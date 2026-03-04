@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - "indexer-envio/**"
+      - ".trunk/**"
       - ".github/workflows/indexer-envio.yml"
   pull_request:
     branches: [main]
     paths:
       - "indexer-envio/**"
+      - ".trunk/**"
       - ".github/workflows/indexer-envio.yml"
 
 permissions: read-all
@@ -21,9 +23,6 @@ jobs:
     permissions:
       checks: write
       contents: read
-    defaults:
-      run:
-        working-directory: indexer-envio
     steps:
       - uses: actions/checkout@v4
 
@@ -36,9 +35,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-        working-directory: .
 
-      - uses: trunk-io/trunk-action@v1
+      - name: Trunk Check
+        uses: trunk-io/trunk-action@v1
 
       - name: Typecheck
-        run: pnpm typecheck
+        run: pnpm --filter @mento-protocol/indexer-envio typecheck

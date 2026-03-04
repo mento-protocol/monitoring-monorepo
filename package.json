@@ -1,7 +1,7 @@
 {
   "name": "@mento-protocol/monitoring-monorepo",
   "private": true,
-  "packageManager": "pnpm@9.15.9",
+  "packageManager": "pnpm@10.30.3",
   "scripts": {
     "indexer:dev": "pnpm --filter @mento-protocol/indexer-envio dev",
     "indexer:codegen": "pnpm --filter @mento-protocol/indexer-envio codegen",
