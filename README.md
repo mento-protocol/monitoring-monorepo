@@ -77,12 +77,14 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 **Dashboard:** Vercel (auto-deploys from `main` branch)
 
 See **[docs/deployment.md](./docs/deployment.md)** for full deployment guide including:
+
 - Deploy branch strategy for indexer (avoids unnecessary redeployments)
 - Envio hosted setup per network
 - Vercel configuration
 - Environment variables reference
 
 **Quick deploy:**
+
 ```bash
 # Deploy indexer to Celo Sepolia
 pnpm deploy:indexer:sepolia
