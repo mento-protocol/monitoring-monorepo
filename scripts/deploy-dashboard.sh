@@ -117,7 +117,7 @@ if [[ "$SETUP" == "true" || ! -d "$VERCEL_DIR" ]]; then
     die "No env file found at $ENV_FILE — copy $DASHBOARD_DIR/.env.production.local.example and fill in values."
   fi
 
-  log "Pushing env vars to Vercel (production)…"
+  log "Pushing env vars to Vercel (production + preview)…"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     # Skip blanks and comments
@@ -138,12 +138,14 @@ if [[ "$SETUP" == "true" || ! -d "$VERCEL_DIR" ]]; then
       continue
     fi
 
-    printf '%s\n' "$VALUE" \
-      | (cd "$REPO_ROOT" && vercel env add "$KEY" production \
-          --scope "$VERCEL_SCOPE" \
-          "${VERCEL_TOKEN_ARGS[@]}" \
-          --force) \
-      && ok "  $KEY"
+    for env in production preview; do
+      printf '%s\n' "$VALUE" \
+        | (cd "$REPO_ROOT" && vercel env add "$KEY" "$env" \
+            --scope "$VERCEL_SCOPE" \
+            "${VERCEL_TOKEN_ARGS[@]}" \
+            --force) \
+        && ok "  $KEY → $env"
+    done
   done < "$ENV_FILE"
 
   # ── GitHub Actions secrets ─────────────────────────────────────────────────
