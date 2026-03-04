@@ -1,0 +1,43 @@
+{
+  "generatedAt": "2026-03-03T10:35:55.418Z",
+  "chain": {
+    "id": 42220,
+    "name": "celo-devnet",
+    "rpcUrl": "http://34.32.123.41:8545",
+    "source": "tools/address-book/addresses.json"
+  },
+  "contracts": [
+    {
+      "label": "FPMMFactory",
+      "contractName": "FPMMFactory",
+      "address": "0xB9732EB66406334F56E9d8c515d5af3da29b0654",
+      "abiFilePath": "abis/FPMMFactory.json",
+      "events": [
+        "FPMMDeployed"
+      ]
+    },
+    {
+      "label": "FPMM KESm/USDm",
+      "contractName": "FPMM",
+      "address": "0xc69D6bBA6785e76998f870609345aA2BE7F64d19",
+      "abiFilePath": "abis/FPMM.json",
+      "events": [
+        "Swap",
+        "Mint",
+        "Burn",
+        "UpdateReserves",
+        "Rebalanced"
+      ]
+    },
+    {
+      "label": "VirtualPoolFactory",
+      "contractName": "VirtualPoolFactory",
+      "address": "0x3268E4b75BEe60C400Eb4Dd8E44E9a3A76873f65",
+      "abiFilePath": "abis/VirtualPoolFactory.json",
+      "events": [
+        "VirtualPoolDeployed",
+        "PoolDeprecated"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,241 @@
+{
+  "otterscanBaseUrl": "http://localhost:5100",
+  "networks": [
+    {
+      "id": "celo",
+      "label": "Celo Devnet",
+      "rpcUrl": "http://34.32.123.41:8545",
+      "addresses": [
+        {
+          "label": "ActivePool",
+          "address": "0x9B413Df62d2711A1ec2E1B513aa744bF7e21f241",
+          "kind": "contract",
+          "category": "cdp",
+          "notes": ""
+        },
+        {
+          "label": "AddressesRegistry",
+          "address": "0x7C88934470A7297C7B63654d78ccC6B61eEf79E1",
+          "kind": "registry",
+          "category": "cdp",
+          "notes": ""
+        },
+        {
+          "label": "BorrowerOperations",
+          "address": "0xb6A5cbCE2d3610DCD328072A749Eb75ee79B32DD",
+          "kind": "contract",
+          "category": "cdp",
+          "notes": ""
+        },
+        {
+          "label": "CDPLiquidityStrategy",
+          "address": "0x5EFDa471A4240D259d9C379891FDfc11208Cdba9",
+          "kind": "strategy",
+          "category": "cdp",
+          "notes": ""
+        },
+        {
+          "label": "CollateralRegistry",
+          "address": "0xa5757d91036d1b22cD596dc317949fAf4872DF3E",
+          "kind": "registry",
+          "category": "cdp",
+          "notes": ""
+        },
+        {
+          "label": "CollSurplusPool",
+          "address": "0xc63922cA36379EE3D1ABBCdc8e252eAcaEfa8f95",
+          "kind": "pool",
+          "category": "cdp",
+          "notes": ""
+        },
+        {
+          "label": "DefaultPool",
+          "address": "0x49EdEaC6eBb4a658Cc096f24D7c5c9B89c58E5d8",
+          "kind": "pool",
+          "category": "cdp",
+          "notes": ""
+        },
+        {
+          "label": "FixedAssetReader",
+          "address": "0xB42FAD3584B916881EAbE8D581ba3BF5651a860e",
+          "kind": "reader",
+          "category": "cdp",
+          "notes": ""
+        },
+        {
+          "label": "FPMM KESm/USDm",
+          "address": "0xc69D6bBA6785e76998f870609345aA2BE7F64d19",
+          "kind": "fpmm",
+          "category": "fpmm",
+          "notes": "Deployed via FPMMFactory"
+        },
+        {
+          "label": "FPMMFactory",
+          "address": "0xB9732EB66406334F56E9d8c515d5af3da29b0654",
+          "kind": "factory",
+          "category": "fpmm",
+          "notes": ""
+        },
+        {
+          "label": "FXPriceFeed",
+          "address": "0x9F9E92724Ae085B0af5D7505Df99884FbE22C3ec",
+          "kind": "oracle",
+          "category": "oracle",
+          "notes": ""
+        },
+        {
+          "label": "FXPriceFeedProxy",
+          "address": "0xbc4aBf099B4A6763E10a503EECeAD987652cF4Bb",
+          "kind": "proxy",
+          "category": "oracle",
+          "notes": ""
+        },
+        {
+          "label": "GasPool",
+          "address": "0x24F8C4dDfb186Bb2f5dC940E46EbB50950110A6F",
+          "kind": "pool",
+          "category": "cdp",
+          "notes": ""
+        },
+        {
+          "label": "HintHelpers",
+          "address": "0x7DCE5ECaFB09581842bA778fAb1D71EcaD4A077C",
+          "kind": "helper",
+          "category": "cdp",
+          "notes": ""
+        },
+        {
+          "label": "MarketHoursBreaker",
+          "address": "0xA4992757FA3198bB03947C9B2bA877aC4D6bCC53",
+          "kind": "breaker",
+          "category": "oracle",
+          "notes": ""
+        },
+        {
+          "label": "MetadataNFT",
+          "address": "0xDa050C20b58112CfD3cd07bd93b88EEa93Cf06D9",
+          "kind": "nft",
+          "category": "cdp",
+          "notes": ""
+        },
+        {
+          "label": "MultiTroveGetter",
+          "address": "0x3802e275Cc77827cf15aB06AbfcDace38FB09377",
+          "kind": "getter",
+          "category": "cdp",
+          "notes": ""
+        },
+        {
+          "label": "OracleAdapter",
+          "address": "0x06093c0f358C64f68B9f83887aBDf9aD254Fef5d",
+          "kind": "oracle",
+          "category": "oracle",
+          "notes": ""
+        },
+        {
+          "label": "Router",
+          "address": "0x330A7141aFf4Ff2b2DDFB6b008676abBbd0e0838",
+          "kind": "router",
+          "category": "fpmm",
+          "notes": ""
+        },
+        {
+          "label": "SortedTroves",
+          "address": "0xC5Dc60319f70930E1d0D7954C2439ea9d230E434",
+          "kind": "core",
+          "category": "cdp",
+          "notes": ""
+        },
+        {
+          "label": "SSTORE2DataPointer",
+          "address": "0x70049Df72981bcd3D521e74C79818E74057F57a8",
+          "kind": "utility",
+          "category": "cdp",
+          "notes": ""
+        },
+        {
+          "label": "StabilityPool",
+          "address": "0x3327BEeaD6e85705617C657b0E78b3e941F73121",
+          "kind": "pool",
+          "category": "cdp",
+          "notes": "Liquity GBPm"
+        },
+        {
+          "label": "StabilityPoolProxy",
+          "address": "0xc10e9792a474DDeb021cE03E4B049eb759d95E89",
+          "kind": "proxy",
+          "category": "cdp",
+          "notes": "Liquity GBPm"
+        },
+        {
+          "label": "StableTokenV3 GBPm",
+          "address": "0x191347F9d9a73ff9F41dE39464c93D08254Fe07E",
+          "kind": "token",
+          "category": "Tokens",
+          "notes": ""
+        },
+        {
+          "label": "StableTokenV3 KESm",
+          "address": "0x456a3D042C0DbD3db53D5489e98dFb038553B0d0",
+          "kind": "token",
+          "category": "Tokens",
+          "notes": "Used in FPMM KESm/USDm"
+        },
+        {
+          "label": "StableTokenV3 USDm",
+          "address": "0x106Cc9ff5a2c488780635bE8aFC07C68522b7ea5",
+          "kind": "token",
+          "category": "Tokens",
+          "notes": ""
+        },
+        {
+          "label": "SystemParams",
+          "address": "0x6dC60982BE536a1bb8EF198A17F438FD644d9604",
+          "kind": "core",
+          "category": "cdp",
+          "notes": "Liquity GBPm"
+        },
+        {
+          "label": "SystemParamsProxy",
+          "address": "0xDDD2de5Db7E81E22553CC68ea6125b8A817aC8Ea",
+          "kind": "proxy",
+          "category": "cdp",
+          "notes": "Liquity GBPm"
+        },
+        {
+          "label": "TroveManager",
+          "address": "0xF1fEDE8244918833073369Eb36649ee74A006c72",
+          "kind": "core",
+          "category": "cdp",
+          "notes": "Liquity GBPm"
+        },
+        {
+          "label": "TroveNFT",
+          "address": "0xC0e534A45A6CD4b491467AE0186c2615Ca830b79",
+          "kind": "nft",
+          "category": "cdp",
+          "notes": "Liquity GBPm"
+        },
+        {
+          "label": "VirtualPoolFactory",
+          "address": "0x3268E4b75BEe60C400Eb4Dd8E44E9a3A76873f65",
+          "kind": "factory",
+          "category": "fpmm",
+          "notes": ""
+        }
+      ]
+    },
+    {
+      "id": "monad",
+      "label": "Monad Devnet",
+      "rpcUrl": "http://34.32.90.196:8545",
+      "addresses": []
+    },
+    {
+      "id": "celo-sepolia",
+      "label": "Celo Sepolia Devnet",
+      "rpcUrl": "http://celo-sepolia-devnet.mento.org",
+      "addresses": []
+    }
+  ]
+}

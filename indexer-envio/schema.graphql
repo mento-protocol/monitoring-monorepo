@@ -1,0 +1,120 @@
+type Pool {
+  id: ID!
+  token0: String
+  token1: String
+  source: String!
+
+  # Latest reserves (updated on every ReserveUpdate / Swap)
+  reserves0: BigInt!
+  reserves1: BigInt!
+
+  # Cumulative metrics (running totals since pool creation)
+  swapCount: Int!
+  notionalVolume0: BigInt!
+  notionalVolume1: BigInt!
+  rebalanceCount: Int!
+
+  createdAtBlock: BigInt!
+  createdAtTimestamp: BigInt!
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
+type PoolSnapshot @index(fields: ["poolId", "timestamp"]) {
+  id: ID!
+  poolId: String! @index
+  timestamp: BigInt! @index
+
+  # Point-in-time state (latest values at end of this hour)
+  reserves0: BigInt!
+  reserves1: BigInt!
+
+  # Per-hour activity
+  swapCount: Int!
+  swapVolume0: BigInt!
+  swapVolume1: BigInt!
+  rebalanceCount: Int!
+  mintCount: Int!
+  burnCount: Int!
+
+  # Running cumulative totals (snapshot of Pool cumulatives at this hour)
+  cumulativeSwapCount: Int!
+  cumulativeVolume0: BigInt!
+  cumulativeVolume1: BigInt!
+
+  blockNumber: BigInt!
+}
+
+type FactoryDeployment {
+  id: ID!
+  poolId: String!
+  token0: String!
+  token1: String!
+  implementation: String!
+  factoryAddress: String!
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+}
+
+type SwapEvent @index(fields: ["poolId", "blockTimestamp"]) {
+  id: ID!
+  poolId: String! @index
+  sender: String!
+  recipient: String!
+  amount0In: BigInt!
+  amount1In: BigInt!
+  amount0Out: BigInt!
+  amount1Out: BigInt!
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
+}
+
+type LiquidityEvent @index(fields: ["poolId", "blockTimestamp"]) {
+  id: ID!
+  poolId: String! @index
+  kind: String!
+  sender: String!
+  recipient: String!
+  amount0: BigInt!
+  amount1: BigInt!
+  liquidity: BigInt!
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
+}
+
+type ReserveUpdate @index(fields: ["poolId", "blockTimestamp"]) {
+  id: ID!
+  poolId: String! @index
+  reserve0: BigInt!
+  reserve1: BigInt!
+  blockTimestampInPool: BigInt!
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
+}
+
+type RebalanceEvent @index(fields: ["poolId", "blockTimestamp"]) {
+  id: ID!
+  poolId: String! @index
+  sender: String!
+  priceDifferenceBefore: BigInt!
+  priceDifferenceAfter: BigInt!
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
+}
+
+type VirtualPoolLifecycle {
+  id: ID!
+  poolId: String!
+  action: String!
+  token0: String
+  token1: String
+  factoryAddress: String!
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+}

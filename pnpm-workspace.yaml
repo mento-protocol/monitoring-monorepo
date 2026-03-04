@@ -1,0 +1,7 @@
+packages:
+  - 'indexer-envio'
+  - 'ui-dashboard'
+
+ignoredBuiltDependencies:
+  - sharp
+  - unrs-resolver

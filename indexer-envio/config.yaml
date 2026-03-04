@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+name: celo
+description: Celo devnet v3 FPMM-focused HyperIndex indexer
+networks:
+  - id: 42220
+    rpc_config:
+      url: ${ENVIO_RPC_URL:-http://34.32.123.41:8545}
+    start_block: ${ENVIO_START_BLOCK:-0}
+    contracts:
+      - name: FPMMFactory
+        abi_file_path: abis/FPMMFactory.json
+        address:
+          - 0xB9732EB66406334F56E9d8c515d5af3da29b0654
+        handler: src/EventHandlers.ts
+        events:
+          - event: FPMMDeployed
+      - name: FPMM
+        abi_file_path: abis/FPMM.json
+        address:
+          - 0xc69D6bBA6785e76998f870609345aA2BE7F64d19
+        handler: src/EventHandlers.ts
+        events:
+          - event: Swap
+          - event: Mint
+          - event: Burn
+          - event: UpdateReserves
+          - event: Rebalanced
+      - name: VirtualPoolFactory
+        abi_file_path: abis/VirtualPoolFactory.json
+        address:
+          - 0x3268E4b75BEe60C400Eb4Dd8E44E9a3A76873f65
+        handler: src/EventHandlers.ts
+        events:
+          - event: VirtualPoolDeployed
+          - event: PoolDeprecated
+unordered_multichain_mode: true
+preload_handlers: true
+field_selection:
+  transaction_fields:
+    - hash

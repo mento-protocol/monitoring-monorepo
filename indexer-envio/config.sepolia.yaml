@@ -1,0 +1,62 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+name: celo-sepolia
+description: Celo Sepolia (testnet-v2-rc5) v3 FPMM HyperIndex indexer
+networks:
+  - id: 11142220
+    rpc_config:
+      url: ${ENVIO_RPC_URL:-https://forno.celo-sepolia.celo-testnet.org}
+    start_block: ${ENVIO_START_BLOCK:-18946570}
+    contracts:
+      - name: FPMMFactory
+        abi_file_path: abis/FPMMFactory.json
+        address:
+          - 0x353ED52bF8482027C0e0b9e3c0e5d96A9F680980
+        handler: src/EventHandlers.ts
+        events:
+          - event: FPMMDeployed
+      - name: FPMM
+        abi_file_path: abis/FPMM.json
+        address:
+          - 0x550d9ecb4c373510b8a41f5fb7d98e9e1c51a07e # GBPm/USDm
+        handler: src/EventHandlers.ts
+        events:
+          - event: Swap
+          - event: Mint
+          - event: Burn
+          - event: UpdateReserves
+          - event: Rebalanced
+      - name: VirtualPool
+        abi_file_path: abis/FPMM.json
+        address:
+          - 0x671334256a893fdbc4ffe55f98f156a168bd897a
+          - 0x1e2506edca4ef3030e51be8b571b935d55677604
+          - 0x8103fb2db87ac96cc62faa399b98e1173720ab19
+          - 0x62722497dc8992337117ee79a02015dcea43b2c2
+          - 0x68d19b5a48cbbfd11057e97da9960b09d771e7b6
+          - 0x58f08739ea9764097b9500b6e4a4db64d168b807
+          - 0x284c2d99c5a12a65f10eff7183c33c1217b65a56
+          - 0xcbfc8c84168d7f34faba0018a3a63b998f1ffece
+          - 0x49a968c539599385c69c2d528500da58d933fafa
+          - 0x917ee035bf0a964acc75539f919a5b4f16336373
+          - 0x6b66271811615f4b6dadb8620ed71a1e90f41deb
+          - 0x22118009665b1d6810d4560a098d3e67bbcb934f
+        handler: src/EventHandlers.ts
+        events:
+          - event: Swap
+          - event: Mint
+          - event: Burn
+          - event: UpdateReserves
+          - event: Rebalanced
+      - name: VirtualPoolFactory
+        abi_file_path: abis/VirtualPoolFactory.json
+        address:
+          - 0x887955f28723B0e9Bddc358448CB5B1FDe692da4
+        handler: src/EventHandlers.ts
+        events:
+          - event: VirtualPoolDeployed
+          - event: PoolDeprecated
+unordered_multichain_mode: true
+preload_handlers: true
+field_selection:
+  transaction_fields:
+    - hash
