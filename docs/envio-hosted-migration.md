@@ -31,7 +31,7 @@ There is **no `envio deploy` command**. Deployment is entirely Git-based via the
 - HyperIndex ≥ v2.21.5 (we're on v2.32.3 ✅)
 - Versions 2.29.x are **not supported**
 - `package.json` must be present
-- Compatible with pnpm 9.10.0
+- Compatible with pnpm ≥ 9.10.0 (we're on 10.30.3 ✅)
 - Repo ≤ 100MB
 
 ## 2. Hosted GraphQL Endpoint
@@ -121,7 +121,7 @@ The config file is the same. No code changes needed between environments — onl
 |------|------|------|
 | 1 | Ensure indexer code is in a GitHub repo (gisk0 org) | 5 min |
 | 2 | Verify `package.json` exists with HyperIndex dep ≥2.21.5 | 2 min |
-| 3 | Test `pnpm install` works with pnpm 9.10.0 | 5 min |
+| 3 | Test `pnpm install` works with pnpm 10.30.3 | 5 min |
 | 4 | Create deployment branch (e.g., `deploy/hosted`) | 2 min |
 
 ### Day 1 (Today): Deploy to Envio Hosted

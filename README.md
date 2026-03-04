@@ -13,8 +13,8 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — an [Envio Hy
 
 ### Prerequisites
 
-- Node.js ≥ 18
-- [pnpm](https://pnpm.io/) 9.x
+- Node.js 22 LTS (≥ 18 required)
+- [pnpm](https://pnpm.io/) 10.x
 - Docker (for Envio indexer local dev — runs Postgres + Hasura)
 
 ### Install
