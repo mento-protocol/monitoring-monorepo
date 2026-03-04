@@ -62,35 +62,28 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
 ### Dashboard
 
-| Variable                            | Description                              |
-| ----------------------------------- | ---------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL_DEVNET`     | Hasura GraphQL endpoint for Celo devnet  |
-| `NEXT_PUBLIC_HASURA_URL_SEPOLIA`    | Hasura GraphQL endpoint for Celo Sepolia |
-| `NEXT_PUBLIC_HASURA_SECRET_DEVNET`  | Hasura admin secret (devnet)             |
-| `NEXT_PUBLIC_HASURA_SECRET_SEPOLIA` | Hasura admin secret (Sepolia)            |
-| `NEXT_PUBLIC_EXPLORER_URL_DEVNET`   | Block explorer URL for devnet            |
-| `NEXT_PUBLIC_EXPLORER_URL_SEPOLIA`  | Block explorer URL for Sepolia           |
+The dashboard supports five network targets. Each uses a `_<NETWORK>` suffix on the env var name:
+
+| Variable                                   | Default                            | Description                               |
+| ------------------------------------------ | ---------------------------------- | ----------------------------------------- |
+| `NEXT_PUBLIC_HASURA_URL_DEVNET`            | `http://localhost:8080/v1/graphql` | Hasura endpoint — Celo Devnet (local)     |
+| `NEXT_PUBLIC_HASURA_SECRET_DEVNET`         | `"testing"`                        | Hasura admin secret — Celo Devnet         |
+| `NEXT_PUBLIC_EXPLORER_URL_DEVNET`          | `http://localhost:5100`            | Block explorer URL — Celo Devnet          |
+| `NEXT_PUBLIC_HASURA_URL_SEPOLIA`           | `http://localhost:8080/v1/graphql` | Hasura endpoint — Celo Sepolia (local)    |
+| `NEXT_PUBLIC_HASURA_SECRET_SEPOLIA`        | `"testing"`                        | Hasura admin secret — Celo Sepolia        |
+| `NEXT_PUBLIC_EXPLORER_URL_SEPOLIA`         | `https://sepolia.celoscan.io`      | Block explorer URL — Celo Sepolia         |
+| `NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED`    | —                                  | Hasura endpoint — Celo Sepolia (hosted)   |
+| `NEXT_PUBLIC_HASURA_SECRET_SEPOLIA_HOSTED` | —                                  | Hasura admin secret — Celo Sepolia hosted |
+| `NEXT_PUBLIC_HASURA_URL_MAINNET`           | `http://localhost:8082/v1/graphql` | Hasura endpoint — Celo Mainnet (local)    |
+| `NEXT_PUBLIC_HASURA_SECRET_MAINNET`        | `"testing"`                        | Hasura admin secret — Celo Mainnet        |
+| `NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED`    | —                                  | Hasura endpoint — Celo Mainnet (hosted)   |
+| `NEXT_PUBLIC_HASURA_SECRET_MAINNET_HOSTED` | —                                  | Hasura admin secret — Celo Mainnet hosted |
 
 ## Deployment
 
-**Indexer:** Envio Hosted Service (dedicated deploy branches per network)  
-**Dashboard:** Vercel (auto-deploys from `main` branch)
+The dashboard is configured for **Vercel** deployment. See [`ui-dashboard/vercel.json`](./ui-dashboard/vercel.json).
 
-See **[docs/deployment.md](./docs/deployment.md)** for full deployment guide including:
-
-- Deploy branch strategy for indexer (avoids unnecessary redeployments)
-- Envio hosted setup per network
-- Vercel configuration
-- Environment variables reference
-
-**Quick deploy:**
-
-```bash
-# Deploy indexer to Celo Sepolia
-pnpm deploy:indexer:sepolia
-
-# Dashboard auto-deploys on push to main (Vercel)
-```
+Set all `NEXT_PUBLIC_*` environment variables in the Vercel project settings.
 
 ## Architecture
 
