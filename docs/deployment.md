@@ -30,7 +30,7 @@ Each network has a dedicated deploy branch that Envio watches:
 pnpm indexer:sepolia:dev
 
 # When ready to deploy indexer changes to Celo Sepolia:
-./scripts/deploy-indexer.sh celo-sepolia
+pnpm deploy:indexer:sepolia
 ```
 
 **Manual Deployment:**
@@ -199,12 +199,12 @@ Common issues:
 All deployment scripts live in `scripts/`:
 
 ```bash
-./scripts/deploy-indexer.sh <network>
+pnpm deploy:indexer:<network>
 ```
 
 Example:
 ```bash
-./scripts/deploy-indexer.sh celo-sepolia
+pnpm deploy:indexer:sepolia
 ```
 
 This pushes `main` to `deploy/celo-sepolia` and triggers Envio redeployment.

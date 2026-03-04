@@ -85,7 +85,7 @@ See **[docs/deployment.md](./docs/deployment.md)** for full deployment guide inc
 **Quick deploy:**
 ```bash
 # Deploy indexer to Celo Sepolia
-./scripts/deploy-indexer.sh celo-sepolia
+pnpm deploy:indexer:sepolia
 
 # Dashboard auto-deploys on push to main (Vercel)
 ```
