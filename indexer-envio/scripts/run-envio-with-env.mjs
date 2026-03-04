@@ -54,22 +54,58 @@ const assertRequiredConfig = (command) => {
     return;
   }
 
+  // ENVIO_START_BLOCK and ENVIO_RPC_URL are optional here: the config YAML
+  // declares defaults via ${VAR:-default} which the envio CLI resolves at
+  // parse time. Throwing when they are absent prevents hosted deployments
+  // (where env-var injection is a paid feature) from starting at all.
   const startBlock = process.env.ENVIO_START_BLOCK;
-  if (!startBlock) {
-    throw new Error(
-      "Missing ENVIO_START_BLOCK. Set it in indexers/celo/.env before running Envio.",
-    );
-  }
-
-  if (!/^\d+$/.test(startBlock)) {
+  if (startBlock && !/^\d+$/.test(startBlock)) {
     throw new Error(
       `ENVIO_START_BLOCK must be an integer block number, got "${startBlock}".`,
     );
   }
+};
 
-  if (!process.env.ENVIO_RPC_URL) {
-    throw new Error(
-      "Missing ENVIO_RPC_URL. Set it in indexers/celo/.env before running Envio.",
+/**
+ * Envio's generated docker-compose.yaml doesn't include a healthcheck for the
+ * postgres service. Without one, Docker reports Health:"" (empty string) and
+ * the envio dev loop waits forever for all services to become healthy.
+ *
+ * This function patches the generated file to add a postgres healthcheck after
+ * every codegen run that regenerates it.
+ */
+const patchDockerComposeHealthcheck = () => {
+  const composePath = resolve(projectRoot, "generated", "docker-compose.yaml");
+  if (!existsSync(composePath)) {
+    return;
+  }
+
+  const content = readFileSync(composePath, "utf8");
+
+  if (content.includes("pg_isready")) {
+    return;
+  }
+
+  const healthcheck = [
+    "    healthcheck:",
+    '      test: ["CMD-SHELL", "pg_isready -U ${ENVIO_PG_USER:-postgres} -d ${ENVIO_PG_DATABASE:-envio-dev}"]',
+    "      interval: 5s",
+    "      timeout: 2s",
+    "      retries: 10",
+    "      start_period: 5s",
+  ].join("\n");
+
+  // Insert the healthcheck block just before the `networks:` line of the
+  // envio-postgres service. The generated file always has this structure.
+  const patched = content.replace(
+    /^( {4}networks:\n {6}- my-proxy-net\n {2}graphql-engine:)/m,
+    `${healthcheck}\n$1`,
+  );
+
+  if (patched !== content) {
+    writeFileSync(composePath, patched, "utf8");
+    console.log(
+      "[run-envio-with-env] Patched docker-compose.yaml: added postgres healthcheck",
     );
   }
 };
@@ -137,9 +173,11 @@ const main = () => {
           { stdio: "inherit", env: process.env },
         );
         if (retryResult.error) throw retryResult.error;
+        patchDockerComposeHealthcheck();
         process.exit(retryResult.status ?? 1);
       }
     }
+    patchDockerComposeHealthcheck();
   }
 
   process.exit(result.status ?? 1);
