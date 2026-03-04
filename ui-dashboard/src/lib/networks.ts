@@ -7,7 +7,7 @@ import contractsData from "./contracts.json";
 // Official treb deployment namespace per chain — update when a new deployment is promoted
 const ACTIVE_DEPLOYMENT = {
   "celo-sepolia": "testnet-v2-rc5",
-  "celo-mainnet": null, // TODO: set once a celo-mainnet namespace is added to @mento-protocol/contracts
+  "celo-mainnet": "mainnet",
 } as const satisfies Record<string, string | null>;
 
 export type IndexerNetworkId =
@@ -149,7 +149,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
 };
 
 export const NETWORK_IDS = Object.keys(NETWORKS) as IndexerNetworkId[];
-export const DEFAULT_NETWORK: IndexerNetworkId = "celo-sepolia-hosted";
+export const DEFAULT_NETWORK: IndexerNetworkId = "celo-mainnet-hosted";
 
 export function isNetworkId(v: string): v is IndexerNetworkId {
   return v in NETWORKS;

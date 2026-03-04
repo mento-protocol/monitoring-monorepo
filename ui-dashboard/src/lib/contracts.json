@@ -756,5 +756,147 @@
         "type": "contract"
       }
     }
+  },
+  "42220": {
+    "mainnet": {
+      "USDm": {
+        "address": "0x765DE816845861e75A25fCA122bb6898B8B1282a",
+        "name": "USDm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "EURm": {
+        "address": "0xD8763CBa276a3738E6DE85b4b3bF5FDed6D6cA73",
+        "name": "EURm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "BRLm": {
+        "address": "0xe8537a3d056DA446677B9E9d6c5dB704EaAb4787",
+        "name": "BRLm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "XOFm": {
+        "address": "0x73F93dcc49cB8A239e2032663e9475dd5ef29A08",
+        "name": "XOFm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "KESm": {
+        "address": "0x456a3D042C0DbD3db53D5489e98dFb038553B0d0",
+        "name": "KESm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "COPm": {
+        "address": "0x8a567e2ae79ca692bd748ab832081c45de4041ea",
+        "name": "COPm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "GHSm": {
+        "address": "0xfaea5f3404bba20d3cc2f8c4b0a888f55a3c7313",
+        "name": "GHSm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "GBPm": {
+        "address": "0xccf663b1ff11028f0b19058d0f7b674004a40746",
+        "name": "GBPm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "ZARm": {
+        "address": "0x4c35853a3b4e647fd266f4de678dcc8fec410bf6",
+        "name": "ZARm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "AUDm": {
+        "address": "0x7175504c455076f15c04a2f90a8e352281f492f9",
+        "name": "AUDm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "CHFm": {
+        "address": "0xb55a79f398e759e43c95b979163f30ec87ee131d",
+        "name": "CHFm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "NGNm": {
+        "address": "0xe2702bd97ee33c88c8f6f92da3b733608aa76f71",
+        "name": "NGNm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "CADm": {
+        "address": "0xff4ab19391af240c311c54200a492233052b6325",
+        "name": "CADm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "PHPm": {
+        "address": "0x105d4a9306d2e55a71d2eb95b81553ae1dc20d7b",
+        "name": "PHPm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "JPYm": {
+        "address": "0xc45ecf20f3cd864b32d9794d6f76814ae8892e20",
+        "name": "JPYm",
+        "abi": "StableTokenV2",
+        "type": "token"
+      },
+      "axlUSDC": {
+        "address": "0xEB466342C4d449BC9f53A865D5Cb90586f405215",
+        "name": "axlUSDC",
+        "abi": "ERC20",
+        "type": "token"
+      },
+      "USDC": {
+        "address": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
+        "name": "USDC",
+        "abi": "ERC20",
+        "type": "token"
+      },
+      "USDT": {
+        "address": "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e",
+        "name": "USD\u20ae",
+        "abi": "ERC20",
+        "type": "token"
+      },
+      "CELO": {
+        "address": "0x471EcE3750Da237f93B8E339c536989b8978a438",
+        "name": "CELO",
+        "abi": "ERC20",
+        "type": "token"
+      },
+      "FPMMFactory": {
+        "address": "0xa849b475FE5a4B5C9C3280152c7a1945b907613b",
+        "name": "FPMMFactory",
+        "abi": "FPMMFactory",
+        "type": "contract"
+      },
+      "VirtualPoolFactory": {
+        "address": "0x22abd4ADF6aab38aC1022352d496A07Acee5aCB3",
+        "name": "VirtualPoolFactory",
+        "abi": "VirtualPoolFactory",
+        "type": "contract"
+      },
+      "Router": {
+        "address": "0x4861840C2EfB2b98312B0aE34d86fD73E8f9B6f6",
+        "name": "Router",
+        "abi": "Router",
+        "type": "contract"
+      },
+      "OracleAdapter": {
+        "address": "0xa472fBBF4b890A54381977ac392BdF82EeC4383a",
+        "name": "OracleAdapter",
+        "abi": "OracleAdapter",
+        "type": "contract"
+      }
+    }
   }
 }
