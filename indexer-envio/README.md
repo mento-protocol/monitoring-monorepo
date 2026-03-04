@@ -16,9 +16,9 @@ The indexing flow is:
 1. `scripts/sync-contract-config.mjs` copies ABIs from `../../../mento-core/out/**` into `abis/`.
 1. The same sync script generates:
    - `config/contracts.celo.v3.json` (manifest of tracked contracts/events)
-   - `config.yaml` (Envio runtime config)
+   - `config.celo.devnet.yaml` (Envio runtime config)
 1. `pnpm codegen` generates typed runtime code in `generated/` from:
-   - `config.yaml`
+   - `config.celo.devnet.yaml`
    - `schema.graphql`
    - `src/EventHandlers.ts`
 1. `pnpm dev` starts Postgres + Hasura + indexer and writes entities from handlers into the DB.
@@ -51,7 +51,7 @@ postgres --> hasura
 
 ## Important files
 
-- `config.yaml` — runtime chain/contracts/events config
+- `config.celo.devnet.yaml` — runtime chain/contracts/events config
 - `schema.graphql` — entity model queried in Hasura
 - `src/EventHandlers.ts` — event-to-entity mapping logic
 - `scripts/sync-contract-config.mjs` — address/ABI/config sync

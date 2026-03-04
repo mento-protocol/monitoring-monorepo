@@ -19,7 +19,7 @@
 - Address-book-driven sync:
   - reads addresses/RPC from `tools/address-book/addresses.json`
   - copies ABIs from `../mento-core/out/**`
-  - writes `indexers/celo/config.yaml` and `indexers/celo/config/contracts.celo.v3.json`
+  - writes `indexers/celo/config.celo.devnet.yaml` and `indexers/celo/config/contracts.celo.v3.json`
 - Hardened command wrapper:
   - `indexers/celo/scripts/run-envio-with-env.mjs`
   - loads `.env`

@@ -3,10 +3,10 @@
   "private": true,
   "packageManager": "pnpm@10.30.3",
   "scripts": {
-    "indexer:dev": "pnpm --filter @mento-protocol/indexer-envio dev",
-    "indexer:codegen": "pnpm --filter @mento-protocol/indexer-envio codegen",
-    "indexer:sepolia:dev": "ENVIO_PG_PORT=5434 ENVIO_PG_DATABASE=envio-sepolia ENVIO_PORT=9899 ENVIO_RPC_URL=https://forno.celo-sepolia.celo-testnet.org ENVIO_START_BLOCK=18901381 pnpm --filter @mento-protocol/indexer-envio dev --config config.sepolia.yaml",
-    "indexer:sepolia:codegen": "pnpm --filter @mento-protocol/indexer-envio codegen --config config.sepolia.yaml",
+    "indexer:dev": "pnpm --filter @mento-protocol/indexer-envio dev --config config.celo.devnet.yaml",
+    "indexer:codegen": "pnpm --filter @mento-protocol/indexer-envio codegen --config config.celo.devnet.yaml",
+    "indexer:sepolia:dev": "ENVIO_PG_PORT=5434 ENVIO_PG_DATABASE=envio-sepolia ENVIO_PORT=9899 ENVIO_RPC_URL=https://forno.celo-sepolia.celo-testnet.org ENVIO_START_BLOCK=18901381 pnpm --filter @mento-protocol/indexer-envio dev --config config.celo.sepolia.yaml",
+    "indexer:sepolia:codegen": "pnpm --filter @mento-protocol/indexer-envio codegen --config config.celo.sepolia.yaml",
     "dashboard:dev": "pnpm --filter @mento-protocol/ui-dashboard dev",
     "dashboard:build": "pnpm --filter @mento-protocol/ui-dashboard build"
   }
