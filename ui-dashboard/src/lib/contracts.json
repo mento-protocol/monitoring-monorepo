@@ -1,0 +1,760 @@
+{
+  "143": {
+    "monad-mainnet": {
+      "GBPm": {
+        "address": "0xddF082068Caa5B941ED8c603ADf0cecBdBb59f8E",
+        "name": "GBPm",
+        "abi": "./abis/GBPm.json",
+        "type": "token"
+      },
+      "USDm": {
+        "address": "0x866a7e4611C127DCe1a14C6841D2eA962A68dc88",
+        "name": "USDm",
+        "abi": "./abis/USDm.json",
+        "type": "token"
+      },
+      "StableTokenSpoke": {
+        "address": "0xa8caCd5d58F98Ee303fb54EF101AA4e277777E91",
+        "name": "StableTokenSpoke",
+        "abi": "./abis/StableTokenSpoke.json",
+        "type": "token"
+      }
+    }
+  },
+  "11142220": {
+    "testnet-v2-rc5": {
+      "BiPoolManager": {
+        "address": "0xeCB3C656C131fCd9bB8D1d80898716bD684feb78",
+        "name": "BiPoolManager",
+        "abi": "./abis/BiPoolManager.json",
+        "type": "contract"
+      },
+      "Broker": {
+        "address": "0xB9Ae2065142EB79b6c5EB1E8778F883fad6B07Ba",
+        "name": "Broker",
+        "abi": "./abis/Broker.json",
+        "type": "contract"
+      },
+      "PHPm": {
+        "address": "0x0352976d940a2C3FBa0C3623198947Ee1d17869E",
+        "name": "PHPm",
+        "abi": "./abis/PHPm.json",
+        "type": "token"
+      },
+      "Reserve": {
+        "address": "0x2bC2D48735842924C508468C5A02580aD4F6d99A",
+        "name": "Reserve",
+        "abi": "./abis/Reserve.json",
+        "type": "contract"
+      },
+      "SortedOracles": {
+        "address": "0xfaa7Ca2B056E60F6733aE75AA0709140a6eAfD20",
+        "name": "SortedOracles",
+        "abi": "./abis/SortedOracles.json",
+        "type": "contract"
+      },
+      "AUDm": {
+        "address": "0x5873Faeb42F3563dcD77F0fbbdA818E6d6DA3139",
+        "name": "AUDm",
+        "abi": "./abis/AUDm.json",
+        "type": "token"
+      },
+      "CADm": {
+        "address": "0xF151c9a13b78C84f93f50B8b3bC689fedc134F60",
+        "name": "CADm",
+        "abi": "./abis/CADm.json",
+        "type": "token"
+      },
+      "CHFm": {
+        "address": "0x284E9b7B623eAE866914b7FA0eB720C2Bb3C2980",
+        "name": "CHFm",
+        "abi": "./abis/CHFm.json",
+        "type": "token"
+      },
+      "COPm": {
+        "address": "0x5F8d55c3627d2dc0a2B4afa798f877242F382F67",
+        "name": "COPm",
+        "abi": "./abis/COPm.json",
+        "type": "token"
+      },
+      "EURm": {
+        "address": "0xA99dC247d6b7B2E3ab48a1fEE101b83cD6aCd82a",
+        "name": "EURm",
+        "abi": "./abis/EURm.json",
+        "type": "token"
+      },
+      "GBPm": {
+        "address": "0x85F5181Abdbf0e1814Fc4358582Ae07b8eBA3aF3",
+        "name": "GBPm",
+        "abi": "./abis/GBPm.json",
+        "type": "token"
+      },
+      "GHSm": {
+        "address": "0x5e94B8C872bD47BC4255E60ECBF44D5E66e7401C",
+        "name": "GHSm",
+        "abi": "./abis/GHSm.json",
+        "type": "token"
+      },
+      "JPYm": {
+        "address": "0x85Bee67D435A39f7467a8a9DE34a5B73D25Df426",
+        "name": "JPYm",
+        "abi": "./abis/JPYm.json",
+        "type": "token"
+      },
+      "KESm": {
+        "address": "0xC7e4635651E3e3Af82b61d3E23c159438daE3BbF",
+        "name": "KESm",
+        "abi": "./abis/KESm.json",
+        "type": "token"
+      },
+      "NGNm": {
+        "address": "0x3d5ae86F34E2a82771496D140daFAEf3789dF888",
+        "name": "NGNm",
+        "abi": "./abis/NGNm.json",
+        "type": "token"
+      },
+      "BRLm": {
+        "address": "0x2294298942fdc79417DE9E0D740A4957E0e7783a",
+        "name": "BRLm",
+        "abi": "./abis/BRLm.json",
+        "type": "token"
+      },
+      "USDm": {
+        "address": "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b",
+        "name": "USDm",
+        "abi": "./abis/USDm.json",
+        "type": "token"
+      },
+      "ZARm": {
+        "address": "0x10CCfB235b0E1Ed394bACE4560C3ed016697687e",
+        "name": "ZARm",
+        "abi": "./abis/ZARm.json",
+        "type": "token"
+      },
+      "XOFm": {
+        "address": "0x5505b70207aE3B826c1A7607F19F3Bf73444A082",
+        "name": "XOFm",
+        "abi": "./abis/XOFm.json",
+        "type": "token"
+      },
+      "CDPLiquidityStrategy": {
+        "address": "0x065AE7D4e207C8f4dca112D0B79E668cc7e93e03",
+        "name": "CDPLiquidityStrategy",
+        "abi": "./abis/CDPLiquidityStrategy.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerFactory": {
+        "address": "0xd96f786f5a294fb7cbb0847307293b7A871B9d5a",
+        "name": "ChainlinkRelayerFactory",
+        "abi": "./abis/ChainlinkRelayerFactory.json",
+        "type": "contract"
+      },
+      "Emission": {
+        "address": "0x3C1BEA0F35b5dcAc1065CA9b3b6877657dEa4A69",
+        "name": "Emission",
+        "abi": "./abis/Emission.json",
+        "type": "contract"
+      },
+      "FPMMFactory": {
+        "address": "0x353ED52bF8482027C0e0b9e3c0e5d96A9F680980",
+        "name": "FPMMFactory",
+        "abi": "./abis/FPMMFactory.json",
+        "type": "contract"
+      },
+      "FactoryRegistry": {
+        "address": "0x47Cb00322E9cd6196915629EDD4De1EA92F98561",
+        "name": "FactoryRegistry",
+        "abi": "./abis/FactoryRegistry.json",
+        "type": "contract"
+      },
+      "Locking": {
+        "address": "0xB72320fC501cb30E55bAF0DA48c20b11fAc9f79D",
+        "name": "Locking",
+        "abi": "./abis/Locking.json",
+        "type": "contract"
+      },
+      "MentoGovernor": {
+        "address": "0x23173Ac37b8E4e5a60d787aC543B3F51e8f398b4",
+        "name": "MentoGovernor",
+        "abi": "./abis/MentoGovernor.json",
+        "type": "contract"
+      },
+      "OracleAdapter": {
+        "address": "0x26eFF54e2f0E8825996b83119b7Df5ef2C882dD7",
+        "name": "OracleAdapter",
+        "abi": "./abis/OracleAdapter.json",
+        "type": "contract"
+      },
+      "ReserveLiquidityStrategy": {
+        "address": "0x734bb3251Ec3f1A83f8f2A8609bcEF649D54EbF8",
+        "name": "ReserveLiquidityStrategy",
+        "abi": "./abis/ReserveLiquidityStrategy.json",
+        "type": "contract"
+      },
+      "ReserveV2": {
+        "address": "0xbCdc1D0b92DfceEaa0FcD0a0D53355F4bF1DB8a7",
+        "name": "ReserveV2",
+        "abi": "./abis/ReserveV2.json",
+        "type": "contract"
+      },
+      "StabilityPoolGBPm": {
+        "address": "0x31f4fE29B8104969209C0474A40FCa79170Ee53e",
+        "name": "StabilityPoolGBPm",
+        "abi": "./abis/StabilityPoolGBPm.json",
+        "type": "contract"
+      },
+      "SystemParamsProxyGBPm": {
+        "address": "0x70855d7826d3Ae92b2B3ae154eE6945754dD4Fe5",
+        "name": "SystemParamsProxyGBPm",
+        "abi": "./abis/SystemParamsProxyGBPm.json",
+        "type": "contract"
+      },
+      "TimelockController": {
+        "address": "0x74c44Be99937815173A3C56274331e0A05611e0D",
+        "name": "TimelockController",
+        "abi": "./abis/TimelockController.json",
+        "type": "contract"
+      },
+      "ActivePool": {
+        "address": "0x50651599c8A778732C34d1C181EEB05Ff2Ef9d73",
+        "name": "ActivePool",
+        "abi": "./abis/ActivePool.json",
+        "type": "contract"
+      },
+      "AddressSortedLinkedListWithMedian": {
+        "address": "0xf90B816Ea07eC3c6384656cd5B3249DA8fc3df6F",
+        "name": "AddressSortedLinkedListWithMedian",
+        "abi": "./abis/AddressSortedLinkedListWithMedian.json",
+        "type": "contract"
+      },
+      "AddressesRegistry": {
+        "address": "0x8b33D626E8d79388889d404fBC515Ed131c9508e",
+        "name": "AddressesRegistry",
+        "abi": "./abis/AddressesRegistry.json",
+        "type": "contract"
+      },
+      "BorrowerOperations": {
+        "address": "0x7fCd2F75Ed661E76f969E6D0347a93028a099d6D",
+        "name": "BorrowerOperations",
+        "abi": "./abis/BorrowerOperations.json",
+        "type": "contract"
+      },
+      "BreakerBox": {
+        "address": "0x578bD46003B9D3fd4c3C3f47c98B329562a6a1dE",
+        "name": "BreakerBox",
+        "abi": "./abis/BreakerBox.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1AUDUSD": {
+        "address": "0x6F59935344432D758365E9bC0d48E1fF0b408db4",
+        "name": "ChainlinkRelayerV1AUDUSD",
+        "abi": "./abis/ChainlinkRelayerV1AUDUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1BRLUSD": {
+        "address": "0x23aA272Ac1474D070a327FF6fcf65b78cBce6584",
+        "name": "ChainlinkRelayerV1BRLUSD",
+        "abi": "./abis/ChainlinkRelayerV1BRLUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CADUSD": {
+        "address": "0x7f13976279b3Da9f09b898FEECBcBA3C32AA93e0",
+        "name": "ChainlinkRelayerV1CADUSD",
+        "abi": "./abis/ChainlinkRelayerV1CADUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOAUD": {
+        "address": "0x8C901159B659c6d32Fd388ceF31177161D87ff68",
+        "name": "ChainlinkRelayerV1CELOAUD",
+        "abi": "./abis/ChainlinkRelayerV1CELOAUD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOBRL": {
+        "address": "0xEfa6f00469868b34B6d472f5E3E9715b694e2027",
+        "name": "ChainlinkRelayerV1CELOBRL",
+        "abi": "./abis/ChainlinkRelayerV1CELOBRL.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOCAD": {
+        "address": "0xc4c3C5a01e962487F1a3f03E3287B6509DD66632",
+        "name": "ChainlinkRelayerV1CELOCAD",
+        "abi": "./abis/ChainlinkRelayerV1CELOCAD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOCHF": {
+        "address": "0x498A8f18ace887647f4cA436F47cB792A12E5469",
+        "name": "ChainlinkRelayerV1CELOCHF",
+        "abi": "./abis/ChainlinkRelayerV1CELOCHF.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOCOP": {
+        "address": "0x904F3f318a31a72eBF4Dfe4ffdBa8edeAf106E21",
+        "name": "ChainlinkRelayerV1CELOCOP",
+        "abi": "./abis/ChainlinkRelayerV1CELOCOP.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOETH": {
+        "address": "0x63F4d2aC940b4fD859F5A935Ed965d46C714eC6B",
+        "name": "ChainlinkRelayerV1CELOETH",
+        "abi": "./abis/ChainlinkRelayerV1CELOETH.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOEUR": {
+        "address": "0x39d778811b3a821FeF7595D3917d7faAdb166adF",
+        "name": "ChainlinkRelayerV1CELOEUR",
+        "abi": "./abis/ChainlinkRelayerV1CELOEUR.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOGBP": {
+        "address": "0x322058147899F064f353619a7dc0398039f4e501",
+        "name": "ChainlinkRelayerV1CELOGBP",
+        "abi": "./abis/ChainlinkRelayerV1CELOGBP.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOGHS": {
+        "address": "0x234898e2E5F6933eaec7B3B7a40298195Bca4CC6",
+        "name": "ChainlinkRelayerV1CELOGHS",
+        "abi": "./abis/ChainlinkRelayerV1CELOGHS.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOJPY": {
+        "address": "0x98d8FCcE5582283ad5bC7a6Bc781a7297d11A03D",
+        "name": "ChainlinkRelayerV1CELOJPY",
+        "abi": "./abis/ChainlinkRelayerV1CELOJPY.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOKES": {
+        "address": "0x3d00E2FAB1Cd6988E8145EB84DC615ed2A414Bf0",
+        "name": "ChainlinkRelayerV1CELOKES",
+        "abi": "./abis/ChainlinkRelayerV1CELOKES.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELONGN": {
+        "address": "0x12ab3C0Fd87889E2EEeF38B5d80B03650c9D014a",
+        "name": "ChainlinkRelayerV1CELONGN",
+        "abi": "./abis/ChainlinkRelayerV1CELONGN.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOPHP": {
+        "address": "0xEDD4141B665c90fbB47150aFAEf1893999Be1AE2",
+        "name": "ChainlinkRelayerV1CELOPHP",
+        "abi": "./abis/ChainlinkRelayerV1CELOPHP.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOUSD": {
+        "address": "0x87335a896976A51d9c1D147AF32FB3536c31e85B",
+        "name": "ChainlinkRelayerV1CELOUSD",
+        "abi": "./abis/ChainlinkRelayerV1CELOUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOXOF": {
+        "address": "0x37e0be73052e1dE8fc07A2326Bb63D5c79CC5e2A",
+        "name": "ChainlinkRelayerV1CELOXOF",
+        "abi": "./abis/ChainlinkRelayerV1CELOXOF.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CELOZAR": {
+        "address": "0x3385D9ec1668a11FE8C5851143F512880a4f716A",
+        "name": "ChainlinkRelayerV1CELOZAR",
+        "abi": "./abis/ChainlinkRelayerV1CELOZAR.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1CHFUSD": {
+        "address": "0xF7bCF416388aa2ec59da74ae1d8bc5C99c385884",
+        "name": "ChainlinkRelayerV1CHFUSD",
+        "abi": "./abis/ChainlinkRelayerV1CHFUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1COPUSD": {
+        "address": "0xAd7AdcF65AB03857075ef1fa000eef7A3F40D6ce",
+        "name": "ChainlinkRelayerV1COPUSD",
+        "abi": "./abis/ChainlinkRelayerV1COPUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1EUROCEUR": {
+        "address": "0xb3338B3bF86965444116E36AC22157bf4C1D4DF9",
+        "name": "ChainlinkRelayerV1EUROCEUR",
+        "abi": "./abis/ChainlinkRelayerV1EUROCEUR.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1EURUSD": {
+        "address": "0x0839CfefB470963Cabbed28dE81cFDe55A98bD69",
+        "name": "ChainlinkRelayerV1EURUSD",
+        "abi": "./abis/ChainlinkRelayerV1EURUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1EURXOF": {
+        "address": "0x840653129B6eC9318bB4154Cb2Fd65Fc428fe089",
+        "name": "ChainlinkRelayerV1EURXOF",
+        "abi": "./abis/ChainlinkRelayerV1EURXOF.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1GBPUSD": {
+        "address": "0x0D45E48a07c41defc88c7EEa0Fbab4aF5B5923D9",
+        "name": "ChainlinkRelayerV1GBPUSD",
+        "abi": "./abis/ChainlinkRelayerV1GBPUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1GHSUSD": {
+        "address": "0x78069E0677f798e3BdA25b7dB54bd2f236B7d448",
+        "name": "ChainlinkRelayerV1GHSUSD",
+        "abi": "./abis/ChainlinkRelayerV1GHSUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1JPYUSD": {
+        "address": "0x18fde6E5a2485D70b312FfC3a5138369c784a567",
+        "name": "ChainlinkRelayerV1JPYUSD",
+        "abi": "./abis/ChainlinkRelayerV1JPYUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1KESUSD": {
+        "address": "0xb020926b1CE8Fa4118B43633d3c4c127c8f3dd8f",
+        "name": "ChainlinkRelayerV1KESUSD",
+        "abi": "./abis/ChainlinkRelayerV1KESUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1NGNUSD": {
+        "address": "0xB42767062962B438C8f4c1d176E85D1B89B12618",
+        "name": "ChainlinkRelayerV1NGNUSD",
+        "abi": "./abis/ChainlinkRelayerV1NGNUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1PHPUSD": {
+        "address": "0xd8dDe141DFe30DCeeF62bc295F8566dBfEB5F7e3",
+        "name": "ChainlinkRelayerV1PHPUSD",
+        "abi": "./abis/ChainlinkRelayerV1PHPUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1USDCUSD": {
+        "address": "0x2026c1eA69E65dC370b46bfF9fDA1DCE256f188D",
+        "name": "ChainlinkRelayerV1USDCUSD",
+        "abi": "./abis/ChainlinkRelayerV1USDCUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1USDTUSD": {
+        "address": "0x19ea130846452733ff2359974Cd58984A2e3963D",
+        "name": "ChainlinkRelayerV1USDTUSD",
+        "abi": "./abis/ChainlinkRelayerV1USDTUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1XOFUSD": {
+        "address": "0xC22f388810A4183c61Cb8cdd4B20a5015f2398e6",
+        "name": "ChainlinkRelayerV1XOFUSD",
+        "abi": "./abis/ChainlinkRelayerV1XOFUSD.json",
+        "type": "contract"
+      },
+      "ChainlinkRelayerV1ZARUSD": {
+        "address": "0x757654C3B851110EEF9304e2297Bd592173Af1e6",
+        "name": "ChainlinkRelayerV1ZARUSD",
+        "abi": "./abis/ChainlinkRelayerV1ZARUSD.json",
+        "type": "contract"
+      },
+      "CollSurplusPool": {
+        "address": "0x4b8FD6eFe77B56a27c90eb46586c8903E8D0A63a",
+        "name": "CollSurplusPool",
+        "abi": "./abis/CollSurplusPool.json",
+        "type": "contract"
+      },
+      "CollateralRegistry": {
+        "address": "0xc674b6562eaf4E40056aad628E398F58cA0b2B91",
+        "name": "CollateralRegistry",
+        "abi": "./abis/CollateralRegistry.json",
+        "type": "contract"
+      },
+      "ConstantProductPricingModule": {
+        "address": "0x2584a5835e3aE7E901e6462E1de06920c2C68028",
+        "name": "ConstantProductPricingModule",
+        "abi": "./abis/ConstantProductPricingModule.json",
+        "type": "contract"
+      },
+      "ConstantSumPricingModule": {
+        "address": "0x3b199d9EbEbe509bb711BfFb455c2d79102A9602",
+        "name": "ConstantSumPricingModule",
+        "abi": "./abis/ConstantSumPricingModule.json",
+        "type": "contract"
+      },
+      "DefaultPool": {
+        "address": "0x8f0E218fE0EB3Ef1dAF3eEAF1Cbf4Ec6d29b6fe4",
+        "name": "DefaultPool",
+        "abi": "./abis/DefaultPool.json",
+        "type": "contract"
+      },
+      "FPMM": {
+        "address": "0x43cB9D6AcF1462356303079EA4FDd8bc30042a6A",
+        "name": "FPMM",
+        "abi": "./abis/FPMM.json",
+        "type": "pool"
+      },
+      "GasPool": {
+        "address": "0xcf0349BaffbEEb9f5c8871338415613610DC321E",
+        "name": "GasPool",
+        "abi": "./abis/GasPool.json",
+        "type": "contract"
+      },
+      "HintHelpers": {
+        "address": "0x5A54DD5d7AD1b782b43bB08d0A40CA947a315556",
+        "name": "HintHelpers",
+        "abi": "./abis/HintHelpers.json",
+        "type": "contract"
+      },
+      "MarketHoursBreaker": {
+        "address": "0x99C968Bf5972C11442654b989B7eAD0237cA654B",
+        "name": "MarketHoursBreaker",
+        "abi": "./abis/MarketHoursBreaker.json",
+        "type": "contract"
+      },
+      "MarketHoursBreakerToggleable": {
+        "address": "0x4c67f682195d1627Ed76eD69311930c7fB069684",
+        "name": "MarketHoursBreakerToggleable",
+        "abi": "./abis/MarketHoursBreakerToggleable.json",
+        "type": "contract"
+      },
+      "MedianDeltaBreaker": {
+        "address": "0xd29B4e743F7B84D63fBF9149B6D983DF2eF5C952",
+        "name": "MedianDeltaBreaker",
+        "abi": "./abis/MedianDeltaBreaker.json",
+        "type": "contract"
+      },
+      "MentoRouter": {
+        "address": "0x8e4Fb12D86D5DF911086a9153e79CA27e0c96156",
+        "name": "MentoRouter",
+        "abi": "./abis/MentoRouter.json",
+        "type": "contract"
+      },
+      "MentoToken": {
+        "address": "0x07867fd40EB56b4380bE39c88D0a7EA59Aa99A20",
+        "name": "MentoToken",
+        "abi": "./abis/MentoToken.json",
+        "type": "token"
+      },
+      "MockChainlinkAggregatorAUDUSD": {
+        "address": "0x94d96BAef28145235fA66758b0B121Bed0ee1361",
+        "name": "MockChainlinkAggregatorAUDUSD",
+        "abi": "./abis/MockChainlinkAggregatorAUDUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorBRLUSD": {
+        "address": "0xF7Ab72Be610821Eccee45f78C490c71356eCab27",
+        "name": "MockChainlinkAggregatorBRLUSD",
+        "abi": "./abis/MockChainlinkAggregatorBRLUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorCADUSD": {
+        "address": "0xA5F93481c20A6e0F6360Aaf80B8693179Dcc6c9B",
+        "name": "MockChainlinkAggregatorCADUSD",
+        "abi": "./abis/MockChainlinkAggregatorCADUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorCELOUSD": {
+        "address": "0x275eaa7A22589e89997814abcBeCDcF0aC7b8912",
+        "name": "MockChainlinkAggregatorCELOUSD",
+        "abi": "./abis/MockChainlinkAggregatorCELOUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorCHFUSD": {
+        "address": "0xDF23F723E9F8033d650A7e7fbf8759233BE6C1b4",
+        "name": "MockChainlinkAggregatorCHFUSD",
+        "abi": "./abis/MockChainlinkAggregatorCHFUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorCOPUSD": {
+        "address": "0xfF40C3C48Ed8e25aC63dD92cc9a328da890C3930",
+        "name": "MockChainlinkAggregatorCOPUSD",
+        "abi": "./abis/MockChainlinkAggregatorCOPUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorETHUSD": {
+        "address": "0x7917d6C20272085Ad41C2340c36Ef0D8523E110E",
+        "name": "MockChainlinkAggregatorETHUSD",
+        "abi": "./abis/MockChainlinkAggregatorETHUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorEUROCUSD": {
+        "address": "0x3c8D67D0Baaa85D831684B407b5A8BDAEEeA49bd",
+        "name": "MockChainlinkAggregatorEUROCUSD",
+        "abi": "./abis/MockChainlinkAggregatorEUROCUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorEURUSD": {
+        "address": "0x6E55B9BE545adD377ebB7bcDa03cEb5819d650a6",
+        "name": "MockChainlinkAggregatorEURUSD",
+        "abi": "./abis/MockChainlinkAggregatorEURUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorGBPUSD": {
+        "address": "0x9B6EA7621eec8EcE34dD0c4A87041962B435a185",
+        "name": "MockChainlinkAggregatorGBPUSD",
+        "abi": "./abis/MockChainlinkAggregatorGBPUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorGHSUSD": {
+        "address": "0xf6d0f39f5087fBeAd36233b979d34a90618f6B20",
+        "name": "MockChainlinkAggregatorGHSUSD",
+        "abi": "./abis/MockChainlinkAggregatorGHSUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorJPYUSD": {
+        "address": "0x7948b896a3D40b5F992DEE730c96c49c25124E81",
+        "name": "MockChainlinkAggregatorJPYUSD",
+        "abi": "./abis/MockChainlinkAggregatorJPYUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorKESUSD": {
+        "address": "0x00E406495a36311Dc4b30dfecB140ee4a70118C7",
+        "name": "MockChainlinkAggregatorKESUSD",
+        "abi": "./abis/MockChainlinkAggregatorKESUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorNGNUSD": {
+        "address": "0x6545030396e3e8430eadFDdA4c6A0330AE8377d8",
+        "name": "MockChainlinkAggregatorNGNUSD",
+        "abi": "./abis/MockChainlinkAggregatorNGNUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorPHPUSD": {
+        "address": "0xcb7C39239880b0773475900B1f0b529a1714aE5E",
+        "name": "MockChainlinkAggregatorPHPUSD",
+        "abi": "./abis/MockChainlinkAggregatorPHPUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorUSDCUSD": {
+        "address": "0xf5922fCD1513525B11BcA9B1dAAB4014Ca602552",
+        "name": "MockChainlinkAggregatorUSDCUSD",
+        "abi": "./abis/MockChainlinkAggregatorUSDCUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorUSDTUSD": {
+        "address": "0x3fd706c98fF4f1688A4bb1C9bb01F5f6d58B9EA1",
+        "name": "MockChainlinkAggregatorUSDTUSD",
+        "abi": "./abis/MockChainlinkAggregatorUSDTUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorXOFUSD": {
+        "address": "0x76291e7933851FC64C874A30218d5d92978340A7",
+        "name": "MockChainlinkAggregatorXOFUSD",
+        "abi": "./abis/MockChainlinkAggregatorXOFUSD.json",
+        "type": "contract"
+      },
+      "MockChainlinkAggregatorZARUSD": {
+        "address": "0x5C9a1c3835a3dd7618A9dBb0EE1325D853fd7d3d",
+        "name": "MockChainlinkAggregatorZARUSD",
+        "abi": "./abis/MockChainlinkAggregatorZARUSD.json",
+        "type": "contract"
+      },
+      "MockERC20USDC": {
+        "address": "0xBD63e46Be8eF8D89dFde3054E7b9ECAEb8Ad83e9",
+        "name": "MockERC20USDC",
+        "abi": "./abis/MockERC20USDC.json",
+        "type": "token"
+      },
+      "MockERC20USDT": {
+        "address": "0xCA53d9b72646B254d29EBeEb4c5cde7BB4bb59e0",
+        "name": "MockERC20USDT",
+        "abi": "./abis/MockERC20USDT.json",
+        "type": "token"
+      },
+      "MockERC20axlEUROC": {
+        "address": "0x9883d788d40F1C7595a780ed881Ea833C7743B4B",
+        "name": "MockERC20axlEUROC",
+        "abi": "./abis/MockERC20axlEUROC.json",
+        "type": "token"
+      },
+      "MockERC20axlUSDC": {
+        "address": "0x6285De9DA7C1d329C0451628638908915002d9d1",
+        "name": "MockERC20axlUSDC",
+        "abi": "./abis/MockERC20axlUSDC.json",
+        "type": "token"
+      },
+      "MultiTroveGetter": {
+        "address": "0xED59EDfB9fCD06bb13d568ab548eC101fBb77a54",
+        "name": "MultiTroveGetter",
+        "abi": "./abis/MultiTroveGetter.json",
+        "type": "contract"
+      },
+      "ProxyAdmin": {
+        "address": "0x01bd47aa7B13a75c24E3dA760f8A503c435BB4Df",
+        "name": "ProxyAdmin",
+        "abi": "./abis/ProxyAdmin.json",
+        "type": "contract"
+      },
+      "ReserveLiquidityStrategyv300": {
+        "address": "0x77b2d6d2220Cb0EA20Ea9d9EB7A75Dd11343e412",
+        "name": "ReserveLiquidityStrategyv300",
+        "abi": "./abis/ReserveLiquidityStrategyv300.json",
+        "type": "contract"
+      },
+      "ReserveLiquidityStrategyv301": {
+        "address": "0x625BD9cc583B5F9a88a38B0657ce816a3F02D367",
+        "name": "ReserveLiquidityStrategyv301",
+        "abi": "./abis/ReserveLiquidityStrategyv301.json",
+        "type": "contract"
+      },
+      "ReserveTroveFactory": {
+        "address": "0xf179d705706CD959884E40B1eA21C95EC84D9E14",
+        "name": "ReserveTroveFactory",
+        "abi": "./abis/ReserveTroveFactory.json",
+        "type": "contract"
+      },
+      "Router": {
+        "address": "0xcf6cD45210b3ffE3cA28379C4683F1e60D0C2CCd",
+        "name": "Router",
+        "abi": "./abis/Router.json",
+        "type": "contract"
+      },
+      "SortedTroves": {
+        "address": "0x714CBd00Be7B39A9319a434a670d51C86F994E3d",
+        "name": "SortedTroves",
+        "abi": "./abis/SortedTroves.json",
+        "type": "contract"
+      },
+      "StabilityPool": {
+        "address": "0x1c424be1BE055a6C91ED9839a0E440E26814D1fC",
+        "name": "StabilityPool",
+        "abi": "./abis/StabilityPool.json",
+        "type": "contract"
+      },
+      "StableTokenV2": {
+        "address": "0xEd9A3541f06E45E3d92E937AA74eD878127318E0",
+        "name": "StableTokenV2",
+        "abi": "./abis/StableTokenV2.json",
+        "type": "token"
+      },
+      "StableTokenV3": {
+        "address": "0xdbd4ea7ce0b15c9d57dc3fa47713477e4ef4fdcb",
+        "name": "StableTokenV3",
+        "abi": "./abis/StableTokenV3.json",
+        "type": "token"
+      },
+      "SystemParams": {
+        "address": "0xdf1E9330f328Ea8Fd3E974b1a2510A9791712318",
+        "name": "SystemParams",
+        "abi": "./abis/SystemParams.json",
+        "type": "contract"
+      },
+      "TroveManager": {
+        "address": "0x3ADFF16949513480E051F451748Ee8B801731c46",
+        "name": "TroveManager",
+        "abi": "./abis/TroveManager.json",
+        "type": "contract"
+      },
+      "TroveNFT": {
+        "address": "0x25B721CA74E6D0c2e3b9FD755cd2148A35CF1E84",
+        "name": "TroveNFT",
+        "abi": "./abis/TroveNFT.json",
+        "type": "contract"
+      },
+      "ValueDeltaBreaker": {
+        "address": "0x03CDf2966185Eb0b980f2481Ad386B8aFdAB4534",
+        "name": "ValueDeltaBreaker",
+        "abi": "./abis/ValueDeltaBreaker.json",
+        "type": "contract"
+      },
+      "VirtualPoolFactory": {
+        "address": "0x887955f28723B0e9Bddc358448CB5B1FDe692da4",
+        "name": "VirtualPoolFactory",
+        "abi": "./abis/VirtualPoolFactory.json",
+        "type": "contract"
+      }
+    }
+  }
+}

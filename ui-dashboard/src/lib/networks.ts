@@ -2,7 +2,7 @@
 // Network definitions — add new chains here
 // ---------------------------------------------------------------------------
 
-import contractsData from "@mento-protocol/contracts/contracts.json";
+import contractsData from "./contracts.json";
 
 // Official treb deployment namespace per chain — update when a new deployment is promoted
 const ACTIVE_DEPLOYMENT = {

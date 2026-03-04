@@ -42,9 +42,6 @@ importers:
 
   ui-dashboard:
     dependencies:
-      '@mento-protocol/contracts':
-        specifier: file:../../../../projects/mento/mento-deployments-v2/packages/contracts
-        version: file:../../../projects/mento/mento-deployments-v2/packages/contracts
       graphql:
         specifier: ^16.13.1
         version: 16.13.1
@@ -719,9 +716,6 @@ packages:
   '@maplibre/maplibre-gl-style-spec@20.4.0':
     resolution: {integrity: sha512-AzBy3095fTFPjDjmWpR2w6HVRAZJ6hQZUCwk5Plz6EyfnfuQW1odeW5i2Ai47Y6TBA2hQnC+azscjBSALpaWgw==}
     hasBin: true
-
-  '@mento-protocol/contracts@file:../../../projects/mento/mento-deployments-v2/packages/contracts':
-    resolution: {directory: ../../../projects/mento/mento-deployments-v2/packages/contracts, type: directory}
 
   '@next/env@16.1.6':
     resolution: {integrity: sha512-N1ySLuZjnAtN3kFnwhAwPvZah8RJxKasD7x1f8shFqhncnWZn4JMfg37diLNuoHsLAlrDfM3g4mawVdtAG8XLQ==}
@@ -4150,8 +4144,6 @@ snapshots:
       quickselect: 2.0.0
       rw: 1.3.3
       tinyqueue: 3.0.0
-
-  '@mento-protocol/contracts@file:../../../projects/mento/mento-deployments-v2/packages/contracts': {}
 
   '@next/env@16.1.6': {}
 
