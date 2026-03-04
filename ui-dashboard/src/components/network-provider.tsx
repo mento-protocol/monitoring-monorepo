@@ -2,10 +2,9 @@
 
 import {
   createContext,
-  useContext,
+  use,
   useState,
   useCallback,
-  useEffect,
   type ReactNode,
 } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
@@ -30,22 +29,24 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  // Read initial value from URL
   const paramNetwork = searchParams.get("network") ?? "";
-  const initial = isNetworkId(paramNetwork) ? paramNetwork : DEFAULT_NETWORK;
-  const [networkId, setNetworkIdState] = useState<NetworkId>(initial);
+  const fromURL: NetworkId = isNetworkId(paramNetwork)
+    ? paramNetwork
+    : DEFAULT_NETWORK;
 
-  // Sync URL → state when URL changes externally
-  useEffect(() => {
-    const p = searchParams.get("network") ?? "";
-    if (isNetworkId(p) && p !== networkId) {
-      setNetworkIdState(p);
-    }
-  }, [searchParams, networkId]);
+  const [networkId, setNetworkId] = useState<NetworkId>(fromURL);
 
-  const setNetworkId = useCallback(
+  // Sync URL → state when the URL changes externally (derived state pattern,
+  // avoids calling setState inside useEffect).
+  const [prevFromURL, setPrevFromURL] = useState(fromURL);
+  if (prevFromURL !== fromURL) {
+    setPrevFromURL(fromURL);
+    setNetworkId(fromURL);
+  }
+
+  const handleNetworkChange = useCallback(
     (id: NetworkId) => {
-      setNetworkIdState(id);
+      setNetworkId(id);
       const params = new URLSearchParams(searchParams.toString());
       if (id === DEFAULT_NETWORK) {
         params.delete("network");
@@ -61,16 +62,14 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   const value: NetworkContextValue = {
     network: NETWORKS[networkId],
     networkId,
-    setNetworkId,
+    setNetworkId: handleNetworkChange,
   };
 
-  return (
-    <NetworkContext.Provider value={value}>{children}</NetworkContext.Provider>
-  );
+  return <NetworkContext value={value}>{children}</NetworkContext>;
 }
 
 export function useNetwork(): NetworkContextValue {
-  const ctx = useContext(NetworkContext);
+  const ctx = use(NetworkContext);
   if (!ctx) {
     throw new Error("useNetwork must be used within <NetworkProvider>");
   }

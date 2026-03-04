@@ -131,10 +131,8 @@ const upsertPool = async ({
     reserves0: reservesDelta?.reserve0 ?? existing.reserves0,
     reserves1: reservesDelta?.reserve1 ?? existing.reserves1,
     swapCount: existing.swapCount + (swapDelta ? 1 : 0),
-    notionalVolume0:
-      existing.notionalVolume0 + (swapDelta?.volume0 ?? 0n),
-    notionalVolume1:
-      existing.notionalVolume1 + (swapDelta?.volume1 ?? 0n),
+    notionalVolume0: existing.notionalVolume0 + (swapDelta?.volume0 ?? 0n),
+    notionalVolume1: existing.notionalVolume1 + (swapDelta?.volume1 ?? 0n),
     rebalanceCount: existing.rebalanceCount + (rebalanceDelta ? 1 : 0),
     createdAtBlock:
       existing.createdAtBlock === 0n ? blockNumber : existing.createdAtBlock,

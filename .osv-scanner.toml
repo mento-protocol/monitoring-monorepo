@@ -1,0 +1,7 @@
+[[IgnoredVulns]]
+id = "GHSA-73rr-hh4g-fpgx"
+reason = "Affects diff@7.0.0 (jsdiff) — no fix available, this is already the latest version"
+
+[[IgnoredVulns]]
+id = "GHSA-5c6j-r48x-rmvq"
+reason = "Affects serialize-javascript@6.0.2 — no fix available, this is already the latest version"

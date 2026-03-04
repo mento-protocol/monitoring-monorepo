@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useCallback, useEffect } from "react";
+import { Suspense, useState, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useGQL } from "@/lib/graphql";
@@ -41,10 +41,14 @@ function HomeContent() {
   const [filterInput, setFilterInput] = useState(poolFilter);
   const [filterError, setFilterError] = useState("");
 
-  useEffect(() => {
+  // Sync URL → input state when the URL changes externally (derived state
+  // pattern, avoids calling setState inside useEffect).
+  const [prevPoolFilter, setPrevPoolFilter] = useState(poolFilter);
+  if (prevPoolFilter !== poolFilter) {
+    setPrevPoolFilter(poolFilter);
     setFilterInput(poolFilter);
     setFilterError("");
-  }, [poolFilter]);
+  }
 
   const {
     data: poolsData,
