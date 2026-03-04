@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - "ui-dashboard/**"
+      - ".trunk/**"
       - ".github/workflows/ui-dashboard.yml"
   pull_request:
     branches: [main]
     paths:
       - "ui-dashboard/**"
+      - ".trunk/**"
       - ".github/workflows/ui-dashboard.yml"
 
 permissions: read-all
@@ -21,9 +23,6 @@ jobs:
     permissions:
       checks: write
       contents: read
-    defaults:
-      run:
-        working-directory: ui-dashboard
     steps:
       - uses: actions/checkout@v4
 
@@ -36,15 +35,15 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-        working-directory: .
 
-      - uses: trunk-io/trunk-action@v1
+      - name: Trunk Check
+        uses: trunk-io/trunk-action@v1
 
       - name: Typecheck
-        run: pnpm typecheck
+        run: pnpm --filter @mento-protocol/ui-dashboard typecheck
 
       - name: Test with coverage
-        run: pnpm test:coverage
+        run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
 
       - uses: codecov/codecov-action@v4
         with:

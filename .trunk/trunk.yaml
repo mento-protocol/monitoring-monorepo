@@ -30,7 +30,7 @@ lint:
     - git-diff-check
     - trufflehog@3.93.6
     - osv-scanner@2.3.3
-    - codespell@2.5.0
+    - codespell@2.4.1
     - actionlint@1.7.4
     - yamllint@1.38.0
 
