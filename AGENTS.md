@@ -76,6 +76,20 @@ monitoring-monorepo/
 - Dashboard needs `NEXT_PUBLIC_HASURA_URL_*` and `NEXT_PUBLIC_HASURA_SECRET_*` env vars
 - See root README.md for full env var documentation
 
+## Envio Gotchas
+
+### Hasura must run on port 8080
+
+The envio binary hardcodes `http://localhost:8080/hasura/healthz?strict=true` for its startup liveness check. This port is not configurable via env vars. **Never set `HASURA_EXTERNAL_PORT` to anything other than 8080** (or omit it entirely) — the binary will silently fail its health check and retry with exponential backoff, stalling startup for 5+ minutes per attempt.
+
+### Only one local indexer at a time
+
+All envio configs share the same Docker project name (`generated`, derived from the `generated/` directory name) and the same Hasura port (8080). Running two local indexers simultaneously will cause container name conflicts. Start one, stop it, then start the other.
+
+### Postgres healthcheck is auto-patched after codegen
+
+The envio-generated `generated/docker-compose.yaml` does not include a healthcheck for the postgres service. Without one, Docker reports `Health:""` and the envio binary waits indefinitely. `scripts/run-envio-with-env.mjs` automatically patches the file to add a `pg_isready` healthcheck after every `pnpm codegen` run. If you regenerate the compose file manually, re-run codegen via the script (not directly via `envio codegen`) to re-apply the patch.
+
 ## Common Tasks
 
 ### Adding a new contract to index
