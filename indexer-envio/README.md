@@ -103,6 +103,7 @@ Notes:
 - `pnpm codegen`, `pnpm dev`, and `pnpm start` load `.env` automatically.
 - `ENVIO_START_BLOCK` and `ENVIO_RPC_URL` are required for `codegen/dev/start`.
 - `codegen` runs with `CI=true` internally to avoid non-TTY pnpm prompt failures.
+- On a fresh checkout, `codegen` will run twice: first to generate `generated/`, then again after auto-installing its deps. This is expected — subsequent runs are single-pass.
 
 ## Query examples
 
