@@ -25,11 +25,9 @@ export const NETWORKS: Record<NetworkId, Network> = {
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_DEVNET ??
       "http://localhost:8080/v1/graphql",
-    hasuraSecret:
-      process.env.NEXT_PUBLIC_HASURA_SECRET_DEVNET ?? "testing",
+    hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_DEVNET ?? "testing",
     explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_DEVNET ??
-      "http://localhost:5100",
+      process.env.NEXT_PUBLIC_EXPLORER_URL_DEVNET ?? "http://localhost:5100",
     tokenSymbols: {
       "0x765de816845861e75a25fca122bb6898b8b1282a": "USDm",
       "0xfaea5f3404bba20d3cc2f8c4b0a888f55a3c7313": "GHSm",
@@ -45,8 +43,7 @@ export const NETWORKS: Record<NetworkId, Network> = {
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_SEPOLIA ??
       "http://localhost:8081/v1/graphql",
-    hasuraSecret:
-      process.env.NEXT_PUBLIC_HASURA_SECRET_SEPOLIA ?? "testing",
+    hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_SEPOLIA ?? "testing",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_SEPOLIA ??
       "https://celo-sepolia.blockscout.com",

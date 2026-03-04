@@ -6,8 +6,6 @@ tags: [mento, envio, indexer, deployment, vercel]
 status: complete
 ---
 
-# Envio Hosted Service Migration Plan
-
 ## TL;DR
 
 Envio's hosted service uses **Git-based deployments** (like Vercel) — push to a branch, it deploys. No `envio deploy` CLI command exists. Free dev tier has limits (100k events, 5GB, 30-day max). The hosted service provides a **GraphQL endpoint** directly (no separate Hasura needed). Migration is straightforward: push indexer code to GitHub, connect via Envio dashboard, update Vercel env vars to point to the new endpoint.
@@ -28,6 +26,7 @@ There is **no `envio deploy` command**. Deployment is entirely Git-based via the
 5. **Push to branch → auto-deploys**
 
 ### Requirements
+
 - HyperIndex ≥ v2.21.5 (we're on v2.32.3 ✅)
 - Versions 2.29.x are **not supported**
 - `package.json` must be present
@@ -37,17 +36,21 @@ There is **no `envio deploy` command**. Deployment is entirely Git-based via the
 ## 2. Hosted GraphQL Endpoint
 
 ### Format
-```
+
+```text
 https://{indexer-slug}.envio.dev/graphql
 ```
+
 (Exact URL shown in dashboard after deployment)
 
 ### Authentication
+
 - **Hosted indexers don't need an `ENVIO_API_TOKEN`** — HyperSync auth is handled automatically
 - GraphQL endpoint access can be controlled via **IP/Domain whitelisting** in the dashboard (Security settings)
 - No API key headers needed for querying the GraphQL endpoint by default
 
 ### Key Difference from Local
+
 - **Local:** Queries go to Hasura (`http://localhost:8080/v1/graphql`)
 - **Hosted:** Queries go directly to Envio's GraphQL endpoint — **no separate Hasura layer**
 - The query schema/syntax should be identical (Envio uses Hasura under the hood)
@@ -63,6 +66,7 @@ The `config.sepolia.yaml` should work **as-is** on hosted. Key notes:
 ## 4. Pricing / Free Tier
 
 ### Development Plan (Free)
+
 - 3 indexers per org
 - 3 deployments per indexer
 - **Soft limits** (triggers 7+3 day deletion countdown):
@@ -75,20 +79,24 @@ The `config.sepolia.yaml` should work **as-is** on hosted. Key notes:
 - Includes: GraphQL API, multichain, monitoring, alerts, IP whitelisting
 
 ### Paid Plans
+
 - Production Small/Medium/Large and Dedicated tiers available
 - See [envio.dev/pricing](https://envio.dev/pricing) for current rates
 
 ### For Our Use Case
+
 With 12 events indexed and no trades yet, the free tier is **more than sufficient**. The 100k event soft limit and 30-day expiry are the main constraints to watch as we scale.
 
 ## 5. Dashboard Env Var Changes for Vercel
 
 ### Current (Local)
+
 ```env
 NEXT_PUBLIC_HASURA_URL=http://localhost:8080/v1/graphql
 ```
 
 ### After Migration (Hosted)
+
 ```env
 NEXT_PUBLIC_GRAPHQL_URL=https://{your-indexer}.envio.dev/graphql
 ```
@@ -117,35 +125,35 @@ The config file is the same. No code changes needed between environments — onl
 
 ### Day 1 (Today — March 4): Prep
 
-| Step | Task | Time |
-|------|------|------|
-| 1 | Ensure indexer code is in a GitHub repo (gisk0 org) | 5 min |
-| 2 | Verify `package.json` exists with HyperIndex dep ≥2.21.5 | 2 min |
-| 3 | Test `pnpm install` works with pnpm 10.30.3 | 5 min |
-| 4 | Create deployment branch (e.g., `deploy/hosted`) | 2 min |
+| Step | Task                                                     | Time  |
+| ---- | -------------------------------------------------------- | ----- |
+| 1    | Ensure indexer code is in a GitHub repo (gisk0 org)      | 5 min |
+| 2    | Verify `package.json` exists with HyperIndex dep ≥2.21.5 | 2 min |
+| 3    | Test `pnpm install` works with pnpm 10.30.3              | 5 min |
+| 4    | Create deployment branch (e.g., `deploy/hosted`)         | 2 min |
 
 ### Day 1 (Today): Deploy to Envio Hosted
 
-| Step | Task | Time |
-|------|------|------|
-| 5 | Login to [envio.dev/app](https://envio.dev/app/login) with GitHub | 2 min |
-| 6 | Install Envio Deployments GitHub App on repo | 2 min |
-| 7 | Add indexer → select repo → set config path to `config.sepolia.yaml` | 3 min |
-| 8 | Set deployment branch to `deploy/hosted` | 1 min |
-| 9 | Push to `deploy/hosted` → watch deployment in dashboard | 5-15 min |
-| 10 | Verify indexer syncs and events appear | 5 min |
-| 11 | Note the GraphQL endpoint URL from dashboard | 1 min |
-| 12 | Test a query against the hosted endpoint (curl or GraphQL playground) | 5 min |
+| Step | Task                                                                  | Time     |
+| ---- | --------------------------------------------------------------------- | -------- |
+| 5    | Login to [envio.dev/app](https://envio.dev/app/login) with GitHub     | 2 min    |
+| 6    | Install Envio Deployments GitHub App on repo                          | 2 min    |
+| 7    | Add indexer → select repo → set config path to `config.sepolia.yaml`  | 3 min    |
+| 8    | Set deployment branch to `deploy/hosted`                              | 1 min    |
+| 9    | Push to `deploy/hosted` → watch deployment in dashboard               | 5-15 min |
+| 10   | Verify indexer syncs and events appear                                | 5 min    |
+| 11   | Note the GraphQL endpoint URL from dashboard                          | 1 min    |
+| 12   | Test a query against the hosted endpoint (curl or GraphQL playground) | 5 min    |
 
 ### Day 1 (Today): Update Dashboard
 
-| Step | Task | Time |
-|------|------|------|
-| 13 | Update GraphQL client code to use `NEXT_PUBLIC_GRAPHQL_URL` env var | 10 min |
-| 14 | Test locally with hosted endpoint | 5 min |
-| 15 | Add `NEXT_PUBLIC_GRAPHQL_URL` to Vercel env vars (production) | 2 min |
-| 16 | Deploy dashboard to Vercel | 5 min |
-| 17 | Verify dashboard loads data from hosted Envio | 5 min |
+| Step | Task                                                                | Time   |
+| ---- | ------------------------------------------------------------------- | ------ |
+| 13   | Update GraphQL client code to use `NEXT_PUBLIC_GRAPHQL_URL` env var | 10 min |
+| 14   | Test locally with hosted endpoint                                   | 5 min  |
+| 15   | Add `NEXT_PUBLIC_GRAPHQL_URL` to Vercel env vars (production)       | 2 min  |
+| 16   | Deploy dashboard to Vercel                                          | 5 min  |
+| 17   | Verify dashboard loads data from hosted Envio                       | 5 min  |
 
 ### Post-Deploy
 
@@ -154,17 +162,17 @@ The config file is the same. No code changes needed between environments — onl
 - Monitor the 100k event limit — plan upgrade before hitting it
 - Note 30-day auto-deletion on free tier — redeploy or upgrade before expiry
 
-**Total estimated time: ~1-2 hours**
+Total estimated time: ~1-2 hours
 
 ## 9. Risks & Mitigations
 
-| Risk | Mitigation |
-|------|-----------|
-| Free tier 30-day expiry | Calendar reminder at day 25; upgrade to paid or redeploy |
-| 100k event limit | Monitor in dashboard; upgrade when approaching 80k |
-| Celo Sepolia not on HyperSync | Falls back to RPC automatically; may be slower |
-| Schema differences | Unlikely — same Hasura-based GraphQL; test queries first |
-| Deployment fails | Check pnpm compatibility, config path, repo size |
+| Risk                          | Mitigation                                               |
+| ----------------------------- | -------------------------------------------------------- |
+| Free tier 30-day expiry       | Calendar reminder at day 25; upgrade to paid or redeploy |
+| 100k event limit              | Monitor in dashboard; upgrade when approaching 80k       |
+| Celo Sepolia not on HyperSync | Falls back to RPC automatically; may be slower           |
+| Schema differences            | Unlikely — same Hasura-based GraphQL; test queries first |
+| Deployment fails              | Check pnpm compatibility, config path, repo size         |
 
 ## 10. Quick Reference
 
@@ -184,6 +192,7 @@ curl -X POST https://{slug}.envio.dev/graphql \
 ---
 
 **Sources:**
+
 - [Envio Hosted Service Overview](https://docs.envio.dev/docs/HyperIndex/hosted-service)
 - [Deployment Guide](https://docs.envio.dev/docs/HyperIndex/hosted-service-deployment)
 - [Billing & Pricing](https://docs.envio.dev/docs/HyperIndex/hosted-service-billing)

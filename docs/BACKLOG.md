@@ -1,10 +1,11 @@
 # Monitoring Monorepo — Task Backlog
 
-_Last updated: 2026-03-04_
+Last updated: 2026-03-04
 
 ## 🔴 Blockers / Next Up
 
 ### Envio Hosted Deployment
+
 - [ ] Sign up at [envio.dev](https://envio.dev) (Philip — needs GitHub OAuth)
 - [ ] Connect `mento-protocol/monitoring-monorepo` repo
 - [ ] Deploy `indexer-envio/` with `config.sepolia.yaml`
@@ -15,6 +16,7 @@ _Last updated: 2026-03-04_
 - **Why first:** Vercel dashboard needs a public GraphQL URL
 
 ### Vercel Deployment
+
 - [ ] Create Vercel project pointing to `ui-dashboard/`
 - [ ] Set env vars:
   - `NEXT_PUBLIC_HASURA_URL_SEPOLIA` → Envio hosted GraphQL URL
@@ -29,24 +31,28 @@ _Last updated: 2026-03-04_
 ## 🟡 Dashboard Features (Phase 1)
 
 ### Global Page
+
 - [ ] TVL across all pools (sum of reserves in USD equivalent)
 - [ ] Total swap volume (cumulative)
 - [ ] Pool count by type (FPMM vs VirtualPool)
 - [ ] Chain-level stats (ChainStat entity)
 
 ### Snapshot-Based Charts
+
 - [ ] Volume over time (hourly/daily bars from PoolSnapshot)
 - [ ] Cumulative volume line chart
 - [ ] TVL over time
 - [ ] Gap-filling via forward-fill in dashboard (Envio block handlers lack timestamp)
 
 ### Pool Health KPIs
+
 - [ ] Oracle liveness indicator (oracleOk, livenessRatio fields on Pool)
 - [ ] Deviation ratio warnings (warn ≥1 for >15min, crit >60min)
 - [ ] Trading limit pressure (warn >0.8, crit ≥1.0)
 - [ ] Rebalance liveness + effectiveness
 
 ### Pool Detail Enhancements
+
 - [ ] Liquidity depth visualization
 - [ ] Rebalance event timeline
 - [ ] Fee revenue per pool
@@ -54,6 +60,7 @@ _Last updated: 2026-03-04_
 ## 🟢 Infrastructure
 
 ### Indexer Improvements
+
 - [ ] Oracle state fields on Pool entity (oracleOk, livenessRatio)
 - [ ] ChainStat / GlobalStat aggregate entities
 - [ ] Liquity v2 indexing (TroveManager, StabilityPool, CDPs)
@@ -62,12 +69,14 @@ _Last updated: 2026-03-04_
 - [ ] Monad indexing (blocked on contract deployment)
 
 ### Alerting (Phase 2)
+
 - [ ] Aegis integration for real-time state-based alerting
 - [ ] Prometheus metrics export from indexer
 - [ ] Grafana dashboards for ops team
 - [ ] Discord/Telegram alert channels
 
 ### DevEx
+
 - [ ] Google Auth (NextAuth.js) for dashboard access control
 - [ ] Streamlit sandbox for Roman (Python, reads from same Hasura)
 - [ ] CI pipeline (lint, typecheck, build) on GitHub Actions

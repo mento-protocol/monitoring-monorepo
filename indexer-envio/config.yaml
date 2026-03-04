@@ -3,8 +3,6 @@ name: celo
 description: Celo devnet v3 FPMM-focused HyperIndex indexer
 networks:
   - id: 42220
-    rpc_config:
-      url: ${ENVIO_RPC_URL:-http://34.32.123.41:8545}
     start_block: ${ENVIO_START_BLOCK:-0}
     contracts:
       - name: FPMMFactory

@@ -1,6 +1,6 @@
 packages:
-  - 'indexer-envio'
-  - 'ui-dashboard'
+  - indexer-envio
+  - ui-dashboard
 
 ignoredBuiltDependencies:
   - sharp

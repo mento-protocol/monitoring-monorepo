@@ -3,6 +3,7 @@
 ## Overview
 
 pnpm monorepo with two packages:
+
 - `indexer-envio/` — Envio HyperIndex indexer for Celo v3 FPMM pools
 - `ui-dashboard/` — Next.js 16 + Plotly.js monitoring dashboard
 
@@ -48,7 +49,7 @@ pnpm dashboard:build          # Production build
 
 ## File Structure
 
-```
+```text
 monitoring-monorepo/
 ├── package.json              # Root workspace config
 ├── pnpm-workspace.yaml       # Workspace package list
@@ -78,6 +79,7 @@ monitoring-monorepo/
 ## Common Tasks
 
 ### Adding a new contract to index
+
 1. Add ABI to `indexer-envio/abis/`
 2. Add contract entry in `config.yaml` (and `config.sepolia.yaml` if applicable)
 3. Add entity to `schema.graphql`
@@ -85,6 +87,7 @@ monitoring-monorepo/
 5. Run `pnpm indexer:codegen` to regenerate types
 
 ### Adding a new chart to the dashboard
+
 1. Create component in `ui-dashboard/src/`
 2. Add GraphQL query for the data
 3. Wire up with SWR for real-time updates

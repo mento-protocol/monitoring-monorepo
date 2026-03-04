@@ -35,10 +35,12 @@ pnpm lint   # Run ESLint
 ## Multi-Chain Support
 
 The dashboard supports switching between networks:
+
 - **Celo Devnet** — local/test deployment
 - **Celo Sepolia** — public testnet
 
 Network switching is driven by env vars:
+
 - `NEXT_PUBLIC_HASURA_URL_DEVNET` / `NEXT_PUBLIC_HASURA_URL_SEPOLIA`
 - `NEXT_PUBLIC_HASURA_SECRET_DEVNET` / `NEXT_PUBLIC_HASURA_SECRET_SEPOLIA`
 - `NEXT_PUBLIC_EXPLORER_URL_DEVNET` / `NEXT_PUBLIC_EXPLORER_URL_SEPOLIA`

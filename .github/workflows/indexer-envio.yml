@@ -4,15 +4,15 @@ on:
   push:
     branches: [main]
     paths:
-      - "indexer-envio/**"
-      - ".trunk/**"
-      - ".github/workflows/indexer-envio.yml"
+      - indexer-envio/**
+      - .trunk/**
+      - .github/workflows/indexer-envio.yml
   pull_request:
     branches: [main]
     paths:
-      - "indexer-envio/**"
-      - ".trunk/**"
-      - ".github/workflows/indexer-envio.yml"
+      - indexer-envio/**
+      - .trunk/**
+      - .github/workflows/indexer-envio.yml
 
 permissions: read-all
 

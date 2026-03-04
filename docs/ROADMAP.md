@@ -60,7 +60,7 @@
 
 ## Architecture
 
-```
+```text
 Envio HyperIndex (hosted) → Hasura GraphQL → Next.js Dashboard (Vercel)
                                             → Streamlit Sandbox (Phase 3)
                                             → Aegis Alerting (Phase 2)
@@ -68,14 +68,14 @@ Envio HyperIndex (hosted) → Hasura GraphQL → Next.js Dashboard (Vercel)
 
 ## Key Files
 
-| What | Where |
-|------|-------|
-| Indexer schema | `indexer-envio/schema.graphql` |
-| Event handlers | `indexer-envio/src/EventHandlers.ts` |
-| DevNet config | `indexer-envio/config.yaml` |
-| Sepolia config | `indexer-envio/config.sepolia.yaml` |
-| Dashboard app | `ui-dashboard/src/app/` |
-| Network defs | `ui-dashboard/src/lib/networks.ts` |
-| Token mapping | `ui-dashboard/src/lib/tokens.ts` |
-| Migration plan | `docs/envio-hosted-migration.md` |
+| What            | Where                                            |
+| --------------- | ------------------------------------------------ |
+| Indexer schema  | `indexer-envio/schema.graphql`                   |
+| Event handlers  | `indexer-envio/src/EventHandlers.ts`             |
+| DevNet config   | `indexer-envio/config.yaml`                      |
+| Sepolia config  | `indexer-envio/config.sepolia.yaml`              |
+| Dashboard app   | `ui-dashboard/src/app/`                          |
+| Network defs    | `ui-dashboard/src/lib/networks.ts`               |
+| Token mapping   | `ui-dashboard/src/lib/tokens.ts`                 |
+| Migration plan  | `docs/envio-hosted-migration.md`                 |
 | Monitoring spec | See vault `projects/mento-v3-monitoring/SPEC.md` |

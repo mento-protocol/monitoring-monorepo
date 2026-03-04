@@ -23,15 +23,23 @@ lint:
         - "**/coverage/**"
         - "**/generated/**"
         - "**/.envio/**"
+    - linters: [eslint]
+      paths:
+        - indexer-envio/**
+    - linters: [osv-scanner]
+      paths:
+        - indexer-envio/pnpm-lock.yaml
+        - pnpm-lock.yaml
   enabled:
-    - eslint@10.0.0
+    - checkov@3.2.506
+    - eslint@10.0.2
     - prettier@3.8.1
     - markdownlint@0.48.0
     - git-diff-check
     - trufflehog@3.93.6
     - osv-scanner@2.3.3
     - codespell@2.4.1
-    - actionlint@1.7.4
+    - actionlint@1.7.8
     - yamllint@1.38.0
 
 actions:

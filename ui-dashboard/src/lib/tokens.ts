@@ -10,12 +10,16 @@ const USDM_SYMBOLS = new Set(["USDm"]);
 
 export function tokenSymbol(network: Network, address: string | null): string {
   if (!address) return "?";
-  return network.tokenSymbols[address.toLowerCase()] ?? truncateAddress(address);
+  return (
+    network.tokenSymbols[address.toLowerCase()] ?? truncateAddress(address)
+  );
 }
 
 export function addressLabel(network: Network, address: string | null): string {
   if (!address) return "\u2014";
-  return network.addressLabels[address.toLowerCase()] ?? truncateAddress(address);
+  return (
+    network.addressLabels[address.toLowerCase()] ?? truncateAddress(address)
+  );
 }
 
 export function hasLabel(network: Network, address: string | null): boolean {

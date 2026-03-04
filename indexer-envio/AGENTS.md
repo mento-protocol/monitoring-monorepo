@@ -40,7 +40,8 @@ pnpm test      # Run tests (mocha + chai)
 ## Environment
 
 Copy `.env.example` → `.env` and set:
-- `ENVIO_API_TOKEN` — Get from https://envio.dev/app/api-tokens
+
+- `ENVIO_API_TOKEN` — Get from <https://envio.dev/app/api-tokens>
 - `ENVIO_RPC_URL` — Celo RPC endpoint
 - `ENVIO_START_BLOCK` — Block number to start indexing from
 

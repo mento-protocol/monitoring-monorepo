@@ -4,15 +4,15 @@ on:
   push:
     branches: [main]
     paths:
-      - "ui-dashboard/**"
-      - ".trunk/**"
-      - ".github/workflows/ui-dashboard.yml"
+      - ui-dashboard/**
+      - .trunk/**
+      - .github/workflows/ui-dashboard.yml
   pull_request:
     branches: [main]
     paths:
-      - "ui-dashboard/**"
-      - ".trunk/**"
-      - ".github/workflows/ui-dashboard.yml"
+      - ui-dashboard/**
+      - .trunk/**
+      - .github/workflows/ui-dashboard.yml
 
 permissions: read-all
 
