@@ -73,9 +73,22 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
 ## Deployment
 
-The dashboard is configured for **Vercel** deployment. See [`ui-dashboard/vercel.json`](./ui-dashboard/vercel.json).
+**Indexer:** Envio Hosted Service (dedicated deploy branches per network)  
+**Dashboard:** Vercel (auto-deploys from `main` branch)
 
-Set all `NEXT_PUBLIC_*` environment variables in the Vercel project settings.
+See **[docs/deployment.md](./docs/deployment.md)** for full deployment guide including:
+- Deploy branch strategy for indexer (avoids unnecessary redeployments)
+- Envio hosted setup per network
+- Vercel configuration
+- Environment variables reference
+
+**Quick deploy:**
+```bash
+# Deploy indexer to Celo Sepolia
+./scripts/deploy-indexer.sh celo-sepolia
+
+# Dashboard auto-deploys on push to main (Vercel)
+```
 
 ## Architecture
 
