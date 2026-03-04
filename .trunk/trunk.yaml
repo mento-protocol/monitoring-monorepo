@@ -1,0 +1,62 @@
+# https://docs.trunk.io/cli
+version: 0.1
+cli:
+  version: 1.25.0
+
+plugins:
+  sources:
+    - id: trunk
+      ref: v1.7.5
+      uri: https://github.com/trunk-io/plugins
+
+runtimes:
+  enabled:
+    - node@22.16.0
+    - python@3.10.8
+
+lint:
+  ignore:
+    - linters: [ALL]
+      paths:
+        - "**/node_modules/**"
+        - "**/.next/**"
+        - "**/coverage/**"
+        - "**/generated/**"
+        - "**/.envio/**"
+  enabled:
+    - eslint@10.0.0
+    - prettier@3.8.1
+    - markdownlint@0.48.0
+    - git-diff-check
+    - trufflehog@3.93.6
+    - osv-scanner@2.3.3
+    - codespell@2.5.0
+    - actionlint@1.7.4
+    - yamllint@1.38.0
+
+actions:
+  disabled:
+    - trunk-announce
+    - trunk-check-pre-push # Use custom pre-push below
+  definitions:
+    - id: trunk-check-all-pre-push
+      display_name: Trunk Check All Pre-Push
+      run: trunk check --all
+      triggers:
+        - git_hooks: [pre-push]
+    - id: typecheck-pre-push
+      display_name: TypeCheck Pre-Push
+      run: pnpm --filter @mento-protocol/ui-dashboard typecheck
+      triggers:
+        - git_hooks: [pre-push]
+    - id: test-pre-push
+      display_name: Test Pre-Push
+      run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
+      triggers:
+        - git_hooks: [pre-push]
+  enabled:
+    - trunk-fmt-pre-commit
+    - trunk-check-all-pre-push
+    - typecheck-pre-push
+    - test-pre-push
+    - trunk-upgrade-available

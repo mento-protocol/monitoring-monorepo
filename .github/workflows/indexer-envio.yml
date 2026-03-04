@@ -1,0 +1,44 @@
+name: "Indexer Envio: Quality Checks"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "indexer-envio/**"
+      - ".github/workflows/indexer-envio.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "indexer-envio/**"
+      - ".github/workflows/indexer-envio.yml"
+
+permissions: read-all
+
+jobs:
+  quality:
+    name: Quality Checks
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
+    defaults:
+      run:
+        working-directory: indexer-envio
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - uses: trunk-io/trunk-action@v1
+
+      - name: Typecheck
+        run: pnpm typecheck
