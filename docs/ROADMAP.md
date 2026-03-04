@@ -12,16 +12,23 @@
 - [x] `@index` directives on schema for query performance
 - [x] Monorepo extraction from devnet repo
 - [x] Envio hosted migration plan (`docs/envio-hosted-migration.md`)
+- [x] Config files renamed to `config.celo.{network}.yaml`
+- [x] Deploy branch strategy with per-network branches (`deploy/celo-sepolia`, etc.) — `docs/deployment.md`
+- [x] pnpm deploy scripts (`deploy:indexer:sepolia/mainnet/monad`)
+- [x] Network config expanded with `local`/`hosted` variants for Sepolia and Mainnet
+- [x] `contracts.json` committed and integrated into `networks.ts` for token/address resolution
+- [x] CI pipeline — ESLint + vitest + trunk on GitHub Actions
+- [x] `AGENTS.md` with Envio gotchas (Hasura port, single indexer, postgres healthcheck)
 
 ## 🔜 Next Up
 
 ### Deployment (needs account access)
 
-- [ ] **Envio hosted deployment** — sign up at envio.dev, connect `monitoring-monorepo`, deploy Sepolia indexer. See `docs/envio-hosted-migration.md` for step-by-step.
-- [ ] **Vercel deployment** — connect `ui-dashboard/`, set env vars:
-  - `NEXT_PUBLIC_HASURA_URL_DEVNET` / `NEXT_PUBLIC_HASURA_URL_SEPOLIA`
-  - `NEXT_PUBLIC_HASURA_SECRET_DEVNET` / `NEXT_PUBLIC_HASURA_SECRET_SEPOLIA`
-  - `NEXT_PUBLIC_EXPLORER_URL_DEVNET` / `NEXT_PUBLIC_EXPLORER_URL_SEPOLIA`
+- [x] **Envio hosted deployment** — `mento-v3-celo-sepolia` live at [envio.dev](https://envio.dev/app/mento-protocol/mento-v3-celo-sepolia)
+- [ ] **Vercel deployment** — connect `ui-dashboard/`, set env vars (see `docs/deployment.md`):
+  - `NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED` → Envio hosted GraphQL URL
+  - `NEXT_PUBLIC_HASURA_SECRET_SEPOLIA_HOSTED` → (empty for hosted)
+  - `NEXT_PUBLIC_EXPLORER_URL_SEPOLIA_HOSTED` → `https://celo-sepolia.blockscout.com`
 - [ ] **Google Auth** (NextAuth.js) — restrict to @mentolabs.xyz
 
 ### Dashboard Features (Phase 1)

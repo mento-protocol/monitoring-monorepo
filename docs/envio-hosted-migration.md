@@ -123,37 +123,37 @@ The config file is the same. No code changes needed between environments — onl
 
 ## 8. Step-by-Step Migration Plan
 
-### Day 1 (Today — March 4): Prep
+### Prep (Done ✅)
 
-| Step | Task                                                     | Time  |
-| ---- | -------------------------------------------------------- | ----- |
-| 1    | Ensure indexer code is in a GitHub repo (gisk0 org)      | 5 min |
-| 2    | Verify `package.json` exists with HyperIndex dep ≥2.21.5 | 2 min |
-| 3    | Test `pnpm install` works with pnpm 10.30.3              | 5 min |
-| 4    | Create deployment branch (e.g., `deploy/hosted`)         | 2 min |
+| Step | Task                                                               | Status       |
+| ---- | ------------------------------------------------------------------ | ------------ |
+| 1    | Indexer code in GitHub repo (`mento-protocol/monitoring-monorepo`) | ✅           |
+| 2    | `package.json` with HyperIndex dep ≥2.21.5                         | ✅ (v2.32.3) |
+| 3    | pnpm 10.30.3 compatible                                            | ✅           |
+| 4    | Deploy branch `deploy/celo-sepolia` created                        | ✅           |
 
-### Day 1 (Today): Deploy to Envio Hosted
+### Deploy to Envio Hosted (Needs Philip's Account)
 
-| Step | Task                                                                  | Time     |
-| ---- | --------------------------------------------------------------------- | -------- |
-| 5    | Login to [envio.dev/app](https://envio.dev/app/login) with GitHub     | 2 min    |
-| 6    | Install Envio Deployments GitHub App on repo                          | 2 min    |
-| 7    | Add indexer → select repo → set config path to `config.sepolia.yaml`  | 3 min    |
-| 8    | Set deployment branch to `deploy/hosted`                              | 1 min    |
-| 9    | Push to `deploy/hosted` → watch deployment in dashboard               | 5-15 min |
-| 10   | Verify indexer syncs and events appear                                | 5 min    |
-| 11   | Note the GraphQL endpoint URL from dashboard                          | 1 min    |
-| 12   | Test a query against the hosted endpoint (curl or GraphQL playground) | 5 min    |
+| Step | Task                                                                      | Time     |
+| ---- | ------------------------------------------------------------------------- | -------- |
+| 5    | Login to [envio.dev/app](https://envio.dev/app/login) with GitHub         | 2 min    |
+| 6    | Install Envio Deployments GitHub App on repo                              | 2 min    |
+| 7    | Add indexer → select repo → set config path to `config.celo.sepolia.yaml` | 3 min    |
+| 8    | Set deployment branch to `deploy/celo-sepolia`                            | 1 min    |
+| 9    | Push to `deploy/celo-sepolia` → watch deployment in dashboard             | 5-15 min |
+| 10   | Verify indexer syncs and events appear                                    | 5 min    |
+| 11   | Note the GraphQL endpoint URL from dashboard                              | 1 min    |
+| 12   | Test a query against the hosted endpoint (curl or GraphQL playground)     | 5 min    |
 
-### Day 1 (Today): Update Dashboard
+### Update Dashboard + Vercel
 
-| Step | Task                                                                | Time   |
-| ---- | ------------------------------------------------------------------- | ------ |
-| 13   | Update GraphQL client code to use `NEXT_PUBLIC_GRAPHQL_URL` env var | 10 min |
-| 14   | Test locally with hosted endpoint                                   | 5 min  |
-| 15   | Add `NEXT_PUBLIC_GRAPHQL_URL` to Vercel env vars (production)       | 2 min  |
-| 16   | Deploy dashboard to Vercel                                          | 5 min  |
-| 17   | Verify dashboard loads data from hosted Envio                       | 5 min  |
+| Step | Task                                                                            | Time  |
+| ---- | ------------------------------------------------------------------------------- | ----- |
+| 13   | Add `NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED` to Vercel env vars (hosted GQL URL) | 2 min |
+| 14   | Add `NEXT_PUBLIC_EXPLORER_URL_SEPOLIA_HOSTED` to Vercel env vars                | 1 min |
+| 15   | Create Vercel project pointing to `ui-dashboard/` — see `docs/deployment.md`    | 5 min |
+| 16   | Deploy dashboard to Vercel                                                      | 5 min |
+| 17   | Switch network selector to "Celo Sepolia (hosted)" and verify data loads        | 5 min |
 
 ### Post-Deploy
 
@@ -180,8 +180,9 @@ Total estimated time: ~1-2 hours
 # Local dev (unchanged)
 envio dev
 
-# Deploy to hosted (just push)
-git push origin deploy/hosted
+# Deploy to hosted (just push — or use pnpm script)
+pnpm deploy:indexer:sepolia
+# equivalent to: git push origin main:deploy/celo-sepolia
 
 # Test hosted endpoint
 curl -X POST https://{slug}.envio.dev/graphql \
