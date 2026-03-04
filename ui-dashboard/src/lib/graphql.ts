@@ -10,7 +10,12 @@ function getClient(network: Network): GraphQLClient {
   const cached = clientCache.get(network.hasuraUrl);
   if (cached) return cached;
   const client = new GraphQLClient(network.hasuraUrl, {
-    headers: { "x-hasura-admin-secret": network.hasuraSecret },
+    // Omit the secret header entirely when empty — sending an empty string
+    // causes Hasura to return access-denied instead of falling through to
+    // unauthenticated access (which is what public hosted endpoints allow).
+    headers: network.hasuraSecret
+      ? { "x-hasura-admin-secret": network.hasuraSecret }
+      : {},
   });
   clientCache.set(network.hasuraUrl, client);
   return client;
