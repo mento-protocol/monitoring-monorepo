@@ -99,7 +99,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     contractsNamespace: ACTIVE_DEPLOYMENT["celo-sepolia"],
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_SEPOLIA ??
-      "http://localhost:8081/v1/graphql",
+      "http://localhost:8080/v1/graphql",
     hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_SEPOLIA ?? "testing",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_SEPOLIA ??
