@@ -1,18 +1,43 @@
-import { defineConfig, globalIgnores } from "eslint/config";
-import nextVitals from "eslint-config-next/core-web-vitals";
-import nextTs from "eslint-config-next/typescript";
+import js from "@eslint/js";
+import tseslint from "typescript-eslint";
+import reactPlugin from "@eslint-react/eslint-plugin";
+import nextPlugin from "@next/eslint-plugin-next";
+import jsxA11y from "eslint-plugin-jsx-a11y";
+import globals from "globals";
 
-const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
-  // Override default ignores of eslint-config-next.
-  globalIgnores([
-    // Default ignores of eslint-config-next:
-    ".next/**",
-    "out/**",
-    "build/**",
-    "next-env.d.ts",
-  ]),
-]);
-
-export default eslintConfig;
+export default tseslint.config(
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+  {
+    ...reactPlugin.configs["recommended-typescript"],
+    files: ["**/*.{ts,tsx}"],
+    languageOptions: {
+      ...reactPlugin.configs["recommended-typescript"].languageOptions,
+      globals: { ...globals.browser, ...globals.node },
+    },
+  },
+  {
+    plugins: { "@next/next": nextPlugin },
+    rules: {
+      ...nextPlugin.configs.recommended.rules,
+      ...nextPlugin.configs["core-web-vitals"].rules,
+    },
+  },
+  {
+    plugins: { "jsx-a11y": jsxA11y },
+    rules: jsxA11y.flatConfigs.recommended.rules,
+  },
+  {
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.node, React: "readonly" },
+    },
+  },
+  {
+    ignores: [
+      "**/node_modules/**",
+      "**/.next/**",
+      "coverage/**",
+      "**/.trunk/**",
+    ],
+  },
+);

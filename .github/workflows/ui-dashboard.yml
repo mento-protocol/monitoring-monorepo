@@ -1,0 +1,53 @@
+name: "UI Dashboard: Quality Checks"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ui-dashboard/**"
+      - ".github/workflows/ui-dashboard.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "ui-dashboard/**"
+      - ".github/workflows/ui-dashboard.yml"
+
+permissions: read-all
+
+jobs:
+  quality:
+    name: Quality Checks
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
+    defaults:
+      run:
+        working-directory: ui-dashboard
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - uses: trunk-io/trunk-action@v1
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test with coverage
+        run: pnpm test:coverage
+
+      - uses: codecov/codecov-action@v4
+        with:
+          fail_ci_if_error: false
+          flags: ui-dashboard
+          directory: ui-dashboard/coverage

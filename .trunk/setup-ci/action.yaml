@@ -1,0 +1,10 @@
+name: Trunk Code Quality setup
+description: Install project npm deps so trunk can find eslint plugins
+runs:
+  using: composite
+  steps:
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
+    - name: Install npm dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile

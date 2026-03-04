@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "graphql": "^16.13.0",
@@ -19,14 +22,21 @@
     "swr": "^2.4.1"
   },
   "devDependencies": {
+    "@eslint-react/eslint-plugin": "^2.13.0",
+    "@eslint/js": "^10.0.1",
+    "@next/eslint-plugin-next": "^16.1.6",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/react-plotly.js": "^2.6.4",
-    "eslint": "^9",
-    "eslint-config-next": "16.1.6",
+    "@vitest/coverage-v8": "^4.0.18",
+    "eslint": "^10",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "globals": "^17.4.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "typescript-eslint": "^8.56.1",
+    "vitest": "^4.0.18"
   }
 }
