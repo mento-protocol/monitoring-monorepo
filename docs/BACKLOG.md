@@ -4,29 +4,19 @@ Last updated: 2026-03-04
 
 ## 🔴 Blockers / Next Up
 
-### Envio Hosted Deployment
+### ~~Envio Hosted Deployment~~ ✅
 
-- [ ] Sign up at [envio.dev](https://envio.dev) (Philip — needs GitHub OAuth)
-- [ ] Connect `mento-protocol/monitoring-monorepo` repo
-- [ ] Deploy `indexer-envio/` with `config.sepolia.yaml`
-- [ ] Note the hosted GraphQL endpoint URL
-- [ ] Test queries against hosted endpoint
-- **Docs:** `docs/envio-hosted-migration.md`
-- **Estimate:** ~1-2 hours
-- **Why first:** Vercel dashboard needs a public GraphQL URL
+Deployed at [envio.dev/app/mento-protocol/mento-v3-celo-sepolia](https://envio.dev/app/mento-protocol/mento-v3-celo-sepolia)
 
-### Vercel Deployment
+### ~~Vercel Deployment~~ ✅
 
-- [ ] Create Vercel project pointing to `ui-dashboard/`
-- [ ] Set env vars:
-  - `NEXT_PUBLIC_HASURA_URL_SEPOLIA` → Envio hosted GraphQL URL
-  - `NEXT_PUBLIC_HASURA_SECRET_SEPOLIA` → (may not be needed for hosted)
-  - `NEXT_PUBLIC_EXPLORER_URL_SEPOLIA` → `https://celo-sepolia.blockscout.com`
-  - (DevNet vars optional — only for internal use)
-- [ ] Verify build + deploy
+Live at [monitoring-ui-dashboard.vercel.app](https://monitoring-ui-dashboard.vercel.app)
+
+- [x] Vercel project created (`chapatis-projects/monitoring-ui-dashboard`)
+- [x] Env vars set (`NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED`)
+- [x] Build verified — Next.js 16 + pnpm monorepo deploys cleanly
 - [ ] Share URL with team
-- **Depends on:** Envio hosted deployment
-- **Estimate:** ~30 min
+- [ ] Add GitHub secrets for auto-deploy CI (`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`)
 
 ## 🟡 Dashboard Features (Phase 1)
 
@@ -79,7 +69,6 @@ Last updated: 2026-03-04
 
 - [ ] Google Auth (NextAuth.js) for dashboard access control
 - [ ] Streamlit sandbox for Roman (Python, reads from same Hasura)
-- [ ] CI pipeline (lint, typecheck, build) on GitHub Actions
 
 ## 📋 Tech Debt
 
@@ -102,3 +91,12 @@ Last updated: 2026-03-04
 - [x] Vercel config (`vercel.json`)
 - [x] Browser-verified end-to-end (DevNet + Sepolia + reserves chart)
 - [x] Envio hosted migration plan researched
+- [x] Config files renamed to `config.celo.{network}.yaml`
+- [x] Deploy branch strategy (`deploy/celo-sepolia`, `deploy/celo-mainnet`, `deploy/monad-mainnet`)
+- [x] pnpm deploy scripts (`deploy:indexer:sepolia/mainnet/monad`)
+- [x] Network config expanded with `local`/`hosted` variants per chain
+- [x] `contracts.json` committed to repo + integrated into network config for token/address resolution
+- [x] CI pipeline (lint, typecheck, build) on GitHub Actions — `indexer-envio.yml` + `ui-dashboard.yml`
+- [x] Code quality toolchain (ESLint 10 + vitest + trunk)
+- [x] `AGENTS.md` with Envio gotchas (Hasura port 8080, single-indexer constraint, postgres healthcheck patch)
+- [x] Envio hosted deployment — `mento-v3-celo-sepolia` live at [envio.dev](https://envio.dev/app/mento-protocol/mento-v3-celo-sepolia)

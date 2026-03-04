@@ -3,7 +3,10 @@ node_modules/
 .env
 .env.local
 .env.sepolia
+.env.production.local
 .next/
 dist/
 *.tsbuildinfo
 .DS_Store
+.vercel/
+.vercel

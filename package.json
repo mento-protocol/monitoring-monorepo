@@ -11,6 +11,8 @@
     "dashboard:build": "pnpm --filter @mento-protocol/ui-dashboard build",
     "deploy:indexer:sepolia": "./scripts/deploy-indexer.sh celo-sepolia",
     "deploy:indexer:mainnet": "./scripts/deploy-indexer.sh celo-mainnet",
-    "deploy:indexer:monad": "./scripts/deploy-indexer.sh monad-mainnet"
+    "deploy:indexer:monad": "./scripts/deploy-indexer.sh monad-mainnet",
+    "deploy:dashboard": "./scripts/deploy-dashboard.sh",
+    "deploy:dashboard:setup": "./scripts/deploy-dashboard.sh --setup"
   }
 }
