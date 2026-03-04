@@ -12,14 +12,14 @@ import {
   NETWORKS,
   DEFAULT_NETWORK,
   isNetworkId,
-  type NetworkId,
+  type IndexerNetworkId,
   type Network,
 } from "@/lib/networks";
 
 type NetworkContextValue = {
   network: Network;
-  networkId: NetworkId;
-  setNetworkId: (id: NetworkId) => void;
+  networkId: IndexerNetworkId;
+  setNetworkId: (id: IndexerNetworkId) => void;
 };
 
 const NetworkContext = createContext<NetworkContextValue | null>(null);
@@ -30,11 +30,11 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   const paramNetwork = searchParams.get("network") ?? "";
-  const fromURL: NetworkId = isNetworkId(paramNetwork)
+  const fromURL: IndexerNetworkId = isNetworkId(paramNetwork)
     ? paramNetwork
     : DEFAULT_NETWORK;
 
-  const [networkId, setNetworkId] = useState<NetworkId>(fromURL);
+  const [networkId, setNetworkId] = useState<IndexerNetworkId>(fromURL);
 
   // Sync URL → state when the URL changes externally (derived state pattern,
   // avoids calling setState inside useEffect).
@@ -45,7 +45,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   }
 
   const handleNetworkChange = useCallback(
-    (id: NetworkId) => {
+    (id: IndexerNetworkId) => {
       setNetworkId(id);
       const params = new URLSearchParams(searchParams.toString());
       if (id === DEFAULT_NETWORK) {

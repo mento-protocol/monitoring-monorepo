@@ -2,12 +2,27 @@
 // Network definitions — add new chains here
 // ---------------------------------------------------------------------------
 
-export type NetworkId = "devnet" | "sepolia";
+import contractsData from "@mento-protocol/contracts/contracts.json";
+
+// Official treb deployment namespace per chain — update when a new deployment is promoted
+const ACTIVE_DEPLOYMENT = {
+  "celo-sepolia": "testnet-v2-rc5",
+  "celo-mainnet": null, // TODO: set once a celo-mainnet namespace is added to @mento-protocol/contracts
+} as const satisfies Record<string, string | null>;
+
+export type IndexerNetworkId =
+  | "devnet"
+  | "celo-sepolia-local"
+  | "celo-sepolia-hosted"
+  | "celo-mainnet-local"
+  | "celo-mainnet-hosted";
 
 export type Network = {
-  id: NetworkId;
+  id: IndexerNetworkId;
   label: string;
   chainId: number;
+  /** Treb deployment namespace in @mento-protocol/contracts backing this network, or null if not yet available */
+  contractsNamespace: string | null;
   hasuraUrl: string;
   hasuraSecret: string;
   explorerBaseUrl: string;
@@ -17,11 +32,52 @@ export type Network = {
   addressLabels: Record<string, string>;
 };
 
-export const NETWORKS: Record<NetworkId, Network> = {
+type ContractEntry = {
+  address: string;
+  name: string;
+  abi: string;
+  type: "token" | "pool" | "contract";
+};
+
+type ContractsData = Record<
+  string,
+  Record<string, Record<string, ContractEntry>>
+>;
+
+function buildNetworkMaps(
+  chainId: number,
+  namespace: string | null,
+): Pick<Network, "tokenSymbols" | "addressLabels"> {
+  const contracts =
+    (contractsData as ContractsData)[String(chainId)]?.[namespace ?? ""] ?? {};
+  const entries = Object.entries(contracts);
+  return {
+    tokenSymbols: Object.fromEntries(
+      entries
+        .filter(([, entry]) => entry.type === "token")
+        .map(([name, entry]) => [entry.address.toLowerCase(), name]),
+    ),
+    addressLabels: Object.fromEntries(
+      entries.map(([name, entry]) => [entry.address.toLowerCase(), name]),
+    ),
+  };
+}
+
+function makeNetwork(
+  config: Omit<Network, "tokenSymbols" | "addressLabels">,
+): Network {
+  return {
+    ...config,
+    ...buildNetworkMaps(config.chainId, config.contractsNamespace),
+  };
+}
+
+export const NETWORKS: Record<IndexerNetworkId, Network> = {
   devnet: {
     id: "devnet",
-    label: "Celo Devnet",
+    label: "Celo Devnet (local)",
     chainId: 42220,
+    contractsNamespace: ACTIVE_DEPLOYMENT["celo-mainnet"],
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_DEVNET ??
       "http://localhost:8080/v1/graphql",
@@ -36,10 +92,11 @@ export const NETWORKS: Record<NetworkId, Network> = {
       "0x287810f677516f10993ff63a520aad5509f35796": "Deployer",
     },
   },
-  sepolia: {
-    id: "sepolia",
-    label: "Celo Sepolia",
+  "celo-sepolia-local": makeNetwork({
+    id: "celo-sepolia-local",
+    label: "Celo Sepolia (local)",
     chainId: 11142220,
+    contractsNamespace: ACTIVE_DEPLOYMENT["celo-sepolia"],
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_SEPOLIA ??
       "http://localhost:8081/v1/graphql",
@@ -47,34 +104,46 @@ export const NETWORKS: Record<NetworkId, Network> = {
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_SEPOLIA ??
       "https://celo-sepolia.blockscout.com",
-    tokenSymbols: {
-      "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b": "USDm",
-      "0x0352976d940a2c3fba0c3623198947ee1d17869e": "PHPm",
-      "0x5873faeb42f3563dcd77f0fbbda818e6d6da3139": "AUDm",
-      "0xf151c9a13b78c84f93f50b8b3bc689fedc134f60": "CADm",
-      "0x284e9b7b623eae866914b7fa0eb720c2bb3c2980": "CHFm",
-      "0x5f8d55c3627d2dc0a2b4afa798f877242f382f67": "COPm",
-      "0xa99dc247d6b7b2e3ab48a1fee101b83cd6acd82a": "EURm",
-      "0x85f5181abdbf0e1814fc4358582ae07b8eba3af3": "GBPm",
-      "0x5e94b8c872bd47bc4255e60ecbf44d5e66e7401c": "GHSm",
-      "0x85bee67d435a39f7467a8a9de34a5b73d25df426": "JPYm",
-      "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf": "KESm",
-      "0x3d5ae86f34e2a82771496d140dafaef3789df888": "NGNm",
-      "0x2294298942fdc79417de9e0d740a4957e0e7783a": "BRLm",
-      "0x10ccfb235b0e1ed394bace4560c3ed016697687e": "ZARm",
-      "0x5505b70207ae3b826c1a7607f19f3bf73444a082": "XOFm",
-    },
-    addressLabels: {
-      "0x887955f28723b0e9bddc358448cb5b1fde692da4": "VirtualPoolFactory",
-      "0x5e2a42d760aa6969c3da49b249ec181115887391": "FPMMFactory",
-      "0xcf6cd45210b3ffe3ca28379c4683f1e60d0c2ccd": "Router",
-    },
-  },
+  }),
+  "celo-sepolia-hosted": makeNetwork({
+    id: "celo-sepolia-hosted",
+    label: "Celo Sepolia (hosted)",
+    chainId: 11142220,
+    contractsNamespace: ACTIVE_DEPLOYMENT["celo-sepolia"],
+    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED ?? "",
+    hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_SEPOLIA_HOSTED ?? "",
+    explorerBaseUrl:
+      process.env.NEXT_PUBLIC_EXPLORER_URL_SEPOLIA_HOSTED ??
+      "https://celo-sepolia.blockscout.com",
+  }),
+  "celo-mainnet-local": makeNetwork({
+    id: "celo-mainnet-local",
+    label: "Celo Mainnet (local)",
+    chainId: 42220,
+    contractsNamespace: ACTIVE_DEPLOYMENT["celo-mainnet"],
+    hasuraUrl:
+      process.env.NEXT_PUBLIC_HASURA_URL_MAINNET ??
+      "http://localhost:8082/v1/graphql",
+    hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_MAINNET ?? "testing",
+    explorerBaseUrl:
+      process.env.NEXT_PUBLIC_EXPLORER_URL_MAINNET ?? "https://celoscan.io",
+  }),
+  "celo-mainnet-hosted": makeNetwork({
+    id: "celo-mainnet-hosted",
+    label: "Celo Mainnet (hosted)",
+    chainId: 42220,
+    contractsNamespace: ACTIVE_DEPLOYMENT["celo-mainnet"],
+    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED ?? "",
+    hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_MAINNET_HOSTED ?? "",
+    explorerBaseUrl:
+      process.env.NEXT_PUBLIC_EXPLORER_URL_MAINNET_HOSTED ??
+      "https://celoscan.io",
+  }),
 };
 
-export const NETWORK_IDS = Object.keys(NETWORKS) as NetworkId[];
-export const DEFAULT_NETWORK: NetworkId = "sepolia";
+export const NETWORK_IDS = Object.keys(NETWORKS) as IndexerNetworkId[];
+export const DEFAULT_NETWORK: IndexerNetworkId = "celo-sepolia-hosted";
 
-export function isNetworkId(v: string): v is NetworkId {
+export function isNetworkId(v: string): v is IndexerNetworkId {
   return v in NETWORKS;
 }

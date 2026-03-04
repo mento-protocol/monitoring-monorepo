@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { tokenSymbol, poolName } from "../tokens";
 import { NETWORKS } from "../networks";
 
-const sepolia = NETWORKS.sepolia;
+const sepolia = NETWORKS["celo-sepolia-local"];
 const devnet = NETWORKS.devnet;
 
 describe("tokenSymbol", () => {
