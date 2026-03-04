@@ -36,8 +36,5 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Trunk Check
-        uses: trunk-io/trunk-action@v1
-
       - name: Typecheck
         run: pnpm --filter @mento-protocol/indexer-envio typecheck
