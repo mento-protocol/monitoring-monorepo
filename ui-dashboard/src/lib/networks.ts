@@ -30,6 +30,8 @@ export type Network = {
   tokenSymbols: Record<string, string>;
   /** address (lower) → human label */
   addressLabels: Record<string, string>;
+  /** True for networks that require a locally-running indexer — hidden in deployed environments */
+  local: boolean;
 };
 
 type ContractEntry = {
@@ -64,9 +66,11 @@ function buildNetworkMaps(
 }
 
 function makeNetwork(
-  config: Omit<Network, "tokenSymbols" | "addressLabels">,
+  config: Omit<Network, "tokenSymbols" | "addressLabels" | "local"> &
+    Partial<Pick<Network, "local">>,
 ): Network {
   return {
+    local: false,
     ...config,
     ...buildNetworkMaps(config.chainId, config.contractsNamespace),
   };
@@ -76,6 +80,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
   devnet: {
     id: "devnet",
     label: "Celo Devnet (local)",
+    local: true,
     chainId: 42220,
     contractsNamespace: ACTIVE_DEPLOYMENT["celo-mainnet"],
     hasuraUrl:
@@ -95,6 +100,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
   "celo-sepolia-local": makeNetwork({
     id: "celo-sepolia-local",
     label: "Celo Sepolia (local)",
+    local: true,
     chainId: 11142220,
     contractsNamespace: ACTIVE_DEPLOYMENT["celo-sepolia"],
     hasuraUrl:
@@ -119,6 +125,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
   "celo-mainnet-local": makeNetwork({
     id: "celo-mainnet-local",
     label: "Celo Mainnet (local)",
+    local: true,
     chainId: 42220,
     contractsNamespace: ACTIVE_DEPLOYMENT["celo-mainnet"],
     hasuraUrl:
