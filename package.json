@@ -13,6 +13,8 @@
     "deploy:indexer:mainnet": "./scripts/deploy-indexer.sh celo-mainnet",
     "deploy:indexer:monad": "./scripts/deploy-indexer.sh monad-mainnet",
     "deploy:dashboard": "./scripts/deploy-dashboard.sh",
-    "deploy:dashboard:setup": "./scripts/deploy-dashboard.sh --setup"
+    "deploy:dashboard:setup": "./scripts/deploy-dashboard.sh --setup",
+    "indexer:mainnet:dev": "ENVIO_PG_PORT=5435 ENVIO_PG_DATABASE=envio-mainnet HASURA_EXTERNAL_PORT=8082 ENVIO_START_BLOCK=60664500 pnpm --filter @mento-protocol/indexer-envio dev --config config.celo.mainnet.yaml",
+    "indexer:mainnet:codegen": "pnpm --filter @mento-protocol/indexer-envio codegen --config config.celo.mainnet.yaml"
   }
 }
