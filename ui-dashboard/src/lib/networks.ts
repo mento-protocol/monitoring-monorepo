@@ -52,8 +52,26 @@ export const NETWORKS: Record<NetworkId, Network> = {
       "https://celo-sepolia.blockscout.com",
     tokenSymbols: {
       "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b": "USDm",
+      "0x0352976d940a2c3fba0c3623198947ee1d17869e": "PUSO",
+      "0x5873faeb42f3563dcd77f0fbbda818e6d6da3139": "cAUD",
+      "0xf151c9a13b78c84f93f50b8b3bc689fedc134f60": "cCAD",
+      "0x284e9b7b623eae866914b7fa0eb720c2bb3c2980": "cCHF",
+      "0x5f8d55c3627d2dc0a2b4afa798f877242f382f67": "cCOP",
+      "0xa99dc247d6b7b2e3ab48a1fee101b83cd6acd82a": "cEUR",
+      "0x85f5181abdbf0e1814fc4358582ae07b8eba3af3": "cGBP",
+      "0x5e94b8c872bd47bc4255e60ecbf44d5e66e7401c": "cGHS",
+      "0x85bee67d435a39f7467a8a9de34a5b73d25df426": "cJPY",
+      "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf": "cKES",
+      "0x3d5ae86f34e2a82771496d140dafaef3789df888": "cNGN",
+      "0x2294298942fdc79417de9e0d740a4957e0e7783a": "cREAL",
+      "0x10ccfb235b0e1ed394bace4560c3ed016697687e": "cZAR",
+      "0x5505b70207ae3b826c1a7607f19f3bf73444a082": "eXOF",
     },
-    addressLabels: {},
+    addressLabels: {
+      "0x887955f28723b0e9bddc358448cb5b1fde692da4": "VirtualPoolFactory",
+      "0x5e2a42d760aa6969c3da49b249ec181115887391": "FPMMFactory",
+      "0xcf6cd45210b3ffe3ca28379c4683f1e60d0c2ccd": "Router",
+    },
   },
 };
 
