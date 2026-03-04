@@ -12,11 +12,11 @@ Deployed at [envio.dev/app/mento-protocol/mento-v3-celo-sepolia](https://envio.d
 
 Live at [monitoring-ui-dashboard.vercel.app](https://monitoring-ui-dashboard.vercel.app)
 
-- [x] Vercel project created (`chapatis-projects/monitoring-ui-dashboard`)
+- [x] Vercel project created (`mentolabs/monitoring-ui-dashboard`)
 - [x] Env vars set (`NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED`)
 - [x] Build verified — Next.js 16 + pnpm monorepo deploys cleanly
-- [ ] Share URL with team
-- [ ] Add GitHub secrets for auto-deploy CI (`VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`)
+- [x] Share URL with team
+- [x] GitHub secrets set via `pnpm deploy:dashboard:setup` (VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID)
 
 ## 🟡 Dashboard Features (Phase 1)
 

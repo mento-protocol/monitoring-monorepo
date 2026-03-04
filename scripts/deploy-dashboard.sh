@@ -3,8 +3,8 @@
 #
 # The script operates from the MONOREPO ROOT so that pnpm-lock.yaml is
 # included in the upload and `pnpm install` succeeds on Vercel's build servers.
-# It sets the project's rootDirectory to "ui-dashboard" via the Vercel REST API
-# so that Next.js is detected and built from the correct subdirectory.
+# It sets the project's rootDirectory via the Vercel REST API so that Next.js
+# is detected and built from the correct subdirectory.
 #
 # Usage:
 #   ./scripts/deploy-dashboard.sh          # deploy only
@@ -12,18 +12,23 @@
 #
 # Environment variables (all optional):
 #   VERCEL_TOKEN  — auth token (falls back to local CLI session)
-#   VERCEL_SCOPE  — Vercel team/org slug (default: chapatis-projects)
+#   VERCEL_SCOPE  — Vercel team/org slug (default: mentolabs)
 
 set -euo pipefail
 
+# ── Config ────────────────────────────────────────────────────────────────────
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DASHBOARD_DIR="$REPO_ROOT/ui-dashboard"
 VERCEL_DIR="$REPO_ROOT/.vercel"
-ENV_FILE="$REPO_ROOT/ui-dashboard/.env.production.local"
+ENV_FILE="$DASHBOARD_DIR/.env.production.local"
+VERCEL_PROJECT="monitoring-ui-dashboard"
+GITHUB_REPO="mento-protocol/monitoring-monorepo"
 
 # Scope is required when the account has multiple teams.
 # Only used during `vercel link` — NOT passed to `vercel deploy`, which reads
 # the team from the local .vercel/project.json instead.
-VERCEL_SCOPE="${VERCEL_SCOPE:-chapatis-projects}"
+VERCEL_SCOPE="${VERCEL_SCOPE:-mentolabs}"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -37,17 +42,23 @@ require_cmd() {
 }
 
 # Returns the Vercel auth token: VERCEL_TOKEN env var takes precedence,
-# then falls back to the local CLI auth file (macOS).
+# then falls back to the local CLI auth file (Linux XDG or macOS).
 get_token() {
   if [[ -n "${VERCEL_TOKEN:-}" ]]; then
     echo "$VERCEL_TOKEN"
     return
   fi
-  local auth_file="$HOME/Library/Application Support/com.vercel.cli/auth.json"
-  if [[ -f "$auth_file" ]]; then
-    python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['token'])" "$auth_file"
-    return
-  fi
+  local xdg_data="${XDG_DATA_HOME:-$HOME/.local/share}"
+  local candidates=(
+    "$xdg_data/com.vercel.cli/auth.json"                         # Linux (XDG)
+    "$HOME/Library/Application Support/com.vercel.cli/auth.json" # macOS
+  )
+  for auth_file in "${candidates[@]}"; do
+    if [[ -f "$auth_file" ]]; then
+      python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['token'])" "$auth_file"
+      return
+    fi
+  done
   die "No auth token found. Set VERCEL_TOKEN or run: vercel login"
 }
 
@@ -73,18 +84,19 @@ SETUP=false
 
 if [[ "$SETUP" == "true" || ! -d "$VERCEL_DIR" ]]; then
   # Remove any stale links from previous attempts.
-  rm -rf "$VERCEL_DIR" "$REPO_ROOT/ui-dashboard/.vercel"
+  rm -rf "$VERCEL_DIR" "$DASHBOARD_DIR/.vercel"
 
   log "Linking Vercel project from monorepo root (scope: $VERCEL_SCOPE)…"
   # --scope is required here to find the project by name in the right team.
   (cd "$REPO_ROOT" && vercel link --yes \
-    --project monitoring-ui-dashboard \
+    --project "$VERCEL_PROJECT" \
     --scope "$VERCEL_SCOPE" \
     "${VERCEL_TOKEN_ARGS[@]}")
   ok "Project linked → $VERCEL_DIR/project.json"
 
-  # ── Set rootDirectory = "ui-dashboard" via Vercel REST API ─────────────────
-  log "Configuring project rootDirectory = ui-dashboard…"
+  # ── Set rootDirectory via Vercel REST API ───────────────────────────────────
+  DASHBOARD_SUBDIR="${DASHBOARD_DIR##*/}"
+  log "Configuring project rootDirectory = ${DASHBOARD_SUBDIR}…"
   PROJECT_ID=$(python3 -c "import json; print(json.load(open('$VERCEL_DIR/project.json'))['projectId'])")
   TEAM_ID=$(python3 -c "import json; print(json.load(open('$VERCEL_DIR/project.json'))['orgId'])")
   TOKEN=$(get_token)
@@ -93,16 +105,16 @@ if [[ "$SETUP" == "true" || ! -d "$VERCEL_DIR" ]]; then
     -X PATCH "https://api.vercel.com/v9/projects/$PROJECT_ID?teamId=$TEAM_ID" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
-    -d '{"rootDirectory": "ui-dashboard"}')
+    -d "{\"rootDirectory\": \"$DASHBOARD_SUBDIR\"}")
 
   [[ "$HTTP_STATUS" == "200" ]] \
     || die "Failed to set rootDirectory (HTTP $HTTP_STATUS). Check your token/permissions."
-  ok "rootDirectory set to ui-dashboard"
+  ok "rootDirectory set to $DASHBOARD_SUBDIR"
 
   # ── Env vars ───────────────────────────────────────────────────────────────
 
   if [[ ! -f "$ENV_FILE" ]]; then
-    die "No env file found at $ENV_FILE — copy ui-dashboard/.env.production.local.example and fill in values."
+    die "No env file found at $ENV_FILE — copy $DASHBOARD_DIR/.env.production.local.example and fill in values."
   fi
 
   log "Pushing env vars to Vercel (production)…"
@@ -133,6 +145,22 @@ if [[ "$SETUP" == "true" || ! -d "$VERCEL_DIR" ]]; then
           --force) \
       && ok "  $KEY"
   done < "$ENV_FILE"
+
+  # ── GitHub Actions secrets ─────────────────────────────────────────────────
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    log "Setting GitHub Actions secrets for CI auto-deploy…"
+
+    gh secret set VERCEL_TOKEN      --body "$TOKEN"      --repo "$GITHUB_REPO"
+    gh secret set VERCEL_ORG_ID     --body "$TEAM_ID"    --repo "$GITHUB_REPO"
+    gh secret set VERCEL_PROJECT_ID --body "$PROJECT_ID" --repo "$GITHUB_REPO"
+    ok "GitHub secrets set (VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID)"
+  else
+    log "gh CLI not found or not authenticated — skipping GitHub secrets."
+    log "Set these secrets manually at github.com/$GITHUB_REPO/settings/secrets/actions:"
+    log "  VERCEL_TOKEN      = (create at vercel.com → Account Settings → Tokens)"
+    log "  VERCEL_ORG_ID     = $TEAM_ID"
+    log "  VERCEL_PROJECT_ID = $PROJECT_ID"
+  fi
 fi
 
 # ── Deploy ───────────────────────────────────────────────────────────────────
