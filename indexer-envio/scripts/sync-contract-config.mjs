@@ -27,7 +27,7 @@ const contractsOutputPath = join(
   "config",
   "contracts.celo.v3.json",
 );
-const configOutputPath = join(projectRoot, "config.yaml");
+const configOutputPath = join(projectRoot, "config.celo.devnet.yaml");
 const abisDir = join(projectRoot, "abis");
 
 const CONTRACT_SPECS = [

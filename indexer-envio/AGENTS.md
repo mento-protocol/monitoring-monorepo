@@ -6,8 +6,8 @@ Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on
 
 ## Key Files
 
-- `config.yaml` — Devnet indexer config (contract addresses, events, RPC)
-- `config.sepolia.yaml` — Celo Sepolia testnet config
+- `config.celo.devnet.yaml` — Devnet indexer config (contract addresses, events, RPC)
+- `config.celo.sepolia.yaml` — Celo Sepolia testnet config
 - `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced)
 - `src/EventHandlers.ts` — Event processing logic
 - `scripts/run-envio-with-env.mjs` — Wrapper that loads .env before running envio CLI
