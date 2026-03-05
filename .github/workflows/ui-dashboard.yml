@@ -11,12 +11,6 @@ on:
       - .github/workflows/ui-dashboard.yml
   pull_request:
     branches: [main]
-    paths:
-      - ui-dashboard/**
-      - scripts/**
-      - docs/**
-      - .trunk/**
-      - .github/workflows/ui-dashboard.yml
 
 permissions: read-all
 
