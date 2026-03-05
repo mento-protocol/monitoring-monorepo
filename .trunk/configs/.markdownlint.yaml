@@ -1,2 +1,8 @@
 # Prettier friendly markdownlint config (all formatting rules disabled)
 extends: markdownlint/style/prettier
+# MD036: bold-as-pseudo-heading is acceptable in planning/design docs
+MD036: false
+# MD040: fenced code blocks without language tag (common in shell/pseudo-code)
+MD040: false
+# MD060: table column style is handled by prettier
+MD060: false
