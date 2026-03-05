@@ -142,9 +142,29 @@ type RebalanceEvent @index(fields: ["poolId", "blockTimestamp"]) {
   sender: String!
   priceDifferenceBefore: BigInt!
   priceDifferenceAfter: BigInt!
+  improvement: BigInt!          # priceDifferenceBefore - priceDifferenceAfter
+  effectivenessRatio: String!   # improvement / priceDifferenceBefore as string e.g. "0.5000"
   txHash: String!
   blockNumber: BigInt!
   blockTimestamp: BigInt! @index
+}
+
+type TradingLimit @index(fields: ["poolId"]) {
+  id: ID!                    # "{poolId}-{tokenAddress}"
+  poolId: String!
+  token: String!
+  limit0: BigInt!
+  limit1: BigInt!
+  decimals: Int!
+  netflow0: BigInt!
+  netflow1: BigInt!
+  lastUpdated0: BigInt!
+  lastUpdated1: BigInt!
+  limitPressure0: String!    # stored as string e.g. "0.1230"
+  limitPressure1: String!
+  limitStatus: String!       # "OK" | "WARN" | "CRITICAL"
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
 }
 
 type VirtualPoolLifecycle {

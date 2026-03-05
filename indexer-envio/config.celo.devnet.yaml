@@ -23,6 +23,7 @@ networks:
           - event: Burn
           - event: UpdateReserves
           - event: Rebalanced
+          - event: TradingLimitConfigured
       - name: VirtualPoolFactory
         abi_file_path: abis/VirtualPoolFactory.json
         address:

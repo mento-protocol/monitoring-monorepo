@@ -9,6 +9,7 @@ import {
   RebalanceEvent,
   ReserveUpdate,
   SwapEvent,
+  TradingLimit,
   VirtualPoolFactory,
   VirtualPool,
   VirtualPoolLifecycle,
@@ -67,6 +68,36 @@ function getRpcClient(chainId: number): ReturnType<typeof createPublicClient> {
   }
   return rpcClients.get(chainId)!;
 }
+
+const FPMM_TRADING_LIMITS_ABI = [
+  {
+    type: "function",
+    name: "getTradingLimits",
+    inputs: [{ name: "token", type: "address" }],
+    outputs: [
+      {
+        name: "config",
+        type: "tuple",
+        components: [
+          { name: "limit0", type: "int120" },
+          { name: "limit1", type: "int120" },
+          { name: "decimals", type: "uint8" },
+        ],
+      },
+      {
+        name: "state",
+        type: "tuple",
+        components: [
+          { name: "lastUpdated0", type: "uint32" },
+          { name: "lastUpdated1", type: "uint32" },
+          { name: "netflow0", type: "int96" },
+          { name: "netflow1", type: "int96" },
+        ],
+      },
+    ],
+    stateMutability: "view",
+  },
+] as const;
 
 const FPMM_MINIMAL_ABI = [
   {
@@ -150,6 +181,68 @@ async function fetchReferenceRateFeedID(
 }
 
 // ---------------------------------------------------------------------------
+// Trading limit helpers
+// ---------------------------------------------------------------------------
+
+type TradingLimitData = {
+  config: { limit0: bigint; limit1: bigint; decimals: number };
+  state: {
+    lastUpdated0: number;
+    lastUpdated1: number;
+    netflow0: bigint;
+    netflow1: bigint;
+  };
+};
+
+async function fetchTradingLimits(
+  chainId: number,
+  poolAddress: string,
+  token: string,
+): Promise<TradingLimitData | null> {
+  try {
+    const client = getRpcClient(chainId);
+    const result = (await client.readContract({
+      address: poolAddress as `0x${string}`,
+      abi: FPMM_TRADING_LIMITS_ABI,
+      functionName: "getTradingLimits",
+      args: [token as `0x${string}`],
+    })) as unknown as [
+      { limit0: bigint; limit1: bigint; decimals: number },
+      {
+        lastUpdated0: number;
+        lastUpdated1: number;
+        netflow0: bigint;
+        netflow1: bigint;
+      },
+    ];
+    const [config, state] = result;
+    return { config, state };
+  } catch {
+    return null;
+  }
+}
+
+function computeLimitStatus(p0: number, p1: number): string {
+  const worst = Math.max(p0, p1);
+  if (worst >= 1.0) return "CRITICAL";
+  if (worst > 0.8) return "WARN";
+  return "OK";
+}
+
+function computeLimitPressures(
+  netflow0: bigint,
+  netflow1: bigint,
+  limit0: bigint,
+  limit1: bigint,
+): { p0: number; p1: number } {
+  const abs0 = netflow0 < 0n ? -netflow0 : netflow0;
+  const abs1 = netflow1 < 0n ? -netflow1 : netflow1;
+  const p0 = limit0 !== 0n ? Number(abs0) / Number(limit0) : 0;
+  const p1 = limit1 !== 0n ? Number(abs1) / Number(limit1) : 0;
+  return { p0, p1 };
+}
+
+// ---------------------------------------------------------------------------
 // Health status computation
 // ---------------------------------------------------------------------------
 
@@ -215,6 +308,11 @@ const DEFAULT_ORACLE_FIELDS = {
   rebalanceThreshold: 0,
   lastRebalancedAt: 0n,
   healthStatus: "N/A" as string,
+  limitStatus: "N/A" as string,
+  limitPressure0: "0.0000" as string,
+  limitPressure1: "0.0000" as string,
+  rebalancerAddress: "" as string,
+  rebalanceLivenessStatus: "N/A" as string,
 };
 
 const getOrCreatePool = async (
@@ -463,6 +561,83 @@ FPMM.Swap.handler(async ({ event, context }) => {
     swapDelta: { volume0, volume1 },
   });
 
+  // Update trading limits for FPMM pools (guard: getTradingLimits reverts on VirtualPools)
+  if (pool.source && pool.source.includes("fpmm") && pool.token0 && pool.token1) {
+    const [limits0, limits1] = await Promise.all([
+      fetchTradingLimits(event.chainId, event.srcAddress, pool.token0),
+      fetchTradingLimits(event.chainId, event.srcAddress, pool.token1),
+    ]);
+
+    let worstP0 = 0;
+    let worstP1 = 0;
+
+    if (limits0) {
+      const { p0, p1 } = computeLimitPressures(
+        limits0.state.netflow0, limits0.state.netflow1,
+        limits0.config.limit0, limits0.config.limit1,
+      );
+      worstP0 = Math.max(worstP0, p0, p1);
+      const tl: TradingLimit = {
+        id: `${poolId}-${pool.token0}`,
+        poolId,
+        token: pool.token0,
+        limit0: limits0.config.limit0,
+        limit1: limits0.config.limit1,
+        decimals: limits0.config.decimals,
+        netflow0: limits0.state.netflow0,
+        netflow1: limits0.state.netflow1,
+        lastUpdated0: BigInt(limits0.state.lastUpdated0),
+        lastUpdated1: BigInt(limits0.state.lastUpdated1),
+        limitPressure0: p0.toFixed(4),
+        limitPressure1: p1.toFixed(4),
+        limitStatus: computeLimitStatus(p0, p1),
+        updatedAtBlock: blockNumber,
+        updatedAtTimestamp: blockTimestamp,
+      };
+      context.TradingLimit.set(tl);
+    }
+
+    if (limits1) {
+      const { p0, p1 } = computeLimitPressures(
+        limits1.state.netflow0, limits1.state.netflow1,
+        limits1.config.limit0, limits1.config.limit1,
+      );
+      worstP1 = Math.max(worstP1, p0, p1);
+      const tl: TradingLimit = {
+        id: `${poolId}-${pool.token1}`,
+        poolId,
+        token: pool.token1,
+        limit0: limits1.config.limit0,
+        limit1: limits1.config.limit1,
+        decimals: limits1.config.decimals,
+        netflow0: limits1.state.netflow0,
+        netflow1: limits1.state.netflow1,
+        lastUpdated0: BigInt(limits1.state.lastUpdated0),
+        lastUpdated1: BigInt(limits1.state.lastUpdated1),
+        limitPressure0: p0.toFixed(4),
+        limitPressure1: p1.toFixed(4),
+        limitStatus: computeLimitStatus(p0, p1),
+        updatedAtBlock: blockNumber,
+        updatedAtTimestamp: blockTimestamp,
+      };
+      context.TradingLimit.set(tl);
+    }
+
+    if (limits0 || limits1) {
+      const overallWorst = Math.max(worstP0, worstP1);
+      const limitStatus = computeLimitStatus(overallWorst, 0);
+      const updatedPool = await context.Pool.get(poolId);
+      if (updatedPool) {
+        context.Pool.set({
+          ...updatedPool,
+          limitStatus,
+          limitPressure0: worstP0.toFixed(4),
+          limitPressure1: worstP1.toFixed(4),
+        });
+      }
+    }
+  }
+
   const swap: SwapEvent = {
     id,
     poolId,
@@ -647,8 +822,12 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   // Fetch fresh rebalancing state post-rebalance
   const rebalState = await fetchRebalancingState(event.chainId, poolId);
 
+  const rebalancerAddress = asAddress(event.params.sender);
+
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {
     lastRebalancedAt: blockTimestamp,
+    rebalancerAddress,
+    rebalanceLivenessStatus: "ACTIVE",
   };
 
   if (rebalState) {
@@ -705,18 +884,86 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     rebalanceDelta: true,
   });
 
+  // Compute rebalance effectiveness metrics
+  const priceDifferenceBefore = event.params.priceDifferenceBefore;
+  const priceDifferenceAfter = event.params.priceDifferenceAfter;
+  const improvement = priceDifferenceBefore - priceDifferenceAfter;
+  const effectivenessRatio =
+    priceDifferenceBefore > 0n
+      ? (Number(improvement) / Number(priceDifferenceBefore)).toFixed(4)
+      : "0.0000";
+
   const rebalanced: RebalanceEvent = {
     id,
     poolId,
-    sender: asAddress(event.params.sender),
-    priceDifferenceBefore: event.params.priceDifferenceBefore,
-    priceDifferenceAfter: event.params.priceDifferenceAfter,
+    sender: rebalancerAddress,
+    priceDifferenceBefore,
+    priceDifferenceAfter,
+    improvement,
+    effectivenessRatio,
     txHash: event.transaction.hash,
     blockNumber,
     blockTimestamp,
   };
 
   context.RebalanceEvent.set(rebalanced);
+});
+
+FPMM.TradingLimitConfigured.handler(async ({ event, context }) => {
+  const poolId = asAddress(event.srcAddress);
+  const token = asAddress(event.params.token);
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
+
+  // event.params.config is a tuple [limit0, limit1, decimals] (int120, int120, uint8)
+  const configTuple = event.params.config as unknown as [bigint, bigint, number];
+  const eventLimit0 = configTuple[0];
+  const eventLimit1 = configTuple[1];
+  const eventDecimals = configTuple[2];
+
+  // RPC call to get current state after configuration
+  const limits = await fetchTradingLimits(event.chainId, event.srcAddress, event.params.token);
+
+  const limit0 = limits ? limits.config.limit0 : eventLimit0;
+  const limit1 = limits ? limits.config.limit1 : eventLimit1;
+  const decimals = limits ? limits.config.decimals : eventDecimals;
+  const netflow0 = limits ? limits.state.netflow0 : 0n;
+  const netflow1 = limits ? limits.state.netflow1 : 0n;
+  const lastUpdated0 = limits ? BigInt(limits.state.lastUpdated0) : 0n;
+  const lastUpdated1 = limits ? BigInt(limits.state.lastUpdated1) : 0n;
+
+  const { p0, p1 } = computeLimitPressures(netflow0, netflow1, limit0, limit1);
+  const limitStatus = computeLimitStatus(p0, p1);
+
+  const tl: TradingLimit = {
+    id: `${poolId}-${token}`,
+    poolId,
+    token,
+    limit0,
+    limit1,
+    decimals,
+    netflow0,
+    netflow1,
+    lastUpdated0,
+    lastUpdated1,
+    limitPressure0: p0.toFixed(4),
+    limitPressure1: p1.toFixed(4),
+    limitStatus,
+    updatedAtBlock: blockNumber,
+    updatedAtTimestamp: blockTimestamp,
+  };
+  context.TradingLimit.set(tl);
+
+  // Update pool's denormalised limit fields
+  const pool = await context.Pool.get(poolId);
+  if (pool) {
+    context.Pool.set({
+      ...pool,
+      limitStatus,
+      limitPressure0: p0.toFixed(4),
+      limitPressure1: p1.toFixed(4),
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1078,12 +1325,23 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
     rebalanceDelta: true,
   });
 
+  // Compute rebalance effectiveness metrics
+  const priceDifferenceBefore = event.params.priceDifferenceBefore;
+  const priceDifferenceAfter = event.params.priceDifferenceAfter;
+  const improvement = priceDifferenceBefore - priceDifferenceAfter;
+  const effectivenessRatio =
+    priceDifferenceBefore > 0n
+      ? (Number(improvement) / Number(priceDifferenceBefore)).toFixed(4)
+      : "0.0000";
+
   const rebalanced: RebalanceEvent = {
     id,
     poolId,
     sender: asAddress(event.params.sender),
-    priceDifferenceBefore: event.params.priceDifferenceBefore,
-    priceDifferenceAfter: event.params.priceDifferenceAfter,
+    priceDifferenceBefore,
+    priceDifferenceAfter,
+    improvement,
+    effectivenessRatio,
     txHash: event.transaction.hash,
     blockNumber,
     blockTimestamp,
