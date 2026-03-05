@@ -5,6 +5,15 @@ import type { ReserveUpdate } from "@/lib/types";
 import { tokenSymbol } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 import { parseWei } from "@/lib/format";
+import {
+  PLOTLY_BASE_LAYOUT,
+  PLOTLY_AXIS_DEFAULTS,
+  PLOTLY_LEGEND,
+  PLOTLY_MARGIN,
+  PLOTLY_CONFIG,
+  RANGE_SELECTOR_BUTTONS_HOURLY,
+  makeDateXAxis,
+} from "@/lib/plot";
 
 // Plotly must be loaded client-side only (no SSR)
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
@@ -51,60 +60,9 @@ export function ReserveChart({ rows, token0, token1 }: ReserveChartProps) {
   };
 
   const layout = {
-    paper_bgcolor: "transparent",
-    plot_bgcolor: "transparent",
-    font: { color: "#94a3b8", size: 12 },
-    xaxis: {
-      gridcolor: "#1e293b",
-      linecolor: "#334155",
-      tickcolor: "#334155",
-      type: "date" as const,
-      rangeslider: {
-        bgcolor: "#1e293b",
-        bordercolor: "#334155",
-        thickness: 0.08,
-      },
-      rangeselector: {
-        bgcolor: "#1e293b",
-        activecolor: "#334155",
-        bordercolor: "#475569",
-        borderwidth: 1,
-        font: { color: "#94a3b8" },
-        buttons: [
-          {
-            count: 1,
-            label: "1h",
-            step: "hour" as const,
-            stepmode: "backward" as const,
-          },
-          {
-            count: 6,
-            label: "6h",
-            step: "hour" as const,
-            stepmode: "backward" as const,
-          },
-          {
-            count: 1,
-            label: "1d",
-            step: "day" as const,
-            stepmode: "backward" as const,
-          },
-          {
-            count: 7,
-            label: "7d",
-            step: "day" as const,
-            stepmode: "backward" as const,
-          },
-          { step: "all" as const, label: "All" },
-        ],
-      },
-    },
-    yaxis: {
-      title: { text: sym0 },
-      gridcolor: "#1e293b",
-      linecolor: "#334155",
-      tickcolor: "#334155",
-    },
+    ...PLOTLY_BASE_LAYOUT,
+    xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_HOURLY),
+    yaxis: { title: { text: sym0 }, ...PLOTLY_AXIS_DEFAULTS },
     yaxis2: {
       title: { text: sym1 },
       overlaying: "y" as const,
@@ -113,12 +71,8 @@ export function ReserveChart({ rows, token0, token1 }: ReserveChartProps) {
       linecolor: "#334155",
       tickcolor: "#334155",
     },
-    legend: {
-      bgcolor: "transparent",
-      bordercolor: "#334155",
-      borderwidth: 1,
-    },
-    margin: { t: 16, r: 60, b: 8, l: 60 },
+    legend: PLOTLY_LEGEND,
+    margin: PLOTLY_MARGIN,
     autosize: true,
     dragmode: "pan" as const,
   };
@@ -131,7 +85,7 @@ export function ReserveChart({ rows, token0, token1 }: ReserveChartProps) {
       <Plot
         data={[trace0, trace1]}
         layout={layout}
-        config={{ responsive: true, displayModeBar: true, scrollZoom: true }}
+        config={{ ...PLOTLY_CONFIG, displayModeBar: true }}
         style={{ width: "100%", height: 320 }}
         useResizeHandler
       />

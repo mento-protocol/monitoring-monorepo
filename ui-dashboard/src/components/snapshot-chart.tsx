@@ -3,6 +3,15 @@
 import dynamic from "next/dynamic";
 import type { PoolSnapshot } from "@/lib/types";
 import { parseWei } from "@/lib/format";
+import {
+  PLOTLY_BASE_LAYOUT,
+  PLOTLY_AXIS_DEFAULTS,
+  PLOTLY_LEGEND,
+  PLOTLY_MARGIN,
+  PLOTLY_CONFIG,
+  RANGE_SELECTOR_BUTTONS_DAILY,
+  makeDateXAxis,
+} from "@/lib/plot";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
@@ -57,54 +66,9 @@ export function SnapshotChart({
   };
 
   const layout = {
-    paper_bgcolor: "transparent",
-    plot_bgcolor: "transparent",
-    font: { color: "#94a3b8", size: 12 },
-    xaxis: {
-      gridcolor: "#1e293b",
-      linecolor: "#334155",
-      tickcolor: "#334155",
-      type: "date" as const,
-      rangeslider: {
-        bgcolor: "#1e293b",
-        bordercolor: "#334155",
-        thickness: 0.08,
-      },
-      rangeselector: {
-        bgcolor: "#1e293b",
-        activecolor: "#334155",
-        bordercolor: "#475569",
-        borderwidth: 1,
-        font: { color: "#94a3b8" },
-        buttons: [
-          {
-            count: 1,
-            label: "1d",
-            step: "day" as const,
-            stepmode: "backward" as const,
-          },
-          {
-            count: 7,
-            label: "7d",
-            step: "day" as const,
-            stepmode: "backward" as const,
-          },
-          {
-            count: 30,
-            label: "30d",
-            step: "day" as const,
-            stepmode: "backward" as const,
-          },
-          { step: "all" as const, label: "All" },
-        ],
-      },
-    },
-    yaxis: {
-      title: { text: "Swap Volume" },
-      gridcolor: "#1e293b",
-      linecolor: "#334155",
-      tickcolor: "#334155",
-    },
+    ...PLOTLY_BASE_LAYOUT,
+    xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY),
+    yaxis: { title: { text: "Swap Volume" }, ...PLOTLY_AXIS_DEFAULTS },
     yaxis2: {
       title: { text: "Cumulative Swaps" },
       overlaying: "y" as const,
@@ -113,12 +77,8 @@ export function SnapshotChart({
       linecolor: "#334155",
       tickcolor: "#334155",
     },
-    legend: {
-      bgcolor: "transparent",
-      bordercolor: "#334155",
-      borderwidth: 1,
-    },
-    margin: { t: 16, r: 60, b: 8, l: 60 },
+    legend: PLOTLY_LEGEND,
+    margin: PLOTLY_MARGIN,
     autosize: true,
     dragmode: "pan" as const,
   };
@@ -131,7 +91,7 @@ export function SnapshotChart({
       <Plot
         data={[volumeTrace0, volumeTrace1, cumSwapTrace]}
         layout={layout}
-        config={{ responsive: true, displayModeBar: true, scrollZoom: true }}
+        config={{ ...PLOTLY_CONFIG, displayModeBar: true }}
         style={{ width: "100%", height: 320 }}
         useResizeHandler
       />
