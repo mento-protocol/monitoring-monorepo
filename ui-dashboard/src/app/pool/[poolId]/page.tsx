@@ -5,7 +5,7 @@ import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useGQL } from "@/lib/graphql";
 import {
-  POOL_DETAIL,
+  POOL_DETAIL_WITH_HEALTH,
   POOL_SWAPS,
   POOL_RESERVES,
   POOL_REBALANCES,
@@ -87,7 +87,7 @@ function PoolDetail() {
     data: poolData,
     error: poolErr,
     isLoading: poolLoading,
-  } = useGQL<{ Pool: Pool[] }>(POOL_DETAIL, { id: decodedId });
+  } = useGQL<{ Pool: Pool[] }>(POOL_DETAIL_WITH_HEALTH, { id: decodedId });
 
   const pool = poolData?.Pool?.[0] ?? null;
 
