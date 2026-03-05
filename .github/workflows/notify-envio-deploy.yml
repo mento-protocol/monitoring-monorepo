@@ -1,0 +1,55 @@
+name: "Notify: Envio Indexer Deploy"
+
+on:
+  push:
+    branches:
+      - deploy/celo-mainnet
+      - deploy/celo-sepolia
+      - deploy/monad-mainnet
+
+permissions: read-all
+
+jobs:
+  notify:
+    name: Post Discord reminder
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine network
+        id: meta
+        run: |
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          case "$BRANCH" in
+            deploy/celo-mainnet)
+              echo "network=Celo Mainnet" >> $GITHUB_OUTPUT
+              echo "cmd=pnpm update-endpoint:mainnet" >> $GITHUB_OUTPUT
+              echo "envio_url=https://envio.dev/app/mento-protocol/mento-v3-celo-mainnet" >> $GITHUB_OUTPUT
+              ;;
+            deploy/celo-sepolia)
+              echo "network=Celo Sepolia" >> $GITHUB_OUTPUT
+              echo "cmd=pnpm update-endpoint:sepolia" >> $GITHUB_OUTPUT
+              echo "envio_url=https://envio.dev/app/mento-protocol/mento-v3-celo-sepolia" >> $GITHUB_OUTPUT
+              ;;
+            deploy/monad-mainnet)
+              echo "network=Monad Mainnet" >> $GITHUB_OUTPUT
+              echo "cmd=pnpm update-endpoint:monad" >> $GITHUB_OUTPUT
+              echo "envio_url=https://envio.dev/app/mento-protocol/mento-v3-monad-mainnet" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+      - name: Post to Discord thread
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          THREAD_ID: "1476243867832549489"
+          NETWORK: ${{ steps.meta.outputs.network }}
+          CMD: ${{ steps.meta.outputs.cmd }}
+          ENVIO_URL: ${{ steps.meta.outputs.envio_url }}
+          COMMIT: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          SHORT_SHA="${COMMIT:0:7}"
+          MESSAGE="🚀 **Envio indexer deploying — $NETWORK** (commit \`$SHORT_SHA\` by $ACTOR)\n\nOnce sync hits 100%, update the Vercel env var:\n\`\`\`\nENDPOINT_HASH=<new_hash> $CMD\n\`\`\`\n📊 Track sync progress: $ENVIO_URL"
+
+          curl -s -X POST "https://discord.com/api/v10/channels/$THREAD_ID/messages" \
+            -H "Authorization: Bot $DISCORD_BOT_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"content\": \"$MESSAGE\"}"
