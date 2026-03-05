@@ -31,6 +31,15 @@ type Pool {
   # Health
   healthStatus: String!
 
+  # Trading limits (FPMM pools only; defaults to "N/A" for VirtualPools)
+  limitStatus: String!       # "OK" | "WARN" | "CRITICAL" | "N/A"
+  limitPressure0: String!    # e.g. "0.1230"
+  limitPressure1: String!    # e.g. "0.0050"
+
+  # Rebalancer liveness (FPMM pools only)
+  rebalancerAddress: String!
+  rebalanceLivenessStatus: String!  # "ACTIVE" | "N/A"
+
   createdAtBlock: BigInt!
   createdAtTimestamp: BigInt!
   updatedAtBlock: BigInt!
