@@ -118,9 +118,7 @@ if [[ -n "$ENV_VAR_ID" ]]; then
     -H "Authorization: Bearer $VERCEL_TOKEN" \
     -H "Content-Type: application/json" \
     -d "{
-      \"value\": \"$GRAPHQL_URL\",
-      \"type\": \"plain\",
-      \"target\": [\"production\", \"preview\"]
+      \"value\": \"$GRAPHQL_URL\"
     }")
 else
   # POST new env var
