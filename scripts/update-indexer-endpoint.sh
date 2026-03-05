@@ -9,6 +9,14 @@
 
 set -euo pipefail
 
+# Auto-load .env.deploy if it exists
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/../.env.deploy"
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck source=/dev/null
+  set -a; source "$ENV_FILE"; set +a
+fi
+
 ENVIO_TOKEN="${ENVIO_API_TOKEN:-$(pass envio/api-token 2>/dev/null || echo '')}"
 VERCEL_TOKEN="${VERCEL_TOKEN:-$(pass vercel/api-token 2>/dev/null || echo '')}"
 VERCEL_PROJECT_ID="${VERCEL_PROJECT_ID:-prj_monitoring_ui_dashboard}"
