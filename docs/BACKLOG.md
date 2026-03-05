@@ -1,102 +1,94 @@
 # Monitoring Monorepo — Task Backlog
 
-Last updated: 2026-03-04
+Last updated: 2026-03-05
 
-## 🔴 Blockers / Next Up
+## 🔴 Immediate — Stream C Dashboard KPI Components
 
-### ~~Envio Hosted Deployment~~ ✅
+Indexer schema is complete. These are dashboard-only items.
 
-Deployed at [envio.dev/app/mento-protocol/mento-v3-celo-sepolia](https://envio.dev/app/mento-protocol/mento-v3-celo-sepolia)
+- [ ] **LimitBadge** — show `limitStatus` (OK/WARN/CRITICAL) on pool list + detail
+- [ ] **LimitPanel** — breakdown of `limitPressure0/1` and `netflow0/1` per token on pool detail
+- [ ] **LivenessBadge** — show `rebalanceLivenessStatus` (ACTIVE / N/A) on pool list
+- [ ] **RebalancerPanel** — rebalance event timeline + `effectivenessRatio` on pool detail
+- [ ] **TVL on global page** — sum `reserves0/1` across pools (decide: raw amounts vs USD)
+- [ ] **Gap-fill for snapshot charts** — forward-fill missing hourly buckets in dashboard layer (not block handlers — Envio `onBlock` lacks timestamp)
 
-### ~~Vercel Deployment~~ ✅
+## 🟡 Phase 2 — Indexer + Alerting
 
-Live at [monitoring-ui-dashboard.vercel.app](https://monitoring-ui-dashboard.vercel.app)
+### Indexer Enhancements
 
-- [x] Vercel project created (`mentolabs/monitoring-ui-dashboard`)
-- [x] Env vars set (`NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED`)
-- [x] Build verified — Next.js 16 + pnpm monorepo deploys cleanly
-- [x] Share URL with team
-- [x] GitHub secrets set via `pnpm deploy:dashboard:setup` (VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID)
+- [ ] **Liquity v2 CDP indexing**
+  - TroveManager events: `TroveOpened`, `TroveClosed`, `TroveUpdated`, `LiquidationEvent`
+  - StabilityPool events: `UserDepositChanged`, `PoolBalanceUpdated`
+  - Contracts: TroveManager `0xb38aEf2bF4e34B997330D626EBCd7629De3885C9`, StabilityPool `0x06346c0fAB682dBde9f245D2D84677592E8aaa15`
+  - New entities: `Trove`, `StabilityPoolSnapshot`
+- [ ] **Monad indexing** — blocked on contract deployment to Monad
+- [ ] **ChainStat / GlobalStat** — protocol-level aggregate entity (total pools, total swaps, global TVL)
 
-## 🟡 Dashboard Features (Phase 1)
+### Alerting (Aegis/Grafana)
 
-### Global Page
-
-- [ ] TVL across all pools (sum of reserves in USD equivalent)
-- [ ] Total swap volume (cumulative)
-- [ ] Pool count by type (FPMM vs VirtualPool)
-- [ ] Chain-level stats (ChainStat entity)
-
-### Snapshot-Based Charts
-
-- [ ] Volume over time (hourly/daily bars from PoolSnapshot)
-- [ ] Cumulative volume line chart
-- [ ] TVL over time
-- [ ] Gap-filling via forward-fill in dashboard (Envio block handlers lack timestamp)
-
-### Pool Health KPIs
-
-- [ ] Oracle liveness indicator (oracleOk, livenessRatio fields on Pool)
-- [ ] Deviation ratio warnings (warn ≥1 for >15min, crit >60min)
-- [ ] Trading limit pressure (warn >0.8, crit ≥1.0)
-- [ ] Rebalance liveness + effectiveness
-
-### Pool Detail Enhancements
-
-- [ ] Liquidity depth visualization
-- [ ] Rebalance event timeline
-- [ ] Fee revenue per pool
-
-## 🟢 Infrastructure
-
-### Indexer Improvements
-
-- [ ] Oracle state fields on Pool entity (oracleOk, livenessRatio)
-- [ ] ChainStat / GlobalStat aggregate entities
-- [ ] Liquity v2 indexing (TroveManager, StabilityPool, CDPs)
-  - Contracts on DevNet: TroveManager `0xF1fE...`, ActivePool `0x9B41...`, etc.
-  - Separate ABI + handler needed
-- [ ] Monad indexing (blocked on contract deployment)
-
-### Alerting (Phase 2)
-
-- [ ] Aegis integration for real-time state-based alerting
 - [ ] Prometheus metrics export from indexer
-- [ ] Grafana dashboards for ops team
-- [ ] Discord/Telegram alert channels
+- [ ] Grafana dashboards
+- [ ] Alert rule: oracle liveness (warn >0.8, crit ≥1)
+- [ ] Alert rule: deviation ratio (warn ≥0.8 for >15min, crit >60min)
+- [ ] Alert rule: trading limit pressure (warn >0.8, crit ≥1.0)
+- [ ] Alert rule: rebalancer liveness (crit if no rebalance in threshold window)
+- [ ] Alert rule: Stability Pool headroom (crit ≤0)
+- [ ] Discord/PagerDuty channels
 
-### DevEx
+## 🟢 Phase 3
 
-- [ ] Google Auth (NextAuth.js) for dashboard access control
-- [ ] Streamlit sandbox for Roman (Python, reads from same Hasura)
+- [ ] **Roman's Streamlit sandbox** — Python/Streamlit reads same Hasura backend
+- [ ] **Google Auth** (NextAuth.js) — restrict dashboard to @mentolabs.xyz
+- [ ] **ClickHouse sink** — heavy analytics beyond Postgres
 
 ## 📋 Tech Debt
 
-- [ ] Dashboard has no test coverage
-- [ ] Hasura admin secret exposed in client bundle (needs server-side proxy for prod)
-- [ ] `setURL` in page.tsx doesn't preserve all query params when switching filters
-- [ ] DevNet address book is hardcoded (2 tokens) — was dynamic in devnet repo
-- [ ] No error boundaries or loading skeletons in dashboard
+- [ ] Dashboard test coverage (currently 53 tests, all in lib utils — zero component tests)
+- [ ] Hasura admin secret exposed in client bundle — needs server-side proxy or Hasura JWT auth for prod
+- [ ] `setURL` in page.tsx doesn't preserve all query params on filter switch
+- [ ] No error boundaries or loading skeletons in dashboard UI
 - [ ] Port 9898 hardcoded in Envio — can't run multiple indexers simultaneously
+- [ ] DevNet config (`config.celo.devnet.yaml`) may be stale — devnet is no longer primary target
 
 ## ✅ Done
 
-- [x] Envio indexer for Celo DevNet (2 pools, 40 events)
-- [x] Envio indexer for Celo Sepolia (12 VirtualPools, 12 events)
-- [x] Next.js dashboard with multi-chain network switching
-- [x] Reserve history chart (Plotly)
-- [x] PoolSnapshots with hourly buckets
-- [x] Sepolia token symbol mapping (14 stablecoins + PUSO)
+### Indexer
+
+- [x] Envio indexer for Celo Sepolia (VirtualPools + FPMMs)
+- [x] Envio indexer for Celo Mainnet (4 FPMMs: USDm/GBPm, USDm/axlUSDC, USDm/USDC, USDT/USDm)
+- [x] Envio hosted deployment: `mento-v3-celo-mainnet` live, 100% synced
+- [x] Envio hosted deployment: `mento-v3-celo-sepolia` live
+- [x] Oracle health state (`healthStatus`, `oracleOk`, `oraclePrice`, `priceDifference`, `rebalanceThreshold`)
+- [x] OracleSnapshot entity — per-event oracle price + health timeline
+- [x] SortedOracles event indexing (mainnet only)
+- [x] TradingLimit entity (`limitStatus`, `limitPressure0/1`, `netflow0/1`, `limit0/1`)
+- [x] Rebalancer liveness (`rebalancerAddress`, `rebalanceLivenessStatus`, `effectivenessRatio`)
+- [x] PoolSnapshot pre-aggregation (volume, TVL, fees per pool per hour/day)
+- [x] Pool cumulative fields (`swapCount`, `notionalVolume0/1`, `rebalanceCount`)
+- [x] `txHash` on all events
+- [x] `@index` directives for query performance
+- [x] Config files: `config.celo.mainnet.yaml`, `config.celo.sepolia.yaml`
+- [x] Deploy branch strategy (`deploy/celo-mainnet`, `deploy/celo-sepolia`)
+- [x] `contracts.json` committed + integrated into network config
+
+### Dashboard
+
+- [x] Live at monitoring.mento.org
+- [x] Global overview page (`/`) — metrics tiles, all pools table, activity ranking
+- [x] Pool detail page (`/pools/[poolId]`) — trades, reserve chart, analytics tab
+- [x] Oracle health: HealthBadge, HealthPanel, OracleChart (dual y-axis)
+- [x] Analytics tab with PoolSnapshot charts
+- [x] Multi-chain network switcher
+- [x] Token symbol mapping, `isFpmm()` in `tokens.ts`
+- [x] Shared `PoolsTable` component
+
+### Infrastructure
+
 - [x] Monorepo extraction from devnet repo
-- [x] Vercel config (`vercel.json`)
-- [x] Browser-verified end-to-end (DevNet + Sepolia + reserves chart)
-- [x] Envio hosted migration plan researched
-- [x] Config files renamed to `config.celo.{network}.yaml`
-- [x] Deploy branch strategy (`deploy/celo-sepolia`, `deploy/celo-mainnet`, `deploy/monad-mainnet`)
-- [x] pnpm deploy scripts (`deploy:indexer:sepolia/mainnet/monad`)
-- [x] Network config expanded with `local`/`hosted` variants per chain
-- [x] `contracts.json` committed to repo + integrated into network config for token/address resolution
-- [x] CI pipeline (lint, typecheck, build) on GitHub Actions — `indexer-envio.yml` + `ui-dashboard.yml`
-- [x] Code quality toolchain (ESLint 10 + vitest + trunk)
-- [x] `AGENTS.md` with Envio gotchas (Hasura port 8080, single-indexer constraint, postgres healthcheck patch)
-- [x] Envio hosted deployment — `mento-v3-celo-sepolia` live at [envio.dev](https://envio.dev/app/mento-protocol/mento-v3-celo-sepolia)
+- [x] CI: ESLint 10 + Vitest (53 tests) + typecheck + Codecov
+- [x] `pnpm deploy:indexer:*` scripts
+- [x] `pnpm update-endpoint:mainnet` — Vercel env var update after indexer redeploy
+- [x] Discord notification on deploy branch push (`notify-envio-deploy.yml`) — PR #17
+- [x] `AGENTS.md` files for indexer + dashboard
+- [x] Deployment docs (`docs/deployment.md`)

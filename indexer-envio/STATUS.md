@@ -1,151 +1,117 @@
-# HyperIndexer Handoff (Celo)
+# Indexer Status
 
-## Current state
+Last updated: 2026-03-05
 
-- Repo: `devnet`
-- Branch: `feat/envio-celo-indexer`
-- Latest indexer commits:
-  - `0c351694` - `feat: add hardened Celo HyperIndexer scaffold`
-  - `d278b26e` - `docs: expand HyperIndexer runbook and add flow diagram`
-- Local working tree still has unrelated, uncommitted changes:
-  - `bin/start-explorer.sh`
-  - `tools/address-book/server.mjs`
-  - `.trunk/` (untracked)
-  - `indexers/celo/.cursor/` (untracked)
+## Current State
 
-## What is implemented
+Both mainnet and Sepolia indexers are live and synced on Envio's hosted service.
 
-- Envio indexer package in `indexers/celo`
-- Address-book-driven sync:
-  - reads addresses/RPC from `tools/address-book/addresses.json`
-  - copies ABIs from `../mento-core/out/**`
-  - writes `indexers/celo/config.celo.devnet.yaml` and `indexers/celo/config/contracts.celo.v3.json`
-- Hardened command wrapper:
-  - `indexers/celo/scripts/run-envio-with-env.mjs`
-  - loads `.env`
-  - validates `ENVIO_START_BLOCK` + `ENVIO_RPC_URL`
-  - forces `CI=true` only for `codegen` (non-TTY safe)
-- Start block chosen and verified:
-  - `ENVIO_START_BLOCK=60548751`
-- Schema + handlers for:
-  - `FactoryDeployment`
-  - `Pool`
-  - `SwapEvent`
-  - `LiquidityEvent`
-  - `ReserveUpdate`
-  - `RebalanceEvent`
-  - `VirtualPoolLifecycle`
+| Network      | Envio Project              | Status         | Sync   |
+| ------------ | -------------------------- | -------------- | ------ |
+| Celo Mainnet | `mento-v3-celo-mainnet`    | ✅ Live        | 100%   |
+| Celo Sepolia | `mento-v3-celo-sepolia`    | ✅ Live        | 100%   |
+| Monad        | —                          | ⏳ Blocked     | —      |
 
-## Runbook (known good)
+## GraphQL Endpoint
 
-From repo root:
+The hosted endpoint URL contains a hash that changes on every redeploy:
 
-```bash
-pnpm indexer:celo:prepare
-pnpm indexer:celo:dev
+```text
+https://indexer.dev.hyperindex.xyz/<hash>/v1/graphql
 ```
 
-Stop/reset local services/state:
+The current live hash is stored as `NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED` in Vercel project settings.
 
-```bash
-pnpm --dir indexers/celo stop
+> After each indexer redeploy, run `pnpm update-endpoint:mainnet` to update the Vercel env var.
+
+## Schema (as of 2026-03-05)
+
+Full schema: [`schema.graphql`](./schema.graphql)
+
+### Entities
+
+| Entity              | Count (approx, mainnet) | Notes                                      |
+| ------------------- | ----------------------- | ------------------------------------------ |
+| Pool                | ~16 (4 FPMM + VPs)     | One per pool, mutable state                |
+| PoolSnapshot        | Growing                 | Hourly buckets per pool                    |
+| OracleSnapshot      | Growing                 | Per SortedOracles event (mainnet only)     |
+| TradingLimit        | ~4–8                   | One per pool per token (FPMM pools only)   |
+| SwapEvent           | Growing                 | Immutable event log                        |
+| LiquidityEvent      | Growing                 | Mint/burn events                           |
+| ReserveUpdate       | Growing                 | Per UpdateReserves event                   |
+| RebalanceEvent      | Growing                 | Per Rebalanced event                       |
+| FactoryDeployment   | ~4 (FPMM) + VPs        | Pool creation events                       |
+| VirtualPoolLifecycle| Growing                 | VirtualPool deploy/deprecate events        |
+
+### Key Pool Fields (current schema)
+
+```graphql
+type Pool {
+  id: ID!
+  token0: String
+  token1: String
+  source: String!                    # "fpmm" | "virtual"
+  reserves0: BigInt!
+  reserves1: BigInt!
+  swapCount: Int!
+  notionalVolume0: BigInt!
+  notionalVolume1: BigInt!
+  rebalanceCount: Int!
+  oracleOk: Boolean!
+  oraclePrice: BigInt!
+  oraclePriceDenom: BigInt!
+  oracleTimestamp: BigInt!
+  oracleExpiry: BigInt!
+  oracleNumReporters: Int!
+  referenceRateFeedID: String!
+  priceDifference: BigInt!
+  rebalanceThreshold: Int!
+  lastRebalancedAt: BigInt!
+  healthStatus: String!              # "OK" | "WARN" | "CRITICAL" | "N/A"
+  limitStatus: String!               # "OK" | "WARN" | "CRITICAL" | "N/A"
+  limitPressure0: String!
+  limitPressure1: String!
+  rebalancerAddress: String!
+  rebalanceLivenessStatus: String!   # "ACTIVE" | "N/A"
+  createdAtBlock: BigInt!
+  createdAtTimestamp: BigInt!
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+}
 ```
 
-## Environment defaults
+## Config Files
 
-See `indexers/celo/.env.example`:
+| File                          | Start Block | Networks       |
+| ----------------------------- | ----------- | -------------- |
+| `config.celo.mainnet.yaml`    | 60664513    | Celo Mainnet   |
+| `config.celo.sepolia.yaml`    | (Sepolia)   | Celo Sepolia   |
+| `config.celo.devnet.yaml`     | 60548751    | DevNet (local) |
 
-- `ENVIO_RPC_URL="http://34.32.123.41:8545"`
-- `ENVIO_START_BLOCK="60548751"`
+## Contracts Indexed (Mainnet)
 
-## Query endpoint
+| Contract        | Address                                      |
+| --------------- | -------------------------------------------- |
+| FPMMFactory     | `0xa849b475FE5a4B5C9C3280152c7a1945b907613b` |
+| Router          | `0x4861840C2EfB2b98312B0aE34d86fD73E8f9B6f6` |
+| OracleAdapter   | `0xa472fBBF4b890A54381977ac392BdF82EeC4383a` |
+| SortedOracles   | `0xefB84935239dAcdecF7c5bA76d8dE40b077B7b33` |
+| FPMM pools (×4) | See README.md                                |
 
-- Hasura: `http://localhost:8080`
-- GraphQL: `http://localhost:8080/v1/graphql`
-- Admin secret: `testing`
+## What's Not Yet Indexed
 
-## Verified query output (historical reference)
+- Liquity v2 CDP contracts (TroveManager, StabilityPool) — Phase 2
+- Monad mainnet — blocked on contract deployment
+- Historical pre-start-block events (Envio `onBlock` lacks timestamps for backfill)
 
-Earliest rows observed after reset/restart:
+## Local Dev
 
-- `FactoryDeployment.blockNumber = 60550751`
-- `Pool.createdAtBlock = 60550751` (FPMM), `60550752` (virtual pool)
-- `SwapEvent` starts at `60550758`
+See [`README.md`](./README.md#local-development) for setup instructions.
 
-## Known gotchas
-
-- If indexing appears to start from old history, persisted state may exist: run `pnpm --dir indexers/celo stop`.
-- `pnpm codegen` must run with env loaded; wrapper script now enforces this.
-- `indexers/celo` includes generated/runtime artifacts by design for reproducibility.
-
-## Next objective (UI)
-
-Build a local UI for indexed data (swaps/pools) with:
-
-1. Basic recent swaps table (sorted by block desc)
-2. Pool filter (by pool address)
-3. URL-as-state for filters (shareable links)
-4. Keyboard-accessible controls and semantic table markup
-
-## UI implementation breakdown
-
-### MVP (ship first)
-
-1. Scaffold a minimal UI app in `indexers/celo/ui` (TypeScript).
-2. Add a small GraphQL client helper for `http://localhost:8080/v1/graphql`.
-3. Implement `RecentSwapsTable`:
-   - query latest `SwapEvent` rows
-   - default sort: `blockNumber DESC`, then `logIndex DESC`
-   - show loading, empty, and error states
-4. Implement pool filter UI:
-   - text input for pool address
-   - apply/clear buttons
-   - keyboard operable controls
-5. Persist filter state in URL query params:
-   - `?pool=<address>&limit=<n>`
-   - read on load, write on change
-6. Add basic validation for pool address input (hex + length).
-
-### Stretch goals (after MVP)
-
-1. Add pagination controls (cursor or offset-based).
-2. Add relative timestamps and block links.
-3. Add client-side CSV export for current filtered rows.
-4. Add a pool summary card (last trade, volume proxy, last reserve update block).
-
-### Acceptance checks
-
-1. With no filters, table shows newest swaps.
-2. With `?pool=<known_pool>`, only that pool's swaps render.
-3. Clearing filter updates URL and restores unfiltered list.
-4. Entire workflow is keyboard-only usable.
-5. Invalid pool address shows validation feedback and does not query.
-
-### First-session command sequence
-
-Run indexer stack first:
+Quick start:
 
 ```bash
-pnpm indexer:celo:prepare
-pnpm indexer:celo:dev
-```
-
-Then start UI app from the new `indexers/celo/ui` package and verify:
-
-1. UI loads with recent swaps.
-2. URL query state round-trips via refresh.
-3. Pool filter returns expected subset.
-
-## Suggested fresh-session prompt
-
-```markdown
-Continue from `indexers/celo/STATUS.md`.
-
-Goal: build a lightweight local UI for Envio-indexed data (SwapEvent + Pool) against Hasura GraphQL.
-
-Constraints:
-
-- keep existing indexer pipeline unchanged
-- prioritize accessibility and URL-as-state
-- start with read-only UI and clear loading/error states
+pnpm indexer:sepolia:codegen
+pnpm indexer:sepolia:dev
+# Hasura: http://localhost:8080 (secret: testing)
 ```

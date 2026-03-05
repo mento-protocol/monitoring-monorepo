@@ -1,21 +1,48 @@
 # Mento Monitoring Monorepo
 
-Real-time monitoring infrastructure for Mento v3 on-chain pools — an [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js + Plotly.js dashboard.
+Real-time monitoring infrastructure for Mento v3 on-chain pools — an [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
+
+**Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
 ## Packages
 
-| Package                             | Description                                                                    |
-| ----------------------------------- | ------------------------------------------------------------------------------ |
-| [`indexer-envio`](./indexer-envio/) | Envio HyperIndex indexer for Celo v3 FPMM pools (devnet + Sepolia configs)     |
-| [`ui-dashboard`](./ui-dashboard/)   | Next.js 16 + Plotly.js monitoring dashboard with multi-chain network switching |
+| Package                             | Description                                                                         |
+| ----------------------------------- | ----------------------------------------------------------------------------------- |
+| [`indexer-envio`](./indexer-envio/) | Envio HyperIndex indexer for Celo Mainnet + Sepolia (FPMM pools + VirtualPools)    |
+| [`ui-dashboard`](./ui-dashboard/)   | Next.js 16 + Plotly.js monitoring dashboard with multi-chain network switching      |
+
+## Architecture
+
+```text
+┌─────────────────┐     ┌──────────────────┐     ┌────────────────┐
+│  Celo Chain     │────▶│  Envio HyperIndex │────▶│  Hasura        │
+│  (RPC / GRPC)   │     │  (Hosted)         │     │  (GraphQL API) │
+└─────────────────┘     └──────────────────┘     └───────┬────────┘
+                                                          │
+                                                   ┌──────▼──────┐
+                                                   │  Next.js    │
+                                                   │  Dashboard  │
+                                                   │  (Vercel)   │
+                                                   └─────────────┘
+```
+
+The indexer runs on Envio's hosted free tier. Each deploy produces a new GraphQL endpoint hash. The dashboard reads from this endpoint via Hasura's GraphQL API.
+
+## Networks
+
+| Network        | Chain ID | Status                        |
+| -------------- | -------- | ----------------------------- |
+| Celo Mainnet   | 42220    | ✅ Live                       |
+| Celo Sepolia   | 44787    | ✅ Live                       |
+| Monad Mainnet  | —        | ⏳ Blocked on contract deploy |
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 22 LTS (≥ 18 required)
+- Node.js 22 LTS
 - [pnpm](https://pnpm.io/) 10.x
-- Docker (for Envio indexer local dev — runs Postgres + Hasura)
+- Docker (for local indexer dev — runs Postgres + Hasura)
 
 ### Install
 
@@ -23,20 +50,13 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — an [Envio Hy
 pnpm install
 ```
 
-### Run the Indexer (devnet)
+### Run the Indexer (local — Celo Sepolia)
 
 ```bash
-# First-time setup: generate types from the schema
-pnpm indexer:codegen
-
-# Start the indexer (spins up Docker containers for Postgres + Hasura)
-pnpm indexer:dev
-```
-
-### Run the Indexer (Celo Sepolia)
-
-```bash
+# Generate types from schema + config
 pnpm indexer:sepolia:codegen
+
+# Start the indexer (spins up Docker: Postgres + Hasura + indexer)
 pnpm indexer:sepolia:dev
 ```
 
@@ -46,7 +66,7 @@ pnpm indexer:sepolia:dev
 pnpm dashboard:dev
 ```
 
-The dashboard connects to Hasura (exposed by the indexer) to display real-time pool data.
+The dashboard connects to Hasura (local or hosted) to display real-time pool data.
 
 ## Environment Variables
 
@@ -54,47 +74,86 @@ The dashboard connects to Hasura (exposed by the indexer) to display real-time p
 
 Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
-| Variable            | Description                  | Default                             |
-| ------------------- | ---------------------------- | ----------------------------------- |
-| `ENVIO_API_TOKEN`   | Envio platform API token     | —                                   |
-| `ENVIO_RPC_URL`     | Celo RPC endpoint            | `http://34.32.123.41:8545` (devnet) |
-| `ENVIO_START_BLOCK` | Block to start indexing from | `60548751`                          |
+| Variable            | Description                  | Default          |
+| ------------------- | ---------------------------- | ---------------- |
+| `ENVIO_API_TOKEN`   | Envio platform API token     | —                |
+| `ENVIO_RPC_URL`     | Celo RPC endpoint            | —                |
+| `ENVIO_START_BLOCK` | Block to start indexing from | `60664513`       |
 
 ### Dashboard
 
-The dashboard supports five network targets. Each uses a `_<NETWORK>` suffix on the env var name:
+The dashboard supports multiple network targets via `_<NETWORK>` suffix env vars:
 
-| Variable                                   | Default                            | Description                               |
-| ------------------------------------------ | ---------------------------------- | ----------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL_DEVNET`            | `http://localhost:8080/v1/graphql` | Hasura endpoint — Celo Devnet (local)     |
-| `NEXT_PUBLIC_HASURA_SECRET_DEVNET`         | `"testing"`                        | Hasura admin secret — Celo Devnet         |
-| `NEXT_PUBLIC_EXPLORER_URL_DEVNET`          | `http://localhost:5100`            | Block explorer URL — Celo Devnet          |
-| `NEXT_PUBLIC_HASURA_URL_SEPOLIA`           | `http://localhost:8080/v1/graphql` | Hasura endpoint — Celo Sepolia (local)    |
-| `NEXT_PUBLIC_HASURA_SECRET_SEPOLIA`        | `"testing"`                        | Hasura admin secret — Celo Sepolia        |
-| `NEXT_PUBLIC_EXPLORER_URL_SEPOLIA`         | `https://sepolia.celoscan.io`      | Block explorer URL — Celo Sepolia         |
-| `NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED`    | —                                  | Hasura endpoint — Celo Sepolia (hosted)   |
-| `NEXT_PUBLIC_HASURA_SECRET_SEPOLIA_HOSTED` | —                                  | Hasura admin secret — Celo Sepolia hosted |
-| `NEXT_PUBLIC_HASURA_URL_MAINNET`           | `http://localhost:8082/v1/graphql` | Hasura endpoint — Celo Mainnet (local)    |
-| `NEXT_PUBLIC_HASURA_SECRET_MAINNET`        | `"testing"`                        | Hasura admin secret — Celo Mainnet        |
-| `NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED`    | —                                  | Hasura endpoint — Celo Mainnet (hosted)   |
-| `NEXT_PUBLIC_HASURA_SECRET_MAINNET_HOSTED` | —                                  | Hasura admin secret — Celo Mainnet hosted |
+| Variable                                    | Description                                     |
+| ------------------------------------------- | ----------------------------------------------- |
+| `NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED`     | Hasura/GraphQL endpoint — Celo Mainnet (hosted) |
+| `NEXT_PUBLIC_HASURA_SECRET_MAINNET_HOSTED`  | Hasura admin secret — Celo Mainnet hosted       |
+| `NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED`     | Hasura/GraphQL endpoint — Celo Sepolia (hosted) |
+| `NEXT_PUBLIC_HASURA_SECRET_SEPOLIA_HOSTED`  | Hasura admin secret — Celo Sepolia hosted       |
+| `NEXT_PUBLIC_HASURA_URL_MAINNET`            | Hasura endpoint — Celo Mainnet (local)          |
+| `NEXT_PUBLIC_HASURA_SECRET_MAINNET`         | Hasura admin secret — Celo Mainnet (local)      |
+| `NEXT_PUBLIC_HASURA_URL_SEPOLIA`            | Hasura endpoint — Celo Sepolia (local)          |
+| `NEXT_PUBLIC_HASURA_SECRET_SEPOLIA`         | Hasura admin secret — Celo Sepolia (local)      |
+| `NEXT_PUBLIC_EXPLORER_URL_MAINNET`          | Block explorer — Celo Mainnet                   |
+| `NEXT_PUBLIC_EXPLORER_URL_SEPOLIA`          | Block explorer — Celo Sepolia                   |
 
 ## Deployment
 
-The dashboard is configured for **Vercel** deployment. See [`ui-dashboard/vercel.json`](./ui-dashboard/vercel.json).
+### Indexer → Envio Hosted
 
-Set all `NEXT_PUBLIC_*` environment variables in the Vercel project settings.
+Each network has a dedicated deploy branch Envio watches:
 
-## Architecture
+| Network      | Deploy Branch         |
+| ------------ | --------------------- |
+| Celo Mainnet | `deploy/celo-mainnet` |
+| Celo Sepolia | `deploy/celo-sepolia` |
 
-```text
-┌─────────────┐     ┌──────────┐     ┌─────────────┐
-│ Celo Chain   │────▶│  Envio   │────▶│  Hasura     │
-│ (RPC)        │     │ Indexer  │     │  (GraphQL)  │
-└─────────────┘     └──────────┘     └──────┬──────┘
-                                            │
-                                     ┌──────▼──────┐
-                                     │  Next.js    │
-                                     │  Dashboard  │
-                                     └─────────────┘
+Push to trigger a redeploy:
+
+```bash
+pnpm deploy:indexer:mainnet
+# or
+git push origin main:deploy/celo-mainnet
 ```
+
+> ⚠️ **Endpoint changes on each deploy.** Envio free tier generates a new URL hash per deployment. After redeploying the indexer, update the Vercel env var:
+> ```bash
+> pnpm update-endpoint:mainnet
+> ```
+
+### Dashboard → Vercel
+
+Vercel watches `main` — every push auto-deploys the dashboard. See [`docs/deployment.md`](./docs/deployment.md) for full details.
+
+## CI
+
+GitHub Actions runs on every PR:
+
+- ESLint 10 (no `eslint-config-next` — uses `@eslint/js` + `typescript-eslint` + `@eslint-react`)
+- Vitest (53 tests)
+- TypeScript typecheck
+- Codecov coverage reporting
+
+## Key Files
+
+| What             | Where                                    |
+| ---------------- | ---------------------------------------- |
+| Indexer schema   | `indexer-envio/schema.graphql`           |
+| Event handlers   | `indexer-envio/src/EventHandlers.ts`     |
+| Mainnet config   | `indexer-envio/config.celo.mainnet.yaml` |
+| Sepolia config   | `indexer-envio/config.celo.sepolia.yaml` |
+| Dashboard app    | `ui-dashboard/src/app/`                  |
+| Network defs     | `ui-dashboard/src/lib/networks.ts`       |
+| GraphQL queries  | `ui-dashboard/src/lib/queries.ts`        |
+| Pool type helper | `ui-dashboard/src/lib/tokens.ts`         |
+| Deployment guide | `docs/deployment.md`                     |
+| Technical spec   | `SPEC.md`                                |
+| Roadmap          | `docs/ROADMAP.md`                        |
+
+## Documentation
+
+- [`SPEC.md`](./SPEC.md) — Full technical specification
+- [`docs/ROADMAP.md`](./docs/ROADMAP.md) — Current state + upcoming work
+- [`docs/BACKLOG.md`](./docs/BACKLOG.md) — Detailed task backlog
+- [`docs/deployment.md`](./docs/deployment.md) — Deployment guide
+- [`indexer-envio/README.md`](./indexer-envio/README.md) — Indexer reference

@@ -2,12 +2,10 @@
 
 ## Architecture
 
-This is a monorepo containing:
+This monorepo deploys two services independently:
 
-- **Indexer** (`indexer-envio/`) → Envio Hosted Service
+- **Indexer** (`indexer-envio/`) → Envio Hosted Service (free tier)
 - **Dashboard** (`ui-dashboard/`) → Vercel
-
-To avoid unnecessary redeployments, we use **separate deploy branches** for the indexer.
 
 ---
 
@@ -17,145 +15,142 @@ To avoid unnecessary redeployments, we use **separate deploy branches** for the 
 
 Each network has a dedicated deploy branch that Envio watches:
 
-| Network       | Deploy Branch          | Config File                 | Envio Project            |
-| ------------- | ---------------------- | --------------------------- | ------------------------ |
-| Celo Sepolia  | `deploy/celo-sepolia`  | `config.celo.sepolia.yaml`  | `mento-v3-celo-sepolia`  |
-| Celo Mainnet  | `deploy/celo-mainnet`  | `config.celo.mainnet.yaml`  | `mento-v3-celo-mainnet`  |
-| Monad Mainnet | `deploy/monad-mainnet` | `config.monad.mainnet.yaml` | `mento-v3-monad-mainnet` |
+| Network       | Deploy Branch          | Config File                  | Envio Project            |
+| ------------- | ---------------------- | ---------------------------- | ------------------------ |
+| Celo Mainnet  | `deploy/celo-mainnet`  | `config.celo.mainnet.yaml`   | `mento-v3-celo-mainnet`  |
+| Celo Sepolia  | `deploy/celo-sepolia`  | `config.celo.sepolia.yaml`   | `mento-v3-celo-sepolia`  |
+| Monad Mainnet | `deploy/monad-mainnet` | `config.monad.mainnet.yaml`  | `mento-v3-monad-mainnet` |
+
+### ⚠️ Endpoint Hash Changes on Every Deploy
+
+Envio's free tier generates a **new GraphQL endpoint URL** on each deployment. The URL contains a hash that changes:
+
+```text
+https://indexer.dev.hyperindex.xyz/<hash>/v1/graphql
+```
+
+After every indexer redeploy, you **must** update the Vercel environment variable.
 
 ### Deployment Workflow
 
-**Local Development:**
+**Redeploy the mainnet indexer:**
 
 ```bash
-# Work on main as usual
-pnpm indexer:sepolia:dev
+# Push main to the deploy branch (triggers Envio redeploy)
+pnpm deploy:indexer:mainnet
+# equivalent: git push origin main:deploy/celo-mainnet
 
-# When ready to deploy indexer changes to Celo Sepolia:
+# After Envio finishes syncing, update the Vercel env var:
+pnpm update-endpoint:mainnet
+```
+
+**Redeploy Sepolia:**
+
+```bash
 pnpm deploy:indexer:sepolia
+pnpm update-endpoint:sepolia
 ```
 
-**Manual Deployment:**
+### Force Retrigger Without Code Changes
+
+If Envio gets stuck or you need to retrigger without a code change:
 
 ```bash
-# Push current main to the deploy branch
-git push origin main:deploy/celo-sepolia
-
-# Or push a specific commit
-git push origin <commit-sha>:deploy/celo-sepolia
-```
-
-Envio will automatically redeploy when the deploy branch is updated.
-
-### Initial Setup (one-time)
-
-#### 1. Create Deploy Branches
-
-```bash
-# Create all deploy branches from main
-git push origin main:deploy/celo-sepolia
+# Empty commit trick
+git commit --allow-empty -m "chore: retrigger envio deploy"
 git push origin main:deploy/celo-mainnet
-git push origin main:deploy/monad-mainnet
 ```
 
-#### 2. Configure Envio Projects
+### Discord Notification
 
-For each network, create an Envio hosted project:
+`.github/workflows/notify-envio-deploy.yml` fires automatically when you push to any `deploy/*` branch. It posts a reminder in Discord to update the Vercel endpoint after Envio finishes syncing.
 
-1. Go to <https://envio.dev/app>
-2. New Deployment → Connect GitHub repo `mento-protocol/monitoring-monorepo`
-3. Fill in:
-   - **Name:** `mento-v3-celo-sepolia` (or respective network)
-   - **Description:** `Mento v3 indexer for Celo Sepolia`
-   - **Directory:** `indexer-envio`
-   - **Config File:** `config.celo.sepolia.yaml` (or respective config)
-   - **Branch:** `deploy/celo-sepolia` (or respective branch)
-   - **Plan:** Development (Free)
-   - **Public:** ✅
+### After Redeployment Checklist
 
-4. Deploy
-
-#### 3. Get GraphQL Endpoint
-
-After deployment, copy the GraphQL endpoint from Envio dashboard. Format:
-
-```text
-https://<project-id>.envio.dev/v1/graphql
-```
-
-Add to Vercel env vars (see Dashboard Deployment below).
+1. ✅ Wait for Envio to reach 100% sync (check [envio.dev/app](https://envio.dev/app))
+2. ✅ Get the new GraphQL endpoint URL from the Envio dashboard
+3. ✅ Run `pnpm update-endpoint:mainnet` (or update Vercel env var manually)
+4. ✅ Trigger a Vercel redeploy (or wait for next push to `main`)
+5. ✅ Verify monitoring.mento.org loads data
 
 ---
 
 ## Dashboard Deployment (Vercel)
 
-### Dashboard Deployment Workflow
+**Vercel watches `main`** — every push to `main` triggers a dashboard redeploy automatically.
 
-**Vercel watches `main` branch** — every push to `main` triggers a dashboard redeploy.
-
-Since dashboard changes are more frequent than indexer changes, this is the desired behavior.
-
-### Dashboard Initial Setup (one-time)
-
-#### 1. Connect Vercel
-
-1. Go to <https://vercel.com/new>
-2. Import `mento-protocol/monitoring-monorepo`
-3. Configure:
-   - **Framework:** Next.js
-   - **Root Directory:** `ui-dashboard`
-   - **Build Command:** `pnpm build` (default)
-   - **Install Command:** `pnpm install` (default)
-
-#### 2. Environment Variables
-
-Add these in Vercel project settings:
+### Environment Variables (Vercel Project Settings)
 
 ```bash
-# Celo Sepolia (from Envio hosted)
-NEXT_PUBLIC_HASURA_URL_SEPOLIA=https://<envio-project-id>.envio.dev/v1/graphql
-NEXT_PUBLIC_HASURA_SECRET_SEPOLIA=  # Leave empty for hosted (no auth by default)
+# Celo Mainnet — hosted indexer (update after each indexer redeploy)
+NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED=https://indexer.dev.hyperindex.xyz/<hash>/v1/graphql
+NEXT_PUBLIC_HASURA_SECRET_MAINNET_HOSTED=  # empty for hosted (no auth by default)
+NEXT_PUBLIC_EXPLORER_URL_MAINNET=https://explorer.celo.org
+
+# Celo Sepolia — hosted indexer
+NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED=https://indexer.dev.hyperindex.xyz/<hash>/v1/graphql
+NEXT_PUBLIC_HASURA_SECRET_SEPOLIA_HOSTED=
 NEXT_PUBLIC_EXPLORER_URL_SEPOLIA=https://celo-sepolia.blockscout.com
-
-# Celo DevNet (local/self-hosted)
-NEXT_PUBLIC_HASURA_URL_DEVNET=http://localhost:8080/v1/graphql
-NEXT_PUBLIC_HASURA_SECRET_DEVNET=testing
-NEXT_PUBLIC_EXPLORER_URL_DEVNET=http://localhost:5100
-
-# Future: Celo Mainnet
-# NEXT_PUBLIC_HASURA_URL_MAINNET=https://<envio-mainnet-id>.envio.dev/v1/graphql
-# NEXT_PUBLIC_HASURA_SECRET_MAINNET=
-# NEXT_PUBLIC_EXPLORER_URL_MAINNET=https://explorer.celo.org
 ```
 
-#### 3. Deploy
+### update-endpoint Script
 
-Push to `main` — Vercel auto-deploys.
+`pnpm update-endpoint:mainnet` uses the Vercel API to update `NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED` programmatically:
+
+```bash
+# Requires VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID in the environment
+# (set via GitHub secrets during initial setup, or in local .env)
+pnpm update-endpoint:mainnet <new-endpoint-url>
+```
 
 ---
 
-## Branch Strategy Summary
+## Initial Setup (One-time)
+
+### 1. Envio Setup
+
+1. Go to [envio.dev/app](https://envio.dev/app) → New Deployment
+2. Connect `mento-protocol/monitoring-monorepo`
+3. Configure:
+   - **Directory:** `indexer-envio`
+   - **Config File:** `config.celo.mainnet.yaml`
+   - **Branch:** `deploy/celo-mainnet`
+   - **Plan:** Development (Free)
+4. Deploy and note the GraphQL endpoint URL
+
+### 2. Vercel Setup
+
+1. Go to [vercel.com/new](https://vercel.com/new) → Import `mento-protocol/monitoring-monorepo`
+2. Configure:
+   - **Framework:** Next.js
+   - **Root Directory:** `ui-dashboard`
+3. Add all `NEXT_PUBLIC_*` env vars (see above)
+4. Add GitHub secrets for deploy scripts:
+
+```bash
+pnpm deploy:dashboard:setup
+# Sets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
+```
+
+---
+
+## Branch Strategy
 
 ```text
 main
 ├── 🚀 auto-deploys to Vercel (dashboard)
 └── feature branches → PR → main
 
-deploy/celo-sepolia
-├── 🚀 auto-deploys to Envio (indexer)
-└── updated manually via: git push origin main:deploy/celo-sepolia
-
 deploy/celo-mainnet
-└── (future)
+├── 🚀 auto-deploys to Envio (indexer, mainnet)
+└── updated via: pnpm deploy:indexer:mainnet
 
-deploy/monad-mainnet
-└── (future)
+deploy/celo-sepolia
+├── 🚀 auto-deploys to Envio (indexer, sepolia)
+└── updated via: pnpm deploy:indexer:sepolia
 ```
 
-**Why?**
-
-- Dashboard changes are frequent → auto-deploy on every `main` push
-- Indexer changes are rare → manual push to deploy branch avoids unnecessary redeployments
+**Why deploy branches?** Dashboard changes are frequent → auto-deploy on `main` push. Indexer changes are rare → manual push to deploy branch avoids unnecessary Envio redeployments (which change the endpoint hash, requiring a Vercel env var update).
 
 ---
 
@@ -163,60 +158,24 @@ deploy/monad-mainnet
 
 ### Envio deployment fails
 
-**Check logs in Envio dashboard** → Build Logs tab.
+Check build logs in the Envio dashboard → Build Logs tab. Common issues:
 
-Common issues:
+- `pnpm install` fails → verify `pnpm-lock.yaml` is committed
+- Config file not found → verify `config.celo.mainnet.yaml` exists in `indexer-envio/`
+- TypeScript errors → run `pnpm indexer:mainnet:codegen` locally first
 
-- `pnpm install` fails → check `package.json` / `pnpm-lock.yaml` are committed
-- Config file not found → verify `config.celo.sepolia.yaml` exists in `indexer-envio/`
-- TypeScript errors → run `pnpm indexer:sepolia:codegen` locally first
+### Dashboard shows no data after indexer redeploy
 
-### Vercel deployment fails
-
-**Check build logs in Vercel dashboard**.
-
-Common issues:
-
-- Missing env vars → add in Vercel project settings
-- Build errors → run `pnpm --filter @mento-protocol/ui-dashboard build` locally first
-- Wrong root directory → should be `ui-dashboard` not `.`
+The endpoint hash changed. Run `pnpm update-endpoint:mainnet` with the new URL, then trigger a Vercel redeploy.
 
 ### Indexer not syncing
 
-**Check Envio dashboard → Metrics tab**.
+Check Envio dashboard → Metrics tab.
 
-- If stuck at 0% → check RPC URL in config (for non-HyperSync networks)
-- If RPC rate-limited → add fallback RPC or contact Envio for HyperSync support
-- Check start block is correct (must be ≤ first contract deployment)
+- Stuck at 0% → check RPC URL in config
+- RPC rate-limited → contact Envio for HyperSync support
+- Start block wrong → must be ≤ first contract deployment block (`60664513` for mainnet)
 
----
+### Force a fresh Envio sync
 
-## Monitoring
-
-**Indexer:**
-
-- Envio dashboard → <https://envio.dev/app> → Metrics, Logs, Schema
-- GraphQL playground: `https://<project-id>.envio.dev/v1/graphql`
-
-**Dashboard:**
-
-- Vercel dashboard → <https://vercel.com/dashboard>
-- Production URL: auto-generated by Vercel (e.g., `mento-v3-monitoring.vercel.app`)
-
----
-
-## Scripts
-
-All deployment scripts live in `scripts/`:
-
-```bash
-pnpm deploy:indexer:<network>
-```
-
-Example:
-
-```bash
-pnpm deploy:indexer:sepolia
-```
-
-This pushes `main` to `deploy/celo-sepolia` and triggers Envio redeployment.
+Delete the indexer in Envio dashboard → re-add it. This resets all state and starts from the configured start block.
