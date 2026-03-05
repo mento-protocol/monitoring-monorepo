@@ -18,7 +18,7 @@ permissions: read-all
 
 jobs:
   quality:
-    name: Quality Checks
+    name: Quality Checks (ui-dashboard)
     runs-on: ubuntu-latest
     permissions:
       checks: write
