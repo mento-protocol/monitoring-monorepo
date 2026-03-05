@@ -1,19 +1,3 @@
-export const ALL_POOLS = `
-  query AllPools {
-    Pool(order_by: { createdAtBlock: desc }) {
-      id
-      token0
-      token1
-      source
-      createdAtBlock
-      createdAtTimestamp
-      updatedAtBlock
-      updatedAtTimestamp
-    }
-  }
-`;
-
-/** Extended pool query with oracle health fields — requires updated indexer schema */
 export const ALL_POOLS_WITH_HEALTH = `
   query AllPoolsWithHealth {
     Pool(order_by: { createdAtBlock: desc }) {
@@ -107,17 +91,6 @@ export const POOL_LIQUIDITY = `
   }
 `;
 
-export const POOL_DETAIL = `
-  query PoolDetail($id: String!) {
-    Pool(where: { id: { _eq: $id } }) {
-      id token0 token1 source
-      createdAtBlock createdAtTimestamp
-      updatedAtBlock updatedAtTimestamp
-    }
-  }
-`;
-
-/** Extended pool detail with oracle health fields — requires updated indexer schema */
 export const POOL_DETAIL_WITH_HEALTH = `
   query PoolDetailWithHealth($id: String!) {
     Pool(where: { id: { _eq: $id } }) {
@@ -135,17 +108,6 @@ export const POOL_DETAIL_WITH_HEALTH = `
       priceDifference
       rebalanceThreshold
       lastRebalancedAt
-    }
-  }
-`;
-
-export const GLOBAL_AGGREGATES = `
-  query GlobalAggregates {
-    Pool_aggregate {
-      aggregate { count }
-    }
-    SwapEvent_aggregate {
-      aggregate { count }
     }
   }
 `;

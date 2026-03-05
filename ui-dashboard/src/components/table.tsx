@@ -1,6 +1,6 @@
-import React from "react";
+import type { ReactNode } from "react";
 
-export function Table({ children }: { children: React.ReactNode }) {
+export function Table({ children }: { children: ReactNode }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-800">
       <table className="w-full text-sm">{children}</table>
@@ -8,7 +8,7 @@ export function Table({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function Row({ children }: { children: React.ReactNode }) {
+export function Row({ children }: { children: ReactNode }) {
   return (
     <tr className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
       {children}
@@ -20,7 +20,7 @@ export function Th({
   children,
   align = "left",
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   align?: "left" | "right";
 }) {
   return (
@@ -41,7 +41,7 @@ export function Td({
   align = "left",
   title,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   mono?: boolean;
   small?: boolean;
   muted?: boolean;

@@ -1,0 +1,215 @@
+import { describe, it, expect, vi, afterEach } from "vitest";
+import {
+  truncateAddress,
+  parseWei,
+  formatWei,
+  formatTimestamp,
+  relativeTime,
+  formatBlock,
+  isValidAddress,
+} from "../format";
+
+// ---------------------------------------------------------------------------
+// truncateAddress
+// ---------------------------------------------------------------------------
+describe("truncateAddress", () => {
+  it("returns em-dash for null", () => {
+    expect(truncateAddress(null)).toBe("—");
+  });
+
+  it("returns address unchanged when <= 10 chars", () => {
+    expect(truncateAddress("0x1234567")).toBe("0x1234567");
+    expect(truncateAddress("0x12345678")).toBe("0x12345678");
+  });
+
+  it("truncates long address to 6+4 format", () => {
+    const addr = "0xabc123def456789012345678";
+    const result = truncateAddress(addr);
+    expect(result).toBe("0xabc1…5678");
+  });
+
+  it("truncates standard 42-char Ethereum address", () => {
+    const addr = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
+    const result = truncateAddress(addr);
+    expect(result.startsWith("0xd8dA")).toBe(true);
+    expect(result.endsWith("6045")).toBe(true);
+    expect(result).toContain("…");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseWei
+// ---------------------------------------------------------------------------
+describe("parseWei", () => {
+  it("returns 0 for empty string", () => {
+    expect(parseWei("")).toBe(0);
+  });
+
+  it('returns 0 for "0"', () => {
+    expect(parseWei("0")).toBe(0);
+  });
+
+  it("converts 1e18 wei to 1", () => {
+    expect(parseWei("1000000000000000000")).toBeCloseTo(1, 6);
+  });
+
+  it("supports custom decimals", () => {
+    expect(parseWei("1000000", 6)).toBeCloseTo(1, 6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatWei
+// ---------------------------------------------------------------------------
+describe("formatWei", () => {
+  it('returns "0" for "0"', () => {
+    expect(formatWei("0")).toBe("0");
+  });
+
+  it('returns "0" for empty string', () => {
+    expect(formatWei("")).toBe("0");
+  });
+
+  it("formats 1 token correctly", () => {
+    const result = formatWei("1000000000000000000");
+    expect(result).toBe("1");
+  });
+
+  it("formats 1234.5678 tokens", () => {
+    const result = formatWei("1234567800000000000000");
+    expect(result).toContain("1,234");
+  });
+
+  it("uses exponential notation for very small numbers", () => {
+    // 0.00001 token in wei
+    const result = formatWei("10000000000000"); // 0.00001
+    expect(result).toContain("e");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatBlock
+// ---------------------------------------------------------------------------
+describe("formatBlock", () => {
+  it("formats block number with locale separators", () => {
+    const result = formatBlock("1234567");
+    expect(result).toContain("1");
+    expect(result).toContain("234");
+  });
+
+  it('formats "0" as "0"', () => {
+    expect(formatBlock("0")).toBe("0");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatTimestamp
+// ---------------------------------------------------------------------------
+describe("formatTimestamp", () => {
+  it('returns em-dash for "0"', () => {
+    expect(formatTimestamp("0")).toBe("—");
+  });
+
+  it("returns em-dash for empty string", () => {
+    expect(formatTimestamp("")).toBe("—");
+  });
+
+  it("returns a locale date string for a valid unix timestamp", () => {
+    // 2024-01-01 00:00:00 UTC
+    const result = formatTimestamp("1704067200");
+    expect(result).toBeTruthy();
+    expect(result).not.toBe("—");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// relativeTime
+// ---------------------------------------------------------------------------
+describe("relativeTime", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('returns em-dash for "0"', () => {
+    expect(relativeTime("0")).toBe("—");
+  });
+
+  it("returns em-dash for empty string", () => {
+    expect(relativeTime("")).toBe("—");
+  });
+
+  it("returns seconds ago for recent timestamp", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T00:00:30Z"));
+    const ts = String(new Date("2024-01-01T00:00:00Z").getTime() / 1000);
+    expect(relativeTime(ts)).toBe("30s ago");
+  });
+
+  it("returns minutes ago for timestamp ~5 minutes old", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T00:05:00Z"));
+    const ts = String(new Date("2024-01-01T00:00:00Z").getTime() / 1000);
+    expect(relativeTime(ts)).toBe("5m ago");
+  });
+
+  it("returns hours ago for timestamp ~3 hours old", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T03:00:00Z"));
+    const ts = String(new Date("2024-01-01T00:00:00Z").getTime() / 1000);
+    expect(relativeTime(ts)).toBe("3h ago");
+  });
+
+  it("returns days ago for timestamp ~2 days old", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-03T00:00:00Z"));
+    const ts = String(new Date("2024-01-01T00:00:00Z").getTime() / 1000);
+    expect(relativeTime(ts)).toBe("2d ago");
+  });
+
+  it("returns formatted date for future timestamps", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T00:00:00Z"));
+    const futureTs = String(new Date("2024-01-02T00:00:00Z").getTime() / 1000);
+    // Future timestamps fall through to formatTimestamp
+    const result = relativeTime(futureTs);
+    expect(result).not.toContain("ago");
+    expect(result).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isValidAddress
+// ---------------------------------------------------------------------------
+describe("isValidAddress", () => {
+  it("accepts valid lowercase address", () => {
+    expect(isValidAddress("0xd8da6bf26964af9d7eed9e03e53415d37aa96045")).toBe(
+      true,
+    );
+  });
+
+  it("accepts valid mixed-case (EIP-55) address", () => {
+    expect(isValidAddress("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")).toBe(
+      true,
+    );
+  });
+
+  it("rejects address without 0x prefix", () => {
+    expect(isValidAddress("d8da6bf26964af9d7eed9e03e53415d37aa96045")).toBe(
+      false,
+    );
+  });
+
+  it("rejects address that is too short", () => {
+    expect(isValidAddress("0x1234")).toBe(false);
+  });
+
+  it("rejects address with invalid hex characters", () => {
+    expect(isValidAddress("0xZZZZZBF26964aF9D7eEd9e03E53415D37aA96045")).toBe(
+      false,
+    );
+  });
+
+  it("rejects empty string", () => {
+    expect(isValidAddress("")).toBe(false);
+  });
+});

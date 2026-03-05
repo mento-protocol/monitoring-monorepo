@@ -572,22 +572,25 @@ function AnalyticsTab({
 }) {
   const { network } = useNetwork();
 
-  // VirtualPools never emit UpdateReserves/Rebalanced so they never generate snapshots
-  if (pool && !isFpmm(pool)) {
-    return <EmptyBox message="VirtualPool — no snapshot data available." />;
-  }
+  // VirtualPools never emit UpdateReserves/Rebalanced so they never generate snapshots.
+  // Hooks must all be called before any conditional return (Rules of Hooks).
+  const isFpmmPool = pool ? isFpmm(pool) : true; // treat null as non-virtual while loading
 
   const { data, error, isLoading } = useGQL<{
     PoolSnapshot: PoolSnapshot[];
-  }>(POOL_SNAPSHOTS, { poolId, limit });
+  }>(isFpmmPool ? POOL_SNAPSHOTS : null, { poolId, limit });
   const rows = data?.PoolSnapshot ?? [];
 
   // Reuse the oracle snapshots already fetched in OracleTab (SWR deduplicates by key)
   const { data: oracleData } = useGQL<{ OracleSnapshot: OracleSnapshot[] }>(
-    ORACLE_SNAPSHOTS,
+    isFpmmPool ? ORACLE_SNAPSHOTS : null,
     { poolId, limit },
   );
   const oracleSnapshots = oracleData?.OracleSnapshot ?? [];
+
+  if (pool && !isFpmmPool) {
+    return <EmptyBox message="VirtualPool — no snapshot data available." />;
+  }
 
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;

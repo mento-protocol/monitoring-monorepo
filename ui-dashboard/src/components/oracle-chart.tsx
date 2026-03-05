@@ -2,6 +2,15 @@
 
 import dynamic from "next/dynamic";
 import type { OracleSnapshot } from "@/lib/types";
+import {
+  PLOTLY_BASE_LAYOUT,
+  PLOTLY_AXIS_DEFAULTS,
+  PLOTLY_LEGEND,
+  PLOTLY_MARGIN,
+  PLOTLY_CONFIG,
+  RANGE_SELECTOR_BUTTONS_DAILY,
+  makeDateXAxis,
+} from "@/lib/plot";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
@@ -121,54 +130,12 @@ export function OracleChart({
   ];
 
   const layout = {
-    paper_bgcolor: "transparent",
-    plot_bgcolor: "transparent",
-    font: { color: "#94a3b8", size: 12 },
+    ...PLOTLY_BASE_LAYOUT,
     shapes,
-    xaxis: {
-      gridcolor: "#1e293b",
-      linecolor: "#334155",
-      tickcolor: "#334155",
-      type: "date" as const,
-      rangeslider: {
-        bgcolor: "#1e293b",
-        bordercolor: "#334155",
-        thickness: 0.08,
-      },
-      rangeselector: {
-        bgcolor: "#1e293b",
-        activecolor: "#334155",
-        bordercolor: "#475569",
-        borderwidth: 1,
-        font: { color: "#94a3b8" },
-        buttons: [
-          {
-            count: 1,
-            label: "1d",
-            step: "day" as const,
-            stepmode: "backward" as const,
-          },
-          {
-            count: 7,
-            label: "7d",
-            step: "day" as const,
-            stepmode: "backward" as const,
-          },
-          {
-            count: 30,
-            label: "30d",
-            step: "day" as const,
-            stepmode: "backward" as const,
-          },
-          { step: "all" as const, label: "All" },
-        ],
-      },
-    },
+    xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY),
     yaxis: {
       title: { text: `Oracle Price (${token1Symbol}/${token0Symbol})` },
-      gridcolor: "#1e293b",
-      linecolor: "#334155",
-      tickcolor: "#334155",
+      ...PLOTLY_AXIS_DEFAULTS,
     },
     yaxis2: {
       title: { text: "Deviation %" },
@@ -179,12 +146,8 @@ export function OracleChart({
       tickcolor: "#334155",
       range: [0, 150],
     },
-    legend: {
-      bgcolor: "transparent",
-      bordercolor: "#334155",
-      borderwidth: 1,
-    },
-    margin: { t: 16, r: 60, b: 8, l: 60 },
+    legend: PLOTLY_LEGEND,
+    margin: PLOTLY_MARGIN,
     autosize: true,
     dragmode: "pan" as const,
   };
@@ -219,7 +182,7 @@ export function OracleChart({
       <Plot
         data={[priceTrace, deviationTrace]}
         layout={layout}
-        config={{ responsive: true, displayModeBar: false, scrollZoom: true }}
+        config={PLOTLY_CONFIG}
         style={{ width: "100%", height: 360 }}
         useResizeHandler
       />
