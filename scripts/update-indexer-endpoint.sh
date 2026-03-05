@@ -99,7 +99,7 @@ if [[ -n "$VERCEL_TEAM_ID" ]]; then
 fi
 
 # Get the existing env var ID so we can PATCH it (not POST a duplicate)
-ENV_VAR_ID=$(curl -s "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env${TEAM_PARAM}" \
+ENV_VAR_ID=$(curl -s "https://api.vercel.com/v9/projects/${VERCEL_PROJECT_ID}/env${TEAM_PARAM}" \
   -H "Authorization: Bearer $VERCEL_TOKEN" \
   | python3 -c "
 import json,sys
@@ -109,6 +109,8 @@ for e in d.get('envs', []):
         print(e['id'])
         break
 " 2>/dev/null)
+
+echo "   Env var ID lookup: ${ENV_VAR_ID:-not found}"
 
 if [[ -n "$ENV_VAR_ID" ]]; then
   # PATCH existing env var
