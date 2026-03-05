@@ -101,15 +101,19 @@ if [[ "$SETUP" == "true" || ! -d "$VERCEL_DIR" ]]; then
   TEAM_ID=$(python3 -c "import json; print(json.load(open('$VERCEL_DIR/project.json'))['orgId'])")
   TOKEN=$(get_token)
 
+  # Only deploy when files inside ui-dashboard actually changed.
+  IGNORED_BUILD_CMD="git diff HEAD^ HEAD --quiet -- ui-dashboard"
+
   HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
     -X PATCH "https://api.vercel.com/v9/projects/$PROJECT_ID?teamId=$TEAM_ID" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
-    -d "{\"rootDirectory\": \"$DASHBOARD_SUBDIR\"}")
+    -d "{\"rootDirectory\": \"$DASHBOARD_SUBDIR\", \"commandForIgnoringBuildStep\": \"$IGNORED_BUILD_CMD\"}")
 
   [[ "$HTTP_STATUS" == "200" ]] \
-    || die "Failed to set rootDirectory (HTTP $HTTP_STATUS). Check your token/permissions."
+    || die "Failed to configure project (HTTP $HTTP_STATUS). Check your token/permissions."
   ok "rootDirectory set to $DASHBOARD_SUBDIR"
+  ok "Ignored build step: $IGNORED_BUILD_CMD"
 
   # ── Env vars ───────────────────────────────────────────────────────────────
 
