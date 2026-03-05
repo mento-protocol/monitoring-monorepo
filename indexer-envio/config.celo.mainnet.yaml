@@ -56,6 +56,14 @@ networks:
         events:
           - event: VirtualPoolDeployed
           - event: PoolDeprecated
+      - name: SortedOracles
+        abi_file_path: abis/SortedOracles.json
+        address:
+          - "0xefB84935239dAcdecF7c5bA76d8dE40b077B7b33"
+        handler: src/EventHandlers.ts
+        events:
+          - event: OracleReported
+          - event: MedianUpdated
 unordered_multichain_mode: true
 preload_handlers: true
 field_selection:

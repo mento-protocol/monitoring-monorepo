@@ -10,6 +10,7 @@ import {
   POOL_RESERVES,
   POOL_REBALANCES,
   POOL_LIQUIDITY,
+  ORACLE_SNAPSHOTS,
 } from "@/lib/queries";
 import {
   truncateAddress,
@@ -26,6 +27,7 @@ import type {
   ReserveUpdate,
   RebalanceEvent,
   LiquidityEvent,
+  OracleSnapshot,
 } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
 import { Skeleton, EmptyBox, ErrorBox } from "@/components/feedback";
@@ -34,6 +36,8 @@ import { LimitSelect } from "@/components/controls";
 import { SenderCell } from "@/components/sender-cell";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import { ReserveChart } from "@/components/reserve-chart";
+import { OraclePriceChart } from "@/components/oracle-price-chart";
+import { HealthPanel } from "@/components/health-panel";
 
 export default function PoolDetailPage() {
   return (
@@ -45,7 +49,7 @@ export default function PoolDetailPage() {
 
 // ---------------------------------------------------------------------------
 
-const TABS = ["swaps", "reserves", "rebalances", "liquidity"] as const;
+const TABS = ["swaps", "reserves", "rebalances", "liquidity", "oracle"] as const;
 type Tab = (typeof TABS)[number];
 
 function PoolDetail() {
@@ -102,7 +106,10 @@ function PoolDetail() {
       ) : !pool ? (
         <ErrorBox message={`Pool ${decodedId} not found.`} />
       ) : (
-        <PoolHeader pool={pool} />
+        <>
+          <PoolHeader pool={pool} />
+          <HealthPanel pool={pool} />
+        </>
       )}
 
       <div
@@ -146,6 +153,9 @@ function PoolDetail() {
         )}
         {tab === "liquidity" && (
           <LiquidityTab poolId={decodedId} limit={limit} />
+        )}
+        {tab === "oracle" && (
+          <OracleTab poolId={decodedId} limit={limit} pool={pool} />
         )}
       </div>
     </div>
@@ -435,5 +445,91 @@ function LiquidityTab({ poolId, limit }: { poolId: string; limit: number }) {
         ))}
       </tbody>
     </Table>
+  );
+}
+
+function OracleTab({
+  poolId,
+  limit,
+  pool,
+}: {
+  poolId: string;
+  limit: number;
+  pool: Pool | null;
+}) {
+  const { data, error, isLoading } = useGQL<{
+    OracleSnapshot: OracleSnapshot[];
+  }>(ORACLE_SNAPSHOTS, { poolId, limit });
+  const rows = data?.OracleSnapshot ?? [];
+
+  if (pool?.source?.includes("virtual")) {
+    return <EmptyBox message="VirtualPool — no oracle data available." />;
+  }
+
+  if (error) return <ErrorBox message={error.message} />;
+  if (isLoading) return <Skeleton rows={5} />;
+  if (rows.length === 0)
+    return (
+      <EmptyBox message="No oracle snapshots yet. Oracle data is captured on pool activity (swaps, rebalances)." />
+    );
+
+  return (
+    <>
+      <OraclePriceChart
+        snapshots={rows}
+        token0={pool?.token0 ?? null}
+        token1={pool?.token1 ?? null}
+      />
+      <Table>
+        <thead>
+          <tr className="border-b border-slate-800 bg-slate-900/50">
+            <Th>Source</Th>
+            <Th align="right">Oracle OK</Th>
+            <Th align="right">Price (num)</Th>
+            <Th align="right">Price Diff</Th>
+            <Th align="right">Threshold</Th>
+            <Th align="right">Reporters</Th>
+            <Th align="right">Block</Th>
+            <Th>Time</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {[...rows].reverse().map((r) => (
+            <Row key={r.id}>
+              <Td small>
+                <span className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono">
+                  {r.source}
+                </span>
+              </Td>
+              <Td small align="right">
+                <span
+                  className={r.oracleOk ? "text-emerald-400" : "text-red-400"}
+                >
+                  {r.oracleOk ? "✓" : "✗"}
+                </span>
+              </Td>
+              <Td mono small align="right">
+                {r.oraclePrice}
+              </Td>
+              <Td mono small align="right">
+                {r.priceDifference}
+              </Td>
+              <Td mono small align="right">
+                {r.rebalanceThreshold}
+              </Td>
+              <Td mono small align="right">
+                {r.numReporters}
+              </Td>
+              <Td mono small muted align="right">
+                {formatBlock(r.blockNumber)}
+              </Td>
+              <Td small muted title={formatTimestamp(r.timestamp)}>
+                {relativeTime(r.timestamp)}
+              </Td>
+            </Row>
+          ))}
+        </tbody>
+      </Table>
+    </>
   );
 }

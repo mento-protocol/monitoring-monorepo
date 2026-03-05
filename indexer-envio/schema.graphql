@@ -14,10 +14,41 @@ type Pool {
   notionalVolume1: BigInt!
   rebalanceCount: Int!
 
+  # Oracle state (FPMM pools only; VirtualPools default to N/A)
+  oracleOk: Boolean!
+  oraclePrice: BigInt!
+  oraclePriceDenom: BigInt!
+  oracleTimestamp: BigInt!
+  oracleExpiry: BigInt!
+  oracleNumReporters: Int!
+  referenceRateFeedID: String!
+
+  # Deviation / rebalance state
+  priceDifference: BigInt!
+  rebalanceThreshold: Int!
+  lastRebalancedAt: BigInt!
+
+  # Health
+  healthStatus: String!
+
   createdAtBlock: BigInt!
   createdAtTimestamp: BigInt!
   updatedAtBlock: BigInt!
   updatedAtTimestamp: BigInt!
+}
+
+type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {
+  id: ID!
+  poolId: String! @index
+  timestamp: BigInt! @index
+  oraclePrice: BigInt!
+  oraclePriceDenom: BigInt!
+  oracleOk: Boolean!
+  numReporters: Int!
+  priceDifference: BigInt!
+  rebalanceThreshold: Int!
+  source: String!
+  blockNumber: BigInt!
 }
 
 type PoolSnapshot @index(fields: ["poolId", "timestamp"]) {
