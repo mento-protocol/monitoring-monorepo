@@ -104,3 +104,4 @@ Envio HyperIndex (hosted) → Hasura GraphQL → Next.js Dashboard (Vercel)
 | GraphQL queries | `ui-dashboard/src/lib/queries.ts` |
 | Deployment guide | `docs/deployment.md` |
 | Monitoring spec | vault `projects/mento-v3-monitoring/SPEC.md` |
+# CI gate pattern active
