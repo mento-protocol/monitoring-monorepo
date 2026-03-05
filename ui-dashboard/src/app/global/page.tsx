@@ -31,8 +31,6 @@ type AggregateResponse = {
 };
 
 function GlobalContent() {
-  const { network } = useNetwork();
-
   const {
     data: poolsData,
     error: poolsErr,
