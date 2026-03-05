@@ -1,5 +1,6 @@
 "use client";
 
+import { AddressLink } from "@/components/address-link";
 import { KindBadge, SourceBadge } from "@/components/badges";
 import { LimitSelect } from "@/components/controls";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
@@ -17,7 +18,6 @@ import {
   formatTimestamp,
   formatWei,
   relativeTime,
-  truncateAddress,
 } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import {
@@ -41,7 +41,7 @@ import type {
 } from "@/lib/types";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback } from "react";
+import React, { Suspense, useCallback } from "react";
 
 export default function PoolDetailPage() {
   return (
@@ -104,9 +104,11 @@ function PoolDetail() {
         </Link>
         <span className="mx-2">/</span>
         <span className="text-slate-200">
-          {pool
-            ? poolName(network, pool.token0, pool.token1)
-            : truncateAddress(decodedId)}
+          {pool ? (
+            poolName(network, pool.token0, pool.token1)
+          ) : (
+            <AddressLink address={decodedId} />
+          )}
         </span>
       </nav>
 
@@ -190,22 +192,18 @@ function PoolHeader({ pool }: { pool: Pool }) {
       <div className="flex flex-wrap items-center gap-3 mb-3">
         <h1 className="text-xl font-bold text-white">{name}</h1>
         <SourceBadge source={pool.source} />
-        <span className="font-mono text-sm text-slate-500" title={pool.id}>
-          {truncateAddress(pool.id)}
+        <span className="text-sm">
+          <AddressLink address={pool.id} />
         </span>
       </div>
       <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
         <Stat
           label="Token 0"
-          value={truncateAddress(pool.token0)}
-          title={pool.token0 ?? undefined}
-          mono
+          value={pool.token0 ? <AddressLink address={pool.token0} /> : "—"}
         />
         <Stat
           label="Token 1"
-          value={truncateAddress(pool.token1)}
-          title={pool.token1 ?? undefined}
-          mono
+          value={pool.token1 ? <AddressLink address={pool.token1} /> : "—"}
         />
         <Stat
           label="Created at block"
@@ -228,7 +226,7 @@ function Stat({
   mono,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   title?: string;
   mono?: boolean;
 }) {

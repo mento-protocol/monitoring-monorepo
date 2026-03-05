@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { truncateAddress, relativeTime, formatTimestamp } from "@/lib/format";
+import { relativeTime, formatTimestamp } from "@/lib/format";
 import { poolName } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
 import { SourceBadge, HealthBadge } from "@/components/badges";
+import { AddressLink } from "@/components/address-link";
 
 interface PoolsTableProps {
   pools: Pool[];
@@ -43,8 +44,8 @@ export function PoolsTable({ pools }: PoolsTableProps) {
             <td className="px-4 py-3">
               <HealthBadge status={p.healthStatus ?? "N/A"} />
             </td>
-            <Td mono muted small title={p.id}>
-              {truncateAddress(p.id)}
+            <Td small>
+              <AddressLink address={p.id} />
             </Td>
             <Td muted title={formatTimestamp(p.createdAtTimestamp)}>
               {relativeTime(p.createdAtTimestamp)}
