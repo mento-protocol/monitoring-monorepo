@@ -38,10 +38,16 @@ export default function RootLayout({
                 Mento v3 Monitor
               </Link>
               <Link
-                href="/global"
+                href="/"
                 className="text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
               >
                 Global
+              </Link>
+              <Link
+                href="/pools"
+                className="text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+              >
+                Pools
               </Link>
               <NetworkSelector />
             </nav>
