@@ -98,16 +98,40 @@ if [[ -n "$VERCEL_TEAM_ID" ]]; then
   TEAM_PARAM="?teamId=$VERCEL_TEAM_ID"
 fi
 
-# Update the env var via Vercel API
-UPDATE_RESULT=$(curl -s -X POST "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env${TEAM_PARAM}" \
+# Get the existing env var ID so we can PATCH it (not POST a duplicate)
+ENV_VAR_ID=$(curl -s "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env${TEAM_PARAM}" \
   -H "Authorization: Bearer $VERCEL_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"key\": \"NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED\",
-    \"value\": \"$GRAPHQL_URL\",
-    \"type\": \"plain\",
-    \"target\": [\"production\", \"preview\"]
-  }")
+  | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+for e in d.get('envs', []):
+    if e.get('key') == 'NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED':
+        print(e['id'])
+        break
+" 2>/dev/null)
+
+if [[ -n "$ENV_VAR_ID" ]]; then
+  # PATCH existing env var
+  UPDATE_RESULT=$(curl -s -X PATCH "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env/${ENV_VAR_ID}${TEAM_PARAM}" \
+    -H "Authorization: Bearer $VERCEL_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"value\": \"$GRAPHQL_URL\",
+      \"type\": \"plain\",
+      \"target\": [\"production\", \"preview\"]
+    }")
+else
+  # POST new env var
+  UPDATE_RESULT=$(curl -s -X POST "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env${TEAM_PARAM}" \
+    -H "Authorization: Bearer $VERCEL_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"key\": \"NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED\",
+      \"value\": \"$GRAPHQL_URL\",
+      \"type\": \"plain\",
+      \"target\": [\"production\", \"preview\"]
+    }")
+fi
 
 if echo "$UPDATE_RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); exit(0 if d.get('key') or d.get('id') else 1)" 2>/dev/null; then
   echo "✅ Vercel env var updated"
