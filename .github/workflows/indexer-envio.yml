@@ -11,12 +11,6 @@ on:
       - .github/workflows/indexer-envio.yml
   pull_request:
     branches: [main]
-    paths:
-      - indexer-envio/**
-      - scripts/**
-      - docs/**
-      - .trunk/**
-      - .github/workflows/indexer-envio.yml
 
 permissions: read-all
 
