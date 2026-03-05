@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - indexer-envio/**
+      - scripts/**
       - .trunk/**
       - .github/workflows/indexer-envio.yml
   pull_request:
     branches: [main]
     paths:
       - indexer-envio/**
+      - scripts/**
       - .trunk/**
       - .github/workflows/indexer-envio.yml
 

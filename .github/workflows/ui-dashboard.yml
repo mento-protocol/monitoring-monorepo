@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - ui-dashboard/**
+      - scripts/**
       - .trunk/**
       - .github/workflows/ui-dashboard.yml
   pull_request:
     branches: [main]
     paths:
       - ui-dashboard/**
+      - scripts/**
       - .trunk/**
       - .github/workflows/ui-dashboard.yml
 
