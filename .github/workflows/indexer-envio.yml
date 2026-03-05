@@ -6,6 +6,7 @@ on:
     paths:
       - indexer-envio/**
       - scripts/**
+      - docs/**
       - .trunk/**
       - .github/workflows/indexer-envio.yml
   pull_request:
@@ -13,6 +14,7 @@ on:
     paths:
       - indexer-envio/**
       - scripts/**
+      - docs/**
       - .trunk/**
       - .github/workflows/indexer-envio.yml
 
