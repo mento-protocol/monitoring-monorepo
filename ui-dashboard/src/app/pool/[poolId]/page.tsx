@@ -39,6 +39,7 @@ import { SenderCell } from "@/components/sender-cell";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import { ReserveChart } from "@/components/reserve-chart";
 import { OraclePriceChart } from "@/components/oracle-price-chart";
+import { OracleChart } from "@/components/oracle-chart";
 import { HealthPanel } from "@/components/health-panel";
 import { SnapshotChart } from "@/components/snapshot-chart";
 
@@ -570,6 +571,13 @@ function AnalyticsTab({
   }>(POOL_SNAPSHOTS, { poolId, limit });
   const rows = data?.PoolSnapshot ?? [];
 
+  // Re-use the oracle snapshots already fetched in OracleTab (SWR deduplicates by key)
+  const { data: oracleData } = useGQL<{ OracleSnapshot: OracleSnapshot[] }>(
+    ORACLE_SNAPSHOTS,
+    { poolId, limit },
+  );
+  const oracleSnapshots = oracleData?.OracleSnapshot ?? [];
+
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
   if (rows.length === 0)
@@ -582,6 +590,11 @@ function AnalyticsTab({
 
   return (
     <>
+      <OracleChart
+        snapshots={oracleSnapshots}
+        token0Symbol={sym0}
+        token1Symbol={sym1}
+      />
       <SnapshotChart snapshots={rows} token0Symbol={sym0} token1Symbol={sym1} />
       <Table>
         <thead>
