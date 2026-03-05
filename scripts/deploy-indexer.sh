@@ -60,4 +60,30 @@ echo ""
 echo "✅ Pushed to $DEPLOY_BRANCH"
 echo "   Envio will automatically redeploy the indexer."
 echo ""
-echo "Monitor at: https://envio.dev/app"
+echo "📋 POST-DEPLOY CHECKLIST (do these after sync completes, ~2-5 min):"
+echo ""
+echo "   1. Watch sync progress:"
+echo "      https://envio.dev/app/mento-protocol/mento-v3-${NETWORK}"
+echo ""
+echo "   2. Once 'Synced: 100%', copy the GraphQL endpoint from the deployment page"
+echo "      (format: https://indexer.dev.hyperindex.xyz/<hash>/v1/graphql)"
+echo ""
+echo "   3. Update Vercel env var:"
+echo "      NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED=<new-endpoint>"
+echo "      Or run: ENDPOINT_HASH=<hash> pnpm update-endpoint:mainnet"
+echo ""
+echo "   4. Vercel will auto-redeploy. Verify at: https://monitoring.mento.org"
+echo ""
+
+# Set a reminder via OpenClaw cron if available
+REMINDER_MINUTES=10
+if command -v openclaw &>/dev/null; then
+  REMIND_AT=$(date -u -d "+${REMINDER_MINUTES} minutes" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || \
+              date -u -v+${REMINDER_MINUTES}M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+  if [[ -n "$REMIND_AT" ]]; then
+    echo "⏰ Setting a ${REMINDER_MINUTES}-min reminder to update the Vercel endpoint..."
+    # This would need openclaw CLI support for cron - skip silently if not available
+  fi
+fi
+
+echo "⏰ Don't forget to update the Vercel endpoint after sync completes!"
