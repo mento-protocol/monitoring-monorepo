@@ -7,18 +7,18 @@ export type Pool = {
   createdAtTimestamp: string;
   updatedAtBlock: string;
   updatedAtTimestamp: string;
-  // Oracle & health state
-  healthStatus: string;
-  oracleOk: boolean;
-  oraclePrice: string;
-  oraclePriceDenom: string;
-  oracleTimestamp: string;
-  oracleExpiry: string;
-  oracleNumReporters: number;
-  referenceRateFeedID: string;
-  priceDifference: string;
-  rebalanceThreshold: number;
-  lastRebalancedAt: string;
+  // Oracle & health state (optional — only present when indexer has new schema)
+  healthStatus?: string;
+  oracleOk?: boolean;
+  oraclePrice?: string;
+  oraclePriceDenom?: string;
+  oracleTimestamp?: string;
+  oracleExpiry?: string;
+  oracleNumReporters?: number;
+  referenceRateFeedID?: string;
+  priceDifference?: string;
+  rebalanceThreshold?: number;
+  lastRebalancedAt?: string;
 };
 
 export type OracleSnapshot = {

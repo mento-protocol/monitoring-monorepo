@@ -64,10 +64,11 @@ interface HealthPanelProps {
 export function HealthPanel({ pool }: HealthPanelProps) {
   const { network } = useNetwork();
   const isVirtual = pool.source?.includes("virtual");
+  const hasHealthData = pool.healthStatus !== undefined;
 
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
-  const oraclePrice = parseOraclePrice(pool.oraclePrice, pool.oraclePriceDenom);
+  const oraclePrice = parseOraclePrice(pool.oraclePrice ?? "0", pool.oraclePriceDenom ?? "0");
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -79,6 +80,10 @@ export function HealthPanel({ pool }: HealthPanelProps) {
       {isVirtual ? (
         <p className="text-sm text-slate-400">
           VirtualPool — no oracle data. Health monitoring is not applicable.
+        </p>
+      ) : !hasHealthData ? (
+        <p className="text-sm text-slate-400">
+          Oracle health data not yet available — indexer schema update pending.
         </p>
       ) : (
         <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
@@ -122,7 +127,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
           <div>
             <dt className="text-slate-400 mb-1">Oracle Reporters</dt>
             <dd className="text-white">
-              {pool.oracleNumReporters > 0
+              {pool.oracleNumReporters != null && pool.oracleNumReporters > 0
                 ? pool.oracleNumReporters
                 : <span className="text-slate-500">—</span>}
             </dd>
@@ -133,8 +138,8 @@ export function HealthPanel({ pool }: HealthPanelProps) {
             <dt className="text-slate-400 mb-1">Deviation vs Threshold</dt>
             <dd>
               <DeviationBar
-                priceDifference={pool.priceDifference}
-                rebalanceThreshold={pool.rebalanceThreshold}
+                priceDifference={pool.priceDifference ?? "0"}
+                rebalanceThreshold={pool.rebalanceThreshold ?? 0}
               />
             </dd>
           </div>
