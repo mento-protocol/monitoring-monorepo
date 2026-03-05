@@ -8,7 +8,7 @@ import contractsData from "./contracts.json";
 // These must match the namespace keys in @mento-protocol/contracts contracts.json.
 const ACTIVE_DEPLOYMENT = {
   "celo-sepolia": "testnet-v2-rc5",
-  "celo-mainnet": "celo",
+  "celo-mainnet": "mainnet",
 } as const satisfies Record<string, string | null>;
 
 export type IndexerNetworkId =

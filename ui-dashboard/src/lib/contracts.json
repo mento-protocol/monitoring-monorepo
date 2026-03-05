@@ -185,6 +185,332 @@
         "address": "0x4c35853A3B4e647fD266f4de678dCc8fEC410BF6",
         "type": "token"
       }
+    },
+    "mainnet": {
+      "AUDm": {
+        "address": "0x7175504C455076F15c04A2F90a8e352281F492F9",
+        "type": "token"
+      },
+      "axlEUROC": {
+        "address": "0x061cc5a2C863E0C1Cb404006D559dB18A34C762d",
+        "type": "token"
+      },
+      "axlUSDC": {
+        "address": "0xEB466342C4d449BC9f53A865D5Cb90586f405215",
+        "type": "token"
+      },
+      "BiPoolManager": {
+        "address": "0x22d9db95E6Ae61c104A7B6F6C78D7993B94ec901",
+        "type": "contract"
+      },
+      "BreakerBox": {
+        "address": "0x303ED1df62Fa067659B586EbEe8De0EcE824Ab39",
+        "type": "contract"
+      },
+      "BRLm": {
+        "address": "0xe8537a3d056da446677b9e9d6c5db704eaab4787",
+        "type": "token"
+      },
+      "Broker": {
+        "address": "0x777A8255cA72412f0d706dc03C9D1987306B4CaD",
+        "type": "contract"
+      },
+      "CADm": {
+        "address": "0xff4Ab19391af240c311c54200a492233052B6325",
+        "type": "token"
+      },
+      "CELO": {
+        "address": "0x471ece3750da237f93b8e339c536989b8978a438",
+        "type": "token"
+      },
+      "ChainlinkRelayerFactory": {
+        "address": "0x247cb6ecf21bdd2bc29d726cccc8d2f066211663",
+        "type": "contract"
+      },
+      "CHFm": {
+        "address": "0xb55a79F398E759E43C95b979163f30eC87Ee131D",
+        "type": "token"
+      },
+      "ConstantProductPricingModule": {
+        "address": "0x0c07126d0CB30E66eF7553Cc7C37143B4f06DddB",
+        "type": "contract"
+      },
+      "ConstantSumPricingModule": {
+        "address": "0xDebED1F6f6ce9F6e73AA25F95acBFFE2397550Fb",
+        "type": "contract"
+      },
+      "COPm": {
+        "address": "0x8a567e2ae79ca692bd748ab832081c45de4041ea",
+        "type": "token"
+      },
+      "EURm": {
+        "address": "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73",
+        "type": "token"
+      },
+      "FeeSetter": {
+        "address": "0x58099B74F4ACd642Da77b4B7966b4138ec5Ba458",
+        "type": "contract"
+      },
+      "FxPriceFeedManager": {
+        "address": "0x58099B74F4ACd642Da77b4B7966b4138ec5Ba458",
+        "type": "contract"
+      },
+      "GBPm": {
+        "address": "0xCCF663b1fF11028f0b19058d0f7B674004a40746",
+        "type": "token"
+      },
+      "GHSm": {
+        "address": "0xfAeA5F3404bbA20D3cc2f8C4B0A888F55a3c7313",
+        "type": "token"
+      },
+      "JPYm": {
+        "address": "0xc45eCF20f3CD864B32D9794d6f76814aE8892e20",
+        "type": "token"
+      },
+      "KESm": {
+        "address": "0x456a3D042C0DbD3db53D5489e98dFb038553B0d0",
+        "type": "token"
+      },
+      "Locking": {
+        "address": "0x001Bb66636dCd149A1A2bA8C50E408BdDd80279C",
+        "type": "contract"
+      },
+      "MedianDeltaBreaker": {
+        "address": "0x49349F92D2B17d491e42C8fdB02D19f072F9B5D9",
+        "type": "contract"
+      },
+      "MentoGovernor": {
+        "address": "0x47036d78bB3169b4F5560dD77BF93f4412A59852",
+        "type": "contract"
+      },
+      "MigrationMultisig": {
+        "address": "0x58099B74F4ACd642Da77b4B7966b4138ec5Ba458",
+        "type": "contract"
+      },
+      "NGNm": {
+        "address": "0xE2702Bd97ee33c88c8f6f92DA3B733608aa76F71",
+        "type": "token"
+      },
+      "PHPm": {
+        "address": "0x105d4A9306D2E55a71d2Eb95B81553AE1dC20d7B",
+        "type": "token"
+      },
+      "ProtocolFeeRecipient": {
+        "address": "0x0Dd57F6f181D0469143fe9380762d8a112e96e4a",
+        "type": "contract"
+      },
+      "ProxyAdmin": {
+        "address": "0x70d8DC60f9701c46D4CE9AC141E154f6804e1dC3",
+        "type": "contract"
+      },
+      "Reserve": {
+        "address": "0x9380fA34Fd9e4Fd14c06305fd7B6199089eD4eb9",
+        "type": "contract"
+      },
+      "ReserveSafe": {
+        "address": "0x87647780180B8f55980C7D3fFeFe08a9B29e9aE1",
+        "type": "contract"
+      },
+      "SortedOracles": {
+        "address": "0xefb84935239dacdecf7c5ba76d8de40b077b7b33",
+        "type": "contract"
+      },
+      "StableTokenV2": {
+        "address": "0x434563B0604BE100F04B7Ae485BcafE3c9D8850E",
+        "type": "token"
+      },
+      "TimelockController": {
+        "address": "0x890DB8A597940165901372Dd7DB61C9f246e2147",
+        "type": "contract"
+      },
+      "USDC": {
+        "address": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
+        "type": "token"
+      },
+      "USDm": {
+        "address": "0x765de816845861e75a25fca122bb6898b8b1282a",
+        "type": "token"
+      },
+      "USDT": {
+        "address": "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e",
+        "type": "token"
+      },
+      "ValueDeltaBreaker": {
+        "address": "0x4DBC33B3abA78475A5AA4BC7A5B11445d387BF68",
+        "type": "contract"
+      },
+      "XOFm": {
+        "address": "0x73F93dcc49cB8A239e2032663e9475dd5ef29A08",
+        "type": "token"
+      },
+      "YieldSplitAddress": {
+        "address": "0x0Dd57F6f181D0469143fe9380762d8a112e96e4a",
+        "type": "contract"
+      },
+      "ZARm": {
+        "address": "0x4c35853A3B4e647fD266f4de678dCc8fEC410BF6",
+        "type": "token"
+      },
+      "ActivePool": {
+        "address": "0xa7873F4Bf2A1ea2EB20B1e8A992C4748e78473b2",
+        "type": "contract"
+      },
+      "AddressesRegistry": {
+        "address": "0xB3136DBadB14Ab587FFa91545538126938Fe0C6E",
+        "type": "contract"
+      },
+      "BorrowerOperations": {
+        "address": "0x8ec9A81871F816F1EF007a82293703057A943B8A",
+        "type": "contract"
+      },
+      "CDPLiquidityStrategy:Impl": {
+        "address": "0xaa6A9b01d02dDb3DB718669A83621C97c2e31823",
+        "type": "contract"
+      },
+      "CollSurplusPool": {
+        "address": "0xfFF48ee3bd2D534E35b54D538de30a9d7709d4B6",
+        "type": "contract"
+      },
+      "CollateralRegistry": {
+        "address": "0x1bEDD4334335522B0a0e8e610d326B16B0a605Fb",
+        "type": "contract"
+      },
+      "DefaultPool": {
+        "address": "0x95191e52d01eC060cEA753CDADfEEB07b78D0047",
+        "type": "contract"
+      },
+      "FPMM": {
+        "address": "0x8cB0518a0510Ab62450F79f3cD9EE0cbdDB77F30",
+        "type": "pool"
+      },
+      "FPMMFactory:Impl": {
+        "address": "0xCC5bB0ba252082213ce1303CBfbA8D56CD872A8a",
+        "type": "contract"
+      },
+      "FXPriceFeed": {
+        "address": "0x994F75Fa669eb7e5bF7d465e796c2c7845D707A9",
+        "type": "contract"
+      },
+      "FactoryRegistry:Impl": {
+        "address": "0x8124b66595Ff4E79B7F0c1b1101AFa501d219311",
+        "type": "contract"
+      },
+      "FixedAssetReader": {
+        "address": "0xb62825c011D2ae3fc89bc4e095e43B51D06545b5",
+        "type": "contract"
+      },
+      "GasPool": {
+        "address": "0x8b61f941D89560C7D8b3D595F44F7fd97D79817b",
+        "type": "contract"
+      },
+      "HintHelpers": {
+        "address": "0xAfd741674bc4aa965a788dACe5b0434FD4374D82",
+        "type": "contract"
+      },
+      "MarketHoursBreaker": {
+        "address": "0x0A18B8e7338eF8d6025529257aA5CCd5A14e0DAF",
+        "type": "contract"
+      },
+      "MetadataNFT": {
+        "address": "0x5e06ADD8bD01dCBEF0C20d6fC25A8C96166B86A4",
+        "type": "contract"
+      },
+      "MultiTroveGetter": {
+        "address": "0x78fd33d2bCe0389cF41e15947B0EB0cE9dF8327F",
+        "type": "contract"
+      },
+      "OracleAdapter:Impl": {
+        "address": "0xc1B767756F582d124E76BB3e246f31e6aB256059",
+        "type": "contract"
+      },
+      "ReserveLiquidityStrategy:Impl": {
+        "address": "0x420FbDB50dadF0286144BFF91ed62A6893dee148",
+        "type": "contract"
+      },
+      "ReserveTroveFactory": {
+        "address": "0x02859465DCC7D7F2Bee183fC7FaC78544c9519e1",
+        "type": "contract"
+      },
+      "ReserveV2:Impl": {
+        "address": "0xC16d23E4789e2B214D71C1Df7820a4dDAb1Df5FF",
+        "type": "contract"
+      },
+      "Router": {
+        "address": "0x4861840C2EfB2b98312B0aE34d86fD73E8f9B6f6",
+        "type": "contract"
+      },
+      "SSTORE2DataPointer": {
+        "address": "0xB4f12C44ec87A4541248BEC6c2D0ce7E7b882694",
+        "type": "contract"
+      },
+      "SortedTroves": {
+        "address": "0x46D0C9e51e05D6ff38B2a19D6310488f3112Bf9b",
+        "type": "contract"
+      },
+      "StabilityPool:Impl": {
+        "address": "0x2d5d7E2767c5493610caE84E0AB7F9D2CCE8C1A5",
+        "type": "contract"
+      },
+      "StableTokenV3:v3.0.0": {
+        "address": "0x4B9B0E94197B7b2b11D311239e1420106cE7a2a2",
+        "type": "token"
+      },
+      "StableTokenV3:v3.0.1": {
+        "address": "0x815795C30D0758A297B08cD4e0643620c974c318",
+        "type": "token"
+      },
+      "SystemParams": {
+        "address": "0x064D8bCC79711cF51dF7Ca0a7fe531A271Cd74E9",
+        "type": "contract"
+      },
+      "CDPLiquidityStrategy": {
+        "address": "0x4e78BD9565341EAbe99cDC024acB044d9BDcB985",
+        "type": "contract"
+      },
+      "FPMMFactory": {
+        "address": "0xa849b475FE5a4B5C9C3280152c7a1945b907613b",
+        "type": "contract"
+      },
+      "FXPriceFeed:GBPm": {
+        "address": "0xBBB144A67f4403112b4C895Cc85d5EE4F90013DE",
+        "type": "contract"
+      },
+      "FactoryRegistry": {
+        "address": "0x7b2f7d11eabD576782f77bF2CcA46a853410AdF6",
+        "type": "contract"
+      },
+      "OracleAdapter": {
+        "address": "0xa472fBBF4b890A54381977ac392BdF82EeC4383a",
+        "type": "contract"
+      },
+      "ReserveLiquidityStrategy": {
+        "address": "0xa0fB8b16ce6AF3634fF9F3f4F40E49E1C1ae4f0B",
+        "type": "contract"
+      },
+      "ReserveV2": {
+        "address": "0x4255Cf38e51516766180b33122029A88Cb853806",
+        "type": "contract"
+      },
+      "StabilityPool:GBPm": {
+        "address": "0x06346c0fAB682dBde9f245D2D84677592E8aaa15",
+        "type": "contract"
+      },
+      "SystemParamsProxy:GBPm": {
+        "address": "0x70536e44d1D9238BA8E35Ffe63Bb388a63F0DE51",
+        "type": "contract"
+      },
+      "TroveManager": {
+        "address": "0xb38aEf2bF4e34B997330D626EBCd7629De3885C9",
+        "type": "contract"
+      },
+      "TroveNFT": {
+        "address": "0x46273A5792013973b64a42E760E6F81d0472C6b6",
+        "type": "contract"
+      },
+      "VirtualPoolFactory": {
+        "address": "0x22abd4ADF6aab38aC1022352d496A07Acee5aCB3",
+        "type": "contract"
+      }
     }
   },
   "11142220": {
