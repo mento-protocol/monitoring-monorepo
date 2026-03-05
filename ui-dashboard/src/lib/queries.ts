@@ -9,6 +9,16 @@ export const ALL_POOLS = `
       createdAtTimestamp
       updatedAtBlock
       updatedAtTimestamp
+      healthStatus
+      oracleOk
+      oraclePrice
+      oraclePriceDenom
+      oracleTimestamp
+      priceDifference
+      rebalanceThreshold
+      oracleNumReporters
+      lastRebalancedAt
+      referenceRateFeedID
     }
   }
 `;
@@ -83,6 +93,39 @@ export const POOL_DETAIL = `
       id token0 token1 source
       createdAtBlock createdAtTimestamp
       updatedAtBlock updatedAtTimestamp
+      healthStatus
+      oracleOk
+      oraclePrice
+      oraclePriceDenom
+      oracleTimestamp
+      oracleExpiry
+      oracleNumReporters
+      referenceRateFeedID
+      priceDifference
+      rebalanceThreshold
+      lastRebalancedAt
+    }
+  }
+`;
+
+export const ORACLE_SNAPSHOTS = `
+  query OracleSnapshots($poolId: String!, $limit: Int!) {
+    OracleSnapshot(
+      where: { poolId: { _eq: $poolId } }
+      order_by: { timestamp: asc }
+      limit: $limit
+    ) {
+      id
+      poolId
+      timestamp
+      oraclePrice
+      oraclePriceDenom
+      oracleOk
+      numReporters
+      priceDifference
+      rebalanceThreshold
+      source
+      blockNumber
     }
   }
 `;

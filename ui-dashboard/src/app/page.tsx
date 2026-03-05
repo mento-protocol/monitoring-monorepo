@@ -18,7 +18,7 @@ import { useNetwork } from "@/components/network-provider";
 import type { Pool, SwapEvent } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
-import { SourceBadge } from "@/components/badges";
+import { SourceBadge, HealthBadge } from "@/components/badges";
 import { LimitSelect } from "@/components/controls";
 import { SenderCell } from "@/components/sender-cell";
 
@@ -228,6 +228,7 @@ function PoolsTable({ pools }: { pools: Pool[] }) {
         <tr className="border-b border-slate-800 bg-slate-900/50">
           <Th>Pool</Th>
           <Th>Type</Th>
+          <Th>Status</Th>
           <Th>Address</Th>
           <Th>Created</Th>
           <Th>Updated</Th>
@@ -246,6 +247,9 @@ function PoolsTable({ pools }: { pools: Pool[] }) {
             </td>
             <td className="px-4 py-3">
               <SourceBadge source={p.source} />
+            </td>
+            <td className="px-4 py-3">
+              <HealthBadge status={p.healthStatus ?? "N/A"} />
             </td>
             <Td mono muted small title={p.id}>
               {truncateAddress(p.id)}

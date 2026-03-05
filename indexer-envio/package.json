@@ -24,7 +24,8 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "envio": "2.32.3"
+    "envio": "2.32.3",
+    "viem": "2.47.0"
   },
   "optionalDependencies": {
     "generated": "link:generated"
