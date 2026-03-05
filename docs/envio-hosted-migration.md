@@ -3,8 +3,15 @@ title: "Envio Hosted Service Migration Plan"
 date: 2026-03-04
 type: research
 tags: [mento, envio, indexer, deployment, vercel]
-status: complete
+status: archived
+archived: 2026-03-05
+archived_reason: "Migration complete. Both mainnet and Sepolia indexers are live on Envio hosted. See docs/deployment.md for current workflow."
 ---
+
+> **ARCHIVED** — This document was a planning/research artifact for the Envio hosted migration. Migration is complete. See [`docs/deployment.md`](./deployment.md) for the current deployment workflow.
+
+---
+
 
 ## TL;DR
 

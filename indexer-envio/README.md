@@ -1,168 +1,220 @@
-# Celo Devnet HyperIndex (v3 FPMM-focused)
+# Mento v3 Envio HyperIndex Indexer
 
-This package is an Envio HyperIndex indexer for Celo devnet trading-path events.
+Envio HyperIndex indexer for Mento v3 on Celo Mainnet and Celo Sepolia. Tracks FPMM pool activity, oracle health, trading limits, and rebalancer liveness.
 
-It currently tracks:
+## What It Does
 
-- `FPMMFactory` (`FPMMDeployed`)
-- `FPMM` (`Swap`, `Mint`, `Burn`, `UpdateReserves`, `Rebalanced`)
-- `VirtualPoolFactory` (`VirtualPoolDeployed`, `PoolDeprecated`)
+The indexer listens to on-chain events from Mento v3 contracts and writes structured entities to Postgres, exposed via Hasura GraphQL.
 
-## How it works
+### Events Indexed
 
-The indexing flow is:
+| Contract        | Events                                                        |
+| --------------- | ------------------------------------------------------------- |
+| FPMMFactory     | `FPMMDeployed`                                                |
+| FPMM (pool)     | `Swap`, `Mint`, `Burn`, `UpdateReserves`, `Rebalanced`        |
+| VirtualPoolFactory | `VirtualPoolDeployed`, `PoolDeprecated`                    |
+| SortedOracles   | `OracleReportRemoved`, `OracleReportUpdated` (mainnet only)   |
 
-1. Address and RPC source of truth comes from `../../tools/address-book/addresses.json`.
-1. `scripts/sync-contract-config.mjs` copies ABIs from `../../../mento-core/out/**` into `abis/`.
-1. The same sync script generates:
-   - `config/contracts.celo.v3.json` (manifest of tracked contracts/events)
-   - `config.celo.devnet.yaml` (Envio runtime config)
-1. `pnpm codegen` generates typed runtime code in `generated/` from:
-   - `config.celo.devnet.yaml`
-   - `schema.graphql`
-   - `src/EventHandlers.ts`
-1. `pnpm dev` starts Postgres + Hasura + indexer and writes entities from handlers into the DB.
-1. You query via GraphQL at `http://localhost:8080/v1/graphql`.
+### Entities Written
 
-```mermaid
-flowchart LR
-addressBook[AddressBookJSON]
-mentoArtifacts[MentoCoreArtifacts]
-syncScript[SyncContractConfigScript]
-configYaml[ConfigYAML]
-schemaGraphql[SchemaGraphQL]
-handlers[EventHandlersTS]
-codegen[EnvioCodegen]
-runtime[EnvioRuntime]
-postgres[Postgres]
-hasura[HasuraGraphQL]
+| Entity              | Description                                                          |
+| ------------------- | -------------------------------------------------------------------- |
+| `Pool`              | Per-pool state: reserves, health status, oracle state, trading limits, rebalancer liveness |
+| `PoolSnapshot`      | Hourly pre-aggregated: volume, TVL, swap count, rebalance count      |
+| `OracleSnapshot`    | Per-oracle-event: price, deviation, health status                    |
+| `TradingLimit`      | Per-pool per-token: limit state, netflow, pressure ratio             |
+| `SwapEvent`         | Individual swap: amounts in/out, txHash, timestamp                   |
+| `LiquidityEvent`    | Mint/burn events: amounts, txHash                                    |
+| `ReserveUpdate`     | Reserve snapshots on every `UpdateReserves`                          |
+| `RebalanceEvent`    | Per-rebalance: improvement, effectiveness ratio                      |
+| `FactoryDeployment` | Pool creation events from factory                                    |
+| `VirtualPoolLifecycle` | VirtualPool deploy/deprecate events                              |
 
-addressBook --> syncScript
-mentoArtifacts --> syncScript
-syncScript --> configYaml
-syncScript --> runtime
-configYaml --> codegen
-schemaGraphql --> codegen
-handlers --> codegen
-codegen --> runtime
-runtime --> postgres
-postgres --> hasura
-```
+### Pool Type Logic
 
-## Important files
+FPMM pools (4 on mainnet) have oracle health, trading limits, and rebalancer liveness.
+VirtualPools get `"N/A"` for these fields.
 
-- `config.celo.devnet.yaml` — runtime chain/contracts/events config
-- `schema.graphql` — entity model queried in Hasura
-- `src/EventHandlers.ts` — event-to-entity mapping logic
-- `scripts/sync-contract-config.mjs` — address/ABI/config sync
-- `scripts/run-envio-with-env.mjs` — hardened command wrapper for env loading/validation
-- `.env` — local runtime variables (`ENVIO_RPC_URL`, `ENVIO_START_BLOCK`, etc.)
+The single source of truth is `isFpmm()` in `ui-dashboard/src/lib/tokens.ts`, which checks the pool's source field.
 
-## Prerequisites
+## Mainnet Contracts
 
-- [Node.js (v18+)](https://nodejs.org/en/download/current)
-- [pnpm (v8+)](https://pnpm.io/installation)
-- [Docker desktop](https://www.docker.com/products/docker-desktop/)
-- Access to devnet RPC (allowlist your IP from repo root with `pnpm add-ip`)
+| Contract        | Address                                      |
+| --------------- | -------------------------------------------- |
+| FPMMFactory     | `0xa849b475FE5a4B5C9C3280152c7a1945b907613b` |
+| Router          | `0x4861840C2EfB2b98312B0aE34d86fD73E8f9B6f6` |
+| OracleAdapter   | `0xa472fBBF4b890A54381977ac392BdF82EeC4383a` |
+| SortedOracles   | `0xefB84935239dAcdecF7c5bA76d8dE40b077B7b33` |
 
-## Setup and run (Celo)
+Start block: `60664513`
 
-1. Copy env file:
+## Mainnet FPMM Pools
 
-```bash
-cp .env.example .env
-```
+| Pool Address                                   | Pair          |
+| ---------------------------------------------- | ------------- |
+| `0x8c0014afe032e4574481d8934504100bf23fcb56`   | USDm / GBPm   |
+| `0xb285d4c7133d6f27bfb29224fb0d22e7ec3ddd2d`   | USDm / axlUSDC |
+| `0x462fe04b4fd719cbd04c0310365d421d02aaa19e`   | USDm / USDC   |
+| `0x0feba760d93423d127de1b6abecdb60e5253228d`   | USDT / USDm   |
 
-1. Prepare indexer artifacts:
+## Configuration Files
 
-```bash
-pnpm prepare:indexer
-```
+| File                           | Network        |
+| ------------------------------ | -------------- |
+| `config.celo.mainnet.yaml`     | Celo Mainnet   |
+| `config.celo.sepolia.yaml`     | Celo Sepolia   |
+| `config.celo.devnet.yaml`      | Celo DevNet (local) |
 
-1. Start the indexer:
+## Schema
 
-```bash
-pnpm dev
-```
+See [`schema.graphql`](./schema.graphql) for the full entity model.
 
-Then open `http://localhost:8080` (admin secret: `testing`).
+Key design decisions:
+- `PoolSnapshot` uses hourly buckets (industry standard, Uniswap/Balancer pattern)
+- Gap-filling for charts is done in the dashboard layer (forward-fill) — Envio `onBlock` handlers lack timestamps
+- `TradingLimit` has a composite ID: `{poolId}-{tokenAddress}`
+- All BigInt fields use string representation in GraphQL responses
 
-## Commands
+## Local Development
+
+### Prerequisites
+
+- Node.js 22 LTS
+- pnpm 10.x
+- Docker Desktop (runs Postgres + Hasura locally)
+
+### Setup
 
 ```bash
-pnpm sync:contracts
-pnpm codegen
-pnpm prepare:indexer
-pnpm dev
-pnpm start
-pnpm stop
+# From repo root
+cp indexer-envio/.env.example indexer-envio/.env
+# Edit .env: set ENVIO_RPC_URL and ENVIO_START_BLOCK
+
+# Generate types from schema + config
+pnpm indexer:sepolia:codegen
+
+# Start indexer stack (Docker + indexer)
+pnpm indexer:sepolia:dev
 ```
 
-Notes:
+Hasura console: `http://localhost:8080` (admin secret: `testing`)
+GraphQL endpoint: `http://localhost:8080/v1/graphql`
 
-- `pnpm codegen`, `pnpm dev`, and `pnpm start` load `.env` automatically.
-- `ENVIO_START_BLOCK` and `ENVIO_RPC_URL` are required for `codegen/dev/start`.
-- `codegen` runs with `CI=true` internally to avoid non-TTY pnpm prompt failures.
-- On a fresh checkout, `codegen` will run twice: first to generate `generated/`, then again after auto-installing its deps. This is expected — subsequent runs are single-pass.
+### Available Commands (from repo root)
 
-## Query examples
+```bash
+pnpm indexer:sepolia:codegen   # Generate types for Sepolia
+pnpm indexer:sepolia:dev       # Start local Sepolia indexer
+pnpm indexer:mainnet:codegen   # Generate types for Mainnet
+pnpm indexer:mainnet:dev       # Start local Mainnet indexer
+pnpm deploy:indexer:mainnet    # Push to deploy/celo-mainnet branch
+pnpm deploy:indexer:sepolia    # Push to deploy/celo-sepolia branch
+```
 
-Recent swaps:
+### From `indexer-envio/` directory
+
+```bash
+pnpm codegen    # Generate types (loads .env automatically)
+pnpm dev        # Start indexer stack
+pnpm start      # Start without codegen
+pnpm stop       # Stop Docker containers
+```
+
+## Key Files
+
+| File                       | Purpose                                            |
+| -------------------------- | -------------------------------------------------- |
+| `schema.graphql`           | Entity model (Hasura schema)                       |
+| `src/EventHandlers.ts`     | Event → entity mapping logic                       |
+| `config.celo.mainnet.yaml` | Mainnet chain config, contracts, events, start block |
+| `config.celo.sepolia.yaml` | Sepolia chain config                               |
+| `abis/`                    | Contract ABIs                                      |
+| `.env.example`             | Environment variable template                      |
+
+## Example Queries
+
+**Recent swaps:**
 
 ```graphql
 query RecentSwaps {
-  SwapEvent(limit: 20, order_by: { blockNumber: desc }) {
+  SwapEvent(limit: 20, order_by: { blockTimestamp: desc }) {
     id
     poolId
-    sender
-    recipient
     amount0In
     amount1In
     amount0Out
     amount1Out
-    blockNumber
+    txHash
     blockTimestamp
   }
 }
 ```
 
-Pools:
+**Pool health state:**
 
 ```graphql
-query Pools {
-  Pool(order_by: { updatedAtBlock: desc }) {
+query PoolHealth {
+  Pool {
     id
     token0
     token1
-    source
-    createdAtBlock
-    updatedAtBlock
+    healthStatus
+    oracleOk
+    priceDifference
+    rebalanceThreshold
+    limitStatus
+    limitPressure0
+    limitPressure1
+    rebalanceLivenessStatus
   }
 }
 ```
 
-## Adding a new network
+**Trading limits:**
 
-This package is currently Celo-specific (chain id and tracked contracts are curated in `scripts/sync-contract-config.mjs`).
-
-Recommended path for a new network:
-
-1. Duplicate this package directory (`indexers/celo` -> `indexers/<network>`).
-1. Add network addresses + rpc URL in `../../tools/address-book/addresses.json`.
-1. Update contract specs in `scripts/sync-contract-config.mjs`:
-   - network id selection
-   - contract labels
-   - ABI artifact paths
-   - event allowlist
-1. Update `.env.example` defaults (`ENVIO_RPC_URL`, `ENVIO_START_BLOCK`).
-1. Run:
-
-```bash
-pnpm sync:contracts
-pnpm codegen
-pnpm dev
+```graphql
+query TradingLimits {
+  TradingLimit {
+    poolId
+    token
+    limitPressure0
+    limitPressure1
+    limitStatus
+    netflow0
+    netflow1
+    updatedAtTimestamp
+  }
+}
 ```
 
-1. Verify in Hasura with aggregate + known-address queries before wider use.
+**Oracle snapshots for a pool:**
 
-If we want true multi-network onboarding in one package, next step is to parameterize `sync-contract-config.mjs` with `--network <id>` and generate per-network manifests/configs.
+```graphql
+query OracleHistory($poolId: String!) {
+  OracleSnapshot(
+    where: { poolId: { _eq: $poolId } }
+    order_by: { timestamp: desc }
+    limit: 100
+  ) {
+    timestamp
+    oraclePrice
+    oraclePriceDenom
+    oracleOk
+    priceDifference
+    rebalanceThreshold
+    numReporters
+  }
+}
+```
+
+## Deployment
+
+The indexer deploys via Git push to a deploy branch. Envio watches the branch and auto-redeploys.
+
+> ⚠️ **Each deployment generates a new endpoint URL hash.** Update the Vercel env var after every redeploy. See [`docs/deployment.md`](../docs/deployment.md).
+
+## Known Limitations
+
+- Only one indexer can run locally at a time (port 9898 hardcoded in Envio)
+- SortedOracles events are only indexed on mainnet (Sepolia returns zero address for oracle contracts)
+- Envio free tier: 100k event soft limit, 30-day expiry — monitor and redeploy before expiry
