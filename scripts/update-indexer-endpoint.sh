@@ -36,7 +36,7 @@ echo "🔍 Querying Envio operator API for latest deployment..."
 COMMIT_HASH=$(curl -s "https://operator.hyperindex.xyz/v1/graphql" \
   -H "x-envio-api-token: $ENVIO_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"query\":\"{ deployments(where: {indexer_id: {_eq: \\\"$INDEXER_ID\\\"}}, order_by: {created_time: desc}, limit: 1, where: {deployment_status: {_eq: \\\"added\\\"}}) { commit_hash } }\"}" \
+  -d "{\"query\":\"{ deployments(where: {indexer_id: {_eq: \\\"$INDEXER_ID\\\"}}, order_by: {created_time: desc}, limit: 1) { commit_hash } }\"}" \
   | python3 -c "import json,sys; data=json.load(sys.stdin); print(data['data']['deployments'][0]['commit_hash'])")
 
 echo "📌 Latest deployment commit: $COMMIT_HASH"
