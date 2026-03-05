@@ -19,6 +19,10 @@ export type Pool = {
   priceDifference?: string;
   rebalanceThreshold?: number;
   lastRebalancedAt?: string;
+  swapCount?: number;
+  rebalanceCount?: number;
+  notionalVolume0?: string;
+  notionalVolume1?: string;
 };
 
 export type OracleSnapshot = {
@@ -72,6 +76,22 @@ export type ReserveUpdate = {
   txHash: string;
   blockNumber: string;
   blockTimestamp: string;
+};
+
+export type PoolSnapshot = {
+  id: string;
+  poolId: string;
+  timestamp: string;
+  reserves0: string;
+  reserves1: string;
+  swapCount: number;
+  swapVolume0: string;
+  swapVolume1: string;
+  rebalanceCount: number;
+  cumulativeSwapCount: number;
+  cumulativeVolume0: string;
+  cumulativeVolume1: string;
+  blockNumber: string;
 };
 
 export type RebalanceEvent = {

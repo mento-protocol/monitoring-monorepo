@@ -11,6 +11,7 @@ import {
   POOL_REBALANCES,
   POOL_LIQUIDITY,
   ORACLE_SNAPSHOTS,
+  POOL_SNAPSHOTS,
 } from "@/lib/queries";
 import {
   truncateAddress,
@@ -28,6 +29,7 @@ import type {
   RebalanceEvent,
   LiquidityEvent,
   OracleSnapshot,
+  PoolSnapshot,
 } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
 import { Skeleton, EmptyBox, ErrorBox } from "@/components/feedback";
@@ -38,6 +40,7 @@ import { TxHashCell } from "@/components/tx-hash-cell";
 import { ReserveChart } from "@/components/reserve-chart";
 import { OraclePriceChart } from "@/components/oracle-price-chart";
 import { HealthPanel } from "@/components/health-panel";
+import { SnapshotChart } from "@/components/snapshot-chart";
 
 export default function PoolDetailPage() {
   return (
@@ -55,6 +58,7 @@ const TABS = [
   "rebalances",
   "liquidity",
   "oracle",
+  "analytics",
 ] as const;
 type Tab = (typeof TABS)[number];
 
@@ -162,6 +166,9 @@ function PoolDetail() {
         )}
         {tab === "oracle" && (
           <OracleTab poolId={decodedId} limit={limit} pool={pool} />
+        )}
+        {tab === "analytics" && (
+          <AnalyticsTab poolId={decodedId} limit={limit} />
         )}
       </div>
     </div>
@@ -531,6 +538,62 @@ function OracleTab({
               </Td>
               <Td small muted title={formatTimestamp(r.timestamp)}>
                 {relativeTime(r.timestamp)}
+              </Td>
+            </Row>
+          ))}
+        </tbody>
+      </Table>
+    </>
+  );
+}
+
+function AnalyticsTab({ poolId, limit }: { poolId: string; limit: number }) {
+  const { data, error, isLoading } = useGQL<{
+    PoolSnapshot: PoolSnapshot[];
+  }>(POOL_SNAPSHOTS, { poolId, limit });
+  const rows = data?.PoolSnapshot ?? [];
+
+  if (error) return <ErrorBox message={error.message} />;
+  if (isLoading) return <Skeleton rows={5} />;
+  if (rows.length === 0)
+    return (
+      <EmptyBox message="No snapshot data yet. Snapshots are created on pool activity." />
+    );
+
+  return (
+    <>
+      <SnapshotChart snapshots={rows} />
+      <Table>
+        <thead>
+          <tr className="border-b border-slate-800 bg-slate-900/50">
+            <Th>Time</Th>
+            <Th align="right">Swaps</Th>
+            <Th align="right">Volume (Token 0)</Th>
+            <Th align="right">Volume (Token 1)</Th>
+            <Th align="right">Cumulative Swaps</Th>
+            <Th align="right">Block</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {[...rows].reverse().map((r) => (
+            <Row key={r.id}>
+              <Td small muted title={formatTimestamp(r.timestamp)}>
+                {relativeTime(r.timestamp)}
+              </Td>
+              <Td mono small align="right">
+                {r.swapCount}
+              </Td>
+              <Td mono small align="right">
+                {formatWei(r.swapVolume0)}
+              </Td>
+              <Td mono small align="right">
+                {formatWei(r.swapVolume1)}
+              </Td>
+              <Td mono small align="right">
+                {r.cumulativeSwapCount}
+              </Td>
+              <Td mono small muted align="right">
+                {formatBlock(r.blockNumber)}
               </Td>
             </Row>
           ))}
