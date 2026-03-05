@@ -4,7 +4,7 @@ import { Suspense, useState, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useGQL } from "@/lib/graphql";
-import { ALL_POOLS, RECENT_SWAPS, POOL_SWAPS } from "@/lib/queries";
+import { ALL_POOLS_WITH_HEALTH, RECENT_SWAPS, POOL_SWAPS } from "@/lib/queries";
 import {
   truncateAddress,
   formatWei,
@@ -54,7 +54,7 @@ function HomeContent() {
     data: poolsData,
     error: poolsErr,
     isLoading: poolsLoading,
-  } = useGQL<{ Pool: Pool[] }>(ALL_POOLS);
+  } = useGQL<{ Pool: Pool[] }>(ALL_POOLS_WITH_HEALTH);
 
   const swapQuery = poolFilter ? POOL_SWAPS : RECENT_SWAPS;
   const swapVars = poolFilter ? { poolId: poolFilter, limit } : { limit };
