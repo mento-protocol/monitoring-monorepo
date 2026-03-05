@@ -50,6 +50,11 @@ export function poolName(
   return `${sym0}/${sym1}`;
 }
 
+/** Returns true if the pool is an FPMM (as opposed to a VirtualPool). */
+export function isFpmm(pool: Pick<Pool, "source">): boolean {
+  return pool.source.toLowerCase().includes("fpmm");
+}
+
 /** Lookup from pool ID -> display name for a list of pools. */
 export function buildPoolNameMap(
   network: Network,

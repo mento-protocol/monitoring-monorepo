@@ -3,19 +3,15 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { useGQL } from "@/lib/graphql";
-import { ALL_POOLS_WITH_HEALTH, GLOBAL_AGGREGATES } from "@/lib/queries";
-import {
-  truncateAddress,
-  relativeTime,
-  formatTimestamp,
-  formatWei,
-} from "@/lib/format";
-import { poolName } from "@/lib/tokens";
+import { ALL_POOLS_WITH_HEALTH } from "@/lib/queries";
+import { formatWei } from "@/lib/format";
+import { poolName, isFpmm } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
-import { SourceBadge, HealthBadge } from "@/components/badges";
+import { SourceBadge } from "@/components/badges";
+import { PoolsTable } from "@/components/pools-table";
 
 export default function GlobalPage() {
   return (
@@ -25,11 +21,6 @@ export default function GlobalPage() {
   );
 }
 
-type AggregateResponse = {
-  Pool_aggregate: { aggregate: { count: number } };
-  SwapEvent_aggregate: { aggregate: { count: number } };
-};
-
 function GlobalContent() {
   const {
     data: poolsData,
@@ -37,27 +28,21 @@ function GlobalContent() {
     isLoading: poolsLoading,
   } = useGQL<{ Pool: Pool[] }>(ALL_POOLS_WITH_HEALTH);
 
-  const {
-    data: aggData,
-    error: aggErr,
-    isLoading: aggLoading,
-  } = useGQL<AggregateResponse>(GLOBAL_AGGREGATES);
-
   const pools = poolsData?.Pool ?? [];
-  const totalSwaps = aggData?.SwapEvent_aggregate?.aggregate?.count ?? 0;
 
-  const fpmmPools = pools.filter((p) => p.source.includes("fpmm"));
-  const virtualPools = pools.filter((p) => !p.source.includes("fpmm"));
+  const fpmmPools = pools.filter(isFpmm);
+  const virtualPools = pools.filter((p) => !isFpmm(p));
 
   const okCount = pools.filter((p) => p.healthStatus === "OK").length;
   const warnCount = pools.filter((p) => p.healthStatus === "WARN").length;
   const critCount = pools.filter((p) => p.healthStatus === "CRITICAL").length;
+  // N/A = VirtualPools (oracle health not applicable) + any pools without health data
   const naCount = pools.filter(
     (p) => !p.healthStatus || p.healthStatus === "N/A",
   ).length;
 
-  const loading = poolsLoading || aggLoading;
-  const error = poolsErr || aggErr;
+  // Derive total swaps from pool cumulative counts (avoids a second query)
+  const totalSwaps = pools.reduce((sum, p) => sum + (p.swapCount ?? 0), 0);
 
   return (
     <div className="space-y-8">
@@ -68,8 +53,8 @@ function GlobalContent() {
         </p>
       </div>
 
-      {error && (
-        <ErrorBox message={`Failed to load data: ${error.message}`} />
+      {poolsErr && (
+        <ErrorBox message={`Failed to load data: ${poolsErr.message}`} />
       )}
 
       {/* Summary tiles */}
@@ -78,19 +63,19 @@ function GlobalContent() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Tile
             label="Total Pools"
-            value={loading ? "…" : String(pools.length)}
+            value={poolsLoading ? "…" : String(pools.length)}
           />
           <Tile
             label="FPMM Pools"
-            value={loading ? "…" : String(fpmmPools.length)}
+            value={poolsLoading ? "…" : String(fpmmPools.length)}
           />
           <Tile
             label="Virtual Pools"
-            value={loading ? "…" : String(virtualPools.length)}
+            value={poolsLoading ? "…" : String(virtualPools.length)}
           />
           <Tile
             label="Total Swaps"
-            value={loading ? "…" : totalSwaps.toLocaleString()}
+            value={poolsLoading ? "…" : totalSwaps.toLocaleString()}
           />
         </div>
       </section>
@@ -99,15 +84,18 @@ function GlobalContent() {
       <section>
         <h2 className="text-lg font-semibold text-white mb-3">
           Health Status
+          <span className="ml-2 text-xs font-normal text-slate-500">
+            (N/A = VirtualPools — oracle health not applicable)
+          </span>
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Tile label="🟢 OK" value={loading ? "…" : String(okCount)} />
-          <Tile label="🟡 WARN" value={loading ? "…" : String(warnCount)} />
+          <Tile label="🟢 OK" value={poolsLoading ? "…" : String(okCount)} />
+          <Tile label="🟡 WARN" value={poolsLoading ? "…" : String(warnCount)} />
           <Tile
             label="🔴 CRITICAL"
-            value={loading ? "…" : String(critCount)}
+            value={poolsLoading ? "…" : String(critCount)}
           />
-          <Tile label="⚪ N/A" value={loading ? "…" : String(naCount)} />
+          <Tile label="⚪ N/A" value={poolsLoading ? "…" : String(naCount)} />
         </div>
       </section>
 
@@ -119,7 +107,7 @@ function GlobalContent() {
         ) : pools.length === 0 ? (
           <EmptyBox message="No pools found." />
         ) : (
-          <AllPoolsTable pools={pools} />
+          <PoolsTable pools={pools} />
         )}
       </section>
 
@@ -137,53 +125,6 @@ function GlobalContent() {
         )}
       </section>
     </div>
-  );
-}
-
-function AllPoolsTable({ pools }: { pools: Pool[] }) {
-  const { network } = useNetwork();
-  return (
-    <Table>
-      <thead>
-        <tr className="border-b border-slate-800 bg-slate-900/50">
-          <Th>Pool</Th>
-          <Th>Type</Th>
-          <Th>Status</Th>
-          <Th>Address</Th>
-          <Th>Created</Th>
-          <Th>Updated</Th>
-        </tr>
-      </thead>
-      <tbody>
-        {pools.map((p) => (
-          <Row key={p.id}>
-            <td className="px-4 py-3">
-              <Link
-                href={`/pool/${encodeURIComponent(p.id)}`}
-                className="font-semibold text-indigo-400 hover:text-indigo-300"
-              >
-                {poolName(network, p.token0, p.token1)}
-              </Link>
-            </td>
-            <td className="px-4 py-3">
-              <SourceBadge source={p.source} />
-            </td>
-            <td className="px-4 py-3">
-              <HealthBadge status={p.healthStatus ?? "N/A"} />
-            </td>
-            <Td mono muted small title={p.id}>
-              {truncateAddress(p.id)}
-            </Td>
-            <Td muted title={formatTimestamp(p.createdAtTimestamp)}>
-              {relativeTime(p.createdAtTimestamp)}
-            </Td>
-            <Td muted title={formatTimestamp(p.updatedAtTimestamp)}>
-              {relativeTime(p.updatedAtTimestamp)}
-            </Td>
-          </Row>
-        ))}
-      </tbody>
-    </Table>
   );
 }
 
