@@ -16,47 +16,21 @@ on:
 permissions: read-all
 
 jobs:
-  check-changes:
-    name: Detect changed files
-    runs-on: ubuntu-latest
-    outputs:
-      indexer-changed: ${{ steps.filter.outputs.indexer }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            indexer:
-              - 'indexer-envio/**'
-              - 'scripts/**'
-              - 'docs/**'
-              - '.trunk/**'
-              - '.github/workflows/indexer-envio.yml'
-
   quality:
     name: Quality Checks (indexer-envio)
-    needs: check-changes
-    if: needs.check-changes.outputs.indexer-changed == 'true'
     runs-on: ubuntu-latest
     permissions:
       checks: write
       contents: read
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      # Note: typecheck skipped — requires `envio codegen` (Docker) to generate types.
-      # Typecheck runs locally via pre-push hook after codegen.
       - name: Build check (syntax only)
         run: pnpm --filter @mento-protocol/indexer-envio build || true
 
@@ -66,12 +40,12 @@ jobs:
     needs: [quality]
     runs-on: ubuntu-latest
     steps:
-      - name: Pass if quality succeeded or was skipped (no relevant changes)
+      - name: Pass if quality succeeded or was skipped
         run: |
           result="${{ needs.quality.result }}"
           if [ "$result" = "success" ] || [ "$result" = "skipped" ]; then
-            echo "✅ CI gate passed (quality: $result)"
+            echo "CI gate passed (quality: $result)"
           else
-            echo "❌ CI gate failed (quality: $result)"
+            echo "CI gate failed (quality: $result)"
             exit 1
           fi
