@@ -99,7 +99,7 @@ function PoolDetail() {
     <div className="space-y-6">
       <nav aria-label="Breadcrumb" className="text-sm text-slate-400">
         <Link href="/" className="hover:text-indigo-400">
-          Home
+          Global
         </Link>
         <span className="mx-2">/</span>
         <span className="text-slate-200">
