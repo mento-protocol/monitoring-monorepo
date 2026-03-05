@@ -12,19 +12,15 @@ function parseOraclePrice(num: string, denom: string): string {
   return price.toFixed(6);
 }
 
-function formatBps(value: string): string {
-  if (!value || value === "0") return "0";
-  // priceDifference is in bps (basis points * 10000 or raw bps)
-  // rebalanceThreshold is in bps (e.g. 5000 = 50 bps)
-  return value;
-}
-
 interface DeviationBarProps {
   priceDifference: string;
   rebalanceThreshold: number;
 }
 
-function DeviationBar({ priceDifference, rebalanceThreshold }: DeviationBarProps) {
+function DeviationBar({
+  priceDifference,
+  rebalanceThreshold,
+}: DeviationBarProps) {
   if (!rebalanceThreshold || rebalanceThreshold === 0) {
     return <span className="text-slate-400 text-sm">—</span>;
   }
@@ -68,7 +64,10 @@ export function HealthPanel({ pool }: HealthPanelProps) {
 
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
-  const oraclePrice = parseOraclePrice(pool.oraclePrice ?? "0", pool.oraclePriceDenom ?? "0");
+  const oraclePrice = parseOraclePrice(
+    pool.oraclePrice ?? "0",
+    pool.oraclePriceDenom ?? "0",
+  );
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -92,9 +91,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
             <dt className="text-slate-400 mb-1">Oracle Status</dt>
             <dd className="flex flex-col gap-0.5">
               <span
-                className={
-                  pool.oracleOk ? "text-emerald-400" : "text-red-400"
-                }
+                className={pool.oracleOk ? "text-emerald-400" : "text-red-400"}
               >
                 {pool.oracleOk ? "✓ Fresh" : "✗ Stale"}
               </span>
@@ -127,9 +124,12 @@ export function HealthPanel({ pool }: HealthPanelProps) {
           <div>
             <dt className="text-slate-400 mb-1">Oracle Reporters</dt>
             <dd className="text-white">
-              {pool.oracleNumReporters != null && pool.oracleNumReporters > 0
-                ? pool.oracleNumReporters
-                : <span className="text-slate-500">—</span>}
+              {pool.oracleNumReporters != null &&
+              pool.oracleNumReporters > 0 ? (
+                pool.oracleNumReporters
+              ) : (
+                <span className="text-slate-500">—</span>
+              )}
             </dd>
           </div>
 
@@ -155,9 +155,11 @@ export function HealthPanel({ pool }: HealthPanelProps) {
                   : undefined
               }
             >
-              {pool.lastRebalancedAt && pool.lastRebalancedAt !== "0"
-                ? relativeTime(pool.lastRebalancedAt)
-                : <span className="text-slate-500">Never</span>}
+              {pool.lastRebalancedAt && pool.lastRebalancedAt !== "0" ? (
+                relativeTime(pool.lastRebalancedAt)
+              ) : (
+                <span className="text-slate-500">Never</span>
+              )}
             </dd>
           </div>
         </dl>
