@@ -1,6 +1,7 @@
 name: "Indexer Envio: Quality Checks"
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
