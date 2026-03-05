@@ -13,7 +13,7 @@ import {
   formatBlock,
   isValidAddress,
 } from "@/lib/format";
-import { buildPoolNameMap } from "@/lib/tokens";
+import { buildPoolNameMap, tokenSymbol } from "@/lib/tokens";
 import { PoolsTable } from "@/components/pools-table";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool, SwapEvent } from "@/lib/types";
@@ -67,6 +67,7 @@ function HomeContent() {
   const pools = poolsData?.Pool ?? [];
   const swaps = swapsData?.SwapEvent ?? [];
   const poolNames = buildPoolNameMap(network, pools);
+  const poolMap = Object.fromEntries(pools.map((p) => [p.id, p]));
 
   const setURL = useCallback(
     (pool: string, lim: number) => {
@@ -211,6 +212,7 @@ function HomeContent() {
             swaps={swaps}
             showPool={!poolFilter}
             poolNames={poolNames}
+            poolMap={poolMap}
           />
         )}
       </section>
@@ -224,60 +226,67 @@ function SwapTable({
   swaps,
   showPool,
   poolNames,
+  poolMap,
 }: {
   swaps: SwapEvent[];
   showPool: boolean;
   poolNames: Record<string, string>;
+  poolMap: Record<string, Pool>;
 }) {
+  const { network } = useNetwork();
   return (
     <Table>
       <thead>
         <tr className="border-b border-slate-800 bg-slate-900/50">
           {showPool && <Th>Pool</Th>}
           <Th>Sender</Th>
-          <Th align="right">Amt0 In</Th>
-          <Th align="right">Amt1 In</Th>
-          <Th align="right">Amt0 Out</Th>
-          <Th align="right">Amt1 Out</Th>
+          <Th>Trader</Th>
+          <Th align="right">Sold</Th>
+          <Th align="right">Bought</Th>
           <Th align="right">Block</Th>
           <Th>Time</Th>
         </tr>
       </thead>
       <tbody>
-        {swaps.map((s) => (
-          <Row key={s.id}>
-            {showPool && (
-              <td className="px-4 py-2">
-                <Link
-                  href={`/pool/${encodeURIComponent(s.poolId)}`}
-                  className="text-sm font-medium text-indigo-400 hover:text-indigo-300"
-                  title={s.poolId}
-                >
-                  {poolNames[s.poolId] ?? truncateAddress(s.poolId)}
-                </Link>
-              </td>
-            )}
-            <SenderCell address={s.sender} />
-            <Td mono small align="right">
-              {formatWei(s.amount0In)}
-            </Td>
-            <Td mono small align="right">
-              {formatWei(s.amount1In)}
-            </Td>
-            <Td mono small align="right">
-              {formatWei(s.amount0Out)}
-            </Td>
-            <Td mono small align="right">
-              {formatWei(s.amount1Out)}
-            </Td>
-            <Td mono small muted align="right">
-              {formatBlock(s.blockNumber)}
-            </Td>
-            <Td small muted title={formatTimestamp(s.blockTimestamp)}>
-              {relativeTime(s.blockTimestamp)}
-            </Td>
-          </Row>
-        ))}
+        {swaps.map((s) => {
+          const pool = poolMap[s.poolId];
+          const sym0 = tokenSymbol(network, pool?.token0 ?? null);
+          const sym1 = tokenSymbol(network, pool?.token1 ?? null);
+          const soldToken0 = BigInt(s.amount0In) > BigInt(0);
+          const soldAmt = soldToken0 ? s.amount0In : s.amount1In;
+          const boughtAmt = soldToken0 ? s.amount1Out : s.amount0Out;
+          const soldSym = soldToken0 ? sym0 : sym1;
+          const boughtSym = soldToken0 ? sym1 : sym0;
+          return (
+            <Row key={s.id}>
+              {showPool && (
+                <td className="px-4 py-2">
+                  <Link
+                    href={`/pool/${encodeURIComponent(s.poolId)}`}
+                    className="text-sm font-medium text-indigo-400 hover:text-indigo-300"
+                    title={s.poolId}
+                  >
+                    {poolNames[s.poolId] ?? truncateAddress(s.poolId)}
+                  </Link>
+                </td>
+              )}
+              <SenderCell address={s.sender} />
+              <SenderCell address={s.recipient} />
+              <Td mono small align="right">
+                {formatWei(soldAmt)} {soldSym}
+              </Td>
+              <Td mono small align="right">
+                {formatWei(boughtAmt)} {boughtSym}
+              </Td>
+              <Td mono small muted align="right">
+                {formatBlock(s.blockNumber)}
+              </Td>
+              <Td small muted title={formatTimestamp(s.blockTimestamp)}>
+                {relativeTime(s.blockTimestamp)}
+              </Td>
+            </Row>
+          );
+        })}
       </tbody>
     </Table>
   );

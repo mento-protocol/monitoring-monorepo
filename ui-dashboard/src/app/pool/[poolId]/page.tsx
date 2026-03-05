@@ -155,7 +155,9 @@ function PoolDetail() {
       </div>
 
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-        {tab === "swaps" && <SwapsTab poolId={decodedId} limit={limit} />}
+        {tab === "swaps" && (
+          <SwapsTab poolId={decodedId} limit={limit} pool={pool} />
+        )}
         {tab === "reserves" && (
           <ReservesTab poolId={decodedId} limit={limit} pool={pool} />
         )}
@@ -244,7 +246,16 @@ function Stat({
 // Tab content
 // ---------------------------------------------------------------------------
 
-function SwapsTab({ poolId, limit }: { poolId: string; limit: number }) {
+function SwapsTab({
+  poolId,
+  limit,
+  pool,
+}: {
+  poolId: string;
+  limit: number;
+  pool: Pool | null;
+}) {
+  const { network } = useNetwork();
   const { data, error, isLoading } = useGQL<{ SwapEvent: SwapEvent[] }>(
     POOL_SWAPS,
     { poolId, limit },
@@ -255,45 +266,49 @@ function SwapsTab({ poolId, limit }: { poolId: string; limit: number }) {
   if (isLoading) return <Skeleton rows={5} />;
   if (swaps.length === 0) return <EmptyBox message="No swaps for this pool." />;
 
+  const sym0 = tokenSymbol(network, pool?.token0 ?? null);
+  const sym1 = tokenSymbol(network, pool?.token1 ?? null);
+
   return (
     <Table>
       <thead>
         <tr className="border-b border-slate-800 bg-slate-900/50">
           <Th>Tx</Th>
           <Th>Sender</Th>
-          <Th align="right">Amt0 In</Th>
-          <Th align="right">Amt1 In</Th>
-          <Th align="right">Amt0 Out</Th>
-          <Th align="right">Amt1 Out</Th>
+          <Th>Trader</Th>
+          <Th align="right">Sold</Th>
+          <Th align="right">Bought</Th>
           <Th align="right">Block</Th>
           <Th>Time</Th>
         </tr>
       </thead>
       <tbody>
-        {swaps.map((s) => (
-          <Row key={s.id}>
-            <TxHashCell txHash={s.txHash} />
-            <SenderCell address={s.sender} />
-            <Td mono small align="right">
-              {formatWei(s.amount0In)}
-            </Td>
-            <Td mono small align="right">
-              {formatWei(s.amount1In)}
-            </Td>
-            <Td mono small align="right">
-              {formatWei(s.amount0Out)}
-            </Td>
-            <Td mono small align="right">
-              {formatWei(s.amount1Out)}
-            </Td>
-            <Td mono small muted align="right">
-              {formatBlock(s.blockNumber)}
-            </Td>
-            <Td small muted title={formatTimestamp(s.blockTimestamp)}>
-              {relativeTime(s.blockTimestamp)}
-            </Td>
-          </Row>
-        ))}
+        {swaps.map((s) => {
+          const soldToken0 = BigInt(s.amount0In) > BigInt(0);
+          const soldAmt = soldToken0 ? s.amount0In : s.amount1In;
+          const boughtAmt = soldToken0 ? s.amount1Out : s.amount0Out;
+          const soldSym = soldToken0 ? sym0 : sym1;
+          const boughtSym = soldToken0 ? sym1 : sym0;
+          return (
+            <Row key={s.id}>
+              <TxHashCell txHash={s.txHash} />
+              <SenderCell address={s.sender} />
+              <SenderCell address={s.recipient} />
+              <Td mono small align="right">
+                {formatWei(soldAmt)} {soldSym}
+              </Td>
+              <Td mono small align="right">
+                {formatWei(boughtAmt)} {boughtSym}
+              </Td>
+              <Td mono small muted align="right">
+                {formatBlock(s.blockNumber)}
+              </Td>
+              <Td small muted title={formatTimestamp(s.blockTimestamp)}>
+                {relativeTime(s.blockTimestamp)}
+              </Td>
+            </Row>
+          );
+        })}
       </tbody>
     </Table>
   );
