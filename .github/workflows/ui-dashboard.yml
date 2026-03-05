@@ -15,8 +15,28 @@ on:
 permissions: read-all
 
 jobs:
+  check-changes:
+    name: Detect changed files
+    runs-on: ubuntu-latest
+    outputs:
+      ui-changed: ${{ steps.filter.outputs.ui }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            ui:
+              - 'ui-dashboard/**'
+              - 'scripts/**'
+              - 'docs/**'
+              - '.trunk/**'
+              - '.github/workflows/ui-dashboard.yml'
+
   quality:
     name: Quality Checks (ui-dashboard)
+    needs: check-changes
+    if: needs.check-changes.outputs.ui-changed == 'true'
     runs-on: ubuntu-latest
     permissions:
       checks: write
@@ -48,3 +68,19 @@ jobs:
           fail_ci_if_error: false
           flags: ui-dashboard
           directory: ui-dashboard/coverage
+
+  ci-gate:
+    name: CI Gate (ui-dashboard)
+    if: always()
+    needs: [quality]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pass if quality succeeded or was skipped (no relevant changes)
+        run: |
+          result="${{ needs.quality.result }}"
+          if [ "$result" = "success" ] || [ "$result" = "skipped" ]; then
+            echo "✅ CI gate passed (quality: $result)"
+          else
+            echo "❌ CI gate failed (quality: $result)"
+            exit 1
+          fi

@@ -15,8 +15,28 @@ on:
 permissions: read-all
 
 jobs:
+  check-changes:
+    name: Detect changed files
+    runs-on: ubuntu-latest
+    outputs:
+      indexer-changed: ${{ steps.filter.outputs.indexer }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            indexer:
+              - 'indexer-envio/**'
+              - 'scripts/**'
+              - 'docs/**'
+              - '.trunk/**'
+              - '.github/workflows/indexer-envio.yml'
+
   quality:
     name: Quality Checks (indexer-envio)
+    needs: check-changes
+    if: needs.check-changes.outputs.indexer-changed == 'true'
     runs-on: ubuntu-latest
     permissions:
       checks: write
@@ -38,3 +58,19 @@ jobs:
       # Typecheck runs locally via pre-push hook after codegen.
       - name: Build check (syntax only)
         run: pnpm --filter @mento-protocol/indexer-envio build || true
+
+  ci-gate:
+    name: CI Gate (indexer-envio)
+    if: always()
+    needs: [quality]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pass if quality succeeded or was skipped (no relevant changes)
+        run: |
+          result="${{ needs.quality.result }}"
+          if [ "$result" = "success" ] || [ "$result" = "skipped" ]; then
+            echo "✅ CI gate passed (quality: $result)"
+          else
+            echo "❌ CI gate failed (quality: $result)"
+            exit 1
+          fi
