@@ -37,6 +37,12 @@ export default function RootLayout({
               >
                 Mento v3 Monitor
               </Link>
+              <Link
+                href="/global"
+                className="text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+              >
+                Global
+              </Link>
               <NetworkSelector />
             </nav>
             <div className="mx-auto max-w-7xl px-6 py-6">{children}</div>

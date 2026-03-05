@@ -35,6 +35,10 @@ export const ALL_POOLS_WITH_HEALTH = `
       oracleNumReporters
       lastRebalancedAt
       referenceRateFeedID
+      swapCount
+      rebalanceCount
+      notionalVolume0
+      notionalVolume1
     }
   }
 `;
@@ -131,6 +135,34 @@ export const POOL_DETAIL_WITH_HEALTH = `
       priceDifference
       rebalanceThreshold
       lastRebalancedAt
+    }
+  }
+`;
+
+export const GLOBAL_AGGREGATES = `
+  query GlobalAggregates {
+    Pool_aggregate {
+      aggregate { count }
+    }
+    SwapEvent_aggregate {
+      aggregate { count }
+    }
+  }
+`;
+
+export const POOL_SNAPSHOTS = `
+  query PoolSnapshots($poolId: String!, $limit: Int!) {
+    PoolSnapshot(
+      where: { poolId: { _eq: $poolId } }
+      order_by: { timestamp: asc }
+      limit: $limit
+    ) {
+      id poolId timestamp
+      reserves0 reserves1
+      swapCount swapVolume0 swapVolume1
+      rebalanceCount cumulativeSwapCount
+      cumulativeVolume0 cumulativeVolume1
+      blockNumber
     }
   }
 `;
