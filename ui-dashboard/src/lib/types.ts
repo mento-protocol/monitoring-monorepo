@@ -19,6 +19,11 @@ export type Pool = {
   priceDifference?: string;
   rebalanceThreshold?: number;
   lastRebalancedAt?: string;
+  limitStatus?: string;
+  limitPressure0?: string;
+  limitPressure1?: string;
+  rebalancerAddress?: string;
+  rebalanceLivenessStatus?: string;
   swapCount?: number;
   rebalanceCount?: number;
   notionalVolume0?: string;
@@ -103,4 +108,25 @@ export type RebalanceEvent = {
   txHash: string;
   blockNumber: string;
   blockTimestamp: string;
+  rebalancerAddress?: string;
+  improvement?: string;
+  effectivenessRatio?: string;
+};
+
+export type TradingLimit = {
+  id: string;
+  poolId: string;
+  token: string;
+  limit0: string;
+  limit1: string;
+  decimals: number;
+  netflow0: string;
+  netflow1: string;
+  lastUpdated0: string;
+  lastUpdated1: string;
+  limitPressure0: string;
+  limitPressure1: string;
+  limitStatus: string;
+  updatedAtBlock: string;
+  updatedAtTimestamp: string;
 };

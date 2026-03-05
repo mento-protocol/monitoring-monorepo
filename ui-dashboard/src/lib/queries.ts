@@ -18,6 +18,11 @@ export const ALL_POOLS_WITH_HEALTH = `
       rebalanceThreshold
       oracleNumReporters
       lastRebalancedAt
+      limitStatus
+      limitPressure0
+      limitPressure1
+      rebalancerAddress
+      rebalanceLivenessStatus
       referenceRateFeedID
       swapCount
       rebalanceCount
@@ -73,6 +78,7 @@ export const POOL_REBALANCES = `
     ) {
       id sender priceDifferenceBefore priceDifferenceAfter
       txHash blockNumber blockTimestamp
+      rebalancerAddress improvement effectivenessRatio
     }
   }
 `;
@@ -108,6 +114,11 @@ export const POOL_DETAIL_WITH_HEALTH = `
       priceDifference
       rebalanceThreshold
       lastRebalancedAt
+      limitStatus
+      limitPressure0
+      limitPressure1
+      rebalancerAddress
+      rebalanceLivenessStatus
     }
   }
 `;
@@ -125,6 +136,18 @@ export const POOL_SNAPSHOTS = `
       rebalanceCount cumulativeSwapCount
       cumulativeVolume0 cumulativeVolume1
       blockNumber
+    }
+  }
+`;
+
+export const TRADING_LIMITS = `
+  query TradingLimits($poolId: String!) {
+    TradingLimit(where: { poolId: { _eq: $poolId } }) {
+      id token limit0 limit1 decimals
+      netflow0 netflow1
+      lastUpdated0 lastUpdated1
+      limitPressure0 limitPressure1
+      limitStatus updatedAtBlock updatedAtTimestamp
     }
   }
 `;

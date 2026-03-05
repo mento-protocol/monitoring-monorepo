@@ -33,6 +33,52 @@ export function computeHealthStatus(pool: PoolHealthState): HealthStatus {
 }
 
 /**
+ * Compute the trading limit status for a pool based on pressure values.
+ *
+ * - "N/A":       VirtualPools (source includes "virtual") — no limits
+ * - "CRITICAL":  max pressure >= 1.0 (limit breached)
+ * - "WARN":      max pressure >= 0.8
+ * - "OK":        max pressure < 0.8
+ */
+export function computeLimitStatus(pool: {
+  source?: string;
+  limitPressure0?: string;
+  limitPressure1?: string;
+}): HealthStatus {
+  if (pool.source?.includes("virtual")) return "N/A";
+  const p0 = Number(pool.limitPressure0 ?? "0");
+  const p1 = Number(pool.limitPressure1 ?? "0");
+  const max = Math.max(p0, p1);
+  if (max >= 1.0) return "CRITICAL";
+  if (max >= 0.8) return "WARN";
+  return "OK";
+}
+
+export type RebalancerStatus = "ACTIVE" | "STALE" | "N/A";
+
+/**
+ * Compute rebalancer liveness for a pool.
+ *
+ * - "N/A":    VirtualPools or no rebalance data
+ * - "STALE":  age > 86400s AND healthStatus !== "OK"
+ * - "ACTIVE": within 24h OR healthStatus is "OK"
+ */
+export function computeRebalancerLiveness(
+  pool: {
+    source?: string;
+    lastRebalancedAt?: string;
+    healthStatus?: string;
+  },
+  nowSeconds: number,
+): RebalancerStatus {
+  if (pool.source?.includes("virtual")) return "N/A";
+  if (!pool.lastRebalancedAt || pool.lastRebalancedAt === "0") return "N/A";
+  const age = nowSeconds - Number(pool.lastRebalancedAt);
+  const isStale = age > 86400 && pool.healthStatus !== "OK";
+  return isStale ? "STALE" : "ACTIVE";
+}
+
+/**
  * Format deviation as a percentage of the threshold.
  * Returns a string like "49.1%" or "0%".
  */
