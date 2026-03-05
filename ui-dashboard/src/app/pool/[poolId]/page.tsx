@@ -49,7 +49,13 @@ export default function PoolDetailPage() {
 
 // ---------------------------------------------------------------------------
 
-const TABS = ["swaps", "reserves", "rebalances", "liquidity", "oracle"] as const;
+const TABS = [
+  "swaps",
+  "reserves",
+  "rebalances",
+  "liquidity",
+  "oracle",
+] as const;
 type Tab = (typeof TABS)[number];
 
 function PoolDetail() {

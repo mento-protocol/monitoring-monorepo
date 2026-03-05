@@ -156,7 +156,8 @@ async function fetchReferenceRateFeedID(
 function computeHealthStatus(pool: Pool): string {
   if (pool.source?.includes("virtual")) return "N/A";
   if (!pool.oracleOk) return "CRITICAL";
-  const threshold = pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
+  const threshold =
+    pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
   const devRatio = Number(pool.priceDifference) / threshold;
   if (devRatio >= 1.0) return "CRITICAL";
   if (devRatio >= 0.8) return "WARN";
