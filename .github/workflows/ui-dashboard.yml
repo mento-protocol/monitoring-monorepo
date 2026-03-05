@@ -6,6 +6,7 @@ on:
     paths:
       - ui-dashboard/**
       - scripts/**
+      - docs/**
       - .trunk/**
       - .github/workflows/ui-dashboard.yml
   pull_request:
@@ -13,6 +14,7 @@ on:
     paths:
       - ui-dashboard/**
       - scripts/**
+      - docs/**
       - .trunk/**
       - .github/workflows/ui-dashboard.yml
 
