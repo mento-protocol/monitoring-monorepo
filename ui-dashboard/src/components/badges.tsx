@@ -57,6 +57,86 @@ export function SourceBadge({ source }: { source: string }) {
   );
 }
 
+/** Trading limit status badge (OK | WARN | CRITICAL | N/A) */
+export function LimitBadge({ status }: { status: string }) {
+  const configs: Record<
+    string,
+    { label: string; dot: string; bg: string; text: string }
+  > = {
+    OK: {
+      label: "OK",
+      dot: "🟢",
+      bg: "bg-emerald-500/20",
+      text: "text-emerald-300",
+    },
+    WARN: {
+      label: "WARN",
+      dot: "🟡",
+      bg: "bg-amber-500/20",
+      text: "text-amber-300",
+    },
+    CRITICAL: {
+      label: "CRITICAL",
+      dot: "🔴",
+      bg: "bg-red-500/20",
+      text: "text-red-300",
+    },
+    "N/A": {
+      label: "N/A",
+      dot: "⚪",
+      bg: "bg-slate-500/20",
+      text: "text-slate-400",
+    },
+  };
+
+  const cfg = configs[status] ?? configs["N/A"];
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium ${cfg.bg} ${cfg.text}`}
+    >
+      <span aria-hidden="true">{cfg.dot}</span>
+      {cfg.label}
+    </span>
+  );
+}
+
+/** Rebalancer liveness badge (ACTIVE | STALE | N/A) */
+export function RebalancerBadge({ status }: { status: string }) {
+  const configs: Record<
+    string,
+    { label: string; dot: string; bg: string; text: string }
+  > = {
+    ACTIVE: {
+      label: "ACTIVE",
+      dot: "🟢",
+      bg: "bg-emerald-500/20",
+      text: "text-emerald-300",
+    },
+    STALE: {
+      label: "STALE",
+      dot: "🔴",
+      bg: "bg-red-500/20",
+      text: "text-red-300",
+    },
+    "N/A": {
+      label: "N/A",
+      dot: "⚪",
+      bg: "bg-slate-500/20",
+      text: "text-slate-400",
+    },
+  };
+
+  const cfg = configs[status] ?? configs["N/A"];
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium ${cfg.bg} ${cfg.text}`}
+    >
+      <span aria-hidden="true">{cfg.dot}</span>
+      {cfg.label}
+    </span>
+  );
+}
+
 export function KindBadge({ kind }: { kind: string }) {
   const isMint = kind === "MINT";
   return (

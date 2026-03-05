@@ -5,6 +5,8 @@ import { KindBadge, SourceBadge } from "@/components/badges";
 import { LimitSelect } from "@/components/controls";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { HealthPanel } from "@/components/health-panel";
+import { LimitPanel } from "@/components/limit-panel";
+import { RebalancerPanel } from "@/components/rebalancer-panel";
 import { useNetwork } from "@/components/network-provider";
 import { OracleChart } from "@/components/oracle-chart";
 import { OraclePriceChart } from "@/components/oracle-price-chart";
@@ -28,6 +30,7 @@ import {
   POOL_RESERVES,
   POOL_SNAPSHOTS,
   POOL_SWAPS,
+  TRADING_LIMITS,
 } from "@/lib/queries";
 import { isFpmm, poolName, tokenSymbol } from "@/lib/tokens";
 import type {
@@ -38,6 +41,7 @@ import type {
   RebalanceEvent,
   ReserveUpdate,
   SwapEvent,
+  TradingLimit,
 } from "@/lib/types";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -96,6 +100,12 @@ function PoolDetail() {
 
   const pool = poolData?.Pool?.[0] ?? null;
 
+  const { data: limitsData } = useGQL<{ TradingLimit: TradingLimit[] }>(
+    TRADING_LIMITS,
+    { poolId: decodedId },
+  );
+  const tradingLimits = limitsData?.TradingLimit ?? [];
+
   return (
     <div className="space-y-6">
       <nav aria-label="Breadcrumb" className="text-sm text-slate-400">
@@ -122,6 +132,8 @@ function PoolDetail() {
         <>
           <PoolHeader pool={pool} />
           <HealthPanel pool={pool} />
+          <LimitPanel pool={pool} tradingLimits={tradingLimits} />
+          <RebalancerPanelWrapper pool={pool} poolId={decodedId} limit={20} />
         </>
       )}
 
@@ -178,6 +190,27 @@ function PoolDetail() {
       </div>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Rebalancer panel wrapper (fetches rebalances for the panel)
+// ---------------------------------------------------------------------------
+
+function RebalancerPanelWrapper({
+  pool,
+  poolId,
+  limit,
+}: {
+  pool: Pool;
+  poolId: string;
+  limit: number;
+}) {
+  const { data } = useGQL<{ RebalanceEvent: RebalanceEvent[] }>(
+    POOL_REBALANCES,
+    { poolId, limit },
+  );
+  const rebalances = data?.RebalanceEvent ?? [];
+  return <RebalancerPanel pool={pool} rebalances={rebalances} />;
 }
 
 // ---------------------------------------------------------------------------
