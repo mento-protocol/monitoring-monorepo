@@ -51,7 +51,6 @@
 
 - [ ] **Google Auth** (NextAuth.js) — restrict dashboard to @mentolabs.xyz accounts
 - [ ] **OracleSnapshot chart improvements** — oracle price history timeline on pool detail
-- [ ] **Merge PRs #2 and #4** — config rename + deploy branch docs (still open, no conflicts)
 
 ### Phase 1 — Dashboard Features
 
