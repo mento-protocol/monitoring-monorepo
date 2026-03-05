@@ -11,7 +11,7 @@ set -euo pipefail
 
 # Auto-load .env.deploy if it exists
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${SCRIPT_DIR}/../.env.deploy"
+ENV_FILE="${SCRIPT_DIR}/../.env.local"
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck source=/dev/null
   set -a; source "$ENV_FILE"; set +a
