@@ -8,23 +8,40 @@ const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
 interface SnapshotChartProps {
   snapshots: PoolSnapshot[];
+  token0Symbol?: string;
+  token1Symbol?: string;
 }
 
-export function SnapshotChart({ snapshots }: SnapshotChartProps) {
+export function SnapshotChart({
+  snapshots,
+  token0Symbol = "Token 0",
+  token1Symbol = "Token 1",
+}: SnapshotChartProps) {
   if (snapshots.length === 0) return null;
 
   const timestamps = snapshots.map((s) =>
     new Date(Number(s.timestamp) * 1000).toISOString(),
   );
-  const volumes = snapshots.map((s) => parseWei(s.swapVolume0));
+  // parseWei assumes 18 decimals — valid for all Mento stablecoins
+  const volumes0 = snapshots.map((s) => parseWei(s.swapVolume0));
+  const volumes1 = snapshots.map((s) => parseWei(s.swapVolume1));
   const cumSwaps = snapshots.map((s) => s.cumulativeSwapCount);
 
-  const volumeTrace = {
+  const volumeTrace0 = {
     x: timestamps,
-    y: volumes,
+    y: volumes0,
     type: "bar" as const,
-    name: "Swap Volume (Token 0)",
+    name: `Vol ${token0Symbol}`,
     marker: { color: "#6366f1" },
+    yaxis: "y" as const,
+  };
+
+  const volumeTrace1 = {
+    x: timestamps,
+    y: volumes1,
+    type: "bar" as const,
+    name: `Vol ${token1Symbol}`,
+    marker: { color: "#a78bfa" },
     yaxis: "y" as const,
   };
 
@@ -112,7 +129,7 @@ export function SnapshotChart({ snapshots }: SnapshotChartProps) {
         Swap Volume &amp; Cumulative Swaps
       </h3>
       <Plot
-        data={[volumeTrace, cumSwapTrace]}
+        data={[volumeTrace0, volumeTrace1, cumSwapTrace]}
         layout={layout}
         config={{ responsive: true, displayModeBar: true, scrollZoom: true }}
         style={{ width: "100%", height: 320 }}

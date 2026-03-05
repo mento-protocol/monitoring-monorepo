@@ -20,7 +20,7 @@ import {
   formatTimestamp,
   formatBlock,
 } from "@/lib/format";
-import { poolName } from "@/lib/tokens";
+import { poolName, tokenSymbol, isFpmm } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 import type {
   Pool,
@@ -168,7 +168,7 @@ function PoolDetail() {
           <OracleTab poolId={decodedId} limit={limit} pool={pool} />
         )}
         {tab === "analytics" && (
-          <AnalyticsTab poolId={decodedId} limit={limit} />
+          <AnalyticsTab poolId={decodedId} limit={limit} pool={pool} />
         )}
       </div>
     </div>
@@ -547,7 +547,24 @@ function OracleTab({
   );
 }
 
-function AnalyticsTab({ poolId, limit }: { poolId: string; limit: number }) {
+function AnalyticsTab({
+  poolId,
+  limit,
+  pool,
+}: {
+  poolId: string;
+  limit: number;
+  pool: Pool | null;
+}) {
+  const { network } = useNetwork();
+
+  // VirtualPools never emit UpdateReserves/Rebalanced so they never generate snapshots
+  if (pool && !isFpmm(pool)) {
+    return (
+      <EmptyBox message="VirtualPool — no snapshot data available." />
+    );
+  }
+
   const { data, error, isLoading } = useGQL<{
     PoolSnapshot: PoolSnapshot[];
   }>(POOL_SNAPSHOTS, { poolId, limit });
@@ -560,9 +577,12 @@ function AnalyticsTab({ poolId, limit }: { poolId: string; limit: number }) {
       <EmptyBox message="No snapshot data yet. Snapshots are created on pool activity." />
     );
 
+  const sym0 = tokenSymbol(network, pool?.token0 ?? null);
+  const sym1 = tokenSymbol(network, pool?.token1 ?? null);
+
   return (
     <>
-      <SnapshotChart snapshots={rows} />
+      <SnapshotChart snapshots={rows} token0Symbol={sym0} token1Symbol={sym1} />
       <Table>
         <thead>
           <tr className="border-b border-slate-800 bg-slate-900/50">
