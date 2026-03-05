@@ -25,14 +25,21 @@
 - [x] Token symbol mapping (on-chain `symbol()` values, not registry names)
 - [x] `contracts.json` integrated into `networks.ts`
 - [x] **Dashboard LIVE at monitoring.mento.org**
+- [x] **Global overview page** (`/`) — summary tiles, health breakdown, all pools table, activity ranking
+- [x] **Pool list moved to `/pools`** — Global is now the homepage
+- [x] **Analytics tab** on pool detail — snapshot charts (hourly swap volume + cumulative count)
+- [x] **Shared `PoolsTable` component** — reused across home + global pages
+- [x] **`isFpmm()` utility** in `tokens.ts` — single source of truth for pool type detection
 
 ### Infrastructure / DX
 - [x] Monorepo extraction from devnet repo
-- [x] CI pipeline — ESLint 10 + Vitest + trunk on GitHub Actions (path-scoped)
+- [x] CI pipeline — ESLint 10 + Vitest + trunk on GitHub Actions
+- [x] CI path filters removed from `pull_request` triggers — both workflows always report status
 - [x] 22 unit tests (token utils + oracle health logic)
 - [x] `pnpm deploy:indexer:*` scripts
 - [x] `pnpm update-endpoint:mainnet` — updates Vercel env var via API after redeploy
 - [x] Post-deploy checklist printed by deploy script
+- [x] **Discord notification on deploy branch push** — `notify-envio-deploy.yml` fires on `deploy/*` branches, posts reminder to update Vercel endpoint
 - [x] `AGENTS.md` files for indexer + dashboard
 - [x] Deployment docs (`docs/deployment.md`)
 
@@ -42,29 +49,27 @@
 
 ### Immediate (quick wins)
 
-- [ ] **Switch to health queries** — update `page.tsx` + `pool/[poolId]/page.tsx` to use
-      `ALL_POOLS_WITH_HEALTH` / `POOL_DETAIL_WITH_HEALTH` so health badges show live data
-      *(deferred pending stable endpoint — now unblocked)*
 - [ ] **Google Auth** (NextAuth.js) — restrict dashboard to @mentolabs.xyz accounts
-- [ ] **Update ROADMAP in repo** ← you're here
+- [ ] **OracleSnapshot chart improvements** — oracle price history timeline on pool detail
 
 ### Phase 1 — Dashboard Features
 
-- [ ] **Global page** — TVL across all pools, aggregate swap volume, pool count by status
-- [ ] **Snapshot charts** — volume over time, cumulative volume (PoolSnapshot entities already indexed)
-- [ ] **Pool KPIs in UI** — surface `swapCount`, `notionalVolume0/1`, `rebalanceCount` on pool detail
-- [ ] **OracleSnapshot chart** — oracle price history + health timeline on pool detail page
+- [ ] **Trading limit tracking** — `limitPressure` field on Pool, warn/crit thresholds per Roman's spec
+- [ ] **Rebalancer liveness/effectiveness metrics** — surface rebalance events + lag tracking
+- [ ] **TVL on global page** — requires price conversion or raw reserve amounts display
 - [ ] **Gap-fill for charts** — forward-fill missing hourly snapshots in dashboard layer
 
 ### Phase 1 — Indexer Enhancements
 
-- [ ] **Trading limit tracking** — `limitPressure` field, warn/crit thresholds per Roman's spec
-- [ ] **Rebalancer events** — liveness + effectiveness metrics
+- [ ] **Trading limit events** — index `TradingLimitUpdated` + `BreakerBox` state changes
+- [ ] **Rebalancer events** — track liveness + effectiveness (time since last rebalance per pool)
 - [ ] **ChainStat / GlobalStat aggregates** — protocol-level metrics entity
 
 ### Phase 2
 
 - [ ] **Liquity v2 indexing** — TroveManager, ActivePool, StabilityPool, CDPLiquidityStrategy
+  - GBPm TroveManager: `0xb38aEf2bF4e34B997330D626EBCd7629De3885C9`
+  - StabilityPool: `0x06346c0fAB682dBde9f245D2D84677592E8aaa15`
 - [ ] **Revenue tracking** — protocol fees, spread revenue per pool
 - [ ] **Monad indexing** — blocked on contract deployment to Monad
 - [ ] **Alerting (Aegis)** — Prometheus metrics → Grafana alerts for 5 KPIs:
