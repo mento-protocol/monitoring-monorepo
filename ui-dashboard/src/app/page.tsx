@@ -90,7 +90,10 @@ function GlobalContent() {
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Tile label="🟢 OK" value={poolsLoading ? "…" : String(okCount)} />
-          <Tile label="🟡 WARN" value={poolsLoading ? "…" : String(warnCount)} />
+          <Tile
+            label="🟡 WARN"
+            value={poolsLoading ? "…" : String(warnCount)}
+          />
           <Tile
             label="🔴 CRITICAL"
             value={poolsLoading ? "…" : String(critCount)}
@@ -113,9 +116,7 @@ function GlobalContent() {
 
       {/* Activity summary */}
       <section>
-        <h2 className="text-lg font-semibold text-white mb-3">
-          Pool Activity
-        </h2>
+        <h2 className="text-lg font-semibold text-white mb-3">Pool Activity</h2>
         {poolsLoading ? (
           <Skeleton rows={5} />
         ) : pools.length === 0 ? (

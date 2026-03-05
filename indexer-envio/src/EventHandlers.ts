@@ -562,7 +562,12 @@ FPMM.Swap.handler(async ({ event, context }) => {
   });
 
   // Update trading limits for FPMM pools (guard: getTradingLimits reverts on VirtualPools)
-  if (pool.source && pool.source.includes("fpmm") && pool.token0 && pool.token1) {
+  if (
+    pool.source &&
+    pool.source.includes("fpmm") &&
+    pool.token0 &&
+    pool.token1
+  ) {
     const [limits0, limits1] = await Promise.all([
       fetchTradingLimits(event.chainId, event.srcAddress, pool.token0),
       fetchTradingLimits(event.chainId, event.srcAddress, pool.token1),
@@ -573,8 +578,10 @@ FPMM.Swap.handler(async ({ event, context }) => {
 
     if (limits0) {
       const { p0, p1 } = computeLimitPressures(
-        limits0.state.netflow0, limits0.state.netflow1,
-        limits0.config.limit0, limits0.config.limit1,
+        limits0.state.netflow0,
+        limits0.state.netflow1,
+        limits0.config.limit0,
+        limits0.config.limit1,
       );
       worstP0 = Math.max(worstP0, p0, p1);
       const tl: TradingLimit = {
@@ -599,8 +606,10 @@ FPMM.Swap.handler(async ({ event, context }) => {
 
     if (limits1) {
       const { p0, p1 } = computeLimitPressures(
-        limits1.state.netflow0, limits1.state.netflow1,
-        limits1.config.limit0, limits1.config.limit1,
+        limits1.state.netflow0,
+        limits1.state.netflow1,
+        limits1.config.limit0,
+        limits1.config.limit1,
       );
       worstP1 = Math.max(worstP1, p0, p1);
       const tl: TradingLimit = {
@@ -916,13 +925,21 @@ FPMM.TradingLimitConfigured.handler(async ({ event, context }) => {
   const blockTimestamp = asBigInt(event.block.timestamp);
 
   // event.params.config is a tuple [limit0, limit1, decimals] (int120, int120, uint8)
-  const configTuple = event.params.config as unknown as [bigint, bigint, number];
+  const configTuple = event.params.config as unknown as [
+    bigint,
+    bigint,
+    number,
+  ];
   const eventLimit0 = configTuple[0];
   const eventLimit1 = configTuple[1];
   const eventDecimals = configTuple[2];
 
   // RPC call to get current state after configuration
-  const limits = await fetchTradingLimits(event.chainId, event.srcAddress, event.params.token);
+  const limits = await fetchTradingLimits(
+    event.chainId,
+    event.srcAddress,
+    event.params.token,
+  );
 
   const limit0 = limits ? limits.config.limit0 : eventLimit0;
   const limit1 = limits ? limits.config.limit1 : eventLimit1;

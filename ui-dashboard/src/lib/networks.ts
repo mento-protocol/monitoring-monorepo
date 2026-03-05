@@ -4,10 +4,11 @@
 
 import contractsData from "./contracts.json";
 
-// Official treb deployment namespace per chain — update when a new deployment is promoted
+// Official treb deployment namespace per chain — update when a new deployment is promoted.
+// These must match the namespace keys in @mento-protocol/contracts contracts.json.
 const ACTIVE_DEPLOYMENT = {
   "celo-sepolia": "testnet-v2-rc5",
-  "celo-mainnet": "mainnet",
+  "celo-mainnet": "celo",
 } as const satisfies Record<string, string | null>;
 
 export type IndexerNetworkId =
@@ -36,8 +37,6 @@ export type Network = {
 
 type ContractEntry = {
   address: string;
-  name: string;
-  abi: string;
   type: "token" | "pool" | "contract";
 };
 

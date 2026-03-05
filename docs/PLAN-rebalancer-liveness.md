@@ -7,11 +7,13 @@
 ## Context
 
 `RebalanceEvent` entities are already indexed with:
+
 - `poolId`, `sender`, `priceDifferenceBefore`, `priceDifferenceAfter`, `txHash`, `blockTimestamp`
 
 `Pool.lastRebalancedAt` (BigInt timestamp) and `Pool.rebalanceCount` already tracked.
 
 **What we need to add:**
+
 1. **Liveness:** Time since last rebalance — is any rebalancer bot actually running?
 2. **Effectiveness:** Is each rebalance actually reducing `priceDifference`?
 3. **Dashboard surface:** Liveness badge per pool + rebalance history table
@@ -31,8 +33,8 @@ Already has `priceDifferenceBefore` and `priceDifferenceAfter`. Add computed fie
 ```graphql
 type RebalanceEvent {
   # ... existing fields ...
-  improvement: Int!  # priceDifferenceBefore - priceDifferenceAfter (positive = good)
-  effectivenessRatio: String!  # improvement / priceDifferenceBefore (0–1)
+  improvement: Int! # priceDifferenceBefore - priceDifferenceAfter (positive = good)
+  effectivenessRatio: String! # improvement / priceDifferenceBefore (0–1)
 }
 ```
 
@@ -50,6 +52,7 @@ rebalanceLivenessStatus: String!  # "ACTIVE" | "STALE" | "N/A"
 Update on every `Rebalanced` event handler.
 
 `rebalanceLivenessStatus` logic:
+
 - `N/A` if pool has never been rebalanced (`rebalanceCount == 0`) or is VirtualPool
 - `ACTIVE` if `block.timestamp - lastRebalancedAt < 86400` (< 24h)
 - `STALE` if ≥ 24h — but **only flag as STALE if `healthStatus` is WARN or CRITICAL** (a pool that's healthy doesn't need rebalancing)
@@ -59,9 +62,10 @@ Update on every `Rebalanced` event handler.
 #### 3. Add `RebalancerStat` entity (optional stretch)
 
 Per-rebalancer-address aggregated stats:
+
 ```graphql
 type RebalancerStat {
-  id: ID!                     # sender address
+  id: ID! # sender address
   address: String!
   totalRebalances: Int!
   avgEffectivenessRatio: String!
@@ -93,6 +97,7 @@ Compute live time delta client-side from `pool.lastRebalancedAt` — don't rely 
 #### 6. Pool detail: `RebalancerPanel` in Overview tab
 
 Show alongside `HealthPanel` and `LimitPanel`:
+
 - Last rebalancer address (truncated, linked to Celoscan)
 - Time since last rebalance (live, computed client-side)
 - Total rebalance count
@@ -101,6 +106,7 @@ Show alongside `HealthPanel` and `LimitPanel`:
 #### 7. Pool detail: Rebalances tab — add effectiveness column
 
 Current Rebalances tab shows the event table. Add:
+
 - `Improvement` column: `priceDifferenceBefore → priceDifferenceAfter` with delta
 - `Effectiveness` column: percentage reduction in price difference
 - Sort by most recent by default
@@ -110,6 +116,7 @@ Current Rebalances tab shows the event table. Add:
 #### 8. Global page: rebalancer liveness summary
 
 Add a `Rebalancer` section to the global overview page:
+
 - Count of FPMM pools with `ACTIVE` / `STALE` / `N/A` liveness
 - List of any `STALE` pools with health `WARN`/`CRITICAL` (action required)
 

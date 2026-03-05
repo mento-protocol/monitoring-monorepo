@@ -21,7 +21,7 @@ Plotly dual-trace chart:
 - **Primary y-axis:** Oracle price as a line trace, normalised to human-readable units (`oraclePrice / oraclePriceDenom`)
 - **Secondary y-axis:** Price deviation as a percentage of threshold (`priceDifference / rebalanceThreshold * 100`), 0–100%+
 - **Background colour bands** (using Plotly `layout.shapes`):
-  - Green band: `deviation < 80%` 
+  - Green band: `deviation < 80%`
   - Yellow band: `80% ≤ deviation < 100%`
   - Red band: `deviation ≥ 100%`
 - **Point colouring:** each data point coloured by `oracleOk` (red dot when oracle expired, green otherwise)
@@ -29,6 +29,7 @@ Plotly dual-trace chart:
 - **Dark theme** — matches existing `ReserveChart` / `SnapshotChart` styling
 
 Props:
+
 ```ts
 interface OracleChartProps {
   snapshots: OracleSnapshot[];
@@ -40,6 +41,7 @@ interface OracleChartProps {
 ### 2. Query update (`ui-dashboard/src/lib/queries.ts`)
 
 Update `ORACLE_SNAPSHOTS` to:
+
 - Use `order_by: { timestamp: desc }` + `limit` (most recent N, reversed for chart display)
 - Add `healthStatus` field if we add it to `OracleSnapshot` entity (see indexer task below)
 
@@ -63,7 +65,7 @@ Not required for initial chart — can be done as a follow-up indexer schema mig
 
 - [ ] `OracleChart` component renders with Plotly dual y-axis (price + deviation%)
 - [ ] Background health bands visible (green / yellow / red)
-- [ ] Points coloured by `oracleOk` 
+- [ ] Points coloured by `oracleOk`
 - [ ] Chart shows on Analytics tab for FPMM pools only
 - [ ] VirtualPools see empty state, not a broken chart
 - [ ] Dark theme, consistent with `ReserveChart` / `SnapshotChart`

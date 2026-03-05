@@ -3,6 +3,7 @@
 ## ✅ Done
 
 ### Indexer
+
 - [x] Envio indexer: DevNet + Celo-Sepolia configs (12 VirtualPools, 2 FPMMs)
 - [x] Envio indexer: Celo Mainnet config (4 FPMMs + 12 VirtualPools)
 - [x] Envio hosted deployment: `mento-v3-celo-mainnet` live, 100% synced, ~49k events
@@ -18,6 +19,7 @@
 - [x] Deploy branch strategy (`deploy/celo-sepolia`, `deploy/celo-mainnet`, `deploy/monad-mainnet`)
 
 ### Dashboard
+
 - [x] Multi-chain dashboard with network switcher (DevNet / Sepolia / Mainnet)
 - [x] Pool list with health badge column (🟢 OK / 🟡 WARN / 🔴 CRITICAL)
 - [x] Pool detail page with reserve history chart (Plotly, interactive)
@@ -32,6 +34,7 @@
 - [x] **`isFpmm()` utility** in `tokens.ts` — single source of truth for pool type detection
 
 ### Infrastructure / DX
+
 - [x] Monorepo extraction from devnet repo
 - [x] CI pipeline — ESLint 10 + Vitest + trunk on GitHub Actions
 - [x] CI path filters removed from `pull_request` triggers — both workflows always report status
@@ -97,15 +100,15 @@ Envio HyperIndex (hosted) → Hasura GraphQL → Next.js Dashboard (Vercel)
 
 ## Key Files
 
-| What | Where |
-|------|-------|
-| Indexer schema | `indexer-envio/schema.graphql` |
-| Event handlers | `indexer-envio/src/EventHandlers.ts` |
-| Mainnet config | `indexer-envio/config.celo.mainnet.yaml` |
-| Sepolia config | `indexer-envio/config.celo.sepolia.yaml` |
-| DevNet config | `indexer-envio/config.celo.devnet.yaml` |
-| Dashboard app | `ui-dashboard/src/app/` |
-| Network defs | `ui-dashboard/src/lib/networks.ts` |
-| GraphQL queries | `ui-dashboard/src/lib/queries.ts` |
-| Deployment guide | `docs/deployment.md` |
-| Monitoring spec | vault `projects/mento-v3-monitoring/SPEC.md` |
+| What             | Where                                        |
+| ---------------- | -------------------------------------------- |
+| Indexer schema   | `indexer-envio/schema.graphql`               |
+| Event handlers   | `indexer-envio/src/EventHandlers.ts`         |
+| Mainnet config   | `indexer-envio/config.celo.mainnet.yaml`     |
+| Sepolia config   | `indexer-envio/config.celo.sepolia.yaml`     |
+| DevNet config    | `indexer-envio/config.celo.devnet.yaml`      |
+| Dashboard app    | `ui-dashboard/src/app/`                      |
+| Network defs     | `ui-dashboard/src/lib/networks.ts`           |
+| GraphQL queries  | `ui-dashboard/src/lib/queries.ts`            |
+| Deployment guide | `docs/deployment.md`                         |
+| Monitoring spec  | vault `projects/mento-v3-monitoring/SPEC.md` |

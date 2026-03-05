@@ -1,47 +1,47 @@
 "use client";
 
-import { Suspense, useCallback } from "react";
-import { useParams, useSearchParams, useRouter } from "next/navigation";
-import Link from "next/link";
-import { useGQL } from "@/lib/graphql";
+import { KindBadge, SourceBadge } from "@/components/badges";
+import { LimitSelect } from "@/components/controls";
+import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
+import { HealthPanel } from "@/components/health-panel";
+import { useNetwork } from "@/components/network-provider";
+import { OracleChart } from "@/components/oracle-chart";
+import { OraclePriceChart } from "@/components/oracle-price-chart";
+import { ReserveChart } from "@/components/reserve-chart";
+import { SenderCell } from "@/components/sender-cell";
+import { SnapshotChart } from "@/components/snapshot-chart";
+import { Row, Table, Td, Th } from "@/components/table";
+import { TxHashCell } from "@/components/tx-hash-cell";
 import {
-  POOL_DETAIL_WITH_HEALTH,
-  POOL_SWAPS,
-  POOL_RESERVES,
-  POOL_REBALANCES,
-  POOL_LIQUIDITY,
-  ORACLE_SNAPSHOTS,
-  POOL_SNAPSHOTS,
-} from "@/lib/queries";
-import {
-  truncateAddress,
+  formatBlock,
+  formatTimestamp,
   formatWei,
   relativeTime,
-  formatTimestamp,
-  formatBlock,
+  truncateAddress,
 } from "@/lib/format";
-import { poolName, tokenSymbol, isFpmm } from "@/lib/tokens";
-import { useNetwork } from "@/components/network-provider";
+import { useGQL } from "@/lib/graphql";
+import {
+  ORACLE_SNAPSHOTS,
+  POOL_DETAIL_WITH_HEALTH,
+  POOL_LIQUIDITY,
+  POOL_REBALANCES,
+  POOL_RESERVES,
+  POOL_SNAPSHOTS,
+  POOL_SWAPS,
+} from "@/lib/queries";
+import { isFpmm, poolName, tokenSymbol } from "@/lib/tokens";
 import type {
-  Pool,
-  SwapEvent,
-  ReserveUpdate,
-  RebalanceEvent,
   LiquidityEvent,
   OracleSnapshot,
+  Pool,
   PoolSnapshot,
+  RebalanceEvent,
+  ReserveUpdate,
+  SwapEvent,
 } from "@/lib/types";
-import { Table, Row, Th, Td } from "@/components/table";
-import { Skeleton, EmptyBox, ErrorBox } from "@/components/feedback";
-import { SourceBadge, KindBadge } from "@/components/badges";
-import { LimitSelect } from "@/components/controls";
-import { SenderCell } from "@/components/sender-cell";
-import { TxHashCell } from "@/components/tx-hash-cell";
-import { ReserveChart } from "@/components/reserve-chart";
-import { OraclePriceChart } from "@/components/oracle-price-chart";
-import { OracleChart } from "@/components/oracle-chart";
-import { HealthPanel } from "@/components/health-panel";
-import { SnapshotChart } from "@/components/snapshot-chart";
+import Link from "next/link";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback } from "react";
 
 export default function PoolDetailPage() {
   return (
@@ -561,9 +561,7 @@ function AnalyticsTab({
 
   // VirtualPools never emit UpdateReserves/Rebalanced so they never generate snapshots
   if (pool && !isFpmm(pool)) {
-    return (
-      <EmptyBox message="VirtualPool — no snapshot data available." />
-    );
+    return <EmptyBox message="VirtualPool — no snapshot data available." />;
   }
 
   const { data, error, isLoading } = useGQL<{
@@ -571,7 +569,7 @@ function AnalyticsTab({
   }>(POOL_SNAPSHOTS, { poolId, limit });
   const rows = data?.PoolSnapshot ?? [];
 
-  // Re-use the oracle snapshots already fetched in OracleTab (SWR deduplicates by key)
+  // Reuse the oracle snapshots already fetched in OracleTab (SWR deduplicates by key)
   const { data: oracleData } = useGQL<{ OracleSnapshot: OracleSnapshot[] }>(
     ORACLE_SNAPSHOTS,
     { poolId, limit },

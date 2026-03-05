@@ -7,6 +7,7 @@
 ## Context
 
 Each FPMM has per-token trading limits enforced by `getTradingLimits(address)`:
+
 - `config.limit0` — max allowed netflow for token0 (e.g. 500 USDm)
 - `config.limit1` — max allowed netflow for token1 (e.g. 1000 USDC)
 - `state.netflow0 / netflow1` — running net flow since last reset (`lastUpdated` timestamp)
@@ -14,11 +15,13 @@ Each FPMM has per-token trading limits enforced by `getTradingLimits(address)`:
 `limitPressure = |netflow| / limit` per token, per window.
 
 **Live probe (USDC/USDm pool, 2026-03-05):**
+
 - `limit0`: 500 USDm, `limit1`: 1000 USDC
 - Current `netflow0`: 5 USDm → `pressure0 = 0.010` (OK)
 - Current `netflow1`: -5 USDC → `pressure1 = 0.005` (OK)
 
 **Thresholds (Roman's spec):**
+
 - WARN: `limitPressure > 0.8`
 - CRITICAL: `limitPressure ≥ 1.0`
 
@@ -37,19 +40,19 @@ There is **no on-chain event for netflow state changes** — it's derived from S
 
 ```graphql
 type TradingLimit @index(fields: ["poolId"]) {
-  id: ID!           # poolId-tokenAddress
-  poolId: String!   @index
+  id: ID! # poolId-tokenAddress
+  poolId: String! @index
   token: String!
-  limit0: BigInt!   # max netflow window 0 (raw, token decimals)
-  limit1: BigInt!   # max netflow window 1
+  limit0: BigInt! # max netflow window 0 (raw, token decimals)
+  limit1: BigInt! # max netflow window 1
   decimals: Int!
   netflow0: BigInt! # current netflow window 0 (raw)
   netflow1: BigInt! # current netflow window 1
   lastUpdated0: BigInt!
   lastUpdated1: BigInt!
-  limitPressure0: String!  # 0.000–1.000+ (stored as string for precision)
+  limitPressure0: String! # 0.000–1.000+ (stored as string for precision)
   limitPressure1: String!
-  limitStatus: String!     # "OK" | "WARN" | "CRITICAL" (worst of both)
+  limitStatus: String! # "OK" | "WARN" | "CRITICAL" (worst of both)
   updatedAtBlock: BigInt!
   updatedAtTimestamp: BigInt!
 }
@@ -58,6 +61,7 @@ type TradingLimit @index(fields: ["poolId"]) {
 #### 2. Add `TradingLimitConfigured` event handler
 
 In `EventHandlers.ts`:
+
 - On `TradingLimitConfigured(token, config)`:
   - Upsert `TradingLimit` entity with new `limit0`, `limit1`, `decimals`
   - RPC call `getTradingLimits(token)` to get current `state` (same viem pattern as oracle health)
@@ -67,6 +71,7 @@ In `EventHandlers.ts`:
 #### 3. Update `Swap` event handler
 
 On every `Swap`, update the `TradingLimit` entity:
+
 - RPC call `getTradingLimits(token0)` and `getTradingLimits(token1)`
 - Recompute `netflow0`, `netflow1`, `limitPressure0`, `limitPressure1`, `limitStatus`
 - This is the same pattern used for oracle health on `Swap` events
@@ -88,7 +93,7 @@ Update on every Swap handler after computing TradingLimit.
 function computeLimitStatus(p0: number, p1: number): string {
   const worst = Math.max(p0, p1);
   if (worst >= 1.0) return "CRITICAL";
-  if (worst > 0.8)  return "WARN";
+  if (worst > 0.8) return "WARN";
   return "OK";
 }
 ```
@@ -104,6 +109,7 @@ Fetch `limitStatus`, `limitPressure0`, `limitPressure1` on every pool query.
 #### 7. `LimitBadge` component
 
 Same pattern as `HealthBadge`:
+
 ```
 OK      → 🟢
 WARN    → 🟡  (e.g. "85% full")
@@ -118,6 +124,7 @@ Add `LimitBadge` column to `PoolsTable` alongside existing `HealthBadge`.
 #### 9. Pool detail: `LimitPanel` in Overview tab
 
 Expandable panel (same pattern as `HealthPanel`) showing:
+
 - Token 0: `netflow0 / limit0` with percentage bar
 - Token 1: `netflow1 / limit1` with percentage bar
 - `lastUpdated` timestamp per window

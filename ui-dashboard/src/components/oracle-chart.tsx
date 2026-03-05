@@ -31,9 +31,7 @@ export function OracleChart({
   // Deviation % of rebalance threshold
   const deviations = snapshots.map((s) => {
     const threshold = Number(s.rebalanceThreshold);
-    return threshold > 0
-      ? (Number(s.priceDifference) / threshold) * 100
-      : 0;
+    return threshold > 0 ? (Number(s.priceDifference) / threshold) * 100 : 0;
   });
 
   // Per-point marker colours based on oracleOk
