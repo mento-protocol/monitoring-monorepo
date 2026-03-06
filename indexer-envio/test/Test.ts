@@ -40,7 +40,10 @@ type GeneratedModule = {
             fpmmImplementation: string;
           };
         };
-        processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
+        processEvent: (args: {
+          event: unknown;
+          mockDb: MockDb;
+        }) => Promise<MockDb>;
       };
     };
     FPMM: {
@@ -72,7 +75,10 @@ type GeneratedModule = {
             amount1Out: bigint;
           };
         };
-        processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
+        processEvent: (args: {
+          event: unknown;
+          mockDb: MockDb;
+        }) => Promise<MockDb>;
       };
     };
     SortedOracles: {
@@ -89,7 +95,10 @@ type GeneratedModule = {
             block?: { number?: number; timestamp?: number };
           };
         }) => unknown;
-        processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
+        processEvent: (args: {
+          event: unknown;
+          mockDb: MockDb;
+        }) => Promise<MockDb>;
       };
       MedianUpdated: {
         createMockEvent: (args: {
@@ -102,7 +111,10 @@ type GeneratedModule = {
             block?: { number?: number; timestamp?: number };
           };
         }) => unknown;
-        processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
+        processEvent: (args: {
+          event: unknown;
+          mockDb: MockDb;
+        }) => Promise<MockDb>;
       };
     };
   };
@@ -239,7 +251,10 @@ describe("Envio Celo indexer handlers", () => {
         block: { number: 200, timestamp: 1_700_000_000 },
       },
     });
-    mockDb = await FPMMFactory.FPMMDeployed.processEvent({ event: deployEvent, mockDb });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
 
     // Process OracleReported for the feed used by this pool.
     // rateFeedPoolMap is populated by FPMMDeployed; the token param must match
@@ -257,7 +272,10 @@ describe("Envio Celo indexer handlers", () => {
         block: { number: 201, timestamp: 1_700_000_100 },
       },
     });
-    mockDb = await SortedOracles.OracleReported.processEvent({ event: oracleEvent, mockDb });
+    mockDb = await SortedOracles.OracleReported.processEvent({
+      event: oracleEvent,
+      mockDb,
+    });
 
     // The snapshot ID is "{chainId}_{block}_{logIndex}-{poolId}" — but only
     // fires if the pool was in rateFeedPoolMap. Since this unit test runs after
@@ -292,7 +310,10 @@ describe("Envio Celo indexer handlers", () => {
         block: { number: 300, timestamp: 1_700_001_000 },
       },
     });
-    mockDb = await FPMMFactory.FPMMDeployed.processEvent({ event: deployEvent, mockDb });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
 
     // Process MedianUpdated — if rateFeedPoolMap has an entry it will write a
     // snapshot. Even with no map entry the handler must not throw.
@@ -306,14 +327,17 @@ describe("Envio Celo indexer handlers", () => {
         block: { number: 301, timestamp: 1_700_001_100 },
       },
     });
-    mockDb = await SortedOracles.MedianUpdated.processEvent({ event: medianEvent, mockDb });
+    mockDb = await SortedOracles.MedianUpdated.processEvent({
+      event: medianEvent,
+      mockDb,
+    });
 
     // Validate no OracleSnapshot was written for this unknown feed (correct — pool
     // wasn't mapped). The real integration test for source value happens on mainnet.
     // This unit test confirms the handler runs without errors after the source rename.
-    const pool = mockDb.entities.Pool.get("0x00000000000000000000000000000000000000ab") as
-      | { source: string }
-      | undefined;
+    const pool = mockDb.entities.Pool.get(
+      "0x00000000000000000000000000000000000000ab",
+    ) as { source: string } | undefined;
     assert.ok(pool, "Pool entity must still exist after MedianUpdated");
   });
 });

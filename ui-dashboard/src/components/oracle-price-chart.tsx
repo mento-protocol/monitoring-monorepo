@@ -34,9 +34,7 @@ export function OraclePriceChart({
   const timestamps = snapshots.map((s) =>
     new Date(Number(s.timestamp) * 1000).toISOString(),
   );
-  const prices = snapshots.map((s) =>
-    parseOraclePrice(s.oraclePrice),
-  );
+  const prices = snapshots.map((s) => parseOraclePrice(s.oraclePrice));
   const deviations = snapshots.map((s) => {
     if (!s.rebalanceThreshold || s.rebalanceThreshold === 0) return 0;
     return (Number(s.priceDifference) / s.rebalanceThreshold) * 100;

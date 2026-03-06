@@ -3,7 +3,11 @@
 import type { Pool } from "@/lib/types";
 import { HealthBadge } from "@/components/badges";
 import { tokenSymbol } from "@/lib/tokens";
-import { relativeTime, formatTimestamp, SORTED_ORACLES_DECIMALS } from "@/lib/format";
+import {
+  relativeTime,
+  formatTimestamp,
+  SORTED_ORACLES_DECIMALS,
+} from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
 
 /** SortedOracles always uses 24-decimal precision (denominator = 10^24). */
