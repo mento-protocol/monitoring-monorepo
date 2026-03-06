@@ -6,14 +6,16 @@ import { tokenSymbol } from "@/lib/tokens";
 import { relativeTime, formatTimestamp } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
 
-function parseOraclePrice(num: string, denom: string): string {
-  if (!num || !denom || denom === "0" || num === "0") return "—";
-  const price = Number(num) / Number(denom);
-  // Some SortedOracles feeds report prices in 24-decimal precision while the
-  // denominator is stored in 18-decimal precision, producing a ratio of ~10^6
-  // for feeds like USDC/USDm. Until the indexer normalises these, hide the
-  // raw price rather than display a misleading value.
-  if (price > 1_000 || price < 0.001) return "—";
+// SortedOracles always uses 24-decimal fixed-point (denominator = 10^24).
+// The indexer stores `oraclePrice` from MedianUpdated.value (24dp scale) but
+// `oraclePriceDenom` from FPMM.getRebalancingState() (18dp scale) — a mismatch.
+// Fix: always normalise by 10^24. The `denom` param is kept for API compat but ignored.
+const SORTED_ORACLES_PRECISION = 1e24;
+
+function parseOraclePrice(num: string, _denom: string): string {
+  if (!num || num === "0") return "—";
+  const price = Number(num) / SORTED_ORACLES_PRECISION;
+  if (!isFinite(price) || price <= 0) return "—";
   return price.toFixed(6);
 }
 
