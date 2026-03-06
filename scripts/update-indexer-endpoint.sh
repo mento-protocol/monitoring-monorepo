@@ -84,15 +84,16 @@ if [[ -z "$ENDPOINT_HASH" ]]; then
   exit 0
 fi
 
-GRAPHQL_URL="https://indexer.dev.hyperindex.xyz/${ENDPOINT_HASH}/v1/graphql"
+GRAPHQL_URL="https://indexer.hyperindex.xyz/${ENDPOINT_HASH}/v1/graphql"
 
 # Verify the endpoint works
 echo "✅ Verifying endpoint: $GRAPHQL_URL"
-HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" "$GRAPHQL_URL" \
+BODY_TMP=$(mktemp)
+HTTP_CODE=$(curl -s -o "$BODY_TMP" -w "%{http_code}" "$GRAPHQL_URL" \
   -H "Content-Type: application/json" \
   -d '{"query":"{ Pool(limit:1) { id } }"}')
-HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
-HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -1)
+HTTP_BODY=$(cat "$BODY_TMP")
+rm -f "$BODY_TMP"
 
 ENVIO_DASHBOARD="https://envio.dev/app/${ORG_ID}/${INDEXER_ID}/${COMMIT_HASH}"
 
