@@ -15,13 +15,10 @@ interface OraclePriceChartProps {
 }
 
 /**
- * Parse oracle price from numerator/denominator (24 decimal precision).
- * Returns the rate as token0 / token1.
- */
-function parseOraclePrice(num: string, denom: string): number {
-  if (!num || !denom || denom === "0") return 0;
-  // SortedOracles uses 24 decimal precision: divide num by denom
-  return Number(num) / Number(denom);
+ /** SortedOracles always uses 24-decimal precision (denominator = 10^24). */
+function parseOraclePrice(num: string): number {
+  if (!num || num === "0") return 0;
+  return Number(num) / 1e24;
 }
 
 export function OraclePriceChart({
@@ -39,7 +36,7 @@ export function OraclePriceChart({
     new Date(Number(s.timestamp) * 1000).toISOString(),
   );
   const prices = snapshots.map((s) =>
-    parseOraclePrice(s.oraclePrice, s.oraclePriceDenom),
+    parseOraclePrice(s.oraclePrice),
   );
   const deviations = snapshots.map((s) => {
     if (!s.rebalanceThreshold || s.rebalanceThreshold === 0) return 0;

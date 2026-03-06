@@ -11,7 +11,6 @@ export type Pool = {
   healthStatus?: string;
   oracleOk?: boolean;
   oraclePrice?: string;
-  oraclePriceDenom?: string;
   oracleTimestamp?: string;
   oracleExpiry?: string;
   oracleNumReporters?: number;
@@ -35,7 +34,6 @@ export type OracleSnapshot = {
   poolId: string;
   timestamp: string;
   oraclePrice: string;
-  oraclePriceDenom: string;
   oracleOk: boolean;
   numReporters: number;
   priceDifference: string;

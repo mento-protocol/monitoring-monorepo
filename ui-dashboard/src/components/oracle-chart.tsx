@@ -32,10 +32,10 @@ export function OracleChart({
   );
 
   // Normalise oracle price to human-readable float
-  const prices = snapshots.map((s) => {
-    const denom = Number(s.oraclePriceDenom);
-    return denom > 0 ? Number(s.oraclePrice) / denom : 0;
-  });
+  // SortedOracles always uses 24-decimal precision — divide by 10^24
+  const prices = snapshots.map((s) =>
+    s.oraclePrice ? Number(s.oraclePrice) / 1e24 : 0,
+  );
 
   // Deviation % of rebalance threshold
   const deviations = snapshots.map((s) => {
