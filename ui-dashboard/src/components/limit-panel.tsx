@@ -4,17 +4,21 @@ import type { Pool, TradingLimit } from "@/lib/types";
 import { LimitBadge } from "@/components/badges";
 import { computeLimitStatus } from "@/lib/health";
 import { tokenSymbol } from "@/lib/tokens";
+import { formatWei } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
+
+// Limits and netflows are always stored in 18-decimal precision in the indexer,
+// regardless of the token's ERC20 decimals (the FPMM normalises to 18dp internally).
+const LIMIT_DECIMALS = 18;
 
 interface PressureBarProps {
   pressure: string;
   label: string;
   netflow: string;
   limit: string;
-  decimals: number;
 }
 
-function PressureBar({ pressure, label, netflow, limit, decimals }: PressureBarProps) {
+function PressureBar({ pressure, label, netflow, limit }: PressureBarProps) {
   const ratio = Number(pressure);
   const pct = Math.min(ratio * 100, 100);
   const displayPct = (ratio * 100).toFixed(1);
@@ -25,11 +29,13 @@ function PressureBar({ pressure, label, netflow, limit, decimals }: PressureBarP
         ? "bg-amber-500"
         : "bg-emerald-500";
 
-  const formatVal = (val: string) => {
-    if (!val || val === "0") return "0";
-    const num = Number(val) / 10 ** decimals;
-    return num.toLocaleString(undefined, { maximumFractionDigits: 4 });
-  };
+  const netflowHuman = formatWei(
+    netflow.replace(/^-/, ""),
+    LIMIT_DECIMALS,
+    2,
+  );
+  const limitHuman = formatWei(limit, LIMIT_DECIMALS, 2);
+  const sign = netflow.startsWith("-") ? "-" : "+";
 
   return (
     <div className="flex flex-col gap-1">
@@ -47,7 +53,7 @@ function PressureBar({ pressure, label, netflow, limit, decimals }: PressureBarP
         />
       </div>
       <div className="text-xs text-slate-400">
-        Netflow: {formatVal(netflow)} / Limit: {formatVal(limit)}
+        Netflow: {sign}{netflowHuman} / Limit: {limitHuman}
       </div>
     </div>
   );
@@ -92,14 +98,12 @@ export function LimitPanel({ pool, tradingLimits }: LimitPanelProps) {
                   label="Direction 0→1"
                   netflow={tl.netflow0}
                   limit={tl.limit0}
-                  decimals={tl.decimals}
                 />
                 <PressureBar
                   pressure={tl.limitPressure1}
                   label="Direction 1→0"
                   netflow={tl.netflow1}
                   limit={tl.limit1}
-                  decimals={tl.decimals}
                 />
               </div>
             );
