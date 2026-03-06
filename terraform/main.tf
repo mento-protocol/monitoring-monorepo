@@ -60,7 +60,9 @@ resource "vercel_project" "dashboard" {
   build_command   = "pnpm build"
 
   # Only rebuild when something in ui-dashboard/ actually changed.
-  ignore_command = "git diff HEAD^ HEAD --quiet -- ui-dashboard"
+  # NOTE: Vercel runs this command with CWD = root_directory (ui-dashboard/),
+  # so we use "." rather than "ui-dashboard" to reference the current dir.
+  ignore_command = "git diff HEAD^ HEAD --quiet -- ."
 
   git_repository = {
     type              = "github"
