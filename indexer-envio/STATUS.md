@@ -6,11 +6,11 @@ Last updated: 2026-03-05
 
 Both mainnet and Sepolia indexers are live and synced on Envio's hosted service.
 
-| Network      | Envio Project              | Status         | Sync   |
-| ------------ | -------------------------- | -------------- | ------ |
-| Celo Mainnet | `mento-v3-celo-mainnet`    | ✅ Live        | 100%   |
-| Celo Sepolia | `mento-v3-celo-sepolia`    | ✅ Live        | 100%   |
-| Monad        | —                          | ⏳ Blocked     | —      |
+| Network      | Envio Project           | Status     | Sync |
+| ------------ | ----------------------- | ---------- | ---- |
+| Celo Mainnet | `mento-v3-celo-mainnet` | ✅ Live    | 100% |
+| Celo Sepolia | `mento-v3-celo-sepolia` | ✅ Live    | 100% |
+| Monad        | —                       | ⏳ Blocked | —    |
 
 ## GraphQL Endpoint
 
@@ -30,18 +30,18 @@ Full schema: [`schema.graphql`](./schema.graphql)
 
 ### Entities
 
-| Entity              | Count (approx, mainnet) | Notes                                      |
-| ------------------- | ----------------------- | ------------------------------------------ |
-| Pool                | ~16 (4 FPMM + VPs)     | One per pool, mutable state                |
-| PoolSnapshot        | Growing                 | Hourly buckets per pool                    |
-| OracleSnapshot      | Growing                 | Per SortedOracles event (mainnet only)     |
-| TradingLimit        | ~4–8                   | One per pool per token (FPMM pools only)   |
-| SwapEvent           | Growing                 | Immutable event log                        |
-| LiquidityEvent      | Growing                 | Mint/burn events                           |
-| ReserveUpdate       | Growing                 | Per UpdateReserves event                   |
-| RebalanceEvent      | Growing                 | Per Rebalanced event                       |
-| FactoryDeployment   | ~4 (FPMM) + VPs        | Pool creation events                       |
-| VirtualPoolLifecycle| Growing                 | VirtualPool deploy/deprecate events        |
+| Entity               | Count (approx, mainnet) | Notes                                    |
+| -------------------- | ----------------------- | ---------------------------------------- |
+| Pool                 | ~16 (4 FPMM + VPs)      | One per pool, mutable state              |
+| PoolSnapshot         | Growing                 | Hourly buckets per pool                  |
+| OracleSnapshot       | Growing                 | Per SortedOracles event (mainnet only)   |
+| TradingLimit         | ~4–8                    | One per pool per token (FPMM pools only) |
+| SwapEvent            | Growing                 | Immutable event log                      |
+| LiquidityEvent       | Growing                 | Mint/burn events                         |
+| ReserveUpdate        | Growing                 | Per UpdateReserves event                 |
+| RebalanceEvent       | Growing                 | Per Rebalanced event                     |
+| FactoryDeployment    | ~4 (FPMM) + VPs         | Pool creation events                     |
+| VirtualPoolLifecycle | Growing                 | VirtualPool deploy/deprecate events      |
 
 ### Key Pool Fields (current schema)
 
@@ -50,7 +50,7 @@ type Pool {
   id: ID!
   token0: String
   token1: String
-  source: String!                    # "fpmm" | "virtual"
+  source: String! # "fpmm" | "virtual"
   reserves0: BigInt!
   reserves1: BigInt!
   swapCount: Int!
@@ -67,12 +67,12 @@ type Pool {
   priceDifference: BigInt!
   rebalanceThreshold: Int!
   lastRebalancedAt: BigInt!
-  healthStatus: String!              # "OK" | "WARN" | "CRITICAL" | "N/A"
-  limitStatus: String!               # "OK" | "WARN" | "CRITICAL" | "N/A"
+  healthStatus: String! # "OK" | "WARN" | "CRITICAL" | "N/A"
+  limitStatus: String! # "OK" | "WARN" | "CRITICAL" | "N/A"
   limitPressure0: String!
   limitPressure1: String!
   rebalancerAddress: String!
-  rebalanceLivenessStatus: String!   # "ACTIVE" | "N/A"
+  rebalanceLivenessStatus: String! # "ACTIVE" | "N/A"
   createdAtBlock: BigInt!
   createdAtTimestamp: BigInt!
   updatedAtBlock: BigInt!
@@ -82,11 +82,11 @@ type Pool {
 
 ## Config Files
 
-| File                          | Start Block | Networks       |
-| ----------------------------- | ----------- | -------------- |
-| `config.celo.mainnet.yaml`    | 60664513    | Celo Mainnet   |
-| `config.celo.sepolia.yaml`    | (Sepolia)   | Celo Sepolia   |
-| `config.celo.devnet.yaml`     | 60548751    | DevNet (local) |
+| File                       | Start Block | Networks       |
+| -------------------------- | ----------- | -------------- |
+| `config.celo.mainnet.yaml` | 60664513    | Celo Mainnet   |
+| `config.celo.sepolia.yaml` | (Sepolia)   | Celo Sepolia   |
+| `config.celo.devnet.yaml`  | 60548751    | DevNet (local) |
 
 ## Contracts Indexed (Mainnet)
 

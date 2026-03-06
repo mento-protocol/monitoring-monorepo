@@ -12,7 +12,6 @@ archived_reason: "Migration complete. Both mainnet and Sepolia indexers are live
 
 ---
 
-
 ## TL;DR
 
 Envio's hosted service uses **Git-based deployments** (like Vercel) — push to a branch, it deploys. No `envio deploy` CLI command exists. Free dev tier has limits (100k events, 5GB, 30-day max). The hosted service provides a **GraphQL endpoint** directly (no separate Hasura needed). Migration is straightforward: push indexer code to GitHub, connect via Envio dashboard, update Vercel env vars to point to the new endpoint.

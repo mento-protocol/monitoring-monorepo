@@ -17,9 +17,9 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 
 ### Live Endpoints
 
-| What           | URL                                              |
-| -------------- | ------------------------------------------------ |
-| Dashboard      | https://monitoring.mento.org                     |
+| What            | URL                                                    |
+| --------------- | ------------------------------------------------------ |
+| Dashboard       | https://monitoring.mento.org                           |
 | Mainnet GraphQL | `https://indexer.dev.hyperindex.xyz/<hash>/v1/graphql` |
 
 ---
@@ -62,42 +62,42 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 
 ### Components
 
-| Component         | Technology           | Hosting        | Repo Path          |
-| ----------------- | -------------------- | -------------- | ------------------ |
-| Indexer           | Envio HyperIndex     | Envio hosted   | `indexer-envio/`   |
-| GraphQL API       | Hasura (auto-managed)| Envio hosted   | —                  |
-| Dashboard         | Next.js 16 + Plotly  | Vercel         | `ui-dashboard/`    |
-| Alerting (future) | Aegis / Grafana      | TBD            | —                  |
+| Component         | Technology            | Hosting      | Repo Path        |
+| ----------------- | --------------------- | ------------ | ---------------- |
+| Indexer           | Envio HyperIndex      | Envio hosted | `indexer-envio/` |
+| GraphQL API       | Hasura (auto-managed) | Envio hosted | —                |
+| Dashboard         | Next.js 16 + Plotly   | Vercel       | `ui-dashboard/`  |
+| Alerting (future) | Aegis / Grafana       | TBD          | —                |
 
 ---
 
 ## 3. Networks
 
-| Network        | Chain ID | Status                         | Start Block |
-| -------------- | -------- | ------------------------------ | ----------- |
-| Celo Mainnet   | 42220    | ✅ Live                        | 60664513    |
-| Celo Sepolia   | 44787    | ✅ Live                        | —           |
-| Monad Mainnet  | —        | ⏳ Blocked on contract deploy  | —           |
+| Network       | Chain ID | Status                        | Start Block |
+| ------------- | -------- | ----------------------------- | ----------- |
+| Celo Mainnet  | 42220    | ✅ Live                       | 60664513    |
+| Celo Sepolia  | 44787    | ✅ Live                       | —           |
+| Monad Mainnet | —        | ⏳ Blocked on contract deploy | —           |
 
 ---
 
 ## 4. Contracts (Celo Mainnet)
 
-| Contract        | Address                                      |
-| --------------- | -------------------------------------------- |
-| FPMMFactory     | `0xa849b475FE5a4B5C9C3280152c7a1945b907613b` |
-| Router          | `0x4861840C2EfB2b98312B0aE34d86fD73E8f9B6f6` |
-| OracleAdapter   | `0xa472fBBF4b890A54381977ac392BdF82EeC4383a` |
-| SortedOracles   | `0xefB84935239dAcdecF7c5bA76d8dE40b077B7b33` |
+| Contract      | Address                                      |
+| ------------- | -------------------------------------------- |
+| FPMMFactory   | `0xa849b475FE5a4B5C9C3280152c7a1945b907613b` |
+| Router        | `0x4861840C2EfB2b98312B0aE34d86fD73E8f9B6f6` |
+| OracleAdapter | `0xa472fBBF4b890A54381977ac392BdF82EeC4383a` |
+| SortedOracles | `0xefB84935239dAcdecF7c5bA76d8dE40b077B7b33` |
 
 ### FPMM Pools (Mainnet)
 
-| Address                                        | Pair           |
-| ---------------------------------------------- | -------------- |
-| `0x8c0014afe032e4574481d8934504100bf23fcb56`   | USDm / GBPm    |
-| `0xb285d4c7133d6f27bfb29224fb0d22e7ec3ddd2d`   | USDm / axlUSDC |
-| `0x462fe04b4fd719cbd04c0310365d421d02aaa19e`   | USDm / USDC    |
-| `0x0feba760d93423d127de1b6abecdb60e5253228d`   | USDT / USDm    |
+| Address                                      | Pair           |
+| -------------------------------------------- | -------------- |
+| `0x8c0014afe032e4574481d8934504100bf23fcb56` | USDm / GBPm    |
+| `0xb285d4c7133d6f27bfb29224fb0d22e7ec3ddd2d` | USDm / axlUSDC |
+| `0x462fe04b4fd719cbd04c0310365d421d02aaa19e` | USDm / USDC    |
+| `0x0feba760d93423d127de1b6abecdb60e5253228d` | USDT / USDm    |
 
 ---
 
@@ -111,10 +111,10 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 
 **Applies to:** FPMM pools only (VirtualPools → N/A)
 
-| Status   | Condition               |
-| -------- | ----------------------- |
-| OK       | `oracleOk == true`      |
-| WARN     | liveness ratio > 0.8    |
+| Status   | Condition                             |
+| -------- | ------------------------------------- |
+| OK       | `oracleOk == true`                    |
+| WARN     | liveness ratio > 0.8                  |
 | CRITICAL | liveness ratio ≥ 1.0 (oracle expired) |
 
 ### 5.2 Deviation Ratio (Oracle Price vs Market)
@@ -125,11 +125,11 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 
 **Applies to:** FPMM pools only
 
-| Status   | Condition                                              |
-| -------- | ------------------------------------------------------ |
-| OK       | `priceDifference / rebalanceThreshold < 0.8`          |
-| WARN     | ratio ≥ 0.8 sustained for > 15 min                    |
-| CRITICAL | ratio ≥ 0.8 sustained for > 60 min                    |
+| Status   | Condition                                    |
+| -------- | -------------------------------------------- |
+| OK       | `priceDifference / rebalanceThreshold < 0.8` |
+| WARN     | ratio ≥ 0.8 sustained for > 15 min           |
+| CRITICAL | ratio ≥ 0.8 sustained for > 60 min           |
 
 The `healthStatus` field on Pool encodes the current status: `"OK"` | `"WARN"` | `"CRITICAL"` | `"N/A"`.
 
@@ -143,11 +143,11 @@ The `healthStatus` field on Pool encodes the current status: `"OK"` | `"WARN"` |
 
 **Applies to:** FPMM pools only
 
-| Status   | Condition                              |
-| -------- | -------------------------------------- |
-| OK       | max pressure < 0.8                     |
-| WARN     | max pressure > 0.8                     |
-| CRITICAL | max pressure ≥ 1.0 (limit hit)         |
+| Status   | Condition                      |
+| -------- | ------------------------------ |
+| OK       | max pressure < 0.8             |
+| WARN     | max pressure > 0.8             |
+| CRITICAL | max pressure ≥ 1.0 (limit hit) |
 
 `limitPressure` = `|netflow| / limit` — stored as decimal string for precision.
 
@@ -159,10 +159,10 @@ The `healthStatus` field on Pool encodes the current status: `"OK"` | `"WARN"` |
 
 **Applies to:** FPMM pools only
 
-| Status   | Condition                              |
-| -------- | -------------------------------------- |
-| ACTIVE   | Rebalancer has rebalanced recently     |
-| N/A      | Pool is a VirtualPool                  |
+| Status | Condition                          |
+| ------ | ---------------------------------- |
+| ACTIVE | Rebalancer has rebalanced recently |
+| N/A    | Pool is a VirtualPool              |
 
 `effectivenessRatio` per RebalanceEvent = `(priceDifferenceBefore - priceDifferenceAfter) / priceDifferenceBefore` — how much of the deviation was corrected.
 
@@ -174,10 +174,10 @@ The `healthStatus` field on Pool encodes the current status: `"OK"` | `"WARN"` |
 
 **Applies to:** Liquity v2 CDP pools (GBPm TroveManager / StabilityPool)
 
-| Status   | Condition                              |
-| -------- | -------------------------------------- |
-| OK       | headroom > 0                           |
-| CRITICAL | headroom ≤ 0 (undercollateralized)     |
+| Status   | Condition                          |
+| -------- | ---------------------------------- |
+| OK       | headroom > 0                       |
+| CRITICAL | headroom ≤ 0 (undercollateralized) |
 
 ---
 
@@ -191,17 +191,16 @@ Mutable per-pool state. Updated on every relevant event.
 
 ```graphql
 type Pool {
-  id: ID!                        # pool address (lowercase)
-  token0: String                 # token0 address
-  token1: String                 # token1 address
-  source: String!                # "fpmm" | "virtual"
-  reserves0: BigInt!             # current reserve0
-  reserves1: BigInt!             # current reserve1
-  swapCount: Int!                # cumulative swap count
-  notionalVolume0: BigInt!       # cumulative notional volume in token0
-  notionalVolume1: BigInt!       # cumulative notional volume in token1
-  rebalanceCount: Int!           # cumulative rebalance count
-
+  id: ID! # pool address (lowercase)
+  token0: String # token0 address
+  token1: String # token1 address
+  source: String! # "fpmm" | "virtual"
+  reserves0: BigInt! # current reserve0
+  reserves1: BigInt! # current reserve1
+  swapCount: Int! # cumulative swap count
+  notionalVolume0: BigInt! # cumulative notional volume in token0
+  notionalVolume1: BigInt! # cumulative notional volume in token1
+  rebalanceCount: Int! # cumulative rebalance count
   # Oracle state (FPMM only; defaults to zero/false for VirtualPools)
   oracleOk: Boolean!
   oraclePrice: BigInt!
@@ -213,17 +212,15 @@ type Pool {
   priceDifference: BigInt!
   rebalanceThreshold: Int!
   lastRebalancedAt: BigInt!
-  healthStatus: String!          # "OK" | "WARN" | "CRITICAL" | "N/A"
-
+  healthStatus: String! # "OK" | "WARN" | "CRITICAL" | "N/A"
   # Trading limits (FPMM only)
-  limitStatus: String!           # "OK" | "WARN" | "CRITICAL" | "N/A"
+  limitStatus: String! # "OK" | "WARN" | "CRITICAL" | "N/A"
   limitPressure0: String!
   limitPressure1: String!
 
   # Rebalancer
   rebalancerAddress: String!
   rebalanceLivenessStatus: String! # "ACTIVE" | "N/A"
-
   createdAtBlock: BigInt!
   createdAtTimestamp: BigInt!
   updatedAtBlock: BigInt!
@@ -237,10 +234,9 @@ Hourly pre-aggregated activity per pool. Industry standard (Uniswap/Balancer pat
 
 ```graphql
 type PoolSnapshot {
-  id: ID!                        # "{poolId}-{hourTimestamp}"
+  id: ID! # "{poolId}-{hourTimestamp}"
   poolId: String! @index
-  timestamp: BigInt! @index      # unix timestamp truncated to hour
-
+  timestamp: BigInt! @index # unix timestamp truncated to hour
   # Point-in-time state at end of this hour
   reserves0: BigInt!
   reserves1: BigInt!
@@ -290,7 +286,7 @@ Per-pool per-token trading limit state.
 
 ```graphql
 type TradingLimit {
-  id: ID!                        # "{poolId}-{tokenAddress}"
+  id: ID! # "{poolId}-{tokenAddress}"
   poolId: String!
   token: String!
   limit0: BigInt!
@@ -302,7 +298,7 @@ type TradingLimit {
   lastUpdated1: BigInt!
   limitPressure0: String!
   limitPressure1: String!
-  limitStatus: String!           # "OK" | "WARN" | "CRITICAL"
+  limitStatus: String! # "OK" | "WARN" | "CRITICAL"
   updatedAtBlock: BigInt!
   updatedAtTimestamp: BigInt!
 }
@@ -319,8 +315,8 @@ type RebalanceEvent {
   sender: String!
   priceDifferenceBefore: BigInt!
   priceDifferenceAfter: BigInt!
-  improvement: BigInt!           # priceDifferenceBefore - priceDifferenceAfter
-  effectivenessRatio: String!    # improvement / priceDifferenceBefore, e.g. "0.5000"
+  improvement: BigInt! # priceDifferenceBefore - priceDifferenceAfter
+  effectivenessRatio: String! # improvement / priceDifferenceBefore, e.g. "0.5000"
   txHash: String!
   blockNumber: BigInt!
   blockTimestamp: BigInt! @index
@@ -338,12 +334,14 @@ type RebalanceEvent {
 Protocol-wide metrics dashboard.
 
 **Tiles:**
+
 - Total pools (FPMM + VirtualPool count)
 - Active pools (with swap activity in last 24h)
 - Health breakdown (OK / WARN / CRITICAL counts)
 - Total swap count
 
 **Components:**
+
 - `PoolsTable` — all pools with HealthBadge, last swap, volume
 - Activity ranking by swap count
 
@@ -354,28 +352,29 @@ Protocol-wide metrics dashboard.
 Per-pool deep-dive.
 
 **Tabs:**
+
 1. **Overview** — reserve chart (Plotly), recent swaps table
 2. **Analytics** — PoolSnapshot charts (hourly volume bars + cumulative count), OracleChart (FPMM only)
-3. *(Future)* **Limits** — TradingLimit pressure panel
-4. *(Future)* **Rebalancer** — RebalanceEvent timeline
+3. _(Future)_ **Limits** — TradingLimit pressure panel
+4. _(Future)_ **Rebalancer** — RebalanceEvent timeline
 
 **Status:** ✅ Live (tabs 1 + 2)
 
 ### Key Components
 
-| Component         | File                                       | Status         |
-| ----------------- | ------------------------------------------ | -------------- |
-| `PoolsTable`      | `components/pools-table.tsx`               | ✅ Live        |
-| `HealthBadge`     | `components/health-badge.tsx`              | ✅ Live        |
-| `HealthPanel`     | `components/health-panel.tsx`              | ✅ Live        |
-| `OracleChart`     | `components/oracle-chart.tsx`              | ✅ Live        |
-| `ReserveChart`    | `components/reserve-chart.tsx`             | ✅ Live        |
-| `SnapshotChart`   | `components/snapshot-chart.tsx`            | ✅ Live        |
-| `NetworkSwitcher` | `components/network-switcher.tsx`          | ✅ Live        |
-| `LimitBadge`      | —                                          | 🔜 Stream C   |
-| `LimitPanel`      | —                                          | 🔜 Stream C   |
-| `LivenessBadge`   | —                                          | 🔜 Stream C   |
-| `RebalancerPanel` | —                                          | 🔜 Stream C   |
+| Component         | File                              | Status      |
+| ----------------- | --------------------------------- | ----------- |
+| `PoolsTable`      | `components/pools-table.tsx`      | ✅ Live     |
+| `HealthBadge`     | `components/health-badge.tsx`     | ✅ Live     |
+| `HealthPanel`     | `components/health-panel.tsx`     | ✅ Live     |
+| `OracleChart`     | `components/oracle-chart.tsx`     | ✅ Live     |
+| `ReserveChart`    | `components/reserve-chart.tsx`    | ✅ Live     |
+| `SnapshotChart`   | `components/snapshot-chart.tsx`   | ✅ Live     |
+| `NetworkSwitcher` | `components/network-switcher.tsx` | ✅ Live     |
+| `LimitBadge`      | —                                 | 🔜 Stream C |
+| `LimitPanel`      | —                                 | 🔜 Stream C |
+| `LivenessBadge`   | —                                 | 🔜 Stream C |
+| `RebalancerPanel` | —                                 | 🔜 Stream C |
 
 ### Pool Type Detection
 
@@ -386,16 +385,17 @@ Per-pool deep-dive.
 ## 8. Network Support
 
 The dashboard supports multiple network targets via a network switcher. Each network target has:
+
 - A Hasura/GraphQL endpoint URL
 - A Hasura admin secret
 - A block explorer base URL
 
-| Target                    | Description                    |
-| ------------------------- | ------------------------------ |
-| `MAINNET_HOSTED`          | Celo Mainnet (Envio hosted)    |
-| `SEPOLIA_HOSTED`          | Celo Sepolia (Envio hosted)    |
-| `MAINNET`                 | Celo Mainnet (local dev)       |
-| `SEPOLIA`                 | Celo Sepolia (local dev)       |
+| Target           | Description                 |
+| ---------------- | --------------------------- |
+| `MAINNET_HOSTED` | Celo Mainnet (Envio hosted) |
+| `SEPOLIA_HOSTED` | Celo Sepolia (Envio hosted) |
+| `MAINNET`        | Celo Mainnet (local dev)    |
+| `SEPOLIA`        | Celo Sepolia (local dev)    |
 
 The live dashboard (monitoring.mento.org) uses `MAINNET_HOSTED` by default.
 
@@ -403,32 +403,35 @@ The live dashboard (monitoring.mento.org) uses `MAINNET_HOSTED` by default.
 
 ## 9. Known Limitations
 
-| Limitation                              | Details                                                    |
-| --------------------------------------- | ---------------------------------------------------------- |
-| Endpoint hash changes on each deploy    | Envio free tier generates new URL per deploy; requires Vercel env var update |
-| No authentication on dashboard          | Google Auth deferred to last; Hasura secret exposed in client bundle |
-| Cannot run two indexers locally         | Port 9898 hardcoded in Envio                               |
-| SortedOracles on Sepolia               | Contracts return zero address; oracle indexing mainnet-only |
-| Gap-fill not yet implemented           | PoolSnapshot charts may show gaps for periods with no activity |
-| Monad blocked                          | Awaiting contract deployment to Monad                      |
-| No Liquity v2 indexing                 | TroveManager / StabilityPool — Phase 2                     |
-| Dashboard component tests              | Zero component-level tests; only lib utils covered         |
+| Limitation                           | Details                                                                      |
+| ------------------------------------ | ---------------------------------------------------------------------------- |
+| Endpoint hash changes on each deploy | Envio free tier generates new URL per deploy; requires Vercel env var update |
+| No authentication on dashboard       | Google Auth deferred to last; Hasura secret exposed in client bundle         |
+| Cannot run two indexers locally      | Port 9898 hardcoded in Envio                                                 |
+| SortedOracles on Sepolia             | Contracts return zero address; oracle indexing mainnet-only                  |
+| Gap-fill not yet implemented         | PoolSnapshot charts may show gaps for periods with no activity               |
+| Monad blocked                        | Awaiting contract deployment to Monad                                        |
+| No Liquity v2 indexing               | TroveManager / StabilityPool — Phase 2                                       |
+| Dashboard component tests            | Zero component-level tests; only lib utils covered                           |
 
 ---
 
 ## 10. Future Plans
 
 ### Stream C (Next)
+
 - Dashboard components for trading limits and rebalancer liveness
 - TVL display on global page
 - Gap-fill logic for snapshot charts
 
 ### Phase 2
+
 - Liquity v2 CDP indexing (TroveManager, StabilityPool, Trove entities)
 - Aegis/Grafana alerting with the 5 KPI thresholds
 - Monad indexing (once contracts are deployed)
 
 ### Phase 3
+
 - Roman's Streamlit sandbox (Python, reads from same Hasura backend)
 - Google Auth (NextAuth.js — `@mentolabs.xyz` only)
 - ClickHouse sink for heavy analytics
@@ -448,6 +451,7 @@ pnpm --filter @mento-protocol/ui-dashboard lint
 ### CI
 
 GitHub Actions (`.github/workflows/`):
+
 - `ui-dashboard.yml` — lint + typecheck + test + Codecov
 - `indexer-envio.yml` — typecheck + lint
 - `notify-envio-deploy.yml` — Discord notification on `deploy/*` push

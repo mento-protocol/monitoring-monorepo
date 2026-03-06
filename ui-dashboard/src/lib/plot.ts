@@ -19,17 +19,52 @@ export const PLOTLY_BASE_LAYOUT = {
 
 /** Range-selector button presets for time-series charts. */
 export const RANGE_SELECTOR_BUTTONS_DAILY = [
-  { count: 1, label: "1d", step: "day" as const, stepmode: "backward" as const },
-  { count: 7, label: "7d", step: "day" as const, stepmode: "backward" as const },
-  { count: 30, label: "30d", step: "day" as const, stepmode: "backward" as const },
+  {
+    count: 1,
+    label: "1d",
+    step: "day" as const,
+    stepmode: "backward" as const,
+  },
+  {
+    count: 7,
+    label: "7d",
+    step: "day" as const,
+    stepmode: "backward" as const,
+  },
+  {
+    count: 30,
+    label: "30d",
+    step: "day" as const,
+    stepmode: "backward" as const,
+  },
   { step: "all" as const, label: "All" },
 ];
 
 export const RANGE_SELECTOR_BUTTONS_HOURLY = [
-  { count: 1, label: "1h", step: "hour" as const, stepmode: "backward" as const },
-  { count: 6, label: "6h", step: "hour" as const, stepmode: "backward" as const },
-  { count: 1, label: "1d", step: "day" as const, stepmode: "backward" as const },
-  { count: 7, label: "7d", step: "day" as const, stepmode: "backward" as const },
+  {
+    count: 1,
+    label: "1h",
+    step: "hour" as const,
+    stepmode: "backward" as const,
+  },
+  {
+    count: 6,
+    label: "6h",
+    step: "hour" as const,
+    stepmode: "backward" as const,
+  },
+  {
+    count: 1,
+    label: "1d",
+    step: "day" as const,
+    stepmode: "backward" as const,
+  },
+  {
+    count: 7,
+    label: "7d",
+    step: "day" as const,
+    stepmode: "backward" as const,
+  },
   { step: "all" as const, label: "All" },
 ];
 
@@ -49,7 +84,12 @@ export const PLOTLY_RANGE_SLIDER_STYLE = {
 } as const;
 
 type RangeSelectorButton =
-  | { count: number; label: string; step: "hour" | "day" | "month" | "year"; stepmode: "backward" }
+  | {
+      count: number;
+      label: string;
+      step: "hour" | "day" | "month" | "year";
+      stepmode: "backward";
+    }
   | { step: "all"; label: string; count?: undefined; stepmode?: undefined };
 
 /** Common xaxis config for date-typed, sliding time-series charts. */

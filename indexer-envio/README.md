@@ -8,27 +8,27 @@ The indexer listens to on-chain events from Mento v3 contracts and writes struct
 
 ### Events Indexed
 
-| Contract        | Events                                                        |
-| --------------- | ------------------------------------------------------------- |
-| FPMMFactory     | `FPMMDeployed`                                                |
-| FPMM (pool)     | `Swap`, `Mint`, `Burn`, `UpdateReserves`, `Rebalanced`        |
-| VirtualPoolFactory | `VirtualPoolDeployed`, `PoolDeprecated`                    |
-| SortedOracles   | `OracleReportRemoved`, `OracleReportUpdated` (mainnet only)   |
+| Contract           | Events                                                      |
+| ------------------ | ----------------------------------------------------------- |
+| FPMMFactory        | `FPMMDeployed`                                              |
+| FPMM (pool)        | `Swap`, `Mint`, `Burn`, `UpdateReserves`, `Rebalanced`      |
+| VirtualPoolFactory | `VirtualPoolDeployed`, `PoolDeprecated`                     |
+| SortedOracles      | `OracleReportRemoved`, `OracleReportUpdated` (mainnet only) |
 
 ### Entities Written
 
-| Entity              | Description                                                          |
-| ------------------- | -------------------------------------------------------------------- |
-| `Pool`              | Per-pool state: reserves, health status, oracle state, trading limits, rebalancer liveness |
-| `PoolSnapshot`      | Hourly pre-aggregated: volume, TVL, swap count, rebalance count      |
-| `OracleSnapshot`    | Per-oracle-event: price, deviation, health status                    |
-| `TradingLimit`      | Per-pool per-token: limit state, netflow, pressure ratio             |
-| `SwapEvent`         | Individual swap: amounts in/out, txHash, timestamp                   |
-| `LiquidityEvent`    | Mint/burn events: amounts, txHash                                    |
-| `ReserveUpdate`     | Reserve snapshots on every `UpdateReserves`                          |
-| `RebalanceEvent`    | Per-rebalance: improvement, effectiveness ratio                      |
-| `FactoryDeployment` | Pool creation events from factory                                    |
-| `VirtualPoolLifecycle` | VirtualPool deploy/deprecate events                              |
+| Entity                 | Description                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------ |
+| `Pool`                 | Per-pool state: reserves, health status, oracle state, trading limits, rebalancer liveness |
+| `PoolSnapshot`         | Hourly pre-aggregated: volume, TVL, swap count, rebalance count                            |
+| `OracleSnapshot`       | Per-oracle-event: price, deviation, health status                                          |
+| `TradingLimit`         | Per-pool per-token: limit state, netflow, pressure ratio                                   |
+| `SwapEvent`            | Individual swap: amounts in/out, txHash, timestamp                                         |
+| `LiquidityEvent`       | Mint/burn events: amounts, txHash                                                          |
+| `ReserveUpdate`        | Reserve snapshots on every `UpdateReserves`                                                |
+| `RebalanceEvent`       | Per-rebalance: improvement, effectiveness ratio                                            |
+| `FactoryDeployment`    | Pool creation events from factory                                                          |
+| `VirtualPoolLifecycle` | VirtualPool deploy/deprecate events                                                        |
 
 ### Pool Type Logic
 
@@ -39,37 +39,38 @@ The single source of truth is `isFpmm()` in `ui-dashboard/src/lib/tokens.ts`, wh
 
 ## Mainnet Contracts
 
-| Contract        | Address                                      |
-| --------------- | -------------------------------------------- |
-| FPMMFactory     | `0xa849b475FE5a4B5C9C3280152c7a1945b907613b` |
-| Router          | `0x4861840C2EfB2b98312B0aE34d86fD73E8f9B6f6` |
-| OracleAdapter   | `0xa472fBBF4b890A54381977ac392BdF82EeC4383a` |
-| SortedOracles   | `0xefB84935239dAcdecF7c5bA76d8dE40b077B7b33` |
+| Contract      | Address                                      |
+| ------------- | -------------------------------------------- |
+| FPMMFactory   | `0xa849b475FE5a4B5C9C3280152c7a1945b907613b` |
+| Router        | `0x4861840C2EfB2b98312B0aE34d86fD73E8f9B6f6` |
+| OracleAdapter | `0xa472fBBF4b890A54381977ac392BdF82EeC4383a` |
+| SortedOracles | `0xefB84935239dAcdecF7c5bA76d8dE40b077B7b33` |
 
 Start block: `60664513`
 
 ## Mainnet FPMM Pools
 
-| Pool Address                                   | Pair          |
-| ---------------------------------------------- | ------------- |
-| `0x8c0014afe032e4574481d8934504100bf23fcb56`   | USDm / GBPm   |
-| `0xb285d4c7133d6f27bfb29224fb0d22e7ec3ddd2d`   | USDm / axlUSDC |
-| `0x462fe04b4fd719cbd04c0310365d421d02aaa19e`   | USDm / USDC   |
-| `0x0feba760d93423d127de1b6abecdb60e5253228d`   | USDT / USDm   |
+| Pool Address                                 | Pair           |
+| -------------------------------------------- | -------------- |
+| `0x8c0014afe032e4574481d8934504100bf23fcb56` | USDm / GBPm    |
+| `0xb285d4c7133d6f27bfb29224fb0d22e7ec3ddd2d` | USDm / axlUSDC |
+| `0x462fe04b4fd719cbd04c0310365d421d02aaa19e` | USDm / USDC    |
+| `0x0feba760d93423d127de1b6abecdb60e5253228d` | USDT / USDm    |
 
 ## Configuration Files
 
-| File                           | Network        |
-| ------------------------------ | -------------- |
-| `config.celo.mainnet.yaml`     | Celo Mainnet   |
-| `config.celo.sepolia.yaml`     | Celo Sepolia   |
-| `config.celo.devnet.yaml`      | Celo DevNet (local) |
+| File                       | Network             |
+| -------------------------- | ------------------- |
+| `config.celo.mainnet.yaml` | Celo Mainnet        |
+| `config.celo.sepolia.yaml` | Celo Sepolia        |
+| `config.celo.devnet.yaml`  | Celo DevNet (local) |
 
 ## Schema
 
 See [`schema.graphql`](./schema.graphql) for the full entity model.
 
 Key design decisions:
+
 - `PoolSnapshot` uses hourly buckets (industry standard, Uniswap/Balancer pattern)
 - Gap-filling for charts is done in the dashboard layer (forward-fill) — Envio `onBlock` handlers lack timestamps
 - `TradingLimit` has a composite ID: `{poolId}-{tokenAddress}`
@@ -122,14 +123,14 @@ pnpm stop       # Stop Docker containers
 
 ## Key Files
 
-| File                       | Purpose                                            |
-| -------------------------- | -------------------------------------------------- |
-| `schema.graphql`           | Entity model (Hasura schema)                       |
-| `src/EventHandlers.ts`     | Event → entity mapping logic                       |
+| File                       | Purpose                                              |
+| -------------------------- | ---------------------------------------------------- |
+| `schema.graphql`           | Entity model (Hasura schema)                         |
+| `src/EventHandlers.ts`     | Event → entity mapping logic                         |
 | `config.celo.mainnet.yaml` | Mainnet chain config, contracts, events, start block |
-| `config.celo.sepolia.yaml` | Sepolia chain config                               |
-| `abis/`                    | Contract ABIs                                      |
-| `.env.example`             | Environment variable template                      |
+| `config.celo.sepolia.yaml` | Sepolia chain config                                 |
+| `abis/`                    | Contract ABIs                                        |
+| `.env.example`             | Environment variable template                        |
 
 ## Example Queries
 
