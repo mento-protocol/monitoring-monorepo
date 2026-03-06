@@ -13,11 +13,8 @@ import {
   RebalancerBadge,
 } from "@/components/badges";
 import { AddressLink } from "@/components/address-link";
-import {
-  computeLimitStatus,
-  computeRebalancerLiveness,
-} from "@/lib/health";
-import type { HealthStatus, RebalancerStatus } from "@/lib/health";
+import { computeLimitStatus, computeRebalancerLiveness } from "@/lib/health";
+import type { RebalancerStatus } from "@/lib/health";
 
 function healthTooltip(p: Pool): string {
   const status = p.healthStatus ?? "N/A";
@@ -37,8 +34,10 @@ function limitTooltip(status: string): string {
 }
 
 function rebalancerTooltip(status: RebalancerStatus): string {
-  if (status === "ACTIVE") return "Rebalancer active — last rebalance within 24h";
-  if (status === "STALE") return "No rebalance in 24h while pool health is not OK";
+  if (status === "ACTIVE")
+    return "Rebalancer active — last rebalance within 24h";
+  if (status === "STALE")
+    return "No rebalance in 24h while pool health is not OK";
   return "VirtualPool — rebalancer not applicable";
 }
 
