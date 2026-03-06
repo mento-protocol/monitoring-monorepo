@@ -88,12 +88,22 @@ GRAPHQL_URL="https://indexer.dev.hyperindex.xyz/${ENDPOINT_HASH}/v1/graphql"
 
 # Verify the endpoint works
 echo "✅ Verifying endpoint: $GRAPHQL_URL"
-RESULT=$(curl -s "$GRAPHQL_URL" \
+HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" "$GRAPHQL_URL" \
   -H "Content-Type: application/json" \
-  -d '{"query":"{ Pool(limit:1) { id } }"}' | python3 -c "import json,sys; d=json.load(sys.stdin); print('ok' if d.get('data') else 'error: ' + str(d.get('errors',['unknown'])))")
+  -d '{"query":"{ Pool(limit:1) { id } }"}')
+HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -1)
+
+ENVIO_DASHBOARD="https://envio.dev/app/${ORG_ID}/${INDEXER_ID}/${COMMIT_HASH}"
+
+if [[ "$HTTP_CODE" != "200" ]]; then
+  RESULT="error: HTTP $HTTP_CODE — endpoint may not exist yet. Grab the correct hash from:\n   ${ENVIO_DASHBOARD}"
+else
+  RESULT=$(echo "$HTTP_BODY" | python3 -c "import json,sys; d=json.load(sys.stdin); print('ok' if d.get('data') else 'error: ' + str(d.get('errors',['unknown'])))")
+fi
 
 if [[ "$RESULT" != "ok" ]]; then
-  echo "❌ Endpoint verification failed: $RESULT"
+  echo -e "❌ Endpoint verification failed: $RESULT"
   exit 1
 fi
 
