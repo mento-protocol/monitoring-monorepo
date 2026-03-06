@@ -96,6 +96,11 @@ The dashboard supports multiple network targets via `_<NETWORK>` suffix env vars
 | `NEXT_PUBLIC_HASURA_SECRET_SEPOLIA`        | Hasura admin secret — Celo Sepolia (local)      |
 | `NEXT_PUBLIC_EXPLORER_URL_MAINNET`         | Block explorer — Celo Mainnet                   |
 | `NEXT_PUBLIC_EXPLORER_URL_SEPOLIA`         | Block explorer — Celo Sepolia                   |
+| `UPSTASH_REDIS_REST_URL`                   | Address labels storage (Upstash Redis)          |
+| `UPSTASH_REDIS_REST_TOKEN`                 | Address labels Redis auth token                 |
+| `BLOB_READ_WRITE_TOKEN`                    | Vercel Blob token for daily label backups       |
+
+Production env vars are managed by Terraform — do not edit them in the Vercel dashboard. See [`terraform/`](./terraform/) and [`docs/deployment.md`](./docs/deployment.md).
 
 ## Deployment
 
@@ -116,15 +121,20 @@ pnpm deploy:indexer:mainnet
 git push origin main:deploy/celo-mainnet
 ```
 
-> ⚠️ **Endpoint changes on each deploy.** Envio free tier generates a new URL hash per deployment. After redeploying the indexer, update the Vercel env var:
->
-> ```bash
-> pnpm update-endpoint:mainnet
-> ```
+> ⚠️ **Sepolia endpoint changes on each Envio redeploy.** After redeploying the Sepolia indexer, update `hasura_url_sepolia_hosted` in `terraform/terraform.tfvars` and run `pnpm infra:apply`.
 
 ### Dashboard → Vercel
 
-Vercel watches `main` — every push auto-deploys the dashboard. See [`docs/deployment.md`](./docs/deployment.md) for full details.
+Vercel's native Git integration watches `main` — every push that touches `ui-dashboard/` auto-deploys the dashboard to [monitoring.mento.org](https://monitoring.mento.org).
+
+All infrastructure (Vercel project, env vars, Upstash Redis, custom domain) is managed by Terraform:
+
+```bash
+pnpm infra:plan    # preview changes
+pnpm infra:apply   # apply changes
+```
+
+See [`docs/deployment.md`](./docs/deployment.md) for the full setup guide and troubleshooting.
 
 ## CI
 
@@ -137,19 +147,23 @@ GitHub Actions runs on every PR:
 
 ## Key Files
 
-| What             | Where                                    |
-| ---------------- | ---------------------------------------- |
-| Indexer schema   | `indexer-envio/schema.graphql`           |
-| Event handlers   | `indexer-envio/src/EventHandlers.ts`     |
-| Mainnet config   | `indexer-envio/config.celo.mainnet.yaml` |
-| Sepolia config   | `indexer-envio/config.celo.sepolia.yaml` |
-| Dashboard app    | `ui-dashboard/src/app/`                  |
-| Network defs     | `ui-dashboard/src/lib/networks.ts`       |
-| GraphQL queries  | `ui-dashboard/src/lib/queries.ts`        |
-| Pool type helper | `ui-dashboard/src/lib/tokens.ts`         |
-| Deployment guide | `docs/deployment.md`                     |
-| Technical spec   | `SPEC.md`                                |
-| Roadmap          | `docs/ROADMAP.md`                        |
+| What                     | Where                                        |
+| ------------------------ | -------------------------------------------- |
+| Indexer schema           | `indexer-envio/schema.graphql`               |
+| Event handlers           | `indexer-envio/src/EventHandlers.ts`         |
+| Mainnet config           | `indexer-envio/config.celo.mainnet.yaml`     |
+| Sepolia config           | `indexer-envio/config.celo.sepolia.yaml`     |
+| Dashboard app            | `ui-dashboard/src/app/`                      |
+| Address book page        | `ui-dashboard/src/app/address-book/page.tsx` |
+| Address labels API       | `ui-dashboard/src/app/api/address-labels/`   |
+| Address labels storage   | `ui-dashboard/src/lib/address-labels.ts`     |
+| Network defs             | `ui-dashboard/src/lib/networks.ts`           |
+| GraphQL queries          | `ui-dashboard/src/lib/queries.ts`            |
+| Pool type helper         | `ui-dashboard/src/lib/tokens.ts`             |
+| Terraform infrastructure | `terraform/`                                 |
+| Deployment guide         | `docs/deployment.md`                         |
+| Technical spec           | `SPEC.md`                                    |
+| Roadmap                  | `docs/ROADMAP.md`                            |
 
 ## Documentation
 

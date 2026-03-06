@@ -22,6 +22,11 @@ pnpm indexer:sepolia:dev      # Start indexer (sepolia)
 # Dashboard
 pnpm dashboard:dev            # Dev server
 pnpm dashboard:build          # Production build
+
+# Infrastructure (Terraform)
+pnpm infra:init               # Init providers (first time or after changes)
+pnpm infra:plan               # Preview infrastructure changes
+pnpm infra:apply              # Apply infrastructure changes
 ```
 
 ## Package Details
@@ -44,8 +49,9 @@ pnpm dashboard:build          # Production build
 - **Data:** GraphQL queries to Hasura (via graphql-request + SWR)
 - **Styling:** Tailwind CSS 4
 - **Multi-chain:** Network selector switches between devnet/sepolia Hasura endpoints
-- **Addresses:** `src/lib/addresses.json` — contract address book for all networks
-- **Deployment:** Vercel (see `vercel.json`)
+- **Static labels:** `src/lib/networks.ts` maps known contract addresses to names
+- **Address book:** `/address-book` page + inline editing; custom labels stored in Upstash Redis, backed up daily to Vercel Blob
+- **Deployment:** Vercel (`monitoring-dashboard` project); infra managed by Terraform in `terraform/`
 
 ## File Structure
 
@@ -53,6 +59,12 @@ pnpm dashboard:build          # Production build
 monitoring-monorepo/
 ├── package.json              # Root workspace config
 ├── pnpm-workspace.yaml       # Workspace package list
+├── terraform/                # Terraform — Vercel project + Upstash Redis + env vars
+│   ├── main.tf               # All resources
+│   ├── variables.tf          # Input variables
+│   ├── outputs.tf            # Outputs (project ID, Redis URL, etc.)
+│   ├── terraform.tfvars.example  # Template (copy to terraform.tfvars)
+│   └── .gitignore            # Ignores tfstate, tfvars, .terraform/
 ├── indexer-envio/
 │   ├── config.yaml           # Devnet indexer config
 │   ├── config.sepolia.yaml   # Sepolia indexer config
@@ -63,17 +75,25 @@ monitoring-monorepo/
 │   └── test/                 # Tests
 └── ui-dashboard/
     ├── src/
-    │   ├── app/              # Next.js App Router pages
-    │   └── lib/              # Data fetching, addresses
+    │   ├── app/
+    │   │   ├── address-book/ # Address book page
+    │   │   └── api/address-labels/  # CRUD + export/import/backup routes
+    │   ├── components/
+    │   │   ├── address-label-editor.tsx   # Inline edit dialog
+    │   │   └── address-labels-provider.tsx  # Context: merges static + custom labels
+    │   └── lib/
+    │       ├── address-labels.ts  # Upstash Redis data access (server-side)
+    │       └── networks.ts        # Static contract address→name mappings
     ├── public/               # Static assets
-    ├── vercel.json           # Vercel deployment config
+    ├── vercel.json           # Vercel config + daily backup cron
     └── next.config.ts        # Next.js config
 ```
 
 ## Environment
 
 - Indexer needs Docker for local dev (Postgres + Hasura containers)
-- Dashboard needs `NEXT_PUBLIC_HASURA_URL_*` and `NEXT_PUBLIC_HASURA_SECRET_*` env vars
+- Dashboard needs `NEXT_PUBLIC_HASURA_URL_*` env vars for local dev; run `vercel env pull ui-dashboard/.env.local` to pull from the linked project
+- Production env vars (including Upstash Redis + Blob credentials) are managed by Terraform — see `terraform/terraform.tfvars.example`
 - See root README.md for full env var documentation
 
 ## Envio Gotchas
@@ -105,3 +125,10 @@ The envio-generated `generated/docker-compose.yaml` does not include a healthche
 1. Create component in `ui-dashboard/src/`
 2. Add GraphQL query for the data
 3. Wire up with SWR for real-time updates
+
+### Adding or changing infrastructure (Vercel project, env vars, Redis)
+
+1. Edit `terraform/main.tf` or `terraform/variables.tf`
+2. Run `pnpm infra:plan` to preview
+3. Run `pnpm infra:apply` to apply
+4. Commit the updated `terraform/main.tf` and `terraform/.terraform.lock.hcl` (state file is gitignored)
