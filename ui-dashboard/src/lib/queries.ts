@@ -77,7 +77,7 @@ export const POOL_REBALANCES = `
     ) {
       id sender priceDifferenceBefore priceDifferenceAfter
       txHash blockNumber blockTimestamp
-      rebalancerAddress improvement effectivenessRatio
+      improvement effectivenessRatio
     }
   }
 `;
