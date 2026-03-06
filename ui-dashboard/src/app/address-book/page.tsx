@@ -97,8 +97,8 @@ export default function AddressBookPage() {
         <div>
           <h1 className="text-xl font-bold text-white">Address Book</h1>
           <p className="mt-1 text-sm text-slate-400">
-            Labels for {network.label}. Custom labels take precedence over
-            contract labels.
+            Labels for {network.label.replace(/ \(.*\)$/, "")}. Custom labels
+            take precedence over contract labels.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">

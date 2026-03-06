@@ -24,6 +24,7 @@ import {
 import { useGQL } from "@/lib/graphql";
 import {
   ORACLE_SNAPSHOTS,
+  POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   POOL_LIQUIDITY,
   POOL_REBALANCES,
@@ -63,7 +64,6 @@ const TABS = [
   "rebalances",
   "liquidity",
   "oracle",
-  "analytics",
 ] as const;
 type Tab = (typeof TABS)[number];
 
@@ -106,6 +106,11 @@ function PoolDetail() {
   );
   const tradingLimits = limitsData?.TradingLimit ?? [];
 
+  const { data: deployData } = useGQL<{
+    FactoryDeployment: { txHash: string }[];
+  }>(POOL_DEPLOYMENT, { poolId: decodedId });
+  const deployTxHash = deployData?.FactoryDeployment?.[0]?.txHash;
+
   return (
     <div className="space-y-6">
       <nav aria-label="Breadcrumb" className="text-sm text-slate-400">
@@ -130,10 +135,12 @@ function PoolDetail() {
         <ErrorBox message={`Pool ${decodedId} not found.`} />
       ) : (
         <>
-          <PoolHeader pool={pool} />
+          <PoolHeader pool={pool} deployTxHash={deployTxHash} />
           <HealthPanel pool={pool} />
-          <LimitPanel pool={pool} tradingLimits={tradingLimits} />
-          <RebalancerPanelWrapper pool={pool} poolId={decodedId} limit={20} />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <LimitPanel pool={pool} tradingLimits={tradingLimits} />
+            <RebalancerPanelWrapper pool={pool} poolId={decodedId} limit={20} />
+          </div>
         </>
       )}
 
@@ -184,9 +191,6 @@ function PoolDetail() {
         {tab === "oracle" && (
           <OracleTab poolId={decodedId} limit={limit} pool={pool} />
         )}
-        {tab === "analytics" && (
-          <AnalyticsTab poolId={decodedId} limit={limit} pool={pool} />
-        )}
       </div>
     </div>
   );
@@ -217,7 +221,13 @@ function RebalancerPanelWrapper({
 // Pool header
 // ---------------------------------------------------------------------------
 
-function PoolHeader({ pool }: { pool: Pool }) {
+function PoolHeader({
+  pool,
+  deployTxHash,
+}: {
+  pool: Pool;
+  deployTxHash?: string;
+}) {
   const { network } = useNetwork();
   const name = poolName(network, pool.token0, pool.token1);
   return (
@@ -240,11 +250,33 @@ function PoolHeader({ pool }: { pool: Pool }) {
         />
         <Stat
           label="Created at block"
-          value={formatBlock(pool.createdAtBlock)}
+          value={
+            <a
+              href={`${network.explorerBaseUrl}/block/${pool.createdAtBlock}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-indigo-400 hover:text-indigo-300 font-mono"
+            >
+              {formatBlock(pool.createdAtBlock)}
+            </a>
+          }
         />
         <Stat
           label="Created"
-          value={relativeTime(pool.createdAtTimestamp)}
+          value={
+            deployTxHash ? (
+              <a
+                href={`${network.explorerBaseUrl}/tx/${deployTxHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-indigo-400 hover:text-indigo-300"
+              >
+                {relativeTime(pool.createdAtTimestamp)}
+              </a>
+            ) : (
+              relativeTime(pool.createdAtTimestamp)
+            )
+          }
           title={formatTimestamp(pool.createdAtTimestamp)}
         />
       </dl>
@@ -293,15 +325,32 @@ function SwapsTab({
   );
   const swaps = data?.SwapEvent ?? [];
 
-  if (error) return <ErrorBox message={error.message} />;
-  if (isLoading) return <Skeleton rows={5} />;
-  if (swaps.length === 0) return <EmptyBox message="No swaps for this pool." />;
+  const fpmmPool = pool ? isFpmm(pool) : false;
+  const { data: snapshotData } = useGQL<{ PoolSnapshot: PoolSnapshot[] }>(
+    fpmmPool ? POOL_SNAPSHOTS : null,
+    { poolId, limit },
+  );
+  const snapshots = snapshotData?.PoolSnapshot ?? [];
 
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
+  if (error) return <ErrorBox message={error.message} />;
+  if (isLoading) return <Skeleton rows={5} />;
+
   return (
-    <Table>
+    <>
+      {fpmmPool && snapshots.length > 0 && (
+        <SnapshotChart
+          snapshots={snapshots}
+          token0Symbol={sym0}
+          token1Symbol={sym1}
+        />
+      )}
+      {swaps.length === 0 ? (
+        <EmptyBox message="No swaps for this pool." />
+      ) : (
+        <Table>
       <thead>
         <tr className="border-b border-slate-800 bg-slate-900/50">
           <Th>Tx</Th>
@@ -342,6 +391,8 @@ function SwapsTab({
         })}
       </tbody>
     </Table>
+      )}
+    </>
   );
 }
 
@@ -422,9 +473,10 @@ function RebalancesTab({ poolId, limit }: { poolId: string; limit: number }) {
       <thead>
         <tr className="border-b border-slate-800 bg-slate-900/50">
           <Th>Tx</Th>
-          <Th>Sender</Th>
-          <Th align="right">Price Diff Before</Th>
-          <Th align="right">Price Diff After</Th>
+          <Th>Rebalancer</Th>
+          <Th align="right">Before (bps)</Th>
+          <Th align="right">After (bps)</Th>
+          <Th align="right">Effectiveness</Th>
           <Th align="right">Block</Th>
           <Th>Time</Th>
         </tr>
@@ -433,12 +485,17 @@ function RebalancesTab({ poolId, limit }: { poolId: string; limit: number }) {
         {rows.map((r) => (
           <Row key={r.id}>
             <TxHashCell txHash={r.txHash} />
-            <SenderCell address={r.sender} />
+            <SenderCell address={r.rebalancerAddress ?? r.sender} />
             <Td mono small align="right">
-              {formatWei(r.priceDifferenceBefore)}
+              {Number(r.priceDifferenceBefore).toLocaleString()}
             </Td>
             <Td mono small align="right">
-              {formatWei(r.priceDifferenceAfter)}
+              {Number(r.priceDifferenceAfter).toLocaleString()}
+            </Td>
+            <Td mono small align="right">
+              {r.effectivenessRatio
+                ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
+                : "—"}
             </Td>
             <Td mono small muted align="right">
               {formatBlock(r.blockNumber)}
@@ -517,10 +574,14 @@ function OracleTab({
   limit: number;
   pool: Pool | null;
 }) {
+  const { network } = useNetwork();
   const { data, error, isLoading } = useGQL<{
     OracleSnapshot: OracleSnapshot[];
   }>(ORACLE_SNAPSHOTS, { poolId, limit });
   const rows = data?.OracleSnapshot ?? [];
+
+  const sym0 = tokenSymbol(network, pool?.token0 ?? null);
+  const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
   if (pool?.source?.includes("virtual")) {
     return <EmptyBox message="VirtualPool — no oracle data available." />;
@@ -535,6 +596,7 @@ function OracleTab({
 
   return (
     <>
+      <OracleChart snapshots={rows} token0Symbol={sym0} token1Symbol={sym1} />
       <OraclePriceChart
         snapshots={rows}
         token0={pool?.token0 ?? null}
@@ -594,91 +656,4 @@ function OracleTab({
   );
 }
 
-function AnalyticsTab({
-  poolId,
-  limit,
-  pool,
-}: {
-  poolId: string;
-  limit: number;
-  pool: Pool | null;
-}) {
-  const { network } = useNetwork();
 
-  // VirtualPools never emit UpdateReserves/Rebalanced so they never generate snapshots.
-  // Hooks must all be called before any conditional return (Rules of Hooks).
-  const isFpmmPool = pool ? isFpmm(pool) : true; // treat null as non-virtual while loading
-
-  const { data, error, isLoading } = useGQL<{
-    PoolSnapshot: PoolSnapshot[];
-  }>(isFpmmPool ? POOL_SNAPSHOTS : null, { poolId, limit });
-  const rows = data?.PoolSnapshot ?? [];
-
-  // Reuse the oracle snapshots already fetched in OracleTab (SWR deduplicates by key)
-  const { data: oracleData } = useGQL<{ OracleSnapshot: OracleSnapshot[] }>(
-    isFpmmPool ? ORACLE_SNAPSHOTS : null,
-    { poolId, limit },
-  );
-  const oracleSnapshots = oracleData?.OracleSnapshot ?? [];
-
-  if (pool && !isFpmmPool) {
-    return <EmptyBox message="VirtualPool — no snapshot data available." />;
-  }
-
-  if (error) return <ErrorBox message={error.message} />;
-  if (isLoading) return <Skeleton rows={5} />;
-  if (rows.length === 0)
-    return (
-      <EmptyBox message="No snapshot data yet. Snapshots are created on pool activity." />
-    );
-
-  const sym0 = tokenSymbol(network, pool?.token0 ?? null);
-  const sym1 = tokenSymbol(network, pool?.token1 ?? null);
-
-  return (
-    <>
-      <OracleChart
-        snapshots={oracleSnapshots}
-        token0Symbol={sym0}
-        token1Symbol={sym1}
-      />
-      <SnapshotChart snapshots={rows} token0Symbol={sym0} token1Symbol={sym1} />
-      <Table>
-        <thead>
-          <tr className="border-b border-slate-800 bg-slate-900/50">
-            <Th>Time</Th>
-            <Th align="right">Swaps</Th>
-            <Th align="right">Volume (Token 0)</Th>
-            <Th align="right">Volume (Token 1)</Th>
-            <Th align="right">Cumulative Swaps</Th>
-            <Th align="right">Block</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {[...rows].reverse().map((r) => (
-            <Row key={r.id}>
-              <Td small muted title={formatTimestamp(r.timestamp)}>
-                {relativeTime(r.timestamp)}
-              </Td>
-              <Td mono small align="right">
-                {r.swapCount}
-              </Td>
-              <Td mono small align="right">
-                {formatWei(r.swapVolume0)}
-              </Td>
-              <Td mono small align="right">
-                {formatWei(r.swapVolume1)}
-              </Td>
-              <Td mono small align="right">
-                {r.cumulativeSwapCount}
-              </Td>
-              <Td mono small muted align="right">
-                {formatBlock(r.blockNumber)}
-              </Td>
-            </Row>
-          ))}
-        </tbody>
-      </Table>
-    </>
-  );
-}

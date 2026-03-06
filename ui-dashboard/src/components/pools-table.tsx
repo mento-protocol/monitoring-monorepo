@@ -13,7 +13,34 @@ import {
   RebalancerBadge,
 } from "@/components/badges";
 import { AddressLink } from "@/components/address-link";
-import { computeLimitStatus, computeRebalancerLiveness } from "@/lib/health";
+import {
+  computeLimitStatus,
+  computeRebalancerLiveness,
+} from "@/lib/health";
+import type { HealthStatus, RebalancerStatus } from "@/lib/health";
+
+function healthTooltip(p: Pool): string {
+  const status = p.healthStatus ?? "N/A";
+  if (status === "N/A") return "VirtualPool — oracle health not tracked";
+  if (status === "CRITICAL" && !p.oracleOk)
+    return "Oracle stale — last update expired";
+  if (status === "CRITICAL") return "Price deviation ≥ rebalance threshold";
+  if (status === "WARN") return "Price deviation ≥ 80% of rebalance threshold";
+  return "Oracle healthy";
+}
+
+function limitTooltip(status: string): string {
+  if (status === "CRITICAL") return "Trading limit breached (≥100% pressure)";
+  if (status === "WARN") return "Trading limit pressure ≥ 80%";
+  if (status === "OK") return "Trading limits within bounds";
+  return "VirtualPool — trading limits not tracked";
+}
+
+function rebalancerTooltip(status: RebalancerStatus): string {
+  if (status === "ACTIVE") return "Rebalancer active — last rebalance within 24h";
+  if (status === "STALE") return "No rebalance in 24h while pool health is not OK";
+  return "VirtualPool — rebalancer not applicable";
+}
 
 interface PoolsTableProps {
   pools: Pool[];
@@ -54,13 +81,19 @@ export function PoolsTable({ pools }: PoolsTableProps) {
                 <SourceBadge source={p.source} />
               </td>
               <td className="px-4 py-3">
-                <HealthBadge status={p.healthStatus ?? "N/A"} />
+                <span title={healthTooltip(p)}>
+                  <HealthBadge status={p.healthStatus ?? "N/A"} />
+                </span>
               </td>
               <td className="px-4 py-3">
-                <LimitBadge status={limitStatus} />
+                <span title={limitTooltip(limitStatus)}>
+                  <LimitBadge status={limitStatus} />
+                </span>
               </td>
               <td className="px-4 py-3">
-                <RebalancerBadge status={rebalancerStatus} />
+                <span title={rebalancerTooltip(rebalancerStatus)}>
+                  <RebalancerBadge status={rebalancerStatus} />
+                </span>
               </td>
               <Td small>
                 <AddressLink address={p.id} />
