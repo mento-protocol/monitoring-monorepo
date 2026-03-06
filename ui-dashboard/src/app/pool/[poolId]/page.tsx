@@ -351,46 +351,46 @@ function SwapsTab({
         <EmptyBox message="No swaps for this pool." />
       ) : (
         <Table>
-      <thead>
-        <tr className="border-b border-slate-800 bg-slate-900/50">
-          <Th>Tx</Th>
-          <Th>Sender</Th>
-          <Th>Trader</Th>
-          <Th align="right">Sold</Th>
-          <Th align="right">Bought</Th>
-          <Th align="right">Block</Th>
-          <Th>Time</Th>
-        </tr>
-      </thead>
-      <tbody>
-        {swaps.map((s) => {
-          const soldToken0 = BigInt(s.amount0In) > BigInt(0);
-          const soldAmt = soldToken0 ? s.amount0In : s.amount1In;
-          const boughtAmt = soldToken0 ? s.amount1Out : s.amount0Out;
-          const soldSym = soldToken0 ? sym0 : sym1;
-          const boughtSym = soldToken0 ? sym1 : sym0;
-          return (
-            <Row key={s.id}>
-              <TxHashCell txHash={s.txHash} />
-              <SenderCell address={s.sender} />
-              <SenderCell address={s.recipient} />
-              <Td mono small align="right">
-                {formatWei(soldAmt)} {soldSym}
-              </Td>
-              <Td mono small align="right">
-                {formatWei(boughtAmt)} {boughtSym}
-              </Td>
-              <Td mono small muted align="right">
-                {formatBlock(s.blockNumber)}
-              </Td>
-              <Td small muted title={formatTimestamp(s.blockTimestamp)}>
-                {relativeTime(s.blockTimestamp)}
-              </Td>
-            </Row>
-          );
-        })}
-      </tbody>
-    </Table>
+          <thead>
+            <tr className="border-b border-slate-800 bg-slate-900/50">
+              <Th>Tx</Th>
+              <Th>Sender</Th>
+              <Th>Trader</Th>
+              <Th align="right">Sold</Th>
+              <Th align="right">Bought</Th>
+              <Th align="right">Block</Th>
+              <Th>Time</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {swaps.map((s) => {
+              const soldToken0 = BigInt(s.amount0In) > BigInt(0);
+              const soldAmt = soldToken0 ? s.amount0In : s.amount1In;
+              const boughtAmt = soldToken0 ? s.amount1Out : s.amount0Out;
+              const soldSym = soldToken0 ? sym0 : sym1;
+              const boughtSym = soldToken0 ? sym1 : sym0;
+              return (
+                <Row key={s.id}>
+                  <TxHashCell txHash={s.txHash} />
+                  <SenderCell address={s.sender} />
+                  <SenderCell address={s.recipient} />
+                  <Td mono small align="right">
+                    {formatWei(soldAmt)} {soldSym}
+                  </Td>
+                  <Td mono small align="right">
+                    {formatWei(boughtAmt)} {boughtSym}
+                  </Td>
+                  <Td mono small muted align="right">
+                    {formatBlock(s.blockNumber)}
+                  </Td>
+                  <Td small muted title={formatTimestamp(s.blockTimestamp)}>
+                    {relativeTime(s.blockTimestamp)}
+                  </Td>
+                </Row>
+              );
+            })}
+          </tbody>
+        </Table>
       )}
     </>
   );
@@ -655,5 +655,3 @@ function OracleTab({
     </>
   );
 }
-
-
