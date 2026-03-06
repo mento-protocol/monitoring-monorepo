@@ -19,7 +19,7 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 
 | What            | URL                                                    |
 | --------------- | ------------------------------------------------------ |
-| Dashboard       | https://monitoring.mento.org                           |
+| Dashboard       | <https://monitoring.mento.org>                         |
 | Mainnet GraphQL | `https://indexer.dev.hyperindex.xyz/<hash>/v1/graphql` |
 
 ---
