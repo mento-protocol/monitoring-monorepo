@@ -54,7 +54,7 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 # Push current HEAD to deploy branch
-git push origin "HEAD:refs/heads/$DEPLOY_BRANCH"
+git push --force-with-lease origin "HEAD:refs/heads/$DEPLOY_BRANCH"
 
 echo ""
 echo "✅ Pushed to $DEPLOY_BRANCH"
