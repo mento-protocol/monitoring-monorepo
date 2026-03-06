@@ -21,15 +21,21 @@ Each network has a dedicated deploy branch that Envio watches:
 | Celo Sepolia  | `deploy/celo-sepolia`  | `config.celo.sepolia.yaml`  | `mento-v3-celo-sepolia`  |
 | Monad Mainnet | `deploy/monad-mainnet` | `config.monad.mainnet.yaml` | `mento-v3-monad-mainnet` |
 
-### ⚠️ Endpoint Hash Changes on Every Deploy
+### Endpoint URLs
 
-Envio's free tier generates a **new GraphQL endpoint URL** on each deployment. The URL contains a hash that changes:
+**Mainnet** uses the Envio **production** tier with a static endpoint — the hash does not change on redeployment:
+
+```text
+https://indexer.hyperindex.xyz/60ff18c/v1/graphql
+```
+
+**Sepolia** is on the Envio **dev** tier. The URL hash changes on every redeploy:
 
 ```text
 https://indexer.dev.hyperindex.xyz/<hash>/v1/graphql
 ```
 
-After every indexer redeploy, you **must** update the Vercel environment variable.
+After a Sepolia redeploy, update `NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED` in Vercel manually.
 
 ### Deployment Workflow
 
@@ -39,16 +45,13 @@ After every indexer redeploy, you **must** update the Vercel environment variabl
 # Push main to the deploy branch (triggers Envio redeploy)
 pnpm deploy:indexer:mainnet
 # equivalent: git push origin main:deploy/celo-mainnet
-
-# After Envio finishes syncing, update the Vercel env var:
-pnpm update-endpoint:mainnet
 ```
 
 **Redeploy Sepolia:**
 
 ```bash
 pnpm deploy:indexer:sepolia
-pnpm update-endpoint:sepolia
+# After Envio finishes syncing, update NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED in Vercel
 ```
 
 ### Force Retrigger Without Code Changes
@@ -68,10 +71,9 @@ git push origin main:deploy/celo-mainnet
 ### After Redeployment Checklist
 
 1. ✅ Wait for Envio to reach 100% sync (check [envio.dev/app](https://envio.dev/app))
-2. ✅ Get the new GraphQL endpoint URL from the Envio dashboard
-3. ✅ Run `pnpm update-endpoint:mainnet` (or update Vercel env var manually)
-4. ✅ Trigger a Vercel redeploy (or wait for next push to `main`)
-5. ✅ Verify monitoring.mento.org loads data
+2. ✅ If Sepolia: get the new GraphQL endpoint URL from the Envio dashboard and update `NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED` in Vercel
+3. ✅ Trigger a Vercel redeploy (or wait for next push to `main`)
+4. ✅ Verify monitoring.mento.org loads data
 
 ---
 
@@ -82,8 +84,8 @@ git push origin main:deploy/celo-mainnet
 ### Environment Variables (Vercel Project Settings)
 
 ```bash
-# Celo Mainnet — hosted indexer (update after each indexer redeploy)
-NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED=https://indexer.dev.hyperindex.xyz/<hash>/v1/graphql
+# Celo Mainnet — Envio production tier (static endpoint)
+NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED=https://indexer.hyperindex.xyz/60ff18c/v1/graphql
 NEXT_PUBLIC_HASURA_SECRET_MAINNET_HOSTED=  # empty for hosted (no auth by default)
 NEXT_PUBLIC_EXPLORER_URL_MAINNET=https://explorer.celo.org
 
