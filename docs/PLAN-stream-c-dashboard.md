@@ -9,6 +9,7 @@
 ## Context
 
 The indexer (PR #21, merged) already indexes:
+
 - `Pool.limitStatus` — "OK" | "WARN" | "CRITICAL" | "N/A"
 - `Pool.limitPressure0` / `limitPressure1` — string floats e.g. "0.1230" (worst pressure of the two tokens)
 - `Pool.rebalancerAddress` — address string
@@ -24,11 +25,13 @@ This stream adds the dashboard components to surface that data.
 ## Scope
 
 ### New components
+
 1. **`LimitBadge`** — inline status badge (OK/WARN/CRITICAL/N/A) for trading limit pressure
 2. **`LimitPanel`** — pool detail section showing per-token limit bars + current netflow/limit values
 3. **`RebalancerPanel`** — pool detail section showing rebalancer address, liveness status, effectiveness history
 
 ### Updates to existing components
+
 4. **`PoolsTable`** — add `Limit` and `Rebalancer` columns (FPMM only; N/A for VirtualPools)
 5. **`pool/[poolId]/page.tsx`** — add LimitPanel + RebalancerPanel to Overview tab
 6. **`queries.ts`** — add `TRADING_LIMITS` query + extend `ALL_POOLS_WITH_HEALTH` and `POOL_DETAIL_WITH_HEALTH` with new fields
@@ -37,6 +40,7 @@ This stream adds the dashboard components to surface that data.
 9. **`tokens.ts`** — confirm `isFpmm()` covers limit/rebalancer gating (already there, just verify)
 
 ### Out of scope
+
 - New indexer changes (indexer is already deployed)
 - Liquity v2 views
 - Alerting
@@ -62,6 +66,7 @@ This stream adds the dashboard components to surface that data.
 ## Testing Criteria
 
 ### Unit tests (vitest)
+
 ```
 computeLimitStatus()
   ✓ returns "OK" when pressure < 0.8
@@ -89,6 +94,7 @@ LimitPressureBar (pressure value formatting)
 ```
 
 ### Manual / integration checks
+
 - On mainnet Celo, open a known FPMM pool (e.g. USDm/USDC `0x462f...`)
   - LimitPanel shows two token rows with pressure bars
   - LimitBadge in PoolsTable matches the panel status
@@ -101,8 +107,10 @@ LimitPressureBar (pressure value formatting)
 ## Implementation Notes
 
 ### Client-side STALE computation
+
 The indexer sets `rebalanceLivenessStatus = "ACTIVE"` on each rebalance event.  
 Dashboard computes STALE as:
+
 ```ts
 function computeRebalancerLiveness(pool: Pool, now: number): RebalancerStatus {
   if (!isFpmm(network, pool.token0, pool.token1)) return "N/A";
@@ -114,22 +122,33 @@ function computeRebalancerLiveness(pool: Pool, now: number): RebalancerStatus {
 ```
 
 ### Worst-of pressure for table column
+
 `PoolsTable` shows a single `LimitBadge` per pool using `pool.limitStatus` (already computed by indexer as worst-of across both tokens). No re-computation needed.
 
 ### TradingLimit query
+
 The `TradingLimit` entity is keyed `{poolId}-{tokenAddress}`. Pool detail page fetches it separately:
+
 ```graphql
 query TradingLimits($poolId: String!) {
   TradingLimit(where: { poolId: { _eq: $poolId } }) {
-    id token limit0 limit1 decimals
-    netflow0 netflow1
-    limitPressure0 limitPressure1
-    limitStatus updatedAtTimestamp
+    id
+    token
+    limit0
+    limit1
+    decimals
+    netflow0
+    netflow1
+    limitPressure0
+    limitPressure1
+    limitStatus
+    updatedAtTimestamp
   }
 }
 ```
 
 ### Rebalance history effectiveness
+
 `RebalanceEvent` already has `effectivenessRatio` and `improvement` fields from the indexer. Add these columns to the existing rebalance history table on the pool detail page.
 
 ---

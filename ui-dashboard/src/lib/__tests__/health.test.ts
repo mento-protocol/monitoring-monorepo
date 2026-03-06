@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { computeHealthStatus, formatDeviationPct, computeLimitStatus, computeRebalancerLiveness } from "../health";
+import {
+  computeHealthStatus,
+  formatDeviationPct,
+  computeLimitStatus,
+  computeRebalancerLiveness,
+} from "../health";
 
 describe("computeHealthStatus", () => {
   it('returns "N/A" for VirtualPools (source includes "virtual")', () => {
@@ -150,44 +155,66 @@ describe("formatDeviationPct", () => {
 describe("computeLimitStatus", () => {
   it('returns "N/A" for VirtualPools (source includes "virtual")', () => {
     expect(
-      computeLimitStatus({ source: "virtual_pool_factory", limitPressure0: "0.9", limitPressure1: "0.9" }),
+      computeLimitStatus({
+        source: "virtual_pool_factory",
+        limitPressure0: "0.9",
+        limitPressure1: "0.9",
+      }),
     ).toBe("N/A");
   });
 
   it('returns "OK" when max pressure < 0.8', () => {
     expect(
-      computeLimitStatus({ source: "fpmm_factory", limitPressure0: "0.1", limitPressure1: "0.5" }),
+      computeLimitStatus({
+        source: "fpmm_factory",
+        limitPressure0: "0.1",
+        limitPressure1: "0.5",
+      }),
     ).toBe("OK");
   });
 
   it('returns "WARN" when max pressure >= 0.8', () => {
     expect(
-      computeLimitStatus({ source: "fpmm_factory", limitPressure0: "0.3", limitPressure1: "0.85" }),
+      computeLimitStatus({
+        source: "fpmm_factory",
+        limitPressure0: "0.3",
+        limitPressure1: "0.85",
+      }),
     ).toBe("WARN");
   });
 
   it('returns "WARN" for exactly 0.8 pressure', () => {
     expect(
-      computeLimitStatus({ source: "fpmm_factory", limitPressure0: "0.8", limitPressure1: "0.0" }),
+      computeLimitStatus({
+        source: "fpmm_factory",
+        limitPressure0: "0.8",
+        limitPressure1: "0.0",
+      }),
     ).toBe("WARN");
   });
 
   it('returns "CRITICAL" when max pressure >= 1.0', () => {
     expect(
-      computeLimitStatus({ source: "fpmm_factory", limitPressure0: "0.5", limitPressure1: "1.0" }),
+      computeLimitStatus({
+        source: "fpmm_factory",
+        limitPressure0: "0.5",
+        limitPressure1: "1.0",
+      }),
     ).toBe("CRITICAL");
   });
 
   it('returns "CRITICAL" when pressure exceeds 1.0', () => {
     expect(
-      computeLimitStatus({ source: "fpmm_factory", limitPressure0: "1.5", limitPressure1: "0.2" }),
+      computeLimitStatus({
+        source: "fpmm_factory",
+        limitPressure0: "1.5",
+        limitPressure1: "0.2",
+      }),
     ).toBe("CRITICAL");
   });
 
   it('returns "OK" when pressures are missing (defaults to 0)', () => {
-    expect(
-      computeLimitStatus({ source: "fpmm_factory" }),
-    ).toBe("OK");
+    expect(computeLimitStatus({ source: "fpmm_factory" })).toBe("OK");
   });
 });
 
@@ -196,53 +223,94 @@ describe("computeRebalancerLiveness", () => {
 
   it('returns "N/A" for VirtualPools', () => {
     expect(
-      computeRebalancerLiveness({ source: "virtual_pool", lastRebalancedAt: "999000" }, NOW),
+      computeRebalancerLiveness(
+        { source: "virtual_pool", lastRebalancedAt: "999000" },
+        NOW,
+      ),
     ).toBe("N/A");
   });
 
   it('returns "N/A" when lastRebalancedAt is missing', () => {
-    expect(
-      computeRebalancerLiveness({ source: "fpmm_factory" }, NOW),
-    ).toBe("N/A");
+    expect(computeRebalancerLiveness({ source: "fpmm_factory" }, NOW)).toBe(
+      "N/A",
+    );
   });
 
   it('returns "N/A" when lastRebalancedAt is "0"', () => {
     expect(
-      computeRebalancerLiveness({ source: "fpmm_factory", lastRebalancedAt: "0" }, NOW),
+      computeRebalancerLiveness(
+        { source: "fpmm_factory", lastRebalancedAt: "0" },
+        NOW,
+      ),
     ).toBe("N/A");
   });
 
   it('returns "ACTIVE" when rebalanced within 24h', () => {
     // 1h ago
     expect(
-      computeRebalancerLiveness({ source: "fpmm_factory", lastRebalancedAt: String(NOW - 3600), healthStatus: "CRITICAL" }, NOW),
+      computeRebalancerLiveness(
+        {
+          source: "fpmm_factory",
+          lastRebalancedAt: String(NOW - 3600),
+          healthStatus: "CRITICAL",
+        },
+        NOW,
+      ),
     ).toBe("ACTIVE");
   });
 
   it('returns "STALE" when age > 86400 and healthStatus is not OK', () => {
     // 25h ago, CRITICAL health
     expect(
-      computeRebalancerLiveness({ source: "fpmm_factory", lastRebalancedAt: String(NOW - 90000), healthStatus: "CRITICAL" }, NOW),
+      computeRebalancerLiveness(
+        {
+          source: "fpmm_factory",
+          lastRebalancedAt: String(NOW - 90000),
+          healthStatus: "CRITICAL",
+        },
+        NOW,
+      ),
     ).toBe("STALE");
   });
 
   it('returns "ACTIVE" when age > 86400 but healthStatus is OK', () => {
     // 25h ago but health is OK
     expect(
-      computeRebalancerLiveness({ source: "fpmm_factory", lastRebalancedAt: String(NOW - 90000), healthStatus: "OK" }, NOW),
+      computeRebalancerLiveness(
+        {
+          source: "fpmm_factory",
+          lastRebalancedAt: String(NOW - 90000),
+          healthStatus: "OK",
+        },
+        NOW,
+      ),
     ).toBe("ACTIVE");
   });
 
   it('returns "STALE" when age > 86400 and healthStatus is WARN', () => {
     expect(
-      computeRebalancerLiveness({ source: "fpmm_factory", lastRebalancedAt: String(NOW - 90000), healthStatus: "WARN" }, NOW),
+      computeRebalancerLiveness(
+        {
+          source: "fpmm_factory",
+          lastRebalancedAt: String(NOW - 90000),
+          healthStatus: "WARN",
+        },
+        NOW,
+      ),
     ).toBe("STALE");
   });
 
   it('returns "ACTIVE" for exactly 86400s age (boundary)', () => {
     // exactly at boundary — age is NOT > 86400, so ACTIVE
     expect(
-      computeRebalancerLiveness({ source: "fpmm_factory", lastRebalancedAt: String(NOW - 86400), healthStatus: "CRITICAL" }, NOW),
+      computeRebalancerLiveness(
+        {
+          source: "fpmm_factory",
+          lastRebalancedAt: String(NOW - 86400),
+          healthStatus: "CRITICAL",
+        },
+        NOW,
+      ),
     ).toBe("ACTIVE");
   });
 });
