@@ -141,6 +141,16 @@ resource "vercel_project_environment_variable" "blob_token" {
 # Cron jobs are defined in ui-dashboard/vercel.json and activated automatically
 # on first deploy. No Terraform resource is needed.
 
+# ── Custom Domain ────────────────────────────────────────────────────────────
+# DNS is already pointing to Vercel (CNAME → vercel-dns). Assigning the domain
+# to this project is all that's needed.
+
+resource "vercel_project_domain" "monitoring" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  domain     = "monitoring.mento.org"
+}
+
 # ── Local .vercel/project.json ────────────────────────────────────────────────
 # Keeps the Vercel CLI linked to the correct project after creation/recreation.
 # This file is gitignored but must exist locally for `vercel deploy` to work.

@@ -5,8 +5,7 @@ output "vercel_project_id" {
 
 output "vercel_project_url" {
   description = "Production URL of the deployed dashboard."
-  value       = "https://${vercel_project.dashboard.name}.vercel.app"
-  # → https://monitoring-dashboard.vercel.app
+  value       = "https://${vercel_project_domain.monitoring.domain}"
 }
 
 output "upstash_redis_rest_url" {
