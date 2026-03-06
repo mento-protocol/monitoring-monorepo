@@ -32,7 +32,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Generate types (envio codegen)
-        run: pnpm --filter @mento-protocol/indexer-envio codegen --config config.celo.devnet.yaml
+        # Use mainnet config — it has the full contract set (VirtualPool, SortedOracles)
+        # that devnet config omits, so all exports are generated for typecheck.
+        run: pnpm --filter @mento-protocol/indexer-envio codegen --config config.celo.mainnet.yaml
       - name: Link generated package
         # pnpm install runs before generated/ exists, so the workspace symlink for
         # the optional `link:generated` dep is missing. Re-running install after
