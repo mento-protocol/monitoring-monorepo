@@ -17,10 +17,10 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 
 ### Live Endpoints
 
-| What            | URL                                                    |
-| --------------- | ------------------------------------------------------ |
-| Dashboard       | <https://monitoring.mento.org>                         |
-| Mainnet GraphQL | `https://indexer.dev.hyperindex.xyz/<hash>/v1/graphql` |
+| What            | URL                                                 |
+| --------------- | --------------------------------------------------- |
+| Dashboard       | <https://monitoring.mento.org>                      |
+| Mainnet GraphQL | `https://indexer.hyperindex.xyz/60ff18c/v1/graphql` |
 
 ---
 
