@@ -6,15 +6,10 @@ import { tokenSymbol } from "@/lib/tokens";
 import { relativeTime, formatTimestamp } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
 
-// SortedOracles always uses 24-decimal fixed-point (denominator = 10^24).
-// The indexer stores `oraclePrice` from MedianUpdated.value (24dp scale) but
-// `oraclePriceDenom` from FPMM.getRebalancingState() (18dp scale) — a mismatch.
-// Always normalise by 10^24, ignoring the denom field.
-const SORTED_ORACLES_PRECISION = 1e24;
-
+/** SortedOracles always uses 24-decimal precision (denominator = 10^24). */
 function parseOraclePrice(num: string): string {
   if (!num || num === "0") return "—";
-  const price = Number(num) / SORTED_ORACLES_PRECISION;
+  const price = Number(num) / 1e24;
   if (!isFinite(price) || price <= 0) return "—";
   return price.toFixed(6);
 }

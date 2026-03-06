@@ -49,8 +49,10 @@ const snapshotId = (poolId: string, hourTs: bigint): string =>
  * Multiple FPMM pools can share the same SortedOracles rate feed. */
 const rateFeedPoolMap = new Map<string, Set<string>>();
 
-/** SortedOracles always uses a fixed 24-decimal denominator (10^24). */
-const SORTED_ORACLES_DENOM = 10n ** 24n;
+/** SortedOracles always uses a fixed 24-decimal precision (denominator = 10^24).
+ * oraclePrice values from SortedOracles events are always in this scale.
+ * Divide by SORTED_ORACLES_DECIMALS to get the human-readable price. */
+const SORTED_ORACLES_DECIMALS = 24;
 
 // Lazy RPC clients per chainId
 const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
@@ -303,7 +305,6 @@ type SnapshotContext = {
 const DEFAULT_ORACLE_FIELDS = {
   oracleOk: false,
   oraclePrice: 0n,
-  oraclePriceDenom: 0n,
   oracleTimestamp: 0n,
   oracleExpiry: 0n,
   oracleNumReporters: 0,
@@ -496,13 +497,12 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
   }
 
   if (rebalState) {
-    // Store the oracle price from the FPMM's rebalancing state numerator, but
-    // always use the canonical SortedOracles 24-decimal denominator so that
-    // oraclePrice / oraclePriceDenom always yields the correct human price.
-    // (FPMM.getRebalancingState returns oraclePriceDenominator in 18dp which
-    // is inconsistent with the 24dp values emitted by SortedOracles events.)
+    // Store the raw SortedOracles numerator. The denominator is always 10^24
+    // (SORTED_ORACLES_DECIMALS) — callers divide oraclePrice by 10^24 to get
+    // the human-readable price. Note: FPMM.getRebalancingState() also returns
+    // an oraclePriceDenominator but it uses 18dp which is inconsistent with
+    // the 24dp SortedOracles format — we ignore it.
     oracleDelta.oraclePrice = rebalState.oraclePriceNumerator;
-    oracleDelta.oraclePriceDenom = SORTED_ORACLES_DENOM;
     oracleDelta.rebalanceThreshold = rebalState.rebalanceThreshold;
     oracleDelta.priceDifference = rebalState.priceDifference;
     // Assume oracle is OK when pool is first deployed
@@ -767,7 +767,6 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   if (rebalState) {
     oracleDelta = {
       oraclePrice: rebalState.oraclePriceNumerator,
-      oraclePriceDenom: SORTED_ORACLES_DENOM,
       rebalanceThreshold: rebalState.rebalanceThreshold,
       priceDifference: rebalState.priceDifference,
       oracleTimestamp: blockTimestamp,
@@ -802,7 +801,6 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       poolId,
       timestamp: blockTimestamp,
       oraclePrice: rebalState.oraclePriceNumerator,
-      oraclePriceDenom: SORTED_ORACLES_DENOM,
       oracleOk: updatedPool.oracleOk,
       numReporters: updatedPool.oracleNumReporters,
       priceDifference: rebalState.priceDifference,
@@ -855,7 +853,6 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     oracleDelta = {
       ...oracleDelta,
       oraclePrice: rebalState.oraclePriceNumerator,
-      oraclePriceDenom: SORTED_ORACLES_DENOM,
       rebalanceThreshold: rebalState.rebalanceThreshold,
       priceDifference: rebalState.priceDifference,
       oracleTimestamp: blockTimestamp,
@@ -886,7 +883,6 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       poolId,
       timestamp: blockTimestamp,
       oraclePrice: rebalState.oraclePriceNumerator,
-      oraclePriceDenom: SORTED_ORACLES_DENOM,
       oracleOk: updatedPool.oracleOk,
       numReporters: updatedPool.oracleNumReporters,
       priceDifference: rebalState.priceDifference,
@@ -1020,7 +1016,6 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       oracleTimestamp,
       oracleOk: true,
       oraclePrice,
-      oraclePriceDenom: SORTED_ORACLES_DENOM,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
@@ -1034,7 +1029,6 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       poolId,
       timestamp: blockTimestamp,
       oraclePrice,
-      oraclePriceDenom: SORTED_ORACLES_DENOM,
       oracleOk: true,
       numReporters: existing.oracleNumReporters,
       priceDifference: existing.priceDifference,
@@ -1064,7 +1058,6 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
     const updatedPool: Pool = {
       ...existing,
       oraclePrice,
-      oraclePriceDenom: SORTED_ORACLES_DENOM,
       oracleTimestamp: blockTimestamp,
       oracleOk: true,
       updatedAtBlock: blockNumber,
@@ -1080,7 +1073,6 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       poolId,
       timestamp: blockTimestamp,
       oraclePrice,
-      oraclePriceDenom: SORTED_ORACLES_DENOM,
       oracleOk: true,
       numReporters: existing.oracleNumReporters,
       priceDifference: existing.priceDifference,

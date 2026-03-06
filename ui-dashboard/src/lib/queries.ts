@@ -12,7 +12,6 @@ export const ALL_POOLS_WITH_HEALTH = `
       healthStatus
       oracleOk
       oraclePrice
-      oraclePriceDenom
       oracleTimestamp
       priceDifference
       rebalanceThreshold
@@ -106,7 +105,6 @@ export const POOL_DETAIL_WITH_HEALTH = `
       healthStatus
       oracleOk
       oraclePrice
-      oraclePriceDenom
       oracleTimestamp
       oracleExpiry
       oracleNumReporters
@@ -163,7 +161,6 @@ export const ORACLE_SNAPSHOTS = `
       poolId
       timestamp
       oraclePrice
-      oraclePriceDenom
       oracleOk
       numReporters
       priceDifference

@@ -17,7 +17,6 @@ type Pool {
   # Oracle state (FPMM pools only; VirtualPools default to N/A)
   oracleOk: Boolean!
   oraclePrice: BigInt!
-  oraclePriceDenom: BigInt!
   oracleTimestamp: BigInt!
   oracleExpiry: BigInt!
   oracleNumReporters: Int!
@@ -49,7 +48,6 @@ type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {
   poolId: String! @index
   timestamp: BigInt! @index
   oraclePrice: BigInt!
-  oraclePriceDenom: BigInt!
   oracleOk: Boolean!
   numReporters: Int!
   priceDifference: BigInt!
