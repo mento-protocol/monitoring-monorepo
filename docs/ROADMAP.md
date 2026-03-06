@@ -100,15 +100,15 @@ Envio HyperIndex (hosted) → Hasura GraphQL → Next.js Dashboard (Vercel)
 
 ## Key Files
 
-| What             | Where                                        |
-| ---------------- | -------------------------------------------- |
-| Indexer schema   | `indexer-envio/schema.graphql`               |
-| Event handlers   | `indexer-envio/src/EventHandlers.ts`         |
-| Mainnet config   | `indexer-envio/config.celo.mainnet.yaml`     |
-| Sepolia config   | `indexer-envio/config.celo.sepolia.yaml`     |
-| Dashboard app    | `ui-dashboard/src/app/`                      |
-| Network defs     | `ui-dashboard/src/lib/networks.ts`           |
-| GraphQL queries  | `ui-dashboard/src/lib/queries.ts`            |
-| Pool type helper | `ui-dashboard/src/lib/tokens.ts`             |
-| Technical spec   | `SPEC.md`                                    |
-| Deployment guide | `docs/deployment.md`                         |
+| What             | Where                                    |
+| ---------------- | ---------------------------------------- |
+| Indexer schema   | `indexer-envio/schema.graphql`           |
+| Event handlers   | `indexer-envio/src/EventHandlers.ts`     |
+| Mainnet config   | `indexer-envio/config.celo.mainnet.yaml` |
+| Sepolia config   | `indexer-envio/config.celo.sepolia.yaml` |
+| Dashboard app    | `ui-dashboard/src/app/`                  |
+| Network defs     | `ui-dashboard/src/lib/networks.ts`       |
+| GraphQL queries  | `ui-dashboard/src/lib/queries.ts`        |
+| Pool type helper | `ui-dashboard/src/lib/tokens.ts`         |
+| Technical spec   | `SPEC.md`                                |
+| Deployment guide | `docs/deployment.md`                     |

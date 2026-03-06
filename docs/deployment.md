@@ -15,11 +15,11 @@ This monorepo deploys two services independently:
 
 Each network has a dedicated deploy branch that Envio watches:
 
-| Network       | Deploy Branch          | Config File                  | Envio Project            |
-| ------------- | ---------------------- | ---------------------------- | ------------------------ |
-| Celo Mainnet  | `deploy/celo-mainnet`  | `config.celo.mainnet.yaml`   | `mento-v3-celo-mainnet`  |
-| Celo Sepolia  | `deploy/celo-sepolia`  | `config.celo.sepolia.yaml`   | `mento-v3-celo-sepolia`  |
-| Monad Mainnet | `deploy/monad-mainnet` | `config.monad.mainnet.yaml`  | `mento-v3-monad-mainnet` |
+| Network       | Deploy Branch          | Config File                 | Envio Project            |
+| ------------- | ---------------------- | --------------------------- | ------------------------ |
+| Celo Mainnet  | `deploy/celo-mainnet`  | `config.celo.mainnet.yaml`  | `mento-v3-celo-mainnet`  |
+| Celo Sepolia  | `deploy/celo-sepolia`  | `config.celo.sepolia.yaml`  | `mento-v3-celo-sepolia`  |
+| Monad Mainnet | `deploy/monad-mainnet` | `config.monad.mainnet.yaml` | `mento-v3-monad-mainnet` |
 
 ### ⚠️ Endpoint Hash Changes on Every Deploy
 

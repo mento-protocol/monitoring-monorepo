@@ -9,6 +9,7 @@
 ## Summary
 
 The dashboard is well-structured and readable overall. The main themes are:
+
 1. **Dead exports** that were never wired up to the UI
 2. **Copy-pasted Plotly layout config** across three chart components
 3. A **React Rules of Hooks violation** in `AnalyticsTab`
@@ -24,11 +25,11 @@ Applied refactors are marked ✅. Suggestions for follow-up are marked 💡.
 
 Three exports were never imported anywhere in the dashboard source:
 
-| Export | Status |
-|--------|--------|
-| `ALL_POOLS` | Dead — superseded by `ALL_POOLS_WITH_HEALTH` |
-| `POOL_DETAIL` | Dead — superseded by `POOL_DETAIL_WITH_HEALTH` |
-| `GLOBAL_AGGREGATES` | Dead — no UI consumption |
+| Export              | Status                                         |
+| ------------------- | ---------------------------------------------- |
+| `ALL_POOLS`         | Dead — superseded by `ALL_POOLS_WITH_HEALTH`   |
+| `POOL_DETAIL`       | Dead — superseded by `POOL_DETAIL_WITH_HEALTH` |
+| `GLOBAL_AGGREGATES` | Dead — no UI consumption                       |
 
 **Action:** Removed all three. If needed for future tooling/scripts, they can be re-added then.
 
@@ -44,7 +45,7 @@ Three exports were never imported anywhere in the dashboard source:
 // Before
 import React from "react";
 
-// After  
+// After
 import type { ReactNode } from "react";
 ```
 
@@ -69,6 +70,7 @@ font: { color: "#94a3b8", size: 12 },
 ```
 
 **Action:** Extracted to `lib/plot.ts` with:
+
 - `PLOTLY_BASE_LAYOUT` — canvas/font defaults
 - `PLOTLY_AXIS_DEFAULTS` — grid/line/tick colors
 - `PLOTLY_LEGEND` — legend styling
@@ -82,10 +84,13 @@ Charts now import and spread these constants, reducing layout config to ~10 line
 ### Repeated table header row
 
 💡 Every tab/table repeats:
+
 ```tsx
 <tr className="border-b border-slate-800 bg-slate-900/50">
 ```
+
 This appears ~8 times. Consider adding a `<Thead>` component to `table.tsx`:
+
 ```tsx
 export function Thead({ children }: { children: React.ReactNode }) {
   return (
@@ -97,12 +102,15 @@ export function Thead({ children }: { children: React.ReactNode }) {
 ### Swap direction logic
 
 💡 This block is duplicated in `SwapsTab` (`pool/[poolId]/page.tsx`) and `SwapTable` (`pools/page.tsx`):
+
 ```ts
 const soldToken0 = BigInt(s.amount0In) > BigInt(0);
 const soldAmt = soldToken0 ? s.amount0In : s.amount1In;
 const boughtAmt = soldToken0 ? s.amount1Out : s.amount0Out;
 ```
+
 Consider extracting to a helper in `lib/format.ts` or a shared utility:
+
 ```ts
 export function resolveSwapDirection(swap: SwapEvent) {
   const soldToken0 = BigInt(swap.amount0In) > 0n;
@@ -161,7 +169,7 @@ if (pool && !isFpmmPool) {
 
 ```ts
 // types.ts — ReserveUpdate
-blockTimestampInPool: string;  // ← never used, remove
+blockTimestampInPool: string; // ← never used, remove
 ```
 
 ### Unused GQL fields
@@ -217,6 +225,7 @@ export type Pool = {
 ## 7. Test Coverage ✅ (added in this PR)
 
 Added `src/lib/__tests__/format.test.ts` with 31 tests covering:
+
 - `truncateAddress` — null, short, and standard addresses
 - `parseWei` — empty, zero, 18-decimal, custom decimals
 - `formatWei` — zero, 1 token, large numbers, very small (exponential)
@@ -228,9 +237,10 @@ Added `src/lib/__tests__/format.test.ts` with 31 tests covering:
 ### Remaining coverage gaps
 
 💡 `lib/tokens.ts` tests only cover `tokenSymbol` and `poolName`. Missing:
+
 - `buildPoolNameMap`
 - `hasLabel`
-- `addressLabel`  
+- `addressLabel`
 - `isFpmm`
 - `explorerAddressUrl` / `explorerTxUrl`
 
@@ -241,13 +251,17 @@ Added `src/lib/__tests__/format.test.ts` with 31 tests covering:
 ### `BigInt` allocation in render hot path
 
 💡 In `SwapsTab` and `SwapTable`, every swap row creates two `BigInt` objects per render:
+
 ```ts
 const soldToken0 = BigInt(s.amount0In) > BigInt(0);
 ```
+
 `BigInt("0")` is equivalent to `0n` (literal). For large tables this is minor but avoidable:
+
 ```ts
 const soldToken0 = s.amount0In !== "0" && s.amount0In !== "";
 ```
+
 (since the indexer always stores `"0"` for the zero side of a swap)
 
 ### SWR `refreshInterval` not configurable per call site
@@ -276,14 +290,14 @@ All components that use hooks (`useState`, `useSWR`, context) correctly have `"u
 
 ## Files Changed in This PR
 
-| File | Change |
-|------|--------|
-| `src/lib/queries.ts` | Remove dead exports: `ALL_POOLS`, `POOL_DETAIL`, `GLOBAL_AGGREGATES` |
-| `src/lib/plot.ts` | **New** — shared Plotly layout constants and helpers |
-| `src/lib/__tests__/format.test.ts` | **New** — 31 tests for `lib/format.ts` |
-| `src/app/pools/page.tsx` | Remove unused `TxHashCell` import |
-| `src/app/pool/[poolId]/page.tsx` | Fix Rules of Hooks violation in `AnalyticsTab` |
-| `src/components/table.tsx` | Fix `React` import → `import type { ReactNode }` |
-| `src/components/oracle-chart.tsx` | Use shared Plotly layout from `lib/plot.ts` |
-| `src/components/reserve-chart.tsx` | Use shared Plotly layout from `lib/plot.ts` |
-| `src/components/snapshot-chart.tsx` | Use shared Plotly layout from `lib/plot.ts` |
+| File                                | Change                                                               |
+| ----------------------------------- | -------------------------------------------------------------------- |
+| `src/lib/queries.ts`                | Remove dead exports: `ALL_POOLS`, `POOL_DETAIL`, `GLOBAL_AGGREGATES` |
+| `src/lib/plot.ts`                   | **New** — shared Plotly layout constants and helpers                 |
+| `src/lib/__tests__/format.test.ts`  | **New** — 31 tests for `lib/format.ts`                               |
+| `src/app/pools/page.tsx`            | Remove unused `TxHashCell` import                                    |
+| `src/app/pool/[poolId]/page.tsx`    | Fix Rules of Hooks violation in `AnalyticsTab`                       |
+| `src/components/table.tsx`          | Fix `React` import → `import type { ReactNode }`                     |
+| `src/components/oracle-chart.tsx`   | Use shared Plotly layout from `lib/plot.ts`                          |
+| `src/components/reserve-chart.tsx`  | Use shared Plotly layout from `lib/plot.ts`                          |
+| `src/components/snapshot-chart.tsx` | Use shared Plotly layout from `lib/plot.ts`                          |
