@@ -45,8 +45,12 @@ const snapshotId = (poolId: string, hourTs: bigint): string =>
 // Oracle helpers
 // ---------------------------------------------------------------------------
 
-/** In-memory mapping: rateFeedID (lowercase) → poolId for FPMM pools */
-const rateFeedPoolMap = new Map<string, string>();
+/** In-memory mapping: rateFeedID (lowercase) → Set of poolIds that use it.
+ * Multiple FPMM pools can share the same SortedOracles rate feed. */
+const rateFeedPoolMap = new Map<string, Set<string>>();
+
+/** SortedOracles always uses a fixed 24-decimal denominator (10^24). */
+const SORTED_ORACLES_DENOM = 10n ** 24n;
 
 // Lazy RPC clients per chainId
 const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
@@ -484,13 +488,21 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
 
   if (rateFeedID) {
     oracleDelta.referenceRateFeedID = rateFeedID;
-    // Register in the in-memory map for SortedOracles event lookup
-    rateFeedPoolMap.set(rateFeedID, poolId);
+    // Register in the in-memory map for SortedOracles event lookup.
+    // Multiple pools can share the same feed — store a Set.
+    const existing = rateFeedPoolMap.get(rateFeedID) ?? new Set<string>();
+    existing.add(poolId);
+    rateFeedPoolMap.set(rateFeedID, existing);
   }
 
   if (rebalState) {
+    // Store the oracle price from the FPMM's rebalancing state numerator, but
+    // always use the canonical SortedOracles 24-decimal denominator so that
+    // oraclePrice / oraclePriceDenom always yields the correct human price.
+    // (FPMM.getRebalancingState returns oraclePriceDenominator in 18dp which
+    // is inconsistent with the 24dp values emitted by SortedOracles events.)
     oracleDelta.oraclePrice = rebalState.oraclePriceNumerator;
-    oracleDelta.oraclePriceDenom = rebalState.oraclePriceDenominator;
+    oracleDelta.oraclePriceDenom = SORTED_ORACLES_DENOM;
     oracleDelta.rebalanceThreshold = rebalState.rebalanceThreshold;
     oracleDelta.priceDifference = rebalState.priceDifference;
     // Assume oracle is OK when pool is first deployed
@@ -755,7 +767,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   if (rebalState) {
     oracleDelta = {
       oraclePrice: rebalState.oraclePriceNumerator,
-      oraclePriceDenom: rebalState.oraclePriceDenominator,
+      oraclePriceDenom: SORTED_ORACLES_DENOM,
       rebalanceThreshold: rebalState.rebalanceThreshold,
       priceDifference: rebalState.priceDifference,
       oracleTimestamp: blockTimestamp,
@@ -790,7 +802,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       poolId,
       timestamp: blockTimestamp,
       oraclePrice: rebalState.oraclePriceNumerator,
-      oraclePriceDenom: rebalState.oraclePriceDenominator,
+      oraclePriceDenom: SORTED_ORACLES_DENOM,
       oracleOk: updatedPool.oracleOk,
       numReporters: updatedPool.oracleNumReporters,
       priceDifference: rebalState.priceDifference,
@@ -843,7 +855,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     oracleDelta = {
       ...oracleDelta,
       oraclePrice: rebalState.oraclePriceNumerator,
-      oraclePriceDenom: rebalState.oraclePriceDenominator,
+      oraclePriceDenom: SORTED_ORACLES_DENOM,
       rebalanceThreshold: rebalState.rebalanceThreshold,
       priceDifference: rebalState.priceDifference,
       oracleTimestamp: blockTimestamp,
@@ -874,7 +886,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       poolId,
       timestamp: blockTimestamp,
       oraclePrice: rebalState.oraclePriceNumerator,
-      oraclePriceDenom: rebalState.oraclePriceDenominator,
+      oraclePriceDenom: SORTED_ORACLES_DENOM,
       oracleOk: updatedPool.oracleOk,
       numReporters: updatedPool.oracleNumReporters,
       priceDifference: rebalState.priceDifference,
@@ -992,49 +1004,44 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Look up which pool uses this rateFeedID
-  const poolId = rateFeedPoolMap.get(rateFeedID);
-  if (!poolId) return; // No pool tracks this rateFeedID
+  // Look up all pools using this rateFeedID (multiple pools can share a feed)
+  const poolIds = rateFeedPoolMap.get(rateFeedID);
+  if (!poolIds || poolIds.size === 0) return;
 
-  const existing = await context.Pool.get(poolId);
-  if (!existing) return;
-
-  // OracleReported includes: token (rateFeedID), oracle (reporter), timestamp, value
-  // value is the reported price, timestamp is the oracle's reported timestamp
   const oracleTimestamp = event.params.timestamp;
   const oraclePrice = event.params.value;
 
-  const oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {
-    oracleTimestamp,
-    oracleOk: true, // A new report means oracle is fresh
-    oraclePrice,
-    // Keep existing denom (we'll update on MedianUpdated)
-  };
+  for (const poolId of poolIds) {
+    const existing = await context.Pool.get(poolId);
+    if (!existing) continue;
 
-  const updatedPool: Pool = {
-    ...existing,
-    ...oracleDelta,
-    updatedAtBlock: blockNumber,
-    updatedAtTimestamp: blockTimestamp,
-  };
-  const healthStatus = computeHealthStatus(updatedPool);
-  context.Pool.set({ ...updatedPool, healthStatus });
+    const updatedPool: Pool = {
+      ...existing,
+      oracleTimestamp,
+      oracleOk: true,
+      oraclePrice,
+      oraclePriceDenom: SORTED_ORACLES_DENOM,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    };
+    const healthStatus = computeHealthStatus(updatedPool);
+    context.Pool.set({ ...updatedPool, healthStatus });
 
-  // Create OracleSnapshot
-  const snapshot: OracleSnapshot = {
-    id: eventId(event.chainId, event.block.number, event.logIndex),
-    poolId,
-    timestamp: blockTimestamp,
-    oraclePrice,
-    oraclePriceDenom: existing.oraclePriceDenom,
-    oracleOk: true,
-    numReporters: existing.oracleNumReporters,
-    priceDifference: existing.priceDifference,
-    rebalanceThreshold: existing.rebalanceThreshold,
-    source: "oracle_reported",
-    blockNumber,
-  };
-  context.OracleSnapshot.set(snapshot);
+    const snapshot: OracleSnapshot = {
+      id: eventId(event.chainId, event.block.number, event.logIndex) + `-${poolId}`,
+      poolId,
+      timestamp: blockTimestamp,
+      oraclePrice,
+      oraclePriceDenom: SORTED_ORACLES_DENOM,
+      oracleOk: true,
+      numReporters: existing.oracleNumReporters,
+      priceDifference: existing.priceDifference,
+      rebalanceThreshold: existing.rebalanceThreshold,
+      source: "oracle_reported",
+      blockNumber,
+    };
+    context.OracleSnapshot.set(snapshot);
+  }
 });
 
 SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
@@ -1042,42 +1049,43 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Look up which pool uses this rateFeedID
-  const poolId = rateFeedPoolMap.get(rateFeedID);
-  if (!poolId) return;
+  // Look up all pools using this rateFeedID (multiple pools can share a feed)
+  const poolIds = rateFeedPoolMap.get(rateFeedID);
+  if (!poolIds || poolIds.size === 0) return;
 
-  const existing = await context.Pool.get(poolId);
-  if (!existing) return;
-
-  // MedianUpdated includes: token (rateFeedID), value (new median price)
   const oraclePrice = event.params.value;
 
-  const updatedPool: Pool = {
-    ...existing,
-    oraclePrice,
-    oracleTimestamp: blockTimestamp,
-    oracleOk: true,
-    updatedAtBlock: blockNumber,
-    updatedAtTimestamp: blockTimestamp,
-  };
-  const healthStatus = computeHealthStatus(updatedPool);
-  context.Pool.set({ ...updatedPool, healthStatus });
+  for (const poolId of poolIds) {
+    const existing = await context.Pool.get(poolId);
+    if (!existing) continue;
 
-  // Create OracleSnapshot for median update
-  const snapshot: OracleSnapshot = {
-    id: eventId(event.chainId, event.block.number, event.logIndex),
-    poolId,
-    timestamp: blockTimestamp,
-    oraclePrice,
-    oraclePriceDenom: existing.oraclePriceDenom,
-    oracleOk: true,
-    numReporters: existing.oracleNumReporters,
-    priceDifference: existing.priceDifference,
-    rebalanceThreshold: existing.rebalanceThreshold,
-    source: "oracle_reported",
-    blockNumber,
-  };
-  context.OracleSnapshot.set(snapshot);
+    const updatedPool: Pool = {
+      ...existing,
+      oraclePrice,
+      oraclePriceDenom: SORTED_ORACLES_DENOM,
+      oracleTimestamp: blockTimestamp,
+      oracleOk: true,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    };
+    const healthStatus = computeHealthStatus(updatedPool);
+    context.Pool.set({ ...updatedPool, healthStatus });
+
+    const snapshot: OracleSnapshot = {
+      id: eventId(event.chainId, event.block.number, event.logIndex) + `-${poolId}`,
+      poolId,
+      timestamp: blockTimestamp,
+      oraclePrice,
+      oraclePriceDenom: SORTED_ORACLES_DENOM,
+      oracleOk: true,
+      numReporters: existing.oracleNumReporters,
+      priceDifference: existing.priceDifference,
+      rebalanceThreshold: existing.rebalanceThreshold,
+      source: "oracle_reported",
+      blockNumber,
+    };
+    context.OracleSnapshot.set(snapshot);
+  }
 });
 
 // ---------------------------------------------------------------------------
