@@ -482,7 +482,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
   // Fetch oracle state from chain at pool creation
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
 
-  const [rateFeedID, rebalState] = await Promise.all([
+  const [rateFeedID, rebalancingState] = await Promise.all([
     fetchReferenceRateFeedID(event.chainId, poolId),
     fetchRebalancingState(event.chainId, poolId),
   ]);
@@ -496,15 +496,15 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     rateFeedPoolMap.set(rateFeedID, existing);
   }
 
-  if (rebalState) {
+  if (rebalancingState) {
     // Store the raw SortedOracles numerator. The denominator is always 10^24
     // (SORTED_ORACLES_DECIMALS) — callers divide oraclePrice by 10^24 to get
     // the human-readable price. Note: FPMM.getRebalancingState() also returns
     // an oraclePriceDenominator but it uses 18dp which is inconsistent with
     // the 24dp SortedOracles format — we ignore it.
-    oracleDelta.oraclePrice = rebalState.oraclePriceNumerator;
-    oracleDelta.rebalanceThreshold = rebalState.rebalanceThreshold;
-    oracleDelta.priceDifference = rebalState.priceDifference;
+    oracleDelta.oraclePrice = rebalancingState.oraclePriceNumerator;
+    oracleDelta.rebalanceThreshold = rebalancingState.rebalanceThreshold;
+    oracleDelta.priceDifference = rebalancingState.priceDifference;
     // Assume oracle is OK when pool is first deployed
     oracleDelta.oracleOk = true;
     oracleDelta.oracleTimestamp = blockTimestamp;
@@ -761,14 +761,14 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const blockTimestamp = asBigInt(event.block.timestamp);
 
   // Fetch fresh rebalancing state for FPMM pools
-  const rebalState = await fetchRebalancingState(event.chainId, poolId);
+  const rebalancingState = await fetchRebalancingState(event.chainId, poolId);
 
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
-  if (rebalState) {
+  if (rebalancingState) {
     oracleDelta = {
-      oraclePrice: rebalState.oraclePriceNumerator,
-      rebalanceThreshold: rebalState.rebalanceThreshold,
-      priceDifference: rebalState.priceDifference,
+      oraclePrice: rebalancingState.oraclePriceNumerator,
+      rebalanceThreshold: rebalancingState.rebalanceThreshold,
+      priceDifference: rebalancingState.priceDifference,
       oracleTimestamp: blockTimestamp,
     };
   }
@@ -795,16 +795,16 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   context.Pool.set({ ...updatedPool, healthStatus });
 
   // Create OracleSnapshot if we got data
-  if (rebalState) {
+  if (rebalancingState) {
     const snapshot: OracleSnapshot = {
       id: eventId(event.chainId, event.block.number, event.logIndex),
       poolId,
       timestamp: blockTimestamp,
-      oraclePrice: rebalState.oraclePriceNumerator,
+      oraclePrice: rebalancingState.oraclePriceNumerator,
       oracleOk: updatedPool.oracleOk,
       numReporters: updatedPool.oracleNumReporters,
-      priceDifference: rebalState.priceDifference,
-      rebalanceThreshold: rebalState.rebalanceThreshold,
+      priceDifference: rebalancingState.priceDifference,
+      rebalanceThreshold: rebalancingState.rebalanceThreshold,
       source: "update_reserves",
       blockNumber,
     };
@@ -839,7 +839,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   const blockTimestamp = asBigInt(event.block.timestamp);
 
   // Fetch fresh rebalancing state post-rebalance
-  const rebalState = await fetchRebalancingState(event.chainId, poolId);
+  const rebalancingState = await fetchRebalancingState(event.chainId, poolId);
 
   const rebalancerAddress = asAddress(event.params.sender);
 
@@ -849,12 +849,12 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     rebalanceLivenessStatus: "ACTIVE",
   };
 
-  if (rebalState) {
+  if (rebalancingState) {
     oracleDelta = {
       ...oracleDelta,
-      oraclePrice: rebalState.oraclePriceNumerator,
-      rebalanceThreshold: rebalState.rebalanceThreshold,
-      priceDifference: rebalState.priceDifference,
+      oraclePrice: rebalancingState.oraclePriceNumerator,
+      rebalanceThreshold: rebalancingState.rebalanceThreshold,
+      priceDifference: rebalancingState.priceDifference,
       oracleTimestamp: blockTimestamp,
     };
   }
@@ -877,16 +877,16 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   context.Pool.set({ ...updatedPool, healthStatus });
 
   // Create OracleSnapshot
-  if (rebalState) {
+  if (rebalancingState) {
     const snapshot: OracleSnapshot = {
       id: eventId(event.chainId, event.block.number, event.logIndex),
       poolId,
       timestamp: blockTimestamp,
-      oraclePrice: rebalState.oraclePriceNumerator,
+      oraclePrice: rebalancingState.oraclePriceNumerator,
       oracleOk: updatedPool.oracleOk,
       numReporters: updatedPool.oracleNumReporters,
-      priceDifference: rebalState.priceDifference,
-      rebalanceThreshold: rebalState.rebalanceThreshold,
+      priceDifference: rebalancingState.priceDifference,
+      rebalanceThreshold: rebalancingState.rebalanceThreshold,
       source: "rebalanced",
       blockNumber,
     };
