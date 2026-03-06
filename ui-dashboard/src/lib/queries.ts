@@ -170,3 +170,14 @@ export const ORACLE_SNAPSHOTS = `
     }
   }
 `;
+
+export const POOL_DEPLOYMENT = `
+  query PoolDeployment($poolId: String!) {
+    FactoryDeployment(
+      where: { poolId: { _eq: $poolId } }
+      limit: 1
+    ) {
+      txHash
+    }
+  }
+`;

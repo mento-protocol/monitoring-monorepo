@@ -34,6 +34,7 @@ function DeviationBar({
   const threshold = rebalanceThreshold;
   const ratio = Math.min(diff / threshold, 1.5); // cap at 150%
   const pct = Math.min(ratio * 100, 100);
+  const pctOfThreshold = ((diff / threshold) * 100).toFixed(1);
   const color =
     ratio >= 1.0
       ? "bg-red-500"
@@ -44,7 +45,10 @@ function DeviationBar({
   return (
     <div className="flex flex-col gap-1">
       <span className="text-sm text-slate-200">
-        {diff.toLocaleString()} bps / {threshold.toLocaleString()} bps threshold
+        {pctOfThreshold}% of rebalance threshold
+        <span className="ml-2 text-xs text-slate-500">
+          ({diff.toLocaleString()} / {threshold.toLocaleString()} bps)
+        </span>
       </span>
       <div className="h-2 w-full rounded-full bg-slate-700">
         <div
