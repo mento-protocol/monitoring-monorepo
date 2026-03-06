@@ -1,0 +1,31 @@
+# Copy this file to terraform.tfvars and fill in the values.
+# terraform.tfvars is gitignored — never commit it.
+
+# ── Vercel ────────────────────────────────────────────────────────────────────
+# Create at: vercel.com → Account Settings → Tokens
+vercel_token = "vcp_..."
+
+# Team ID — default is already set in variables.tf; override only if changed.
+# vercel_team_id = "team_4l4TPoxnWEcusT8VeXkHbzF2"
+
+# ── Upstash ───────────────────────────────────────────────────────────────────
+# API credentials at: console.upstash.com → Account → API Keys
+upstash_email   = "your@email.com"
+upstash_api_key = "..."
+
+# Primary region for the Redis database — closest to your Vercel deployment region.
+# upstash_region = "eu-west-1"
+
+# ── Hasura / Envio ────────────────────────────────────────────────────────────
+# Defaults in variables.tf point to the current Envio-hosted endpoints.
+# Override here only if the deployment IDs change.
+# hasura_url_sepolia_hosted  = "https://indexer.hyperindex.xyz/fc3170d/v1/graphql"
+# hasura_url_mainnet_hosted  = "https://indexer.hyperindex.xyz/60ff18c/v1/graphql"
+
+# Admin secrets — leave empty for public Envio-hosted deployments.
+# hasura_secret_sepolia_hosted = ""
+# hasura_secret_mainnet_hosted = ""
+
+# ── Vercel Blob ───────────────────────────────────────────────────────────────
+# Provision the store once (see README), then paste the token here.
+# blob_read_write_token = "vercel_blob_rw_..."

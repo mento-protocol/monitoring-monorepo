@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { NetworkProvider } from "@/components/network-provider";
+import { AddressLabelsProvider } from "@/components/address-labels-provider";
 import { NetworkSelector } from "@/components/network-selector";
 import "./globals.css";
 
@@ -27,31 +28,39 @@ export default function RootLayout({
       >
         <Suspense>
           <NetworkProvider>
-            <nav
-              className="border-b border-slate-800 px-6 py-3 flex items-center gap-4"
-              aria-label="Main navigation"
-            >
-              <Link
-                href="/"
-                className="text-lg font-bold text-white hover:text-indigo-400 transition-colors"
+            <AddressLabelsProvider>
+              <nav
+                className="border-b border-slate-800 px-6 py-3 flex items-center gap-4"
+                aria-label="Main navigation"
               >
-                Mento v3 Monitor
-              </Link>
-              <Link
-                href="/"
-                className="text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
-              >
-                Global
-              </Link>
-              <Link
-                href="/pools"
-                className="text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
-              >
-                Pools
-              </Link>
-              <NetworkSelector />
-            </nav>
-            <div className="mx-auto max-w-7xl px-6 py-6">{children}</div>
+                <Link
+                  href="/"
+                  className="text-lg font-bold text-white hover:text-indigo-400 transition-colors"
+                >
+                  Mento v3 Monitor
+                </Link>
+                <Link
+                  href="/"
+                  className="text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+                >
+                  Global
+                </Link>
+                <Link
+                  href="/pools"
+                  className="text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+                >
+                  Pools
+                </Link>
+                <Link
+                  href="/address-book"
+                  className="text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+                >
+                  Address Book
+                </Link>
+                <NetworkSelector />
+              </nav>
+              <div className="mx-auto max-w-7xl px-6 py-6">{children}</div>
+            </AddressLabelsProvider>
           </NetworkProvider>
         </Suspense>
       </body>
