@@ -1,3 +1,10 @@
+/**
+ * SortedOracles always uses 24-decimal fixed-point precision.
+ * Divide any raw oracle price value by 10^SORTED_ORACLES_DECIMALS to get the
+ * human-readable rate.
+ */
+export const SORTED_ORACLES_DECIMALS = 24;
+
 export function truncateAddress(address: string | null): string {
   if (!address) return "\u2014";
   if (address.length <= 10) return address;

@@ -3,13 +3,13 @@
 import type { Pool } from "@/lib/types";
 import { HealthBadge } from "@/components/badges";
 import { tokenSymbol } from "@/lib/tokens";
-import { relativeTime, formatTimestamp } from "@/lib/format";
+import { relativeTime, formatTimestamp, SORTED_ORACLES_DECIMALS } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
 
 /** SortedOracles always uses 24-decimal precision (denominator = 10^24). */
 function parseOraclePrice(num: string): string {
   if (!num || num === "0") return "—";
-  const price = Number(num) / 1e24;
+  const price = Number(num) / 10 ** SORTED_ORACLES_DECIMALS;
   if (!isFinite(price) || price <= 0) return "—";
   return price.toFixed(6);
 }

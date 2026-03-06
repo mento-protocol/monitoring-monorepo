@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import type { OracleSnapshot } from "@/lib/types";
+import { SORTED_ORACLES_DECIMALS } from "@/lib/format";
 import {
   PLOTLY_BASE_LAYOUT,
   PLOTLY_AXIS_DEFAULTS,
@@ -32,9 +33,8 @@ export function OracleChart({
   );
 
   // Normalise oracle price to human-readable float
-  // SortedOracles always uses 24-decimal precision — divide by 10^24
   const prices = snapshots.map((s) =>
-    s.oraclePrice ? Number(s.oraclePrice) / 1e24 : 0,
+    s.oraclePrice ? Number(s.oraclePrice) / 10 ** SORTED_ORACLES_DECIMALS : 0,
   );
 
   // Deviation % of rebalance threshold
