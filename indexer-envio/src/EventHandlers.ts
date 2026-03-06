@@ -1028,7 +1028,9 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
     context.Pool.set({ ...updatedPool, healthStatus });
 
     const snapshot: OracleSnapshot = {
-      id: eventId(event.chainId, event.block.number, event.logIndex) + `-${poolId}`,
+      id:
+        eventId(event.chainId, event.block.number, event.logIndex) +
+        `-${poolId}`,
       poolId,
       timestamp: blockTimestamp,
       oraclePrice,
@@ -1072,7 +1074,9 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
     context.Pool.set({ ...updatedPool, healthStatus });
 
     const snapshot: OracleSnapshot = {
-      id: eventId(event.chainId, event.block.number, event.logIndex) + `-${poolId}`,
+      id:
+        eventId(event.chainId, event.block.number, event.logIndex) +
+        `-${poolId}`,
       poolId,
       timestamp: blockTimestamp,
       oraclePrice,
