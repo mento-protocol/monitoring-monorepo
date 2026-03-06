@@ -46,13 +46,34 @@ const snapshotId = (poolId: string, hourTs: bigint): string =>
 // ---------------------------------------------------------------------------
 
 /** In-memory mapping: rateFeedID (lowercase) → Set of poolIds that use it.
- * Multiple FPMM pools can share the same SortedOracles rate feed. */
+ * Multiple FPMM pools can share the same SortedOracles rate feed.
+ *
+ * ⚠️ This map is populated at FPMMDeployed handler time. It is in-memory only
+ * and is rebuilt during historical re-sync. Any OracleReported / MedianUpdated
+ * events processed before their corresponding FPMMDeployed event (which can't
+ * happen in correct block order, but worth noting for debugging) would miss all
+ * pools. If the indexer restarts mid-sync, the map is empty for already-synced
+ * blocks — Envio re-processes all events from the start, so this is fine in
+ * practice, but the map should not be treated as a persistent data structure. */
 const rateFeedPoolMap = new Map<string, Set<string>>();
 
 /** SortedOracles always uses a fixed 24-decimal precision (denominator = 10^24).
- * oraclePrice values from SortedOracles events are always in this scale.
- * Divide by SORTED_ORACLES_DECIMALS to get the human-readable price. */
+ * oraclePrice values from SortedOracles events (OracleReported, MedianUpdated)
+ * are always in this 24dp scale. Divide by 10^SORTED_ORACLES_DECIMALS to get
+ * the human-readable price.
+ *
+ * NOTE: FPMM.getRebalancingState() internally calls OracleAdapter.getFXRateIfValid()
+ * which normalises SortedOracles' 24dp output to 18dp by dividing both numerator
+ * and denominator by 1e6 (see OracleAdapter._getOracleRate). Therefore the
+ * oraclePriceNumerator returned by getRebalancingState() is in 18dp scale and
+ * must be multiplied by ORACLE_ADAPTER_SCALE_FACTOR before storage so it stays
+ * consistent with the 24dp values emitted by SortedOracles events. */
 const SORTED_ORACLES_DECIMALS = 24;
+
+/** OracleAdapter divides both numerator and denominator by 1e6, converting
+ * SortedOracles' 24dp precision to 18dp. Multiply by this factor to restore
+ * the original 24dp scale when reading from getRebalancingState(). */
+const ORACLE_ADAPTER_SCALE_FACTOR = 1_000_000n;
 
 // Lazy RPC clients per chainId
 const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
@@ -502,7 +523,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     // the human-readable price. Note: FPMM.getRebalancingState() also returns
     // an oraclePriceDenominator but it uses 18dp which is inconsistent with
     // the 24dp SortedOracles format — we ignore it.
-    oracleDelta.oraclePrice = rebalancingState.oraclePriceNumerator;
+    oracleDelta.oraclePrice = rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
     oracleDelta.rebalanceThreshold = rebalancingState.rebalanceThreshold;
     oracleDelta.priceDifference = rebalancingState.priceDifference;
     // Assume oracle is OK when pool is first deployed
@@ -766,7 +787,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
   if (rebalancingState) {
     oracleDelta = {
-      oraclePrice: rebalancingState.oraclePriceNumerator,
+      oraclePrice: rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
       priceDifference: rebalancingState.priceDifference,
       oracleTimestamp: blockTimestamp,
@@ -800,7 +821,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       id: eventId(event.chainId, event.block.number, event.logIndex),
       poolId,
       timestamp: blockTimestamp,
-      oraclePrice: rebalancingState.oraclePriceNumerator,
+      oraclePrice: rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
       oracleOk: updatedPool.oracleOk,
       numReporters: updatedPool.oracleNumReporters,
       priceDifference: rebalancingState.priceDifference,
@@ -852,7 +873,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   if (rebalancingState) {
     oracleDelta = {
       ...oracleDelta,
-      oraclePrice: rebalancingState.oraclePriceNumerator,
+      oraclePrice: rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
       priceDifference: rebalancingState.priceDifference,
       oracleTimestamp: blockTimestamp,
@@ -882,7 +903,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       id: eventId(event.chainId, event.block.number, event.logIndex),
       poolId,
       timestamp: blockTimestamp,
-      oraclePrice: rebalancingState.oraclePriceNumerator,
+      oraclePrice: rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
       oracleOk: updatedPool.oracleOk,
       numReporters: updatedPool.oracleNumReporters,
       priceDifference: rebalancingState.priceDifference,
@@ -1077,7 +1098,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       numReporters: existing.oracleNumReporters,
       priceDifference: existing.priceDifference,
       rebalanceThreshold: existing.rebalanceThreshold,
-      source: "oracle_reported",
+      source: "oracle_median_updated",
       blockNumber,
     };
     context.OracleSnapshot.set(snapshot);
