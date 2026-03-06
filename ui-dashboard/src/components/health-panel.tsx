@@ -9,10 +9,10 @@ import { useNetwork } from "@/components/network-provider";
 // SortedOracles always uses 24-decimal fixed-point (denominator = 10^24).
 // The indexer stores `oraclePrice` from MedianUpdated.value (24dp scale) but
 // `oraclePriceDenom` from FPMM.getRebalancingState() (18dp scale) — a mismatch.
-// Fix: always normalise by 10^24. The `denom` param is kept for API compat but ignored.
+// Always normalise by 10^24, ignoring the denom field.
 const SORTED_ORACLES_PRECISION = 1e24;
 
-function parseOraclePrice(num: string, _denom: string): string {
+function parseOraclePrice(num: string): string {
   if (!num || num === "0") return "—";
   const price = Number(num) / SORTED_ORACLES_PRECISION;
   if (!isFinite(price) || price <= 0) return "—";
@@ -71,10 +71,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
 
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
-  const oraclePrice = parseOraclePrice(
-    pool.oraclePrice ?? "0",
-    pool.oraclePriceDenom ?? "0",
-  );
+  const oraclePrice = parseOraclePrice(pool.oraclePrice ?? "0");
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">

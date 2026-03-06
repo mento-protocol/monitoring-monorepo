@@ -29,11 +29,7 @@ function PressureBar({ pressure, label, netflow, limit }: PressureBarProps) {
         ? "bg-amber-500"
         : "bg-emerald-500";
 
-  const netflowHuman = formatWei(
-    netflow.replace(/^-/, ""),
-    LIMIT_DECIMALS,
-    2,
-  );
+  const netflowHuman = formatWei(netflow.replace(/^-/, ""), LIMIT_DECIMALS, 2);
   const limitHuman = formatWei(limit, LIMIT_DECIMALS, 2);
   const sign = netflow.startsWith("-") ? "-" : "+";
 
@@ -53,7 +49,8 @@ function PressureBar({ pressure, label, netflow, limit }: PressureBarProps) {
         />
       </div>
       <div className="text-xs text-slate-400">
-        Netflow: {sign}{netflowHuman} / Limit: {limitHuman}
+        Netflow: {sign}
+        {netflowHuman} / Limit: {limitHuman}
       </div>
     </div>
   );

@@ -6,7 +6,12 @@ import { poolName } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
-import { SourceBadge, HealthBadge, LimitBadge, RebalancerBadge } from "@/components/badges";
+import {
+  SourceBadge,
+  HealthBadge,
+  LimitBadge,
+  RebalancerBadge,
+} from "@/components/badges";
 import { AddressLink } from "@/components/address-link";
 import { computeLimitStatus, computeRebalancerLiveness } from "@/lib/health";
 
