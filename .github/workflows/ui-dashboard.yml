@@ -42,19 +42,3 @@ jobs:
           fail_ci_if_error: false
           flags: ui-dashboard
           directory: ui-dashboard/coverage
-
-  ci-gate:
-    name: CI Gate (ui-dashboard)
-    if: always()
-    needs: [quality]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Pass if quality succeeded or was skipped
-        run: |
-          result="${{ needs.quality.result }}"
-          if [ "$result" = "success" ] || [ "$result" = "skipped" ]; then
-            echo "CI gate passed (quality: $result)"
-          else
-            echo "CI gate failed (quality: $result)"
-            exit 1
-          fi
