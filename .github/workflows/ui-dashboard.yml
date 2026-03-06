@@ -31,8 +31,6 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Lint (ESLint)
-        run: pnpm --filter @mento-protocol/ui-dashboard lint
       - name: Typecheck
         run: pnpm --filter @mento-protocol/ui-dashboard typecheck
       - name: Test with coverage

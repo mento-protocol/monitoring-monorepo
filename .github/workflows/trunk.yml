@@ -1,0 +1,27 @@
+name: "Trunk: Code Quality"
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: read-all
+
+jobs:
+  trunk:
+    name: Trunk Check
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.trunk/setup-ci
+      - uses: trunk-io/trunk-action@v1
+        with:
+          arguments: --all
