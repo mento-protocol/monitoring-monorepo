@@ -9,6 +9,11 @@ import { useNetwork } from "@/components/network-provider";
 function parseOraclePrice(num: string, denom: string): string {
   if (!num || !denom || denom === "0" || num === "0") return "—";
   const price = Number(num) / Number(denom);
+  // Some SortedOracles feeds report prices in 24-decimal precision while the
+  // denominator is stored in 18-decimal precision, producing a ratio of ~10^6
+  // for feeds like USDC/USDm. Until the indexer normalises these, hide the
+  // raw price rather than display a misleading value.
+  if (price > 1_000 || price < 0.001) return "—";
   return price.toFixed(6);
 }
 
