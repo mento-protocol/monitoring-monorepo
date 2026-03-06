@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import type { OracleSnapshot } from "@/lib/types";
 import { tokenSymbol } from "@/lib/tokens";
+import { SORTED_ORACLES_DECIMALS } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
 
 // Plotly must be loaded client-side only (no SSR)
@@ -14,11 +15,9 @@ interface OraclePriceChartProps {
   token1: string | null;
 }
 
-/**
- /** SortedOracles always uses 24-decimal precision (denominator = 10^24). */
 function parseOraclePrice(num: string): number {
   if (!num || num === "0") return 0;
-  return Number(num) / 1e24;
+  return Number(num) / 10 ** SORTED_ORACLES_DECIMALS;
 }
 
 export function OraclePriceChart({
