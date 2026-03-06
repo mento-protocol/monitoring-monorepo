@@ -1,6 +1,6 @@
 # Indexer Status
 
-Last updated: 2026-03-05
+Last updated: 2026-03-06
 
 ## Current State
 
@@ -14,15 +14,15 @@ Both mainnet and Sepolia indexers are live and synced on Envio's hosted service.
 
 ## GraphQL Endpoint
 
-The hosted endpoint URL contains a hash that changes on every redeploy:
+Mainnet uses the Envio production tier with a **static** endpoint (hash does not change on redeploy):
 
 ```text
-https://indexer.dev.hyperindex.xyz/<hash>/v1/graphql
+https://indexer.hyperindex.xyz/60ff18c/v1/graphql
 ```
 
-The current live hash is stored as `NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED` in Vercel project settings.
+The current URL is stored as `NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED` in Vercel project settings.
 
-> After each indexer redeploy, run `pnpm update-endpoint:mainnet` to update the Vercel env var.
+> Only update the Vercel env var if the indexer is redeployed and Envio issues a new endpoint.
 
 ## Schema (as of 2026-03-05)
 
