@@ -1,3 +1,4 @@
+"use client"; // v2
 "use client";
 
 import { AddressLink } from "@/components/address-link";
