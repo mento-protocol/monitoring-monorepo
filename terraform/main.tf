@@ -59,10 +59,8 @@ resource "vercel_project" "dashboard" {
   install_command = "pnpm install"
   build_command   = "pnpm build"
 
-  # Only rebuild when something in ui-dashboard/ actually changed.
-  # Always deploy on main (never skip production). Skip previews only when
-  # nothing in ui-dashboard/ changed. Vercel CWD = root_directory (ui-dashboard/).
-  ignore_command = "if [ \"$VERCEL_GIT_COMMIT_REF\" = \"main\" ]; then exit 1; fi; git diff HEAD^ HEAD --quiet -- ."
+  # No ignore_command — always build on every push.
+  # A "smart skip" caused production to be silently stuck for weeks.
 
   git_repository = {
     type              = "github"
