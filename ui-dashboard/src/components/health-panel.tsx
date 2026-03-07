@@ -2,7 +2,7 @@
 
 import type { Pool } from "@/lib/types";
 import { HealthBadge } from "@/components/badges";
-import { tokenSymbol } from "@/lib/tokens";
+import { tokenSymbol, chainlinkFeedUrl } from "@/lib/tokens";
 import {
   relativeTime,
   formatTimestamp,
@@ -75,6 +75,8 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
   const oraclePrice = parseOraclePrice(pool.oraclePrice ?? "0");
+  // Link oracle price to Chainlink data feed — use the non-USDm token symbol
+  const chainlinkUrl = chainlinkFeedUrl(sym1) ?? chainlinkFeedUrl(sym0);
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -115,7 +117,20 @@ export function HealthPanel({ pool }: HealthPanelProps) {
 
           {/* Oracle Price */}
           <div>
-            <dt className="text-slate-400 mb-1">Oracle Price</dt>
+            <dt className="text-slate-400 mb-1">
+              Oracle Price
+              {chainlinkUrl && (
+                <a
+                  href={chainlinkUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="View Chainlink data feed"
+                  className="ml-2 text-xs text-slate-500 hover:text-indigo-400 transition-colors"
+                >
+                  ↗ Chainlink
+                </a>
+              )}
+            </dt>
             <dd className="text-white font-mono">
               {oraclePrice !== "—" ? (
                 <span>

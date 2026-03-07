@@ -10,6 +10,7 @@ const CATEGORIES = [
   "Market Maker",
   "Arbitrageur",
   "DAO",
+  "Team",
   "Treasury",
   "Protocol",
   "Wallet",
