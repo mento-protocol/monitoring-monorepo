@@ -1071,7 +1071,12 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
   if (!poolIds || poolIds.size === 0) return;
 
   const oracleTimestamp = event.params.timestamp;
-  // Fetch reporter count once per rateFeedID (shared across all pools using it)
+  // Fetch reporter count once per rateFeedID (shared across all pools using it).
+  // OracleReported fires per individual reporter — each event here triggers
+  // 1 numRates RPC call + N getRebalancingState calls (one per pool sharing the feed).
+  // With 4 FPMM pools, that's up to 5 RPC calls per oracle report. Acceptable
+  // in live mode (oracle reports are infrequent); if historical sync is slow,
+  // consider caching numRates per (chainId, feedId, block) or skipping during sync.
   const oracleNumReporters = await fetchNumReporters(event.chainId, rateFeedID);
 
   for (const poolId of poolIds) {

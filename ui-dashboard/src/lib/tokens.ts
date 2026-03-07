@@ -68,22 +68,37 @@ export function buildPoolNameMap(
 }
 
 /**
- * Returns the Chainlink data feed URL for a given token symbol on Celo mainnet,
- * or null if no mapping is known. Only applicable to FPMM pools (oracle health).
- * All feeds are vs USD (the SortedOracles denomination).
+ * Returns the Chainlink data feed URL for a given token symbol and chainId,
+ * or null if no mapping exists for that chain. Only applicable to FPMM pools.
+ * Add new chains to CHAINLINK_FEEDS as they go live.
  */
-export function chainlinkFeedUrl(tokenSymbol: string): string | null {
+export function chainlinkFeedUrl(
+  tokenSymbol: string,
+  chainId: number,
+): string | null {
+  const chainConfig = CHAINLINK_FEEDS[chainId];
+  if (!chainConfig) return null;
   // Normalise: strip "axl" prefix and lowercase for matching
   const sym = tokenSymbol.replace(/^axl/i, "").toLowerCase();
-  const slug = CHAINLINK_CELO_SLUG[sym];
+  const slug = chainConfig.slugs[sym];
   if (!slug) return null;
-  return `https://data.chain.link/feeds/celo/mainnet/${slug}`;
+  return `${chainConfig.baseUrl}/${slug}`;
 }
 
-/** Chainlink Celo mainnet feed slugs (base-usd format). */
-const CHAINLINK_CELO_SLUG: Record<string, string> = {
-  usdc: "usdc-usd",
-  usdt: "usdt-usd",
-  gbp: "gbp-usd",
-  gbpm: "gbp-usd",
+/** Per-chain Chainlink feed configuration. Add new entries as new chains go live. */
+const CHAINLINK_FEEDS: Record<
+  number,
+  { baseUrl: string; slugs: Record<string, string> }
+> = {
+  42220: {
+    // Celo Mainnet
+    baseUrl: "https://data.chain.link/feeds/celo/mainnet",
+    slugs: {
+      usdc: "usdc-usd",
+      usdt: "usdt-usd",
+      gbp: "gbp-usd",
+      gbpm: "gbp-usd",
+    },
+  },
+  // 10143: { baseUrl: "...", slugs: { ... } }, // Monad — add when live
 };

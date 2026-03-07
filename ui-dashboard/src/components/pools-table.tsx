@@ -19,7 +19,7 @@ import type { RebalancerStatus } from "@/lib/health";
 function healthTooltip(p: Pool): string {
   const status = p.healthStatus ?? "N/A";
   if (status === "N/A") return "VirtualPool — oracle health not tracked";
-  if (status === "CRITICAL" && !p.oracleOk)
+  if (status === "CRITICAL" && p.oracleOk === false)
     return "Oracle stale — last update expired";
   if (status === "CRITICAL") return "Price deviation ≥ rebalance threshold";
   if (status === "WARN") return "Price deviation ≥ 80% of rebalance threshold";
