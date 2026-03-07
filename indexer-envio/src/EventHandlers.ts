@@ -1093,7 +1093,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
   const oracleNumReporters = await fetchNumReporters(
     event.chainId,
     rateFeedID,
-    event.block.number,
+    BigInt(event.block.number),
   );
 
   for (const poolId of poolIds) {
