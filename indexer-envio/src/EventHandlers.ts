@@ -106,6 +106,7 @@ function getRpcClient(chainId: number): ReturnType<typeof createPublicClient> {
 /** SortedOracles contract addresses per chainId (mainnet only for oracle health). */
 const SORTED_ORACLES_ADDRESS: Record<number, `0x${string}`> = {
   42220: "0xefB84935239dAcdecF7c5bA76d8dE40b077B7b33", // Celo Mainnet
+  11142220: "0xfaa7Ca2B056E60F6733aE75AA0709140a6eAfD20", // Celo Sepolia
 };
 
 const SORTED_ORACLES_ABI = [
