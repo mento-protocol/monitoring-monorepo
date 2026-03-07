@@ -7,7 +7,6 @@ import { SORTED_ORACLES_DECIMALS } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
 import {
   PLOTLY_AXIS_DEFAULTS,
-  PLOTLY_CONFIG,
   PLOTLY_RANGE_SELECTOR_STYLE,
   PLOTLY_RANGE_SLIDER_STYLE,
   RANGE_SELECTOR_BUTTONS_DAILY,
