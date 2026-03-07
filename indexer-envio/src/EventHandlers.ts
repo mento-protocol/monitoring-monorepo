@@ -115,6 +115,15 @@ const SORTED_ORACLES_ABI = [
   },
 ] as const;
 
+/** numRates changes only when reporters are added/removed — cache per feed to
+ * avoid redundant RPC calls during historical sync (thousands of OracleReported
+ * events fire per feed; without caching each one pays an RPC round-trip). */
+const numReportersCache = new Map<
+  string,
+  { value: number; cachedAt: number }
+>();
+const NUM_REPORTERS_CACHE_TTL_MS = 60_000; // 1 minute — covers bursts of oracle reports
+
 /** Returns the number of active oracle reporters for the given rateFeedID, or 0 on error. */
 async function fetchNumReporters(
   chainId: number,
@@ -122,6 +131,13 @@ async function fetchNumReporters(
 ): Promise<number> {
   const address = SORTED_ORACLES_ADDRESS[chainId];
   if (!address) return 0;
+
+  const cacheKey = `${chainId}:${rateFeedID}`;
+  const cached = numReportersCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < NUM_REPORTERS_CACHE_TTL_MS) {
+    return cached.value;
+  }
+
   try {
     const client = getRpcClient(chainId);
     const count = await client.readContract({
@@ -130,7 +146,9 @@ async function fetchNumReporters(
       functionName: "numRates",
       args: [rateFeedID as `0x${string}`],
     });
-    return Number(count);
+    const value = Number(count);
+    numReportersCache.set(cacheKey, { value, cachedAt: Date.now() });
+    return value;
   } catch {
     return 0;
   }
@@ -1071,12 +1089,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
   if (!poolIds || poolIds.size === 0) return;
 
   const oracleTimestamp = event.params.timestamp;
-  // Fetch reporter count once per rateFeedID (shared across all pools using it).
-  // OracleReported fires per individual reporter — each event here triggers
-  // 1 numRates RPC call + N getRebalancingState calls (one per pool sharing the feed).
-  // With 4 FPMM pools, that's up to 5 RPC calls per oracle report. Acceptable
-  // in live mode (oracle reports are infrequent); if historical sync is slow,
-  // consider caching numRates per (chainId, feedId, block) or skipping during sync.
+  // Fetch reporter count (cached per feed — see numReportersCache above).
   const oracleNumReporters = await fetchNumReporters(event.chainId, rateFeedID);
 
   for (const poolId of poolIds) {
