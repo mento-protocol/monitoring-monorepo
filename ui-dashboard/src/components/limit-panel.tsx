@@ -18,7 +18,7 @@ interface PressureBarProps {
   limit: string;
 }
 
-/** L0 = short rolling window (typically ~5 min), L1 = long rolling window (typically ~24 h).
+/** L0 = 5-minute rolling window, L1 = 24-hour rolling window (hardcoded in TradingLimitsV2.sol).
  * Both track absolute netflow of the given token against a configured ceiling. */
 function PressureBar({ pressure, label, netflow, limit }: PressureBarProps) {
   const ratio = Number(pressure);
@@ -94,13 +94,13 @@ export function LimitPanel({ pool, tradingLimits }: LimitPanelProps) {
                 </div>
                 <PressureBar
                   pressure={tl.limitPressure0}
-                  label="Short window (L0)"
+                  label="5-minute limit (L0)"
                   netflow={tl.netflow0}
                   limit={tl.limit0}
                 />
                 <PressureBar
                   pressure={tl.limitPressure1}
-                  label="Long window (L1)"
+                  label="Daily limit (L1)"
                   netflow={tl.netflow1}
                   limit={tl.limit1}
                 />
