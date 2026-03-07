@@ -66,3 +66,24 @@ export function buildPoolNameMap(
   }
   return map;
 }
+
+/**
+ * Returns the Chainlink data feed URL for a given token symbol on Celo mainnet,
+ * or null if no mapping is known. Only applicable to FPMM pools (oracle health).
+ * All feeds are vs USD (the SortedOracles denomination).
+ */
+export function chainlinkFeedUrl(tokenSymbol: string): string | null {
+  // Normalise: strip "axl" prefix and lowercase for matching
+  const sym = tokenSymbol.replace(/^axl/i, "").toLowerCase();
+  const slug = CHAINLINK_CELO_SLUG[sym];
+  if (!slug) return null;
+  return `https://data.chain.link/feeds/celo/mainnet/${slug}`;
+}
+
+/** Chainlink Celo mainnet feed slugs (base-usd format). */
+const CHAINLINK_CELO_SLUG: Record<string, string> = {
+  usdc: "usdc-usd",
+  usdt: "usdt-usd",
+  gbp: "gbp-usd",
+  gbpm: "gbp-usd",
+};

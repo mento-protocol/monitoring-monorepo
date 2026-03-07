@@ -228,7 +228,17 @@ export default function AddressBookPage() {
       {editingAddress && (
         <AddressLabelEditor
           address={editingAddress}
-          initial={getEntry(editingAddress)}
+          initial={
+            // For contract rows with no custom entry yet, pre-fill the label
+            // so the user can add category/notes without having to retype it.
+            getEntry(editingAddress) ??
+            (network.addressLabels[editingAddress]
+              ? {
+                  label: network.addressLabels[editingAddress],
+                  updatedAt: new Date().toISOString(),
+                }
+              : undefined)
+          }
           onClose={() => setEditingAddress(null)}
         />
       )}
@@ -312,10 +322,10 @@ function AddressRow({
           <button
             type="button"
             onClick={onEdit}
-            title="Add a custom label override"
+            title="Add category or notes to this contract"
             className="text-xs text-slate-600 hover:text-indigo-300 transition-colors"
           >
-            Override
+            + Category
           </button>
         )}
       </td>

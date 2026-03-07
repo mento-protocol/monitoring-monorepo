@@ -5,6 +5,13 @@ import type { OracleSnapshot } from "@/lib/types";
 import { tokenSymbol } from "@/lib/tokens";
 import { SORTED_ORACLES_DECIMALS } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
+import {
+  PLOTLY_AXIS_DEFAULTS,
+  PLOTLY_CONFIG,
+  PLOTLY_RANGE_SELECTOR_STYLE,
+  PLOTLY_RANGE_SLIDER_STYLE,
+  RANGE_SELECTOR_BUTTONS_DAILY,
+} from "@/lib/plot";
 
 // Plotly must be loaded client-side only (no SSR)
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
@@ -67,9 +74,13 @@ export function OraclePriceChart({
     font: { color: "#94a3b8", size: 12 },
     margin: { t: 20, r: 60, b: 50, l: 60 },
     xaxis: {
-      gridcolor: "#1e293b",
-      linecolor: "#334155",
-      tickcolor: "#475569",
+      ...PLOTLY_AXIS_DEFAULTS,
+      type: "date" as const,
+      rangeslider: PLOTLY_RANGE_SLIDER_STYLE,
+      rangeselector: {
+        ...PLOTLY_RANGE_SELECTOR_STYLE,
+        buttons: RANGE_SELECTOR_BUTTONS_DAILY,
+      },
     },
     yaxis: {
       title: { text: `Oracle Price`, font: { size: 11 } },

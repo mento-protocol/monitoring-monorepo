@@ -183,7 +183,7 @@ export function OracleChart({
         data={[priceTrace, deviationTrace]}
         layout={layout}
         config={PLOTLY_CONFIG}
-        style={{ width: "100%", height: 360 }}
+        style={{ width: "100%", height: 420 }}
         useResizeHandler
       />
     </div>
