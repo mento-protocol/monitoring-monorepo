@@ -54,3 +54,32 @@ export function formatBlock(bn: string): string {
 export function isValidAddress(value: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(value);
 }
+
+// ---------------------------------------------------------------------------
+// Oracle price formatting
+// ---------------------------------------------------------------------------
+
+/** Set of USD-stable token symbols. If token0 is in this set, the SortedOracles
+ * feed value ("1 feedToken = X USD") must be inverted to get the pool display
+ * direction ("1 USDm = 1/X token1"). */
+const USD_STABLE_SYMS = new Set(["USDm"]);
+
+/**
+ * Converts a raw SortedOracles oracle price (24dp integer string) to a
+ * human-readable number in pool display direction (token0 → token1).
+ *
+ * SortedOracles stores prices as "1 feedToken = X USD" (feed direction).
+ * When token0 is USD-stable (USDm), the pool shows "1 USDm = 1/X token1",
+ * so we invert. For non-USD-stable token0 (e.g. USDT/USDm) no inversion needed.
+ *
+ * Returns 0 if price is missing or invalid.
+ */
+export function parseOraclePriceToNumber(
+  rawPrice: string | null | undefined,
+  sym0: string,
+): number {
+  if (!rawPrice || rawPrice === "0") return 0;
+  const feedValue = Number(rawPrice) / 10 ** SORTED_ORACLES_DECIMALS;
+  if (!isFinite(feedValue) || feedValue <= 0) return 0;
+  return USD_STABLE_SYMS.has(sym0) ? 1 / feedValue : feedValue;
+}

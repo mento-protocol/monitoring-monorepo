@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import type { OracleSnapshot } from "@/lib/types";
-import { SORTED_ORACLES_DECIMALS } from "@/lib/format";
+import { parseOraclePriceToNumber } from "@/lib/format";
 import {
   PLOTLY_BASE_LAYOUT,
   PLOTLY_AXIS_DEFAULTS,
@@ -32,9 +32,9 @@ export function OracleChart({
     new Date(Number(s.timestamp) * 1000).toISOString(),
   );
 
-  // Normalise oracle price to human-readable float
+  // Normalise oracle price to human-readable float in pool direction (token0→token1)
   const prices = snapshots.map((s) =>
-    s.oraclePrice ? Number(s.oraclePrice) / 10 ** SORTED_ORACLES_DECIMALS : 0,
+    parseOraclePriceToNumber(s.oraclePrice ?? null, token0Symbol ?? ""),
   );
 
   // Deviation % of rebalance threshold
