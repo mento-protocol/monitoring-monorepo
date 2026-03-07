@@ -57,17 +57,21 @@ const snapshotId = (poolId: string, hourTs: bigint): string =>
  * practice, but the map should not be treated as a persistent data structure. */
 const rateFeedPoolMap = new Map<string, Set<string>>();
 
-/** SortedOracles always uses a fixed 24-decimal precision (denominator = 10^24).
- * oraclePrice values from SortedOracles events (OracleReported, MedianUpdated)
- * are always in this 24dp scale. Divide by 10^SORTED_ORACLES_DECIMALS to get
- * the human-readable price.
+/** oraclePrice is always stored in the pool's token direction (token0 → token1)
+ * at 24dp precision. Divide by 10^SORTED_ORACLES_DECIMALS to get the
+ * human-readable price (e.g. "1 USDm = 0.79 GBPm").
+ *
+ * ⚠️ Do NOT store event.params.value from OracleReported/MedianUpdated directly.
+ * SortedOracles emits rates in "feedToken / USD" direction (e.g. "1 GBP = 1.27 USD"),
+ * which is the INVERSE of the pool direction for non-USD-denominated pairs.
+ * Always use getRebalancingState().oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR
+ * so the direction is consistent across all handlers.
  *
  * NOTE: FPMM.getRebalancingState() internally calls OracleAdapter.getFXRateIfValid()
  * which normalises SortedOracles' 24dp output to 18dp by dividing both numerator
  * and denominator by 1e6 (see OracleAdapter._getOracleRate). Therefore the
  * oraclePriceNumerator returned by getRebalancingState() is in 18dp scale and
- * must be multiplied by ORACLE_ADAPTER_SCALE_FACTOR before storage so it stays
- * consistent with the 24dp values emitted by SortedOracles events. */
+ * must be multiplied by ORACLE_ADAPTER_SCALE_FACTOR to restore 24dp. */
 const SORTED_ORACLES_DECIMALS = 24;
 
 /** OracleAdapter divides both numerator and denominator by 1e6, converting
@@ -1031,11 +1035,23 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
   if (!poolIds || poolIds.size === 0) return;
 
   const oracleTimestamp = event.params.timestamp;
-  const oraclePrice = event.params.value;
 
   for (const poolId of poolIds) {
     const existing = await context.Pool.get(poolId);
     if (!existing) continue;
+
+    // Use getRebalancingState() so oraclePrice is stored in the pool's token
+    // direction (token0 → token1), consistent with all other handlers.
+    // event.params.value is the raw SortedOracles rate ("1 feedToken = X USD")
+    // which can be the INVERSE of the pool direction (e.g. GBP pool: 1 GBP = 1.27 USD
+    // but the pool displays 1 USDm = 0.79 GBPm).
+    const rebalancingState = await fetchRebalancingState(
+      event.chainId,
+      asAddress(poolId),
+    );
+    if (!rebalancingState) continue;
+    const oraclePrice =
+      rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
 
     const updatedPool: Pool = {
       ...existing,
@@ -1075,11 +1091,22 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   const poolIds = rateFeedPoolMap.get(rateFeedID);
   if (!poolIds || poolIds.size === 0) return;
 
-  const oraclePrice = event.params.value;
-
   for (const poolId of poolIds) {
     const existing = await context.Pool.get(poolId);
     if (!existing) continue;
+
+    // Use getRebalancingState() so oraclePrice is stored in the pool's token
+    // direction (token0 → token1), consistent with all other handlers.
+    // event.params.value is the raw SortedOracles rate ("1 feedToken = X USD")
+    // which can be the INVERSE of the pool direction (e.g. GBP pool: 1 GBP = 1.27 USD
+    // but the pool displays 1 USDm = 0.79 GBPm).
+    const rebalancingState = await fetchRebalancingState(
+      event.chainId,
+      asAddress(poolId),
+    );
+    if (!rebalancingState) continue;
+    const oraclePrice =
+      rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
 
     const updatedPool: Pool = {
       ...existing,
