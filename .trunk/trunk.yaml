@@ -54,7 +54,7 @@ actions:
         - git_hooks: [pre-push]
     - id: typecheck-pre-push
       display_name: TypeCheck Pre-Push
-      run: pnpm --filter @mento-protocol/ui-dashboard typecheck
+      run: pnpm --filter @mento-protocol/ui-dashboard --filter @mento-protocol/indexer-envio typecheck
       triggers:
         - git_hooks: [pre-push]
     - id: test-pre-push
