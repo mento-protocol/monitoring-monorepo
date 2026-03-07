@@ -21,6 +21,39 @@ interface SnapshotChartProps {
   token1Symbol?: string;
 }
 
+/** Groups hourly snapshots into UTC day buckets.
+ * Sums volume/swapCount per day; uses last cumulativeSwapCount in each day. */
+function aggregateByDay(snapshots: PoolSnapshot[]): {
+  days: string[];
+  vol0: number[];
+  vol1: number[];
+  cumSwaps: number[];
+} {
+  const buckets = new Map<
+    string,
+    { vol0: number; vol1: number; cumSwaps: number }
+  >();
+
+  for (const s of snapshots) {
+    const day = new Date(Number(s.timestamp) * 1000).toISOString().slice(0, 10); // "YYYY-MM-DD"
+    const existing = buckets.get(day) ?? { vol0: 0, vol1: 0, cumSwaps: 0 };
+    buckets.set(day, {
+      vol0: existing.vol0 + parseWei(s.swapVolume0),
+      vol1: existing.vol1 + parseWei(s.swapVolume1),
+      // Last snapshot in the day has the highest cumulative count
+      cumSwaps: Math.max(existing.cumSwaps, s.cumulativeSwapCount),
+    });
+  }
+
+  const days = [...buckets.keys()].sort();
+  return {
+    days,
+    vol0: days.map((d) => buckets.get(d)!.vol0),
+    vol1: days.map((d) => buckets.get(d)!.vol1),
+    cumSwaps: days.map((d) => buckets.get(d)!.cumSwaps),
+  };
+}
+
 export function SnapshotChart({
   snapshots,
   token0Symbol = "Token 0",
@@ -28,34 +61,28 @@ export function SnapshotChart({
 }: SnapshotChartProps) {
   if (snapshots.length === 0) return null;
 
-  const timestamps = snapshots.map((s) =>
-    new Date(Number(s.timestamp) * 1000).toISOString(),
-  );
-  // parseWei assumes 18 decimals — valid for all Mento stablecoins
-  const volumes0 = snapshots.map((s) => parseWei(s.swapVolume0));
-  const volumes1 = snapshots.map((s) => parseWei(s.swapVolume1));
-  const cumSwaps = snapshots.map((s) => s.cumulativeSwapCount);
+  const { days, vol0, vol1, cumSwaps } = aggregateByDay(snapshots);
 
   const volumeTrace0 = {
-    x: timestamps,
-    y: volumes0,
+    x: days,
+    y: vol0,
     type: "bar" as const,
-    name: `Vol ${token0Symbol}`,
+    name: `${token0Symbol} sold`,
     marker: { color: "#6366f1" },
     yaxis: "y" as const,
   };
 
   const volumeTrace1 = {
-    x: timestamps,
-    y: volumes1,
+    x: days,
+    y: vol1,
     type: "bar" as const,
-    name: `Vol ${token1Symbol}`,
+    name: `${token1Symbol} sold`,
     marker: { color: "#a78bfa" },
     yaxis: "y" as const,
   };
 
   const cumSwapTrace = {
-    x: timestamps,
+    x: days,
     y: cumSwaps,
     type: "scatter" as const,
     mode: "lines+markers" as const,
@@ -67,8 +94,12 @@ export function SnapshotChart({
 
   const layout = {
     ...PLOTLY_BASE_LAYOUT,
+    barmode: "stack" as const,
     xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY),
-    yaxis: { title: { text: "Swap Volume" }, ...PLOTLY_AXIS_DEFAULTS },
+    yaxis: {
+      title: { text: "Daily Swap Volume" },
+      ...PLOTLY_AXIS_DEFAULTS,
+    },
     yaxis2: {
       title: { text: "Cumulative Swaps" },
       overlaying: "y" as const,
@@ -86,7 +117,7 @@ export function SnapshotChart({
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 mb-4">
       <h3 className="text-sm font-medium text-slate-400 mb-3">
-        Swap Volume &amp; Cumulative Swaps
+        Daily Swap Volume
       </h3>
       <Plot
         data={[volumeTrace0, volumeTrace1, cumSwapTrace]}

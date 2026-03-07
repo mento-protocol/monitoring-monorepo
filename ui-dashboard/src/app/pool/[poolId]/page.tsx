@@ -12,6 +12,7 @@ import { OracleChart } from "@/components/oracle-chart";
 import { OraclePriceChart } from "@/components/oracle-price-chart";
 import { ReserveChart } from "@/components/reserve-chart";
 import { SenderCell } from "@/components/sender-cell";
+import { LiquidityChart } from "@/components/liquidity-chart";
 import { SnapshotChart } from "@/components/snapshot-chart";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
@@ -186,7 +187,7 @@ function PoolDetail() {
           <RebalancesTab poolId={decodedId} limit={limit} />
         )}
         {tab === "liquidity" && (
-          <LiquidityTab poolId={decodedId} limit={limit} />
+          <LiquidityTab poolId={decodedId} limit={limit} pool={pool} />
         )}
         {tab === "oracle" && (
           <OracleTab poolId={decodedId} limit={limit} pool={pool} />
@@ -511,58 +512,89 @@ function RebalancesTab({ poolId, limit }: { poolId: string; limit: number }) {
   );
 }
 
-function LiquidityTab({ poolId, limit }: { poolId: string; limit: number }) {
+function LiquidityTab({
+  poolId,
+  limit,
+  pool,
+}: {
+  poolId: string;
+  limit: number;
+  pool: Pool | null;
+}) {
+  const { network } = useNetwork();
   const { data, error, isLoading } = useGQL<{
     LiquidityEvent: LiquidityEvent[];
   }>(POOL_LIQUIDITY, { poolId, limit });
   const rows = data?.LiquidityEvent ?? [];
 
+  const fpmmPool = pool ? isFpmm(pool) : false;
+  // Passing null as the query key skips the request — VirtualPools have no snapshots.
+  const { data: snapshotData } = useGQL<{ PoolSnapshot: PoolSnapshot[] }>(
+    fpmmPool ? POOL_SNAPSHOTS : null,
+    { poolId, limit },
+  );
+  const snapshots = snapshotData?.PoolSnapshot ?? [];
+
+  const sym0 = tokenSymbol(network, pool?.token0 ?? null);
+  const sym1 = tokenSymbol(network, pool?.token1 ?? null);
+
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
-  if (rows.length === 0)
-    return <EmptyBox message="No liquidity events for this pool." />;
 
   return (
-    <Table>
-      <thead>
-        <tr className="border-b border-slate-800 bg-slate-900/50">
-          <Th>Tx</Th>
-          <Th>Kind</Th>
-          <Th>Sender</Th>
-          <Th align="right">Amount 0</Th>
-          <Th align="right">Amount 1</Th>
-          <Th align="right">Liquidity</Th>
-          <Th align="right">Block</Th>
-          <Th>Time</Th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => (
-          <Row key={r.id}>
-            <TxHashCell txHash={r.txHash} />
-            <td className="px-4 py-2">
-              <KindBadge kind={r.kind} />
-            </td>
-            <SenderCell address={r.sender} />
-            <Td mono small align="right">
-              {formatWei(r.amount0)}
-            </Td>
-            <Td mono small align="right">
-              {formatWei(r.amount1)}
-            </Td>
-            <Td mono small align="right">
-              {formatWei(r.liquidity)}
-            </Td>
-            <Td mono small muted align="right">
-              {formatBlock(r.blockNumber)}
-            </Td>
-            <Td small muted title={formatTimestamp(r.blockTimestamp)}>
-              {relativeTime(r.blockTimestamp)}
-            </Td>
-          </Row>
-        ))}
-      </tbody>
-    </Table>
+    <>
+      {fpmmPool && snapshots.length > 0 && (
+        <LiquidityChart
+          snapshots={snapshots}
+          token0Symbol={sym0}
+          token1Symbol={sym1}
+        />
+      )}
+      {rows.length === 0 ? (
+        <EmptyBox message="No liquidity events for this pool." />
+      ) : (
+        <Table>
+          <thead>
+            <tr className="border-b border-slate-800 bg-slate-900/50">
+              <Th>Tx</Th>
+              <Th>Kind</Th>
+              <Th>Sender</Th>
+              <Th align="right">Amount 0</Th>
+              <Th align="right">Amount 1</Th>
+              <Th align="right">Liquidity</Th>
+              <Th align="right">Block</Th>
+              <Th>Time</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <Row key={r.id}>
+                <TxHashCell txHash={r.txHash} />
+                <td className="px-4 py-2">
+                  <KindBadge kind={r.kind} />
+                </td>
+                <SenderCell address={r.sender} />
+                <Td mono small align="right">
+                  {formatWei(r.amount0)}
+                </Td>
+                <Td mono small align="right">
+                  {formatWei(r.amount1)}
+                </Td>
+                <Td mono small align="right">
+                  {formatWei(r.liquidity)}
+                </Td>
+                <Td mono small muted align="right">
+                  {formatBlock(r.blockNumber)}
+                </Td>
+                <Td small muted title={formatTimestamp(r.blockTimestamp)}>
+                  {relativeTime(r.blockTimestamp)}
+                </Td>
+              </Row>
+            ))}
+          </tbody>
+        </Table>
+      )}
+    </>
   );
 }
 
