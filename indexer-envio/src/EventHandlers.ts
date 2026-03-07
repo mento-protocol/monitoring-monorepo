@@ -100,6 +100,42 @@ function getRpcClient(chainId: number): ReturnType<typeof createPublicClient> {
   return rpcClients.get(chainId)!;
 }
 
+/** SortedOracles contract addresses per chainId (mainnet only for oracle health). */
+const SORTED_ORACLES_ADDRESS: Record<number, `0x${string}`> = {
+  42220: "0xefB84935239dAcdecF7c5bA76d8dE40b077B7b33", // Celo Mainnet
+};
+
+const SORTED_ORACLES_ABI = [
+  {
+    type: "function",
+    name: "numRates",
+    inputs: [{ name: "token", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
+
+/** Returns the number of active oracle reporters for the given rateFeedID, or 0 on error. */
+async function fetchNumReporters(
+  chainId: number,
+  rateFeedID: string,
+): Promise<number> {
+  const address = SORTED_ORACLES_ADDRESS[chainId];
+  if (!address) return 0;
+  try {
+    const client = getRpcClient(chainId);
+    const count = await client.readContract({
+      address,
+      abi: SORTED_ORACLES_ABI,
+      functionName: "numRates",
+      args: [rateFeedID as `0x${string}`],
+    });
+    return Number(count);
+  } catch {
+    return 0;
+  }
+}
+
 const FPMM_TRADING_LIMITS_ABI = [
   {
     type: "function",
@@ -1035,6 +1071,8 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
   if (!poolIds || poolIds.size === 0) return;
 
   const oracleTimestamp = event.params.timestamp;
+  // Fetch reporter count once per rateFeedID (shared across all pools using it)
+  const oracleNumReporters = await fetchNumReporters(event.chainId, rateFeedID);
 
   for (const poolId of poolIds) {
     const existing = await context.Pool.get(poolId);
@@ -1058,6 +1096,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       oracleTimestamp,
       oracleOk: true,
       oraclePrice,
+      oracleNumReporters,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
@@ -1072,7 +1111,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       timestamp: blockTimestamp,
       oraclePrice,
       oracleOk: true,
-      numReporters: existing.oracleNumReporters,
+      numReporters: oracleNumReporters,
       priceDifference: existing.priceDifference,
       rebalanceThreshold: existing.rebalanceThreshold,
       source: "oracle_reported",
