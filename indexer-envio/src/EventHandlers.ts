@@ -15,6 +15,7 @@ import {
   VirtualPoolLifecycle,
   SortedOracles,
 } from "generated";
+import type { HandlerContext } from "generated/src/Types";
 
 import { createPublicClient, http } from "viem";
 
@@ -55,7 +56,9 @@ const snapshotId = (poolId: string, hourTs: bigint): string =>
  * pools. If the indexer restarts mid-sync, the map is empty for already-synced
  * blocks — Envio re-processes all events from the start, so this is fine in
  * practice, but the map should not be treated as a persistent data structure. */
-const rateFeedPoolMap = new Map<string, Set<string>>();
+// rateFeedPoolMap was removed — SortedOracles handlers now use
+// context.Pool.getWhere.referenceRateFeedID.eq() (DB-backed, works across
+// Envio worker processes; in-memory maps are not shared between workers).
 
 /** oraclePrice is always stored in the pool's token direction (token0 → token1)
  * at 24dp precision. Divide by 10^SORTED_ORACLES_DECIMALS to get the
@@ -120,6 +123,17 @@ const SORTED_ORACLES_ABI = [
  * redundant RPC calls during historical sync where many events share a block.
  * Key: "chainId:feedId:blockNumber" */
 const numReportersCache = new Map<string, number>();
+
+/** Returns all FPMM pool IDs that reference the given rateFeedID.
+ * Uses context.Pool.getWhere (DB-backed) so it works correctly in Envio's
+ * multi-process hosted environment where in-memory maps are not shared. */
+async function getPoolsByFeed(
+  context: HandlerContext,
+  rateFeedID: string,
+): Promise<string[]> {
+  const pools = await context.Pool.getWhere.referenceRateFeedID.eq(rateFeedID);
+  return pools.map((p) => p.id);
+}
 
 /** Returns the number of active oracle reporters for the given rateFeedID at
  * the given block, or 0 on error. Results are cached per block so each block
@@ -567,11 +581,6 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
 
   if (rateFeedID) {
     oracleDelta.referenceRateFeedID = rateFeedID;
-    // Register in the in-memory map for SortedOracles event lookup.
-    // Multiple pools can share the same feed — store a Set.
-    const existing = rateFeedPoolMap.get(rateFeedID) ?? new Set<string>();
-    existing.add(poolId);
-    rateFeedPoolMap.set(rateFeedID, existing);
   }
 
   if (rebalancingState) {
@@ -1083,9 +1092,10 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Look up all pools using this rateFeedID (multiple pools can share a feed)
-  const poolIds = rateFeedPoolMap.get(rateFeedID);
-  if (!poolIds || poolIds.size === 0) return;
+  // Look up all pools using this rateFeedID via DB query (not in-memory map —
+  // in-process state is not shared between Envio worker processes).
+  const poolIds = await getPoolsByFeed(context, rateFeedID);
+  if (poolIds.length === 0) return;
 
   const oracleTimestamp = event.params.timestamp;
   // Fetch reporter count at this exact block (cached per block — precise in live
@@ -1148,9 +1158,9 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Look up all pools using this rateFeedID (multiple pools can share a feed)
-  const poolIds = rateFeedPoolMap.get(rateFeedID);
-  if (!poolIds || poolIds.size === 0) return;
+  // Look up all pools using this rateFeedID via DB query (not in-memory map).
+  const poolIds = await getPoolsByFeed(context, rateFeedID);
+  if (poolIds.length === 0) return;
 
   for (const poolId of poolIds) {
     const existing = await context.Pool.get(poolId);

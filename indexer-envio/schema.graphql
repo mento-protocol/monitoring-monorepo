@@ -20,7 +20,7 @@ type Pool {
   oracleTimestamp: BigInt!
   oracleExpiry: BigInt!
   oracleNumReporters: Int!
-  referenceRateFeedID: String!
+  referenceRateFeedID: String! @index
 
   # Deviation / rebalance state
   priceDifference: BigInt!
