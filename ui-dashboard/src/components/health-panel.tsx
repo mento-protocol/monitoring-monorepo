@@ -75,8 +75,12 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
   const oraclePrice = parseOraclePrice(pool.oraclePrice ?? "0");
-  // Link oracle price to Chainlink data feed — use the non-USDm token symbol
-  const chainlinkUrl = chainlinkFeedUrl(sym1) ?? chainlinkFeedUrl(sym0);
+  // SortedOracles rates are "feedToken / USD". In USDm-based pools the
+  // non-USDm token is always sym1 (e.g. GBPm, USDC), so try sym1 first.
+  // For USDT/USDm the non-USDm token is sym0, so fall back to that.
+  const chainlinkUrl =
+    chainlinkFeedUrl(sym1, network.chainId) ??
+    chainlinkFeedUrl(sym0, network.chainId);
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">

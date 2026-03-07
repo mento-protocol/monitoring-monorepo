@@ -1,4 +1,3 @@
-"use client"; // v2
 "use client";
 
 import { AddressLink } from "@/components/address-link";
@@ -327,6 +326,7 @@ function SwapsTab({
   const swaps = data?.SwapEvent ?? [];
 
   const fpmmPool = pool ? isFpmm(pool) : false;
+  // Passing null as the query key skips the request — VirtualPools have no snapshots.
   const { data: snapshotData } = useGQL<{ PoolSnapshot: PoolSnapshot[] }>(
     fpmmPool ? POOL_SNAPSHOTS : null,
     { poolId, limit },
@@ -486,7 +486,7 @@ function RebalancesTab({ poolId, limit }: { poolId: string; limit: number }) {
         {rows.map((r) => (
           <Row key={r.id}>
             <TxHashCell txHash={r.txHash} />
-            <SenderCell address={r.rebalancerAddress ?? r.sender} />
+            <SenderCell address={r.sender} />
             <Td mono small align="right">
               {Number(r.priceDifferenceBefore).toLocaleString()}
             </Td>
