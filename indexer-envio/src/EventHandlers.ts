@@ -1110,18 +1110,14 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
     const existing = await context.Pool.get(poolId);
     if (!existing) continue;
 
-    // Use getRebalancingState() so oraclePrice is stored in the pool's token
-    // direction (token0 → token1), consistent with all other handlers.
-    // event.params.value is the raw SortedOracles rate ("1 feedToken = X USD")
-    // which can be the INVERSE of the pool direction (e.g. GBP pool: 1 GBP = 1.27 USD
-    // but the pool displays 1 USDm = 0.79 GBPm).
-    const rebalancingState = await fetchRebalancingState(
-      event.chainId,
-      asAddress(poolId),
-    );
-    if (!rebalancingState) continue;
-    const oraclePrice =
-      rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
+    // Use event.params.value directly (SortedOracles 24dp "feedToken/USD" rate).
+    // We intentionally avoid calling getRebalancingState() here because it reverts
+    // when the oracle is stale (expired reports or circuit breaker tripped) — which
+    // is exactly when we most need to record oracle state transitions.
+    // NOTE: oraclePrice is stored in feed direction ("1 feedToken = X USD"), not
+    // pool direction. The dashboard inverts for pools where feedToken == token1
+    // (e.g. GBPm pool: feedValue ≈ 1.27, displayed as 1/1.27 ≈ 0.79 USDm/GBPm).
+    const oraclePrice = event.params.value;
 
     const updatedPool: Pool = {
       ...existing,
@@ -1167,17 +1163,10 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
     if (!existing) continue;
 
     // Use getRebalancingState() so oraclePrice is stored in the pool's token
-    // direction (token0 → token1), consistent with all other handlers.
-    // event.params.value is the raw SortedOracles rate ("1 feedToken = X USD")
-    // which can be the INVERSE of the pool direction (e.g. GBP pool: 1 GBP = 1.27 USD
-    // but the pool displays 1 USDm = 0.79 GBPm).
-    const rebalancingState = await fetchRebalancingState(
-      event.chainId,
-      asAddress(poolId),
-    );
-    if (!rebalancingState) continue;
-    const oraclePrice =
-      rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
+    // Use event.params.value directly (median SortedOracles 24dp rate).
+    // Same rationale as OracleReported: avoids getRebalancingState() which
+    // reverts when the oracle is stale. oraclePrice is in feed direction.
+    const oraclePrice = event.params.value;
 
     const updatedPool: Pool = {
       ...existing,
