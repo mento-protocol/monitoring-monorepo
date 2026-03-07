@@ -59,10 +59,8 @@ resource "vercel_project" "dashboard" {
   install_command = "pnpm install"
   build_command   = "pnpm build"
 
-  # Only rebuild when something in ui-dashboard/ actually changed.
-  # NOTE: Vercel runs this command with CWD = root_directory (ui-dashboard/),
-  # so we use "." rather than "ui-dashboard" to reference the current dir.
-  ignore_command = "git diff HEAD^ HEAD --quiet -- ."
+  # No ignore_command — always build on every push.
+  # A "smart skip" caused production to be silently stuck for weeks.
 
   git_repository = {
     type              = "github"
