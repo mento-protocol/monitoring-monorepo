@@ -6,15 +6,14 @@ import { tokenSymbol, chainlinkFeedUrl } from "@/lib/tokens";
 import {
   relativeTime,
   formatTimestamp,
-  SORTED_ORACLES_DECIMALS,
+  parseOraclePriceToNumber,
 } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
 
-/** SortedOracles always uses 24-decimal precision (denominator = 10^24). */
-function parseOraclePrice(num: string): string {
-  if (!num || num === "0") return "—";
-  const price = Number(num) / 10 ** SORTED_ORACLES_DECIMALS;
-  if (!isFinite(price) || price <= 0) return "—";
+/** Format raw oracle price (24dp) into display string in pool direction (token0→token1). */
+function parseOraclePrice(num: string, sym0: string): string {
+  const price = parseOraclePriceToNumber(num, sym0);
+  if (price <= 0) return "—";
   return price.toFixed(6);
 }
 
@@ -74,7 +73,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
 
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
-  const oraclePrice = parseOraclePrice(pool.oraclePrice ?? "0");
+  const oraclePrice = parseOraclePrice(pool.oraclePrice ?? "0", sym0);
   // SortedOracles rates are "feedToken / USD". In USDm-based pools the
   // non-USDm token is always sym1 (e.g. GBPm, USDC), so try sym1 first.
   // For USDT/USDm the non-USDm token is sym0, so fall back to that.

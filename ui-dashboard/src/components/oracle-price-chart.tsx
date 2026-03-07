@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import type { OracleSnapshot } from "@/lib/types";
 import { tokenSymbol } from "@/lib/tokens";
-import { SORTED_ORACLES_DECIMALS } from "@/lib/format";
+import { parseOraclePriceToNumber } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
 import {
   PLOTLY_AXIS_DEFAULTS,
@@ -21,11 +21,6 @@ interface OraclePriceChartProps {
   token1: string | null;
 }
 
-function parseOraclePrice(num: string): number {
-  if (!num || num === "0") return 0;
-  return Number(num) / 10 ** SORTED_ORACLES_DECIMALS;
-}
-
 export function OraclePriceChart({
   snapshots,
   token0,
@@ -40,7 +35,9 @@ export function OraclePriceChart({
   const timestamps = snapshots.map((s) =>
     new Date(Number(s.timestamp) * 1000).toISOString(),
   );
-  const prices = snapshots.map((s) => parseOraclePrice(s.oraclePrice));
+  const prices = snapshots.map((s) =>
+    parseOraclePriceToNumber(s.oraclePrice, sym0),
+  );
   const deviations = snapshots.map((s) => {
     if (!s.rebalanceThreshold || s.rebalanceThreshold === 0) return 0;
     return (Number(s.priceDifference) / s.rebalanceThreshold) * 100;
