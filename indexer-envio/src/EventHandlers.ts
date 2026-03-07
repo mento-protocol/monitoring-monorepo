@@ -115,28 +115,26 @@ const SORTED_ORACLES_ABI = [
   },
 ] as const;
 
-/** numRates changes only when reporters are added/removed — cache per feed to
- * avoid redundant RPC calls during historical sync (thousands of OracleReported
- * events fire per feed; without caching each one pays an RPC round-trip). */
-const numReportersCache = new Map<
-  string,
-  { value: number; cachedAt: number }
->();
-const NUM_REPORTERS_CACHE_TTL_MS = 60_000; // 1 minute — covers bursts of oracle reports
+/** Cache numRates by block — numRates can't change within a single block, so
+ * this is always precise (no stale risk in live mode) while still collapsing
+ * redundant RPC calls during historical sync where many events share a block.
+ * Key: "chainId:feedId:blockNumber" */
+const numReportersCache = new Map<string, number>();
 
-/** Returns the number of active oracle reporters for the given rateFeedID, or 0 on error. */
+/** Returns the number of active oracle reporters for the given rateFeedID at
+ * the given block, or 0 on error. Results are cached per block so each block
+ * pays at most one RPC call per feed regardless of how many pools share it. */
 async function fetchNumReporters(
   chainId: number,
   rateFeedID: string,
+  blockNumber: bigint,
 ): Promise<number> {
   const address = SORTED_ORACLES_ADDRESS[chainId];
   if (!address) return 0;
 
-  const cacheKey = `${chainId}:${rateFeedID}`;
+  const cacheKey = `${chainId}:${rateFeedID}:${blockNumber}`;
   const cached = numReportersCache.get(cacheKey);
-  if (cached && Date.now() - cached.cachedAt < NUM_REPORTERS_CACHE_TTL_MS) {
-    return cached.value;
-  }
+  if (cached !== undefined) return cached;
 
   try {
     const client = getRpcClient(chainId);
@@ -145,9 +143,10 @@ async function fetchNumReporters(
       abi: SORTED_ORACLES_ABI,
       functionName: "numRates",
       args: [rateFeedID as `0x${string}`],
+      blockNumber,
     });
     const value = Number(count);
-    numReportersCache.set(cacheKey, { value, cachedAt: Date.now() });
+    numReportersCache.set(cacheKey, value);
     return value;
   } catch {
     return 0;
@@ -1089,8 +1088,13 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
   if (!poolIds || poolIds.size === 0) return;
 
   const oracleTimestamp = event.params.timestamp;
-  // Fetch reporter count (cached per feed — see numReportersCache above).
-  const oracleNumReporters = await fetchNumReporters(event.chainId, rateFeedID);
+  // Fetch reporter count at this exact block (cached per block — precise in live
+  // mode, deduplicated during historical sync).
+  const oracleNumReporters = await fetchNumReporters(
+    event.chainId,
+    rateFeedID,
+    event.block.number,
+  );
 
   for (const poolId of poolIds) {
     const existing = await context.Pool.get(poolId);
