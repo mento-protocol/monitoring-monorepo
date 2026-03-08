@@ -443,65 +443,67 @@ function ReservesTab({
           </tr>
         </thead>
         <tbody>
-          {[...rows].reverse().map((r) => {
+          {(() => {
             const feedVal =
               pool?.oraclePrice && pool.oraclePrice !== "0"
                 ? Number(pool.oraclePrice) / 1e24
                 : null;
-            const raw0 = parseWei(r.reserve0);
-            const raw1 = parseWei(r.reserve1);
             const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
-            // USD values: USDm ≈ $1, non-USDm × feedVal
-            const usd0 = feedVal && !usdmIsToken0 ? raw0 * feedVal : raw0;
-            const usd1 = feedVal && usdmIsToken0 ? raw1 * feedVal : raw1;
-            const total = usd0 + usd1;
             const showUsd = feedVal !== null;
+            return [...rows].reverse().map((r) => {
+              const raw0 = parseWei(r.reserve0);
+              const raw1 = parseWei(r.reserve1);
+              // USD values: USDm ≈ $1, non-USDm × feedVal
+              const usd0 = feedVal && !usdmIsToken0 ? raw0 * feedVal : raw0;
+              const usd1 = feedVal && usdmIsToken0 ? raw1 * feedVal : raw1;
+              const total = usd0 + usd1;
 
-            return (
-              <Row key={r.id}>
-                <TxHashCell txHash={r.txHash} />
-                <Td mono small align="right">
-                  <div>
-                    {formatWei(r.reserve0, 18, 2)} {sym0}
-                  </div>
-                  {showUsd && (
-                    <div className="text-xs text-slate-500">
-                      ≈ $
-                      {usd0.toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+              return (
+                <Row key={r.id}>
+                  <TxHashCell txHash={r.txHash} />
+                  <Td mono small align="right">
+                    <div>
+                      {formatWei(r.reserve0, 18, 2)} {sym0}
                     </div>
-                  )}
-                </Td>
-                <Td mono small align="right">
-                  <div>
-                    {formatWei(r.reserve1, 18, 2)} {sym1}
-                  </div>
-                  {showUsd && (
-                    <div className="text-xs text-slate-500">
-                      ≈ $
-                      {usd1.toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                    {showUsd && (
+                      <div className="text-xs text-slate-500">
+                        ≈ $
+                        {usd0.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </div>
+                    )}
+                  </Td>
+                  <Td mono small align="right">
+                    <div>
+                      {formatWei(r.reserve1, 18, 2)} {sym1}
                     </div>
-                  )}
-                </Td>
-                <Td mono small align="right">
-                  {showUsd
-                    ? `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    : "—"}
-                </Td>
-                <Td mono small muted align="right">
-                  {formatBlock(r.blockNumber)}
-                </Td>
-                <Td small muted title={formatTimestamp(r.blockTimestamp)}>
-                  {relativeTime(r.blockTimestamp)}
-                </Td>
-              </Row>
-            );
-          })}
+                    {showUsd && (
+                      <div className="text-xs text-slate-500">
+                        ≈ $
+                        {usd1.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </div>
+                    )}
+                  </Td>
+                  <Td mono small align="right">
+                    {showUsd
+                      ? `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      : "—"}
+                  </Td>
+                  <Td mono small muted align="right">
+                    {formatBlock(r.blockNumber)}
+                  </Td>
+                  <Td small muted title={formatTimestamp(r.blockTimestamp)}>
+                    {relativeTime(r.blockTimestamp)}
+                  </Td>
+                </Row>
+              );
+            });
+          })()}
         </tbody>
       </Table>
     </>
