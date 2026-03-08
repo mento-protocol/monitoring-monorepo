@@ -9,7 +9,6 @@ import {
   PLOTLY_BASE_LAYOUT,
   PLOTLY_AXIS_DEFAULTS,
   PLOTLY_LEGEND,
-  PLOTLY_MARGIN,
   PLOTLY_CONFIG,
   RANGE_SELECTOR_BUTTONS_HOURLY,
   makeDateXAxis,
@@ -77,7 +76,9 @@ export function ReserveChart({
     x: timestamps,
     y: r0,
     customdata: raw0,
-    hovertemplate: `<b>%{customdata:,.2f} ${sym0}</b><br>%{x|%b %d, %Y %H:%M}<extra></extra>`,
+    hovertemplate: useUsd
+      ? `<b>%{customdata:,.2f} ${sym0}</b><br>≈ $%{y:,.2f} USD<br>%{x|%b %d, %Y %H:%M}<extra></extra>`
+      : `<b>%{customdata:,.2f} ${sym0}</b><br>%{x|%b %d, %Y %H:%M}<extra></extra>`,
     type: "scatter" as const,
     mode: "lines+markers" as const,
     name: name0,
@@ -90,7 +91,9 @@ export function ReserveChart({
     x: timestamps,
     y: r1,
     customdata: raw1,
-    hovertemplate: `<b>%{customdata:,.2f} ${sym1}</b><br>%{x|%b %d, %Y %H:%M}<extra></extra>`,
+    hovertemplate: useUsd
+      ? `<b>%{customdata:,.2f} ${sym1}</b><br>≈ $%{y:,.2f} USD<br>%{x|%b %d, %Y %H:%M}<extra></extra>`
+      : `<b>%{customdata:,.2f} ${sym1}</b><br>%{x|%b %d, %Y %H:%M}<extra></extra>`,
     type: "scatter" as const,
     mode: "lines+markers" as const,
     name: name1,
@@ -101,10 +104,18 @@ export function ReserveChart({
 
   const layout = {
     ...PLOTLY_BASE_LAYOUT,
+    font: { ...PLOTLY_BASE_LAYOUT.font, size: 11 },
     xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_HOURLY),
     yaxis: { title: { text: yAxisTitle }, ...PLOTLY_AXIS_DEFAULTS },
-    legend: PLOTLY_LEGEND,
-    margin: PLOTLY_MARGIN,
+    legend: {
+      ...PLOTLY_LEGEND,
+      orientation: "h" as const,
+      x: 0.5,
+      y: -0.25,
+      xanchor: "center" as const,
+      yanchor: "top" as const,
+    },
+    margin: { t: 8, r: 16, b: 8, l: 48 },
     autosize: true,
     dragmode: "pan" as const,
   };
