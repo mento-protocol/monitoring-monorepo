@@ -358,11 +358,21 @@ function SwapsTab({
           <thead>
             <tr className="border-b border-slate-800 bg-slate-900/50">
               <Th>Tx</Th>
-              <Th>Sender</Th>
+              <th
+                scope="col"
+                className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400"
+              >
+                Sender
+              </th>
               <Th>Trader</Th>
               <Th align="right">Sold</Th>
               <Th align="right">Bought</Th>
-              <Th align="right">Block</Th>
+              <th
+                scope="col"
+                className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-right"
+              >
+                Block
+              </th>
               <Th>Time</Th>
             </tr>
           </thead>
@@ -376,7 +386,10 @@ function SwapsTab({
               return (
                 <Row key={s.id}>
                   <TxHashCell txHash={s.txHash} />
-                  <SenderCell address={s.sender} />
+                  <SenderCell
+                    address={s.sender}
+                    className="hidden sm:table-cell"
+                  />
                   <SenderCell address={s.recipient} />
                   <Td mono small align="right">
                     {formatWei(soldAmt)} {soldSym}
@@ -384,9 +397,9 @@ function SwapsTab({
                   <Td mono small align="right">
                     {formatWei(boughtAmt)} {boughtSym}
                   </Td>
-                  <Td mono small muted align="right">
+                  <td className="hidden md:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
                     {formatBlock(s.blockNumber)}
-                  </Td>
+                  </td>
                   <Td small muted title={formatTimestamp(s.blockTimestamp)}>
                     {relativeTime(s.blockTimestamp)}
                   </Td>
