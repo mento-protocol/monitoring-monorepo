@@ -97,34 +97,33 @@ export function SnapshotChart({
     barmode: "stack" as const,
     xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY),
     yaxis: {
-      title: { text: "Daily Swap Volume" },
+      title: { text: "Volume", font: { size: 10 } },
       ...PLOTLY_AXIS_DEFAULTS,
     },
     yaxis2: {
-      title: { text: "Cumulative Swaps" },
+      title: { text: "Swaps", font: { size: 10 } },
       overlaying: "y" as const,
       side: "right" as const,
       gridcolor: "transparent",
       linecolor: "#334155",
       tickcolor: "#334155",
     },
-    // Place legend below the chart to avoid overlapping the dual Y-axes
     legend: {
       ...PLOTLY_LEGEND,
       orientation: "h" as const,
       x: 0.5,
-      y: -0.35,
+      y: -0.45,
       xanchor: "center" as const,
       yanchor: "top" as const,
+      font: { size: 10 },
     },
-    // Tight margins for mobile; bottom accommodates horizontal legend
-    margin: { t: 8, l: 48, r: 48, b: 8 },
+    margin: { t: 8, l: 40, r: 36, b: 8 },
     autosize: true,
     dragmode: "pan" as const,
   };
 
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 mb-4">
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
       <h3 className="text-sm font-medium text-slate-400 mb-3">
         Daily Swap Volume
       </h3>
@@ -132,7 +131,7 @@ export function SnapshotChart({
         data={[volumeTrace0, volumeTrace1, cumSwapTrace]}
         layout={layout}
         config={PLOTLY_CONFIG}
-        style={{ width: "100%", height: 320 }}
+        style={{ width: "100%", height: 380 }}
         useResizeHandler
       />
     </div>

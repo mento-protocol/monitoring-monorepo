@@ -133,11 +133,11 @@ export function OracleChart({
     shapes,
     xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY),
     yaxis: {
-      title: { text: `Oracle Price (${token0Symbol}/${token1Symbol})` },
+      title: { text: "Price", font: { size: 10 } },
       ...PLOTLY_AXIS_DEFAULTS,
     },
     yaxis2: {
-      title: { text: "Deviation %" },
+      title: { text: "Dev %", font: { size: 10 } },
       overlaying: "y" as const,
       side: "right" as const,
       gridcolor: "transparent",
@@ -160,7 +160,7 @@ export function OracleChart({
   };
 
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 mb-4">
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
       <h3 className="text-sm font-medium text-slate-400 mb-3">
         Oracle Price History &amp; Deviation Health
       </h3>
