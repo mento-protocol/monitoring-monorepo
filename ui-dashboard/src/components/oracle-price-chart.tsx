@@ -103,7 +103,7 @@ export function OraclePriceChart({
   };
 
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+    <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-2 sm:p-4 overflow-hidden">
       <h3 className="mb-3 text-sm font-semibold text-slate-200">
         Oracle Price History
       </h3>

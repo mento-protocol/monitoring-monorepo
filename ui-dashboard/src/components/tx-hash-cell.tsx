@@ -5,9 +5,9 @@ import { explorerTxUrl } from "@/lib/tokens";
 
 export function TxHashCell({ txHash }: { txHash: string }) {
   const { network } = useNetwork();
-  const short = `${txHash.slice(0, 8)}…${txHash.slice(-6)}`;
+  const short = `${txHash.slice(0, 6)}…${txHash.slice(-4)}`;
   return (
-    <td className="px-4 py-2 text-xs">
+    <td className="px-2 sm:px-4 py-1.5 sm:py-2 text-[10px] sm:text-xs">
       <a
         href={explorerTxUrl(network, txHash)}
         target="_blank"
