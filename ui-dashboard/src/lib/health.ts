@@ -5,8 +5,17 @@
 
 export type HealthStatus = "OK" | "WARN" | "CRITICAL" | "N/A";
 
-/** Stale threshold: oracle older than 1 hour is considered expired. */
-const ORACLE_STALE_SECONDS = 3600;
+/**
+ * Oracle staleness threshold in seconds.
+ *
+ * SortedOracles.reportExpirySeconds() on Celo mainnet = 300s (5 min).
+ * Per-token overrides (tokenReportExpirySeconds) are 0 → use global default.
+ * isOldestReportExpired(token) returns true when oldest report age > 300s.
+ *
+ * We match the on-chain definition: an oracle is stale when its last report
+ * is older than the SortedOracles expiry window.
+ */
+const ORACLE_STALE_SECONDS = 300;
 
 export interface PoolHealthState {
   source?: string;
