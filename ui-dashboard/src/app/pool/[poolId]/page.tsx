@@ -480,6 +480,7 @@ function RebalancesTab({ poolId, limit }: { poolId: string; limit: number }) {
       <thead>
         <tr className="border-b border-slate-800 bg-slate-900/50">
           <Th>Tx</Th>
+          <Th>Strategy</Th>
           <Th>Rebalancer</Th>
           <Th align="right">Before (bps)</Th>
           <Th align="right">After (bps)</Th>
@@ -493,6 +494,7 @@ function RebalancesTab({ poolId, limit }: { poolId: string; limit: number }) {
           <Row key={r.id}>
             <TxHashCell txHash={r.txHash} />
             <SenderCell address={r.sender} />
+            <SenderCell address={r.caller} />
             <Td mono small align="right">
               {Number(r.priceDifferenceBefore).toLocaleString()}
             </Td>

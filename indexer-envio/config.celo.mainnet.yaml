@@ -70,3 +70,4 @@ preload_handlers: true
 field_selection:
   transaction_fields:
     - hash
+    - "from"

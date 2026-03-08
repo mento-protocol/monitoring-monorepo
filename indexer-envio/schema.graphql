@@ -136,7 +136,8 @@ type ReserveUpdate @index(fields: ["poolId", "blockTimestamp"]) {
 type RebalanceEvent @index(fields: ["poolId", "blockTimestamp"]) {
   id: ID!
   poolId: String! @index
-  sender: String!
+  sender: String! # Strategy contract (event.params.sender)
+  caller: String! # EOA that triggered the rebalance (tx.from)
   priceDifferenceBefore: BigInt!
   priceDifferenceAfter: BigInt!
   improvement: BigInt! # priceDifferenceBefore - priceDifferenceAfter
