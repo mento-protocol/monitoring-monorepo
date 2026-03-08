@@ -18,6 +18,7 @@ type Pool {
   oracleOk: Boolean!
   oraclePrice: BigInt!
   oracleTimestamp: BigInt!
+  oracleTxHash: String!
   oracleExpiry: BigInt!
   oracleNumReporters: Int!
   referenceRateFeedID: String! @index

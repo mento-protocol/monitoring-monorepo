@@ -13,6 +13,7 @@ export const ALL_POOLS_WITH_HEALTH = `
       oracleOk
       oraclePrice
       oracleTimestamp
+      oracleTxHash
       priceDifference
       rebalanceThreshold
       oracleNumReporters
@@ -106,6 +107,7 @@ export const POOL_DETAIL_WITH_HEALTH = `
       oracleOk
       oraclePrice
       oracleTimestamp
+      oracleTxHash
       oracleExpiry
       oracleNumReporters
       referenceRateFeedID
