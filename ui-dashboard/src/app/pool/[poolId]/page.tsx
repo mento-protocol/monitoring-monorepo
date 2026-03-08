@@ -169,7 +169,7 @@ function PoolDetail() {
             {t}
           </button>
         ))}
-        <div className="ml-auto flex items-center">
+        <div className="ml-auto hidden sm:flex items-center">
           <LimitSelect
             id="tab-limit"
             value={limit}
