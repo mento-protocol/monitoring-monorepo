@@ -68,4 +68,5 @@ unordered_multichain_mode: true
 preload_handlers: true
 field_selection:
   transaction_fields:
+    - "from"
     - hash

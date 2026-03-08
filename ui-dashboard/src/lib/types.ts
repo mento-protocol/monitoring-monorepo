@@ -102,6 +102,7 @@ export type RebalanceEvent = {
   id: string;
   poolId: string;
   sender: string;
+  caller: string;
   priceDifferenceBefore: string;
   priceDifferenceAfter: string;
   txHash: string;

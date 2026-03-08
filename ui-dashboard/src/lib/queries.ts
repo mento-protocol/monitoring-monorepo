@@ -76,7 +76,7 @@ export const POOL_REBALANCES = `
       order_by: { blockNumber: desc }
       limit: $limit
     ) {
-      id sender priceDifferenceBefore priceDifferenceAfter
+      id sender caller priceDifferenceBefore priceDifferenceAfter
       txHash blockNumber blockTimestamp
       improvement effectivenessRatio
     }
