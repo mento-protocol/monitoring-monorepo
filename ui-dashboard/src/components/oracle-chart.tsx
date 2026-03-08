@@ -134,7 +134,7 @@ export function OracleChart({
     shapes,
     xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY),
     yaxis: {
-      title: { text: `Oracle Price (${token1Symbol}/${token0Symbol})` },
+      title: { text: `Oracle Price (${token0Symbol}/${token1Symbol})` },
       ...PLOTLY_AXIS_DEFAULTS,
     },
     yaxis2: {

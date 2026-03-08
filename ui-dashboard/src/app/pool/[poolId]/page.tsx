@@ -20,6 +20,7 @@ import {
   formatBlock,
   formatTimestamp,
   formatWei,
+  parseOraclePriceToNumber,
   relativeTime,
 } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
@@ -640,7 +641,9 @@ function OracleTab({
           <tr className="border-b border-slate-800 bg-slate-900/50">
             <Th>Source</Th>
             <Th align="right">Oracle OK</Th>
-            <Th align="right">Price (num)</Th>
+            <Th align="right">
+              Price ({sym0}/{sym1})
+            </Th>
             <Th align="right">Price Diff</Th>
             <Th align="right">Threshold</Th>
             <Th align="right">Reporters</Th>
@@ -664,13 +667,13 @@ function OracleTab({
                 </span>
               </Td>
               <Td mono small align="right">
-                {r.oraclePrice}
+                {parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6)}
               </Td>
               <Td mono small align="right">
-                {r.priceDifference}
+                {Number(r.priceDifference) > 0 ? r.priceDifference : "—"}
               </Td>
               <Td mono small align="right">
-                {r.rebalanceThreshold}
+                {r.rebalanceThreshold > 0 ? r.rebalanceThreshold : "—"}
               </Td>
               <Td mono small align="right">
                 {r.numReporters}
