@@ -412,7 +412,10 @@ function ReservesTab({
     POOL_RESERVES,
     { poolId, limit },
   );
+  const { network } = useNetwork();
   const rows = data?.ReserveUpdate ?? [];
+  const sym0 = tokenSymbol(network, pool?.token0 ?? null);
+  const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
@@ -431,8 +434,8 @@ function ReservesTab({
         <thead>
           <tr className="border-b border-slate-800 bg-slate-900/50">
             <Th>Tx</Th>
-            <Th align="right">Reserve 0</Th>
-            <Th align="right">Reserve 1</Th>
+            <Th align="right">{sym0} Reserve</Th>
+            <Th align="right">{sym1} Reserve</Th>
             <Th align="right">Block</Th>
             <Th>Time</Th>
           </tr>
@@ -442,10 +445,10 @@ function ReservesTab({
             <Row key={r.id}>
               <TxHashCell txHash={r.txHash} />
               <Td mono small align="right">
-                {formatWei(r.reserve0)}
+                {formatWei(r.reserve0, 18, 2)} {sym0}
               </Td>
               <Td mono small align="right">
-                {formatWei(r.reserve1)}
+                {formatWei(r.reserve1, 18, 2)} {sym1}
               </Td>
               <Td mono small muted align="right">
                 {formatBlock(r.blockNumber)}
