@@ -12,6 +12,7 @@ export type Pool = {
   oracleOk?: boolean;
   oraclePrice?: string;
   oracleTimestamp?: string;
+  oracleTxHash?: string;
   oracleExpiry?: string;
   oracleNumReporters?: number;
   referenceRateFeedID?: string;

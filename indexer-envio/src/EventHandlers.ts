@@ -440,6 +440,7 @@ const DEFAULT_ORACLE_FIELDS = {
   oracleOk: false,
   oraclePrice: 0n,
   oracleTimestamp: 0n,
+  oracleTxHash: "",
   oracleExpiry: 0n,
   oracleNumReporters: 0,
   referenceRateFeedID: "",
@@ -630,6 +631,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
   if (rebalanceThreshold > 0) {
     oracleDelta.rebalanceThreshold = rebalanceThreshold;
   }
+  oracleDelta.oracleTxHash = event.transaction.hash;
 
   const pool = await upsertPool({
     context,
@@ -980,6 +982,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
       priceDifference: rebalancingState.priceDifference,
       oracleTimestamp: blockTimestamp,
+      oracleTxHash: event.transaction.hash,
     };
   }
 
@@ -1155,6 +1158,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
     const updatedPool: Pool = {
       ...existing,
       oracleTimestamp,
+      oracleTxHash: event.transaction.hash,
       oracleOk: true,
       oraclePrice,
       oracleNumReporters,
@@ -1205,6 +1209,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       ...existing,
       oraclePrice,
       oracleTimestamp: blockTimestamp,
+      oracleTxHash: event.transaction.hash,
       oracleOk: true,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,

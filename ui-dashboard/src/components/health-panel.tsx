@@ -3,7 +3,12 @@
 import { useState } from "react";
 import type { Pool } from "@/lib/types";
 import { HealthBadge } from "@/components/badges";
-import { tokenSymbol, chainlinkFeedUrl, USDM_SYMBOLS } from "@/lib/tokens";
+import {
+  tokenSymbol,
+  chainlinkFeedUrl,
+  explorerTxUrl,
+  USDM_SYMBOLS,
+} from "@/lib/tokens";
 import { relativeTime, formatTimestamp } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
 
@@ -130,14 +135,26 @@ export function HealthPanel({ pool }: HealthPanelProps) {
               >
                 {pool.oracleOk ? "✓ Fresh" : "✗ Stale"}
               </span>
-              {pool.oracleTimestamp && pool.oracleTimestamp !== "0" && (
-                <span
-                  className="text-xs text-slate-400"
-                  title={formatTimestamp(pool.oracleTimestamp)}
-                >
-                  Last updated {relativeTime(pool.oracleTimestamp)}
-                </span>
-              )}
+              {pool.oracleTimestamp &&
+                pool.oracleTimestamp !== "0" &&
+                (pool.oracleTxHash ? (
+                  <a
+                    href={explorerTxUrl(network, pool.oracleTxHash)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-slate-400 hover:text-indigo-400 transition-colors"
+                    title={formatTimestamp(pool.oracleTimestamp)}
+                  >
+                    Last updated {relativeTime(pool.oracleTimestamp)} ↗
+                  </a>
+                ) : (
+                  <span
+                    className="text-xs text-slate-400"
+                    title={formatTimestamp(pool.oracleTimestamp)}
+                  >
+                    Last updated {relativeTime(pool.oracleTimestamp)}
+                  </span>
+                ))}
             </dd>
           </div>
 
