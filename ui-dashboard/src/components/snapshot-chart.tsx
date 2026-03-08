@@ -108,8 +108,17 @@ export function SnapshotChart({
       linecolor: "#334155",
       tickcolor: "#334155",
     },
-    legend: PLOTLY_LEGEND,
-    margin: PLOTLY_MARGIN,
+    // Place legend below the chart to avoid overlapping the dual Y-axes
+    legend: {
+      ...PLOTLY_LEGEND,
+      orientation: "h" as const,
+      x: 0,
+      y: -0.15,
+      xanchor: "left" as const,
+      yanchor: "top" as const,
+    },
+    // Extra right margin for the "Cumulative Swaps" Y-axis label
+    margin: { ...PLOTLY_MARGIN, r: 80 },
     autosize: true,
     dragmode: "pan" as const,
   };
