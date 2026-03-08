@@ -8,4 +8,19 @@
 body {
   background: #0f172a;
   color: #e2e8f0;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Plotly charts: prevent horizontal overflow on mobile */
+.js-plotly-plot,
+.plot-container {
+  max-width: 100% !important;
+  overflow: hidden;
+}
+
+/* Plotly range selector buttons: smaller tap targets on mobile */
+@media (max-width: 640px) {
+  .js-plotly-plot .rangeselector .button {
+    font-size: 10px !important;
+  }
 }

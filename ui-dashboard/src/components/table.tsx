@@ -26,7 +26,7 @@ export function Th({
   return (
     <th
       scope="col"
-      className={`px-4 py-3 font-medium text-slate-400 ${align === "right" ? "text-right" : "text-left"}`}
+      className={`px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 whitespace-nowrap ${align === "right" ? "text-right" : "text-left"}`}
     >
       {children}
     </th>
@@ -49,9 +49,9 @@ export function Td({
   title?: string;
 }) {
   const cls = [
-    "px-4 py-2",
+    "px-2 sm:px-4 py-1.5 sm:py-2",
     mono && "font-mono",
-    small && "text-xs",
+    small ? "text-[10px] sm:text-xs" : "text-xs sm:text-sm",
     muted ? "text-slate-400" : "text-slate-300",
     align === "right" && "text-right",
   ]

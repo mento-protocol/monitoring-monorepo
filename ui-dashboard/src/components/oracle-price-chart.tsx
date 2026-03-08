@@ -67,8 +67,8 @@ export function OraclePriceChart({
   const layout = {
     paper_bgcolor: "transparent",
     plot_bgcolor: "transparent",
-    font: { color: "#94a3b8", size: 12 },
-    margin: { t: 20, r: 60, b: 50, l: 60 },
+    font: { color: "#94a3b8", size: 11 },
+    margin: { t: 8, r: 48, b: 8, l: 48 },
     xaxis: {
       ...PLOTLY_AXIS_DEFAULTS,
       type: "date" as const,
