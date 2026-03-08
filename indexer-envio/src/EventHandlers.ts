@@ -201,6 +201,20 @@ const FPMM_TRADING_LIMITS_ABI = [
 const FPMM_MINIMAL_ABI = [
   {
     type: "function",
+    name: "rebalanceThresholdAbove",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "rebalanceThresholdBelow",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "getRebalancingState",
     inputs: [],
     outputs: [
@@ -259,6 +273,33 @@ async function fetchRebalancingState(
     };
   } catch {
     return null;
+  }
+}
+
+/** Fetch the pool's rebalance threshold using standalone getters that do NOT
+ * require the oracle to be live (unlike getRebalancingState which reverts when
+ * the oracle is stale). Returns the max of thresholdAbove/thresholdBelow, or 0. */
+async function fetchRebalanceThreshold(
+  chainId: number,
+  poolAddress: string,
+): Promise<number> {
+  try {
+    const client = getRpcClient(chainId);
+    const [above, below] = await Promise.all([
+      client.readContract({
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_MINIMAL_ABI,
+        functionName: "rebalanceThresholdAbove",
+      }),
+      client.readContract({
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_MINIMAL_ABI,
+        functionName: "rebalanceThresholdBelow",
+      }),
+    ]);
+    return Math.max(Number(above), Number(below));
+  } catch {
+    return 0;
   }
 }
 
@@ -575,28 +616,19 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
   // Fetch oracle state from chain at pool creation
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
 
-  const [rateFeedID, rebalancingState] = await Promise.all([
+  const [rateFeedID, rebalanceThreshold] = await Promise.all([
     fetchReferenceRateFeedID(event.chainId, poolId),
-    fetchRebalancingState(event.chainId, poolId),
+    // Use standalone getters — they work even when the oracle is stale,
+    // unlike getRebalancingState() which reverts on stale/expired oracle data.
+    fetchRebalanceThreshold(event.chainId, poolId),
   ]);
 
   if (rateFeedID) {
     oracleDelta.referenceRateFeedID = rateFeedID;
   }
 
-  if (rebalancingState) {
-    // Store the raw SortedOracles numerator. The denominator is always 10^24
-    // (SORTED_ORACLES_DECIMALS) — callers divide oraclePrice by 10^24 to get
-    // the human-readable price. Note: FPMM.getRebalancingState() also returns
-    // an oraclePriceDenominator but it uses 18dp which is inconsistent with
-    // the 24dp SortedOracles format — we ignore it.
-    oracleDelta.oraclePrice =
-      rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
-    oracleDelta.rebalanceThreshold = rebalancingState.rebalanceThreshold;
-    oracleDelta.priceDifference = rebalancingState.priceDifference;
-    // Assume oracle is OK when pool is first deployed
-    oracleDelta.oracleOk = true;
-    oracleDelta.oracleTimestamp = blockTimestamp;
+  if (rebalanceThreshold > 0) {
+    oracleDelta.rebalanceThreshold = rebalanceThreshold;
   }
 
   const pool = await upsertPool({
