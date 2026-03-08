@@ -1,24 +1,25 @@
 "use client";
 
+import { useState } from "react";
 import type { Pool } from "@/lib/types";
 import { HealthBadge } from "@/components/badges";
-import { tokenSymbol, chainlinkFeedUrl } from "@/lib/tokens";
-import {
-  relativeTime,
-  formatTimestamp,
-  parseOraclePriceToNumber,
-} from "@/lib/format";
+import { tokenSymbol, chainlinkFeedUrl, USDM_SYMBOLS } from "@/lib/tokens";
+import { relativeTime, formatTimestamp } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
 
-/** Format raw oracle price (24dp) into display string in pool direction (token0→token1).
- * Uses smart decimal places: prices near 1.0 get 4dp, others get 6dp. */
-function parseOraclePrice(num: string, sym0: string): string {
-  const price = parseOraclePriceToNumber(num, sym0);
+/** Format a price float with smart decimal places.
+ * Prices near 1.0 (stablecoins) → 4dp; others → 6dp. */
+function formatPrice(price: number): string {
   if (price <= 0) return "—";
-  // 4dp is enough for stablecoin rates near 1.0 (avoids "0.99999" noise)
-  // 6dp for rates that are further from 1 (e.g. GBPm ~0.746742)
   const dp = price > 0.9 && price < 1.1 ? 4 : 6;
   return price.toFixed(dp);
+}
+
+/** Parse raw 24dp oracle price into the feed direction value (feedToken/USD).
+ * Always returns the raw feed value — display direction is handled at the call site. */
+function rawFeedValue(oraclePrice: string): number {
+  if (!oraclePrice || oraclePrice === "0") return 0;
+  return Number(oraclePrice) / 10 ** 24;
 }
 
 interface DeviationBarProps {
@@ -72,12 +73,30 @@ interface HealthPanelProps {
 
 export function HealthPanel({ pool }: HealthPanelProps) {
   const { network } = useNetwork();
+  const [priceInverted, setPriceInverted] = useState(false);
   const isVirtual = pool.source?.includes("virtual");
   const hasHealthData = pool.healthStatus !== undefined;
 
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
-  const oraclePrice = parseOraclePrice(pool.oraclePrice ?? "0", sym0);
+
+  // Oracle price is stored as feed direction ("feedToken/USD"). Pool title
+  // (from poolName()) puts the non-USDm token first, which matches feed direction:
+  //   USDm/GBPm pool → title "GBPm/USDm" → "1 GBPm = 1.34 USDm" (feed = GBP/USD)
+  //   USDT/USDm pool → title "USDT/USDm" → "1 USDT = 1.00 USDm" (feed = USDT/USD)
+  // So "title direction" = raw feed direction (no inversion).
+  const feedVal = rawFeedValue(pool.oraclePrice ?? "0");
+  // titleToken is the non-USDm token (always listed first in the pool title)
+  const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
+  const titleToken = usdmIsToken0 ? sym1 : sym0;
+  const quoteToken = usdmIsToken0 ? sym0 : sym1;
+  // In title direction: 1 titleToken = feedVal quoteToken
+  // Inverted:          1 quoteToken = (1/feedVal) titleToken
+  const displayBase = priceInverted ? quoteToken : titleToken;
+  const displayQuote = priceInverted ? titleToken : quoteToken;
+  const displayPrice =
+    feedVal > 0 ? formatPrice(priceInverted ? 1 / feedVal : feedVal) : "—";
+
   // SortedOracles rates are "feedToken / USD". In USDm-based pools the
   // non-USDm token is always sym1 (e.g. GBPm, USDC), so try sym1 first.
   // For USDT/USDm the non-USDm token is sym0, so fall back to that.
@@ -139,10 +158,16 @@ export function HealthPanel({ pool }: HealthPanelProps) {
               )}
             </dt>
             <dd className="text-white font-mono">
-              {oraclePrice !== "—" ? (
-                <span>
-                  1 {sym0} = {oraclePrice} {sym1}
-                </span>
+              {displayPrice !== "—" ? (
+                <button
+                  type="button"
+                  onClick={() => setPriceInverted((v) => !v)}
+                  title="Click to toggle price direction"
+                  className="hover:text-indigo-300 transition-colors cursor-pointer text-left"
+                >
+                  1 {displayBase} = {displayPrice} {displayQuote}
+                  <span className="ml-1.5 text-xs text-slate-500">⇄</span>
+                </button>
               ) : (
                 <span className="text-slate-500">—</span>
               )}
