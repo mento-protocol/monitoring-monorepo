@@ -383,6 +383,47 @@ function computeLimitPressures(
 }
 
 // ---------------------------------------------------------------------------
+// Price difference computation (reserve ratio vs oracle price)
+// ---------------------------------------------------------------------------
+
+/**
+ * Computes priceDifference in basis points (bps) from reserves and oracle price.
+ *
+ * The oracle price (oraclePrice) is stored in feed direction (24dp):
+ *   e.g. GBP/USD = 1.339150e24 means "1 GBP = 1.339150 USD"
+ *
+ * For FPMM pools where USDm is one of the tokens, the feed direction
+ * gives the token0/token1 ratio directly when USDm is token0 (the "USD" side):
+ *   reserveRatio = reserves0 / reserves1 (should ≈ feedPrice/1e24 when balanced)
+ *
+ * priceDifference = |reserveRatio - oracleRatio| / oracleRatio × 10000
+ *
+ * Returns 0n when oracle price or reserves are missing/zero.
+ */
+function computePriceDifference(pool: {
+  reserves0: bigint;
+  reserves1: bigint;
+  oraclePrice: bigint;
+}): bigint {
+  if (pool.oraclePrice === 0n || pool.reserves0 === 0n || pool.reserves1 === 0n)
+    return 0n;
+
+  // reserveRatio scaled to 24dp: (reserves0 * 1e24) / reserves1
+  const SCALE = 10n ** 24n;
+  const reserveRatio = (pool.reserves0 * SCALE) / pool.reserves1;
+
+  // oraclePrice is already 24dp in feed direction
+  const oracleRatio = pool.oraclePrice;
+
+  // priceDiff in bps: |reserveRatio - oracleRatio| * 10000 / oracleRatio
+  const diff =
+    reserveRatio > oracleRatio
+      ? reserveRatio - oracleRatio
+      : oracleRatio - reserveRatio;
+  return (diff * 10000n) / oracleRatio;
+}
+
+// ---------------------------------------------------------------------------
 // Health status computation
 // ---------------------------------------------------------------------------
 
@@ -508,7 +549,7 @@ const upsertPool = async ({
 }): Promise<Pool> => {
   const existing = await getOrCreatePool(context, poolId, { token0, token1 });
 
-  const next: Pool = {
+  let next: Pool = {
     ...existing,
     token0: token0 ?? existing.token0,
     token1: token1 ?? existing.token1,
@@ -531,8 +572,18 @@ const upsertPool = async ({
     updatedAtTimestamp: blockTimestamp,
   };
 
-  context.Pool.set(next);
-  return next;
+  // Recompute priceDifference from reserves + oracle price for FPMM pools
+  const priceDifference =
+    !next.source?.includes("virtual") && next.oraclePrice > 0n
+      ? computePriceDifference(next)
+      : next.priceDifference;
+
+  const withDeviation = { ...next, priceDifference };
+  const healthStatus = computeHealthStatus(withDeviation);
+  const final = { ...withDeviation, healthStatus };
+
+  context.Pool.set(final);
+  return final;
 };
 
 // ---------------------------------------------------------------------------
@@ -643,10 +694,6 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     blockTimestamp,
     oracleDelta,
   });
-
-  // Compute and persist healthStatus
-  const healthStatus = computeHealthStatus({ ...pool, ...oracleDelta });
-  context.Pool.set({ ...pool, ...oracleDelta, healthStatus });
 
   const deployment: FactoryDeployment = {
     id,
@@ -892,7 +939,6 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       oraclePrice:
         rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
-      priceDifference: rebalancingState.priceDifference,
       oracleTimestamp: blockTimestamp,
     };
   }
@@ -910,15 +956,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     oracleDelta,
   });
 
-  // Update healthStatus based on latest oracle state
-  const updatedPool: Pool = {
-    ...pool,
-    ...oracleDelta,
-  };
-  const healthStatus = computeHealthStatus(updatedPool);
-  context.Pool.set({ ...updatedPool, healthStatus });
-
-  // Create OracleSnapshot if we got data
+  // Create OracleSnapshot if we got data from rebalancingState RPC
   if (rebalancingState) {
     const snapshot: OracleSnapshot = {
       id: eventId(event.chainId, event.block.number, event.logIndex),
@@ -926,10 +964,10 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       timestamp: blockTimestamp,
       oraclePrice:
         rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
-      oracleOk: updatedPool.oracleOk,
-      numReporters: updatedPool.oracleNumReporters,
-      priceDifference: rebalancingState.priceDifference,
-      rebalanceThreshold: rebalancingState.rebalanceThreshold,
+      oracleOk: pool.oracleOk,
+      numReporters: pool.oracleNumReporters,
+      priceDifference: pool.priceDifference,
+      rebalanceThreshold: pool.rebalanceThreshold,
       source: "update_reserves",
       blockNumber,
     };
@@ -938,7 +976,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
 
   await upsertSnapshot({
     context,
-    pool: { ...updatedPool, healthStatus },
+    pool,
     blockTimestamp,
     blockNumber,
   });
@@ -980,7 +1018,6 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       oraclePrice:
         rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
-      priceDifference: rebalancingState.priceDifference,
       oracleTimestamp: blockTimestamp,
       oracleTxHash: event.transaction.hash,
     };
@@ -996,13 +1033,6 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     oracleDelta,
   });
 
-  const updatedPool: Pool = {
-    ...pool,
-    ...oracleDelta,
-  };
-  const healthStatus = computeHealthStatus(updatedPool);
-  context.Pool.set({ ...updatedPool, healthStatus });
-
   // Create OracleSnapshot
   if (rebalancingState) {
     const snapshot: OracleSnapshot = {
@@ -1011,10 +1041,10 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       timestamp: blockTimestamp,
       oraclePrice:
         rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
-      oracleOk: updatedPool.oracleOk,
-      numReporters: updatedPool.oracleNumReporters,
-      priceDifference: rebalancingState.priceDifference,
-      rebalanceThreshold: rebalancingState.rebalanceThreshold,
+      oracleOk: pool.oracleOk,
+      numReporters: pool.oracleNumReporters,
+      priceDifference: pool.priceDifference,
+      rebalanceThreshold: pool.rebalanceThreshold,
       source: "rebalanced",
       blockNumber,
     };
@@ -1023,7 +1053,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
 
   await upsertSnapshot({
     context,
-    pool: { ...updatedPool, healthStatus },
+    pool,
     blockTimestamp,
     blockNumber,
     rebalanceDelta: true,
@@ -1166,8 +1196,15 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
-    const healthStatus = computeHealthStatus(updatedPool);
-    context.Pool.set({ ...updatedPool, healthStatus });
+    // Recompute priceDifference with new oracle price + existing reserves
+    const priceDifference =
+      !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+        ? computePriceDifference(updatedPool)
+        : updatedPool.priceDifference;
+    const withDev = { ...updatedPool, priceDifference };
+    const healthStatus = computeHealthStatus(withDev);
+    const finalPool = { ...withDev, healthStatus };
+    context.Pool.set(finalPool);
 
     const snapshot: OracleSnapshot = {
       id:
@@ -1178,7 +1215,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       oraclePrice,
       oracleOk: true,
       numReporters: oracleNumReporters,
-      priceDifference: existing.priceDifference,
+      priceDifference,
       rebalanceThreshold: existing.rebalanceThreshold,
       source: "oracle_reported",
       blockNumber,
@@ -1215,8 +1252,15 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
-    const healthStatus = computeHealthStatus(updatedPool);
-    context.Pool.set({ ...updatedPool, healthStatus });
+    // Recompute priceDifference with new oracle price + existing reserves
+    const priceDifference =
+      !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+        ? computePriceDifference(updatedPool)
+        : updatedPool.priceDifference;
+    const withDev = { ...updatedPool, priceDifference };
+    const healthStatus = computeHealthStatus(withDev);
+    const finalPool = { ...withDev, healthStatus };
+    context.Pool.set(finalPool);
 
     const snapshot: OracleSnapshot = {
       id:
@@ -1227,7 +1271,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       oraclePrice,
       oracleOk: true,
       numReporters: existing.oracleNumReporters,
-      priceDifference: existing.priceDifference,
+      priceDifference,
       rebalanceThreshold: existing.rebalanceThreshold,
       source: "oracle_median_updated",
       blockNumber,
