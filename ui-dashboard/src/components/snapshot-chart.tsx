@@ -7,7 +7,6 @@ import {
   PLOTLY_BASE_LAYOUT,
   PLOTLY_AXIS_DEFAULTS,
   PLOTLY_LEGEND,
-  PLOTLY_MARGIN,
   PLOTLY_CONFIG,
   RANGE_SELECTOR_BUTTONS_DAILY,
   makeDateXAxis,
@@ -94,6 +93,7 @@ export function SnapshotChart({
 
   const layout = {
     ...PLOTLY_BASE_LAYOUT,
+    font: { ...PLOTLY_BASE_LAYOUT.font, size: 11 },
     barmode: "stack" as const,
     xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY),
     yaxis: {
@@ -113,12 +113,12 @@ export function SnapshotChart({
       ...PLOTLY_LEGEND,
       orientation: "h" as const,
       x: 0.5,
-      y: -0.25,
+      y: -0.35,
       xanchor: "center" as const,
       yanchor: "top" as const,
     },
-    // Extra margins: left for Y-axis title+ticks, right for 2nd Y-axis, bottom for legend
-    margin: { ...PLOTLY_MARGIN, l: 80, r: 80, b: 60 },
+    // Tight margins for mobile; bottom accommodates horizontal legend
+    margin: { t: 8, l: 48, r: 48, b: 8 },
     autosize: true,
     dragmode: "pan" as const,
   };
@@ -131,7 +131,7 @@ export function SnapshotChart({
       <Plot
         data={[volumeTrace0, volumeTrace1, cumSwapTrace]}
         layout={layout}
-        config={{ ...PLOTLY_CONFIG, displayModeBar: true }}
+        config={PLOTLY_CONFIG}
         style={{ width: "100%", height: 320 }}
         useResizeHandler
       />

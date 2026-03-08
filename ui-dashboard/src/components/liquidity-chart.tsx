@@ -143,7 +143,7 @@ export function LiquidityChart({
       <Plot
         data={[trace0, trace1]}
         layout={layout}
-        config={{ ...PLOTLY_CONFIG, displayModeBar: true }}
+        config={PLOTLY_CONFIG}
         style={{ width: "100%", height: 320 }}
         useResizeHandler
       />
