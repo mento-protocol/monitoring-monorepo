@@ -112,13 +112,13 @@ export function SnapshotChart({
     legend: {
       ...PLOTLY_LEGEND,
       orientation: "h" as const,
-      x: 0,
-      y: -0.15,
-      xanchor: "left" as const,
+      x: 0.5,
+      y: -0.25,
+      xanchor: "center" as const,
       yanchor: "top" as const,
     },
-    // Extra right margin for the "Cumulative Swaps" Y-axis label
-    margin: { ...PLOTLY_MARGIN, r: 80 },
+    // Extra margins: left for Y-axis title+ticks, right for 2nd Y-axis, bottom for legend
+    margin: { ...PLOTLY_MARGIN, l: 80, r: 80, b: 60 },
     autosize: true,
     dragmode: "pan" as const,
   };
