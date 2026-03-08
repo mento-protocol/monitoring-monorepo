@@ -5,9 +5,13 @@
 
 export type HealthStatus = "OK" | "WARN" | "CRITICAL" | "N/A";
 
+/** Stale threshold: oracle older than 1 hour is considered expired. */
+const ORACLE_STALE_SECONDS = 3600;
+
 export interface PoolHealthState {
   source?: string;
   oracleOk?: boolean;
+  oracleTimestamp?: string;
   priceDifference?: string;
   rebalanceThreshold?: number;
 }
@@ -16,13 +20,21 @@ export interface PoolHealthState {
  * Compute the health status for a pool based on its oracle state.
  *
  * - "N/A":       VirtualPools (source includes "virtual") — no oracle
- * - "CRITICAL":  Oracle is stale (oracleOk == false) OR deviation >= threshold
+ * - "CRITICAL":  Oracle is stale (age > 1h) OR deviation >= threshold
  * - "WARN":      Oracle is fresh but deviation >= 80% of threshold
  * - "OK":        Oracle is fresh and deviation is below 80% of threshold
+ *
+ * Uses wall-clock time comparison rather than the indexed oracleOk flag,
+ * which is only set at event time and never expires.
  */
 export function computeHealthStatus(pool: PoolHealthState): HealthStatus {
   if (pool.source?.includes("virtual")) return "N/A";
-  if (!pool.oracleOk) return "CRITICAL";
+  // Time-based staleness check (client-side wall clock)
+  const oracleTs = Number(pool.oracleTimestamp ?? "0");
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const isOracleStale =
+    oracleTs === 0 || nowSeconds - oracleTs > ORACLE_STALE_SECONDS;
+  if (isOracleStale) return "CRITICAL";
   const diff = Number(pool.priceDifference ?? "0");
   const threshold =
     (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
