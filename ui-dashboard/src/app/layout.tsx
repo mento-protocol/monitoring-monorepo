@@ -30,36 +30,38 @@ export default function RootLayout({
           <NetworkProvider>
             <AddressLabelsProvider>
               <nav
-                className="border-b border-slate-800 px-6 py-3 flex items-center gap-4"
+                className="border-b border-slate-800 px-3 sm:px-6 py-2 sm:py-3 flex items-center gap-2 sm:gap-4 flex-wrap"
                 aria-label="Main navigation"
               >
                 <Link
                   href="/"
-                  className="text-lg font-bold text-white hover:text-indigo-400 transition-colors"
+                  className="text-base sm:text-lg font-bold text-white hover:text-indigo-400 transition-colors"
                 >
-                  Mento v3 Monitor
+                  Mento v3
                 </Link>
                 <Link
                   href="/"
-                  className="text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+                  className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
                 >
                   Global
                 </Link>
                 <Link
                   href="/pools"
-                  className="text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+                  className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
                 >
                   Pools
                 </Link>
                 <Link
                   href="/address-book"
-                  className="text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+                  className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
                 >
-                  Address Book
+                  Addresses
                 </Link>
                 <NetworkSelector />
               </nav>
-              <div className="mx-auto max-w-7xl px-6 py-6">{children}</div>
+              <div className="mx-auto max-w-7xl px-3 sm:px-6 py-4 sm:py-6">
+                {children}
+              </div>
             </AddressLabelsProvider>
           </NetworkProvider>
         </Suspense>

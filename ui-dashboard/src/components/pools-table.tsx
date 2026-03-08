@@ -56,9 +56,24 @@ export function PoolsTable({ pools }: PoolsTableProps) {
           <Th>Type</Th>
           <Th>Status</Th>
           <Th>Limit</Th>
-          <Th>Rebalancer</Th>
-          <Th>Address</Th>
-          <Th>Created</Th>
+          <th
+            scope="col"
+            className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400"
+          >
+            Rebalancer
+          </th>
+          <th
+            scope="col"
+            className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400"
+          >
+            Address
+          </th>
+          <th
+            scope="col"
+            className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400"
+          >
+            Created
+          </th>
           <Th>Updated</Th>
         </tr>
       </thead>
@@ -68,38 +83,41 @@ export function PoolsTable({ pools }: PoolsTableProps) {
           const rebalancerStatus = computeRebalancerLiveness(p, nowSeconds);
           return (
             <Row key={p.id}>
-              <td className="px-4 py-3">
+              <td className="px-2 sm:px-4 py-2 sm:py-3">
                 <Link
                   href={`/pool/${encodeURIComponent(p.id)}`}
-                  className="font-semibold text-indigo-400 hover:text-indigo-300"
+                  className="font-semibold text-sm sm:text-base text-indigo-400 hover:text-indigo-300"
                 >
                   {poolName(network, p.token0, p.token1)}
                 </Link>
               </td>
-              <td className="px-4 py-3">
+              <td className="px-2 sm:px-4 py-2 sm:py-3">
                 <SourceBadge source={p.source} />
               </td>
-              <td className="px-4 py-3">
+              <td className="px-2 sm:px-4 py-2 sm:py-3">
                 <span title={healthTooltip(p)}>
                   <HealthBadge status={p.healthStatus ?? "N/A"} />
                 </span>
               </td>
-              <td className="px-4 py-3">
+              <td className="px-2 sm:px-4 py-2 sm:py-3">
                 <span title={limitTooltip(limitStatus)}>
                   <LimitBadge status={limitStatus} />
                 </span>
               </td>
-              <td className="px-4 py-3">
+              <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
                 <span title={rebalancerTooltip(rebalancerStatus)}>
                   <RebalancerBadge status={rebalancerStatus} />
                 </span>
               </td>
-              <Td small>
+              <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-[10px] sm:text-xs text-slate-300">
                 <AddressLink address={p.id} />
-              </Td>
-              <Td muted title={formatTimestamp(p.createdAtTimestamp)}>
+              </td>
+              <td
+                className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-[10px] sm:text-xs text-slate-400"
+                title={formatTimestamp(p.createdAtTimestamp)}
+              >
                 {relativeTime(p.createdAtTimestamp)}
-              </Td>
+              </td>
               <Td muted title={formatTimestamp(p.updatedAtTimestamp)}>
                 {relativeTime(p.updatedAtTimestamp)}
               </Td>
