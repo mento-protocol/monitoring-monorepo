@@ -6,12 +6,18 @@ import {
   computeRebalancerLiveness,
 } from "../health";
 
+/** A recent oracle timestamp (5 minutes ago) for tests that need a fresh oracle. */
+const FRESH_TS = String(Math.floor(Date.now() / 1000) - 300);
+/** A stale oracle timestamp (2 hours ago). */
+const STALE_TS = String(Math.floor(Date.now() / 1000) - 7200);
+
 describe("computeHealthStatus", () => {
   it('returns "N/A" for VirtualPools (source includes "virtual")', () => {
     expect(
       computeHealthStatus({
         source: "virtual_pool_factory",
         oracleOk: true,
+        oracleTimestamp: FRESH_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
@@ -23,6 +29,7 @@ describe("computeHealthStatus", () => {
       computeHealthStatus({
         source: "fpmm_virtual_test",
         oracleOk: true,
+        oracleTimestamp: FRESH_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
@@ -34,6 +41,7 @@ describe("computeHealthStatus", () => {
       computeHealthStatus({
         source: "fpmm_factory",
         oracleOk: false,
+        oracleTimestamp: STALE_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
@@ -46,6 +54,7 @@ describe("computeHealthStatus", () => {
       computeHealthStatus({
         source: "fpmm_factory",
         oracleOk: true,
+        oracleTimestamp: FRESH_TS,
         priceDifference: "1000",
         rebalanceThreshold: 5000,
       }),
@@ -58,6 +67,7 @@ describe("computeHealthStatus", () => {
       computeHealthStatus({
         source: "fpmm_factory",
         oracleOk: true,
+        oracleTimestamp: FRESH_TS,
         priceDifference: "4000",
         rebalanceThreshold: 5000,
       }),
@@ -70,6 +80,7 @@ describe("computeHealthStatus", () => {
       computeHealthStatus({
         source: "fpmm_update_reserves",
         oracleOk: true,
+        oracleTimestamp: FRESH_TS,
         priceDifference: "4000",
         rebalanceThreshold: 5000,
       }),
@@ -82,6 +93,7 @@ describe("computeHealthStatus", () => {
       computeHealthStatus({
         source: "fpmm_factory",
         oracleOk: true,
+        oracleTimestamp: FRESH_TS,
         priceDifference: "5000",
         rebalanceThreshold: 5000,
       }),
@@ -94,6 +106,7 @@ describe("computeHealthStatus", () => {
       computeHealthStatus({
         source: "fpmm_rebalanced",
         oracleOk: true,
+        oracleTimestamp: FRESH_TS,
         priceDifference: "8000",
         rebalanceThreshold: 5000,
       }),
@@ -106,6 +119,7 @@ describe("computeHealthStatus", () => {
       computeHealthStatus({
         source: "fpmm_factory",
         oracleOk: true,
+        oracleTimestamp: FRESH_TS,
         priceDifference: "9000",
         rebalanceThreshold: 0,
       }),
@@ -126,6 +140,7 @@ describe("computeHealthStatus", () => {
       computeHealthStatus({
         source: "fpmm_factory",
         oracleOk: true,
+        oracleTimestamp: FRESH_TS,
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),

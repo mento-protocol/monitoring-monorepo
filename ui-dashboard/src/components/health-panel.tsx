@@ -82,6 +82,18 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   const isVirtual = pool.source?.includes("virtual");
   const hasHealthData = pool.healthStatus !== undefined;
 
+  // Compute real-time oracle freshness client-side.
+  // The indexed oracleOk is set at event time and never expires.
+  // We compare oracleTimestamp against wall-clock time instead.
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const oracleAge =
+    pool.oracleTimestamp && pool.oracleTimestamp !== "0"
+      ? nowSeconds - Number(pool.oracleTimestamp)
+      : Infinity;
+  // Oracle is stale if >1 hour since last update
+  const ORACLE_STALE_THRESHOLD = 3600;
+  const isOracleFresh = oracleAge < ORACLE_STALE_THRESHOLD;
+
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
 
@@ -131,9 +143,9 @@ export function HealthPanel({ pool }: HealthPanelProps) {
             <dt className="text-slate-400 mb-1">Oracle Status</dt>
             <dd className="flex flex-col gap-0.5">
               <span
-                className={pool.oracleOk ? "text-emerald-400" : "text-red-400"}
+                className={isOracleFresh ? "text-emerald-400" : "text-red-400"}
               >
-                {pool.oracleOk ? "✓ Fresh" : "✗ Stale"}
+                {isOracleFresh ? "✓ Fresh" : "✗ Stale"}
               </span>
               {pool.oracleTimestamp &&
                 pool.oracleTimestamp !== "0" &&
