@@ -6,7 +6,7 @@ import { truncateAddress } from "./format";
 // Network-aware helpers
 // ---------------------------------------------------------------------------
 
-const USDM_SYMBOLS = new Set(["USDm"]);
+export const USDM_SYMBOLS = new Set(["USDm"]);
 
 export function tokenSymbol(network: Network, address: string | null): string {
   if (!address) return "?";
