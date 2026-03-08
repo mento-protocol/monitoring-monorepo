@@ -160,7 +160,7 @@ function PoolDetail() {
             aria-selected={tab === t}
             aria-controls={`panel-${t}`}
             onClick={() => setURL(t, limit)}
-            className={`px-4 py-2 text-sm font-medium capitalize transition-colors ${
+            className={`px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium capitalize transition-colors ${
               tab === t
                 ? "border-b-2 border-indigo-500 text-white"
                 : "text-slate-400 hover:text-slate-200"

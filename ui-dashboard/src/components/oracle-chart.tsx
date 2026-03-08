@@ -7,7 +7,6 @@ import {
   PLOTLY_BASE_LAYOUT,
   PLOTLY_AXIS_DEFAULTS,
   PLOTLY_LEGEND,
-  PLOTLY_MARGIN,
   PLOTLY_CONFIG,
   RANGE_SELECTOR_BUTTONS_DAILY,
   makeDateXAxis,
@@ -146,8 +145,16 @@ export function OracleChart({
       tickcolor: "#334155",
       range: [0, 150],
     },
-    legend: PLOTLY_LEGEND,
-    margin: PLOTLY_MARGIN,
+    legend: {
+      ...PLOTLY_LEGEND,
+      orientation: "h" as const,
+      x: 0.5,
+      y: -0.3,
+      xanchor: "center" as const,
+      yanchor: "top" as const,
+    },
+    margin: { t: 8, l: 48, r: 48, b: 8 },
+    font: { ...PLOTLY_BASE_LAYOUT.font, size: 11 },
     autosize: true,
     dragmode: "pan" as const,
   };
@@ -157,26 +164,26 @@ export function OracleChart({
       <h3 className="text-sm font-medium text-slate-400 mb-3">
         Oracle Price History &amp; Deviation Health
       </h3>
-      <div className="flex gap-4 mb-2 text-xs text-slate-500">
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 text-[10px] sm:text-xs text-slate-500">
         <span className="flex items-center gap-1">
-          <span className="inline-block w-3 h-3 rounded-sm bg-green-500/20 border border-green-500/40" />
-          Healthy (&lt;80%)
+          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-500/20 border border-green-500/40" />
+          Healthy
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block w-3 h-3 rounded-sm bg-yellow-500/20 border border-yellow-500/40" />
-          Warning (80–100%)
+          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-yellow-500/20 border border-yellow-500/40" />
+          Warning
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block w-3 h-3 rounded-sm bg-red-500/20 border border-red-500/40" />
-          Critical (&gt;100%)
-        </span>
-        <span className="flex items-center gap-1 ml-2">
-          <span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500" />
-          Oracle OK
+          <span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-500/20 border border-red-500/40" />
+          Critical
         </span>
         <span className="flex items-center gap-1">
-          <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" />
-          Oracle Expired
+          <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
+          OK
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
+          Expired
         </span>
       </div>
       <Plot
