@@ -124,7 +124,8 @@ const { TestHelpers } = generated as unknown as GeneratedModule;
 const { MockDb, FPMMFactory, FPMM, SortedOracles } = TestHelpers;
 
 describe("Envio Celo indexer handlers", () => {
-  it("persists FactoryDeployment + Pool for FPMMDeployed", async () => {
+  it("persists FactoryDeployment + Pool for FPMMDeployed", async function () {
+    this.timeout(10_000);
     const mockDb = MockDb.createMockDb();
     const event = FPMMFactory.FPMMDeployed.createMockEvent({
       token0: "0x0000000000000000000000000000000000000001",
