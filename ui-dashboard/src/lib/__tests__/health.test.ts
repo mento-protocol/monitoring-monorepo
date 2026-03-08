@@ -6,10 +6,10 @@ import {
   computeRebalancerLiveness,
 } from "../health";
 
-/** A recent oracle timestamp (5 minutes ago) for tests that need a fresh oracle. */
-const FRESH_TS = String(Math.floor(Date.now() / 1000) - 300);
-/** A stale oracle timestamp (2 hours ago). */
-const STALE_TS = String(Math.floor(Date.now() / 1000) - 7200);
+/** A recent oracle timestamp (2 minutes ago) — within 5-min SortedOracles expiry. */
+const FRESH_TS = String(Math.floor(Date.now() / 1000) - 120);
+/** A stale oracle timestamp (10 minutes ago) — beyond 5-min SortedOracles expiry. */
+const STALE_TS = String(Math.floor(Date.now() / 1000) - 600);
 
 describe("computeHealthStatus", () => {
   it('returns "N/A" for VirtualPools (source includes "virtual")', () => {

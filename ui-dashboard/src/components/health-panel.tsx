@@ -83,15 +83,14 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   const hasHealthData = pool.healthStatus !== undefined;
 
   // Compute real-time oracle freshness client-side.
-  // The indexed oracleOk is set at event time and never expires.
-  // We compare oracleTimestamp against wall-clock time instead.
+  // Matches SortedOracles.isOldestReportExpired() — Celo mainnet uses
+  // reportExpirySeconds = 300s (5 min). See health.ts for details.
   const nowSeconds = Math.floor(Date.now() / 1000);
   const oracleAge =
     pool.oracleTimestamp && pool.oracleTimestamp !== "0"
       ? nowSeconds - Number(pool.oracleTimestamp)
       : Infinity;
-  // Oracle is stale if >1 hour since last update
-  const ORACLE_STALE_THRESHOLD = 3600;
+  const ORACLE_STALE_THRESHOLD = 300; // SortedOracles.reportExpirySeconds()
   const isOracleFresh = oracleAge < ORACLE_STALE_THRESHOLD;
 
   const sym0 = tokenSymbol(network, pool.token0);
