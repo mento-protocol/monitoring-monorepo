@@ -69,6 +69,8 @@ export function LiquidityChart({
   );
   const reserves0Usd = snapshots.map((s) => toUsd0(s.reserves0));
   const reserves1Usd = snapshots.map((s) => toUsd1(s.reserves1));
+  const raw0 = snapshots.map((s) => parseWei(s.reserves0));
+  const raw1 = snapshots.map((s) => parseWei(s.reserves1));
 
   const yAxisTitle = useUsd ? "Reserve Value (USD)" : "Reserve Balance";
   const name0 = useUsd ? `${token0Symbol} (USD)` : token0Symbol;
@@ -77,6 +79,8 @@ export function LiquidityChart({
   const trace0 = {
     x: timestamps,
     y: reserves0Usd,
+    customdata: raw0,
+    hovertemplate: `<b>%{customdata:,.2f} ${token0Symbol}</b><br>%{x|%b %d, %Y %H:%M}<extra></extra>`,
     type: "scatter" as const,
     mode: "lines" as const,
     name: name0,
@@ -89,6 +93,8 @@ export function LiquidityChart({
   const trace1 = {
     x: timestamps,
     y: reserves1Usd,
+    customdata: raw1,
+    hovertemplate: `<b>%{customdata:,.2f} ${token1Symbol}</b><br>%{x|%b %d, %Y %H:%M}<extra></extra>`,
     type: "scatter" as const,
     mode: "lines" as const,
     name: name1,

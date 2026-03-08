@@ -65,6 +65,9 @@ export function ReserveChart({
   );
   const r0 = rows.map((r) => toUsd0(r.reserve0));
   const r1 = rows.map((r) => toUsd1(r.reserve1));
+  // Raw token amounts for hover tooltip (always show original, not USD)
+  const raw0 = rows.map((r) => parseWei(r.reserve0));
+  const raw1 = rows.map((r) => parseWei(r.reserve1));
 
   const name0 = useUsd ? `${sym0} (USD)` : sym0;
   const name1 = useUsd ? `${sym1} (USD)` : sym1;
@@ -73,6 +76,8 @@ export function ReserveChart({
   const trace0 = {
     x: timestamps,
     y: r0,
+    customdata: raw0,
+    hovertemplate: `<b>%{customdata:,.2f} ${sym0}</b><br>%{x|%b %d, %Y %H:%M}<extra></extra>`,
     type: "scatter" as const,
     mode: "lines+markers" as const,
     name: name0,
@@ -84,6 +89,8 @@ export function ReserveChart({
   const trace1 = {
     x: timestamps,
     y: r1,
+    customdata: raw1,
+    hovertemplate: `<b>%{customdata:,.2f} ${sym1}</b><br>%{x|%b %d, %Y %H:%M}<extra></extra>`,
     type: "scatter" as const,
     mode: "lines+markers" as const,
     name: name1,
