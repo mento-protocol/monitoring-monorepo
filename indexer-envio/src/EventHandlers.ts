@@ -60,21 +60,17 @@ const snapshotId = (poolId: string, hourTs: bigint): string =>
 // context.Pool.getWhere.referenceRateFeedID.eq() (DB-backed, works across
 // Envio worker processes; in-memory maps are not shared between workers).
 
-/** oraclePrice is always stored in the pool's token direction (token0 → token1)
+/** oraclePrice is stored in **feed direction** (SortedOracles "feedToken/USD")
  * at 24dp precision. Divide by 10^SORTED_ORACLES_DECIMALS to get the
- * human-readable price (e.g. "1 USDm = 0.79 GBPm").
+ * human-readable price (e.g. "1 GBP = 1.34 USD").
  *
- * ⚠️ Do NOT store event.params.value from OracleReported/MedianUpdated directly.
- * SortedOracles emits rates in "feedToken / USD" direction (e.g. "1 GBP = 1.27 USD"),
- * which is the INVERSE of the pool direction for non-USD-denominated pairs.
- * Always use getRebalancingState().oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR
- * so the direction is consistent across all handlers.
+ * OracleReported/MedianUpdated handlers store event.params.value directly
+ * (SortedOracles 24dp rate in feed direction). UpdateReserves/Rebalanced
+ * handlers may additionally fetch getRebalancingState() which returns an 18dp
+ * value that must be multiplied by ORACLE_ADAPTER_SCALE_FACTOR to restore 24dp.
  *
- * NOTE: FPMM.getRebalancingState() internally calls OracleAdapter.getFXRateIfValid()
- * which normalises SortedOracles' 24dp output to 18dp by dividing both numerator
- * and denominator by 1e6 (see OracleAdapter._getOracleRate). Therefore the
- * oraclePriceNumerator returned by getRebalancingState() is in 18dp scale and
- * must be multiplied by ORACLE_ADAPTER_SCALE_FACTOR to restore 24dp. */
+ * ⚠️ getRebalancingState() reverts when the oracle is stale (error 0xa407143a).
+ * Oracle event handlers avoid calling it entirely — they use event.params.value. */
 const SORTED_ORACLES_DECIMALS = 24;
 
 /** OracleAdapter divides both numerator and denominator by 1e6, converting
@@ -386,17 +382,31 @@ function computeLimitPressures(
 // Price difference computation (reserve ratio vs oracle price)
 // ---------------------------------------------------------------------------
 
+/** Known USDm token addresses (lowercased) per chain. */
+const USDM_ADDRESSES = new Set([
+  "0x765de816845861e75a25fca122bb6898b8b1282a", // Celo mainnet (cUSD/USDm)
+]);
+
 /**
  * Computes priceDifference in basis points (bps) from reserves and oracle price.
  *
- * The oracle price (oraclePrice) is stored in feed direction (24dp):
+ * Oracle price is stored in **feed direction** (24dp SortedOracles rate):
  *   e.g. GBP/USD = 1.339150e24 means "1 GBP = 1.339150 USD"
  *
- * For FPMM pools where USDm is one of the tokens, the feed direction
- * gives the token0/token1 ratio directly when USDm is token0 (the "USD" side):
- *   reserveRatio = reserves0 / reserves1 (should ≈ feedPrice/1e24 when balanced)
+ * The reserve ratio (reserves0/reserves1) is in **pool direction** (token0→token1).
+ * To compare them, we need to convert the feed price to pool direction:
  *
- * priceDifference = |reserveRatio - oracleRatio| / oracleRatio × 10000
+ *   - If token0 is USDm: pool direction = USDm/nonUSD = 1/feedPrice (inverted)
+ *     Actually: reserveRatio = reserves0/reserves1 = USDm/GBPm ≈ 0.89
+ *     oraclePrice in feed direction = GBP/USD = 1.34
+ *     So we compare reserveRatio to feedPrice: |0.89 - 1.34|/1.34 = deviation
+ *     Wait — this IS correct because reserves0(USDm)/reserves1(GBPm) should equal
+ *     feedPrice(GBP/USD) = how many USDm per GBPm when balanced.
+ *
+ *   - If token1 is USDm: pool direction = nonUSD/USDm
+ *     reserveRatio = nonUSD/USDm. Feed = nonUSD/USD.
+ *     In a balanced pool, nonUSD/USDm ≈ 1/feedPrice (since 1 USDm ≈ $1).
+ *     So we must INVERT the feed price for comparison.
  *
  * Returns 0n when oracle price or reserves are missing/zero.
  */
@@ -404,16 +414,38 @@ function computePriceDifference(pool: {
   reserves0: bigint;
   reserves1: bigint;
   oraclePrice: bigint;
+  token0?: string;
+  token1?: string;
 }): bigint {
   if (pool.oraclePrice === 0n || pool.reserves0 === 0n || pool.reserves1 === 0n)
     return 0n;
+  if (!pool.token0 || !pool.token1) return 0n;
 
-  // reserveRatio scaled to 24dp: (reserves0 * 1e24) / reserves1
   const SCALE = 10n ** 24n;
+  // reserveRatio in 24dp: reserves0 / reserves1
   const reserveRatio = (pool.reserves0 * SCALE) / pool.reserves1;
 
-  // oraclePrice is already 24dp in feed direction
-  const oracleRatio = pool.oraclePrice;
+  // Determine oracle ratio in pool direction.
+  // Feed direction = "feedToken/USD" (e.g. GBP/USD = 1.34).
+  // When USDm is token0: pool direction = USDm/nonUSD.
+  //   In a balanced pool: reserves0/reserves1 = feedPrice
+  //   (because 1 GBPm costs 1.34 USDm). → use feed directly.
+  // When USDm is token1: pool direction = nonUSD/USDm.
+  //   In a balanced pool: reserves0/reserves1 = 1/feedPrice. → invert.
+  const usdmIsToken0 = USDM_ADDRESSES.has(pool.token0.toLowerCase());
+  const usdmIsToken1 = USDM_ADDRESSES.has(pool.token1.toLowerCase());
+
+  let oracleRatio: bigint;
+  if (usdmIsToken0) {
+    // Pool direction matches feed direction
+    oracleRatio = pool.oraclePrice;
+  } else if (usdmIsToken1) {
+    // Pool direction is inverted from feed: oracleRatio = SCALE² / feedPrice
+    oracleRatio = (SCALE * SCALE) / pool.oraclePrice;
+  } else {
+    // Neither token is USDm — can't determine direction, skip
+    return 0n;
+  }
 
   // priceDiff in bps: |reserveRatio - oracleRatio| * 10000 / oracleRatio
   const diff =
