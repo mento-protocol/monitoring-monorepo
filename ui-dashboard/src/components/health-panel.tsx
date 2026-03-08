@@ -10,11 +10,15 @@ import {
 } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
 
-/** Format raw oracle price (24dp) into display string in pool direction (token0→token1). */
+/** Format raw oracle price (24dp) into display string in pool direction (token0→token1).
+ * Uses smart decimal places: prices near 1.0 get 4dp, others get 6dp. */
 function parseOraclePrice(num: string, sym0: string): string {
   const price = parseOraclePriceToNumber(num, sym0);
   if (price <= 0) return "—";
-  return price.toFixed(6);
+  // 4dp is enough for stablecoin rates near 1.0 (avoids "0.99999" noise)
+  // 6dp for rates that are further from 1 (e.g. GBPm ~0.746742)
+  const dp = price > 0.9 && price < 1.1 ? 4 : 6;
+  return price.toFixed(dp);
 }
 
 interface DeviationBarProps {
@@ -26,10 +30,10 @@ function DeviationBar({
   priceDifference,
   rebalanceThreshold,
 }: DeviationBarProps) {
-  if (!rebalanceThreshold || rebalanceThreshold === 0) {
+  const diff = Number(priceDifference);
+  if (!rebalanceThreshold || rebalanceThreshold === 0 || diff === 0) {
     return <span className="text-slate-400 text-sm">—</span>;
   }
-  const diff = Number(priceDifference);
   const threshold = rebalanceThreshold;
   const ratio = Math.min(diff / threshold, 1.5); // cap at 150%
   const pct = Math.min(ratio * 100, 100);

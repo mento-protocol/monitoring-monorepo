@@ -112,7 +112,7 @@ function HomeContent() {
           value={swapsLoading ? "…" : `${swaps.length} swaps`}
         />
         <Tile
-          label="Latest Block"
+          label="Latest Swap Block"
           value={latestBlock ? formatBlock(latestBlock) : "—"}
         />
       </div>
