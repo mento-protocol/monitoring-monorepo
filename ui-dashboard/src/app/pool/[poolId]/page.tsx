@@ -547,6 +547,7 @@ function LiquidityTab({
       {fpmmPool && snapshots.length > 0 && (
         <LiquidityChart
           snapshots={snapshots}
+          pool={pool}
           token0Symbol={sym0}
           token1Symbol={sym1}
         />
