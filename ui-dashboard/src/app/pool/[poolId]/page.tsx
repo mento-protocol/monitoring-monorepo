@@ -425,6 +425,7 @@ function ReservesTab({
         rows={rows}
         token0={pool?.token0 ?? null}
         token1={pool?.token1 ?? null}
+        pool={pool}
       />
       <Table>
         <thead>
