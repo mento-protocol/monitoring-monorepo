@@ -24,6 +24,8 @@ export type Pool = {
   limitPressure1?: string;
   rebalancerAddress?: string;
   rebalanceLivenessStatus?: string;
+  token0Decimals?: number;
+  token1Decimals?: number;
   swapCount?: number;
   rebalanceCount?: number;
   notionalVolume0?: string;

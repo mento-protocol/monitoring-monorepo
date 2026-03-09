@@ -7,20 +7,26 @@ import { tokenSymbol } from "@/lib/tokens";
 import { formatWei } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
 
-// Limits and netflows are always stored in 18-decimal precision in the indexer,
-// regardless of the token's ERC20 decimals (the FPMM normalises to 18dp internally).
-const LIMIT_DECIMALS = 18;
+// Default decimals fallback — overridden per-limit by TradingLimit.decimals field.
+const DEFAULT_LIMIT_DECIMALS = 18;
 
 interface PressureBarProps {
   pressure: string;
   label: string;
   netflow: string;
   limit: string;
+  decimals: number;
 }
 
 /** L0 = 5-minute rolling window, L1 = 24-hour rolling window (hardcoded in TradingLimitsV2.sol).
  * Both track absolute netflow of the given token against a configured ceiling. */
-function PressureBar({ pressure, label, netflow, limit }: PressureBarProps) {
+function PressureBar({
+  pressure,
+  label,
+  netflow,
+  limit,
+  decimals,
+}: PressureBarProps) {
   const ratio = Number(pressure);
   const pct = Math.min(ratio * 100, 100);
   const displayPct = (ratio * 100).toFixed(1);
@@ -31,8 +37,8 @@ function PressureBar({ pressure, label, netflow, limit }: PressureBarProps) {
         ? "bg-amber-500"
         : "bg-emerald-500";
 
-  const netflowHuman = formatWei(netflow.replace(/^-/, ""), LIMIT_DECIMALS, 2);
-  const limitHuman = formatWei(limit, LIMIT_DECIMALS, 2);
+  const netflowHuman = formatWei(netflow.replace(/^-/, ""), decimals, 2);
+  const limitHuman = formatWei(limit, decimals, 2);
   const sign = netflow.startsWith("-") ? "-" : "+";
 
   return (
@@ -97,12 +103,14 @@ export function LimitPanel({ pool, tradingLimits }: LimitPanelProps) {
                   label="5-minute limit (L0)"
                   netflow={tl.netflow0}
                   limit={tl.limit0}
+                  decimals={tl.decimals ?? DEFAULT_LIMIT_DECIMALS}
                 />
                 <PressureBar
                   pressure={tl.limitPressure1}
                   label="Daily limit (L1)"
                   netflow={tl.netflow1}
                   limit={tl.limit1}
+                  decimals={tl.decimals ?? DEFAULT_LIMIT_DECIMALS}
                 />
               </div>
             );

@@ -383,6 +383,12 @@ function SwapsTab({
               const boughtAmt = soldToken0 ? s.amount1Out : s.amount0Out;
               const soldSym = soldToken0 ? sym0 : sym1;
               const boughtSym = soldToken0 ? sym1 : sym0;
+              const soldDec = soldToken0
+                ? (pool?.token0Decimals ?? 18)
+                : (pool?.token1Decimals ?? 18);
+              const boughtDec = soldToken0
+                ? (pool?.token1Decimals ?? 18)
+                : (pool?.token0Decimals ?? 18);
               return (
                 <Row key={s.id}>
                   <TxHashCell txHash={s.txHash} />
@@ -392,10 +398,10 @@ function SwapsTab({
                   />
                   <SenderCell address={s.recipient} />
                   <Td mono small align="right">
-                    {formatWei(soldAmt)} {soldSym}
+                    {formatWei(soldAmt, soldDec)} {soldSym}
                   </Td>
                   <Td mono small align="right">
-                    {formatWei(boughtAmt)} {boughtSym}
+                    {formatWei(boughtAmt, boughtDec)} {boughtSym}
                   </Td>
                   <td className="hidden md:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
                     {formatBlock(s.blockNumber)}
@@ -476,7 +482,8 @@ function ReservesTab({
                   <TxHashCell txHash={r.txHash} />
                   <Td mono small align="right">
                     <div>
-                      {formatWei(r.reserve0, 18, 2)} {sym0}
+                      {formatWei(r.reserve0, pool?.token0Decimals ?? 18, 2)}{" "}
+                      {sym0}
                     </div>
                     {showUsd && (
                       <div className="text-xs text-slate-500">
@@ -490,7 +497,8 @@ function ReservesTab({
                   </Td>
                   <Td mono small align="right">
                     <div>
-                      {formatWei(r.reserve1, 18, 2)} {sym1}
+                      {formatWei(r.reserve1, pool?.token1Decimals ?? 18, 2)}{" "}
+                      {sym1}
                     </div>
                     {showUsd && (
                       <div className="text-xs text-slate-500">
