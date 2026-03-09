@@ -30,6 +30,8 @@ export type Pool = {
   rebalanceCount?: number;
   notionalVolume0?: string;
   notionalVolume1?: string;
+  reserves0?: string;
+  reserves1?: string;
 };
 
 export type OracleSnapshot = {
@@ -113,6 +115,12 @@ export type RebalanceEvent = {
   rebalancerAddress?: string;
   improvement?: string;
   effectivenessRatio?: string;
+};
+
+export type PoolSnapshot24h = {
+  poolId: string;
+  swapVolume0: string;
+  swapVolume1: string;
 };
 
 export type TradingLimit = {

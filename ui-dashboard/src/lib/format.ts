@@ -54,6 +54,12 @@ export function isValidAddress(value: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(value);
 }
 
+export function formatUSD(value: number): string {
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  return `$${value.toFixed(2)}`;
+}
+
 // ---------------------------------------------------------------------------
 // Oracle price formatting
 // ---------------------------------------------------------------------------

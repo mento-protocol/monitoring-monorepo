@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { relativeTime, formatTimestamp } from "@/lib/format";
-import { poolName } from "@/lib/tokens";
+import { relativeTime, formatTimestamp, formatUSD } from "@/lib/format";
+import { poolName, poolTvlUSD } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
@@ -12,7 +12,6 @@ import {
   LimitBadge,
   RebalancerBadge,
 } from "@/components/badges";
-import { AddressLink } from "@/components/address-link";
 import {
   computeHealthStatus,
   computeLimitStatus,
@@ -53,9 +52,10 @@ function rebalancerTooltip(status: RebalancerStatus): string {
 
 interface PoolsTableProps {
   pools: Pool[];
+  volume24h?: Map<string, number>;
 }
 
-export function PoolsTable({ pools }: PoolsTableProps) {
+export function PoolsTable({ pools, volume24h }: PoolsTableProps) {
   const { network } = useNetwork();
   const nowSeconds = Math.floor(Date.now() / 1000);
   return (
@@ -63,28 +63,23 @@ export function PoolsTable({ pools }: PoolsTableProps) {
       <thead>
         <tr className="border-b border-slate-800 bg-slate-900/50">
           <Th>Pool</Th>
-          <Th>Type</Th>
-          <Th>Status</Th>
+          <Th>Source</Th>
+          <Th>Health</Th>
           <Th>Limit</Th>
+          <th scope="col" className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left">TVL</th>
+          <th scope="col" className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left">24h Vol</th>
           <th
             scope="col"
-            className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400"
+            className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
           >
             Rebalancer
           </th>
           <th
             scope="col"
-            className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400"
-          >
-            Address
-          </th>
-          <th
-            scope="col"
-            className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400"
+            className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
           >
             Created
           </th>
-          <Th>Updated</Th>
         </tr>
       </thead>
       <tbody>
@@ -95,6 +90,8 @@ export function PoolsTable({ pools }: PoolsTableProps) {
             { ...p, healthStatus },
             nowSeconds,
           );
+          const tvl = poolTvlUSD(p, network);
+          const vol = volume24h?.get(p.id) ?? 0;
           return (
             <Row key={p.id}>
               <td className="px-2 sm:px-4 py-2 sm:py-3">
@@ -118,13 +115,16 @@ export function PoolsTable({ pools }: PoolsTableProps) {
                   <LimitBadge status={limitStatus} />
                 </span>
               </td>
+              <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-300 font-mono">
+                {tvl > 0 ? formatUSD(tvl) : "—"}
+              </td>
+              <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-300 font-mono">
+                {vol > 0 ? formatUSD(vol) : "—"}
+              </td>
               <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
                 <span title={rebalancerTooltip(rebalancerStatus)}>
                   <RebalancerBadge status={rebalancerStatus} />
                 </span>
-              </td>
-              <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-[10px] sm:text-xs text-slate-300">
-                <AddressLink address={p.id} />
               </td>
               <td
                 className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-[10px] sm:text-xs text-slate-400"
@@ -132,9 +132,6 @@ export function PoolsTable({ pools }: PoolsTableProps) {
               >
                 {relativeTime(p.createdAtTimestamp)}
               </td>
-              <Td muted title={formatTimestamp(p.updatedAtTimestamp)}>
-                {relativeTime(p.updatedAtTimestamp)}
-              </Td>
             </Row>
           );
         })}
