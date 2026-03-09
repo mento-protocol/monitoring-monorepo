@@ -15,7 +15,7 @@ export type HealthStatus = "OK" | "WARN" | "CRITICAL" | "N/A";
  * We match the on-chain definition: an oracle is stale when its last report
  * is older than the SortedOracles expiry window.
  */
-const ORACLE_STALE_SECONDS = 300;
+export const ORACLE_STALE_SECONDS = 300;
 
 export interface PoolHealthState {
   source?: string;

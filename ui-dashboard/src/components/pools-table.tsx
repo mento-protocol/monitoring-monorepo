@@ -17,6 +17,7 @@ import {
   computeHealthStatus,
   computeLimitStatus,
   computeRebalancerLiveness,
+  ORACLE_STALE_SECONDS,
 } from "@/lib/health";
 import type { RebalancerStatus } from "@/lib/health";
 
@@ -26,7 +27,8 @@ function healthTooltip(status: string, p: Pool): string {
   // wall-clock oracle age (same logic as computeHealthStatus).
   const oracleTs = Number(p.oracleTimestamp ?? "0");
   const isOracleStale =
-    oracleTs === 0 || Math.floor(Date.now() / 1000) - oracleTs > 300;
+    oracleTs === 0 ||
+    Math.floor(Date.now() / 1000) - oracleTs > ORACLE_STALE_SECONDS;
   if (status === "CRITICAL" && isOracleStale)
     return "Oracle stale — last update expired";
   if (status === "CRITICAL") return "Price deviation ≥ rebalance threshold";
