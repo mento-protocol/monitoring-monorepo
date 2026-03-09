@@ -64,11 +64,17 @@ function GlobalContent() {
   // TVL for FPMM pools
   const fpmmTvl = fpmmPools.reduce((sum, p) => sum + poolTvlUSD(p, network), 0);
 
-  const volume24hMap = buildPool24hVolumeMap(snapshots24h, pools, network);
-  const total24hVolume = Array.from(volume24hMap.values()).reduce<number>(
-    (sum, v) => (typeof v === "number" ? sum + v : sum),
-    0,
+  const volume24hMap = useMemo(
+    () => buildPool24hVolumeMap(snapshots24h, pools, network),
+    [snapshots24h, pools, network],
   );
+  const total24hVolume = useMemo(() => {
+    if (snapshotsErr) return null;
+    return Array.from(volume24hMap.values()).reduce<number>(
+      (sum, v) => (typeof v === "number" ? sum + v : sum),
+      0,
+    );
+  }, [volume24hMap, snapshotsErr]);
 
   return (
     <div className="space-y-8">
@@ -110,7 +116,11 @@ function GlobalContent() {
           <Tile
             label="24h Volume"
             value={
-              poolsLoading || snapshotsLoading ? "…" : formatUSD(total24hVolume)
+              poolsLoading || snapshotsLoading
+                ? "…"
+                : total24hVolume === null
+                  ? "N/A"
+                  : formatUSD(total24hVolume)
             }
           />
           <Tile
