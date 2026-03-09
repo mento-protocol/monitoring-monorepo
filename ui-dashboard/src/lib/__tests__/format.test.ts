@@ -72,7 +72,7 @@ describe("formatWei", () => {
 
   it("formats 1 token correctly", () => {
     const result = formatWei("1000000000000000000");
-    expect(result).toBe("1");
+    expect(result).toBe("1.00");
   });
 
   it("formats 1234.5678 tokens", () => {
@@ -80,10 +80,10 @@ describe("formatWei", () => {
     expect(result).toContain("1,234");
   });
 
-  it("uses exponential notation for very small numbers", () => {
-    // 0.00001 token in wei
+  it("formats very small numbers as fixed decimal (no scientific notation)", () => {
+    // 0.00001 token in wei — should show "0.00" not "1.00e-5"
     const result = formatWei("10000000000000"); // 0.00001
-    expect(result).toContain("e");
+    expect(result).toBe("0.00");
   });
 });
 
