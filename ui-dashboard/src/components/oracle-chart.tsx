@@ -48,15 +48,26 @@ export function OracleChart({
   );
 
   const hoverText = snapshots.map((s, i) => {
-    const ts = new Date(Number(s.timestamp) * 1000).toLocaleString();
+    const d = new Date(Number(s.timestamp) * 1000);
+    const ts =
+      d.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }) +
+      " " +
+      d.toLocaleTimeString("en-US", {
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
     const price = prices[i].toFixed(4);
     const dev = deviations[i].toFixed(2);
     return (
       `<b>${ts}</b><br>` +
       `Price: ${price} ${token1Symbol}/${token0Symbol}<br>` +
-      `Deviation: ${dev}%<br>` +
-      `Reporters: ${s.numReporters}<br>` +
-      `Source: ${s.source}`
+      `Deviation: ${dev}%`
     );
   });
 
