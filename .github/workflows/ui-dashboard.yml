@@ -18,7 +18,7 @@ permissions: read-all
 jobs:
   quality:
     name: Quality Checks (ui-dashboard)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       checks: write
       contents: read
