@@ -37,8 +37,8 @@ export const ALL_POOLS_WITH_HEALTH = `
 `;
 
 export const POOL_SNAPSHOTS_24H = `
-  query PoolSnapshots24h($since: numeric!) {
-    PoolSnapshot(where: { timestamp: { _gte: $since } }) {
+  query PoolSnapshots24h($from: numeric!, $to: numeric!) {
+    PoolSnapshot(where: { timestamp: { _gte: $from, _lt: $to } }) {
       poolId
       swapVolume0
       swapVolume1
