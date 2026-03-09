@@ -62,9 +62,16 @@ actions:
       run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
       triggers:
         - git_hooks: [pre-push]
+    - id: indexer-codegen-pre-push
+      display_name: Indexer Schema Codegen (pre-push)
+      description: Validates schema.graphql by running envio codegen — catches duplicate fields, bad types, etc. before CI.
+      run: pnpm --filter @mento-protocol/indexer-envio codegen --config config.celo.mainnet.yaml
+      triggers:
+        - git_hooks: [pre-push]
   enabled:
     - trunk-fmt-pre-commit
     - trunk-check-all-pre-push
     - typecheck-pre-push
     - test-pre-push
+    - indexer-codegen-pre-push
     - trunk-upgrade-available
