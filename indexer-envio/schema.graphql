@@ -2,6 +2,8 @@ type Pool {
   id: ID!
   token0: String
   token1: String
+  token0Decimals: Int!
+  token1Decimals: Int!
   source: String!
 
   # Latest reserves (updated on every ReserveUpdate / Swap)
@@ -22,6 +24,10 @@ type Pool {
   oracleExpiry: BigInt!
   oracleNumReporters: Int!
   referenceRateFeedID: String! @index
+
+  # Token decimals (used for reserve normalization)
+  token0Decimals: Int!
+  token1Decimals: Int!
 
   # Deviation / rebalance state
   priceDifference: BigInt!
