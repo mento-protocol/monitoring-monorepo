@@ -44,7 +44,7 @@ describe("buildPool24hVolumeMap", () => {
     expect(volumeByPool.get("pool-1")).toBeCloseTo(2, 8);
   });
 
-  it("falls back to sum of both token volumes when oracle is unavailable", () => {
+  it("marks volume as non-convertible when oracle is unavailable", () => {
     const pools: Pool[] = [
       {
         id: "pool-2",
@@ -70,6 +70,6 @@ describe("buildPool24hVolumeMap", () => {
     ];
 
     const volumeByPool = buildPool24hVolumeMap(snapshots, pools, network);
-    expect(volumeByPool.get("pool-2")).toBeCloseTo(4, 8);
+    expect(volumeByPool.get("pool-2")).toBeNull();
   });
 });

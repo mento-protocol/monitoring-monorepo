@@ -52,7 +52,7 @@ function rebalancerTooltip(status: RebalancerStatus): string {
 
 interface PoolsTableProps {
   pools: Pool[];
-  volume24h?: Map<string, number>;
+  volume24h?: Map<string, number | null>;
   volume24hLoading?: boolean;
 }
 
@@ -106,7 +106,7 @@ export function PoolsTable({
             nowSeconds,
           );
           const tvl = poolTvlUSD(p, network);
-          const vol = volume24h?.get(p.id) ?? 0;
+          const vol = volume24h?.get(p.id);
           return (
             <Row key={p.id}>
               <td className="px-2 sm:px-4 py-2 sm:py-3">
@@ -134,7 +134,13 @@ export function PoolsTable({
                 {tvl > 0 ? formatUSD(tvl) : "—"}
               </td>
               <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-300 font-mono">
-                {volume24hLoading ? "…" : vol > 0 ? formatUSD(vol) : "—"}
+                {volume24hLoading
+                  ? "…"
+                  : vol === null
+                    ? "N/A"
+                    : vol && vol > 0
+                      ? formatUSD(vol)
+                      : "—"}
               </td>
               <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
                 <span title={rebalancerTooltip(rebalancerStatus)}>
