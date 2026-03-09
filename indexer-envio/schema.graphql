@@ -25,10 +25,6 @@ type Pool {
   oracleNumReporters: Int!
   referenceRateFeedID: String! @index
 
-  # Token decimals (used for reserve normalization)
-  token0Decimals: Int!
-  token1Decimals: Int!
-
   # Deviation / rebalance state
   priceDifference: BigInt!
   rebalanceThreshold: Int!
