@@ -329,3 +329,43 @@ describe("computeRebalancerLiveness", () => {
     ).toBe("ACTIVE");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Oracle staleness boundary (300s)
+// ---------------------------------------------------------------------------
+describe("computeHealthStatus oracle staleness boundary", () => {
+  it("oracle at exactly 300s is fresh (age <= 300 → OK)", () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: FRESH_TS, // within 300s
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+      }),
+    ).toBe("OK");
+  });
+
+  it("oracle at 301s is stale → CRITICAL", () => {
+    const ts301 = String(Math.floor(Date.now() / 1000) - 301);
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: ts301,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+      }),
+    ).toBe("CRITICAL");
+  });
+
+  it("oracle at exactly 300s is not stale (age <= 300)", () => {
+    const ts300 = String(Math.floor(Date.now() / 1000) - 300);
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: ts300,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+      }),
+    ).toBe("OK");
+  });
+});

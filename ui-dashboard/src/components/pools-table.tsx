@@ -20,10 +20,14 @@ import {
 } from "@/lib/health";
 import type { RebalancerStatus } from "@/lib/health";
 
-function healthTooltip(p: Pool): string {
-  const status = p.healthStatus ?? "N/A";
+function healthTooltip(status: string, p: Pool): string {
   if (status === "N/A") return "VirtualPool — oracle health not tracked";
-  if (status === "CRITICAL" && p.oracleOk === false)
+  // Determine whether CRITICAL is oracle-driven or deviation-driven using
+  // wall-clock oracle age (same logic as computeHealthStatus).
+  const oracleTs = Number(p.oracleTimestamp ?? "0");
+  const isOracleStale =
+    oracleTs === 0 || Math.floor(Date.now() / 1000) - oracleTs > 300;
+  if (status === "CRITICAL" && isOracleStale)
     return "Oracle stale — last update expired";
   if (status === "CRITICAL") return "Price deviation ≥ rebalance threshold";
   if (status === "WARN") return "Price deviation ≥ 80% of rebalance threshold";
@@ -83,8 +87,12 @@ export function PoolsTable({ pools }: PoolsTableProps) {
       </thead>
       <tbody>
         {pools.map((p) => {
+          const healthStatus = computeHealthStatus(p);
           const limitStatus = p.limitStatus ?? computeLimitStatus(p);
-          const rebalancerStatus = computeRebalancerLiveness(p, nowSeconds);
+          const rebalancerStatus = computeRebalancerLiveness(
+            { ...p, healthStatus },
+            nowSeconds,
+          );
           return (
             <Row key={p.id}>
               <td className="px-2 sm:px-4 py-2 sm:py-3">
@@ -99,8 +107,8 @@ export function PoolsTable({ pools }: PoolsTableProps) {
                 <SourceBadge source={p.source} />
               </td>
               <td className="px-2 sm:px-4 py-2 sm:py-3">
-                <span title={healthTooltip(p)}>
-                  <HealthBadge status={computeHealthStatus(p)} />
+                <span title={healthTooltip(healthStatus, p)}>
+                  <HealthBadge status={healthStatus} />
                 </span>
               </td>
               <td className="px-2 sm:px-4 py-2 sm:py-3">
