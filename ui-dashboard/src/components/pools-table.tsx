@@ -5,7 +5,7 @@ import { relativeTime, formatTimestamp, formatUSD } from "@/lib/format";
 import { poolName, poolTvlUSD } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool } from "@/lib/types";
-import { Table, Row, Th, Td } from "@/components/table";
+import { Table, Row, Th } from "@/components/table";
 import {
   SourceBadge,
   HealthBadge,
@@ -53,9 +53,14 @@ function rebalancerTooltip(status: RebalancerStatus): string {
 interface PoolsTableProps {
   pools: Pool[];
   volume24h?: Map<string, number>;
+  volume24hLoading?: boolean;
 }
 
-export function PoolsTable({ pools, volume24h }: PoolsTableProps) {
+export function PoolsTable({
+  pools,
+  volume24h,
+  volume24hLoading = false,
+}: PoolsTableProps) {
   const { network } = useNetwork();
   const nowSeconds = Math.floor(Date.now() / 1000);
   return (
@@ -66,8 +71,18 @@ export function PoolsTable({ pools, volume24h }: PoolsTableProps) {
           <Th>Source</Th>
           <Th>Health</Th>
           <Th>Limit</Th>
-          <th scope="col" className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left">TVL</th>
-          <th scope="col" className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left">24h Vol</th>
+          <th
+            scope="col"
+            className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
+          >
+            TVL
+          </th>
+          <th
+            scope="col"
+            className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
+          >
+            24h Vol
+          </th>
           <th
             scope="col"
             className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
@@ -119,7 +134,7 @@ export function PoolsTable({ pools, volume24h }: PoolsTableProps) {
                 {tvl > 0 ? formatUSD(tvl) : "—"}
               </td>
               <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-300 font-mono">
-                {vol > 0 ? formatUSD(vol) : "—"}
+                {volume24hLoading ? "…" : vol > 0 ? formatUSD(vol) : "—"}
               </td>
               <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
                 <span title={rebalancerTooltip(rebalancerStatus)}>
