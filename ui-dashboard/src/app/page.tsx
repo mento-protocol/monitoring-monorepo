@@ -39,6 +39,7 @@ function GlobalContent() {
   } = useGQL<{ PoolSnapshot: PoolSnapshot24h[] }>(
     POOL_SNAPSHOTS_24H,
     snapshotsVariables,
+    60_000,
   );
 
   const { network } = useNetwork();
@@ -64,8 +65,8 @@ function GlobalContent() {
   const fpmmTvl = fpmmPools.reduce((sum, p) => sum + poolTvlUSD(p, network), 0);
 
   const volume24hMap = buildPool24hVolumeMap(snapshots24h, pools, network);
-  const total24hVolume = Array.from(volume24hMap.values()).reduce(
-    (sum, v) => sum + v,
+  const total24hVolume = Array.from(volume24hMap.values()).reduce<number>(
+    (sum, v) => (typeof v === "number" ? sum + v : sum),
     0,
   );
 
