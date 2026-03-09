@@ -6,19 +6,28 @@ on:
     branches: [main]
     paths:
       - indexer-envio/**
-      - scripts/**
-      - docs/**
-      - .trunk/**
+      - pnpm-lock.yaml
+      - package.json
       - .github/workflows/indexer-envio.yml
   pull_request:
     branches: [main]
+    paths:
+      - indexer-envio/**
+      - pnpm-lock.yaml
+      - package.json
+      - .github/workflows/indexer-envio.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions: read-all
 
 jobs:
   quality:
-    name: Quality Checks (indexer-envio)
+    name: Quality Checks
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
     permissions:
       checks: write
       contents: read
@@ -27,7 +36,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

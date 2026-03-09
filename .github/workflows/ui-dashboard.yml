@@ -6,19 +6,28 @@ on:
     branches: [main]
     paths:
       - ui-dashboard/**
-      - scripts/**
-      - docs/**
-      - .trunk/**
+      - pnpm-lock.yaml
+      - package.json
       - .github/workflows/ui-dashboard.yml
   pull_request:
     branches: [main]
+    paths:
+      - ui-dashboard/**
+      - pnpm-lock.yaml
+      - package.json
+      - .github/workflows/ui-dashboard.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions: read-all
 
 jobs:
   quality:
-    name: Quality Checks (ui-dashboard)
+    name: Quality Checks
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
     permissions:
       checks: write
       contents: read
@@ -27,7 +36,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -35,8 +44,9 @@ jobs:
         run: pnpm --filter @mento-protocol/ui-dashboard typecheck
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
-      - uses: codecov/codecov-action@v4
+      - uses: codecov/codecov-action@v5
         with:
           fail_ci_if_error: false
           flags: ui-dashboard
           directory: ui-dashboard/coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
