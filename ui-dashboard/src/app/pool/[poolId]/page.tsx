@@ -470,8 +470,8 @@ function ReservesTab({
             const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
             const showUsd = feedVal !== null;
             return [...rows].reverse().map((r) => {
-              const raw0 = parseWei(r.reserve0);
-              const raw1 = parseWei(r.reserve1);
+              const raw0 = parseWei(r.reserve0, pool?.token0Decimals ?? 18);
+              const raw1 = parseWei(r.reserve1, pool?.token1Decimals ?? 18);
               // USD values: USDm ≈ $1, non-USDm × feedVal
               const usd0 = feedVal && !usdmIsToken0 ? raw0 * feedVal : raw0;
               const usd1 = feedVal && usdmIsToken0 ? raw1 * feedVal : raw1;

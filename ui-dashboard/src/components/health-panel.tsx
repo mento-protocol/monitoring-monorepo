@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Pool } from "@/lib/types";
 import { HealthBadge } from "@/components/badges";
+import { computeHealthStatus } from "@/lib/health";
 import {
   tokenSymbol,
   chainlinkFeedUrl,
@@ -91,7 +92,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
       ? nowSeconds - Number(pool.oracleTimestamp)
       : Infinity;
   const ORACLE_STALE_THRESHOLD = 300; // SortedOracles.reportExpirySeconds()
-  const isOracleFresh = oracleAge < ORACLE_STALE_THRESHOLD;
+  const isOracleFresh = oracleAge <= ORACLE_STALE_THRESHOLD; // age <= 300 is fresh, > 300 is stale
 
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
@@ -124,7 +125,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <div className="flex items-center gap-3 mb-4">
         <h2 className="text-base font-semibold text-white">Health Status</h2>
-        <HealthBadge status={pool.healthStatus ?? "N/A"} />
+        <HealthBadge status={computeHealthStatus(pool)} />
       </div>
 
       {isVirtual ? (

@@ -4,6 +4,8 @@ export const ALL_POOLS_WITH_HEALTH = `
       id
       token0
       token1
+      token0Decimals
+      token1Decimals
       source
       createdAtBlock
       createdAtTimestamp
@@ -100,7 +102,7 @@ export const POOL_LIQUIDITY = `
 export const POOL_DETAIL_WITH_HEALTH = `
   query PoolDetailWithHealth($id: String!) {
     Pool(where: { id: { _eq: $id } }) {
-      id token0 token1 source
+      id token0 token1 token0Decimals token1Decimals source
       createdAtBlock createdAtTimestamp
       updatedAtBlock updatedAtTimestamp
       healthStatus
