@@ -197,6 +197,20 @@ const FPMM_TRADING_LIMITS_ABI = [
 const FPMM_MINIMAL_ABI = [
   {
     type: "function",
+    name: "decimals0",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "decimals1",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "rebalanceThresholdAbove",
     inputs: [],
     outputs: [{ name: "", type: "uint256" }],
@@ -330,6 +344,26 @@ type TradingLimitData = {
   };
 };
 
+/** Fetches decimals0() or decimals1() from an FPMM pool — returns the scaling
+ *  factor (e.g. 1000000000000000000n for 18dp, 1000000n for 6dp). */
+async function fetchTokenDecimalsScaling(
+  chainId: number,
+  poolAddress: string,
+  fn: "decimals0" | "decimals1",
+): Promise<bigint | null> {
+  try {
+    const client = getRpcClient(chainId);
+    const result = await client.readContract({
+      address: poolAddress as `0x${string}`,
+      abi: FPMM_MINIMAL_ABI,
+      functionName: fn,
+    });
+    return result as bigint;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchTradingLimits(
   chainId: number,
   poolAddress: string,
@@ -416,14 +450,24 @@ function computePriceDifference(pool: {
   oraclePrice: bigint;
   token0?: string;
   token1?: string;
+  token0Decimals: number;
+  token1Decimals: number;
 }): bigint {
   if (pool.oraclePrice === 0n || pool.reserves0 === 0n || pool.reserves1 === 0n)
     return 0n;
   if (!pool.token0 || !pool.token1) return 0n;
 
   const SCALE = 10n ** 24n;
-  // reserveRatio in 24dp: reserves0 / reserves1
-  const reserveRatio = (pool.reserves0 * SCALE) / pool.reserves1;
+  // Normalize reserves to 18 decimals before computing ratio.
+  // USDT/USDC are 6dp, USDm/GBPm are 18dp — without normalization the ratio
+  // is off by 10^(18-6) = 10^12.
+  const dec0 = BigInt(pool.token0Decimals);
+  const dec1 = BigInt(pool.token1Decimals);
+  const norm0 = pool.reserves0 * 10n ** (18n - dec0);
+  const norm1 = pool.reserves1 * 10n ** (18n - dec1);
+
+  // reserveRatio in 24dp: norm0 / norm1
+  const reserveRatio = (norm0 * SCALE) / norm1;
 
   // Determine oracle ratio in pool direction.
   // Feed direction = "feedToken/USD" (e.g. GBP/USD = 1.34).
@@ -526,6 +570,8 @@ const DEFAULT_ORACLE_FIELDS = {
   limitPressure1: "0.0000" as string,
   rebalancerAddress: "" as string,
   rebalanceLivenessStatus: "N/A" as string,
+  token0Decimals: 18,
+  token1Decimals: 18,
 };
 
 const getOrCreatePool = async (
@@ -566,6 +612,7 @@ const upsertPool = async ({
   swapDelta,
   rebalanceDelta,
   oracleDelta,
+  tokenDecimals,
 }: {
   context: PoolContext;
   poolId: string;
@@ -578,6 +625,7 @@ const upsertPool = async ({
   swapDelta?: { volume0: bigint; volume1: bigint };
   rebalanceDelta?: boolean;
   oracleDelta?: Partial<typeof DEFAULT_ORACLE_FIELDS>;
+  tokenDecimals?: { token0Decimals: number; token1Decimals: number };
 }): Promise<Pool> => {
   const existing = await getOrCreatePool(context, poolId, { token0, token1 });
 
@@ -594,6 +642,9 @@ const upsertPool = async ({
     rebalanceCount: existing.rebalanceCount + (rebalanceDelta ? 1 : 0),
     // Merge oracle delta if provided
     ...(oracleDelta ?? {}),
+    // Persist token decimals if provided (set once at pool creation)
+    token0Decimals: tokenDecimals?.token0Decimals ?? existing.token0Decimals,
+    token1Decimals: tokenDecimals?.token1Decimals ?? existing.token1Decimals,
     createdAtBlock:
       existing.createdAtBlock === 0n ? blockNumber : existing.createdAtBlock,
     createdAtTimestamp:
@@ -700,12 +751,18 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
   // Fetch oracle state from chain at pool creation
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
 
-  const [rateFeedID, rebalanceThreshold] = await Promise.all([
+  const [rateFeedID, rebalanceThreshold, dec0Raw, dec1Raw] = await Promise.all([
     fetchReferenceRateFeedID(event.chainId, poolId),
     // Use standalone getters — they work even when the oracle is stale,
     // unlike getRebalancingState() which reverts on stale/expired oracle data.
     fetchRebalanceThreshold(event.chainId, poolId),
+    // Fetch token decimals scaling factors (e.g. 1e18 for 18-decimal tokens)
+    fetchTokenDecimalsScaling(event.chainId, poolId, "decimals0"),
+    fetchTokenDecimalsScaling(event.chainId, poolId, "decimals1"),
   ]);
+  // Convert scaling factor (1e18, 1e6, etc.) to decimals count (18, 6, etc.)
+  const token0Decimals = dec0Raw ? Math.round(Math.log10(Number(dec0Raw))) : 18;
+  const token1Decimals = dec1Raw ? Math.round(Math.log10(Number(dec1Raw))) : 18;
 
   if (rateFeedID) {
     oracleDelta.referenceRateFeedID = rateFeedID;
@@ -725,6 +782,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     blockNumber,
     blockTimestamp,
     oracleDelta,
+    tokenDecimals: { token0Decimals, token1Decimals },
   });
 
   const deployment: FactoryDeployment = {
