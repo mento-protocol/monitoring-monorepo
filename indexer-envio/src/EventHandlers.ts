@@ -444,6 +444,32 @@ const USDM_ADDRESSES = new Set([
  *
  * Returns 0n when oracle price or reserves are missing/zero.
  */
+/**
+ * Normalize an amount to 18 decimal precision regardless of source token decimals.
+ * Handles dec < 18 (scale up), dec > 18 (scale down), dec === 18 (no-op).
+ */
+export function normalizeTo18(amount: bigint, decimals: number): bigint {
+  if (decimals === 18) return amount;
+  if (decimals < 18) return amount * 10n ** BigInt(18 - decimals);
+  return amount / 10n ** BigInt(decimals - 18);
+}
+
+/**
+ * Convert an on-chain ERC20 decimals scaling factor (e.g. 1000000n for 6dp,
+ * 10^18 for 18dp) to a plain decimals count. Returns null if the value is not
+ * a valid power of 10 (rejects unexpected/corrupt on-chain values).
+ */
+export function scalingFactorToDecimals(scaling: bigint): number | null {
+  if (scaling <= 0n) return null;
+  let d = 0;
+  let n = scaling;
+  while (n > 1n && n % 10n === 0n) {
+    n /= 10n;
+    d += 1;
+  }
+  return n === 1n ? d : null; // reject non-10^n values
+}
+
 function computePriceDifference(pool: {
   reserves0: bigint;
   reserves1: bigint;
@@ -461,10 +487,8 @@ function computePriceDifference(pool: {
   // Normalize reserves to 18 decimals before computing ratio.
   // USDT/USDC are 6dp, USDm/GBPm are 18dp — without normalization the ratio
   // is off by 10^(18-6) = 10^12.
-  const dec0 = BigInt(pool.token0Decimals);
-  const dec1 = BigInt(pool.token1Decimals);
-  const norm0 = pool.reserves0 * 10n ** (18n - dec0);
-  const norm1 = pool.reserves1 * 10n ** (18n - dec1);
+  const norm0 = normalizeTo18(pool.reserves0, pool.token0Decimals);
+  const norm1 = normalizeTo18(pool.reserves1, pool.token1Decimals);
 
   // reserveRatio in 24dp: norm0 / norm1
   const reserveRatio = (norm0 * SCALE) / norm1;
@@ -761,8 +785,13 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     fetchTokenDecimalsScaling(event.chainId, poolId, "decimals1"),
   ]);
   // Convert scaling factor (1e18, 1e6, etc.) to decimals count (18, 6, etc.)
-  const token0Decimals = dec0Raw ? Math.round(Math.log10(Number(dec0Raw))) : 18;
-  const token1Decimals = dec1Raw ? Math.round(Math.log10(Number(dec1Raw))) : 18;
+  // scalingFactorToDecimals rejects non-power-of-10 values (returns null → fallback 18)
+  const token0Decimals = dec0Raw
+    ? (scalingFactorToDecimals(dec0Raw) ?? 18)
+    : 18;
+  const token1Decimals = dec1Raw
+    ? (scalingFactorToDecimals(dec1Raw) ?? 18)
+    : 18;
 
   if (rateFeedID) {
     oracleDelta.referenceRateFeedID = rateFeedID;
