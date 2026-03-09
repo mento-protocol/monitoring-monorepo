@@ -11,11 +11,6 @@ on:
       - .github/workflows/indexer-envio.yml
   pull_request:
     branches: [main]
-    paths:
-      - indexer-envio/**
-      - pnpm-lock.yaml
-      - package.json
-      - .github/workflows/indexer-envio.yml
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -33,23 +28,43 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+      - name: Detect indexer-related changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            indexer:
+              - indexer-envio/**
+              - pnpm-lock.yaml
+              - package.json
+              - .github/workflows/indexer-envio.yml
+      - name: No indexer changes
+        if: steps.changes.outputs.indexer != 'true'
+        run: echo "No indexer-related changes; skipping indexer quality checks."
       - uses: pnpm/action-setup@v4
+        if: steps.changes.outputs.indexer == 'true'
       - uses: actions/setup-node@v4
+        if: steps.changes.outputs.indexer == 'true'
         with:
           node-version-file: .node-version
           cache: pnpm
       - name: Install dependencies
+        if: steps.changes.outputs.indexer == 'true'
         run: pnpm install --frozen-lockfile
       - name: Generate types (envio codegen)
+        if: steps.changes.outputs.indexer == 'true'
         # Use mainnet config — it has the full contract set (VirtualPool, SortedOracles)
         # that devnet config omits, so all exports are generated for typecheck.
         run: pnpm --filter @mento-protocol/indexer-envio codegen --config config.celo.mainnet.yaml
       - name: Link generated package
+        if: steps.changes.outputs.indexer == 'true'
         # pnpm install runs before generated/ exists, so the workspace symlink for
         # the optional `link:generated` dep is missing. Re-running install after
         # codegen creates the symlink so typecheck and tests can resolve it.
         run: pnpm install --frozen-lockfile
       - name: Typecheck
+        if: steps.changes.outputs.indexer == 'true'
         run: pnpm --filter @mento-protocol/indexer-envio typecheck
       - name: Test
+        if: steps.changes.outputs.indexer == 'true'
         run: pnpm --filter @mento-protocol/indexer-envio test
