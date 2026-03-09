@@ -1,4 +1,4 @@
-name: "Indexer Envio: Quality Checks"
+name: Indexer Envio
 
 on:
   workflow_dispatch:

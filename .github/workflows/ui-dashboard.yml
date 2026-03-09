@@ -1,4 +1,4 @@
-name: "UI Dashboard: Quality Checks"
+name: UI Dashboard
 
 on:
   workflow_dispatch:

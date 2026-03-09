@@ -1,4 +1,4 @@
-name: "Trunk: Code Quality"
+name: Trunk
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ permissions: read-all
 
 jobs:
   trunk:
-    name: Trunk Check
+    name: Code Quality
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
