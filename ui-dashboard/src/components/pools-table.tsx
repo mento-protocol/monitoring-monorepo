@@ -13,7 +13,11 @@ import {
   RebalancerBadge,
 } from "@/components/badges";
 import { AddressLink } from "@/components/address-link";
-import { computeLimitStatus, computeRebalancerLiveness } from "@/lib/health";
+import {
+  computeHealthStatus,
+  computeLimitStatus,
+  computeRebalancerLiveness,
+} from "@/lib/health";
 import type { RebalancerStatus } from "@/lib/health";
 
 function healthTooltip(p: Pool): string {
@@ -96,7 +100,7 @@ export function PoolsTable({ pools }: PoolsTableProps) {
               </td>
               <td className="px-2 sm:px-4 py-2 sm:py-3">
                 <span title={healthTooltip(p)}>
-                  <HealthBadge status={p.healthStatus ?? "N/A"} />
+                  <HealthBadge status={computeHealthStatus(p)} />
                 </span>
               </td>
               <td className="px-2 sm:px-4 py-2 sm:py-3">
