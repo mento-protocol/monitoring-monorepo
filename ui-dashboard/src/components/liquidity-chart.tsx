@@ -51,14 +51,17 @@ export function LiquidityChart({
   // Use token amounts as fallback when oracle price is unavailable
   const useUsd = rawFeedValue > 0;
 
+  const dec0 = pool?.token0Decimals ?? 18;
+  const dec1 = pool?.token1Decimals ?? 18;
+
   const toUsd0 = (raw: string) => {
-    const amount = parseWei(raw);
+    const amount = parseWei(raw, dec0);
     if (!useUsd) return amount;
     return usdmIsToken0 ? amount : amount * rawFeedValue;
   };
 
   const toUsd1 = (raw: string) => {
-    const amount = parseWei(raw);
+    const amount = parseWei(raw, dec1);
     if (!useUsd) return amount;
     return usdmIsToken0 ? amount * rawFeedValue : amount;
   };
@@ -68,8 +71,8 @@ export function LiquidityChart({
   );
   const reserves0Usd = snapshots.map((s) => toUsd0(s.reserves0));
   const reserves1Usd = snapshots.map((s) => toUsd1(s.reserves1));
-  const raw0 = snapshots.map((s) => parseWei(s.reserves0));
-  const raw1 = snapshots.map((s) => parseWei(s.reserves1));
+  const raw0 = snapshots.map((s) => parseWei(s.reserves0, dec0));
+  const raw1 = snapshots.map((s) => parseWei(s.reserves1, dec1));
 
   const yAxisTitle = useUsd ? "Reserve Value (USD)" : "Reserve Balance";
   const name0 = useUsd ? `${token0Symbol} (USD)` : token0Symbol;

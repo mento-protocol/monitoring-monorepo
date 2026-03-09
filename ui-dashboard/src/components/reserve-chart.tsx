@@ -46,14 +46,17 @@ export function ReserveChart({
   const useUsd = feedVal > 0;
   const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
 
+  const dec0 = pool?.token0Decimals ?? 18;
+  const dec1 = pool?.token1Decimals ?? 18;
+
   const toUsd0 = (raw: string) => {
-    const amount = parseWei(raw);
+    const amount = parseWei(raw, dec0);
     if (!useUsd) return amount;
     return usdmIsToken0 ? amount : amount * feedVal;
   };
 
   const toUsd1 = (raw: string) => {
-    const amount = parseWei(raw);
+    const amount = parseWei(raw, dec1);
     if (!useUsd) return amount;
     return usdmIsToken0 ? amount * feedVal : amount;
   };
@@ -65,8 +68,8 @@ export function ReserveChart({
   const r0 = rows.map((r) => toUsd0(r.reserve0));
   const r1 = rows.map((r) => toUsd1(r.reserve1));
   // Raw token amounts for hover tooltip (always show original, not USD)
-  const raw0 = rows.map((r) => parseWei(r.reserve0));
-  const raw1 = rows.map((r) => parseWei(r.reserve1));
+  const raw0 = rows.map((r) => parseWei(r.reserve0, dec0));
+  const raw1 = rows.map((r) => parseWei(r.reserve1, dec1));
 
   const name0 = useUsd ? `${sym0} (USD)` : sym0;
   const name1 = useUsd ? `${sym1} (USD)` : sym1;
