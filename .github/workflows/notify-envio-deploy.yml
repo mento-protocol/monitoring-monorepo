@@ -12,7 +12,7 @@ permissions: read-all
 jobs:
   notify:
     name: Post Discord reminder
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Determine network
         id: meta
