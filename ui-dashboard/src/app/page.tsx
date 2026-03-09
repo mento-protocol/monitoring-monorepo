@@ -1,12 +1,12 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useMemo } from "react";
 import Link from "next/link";
 import { useGQL } from "@/lib/graphql";
 import { ALL_POOLS_WITH_HEALTH, POOL_SNAPSHOTS_24H } from "@/lib/queries";
 import { formatWei, formatUSD } from "@/lib/format";
-import { poolName, isFpmm, poolTvlUSD, USDM_SYMBOLS, tokenSymbol } from "@/lib/tokens";
-import { parseWei } from "@/lib/format";
+import { poolName, isFpmm, poolTvlUSD } from "@/lib/tokens";
+import { buildPool24hVolumeMap, snapshotSince24h } from "@/lib/volume";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool, PoolSnapshot24h } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
@@ -29,10 +29,16 @@ function GlobalContent() {
     isLoading: poolsLoading,
   } = useGQL<{ Pool: Pool[] }>(ALL_POOLS_WITH_HEALTH);
 
-  const since = Math.floor(Date.now() / 1000) - 86400;
-  const { data: snapshotsData } = useGQL<{ PoolSnapshot: PoolSnapshot24h[] }>(
+  // Pool snapshots are bucketed per hour, so align the window to hour boundaries.
+  const since = snapshotSince24h(Date.now());
+  const snapshotsVariables = useMemo(() => ({ since }), [since]);
+  const {
+    data: snapshotsData,
+    error: snapshotsErr,
+    isLoading: snapshotsLoading,
+  } = useGQL<{ PoolSnapshot: PoolSnapshot24h[] }>(
     POOL_SNAPSHOTS_24H,
-    { since },
+    snapshotsVariables,
   );
 
   const { network } = useNetwork();
@@ -57,27 +63,7 @@ function GlobalContent() {
   // TVL for FPMM pools
   const fpmmTvl = fpmmPools.reduce((sum, p) => sum + poolTvlUSD(p, network), 0);
 
-  // 24h volume per pool
-  const poolMap = new Map<string, Pool>(pools.map((p) => [p.id, p]));
-  const volume24hMap = new Map<string, number>();
-  for (const snap of snapshots24h) {
-    const pool = poolMap.get(snap.poolId);
-    let vol: number;
-    if (pool?.oraclePrice && pool.oraclePrice !== "0") {
-      const sym0 = tokenSymbol(network, pool.token0 ?? null);
-      const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
-      if (usdmIsToken0) {
-        vol = parseWei(snap.swapVolume0, pool.token0Decimals ?? 18);
-      } else {
-        vol = parseWei(snap.swapVolume1, pool.token1Decimals ?? 18);
-      }
-    } else {
-      vol =
-        parseWei(snap.swapVolume0, pool?.token0Decimals ?? 18) +
-        parseWei(snap.swapVolume1, pool?.token1Decimals ?? 18);
-    }
-    volume24hMap.set(snap.poolId, (volume24hMap.get(snap.poolId) ?? 0) + vol);
-  }
+  const volume24hMap = buildPool24hVolumeMap(snapshots24h, pools, network);
   const total24hVolume = Array.from(volume24hMap.values()).reduce(
     (sum, v) => sum + v,
     0,
@@ -94,6 +80,11 @@ function GlobalContent() {
 
       {poolsErr && (
         <ErrorBox message={`Failed to load data: ${poolsErr.message}`} />
+      )}
+      {snapshotsErr && (
+        <ErrorBox
+          message={`Failed to load 24h snapshots: ${snapshotsErr.message}`}
+        />
       )}
 
       {/* Summary tiles */}
@@ -117,7 +108,9 @@ function GlobalContent() {
           />
           <Tile
             label="24h Volume"
-            value={poolsLoading ? "…" : formatUSD(total24hVolume)}
+            value={
+              poolsLoading || snapshotsLoading ? "…" : formatUSD(total24hVolume)
+            }
           />
           <Tile
             label="Total Swaps"
@@ -156,7 +149,11 @@ function GlobalContent() {
         ) : pools.length === 0 ? (
           <EmptyBox message="No pools found." />
         ) : (
-          <PoolsTable pools={pools} volume24h={volume24hMap} />
+          <PoolsTable
+            pools={pools}
+            volume24h={volume24hMap}
+            volume24hLoading={snapshotsLoading}
+          />
         )}
       </section>
 
