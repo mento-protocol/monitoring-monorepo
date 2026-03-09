@@ -22,9 +22,8 @@ export function parseWei(value: string, decimals = 18): number {
 export function formatWei(value: string, decimals = 18, display = 4): string {
   if (!value || value === "0") return "0";
   const num = Number(value) / 10 ** decimals;
-  if (Math.abs(num) < 0.0001 && num !== 0) return num.toExponential(2);
   return num.toLocaleString(undefined, {
-    minimumFractionDigits: 0,
+    minimumFractionDigits: 2,
     maximumFractionDigits: display,
   });
 }
