@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { relativeTime, formatTimestamp, formatUSD } from "@/lib/format";
 import { poolName, poolTvlUSD } from "@/lib/tokens";
@@ -63,6 +64,10 @@ export function PoolsTable({
 }: PoolsTableProps) {
   const { network } = useNetwork();
   const nowSeconds = Math.floor(Date.now() / 1000);
+  const tvlByPoolId = useMemo(
+    () => new Map(pools.map((pool) => [pool.id, poolTvlUSD(pool, network)])),
+    [pools, network],
+  );
   return (
     <Table>
       <thead>
@@ -105,7 +110,7 @@ export function PoolsTable({
             { ...p, healthStatus },
             nowSeconds,
           );
-          const tvl = poolTvlUSD(p, network);
+          const tvl = tvlByPoolId.get(p.id) ?? 0;
           const vol = volume24h?.get(p.id);
           return (
             <Row key={p.id}>

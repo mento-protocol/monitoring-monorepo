@@ -24,7 +24,7 @@ export function buildPool24hVolumeMap(
   const volumeByPool = new Map<string, number | null>();
 
   for (const pool of pools) {
-    if (!isUsdConvertible(pool)) {
+    if (!isUsdConvertible(pool, network)) {
       volumeByPool.set(pool.id, null);
     }
   }
@@ -51,14 +51,23 @@ function getSnapshotVolumeInUsd(
   pool: Pool | undefined,
   network: Network,
 ): number | null {
-  if (!pool || !isUsdConvertible(pool)) return null;
+  if (!pool || !isUsdConvertible(pool, network)) return null;
   const sym0 = tokenSymbol(network, pool.token0 ?? null);
-  const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
-  return usdmIsToken0
-    ? parseWei(snapshot.swapVolume0, pool.token0Decimals ?? 18)
-    : parseWei(snapshot.swapVolume1, pool.token1Decimals ?? 18);
+  const sym1 = tokenSymbol(network, pool.token1 ?? null);
+  if (USDM_SYMBOLS.has(sym0)) {
+    return parseWei(snapshot.swapVolume0, pool.token0Decimals ?? 18);
+  }
+  if (USDM_SYMBOLS.has(sym1)) {
+    return parseWei(snapshot.swapVolume1, pool.token1Decimals ?? 18);
+  }
+  return null;
 }
 
-function isUsdConvertible(pool: Pick<Pool, "oraclePrice">): boolean {
-  return Boolean(pool.oraclePrice && pool.oraclePrice !== "0");
+function isUsdConvertible(
+  pool: Pick<Pool, "token0" | "token1">,
+  network: Network,
+): boolean {
+  const sym0 = tokenSymbol(network, pool.token0 ?? null);
+  const sym1 = tokenSymbol(network, pool.token1 ?? null);
+  return USDM_SYMBOLS.has(sym0) || USDM_SYMBOLS.has(sym1);
 }

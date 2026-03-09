@@ -44,7 +44,7 @@ describe("buildPool24hVolumeMap", () => {
     expect(volumeByPool.get("pool-1")).toBeCloseTo(2, 8);
   });
 
-  it("marks volume as non-convertible when oracle is unavailable", () => {
+  it("uses USDm leg volume even when oracle is unavailable", () => {
     const pools: Pool[] = [
       {
         id: "pool-2",
@@ -70,6 +70,35 @@ describe("buildPool24hVolumeMap", () => {
     ];
 
     const volumeByPool = buildPool24hVolumeMap(snapshots, pools, network);
-    expect(volumeByPool.get("pool-2")).toBeNull();
+    expect(volumeByPool.get("pool-2")).toBeCloseTo(1, 8);
+  });
+
+  it("marks volume as non-convertible when pool has no USDm leg", () => {
+    const pools: Pool[] = [
+      {
+        id: "pool-3",
+        token0: "0x0000000000000000000000000000000000000003",
+        token1: "0x0000000000000000000000000000000000000004",
+        token0Decimals: 18,
+        token1Decimals: 18,
+        oraclePrice: "0",
+        source: "VirtualPool",
+        createdAtBlock: "0",
+        createdAtTimestamp: "0",
+        updatedAtBlock: "0",
+        updatedAtTimestamp: "0",
+      },
+    ];
+
+    const snapshots: PoolSnapshot24h[] = [
+      {
+        poolId: "pool-3",
+        swapVolume0: "1000000000000000000",
+        swapVolume1: "3000000000000000000",
+      },
+    ];
+
+    const volumeByPool = buildPool24hVolumeMap(snapshots, pools, network);
+    expect(volumeByPool.get("pool-3")).toBeNull();
   });
 });
