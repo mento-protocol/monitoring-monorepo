@@ -178,6 +178,56 @@ describe("relativeTime", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Reserve USD calculation with mixed token decimals
+// Mirrors the inline calculation in pool/[poolId]/page.tsx:
+//   raw  = parseWei(reserve, tokenDecimals)
+//   usd0 = usdmIsToken0 ? raw0 : raw0 * feedVal
+//   usd1 = usdmIsToken0 ? raw1 * feedVal : raw1
+//   total = usd0 + usd1
+// ---------------------------------------------------------------------------
+describe("reserve USD calculation (mixed decimals)", () => {
+  it("parseWei correctly handles 6-decimal USDm amounts", () => {
+    // 1 USDm = 1_000_000 units at 6 decimals
+    expect(parseWei("1000000", 6)).toBeCloseTo(1, 6);
+  });
+
+  it("parseWei with wrong decimals produces near-zero result (documents the pre-fix bug)", () => {
+    // 1_000_000 misread as 18 decimals → 1e-12, not 1
+    expect(parseWei("1000000", 18)).toBeCloseTo(1e-12, 18);
+  });
+
+  it("computes correct total USD for token0=CELO (18 dec) + token1=USDm (6 dec)", () => {
+    // 2 CELO at $0.50 each + 3 USDm at $1 each → $4.00 total
+    const raw0 = parseWei("2000000000000000000", 18); // 2 CELO
+    const raw1 = parseWei("3000000", 6); // 3 USDm
+    const feedVal = 0.5;
+    const usdmIsToken0 = false;
+    const usd0 = usdmIsToken0 ? raw0 : raw0 * feedVal;
+    const usd1 = usdmIsToken0 ? raw1 * feedVal : raw1;
+    expect(raw0).toBeCloseTo(2, 6);
+    expect(raw1).toBeCloseTo(3, 6);
+    expect(usd0).toBeCloseTo(1.0, 6);
+    expect(usd1).toBeCloseTo(3.0, 6);
+    expect(usd0 + usd1).toBeCloseTo(4.0, 6);
+  });
+
+  it("computes correct total USD for token0=USDm (6 dec) + token1=CELO (18 dec)", () => {
+    // 2 USDm at $1 each + 4 CELO at $0.50 each → $4.00 total
+    const raw0 = parseWei("2000000", 6); // 2 USDm
+    const raw1 = parseWei("4000000000000000000", 18); // 4 CELO
+    const feedVal = 0.5;
+    const usdmIsToken0 = true;
+    const usd0 = usdmIsToken0 ? raw0 : raw0 * feedVal;
+    const usd1 = usdmIsToken0 ? raw1 * feedVal : raw1;
+    expect(raw0).toBeCloseTo(2, 6);
+    expect(raw1).toBeCloseTo(4, 6);
+    expect(usd0).toBeCloseTo(2.0, 6);
+    expect(usd1).toBeCloseTo(2.0, 6);
+    expect(usd0 + usd1).toBeCloseTo(4.0, 6);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // isValidAddress
 // ---------------------------------------------------------------------------
 describe("isValidAddress", () => {

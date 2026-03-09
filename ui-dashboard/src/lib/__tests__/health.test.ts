@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import {
   computeHealthStatus,
   formatDeviationPct,
@@ -332,13 +332,27 @@ describe("computeRebalancerLiveness", () => {
 
 // ---------------------------------------------------------------------------
 // Oracle staleness boundary (300s)
+// Timestamps are derived from a frozen clock so these tests are deterministic.
 // ---------------------------------------------------------------------------
 describe("computeHealthStatus oracle staleness boundary", () => {
-  it("oracle at exactly 300s is fresh (age <= 300 → OK)", () => {
+  const FROZEN_NOW_MS = 1_700_000_000_000;
+  const frozenNowSec = Math.floor(FROZEN_NOW_MS / 1000);
+
+  beforeAll(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FROZEN_NOW_MS);
+  });
+
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  it("oracle 120s old (well within 300s window) is fresh → OK", () => {
+    const ts120 = String(frozenNowSec - 120);
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
-        oracleTimestamp: FRESH_TS, // within 300s
+        oracleTimestamp: ts120,
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
@@ -346,7 +360,7 @@ describe("computeHealthStatus oracle staleness boundary", () => {
   });
 
   it("oracle at 301s is stale → CRITICAL", () => {
-    const ts301 = String(Math.floor(Date.now() / 1000) - 301);
+    const ts301 = String(frozenNowSec - 301);
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
@@ -357,8 +371,8 @@ describe("computeHealthStatus oracle staleness boundary", () => {
     ).toBe("CRITICAL");
   });
 
-  it("oracle at exactly 300s is not stale (age <= 300)", () => {
-    const ts300 = String(Math.floor(Date.now() / 1000) - 300);
+  it("oracle at exactly 300s is not stale (age <= 300) → OK", () => {
+    const ts300 = String(frozenNowSec - 300);
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
