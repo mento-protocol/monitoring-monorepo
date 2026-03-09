@@ -1,16 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { NETWORKS } from "../networks";
-import { buildPool24hVolumeMap, snapshotSince24h } from "../volume";
+import { buildPool24hVolumeMap, snapshotWindow24h } from "../volume";
 import type { Pool, PoolSnapshot24h } from "../types";
 
 const network = NETWORKS["celo-sepolia-local"];
 
-describe("snapshotSince24h", () => {
-  it("aligns the lower bound to hourly snapshot buckets", () => {
+describe("snapshotWindow24h", () => {
+  it("returns a bounded 24h hourly window", () => {
     const now = Date.UTC(2026, 2, 9, 21, 26, 45, 0); // 21:26:45 UTC
-    const since = snapshotSince24h(now);
+    const { from, to } = snapshotWindow24h(now);
     const expectedHourStart = Date.UTC(2026, 2, 9, 21, 0, 0, 0) / 1000;
-    expect(since).toBe(expectedHourStart - 24 * 3600);
+    expect(from).toBe(expectedHourStart - 24 * 3600);
+    expect(to).toBe(expectedHourStart);
+    expect(to - from).toBe(24 * 3600);
   });
 });
 

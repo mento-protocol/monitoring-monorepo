@@ -10,9 +10,13 @@ export function hourBucket(timestampSeconds: number): number {
   return Math.floor(timestampSeconds / SECONDS_PER_HOUR) * SECONDS_PER_HOUR;
 }
 
-export function snapshotSince24h(nowMs: number): number {
+export function snapshotWindow24h(nowMs: number): { from: number; to: number } {
   const nowSeconds = Math.floor(nowMs / 1000);
-  return hourBucket(nowSeconds) - SECONDS_PER_DAY;
+  const to = hourBucket(nowSeconds);
+  return {
+    from: to - SECONDS_PER_DAY,
+    to,
+  };
 }
 
 export function buildPool24hVolumeMap(

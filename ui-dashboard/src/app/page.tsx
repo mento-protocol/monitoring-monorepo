@@ -6,7 +6,7 @@ import { useGQL } from "@/lib/graphql";
 import { ALL_POOLS_WITH_HEALTH, POOL_SNAPSHOTS_24H } from "@/lib/queries";
 import { formatWei, formatUSD } from "@/lib/format";
 import { poolName, isFpmm, poolTvlUSD } from "@/lib/tokens";
-import { buildPool24hVolumeMap, snapshotSince24h } from "@/lib/volume";
+import { buildPool24hVolumeMap, snapshotWindow24h } from "@/lib/volume";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool, PoolSnapshot24h } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
@@ -29,9 +29,9 @@ function GlobalContent() {
     isLoading: poolsLoading,
   } = useGQL<{ Pool: Pool[] }>(ALL_POOLS_WITH_HEALTH);
 
-  // Pool snapshots are bucketed per hour, so align the window to hour boundaries.
-  const since = snapshotSince24h(Date.now());
-  const snapshotsVariables = useMemo(() => ({ since }), [since]);
+  // Query exactly the previous 24 complete hourly buckets: [from, to).
+  const { from, to } = snapshotWindow24h(Date.now());
+  const snapshotsVariables = useMemo(() => ({ from, to }), [from, to]);
   const {
     data: snapshotsData,
     error: snapshotsErr,
