@@ -1,6 +1,6 @@
 import type { Pool } from "./types";
 import type { Network } from "./networks";
-import { truncateAddress } from "./format";
+import { truncateAddress, parseWei } from "./format";
 
 // ---------------------------------------------------------------------------
 // Network-aware helpers
@@ -83,6 +83,36 @@ export function chainlinkFeedUrl(
   const slug = chainConfig.slugs[sym];
   if (!slug) return null;
   return `${chainConfig.baseUrl}/${slug}`;
+}
+
+/**
+ * Computes the TVL of a pool in USD using the oracle price and token reserves.
+ * Returns 0 if oracle price or reserves are missing.
+ */
+export function poolTvlUSD(
+  pool: {
+    reserves0?: string;
+    reserves1?: string;
+    token0Decimals?: number;
+    token1Decimals?: number;
+    oraclePrice?: string;
+    token0?: string | null;
+    token1?: string | null;
+  },
+  network: Network,
+): number {
+  if (!pool.oraclePrice || pool.oraclePrice === "0") return 0;
+  if (!pool.reserves0 && !pool.reserves1) return 0;
+  const r0 = parseWei(pool.reserves0 ?? "0", pool.token0Decimals ?? 18);
+  const r1 = parseWei(pool.reserves1 ?? "0", pool.token1Decimals ?? 18);
+  const feedVal = Number(pool.oraclePrice) / 1e24;
+  const sym0 = tokenSymbol(network, pool.token0 ?? null);
+  const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
+  if (usdmIsToken0) {
+    return r0 + r1 * feedVal;
+  } else {
+    return r0 * feedVal + r1;
+  }
 }
 
 /** Per-chain Chainlink feed configuration. Add new entries as new chains go live. */
