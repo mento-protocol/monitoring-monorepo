@@ -7,6 +7,7 @@ import {
   relativeTime,
   formatBlock,
   isValidAddress,
+  formatUSD,
 } from "../format";
 
 // ---------------------------------------------------------------------------
@@ -84,6 +85,20 @@ describe("formatWei", () => {
     // 0.00001 token in wei — should show "0.00" not "1.00e-5"
     const result = formatWei("10000000000000"); // 0.00001
     expect(result).toBe("0.00");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatUSD
+// ---------------------------------------------------------------------------
+describe("formatUSD", () => {
+  it("switches to millions at the 999.95K rounding boundary", () => {
+    expect(formatUSD(999_950)).toBe("$1.00M");
+  });
+
+  it("returns N/A for non-finite values", () => {
+    expect(formatUSD(Number.NaN)).toBe("N/A");
+    expect(formatUSD(Number.POSITIVE_INFINITY)).toBe("N/A");
   });
 });
 

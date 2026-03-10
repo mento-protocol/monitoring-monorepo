@@ -5,7 +5,13 @@ import Link from "next/link";
 import { useGQL } from "@/lib/graphql";
 import { ALL_POOLS_WITH_HEALTH, POOL_SNAPSHOTS_24H } from "@/lib/queries";
 import { formatWei, formatUSD } from "@/lib/format";
-import { poolName, isFpmm, poolTvlUSD } from "@/lib/tokens";
+import {
+  poolName,
+  isFpmm,
+  poolTvlUSD,
+  tokenSymbol,
+  USDM_SYMBOLS,
+} from "@/lib/tokens";
 import { buildPool24hVolumeMap, snapshotWindow24h } from "@/lib/volume";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool, PoolSnapshot24h } from "@/lib/types";
@@ -28,10 +34,27 @@ function GlobalContent() {
     error: poolsErr,
     isLoading: poolsLoading,
   } = useGQL<{ Pool: Pool[] }>(ALL_POOLS_WITH_HEALTH);
+  const { network } = useNetwork();
+
+  const pools = poolsData?.Pool ?? [];
+  const usdConvertiblePoolIds = useMemo(
+    () =>
+      pools
+        .filter((pool) => {
+          const sym0 = tokenSymbol(network, pool.token0 ?? null);
+          const sym1 = tokenSymbol(network, pool.token1 ?? null);
+          return USDM_SYMBOLS.has(sym0) || USDM_SYMBOLS.has(sym1);
+        })
+        .map((pool) => pool.id),
+    [pools, network],
+  );
 
   // Query exactly the previous 24 complete hourly buckets: [from, to).
   const { from, to } = snapshotWindow24h(Date.now());
-  const snapshotsVariables = useMemo(() => ({ from, to }), [from, to]);
+  const snapshotsVariables = useMemo(
+    () => ({ from, to, poolIds: usdConvertiblePoolIds }),
+    [from, to, usdConvertiblePoolIds],
+  );
   const {
     data: snapshotsData,
     error: snapshotsErr,
@@ -39,12 +62,8 @@ function GlobalContent() {
   } = useGQL<{ PoolSnapshot: PoolSnapshot24h[] }>(
     POOL_SNAPSHOTS_24H,
     snapshotsVariables,
-    60_000,
+    300_000,
   );
-
-  const { network } = useNetwork();
-
-  const pools = poolsData?.Pool ?? [];
   const snapshots24h = snapshotsData?.PoolSnapshot ?? [];
 
   const fpmmPools = pools.filter(isFpmm);
@@ -164,6 +183,7 @@ function GlobalContent() {
             pools={pools}
             volume24h={volume24hMap}
             volume24hLoading={snapshotsLoading}
+            volume24hError={Boolean(snapshotsErr)}
           />
         )}
       </section>
