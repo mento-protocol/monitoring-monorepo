@@ -12,7 +12,11 @@ import {
   tokenSymbol,
   USDM_SYMBOLS,
 } from "@/lib/tokens";
-import { buildPool24hVolumeMap, snapshotWindow24h } from "@/lib/volume";
+import {
+  buildPool24hVolumeMap,
+  shouldQueryPoolSnapshots24h,
+  snapshotWindow24h,
+} from "@/lib/volume";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool, PoolSnapshot24h } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
@@ -51,16 +55,22 @@ function GlobalContent() {
 
   // Query exactly the previous 24 complete hourly buckets: [from, to).
   const { from, to } = snapshotWindow24h(Date.now());
+  const shouldQuerySnapshots = shouldQueryPoolSnapshots24h(
+    usdConvertiblePoolIds,
+  );
   const snapshotsVariables = useMemo(
-    () => ({ from, to, poolIds: usdConvertiblePoolIds }),
-    [from, to, usdConvertiblePoolIds],
+    () =>
+      shouldQuerySnapshots
+        ? { from, to, poolIds: usdConvertiblePoolIds }
+        : undefined,
+    [from, to, shouldQuerySnapshots, usdConvertiblePoolIds],
   );
   const {
     data: snapshotsData,
     error: snapshotsErr,
     isLoading: snapshotsLoading,
   } = useGQL<{ PoolSnapshot: PoolSnapshot24h[] }>(
-    POOL_SNAPSHOTS_24H,
+    shouldQuerySnapshots ? POOL_SNAPSHOTS_24H : null,
     snapshotsVariables,
     300_000,
   );

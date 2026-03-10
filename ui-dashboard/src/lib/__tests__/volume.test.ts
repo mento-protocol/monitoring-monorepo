@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { NETWORKS } from "../networks";
-import { buildPool24hVolumeMap, snapshotWindow24h } from "../volume";
+import {
+  buildPool24hVolumeMap,
+  shouldQueryPoolSnapshots24h,
+  snapshotWindow24h,
+} from "../volume";
 import type { Pool, PoolSnapshot24h } from "../types";
 
 const network = NETWORKS["celo-sepolia-local"];
@@ -13,6 +17,16 @@ describe("snapshotWindow24h", () => {
     expect(from).toBe(expectedHourStart - 24 * 3600);
     expect(to).toBe(expectedHourStart);
     expect(to - from).toBe(24 * 3600);
+  });
+});
+
+describe("shouldQueryPoolSnapshots24h", () => {
+  it("returns false when there are no pool ids", () => {
+    expect(shouldQueryPoolSnapshots24h([])).toBe(false);
+  });
+
+  it("returns true when at least one pool id is present", () => {
+    expect(shouldQueryPoolSnapshots24h(["pool-1"])).toBe(true);
   });
 });
 
