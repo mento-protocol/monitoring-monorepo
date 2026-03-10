@@ -19,6 +19,12 @@ export function snapshotWindow24h(nowMs: number): { from: number; to: number } {
   };
 }
 
+export function shouldQueryPoolSnapshots24h(
+  poolIds: readonly string[],
+): boolean {
+  return poolIds.length > 0;
+}
+
 export function buildPool24hVolumeMap(
   snapshots: PoolSnapshot24h[],
   pools: Pool[],
