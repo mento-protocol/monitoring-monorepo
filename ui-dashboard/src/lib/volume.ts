@@ -73,6 +73,15 @@ function getSnapshotVolumeInUsd(
   return null;
 }
 
+export function sumFpmmSwaps24h(
+  snapshots: PoolSnapshot24h[],
+  fpmmPoolIds: ReadonlySet<string>,
+): number {
+  return snapshots
+    .filter((s) => fpmmPoolIds.has(s.poolId))
+    .reduce((sum, s) => sum + s.swapCount, 0);
+}
+
 function isUsdConvertible(
   pool: Pick<Pool, "token0" | "token1">,
   network: Network,

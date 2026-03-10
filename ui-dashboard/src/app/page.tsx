@@ -16,6 +16,7 @@ import {
   buildPool24hVolumeMap,
   shouldQueryPoolSnapshots24h,
   snapshotWindow24h,
+  sumFpmmSwaps24h,
 } from "@/lib/volume";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool, PoolSnapshot24h } from "@/lib/types";
@@ -108,10 +109,7 @@ function GlobalContent() {
     [fpmmPools],
   );
   const swaps24hFpmm = useMemo(
-    () =>
-      snapshots24h
-        .filter((s) => fpmmPoolIdSet.has(s.poolId))
-        .reduce((sum, s) => sum + s.swapCount, 0),
+    () => sumFpmmSwaps24h(snapshots24h, fpmmPoolIdSet),
     [snapshots24h, fpmmPoolIdSet],
   );
 
@@ -165,7 +163,9 @@ function GlobalContent() {
             value={
               poolsLoading || snapshotsLoading
                 ? "…"
-                : swaps24hFpmm.toLocaleString()
+                : snapshotsErr
+                  ? "N/A"
+                  : swaps24hFpmm.toLocaleString()
             }
           />
         </div>

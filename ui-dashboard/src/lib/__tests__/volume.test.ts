@@ -4,6 +4,7 @@ import {
   buildPool24hVolumeMap,
   shouldQueryPoolSnapshots24h,
   snapshotWindow24h,
+  sumFpmmSwaps24h,
 } from "../volume";
 import type { Pool, PoolSnapshot24h } from "../types";
 
@@ -27,6 +28,43 @@ describe("shouldQueryPoolSnapshots24h", () => {
 
   it("returns true when at least one pool id is present", () => {
     expect(shouldQueryPoolSnapshots24h(["pool-1"])).toBe(true);
+  });
+});
+
+describe("sumFpmmSwaps24h", () => {
+  it("sums swapCount across all hourly snapshots for FPMM pools", () => {
+    const snapshots: PoolSnapshot24h[] = [
+      { poolId: "fpmm-1", swapCount: 3, swapVolume0: "0", swapVolume1: "0" },
+      { poolId: "fpmm-1", swapCount: 5, swapVolume0: "0", swapVolume1: "0" },
+      { poolId: "fpmm-2", swapCount: 2, swapVolume0: "0", swapVolume1: "0" },
+    ];
+    const fpmmIds = new Set(["fpmm-1", "fpmm-2"]);
+    expect(sumFpmmSwaps24h(snapshots, fpmmIds)).toBe(10);
+  });
+
+  it("excludes snapshots from non-FPMM pools", () => {
+    const snapshots: PoolSnapshot24h[] = [
+      { poolId: "fpmm-1", swapCount: 4, swapVolume0: "0", swapVolume1: "0" },
+      {
+        poolId: "virtual-1",
+        swapCount: 99,
+        swapVolume0: "0",
+        swapVolume1: "0",
+      },
+    ];
+    const fpmmIds = new Set(["fpmm-1"]);
+    expect(sumFpmmSwaps24h(snapshots, fpmmIds)).toBe(4);
+  });
+
+  it("returns 0 when there are no snapshots", () => {
+    expect(sumFpmmSwaps24h([], new Set(["fpmm-1"]))).toBe(0);
+  });
+
+  it("returns 0 when fpmmPoolIds is empty", () => {
+    const snapshots: PoolSnapshot24h[] = [
+      { poolId: "fpmm-1", swapCount: 7, swapVolume0: "0", swapVolume1: "0" },
+    ];
+    expect(sumFpmmSwaps24h(snapshots, new Set())).toBe(0);
   });
 });
 
