@@ -73,9 +73,8 @@ function getAddressViaNamespace(
 ): string | undefined {
   const ns = CONTRACT_NAMESPACE_BY_CHAIN[chainId];
   if (!ns) return undefined;
-  return (contractsJson as ContractsJson)[String(chainId)]?.[ns]?.[
-    contractName
-  ]?.address;
+  return (contractsJson as ContractsJson)[String(chainId)]?.[ns]?.[contractName]
+    ?.address;
 }
 
 describe("@mento-protocol/contracts — deterministic namespace address resolution", () => {
@@ -120,6 +119,10 @@ describe("@mento-protocol/contracts — deterministic namespace address resoluti
     // Chain 143 has both 'monad-mainnet' and 'mainnet' namespaces.
     // We don't index chain 143, so getAddressViaNamespace should return undefined.
     const addr = getAddressViaNamespace(143, "USDm");
-    assert.equal(addr, undefined, "Chain 143 is not in CONTRACT_NAMESPACE_BY_CHAIN — should be undefined");
+    assert.equal(
+      addr,
+      undefined,
+      "Chain 143 is not in CONTRACT_NAMESPACE_BY_CHAIN — should be undefined",
+    );
   });
 });
