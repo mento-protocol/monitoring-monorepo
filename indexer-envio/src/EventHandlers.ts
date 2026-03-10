@@ -26,15 +26,39 @@ import { createPublicClient, http } from "viem";
 import _contractsJson from "@mento-protocol/contracts/contracts.json";
 import _sortedOraclesAbi from "@mento-protocol/contracts/abis/SortedOracles.json";
 
-/** Build address map {chainId: address} from contracts.json for a given contract name. */
+// Explicit namespace per chain — must match the active deployment namespace in
+// @mento-protocol/contracts. Using explicit namespaces avoids brittle
+// namespace-ordering assumptions when multiple namespaces exist for a chain
+// (e.g. chainId 143 has both "monad-mainnet" and "mainnet").
+const CONTRACT_NAMESPACE_BY_CHAIN: Record<number, string> = {
+  42220: "mainnet", // Celo mainnet
+  11142220: "testnet-v2-rc5", // Celo Sepolia
+};
+
+type ContractsJson = Record<
+  string,
+  Record<string, Record<string, { address: string }>>
+>;
+
+/** Look up a contract address by chainId + contractName using the explicit namespace map. */
+function _getAddress(
+  chainId: number,
+  contractName: string,
+): `0x${string}` | undefined {
+  const ns = CONTRACT_NAMESPACE_BY_CHAIN[chainId];
+  if (!ns) return undefined;
+  const entry = (_contractsJson as ContractsJson)[String(chainId)]?.[ns]?.[
+    contractName
+  ];
+  return entry?.address as `0x${string}` | undefined;
+}
+
+/** Build address map {chainId: address} for a given contract name. */
 function _addressMap(contractName: string): Record<string, `0x${string}`> {
   const result: Record<string, `0x${string}`> = {};
-  for (const [chainId, namespaces] of Object.entries(_contractsJson)) {
-    for (const contracts of Object.values(namespaces)) {
-      if (contracts[contractName]?.address) {
-        result[chainId] = contracts[contractName].address as `0x${string}`;
-      }
-    }
+  for (const chainId of Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)) {
+    const addr = _getAddress(Number(chainId), contractName);
+    if (addr) result[chainId] = addr;
   }
   return result;
 }
