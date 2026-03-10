@@ -66,12 +66,14 @@ function buildNetworkMaps(
 
 function makeNetwork(
   config: Omit<Network, "tokenSymbols" | "addressLabels" | "local"> &
-    Partial<Pick<Network, "local">>,
+    Partial<Pick<Network, "local" | "tokenSymbols" | "addressLabels">>,
 ): Network {
+  const maps = buildNetworkMaps(config.chainId, config.contractsNamespace);
   return {
     local: false,
     ...config,
-    ...buildNetworkMaps(config.chainId, config.contractsNamespace),
+    tokenSymbols: { ...maps.tokenSymbols, ...config.tokenSymbols },
+    addressLabels: { ...maps.addressLabels, ...config.addressLabels },
   };
 }
 
@@ -88,6 +90,9 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_DEVNET ?? "testing",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_DEVNET ?? "http://localhost:5100",
+    addressLabels: {
+      "0x287810f677516f10993ff63a520aad5509f35796": "Deployer",
+    },
   }),
   "celo-sepolia-local": makeNetwork({
     id: "celo-sepolia-local",
