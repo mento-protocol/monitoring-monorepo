@@ -119,6 +119,7 @@ export type RebalanceEvent = {
 
 export type PoolSnapshot24h = {
   poolId: string;
+  swapCount: number;
   swapVolume0: string;
   swapVolume1: string;
 };
