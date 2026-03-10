@@ -24,6 +24,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@mento-protocol/contracts": "^0.2.0",
     "envio": "2.32.3",
     "viem": "2.47.0"
   },

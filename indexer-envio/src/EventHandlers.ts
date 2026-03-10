@@ -18,6 +18,10 @@ import {
 import type { HandlerContext } from "generated/src/Types";
 
 import { createPublicClient, http } from "viem";
+import {
+  SortedOracles as SortedOraclesContract,
+  USDm as USDmContract,
+} from "@mento-protocol/contracts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -99,21 +103,8 @@ function getRpcClient(chainId: number): ReturnType<typeof createPublicClient> {
   return rpcClients.get(chainId)!;
 }
 
-/** SortedOracles contract addresses per chainId (mainnet only for oracle health). */
-const SORTED_ORACLES_ADDRESS: Record<number, `0x${string}`> = {
-  42220: "0xefB84935239dAcdecF7c5bA76d8dE40b077B7b33", // Celo Mainnet
-  11142220: "0xfaa7Ca2B056E60F6733aE75AA0709140a6eAfD20", // Celo Sepolia
-};
-
-const SORTED_ORACLES_ABI = [
-  {
-    type: "function",
-    name: "numRates",
-    inputs: [{ name: "token", type: "address" }],
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "view",
-  },
-] as const;
+/** SortedOracles contract addresses per chainId, sourced from @mento-protocol/contracts. */
+const SORTED_ORACLES_ADDRESS = SortedOraclesContract.address;
 
 /** Cache numRates by block — numRates can't change within a single block, so
  * this is always precise (no stale risk in live mode) while still collapsing
@@ -151,7 +142,7 @@ async function fetchNumReporters(
     const client = getRpcClient(chainId);
     const count = await client.readContract({
       address,
-      abi: SORTED_ORACLES_ABI,
+      abi: SortedOraclesContract.abi,
       functionName: "numRates",
       args: [rateFeedID as `0x${string}`],
       blockNumber,
@@ -416,10 +407,12 @@ function computeLimitPressures(
 // Price difference computation (reserve ratio vs oracle price)
 // ---------------------------------------------------------------------------
 
-/** Known USDm token addresses (lowercased) per chain. */
-const USDM_ADDRESSES = new Set([
-  "0x765de816845861e75a25fca122bb6898b8b1282a", // Celo mainnet (cUSD/USDm)
-]);
+/** Known USDm token addresses (lowercased), sourced from @mento-protocol/contracts. */
+const USDM_ADDRESSES = new Set(
+  (Object.values(USDmContract.address) as (`0x${string}` | undefined)[])
+    .filter((a): a is `0x${string}` => a !== undefined)
+    .map((a) => a.toLowerCase()),
+);
 
 /**
  * Computes priceDifference in basis points (bps) from reserves and oracle price.
