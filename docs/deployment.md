@@ -131,6 +131,7 @@ Run this once when setting up from scratch or recreating the Vercel project.
 ### Prerequisites
 
 - [Terraform](https://developer.hashicorp.com/terraform/install) ≥ 1.5
+- [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) — authenticated with ADC (`gcloud auth application-default login`). Your account needs `storage.objects.get`, `storage.objects.create`, and `storage.objects.list` on the `mento-terraform-tfstate-6ed6` GCS bucket (role: `roles/storage.objectUser` on the bucket, or broader project-level `roles/storage.admin`)
 - [Vercel CLI](https://vercel.com/docs/cli) (for blob store creation)
 - Vercel API token (create at [vercel.com/account/tokens](https://vercel.com/account/tokens))
 - Upstash account + API key ([console.upstash.com → Account → API Keys](https://console.upstash.com/account/api))
@@ -158,16 +159,23 @@ cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 # edit terraform/terraform.tfvars
 ```
 
-**4. Apply**
+**4. Init (+ one-time state migration if you have an existing local `terraform.tfstate`)**
 
 ```bash
 pnpm infra:init
+```
+
+If a local `terraform/terraform.tfstate` was present from before the GCS backend was introduced, `terraform init` will detect it and prompt to migrate. Enter `yes` to copy it to GCS. This is a one-time step — afterwards GCS is authoritative and the local file can be deleted.
+
+**5. Apply**
+
+```bash
 pnpm infra:apply
 ```
 
 Terraform creates: Upstash Redis database + Vercel project + all env vars + custom domain + `.vercel/project.json`.
 
-**5. Trigger first deploy**
+**6. Trigger first deploy**
 
 Push any commit touching `ui-dashboard/`, or force via:
 
