@@ -55,12 +55,14 @@ interface PoolsTableProps {
   pools: Pool[];
   volume24h?: Map<string, number | null>;
   volume24hLoading?: boolean;
+  volume24hError?: boolean;
 }
 
 export function PoolsTable({
   pools,
   volume24h,
   volume24hLoading = false,
+  volume24hError = false,
 }: PoolsTableProps) {
   const { network } = useNetwork();
   const nowSeconds = Math.floor(Date.now() / 1000);
@@ -141,11 +143,13 @@ export function PoolsTable({
               <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-300 font-mono">
                 {volume24hLoading
                   ? "…"
-                  : vol === null
+                  : volume24hError
                     ? "N/A"
-                    : vol && vol > 0
-                      ? formatUSD(vol)
-                      : "—"}
+                    : vol === null
+                      ? "N/A"
+                      : vol && vol > 0
+                        ? formatUSD(vol)
+                        : "—"}
               </td>
               <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
                 <span title={rebalancerTooltip(rebalancerStatus)}>
