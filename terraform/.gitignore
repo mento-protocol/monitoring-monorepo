@@ -1,5 +1,5 @@
-# Terraform state — contains resource IDs and sensitive outputs.
-# Keep locally; back up manually or with a remote backend if needed.
+# Terraform state — managed remotely in GCS (mento-terraform-tfstate-6ed6/monitoring-monorepo).
+# Local copies are kept here only as a transient artifact of init; they are not authoritative.
 terraform.tfstate
 terraform.tfstate.backup
 
