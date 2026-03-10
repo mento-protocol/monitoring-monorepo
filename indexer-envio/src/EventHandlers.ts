@@ -18,10 +18,35 @@ import {
 import type { HandlerContext } from "generated/src/Types";
 
 import { createPublicClient, http } from "viem";
-import {
-  SortedOracles as SortedOraclesContract,
-  USDm as USDmContract,
-} from "@mento-protocol/contracts";
+
+// @mento-protocol/contracts is ESM-only (no CJS "require" export condition).
+// We import raw JSON subpaths directly — TypeScript compiles these to require()
+// calls (module: CommonJS in tsconfig), which are CJS-safe and work in both
+// the Envio handler runtime and ts-mocha test runner.
+import _contractsJson from "@mento-protocol/contracts/contracts.json";
+import _sortedOraclesAbi from "@mento-protocol/contracts/abis/SortedOracles.json";
+
+/** Build address map {chainId: address} from contracts.json for a given contract name. */
+function _addressMap(contractName: string): Record<string, `0x${string}`> {
+  const result: Record<string, `0x${string}`> = {};
+  for (const [chainId, namespaces] of Object.entries(_contractsJson)) {
+    for (const contracts of Object.values(namespaces)) {
+      if (contracts[contractName]?.address) {
+        result[chainId] = contracts[contractName].address as `0x${string}`;
+      }
+    }
+  }
+  return result;
+}
+
+const SortedOraclesContract = {
+  address: _addressMap("SortedOracles"),
+  abi: _sortedOraclesAbi,
+};
+
+const USDmContract = {
+  address: _addressMap("USDm"),
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
