@@ -30,9 +30,14 @@ import _sortedOraclesAbi from "@mento-protocol/contracts/abis/SortedOracles.json
 // @mento-protocol/contracts. Using explicit namespaces avoids brittle
 // namespace-ordering assumptions when multiple namespaces exist for a chain
 // (e.g. chainId 143 has both "monad-mainnet" and "mainnet").
+//
+// NOTE: ui-dashboard/src/lib/networks.ts defines the same mapping via
+// ACTIVE_DEPLOYMENT. These two are intentionally kept in sync manually.
+// A future improvement could extract a shared @mento-protocol/config package,
+// but that would require cross-package infrastructure changes out of scope here.
 const CONTRACT_NAMESPACE_BY_CHAIN: Record<number, string> = {
-  42220: "mainnet", // Celo mainnet
-  11142220: "testnet-v2-rc5", // Celo Sepolia
+  42220: "mainnet", // Celo mainnet — matches ACTIVE_DEPLOYMENT["celo-mainnet"]
+  11142220: "testnet-v2-rc5", // Celo Sepolia — matches ACTIVE_DEPLOYMENT["celo-sepolia"]
 };
 
 type ContractsJson = Record<
