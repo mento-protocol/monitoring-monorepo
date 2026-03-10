@@ -53,6 +53,12 @@ pnpm infra:apply              # Apply infrastructure changes
 - **Address book:** `/address-book` page + inline editing; custom labels stored in Upstash Redis, backed up daily to Vercel Blob
 - **Deployment:** Vercel (`monitoring-dashboard` project); infra managed by Terraform in `terraform/`
 
+### PR Review Guidance (Dashboard Scale)
+
+- Current expected scale is roughly **30–50 total pools**.
+- At this size, client-side aggregation for the 24h volume tiles/table is acceptable with the current polling setup.
+- Do **not** flag the current snapshot-query aggregation path as a scalability issue in PR reviews unless assumptions change materially (e.g. significantly more pools, much higher polling frequency, or observed latency/cost regressions in production).
+
 ## File Structure
 
 ```text
