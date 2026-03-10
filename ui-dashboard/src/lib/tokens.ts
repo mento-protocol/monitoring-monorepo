@@ -107,12 +107,14 @@ export function poolTvlUSD(
   const r1 = parseWei(pool.reserves1 ?? "0", pool.token1Decimals ?? 18);
   const feedVal = Number(pool.oraclePrice) / 1e24;
   const sym0 = tokenSymbol(network, pool.token0 ?? null);
-  const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
-  if (usdmIsToken0) {
+  const sym1 = tokenSymbol(network, pool.token1 ?? null);
+  if (USDM_SYMBOLS.has(sym0)) {
     return r0 + r1 * feedVal;
-  } else {
+  }
+  if (USDM_SYMBOLS.has(sym1)) {
     return r0 * feedVal + r1;
   }
+  return 0;
 }
 
 /** Per-chain Chainlink feed configuration. Add new entries as new chains go live. */

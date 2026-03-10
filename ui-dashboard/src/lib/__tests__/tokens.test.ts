@@ -127,4 +127,21 @@ describe("poolTvlUSD", () => {
 
     expect(tvl).toBe(0);
   });
+
+  it("returns 0 when neither token side is USDm", () => {
+    const tvl = poolTvlUSD(
+      {
+        token0: "0x0000000000000000000000000000000000000003",
+        token1: "0x0000000000000000000000000000000000000004",
+        token0Decimals: 18,
+        token1Decimals: 18,
+        reserves0: "2000000000000000000",
+        reserves1: "3000000000000000000",
+        oraclePrice: "500000000000000000000000",
+      },
+      sepolia,
+    );
+
+    expect(tvl).toBe(0);
+  });
 });
