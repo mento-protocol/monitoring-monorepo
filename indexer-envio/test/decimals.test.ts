@@ -49,3 +49,40 @@ describe("scalingFactorToDecimals", () => {
     assert.equal(scalingFactorToDecimals(0n), null);
   });
 });
+
+// ---------------------------------------------------------------------------
+// contracts.json integration — assert required chain IDs and addresses exist
+// ---------------------------------------------------------------------------
+import contractsJson from "@mento-protocol/contracts/contracts.json";
+
+describe("@mento-protocol/contracts address assertions", () => {
+  const CELO_MAINNET_CHAIN_ID = "42220";
+  const CELO_SEPOLIA_CHAIN_ID = "11142220";
+
+  function getAddress(chainId: string, contractName: string): string | undefined {
+    const chain = (contractsJson as Record<string, Record<string, Record<string, { address: string }>>>)[chainId];
+    if (!chain) return undefined;
+    for (const contracts of Object.values(chain)) {
+      if (contracts[contractName]?.address) return contracts[contractName].address;
+    }
+    return undefined;
+  }
+
+  it("SortedOracles address exists on Celo mainnet (42220)", () => {
+    const addr = getAddress(CELO_MAINNET_CHAIN_ID, "SortedOracles");
+    assert.ok(addr, "SortedOracles address missing for chainId 42220");
+    assert.match(addr, /^0x[0-9a-fA-F]{40}$/, "Not a valid address");
+  });
+
+  it("SortedOracles address exists on Celo Sepolia (11142220)", () => {
+    const addr = getAddress(CELO_SEPOLIA_CHAIN_ID, "SortedOracles");
+    assert.ok(addr, "SortedOracles address missing for chainId 11142220");
+    assert.match(addr, /^0x[0-9a-fA-F]{40}$/, "Not a valid address");
+  });
+
+  it("USDm address exists on Celo mainnet (42220)", () => {
+    const addr = getAddress(CELO_MAINNET_CHAIN_ID, "USDm");
+    assert.ok(addr, "USDm address missing for chainId 42220");
+    assert.match(addr, /^0x[0-9a-fA-F]{40}$/, "Not a valid address");
+  });
+});
