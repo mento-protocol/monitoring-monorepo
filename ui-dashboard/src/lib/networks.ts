@@ -2,7 +2,7 @@
 // Network definitions — add new chains here
 // ---------------------------------------------------------------------------
 
-import contractsData from "./contracts.json";
+import contractsData from "@mento-protocol/contracts/contracts.json";
 
 // Official treb deployment namespace per chain — update when a new deployment is promoted.
 // These must match the namespace keys in @mento-protocol/contracts contracts.json.
@@ -76,7 +76,7 @@ function makeNetwork(
 }
 
 export const NETWORKS: Record<IndexerNetworkId, Network> = {
-  devnet: {
+  devnet: makeNetwork({
     id: "devnet",
     label: "Celo Devnet (local)",
     local: true,
@@ -88,14 +88,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_DEVNET ?? "testing",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_DEVNET ?? "http://localhost:5100",
-    tokenSymbols: {
-      "0x765de816845861e75a25fca122bb6898b8b1282a": "USDm",
-      "0xfaea5f3404bba20d3cc2f8c4b0a888f55a3c7313": "GHSm",
-    },
-    addressLabels: {
-      "0x287810f677516f10993ff63a520aad5509f35796": "Deployer",
-    },
-  },
+  }),
   "celo-sepolia-local": makeNetwork({
     id: "celo-sepolia-local",
     label: "Celo Sepolia (local)",

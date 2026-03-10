@@ -10,6 +10,9 @@ importers:
 
   indexer-envio:
     dependencies:
+      '@mento-protocol/contracts':
+        specifier: ^0.2.0
+        version: 0.2.0
       envio:
         specifier: 2.32.3
         version: 2.32.3(typescript@5.9.3)
@@ -45,6 +48,9 @@ importers:
 
   ui-dashboard:
     dependencies:
+      '@mento-protocol/contracts':
+        specifier: ^0.2.0
+        version: 0.2.0
       '@upstash/redis':
         specifier: ^1.36.3
         version: 1.36.3
@@ -728,6 +734,9 @@ packages:
   '@maplibre/maplibre-gl-style-spec@20.4.0':
     resolution: {integrity: sha512-AzBy3095fTFPjDjmWpR2w6HVRAZJ6hQZUCwk5Plz6EyfnfuQW1odeW5i2Ai47Y6TBA2hQnC+azscjBSALpaWgw==}
     hasBin: true
+
+  '@mento-protocol/contracts@0.2.0':
+    resolution: {integrity: sha512-1px3h/z1bwwU+37ZQRddojM/M9cRITS6tlkSn2UkOETjnUFb9x2UytdvZzaQRBIIvf8ctXpHUhdiNsbPdbbJig==}
 
   '@next/env@16.1.6':
     resolution: {integrity: sha512-N1ySLuZjnAtN3kFnwhAwPvZah8RJxKasD7x1f8shFqhncnWZn4JMfg37diLNuoHsLAlrDfM3g4mawVdtAG8XLQ==}
@@ -4258,6 +4267,8 @@ snapshots:
       quickselect: 2.0.0
       rw: 1.3.3
       tinyqueue: 3.0.0
+
+  '@mento-protocol/contracts@0.2.0': {}
 
   '@next/env@16.1.6': {}
 
