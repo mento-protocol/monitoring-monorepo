@@ -32,6 +32,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.6
       - name: Format check
         run: terraform fmt -check -recursive
       - name: Init (no backend)
