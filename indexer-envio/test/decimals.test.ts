@@ -51,36 +51,19 @@ describe("scalingFactorToDecimals", () => {
 });
 
 // ---------------------------------------------------------------------------
-// contracts.json integration — deterministic namespace selection + exact addresses
+// contractAddresses.ts integration — exercises real production lookup code
 // ---------------------------------------------------------------------------
-import contractsJson from "@mento-protocol/contracts/contracts.json";
+// Import from the shared module (same code used at runtime in EventHandlers.ts)
+// so tests validate the actual implementation path rather than re-implementing it.
+import {
+  getContractAddress,
+  requireContractAddress,
+  CONTRACT_NAMESPACE_BY_CHAIN,
+} from "../src/contractAddresses";
 
-// Explicit namespace map (mirrors CONTRACT_NAMESPACE_BY_CHAIN in EventHandlers.ts).
-// Tests use these to ensure address resolution is deterministic and namespace-specific.
-const CONTRACT_NAMESPACE_BY_CHAIN: Record<number, string> = {
-  42220: "mainnet",
-  11142220: "testnet-v2-rc5",
-};
-
-type ContractsJson = Record<
-  string,
-  Record<string, Record<string, { address: string }>>
->;
-
-function getAddressViaNamespace(
-  chainId: number,
-  contractName: string,
-): string | undefined {
-  const ns = CONTRACT_NAMESPACE_BY_CHAIN[chainId];
-  if (!ns) return undefined;
-  return (contractsJson as ContractsJson)[String(chainId)]?.[ns]?.[contractName]
-    ?.address;
-}
-
-describe("@mento-protocol/contracts — deterministic namespace address resolution", () => {
-  it("SortedOracles on Celo mainnet (42220/mainnet) resolves to exact known address", () => {
-    const addr = getAddressViaNamespace(42220, "SortedOracles");
-    // Exact address verified from Celo mainnet deployment
+describe("contractAddresses — deterministic namespace address resolution", () => {
+  it("SortedOracles on Celo mainnet (42220) resolves to exact known address", () => {
+    const addr = getContractAddress(42220, "SortedOracles");
     assert.equal(
       addr?.toLowerCase(),
       "0xefb84935239dacdecf7c5ba76d8de40b077b7b33",
@@ -88,8 +71,8 @@ describe("@mento-protocol/contracts — deterministic namespace address resoluti
     );
   });
 
-  it("USDm on Celo mainnet (42220/mainnet) resolves to exact known address", () => {
-    const addr = getAddressViaNamespace(42220, "USDm");
+  it("USDm on Celo mainnet (42220) resolves to exact known address", () => {
+    const addr = getContractAddress(42220, "USDm");
     assert.equal(
       addr?.toLowerCase(),
       "0x765de816845861e75a25fca122bb6898b8b1282a",
@@ -97,8 +80,8 @@ describe("@mento-protocol/contracts — deterministic namespace address resoluti
     );
   });
 
-  it("SortedOracles on Celo Sepolia (11142220/testnet-v2-rc5) resolves to exact known address", () => {
-    const addr = getAddressViaNamespace(11142220, "SortedOracles");
+  it("SortedOracles on Celo Sepolia (11142220) resolves to exact known address", () => {
+    const addr = getContractAddress(11142220, "SortedOracles");
     assert.equal(
       addr?.toLowerCase(),
       "0xfaa7ca2b056e60f6733ae75aa0709140a6eafd20",
@@ -106,8 +89,8 @@ describe("@mento-protocol/contracts — deterministic namespace address resoluti
     );
   });
 
-  it("USDm on Celo Sepolia (11142220/testnet-v2-rc5) resolves to exact known address", () => {
-    const addr = getAddressViaNamespace(11142220, "USDm");
+  it("USDm on Celo Sepolia (11142220) resolves to exact known address", () => {
+    const addr = getContractAddress(11142220, "USDm");
     assert.equal(
       addr?.toLowerCase(),
       "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b",
@@ -115,14 +98,43 @@ describe("@mento-protocol/contracts — deterministic namespace address resoluti
     );
   });
 
-  it("does NOT fall through to wrong namespace for chainId 143 (monad, multiple namespaces)", () => {
-    // Chain 143 has both 'monad-mainnet' and 'mainnet' namespaces.
-    // We don't index chain 143, so getAddressViaNamespace should return undefined.
-    const addr = getAddressViaNamespace(143, "USDm");
+  it("returns undefined for un-indexed chainId (143 — monad, multiple namespaces)", () => {
+    // Chain 143 is not in CONTRACT_NAMESPACE_BY_CHAIN — should not fall through
+    // to any namespace, including the 'mainnet' namespace that also exists on 143.
+    const addr = getContractAddress(143, "USDm");
     assert.equal(
       addr,
       undefined,
-      "Chain 143 is not in CONTRACT_NAMESPACE_BY_CHAIN — should be undefined",
+      "Chain 143 is not indexed — should return undefined",
+    );
+  });
+
+  it("requireContractAddress throws for un-indexed chainId", () => {
+    assert.throws(
+      () => requireContractAddress(999, "SortedOracles"),
+      /Missing address for SortedOracles on chain 999/,
+    );
+  });
+
+  it("requireContractAddress throws for unknown contract name", () => {
+    assert.throws(
+      () => requireContractAddress(42220, "NonExistentContract"),
+      /Missing address for NonExistentContract on chain 42220/,
+    );
+  });
+
+  it("CONTRACT_NAMESPACE_BY_CHAIN covers all expected indexed chains", () => {
+    assert.ok(42220 in CONTRACT_NAMESPACE_BY_CHAIN, "Missing Celo mainnet");
+    assert.ok(11142220 in CONTRACT_NAMESPACE_BY_CHAIN, "Missing Celo Sepolia");
+    assert.equal(
+      CONTRACT_NAMESPACE_BY_CHAIN[42220],
+      "mainnet",
+      "Wrong namespace for Celo mainnet",
+    );
+    assert.equal(
+      CONTRACT_NAMESPACE_BY_CHAIN[11142220],
+      "testnet-v2-rc5",
+      "Wrong namespace for Celo Sepolia",
     );
   });
 });
