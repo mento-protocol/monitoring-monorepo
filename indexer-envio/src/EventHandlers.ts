@@ -19,62 +19,22 @@ import type { HandlerContext } from "generated/src/Types";
 
 import { createPublicClient, http } from "viem";
 
-// @mento-protocol/contracts is ESM-only (no CJS "require" export condition).
-// We import raw JSON subpaths directly — TypeScript compiles these to require()
-// calls (module: CommonJS in tsconfig), which are CJS-safe and work in both
-// the Envio handler runtime and ts-mocha test runner.
-import _contractsJson from "@mento-protocol/contracts/contracts.json";
+// ABI is the only thing needed directly from the package here — address
+// resolution is delegated to contractAddresses.ts (shared with tests).
 import _sortedOraclesAbi from "@mento-protocol/contracts/abis/SortedOracles.json";
+import { buildRequiredAddressMap } from "./contractAddresses";
 
-// Explicit namespace per chain — must match the active deployment namespace in
-// @mento-protocol/contracts. Using explicit namespaces avoids brittle
-// namespace-ordering assumptions when multiple namespaces exist for a chain
-// (e.g. chainId 143 has both "monad-mainnet" and "mainnet").
-//
-// NOTE: ui-dashboard/src/lib/networks.ts defines the same mapping via
-// ACTIVE_DEPLOYMENT. These two are intentionally kept in sync manually.
-// A future improvement could extract a shared @mento-protocol/config package,
-// but that would require cross-package infrastructure changes out of scope here.
-const CONTRACT_NAMESPACE_BY_CHAIN: Record<number, string> = {
-  42220: "mainnet", // Celo mainnet — matches ACTIVE_DEPLOYMENT["celo-mainnet"]
-  11142220: "testnet-v2-rc5", // Celo Sepolia — matches ACTIVE_DEPLOYMENT["celo-sepolia"]
-};
-
-type ContractsJson = Record<
-  string,
-  Record<string, Record<string, { address: string }>>
->;
-
-/** Look up a contract address by chainId + contractName using the explicit namespace map. */
-function _getAddress(
-  chainId: number,
-  contractName: string,
-): `0x${string}` | undefined {
-  const ns = CONTRACT_NAMESPACE_BY_CHAIN[chainId];
-  if (!ns) return undefined;
-  const entry = (_contractsJson as ContractsJson)[String(chainId)]?.[ns]?.[
-    contractName
-  ];
-  return entry?.address as `0x${string}` | undefined;
-}
-
-/** Build address map {chainId: address} for a given contract name. */
-function _addressMap(contractName: string): Record<string, `0x${string}`> {
-  const result: Record<string, `0x${string}`> = {};
-  for (const chainId of Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)) {
-    const addr = _getAddress(Number(chainId), contractName);
-    if (addr) result[chainId] = addr;
-  }
-  return result;
-}
-
+// Required addresses are validated at module init — throws immediately if the
+// package shape changes or a namespace drifts, rather than silently degrading
+// (e.g. fetchNumReporters returning 0, USDm detection failing, priceDifference
+// collapsing to 0).
 const SortedOraclesContract = {
-  address: _addressMap("SortedOracles"),
+  address: buildRequiredAddressMap("SortedOracles"),
   abi: _sortedOraclesAbi,
 };
 
 const USDmContract = {
-  address: _addressMap("USDm"),
+  address: buildRequiredAddressMap("USDm"),
 };
 
 // ---------------------------------------------------------------------------
