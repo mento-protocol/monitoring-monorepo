@@ -41,6 +41,8 @@ function GlobalContent() {
   const { network } = useNetwork();
 
   const pools = poolsData?.Pool ?? [];
+  const fpmmPools = useMemo(() => pools.filter(isFpmm), [pools]);
+
   const usdConvertiblePoolIds = useMemo(
     () =>
       pools
@@ -53,17 +55,19 @@ function GlobalContent() {
     [pools, network],
   );
 
+  // Include all FPMM pool IDs in the snapshot query so we can compute 24h swap counts.
+  const snapshotPoolIds = useMemo(() => {
+    const fpmmIds = fpmmPools.map((p) => p.id);
+    return [...new Set([...usdConvertiblePoolIds, ...fpmmIds])];
+  }, [usdConvertiblePoolIds, fpmmPools]);
+
   // Query exactly the previous 24 complete hourly buckets: [from, to).
   const { from, to } = snapshotWindow24h(Date.now());
-  const shouldQuerySnapshots = shouldQueryPoolSnapshots24h(
-    usdConvertiblePoolIds,
-  );
+  const shouldQuerySnapshots = shouldQueryPoolSnapshots24h(snapshotPoolIds);
   const snapshotsVariables = useMemo(
     () =>
-      shouldQuerySnapshots
-        ? { from, to, poolIds: usdConvertiblePoolIds }
-        : undefined,
-    [from, to, shouldQuerySnapshots, usdConvertiblePoolIds],
+      shouldQuerySnapshots ? { from, to, poolIds: snapshotPoolIds } : undefined,
+    [from, to, shouldQuerySnapshots, snapshotPoolIds],
   );
   const {
     data: snapshotsData,
@@ -76,9 +80,6 @@ function GlobalContent() {
   );
   const snapshots24h = snapshotsData?.PoolSnapshot ?? [];
 
-  const fpmmPools = pools.filter(isFpmm);
-  const virtualPools = pools.filter((p) => !isFpmm(p));
-
   const okCount = pools.filter((p) => p.healthStatus === "OK").length;
   const warnCount = pools.filter((p) => p.healthStatus === "WARN").length;
   const critCount = pools.filter((p) => p.healthStatus === "CRITICAL").length;
@@ -86,9 +87,6 @@ function GlobalContent() {
   const naCount = pools.filter(
     (p) => !p.healthStatus || p.healthStatus === "N/A",
   ).length;
-
-  // Derive total swaps from pool cumulative counts (avoids a second query)
-  const totalSwaps = pools.reduce((sum, p) => sum + (p.swapCount ?? 0), 0);
 
   // TVL for FPMM pools
   const fpmmTvl = fpmmPools.reduce((sum, p) => sum + poolTvlUSD(p, network), 0);
@@ -104,6 +102,18 @@ function GlobalContent() {
       0,
     );
   }, [volume24hMap, snapshotsErr]);
+
+  const fpmmPoolIdSet = useMemo(
+    () => new Set(fpmmPools.map((p) => p.id)),
+    [fpmmPools],
+  );
+  const swaps24hFpmm = useMemo(
+    () =>
+      snapshots24h
+        .filter((s) => fpmmPoolIdSet.has(s.poolId))
+        .reduce((sum, s) => sum + s.swapCount, 0),
+    [snapshots24h, fpmmPoolIdSet],
+  );
 
   return (
     <div className="space-y-8">
@@ -127,17 +137,15 @@ function GlobalContent() {
       <section>
         <h2 className="text-lg font-semibold text-white mb-3">Summary</h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div>
-            <Tile
-              label="Pools"
-              value={poolsLoading ? "…" : String(pools.length)}
-            />
-            {!poolsLoading && (
-              <p className="mt-1 text-xs text-slate-500">
-                {fpmmPools.length} FPMMs · {virtualPools.length} Virtual
-              </p>
-            )}
-          </div>
+          <Tile
+            label="Pools"
+            value={poolsLoading ? "…" : String(pools.length)}
+            subtitle={
+              poolsLoading
+                ? undefined
+                : `${fpmmPools.length} FPMMs · ${pools.length - fpmmPools.length} Virtual`
+            }
+          />
           <Tile
             label="TVL (FPMMs)"
             value={poolsLoading ? "…" : formatUSD(fpmmTvl)}
@@ -153,8 +161,12 @@ function GlobalContent() {
             }
           />
           <Tile
-            label="Total Swaps"
-            value={poolsLoading ? "…" : totalSwaps.toLocaleString()}
+            label="24h Swaps (FPMMs)"
+            value={
+              poolsLoading || snapshotsLoading
+                ? "…"
+                : swaps24hFpmm.toLocaleString()
+            }
           />
         </div>
       </section>

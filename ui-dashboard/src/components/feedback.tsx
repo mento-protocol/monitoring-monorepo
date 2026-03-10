@@ -27,12 +27,28 @@ export function ErrorBox({ message }: { message: string }) {
   );
 }
 
-export function Tile({ label, value }: { label: string; value: string }) {
+export function Tile({
+  label,
+  value,
+  subtitle,
+}: {
+  label: string;
+  value: string;
+  subtitle?: string;
+}) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4">
-      <p className="text-sm text-slate-400">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-white font-mono">
-        {value}
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px]">
+      <div>
+        <p className="text-sm text-slate-400">{label}</p>
+        <p className="mt-1 text-2xl font-semibold text-white font-mono">
+          {value}
+        </p>
+      </div>
+      <p
+        className="mt-2 text-xs text-slate-500 min-h-4"
+        aria-hidden={!subtitle}
+      >
+        {subtitle}
       </p>
     </div>
   );

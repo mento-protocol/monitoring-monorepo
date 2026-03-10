@@ -53,6 +53,7 @@ describe("buildPool24hVolumeMap", () => {
         poolId: "pool-1",
         swapVolume0: "2000000000000000000", // 2 USDm
         swapVolume1: "900000000000000000000", // should be ignored when oracle exists
+        swapCount: 1,
       },
     ];
 
@@ -82,6 +83,7 @@ describe("buildPool24hVolumeMap", () => {
         poolId: "pool-2",
         swapVolume0: "1000000000000000000", // 1
         swapVolume1: "3000000000000000000", // 3
+        swapCount: 1,
       },
     ];
 
@@ -111,6 +113,7 @@ describe("buildPool24hVolumeMap", () => {
         poolId: "pool-3",
         swapVolume0: "1000000000000000000",
         swapVolume1: "3000000000000000000",
+        swapCount: 1,
       },
     ];
 

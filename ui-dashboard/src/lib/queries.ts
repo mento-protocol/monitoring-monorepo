@@ -45,6 +45,7 @@ export const POOL_SNAPSHOTS_24H = `
       }
     ) {
       poolId
+      swapCount
       swapVolume0
       swapVolume1
     }
