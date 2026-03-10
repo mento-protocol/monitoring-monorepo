@@ -93,7 +93,7 @@ All Vercel and storage infrastructure is managed by Terraform in [`terraform/`](
 - Custom domain (`monitoring.mento.org`)
 - Upstash Redis database (address labels storage)
 
-**State is stored locally** in `terraform/terraform.tfstate` (gitignored). Back it up — losing it means re-importing resources.
+**State is stored remotely** in GCS at `gs://mento-terraform-tfstate-6ed6/monitoring-monorepo/`. No local backup is needed — GCS is the source of truth and has object versioning enabled.
 
 #### Terraform commands
 
@@ -231,9 +231,11 @@ Check Envio dashboard → Metrics tab.
 
 Delete the indexer in Envio dashboard → re-add it. This resets all state and starts from the configured start block.
 
-### Terraform state lost
+### Terraform state recovery
 
-If `terraform/terraform.tfstate` is lost, import existing resources back with `terraform import`. Key resource addresses:
+State is in GCS (`gs://mento-terraform-tfstate-6ed6/monitoring-monorepo/`) with object versioning. To recover a previous state version, download an older object version from the GCS bucket and run `terraform state push <file>`.
+
+If state is unrecoverable, import existing resources back with `terraform import`. Key resource addresses:
 
 ```bash
 terraform import vercel_project.dashboard <project-id>
