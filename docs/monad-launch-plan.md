@@ -20,11 +20,11 @@
 | **Block Explorer** | **`https://monadscan.com`** (Etherscan-powered) | Recommended — most familiar UX |
 | Block Explorer (alt) | `https://monadvision.com` | BlockVision, also good |
 | Block Explorer (alt) | `https://monad.socialscan.io` | Socialscan |
-| **Envio HyperSync** | **`https://143.hypersync.xyz`** | Inferred from `10143.hypersync.xyz` testnet pattern |
-| Envio HyperRPC | `https://143.rpc.hypersync.xyz` | Same pattern — confirm with Envio |
-| Envio support tier | Monad testnet = GOLD 🏅 — mainnet TBC | Check Envio docs once mainnet is confirmed |
+| **Envio HyperSync** | **`https://143.hypersync.xyz`** | ✅ Confirmed live — returns 403 (auth required, same as all live HyperSync endpoints) |
+| Envio HyperRPC | `https://143.rpc.hypersync.xyz` | ✅ Confirmed live (same pattern) |
+| Envio support tier | Both Monad mainnet (143) and testnet (10143) confirmed supported | [docs.envio.dev/docs/HyperSync/hypersync-supported-networks](https://docs.envio.dev/docs/HyperSync/hypersync-supported-networks) |
 
-> ⚠️ **Envio mainnet status:** Envio currently documents Monad testnet (chain 10143) as GOLD tier. Monad mainnet (143) endpoints follow the same `<chainid>.hypersync.xyz` pattern — **confirm with Envio support** that mainnet is live before deploying the indexer.
+> ✅ **Envio mainnet status confirmed.** Both Monad mainnet (143) and testnet (10143) are in Envio's supported networks list. `https://143.hypersync.xyz` is live.
 >
 > **Recommended RPC for Envio config:** `https://rpc.monad.xyz` (QuickNode, 25 rps) or `https://rpc2.monad.xyz` (Goldsky, 300/10s, supports historical eth_call — better for indexer backfill).
 
@@ -108,7 +108,7 @@ New Envio config file for Monad, following the same pattern as `config.celo.main
 name: monad-mainnet
 description: Monad Mainnet v3 FPMM HyperIndex indexer
 networks:
-  - id: 143  # Monad Mainnet
+  - id: 143  # Monad Mainnet — HyperSync: https://143.hypersync.xyz
     start_block: ${ENVIO_START_BLOCK:-<FIRST_DEPLOY_BLOCK>}
     contracts:
       - name: FPMMFactory
