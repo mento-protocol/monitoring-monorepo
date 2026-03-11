@@ -2,8 +2,31 @@
 
 > **Status:** Pre-launch prep. Contract addresses TBD — this document tracks everything needed to go live once addresses are available.
 > 
-> **Target chain:** Monad Mainnet (`chainId: 10143` — confirm with team)
-> **Contracts package namespace:** `"monad-mainnet"` (exists in `@mento-protocol/contracts@0.2.0` for chainId 143; confirm final chainId and namespace once deployment is done)
+> **Target chain:** Monad Mainnet — **Chain ID: `143`** (confirmed from official Monad docs)
+> **Contracts package namespace:** `"monad-mainnet"` (exists in `@mento-protocol/contracts@0.2.0` for chainId 143)
+
+---
+
+## Chain Info (Researched)
+
+| Field | Value | Source |
+|-------|-------|--------|
+| Chain ID | **143** | [docs.monad.xyz](https://docs.monad.xyz/developer-essentials/network-information/) |
+| Currency | MON | Official docs |
+| **RPC: `https://rpc.monad.xyz`** | QuickNode, 25 rps, batch 100 | Best default — highest rate limit |
+| RPC: `https://rpc2.monad.xyz` | Goldsky Edge, 300/10s, batch 10 — historical eth_call supported | Good fallback for indexer |
+| RPC: `https://rpc3.monad.xyz` | Ankr, 300/10s, batch 10 | Alternative |
+| RPC: `https://rpc-mainnet.monadinfra.com` | MF, 20 rps, batch 1 — historical eth_call supported | Last resort |
+| **Block Explorer** | **`https://monadscan.com`** (Etherscan-powered) | Recommended — most familiar UX |
+| Block Explorer (alt) | `https://monadvision.com` | BlockVision, also good |
+| Block Explorer (alt) | `https://monad.socialscan.io` | Socialscan |
+| **Envio HyperSync** | **`https://143.hypersync.xyz`** | Inferred from `10143.hypersync.xyz` testnet pattern |
+| Envio HyperRPC | `https://143.rpc.hypersync.xyz` | Same pattern — confirm with Envio |
+| Envio support tier | Monad testnet = GOLD 🏅 — mainnet TBC | Check Envio docs once mainnet is confirmed |
+
+> ⚠️ **Envio mainnet status:** Envio currently documents Monad testnet (chain 10143) as GOLD tier. Monad mainnet (143) endpoints follow the same `<chainid>.hypersync.xyz` pattern — **confirm with Envio support** that mainnet is live before deploying the indexer.
+>
+> **Recommended RPC for Envio config:** `https://rpc.monad.xyz` (QuickNode, 25 rps) or `https://rpc2.monad.xyz` (Goldsky, 300/10s, supports historical eth_call — better for indexer backfill).
 
 ---
 
@@ -67,7 +90,7 @@ Add Monad to `CONTRACT_NAMESPACE_BY_CHAIN`:
 export const CONTRACT_NAMESPACE_BY_CHAIN: Record<number, string> = {
   42220: "mainnet",
   11142220: "testnet-v2-rc5",
-  <MONAD_CHAIN_ID>: "monad-mainnet",
+  143: "monad-mainnet",
 };
 ```
 
@@ -85,7 +108,7 @@ New Envio config file for Monad, following the same pattern as `config.celo.main
 name: monad-mainnet
 description: Monad Mainnet v3 FPMM HyperIndex indexer
 networks:
-  - id: <MONAD_CHAIN_ID>
+  - id: 143  # Monad Mainnet
     start_block: ${ENVIO_START_BLOCK:-<FIRST_DEPLOY_BLOCK>}
     contracts:
       - name: FPMMFactory
@@ -155,7 +178,7 @@ Add Monad to `ACTIVE_DEPLOYMENT` and `NETWORKS`:
 const NS = {
   "celo-mainnet": DEPLOYMENT_NAMESPACES["42220"],
   "celo-sepolia": DEPLOYMENT_NAMESPACES["11142220"],
-  "monad-mainnet": DEPLOYMENT_NAMESPACES["<MONAD_CHAIN_ID>"],
+  "monad-mainnet": DEPLOYMENT_NAMESPACES["143"],
 } as const;
 
 export type IndexerNetworkId =
@@ -170,13 +193,13 @@ export type IndexerNetworkId =
 "monad-mainnet-hosted": makeNetwork({
   id: "monad-mainnet-hosted",
   label: "Monad Mainnet",
-  chainId: <MONAD_CHAIN_ID>,
+  chainId: 143,
   contractsNamespace: NS["monad-mainnet"],
   hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MONAD_HOSTED ?? "",
   hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_MONAD_HOSTED ?? "",
   explorerBaseUrl:
     process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_HOSTED ??
-    "https://explorer.monad.xyz",
+    "https://monadscan.com",  // Etherscan-powered, best default
 }),
 ```
 
