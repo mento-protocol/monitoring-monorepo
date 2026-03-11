@@ -10,6 +10,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — an [Envio Hy
 | ----------------------------------- | ------------------------------------------------------------------------------- |
 | [`indexer-envio`](./indexer-envio/) | Envio HyperIndex indexer for Celo Mainnet + Sepolia (FPMM pools + VirtualPools) |
 | [`ui-dashboard`](./ui-dashboard/)   | Next.js 16 + Plotly.js monitoring dashboard with multi-chain network switching  |
+| [`shared-config`](./shared-config/) | Shared deployment config (chain ID → treb namespace mappings)                   |
 
 ## Architecture
 
@@ -102,6 +103,24 @@ The dashboard supports multiple network targets via `_<NETWORK>` suffix env vars
 
 Production env vars are managed by Terraform — do not edit them in the Vercel dashboard. See [`terraform/`](./terraform/) and [`docs/deployment.md`](./docs/deployment.md).
 
+## Contract Addresses
+
+Contract addresses and ABIs are sourced from the published [`@mento-protocol/contracts`](https://www.npmjs.com/package/@mento-protocol/contracts) npm package — no vendored JSON files. The active treb deployment namespace per chain is declared in [`shared-config/deployment-namespaces.json`](./shared-config/deployment-namespaces.json):
+
+```json
+{
+  "42220": "mainnet",
+  "11142220": "testnet-v2-rc5"
+}
+```
+
+**To promote a new treb deployment** (e.g. after a new `mento-deployments-v2` release):
+
+1. Publish a new `@mento-protocol/contracts` version from `mento-deployments-v2`
+2. Update the package version in `indexer-envio/package.json` and `ui-dashboard/package.json`
+3. Update the namespace string(s) in `shared-config/deployment-namespaces.json`
+4. Run `pnpm install`
+
 ## Deployment
 
 ### Indexer → Envio Hosted
@@ -141,29 +160,31 @@ See [`docs/deployment.md`](./docs/deployment.md) for the full setup guide and tr
 GitHub Actions runs on every PR:
 
 - ESLint 10 (no `eslint-config-next` — uses `@eslint/js` + `typescript-eslint` + `@eslint-react`)
-- Vitest (53 tests)
+- Vitest (105 tests)
 - TypeScript typecheck
 - Codecov coverage reporting
 
 ## Key Files
 
-| What                     | Where                                        |
-| ------------------------ | -------------------------------------------- |
-| Indexer schema           | `indexer-envio/schema.graphql`               |
-| Event handlers           | `indexer-envio/src/EventHandlers.ts`         |
-| Mainnet config           | `indexer-envio/config.celo.mainnet.yaml`     |
-| Sepolia config           | `indexer-envio/config.celo.sepolia.yaml`     |
-| Dashboard app            | `ui-dashboard/src/app/`                      |
-| Address book page        | `ui-dashboard/src/app/address-book/page.tsx` |
-| Address labels API       | `ui-dashboard/src/app/api/address-labels/`   |
-| Address labels storage   | `ui-dashboard/src/lib/address-labels.ts`     |
-| Network defs             | `ui-dashboard/src/lib/networks.ts`           |
-| GraphQL queries          | `ui-dashboard/src/lib/queries.ts`            |
-| Pool type helper         | `ui-dashboard/src/lib/tokens.ts`             |
-| Terraform infrastructure | `terraform/`                                 |
-| Deployment guide         | `docs/deployment.md`                         |
-| Technical spec           | `SPEC.md`                                    |
-| Roadmap                  | `docs/ROADMAP.md`                            |
+| What                           | Where                                        |
+| ------------------------------ | -------------------------------------------- |
+| **Deployment namespace map**   | `shared-config/deployment-namespaces.json`   |
+| Indexer schema                 | `indexer-envio/schema.graphql`               |
+| Event handlers                 | `indexer-envio/src/EventHandlers.ts`         |
+| Contract address resolution    | `indexer-envio/src/contractAddresses.ts`     |
+| Mainnet config                 | `indexer-envio/config.celo.mainnet.yaml`     |
+| Sepolia config                 | `indexer-envio/config.celo.sepolia.yaml`     |
+| Dashboard app                  | `ui-dashboard/src/app/`                      |
+| Address book page              | `ui-dashboard/src/app/address-book/page.tsx` |
+| Address labels API             | `ui-dashboard/src/app/api/address-labels/`   |
+| Address labels storage         | `ui-dashboard/src/lib/address-labels.ts`     |
+| Network defs + contract labels | `ui-dashboard/src/lib/networks.ts`           |
+| GraphQL queries                | `ui-dashboard/src/lib/queries.ts`            |
+| Pool type helper               | `ui-dashboard/src/lib/tokens.ts`             |
+| Terraform infrastructure       | `terraform/`                                 |
+| Deployment guide               | `docs/deployment.md`                         |
+| Technical spec                 | `SPEC.md`                                    |
+| Roadmap                        | `docs/ROADMAP.md`                            |
 
 ## Documentation
 

@@ -2,8 +2,9 @@
 
 ## Overview
 
-pnpm monorepo with two packages:
+pnpm monorepo with three packages:
 
+- `shared-config/` — `@mento-protocol/monitoring-config`: shared deployment config (chain ID → treb namespace mapping)
 - `indexer-envio/` — Envio HyperIndex indexer for Celo v3 FPMM pools
 - `ui-dashboard/` — Next.js 16 + Plotly.js monitoring dashboard
 
@@ -31,13 +32,20 @@ pnpm infra:apply              # Apply infrastructure changes
 
 ## Package Details
 
+### shared-config
+
+- **Package:** `@mento-protocol/monitoring-config` (private, no build step)
+- **Purpose:** Single source of truth for chain ID → active treb namespace. Edit `deployment-namespaces.json` when promoting a new deployment.
+- **Consumed by:** both `indexer-envio` and `ui-dashboard` via `workspace:*` dependency
+
 ### indexer-envio
 
 - **Runtime:** Envio HyperIndex (envio@2.32.3)
 - **Schema:** `schema.graphql` defines indexed entities (FPMM, Swap, Mint, Burn, etc.)
-- **Config:** `config.yaml` (devnet), `config.sepolia.yaml` (Celo Sepolia testnet)
+- **Configs:** `config.celo.devnet.yaml`, `config.celo.mainnet.yaml`, `config.celo.sepolia.yaml`
 - **Handlers:** `src/EventHandlers.ts` — processes blockchain events
-- **ABIs:** `abis/` — FPMMFactory, FPMM, VirtualPoolFactory
+- **Contract addresses:** `src/contractAddresses.ts` — resolves addresses from `@mento-protocol/contracts` using the namespace map from `shared-config`
+- **ABIs:** `abis/` — FPMMFactory, FPMM, VirtualPoolFactory (indexer-specific); SortedOracles + token ABIs come from `@mento-protocol/contracts`
 - **Scripts:** `scripts/run-envio-with-env.mjs` — loads .env and runs envio CLI
 - **Tests:** `test/` — mocha + chai
 - **Docker:** Envio dev mode spins up Postgres + Hasura automatically
@@ -48,9 +56,9 @@ pnpm infra:apply              # Apply infrastructure changes
 - **Charts:** Plotly.js via react-plotly.js
 - **Data:** GraphQL queries to Hasura (via graphql-request + SWR)
 - **Styling:** Tailwind CSS 4
-- **Multi-chain:** Network selector switches between devnet/sepolia Hasura endpoints
-- **Static labels:** `src/lib/networks.ts` maps known contract addresses to names
-- **Address book:** `/address-book` page + inline editing; custom labels stored in Upstash Redis, backed up daily to Vercel Blob
+- **Multi-chain:** Network selector switches between devnet/sepolia/mainnet Hasura endpoints; all networks defined in `src/lib/networks.ts`
+- **Contract labels:** `src/lib/networks.ts` derives token symbols and address labels from `@mento-protocol/contracts` (no vendored JSON); the active namespace per chain comes from `shared-config`
+- **Address book:** `/address-book` page + inline editing; custom labels stored in Upstash Redis, backed up daily to Vercel Blob; custom labels override/extend the package-derived ones
 - **Deployment:** Vercel (`monitoring-dashboard` project); infra managed by Terraform in `terraform/`
 
 ### PR Review Guidance (Dashboard Scale)
@@ -71,12 +79,18 @@ monitoring-monorepo/
 │   ├── outputs.tf            # Outputs (project ID, Redis URL, etc.)
 │   ├── terraform.tfvars.example  # Template (copy to terraform.tfvars)
 │   └── .gitignore            # Ignores tfstate, tfvars, .terraform/
+├── shared-config/            # @mento-protocol/monitoring-config (private)
+│   ├── package.json
+│   └── deployment-namespaces.json  # ← edit this when promoting a new deployment
 ├── indexer-envio/
-│   ├── config.yaml           # Devnet indexer config
-│   ├── config.sepolia.yaml   # Sepolia indexer config
+│   ├── config.celo.devnet.yaml   # Devnet indexer config
+│   ├── config.celo.mainnet.yaml  # Celo Mainnet config
+│   ├── config.celo.sepolia.yaml  # Celo Sepolia config
 │   ├── schema.graphql        # Entity definitions
-│   ├── src/EventHandlers.ts  # Event processing logic
-│   ├── abis/                 # Contract ABIs
+│   ├── src/
+│   │   ├── EventHandlers.ts  # Event processing logic
+│   │   └── contractAddresses.ts  # Contract address resolution from @mento-protocol/contracts
+│   ├── abis/                 # Contract ABIs (FPMMFactory, FPMM, VirtualPoolFactory)
 │   ├── scripts/              # Helper scripts
 │   └── test/                 # Tests
 └── ui-dashboard/
@@ -86,10 +100,10 @@ monitoring-monorepo/
     │   │   └── api/address-labels/  # CRUD + export/import/backup routes
     │   ├── components/
     │   │   ├── address-label-editor.tsx   # Inline edit dialog
-    │   │   └── address-labels-provider.tsx  # Context: merges static + custom labels
+    │   │   └── address-labels-provider.tsx  # Context: merges package + custom labels
     │   └── lib/
     │       ├── address-labels.ts  # Upstash Redis data access (server-side)
-    │       └── networks.ts        # Static contract address→name mappings
+    │       └── networks.ts        # Network defs; derives labels from @mento-protocol/contracts
     ├── public/               # Static assets
     ├── vercel.json           # Vercel config + daily backup cron
     └── next.config.ts        # Next.js config
@@ -118,10 +132,19 @@ The envio-generated `generated/docker-compose.yaml` does not include a healthche
 
 ## Common Tasks
 
+### Promoting a new treb deployment
+
+When a new set of contracts has been deployed and a new `@mento-protocol/contracts` version is published:
+
+1. Update the `@mento-protocol/contracts` version in `indexer-envio/package.json` and `ui-dashboard/package.json`
+2. Update namespace string(s) in `shared-config/deployment-namespaces.json` (e.g. `"42220": "mainnet-v2"`)
+3. Run `pnpm install`
+4. Typecheck: `pnpm --filter @mento-protocol/ui-dashboard typecheck` and `pnpm --filter @mento-protocol/indexer-envio typecheck`
+
 ### Adding a new contract to index
 
 1. Add ABI to `indexer-envio/abis/`
-2. Add contract entry in `config.yaml` (and `config.sepolia.yaml` if applicable)
+2. Add contract entry in `config.celo.mainnet.yaml` (and `config.celo.sepolia.yaml` if applicable)
 3. Add entity to `schema.graphql`
 4. Add handler in `src/EventHandlers.ts`
 5. Run `pnpm indexer:codegen` to regenerate types
