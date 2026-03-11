@@ -75,14 +75,15 @@ export function computeLimitStatus(pool: {
   return "OK";
 }
 
-export type RebalancerStatus = "ACTIVE" | "STALE" | "N/A";
+export type RebalancerStatus = "ACTIVE" | "STALE" | "N/A" | "NO_DATA";
 
 /**
  * Compute rebalancer liveness for a pool.
  *
- * - "N/A":    VirtualPools or no rebalance data
- * - "STALE":  age > 86400s AND healthStatus !== "OK"
- * - "ACTIVE": within 24h OR healthStatus is "OK"
+ * - "N/A":     VirtualPools — rebalancer not applicable by design
+ * - "NO_DATA": FPMM pool with no rebalance events recorded yet
+ * - "STALE":   age > 86400s AND healthStatus !== "OK"
+ * - "ACTIVE":  within 24h OR healthStatus is "OK"
  */
 export function computeRebalancerLiveness(
   pool: {
@@ -93,7 +94,7 @@ export function computeRebalancerLiveness(
   nowSeconds: number,
 ): RebalancerStatus {
   if (pool.source?.includes("virtual")) return "N/A";
-  if (!pool.lastRebalancedAt || pool.lastRebalancedAt === "0") return "N/A";
+  if (!pool.lastRebalancedAt || pool.lastRebalancedAt === "0") return "NO_DATA";
   const age = nowSeconds - Number(pool.lastRebalancedAt);
   const isStale = age > 86400 && pool.healthStatus !== "OK";
   return isStale ? "STALE" : "ACTIVE";

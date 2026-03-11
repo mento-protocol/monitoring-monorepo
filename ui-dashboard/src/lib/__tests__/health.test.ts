@@ -245,19 +245,19 @@ describe("computeRebalancerLiveness", () => {
     ).toBe("N/A");
   });
 
-  it('returns "N/A" when lastRebalancedAt is missing', () => {
+  it('returns "NO_DATA" when lastRebalancedAt is missing (FPMM with no history)', () => {
     expect(computeRebalancerLiveness({ source: "fpmm_factory" }, NOW)).toBe(
-      "N/A",
+      "NO_DATA",
     );
   });
 
-  it('returns "N/A" when lastRebalancedAt is "0"', () => {
+  it('returns "NO_DATA" when lastRebalancedAt is "0" (FPMM with no history)', () => {
     expect(
       computeRebalancerLiveness(
         { source: "fpmm_factory", lastRebalancedAt: "0" },
         NOW,
       ),
-    ).toBe("N/A");
+    ).toBe("NO_DATA");
   });
 
   it('returns "ACTIVE" when rebalanced within 24h', () => {
