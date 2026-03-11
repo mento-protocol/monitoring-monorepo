@@ -51,11 +51,17 @@ jobs:
       - name: Install dependencies
         if: steps.changes.outputs.indexer == 'true'
         run: pnpm install --frozen-lockfile
-      - name: Generate types (envio codegen)
+      - name: Validate all Envio configs (codegen)
         if: steps.changes.outputs.indexer == 'true'
-        # Use mainnet config — it has the full contract set (VirtualPool, SortedOracles)
-        # that devnet config omits, so all exports are generated for typecheck.
-        run: pnpm --filter @mento-protocol/indexer-envio codegen --config config.celo.mainnet.yaml
+        # Run codegen against every config file to catch schema/config drift early.
+        # Celo mainnet is run last (its output is used by typecheck + tests below).
+        # Monad configs are validated for syntax/schema correctness even with empty
+        # address arrays — this catches drift before deploy time.
+        run: |
+          pnpm --filter @mento-protocol/indexer-envio codegen --config config.monad.testnet.yaml
+          pnpm --filter @mento-protocol/indexer-envio codegen --config config.monad.mainnet.yaml
+          pnpm --filter @mento-protocol/indexer-envio codegen --config config.celo.sepolia.yaml
+          pnpm --filter @mento-protocol/indexer-envio codegen --config config.celo.mainnet.yaml
       - name: Link generated package
         if: steps.changes.outputs.indexer == 'true'
         # pnpm install runs before generated/ exists, so the workspace symlink for

@@ -61,14 +61,27 @@ export function requireContractAddress(
 
 /**
  * Build a {chainId: address} map for a given contract name across all indexed chains.
- * All entries are required — throws at module init if any chain is missing the contract.
+ * Chains missing from @mento-protocol/contracts are skipped with a console warning
+ * rather than throwing — this allows the indexer to start for chains that ARE in the
+ * package even if new chains haven't been published yet.
+ *
+ * Use requireContractAddress() directly when you need a hard guarantee.
  */
-export function buildRequiredAddressMap(
+export function buildAddressMap(
   contractName: string,
 ): Record<string, `0x${string}`> {
   const result: Record<string, `0x${string}`> = {};
   for (const chainId of Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)) {
-    result[chainId] = requireContractAddress(Number(chainId), contractName);
+    const addr = getContractAddress(Number(chainId), contractName);
+    if (addr) {
+      result[chainId] = addr;
+    } else {
+      console.warn(
+        `[contractAddresses] ${contractName} not found for chain ${chainId} ` +
+          `(namespace: ${CONTRACT_NAMESPACE_BY_CHAIN[Number(chainId)] ?? "unknown"}) ` +
+          `in @mento-protocol/contracts. Update the package when the deployment is published.`,
+      );
+    }
   }
   return result;
 }

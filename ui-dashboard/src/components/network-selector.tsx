@@ -8,9 +8,16 @@ import { NETWORK_IDS, NETWORKS, type IndexerNetworkId } from "@/lib/networks";
 const showLocalNetworks =
   process.env.NEXT_PUBLIC_SHOW_LOCAL_NETWORKS === "true";
 
-const VISIBLE_NETWORK_IDS = NETWORK_IDS.filter(
-  (id) => showLocalNetworks || !NETWORKS[id].local,
-);
+const VISIBLE_NETWORK_IDS = NETWORK_IDS.filter((id) => {
+  const network = NETWORKS[id];
+  // Hide local networks unless explicitly enabled.
+  if (!showLocalNetworks && network.local) return false;
+  // Hide networks with no Hasura URL configured — selecting them would blank
+  // all data views with a "Hasura URL not configured" error. They become
+  // visible automatically once the env var is set (e.g. after Envio deploy).
+  if (!network.hasuraUrl) return false;
+  return true;
+});
 
 export function NetworkSelector() {
   const { networkId, setNetworkId } = useNetwork();

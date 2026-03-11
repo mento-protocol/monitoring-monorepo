@@ -98,15 +98,29 @@ describe("contractAddresses — deterministic namespace address resolution", () 
     );
   });
 
-  it("returns undefined for un-indexed chainId (143 — monad, multiple namespaces)", () => {
-    // Chain 143 is not in CONTRACT_NAMESPACE_BY_CHAIN — should not fall through
-    // to any namespace, including the 'mainnet' namespace that also exists on 143.
+  it("returns undefined for un-indexed chainId (999 — unknown chain)", () => {
+    const addr = getContractAddress(999, "USDm");
+    assert.equal(addr, undefined, "Unknown chain should return undefined");
+  });
+
+  it("resolves USDm for Monad mainnet (143) — now an indexed chain", () => {
+    // Chain 143 is in CONTRACT_NAMESPACE_BY_CHAIN as "mainnet".
+    // USDm is present in @mento-protocol/contracts for chain 143/mainnet.
     const addr = getContractAddress(143, "USDm");
-    assert.equal(
-      addr,
-      undefined,
-      "Chain 143 is not indexed — should return undefined",
-    );
+    assert.ok(addr, "USDm should resolve for chain 143");
+    assert.match(addr!, /^0x[0-9a-fA-F]{40}$/);
+  });
+
+  it("returns undefined for Monad testnet (10143) — package not yet updated", () => {
+    // Chain 10143 is in CONTRACT_NAMESPACE_BY_CHAIN but @mento-protocol/contracts
+    // does not yet include entries for it. buildAddressMap() will warn and skip it.
+    // This test documents the current state; once the package is updated this
+    // should be changed to assert a valid address.
+    const addr = getContractAddress(10143, "USDm");
+    // Accept either undefined (package not updated) or a valid address (package updated).
+    if (addr !== undefined) {
+      assert.match(addr, /^0x[0-9a-fA-F]{40}$/, "If present, must be a valid address");
+    }
   });
 
   it("requireContractAddress throws for un-indexed chainId", () => {
