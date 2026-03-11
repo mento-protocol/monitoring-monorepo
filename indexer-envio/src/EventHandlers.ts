@@ -22,20 +22,32 @@ import { createPublicClient, http } from "viem";
 // ABI is the only thing needed directly from the package here — address
 // resolution is delegated to contractAddresses.ts (shared with tests).
 import _sortedOraclesAbi from "@mento-protocol/contracts/abis/SortedOracles.json";
-import { buildRequiredAddressMap } from "./contractAddresses";
+import {
+  requireContractAddress,
+  getContractAddress,
+  CONTRACT_NAMESPACE_BY_CHAIN,
+} from "./contractAddresses";
 
-// Required addresses are validated at module init — throws immediately if the
-// package shape changes or a namespace drifts, rather than silently degrading
-// (e.g. fetchNumReporters returning 0, USDm detection failing, priceDifference
-// collapsing to 0).
+// Addresses are resolved lazily per active chainId rather than eagerly for all
+// chains at module init. This avoids crashing the indexer on startup if a future
+// package update removes or renames a Sepolia namespace entry while mainnet is
+// still valid — only chains that are actually indexed will fail.
 const SortedOraclesContract = {
-  address: buildRequiredAddressMap("SortedOracles"),
+  /** Returns the SortedOracles address for the given chainId, throwing if missing. */
+  address: (chainId: number): `0x${string}` =>
+    requireContractAddress(chainId, "SortedOracles"),
   abi: _sortedOraclesAbi,
 };
 
-const USDmContract = {
-  address: buildRequiredAddressMap("USDm"),
-};
+// USDm addresses set — built lazily from all indexed chains. Missing entries
+// are skipped (getContractAddress returns undefined) rather than throwing,
+// so the indexer can still start if USDm is absent on a future chain.
+const USDM_ADDRESSES = new Set(
+  Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)
+    .map((chainId) => getContractAddress(Number(chainId), "USDm"))
+    .filter((a): a is `0x${string}` => a !== undefined)
+    .map((a) => a.toLowerCase()),
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -117,7 +129,7 @@ function getRpcClient(chainId: number): ReturnType<typeof createPublicClient> {
   return rpcClients.get(chainId)!;
 }
 
-/** SortedOracles contract addresses per chainId, sourced from @mento-protocol/contracts. */
+/** Returns SortedOracles address for chainId, throws if not in @mento-protocol/contracts. */
 const SORTED_ORACLES_ADDRESS = SortedOraclesContract.address;
 
 /** Cache numRates by block — numRates can't change within a single block, so
@@ -145,8 +157,13 @@ async function fetchNumReporters(
   rateFeedID: string,
   blockNumber: bigint,
 ): Promise<number> {
-  const address = SORTED_ORACLES_ADDRESS[chainId];
-  if (!address) return 0;
+  let address: `0x${string}`;
+  try {
+    address = SORTED_ORACLES_ADDRESS(chainId);
+  } catch {
+    // Chain not in CONTRACT_NAMESPACE_BY_CHAIN or package entry missing.
+    return 0;
+  }
 
   const cacheKey = `${chainId}:${rateFeedID}:${blockNumber}`;
   const cached = numReportersCache.get(cacheKey);
@@ -420,13 +437,6 @@ function computeLimitPressures(
 // ---------------------------------------------------------------------------
 // Price difference computation (reserve ratio vs oracle price)
 // ---------------------------------------------------------------------------
-
-/** Known USDm token addresses (lowercased), sourced from @mento-protocol/contracts. */
-const USDM_ADDRESSES = new Set(
-  (Object.values(USDmContract.address) as (`0x${string}` | undefined)[])
-    .filter((a): a is `0x${string}` => a !== undefined)
-    .map((a) => a.toLowerCase()),
-);
 
 /**
  * Computes priceDifference in basis points (bps) from reserves and oracle price.
