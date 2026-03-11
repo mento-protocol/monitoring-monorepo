@@ -100,6 +100,13 @@ export function LimitBadge({ status }: { status: string }) {
   );
 }
 
+const NA_BADGE_CONFIG = {
+  label: "N/A",
+  dot: "⚪",
+  bg: "bg-slate-500/20",
+  text: "text-slate-400",
+} as const;
+
 /** Rebalancer liveness badge (ACTIVE | STALE | N/A | NO_DATA) */
 export function RebalancerBadge({ status }: { status: string }) {
   const configs: Record<
@@ -118,18 +125,8 @@ export function RebalancerBadge({ status }: { status: string }) {
       bg: "bg-red-500/20",
       text: "text-red-300",
     },
-    "N/A": {
-      label: "N/A",
-      dot: "⚪",
-      bg: "bg-slate-500/20",
-      text: "text-slate-400",
-    },
-    NO_DATA: {
-      label: "N/A",
-      dot: "⚪",
-      bg: "bg-slate-500/20",
-      text: "text-slate-400",
-    },
+    "N/A": NA_BADGE_CONFIG,
+    NO_DATA: NA_BADGE_CONFIG,
   };
 
   const cfg = configs[status] ?? configs["N/A"];
