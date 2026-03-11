@@ -11,6 +11,7 @@ import DEPLOYMENT_NAMESPACES from "@mento-protocol/monitoring-config/deployment-
 const NS = {
   "celo-mainnet": DEPLOYMENT_NAMESPACES["42220"],
   "celo-sepolia": DEPLOYMENT_NAMESPACES["11142220"],
+  "monad-mainnet": DEPLOYMENT_NAMESPACES["143"],
 } as const;
 
 export type IndexerNetworkId =
@@ -18,7 +19,8 @@ export type IndexerNetworkId =
   | "celo-sepolia-local"
   | "celo-sepolia-hosted"
   | "celo-mainnet-local"
-  | "celo-mainnet-hosted";
+  | "celo-mainnet-hosted"
+  | "monad-mainnet-hosted";
 
 export type Network = {
   id: IndexerNetworkId;
@@ -144,6 +146,18 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_MAINNET_HOSTED ??
       "https://celoscan.io",
+  }),
+  "monad-mainnet-hosted": makeNetwork({
+    id: "monad-mainnet-hosted",
+    label: "Monad Mainnet",
+    chainId: 143,
+    contractsNamespace: NS["monad-mainnet"],
+    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED ?? "",
+    hasuraSecret:
+      process.env.NEXT_PUBLIC_HASURA_SECRET_MONAD_MAINNET_HOSTED ?? "",
+    explorerBaseUrl:
+      process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_MAINNET_HOSTED ??
+      "https://monadscan.com",
   }),
 };
 

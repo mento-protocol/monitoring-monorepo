@@ -1,0 +1,56 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+name: monad-mainnet
+description: Monad Mainnet v3 FPMM HyperIndex indexer
+networks:
+  - id: 143 # Monad Mainnet — HyperSync: https://143.hypersync.xyz
+    start_block: ${ENVIO_START_BLOCK:-0}
+    contracts:
+      - name: FPMMFactory
+        abi_file_path: abis/FPMMFactory.json
+        address:
+          - 0xa849b475FE5a4B5C9C3280152c7a1945b907613b # TransparentUpgradeableProxy:FPMMFactory
+        handler: src/EventHandlers.ts
+        events:
+          - event: FPMMDeployed
+      - name: FPMM
+        abi_file_path: abis/FPMM.json
+        address: [] # Pools deployed via FPMMFactory — add addresses as they go live
+        handler: src/EventHandlers.ts
+        events:
+          - event: Swap
+          - event: Mint
+          - event: Burn
+          - event: UpdateReserves
+          - event: Rebalanced
+          - event: TradingLimitConfigured
+      - name: VirtualPool
+        abi_file_path: abis/FPMM.json
+        address: [] # VirtualPoolFactory not yet deployed — add when live
+        handler: src/EventHandlers.ts
+        events:
+          - event: Swap
+          - event: Mint
+          - event: Burn
+          - event: UpdateReserves
+          - event: Rebalanced
+      - name: VirtualPoolFactory
+        abi_file_path: abis/VirtualPoolFactory.json
+        address: [] # Not yet deployed — add when live
+        handler: src/EventHandlers.ts
+        events:
+          - event: VirtualPoolDeployed
+          - event: PoolDeprecated
+      - name: SortedOracles
+        abi_file_path: abis/SortedOracles.json
+        address:
+          - "0x6f92C745346057a61b259579256159458a0a6A92" # TransparentUpgradeableProxy:SortedOracles
+        handler: src/EventHandlers.ts
+        events:
+          - event: OracleReported
+          - event: MedianUpdated
+unordered_multichain_mode: true
+preload_handlers: true
+field_selection:
+  transaction_fields:
+    - hash
+    - from
