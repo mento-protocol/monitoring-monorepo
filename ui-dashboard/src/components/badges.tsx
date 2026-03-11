@@ -100,7 +100,7 @@ export function LimitBadge({ status }: { status: string }) {
   );
 }
 
-/** Rebalancer liveness badge (ACTIVE | STALE | N/A) */
+/** Rebalancer liveness badge (ACTIVE | STALE | N/A | NO_DATA) */
 export function RebalancerBadge({ status }: { status: string }) {
   const configs: Record<
     string,
@@ -119,6 +119,12 @@ export function RebalancerBadge({ status }: { status: string }) {
       text: "text-red-300",
     },
     "N/A": {
+      label: "N/A",
+      dot: "⚪",
+      bg: "bg-slate-500/20",
+      text: "text-slate-400",
+    },
+    NO_DATA: {
       label: "N/A",
       dot: "⚪",
       bg: "bg-slate-500/20",

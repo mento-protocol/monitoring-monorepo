@@ -48,6 +48,7 @@ function rebalancerTooltip(status: RebalancerStatus): string {
     return "Rebalancer active — last rebalance within 24h";
   if (status === "STALE")
     return "No rebalance in 24h while pool health is not OK";
+  if (status === "NO_DATA") return "No rebalance events recorded yet";
   return "VirtualPool — rebalancer not applicable";
 }
 
