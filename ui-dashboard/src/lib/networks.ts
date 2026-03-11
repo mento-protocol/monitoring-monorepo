@@ -64,7 +64,7 @@ function buildNetworkMaps(
   };
 }
 
-function makeNetwork(
+export function makeNetwork(
   config: Omit<Network, "tokenSymbols" | "addressLabels" | "local"> &
     Partial<Pick<Network, "local" | "tokenSymbols" | "addressLabels">>,
 ): Network {

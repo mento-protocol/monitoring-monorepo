@@ -2,77 +2,127 @@
  * Unit tests for makeNetwork() map-merge behavior in networks.ts.
  *
  * Focus: addressLabels and tokenSymbols overrides take precedence over
- * package-derived maps while still inheriting package entries.
+ * package-derived maps, tested via real same-key collisions.
  */
 import { describe, it, expect } from "vitest";
-import { NETWORKS } from "../networks";
+import { NETWORKS, makeNetwork } from "../networks";
 
-describe("NETWORKS.devnet — makeNetwork override precedence", () => {
-  const devnet = NETWORKS.devnet;
+// Known Celo mainnet addresses from @mento-protocol/contracts (42220/mainnet).
+// These are in the package-derived maps for any network using chainId 42220.
+const USDM_ADDR = "0x765de816845861e75a25fca122bb6898b8b1282a";
 
-  it("retains custom addressLabels override (Deployer) from devnet config", () => {
-    // The devnet config passes { addressLabels: { "0x287810...": "Deployer" } }.
-    // makeNetwork merges: { ...packageLabels, ...configLabels } so config wins.
-    expect(devnet.addressLabels["0x287810f677516f10993ff63a520aad5509f35796"]).toBe(
-      "Deployer",
-    );
+describe("makeNetwork — addressLabels merge/override contract", () => {
+  it("config override wins for same address key (real collision)", () => {
+    // USDm address IS in the package-derived addressLabels for chainId 42220.
+    // If we pass it as a config override, config must win (right-hand spread).
+    const net = makeNetwork({
+      id: "celo-mainnet-hosted",
+      label: "Test",
+      chainId: 42220,
+      contractsNamespace: "mainnet",
+      hasuraUrl: "http://localhost",
+      hasuraSecret: "secret",
+      explorerBaseUrl: "http://localhost",
+      addressLabels: {
+        [USDM_ADDR]: "MyCustomLabel", // collision with package-derived "USDm"
+      },
+    });
+    // Config value must win over package-derived value for the same key.
+    expect(net.addressLabels[USDM_ADDR]).toBe("MyCustomLabel");
   });
 
-  it("also inherits package-derived addressLabels (known Celo mainnet contracts)", () => {
-    // devnet reuses chainId 42220 + contractsNamespace "mainnet".
-    // Package-derived labels should still be present alongside the override.
-    // USDm is the canonical stable token on Celo mainnet.
-    const usdmAddress = "0x765de816845861e75a25fca122bb6898b8b1282a";
-    expect(devnet.addressLabels[usdmAddress]).toBeDefined();
-    expect(typeof devnet.addressLabels[usdmAddress]).toBe("string");
+  it("package-derived addressLabels are inherited when no override for that key", () => {
+    const net = makeNetwork({
+      id: "celo-mainnet-hosted",
+      label: "Test",
+      chainId: 42220,
+      contractsNamespace: "mainnet",
+      hasuraUrl: "http://localhost",
+      hasuraSecret: "secret",
+      explorerBaseUrl: "http://localhost",
+      // no override for USDm address
+    });
+    expect(net.addressLabels[USDM_ADDR]).toBeDefined();
+    expect(typeof net.addressLabels[USDM_ADDR]).toBe("string");
   });
 
-  it("config addressLabels override wins over package entry for same address (real collision)", () => {
-    // Create a real collision: USDm address is in the package-derived map for
-    // chainId 42220 (devnet). We verify that makeNetwork's merge order
-    // { ...packageLabels, ...configLabels } means config values take precedence
-    // by checking that if we look at a network that provides an explicit override
-    // for a known package address, the config value wins.
-    //
-    // devnet uses the Celo mainnet package namespace — USDm is in the derived map.
-    const usdmAddr = "0x765de816845861e75a25fca122bb6898b8b1282a";
-    // First, confirm the package-derived label is present (right-hand spread base).
-    const packageLabel = devnet.addressLabels[usdmAddr];
-    expect(packageLabel).toBeDefined(); // "USDm" from package
-
-    // celo-mainnet-hosted uses the same namespace but no custom addressLabels.
-    // Its USDm label should match devnet's (same package source).
-    const mainnet = NETWORKS["celo-mainnet-hosted"];
-    expect(mainnet.addressLabels[usdmAddr]).toBe(packageLabel);
-
-    // devnet's Deployer override is a config-only entry (not in package).
-    // This proves the spread merge includes both sides.
-    const deployerAddr = "0x287810f677516f10993ff63a520aad5509f35796";
-    expect(devnet.addressLabels[deployerAddr]).toBe("Deployer"); // config wins
-    expect(mainnet.addressLabels[deployerAddr]).toBeUndefined(); // not in package or config
+  it("config-only entry is present alongside package-derived entries", () => {
+    const customAddr = "0x1234000000000000000000000000000000005678";
+    const net = makeNetwork({
+      id: "celo-mainnet-hosted",
+      label: "Test",
+      chainId: 42220,
+      contractsNamespace: "mainnet",
+      hasuraUrl: "http://localhost",
+      hasuraSecret: "secret",
+      explorerBaseUrl: "http://localhost",
+      addressLabels: { [customAddr]: "Custom" },
+    });
+    expect(net.addressLabels[customAddr]).toBe("Custom"); // config entry present
+    expect(net.addressLabels[USDM_ADDR]).toBeDefined(); // package entry also present
   });
 });
 
-describe("NETWORKS.devnet — tokenSymbols map composition", () => {
-  const devnet = NETWORKS.devnet;
+describe("makeNetwork — tokenSymbols merge/override contract", () => {
+  it("config override wins for same address key (real collision)", () => {
+    // USDm address is in package-derived tokenSymbols for chainId 42220.
+    const net = makeNetwork({
+      id: "celo-mainnet-hosted",
+      label: "Test",
+      chainId: 42220,
+      contractsNamespace: "mainnet",
+      hasuraUrl: "http://localhost",
+      hasuraSecret: "secret",
+      explorerBaseUrl: "http://localhost",
+      tokenSymbols: {
+        [USDM_ADDR]: "CUSTOM_SYM", // collision with package-derived "USDm"
+      },
+    });
+    expect(net.tokenSymbols[USDM_ADDR]).toBe("CUSTOM_SYM");
+  });
 
-  it("has tokenSymbols populated from package-derived maps (chainId 42220)", () => {
-    // devnet uses Celo mainnet chain — USDm address should resolve to a symbol.
-    const usdmAddress = "0x765de816845861e75a25fca122bb6898b8b1282a";
-    expect(devnet.tokenSymbols[usdmAddress]).toBeDefined();
+  it("package-derived tokenSymbols are inherited when no override", () => {
+    const net = makeNetwork({
+      id: "celo-mainnet-hosted",
+      label: "Test",
+      chainId: 42220,
+      contractsNamespace: "mainnet",
+      hasuraUrl: "http://localhost",
+      hasuraSecret: "secret",
+      explorerBaseUrl: "http://localhost",
+    });
+    expect(net.tokenSymbols[USDM_ADDR]).toBeDefined();
+    expect(net.tokenSymbols[USDM_ADDR]).toBe("USDm");
   });
 });
 
-describe("NETWORKS makeNetwork — general merge contract", () => {
-  it("celo-sepolia-hosted inherits package labels for Sepolia chain", () => {
+describe("NETWORKS.devnet — real-world override retention", () => {
+  const devnet = NETWORKS.devnet;
+
+  it("retains custom Deployer addressLabel from devnet config", () => {
+    expect(
+      devnet.addressLabels["0x287810f677516f10993ff63a520aad5509f35796"],
+    ).toBe("Deployer");
+  });
+
+  it("also inherits package-derived addressLabels alongside the override", () => {
+    expect(devnet.addressLabels[USDM_ADDR]).toBeDefined();
+  });
+
+  it("has tokenSymbols populated from package maps", () => {
+    expect(Object.keys(devnet.tokenSymbols).length).toBeGreaterThan(0);
+    expect(devnet.tokenSymbols[USDM_ADDR]).toBe("USDm");
+  });
+});
+
+describe("NETWORKS — general map composition", () => {
+  it("celo-sepolia-hosted has tokenSymbols and addressLabels from Sepolia namespace", () => {
     const sepolia = NETWORKS["celo-sepolia-hosted"];
-    // Should have tokenSymbols and addressLabels populated from contracts.json
-    // using the testnet-v2-rc5 namespace.
     expect(Object.keys(sepolia.tokenSymbols).length).toBeGreaterThan(0);
     expect(Object.keys(sepolia.addressLabels).length).toBeGreaterThan(0);
   });
 
-  it("celo-mainnet-hosted has all expected map properties", () => {
+  it("celo-mainnet-hosted has all expected map properties and local=false", () => {
     const mainnet = NETWORKS["celo-mainnet-hosted"];
     expect(mainnet.tokenSymbols).toBeDefined();
     expect(mainnet.addressLabels).toBeDefined();
