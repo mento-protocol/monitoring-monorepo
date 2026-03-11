@@ -10,18 +10,11 @@
  * under module:CommonJS, making them CJS-safe for the Envio handler runtime.
  */
 import _contractsJson from "@mento-protocol/contracts/contracts.json";
+import _namespaces from "@mento-protocol/monitoring-config/deployment-namespaces.json";
 
-// Explicit namespace per chain — must match the active deployment namespace in
-// @mento-protocol/contracts.
-//
-// NOTE: ui-dashboard/src/lib/networks.ts defines the same mapping via
-// ACTIVE_DEPLOYMENT. These two are intentionally kept in sync manually.
-// A future improvement could extract a shared @mento-protocol/config package,
-// but that would require cross-package infrastructure changes out of scope here.
-export const CONTRACT_NAMESPACE_BY_CHAIN: Record<number, string> = {
-  42220: "mainnet", // Celo mainnet — matches ACTIVE_DEPLOYMENT["celo-mainnet"]
-  11142220: "testnet-v2-rc5", // Celo Sepolia — matches ACTIVE_DEPLOYMENT["celo-sepolia"]
-};
+// Single source of truth for chain ID → active treb namespace.
+// Shared with ui-dashboard/src/lib/networks.ts via @mento-protocol/monitoring-config.
+export const CONTRACT_NAMESPACE_BY_CHAIN: Record<string, string> = _namespaces;
 
 type ContractsJson = Record<
   string,
@@ -37,7 +30,7 @@ export function getContractAddress(
   chainId: number,
   contractName: string,
 ): `0x${string}` | undefined {
-  const ns = CONTRACT_NAMESPACE_BY_CHAIN[chainId];
+  const ns = CONTRACT_NAMESPACE_BY_CHAIN[String(chainId)];
   if (!ns) return undefined;
   const entry = (_contractsJson as ContractsJson)[String(chainId)]?.[ns]?.[
     contractName
@@ -59,8 +52,8 @@ export function requireContractAddress(
   if (!addr) {
     throw new Error(
       `[contractAddresses] Missing address for ${contractName} on chain ${chainId} ` +
-        `in @mento-protocol/contracts (namespace: ${CONTRACT_NAMESPACE_BY_CHAIN[chainId] ?? "unknown"}). ` +
-        `Update CONTRACT_NAMESPACE_BY_CHAIN or the package version.`,
+        `in @mento-protocol/contracts (namespace: ${CONTRACT_NAMESPACE_BY_CHAIN[String(chainId)] ?? "unknown"}). ` +
+        `Update deployment-namespaces.json in shared-config or the package version.`,
     );
   }
   return addr;

@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@mento-protocol/contracts": "^0.2.0",
+    "@mento-protocol/monitoring-config": "workspace:*",
     "envio": "2.32.3",
     "viem": "2.47.0"
   },

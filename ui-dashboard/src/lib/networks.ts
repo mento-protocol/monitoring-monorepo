@@ -3,13 +3,15 @@
 // ---------------------------------------------------------------------------
 
 import contractsData from "@mento-protocol/contracts/contracts.json";
+import DEPLOYMENT_NAMESPACES from "@mento-protocol/monitoring-config/deployment-namespaces.json";
 
-// Official treb deployment namespace per chain — update when a new deployment is promoted.
-// These must match the namespace keys in @mento-protocol/contracts contracts.json.
-const ACTIVE_DEPLOYMENT = {
-  "celo-sepolia": "testnet-v2-rc5",
-  "celo-mainnet": "mainnet",
-} as const satisfies Record<string, string | null>;
+// Semantic aliases over the shared chain ID → namespace map.
+// Defined once here so call sites stay readable; the actual namespace strings
+// live in shared-config/deployment-namespaces.json (single source of truth).
+const NS = {
+  "celo-mainnet": DEPLOYMENT_NAMESPACES["42220"],
+  "celo-sepolia": DEPLOYMENT_NAMESPACES["11142220"],
+} as const;
 
 export type IndexerNetworkId =
   | "devnet"
@@ -83,7 +85,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     label: "Celo Devnet (local)",
     local: true,
     chainId: 42220,
-    contractsNamespace: ACTIVE_DEPLOYMENT["celo-mainnet"],
+    contractsNamespace: NS["celo-mainnet"],
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_DEVNET ??
       "http://localhost:8080/v1/graphql",
@@ -99,7 +101,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     label: "Celo Sepolia (local)",
     local: true,
     chainId: 11142220,
-    contractsNamespace: ACTIVE_DEPLOYMENT["celo-sepolia"],
+    contractsNamespace: NS["celo-sepolia"],
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_SEPOLIA ??
       "http://localhost:8080/v1/graphql",
@@ -112,7 +114,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     id: "celo-sepolia-hosted",
     label: "Celo Sepolia (hosted)",
     chainId: 11142220,
-    contractsNamespace: ACTIVE_DEPLOYMENT["celo-sepolia"],
+    contractsNamespace: NS["celo-sepolia"],
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED ?? "",
     hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_SEPOLIA_HOSTED ?? "",
     explorerBaseUrl:
@@ -124,7 +126,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     label: "Celo Mainnet (local)",
     local: true,
     chainId: 42220,
-    contractsNamespace: ACTIVE_DEPLOYMENT["celo-mainnet"],
+    contractsNamespace: NS["celo-mainnet"],
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_MAINNET ??
       "http://localhost:8082/v1/graphql",
@@ -136,7 +138,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     id: "celo-mainnet-hosted",
     label: "Celo Mainnet (hosted)",
     chainId: 42220,
-    contractsNamespace: ACTIVE_DEPLOYMENT["celo-mainnet"],
+    contractsNamespace: NS["celo-mainnet"],
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED ?? "",
     hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_MAINNET_HOSTED ?? "",
     explorerBaseUrl:
