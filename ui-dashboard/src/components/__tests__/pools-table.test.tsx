@@ -56,6 +56,10 @@ const BASE_POOL: Pool = {
   limitStatus: "OK",
 };
 
+function renderSinglePool(pool: Pool): string {
+  return renderToStaticMarkup(<PoolsTable pools={[pool]} />);
+}
+
 function renderPoolTableMarkup(props: {
   volume24h?: Map<string, number | null>;
   volume24hLoading?: boolean;
@@ -63,6 +67,30 @@ function renderPoolTableMarkup(props: {
 }): string {
   return renderToStaticMarkup(<PoolsTable pools={[BASE_POOL]} {...props} />);
 }
+
+describe("PoolsTable rebalancer tooltip", () => {
+  it('shows "No rebalance events recorded yet" for FPMM with no lastRebalancedAt', () => {
+    const html = renderSinglePool({ ...BASE_POOL, source: "fpmm_factory" });
+    expect(html).toContain("No rebalance events recorded yet");
+  });
+
+  it('shows "No rebalance events recorded yet" for FPMM with lastRebalancedAt "0"', () => {
+    const html = renderSinglePool({
+      ...BASE_POOL,
+      source: "fpmm_factory",
+      lastRebalancedAt: "0",
+    });
+    expect(html).toContain("No rebalance events recorded yet");
+  });
+
+  it('shows "VirtualPool — rebalancer not applicable" for VirtualPool', () => {
+    const html = renderSinglePool({
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+    });
+    expect(html).toContain("VirtualPool \u2014 rebalancer not applicable");
+  });
+});
 
 describe("PoolsTable 24h volume states", () => {
   it("renders loading placeholder while 24h volume is loading", () => {
