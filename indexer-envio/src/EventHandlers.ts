@@ -25,6 +25,7 @@ import _sortedOraclesAbi from "@mento-protocol/contracts/abis/SortedOracles.json
 import {
   requireContractAddress,
   getContractAddress,
+  buildAddressMap,
   CONTRACT_NAMESPACE_BY_CHAIN,
 } from "./contractAddresses";
 
@@ -111,12 +112,25 @@ const ORACLE_ADAPTER_SCALE_FACTOR = 1_000_000n;
 // Lazy RPC clients per chainId
 const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
 
+// Per-chain RPC defaults. ENVIO_RPC_URL overrides the default for the active chain.
+// Every indexed chain MUST have an entry here — missing chains fall through to the
+// Celo Sepolia default and silently produce wrong oracle/trading-limit/decimals data.
+const DEFAULT_RPC_BY_CHAIN: Record<number, string> = {
+  42220: "https://forno.celo.org", // Celo Mainnet
+  11142220: "https://forno.celo-sepolia.celo-testnet.org", // Celo Sepolia
+  143: "https://rpc2.monad.xyz", // Monad Mainnet (Goldsky Edge — supports historical eth_call)
+  10143: "https://10143.rpc.hypersync.xyz", // Monad Testnet (Envio HyperRPC)
+};
+
 function getRpcClient(chainId: number): ReturnType<typeof createPublicClient> {
   if (!rpcClients.has(chainId)) {
-    const defaultRpc =
-      chainId === 42220
-        ? "https://forno.celo.org"
-        : "https://forno.celo-sepolia.celo-testnet.org";
+    const defaultRpc = DEFAULT_RPC_BY_CHAIN[chainId];
+    if (!defaultRpc) {
+      throw new Error(
+        `[getRpcClient] No default RPC configured for chainId ${chainId}. ` +
+          `Add an entry to DEFAULT_RPC_BY_CHAIN in EventHandlers.ts.`,
+      );
+    }
     rpcClients.set(
       chainId,
       createPublicClient({

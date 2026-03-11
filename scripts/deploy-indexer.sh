@@ -11,9 +11,10 @@ if [[ -z "$NETWORK" ]]; then
   echo "Available networks:"
   echo "  celo-sepolia"
   echo "  celo-mainnet"
+  echo "  monad-testnet"
   echo "  monad-mainnet"
   echo ""
-  echo "Example: $0 celo-sepolia"
+  echo "Example: $0 monad-testnet"
   exit 1
 fi
 
