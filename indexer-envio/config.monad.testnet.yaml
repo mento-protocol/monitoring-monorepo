@@ -1,0 +1,59 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+name: monad-testnet
+description: Monad Testnet v3 FPMM HyperIndex indexer
+networks:
+  - id: 10143 # Monad Testnet — HyperSync: https://10143.hypersync.xyz
+    start_block: ${ENVIO_START_BLOCK:-0}
+    contracts:
+      - name: FPMMFactory
+        abi_file_path: abis/FPMMFactory.json
+        address:
+          - 0x353ED52bF8482027C0e0b9e3c0e5d96A9F680980 # TransparentUpgradeableProxy:FPMMFactory
+        handler: src/EventHandlers.ts
+        events:
+          - event: FPMMDeployed
+      - name: FPMM
+        abi_file_path: abis/FPMM.json
+        address:
+          - 0xd9e9e6f6b5298e8bad390f7748035c49d6eeb055
+          - 0x1229e8a7b266c6db52712ba5c6899a6c4c3025cd
+          - 0x6d4c4b663541bf21015afb22669b0e1bbb3e2b1c
+        handler: src/EventHandlers.ts
+        events:
+          - event: Swap
+          - event: Mint
+          - event: Burn
+          - event: UpdateReserves
+          - event: Rebalanced
+          - event: TradingLimitConfigured
+      - name: VirtualPool
+        abi_file_path: abis/FPMM.json
+        address: [] # VirtualPoolFactory not yet deployed on testnet
+        handler: src/EventHandlers.ts
+        events:
+          - event: Swap
+          - event: Mint
+          - event: Burn
+          - event: UpdateReserves
+          - event: Rebalanced
+      - name: VirtualPoolFactory
+        abi_file_path: abis/VirtualPoolFactory.json
+        address: [] # Not yet deployed on testnet
+        handler: src/EventHandlers.ts
+        events:
+          - event: VirtualPoolDeployed
+          - event: PoolDeprecated
+      - name: SortedOracles
+        abi_file_path: abis/SortedOracles.json
+        address:
+          - "0x85ed9ac57827132B8F60938F3165BC139E1F53cd" # TransparentUpgradeableProxy:SortedOracles
+        handler: src/EventHandlers.ts
+        events:
+          - event: OracleReported
+          - event: MedianUpdated
+unordered_multichain_mode: true
+preload_handlers: true
+field_selection:
+  transaction_fields:
+    - hash
+    - from

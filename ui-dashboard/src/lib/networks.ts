@@ -12,6 +12,7 @@ const NS = {
   "celo-mainnet": DEPLOYMENT_NAMESPACES["42220"],
   "celo-sepolia": DEPLOYMENT_NAMESPACES["11142220"],
   "monad-mainnet": DEPLOYMENT_NAMESPACES["143"],
+  "monad-testnet": DEPLOYMENT_NAMESPACES["10143"],
 } as const;
 
 export type IndexerNetworkId =
@@ -20,7 +21,8 @@ export type IndexerNetworkId =
   | "celo-sepolia-hosted"
   | "celo-mainnet-local"
   | "celo-mainnet-hosted"
-  | "monad-mainnet-hosted";
+  | "monad-mainnet-hosted"
+  | "monad-testnet-hosted";
 
 export type Network = {
   id: IndexerNetworkId;
@@ -158,6 +160,18 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_MAINNET_HOSTED ??
       "https://monadscan.com",
+  }),
+  "monad-testnet-hosted": makeNetwork({
+    id: "monad-testnet-hosted",
+    label: "Monad Testnet",
+    chainId: 10143,
+    contractsNamespace: NS["monad-testnet"],
+    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED ?? "",
+    hasuraSecret:
+      process.env.NEXT_PUBLIC_HASURA_SECRET_MONAD_TESTNET_HOSTED ?? "",
+    explorerBaseUrl:
+      process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_TESTNET_HOSTED ??
+      "https://testnet.monadscan.com",
   }),
 };
 
