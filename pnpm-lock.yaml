@@ -13,6 +13,9 @@ importers:
       '@mento-protocol/contracts':
         specifier: ^0.2.0
         version: 0.2.0
+      '@mento-protocol/monitoring-config':
+        specifier: workspace:*
+        version: link:../shared-config
       envio:
         specifier: 2.32.3
         version: 2.32.3(typescript@5.9.3)
@@ -46,11 +49,16 @@ importers:
         specifier: link:generated
         version: link:generated
 
+  shared-config: {}
+
   ui-dashboard:
     dependencies:
       '@mento-protocol/contracts':
         specifier: ^0.2.0
         version: 0.2.0
+      '@mento-protocol/monitoring-config':
+        specifier: workspace:*
+        version: link:../shared-config
       '@upstash/redis':
         specifier: ^1.36.3
         version: 1.36.3
