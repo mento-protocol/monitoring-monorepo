@@ -1,23 +1,19 @@
 "use client";
 
 import { useNetwork } from "@/components/network-provider";
-import { NETWORK_IDS, NETWORKS, type IndexerNetworkId } from "@/lib/networks";
+import {
+  NETWORK_IDS,
+  NETWORKS,
+  isConfiguredNetworkId,
+  type IndexerNetworkId,
+} from "@/lib/networks";
 
-// Local networks require a locally-running indexer and are hidden by default.
-// Set NEXT_PUBLIC_SHOW_LOCAL_NETWORKS=true in .env.local to show them.
-const showLocalNetworks =
-  process.env.NEXT_PUBLIC_SHOW_LOCAL_NETWORKS === "true";
-
-const VISIBLE_NETWORK_IDS = NETWORK_IDS.filter((id) => {
-  const network = NETWORKS[id];
-  // Hide local networks unless explicitly enabled.
-  if (!showLocalNetworks && network.local) return false;
-  // Hide networks with no Hasura URL configured — selecting them would blank
-  // all data views with a "Hasura URL not configured" error. They become
-  // visible automatically once the env var is set (e.g. after Envio deploy).
-  if (!network.hasuraUrl) return false;
-  return true;
-});
+// Only show networks that are fully configured (hasuraUrl set, local hidden unless opted in).
+// isConfiguredNetworkId enforces the same rules used by NetworkProvider for URL routing,
+// so the selector and ?network= param are always in sync.
+const VISIBLE_NETWORK_IDS = NETWORK_IDS.filter((id) =>
+  isConfiguredNetworkId(id),
+);
 
 export function NetworkSelector() {
   const { networkId, setNetworkId } = useNetwork();
@@ -30,7 +26,7 @@ export function NetworkSelector() {
       className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-xs font-mono text-slate-300 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
     >
       {VISIBLE_NETWORK_IDS.map((id) => {
-        const label = showLocalNetworks
+        const label = NETWORKS[id].local
           ? NETWORKS[id].label
           : NETWORKS[id].label.replace(" (hosted)", "");
         return (
