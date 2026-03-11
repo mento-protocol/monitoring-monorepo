@@ -181,3 +181,20 @@ export const DEFAULT_NETWORK: IndexerNetworkId = "celo-mainnet-hosted";
 export function isNetworkId(v: string): v is IndexerNetworkId {
   return v in NETWORKS;
 }
+
+/**
+ * A network is "configured" if it has a Hasura URL set.
+ * Unconfigured networks (e.g. Monad before Envio deploy) are excluded from
+ * navigation and URL routing so users can never land on a broken state.
+ * Local networks are always considered unconfigured unless NEXT_PUBLIC_SHOW_LOCAL_NETWORKS=true.
+ */
+const showLocalNetworks =
+  typeof process !== "undefined" &&
+  process.env.NEXT_PUBLIC_SHOW_LOCAL_NETWORKS === "true";
+
+export function isConfiguredNetworkId(v: string): v is IndexerNetworkId {
+  if (!isNetworkId(v)) return false;
+  const network = NETWORKS[v];
+  if (!showLocalNetworks && network.local) return false;
+  return !!network.hasuraUrl;
+}

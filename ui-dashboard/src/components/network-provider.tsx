@@ -11,7 +11,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import {
   NETWORKS,
   DEFAULT_NETWORK,
-  isNetworkId,
+  isConfiguredNetworkId,
   type IndexerNetworkId,
   type Network,
 } from "@/lib/networks";
@@ -30,7 +30,10 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
   const paramNetwork = searchParams.get("network") ?? "";
-  const fromURL: IndexerNetworkId = isNetworkId(paramNetwork)
+  // Only accept URL network params that are actually configured (have a Hasura URL).
+  // This prevents ?network=monad-mainnet-hosted from resolving to a broken state
+  // before the Envio indexer has been deployed and the env var set.
+  const fromURL: IndexerNetworkId = isConfiguredNetworkId(paramNetwork)
     ? paramNetwork
     : DEFAULT_NETWORK;
 
