@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import {
   computeHealthStatus,
+  computeEffectiveStatus,
   formatDeviationPct,
   computeLimitStatus,
   computeRebalancerLiveness,
+  worstStatus,
 } from "../health";
 
 /** A recent oracle timestamp (2 minutes ago) — within 5-min SortedOracles expiry. */
@@ -327,6 +329,83 @@ describe("computeRebalancerLiveness", () => {
         NOW,
       ),
     ).toBe("ACTIVE");
+  });
+});
+
+describe("worstStatus", () => {
+  it("returns CRITICAL over all others", () => {
+    expect(worstStatus("CRITICAL", "OK")).toBe("CRITICAL");
+    expect(worstStatus("OK", "CRITICAL")).toBe("CRITICAL");
+    expect(worstStatus("CRITICAL", "WARN")).toBe("CRITICAL");
+    expect(worstStatus("CRITICAL", "N/A")).toBe("CRITICAL");
+  });
+
+  it("returns WARN over OK and N/A", () => {
+    expect(worstStatus("WARN", "OK")).toBe("WARN");
+    expect(worstStatus("OK", "WARN")).toBe("WARN");
+    expect(worstStatus("WARN", "N/A")).toBe("WARN");
+  });
+
+  it("returns OK over N/A", () => {
+    expect(worstStatus("OK", "N/A")).toBe("OK");
+    expect(worstStatus("N/A", "OK")).toBe("OK");
+  });
+
+  it("returns same value when both are equal", () => {
+    expect(worstStatus("OK", "OK")).toBe("OK");
+    expect(worstStatus("N/A", "N/A")).toBe("N/A");
+  });
+});
+
+describe("computeEffectiveStatus", () => {
+  it("returns the oracle health when limit is better", () => {
+    expect(
+      computeEffectiveStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "5000",
+        rebalanceThreshold: 5000,
+        limitPressure0: "0.1",
+        limitPressure1: "0.1",
+      }),
+    ).toBe("CRITICAL");
+  });
+
+  it("returns the limit status when it is worse than oracle health", () => {
+    expect(
+      computeEffectiveStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+        limitPressure0: "1.05",
+        limitPressure1: "0",
+      }),
+    ).toBe("CRITICAL");
+  });
+
+  it("uses the pre-indexed limitStatus field when present", () => {
+    expect(
+      computeEffectiveStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+        limitStatus: "WARN",
+        limitPressure0: "0",
+        limitPressure1: "0",
+      }),
+    ).toBe("WARN");
+  });
+
+  it("returns N/A for VirtualPools regardless of limit pressure", () => {
+    expect(
+      computeEffectiveStatus({
+        source: "virtual_pool_factory",
+        limitPressure0: "1.5",
+        limitPressure1: "1.5",
+      }),
+    ).toBe("N/A");
   });
 });
 

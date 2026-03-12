@@ -12,22 +12,11 @@ import {
   computeHealthStatus,
   computeLimitStatus,
   computeRebalancerLiveness,
+  worstStatus,
   ORACLE_STALE_SECONDS,
 } from "@/lib/health";
 import type { RebalancerStatus } from "@/lib/health";
 import { poolTotalVolumeUSD } from "@/lib/volume";
-
-// Status severity ordering: N/A < OK < WARN < CRITICAL
-const STATUS_RANK: Record<string, number> = {
-  "N/A": 0,
-  OK: 1,
-  WARN: 2,
-  CRITICAL: 3,
-};
-
-function worstStatus(a: string, b: string): string {
-  return (STATUS_RANK[a] ?? 0) >= (STATUS_RANK[b] ?? 0) ? a : b;
-}
 
 function healthTooltip(status: string, p: Pool): string {
   if (status === "N/A") return "VirtualPool — oracle health not tracked";
@@ -68,8 +57,7 @@ function combinedTooltip(
 ): string {
   const hTip = healthTooltip(healthStatus, p);
   const lFrag = limitTooltipFragment(limitStatus, p, network);
-  if (lFrag) return `${hTip} · ${lFrag}`;
-  return hTip;
+  return lFrag ? `${hTip} · ${lFrag}` : hTip;
 }
 
 function rebalancerTooltip(status: RebalancerStatus): string {
@@ -181,6 +169,7 @@ export function PoolsTable({
               )}
               <td className="px-2 sm:px-4 py-2 sm:py-3">
                 <span
+                  tabIndex={0}
                   title={combinedTooltip(healthStatus, limitStatus, p, network)}
                 >
                   <HealthBadge status={effectiveStatus} />
@@ -201,11 +190,7 @@ export function PoolsTable({
                         : "—"}
               </td>
               <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-300 font-mono">
-                {totalVol == null
-                  ? "—"
-                  : totalVol > 0
-                    ? formatUSD(totalVol)
-                    : "—"}
+                {totalVol == null ? "—" : formatUSD(totalVol)}
               </td>
               <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-300 font-mono text-right">
                 {p.swapCount ?? 0}

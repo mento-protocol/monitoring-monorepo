@@ -75,6 +75,42 @@ export function computeLimitStatus(pool: {
   return "OK";
 }
 
+/**
+ * Severity rank used to pick the worst status across oracle health and limit health.
+ * N/A is least severe; CRITICAL is most severe.
+ */
+const STATUS_RANK: Record<string, number> = {
+  "N/A": 0,
+  OK: 1,
+  WARN: 2,
+  CRITICAL: 3,
+};
+
+export function worstStatus(a: string, b: string): HealthStatus {
+  return (
+    (STATUS_RANK[a] ?? 0) >= (STATUS_RANK[b] ?? 0) ? a : b
+  ) as HealthStatus;
+}
+
+/**
+ * Compute the effective display status for a pool, taking the worst of
+ * oracle health and trading limit status. This is what the Health badge shows.
+ */
+export function computeEffectiveStatus(pool: {
+  source?: string;
+  oracleOk?: boolean;
+  oracleTimestamp?: string;
+  priceDifference?: string;
+  rebalanceThreshold?: number;
+  limitStatus?: string;
+  limitPressure0?: string;
+  limitPressure1?: string;
+}): HealthStatus {
+  const health = computeHealthStatus(pool);
+  const limit: string = pool.limitStatus ?? computeLimitStatus(pool);
+  return worstStatus(health, limit);
+}
+
 export type RebalancerStatus = "ACTIVE" | "STALE" | "N/A" | "NO_DATA";
 
 /**
