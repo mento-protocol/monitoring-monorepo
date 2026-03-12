@@ -62,6 +62,12 @@ actions:
       run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
       triggers:
         - git_hooks: [pre-push]
+    - id: trunk-fmt-pre-push
+      display_name: Trunk Format Pre-Push
+      description: Runs trunk fmt --all before push so formatting issues are caught locally, not in CI.
+      run: trunk fmt --all
+      triggers:
+        - git_hooks: [pre-push]
     - id: indexer-codegen-pre-push
       display_name: Indexer Schema Codegen (pre-push)
       description: Validates schema.graphql by running envio codegen — catches duplicate fields, bad types, etc. before CI.
@@ -70,6 +76,7 @@ actions:
         - git_hooks: [pre-push]
   enabled:
     - trunk-fmt-pre-commit
+    - trunk-fmt-pre-push
     - trunk-check-all-pre-push
     - typecheck-pre-push
     - test-pre-push
