@@ -363,10 +363,10 @@ export function PoolsTable({
                   <HealthBadge status={effectiveStatus} />
                 </button>
               </td>
-              <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-300 font-mono">
+              <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
                 {tvl > 0 ? formatUSD(tvl) : "—"}
               </td>
-              <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-300 font-mono">
+              <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
                 {volume24hLoading
                   ? "…"
                   : volume24hError
@@ -377,13 +377,13 @@ export function PoolsTable({
                         ? formatUSD(vol24h)
                         : "—"}
               </td>
-              <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-300 font-mono">
+              <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
                 {totalVol == null ? "—" : formatUSD(totalVol)}
               </td>
-              <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-300 font-mono text-right">
+              <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
                 {p.swapCount ?? 0}
               </td>
-              <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-300 font-mono text-right">
+              <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
                 {p.rebalanceCount ?? 0}
               </td>
               <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
