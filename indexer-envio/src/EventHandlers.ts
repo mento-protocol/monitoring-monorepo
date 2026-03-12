@@ -152,6 +152,10 @@ const SORTED_ORACLES_ADDRESS = SortedOraclesContract.address;
  * Key: "chainId:feedId:blockNumber" */
 const numReportersCache = new Map<string, number>();
 
+/** Cache report expiry per feed — governance-only parameter that rarely changes.
+ * Key: "chainId:feedId" (no block needed; value is stable within any realistic sync window) */
+const reportExpiryCache = new Map<string, bigint>();
+
 /** Returns all FPMM pool IDs that reference the given rateFeedID.
  * Uses context.Pool.getWhere (DB-backed) so it works correctly in Envio's
  * multi-process hosted environment where in-memory maps are not shared. */
@@ -197,6 +201,50 @@ async function fetchNumReporters(
     return value;
   } catch {
     return 0;
+  }
+}
+
+/** Returns the effective oracle report expiry (seconds) for the given rateFeedID:
+ * uses the per-token override if non-zero, otherwise falls back to the global
+ * reportExpirySeconds(). Falls back to 300n (Celo mainnet default) on RPC error. */
+async function fetchReportExpiry(
+  chainId: number,
+  rateFeedID: string,
+  blockNumber: bigint,
+): Promise<bigint> {
+  let address: `0x${string}`;
+  try {
+    address = SORTED_ORACLES_ADDRESS(chainId);
+  } catch {
+    return 300n;
+  }
+
+  const cacheKey = `${chainId}:${rateFeedID}`;
+  const cached = reportExpiryCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  try {
+    const client = getRpcClient(chainId);
+    const tokenExpiry = (await client.readContract({
+      address,
+      abi: SortedOraclesContract.abi,
+      functionName: "tokenReportExpirySeconds",
+      args: [rateFeedID as `0x${string}`],
+      blockNumber,
+    })) as bigint;
+    const expiry: bigint =
+      tokenExpiry > 0n
+        ? tokenExpiry
+        : ((await client.readContract({
+            address,
+            abi: SortedOraclesContract.abi,
+            functionName: "reportExpirySeconds",
+            blockNumber,
+          })) as bigint);
+    reportExpiryCache.set(cacheKey, expiry);
+    return expiry;
+  } catch {
+    return 300n;
   }
 }
 
@@ -1322,6 +1370,12 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
     rateFeedID,
     BigInt(event.block.number),
   );
+  // Fetch per-feed report expiry (cached per feed — governance-only, rarely changes).
+  const oracleExpiry = await fetchReportExpiry(
+    event.chainId,
+    rateFeedID,
+    blockNumber,
+  );
 
   for (const poolId of poolIds) {
     const existing = await context.Pool.get(poolId);
@@ -1342,6 +1396,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       oracleTxHash: event.transaction.hash,
       oracleOk: true,
       oraclePrice,
+      oracleExpiry,
       oracleNumReporters,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
@@ -1383,6 +1438,13 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   const poolIds = await getPoolsByFeed(context, rateFeedID);
   if (poolIds.length === 0) return;
 
+  // Fetch per-feed report expiry (cached per feed — governance-only, rarely changes).
+  const oracleExpiry = await fetchReportExpiry(
+    event.chainId,
+    rateFeedID,
+    blockNumber,
+  );
+
   for (const poolId of poolIds) {
     const existing = await context.Pool.get(poolId);
     if (!existing) continue;
@@ -1399,6 +1461,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       oracleTimestamp: blockTimestamp,
       oracleTxHash: event.transaction.hash,
       oracleOk: true,
+      oracleExpiry,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };

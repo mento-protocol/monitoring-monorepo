@@ -19,6 +19,7 @@ export const ALL_POOLS_WITH_HEALTH = `
       priceDifference
       rebalanceThreshold
       oracleNumReporters
+      oracleExpiry
       lastRebalancedAt
       limitStatus
       limitPressure0
