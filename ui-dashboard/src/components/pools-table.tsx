@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { NetworkAwareLink } from "@/components/network-aware-link";
 import { formatUSD } from "@/lib/format";
 import { poolName, poolTvlUSD, tokenSymbol } from "@/lib/tokens";
@@ -70,6 +70,73 @@ function rebalancerTooltip(status: RebalancerStatus): string {
   return "VirtualPool — rebalancer not applicable";
 }
 
+type SortKey =
+  | "pool"
+  | "health"
+  | "tvl"
+  | "volume24h"
+  | "totalVolume"
+  | "swaps"
+  | "rebalances";
+type SortDir = "asc" | "desc";
+
+const HEALTH_ORDER: Record<string, number> = {
+  CRITICAL: 0,
+  WARN: 1,
+  OK: 2,
+  "N/A": 3,
+};
+
+interface SortableThProps {
+  sortKey: SortKey;
+  activeSortKey: SortKey;
+  sortDir: SortDir;
+  onSort: (key: SortKey) => void;
+  align?: "left" | "right";
+  className?: string;
+  children: React.ReactNode;
+}
+
+function SortableTh({
+  sortKey,
+  activeSortKey,
+  sortDir,
+  onSort,
+  align = "left",
+  className = "",
+  children,
+}: SortableThProps) {
+  const isActive = sortKey === activeSortKey;
+  const alignClass = align === "right" ? "text-right" : "text-left";
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onSort(sortKey);
+    }
+  };
+  return (
+    <th
+      scope="col"
+      tabIndex={0}
+      aria-sort={
+        isActive ? (sortDir === "asc" ? "ascending" : "descending") : "none"
+      }
+      className={`px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 ${alignClass} cursor-pointer select-none hover:text-slate-200 whitespace-nowrap ${className}`}
+      onClick={() => onSort(sortKey)}
+      onKeyDown={handleKeyDown}
+    >
+      {children}
+      {isActive ? (
+        <span className="ml-1 text-indigo-400">
+          {sortDir === "asc" ? "↑" : "↓"}
+        </span>
+      ) : (
+        <span className="ml-1 text-slate-600">↕</span>
+      )}
+    </th>
+  );
+}
+
 interface PoolsTableProps {
   pools: Pool[];
   volume24h?: Map<string, number | null>;
@@ -85,6 +152,9 @@ export function PoolsTable({
 }: PoolsTableProps) {
   const { network } = useNetwork();
   const nowSeconds = Math.floor(Date.now() / 1000);
+  const [sortKey, setSortKey] = useState<SortKey>("totalVolume");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
   const tvlByPoolId = useMemo(
     () => new Map(pools.map((pool) => [pool.id, poolTvlUSD(pool, network)])),
     [pools, network],
@@ -96,43 +166,139 @@ export function PoolsTable({
       ),
     [pools, network],
   );
+
+  const handleSort = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  };
+
+  const sortedPools = useMemo(() => {
+    const sorted = [...pools].sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "pool":
+          cmp = poolName(network, a.token0, a.token1).localeCompare(
+            poolName(network, b.token0, b.token1),
+          );
+          break;
+        case "health": {
+          const aH = worstStatus(
+            computeHealthStatus(a),
+            a.limitStatus ?? computeLimitStatus(a),
+          );
+          const bH = worstStatus(
+            computeHealthStatus(b),
+            b.limitStatus ?? computeLimitStatus(b),
+          );
+          cmp = (HEALTH_ORDER[aH] ?? 99) - (HEALTH_ORDER[bH] ?? 99);
+          break;
+        }
+        case "tvl":
+          cmp = (tvlByPoolId.get(a.id) ?? 0) - (tvlByPoolId.get(b.id) ?? 0);
+          break;
+        case "volume24h": {
+          const aV = volume24h?.get(a.id) ?? 0;
+          const bV = volume24h?.get(b.id) ?? 0;
+          cmp = (aV ?? 0) - (bV ?? 0);
+          break;
+        }
+        case "totalVolume":
+          cmp =
+            (totalVolumeByPoolId.get(a.id) ?? 0) -
+            (totalVolumeByPoolId.get(b.id) ?? 0);
+          break;
+        case "swaps":
+          cmp = (a.swapCount ?? 0) - (b.swapCount ?? 0);
+          break;
+        case "rebalances":
+          cmp = (a.rebalanceCount ?? 0) - (b.rebalanceCount ?? 0);
+          break;
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return sorted;
+  }, [
+    pools,
+    sortKey,
+    sortDir,
+    tvlByPoolId,
+    totalVolumeByPoolId,
+    volume24h,
+    network,
+  ]);
+
   return (
     <Table>
       <thead>
         <tr className="border-b border-slate-800 bg-slate-900/50">
-          <Th>Pool</Th>
+          <SortableTh
+            sortKey="pool"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+          >
+            Pool
+          </SortableTh>
           {network.hasVirtualPools && <Th>Source</Th>}
-          <Th>Health</Th>
-          <th
-            scope="col"
-            className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
+          <SortableTh
+            sortKey="health"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+          >
+            Health
+          </SortableTh>
+          <SortableTh
+            sortKey="tvl"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+            className="hidden sm:table-cell"
           >
             TVL
-          </th>
-          <th
-            scope="col"
-            className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
+          </SortableTh>
+          <SortableTh
+            sortKey="volume24h"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+            className="hidden md:table-cell"
           >
             24h Volume
-          </th>
-          <th
-            scope="col"
-            className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
+          </SortableTh>
+          <SortableTh
+            sortKey="totalVolume"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+            className="hidden md:table-cell"
           >
             Total Volume
-          </th>
-          <th
-            scope="col"
-            className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-right"
+          </SortableTh>
+          <SortableTh
+            sortKey="swaps"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+            align="right"
+            className="hidden lg:table-cell"
           >
             Swaps
-          </th>
-          <th
-            scope="col"
-            className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-right"
+          </SortableTh>
+          <SortableTh
+            sortKey="rebalances"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+            align="right"
+            className="hidden lg:table-cell"
           >
             Rebalances
-          </th>
+          </SortableTh>
           <th
             scope="col"
             className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
@@ -142,7 +308,7 @@ export function PoolsTable({
         </tr>
       </thead>
       <tbody>
-        {pools.map((p) => {
+        {sortedPools.map((p) => {
           const healthStatus = computeHealthStatus(p);
           const limitStatus = p.limitStatus ?? computeLimitStatus(p);
           const effectiveStatus = worstStatus(healthStatus, limitStatus);
