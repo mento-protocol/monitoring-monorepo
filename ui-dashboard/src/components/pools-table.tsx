@@ -70,7 +70,7 @@ function rebalancerTooltip(status: RebalancerStatus): string {
   return "VirtualPool — rebalancer not applicable";
 }
 
-type SortKey =
+export type SortKey =
   | "pool"
   | "health"
   | "tvl"
@@ -78,14 +78,73 @@ type SortKey =
   | "totalVolume"
   | "swaps"
   | "rebalances";
-type SortDir = "asc" | "desc";
+export type SortDir = "asc" | "desc";
 
+// Higher rank = more severe. "desc" puts highest rank first → CRITICAL first.
 const HEALTH_ORDER: Record<string, number> = {
-  CRITICAL: 0,
-  WARN: 1,
-  OK: 2,
-  "N/A": 3,
+  "N/A": 0,
+  OK: 1,
+  WARN: 2,
+  CRITICAL: 3,
 };
+
+export interface SortContext {
+  network: ReturnType<typeof useNetwork>["network"];
+  tvlByPoolId: Map<string, number>;
+  totalVolumeByPoolId: Map<string, number | null>;
+  volume24h?: Map<string, number | null>;
+}
+
+export function sortPools(
+  pools: Pool[],
+  sortKey: SortKey,
+  sortDir: SortDir,
+  { network, tvlByPoolId, totalVolumeByPoolId, volume24h }: SortContext,
+): Pool[] {
+  return [...pools].sort((a, b) => {
+    let cmp = 0;
+    switch (sortKey) {
+      case "pool":
+        cmp = poolName(network, a.token0, a.token1).localeCompare(
+          poolName(network, b.token0, b.token1),
+        );
+        break;
+      case "health": {
+        const aH = worstStatus(
+          computeHealthStatus(a),
+          a.limitStatus ?? computeLimitStatus(a),
+        );
+        const bH = worstStatus(
+          computeHealthStatus(b),
+          b.limitStatus ?? computeLimitStatus(b),
+        );
+        cmp = (HEALTH_ORDER[aH] ?? 99) - (HEALTH_ORDER[bH] ?? 99);
+        break;
+      }
+      case "tvl":
+        cmp = (tvlByPoolId.get(a.id) ?? 0) - (tvlByPoolId.get(b.id) ?? 0);
+        break;
+      case "volume24h": {
+        const aV = volume24h?.get(a.id) ?? 0;
+        const bV = volume24h?.get(b.id) ?? 0;
+        cmp = (aV ?? 0) - (bV ?? 0);
+        break;
+      }
+      case "totalVolume":
+        cmp =
+          (totalVolumeByPoolId.get(a.id) ?? 0) -
+          (totalVolumeByPoolId.get(b.id) ?? 0);
+        break;
+      case "swaps":
+        cmp = (a.swapCount ?? 0) - (b.swapCount ?? 0);
+        break;
+      case "rebalances":
+        cmp = (a.rebalanceCount ?? 0) - (b.rebalanceCount ?? 0);
+        break;
+    }
+    return sortDir === "asc" ? cmp : -cmp;
+  });
+}
 
 interface SortableThProps {
   sortKey: SortKey;
@@ -108,31 +167,28 @@ function SortableTh({
 }: SortableThProps) {
   const isActive = sortKey === activeSortKey;
   const alignClass = align === "right" ? "text-right" : "text-left";
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      onSort(sortKey);
-    }
-  };
   return (
     <th
       scope="col"
-      tabIndex={0}
       aria-sort={
         isActive ? (sortDir === "asc" ? "ascending" : "descending") : "none"
       }
-      className={`px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 ${alignClass} cursor-pointer select-none hover:text-slate-200 whitespace-nowrap ${className}`}
-      onClick={() => onSort(sortKey)}
-      onKeyDown={handleKeyDown}
+      className={`px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 ${alignClass} whitespace-nowrap ${className}`}
     >
-      {children}
-      {isActive ? (
-        <span className="ml-1 text-indigo-400">
-          {sortDir === "asc" ? "↑" : "↓"}
-        </span>
-      ) : (
-        <span className="ml-1 text-slate-600">↕</span>
-      )}
+      <button
+        type="button"
+        className="flex items-center gap-1 cursor-pointer select-none hover:text-slate-200 bg-transparent border-0 p-0 font-medium text-xs sm:text-sm text-slate-400 hover:text-slate-200"
+        onClick={() => onSort(sortKey)}
+      >
+        {children}
+        {isActive ? (
+          <span className="text-indigo-400">
+            {sortDir === "asc" ? "↑" : "↓"}
+          </span>
+        ) : (
+          <span className="text-slate-600">↕</span>
+        )}
+      </button>
     </th>
   );
 }
@@ -176,60 +232,24 @@ export function PoolsTable({
     }
   };
 
-  const sortedPools = useMemo(() => {
-    const sorted = [...pools].sort((a, b) => {
-      let cmp = 0;
-      switch (sortKey) {
-        case "pool":
-          cmp = poolName(network, a.token0, a.token1).localeCompare(
-            poolName(network, b.token0, b.token1),
-          );
-          break;
-        case "health": {
-          const aH = worstStatus(
-            computeHealthStatus(a),
-            a.limitStatus ?? computeLimitStatus(a),
-          );
-          const bH = worstStatus(
-            computeHealthStatus(b),
-            b.limitStatus ?? computeLimitStatus(b),
-          );
-          cmp = (HEALTH_ORDER[aH] ?? 99) - (HEALTH_ORDER[bH] ?? 99);
-          break;
-        }
-        case "tvl":
-          cmp = (tvlByPoolId.get(a.id) ?? 0) - (tvlByPoolId.get(b.id) ?? 0);
-          break;
-        case "volume24h": {
-          const aV = volume24h?.get(a.id) ?? 0;
-          const bV = volume24h?.get(b.id) ?? 0;
-          cmp = (aV ?? 0) - (bV ?? 0);
-          break;
-        }
-        case "totalVolume":
-          cmp =
-            (totalVolumeByPoolId.get(a.id) ?? 0) -
-            (totalVolumeByPoolId.get(b.id) ?? 0);
-          break;
-        case "swaps":
-          cmp = (a.swapCount ?? 0) - (b.swapCount ?? 0);
-          break;
-        case "rebalances":
-          cmp = (a.rebalanceCount ?? 0) - (b.rebalanceCount ?? 0);
-          break;
-      }
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-    return sorted;
-  }, [
-    pools,
-    sortKey,
-    sortDir,
-    tvlByPoolId,
-    totalVolumeByPoolId,
-    volume24h,
-    network,
-  ]);
+  const sortedPools = useMemo(
+    () =>
+      sortPools(pools, sortKey, sortDir, {
+        network,
+        tvlByPoolId,
+        totalVolumeByPoolId,
+        volume24h,
+      }),
+    [
+      pools,
+      sortKey,
+      sortDir,
+      tvlByPoolId,
+      totalVolumeByPoolId,
+      volume24h,
+      network,
+    ],
+  );
 
   return (
     <Table>
