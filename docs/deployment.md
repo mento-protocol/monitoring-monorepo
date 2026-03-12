@@ -29,13 +29,13 @@ Each network has a dedicated deploy branch that Envio watches:
 https://indexer.hyperindex.xyz/60ff18c/v1/graphql
 ```
 
-**Sepolia** is on the Envio **dev** tier. The URL hash changes on every redeploy:
+**Celo Sepolia** is on the Envio **dev** tier. The URL hash changes on every redeploy:
 
 ```text
 https://indexer.hyperindex.xyz/<hash>/v1/graphql
 ```
 
-After a Sepolia redeploy, update `NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED` in Vercel via `terraform apply`.
+After a Celo Sepolia redeploy, update `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED` in Vercel via `terraform apply`.
 
 ### Deployment Workflow
 
@@ -43,15 +43,15 @@ After a Sepolia redeploy, update `NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED` in Verc
 
 ```bash
 # Push main to the deploy branch (triggers Envio redeploy)
-pnpm deploy:indexer:mainnet
+pnpm deploy:indexer celo-mainnet
 # equivalent: git push origin main:deploy/celo-mainnet
 ```
 
-**Redeploy Sepolia:**
+**Redeploy Celo Sepolia:**
 
 ```bash
-pnpm deploy:indexer:sepolia
-# After Envio finishes syncing, update hasura_url_sepolia_hosted in
+pnpm deploy:indexer celo-sepolia
+# After Envio finishes syncing, update hasura_url_celo_sepolia_hosted in
 # terraform/terraform.tfvars and run: pnpm infra:apply
 ```
 
@@ -72,7 +72,7 @@ git push origin main:deploy/celo-mainnet
 ### After Redeployment Checklist
 
 1. ✅ Wait for Envio to reach 100% sync (check [envio.dev/app](https://envio.dev/app))
-2. ✅ If Sepolia: get the new GraphQL endpoint URL from the Envio dashboard, update `hasura_url_sepolia_hosted` in `terraform/terraform.tfvars`, run `pnpm infra:apply`
+2. ✅ If Celo Sepolia: get the new GraphQL endpoint URL from the Envio dashboard, update `hasura_url_celo_sepolia_hosted` in `terraform/terraform.tfvars`, run `pnpm infra:apply`
 3. ✅ Trigger a Vercel redeploy (or wait for next push to `main`)
 4. ✅ Verify monitoring.mento.org loads data
 
@@ -107,14 +107,15 @@ pnpm infra:apply   # apply changes
 
 All env vars are managed by Terraform (set for `production` and `preview` targets). Do not edit them manually in the Vercel dashboard.
 
-| Variable                                | Source             | Description                             |
-| --------------------------------------- | ------------------ | --------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED` | `terraform.tfvars` | Hasura endpoint — Celo Mainnet (hosted) |
-| `NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED` | `terraform.tfvars` | Hasura endpoint — Celo Sepolia (hosted) |
-| `NEXT_PUBLIC_HASURA_SECRET_*`           | `terraform.tfvars` | Hasura admin secrets (empty for Envio)  |
-| `UPSTASH_REDIS_REST_URL`                | Terraform output   | Address labels Redis — auto-set from DB |
-| `UPSTASH_REDIS_REST_TOKEN`              | Terraform output   | Address labels Redis token — auto-set   |
-| `BLOB_READ_WRITE_TOKEN`                 | `terraform.tfvars` | Vercel Blob token for backup cron       |
+| Variable                                      | Source             | Description                              |
+| --------------------------------------------- | ------------------ | ---------------------------------------- |
+| `NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED`  | `terraform.tfvars` | Hasura endpoint — Celo Mainnet (hosted)  |
+| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED`  | `terraform.tfvars` | Hasura endpoint — Celo Sepolia (hosted)  |
+| `NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED` | `terraform.tfvars` | Hasura endpoint — Monad Mainnet (hosted) |
+| `NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED` | `terraform.tfvars` | Hasura endpoint — Monad Testnet (hosted) |
+| `UPSTASH_REDIS_REST_URL`                      | Terraform output   | Address labels Redis — auto-set from DB  |
+| `UPSTASH_REDIS_REST_TOKEN`                    | Terraform output   | Address labels Redis token — auto-set    |
+| `BLOB_READ_WRITE_TOKEN`                       | `terraform.tfvars` | Vercel Blob token for backup cron        |
 
 ### Address Book & Backup Cron
 
@@ -194,14 +195,32 @@ main
 
 deploy/celo-mainnet
 ├── 🚀 auto-deploys to Envio (indexer, mainnet)
-└── updated via: pnpm deploy:indexer:mainnet
+└── updated via: pnpm deploy:indexer celo-mainnet
 
 deploy/celo-sepolia
-├── 🚀 auto-deploys to Envio (indexer, sepolia)
-└── updated via: pnpm deploy:indexer:sepolia
+├── 🚀 auto-deploys to Envio (indexer, Celo Sepolia)
+└── updated via: pnpm deploy:indexer celo-sepolia
 ```
 
 **Why deploy branches?** Dashboard changes are frequent → auto-deploy on `main` push. Indexer changes are rare → manual push to deploy branch avoids unnecessary Envio redeployments (which change the endpoint hash, requiring a Terraform env var update).
+
+---
+
+## Migration: MAINNET/SEPOLIA → CELO_MAINNET/CELO_SEPOLIA (2025-03)
+
+Env vars were renamed for multi-chain clarity. If you have an existing `terraform/terraform.tfvars`, update it:
+
+```hcl
+# Old (remove)
+# hasura_url_mainnet_hosted  = "..."
+# hasura_url_sepolia_hosted  = "..."
+
+# New
+hasura_url_celo_mainnet_hosted  = "https://indexer.hyperindex.xyz/60ff18c/v1/graphql"
+hasura_url_celo_sepolia_hosted  = "https://indexer.hyperindex.xyz/fc3170d/v1/graphql"
+```
+
+Then run `pnpm infra:apply`. Terraform will replace the old Vercel env vars with the new ones. Brief downtime during apply is expected.
 
 ---
 
@@ -221,11 +240,11 @@ Check build logs in the Envio dashboard → Build Logs tab. Common issues:
 
 - `pnpm install` fails → verify `pnpm-lock.yaml` is committed
 - Config file not found → verify `config.celo.mainnet.yaml` exists in `indexer-envio/`
-- TypeScript errors → run `pnpm indexer:mainnet:codegen` locally first
+- TypeScript errors → run `pnpm indexer:celo-mainnet:codegen` locally first
 
 ### Dashboard shows no data after indexer redeploy
 
-The Sepolia endpoint hash changed. Update `hasura_url_sepolia_hosted` in `terraform/terraform.tfvars` and run `pnpm infra:apply`. Vercel will pick up the new env var on the next deploy.
+The Celo Sepolia endpoint hash changed. Update `hasura_url_celo_sepolia_hosted` in `terraform/terraform.tfvars` and run `pnpm infra:apply`. Vercel will pick up the new env var on the next deploy.
 
 ### Indexer not syncing
 

@@ -9,6 +9,8 @@ Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on
 - `config.celo.devnet.yaml` — Devnet indexer config (contract addresses, events, RPC)
 - `config.celo.mainnet.yaml` — Celo Mainnet config
 - `config.celo.sepolia.yaml` — Celo Sepolia testnet config
+- `config.monad.mainnet.yaml` — Monad Mainnet config
+- `config.monad.testnet.yaml` — Monad Testnet config
 - `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced)
 - `src/EventHandlers.ts` — Event processing logic
 - `src/contractAddresses.ts` — Contract address resolution from `@mento-protocol/contracts`; also exports `CONTRACT_NAMESPACE_BY_CHAIN` (backed by `shared-config`)
@@ -53,4 +55,4 @@ Copy `.env.example` → `.env` and set:
 - `ENVIO_RPC_URL` — Celo RPC endpoint
 - `ENVIO_START_BLOCK` — Block number to start indexing from
 
-For Sepolia: copy `.env.sepolia` → `.env` or use root `pnpm indexer:sepolia:dev`.
+For Celo Sepolia: use root `pnpm indexer:celo-sepolia:dev`. For Celo mainnet: `pnpm indexer:celo-mainnet:dev`. For Monad: `pnpm indexer:monad-mainnet:dev` or `pnpm indexer:monad-testnet:dev`.

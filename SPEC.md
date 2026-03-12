@@ -390,14 +390,14 @@ The dashboard supports multiple network targets via a network switcher. Each net
 - A Hasura admin secret
 - A block explorer base URL
 
-| Target           | Description                 |
-| ---------------- | --------------------------- |
-| `MAINNET_HOSTED` | Celo Mainnet (Envio hosted) |
-| `SEPOLIA_HOSTED` | Celo Sepolia (Envio hosted) |
-| `MAINNET`        | Celo Mainnet (local dev)    |
-| `SEPOLIA`        | Celo Sepolia (local dev)    |
+| Target                | Description                 |
+| --------------------- | --------------------------- |
+| `CELO_MAINNET_HOSTED` | Celo Mainnet (Envio hosted) |
+| `CELO_SEPOLIA_HOSTED` | Celo Sepolia (Envio hosted) |
+| `CELO_MAINNET`        | Celo Mainnet (local dev)    |
+| `CELO_SEPOLIA`        | Celo Sepolia (local dev)    |
 
-The live dashboard (monitoring.mento.org) uses `MAINNET_HOSTED` by default.
+The live dashboard (monitoring.mento.org) uses `CELO_MAINNET_HOSTED` by default.
 
 ---
 
@@ -406,7 +406,7 @@ The live dashboard (monitoring.mento.org) uses `MAINNET_HOSTED` by default.
 | Limitation                           | Details                                                                      |
 | ------------------------------------ | ---------------------------------------------------------------------------- |
 | Endpoint hash changes on each deploy | Envio free tier generates new URL per deploy; requires Vercel env var update |
-| No authentication on dashboard       | Google Auth deferred to last; Hasura secret exposed in client bundle         |
+| No authentication on dashboard       | Google Auth deferred; Envio endpoints are public (no admin secret)           |
 | Cannot run two indexers locally      | Port 9898 hardcoded in Envio                                                 |
 | SortedOracles on Sepolia             | Contracts return zero address; oracle indexing mainnet-only                  |
 | Gap-fill not yet implemented         | PoolSnapshot charts may show gaps for periods with no activity               |

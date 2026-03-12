@@ -44,29 +44,27 @@ variable "upstash_region" {
 
 # ── Hasura / Envio ────────────────────────────────────────────────────────────
 
-variable "hasura_url_sepolia_hosted" {
+variable "hasura_url_celo_sepolia_hosted" {
   description = "GraphQL endpoint for the hosted Celo Sepolia Envio indexer."
   type        = string
   default     = "https://indexer.hyperindex.xyz/fc3170d/v1/graphql"
 }
 
-variable "hasura_secret_sepolia_hosted" {
-  description = "Admin secret for the Sepolia Hasura endpoint. Leave empty for public Envio-hosted deployments."
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
-variable "hasura_url_mainnet_hosted" {
+variable "hasura_url_celo_mainnet_hosted" {
   description = "GraphQL endpoint for the hosted Celo Mainnet Envio indexer."
   type        = string
   default     = "https://indexer.hyperindex.xyz/60ff18c/v1/graphql"
 }
 
-variable "hasura_secret_mainnet_hosted" {
-  description = "Admin secret for the Mainnet Hasura endpoint. Leave empty for public Envio-hosted deployments."
+variable "hasura_url_monad_mainnet_hosted" {
+  description = "GraphQL endpoint for the hosted Monad Mainnet Envio indexer. Leave empty until indexer is deployed."
   type        = string
-  sensitive   = true
+  default     = ""
+}
+
+variable "hasura_url_monad_testnet_hosted" {
+  description = "GraphQL endpoint for the hosted Monad Testnet Envio indexer. Leave empty until indexer is deployed."
+  type        = string
   default     = ""
 }
 

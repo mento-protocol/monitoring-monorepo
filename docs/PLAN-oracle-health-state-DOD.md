@@ -37,7 +37,7 @@
 
 ### Verification
 
-- [ ] Codegen passes for mainnet config (`pnpm indexer:mainnet:codegen`)
+- [ ] Codegen passes for mainnet config (`pnpm indexer:celo-mainnet:codegen`)
 - [ ] Dashboard builds with zero errors (`pnpm --filter ui-dashboard build`)
 - [ ] All existing tests pass + 15 new tests for health status computation (`pnpm --filter ui-dashboard test`)
 

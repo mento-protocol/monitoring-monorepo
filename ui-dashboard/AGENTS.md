@@ -34,21 +34,23 @@ pnpm lint   # Run ESLint
 
 ## Multi-Chain Support
 
-The dashboard supports five network targets (all defined in `src/lib/networks.ts`):
+The dashboard supports multiple network targets (all defined in `src/lib/networks.ts`):
 
-| ID                    | Chain   | Mode   |
-| --------------------- | ------- | ------ |
-| `devnet`              | Mainnet | local  |
-| `celo-sepolia-local`  | Sepolia | local  |
-| `celo-sepolia-hosted` | Sepolia | hosted |
-| `celo-mainnet-local`  | Mainnet | local  |
-| `celo-mainnet-hosted` | Mainnet | hosted |
+| ID                     | Chain         | Mode   |
+| ---------------------- | ------------- | ------ |
+| `devnet`               | Celo devnet   | local  |
+| `celo-sepolia-local`   | Celo Sepolia  | local  |
+| `celo-sepolia-hosted`  | Celo Sepolia  | hosted |
+| `celo-mainnet-local`   | Celo Mainnet  | local  |
+| `celo-mainnet-hosted`  | Celo Mainnet  | hosted |
+| `monad-mainnet-hosted` | Monad Mainnet | hosted |
+| `monad-testnet-hosted` | Monad Testnet | hosted |
 
 Token symbols and address labels are derived automatically from `@mento-protocol/contracts` using the active treb namespace from `shared-config/deployment-namespaces.json`. Custom address labels (stored in Upstash Redis) merge on top and take precedence. Individual networks can also declare custom `addressLabels` overrides in `makeNetwork(...)`.
 
 Network switching is driven by env vars:
 
-- `NEXT_PUBLIC_HASURA_URL_<NETWORK>` / `NEXT_PUBLIC_HASURA_SECRET_<NETWORK>`
+- `NEXT_PUBLIC_HASURA_URL_<NETWORK>`
 - `NEXT_PUBLIC_EXPLORER_URL_<NETWORK>`
 
 ## Notes

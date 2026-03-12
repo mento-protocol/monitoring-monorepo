@@ -21,7 +21,7 @@ All code changes are merged into `main`. No further implementation is needed.
 | `ui-dashboard/src/components/network-selector.tsx` | Networks hidden until `NEXT_PUBLIC_HASURA_URL_MONAD_*` is set                                          |
 | `ui-dashboard/src/components/network-provider.tsx` | `isConfiguredNetworkId()` guards URL routing — `?network=monad-*` falls back to default when URL unset |
 | `terraform/`                                       | Needs updates (see Step 3 below)                                                                       |
-| `scripts/deploy-indexer.sh`                        | `pnpm deploy:indexer:monad-testnet` + `pnpm deploy:indexer:monad` added                                |
+| `scripts/deploy-indexer.sh`                        | `pnpm deploy:indexer [network]` — run without args to be prompted                                      |
 | CI                                                 | Codegen validates all 4 configs; `shared-config/**` triggers indexer checks                            |
 
 ---
@@ -67,7 +67,7 @@ All code changes are merged into `main`. No further implementation is needed.
 
 ```bash
 git checkout main && git pull
-pnpm deploy:indexer:monad-testnet
+pnpm deploy:indexer monad-testnet
 # equivalent: git push origin main:deploy/monad-testnet
 ```
 
@@ -127,7 +127,7 @@ Run the same 4-step flow as testnet once the first pool is deployed via `CreateF
 Differences from testnet:
 
 - Envio project name: `mento-v3-monad-mainnet`
-- Deploy branch: `deploy/monad-mainnet` (`pnpm deploy:indexer:monad`)
+- Deploy branch: `deploy/monad-mainnet` (`pnpm deploy:indexer monad-mainnet`)
 - Terraform var: `hasura_url_monad_mainnet_hosted` → `NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED`
 - Start block: 60,730,000 (SortedOracles deployed ~60,733,096)
 - No pools in the config yet — the indexer will catch `FPMMDeployed` events and add them automatically

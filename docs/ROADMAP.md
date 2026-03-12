@@ -39,7 +39,7 @@ Last updated: 2026-03-05
 ### Infrastructure / DX
 
 - [x] CI pipeline — ESLint 10 + Vitest (53 tests) + typecheck + Codecov
-- [x] `pnpm deploy:indexer:*` scripts
+- [x] `pnpm deploy:indexer [network]` (prompts if no network passed)
 - [x] `pnpm update-endpoint:mainnet` — updates Vercel env var via API after indexer redeploy
 - [x] **Discord notification on deploy branch push** (`notify-envio-deploy.yml`)
 - [x] `AGENTS.md` files for indexer + dashboard

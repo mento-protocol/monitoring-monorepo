@@ -20,7 +20,7 @@ Mainnet uses the Envio production tier with a **static** endpoint (hash does not
 https://indexer.hyperindex.xyz/60ff18c/v1/graphql
 ```
 
-The current URL is stored as `NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED` in Vercel project settings.
+The current URL is stored as `NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED` in Vercel project settings.
 
 > Only update the Vercel env var if the indexer is redeployed and Envio issues a new endpoint.
 
@@ -111,7 +111,7 @@ See [`README.md`](./README.md#local-development) for setup instructions.
 Quick start:
 
 ```bash
-pnpm indexer:sepolia:codegen
-pnpm indexer:sepolia:dev
+pnpm indexer:celo-sepolia:codegen
+pnpm indexer:celo-sepolia:dev
 # Hasura: http://localhost:8080 (secret: testing)
 ```
