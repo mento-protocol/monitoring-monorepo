@@ -11,8 +11,8 @@ importers:
   indexer-envio:
     dependencies:
       '@mento-protocol/contracts':
-        specifier: ^0.2.0
-        version: 0.2.0
+        specifier: ^0.3.0
+        version: 0.3.0
       '@mento-protocol/monitoring-config':
         specifier: workspace:*
         version: link:../shared-config
@@ -54,8 +54,8 @@ importers:
   ui-dashboard:
     dependencies:
       '@mento-protocol/contracts':
-        specifier: ^0.2.0
-        version: 0.2.0
+        specifier: ^0.3.0
+        version: 0.3.0
       '@mento-protocol/monitoring-config':
         specifier: workspace:*
         version: link:../shared-config
@@ -743,8 +743,8 @@ packages:
     resolution: {integrity: sha512-AzBy3095fTFPjDjmWpR2w6HVRAZJ6hQZUCwk5Plz6EyfnfuQW1odeW5i2Ai47Y6TBA2hQnC+azscjBSALpaWgw==}
     hasBin: true
 
-  '@mento-protocol/contracts@0.2.0':
-    resolution: {integrity: sha512-1px3h/z1bwwU+37ZQRddojM/M9cRITS6tlkSn2UkOETjnUFb9x2UytdvZzaQRBIIvf8ctXpHUhdiNsbPdbbJig==}
+  '@mento-protocol/contracts@0.3.0':
+    resolution: {integrity: sha512-NA4/T0ssC7w9OdftVswipItYqJqzLyB4VVlVQ2CfSvGXIdelb2vEPhmkHr2kXelbwe7cDVbFkg6DAV9tndaVQA==}
 
   '@next/env@16.1.6':
     resolution: {integrity: sha512-N1ySLuZjnAtN3kFnwhAwPvZah8RJxKasD7x1f8shFqhncnWZn4JMfg37diLNuoHsLAlrDfM3g4mawVdtAG8XLQ==}
@@ -4276,7 +4276,7 @@ snapshots:
       rw: 1.3.3
       tinyqueue: 3.0.0
 
-  '@mento-protocol/contracts@0.2.0': {}
+  '@mento-protocol/contracts@0.3.0': {}
 
   '@next/env@16.1.6': {}
 

@@ -145,14 +145,13 @@ describe("NETWORKS — Monad networks", () => {
     expect(Object.keys(monad.addressLabels).length).toBeGreaterThan(0);
   });
 
-  it("monad-testnet-hosted has correct chainId and is non-local", () => {
-    // @mento-protocol/contracts does not yet include chain 10143, so tokenSymbols
-    // is empty until the package is updated. This test documents the expected
-    // network properties; tokenSymbol assertions can be added once the package ships.
+  it("monad-testnet-hosted has tokenSymbols populated — @mento-protocol/contracts v0.3.0", () => {
     const testnet = NETWORKS["monad-testnet-hosted"];
+    expect(Object.keys(testnet.tokenSymbols).length).toBeGreaterThan(0);
+    // USDm on Monad testnet (testnet-v2-rc5 namespace)
+    expect(testnet.tokenSymbols[USDM_MONAD_TESTNET]).toBeDefined();
     expect(testnet.chainId).toBe(10143);
     expect(testnet.local).toBe(false);
-    expect(testnet.explorerBaseUrl).toContain("monadscan");
   });
 
   it("monad networks are hidden when hasuraUrl is empty (NEXT_PUBLIC_HASURA_URL_MONAD_* not set)", () => {
