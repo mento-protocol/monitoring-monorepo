@@ -10,40 +10,40 @@
 
 All code changes are merged into `main`. No further implementation is needed.
 
-| Component | What was done |
-|-----------|---------------|
-| `shared-config/deployment-namespaces.json` | Added `143 → mainnet`, `10143 → testnet-v2-rc5` |
-| `@mento-protocol/contracts` | Bumped to **v0.3.0** — ships addresses for both Monad chains |
-| `indexer-envio/src/EventHandlers.ts` | `DEFAULT_RPC_BY_CHAIN` map — chain 143 → `rpc2.monad.xyz`, chain 10143 → Envio HyperRPC |
-| `indexer-envio/config.monad.mainnet.yaml` | Envio config for mainnet, start block 60730000 |
-| `indexer-envio/config.monad.testnet.yaml` | Envio config for testnet, start block 17932300, 3 pools wired |
-| `ui-dashboard/src/lib/networks.ts` | `monad-mainnet-hosted` + `monad-testnet-hosted` network definitions |
-| `ui-dashboard/src/components/network-selector.tsx` | Networks hidden until `NEXT_PUBLIC_HASURA_URL_MONAD_*` is set |
+| Component                                          | What was done                                                                                          |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `shared-config/deployment-namespaces.json`         | Added `143 → mainnet`, `10143 → testnet-v2-rc5`                                                        |
+| `@mento-protocol/contracts`                        | Bumped to **v0.3.0** — ships addresses for both Monad chains                                           |
+| `indexer-envio/src/EventHandlers.ts`               | `DEFAULT_RPC_BY_CHAIN` map — chain 143 → `rpc2.monad.xyz`, chain 10143 → Envio HyperRPC                |
+| `indexer-envio/config.monad.mainnet.yaml`          | Envio config for mainnet, start block 60730000                                                         |
+| `indexer-envio/config.monad.testnet.yaml`          | Envio config for testnet, start block 17932300, 3 pools wired                                          |
+| `ui-dashboard/src/lib/networks.ts`                 | `monad-mainnet-hosted` + `monad-testnet-hosted` network definitions                                    |
+| `ui-dashboard/src/components/network-selector.tsx` | Networks hidden until `NEXT_PUBLIC_HASURA_URL_MONAD_*` is set                                          |
 | `ui-dashboard/src/components/network-provider.tsx` | `isConfiguredNetworkId()` guards URL routing — `?network=monad-*` falls back to default when URL unset |
-| `terraform/` | Needs updates (see Step 3 below) |
-| `scripts/deploy-indexer.sh` | `pnpm deploy:indexer:monad-testnet` + `pnpm deploy:indexer:monad` added |
-| CI | Codegen validates all 4 configs; `shared-config/**` triggers indexer checks |
+| `terraform/`                                       | Needs updates (see Step 3 below)                                                                       |
+| `scripts/deploy-indexer.sh`                        | `pnpm deploy:indexer:monad-testnet` + `pnpm deploy:indexer:monad` added                                |
+| CI                                                 | Codegen validates all 4 configs; `shared-config/**` triggers indexer checks                            |
 
 ---
 
 ## Chain Info
 
-| Field | Mainnet | Testnet |
-|-------|---------|---------|
-| Chain ID | **143** | **10143** |
-| HyperSync | `https://143.hypersync.xyz` | `https://10143.hypersync.xyz` |
-| Indexer RPC | `https://rpc2.monad.xyz` (Goldsky, historical eth_call) | `https://10143.rpc.hypersync.xyz` (Envio HyperRPC) |
-| Block explorer | `https://monadscan.com` | `https://testnet.monadscan.com` |
-| Namespace (`@mento-protocol/contracts`) | `mainnet` | `testnet-v2-rc5` |
+| Field                                   | Mainnet                                                 | Testnet                                            |
+| --------------------------------------- | ------------------------------------------------------- | -------------------------------------------------- |
+| Chain ID                                | **143**                                                 | **10143**                                          |
+| HyperSync                               | `https://143.hypersync.xyz`                             | `https://10143.hypersync.xyz`                      |
+| Indexer RPC                             | `https://rpc2.monad.xyz` (Goldsky, historical eth_call) | `https://10143.rpc.hypersync.xyz` (Envio HyperRPC) |
+| Block explorer                          | `https://monadscan.com`                                 | `https://testnet.monadscan.com`                    |
+| Namespace (`@mento-protocol/contracts`) | `mainnet`                                               | `testnet-v2-rc5`                                   |
 
 ### Contract Addresses
 
-| Contract | Mainnet (143) | Testnet (10143) |
-|----------|---------------|-----------------|
-| USDm | `0xBC69212B8E4d445b2307C9D32dD68E2A4Df00115` | `0x5eCc03111ad2A78F981A108759bc73BAE2AB31bc` |
-| SortedOracles | `0x6f92C745346057a61b259579256159458a0a6A92` | `0x85ed9ac57827132B8F60938F3165BC139E1F53cd` |
-| FPMMFactory | `0xa849b475FE5a4B5C9C3280152c7a1945b907613b` | `0x353ED52bF8482027C0e0b9e3c0e5d96A9F680980` |
-| Testnet pools | — | `0xd9e9e6f6b5298e8bad390f7748035c49d6eeb055` · `0x1229e8a7b266c6db52712ba5c6899a6c4c3025cd` · `0x6d4c4b663541bf21015afb22669b0e1bbb3e2b1c` |
+| Contract      | Mainnet (143)                                | Testnet (10143)                                                                                                                            |
+| ------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| USDm          | `0xBC69212B8E4d445b2307C9D32dD68E2A4Df00115` | `0x5eCc03111ad2A78F981A108759bc73BAE2AB31bc`                                                                                               |
+| SortedOracles | `0x6f92C745346057a61b259579256159458a0a6A92` | `0x85ed9ac57827132B8F60938F3165BC139E1F53cd`                                                                                               |
+| FPMMFactory   | `0xa849b475FE5a4B5C9C3280152c7a1945b907613b` | `0x353ED52bF8482027C0e0b9e3c0e5d96A9F680980`                                                                                               |
+| Testnet pools | —                                            | `0xd9e9e6f6b5298e8bad390f7748035c49d6eeb055` · `0x1229e8a7b266c6db52712ba5c6899a6c4c3025cd` · `0x6d4c4b663541bf21015afb22669b0e1bbb3e2b1c` |
 
 ---
 
@@ -125,6 +125,7 @@ pnpm infra:apply  # apply → sets NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED i
 Run the same 4-step flow as testnet once the first pool is deployed via `CreateFPMM`.
 
 Differences from testnet:
+
 - Envio project name: `mento-v3-monad-mainnet`
 - Deploy branch: `deploy/monad-mainnet` (`pnpm deploy:indexer:monad`)
 - Terraform var: `hasura_url_monad_mainnet_hosted` → `NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED`
@@ -169,11 +170,11 @@ NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED=http://localhost:8080/v1/graphql pnp
 
 ## Estimated Time
 
-| Step | Effort |
-|------|--------|
-| Create Envio project (manual) | ~5 min |
-| Deploy indexer | ~2 min |
-| Terraform changes + apply | ~10 min |
-| Wait for indexer sync | ~15–30 min (testnet, ~350k blocks from start block) |
-| Smoke test + verification | ~10 min |
-| **Total** | **~1 hour** |
+| Step                          | Effort                                              |
+| ----------------------------- | --------------------------------------------------- |
+| Create Envio project (manual) | ~5 min                                              |
+| Deploy indexer                | ~2 min                                              |
+| Terraform changes + apply     | ~10 min                                             |
+| Wait for indexer sync         | ~15–30 min (testnet, ~350k blocks from start block) |
+| Smoke test + verification     | ~10 min                                             |
+| **Total**                     | **~1 hour**                                         |
