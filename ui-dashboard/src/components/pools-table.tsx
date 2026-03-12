@@ -168,12 +168,13 @@ export function PoolsTable({
                 </td>
               )}
               <td className="px-2 sm:px-4 py-2 sm:py-3">
-                <span
-                  tabIndex={0}
+                <button
+                  type="button"
                   title={combinedTooltip(healthStatus, limitStatus, p, network)}
+                  className="cursor-default appearance-none bg-transparent border-0 p-0"
                 >
                   <HealthBadge status={effectiveStatus} />
-                </span>
+                </button>
               </td>
               <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-300 font-mono">
                 {tvl > 0 ? formatUSD(tvl) : "—"}
