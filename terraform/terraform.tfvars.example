@@ -21,7 +21,7 @@ upstash_api_key = "..."
 # Override here only if the deployment IDs change.
 # hasura_url_celo_sepolia_hosted  = "https://indexer.hyperindex.xyz/fc3170d/v1/graphql"
 # hasura_url_celo_mainnet_hosted  = "https://indexer.hyperindex.xyz/60ff18c/v1/graphql"
-# hasura_url_monad_mainnet_hosted = "https://indexer.hyperindex.xyz/<DEPLOYMENT_ID>/v1/graphql"
+# hasura_url_monad_mainnet_hosted = "https://indexer.hyperindex.xyz/cfeda9e/v1/graphql"
 # hasura_url_monad_testnet_hosted = "https://indexer.hyperindex.xyz/<DEPLOYMENT_ID>/v1/graphql"
 
 # ── Vercel Blob ───────────────────────────────────────────────────────────────
