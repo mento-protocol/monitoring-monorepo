@@ -28,6 +28,10 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
   const pct0 = total > 0 ? (r0! / total) * 100 : 50;
   const pct1 = total > 0 ? (r1! / total) * 100 : 50;
 
+  // Dominant side (≥50%) gets indigo, recessive gets emerald — consistent visual signal.
+  const color0 = pct0 >= 50 ? "bg-indigo-500" : "bg-emerald-500";
+  const color1 = pct1 > 50 ? "bg-indigo-500" : "bg-emerald-500";
+
   const feedVal =
     pool.oraclePrice && pool.oraclePrice !== "0"
       ? Number(pool.oraclePrice) / 1e24
@@ -40,8 +44,8 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
   const totalUsd = usd0 !== null && usd1 !== null ? usd0 + usd1 : null;
 
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
-      <div className="flex items-center justify-between mb-4">
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 h-full flex flex-col">
+      <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <h2 className="text-base font-semibold text-white">Reserves</h2>
         {totalUsd !== null && (
           <span className="text-sm text-slate-400">
@@ -56,20 +60,20 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
       {!hasReserves ? (
         <p className="text-sm text-slate-400">No reserve data available yet.</p>
       ) : (
-        <div className="flex gap-4">
+        <div className="flex gap-4 flex-1 min-h-0">
           <Tank
             symbol={sym0}
             amount={formatWei(pool.reserves0!, pool.token0Decimals ?? 18, 2)}
             pct={pct0}
             usd={usd0}
-            colorClass="bg-indigo-500"
+            colorClass={color0}
           />
           <Tank
             symbol={sym1}
             amount={formatWei(pool.reserves1!, pool.token1Decimals ?? 18, 2)}
             pct={pct1}
             usd={usd1}
-            colorClass="bg-emerald-500"
+            colorClass={color1}
           />
         </div>
       )}
@@ -89,9 +93,9 @@ interface TankProps {
 
 function Tank({ symbol, amount, pct, usd, colorClass }: TankProps) {
   return (
-    <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
+    <div className="flex flex-col items-center gap-2 flex-1 min-w-0 min-h-0">
       <div
-        className="relative w-full h-40 rounded border border-slate-700 bg-slate-800/80 overflow-hidden flex flex-col-reverse"
+        className="relative w-full flex-1 min-h-0 rounded border border-slate-700 bg-slate-800/80 overflow-hidden flex flex-col-reverse"
         role="meter"
         aria-valuemin={0}
         aria-valuenow={pct}
@@ -106,7 +110,7 @@ function Tank({ symbol, amount, pct, usd, colorClass }: TankProps) {
           {pct.toFixed(1)}%
         </span>
       </div>
-      <div className="text-center">
+      <div className="text-center flex-shrink-0">
         <div className="text-sm font-medium text-slate-200">{symbol}</div>
         <div className="text-xs font-mono text-slate-400 mt-0.5">{amount}</div>
         {usd !== null && (
