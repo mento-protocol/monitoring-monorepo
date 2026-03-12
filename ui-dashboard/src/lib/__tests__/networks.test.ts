@@ -186,6 +186,21 @@ describe("NETWORKS — Monad networks", () => {
       expect(isConfiguredNetworkId("monad-testnet-hosted")).toBe(false);
     }
   });
+
+  it("monad networks do not expose virtual pool UI", () => {
+    expect(NETWORKS["monad-mainnet-hosted"].hasVirtualPools).toBe(false);
+    expect(NETWORKS["monad-testnet-hosted"].hasVirtualPools).toBe(false);
+  });
+});
+
+describe("NETWORKS — virtual pool support", () => {
+  it("enables virtual pools only for Celo mainnet and Celo Sepolia variants", () => {
+    expect(NETWORKS.devnet.hasVirtualPools).toBe(false);
+    expect(NETWORKS["celo-sepolia-local"].hasVirtualPools).toBe(true);
+    expect(NETWORKS["celo-sepolia-hosted"].hasVirtualPools).toBe(true);
+    expect(NETWORKS["celo-mainnet-local"].hasVirtualPools).toBe(true);
+    expect(NETWORKS["celo-mainnet-hosted"].hasVirtualPools).toBe(true);
+  });
 });
 
 describe("isConfiguredNetworkId — URL routing guard", () => {

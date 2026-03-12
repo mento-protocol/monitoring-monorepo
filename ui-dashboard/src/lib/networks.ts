@@ -39,6 +39,8 @@ export type Network = {
   addressLabels: Record<string, string>;
   /** True for networks that require a locally-running indexer — hidden in deployed environments */
   local: boolean;
+  /** Whether this network has VirtualPool contracts (Celo only). Controls UI visibility of virtual-pool-related elements. */
+  hasVirtualPools: boolean;
 };
 
 type ContractEntry = {
@@ -71,12 +73,21 @@ function buildNetworkMaps(
 }
 
 export function makeNetwork(
-  config: Omit<Network, "tokenSymbols" | "addressLabels" | "local"> &
-    Partial<Pick<Network, "local" | "tokenSymbols" | "addressLabels">>,
+  config: Omit<
+    Network,
+    "tokenSymbols" | "addressLabels" | "local" | "hasVirtualPools"
+  > &
+    Partial<
+      Pick<
+        Network,
+        "local" | "tokenSymbols" | "addressLabels" | "hasVirtualPools"
+      >
+    >,
 ): Network {
   const maps = buildNetworkMaps(config.chainId, config.contractsNamespace);
   return {
     local: false,
+    hasVirtualPools: false,
     ...config,
     tokenSymbols: { ...maps.tokenSymbols, ...config.tokenSymbols },
     addressLabels: { ...maps.addressLabels, ...config.addressLabels },
@@ -104,6 +115,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     id: "celo-sepolia-local",
     label: "Celo Sepolia (local)",
     local: true,
+    hasVirtualPools: true,
     chainId: 11142220,
     contractsNamespace: NS["celo-sepolia"],
     hasuraUrl:
@@ -118,6 +130,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
   "celo-sepolia-hosted": makeNetwork({
     id: "celo-sepolia-hosted",
     label: "Celo Sepolia (hosted)",
+    hasVirtualPools: true,
     chainId: 11142220,
     contractsNamespace: NS["celo-sepolia"],
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED ?? "",
@@ -130,6 +143,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     id: "celo-mainnet-local",
     label: "Celo Mainnet (local)",
     local: true,
+    hasVirtualPools: true,
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
     hasuraUrl:
@@ -144,6 +158,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
   "celo-mainnet-hosted": makeNetwork({
     id: "celo-mainnet-hosted",
     label: "Celo Mainnet (hosted)",
+    hasVirtualPools: true,
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED ?? "",

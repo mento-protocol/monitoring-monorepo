@@ -139,7 +139,7 @@ function GlobalContent() {
             label="Pools"
             value={poolsLoading ? "…" : String(pools.length)}
             subtitle={
-              poolsLoading
+              poolsLoading || !network.hasVirtualPools
                 ? undefined
                 : `${fpmmPools.length} FPMMs · ${pools.length - fpmmPools.length} Virtual`
             }
@@ -175,9 +175,11 @@ function GlobalContent() {
       <section>
         <h2 className="text-lg font-semibold text-white mb-3">
           Health Status
-          <span className="ml-2 text-xs font-normal text-slate-500">
-            (N/A = VirtualPools — oracle health not applicable)
-          </span>
+          {network.hasVirtualPools && (
+            <span className="ml-2 text-xs font-normal text-slate-500">
+              (N/A = VirtualPools — oracle health not applicable)
+            </span>
+          )}
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Tile label="🟢 OK" value={poolsLoading ? "…" : String(okCount)} />
@@ -236,7 +238,7 @@ function ActivityTable({ pools }: { pools: Pool[] }) {
       <thead>
         <tr className="border-b border-slate-800 bg-slate-900/50">
           <Th>Pool</Th>
-          <Th>Type</Th>
+          {network.hasVirtualPools && <Th>Type</Th>}
           <Th align="right">Swaps</Th>
           <Th align="right">Rebalances</Th>
           <Th align="right">Volume (Token 0)</Th>
@@ -254,9 +256,11 @@ function ActivityTable({ pools }: { pools: Pool[] }) {
                 {poolName(network, p.token0, p.token1)}
               </Link>
             </td>
-            <td className="px-4 py-3">
-              <SourceBadge source={p.source} />
-            </td>
+            {network.hasVirtualPools && (
+              <td className="px-4 py-3">
+                <SourceBadge source={p.source} />
+              </td>
+            )}
             <Td mono small align="right">
               {p.swapCount ?? 0}
             </Td>

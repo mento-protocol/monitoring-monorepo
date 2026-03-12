@@ -76,7 +76,7 @@ export function PoolsTable({
       <thead>
         <tr className="border-b border-slate-800 bg-slate-900/50">
           <Th>Pool</Th>
-          <Th>Source</Th>
+          {network.hasVirtualPools && <Th>Source</Th>}
           <Th>Health</Th>
           <Th>Limit</Th>
           <th
@@ -125,9 +125,11 @@ export function PoolsTable({
                   {poolName(network, p.token0, p.token1)}
                 </Link>
               </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3">
-                <SourceBadge source={p.source} />
-              </td>
+              {network.hasVirtualPools && (
+                <td className="px-2 sm:px-4 py-2 sm:py-3">
+                  <SourceBadge source={p.source} />
+                </td>
+              )}
               <td className="px-2 sm:px-4 py-2 sm:py-3">
                 <span title={healthTooltip(healthStatus, p)}>
                   <HealthBadge status={healthStatus} />
