@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
 import { NetworkProvider } from "@/components/network-provider";
 import { AddressLabelsProvider } from "@/components/address-labels-provider";
 import { NetworkSelector } from "@/components/network-selector";
+import { NavLinks } from "@/components/nav-links";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -33,30 +33,7 @@ export default function RootLayout({
                 className="border-b border-slate-800 px-3 sm:px-6 py-2 sm:py-3 flex items-center gap-2 sm:gap-4 flex-wrap"
                 aria-label="Main navigation"
               >
-                <Link
-                  href="/"
-                  className="text-base sm:text-lg font-bold text-white hover:text-indigo-400 transition-colors"
-                >
-                  Mento v3
-                </Link>
-                <Link
-                  href="/"
-                  className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
-                >
-                  Global
-                </Link>
-                <Link
-                  href="/pools"
-                  className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
-                >
-                  Pools
-                </Link>
-                <Link
-                  href="/address-book"
-                  className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
-                >
-                  Addresses
-                </Link>
+                <NavLinks />
                 <NetworkSelector />
               </nav>
               <div className="mx-auto max-w-7xl px-3 sm:px-6 py-4 sm:py-6">
