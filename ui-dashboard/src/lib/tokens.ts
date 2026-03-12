@@ -10,8 +10,11 @@ export const USDM_SYMBOLS = new Set(["USDm"]);
 
 export function tokenSymbol(network: Network, address: string | null): string {
   if (!address) return "?";
+  const lower = address.toLowerCase();
   return (
-    network.tokenSymbols[address.toLowerCase()] ?? truncateAddress(address)
+    network.tokenSymbols[lower] ??
+    network.addressLabels[lower] ??
+    truncateAddress(address)
   );
 }
 
