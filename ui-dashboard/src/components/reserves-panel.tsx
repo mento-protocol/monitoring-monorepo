@@ -2,7 +2,7 @@
 
 import type { Pool } from "@/lib/types";
 import { parseWei, formatWei, formatUSD } from "@/lib/format";
-import { tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
+import { tokenSymbol, poolTvlUSD, USDM_SYMBOLS } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 
 interface ReservesPanelProps {
@@ -14,12 +14,13 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
 
+  // null/undefined → null (not yet indexed); "0" → 0 (valid empty reserve)
   const r0 =
-    pool.reserves0 && pool.reserves0 !== "0"
+    pool.reserves0 != null
       ? parseWei(pool.reserves0, pool.token0Decimals ?? 18)
       : null;
   const r1 =
-    pool.reserves1 && pool.reserves1 !== "0"
+    pool.reserves1 != null
       ? parseWei(pool.reserves1, pool.token1Decimals ?? 18)
       : null;
 
@@ -32,16 +33,32 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
   const color0 = pct0 >= 50 ? "bg-indigo-500" : "bg-emerald-500";
   const color1 = pct1 > 50 ? "bg-indigo-500" : "bg-emerald-500";
 
+  // Per-token USD only when one side is a known USD-stable — mirrors poolTvlUSD() logic.
   const feedVal =
     pool.oraclePrice && pool.oraclePrice !== "0"
       ? Number(pool.oraclePrice) / 1e24
       : null;
-  const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
+  const usdm0 = USDM_SYMBOLS.has(sym0);
+  const usdm1 = USDM_SYMBOLS.has(sym1);
   const usd0 =
-    feedVal !== null && r0 !== null ? (usdmIsToken0 ? r0 : r0 * feedVal) : null;
+    feedVal !== null && r0 !== null
+      ? usdm0
+        ? r0
+        : usdm1
+          ? r0 * feedVal
+          : null
+      : null;
   const usd1 =
-    feedVal !== null && r1 !== null ? (usdmIsToken0 ? r1 * feedVal : r1) : null;
-  const totalUsd = usd0 !== null && usd1 !== null ? usd0 + usd1 : null;
+    feedVal !== null && r1 !== null
+      ? usdm1
+        ? r1
+        : usdm0
+          ? r1 * feedVal
+          : null
+      : null;
+  // Reuse the shared TVL helper — it has tests and handles all edge cases.
+  const totalUsdRaw = poolTvlUSD(pool, network);
+  const totalUsd = totalUsdRaw > 0 ? totalUsdRaw : null;
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 h-full flex flex-col">
