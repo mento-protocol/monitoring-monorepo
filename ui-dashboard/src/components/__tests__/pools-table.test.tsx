@@ -44,7 +44,8 @@ vi.mock("@/components/network-provider", () => ({
   }),
 }));
 
-import { PoolsTable } from "@/components/pools-table";
+import { PoolsTable, sortPools } from "@/components/pools-table";
+import type { SortContext } from "@/components/pools-table";
 
 const BASE_POOL: Pool = {
   id: "pool-1",
@@ -244,5 +245,156 @@ describe("PoolsTable Swaps and Rebalances columns", () => {
     });
     expect(html).toContain(">7<");
     expect(html).toContain(">3<");
+  });
+});
+
+// ─── sortPools unit tests ────────────────────────────────────────────────────
+
+const SORT_CONTEXT: SortContext = {
+  network: mockNetwork as SortContext["network"],
+  tvlByPoolId: new Map(),
+  totalVolumeByPoolId: new Map(),
+  volume24h: undefined,
+};
+
+function makePool(id: string, overrides: Partial<Pool> = {}): Pool {
+  return {
+    ...BASE_POOL,
+    id,
+    token0: BASE_POOL.token0,
+    token1: BASE_POOL.token1,
+    ...overrides,
+  };
+}
+
+describe("sortPools — default totalVolume desc", () => {
+  it("orders pools by total volume descending by default", () => {
+    const low = makePool("low", { notionalVolume0: "1000000000000000000" }); // 1 USDm
+    const high = makePool("high", { notionalVolume0: "5000000000000000000" }); // 5 USDm
+    const mid = makePool("mid", { notionalVolume0: "3000000000000000000" }); // 3 USDm
+    const ctx: SortContext = {
+      ...SORT_CONTEXT,
+      totalVolumeByPoolId: new Map([
+        ["low", 1],
+        ["high", 5],
+        ["mid", 3],
+      ]),
+    };
+    const result = sortPools([low, mid, high], "totalVolume", "desc", ctx);
+    expect(result.map((p) => p.id)).toEqual(["high", "mid", "low"]);
+  });
+
+  it("orders pools by total volume ascending when toggled", () => {
+    const ctx: SortContext = {
+      ...SORT_CONTEXT,
+      totalVolumeByPoolId: new Map([
+        ["low", 1],
+        ["high", 5],
+        ["mid", 3],
+      ]),
+    };
+    const pools = [makePool("low"), makePool("mid"), makePool("high")];
+    const result = sortPools(pools, "totalVolume", "asc", ctx);
+    expect(result.map((p) => p.id)).toEqual(["low", "mid", "high"]);
+  });
+});
+
+describe("sortPools — health severity ordering", () => {
+  const now = String(Math.floor(Date.now() / 1000));
+  // threshold = 5000; devRatio controls computed health status:
+  //   CRITICAL: priceDifference / threshold >= 1.0  (e.g. 5001)
+  //   WARN:     devRatio 0.8–1.0                    (e.g. 4500 → 0.9)
+  //   OK:       devRatio < 0.8                      (e.g. 100  → 0.02)
+  const THRESHOLD = 5000;
+
+  const freshCritical: Partial<Pool> = {
+    oracleTimestamp: now,
+    priceDifference: "5001",
+    rebalanceThreshold: THRESHOLD,
+    limitStatus: "OK",
+  };
+  const freshWarn: Partial<Pool> = {
+    oracleTimestamp: now,
+    priceDifference: "4500",
+    rebalanceThreshold: THRESHOLD,
+    limitStatus: "OK",
+  };
+  const freshOk: Partial<Pool> = {
+    oracleTimestamp: now,
+    priceDifference: "100",
+    rebalanceThreshold: THRESHOLD,
+    limitStatus: "OK",
+  };
+
+  it("orders CRITICAL → WARN → OK → N/A descending", () => {
+    const ok = makePool("ok", freshOk);
+    const critical = makePool("critical", freshCritical);
+    const warn = makePool("warn", freshWarn);
+    const na = makePool("na", {
+      source: "virtual_pool_factory",
+      limitStatus: "N/A",
+    });
+    const result = sortPools(
+      [ok, warn, critical, na],
+      "health",
+      "desc",
+      SORT_CONTEXT,
+    );
+    expect(result.map((p) => p.id)).toEqual(["critical", "warn", "ok", "na"]);
+  });
+
+  it("orders N/A → OK → WARN → CRITICAL ascending", () => {
+    const ok = makePool("ok", freshOk);
+    const critical = makePool("critical", freshCritical);
+    const warn = makePool("warn", freshWarn);
+    const na = makePool("na", {
+      source: "virtual_pool_factory",
+      limitStatus: "N/A",
+    });
+    const result = sortPools(
+      [ok, warn, critical, na],
+      "health",
+      "asc",
+      SORT_CONTEXT,
+    );
+    expect(result.map((p) => p.id)).toEqual(["na", "ok", "warn", "critical"]);
+  });
+
+  it("uses worstStatus so limitStatus can elevate health rank", () => {
+    // Both pools have OK oracle health; only limit-critical has limitStatus: CRITICAL
+    const healthOkLimitCritical = makePool("limit-critical", {
+      ...freshOk,
+      limitStatus: "CRITICAL",
+    });
+    const healthOkLimitOk = makePool("both-ok", freshOk);
+    const result = sortPools(
+      [healthOkLimitOk, healthOkLimitCritical],
+      "health",
+      "desc",
+      SORT_CONTEXT,
+    );
+    expect(result.map((p) => p.id)).toEqual(["limit-critical", "both-ok"]);
+  });
+});
+
+describe("sortPools — swaps and rebalances", () => {
+  it("orders by swap count descending", () => {
+    const pools = [
+      makePool("a", { swapCount: 10 }),
+      makePool("b", { swapCount: 50 }),
+      makePool("c", { swapCount: 5 }),
+    ];
+    const result = sortPools(pools, "swaps", "desc", SORT_CONTEXT);
+    expect(result.map((p) => p.id)).toEqual(["b", "a", "c"]);
+  });
+
+  it("orders by rebalance count ascending", () => {
+    const pools = [
+      makePool("a", { rebalanceCount: 10 }),
+      makePool("b", { rebalanceCount: 2 }),
+      makePool("c", { rebalanceCount: 7 }),
+    ];
+    const result = sortPools(pools, "rebalances", "asc", SORT_CONTEXT);
+    expect(result.map((p) => p.id)).toEqual(["b", "c", "a"]);
   });
 });
