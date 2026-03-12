@@ -47,7 +47,7 @@ import type {
   SwapEvent,
   TradingLimit,
 } from "@/lib/types";
-import Link from "next/link";
+import { NetworkAwareLink } from "@/components/network-aware-link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import React, { Suspense, useCallback } from "react";
 
@@ -83,16 +83,18 @@ function PoolDetail() {
 
   const setURL = useCallback(
     (t: Tab, lim: number) => {
-      const p = new URLSearchParams();
+      const p = new URLSearchParams(searchParams.toString());
       if (t !== "swaps") p.set("tab", t);
+      else p.delete("tab");
       if (lim !== 25) p.set("limit", String(lim));
+      else p.delete("limit");
       const qs = p.toString();
       router.replace(
         `/pool/${encodeURIComponent(decodedId)}${qs ? `?${qs}` : ""}`,
         { scroll: false },
       );
     },
-    [router, decodedId],
+    [router, decodedId, searchParams],
   );
 
   const {
@@ -117,9 +119,9 @@ function PoolDetail() {
   return (
     <div className="space-y-6">
       <nav aria-label="Breadcrumb" className="text-sm text-slate-400">
-        <Link href="/" className="hover:text-indigo-400">
+        <NetworkAwareLink href="/" className="hover:text-indigo-400">
           Global
-        </Link>
+        </NetworkAwareLink>
         <span className="mx-2">/</span>
         <span className="text-slate-200">
           {pool ? (

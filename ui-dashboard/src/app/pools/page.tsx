@@ -2,7 +2,7 @@
 
 import { Suspense, useState, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import Link from "next/link";
+import { NetworkAwareLink } from "@/components/network-aware-link";
 import { useGQL } from "@/lib/graphql";
 import { ALL_POOLS_WITH_HEALTH, RECENT_SWAPS, POOL_SWAPS } from "@/lib/queries";
 import {
@@ -71,13 +71,15 @@ function HomeContent() {
 
   const setURL = useCallback(
     (pool: string, lim: number) => {
-      const p = new URLSearchParams();
+      const p = new URLSearchParams(searchParams.toString());
       if (pool) p.set("pool", pool);
+      else p.delete("pool");
       if (lim !== 25) p.set("limit", String(lim));
+      else p.delete("limit");
       const qs = p.toString();
       router.replace(qs ? `/?${qs}` : "/", { scroll: false });
     },
-    [router],
+    [router, searchParams],
   );
 
   const applyFilter = useCallback(() => {
@@ -261,13 +263,13 @@ function SwapTable({
             <Row key={s.id}>
               {showPool && (
                 <td className="px-4 py-2">
-                  <Link
+                  <NetworkAwareLink
                     href={`/pool/${encodeURIComponent(s.poolId)}`}
                     className="text-sm font-medium text-indigo-400 hover:text-indigo-300"
                     title={s.poolId}
                   >
                     {poolNames[s.poolId] ?? truncateAddress(s.poolId)}
-                  </Link>
+                  </NetworkAwareLink>
                 </td>
               )}
               <SenderCell address={s.sender} />

@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useMemo } from "react";
-import Link from "next/link";
+import { NetworkAwareLink } from "@/components/network-aware-link";
 import { useGQL } from "@/lib/graphql";
 import { ALL_POOLS_WITH_HEALTH, POOL_SNAPSHOTS_24H } from "@/lib/queries";
 import { formatWei, formatUSD } from "@/lib/format";
@@ -249,12 +249,12 @@ function ActivityTable({ pools }: { pools: Pool[] }) {
         {sorted.map((p) => (
           <Row key={p.id}>
             <td className="px-4 py-3">
-              <Link
+              <NetworkAwareLink
                 href={`/pool/${encodeURIComponent(p.id)}`}
                 className="font-semibold text-indigo-400 hover:text-indigo-300"
               >
                 {poolName(network, p.token0, p.token1)}
-              </Link>
+              </NetworkAwareLink>
             </td>
             {network.hasVirtualPools && (
               <td className="px-4 py-3">

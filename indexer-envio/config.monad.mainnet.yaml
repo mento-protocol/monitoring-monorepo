@@ -14,7 +14,10 @@ networks:
           - event: FPMMDeployed
       - name: FPMM
         abi_file_path: abis/FPMM.json
-        address: [] # Pools deployed via FPMMFactory — add addresses as they go live
+        address:
+          - 0xd0e9c1a718d2a693d41eacd4b2696180403ce081 # GBPm/USDm
+          - 0x463c0d1f04bcd99a1efcf94ac2a75bc19ea4a7e5 # USDC/USDm
+          - 0xb0a0264ce6847f101b76ba36a4a3083ba489f501 # AUSD/USDm
         handler: src/EventHandlers.ts
         events:
           - event: Swap

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import Link from "next/link";
+import { NetworkAwareLink } from "@/components/network-aware-link";
 import { relativeTime, formatTimestamp, formatUSD } from "@/lib/format";
 import { poolName, poolTvlUSD } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
@@ -118,12 +118,12 @@ export function PoolsTable({
           return (
             <Row key={p.id}>
               <td className="px-2 sm:px-4 py-2 sm:py-3">
-                <Link
+                <NetworkAwareLink
                   href={`/pool/${encodeURIComponent(p.id)}`}
                   className="font-semibold text-sm sm:text-base text-indigo-400 hover:text-indigo-300"
                 >
                   {poolName(network, p.token0, p.token1)}
-                </Link>
+                </NetworkAwareLink>
               </td>
               {network.hasVirtualPools && (
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
