@@ -6,6 +6,7 @@ on:
       - deploy/celo-mainnet
       - deploy/celo-sepolia
       - deploy/monad-mainnet
+      - deploy/monad-testnet
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -35,6 +36,10 @@ jobs:
             deploy/monad-mainnet)
               echo "network=Monad Mainnet" >> $GITHUB_OUTPUT
               echo "envio_url=https://envio.dev/app/mento-protocol/mento-v3-monad-mainnet" >> $GITHUB_OUTPUT
+              ;;
+            deploy/monad-testnet)
+              echo "network=Monad Testnet" >> $GITHUB_OUTPUT
+              echo "envio_url=https://envio.dev/app/mento-protocol/mento-v3-monad-testnet" >> $GITHUB_OUTPUT
               ;;
           esac
 
