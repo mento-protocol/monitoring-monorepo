@@ -11,6 +11,7 @@ import {
   snapshotWindow24h,
   sumFpmmSwaps24h,
 } from "@/lib/volume";
+import { computeEffectiveStatus } from "@/lib/health";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool, PoolSnapshot24h } from "@/lib/types";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
@@ -72,12 +73,20 @@ function GlobalContent() {
   );
   const snapshots24h = snapshotsData?.PoolSnapshot ?? [];
 
-  const okCount = pools.filter((p) => p.healthStatus === "OK").length;
-  const warnCount = pools.filter((p) => p.healthStatus === "WARN").length;
-  const critCount = pools.filter((p) => p.healthStatus === "CRITICAL").length;
-  // N/A = VirtualPools (oracle health not applicable) + any pools without health data
+  // Use computeEffectiveStatus (worst of oracle health + limit) so these counts
+  // match the status badge shown in the table.
+  const okCount = pools.filter(
+    (p) => computeEffectiveStatus(p) === "OK",
+  ).length;
+  const warnCount = pools.filter(
+    (p) => computeEffectiveStatus(p) === "WARN",
+  ).length;
+  const critCount = pools.filter(
+    (p) => computeEffectiveStatus(p) === "CRITICAL",
+  ).length;
+  // N/A = VirtualPools (oracle health and trading limits not applicable)
   const naCount = pools.filter(
-    (p) => !p.healthStatus || p.healthStatus === "N/A",
+    (p) => computeEffectiveStatus(p) === "N/A",
   ).length;
 
   // TVL for FPMM pools
@@ -166,11 +175,11 @@ function GlobalContent() {
       <section>
         <h2 className="text-lg font-semibold text-white mb-3">
           Health Status
-          {network.hasVirtualPools && (
-            <span className="ml-2 text-xs font-normal text-slate-500">
-              (N/A = VirtualPools — oracle health not applicable)
-            </span>
-          )}
+          <span className="ml-2 text-xs font-normal text-slate-500">
+            {network.hasVirtualPools
+              ? "(oracle + limit · N/A = VirtualPools)"
+              : "(oracle + limit)"}
+          </span>
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Tile label="🟢 OK" value={poolsLoading ? "…" : String(okCount)} />

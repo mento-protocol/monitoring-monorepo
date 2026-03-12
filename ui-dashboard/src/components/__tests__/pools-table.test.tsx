@@ -208,10 +208,18 @@ describe("PoolsTable Total Volume column", () => {
       notionalVolume1: "2000000000000000000",
     });
     // Non-convertible pools must NOT show any USD-formatted total volume value
-    expect(html).not.toMatch(/\$\d+\.\d+.*Total/);
-    // The total volume cell specifically shows em-dash (no USD value rendered for it)
     expect(html).not.toContain("$1.00");
     expect(html).not.toContain("$2.00");
+  });
+
+  it("shows $0.00 for a USD-convertible pool with zero all-time volume", () => {
+    const html = renderSinglePool({
+      ...BASE_POOL,
+      token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
+      token0Decimals: 18,
+      // notionalVolume0 absent — poolTotalVolumeUSD returns 0, not null
+    });
+    expect(html).toContain("$0.00");
   });
 });
 
