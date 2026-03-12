@@ -3,6 +3,23 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
 import type { Pool } from "@/lib/types";
 
+const mockNetwork = {
+  id: "celo-sepolia-local",
+  label: "Celo Sepolia (local)",
+  chainId: 11142220,
+  contractsNamespace: "testnet-v2-rc5",
+  hasuraUrl: "http://localhost:8080/v1/graphql",
+  hasuraSecret: "testing",
+  explorerBaseUrl: "https://celo-sepolia.blockscout.com",
+  tokenSymbols: {
+    "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b": "USDm",
+    "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf": "KESm",
+  },
+  addressLabels: {},
+  local: true,
+  hasVirtualPools: true,
+};
+
 vi.mock("next/link", () => ({
   default: ({
     href,
@@ -21,21 +38,7 @@ vi.mock("next/link", () => ({
 
 vi.mock("@/components/network-provider", () => ({
   useNetwork: () => ({
-    network: {
-      id: "celo-sepolia-local",
-      label: "Celo Sepolia (local)",
-      chainId: 11142220,
-      contractsNamespace: "testnet-v2-rc5",
-      hasuraUrl: "http://localhost:8080/v1/graphql",
-      hasuraSecret: "testing",
-      explorerBaseUrl: "https://celo-sepolia.blockscout.com",
-      tokenSymbols: {
-        "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b": "USDm",
-        "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf": "KESm",
-      },
-      addressLabels: {},
-      local: true,
-    },
+    network: mockNetwork,
     networkId: "celo-sepolia-local",
     setNetworkId: vi.fn(),
   }),
@@ -47,7 +50,7 @@ const BASE_POOL: Pool = {
   id: "pool-1",
   token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b",
   token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf",
-  source: "FPMM",
+  source: "fpmm_factory",
   createdAtBlock: "1",
   createdAtTimestamp: "1700000000",
   updatedAtBlock: "1",
@@ -113,5 +116,23 @@ describe("PoolsTable 24h volume states", () => {
       volume24h: new Map([["pool-1", 123]]),
     });
     expect(usdVolumeHtml).toContain("$123.00");
+  });
+});
+
+describe("PoolsTable network-specific virtual pool UI", () => {
+  it("shows the Source column on networks with virtual pools", () => {
+    mockNetwork.hasVirtualPools = true;
+    const html = renderPoolTableMarkup({});
+    expect(html).toContain(">Source</th>");
+    expect(html).toContain("FPMM");
+  });
+
+  it("hides the Source column on networks without virtual pools", () => {
+    mockNetwork.hasVirtualPools = false;
+    const html = renderPoolTableMarkup({});
+    expect(html).not.toContain(">Source</th>");
+    expect(html).not.toContain("Virtual");
+    expect(html).not.toContain("FPMM");
+    mockNetwork.hasVirtualPools = true;
   });
 });
