@@ -12,8 +12,8 @@
  * count when oracle data is absent.
  *
  * Edge cases:
- * - Both reserves zero: returns 0%/0% (empty pool, not 50%/50%)
- * - One reserve null (not yet indexed): rawTotal = 0 → 0%/100%
+ * - Both reserves zero: returns pct0=0, pct1=100 (component should guard against rendering this)
+ * - One reserve null (not yet indexed): rawTotal = 0 → pct0=0, pct1=100
  */
 export function computeReservePcts(
   r0: number | null,
