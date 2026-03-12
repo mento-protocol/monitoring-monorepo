@@ -3,7 +3,7 @@ name: monad-mainnet
 description: Monad Mainnet v3 FPMM HyperIndex indexer
 networks:
   - id: 143 # Monad Mainnet — HyperSync: https://143.hypersync.xyz
-    start_block: ${ENVIO_START_BLOCK:-0}
+    start_block: ${ENVIO_START_BLOCK:-60730000} # SortedOracles ~60733096, FPMMFactory ~60747398
     contracts:
       - name: FPMMFactory
         abi_file_path: abis/FPMMFactory.json

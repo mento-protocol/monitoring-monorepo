@@ -3,7 +3,7 @@ name: monad-testnet
 description: Monad Testnet v3 FPMM HyperIndex indexer
 networks:
   - id: 10143 # Monad Testnet — HyperSync: https://10143.hypersync.xyz
-    start_block: ${ENVIO_START_BLOCK:-0}
+    start_block: ${ENVIO_START_BLOCK:-17932300} # SortedOracles ~17932362, FPMMFactory ~17932599
     contracts:
       - name: FPMMFactory
         abi_file_path: abis/FPMMFactory.json
