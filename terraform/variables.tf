@@ -59,7 +59,7 @@ variable "hasura_url_celo_mainnet_hosted" {
 variable "hasura_url_monad_mainnet_hosted" {
   description = "GraphQL endpoint for the hosted Monad Mainnet Envio indexer. Leave empty until indexer is deployed."
   type        = string
-  default     = ""
+  default     = "https://indexer.hyperindex.xyz/cfeda9e/v1/graphql"
 }
 
 variable "hasura_url_monad_testnet_hosted" {
