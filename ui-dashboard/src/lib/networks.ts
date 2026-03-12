@@ -99,6 +99,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     id: "devnet",
     label: "Celo Devnet (local)",
     local: true,
+    hasVirtualPools: true,
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
     hasuraUrl:

@@ -194,8 +194,8 @@ describe("NETWORKS — Monad networks", () => {
 });
 
 describe("NETWORKS — virtual pool support", () => {
-  it("enables virtual pools only for Celo mainnet and Celo Sepolia variants", () => {
-    expect(NETWORKS.devnet.hasVirtualPools).toBe(false);
+  it("enables virtual pools for all Celo networks, disables for Monad", () => {
+    expect(NETWORKS.devnet.hasVirtualPools).toBe(true);
     expect(NETWORKS["celo-sepolia-local"].hasVirtualPools).toBe(true);
     expect(NETWORKS["celo-sepolia-hosted"].hasVirtualPools).toBe(true);
     expect(NETWORKS["celo-mainnet-local"].hasVirtualPools).toBe(true);
