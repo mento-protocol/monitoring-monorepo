@@ -36,7 +36,7 @@ import {
   POOL_SWAPS,
   TRADING_LIMITS,
 } from "@/lib/queries";
-import { computeRebalancerLiveness } from "@/lib/health";
+import { computeHealthStatus, computeRebalancerLiveness } from "@/lib/health";
 import { isFpmm, poolName, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import type {
   LiquidityEvent,
@@ -216,9 +216,10 @@ function PoolHeader({
   const { network } = useNetwork();
   const name = poolName(network, pool.token0, pool.token1);
   const isVirtual = pool.source?.includes("virtual");
+  const nowSeconds = Math.floor(Date.now() / 1000);
   const rebalancerLiveness = computeRebalancerLiveness(
-    pool,
-    Math.floor(Date.now() / 1000),
+    { ...pool, healthStatus: computeHealthStatus(pool) },
+    nowSeconds,
   );
 
   return (
