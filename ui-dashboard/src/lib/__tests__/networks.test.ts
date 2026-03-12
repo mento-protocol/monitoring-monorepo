@@ -174,8 +174,12 @@ describe("isConfiguredNetworkId — URL routing guard", () => {
   it("returns a boolean for any known network id", () => {
     // Correctness: the function must not throw for any defined network.
     expect(typeof isConfiguredNetworkId("celo-mainnet-hosted")).toBe("boolean");
-    expect(typeof isConfiguredNetworkId("monad-mainnet-hosted")).toBe("boolean");
-    expect(typeof isConfiguredNetworkId("monad-testnet-hosted")).toBe("boolean");
+    expect(typeof isConfiguredNetworkId("monad-mainnet-hosted")).toBe(
+      "boolean",
+    );
+    expect(typeof isConfiguredNetworkId("monad-testnet-hosted")).toBe(
+      "boolean",
+    );
   });
 
   it("returns false for unknown network id regardless of env", () => {
