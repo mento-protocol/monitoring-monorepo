@@ -136,3 +136,93 @@ describe("PoolsTable network-specific virtual pool UI", () => {
     mockNetwork.hasVirtualPools = true;
   });
 });
+
+describe("PoolsTable column structure", () => {
+  it("renders the new column headers and omits removed ones", () => {
+    const html = renderPoolTableMarkup({});
+    expect(html).toContain("24h Volume");
+    expect(html).toContain("Total Volume");
+    expect(html).toContain("Swaps");
+    expect(html).toContain("Rebalances");
+    // Removed columns
+    expect(html).not.toContain(">Limit</th>");
+    expect(html).not.toContain(">Created</th>");
+  });
+});
+
+describe("PoolsTable combined Health + Limit badge", () => {
+  it("elevates badge to CRITICAL when limitStatus is CRITICAL but healthStatus is OK", () => {
+    const html = renderSinglePool({
+      ...BASE_POOL,
+      healthStatus: "OK",
+      limitStatus: "CRITICAL",
+      oracleTimestamp: String(Math.floor(Date.now() / 1000)), // fresh oracle
+      limitPressure0: "1.05",
+      limitPressure1: "0.1",
+    });
+    // The Health badge cell should show CRITICAL
+    expect(html).toContain("CRITICAL");
+  });
+
+  it("keeps badge at CRITICAL when healthStatus is CRITICAL and limitStatus is OK", () => {
+    const html = renderSinglePool({
+      ...BASE_POOL,
+      healthStatus: "CRITICAL",
+      limitStatus: "OK",
+    });
+    expect(html).toContain("CRITICAL");
+  });
+
+  it("includes per-token pressure in tooltip when limit is CRITICAL", () => {
+    const html = renderSinglePool({
+      ...BASE_POOL,
+      healthStatus: "OK",
+      limitStatus: "CRITICAL",
+      oracleTimestamp: String(Math.floor(Date.now() / 1000)),
+      limitPressure0: "1.05",
+      limitPressure1: "0.12",
+    });
+    // Tooltip should mention token symbols and pressure percentages
+    expect(html).toContain("105%");
+    expect(html).toContain("12%");
+  });
+});
+
+describe("PoolsTable Total Volume column", () => {
+  it("shows formatted USD for a pool with USDm as token0", () => {
+    const html = renderSinglePool({
+      ...BASE_POOL,
+      token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
+      token0Decimals: 18,
+      notionalVolume0: "5000000000000000000", // 5 USDm
+    });
+    expect(html).toContain("$5.00");
+  });
+
+  it("shows — for a pool with no USDm leg", () => {
+    const html = renderSinglePool({
+      ...BASE_POOL,
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      notionalVolume0: "1000000000000000000",
+      notionalVolume1: "2000000000000000000",
+    });
+    // Non-convertible pools must NOT show any USD-formatted total volume value
+    expect(html).not.toMatch(/\$\d+\.\d+.*Total/);
+    // The total volume cell specifically shows em-dash (no USD value rendered for it)
+    expect(html).not.toContain("$1.00");
+    expect(html).not.toContain("$2.00");
+  });
+});
+
+describe("PoolsTable Swaps and Rebalances columns", () => {
+  it("renders all-time swap and rebalance counts", () => {
+    const html = renderSinglePool({
+      ...BASE_POOL,
+      swapCount: 7,
+      rebalanceCount: 3,
+    });
+    expect(html).toContain(">7<");
+    expect(html).toContain(">3<");
+  });
+});

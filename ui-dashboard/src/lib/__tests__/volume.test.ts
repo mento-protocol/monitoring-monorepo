@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { NETWORKS } from "../networks";
 import {
   buildPool24hVolumeMap,
+  poolTotalVolumeUSD,
   shouldQueryPoolSnapshots24h,
   snapshotWindow24h,
   sumFpmmSwaps24h,
@@ -157,5 +158,70 @@ describe("buildPool24hVolumeMap", () => {
 
     const volumeByPool = buildPool24hVolumeMap(snapshots, pools, network);
     expect(volumeByPool.get("pool-3")).toBeNull();
+  });
+});
+
+const BASE_POOL_FIELDS = {
+  source: "fpmm_factory",
+  createdAtBlock: "0",
+  createdAtTimestamp: "0",
+  updatedAtBlock: "0",
+  updatedAtTimestamp: "0",
+};
+
+describe("poolTotalVolumeUSD", () => {
+  it("returns volume in USD when token0 is USDm", () => {
+    const pool: Pool = {
+      ...BASE_POOL_FIELDS,
+      id: "pool-1",
+      token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
+      token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
+      token0Decimals: 18,
+      token1Decimals: 18,
+      notionalVolume0: "5000000000000000000", // 5e18 = 5 USDm
+      notionalVolume1: "900000000000000000000",
+    };
+    expect(poolTotalVolumeUSD(pool, network)).toBeCloseTo(5, 8);
+  });
+
+  it("returns volume in USD when token1 is USDm", () => {
+    const pool: Pool = {
+      ...BASE_POOL_FIELDS,
+      id: "pool-2",
+      token0: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
+      token1: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
+      token0Decimals: 18,
+      token1Decimals: 18,
+      notionalVolume0: "900000000000000000000",
+      notionalVolume1: "10000000000000000000", // 10e18 = 10 USDm
+    };
+    expect(poolTotalVolumeUSD(pool, network)).toBeCloseTo(10, 8);
+  });
+
+  it("returns null when pool has no USDm leg", () => {
+    const pool: Pool = {
+      ...BASE_POOL_FIELDS,
+      id: "pool-3",
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      token0Decimals: 18,
+      token1Decimals: 18,
+      notionalVolume0: "1000000000000000000",
+      notionalVolume1: "2000000000000000000",
+    };
+    expect(poolTotalVolumeUSD(pool, network)).toBeNull();
+  });
+
+  it("returns 0 when pool is USD-convertible but has no recorded volume", () => {
+    const pool: Pool = {
+      ...BASE_POOL_FIELDS,
+      id: "pool-4",
+      token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
+      token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
+      token0Decimals: 18,
+      token1Decimals: 18,
+      // notionalVolume0 intentionally absent
+    };
+    expect(poolTotalVolumeUSD(pool, network)).toBe(0);
   });
 });
