@@ -6,14 +6,11 @@
 export type HealthStatus = "OK" | "WARN" | "CRITICAL" | "N/A";
 
 /**
- * Oracle staleness threshold in seconds.
+ * Fallback oracle staleness threshold in seconds.
  *
- * SortedOracles.reportExpirySeconds() on Celo mainnet = 300s (5 min).
- * Per-token overrides (tokenReportExpirySeconds) are 0 → use global default.
- * isOldestReportExpired(token) returns true when oldest report age > 300s.
- *
- * We match the on-chain definition: an oracle is stale when its last report
- * is older than the SortedOracles expiry window.
+ * Used when oracleExpiry is not yet indexed for a pool (e.g. pools created
+ * before the indexer started capturing it). SortedOracles.reportExpirySeconds()
+ * on Celo mainnet = 300s (5 min), which is the lowest value across supported chains.
  */
 export const ORACLE_STALE_SECONDS = 300;
 
@@ -21,6 +18,7 @@ export interface PoolHealthState {
   source?: string;
   oracleOk?: boolean;
   oracleTimestamp?: string;
+  oracleExpiry?: string;
   priceDifference?: string;
   rebalanceThreshold?: number;
 }
@@ -29,20 +27,26 @@ export interface PoolHealthState {
  * Compute the health status for a pool based on its oracle state.
  *
  * - "N/A":       VirtualPools (source includes "virtual") — no oracle
- * - "CRITICAL":  Oracle is stale (age > 1h) OR deviation >= threshold
+ * - "CRITICAL":  Oracle is stale (age > expiry) OR deviation >= threshold
  * - "WARN":      Oracle is fresh but deviation >= 80% of threshold
  * - "OK":        Oracle is fresh and deviation is below 80% of threshold
  *
  * Uses wall-clock time comparison rather than the indexed oracleOk flag,
  * which is only set at event time and never expires.
+ *
+ * The staleness threshold comes from the indexed oracleExpiry (fetched
+ * per-feed from SortedOracles at index time), falling back to ORACLE_STALE_SECONDS
+ * for pools that pre-date this field.
  */
 export function computeHealthStatus(pool: PoolHealthState): HealthStatus {
   if (pool.source?.includes("virtual")) return "N/A";
   // Time-based staleness check (client-side wall clock)
   const oracleTs = Number(pool.oracleTimestamp ?? "0");
   const nowSeconds = Math.floor(Date.now() / 1000);
+  const stalenessThreshold =
+    Number(pool.oracleExpiry ?? "0") || ORACLE_STALE_SECONDS;
   const isOracleStale =
-    oracleTs === 0 || nowSeconds - oracleTs > ORACLE_STALE_SECONDS;
+    oracleTs === 0 || nowSeconds - oracleTs > stalenessThreshold;
   if (isOracleStale) return "CRITICAL";
   const diff = Number(pool.priceDifference ?? "0");
   const threshold =
@@ -100,6 +104,7 @@ export function computeEffectiveStatus(pool: {
   source?: string;
   oracleOk?: boolean;
   oracleTimestamp?: string;
+  oracleExpiry?: string;
   priceDifference?: string;
   rebalanceThreshold?: number;
   limitStatus?: string;
