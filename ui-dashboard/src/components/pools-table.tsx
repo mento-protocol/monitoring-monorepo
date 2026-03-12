@@ -26,7 +26,8 @@ function healthTooltip(status: string, p: Pool): string {
     Math.floor(Date.now() / 1000) - oracleTs > ORACLE_STALE_SECONDS;
   if (status === "CRITICAL" && isOracleStale)
     return "Oracle stale — last update expired";
-  if (status === "CRITICAL") return "Price deviation ≥ rebalance threshold";
+  if (status === "CRITICAL")
+    return "Needs rebalance: price deviation ≥ threshold";
   if (status === "WARN") return "Price deviation ≥ 80% of rebalance threshold";
   return "Oracle healthy";
 }
