@@ -139,6 +139,8 @@ export const POOL_DETAIL_WITH_HEALTH = `
       limitPressure1
       rebalancerAddress
       rebalanceLivenessStatus
+      reserves0
+      reserves1
     }
   }
 `;

@@ -1,12 +1,12 @@
 "use client";
 
 import { AddressLink } from "@/components/address-link";
-import { KindBadge, SourceBadge } from "@/components/badges";
+import { KindBadge, RebalancerBadge, SourceBadge } from "@/components/badges";
 import { LimitSelect } from "@/components/controls";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { HealthPanel } from "@/components/health-panel";
 import { LimitPanel } from "@/components/limit-panel";
-import { RebalancerPanel } from "@/components/rebalancer-panel";
+import { ReservesPanel } from "@/components/reserves-panel";
 import { useNetwork } from "@/components/network-provider";
 import { OracleChart } from "@/components/oracle-chart";
 import { OraclePriceChart } from "@/components/oracle-price-chart";
@@ -36,6 +36,7 @@ import {
   POOL_SWAPS,
   TRADING_LIMITS,
 } from "@/lib/queries";
+import { computeRebalancerLiveness } from "@/lib/health";
 import { isFpmm, poolName, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import type {
   LiquidityEvent,
@@ -143,8 +144,8 @@ function PoolDetail() {
           <PoolHeader pool={pool} deployTxHash={deployTxHash} />
           <HealthPanel pool={pool} />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <ReservesPanel pool={pool} />
             <LimitPanel pool={pool} tradingLimits={tradingLimits} />
-            <RebalancerPanelWrapper pool={pool} poolId={decodedId} limit={20} />
           </div>
         </>
       )}
@@ -202,27 +203,6 @@ function PoolDetail() {
 }
 
 // ---------------------------------------------------------------------------
-// Rebalancer panel wrapper (fetches rebalances for the panel)
-// ---------------------------------------------------------------------------
-
-function RebalancerPanelWrapper({
-  pool,
-  poolId,
-  limit,
-}: {
-  pool: Pool;
-  poolId: string;
-  limit: number;
-}) {
-  const { data } = useGQL<{ RebalanceEvent: RebalanceEvent[] }>(
-    POOL_REBALANCES,
-    { poolId, limit },
-  );
-  const rebalances = data?.RebalanceEvent ?? [];
-  return <RebalancerPanel pool={pool} rebalances={rebalances} />;
-}
-
-// ---------------------------------------------------------------------------
 // Pool header
 // ---------------------------------------------------------------------------
 
@@ -235,6 +215,12 @@ function PoolHeader({
 }) {
   const { network } = useNetwork();
   const name = poolName(network, pool.token0, pool.token1);
+  const isVirtual = pool.source?.includes("virtual");
+  const rebalancerLiveness = computeRebalancerLiveness(
+    pool,
+    Math.floor(Date.now() / 1000),
+  );
+
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <div className="flex flex-wrap items-center gap-3 mb-3">
@@ -244,7 +230,7 @@ function PoolHeader({
           <AddressLink address={pool.id} />
         </span>
       </div>
-      <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+      <dl className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-sm">
         <Stat
           label="Token 0"
           value={pool.token0 ? <AddressLink address={pool.token0} /> : "—"}
@@ -252,6 +238,19 @@ function PoolHeader({
         <Stat
           label="Token 1"
           value={pool.token1 ? <AddressLink address={pool.token1} /> : "—"}
+        />
+        <Stat
+          label="Rebalancing Strategy"
+          value={
+            isVirtual || !pool.rebalancerAddress ? (
+              <span className="text-slate-500">—</span>
+            ) : (
+              <span className="flex items-center gap-1.5 flex-wrap">
+                <AddressLink address={pool.rebalancerAddress} />
+                <RebalancerBadge status={rebalancerLiveness} />
+              </span>
+            )
+          }
         />
         <Stat
           label="Created at block"
