@@ -154,36 +154,52 @@ describe("NETWORKS — Monad networks", () => {
     expect(testnet.local).toBe(false);
   });
 
-  it("monad networks are hidden when hasuraUrl is empty (NEXT_PUBLIC_HASURA_URL_MONAD_* not set)", () => {
-    // In test env these vars are unset, so hasuraUrl is "".
-    // The network-selector filters these out — verified here at the network level.
-    expect(NETWORKS["monad-mainnet-hosted"].hasuraUrl).toBe("");
-    expect(NETWORKS["monad-testnet-hosted"].hasuraUrl).toBe("");
+  it("monad network visibility is gated on hasuraUrl being set", () => {
+    // isConfiguredNetworkId() is the single source of truth for routing.
+    // Whether Monad is visible depends on env vars — both outcomes are valid here;
+    // the routing guard correctness is tested in isConfiguredNetworkId suite below.
+    const monadMainnet = NETWORKS["monad-mainnet-hosted"];
+    const monadTestnet = NETWORKS["monad-testnet-hosted"];
+    // The contract: if hasuraUrl is empty, isConfiguredNetworkId must return false.
+    if (!monadMainnet.hasuraUrl) {
+      expect(isConfiguredNetworkId("monad-mainnet-hosted")).toBe(false);
+    }
+    if (!monadTestnet.hasuraUrl) {
+      expect(isConfiguredNetworkId("monad-testnet-hosted")).toBe(false);
+    }
   });
 });
 
 describe("isConfiguredNetworkId — URL routing guard", () => {
-  it("returns true for celo-mainnet-hosted (has Hasura URL in CI env)", () => {
-    // NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED has a default in variables.tf,
-    // but in test env it may not be set — accept both outcomes.
-    const result = isConfiguredNetworkId("celo-mainnet-hosted");
-    // Either configured (URL set) or unconfigured (URL empty in test env); both are valid.
-    expect(typeof result).toBe("boolean");
+  it("returns a boolean for any known network id", () => {
+    // Correctness: the function must not throw for any defined network.
+    expect(typeof isConfiguredNetworkId("celo-mainnet-hosted")).toBe("boolean");
+    expect(typeof isConfiguredNetworkId("monad-mainnet-hosted")).toBe("boolean");
+    expect(typeof isConfiguredNetworkId("monad-testnet-hosted")).toBe("boolean");
   });
 
-  it("returns false for monad-mainnet-hosted when hasuraUrl is empty", () => {
-    // Env var not set in test/CI → hasuraUrl is "" → not configurable for routing.
-    // This verifies that ?network=monad-mainnet-hosted is rejected by NetworkProvider.
-    expect(NETWORKS["monad-mainnet-hosted"].hasuraUrl).toBe("");
-    expect(isConfiguredNetworkId("monad-mainnet-hosted")).toBe(false);
-  });
-
-  it("returns false for monad-testnet-hosted when hasuraUrl is empty", () => {
-    expect(NETWORKS["monad-testnet-hosted"].hasuraUrl).toBe("");
-    expect(isConfiguredNetworkId("monad-testnet-hosted")).toBe(false);
-  });
-
-  it("returns false for unknown network id", () => {
+  it("returns false for unknown network id regardless of env", () => {
     expect(isConfiguredNetworkId("not-a-real-network")).toBe(false);
+  });
+
+  it("never returns true for a network with empty hasuraUrl", () => {
+    // Core invariant: no empty-URL network can be navigated to.
+    // This holds regardless of which env vars are set.
+    const unconfigured = Object.entries(NETWORKS).filter(
+      ([, n]) => !n.hasuraUrl,
+    );
+    for (const [id] of unconfigured) {
+      expect(isConfiguredNetworkId(id)).toBe(false);
+    }
+  });
+
+  it("never returns false for a non-local network with a populated hasuraUrl", () => {
+    // Inverse: if URL is set and network is not local, it must be routable.
+    const configured = Object.entries(NETWORKS).filter(
+      ([, n]) => !!n.hasuraUrl && !n.local,
+    );
+    for (const [id] of configured) {
+      expect(isConfiguredNetworkId(id)).toBe(true);
+    }
   });
 });
