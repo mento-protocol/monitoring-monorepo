@@ -1,330 +1,179 @@
-# Monad Mainnet — Monitoring Launch Plan
+# Monad Monitoring — Launch Runbook
 
-> **Status:** Pre-launch prep. Contract addresses TBD — this document tracks everything needed to go live once addresses are available.
-> 
-> **Target chain:** Monad Mainnet — **Chain ID: `143`** (confirmed from official Monad docs)
-> **Contracts package namespace:** `"monad-mainnet"` (exists in `@mento-protocol/contracts@0.2.0` for chainId 143)
-
----
-
-## Chain Info (Researched)
-
-| Field | Value | Source |
-|-------|-------|--------|
-| Chain ID | **143** | [docs.monad.xyz](https://docs.monad.xyz/developer-essentials/network-information/) |
-| Currency | MON | Official docs |
-| **RPC: `https://rpc.monad.xyz`** | QuickNode, 25 rps, batch 100 | Best default — highest rate limit |
-| RPC: `https://rpc2.monad.xyz` | Goldsky Edge, 300/10s, batch 10 — historical eth_call supported | Good fallback for indexer |
-| RPC: `https://rpc3.monad.xyz` | Ankr, 300/10s, batch 10 | Alternative |
-| RPC: `https://rpc-mainnet.monadinfra.com` | MF, 20 rps, batch 1 — historical eth_call supported | Last resort |
-| **Block Explorer** | **`https://monadscan.com`** (Etherscan-powered) | Recommended — most familiar UX |
-| Block Explorer (alt) | `https://monadvision.com` | BlockVision, also good |
-| Block Explorer (alt) | `https://monad.socialscan.io` | Socialscan |
-| **Envio HyperSync** | **`https://143.hypersync.xyz`** | ✅ Confirmed live — returns 403 (auth required, same as all live HyperSync endpoints) |
-| Envio HyperRPC | `https://143.rpc.hypersync.xyz` | ✅ Confirmed live (same pattern) |
-| Envio support tier | Both Monad mainnet (143) and testnet (10143) confirmed supported | [docs.envio.dev/docs/HyperSync/hypersync-supported-networks](https://docs.envio.dev/docs/HyperSync/hypersync-supported-networks) |
-
-> ✅ **Envio mainnet status confirmed.** Both Monad mainnet (143) and testnet (10143) are in Envio's supported networks list. `https://143.hypersync.xyz` is live.
+> **Status:** Code complete (PR #62 merged). Waiting on Envio hosted deployments.
 >
-> **Recommended RPC for Envio config:** `https://rpc.monad.xyz` (QuickNode, 25 rps) or `https://rpc2.monad.xyz` (Goldsky, 300/10s, supports historical eth_call — better for indexer backfill).
+> **Chains:** Monad Mainnet (143) · Monad Testnet (10143)
 
 ---
 
-## Definition of Done
+## What's Already Done (PR #62)
 
-Monitoring is live for Monad when:
+All code changes are merged into `main`. No further implementation is needed.
 
-- [ ] Envio indexer is running for Monad, events are being indexed
-- [ ] GraphQL endpoint is accessible and returning pool/swap/oracle data
-- [ ] Dashboard shows Monad pools in the "All Pools" table with correct health status
-- [ ] Oracle prices, reserves, trading limits, and rebalancer status are accurate
-- [ ] TVL and 24h volume tiles show Monad data (or are clearly labeled per-chain)
-- [ ] Vercel deployment has Monad env vars set and network is reachable
-- [ ] No CI failures on the `deploy/monad-mainnet` branch
-
----
-
-## Pre-requisites (blocking — need from team)
-
-| Item | Status | Notes |
-|------|--------|-------|
-| Final Monad chain ID | ⏳ TBD | Confirm: is it `143` (testnet) or a mainnet ID? |
-| `@mento-protocol/contracts` namespace for Monad | ⏳ TBD | Likely `"monad-mainnet"` — confirm once deployment is published to package |
-| FPMMFactory address | ⏳ TBD | Required in Envio config |
-| VirtualPoolFactory address | ⏳ TBD | Required in Envio config |
-| SortedOracles address | ⏳ TBD | Required in Envio config + contractAddresses.ts |
-| USDm address (Monad) | ⏳ TBD | Required for USDm direction detection |
-| Initial FPMM pool addresses | ⏳ TBD | One or more at launch |
-| Initial VirtualPool addresses | ⏳ TBD | Zero or more at launch |
-| Monad RPC URL | ⏳ TBD | For Envio indexer config |
-| Monad block explorer base URL | ⏳ TBD | e.g. `https://explorer.monad.xyz` |
-| Envio hosted deployment for Monad | ⏳ TBD | Need GraphQL endpoint URL once indexer is deployed |
-| Start block for indexing | ⏳ TBD | First deployment transaction block |
+| Component | What was done |
+|-----------|---------------|
+| `shared-config/deployment-namespaces.json` | Added `143 → mainnet`, `10143 → testnet-v2-rc5` |
+| `@mento-protocol/contracts` | Bumped to **v0.3.0** — ships addresses for both Monad chains |
+| `indexer-envio/src/EventHandlers.ts` | `DEFAULT_RPC_BY_CHAIN` map — chain 143 → `rpc2.monad.xyz`, chain 10143 → Envio HyperRPC |
+| `indexer-envio/config.monad.mainnet.yaml` | Envio config for mainnet, start block 60730000 |
+| `indexer-envio/config.monad.testnet.yaml` | Envio config for testnet, start block 17932300, 3 pools wired |
+| `ui-dashboard/src/lib/networks.ts` | `monad-mainnet-hosted` + `monad-testnet-hosted` network definitions |
+| `ui-dashboard/src/components/network-selector.tsx` | Networks hidden until `NEXT_PUBLIC_HASURA_URL_MONAD_*` is set |
+| `ui-dashboard/src/components/network-provider.tsx` | `isConfiguredNetworkId()` guards URL routing — `?network=monad-*` falls back to default when URL unset |
+| `terraform/` | Needs updates (see Step 3 below) |
+| `scripts/deploy-indexer.sh` | `pnpm deploy:indexer:monad-testnet` + `pnpm deploy:indexer:monad` added |
+| CI | Codegen validates all 4 configs; `shared-config/**` triggers indexer checks |
 
 ---
 
-## Implementation Steps
+## Chain Info
 
-### Step 1 — Update `shared-config/deployment-namespaces.json`
+| Field | Mainnet | Testnet |
+|-------|---------|---------|
+| Chain ID | **143** | **10143** |
+| HyperSync | `https://143.hypersync.xyz` | `https://10143.hypersync.xyz` |
+| Indexer RPC | `https://rpc2.monad.xyz` (Goldsky, historical eth_call) | `https://10143.rpc.hypersync.xyz` (Envio HyperRPC) |
+| Block explorer | `https://monadscan.com` | `https://testnet.monadscan.com` |
+| Namespace (`@mento-protocol/contracts`) | `mainnet` | `testnet-v2-rc5` |
 
-Add the Monad chain ID and its `@mento-protocol/contracts` namespace:
+### Contract Addresses
 
-```json
-{
-  "42220": "mainnet",
-  "11142220": "testnet-v2-rc5",
-  "<MONAD_CHAIN_ID>": "monad-mainnet"
+| Contract | Mainnet (143) | Testnet (10143) |
+|----------|---------------|-----------------|
+| USDm | `0xBC69212B8E4d445b2307C9D32dD68E2A4Df00115` | `0x5eCc03111ad2A78F981A108759bc73BAE2AB31bc` |
+| SortedOracles | `0x6f92C745346057a61b259579256159458a0a6A92` | `0x85ed9ac57827132B8F60938F3165BC139E1F53cd` |
+| FPMMFactory | `0xa849b475FE5a4B5C9C3280152c7a1945b907613b` | `0x353ED52bF8482027C0e0b9e3c0e5d96A9F680980` |
+| Testnet pools | — | `0xd9e9e6f6b5298e8bad390f7748035c49d6eeb055` · `0x1229e8a7b266c6db52712ba5c6899a6c4c3025cd` · `0x6d4c4b663541bf21015afb22669b0e1bbb3e2b1c` |
+
+---
+
+## Go-Live Checklist
+
+### Monad Testnet (3 pools already deployed — ready now)
+
+#### Step 1 — Create Envio hosted project (one-time, manual, ~5 min)
+
+1. Go to <https://envio.dev/app/mento-protocol> → **New Indexer** → **Import from GitHub**
+2. Select `mento-protocol/monitoring-monorepo`
+3. Set:
+   - **Branch:** `deploy/monad-testnet`
+   - **Root directory:** `indexer-envio`
+   - **Config file:** `config.monad.testnet.yaml`
+   - **Project name:** `mento-v3-monad-testnet`
+4. Create — Envio gives you a GraphQL endpoint: `https://indexer.hyperindex.xyz/<hash>/v1/graphql`
+5. **Copy the URL** — needed in Step 3
+
+#### Step 2 — Deploy the indexer (~2 min)
+
+```bash
+git checkout main && git pull
+pnpm deploy:indexer:monad-testnet
+# equivalent: git push origin main:deploy/monad-testnet
+```
+
+Wait for Envio to reach 100% sync at <https://envio.dev/app/mento-protocol/mento-v3-monad-testnet>.
+Testnet start block is 17,932,300 — sync should be fast.
+
+#### Step 3 — Add Terraform variables (~10 min)
+
+Add to `terraform/variables.tf`:
+
+```hcl
+variable "hasura_url_monad_testnet_hosted" {
+  description = "Hasura GraphQL endpoint for Monad Testnet (Envio hosted)"
+  type        = string
+  default     = ""
 }
 ```
 
-**Files:** `shared-config/deployment-namespaces.json`  
-**Blocked by:** Confirmed chain ID + package namespace
+Add to `terraform/terraform.tfvars`:
 
----
-
-### Step 2 — Update `indexer-envio/src/contractAddresses.ts`
-
-Add Monad to `CONTRACT_NAMESPACE_BY_CHAIN`:
-
-```ts
-export const CONTRACT_NAMESPACE_BY_CHAIN: Record<number, string> = {
-  42220: "mainnet",
-  11142220: "testnet-v2-rc5",
-  143: "monad-mainnet",
-};
+```hcl
+hasura_url_monad_testnet_hosted = "https://indexer.hyperindex.xyz/<hash>/v1/graphql"
 ```
 
-**Files:** `indexer-envio/src/contractAddresses.ts`  
-**Blocked by:** Confirmed chain ID + namespace in `@mento-protocol/contracts`  
-**Note:** Address resolution (SortedOracles, USDm) is automatic once the namespace is added, provided the package is updated with Monad addresses.
+Add to `terraform/main.tf` (same pattern as the Sepolia block):
 
----
-
-### Step 3 — Create `indexer-envio/config.monad.mainnet.yaml`
-
-New Envio config file for Monad, following the same pattern as `config.celo.mainnet.yaml`:
-
-```yaml
-name: monad-mainnet
-description: Monad Mainnet v3 FPMM HyperIndex indexer
-networks:
-  - id: 143  # Monad Mainnet — HyperSync: https://143.hypersync.xyz
-    start_block: ${ENVIO_START_BLOCK:-<FIRST_DEPLOY_BLOCK>}
-    contracts:
-      - name: FPMMFactory
-        abi_file_path: abis/FPMMFactory.json
-        address:
-          - <FPMM_FACTORY_ADDRESS>
-        handler: src/EventHandlers.ts
-        events:
-          - event: FPMMDeployed
-      - name: FPMM
-        abi_file_path: abis/FPMM.json
-        address:
-          - <FPMM_POOL_ADDRESS_1>
-          # add more as pools are deployed
-        handler: src/EventHandlers.ts
-        events:
-          - event: Swap
-          - event: Mint
-          - event: Burn
-          - event: UpdateReserves
-          - event: Rebalanced
-          - event: TradingLimitConfigured
-      - name: VirtualPool
-        abi_file_path: abis/FPMM.json
-        address: []  # fill in when virtual pools are deployed
-        handler: src/EventHandlers.ts
-        events:
-          - event: Swap
-          - event: Mint
-          - event: Burn
-          - event: UpdateReserves
-          - event: Rebalanced
-      - name: VirtualPoolFactory
-        abi_file_path: abis/VirtualPoolFactory.json
-        address:
-          - <VIRTUAL_POOL_FACTORY_ADDRESS>
-        handler: src/EventHandlers.ts
-        events:
-          - event: VirtualPoolDeployed
-          - event: PoolDeprecated
-      - name: SortedOracles
-        abi_file_path: abis/SortedOracles.json
-        address:
-          - "<SORTED_ORACLES_ADDRESS>"
-        handler: src/EventHandlers.ts
-        events:
-          - event: OracleReported
-          - event: MedianUpdated
-unordered_multichain_mode: true
-preload_handlers: true
-field_selection:
-  transaction_fields:
-    - hash
-    - from
+```hcl
+resource "vercel_project_environment_variable" "hasura_url_monad_testnet" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED"
+  value      = var.hasura_url_monad_testnet_hosted
+  target     = ["production", "preview"]
+}
 ```
 
-**Files:** `indexer-envio/config.monad.mainnet.yaml` (new file)  
-**Blocked by:** All addresses from Step 0
-
----
-
-### Step 4 — Update `ui-dashboard/src/lib/networks.ts`
-
-Add Monad to `ACTIVE_DEPLOYMENT` and `NETWORKS`:
-
-```ts
-const NS = {
-  "celo-mainnet": DEPLOYMENT_NAMESPACES["42220"],
-  "celo-sepolia": DEPLOYMENT_NAMESPACES["11142220"],
-  "monad-mainnet": DEPLOYMENT_NAMESPACES["143"],
-} as const;
-
-export type IndexerNetworkId =
-  | "devnet"
-  | "celo-sepolia-local"
-  | "celo-sepolia-hosted"
-  | "celo-mainnet-local"
-  | "celo-mainnet-hosted"
-  | "monad-mainnet-hosted";  // new
-
-// In NETWORKS:
-"monad-mainnet-hosted": makeNetwork({
-  id: "monad-mainnet-hosted",
-  label: "Monad Mainnet",
-  chainId: 143,
-  contractsNamespace: NS["monad-mainnet"],
-  hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MONAD_HOSTED ?? "",
-  hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_MONAD_HOSTED ?? "",
-  explorerBaseUrl:
-    process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_HOSTED ??
-    "https://monadscan.com",  // Etherscan-powered, best default
-}),
-```
-
-**Files:** `ui-dashboard/src/lib/networks.ts`  
-**Blocked by:** Confirmed chain ID + package namespace
-
----
-
-### Step 5 — Update `.env.production.local.example`
-
-Document the new env vars:
+Then apply:
 
 ```bash
-# ── Monad Mainnet (hosted Envio indexer) ──────────────────────────────────────
-NEXT_PUBLIC_HASURA_URL_MONAD_HOSTED=https://indexer.hyperindex.xyz/<MONAD_DEPLOYMENT_ID>/v1/graphql
-NEXT_PUBLIC_HASURA_SECRET_MONAD_HOSTED=
-# NEXT_PUBLIC_EXPLORER_URL_MONAD_HOSTED=https://explorer.monad.xyz
+pnpm infra:plan   # preview
+pnpm infra:apply  # apply → sets NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED in Vercel
 ```
 
-**Files:** `ui-dashboard/.env.production.local.example`  
-**Blocked by:** Envio hosted deployment URL
+#### Step 4 — Verify (~5 min)
+
+- Go to <https://monitoring.mento.org> → network selector shows **Monad Testnet**
+- Pools table shows 3 pools
+- Oracle prices and health status render correctly
+- Explorer links point to `testnet.monadscan.com`
 
 ---
 
-### Step 6 — Set Vercel env vars
+### Monad Mainnet (no pools yet — indexer ready, nothing to index)
 
-In the Vercel project (mentolabs/monitoring-dashboard):
-- `NEXT_PUBLIC_HASURA_URL_MONAD_HOSTED` — GraphQL endpoint
-- `NEXT_PUBLIC_HASURA_SECRET_MONAD_HOSTED` — if needed
-- `NEXT_PUBLIC_EXPLORER_URL_MONAD_HOSTED` — block explorer
+Run the same 4-step flow as testnet once the first pool is deployed via `CreateFPMM`.
 
-**Blocked by:** Envio hosted deployment URL
+Differences from testnet:
+- Envio project name: `mento-v3-monad-mainnet`
+- Deploy branch: `deploy/monad-mainnet` (`pnpm deploy:indexer:monad`)
+- Terraform var: `hasura_url_monad_mainnet_hosted` → `NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED`
+- Start block: 60,730,000 (SortedOracles deployed ~60,733,096)
+- No pools in the config yet — the indexer will catch `FPMMDeployed` events and add them automatically
 
----
-
-### Step 7 — Update `deploy/monad-mainnet` branch
-
-Merge `main` into `deploy/monad-mainnet`, then push to trigger Vercel preview.  
-This is the same pattern used for Celo deployments.
+> ⚠️ **Note:** Monad mainnet pools have no `VirtualPool` support (only FPMM). `VirtualPoolFactory` is not in the `@mento-protocol/contracts` package for Monad yet — omitted from the config intentionally.
 
 ---
 
-### Step 8 — Update `@mento-protocol/contracts` package (if needed)
-
-If Monad contract addresses are not yet in the package (`@mento-protocol/contracts`):
-- The `contractAddresses.ts` fail-fast logic will throw at indexer startup
-- Package needs to be updated with `FPMMFactory`, `VirtualPoolFactory`, `SortedOracles`, `USDm` addresses for the Monad chain/namespace
-- Then bump the `@mento-protocol/contracts` version in `indexer-envio/package.json`
-
-**Owned by:** Contracts team  
-**Note:** `USDm` address for chainId 143/`monad-mainnet` namespace already exists in v0.2.0 (`0x866a7e4611C127DCe1a14C6841D2eA962A68dc88`). Other contracts TBD.
-
----
-
-## Test Plan
-
-### Local smoke test (before deploying)
+## Local Smoke Test (before deploying)
 
 ```bash
-# 1. Spin up Envio locally with the Monad config
+# 1. Run codegen against the Monad config first
 cd indexer-envio
-ENVIO_START_BLOCK=<start_block> envio dev --config config.monad.mainnet.yaml
+pnpm run envio:codegen --config config.monad.testnet.yaml
 
-# 2. Verify indexing starts without errors (no contractAddresses throws)
-# 3. Check a known swap transaction appears in PoolSnapshot
+# 2. Spin up Envio locally
+pnpm run dev:monad-testnet
+# or: ./scripts/run-envio-with-env.mjs config.monad.testnet.yaml
 
-# 4. Run the dashboard against the local indexer
+# 3. Run the dashboard against the local indexer
 cd ui-dashboard
-NEXT_PUBLIC_HASURA_URL_MONAD_HOSTED=http://localhost:8080/v1/graphql pnpm dev
-# Visit http://localhost:3000 → select "Monad Mainnet" network
+NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED=http://localhost:8080/v1/graphql pnpm dev
+# Visit http://localhost:3000 → select "Monad Testnet"
 # Verify: pools visible, health badges render, oracle prices shown
 ```
 
-### Automated tests
+---
 
-```bash
-# All existing tests must still pass — no regressions
-cd indexer-envio && pnpm test    # 21 tests including contractAddresses assertions
-cd ui-dashboard && pnpm test     # 105 tests including network merge tests
+## Post-Deploy Verification Checklist
 
-# The contractAddresses tests will automatically validate Monad address resolution
-# once the chain ID is added to CONTRACT_NAMESPACE_BY_CHAIN
-```
-
-### Post-deploy verification checklist
-
-- [ ] Monad network selectable in dashboard dropdown
-- [ ] "All Pools" table shows at least 1 pool
-- [ ] Health status column shows values (not all "N/A")
-- [ ] Oracle price visible and non-zero for at least 1 FPMM pool
-- [ ] Swap count > 0 if any swaps have occurred
-- [ ] Pool detail page loads without error
-- [ ] Explorer links point to correct Monad explorer
+- [ ] Monad Testnet visible in network selector
+- [ ] "All Pools" table shows 3 pools
+- [ ] Health status column has values (not all "N/A")
+- [ ] Oracle price visible and non-zero for at least 1 pool
 - [ ] TVL tile shows non-zero value
+- [ ] Explorer links go to `testnet.monadscan.com`
 - [ ] No console errors in browser
 
 ---
 
-## Dependency Map
-
-```
-Contracts deployed on Monad
-    ↓
-@mento-protocol/contracts package updated with addresses
-    ↓
-shared-config/deployment-namespaces.json  ←──────────────────┐
-contractAddresses.ts (CONTRACT_NAMESPACE_BY_CHAIN)            │  (must stay in sync)
-    ↓                                                          │
-config.monad.mainnet.yaml   networks.ts (NETWORKS)  ──────────┘
-    ↓                              ↓
-Envio hosted indexer         Vercel env vars set
-    ↓                              ↓
-GraphQL endpoint     →    dashboard can query it
-```
-
----
-
-## Estimated Time Once Addresses Are Available
+## Estimated Time
 
 | Step | Effort |
 |------|--------|
-| Steps 1–5 (code changes) | ~30 min |
-| Envio deployment + indexer sync to tip | ~1–2 hours (depends on start block) |
-| Vercel env vars + preview deploy | ~5 min |
-| Smoke test + verification | ~15 min |
-| **Total** | **~2–3 hours** |
-
-The code changes themselves are mechanical — the bottleneck is indexer sync time.
+| Create Envio project (manual) | ~5 min |
+| Deploy indexer | ~2 min |
+| Terraform changes + apply | ~10 min |
+| Wait for indexer sync | ~15–30 min (testnet, ~350k blocks from start block) |
+| Smoke test + verification | ~10 min |
+| **Total** | **~1 hour** |
