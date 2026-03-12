@@ -173,6 +173,18 @@ describe("PoolsTable combined Health + Limit badge", () => {
     expect(html).toContain("CRITICAL");
   });
 
+  it("shows 'Needs rebalance' tooltip when health is CRITICAL due to deviation", () => {
+    const html = renderSinglePool({
+      ...BASE_POOL,
+      healthStatus: "CRITICAL",
+      limitStatus: "OK",
+      oracleTimestamp: String(Math.floor(Date.now() / 1000)), // fresh oracle → deviation-driven
+      priceDifference: "5000",
+      rebalanceThreshold: 5000,
+    });
+    expect(html).toContain("Needs rebalance: price deviation");
+  });
+
   it("includes per-token pressure in tooltip when limit is CRITICAL", () => {
     const html = renderSinglePool({
       ...BASE_POOL,
