@@ -130,6 +130,24 @@ describe("NETWORKS — general map composition", () => {
   });
 });
 
+describe("NETWORKS — local development defaults", () => {
+  it("uses the local Hasura admin secret by default", () => {
+    expect(NETWORKS.devnet.hasuraSecret).toBe("testing");
+    expect(NETWORKS["celo-sepolia-local"].hasuraSecret).toBe("testing");
+    expect(NETWORKS["celo-mainnet-local"].hasuraSecret).toBe("testing");
+  });
+
+  it("uses port 8080 for every local Hasura endpoint", () => {
+    expect(NETWORKS.devnet.hasuraUrl).toBe("http://localhost:8080/v1/graphql");
+    expect(NETWORKS["celo-sepolia-local"].hasuraUrl).toBe(
+      "http://localhost:8080/v1/graphql",
+    );
+    expect(NETWORKS["celo-mainnet-local"].hasuraUrl).toBe(
+      "http://localhost:8080/v1/graphql",
+    );
+  });
+});
+
 describe("NETWORKS — Monad networks", () => {
   const USDM_MONAD_MAINNET = "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115";
   const USDM_MONAD_TESTNET = "0x5ecc03111ad2a78f981a108759bc73bae2ab31bc";
