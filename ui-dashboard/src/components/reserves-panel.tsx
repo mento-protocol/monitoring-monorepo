@@ -26,6 +26,9 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
       : null;
 
   const hasReserves = r0 !== null && r1 !== null;
+  // Both reserves indexed as "0" — pool exists but has no liquidity yet.
+  // Prevents token1 tank from rendering as 100% full on a fully empty pool.
+  const isEmptyPool = hasReserves && r0 === 0 && r1 === 0;
 
   // Per-token USD values — mirrors poolTvlUSD() logic for which side is the price leg.
   const feedVal =
@@ -80,6 +83,8 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
 
       {!hasReserves ? (
         <p className="text-sm text-slate-400">No reserve data available yet.</p>
+      ) : isEmptyPool ? (
+        <p className="text-sm text-slate-400">Pool has no reserves yet.</p>
       ) : (
         <div className="flex gap-4 flex-1 min-h-[200px]">
           <Tank
