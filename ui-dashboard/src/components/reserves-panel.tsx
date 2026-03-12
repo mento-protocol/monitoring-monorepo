@@ -2,6 +2,7 @@
 
 import type { Pool } from "@/lib/types";
 import { parseWei, formatWei, formatUSD } from "@/lib/format";
+import { computeReservePcts, computeThresholdLines } from "@/lib/reserves";
 import { tokenSymbol, poolTvlUSD, USDM_SYMBOLS } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 
@@ -50,18 +51,8 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
           : null
       : null;
 
-  // Prefer USD-normalized fill percentages to avoid unit mismatch on non-parity pairs.
-  // Example: a balanced KESm/USDm pool has ~130:1 raw count ratio but 50/50 USD value.
-  // Falls back to raw token count when oracle price is unavailable.
   const usdTotal = usd0 !== null && usd1 !== null ? usd0 + usd1 : null;
-  const rawTotal = hasReserves ? r0! + r1! : 0;
-  const pct0 =
-    usdTotal !== null && usdTotal > 0
-      ? (usd0! / usdTotal) * 100
-      : rawTotal > 0
-        ? (r0! / rawTotal) * 100
-        : 0; // both reserves are zero — empty tanks show 0%
-  const pct1 = 100 - pct0;
+  const { pct0, pct1 } = computeReservePcts(r0, r1, usd0, usd1);
 
   // Dominant side (≥50%) gets indigo, recessive gets emerald — consistent visual signal.
   const color0 = pct0 >= 50 ? "bg-indigo-500" : "bg-emerald-500";
@@ -71,34 +62,7 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
   const totalUsdRaw = poolTvlUSD(pool, network);
   const totalUsd = totalUsdRaw > 0 ? totalUsdRaw : null;
 
-  // Critical threshold lines.
-  //
-  // When using USD-normalized pct, the equilibrium is always 50/50 (each side has
-  // equal USD value in a balanced pool). The critical fill% at priceDifference =
-  // rebalanceThreshold simplifies to:
-  //   x = (1 ± T) / (2 ± T)   where T = rebalanceThreshold / 10000
-  //
-  // Derivation: at critical (FPMM constant product), r0/r1 deviates by T from oracle.
-  //   usd0/usd1 = (r0 * priceInUSD) / (r1 * priceInUSD) = r0/r1 / P_pool = 1 ± T
-  //   → x_usd = (1 ± T) / (2 ± T). Oracle price cancels out entirely.
-  //
-  // Lines are only shown when using USD-normalized pct (usdTotal != null).
-  const T =
-    pool.rebalanceThreshold && pool.rebalanceThreshold > 0
-      ? pool.rebalanceThreshold / 10000
-      : null;
-
-  let threshold0Lower: number | null = null;
-  let threshold0Upper: number | null = null;
-  if (T !== null && usdTotal !== null && T < 1) {
-    threshold0Upper = ((1 + T) / (2 + T)) * 100;
-    threshold0Lower = ((1 - T) / (2 - T)) * 100;
-  }
-  // Tank1 thresholds are the complements of tank0's (pct1 = 100 − pct0).
-  const threshold1Lower =
-    threshold0Upper !== null ? 100 - threshold0Upper : null;
-  const threshold1Upper =
-    threshold0Lower !== null ? 100 - threshold0Lower : null;
+  const thresholds = computeThresholdLines(pool.rebalanceThreshold, usdTotal);
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 h-full flex flex-col">
@@ -124,8 +88,8 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
             pct={pct0}
             usd={usd0}
             colorClass={color0}
-            thresholdLower={threshold0Lower ?? undefined}
-            thresholdUpper={threshold0Upper ?? undefined}
+            thresholdLower={thresholds?.threshold0Lower}
+            thresholdUpper={thresholds?.threshold0Upper}
           />
           <Tank
             symbol={sym1}
@@ -133,8 +97,8 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
             pct={pct1}
             usd={usd1}
             colorClass={color1}
-            thresholdLower={threshold1Lower ?? undefined}
-            thresholdUpper={threshold1Upper ?? undefined}
+            thresholdLower={thresholds?.threshold1Lower}
+            thresholdUpper={thresholds?.threshold1Upper}
           />
         </div>
       )}
