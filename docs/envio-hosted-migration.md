@@ -153,13 +153,13 @@ The config file is the same. No code changes needed between environments — onl
 
 ### Update Dashboard + Vercel
 
-| Step | Task                                                                            | Time  |
-| ---- | ------------------------------------------------------------------------------- | ----- |
-| 13   | Add `NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED` to Vercel env vars (hosted GQL URL) | 2 min |
-| 14   | Add `NEXT_PUBLIC_EXPLORER_URL_SEPOLIA_HOSTED` to Vercel env vars                | 1 min |
-| 15   | Create Vercel project pointing to `ui-dashboard/` — see `docs/deployment.md`    | 5 min |
-| 16   | Deploy dashboard to Vercel                                                      | 5 min |
-| 17   | Switch network selector to "Celo Sepolia (hosted)" and verify data loads        | 5 min |
+| Step | Task                                                                                 | Time  |
+| ---- | ------------------------------------------------------------------------------------ | ----- |
+| 13   | Add `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED` to Vercel env vars (hosted GQL URL) | 2 min |
+| 14   | Add `NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_HOSTED` to Vercel env vars                | 1 min |
+| 15   | Create Vercel project pointing to `ui-dashboard/` — see `docs/deployment.md`         | 5 min |
+| 16   | Deploy dashboard to Vercel                                                           | 5 min |
+| 17   | Switch network selector to "Celo Sepolia (hosted)" and verify data loads             | 5 min |
 
 ### Post-Deploy
 
@@ -187,7 +187,7 @@ Total estimated time: ~1-2 hours
 envio dev
 
 # Deploy to hosted (just push — or use pnpm script)
-pnpm deploy:indexer:sepolia
+pnpm deploy:indexer celo-sepolia
 # equivalent to: git push origin main:deploy/celo-sepolia
 
 # Test hosted endpoint

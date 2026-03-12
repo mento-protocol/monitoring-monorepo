@@ -1,20 +1,46 @@
 #!/usr/bin/env bash
 # Deploy indexer to Envio Hosted by pushing to deploy branch
+#
+# Usage: pnpm deploy:indexer [network]
+#   With network: pnpm deploy:indexer celo-mainnet
+#   Without: prompts interactively
 
 set -euo pipefail
+
+VALID_NETWORKS=(celo-sepolia celo-mainnet monad-testnet monad-mainnet)
+
+validate_network() {
+  local n="$1"
+  for valid in "${VALID_NETWORKS[@]}"; do
+    if [[ "$n" == "$valid" ]]; then return 0; fi
+  done
+  return 1
+}
+
+if [[ "${1:-}" == "--" ]]; then
+  shift
+fi
 
 NETWORK="${1:-}"
 
 if [[ -z "$NETWORK" ]]; then
-  echo "Usage: $0 <network>"
+  echo "Select network to deploy:"
+  for i in "${!VALID_NETWORKS[@]}"; do
+    echo "  $((i + 1))) ${VALID_NETWORKS[$i]}"
+  done
   echo ""
-  echo "Available networks:"
-  echo "  celo-sepolia"
-  echo "  celo-mainnet"
-  echo "  monad-testnet"
-  echo "  monad-mainnet"
-  echo ""
-  echo "Example: $0 monad-testnet"
+  read -p "Enter number or network name: " choice
+  if [[ "$choice" =~ ^[1-4]$ ]]; then
+    NETWORK="${VALID_NETWORKS[$((choice - 1))]}"
+  else
+    NETWORK="$choice"
+  fi
+fi
+
+if [[ -z "$NETWORK" ]] || ! validate_network "$NETWORK"; then
+  echo "Invalid or missing network."
+  echo "Available: ${VALID_NETWORKS[*]}"
+  echo "Example: pnpm deploy:indexer celo-mainnet"
   exit 1
 fi
 
@@ -31,7 +57,7 @@ fi
 if ! git ls-remote --heads origin "$DEPLOY_BRANCH" | grep -q "$DEPLOY_BRANCH"; then
   echo "⚠️  Deploy branch '$DEPLOY_BRANCH' does not exist on remote."
   echo "Creating it now from current main..."
-  git push --no-verify origin "main:refs/heads/$DEPLOY_BRANCH"
+  git push origin "main:refs/heads/$DEPLOY_BRANCH"
 fi
 
 echo "🚀 Deploying indexer to Envio Hosted (network: $NETWORK)"
@@ -55,7 +81,7 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 # Push current HEAD to deploy branch
-git push --no-verify --force-with-lease origin "HEAD:refs/heads/$DEPLOY_BRANCH"
+git push --force-with-lease origin "HEAD:refs/heads/$DEPLOY_BRANCH"
 
 echo ""
 echo "✅ Pushed to $DEPLOY_BRANCH"

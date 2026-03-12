@@ -15,10 +15,16 @@ pnpm monorepo with three packages:
 pnpm install
 
 # Indexer
-pnpm indexer:codegen          # Generate types from schema
-pnpm indexer:dev              # Start indexer (devnet)
-pnpm indexer:sepolia:codegen  # Generate types (sepolia config)
-pnpm indexer:sepolia:dev      # Start indexer (sepolia)
+pnpm indexer:codegen              # Generate types from schema (devnet)
+pnpm indexer:dev                   # Start indexer (devnet)
+pnpm indexer:celo-sepolia:codegen  # Generate types (Celo Sepolia config)
+pnpm indexer:celo-sepolia:dev     # Start indexer (Celo Sepolia)
+pnpm indexer:celo-mainnet:codegen  # Generate types (Celo mainnet)
+pnpm indexer:celo-mainnet:dev      # Start indexer (Celo mainnet)
+pnpm indexer:monad-mainnet:codegen  # Generate types (Monad mainnet)
+pnpm indexer:monad-mainnet:dev      # Start indexer (Monad mainnet)
+pnpm indexer:monad-testnet:codegen  # Generate types (Monad testnet)
+pnpm indexer:monad-testnet:dev      # Start indexer (Monad testnet)
 
 # Dashboard
 pnpm dashboard:dev            # Dev server
@@ -42,7 +48,7 @@ pnpm infra:apply              # Apply infrastructure changes
 
 - **Runtime:** Envio HyperIndex (envio@2.32.3)
 - **Schema:** `schema.graphql` defines indexed entities (FPMM, Swap, Mint, Burn, etc.)
-- **Configs:** `config.celo.devnet.yaml`, `config.celo.mainnet.yaml`, `config.celo.sepolia.yaml`
+- **Configs:** `config.celo.devnet.yaml`, `config.celo.mainnet.yaml`, `config.celo.sepolia.yaml`, `config.monad.mainnet.yaml`, `config.monad.testnet.yaml`
 - **Handlers:** `src/EventHandlers.ts` — processes blockchain events
 - **Contract addresses:** `src/contractAddresses.ts` — resolves addresses from `@mento-protocol/contracts` using the namespace map from `shared-config`
 - **ABIs:** `abis/` — FPMMFactory, FPMM, VirtualPoolFactory (indexer-specific); SortedOracles + token ABIs come from `@mento-protocol/contracts`
@@ -56,7 +62,7 @@ pnpm infra:apply              # Apply infrastructure changes
 - **Charts:** Plotly.js via react-plotly.js
 - **Data:** GraphQL queries to Hasura (via graphql-request + SWR)
 - **Styling:** Tailwind CSS 4
-- **Multi-chain:** Network selector switches between devnet/sepolia/mainnet Hasura endpoints; all networks defined in `src/lib/networks.ts`
+- **Multi-chain:** Network selector switches between celo-mainnet, celo-sepolia, monad-mainnet, monad-testnet Hasura endpoints; all networks defined in `src/lib/networks.ts`
 - **Contract labels:** `src/lib/networks.ts` derives token symbols and address labels from `@mento-protocol/contracts` (no vendored JSON); the active namespace per chain comes from `shared-config`
 - **Address book:** `/address-book` page + inline editing; custom labels stored in Upstash Redis, backed up daily to Vercel Blob; custom labels override/extend the package-derived ones
 - **Deployment:** Vercel (`monitoring-dashboard` project); infra managed by Terraform in `terraform/`
@@ -86,6 +92,8 @@ monitoring-monorepo/
 │   ├── config.celo.devnet.yaml   # Devnet indexer config
 │   ├── config.celo.mainnet.yaml  # Celo Mainnet config
 │   ├── config.celo.sepolia.yaml  # Celo Sepolia config
+│   ├── config.monad.mainnet.yaml # Monad Mainnet config
+│   ├── config.monad.testnet.yaml # Monad Testnet config
 │   ├── schema.graphql        # Entity definitions
 │   ├── src/
 │   │   ├── EventHandlers.ts  # Event processing logic
@@ -144,7 +152,7 @@ When a new set of contracts has been deployed and a new `@mento-protocol/contrac
 ### Adding a new contract to index
 
 1. Add ABI to `indexer-envio/abis/`
-2. Add contract entry in `config.celo.mainnet.yaml` (and `config.celo.sepolia.yaml` if applicable)
+2. Add contract entry in the relevant config(s): `config.celo.mainnet.yaml`, `config.celo.sepolia.yaml`, `config.monad.mainnet.yaml`, `config.monad.testnet.yaml`
 3. Add entity to `schema.graphql`
 4. Add handler in `src/EventHandlers.ts`
 5. Run `pnpm indexer:codegen` to regenerate types

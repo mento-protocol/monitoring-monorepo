@@ -93,7 +93,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_DEVNET ??
       "http://localhost:8080/v1/graphql",
-    hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_DEVNET ?? "testing",
+    hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_DEVNET ?? "http://localhost:5100",
     addressLabels: {
@@ -107,11 +107,11 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 11142220,
     contractsNamespace: NS["celo-sepolia"],
     hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_SEPOLIA ??
+      process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA ??
       "http://localhost:8080/v1/graphql",
-    hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_SEPOLIA ?? "testing",
+    hasuraSecret: "",
     explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_SEPOLIA ??
+      process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA ??
       "https://celo-sepolia.blockscout.com",
   }),
   "celo-sepolia-hosted": makeNetwork({
@@ -119,10 +119,10 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     label: "Celo Sepolia (hosted)",
     chainId: 11142220,
     contractsNamespace: NS["celo-sepolia"],
-    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED ?? "",
-    hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_SEPOLIA_HOSTED ?? "",
+    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED ?? "",
+    hasuraSecret: "",
     explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_SEPOLIA_HOSTED ??
+      process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_HOSTED ??
       "https://celo-sepolia.blockscout.com",
   }),
   "celo-mainnet-local": makeNetwork({
@@ -132,21 +132,22 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
     hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_MAINNET ??
+      process.env.NEXT_PUBLIC_HASURA_URL_CELO_MAINNET ??
       "http://localhost:8082/v1/graphql",
-    hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_MAINNET ?? "testing",
+    hasuraSecret: "",
     explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_MAINNET ?? "https://celoscan.io",
+      process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET ??
+      "https://celoscan.io",
   }),
   "celo-mainnet-hosted": makeNetwork({
     id: "celo-mainnet-hosted",
     label: "Celo Mainnet (hosted)",
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
-    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED ?? "",
-    hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_MAINNET_HOSTED ?? "",
+    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED ?? "",
+    hasuraSecret: "",
     explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_MAINNET_HOSTED ??
+      process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET_HOSTED ??
       "https://celoscan.io",
   }),
   "monad-mainnet-hosted": makeNetwork({
@@ -155,8 +156,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 143,
     contractsNamespace: NS["monad-mainnet"],
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED ?? "",
-    hasuraSecret:
-      process.env.NEXT_PUBLIC_HASURA_SECRET_MONAD_MAINNET_HOSTED ?? "",
+    hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_MAINNET_HOSTED ??
       "https://monadscan.com",
@@ -167,8 +167,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 10143,
     contractsNamespace: NS["monad-testnet"],
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED ?? "",
-    hasuraSecret:
-      process.env.NEXT_PUBLIC_HASURA_SECRET_MONAD_TESTNET_HOSTED ?? "",
+    hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_TESTNET_HOSTED ??
       "https://testnet.monadscan.com",

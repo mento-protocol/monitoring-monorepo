@@ -87,7 +87,7 @@ Indexer schema is complete. These are dashboard-only items.
 
 - [x] Monorepo extraction from devnet repo
 - [x] CI: ESLint 10 + Vitest (53 tests) + typecheck + Codecov
-- [x] `pnpm deploy:indexer:*` scripts
+- [x] `pnpm deploy:indexer [network]` (prompts if no network passed)
 - [x] `pnpm update-endpoint:mainnet` — Vercel env var update after indexer redeploy
 - [x] Discord notification on deploy branch push (`notify-envio-deploy.yml`) — PR #17
 - [x] `AGENTS.md` files for indexer + dashboard

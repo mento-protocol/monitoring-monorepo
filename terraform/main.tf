@@ -77,40 +77,38 @@ resource "vercel_project" "dashboard" {
 # ── Environment Variables ─────────────────────────────────────────────────────
 # Using individual resources so optional vars can use count without type-mixing.
 
-resource "vercel_project_environment_variable" "hasura_url_sepolia" {
+resource "vercel_project_environment_variable" "hasura_url_celo_sepolia" {
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id
-  key        = "NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED"
-  value      = var.hasura_url_sepolia_hosted
+  key        = "NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED"
+  value      = var.hasura_url_celo_sepolia_hosted
   target     = ["production", "preview"]
 }
 
-resource "vercel_project_environment_variable" "hasura_secret_sepolia" {
-  count      = var.hasura_secret_sepolia_hosted != "" ? 1 : 0
+resource "vercel_project_environment_variable" "hasura_url_celo_mainnet" {
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id
-  key        = "NEXT_PUBLIC_HASURA_SECRET_SEPOLIA_HOSTED"
-  value      = var.hasura_secret_sepolia_hosted
-  target     = ["production", "preview"]
-  sensitive  = true
-}
-
-resource "vercel_project_environment_variable" "hasura_url_mainnet" {
-  project_id = vercel_project.dashboard.id
-  team_id    = var.vercel_team_id
-  key        = "NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED"
-  value      = var.hasura_url_mainnet_hosted
+  key        = "NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED"
+  value      = var.hasura_url_celo_mainnet_hosted
   target     = ["production", "preview"]
 }
 
-resource "vercel_project_environment_variable" "hasura_secret_mainnet" {
-  count      = var.hasura_secret_mainnet_hosted != "" ? 1 : 0
+resource "vercel_project_environment_variable" "hasura_url_monad_mainnet" {
+  count      = var.hasura_url_monad_mainnet_hosted != "" ? 1 : 0
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id
-  key        = "NEXT_PUBLIC_HASURA_SECRET_MAINNET_HOSTED"
-  value      = var.hasura_secret_mainnet_hosted
+  key        = "NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED"
+  value      = var.hasura_url_monad_mainnet_hosted
   target     = ["production", "preview"]
-  sensitive  = true
+}
+
+resource "vercel_project_environment_variable" "hasura_url_monad_testnet" {
+  count      = var.hasura_url_monad_testnet_hosted != "" ? 1 : 0
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED"
+  value      = var.hasura_url_monad_testnet_hosted
+  target     = ["production", "preview"]
 }
 
 resource "vercel_project_environment_variable" "redis_url" {

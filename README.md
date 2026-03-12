@@ -6,11 +6,11 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — an [Envio Hy
 
 ## Packages
 
-| Package                             | Description                                                                     |
-| ----------------------------------- | ------------------------------------------------------------------------------- |
-| [`indexer-envio`](./indexer-envio/) | Envio HyperIndex indexer for Celo Mainnet + Sepolia (FPMM pools + VirtualPools) |
-| [`ui-dashboard`](./ui-dashboard/)   | Next.js 16 + Plotly.js monitoring dashboard with multi-chain network switching  |
-| [`shared-config`](./shared-config/) | Shared deployment config (chain ID → treb namespace mappings)                   |
+| Package                             | Description                                                                    |
+| ----------------------------------- | ------------------------------------------------------------------------------ |
+| [`indexer-envio`](./indexer-envio/) | Envio HyperIndex indexer for Celo + Monad (FPMM pools + VirtualPools)          |
+| [`ui-dashboard`](./ui-dashboard/)   | Next.js 16 + Plotly.js monitoring dashboard with multi-chain network switching |
+| [`shared-config`](./shared-config/) | Shared deployment config (chain ID → treb namespace mappings)                  |
 
 ## Architecture
 
@@ -51,14 +51,18 @@ The indexer runs on Envio's hosted free tier. Each deploy produces a new GraphQL
 pnpm install
 ```
 
-### Run the Indexer (local — Celo Sepolia)
+### Run the Indexer (local)
 
 ```bash
-# Generate types from schema + config
-pnpm indexer:sepolia:codegen
+# Celo Sepolia
+pnpm indexer:celo-sepolia:codegen && pnpm indexer:celo-sepolia:dev
 
-# Start the indexer (spins up Docker: Postgres + Hasura + indexer)
-pnpm indexer:sepolia:dev
+# Celo Mainnet
+pnpm indexer:celo-mainnet:codegen && pnpm indexer:celo-mainnet:dev
+
+# Monad Testnet / Mainnet
+pnpm indexer:monad-testnet:codegen && pnpm indexer:monad-testnet:dev
+pnpm indexer:monad-mainnet:codegen && pnpm indexer:monad-mainnet:dev
 ```
 
 ### Run the Dashboard
@@ -85,21 +89,19 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
 The dashboard supports multiple network targets via `_<NETWORK>` suffix env vars:
 
-| Variable                                   | Description                                     |
-| ------------------------------------------ | ----------------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED`    | Hasura/GraphQL endpoint — Celo Mainnet (hosted) |
-| `NEXT_PUBLIC_HASURA_SECRET_MAINNET_HOSTED` | Hasura admin secret — Celo Mainnet hosted       |
-| `NEXT_PUBLIC_HASURA_URL_SEPOLIA_HOSTED`    | Hasura/GraphQL endpoint — Celo Sepolia (hosted) |
-| `NEXT_PUBLIC_HASURA_SECRET_SEPOLIA_HOSTED` | Hasura admin secret — Celo Sepolia hosted       |
-| `NEXT_PUBLIC_HASURA_URL_MAINNET`           | Hasura endpoint — Celo Mainnet (local)          |
-| `NEXT_PUBLIC_HASURA_SECRET_MAINNET`        | Hasura admin secret — Celo Mainnet (local)      |
-| `NEXT_PUBLIC_HASURA_URL_SEPOLIA`           | Hasura endpoint — Celo Sepolia (local)          |
-| `NEXT_PUBLIC_HASURA_SECRET_SEPOLIA`        | Hasura admin secret — Celo Sepolia (local)      |
-| `NEXT_PUBLIC_EXPLORER_URL_MAINNET`         | Block explorer — Celo Mainnet                   |
-| `NEXT_PUBLIC_EXPLORER_URL_SEPOLIA`         | Block explorer — Celo Sepolia                   |
-| `UPSTASH_REDIS_REST_URL`                   | Address labels storage (Upstash Redis)          |
-| `UPSTASH_REDIS_REST_TOKEN`                 | Address labels Redis auth token                 |
-| `BLOB_READ_WRITE_TOKEN`                    | Vercel Blob token for daily label backups       |
+| Variable                                      | Description                                      |
+| --------------------------------------------- | ------------------------------------------------ |
+| `NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED`  | Hasura/GraphQL endpoint — Celo Mainnet (hosted)  |
+| `NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED` | Hasura/GraphQL endpoint — Monad Mainnet (hosted) |
+| `NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED` | Hasura/GraphQL endpoint — Monad Testnet (hosted) |
+| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED`  | Hasura/GraphQL endpoint — Celo Sepolia (hosted)  |
+| `NEXT_PUBLIC_HASURA_URL_CELO_MAINNET`         | Hasura endpoint — Celo Mainnet (local)           |
+| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`         | Hasura endpoint — Celo Sepolia (local)           |
+| `NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET`       | Block explorer — Celo Mainnet                    |
+| `NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA`       | Block explorer — Celo Sepolia                    |
+| `UPSTASH_REDIS_REST_URL`                      | Address labels storage (Upstash Redis)           |
+| `UPSTASH_REDIS_REST_TOKEN`                    | Address labels Redis auth token                  |
+| `BLOB_READ_WRITE_TOKEN`                       | Vercel Blob token for daily label backups        |
 
 Production env vars are managed by Terraform — do not edit them in the Vercel dashboard. See [`terraform/`](./terraform/) and [`docs/deployment.md`](./docs/deployment.md).
 
@@ -127,20 +129,24 @@ Contract addresses and ABIs are sourced from the published [`@mento-protocol/con
 
 Each network has a dedicated deploy branch Envio watches:
 
-| Network      | Deploy Branch         |
-| ------------ | --------------------- |
-| Celo Mainnet | `deploy/celo-mainnet` |
-| Celo Sepolia | `deploy/celo-sepolia` |
+| Network       | Deploy Branch          |
+| ------------- | ---------------------- |
+| Celo Mainnet  | `deploy/celo-mainnet`  |
+| Celo Sepolia  | `deploy/celo-sepolia`  |
+| Monad Mainnet | `deploy/monad-mainnet` |
+| Monad Testnet | `deploy/monad-testnet` |
 
 Push to trigger a redeploy:
 
 ```bash
-pnpm deploy:indexer:mainnet
-# or
+pnpm deploy:indexer celo-mainnet
+# or run without args to be prompted:
+pnpm deploy:indexer
+# or push directly:
 git push origin main:deploy/celo-mainnet
 ```
 
-> ⚠️ **Sepolia endpoint changes on each Envio redeploy.** After redeploying the Sepolia indexer, update `hasura_url_sepolia_hosted` in `terraform/terraform.tfvars` and run `pnpm infra:apply`.
+> ⚠️ **Celo Sepolia endpoint changes on each Envio redeploy.** After redeploying the Celo Sepolia indexer, update `hasura_url_celo_sepolia_hosted` in `terraform/terraform.tfvars` and run `pnpm infra:apply`.
 
 ### Dashboard → Vercel
 
@@ -172,8 +178,9 @@ GitHub Actions runs on every PR:
 | Indexer schema                 | `indexer-envio/schema.graphql`               |
 | Event handlers                 | `indexer-envio/src/EventHandlers.ts`         |
 | Contract address resolution    | `indexer-envio/src/contractAddresses.ts`     |
-| Mainnet config                 | `indexer-envio/config.celo.mainnet.yaml`     |
-| Sepolia config                 | `indexer-envio/config.celo.sepolia.yaml`     |
+| Celo mainnet config            | `indexer-envio/config.celo.mainnet.yaml`     |
+| Celo Sepolia config            | `indexer-envio/config.celo.sepolia.yaml`     |
+| Monad mainnet/testnet configs  | `indexer-envio/config.monad.*.yaml`          |
 | Dashboard app                  | `ui-dashboard/src/app/`                      |
 | Address book page              | `ui-dashboard/src/app/address-book/page.tsx` |
 | Address labels API             | `ui-dashboard/src/app/api/address-labels/`   |

@@ -92,10 +92,10 @@ cp indexer-envio/.env.example indexer-envio/.env
 # Edit .env: set ENVIO_RPC_URL and ENVIO_START_BLOCK
 
 # Generate types from schema + config
-pnpm indexer:sepolia:codegen
+pnpm indexer:celo-sepolia:codegen
 
 # Start indexer stack (Docker + indexer)
-pnpm indexer:sepolia:dev
+pnpm indexer:celo-sepolia:dev
 ```
 
 Hasura console: `http://localhost:8080` (admin secret: `testing`)
@@ -104,12 +104,13 @@ GraphQL endpoint: `http://localhost:8080/v1/graphql`
 ### Available Commands (from repo root)
 
 ```bash
-pnpm indexer:sepolia:codegen   # Generate types for Sepolia
-pnpm indexer:sepolia:dev       # Start local Sepolia indexer
-pnpm indexer:mainnet:codegen   # Generate types for Mainnet
-pnpm indexer:mainnet:dev       # Start local Mainnet indexer
-pnpm deploy:indexer:mainnet    # Push to deploy/celo-mainnet branch
-pnpm deploy:indexer:sepolia    # Push to deploy/celo-sepolia branch
+pnpm indexer:celo-sepolia:codegen   # Generate types for Celo Sepolia
+pnpm indexer:celo-sepolia:dev       # Start local Celo Sepolia indexer
+pnpm indexer:celo-mainnet:codegen   # Generate types for Celo Mainnet
+pnpm indexer:celo-mainnet:dev       # Start local Celo Mainnet indexer
+pnpm deploy:indexer celo-mainnet    # Push to deploy/celo-mainnet branch
+pnpm deploy:indexer celo-sepolia    # Push to deploy/celo-sepolia branch
+pnpm deploy:indexer                 # Prompts for network
 ```
 
 ### From `indexer-envio/` directory

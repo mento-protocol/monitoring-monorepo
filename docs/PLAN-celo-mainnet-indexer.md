@@ -88,7 +88,7 @@ The existing schema works for v3 FPMM pools. For v2 BiPoolManager:
 
 1. **Test locally:**
    ```bash
-   pnpm indexer:mainnet:dev
+   pnpm indexer:celo-mainnet:dev
    ```
 2. **Deploy to Envio hosted:**
    - Create `mento-v3-celo-mainnet` on envio.dev (Philip — manual step)
@@ -102,7 +102,7 @@ The existing schema works for v3 FPMM pools. For v2 BiPoolManager:
 
 1. **Set `ACTIVE_DEPLOYMENT["celo-mainnet"]`** in networks.ts
 2. **Add mainnet tokens to contracts.json** (queried on-chain)
-3. **Add Vercel env var:** `NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED`
+3. **Add Vercel env var:** `NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED`
 4. **Set DEFAULT_NETWORK** to `celo-mainnet-hosted`
 5. **Verify network switcher** shows mainnet data
 
@@ -119,7 +119,7 @@ The existing schema works for v3 FPMM pools. For v2 BiPoolManager:
    - Plan: Development (Free)
 2. **Copy the GraphQL endpoint** from Envio dashboard after deployment
 
-3. **Add Vercel env var:** `NEXT_PUBLIC_HASURA_URL_MAINNET_HOSTED=<endpoint>`
+3. **Add Vercel env var:** `NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED=<endpoint>`
 
 4. No credentials needed from Philip — Celo mainnet RPC is public (`https://forno.celo.org`), HyperSync is available for chain 42220.
 
