@@ -111,21 +111,15 @@ describe("contractAddresses — deterministic namespace address resolution", () 
     assert.match(addr!, /^0x[0-9a-fA-F]{40}$/);
   });
 
-  it("returns undefined for Monad testnet (10143) — @mento-protocol/contracts not yet updated", () => {
-    // Chain 10143 is in CONTRACT_NAMESPACE_BY_CHAIN (so the Envio config is valid),
-    // but @mento-protocol/contracts v0.x does not yet ship 10143 addresses.
-    // buildAddressMap() warns and skips this chain; oracle/health data will be
-    // absent rather than silently wrong.
-    //
-    // ⚠️  UPGRADE GATE: when @mento-protocol/contracts adds 10143 entries,
-    // this test MUST be changed to assert a valid address (matching 0x[40 hex chars]).
-    // Until then, CI enforcing `undefined` here ensures the package update is not
-    // accidentally skipped before the testnet indexer goes live.
+  it("resolves USDm for Monad testnet (10143) — @mento-protocol/contracts v0.3.0", () => {
+    // v0.3.0 ships 10143 under namespace 'testnet-v2-rc5'.
     const addr = getContractAddress(10143, "USDm");
+    assert.ok(addr, "USDm should resolve for chain 10143");
+    assert.match(addr!, /^0x[0-9a-fA-F]{40}$/);
+    // Known address from @mento-protocol/contracts v0.3.0
     assert.equal(
-      addr,
-      undefined,
-      "Chain 10143 not in @mento-protocol/contracts yet — update this test once the package ships",
+      addr!.toLowerCase(),
+      "0x5ecc03111ad2a78f981a108759bc73bae2ab31bc",
     );
   });
 
