@@ -3,6 +3,28 @@ import { tokenSymbol, USDM_SYMBOLS } from "./tokens";
 import type { Network } from "./networks";
 import type { Pool, PoolSnapshot24h } from "./types";
 
+/**
+ * Compute all-time total volume in USD for a pool.
+ *
+ * Returns null when the pool has no USD-convertible leg (i.e. neither token
+ * is in USDM_SYMBOLS). Returns 0 when the pool is USD-convertible but has no
+ * recorded volume yet (notionalVolume fields absent or "0").
+ */
+export function poolTotalVolumeUSD(
+  pool: Pool,
+  network: Network,
+): number | null {
+  const sym0 = tokenSymbol(network, pool.token0 ?? null);
+  const sym1 = tokenSymbol(network, pool.token1 ?? null);
+  if (USDM_SYMBOLS.has(sym0)) {
+    return parseWei(pool.notionalVolume0 ?? "0", pool.token0Decimals ?? 18);
+  }
+  if (USDM_SYMBOLS.has(sym1)) {
+    return parseWei(pool.notionalVolume1 ?? "0", pool.token1Decimals ?? 18);
+  }
+  return null;
+}
+
 const SECONDS_PER_HOUR = 3600;
 const SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR;
 

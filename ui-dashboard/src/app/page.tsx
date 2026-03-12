@@ -1,17 +1,10 @@
 "use client";
 
 import { Suspense, useMemo } from "react";
-import { NetworkAwareLink } from "@/components/network-aware-link";
 import { useGQL } from "@/lib/graphql";
 import { ALL_POOLS_WITH_HEALTH, POOL_SNAPSHOTS_24H } from "@/lib/queries";
-import { formatWei, formatUSD } from "@/lib/format";
-import {
-  poolName,
-  isFpmm,
-  poolTvlUSD,
-  tokenSymbol,
-  USDM_SYMBOLS,
-} from "@/lib/tokens";
+import { formatUSD } from "@/lib/format";
+import { isFpmm, poolTvlUSD, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import {
   buildPool24hVolumeMap,
   shouldQueryPoolSnapshots24h,
@@ -20,9 +13,7 @@ import {
 } from "@/lib/volume";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool, PoolSnapshot24h } from "@/lib/types";
-import { Table, Row, Th, Td } from "@/components/table";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
-import { SourceBadge } from "@/components/badges";
 import { PoolsTable } from "@/components/pools-table";
 
 export default function GlobalPage() {
@@ -211,71 +202,6 @@ function GlobalContent() {
           />
         )}
       </section>
-
-      {/* Activity summary */}
-      <section>
-        <h2 className="text-lg font-semibold text-white mb-3">Pool Activity</h2>
-        {poolsLoading ? (
-          <Skeleton rows={5} />
-        ) : pools.length === 0 ? (
-          <EmptyBox message="No pools found." />
-        ) : (
-          <ActivityTable pools={pools} />
-        )}
-      </section>
     </div>
-  );
-}
-
-function ActivityTable({ pools }: { pools: Pool[] }) {
-  const { network } = useNetwork();
-  // Sort by swap count descending
-  const sorted = [...pools].sort(
-    (a, b) => (b.swapCount ?? 0) - (a.swapCount ?? 0),
-  );
-  return (
-    <Table>
-      <thead>
-        <tr className="border-b border-slate-800 bg-slate-900/50">
-          <Th>Pool</Th>
-          {network.hasVirtualPools && <Th>Type</Th>}
-          <Th align="right">Swaps</Th>
-          <Th align="right">Rebalances</Th>
-          <Th align="right">Volume (Token 0)</Th>
-          <Th align="right">Volume (Token 1)</Th>
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.map((p) => (
-          <Row key={p.id}>
-            <td className="px-4 py-3">
-              <NetworkAwareLink
-                href={`/pool/${encodeURIComponent(p.id)}`}
-                className="font-semibold text-indigo-400 hover:text-indigo-300"
-              >
-                {poolName(network, p.token0, p.token1)}
-              </NetworkAwareLink>
-            </td>
-            {network.hasVirtualPools && (
-              <td className="px-4 py-3">
-                <SourceBadge source={p.source} />
-              </td>
-            )}
-            <Td mono small align="right">
-              {p.swapCount ?? 0}
-            </Td>
-            <Td mono small align="right">
-              {p.rebalanceCount ?? 0}
-            </Td>
-            <Td mono small align="right">
-              {p.notionalVolume0 ? formatWei(p.notionalVolume0) : "—"}
-            </Td>
-            <Td mono small align="right">
-              {p.notionalVolume1 ? formatWei(p.notionalVolume1) : "—"}
-            </Td>
-          </Row>
-        ))}
-      </tbody>
-    </Table>
   );
 }
