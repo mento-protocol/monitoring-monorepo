@@ -13,9 +13,6 @@ importers:
       '@mento-protocol/contracts':
         specifier: ^0.3.0
         version: 0.3.0
-      '@mento-protocol/monitoring-config':
-        specifier: workspace:*
-        version: link:../shared-config
       envio:
         specifier: 2.32.3
         version: 2.32.3(typescript@5.9.3)
