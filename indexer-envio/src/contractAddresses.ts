@@ -10,10 +10,11 @@
  * under module:CommonJS, making them CJS-safe for the Envio handler runtime.
  */
 import _contractsJson from "@mento-protocol/contracts/contracts.json";
-import _namespaces from "@mento-protocol/monitoring-config/deployment-namespaces.json";
+import _namespaces from "../config/deployment-namespaces.json";
 
-// Single source of truth for chain ID → active treb namespace.
-// Shared with ui-dashboard/src/lib/networks.ts via @mento-protocol/monitoring-config.
+// Vendored chain ID -> namespace map for Envio hosted compatibility.
+// Envio may build indexer-envio outside the pnpm workspace, so the indexer
+// cannot depend on the shared workspace package at deploy time.
 export const CONTRACT_NAMESPACE_BY_CHAIN: Record<string, string> = _namespaces;
 
 type ContractsJson = Record<
@@ -53,7 +54,7 @@ export function requireContractAddress(
     throw new Error(
       `[contractAddresses] Missing address for ${contractName} on chain ${chainId} ` +
         `in @mento-protocol/contracts (namespace: ${CONTRACT_NAMESPACE_BY_CHAIN[String(chainId)] ?? "unknown"}). ` +
-        `Update deployment-namespaces.json in shared-config or the package version.`,
+        `Update indexer-envio/config/deployment-namespaces.json and shared-config/deployment-namespaces.json, or bump the package version.`,
     );
   }
   return addr;

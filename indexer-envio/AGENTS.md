@@ -13,7 +13,8 @@ Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on
 - `config.monad.testnet.yaml` — Monad Testnet config
 - `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced)
 - `src/EventHandlers.ts` — Event processing logic
-- `src/contractAddresses.ts` — Contract address resolution from `@mento-protocol/contracts`; also exports `CONTRACT_NAMESPACE_BY_CHAIN` (backed by `shared-config`)
+- `src/contractAddresses.ts` — Contract address resolution from `@mento-protocol/contracts`; also exports `CONTRACT_NAMESPACE_BY_CHAIN` (backed by `config/deployment-namespaces.json`)
+- `config/deployment-namespaces.json` — Vendored copy of the chain ID → active namespace map used by Envio hosted builds
 - `scripts/run-envio-with-env.mjs` — Wrapper that loads .env before running envio CLI
 - `abis/` — Contract ABIs (FPMMFactory, FPMM, VirtualPoolFactory); SortedOracles + token ABIs come from `@mento-protocol/contracts`
 
@@ -43,8 +44,8 @@ pnpm test      # Run tests (mocha + chai)
 
 ## Dependencies
 
-- **`@mento-protocol/contracts`** — Contract ABIs and addresses (published npm package). The active namespace per chain is in `../shared-config/deployment-namespaces.json`.
-- **`@mento-protocol/monitoring-config`** — Shared workspace package; provides `deployment-namespaces.json`.
+- **`@mento-protocol/contracts`** — Contract ABIs and addresses (published npm package).
+- **`config/deployment-namespaces.json`** — Vendored namespace map for Envio hosted compatibility; keep it in sync with `../shared-config/deployment-namespaces.json`.
 - **`viem`** — Used for RPC calls (oracle reporter count via `readContract`).
 
 ## Environment

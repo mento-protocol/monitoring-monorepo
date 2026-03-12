@@ -124,14 +124,16 @@ pnpm stop       # Stop Docker containers
 
 ## Key Files
 
-| File                       | Purpose                                              |
-| -------------------------- | ---------------------------------------------------- |
-| `schema.graphql`           | Entity model (Hasura schema)                         |
-| `src/EventHandlers.ts`     | Event → entity mapping logic                         |
-| `config.celo.mainnet.yaml` | Mainnet chain config, contracts, events, start block |
-| `config.celo.sepolia.yaml` | Sepolia chain config                                 |
-| `abis/`                    | Contract ABIs                                        |
-| `.env.example`             | Environment variable template                        |
+| File                                | Purpose                                              |
+| ----------------------------------- | ---------------------------------------------------- |
+| `schema.graphql`                    | Entity model (Hasura schema)                         |
+| `src/EventHandlers.ts`              | Event → entity mapping logic                         |
+| `src/contractAddresses.ts`          | Contract/package address resolution                  |
+| `config/deployment-namespaces.json` | Vendored namespace map for Envio hosted builds       |
+| `config.celo.mainnet.yaml`          | Mainnet chain config, contracts, events, start block |
+| `config.celo.sepolia.yaml`          | Sepolia chain config                                 |
+| `abis/`                             | Contract ABIs                                        |
+| `.env.example`                      | Environment variable template                        |
 
 ## Example Queries
 
@@ -212,6 +214,8 @@ query OracleHistory($poolId: String!) {
 ## Deployment
 
 The indexer deploys via Git push to a deploy branch. Envio watches the branch and auto-redeploys.
+
+Because Envio hosted may build `indexer-envio/` outside the pnpm workspace, the package keeps a committed copy of `deployment-namespaces.json` in `indexer-envio/config/`. The repo test suite verifies that file stays in sync with `shared-config/deployment-namespaces.json`.
 
 > ⚠️ **Each deployment generates a new endpoint URL hash.** Update the Vercel env var after every redeploy. See [`docs/deployment.md`](../docs/deployment.md).
 
