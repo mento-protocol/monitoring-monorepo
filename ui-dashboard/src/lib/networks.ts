@@ -93,7 +93,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_DEVNET ??
       "http://localhost:8080/v1/graphql",
-    hasuraSecret: "",
+    hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_DEVNET ?? "testing",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_DEVNET ?? "http://localhost:5100",
     addressLabels: {
@@ -109,7 +109,8 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA ??
       "http://localhost:8080/v1/graphql",
-    hasuraSecret: "",
+    hasuraSecret:
+      process.env.NEXT_PUBLIC_HASURA_SECRET_CELO_SEPOLIA ?? "testing",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA ??
       "https://celo-sepolia.blockscout.com",
@@ -133,8 +134,9 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     contractsNamespace: NS["celo-mainnet"],
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_CELO_MAINNET ??
-      "http://localhost:8082/v1/graphql",
-    hasuraSecret: "",
+      "http://localhost:8080/v1/graphql",
+    hasuraSecret:
+      process.env.NEXT_PUBLIC_HASURA_SECRET_CELO_MAINNET ?? "testing",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET ??
       "https://celoscan.io",
