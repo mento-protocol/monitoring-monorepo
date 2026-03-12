@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - indexer-envio/**
+      - shared-config/**
       - pnpm-lock.yaml
       - package.json
       - .github/workflows/indexer-envio.yml
@@ -35,6 +36,7 @@ jobs:
           filters: |
             indexer:
               - indexer-envio/**
+              - shared-config/**
               - pnpm-lock.yaml
               - package.json
               - .github/workflows/indexer-envio.yml
