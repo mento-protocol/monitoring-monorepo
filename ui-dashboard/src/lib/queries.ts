@@ -206,3 +206,14 @@ export const POOL_DEPLOYMENT = `
     }
   }
 `;
+
+export const PROTOCOL_FEE_TRANSFERS_ALL = `
+  query ProtocolFeeTransfersAll {
+    ProtocolFeeTransfer(order_by: { blockTimestamp: desc }) {
+      tokenSymbol
+      tokenDecimals
+      amount
+      blockTimestamp
+    }
+  }
+`;

@@ -179,3 +179,15 @@ type VirtualPoolLifecycle {
   blockNumber: BigInt!
   blockTimestamp: BigInt!
 }
+
+type ProtocolFeeTransfer {
+  id: ID!
+  token: String! @index
+  tokenSymbol: String!
+  tokenDecimals: Int!
+  amount: BigInt!
+  from: String!
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
+}
