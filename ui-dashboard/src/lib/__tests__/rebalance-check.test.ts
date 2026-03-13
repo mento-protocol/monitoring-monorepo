@@ -28,9 +28,9 @@ beforeEach(() => {
 
 describe("checkRebalanceStatus", () => {
   it("returns canRebalance=true when simulation succeeds", async () => {
-    // Strategy type detection: getCDPConfig reverts, reserve() succeeds
+    // Strategy type detection: getCDPConfig reverts (contract-level), reserve() succeeds
     mockReadContract
-      .mockRejectedValueOnce(new Error("not CDP"))
+      .mockRejectedValueOnce(new Error("execution reverted"))
       .mockResolvedValueOnce("0x3333333333333333333333333333333333333333");
     // Simulate rebalance succeeds
     mockCall.mockResolvedValueOnce({ data: "0x" });
@@ -107,7 +107,7 @@ describe("checkRebalanceStatus", () => {
 
   it("detects reserve strategy type when getCDPConfig fails but reserve() succeeds", async () => {
     mockReadContract
-      .mockRejectedValueOnce(new Error("no getCDPConfig"))
+      .mockRejectedValueOnce(new Error("execution reverted"))
       .mockResolvedValueOnce("0x3333333333333333333333333333333333333333");
     mockCall.mockResolvedValueOnce({ data: "0x" });
 
@@ -116,10 +116,10 @@ describe("checkRebalanceStatus", () => {
   });
 
   it("returns blocked when strategy type is unknown (no false green)", async () => {
-    // Both strategy probes fail → unknown
+    // Both strategy probes revert (contract-level) → unknown
     mockReadContract
-      .mockRejectedValueOnce(new Error("no getCDPConfig"))
-      .mockRejectedValueOnce(new Error("no reserve"));
+      .mockRejectedValueOnce(new Error("execution reverted"))
+      .mockRejectedValueOnce(new Error("execution reverted"));
     // eth_call should NOT be made — unknown strategy short-circuits
 
     const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
@@ -131,10 +131,21 @@ describe("checkRebalanceStatus", () => {
     expect(mockCall).not.toHaveBeenCalled();
   });
 
-  it("propagates transport errors instead of treating them as reverts", async () => {
+  it("propagates transport errors during strategy detection", async () => {
+    // First probe fails with a transport error (not a contract revert)
+    mockReadContract.mockRejectedValueOnce(new Error("fetch failed: 401"));
+
+    await expect(checkRebalanceStatus(POOL, STRATEGY, RPC_URL)).rejects.toThrow(
+      "fetch failed",
+    );
+    // Simulation should never have been attempted
+    expect(mockCall).not.toHaveBeenCalled();
+  });
+
+  it("propagates transport errors during simulation", async () => {
     // Strategy detection succeeds (reserve)
     mockReadContract
-      .mockRejectedValueOnce(new Error("no getCDPConfig"))
+      .mockRejectedValueOnce(new Error("execution reverted"))
       .mockResolvedValueOnce("0x3333333333333333333333333333333333333333");
 
     // Simulate rebalance fails with a network/transport error (no revert data, no "revert" in message)
@@ -144,6 +155,22 @@ describe("checkRebalanceStatus", () => {
     // Should throw so SWR can surface via the error state
     await expect(checkRebalanceStatus(POOL, STRATEGY, RPC_URL)).rejects.toThrow(
       "fetch failed",
+    );
+  });
+
+  it("does not misclassify 'execution timeout' as a contract revert", async () => {
+    // Strategy detection succeeds (reserve)
+    mockReadContract
+      .mockRejectedValueOnce(new Error("execution reverted"))
+      .mockResolvedValueOnce("0x3333333333333333333333333333333333333333");
+
+    // Provider returns "execution timeout" — this is NOT a contract revert
+    const providerErr = new Error("execution timeout");
+    mockCall.mockRejectedValueOnce(providerErr);
+
+    // Should throw so SWR shows "Diagnostics unavailable"
+    await expect(checkRebalanceStatus(POOL, STRATEGY, RPC_URL)).rejects.toThrow(
+      "execution timeout",
     );
   });
 
@@ -179,9 +206,9 @@ describe("checkRebalanceStatus", () => {
     const TOKEN0 = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const TOKEN1 = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-    // Strategy type detection: getCDPConfig fails, reserve() succeeds
+    // Strategy type detection: getCDPConfig reverts (contract-level), reserve() succeeds
     mockReadContract
-      .mockRejectedValueOnce(new Error("no getCDPConfig"))
+      .mockRejectedValueOnce(new Error("execution reverted"))
       .mockResolvedValueOnce(RESERVE_ADDR);
 
     // Simulate rebalance reverts with RLS_RESERVE_OUT_OF_COLLATERAL
@@ -235,7 +262,7 @@ describe("checkRebalanceStatus", () => {
   it("handles revert with no parseable data gracefully", async () => {
     // Use a known strategy so we get past the unknown guard
     mockReadContract
-      .mockRejectedValueOnce(new Error("no getCDPConfig"))
+      .mockRejectedValueOnce(new Error("execution reverted"))
       .mockResolvedValueOnce("0x3333333333333333333333333333333333333333");
 
     // Revert with "revert" in message but no data
