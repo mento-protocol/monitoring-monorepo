@@ -273,7 +273,7 @@ async function getPoolsWithReferenceFeed(
 }
 
 /** TradingLimitsV2 stores all limit/netflow values in 15-decimal internal precision. */
-const TRADING_LIMITS_INTERNAL_DECIMALS = 15;
+export const TRADING_LIMITS_INTERNAL_DECIMALS = 15;
 
 const FPMM_TRADING_LIMITS_ABI = [
   {

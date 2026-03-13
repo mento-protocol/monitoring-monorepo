@@ -100,14 +100,14 @@ export function LimitPanel({ pool, tradingLimits }: LimitPanelProps) {
                   label="5-minute limit (L0)"
                   netflow={tl.netflow0}
                   limit={tl.limit0}
-                  decimals={tl.decimals ?? TRADING_LIMITS_INTERNAL_DECIMALS}
+                  decimals={TRADING_LIMITS_INTERNAL_DECIMALS}
                 />
                 <PressureBar
                   pressure={tl.limitPressure1}
                   label="Daily limit (L1)"
                   netflow={tl.netflow1}
                   limit={tl.limit1}
-                  decimals={tl.decimals ?? TRADING_LIMITS_INTERNAL_DECIMALS}
+                  decimals={TRADING_LIMITS_INTERNAL_DECIMALS}
                 />
               </div>
             );
