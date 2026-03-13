@@ -537,25 +537,24 @@ function computeLimitPressures(
 // ---------------------------------------------------------------------------
 
 /**
- * Computes priceDifference in basis points (bps) from reserves and oracle price.
+ * Computes priceDifference in basis points (bps) from reserves and oracle price,
+ * matching the on-chain FPMM formula: |reservePrice - oraclePrice| / oraclePrice.
+ *
+ * The on-chain contract always computes in one direction:
+ *   reservePrice = (reserve0 * tpm0) / (reserve1 * tpm1)
+ *   oraclePrice  = oraclePriceNumerator / oraclePriceDenominator
+ *   priceDifference = |reservePrice - oraclePrice| * 10000 / oraclePrice
  *
  * Oracle price is stored in **feed direction** (24dp SortedOracles rate):
  *   e.g. GBP/USD = 1.339150e24 means "1 GBP = 1.339150 USD"
  *
- * The reserve ratio (reserves0/reserves1) is in **pool direction** (token0→token1).
- * To compare them, we need to convert the feed price to pool direction:
+ * When USDm is token0: reserveRatio = USDm/nonUSD = feedPrice → compare directly.
+ * When USDm is token1: reserveRatio = nonUSD/USDm = 1/feedPrice → invert
+ *   reserveRatio to get USDm/nonUSD, then compare against feedPrice directly.
  *
- *   - If token0 is USDm: pool direction = USDm/nonUSD = 1/feedPrice (inverted)
- *     Actually: reserveRatio = reserves0/reserves1 = USDm/GBPm ≈ 0.89
- *     oraclePrice in feed direction = GBP/USD = 1.34
- *     So we compare reserveRatio to feedPrice: |0.89 - 1.34|/1.34 = deviation
- *     Wait — this IS correct because reserves0(USDm)/reserves1(GBPm) should equal
- *     feedPrice(GBP/USD) = how many USDm per GBPm when balanced.
- *
- *   - If token1 is USDm: pool direction = nonUSD/USDm
- *     reserveRatio = nonUSD/USDm. Feed = nonUSD/USD.
- *     In a balanced pool, nonUSD/USDm ≈ 1/feedPrice (since 1 USDm ≈ $1).
- *     So we must INVERT the feed price for comparison.
+ * IMPORTANT: The deviation formula |R - O| / O is NOT invariant under inversion
+ * of both R and O: |1/R - 1/O| / (1/O) = |R - O| / R (divides by R, not O!).
+ * So we must always compute in the feed direction to match the contract.
  *
  * Returns 0n when oracle price or reserves are missing/zero.
  */
@@ -605,37 +604,35 @@ function computePriceDifference(pool: {
   const norm0 = normalizeTo18(pool.reserves0, pool.token0Decimals);
   const norm1 = normalizeTo18(pool.reserves1, pool.token1Decimals);
 
-  // reserveRatio in 24dp: norm0 / norm1
-  const reserveRatio = (norm0 * SCALE) / norm1;
+  // Compute reserve ratio in 24dp: norm0 / norm1 (pool direction).
+  const poolRatio = (norm0 * SCALE) / norm1;
 
-  // Determine oracle ratio in pool direction.
+  // Convert to feed direction so the deviation formula matches the contract.
   // Feed direction = "feedToken/USD" (e.g. GBP/USD = 1.34).
-  // When USDm is token0: pool direction = USDm/nonUSD.
-  //   In a balanced pool: reserves0/reserves1 = feedPrice
-  //   (because 1 GBPm costs 1.34 USDm). → use feed directly.
-  // When USDm is token1: pool direction = nonUSD/USDm.
-  //   In a balanced pool: reserves0/reserves1 = 1/feedPrice. → invert.
+  // When USDm is token0: pool ratio = USDm/nonUSD = feedPrice → already correct.
+  // When USDm is token1: pool ratio = nonUSD/USDm = 1/feedPrice → invert.
   const usdmIsToken0 = USDM_ADDRESSES.has(pool.token0.toLowerCase());
   const usdmIsToken1 = USDM_ADDRESSES.has(pool.token1.toLowerCase());
 
-  let oracleRatio: bigint;
+  let reserveRatio: bigint;
   if (usdmIsToken0) {
     // Pool direction matches feed direction
-    oracleRatio = pool.oraclePrice;
+    reserveRatio = poolRatio;
   } else if (usdmIsToken1) {
-    // Pool direction is inverted from feed: oracleRatio = SCALE² / feedPrice
-    oracleRatio = (SCALE * SCALE) / pool.oraclePrice;
+    // Pool direction is inverted from feed — invert reserve ratio
+    reserveRatio = (SCALE * SCALE) / poolRatio;
   } else {
     // Neither token is USDm — can't determine direction, skip
     return 0n;
   }
 
-  // priceDiff in bps: |reserveRatio - oracleRatio| * 10000 / oracleRatio
+  // Both reserveRatio and oraclePrice are now in feed direction.
+  // priceDiff in bps: |reserveRatio - oraclePrice| * 10000 / oraclePrice
   const diff =
-    reserveRatio > oracleRatio
-      ? reserveRatio - oracleRatio
-      : oracleRatio - reserveRatio;
-  return (diff * 10000n) / oracleRatio;
+    reserveRatio > pool.oraclePrice
+      ? reserveRatio - pool.oraclePrice
+      : pool.oraclePrice - reserveRatio;
+  return (diff * 10000n) / pool.oraclePrice;
 }
 
 // ---------------------------------------------------------------------------
