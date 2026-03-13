@@ -555,4 +555,138 @@ describe("Envio Celo indexer handlers", () => {
       "MedianUpdated snapshot must preserve the last known-good reporter count on read failure",
     );
   });
+
+  // ---------------------------------------------------------------------------
+  // priceDifference fallback tests
+  // ---------------------------------------------------------------------------
+  // In unit tests, fetchRebalancingState() makes an RPC call that fails (no real
+  // node), so it returns null and the handlers fall back to computePriceDifference().
+  // These tests verify the fallback path stores a correct priceDifference on both
+  // the Pool entity and the OracleSnapshot.
+
+  it("OracleReported: falls back to computePriceDifference when fetchRebalancingState fails, and stores priceDifference on pool + snapshot", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000ae";
+    const FEED_ID = "0x000000000000000000000000000000000000babe";
+    // Oracle ≈ 1.0 at 24dp
+    const ORACLE_PRICE_24DP = 1_000_000_000_000_000_000_000_000n;
+    // Reserves: 40k / 60k (18dp) → reserveRatio ≈ 0.667, deviation ≈ 33.3% ≈ 3333 bps
+    const R0 = 40_000_000_000_000_000_000_000n;
+    const R1 = 60_000_000_000_000_000_000_000n;
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolId: POOL_ADDR,
+      feedId: FEED_ID,
+    });
+
+    // Seed non-zero reserves + oracle price so computePriceDifference has data
+    const seededPool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seededPool,
+      reserves0: R0,
+      reserves1: R1,
+      oraclePrice: ORACLE_PRICE_24DP,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      source: "fpmm_update_reserves",
+    });
+
+    const oracleEvent = SortedOracles.OracleReported.createMockEvent({
+      token: FEED_ID,
+      oracle: "0x0000000000000000000000000000000000000099",
+      timestamp: 1_700_002_000n,
+      value: ORACLE_PRICE_24DP,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 20,
+        srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+        block: { number: 400, timestamp: 1_700_002_000 },
+      },
+    });
+    mockDb = await SortedOracles.OracleReported.processEvent({
+      event: oracleEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    assert.ok(pool, "Pool must exist after OracleReported");
+    // With reserves 40k/60k and oracle=1.0, deviation ≈ 3333 bps
+    assert.ok(
+      pool.priceDifference >= 3330n && pool.priceDifference <= 3340n,
+      `expected priceDifference ~3333 bps (fallback), got ${pool.priceDifference}`,
+    );
+
+    const snapshotId = `${42220}_${400}_${20}-${POOL_ADDR}`;
+    const snapshot = mockDb.entities.OracleSnapshot.get(snapshotId) as
+      | OracleSnapshotEntity
+      | undefined;
+    assert.ok(snapshot, "OracleSnapshot must be written");
+    assert.equal(
+      snapshot!.priceDifference,
+      pool.priceDifference,
+      "Snapshot priceDifference must match pool priceDifference",
+    );
+    assert.equal(snapshot!.source, "oracle_reported");
+  });
+
+  it("MedianUpdated: falls back to computePriceDifference when fetchRebalancingState fails, and stores priceDifference on pool + snapshot", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000af";
+    const FEED_ID = "0x000000000000000000000000000000000000deaf";
+    const ORACLE_PRICE_24DP = 1_000_000_000_000_000_000_000_000n;
+    const R0 = 40_000_000_000_000_000_000_000n;
+    const R1 = 60_000_000_000_000_000_000_000n;
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolId: POOL_ADDR,
+      feedId: FEED_ID,
+    });
+
+    const seededPool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seededPool,
+      reserves0: R0,
+      reserves1: R1,
+      oraclePrice: ORACLE_PRICE_24DP,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      source: "fpmm_update_reserves",
+    });
+
+    const medianEvent = SortedOracles.MedianUpdated.createMockEvent({
+      token: FEED_ID,
+      value: ORACLE_PRICE_24DP,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 21,
+        srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+        block: { number: 401, timestamp: 1_700_002_100 },
+      },
+    });
+    mockDb = await SortedOracles.MedianUpdated.processEvent({
+      event: medianEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    assert.ok(pool, "Pool must exist after MedianUpdated");
+    assert.ok(
+      pool.priceDifference >= 3330n && pool.priceDifference <= 3340n,
+      `expected priceDifference ~3333 bps (fallback), got ${pool.priceDifference}`,
+    );
+
+    const snapshotId = `${42220}_${401}_${21}-${POOL_ADDR}`;
+    const snapshot = mockDb.entities.OracleSnapshot.get(snapshotId) as
+      | OracleSnapshotEntity
+      | undefined;
+    assert.ok(snapshot, "OracleSnapshot must be written");
+    assert.equal(
+      snapshot!.priceDifference,
+      pool.priceDifference,
+      "Snapshot priceDifference must match pool priceDifference",
+    );
+    assert.equal(snapshot!.source, "oracle_median_updated");
+  });
 });
