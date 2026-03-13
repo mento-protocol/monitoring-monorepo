@@ -30,15 +30,15 @@ const FX_RATES: Record<string, number> = {
 // USD conversion
 // ---------------------------------------------------------------------------
 
-function tokenToUSD(symbol: string, amount: number): number {
+/**
+ * Convert a token amount to USD. Returns `null` for unknown tokens
+ * so callers can track unconverted fees separately.
+ */
+export function tokenToUSD(symbol: string, amount: number): number | null {
   if (USD_PEGGED_SYMBOLS.has(symbol)) return amount;
   const rate = FX_RATES[symbol];
   if (rate !== undefined) return amount * rate;
-  // Unknown token — excluded from USD total
-  console.warn(
-    `[protocol-fees] Unknown fee token "${symbol}" — excluded from USD total`,
-  );
-  return 0;
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -48,6 +48,8 @@ function tokenToUSD(symbol: string, amount: number): number {
 export type ProtocolFeeSummary = {
   totalFeesUSD: number;
   fees24hUSD: number;
+  /** True when at least one transfer had an unknown token symbol. */
+  hasUnknownTokens: boolean;
 };
 
 /**
@@ -60,15 +62,20 @@ export function aggregateProtocolFees(
   const cutoff24h = Math.floor(Date.now() / 1000) - 86400;
   let totalFeesUSD = 0;
   let fees24hUSD = 0;
+  let hasUnknownTokens = false;
 
   for (const t of transfers) {
     const amount = parseWei(t.amount, t.tokenDecimals);
     const usd = tokenToUSD(t.tokenSymbol, amount);
+    if (usd === null) {
+      hasUnknownTokens = true;
+      continue;
+    }
     totalFeesUSD += usd;
     if (Number(t.blockTimestamp) >= cutoff24h) {
       fees24hUSD += usd;
     }
   }
 
-  return { totalFeesUSD, fees24hUSD };
+  return { totalFeesUSD, fees24hUSD, hasUnknownTokens };
 }

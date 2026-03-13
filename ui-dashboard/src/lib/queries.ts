@@ -207,9 +207,19 @@ export const POOL_DEPLOYMENT = `
   }
 `;
 
+/**
+ * Fetch all protocol fee transfers for client-side USD aggregation.
+ *
+ * Capped at 10 000 rows as a safety net. Fee transfers are infrequent (the
+ * yield split address receives fees only on swap activity, typically
+ * hundreds/year), so this limit won't clip real data for a long time.
+ *
+ * Future: move USD conversion into a Hasura computed field or materialised
+ * view so the browser only receives two numbers instead of N rows.
+ */
 export const PROTOCOL_FEE_TRANSFERS_ALL = `
   query ProtocolFeeTransfersAll {
-    ProtocolFeeTransfer {
+    ProtocolFeeTransfer(limit: 10000) {
       tokenSymbol
       tokenDecimals
       amount

@@ -150,9 +150,15 @@ function GlobalContent() {
                 ? "…"
                 : feesErr
                   ? "N/A"
-                  : formatUSD(fees!.totalFeesUSD)
+                  : fees
+                    ? `${fees.hasUnknownTokens ? "≈ " : ""}${formatUSD(fees.totalFeesUSD)}`
+                    : "N/A"
             }
-            subtitle="All-time cumulative"
+            subtitle={
+              fees?.hasUnknownTokens
+                ? "Approximate — some tokens unpriced"
+                : "All-time cumulative"
+            }
           />
           <Tile
             label="24h Volume"
@@ -177,7 +183,13 @@ function GlobalContent() {
           <Tile
             label="24h Fees Earned"
             value={
-              feesLoading ? "…" : feesErr ? "N/A" : formatUSD(fees!.fees24hUSD)
+              feesLoading
+                ? "…"
+                : feesErr
+                  ? "N/A"
+                  : fees
+                    ? formatUSD(fees.fees24hUSD)
+                    : "N/A"
             }
           />
         </div>
