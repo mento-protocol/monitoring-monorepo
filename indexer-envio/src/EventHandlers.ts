@@ -584,7 +584,7 @@ export function scalingFactorToDecimals(scaling: bigint): number | null {
   return n === 1n ? d : null; // reject non-10^n values
 }
 
-function computePriceDifference(pool: {
+export function computePriceDifference(pool: {
   reserves0: bigint;
   reserves1: bigint;
   oraclePrice: bigint;
@@ -604,23 +604,19 @@ function computePriceDifference(pool: {
   const norm0 = normalizeTo18(pool.reserves0, pool.token0Decimals);
   const norm1 = normalizeTo18(pool.reserves1, pool.token1Decimals);
 
-  // Compute reserve ratio in 24dp: norm0 / norm1 (pool direction).
-  const poolRatio = (norm0 * SCALE) / norm1;
-
-  // Convert to feed direction so the deviation formula matches the contract.
+  // Compute reserve ratio in feed direction (USDm/nonUSD) at 24dp.
   // Feed direction = "feedToken/USD" (e.g. GBP/USD = 1.34).
-  // When USDm is token0: pool ratio = USDm/nonUSD = feedPrice → already correct.
-  // When USDm is token1: pool ratio = nonUSD/USDm = 1/feedPrice → invert.
+  // When USDm is token0: ratio = norm0/norm1 (already feed direction).
+  // When USDm is token1: ratio = norm1/norm0 (swap to get feed direction).
+  // Computing directly avoids truncation error from inverting a floored ratio.
   const usdmIsToken0 = USDM_ADDRESSES.has(pool.token0.toLowerCase());
   const usdmIsToken1 = USDM_ADDRESSES.has(pool.token1.toLowerCase());
 
   let reserveRatio: bigint;
   if (usdmIsToken0) {
-    // Pool direction matches feed direction
-    reserveRatio = poolRatio;
+    reserveRatio = (norm0 * SCALE) / norm1;
   } else if (usdmIsToken1) {
-    // Pool direction is inverted from feed — invert reserve ratio
-    reserveRatio = (SCALE * SCALE) / poolRatio;
+    reserveRatio = (norm1 * SCALE) / norm0;
   } else {
     // Neither token is USDm — can't determine direction, skip
     return 0n;
