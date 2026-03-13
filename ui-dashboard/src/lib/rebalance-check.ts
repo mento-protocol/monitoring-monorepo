@@ -7,30 +7,12 @@
  */
 
 import {
-  createPublicClient,
-  http,
   decodeErrorResult,
   type Hex,
   encodeFunctionData,
   parseAbi,
 } from "viem";
-
-// ---------------------------------------------------------------------------
-// RPC client per URL (cached)
-// ---------------------------------------------------------------------------
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const clientCache = new Map<string, any>();
-
-function getClient(rpcUrl: string) {
-  let client = clientCache.get(rpcUrl);
-  if (client) return client;
-  client = createPublicClient({
-    transport: http(rpcUrl),
-  });
-  clientCache.set(rpcUrl, client);
-  return client;
-}
+import { getViemClient, ERC20_ABI } from "./rpc-client";
 
 // ---------------------------------------------------------------------------
 // ABI fragments
@@ -100,11 +82,6 @@ const STABILITY_POOL_ABI = parseAbi([
 
 // Note: ReserveV2 does not expose a collateral balance getter — we use
 // ERC20 balanceOf on the collateral token with the reserve address instead.
-
-const ERC20_ABI = parseAbi([
-  "function symbol() external view returns (string)",
-  "function decimals() external view returns (uint8)",
-]);
 
 // ---------------------------------------------------------------------------
 // Error → human-readable message mapping
@@ -218,7 +195,7 @@ export async function checkRebalanceStatus(
   strategyAddress: string,
   rpcUrl: string,
 ): Promise<RebalanceCheckResult> {
-  const client = getClient(rpcUrl);
+  const client = getViemClient(rpcUrl);
   const pool = poolAddress as `0x${string}`;
   const strategy = strategyAddress as `0x${string}`;
 
