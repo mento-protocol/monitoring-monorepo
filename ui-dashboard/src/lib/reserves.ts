@@ -50,7 +50,9 @@ export function computeReservePcts(
  * Returns null when:
  * - usdTotal is null (no oracle → using raw count pct, formula doesn't apply)
  * - rebalanceThreshold is missing or zero
- * - T ≥ 1 (threshold ≥ 10000 bps — degenerate; (2−T) would be ≤ 1, safe band collapses)
+ * - T > 1 (threshold > 10000 bps): (1−T) becomes negative, lower bound goes below 0%.
+ *   At T=1 (10000 bps) exactly: lower=0%, upper=66.7% — still renderable.
+ *   At T=2: denominator (2−T)=0, undefined. Guard keeps T strictly below 2.
  */
 export interface ThresholdLines {
   threshold0Lower: number;
@@ -68,7 +70,7 @@ export function computeThresholdLines(
     rebalanceThreshold != null && rebalanceThreshold > 0
       ? rebalanceThreshold / 10000
       : null;
-  if (T === null || T >= 1) return null;
+  if (T === null || T > 1) return null;
 
   const threshold0Upper = ((1 + T) / (2 + T)) * 100;
   const threshold0Lower = ((1 - T) / (2 - T)) * 100;

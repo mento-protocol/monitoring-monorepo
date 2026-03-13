@@ -152,8 +152,11 @@ const SORTED_ORACLES_ADDRESS = SortedOraclesContract.address;
  * Key: "chainId:feedId:blockNumber" */
 const numReportersCache = new Map<string, number>();
 
-/** Cache report expiry per feed — governance-only parameter that rarely changes.
- * Key: "chainId:feedId" (no block needed; value is stable within any realistic sync window) */
+/** Cache report expiry per feed.
+ * Key: "chainId:feedId:blockNumber" — same pattern as numReportersCache.
+ * Including blockNumber ensures historical backfills that span a governance change
+ * (e.g. tokenReportExpirySeconds updated on-chain) pick up the correct value at
+ * each block rather than reusing the first-seen expiry forever. */
 const reportExpiryCache = new Map<string, bigint>();
 
 /** Returns all FPMM pool IDs that reference the given rateFeedID.
@@ -219,7 +222,7 @@ async function fetchReportExpiry(
     return 300n;
   }
 
-  const cacheKey = `${chainId}:${rateFeedID}`;
+  const cacheKey = `${chainId}:${rateFeedID}:${blockNumber}`;
   const cached = reportExpiryCache.get(cacheKey);
   if (cached !== undefined) return cached;
 

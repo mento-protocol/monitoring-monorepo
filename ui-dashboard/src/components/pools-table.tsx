@@ -21,9 +21,13 @@ import { poolTotalVolumeUSD } from "@/lib/volume";
 function healthTooltip(status: string, p: Pool): string {
   if (status === "N/A") return "VirtualPool — oracle health not tracked";
   const oracleTs = Number(p.oracleTimestamp ?? "0");
+  // Mirror computeHealthStatus: use the indexed per-feed expiry, falling back to the
+  // global default so the tooltip root-cause matches the badge on non-300s feeds.
+  const stalenessThreshold =
+    Number(p.oracleExpiry ?? "0") || ORACLE_STALE_SECONDS;
   const isOracleStale =
     oracleTs === 0 ||
-    Math.floor(Date.now() / 1000) - oracleTs > ORACLE_STALE_SECONDS;
+    Math.floor(Date.now() / 1000) - oracleTs > stalenessThreshold;
   if (status === "CRITICAL" && isOracleStale)
     return "Oracle stale — last update expired";
   if (status === "CRITICAL")
