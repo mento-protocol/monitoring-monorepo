@@ -12,9 +12,6 @@ import type { ProtocolFeeTransfer } from "./types";
 // Constants
 // ---------------------------------------------------------------------------
 
-export const YIELD_SPLIT_ADDRESS =
-  "0x0Dd57F6f181D0469143fe9380762d8a112e96e4a" as const;
-
 /** Tokens treated as $1.00 for USD conversion. */
 const USD_PEGGED_SYMBOLS = new Set(["cUSD", "USDC", "axlUSDC", "USDT", "USDm"]);
 
