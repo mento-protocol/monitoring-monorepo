@@ -100,6 +100,31 @@ const ORACLE_ADAPTER_SCALE_FACTOR = 1_000_000n;
 // Lazy RPC clients per chainId
 const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
 
+// ---------------------------------------------------------------------------
+// Test hooks — only used in unit tests to inject mock RPC responses.
+// Never set in production; `fetchRebalancingState` checks this map first.
+// ---------------------------------------------------------------------------
+const _testRebalancingStates = new Map<string, RebalancingState | null>();
+
+/** @internal Test-only: pre-set a mock rebalancing state for a pool. */
+export function _setMockRebalancingState(
+  chainId: number,
+  poolAddress: string,
+  state: RebalancingState | null,
+): void {
+  const key = `${chainId}:${poolAddress.toLowerCase()}`;
+  if (state === null) {
+    _testRebalancingStates.delete(key);
+  } else {
+    _testRebalancingStates.set(key, state);
+  }
+}
+
+/** @internal Test-only: clear all mock rebalancing states. */
+export function _clearMockRebalancingStates(): void {
+  _testRebalancingStates.clear();
+}
+
 // Per-chain RPC defaults. ENVIO_RPC_URL overrides the default for the active chain.
 // Every indexed chain MUST have an entry here — missing chains fall through to the
 // Celo Sepolia default and silently produce wrong oracle/trading-limit/decimals data.
@@ -377,6 +402,11 @@ async function fetchRebalancingState(
   poolAddress: string,
   blockNumber?: bigint,
 ): Promise<RebalancingState | null> {
+  // In unit tests, callers inject a mock via _setMockRebalancingState so no RPC is needed.
+  const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
+  if (_testRebalancingStates.has(testKey)) {
+    return _testRebalancingStates.get(testKey) ?? null;
+  }
   try {
     const client = getRpcClient(chainId);
     const result = await client.readContract({
@@ -1185,7 +1215,10 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Fetch fresh rebalancing state for FPMM pools (pinned to event block)
+  // Fetch fresh rebalancing state for FPMM pools (pinned to event block).
+  // Note: eth_call is block-final, not tx-final. Multiple events in the same block
+  // may all record the same post-block priceDifference — an accepted approximation
+  // for monitoring purposes.
   const rebalancingState = await fetchRebalancingState(
     event.chainId,
     poolId,
@@ -1269,7 +1302,8 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Fetch fresh rebalancing state post-rebalance (pinned to event block)
+  // Fetch fresh rebalancing state post-rebalance (pinned to event block).
+  // Note: eth_call is block-final, not tx-final — accepted approximation for monitoring.
   const rebalancingState = await fetchRebalancingState(
     event.chainId,
     poolId,
@@ -1486,15 +1520,28 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
             blockNumber,
           )) ?? existing.oracleExpiry);
 
-    const oraclePrice = event.params.value;
-
-    // Try to get the contract's authoritative priceDifference (pinned to event block).
-    // The oracle was just reported so getRebalancingState() should succeed.
+    // Try to get the contract's authoritative state (pinned to event block).
+    // Note: eth_call is block-final, not tx-final. Multiple oracle events in the same
+    // block will all see the same post-block rebalancing state. This is an accepted
+    // approximation for monitoring purposes.
     const rebalancingState = await fetchRebalancingState(
       event.chainId,
       poolId,
       blockNumber,
     );
+
+    // When rebalancingState is available, use the contract's effective oracle price
+    // (numerator/denominator from the median) for both oraclePrice and priceDifference.
+    // This keeps both values semantically consistent — they both describe the same
+    // oracle state (effective median after the tx), not a mix of per-reporter and median.
+    // Fall back to event.params.value (the individual reporter's price) only when the
+    // contract call fails.
+    const isInverted = existing.invertRateFeed ?? false;
+    const oraclePrice = rebalancingState
+      ? isInverted
+        ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
+        : rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR
+      : event.params.value;
 
     const updatedPool: Pool = {
       ...existing,

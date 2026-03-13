@@ -1,6 +1,10 @@
 /// <reference types="mocha" />
 import { assert } from "chai";
 import generated from "generated";
+import {
+  _setMockRebalancingState,
+  _clearMockRebalancingStates,
+} from "../src/EventHandlers.ts";
 
 type MockDb = {
   entities: {
@@ -852,6 +856,219 @@ describe("Envio Celo indexer handlers", () => {
     assert.ok(
       pool.priceDifference >= 3330n && pool.priceDifference <= 3340n,
       `expected priceDifference ~3333 bps (fallback), got ${pool.priceDifference}`,
+    );
+    assert.equal(pool.rebalanceCount, 1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Success-path tests (contract-provided priceDifference takes precedence)
+  // ---------------------------------------------------------------------------
+  // These tests inject a mock rebalancing state via _setMockRebalancingState so
+  // that fetchRebalancingState() returns a known value, verifying the success path.
+
+  afterEach(() => {
+    _clearMockRebalancingStates();
+  });
+
+  it("OracleReported: uses contract priceDifference and oracle price when fetchRebalancingState succeeds", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000c0";
+    const FEED_ID = "0x000000000000000000000000000000000000cafe";
+    const REPORTER_PRICE = 1_000_000_000_000_000_000_000_000n; // 1.0 at 24dp
+    // Contract returns a different (authoritative) priceDifference: 500 bps
+    const CONTRACT_PRICE_DIFF = 500n;
+    // oraclePriceNumerator at 18dp (ORACLE_ADAPTER_SCALE_FACTOR = 1e6 restores to 24dp)
+    const CONTRACT_PRICE_NUM = 1_000_000_000_000_000_000n; // 1.0 at 18dp
+    const CONTRACT_PRICE_DENOM = 1_000_000_000_000_000_000n;
+
+    _setMockRebalancingState(42220, POOL_ADDR, {
+      oraclePriceNumerator: CONTRACT_PRICE_NUM,
+      oraclePriceDenominator: CONTRACT_PRICE_DENOM,
+      rebalanceThreshold: 500,
+      priceDifference: CONTRACT_PRICE_DIFF,
+    });
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedPoolWithFeed(mockDb, { poolId: POOL_ADDR, feedId: FEED_ID });
+
+    // Seed with imbalanced reserves — local computation would give ~3333 bps
+    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: 40_000_000_000_000_000_000_000n,
+      reserves1: 60_000_000_000_000_000_000_000n,
+      oraclePrice: REPORTER_PRICE,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      source: "fpmm_update_reserves",
+    });
+
+    const oracleEvent = SortedOracles.OracleReported.createMockEvent({
+      token: FEED_ID,
+      oracle: "0x0000000000000000000000000000000000000099",
+      timestamp: 1_700_005_000n,
+      value: REPORTER_PRICE,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 20,
+        srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+        block: { number: 700, timestamp: 1_700_005_000 },
+      },
+    });
+    mockDb = await SortedOracles.OracleReported.processEvent({
+      event: oracleEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    assert.ok(pool, "Pool must exist after OracleReported");
+    // Contract value (500 bps) must win over local computation (~3333 bps)
+    assert.equal(
+      pool.priceDifference,
+      CONTRACT_PRICE_DIFF,
+      `expected contract priceDifference ${CONTRACT_PRICE_DIFF} bps, got ${pool.priceDifference}`,
+    );
+    // oraclePrice must come from contract (median), not event.params.value
+    const expectedOraclePrice = CONTRACT_PRICE_NUM * 1_000_000n;
+    assert.equal(
+      pool.oraclePrice,
+      expectedOraclePrice,
+      `expected contract oracle price ${expectedOraclePrice}, got ${pool.oraclePrice}`,
+    );
+
+    const snapshotId = `${42220}_${700}_${20}-${POOL_ADDR}`;
+    const snapshot = mockDb.entities.OracleSnapshot.get(snapshotId) as
+      | OracleSnapshotEntity
+      | undefined;
+    assert.ok(snapshot, "OracleSnapshot must be written");
+    assert.equal(
+      snapshot!.priceDifference,
+      CONTRACT_PRICE_DIFF,
+      "Snapshot priceDifference must use contract value",
+    );
+  });
+
+  it("UpdateReserves: uses contract priceDifference when fetchRebalancingState succeeds", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000c1";
+    const CONTRACT_PRICE_DIFF = 200n; // 200 bps from contract
+    const CONTRACT_PRICE_NUM = 1_000_000_000_000_000_000n;
+    const CONTRACT_PRICE_DENOM = 1_000_000_000_000_000_000n;
+
+    _setMockRebalancingState(42220, POOL_ADDR, {
+      oraclePriceNumerator: CONTRACT_PRICE_NUM,
+      oraclePriceDenominator: CONTRACT_PRICE_DENOM,
+      rebalanceThreshold: 500,
+      priceDifference: CONTRACT_PRICE_DIFF,
+    });
+
+    let mockDb = MockDb.createMockDb();
+
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 800, timestamp: 1_700_006_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({ event: deployEvent, mockDb });
+
+    // Seed with imbalanced reserves — local computation would give ~3333 bps
+    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      oraclePrice: 1_000_000_000_000_000_000_000_000n,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      source: "fpmm_update_reserves",
+    });
+
+    const updateEvent = FPMM.UpdateReserves.createMockEvent({
+      reserve0: 40_000_000_000_000_000_000_000n,
+      reserve1: 60_000_000_000_000_000_000_000n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 11,
+        srcAddress: POOL_ADDR,
+        block: { number: 801, timestamp: 1_700_006_100 },
+      },
+    });
+    mockDb = await FPMM.UpdateReserves.processEvent({ event: updateEvent, mockDb });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    assert.ok(pool, "Pool must exist after UpdateReserves");
+    // Contract value (200 bps) must win over local computation (~3333 bps)
+    assert.equal(
+      pool.priceDifference,
+      CONTRACT_PRICE_DIFF,
+      `expected contract priceDifference ${CONTRACT_PRICE_DIFF} bps, got ${pool.priceDifference}`,
+    );
+  });
+
+  it("Rebalanced: uses contract priceDifference when fetchRebalancingState succeeds", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000c2";
+    const CONTRACT_PRICE_DIFF = 50n; // 50 bps post-rebalance from contract
+
+    _setMockRebalancingState(42220, POOL_ADDR, {
+      oraclePriceNumerator: 1_000_000_000_000_000_000n,
+      oraclePriceDenominator: 1_000_000_000_000_000_000n,
+      rebalanceThreshold: 500,
+      priceDifference: CONTRACT_PRICE_DIFF,
+    });
+
+    let mockDb = MockDb.createMockDb();
+
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 900, timestamp: 1_700_007_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({ event: deployEvent, mockDb });
+
+    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: 40_000_000_000_000_000_000_000n,
+      reserves1: 60_000_000_000_000_000_000_000n,
+      oraclePrice: 1_000_000_000_000_000_000_000_000n,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      source: "fpmm_update_reserves",
+    });
+
+    const rebalancedEvent = FPMM.Rebalanced.createMockEvent({
+      sender: "0x0000000000000000000000000000000000000099",
+      priceDifferenceBefore: 3333n,
+      priceDifferenceAfter: 50n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 11,
+        srcAddress: POOL_ADDR,
+        block: { number: 901, timestamp: 1_700_007_100 },
+      },
+    });
+    mockDb = await FPMM.Rebalanced.processEvent({ event: rebalancedEvent, mockDb });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    assert.ok(pool, "Pool must exist after Rebalanced");
+    // Contract value (50 bps) must win over local computation (~3333 bps)
+    assert.equal(
+      pool.priceDifference,
+      CONTRACT_PRICE_DIFF,
+      `expected contract priceDifference ${CONTRACT_PRICE_DIFF} bps, got ${pool.priceDifference}`,
     );
     assert.equal(pool.rebalanceCount, 1);
   });
