@@ -197,6 +197,22 @@ describe("computePriceDifference", () => {
     );
   });
 
+  it("returns 0 when >18dp normalization floors reserves to zero", () => {
+    // 1 wei at 24dp normalizes to 0 at 18dp — must not throw division by zero
+    const pd = computePriceDifference(
+      pool({
+        reserves0: 1n,
+        reserves1: 1_000_000_000_000_000_000n, // 1 USDm
+        oraclePrice: SCALE,
+        token0: NON_USDM,
+        token1: USDM_CELO,
+        token0Decimals: 24,
+        token1Decimals: 18,
+      }),
+    );
+    assert.equal(pd, 0n);
+  });
+
   it("balanced pool returns 0 deviation", () => {
     // reserves match oracle exactly: 1 USDm per 1 nonUSD, oracle = 1.0
     const pd = computePriceDifference(
