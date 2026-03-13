@@ -1542,11 +1542,16 @@ SortedOracles.TokenReportExpirySet.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
   const poolIds = await getPoolsByFeed(context, rateFeedID);
+  const oracleExpiry = await fetchReportExpiry(
+    event.chainId,
+    rateFeedID,
+    blockNumber,
+  );
 
   await updatePoolsOracleExpiry(
     context,
     poolIds,
-    event.params.reportExpiry,
+    oracleExpiry,
     blockNumber,
     blockTimestamp,
   );
