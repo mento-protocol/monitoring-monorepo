@@ -11,8 +11,8 @@ import {
   snapshotWindow24h,
   sumFpmmSwaps24h,
 } from "@/lib/volume";
-import { computeEffectiveStatus } from "@/lib/health";
 import { useNetwork } from "@/components/network-provider";
+import { useProtocolFees } from "@/hooks/use-protocol-fees";
 import type { Pool, PoolSnapshot24h } from "@/lib/types";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import { PoolsTable } from "@/components/pools-table";
@@ -73,22 +73,6 @@ function GlobalContent() {
   );
   const snapshots24h = snapshotsData?.PoolSnapshot ?? [];
 
-  // Use computeEffectiveStatus (worst of oracle health + limit) so these counts
-  // match the status badge shown in the table.
-  const okCount = pools.filter(
-    (p) => computeEffectiveStatus(p) === "OK",
-  ).length;
-  const warnCount = pools.filter(
-    (p) => computeEffectiveStatus(p) === "WARN",
-  ).length;
-  const critCount = pools.filter(
-    (p) => computeEffectiveStatus(p) === "CRITICAL",
-  ).length;
-  // N/A = VirtualPools (oracle health and trading limits not applicable)
-  const naCount = pools.filter(
-    (p) => computeEffectiveStatus(p) === "N/A",
-  ).length;
-
   // TVL for FPMM pools
   const fpmmTvl = fpmmPools.reduce((sum, p) => sum + poolTvlUSD(p, network), 0);
 
@@ -113,6 +97,12 @@ function GlobalContent() {
     [snapshots24h, fpmmPoolIdSet],
   );
 
+  const {
+    data: fees,
+    isLoading: feesLoading,
+    error: feesErr,
+  } = useProtocolFees();
+
   return (
     <div className="space-y-8">
       <div>
@@ -130,11 +120,16 @@ function GlobalContent() {
           message={`Failed to load 24h snapshots: ${snapshotsErr.message}`}
         />
       )}
+      {feesErr && (
+        <ErrorBox
+          message={`Failed to load protocol fees: ${feesErr.message}`}
+        />
+      )}
 
       {/* Summary tiles */}
       <section>
         <h2 className="text-lg font-semibold text-white mb-3">Summary</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <Tile
             label="Pools"
             value={poolsLoading ? "…" : String(pools.length)}
@@ -147,6 +142,17 @@ function GlobalContent() {
           <Tile
             label="TVL (FPMMs)"
             value={poolsLoading ? "…" : formatUSD(fpmmTvl)}
+          />
+          <Tile
+            label="Total Fees Earned"
+            value={
+              feesLoading
+                ? "…"
+                : feesErr
+                  ? "N/A"
+                  : formatUSD(fees!.totalFeesUSD)
+            }
+            subtitle="All-time cumulative"
           />
           <Tile
             label="24h Volume"
@@ -168,30 +174,12 @@ function GlobalContent() {
                   : swaps24hFpmm.toLocaleString()
             }
           />
-        </div>
-      </section>
-
-      {/* Health breakdown */}
-      <section>
-        <h2 className="text-lg font-semibold text-white mb-3">
-          Health Status
-          <span className="ml-2 text-xs font-normal text-slate-500">
-            {network.hasVirtualPools
-              ? "(oracle + limit · N/A = VirtualPools)"
-              : "(oracle + limit)"}
-          </span>
-        </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Tile label="🟢 OK" value={poolsLoading ? "…" : String(okCount)} />
           <Tile
-            label="🟡 WARN"
-            value={poolsLoading ? "…" : String(warnCount)}
+            label="24h Fees Earned"
+            value={
+              feesLoading ? "…" : feesErr ? "N/A" : formatUSD(fees!.fees24hUSD)
+            }
           />
-          <Tile
-            label="🔴 CRITICAL"
-            value={poolsLoading ? "…" : String(critCount)}
-          />
-          <Tile label="⚪ N/A" value={poolsLoading ? "…" : String(naCount)} />
         </div>
       </section>
 

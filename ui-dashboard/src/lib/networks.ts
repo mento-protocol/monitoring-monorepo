@@ -169,6 +169,9 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET ??
       "https://celoscan.io",
+    addressLabels: {
+      "0x0dd57f6f181d0469143fe9380762d8a112e96e4a": "Yield Split",
+    },
   }),
   "celo-mainnet-hosted": makeNetwork({
     id: "celo-mainnet-hosted",
@@ -182,6 +185,9 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET_HOSTED ??
       "https://celoscan.io",
+    addressLabels: {
+      "0x0dd57f6f181d0469143fe9380762d8a112e96e4a": "Yield Split",
+    },
   }),
   "monad-mainnet-hosted": makeNetwork({
     id: "monad-mainnet-hosted",
