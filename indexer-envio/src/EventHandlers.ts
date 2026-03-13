@@ -1395,6 +1395,27 @@ FPMM.TradingLimitConfigured.handler(async ({ event, context }) => {
 });
 
 // ---------------------------------------------------------------------------
+// FPMM.LiquidityStrategyUpdated — track strategy address on pool
+// ---------------------------------------------------------------------------
+
+FPMM.LiquidityStrategyUpdated.handler(async ({ event, context }) => {
+  const poolId = asAddress(event.srcAddress);
+  const strategy = asAddress(event.params.strategy);
+  const status = event.params.status;
+
+  const pool = await context.Pool.get(poolId);
+  if (!pool) return;
+
+  if (status) {
+    // Strategy enabled — record as rebalancer address
+    context.Pool.set({ ...pool, rebalancerAddress: strategy });
+  } else if (pool.rebalancerAddress === strategy) {
+    // Strategy disabled — clear only if it matches current
+    context.Pool.set({ ...pool, rebalancerAddress: "" });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Event Handlers — SortedOracles (Mainnet only)
 // ---------------------------------------------------------------------------
 
