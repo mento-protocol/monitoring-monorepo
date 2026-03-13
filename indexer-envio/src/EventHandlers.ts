@@ -272,6 +272,9 @@ async function getPoolsWithReferenceFeed(
   return context.Pool.getWhere.referenceRateFeedID.gt("");
 }
 
+/** TradingLimitsV2 stores all limit/netflow values in 15-decimal internal precision. */
+const TRADING_LIMITS_INTERNAL_DECIMALS = 15;
+
 const FPMM_TRADING_LIMITS_ABI = [
   {
     type: "function",
@@ -1015,7 +1018,7 @@ FPMM.Swap.handler(async ({ event, context }) => {
         token: pool.token0,
         limit0: limits0.config.limit0,
         limit1: limits0.config.limit1,
-        decimals: limits0.config.decimals,
+        decimals: TRADING_LIMITS_INTERNAL_DECIMALS,
         netflow0: limits0.state.netflow0,
         netflow1: limits0.state.netflow1,
         lastUpdated0: BigInt(limits0.state.lastUpdated0),
@@ -1043,7 +1046,7 @@ FPMM.Swap.handler(async ({ event, context }) => {
         token: pool.token1,
         limit0: limits1.config.limit0,
         limit1: limits1.config.limit1,
-        decimals: limits1.config.decimals,
+        decimals: TRADING_LIMITS_INTERNAL_DECIMALS,
         netflow0: limits1.state.netflow0,
         netflow1: limits1.state.netflow1,
         lastUpdated0: BigInt(limits1.state.lastUpdated0),
@@ -1366,7 +1369,7 @@ FPMM.TradingLimitConfigured.handler(async ({ event, context }) => {
 
   const limit0 = limits ? limits.config.limit0 : eventLimit0;
   const limit1 = limits ? limits.config.limit1 : eventLimit1;
-  const decimals = limits ? limits.config.decimals : eventDecimals;
+  const decimals = TRADING_LIMITS_INTERNAL_DECIMALS;
   const netflow0 = limits ? limits.state.netflow0 : 0n;
   const netflow1 = limits ? limits.state.netflow1 : 0n;
   const lastUpdated0 = limits ? BigInt(limits.state.lastUpdated0) : 0n;
