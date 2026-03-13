@@ -5,6 +5,9 @@
  */
 export const SORTED_ORACLES_DECIMALS = 24;
 
+/** TradingLimitsV2 stores all limit/netflow values in 15-decimal internal precision. */
+export const TRADING_LIMITS_INTERNAL_DECIMALS = 15;
+
 export function truncateAddress(address: string | null): string {
   if (!address) return "\u2014";
   if (address.length <= 10) return address;
