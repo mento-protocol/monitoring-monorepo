@@ -8,6 +8,7 @@ import {
   formatBlock,
   isValidAddress,
   formatUSD,
+  TRADING_LIMITS_INTERNAL_DECIMALS,
 } from "../format";
 
 // ---------------------------------------------------------------------------
@@ -85,6 +86,20 @@ describe("formatWei", () => {
     // 0.00001 token in wei — should show "0.00" not "1.00e-5"
     const result = formatWei("10000000000000"); // 0.00001
     expect(result).toBe("0.00");
+  });
+
+  it("formats trading limit values at 15-decimal internal precision", () => {
+    // On-chain limit0 for GBPM/USDM: 77000000000000000000 = 77,000 at 15dp
+    expect(
+      formatWei("77000000000000000000", TRADING_LIMITS_INTERNAL_DECIMALS, 2),
+    ).toBe("77,000.00");
+  });
+
+  it("formats trading limit netflow at 15-decimal internal precision", () => {
+    // On-chain netflow1: 52124244979381018806 ≈ 52,124.24 at 15dp
+    expect(
+      formatWei("52124244979381018806", TRADING_LIMITS_INTERNAL_DECIMALS, 2),
+    ).toBe("52,124.24");
   });
 });
 
