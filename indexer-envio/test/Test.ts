@@ -888,7 +888,10 @@ describe("Envio Celo indexer handlers", () => {
     });
 
     let mockDb = MockDb.createMockDb();
-    mockDb = await seedPoolWithFeed(mockDb, { poolId: POOL_ADDR, feedId: FEED_ID });
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolId: POOL_ADDR,
+      feedId: FEED_ID,
+    });
 
     // Seed with imbalanced reserves — local computation would give ~3333 bps
     const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
@@ -964,7 +967,10 @@ describe("Envio Celo indexer handlers", () => {
     });
 
     let mockDb = MockDb.createMockDb();
-    mockDb = await seedPoolWithFeed(mockDb, { poolId: POOL_ADDR, feedId: FEED_ID });
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolId: POOL_ADDR,
+      feedId: FEED_ID,
+    });
 
     // Seed with imbalanced reserves — local computation would give ~3333 bps
     const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
@@ -1042,7 +1048,10 @@ describe("Envio Celo indexer handlers", () => {
         block: { number: 800, timestamp: 1_700_006_000 },
       },
     });
-    mockDb = await FPMMFactory.FPMMDeployed.processEvent({ event: deployEvent, mockDb });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
 
     // Seed with imbalanced reserves — local computation would give ~3333 bps
     const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
@@ -1065,7 +1074,10 @@ describe("Envio Celo indexer handlers", () => {
         block: { number: 801, timestamp: 1_700_006_100 },
       },
     });
-    mockDb = await FPMM.UpdateReserves.processEvent({ event: updateEvent, mockDb });
+    mockDb = await FPMM.UpdateReserves.processEvent({
+      event: updateEvent,
+      mockDb,
+    });
 
     const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
     assert.ok(pool, "Pool must exist after UpdateReserves");
@@ -1102,7 +1114,10 @@ describe("Envio Celo indexer handlers", () => {
         block: { number: 900, timestamp: 1_700_007_000 },
       },
     });
-    mockDb = await FPMMFactory.FPMMDeployed.processEvent({ event: deployEvent, mockDb });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
 
     const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
@@ -1127,7 +1142,10 @@ describe("Envio Celo indexer handlers", () => {
         block: { number: 901, timestamp: 1_700_007_100 },
       },
     });
-    mockDb = await FPMM.Rebalanced.processEvent({ event: rebalancedEvent, mockDb });
+    mockDb = await FPMM.Rebalanced.processEvent({
+      event: rebalancedEvent,
+      mockDb,
+    });
 
     const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
     assert.ok(pool, "Pool must exist after Rebalanced");
