@@ -180,10 +180,20 @@ describe("computeThresholdLines", () => {
       expect(computeThresholdLines(undefined, 10000)).toBeNull();
     });
 
-    it("returns null when T >= 1 (threshold >= 10000 bps)", () => {
-      // At T=1, (2-T) = 1 and the lower bound would be 0% — safe zone collapses
-      expect(computeThresholdLines(10000, 10000)).toBeNull();
+    it("returns null when T > 1 (threshold > 10000 bps)", () => {
+      // T > 1 gives (1-T) < 0, so threshold0Lower would go negative.
+      expect(computeThresholdLines(10001, 10000)).toBeNull();
       expect(computeThresholdLines(15000, 10000)).toBeNull();
+    });
+
+    it("accepts T = 1 exactly (10000 bps): lower=0%, upper=66.7%", () => {
+      // At T=1: (1-1)/(2-1)*100 = 0%, (1+1)/(2+1)*100 = 66.7% — valid and renderable.
+      const lines = computeThresholdLines(10000, 10000);
+      expect(lines).not.toBeNull();
+      expect(lines!.threshold0Lower).toBeCloseTo(0);
+      expect(lines!.threshold0Upper).toBeCloseTo(66.67, 1);
+      expect(lines!.threshold1Lower).toBeCloseTo(33.33, 1);
+      expect(lines!.threshold1Upper).toBeCloseTo(100);
     });
 
     it("accepts T just below 1 (9999 bps)", () => {
