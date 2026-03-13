@@ -224,7 +224,9 @@ async function seedPoolWithFeed(
     mockDb,
   });
 
-  const existingPool = nextDb.entities.Pool.get(poolId) as PoolEntity | undefined;
+  const existingPool = nextDb.entities.Pool.get(poolId) as
+    | PoolEntity
+    | undefined;
   assert.ok(existingPool, "Expected seeded pool entity to exist");
   if (!existingPool) {
     throw new Error("Expected seeded pool entity to exist");
@@ -539,7 +541,10 @@ describe("Envio Celo indexer handlers", () => {
     const snapshot = mockDb.entities.OracleSnapshot.get(snapshotId) as
       | OracleSnapshotEntity
       | undefined;
-    assert.ok(snapshot, "MedianUpdated should write an OracleSnapshot for matched pools");
+    assert.ok(
+      snapshot,
+      "MedianUpdated should write an OracleSnapshot for matched pools",
+    );
     if (!snapshot) {
       throw new Error("Expected OracleSnapshot entity after MedianUpdated");
     }
