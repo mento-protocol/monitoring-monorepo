@@ -4,7 +4,8 @@
       "Bash(vim /Users/chapati/.claude/settings.json)",
       "WebFetch(domain:monitoring.mento.org)",
       "Bash(./tools/trunk fmt:*)",
-      "Bash(./tools/trunk check:*)"
+      "Bash(./tools/trunk check:*)",
+      "Bash(xxd indexer-envio/src/EventHandlers.ts | grep -A1 \"contract\" | head -4)"
     ]
   }
 }

@@ -375,6 +375,7 @@ type RebalancingState = {
 async function fetchRebalancingState(
   chainId: number,
   poolAddress: string,
+  blockNumber?: bigint,
 ): Promise<RebalancingState | null> {
   try {
     const client = getRpcClient(chainId);
@@ -382,6 +383,7 @@ async function fetchRebalancingState(
       address: poolAddress as `0x${string}`,
       abi: FPMM_MINIMAL_ABI,
       functionName: "getRebalancingState",
+      ...(blockNumber !== undefined && { blockNumber }),
     });
     // viem returns a tuple: [num, denom, rNum, rDenom, above, threshold, diff]
     const r = result as readonly [
@@ -792,19 +794,11 @@ const upsertPool = async ({
     updatedAtTimestamp: blockTimestamp,
   };
 
-  // Use contract-provided priceDifference when available (passed via oracleDelta
-  // from fetchRebalancingState). Only fall back to local recomputation when the
-  // contract value was not supplied (e.g. oracle-only update events).
-  const contractPriceDiff =
-    oracleDelta && "priceDifference" in oracleDelta && oracleDelta.priceDifference !== undefined
-      ? oracleDelta.priceDifference
-      : null;
+  // Recompute priceDifference from reserves + oracle price for FPMM pools
   const priceDifference =
-    contractPriceDiff !== null
-      ? contractPriceDiff
-      : !next.source?.includes("virtual") && next.oraclePrice > 0n
-        ? computePriceDifference(next)
-        : next.priceDifference;
+    !next.source?.includes("virtual") && next.oraclePrice > 0n
+      ? computePriceDifference(next)
+      : next.priceDifference;
 
   const withDeviation = { ...next, priceDifference };
   const healthStatus = computeHealthStatus(withDeviation);
@@ -1184,8 +1178,8 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Fetch fresh rebalancing state for FPMM pools
-  const rebalancingState = await fetchRebalancingState(event.chainId, poolId);
+  // Fetch fresh rebalancing state for FPMM pools (pinned to event block)
+  const rebalancingState = await fetchRebalancingState(event.chainId, poolId, blockNumber);
 
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
   if (rebalancingState) {
@@ -1264,8 +1258,8 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Fetch fresh rebalancing state post-rebalance
-  const rebalancingState = await fetchRebalancingState(event.chainId, poolId);
+  // Fetch fresh rebalancing state post-rebalance (pinned to event block)
+  const rebalancingState = await fetchRebalancingState(event.chainId, poolId, blockNumber);
 
   const rebalancerAddress = asAddress(event.params.sender);
 
@@ -1477,20 +1471,14 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
             blockNumber,
           )) ?? existing.oracleExpiry);
 
-    // Use event.params.value directly (SortedOracles 24dp "feedToken/USD" rate).
-    // We intentionally avoid calling getRebalancingState() here because it reverts
-    // when the oracle is stale (expired reports or circuit breaker tripped) — which
-    // is exactly when we most need to record oracle state transitions.
-    // NOTE: oraclePrice is stored in feed direction ("1 feedToken = X USD"), not
-    // pool direction. The dashboard inverts for pools where feedToken == token1
-    // (e.g. GBPm pool: feedValue ≈ 1.27, displayed as 1/1.27 ≈ 0.79 USDm/GBPm).
     const oraclePrice = event.params.value;
 
-    // Try to get the contract's authoritative priceDifference.
-    // The oracle was just reported, so getRebalancingState() should succeed.
+    // Try to get the contract's authoritative priceDifference (pinned to event block).
+    // The oracle was just reported so getRebalancingState() should succeed.
     const rebalancingState = await fetchRebalancingState(
       event.chainId,
       poolId,
+      blockNumber,
     );
 
     const updatedPool: Pool = {
@@ -1564,10 +1552,11 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
 
     const oraclePrice = event.params.value;
 
-    // Try to get the contract's authoritative priceDifference.
+    // Try to get the contract's authoritative priceDifference (pinned to event block).
     const rebalancingState = await fetchRebalancingState(
       event.chainId,
       poolId,
+      blockNumber,
     );
 
     const updatedPool: Pool = {
