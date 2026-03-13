@@ -1555,7 +1555,9 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       : !updatedPool.source?.includes("virtual") && oraclePrice > 0n
         ? computePriceDifference(updatedPool)
         : updatedPool.priceDifference;
-    const withDev = { ...updatedPool, priceDifference };
+    const rebalanceThreshold =
+      rebalancingState?.rebalanceThreshold ?? updatedPool.rebalanceThreshold;
+    const withDev = { ...updatedPool, priceDifference, rebalanceThreshold };
     const healthStatus = computeHealthStatus(withDev);
     const finalPool = { ...withDev, healthStatus };
     context.Pool.set(finalPool);
@@ -1570,7 +1572,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       oracleOk: true,
       numReporters: oracleNumReporters ?? existing.oracleNumReporters,
       priceDifference,
-      rebalanceThreshold: existing.rebalanceThreshold,
+      rebalanceThreshold,
       source: "oracle_reported",
       blockNumber,
     };
@@ -1633,7 +1635,9 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       : !updatedPool.source?.includes("virtual") && oraclePrice > 0n
         ? computePriceDifference(updatedPool)
         : updatedPool.priceDifference;
-    const withDev = { ...updatedPool, priceDifference };
+    const rebalanceThreshold =
+      rebalancingState?.rebalanceThreshold ?? updatedPool.rebalanceThreshold;
+    const withDev = { ...updatedPool, priceDifference, rebalanceThreshold };
     const healthStatus = computeHealthStatus(withDev);
     const finalPool = { ...withDev, healthStatus };
     context.Pool.set(finalPool);
@@ -1648,7 +1652,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       oracleOk: true,
       numReporters: oracleNumReporters ?? existing.oracleNumReporters,
       priceDifference,
-      rebalanceThreshold: existing.rebalanceThreshold,
+      rebalanceThreshold,
       source: "oracle_median_updated",
       blockNumber,
     };

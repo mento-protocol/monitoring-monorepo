@@ -931,6 +931,11 @@ describe("Envio Celo indexer handlers", () => {
       CONTRACT_PRICE_DIFF,
       `expected contract priceDifference ${CONTRACT_PRICE_DIFF} bps, got ${pool.priceDifference}`,
     );
+    assert.equal(
+      pool.rebalanceThreshold,
+      500,
+      `expected pool.rebalanceThreshold 500 from contract, got ${pool.rebalanceThreshold}`,
+    );
     // oraclePrice must come from event.params.value (per-reporter), NOT the contract median
     assert.equal(
       pool.oraclePrice,
@@ -947,6 +952,11 @@ describe("Envio Celo indexer handlers", () => {
       snapshot!.priceDifference,
       CONTRACT_PRICE_DIFF,
       "Snapshot priceDifference must use contract value",
+    );
+    assert.equal(
+      snapshot!.rebalanceThreshold,
+      500,
+      `expected snapshot.rebalanceThreshold 500 from contract, got ${snapshot!.rebalanceThreshold}`,
     );
   });
 
@@ -1008,6 +1018,11 @@ describe("Envio Celo indexer handlers", () => {
       CONTRACT_PRICE_DIFF,
       `expected contract priceDifference ${CONTRACT_PRICE_DIFF} bps, got ${pool.priceDifference}`,
     );
+    assert.equal(
+      pool.rebalanceThreshold,
+      500,
+      `expected pool.rebalanceThreshold 500 from contract, got ${pool.rebalanceThreshold}`,
+    );
 
     const snapshotId = `${42220}_${701}_${21}-${POOL_ADDR}`;
     const snapshot = mockDb.entities.OracleSnapshot.get(snapshotId) as
@@ -1018,6 +1033,11 @@ describe("Envio Celo indexer handlers", () => {
       snapshot!.priceDifference,
       CONTRACT_PRICE_DIFF,
       "Snapshot priceDifference must use contract value from getRebalancingState",
+    );
+    assert.equal(
+      snapshot!.rebalanceThreshold,
+      500,
+      `expected snapshot.rebalanceThreshold 500 from contract, got ${snapshot!.rebalanceThreshold}`,
     );
   });
 
