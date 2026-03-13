@@ -1316,6 +1316,10 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     lastRebalancedAt: blockTimestamp,
     rebalancerAddress,
     rebalanceLivenessStatus: "ACTIVE",
+    // priceDifference comes directly from the event — it is the exact
+    // post-rebalance value emitted by the contract, more authoritative than
+    // getRebalancingState() which is block-final and may reflect later txs.
+    priceDifference: event.params.priceDifferenceAfter,
   };
 
   if (rebalancingState) {
@@ -1330,7 +1334,6 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       ...oracleDelta,
       oraclePrice,
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
-      priceDifference: rebalancingState.priceDifference,
       oracleTimestamp: blockTimestamp,
       oracleTxHash: event.transaction.hash,
     };
@@ -1520,22 +1523,12 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
             blockNumber,
           )) ?? existing.oracleExpiry);
 
-    // Try to get the contract's authoritative state (pinned to event block).
-    // Note: eth_call is block-final, not tx-final. Multiple oracle events in the same
-    // block will all see the same post-block rebalancing state. This is an accepted
-    // approximation for monitoring purposes.
-    const rebalancingState = await fetchRebalancingState(
-      event.chainId,
-      poolId,
-      blockNumber,
-    );
-
-    // oraclePrice always comes from the individual reporter's value (event.params.value).
-    // priceDifference comes from getRebalancingState() (block-final median) when
-    // available, falling back to local recomputation. The two fields are intentionally
-    // from different sources: oraclePrice is per-reporter; priceDifference uses the
-    // effective median which the contract uses for rebalancing decisions.
-    const isInverted = existing.invertRateFeed ?? false;
+    // oraclePrice comes from event.params.value (the individual reporter's value).
+    // priceDifference is recomputed locally using the new oracle price + existing
+    // reserves, keeping both values self-consistent from the same data snapshot.
+    // We intentionally avoid getRebalancingState() here: it would mix block-final
+    // contract state with per-event oracle prices, producing rows where price and
+    // deviation come from different on-chain moments.
     const oraclePrice = event.params.value;
 
     const updatedPool: Pool = {
@@ -1549,14 +1542,11 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
-    // Prefer contract's priceDifference; fall back to local recomputation
-    const priceDifference = rebalancingState
-      ? rebalancingState.priceDifference
-      : !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+    const priceDifference =
+      !updatedPool.source?.includes("virtual") && oraclePrice > 0n
         ? computePriceDifference(updatedPool)
         : updatedPool.priceDifference;
-    const rebalanceThreshold =
-      rebalancingState?.rebalanceThreshold ?? updatedPool.rebalanceThreshold;
+    const rebalanceThreshold = updatedPool.rebalanceThreshold;
     const withDev = { ...updatedPool, priceDifference, rebalanceThreshold };
     const healthStatus = computeHealthStatus(withDev);
     const finalPool = { ...withDev, healthStatus };
@@ -1609,14 +1599,12 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
             blockNumber,
           )) ?? existing.oracleExpiry);
 
+    // oraclePrice comes from event.params.value (the median update value).
+    // priceDifference is recomputed locally using the new oracle price + existing
+    // reserves, keeping both values self-consistent from the same data snapshot.
+    // Same rationale as OracleReported: avoid getRebalancingState() to prevent
+    // mixing block-final contract state with per-event oracle prices.
     const oraclePrice = event.params.value;
-
-    // Try to get the contract's authoritative priceDifference (pinned to event block).
-    const rebalancingState = await fetchRebalancingState(
-      event.chainId,
-      poolId,
-      blockNumber,
-    );
 
     const updatedPool: Pool = {
       ...existing,
@@ -1629,14 +1617,11 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
-    // Prefer contract's priceDifference; fall back to local recomputation
-    const priceDifference = rebalancingState
-      ? rebalancingState.priceDifference
-      : !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+    const priceDifference =
+      !updatedPool.source?.includes("virtual") && oraclePrice > 0n
         ? computePriceDifference(updatedPool)
         : updatedPool.priceDifference;
-    const rebalanceThreshold =
-      rebalancingState?.rebalanceThreshold ?? updatedPool.rebalanceThreshold;
+    const rebalanceThreshold = updatedPool.rebalanceThreshold;
     const withDev = { ...updatedPool, priceDifference, rebalanceThreshold };
     const healthStatus = computeHealthStatus(withDev);
     const finalPool = { ...withDev, healthStatus };
