@@ -115,14 +115,63 @@ describe("checkRebalanceStatus", () => {
     expect(result.strategyType).toBe("reserve");
   });
 
-  it('detects "unknown" strategy type when both probes fail', async () => {
+  it("returns blocked when strategy type is unknown (no false green)", async () => {
+    // Both strategy probes fail → unknown
     mockReadContract
       .mockRejectedValueOnce(new Error("no getCDPConfig"))
       .mockRejectedValueOnce(new Error("no reserve"));
-    mockCall.mockResolvedValueOnce({ data: "0x" });
+    // eth_call should NOT be made — unknown strategy short-circuits
 
     const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
+
+    expect(result.canRebalance).toBe(false);
     expect(result.strategyType).toBe("unknown");
+    expect(result.message).toContain("Unable to identify");
+    // Verify simulation was never attempted
+    expect(mockCall).not.toHaveBeenCalled();
+  });
+
+  it("propagates transport errors instead of treating them as reverts", async () => {
+    // Strategy detection succeeds (reserve)
+    mockReadContract
+      .mockRejectedValueOnce(new Error("no getCDPConfig"))
+      .mockResolvedValueOnce("0x3333333333333333333333333333333333333333");
+
+    // Simulate rebalance fails with a network/transport error (no revert data, no "revert" in message)
+    const transportErr = new Error("fetch failed: network error");
+    mockCall.mockRejectedValueOnce(transportErr);
+
+    // Should throw so SWR can surface via the error state
+    await expect(checkRebalanceStatus(POOL, STRATEGY, RPC_URL)).rejects.toThrow(
+      "fetch failed",
+    );
+  });
+
+  it("decodes nested { data: { data: Hex } } error payloads", async () => {
+    // Strategy detection: CDP
+    mockReadContract.mockResolvedValueOnce({
+      stabilityPool: "0x4444444444444444444444444444444444444444",
+      collateralRegistry: "0x5555555555555555555555555555555555555555",
+      stabilityPoolPercentage: BigInt(100),
+      maxIterations: BigInt(10),
+    });
+
+    const CDPLS_SELECTOR = keccak256(
+      toBytes("CDPLS_STABILITY_POOL_BALANCE_TOO_LOW()"),
+    ).slice(0, 10) as `0x${string}`;
+
+    // Error uses nested { data: { data: "0x..." } } form
+    const err = new Error("execution reverted");
+    Object.assign(err, { data: { data: CDPLS_SELECTOR } });
+    mockCall.mockRejectedValueOnce(err);
+
+    // Skip enrichment mocks (just verify decoding works)
+    mockReadContract.mockRejectedValueOnce(new Error("skip enrichment"));
+
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
+
+    expect(result.canRebalance).toBe(false);
+    expect(result.rawError).toBe("CDPLS_STABILITY_POOL_BALANCE_TOO_LOW");
   });
 
   it("returns reserve enrichment on RLS_RESERVE_OUT_OF_COLLATERAL", async () => {
@@ -184,10 +233,12 @@ describe("checkRebalanceStatus", () => {
   });
 
   it("handles revert with no parseable data gracefully", async () => {
+    // Use a known strategy so we get past the unknown guard
     mockReadContract
       .mockRejectedValueOnce(new Error("no getCDPConfig"))
-      .mockRejectedValueOnce(new Error("no reserve"));
+      .mockResolvedValueOnce("0x3333333333333333333333333333333333333333");
 
+    // Revert with "revert" in message but no data
     const err = new Error("execution reverted");
     mockCall.mockRejectedValueOnce(err);
 
@@ -195,6 +246,6 @@ describe("checkRebalanceStatus", () => {
 
     expect(result.canRebalance).toBe(false);
     expect(result.message).toBe("Rebalance reverted with an unknown error");
-    expect(result.strategyType).toBe("unknown");
+    expect(result.strategyType).toBe("reserve");
   });
 });
