@@ -209,17 +209,18 @@ async function fetchNumReporters(
 
 /** Returns the effective oracle report expiry (seconds) for the given rateFeedID:
  * uses the per-token override if non-zero, otherwise falls back to the global
- * reportExpirySeconds(). Falls back to 300n (Celo mainnet default) on RPC error. */
+ * reportExpirySeconds(). Returns null on RPC/address error so callers can preserve
+ * the previous known-good value instead of persisting a fabricated threshold. */
 async function fetchReportExpiry(
   chainId: number,
   rateFeedID: string,
   blockNumber: bigint,
-): Promise<bigint> {
+): Promise<bigint | null> {
   let address: `0x${string}`;
   try {
     address = SORTED_ORACLES_ADDRESS(chainId);
   } catch {
-    return 300n;
+    return null;
   }
 
   const cacheKey = `${chainId}:${rateFeedID}:${blockNumber}`;
@@ -247,8 +248,38 @@ async function fetchReportExpiry(
     reportExpiryCache.set(cacheKey, expiry);
     return expiry;
   } catch {
-    return 300n;
+    return null;
   }
+}
+
+async function updatePoolsOracleExpiry(
+  context: HandlerContext,
+  poolIds: string[],
+  oracleExpiry: bigint | null,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
+): Promise<void> {
+  if (oracleExpiry === null || poolIds.length === 0) return;
+
+  for (const poolId of poolIds) {
+    const existing = await context.Pool.get(poolId);
+    if (!existing || existing.oracleExpiry === oracleExpiry) continue;
+
+    const updatedPool: Pool = {
+      ...existing,
+      oracleExpiry,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    };
+    const healthStatus = computeHealthStatus(updatedPool);
+    context.Pool.set({ ...updatedPool, healthStatus });
+  }
+}
+
+async function getPoolsWithReferenceFeed(
+  context: HandlerContext,
+): Promise<Pool[]> {
+  return context.Pool.getWhere.referenceRateFeedID.gt("");
 }
 
 const FPMM_TRADING_LIMITS_ABI = [
@@ -879,11 +910,14 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     oracleDelta.referenceRateFeedID = rateFeedID;
     // Populate oracleExpiry at creation so the dashboard uses the correct
     // staleness threshold immediately, before the first oracle event arrives.
-    oracleDelta.oracleExpiry = await fetchReportExpiry(
+    const oracleExpiry = await fetchReportExpiry(
       event.chainId,
       rateFeedID,
       blockNumber,
     );
+    if (oracleExpiry !== null) {
+      oracleDelta.oracleExpiry = oracleExpiry;
+    }
   }
 
   if (rebalanceThreshold > 0) {
@@ -1406,7 +1440,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       oracleTxHash: event.transaction.hash,
       oracleOk: true,
       oraclePrice,
-      oracleExpiry,
+      oracleExpiry: oracleExpiry ?? existing.oracleExpiry,
       oracleNumReporters,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
@@ -1471,7 +1505,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       oracleTimestamp: blockTimestamp,
       oracleTxHash: event.transaction.hash,
       oracleOk: true,
-      oracleExpiry,
+      oracleExpiry: oracleExpiry ?? existing.oracleExpiry,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
@@ -1500,6 +1534,42 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       blockNumber,
     };
     context.OracleSnapshot.set(snapshot);
+  }
+});
+
+SortedOracles.TokenReportExpirySet.handler(async ({ event, context }) => {
+  const rateFeedID = asAddress(event.params.token);
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
+  const poolIds = await getPoolsByFeed(context, rateFeedID);
+
+  await updatePoolsOracleExpiry(
+    context,
+    poolIds,
+    event.params.reportExpiry,
+    blockNumber,
+    blockTimestamp,
+  );
+});
+
+SortedOracles.ReportExpirySet.handler(async ({ event, context }) => {
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
+  const pools = await getPoolsWithReferenceFeed(context);
+
+  for (const pool of pools) {
+    const oracleExpiry = await fetchReportExpiry(
+      event.chainId,
+      pool.referenceRateFeedID,
+      blockNumber,
+    );
+    await updatePoolsOracleExpiry(
+      context,
+      [pool.id],
+      oracleExpiry,
+      blockNumber,
+      blockTimestamp,
+    );
   }
 });
 
