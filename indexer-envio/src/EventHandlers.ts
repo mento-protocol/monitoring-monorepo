@@ -274,8 +274,7 @@ async function updatePoolsOracleExpiry(
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
-    const healthStatus = computeHealthStatus(updatedPool);
-    context.Pool.set({ ...updatedPool, healthStatus });
+    context.Pool.set(updatedPool);
   }
 }
 
@@ -1417,16 +1416,20 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
     rateFeedID,
     BigInt(event.block.number),
   );
-  // Fetch per-feed report expiry (cached per feed — governance-only, rarely changes).
-  const oracleExpiry = await fetchReportExpiry(
-    event.chainId,
-    rateFeedID,
-    blockNumber,
-  );
+  let resolvedOracleExpiry: bigint | null | undefined;
 
   for (const poolId of poolIds) {
     const existing = await context.Pool.get(poolId);
     if (!existing) continue;
+
+    const oracleExpiry =
+      existing.oracleExpiry > 0n
+        ? existing.oracleExpiry
+        : ((resolvedOracleExpiry ??= await fetchReportExpiry(
+            event.chainId,
+            rateFeedID,
+            blockNumber,
+          )) ?? existing.oracleExpiry);
 
     // Use event.params.value directly (SortedOracles 24dp "feedToken/USD" rate).
     // We intentionally avoid calling getRebalancingState() here because it reverts
@@ -1443,7 +1446,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       oracleTxHash: event.transaction.hash,
       oracleOk: true,
       oraclePrice,
-      oracleExpiry: oracleExpiry ?? existing.oracleExpiry,
+      oracleExpiry,
       oracleNumReporters: oracleNumReporters ?? existing.oracleNumReporters,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
@@ -1485,21 +1488,25 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   const poolIds = await getPoolsByFeed(context, rateFeedID);
   if (poolIds.length === 0) return;
 
-  // Fetch per-feed report expiry (cached per feed — governance-only, rarely changes).
-  const oracleExpiry = await fetchReportExpiry(
-    event.chainId,
-    rateFeedID,
-    blockNumber,
-  );
   const oracleNumReporters = await fetchNumReporters(
     event.chainId,
     rateFeedID,
     blockNumber,
   );
+  let resolvedOracleExpiry: bigint | null | undefined;
 
   for (const poolId of poolIds) {
     const existing = await context.Pool.get(poolId);
     if (!existing) continue;
+
+    const oracleExpiry =
+      existing.oracleExpiry > 0n
+        ? existing.oracleExpiry
+        : ((resolvedOracleExpiry ??= await fetchReportExpiry(
+            event.chainId,
+            rateFeedID,
+            blockNumber,
+          )) ?? existing.oracleExpiry);
 
     // Use getRebalancingState() so oraclePrice is stored in the pool's token
     // Use event.params.value directly (median SortedOracles 24dp rate).
@@ -1513,7 +1520,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       oracleTimestamp: blockTimestamp,
       oracleTxHash: event.transaction.hash,
       oracleOk: true,
-      oracleExpiry: oracleExpiry ?? existing.oracleExpiry,
+      oracleExpiry,
       oracleNumReporters: oracleNumReporters ?? existing.oracleNumReporters,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
