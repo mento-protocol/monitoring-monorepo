@@ -141,3 +141,10 @@ export type TradingLimit = {
   updatedAtBlock: string;
   updatedAtTimestamp: string;
 };
+
+export type ProtocolFeeTransfer = {
+  tokenSymbol: string;
+  tokenDecimals: number;
+  amount: string;
+  blockTimestamp: string;
+};

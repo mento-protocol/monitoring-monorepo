@@ -54,6 +54,15 @@ networks:
           - event: MedianUpdated
           - event: ReportExpirySet
           - event: TokenReportExpirySet
+      - name: ERC20FeeToken
+        abi_file_path: abis/ERC20.json
+        address:
+          - "0x5eCc03111ad2A78F981A108759bc73BAE2AB31bc" # USDm
+          - "0x534b2f3a21130d7a60830c2df862319e593943a3" # USDC
+          - "0x04de554E875c9797dC4ceBd834A9e99fa8fD5Df9" # GBPm
+        handler: src/EventHandlers.ts
+        events:
+          - event: Transfer
 unordered_multichain_mode: true
 preload_handlers: true
 field_selection:
