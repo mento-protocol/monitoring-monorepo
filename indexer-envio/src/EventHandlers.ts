@@ -603,6 +603,8 @@ export function computePriceDifference(pool: {
   // is off by 10^(18-6) = 10^12.
   const norm0 = normalizeTo18(pool.reserves0, pool.token0Decimals);
   const norm1 = normalizeTo18(pool.reserves1, pool.token1Decimals);
+  // Guard against normalization flooring to zero (possible when decimals > 18).
+  if (norm0 === 0n || norm1 === 0n) return 0n;
 
   // Compute reserve ratio in feed direction (USDm/nonUSD) at 24dp.
   // Feed direction = "feedToken/USD" (e.g. GBP/USD = 1.34).
