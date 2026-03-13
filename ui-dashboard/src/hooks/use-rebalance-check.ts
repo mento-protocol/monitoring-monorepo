@@ -34,12 +34,7 @@ export function useRebalanceCheck(
 
   const { data, error, isLoading } = useSWR<RebalanceCheckResult | null>(
     key,
-    () =>
-      checkRebalanceStatus(
-        pool!.id,
-        pool!.rebalancerAddress!,
-        chainId,
-      ),
+    () => checkRebalanceStatus(pool!.id, pool!.rebalancerAddress!, chainId),
     {
       refreshInterval: 30_000,
       revalidateOnFocus: false,

@@ -113,13 +113,10 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     chainlinkFeedUrl(sym1, network.chainId) ??
     chainlinkFeedUrl(sym0, network.chainId);
 
-  const {
-    data: rebalanceCheck,
-    isLoading: rebalanceCheckLoading,
-  } = useRebalanceCheck(pool, network.chainId);
+  const { data: rebalanceCheck, isLoading: rebalanceCheckLoading } =
+    useRebalanceCheck(pool, network.chainId);
 
-  const showRebalanceDiag =
-    rebalanceCheck !== null || rebalanceCheckLoading;
+  const showRebalanceDiag = rebalanceCheck !== null || rebalanceCheckLoading;
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -300,12 +297,8 @@ function RebalanceDiagnostics({
 
   if (!result) return null;
 
-  const statusColor = result.canRebalance
-    ? "text-emerald-400"
-    : "text-red-400";
-  const statusDot = result.canRebalance
-    ? "bg-emerald-400"
-    : "bg-red-400";
+  const statusColor = result.canRebalance ? "text-emerald-400" : "text-red-400";
+  const statusDot = result.canRebalance ? "bg-emerald-400" : "bg-red-400";
   const statusIcon = result.canRebalance ? "✓" : "✗";
 
   return (
@@ -334,9 +327,7 @@ function RebalanceDiagnostics({
           <p
             className="text-sm text-slate-300 leading-relaxed"
             title={
-              result.rawError
-                ? `Raw error: ${result.rawError}`
-                : undefined
+              result.rawError ? `Raw error: ${result.rawError}` : undefined
             }
           >
             {result.message}
@@ -349,7 +340,9 @@ function RebalanceDiagnostics({
         )}
 
         {/* Strategy-specific enrichment */}
-        {result.enrichment && <EnrichmentDetail enrichment={result.enrichment} />}
+        {result.enrichment && (
+          <EnrichmentDetail enrichment={result.enrichment} />
+        )}
 
         {/* Strategy type label */}
         <span className="text-xs text-slate-600">
@@ -377,9 +370,7 @@ function EnrichmentDetail({
   if (enrichment.type === "cdp") {
     const balance = enrichment.stabilityPoolBalance;
     const formatted =
-      balance >= 1000
-        ? `${(balance / 1000).toFixed(1)}k`
-        : balance.toFixed(2);
+      balance >= 1000 ? `${(balance / 1000).toFixed(1)}k` : balance.toFixed(2);
 
     return (
       <div className="rounded border border-slate-700/50 bg-slate-800/50 px-3 py-2">
@@ -396,9 +387,7 @@ function EnrichmentDetail({
   if (enrichment.type === "reserve") {
     const balance = enrichment.reserveCollateralBalance;
     const formatted =
-      balance >= 1000
-        ? `${(balance / 1000).toFixed(1)}k`
-        : balance.toFixed(2);
+      balance >= 1000 ? `${(balance / 1000).toFixed(1)}k` : balance.toFixed(2);
 
     return (
       <div className="rounded border border-slate-700/50 bg-slate-800/50 px-3 py-2">
