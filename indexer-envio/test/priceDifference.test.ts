@@ -189,9 +189,12 @@ describe("computePriceDifference", () => {
         token1: USDM_CELO,
       }),
     );
-    // reserveRatio in feed direction = norm1/norm0 = 1e18/1 * SCALE = huge
-    // deviation should be very large (pool is wildly imbalanced)
-    assert.ok(pd > 0n, "should return non-zero for extreme imbalance");
+    // reserveRatio = 1e18 * SCALE / 1 = 1e42, oracle = 1e24
+    // deviation = (1e42 - 1e24) * 10000 / 1e24 ≈ 9.999…e21 bps (>> 10000 bps)
+    assert.ok(
+      pd > 10000n,
+      `extreme imbalance should far exceed 100%, got ${pd}`,
+    );
   });
 
   it("balanced pool returns 0 deviation", () => {
