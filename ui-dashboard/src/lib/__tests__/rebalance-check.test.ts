@@ -47,36 +47,32 @@ describe("checkRebalanceStatus", () => {
     mockReadContract.mockResolvedValueOnce({
       stabilityPool: "0x4444444444444444444444444444444444444444",
       collateralRegistry: "0x5555555555555555555555555555555555555555",
-      stabilityPoolPercentage: 100n,
-      maxIterations: 10n,
+      stabilityPoolPercentage: BigInt(100),
+      maxIterations: BigInt(10),
     });
 
-    // Simulate rebalance reverts with CDPLS_STABILITY_POOL_BALANCE_TOO_LOW
-    // Error selector for CDPLS_STABILITY_POOL_BALANCE_TOO_LOW() — keccak256 first 4 bytes
+    // Simulate rebalance reverts
     const err = new Error("execution reverted");
-    // Use the actual error selector from the ABI
-    (err as Record<string, unknown>).data =
-      "0x" + "8a600b7c".padEnd(8, "0"); // placeholder, will be computed
-
+    Object.assign(err, {
+      data: "0x" + "8a600b7c".padEnd(8, "0"),
+    });
     mockCall.mockRejectedValueOnce(err);
 
-    // For enrichment: getTotalBoldDeposits + boldToken
+    // For enrichment: getCDPConfig + getTotalBoldDeposits + boldToken + symbol + decimals
     mockReadContract
       .mockResolvedValueOnce({
         stabilityPool: "0x4444444444444444444444444444444444444444",
         collateralRegistry: "0x5555555555555555555555555555555555555555",
-        stabilityPoolPercentage: 100n,
-        maxIterations: 10n,
+        stabilityPoolPercentage: BigInt(100),
+        maxIterations: BigInt(10),
       })
-      .mockResolvedValueOnce(0n) // getTotalBoldDeposits
+      .mockResolvedValueOnce(BigInt(0)) // getTotalBoldDeposits
       .mockResolvedValueOnce("0x6666666666666666666666666666666666666666") // boldToken
       .mockResolvedValueOnce("USDm") // symbol
-      .mockResolvedValueOnce(18) // decimals
-    ;
+      .mockResolvedValueOnce(18); // decimals
 
     const result = await checkRebalanceStatus(POOL, STRATEGY, CHAIN_ID);
 
-    // The exact behavior depends on whether the error selector matches.
     // The key assertion is that it returns canRebalance=false.
     expect(result.canRebalance).toBe(false);
     expect(result.strategyType).toBe("cdp");
@@ -86,8 +82,8 @@ describe("checkRebalanceStatus", () => {
     mockReadContract.mockResolvedValueOnce({
       stabilityPool: "0x4444444444444444444444444444444444444444",
       collateralRegistry: "0x5555555555555555555555555555555555555555",
-      stabilityPoolPercentage: 100n,
-      maxIterations: 10n,
+      stabilityPoolPercentage: BigInt(100),
+      maxIterations: BigInt(10),
     });
     mockCall.mockResolvedValueOnce({ data: "0x" });
 

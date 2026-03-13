@@ -114,12 +114,10 @@ const ERROR_MESSAGES: Record<string, string> = {
     "Stability pool has insufficient liquidity to fully rebalance",
   CDPLS_STABILITY_POOL_IS_ZERO:
     "No stability pool configured for this strategy",
-  CDPLS_COLLATERAL_REGISTRY_IS_ZERO:
-    "Collateral registry not configured",
+  CDPLS_COLLATERAL_REGISTRY_IS_ZERO: "Collateral registry not configured",
   CDPLS_OUT_OF_FUNDS_FOR_REDEMPTION_SUBSIDY:
     "Insufficient funds to cover redemption subsidy",
-  CDPLS_REDEMPTION_FEE_TOO_LARGE:
-    "Redemption fee exceeds tolerance",
+  CDPLS_REDEMPTION_FEE_TOO_LARGE: "Redemption fee exceeds tolerance",
   CDPLS_REDEMPTION_SHORTFALL_TOO_LARGE:
     "Redemption shortfall exceeds tolerance",
   CDPLS_INVALID_STABILITY_POOL_PERCENTAGE:
@@ -127,27 +125,17 @@ const ERROR_MESSAGES: Record<string, string> = {
   // Reserve strategy
   RLS_RESERVE_OUT_OF_COLLATERAL:
     "Reserve has insufficient collateral to rebalance",
-  RLS_INVALID_RESERVE:
-    "Reserve contract not configured",
-  RLS_COLLATERAL_TO_POOL_FAILED:
-    "Collateral transfer to pool failed",
-  RLS_TOKEN_IN_NOT_SUPPORTED:
-    "Collateral token not supported by reserve",
-  RLS_TOKEN_OUT_NOT_SUPPORTED:
-    "Debt token not supported by reserve",
+  RLS_INVALID_RESERVE: "Reserve contract not configured",
+  RLS_COLLATERAL_TO_POOL_FAILED: "Collateral transfer to pool failed",
+  RLS_TOKEN_IN_NOT_SUPPORTED: "Collateral token not supported by reserve",
+  RLS_TOKEN_OUT_NOT_SUPPORTED: "Debt token not supported by reserve",
   // Shared
-  LS_COOLDOWN_ACTIVE:
-    "Rebalance cooldown is active — retry shortly",
-  LS_POOL_NOT_REBALANCEABLE:
-    "Pool deviation is below the rebalance threshold",
-  LS_INVALID_PRICES:
-    "Oracle price data is invalid or stale",
-  LS_CAN_ONLY_REBALANCE_ONCE:
-    "Pool was already rebalanced this block",
-  LS_POOL_NOT_FOUND:
-    "Pool is not registered with this strategy",
-  LS_STRATEGY_EXECUTION_FAILED:
-    "Strategy execution failed internally",
+  LS_COOLDOWN_ACTIVE: "Rebalance cooldown is active — retry shortly",
+  LS_POOL_NOT_REBALANCEABLE: "Pool deviation is below the rebalance threshold",
+  LS_INVALID_PRICES: "Oracle price data is invalid or stale",
+  LS_CAN_ONLY_REBALANCE_ONCE: "Pool was already rebalanced this block",
+  LS_POOL_NOT_FOUND: "Pool is not registered with this strategy",
+  LS_STRATEGY_EXECUTION_FAILED: "Strategy execution failed internally",
   LS_HOOK_NOT_CALLED:
     "Pool hook was not invoked — possible contract misconfiguration",
   LS_BAD_INCENTIVE: "Incentive configuration is invalid",
@@ -241,7 +229,7 @@ export async function checkRebalanceStatus(
       enrichment: null,
     };
   } catch (err: unknown) {
-    return handleRevert(err, client, strategy, pool, strategyType, chainId);
+    return handleRevert(err, client, strategy, pool, strategyType);
   }
 }
 
@@ -293,7 +281,6 @@ async function handleRevert(
   strategy: `0x${string}`,
   pool: `0x${string}`,
   strategyType: StrategyType,
-  chainId: number,
 ): Promise<RebalanceCheckResult> {
   // Extract the revert data from the RPC error
   const revertData = extractRevertData(err);
@@ -476,9 +463,7 @@ async function fetchReserveEnrichment(
       }),
     ]);
 
-    const collateralToken = (
-      isToken0Debt ? token1 : token0
-    ) as `0x${string}`;
+    const collateralToken = (isToken0Debt ? token1 : token0) as `0x${string}`;
 
     const [balance, symbol, decimals] = await Promise.all([
       client.readContract({
