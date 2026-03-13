@@ -254,7 +254,10 @@ async function detectStrategyType(
   strategy: `0x${string}`,
   pool: `0x${string}`,
 ): Promise<StrategyType> {
-  // Try CDP first (getCDPConfig is unique to CDPLiquidityStrategy)
+  // Try CDP first (getCDPConfig is unique to CDPLiquidityStrategy).
+  // Only swallow contract-level reverts (wrong ABI / function not found).
+  // Transport errors (network, 401, CORS) must propagate so SWR shows
+  // "Diagnostics unavailable" instead of a misleading "unknown strategy".
   try {
     await client.readContract({
       address: strategy,
@@ -263,8 +266,8 @@ async function detectStrategyType(
       args: [pool],
     });
     return "cdp";
-  } catch {
-    // Not CDP — try Reserve
+  } catch (err) {
+    if (!isContractRevert(err)) throw err;
   }
 
   try {
@@ -274,8 +277,8 @@ async function detectStrategyType(
       functionName: "reserve",
     });
     return "reserve";
-  } catch {
-    // Neither
+  } catch (err) {
+    if (!isContractRevert(err)) throw err;
   }
 
   return "unknown";
@@ -350,15 +353,18 @@ async function handleRevert(
   };
 }
 
-/** Heuristic: contract reverts contain revert data or mention "revert" in the
- *  message. Transport/network errors (fetch failures, 401, timeouts) do not. */
+/** Heuristic: contract reverts contain revert data or "execution reverted" in
+ *  the message. Transport/network errors (fetch failures, 401, timeouts,
+ *  "execution timeout") do not match. */
 function isContractRevert(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   // Walk the cause chain looking for revert data
   if (extractRevertData(err)) return true;
-  // Viem tags contract reverts in the error message
+  // Viem tags contract reverts with "revert" — match that specifically,
+  // but NOT loose "execution" which also appears in provider-level errors
+  // like "execution timeout" or "execution aborted".
   const msg = (err as { message?: string }).message ?? "";
-  return /revert|execution/i.test(msg);
+  return /revert/i.test(msg);
 }
 
 function extractRevertData(err: unknown): Hex | null {
