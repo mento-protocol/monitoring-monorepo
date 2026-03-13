@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(vim /Users/chapati/.claude/settings.json)",
+      "WebFetch(domain:monitoring.mento.org)",
+      "Bash(./tools/trunk fmt:*)",
+      "Bash(./tools/trunk check:*)"
+    ]
+  }
+}
