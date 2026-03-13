@@ -794,9 +794,16 @@ const upsertPool = async ({
     updatedAtTimestamp: blockTimestamp,
   };
 
-  // Recompute priceDifference from reserves + oracle price for FPMM pools
-  const priceDifference =
-    !next.source?.includes("virtual") && next.oraclePrice > 0n
+  // Use contract-provided priceDifference when available (passed via oracleDelta
+  // from fetchRebalancingState). Only fall back to local recomputation when the
+  // contract value was not supplied (e.g. oracle-only update events).
+  const hasContractPriceDiff =
+    oracleDelta != null &&
+    "priceDifference" in oracleDelta &&
+    oracleDelta.priceDifference !== undefined;
+  const priceDifference = hasContractPriceDiff
+    ? oracleDelta.priceDifference!
+    : !next.source?.includes("virtual") && next.oraclePrice > 0n
       ? computePriceDifference(next)
       : next.priceDifference;
 
@@ -1179,7 +1186,11 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const blockTimestamp = asBigInt(event.block.timestamp);
 
   // Fetch fresh rebalancing state for FPMM pools (pinned to event block)
-  const rebalancingState = await fetchRebalancingState(event.chainId, poolId, blockNumber);
+  const rebalancingState = await fetchRebalancingState(
+    event.chainId,
+    poolId,
+    blockNumber,
+  );
 
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
   if (rebalancingState) {
@@ -1259,7 +1270,11 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   const blockTimestamp = asBigInt(event.block.timestamp);
 
   // Fetch fresh rebalancing state post-rebalance (pinned to event block)
-  const rebalancingState = await fetchRebalancingState(event.chainId, poolId, blockNumber);
+  const rebalancingState = await fetchRebalancingState(
+    event.chainId,
+    poolId,
+    blockNumber,
+  );
 
   const rebalancerAddress = asAddress(event.params.sender);
 
