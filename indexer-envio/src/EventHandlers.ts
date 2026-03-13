@@ -2061,31 +2061,39 @@ async function resolveFeeTokenMeta(
   }
 }
 
-ERC20FeeToken.Transfer.handler(async ({ event, context }) => {
-  // Early return: only index transfers TO the yield split address.
-  const to = event.params.to.toLowerCase();
-  if (to !== YIELD_SPLIT_ADDRESS) return;
+ERC20FeeToken.Transfer.handler(
+  async ({ event, context }) => {
+    const { chainId } = event;
+    const tokenAddress = event.srcAddress;
+    const { symbol, decimals } = await resolveFeeTokenMeta(
+      chainId,
+      tokenAddress,
+    );
 
-  const { chainId } = event;
-  const tokenAddress = event.srcAddress;
-  const { symbol, decimals } = await resolveFeeTokenMeta(chainId, tokenAddress);
+    const id = eventId(chainId, event.block.number, event.logIndex);
 
-  const id = eventId(chainId, event.block.number, event.logIndex);
+    const transfer: ProtocolFeeTransfer = {
+      id,
+      token: asAddress(tokenAddress),
+      tokenSymbol: symbol,
+      tokenDecimals: decimals,
+      amount: event.params.value,
+      from: asAddress(event.params.from),
+      txHash: event.transaction.hash,
+      blockNumber: BigInt(event.block.number),
+      blockTimestamp: BigInt(event.block.timestamp),
+    };
 
-  const transfer: ProtocolFeeTransfer = {
-    id,
-    token: asAddress(tokenAddress),
-    tokenSymbol: symbol,
-    tokenDecimals: decimals,
-    amount: event.params.value,
-    from: asAddress(event.params.from),
-    txHash: event.transaction.hash,
-    blockNumber: BigInt(event.block.number),
-    blockTimestamp: BigInt(event.block.timestamp),
-  };
-
-  context.ProtocolFeeTransfer.set(transfer);
-});
+    context.ProtocolFeeTransfer.set(transfer);
+  },
+  {
+    // Topic-level filter: Envio only delivers Transfer events where `to`
+    // matches the yield split address. Without this, we'd ingest every
+    // Transfer for USDC/USDT/USDm on-chain (millions of events) and
+    // discard all but a handful in the handler.
+    eventFilters: { to: YIELD_SPLIT_ADDRESS },
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Gap-Filling Note:
