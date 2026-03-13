@@ -86,9 +86,8 @@ const STABILITY_POOL_ABI = parseAbi([
   "function boldToken() external view returns (address)",
 ]);
 
-const RESERVE_ABI = parseAbi([
-  "function getReserveAddressesCollateralAssetBalance(address collateral) external view returns (uint256)",
-]);
+// Note: ReserveV2 does not expose a collateral balance getter — we use
+// ERC20 balanceOf on the collateral token with the reserve address instead.
 
 const ERC20_ABI = parseAbi([
   "function symbol() external view returns (string)",
@@ -456,12 +455,16 @@ async function fetchReserveEnrichment(
 
     const collateralToken = (isToken0Debt ? token1 : token0) as `0x${string}`;
 
+    const balanceOfAbi = parseAbi([
+      "function balanceOf(address account) external view returns (uint256)",
+    ]);
+
     const [balance, symbol, decimals] = await Promise.all([
       client.readContract({
-        address: reserveAddr,
-        abi: RESERVE_ABI,
-        functionName: "getReserveAddressesCollateralAssetBalance",
-        args: [collateralToken],
+        address: collateralToken,
+        abi: balanceOfAbi,
+        functionName: "balanceOf",
+        args: [reserveAddr],
       }),
       client.readContract({
         address: collateralToken,

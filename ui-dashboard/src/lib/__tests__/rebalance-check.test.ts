@@ -125,6 +125,64 @@ describe("checkRebalanceStatus", () => {
     expect(result.strategyType).toBe("unknown");
   });
 
+  it("returns reserve enrichment on RLS_RESERVE_OUT_OF_COLLATERAL", async () => {
+    const RESERVE_ADDR = "0x3333333333333333333333333333333333333333";
+    const TOKEN0 = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const TOKEN1 = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    // Strategy type detection: getCDPConfig fails, reserve() succeeds
+    mockReadContract
+      .mockRejectedValueOnce(new Error("no getCDPConfig"))
+      .mockResolvedValueOnce(RESERVE_ADDR);
+
+    // Simulate rebalance reverts with RLS_RESERVE_OUT_OF_COLLATERAL
+    const RLS_SELECTOR = keccak256(
+      toBytes("RLS_RESERVE_OUT_OF_COLLATERAL()"),
+    ).slice(0, 10) as `0x${string}`;
+    const err = new Error("execution reverted");
+    Object.assign(err, { data: RLS_SELECTOR });
+    mockCall.mockRejectedValueOnce(err);
+
+    // Enrichment calls:
+    // 1. reserve() again
+    // 2. poolConfigs(pool) → returns tuple with isToken0Debt=true
+    // 3. token0()
+    // 4. token1()
+    // 5. balanceOf(reserveAddr) on collateral token (token1 since token0 is debt)
+    // 6. symbol() on collateral token
+    // 7. decimals() on collateral token
+    mockReadContract
+      .mockResolvedValueOnce(RESERVE_ADDR) // reserve()
+      .mockResolvedValueOnce([
+        true,
+        0,
+        0,
+        "0x0000000000000000000000000000000000000000",
+        BigInt(0),
+        BigInt(0),
+        BigInt(0),
+        BigInt(0),
+      ]) // poolConfigs — isToken0Debt=true
+      .mockResolvedValueOnce(TOKEN0) // token0
+      .mockResolvedValueOnce(TOKEN1) // token1
+      .mockResolvedValueOnce(BigInt(5000) * BigInt(10 ** 18)) // balanceOf (5000 tokens)
+      .mockResolvedValueOnce("USDC") // symbol
+      .mockResolvedValueOnce(18); // decimals
+
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
+
+    expect(result.canRebalance).toBe(false);
+    expect(result.strategyType).toBe("reserve");
+    expect(result.rawError).toBe("RLS_RESERVE_OUT_OF_COLLATERAL");
+    expect(result.message).toContain("Reserve has insufficient collateral");
+    expect(result.enrichment).toEqual({
+      type: "reserve",
+      reserveCollateralBalance: 5000,
+      collateralTokenSymbol: "USDC",
+      collateralTokenDecimals: 18,
+    });
+  });
+
   it("handles revert with no parseable data gracefully", async () => {
     mockReadContract
       .mockRejectedValueOnce(new Error("no getCDPConfig"))
