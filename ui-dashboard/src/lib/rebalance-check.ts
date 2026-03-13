@@ -16,28 +16,19 @@ import {
 } from "viem";
 
 // ---------------------------------------------------------------------------
-// RPC client per chain (cached)
+// RPC client per URL (cached)
 // ---------------------------------------------------------------------------
 
-const RPC_URLS: Record<number, string> = {
-  42220: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
-  11142220:
-    process.env.NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA ??
-    "https://alfajores-forno.celo-testnet.org",
-};
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const clientCache = new Map<number, any>();
+const clientCache = new Map<string, any>();
 
-function getClient(chainId: number) {
-  let client = clientCache.get(chainId);
+function getClient(rpcUrl: string) {
+  let client = clientCache.get(rpcUrl);
   if (client) return client;
-  const rpcUrl = RPC_URLS[chainId];
-  if (!rpcUrl) throw new Error(`No RPC URL configured for chain ${chainId}`);
   client = createPublicClient({
     transport: http(rpcUrl),
   });
-  clientCache.set(chainId, client);
+  clientCache.set(rpcUrl, client);
   return client;
 }
 
@@ -200,9 +191,9 @@ export type StrategyEnrichment =
 export async function checkRebalanceStatus(
   poolAddress: string,
   strategyAddress: string,
-  chainId: number,
+  rpcUrl: string,
 ): Promise<RebalanceCheckResult> {
-  const client = getClient(chainId);
+  const client = getClient(rpcUrl);
   const pool = poolAddress as `0x${string}`;
   const strategy = strategyAddress as `0x${string}`;
 

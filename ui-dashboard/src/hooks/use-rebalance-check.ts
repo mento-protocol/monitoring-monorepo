@@ -2,6 +2,7 @@
 
 import useSWR from "swr";
 import type { Pool } from "@/lib/types";
+import type { Network } from "@/lib/networks";
 import {
   checkRebalanceStatus,
   type RebalanceCheckResult,
@@ -21,20 +22,21 @@ import { computeHealthStatus } from "@/lib/health";
  */
 export function useRebalanceCheck(
   pool: Pool | null,
-  chainId: number,
+  network: Network,
 ): {
   data: RebalanceCheckResult | null;
   isLoading: boolean;
   error: Error | undefined;
 } {
-  const shouldCheck = shouldRunCheck(pool);
+  const shouldCheck = shouldRunCheck(pool) && !!network.rpcUrl;
   const key = shouldCheck
-    ? `rebalance-check:${pool!.id}:${pool!.rebalancerAddress}`
+    ? `rebalance-check:${network.id}:${pool!.id}:${pool!.rebalancerAddress}`
     : null;
 
   const { data, error, isLoading } = useSWR<RebalanceCheckResult | null>(
     key,
-    () => checkRebalanceStatus(pool!.id, pool!.rebalancerAddress!, chainId),
+    () =>
+      checkRebalanceStatus(pool!.id, pool!.rebalancerAddress!, network.rpcUrl!),
     {
       refreshInterval: 30_000,
       revalidateOnFocus: false,
