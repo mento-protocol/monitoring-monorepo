@@ -196,8 +196,22 @@ export async function checkRebalanceStatus(
   const pool = poolAddress as `0x${string}`;
   const strategy = strategyAddress as `0x${string}`;
 
-  // 1. Detect strategy type
+  // 1. Detect strategy type — if detection itself fails with a transport error
+  //    (network down, 401, etc.) let it propagate so SWR surfaces it via the
+  //    error state ("Diagnostics unavailable").
   const strategyType = await detectStrategyType(client, strategy, pool);
+
+  // Refuse to simulate against an unrecognised strategy — eth_call to an EOA
+  // or zero-code address silently returns 0x, which would be a false positive.
+  if (strategyType === "unknown") {
+    return {
+      canRebalance: false,
+      message: "Unable to identify the liquidity strategy type",
+      rawError: null,
+      strategyType,
+      enrichment: null,
+    };
+  }
 
   // 2. Simulate rebalance(pool) via eth_call
   try {
@@ -219,6 +233,13 @@ export async function checkRebalanceStatus(
       enrichment: null,
     };
   } catch (err: unknown) {
+    // Distinguish contract reverts (which contain revert data) from transport
+    // errors (network failures, 401s, timeouts). Only contract reverts should
+    // be decoded — transport errors must propagate so SWR shows the
+    // "Diagnostics unavailable" state instead of a misleading "blocked".
+    if (!isContractRevert(err)) {
+      throw err;
+    }
     return handleRevert(err, client, strategy, pool, strategyType);
   }
 }
@@ -329,6 +350,17 @@ async function handleRevert(
   };
 }
 
+/** Heuristic: contract reverts contain revert data or mention "revert" in the
+ *  message. Transport/network errors (fetch failures, 401, timeouts) do not. */
+function isContractRevert(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  // Walk the cause chain looking for revert data
+  if (extractRevertData(err)) return true;
+  // Viem tags contract reverts in the error message
+  const msg = (err as { message?: string }).message ?? "";
+  return /revert|execution/i.test(msg);
+}
+
 function extractRevertData(err: unknown): Hex | null {
   if (err && typeof err === "object") {
     // Viem wraps call reverts in a ContractFunctionExecutionError
@@ -337,6 +369,15 @@ function extractRevertData(err: unknown): Hex | null {
     for (let i = 0; i < 5; i++) {
       if (typeof current.data === "string" && current.data.startsWith("0x")) {
         return current.data as Hex;
+      }
+      // Some providers wrap revert data as { data: { data: "0x..." } }
+      if (
+        current.data &&
+        typeof current.data === "object" &&
+        typeof (current.data as Record<string, unknown>).data === "string"
+      ) {
+        const nested = (current.data as Record<string, unknown>).data as string;
+        if (nested.startsWith("0x")) return nested as Hex;
       }
       if (current.cause && typeof current.cause === "object") {
         current = current.cause as Record<string, unknown>;

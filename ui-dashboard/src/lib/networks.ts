@@ -201,9 +201,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     label: "Monad Testnet",
     chainId: 10143,
     contractsNamespace: NS["monad-testnet"],
-    rpcUrl:
-      process.env.NEXT_PUBLIC_RPC_URL_MONAD_TESTNET ??
-      "https://testnet-rpc2.monad.xyz",
+    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_MONAD_TESTNET,
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
