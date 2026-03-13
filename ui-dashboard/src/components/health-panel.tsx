@@ -113,10 +113,14 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     chainlinkFeedUrl(sym1, network.chainId) ??
     chainlinkFeedUrl(sym0, network.chainId);
 
-  const { data: rebalanceCheck, isLoading: rebalanceCheckLoading } =
-    useRebalanceCheck(pool, network.chainId);
+  const {
+    data: rebalanceCheck,
+    isLoading: rebalanceCheckLoading,
+    error: rebalanceCheckError,
+  } = useRebalanceCheck(pool, network);
 
-  const showRebalanceDiag = rebalanceCheck !== null || rebalanceCheckLoading;
+  const showRebalanceDiag =
+    rebalanceCheck !== null || rebalanceCheckLoading || !!rebalanceCheckError;
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -262,6 +266,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
             <RebalanceDiagnostics
               result={rebalanceCheck}
               isLoading={rebalanceCheckLoading}
+              error={rebalanceCheckError}
             />
           )}
         </div>
@@ -277,9 +282,11 @@ export function HealthPanel({ pool }: HealthPanelProps) {
 function RebalanceDiagnostics({
   result,
   isLoading,
+  error,
 }: {
   result: RebalanceCheckResult | null;
   isLoading: boolean;
+  error: Error | undefined;
 }) {
   if (isLoading) {
     return (
@@ -290,6 +297,20 @@ function RebalanceDiagnostics({
         <div className="flex items-center gap-2 text-sm text-slate-500">
           <span className="inline-block w-3 h-3 rounded-full bg-slate-600 animate-pulse" />
           Checking rebalance feasibility…
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="lg:w-72 lg:flex-shrink-0 lg:border-l lg:border-slate-800 lg:pl-6">
+        <h3 className="text-sm font-medium text-slate-400 mb-3">
+          Rebalance Status
+        </h3>
+        <div className="flex items-center gap-2 text-sm text-amber-400">
+          <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-400 flex-shrink-0" />
+          Diagnostics unavailable
         </div>
       </div>
     );
@@ -313,26 +334,22 @@ function RebalanceDiagnostics({
           <span
             className={`inline-block w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0 ${statusDot}`}
           />
-          <span
-            className={`text-sm font-medium ${statusColor}`}
-            title={result.rawError ?? undefined}
-          >
+          <span className={`text-sm font-medium ${statusColor}`}>
             {statusIcon}{" "}
             {result.canRebalance ? "Rebalance possible" : "Rebalance blocked"}
           </span>
         </div>
 
-        {/* Human-readable reason with raw error tooltip */}
+        {/* Human-readable reason with raw error */}
         {!result.canRebalance && (
-          <p
-            className="text-sm text-slate-300 leading-relaxed"
-            title={
-              result.rawError ? `Raw error: ${result.rawError}` : undefined
-            }
-          >
+          <p className="text-sm text-slate-300 leading-relaxed">
             {result.message}
             {result.rawError && (
-              <span className="ml-1.5 text-xs text-slate-600 cursor-help border-b border-dotted border-slate-600">
+              <span
+                className="ml-1.5 text-xs text-slate-600 cursor-help border-b border-dotted border-slate-600"
+                tabIndex={0}
+                aria-label={`Raw error: ${result.rawError}`}
+              >
                 [{result.rawError}]
               </span>
             )}

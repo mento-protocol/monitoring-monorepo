@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { keccak256, toBytes } from "viem";
 
 // Mock viem before importing the module under test
 const mockCall = vi.fn();
@@ -19,7 +20,7 @@ import { checkRebalanceStatus } from "../rebalance-check";
 
 const POOL = "0x1111111111111111111111111111111111111111";
 const STRATEGY = "0x2222222222222222222222222222222222222222";
-const CHAIN_ID = 42220;
+const RPC_URL = "https://forno.celo.org";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -34,7 +35,7 @@ describe("checkRebalanceStatus", () => {
     // Simulate rebalance succeeds
     mockCall.mockResolvedValueOnce({ data: "0x" });
 
-    const result = await checkRebalanceStatus(POOL, STRATEGY, CHAIN_ID);
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
 
     expect(result.canRebalance).toBe(true);
     expect(result.message).toBe("Rebalance is currently possible");
@@ -51,10 +52,16 @@ describe("checkRebalanceStatus", () => {
       maxIterations: BigInt(10),
     });
 
-    // Simulate rebalance reverts
+    // Use real ABI-encoded selector for CDPLS_STABILITY_POOL_BALANCE_TOO_LOW()
+    // Error selectors are keccak256 of the bare signature, first 4 bytes
+    const CDPLS_SELECTOR = keccak256(
+      toBytes("CDPLS_STABILITY_POOL_BALANCE_TOO_LOW()"),
+    ).slice(0, 10) as `0x${string}`;
+
+    // Simulate rebalance reverts with real selector
     const err = new Error("execution reverted");
     Object.assign(err, {
-      data: "0x" + "8a600b7c".padEnd(8, "0"),
+      data: CDPLS_SELECTOR,
     });
     mockCall.mockRejectedValueOnce(err);
 
@@ -71,11 +78,18 @@ describe("checkRebalanceStatus", () => {
       .mockResolvedValueOnce("USDm") // symbol
       .mockResolvedValueOnce(18); // decimals
 
-    const result = await checkRebalanceStatus(POOL, STRATEGY, CHAIN_ID);
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
 
-    // The key assertion is that it returns canRebalance=false.
     expect(result.canRebalance).toBe(false);
     expect(result.strategyType).toBe("cdp");
+    expect(result.rawError).toBe("CDPLS_STABILITY_POOL_BALANCE_TOO_LOW");
+    expect(result.message).toContain("Stability pool");
+    expect(result.enrichment).toEqual({
+      type: "cdp",
+      stabilityPoolBalance: 0,
+      stabilityPoolTokenSymbol: "USDm",
+      stabilityPoolTokenDecimals: 18,
+    });
   });
 
   it("detects CDP strategy type when getCDPConfig succeeds", async () => {
@@ -87,7 +101,7 @@ describe("checkRebalanceStatus", () => {
     });
     mockCall.mockResolvedValueOnce({ data: "0x" });
 
-    const result = await checkRebalanceStatus(POOL, STRATEGY, CHAIN_ID);
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
     expect(result.strategyType).toBe("cdp");
   });
 
@@ -97,7 +111,7 @@ describe("checkRebalanceStatus", () => {
       .mockResolvedValueOnce("0x3333333333333333333333333333333333333333");
     mockCall.mockResolvedValueOnce({ data: "0x" });
 
-    const result = await checkRebalanceStatus(POOL, STRATEGY, CHAIN_ID);
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
     expect(result.strategyType).toBe("reserve");
   });
 
@@ -107,7 +121,7 @@ describe("checkRebalanceStatus", () => {
       .mockRejectedValueOnce(new Error("no reserve"));
     mockCall.mockResolvedValueOnce({ data: "0x" });
 
-    const result = await checkRebalanceStatus(POOL, STRATEGY, CHAIN_ID);
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
     expect(result.strategyType).toBe("unknown");
   });
 
@@ -119,7 +133,7 @@ describe("checkRebalanceStatus", () => {
     const err = new Error("execution reverted");
     mockCall.mockRejectedValueOnce(err);
 
-    const result = await checkRebalanceStatus(POOL, STRATEGY, CHAIN_ID);
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
 
     expect(result.canRebalance).toBe(false);
     expect(result.message).toBe("Rebalance reverted with an unknown error");

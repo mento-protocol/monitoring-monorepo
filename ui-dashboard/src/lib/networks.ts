@@ -41,6 +41,8 @@ export type Network = {
   local: boolean;
   /** Whether this network has VirtualPool contracts (Celo only). Controls UI visibility of virtual-pool-related elements. */
   hasVirtualPools: boolean;
+  /** JSON-RPC endpoint used for on-chain reads (e.g. rebalance simulation) */
+  rpcUrl?: string;
 };
 
 type ContractEntry = {
@@ -75,12 +77,16 @@ function buildNetworkMaps(
 export function makeNetwork(
   config: Omit<
     Network,
-    "tokenSymbols" | "addressLabels" | "local" | "hasVirtualPools"
+    "tokenSymbols" | "addressLabels" | "local" | "hasVirtualPools" | "rpcUrl"
   > &
     Partial<
       Pick<
         Network,
-        "local" | "tokenSymbols" | "addressLabels" | "hasVirtualPools"
+        | "local"
+        | "tokenSymbols"
+        | "addressLabels"
+        | "hasVirtualPools"
+        | "rpcUrl"
       >
     >,
 ): Network {
@@ -102,6 +108,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasVirtualPools: true,
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
+    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_DEVNET ?? "http://localhost:8545",
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_DEVNET ??
       "http://localhost:8080/v1/graphql",
@@ -119,6 +126,9 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasVirtualPools: true,
     chainId: 11142220,
     contractsNamespace: NS["celo-sepolia"],
+    rpcUrl:
+      process.env.NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA ??
+      "https://forno.celo-sepolia.celo-testnet.org",
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA ??
       "http://localhost:8080/v1/graphql",
@@ -134,6 +144,9 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasVirtualPools: true,
     chainId: 11142220,
     contractsNamespace: NS["celo-sepolia"],
+    rpcUrl:
+      process.env.NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA ??
+      "https://forno.celo-sepolia.celo-testnet.org",
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
@@ -147,6 +160,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasVirtualPools: true,
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
+    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_CELO_MAINNET ??
       "http://localhost:8080/v1/graphql",
@@ -162,6 +176,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasVirtualPools: true,
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
+    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
@@ -173,6 +188,8 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     label: "Monad Mainnet",
     chainId: 143,
     contractsNamespace: NS["monad-mainnet"],
+    rpcUrl:
+      process.env.NEXT_PUBLIC_RPC_URL_MONAD_MAINNET ?? "https://rpc2.monad.xyz",
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
@@ -184,6 +201,9 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     label: "Monad Testnet",
     chainId: 10143,
     contractsNamespace: NS["monad-testnet"],
+    rpcUrl:
+      process.env.NEXT_PUBLIC_RPC_URL_MONAD_TESTNET ??
+      "https://10143.rpc.hypersync.xyz",
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
