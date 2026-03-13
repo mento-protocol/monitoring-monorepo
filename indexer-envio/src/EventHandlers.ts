@@ -877,6 +877,13 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
 
   if (rateFeedID) {
     oracleDelta.referenceRateFeedID = rateFeedID;
+    // Populate oracleExpiry at creation so the dashboard uses the correct
+    // staleness threshold immediately, before the first oracle event arrives.
+    oracleDelta.oracleExpiry = await fetchReportExpiry(
+      event.chainId,
+      rateFeedID,
+      blockNumber,
+    );
   }
 
   if (rebalanceThreshold > 0) {

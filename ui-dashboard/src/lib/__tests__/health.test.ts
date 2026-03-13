@@ -462,3 +462,88 @@ describe("computeHealthStatus oracle staleness boundary", () => {
     ).toBe("OK");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Oracle staleness with per-feed oracleExpiry (non-default, e.g. Monad)
+// ---------------------------------------------------------------------------
+describe("computeHealthStatus per-feed oracleExpiry", () => {
+  const FROZEN_NOW_MS = 1_700_000_000_000;
+  const frozenNowSec = Math.floor(FROZEN_NOW_MS / 1000);
+
+  beforeAll(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FROZEN_NOW_MS);
+  });
+
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  it("400s-old oracle with oracleExpiry=600 is fresh → OK", () => {
+    // Would be CRITICAL at the default 300s threshold; the longer expiry keeps it OK.
+    const ts400 = String(frozenNowSec - 400);
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: ts400,
+        oracleExpiry: "600",
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+      }),
+    ).toBe("OK");
+  });
+
+  it("601s-old oracle with oracleExpiry=600 is stale → CRITICAL", () => {
+    const ts601 = String(frozenNowSec - 601);
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: ts601,
+        oracleExpiry: "600",
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+      }),
+    ).toBe("CRITICAL");
+  });
+
+  it("oracleExpiry=0 falls back to 300s default", () => {
+    // "0" means not yet indexed — should behave identically to the default 300s window.
+    const ts301 = String(frozenNowSec - 301);
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: ts301,
+        oracleExpiry: "0",
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+      }),
+    ).toBe("CRITICAL");
+  });
+
+  it("missing oracleExpiry field falls back to 300s default", () => {
+    const ts301 = String(frozenNowSec - 301);
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: ts301,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+        // oracleExpiry intentionally omitted
+      }),
+    ).toBe("CRITICAL");
+  });
+
+  it("oracleExpiry=600: 300s-old oracle that would be stale at default is still OK", () => {
+    // Boundary: age === default 300s but custom expiry is 600s → fresh
+    const ts300 = String(frozenNowSec - 300);
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: ts300,
+        oracleExpiry: "600",
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+      }),
+    ).toBe("OK");
+  });
+});
