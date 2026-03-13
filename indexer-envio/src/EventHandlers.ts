@@ -792,11 +792,19 @@ const upsertPool = async ({
     updatedAtTimestamp: blockTimestamp,
   };
 
-  // Recompute priceDifference from reserves + oracle price for FPMM pools
+  // Use contract-provided priceDifference when available (passed via oracleDelta
+  // from fetchRebalancingState). Only fall back to local recomputation when the
+  // contract value was not supplied (e.g. oracle-only update events).
+  const contractPriceDiff =
+    oracleDelta && "priceDifference" in oracleDelta && oracleDelta.priceDifference !== undefined
+      ? oracleDelta.priceDifference
+      : null;
   const priceDifference =
-    !next.source?.includes("virtual") && next.oraclePrice > 0n
-      ? computePriceDifference(next)
-      : next.priceDifference;
+    contractPriceDiff !== null
+      ? contractPriceDiff
+      : !next.source?.includes("virtual") && next.oraclePrice > 0n
+        ? computePriceDifference(next)
+        : next.priceDifference;
 
   const withDeviation = { ...next, priceDifference };
   const healthStatus = computeHealthStatus(withDeviation);
@@ -1194,6 +1202,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     oracleDelta = {
       oraclePrice,
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
+      priceDifference: rebalancingState.priceDifference,
       oracleTimestamp: blockTimestamp,
     };
   }
@@ -1278,6 +1287,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       ...oracleDelta,
       oraclePrice,
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
+      priceDifference: rebalancingState.priceDifference,
       oracleTimestamp: blockTimestamp,
       oracleTxHash: event.transaction.hash,
     };
@@ -1476,6 +1486,13 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
     // (e.g. GBPm pool: feedValue ≈ 1.27, displayed as 1/1.27 ≈ 0.79 USDm/GBPm).
     const oraclePrice = event.params.value;
 
+    // Try to get the contract's authoritative priceDifference.
+    // The oracle was just reported, so getRebalancingState() should succeed.
+    const rebalancingState = await fetchRebalancingState(
+      event.chainId,
+      poolId,
+    );
+
     const updatedPool: Pool = {
       ...existing,
       oracleTimestamp,
@@ -1487,9 +1504,10 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
-    // Recompute priceDifference with new oracle price + existing reserves
-    const priceDifference =
-      !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+    // Prefer contract's priceDifference; fall back to local recomputation
+    const priceDifference = rebalancingState
+      ? rebalancingState.priceDifference
+      : !updatedPool.source?.includes("virtual") && oraclePrice > 0n
         ? computePriceDifference(updatedPool)
         : updatedPool.priceDifference;
     const withDev = { ...updatedPool, priceDifference };
@@ -1544,11 +1562,13 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
             blockNumber,
           )) ?? existing.oracleExpiry);
 
-    // Use getRebalancingState() so oraclePrice is stored in the pool's token
-    // Use event.params.value directly (median SortedOracles 24dp rate).
-    // Same rationale as OracleReported: avoids getRebalancingState() which
-    // reverts when the oracle is stale. oraclePrice is in feed direction.
     const oraclePrice = event.params.value;
+
+    // Try to get the contract's authoritative priceDifference.
+    const rebalancingState = await fetchRebalancingState(
+      event.chainId,
+      poolId,
+    );
 
     const updatedPool: Pool = {
       ...existing,
@@ -1561,9 +1581,10 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
-    // Recompute priceDifference with new oracle price + existing reserves
-    const priceDifference =
-      !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+    // Prefer contract's priceDifference; fall back to local recomputation
+    const priceDifference = rebalancingState
+      ? rebalancingState.priceDifference
+      : !updatedPool.source?.includes("virtual") && oraclePrice > 0n
         ? computePriceDifference(updatedPool)
         : updatedPool.priceDifference;
     const withDev = { ...updatedPool, priceDifference };
