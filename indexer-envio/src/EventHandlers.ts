@@ -171,19 +171,21 @@ async function getPoolsByFeed(
 }
 
 /** Returns the number of active oracle reporters for the given rateFeedID at
- * the given block, or 0 on error. Results are cached per block so each block
- * pays at most one RPC call per feed regardless of how many pools share it. */
+ * the given block, or null on error. Callers can preserve the last known-good
+ * value instead of persisting a fabricated zero on transient RPC failures.
+ * Results are cached per block so each block pays at most one RPC call per
+ * feed regardless of how many pools share it. */
 async function fetchNumReporters(
   chainId: number,
   rateFeedID: string,
   blockNumber: bigint,
-): Promise<number> {
+): Promise<number | null> {
   let address: `0x${string}`;
   try {
     address = SORTED_ORACLES_ADDRESS(chainId);
   } catch {
     // Chain not in CONTRACT_NAMESPACE_BY_CHAIN or package entry missing.
-    return 0;
+    return null;
   }
 
   const cacheKey = `${chainId}:${rateFeedID}:${blockNumber}`;
@@ -203,7 +205,7 @@ async function fetchNumReporters(
     numReportersCache.set(cacheKey, value);
     return value;
   } catch {
-    return 0;
+    return null;
   }
 }
 
@@ -1442,7 +1444,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       oracleOk: true,
       oraclePrice,
       oracleExpiry: oracleExpiry ?? existing.oracleExpiry,
-      oracleNumReporters,
+      oracleNumReporters: oracleNumReporters ?? existing.oracleNumReporters,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
@@ -1464,7 +1466,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       timestamp: blockTimestamp,
       oraclePrice,
       oracleOk: true,
-      numReporters: oracleNumReporters,
+      numReporters: oracleNumReporters ?? existing.oracleNumReporters,
       priceDifference,
       rebalanceThreshold: existing.rebalanceThreshold,
       source: "oracle_reported",
@@ -1512,7 +1514,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       oracleTxHash: event.transaction.hash,
       oracleOk: true,
       oracleExpiry: oracleExpiry ?? existing.oracleExpiry,
-      oracleNumReporters,
+      oracleNumReporters: oracleNumReporters ?? existing.oracleNumReporters,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
@@ -1534,7 +1536,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       timestamp: blockTimestamp,
       oraclePrice,
       oracleOk: true,
-      numReporters: oracleNumReporters,
+      numReporters: oracleNumReporters ?? existing.oracleNumReporters,
       priceDifference,
       rebalanceThreshold: existing.rebalanceThreshold,
       source: "oracle_median_updated",
