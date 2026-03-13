@@ -79,6 +79,18 @@ const STRATEGY_ABI = parseAbi([
   "error RLS_RESERVE_OUT_OF_COLLATERAL()",
   "error RLS_TOKEN_IN_NOT_SUPPORTED()",
   "error RLS_TOKEN_OUT_NOT_SUPPORTED()",
+  // FPMM pool-side errors (can bubble through strategy.rebalance → pool.rebalance)
+  "error NotLiquidityStrategy()",
+  "error PriceDifferenceTooSmall()",
+  "error PriceDifferenceNotImproved()",
+  "error PriceDifferenceMovedInWrongDirection()",
+  "error PriceDifferenceMovedTooFarFromThresholds()",
+  "error RebalanceDirectionInvalid()",
+  "error RebalanceThresholdTooHigh()",
+  "error RebalanceIncentiveTooHigh()",
+  "error ReferenceRateNotSet()",
+  "error ReserveValueDecreased()",
+  "error ReservesEmpty()",
 ]);
 
 const STABILITY_POOL_ABI = parseAbi([
@@ -139,6 +151,20 @@ const ERROR_MESSAGES: Record<string, string> = {
   LS_POOL_MUST_BE_SET: "Pool address cannot be zero",
   LS_PROTOCOL_FEE_RECIPIENT_REQUIRED: "Protocol fee recipient must be set",
   LS_ZERO_DECIMAL: "Token has zero decimals",
+  // FPMM pool-side errors
+  NotLiquidityStrategy: "Caller is not a registered liquidity strategy",
+  PriceDifferenceTooSmall: "Pool deviation is below the rebalance threshold",
+  PriceDifferenceNotImproved: "Rebalance did not improve the price deviation",
+  PriceDifferenceMovedInWrongDirection:
+    "Rebalance moved the price in the wrong direction",
+  PriceDifferenceMovedTooFarFromThresholds:
+    "Rebalance moved the price too far past the threshold",
+  RebalanceDirectionInvalid: "Invalid rebalance direction",
+  RebalanceThresholdTooHigh: "Rebalance threshold exceeds allowed maximum",
+  RebalanceIncentiveTooHigh: "Rebalance incentive exceeds allowed maximum",
+  ReferenceRateNotSet: "Oracle reference rate is not configured",
+  ReserveValueDecreased: "Pool reserve value decreased after rebalance",
+  ReservesEmpty: "Pool reserves are empty",
 };
 
 // ---------------------------------------------------------------------------
