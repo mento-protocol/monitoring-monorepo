@@ -60,10 +60,12 @@ function shouldRunCheck(pool: Pool | null): boolean {
   const health = computeHealthStatus(pool);
   if (health === "OK" || health === "N/A") return false;
 
-  // Only check if deviation is at or above threshold (pool actually needs rebalancing)
+  // Only check if deviation is at or above threshold (pool actually needs rebalancing).
+  // Use the same fallback as computeHealthStatus (10000 bps) when threshold is missing.
   const diff = Number(pool.priceDifference ?? "0");
-  const threshold = pool.rebalanceThreshold ?? 0;
-  if (threshold <= 0 || diff < threshold) return false;
+  const threshold =
+    (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
+  if (diff < threshold) return false;
 
   return true;
 }
