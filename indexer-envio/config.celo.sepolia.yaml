@@ -64,6 +64,8 @@ networks:
         events:
           - event: OracleReported
           - event: MedianUpdated
+          - event: ReportExpirySet
+          - event: TokenReportExpirySet
 unordered_multichain_mode: true
 preload_handlers: true
 field_selection:

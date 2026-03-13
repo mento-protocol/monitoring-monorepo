@@ -23,6 +23,24 @@ export interface PoolHealthState {
   rebalanceThreshold?: number;
 }
 
+export function getOracleStalenessThreshold(pool: {
+  oracleExpiry?: string;
+}): number {
+  return Number(pool.oracleExpiry ?? "0") || ORACLE_STALE_SECONDS;
+}
+
+export function isOracleFresh(
+  pool: {
+    oracleTimestamp?: string;
+    oracleExpiry?: string;
+  },
+  nowSeconds = Math.floor(Date.now() / 1000),
+): boolean {
+  const oracleTs = Number(pool.oracleTimestamp ?? "0");
+  const stalenessThreshold = getOracleStalenessThreshold(pool);
+  return oracleTs !== 0 && nowSeconds - oracleTs <= stalenessThreshold;
+}
+
 /**
  * Compute the health status for a pool based on its oracle state.
  *
@@ -40,13 +58,7 @@ export interface PoolHealthState {
  */
 export function computeHealthStatus(pool: PoolHealthState): HealthStatus {
   if (pool.source?.includes("virtual")) return "N/A";
-  // Time-based staleness check (client-side wall clock)
-  const oracleTs = Number(pool.oracleTimestamp ?? "0");
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const stalenessThreshold =
-    Number(pool.oracleExpiry ?? "0") || ORACLE_STALE_SECONDS;
-  const isOracleStale =
-    oracleTs === 0 || nowSeconds - oracleTs > stalenessThreshold;
+  const isOracleStale = !isOracleFresh(pool);
   if (isOracleStale) return "CRITICAL";
   const diff = Number(pool.priceDifference ?? "0");
   const threshold =

@@ -3,7 +3,11 @@
 import { useState } from "react";
 import type { Pool } from "@/lib/types";
 import { HealthBadge } from "@/components/badges";
-import { computeHealthStatus } from "@/lib/health";
+import {
+  computeHealthStatus,
+  getOracleStalenessThreshold,
+  isOracleFresh,
+} from "@/lib/health";
 import {
   tokenSymbol,
   chainlinkFeedUrl,
@@ -83,16 +87,13 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   const isVirtual = pool.source?.includes("virtual");
   const hasHealthData = pool.healthStatus !== undefined;
 
-  // Compute real-time oracle freshness client-side.
-  // Matches SortedOracles.isOldestReportExpired() — Celo mainnet uses
-  // reportExpirySeconds = 300s (5 min). See health.ts for details.
   const nowSeconds = Math.floor(Date.now() / 1000);
   const oracleAge =
     pool.oracleTimestamp && pool.oracleTimestamp !== "0"
       ? nowSeconds - Number(pool.oracleTimestamp)
       : Infinity;
-  const ORACLE_STALE_THRESHOLD = 300; // SortedOracles.reportExpirySeconds()
-  const isOracleFresh = oracleAge <= ORACLE_STALE_THRESHOLD; // age <= 300 is fresh, > 300 is stale
+  const stalenessThreshold = getOracleStalenessThreshold(pool);
+  const oracleIsFresh = isOracleFresh(pool, nowSeconds);
 
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
@@ -143,9 +144,12 @@ export function HealthPanel({ pool }: HealthPanelProps) {
             <dt className="text-slate-400 mb-1">Oracle Status</dt>
             <dd className="flex flex-col gap-0.5">
               <span
-                className={isOracleFresh ? "text-emerald-400" : "text-red-400"}
+                className={oracleIsFresh ? "text-emerald-400" : "text-red-400"}
               >
-                {isOracleFresh ? "✓ Fresh" : "✗ Stale"}
+                {oracleIsFresh ? "✓ Fresh" : "✗ Stale"}
+              </span>
+              <span className="text-xs text-slate-500">
+                Expiry window {stalenessThreshold}s
               </span>
               {pool.oracleTimestamp &&
                 pool.oracleTimestamp !== "0" &&
@@ -157,14 +161,16 @@ export function HealthPanel({ pool }: HealthPanelProps) {
                     className="text-xs text-slate-400 hover:text-indigo-400 transition-colors"
                     title={formatTimestamp(pool.oracleTimestamp)}
                   >
-                    Last updated {relativeTime(pool.oracleTimestamp)} ↗
+                    Last updated {relativeTime(pool.oracleTimestamp)}{" "}
+                    {oracleAge !== Infinity ? `(${oracleAge}s ago)` : ""} ↗
                   </a>
                 ) : (
                   <span
                     className="text-xs text-slate-400"
                     title={formatTimestamp(pool.oracleTimestamp)}
                   >
-                    Last updated {relativeTime(pool.oracleTimestamp)}
+                    Last updated {relativeTime(pool.oracleTimestamp)}{" "}
+                    {oracleAge !== Infinity ? `(${oracleAge}s ago)` : ""}
                   </span>
                 ))}
             </dd>
