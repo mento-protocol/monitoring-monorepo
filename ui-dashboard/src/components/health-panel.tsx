@@ -346,8 +346,8 @@ function RebalanceDiagnostics({
             {result.message}
             {result.rawError && (
               <span
-                className="ml-1.5 text-xs text-slate-600 cursor-help border-b border-dotted border-slate-600"
-                tabIndex={0}
+                className="ml-1.5 text-xs text-slate-600 border-b border-dotted border-slate-600"
+                role="note"
                 aria-label={`Raw error: ${result.rawError}`}
               >
                 [{result.rawError}]
