@@ -5,9 +5,15 @@ import generated from "generated";
 type MockDb = {
   entities: {
     FactoryDeployment: { get: (id: string) => unknown };
-    Pool: { get: (id: string) => unknown };
+    Pool: {
+      get: (id: string) => unknown;
+      set: (entity: unknown) => MockDb;
+    };
     SwapEvent: { get: (id: string) => unknown };
-    OracleSnapshot: { get: (id: string) => unknown };
+    OracleSnapshot: {
+      get: (id: string) => unknown;
+      set: (entity: unknown) => MockDb;
+    };
   };
 };
 
@@ -116,12 +122,123 @@ type GeneratedModule = {
           mockDb: MockDb;
         }) => Promise<MockDb>;
       };
+      TokenReportExpirySet: {
+        createMockEvent: (args: {
+          token?: string;
+          reportExpiry?: bigint;
+          mockEventData?: {
+            chainId?: number;
+            logIndex?: number;
+            srcAddress?: string;
+            block?: { number?: number; timestamp?: number };
+          };
+        }) => unknown;
+        processEvent: (args: {
+          event: unknown;
+          mockDb: MockDb;
+        }) => Promise<MockDb>;
+      };
     };
   };
 };
 
 const { TestHelpers } = generated as unknown as GeneratedModule;
 const { MockDb, FPMMFactory, FPMM, SortedOracles } = TestHelpers;
+
+type PoolEntity = {
+  id: string;
+  source: string;
+  token0?: string;
+  token1?: string;
+  referenceRateFeedID: string;
+  oracleExpiry: bigint;
+  oracleNumReporters: number;
+  oraclePrice: bigint;
+  oracleTimestamp: bigint;
+  oracleTxHash: string;
+  oracleOk: boolean;
+  priceDifference: bigint;
+  rebalanceThreshold: number;
+  lastRebalancedAt: bigint;
+  healthStatus: string;
+  limitStatus: string;
+  limitPressure0: string;
+  limitPressure1: string;
+  rebalancerAddress: string;
+  rebalanceLivenessStatus: string;
+  token0Decimals: number;
+  token1Decimals: number;
+  reserves0: bigint;
+  reserves1: bigint;
+  swapCount: number;
+  notionalVolume0: bigint;
+  notionalVolume1: bigint;
+  rebalanceCount: number;
+  createdAtBlock: bigint;
+  createdAtTimestamp: bigint;
+  updatedAtBlock: bigint;
+  updatedAtTimestamp: bigint;
+};
+
+type OracleSnapshotEntity = {
+  id: string;
+  poolId: string;
+  timestamp: bigint;
+  oraclePrice: bigint;
+  oracleOk: boolean;
+  numReporters: number;
+  priceDifference: bigint;
+  rebalanceThreshold: number;
+  source: string;
+  blockNumber: bigint;
+};
+
+async function seedPoolWithFeed(
+  mockDb: MockDb,
+  {
+    poolId,
+    feedId,
+    oracleExpiry = 600n,
+    oracleNumReporters = 7,
+  }: {
+    poolId: string;
+    feedId: string;
+    oracleExpiry?: bigint;
+    oracleNumReporters?: number;
+  },
+): Promise<MockDb> {
+  const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+    token0: "0x0000000000000000000000000000000000000003",
+    token1: "0x0000000000000000000000000000000000000004",
+    fpmmProxy: poolId,
+    fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+    mockEventData: {
+      chainId: 42220,
+      logIndex: 10,
+      srcAddress: "0x00000000000000000000000000000000000000cc",
+      block: { number: 300, timestamp: 1_700_001_000 },
+    },
+  });
+  let nextDb = await FPMMFactory.FPMMDeployed.processEvent({
+    event: deployEvent,
+    mockDb,
+  });
+
+  const existingPool = nextDb.entities.Pool.get(poolId) as PoolEntity | undefined;
+  assert.ok(existingPool, "Expected seeded pool entity to exist");
+  if (!existingPool) {
+    throw new Error("Expected seeded pool entity to exist");
+  }
+
+  nextDb = nextDb.entities.Pool.set({
+    ...existingPool,
+    referenceRateFeedID: feedId,
+    oracleExpiry,
+    oracleNumReporters,
+  });
+
+  return nextDb;
+}
 
 describe("Envio Celo indexer handlers", () => {
   it("persists FactoryDeployment + Pool for FPMMDeployed", async function () {
@@ -340,5 +457,97 @@ describe("Envio Celo indexer handlers", () => {
       "0x00000000000000000000000000000000000000ab",
     ) as { source: string } | undefined;
     assert.ok(pool, "Pool entity must still exist after MedianUpdated");
+  });
+
+  it("TokenReportExpirySet: clearing per-token override does not clobber the last known expiry with 0", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000ac";
+    const FEED_ID = "0x000000000000000000000000000000000000feed";
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolId: POOL_ADDR,
+      feedId: FEED_ID,
+      oracleExpiry: 600n,
+    });
+
+    const expiryEvent = SortedOracles.TokenReportExpirySet.createMockEvent({
+      token: FEED_ID,
+      reportExpiry: 0n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 12,
+        srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+        block: { number: 302, timestamp: 1_700_001_200 },
+      },
+    });
+    mockDb = await SortedOracles.TokenReportExpirySet.processEvent({
+      event: expiryEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    assert.ok(pool, "Pool entity must still exist after TokenReportExpirySet");
+    if (!pool) {
+      throw new Error("Expected Pool entity after TokenReportExpirySet");
+    }
+    assert.equal(
+      pool.oracleExpiry,
+      600n,
+      "clearing a token override must not persist oracleExpiry=0",
+    );
+  });
+
+  it("MedianUpdated: refreshes oracleNumReporters on Pool and OracleSnapshot", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000ad";
+    const FEED_ID = "0x000000000000000000000000000000000000cafe";
+    const ORACLE_PRICE_24DP = BigInt("999000000000000000000000");
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolId: POOL_ADDR,
+      feedId: FEED_ID,
+      oracleNumReporters: 7,
+    });
+
+    const medianEvent = SortedOracles.MedianUpdated.createMockEvent({
+      token: FEED_ID,
+      value: ORACLE_PRICE_24DP,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 13,
+        srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+        block: { number: 303, timestamp: 1_700_001_300 },
+      },
+    });
+    mockDb = await SortedOracles.MedianUpdated.processEvent({
+      event: medianEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    assert.ok(pool, "Pool entity must still exist after MedianUpdated");
+    if (!pool) {
+      throw new Error("Expected Pool entity after MedianUpdated");
+    }
+    assert.equal(
+      pool.oracleNumReporters,
+      0,
+      "MedianUpdated must refresh oracleNumReporters instead of reusing the stale stored value",
+    );
+
+    const snapshotId = `${42220}_${303}_${13}-${POOL_ADDR}`;
+    const snapshot = mockDb.entities.OracleSnapshot.get(snapshotId) as
+      | OracleSnapshotEntity
+      | undefined;
+    assert.ok(snapshot, "MedianUpdated should write an OracleSnapshot for matched pools");
+    if (!snapshot) {
+      throw new Error("Expected OracleSnapshot entity after MedianUpdated");
+    }
+    assert.equal(snapshot.source, "oracle_median_updated");
+    assert.equal(
+      snapshot.numReporters,
+      0,
+      "MedianUpdated snapshot must use the refreshed reporter count",
+    );
   });
 });
