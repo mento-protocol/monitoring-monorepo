@@ -245,6 +245,7 @@ async function fetchReportExpiry(
             functionName: "reportExpirySeconds",
             blockNumber,
           })) as bigint);
+    if (expiry <= 0n) return null;
     reportExpiryCache.set(cacheKey, expiry);
     return expiry;
   } catch {
@@ -1488,6 +1489,11 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
     rateFeedID,
     blockNumber,
   );
+  const oracleNumReporters = await fetchNumReporters(
+    event.chainId,
+    rateFeedID,
+    blockNumber,
+  );
 
   for (const poolId of poolIds) {
     const existing = await context.Pool.get(poolId);
@@ -1506,6 +1512,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       oracleTxHash: event.transaction.hash,
       oracleOk: true,
       oracleExpiry: oracleExpiry ?? existing.oracleExpiry,
+      oracleNumReporters,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
@@ -1527,7 +1534,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       timestamp: blockTimestamp,
       oraclePrice,
       oracleOk: true,
-      numReporters: existing.oracleNumReporters,
+      numReporters: oracleNumReporters,
       priceDifference,
       rebalanceThreshold: existing.rebalanceThreshold,
       source: "oracle_median_updated",
