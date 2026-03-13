@@ -86,26 +86,49 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
       ) : isEmptyPool ? (
         <p className="text-sm text-slate-400">Pool has no reserves yet.</p>
       ) : (
-        <div className="flex gap-4 flex-1 min-h-[200px]">
-          <Tank
-            symbol={sym0}
-            amount={formatWei(pool.reserves0!, pool.token0Decimals ?? 18, 2)}
-            pct={pct0}
-            usd={usd0}
-            colorClass={color0}
-            thresholdLower={thresholds?.threshold0Lower}
-            thresholdUpper={thresholds?.threshold0Upper}
-          />
-          <Tank
-            symbol={sym1}
-            amount={formatWei(pool.reserves1!, pool.token1Decimals ?? 18, 2)}
-            pct={pct1}
-            usd={usd1}
-            colorClass={color1}
-            thresholdLower={thresholds?.threshold1Lower}
-            thresholdUpper={thresholds?.threshold1Upper}
-          />
-        </div>
+        <>
+          <div className="flex gap-4 flex-1 min-h-[200px]">
+            <Tank
+              symbol={sym0}
+              amount={formatWei(pool.reserves0!, pool.token0Decimals ?? 18, 2)}
+              pct={pct0}
+              usd={usd0}
+              colorClass={color0}
+              thresholdLower={thresholds?.threshold0Lower}
+              thresholdUpper={thresholds?.threshold0Upper}
+              thresholdLegendId={
+                thresholds ? "reserves-threshold-legend" : undefined
+              }
+            />
+            <Tank
+              symbol={sym1}
+              amount={formatWei(pool.reserves1!, pool.token1Decimals ?? 18, 2)}
+              pct={pct1}
+              usd={usd1}
+              colorClass={color1}
+              thresholdLower={thresholds?.threshold1Lower}
+              thresholdUpper={thresholds?.threshold1Upper}
+              thresholdLegendId={
+                thresholds ? "reserves-threshold-legend" : undefined
+              }
+            />
+          </div>
+          {thresholds && (
+            <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-slate-800 flex-shrink-0">
+              {/* Visible legend — also referenced via aria-describedby on the meters */}
+              <span
+                className="w-5 border-t-2 border-dashed border-amber-400/60 flex-shrink-0"
+                aria-hidden="true"
+              />
+              <span
+                id="reserves-threshold-legend"
+                className="text-xs text-slate-500"
+              >
+                Rebalance threshold — amber lines mark the safe operating range
+              </span>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -121,6 +144,7 @@ interface TankProps {
   colorClass: string;
   thresholdLower?: number;
   thresholdUpper?: number;
+  thresholdLegendId?: string;
 }
 
 function Tank({
@@ -131,6 +155,7 @@ function Tank({
   colorClass,
   thresholdLower,
   thresholdUpper,
+  thresholdLegendId,
 }: TankProps) {
   return (
     <div className="flex flex-col items-center gap-2 flex-1 min-w-0 min-h-0">
@@ -141,6 +166,7 @@ function Tank({
         aria-valuenow={pct}
         aria-valuemax={100}
         aria-label={`${symbol} reserve: ${pct.toFixed(1)}%`}
+        aria-describedby={thresholdLegendId}
       >
         <div
           className={`w-full transition-all duration-500 ${colorClass} opacity-70`}
