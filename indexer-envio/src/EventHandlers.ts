@@ -24,8 +24,6 @@ import { createPublicClient, http } from "viem";
 import _sortedOraclesAbi from "@mento-protocol/contracts/abis/SortedOracles.json";
 import {
   requireContractAddress,
-  getContractAddress,
-  buildAddressMap,
   CONTRACT_NAMESPACE_BY_CHAIN,
 } from "./contractAddresses";
 
@@ -39,16 +37,6 @@ const SortedOraclesContract = {
     requireContractAddress(chainId, "SortedOracles"),
   abi: _sortedOraclesAbi,
 };
-
-// USDm addresses set — built lazily from all indexed chains. Missing entries
-// are skipped (getContractAddress returns undefined) rather than throwing,
-// so the indexer can still start if USDm is absent on a future chain.
-const USDM_ADDRESSES = new Set(
-  Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)
-    .map((chainId) => getContractAddress(Number(chainId), "USDm"))
-    .filter((a): a is `0x${string}` => a !== undefined)
-    .map((a) => a.toLowerCase()),
-);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -365,6 +353,13 @@ const FPMM_MINIMAL_ABI = [
     outputs: [{ name: "", type: "address" }],
     stateMutability: "view",
   },
+  {
+    type: "function",
+    name: "invertRateFeed",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+  },
 ] as const;
 
 type RebalancingState = {
@@ -403,6 +398,24 @@ async function fetchRebalancingState(
     };
   } catch {
     return null;
+  }
+}
+
+/** Fetch the pool's invertRateFeed flag. Returns false on error (default). */
+async function fetchInvertRateFeed(
+  chainId: number,
+  poolAddress: string,
+): Promise<boolean> {
+  try {
+    const client = getRpcClient(chainId);
+    const result = await client.readContract({
+      address: poolAddress as `0x${string}`,
+      abi: FPMM_MINIMAL_ABI,
+      functionName: "invertRateFeed",
+    });
+    return result as boolean;
+  } catch {
+    return false;
   }
 }
 
@@ -588,49 +601,35 @@ export function computePriceDifference(pool: {
   reserves0: bigint;
   reserves1: bigint;
   oraclePrice: bigint;
-  token0?: string;
-  token1?: string;
+  invertRateFeed: boolean;
   token0Decimals: number;
   token1Decimals: number;
 }): bigint {
   if (pool.oraclePrice === 0n || pool.reserves0 === 0n || pool.reserves1 === 0n)
     return 0n;
-  if (!pool.token0 || !pool.token1) return 0n;
 
   const SCALE = 10n ** 24n;
   // Normalize reserves to 18 decimals before computing ratio.
-  // USDT/USDC are 6dp, USDm/GBPm are 18dp — without normalization the ratio
-  // is off by 10^(18-6) = 10^12.
   const norm0 = normalizeTo18(pool.reserves0, pool.token0Decimals);
   const norm1 = normalizeTo18(pool.reserves1, pool.token1Decimals);
   // Guard against normalization flooring to zero (possible when decimals > 18).
   if (norm0 === 0n || norm1 === 0n) return 0n;
 
-  // Compute reserve ratio in feed direction (USDm/nonUSD) at 24dp.
-  // Feed direction = "feedToken/USD" (e.g. GBP/USD = 1.34).
-  // When USDm is token0: ratio = norm0/norm1 (already feed direction).
-  // When USDm is token1: ratio = norm1/norm0 (swap to get feed direction).
-  // Computing directly avoids truncation error from inverting a floored ratio.
-  const usdmIsToken0 = USDM_ADDRESSES.has(pool.token0.toLowerCase());
-  const usdmIsToken1 = USDM_ADDRESSES.has(pool.token1.toLowerCase());
+  // Always compute reserve0/reserve1 — matches the contract's reservePrice.
+  const reserveRatio = (norm0 * SCALE) / norm1;
 
-  let reserveRatio: bigint;
-  if (usdmIsToken0) {
-    reserveRatio = (norm0 * SCALE) / norm1;
-  } else if (usdmIsToken1) {
-    reserveRatio = (norm1 * SCALE) / norm0;
-  } else {
-    // Neither token is USDm — can't determine direction, skip
-    return 0n;
-  }
+  // oraclePrice is stored in feed direction (raw SortedOracles rate at 24dp).
+  // When invertRateFeed is true, the contract compares reserves against 1/feedRate.
+  const oracleRef = pool.invertRateFeed
+    ? (SCALE * SCALE) / pool.oraclePrice
+    : pool.oraclePrice;
 
-  // Both reserveRatio and oraclePrice are now in feed direction.
-  // priceDiff in bps: |reserveRatio - oraclePrice| * 10000 / oraclePrice
+  // priceDiff in bps: |reserveRatio - oracleRef| * 10000 / oracleRef
   const diff =
-    reserveRatio > pool.oraclePrice
-      ? reserveRatio - pool.oraclePrice
-      : pool.oraclePrice - reserveRatio;
-  return (diff * 10000n) / pool.oraclePrice;
+    reserveRatio > oracleRef
+      ? reserveRatio - oracleRef
+      : oracleRef - reserveRatio;
+  return (diff * 10000n) / oracleRef;
 }
 
 // ---------------------------------------------------------------------------
@@ -695,6 +694,7 @@ const DEFAULT_ORACLE_FIELDS = {
   oracleExpiry: 0n,
   oracleNumReporters: 0,
   referenceRateFeedID: "",
+  invertRateFeed: false,
   priceDifference: 0n,
   rebalanceThreshold: 0,
   lastRebalancedAt: 0n,
@@ -885,15 +885,17 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
   // Fetch oracle state from chain at pool creation
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
 
-  const [rateFeedID, rebalanceThreshold, dec0Raw, dec1Raw] = await Promise.all([
-    fetchReferenceRateFeedID(event.chainId, poolId),
-    // Use standalone getters — they work even when the oracle is stale,
-    // unlike getRebalancingState() which reverts on stale/expired oracle data.
-    fetchRebalanceThreshold(event.chainId, poolId),
-    // Fetch token decimals scaling factors (e.g. 1e18 for 18-decimal tokens)
-    fetchTokenDecimalsScaling(event.chainId, poolId, "decimals0"),
-    fetchTokenDecimalsScaling(event.chainId, poolId, "decimals1"),
-  ]);
+  const [rateFeedID, rebalanceThreshold, dec0Raw, dec1Raw, invertRateFeed] =
+    await Promise.all([
+      fetchReferenceRateFeedID(event.chainId, poolId),
+      // Use standalone getters — they work even when the oracle is stale,
+      // unlike getRebalancingState() which reverts on stale/expired oracle data.
+      fetchRebalanceThreshold(event.chainId, poolId),
+      // Fetch token decimals scaling factors (e.g. 1e18 for 18-decimal tokens)
+      fetchTokenDecimalsScaling(event.chainId, poolId, "decimals0"),
+      fetchTokenDecimalsScaling(event.chainId, poolId, "decimals1"),
+      fetchInvertRateFeed(event.chainId, poolId),
+    ]);
   // Convert scaling factor (1e18, 1e6, etc.) to decimals count (18, 6, etc.)
   // scalingFactorToDecimals rejects non-power-of-10 values (returns null → fallback 18)
   const token0Decimals = dec0Raw
@@ -916,6 +918,8 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
       oracleDelta.oracleExpiry = oracleExpiry;
     }
   }
+
+  oracleDelta.invertRateFeed = invertRateFeed;
 
   if (rebalanceThreshold > 0) {
     oracleDelta.rebalanceThreshold = rebalanceThreshold;
@@ -1174,9 +1178,18 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
 
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
   if (rebalancingState) {
+    // Read existing pool to check invertRateFeed flag.
+    // For inverted pools, getRebalancingState returns numerator=1e18 and
+    // denominator=feedRate_18dp. We always store oracle price in feed direction
+    // (raw SortedOracles rate at 24dp) for consistency with OracleReported events.
+    const existing = await context.Pool.get(poolId);
+    const isInverted = existing?.invertRateFeed ?? false;
+    const oraclePrice = isInverted
+      ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
+      : rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
+
     oracleDelta = {
-      oraclePrice:
-        rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
+      oraclePrice,
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
       oracleTimestamp: blockTimestamp,
     };
@@ -1201,8 +1214,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       id: eventId(event.chainId, event.block.number, event.logIndex),
       poolId,
       timestamp: blockTimestamp,
-      oraclePrice:
-        rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
+      oraclePrice: oracleDelta.oraclePrice!,
       oracleOk: pool.oracleOk,
       numReporters: pool.oracleNumReporters,
       priceDifference: pool.priceDifference,
@@ -1252,10 +1264,16 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   };
 
   if (rebalancingState) {
+    // Same inverted-pool logic as UpdateReserves — store feed-direction oracle price.
+    const existing = await context.Pool.get(poolId);
+    const isInverted = existing?.invertRateFeed ?? false;
+    const oraclePrice = isInverted
+      ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
+      : rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
+
     oracleDelta = {
       ...oracleDelta,
-      oraclePrice:
-        rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
+      oraclePrice,
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
       oracleTimestamp: blockTimestamp,
       oracleTxHash: event.transaction.hash,
@@ -1278,8 +1296,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       id: eventId(event.chainId, event.block.number, event.logIndex),
       poolId,
       timestamp: blockTimestamp,
-      oraclePrice:
-        rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
+      oraclePrice: oracleDelta.oraclePrice!,
       oracleOk: pool.oracleOk,
       numReporters: pool.oracleNumReporters,
       priceDifference: pool.priceDifference,
