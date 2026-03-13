@@ -1995,8 +1995,11 @@ const FEE_TOKEN_META: Record<
   },
 };
 
-/** Cache for token decimals fetched via RPC (fallback for unknown tokens). */
-const feeTokenDecimalsCache = new Map<string, number>();
+/** Cache for token metadata fetched via RPC (fallback for unknown tokens). */
+const feeTokenMetaCache = new Map<
+  string,
+  { symbol: string; decimals: number }
+>();
 
 const ERC20_DECIMALS_ABI = [
   {
@@ -2028,10 +2031,8 @@ async function resolveFeeTokenMeta(
   if (static_) return static_;
 
   const cacheKey = `${chainId}:${lower}`;
-  const cachedDecimals = feeTokenDecimalsCache.get(cacheKey);
-  if (cachedDecimals !== undefined) {
-    return { symbol: "UNKNOWN", decimals: cachedDecimals };
-  }
+  const cached = feeTokenMetaCache.get(cacheKey);
+  if (cached) return cached;
 
   try {
     const client = getRpcClient(chainId);
@@ -2047,15 +2048,16 @@ async function resolveFeeTokenMeta(
         functionName: "symbol",
       }),
     ]);
-    const d = Number(decimals);
-    feeTokenDecimalsCache.set(cacheKey, d);
-    return { symbol: symbol as string, decimals: d };
+    const meta = { symbol: symbol as string, decimals: Number(decimals) };
+    feeTokenMetaCache.set(cacheKey, meta);
+    return meta;
   } catch {
     console.warn(
       `[ERC20FeeToken] Failed to read decimals/symbol for ${tokenAddress} on chain ${chainId}. Defaulting to 18dp.`,
     );
-    feeTokenDecimalsCache.set(cacheKey, 18);
-    return { symbol: "UNKNOWN", decimals: 18 };
+    const fallback = { symbol: "UNKNOWN", decimals: 18 };
+    feeTokenMetaCache.set(cacheKey, fallback);
+    return fallback;
   }
 }
 
