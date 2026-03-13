@@ -86,6 +86,39 @@ type GeneratedModule = {
           mockDb: MockDb;
         }) => Promise<MockDb>;
       };
+      UpdateReserves: {
+        createMockEvent: (args: {
+          reserve0: bigint;
+          reserve1: bigint;
+          mockEventData: {
+            chainId: number;
+            logIndex: number;
+            srcAddress: string;
+            block: { number: number; timestamp: number };
+          };
+        }) => unknown;
+        processEvent: (args: {
+          event: unknown;
+          mockDb: MockDb;
+        }) => Promise<MockDb>;
+      };
+      Rebalanced: {
+        createMockEvent: (args: {
+          sender: string;
+          priceDifferenceBefore: bigint;
+          priceDifferenceAfter: bigint;
+          mockEventData: {
+            chainId: number;
+            logIndex: number;
+            srcAddress: string;
+            block: { number: number; timestamp: number };
+          };
+        }) => unknown;
+        processEvent: (args: {
+          event: unknown;
+          mockDb: MockDb;
+        }) => Promise<MockDb>;
+      };
     };
     SortedOracles: {
       OracleReported: {
@@ -688,5 +721,138 @@ describe("Envio Celo indexer handlers", () => {
       "Snapshot priceDifference must match pool priceDifference",
     );
     assert.equal(snapshot!.source, "oracle_median_updated");
+  });
+
+  // ---------------------------------------------------------------------------
+  // UpdateReserves / Rebalanced priceDifference tests
+  // ---------------------------------------------------------------------------
+  // In unit tests fetchRebalancingState() fails (no real RPC node), so oracleDelta
+  // won't include priceDifference. These tests verify the fallback through upsertPool
+  // stores a correct locally-computed priceDifference.
+
+  it("UpdateReserves: stores priceDifference via upsertPool fallback when fetchRebalancingState fails", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000b0";
+    const ORACLE_PRICE_24DP = 1_000_000_000_000_000_000_000_000n;
+    // 40k / 60k → deviation ≈ 33.3% ≈ 3333 bps
+    const R0 = 40_000_000_000_000_000_000_000n;
+    const R1 = 60_000_000_000_000_000_000_000n;
+
+    let mockDb = MockDb.createMockDb();
+
+    // Deploy pool first
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 500, timestamp: 1_700_003_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    // Pre-seed with oracle price + decimals so computePriceDifference has data
+    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      oraclePrice: ORACLE_PRICE_24DP,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      source: "fpmm_update_reserves",
+    });
+
+    // Fire UpdateReserves with imbalanced reserves
+    const updateEvent = FPMM.UpdateReserves.createMockEvent({
+      reserve0: R0,
+      reserve1: R1,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 11,
+        srcAddress: POOL_ADDR,
+        block: { number: 501, timestamp: 1_700_003_100 },
+      },
+    });
+    mockDb = await FPMM.UpdateReserves.processEvent({
+      event: updateEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    assert.ok(pool, "Pool must exist after UpdateReserves");
+    assert.ok(
+      pool.priceDifference >= 3330n && pool.priceDifference <= 3340n,
+      `expected priceDifference ~3333 bps, got ${pool.priceDifference}`,
+    );
+    assert.equal(pool.source, "fpmm_update_reserves");
+  });
+
+  it("Rebalanced: stores priceDifference via upsertPool fallback when fetchRebalancingState fails", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000b1";
+    const ORACLE_PRICE_24DP = 1_000_000_000_000_000_000_000_000n;
+    const R0 = 40_000_000_000_000_000_000_000n;
+    const R1 = 60_000_000_000_000_000_000_000n;
+
+    let mockDb = MockDb.createMockDb();
+
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 600, timestamp: 1_700_004_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: R0,
+      reserves1: R1,
+      oraclePrice: ORACLE_PRICE_24DP,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      source: "fpmm_update_reserves",
+    });
+
+    const rebalancedEvent = FPMM.Rebalanced.createMockEvent({
+      sender: "0x0000000000000000000000000000000000000099",
+      priceDifferenceBefore: 3333n,
+      priceDifferenceAfter: 100n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 11,
+        srcAddress: POOL_ADDR,
+        block: { number: 601, timestamp: 1_700_004_100 },
+      },
+    });
+    mockDb = await FPMM.Rebalanced.processEvent({
+      event: rebalancedEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    assert.ok(pool, "Pool must exist after Rebalanced");
+    // fetchRebalancingState fails → upsertPool falls back to computePriceDifference
+    assert.ok(
+      pool.priceDifference >= 3330n && pool.priceDifference <= 3340n,
+      `expected priceDifference ~3333 bps (fallback), got ${pool.priceDifference}`,
+    );
+    assert.equal(pool.rebalanceCount, 1);
   });
 });
