@@ -16,6 +16,8 @@ import {
 } from "@/lib/tokens";
 import { relativeTime, formatTimestamp } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
+import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
+import type { RebalanceCheckResult } from "@/lib/rebalance-check";
 
 /** Format a price float with smart decimal places.
  * Prices near 1.0 (stablecoins) → 4dp; others → 6dp. */
@@ -98,29 +100,26 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
 
-  // Oracle price is stored as feed direction ("feedToken/USD"). Pool title
-  // (from poolName()) puts the non-USDm token first, which matches feed direction:
-  //   USDm/GBPm pool → title "GBPm/USDm" → "1 GBPm = 1.34 USDm" (feed = GBP/USD)
-  //   USDT/USDm pool → title "USDT/USDm" → "1 USDT = 1.00 USDm" (feed = USDT/USD)
-  // So "title direction" = raw feed direction (no inversion).
   const feedVal = rawFeedValue(pool.oraclePrice ?? "0");
-  // titleToken is the non-USDm token (always listed first in the pool title)
   const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
   const titleToken = usdmIsToken0 ? sym1 : sym0;
   const quoteToken = usdmIsToken0 ? sym0 : sym1;
-  // In title direction: 1 titleToken = feedVal quoteToken
-  // Inverted:          1 quoteToken = (1/feedVal) titleToken
   const displayBase = priceInverted ? quoteToken : titleToken;
   const displayQuote = priceInverted ? titleToken : quoteToken;
   const displayPrice =
     feedVal > 0 ? formatPrice(priceInverted ? 1 / feedVal : feedVal) : "—";
 
-  // SortedOracles rates are "feedToken / USD". In USDm-based pools the
-  // non-USDm token is always sym1 (e.g. GBPm, USDC), so try sym1 first.
-  // For USDT/USDm the non-USDm token is sym0, so fall back to that.
   const chainlinkUrl =
     chainlinkFeedUrl(sym1, network.chainId) ??
     chainlinkFeedUrl(sym0, network.chainId);
+
+  const {
+    data: rebalanceCheck,
+    isLoading: rebalanceCheckLoading,
+  } = useRebalanceCheck(pool, network.chainId);
+
+  const showRebalanceDiag =
+    rebalanceCheck !== null || rebalanceCheckLoading;
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -138,121 +137,280 @@ export function HealthPanel({ pool }: HealthPanelProps) {
           Oracle health data not yet available — indexer schema update pending.
         </p>
       ) : (
-        <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-          {/* Oracle Status */}
-          <div>
-            <dt className="text-slate-400 mb-1">Oracle Status</dt>
-            <dd className="flex flex-col gap-0.5">
-              <span
-                className={oracleIsFresh ? "text-emerald-400" : "text-red-400"}
-              >
-                {oracleIsFresh ? "✓ Fresh" : "✗ Stale"}
-              </span>
-              <span className="text-xs text-slate-500">
-                Expiry window {stalenessThreshold}s
-              </span>
-              {pool.oracleTimestamp &&
-                pool.oracleTimestamp !== "0" &&
-                (pool.oracleTxHash ? (
+        <div
+          className={`flex flex-col ${showRebalanceDiag ? "lg:flex-row" : ""} gap-6`}
+        >
+          {/* Left: Oracle health stats */}
+          <dl
+            className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm ${showRebalanceDiag ? "lg:flex-1 lg:min-w-0" : ""}`}
+          >
+            {/* Oracle Status */}
+            <div>
+              <dt className="text-slate-400 mb-1">Oracle Status</dt>
+              <dd className="flex flex-col gap-0.5">
+                <span
+                  className={
+                    oracleIsFresh ? "text-emerald-400" : "text-red-400"
+                  }
+                >
+                  {oracleIsFresh ? "✓ Fresh" : "✗ Stale"}
+                </span>
+                <span className="text-xs text-slate-500">
+                  Expiry window {stalenessThreshold}s
+                </span>
+                {pool.oracleTimestamp &&
+                  pool.oracleTimestamp !== "0" &&
+                  (pool.oracleTxHash ? (
+                    <a
+                      href={explorerTxUrl(network, pool.oracleTxHash)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-slate-400 hover:text-indigo-400 transition-colors"
+                      title={formatTimestamp(pool.oracleTimestamp)}
+                    >
+                      Last updated {relativeTime(pool.oracleTimestamp)}{" "}
+                      {oracleAge !== Infinity ? `(${oracleAge}s ago)` : ""} ↗
+                    </a>
+                  ) : (
+                    <span
+                      className="text-xs text-slate-400"
+                      title={formatTimestamp(pool.oracleTimestamp)}
+                    >
+                      Last updated {relativeTime(pool.oracleTimestamp)}{" "}
+                      {oracleAge !== Infinity ? `(${oracleAge}s ago)` : ""}
+                    </span>
+                  ))}
+              </dd>
+            </div>
+
+            {/* Oracle Price */}
+            <div>
+              <dt className="text-slate-400 mb-1">
+                Oracle Price
+                {chainlinkUrl && (
                   <a
-                    href={explorerTxUrl(network, pool.oracleTxHash)}
+                    href={chainlinkUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs text-slate-400 hover:text-indigo-400 transition-colors"
-                    title={formatTimestamp(pool.oracleTimestamp)}
+                    title="View Chainlink data feed"
+                    className="ml-2 text-xs text-slate-500 hover:text-indigo-400 transition-colors"
                   >
-                    Last updated {relativeTime(pool.oracleTimestamp)}{" "}
-                    {oracleAge !== Infinity ? `(${oracleAge}s ago)` : ""} ↗
+                    ↗ Chainlink
                   </a>
-                ) : (
-                  <span
-                    className="text-xs text-slate-400"
-                    title={formatTimestamp(pool.oracleTimestamp)}
+                )}
+              </dt>
+              <dd className="text-white font-mono">
+                {displayPrice !== "—" ? (
+                  <button
+                    type="button"
+                    onClick={() => setPriceInverted((v) => !v)}
+                    title="Click to toggle price direction"
+                    className="hover:text-indigo-300 transition-colors cursor-pointer text-left"
                   >
-                    Last updated {relativeTime(pool.oracleTimestamp)}{" "}
-                    {oracleAge !== Infinity ? `(${oracleAge}s ago)` : ""}
-                  </span>
-                ))}
-            </dd>
-          </div>
+                    1 {displayBase} = {displayPrice} {displayQuote}
+                    <span className="ml-1.5 text-xs text-slate-500">⇄</span>
+                  </button>
+                ) : (
+                  <span className="text-slate-500">—</span>
+                )}
+              </dd>
+            </div>
 
-          {/* Oracle Price */}
-          <div>
-            <dt className="text-slate-400 mb-1">
-              Oracle Price
-              {chainlinkUrl && (
-                <a
-                  href={chainlinkUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="View Chainlink data feed"
-                  className="ml-2 text-xs text-slate-500 hover:text-indigo-400 transition-colors"
-                >
-                  ↗ Chainlink
-                </a>
-              )}
-            </dt>
-            <dd className="text-white font-mono">
-              {displayPrice !== "—" ? (
-                <button
-                  type="button"
-                  onClick={() => setPriceInverted((v) => !v)}
-                  title="Click to toggle price direction"
-                  className="hover:text-indigo-300 transition-colors cursor-pointer text-left"
-                >
-                  1 {displayBase} = {displayPrice} {displayQuote}
-                  <span className="ml-1.5 text-xs text-slate-500">⇄</span>
-                </button>
-              ) : (
-                <span className="text-slate-500">—</span>
-              )}
-            </dd>
-          </div>
+            {/* Reporters */}
+            <div>
+              <dt className="text-slate-400 mb-1">Oracle Reporters</dt>
+              <dd className="text-white">
+                {pool.oracleNumReporters != null &&
+                pool.oracleNumReporters > 0 ? (
+                  pool.oracleNumReporters
+                ) : (
+                  <span className="text-slate-500">—</span>
+                )}
+              </dd>
+            </div>
 
-          {/* Reporters */}
-          <div>
-            <dt className="text-slate-400 mb-1">Oracle Reporters</dt>
-            <dd className="text-white">
-              {pool.oracleNumReporters != null &&
-              pool.oracleNumReporters > 0 ? (
-                pool.oracleNumReporters
-              ) : (
-                <span className="text-slate-500">—</span>
-              )}
-            </dd>
-          </div>
+            {/* Deviation */}
+            <div className="sm:col-span-2">
+              <dt className="text-slate-400 mb-1">Deviation vs Threshold</dt>
+              <dd>
+                <DeviationBar
+                  priceDifference={pool.priceDifference ?? "0"}
+                  rebalanceThreshold={pool.rebalanceThreshold ?? 0}
+                />
+              </dd>
+            </div>
 
-          {/* Deviation */}
-          <div className="sm:col-span-2">
-            <dt className="text-slate-400 mb-1">Deviation vs Threshold</dt>
-            <dd>
-              <DeviationBar
-                priceDifference={pool.priceDifference ?? "0"}
-                rebalanceThreshold={pool.rebalanceThreshold ?? 0}
-              />
-            </dd>
-          </div>
+            {/* Last Rebalance */}
+            <div>
+              <dt className="text-slate-400 mb-1">Last Rebalance</dt>
+              <dd
+                className="text-white"
+                title={
+                  pool.lastRebalancedAt && pool.lastRebalancedAt !== "0"
+                    ? formatTimestamp(pool.lastRebalancedAt)
+                    : undefined
+                }
+              >
+                {pool.lastRebalancedAt && pool.lastRebalancedAt !== "0" ? (
+                  relativeTime(pool.lastRebalancedAt)
+                ) : (
+                  <span className="text-slate-500">Never</span>
+                )}
+              </dd>
+            </div>
+          </dl>
 
-          {/* Last Rebalance */}
-          <div>
-            <dt className="text-slate-400 mb-1">Last Rebalance</dt>
-            <dd
-              className="text-white"
-              title={
-                pool.lastRebalancedAt && pool.lastRebalancedAt !== "0"
-                  ? formatTimestamp(pool.lastRebalancedAt)
-                  : undefined
-              }
-            >
-              {pool.lastRebalancedAt && pool.lastRebalancedAt !== "0" ? (
-                relativeTime(pool.lastRebalancedAt)
-              ) : (
-                <span className="text-slate-500">Never</span>
-              )}
-            </dd>
-          </div>
-        </dl>
+          {/* Right: Rebalance diagnostics (only when pool needs rebalancing) */}
+          {showRebalanceDiag && (
+            <RebalanceDiagnostics
+              result={rebalanceCheck}
+              isLoading={rebalanceCheckLoading}
+            />
+          )}
+        </div>
       )}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Rebalance diagnostics panel (right side of health panel)
+// ---------------------------------------------------------------------------
+
+function RebalanceDiagnostics({
+  result,
+  isLoading,
+}: {
+  result: RebalanceCheckResult | null;
+  isLoading: boolean;
+}) {
+  if (isLoading) {
+    return (
+      <div className="lg:w-72 lg:flex-shrink-0 lg:border-l lg:border-slate-800 lg:pl-6">
+        <h3 className="text-sm font-medium text-slate-400 mb-3">
+          Rebalance Status
+        </h3>
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <span className="inline-block w-3 h-3 rounded-full bg-slate-600 animate-pulse" />
+          Checking rebalance feasibility…
+        </div>
+      </div>
+    );
+  }
+
+  if (!result) return null;
+
+  const statusColor = result.canRebalance
+    ? "text-emerald-400"
+    : "text-red-400";
+  const statusDot = result.canRebalance
+    ? "bg-emerald-400"
+    : "bg-red-400";
+  const statusIcon = result.canRebalance ? "✓" : "✗";
+
+  return (
+    <div className="lg:w-72 lg:flex-shrink-0 lg:border-l lg:border-slate-800 lg:pl-6">
+      <h3 className="text-sm font-medium text-slate-400 mb-3">
+        Rebalance Status
+      </h3>
+
+      <div className="flex flex-col gap-3">
+        {/* Status line */}
+        <div className="flex items-start gap-2">
+          <span
+            className={`inline-block w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0 ${statusDot}`}
+          />
+          <span
+            className={`text-sm font-medium ${statusColor}`}
+            title={result.rawError ?? undefined}
+          >
+            {statusIcon}{" "}
+            {result.canRebalance ? "Rebalance possible" : "Rebalance blocked"}
+          </span>
+        </div>
+
+        {/* Human-readable reason with raw error tooltip */}
+        {!result.canRebalance && (
+          <p
+            className="text-sm text-slate-300 leading-relaxed"
+            title={
+              result.rawError
+                ? `Raw error: ${result.rawError}`
+                : undefined
+            }
+          >
+            {result.message}
+            {result.rawError && (
+              <span className="ml-1.5 text-xs text-slate-600 cursor-help border-b border-dotted border-slate-600">
+                [{result.rawError}]
+              </span>
+            )}
+          </p>
+        )}
+
+        {/* Strategy-specific enrichment */}
+        {result.enrichment && <EnrichmentDetail enrichment={result.enrichment} />}
+
+        {/* Strategy type label */}
+        <span className="text-xs text-slate-600">
+          Strategy:{" "}
+          {result.strategyType === "cdp"
+            ? "CDP Liquidity"
+            : result.strategyType === "reserve"
+              ? "Reserve Liquidity"
+              : "Unknown"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Strategy enrichment details
+// ---------------------------------------------------------------------------
+
+function EnrichmentDetail({
+  enrichment,
+}: {
+  enrichment: NonNullable<RebalanceCheckResult["enrichment"]>;
+}) {
+  if (enrichment.type === "cdp") {
+    const balance = enrichment.stabilityPoolBalance;
+    const formatted =
+      balance >= 1000
+        ? `${(balance / 1000).toFixed(1)}k`
+        : balance.toFixed(2);
+
+    return (
+      <div className="rounded border border-slate-700/50 bg-slate-800/50 px-3 py-2">
+        <div className="text-xs text-slate-400 mb-1">
+          Stability Pool Balance
+        </div>
+        <div className="text-sm font-mono text-slate-200">
+          {formatted} {enrichment.stabilityPoolTokenSymbol}
+        </div>
+      </div>
+    );
+  }
+
+  if (enrichment.type === "reserve") {
+    const balance = enrichment.reserveCollateralBalance;
+    const formatted =
+      balance >= 1000
+        ? `${(balance / 1000).toFixed(1)}k`
+        : balance.toFixed(2);
+
+    return (
+      <div className="rounded border border-slate-700/50 bg-slate-800/50 px-3 py-2">
+        <div className="text-xs text-slate-400 mb-1">
+          Reserve Collateral Balance
+        </div>
+        <div className="text-sm font-mono text-slate-200">
+          {formatted} {enrichment.collateralTokenSymbol}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
