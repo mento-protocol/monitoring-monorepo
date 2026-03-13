@@ -27,6 +27,7 @@ networks:
           - event: UpdateReserves
           - event: Rebalanced
           - event: TradingLimitConfigured
+          - event: LiquidityStrategyUpdated
       - name: VirtualPool
         abi_file_path: abis/FPMM.json
         address:
