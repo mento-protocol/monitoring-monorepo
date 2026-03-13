@@ -1530,18 +1530,13 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       blockNumber,
     );
 
-    // When rebalancingState is available, use the contract's effective oracle price
-    // (numerator/denominator from the median) for both oraclePrice and priceDifference.
-    // This keeps both values semantically consistent — they both describe the same
-    // oracle state (effective median after the tx), not a mix of per-reporter and median.
-    // Fall back to event.params.value (the individual reporter's price) only when the
-    // contract call fails.
+    // oraclePrice always comes from the individual reporter's value (event.params.value).
+    // priceDifference comes from getRebalancingState() (block-final median) when
+    // available, falling back to local recomputation. The two fields are intentionally
+    // from different sources: oraclePrice is per-reporter; priceDifference uses the
+    // effective median which the contract uses for rebalancing decisions.
     const isInverted = existing.invertRateFeed ?? false;
-    const oraclePrice = rebalancingState
-      ? isInverted
-        ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
-        : rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR
-      : event.params.value;
+    const oraclePrice = event.params.value;
 
     const updatedPool: Pool = {
       ...existing,
