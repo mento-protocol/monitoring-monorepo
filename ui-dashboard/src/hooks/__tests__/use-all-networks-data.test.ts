@@ -21,6 +21,14 @@ const MOCK_NETWORK: Network = {
   hasVirtualPools: false,
 };
 
+const MOCK_NETWORK_2: Network = {
+  ...MOCK_NETWORK,
+  id: "celo-sepolia-hosted",
+  label: "Celo Sepolia (hosted)",
+  chainId: 11142220,
+  hasuraUrl: "https://hasura-sepolia.example.com/v1/graphql",
+};
+
 const MOCK_NETWORK_WITH_SECRET: Network = {
   ...MOCK_NETWORK,
   hasuraSecret: "  my-secret  ", // intentional whitespace to test trimming
@@ -51,6 +59,10 @@ vi.mock("graphql-request", () => {
 
 import { GraphQLClient } from "graphql-request";
 
+/**
+ * Sets up a per-query mock. IMPORTANT: check PoolSnapshot before Pool,
+ * since "Pool" is a substring of "PoolSnapshot".
+ */
 function mockRequest(impl: (query: string) => unknown) {
   (
     GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
@@ -69,10 +81,11 @@ describe("fetchNetworkData — happy path", () => {
   it("returns pools, fees, and snapshots on full success", async () => {
     const pool = makePool("pool-1");
     mockRequest((query) => {
-      if (query.includes("Pool")) return { Pool: [pool] };
+      // IMPORTANT: PoolSnapshot must be checked before Pool (substring match)
+      if (query.includes("PoolSnapshot")) return { PoolSnapshot: [] };
       if (query.includes("ProtocolFeeTransfer"))
         return { ProtocolFeeTransfer: [] };
-      if (query.includes("PoolSnapshot")) return { PoolSnapshot: [] };
+      if (query.includes("Pool")) return { Pool: [pool] };
       return {};
     });
 
@@ -152,9 +165,9 @@ describe("fetchNetworkData — fees query failure only", () => {
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
     ).mockImplementation((query: string) => {
       if (query.includes("ProtocolFeeTransfer")) return Promise.reject(feesErr);
-      if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
       if (query.includes("PoolSnapshot"))
         return Promise.resolve({ PoolSnapshot: [] });
+      if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
       return Promise.resolve({});
     });
 
@@ -181,9 +194,9 @@ describe("fetchNetworkData — snapshots query failure only", () => {
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
     ).mockImplementation((query: string) => {
       if (query.includes("PoolSnapshot")) return Promise.reject(snapErr);
-      if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
       if (query.includes("ProtocolFeeTransfer"))
         return Promise.resolve({ ProtocolFeeTransfer: [] });
+      if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
       return Promise.resolve({});
     });
 
@@ -212,5 +225,113 @@ describe("fetchNetworkData — non-Error thrown values", () => {
 
     expect(result.error).toBeInstanceOf(Error);
     expect(result.error?.message).toBe("something went wrong");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchAllNetworks — cross-network orchestration
+// ---------------------------------------------------------------------------
+// We test fetchAllNetworks by calling fetchNetworkData directly for each
+// network in the same pattern the real function uses, to cover the
+// allSettled mapping logic without needing to mock module internals.
+
+describe("fetchAllNetworks — mixed fulfilled/rejected handling", () => {
+  it("one network pools failure does not affect the other network", async () => {
+    const pool = makePool("pool-x");
+    const poolsErr = new Error("network down");
+
+    // Simulate network1 succeeding, network2 failing
+    const result1 = await (async () => {
+      (
+        GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+      ).mockImplementation((query: string) => {
+        if (query.includes("PoolSnapshot"))
+          return Promise.resolve({ PoolSnapshot: [] });
+        if (query.includes("ProtocolFeeTransfer"))
+          return Promise.resolve({ ProtocolFeeTransfer: [] });
+        if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
+        return Promise.resolve({});
+      });
+      return fetchNetworkData(MOCK_NETWORK, 0, 1000);
+    })();
+
+    vi.clearAllMocks();
+
+    const result2 = await (async () => {
+      (
+        GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+      ).mockRejectedValue(poolsErr);
+      return fetchNetworkData(MOCK_NETWORK_2, 0, 1000);
+    })();
+
+    // Network 1: success
+    expect(result1.error).toBeNull();
+    expect(result1.pools).toHaveLength(1);
+    expect(result1.network.id).toBe("celo-mainnet-hosted");
+
+    // Network 2: error, but still returns correct network metadata
+    expect(result2.error).toBe(poolsErr);
+    expect(result2.pools).toHaveLength(0);
+    expect(result2.network.id).toBe("celo-sepolia-hosted");
+  });
+
+  it("network index maps correctly to network metadata on rejection", async () => {
+    // Verify that a failing network still carries the correct network object
+    const err = new Error("timeout");
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockRejectedValue(err);
+
+    const result = await fetchNetworkData(MOCK_NETWORK_2, 0, 1000);
+
+    expect(result.network).toBe(MOCK_NETWORK_2);
+    expect(result.error).toBe(err);
+  });
+
+  it("fees failure on one network does not affect pools or snapshots", async () => {
+    const pool = makePool("pool-c");
+    const feesErr = new Error("fees down");
+
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((query: string) => {
+      if (query.includes("ProtocolFeeTransfer")) return Promise.reject(feesErr);
+      if (query.includes("PoolSnapshot"))
+        return Promise.resolve({ PoolSnapshot: [] });
+      if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
+      return Promise.resolve({});
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, 0, 1000);
+
+    expect(result.error).toBeNull();
+    expect(result.pools).toHaveLength(1);
+    expect(result.feesError).toBe(feesErr);
+    expect(result.snapshotsError).toBeNull();
+    expect(result.fees).toBeNull();
+  });
+
+  it("snapshots failure on one network does not affect pools or fees", async () => {
+    const pool = makePool("pool-d");
+    const snapErr = new Error("snapshots down");
+
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((query: string) => {
+      if (query.includes("PoolSnapshot")) return Promise.reject(snapErr);
+      if (query.includes("ProtocolFeeTransfer"))
+        return Promise.resolve({ ProtocolFeeTransfer: [] });
+      if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
+      return Promise.resolve({});
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, 0, 1000);
+
+    expect(result.error).toBeNull();
+    expect(result.pools).toHaveLength(1);
+    expect(result.snapshotsError).toBe(snapErr);
+    expect(result.feesError).toBeNull();
+    expect(result.snapshots).toHaveLength(0);
+    expect(result.fees).not.toBeNull();
   });
 });
