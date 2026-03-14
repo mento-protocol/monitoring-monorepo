@@ -219,7 +219,7 @@ export const POOL_DEPLOYMENT = `
  */
 export const PROTOCOL_FEE_TRANSFERS_ALL = `
   query ProtocolFeeTransfersAll {
-    ProtocolFeeTransfer(limit: 10000) {
+    ProtocolFeeTransfer(limit: 10000, order_by: { blockTimestamp: desc }) {
       tokenSymbol
       tokenDecimals
       amount
