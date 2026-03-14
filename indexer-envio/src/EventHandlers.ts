@@ -2067,6 +2067,16 @@ async function resolveFeeTokenMeta(
 
 ERC20FeeToken.Transfer.handler(
   async ({ event, context }) => {
+    // Sender provenance check: only persist transfers originating from known
+    // FPMM pools. This prevents arbitrary third-party transfers to the yield
+    // split address (donations, airdrops, mistaken sends) from inflating
+    // the protocol fee KPIs. Pool IDs are lowercase addresses.
+    const sender = asAddress(event.params.from);
+    const pool = await context.Pool.get(sender);
+    if (!pool || !pool.source?.includes("fpmm")) {
+      return; // Not from a known FPMM pool — skip
+    }
+
     const { chainId } = event;
     const tokenAddress = event.srcAddress;
     const { symbol, decimals } = await resolveFeeTokenMeta(
@@ -2082,7 +2092,7 @@ ERC20FeeToken.Transfer.handler(
       tokenSymbol: symbol,
       tokenDecimals: decimals,
       amount: event.params.value,
-      from: asAddress(event.params.from),
+      from: sender,
       txHash: event.transaction.hash,
       blockNumber: BigInt(event.block.number),
       blockTimestamp: BigInt(event.block.timestamp),
