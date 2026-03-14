@@ -8,6 +8,7 @@ import {
   getOracleStalenessThreshold,
   isOracleFresh,
 } from "@/lib/health";
+import { isWeekend } from "@/lib/weekend";
 import {
   tokenSymbol,
   chainlinkFeedUrl,
@@ -117,7 +118,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     data: rebalanceCheck,
     isLoading: rebalanceCheckLoading,
     error: rebalanceCheckError,
-  } = useRebalanceCheck(pool, network, network.chainId);
+  } = useRebalanceCheck(pool, network);
 
   const showRebalanceDiag =
     rebalanceCheck !== null || rebalanceCheckLoading || !!rebalanceCheckError;
@@ -137,6 +138,14 @@ export function HealthPanel({ pool }: HealthPanelProps) {
         <p className="text-sm text-slate-400">
           Oracle health data not yet available — indexer schema update pending.
         </p>
+      ) : !oracleIsFresh && isWeekend() ? (
+        <div className="flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-800/40 px-4 py-3 text-sm text-slate-300">
+          <span className="text-base leading-5 flex-shrink-0" aria-hidden="true">🌙</span>
+          <span>
+            <span className="font-medium text-slate-200">Trading is paused for the weekend.</span>{" "}
+            FX markets are closed and no fresh oracle data is available. Pool trading will resume automatically when markets reopen (~Sunday 23:00 UTC).
+          </span>
+        </div>
       ) : (
         <div
           className={`flex flex-col ${showRebalanceDiag ? "lg:flex-row" : ""} gap-6`}

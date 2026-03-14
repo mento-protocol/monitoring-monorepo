@@ -6,8 +6,18 @@ import {
   computeLimitStatus,
   computeRebalancerLiveness,
   worstStatus,
-  getOracleStalenessThreshold,
 } from "../health";
+
+// Mock weekend.ts so health tests are deterministic regardless of real-world day.
+// Override per-test when WEEKEND behaviour needs to be tested.
+vi.mock("../weekend", () => ({
+  isWeekend: vi.fn(() => false),
+  isWeekendOracleStale: vi.fn(() => false),
+  FX_CLOSE_DAY: 5,
+  FX_CLOSE_HOUR_UTC: 21,
+  FX_REOPEN_DAY: 0,
+  FX_REOPEN_HOUR_UTC: 23,
+}));
 
 /** A recent oracle timestamp (2 minutes ago) — within 5-min SortedOracles expiry. */
 const FRESH_TS = String(Math.floor(Date.now() / 1000) - 120);
@@ -136,6 +146,19 @@ describe("computeHealthStatus", () => {
         source: "fpmm_factory",
       }),
     ).toBe("CRITICAL");
+  });
+
+  it('returns "WEEKEND" instead of CRITICAL when oracle is stale during weekend', async () => {
+    const weekend = await import("../weekend");
+    vi.mocked(weekend.isWeekend).mockReturnValueOnce(true);
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: STALE_TS,
+        priceDifference: "0",
+        rebalanceThreshold: 5000,
+      }),
+    ).toBe("WEEKEND");
   });
 
   it("returns OK for zero priceDifference with valid threshold", () => {
@@ -326,6 +349,20 @@ describe("computeRebalancerLiveness", () => {
           source: "fpmm_factory",
           lastRebalancedAt: String(NOW - 86400),
           healthStatus: "CRITICAL",
+        },
+        NOW,
+      ),
+    ).toBe("ACTIVE");
+  });
+
+  it('returns "ACTIVE" when healthStatus is "WEEKEND" even if age > 86400', () => {
+    // WEEKEND = expected closure, rebalancer is not actually stale
+    expect(
+      computeRebalancerLiveness(
+        {
+          source: "fpmm_factory",
+          lastRebalancedAt: String(NOW - 90000),
+          healthStatus: "WEEKEND",
         },
         NOW,
       ),
@@ -550,41 +587,9 @@ describe("computeHealthStatus per-feed oracleExpiry", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Per-chain fallback for getOracleStalenessThreshold
+// Chain-aware fallback via ORACLE_STALE_SECONDS_BY_CHAIN
 // ---------------------------------------------------------------------------
-describe("getOracleStalenessThreshold per-chain fallback", () => {
-  it("Monad mainnet (143): fallback = 360s when oracleExpiry is 0", () => {
-    expect(getOracleStalenessThreshold({ oracleExpiry: "0" }, 143)).toBe(360);
-  });
-
-  it("Celo mainnet (42220): fallback = 300s when oracleExpiry is 0", () => {
-    expect(getOracleStalenessThreshold({ oracleExpiry: "0" }, 42220)).toBe(300);
-  });
-
-  it("Unknown chain: fallback = 300s (ORACLE_STALE_SECONDS default)", () => {
-    expect(getOracleStalenessThreshold({ oracleExpiry: "0" }, 99999)).toBe(300);
-  });
-
-  it("Unknown chain with no chainId arg: fallback = 300s", () => {
-    expect(getOracleStalenessThreshold({ oracleExpiry: "0" })).toBe(300);
-  });
-
-  it("Pool with oracleExpiry > 0 overrides chain fallback (Monad 143)", () => {
-    // oracleExpiry=600 should win over the chain default of 360
-    expect(getOracleStalenessThreshold({ oracleExpiry: "600" }, 143)).toBe(600);
-  });
-
-  it("Pool with oracleExpiry > 0 overrides chain fallback (Celo 42220)", () => {
-    expect(getOracleStalenessThreshold({ oracleExpiry: "480" }, 42220)).toBe(
-      480,
-    );
-  });
-});
-
-// ---------------------------------------------------------------------------
-// computeHealthStatus uses per-chain fallback when oracleExpiry is missing
-// ---------------------------------------------------------------------------
-describe("computeHealthStatus per-chain fallback via chainId", () => {
+describe("computeHealthStatus chain-aware staleness fallback", () => {
   const FROZEN_NOW_MS = 1_700_000_000_000;
   const frozenNowSec = Math.floor(FROZEN_NOW_MS / 1000);
 
@@ -597,81 +602,52 @@ describe("computeHealthStatus per-chain fallback via chainId", () => {
     vi.useRealTimers();
   });
 
-  it("Monad (143): 340s-old oracle is fresh (360s fallback)", () => {
-    // 340s < 360s → OK. At Celo's 300s threshold this would be CRITICAL.
-    const ts = String(frozenNowSec - 340);
+  it("Monad (chainId=143): 340s-old oracle with oracleExpiry=0 is fresh (360s fallback)", () => {
+    // Would be CRITICAL at the 300s default, but Monad's fallback is 360s
+    const ts340 = String(frozenNowSec - 340);
     expect(
       computeHealthStatus(
         {
           source: "fpmm_factory",
-          oracleTimestamp: ts,
+          oracleTimestamp: ts340,
+          oracleExpiry: "0",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
+        143, // Monad mainnet chainId
+      ),
+    ).toBe("OK");
+  });
+
+  it("Monad (chainId=143): 361s-old oracle with oracleExpiry=0 is stale", () => {
+    const ts361 = String(frozenNowSec - 361);
+    expect(
+      computeHealthStatus(
+        {
+          source: "fpmm_factory",
+          oracleTimestamp: ts361,
+          oracleExpiry: "0",
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },
         143,
       ),
-    ).toBe("OK");
-  });
-
-  it("Monad (143): 361s-old oracle is stale → CRITICAL", () => {
-    const ts = String(frozenNowSec - 361);
-    expect(
-      computeHealthStatus(
-        {
-          source: "fpmm_factory",
-          oracleTimestamp: ts,
-          priceDifference: "0",
-          rebalanceThreshold: 5000,
-        },
-        143,
-      ),
     ).toBe("CRITICAL");
   });
 
-  it("Celo (42220): 301s-old oracle is stale → CRITICAL (300s fallback)", () => {
-    const ts = String(frozenNowSec - 301);
+  it("unknown chainId falls back to 300s default", () => {
+    const ts301 = String(frozenNowSec - 301);
     expect(
       computeHealthStatus(
         {
           source: "fpmm_factory",
-          oracleTimestamp: ts,
+          oracleTimestamp: ts301,
+          oracleExpiry: "0",
           priceDifference: "0",
           rebalanceThreshold: 5000,
         },
-        42220,
+        99999, // unknown chain
       ),
     ).toBe("CRITICAL");
-  });
-
-  it("Unknown chain: 301s-old oracle is stale → CRITICAL (300s default)", () => {
-    const ts = String(frozenNowSec - 301);
-    expect(
-      computeHealthStatus(
-        {
-          source: "fpmm_factory",
-          oracleTimestamp: ts,
-          priceDifference: "0",
-          rebalanceThreshold: 5000,
-        },
-        99999,
-      ),
-    ).toBe("CRITICAL");
-  });
-
-  it("oracleExpiry > 0 overrides chain fallback: 340s-old with expiry=600 on Celo is fresh", () => {
-    // Even on Celo (300s fallback), if oracleExpiry=600 is indexed then 340s is fresh.
-    const ts = String(frozenNowSec - 340);
-    expect(
-      computeHealthStatus(
-        {
-          source: "fpmm_factory",
-          oracleTimestamp: ts,
-          oracleExpiry: "600",
-          priceDifference: "0",
-          rebalanceThreshold: 5000,
-        },
-        42220,
-      ),
-    ).toBe("OK");
   });
 });

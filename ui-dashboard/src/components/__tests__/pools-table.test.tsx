@@ -3,6 +3,23 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
 import type { Pool } from "@/lib/types";
 
+// Mock weekend detection so component tests are deterministic (not day-of-week dependent).
+// Tests that want to test weekend behaviour can override isWeekend per-test.
+vi.mock("@/lib/weekend", () => ({
+  isWeekend: vi.fn(() => false),
+  isWeekendOracleStale: vi.fn(() => false),
+  FX_CLOSE_DAY: 5,
+  FX_CLOSE_HOUR_UTC: 21,
+  FX_REOPEN_DAY: 0,
+  FX_REOPEN_HOUR_UTC: 23,
+}));
+
+// Also mock weekend in health.ts resolution path
+vi.mock("@/lib/health", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/health")>();
+  return actual;
+});
+
 const mockNetwork = {
   id: "celo-sepolia-local",
   label: "Celo Sepolia (local)",
@@ -198,6 +215,21 @@ describe("PoolsTable combined Health + Limit badge", () => {
     // Tooltip should mention token symbols and pressure percentages
     expect(html).toContain("105%");
     expect(html).toContain("12%");
+  });
+});
+
+describe("PoolsTable weekend banner", () => {
+  it("shows weekend banner when isWeekend returns true", async () => {
+    const weekend = await import("@/lib/weekend");
+    vi.mocked(weekend.isWeekend).mockReturnValueOnce(true);
+    const html = renderSinglePool({ ...BASE_POOL });
+    expect(html).toContain("FX markets are closed this weekend");
+  });
+
+  it("does not show weekend banner when isWeekend returns false", () => {
+    // Default mock returns false
+    const html = renderSinglePool({ ...BASE_POOL });
+    expect(html).not.toContain("FX markets are closed this weekend");
   });
 });
 
