@@ -69,9 +69,7 @@ networks:
           - event: TokenReportExpirySet
       - name: ERC20FeeToken
         abi_file_path: abis/ERC20.json
-        address:
-          - "0xdE9e4C3ce781b4bA68120d6261cbad65ce0aB00b" # USDm
-          - "0x85F5181Abdbf0e1814Fc4358582Ae07b8eBA3aF3" # GBPm
+        address: [] # Dynamically registered from FPMMDeployed events
         handler: src/EventHandlers.ts
         events:
           - event: Transfer

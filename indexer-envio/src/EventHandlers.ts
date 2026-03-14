@@ -925,6 +925,14 @@ const upsertSnapshot = async ({
 // Event Handlers — FPMM
 // ---------------------------------------------------------------------------
 
+// Dynamically register pool tokens for ERC20FeeToken Transfer indexing.
+// Only FPMM pools generate protocol fees (VirtualPools have no fee mechanism).
+// Envio deduplicates addresses, so re-registering the same token is harmless.
+FPMMFactory.FPMMDeployed.contractRegister(({ event, context }) => {
+  context.addERC20FeeToken(event.params.token0);
+  context.addERC20FeeToken(event.params.token1);
+});
+
 FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
   const poolId = asAddress(event.params.fpmmProxy);
@@ -1991,86 +1999,7 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
 const YIELD_SPLIT_ADDRESS =
   "0x0dd57f6f181d0469143fe9380762d8a112e96e4a" as const;
 
-/**
- * Token metadata keyed by lowercase address per chain.
- * Matches the ERC20FeeToken addresses registered in each chain config.
- * This avoids an RPC call for symbol/decimals on every Transfer event.
- */
-const FEE_TOKEN_META: Record<
-  number,
-  Record<string, { symbol: string; decimals: number }>
-> = {
-  // Celo Mainnet
-  42220: {
-    "0x765de816845861e75a25fca122bb6898b8b1282a": {
-      symbol: "USDm",
-      decimals: 18,
-    },
-    "0xceba9300f2b948710d2653dd7b07f33a8b32118c": {
-      symbol: "USDC",
-      decimals: 6,
-    },
-    "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e": {
-      symbol: "USDT",
-      decimals: 6,
-    },
-    "0xccf663b1ff11028f0b19058d0f7b674004a40746": {
-      symbol: "GBPm",
-      decimals: 18,
-    },
-    "0xeb466342c4d449bc9f53a865d5cb90586f405215": {
-      symbol: "axlUSDC",
-      decimals: 6,
-    },
-  },
-  // Monad Mainnet
-  143: {
-    "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115": {
-      symbol: "USDm",
-      decimals: 18,
-    },
-    "0x754704bc059f8c67012fed69bc8a327a5aafb603": {
-      symbol: "USDC",
-      decimals: 6,
-    },
-    "0x39bb4e0a204412bb98e821d25e7d955e69d40fd1": {
-      symbol: "GBPm",
-      decimals: 18,
-    },
-    "0x00000000efe302beaa2b3e6e1b18d08d69a9012a": {
-      symbol: "AUSD",
-      decimals: 18,
-    },
-  },
-  // Celo Sepolia
-  11142220: {
-    "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b": {
-      symbol: "USDm",
-      decimals: 18,
-    },
-    "0x85f5181abdbf0e1814fc4358582ae07b8eba3af3": {
-      symbol: "GBPm",
-      decimals: 18,
-    },
-  },
-  // Monad Testnet
-  10143: {
-    "0x5ecc03111ad2a78f981a108759bc73bae2ab31bc": {
-      symbol: "USDm",
-      decimals: 18,
-    },
-    "0x534b2f3a21130d7a60830c2df862319e593943a3": {
-      symbol: "USDC",
-      decimals: 6,
-    },
-    "0x04de554e875c9797dc4cebd834a9e99fa8fd5df9": {
-      symbol: "GBPm",
-      decimals: 18,
-    },
-  },
-};
-
-/** Cache for token metadata fetched via RPC (fallback for unknown tokens). */
+/** Cache for token metadata fetched via RPC (one call per unique token, then cached). */
 const feeTokenMetaCache = new Map<
   string,
   { symbol: string; decimals: number }
@@ -2094,17 +2023,15 @@ const ERC20_DECIMALS_ABI = [
 ] as const;
 
 /**
- * Resolve symbol + decimals for a fee token. Prefers the static FEE_TOKEN_META
- * map; falls back to an RPC call (cached) for tokens not in the map.
+ * Resolve symbol + decimals for a fee token via RPC (cached after first call).
+ * ERC20FeeToken addresses are dynamically registered from FPMMDeployed events,
+ * so there is no static address map — all metadata comes from on-chain reads.
  */
 async function resolveFeeTokenMeta(
   chainId: number,
   tokenAddress: string,
 ): Promise<{ symbol: string; decimals: number }> {
   const lower = tokenAddress.toLowerCase();
-  const static_ = FEE_TOKEN_META[chainId]?.[lower];
-  if (static_) return static_;
-
   const cacheKey = `${chainId}:${lower}`;
   const cached = feeTokenMetaCache.get(cacheKey);
   if (cached) return cached;
