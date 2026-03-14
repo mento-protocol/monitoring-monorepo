@@ -140,10 +140,19 @@ export function HealthPanel({ pool }: HealthPanelProps) {
         </p>
       ) : !oracleIsFresh && isWeekend() ? (
         <div className="flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-800/40 px-4 py-3 text-sm text-slate-300">
-          <span className="text-base leading-5 flex-shrink-0" aria-hidden="true">🌙</span>
+          <span
+            className="text-base leading-5 flex-shrink-0"
+            aria-hidden="true"
+          >
+            🌙
+          </span>
           <span>
-            <span className="font-medium text-slate-200">Trading is paused for the weekend.</span>{" "}
-            FX markets are closed and no fresh oracle data is available. Pool trading will resume automatically when markets reopen (~Sunday 23:00 UTC).
+            <span className="font-medium text-slate-200">
+              Trading is paused for the weekend.
+            </span>{" "}
+            FX markets are closed and no fresh oracle data is available. Pool
+            trading will resume automatically when markets reopen (~Sunday 23:00
+            UTC).
           </span>
         </div>
       ) : (

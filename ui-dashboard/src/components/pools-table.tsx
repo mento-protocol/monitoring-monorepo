@@ -25,9 +25,10 @@ function healthTooltip(status: string, p: Pool, chainId?: number): string {
   // Mirror computeHealthStatus: use the indexed per-feed expiry, falling back to the
   // per-chain default so the tooltip root-cause matches the badge on non-300s networks.
   const chainFallback =
-    (chainId !== undefined ? ORACLE_STALE_SECONDS_BY_CHAIN[chainId] : undefined) ?? 300;
-  const stalenessThreshold =
-    Number(p.oracleExpiry ?? "0") || chainFallback;
+    (chainId !== undefined
+      ? ORACLE_STALE_SECONDS_BY_CHAIN[chainId]
+      : undefined) ?? 300;
+  const stalenessThreshold = Number(p.oracleExpiry ?? "0") || chainFallback;
   const isOracleStale =
     oracleTs === 0 ||
     Math.floor(Date.now() / 1000) - oracleTs > stalenessThreshold;
@@ -267,157 +268,171 @@ export function PoolsTable({
     <>
       {showWeekendBanner && (
         <div className="mb-4 flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-3 text-sm text-slate-300">
-          <span className="text-base leading-5 flex-shrink-0" aria-hidden="true">🌙</span>
+          <span
+            className="text-base leading-5 flex-shrink-0"
+            aria-hidden="true"
+          >
+            🌙
+          </span>
           <span>
-            <span className="font-medium text-slate-200">FX markets are closed this weekend.</span>{" "}
-            Pool trading is paused until markets reopen (~Sunday 23:00 UTC). This is expected — oracle data resumes automatically when markets open.
+            <span className="font-medium text-slate-200">
+              FX markets are closed this weekend.
+            </span>{" "}
+            Pool trading is paused until markets reopen (~Sunday 23:00 UTC).
+            This is expected — oracle data resumes automatically when markets
+            open.
           </span>
         </div>
       )}
-    <Table>
-      <thead>
-        <tr className="border-b border-slate-800 bg-slate-900/50">
-          <SortableTh
-            sortKey="pool"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-          >
-            Pool
-          </SortableTh>
-          {network.hasVirtualPools && <Th>Source</Th>}
-          <SortableTh
-            sortKey="health"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-          >
-            Health
-          </SortableTh>
-          <SortableTh
-            sortKey="tvl"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-            className="hidden sm:table-cell"
-          >
-            TVL
-          </SortableTh>
-          <SortableTh
-            sortKey="volume24h"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-            className="hidden md:table-cell"
-          >
-            24h Volume
-          </SortableTh>
-          <SortableTh
-            sortKey="totalVolume"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-            className="hidden md:table-cell"
-          >
-            Total Volume
-          </SortableTh>
-          <SortableTh
-            sortKey="swaps"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-            align="right"
-            className="hidden lg:table-cell"
-          >
-            Swaps
-          </SortableTh>
-          <SortableTh
-            sortKey="rebalances"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-            align="right"
-            className="hidden lg:table-cell"
-          >
-            Rebalances
-          </SortableTh>
-          <th
-            scope="col"
-            className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
-          >
-            Rebalancer
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {sortedPools.map((p) => {
-          const healthStatus = computeHealthStatus(p, network.chainId);
-          const limitStatus = p.limitStatus ?? computeLimitStatus(p);
-          const effectiveStatus = worstStatus(healthStatus, limitStatus);
-          const rebalancerStatus = computeRebalancerLiveness(
-            { ...p, healthStatus },
-            nowSeconds,
-          );
-          const tvl = tvlByPoolId.get(p.id) ?? 0;
-          const vol24h = volume24h?.get(p.id);
-          const totalVol = totalVolumeByPoolId.get(p.id);
-          return (
-            <Row key={p.id}>
-              <td className="px-2 sm:px-4 py-2 sm:py-3">
-                <NetworkAwareLink
-                  href={`/pool/${encodeURIComponent(p.id)}`}
-                  className="font-semibold text-sm sm:text-base text-indigo-400 hover:text-indigo-300"
-                >
-                  {poolName(network, p.token0, p.token1)}
-                </NetworkAwareLink>
-              </td>
-              {network.hasVirtualPools && (
+      <Table>
+        <thead>
+          <tr className="border-b border-slate-800 bg-slate-900/50">
+            <SortableTh
+              sortKey="pool"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+            >
+              Pool
+            </SortableTh>
+            {network.hasVirtualPools && <Th>Source</Th>}
+            <SortableTh
+              sortKey="health"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+            >
+              Health
+            </SortableTh>
+            <SortableTh
+              sortKey="tvl"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              className="hidden sm:table-cell"
+            >
+              TVL
+            </SortableTh>
+            <SortableTh
+              sortKey="volume24h"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              className="hidden md:table-cell"
+            >
+              24h Volume
+            </SortableTh>
+            <SortableTh
+              sortKey="totalVolume"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              className="hidden md:table-cell"
+            >
+              Total Volume
+            </SortableTh>
+            <SortableTh
+              sortKey="swaps"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              align="right"
+              className="hidden lg:table-cell"
+            >
+              Swaps
+            </SortableTh>
+            <SortableTh
+              sortKey="rebalances"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              align="right"
+              className="hidden lg:table-cell"
+            >
+              Rebalances
+            </SortableTh>
+            <th
+              scope="col"
+              className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
+            >
+              Rebalancer
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {sortedPools.map((p) => {
+            const healthStatus = computeHealthStatus(p, network.chainId);
+            const limitStatus = p.limitStatus ?? computeLimitStatus(p);
+            const effectiveStatus = worstStatus(healthStatus, limitStatus);
+            const rebalancerStatus = computeRebalancerLiveness(
+              { ...p, healthStatus },
+              nowSeconds,
+            );
+            const tvl = tvlByPoolId.get(p.id) ?? 0;
+            const vol24h = volume24h?.get(p.id);
+            const totalVol = totalVolumeByPoolId.get(p.id);
+            return (
+              <Row key={p.id}>
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
-                  <SourceBadge source={p.source} />
+                  <NetworkAwareLink
+                    href={`/pool/${encodeURIComponent(p.id)}`}
+                    className="font-semibold text-sm sm:text-base text-indigo-400 hover:text-indigo-300"
+                  >
+                    {poolName(network, p.token0, p.token1)}
+                  </NetworkAwareLink>
                 </td>
-              )}
-              <td className="px-2 sm:px-4 py-2 sm:py-3">
-                <button
-                  type="button"
-                  title={combinedTooltip(healthStatus, limitStatus, p, network)}
-                  className="cursor-default appearance-none bg-transparent border-0 p-0"
-                >
-                  <HealthBadge status={effectiveStatus} />
-                </button>
-              </td>
-              <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
-                {tvl > 0 ? formatUSD(tvl) : "—"}
-              </td>
-              <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
-                {volume24hLoading
-                  ? "…"
-                  : volume24hError
-                    ? "N/A"
-                    : vol24h === null
+                {network.hasVirtualPools && (
+                  <td className="px-2 sm:px-4 py-2 sm:py-3">
+                    <SourceBadge source={p.source} />
+                  </td>
+                )}
+                <td className="px-2 sm:px-4 py-2 sm:py-3">
+                  <button
+                    type="button"
+                    title={combinedTooltip(
+                      healthStatus,
+                      limitStatus,
+                      p,
+                      network,
+                    )}
+                    className="cursor-default appearance-none bg-transparent border-0 p-0"
+                  >
+                    <HealthBadge status={effectiveStatus} />
+                  </button>
+                </td>
+                <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
+                  {tvl > 0 ? formatUSD(tvl) : "—"}
+                </td>
+                <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
+                  {volume24hLoading
+                    ? "…"
+                    : volume24hError
                       ? "N/A"
-                      : vol24h && vol24h > 0
-                        ? formatUSD(vol24h)
-                        : "—"}
-              </td>
-              <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
-                {totalVol == null ? "—" : formatUSD(totalVol)}
-              </td>
-              <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
-                {p.swapCount ?? 0}
-              </td>
-              <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
-                {p.rebalanceCount ?? 0}
-              </td>
-              <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
-                <span title={rebalancerTooltip(rebalancerStatus)}>
-                  <RebalancerBadge status={rebalancerStatus} />
-                </span>
-              </td>
-            </Row>
-          );
-        })}
-      </tbody>
-    </Table>
+                      : vol24h === null
+                        ? "N/A"
+                        : vol24h && vol24h > 0
+                          ? formatUSD(vol24h)
+                          : "—"}
+                </td>
+                <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
+                  {totalVol == null ? "—" : formatUSD(totalVol)}
+                </td>
+                <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
+                  {p.swapCount ?? 0}
+                </td>
+                <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
+                  {p.rebalanceCount ?? 0}
+                </td>
+                <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
+                  <span title={rebalancerTooltip(rebalancerStatus)}>
+                    <RebalancerBadge status={rebalancerStatus} />
+                  </span>
+                </td>
+              </Row>
+            );
+          })}
+        </tbody>
+      </Table>
     </>
   );
 }

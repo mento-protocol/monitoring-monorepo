@@ -60,8 +60,8 @@ import { isOracleFresh } from "../health";
 const SAT_NOON = new Date("2026-03-14T12:00:00Z"); // Saturday
 const MON_NOON = new Date("2026-03-16T12:00:00Z"); // Monday
 
-const FRESH_TS = String(Math.floor(SAT_NOON.getTime() / 1000) - 60);   // 60s ago
-const STALE_TS = String(Math.floor(SAT_NOON.getTime() / 1000) - 600);  // 600s ago (> 300s)
+const FRESH_TS = String(Math.floor(SAT_NOON.getTime() / 1000) - 60); // 60s ago
+const STALE_TS = String(Math.floor(SAT_NOON.getTime() / 1000) - 600); // 600s ago (> 300s)
 
 describe("isWeekendOracleStale", () => {
   it("returns true when oracle is stale AND it is the weekend", () => {
