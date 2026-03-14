@@ -218,7 +218,7 @@ function PoolHeader({
   const isVirtual = pool.source?.includes("virtual");
   const nowSeconds = Math.floor(Date.now() / 1000);
   const rebalancerLiveness = computeRebalancerLiveness(
-    { ...pool, healthStatus: computeHealthStatus(pool) },
+    { ...pool, healthStatus: computeHealthStatus(pool, network.chainId) },
     nowSeconds,
   );
 
