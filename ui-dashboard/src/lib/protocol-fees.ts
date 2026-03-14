@@ -45,11 +45,16 @@ export function tokenToUSD(symbol: string, amount: number): number | null {
 // Public API
 // ---------------------------------------------------------------------------
 
+/** Maximum rows fetched by the PROTOCOL_FEE_TRANSFERS_ALL query. */
+export const PROTOCOL_FEE_QUERY_LIMIT = 10_000;
+
 export type ProtocolFeeSummary = {
   totalFeesUSD: number;
   fees24hUSD: number;
   /** True when at least one transfer had an unknown token symbol. */
   hasUnknownTokens: boolean;
+  /** True when the query hit the row limit — all-time total is a lower bound. */
+  isTruncated: boolean;
 };
 
 /**
@@ -77,5 +82,10 @@ export function aggregateProtocolFees(
     }
   }
 
-  return { totalFeesUSD, fees24hUSD, hasUnknownTokens };
+  return {
+    totalFeesUSD,
+    fees24hUSD,
+    hasUnknownTokens,
+    isTruncated: transfers.length >= PROTOCOL_FEE_QUERY_LIMIT,
+  };
 }

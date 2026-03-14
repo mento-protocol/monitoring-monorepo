@@ -151,13 +151,15 @@ function GlobalContent() {
                 : feesErr
                   ? "N/A"
                   : fees
-                    ? `${fees.hasUnknownTokens ? "≈ " : ""}${formatUSD(fees.totalFeesUSD)}`
+                    ? `${fees.hasUnknownTokens || fees.isTruncated ? "≈ " : ""}${formatUSD(fees.totalFeesUSD)}`
                     : "N/A"
             }
             subtitle={
-              fees?.hasUnknownTokens
-                ? "Approximate — some tokens unpriced"
-                : "All-time cumulative"
+              fees?.isTruncated
+                ? "Lower bound — data exceeds query limit"
+                : fees?.hasUnknownTokens
+                  ? "Approximate — some tokens unpriced"
+                  : "All-time cumulative"
             }
           />
           <Tile
@@ -188,8 +190,13 @@ function GlobalContent() {
                 : feesErr
                   ? "N/A"
                   : fees
-                    ? formatUSD(fees.fees24hUSD)
+                    ? `${fees.hasUnknownTokens ? "≈ " : ""}${formatUSD(fees.fees24hUSD)}`
                     : "N/A"
+            }
+            subtitle={
+              fees?.hasUnknownTokens
+                ? "Approximate — some tokens unpriced"
+                : undefined
             }
           />
         </div>

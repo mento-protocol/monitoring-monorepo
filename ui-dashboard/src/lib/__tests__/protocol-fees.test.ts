@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { aggregateProtocolFees, tokenToUSD } from "../protocol-fees";
+import {
+  aggregateProtocolFees,
+  tokenToUSD,
+  PROTOCOL_FEE_QUERY_LIMIT,
+} from "../protocol-fees";
 import type { ProtocolFeeTransfer } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -145,5 +149,19 @@ describe("aggregateProtocolFees", () => {
     const result = aggregateProtocolFees(transfers);
     expect(result.totalFeesUSD).toBeCloseTo(10 + 5 + 2.54, 1);
     expect(result.fees24hUSD).toBeCloseTo(5, 2); // only USDC is recent
+  });
+
+  it("sets isTruncated=false when below query limit", () => {
+    const transfers = [transfer(), transfer()];
+    const result = aggregateProtocolFees(transfers);
+    expect(result.isTruncated).toBe(false);
+  });
+
+  it("sets isTruncated=true when transfers hit the query limit", () => {
+    const transfers = Array.from({ length: PROTOCOL_FEE_QUERY_LIMIT }, () =>
+      transfer(),
+    );
+    const result = aggregateProtocolFees(transfers);
+    expect(result.isTruncated).toBe(true);
   });
 });
