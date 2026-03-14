@@ -78,3 +78,25 @@ export function useNetwork(): NetworkContextValue {
   }
   return ctx;
 }
+
+/**
+ * A lightweight provider that sets a fixed network in context without URL
+ * routing. Use this to render network-aware components (e.g. PoolsTable) for
+ * a specific network inside a crosschain layout.
+ */
+export function StaticNetworkProvider({
+  network,
+  children,
+}: {
+  network: Network;
+  children: ReactNode;
+}) {
+  const value: NetworkContextValue = {
+    network,
+    networkId: network.id,
+    setNetworkId: () => {
+      // no-op: static provider does not support network switching
+    },
+  };
+  return <NetworkContext value={value}>{children}</NetworkContext>;
+}
