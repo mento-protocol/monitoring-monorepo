@@ -25,7 +25,7 @@
   },
   "dependencies": {
     "@mento-protocol/contracts": "0.3.1",
-    "envio": "2.32.3",
+    "envio": "2.32.10",
     "viem": "2.47.0"
   },
   "optionalDependencies": {

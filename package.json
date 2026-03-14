@@ -20,5 +20,13 @@
     "infra:apply": "terraform -chdir=terraform apply",
     "infra:init": "terraform -chdir=terraform init",
     "infra:plan": "terraform -chdir=terraform plan"
+  },
+  "pnpm": {
+    "overrides": {
+      "undici": ">=6.24.0",
+      "flatted": ">=3.4.0",
+      "serialize-javascript": ">=7.0.3",
+      "diff@>=6": ">=8.0.3"
+    }
   }
 }

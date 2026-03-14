@@ -36,7 +36,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/react-plotly.js": "^2.6.4",
     "@vitest/coverage-v8": "^4.0.18",
-    "eslint": "^10.0.2",
+    "eslint": "^10.0.3",
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "globals": "^17.4.0",
     "tailwindcss": "^4.2.1",
