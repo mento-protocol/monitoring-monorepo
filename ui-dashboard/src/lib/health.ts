@@ -49,7 +49,11 @@ export function getOracleStalenessThreshold(
 ): number {
   const indexed = Number(pool.oracleExpiry ?? "0");
   if (indexed > 0) return indexed;
-  return (chainId !== undefined ? ORACLE_STALE_SECONDS_BY_CHAIN[chainId] : undefined) ?? ORACLE_STALE_SECONDS;
+  return (
+    (chainId !== undefined
+      ? ORACLE_STALE_SECONDS_BY_CHAIN[chainId]
+      : undefined) ?? ORACLE_STALE_SECONDS
+  );
 }
 
 export function isOracleFresh(
@@ -81,7 +85,10 @@ export function isOracleFresh(
  * per-feed from SortedOracles at index time), falling back to ORACLE_STALE_SECONDS
  * for pools that pre-date this field.
  */
-export function computeHealthStatus(pool: PoolHealthState, chainId?: number): HealthStatus {
+export function computeHealthStatus(
+  pool: PoolHealthState,
+  chainId?: number,
+): HealthStatus {
   if (pool.source?.includes("virtual")) return "N/A";
   const isOracleStale = !isOracleFresh(pool, undefined, chainId);
   if (isOracleStale) {
@@ -142,17 +149,20 @@ export function worstStatus(a: string, b: string): HealthStatus {
  * Compute the effective display status for a pool, taking the worst of
  * oracle health and trading limit status. This is what the Health badge shows.
  */
-export function computeEffectiveStatus(pool: {
-  source?: string;
-  oracleOk?: boolean;
-  oracleTimestamp?: string;
-  oracleExpiry?: string;
-  priceDifference?: string;
-  rebalanceThreshold?: number;
-  limitStatus?: string;
-  limitPressure0?: string;
-  limitPressure1?: string;
-}, chainId?: number): HealthStatus {
+export function computeEffectiveStatus(
+  pool: {
+    source?: string;
+    oracleOk?: boolean;
+    oracleTimestamp?: string;
+    oracleExpiry?: string;
+    priceDifference?: string;
+    rebalanceThreshold?: number;
+    limitStatus?: string;
+    limitPressure0?: string;
+    limitPressure1?: string;
+  },
+  chainId?: number,
+): HealthStatus {
   const health = computeHealthStatus(pool, chainId);
   const limit: string = pool.limitStatus ?? computeLimitStatus(pool);
   return worstStatus(health, limit);
@@ -180,7 +190,10 @@ export function computeRebalancerLiveness(
   if (!pool.lastRebalancedAt || pool.lastRebalancedAt === "0") return "NO_DATA";
   const age = nowSeconds - Number(pool.lastRebalancedAt);
   // WEEKEND is expected — don't flag the rebalancer as STALE during FX market closure
-  const isStale = age > 86400 && pool.healthStatus !== "OK" && pool.healthStatus !== "WEEKEND";
+  const isStale =
+    age > 86400 &&
+    pool.healthStatus !== "OK" &&
+    pool.healthStatus !== "WEEKEND";
   return isStale ? "STALE" : "ACTIVE";
 }
 
