@@ -34,6 +34,7 @@ const mockNetwork = {
   },
   addressLabels: {},
   local: true,
+  testnet: true,
   hasVirtualPools: true,
 };
 

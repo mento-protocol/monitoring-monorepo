@@ -27,6 +27,7 @@ vi.mock("@/components/network-provider", () => ({
       tokenSymbols: {},
       addressLabels: {},
       hasVirtualPools: false,
+      testnet: false,
     },
     networkId: "celo-mainnet-hosted",
     setNetworkId: vi.fn(),
@@ -57,6 +58,7 @@ const BASE_NETWORK: Network = {
   addressLabels: {},
   local: false,
   hasVirtualPools: false,
+  testnet: false,
 };
 
 const NETWORK_2: Network = {
