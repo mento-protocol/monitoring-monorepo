@@ -1,9 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import {
-  aggregateProtocolFees,
-  tokenToUSD,
-  type ProtocolFeeSummary,
-} from "../protocol-fees";
+import { aggregateProtocolFees, tokenToUSD } from "../protocol-fees";
 import type { ProtocolFeeTransfer } from "../types";
 
 // ---------------------------------------------------------------------------
