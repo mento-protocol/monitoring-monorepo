@@ -23,12 +23,12 @@ function GlobalContent() {
 
   // Whether any network has a top-level, fees, or snapshots failure.
   // Used to show N/A / "partial data" in KPI tiles rather than silently under-reporting.
-  const anyNetworkError = networkData.some((nd) => nd.error !== null);
+  const anyNetworkError = networkData.some((netData) => netData.error !== null);
   const anyFeesError = networkData.some(
-    (nd) => nd.feesError !== null && nd.error === null,
+    (netData) => netData.feesError !== null && netData.error === null,
   );
   const anySnapshotsError = networkData.some(
-    (nd) => nd.snapshotsError !== null && nd.error === null,
+    (netData) => netData.snapshotsError !== null && netData.error === null,
   );
 
   // Aggregate KPIs across all networks.
@@ -51,18 +51,18 @@ function GlobalContent() {
     let hasUnknownTokens = false;
     let isTruncated = false;
 
-    for (const nd of networkData) {
+    for (const netData of networkData) {
       // Skip whole-network errors (pools = [] anyway, already flagged via anyNetworkError)
-      if (nd.error !== null) continue;
+      if (netData.error !== null) continue;
 
-      const { network, pools, snapshots, fees } = nd;
+      const { network, pools, snapshots, fees } = netData;
       const fpmmPools = pools.filter(isFpmm);
       totalPools += pools.length;
       totalFpmmPools += fpmmPools.length;
       totalTvl += fpmmPools.reduce((sum, p) => sum + poolTvlUSD(p, network), 0);
 
       // Only add volume/swaps when snapshots succeeded for this network
-      if (nd.snapshotsError === null) {
+      if (netData.snapshotsError === null) {
         const volume24hMap = buildPool24hVolumeMap(snapshots, pools, network);
         if (totalVolume24h !== null) {
           totalVolume24h += Array.from(volume24hMap.values()).reduce<number>(
@@ -77,7 +77,7 @@ function GlobalContent() {
       }
 
       // Only add fees when fees query succeeded for this network
-      if (nd.feesError === null && fees !== null) {
+      if (netData.feesError === null && fees !== null) {
         if (totalFeesAllTime !== null) totalFeesAllTime += fees.totalFeesUSD;
         if (totalFees24h !== null) totalFees24h += fees.fees24hUSD;
         if (fees.hasUnknownTokens) hasUnknownTokens = true;
@@ -100,7 +100,7 @@ function GlobalContent() {
 
   // Show sections for networks that have pools or encountered an error
   const configuredNetworks = networkData.filter(
-    (nd) => nd.pools.length > 0 || nd.error !== null,
+    (netData) => netData.pools.length > 0 || netData.error !== null,
   );
 
   return (
@@ -130,7 +130,9 @@ function GlobalContent() {
           <Tile
             label="TVL (FPMMs)"
             value={isLoading ? "…" : formatUSD(aggregated.totalTvl)}
-            subtitle={anyNetworkError ? "Partial data — some chains failed" : undefined}
+            subtitle={
+              anyNetworkError ? "Partial data — some chains failed" : undefined
+            }
           />
           <Tile
             label="Total Fees Earned"
@@ -208,8 +210,8 @@ function GlobalContent() {
           <EmptyBox message="No pools found across any chain." />
         </section>
       ) : (
-        configuredNetworks.map((nd) => (
-          <ChainPoolsSection key={nd.network.id} networkData={nd} />
+        configuredNetworks.map((netData) => (
+          <ChainPoolsSection key={netData.network.id} networkData={netData} />
         ))
       )}
     </div>
@@ -226,9 +228,7 @@ function ChainPoolsSection({ networkData }: { networkData: NetworkData }) {
 
   return (
     <section>
-      <h2 className="text-lg font-semibold text-white mb-3">
-        {network.label}
-      </h2>
+      <h2 className="text-lg font-semibold text-white mb-3">{network.label}</h2>
       {error ? (
         <ErrorBox message={`Failed to load pools: ${error.message}`} />
       ) : pools.length === 0 ? (

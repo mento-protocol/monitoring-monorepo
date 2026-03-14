@@ -52,19 +52,9 @@ vi.mock("graphql-request", () => {
 import { GraphQLClient } from "graphql-request";
 
 function mockRequest(impl: (query: string) => unknown) {
-  (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>).mockImplementation(
-    (query: string) => Promise.resolve(impl(query)),
-  );
-}
-
-function mockRequestFail(query: string, error: Error) {
-  (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>).mockImplementation(
-    (q: string) => {
-      if (q === query) return Promise.reject(error);
-      // Default success for other queries
-      return Promise.resolve({ Pool: [], ProtocolFeeTransfer: [], PoolSnapshot: [] });
-    },
-  );
+  (
+    GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+  ).mockImplementation((query: string) => Promise.resolve(impl(query)));
 }
 
 beforeEach(() => {
@@ -80,7 +70,8 @@ describe("fetchNetworkData — happy path", () => {
     const pool = makePool("pool-1");
     mockRequest((query) => {
       if (query.includes("Pool")) return { Pool: [pool] };
-      if (query.includes("ProtocolFeeTransfer")) return { ProtocolFeeTransfer: [] };
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
       if (query.includes("PoolSnapshot")) return { PoolSnapshot: [] };
       return {};
     });
@@ -104,17 +95,23 @@ describe("fetchNetworkData — happy path", () => {
 
     await fetchNetworkData(MOCK_NETWORK_WITH_SECRET, 0, 1000);
 
-    const constructorArgs = (GraphQLClient as ReturnType<typeof vi.fn>).mock.calls[0];
+    const constructorArgs = (GraphQLClient as ReturnType<typeof vi.fn>).mock
+      .calls[0];
     const headers = constructorArgs[1]?.headers ?? {};
     expect(headers["x-hasura-admin-secret"]).toBe("my-secret");
   });
 
   it("omits auth header when secret is empty", async () => {
-    mockRequest(() => ({ Pool: [], ProtocolFeeTransfer: [], PoolSnapshot: [] }));
+    mockRequest(() => ({
+      Pool: [],
+      ProtocolFeeTransfer: [],
+      PoolSnapshot: [],
+    }));
 
     await fetchNetworkData(MOCK_NETWORK, 0, 1000);
 
-    const constructorArgs = (GraphQLClient as ReturnType<typeof vi.fn>).mock.calls[0];
+    const constructorArgs = (GraphQLClient as ReturnType<typeof vi.fn>).mock
+      .calls[0];
     const headers = constructorArgs[1]?.headers ?? {};
     expect(headers["x-hasura-admin-secret"]).toBeUndefined();
   });
@@ -127,7 +124,9 @@ describe("fetchNetworkData — happy path", () => {
 describe("fetchNetworkData — pools query failure", () => {
   it("returns error and empty data when pools query throws", async () => {
     const poolsError = new Error("pools query failed");
-    (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>).mockRejectedValue(poolsError);
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockRejectedValue(poolsError);
 
     const result = await fetchNetworkData(MOCK_NETWORK, 0, 1000);
 
@@ -149,14 +148,15 @@ describe("fetchNetworkData — fees query failure only", () => {
     const pool = makePool("pool-a");
     const feesErr = new Error("fees timeout");
 
-    (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>).mockImplementation(
-      (query: string) => {
-        if (query.includes("ProtocolFeeTransfer")) return Promise.reject(feesErr);
-        if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
-        if (query.includes("PoolSnapshot")) return Promise.resolve({ PoolSnapshot: [] });
-        return Promise.resolve({});
-      },
-    );
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((query: string) => {
+      if (query.includes("ProtocolFeeTransfer")) return Promise.reject(feesErr);
+      if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
+      if (query.includes("PoolSnapshot"))
+        return Promise.resolve({ PoolSnapshot: [] });
+      return Promise.resolve({});
+    });
 
     const result = await fetchNetworkData(MOCK_NETWORK, 0, 1000);
 
@@ -177,15 +177,15 @@ describe("fetchNetworkData — snapshots query failure only", () => {
     const pool = makePool("pool-b");
     const snapErr = new Error("snapshots unavailable");
 
-    (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>).mockImplementation(
-      (query: string) => {
-        if (query.includes("PoolSnapshot")) return Promise.reject(snapErr);
-        if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
-        if (query.includes("ProtocolFeeTransfer"))
-          return Promise.resolve({ ProtocolFeeTransfer: [] });
-        return Promise.resolve({});
-      },
-    );
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((query: string) => {
+      if (query.includes("PoolSnapshot")) return Promise.reject(snapErr);
+      if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
+      if (query.includes("ProtocolFeeTransfer"))
+        return Promise.resolve({ ProtocolFeeTransfer: [] });
+      return Promise.resolve({});
+    });
 
     const result = await fetchNetworkData(MOCK_NETWORK, 0, 1000);
 
@@ -204,9 +204,9 @@ describe("fetchNetworkData — snapshots query failure only", () => {
 
 describe("fetchNetworkData — non-Error thrown values", () => {
   it("wraps string rejection in Error for pools failure", async () => {
-    (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>).mockRejectedValue(
-      "something went wrong",
-    );
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockRejectedValue("something went wrong");
 
     const result = await fetchNetworkData(MOCK_NETWORK, 0, 1000);
 
