@@ -38,15 +38,18 @@ type AllNetworksResult = {
   error: Error | null;
 };
 
-async function fetchNetworkData(
+/** @internal Exported for testing only. */
+export async function fetchNetworkData(
   network: Network,
   from: number,
   to: number,
 ): Promise<NetworkData> {
+  // Trim whitespace — matches useGQL behaviour; Hasura treats whitespace-only
+  // secrets as invalid auth and returns access-denied rather than falling
+  // through to unauthenticated access.
+  const secret = network.hasuraSecret.trim();
   const client = new GraphQLClient(network.hasuraUrl, {
-    headers: network.hasuraSecret
-      ? { "x-hasura-admin-secret": network.hasuraSecret }
-      : {},
+    headers: secret ? { "x-hasura-admin-secret": secret } : {},
   });
 
   // Pools are required — if this fails, the whole network entry is an error.
