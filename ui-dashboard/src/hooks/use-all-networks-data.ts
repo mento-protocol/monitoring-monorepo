@@ -126,7 +126,8 @@ export async function fetchNetworkData(
   };
 }
 
-async function fetchAllNetworks(): Promise<NetworkData[]> {
+/** @internal Exported for testing only. */
+export async function fetchAllNetworks(): Promise<NetworkData[]> {
   const configuredNetworkIds = NETWORK_IDS.filter(isConfiguredNetworkId);
   const { from, to } = snapshotWindow24h(Date.now());
 
