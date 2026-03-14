@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fetchNetworkData } from "../use-all-networks-data";
+import { fetchNetworkData, fetchAllNetworks } from "../use-all-networks-data";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
 
@@ -229,13 +229,12 @@ describe("fetchNetworkData — non-Error thrown values", () => {
 });
 
 // ---------------------------------------------------------------------------
-// fetchAllNetworks — cross-network orchestration
+// fetchNetworkData — cross-network isolation
+// (These tests exercise fetchNetworkData in isolation, not fetchAllNetworks.
+//  See the fetchAllNetworks section below for orchestration-level tests.)
 // ---------------------------------------------------------------------------
-// We test fetchAllNetworks by calling fetchNetworkData directly for each
-// network in the same pattern the real function uses, to cover the
-// allSettled mapping logic without needing to mock module internals.
 
-describe("fetchAllNetworks — mixed fulfilled/rejected handling", () => {
+describe("fetchNetworkData — cross-network isolation", () => {
   it("one network pools failure does not affect the other network", async () => {
     const pool = makePool("pool-x");
     const poolsErr = new Error("network down");
@@ -333,5 +332,167 @@ describe("fetchAllNetworks — mixed fulfilled/rejected handling", () => {
     expect(result.feesError).toBeNull();
     expect(result.snapshots).toHaveLength(0);
     expect(result.fees).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchAllNetworks — orchestration (Promise.allSettled + rejection mapping)
+// ---------------------------------------------------------------------------
+// These tests call fetchAllNetworks() directly and control which networks it
+// sees by mocking @/lib/networks. This verifies the actual orchestration path:
+// allSettled mapping, index→network metadata preservation, and rejection wrapping.
+
+vi.mock("@/lib/networks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/networks")>();
+  return {
+    ...actual,
+    NETWORK_IDS: ["celo-mainnet-hosted", "celo-sepolia-hosted"],
+    NETWORKS: {
+      "celo-mainnet-hosted": {
+        id: "celo-mainnet-hosted",
+        label: "Celo Mainnet (hosted)",
+        chainId: 42220,
+        contractsNamespace: null,
+        hasuraUrl: "https://mainnet.example.com/v1/graphql",
+        hasuraSecret: "",
+        explorerBaseUrl: "https://celoscan.io",
+        tokenSymbols: {},
+        addressLabels: {},
+        local: false,
+        hasVirtualPools: false,
+      },
+      "celo-sepolia-hosted": {
+        id: "celo-sepolia-hosted",
+        label: "Celo Sepolia (hosted)",
+        chainId: 11142220,
+        contractsNamespace: null,
+        hasuraUrl: "https://sepolia.example.com/v1/graphql",
+        hasuraSecret: "",
+        explorerBaseUrl: "https://celo-sepolia.blockscout.com",
+        tokenSymbols: {},
+        addressLabels: {},
+        local: false,
+        hasVirtualPools: false,
+      },
+    },
+    isConfiguredNetworkId: (id: string) =>
+      ["celo-mainnet-hosted", "celo-sepolia-hosted"].includes(id),
+  };
+});
+
+describe("fetchAllNetworks — orchestration", () => {
+  it("returns one result per configured network", async () => {
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({
+      Pool: [],
+      ProtocolFeeTransfer: [],
+      PoolSnapshot: [],
+    });
+
+    const results = await fetchAllNetworks();
+
+    expect(results).toHaveLength(2);
+    expect(results[0].network.id).toBe("celo-mainnet-hosted");
+    expect(results[1].network.id).toBe("celo-sepolia-hosted");
+  });
+
+  it("fulfilled network has correct pools and no error", async () => {
+    const pool = makePool("pool-main");
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((query: string) => {
+      if (query.includes("PoolSnapshot"))
+        return Promise.resolve({ PoolSnapshot: [] });
+      if (query.includes("ProtocolFeeTransfer"))
+        return Promise.resolve({ ProtocolFeeTransfer: [] });
+      if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
+      return Promise.resolve({});
+    });
+
+    const results = await fetchAllNetworks();
+    const mainnet = results.find(
+      (r) => r.network.id === "celo-mainnet-hosted",
+    )!;
+
+    expect(mainnet.error).toBeNull();
+    expect(mainnet.pools).toHaveLength(1);
+    expect(mainnet.pools[0].id).toBe("pool-main");
+  });
+
+  it("rejected network maps error and preserves network metadata", async () => {
+    const err = new Error("sepolia down");
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation(() => {
+      // Fail only the sepolia URL
+      const url = (GraphQLClient as ReturnType<typeof vi.fn>).mock.calls.at(
+        -1,
+      )?.[0];
+      if (url?.includes("sepolia")) return Promise.reject(err);
+      return Promise.resolve({
+        Pool: [],
+        ProtocolFeeTransfer: [],
+        PoolSnapshot: [],
+      });
+    });
+
+    const results = await fetchAllNetworks();
+    const sepolia = results.find(
+      (r) => r.network.id === "celo-sepolia-hosted",
+    )!;
+
+    expect(sepolia.network.id).toBe("celo-sepolia-hosted");
+    expect(sepolia.error).toBe(err);
+    expect(sepolia.pools).toHaveLength(0);
+  });
+
+  it("one network failing does not prevent others from succeeding", async () => {
+    const pool = makePool("pool-ok");
+    // Track call count: mainnet gets calls 1-3 (pools/fees/snapshots),
+    // sepolia gets call 4 which we reject.
+    let callCount = 0;
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((query: string) => {
+      callCount++;
+      // Reject every request to the sepolia client (constructed second)
+      const constructedUrls = (
+        GraphQLClient as ReturnType<typeof vi.fn>
+      ).mock.calls.map((c: unknown[]) => c[0] as string);
+      const lastUrl = constructedUrls[constructedUrls.length - 1] ?? "";
+      if (lastUrl.includes("sepolia"))
+        return Promise.reject(new Error("sepolia down"));
+      if (query.includes("PoolSnapshot"))
+        return Promise.resolve({ PoolSnapshot: [] });
+      if (query.includes("ProtocolFeeTransfer"))
+        return Promise.resolve({ ProtocolFeeTransfer: [] });
+      return Promise.resolve({ Pool: [pool] });
+    });
+
+    const results = await fetchAllNetworks();
+    const mainnet = results.find(
+      (r) => r.network.id === "celo-mainnet-hosted",
+    )!;
+    const sepolia = results.find(
+      (r) => r.network.id === "celo-sepolia-hosted",
+    )!;
+
+    expect(mainnet.error).toBeNull();
+    expect(sepolia.error).not.toBeNull();
+    // callCount used to suppress unused-var lint
+    expect(callCount).toBeGreaterThan(0);
+  });
+
+  it("wraps non-Error rejections in Error objects", async () => {
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockRejectedValue("string rejection");
+
+    const results = await fetchAllNetworks();
+
+    for (const result of results) {
+      expect(result.error).toBeInstanceOf(Error);
+    }
   });
 });
