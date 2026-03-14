@@ -594,14 +594,13 @@ describe("Envio Celo indexer handlers", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // priceDifference fallback tests
+  // priceDifference tests — oracle handlers use event oracle + local computation
   // ---------------------------------------------------------------------------
-  // In unit tests, fetchRebalancingState() makes an RPC call that fails (no real
-  // node), so it returns null and the handlers fall back to computePriceDifference().
-  // These tests verify the fallback path stores a correct priceDifference on both
-  // the Pool entity and the OracleSnapshot.
+  // OracleReported and MedianUpdated use event.params.value for the oracle price
+  // and computePriceDifference() for deviation — no getRebalancingState() RPC call.
+  // This avoids block-final state inconsistency and O(pools) RPC round-trips.
 
-  it("OracleReported: falls back to computePriceDifference when fetchRebalancingState fails, and stores priceDifference on pool + snapshot", async () => {
+  it("OracleReported: stores priceDifference computed from event oracle + existing reserves", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000ae";
     const FEED_ID = "0x000000000000000000000000000000000000babe";
     // Oracle ≈ 1.0 at 24dp
@@ -667,7 +666,7 @@ describe("Envio Celo indexer handlers", () => {
     assert.equal(snapshot!.source, "oracle_reported");
   });
 
-  it("MedianUpdated: falls back to computePriceDifference when fetchRebalancingState fails, and stores priceDifference on pool + snapshot", async () => {
+  it("MedianUpdated: stores priceDifference computed from event oracle + existing reserves", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000af";
     const FEED_ID = "0x000000000000000000000000000000000000deaf";
     const ORACLE_PRICE_24DP = 1_000_000_000_000_000_000_000_000n;
@@ -875,20 +874,18 @@ describe("Envio Celo indexer handlers", () => {
     _clearMockRebalancingStates();
   });
 
-  it("OracleReported: uses getRebalancingState() for both oraclePrice and priceDifference when available", async () => {
+  it("OracleReported: uses event oracle price (not getRebalancingState) even when RPC mock is available", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000c0";
     const FEED_ID = "0x000000000000000000000000000000000000cafe";
-    const REPORTER_PRICE = 1_000_000_000_000_000_000_000_000n; // 1.0 at 24dp (event.params.value)
-    // Contract-derived price: numerator * ORACLE_ADAPTER_SCALE_FACTOR = 1.05e18 * 1e6 = 1.05e24
-    const CONTRACT_PRICE_NUM = 1_050_000_000_000_000_000n; // 1.05 at 18dp
-    const CONTRACT_PRICE = CONTRACT_PRICE_NUM * 1_000_000n; // 1.05 at 24dp
-
-    // getRebalancingState is now called — oraclePrice and priceDifference both come from it.
+    const REPORTER_PRICE = 1_000_000_000_000_000_000_000_000n; // 1.0 at 24dp
+    // Even though a mock rebalancing state is available with a different oracle
+    // price, the handler should ignore it and use event.params.value directly.
+    const CONTRACT_PRICE_NUM = 1_050_000_000_000_000_000n;
     _setMockRebalancingState(42220, POOL_ADDR, {
       oraclePriceNumerator: CONTRACT_PRICE_NUM,
       oraclePriceDenominator: 1_000_000_000_000_000_000n,
       rebalanceThreshold: 500,
-      priceDifference: 999n, // block-final priceDifference from contract
+      priceDifference: 999n,
     });
 
     let mockDb = MockDb.createMockDb();
@@ -897,7 +894,6 @@ describe("Envio Celo indexer handlers", () => {
       feedId: FEED_ID,
     });
 
-    // Seed with imbalanced reserves — computePriceDifference gives ~3333 bps
     const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...seeded,
@@ -929,50 +925,30 @@ describe("Envio Celo indexer handlers", () => {
 
     const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
     assert.ok(pool, "Pool must exist after OracleReported");
-    // oraclePrice must come from getRebalancingState() (block-final), NOT event.params.value
+    // oraclePrice must come from event.params.value, NOT getRebalancingState
     assert.equal(
       pool.oraclePrice,
-      CONTRACT_PRICE,
-      `expected contract-derived oracle price ${CONTRACT_PRICE}, got ${pool.oraclePrice}`,
+      REPORTER_PRICE,
+      `expected event oracle price ${REPORTER_PRICE}, got ${pool.oraclePrice}`,
     );
-    // RPC priceDifference (999 bps) takes precedence over local computePriceDifference (~3333 bps)
-    assert.equal(
-      pool.priceDifference,
-      999n,
-      `expected priceDifference 999 bps from getRebalancingState(), got ${pool.priceDifference}`,
-    );
-
-    const snapshotId = `${42220}_${700}_${20}-${POOL_ADDR}`;
-    const snapshot = mockDb.entities.OracleSnapshot.get(snapshotId) as
-      | OracleSnapshotEntity
-      | undefined;
-    assert.ok(snapshot, "OracleSnapshot must be written");
-    assert.equal(
-      snapshot!.oraclePrice,
-      CONTRACT_PRICE,
-      "Snapshot oraclePrice must match contract-derived price",
-    );
-    assert.equal(
-      snapshot!.priceDifference,
-      pool.priceDifference,
-      "Snapshot priceDifference must match pool (from getRebalancingState)",
+    // priceDifference from computePriceDifference (reserves 40k/60k, oracle 1.0 → ~3333 bps)
+    assert.ok(
+      pool.priceDifference >= 3330n && pool.priceDifference <= 3340n,
+      `expected priceDifference ~3333 bps (local computation), got ${pool.priceDifference}`,
     );
   });
 
-  it("MedianUpdated: uses getRebalancingState() for both oraclePrice and priceDifference when available", async () => {
+  it("MedianUpdated: uses event oracle price (not getRebalancingState) even when RPC mock is available", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000c4";
     const FEED_ID = "0x000000000000000000000000000000000000beef";
-    const MEDIAN_PRICE = 1_000_000_000_000_000_000_000_000n; // 1.0 at 24dp (event.params.value)
-    // Contract-derived price: numerator * ORACLE_ADAPTER_SCALE_FACTOR = 1.05e18 * 1e6 = 1.05e24
-    const CONTRACT_PRICE_NUM = 1_050_000_000_000_000_000n; // 1.05 at 18dp
-    const CONTRACT_PRICE = CONTRACT_PRICE_NUM * 1_000_000n; // 1.05 at 24dp
-
-    // Mock RPC state — handler should use this for both oraclePrice and priceDifference
+    const MEDIAN_PRICE = 1_000_000_000_000_000_000_000_000n; // 1.0 at 24dp
+    // Mock RPC state — handler should NOT use this for oracle events
+    const CONTRACT_PRICE_NUM = 1_050_000_000_000_000_000n;
     _setMockRebalancingState(42220, POOL_ADDR, {
       oraclePriceNumerator: CONTRACT_PRICE_NUM,
       oraclePriceDenominator: 1_000_000_000_000_000_000n,
       rebalanceThreshold: 500,
-      priceDifference: 999n, // block-final priceDifference from contract
+      priceDifference: 999n,
     });
 
     let mockDb = MockDb.createMockDb();
@@ -981,7 +957,6 @@ describe("Envio Celo indexer handlers", () => {
       feedId: FEED_ID,
     });
 
-    // Seed with imbalanced reserves — computePriceDifference gives ~3333 bps
     const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...seeded,
@@ -1011,33 +986,16 @@ describe("Envio Celo indexer handlers", () => {
 
     const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
     assert.ok(pool, "Pool must exist after MedianUpdated");
-    // oraclePrice must come from getRebalancingState() (block-final), NOT event.params.value
+    // oraclePrice must come from event.params.value, NOT getRebalancingState
     assert.equal(
       pool.oraclePrice,
-      CONTRACT_PRICE,
-      `expected contract-derived oracle price ${CONTRACT_PRICE}, got ${pool.oraclePrice}`,
+      MEDIAN_PRICE,
+      `expected event oracle price ${MEDIAN_PRICE}, got ${pool.oraclePrice}`,
     );
-    // RPC priceDifference (999 bps) takes precedence over local computePriceDifference (~3333 bps)
-    assert.equal(
-      pool.priceDifference,
-      999n,
-      `expected priceDifference 999 bps from getRebalancingState(), got ${pool.priceDifference}`,
-    );
-
-    const snapshotId = `${42220}_${701}_${21}-${POOL_ADDR}`;
-    const snapshot = mockDb.entities.OracleSnapshot.get(snapshotId) as
-      | OracleSnapshotEntity
-      | undefined;
-    assert.ok(snapshot, "OracleSnapshot must be written for MedianUpdated");
-    assert.equal(
-      snapshot!.oraclePrice,
-      CONTRACT_PRICE,
-      "Snapshot oraclePrice must match contract-derived price",
-    );
-    assert.equal(
-      snapshot!.priceDifference,
-      pool.priceDifference,
-      "Snapshot priceDifference must match pool (from getRebalancingState)",
+    // priceDifference from computePriceDifference (reserves 40k/60k, oracle 1.0 → ~3333 bps)
+    assert.ok(
+      pool.priceDifference >= 3330n && pool.priceDifference <= 3340n,
+      `expected priceDifference ~3333 bps (local computation), got ${pool.priceDifference}`,
     );
   });
 

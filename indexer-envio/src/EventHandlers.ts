@@ -1522,22 +1522,13 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
             blockNumber,
           )) ?? existing.oracleExpiry);
 
-    // Fetch contract's authoritative state (pinned to event block).
-    // Both oraclePrice and priceDifference come from the same block-final
-    // getRebalancingState() call for internal consistency. Falls back to
-    // event.params.value + local computePriceDifference() only when RPC fails.
-    // Note: eth_call is block-final, not tx-final — accepted monitoring approximation.
-    const rebalancingState = await fetchRebalancingState(
-      event.chainId,
-      poolId,
-      blockNumber,
-    );
-    const isInverted = existing?.invertRateFeed ?? false;
-    const oraclePrice = rebalancingState
-      ? isInverted
-        ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
-        : rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR
-      : event.params.value;
+    // Use the event's oracle price directly — it is the exact value reported
+    // in this tx. We avoid calling getRebalancingState() here because:
+    // 1. It returns block-final state, not event-time state (stale if multiple
+    //    oracle reports land in the same block)
+    // 2. It adds O(pools) serial RPC calls per oracle event, slowing backfills
+    // priceDifference is recomputed locally from the event oracle + DB reserves.
+    const oraclePrice = event.params.value;
 
     const updatedPool: Pool = {
       ...existing,
@@ -1550,14 +1541,11 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
-    const priceDifference = rebalancingState
-      ? rebalancingState.priceDifference
-      : !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+    const priceDifference =
+      !updatedPool.source?.includes("virtual") && oraclePrice > 0n
         ? computePriceDifference(updatedPool)
         : updatedPool.priceDifference;
-    const rebalanceThreshold =
-      rebalancingState?.rebalanceThreshold ?? updatedPool.rebalanceThreshold;
-    const withDev = { ...updatedPool, priceDifference, rebalanceThreshold };
+    const withDev = { ...updatedPool, priceDifference };
     const healthStatus = computeHealthStatus(withDev);
     const finalPool = { ...withDev, healthStatus };
     context.Pool.set(finalPool);
@@ -1572,7 +1560,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       oracleOk: true,
       numReporters: oracleNumReporters ?? existing.oracleNumReporters,
       priceDifference,
-      rebalanceThreshold,
+      rebalanceThreshold: existing.rebalanceThreshold,
       source: "oracle_reported",
       blockNumber,
     };
@@ -1609,22 +1597,8 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
             blockNumber,
           )) ?? existing.oracleExpiry);
 
-    // Fetch contract's authoritative state (pinned to event block).
-    // Both oraclePrice and priceDifference come from the same block-final
-    // getRebalancingState() call for internal consistency. Falls back to
-    // event.params.value + local computePriceDifference() only when RPC fails.
-    // Note: eth_call is block-final, not tx-final — accepted monitoring approximation.
-    const rebalancingState = await fetchRebalancingState(
-      event.chainId,
-      poolId,
-      blockNumber,
-    );
-    const isInverted = existing?.invertRateFeed ?? false;
-    const oraclePrice = rebalancingState
-      ? isInverted
-        ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
-        : rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR
-      : event.params.value;
+    // Same as OracleReported: use event oracle + local computePriceDifference.
+    const oraclePrice = event.params.value;
 
     const updatedPool: Pool = {
       ...existing,
@@ -1637,14 +1611,11 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
-    const priceDifference = rebalancingState
-      ? rebalancingState.priceDifference
-      : !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+    const priceDifference =
+      !updatedPool.source?.includes("virtual") && oraclePrice > 0n
         ? computePriceDifference(updatedPool)
         : updatedPool.priceDifference;
-    const rebalanceThreshold =
-      rebalancingState?.rebalanceThreshold ?? updatedPool.rebalanceThreshold;
-    const withDev = { ...updatedPool, priceDifference, rebalanceThreshold };
+    const withDev = { ...updatedPool, priceDifference };
     const healthStatus = computeHealthStatus(withDev);
     const finalPool = { ...withDev, healthStatus };
     context.Pool.set(finalPool);
@@ -1659,7 +1630,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       oracleOk: true,
       numReporters: oracleNumReporters ?? existing.oracleNumReporters,
       priceDifference,
-      rebalanceThreshold,
+      rebalanceThreshold: existing.rebalanceThreshold,
       source: "oracle_median_updated",
       blockNumber,
     };
