@@ -39,6 +39,8 @@ export type Network = {
   addressLabels: Record<string, string>;
   /** True for networks that require a locally-running indexer — hidden in deployed environments */
   local: boolean;
+  /** True for test/staging networks — hidden in production unless NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true */
+  testnet: boolean;
   /** Whether this network has VirtualPool contracts (Celo only). Controls UI visibility of virtual-pool-related elements. */
   hasVirtualPools: boolean;
   /** JSON-RPC endpoint used for on-chain reads (e.g. rebalance simulation) */
@@ -77,12 +79,18 @@ function buildNetworkMaps(
 export function makeNetwork(
   config: Omit<
     Network,
-    "tokenSymbols" | "addressLabels" | "local" | "hasVirtualPools" | "rpcUrl"
+    | "tokenSymbols"
+    | "addressLabels"
+    | "local"
+    | "hasVirtualPools"
+    | "rpcUrl"
+    | "testnet"
   > &
     Partial<
       Pick<
         Network,
         | "local"
+        | "testnet"
         | "tokenSymbols"
         | "addressLabels"
         | "hasVirtualPools"
@@ -93,6 +101,7 @@ export function makeNetwork(
   const maps = buildNetworkMaps(config.chainId, config.contractsNamespace);
   return {
     local: false,
+    testnet: false,
     hasVirtualPools: false,
     ...config,
     tokenSymbols: { ...maps.tokenSymbols, ...config.tokenSymbols },
@@ -123,6 +132,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     id: "celo-sepolia-local",
     label: "Celo Sepolia (local)",
     local: true,
+    testnet: true,
     hasVirtualPools: true,
     chainId: 11142220,
     contractsNamespace: NS["celo-sepolia"],
@@ -141,6 +151,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
   "celo-sepolia-hosted": makeNetwork({
     id: "celo-sepolia-hosted",
     label: "Celo Sepolia (hosted)",
+    testnet: true,
     hasVirtualPools: true,
     chainId: 11142220,
     contractsNamespace: NS["celo-sepolia"],
@@ -205,6 +216,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
   "monad-testnet-hosted": makeNetwork({
     id: "monad-testnet-hosted",
     label: "Monad Testnet",
+    testnet: true,
     chainId: 10143,
     contractsNamespace: NS["monad-testnet"],
     rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_MONAD_TESTNET,
@@ -228,14 +240,20 @@ export function isNetworkId(v: string): v is IndexerNetworkId {
  * Unconfigured networks (e.g. Monad before Envio deploy) are excluded from
  * navigation and URL routing so users can never land on a broken state.
  * Local networks are always considered unconfigured unless NEXT_PUBLIC_SHOW_LOCAL_NETWORKS=true.
+ * Testnet networks are excluded in production unless NEXT_PUBLIC_SHOW_TESTNET_NETWORKS=true.
  */
 const showLocalNetworks =
   typeof process !== "undefined" &&
   process.env.NEXT_PUBLIC_SHOW_LOCAL_NETWORKS === "true";
 
+export const showTestnetNetworks =
+  typeof process !== "undefined" &&
+  process.env.NEXT_PUBLIC_SHOW_TESTNET_NETWORKS === "true";
+
 export function isConfiguredNetworkId(v: string): v is IndexerNetworkId {
   if (!isNetworkId(v)) return false;
   const network = NETWORKS[v];
   if (!showLocalNetworks && network.local) return false;
+  if (!showTestnetNetworks && network.testnet) return false;
   return !!network.hasuraUrl;
 }

@@ -19,6 +19,7 @@ const MOCK_NETWORK: Network = {
   addressLabels: {},
   local: false,
   hasVirtualPools: false,
+  testnet: false,
 };
 
 const MOCK_NETWORK_2: Network = {
@@ -360,6 +361,7 @@ vi.mock("@/lib/networks", async (importOriginal) => {
         addressLabels: {},
         local: false,
         hasVirtualPools: false,
+        testnet: false,
       },
       "celo-sepolia-hosted": {
         id: "celo-sepolia-hosted",
@@ -373,6 +375,7 @@ vi.mock("@/lib/networks", async (importOriginal) => {
         addressLabels: {},
         local: false,
         hasVirtualPools: false,
+        testnet: false,
       },
     },
     isConfiguredNetworkId: (id: string) =>
