@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Shim: delegates to trunk's git-hook callback from the correct repo root.
+# Lives in .trunk/hooks/ so core.hooksPath can point here and work from any
+# machine (server, Mac, CI) regardless of where trunk's cache dir is.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+TRUNK="${REPO_ROOT}/tools/trunk"
+
+if [[ ! -x "${TRUNK}" ]]; then
+  echo "trunk not found at ${TRUNK} — skipping pre-commit hooks" >&2
+  exit 0
+fi
+
+TRUNK_LAUNCHER_QUIET=true "${TRUNK}" git-hooks callback pre-commit -- "$@"

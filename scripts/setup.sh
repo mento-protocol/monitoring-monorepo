@@ -14,9 +14,13 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+echo "▶ Configuring git hooks..."
+git config core.hooksPath .trunk/hooks
+echo "  core.hooksPath → .trunk/hooks"
 
 echo "▶ Installing dependencies..."
-cd "$REPO_ROOT"
 pnpm install --frozen-lockfile
 
 echo "▶ Running Envio codegen (celo-mainnet config)..."
