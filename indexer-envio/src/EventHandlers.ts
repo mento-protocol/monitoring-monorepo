@@ -1524,11 +1524,6 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
           )) ?? existing.oracleExpiry);
 
     // oraclePrice comes from event.params.value (the individual reporter's value).
-    // priceDifference is recomputed locally using the new oracle price + existing
-    // reserves, keeping both values self-consistent from the same data snapshot.
-    // We intentionally avoid getRebalancingState() here: it would mix block-final
-    // contract state with per-event oracle prices, producing rows where price and
-    // deviation come from different on-chain moments.
     const oraclePrice = event.params.value;
 
     const updatedPool: Pool = {
@@ -1542,11 +1537,23 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
+    // Fetch contract's authoritative priceDifference (pinned to event block).
+    // Note: eth_call is block-final, not tx-final — accepted monitoring approximation.
+    // oraclePrice = event.params.value (per-event value); priceDifference =
+    // getRebalancingState() (block-final contract deviation using effective median).
+    const rebalancingState = await fetchRebalancingState(
+      event.chainId,
+      poolId,
+      blockNumber,
+    );
     const priceDifference =
-      !updatedPool.source?.includes("virtual") && oraclePrice > 0n
-        ? computePriceDifference(updatedPool)
-        : updatedPool.priceDifference;
-    const rebalanceThreshold = updatedPool.rebalanceThreshold;
+      rebalancingState != null
+        ? rebalancingState.priceDifference
+        : !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+          ? computePriceDifference(updatedPool)
+          : updatedPool.priceDifference;
+    const rebalanceThreshold =
+      rebalancingState?.rebalanceThreshold ?? updatedPool.rebalanceThreshold;
     const withDev = { ...updatedPool, priceDifference, rebalanceThreshold };
     const healthStatus = computeHealthStatus(withDev);
     const finalPool = { ...withDev, healthStatus };
@@ -1600,10 +1607,6 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
           )) ?? existing.oracleExpiry);
 
     // oraclePrice comes from event.params.value (the median update value).
-    // priceDifference is recomputed locally using the new oracle price + existing
-    // reserves, keeping both values self-consistent from the same data snapshot.
-    // Same rationale as OracleReported: avoid getRebalancingState() to prevent
-    // mixing block-final contract state with per-event oracle prices.
     const oraclePrice = event.params.value;
 
     const updatedPool: Pool = {
@@ -1617,11 +1620,23 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
+    // Fetch contract's authoritative priceDifference (pinned to event block).
+    // Note: eth_call is block-final, not tx-final — accepted monitoring approximation.
+    // oraclePrice = event.params.value (per-event value); priceDifference =
+    // getRebalancingState() (block-final contract deviation using effective median).
+    const rebalancingState = await fetchRebalancingState(
+      event.chainId,
+      poolId,
+      blockNumber,
+    );
     const priceDifference =
-      !updatedPool.source?.includes("virtual") && oraclePrice > 0n
-        ? computePriceDifference(updatedPool)
-        : updatedPool.priceDifference;
-    const rebalanceThreshold = updatedPool.rebalanceThreshold;
+      rebalancingState != null
+        ? rebalancingState.priceDifference
+        : !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+          ? computePriceDifference(updatedPool)
+          : updatedPool.priceDifference;
+    const rebalanceThreshold =
+      rebalancingState?.rebalanceThreshold ?? updatedPool.rebalanceThreshold;
     const withDev = { ...updatedPool, priceDifference, rebalanceThreshold };
     const healthStatus = computeHealthStatus(withDev);
     const finalPool = { ...withDev, healthStatus };
