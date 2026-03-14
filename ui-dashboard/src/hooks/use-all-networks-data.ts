@@ -71,32 +71,49 @@ export async function fetchNetworkData(
     };
   }
 
-  // Fees and snapshots are independent — failures are surfaced per-field so the
-  // UI can show "N/A" rather than silently reporting $0 or zero volume.
-  let fees: ProtocolFeeSummary | null = null;
-  let feesError: Error | null = null;
-  try {
-    const feesRes = await client.request<{
-      ProtocolFeeTransfer: ProtocolFeeTransfer[];
-    }>(PROTOCOL_FEE_TRANSFERS_ALL);
-    fees = aggregateProtocolFees(feesRes.ProtocolFeeTransfer ?? []);
-  } catch (err) {
-    feesError = err instanceof Error ? err : new Error(String(err));
-  }
-
-  let snapshots: PoolSnapshot24h[] = [];
-  let snapshotsError: Error | null = null;
+  // Fees and snapshots are independent — run concurrently after pools succeeds.
+  // Failures are surfaced per-field so the UI can show "N/A" rather than
+  // silently reporting $0 or zero volume.
   const poolIds = pools.map((p) => p.id);
-  if (shouldQueryPoolSnapshots24h(poolIds)) {
-    try {
-      const snapshotsRes = await client.request<{
-        PoolSnapshot: PoolSnapshot24h[];
-      }>(POOL_SNAPSHOTS_24H, { from, to, poolIds });
-      snapshots = snapshotsRes?.PoolSnapshot ?? [];
-    } catch (err) {
-      snapshotsError = err instanceof Error ? err : new Error(String(err));
-    }
-  }
+  const [feesResult, snapshotsResult] = await Promise.allSettled([
+    client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
+      PROTOCOL_FEE_TRANSFERS_ALL,
+    ),
+    shouldQueryPoolSnapshots24h(poolIds)
+      ? client.request<{ PoolSnapshot: PoolSnapshot24h[] }>(
+          POOL_SNAPSHOTS_24H,
+          {
+            from,
+            to,
+            poolIds,
+          },
+        )
+      : Promise.resolve<{ PoolSnapshot: PoolSnapshot24h[] }>({
+          PoolSnapshot: [],
+        }),
+  ]);
+
+  const fees =
+    feesResult.status === "fulfilled"
+      ? aggregateProtocolFees(feesResult.value.ProtocolFeeTransfer ?? [])
+      : null;
+  const feesError =
+    feesResult.status === "rejected"
+      ? feesResult.reason instanceof Error
+        ? feesResult.reason
+        : new Error(String(feesResult.reason))
+      : null;
+
+  const snapshots =
+    snapshotsResult.status === "fulfilled"
+      ? (snapshotsResult.value.PoolSnapshot ?? [])
+      : [];
+  const snapshotsError =
+    snapshotsResult.status === "rejected"
+      ? snapshotsResult.reason instanceof Error
+        ? snapshotsResult.reason
+        : new Error(String(snapshotsResult.reason))
+      : null;
 
   return {
     network,
