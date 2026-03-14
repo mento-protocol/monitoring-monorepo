@@ -6,6 +6,7 @@ import {
   computeLimitStatus,
   computeRebalancerLiveness,
   worstStatus,
+  getOracleStalenessThreshold,
 } from "../health";
 
 /** A recent oracle timestamp (2 minutes ago) — within 5-min SortedOracles expiry. */
@@ -544,6 +545,105 @@ describe("computeHealthStatus per-feed oracleExpiry", () => {
         priceDifference: "0",
         rebalanceThreshold: 5000,
       }),
+    ).toBe("OK");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-chain fallback for getOracleStalenessThreshold
+// ---------------------------------------------------------------------------
+describe("getOracleStalenessThreshold per-chain fallback", () => {
+  it("Monad mainnet (143): fallback = 360s when oracleExpiry is 0", () => {
+    expect(getOracleStalenessThreshold({ oracleExpiry: "0" }, 143)).toBe(360);
+  });
+
+  it("Celo mainnet (42220): fallback = 300s when oracleExpiry is 0", () => {
+    expect(getOracleStalenessThreshold({ oracleExpiry: "0" }, 42220)).toBe(300);
+  });
+
+  it("Unknown chain: fallback = 300s (ORACLE_STALE_SECONDS default)", () => {
+    expect(getOracleStalenessThreshold({ oracleExpiry: "0" }, 99999)).toBe(300);
+  });
+
+  it("Unknown chain with no chainId arg: fallback = 300s", () => {
+    expect(getOracleStalenessThreshold({ oracleExpiry: "0" })).toBe(300);
+  });
+
+  it("Pool with oracleExpiry > 0 overrides chain fallback (Monad 143)", () => {
+    // oracleExpiry=600 should win over the chain default of 360
+    expect(getOracleStalenessThreshold({ oracleExpiry: "600" }, 143)).toBe(600);
+  });
+
+  it("Pool with oracleExpiry > 0 overrides chain fallback (Celo 42220)", () => {
+    expect(getOracleStalenessThreshold({ oracleExpiry: "480" }, 42220)).toBe(480);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeHealthStatus uses per-chain fallback when oracleExpiry is missing
+// ---------------------------------------------------------------------------
+describe("computeHealthStatus per-chain fallback via chainId", () => {
+  const FROZEN_NOW_MS = 1_700_000_000_000;
+  const frozenNowSec = Math.floor(FROZEN_NOW_MS / 1000);
+
+  beforeAll(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FROZEN_NOW_MS);
+  });
+
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  it("Monad (143): 340s-old oracle is fresh (360s fallback)", () => {
+    // 340s < 360s → OK. At Celo's 300s threshold this would be CRITICAL.
+    const ts = String(frozenNowSec - 340);
+    expect(
+      computeHealthStatus(
+        { source: "fpmm_factory", oracleTimestamp: ts, priceDifference: "0", rebalanceThreshold: 5000 },
+        143,
+      ),
+    ).toBe("OK");
+  });
+
+  it("Monad (143): 361s-old oracle is stale → CRITICAL", () => {
+    const ts = String(frozenNowSec - 361);
+    expect(
+      computeHealthStatus(
+        { source: "fpmm_factory", oracleTimestamp: ts, priceDifference: "0", rebalanceThreshold: 5000 },
+        143,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it("Celo (42220): 301s-old oracle is stale → CRITICAL (300s fallback)", () => {
+    const ts = String(frozenNowSec - 301);
+    expect(
+      computeHealthStatus(
+        { source: "fpmm_factory", oracleTimestamp: ts, priceDifference: "0", rebalanceThreshold: 5000 },
+        42220,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it("Unknown chain: 301s-old oracle is stale → CRITICAL (300s default)", () => {
+    const ts = String(frozenNowSec - 301);
+    expect(
+      computeHealthStatus(
+        { source: "fpmm_factory", oracleTimestamp: ts, priceDifference: "0", rebalanceThreshold: 5000 },
+        99999,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it("oracleExpiry > 0 overrides chain fallback: 340s-old with expiry=600 on Celo is fresh", () => {
+    // Even on Celo (300s fallback), if oracleExpiry=600 is indexed then 340s is fresh.
+    const ts = String(frozenNowSec - 340);
+    expect(
+      computeHealthStatus(
+        { source: "fpmm_factory", oracleTimestamp: ts, oracleExpiry: "600", priceDifference: "0", rebalanceThreshold: 5000 },
+        42220,
+      ),
     ).toBe("OK");
   });
 });

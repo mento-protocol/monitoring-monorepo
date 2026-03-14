@@ -117,7 +117,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     data: rebalanceCheck,
     isLoading: rebalanceCheckLoading,
     error: rebalanceCheckError,
-  } = useRebalanceCheck(pool, network);
+  } = useRebalanceCheck(pool, network, network.chainId);
 
   const showRebalanceDiag =
     rebalanceCheck !== null || rebalanceCheckLoading || !!rebalanceCheckError;

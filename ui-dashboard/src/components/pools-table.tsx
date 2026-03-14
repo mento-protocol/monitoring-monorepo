@@ -13,7 +13,7 @@ import {
   computeLimitStatus,
   computeRebalancerLiveness,
   worstStatus,
-  ORACLE_STALE_SECONDS_BY_CHAIN,
+  getOracleStalenessThreshold,
 } from "@/lib/health";
 import type { RebalancerStatus } from "@/lib/health";
 import { poolTotalVolumeUSD } from "@/lib/volume";
@@ -23,10 +23,7 @@ function healthTooltip(status: string, p: Pool, chainId?: number): string {
   const oracleTs = Number(p.oracleTimestamp ?? "0");
   // Mirror computeHealthStatus: use the indexed per-feed expiry, falling back to the
   // per-chain default so the tooltip root-cause matches the badge on non-300s networks.
-  const chainFallback =
-    (chainId !== undefined ? ORACLE_STALE_SECONDS_BY_CHAIN[chainId] : undefined) ?? 300;
-  const stalenessThreshold =
-    Number(p.oracleExpiry ?? "0") || chainFallback;
+  const stalenessThreshold = getOracleStalenessThreshold(p, chainId);
   const isOracleStale =
     oracleTs === 0 ||
     Math.floor(Date.now() / 1000) - oracleTs > stalenessThreshold;
