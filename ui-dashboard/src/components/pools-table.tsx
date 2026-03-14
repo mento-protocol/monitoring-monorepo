@@ -13,18 +13,20 @@ import {
   computeLimitStatus,
   computeRebalancerLiveness,
   worstStatus,
-  ORACLE_STALE_SECONDS,
+  ORACLE_STALE_SECONDS_BY_CHAIN,
 } from "@/lib/health";
 import type { RebalancerStatus } from "@/lib/health";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 
-function healthTooltip(status: string, p: Pool): string {
+function healthTooltip(status: string, p: Pool, chainId?: number): string {
   if (status === "N/A") return "VirtualPool — oracle health not tracked";
   const oracleTs = Number(p.oracleTimestamp ?? "0");
   // Mirror computeHealthStatus: use the indexed per-feed expiry, falling back to the
-  // global default so the tooltip root-cause matches the badge on non-300s feeds.
+  // per-chain default so the tooltip root-cause matches the badge on non-300s networks.
+  const chainFallback =
+    (chainId !== undefined ? ORACLE_STALE_SECONDS_BY_CHAIN[chainId] : undefined) ?? 300;
   const stalenessThreshold =
-    Number(p.oracleExpiry ?? "0") || ORACLE_STALE_SECONDS;
+    Number(p.oracleExpiry ?? "0") || chainFallback;
   const isOracleStale =
     oracleTs === 0 ||
     Math.floor(Date.now() / 1000) - oracleTs > stalenessThreshold;
@@ -60,7 +62,7 @@ function combinedTooltip(
   p: Pool,
   network: ReturnType<typeof useNetwork>["network"],
 ): string {
-  const hTip = healthTooltip(healthStatus, p);
+  const hTip = healthTooltip(healthStatus, p, network.chainId);
   const lFrag = limitTooltipFragment(limitStatus, p, network);
   return lFrag ? `${hTip} · ${lFrag}` : hTip;
 }
@@ -115,11 +117,11 @@ export function sortPools(
         break;
       case "health": {
         const aH = worstStatus(
-          computeHealthStatus(a),
+          computeHealthStatus(a, network.chainId),
           a.limitStatus ?? computeLimitStatus(a),
         );
         const bH = worstStatus(
-          computeHealthStatus(b),
+          computeHealthStatus(b, network.chainId),
           b.limitStatus ?? computeLimitStatus(b),
         );
         cmp = (HEALTH_ORDER[aH] ?? 99) - (HEALTH_ORDER[bH] ?? 99);
@@ -333,7 +335,7 @@ export function PoolsTable({
       </thead>
       <tbody>
         {sortedPools.map((p) => {
-          const healthStatus = computeHealthStatus(p);
+          const healthStatus = computeHealthStatus(p, network.chainId);
           const limitStatus = p.limitStatus ?? computeLimitStatus(p);
           const effectiveStatus = worstStatus(healthStatus, limitStatus);
           const rebalancerStatus = computeRebalancerLiveness(

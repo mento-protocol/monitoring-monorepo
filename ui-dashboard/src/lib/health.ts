@@ -14,6 +14,24 @@ export type HealthStatus = "OK" | "WARN" | "CRITICAL" | "N/A";
  */
 export const ORACLE_STALE_SECONDS = 300;
 
+/**
+ * Per-chain fallback for SortedOracles.reportExpirySeconds().
+ *
+ * Values fetched on-chain 2025-03-14:
+ *   - Celo mainnet  (42220): 300s  (0x12c)
+ *   - Monad mainnet (143):   360s  (0x168)
+ *
+ * Used when oracleExpiry is 0 in the DB (pool created before the indexer
+ * started fetching it, or first-seen on a chain that returned null).
+ * Falls back to ORACLE_STALE_SECONDS (300) for unknown chains.
+ */
+export const ORACLE_STALE_SECONDS_BY_CHAIN: Record<number, number> = {
+  42220: 300, // Celo mainnet
+  11142220: 300, // Celo Alfajores
+  143: 360, // Monad mainnet
+  10143: 360, // Monad testnet
+};
+
 export interface PoolHealthState {
   source?: string;
   oracleOk?: boolean;
@@ -23,10 +41,13 @@ export interface PoolHealthState {
   rebalanceThreshold?: number;
 }
 
-export function getOracleStalenessThreshold(pool: {
-  oracleExpiry?: string;
-}): number {
-  return Number(pool.oracleExpiry ?? "0") || ORACLE_STALE_SECONDS;
+export function getOracleStalenessThreshold(
+  pool: { oracleExpiry?: string },
+  chainId?: number,
+): number {
+  const indexed = Number(pool.oracleExpiry ?? "0");
+  if (indexed > 0) return indexed;
+  return (chainId !== undefined ? ORACLE_STALE_SECONDS_BY_CHAIN[chainId] : undefined) ?? ORACLE_STALE_SECONDS;
 }
 
 export function isOracleFresh(
@@ -35,9 +56,10 @@ export function isOracleFresh(
     oracleExpiry?: string;
   },
   nowSeconds = Math.floor(Date.now() / 1000),
+  chainId?: number,
 ): boolean {
   const oracleTs = Number(pool.oracleTimestamp ?? "0");
-  const stalenessThreshold = getOracleStalenessThreshold(pool);
+  const stalenessThreshold = getOracleStalenessThreshold(pool, chainId);
   return oracleTs !== 0 && nowSeconds - oracleTs <= stalenessThreshold;
 }
 
@@ -56,9 +78,9 @@ export function isOracleFresh(
  * per-feed from SortedOracles at index time), falling back to ORACLE_STALE_SECONDS
  * for pools that pre-date this field.
  */
-export function computeHealthStatus(pool: PoolHealthState): HealthStatus {
+export function computeHealthStatus(pool: PoolHealthState, chainId?: number): HealthStatus {
   if (pool.source?.includes("virtual")) return "N/A";
-  const isOracleStale = !isOracleFresh(pool);
+  const isOracleStale = !isOracleFresh(pool, undefined, chainId);
   if (isOracleStale) return "CRITICAL";
   const diff = Number(pool.priceDifference ?? "0");
   const threshold =
@@ -122,8 +144,8 @@ export function computeEffectiveStatus(pool: {
   limitStatus?: string;
   limitPressure0?: string;
   limitPressure1?: string;
-}): HealthStatus {
-  const health = computeHealthStatus(pool);
+}, chainId?: number): HealthStatus {
+  const health = computeHealthStatus(pool, chainId);
   const limit: string = pool.limitStatus ?? computeLimitStatus(pool);
   return worstStatus(health, limit);
 }

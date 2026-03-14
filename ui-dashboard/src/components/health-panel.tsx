@@ -94,8 +94,8 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     pool.oracleTimestamp && pool.oracleTimestamp !== "0"
       ? nowSeconds - Number(pool.oracleTimestamp)
       : Infinity;
-  const stalenessThreshold = getOracleStalenessThreshold(pool);
-  const oracleIsFresh = isOracleFresh(pool, nowSeconds);
+  const stalenessThreshold = getOracleStalenessThreshold(pool, network.chainId);
+  const oracleIsFresh = isOracleFresh(pool, nowSeconds, network.chainId);
 
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
@@ -126,7 +126,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <div className="flex items-center gap-3 mb-4">
         <h2 className="text-base font-semibold text-white">Health Status</h2>
-        <HealthBadge status={computeHealthStatus(pool)} />
+        <HealthBadge status={computeHealthStatus(pool, network.chainId)} />
       </div>
 
       {isVirtual ? (
