@@ -1979,12 +1979,14 @@ async function resolveFeeTokenMeta(
     feeTokenMetaCache.set(cacheKey, meta);
     return meta;
   } catch {
+    // Don't cache failures — a transient RPC error would permanently mis-scale
+    // this token (e.g. treating 6-decimal USDC as 18-decimal). On retry the RPC
+    // will likely succeed and the correct metadata will be cached.
     console.warn(
-      `[ERC20FeeToken] Failed to read decimals/symbol for ${tokenAddress} on chain ${chainId}. Defaulting to 18dp.`,
+      `[ERC20FeeToken] Failed to read decimals/symbol for ${tokenAddress} on chain ${chainId}. ` +
+        `Using fallback (18dp / UNKNOWN) for this event only — will retry on next transfer.`,
     );
-    const fallback = { symbol: "UNKNOWN", decimals: 18 };
-    feeTokenMetaCache.set(cacheKey, fallback);
-    return fallback;
+    return { symbol: "UNKNOWN", decimals: 18 };
   }
 }
 
