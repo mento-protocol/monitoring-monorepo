@@ -8,6 +8,7 @@ import {
   getOracleStalenessThreshold,
   isOracleFresh,
 } from "@/lib/health";
+import { isWeekend } from "@/lib/weekend";
 import {
   tokenSymbol,
   chainlinkFeedUrl,
@@ -94,8 +95,8 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     pool.oracleTimestamp && pool.oracleTimestamp !== "0"
       ? nowSeconds - Number(pool.oracleTimestamp)
       : Infinity;
-  const stalenessThreshold = getOracleStalenessThreshold(pool);
-  const oracleIsFresh = isOracleFresh(pool, nowSeconds);
+  const stalenessThreshold = getOracleStalenessThreshold(pool, network.chainId);
+  const oracleIsFresh = isOracleFresh(pool, nowSeconds, network.chainId);
 
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
@@ -126,7 +127,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <div className="flex items-center gap-3 mb-4">
         <h2 className="text-base font-semibold text-white">Health Status</h2>
-        <HealthBadge status={computeHealthStatus(pool)} />
+        <HealthBadge status={computeHealthStatus(pool, network.chainId)} />
       </div>
 
       {isVirtual ? (
@@ -137,6 +138,23 @@ export function HealthPanel({ pool }: HealthPanelProps) {
         <p className="text-sm text-slate-400">
           Oracle health data not yet available — indexer schema update pending.
         </p>
+      ) : !oracleIsFresh && isWeekend() ? (
+        <div className="flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-800/40 px-4 py-3 text-sm text-slate-300">
+          <span
+            className="text-base leading-5 flex-shrink-0"
+            aria-hidden="true"
+          >
+            🌙
+          </span>
+          <span>
+            <span className="font-medium text-slate-200">
+              Trading is paused for the weekend.
+            </span>{" "}
+            FX markets are closed and no fresh oracle data is available. Pool
+            trading will resume automatically when markets reopen (~Sunday 23:00
+            UTC).
+          </span>
+        </div>
       ) : (
         <div
           className={`flex flex-col ${showRebalanceDiag ? "lg:flex-row" : ""} gap-6`}

@@ -28,7 +28,7 @@ export function useRebalanceCheck(
   isLoading: boolean;
   error: Error | undefined;
 } {
-  const shouldCheck = shouldRunCheck(pool) && !!network.rpcUrl;
+  const shouldCheck = shouldRunCheck(pool, network.chainId) && !!network.rpcUrl;
   const key = shouldCheck
     ? `rebalance-check:${network.id}:${pool!.id}:${pool!.rebalancerAddress}`
     : null;
@@ -52,13 +52,15 @@ export function useRebalanceCheck(
   };
 }
 
-function shouldRunCheck(pool: Pool | null): boolean {
+function shouldRunCheck(pool: Pool | null, chainId?: number): boolean {
   if (!pool) return false;
   if (pool.source?.includes("virtual")) return false;
   if (!pool.rebalancerAddress) return false;
 
-  const health = computeHealthStatus(pool);
-  if (health === "OK" || health === "N/A") return false;
+  // Pass chainId so chain-aware staleness thresholds are used (e.g. Monad = 360s)
+  const health = computeHealthStatus(pool, chainId);
+  // WEEKEND = expected oracle staleness during FX market closure, not actionable
+  if (health === "OK" || health === "N/A" || health === "WEEKEND") return false;
 
   // Only check if deviation is at or above threshold (pool actually needs rebalancing).
   // Use the same fallback as computeHealthStatus (10000 bps) when threshold is missing.
