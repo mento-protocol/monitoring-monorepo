@@ -83,12 +83,20 @@ const snapshotId = (poolId: string, hourTs: bigint): string =>
  * at 24dp precision. Divide by 10^SORTED_ORACLES_DECIMALS to get the
  * human-readable price (e.g. "1 GBP = 1.34 USD").
  *
- * OracleReported/MedianUpdated handlers now call getRebalancingState() for
- * block-final consistency: both oraclePrice and priceDifference are derived
- * from the same RPC call (18dp numerator/denominator × ORACLE_ADAPTER_SCALE_FACTOR
- * to restore 24dp). Falls back to event.params.value + local computePriceDifference()
- * only when getRebalancingState() fails (e.g. stale oracle, error 0xa407143a).
- * UpdateReserves/Rebalanced handlers use the same pattern. */
+ * priceDifference data sourcing strategy (by handler):
+ *
+ * - **UpdateReserves**: getRebalancingState() at blockNumber (1 RPC per pool).
+ *   Block-final, not tx-final, but acceptable: same pool rarely has >1 event/block.
+ *   The event only provides reserves, not oracle data or priceDifference.
+ *
+ * - **Rebalanced**: event.params.priceDifferenceAfter (exact, emitted by contract).
+ *   getRebalancingState() used only for oraclePrice + threshold.
+ *
+ * - **OracleReported / MedianUpdated**: event.params.value for oraclePrice,
+ *   computePriceDifference() for deviation. Does NOT call getRebalancingState()
+ *   because (a) eth_call is block-final and would disagree with the event's own
+ *   oracle price when multiple reports land in one block, and (b) it would add
+ *   O(pools) serial RPC round-trips per oracle event, slowing backfills. */
 const SORTED_ORACLES_DECIMALS = 24;
 
 /** OracleAdapter divides both numerator and denominator by 1e6, converting
@@ -1214,10 +1222,13 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Fetch fresh rebalancing state for FPMM pools (pinned to event block).
-  // Note: eth_call is block-final, not tx-final. Multiple events in the same block
-  // may all record the same post-block priceDifference — an accepted approximation
-  // for monitoring purposes.
+  // Fetch rebalancing state from the pool contract (pinned to event block).
+  //
+  // ⚠️ eth_call at blockNumber returns block-final state, not mid-tx state.
+  // If the same pool has >1 UpdateReserves in one block, earlier events will
+  // record the block-final priceDifference. This is an accepted approximation:
+  // each pool is an independent contract and rarely has multiple events per block.
+  // There is no standard RPC method to read mid-transaction state.
   const rebalancingState = await fetchRebalancingState(
     event.chainId,
     poolId,
