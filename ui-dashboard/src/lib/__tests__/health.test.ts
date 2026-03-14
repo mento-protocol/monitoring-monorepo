@@ -575,7 +575,9 @@ describe("getOracleStalenessThreshold per-chain fallback", () => {
   });
 
   it("Pool with oracleExpiry > 0 overrides chain fallback (Celo 42220)", () => {
-    expect(getOracleStalenessThreshold({ oracleExpiry: "480" }, 42220)).toBe(480);
+    expect(getOracleStalenessThreshold({ oracleExpiry: "480" }, 42220)).toBe(
+      480,
+    );
   });
 });
 
@@ -600,7 +602,12 @@ describe("computeHealthStatus per-chain fallback via chainId", () => {
     const ts = String(frozenNowSec - 340);
     expect(
       computeHealthStatus(
-        { source: "fpmm_factory", oracleTimestamp: ts, priceDifference: "0", rebalanceThreshold: 5000 },
+        {
+          source: "fpmm_factory",
+          oracleTimestamp: ts,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
         143,
       ),
     ).toBe("OK");
@@ -610,7 +617,12 @@ describe("computeHealthStatus per-chain fallback via chainId", () => {
     const ts = String(frozenNowSec - 361);
     expect(
       computeHealthStatus(
-        { source: "fpmm_factory", oracleTimestamp: ts, priceDifference: "0", rebalanceThreshold: 5000 },
+        {
+          source: "fpmm_factory",
+          oracleTimestamp: ts,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
         143,
       ),
     ).toBe("CRITICAL");
@@ -620,7 +632,12 @@ describe("computeHealthStatus per-chain fallback via chainId", () => {
     const ts = String(frozenNowSec - 301);
     expect(
       computeHealthStatus(
-        { source: "fpmm_factory", oracleTimestamp: ts, priceDifference: "0", rebalanceThreshold: 5000 },
+        {
+          source: "fpmm_factory",
+          oracleTimestamp: ts,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
         42220,
       ),
     ).toBe("CRITICAL");
@@ -630,7 +647,12 @@ describe("computeHealthStatus per-chain fallback via chainId", () => {
     const ts = String(frozenNowSec - 301);
     expect(
       computeHealthStatus(
-        { source: "fpmm_factory", oracleTimestamp: ts, priceDifference: "0", rebalanceThreshold: 5000 },
+        {
+          source: "fpmm_factory",
+          oracleTimestamp: ts,
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
         99999,
       ),
     ).toBe("CRITICAL");
@@ -641,7 +663,13 @@ describe("computeHealthStatus per-chain fallback via chainId", () => {
     const ts = String(frozenNowSec - 340);
     expect(
       computeHealthStatus(
-        { source: "fpmm_factory", oracleTimestamp: ts, oracleExpiry: "600", priceDifference: "0", rebalanceThreshold: 5000 },
+        {
+          source: "fpmm_factory",
+          oracleTimestamp: ts,
+          oracleExpiry: "600",
+          priceDifference: "0",
+          rebalanceThreshold: 5000,
+        },
         42220,
       ),
     ).toBe("OK");
