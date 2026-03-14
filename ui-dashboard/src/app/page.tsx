@@ -21,8 +21,9 @@ export default function GlobalPage() {
 function GlobalContent() {
   const { networkData, isLoading } = useAllNetworksData();
 
-  // Whether any network has a fees or snapshots sub-query failure.
-  // Used to show N/A in global KPI tiles rather than silently under-reporting.
+  // Whether any network has a top-level, fees, or snapshots failure.
+  // Used to show N/A / "partial data" in KPI tiles rather than silently under-reporting.
+  const anyNetworkError = networkData.some((nd) => nd.error !== null);
   const anyFeesError = networkData.some(
     (nd) => nd.feesError !== null && nd.error === null,
   );
@@ -31,21 +32,27 @@ function GlobalContent() {
   );
 
   // Aggregate KPIs across all networks.
-  // Only include networks where the relevant sub-query succeeded to avoid
-  // silently mixing real values with zeroed-out failure results.
+  // Pools/TVL include only successfully loaded chains — but we track whether
+  // any chain failed so tiles can show N/A / "partial data" subtitles.
+  // Fees and volume/swaps go null when *any* relevant sub-query failed so we
+  // never mix real values with silently zeroed-out failures.
   const aggregated = useMemo(() => {
     let totalPools = 0;
     let totalFpmmPools = 0;
     let totalTvl = 0;
-    let totalVolume24h: number | null = anySnapshotsError ? null : 0;
-    let totalSwaps24hFpmm: number | null = anySnapshotsError ? null : 0;
-    let totalFeesAllTime: number | null = anyFeesError ? null : 0;
-    let totalFees24h: number | null = anyFeesError ? null : 0;
+    let totalVolume24h: number | null =
+      anySnapshotsError || anyNetworkError ? null : 0;
+    let totalSwaps24hFpmm: number | null =
+      anySnapshotsError || anyNetworkError ? null : 0;
+    let totalFeesAllTime: number | null =
+      anyFeesError || anyNetworkError ? null : 0;
+    let totalFees24h: number | null =
+      anyFeesError || anyNetworkError ? null : 0;
     let hasUnknownTokens = false;
     let isTruncated = false;
 
     for (const nd of networkData) {
-      // Skip whole-network errors — pools = [] anyway
+      // Skip whole-network errors (pools = [] anyway, already flagged via anyNetworkError)
       if (nd.error !== null) continue;
 
       const { network, pools, snapshots, fees } = nd;
@@ -89,7 +96,7 @@ function GlobalContent() {
       hasUnknownTokens,
       isTruncated,
     };
-  }, [networkData, anySnapshotsError, anyFeesError]);
+  }, [networkData, anyNetworkError, anySnapshotsError, anyFeesError]);
 
   // Show sections for networks that have pools or encountered an error
   const configuredNetworks = networkData.filter(
@@ -115,12 +122,15 @@ function GlobalContent() {
             subtitle={
               isLoading
                 ? undefined
-                : `${aggregated.totalFpmmPools} FPMMs · ${aggregated.totalPools - aggregated.totalFpmmPools} Virtual`
+                : anyNetworkError
+                  ? `${aggregated.totalFpmmPools} FPMMs · ${aggregated.totalPools - aggregated.totalFpmmPools} Virtual · partial data`
+                  : `${aggregated.totalFpmmPools} FPMMs · ${aggregated.totalPools - aggregated.totalFpmmPools} Virtual`
             }
           />
           <Tile
             label="TVL (FPMMs)"
             value={isLoading ? "…" : formatUSD(aggregated.totalTvl)}
+            subtitle={anyNetworkError ? "Partial data — some chains failed" : undefined}
           />
           <Tile
             label="Total Fees Earned"
