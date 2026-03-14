@@ -138,34 +138,33 @@ All envio configs share the same Docker project name (`generated`, derived from 
 
 The envio-generated `generated/docker-compose.yaml` does not include a healthcheck for the postgres service. Without one, Docker reports `Health:""` and the envio binary waits indefinitely. `scripts/run-envio-with-env.mjs` automatically patches the file to add a `pg_isready` healthcheck after every `pnpm codegen` run. If you regenerate the compose file manually, re-run codegen via the script (not directly via `envio codegen`) to re-apply the patch.
 
+## New Worktree / Clone Setup
+
+After creating a new worktree or cloning the repo, run:
+
+```bash
+./scripts/setup.sh
+```
+
+This installs deps and runs Envio codegen (required for `indexer-envio` TypeScript to compile — the `generated/` dir is gitignored).
+
 ## Pre-Push Checklist (MANDATORY for server-side work)
 
 > ⚠️ **Git hooks don't run on the server.** Trunk's pre-push hooks live in the Mac's common `.git/hooks/` dir. When pushing from the server, they are silently skipped. CI is the first place checks run — and CI failures are far more expensive than local checks. Always run these manually before pushing:
 
 ```bash
-# From the repo root (or worktree root):
-./tools/trunk fmt --all                                            # Format everything
-./tools/trunk check --all                                         # Lint + codespell on all files
-pnpm indexer:celo-mainnet:codegen                                 # Required before indexer typecheck
-pnpm --filter @mento-protocol/ui-dashboard typecheck              # Dashboard TS
-pnpm --filter @mento-protocol/indexer-envio typecheck             # Indexer TS
-pnpm --filter @mento-protocol/ui-dashboard test:coverage          # Tests
+./tools/trunk fmt --all
+./tools/trunk check --all
+pnpm --filter @mento-protocol/ui-dashboard typecheck
+pnpm --filter @mento-protocol/indexer-envio typecheck
+pnpm --filter @mento-protocol/ui-dashboard test:coverage
 ```
-
-**Checklist:**
-
-- [ ] `trunk fmt --all` — no formatting issues
-- [ ] `trunk check --all` — no lint/codespell issues
-- [ ] Codegen run (if touching `schema.graphql` or indexer configs)
-- [ ] `ui-dashboard typecheck` clean
-- [ ] `indexer-envio typecheck` clean (requires codegen artifacts)
-- [ ] Tests passing
 
 **Common traps:**
 
 - `codespell` flags short variable names that match common abbreviations (e.g. a two-letter loop var that looks like a misspelling). Use descriptive names like `netData` to avoid this.
 - `trunk check <file>` only checks the specified files — always use `--all` to match what CI runs
-- New worktrees need `pnpm indexer:celo-mainnet:codegen` before `indexer-envio typecheck` can pass (the `generated/` dir is gitignored)
+- If `indexer-envio typecheck` fails with "Cannot find module 'generated'", run `./scripts/setup.sh` first
 
 ## Common Tasks
 
