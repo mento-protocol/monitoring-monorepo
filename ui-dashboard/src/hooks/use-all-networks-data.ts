@@ -109,7 +109,7 @@ export async function fetchNetworkData(
   };
 }
 
-async function fetchAllNetworks(_key: string): Promise<NetworkData[]> {
+async function fetchAllNetworks(): Promise<NetworkData[]> {
   const configuredNetworkIds = NETWORK_IDS.filter(isConfiguredNetworkId);
   const { from, to } = snapshotWindow24h(Date.now());
 
