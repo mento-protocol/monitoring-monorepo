@@ -26,8 +26,6 @@ import { createPublicClient, http } from "viem";
 import _sortedOraclesAbi from "@mento-protocol/contracts/abis/SortedOracles.json";
 import {
   requireContractAddress,
-  getContractAddress,
-  buildAddressMap,
   CONTRACT_NAMESPACE_BY_CHAIN,
 } from "./contractAddresses";
 
@@ -41,16 +39,6 @@ const SortedOraclesContract = {
     requireContractAddress(chainId, "SortedOracles"),
   abi: _sortedOraclesAbi,
 };
-
-// USDm addresses set — built lazily from all indexed chains. Missing entries
-// are skipped (getContractAddress returns undefined) rather than throwing,
-// so the indexer can still start if USDm is absent on a future chain.
-const USDM_ADDRESSES = new Set(
-  Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)
-    .map((chainId) => getContractAddress(Number(chainId), "USDm"))
-    .filter((a): a is `0x${string}` => a !== undefined)
-    .map((a) => a.toLowerCase()),
-);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -97,13 +85,20 @@ const snapshotId = (poolId: string, hourTs: bigint): string =>
  * at 24dp precision. Divide by 10^SORTED_ORACLES_DECIMALS to get the
  * human-readable price (e.g. "1 GBP = 1.34 USD").
  *
- * OracleReported/MedianUpdated handlers store event.params.value directly
- * (SortedOracles 24dp rate in feed direction). UpdateReserves/Rebalanced
- * handlers may additionally fetch getRebalancingState() which returns an 18dp
- * value that must be multiplied by ORACLE_ADAPTER_SCALE_FACTOR to restore 24dp.
+ * priceDifference data sourcing strategy (by handler):
  *
- * ⚠️ getRebalancingState() reverts when the oracle is stale (error 0xa407143a).
- * Oracle event handlers avoid calling it entirely — they use event.params.value. */
+ * - **UpdateReserves**: getRebalancingState() at blockNumber (1 RPC per pool).
+ *   Block-final, not tx-final, but acceptable: same pool rarely has >1 event/block.
+ *   The event only provides reserves, not oracle data or priceDifference.
+ *
+ * - **Rebalanced**: event.params.priceDifferenceAfter (exact, emitted by contract).
+ *   getRebalancingState() used only for oraclePrice + threshold.
+ *
+ * - **OracleReported / MedianUpdated**: event.params.value for oraclePrice,
+ *   computePriceDifference() for deviation. Does NOT call getRebalancingState()
+ *   because (a) eth_call is block-final and would disagree with the event's own
+ *   oracle price when multiple reports land in one block, and (b) it would add
+ *   O(pools) serial RPC round-trips per oracle event, slowing backfills. */
 const SORTED_ORACLES_DECIMALS = 24;
 
 /** OracleAdapter divides both numerator and denominator by 1e6, converting
@@ -113,6 +108,31 @@ const ORACLE_ADAPTER_SCALE_FACTOR = 1_000_000n;
 
 // Lazy RPC clients per chainId
 const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
+
+// ---------------------------------------------------------------------------
+// Test hooks — only used in unit tests to inject mock RPC responses.
+// Never set in production; `fetchRebalancingState` checks this map first.
+// ---------------------------------------------------------------------------
+const _testRebalancingStates = new Map<string, RebalancingState | null>();
+
+/** @internal Test-only: pre-set a mock rebalancing state for a pool. */
+export function _setMockRebalancingState(
+  chainId: number,
+  poolAddress: string,
+  state: RebalancingState | null,
+): void {
+  const key = `${chainId}:${poolAddress.toLowerCase()}`;
+  if (state === null) {
+    _testRebalancingStates.delete(key);
+  } else {
+    _testRebalancingStates.set(key, state);
+  }
+}
+
+/** @internal Test-only: clear all mock rebalancing states. */
+export function _clearMockRebalancingStates(): void {
+  _testRebalancingStates.clear();
+}
 
 // Per-chain RPC defaults. ENVIO_RPC_URL overrides the default for the active chain.
 // Every indexed chain MUST have an entry here — missing chains fall through to the
@@ -286,6 +306,9 @@ async function getPoolsWithReferenceFeed(
   return context.Pool.getWhere.referenceRateFeedID.gt("");
 }
 
+/** TradingLimitsV2 stores all limit/netflow values in 15-decimal internal precision. */
+export const TRADING_LIMITS_INTERNAL_DECIMALS = 15;
+
 const FPMM_TRADING_LIMITS_ABI = [
   {
     type: "function",
@@ -367,6 +390,13 @@ const FPMM_MINIMAL_ABI = [
     outputs: [{ name: "", type: "address" }],
     stateMutability: "view",
   },
+  {
+    type: "function",
+    name: "invertRateFeed",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+  },
 ] as const;
 
 type RebalancingState = {
@@ -379,13 +409,20 @@ type RebalancingState = {
 async function fetchRebalancingState(
   chainId: number,
   poolAddress: string,
+  blockNumber?: bigint,
 ): Promise<RebalancingState | null> {
+  // In unit tests, callers inject a mock via _setMockRebalancingState so no RPC is needed.
+  const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
+  if (_testRebalancingStates.has(testKey)) {
+    return _testRebalancingStates.get(testKey) ?? null;
+  }
   try {
     const client = getRpcClient(chainId);
     const result = await client.readContract({
       address: poolAddress as `0x${string}`,
       abi: FPMM_MINIMAL_ABI,
       functionName: "getRebalancingState",
+      ...(blockNumber !== undefined && { blockNumber }),
     });
     // viem returns a tuple: [num, denom, rNum, rDenom, above, threshold, diff]
     const r = result as readonly [
@@ -405,6 +442,24 @@ async function fetchRebalancingState(
     };
   } catch {
     return null;
+  }
+}
+
+/** Fetch the pool's invertRateFeed flag. Returns false on error (default). */
+async function fetchInvertRateFeed(
+  chainId: number,
+  poolAddress: string,
+): Promise<boolean> {
+  try {
+    const client = getRpcClient(chainId);
+    const result = await client.readContract({
+      address: poolAddress as `0x${string}`,
+      abi: FPMM_MINIMAL_ABI,
+      functionName: "invertRateFeed",
+    });
+    return result as boolean;
+  } catch {
+    return false;
   }
 }
 
@@ -539,25 +594,24 @@ function computeLimitPressures(
 // ---------------------------------------------------------------------------
 
 /**
- * Computes priceDifference in basis points (bps) from reserves and oracle price.
+ * Computes priceDifference in basis points (bps) from reserves and oracle price,
+ * matching the on-chain FPMM formula: |reservePrice - oraclePrice| / oraclePrice.
+ *
+ * The on-chain contract always computes in one direction:
+ *   reservePrice = (reserve0 * tpm0) / (reserve1 * tpm1)
+ *   oraclePrice  = oraclePriceNumerator / oraclePriceDenominator
+ *   priceDifference = |reservePrice - oraclePrice| * 10000 / oraclePrice
  *
  * Oracle price is stored in **feed direction** (24dp SortedOracles rate):
  *   e.g. GBP/USD = 1.339150e24 means "1 GBP = 1.339150 USD"
  *
- * The reserve ratio (reserves0/reserves1) is in **pool direction** (token0→token1).
- * To compare them, we need to convert the feed price to pool direction:
+ * When USDm is token0: reserveRatio = USDm/nonUSD = feedPrice → compare directly.
+ * When USDm is token1: reserveRatio = nonUSD/USDm = 1/feedPrice → invert
+ *   reserveRatio to get USDm/nonUSD, then compare against feedPrice directly.
  *
- *   - If token0 is USDm: pool direction = USDm/nonUSD = 1/feedPrice (inverted)
- *     Actually: reserveRatio = reserves0/reserves1 = USDm/GBPm ≈ 0.89
- *     oraclePrice in feed direction = GBP/USD = 1.34
- *     So we compare reserveRatio to feedPrice: |0.89 - 1.34|/1.34 = deviation
- *     Wait — this IS correct because reserves0(USDm)/reserves1(GBPm) should equal
- *     feedPrice(GBP/USD) = how many USDm per GBPm when balanced.
- *
- *   - If token1 is USDm: pool direction = nonUSD/USDm
- *     reserveRatio = nonUSD/USDm. Feed = nonUSD/USD.
- *     In a balanced pool, nonUSD/USDm ≈ 1/feedPrice (since 1 USDm ≈ $1).
- *     So we must INVERT the feed price for comparison.
+ * IMPORTANT: The deviation formula |R - O| / O is NOT invariant under inversion
+ * of both R and O: |1/R - 1/O| / (1/O) = |R - O| / R (divides by R, not O!).
+ * So we must always compute in the feed direction to match the contract.
  *
  * Returns 0n when oracle price or reserves are missing/zero.
  */
@@ -587,57 +641,39 @@ export function scalingFactorToDecimals(scaling: bigint): number | null {
   return n === 1n ? d : null; // reject non-10^n values
 }
 
-function computePriceDifference(pool: {
+export function computePriceDifference(pool: {
   reserves0: bigint;
   reserves1: bigint;
   oraclePrice: bigint;
-  token0?: string;
-  token1?: string;
+  invertRateFeed: boolean;
   token0Decimals: number;
   token1Decimals: number;
 }): bigint {
   if (pool.oraclePrice === 0n || pool.reserves0 === 0n || pool.reserves1 === 0n)
     return 0n;
-  if (!pool.token0 || !pool.token1) return 0n;
 
   const SCALE = 10n ** 24n;
   // Normalize reserves to 18 decimals before computing ratio.
-  // USDT/USDC are 6dp, USDm/GBPm are 18dp — without normalization the ratio
-  // is off by 10^(18-6) = 10^12.
   const norm0 = normalizeTo18(pool.reserves0, pool.token0Decimals);
   const norm1 = normalizeTo18(pool.reserves1, pool.token1Decimals);
+  // Guard against normalization flooring to zero (possible when decimals > 18).
+  if (norm0 === 0n || norm1 === 0n) return 0n;
 
-  // reserveRatio in 24dp: norm0 / norm1
+  // Always compute reserve0/reserve1 — matches the contract's reservePrice.
   const reserveRatio = (norm0 * SCALE) / norm1;
 
-  // Determine oracle ratio in pool direction.
-  // Feed direction = "feedToken/USD" (e.g. GBP/USD = 1.34).
-  // When USDm is token0: pool direction = USDm/nonUSD.
-  //   In a balanced pool: reserves0/reserves1 = feedPrice
-  //   (because 1 GBPm costs 1.34 USDm). → use feed directly.
-  // When USDm is token1: pool direction = nonUSD/USDm.
-  //   In a balanced pool: reserves0/reserves1 = 1/feedPrice. → invert.
-  const usdmIsToken0 = USDM_ADDRESSES.has(pool.token0.toLowerCase());
-  const usdmIsToken1 = USDM_ADDRESSES.has(pool.token1.toLowerCase());
+  // oraclePrice is stored in feed direction (raw SortedOracles rate at 24dp).
+  // When invertRateFeed is true, the contract compares reserves against 1/feedRate.
+  const oracleRef = pool.invertRateFeed
+    ? (SCALE * SCALE) / pool.oraclePrice
+    : pool.oraclePrice;
 
-  let oracleRatio: bigint;
-  if (usdmIsToken0) {
-    // Pool direction matches feed direction
-    oracleRatio = pool.oraclePrice;
-  } else if (usdmIsToken1) {
-    // Pool direction is inverted from feed: oracleRatio = SCALE² / feedPrice
-    oracleRatio = (SCALE * SCALE) / pool.oraclePrice;
-  } else {
-    // Neither token is USDm — can't determine direction, skip
-    return 0n;
-  }
-
-  // priceDiff in bps: |reserveRatio - oracleRatio| * 10000 / oracleRatio
+  // priceDiff in bps: |reserveRatio - oracleRef| * 10000 / oracleRef
   const diff =
-    reserveRatio > oracleRatio
-      ? reserveRatio - oracleRatio
-      : oracleRatio - reserveRatio;
-  return (diff * 10000n) / oracleRatio;
+    reserveRatio > oracleRef
+      ? reserveRatio - oracleRef
+      : oracleRef - reserveRatio;
+  return (diff * 10000n) / oracleRef;
 }
 
 // ---------------------------------------------------------------------------
@@ -702,6 +738,7 @@ const DEFAULT_ORACLE_FIELDS = {
   oracleExpiry: 0n,
   oracleNumReporters: 0,
   referenceRateFeedID: "",
+  invertRateFeed: false,
   priceDifference: 0n,
   rebalanceThreshold: 0,
   lastRebalancedAt: 0n,
@@ -796,9 +833,16 @@ const upsertPool = async ({
     updatedAtTimestamp: blockTimestamp,
   };
 
-  // Recompute priceDifference from reserves + oracle price for FPMM pools
-  const priceDifference =
-    !next.source?.includes("virtual") && next.oraclePrice > 0n
+  // Use contract-provided priceDifference when available (passed via oracleDelta
+  // from fetchRebalancingState). Only fall back to local recomputation when the
+  // contract value was not supplied (e.g. oracle-only update events).
+  const hasContractPriceDiff =
+    oracleDelta != null &&
+    "priceDifference" in oracleDelta &&
+    oracleDelta.priceDifference !== undefined;
+  const priceDifference = hasContractPriceDiff
+    ? oracleDelta.priceDifference!
+    : !next.source?.includes("virtual") && next.oraclePrice > 0n
       ? computePriceDifference(next)
       : next.priceDifference;
 
@@ -900,15 +944,17 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
   // Fetch oracle state from chain at pool creation
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
 
-  const [rateFeedID, rebalanceThreshold, dec0Raw, dec1Raw] = await Promise.all([
-    fetchReferenceRateFeedID(event.chainId, poolId),
-    // Use standalone getters — they work even when the oracle is stale,
-    // unlike getRebalancingState() which reverts on stale/expired oracle data.
-    fetchRebalanceThreshold(event.chainId, poolId),
-    // Fetch token decimals scaling factors (e.g. 1e18 for 18-decimal tokens)
-    fetchTokenDecimalsScaling(event.chainId, poolId, "decimals0"),
-    fetchTokenDecimalsScaling(event.chainId, poolId, "decimals1"),
-  ]);
+  const [rateFeedID, rebalanceThreshold, dec0Raw, dec1Raw, invertRateFeed] =
+    await Promise.all([
+      fetchReferenceRateFeedID(event.chainId, poolId),
+      // Use standalone getters — they work even when the oracle is stale,
+      // unlike getRebalancingState() which reverts on stale/expired oracle data.
+      fetchRebalanceThreshold(event.chainId, poolId),
+      // Fetch token decimals scaling factors (e.g. 1e18 for 18-decimal tokens)
+      fetchTokenDecimalsScaling(event.chainId, poolId, "decimals0"),
+      fetchTokenDecimalsScaling(event.chainId, poolId, "decimals1"),
+      fetchInvertRateFeed(event.chainId, poolId),
+    ]);
   // Convert scaling factor (1e18, 1e6, etc.) to decimals count (18, 6, etc.)
   // scalingFactorToDecimals rejects non-power-of-10 values (returns null → fallback 18)
   const token0Decimals = dec0Raw
@@ -931,6 +977,8 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
       oracleDelta.oracleExpiry = oracleExpiry;
     }
   }
+
+  oracleDelta.invertRateFeed = invertRateFeed;
 
   if (rebalanceThreshold > 0) {
     oracleDelta.rebalanceThreshold = rebalanceThreshold;
@@ -1026,7 +1074,7 @@ FPMM.Swap.handler(async ({ event, context }) => {
         token: pool.token0,
         limit0: limits0.config.limit0,
         limit1: limits0.config.limit1,
-        decimals: limits0.config.decimals,
+        decimals: TRADING_LIMITS_INTERNAL_DECIMALS,
         netflow0: limits0.state.netflow0,
         netflow1: limits0.state.netflow1,
         lastUpdated0: BigInt(limits0.state.lastUpdated0),
@@ -1054,7 +1102,7 @@ FPMM.Swap.handler(async ({ event, context }) => {
         token: pool.token1,
         limit0: limits1.config.limit0,
         limit1: limits1.config.limit1,
-        decimals: limits1.config.decimals,
+        decimals: TRADING_LIMITS_INTERNAL_DECIMALS,
         netflow0: limits1.state.netflow0,
         netflow1: limits1.state.netflow1,
         lastUpdated0: BigInt(limits1.state.lastUpdated0),
@@ -1184,15 +1232,35 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Fetch fresh rebalancing state for FPMM pools
-  const rebalancingState = await fetchRebalancingState(event.chainId, poolId);
+  // Fetch rebalancing state from the pool contract (pinned to event block).
+  //
+  // ⚠️ eth_call at blockNumber returns block-final state, not mid-tx state.
+  // If the same pool has >1 UpdateReserves in one block, earlier events will
+  // record the block-final priceDifference. This is an accepted approximation:
+  // each pool is an independent contract and rarely has multiple events per block.
+  // There is no standard RPC method to read mid-transaction state.
+  const rebalancingState = await fetchRebalancingState(
+    event.chainId,
+    poolId,
+    blockNumber,
+  );
 
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
   if (rebalancingState) {
+    // Read existing pool to check invertRateFeed flag.
+    // For inverted pools, getRebalancingState returns numerator=1e18 and
+    // denominator=feedRate_18dp. We always store oracle price in feed direction
+    // (raw SortedOracles rate at 24dp) for consistency with OracleReported events.
+    const existing = await context.Pool.get(poolId);
+    const isInverted = existing?.invertRateFeed ?? false;
+    const oraclePrice = isInverted
+      ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
+      : rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
+
     oracleDelta = {
-      oraclePrice:
-        rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
+      oraclePrice,
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
+      priceDifference: rebalancingState.priceDifference,
       oracleTimestamp: blockTimestamp,
     };
   }
@@ -1216,8 +1284,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       id: eventId(event.chainId, event.block.number, event.logIndex),
       poolId,
       timestamp: blockTimestamp,
-      oraclePrice:
-        rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
+      oraclePrice: oracleDelta.oraclePrice!,
       oracleOk: pool.oracleOk,
       numReporters: pool.oracleNumReporters,
       priceDifference: pool.priceDifference,
@@ -1255,8 +1322,13 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Fetch fresh rebalancing state post-rebalance
-  const rebalancingState = await fetchRebalancingState(event.chainId, poolId);
+  // Fetch fresh rebalancing state post-rebalance (pinned to event block).
+  // Note: eth_call is block-final, not tx-final — accepted approximation for monitoring.
+  const rebalancingState = await fetchRebalancingState(
+    event.chainId,
+    poolId,
+    blockNumber,
+  );
 
   const rebalancerAddress = asAddress(event.params.sender);
 
@@ -1264,13 +1336,23 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     lastRebalancedAt: blockTimestamp,
     rebalancerAddress,
     rebalanceLivenessStatus: "ACTIVE",
+    // priceDifference comes directly from the event — it is the exact
+    // post-rebalance value emitted by the contract, more authoritative than
+    // getRebalancingState() which is block-final and may reflect later txs.
+    priceDifference: event.params.priceDifferenceAfter,
   };
 
   if (rebalancingState) {
+    // Same inverted-pool logic as UpdateReserves — store feed-direction oracle price.
+    const existing = await context.Pool.get(poolId);
+    const isInverted = existing?.invertRateFeed ?? false;
+    const oraclePrice = isInverted
+      ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
+      : rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
+
     oracleDelta = {
       ...oracleDelta,
-      oraclePrice:
-        rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
+      oraclePrice,
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
       oracleTimestamp: blockTimestamp,
       oracleTxHash: event.transaction.hash,
@@ -1293,8 +1375,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       id: eventId(event.chainId, event.block.number, event.logIndex),
       poolId,
       timestamp: blockTimestamp,
-      oraclePrice:
-        rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
+      oraclePrice: oracleDelta.oraclePrice!,
       oracleOk: pool.oracleOk,
       numReporters: pool.oracleNumReporters,
       priceDifference: pool.priceDifference,
@@ -1364,7 +1445,7 @@ FPMM.TradingLimitConfigured.handler(async ({ event, context }) => {
 
   const limit0 = limits ? limits.config.limit0 : eventLimit0;
   const limit1 = limits ? limits.config.limit1 : eventLimit1;
-  const decimals = limits ? limits.config.decimals : eventDecimals;
+  const decimals = TRADING_LIMITS_INTERNAL_DECIMALS;
   const netflow0 = limits ? limits.state.netflow0 : 0n;
   const netflow1 = limits ? limits.state.netflow1 : 0n;
   const lastUpdated0 = limits ? BigInt(limits.state.lastUpdated0) : 0n;
@@ -1462,13 +1543,12 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
             blockNumber,
           )) ?? existing.oracleExpiry);
 
-    // Use event.params.value directly (SortedOracles 24dp "feedToken/USD" rate).
-    // We intentionally avoid calling getRebalancingState() here because it reverts
-    // when the oracle is stale (expired reports or circuit breaker tripped) — which
-    // is exactly when we most need to record oracle state transitions.
-    // NOTE: oraclePrice is stored in feed direction ("1 feedToken = X USD"), not
-    // pool direction. The dashboard inverts for pools where feedToken == token1
-    // (e.g. GBPm pool: feedValue ≈ 1.27, displayed as 1/1.27 ≈ 0.79 USDm/GBPm).
+    // Use the event's oracle price directly — it is the exact value reported
+    // in this tx. We avoid calling getRebalancingState() here because:
+    // 1. It returns block-final state, not event-time state (stale if multiple
+    //    oracle reports land in the same block)
+    // 2. It adds O(pools) serial RPC calls per oracle event, slowing backfills
+    // priceDifference is recomputed locally from the event oracle + DB reserves.
     const oraclePrice = event.params.value;
 
     const updatedPool: Pool = {
@@ -1482,7 +1562,6 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
-    // Recompute priceDifference with new oracle price + existing reserves
     const priceDifference =
       !updatedPool.source?.includes("virtual") && oraclePrice > 0n
         ? computePriceDifference(updatedPool)
@@ -1539,10 +1618,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
             blockNumber,
           )) ?? existing.oracleExpiry);
 
-    // Use getRebalancingState() so oraclePrice is stored in the pool's token
-    // Use event.params.value directly (median SortedOracles 24dp rate).
-    // Same rationale as OracleReported: avoids getRebalancingState() which
-    // reverts when the oracle is stale. oraclePrice is in feed direction.
+    // Same as OracleReported: use event oracle + local computePriceDifference.
     const oraclePrice = event.params.value;
 
     const updatedPool: Pool = {
@@ -1556,7 +1632,6 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
-    // Recompute priceDifference with new oracle price + existing reserves
     const priceDifference =
       !updatedPool.source?.includes("virtual") && oraclePrice > 0n
         ? computePriceDifference(updatedPool)

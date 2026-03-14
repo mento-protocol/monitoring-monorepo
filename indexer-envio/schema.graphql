@@ -26,6 +26,7 @@ type Pool {
   referenceRateFeedID: String! @index
 
   # Deviation / rebalance state
+  invertRateFeed: Boolean!
   priceDifference: BigInt!
   rebalanceThreshold: Int!
   lastRebalancedAt: BigInt!

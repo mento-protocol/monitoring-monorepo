@@ -4,11 +4,8 @@ import type { Pool, TradingLimit } from "@/lib/types";
 import { LimitBadge } from "@/components/badges";
 import { computeLimitStatus } from "@/lib/health";
 import { tokenSymbol } from "@/lib/tokens";
-import { formatWei } from "@/lib/format";
+import { formatWei, TRADING_LIMITS_INTERNAL_DECIMALS } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
-
-// Default decimals fallback — overridden per-limit by TradingLimit.decimals field.
-const DEFAULT_LIMIT_DECIMALS = 18;
 
 interface PressureBarProps {
   pressure: string;
@@ -103,14 +100,14 @@ export function LimitPanel({ pool, tradingLimits }: LimitPanelProps) {
                   label="5-minute limit (L0)"
                   netflow={tl.netflow0}
                   limit={tl.limit0}
-                  decimals={tl.decimals ?? DEFAULT_LIMIT_DECIMALS}
+                  decimals={TRADING_LIMITS_INTERNAL_DECIMALS}
                 />
                 <PressureBar
                   pressure={tl.limitPressure1}
                   label="Daily limit (L1)"
                   netflow={tl.netflow1}
                   limit={tl.limit1}
-                  decimals={tl.decimals ?? DEFAULT_LIMIT_DECIMALS}
+                  decimals={TRADING_LIMITS_INTERNAL_DECIMALS}
                 />
               </div>
             );
