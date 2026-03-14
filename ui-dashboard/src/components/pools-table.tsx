@@ -13,9 +13,10 @@ import {
   computeLimitStatus,
   computeRebalancerLiveness,
   worstStatus,
-  getOracleStalenessThreshold,
+  ORACLE_STALE_SECONDS_BY_CHAIN,
 } from "@/lib/health";
 import type { RebalancerStatus } from "@/lib/health";
+import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 
 function healthTooltip(status: string, p: Pool, chainId?: number): string {
@@ -23,10 +24,15 @@ function healthTooltip(status: string, p: Pool, chainId?: number): string {
   const oracleTs = Number(p.oracleTimestamp ?? "0");
   // Mirror computeHealthStatus: use the indexed per-feed expiry, falling back to the
   // per-chain default so the tooltip root-cause matches the badge on non-300s networks.
-  const stalenessThreshold = getOracleStalenessThreshold(p, chainId);
+  const chainFallback =
+    (chainId !== undefined ? ORACLE_STALE_SECONDS_BY_CHAIN[chainId] : undefined) ?? 300;
+  const stalenessThreshold =
+    Number(p.oracleExpiry ?? "0") || chainFallback;
   const isOracleStale =
     oracleTs === 0 ||
     Math.floor(Date.now() / 1000) - oracleTs > stalenessThreshold;
+  if (status === "WEEKEND")
+    return "FX markets are closed this weekend — trading paused until ~Sunday 23:00 UTC";
   if (status === "CRITICAL" && isOracleStale)
     return "Oracle stale — last update expired";
   if (status === "CRITICAL")
@@ -88,7 +94,8 @@ const HEALTH_ORDER: Record<string, number> = {
   "N/A": 0,
   OK: 1,
   WARN: 2,
-  CRITICAL: 3,
+  WEEKEND: 3,
+  CRITICAL: 4,
 };
 
 export interface SortContext {
@@ -254,7 +261,19 @@ export function PoolsTable({
     ],
   );
 
+  const showWeekendBanner = isWeekend();
+
   return (
+    <>
+      {showWeekendBanner && (
+        <div className="mb-4 flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-3 text-sm text-slate-300">
+          <span className="text-base leading-5 flex-shrink-0" aria-hidden="true">🌙</span>
+          <span>
+            <span className="font-medium text-slate-200">FX markets are closed this weekend.</span>{" "}
+            Pool trading is paused until markets reopen (~Sunday 23:00 UTC). This is expected — oracle data resumes automatically when markets open.
+          </span>
+        </div>
+      )}
     <Table>
       <thead>
         <tr className="border-b border-slate-800 bg-slate-900/50">
@@ -399,5 +418,6 @@ export function PoolsTable({
         })}
       </tbody>
     </Table>
+    </>
   );
 }

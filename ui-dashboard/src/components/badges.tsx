@@ -1,4 +1,4 @@
-/** Health status badge for oracle/pool health (OK | WARN | CRITICAL | N/A) */
+/** Health status badge for oracle/pool health (OK | WARN | WEEKEND | CRITICAL | N/A) */
 export function HealthBadge({ status }: { status: string }) {
   const configs: Record<
     string,
@@ -15,6 +15,12 @@ export function HealthBadge({ status }: { status: string }) {
       dot: "🟡",
       bg: "bg-amber-500/20",
       text: "text-amber-300",
+    },
+    WEEKEND: {
+      label: "Weekend",
+      dot: "🌙",
+      bg: "bg-slate-500/20",
+      text: "text-slate-300",
     },
     CRITICAL: {
       label: "CRITICAL",
