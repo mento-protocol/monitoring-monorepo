@@ -51,6 +51,7 @@ import type {
 import { NetworkAwareLink } from "@/components/network-aware-link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
+import { buildPoolNotFoundDest } from "@/lib/routing";
 import React, { Suspense, useCallback } from "react";
 
 export default function PoolDetailPage() {
@@ -113,9 +114,7 @@ function PoolDetail() {
   // Preserve the active ?network= param so the user lands on the correct chain.
   useEffect(() => {
     if (!poolLoading && !poolErr && !pool) {
-      const networkParam = searchParams.get("network");
-      const dest = networkParam ? `/pools?network=${networkParam}` : "/pools";
-      router.replace(dest);
+      router.replace(buildPoolNotFoundDest(searchParams.get("network")));
     }
   }, [pool, poolLoading, poolErr, router, searchParams]);
 
