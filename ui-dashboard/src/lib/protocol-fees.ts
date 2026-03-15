@@ -22,17 +22,36 @@ const USD_PEGGED_SYMBOLS = new Set([
   "USDT",
   "USD₮",
   "USDm",
+  // AUSD (Monad) is the USD-pegged spoke token
+  "AUSD",
 ]);
 
 /**
- * Approximate FX rates for non-USD stablecoins.
+ * FX rates for non-USD stablecoins (USD per 1 token).
+ * Covers all Mento v3 tokens on Celo and Monad.
+ * Rates sourced from exchangerate-api.com, updated March 2025.
  * Hardcoded for v1 — acceptable for a monitoring dashboard.
  */
 const FX_RATES: Record<string, number> = {
-  cEUR: 1.08,
-  GBPm: 1.27,
+  // Legacy symbol (kept for backward-compat with any old indexed data)
+  cEUR: 1.1455,
+  // Celo v3 tokens (symbols from on-chain ERC20.symbol())
+  EURm: 1.1455,
+  GBPm: 1.3263,
+  AUDm: 0.6993,
+  CADm: 0.7299,
+  CHFm: 1.2674,
   KESm: 0.0077,
-  AUSD: 1.0,
+  BRLm: 0.1905,
+  COPm: 0.00027,
+  GHSm: 0.0924,
+  JPYm: 0.00627,
+  NGNm: 0.00073,
+  PHPm: 0.01675,
+  XOFm: 0.00175,
+  ZARm: 0.0593,
+  // axlEUROC: euro-pegged bridged stablecoin (same rate as EUR)
+  axlEUROC: 1.1455,
 };
 
 // ---------------------------------------------------------------------------
