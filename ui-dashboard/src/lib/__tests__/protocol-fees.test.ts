@@ -41,75 +41,47 @@ describe("tokenToUSD", () => {
   });
 
   it("converts AUDm at FX rate", () => {
-    const usd = tokenToUSD("AUDm", 100);
-    expect(usd).not.toBeNull();
-    expect(usd!).toBeGreaterThan(50);
-    expect(usd!).toBeLessThan(90);
+    expect(tokenToUSD("AUDm", 100)).toBeCloseTo(69.93, 2);
   });
 
   it("converts CADm at FX rate", () => {
-    const usd = tokenToUSD("CADm", 100);
-    expect(usd).not.toBeNull();
-    expect(usd!).toBeGreaterThan(60);
-    expect(usd!).toBeLessThan(90);
+    expect(tokenToUSD("CADm", 100)).toBeCloseTo(72.99, 2);
   });
 
   it("converts CHFm at FX rate", () => {
-    const usd = tokenToUSD("CHFm", 100);
-    expect(usd).not.toBeNull();
-    expect(usd!).toBeGreaterThan(100);
-    expect(usd!).toBeLessThan(150);
+    expect(tokenToUSD("CHFm", 100)).toBeCloseTo(126.74, 2);
   });
 
   it("converts BRLm at FX rate", () => {
-    const usd = tokenToUSD("BRLm", 100);
-    expect(usd).not.toBeNull();
-    expect(usd!).toBeGreaterThan(10);
-    expect(usd!).toBeLessThan(30);
+    expect(tokenToUSD("BRLm", 100)).toBeCloseTo(19.05, 2);
   });
 
   it("converts COPm at FX rate", () => {
-    const usd = tokenToUSD("COPm", 1000);
-    expect(usd).not.toBeNull();
-    expect(usd!).toBeLessThan(1);
+    expect(tokenToUSD("COPm", 100)).toBeCloseTo(0.027, 3);
   });
 
   it("converts GHSm at FX rate", () => {
-    const usd = tokenToUSD("GHSm", 100);
-    expect(usd).not.toBeNull();
-    expect(usd!).toBeGreaterThan(5);
-    expect(usd!).toBeLessThan(15);
+    expect(tokenToUSD("GHSm", 100)).toBeCloseTo(9.24, 2);
   });
 
   it("converts JPYm at FX rate", () => {
-    const usd = tokenToUSD("JPYm", 100);
-    expect(usd).not.toBeNull();
-    expect(usd!).toBeLessThan(1);
+    expect(tokenToUSD("JPYm", 100)).toBeCloseTo(0.627, 3);
   });
 
   it("converts NGNm at FX rate", () => {
-    const usd = tokenToUSD("NGNm", 100);
-    expect(usd).not.toBeNull();
-    expect(usd!).toBeLessThan(1);
+    expect(tokenToUSD("NGNm", 100)).toBeCloseTo(0.073, 3);
   });
 
   it("converts PHPm at FX rate", () => {
-    const usd = tokenToUSD("PHPm", 100);
-    expect(usd).not.toBeNull();
-    expect(usd!).toBeLessThan(5);
+    expect(tokenToUSD("PHPm", 100)).toBeCloseTo(1.675, 3);
   });
 
   it("converts XOFm at FX rate", () => {
-    const usd = tokenToUSD("XOFm", 100);
-    expect(usd).not.toBeNull();
-    expect(usd!).toBeLessThan(1);
+    expect(tokenToUSD("XOFm", 100)).toBeCloseTo(0.175, 3);
   });
 
   it("converts ZARm at FX rate", () => {
-    const usd = tokenToUSD("ZARm", 100);
-    expect(usd).not.toBeNull();
-    expect(usd!).toBeGreaterThan(3);
-    expect(usd!).toBeLessThan(10);
+    expect(tokenToUSD("ZARm", 100)).toBeCloseTo(5.93, 2);
   });
 
   it("converts axlEUROC at FX rate (EUR-pegged)", () => {
