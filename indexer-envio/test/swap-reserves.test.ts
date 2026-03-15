@@ -14,32 +14,32 @@ type MockDb = {
   };
 };
 
+type EventProcessor = {
+  createMockEvent: (args: unknown) => unknown;
+  processEvent: (args: { event: unknown; mockDb: MockDb }) => Promise<MockDb>;
+};
+
 type GeneratedModule = {
   TestHelpers: {
     MockDb: { createMockDb: () => MockDb };
     FPMMFactory: {
-      FPMMDeployed: {
-        createMockEvent: (args: unknown) => unknown;
-        processEvent: (args: {
-          event: unknown;
-          mockDb: MockDb;
-        }) => Promise<MockDb>;
-      };
+      FPMMDeployed: EventProcessor;
     };
     FPMM: {
-      Swap: {
-        createMockEvent: (args: unknown) => unknown;
-        processEvent: (args: {
-          event: unknown;
-          mockDb: MockDb;
-        }) => Promise<MockDb>;
-      };
+      Swap: EventProcessor;
+    };
+    VirtualPoolFactory: {
+      VirtualPoolDeployed: EventProcessor;
+    };
+    VirtualPool: {
+      Swap: EventProcessor;
     };
   };
 };
 
 const { TestHelpers } = generated as unknown as GeneratedModule;
-const { MockDb, FPMMFactory, FPMM } = TestHelpers;
+const { MockDb, FPMMFactory, FPMM, VirtualPoolFactory, VirtualPool } =
+  TestHelpers;
 
 type PoolEntity = {
   id: string;
@@ -173,6 +173,142 @@ describe("Swap handler — reserve syncing", () => {
     const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
     assert.ok(pool, "Pool must exist after Swap");
     // Reserves must NOT be zeroed — they should remain at seeded values
+    assert.equal(
+      pool!.reserves0,
+      SEED_R0,
+      `reserves0 must be preserved (${SEED_R0}), got ${pool!.reserves0}`,
+    );
+    assert.equal(
+      pool!.reserves1,
+      SEED_R1,
+      `reserves1 must be preserved (${SEED_R1}), got ${pool!.reserves1}`,
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // VirtualPool.Swap — same reserve-sync path as FPMM.Swap
+  // ---------------------------------------------------------------------------
+
+  it("VirtualPool.Swap updates reserves from mocked getReserves()", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000e2";
+    const MOCK_R0 = 80_000_000_000_000_000_000_000n;
+    const MOCK_R1 = 90_000_000_000_000_000_000_000n;
+
+    _setMockReserves(42220, POOL_ADDR, {
+      reserve0: MOCK_R0,
+      reserve1: MOCK_R1,
+    });
+
+    let mockDb = MockDb.createMockDb();
+
+    // Deploy VirtualPool
+    const deployEvent = VirtualPoolFactory.VirtualPoolDeployed.createMockEvent({
+      pool: POOL_ADDR,
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 2000, timestamp: 1_700_020_000 },
+      },
+    });
+    mockDb = await VirtualPoolFactory.VirtualPoolDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    // Fire VirtualPool.Swap
+    const swapEvent = VirtualPool.Swap.createMockEvent({
+      sender: "0x0000000000000000000000000000000000000011",
+      to: "0x0000000000000000000000000000000000000022",
+      amount0In: 1_000_000_000_000_000_000n,
+      amount1In: 0n,
+      amount0Out: 0n,
+      amount1Out: 2_000_000_000_000_000_000n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 11,
+        srcAddress: POOL_ADDR,
+        block: { number: 2001, timestamp: 1_700_020_100 },
+      },
+    });
+    mockDb = await VirtualPool.Swap.processEvent({
+      event: swapEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    assert.ok(pool, "VirtualPool must exist after Swap");
+    assert.equal(
+      pool!.reserves0,
+      MOCK_R0,
+      `expected reserves0 = ${MOCK_R0}, got ${pool!.reserves0}`,
+    );
+    assert.equal(
+      pool!.reserves1,
+      MOCK_R1,
+      `expected reserves1 = ${MOCK_R1}, got ${pool!.reserves1}`,
+    );
+  });
+
+  it("VirtualPool.Swap preserves reserves when getReserves() returns null", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000e3";
+    const SEED_R0 = 60_000_000_000_000_000_000_000n;
+    const SEED_R1 = 55_000_000_000_000_000_000_000n;
+
+    let mockDb = MockDb.createMockDb();
+
+    // Deploy VirtualPool
+    const deployEvent = VirtualPoolFactory.VirtualPoolDeployed.createMockEvent({
+      pool: POOL_ADDR,
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 2100, timestamp: 1_700_021_000 },
+      },
+    });
+    mockDb = await VirtualPoolFactory.VirtualPoolDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    // Pre-seed reserves
+    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    assert.ok(seeded, "VirtualPool must exist after deploy");
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: SEED_R0,
+      reserves1: SEED_R1,
+    });
+
+    // Simulate RPC failure
+    _setMockReserves(42220, POOL_ADDR, null);
+
+    const swapEvent = VirtualPool.Swap.createMockEvent({
+      sender: "0x0000000000000000000000000000000000000011",
+      to: "0x0000000000000000000000000000000000000022",
+      amount0In: 1_000_000_000_000_000_000n,
+      amount1In: 0n,
+      amount0Out: 0n,
+      amount1Out: 2_000_000_000_000_000_000n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 11,
+        srcAddress: POOL_ADDR,
+        block: { number: 2101, timestamp: 1_700_021_100 },
+      },
+    });
+    mockDb = await VirtualPool.Swap.processEvent({
+      event: swapEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    assert.ok(pool, "VirtualPool must exist after Swap");
     assert.equal(
       pool!.reserves0,
       SEED_R0,
