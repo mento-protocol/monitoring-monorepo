@@ -6,28 +6,21 @@ import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
 import { explorerAddressUrl } from "@/lib/tokens";
 import { truncateAddress } from "@/lib/format";
+import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 import {
-  NETWORKS,
-  NETWORK_IDS,
-  isConfiguredNetworkId,
-  type Network,
-} from "@/lib/networks";
+  buildAddressBookRows,
+  resolveIsCustom,
+  resolveCanEdit,
+  type AddressBookRow,
+} from "@/lib/address-book";
 import type {
   AddressLabelEntry,
   AddressLabelsSnapshot,
 } from "@/lib/address-labels";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type AddressRow = {
-  address: string;
-  label: string;
-  isCustom: boolean;
-  /** Network this contract label belongs to; null for custom-only labels */
-  network: Network | null;
-};
+// AddressBookRow is imported from @/lib/address-book (shared with tests).
+// Local alias for brevity.
+type AddressRow = AddressBookRow;
 
 // ---------------------------------------------------------------------------
 // Page
@@ -59,7 +52,7 @@ export default function AddressBookPage() {
         const key = `${id}:${address}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        rows.push({ address, label, isCustom: false, network: net });
+        rows.push({ key, address, label, isCustom: false, network: net });
       }
     }
 
@@ -71,6 +64,7 @@ export default function AddressBookPage() {
   const customRows = useMemo<AddressRow[]>(
     () =>
       customLabels.map((r) => ({
+        key: `custom:${r.address}`,
         address: r.address,
         label: getLabel(r.address),
         isCustom: true,
@@ -82,24 +76,21 @@ export default function AddressBookPage() {
   // Merge: custom labels on the selected network take precedence over contract
   // rows for the same (selectedNetwork.id, address) pair. Contract rows from
   // OTHER networks are always shown — dedupe is per (chainId, address).
-  const allRows = useMemo<AddressRow[]>(() => {
-    const customKeysOnSelectedNet = new Set(
-      customRows.map((r) => `${selectedNetwork.id}:${r.address}`),
-    );
-    const filteredContractRows = contractRows.filter(
-      (r) =>
-        !customKeysOnSelectedNet.has(`${r.network?.id ?? ""}:${r.address}`),
-    );
-    return [...customRows, ...filteredContractRows].filter((row) => {
-      if (!search) return true;
-      const q = search.toLowerCase();
-      return (
-        row.address.includes(q) ||
-        row.label.toLowerCase().includes(q) ||
-        (row.network?.label.toLowerCase().includes(q) ?? false)
-      );
-    });
-  }, [customRows, contractRows, selectedNetwork.id, search]);
+  const allRows = useMemo<AddressRow[]>(
+    () =>
+      buildAddressBookRows(contractRows, customRows, selectedNetwork.id).filter(
+        (row) => {
+          if (!search) return true;
+          const q = search.toLowerCase();
+          return (
+            row.address.includes(q) ||
+            row.label.toLowerCase().includes(q) ||
+            (row.network?.label.toLowerCase().includes(q) ?? false)
+          );
+        },
+      ),
+    [customRows, contractRows, selectedNetwork.id, search],
+  );
 
   const handleExport = useCallback(() => {
     // Export all chains
@@ -270,21 +261,14 @@ export default function AddressBookPage() {
                 // only fetch them for custom rows (which ARE on selectedNetwork).
                 const entry = row.isCustom ? getEntry(row.address) : undefined;
                 // isCustomLabel() is scoped to selectedNetwork; only use it for
-                // rows on that network to avoid false positives on other chains.
-                const isOnSelectedNetwork =
-                  row.network === null || row.network.id === selectedNetwork.id;
-                const isCustomResolved =
-                  row.isCustom ||
-                  (isOnSelectedNetwork && isCustomLabel(row.address));
-
-                // Contract rows use their own network for correct explorer link.
-                // Custom rows are on the selected network (chain-scoped storage).
+                // Use shared helpers (also used in tests) for consistent resolution.
+                const isCustomResolved = resolveIsCustom(
+                  row,
+                  selectedNetwork.id,
+                  isCustomLabel,
+                );
+                const canEdit = resolveCanEdit(row, selectedNetwork.id);
                 const net = row.network ?? selectedNetwork;
-
-                // Only allow editing rows on the selected network — editing a
-                // contract row from another chain would write to the wrong Redis
-                // hash. Users must switch networks first.
-                const canEdit = isOnSelectedNetwork;
 
                 return (
                   <AddressTableRow
@@ -406,12 +390,14 @@ function AddressTableRow({
       </td>
       <td className="px-4 py-3">
         {!canEdit ? (
-          <span
-            title="Switch to this network to edit"
-            className="text-xs text-slate-700 cursor-default"
+          <button
+            type="button"
+            disabled
+            aria-label="Switch to this network to edit"
+            className="text-xs text-slate-700 cursor-not-allowed"
           >
-            —
-          </span>
+            Switch network
+          </button>
         ) : isCustom ? (
           <button
             type="button"
