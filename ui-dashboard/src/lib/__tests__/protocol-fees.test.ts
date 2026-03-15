@@ -21,15 +21,23 @@ describe("tokenToUSD", () => {
   });
 
   it("converts GBPm at FX rate", () => {
-    expect(tokenToUSD("GBPm", 100)).toBeCloseTo(127, 2);
+    expect(tokenToUSD("GBPm", 100)).toBeCloseTo(132.63, 1);
   });
 
-  it("converts cEUR at FX rate", () => {
-    expect(tokenToUSD("cEUR", 100)).toBeCloseTo(108, 2);
+  it("converts EURm at FX rate", () => {
+    expect(tokenToUSD("EURm", 100)).toBeCloseTo(114.55, 1);
   });
 
-  it("converts AUSD at 1:1", () => {
+  it("converts cEUR at FX rate (legacy symbol)", () => {
+    expect(tokenToUSD("cEUR", 100)).toBeCloseTo(114.55, 1);
+  });
+
+  it("converts AUSD at 1:1 (USD-pegged)", () => {
     expect(tokenToUSD("AUSD", 100)).toBe(100);
+  });
+
+  it("converts KESm at FX rate", () => {
+    expect(tokenToUSD("KESm", 1000)).toBeCloseTo(7.7, 1);
   });
 
   it("returns null for unknown tokens", () => {
@@ -98,7 +106,7 @@ describe("aggregateProtocolFees", () => {
       }),
     ];
     const result = aggregateProtocolFees(transfers);
-    expect(result.totalFeesUSD).toBeCloseTo(1.27, 2); // 1 * 1.27
+    expect(result.totalFeesUSD).toBeCloseTo(1.3263, 2); // 1 * 1.3263
   });
 
   it("splits 24h fees correctly", () => {
@@ -149,7 +157,7 @@ describe("aggregateProtocolFees", () => {
       }),
     ];
     const result = aggregateProtocolFees(transfers);
-    expect(result.totalFeesUSD).toBeCloseTo(10 + 5 + 2.54, 1);
+    expect(result.totalFeesUSD).toBeCloseTo(10 + 5 + 2 * 1.3263, 1);
     expect(result.fees24hUSD).toBeCloseTo(5, 2); // only USDC is recent
   });
 
