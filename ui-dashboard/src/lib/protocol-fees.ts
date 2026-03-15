@@ -13,7 +13,16 @@ import type { ProtocolFeeTransfer } from "./types";
 // ---------------------------------------------------------------------------
 
 /** Tokens treated as $1.00 for USD conversion. */
-const USD_PEGGED_SYMBOLS = new Set(["cUSD", "USDC", "axlUSDC", "USDT", "USDm"]);
+// Note: "USD₮" (with Unicode ₮ U+20AE) is how USDT appears on Celo — the Celo
+// token contract uses the Mongolian Tögrög sign as the ticker suffix.
+const USD_PEGGED_SYMBOLS = new Set([
+  "cUSD",
+  "USDC",
+  "axlUSDC",
+  "USDT",
+  "USD₮",
+  "USDm",
+]);
 
 /**
  * Approximate FX rates for non-USD stablecoins.
