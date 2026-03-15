@@ -3,8 +3,8 @@ import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { NetworkProvider } from "@/components/network-provider";
 import { AddressLabelsProvider } from "@/components/address-labels-provider";
-import { NetworkSelector } from "@/components/network-selector";
 import { NavLinks } from "@/components/nav-links";
+import { ConditionalNetworkSelector } from "@/components/conditional-network-selector";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Mento v3 Monitor",
-  description: "Monitoring dashboard for Mento v3 protocol",
+  title: "Mento Analytics",
+  description: "Cross-chain analytics dashboard for Mento protocol",
 };
 
 export default function RootLayout({
@@ -34,7 +34,7 @@ export default function RootLayout({
                 aria-label="Main navigation"
               >
                 <NavLinks />
-                <NetworkSelector />
+                <ConditionalNetworkSelector />
               </nav>
               <div className="mx-auto max-w-7xl px-3 sm:px-6 py-4 sm:py-6">
                 {children}
