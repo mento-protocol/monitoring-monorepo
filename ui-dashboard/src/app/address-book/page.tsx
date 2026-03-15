@@ -74,22 +74,24 @@ export default function AddressBookPage() {
   );
 
   // Merge: custom labels on the selected network take precedence over contract
-  // rows for the same (selectedNetwork.id, address) pair. Contract rows from
+  // rows for the same (selectedChainId, address) pair. Contract rows from
   // OTHER networks are always shown — dedupe is per (chainId, address).
   const allRows = useMemo<AddressRow[]>(
     () =>
-      buildAddressBookRows(contractRows, customRows, selectedNetwork.id).filter(
-        (row) => {
-          if (!search) return true;
-          const q = search.toLowerCase();
-          return (
-            row.address.includes(q) ||
-            row.label.toLowerCase().includes(q) ||
-            (row.network?.label.toLowerCase().includes(q) ?? false)
-          );
-        },
-      ),
-    [customRows, contractRows, selectedNetwork.id, search],
+      buildAddressBookRows(
+        contractRows,
+        customRows,
+        selectedNetwork.chainId,
+      ).filter((row) => {
+        if (!search) return true;
+        const q = search.toLowerCase();
+        return (
+          row.address.includes(q) ||
+          row.label.toLowerCase().includes(q) ||
+          (row.network?.label.toLowerCase().includes(q) ?? false)
+        );
+      }),
+    [customRows, contractRows, selectedNetwork.chainId, search],
   );
 
   const handleExport = useCallback(() => {
@@ -264,10 +266,10 @@ export default function AddressBookPage() {
                 // Use shared helpers (also used in tests) for consistent resolution.
                 const isCustomResolved = resolveIsCustom(
                   row,
-                  selectedNetwork.id,
+                  selectedNetwork.chainId,
                   isCustomLabel,
                 );
-                const canEdit = resolveCanEdit(row, selectedNetwork.id);
+                const canEdit = resolveCanEdit(row, selectedNetwork.chainId);
                 const net = row.network ?? selectedNetwork;
 
                 return (
