@@ -50,9 +50,8 @@ import type {
 } from "@/lib/types";
 import { NetworkAwareLink } from "@/components/network-aware-link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useEffect } from "react";
+import React, { Suspense, useCallback, useEffect } from "react";
 import { buildPoolNotFoundDest } from "@/lib/routing";
-import React, { Suspense, useCallback } from "react";
 
 export default function PoolDetailPage() {
   return (
@@ -117,6 +116,10 @@ function PoolDetail() {
       router.replace(buildPoolNotFoundDest(searchParams.get("network")));
     }
   }, [pool, poolLoading, poolErr, router, searchParams]);
+
+  // Return null while redirect is pending to avoid a transient error flash
+  // and unnecessary error announcement for assistive tech.
+  if (!poolLoading && !poolErr && !pool) return null;
 
   const { data: limitsData } = useGQL<{ TradingLimit: TradingLimit[] }>(
     TRADING_LIMITS,
