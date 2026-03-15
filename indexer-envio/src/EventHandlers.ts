@@ -206,6 +206,11 @@ const numReportersCache = new Map<string, number>();
  * each block rather than reusing the first-seen expiry forever. */
 const reportExpiryCache = new Map<string, bigint>();
 
+/** Cache getReserves() results by block — reserves are block-final, so multiple
+ * Swap events for the same pool in the same block all produce the same result.
+ * Key: "chainId:poolAddress:blockNumber" — same pattern as numReportersCache. */
+const reservesCache = new Map<string, { reserve0: bigint; reserve1: bigint }>();
+
 /** Returns all FPMM pool IDs that reference the given rateFeedID.
  * Uses context.Pool.getWhere (DB-backed) so it works correctly in Envio's
  * multi-process hosted environment where in-memory maps are not shared. */
@@ -504,6 +509,13 @@ async function fetchReserves(
   if (_testReserves.has(testKey)) {
     return _testReserves.get(testKey) ?? null;
   }
+
+  // Block-scoped cache: reserves are block-final, so multiple Swap events for
+  // the same pool in the same block all yield the same result.
+  const cacheKey = `${chainId}:${poolAddress.toLowerCase()}:${blockNumber}`;
+  const cached = reservesCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   try {
     const client = getRpcClient(chainId);
     const result = await client.readContract({
@@ -513,7 +525,9 @@ async function fetchReserves(
       ...(blockNumber !== undefined && { blockNumber }),
     });
     const r = result as readonly [bigint, bigint, bigint];
-    return { reserve0: r[0], reserve1: r[1] };
+    const reserves = { reserve0: r[0], reserve1: r[1] };
+    reservesCache.set(cacheKey, reserves);
+    return reserves;
   } catch {
     return null;
   }
