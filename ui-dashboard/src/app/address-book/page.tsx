@@ -1,18 +1,38 @@
 "use client";
 
-import { useRef, useState, useCallback } from "react";
-import { useNetwork } from "@/components/network-provider";
+import { useRef, useState, useCallback, useMemo } from "react";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
 import { explorerAddressUrl } from "@/lib/tokens";
 import { truncateAddress } from "@/lib/format";
+import {
+  NETWORKS,
+  NETWORK_IDS,
+  isConfiguredNetworkId,
+  type Network,
+} from "@/lib/networks";
 import type {
   AddressLabelEntry,
   AddressLabelsSnapshot,
 } from "@/lib/address-labels";
 
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+type AddressRow = {
+  address: string;
+  label: string;
+  isCustom: boolean;
+  /** Network this contract label belongs to; null for custom-only labels */
+  network: Network | null;
+};
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
 export default function AddressBookPage() {
-  const { network } = useNetwork();
   const { customLabels, getLabel, isCustomLabel, getEntry, isLoading, error } =
     useAddressLabels();
 
@@ -23,33 +43,64 @@ export default function AddressBookPage() {
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Merge static contract labels with custom labels for the full table view
-  const staticLabels = Object.entries(network.addressLabels).map(
-    ([address, label]) => ({
-      address,
-      label,
-      isCustom: false,
-    }),
+  // Aggregate contract labels from ALL configured non-local networks.
+  // Each address can appear in multiple networks (e.g. same token on mainnet
+  // and testnet) — we emit one row per (address, network) pair.
+  const contractRows = useMemo<AddressRow[]>(() => {
+    const configuredIds = NETWORK_IDS.filter(isConfiguredNetworkId);
+    const rows: AddressRow[] = [];
+    const seen = new Set<string>(); // dedupe address within each network
+
+    for (const id of configuredIds) {
+      const net = NETWORKS[id];
+      for (const [address, label] of Object.entries(net.addressLabels)) {
+        const key = `${id}:${address}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rows.push({ address, label, isCustom: false, network: net });
+      }
+    }
+
+    return rows;
+  }, []);
+
+  // Custom labels are global (not network-scoped in this view).
+  // We show them once, without a specific network.
+  const customRows = useMemo<AddressRow[]>(
+    () =>
+      customLabels.map((r) => ({
+        address: r.address,
+        label: r.label,
+        isCustom: true,
+        network: null,
+      })),
+    [customLabels],
   );
 
-  const allRows = [
-    ...customLabels.map((r) => ({ ...r, isCustom: true })),
-    ...staticLabels.filter(
-      (s) => !customLabels.some((c) => c.address === s.address),
-    ),
-  ].filter((row) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return row.address.includes(q) || row.label.toLowerCase().includes(q);
-  });
+  // Merge: custom labels take precedence, deduplicating by address.
+  const allRows = useMemo<AddressRow[]>(() => {
+    const customAddresses = new Set(customRows.map((r) => r.address));
+    return [
+      ...customRows,
+      ...contractRows.filter((r) => !customAddresses.has(r.address)),
+    ].filter((row) => {
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return (
+        row.address.includes(q) ||
+        row.label.toLowerCase().includes(q) ||
+        (row.network?.label.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [customRows, contractRows, search]);
 
   const handleExport = useCallback(() => {
-    const url = `/api/address-labels/export?chainId=${network.chainId}`;
+    // Export all chains
     const a = document.createElement("a");
-    a.href = url;
+    a.href = `/api/address-labels/export`;
     a.download = "";
     a.click();
-  }, [network.chainId]);
+  }, []);
 
   const handleImportClick = () => {
     setImportError(null);
@@ -97,8 +148,8 @@ export default function AddressBookPage() {
         <div>
           <h1 className="text-xl font-bold text-white">Address Book</h1>
           <p className="mt-1 text-sm text-slate-400">
-            Labels for {network.label.replace(/ \(.*\)$/, "")}. Custom labels
-            take precedence over contract labels.
+            Contract labels across all chains. Custom labels take precedence
+            over contract labels.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -154,7 +205,7 @@ export default function AddressBookPage() {
       <div>
         <input
           type="search"
-          placeholder="Search by address or label…"
+          placeholder="Search by address, label, or chain…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Search address book"
@@ -187,6 +238,9 @@ export default function AddressBookPage() {
                   Label
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Chain
+                </th>
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Category
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -203,15 +257,28 @@ export default function AddressBookPage() {
             <tbody>
               {allRows.map((row) => {
                 const entry = getEntry(row.address);
+                // Use row's own network for explorer link; fall back to first
+                // configured network for custom-only labels (best effort).
+                const net =
+                  row.network ??
+                  NETWORKS[
+                    NETWORK_IDS.filter(isConfiguredNetworkId)[0] ??
+                      "celo-mainnet-hosted"
+                  ];
                 return (
-                  <AddressRow
-                    key={row.address}
+                  <AddressTableRow
+                    key={`${row.network?.id ?? "custom"}:${row.address}`}
                     address={row.address}
                     label={getLabel(row.address)}
+                    networkLabel={
+                      row.network
+                        ? row.network.label.replace(/ \(.*\)$/, "")
+                        : null
+                    }
                     category={entry?.category}
                     notes={entry?.notes}
                     isCustom={row.isCustom || isCustomLabel(row.address)}
-                    explorerUrl={explorerAddressUrl(network, row.address)}
+                    explorerUrl={explorerAddressUrl(net, row.address)}
                     onEdit={() => setEditingAddress(row.address)}
                   />
                 );
@@ -229,15 +296,16 @@ export default function AddressBookPage() {
         <AddressLabelEditor
           address={editingAddress}
           initial={
-            // For contract rows with no custom entry yet, pre-fill the label
-            // so the user can add category/notes without having to retype it.
             getEntry(editingAddress) ??
-            (network.addressLabels[editingAddress]
-              ? {
-                  label: network.addressLabels[editingAddress],
-                  updatedAt: new Date().toISOString(),
-                }
-              : undefined)
+            (() => {
+              // Pre-fill label from any network's contract labels
+              for (const id of NETWORK_IDS.filter(isConfiguredNetworkId)) {
+                const lbl = NETWORKS[id].addressLabels[editingAddress];
+                if (lbl)
+                  return { label: lbl, updatedAt: new Date().toISOString() };
+              }
+              return undefined;
+            })()
           }
           onClose={() => setEditingAddress(null)}
         />
@@ -253,6 +321,7 @@ export default function AddressBookPage() {
 type AddressRowProps = {
   address: string;
   label: string;
+  networkLabel: string | null;
   category?: string;
   notes?: string;
   isCustom: boolean;
@@ -260,9 +329,10 @@ type AddressRowProps = {
   onEdit: () => void;
 };
 
-function AddressRow({
+function AddressTableRow({
   address,
   label,
+  networkLabel,
   category,
   notes,
   isCustom,
@@ -291,6 +361,9 @@ function AddressRow({
         >
           {label}
         </span>
+      </td>
+      <td className="px-4 py-3 text-xs text-slate-400">
+        {networkLabel ?? <span className="text-slate-600">All chains</span>}
       </td>
       <td className="px-4 py-3 text-xs text-slate-400">
         {category ?? <span className="text-slate-600">—</span>}

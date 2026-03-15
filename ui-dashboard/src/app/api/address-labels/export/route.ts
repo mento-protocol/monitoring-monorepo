@@ -1,19 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLabels, type AddressLabelsSnapshot } from "@/lib/address-labels";
+import {
+  getLabels,
+  getAllChainLabels,
+  type AddressLabelEntry,
+  type AddressLabelsSnapshot,
+} from "@/lib/address-labels";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const chainId = Number(req.nextUrl.searchParams.get("chainId"));
-  if (!Number.isInteger(chainId) || chainId <= 0) {
-    return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });
-  }
+  const chainIdParam = req.nextUrl.searchParams.get("chainId");
 
   try {
-    const labels = await getLabels(chainId);
+    let chains: Record<string, Record<string, AddressLabelEntry>>;
+    let filename: string;
+
+    if (chainIdParam !== null) {
+      // Legacy: export a single chain by chainId
+      const chainId = Number(chainIdParam);
+      if (!Number.isInteger(chainId) || chainId <= 0) {
+        return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });
+      }
+      const labels = await getLabels(chainId);
+      chains = { [String(chainId)]: labels };
+      filename = `address-labels-chain-${chainId}-${new Date().toISOString().slice(0, 10)}.json`;
+    } else {
+      // Export all chains
+      chains = await getAllChainLabels();
+      filename = `address-labels-all-${new Date().toISOString().slice(0, 10)}.json`;
+    }
+
     const snapshot: AddressLabelsSnapshot = {
       exportedAt: new Date().toISOString(),
-      chains: { [String(chainId)]: labels },
+      chains,
     };
-    const filename = `address-labels-chain-${chainId}-${new Date().toISOString().slice(0, 10)}.json`;
+
     return new NextResponse(JSON.stringify(snapshot, null, 2), {
       headers: {
         "Content-Type": "application/json",
