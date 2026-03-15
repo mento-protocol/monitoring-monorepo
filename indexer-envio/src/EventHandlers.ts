@@ -111,7 +111,8 @@ const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
 
 // ---------------------------------------------------------------------------
 // Test hooks — only used in unit tests to inject mock RPC responses.
-// Never set in production; `fetchRebalancingState` checks this map first.
+// Never set in production; `fetchRebalancingState` / `fetchReserves` check
+// these maps first.
 // ---------------------------------------------------------------------------
 const _testRebalancingStates = new Map<string, RebalancingState | null>();
 
@@ -132,6 +133,30 @@ export function _setMockRebalancingState(
 /** @internal Test-only: clear all mock rebalancing states. */
 export function _clearMockRebalancingStates(): void {
   _testRebalancingStates.clear();
+}
+
+const _testReserves = new Map<
+  string,
+  { reserve0: bigint; reserve1: bigint } | null
+>();
+
+/** @internal Test-only: pre-set mock on-chain reserves for a pool. */
+export function _setMockReserves(
+  chainId: number,
+  poolAddress: string,
+  reserves: { reserve0: bigint; reserve1: bigint } | null,
+): void {
+  const key = `${chainId}:${poolAddress.toLowerCase()}`;
+  if (reserves === null) {
+    _testReserves.delete(key);
+  } else {
+    _testReserves.set(key, reserves);
+  }
+}
+
+/** @internal Test-only: clear all mock reserves. */
+export function _clearMockReserves(): void {
+  _testReserves.clear();
 }
 
 // Per-chain RPC defaults. ENVIO_RPC_URL overrides the default for the active chain.
@@ -342,6 +367,17 @@ const FPMM_TRADING_LIMITS_ABI = [
 const FPMM_MINIMAL_ABI = [
   {
     type: "function",
+    name: "getReserves",
+    inputs: [],
+    outputs: [
+      { name: "_reserve0", type: "uint256" },
+      { name: "_reserve1", type: "uint256" },
+      { name: "_blockTimestampLast", type: "uint256" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "decimals0",
     inputs: [],
     outputs: [{ name: "", type: "uint256" }],
@@ -440,6 +476,44 @@ async function fetchRebalancingState(
       rebalanceThreshold: Number(r[5]),
       priceDifference: r[6],
     };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch current on-chain reserves for a pool via getReserves().
+ * Called from Swap handlers to keep indexer reserves in sync without waiting
+ * for an UpdateReserves event (which is only emitted by the rebalancer, not
+ * on every swap).
+ *
+ * eth_call is block-final: if the same pool has >1 Swap in one block, all
+ * events in that block will record the block-final reserves — an accepted
+ * approximation matching the existing UpdateReserves handler behaviour.
+ *
+ * Returns null on RPC failure so callers preserve stale reserves rather than
+ * zeroing them out.
+ */
+async function fetchReserves(
+  chainId: number,
+  poolAddress: string,
+  blockNumber?: bigint,
+): Promise<{ reserve0: bigint; reserve1: bigint } | null> {
+  // In unit tests, callers inject a mock via _setMockReserves so no RPC is needed.
+  const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
+  if (_testReserves.has(testKey)) {
+    return _testReserves.get(testKey) ?? null;
+  }
+  try {
+    const client = getRpcClient(chainId);
+    const result = await client.readContract({
+      address: poolAddress as `0x${string}`,
+      abi: FPMM_MINIMAL_ABI,
+      functionName: "getReserves",
+      ...(blockNumber !== undefined && { blockNumber }),
+    });
+    const r = result as readonly [bigint, bigint, bigint];
+    return { reserve0: r[0], reserve1: r[1] };
   } catch {
     return null;
   }
@@ -1028,6 +1102,20 @@ FPMM.Swap.handler(async ({ event, context }) => {
       ? event.params.amount1In
       : event.params.amount1Out;
 
+  // Fetch current on-chain reserves at this block.
+  // The Swap event does NOT emit reserve data, but the FPMM contract updates
+  // reserves in-place on every swap. Without this call the indexer reserves
+  // stay stale between UpdateReserves events (which are only emitted by the
+  // rebalancer, not after every swap), causing incorrect priceDifference values.
+  // eth_call is block-final: if the same pool has >1 Swap in one block, all
+  // events in that block will record the block-final reserves — an accepted
+  // approximation that matches the existing UpdateReserves handler behaviour.
+  const reservesDelta = await fetchReserves(
+    event.chainId,
+    event.srcAddress,
+    blockNumber,
+  );
+
   const pool = await upsertPool({
     context,
     poolId,
@@ -1035,6 +1123,7 @@ FPMM.Swap.handler(async ({ event, context }) => {
     blockNumber,
     blockTimestamp,
     swapDelta: { volume0, volume1 },
+    ...(reservesDelta && { reservesDelta }),
   });
 
   await upsertSnapshot({
@@ -1786,6 +1875,14 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
       ? event.params.amount1In
       : event.params.amount1Out;
 
+  // Same rationale as FPMM.Swap: fetch block-final reserves so the indexer
+  // stays in sync without waiting for an UpdateReserves event.
+  const reservesDelta = await fetchReserves(
+    event.chainId,
+    event.srcAddress,
+    blockNumber,
+  );
+
   const pool = await upsertPool({
     context,
     poolId,
@@ -1793,6 +1890,7 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
     blockNumber,
     blockTimestamp,
     swapDelta: { volume0, volume1 },
+    ...(reservesDelta && { reservesDelta }),
   });
 
   await upsertSnapshot({
