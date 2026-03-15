@@ -266,10 +266,26 @@ export default function AddressBookPage() {
             </thead>
             <tbody>
               {allRows.map((row) => {
-                const entry = getEntry(row.address);
+                // entry/isCustom are only meaningful on the selected network —
+                // only fetch them for custom rows (which ARE on selectedNetwork).
+                const entry = row.isCustom ? getEntry(row.address) : undefined;
+                // isCustomLabel() is scoped to selectedNetwork; only use it for
+                // rows on that network to avoid false positives on other chains.
+                const isOnSelectedNetwork =
+                  row.network === null || row.network.id === selectedNetwork.id;
+                const isCustomResolved =
+                  row.isCustom ||
+                  (isOnSelectedNetwork && isCustomLabel(row.address));
+
                 // Contract rows use their own network for correct explorer link.
                 // Custom rows are on the selected network (chain-scoped storage).
                 const net = row.network ?? selectedNetwork;
+
+                // Only allow editing rows on the selected network — editing a
+                // contract row from another chain would write to the wrong Redis
+                // hash. Users must switch networks first.
+                const canEdit = isOnSelectedNetwork;
+
                 return (
                   <AddressTableRow
                     key={`${row.network?.id ?? selectedNetwork.id}:${row.address}`}
@@ -282,7 +298,8 @@ export default function AddressBookPage() {
                     }
                     category={entry?.category}
                     notes={entry?.notes}
-                    isCustom={row.isCustom || isCustomLabel(row.address)}
+                    isCustom={isCustomResolved}
+                    canEdit={canEdit}
                     explorerUrl={explorerAddressUrl(net, row.address)}
                     onEdit={() => setEditingAddress(row.address)}
                   />
@@ -327,6 +344,8 @@ type AddressRowProps = {
   category?: string;
   notes?: string;
   isCustom: boolean;
+  /** False for contract rows on non-selected networks — edit would write to wrong chain */
+  canEdit: boolean;
   explorerUrl: string;
   onEdit: () => void;
 };
@@ -338,6 +357,7 @@ function AddressTableRow({
   category,
   notes,
   isCustom,
+  canEdit,
   explorerUrl,
   onEdit,
 }: AddressRowProps) {
@@ -385,7 +405,14 @@ function AddressTableRow({
         )}
       </td>
       <td className="px-4 py-3">
-        {isCustom ? (
+        {!canEdit ? (
+          <span
+            title="Switch to this network to edit"
+            className="text-xs text-slate-700 cursor-default"
+          >
+            —
+          </span>
+        ) : isCustom ? (
           <button
             type="button"
             onClick={onEdit}
