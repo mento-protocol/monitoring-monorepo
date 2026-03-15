@@ -1,33 +1,20 @@
 /**
- * Tests for address book cross-network row composition rules.
- *
- * The merge logic in page.tsx follows these rules:
- * 1. Contract rows: one per (networkId, address) — same address on different
- *    chains is two separate rows.
- * 2. Custom rows: come from the selected network only (chain-scoped storage).
- * 3. Dedupe: custom row on selectedNetwork hides the contract row for the
- *    same address on that network, but NOT contract rows for the same address
- *    on other networks.
- * 4. isCustom: only true when the row is actually a custom label OR when
- *    it belongs to the selected network and isCustomLabel() returns true.
- * 5. canEdit: only true when row is on the selected network (or custom).
- *    Non-selected-chain contract rows show "—" to avoid writing to wrong chain.
+ * Tests for address book row composition using the shared helpers from
+ * @/lib/address-book — same functions used in page.tsx.
  */
 
 import { describe, it, expect } from "vitest";
+import {
+  buildAddressBookRows,
+  resolveIsCustom,
+  resolveCanEdit,
+  type AddressBookRow,
+} from "@/lib/address-book";
 import type { Network } from "@/lib/networks";
 
 // ---------------------------------------------------------------------------
-// Pure helpers extracted from page.tsx logic for isolated testing
+// Fixtures
 // ---------------------------------------------------------------------------
-
-type TableRow = {
-  key: string;
-  address: string;
-  label: string;
-  isCustom: boolean;
-  network: Network | null;
-};
 
 const ADDR_A = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const ADDR_B = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -52,196 +39,139 @@ function makeNet(id: string): Network {
 const NET_MAIN = makeNet("celo-mainnet-hosted");
 const NET_MONAD = makeNet("monad-mainnet-hosted");
 
-/** Mirrors the allRows merge logic from page.tsx */
-function buildAllRows(
-  contractRows: TableRow[],
-  customRows: TableRow[],
-  selectedNetworkId: string,
-): TableRow[] {
-  const customKeysOnSelectedNet = new Set(
-    customRows.map((r) => `${selectedNetworkId}:${r.address}`),
-  );
-  const filteredContractRows = contractRows.filter(
-    (r) => !customKeysOnSelectedNet.has(`${r.network?.id ?? ""}:${r.address}`),
-  );
-  return [...customRows, ...filteredContractRows];
+function contractRow(
+  address: string,
+  net: Network,
+  label = "Contract",
+): AddressBookRow {
+  return {
+    key: `${net.id}:${address}`,
+    address,
+    label,
+    isCustom: false,
+    network: net,
+  };
 }
 
-/** Mirrors isCustomResolved logic */
-function resolveIsCustom(
-  row: TableRow,
-  selectedNetworkId: string,
-  customAddresses: Set<string>,
-): boolean {
-  const isOnSelectedNetwork =
-    row.network === null || row.network.id === selectedNetworkId;
-  return (
-    row.isCustom || (isOnSelectedNetwork && customAddresses.has(row.address))
-  );
-}
-
-/** Mirrors canEdit logic */
-function resolveCanEdit(row: TableRow, selectedNetworkId: string): boolean {
-  return row.network === null || row.network.id === selectedNetworkId;
+function customRow(address: string, net: Network): AddressBookRow {
+  return {
+    key: `custom:${address}`,
+    address,
+    label: "Custom label",
+    isCustom: true,
+    network: net,
+  };
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// buildAddressBookRows
 // ---------------------------------------------------------------------------
 
-describe("address book row composition", () => {
-  describe("contract row deduplication", () => {
-    it("keeps same address from different chains as separate rows", () => {
-      const contractRows: TableRow[] = [
-        {
-          key: "celo-mainnet-hosted:0xaaa",
-          address: ADDR_A,
-          label: "Token A (Celo)",
-          isCustom: false,
-          network: NET_MAIN,
-        },
-        {
-          key: "monad-mainnet-hosted:0xaaa",
-          address: ADDR_A,
-          label: "Token A (Monad)",
-          isCustom: false,
-          network: NET_MONAD,
-        },
-      ];
-      const result = buildAllRows(contractRows, [], NET_MAIN.id);
-      expect(result).toHaveLength(2);
-    });
-
-    it("hides contract row on selected network when custom label exists", () => {
-      const contractRows: TableRow[] = [
-        {
-          key: "celo-mainnet-hosted:0xaaa",
-          address: ADDR_A,
-          label: "Contract label",
-          isCustom: false,
-          network: NET_MAIN,
-        },
-      ];
-      const customRows: TableRow[] = [
-        {
-          key: "custom:0xaaa",
-          address: ADDR_A,
-          label: "My custom label",
-          isCustom: true,
-          network: NET_MAIN,
-        },
-      ];
-      const result = buildAllRows(contractRows, customRows, NET_MAIN.id);
-      expect(result).toHaveLength(1);
-      expect(result[0].isCustom).toBe(true);
-      expect(result[0].label).toBe("My custom label");
-    });
-
-    it("does NOT hide contract row from other network when custom label exists on selected", () => {
-      const contractRows: TableRow[] = [
-        {
-          key: "celo-mainnet-hosted:0xaaa",
-          address: ADDR_A,
-          label: "Token (Celo)",
-          isCustom: false,
-          network: NET_MAIN,
-        },
-        {
-          key: "monad-mainnet-hosted:0xaaa",
-          address: ADDR_A,
-          label: "Token (Monad)",
-          isCustom: false,
-          network: NET_MONAD,
-        },
-      ];
-      const customRows: TableRow[] = [
-        {
-          key: "custom:0xaaa",
-          address: ADDR_A,
-          label: "My custom",
-          isCustom: true,
-          network: NET_MAIN,
-        },
-      ];
-      const result = buildAllRows(contractRows, customRows, NET_MAIN.id);
-      // Custom + Monad contract row; Celo contract row hidden
-      expect(result).toHaveLength(2);
-      const monadRow = result.find((r) => r.network?.id === NET_MONAD.id);
-      expect(monadRow).toBeDefined();
-      expect(monadRow?.label).toBe("Token (Monad)");
-    });
+describe("buildAddressBookRows", () => {
+  it("returns all contract rows when no custom labels exist", () => {
+    const rows = buildAddressBookRows(
+      [contractRow(ADDR_A, NET_MAIN), contractRow(ADDR_B, NET_MONAD)],
+      [],
+      NET_MAIN.id,
+    );
+    expect(rows).toHaveLength(2);
   });
 
-  describe("isCustom resolution", () => {
-    it("contract row on selected network is NOT marked custom", () => {
-      const row: TableRow = {
-        key: "k",
-        address: ADDR_B,
-        label: "lbl",
-        isCustom: false,
-        network: NET_MAIN,
-      };
-      const customAddresses = new Set<string>();
-      expect(resolveIsCustom(row, NET_MAIN.id, customAddresses)).toBe(false);
-    });
-
-    it("contract row on OTHER network is NOT marked custom even if address has custom on selected", () => {
-      const row: TableRow = {
-        key: "k",
-        address: ADDR_A,
-        label: "lbl",
-        isCustom: false,
-        network: NET_MONAD,
-      };
-      // ADDR_A has a custom label on selected (Celo)
-      const customAddresses = new Set([ADDR_A]);
-      expect(resolveIsCustom(row, NET_MAIN.id, customAddresses)).toBe(false);
-    });
-
-    it("custom row is always marked custom regardless of network", () => {
-      const row: TableRow = {
-        key: "k",
-        address: ADDR_A,
-        label: "lbl",
-        isCustom: true,
-        network: NET_MAIN,
-      };
-      expect(resolveIsCustom(row, NET_MAIN.id, new Set())).toBe(true);
-    });
+  it("keeps same address from different chains as separate rows", () => {
+    const rows = buildAddressBookRows(
+      [contractRow(ADDR_A, NET_MAIN), contractRow(ADDR_A, NET_MONAD)],
+      [],
+      NET_MAIN.id,
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.network?.id).sort()).toEqual(
+      [NET_MAIN.id, NET_MONAD.id].sort(),
+    );
   });
 
-  describe("canEdit resolution", () => {
-    it("allows editing rows on the selected network", () => {
-      const row: TableRow = {
-        key: "k",
-        address: ADDR_A,
-        label: "lbl",
-        isCustom: false,
-        network: NET_MAIN,
-      };
-      expect(resolveCanEdit(row, NET_MAIN.id)).toBe(true);
-    });
+  it("hides contract row on selected network when custom label exists", () => {
+    const rows = buildAddressBookRows(
+      [contractRow(ADDR_A, NET_MAIN)],
+      [customRow(ADDR_A, NET_MAIN)],
+      NET_MAIN.id,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].isCustom).toBe(true);
+  });
 
-    it("disables editing for contract rows on other networks", () => {
-      const row: TableRow = {
-        key: "k",
-        address: ADDR_A,
-        label: "lbl",
-        isCustom: false,
-        network: NET_MONAD,
-      };
-      expect(resolveCanEdit(row, NET_MAIN.id)).toBe(false);
-    });
+  it("does NOT hide contract row from other network when custom exists on selected", () => {
+    const rows = buildAddressBookRows(
+      [contractRow(ADDR_A, NET_MAIN), contractRow(ADDR_A, NET_MONAD)],
+      [customRow(ADDR_A, NET_MAIN)],
+      NET_MAIN.id,
+    );
+    // Custom + Monad contract row (Celo contract row replaced by custom)
+    expect(rows).toHaveLength(2);
+    expect(rows.some((r) => r.network?.id === NET_MONAD.id)).toBe(true);
+  });
 
-    it("allows editing custom rows (network=null)", () => {
-      const row: TableRow = {
-        key: "k",
-        address: ADDR_A,
-        label: "lbl",
-        isCustom: true,
-        network: null,
-      };
-      expect(resolveCanEdit(row, NET_MAIN.id)).toBe(true);
-    });
+  it("custom rows come first in the result", () => {
+    const rows = buildAddressBookRows(
+      [contractRow(ADDR_B, NET_MAIN)],
+      [customRow(ADDR_A, NET_MAIN)],
+      NET_MAIN.id,
+    );
+    expect(rows[0].isCustom).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveIsCustom
+// ---------------------------------------------------------------------------
+
+describe("resolveIsCustom", () => {
+  it("contract row on selected network is NOT marked custom by default", () => {
+    const row = contractRow(ADDR_B, NET_MAIN);
+    expect(resolveIsCustom(row, NET_MAIN.id, () => false)).toBe(false);
+  });
+
+  it("contract row on selected network IS marked custom when isCustomLabel returns true", () => {
+    const row = contractRow(ADDR_A, NET_MAIN);
+    expect(resolveIsCustom(row, NET_MAIN.id, () => true)).toBe(true);
+  });
+
+  it("contract row on OTHER network is NOT marked custom even if address has custom on selected", () => {
+    const row = contractRow(ADDR_A, NET_MONAD);
+    // isCustomLabel would return true (selected network has a custom label for this address)
+    expect(resolveIsCustom(row, NET_MAIN.id, () => true)).toBe(false);
+  });
+
+  it("custom row is always marked custom", () => {
+    const row = customRow(ADDR_A, NET_MAIN);
+    expect(resolveIsCustom(row, NET_MAIN.id, () => false)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveCanEdit
+// ---------------------------------------------------------------------------
+
+describe("resolveCanEdit", () => {
+  it("allows editing rows on the selected network", () => {
+    expect(resolveCanEdit(contractRow(ADDR_A, NET_MAIN), NET_MAIN.id)).toBe(
+      true,
+    );
+  });
+
+  it("disables editing for contract rows on other networks", () => {
+    expect(resolveCanEdit(contractRow(ADDR_A, NET_MONAD), NET_MAIN.id)).toBe(
+      false,
+    );
+  });
+
+  it("allows editing custom rows (network=null)", () => {
+    const row: AddressBookRow = {
+      key: "custom",
+      address: ADDR_A,
+      label: "lbl",
+      isCustom: true,
+      network: null,
+    };
+    expect(resolveCanEdit(row, NET_MAIN.id)).toBe(true);
   });
 });

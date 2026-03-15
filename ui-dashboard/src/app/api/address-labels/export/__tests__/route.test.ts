@@ -70,4 +70,28 @@ describe("GET /api/address-labels/export", () => {
     const res = await GET(req);
     expect(res.status).toBe(400);
   });
+
+  it("returns 500 when getLabels throws", async () => {
+    (getLabels as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("Redis connection failed"),
+    );
+    const req = new NextRequest(
+      "http://localhost/api/address-labels/export?chainId=42220",
+    );
+    const res = await GET(req);
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("Redis connection failed");
+  });
+
+  it("returns 500 when getAllChainLabels throws", async () => {
+    (getAllChainLabels as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("Redis unavailable"),
+    );
+    const req = new NextRequest("http://localhost/api/address-labels/export");
+    const res = await GET(req);
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("Redis unavailable");
+  });
 });
