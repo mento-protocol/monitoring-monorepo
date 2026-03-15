@@ -8,5 +8,7 @@
  * the correct chain rather than the default.
  */
 export function buildPoolNotFoundDest(networkParam: string | null): string {
-  return networkParam ? `/pools?network=${networkParam}` : "/pools";
+  if (!networkParam) return "/pools";
+  const params = new URLSearchParams({ network: networkParam });
+  return `/pools?${params.toString()}`;
 }

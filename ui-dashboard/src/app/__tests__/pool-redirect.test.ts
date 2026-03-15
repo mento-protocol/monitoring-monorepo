@@ -23,4 +23,11 @@ describe("buildPoolNotFoundDest", () => {
       "/pools?network=monad-mainnet-hosted",
     );
   });
+
+  it("encodes crafted input to prevent param injection", () => {
+    const dest = buildPoolNotFoundDest("foo&pool=0xevil");
+    // Should not contain a bare & that would inject a second param
+    expect(dest).not.toContain("&pool=");
+    expect(dest).toContain("network=");
+  });
 });
