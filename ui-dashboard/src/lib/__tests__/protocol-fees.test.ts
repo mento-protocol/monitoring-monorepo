@@ -14,6 +14,8 @@ describe("tokenToUSD", () => {
     expect(tokenToUSD("USDm", 100)).toBe(100);
     expect(tokenToUSD("USDC", 50)).toBe(50);
     expect(tokenToUSD("USDT", 25)).toBe(25);
+    // USD₮ (U+20AE) is how USDT appears on Celo — same $1 peg
+    expect(tokenToUSD("USD₮", 25)).toBe(25);
     expect(tokenToUSD("cUSD", 10)).toBe(10);
     expect(tokenToUSD("axlUSDC", 5)).toBe(5);
   });

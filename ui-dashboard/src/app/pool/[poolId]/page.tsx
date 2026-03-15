@@ -50,6 +50,7 @@ import type {
 } from "@/lib/types";
 import { NetworkAwareLink } from "@/components/network-aware-link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useEffect } from "react";
 import React, { Suspense, useCallback } from "react";
 
 export default function PoolDetailPage() {
@@ -106,6 +107,15 @@ function PoolDetail() {
 
   const pool = poolData?.Pool?.[0] ?? null;
 
+  // When the pool is not found on the current network (e.g. user switched
+  // networks while viewing a pool), redirect to /pools rather than showing
+  // an error — the pool may simply not exist on the new chain.
+  useEffect(() => {
+    if (!poolLoading && !poolErr && !pool) {
+      router.replace("/pools");
+    }
+  }, [pool, poolLoading, poolErr, router]);
+
   const { data: limitsData } = useGQL<{ TradingLimit: TradingLimit[] }>(
     TRADING_LIMITS,
     { poolId: decodedId },
@@ -120,8 +130,8 @@ function PoolDetail() {
   return (
     <div className="space-y-6">
       <nav aria-label="Breadcrumb" className="text-sm text-slate-400">
-        <NetworkAwareLink href="/" className="hover:text-indigo-400">
-          Global
+        <NetworkAwareLink href="/pools" className="hover:text-indigo-400">
+          Pools
         </NetworkAwareLink>
         <span className="mx-2">/</span>
         <span className="text-slate-200">

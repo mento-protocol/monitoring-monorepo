@@ -9,8 +9,7 @@ import { NetworkSelector } from "@/components/network-selector";
  */
 export function ConditionalNetworkSelector() {
   const pathname = usePathname();
-  const showSelector =
-    pathname.startsWith("/pools") || pathname.startsWith("/pool/");
-  if (!showSelector) return null;
+  // Hide only on the global homepage — every other route is network-scoped
+  if (pathname === "/") return null;
   return <NetworkSelector />;
 }
