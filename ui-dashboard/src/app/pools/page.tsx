@@ -77,7 +77,7 @@ function HomeContent() {
       if (lim !== 25) p.set("limit", String(lim));
       else p.delete("limit");
       const qs = p.toString();
-      router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+      router.replace(qs ? `/pools?${qs}` : "/pools", { scroll: false });
     },
     [router, searchParams],
   );
