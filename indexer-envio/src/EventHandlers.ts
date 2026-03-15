@@ -135,23 +135,25 @@ export function _clearMockRebalancingStates(): void {
   _testRebalancingStates.clear();
 }
 
+/** Sentinel value representing a mock null return (RPC failure simulation).
+ * Distinct from "no mock set" (which falls through to real RPC). */
+const NULL_RESERVES = Symbol("null-reserves");
+
 const _testReserves = new Map<
   string,
-  { reserve0: bigint; reserve1: bigint } | null
+  { reserve0: bigint; reserve1: bigint } | typeof NULL_RESERVES
 >();
 
-/** @internal Test-only: pre-set mock on-chain reserves for a pool. */
+/** @internal Test-only: pre-set mock on-chain reserves for a pool.
+ * Pass `null` to simulate an RPC failure (fetchReserves returns null).
+ * Call `_clearMockReserves()` to remove all mocks and restore real RPC. */
 export function _setMockReserves(
   chainId: number,
   poolAddress: string,
   reserves: { reserve0: bigint; reserve1: bigint } | null,
 ): void {
   const key = `${chainId}:${poolAddress.toLowerCase()}`;
-  if (reserves === null) {
-    _testReserves.delete(key);
-  } else {
-    _testReserves.set(key, reserves);
-  }
+  _testReserves.set(key, reserves === null ? NULL_RESERVES : reserves);
 }
 
 /** @internal Test-only: clear all mock reserves. */
@@ -208,8 +210,10 @@ const reportExpiryCache = new Map<string, bigint>();
 
 /** Cache getReserves() results by block — reserves are block-final, so multiple
  * Swap events for the same pool in the same block all produce the same result.
- * Key: "chainId:poolAddress:blockNumber" — same pattern as numReportersCache. */
+ * Key: "chainId:poolAddress:blockNumber" — same pattern as numReportersCache.
+ * Evicted when a new blockNumber is seen (Envio processes blocks sequentially). */
 const reservesCache = new Map<string, { reserve0: bigint; reserve1: bigint }>();
+let reservesCacheLastBlock: bigint | undefined;
 
 /** Returns all FPMM pool IDs that reference the given rateFeedID.
  * Uses context.Pool.getWhere (DB-backed) so it works correctly in Envio's
@@ -507,11 +511,17 @@ async function fetchReserves(
   // In unit tests, callers inject a mock via _setMockReserves so no RPC is needed.
   const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
   if (_testReserves.has(testKey)) {
-    return _testReserves.get(testKey) ?? null;
+    const mock = _testReserves.get(testKey);
+    return mock === NULL_RESERVES ? null : (mock ?? null);
   }
 
   // Block-scoped cache: reserves are block-final, so multiple Swap events for
   // the same pool in the same block all yield the same result.
+  // Evict stale entries when a new block is encountered (sequential processing).
+  if (blockNumber !== undefined && blockNumber !== reservesCacheLastBlock) {
+    reservesCache.clear();
+    reservesCacheLastBlock = blockNumber;
+  }
   const cacheKey = `${chainId}:${poolAddress.toLowerCase()}:${blockNumber}`;
   const cached = reservesCache.get(cacheKey);
   if (cached !== undefined) return cached;
