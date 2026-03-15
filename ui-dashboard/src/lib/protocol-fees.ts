@@ -29,7 +29,7 @@ const USD_PEGGED_SYMBOLS = new Set([
 /**
  * FX rates for non-USD stablecoins (USD per 1 token).
  * Covers all Mento v3 tokens on Celo and Monad.
- * Rates sourced from exchangerate-api.com, updated March 2025.
+ * Approximate spot rates sourced from exchangerate-api.com — update periodically.
  * Hardcoded for v1 — acceptable for a monitoring dashboard.
  */
 const FX_RATES: Record<string, number> = {
