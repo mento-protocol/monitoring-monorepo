@@ -113,14 +113,23 @@ describe("aggregateProtocolFees", () => {
     expect(result.fees24hUSD).toBeCloseTo(2, 2); // 2 recent transfers
   });
 
-  it("sets hasUnknownTokens when unknown symbols present", () => {
+  it("sets hasUnknownTokens when genuinely unpriced symbols are present", () => {
+    const transfers = [
+      transfer({ tokenSymbol: "SOMENEWTOK", amount: "1000000000000000000" }),
+      transfer({ tokenSymbol: "USDm", amount: "1000000000000000000" }),
+    ];
+    const result = aggregateProtocolFees(transfers);
+    expect(result.hasUnknownTokens).toBe(true);
+    expect(result.totalFeesUSD).toBeCloseTo(1, 2);
+  });
+
+  it("silently skips UNKNOWN (indexer placeholder) without setting hasUnknownTokens", () => {
     const transfers = [
       transfer({ tokenSymbol: "UNKNOWN", amount: "1000000000000000000" }),
       transfer({ tokenSymbol: "USDm", amount: "1000000000000000000" }),
     ];
     const result = aggregateProtocolFees(transfers);
-    expect(result.hasUnknownTokens).toBe(true);
-    // Unknown token should be excluded from USD total
+    expect(result.hasUnknownTokens).toBe(false);
     expect(result.totalFeesUSD).toBeCloseTo(1, 2);
   });
 

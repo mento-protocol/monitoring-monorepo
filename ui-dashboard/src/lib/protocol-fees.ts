@@ -67,6 +67,13 @@ export type ProtocolFeeSummary = {
 };
 
 /**
+ * Token symbols the indexer emits when it cannot resolve the on-chain symbol
+ * (e.g. tokens not yet in @mento-protocol/contracts). These are silently
+ * skipped rather than flagging the summary as approximate.
+ */
+const UNRESOLVED_SYMBOLS = new Set(["UNKNOWN"]);
+
+/**
  * Aggregates indexed ProtocolFeeTransfer rows into USD totals.
  * Splits by a 24h timestamp cutoff for the daily metric.
  */
@@ -79,6 +86,9 @@ export function aggregateProtocolFees(
   let hasUnknownTokens = false;
 
   for (const t of transfers) {
+    // Skip indexer placeholder symbols silently — not real unpriced value.
+    if (UNRESOLVED_SYMBOLS.has(t.tokenSymbol)) continue;
+
     const amount = parseWei(t.amount, t.tokenDecimals);
     const usd = tokenToUSD(t.tokenSymbol, amount);
     if (usd === null) {
