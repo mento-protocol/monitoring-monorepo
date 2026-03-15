@@ -4,8 +4,9 @@ import { usePathname } from "next/navigation";
 import { NetworkSelector } from "@/components/network-selector";
 
 /**
- * Renders the NetworkSelector only on per-network pages (/pools, /pool/[id]).
- * Hidden on the global homepage (/) since it aggregates all chains already.
+ * Renders the NetworkSelector on all routes except the global homepage (/).
+ * Hidden on / since it aggregates all chains; visible everywhere else
+ * (e.g. /pools, /pool/*, /address-book) where per-chain context matters.
  */
 export function ConditionalNetworkSelector() {
   const pathname = usePathname();

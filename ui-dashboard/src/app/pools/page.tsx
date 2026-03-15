@@ -21,6 +21,7 @@ import { Table, Row, Th, Td } from "@/components/table";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import { LimitSelect } from "@/components/controls";
 import { SenderCell } from "@/components/sender-cell";
+import { buildPoolsFilterUrl } from "@/lib/routing";
 
 export default function HomePage() {
   return (
@@ -71,13 +72,9 @@ function HomeContent() {
 
   const setURL = useCallback(
     (pool: string, lim: number) => {
-      const p = new URLSearchParams(searchParams.toString());
-      if (pool) p.set("pool", pool);
-      else p.delete("pool");
-      if (lim !== 25) p.set("limit", String(lim));
-      else p.delete("limit");
-      const qs = p.toString();
-      router.replace(qs ? `/pools?${qs}` : "/pools", { scroll: false });
+      router.replace(buildPoolsFilterUrl(searchParams, pool, lim), {
+        scroll: false,
+      });
     },
     [router, searchParams],
   );
