@@ -40,6 +40,84 @@ describe("tokenToUSD", () => {
     expect(tokenToUSD("KESm", 1000)).toBeCloseTo(7.7, 1);
   });
 
+  it("converts AUDm at FX rate", () => {
+    const usd = tokenToUSD("AUDm", 100);
+    expect(usd).not.toBeNull();
+    expect(usd!).toBeGreaterThan(50);
+    expect(usd!).toBeLessThan(90);
+  });
+
+  it("converts CADm at FX rate", () => {
+    const usd = tokenToUSD("CADm", 100);
+    expect(usd).not.toBeNull();
+    expect(usd!).toBeGreaterThan(60);
+    expect(usd!).toBeLessThan(90);
+  });
+
+  it("converts CHFm at FX rate", () => {
+    const usd = tokenToUSD("CHFm", 100);
+    expect(usd).not.toBeNull();
+    expect(usd!).toBeGreaterThan(100);
+    expect(usd!).toBeLessThan(150);
+  });
+
+  it("converts BRLm at FX rate", () => {
+    const usd = tokenToUSD("BRLm", 100);
+    expect(usd).not.toBeNull();
+    expect(usd!).toBeGreaterThan(10);
+    expect(usd!).toBeLessThan(30);
+  });
+
+  it("converts COPm at FX rate", () => {
+    const usd = tokenToUSD("COPm", 1000);
+    expect(usd).not.toBeNull();
+    expect(usd!).toBeLessThan(1);
+  });
+
+  it("converts GHSm at FX rate", () => {
+    const usd = tokenToUSD("GHSm", 100);
+    expect(usd).not.toBeNull();
+    expect(usd!).toBeGreaterThan(5);
+    expect(usd!).toBeLessThan(15);
+  });
+
+  it("converts JPYm at FX rate", () => {
+    const usd = tokenToUSD("JPYm", 100);
+    expect(usd).not.toBeNull();
+    expect(usd!).toBeLessThan(1);
+  });
+
+  it("converts NGNm at FX rate", () => {
+    const usd = tokenToUSD("NGNm", 100);
+    expect(usd).not.toBeNull();
+    expect(usd!).toBeLessThan(1);
+  });
+
+  it("converts PHPm at FX rate", () => {
+    const usd = tokenToUSD("PHPm", 100);
+    expect(usd).not.toBeNull();
+    expect(usd!).toBeLessThan(5);
+  });
+
+  it("converts XOFm at FX rate", () => {
+    const usd = tokenToUSD("XOFm", 100);
+    expect(usd).not.toBeNull();
+    expect(usd!).toBeLessThan(1);
+  });
+
+  it("converts ZARm at FX rate", () => {
+    const usd = tokenToUSD("ZARm", 100);
+    expect(usd).not.toBeNull();
+    expect(usd!).toBeGreaterThan(3);
+    expect(usd!).toBeLessThan(10);
+  });
+
+  it("converts axlEUROC at FX rate (EUR-pegged)", () => {
+    const usd = tokenToUSD("axlEUROC", 100);
+    expect(usd).not.toBeNull();
+    expect(usd!).toBeCloseTo(114.55, 1);
+  });
+
   it("returns null for unknown tokens", () => {
     expect(tokenToUSD("UNKNOWN", 100)).toBeNull();
     expect(tokenToUSD("FOO", 50)).toBeNull();
