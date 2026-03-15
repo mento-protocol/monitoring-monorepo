@@ -85,11 +85,23 @@ export async function getAllChainLabels(): Promise<
   Record<string, Record<string, AddressLabelEntry>>
 > {
   const redis = getRedis();
-  // Scan for all labels:* keys to collect every chain's data
-  const [, keys] = await redis.scan(0, { match: "labels:*", count: 100 });
+
+  // SCAN is cursor-based and may require multiple iterations to return all
+  // keys. A single call risks producing incomplete exports.
+  const allKeys: string[] = [];
+  let cursor = 0;
+  do {
+    const [nextCursor, batch] = await redis.scan(cursor, {
+      match: "labels:*",
+      count: 100,
+    });
+    cursor = Number(nextCursor);
+    allKeys.push(...batch);
+  } while (cursor !== 0);
+
   const result: Record<string, Record<string, AddressLabelEntry>> = {};
   await Promise.all(
-    keys.map(async (key) => {
+    allKeys.map(async (key) => {
       const raw = await redis.hgetall<Record<string, AddressLabelEntry>>(key);
       if (raw) {
         const chainId = key.replace("labels:", "");

@@ -21,15 +21,73 @@ describe("tokenToUSD", () => {
   });
 
   it("converts GBPm at FX rate", () => {
-    expect(tokenToUSD("GBPm", 100)).toBeCloseTo(127, 2);
+    expect(tokenToUSD("GBPm", 100)).toBeCloseTo(132.63, 1);
   });
 
-  it("converts cEUR at FX rate", () => {
-    expect(tokenToUSD("cEUR", 100)).toBeCloseTo(108, 2);
+  it("converts EURm at FX rate", () => {
+    expect(tokenToUSD("EURm", 100)).toBeCloseTo(114.55, 1);
   });
 
-  it("converts AUSD at 1:1", () => {
+  it("converts cEUR at FX rate (legacy symbol)", () => {
+    expect(tokenToUSD("cEUR", 100)).toBeCloseTo(114.55, 1);
+  });
+
+  it("converts AUSD at 1:1 (USD-pegged)", () => {
     expect(tokenToUSD("AUSD", 100)).toBe(100);
+  });
+
+  it("converts KESm at FX rate", () => {
+    expect(tokenToUSD("KESm", 1000)).toBeCloseTo(7.7, 1);
+  });
+
+  it("converts AUDm at FX rate", () => {
+    expect(tokenToUSD("AUDm", 100)).toBeCloseTo(69.93, 2);
+  });
+
+  it("converts CADm at FX rate", () => {
+    expect(tokenToUSD("CADm", 100)).toBeCloseTo(72.99, 2);
+  });
+
+  it("converts CHFm at FX rate", () => {
+    expect(tokenToUSD("CHFm", 100)).toBeCloseTo(126.74, 2);
+  });
+
+  it("converts BRLm at FX rate", () => {
+    expect(tokenToUSD("BRLm", 100)).toBeCloseTo(19.05, 2);
+  });
+
+  it("converts COPm at FX rate", () => {
+    expect(tokenToUSD("COPm", 100)).toBeCloseTo(0.027, 3);
+  });
+
+  it("converts GHSm at FX rate", () => {
+    expect(tokenToUSD("GHSm", 100)).toBeCloseTo(9.24, 2);
+  });
+
+  it("converts JPYm at FX rate", () => {
+    expect(tokenToUSD("JPYm", 100)).toBeCloseTo(0.627, 3);
+  });
+
+  it("converts NGNm at FX rate", () => {
+    expect(tokenToUSD("NGNm", 100)).toBeCloseTo(0.073, 3);
+  });
+
+  it("converts PHPm at FX rate", () => {
+    expect(tokenToUSD("PHPm", 100)).toBeCloseTo(1.675, 3);
+  });
+
+  it("converts XOFm at FX rate", () => {
+    expect(tokenToUSD("XOFm", 100)).toBeCloseTo(0.175, 3);
+  });
+
+  it("converts ZARm at FX rate", () => {
+    expect(tokenToUSD("ZARm", 100)).toBeCloseTo(5.93, 2);
+  });
+
+  it("converts axlEUROC at FX rate (EUR-pegged)", () => {
+    const usd = tokenToUSD("axlEUROC", 100);
+    expect(usd).not.toBeNull();
+    expect(usd!).toBeCloseTo(114.55, 1);
   });
 
   it("returns null for unknown tokens", () => {
@@ -98,7 +156,7 @@ describe("aggregateProtocolFees", () => {
       }),
     ];
     const result = aggregateProtocolFees(transfers);
-    expect(result.totalFeesUSD).toBeCloseTo(1.27, 2); // 1 * 1.27
+    expect(result.totalFeesUSD).toBeCloseTo(1.3263, 2); // 1 * 1.3263
   });
 
   it("splits 24h fees correctly", () => {
@@ -149,7 +207,7 @@ describe("aggregateProtocolFees", () => {
       }),
     ];
     const result = aggregateProtocolFees(transfers);
-    expect(result.totalFeesUSD).toBeCloseTo(10 + 5 + 2.54, 1);
+    expect(result.totalFeesUSD).toBeCloseTo(10 + 5 + 2 * 1.3263, 1);
     expect(result.fees24hUSD).toBeCloseTo(5, 2); // only USDC is recent
   });
 
