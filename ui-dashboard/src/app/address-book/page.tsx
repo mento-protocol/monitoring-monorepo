@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useCallback, useMemo } from "react";
+import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
 import { explorerAddressUrl } from "@/lib/tokens";
@@ -33,6 +34,7 @@ type AddressRow = {
 // ---------------------------------------------------------------------------
 
 export default function AddressBookPage() {
+  const { network: selectedNetwork } = useNetwork();
   const { customLabels, getLabel, isCustomLabel, getEntry, isLoading, error } =
     useAddressLabels();
 
@@ -64,26 +66,31 @@ export default function AddressBookPage() {
     return rows;
   }, []);
 
-  // Custom labels are global (not network-scoped in this view).
-  // We show them once, without a specific network.
+  // Custom labels are scoped to the selected network (storage is per-chainId).
+  // Using getLabel() is correct here since these ARE on the selected network.
   const customRows = useMemo<AddressRow[]>(
     () =>
       customLabels.map((r) => ({
         address: r.address,
-        label: r.label,
+        label: getLabel(r.address),
         isCustom: true,
-        network: null,
+        network: selectedNetwork,
       })),
-    [customLabels],
+    [customLabels, getLabel, selectedNetwork],
   );
 
-  // Merge: custom labels take precedence, deduplicating by address.
+  // Merge: custom labels on the selected network take precedence over contract
+  // rows for the same (selectedNetwork.id, address) pair. Contract rows from
+  // OTHER networks are always shown — dedupe is per (chainId, address).
   const allRows = useMemo<AddressRow[]>(() => {
-    const customAddresses = new Set(customRows.map((r) => r.address));
-    return [
-      ...customRows,
-      ...contractRows.filter((r) => !customAddresses.has(r.address)),
-    ].filter((row) => {
+    const customKeysOnSelectedNet = new Set(
+      customRows.map((r) => `${selectedNetwork.id}:${r.address}`),
+    );
+    const filteredContractRows = contractRows.filter(
+      (r) =>
+        !customKeysOnSelectedNet.has(`${r.network?.id ?? ""}:${r.address}`),
+    );
+    return [...customRows, ...filteredContractRows].filter((row) => {
       if (!search) return true;
       const q = search.toLowerCase();
       return (
@@ -92,7 +99,7 @@ export default function AddressBookPage() {
         (row.network?.label.toLowerCase().includes(q) ?? false)
       );
     });
-  }, [customRows, contractRows, search]);
+  }, [customRows, contractRows, selectedNetwork.id, search]);
 
   const handleExport = useCallback(() => {
     // Export all chains
@@ -148,8 +155,11 @@ export default function AddressBookPage() {
         <div>
           <h1 className="text-xl font-bold text-white">Address Book</h1>
           <p className="mt-1 text-sm text-slate-400">
-            Contract labels across all chains. Custom labels take precedence
-            over contract labels.
+            Contract labels across all chains. Custom labels for{" "}
+            <span className="text-slate-300">
+              {selectedNetwork.label.replace(/ \(.*\)$/, "")}
+            </span>{" "}
+            — use the network selector to edit labels on other chains.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -257,19 +267,14 @@ export default function AddressBookPage() {
             <tbody>
               {allRows.map((row) => {
                 const entry = getEntry(row.address);
-                // Use row's own network for explorer link; fall back to first
-                // configured network for custom-only labels (best effort).
-                const net =
-                  row.network ??
-                  NETWORKS[
-                    NETWORK_IDS.filter(isConfiguredNetworkId)[0] ??
-                      "celo-mainnet-hosted"
-                  ];
+                // Contract rows use their own network for correct explorer link.
+                // Custom rows are on the selected network (chain-scoped storage).
+                const net = row.network ?? selectedNetwork;
                 return (
                   <AddressTableRow
-                    key={`${row.network?.id ?? "custom"}:${row.address}`}
+                    key={`${row.network?.id ?? selectedNetwork.id}:${row.address}`}
                     address={row.address}
-                    label={getLabel(row.address)}
+                    label={row.label}
                     networkLabel={
                       row.network
                         ? row.network.label.replace(/ \(.*\)$/, "")
@@ -297,15 +302,12 @@ export default function AddressBookPage() {
           address={editingAddress}
           initial={
             getEntry(editingAddress) ??
-            (() => {
-              // Pre-fill label from any network's contract labels
-              for (const id of NETWORK_IDS.filter(isConfiguredNetworkId)) {
-                const lbl = NETWORKS[id].addressLabels[editingAddress];
-                if (lbl)
-                  return { label: lbl, updatedAt: new Date().toISOString() };
-              }
-              return undefined;
-            })()
+            (selectedNetwork.addressLabels[editingAddress]
+              ? {
+                  label: selectedNetwork.addressLabels[editingAddress],
+                  updatedAt: new Date().toISOString(),
+                }
+              : undefined)
           }
           onClose={() => setEditingAddress(null)}
         />
