@@ -9,13 +9,7 @@ export function NavLinks() {
         href="/"
         className="text-base sm:text-lg font-bold text-white hover:text-indigo-400 transition-colors"
       >
-        Mento v3
-      </NetworkAwareLink>
-      <NetworkAwareLink
-        href="/"
-        className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
-      >
-        Global
+        Mento Analytics
       </NetworkAwareLink>
       <NetworkAwareLink
         href="/pools"
