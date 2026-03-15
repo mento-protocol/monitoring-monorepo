@@ -110,11 +110,14 @@ function PoolDetail() {
   // When the pool is not found on the current network (e.g. user switched
   // networks while viewing a pool), redirect to /pools rather than showing
   // an error — the pool may simply not exist on the new chain.
+  // Preserve the active ?network= param so the user lands on the correct chain.
   useEffect(() => {
     if (!poolLoading && !poolErr && !pool) {
-      router.replace("/pools");
+      const networkParam = searchParams.get("network");
+      const dest = networkParam ? `/pools?network=${networkParam}` : "/pools";
+      router.replace(dest);
     }
-  }, [pool, poolLoading, poolErr, router]);
+  }, [pool, poolLoading, poolErr, router, searchParams]);
 
   const { data: limitsData } = useGQL<{ TradingLimit: TradingLimit[] }>(
     TRADING_LIMITS,
