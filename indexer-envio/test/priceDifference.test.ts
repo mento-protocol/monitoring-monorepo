@@ -23,7 +23,52 @@ function pool(opts: {
 
 describe("computePriceDifference", () => {
   // -----------------------------------------------------------------------
-  // Contract-verified scenario: pool 0xb0a... on Monad
+  // Contract-verified scenario: AUSD/USDm pool 0xb0a… on Monad mainnet
+  // token0 = AUSD (6 decimals), token1 = USDm (18 decimals)
+  // On-chain: reserves0=60001377664 (6dp), reserves1=40047366881133248737236 (18dp)
+  // getRebalancingState() → priceDifference = 3325 bps
+  // -----------------------------------------------------------------------
+
+  const AUSD_USDM_ORACLE = 999_931_000_000_000_000_000_000n; // ≈ 0.999931 at 24dp
+  // reserves0 = 60001377664 at 6dp → normalized to 18dp: × 10^12
+  const AUSD_R0_RAW = 60_001_377_664n; // raw on-chain (6dp)
+  // reserves1 already 18dp
+  const AUSD_R1 = 40_047_366_881_133_248_737_236n;
+
+  it("AUSD/USDm pool: correct 6dp decimals yields 3325 bps (matches contract)", () => {
+    // With correct token0Decimals=6, normalizeTo18 scales reserves0 by 10^12,
+    // giving ~60001 tokens. ratio = 40047/60001 ≈ 0.6674, oracle ≈ 0.99993.
+    // deviation = |0.6674 - 0.99993| / 0.99993 ≈ 3325 bps.
+    const pd = computePriceDifference(
+      pool({
+        reserves0: AUSD_R0_RAW,
+        reserves1: AUSD_R1,
+        oraclePrice: AUSD_USDM_ORACLE,
+        token0Decimals: 6,
+        token1Decimals: 18,
+      }),
+    );
+    assert.equal(pd, 3325n, `expected 3325 bps (contract value), got ${pd}`);
+  });
+
+  it("AUSD/USDm pool: wrong 18dp decimals computes astronomical ratio", () => {
+    // With wrong token0Decimals=18, reserves0=60001377664 normalizes to ~6e10
+    // (no scaling), giving an enormous reserve ratio vs the oracle.
+    // Without the dust guard, the actual computed deviation is returned.
+    const pd = computePriceDifference(
+      pool({
+        reserves0: AUSD_R0_RAW,
+        reserves1: AUSD_R1,
+        oraclePrice: AUSD_USDM_ORACLE,
+        token0Decimals: 18, // wrong — this is what the DB had before the fix
+        token1Decimals: 18,
+      }),
+    );
+    assert.equal(pd, 6674868461244722n, `expected astronomical bps, got ${pd}`);
+  });
+
+  // -----------------------------------------------------------------------
+  // Contract-verified scenario: pool 0xb0a... on Monad (original test data)
   // getRebalancingState returns priceDifference = 3333 bps
   // reservePrice = reserve1 / reserve0 = 40017/60026 ≈ 0.6668, oracle ≈ 1.0
   // (CORRECTED: FPMM uses token1/token0 direction, so we swap the constants)
@@ -163,10 +208,10 @@ describe("computePriceDifference", () => {
     assert.equal(pd, 0n);
   });
 
-  it("extreme imbalance: very small reserve1", () => {
-    // 1 wei of token1 vs 1e18 token0 — extreme imbalance, should not throw
-    // reserve1/reserve0 = 1 / 1e18 → very small ratio vs oracle=1.0
-    // deviation ≈ 100% (ratio ≈ 0, oracle = 1.0)
+  it("extreme imbalance: dust reserve1 below 1 token is computed normally", () => {
+    // 1 wei of token1 vs 1e18 token0 — essentially drained pool.
+    // Without the dust guard, the actual price deviation is returned.
+    // reserveRatio = 1e6 (in SCALE units), oracle = 1.0 → deviation ≈ 9999 bps
     const pd = computePriceDifference(
       pool({
         reserves0: 1_000_000_000_000_000_000n,
@@ -174,7 +219,20 @@ describe("computePriceDifference", () => {
         oraclePrice: SCALE, // oracle = 1.0
       }),
     );
-    assert.equal(pd, 9999n, `expected ~9999 bps (100% deviation), got ${pd}`);
+    assert.equal(pd, 9999n, `expected 9999 bps, got ${pd}`);
+  });
+
+  it("extreme imbalance: reserve1 >= 1 token is computed normally", () => {
+    // 1 full token (1e18) of token1 vs 1000 tokens of token0 — valid but imbalanced
+    // reserve1/reserve0 = 1e18 / 1000e18 = 0.001, oracle = 1.0 → deviation ≈ 9990 bps
+    const pd = computePriceDifference(
+      pool({
+        reserves0: 1_000_000_000_000_000_000_000n, // 1000 tokens at 18dp
+        reserves1: 1_000_000_000_000_000_000n, // 1 token at 18dp
+        oraclePrice: SCALE, // oracle = 1.0
+      }),
+    );
+    assert.ok(pd >= 9980n && pd <= 9999n, `expected ~9990 bps, got ${pd}`);
   });
 
   it("returns 0 when >18dp normalization floors reserves to zero", () => {
