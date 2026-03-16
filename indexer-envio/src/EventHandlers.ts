@@ -162,6 +162,65 @@ export function _clearMockReserves(): void {
 }
 
 // ---------------------------------------------------------------------------
+// RPC failure logging
+// ---------------------------------------------------------------------------
+
+/** How many failures of the same (chainId, fn) to accumulate before emitting
+ * an additional [RPC_FAILURE_BURST] summary line. Individual failures are
+ * always logged; the burst line is the "pattern detected" signal for monitoring. */
+const RPC_BURST_INTERVAL = 10;
+
+/** Monotonically increasing failure count per `chainId:fn` key. */
+const _rpcFailureCounts = new Map<string, number>();
+
+function sanitizeErrorMessage(msg: string): string {
+  return msg.replace(/https?:\/\/[^\s,)""]*/g, (url) => {
+    try {
+      const u = new URL(url);
+      return `${u.origin}/<redacted>`;
+    } catch {
+      return "<url-redacted>";
+    }
+  });
+}
+
+/**
+ * Log a structured RPC failure warning and emit a burst-summary line every
+ * `RPC_BURST_INTERVAL` failures for the same chain+function combination.
+ *
+ * @param chainId  - the chain where the call was attempted
+ * @param fn       - the contract function name (e.g. "getReserves", "decimals0")
+ * @param target   - pool/token/rateFeed address that was called
+ * @param err      - the caught error value
+ * @param block    - optional block number the call was scoped to
+ */
+function logRpcFailure(
+  chainId: number,
+  fn: string,
+  target: string,
+  err: unknown,
+  block?: bigint,
+): void {
+  const message =
+    err instanceof Error
+      ? sanitizeErrorMessage(err.message)
+      : String(err ?? "unknown error");
+  const blockStr = block !== undefined ? ` block=${block}` : "";
+  console.warn(
+    `[RPC_FAILURE] chainId=${chainId} fn=${fn} target=${target}${blockStr} error=${message}`,
+  );
+
+  const burstKey = `${chainId}:${fn}`;
+  const count = (_rpcFailureCounts.get(burstKey) ?? 0) + 1;
+  _rpcFailureCounts.set(burstKey, count);
+  if (count % RPC_BURST_INTERVAL === 0) {
+    console.warn(
+      `[RPC_FAILURE_BURST] chainId=${chainId} fn=${fn} failureCount=${count}`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Test hooks for fee-token metadata (resolveFeeTokenMeta RPC layer)
 // ---------------------------------------------------------------------------
 
@@ -314,7 +373,8 @@ async function fetchNumReporters(
     const value = Number(count);
     numReportersCache.set(cacheKey, value);
     return value;
-  } catch {
+  } catch (err) {
+    logRpcFailure(chainId, "numRates", rateFeedID, err, blockNumber);
     return null;
   }
 }
@@ -360,7 +420,8 @@ async function fetchReportExpiry(
     if (expiry <= 0n) return null;
     reportExpiryCache.set(cacheKey, expiry);
     return expiry;
-  } catch {
+  } catch (err) {
+    logRpcFailure(chainId, "reportExpiry", rateFeedID, err, blockNumber);
     return null;
   }
 }
@@ -539,7 +600,14 @@ async function fetchRebalancingState(
       rebalanceThreshold: Number(r[5]),
       priceDifference: r[6],
     };
-  } catch {
+  } catch (err) {
+    logRpcFailure(
+      chainId,
+      "getRebalancingState",
+      poolAddress,
+      err,
+      blockNumber,
+    );
     return null;
   }
 }
@@ -592,7 +660,8 @@ async function fetchReserves(
     const reserves = { reserve0: r[0], reserve1: r[1] };
     reservesCache.set(cacheKey, reserves);
     return reserves;
-  } catch {
+  } catch (err) {
+    logRpcFailure(chainId, "getReserves", poolAddress, err, blockNumber);
     return null;
   }
 }
@@ -610,7 +679,8 @@ async function fetchInvertRateFeed(
       functionName: "invertRateFeed",
     });
     return result as boolean;
-  } catch {
+  } catch (err) {
+    logRpcFailure(chainId, "invertRateFeed", poolAddress, err);
     return false;
   }
 }
@@ -637,7 +707,8 @@ async function fetchRebalanceThreshold(
       }),
     ]);
     return Math.max(Number(above), Number(below));
-  } catch {
+  } catch (err) {
+    logRpcFailure(chainId, "rebalanceThreshold", poolAddress, err);
     return 0;
   }
 }
@@ -654,7 +725,8 @@ async function fetchReferenceRateFeedID(
       functionName: "referenceRateFeedID",
     });
     return (result as string).toLowerCase();
-  } catch {
+  } catch (err) {
+    logRpcFailure(chainId, "referenceRateFeedID", poolAddress, err);
     return null;
   }
 }
@@ -688,7 +760,8 @@ async function fetchTokenDecimalsScaling(
       functionName: fn,
     });
     return result as bigint;
-  } catch {
+  } catch (err) {
+    logRpcFailure(chainId, fn, poolAddress, err);
     return null;
   }
 }
@@ -716,7 +789,8 @@ async function fetchTradingLimits(
     ];
     const [config, state] = result;
     return { config, state };
-  } catch {
+  } catch (err) {
+    logRpcFailure(chainId, "getTradingLimits", poolAddress, err);
     return null;
   }
 }
