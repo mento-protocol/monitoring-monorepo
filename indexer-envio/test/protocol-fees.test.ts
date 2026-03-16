@@ -1,6 +1,12 @@
 /// <reference types="mocha" />
 import assert from "node:assert/strict";
 import generated from "generated";
+import {
+  _setMockFeeTokenMeta,
+  _clearMockFeeTokenMeta,
+  _clearBackfilledTokens,
+  _clearFeeTokenMetaCache,
+} from "../src/EventHandlers.ts";
 
 // ---------------------------------------------------------------------------
 // Types & helpers
@@ -187,6 +193,106 @@ describe("ERC20FeeToken.Transfer handler", () => {
       transfer,
       undefined,
       "ProtocolFeeTransfer should NOT be written when no pools exist",
+    );
+  });
+});
+
+describe("UNKNOWN backfill behavior", () => {
+  const TOKEN_2 = "0x0000000000000000000000000000000000000099";
+  const CHAIN_A = 42220;
+
+  afterEach(() => {
+    _clearMockFeeTokenMeta();
+    _clearBackfilledTokens();
+    _clearFeeTokenMetaCache(); // prevent cross-test cache pollution
+  });
+
+  it("stores UNKNOWN when RPC fails on first transfer", async function () {
+    this.timeout(15_000);
+    _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, "FAIL");
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedFpmmPool(mockDb);
+    const event = createTransferEvent({
+      srcAddress: TOKEN_2,
+      logIndex: 40,
+      blockNumber: 600,
+    });
+    mockDb = await ERC20FeeToken.Transfer.processEvent({ event, mockDb });
+    const id = `${CHAIN_A}_600_40`;
+    const transfer = mockDb.entities.ProtocolFeeTransfer.get(id) as
+      | { tokenSymbol: string }
+      | undefined;
+    assert.equal(
+      transfer?.tokenSymbol,
+      "UNKNOWN",
+      "RPC failure should store UNKNOWN placeholder",
+    );
+  });
+
+  it("stores resolved symbol when RPC succeeds", async function () {
+    this.timeout(15_000);
+    _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, { symbol: "GBPm", decimals: 18 });
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedFpmmPool(mockDb);
+    const event = createTransferEvent({
+      srcAddress: TOKEN_2,
+      logIndex: 41,
+      blockNumber: 601,
+    });
+    mockDb = await ERC20FeeToken.Transfer.processEvent({ event, mockDb });
+    const id = `${CHAIN_A}_601_41`;
+    const transfer = mockDb.entities.ProtocolFeeTransfer.get(id) as
+      | { tokenSymbol: string }
+      | undefined;
+    assert.equal(
+      transfer?.tokenSymbol,
+      "GBPm",
+      "Successful RPC should store the resolved symbol",
+    );
+  });
+
+  it("retries resolution on subsequent transfer after RPC failure (no permanent skip)", async function () {
+    this.timeout(15_000);
+    // First transfer: fails
+    _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, "FAIL");
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedFpmmPool(mockDb);
+    const event1 = createTransferEvent({
+      srcAddress: TOKEN_2,
+      logIndex: 50,
+      blockNumber: 700,
+    });
+    mockDb = await ERC20FeeToken.Transfer.processEvent({
+      event: event1,
+      mockDb,
+    });
+    const id1 = `${CHAIN_A}_700_50`;
+    const stale = mockDb.entities.ProtocolFeeTransfer.get(id1) as
+      | { tokenSymbol: string }
+      | undefined;
+    assert.equal(stale?.tokenSymbol, "UNKNOWN");
+
+    // Second transfer: RPC now succeeds — feeTokenMetaCache should NOT have a
+    // cached failure (failures are not cached), so this should resolve correctly.
+    _clearMockFeeTokenMeta();
+    _setMockFeeTokenMeta(CHAIN_A, TOKEN_2, { symbol: "GBPm", decimals: 18 });
+    const event2 = createTransferEvent({
+      srcAddress: TOKEN_2,
+      logIndex: 51,
+      blockNumber: 701,
+    });
+    mockDb = await ERC20FeeToken.Transfer.processEvent({
+      event: event2,
+      mockDb,
+    });
+    const id2 = `${CHAIN_A}_701_51`;
+    const resolved = mockDb.entities.ProtocolFeeTransfer.get(id2) as
+      | { tokenSymbol: string }
+      | undefined;
+    assert.equal(
+      resolved?.tokenSymbol,
+      "GBPm",
+      "Retry after RPC failure should successfully resolve the symbol — failures must not be cached",
     );
   });
 });
