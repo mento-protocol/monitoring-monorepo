@@ -48,7 +48,7 @@ function GlobalContent() {
       anyFeesError || anyNetworkError ? null : 0;
     let totalFees24h: number | null =
       anyFeesError || anyNetworkError ? null : 0;
-    let hasUnknownTokens = false;
+    const unpricedSymbolSet = new Set<string>();
     let isTruncated = false;
 
     for (const netData of networkData) {
@@ -80,10 +80,12 @@ function GlobalContent() {
       if (netData.feesError === null && fees !== null) {
         if (totalFeesAllTime !== null) totalFeesAllTime += fees.totalFeesUSD;
         if (totalFees24h !== null) totalFees24h += fees.fees24hUSD;
-        if (fees.hasUnknownTokens) hasUnknownTokens = true;
+        fees.unpricedSymbols.forEach((s) => unpricedSymbolSet.add(s));
         if (fees.isTruncated) isTruncated = true;
       }
     }
+
+    const unpricedSymbols = Array.from(unpricedSymbolSet).sort();
 
     return {
       totalPools,
@@ -93,7 +95,7 @@ function GlobalContent() {
       totalSwaps24hFpmm,
       totalFeesAllTime,
       totalFees24h,
-      hasUnknownTokens,
+      unpricedSymbols,
       isTruncated,
     };
   }, [networkData, anyNetworkError, anySnapshotsError, anyFeesError]);
@@ -141,15 +143,16 @@ function GlobalContent() {
                 ? "…"
                 : aggregated.totalFeesAllTime === null
                   ? "N/A"
-                  : `${aggregated.hasUnknownTokens || aggregated.isTruncated ? "≈ " : ""}${formatUSD(aggregated.totalFeesAllTime)}`
+                  : `${aggregated.unpricedSymbols.length > 0 || aggregated.isTruncated ? "≈ " : ""}${formatUSD(aggregated.totalFeesAllTime)}`
             }
+            href="https://debank.com/profile/0x0dd57f6f181d0469143fe9380762d8a112e96e4a"
             subtitle={
               aggregated.totalFeesAllTime === null
                 ? "Some chains failed to load"
                 : aggregated.isTruncated
                   ? "Lower bound — data exceeds query limit"
-                  : aggregated.hasUnknownTokens
-                    ? "Approximate — some tokens unpriced"
+                  : aggregated.unpricedSymbols.length > 0
+                    ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
                     : "All-time cumulative"
             }
           />
@@ -185,13 +188,13 @@ function GlobalContent() {
                 ? "…"
                 : aggregated.totalFees24h === null
                   ? "N/A"
-                  : `${aggregated.hasUnknownTokens ? "≈ " : ""}${formatUSD(aggregated.totalFees24h)}`
+                  : `${aggregated.unpricedSymbols.length > 0 ? "≈ " : ""}${formatUSD(aggregated.totalFees24h)}`
             }
             subtitle={
               aggregated.totalFees24h === null
                 ? "Some chains failed to load"
-                : aggregated.hasUnknownTokens
-                  ? "Approximate — some tokens unpriced"
+                : aggregated.unpricedSymbols.length > 0
+                  ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
                   : undefined
             }
           />

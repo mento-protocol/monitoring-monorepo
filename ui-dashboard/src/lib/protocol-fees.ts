@@ -59,6 +59,13 @@ const FX_RATES: Record<string, number> = {
 // ---------------------------------------------------------------------------
 
 /**
+ * Token symbols the indexer emits when it cannot resolve the on-chain symbol
+ * (e.g. tokens not yet in @mento-protocol/contracts). These are silently
+ * skipped rather than flagging the summary as approximate.
+ */
+const UNRESOLVED_SYMBOLS = new Set(["UNKNOWN"]);
+
+/**
  * Convert a token amount to USD. Returns `null` for unknown tokens
  * so callers can track unconverted fees separately.
  */
@@ -79,8 +86,12 @@ export const PROTOCOL_FEE_QUERY_LIMIT = 10_000;
 export type ProtocolFeeSummary = {
   totalFeesUSD: number;
   fees24hUSD: number;
-  /** True when at least one transfer had an unknown token symbol. */
-  hasUnknownTokens: boolean;
+  /**
+   * Symbols that appeared in transfers but have no USD conversion.
+   * Empty array = all tokens priced. Non-empty = fee total is approximate.
+   * Use this to show the user exactly which tokens are unpriced.
+   */
+  unpricedSymbols: string[];
   /** True when the query hit the row limit — all-time total is a lower bound. */
   isTruncated: boolean;
 };
@@ -95,13 +106,16 @@ export function aggregateProtocolFees(
   const cutoff24h = Math.floor(Date.now() / 1000) - 86400;
   let totalFeesUSD = 0;
   let fees24hUSD = 0;
-  let hasUnknownTokens = false;
+  const unpricedSymbolSet = new Set<string>();
 
   for (const t of transfers) {
+    // Skip indexer placeholder symbols silently — not real unpriced value.
+    if (UNRESOLVED_SYMBOLS.has(t.tokenSymbol)) continue;
+
     const amount = parseWei(t.amount, t.tokenDecimals);
     const usd = tokenToUSD(t.tokenSymbol, amount);
     if (usd === null) {
-      hasUnknownTokens = true;
+      unpricedSymbolSet.add(t.tokenSymbol);
       continue;
     }
     totalFeesUSD += usd;
@@ -113,7 +127,7 @@ export function aggregateProtocolFees(
   return {
     totalFeesUSD,
     fees24hUSD,
-    hasUnknownTokens,
+    unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
     isTruncated: transfers.length >= PROTOCOL_FEE_QUERY_LIMIT,
   };
 }

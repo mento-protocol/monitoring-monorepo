@@ -127,7 +127,7 @@ describe("GlobalPage — all networks succeed", () => {
         fees: {
           totalFeesUSD: 1000,
           fees24hUSD: 50,
-          hasUnknownTokens: false,
+          unpricedSymbols: [],
           isTruncated: false,
         },
       }),
@@ -195,7 +195,7 @@ describe("GlobalPage — snapshots-only failure", () => {
         fees: {
           totalFeesUSD: 500,
           fees24hUSD: 20,
-          hasUnknownTokens: false,
+          unpricedSymbols: [],
           isTruncated: false,
         },
       }),
