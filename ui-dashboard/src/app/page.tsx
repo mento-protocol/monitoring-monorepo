@@ -52,6 +52,7 @@ function GlobalContent() {
     const unpricedSymbols24hSet = new Set<string>();
     let isTruncated = false;
     let totalUnresolvedCount = 0;
+    let totalUnresolvedCount24h = 0;
 
     for (const netData of networkData) {
       // Skip whole-network errors (pools = [] anyway, already flagged via anyNetworkError)
@@ -85,6 +86,7 @@ function GlobalContent() {
         fees.unpricedSymbols.forEach((s) => unpricedSymbolSet.add(s));
         fees.unpricedSymbols24h.forEach((s) => unpricedSymbols24hSet.add(s));
         totalUnresolvedCount += fees.unresolvedCount;
+        totalUnresolvedCount24h += fees.unresolvedCount24h;
         if (fees.isTruncated) isTruncated = true;
       }
     }
@@ -103,6 +105,7 @@ function GlobalContent() {
       unpricedSymbols,
       unpricedSymbols24h,
       totalUnresolvedCount,
+      totalUnresolvedCount24h,
       isTruncated,
     };
   }, [networkData, anyNetworkError, anySnapshotsError, anyFeesError]);
@@ -195,14 +198,16 @@ function GlobalContent() {
                 ? "…"
                 : aggregated.totalFees24h === null
                   ? "N/A"
-                  : `${aggregated.unpricedSymbols24h.length > 0 ? "≈ " : ""}${formatUSD(aggregated.totalFees24h)}`
+                  : `${aggregated.unpricedSymbols24h.length > 0 || aggregated.totalUnresolvedCount24h > 0 ? "≈ " : ""}${formatUSD(aggregated.totalFees24h)}`
             }
             subtitle={
               aggregated.totalFees24h === null
                 ? "Some chains failed to load"
                 : aggregated.unpricedSymbols24h.length > 0
                   ? `Approximate — unpriced: ${aggregated.unpricedSymbols24h.join(", ")}`
-                  : undefined
+                  : aggregated.totalUnresolvedCount24h > 0
+                    ? "Approximate — some tokens unresolved"
+                    : undefined
             }
           />
         </div>
