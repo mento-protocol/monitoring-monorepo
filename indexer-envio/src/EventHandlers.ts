@@ -2207,10 +2207,11 @@ ERC20FeeToken.Transfer.handler(
     );
 
     const id = eventId(chainId, event.block.number, event.logIndex);
+    const normalizedToken = asAddress(tokenAddress);
 
     const transfer: ProtocolFeeTransfer = {
       id,
-      token: asAddress(tokenAddress),
+      token: normalizedToken,
       tokenSymbol: symbol,
       tokenDecimals: decimals,
       amount: event.params.value,
@@ -2221,6 +2222,26 @@ ERC20FeeToken.Transfer.handler(
     };
 
     context.ProtocolFeeTransfer.set(transfer);
+
+    // Backfill: if the RPC call succeeded and we now know the real symbol,
+    // find any previously stored UNKNOWN records for the same token address
+    // and update them. This handles the case where the very first transfer
+    // for a token failed RPC resolution (e.g. transient error at deployment
+    // time) and subsequent transfers succeeded — reindexing replays the same
+    // error, so the first record stays UNKNOWN forever without this fix.
+    if (symbol !== "UNKNOWN") {
+      const unknownRecords =
+        await context.ProtocolFeeTransfer.getWhere.token.eq(normalizedToken);
+      for (const stale of unknownRecords) {
+        if (stale.tokenSymbol === "UNKNOWN") {
+          context.ProtocolFeeTransfer.set({
+            ...stale,
+            tokenSymbol: symbol,
+            tokenDecimals: decimals,
+          });
+        }
+      }
+    }
   },
   {
     // Topic-level filter: Envio only delivers Transfer events where `to`
