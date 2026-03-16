@@ -163,7 +163,9 @@ function GlobalContent() {
                   ? "Lower bound — data exceeds query limit"
                   : aggregated.unpricedSymbols.length > 0
                     ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
-                    : "All-time cumulative"
+                    : aggregated.totalUnresolvedCount > 0
+                      ? "Approximate — some tokens unresolved"
+                      : "All-time cumulative"
             }
           />
           <Tile
