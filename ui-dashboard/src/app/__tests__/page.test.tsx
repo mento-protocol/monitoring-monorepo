@@ -135,7 +135,7 @@ describe("GlobalPage — all networks succeed", () => {
         },
       }),
     ]);
-    expect(html).toContain("Total Fees Earned");
+    expect(html).toContain("Swap Fees Earned");
     expect(html).not.toContain("N/A");
   });
 });
@@ -209,7 +209,7 @@ describe("GlobalPage — snapshots-only failure", () => {
     expect(html).toContain("24h Volume");
     expect(html).toContain("N/A");
     // All-time fees should still show (not N/A)
-    expect(html).toContain("Total Fees Earned");
+    expect(html).toContain("Swap Fees Earned");
   });
 });
 
@@ -257,8 +257,8 @@ describe("GlobalPage — unpriced symbols behavior", () => {
     // The all-time subtitle has "Approximate — unpriced: FOO" but not 24h
     const unpricedIdx = html.indexOf("Approximate — unpriced:");
     expect(unpricedIdx).toBeGreaterThan(-1);
-    // 24h Fees Earned label appears after the all-time fees section
-    const fees24hIdx = html.indexOf("24h Fees Earned");
+    // 24h Swap Fees label appears after the all-time fees section
+    const fees24hIdx = html.indexOf("24h Swap Fees");
     // Approximation should not appear after the 24h section start
     // (i.e. it appears only in the all-time section)
     const afterFees24h = html.slice(fees24hIdx);
@@ -303,7 +303,7 @@ describe("GlobalPage — unpriced symbols behavior", () => {
     expect(html).not.toContain("unpriced:");
   });
 
-  it("renders DeBank link on Total Fees Earned tile", () => {
+  it("renders DeBank link on Swap Fees Earned tile", () => {
     const html = render([
       makeNetworkData({
         fees: {
@@ -318,6 +318,6 @@ describe("GlobalPage — unpriced symbols behavior", () => {
       }),
     ]);
     expect(html).toContain("debank.com");
-    expect(html).toContain("Total Fees Earned");
+    expect(html).toContain("Swap Fees Earned");
   });
 });

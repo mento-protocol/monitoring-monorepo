@@ -147,7 +147,7 @@ function GlobalContent() {
             }
           />
           <Tile
-            label="Total Fees Earned"
+            label="Swap Fees Earned"
             value={
               isLoading
                 ? "…"
@@ -194,7 +194,7 @@ function GlobalContent() {
             }
           />
           <Tile
-            label="24h Fees Earned"
+            label="24h Swap Fees"
             value={
               isLoading
                 ? "…"
