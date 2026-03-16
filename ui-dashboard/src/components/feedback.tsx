@@ -48,7 +48,8 @@ export function Tile({
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-1 text-2xl font-semibold text-white font-mono hover:text-indigo-400 transition-colors"
+            aria-label={`${label}: ${value}`}
+            className="mt-1 block text-2xl font-semibold text-white font-mono hover:text-indigo-400 transition-colors"
           >
             {value}
           </a>

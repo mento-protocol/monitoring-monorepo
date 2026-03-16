@@ -49,6 +49,7 @@ function GlobalContent() {
     let totalFees24h: number | null =
       anyFeesError || anyNetworkError ? null : 0;
     const unpricedSymbolSet = new Set<string>();
+    const unpricedSymbols24hSet = new Set<string>();
     let isTruncated = false;
 
     for (const netData of networkData) {
@@ -81,11 +82,13 @@ function GlobalContent() {
         if (totalFeesAllTime !== null) totalFeesAllTime += fees.totalFeesUSD;
         if (totalFees24h !== null) totalFees24h += fees.fees24hUSD;
         fees.unpricedSymbols.forEach((s) => unpricedSymbolSet.add(s));
+        fees.unpricedSymbols24h.forEach((s) => unpricedSymbols24hSet.add(s));
         if (fees.isTruncated) isTruncated = true;
       }
     }
 
     const unpricedSymbols = Array.from(unpricedSymbolSet).sort();
+    const unpricedSymbols24h = Array.from(unpricedSymbols24hSet).sort();
 
     return {
       totalPools,
@@ -96,6 +99,7 @@ function GlobalContent() {
       totalFeesAllTime,
       totalFees24h,
       unpricedSymbols,
+      unpricedSymbols24h,
       isTruncated,
     };
   }, [networkData, anyNetworkError, anySnapshotsError, anyFeesError]);
@@ -188,13 +192,13 @@ function GlobalContent() {
                 ? "…"
                 : aggregated.totalFees24h === null
                   ? "N/A"
-                  : `${aggregated.unpricedSymbols.length > 0 ? "≈ " : ""}${formatUSD(aggregated.totalFees24h)}`
+                  : `${aggregated.unpricedSymbols24h.length > 0 ? "≈ " : ""}${formatUSD(aggregated.totalFees24h)}`
             }
             subtitle={
               aggregated.totalFees24h === null
                 ? "Some chains failed to load"
-                : aggregated.unpricedSymbols.length > 0
-                  ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
+                : aggregated.unpricedSymbols24h.length > 0
+                  ? `Approximate — unpriced: ${aggregated.unpricedSymbols24h.join(", ")}`
                   : undefined
             }
           />
