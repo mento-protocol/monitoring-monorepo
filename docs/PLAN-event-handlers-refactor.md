@@ -6,8 +6,6 @@ tags: [mento, indexer, refactor, envio]
 status: draft
 ---
 
-# EventHandlers.ts Refactoring Plan
-
 ## Executive Summary
 
 `EventHandlers.ts` is a 2,243-line monolith that handles all blockchain event processing for the Mento v3 indexer. It mixes RPC data fetching, business logic, entity construction, caching, test mocking infrastructure, ABI definitions, and handler registration into a single file. Despite generally correct logic and good inline documentation, the file is hard to navigate, impossible to test in isolation, and will get worse as new chains or pool types are added.
