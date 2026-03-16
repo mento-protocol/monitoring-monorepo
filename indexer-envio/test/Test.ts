@@ -1067,6 +1067,104 @@ describe("Envio Celo indexer handlers", () => {
     );
   });
 
+  // ---------------------------------------------------------------------------
+  // oracleTxHash regression tests
+  // Verify that FPMMDeployed and Rebalanced never overwrite oracleTxHash.
+  // Only oracle report events (OracleReported / MedianUpdated) may set it.
+  // ---------------------------------------------------------------------------
+
+  it("FPMMDeployed: does not write oracleTxHash with the deployment tx hash", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000d0";
+    let mockDb = MockDb.createMockDb();
+
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 1000, timestamp: 1_700_010_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    assert.ok(pool, "Pool entity must exist after FPMMDeployed");
+    if (!pool) throw new Error("Expected pool");
+    // oracleTxHash must NOT be populated with the deployment tx hash — it
+    // should remain as the default empty string until an oracle report fires.
+    assert.equal(
+      pool.oracleTxHash,
+      "",
+      "FPMMDeployed must not populate oracleTxHash with the deployment tx hash",
+    );
+  });
+
+  it("Rebalanced: does not overwrite oracleTxHash with the rebalance tx hash", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000d1";
+    const KNOWN_ORACLE_TX =
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    let mockDb = MockDb.createMockDb();
+
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 1100, timestamp: 1_700_011_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    // Simulate a prior oracle report having set oracleTxHash.
+    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      oracleTxHash: KNOWN_ORACLE_TX,
+    });
+
+    const rebalancedEvent = FPMM.Rebalanced.createMockEvent({
+      sender: "0x0000000000000000000000000000000000000099",
+      priceDifferenceBefore: 3333n,
+      priceDifferenceAfter: 100n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 11,
+        srcAddress: POOL_ADDR,
+        block: { number: 1101, timestamp: 1_700_011_100 },
+      },
+    });
+    mockDb = await FPMM.Rebalanced.processEvent({
+      event: rebalancedEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    assert.ok(pool, "Pool must exist after Rebalanced");
+    if (!pool) throw new Error("Expected pool");
+    // The oracle tx hash set by a prior oracle report must be preserved —
+    // Rebalanced must not overwrite it with the rebalance tx hash.
+    assert.equal(
+      pool.oracleTxHash,
+      KNOWN_ORACLE_TX,
+      "Rebalanced must not overwrite oracleTxHash with the rebalance tx hash",
+    );
+  });
+
   it("Rebalanced: uses event.params.priceDifferenceAfter, not RPC priceDifference", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000c2";
     const EVENT_PRICE_DIFF = 50n; // from event.params.priceDifferenceAfter
