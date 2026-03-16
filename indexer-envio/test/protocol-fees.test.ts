@@ -6,6 +6,7 @@ import {
   _clearMockFeeTokenMeta,
   _clearBackfilledTokens,
   _clearFeeTokenMetaCache,
+  selectStaleTransfers,
 } from "../src/EventHandlers.ts";
 
 // ---------------------------------------------------------------------------
@@ -293,6 +294,68 @@ describe("UNKNOWN backfill behavior", () => {
       resolved?.tokenSymbol,
       "GBPm",
       "Retry after RPC failure should successfully resolve the symbol — failures must not be cached",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// selectStaleTransfers — pure backfill filter (no DB required)
+// Tests the core correctness rules of the backfill path:
+//   1. Only UNKNOWN records are selected
+//   2. Only records from the same chain are selected (cross-chain safety)
+//   3. Already-resolved records are skipped
+// ---------------------------------------------------------------------------
+
+describe("selectStaleTransfers", () => {
+  const CHAIN_A = 42220;
+  const CHAIN_B = 143;
+  const TOKEN = "0x0000000000000000000000000000000000000042";
+
+  it("returns only UNKNOWN records for the given chainId", () => {
+    const records = [
+      { id: `${CHAIN_A}_100_1`, tokenSymbol: "UNKNOWN" },
+      { id: `${CHAIN_A}_101_2`, tokenSymbol: "GBPm" }, // already resolved
+      { id: `${CHAIN_A}_102_3`, tokenSymbol: "UNKNOWN" },
+    ];
+    const stale = selectStaleTransfers(records, CHAIN_A);
+    assert.deepEqual(
+      stale.map((r) => r.id),
+      [`${CHAIN_A}_100_1`, `${CHAIN_A}_102_3`],
+    );
+  });
+
+  it("does NOT select UNKNOWN records from a different chain", () => {
+    const records = [
+      { id: `${CHAIN_A}_200_1`, tokenSymbol: "UNKNOWN" }, // chain A
+      { id: `${CHAIN_B}_200_1`, tokenSymbol: "UNKNOWN" }, // chain B — same token, different chain
+    ];
+    const stale = selectStaleTransfers(records, CHAIN_A);
+    assert.equal(stale.length, 1);
+    assert.equal(stale[0]!.id, `${CHAIN_A}_200_1`);
+  });
+
+  it("returns empty array when all records are already resolved", () => {
+    const records = [
+      { id: `${CHAIN_A}_300_1`, tokenSymbol: "USDm" },
+      { id: `${CHAIN_A}_300_2`, tokenSymbol: "GBPm" },
+    ];
+    assert.deepEqual(selectStaleTransfers(records, CHAIN_A), []);
+  });
+
+  it("returns empty array when records list is empty", () => {
+    assert.deepEqual(selectStaleTransfers([], CHAIN_A), []);
+  });
+
+  it("is not confused by a chainId that is a prefix of another (e.g. 42 vs 42220)", () => {
+    const SHORT_CHAIN = 42; // shorter chainId
+    const records = [
+      { id: `${CHAIN_A}_400_1`, tokenSymbol: "UNKNOWN" }, // 42220_ — should NOT match chain 42
+    ];
+    const stale = selectStaleTransfers(records, SHORT_CHAIN);
+    assert.equal(
+      stale.length,
+      0,
+      "42220_ should not be matched by chainId=42 prefix check",
     );
   });
 });
