@@ -195,6 +195,27 @@ export function _clearFeeTokenMetaCache(): void {
   feeTokenMetaCache.clear();
 }
 
+// ---------------------------------------------------------------------------
+// Pure backfill helpers (exported for unit testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Filter a list of ProtocolFeeTransfer records to those that need backfilling:
+ * - tokenSymbol === "UNKNOWN" (unresolved placeholder)
+ * - id starts with `${chainId}_` (same chain only — prevents cross-chain corruption)
+ *
+ * This is extracted from the handler so it can be tested without a live DB/context.
+ */
+export function selectStaleTransfers(
+  records: ReadonlyArray<{ id: string; tokenSymbol: string }>,
+  chainId: number,
+): Array<{ id: string; tokenSymbol: string }> {
+  const prefix = `${chainId}_`;
+  return records.filter(
+    (r) => r.tokenSymbol === "UNKNOWN" && r.id.startsWith(prefix),
+  );
+}
+
 // Per-chain RPC defaults. ENVIO_RPC_URL overrides the default for the active chain.
 // Every indexed chain MUST have an entry here — missing chains fall through to the
 // Celo Sepolia default and silently produce wrong oracle/trading-limit/decimals data.
@@ -2284,20 +2305,12 @@ ERC20FeeToken.Transfer.handler(
       try {
         const unknownRecords =
           await context.ProtocolFeeTransfer.getWhere.token.eq(normalizedToken);
-        // Filter to current chain — ProtocolFeeTransfer is multi-chain and
-        // `getWhere.token.eq()` returns all chains. IDs are `${chainId}_${block}_${log}`.
-        const chainPrefix = `${chainId}_`;
-        for (const stale of unknownRecords) {
-          if (
-            stale.tokenSymbol === "UNKNOWN" &&
-            stale.id.startsWith(chainPrefix)
-          ) {
-            context.ProtocolFeeTransfer.set({
-              ...stale,
-              tokenSymbol: symbol,
-              tokenDecimals: decimals,
-            });
-          }
+        for (const stale of selectStaleTransfers(unknownRecords, chainId)) {
+          context.ProtocolFeeTransfer.set({
+            ...stale,
+            tokenSymbol: symbol,
+            tokenDecimals: decimals,
+          });
         }
         // Mark as backfilled only after successful scan so a transient error
         // does not permanently skip this token for the session lifetime.
