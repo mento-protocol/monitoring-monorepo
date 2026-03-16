@@ -161,6 +161,24 @@ export function _clearMockReserves(): void {
   _testReserves.clear();
 }
 
+/** @internal Test-only: pre-set mock ERC20 decimals for a token address.
+ * Used to exercise the ERC20 fallback path in fetchTokenDecimalsScaling when
+ * the pool's decimals0()/decimals1() call fails (simulated by no mock being set
+ * for the pool call, which causes the real RPC to be skipped in test env). */
+const _testERC20Decimals = new Map<string, number>();
+
+export function _setMockERC20Decimals(
+  chainId: number,
+  tokenAddress: string,
+  decimals: number,
+): void {
+  _testERC20Decimals.set(`${chainId}:${tokenAddress.toLowerCase()}`, decimals);
+}
+
+export function _clearMockERC20Decimals(): void {
+  _testERC20Decimals.clear();
+}
+
 // ---------------------------------------------------------------------------
 // RPC failure logging
 // ---------------------------------------------------------------------------
@@ -745,12 +763,32 @@ type TradingLimitData = {
   };
 };
 
+const ERC20_DECIMALS_ABI = [
+  {
+    type: "function",
+    name: "decimals",
+    inputs: [],
+    outputs: [{ name: "", type: "uint8" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "symbol",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+    stateMutability: "view",
+  },
+] as const;
+
 /** Fetches decimals0() or decimals1() from an FPMM pool — returns the scaling
- *  factor (e.g. 1000000000000000000n for 18dp, 1000000n for 6dp). */
+ *  factor (e.g. 1000000000000000000n for 18dp, 1000000n for 6dp).
+ *  Falls back to calling ERC20 decimals() on the token contract if the pool
+ *  method fails (e.g. RPC failure at indexing time on new chains). */
 async function fetchTokenDecimalsScaling(
   chainId: number,
   poolAddress: string,
   fn: "decimals0" | "decimals1",
+  fallbackTokenAddress?: string,
 ): Promise<bigint | null> {
   try {
     const client = getRpcClient(chainId);
@@ -761,8 +799,30 @@ async function fetchTokenDecimalsScaling(
     });
     return result as bigint;
   } catch (err) {
+    // Pool-level call failed — fall back to the ERC20 decimals() on the token.
+    // The pool returns a scaling factor (10^decimals), so we reconstruct it.
     logRpcFailure(chainId, fn, poolAddress, err);
-    return null;
+    if (!fallbackTokenAddress) return null;
+    // Test hook: check injected ERC20 decimals before making a real RPC call.
+    const erc20Key = `${chainId}:${fallbackTokenAddress.toLowerCase()}`;
+    if (_testERC20Decimals.has(erc20Key)) {
+      const d = _testERC20Decimals.get(erc20Key)!;
+      return 10n ** BigInt(d);
+    }
+    try {
+      const client = getRpcClient(chainId);
+      const d = await client.readContract({
+        address: fallbackTokenAddress as `0x${string}`,
+        abi: ERC20_DECIMALS_ABI,
+        functionName: "decimals",
+      });
+      const decimals = Number(d);
+      if (decimals < 0 || decimals > 36) return null;
+      return 10n ** BigInt(decimals);
+    } catch (err) {
+      logRpcFailure(chainId, "erc20Decimals", fallbackTokenAddress, err);
+      return null;
+    }
   }
 }
 
@@ -1175,8 +1235,8 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
       // unlike getRebalancingState() which reverts on stale/expired oracle data.
       fetchRebalanceThreshold(event.chainId, poolId),
       // Fetch token decimals scaling factors (e.g. 1e18 for 18-decimal tokens)
-      fetchTokenDecimalsScaling(event.chainId, poolId, "decimals0"),
-      fetchTokenDecimalsScaling(event.chainId, poolId, "decimals1"),
+      fetchTokenDecimalsScaling(event.chainId, poolId, "decimals0", token0),
+      fetchTokenDecimalsScaling(event.chainId, poolId, "decimals1", token1),
       fetchInvertRateFeed(event.chainId, poolId),
     ]);
   // Convert scaling factor (1e18, 1e6, etc.) to decimals count (18, 6, etc.)
@@ -2257,23 +2317,6 @@ const feeTokenMetaCache = new Map<
  * unique (chainId, tokenAddress) pair.
  */
 const backfilledTokens = new Set<string>();
-
-const ERC20_DECIMALS_ABI = [
-  {
-    type: "function",
-    name: "decimals",
-    inputs: [],
-    outputs: [{ name: "", type: "uint8" }],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "symbol",
-    inputs: [],
-    outputs: [{ name: "", type: "string" }],
-    stateMutability: "view",
-  },
-] as const;
 
 /**
  * Resolve symbol + decimals for a fee token via RPC (cached after first call).
