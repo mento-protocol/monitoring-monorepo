@@ -87,11 +87,16 @@ export type ProtocolFeeSummary = {
   totalFeesUSD: number;
   fees24hUSD: number;
   /**
-   * Symbols that appeared in transfers but have no USD conversion.
-   * Empty array = all tokens priced. Non-empty = fee total is approximate.
-   * Use this to show the user exactly which tokens are unpriced.
+   * Symbols that appeared in all-time transfers but have no USD conversion.
+   * Empty array = all tokens priced. Non-empty = all-time total is approximate.
    */
   unpricedSymbols: string[];
+  /**
+   * Symbols that appeared in 24h transfers but have no USD conversion.
+   * Separate from unpricedSymbols so the 24h tile is not marked approximate
+   * when an unpriced token only appears in older history.
+   */
+  unpricedSymbols24h: string[];
   /** True when the query hit the row limit — all-time total is a lower bound. */
   isTruncated: boolean;
 };
@@ -107,19 +112,22 @@ export function aggregateProtocolFees(
   let totalFeesUSD = 0;
   let fees24hUSD = 0;
   const unpricedSymbolSet = new Set<string>();
+  const unpricedSymbols24hSet = new Set<string>();
 
   for (const t of transfers) {
     // Skip indexer placeholder symbols silently — not real unpriced value.
     if (UNRESOLVED_SYMBOLS.has(t.tokenSymbol)) continue;
 
+    const is24h = Number(t.blockTimestamp) >= cutoff24h;
     const amount = parseWei(t.amount, t.tokenDecimals);
     const usd = tokenToUSD(t.tokenSymbol, amount);
     if (usd === null) {
       unpricedSymbolSet.add(t.tokenSymbol);
+      if (is24h) unpricedSymbols24hSet.add(t.tokenSymbol);
       continue;
     }
     totalFeesUSD += usd;
-    if (Number(t.blockTimestamp) >= cutoff24h) {
+    if (is24h) {
       fees24hUSD += usd;
     }
   }
@@ -128,6 +136,7 @@ export function aggregateProtocolFees(
     totalFeesUSD,
     fees24hUSD,
     unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
+    unpricedSymbols24h: Array.from(unpricedSymbols24hSet).sort(),
     isTruncated: transfers.length >= PROTOCOL_FEE_QUERY_LIMIT,
   };
 }

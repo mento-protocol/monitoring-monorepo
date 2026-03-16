@@ -128,6 +128,7 @@ describe("GlobalPage — all networks succeed", () => {
           totalFeesUSD: 1000,
           fees24hUSD: 50,
           unpricedSymbols: [],
+          unpricedSymbols24h: [],
           isTruncated: false,
         },
       }),
@@ -196,6 +197,7 @@ describe("GlobalPage — snapshots-only failure", () => {
           totalFeesUSD: 500,
           fees24hUSD: 20,
           unpricedSymbols: [],
+          unpricedSymbols24h: [],
           isTruncated: false,
         },
       }),
@@ -203,6 +205,71 @@ describe("GlobalPage — snapshots-only failure", () => {
     expect(html).toContain("24h Volume");
     expect(html).toContain("N/A");
     // All-time fees should still show (not N/A)
+    expect(html).toContain("Total Fees Earned");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unpriced symbols — subtitle and 24h scoping
+// ---------------------------------------------------------------------------
+
+describe("GlobalPage — unpriced symbols behavior", () => {
+  it("shows 'Approximate — unpriced: FOO' subtitle when all-time unpriced symbols exist", () => {
+    const html = render([
+      makeNetworkData({
+        fees: {
+          totalFeesUSD: 1000,
+          fees24hUSD: 50,
+          unpricedSymbols: ["FOO"],
+          unpricedSymbols24h: [],
+          isTruncated: false,
+        },
+      }),
+    ]);
+    expect(html).toContain("Approximate — unpriced: FOO");
+    expect(html).toContain("≈");
+  });
+
+  it("does NOT show approximation on 24h tile when unpriced symbols are outside 24h", () => {
+    const html = render([
+      makeNetworkData({
+        fees: {
+          totalFeesUSD: 1000,
+          fees24hUSD: 50,
+          // FOO appears in all-time history but NOT in last 24h
+          unpricedSymbols: ["FOO"],
+          unpricedSymbols24h: [],
+          isTruncated: false,
+        },
+      }),
+    ]);
+    // All-time tile should show ≈
+    expect(html).toContain("≈");
+    // 24h fees section should NOT show approximation subtitle
+    // The all-time subtitle has "Approximate — unpriced: FOO" but not 24h
+    const unpricedIdx = html.indexOf("Approximate — unpriced:");
+    expect(unpricedIdx).toBeGreaterThan(-1);
+    // 24h Fees Earned label appears after the all-time fees section
+    const fees24hIdx = html.indexOf("24h Fees Earned");
+    // Approximation should not appear after the 24h section start
+    // (i.e. it appears only in the all-time section)
+    const afterFees24h = html.slice(fees24hIdx);
+    expect(afterFees24h).not.toContain("Approximate — unpriced");
+  });
+
+  it("renders DeBank link on Total Fees Earned tile", () => {
+    const html = render([
+      makeNetworkData({
+        fees: {
+          totalFeesUSD: 500,
+          fees24hUSD: 20,
+          unpricedSymbols: [],
+          unpricedSymbols24h: [],
+          isTruncated: false,
+        },
+      }),
+    ]);
+    expect(html).toContain("debank.com");
     expect(html).toContain("Total Fees Earned");
   });
 });
