@@ -206,10 +206,9 @@ export function _clearFeeTokenMetaCache(): void {
  *
  * This is extracted from the handler so it can be tested without a live DB/context.
  */
-export function selectStaleTransfers(
-  records: ReadonlyArray<{ id: string; tokenSymbol: string }>,
-  chainId: number,
-): Array<{ id: string; tokenSymbol: string }> {
+export function selectStaleTransfers<
+  T extends { id: string; tokenSymbol: string },
+>(records: ReadonlyArray<T>, chainId: number): Array<T> {
   const prefix = `${chainId}_`;
   return records.filter(
     (r) => r.tokenSymbol === "UNKNOWN" && r.id.startsWith(prefix),
