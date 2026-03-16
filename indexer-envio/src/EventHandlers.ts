@@ -2241,8 +2241,14 @@ ERC20FeeToken.Transfer.handler(
       try {
         const unknownRecords =
           await context.ProtocolFeeTransfer.getWhere.token.eq(normalizedToken);
+        // Filter to current chain — ProtocolFeeTransfer is multi-chain and
+        // `getWhere.token.eq()` returns all chains. IDs are `${chainId}_${block}_${log}`.
+        const chainPrefix = `${chainId}_`;
         for (const stale of unknownRecords) {
-          if (stale.tokenSymbol === "UNKNOWN") {
+          if (
+            stale.tokenSymbol === "UNKNOWN" &&
+            stale.id.startsWith(chainPrefix)
+          ) {
             context.ProtocolFeeTransfer.set({
               ...stale,
               tokenSymbol: symbol,

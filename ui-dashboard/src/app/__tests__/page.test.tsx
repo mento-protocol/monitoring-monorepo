@@ -283,6 +283,26 @@ describe("GlobalPage — unpriced symbols behavior", () => {
     expect(html).toContain("Approximate — some tokens unresolved");
   });
 
+  it("shows 'some tokens unresolved' subtitle on all-time tile when unresolvedCount > 0 with no unpricedSymbols", () => {
+    const html = render([
+      makeNetworkData({
+        fees: {
+          totalFeesUSD: 100,
+          fees24hUSD: 10,
+          unpricedSymbols: [],
+          unpricedSymbols24h: [],
+          unresolvedCount: 3,
+          unresolvedCount24h: 0,
+          isTruncated: false,
+        },
+      }),
+    ]);
+    expect(html).toContain("≈");
+    expect(html).toContain("Approximate — some tokens unresolved");
+    // But NOT the 'unpriced: ...' variant since unpricedSymbols is empty
+    expect(html).not.toContain("unpriced:");
+  });
+
   it("renders DeBank link on Total Fees Earned tile", () => {
     const html = render([
       makeNetworkData({
