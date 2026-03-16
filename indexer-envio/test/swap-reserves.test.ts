@@ -1,7 +1,12 @@
 /// <reference types="mocha" />
 import { assert } from "chai";
 import generated from "generated";
-import { _setMockReserves, _clearMockReserves } from "../src/EventHandlers.ts";
+import {
+  _setMockReserves,
+  _clearMockReserves,
+  _setMockERC20Decimals,
+  _clearMockERC20Decimals,
+} from "../src/EventHandlers.ts";
 
 type MockDb = {
   entities: {
@@ -52,6 +57,7 @@ type PoolEntity = {
 describe("Swap handler — reserve syncing", () => {
   afterEach(() => {
     _clearMockReserves();
+    _clearMockERC20Decimals();
   });
 
   it("updates reserves from mocked getReserves() on FPMM.Swap", async () => {
@@ -318,6 +324,98 @@ describe("Swap handler — reserve syncing", () => {
       pool!.reserves1,
       SEED_R1,
       `reserves1 must be preserved (${SEED_R1}), got ${pool!.reserves1}`,
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // FPMMDeployed — ERC20 decimals fallback
+  // Regression test for Monad AUSD/USDm pool (0xb0a…) where decimals0() failed
+  // at index time due to RPC rate-limiting, causing the indexer to fall back to
+  // 18 instead of AUSD's actual 6 decimals. The fix: fall back to ERC20 decimals().
+  // ---------------------------------------------------------------------------
+
+  it("FPMMDeployed uses ERC20 decimals() fallback when decimals0() RPC call fails", async () => {
+    // In tests, no real RPC is available, so decimals0()/decimals1() calls always
+    // fail and return null — exactly simulating the production failure scenario.
+    // We inject the correct ERC20 decimals so the fallback path is exercised.
+    const POOL_ADDR = "0x00000000000000000000000000000000000000e4";
+    const TOKEN0 = "0x00000000efe302beaa2b3e6e1b18d08d69a9012a"; // AUSD (6dp)
+    const TOKEN1 = "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115"; // USDm (18dp)
+
+    _setMockERC20Decimals(42220, TOKEN0, 6);
+    _setMockERC20Decimals(42220, TOKEN1, 18);
+
+    let mockDb = MockDb.createMockDb();
+
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: TOKEN0,
+      token1: TOKEN1,
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 3000, timestamp: 1_700_030_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as
+      | (PoolEntity & { token0Decimals: number; token1Decimals: number })
+      | undefined;
+    assert.ok(pool, "Pool must exist after FPMMDeployed");
+    assert.equal(
+      pool!.token0Decimals,
+      6,
+      `Expected token0Decimals=6 (AUSD), got ${pool!.token0Decimals}`,
+    );
+    assert.equal(
+      pool!.token1Decimals,
+      18,
+      `Expected token1Decimals=18 (USDm), got ${pool!.token1Decimals}`,
+    );
+  });
+
+  it("FPMMDeployed falls back to 18 when both decimals0() and ERC20 decimals() fail", async () => {
+    // No ERC20 mock set — both pool and token calls fail → safe default of 18.
+    const POOL_ADDR = "0x00000000000000000000000000000000000000e5";
+
+    let mockDb = MockDb.createMockDb();
+
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 3100, timestamp: 1_700_031_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as
+      | (PoolEntity & { token0Decimals: number; token1Decimals: number })
+      | undefined;
+    assert.ok(pool, "Pool must exist after FPMMDeployed");
+    assert.equal(
+      pool!.token0Decimals,
+      18,
+      `Expected fallback token0Decimals=18, got ${pool!.token0Decimals}`,
+    );
+    assert.equal(
+      pool!.token1Decimals,
+      18,
+      `Expected fallback token1Decimals=18, got ${pool!.token1Decimals}`,
     );
   });
 });
