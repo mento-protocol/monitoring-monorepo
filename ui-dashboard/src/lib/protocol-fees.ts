@@ -97,6 +97,13 @@ export type ProtocolFeeSummary = {
    * when an unpriced token only appears in older history.
    */
   unpricedSymbols24h: string[];
+  /**
+   * Number of transfers where the indexer could not resolve the token symbol
+   * (stored as "UNKNOWN" placeholder). These are excluded from USD totals —
+   * if this is non-zero the all-time total may be understated even though
+   * unpricedSymbols is empty. Surfaced so the UI can flag approximate totals.
+   */
+  unresolvedCount: number;
   /** True when the query hit the row limit — all-time total is a lower bound. */
   isTruncated: boolean;
 };
@@ -113,10 +120,16 @@ export function aggregateProtocolFees(
   let fees24hUSD = 0;
   const unpricedSymbolSet = new Set<string>();
   const unpricedSymbols24hSet = new Set<string>();
+  let unresolvedCount = 0;
 
   for (const t of transfers) {
-    // Skip indexer placeholder symbols silently — not real unpriced value.
-    if (UNRESOLVED_SYMBOLS.has(t.tokenSymbol)) continue;
+    // Count indexer placeholder symbols — excluded from USD totals but tracked
+    // so the UI can signal the total may be understated if resolution keeps
+    // failing (persistent RPC issue, non-standard token).
+    if (UNRESOLVED_SYMBOLS.has(t.tokenSymbol)) {
+      unresolvedCount++;
+      continue;
+    }
 
     const is24h = Number(t.blockTimestamp) >= cutoff24h;
     const amount = parseWei(t.amount, t.tokenDecimals);
@@ -137,6 +150,7 @@ export function aggregateProtocolFees(
     fees24hUSD,
     unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
     unpricedSymbols24h: Array.from(unpricedSymbols24hSet).sort(),
+    unresolvedCount,
     isTruncated: transfers.length >= PROTOCOL_FEE_QUERY_LIMIT,
   };
 }

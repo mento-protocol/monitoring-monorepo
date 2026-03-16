@@ -51,6 +51,7 @@ function GlobalContent() {
     const unpricedSymbolSet = new Set<string>();
     const unpricedSymbols24hSet = new Set<string>();
     let isTruncated = false;
+    let totalUnresolvedCount = 0;
 
     for (const netData of networkData) {
       // Skip whole-network errors (pools = [] anyway, already flagged via anyNetworkError)
@@ -83,6 +84,7 @@ function GlobalContent() {
         if (totalFees24h !== null) totalFees24h += fees.fees24hUSD;
         fees.unpricedSymbols.forEach((s) => unpricedSymbolSet.add(s));
         fees.unpricedSymbols24h.forEach((s) => unpricedSymbols24hSet.add(s));
+        totalUnresolvedCount += fees.unresolvedCount;
         if (fees.isTruncated) isTruncated = true;
       }
     }
@@ -100,6 +102,7 @@ function GlobalContent() {
       totalFees24h,
       unpricedSymbols,
       unpricedSymbols24h,
+      totalUnresolvedCount,
       isTruncated,
     };
   }, [networkData, anyNetworkError, anySnapshotsError, anyFeesError]);
@@ -147,7 +150,7 @@ function GlobalContent() {
                 ? "…"
                 : aggregated.totalFeesAllTime === null
                   ? "N/A"
-                  : `${aggregated.unpricedSymbols.length > 0 || aggregated.isTruncated ? "≈ " : ""}${formatUSD(aggregated.totalFeesAllTime)}`
+                  : `${aggregated.unpricedSymbols.length > 0 || aggregated.isTruncated || aggregated.totalUnresolvedCount > 0 ? "≈ " : ""}${formatUSD(aggregated.totalFeesAllTime)}`
             }
             href="https://debank.com/profile/0x0dd57f6f181d0469143fe9380762d8a112e96e4a"
             subtitle={
