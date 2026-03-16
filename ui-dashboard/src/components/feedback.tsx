@@ -31,18 +31,32 @@ export function Tile({
   label,
   value,
   subtitle,
+  href,
 }: {
   label: string;
   value: string;
   subtitle?: string;
+  /** Optional link — makes the value clickable (opens in new tab) */
+  href?: string;
 }) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px]">
       <div>
         <p className="text-sm text-slate-400">{label}</p>
-        <p className="mt-1 text-2xl font-semibold text-white font-mono">
-          {value}
-        </p>
+        {href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-1 text-2xl font-semibold text-white font-mono hover:text-indigo-400 transition-colors"
+          >
+            {value}
+          </a>
+        ) : (
+          <p className="mt-1 text-2xl font-semibold text-white font-mono">
+            {value}
+          </p>
+        )}
       </div>
       <p
         className="mt-2 text-xs text-slate-500 min-h-4"

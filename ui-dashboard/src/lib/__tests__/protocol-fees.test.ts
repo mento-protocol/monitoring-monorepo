@@ -122,7 +122,7 @@ describe("aggregateProtocolFees", () => {
     const result = aggregateProtocolFees([]);
     expect(result.totalFeesUSD).toBe(0);
     expect(result.fees24hUSD).toBe(0);
-    expect(result.hasUnknownTokens).toBe(false);
+    expect(result.unpricedSymbols).toEqual([]);
   });
 
   it("sums USD-pegged tokens at 1:1", () => {
@@ -171,24 +171,34 @@ describe("aggregateProtocolFees", () => {
     expect(result.fees24hUSD).toBeCloseTo(2, 2); // 2 recent transfers
   });
 
-  it("sets hasUnknownTokens when unknown symbols present", () => {
+  it("silently skips UNKNOWN (indexer placeholder) without flagging as unpriced", () => {
     const transfers = [
       transfer({ tokenSymbol: "UNKNOWN", amount: "1000000000000000000" }),
       transfer({ tokenSymbol: "USDm", amount: "1000000000000000000" }),
     ];
     const result = aggregateProtocolFees(transfers);
-    expect(result.hasUnknownTokens).toBe(true);
-    // Unknown token should be excluded from USD total
+    expect(result.unpricedSymbols).toEqual([]);
     expect(result.totalFeesUSD).toBeCloseTo(1, 2);
   });
 
-  it("does not set hasUnknownTokens when all tokens are known", () => {
+  it("reports unpriced symbols when genuinely unknown tokens appear", () => {
+    const transfers = [
+      transfer({ tokenSymbol: "NEWTOK", amount: "1000000000000000000" }),
+      transfer({ tokenSymbol: "USDm", amount: "1000000000000000000" }),
+    ];
+    const result = aggregateProtocolFees(transfers);
+    expect(result.unpricedSymbols).toEqual(["NEWTOK"]);
+    // Unpriced token excluded from USD total
+    expect(result.totalFeesUSD).toBeCloseTo(1, 2);
+  });
+
+  it("returns empty unpricedSymbols when all tokens are known", () => {
     const transfers = [
       transfer({ tokenSymbol: "USDm" }),
       transfer({ tokenSymbol: "USDC", tokenDecimals: 6, amount: "1000000" }),
     ];
     const result = aggregateProtocolFees(transfers);
-    expect(result.hasUnknownTokens).toBe(false);
+    expect(result.unpricedSymbols).toEqual([]);
   });
 
   it("handles mixed decimals and currencies", () => {
