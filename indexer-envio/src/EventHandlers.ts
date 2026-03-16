@@ -2125,6 +2125,13 @@ const feeTokenMetaCache = new Map<
   { symbol: string; decimals: number }
 >();
 
+/**
+ * Tracks tokens whose UNKNOWN backfill has already run in this indexer session.
+ * Prevents O(n²) DB scans by ensuring the backfill query runs at most once per
+ * unique (chainId, tokenAddress) pair.
+ */
+const backfilledTokens = new Set<string>();
+
 const ERC20_DECIMALS_ABI = [
   {
     type: "function",
@@ -2221,13 +2228,17 @@ ERC20FeeToken.Transfer.handler(
 
     context.ProtocolFeeTransfer.set(transfer);
 
-    // Backfill: if the RPC call succeeded and we now know the real symbol,
-    // find any previously stored UNKNOWN records for the same token address
-    // and update them. This handles the case where the very first transfer
-    // for a token failed RPC resolution (e.g. transient error at deployment
-    // time) and subsequent transfers succeeded — reindexing replays the same
-    // error, so the first record stays UNKNOWN forever without this fix.
-    if (symbol !== "UNKNOWN") {
+    // Backfill: if RPC succeeded and we now know the real symbol, fix any
+    // previously stored UNKNOWN records for this token. This handles the race
+    // where the first ever transfer failed RPC resolution and reindexing keeps
+    // replaying the same failure.
+    //
+    // Gate on backfilledTokens so the DB scan runs at most ONCE per unique
+    // (chainId, token) pair per indexer session — prevents O(n²) cost for
+    // high-activity tokens.
+    const backfillKey = `${chainId}:${normalizedToken}`;
+    if (symbol !== "UNKNOWN" && !backfilledTokens.has(backfillKey)) {
+      backfilledTokens.add(backfillKey);
       const unknownRecords =
         await context.ProtocolFeeTransfer.getWhere.token.eq(normalizedToken);
       for (const stale of unknownRecords) {

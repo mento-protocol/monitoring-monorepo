@@ -234,4 +234,45 @@ describe("aggregateProtocolFees", () => {
     const result = aggregateProtocolFees(transfers);
     expect(result.isTruncated).toBe(true);
   });
+
+  it("unpricedSymbols24h: includes unpriced symbol in 24h window", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const transfers = [
+      transfer({
+        tokenSymbol: "SOMENEWTOK",
+        blockTimestamp: String(now - 3600), // 1h ago — within 24h
+      }),
+      transfer({ tokenSymbol: "USDm" }),
+    ];
+    const result = aggregateProtocolFees(transfers);
+    expect(result.unpricedSymbols).toContain("SOMENEWTOK");
+    expect(result.unpricedSymbols24h).toContain("SOMENEWTOK");
+  });
+
+  it("unpricedSymbols24h: excludes unpriced symbol outside 24h window", () => {
+    const transfers = [
+      transfer({
+        tokenSymbol: "OLDTOK",
+        blockTimestamp: "100", // very old — outside 24h
+      }),
+      transfer({ tokenSymbol: "USDm" }),
+    ];
+    const result = aggregateProtocolFees(transfers);
+    expect(result.unpricedSymbols).toContain("OLDTOK");
+    expect(result.unpricedSymbols24h).not.toContain("OLDTOK");
+    // 24h fees should be exact even though all-time has unpriced symbols
+    expect(result.unpricedSymbols24h).toHaveLength(0);
+  });
+
+  it("unresolvedCount: counts UNKNOWN transfers without marking them as unpriced", () => {
+    const transfers = [
+      transfer({ tokenSymbol: "UNKNOWN" }),
+      transfer({ tokenSymbol: "UNKNOWN" }),
+      transfer({ tokenSymbol: "USDm" }),
+    ];
+    const result = aggregateProtocolFees(transfers);
+    expect(result.unresolvedCount).toBe(2);
+    expect(result.unpricedSymbols).toHaveLength(0);
+    expect(result.totalFeesUSD).toBeCloseTo(1, 2); // only USDm counted
+  });
 });
