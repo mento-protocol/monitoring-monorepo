@@ -4,6 +4,10 @@ import generated from "generated";
 import {
   _setMockRebalancingState,
   _clearMockRebalancingStates,
+  _setMockRateFeedID,
+  _clearMockRateFeedIDs,
+  _setMockReportExpiry,
+  _clearMockReportExpiry,
 } from "../src/EventHandlers.ts";
 
 type MockDb = {
@@ -1243,5 +1247,144 @@ describe("Envio Celo indexer handlers", () => {
       `expected event priceDifference ${EVENT_PRICE_DIFF} bps, got ${pool.priceDifference} (RPC was ${RPC_PRICE_DIFF})`,
     );
     assert.equal(pool.rebalanceCount, 1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Self-heal: backfill referenceRateFeedID on subsequent events
+  // ---------------------------------------------------------------------------
+
+  it("self-heals empty referenceRateFeedID on next Swap event", async function () {
+    this.timeout(10_000);
+
+    const POOL_ADDR = "0x00000000000000000000000000000000000000dd";
+    const HEALED_FEED = "0xf47172ce00522cc7db02109634a92ce866a15fcc";
+    const HEALED_EXPIRY = 3720n;
+    const CHAIN_ID = 42220;
+
+    // 1. Deploy pool (referenceRateFeedID will be "" because no mock is set
+    //    for the RPC call during deployment — simulating the transient failure)
+    let mockDb = MockDb.createMockDb();
+
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: CHAIN_ID,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 100, timestamp: 1_700_000_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    // Verify the pool was created with empty referenceRateFeedID
+    const poolBefore = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    assert.ok(poolBefore, "Pool must exist after deploy");
+    assert.equal(
+      poolBefore.referenceRateFeedID,
+      "",
+      "referenceRateFeedID should be empty after failed initial fetch",
+    );
+    assert.equal(
+      poolBefore.oracleExpiry,
+      0n,
+      "oracleExpiry should be 0 when referenceRateFeedID is empty",
+    );
+
+    // 2. Set up mocks so the self-heal RPC calls succeed
+    _setMockRateFeedID(CHAIN_ID, POOL_ADDR, HEALED_FEED);
+    _setMockReportExpiry(CHAIN_ID, HEALED_FEED, HEALED_EXPIRY);
+
+    // 3. Process a Swap event — should trigger self-heal
+    const swapEvent = FPMM.Swap.createMockEvent({
+      sender: "0x0000000000000000000000000000000000000099",
+      to: "0x0000000000000000000000000000000000000098",
+      amount0In: 1000n,
+      amount1In: 0n,
+      amount0Out: 0n,
+      amount1Out: 990n,
+      mockEventData: {
+        chainId: CHAIN_ID,
+        logIndex: 20,
+        srcAddress: POOL_ADDR,
+        block: { number: 200, timestamp: 1_700_001_000 },
+      },
+    });
+    mockDb = await FPMM.Swap.processEvent({ event: swapEvent, mockDb });
+
+    // 4. Verify self-heal populated the fields
+    const poolAfter = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    assert.ok(poolAfter, "Pool must exist after Swap");
+    assert.equal(
+      poolAfter.referenceRateFeedID,
+      HEALED_FEED,
+      "referenceRateFeedID should be healed after Swap event",
+    );
+    assert.equal(
+      poolAfter.oracleExpiry,
+      HEALED_EXPIRY,
+      "oracleExpiry should be healed after Swap event",
+    );
+
+    // Cleanup
+    _clearMockRateFeedIDs();
+    _clearMockReportExpiry();
+  });
+
+  it("does NOT self-heal when referenceRateFeedID is already populated", async function () {
+    this.timeout(10_000);
+
+    const POOL_ADDR = "0x00000000000000000000000000000000000000ee";
+    const EXISTING_FEED = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const CHAIN_ID = 42220;
+
+    // 1. Seed pool with an existing referenceRateFeedID
+    let mockDb = await seedPoolWithFeed(MockDb.createMockDb(), {
+      poolId: POOL_ADDR,
+      feedId: EXISTING_FEED,
+      oracleExpiry: 600n,
+    });
+
+    // 2. Set up a different mock — should NOT be used because feed is already set
+    _setMockRateFeedID(
+      CHAIN_ID,
+      POOL_ADDR,
+      "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    );
+
+    // 3. Process a Swap event
+    const swapEvent = FPMM.Swap.createMockEvent({
+      sender: "0x0000000000000000000000000000000000000099",
+      to: "0x0000000000000000000000000000000000000098",
+      amount0In: 500n,
+      amount1In: 0n,
+      amount0Out: 0n,
+      amount1Out: 495n,
+      mockEventData: {
+        chainId: CHAIN_ID,
+        logIndex: 30,
+        srcAddress: POOL_ADDR,
+        block: { number: 400, timestamp: 1_700_002_000 },
+      },
+    });
+    mockDb = await FPMM.Swap.processEvent({ event: swapEvent, mockDb });
+
+    // 4. Verify feed was NOT changed
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    assert.ok(pool, "Pool must exist after Swap");
+    assert.equal(
+      pool.referenceRateFeedID,
+      EXISTING_FEED,
+      "referenceRateFeedID should remain unchanged when already populated",
+    );
+
+    // Cleanup
+    _clearMockRateFeedIDs();
+    _clearMockReportExpiry();
   });
 });

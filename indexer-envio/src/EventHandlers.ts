@@ -273,6 +273,39 @@ export function _clearFeeTokenMetaCache(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Test mocks: referenceRateFeedID & reportExpiry (for self-heal testing)
+// ---------------------------------------------------------------------------
+const _testRateFeedIDs = new Map<string, string | null>();
+
+/** @internal Test-only: pre-set a mock referenceRateFeedID for a pool. */
+export function _setMockRateFeedID(
+  chainId: number,
+  poolAddress: string,
+  rateFeedID: string | null,
+): void {
+  _testRateFeedIDs.set(`${chainId}:${poolAddress.toLowerCase()}`, rateFeedID);
+}
+
+export function _clearMockRateFeedIDs(): void {
+  _testRateFeedIDs.clear();
+}
+
+const _testReportExpiry = new Map<string, bigint | null>();
+
+/** @internal Test-only: pre-set a mock report expiry for a rateFeedID. */
+export function _setMockReportExpiry(
+  chainId: number,
+  rateFeedID: string,
+  expiry: bigint | null,
+): void {
+  _testReportExpiry.set(`${chainId}:${rateFeedID.toLowerCase()}`, expiry);
+}
+
+export function _clearMockReportExpiry(): void {
+  _testReportExpiry.clear();
+}
+
+// ---------------------------------------------------------------------------
 // Pure backfill helpers (exported for unit testing)
 // ---------------------------------------------------------------------------
 
@@ -406,6 +439,10 @@ async function fetchReportExpiry(
   rateFeedID: string,
   blockNumber: bigint,
 ): Promise<bigint | null> {
+  // Check test mock first
+  const mockKey = `${chainId}:${rateFeedID.toLowerCase()}`;
+  if (_testReportExpiry.has(mockKey)) return _testReportExpiry.get(mockKey)!;
+
   let address: `0x${string}`;
   try {
     address = SORTED_ORACLES_ADDRESS(chainId);
@@ -735,6 +772,10 @@ async function fetchReferenceRateFeedID(
   chainId: number,
   poolAddress: string,
 ): Promise<string | null> {
+  // Check test mock first
+  const mockKey = `${chainId}:${poolAddress.toLowerCase()}`;
+  if (_testRateFeedIDs.has(mockKey)) return _testRateFeedIDs.get(mockKey)!;
+
   try {
     const client = getRpcClient(chainId);
     const result = await client.readContract({
@@ -1064,6 +1105,7 @@ const getOrCreatePool = async (
 
 const upsertPool = async ({
   context,
+  chainId,
   poolId,
   token0,
   token1,
@@ -1077,6 +1119,7 @@ const upsertPool = async ({
   tokenDecimals,
 }: {
   context: PoolContext;
+  chainId: number;
   poolId: string;
   token0?: string;
   token1?: string;
@@ -1091,6 +1134,22 @@ const upsertPool = async ({
 }): Promise<Pool> => {
   const existing = await getOrCreatePool(context, poolId, { token0, token1 });
 
+  // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
+  // pool creation), retry now so oracle events can start flowing.
+  let healedOracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> | undefined;
+  if (
+    existing.referenceRateFeedID === "" &&
+    existing.source !== "" &&
+    !existing.source?.includes("virtual")
+  ) {
+    const rateFeedID = await fetchReferenceRateFeedID(chainId, poolId);
+    if (rateFeedID) {
+      healedOracleDelta = { referenceRateFeedID: rateFeedID };
+      const expiry = await fetchReportExpiry(chainId, rateFeedID, blockNumber);
+      if (expiry !== null) healedOracleDelta.oracleExpiry = expiry;
+    }
+  }
+
   let next: Pool = {
     ...existing,
     token0: token0 ?? existing.token0,
@@ -1102,7 +1161,8 @@ const upsertPool = async ({
     notionalVolume0: existing.notionalVolume0 + (swapDelta?.volume0 ?? 0n),
     notionalVolume1: existing.notionalVolume1 + (swapDelta?.volume1 ?? 0n),
     rebalanceCount: existing.rebalanceCount + (rebalanceDelta ? 1 : 0),
-    // Merge oracle delta if provided
+    // Merge healed oracle fields first, then explicit delta takes precedence
+    ...(healedOracleDelta ?? {}),
     ...(oracleDelta ?? {}),
     // Persist token decimals if provided (set once at pool creation)
     token0Decimals: tokenDecimals?.token0Decimals ?? existing.token0Decimals,
@@ -1270,6 +1330,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
 
   const pool = await upsertPool({
     context,
+    chainId: event.chainId,
     poolId,
     token0,
     token1,
@@ -1327,6 +1388,7 @@ FPMM.Swap.handler(async ({ event, context }) => {
 
   const pool = await upsertPool({
     context,
+    chainId: event.chainId,
     poolId,
     source: "fpmm_swap",
     blockNumber,
@@ -1454,6 +1516,7 @@ FPMM.Mint.handler(async ({ event, context }) => {
 
   const pool = await upsertPool({
     context,
+    chainId: event.chainId,
     poolId,
     source: "fpmm_mint",
     blockNumber,
@@ -1493,6 +1556,7 @@ FPMM.Burn.handler(async ({ event, context }) => {
 
   const pool = await upsertPool({
     context,
+    chainId: event.chainId,
     poolId,
     source: "fpmm_burn",
     blockNumber,
@@ -1565,6 +1629,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
 
   const pool = await upsertPool({
     context,
+    chainId: event.chainId,
     poolId,
     source: "fpmm_update_reserves",
     blockNumber,
@@ -1658,6 +1723,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
 
   const pool = await upsertPool({
     context,
+    chainId: event.chainId,
     poolId,
     source: "fpmm_rebalanced",
     blockNumber,
@@ -2010,6 +2076,7 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
   // VirtualPools don't have oracle functions; set N/A health status
   await upsertPool({
     context,
+    chainId: event.chainId,
     poolId,
     token0,
     token1,
@@ -2043,6 +2110,7 @@ VirtualPoolFactory.PoolDeprecated.handler(async ({ event, context }) => {
 
   await upsertPool({
     context,
+    chainId: event.chainId,
     poolId,
     source: "virtual_pool_factory",
     blockNumber: asBigInt(event.block.number),
@@ -2093,6 +2161,7 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
 
   const pool = await upsertPool({
     context,
+    chainId: event.chainId,
     poolId,
     source: "fpmm_swap", // reuse source key; VirtualPool inherits same priority
     blockNumber,
@@ -2134,6 +2203,7 @@ VirtualPool.Mint.handler(async ({ event, context }) => {
 
   const pool = await upsertPool({
     context,
+    chainId: event.chainId,
     poolId,
     source: "fpmm_mint",
     blockNumber,
@@ -2173,6 +2243,7 @@ VirtualPool.Burn.handler(async ({ event, context }) => {
 
   const pool = await upsertPool({
     context,
+    chainId: event.chainId,
     poolId,
     source: "fpmm_burn",
     blockNumber,
@@ -2213,6 +2284,7 @@ VirtualPool.UpdateReserves.handler(async ({ event, context }) => {
   // VirtualPools have no oracle; just update reserves
   const pool = await upsertPool({
     context,
+    chainId: event.chainId,
     poolId,
     source: "fpmm_update_reserves",
     blockNumber,
@@ -2253,6 +2325,7 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
 
   const pool = await upsertPool({
     context,
+    chainId: event.chainId,
     poolId,
     source: "fpmm_rebalanced",
     blockNumber,
