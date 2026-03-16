@@ -605,9 +605,9 @@ describe("Envio Celo indexer handlers", () => {
     const FEED_ID = "0x000000000000000000000000000000000000babe";
     // Oracle ≈ 1.0 at 24dp
     const ORACLE_PRICE_24DP = 1_000_000_000_000_000_000_000_000n;
-    // Reserves: 40k / 60k (18dp) → reserveRatio ≈ 0.667, deviation ≈ 33.3% ≈ 3333 bps
-    const R0 = 40_000_000_000_000_000_000_000n;
-    const R1 = 60_000_000_000_000_000_000_000n;
+    // Reserves: 60k / 40k (18dp) → reserve1/reserve0 ≈ 0.667, deviation ≈ 33.3% ≈ 3333 bps
+    const R0 = 60_000_000_000_000_000_000_000n;
+    const R1 = 40_000_000_000_000_000_000_000n;
 
     let mockDb = MockDb.createMockDb();
     mockDb = await seedPoolWithFeed(mockDb, {
@@ -647,7 +647,7 @@ describe("Envio Celo indexer handlers", () => {
 
     const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
     assert.ok(pool, "Pool must exist after OracleReported");
-    // With reserves 40k/60k and oracle=1.0, deviation ≈ 3333 bps
+    // With reserves R0=60k/R1=40k and oracle=1.0, reserve1/reserve0 ≈ 0.667, deviation ≈ 3333 bps
     assert.ok(
       pool.priceDifference >= 3330n && pool.priceDifference <= 3340n,
       `expected priceDifference ~3333 bps (fallback), got ${pool.priceDifference}`,
@@ -670,8 +670,8 @@ describe("Envio Celo indexer handlers", () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000af";
     const FEED_ID = "0x000000000000000000000000000000000000deaf";
     const ORACLE_PRICE_24DP = 1_000_000_000_000_000_000_000_000n;
-    const R0 = 40_000_000_000_000_000_000_000n;
-    const R1 = 60_000_000_000_000_000_000_000n;
+    const R0 = 60_000_000_000_000_000_000_000n;
+    const R1 = 40_000_000_000_000_000_000_000n;
 
     let mockDb = MockDb.createMockDb();
     mockDb = await seedPoolWithFeed(mockDb, {
@@ -736,9 +736,9 @@ describe("Envio Celo indexer handlers", () => {
   it("UpdateReserves: stores priceDifference via upsertPool fallback when fetchRebalancingState fails", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000b0";
     const ORACLE_PRICE_24DP = 1_000_000_000_000_000_000_000_000n;
-    // 40k / 60k → deviation ≈ 33.3% ≈ 3333 bps
-    const R0 = 40_000_000_000_000_000_000_000n;
-    const R1 = 60_000_000_000_000_000_000_000n;
+    // 60k / 40k → reserve1/reserve0 ≈ 0.667, deviation ≈ 33.3% ≈ 3333 bps
+    const R0 = 60_000_000_000_000_000_000_000n;
+    const R1 = 40_000_000_000_000_000_000_000n;
 
     let mockDb = MockDb.createMockDb();
 
@@ -897,8 +897,8 @@ describe("Envio Celo indexer handlers", () => {
     const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...seeded,
-      reserves0: 40_000_000_000_000_000_000_000n,
-      reserves1: 60_000_000_000_000_000_000_000n,
+      reserves0: 60_000_000_000_000_000_000_000n,
+      reserves1: 40_000_000_000_000_000_000_000n,
       oraclePrice: REPORTER_PRICE,
       token0Decimals: 18,
       token1Decimals: 18,
@@ -931,7 +931,7 @@ describe("Envio Celo indexer handlers", () => {
       REPORTER_PRICE,
       `expected event oracle price ${REPORTER_PRICE}, got ${pool.oraclePrice}`,
     );
-    // priceDifference from computePriceDifference (reserves 40k/60k, oracle 1.0 → ~3333 bps)
+    // priceDifference from computePriceDifference (R0=60k/R1=40k, reserve1/reserve0 ≈ 0.667, oracle 1.0 → ~3333 bps)
     assert.ok(
       pool.priceDifference >= 3330n && pool.priceDifference <= 3340n,
       `expected priceDifference ~3333 bps (local computation), got ${pool.priceDifference}`,
@@ -960,8 +960,8 @@ describe("Envio Celo indexer handlers", () => {
     const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...seeded,
-      reserves0: 40_000_000_000_000_000_000_000n,
-      reserves1: 60_000_000_000_000_000_000_000n,
+      reserves0: 60_000_000_000_000_000_000_000n,
+      reserves1: 40_000_000_000_000_000_000_000n,
       oraclePrice: MEDIAN_PRICE,
       token0Decimals: 18,
       token1Decimals: 18,
@@ -992,7 +992,7 @@ describe("Envio Celo indexer handlers", () => {
       MEDIAN_PRICE,
       `expected event oracle price ${MEDIAN_PRICE}, got ${pool.oraclePrice}`,
     );
-    // priceDifference from computePriceDifference (reserves 40k/60k, oracle 1.0 → ~3333 bps)
+    // priceDifference from computePriceDifference (R0=60k/R1=40k, reserve1/reserve0 ≈ 0.667, oracle 1.0 → ~3333 bps)
     assert.ok(
       pool.priceDifference >= 3330n && pool.priceDifference <= 3340n,
       `expected priceDifference ~3333 bps (local computation), got ${pool.priceDifference}`,

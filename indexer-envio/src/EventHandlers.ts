@@ -695,21 +695,19 @@ function computeLimitPressures(
  * Computes priceDifference in basis points (bps) from reserves and oracle price,
  * matching the on-chain FPMM formula: |reservePrice - oraclePrice| / oraclePrice.
  *
- * The on-chain contract always computes in one direction:
- *   reservePrice = (reserve0 * tpm0) / (reserve1 * tpm1)
- *   oraclePrice  = oraclePriceNumerator / oraclePriceDenominator
- *   priceDifference = |reservePrice - oraclePrice| * 10000 / oraclePrice
+ * CORRECTED: The FPMM contract computes reservePrice as token1/token0:
+ *   reservePrice = (reserve1 * tpm1) / (reserve0 * tpm0)
+ *   where tpm = tokenPrecisionMultiplier = 10^(18 - decimals)
  *
- * Oracle price is stored in **feed direction** (24dp SortedOracles rate):
- *   e.g. GBP/USD = 1.339150e24 means "1 GBP = 1.339150 USD"
+ * After normalization to 18dp this simplifies to norm1/norm0.
  *
- * When USDm is token0: reserveRatio = USDm/nonUSD = feedPrice → compare directly.
- * When USDm is token1: reserveRatio = nonUSD/USDm = 1/feedPrice → invert
- *   reserveRatio to get USDm/nonUSD, then compare against feedPrice directly.
+ * Verified against live Monad mainnet pool 0x463c...a7e5 (USDC/USDm):
+ *   reserves0=495k USDC (6dp), reserves1=330k USDm (18dp), oracle≈0.99993
+ *   norm1/norm0 ≈ 0.667 → deviation = |0.667-0.99993|/0.99993 = 3332 bps ✓
+ *   (old norm0/norm1 ≈ 1.5 → 5000 bps ✗)
  *
- * IMPORTANT: The deviation formula |R - O| / O is NOT invariant under inversion
- * of both R and O: |1/R - 1/O| / (1/O) = |R - O| / R (divides by R, not O!).
- * So we must always compute in the feed direction to match the contract.
+ * Oracle price is stored in **feed direction** (24dp SortedOracles rate).
+ * The invertRateFeed flag determines whether the oracle needs to be inverted.
  *
  * Returns 0n when oracle price or reserves are missing/zero.
  */
@@ -757,8 +755,8 @@ export function computePriceDifference(pool: {
   // Guard against normalization flooring to zero (possible when decimals > 18).
   if (norm0 === 0n || norm1 === 0n) return 0n;
 
-  // Always compute reserve0/reserve1 — matches the contract's reservePrice.
-  const reserveRatio = (norm0 * SCALE) / norm1;
+  // CORRECTED: The FPMM contract computes reservePrice as token1/token0 (norm1/norm0).
+  const reserveRatio = (norm1 * SCALE) / norm0;
 
   // oraclePrice is stored in feed direction (raw SortedOracles rate at 24dp).
   // When invertRateFeed is true, the contract compares reserves against 1/feedRate.
