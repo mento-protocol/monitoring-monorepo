@@ -272,7 +272,24 @@ describe("aggregateProtocolFees", () => {
     ];
     const result = aggregateProtocolFees(transfers);
     expect(result.unresolvedCount).toBe(2);
+    expect(result.unresolvedCount24h).toBe(0); // old timestamps by default
     expect(result.unpricedSymbols).toHaveLength(0);
     expect(result.totalFeesUSD).toBeCloseTo(1, 2); // only USDm counted
+  });
+
+  it("unresolvedCount24h: counts recent UNKNOWN transfers for 24h approximation", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const transfers = [
+      transfer({ tokenSymbol: "UNKNOWN", blockTimestamp: "100" }), // old
+      transfer({
+        tokenSymbol: "UNKNOWN",
+        blockTimestamp: String(now - 3600),
+      }), // 1h ago — within 24h
+      transfer({ tokenSymbol: "USDm" }),
+    ];
+    const result = aggregateProtocolFees(transfers);
+    expect(result.unresolvedCount).toBe(2);
+    expect(result.unresolvedCount24h).toBe(1); // only the recent UNKNOWN
+    expect(result.fees24hUSD).toBeCloseTo(0, 2); // UNKNOWN excluded from total
   });
 });

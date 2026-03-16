@@ -104,6 +104,11 @@ export type ProtocolFeeSummary = {
    * unpricedSymbols is empty. Surfaced so the UI can flag approximate totals.
    */
   unresolvedCount: number;
+  /**
+   * Like unresolvedCount but scoped to the last 24h window.
+   * Non-zero means fees24hUSD is understated and the 24h tile should show ≈.
+   */
+  unresolvedCount24h: number;
   /** True when the query hit the row limit — all-time total is a lower bound. */
   isTruncated: boolean;
 };
@@ -121,17 +126,19 @@ export function aggregateProtocolFees(
   const unpricedSymbolSet = new Set<string>();
   const unpricedSymbols24hSet = new Set<string>();
   let unresolvedCount = 0;
+  let unresolvedCount24h = 0;
 
   for (const t of transfers) {
+    const is24h = Number(t.blockTimestamp) >= cutoff24h;
+
     // Count indexer placeholder symbols — excluded from USD totals but tracked
     // so the UI can signal the total may be understated if resolution keeps
     // failing (persistent RPC issue, non-standard token).
     if (UNRESOLVED_SYMBOLS.has(t.tokenSymbol)) {
       unresolvedCount++;
+      if (is24h) unresolvedCount24h++;
       continue;
     }
-
-    const is24h = Number(t.blockTimestamp) >= cutoff24h;
     const amount = parseWei(t.amount, t.tokenDecimals);
     const usd = tokenToUSD(t.tokenSymbol, amount);
     if (usd === null) {
@@ -151,6 +158,7 @@ export function aggregateProtocolFees(
     unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
     unpricedSymbols24h: Array.from(unpricedSymbols24hSet).sort(),
     unresolvedCount,
+    unresolvedCount24h,
     isTruncated: transfers.length >= PROTOCOL_FEE_QUERY_LIMIT,
   };
 }

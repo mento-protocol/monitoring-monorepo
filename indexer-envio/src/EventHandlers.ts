@@ -2238,17 +2238,27 @@ ERC20FeeToken.Transfer.handler(
     // high-activity tokens.
     const backfillKey = `${chainId}:${normalizedToken}`;
     if (symbol !== "UNKNOWN" && !backfilledTokens.has(backfillKey)) {
-      backfilledTokens.add(backfillKey);
-      const unknownRecords =
-        await context.ProtocolFeeTransfer.getWhere.token.eq(normalizedToken);
-      for (const stale of unknownRecords) {
-        if (stale.tokenSymbol === "UNKNOWN") {
-          context.ProtocolFeeTransfer.set({
-            ...stale,
-            tokenSymbol: symbol,
-            tokenDecimals: decimals,
-          });
+      try {
+        const unknownRecords =
+          await context.ProtocolFeeTransfer.getWhere.token.eq(normalizedToken);
+        for (const stale of unknownRecords) {
+          if (stale.tokenSymbol === "UNKNOWN") {
+            context.ProtocolFeeTransfer.set({
+              ...stale,
+              tokenSymbol: symbol,
+              tokenDecimals: decimals,
+            });
+          }
         }
+        // Mark as backfilled only after successful scan so a transient error
+        // does not permanently skip this token for the session lifetime.
+        backfilledTokens.add(backfillKey);
+      } catch (err) {
+        console.warn(
+          `[ERC20FeeToken] Backfill scan failed for ${normalizedToken} on chain ${chainId}. ` +
+            `Will retry on next transfer.`,
+          err,
+        );
       }
     }
   },

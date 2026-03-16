@@ -130,6 +130,7 @@ describe("GlobalPage — all networks succeed", () => {
           unpricedSymbols: [],
           unpricedSymbols24h: [],
           unresolvedCount: 0,
+          unresolvedCount24h: 0,
           isTruncated: false,
         },
       }),
@@ -200,6 +201,7 @@ describe("GlobalPage — snapshots-only failure", () => {
           unpricedSymbols: [],
           unpricedSymbols24h: [],
           unresolvedCount: 0,
+          unresolvedCount24h: 0,
           isTruncated: false,
         },
       }),
@@ -225,6 +227,7 @@ describe("GlobalPage — unpriced symbols behavior", () => {
           unpricedSymbols: ["FOO"],
           unpricedSymbols24h: [],
           unresolvedCount: 0,
+          unresolvedCount24h: 0,
           isTruncated: false,
         },
       }),
@@ -243,6 +246,7 @@ describe("GlobalPage — unpriced symbols behavior", () => {
           unpricedSymbols: ["FOO"],
           unpricedSymbols24h: [],
           unresolvedCount: 0,
+          unresolvedCount24h: 0,
           isTruncated: false,
         },
       }),
@@ -261,6 +265,24 @@ describe("GlobalPage — unpriced symbols behavior", () => {
     expect(afterFees24h).not.toContain("Approximate — unpriced");
   });
 
+  it("shows approximate on 24h tile when unresolvedCount24h > 0", () => {
+    const html = render([
+      makeNetworkData({
+        fees: {
+          totalFeesUSD: 100,
+          fees24hUSD: 50,
+          unpricedSymbols: [],
+          unpricedSymbols24h: [],
+          unresolvedCount: 1,
+          unresolvedCount24h: 1, // UNKNOWN transfer was in last 24h
+          isTruncated: false,
+        },
+      }),
+    ]);
+    // 24h fees should be marked approximate
+    expect(html).toContain("Approximate — some tokens unresolved");
+  });
+
   it("renders DeBank link on Total Fees Earned tile", () => {
     const html = render([
       makeNetworkData({
@@ -270,6 +292,7 @@ describe("GlobalPage — unpriced symbols behavior", () => {
           unpricedSymbols: [],
           unpricedSymbols24h: [],
           unresolvedCount: 0,
+          unresolvedCount24h: 0,
           isTruncated: false,
         },
       }),
