@@ -161,6 +161,40 @@ export function _clearMockReserves(): void {
   _testReserves.clear();
 }
 
+// ---------------------------------------------------------------------------
+// Test hooks for fee-token metadata (resolveFeeTokenMeta RPC layer)
+// ---------------------------------------------------------------------------
+
+/** Map of cacheKey → mock metadata, used in tests to bypass RPC. */
+const _testFeeTokenMeta = new Map<
+  string,
+  { symbol: string; decimals: number } | "FAIL"
+>();
+
+/**
+ * Pre-seed a fee-token metadata response for tests.
+ * Use "FAIL" as the value to simulate a transient RPC failure.
+ */
+export function _setMockFeeTokenMeta(
+  chainId: number,
+  tokenAddress: string,
+  meta: { symbol: string; decimals: number } | "FAIL",
+): void {
+  _testFeeTokenMeta.set(`${chainId}:${tokenAddress.toLowerCase()}`, meta);
+}
+
+export function _clearMockFeeTokenMeta(): void {
+  _testFeeTokenMeta.clear();
+}
+
+export function _clearBackfilledTokens(): void {
+  backfilledTokens.clear();
+}
+
+export function _clearFeeTokenMetaCache(): void {
+  feeTokenMetaCache.clear();
+}
+
 // Per-chain RPC defaults. ENVIO_RPC_URL overrides the default for the active chain.
 // Every indexed chain MUST have an entry here — missing chains fall through to the
 // Celo Sepolia default and silently produce wrong oracle/trading-limit/decimals data.
@@ -2164,6 +2198,15 @@ async function resolveFeeTokenMeta(
   if (cached) return cached;
 
   try {
+    // Test hook — bypass RPC with pre-seeded metadata. Runs inside try/catch
+    // so "FAIL" simulation exercises the same fallback path as a real error.
+    const testMeta = _testFeeTokenMeta.get(cacheKey);
+    if (testMeta !== undefined) {
+      if (testMeta === "FAIL") throw new Error("[test] simulated RPC failure");
+      feeTokenMetaCache.set(cacheKey, testMeta);
+      return testMeta;
+    }
+
     const client = getRpcClient(chainId);
     const [decimals, symbol] = await Promise.all([
       client.readContract({
