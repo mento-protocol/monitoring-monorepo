@@ -1133,7 +1133,6 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
   if (rebalanceThreshold > 0) {
     oracleDelta.rebalanceThreshold = rebalanceThreshold;
   }
-  oracleDelta.oracleTxHash = event.transaction.hash;
 
   const pool = await upsertPool({
     context,
@@ -1520,7 +1519,6 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       oraclePrice,
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
       oracleTimestamp: blockTimestamp,
-      oracleTxHash: event.transaction.hash,
     };
   }
 
