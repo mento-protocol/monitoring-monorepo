@@ -1137,6 +1137,16 @@ describe("Envio Celo indexer handlers", () => {
       oracleTxHash: KNOWN_ORACLE_TX,
     });
 
+    // Inject a mock rebalancing state so fetchRebalancingState() returns a
+    // non-null value — that's the branch where the pre-fix bug lived.
+    // Without this the guarded block is skipped and the test is a false positive.
+    _setMockRebalancingState(42220, POOL_ADDR, {
+      oraclePriceNumerator: 1_000_000_000_000_000_000n,
+      oraclePriceDenominator: 1_000_000_000_000_000_000n,
+      rebalanceThreshold: 500,
+      priceDifference: 999n,
+    });
+
     const rebalancedEvent = FPMM.Rebalanced.createMockEvent({
       sender: "0x0000000000000000000000000000000000000099",
       priceDifferenceBefore: 3333n,
