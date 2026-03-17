@@ -136,7 +136,7 @@ describe("Swap handler — reserve syncing", () => {
     );
   });
 
-  it("preserves previous reserves when getReserves() returns null (RPC failure)", async () => {
+  it("FPMM.Swap preserves existing reserves (does not fetch or overwrite)", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000e1";
     const SEED_R0 = 30_000_000_000_000_000_000_000n;
     const SEED_R1 = 40_000_000_000_000_000_000_000n;
@@ -161,7 +161,7 @@ describe("Swap handler — reserve syncing", () => {
       mockDb,
     });
 
-    // Pre-seed reserves on the pool entity
+    // Pre-seed reserves on the pool entity (simulates prior UpdateReserves)
     const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
     assert.ok(seeded, "Pool must exist after deploy");
     mockDb = mockDb.entities.Pool.set({
@@ -169,9 +169,6 @@ describe("Swap handler — reserve syncing", () => {
       reserves0: SEED_R0,
       reserves1: SEED_R1,
     });
-
-    // Mock getReserves() returning null (simulates RPC failure)
-    _setMockReserves(42220, POOL_ADDR, null);
 
     // Fire a Swap event
     const swapEvent = FPMM.Swap.createMockEvent({
@@ -284,7 +281,7 @@ describe("Swap handler — reserve syncing", () => {
     );
   });
 
-  it("VirtualPool.Swap preserves reserves when getReserves() returns null", async () => {
+  it("VirtualPool.Swap preserves existing reserves (does not fetch or overwrite)", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000e3";
     const SEED_R0 = 60_000_000_000_000_000_000_000n;
     const SEED_R1 = 55_000_000_000_000_000_000_000n;
@@ -308,7 +305,7 @@ describe("Swap handler — reserve syncing", () => {
       mockDb,
     });
 
-    // Pre-seed reserves
+    // Pre-seed reserves (simulates prior UpdateReserves)
     const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
     assert.ok(seeded, "VirtualPool must exist after deploy");
     mockDb = mockDb.entities.Pool.set({
@@ -316,9 +313,6 @@ describe("Swap handler — reserve syncing", () => {
       reserves0: SEED_R0,
       reserves1: SEED_R1,
     });
-
-    // Simulate RPC failure
-    _setMockReserves(42220, POOL_ADDR, null);
 
     const swapEvent = VirtualPool.Swap.createMockEvent({
       sender: "0x0000000000000000000000000000000000000011",

@@ -31,6 +31,7 @@ import {
   fetchReferenceRateFeedID,
   fetchTokenDecimalsScaling,
   fetchReportExpiry,
+  fetchNumReporters,
   fetchTradingLimits,
 } from "../rpc";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
@@ -79,13 +80,17 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
 
   if (rateFeedID) {
     oracleDelta.referenceRateFeedID = rateFeedID;
-    const oracleExpiry = await fetchReportExpiry(
-      event.chainId,
-      rateFeedID,
-      blockNumber,
-    );
+    // Seed oracleExpiry and oracleNumReporters at pool creation so oracle
+    // handlers can read them from the DB without per-event RPC calls.
+    const [oracleExpiry, numReporters] = await Promise.all([
+      fetchReportExpiry(event.chainId, rateFeedID, blockNumber),
+      fetchNumReporters(event.chainId, rateFeedID, blockNumber),
+    ]);
     if (oracleExpiry !== null) {
       oracleDelta.oracleExpiry = oracleExpiry;
+    }
+    if (numReporters !== null) {
+      oracleDelta.oracleNumReporters = numReporters;
     }
   }
 
