@@ -1,0 +1,209 @@
+// ---------------------------------------------------------------------------
+// SortedOracles event handlers (OracleReported, MedianUpdated, expiry)
+// ---------------------------------------------------------------------------
+
+import { SortedOracles, type Pool, type OracleSnapshot } from "generated";
+import { eventId, asAddress, asBigInt } from "../helpers";
+import { computePriceDifference } from "../priceDifference";
+import { computeHealthStatus } from "../pool";
+import {
+  fetchNumReporters,
+  fetchReportExpiry,
+  getPoolsByFeed,
+  updatePoolsOracleExpiry,
+  getPoolsWithReferenceFeed,
+} from "../rpc";
+
+// ---------------------------------------------------------------------------
+// SortedOracles.OracleReported
+// ---------------------------------------------------------------------------
+
+SortedOracles.OracleReported.handler(async ({ event, context }) => {
+  const rateFeedID = asAddress(event.params.token);
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
+
+  const poolIds = await getPoolsByFeed(context, rateFeedID);
+  if (poolIds.length === 0) return;
+
+  const oracleTimestamp = event.params.timestamp;
+  const oracleNumReporters = await fetchNumReporters(
+    event.chainId,
+    rateFeedID,
+    BigInt(event.block.number),
+  );
+  let resolvedOracleExpiry: bigint | null | undefined;
+
+  for (const poolId of poolIds) {
+    const existing = await context.Pool.get(poolId);
+    if (!existing) continue;
+
+    const oracleExpiry =
+      existing.oracleExpiry > 0n
+        ? existing.oracleExpiry
+        : ((resolvedOracleExpiry ??= await fetchReportExpiry(
+            event.chainId,
+            rateFeedID,
+            blockNumber,
+          )) ?? existing.oracleExpiry);
+
+    const oraclePrice = event.params.value;
+
+    const updatedPool: Pool = {
+      ...existing,
+      oracleTimestamp,
+      oracleTxHash: event.transaction.hash,
+      oracleOk: true,
+      oraclePrice,
+      oracleExpiry,
+      oracleNumReporters: oracleNumReporters ?? existing.oracleNumReporters,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    };
+    const priceDifference =
+      !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+        ? computePriceDifference(updatedPool)
+        : updatedPool.priceDifference;
+    const withDev = { ...updatedPool, priceDifference };
+    const healthStatus = computeHealthStatus(withDev);
+    const finalPool = { ...withDev, healthStatus };
+    context.Pool.set(finalPool);
+
+    const snapshot: OracleSnapshot = {
+      id:
+        eventId(event.chainId, event.block.number, event.logIndex) +
+        `-${poolId}`,
+      poolId,
+      timestamp: blockTimestamp,
+      oraclePrice,
+      oracleOk: true,
+      numReporters: oracleNumReporters ?? existing.oracleNumReporters,
+      priceDifference,
+      rebalanceThreshold: existing.rebalanceThreshold,
+      source: "oracle_reported",
+      blockNumber,
+    };
+    context.OracleSnapshot.set(snapshot);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// SortedOracles.MedianUpdated
+// ---------------------------------------------------------------------------
+
+SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
+  const rateFeedID = asAddress(event.params.token);
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
+
+  const poolIds = await getPoolsByFeed(context, rateFeedID);
+  if (poolIds.length === 0) return;
+
+  const oracleNumReporters = await fetchNumReporters(
+    event.chainId,
+    rateFeedID,
+    blockNumber,
+  );
+  let resolvedOracleExpiry: bigint | null | undefined;
+
+  for (const poolId of poolIds) {
+    const existing = await context.Pool.get(poolId);
+    if (!existing) continue;
+
+    const oracleExpiry =
+      existing.oracleExpiry > 0n
+        ? existing.oracleExpiry
+        : ((resolvedOracleExpiry ??= await fetchReportExpiry(
+            event.chainId,
+            rateFeedID,
+            blockNumber,
+          )) ?? existing.oracleExpiry);
+
+    const oraclePrice = event.params.value;
+
+    const updatedPool: Pool = {
+      ...existing,
+      oraclePrice,
+      oracleTimestamp: blockTimestamp,
+      oracleTxHash: event.transaction.hash,
+      oracleOk: true,
+      oracleExpiry,
+      oracleNumReporters: oracleNumReporters ?? existing.oracleNumReporters,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    };
+    const priceDifference =
+      !updatedPool.source?.includes("virtual") && oraclePrice > 0n
+        ? computePriceDifference(updatedPool)
+        : updatedPool.priceDifference;
+    const withDev = { ...updatedPool, priceDifference };
+    const healthStatus = computeHealthStatus(withDev);
+    const finalPool = { ...withDev, healthStatus };
+    context.Pool.set(finalPool);
+
+    const snapshot: OracleSnapshot = {
+      id:
+        eventId(event.chainId, event.block.number, event.logIndex) +
+        `-${poolId}`,
+      poolId,
+      timestamp: blockTimestamp,
+      oraclePrice,
+      oracleOk: true,
+      numReporters: oracleNumReporters ?? existing.oracleNumReporters,
+      priceDifference,
+      rebalanceThreshold: existing.rebalanceThreshold,
+      source: "oracle_median_updated",
+      blockNumber,
+    };
+    context.OracleSnapshot.set(snapshot);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// SortedOracles.TokenReportExpirySet
+// ---------------------------------------------------------------------------
+
+SortedOracles.TokenReportExpirySet.handler(async ({ event, context }) => {
+  const rateFeedID = asAddress(event.params.token);
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
+  const poolIds = await getPoolsByFeed(context, rateFeedID);
+  const oracleExpiry = await fetchReportExpiry(
+    event.chainId,
+    rateFeedID,
+    blockNumber,
+  );
+
+  await updatePoolsOracleExpiry(
+    context,
+    poolIds,
+    oracleExpiry,
+    blockNumber,
+    blockTimestamp,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// SortedOracles.ReportExpirySet
+// ---------------------------------------------------------------------------
+
+SortedOracles.ReportExpirySet.handler(async ({ event, context }) => {
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
+  const pools = await getPoolsWithReferenceFeed(context);
+
+  for (const pool of pools) {
+    const oracleExpiry = await fetchReportExpiry(
+      event.chainId,
+      pool.referenceRateFeedID,
+      blockNumber,
+    );
+    await updatePoolsOracleExpiry(
+      context,
+      [pool.id],
+      oracleExpiry,
+      blockNumber,
+      blockTimestamp,
+    );
+  }
+});
