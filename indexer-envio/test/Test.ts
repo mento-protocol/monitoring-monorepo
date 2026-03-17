@@ -540,7 +540,7 @@ describe("Envio Celo indexer handlers", () => {
     );
   });
 
-  it("MedianUpdated: sets hardcoded reporter count (single-reporter feeds)", async function () {
+  it("MedianUpdated: preserves seeded reporter count from DB (no per-event RPC)", async function () {
     this.timeout(10_000);
     const POOL_ADDR = "0x00000000000000000000000000000000000000ad";
     const FEED_ID = "0x000000000000000000000000000000000000cafe";
@@ -575,8 +575,8 @@ describe("Envio Celo indexer handlers", () => {
     }
     assert.equal(
       pool.oracleNumReporters,
-      1,
-      "MedianUpdated sets oracleNumReporters to hardcoded 1 (single-reporter feeds)",
+      7,
+      "MedianUpdated preserves the DB-seeded reporter count (no per-event RPC)",
     );
 
     const snapshotId = `${42220}_${303}_${13}-${POOL_ADDR}`;
@@ -593,8 +593,8 @@ describe("Envio Celo indexer handlers", () => {
     assert.equal(snapshot.source, "oracle_median_updated");
     assert.equal(
       snapshot.numReporters,
-      1,
-      "MedianUpdated snapshot uses hardcoded reporter count (single-reporter feeds)",
+      7,
+      "MedianUpdated snapshot preserves the DB-seeded reporter count",
     );
   });
 

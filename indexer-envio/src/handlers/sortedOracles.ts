@@ -13,13 +13,6 @@ import {
   getPoolsWithReferenceFeed,
 } from "../rpc";
 
-// Mento v3 uses a single oracle relayer per feed. All 6 feeds across Celo and
-// Monad mainnet have exactly 1 reporter (verified 2026-03-17). Hardcoding
-// eliminates an RPC call (numRates) on every OracleReported/MedianUpdated event.
-// If multi-reporter feeds are introduced, index the numRates via a new event or
-// fetch it at FPMMDeployed time and cache it on the Pool entity.
-const ORACLE_NUM_REPORTERS = 1;
-
 // ---------------------------------------------------------------------------
 // SortedOracles.OracleReported
 // ---------------------------------------------------------------------------
@@ -55,7 +48,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       oracleOk: true,
       oraclePrice,
       oracleExpiry,
-      oracleNumReporters: ORACLE_NUM_REPORTERS,
+      oracleNumReporters: existing.oracleNumReporters,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
@@ -76,7 +69,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       timestamp: blockTimestamp,
       oraclePrice,
       oracleOk: true,
-      numReporters: ORACLE_NUM_REPORTERS,
+      numReporters: existing.oracleNumReporters,
       priceDifference,
       rebalanceThreshold: existing.rebalanceThreshold,
       source: "oracle_reported",
@@ -117,7 +110,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       oracleTxHash: event.transaction.hash,
       oracleOk: true,
       oracleExpiry,
-      oracleNumReporters: ORACLE_NUM_REPORTERS,
+      oracleNumReporters: existing.oracleNumReporters,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
@@ -138,7 +131,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       timestamp: blockTimestamp,
       oraclePrice,
       oracleOk: true,
-      numReporters: ORACLE_NUM_REPORTERS,
+      numReporters: existing.oracleNumReporters,
       priceDifference,
       rebalanceThreshold: existing.rebalanceThreshold,
       source: "oracle_median_updated",
