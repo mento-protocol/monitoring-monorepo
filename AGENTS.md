@@ -49,7 +49,7 @@ pnpm infra:apply              # Apply infrastructure changes
 - **Runtime:** Envio HyperIndex (envio@2.32.3)
 - **Schema:** `schema.graphql` defines indexed entities (FPMM, Swap, Mint, Burn, etc.)
 - **Configs:** `config.celo.devnet.yaml`, `config.celo.mainnet.yaml`, `config.celo.sepolia.yaml`, `config.monad.mainnet.yaml`, `config.monad.testnet.yaml`
-- **Handlers:** `src/EventHandlers.ts` — processes blockchain events
+- **Handlers:** `src/EventHandlers.ts` is the Envio entry point (all `config.*.yaml` files reference it). It imports handler modules from `src/handlers/` and re-exports test utilities. Handler logic lives in `src/handlers/fpmm.ts`, `src/handlers/sortedOracles.ts`, `src/handlers/virtualPool.ts`, `src/handlers/feeToken.ts`. Shared logic: `src/rpc.ts` (RPC + caches), `src/pool.ts` (upsert), `src/priceDifference.ts`, `src/tradingLimits.ts`, `src/feeToken.ts`, `src/abis.ts`, `src/helpers.ts`.
 - **Contract addresses:** `src/contractAddresses.ts` — resolves addresses from `@mento-protocol/contracts` using the namespace map from `shared-config`
 - **ABIs:** `abis/` — FPMMFactory, FPMM, VirtualPoolFactory (indexer-specific); SortedOracles + token ABIs come from `@mento-protocol/contracts`
 - **Scripts:** `scripts/run-envio-with-env.mjs` — loads .env and runs envio CLI
@@ -96,7 +96,19 @@ monitoring-monorepo/
 │   ├── config.monad.testnet.yaml # Monad Testnet config
 │   ├── schema.graphql        # Entity definitions
 │   ├── src/
-│   │   ├── EventHandlers.ts  # Event processing logic
+│   │   ├── EventHandlers.ts  # Envio entry point (imports handlers, re-exports for tests)
+│   │   ├── handlers/         # Event handler registrations
+│   │   │   ├── fpmm.ts       # FPMMFactory + FPMM handlers
+│   │   │   ├── sortedOracles.ts  # SortedOracles handlers
+│   │   │   ├── virtualPool.ts    # VirtualPool handlers
+│   │   │   └── feeToken.ts       # ERC20FeeToken.Transfer handler
+│   │   ├── rpc.ts            # RPC client, fetch functions, caches, test mocks
+│   │   ├── pool.ts           # Pool/PoolSnapshot upsert, health status
+│   │   ├── priceDifference.ts # Price math (computePriceDifference, normalizeTo18)
+│   │   ├── tradingLimits.ts  # Trading limit types and computation
+│   │   ├── feeToken.ts       # Fee token metadata, backfill, YIELD_SPLIT_ADDRESS
+│   │   ├── abis.ts           # ABI definitions
+│   │   ├── helpers.ts        # Pure utilities (eventId, asAddress, etc.)
 │   │   └── contractAddresses.ts  # Contract address resolution from @mento-protocol/contracts
 │   ├── abis/                 # Contract ABIs (FPMMFactory, FPMM, VirtualPoolFactory)
 │   ├── scripts/              # Helper scripts
@@ -157,6 +169,8 @@ This installs deps and runs Envio codegen (required for `indexer-envio` TypeScri
 ./tools/trunk check --all
 pnpm --filter @mento-protocol/ui-dashboard typecheck
 pnpm --filter @mento-protocol/indexer-envio typecheck
+pnpm --filter @mento-protocol/indexer-envio test
+pnpm indexer:celo-mainnet:codegen   # Validates Envio can parse handler entry point + module imports
 pnpm --filter @mento-protocol/ui-dashboard test:coverage
 ```
 
@@ -165,6 +179,10 @@ pnpm --filter @mento-protocol/ui-dashboard test:coverage
 - `codespell` flags short variable names that match common abbreviations (e.g. a two-letter loop var that looks like a misspelling). Use descriptive names like `netData` to avoid this.
 - `trunk check <file>` only checks the specified files — always use `--all` to match what CI runs
 - If `indexer-envio typecheck` fails with "Cannot find module 'generated'", run `./scripts/setup.sh` first
+
+### EventHandlers.ts must remain the handler entry point
+
+Every `config.*.yaml` specifies `handler: src/EventHandlers.ts`. Envio expects all handler registrations (e.g. `FPMM.Swap.handler(...)`) to be reachable from this file at module load time. The actual logic lives in `src/handlers/*.ts` — these are imported as side effects from `EventHandlers.ts`. If you add a new handler file, you **must** add a corresponding `import "./handlers/yourFile"` in `EventHandlers.ts` and then re-run `pnpm indexer:celo-mainnet:codegen` to verify Envio picks it up.
 
 ## Common Tasks
 
@@ -182,7 +200,7 @@ When a new set of contracts has been deployed and a new `@mento-protocol/contrac
 1. Add ABI to `indexer-envio/abis/`
 2. Add contract entry in the relevant config(s): `config.celo.mainnet.yaml`, `config.celo.sepolia.yaml`, `config.monad.mainnet.yaml`, `config.monad.testnet.yaml`
 3. Add entity to `schema.graphql`
-4. Add handler in `src/EventHandlers.ts`
+4. Add handler in the appropriate `src/handlers/*.ts` file (or create a new one and import it from `src/EventHandlers.ts`)
 5. Run `pnpm indexer:codegen` to regenerate types
 
 ### Adding a new chart to the dashboard
