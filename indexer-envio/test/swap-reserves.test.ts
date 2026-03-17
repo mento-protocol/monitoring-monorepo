@@ -32,12 +32,14 @@ type GeneratedModule = {
     };
     FPMM: {
       Swap: EventProcessor;
+      UpdateReserves: EventProcessor;
     };
     VirtualPoolFactory: {
       VirtualPoolDeployed: EventProcessor;
     };
     VirtualPool: {
       Swap: EventProcessor;
+      UpdateReserves: EventProcessor;
     };
   };
 };
@@ -60,16 +62,10 @@ describe("Swap handler — reserve syncing", () => {
     _clearMockERC20Decimals();
   });
 
-  it("updates reserves from mocked getReserves() on FPMM.Swap", async () => {
+  it("updates reserves via UpdateReserves preceding FPMM.Swap (matching contract behavior)", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000e0";
     const MOCK_R0 = 50_000_000_000_000_000_000_000n;
     const MOCK_R1 = 70_000_000_000_000_000_000_000n;
-
-    // Pre-set mock reserves so fetchReserves() returns known values
-    _setMockReserves(42220, POOL_ADDR, {
-      reserve0: MOCK_R0,
-      reserve1: MOCK_R1,
-    });
 
     let mockDb = MockDb.createMockDb();
 
@@ -91,7 +87,25 @@ describe("Swap handler — reserve syncing", () => {
       mockDb,
     });
 
-    // Fire a Swap event
+    // The FPMM contract calls _update() before emit Swap, so UpdateReserves
+    // always precedes Swap in the same tx. Simulate this event ordering.
+    const updateEvent = FPMM.UpdateReserves.createMockEvent({
+      reserve0: MOCK_R0,
+      reserve1: MOCK_R1,
+      blockTimestamp: 1_700_010_100n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 11,
+        srcAddress: POOL_ADDR,
+        block: { number: 1001, timestamp: 1_700_010_100 },
+      },
+    });
+    mockDb = await FPMM.UpdateReserves.processEvent({
+      event: updateEvent,
+      mockDb,
+    });
+
+    // Fire a Swap event (no fetchReserves RPC — reserves already set above)
     const swapEvent = FPMM.Swap.createMockEvent({
       sender: "0x0000000000000000000000000000000000000011",
       to: "0x0000000000000000000000000000000000000022",
@@ -101,7 +115,7 @@ describe("Swap handler — reserve syncing", () => {
       amount1Out: 2_000_000_000_000_000_000n,
       mockEventData: {
         chainId: 42220,
-        logIndex: 11,
+        logIndex: 12,
         srcAddress: POOL_ADDR,
         block: { number: 1001, timestamp: 1_700_010_100 },
       },
@@ -195,15 +209,10 @@ describe("Swap handler — reserve syncing", () => {
   // VirtualPool.Swap — same reserve-sync path as FPMM.Swap
   // ---------------------------------------------------------------------------
 
-  it("VirtualPool.Swap updates reserves from mocked getReserves()", async () => {
+  it("VirtualPool.Swap uses reserves set by preceding UpdateReserves", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000e2";
     const MOCK_R0 = 80_000_000_000_000_000_000_000n;
     const MOCK_R1 = 90_000_000_000_000_000_000_000n;
-
-    _setMockReserves(42220, POOL_ADDR, {
-      reserve0: MOCK_R0,
-      reserve1: MOCK_R1,
-    });
 
     let mockDb = MockDb.createMockDb();
 
@@ -224,7 +233,24 @@ describe("Swap handler — reserve syncing", () => {
       mockDb,
     });
 
-    // Fire VirtualPool.Swap
+    // UpdateReserves precedes Swap in the same tx (contract calls _update() first)
+    const updateEvent = VirtualPool.UpdateReserves.createMockEvent({
+      reserve0: MOCK_R0,
+      reserve1: MOCK_R1,
+      blockTimestamp: 1_700_020_100n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 11,
+        srcAddress: POOL_ADDR,
+        block: { number: 2001, timestamp: 1_700_020_100 },
+      },
+    });
+    mockDb = await VirtualPool.UpdateReserves.processEvent({
+      event: updateEvent,
+      mockDb,
+    });
+
+    // Fire VirtualPool.Swap (no fetchReserves RPC — reserves already set above)
     const swapEvent = VirtualPool.Swap.createMockEvent({
       sender: "0x0000000000000000000000000000000000000011",
       to: "0x0000000000000000000000000000000000000022",
@@ -234,7 +260,7 @@ describe("Swap handler — reserve syncing", () => {
       amount1Out: 2_000_000_000_000_000_000n,
       mockEventData: {
         chainId: 42220,
-        logIndex: 11,
+        logIndex: 12,
         srcAddress: POOL_ADDR,
         block: { number: 2001, timestamp: 1_700_020_100 },
       },

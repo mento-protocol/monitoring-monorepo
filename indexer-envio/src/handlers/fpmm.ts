@@ -26,7 +26,6 @@ import {
 } from "../tradingLimits";
 import {
   fetchRebalancingState,
-  fetchReserves,
   fetchInvertRateFeed,
   fetchRebalanceThreshold,
   fetchReferenceRateFeedID,
@@ -143,13 +142,11 @@ FPMM.Swap.handler(async ({ event, context }) => {
       ? event.params.amount1In
       : event.params.amount1Out;
 
-  // Fetch current on-chain reserves at this block.
-  const reservesDelta = await fetchReserves(
-    event.chainId,
-    event.srcAddress,
-    blockNumber,
-  );
-
+  // No fetchReserves RPC call needed: the FPMM contract calls _update()
+  // before emitting Swap, so an UpdateReserves event with the exact post-swap
+  // reserves always precedes this Swap event in the same tx. By the time this
+  // handler runs, the UpdateReserves handler has already written reserves to
+  // the Pool entity.
   const pool = await upsertPool({
     context,
     chainId: event.chainId,
@@ -158,7 +155,6 @@ FPMM.Swap.handler(async ({ event, context }) => {
     blockNumber,
     blockTimestamp,
     swapDelta: { volume0, volume1 },
-    ...(reservesDelta && { reservesDelta }),
   });
 
   await upsertSnapshot({

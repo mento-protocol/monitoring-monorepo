@@ -7,12 +7,18 @@ import { eventId, asAddress, asBigInt } from "../helpers";
 import { computePriceDifference } from "../priceDifference";
 import { computeHealthStatus } from "../pool";
 import {
-  fetchNumReporters,
   fetchReportExpiry,
   getPoolsByFeed,
   updatePoolsOracleExpiry,
   getPoolsWithReferenceFeed,
 } from "../rpc";
+
+// Mento v3 uses a single oracle relayer per feed. All 6 feeds across Celo and
+// Monad mainnet have exactly 1 reporter (verified 2026-03-17). Hardcoding
+// eliminates an RPC call (numRates) on every OracleReported/MedianUpdated event.
+// If multi-reporter feeds are introduced, index the numRates via a new event or
+// fetch it at FPMMDeployed time and cache it on the Pool entity.
+const ORACLE_NUM_REPORTERS = 1;
 
 // ---------------------------------------------------------------------------
 // SortedOracles.OracleReported
@@ -27,25 +33,18 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
   if (poolIds.length === 0) return;
 
   const oracleTimestamp = event.params.timestamp;
-  const oracleNumReporters = await fetchNumReporters(
-    event.chainId,
-    rateFeedID,
-    BigInt(event.block.number),
-  );
-  let resolvedOracleExpiry: bigint | null | undefined;
 
   for (const poolId of poolIds) {
     const existing = await context.Pool.get(poolId);
     if (!existing) continue;
 
+    // Resolve oracleExpiry from DB if already populated, otherwise fetch via RPC
+    // (one-time seed — subsequent events use the DB value).
     const oracleExpiry =
       existing.oracleExpiry > 0n
         ? existing.oracleExpiry
-        : ((resolvedOracleExpiry ??= await fetchReportExpiry(
-            event.chainId,
-            rateFeedID,
-            blockNumber,
-          )) ?? existing.oracleExpiry);
+        : ((await fetchReportExpiry(event.chainId, rateFeedID, blockNumber)) ??
+          existing.oracleExpiry);
 
     const oraclePrice = event.params.value;
 
@@ -56,7 +55,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       oracleOk: true,
       oraclePrice,
       oracleExpiry,
-      oracleNumReporters: oracleNumReporters ?? existing.oracleNumReporters,
+      oracleNumReporters: ORACLE_NUM_REPORTERS,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
@@ -77,7 +76,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       timestamp: blockTimestamp,
       oraclePrice,
       oracleOk: true,
-      numReporters: oracleNumReporters ?? existing.oracleNumReporters,
+      numReporters: ORACLE_NUM_REPORTERS,
       priceDifference,
       rebalanceThreshold: existing.rebalanceThreshold,
       source: "oracle_reported",
@@ -99,13 +98,6 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   const poolIds = await getPoolsByFeed(context, rateFeedID);
   if (poolIds.length === 0) return;
 
-  const oracleNumReporters = await fetchNumReporters(
-    event.chainId,
-    rateFeedID,
-    blockNumber,
-  );
-  let resolvedOracleExpiry: bigint | null | undefined;
-
   for (const poolId of poolIds) {
     const existing = await context.Pool.get(poolId);
     if (!existing) continue;
@@ -113,11 +105,8 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
     const oracleExpiry =
       existing.oracleExpiry > 0n
         ? existing.oracleExpiry
-        : ((resolvedOracleExpiry ??= await fetchReportExpiry(
-            event.chainId,
-            rateFeedID,
-            blockNumber,
-          )) ?? existing.oracleExpiry);
+        : ((await fetchReportExpiry(event.chainId, rateFeedID, blockNumber)) ??
+          existing.oracleExpiry);
 
     const oraclePrice = event.params.value;
 
@@ -128,7 +117,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       oracleTxHash: event.transaction.hash,
       oracleOk: true,
       oracleExpiry,
-      oracleNumReporters: oracleNumReporters ?? existing.oracleNumReporters,
+      oracleNumReporters: ORACLE_NUM_REPORTERS,
       updatedAtBlock: blockNumber,
       updatedAtTimestamp: blockTimestamp,
     };
@@ -149,7 +138,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       timestamp: blockTimestamp,
       oraclePrice,
       oracleOk: true,
-      numReporters: oracleNumReporters ?? existing.oracleNumReporters,
+      numReporters: ORACLE_NUM_REPORTERS,
       priceDifference,
       rebalanceThreshold: existing.rebalanceThreshold,
       source: "oracle_median_updated",
