@@ -12,7 +12,6 @@ import {
   type VirtualPoolLifecycle,
 } from "generated";
 import { eventId, asAddress, asBigInt } from "../helpers";
-import { fetchReserves } from "../rpc";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
 
 // ---------------------------------------------------------------------------
@@ -106,12 +105,8 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
       ? event.params.amount1In
       : event.params.amount1Out;
 
-  const reservesDelta = await fetchReserves(
-    event.chainId,
-    event.srcAddress,
-    blockNumber,
-  );
-
+  // No fetchReserves RPC call needed: the contract calls _update() before
+  // emitting Swap, so UpdateReserves always precedes this event in the same tx.
   const pool = await upsertPool({
     context,
     chainId: event.chainId,
@@ -120,7 +115,6 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
     blockNumber,
     blockTimestamp,
     swapDelta: { volume0, volume1 },
-    ...(reservesDelta && { reservesDelta }),
   });
 
   await upsertSnapshot({

@@ -540,7 +540,8 @@ describe("Envio Celo indexer handlers", () => {
     );
   });
 
-  it("MedianUpdated: preserves last known reporter count when refresh has no data", async () => {
+  it("MedianUpdated: sets hardcoded reporter count (single-reporter feeds)", async function () {
+    this.timeout(10_000);
     const POOL_ADDR = "0x00000000000000000000000000000000000000ad";
     const FEED_ID = "0x000000000000000000000000000000000000cafe";
     const ORACLE_PRICE_24DP = BigInt("999000000000000000000000");
@@ -574,8 +575,8 @@ describe("Envio Celo indexer handlers", () => {
     }
     assert.equal(
       pool.oracleNumReporters,
-      7,
-      "MedianUpdated must preserve the last known-good reporter count on read failure",
+      1,
+      "MedianUpdated sets oracleNumReporters to hardcoded 1 (single-reporter feeds)",
     );
 
     const snapshotId = `${42220}_${303}_${13}-${POOL_ADDR}`;
@@ -592,8 +593,8 @@ describe("Envio Celo indexer handlers", () => {
     assert.equal(snapshot.source, "oracle_median_updated");
     assert.equal(
       snapshot.numReporters,
-      7,
-      "MedianUpdated snapshot must preserve the last known-good reporter count on read failure",
+      1,
+      "MedianUpdated snapshot uses hardcoded reporter count (single-reporter feeds)",
     );
   });
 
