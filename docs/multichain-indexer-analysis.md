@@ -45,7 +45,7 @@ indexer-envio/
 - **Separate Envio hosted instances per chain.** Each `config.*.yaml` is deployed independently to Envio's hosted service.
 - Each deployment gets its own Postgres + Hasura endpoint.
 - The dashboard (`ui-dashboard`) currently points to the Celo Mainnet endpoint only: `https://indexer.hyperindex.xyz/60ff18c/v1/graphql`
-- Monad contracts are live (PR #62 merged). Envio hosted deployment pending — this is the next step.
+- Both Celo Mainnet and Monad Mainnet Envio hosted deployments are live. See: https://envio.dev/app/mento-protocol/mento-v3-monad-mainnet
 
 ### What's Shared vs. Separate
 
@@ -304,14 +304,14 @@ Update test fixtures and assertions to include chain ID in entity IDs. All exist
 1. **For mainnet deployments** — create a unified `config.mainnet.yaml` combining Celo + Monad. Deploy as a single Envio hosted instance.
 2. **For testnet deployments** — similarly merge into `config.testnet.yaml`.
 3. **Keep per-chain devnet configs** — devnets are ephemeral and may need isolated testing. Keep `config.celo.devnet.yaml` etc. for local dev.
-4. **Monad is live** — contracts deployed, code merged (PR #62). The merge should happen as part of the Envio hosted deployment step, not after. Starting with a multichain config avoids ever having a separate single-chain Monad deployment.
+4. **Both Monad and Celo Envio deployments are live** — this means the multichain merge now involves migrating two live deployments. The urgency is higher: every day we run separate deployments is more divergence to reconcile.
 
 ### Why Now?
 
-- Monad isn't on the dashboard yet (Envio hosted deployment pending) — no migration of existing multi-endpoint queries needed
+- Monad Envio indexer is live but not yet wired into the dashboard UI (hasuraUrl not set) — no migration of existing multi-endpoint queries needed
 - The handler code is already chain-agnostic — zero handler logic changes beyond ID prefixing
 - Every day with separate deployments is a day of unnecessary operational complexity
-- Adding chain ID to entities now (before Monad data exists in prod) means no breaking migration later
+- ⚠️ Monad data already exists in prod — adding chainId to entity IDs is now a breaking migration requiring a full reindex of both chains
 
 ---
 
