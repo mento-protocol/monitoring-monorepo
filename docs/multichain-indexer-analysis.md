@@ -45,7 +45,7 @@ indexer-envio/
 - **Separate Envio hosted instances per chain.** Each `config.*.yaml` is deployed independently to Envio's hosted service.
 - Each deployment gets its own Postgres + Hasura endpoint.
 - The dashboard (`ui-dashboard`) currently points to the Celo Mainnet endpoint only: `https://indexer.hyperindex.xyz/60ff18c/v1/graphql`
-- Both Celo Mainnet and Monad Mainnet Envio hosted deployments are live. See: https://envio.dev/app/mento-protocol/mento-v3-monad-mainnet
+- Both Celo Mainnet and Monad Mainnet Envio hosted deployments are live. See: <https://envio.dev/app/mento-protocol/mento-v3-monad-mainnet>
 
 ### What's Shared vs. Separate
 
