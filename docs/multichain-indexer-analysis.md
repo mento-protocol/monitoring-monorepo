@@ -45,7 +45,7 @@ indexer-envio/
 - **Separate Envio hosted instances per chain.** Each `config.*.yaml` is deployed independently to Envio's hosted service.
 - Each deployment gets its own Postgres + Hasura endpoint.
 - The dashboard (`ui-dashboard`) currently points to the Celo Mainnet endpoint only: `https://indexer.hyperindex.xyz/60ff18c/v1/graphql`
-- Monad is listed as "⏳ Blocked" in `STATUS.md` (as of 2026-03-06).
+- Monad contracts are live (PR #62 merged). Envio hosted deployment pending — this is the next step.
 
 ### What's Shared vs. Separate
 
@@ -304,11 +304,11 @@ Update test fixtures and assertions to include chain ID in entity IDs. All exist
 1. **For mainnet deployments** — create a unified `config.mainnet.yaml` combining Celo + Monad. Deploy as a single Envio hosted instance.
 2. **For testnet deployments** — similarly merge into `config.testnet.yaml`.
 3. **Keep per-chain devnet configs** — devnets are ephemeral and may need isolated testing. Keep `config.celo.devnet.yaml` etc. for local dev.
-4. **Do this before Monad goes live on the dashboard** — Monad is currently "⏳ Blocked" per STATUS.md. The merge should happen as part of unblocking Monad, not after. Adding Monad as a second separate deployment doubles the operational burden for zero benefit.
+4. **Monad is live** — contracts deployed, code merged (PR #62). The merge should happen as part of the Envio hosted deployment step, not after. Starting with a multichain config avoids ever having a separate single-chain Monad deployment.
 
 ### Why Now?
 
-- Monad isn't live on the dashboard yet — no migration of existing multi-endpoint queries needed
+- Monad isn't on the dashboard yet (Envio hosted deployment pending) — no migration of existing multi-endpoint queries needed
 - The handler code is already chain-agnostic — zero handler logic changes beyond ID prefixing
 - Every day with separate deployments is a day of unnecessary operational complexity
 - Adding chain ID to entities now (before Monad data exists in prod) means no breaking migration later
@@ -366,6 +366,6 @@ Both configs are structurally identical. Key differences are only:
 - `networks[0].id` (`42220` vs `143`)
 - `networks[0].start_block`
 - Contract addresses (different deployments, same contracts)
-- Monad has empty `VirtualPool` and `VirtualPoolFactory` addresses (not yet deployed)
+- Monad contracts are live — real addresses in `config.monad.mainnet.yaml` (FPMMFactory, 3 FPMM pools, VirtualPool). VirtualPoolFactory TBD.
 
 Everything else — events, ABIs, handler paths, field selection, `unordered_multichain_mode` — is identical. This confirms the merge is a straightforward config concatenation.
