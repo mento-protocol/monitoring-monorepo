@@ -71,7 +71,6 @@ function isSnapshot(v: unknown): v is AddressLabelsSnapshot {
 
 function isLabelsMap(v: unknown): v is Record<string, AddressLabelEntry> {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
-  // Validate that every value has a label string (minimum shape check)
   return Object.values(v as Record<string, unknown>).every(
     (entry) =>
       typeof entry === "object" &&

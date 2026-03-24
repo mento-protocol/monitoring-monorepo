@@ -126,8 +126,6 @@ export async function importLabels(
 ): Promise<void> {
   if (Object.keys(labels).length === 0) return;
   const redis = getRedis();
-  // Normalise addresses to lowercase, ensure updatedAt is set, and enforce
-  // strict boolean for isPublic (reject truthy strings like "yes").
   const normalised = Object.fromEntries(
     Object.entries(labels).map(([addr, entry]) => [
       addr.toLowerCase(),
