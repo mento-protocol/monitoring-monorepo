@@ -6,11 +6,13 @@ vi.mock("@/auth", () => ({
   getAuthSession: vi.fn(),
 }));
 
+const mockSet = vi.fn().mockResolvedValue("OK");
+
 vi.mock("@/lib/address-labels", () => ({
-  getAllChainLabels: vi.fn().mockResolvedValue({ "42220": {} }),
-  getRedis: vi.fn(() => ({
-    set: vi.fn().mockResolvedValue("OK"),
-  })),
+  getAllChainLabels: vi.fn().mockResolvedValue({
+    "42220": { "0xabc": { label: "Test", updatedAt: "2026-01-01T00:00:00Z" } },
+  }),
+  getRedis: vi.fn(() => ({ set: mockSet })),
 }));
 
 vi.mock("crypto", () => ({
@@ -67,6 +69,19 @@ describe("POST /api/address-labels/backup", () => {
     });
     const res = await POST(req);
     expect(res.status).toBe(401);
+  });
+
+  it("stores backup in snapshot format compatible with import", async () => {
+    const req = new NextRequest("http://localhost/api/address-labels/backup", {
+      method: "POST",
+      headers: { Authorization: "Bearer test-cron-secret" },
+    });
+    await POST(req);
+    const storedJson = mockSet.mock.calls[0][1] as string;
+    const stored = JSON.parse(storedJson);
+    expect(stored).toHaveProperty("exportedAt");
+    expect(stored).toHaveProperty("chains");
+    expect(stored.chains).toHaveProperty("42220");
   });
 
   it("returns 500 when CRON_SECRET is not set in production", async () => {
