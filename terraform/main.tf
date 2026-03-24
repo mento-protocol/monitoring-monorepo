@@ -147,7 +147,7 @@ resource "vercel_project_environment_variable" "auth_google_id" {
   team_id    = var.vercel_team_id
   key        = "AUTH_GOOGLE_ID"
   value      = var.auth_google_id
-  target     = ["production", "preview"]
+  target     = ["production"]
   sensitive  = true
 }
 
@@ -156,7 +156,7 @@ resource "vercel_project_environment_variable" "auth_google_secret" {
   team_id    = var.vercel_team_id
   key        = "AUTH_GOOGLE_SECRET"
   value      = var.auth_google_secret
-  target     = ["production", "preview"]
+  target     = ["production"]
   sensitive  = true
 }
 
@@ -165,7 +165,7 @@ resource "vercel_project_environment_variable" "auth_secret" {
   team_id    = var.vercel_team_id
   key        = "AUTH_SECRET"
   value      = var.auth_secret
-  target     = ["production", "preview"]
+  target     = ["production"]
   sensitive  = true
 }
 
@@ -189,14 +189,6 @@ resource "vercel_project_domain" "monitoring" {
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id
   domain     = "monitoring.mento.org"
-}
-
-resource "vercel_project_domain" "preview" {
-  project_id = vercel_project.dashboard.id
-  team_id    = var.vercel_team_id
-  domain     = "monitoring-preview.mento.org"
-
-  git_branch = null # Attached to all preview deployments
 }
 
 # ── Local .vercel/project.json ────────────────────────────────────────────────
