@@ -6,7 +6,7 @@ export default auth((req) => {
 
   if (!isAuthenticated && path.startsWith("/address-book")) {
     const signInUrl = new URL("/sign-in", req.nextUrl.origin);
-    signInUrl.searchParams.set("callbackUrl", path);
+    signInUrl.searchParams.set("callbackUrl", `${path}${req.nextUrl.search}`);
     return Response.redirect(signInUrl);
   }
 

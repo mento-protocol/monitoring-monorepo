@@ -22,7 +22,11 @@ export function AuthStatus() {
   }
 
   const handleSignOut = async () => {
-    await mutate(() => true, undefined, { revalidate: false });
+    await mutate(
+      (key: unknown) => Array.isArray(key) && key[0] === "address-labels",
+      undefined,
+      { revalidate: false },
+    );
     await signOut();
   };
 

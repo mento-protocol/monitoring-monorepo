@@ -52,6 +52,17 @@ describe("middleware", () => {
     expect(res!.status).toBe(302);
   });
 
+  it("preserves query params in callbackUrl on redirect", () => {
+    const res = middlewareCallback(
+      makeReq("/address-book?filter=custom&sort=name"),
+    );
+    expect(res).toBeDefined();
+    const location = res!.headers.get("location") ?? "";
+    expect(location).toContain(
+      encodeURIComponent("/address-book?filter=custom&sort=name"),
+    );
+  });
+
   it("allows authenticated /address-book through", () => {
     const res = middlewareCallback(
       makeReq("/address-book", { authenticated: true }),
