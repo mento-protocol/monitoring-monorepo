@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthSession } from "@/auth";
-import { getAllChainLabels, getRedis } from "@/lib/address-labels";
+import {
+  getAllChainLabels,
+  getRedis,
+  type AddressLabelsSnapshot,
+} from "@/lib/address-labels";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const cronSecret = process.env.CRON_SECRET;
@@ -29,14 +33,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const backup = await getAllChainLabels();
+    const chains = await getAllChainLabels();
+    const snapshot: AddressLabelsSnapshot = {
+      exportedAt: new Date().toISOString(),
+      chains,
+    };
 
     const redis = getRedis();
     const randomSuffix = crypto.randomUUID().slice(0, 8);
     const date = new Date().toISOString().slice(0, 10);
     const backupKey = `address-labels:backup:${date}:${randomSuffix}`;
 
-    await redis.set(backupKey, JSON.stringify(backup), {
+    await redis.set(backupKey, JSON.stringify(snapshot), {
       ex: 30 * 24 * 60 * 60, // 30-day TTL
     });
 

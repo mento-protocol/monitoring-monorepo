@@ -40,6 +40,10 @@ describe("auth signIn callback", () => {
     expect(callSignIn("alice@gmail.com")).toBe(false);
   });
 
+  it("accepts mixed-case @mentolabs.xyz emails", () => {
+    expect(callSignIn("Alice@MentoLabs.xyz")).toBe(true);
+  });
+
   it("rejects missing email", () => {
     expect(callSignIn(undefined)).toBe(false);
   });

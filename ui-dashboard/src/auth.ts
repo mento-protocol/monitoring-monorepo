@@ -24,7 +24,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     signIn({ account, profile }) {
       if (account?.provider === "google") {
-        return profile?.email?.endsWith(ALLOWED_DOMAIN) ?? false;
+        return profile?.email?.toLowerCase().endsWith(ALLOWED_DOMAIN) ?? false;
       }
       return false;
     },
@@ -45,5 +45,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
 export async function getAuthSession() {
   const session = await auth();
-  return session?.user?.email?.endsWith(ALLOWED_DOMAIN) ? session : null;
+  return session?.user?.email?.toLowerCase().endsWith(ALLOWED_DOMAIN)
+    ? session
+    : null;
 }

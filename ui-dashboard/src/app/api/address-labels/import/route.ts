@@ -26,6 +26,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // 1. Snapshot format: { exportedAt, chains: { chainId: { address: entry } } }
   // 2. Simple format:   { chainId, labels: { address: entry } }
   if (isSnapshot(body)) {
+    const invalidKeys = Object.keys(body.chains).filter((k) => {
+      const n = Number(k);
+      return !Number.isInteger(n) || n <= 0;
+    });
+    if (invalidKeys.length > 0) {
+      return NextResponse.json(
+        { error: `Invalid chainId keys: ${invalidKeys.join(", ")}` },
+        { status: 400 },
+      );
+    }
     try {
       await Promise.all(
         Object.entries(body.chains).map(([chainId, labels]) =>
