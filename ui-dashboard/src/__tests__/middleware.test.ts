@@ -16,12 +16,16 @@ vi.mock("@/auth", () => ({
   }),
 }));
 
+// Auth env vars must be set before module load so authConfigured = true
+vi.stubEnv("AUTH_GOOGLE_ID", "test-id");
+vi.stubEnv("AUTH_GOOGLE_SECRET", "test-secret");
+
+// Import after mocks and env are set up
+await import("@/middleware");
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
-
-// Import after mocks are set up
-await import("@/middleware");
 
 function makeReq(
   path: string,

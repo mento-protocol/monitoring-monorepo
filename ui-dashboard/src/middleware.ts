@@ -1,6 +1,12 @@
 import { auth } from "@/auth";
 
+const authConfigured = !!(
+  process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
+);
+
 export default auth((req) => {
+  if (!authConfigured) return;
+
   const isAuthenticated = !!req.auth;
   const path = req.nextUrl.pathname;
 

@@ -17,3 +17,8 @@ output "upstash_redis_database_id" {
   description = "Upstash database ID — useful for console.upstash.com references."
   value       = upstash_redis_database.address_labels.database_id
 }
+
+output "google_oauth_redirect_uri" {
+  description = "Redirect URI to add to the Google OAuth client."
+  value       = "https://${vercel_project_domain.monitoring.domain}/api/auth/callback/google"
+}
