@@ -35,8 +35,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return token;
     },
     session({ session, token }) {
-      if (token.email && session.user) {
-        session.user.email = token.email as string;
+      if (typeof token.email === "string" && session.user) {
+        session.user.email = token.email;
       }
       return session;
     },
