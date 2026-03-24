@@ -6,13 +6,19 @@ vi.mock("@/auth", () => ({
   getAuthSession: vi.fn(),
 }));
 
-const mockSet = vi.fn().mockResolvedValue("OK");
-
 vi.mock("@/lib/address-labels", () => ({
   getAllChainLabels: vi.fn().mockResolvedValue({
     "42220": { "0xabc": { label: "Test", updatedAt: "2026-01-01T00:00:00Z" } },
   }),
-  getRedis: vi.fn(() => ({ set: mockSet })),
+}));
+
+const mockPut = vi.fn().mockResolvedValue({
+  pathname: "address-labels-backup-2026-03-24.json",
+  url: "https://blob.vercel-storage.com/address-labels-backup-2026-03-24.json",
+});
+
+vi.mock("@vercel/blob", () => ({
+  put: (...args: unknown[]) => mockPut(...args),
 }));
 
 import { getAuthSession } from "@/auth";
@@ -33,7 +39,6 @@ describe("POST /api/address-labels/backup", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
-    // Should NOT call getAuthSession — cron token is sufficient
     expect(getAuthSession).not.toHaveBeenCalled();
   });
 
@@ -67,30 +72,35 @@ describe("POST /api/address-labels/backup", () => {
     expect(res.status).toBe(401);
   });
 
-  it("uses deterministic daily key (overwrites same-day retries)", async () => {
+  it("stores backup as private Vercel Blob in snapshot format", async () => {
     const req = new NextRequest("http://localhost/api/address-labels/backup", {
       method: "POST",
       headers: { Authorization: "Bearer test-cron-secret" },
     });
     await POST(req);
-    await POST(req);
-    const key1 = mockSet.mock.calls[0][0] as string;
-    const key2 = mockSet.mock.calls[1][0] as string;
-    expect(key1).toBe(key2);
-    expect(key1).toMatch(/^address-labels:backup:\d{4}-\d{2}-\d{2}$/);
-  });
 
-  it("stores backup in snapshot format compatible with import", async () => {
-    const req = new NextRequest("http://localhost/api/address-labels/backup", {
-      method: "POST",
-      headers: { Authorization: "Bearer test-cron-secret" },
-    });
-    await POST(req);
-    const storedJson = mockSet.mock.calls[0][1] as string;
-    const stored = JSON.parse(storedJson);
+    expect(mockPut).toHaveBeenCalledTimes(1);
+    const [filename, content, opts] = mockPut.mock.calls[0];
+    expect(filename).toMatch(/^address-labels-backup-\d{4}-\d{2}-\d{2}\.json$/);
+    expect(opts.access).toBe("private");
+    expect(opts.addRandomSuffix).toBe(false);
+
+    const stored = JSON.parse(content as string);
     expect(stored).toHaveProperty("exportedAt");
     expect(stored).toHaveProperty("chains");
     expect(stored.chains).toHaveProperty("42220");
+  });
+
+  it("overwrites same-day backup (deterministic filename)", async () => {
+    const req = new NextRequest("http://localhost/api/address-labels/backup", {
+      method: "POST",
+      headers: { Authorization: "Bearer test-cron-secret" },
+    });
+    await POST(req);
+    await POST(req);
+    const name1 = mockPut.mock.calls[0][0] as string;
+    const name2 = mockPut.mock.calls[1][0] as string;
+    expect(name1).toBe(name2);
   });
 
   it("returns 500 when CRON_SECRET is not set in production", async () => {
