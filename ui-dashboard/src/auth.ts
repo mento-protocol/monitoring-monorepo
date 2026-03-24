@@ -24,7 +24,7 @@ const nextAuth = NextAuth({
   callbacks: {
     signIn({ account, profile }) {
       if (account?.provider === "google") {
-        return profile?.email?.endsWith("@mentolabs.xyz") ?? false;
+        return profile?.email?.endsWith(ALLOWED_DOMAIN) ?? false;
       }
       return false;
     },

@@ -13,13 +13,27 @@ vi.mock("@/lib/address-labels", () => ({
   getAllChainLabels: vi.fn(),
 }));
 
+import { getAuthSession } from "@/auth";
 import { getLabels, getAllChainLabels } from "@/lib/address-labels";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: authenticated
+  (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+    user: { email: "test@mentolabs.xyz" },
+  });
 });
 
 describe("GET /api/address-labels/export", () => {
+  it("returns 401 when unauthenticated", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    const req = new NextRequest("http://localhost/api/address-labels/export");
+    const res = await GET(req);
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toBe("Authentication required");
+  });
+
   it("exports a single chain when ?chainId= is provided", async () => {
     (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
       "0xabc": { label: "Test", updatedAt: "2026-01-01T00:00:00Z" },
