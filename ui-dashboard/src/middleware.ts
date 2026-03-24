@@ -10,8 +10,11 @@ export default auth((req) => {
     return Response.redirect(signInUrl);
   }
 
+  // Protect write operations on /api/address-labels (non-GET) and all
+  // sub-paths except /backup (which authenticates via CRON_SECRET).
   const isApiWrite =
-    path.startsWith("/api/address-labels/") ||
+    (path.startsWith("/api/address-labels/") &&
+      !path.startsWith("/api/address-labels/backup")) ||
     (path === "/api/address-labels" && req.method !== "GET");
   if (!isAuthenticated && isApiWrite) {
     return new Response(JSON.stringify({ error: "Authentication required" }), {

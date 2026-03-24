@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { getAuthSession } from "@/auth";
 import {
   getLabels,
   getAllChainLabels,
@@ -8,8 +8,8 @@ import {
 } from "@/lib/address-labels";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const session = await auth();
-  if (!session?.user?.email?.endsWith("@mentolabs.xyz")) {
+  const session = await getAuthSession();
+  if (!session) {
     return NextResponse.json(
       { error: "Authentication required" },
       { status: 401 },

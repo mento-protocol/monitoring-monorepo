@@ -1,7 +1,9 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+const ALLOWED_DOMAIN = "@mentolabs.xyz";
+
+const nextAuth = NextAuth({
   providers: [
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
@@ -40,3 +42,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
 });
+
+export const { handlers, auth, signIn, signOut } = nextAuth;
+
+/**
+ * Returns the session if the user is authenticated with an allowed domain,
+ * or null otherwise. Use this in route handlers for auth gating.
+ */
+export async function getAuthSession() {
+  const session = await auth();
+  return session?.user?.email?.endsWith(ALLOWED_DOMAIN) ? session : null;
+}
