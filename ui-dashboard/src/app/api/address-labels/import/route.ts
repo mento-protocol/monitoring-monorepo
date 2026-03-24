@@ -62,16 +62,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 }
 
 function isSnapshot(v: unknown): v is AddressLabelsSnapshot {
+  if (typeof v !== "object" || v === null || !("chains" in v)) return false;
+  const { chains } = v as AddressLabelsSnapshot;
   return (
-    typeof v === "object" &&
-    v !== null &&
-    "chains" in v &&
-    typeof (v as AddressLabelsSnapshot).chains === "object"
+    typeof chains === "object" && chains !== null && !Array.isArray(chains)
   );
 }
 
 function isLabelsMap(v: unknown): v is Record<string, AddressLabelEntry> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  // Validate that every value has a label string (minimum shape check)
+  return Object.values(v as Record<string, unknown>).every(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      typeof (entry as AddressLabelEntry).label === "string",
+  );
 }
 
 function serverError(err: unknown): NextResponse {
