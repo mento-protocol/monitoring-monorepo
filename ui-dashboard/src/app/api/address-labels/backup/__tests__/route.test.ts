@@ -15,10 +15,6 @@ vi.mock("@/lib/address-labels", () => ({
   getRedis: vi.fn(() => ({ set: mockSet })),
 }));
 
-vi.mock("crypto", () => ({
-  randomUUID: () => "12345678-1234-1234-1234-123456789abc",
-}));
-
 import { getAuthSession } from "@/auth";
 
 beforeEach(() => {
@@ -69,6 +65,19 @@ describe("POST /api/address-labels/backup", () => {
     });
     const res = await POST(req);
     expect(res.status).toBe(401);
+  });
+
+  it("uses deterministic daily key (overwrites same-day retries)", async () => {
+    const req = new NextRequest("http://localhost/api/address-labels/backup", {
+      method: "POST",
+      headers: { Authorization: "Bearer test-cron-secret" },
+    });
+    await POST(req);
+    await POST(req);
+    const key1 = mockSet.mock.calls[0][0] as string;
+    const key2 = mockSet.mock.calls[1][0] as string;
+    expect(key1).toBe(key2);
+    expect(key1).toMatch(/^address-labels:backup:\d{4}-\d{2}-\d{2}$/);
   });
 
   it("stores backup in snapshot format compatible with import", async () => {

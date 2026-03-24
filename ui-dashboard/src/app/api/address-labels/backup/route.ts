@@ -40,9 +40,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     };
 
     const redis = getRedis();
-    const randomSuffix = crypto.randomUUID().slice(0, 8);
     const date = new Date().toISOString().slice(0, 10);
-    const backupKey = `address-labels:backup:${date}:${randomSuffix}`;
+    const backupKey = `address-labels:backup:${date}`;
 
     await redis.set(backupKey, JSON.stringify(snapshot), {
       ex: 30 * 24 * 60 * 60, // 30-day TTL

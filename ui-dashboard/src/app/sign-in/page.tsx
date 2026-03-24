@@ -1,17 +1,17 @@
 import { signIn } from "@/auth";
 
+export function sanitizeCallbackUrl(raw?: string): string {
+  if (raw?.startsWith("/") && !raw.startsWith("//")) return raw;
+  return "/address-book";
+}
+
 type Props = {
   searchParams: Promise<{ callbackUrl?: string; error?: string }>;
 };
 
 export default async function SignInPage({ searchParams }: Props) {
   const { callbackUrl, error } = await searchParams;
-
-  // Security: only accept relative paths — reject external redirects
-  const redirectTo =
-    callbackUrl?.startsWith("/") && !callbackUrl.startsWith("//")
-      ? callbackUrl
-      : "/address-book";
+  const redirectTo = sanitizeCallbackUrl(callbackUrl);
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
