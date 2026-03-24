@@ -8,6 +8,7 @@ export type AddressLabelEntry = {
   label: string;
   category?: string;
   notes?: string;
+  isPublic?: boolean;
   updatedAt: string;
 };
 
@@ -35,7 +36,7 @@ function labelsKey(chainId: number): string {
 // Redis client (server-side only)
 // ---------------------------------------------------------------------------
 
-function getRedis(): Redis {
+export function getRedis(): Redis {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
   if (!url || !token) {
@@ -52,12 +53,19 @@ function getRedis(): Redis {
 
 export async function getLabels(
   chainId: number,
+  options?: { publicOnly?: boolean },
 ): Promise<Record<string, AddressLabelEntry>> {
   const redis = getRedis();
   const raw = await redis.hgetall<Record<string, AddressLabelEntry>>(
     labelsKey(chainId),
   );
-  return raw ?? {};
+  const all = raw ?? {};
+  if (options?.publicOnly) {
+    return Object.fromEntries(
+      Object.entries(all).filter(([, entry]) => entry.isPublic === true),
+    );
+  }
+  return all;
 }
 
 export async function upsertLabel(
@@ -118,11 +126,16 @@ export async function importLabels(
 ): Promise<void> {
   if (Object.keys(labels).length === 0) return;
   const redis = getRedis();
-  // Normalise addresses to lowercase and ensure updatedAt is set
+  // Normalise addresses to lowercase, ensure updatedAt is set, and enforce
+  // strict boolean for isPublic (reject truthy strings like "yes").
   const normalised = Object.fromEntries(
     Object.entries(labels).map(([addr, entry]) => [
       addr.toLowerCase(),
-      { ...entry, updatedAt: entry.updatedAt ?? new Date().toISOString() },
+      {
+        ...entry,
+        isPublic: entry.isPublic === true,
+        updatedAt: entry.updatedAt ?? new Date().toISOString(),
+      },
     ]),
   );
   await redis.hset(labelsKey(chainId), normalised);

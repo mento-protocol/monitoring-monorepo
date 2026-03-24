@@ -1,48 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
-import { put } from "@vercel/blob";
-import {
-  getAllChainLabels,
-  type AddressLabelsSnapshot,
-} from "@/lib/address-labels";
+import { auth } from "@/auth";
+import { getLabels, getRedis } from "@/lib/address-labels";
+
+const CHAIN_IDS = [42220, 143]; // Celo mainnet, Monad mainnet
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  // Vercel Cron authenticates requests with the CRON_SECRET env var.
-  // In production, reject unauthenticated calls to this endpoint.
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
+  const isDev = process.env.NODE_ENV === "development";
+
+  if (!isDev) {
+    if (!cronSecret) {
+      console.error(
+        "[backup] CRON_SECRET is not set. Refusing backup request.",
+      );
+      return NextResponse.json(
+        { error: "Server misconfiguration: CRON_SECRET required" },
+        { status: 500 },
+      );
+    }
+
     const authHeader = req.headers.get("authorization");
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const isCronAuth = authHeader === `Bearer ${cronSecret}`;
+
+    if (!isCronAuth) {
+      const session = await auth();
+      if (!session?.user?.email?.endsWith("@mentolabs.xyz")) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
     }
   }
 
   try {
-    const chains = await getAllChainLabels();
-    const totalLabels = Object.values(chains).reduce(
-      (sum, entries) => sum + Object.keys(entries).length,
-      0,
-    );
+    const backup: Record<number, Awaited<ReturnType<typeof getLabels>>> = {};
+    for (const chainId of CHAIN_IDS) {
+      backup[chainId] = await getLabels(chainId);
+    }
 
-    const snapshot: AddressLabelsSnapshot = {
-      exportedAt: new Date().toISOString(),
-      chains,
-    };
-
+    const redis = getRedis();
+    const randomSuffix = crypto.randomUUID().slice(0, 8);
     const date = new Date().toISOString().slice(0, 10);
-    const filename = `address-labels-backup-${date}.json`;
+    const backupKey = `address-labels:backup:${date}:${randomSuffix}`;
 
-    await put(filename, JSON.stringify(snapshot, null, 2), {
-      access: "public",
-      contentType: "application/json",
-      // Overwrite any existing backup for the same date
-      addRandomSuffix: false,
+    await redis.set(backupKey, JSON.stringify(backup), {
+      ex: 30 * 24 * 60 * 60, // 30-day TTL
     });
 
-    return NextResponse.json({ ok: true, totalLabels, filename });
+    console.log(`[backup] Stored backup at Redis key: ${backupKey}`);
+    return NextResponse.json({ ok: true, key: backupKey, date });
   } catch (err) {
-    console.error("[address-labels/backup]", err);
-    const message =
-      err instanceof Error ? err.message : "Internal server error";
+    console.error("[backup]", err);
+    const message = err instanceof Error ? err.message : "Backup failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

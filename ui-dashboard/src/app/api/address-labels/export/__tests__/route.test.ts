@@ -2,6 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { GET } from "../route";
 
+vi.mock("@/auth", () => ({
+  auth: vi.fn().mockResolvedValue({
+    user: { email: "test@mentolabs.xyz" },
+  }),
+}));
+
 vi.mock("@/lib/address-labels", () => ({
   getLabels: vi.fn(),
   getAllChainLabels: vi.fn(),
