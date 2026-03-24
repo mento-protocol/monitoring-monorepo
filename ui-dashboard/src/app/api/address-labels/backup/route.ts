@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
-import { getLabels, getRedis } from "@/lib/address-labels";
-
-const CHAIN_IDS = [42220, 143]; // Celo mainnet, Monad mainnet
+import { getAuthSession } from "@/auth";
+import { getAllChainLabels, getRedis } from "@/lib/address-labels";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const cronSecret = process.env.CRON_SECRET;
@@ -23,18 +21,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const isCronAuth = authHeader === `Bearer ${cronSecret}`;
 
     if (!isCronAuth) {
-      const session = await auth();
-      if (!session?.user?.email?.endsWith("@mentolabs.xyz")) {
+      const session = await getAuthSession();
+      if (!session) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       }
     }
   }
 
   try {
-    const backup: Record<number, Awaited<ReturnType<typeof getLabels>>> = {};
-    for (const chainId of CHAIN_IDS) {
-      backup[chainId] = await getLabels(chainId);
-    }
+    const backup = await getAllChainLabels();
 
     const redis = getRedis();
     const randomSuffix = crypto.randomUUID().slice(0, 8);

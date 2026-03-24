@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { getAuthSession } from "@/auth";
 import { getLabels, upsertLabel, deleteLabel } from "@/lib/address-labels";
-
-async function getAuthSession() {
-  const session = await auth();
-  return session?.user?.email?.endsWith("@mentolabs.xyz") ? session : null;
-}
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const chainId = Number(req.nextUrl.searchParams.get("chainId"));

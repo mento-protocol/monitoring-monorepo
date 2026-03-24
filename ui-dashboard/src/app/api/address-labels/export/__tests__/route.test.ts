@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 import { GET } from "../route";
 
 vi.mock("@/auth", () => ({
-  auth: vi.fn().mockResolvedValue({
+  getAuthSession: vi.fn().mockResolvedValue({
     user: { email: "test@mentolabs.xyz" },
   }),
 }));
