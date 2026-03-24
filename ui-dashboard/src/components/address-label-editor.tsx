@@ -39,6 +39,7 @@ export function AddressLabelEditor({
   const [label, setLabel] = useState(initial?.label ?? "");
   const [category, setCategory] = useState(initial?.category ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
+  const [isPublic, setIsPublic] = useState(initial?.isPublic ?? false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +77,7 @@ export function AddressLabelEditor({
         label.trim(),
         category.trim() || undefined,
         notes.trim() || undefined,
+        isPublic,
       );
       onClose();
     } catch (err) {
@@ -207,6 +209,37 @@ export function AddressLabelEditor({
               placeholder="Any context about this address…"
               className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
             />
+          </div>
+
+          {/* Visibility toggle */}
+          <div className="flex items-center gap-3">
+            <label
+              htmlFor="al-public"
+              className="text-xs font-medium text-slate-400"
+            >
+              Visible to public
+            </label>
+            <button
+              type="button"
+              id="al-public"
+              role="switch"
+              aria-checked={isPublic}
+              onClick={() => setIsPublic(!isPublic)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                isPublic ? "bg-indigo-600" : "bg-slate-700"
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                  isPublic ? "translate-x-4" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+            <span className="text-xs text-slate-500">
+              {isPublic
+                ? "Anyone can see this label"
+                : "Only team members can see this label"}
+            </span>
           </div>
 
           {error && (

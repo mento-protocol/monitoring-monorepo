@@ -252,6 +252,9 @@ export default function AddressBookPage() {
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Source
                 </th>
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Visibility
+                </th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 w-20">
                   Actions
                 </th>
@@ -284,6 +287,7 @@ export default function AddressBookPage() {
                     }
                     category={entry?.category}
                     notes={entry?.notes}
+                    isPublic={entry?.isPublic}
                     isCustom={isCustomResolved}
                     canEdit={canEdit}
                     explorerUrl={explorerAddressUrl(net, row.address)}
@@ -329,6 +333,7 @@ type AddressRowProps = {
   networkLabel: string | null;
   category?: string;
   notes?: string;
+  isPublic?: boolean;
   isCustom: boolean;
   /** False for contract rows on non-selected networks — edit would write to wrong chain */
   canEdit: boolean;
@@ -342,6 +347,7 @@ function AddressTableRow({
   networkLabel,
   category,
   notes,
+  isPublic,
   isCustom,
   canEdit,
   explorerUrl,
@@ -389,6 +395,18 @@ function AddressTableRow({
             contract
           </span>
         )}
+      </td>
+      <td className="px-4 py-3">
+        {isCustom &&
+          (isPublic === true ? (
+            <span className="inline-flex items-center rounded-full bg-emerald-950 px-2 py-0.5 text-xs font-medium text-emerald-300 ring-1 ring-inset ring-emerald-800">
+              public
+            </span>
+          ) : (
+            <span className="inline-flex items-center rounded-full bg-amber-950 px-2 py-0.5 text-xs font-medium text-amber-300 ring-1 ring-inset ring-amber-800">
+              private
+            </span>
+          ))}
       </td>
       <td className="px-4 py-3">
         {!canEdit ? (

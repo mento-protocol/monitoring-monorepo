@@ -30,6 +30,7 @@ type AddressLabelsContextValue = {
     label: string,
     category?: string,
     notes?: string,
+    isPublic?: boolean,
   ) => Promise<void>;
   /** Remove a custom label */
   deleteLabel: (address: string) => Promise<void>;
@@ -119,12 +120,14 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
       label: string,
       category?: string,
       notes?: string,
+      isPublic?: boolean,
     ): Promise<void> => {
       const lower = address.toLowerCase();
       const optimistic: AddressLabelEntry = {
         label,
         category,
         notes,
+        isPublic,
         updatedAt: new Date().toISOString(),
       };
 
@@ -134,7 +137,14 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
           const res = await fetch("/api/address-labels", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chainId, address, label, category, notes }),
+            body: JSON.stringify({
+              chainId,
+              address,
+              label,
+              category,
+              notes,
+              isPublic,
+            }),
           });
           if (!res.ok) {
             const body = (await res.json()) as { error?: string };
