@@ -103,4 +103,35 @@ describe("POST /api/address-labels/import", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it("rejects snapshot with null chain payload", async () => {
+    const res = await POST(jsonReq({ chains: { "42220": null } }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("42220");
+    expect(importLabels).not.toHaveBeenCalled();
+  });
+
+  it("rejects snapshot with non-label-map chain payload", async () => {
+    const res = await POST(jsonReq({ chains: { "42220": "not-a-map" } }));
+    expect(res.status).toBe(400);
+    expect(importLabels).not.toHaveBeenCalled();
+  });
+
+  it("rejects snapshot where one chain has entries missing label", async () => {
+    const res = await POST(
+      jsonReq({
+        chains: {
+          "42220": {
+            "0xabc": { label: "Valid", updatedAt: "2026-01-01T00:00:00Z" },
+          },
+          "143": {
+            "0xdef": { notes: "missing label field" },
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importLabels).not.toHaveBeenCalled();
+  });
 });
