@@ -132,12 +132,49 @@ resource "vercel_project_environment_variable" "redis_token" {
 # exists in the Vercel provider). Run `vercel blob create-store` once and add
 # the resulting token to terraform.tfvars as `blob_read_write_token`.
 resource "vercel_project_environment_variable" "blob_token" {
-  count      = var.blob_read_write_token != "" ? 1 : 0
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id
   key        = "BLOB_READ_WRITE_TOKEN"
   value      = var.blob_read_write_token
+  target     = ["production"]
+  sensitive  = true
+}
+
+# ── Auth Environment Variables ────────────────────────────────────────────
+
+resource "vercel_project_environment_variable" "auth_google_id" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "AUTH_GOOGLE_ID"
+  value      = var.auth_google_id
   target     = ["production", "preview"]
+  sensitive  = true
+}
+
+resource "vercel_project_environment_variable" "auth_google_secret" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "AUTH_GOOGLE_SECRET"
+  value      = var.auth_google_secret
+  target     = ["production", "preview"]
+  sensitive  = true
+}
+
+resource "vercel_project_environment_variable" "auth_secret" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "AUTH_SECRET"
+  value      = var.auth_secret
+  target     = ["production", "preview"]
+  sensitive  = true
+}
+
+resource "vercel_project_environment_variable" "cron_secret" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "CRON_SECRET"
+  value      = var.cron_secret
+  target     = ["production"]
   sensitive  = true
 }
 
@@ -152,6 +189,14 @@ resource "vercel_project_domain" "monitoring" {
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id
   domain     = "monitoring.mento.org"
+}
+
+resource "vercel_project_domain" "preview" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  domain     = "monitoring-preview.mento.org"
+
+  git_branch = null # Attached to all preview deployments
 }
 
 # ── Local .vercel/project.json ────────────────────────────────────────────────

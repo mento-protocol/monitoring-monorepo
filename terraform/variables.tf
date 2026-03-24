@@ -68,16 +68,41 @@ variable "hasura_url_monad_testnet_hosted" {
   default     = ""
 }
 
+# ── Auth (Google OAuth / NextAuth) ─────────────────────────────────────────
+
+variable "auth_google_id" {
+  description = "Google OAuth Client ID. Create at console.cloud.google.com → APIs & Services → Credentials."
+  type        = string
+  sensitive   = true
+}
+
+variable "auth_google_secret" {
+  description = "Google OAuth Client Secret."
+  type        = string
+  sensitive   = true
+}
+
+variable "auth_secret" {
+  description = "NextAuth.js secret for JWT encryption. Generate with: openssl rand -base64 32"
+  type        = string
+  sensitive   = true
+}
+
+variable "cron_secret" {
+  description = "Shared secret for authenticating Vercel Cron requests to /api/address-labels/backup."
+  type        = string
+  sensitive   = true
+}
+
 # ── Vercel Blob ───────────────────────────────────────────────────────────────
 
 variable "blob_read_write_token" {
   description = <<-EOT
     Vercel Blob read-write token for the address-labels backup store.
-    The Vercel Terraform provider does not support Blob store creation.
+    Required for daily backups to external storage (Vercel Blob, private access).
     Provision once with: vercel blob create-store address-labels --scope mentolabs
     Then copy the resulting token here.
   EOT
   type        = string
   sensitive   = true
-  default     = ""
 }

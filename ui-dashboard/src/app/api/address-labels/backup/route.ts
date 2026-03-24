@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { put } from "@vercel/blob";
 import { getAuthSession } from "@/auth";
 import {
   getAllChainLabels,
-  getRedis,
   type AddressLabelsSnapshot,
 } from "@/lib/address-labels";
 
@@ -39,16 +39,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       chains,
     };
 
-    const redis = getRedis();
     const date = new Date().toISOString().slice(0, 10);
-    const backupKey = `address-labels:backup:${date}`;
+    const filename = `address-labels-backup-${date}.json`;
 
-    await redis.set(backupKey, JSON.stringify(snapshot), {
-      ex: 30 * 24 * 60 * 60, // 30-day TTL
+    const blob = await put(filename, JSON.stringify(snapshot, null, 2), {
+      access: "private",
+      contentType: "application/json",
+      addRandomSuffix: false,
     });
 
-    console.log(`[backup] Stored backup at Redis key: ${backupKey}`);
-    return NextResponse.json({ ok: true, key: backupKey, date });
+    console.log(`[backup] Stored backup at: ${blob.pathname}`);
+    return NextResponse.json({ ok: true, pathname: blob.pathname, date });
   } catch (err) {
     console.error("[backup]", err);
     const message = err instanceof Error ? err.message : "Backup failed";
