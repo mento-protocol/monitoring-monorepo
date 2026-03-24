@@ -10,8 +10,7 @@ export default auth((req) => {
     return Response.redirect(signInUrl);
   }
 
-  // Protect write operations on /api/address-labels (non-GET) and all
-  // sub-paths except /backup (which authenticates via CRON_SECRET).
+  // /backup is excluded — it authenticates via CRON_SECRET in-route.
   const isProtectedApi =
     (path.startsWith("/api/address-labels/") &&
       !path.startsWith("/api/address-labels/backup")) ||
