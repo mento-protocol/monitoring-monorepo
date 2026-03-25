@@ -1013,7 +1013,7 @@ export function OlsStatusPanel({
 
   let cooldownStatus: string;
   if (lastRebalance === 0) {
-    cooldownStatus = "Never rebalanced";
+    cooldownStatus = "—";
   } else if (elapsed !== null && elapsed >= cooldown) {
     cooldownStatus = "Ready to rebalance";
   } else if (elapsed !== null) {
@@ -1028,13 +1028,14 @@ export function OlsStatusPanel({
   const debtTokenSym = tokenSymbol(network, olsPool.debtToken || null);
   const debtTokenSide = getDebtTokenSideLabel(pool, olsPool.debtToken);
 
-  // Incentives: raw uint64, denominator 1e18. Show as percentage.
-  // Incentive denominator is 1e18 (FEE_DENOMINATOR). Values can exceed
-  // Number.MAX_SAFE_INTEGER so we use BigInt division for the integer part
-  // and modulo for the fractional part to avoid precision loss.
+  // Incentives: raw uint64, FEE_DENOMINATOR = 1e18 in the contract.
+  // percentage = value / 1e18 * 100. With 4 decimal places: (v * 10000) / 1e16.
+  // Sanity: v=1e18 (100%) → 1e22/1e16 = 1e6 scaled → integer=100, frac=0 → "100.0000%" ✓
+  //         v=1e15 (0.1%) → 1e19/1e16 = 1000 scaled → integer=0, frac=1000 → "0.1000%" ✓
+  // Use BigInt to avoid precision loss on large uint64 values.
   const toPercent = (raw: string): string => {
+    if (!raw || raw === "0") return "0.0000%";
     const v = BigInt(raw);
-    // Multiply by 10000 first (4 decimal places), then divide by 1e16
     const TEN_K = BigInt(10000);
     const DIVISOR = BigInt("10000000000000000"); // 1e16
     const scaled = (v * TEN_K) / DIVISOR;
