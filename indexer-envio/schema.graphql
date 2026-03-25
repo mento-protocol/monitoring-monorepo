@@ -110,7 +110,11 @@ type SwapEvent @index(fields: ["poolId", "blockTimestamp"]) {
   blockNumber: BigInt!
   blockTimestamp: BigInt! @index
   # true when this swap was triggered internally by a Mint/Burn rebalance,
-  # not by a direct user trade through the Router
+  # not by a direct user trade through the Router.
+  # MIGRATION NOTE: This field was added in the LP-trade separation PR.
+  # Deploying this schema change requires a full reindex — historical SwapEvent
+  # rows written before this schema version will not have isLpSwap set and must
+  # not be queried against filters that depend on it until reindexing is complete.
   isLpSwap: Boolean!
 }
 
