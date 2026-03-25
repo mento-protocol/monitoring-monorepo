@@ -61,6 +61,16 @@ networks:
         handler: src/EventHandlers.ts
         events:
           - event: Transfer
+      - name: OpenLiquidityStrategy
+        abi_file_path: abis/OpenLiquidityStrategy.json
+        address:
+          - 0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f
+        handler: src/EventHandlers.ts
+        events:
+          - event: PoolAdded
+          - event: PoolRemoved
+          - event: RebalanceCooldownSet
+          - event: LiquidityMoved
 unordered_multichain_mode: true
 preload_handlers: true
 field_selection:
