@@ -703,16 +703,15 @@ function LiquidityTab({
                           pool?.token1Decimals ?? 18,
                         )} ${sym1}`;
                         return (
-                          <span
+                          <button
                             key={s.id}
+                            type="button"
                             title={swapLabel}
                             aria-label={swapLabel}
-                            tabIndex={0}
-                            role="note"
-                            className="text-xs text-indigo-400 border border-indigo-700 rounded px-1 py-0.5 cursor-default focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                            className="text-xs text-indigo-400 border border-indigo-700 rounded px-1 py-0.5 bg-transparent cursor-default focus:outline-none focus:ring-1 focus:ring-indigo-400"
                           >
                             ⇄ swap
-                          </span>
+                          </button>
                         );
                       })}
                     </div>
