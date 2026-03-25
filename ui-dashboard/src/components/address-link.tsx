@@ -50,7 +50,7 @@ export function AddressLink({ address, readOnly = false }: Props) {
                 : `Add label for ${address}`
             }
             title={isCustom ? "Edit label" : "Add label"}
-            className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-slate-600 hover:text-slate-300 transition-all"
+            className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-0.5 text-slate-600 hover:text-slate-300 transition-all"
           >
             <PencilIcon />
           </button>
@@ -74,8 +74,8 @@ function PencilIcon() {
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 16 16"
       fill="currentColor"
-      width="12"
-      height="12"
+      width="14"
+      height="14"
       aria-hidden="true"
     >
       <path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L2.317 11.21a1.75 1.75 0 0 0-.463.89l-.5 2.5a.75.75 0 0 0 .876.876l2.5-.5a1.75 1.75 0 0 0 .89-.463l8.697-8.696a1.75 1.75 0 0 0 0-2.475Zm-1.414 1.06a.25.25 0 0 1 .354 0l.987.988a.25.25 0 0 1 0 .353L12.06 6.27 9.73 3.94l1.344-1.366ZM8.67 4.999l2.33 2.33L4.81 13.51a.25.25 0 0 1-.127.065l-1.857.372.372-1.857a.25.25 0 0 1 .065-.127L8.67 5Z" />

@@ -59,22 +59,29 @@ export function AddressLabelEditor({
     return () => dialog.removeEventListener("click", handleBackdropClick);
   }, [onClose]);
 
+  // When editing an existing contract row (not a new address, no custom label yet),
+  // label is optional — empty means "keep the contract name".
+  const isContractRow =
+    !isNewAddress && initial !== undefined && !isCustomLabel(address);
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (isNewAddress && !/^0x[0-9a-fA-F]{40}$/.test(address.trim())) {
       setError("Enter a valid 0x address.");
       return;
     }
-    if (!label.trim()) {
+    if (!isContractRow && !label.trim()) {
       setError("Label is required.");
       return;
     }
+    // For contract rows with no custom label yet, fall back to the static name
+    const effectiveLabel = label.trim() || initial?.label || "";
     setSaving(true);
     setError(null);
     try {
       await upsertLabel(
         address,
-        label.trim(),
+        effectiveLabel,
         category.trim() || undefined,
         notes.trim() || undefined,
         isPublic,
@@ -106,7 +113,7 @@ export function AddressLabelEditor({
     <dialog
       ref={dialogRef}
       onClose={onClose}
-      className="rounded-xl border border-slate-700 bg-slate-900 p-0 text-slate-100 shadow-2xl backdrop:bg-black/60 w-full max-w-md"
+      className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 mx-auto rounded-xl border border-slate-700 bg-slate-900 p-0 text-slate-100 shadow-2xl backdrop:bg-black/60 w-full max-w-md"
     >
       <form onSubmit={handleSave} noValidate>
         <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
@@ -156,7 +163,12 @@ export function AddressLabelEditor({
               htmlFor="al-label"
               className="block text-xs font-medium text-slate-400 mb-1"
             >
-              Label <span className="text-indigo-400">*</span>
+              Label{" "}
+              {isContractRow ? (
+                <span className="text-slate-500">(optional)</span>
+              ) : (
+                <span className="text-indigo-400">*</span>
+              )}
             </label>
             <input
               ref={isNewAddress ? undefined : firstInputRef}
@@ -164,8 +176,12 @@ export function AddressLabelEditor({
               type="text"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="e.g. Binance Hot Wallet"
-              required
+              placeholder={
+                isContractRow
+                  ? "Leave blank to keep contract name"
+                  : "e.g. Binance Hot Wallet"
+              }
+              required={!isContractRow}
               className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
