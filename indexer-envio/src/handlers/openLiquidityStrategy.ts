@@ -10,14 +10,20 @@ import {
 } from "generated";
 import { eventId, asAddress, asBigInt } from "../helpers";
 
+function olsPoolId(poolId: string, olsAddress: string): string {
+  return `${poolId}-${olsAddress}`;
+}
+
 function placeholderOlsPool(args: {
+  id: string;
   poolId: string;
   olsAddress: string;
   blockNumber: bigint;
   blockTimestamp: bigint;
 }): OlsPool {
   return {
-    id: args.poolId,
+    id: args.id,
+    poolId: args.poolId,
     olsAddress: args.olsAddress,
     isActive: true,
     debtToken: "",
@@ -43,10 +49,12 @@ async function getOrCreateOlsPool(args: {
   blockNumber: bigint;
   blockTimestamp: bigint;
 }): Promise<OlsPool> {
-  const existing = await args.context.OlsPool.get(args.poolId);
+  const id = olsPoolId(args.poolId, args.olsAddress);
+  const existing = await args.context.OlsPool.get(id);
   return (
     existing ??
     placeholderOlsPool({
+      id,
       poolId: args.poolId,
       olsAddress: args.olsAddress,
       blockNumber: args.blockNumber,
@@ -70,7 +78,8 @@ OpenLiquidityStrategy.PoolAdded.handler(async ({ event, context }) => {
   //                liquiditySourceIncentiveExpansion, protocolIncentiveExpansion,
   //                liquiditySourceIncentiveContraction, protocolIncentiveContraction]
   const olsPool: OlsPool = {
-    id: poolId,
+    id: olsPoolId(poolId, asAddress(event.srcAddress)),
+    poolId,
     olsAddress: asAddress(event.srcAddress),
     isActive: true,
     debtToken: asAddress(p[1]),

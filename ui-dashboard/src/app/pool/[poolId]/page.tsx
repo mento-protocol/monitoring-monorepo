@@ -987,7 +987,7 @@ function OlsTab({
   );
 }
 
-function OlsStatusPanel({
+export function OlsStatusPanel({
   olsPool,
   pool,
   network,
@@ -1128,7 +1128,7 @@ function OlsStatusPanel({
   );
 }
 
-function OlsLiquidityTable({
+export function OlsLiquidityTable({
   events,
   pool,
   network,

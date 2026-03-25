@@ -160,6 +160,7 @@ export type ProtocolFeeTransfer = {
 
 export type OlsPool = {
   id: string;
+  poolId: string;
   olsAddress: string;
   isActive: boolean;
   debtToken: string;
