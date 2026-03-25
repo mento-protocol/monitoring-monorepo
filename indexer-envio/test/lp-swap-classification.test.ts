@@ -590,3 +590,77 @@ describe("LP swap classification — block isolation", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Known limitation: user swap + mint WITHOUT internal rebalance in same tx.
+//
+// When an external contract calls FPMM.swap() then FPMM.mint() in one tx,
+// AND the mint does NOT trigger an internal rebalance swap, the classification
+// logic has no way to distinguish the user swap from an LP rebalance swap —
+// both produce identical Swap events from the FPMM contract. The result is
+// that the user swap gets incorrectly marked isLpSwap=true.
+//
+// This test documents the known behavior. A contract-level fix (e.g. adding
+// an isInternalRebalance flag to the Swap event) would be required to fix it.
+// In practice this scenario is unlikely for Mento FPMM pools.
+// ---------------------------------------------------------------------------
+
+describe("LP swap classification — known limitation", () => {
+  beforeEach(() => {
+    _setMockRateFeedID(CHAIN_ID, POOL_ADDR, null);
+  });
+
+  afterEach(() => {
+    _clearMockReserves();
+    _clearMockRateFeedIDs();
+    _clearMockRebalancingStates();
+  });
+
+  it("KNOWN FALSE-POSITIVE: user swap + mint without rebalance in same block — swap is incorrectly flagged isLpSwap=true", async () => {
+    // This test documents the known limitation. Do NOT change the assertions
+    // to expect isLpSwap=false — that would mask the known gap.
+    let mockDb = await deployPool();
+
+    // User swap fires (e.g. FPMM.swap() called by external contract)
+    const { mockDb: afterSwap, swapId } = await fireSwap(mockDb, {
+      blockNumber: 1001,
+      logIndexReserves: 10,
+      logIndexSwap: 11,
+    });
+
+    // Mint fires in the same block — but WITHOUT an internal rebalance swap
+    // (the pool was already balanced, so _rebalanceSwap() was not called).
+    // No second Swap event fires, so the SwapTxIndex still points to the
+    // user swap from above.
+    const afterMint = await fireMint(afterSwap, {
+      blockNumber: 1001,
+      timestamp: 1_700_001_000,
+      logIndex: 13, // > swapLogIndex(11) so the logIndex guard passes
+    });
+
+    // KNOWN FALSE-POSITIVE: the user swap gets misclassified as LP-triggered
+    // because the backfill sees "Swap in same tx as Mint, logIndex < mintLogIndex"
+    // and has no way to know the Swap was from an external call, not _rebalanceSwap().
+    const swapEntity = afterMint.entities.SwapEvent.get(swapId) as
+      | { isLpSwap: boolean; [key: string]: unknown }
+      | undefined;
+    assert.ok(swapEntity, "SwapEvent must exist");
+    // This assertion documents the known incorrect behavior:
+    assert.strictEqual(
+      swapEntity!.isLpSwap,
+      true,
+      "KNOWN FALSE-POSITIVE: user swap in same tx as mint (no rebalance) is incorrectly flagged isLpSwap=true. A contract-level fix is required to eliminate this edge case.",
+    );
+
+    // And the pool's swapCount is incorrectly decremented
+    const pool = afterMint.entities.Pool.get(POOL_ADDR) as
+      | { swapCount: number; [key: string]: unknown }
+      | undefined;
+    assert.ok(pool);
+    assert.strictEqual(
+      pool!.swapCount,
+      0,
+      "KNOWN FALSE-POSITIVE: pool.swapCount incorrectly decremented to 0 in this edge case",
+    );
+  });
+});

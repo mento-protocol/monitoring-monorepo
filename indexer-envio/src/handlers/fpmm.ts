@@ -57,25 +57,38 @@ import { hourBucket, snapshotId } from "../helpers";
  * We undo those increments here so that all cumulative metrics reflect only
  * genuine user trades.
  *
- * Key design — txHash-only key with last-writer-wins semantics:
- * The SwapTxIndex key is {chainId}:{poolId}:{txHash}. Each Swap event in the
- * tx overwrites the previous entry for that key. Because Envio processes events
- * in log-index order, the LAST swap written for a given pool+tx is the one
- * stored when Mint/Burn fires.
+ * Classification approach — txHash key + logIndex guard:
  *
- * Multicall safety: if an external contract batches FPMM.swap() (user trade)
- * + FPMM.mint() (LP operation) in one tx, the log order is:
- *   logN:   Swap (user trade, from FPMM.swap())
- *   logN+k: Swap (LP rebalance, from _rebalanceSwap() inside FPMM.mint())
- *   logN+m: Mint
- * The LP rebalance swap always fires AFTER the user swap (it is emitted
- * *inside* mint()), so it overwrites the SwapTxIndex entry. When Mint fires,
- * the index points to the LP rebalance swap — exactly what we want.
- * The user swap keeps isLpSwap=false. ✓
+ * The SwapTxIndex key is {chainId}:{poolId}:{txHash}. Each Swap overwrites the
+ * entry (last-writer-wins within a tx). The LP rebalance swap fires inside
+ * mint()/burn(), so it's always the LAST swap for this pool+tx when Mint/Burn
+ * runs. swapLogIndex is also stored to apply a directional guard.
  *
- * Non-adjacent logs: UpdateReserves events fire between Swap and Mint in the
- * real contract flow. Using (mintLogIndex - 1) would fail for this reason.
- * The txHash+overwrite approach is immune to intermediate log events.
+ * KNOWN LIMITATION — user swap + mint without rebalance in same tx:
+ * This is the one case that cannot be perfectly distinguished with event data
+ * alone. FPMM emits identical Swap events whether the swap originated from an
+ * external call or from an internal _rebalanceSwap() call — the contract
+ * address, event signature, and all fields are the same. The only on-chain
+ * signal we have is log ordering.
+ *
+ * The logIndex guard (swapLogIndex < mintBurnLogIndex) filters out swaps that
+ * appear *after* the Mint/Burn (impossible in practice but guards corruption).
+ * It does NOT distinguish "user swap directly before mint" from "LP rebalance
+ * swap directly before mint" — both satisfy the guard.
+ *
+ * In practice this misclassification requires an external contract that:
+ *   1. Calls FPMM.swap() (emits Swap at logN)
+ *   2. Calls FPMM.mint() AND the pool does NOT need rebalancing (no Swap
+ *      emitted by mint, Mint at logM > logN)
+ *
+ * For Mento FPMM pools this is extremely unlikely: the OLS strategy contract
+ * that performs LP operations always runs a rebalance check first, and direct
+ * user interaction with both swap() and mint() in one tx is not a normal flow.
+ * We accept this as a known edge case with low real-world impact.
+ *
+ * If precise attribution becomes critical, the correct fix is to add a
+ * distinguishing field to the FPMM contract's Swap event (e.g. an
+ * `isInternalRebalance` flag) — which requires a contract upgrade.
  */
 // Minimal interface for the context object needed by backfillLpSwap.
 // The full generated context type is a superset of this.
