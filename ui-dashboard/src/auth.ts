@@ -17,6 +17,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
+      // On preview deployments PKCE cannot be used: the code verifier cookie is
+      // set on the preview domain but the callback lands on prod (via the proxy)
+      // — different domains, cookie never sent. Use state-only: JWE signed with
+      // AUTH_SECRET (identical on prod and preview), verified server-side.
+      // AUTH_REDIRECT_PROXY_URL is set on BOTH envs for the proxy handshake,
+      // so we key off VERCEL_ENV instead to keep PKCE on direct prod logins.
+      // See: https://authjs.dev/getting-started/deployment#securing-a-preview-deployment
+      ...(process.env.VERCEL_ENV === "preview" ? { checks: ["state"] } : {}),
     }),
   ],
 
