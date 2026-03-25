@@ -343,7 +343,7 @@ describe("GlobalPage — cross-chain key collision", () => {
       makeNetworkData({ network: NETWORK_2, pools: [pool] }),
     ]);
     expect(capturedProps).not.toBeNull();
-    const map: Map<string, number | null> = capturedProps.volume24hByKey;
+    const map = capturedProps!.volume24hByKey as Map<string, number | null>;
     expect(map.has("celo-mainnet-hosted:0xpool1")).toBe(true);
     expect(map.has("celo-sepolia-hosted:0xpool1")).toBe(true);
     expect(map.size).toBe(2);
