@@ -147,7 +147,7 @@ function GlobalContent() {
   }, [networkData]);
 
   // Networks that failed at the top level — show an error notice per chain
-  const failedNetworks = networkData.filter((nd) => nd.error !== null);
+  const failedNetworks = networkData.filter((net) => net.error !== null);
 
   return (
     <div className="space-y-8">
@@ -250,10 +250,10 @@ function GlobalContent() {
       </section>
 
       {/* Per-chain error notices — shown when a chain fails at the top level */}
-      {failedNetworks.map((nd) => (
+      {failedNetworks.map((net) => (
         <ErrorBox
-          key={nd.network.id}
-          message={`${nd.network.label}: Failed to load pools — ${nd.error?.message}`}
+          key={net.network.id}
+          message={`${net.network.label}: Failed to load pools — ${net.error?.message}`}
         />
       ))}
 
