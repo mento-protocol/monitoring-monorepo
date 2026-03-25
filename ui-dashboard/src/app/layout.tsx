@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { SessionProvider } from "next-auth/react";
+import { getAuthSession } from "@/auth";
 import { NetworkProvider } from "@/components/network-provider";
 import { AddressLabelsProvider } from "@/components/address-labels-provider";
 import { NavLinks } from "@/components/nav-links";
@@ -20,15 +21,17 @@ export const metadata: Metadata = {
   description: "Cross-chain analytics dashboard for Mento protocol",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const session = await getAuthSession();
+
   return (
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
       >
-        <SessionProvider>
+        <SessionProvider session={session}>
           <Suspense>
             <NetworkProvider>
               <AddressLabelsProvider>

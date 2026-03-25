@@ -3,7 +3,8 @@ import AddressBookClient from "./AddressBookClient";
 
 /**
  * Server component: resolves auth session, then renders the client page.
- * Write controls (Add/Edit/Delete/Import/Export) are hidden for unauthenticated users.
+ * Middleware already redirects unauthenticated users away from /address-book,
+ * so canEdit here mirrors the authenticated state for the in-page controls.
  */
 export default async function AddressBookPage() {
   const session = await getAuthSession();

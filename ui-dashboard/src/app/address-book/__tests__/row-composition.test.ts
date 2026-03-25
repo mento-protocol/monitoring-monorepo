@@ -356,4 +356,24 @@ describe("countImportLabels", () => {
   it("does not throw when a chain entry is null inside snapshot", () => {
     expect(countImportLabels({ chains: { "42220": null } })).toBe(0);
   });
+
+  it("skips malformed entries in array payloads instead of counting them", () => {
+    expect(
+      countImportLabels([
+        null,
+        {},
+        { chainId: 42220, address: addr },
+        { chainId: "42220", address: addr },
+      ]),
+    ).toBe(1);
+  });
+
+  it("does not count array entries with non-string address or chainId", () => {
+    expect(
+      countImportLabels([
+        { chainId: 42220, address: addr, name: "A" },
+        { chainId: "42220", address: 123, name: "B" },
+      ]),
+    ).toBe(0);
+  });
 });
