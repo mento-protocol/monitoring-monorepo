@@ -169,13 +169,12 @@ export default function AddressBookPage() {
               Import JSON
             </button>
             <details className="relative">
-              <summary className="cursor-pointer list-none rounded-full p-1 text-slate-500 hover:text-slate-300 transition-colors">
-                <span
-                  aria-label="Import format info"
-                  title="Supported import formats"
-                >
-                  &#9432;
-                </span>
+              <summary
+                aria-label="Supported import formats"
+                title="Supported import formats"
+                className="cursor-pointer list-none rounded-full p-1 text-slate-500 hover:text-slate-300 transition-colors"
+              >
+                <span aria-hidden="true">&#9432;</span>
               </summary>
               <div className="absolute right-0 top-8 z-10 w-80 rounded-lg border border-slate-700 bg-slate-900 p-3 text-xs text-slate-400 shadow-xl">
                 <p className="mb-2 font-semibold text-slate-300">
