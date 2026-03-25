@@ -180,15 +180,6 @@ resource "vercel_project_environment_variable" "cron_secret" {
 
 # Preview auth proxy — routes Google OAuth through the prod domain (already
 # whitelisted in GCP), then forwards the session back to the preview URL.
-# See: https://authjs.dev/guides/deployment#preview-urls-on-vercel
-resource "vercel_project_environment_variable" "nextauth_url_preview" {
-  project_id = vercel_project.dashboard.id
-  team_id    = var.vercel_team_id
-  key        = "NEXTAUTH_URL"
-  value      = "https://monitoring.mento.org"
-  target     = ["preview"]
-}
-
 resource "vercel_project_environment_variable" "auth_redirect_proxy_url" {
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id
