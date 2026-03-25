@@ -4,8 +4,15 @@ const authConfigured = !!(
   process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
 );
 
+// On Vercel preview deployments, skip app-level auth entirely.
+// Preview URLs are already gated behind Vercel Deployment Protection (team SSO),
+// so only authorized team members can reach the preview in the first place.
+// This avoids the cross-domain cookie issue where OAuth state/PKCE cookies set
+// on the preview domain are inaccessible when the callback lands on the prod domain.
+const isPreview = process.env.VERCEL_ENV === "preview";
+
 export default auth((req) => {
-  if (!authConfigured) return;
+  if (!authConfigured || isPreview) return;
 
   const isAuthenticated = !!req.auth;
   const path = req.nextUrl.pathname;
