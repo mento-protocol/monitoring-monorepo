@@ -207,6 +207,31 @@ export const POOL_DEPLOYMENT = `
   }
 `;
 
+// Option A shim: fetch all events for client-side aggregation
+export const POOL_LIQUIDITY_ALL = `
+  query PoolLiquidityAll($poolId: String!) {
+    LiquidityEvent(
+      where: { poolId: { _eq: $poolId } }
+      order_by: { blockNumber: asc }
+      limit: 10000
+    ) {
+      kind sender recipient liquidity
+    }
+  }
+`;
+
+// Option B: direct position query (after reindex)
+export const POOL_LP_POSITIONS = `
+  query PoolLpPositions($poolId: String!) {
+    LiquidityPosition(
+      where: { poolId: { _eq: $poolId } }
+      order_by: { netLiquidity: desc }
+    ) {
+      id address netLiquidity lastUpdatedBlock lastUpdatedTimestamp
+    }
+  }
+`;
+
 /**
  * Fetch all protocol fee transfers for client-side USD aggregation.
  *
