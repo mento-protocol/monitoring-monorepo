@@ -14,12 +14,7 @@ import {
   computeRebalancerLiveness,
   worstStatus,
 } from "@/lib/health";
-import {
-  healthTooltip,
-  limitTooltipFragment,
-  combinedTooltip,
-  rebalancerTooltip,
-} from "@/lib/pool-table-utils";
+import { combinedTooltip, rebalancerTooltip } from "@/lib/pool-table-utils";
 import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 

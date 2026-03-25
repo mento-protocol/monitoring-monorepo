@@ -18,9 +18,13 @@ vi.mock("@/hooks/use-all-networks-data", () => ({
 }));
 
 // GlobalPoolsTable has complex deps — stub it, but capture props for assertions
-let capturedProps: any = null;
+interface CapturedTableProps {
+  entries: { pool: { id: string }; network: { id: string } }[];
+  volume24hByKey?: Map<string, number | null>;
+}
+let capturedProps: CapturedTableProps | null = null;
 vi.mock("@/components/global-pools-table", () => ({
-  GlobalPoolsTable: (props: any) => {
+  GlobalPoolsTable: (props: CapturedTableProps) => {
     capturedProps = props;
     return <div data-testid="global-pools-table" />;
   },
