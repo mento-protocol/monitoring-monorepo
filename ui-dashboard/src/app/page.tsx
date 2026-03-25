@@ -261,7 +261,7 @@ function GlobalContent() {
         <h2 className="text-lg font-semibold text-white mb-3">All Pools</h2>
         {isLoading ? (
           <Skeleton rows={5} />
-        ) : globalEntries.length === 0 ? (
+        ) : failedNetworks.length === 0 && globalEntries.length === 0 ? (
           <EmptyBox message="No pools found across any chain." />
         ) : (
           <GlobalPoolsTable

@@ -17,9 +17,13 @@ vi.mock("@/hooks/use-all-networks-data", () => ({
   useAllNetworksData: vi.fn(),
 }));
 
-// GlobalPoolsTable has complex deps — stub it
+// GlobalPoolsTable has complex deps — stub it, but capture props for assertions
+let capturedProps: any = null;
 vi.mock("@/components/global-pools-table", () => ({
-  GlobalPoolsTable: () => <div data-testid="global-pools-table" />,
+  GlobalPoolsTable: (props: any) => {
+    capturedProps = props;
+    return <div data-testid="global-pools-table" />;
+  },
   globalPoolKey: (entry: { pool: { id: string }; network: { id: string } }) =>
     `${entry.network.id}:${entry.pool.id}`,
 }));
@@ -53,6 +57,21 @@ const NETWORK_2: Network = {
   chainId: 11142220,
 };
 
+import type { Pool } from "@/lib/types";
+
+function makePool(id: string): Pool {
+  return {
+    id,
+    token0: null,
+    token1: null,
+    source: "FPMM",
+    createdAtBlock: "0",
+    createdAtTimestamp: "0",
+    updatedAtBlock: "0",
+    updatedAtTimestamp: "0",
+  };
+}
+
 function makeNetworkData(overrides: Partial<NetworkData> = {}): NetworkData {
   return {
     network: BASE_NETWORK,
@@ -77,6 +96,7 @@ function render(networkData: NetworkData[], isLoading = false): string {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  capturedProps = null;
 });
 
 // ---------------------------------------------------------------------------
@@ -304,5 +324,45 @@ describe("GlobalPage — unpriced symbols behavior", () => {
     ]);
     expect(html).toContain("debank.com");
     expect(html).toContain("Swap Fees Earned");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-chain key collision — same pool ID on two different chains
+// ---------------------------------------------------------------------------
+
+describe("GlobalPage — cross-chain key collision", () => {
+  it("produces distinct volume24hByKey entries for same pool ID on different networks", () => {
+    const pool = makePool("0xpool1");
+    render([
+      makeNetworkData({ network: BASE_NETWORK, pools: [pool] }),
+      makeNetworkData({ network: NETWORK_2, pools: [pool] }),
+    ]);
+    expect(capturedProps).not.toBeNull();
+    const map: Map<string, number | null> = capturedProps.volume24hByKey;
+    expect(map.has("celo-mainnet-hosted:0xpool1")).toBe(true);
+    expect(map.has("celo-sepolia-hosted:0xpool1")).toBe(true);
+    expect(map.size).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// All-networks-failed — EmptyBox must NOT render
+// ---------------------------------------------------------------------------
+
+describe("GlobalPage — all networks failed", () => {
+  it("shows ErrorBox notices but no EmptyBox when every network fails", () => {
+    const html = render([
+      makeNetworkData({
+        network: BASE_NETWORK,
+        error: new Error("mainnet down"),
+      }),
+      makeNetworkData({
+        network: NETWORK_2,
+        error: new Error("sepolia down"),
+      }),
+    ]);
+    expect(html).toContain("Failed to load pools");
+    expect(html).not.toContain("No pools found across any chain.");
   });
 });
