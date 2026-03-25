@@ -22,9 +22,44 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  // Accept two formats:
-  // 1. Snapshot format: { exportedAt, chains: { chainId: { address: entry } } }
-  // 2. Simple format:   { chainId, labels: { address: entry } }
+  // Accept three formats:
+  // 1. Snapshot format:    { exportedAt, chains: { chainId: { address: entry } } }
+  // 2. Simple format:      { chainId, labels: { address: entry } }
+  // 3. Gnosis Safe format: [{ address, chainId, name }]
+  if (isGnosisSafeFormat(body)) {
+    const entries = body as Array<{
+      address: string;
+      chainId: string;
+      name: string;
+    }>;
+
+    // Group by chainId
+    const byChain = new Map<number, Record<string, AddressLabelEntry>>();
+    for (const entry of entries) {
+      const chainId = Number(entry.chainId);
+      if (!Number.isInteger(chainId) || chainId <= 0) {
+        return NextResponse.json(
+          { error: `Invalid chainId: ${entry.chainId}` },
+          { status: 400 },
+        );
+      }
+      if (!byChain.has(chainId)) byChain.set(chainId, {});
+      byChain.get(chainId)![entry.address] = {
+        label: entry.name,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    try {
+      for (const [chainId, labels] of byChain.entries()) {
+        await importLabels(chainId, labels);
+      }
+      return NextResponse.json({ ok: true });
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
   if (isSnapshot(body)) {
     const chainEntries = Object.entries(body.chains);
 
@@ -76,6 +111,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch (err) {
     return serverError(err);
   }
+}
+
+function isGnosisSafeFormat(
+  v: unknown,
+): v is Array<{ address: string; chainId: string; name: string }> {
+  if (!Array.isArray(v) || v.length === 0) return false;
+  return v.every(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      typeof (entry as Record<string, unknown>).address === "string" &&
+      typeof (entry as Record<string, unknown>).chainId === "string" &&
+      typeof (entry as Record<string, unknown>).name === "string",
+  );
 }
 
 function isSnapshot(v: unknown): v is AddressLabelsSnapshot {

@@ -163,13 +163,36 @@ export default function AddressBookPage() {
           >
             Export JSON
           </button>
-          <button
-            type="button"
-            onClick={handleImportClick}
-            className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
-          >
-            Import JSON
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={handleImportClick}
+              className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+            >
+              Import JSON
+            </button>
+            <details className="relative">
+              <summary className="cursor-pointer list-none rounded-full p-1 text-slate-500 hover:text-slate-300 transition-colors">
+                <span
+                  aria-label="Import format info"
+                  title="Supported import formats"
+                >
+                  &#9432;
+                </span>
+              </summary>
+              <div className="absolute right-0 top-8 z-10 w-80 rounded-lg border border-slate-700 bg-slate-900 p-3 text-xs text-slate-400 shadow-xl">
+                <p className="mb-2 font-semibold text-slate-300">
+                  Supported import formats:
+                </p>
+                <p className="mb-1 font-medium text-slate-400">Mento export:</p>
+                <pre className="mb-2 overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`{ "exportedAt": "...",\n  "chains": { "42220": {\n    "0x...": { "label": "...",\n      "category": "...",\n      "notes": "..." } } } }`}</pre>
+                <p className="mb-1 font-medium text-slate-400">
+                  Gnosis Safe address book:
+                </p>
+                <pre className="overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`[{ "address": "0x...",\n   "chainId": "1",\n   "name": "My Label" }]`}</pre>
+              </div>
+            </details>
+          </div>
           <input
             ref={fileInputRef}
             type="file"
@@ -446,6 +469,10 @@ function AddressTableRow({
 // ---------------------------------------------------------------------------
 
 function countLabels(parsed: unknown): number {
+  if (Array.isArray(parsed)) {
+    // Gnosis Safe format: Array<{ address, chainId, name }>
+    return parsed.length;
+  }
   if (typeof parsed === "object" && parsed !== null && "chains" in parsed) {
     return Object.values((parsed as AddressLabelsSnapshot).chains).reduce(
       (sum, entries) => sum + Object.keys(entries).length,
