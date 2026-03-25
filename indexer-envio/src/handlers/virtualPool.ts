@@ -125,6 +125,8 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
     swapDelta: { volume0, volume1 },
   });
 
+  // VirtualPools have no internal rebalance mechanism; all their swaps are
+  // direct user trades. isLpSwap is always false here.
   const swap: SwapEvent = {
     id,
     poolId,
@@ -137,6 +139,7 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
     txHash: event.transaction.hash,
     blockNumber,
     blockTimestamp,
+    isLpSwap: false,
   };
 
   context.SwapEvent.set(swap);

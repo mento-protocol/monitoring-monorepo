@@ -234,7 +234,7 @@ describe("LP swap classification — isLpSwap + volume backfill", () => {
     assert.strictEqual(swapEntity!.isLpSwap, false, "isLpSwap must be false");
 
     // SwapTxIndex must exist
-    const indexId = `${CHAIN_ID}:${POOL_ADDR}:${TX_HASH}`;
+    const indexId = `${CHAIN_ID}:${POOL_ADDR}:${TX_HASH}:11`;
     const indexEntity = mockDb.entities.SwapTxIndex.get(indexId) as
       | SwapTxIndexEntity
       | undefined;
@@ -474,6 +474,95 @@ describe("LP swap classification — isLpSwap + volume backfill", () => {
       pool!.swapCount,
       1,
       "Pool.swapCount must remain 1 for a user trade",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Multicall regression: user swap + LP rebalance swap in same tx
+// An external contract calls FPMM.swap() at logIndex 9, then FPMM.mint()
+// at logIndex 13. mint() triggers an internal rebalance which emits
+// Swap at logIndex 12 and Mint at logIndex 13.
+// Only the swap at logIndex 12 (= mintLogIndex - 1) must be classified as
+// LP-triggered; the user swap at logIndex 9 must remain isLpSwap=false.
+// ---------------------------------------------------------------------------
+
+describe("LP swap classification — multicall edge case", () => {
+  afterEach(() => {
+    _clearMockReserves();
+  });
+
+  it("only the directly preceding swap (logIndex - 1) is classified as LP-triggered", async () => {
+    let mockDb = await deployPool();
+
+    // User swap at logIndex 9 (earlier in the same tx)
+    mockDb = await fireSwap(mockDb, {
+      txHash: TX_HASH,
+      blockNumber: 1001,
+      timestamp: 1_700_001_000,
+      logIndexReserves: 8,
+      logIndexSwap: 9,
+      amount0In: 3_000n,
+      amount1Out: 6_000n,
+    });
+
+    // Internal LP rebalance swap at logIndex 12 (directly before Mint at 13)
+    mockDb = await fireSwap(mockDb, {
+      txHash: TX_HASH,
+      blockNumber: 1001,
+      timestamp: 1_700_001_000,
+      logIndexReserves: 11,
+      logIndexSwap: 12,
+      amount0In: 500n,
+      amount1Out: 1_000n,
+    });
+
+    // Mint at logIndex 13 — backfill must only touch logIndex 12
+    const mintEvent = FPMM.Mint.createMockEvent({
+      sender: "0x0000000000000000000000000000000000000033",
+      to: "0x0000000000000000000000000000000000000044",
+      amount0: 5_000n,
+      amount1: 5_000n,
+      liquidity: 10_000n,
+      mockEventData: {
+        chainId: CHAIN_ID,
+        logIndex: 13,
+        srcAddress: POOL_ADDR,
+        transaction: { hash: TX_HASH },
+        block: { number: 1001, timestamp: 1_700_001_000 },
+      },
+    });
+    mockDb = await FPMM.Mint.processEvent({ event: mintEvent, mockDb });
+
+    // Swap at logIndex 12 must be isLpSwap=true
+    const lpSwap = mockDb.entities.SwapEvent.get(`${CHAIN_ID}:1001:12`) as
+      | SwapEventEntity
+      | undefined;
+    assert.ok(lpSwap, "LP rebalance SwapEvent must exist");
+    assert.strictEqual(
+      lpSwap!.isLpSwap,
+      true,
+      "Swap at logIndex 12 (directly before Mint at 13) must be isLpSwap=true",
+    );
+
+    // User swap at logIndex 9 must remain isLpSwap=false
+    const userSwap = mockDb.entities.SwapEvent.get(`${CHAIN_ID}:1001:9`) as
+      | SwapEventEntity
+      | undefined;
+    assert.ok(userSwap, "User SwapEvent must exist");
+    assert.strictEqual(
+      userSwap!.isLpSwap,
+      false,
+      "User swap at logIndex 9 (not adjacent to Mint) must remain isLpSwap=false",
+    );
+
+    // Pool.swapCount must be 1 — user trade counted, LP rebalance subtracted
+    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    assert.ok(pool);
+    assert.strictEqual(
+      pool!.swapCount,
+      1,
+      "Pool.swapCount must be 1 (user trade counted, LP rebalance subtracted)",
     );
   });
 });

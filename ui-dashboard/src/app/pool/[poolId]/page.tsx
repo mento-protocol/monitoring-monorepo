@@ -629,10 +629,14 @@ function LiquidityTab({
     txHashes.length > 0 ? POOL_LP_SWAPS : null,
     { poolId, txHashes },
   );
-  // Build a map txHash → SwapEvent for O(1) lookup in the table
-  const lpSwapByTx = new Map<string, SwapEvent>(
-    (lpSwapData?.SwapEvent ?? []).map((s) => [s.txHash, s]),
-  );
+  // Build a map txHash → SwapEvent[] to handle multiple LP swaps per tx.
+  // Each LiquidityEvent row shows all linked swap badges.
+  const lpSwapsByTx = new Map<string, SwapEvent[]>();
+  for (const s of lpSwapData?.SwapEvent ?? []) {
+    const existing = lpSwapsByTx.get(s.txHash) ?? [];
+    existing.push(s);
+    lpSwapsByTx.set(s.txHash, existing);
+  }
 
   const fpmmPool = pool ? isFpmm(pool) : false;
   // Passing null as the query key skips the request — VirtualPools have no snapshots.
@@ -676,31 +680,32 @@ function LiquidityTab({
           </thead>
           <tbody>
             {rows.map((r) => {
-              const linkedSwap = lpSwapByTx.get(r.txHash);
+              const linkedSwaps = lpSwapsByTx.get(r.txHash) ?? [];
               return (
                 <Row key={r.id}>
                   <TxHashCell txHash={r.txHash} />
                   <td className="px-4 py-2">
                     <div className="flex items-center gap-1.5">
                       <KindBadge kind={r.kind} />
-                      {linkedSwap && (
+                      {linkedSwaps.map((s) => (
                         <span
+                          key={s.id}
                           title={`Included a rebalance swap: ${formatWei(
-                            linkedSwap.amount0In > linkedSwap.amount0Out
-                              ? linkedSwap.amount0In
-                              : linkedSwap.amount0Out,
+                            s.amount0In > s.amount0Out
+                              ? s.amount0In
+                              : s.amount0Out,
                             pool?.token0Decimals ?? 18,
                           )} ${sym0} ⇄ ${formatWei(
-                            linkedSwap.amount1In > linkedSwap.amount1Out
-                              ? linkedSwap.amount1In
-                              : linkedSwap.amount1Out,
+                            s.amount1In > s.amount1Out
+                              ? s.amount1In
+                              : s.amount1Out,
                             pool?.token1Decimals ?? 18,
                           )} ${sym1}`}
                           className="text-xs text-indigo-400 border border-indigo-700 rounded px-1 py-0.5 cursor-default"
                         >
                           ⇄ swap
                         </span>
-                      )}
+                      ))}
                     </div>
                   </td>
                   <SenderCell address={r.sender} />

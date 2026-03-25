@@ -57,12 +57,15 @@ import { hourBucket, snapshotId } from "../helpers";
  * We undo those increments here so that all cumulative metrics reflect only
  * genuine user trades.
  *
- * Safety note — "user swap + mint in same tx" false-positive concern:
- * FPMM has no multicall entrypoint. A single external transaction can invoke
- * only one of: swap() or mint()/burn(). An LP-rebalance Swap is emitted
- * *internally* by _rebalanceSwap() called from within mint()/burn(), so a
- * Swap event + Mint/Burn event in the same tx always means the swap is an LP
- * rebalance — never a coincidental user trade. This key is therefore safe.
+ * Key design — why logIndex is required:
+ * An external contract CAN batch FPMM.swap() + FPMM.mint() calls in one tx.
+ * Using only {chainId}:{poolId}:{txHash} would misclassify the user swap.
+ * The LP-rebalance swap emitted by _rebalanceSwap() inside mint()/burn() is
+ * *always* the event at (mintLogIndex - 1) for the same pool — the FPMM
+ * contract emits Swap immediately before Mint/Burn with no events between
+ * them. By keying on the swap's logIndex and querying (mintLogIndex - 1),
+ * we match only the internally-triggered rebalance swap, not any earlier user
+ * swap that happened to be in the same tx.
  */
 // Minimal interface for the context object needed by backfillLpSwap.
 // The full generated context type is a superset of this.
@@ -100,15 +103,21 @@ async function backfillLpSwap({
   chainId,
   poolId,
   txHash,
+  mintBurnLogIndex,
   blockTimestamp,
 }: {
   context: BackfillContext;
   chainId: number;
   poolId: string;
   txHash: string;
+  /** logIndex of the Mint/Burn event; we look for a Swap at logIndex - 1 */
+  mintBurnLogIndex: number;
   blockTimestamp: bigint;
 }): Promise<void> {
-  const indexId = `${chainId}:${poolId}:${txHash}`;
+  // Key includes the swap's log index so we only match the swap that fired
+  // *immediately before* this Mint/Burn (the internal LP-rebalance swap).
+  const swapLogIndex = mintBurnLogIndex - 1;
+  const indexId = `${chainId}:${poolId}:${txHash}:${swapLogIndex}`;
   const swapIndex = await context.SwapTxIndex.get(indexId);
   if (!swapIndex) return; // No swap in this tx — nothing to backfill
 
@@ -413,10 +422,12 @@ FPMM.Swap.handler(async ({ event, context }) => {
 
   context.SwapEvent.set(swap);
 
-  // Store a txHash-keyed lookup so the Mint/Burn handler (which fires later
-  // in the same tx) can find this swap by chainId:poolId:txHash.
+  // Store a logIndex-keyed lookup so the Mint/Burn handler can find this swap
+  // by its exact position in the tx log. The Mint/Burn handler queries
+  // logIndex = (mintLogIndex - 1) so it only matches the swap that fired
+  // *directly before* it — which is the internal LP-rebalance swap.
   const swapTxIndex: SwapTxIndex = {
-    id: `${event.chainId}:${poolId}:${event.transaction.hash}`,
+    id: `${event.chainId}:${poolId}:${event.transaction.hash}:${event.logIndex}`,
     swapEventId: id,
   };
   context.SwapTxIndex.set(swapTxIndex);
@@ -449,14 +460,15 @@ FPMM.Mint.handler(async ({ event, context }) => {
     mintDelta: true,
   });
 
-  // If a Swap event fired earlier in this same transaction it was an internal
-  // LP-rebalance swap, not a user trade. Backfill isLpSwap = true and subtract
-  // its volume from the pool / snapshot cumulative trade counters.
+  // If a Swap fired *immediately before* this Mint in the tx log it was an
+  // internal LP-rebalance swap. Backfill isLpSwap = true and subtract its
+  // volume from the pool / snapshot cumulative trade counters.
   await backfillLpSwap({
     context,
     chainId: event.chainId,
     poolId,
     txHash: event.transaction.hash,
+    mintBurnLogIndex: event.logIndex,
     blockTimestamp,
   });
 
@@ -504,12 +516,13 @@ FPMM.Burn.handler(async ({ event, context }) => {
     burnDelta: true,
   });
 
-  // Same as Mint: if a Swap event fired in this tx, it was LP-triggered.
+  // Same as Mint: if a Swap fired directly before this Burn it was LP-triggered.
   await backfillLpSwap({
     context,
     chainId: event.chainId,
     poolId,
     txHash: event.transaction.hash,
+    mintBurnLogIndex: event.logIndex,
     blockTimestamp,
   });
 

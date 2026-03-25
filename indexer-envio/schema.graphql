@@ -114,9 +114,12 @@ type SwapEvent @index(fields: ["poolId", "blockTimestamp"]) {
   isLpSwap: Boolean!
 }
 
-# Ephemeral lookup: lets the Mint/Burn handler find the Swap that fired
-# earlier in the same transaction and backfill isLpSwap = true.
-# id format: "{chainId}:{poolId}:{txHash}"
+# Ephemeral lookup: lets the Mint/Burn handler find the immediately preceding
+# Swap that fired in the same transaction and backfill isLpSwap = true.
+# id format: "{chainId}:{poolId}:{txHash}:{swapLogIndex}"
+# The Mint/Burn handler queries by logIndex-1 so only the swap *directly*
+# before it (the internal LP-rebalance swap) is matched — not unrelated user
+# swaps that happen to share the same tx.
 type SwapTxIndex {
   id: ID!
   swapEventId: String!
