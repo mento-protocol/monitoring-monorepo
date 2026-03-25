@@ -18,6 +18,11 @@ type MockDb = {
       set: (entity: unknown) => MockDb;
     };
     SwapEvent: { get: (id: string) => unknown };
+    LiquidityEvent: { get: (id: string) => unknown };
+    LiquidityPosition: {
+      get: (id: string) => unknown;
+      set: (entity: unknown) => MockDb;
+    };
     OracleSnapshot: {
       get: (id: string) => unknown;
       set: (entity: unknown) => MockDb;
@@ -89,6 +94,44 @@ type GeneratedModule = {
             amount1Out: bigint;
           };
         };
+        processEvent: (args: {
+          event: unknown;
+          mockDb: MockDb;
+        }) => Promise<MockDb>;
+      };
+      Mint: {
+        createMockEvent: (args: {
+          sender: string;
+          to: string;
+          amount0: bigint;
+          amount1: bigint;
+          liquidity: bigint;
+          mockEventData: {
+            chainId: number;
+            logIndex: number;
+            srcAddress: string;
+            block: { number: number; timestamp: number };
+          };
+        }) => unknown;
+        processEvent: (args: {
+          event: unknown;
+          mockDb: MockDb;
+        }) => Promise<MockDb>;
+      };
+      Burn: {
+        createMockEvent: (args: {
+          sender: string;
+          to: string;
+          amount0: bigint;
+          amount1: bigint;
+          liquidity: bigint;
+          mockEventData: {
+            chainId: number;
+            logIndex: number;
+            srcAddress: string;
+            block: { number: number; timestamp: number };
+          };
+        }) => unknown;
         processEvent: (args: {
           event: unknown;
           mockDb: MockDb;
@@ -232,6 +275,15 @@ type OracleSnapshotEntity = {
   rebalanceThreshold: number;
   source: string;
   blockNumber: bigint;
+};
+
+type LiquidityPositionEntity = {
+  id: string;
+  poolId: string;
+  address: string;
+  netLiquidity: bigint;
+  lastUpdatedBlock: bigint;
+  lastUpdatedTimestamp: bigint;
 };
 
 async function seedPoolWithFeed(
@@ -383,6 +435,110 @@ describe("Envio Celo indexer handlers", () => {
     assert.equal(pool.source, "fpmm_swap");
     assert.equal(pool.token0, undefined);
     assert.equal(pool.token1, undefined);
+  });
+
+  it("tracks LiquidityPosition net balances across mint and burn events", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000f0";
+    const LP_ADDR = "0x00000000000000000000000000000000000000f1";
+
+    let mockDb = MockDb.createMockDb();
+
+    const mintEvent = FPMM.Mint.createMockEvent({
+      sender: "0x00000000000000000000000000000000000000aa",
+      to: LP_ADDR,
+      amount0: 100n,
+      amount1: 200n,
+      liquidity: 300n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 30,
+        srcAddress: POOL_ADDR,
+        block: { number: 120, timestamp: 1_700_000_500 },
+      },
+    });
+    mockDb = await FPMM.Mint.processEvent({ event: mintEvent, mockDb });
+
+    const burnEvent = FPMM.Burn.createMockEvent({
+      sender: "0x00000000000000000000000000000000000000aa",
+      to: LP_ADDR,
+      amount0: 10n,
+      amount1: 20n,
+      liquidity: 75n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 31,
+        srcAddress: POOL_ADDR,
+        block: { number: 121, timestamp: 1_700_000_600 },
+      },
+    });
+    mockDb = await FPMM.Burn.processEvent({ event: burnEvent, mockDb });
+
+    const position = mockDb.entities.LiquidityPosition.get(
+      `${POOL_ADDR}-${LP_ADDR}`,
+    ) as LiquidityPositionEntity | undefined;
+    assert.ok(position, "LiquidityPosition must exist after mint/burn");
+    if (!position) {
+      throw new Error("Expected LiquidityPosition entity after mint/burn");
+    }
+
+    assert.equal(position.poolId, POOL_ADDR);
+    assert.equal(position.address, LP_ADDR);
+    assert.equal(position.netLiquidity, 225n);
+    assert.equal(position.lastUpdatedBlock, 121n);
+    assert.equal(position.lastUpdatedTimestamp, 1_700_000_600n);
+  });
+
+  it("attributes burns to the recipient address and clamps incomplete-history underflow to zero", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000f2";
+    const ROUTER_ADDR = "0x00000000000000000000000000000000000000f3";
+    const LP_ADDR = "0x00000000000000000000000000000000000000f4";
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = mockDb.entities.LiquidityPosition.set({
+      id: `${POOL_ADDR}-${LP_ADDR}`,
+      poolId: POOL_ADDR,
+      address: LP_ADDR,
+      netLiquidity: 40n,
+      lastUpdatedBlock: 1n,
+      lastUpdatedTimestamp: 1n,
+    });
+
+    const burnEvent = FPMM.Burn.createMockEvent({
+      sender: ROUTER_ADDR,
+      to: LP_ADDR,
+      amount0: 10n,
+      amount1: 20n,
+      liquidity: 75n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 32,
+        srcAddress: POOL_ADDR,
+        block: { number: 122, timestamp: 1_700_000_700 },
+      },
+    });
+    mockDb = await FPMM.Burn.processEvent({ event: burnEvent, mockDb });
+
+    const recipientPosition = mockDb.entities.LiquidityPosition.get(
+      `${POOL_ADDR}-${LP_ADDR}`,
+    ) as LiquidityPositionEntity | undefined;
+    assert.ok(recipientPosition, "recipient position must exist after burn");
+    if (!recipientPosition) {
+      throw new Error("Expected recipient LiquidityPosition entity after burn");
+    }
+    assert.equal(
+      recipientPosition.netLiquidity,
+      0n,
+      "burn larger than known balance should clamp the recipient to zero",
+    );
+
+    const routerPosition = mockDb.entities.LiquidityPosition.get(
+      `${POOL_ADDR}-${ROUTER_ADDR}`,
+    ) as LiquidityPositionEntity | undefined;
+    assert.equal(
+      routerPosition,
+      undefined,
+      "burn attribution must use the LP recipient, not the router sender",
+    );
   });
 
   // ---------------------------------------------------------------------------

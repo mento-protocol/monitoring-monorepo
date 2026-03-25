@@ -373,9 +373,8 @@ FPMM.Burn.handler(async ({ event, context }) => {
 
   context.LiquidityEvent.set(liquidityEvent);
 
-  // Track LP position: on burn, LP tokens are pulled from `to` (the recipient who
-  // receives the underlying tokens back). Using `to` rather than `sender` avoids
-  // misattribution when a router/strategy contract is the msg.sender.
+  // Track LP position: on burn, the LP recipient is the holder whose position
+  // shrinks. Using `to` rather than `sender` avoids router misattribution.
   const lpBurnId = `${poolId}-${liquidityEvent.recipient}`;
   const existingBurn = await context.LiquidityPosition.get(lpBurnId);
   const prevBalance = existingBurn?.netLiquidity ?? 0n;

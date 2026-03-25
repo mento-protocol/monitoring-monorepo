@@ -207,7 +207,8 @@ export const POOL_DEPLOYMENT = `
   }
 `;
 
-// Option A shim: fetch all events for client-side aggregation
+// Fetch all mint/burn events for client-side position aggregation.
+// Capped at 10,000 rows; the UI shows a warning when the cap is hit.
 export const POOL_LIQUIDITY_ALL = `
   query PoolLiquidityAll($poolId: String!) {
     LiquidityEvent(
@@ -220,7 +221,8 @@ export const POOL_LIQUIDITY_ALL = `
   }
 `;
 
-// Option B: direct position query (after reindex)
+// Direct LP position query — used once the indexer has been reindexed with
+// the LiquidityPosition entity (replaces client-side aggregation in POOL_LIQUIDITY_ALL).
 export const POOL_LP_POSITIONS = `
   query PoolLpPositions($poolId: String!) {
     LiquidityPosition(
