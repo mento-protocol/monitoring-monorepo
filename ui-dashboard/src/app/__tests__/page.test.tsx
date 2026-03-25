@@ -17,26 +17,11 @@ vi.mock("@/hooks/use-all-networks-data", () => ({
   useAllNetworksData: vi.fn(),
 }));
 
-// NetworkProvider reads URL params — stub it out
-vi.mock("@/components/network-provider", () => ({
-  StaticNetworkProvider: ({ children }: { children: React.ReactNode }) =>
-    children,
-  useNetwork: vi.fn(() => ({
-    network: {
-      id: "celo-mainnet-hosted",
-      tokenSymbols: {},
-      addressLabels: {},
-      hasVirtualPools: false,
-      testnet: false,
-    },
-    networkId: "celo-mainnet-hosted",
-    setNetworkId: vi.fn(),
-  })),
-}));
-
-// PoolsTable has complex deps — stub it
-vi.mock("@/components/pools-table", () => ({
-  PoolsTable: () => <div data-testid="pools-table" />,
+// GlobalPoolsTable has complex deps — stub it
+vi.mock("@/components/global-pools-table", () => ({
+  GlobalPoolsTable: () => <div data-testid="global-pools-table" />,
+  globalPoolKey: (entry: { pool: { id: string }; network: { id: string } }) =>
+    `${entry.network.id}:${entry.pool.id}`,
 }));
 
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
