@@ -176,7 +176,7 @@ resource "vercel_project_environment_variable" "cron_secret" {
   value      = var.cron_secret
   # Production-only: preview deployments do not run cron jobs and should not
   # have access to the backup trigger secret.
-  target    = ["production"]
+  target     = ["production"]
   sensitive  = true
 }
 
