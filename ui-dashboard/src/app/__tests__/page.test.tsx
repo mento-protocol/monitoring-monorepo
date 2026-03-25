@@ -352,9 +352,13 @@ describe("GlobalPage — cross-chain key collision", () => {
 
   it("preserves undefined volume entries instead of coercing them to null", () => {
     const pool = makePool("0xpool1");
-    vi.spyOn(volumeModule, "buildPool24hVolumeMap").mockReturnValue(new Map());
+    const spy = vi
+      .spyOn(volumeModule, "buildPool24hVolumeMap")
+      .mockReturnValue(new Map());
 
     render([makeNetworkData({ network: BASE_NETWORK, pools: [pool] })]);
+
+    spy.mockRestore();
 
     expect(capturedProps).not.toBeNull();
     const map = capturedProps!.volume24hByKey as Map<string, number | null>;
