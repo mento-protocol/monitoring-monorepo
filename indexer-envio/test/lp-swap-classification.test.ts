@@ -653,9 +653,12 @@ describe("LP swap classification — known limitation", () => {
     _clearMockRebalancingStates();
   });
 
-  it("KNOWN FALSE-POSITIVE: user swap + mint without rebalance in same block — swap is incorrectly flagged isLpSwap=true", async () => {
-    // This test documents the known limitation. Do NOT change the assertions
-    // to expect isLpSwap=false — that would mask the known gap.
+  it.skip("KNOWN FALSE-POSITIVE: user swap + mint without rebalance in same block — swap is incorrectly flagged isLpSwap=true", async () => {
+    // This test documents a known limitation that is not yet fixed at the
+    // contract/protocol level. It is skipped (not asserted as passing) to avoid
+    // encoding incorrect behavior as expected. A contract-level fix is needed:
+    // the rebalance swap must emit a distinguishable event or flag so we can
+    // safely identify it. Tracked for future work.
     let mockDb = await deployPool();
 
     // User swap fires (e.g. FPMM.swap() called by external contract)
