@@ -68,6 +68,15 @@ networks:
           - event: MedianUpdated
           - event: ReportExpirySet
           - event: TokenReportExpirySet
+      - name: OpenLiquidityStrategy
+        abi_file_path: abis/OpenLiquidityStrategy.json
+        address: [] # Not yet deployed on Celo Sepolia — add address when available
+        handler: src/EventHandlers.ts
+        events:
+          - event: PoolAdded
+          - event: PoolRemoved
+          - event: RebalanceCooldownSet
+          - event: LiquidityMoved
       - name: ERC20FeeToken
         abi_file_path: abis/ERC20.json
         address: [] # Dynamically registered from FPMMDeployed events
