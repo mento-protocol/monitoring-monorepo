@@ -134,4 +134,80 @@ describe("POST /api/address-labels/import", () => {
     expect(res.status).toBe(400);
     expect(importLabels).not.toHaveBeenCalled();
   });
+
+  describe("Gnosis Safe format", () => {
+    const validAddress = "0x" + "a".repeat(40);
+
+    it("imports a valid Gnosis Safe array", async () => {
+      const gnosisSafe = [
+        { address: validAddress, chainId: "42220", name: "My Safe" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(200);
+      expect(importLabels).toHaveBeenCalledTimes(1);
+      expect(importLabels).toHaveBeenCalledWith(
+        42220,
+        expect.objectContaining({
+          [validAddress]: expect.objectContaining({ label: "My Safe" }),
+        }),
+      );
+    });
+
+    it("imports multiple entries grouped by chainId", async () => {
+      const addr2 = "0x" + "b".repeat(40);
+      const gnosisSafe = [
+        { address: validAddress, chainId: "42220", name: "Celo Safe" },
+        { address: addr2, chainId: "1", name: "Mainnet Safe" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(200);
+      expect(importLabels).toHaveBeenCalledTimes(2);
+    });
+
+    it("succeeds with an empty array (no-op)", async () => {
+      const res = await POST(jsonReq([]));
+      expect(res.status).toBe(200);
+      expect(importLabels).not.toHaveBeenCalled();
+    });
+
+    it("rejects an entry with an invalid chainId", async () => {
+      const gnosisSafe = [
+        { address: validAddress, chainId: "not-a-number", name: "Safe" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain("chainId");
+      expect(importLabels).not.toHaveBeenCalled();
+    });
+
+    it("rejects an entry with a negative chainId", async () => {
+      const gnosisSafe = [
+        { address: validAddress, chainId: "-1", name: "Safe" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(400);
+      expect(importLabels).not.toHaveBeenCalled();
+    });
+
+    it("rejects an entry with an invalid address", async () => {
+      const gnosisSafe = [
+        { address: "not-an-address", chainId: "42220", name: "Safe" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain("address");
+      expect(importLabels).not.toHaveBeenCalled();
+    });
+
+    it("rejects an array where one element is missing the name field", async () => {
+      const gnosisSafe = [
+        { address: validAddress, chainId: "42220" }, // missing name
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      // Falls through to simple-format validation since isGnosisSafeFormat returns false
+      expect(res.status).toBe(400);
+    });
+  });
 });

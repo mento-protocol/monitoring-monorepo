@@ -43,6 +43,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           { status: 400 },
         );
       }
+      if (!/^0x[0-9a-fA-F]{40}$/.test(entry.address)) {
+        return NextResponse.json(
+          { error: `Invalid address: ${entry.address}` },
+          { status: 400 },
+        );
+      }
       if (!byChain.has(chainId)) byChain.set(chainId, {});
       byChain.get(chainId)![entry.address] = {
         label: entry.name,
@@ -116,7 +122,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 function isGnosisSafeFormat(
   v: unknown,
 ): v is Array<{ address: string; chainId: string; name: string }> {
-  if (!Array.isArray(v) || v.length === 0) return false;
+  if (!Array.isArray(v)) return false;
+  // An empty array is a valid (no-op) Gnosis Safe export — handle it as this
+  // format so callers get 200 instead of a misleading "Invalid chainId" 400.
+  if (v.length === 0) return true;
   return v.every(
     (entry) =>
       typeof entry === "object" &&
