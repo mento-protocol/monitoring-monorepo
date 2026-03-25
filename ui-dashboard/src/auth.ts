@@ -17,13 +17,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
-      // PKCE uses a cookie on the initiating domain that can't be read when the
-      // OAuth callback lands on a different domain (e.g. prod proxying for a
-      // preview deploy). Replace PKCE with state-only, which is a signed JWT
-      // verified server-side without any cross-domain cookie dependency.
-      // The state check is still cryptographically secure via AUTH_SECRET.
+      // When running as an OAuth proxy for preview deployments (AUTH_REDIRECT_PROXY_URL set),
+      // PKCE cannot be used: the code verifier cookie is set on the preview domain but the
+      // callback lands on prod — different domains, cookie is never sent.
+      // Use state-only instead: the state is a JWE signed with AUTH_SECRET (same on both
+      // prod and preview), verified entirely server-side without cookie dependency.
+      // In normal prod (no proxy URL), default checks apply (includes PKCE).
       // See: https://authjs.dev/getting-started/deployment#securing-a-preview-deployment
-      checks: ["state"],
+      ...(process.env.AUTH_REDIRECT_PROXY_URL ? { checks: ["state"] } : {}),
     }),
   ],
 
