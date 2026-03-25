@@ -147,6 +147,7 @@ interface PoolsTableProps {
   volume24h?: Map<string, number | null>;
   volume24hLoading?: boolean;
   volume24hError?: boolean;
+  olsPoolIds?: Set<string>;
 }
 
 export function PoolsTable({
@@ -154,6 +155,7 @@ export function PoolsTable({
   volume24h,
   volume24hLoading = false,
   volume24hError = false,
+  olsPoolIds,
 }: PoolsTableProps) {
   const { network } = useNetwork();
   const nowSeconds = Math.floor(Date.now() / 1000);
@@ -295,6 +297,14 @@ export function PoolsTable({
             >
               Rebalancer
             </th>
+            {olsPoolIds && (
+              <th
+                scope="col"
+                className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
+              >
+                OLS
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -366,6 +376,15 @@ export function PoolsTable({
                     <RebalancerBadge status={rebalancerStatus} />
                   </span>
                 </td>
+                {olsPoolIds && (
+                  <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
+                    {olsPoolIds.has(p.id) && (
+                      <span className="inline-flex items-center rounded-full bg-purple-900/60 px-2 py-0.5 text-xs font-medium text-purple-300 ring-1 ring-purple-700/50">
+                        OLS
+                      </span>
+                    )}
+                  </td>
+                )}
               </Row>
             );
           })}

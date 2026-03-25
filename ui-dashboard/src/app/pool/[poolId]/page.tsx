@@ -28,6 +28,8 @@ import {
 import { useGQL } from "@/lib/graphql";
 import {
   ORACLE_SNAPSHOTS,
+  OLS_LIQUIDITY_EVENTS,
+  OLS_POOL,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   POOL_LIQUIDITY,
@@ -43,6 +45,8 @@ import { isFpmm, poolName, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import type {
   LiquidityEvent,
   LiquidityPosition,
+  OlsLiquidityEvent,
+  OlsPool,
   OracleSnapshot,
   Pool,
   PoolSnapshot,
@@ -73,6 +77,7 @@ const TABS = [
   "liquidity",
   "oracle",
   "providers",
+  "ols",
 ] as const;
 type Tab = (typeof TABS)[number];
 
@@ -221,6 +226,9 @@ function PoolDetail() {
           <OracleTab poolId={decodedId} limit={limit} pool={pool} />
         )}
         {tab === "providers" && <LpsTab poolId={decodedId} pool={pool} />}
+        {tab === "ols" && (
+          <OlsTab poolId={decodedId} limit={limit} pool={pool} />
+        )}
       </div>
     </div>
   );
@@ -862,6 +870,7 @@ function OracleTab({
         token0={pool?.token0 ?? null}
         token1={pool?.token1 ?? null}
       />
+
       <Table>
         <thead>
           <tr className="border-b border-slate-800 bg-slate-900/50">
@@ -915,5 +924,249 @@ function OracleTab({
         </tbody>
       </Table>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// OLS Tab
+// ---------------------------------------------------------------------------
+
+function OlsTab({
+  poolId,
+  limit,
+  pool,
+}: {
+  poolId: string;
+  limit: number;
+  pool: Pool | null;
+}) {
+  const { network } = useNetwork();
+  const {
+    data: olsData,
+    error: olsErr,
+    isLoading: olsLoading,
+  } = useGQL<{
+    OlsPool: OlsPool[];
+  }>(OLS_POOL, { poolId });
+  const {
+    data: eventsData,
+    error: eventsErr,
+    isLoading: eventsLoading,
+  } = useGQL<{
+    OlsLiquidityEvent: OlsLiquidityEvent[];
+  }>(OLS_LIQUIDITY_EVENTS, { poolId, limit });
+
+  const olsPool = olsData?.OlsPool?.[0] ?? null;
+  const events = eventsData?.OlsLiquidityEvent ?? [];
+
+  if (olsErr) return <ErrorBox message={olsErr.message} />;
+  if (olsLoading) return <Skeleton rows={3} />;
+
+  return (
+    <div className="space-y-6">
+      <OlsStatusPanel olsPool={olsPool} pool={pool} network={network} />
+      <OlsLiquidityTable
+        events={events}
+        pool={pool}
+        network={network}
+        isLoading={eventsLoading}
+        error={eventsErr ?? null}
+      />
+    </div>
+  );
+}
+
+function OlsStatusPanel({
+  olsPool,
+  pool,
+  network,
+}: {
+  olsPool: OlsPool | null;
+  pool: Pool | null;
+  network: ReturnType<typeof useNetwork>["network"];
+}) {
+  if (!olsPool) {
+    return (
+      <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
+        <p className="text-slate-400 text-sm">
+          This pool is not registered with the Open Liquidity Strategy.
+        </p>
+      </div>
+    );
+  }
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const lastRebalance = Number(olsPool.lastRebalance);
+  const cooldown = Number(olsPool.rebalanceCooldown);
+  const elapsed = lastRebalance > 0 ? nowSeconds - lastRebalance : null;
+
+  let cooldownStatus: string;
+  if (lastRebalance === 0) {
+    cooldownStatus = "Never rebalanced";
+  } else if (elapsed !== null && elapsed >= cooldown) {
+    cooldownStatus = "Ready to rebalance";
+  } else if (elapsed !== null) {
+    const remaining = cooldown - elapsed;
+    const h = Math.floor(remaining / 3600);
+    const m = Math.floor((remaining % 3600) / 60);
+    cooldownStatus = `Cooling down (${h}h ${m}m left)`;
+  } else {
+    cooldownStatus = "—";
+  }
+
+  const debtTokenSym = tokenSymbol(network, olsPool.debtToken);
+  const isDebtToken0 =
+    pool?.token0?.toLowerCase() === olsPool.debtToken.toLowerCase();
+
+  // Incentives: raw uint64, denominator 1e18. Show as percentage.
+  const toPercent = (raw: string) =>
+    (Number(BigInt(raw)) / 1e16).toFixed(4) + "%";
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <h3 className="text-base font-semibold text-white">
+          Open Liquidity Strategy
+        </h3>
+        {olsPool.isActive ? (
+          <span className="inline-flex items-center rounded-full bg-emerald-900/60 px-2.5 py-0.5 text-xs font-medium text-emerald-300 ring-1 ring-emerald-700/50">
+            Active
+          </span>
+        ) : (
+          <span className="inline-flex items-center rounded-full bg-red-900/60 px-2.5 py-0.5 text-xs font-medium text-red-300 ring-1 ring-red-700/50">
+            Removed
+          </span>
+        )}
+      </div>
+
+      <dl className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+        <Stat
+          label="Debt Token"
+          value={`${debtTokenSym} (token${isDebtToken0 ? "0" : "1"})`}
+        />
+        <Stat
+          label="Cooldown"
+          value={
+            cooldown > 0
+              ? `${Math.floor(cooldown / 3600)}h ${Math.floor((cooldown % 3600) / 60)}m`
+              : "None"
+          }
+        />
+        <Stat label="Cooldown Status" value={cooldownStatus} />
+        <Stat
+          label="OLS Rebalances"
+          value={String(olsPool.olsRebalanceCount)}
+        />
+        <Stat
+          label="Last Rebalance"
+          value={
+            lastRebalance > 0 ? relativeTime(String(lastRebalance)) : "Never"
+          }
+          title={
+            lastRebalance > 0
+              ? formatTimestamp(String(lastRebalance))
+              : undefined
+          }
+        />
+        <Stat
+          label="Protocol Fee Recipient"
+          value={<AddressLink address={olsPool.protocolFeeRecipient} />}
+        />
+        <Stat
+          label="Expansion Incentive (Liquidity Source)"
+          value={toPercent(olsPool.liquiditySourceIncentiveExpansion)}
+        />
+        <Stat
+          label="Contraction Incentive (Liquidity Source)"
+          value={toPercent(olsPool.liquiditySourceIncentiveContraction)}
+        />
+        <Stat
+          label="Expansion Incentive (Protocol)"
+          value={toPercent(olsPool.protocolIncentiveExpansion)}
+        />
+        <Stat
+          label="Contraction Incentive (Protocol)"
+          value={toPercent(olsPool.protocolIncentiveContraction)}
+        />
+        <Stat
+          label="OLS Contract"
+          value={<AddressLink address={olsPool.olsAddress} />}
+        />
+      </dl>
+    </div>
+  );
+}
+
+function OlsLiquidityTable({
+  events,
+  pool,
+  network,
+  isLoading,
+  error,
+}: {
+  events: OlsLiquidityEvent[];
+  pool: Pool | null;
+  network: ReturnType<typeof useNetwork>["network"];
+  isLoading: boolean;
+  error: Error | null;
+}) {
+  if (error) return <ErrorBox message={error.message} />;
+  if (isLoading) return <Skeleton rows={5} />;
+  if (events.length === 0)
+    return <EmptyBox message="No OLS liquidity events for this pool." />;
+
+  return (
+    <Table>
+      <thead>
+        <tr className="border-b border-slate-800 bg-slate-900/50">
+          <Th>Time</Th>
+          <Th>Direction</Th>
+          <Th align="right">Given to Pool</Th>
+          <Th align="right">Taken from Pool</Th>
+          <Th>Caller</Th>
+          <Th>Tx</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {events.map((e) => {
+          const givenSym = tokenSymbol(network, e.tokenGivenToPool);
+          const takenSym = tokenSymbol(network, e.tokenTakenFromPool);
+          const givenDec =
+            pool?.token0?.toLowerCase() === e.tokenGivenToPool.toLowerCase()
+              ? (pool?.token0Decimals ?? 18)
+              : (pool?.token1Decimals ?? 18);
+          const takenDec =
+            pool?.token0?.toLowerCase() === e.tokenTakenFromPool.toLowerCase()
+              ? (pool?.token0Decimals ?? 18)
+              : (pool?.token1Decimals ?? 18);
+          return (
+            <Row key={e.id}>
+              <Td small muted title={formatTimestamp(e.blockTimestamp)}>
+                {relativeTime(e.blockTimestamp)}
+              </Td>
+              <td className="px-4 py-2">
+                {e.direction === 0 ? (
+                  <span className="inline-flex items-center rounded-full bg-emerald-900/60 px-2 py-0.5 text-xs font-medium text-emerald-300 ring-1 ring-emerald-700/50">
+                    EXPAND
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-red-900/60 px-2 py-0.5 text-xs font-medium text-red-300 ring-1 ring-red-700/50">
+                    CONTRACT
+                  </span>
+                )}
+              </td>
+              <Td mono small align="right">
+                {formatWei(e.amountGivenToPool, givenDec)} {givenSym}
+              </Td>
+              <Td mono small align="right">
+                {formatWei(e.amountTakenFromPool, takenDec)} {takenSym}
+              </Td>
+              <SenderCell address={e.caller} />
+              <TxHashCell txHash={e.txHash} />
+            </Row>
+          );
+        })}
+      </tbody>
+    </Table>
   );
 }
