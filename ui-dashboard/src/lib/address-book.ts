@@ -70,3 +70,37 @@ export function resolveCanEdit(
 ): boolean {
   return row.network === null || row.network.chainId === selectedChainId;
 }
+
+/**
+ * Count the number of distinct labels that will be persisted from a parsed
+ * import payload. Deduplicates Gnosis Safe entries by (chainId, address)
+ * to match what the import API actually persists (lowercase address per chain).
+ */
+export function countImportLabels(parsed: unknown): number {
+  if (Array.isArray(parsed)) {
+    // Gnosis Safe format: Array<{ address, chainId, name }>
+    const entries = parsed as Array<Record<string, unknown>>;
+    return new Set(
+      entries.map(
+        (e) => `${String(e.chainId)}:${String(e.address).toLowerCase()}`,
+      ),
+    ).size;
+  }
+  if (typeof parsed === "object" && parsed !== null && "chains" in parsed) {
+    // Snapshot format: { chains: { chainId: { address: entry } } }
+    return Object.values(
+      (parsed as { chains: Record<string, Record<string, unknown>> }).chains,
+    ).reduce((sum, entries) => sum + Object.keys(entries).length, 0);
+  }
+  if (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    "labels" in parsed &&
+    typeof (parsed as { labels: unknown }).labels === "object"
+  ) {
+    // Simple format: { chainId, labels: { address: entry } }
+    return Object.keys((parsed as { labels: Record<string, unknown> }).labels)
+      .length;
+  }
+  return 0;
+}

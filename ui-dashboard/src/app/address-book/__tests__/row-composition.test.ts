@@ -238,3 +238,77 @@ describe("resolveCanEdit", () => {
     expect(resolveCanEdit(row, NET_CELO_HOSTED.chainId)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// countImportLabels
+// ---------------------------------------------------------------------------
+
+import { countImportLabels } from "@/lib/address-book";
+
+describe("countImportLabels", () => {
+  const addr = "0x" + "a".repeat(40);
+  const addr2 = "0x" + "b".repeat(40);
+
+  it("returns 0 for empty array", () => {
+    expect(countImportLabels([])).toBe(0);
+  });
+
+  it("counts distinct (chainId, address) pairs in Gnosis Safe format", () => {
+    const entries = [
+      { address: addr, chainId: "42220", name: "A" },
+      { address: addr2, chainId: "42220", name: "B" },
+    ];
+    expect(countImportLabels(entries)).toBe(2);
+  });
+
+  it("deduplicates duplicate (chainId, address) entries", () => {
+    const entries = [
+      { address: addr, chainId: "42220", name: "A" },
+      { address: addr, chainId: "42220", name: "A duplicate" },
+    ];
+    expect(countImportLabels(entries)).toBe(1);
+  });
+
+  it("does not deduplicate same address on different chains", () => {
+    const entries = [
+      { address: addr, chainId: "42220", name: "Celo" },
+      { address: addr, chainId: "1", name: "Mainnet" },
+    ];
+    expect(countImportLabels(entries)).toBe(2);
+  });
+
+  it("deduplicates case-insensitive addresses", () => {
+    const entries = [
+      { address: addr.toLowerCase(), chainId: "42220", name: "A" },
+      { address: addr.toUpperCase(), chainId: "42220", name: "A upper" },
+    ];
+    expect(countImportLabels(entries)).toBe(1);
+  });
+
+  it("counts entries in snapshot format", () => {
+    const snapshot = {
+      chains: {
+        "42220": { [addr]: { label: "A", updatedAt: "" } },
+        "1": { [addr2]: { label: "B", updatedAt: "" } },
+      },
+    };
+    expect(countImportLabels(snapshot)).toBe(2);
+  });
+
+  it("counts entries in simple format", () => {
+    const simple = {
+      chainId: 42220,
+      labels: {
+        [addr]: { label: "A", updatedAt: "" },
+        [addr2]: { label: "B", updatedAt: "" },
+      },
+    };
+    expect(countImportLabels(simple)).toBe(2);
+  });
+
+  it("returns 0 for unrecognised payload", () => {
+    expect(countImportLabels({ foo: "bar" })).toBe(0);
+    expect(countImportLabels(null)).toBe(0);
+    expect(countImportLabels(42)).toBe(0);
+  });
+});

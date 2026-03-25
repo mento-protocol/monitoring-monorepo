@@ -11,12 +11,9 @@ import {
   buildAddressBookRows,
   resolveIsCustom,
   resolveCanEdit,
+  countImportLabels,
   type AddressBookRow,
 } from "@/lib/address-book";
-import type {
-  AddressLabelEntry,
-  AddressLabelsSnapshot,
-} from "@/lib/address-labels";
 
 // AddressBookRow is imported from @/lib/address-book (shared with tests).
 // Local alias for brevity.
@@ -133,7 +130,7 @@ export default function AddressBookPage() {
           setImportError(body.error ?? "Import failed.");
           return;
         }
-        const count = countLabels(parsed);
+        const count = countImportLabels(parsed);
         setImportSuccess(`Imported ${count} label${count !== 1 ? "s" : ""}.`);
       } catch (err) {
         setImportError(err instanceof Error ? err.message : "Import failed.");
@@ -462,32 +459,4 @@ function AddressTableRow({
       </td>
     </tr>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Helper
-// ---------------------------------------------------------------------------
-
-function countLabels(parsed: unknown): number {
-  if (Array.isArray(parsed)) {
-    // Gnosis Safe format: Array<{ address, chainId, name }>
-    return parsed.length;
-  }
-  if (typeof parsed === "object" && parsed !== null && "chains" in parsed) {
-    return Object.values((parsed as AddressLabelsSnapshot).chains).reduce(
-      (sum, entries) => sum + Object.keys(entries).length,
-      0,
-    );
-  }
-  if (
-    typeof parsed === "object" &&
-    parsed !== null &&
-    "labels" in parsed &&
-    typeof (parsed as { labels: unknown }).labels === "object"
-  ) {
-    return Object.keys(
-      (parsed as { labels: Record<string, AddressLabelEntry> }).labels,
-    ).length;
-  }
-  return 0;
 }
