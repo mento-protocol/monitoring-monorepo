@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useCallback } from "react";
+import { Suspense, useState, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { NetworkAwareLink } from "@/components/network-aware-link";
 import { useGQL } from "@/lib/graphql";
@@ -62,10 +62,15 @@ function HomeContent() {
     isLoading: poolsLoading,
   } = useGQL<{ Pool: Pool[] }>(ALL_POOLS_WITH_HEALTH);
 
-  const { data: olsData } = useGQL<{ OlsPool: Pick<OlsPool, "id">[] }>(
-    ALL_OLS_POOLS,
+  const {
+    data: olsData,
+    error: olsErr,
+    isLoading: olsLoading,
+  } = useGQL<{ OlsPool: Pick<OlsPool, "id">[] }>(ALL_OLS_POOLS);
+  const olsPoolIds = useMemo(
+    () => new Set((olsData?.OlsPool ?? []).map((p) => p.id)),
+    [olsData],
   );
-  const olsPoolIds = new Set((olsData?.OlsPool ?? []).map((p) => p.id));
 
   const swapQuery = poolFilter ? POOL_SWAPS : RECENT_SWAPS;
   const swapVars = poolFilter ? { poolId: poolFilter, limit } : { limit };
@@ -140,7 +145,16 @@ function HomeContent() {
         ) : pools.length === 0 ? (
           <EmptyBox message="No pools found. Is the indexer running?" />
         ) : (
-          <PoolsTable pools={pools} olsPoolIds={olsPoolIds} />
+          <>
+            {olsErr && !olsLoading && (
+              <div className="mb-3">
+                <ErrorBox
+                  message={`OLS status unavailable right now: ${olsErr.message}. Pool list is loaded, but OLS badges may be incomplete.`}
+                />
+              </div>
+            )}
+            <PoolsTable pools={pools} olsPoolIds={olsPoolIds} />
+          </>
         )}
       </section>
 
