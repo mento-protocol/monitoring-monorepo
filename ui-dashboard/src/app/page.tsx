@@ -117,7 +117,7 @@ function GlobalContent() {
   // Pools from chains with snapshot errors get null in the map → rendered as "N/A" per-row.
   const { globalEntries, volume24hByKey } = useMemo(() => {
     const entries: GlobalPoolEntry[] = [];
-    const volMap = new Map<string, number | null>();
+    const volMap = new Map<string, number | null | undefined>();
 
     for (const netData of networkData) {
       if (netData.error !== null) continue;
@@ -132,10 +132,7 @@ function GlobalContent() {
         const entry: GlobalPoolEntry = { pool, network };
         entries.push(entry);
         const key = globalPoolKey(entry);
-        volMap.set(
-          key,
-          perChainVolMap ? (perChainVolMap.get(pool.id) ?? null) : null,
-        );
+        volMap.set(key, perChainVolMap ? perChainVolMap.get(pool.id) : null);
       }
     }
 
