@@ -194,7 +194,10 @@ resource "vercel_project_environment_variable" "auth_redirect_proxy_url" {
   team_id    = var.vercel_team_id
   key        = "AUTH_REDIRECT_PROXY_URL"
   value      = "https://monitoring.mento.org/api/auth"
-  target     = ["preview"]
+  # Must be set on BOTH production and preview — Auth.js only enables proxy
+  # mode when this var is present in the stable (prod) env too.
+  # See: https://authjs.dev/getting-started/deployment#securing-a-preview-deployment
+  target     = ["production", "preview"]
 }
 
 # Cron jobs are defined in ui-dashboard/vercel.json and activated automatically
