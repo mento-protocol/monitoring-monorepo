@@ -99,30 +99,40 @@ export function countImportLabels(parsed: unknown): number {
 
   if (typeof parsed === "object" && parsed !== null && "chains" in parsed) {
     // Snapshot format: { chains: { chainId: { address: entry } } }
-    const chains = (
-      parsed as { chains: Record<string, Record<string, unknown>> }
-    ).chains;
-    for (const [chainId, entries] of Object.entries(chains)) {
-      for (const address of Object.keys(entries)) {
-        keys.add(importKey(chainId, address));
+    const chains = (parsed as { chains: unknown }).chains;
+    if (
+      typeof chains === "object" &&
+      chains !== null &&
+      !Array.isArray(chains)
+    ) {
+      for (const [chainId, entries] of Object.entries(
+        chains as Record<string, unknown>,
+      )) {
+        if (
+          typeof entries === "object" &&
+          entries !== null &&
+          !Array.isArray(entries)
+        ) {
+          for (const address of Object.keys(entries)) {
+            keys.add(importKey(chainId, address));
+          }
+        }
       }
     }
     return keys.size;
   }
 
-  if (
-    typeof parsed === "object" &&
-    parsed !== null &&
-    "labels" in parsed &&
-    typeof (parsed as { labels: unknown }).labels === "object"
-  ) {
+  if (typeof parsed === "object" && parsed !== null && "labels" in parsed) {
     // Simple format: { chainId, labels: { address: entry } }
-    const { chainId, labels } = parsed as {
-      chainId: number;
-      labels: Record<string, unknown>;
-    };
-    for (const address of Object.keys(labels)) {
-      keys.add(importKey(chainId, address));
+    const { chainId, labels } = parsed as { chainId: unknown; labels: unknown };
+    if (
+      typeof labels === "object" &&
+      labels !== null &&
+      !Array.isArray(labels)
+    ) {
+      for (const address of Object.keys(labels)) {
+        keys.add(importKey(chainId as number, address));
+      }
     }
     return keys.size;
   }
