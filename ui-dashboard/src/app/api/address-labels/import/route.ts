@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthSession } from "@/auth";
 import {
   importLabels,
+  getLabels,
   type AddressLabelEntry,
   type AddressLabelsSnapshot,
 } from "@/lib/address-labels";
@@ -33,8 +34,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       name: string;
     }>;
 
-    // Group by chainId
-    const byChain = new Map<number, Record<string, AddressLabelEntry>>();
+    // Validate all entries upfront, then group by chainId.
+    type ParsedEntry = { chainId: number; address: string; name: string };
+    const parsed: ParsedEntry[] = [];
     for (const entry of entries) {
       // Strict decimal-only parse — reject "1e3", "0x1", and whitespace-padded
       // strings that Number() silently coerces to valid-looking chain IDs.
@@ -58,9 +60,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           { status: 400 },
         );
       }
+      parsed.push({ chainId, address: entry.address, name: entry.name });
+    }
+
+    // Fetch existing labels for each distinct chainId so we can merge instead
+    // of overwriting — preserves category, notes, isPublic from prior entries.
+    const existingByChain = new Map<
+      number,
+      Record<string, AddressLabelEntry>
+    >();
+    const distinctChainIds = [...new Set(parsed.map((e) => e.chainId))];
+    for (const chainId of distinctChainIds) {
+      existingByChain.set(chainId, await getLabels(chainId));
+    }
+
+    const byChain = new Map<number, Record<string, AddressLabelEntry>>();
+    for (const entry of parsed) {
+      const { chainId, address, name } = entry;
+      const existing = existingByChain.get(chainId) ?? {};
+      const prev = existing[address.toLowerCase()];
       if (!byChain.has(chainId)) byChain.set(chainId, {});
-      byChain.get(chainId)![entry.address] = {
-        label: entry.name,
+      byChain.get(chainId)![address] = {
+        // Preserve existing metadata; only overwrite label and timestamp.
+        ...prev,
+        label: name,
         updatedAt: new Date().toISOString(),
       };
     }

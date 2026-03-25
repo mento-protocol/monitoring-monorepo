@@ -59,14 +59,21 @@ describe("auth config", () => {
 });
 
 describe("Google provider checks config", () => {
-  it("uses state-only checks when AUTH_REDIRECT_PROXY_URL is set (proxy mode)", async () => {
+  it("uses state-only checks on preview (VERCEL_ENV=preview)", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
     await loadAuthWithEnv("https://monitoring.mento.org/api/auth");
     expect(capturedGoogleOptions.checks).toEqual(["state"]);
   });
 
-  it("uses default checks (no override) when AUTH_REDIRECT_PROXY_URL is unset (prod mode)", async () => {
+  it("uses default checks on production even with AUTH_REDIRECT_PROXY_URL set", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    await loadAuthWithEnv("https://monitoring.mento.org/api/auth");
+    // No checks override — PKCE is left to Auth.js defaults on prod
+    expect(capturedGoogleOptions.checks).toBeUndefined();
+  });
+
+  it("uses default checks when VERCEL_ENV is unset", async () => {
     await loadAuthWithEnv(undefined);
-    // No checks override — PKCE is left to Auth.js defaults
     expect(capturedGoogleOptions.checks).toBeUndefined();
   });
 });

@@ -8,10 +8,11 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/lib/address-labels", () => ({
   importLabels: vi.fn().mockResolvedValue(undefined),
+  getLabels: vi.fn().mockResolvedValue({}),
 }));
 
 import { getAuthSession } from "@/auth";
-import { importLabels } from "@/lib/address-labels";
+import { importLabels, getLabels } from "@/lib/address-labels";
 
 function jsonReq(body: unknown) {
   return new NextRequest("http://localhost/api/address-labels/import", {
@@ -241,6 +242,39 @@ describe("POST /api/address-labels/import", () => {
       const res = await POST(jsonReq(gnosisSafe));
       // Falls through to simple-format validation since isGnosisSafeFormat returns false
       expect(res.status).toBe(400);
+    });
+
+    it("merges with existing label metadata instead of overwriting", async () => {
+      // Existing label has category/notes/isPublic set
+      const existingEntry = {
+        label: "Old Name",
+        category: "Team",
+        notes: "Important contract",
+        isPublic: true,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+      (getLabels as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        [validAddress.toLowerCase()]: existingEntry,
+      });
+
+      const gnosisSafe = [
+        { address: validAddress, chainId: "42220", name: "New Name" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(200);
+
+      // importLabels should be called with merged entry preserving existing metadata
+      expect(importLabels).toHaveBeenCalledWith(
+        42220,
+        expect.objectContaining({
+          [validAddress]: expect.objectContaining({
+            label: "New Name",
+            category: "Team",
+            notes: "Important contract",
+            isPublic: true,
+          }),
+        }),
+      );
     });
   });
 });
