@@ -258,7 +258,7 @@ export const OLS_LIQUIDITY_EVENTS = `
 
 export const ALL_OLS_POOLS = `
   query AllOlsPools {
-    OlsPool(where: { isActive: { _eq: true } }) {
+    OlsPool(where: { isActive: { _eq: true } }, limit: 1000) {
       poolId
     }
   }

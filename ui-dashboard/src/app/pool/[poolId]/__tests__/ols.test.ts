@@ -202,6 +202,9 @@ describe("getDebtTokenSideLabel", () => {
   });
 });
 
+// vi.mock() is hoisted before imports so it can't reference this const.
+// The inline network object in vi.mock("@/components/network-provider") above
+// must be a literal duplicate. This const is used for prop-based tests below.
 const mockNetwork: Network = {
   id: "celo-mainnet-hosted",
   label: "Celo Mainnet",
@@ -234,7 +237,7 @@ describe("OlsStatusPanel", () => {
     expect(html).toContain("Active");
     expect(html).toContain("OLS Rebalances");
     expect(html).toContain("5"); // olsRebalanceCount
-    expect(html).toContain("Never rebalanced"); // lastRebalance=0
+    expect(html).toContain("Never"); // lastRebalance=0 → "Never" in Last Rebalance stat
   });
 
   it("shows 'Ready to rebalance' when cooldown has elapsed", () => {
