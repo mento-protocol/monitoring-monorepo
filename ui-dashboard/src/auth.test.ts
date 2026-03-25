@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import type { Account, Profile, NextAuthConfig } from "next-auth";
 
 // Capture the NextAuth config when the module is loaded
@@ -16,8 +16,40 @@ vi.mock("next-auth/providers/google", () => ({
   default: vi.fn(() => ({ id: "google" })),
 }));
 
-beforeAll(async () => {
+async function loadAuthWithEnv(redirectProxyUrl?: string) {
+  vi.resetModules();
+  capturedConfig = {} as NextAuthConfig;
+
+  if (redirectProxyUrl === undefined) {
+    vi.unstubAllEnvs();
+    delete process.env.AUTH_REDIRECT_PROXY_URL;
+  } else {
+    vi.stubEnv("AUTH_REDIRECT_PROXY_URL", redirectProxyUrl);
+  }
+
   await import("@/auth");
+}
+
+beforeEach(async () => {
+  await loadAuthWithEnv();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("auth config", () => {
+  it("sets redirectProxyUrl when AUTH_REDIRECT_PROXY_URL is configured", async () => {
+    await loadAuthWithEnv("https://monitoring.mento.org/api/auth");
+    expect(capturedConfig.redirectProxyUrl).toBe(
+      "https://monitoring.mento.org/api/auth",
+    );
+  });
+
+  it("leaves redirectProxyUrl undefined when AUTH_REDIRECT_PROXY_URL is unset", async () => {
+    await loadAuthWithEnv(undefined);
+    expect(capturedConfig.redirectProxyUrl).toBeUndefined();
+  });
 });
 
 describe("auth signIn callback", () => {

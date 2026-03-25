@@ -4,11 +4,13 @@ import { Suspense, useMemo } from "react";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD } from "@/lib/tokens";
 import { buildPool24hVolumeMap, sumFpmmSwaps24h } from "@/lib/volume";
-import { StaticNetworkProvider } from "@/components/network-provider";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
-import type { NetworkData } from "@/hooks/use-all-networks-data";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
-import { PoolsTable } from "@/components/pools-table";
+import {
+  GlobalPoolsTable,
+  globalPoolKey,
+  type GlobalPoolEntry,
+} from "@/components/global-pools-table";
 
 export default function GlobalPage() {
   return (
@@ -110,10 +112,38 @@ function GlobalContent() {
     };
   }, [networkData, anyNetworkError, anySnapshotsError, anyFeesError]);
 
-  // Show sections for networks that have pools or encountered an error
-  const configuredNetworks = networkData.filter(
-    (netData) => netData.pools.length > 0 || netData.error !== null,
-  );
+  // Build a flat list of all pool entries and a merged volume24h map keyed by
+  // `${network.id}:${pool.id}` to avoid collisions across chains.
+  // Pools from chains with snapshot errors get null in the map → rendered as "N/A" per-row.
+  const { globalEntries, volume24hByKey } = useMemo(() => {
+    const entries: GlobalPoolEntry[] = [];
+    const volMap = new Map<string, number | null | undefined>();
+
+    for (const netData of networkData) {
+      if (netData.error !== null) continue;
+      const { network, pools, snapshots, snapshotsError } = netData;
+
+      const perChainVolMap =
+        snapshotsError === null
+          ? buildPool24hVolumeMap(snapshots, pools, network)
+          : null;
+
+      for (const pool of pools) {
+        const entry: GlobalPoolEntry = { pool, network };
+        entries.push(entry);
+        const key = globalPoolKey(entry);
+        volMap.set(key, perChainVolMap ? perChainVolMap.get(pool.id) : null);
+      }
+    }
+
+    return {
+      globalEntries: entries,
+      volume24hByKey: volMap,
+    };
+  }, [networkData]);
+
+  // Networks that failed at the top level — show an error notice per chain
+  const failedNetworks = networkData.filter((net) => net.error !== null);
 
   return (
     <div className="space-y-8">
@@ -215,51 +245,28 @@ function GlobalContent() {
         </div>
       </section>
 
-      {/* Per-chain pool tables — errors shown inline per chain, not duplicated globally */}
-      {isLoading ? (
-        <section>
-          <h2 className="text-lg font-semibold text-white mb-3">All Pools</h2>
+      {/* Per-chain error notices — shown when a chain fails at the top level */}
+      {failedNetworks.map((net) => (
+        <ErrorBox
+          key={net.network.id}
+          message={`${net.network.label}: Failed to load pools — ${net.error?.message}`}
+        />
+      ))}
+
+      {/* Unified global pool table sorted by TVL descending */}
+      <section>
+        <h2 className="text-lg font-semibold text-white mb-3">All Pools</h2>
+        {isLoading ? (
           <Skeleton rows={5} />
-        </section>
-      ) : configuredNetworks.length === 0 ? (
-        <section>
-          <h2 className="text-lg font-semibold text-white mb-3">All Pools</h2>
+        ) : failedNetworks.length === 0 && globalEntries.length === 0 ? (
           <EmptyBox message="No pools found across any chain." />
-        </section>
-      ) : (
-        configuredNetworks.map((netData) => (
-          <ChainPoolsSection key={netData.network.id} networkData={netData} />
-        ))
-      )}
-    </div>
-  );
-}
-
-function ChainPoolsSection({ networkData }: { networkData: NetworkData }) {
-  const { network, pools, snapshots, error, snapshotsError } = networkData;
-
-  const volume24hMap = useMemo(
-    () => buildPool24hVolumeMap(snapshots, pools, network),
-    [snapshots, pools, network],
-  );
-
-  return (
-    <section>
-      <h2 className="text-lg font-semibold text-white mb-3">{network.label}</h2>
-      {error ? (
-        <ErrorBox message={`Failed to load pools: ${error.message}`} />
-      ) : pools.length === 0 ? (
-        <EmptyBox message="No pools found." />
-      ) : (
-        <StaticNetworkProvider network={network}>
-          <PoolsTable
-            pools={pools}
-            volume24h={volume24hMap}
-            volume24hLoading={false}
-            volume24hError={snapshotsError !== null}
+        ) : (
+          <GlobalPoolsTable
+            entries={globalEntries}
+            volume24hByKey={volume24hByKey}
           />
-        </StaticNetworkProvider>
-      )}
-    </section>
+        )}
+      </section>
+    </div>
   );
 }

@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { NetworkAwareLink } from "@/components/network-aware-link";
+import Link from "next/link";
 import { formatUSD } from "@/lib/format";
 import { poolName, poolTvlUSD } from "@/lib/tokens";
-import { useNetwork } from "@/components/network-provider";
+import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
 import { Table, Row, Th } from "@/components/table";
 import { SourceBadge, HealthBadge, RebalancerBadge } from "@/components/badges";
@@ -18,14 +18,22 @@ import { combinedTooltip, rebalancerTooltip } from "@/lib/pool-table-utils";
 import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 
-export type SortKey =
+/** A pool entry enriched with its originating network. */
+export type GlobalPoolEntry = {
+  pool: Pool;
+  network: Network;
+};
+
+export type GlobalSortKey =
   | "pool"
+  | "chain"
   | "health"
   | "tvl"
   | "volume24h"
   | "totalVolume"
   | "swaps"
   | "rebalances";
+
 export type SortDir = "asc" | "desc";
 
 // Higher rank = more severe. "desc" puts highest rank first → CRITICAL first.
@@ -37,58 +45,66 @@ const HEALTH_ORDER: Record<string, number> = {
   CRITICAL: 4,
 };
 
-export interface SortContext {
-  network: ReturnType<typeof useNetwork>["network"];
-  tvlByPoolId: Map<string, number>;
-  totalVolumeByPoolId: Map<string, number | null>;
-  volume24h?: Map<string, number | null>;
+/** Build a unique key for a pool entry so pools from different chains with the same ID don't collide. */
+export function globalPoolKey(entry: GlobalPoolEntry): string {
+  return `${entry.network.id}:${entry.pool.id}`;
 }
 
-export function sortPools(
-  pools: Pool[],
-  sortKey: SortKey,
+export interface GlobalSortContext {
+  tvlByKey: Map<string, number>;
+  totalVolumeByKey: Map<string, number | null>;
+  volume24hByKey?: Map<string, number | null | undefined>;
+}
+
+export function sortGlobalPools(
+  entries: GlobalPoolEntry[],
+  sortKey: GlobalSortKey,
   sortDir: SortDir,
-  { network, tvlByPoolId, totalVolumeByPoolId, volume24h }: SortContext,
-): Pool[] {
-  return [...pools].sort((a, b) => {
+  { tvlByKey, totalVolumeByKey, volume24hByKey }: GlobalSortContext,
+): GlobalPoolEntry[] {
+  return [...entries].sort((a, b) => {
+    const aKey = globalPoolKey(a);
+    const bKey = globalPoolKey(b);
     let cmp = 0;
     switch (sortKey) {
       case "pool":
-        cmp = poolName(network, a.token0, a.token1).localeCompare(
-          poolName(network, b.token0, b.token1),
+        cmp = poolName(a.network, a.pool.token0, a.pool.token1).localeCompare(
+          poolName(b.network, b.pool.token0, b.pool.token1),
         );
+        break;
+      case "chain":
+        cmp = a.network.label.localeCompare(b.network.label);
         break;
       case "health": {
         const aH = worstStatus(
-          computeHealthStatus(a, network.chainId),
-          a.limitStatus ?? computeLimitStatus(a),
+          computeHealthStatus(a.pool, a.network.chainId),
+          a.pool.limitStatus ?? computeLimitStatus(a.pool),
         );
         const bH = worstStatus(
-          computeHealthStatus(b, network.chainId),
-          b.limitStatus ?? computeLimitStatus(b),
+          computeHealthStatus(b.pool, b.network.chainId),
+          b.pool.limitStatus ?? computeLimitStatus(b.pool),
         );
         cmp = (HEALTH_ORDER[aH] ?? 99) - (HEALTH_ORDER[bH] ?? 99);
         break;
       }
       case "tvl":
-        cmp = (tvlByPoolId.get(a.id) ?? 0) - (tvlByPoolId.get(b.id) ?? 0);
+        cmp = (tvlByKey.get(aKey) ?? 0) - (tvlByKey.get(bKey) ?? 0);
         break;
       case "volume24h": {
-        const aV = volume24h?.get(a.id) ?? 0;
-        const bV = volume24h?.get(b.id) ?? 0;
-        cmp = (aV ?? 0) - (bV ?? 0);
+        const aV = volume24hByKey?.get(aKey) ?? 0;
+        const bV = volume24hByKey?.get(bKey) ?? 0;
+        cmp = aV - bV;
         break;
       }
       case "totalVolume":
         cmp =
-          (totalVolumeByPoolId.get(a.id) ?? 0) -
-          (totalVolumeByPoolId.get(b.id) ?? 0);
+          (totalVolumeByKey.get(aKey) ?? 0) - (totalVolumeByKey.get(bKey) ?? 0);
         break;
       case "swaps":
-        cmp = (a.swapCount ?? 0) - (b.swapCount ?? 0);
+        cmp = (a.pool.swapCount ?? 0) - (b.pool.swapCount ?? 0);
         break;
       case "rebalances":
-        cmp = (a.rebalanceCount ?? 0) - (b.rebalanceCount ?? 0);
+        cmp = (a.pool.rebalanceCount ?? 0) - (b.pool.rebalanceCount ?? 0);
         break;
     }
     return sortDir === "asc" ? cmp : -cmp;
@@ -96,10 +112,10 @@ export function sortPools(
 }
 
 interface SortableThProps {
-  sortKey: SortKey;
-  activeSortKey: SortKey;
+  sortKey: GlobalSortKey;
+  activeSortKey: GlobalSortKey;
   sortDir: SortDir;
-  onSort: (key: SortKey) => void;
+  onSort: (key: GlobalSortKey) => void;
   align?: "left" | "right";
   className?: string;
   children: React.ReactNode;
@@ -142,37 +158,52 @@ function SortableTh({
   );
 }
 
-interface PoolsTableProps {
-  pools: Pool[];
-  volume24h?: Map<string, number | null>;
+/** Whether any network in the entry list has virtual pools (controls Source column visibility). */
+function hasAnyVirtualPools(entries: GlobalPoolEntry[]): boolean {
+  return entries.some((e) => e.network.hasVirtualPools);
+}
+
+interface GlobalPoolsTableProps {
+  entries: GlobalPoolEntry[];
+  /**
+   * Volume map keyed by `${network.id}:${pool.id}`.
+   * Use `globalPoolKey()` to build keys when constructing this map.
+   */
+  volume24hByKey?: Map<string, number | null | undefined>;
   volume24hLoading?: boolean;
   volume24hError?: boolean;
 }
 
-export function PoolsTable({
-  pools,
-  volume24h,
+export function GlobalPoolsTable({
+  entries,
+  volume24hByKey,
   volume24hLoading = false,
   volume24hError = false,
-}: PoolsTableProps) {
-  const { network } = useNetwork();
+}: GlobalPoolsTableProps) {
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const [sortKey, setSortKey] = useState<SortKey>("totalVolume");
+  const [sortKey, setSortKey] = useState<GlobalSortKey>("tvl");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  const tvlByPoolId = useMemo(
-    () => new Map(pools.map((pool) => [pool.id, poolTvlUSD(pool, network)])),
-    [pools, network],
-  );
-  const totalVolumeByPoolId = useMemo(
+  const tvlByKey = useMemo(
     () =>
       new Map(
-        pools.map((pool) => [pool.id, poolTotalVolumeUSD(pool, network)]),
+        entries.map((e) => [globalPoolKey(e), poolTvlUSD(e.pool, e.network)]),
       ),
-    [pools, network],
+    [entries],
   );
 
-  const handleSort = (key: SortKey) => {
+  const totalVolumeByKey = useMemo(
+    () =>
+      new Map(
+        entries.map((e) => [
+          globalPoolKey(e),
+          poolTotalVolumeUSD(e.pool, e.network),
+        ]),
+      ),
+    [entries],
+  );
+
+  const handleSort = (key: GlobalSortKey) => {
     if (key === sortKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
@@ -181,25 +212,17 @@ export function PoolsTable({
     }
   };
 
-  const sortedPools = useMemo(
+  const sortedEntries = useMemo(
     () =>
-      sortPools(pools, sortKey, sortDir, {
-        network,
-        tvlByPoolId,
-        totalVolumeByPoolId,
-        volume24h,
+      sortGlobalPools(entries, sortKey, sortDir, {
+        tvlByKey,
+        totalVolumeByKey,
+        volume24hByKey,
       }),
-    [
-      pools,
-      sortKey,
-      sortDir,
-      tvlByPoolId,
-      totalVolumeByPoolId,
-      volume24h,
-      network,
-    ],
+    [entries, sortKey, sortDir, tvlByKey, totalVolumeByKey, volume24hByKey],
   );
 
+  const showVirtualPoolSource = hasAnyVirtualPools(entries);
   const showWeekendBanner = isWeekend();
 
   return (
@@ -233,7 +256,15 @@ export function PoolsTable({
             >
               Pool
             </SortableTh>
-            {network.hasVirtualPools && <Th>Source</Th>}
+            <SortableTh
+              sortKey="chain"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+            >
+              Chain
+            </SortableTh>
+            {showVirtualPoolSource && <Th>Source</Th>}
             <SortableTh
               sortKey="health"
               activeSortKey={sortKey}
@@ -298,7 +329,9 @@ export function PoolsTable({
           </tr>
         </thead>
         <tbody>
-          {sortedPools.map((p) => {
+          {sortedEntries.map((e) => {
+            const { pool: p, network } = e;
+            const key = globalPoolKey(e);
             const healthStatus = computeHealthStatus(p, network.chainId);
             const limitStatus = p.limitStatus ?? computeLimitStatus(p);
             const effectiveStatus = worstStatus(healthStatus, limitStatus);
@@ -306,22 +339,31 @@ export function PoolsTable({
               { ...p, healthStatus },
               nowSeconds,
             );
-            const tvl = tvlByPoolId.get(p.id) ?? 0;
-            const vol24h = volume24h?.get(p.id);
-            const totalVol = totalVolumeByPoolId.get(p.id);
+            const tvl = tvlByKey.get(key) ?? 0;
+            const vol24h = volume24hByKey?.get(key);
+            const totalVol = totalVolumeByKey.get(key);
+            // Build pool detail link preserving network param when non-default
+            const poolHref = `/pool/${encodeURIComponent(p.id)}?network=${network.id}`;
             return (
-              <Row key={p.id}>
+              <Row key={key}>
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
-                  <NetworkAwareLink
-                    href={`/pool/${encodeURIComponent(p.id)}`}
+                  <Link
+                    href={poolHref}
                     className="font-semibold text-sm sm:text-base text-indigo-400 hover:text-indigo-300"
                   >
                     {poolName(network, p.token0, p.token1)}
-                  </NetworkAwareLink>
+                  </Link>
                 </td>
-                {network.hasVirtualPools && (
+                <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-400 whitespace-nowrap">
+                  {network.label}
+                </td>
+                {showVirtualPoolSource && (
                   <td className="px-2 sm:px-4 py-2 sm:py-3">
-                    <SourceBadge source={p.source} />
+                    {network.hasVirtualPools ? (
+                      <SourceBadge source={p.source} />
+                    ) : (
+                      <span className="text-slate-600 text-xs">—</span>
+                    )}
                   </td>
                 )}
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
