@@ -690,25 +690,31 @@ function LiquidityTab({
                   <td className="px-4 py-2">
                     <div className="flex items-center gap-1.5">
                       <KindBadge kind={r.kind} />
-                      {linkedSwaps.map((s) => (
-                        <span
-                          key={s.id}
-                          title={`Included a rebalance swap: ${formatWei(
-                            s.amount0In > s.amount0Out
-                              ? s.amount0In
-                              : s.amount0Out,
-                            pool?.token0Decimals ?? 18,
-                          )} ${sym0} ⇄ ${formatWei(
-                            s.amount1In > s.amount1Out
-                              ? s.amount1In
-                              : s.amount1Out,
-                            pool?.token1Decimals ?? 18,
-                          )} ${sym1}`}
-                          className="text-xs text-indigo-400 border border-indigo-700 rounded px-1 py-0.5 cursor-default"
-                        >
-                          ⇄ swap
-                        </span>
-                      ))}
+                      {linkedSwaps.map((s) => {
+                        const swapLabel = `Included a rebalance swap: ${formatWei(
+                          BigInt(s.amount0In) > BigInt(s.amount0Out)
+                            ? s.amount0In
+                            : s.amount0Out,
+                          pool?.token0Decimals ?? 18,
+                        )} ${sym0} ⇄ ${formatWei(
+                          BigInt(s.amount1In) > BigInt(s.amount1Out)
+                            ? s.amount1In
+                            : s.amount1Out,
+                          pool?.token1Decimals ?? 18,
+                        )} ${sym1}`;
+                        return (
+                          <span
+                            key={s.id}
+                            title={swapLabel}
+                            aria-label={swapLabel}
+                            tabIndex={0}
+                            role="note"
+                            className="text-xs text-indigo-400 border border-indigo-700 rounded px-1 py-0.5 cursor-default focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                          >
+                            ⇄ swap
+                          </span>
+                        );
+                      })}
                     </div>
                   </td>
                   <SenderCell address={r.sender} />

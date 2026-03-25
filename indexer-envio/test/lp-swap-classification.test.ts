@@ -360,6 +360,43 @@ describe("LP swap classification — isLpSwap + volume backfill", () => {
       0n,
       "Pool.notionalVolume1 must be subtracted back to 0",
     );
+
+    // PoolSnapshot should also have swapCount and cumulative fields decremented.
+    // Snapshot ID: "{poolId}-{hourBucket(timestamp)}"
+    // hourBucket(1_700_001_000) = 1_700_001_000 / 3600 * 3600 = 1699999200
+    const snapId = `${POOL_ADDR}-1699999200`;
+    const snapshot = afterMint.entities.PoolSnapshot.get(snapId) as
+      | {
+          swapCount: number;
+          swapVolume0: bigint;
+          swapVolume1: bigint;
+          cumulativeSwapCount: number;
+          cumulativeVolume0: bigint;
+          cumulativeVolume1: bigint;
+          [key: string]: unknown;
+        }
+      | undefined;
+    assert.ok(snapshot, "PoolSnapshot must exist");
+    assert.strictEqual(
+      snapshot!.swapCount,
+      0,
+      "PoolSnapshot.swapCount must be subtracted back to 0 after LP backfill",
+    );
+    assert.strictEqual(
+      snapshot!.swapVolume0,
+      0n,
+      "PoolSnapshot.swapVolume0 must be subtracted back to 0 after LP backfill",
+    );
+    assert.strictEqual(
+      snapshot!.swapVolume1,
+      0n,
+      "PoolSnapshot.swapVolume1 must be subtracted back to 0 after LP backfill",
+    );
+    assert.strictEqual(
+      snapshot!.cumulativeSwapCount,
+      0,
+      "PoolSnapshot.cumulativeSwapCount must be decremented after LP backfill",
+    );
   });
 
   // --------------------------------------------------------------------------
