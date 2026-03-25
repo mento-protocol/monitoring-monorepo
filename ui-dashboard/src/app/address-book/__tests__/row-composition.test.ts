@@ -344,4 +344,16 @@ describe("countImportLabels", () => {
     expect(countImportLabels(null)).toBe(0);
     expect(countImportLabels(42)).toBe(0);
   });
+
+  it("does not throw when chains is null (snapshot format)", () => {
+    expect(countImportLabels({ chains: null })).toBe(0);
+  });
+
+  it("does not throw when labels is null (simple format)", () => {
+    expect(countImportLabels({ chainId: 42220, labels: null })).toBe(0);
+  });
+
+  it("does not throw when a chain entry is null inside snapshot", () => {
+    expect(countImportLabels({ chains: { "42220": null } })).toBe(0);
+  });
 });
