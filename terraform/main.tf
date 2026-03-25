@@ -147,7 +147,7 @@ resource "vercel_project_environment_variable" "auth_google_id" {
   team_id    = var.vercel_team_id
   key        = "AUTH_GOOGLE_ID"
   value      = var.auth_google_id
-  target     = ["production"]
+  target     = ["production", "preview"]
   sensitive  = true
 }
 
@@ -156,7 +156,7 @@ resource "vercel_project_environment_variable" "auth_google_secret" {
   team_id    = var.vercel_team_id
   key        = "AUTH_GOOGLE_SECRET"
   value      = var.auth_google_secret
-  target     = ["production"]
+  target     = ["production", "preview"]
   sensitive  = true
 }
 
@@ -165,7 +165,7 @@ resource "vercel_project_environment_variable" "auth_secret" {
   team_id    = var.vercel_team_id
   key        = "AUTH_SECRET"
   value      = var.auth_secret
-  target     = ["production"]
+  target     = ["production", "preview"]
   sensitive  = true
 }
 
@@ -174,8 +174,27 @@ resource "vercel_project_environment_variable" "cron_secret" {
   team_id    = var.vercel_team_id
   key        = "CRON_SECRET"
   value      = var.cron_secret
-  target     = ["production"]
+  target     = ["production", "preview"]
   sensitive  = true
+}
+
+# Preview auth proxy — routes Google OAuth through the prod domain (already
+# whitelisted in GCP), then forwards the session back to the preview URL.
+# See: https://authjs.dev/guides/deployment#preview-urls-on-vercel
+resource "vercel_project_environment_variable" "nextauth_url_preview" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "NEXTAUTH_URL"
+  value      = "https://monitoring.mento.org"
+  target     = ["preview"]
+}
+
+resource "vercel_project_environment_variable" "auth_redirect_proxy_url" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "AUTH_REDIRECT_PROXY_URL"
+  value      = "https://monitoring.mento.org/api/auth"
+  target     = ["preview"]
 }
 
 # Cron jobs are defined in ui-dashboard/vercel.json and activated automatically
