@@ -3,6 +3,8 @@ import type { Account, Profile, NextAuthConfig } from "next-auth";
 
 // Capture the NextAuth config when the module is loaded
 let capturedConfig: NextAuthConfig;
+// Capture options passed to Google() factory so we can assert provider checks
+let capturedGoogleOptions: Record<string, unknown> = {};
 
 vi.mock("next-auth", () => {
   const NextAuth = vi.fn((config: NextAuthConfig) => {
@@ -13,12 +15,16 @@ vi.mock("next-auth", () => {
 });
 
 vi.mock("next-auth/providers/google", () => ({
-  default: vi.fn(() => ({ id: "google" })),
+  default: vi.fn((opts: Record<string, unknown> = {}) => {
+    capturedGoogleOptions = opts;
+    return { id: "google" };
+  }),
 }));
 
 async function loadAuthWithEnv(redirectProxyUrl?: string) {
   vi.resetModules();
   capturedConfig = {} as NextAuthConfig;
+  capturedGoogleOptions = {};
 
   if (redirectProxyUrl === undefined) {
     vi.unstubAllEnvs();
@@ -49,6 +55,19 @@ describe("auth config", () => {
   it("leaves redirectProxyUrl undefined when AUTH_REDIRECT_PROXY_URL is unset", async () => {
     await loadAuthWithEnv(undefined);
     expect(capturedConfig.redirectProxyUrl).toBeUndefined();
+  });
+});
+
+describe("Google provider checks config", () => {
+  it("uses state-only checks when AUTH_REDIRECT_PROXY_URL is set (proxy mode)", async () => {
+    await loadAuthWithEnv("https://monitoring.mento.org/api/auth");
+    expect(capturedGoogleOptions.checks).toEqual(["state"]);
+  });
+
+  it("uses default checks (no override) when AUTH_REDIRECT_PROXY_URL is unset (prod mode)", async () => {
+    await loadAuthWithEnv(undefined);
+    // No checks override — PKCE is left to Auth.js defaults
+    expect(capturedGoogleOptions.checks).toBeUndefined();
   });
 });
 
