@@ -56,6 +56,13 @@ import { hourBucket, snapshotId } from "../helpers";
  *
  * We undo those increments here so that all cumulative metrics reflect only
  * genuine user trades.
+ *
+ * Safety note — "user swap + mint in same tx" false-positive concern:
+ * FPMM has no multicall entrypoint. A single external transaction can invoke
+ * only one of: swap() or mint()/burn(). An LP-rebalance Swap is emitted
+ * *internally* by _rebalanceSwap() called from within mint()/burn(), so a
+ * Swap event + Mint/Burn event in the same tx always means the swap is an LP
+ * rebalance — never a coincidental user trade. This key is therefore safe.
  */
 // Minimal interface for the context object needed by backfillLpSwap.
 // The full generated context type is a superset of this.

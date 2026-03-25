@@ -689,10 +689,12 @@ function LiquidityTab({
                             linkedSwap.amount0In > linkedSwap.amount0Out
                               ? linkedSwap.amount0In
                               : linkedSwap.amount0Out,
+                            pool?.token0Decimals ?? 18,
                           )} ${sym0} ⇄ ${formatWei(
                             linkedSwap.amount1In > linkedSwap.amount1Out
                               ? linkedSwap.amount1In
                               : linkedSwap.amount1Out,
+                            pool?.token1Decimals ?? 18,
                           )} ${sym1}`}
                           className="text-xs text-indigo-400 border border-indigo-700 rounded px-1 py-0.5 cursor-default"
                         >
