@@ -321,7 +321,6 @@ export function GlobalPoolsTable({
               activeSortKey={sortKey}
               sortDir={sortDir}
               onSort={handleSort}
-              className="hidden sm:table-cell"
             >
               Chain
             </SortableTh>
@@ -415,7 +414,7 @@ export function GlobalPoolsTable({
                     {poolName(network, p.token0, p.token1)}
                   </Link>
                 </td>
-                <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-400 whitespace-nowrap">
+                <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-400 whitespace-nowrap">
                   {network.label}
                 </td>
                 {showVirtualPoolSource && (
