@@ -91,8 +91,21 @@ export function countImportLabels(parsed: unknown): number {
 
   if (Array.isArray(parsed)) {
     // Gnosis Safe format: Array<{ address, chainId, name }>
-    for (const e of parsed as Array<Record<string, unknown>>) {
-      keys.add(importKey(String(e.chainId), String(e.address)));
+    for (const entry of parsed) {
+      if (
+        typeof entry === "object" &&
+        entry !== null &&
+        !Array.isArray(entry) &&
+        typeof (entry as Record<string, unknown>).chainId === "string" &&
+        typeof (entry as Record<string, unknown>).address === "string"
+      ) {
+        keys.add(
+          importKey(
+            (entry as Record<string, string>).chainId,
+            (entry as Record<string, string>).address,
+          ),
+        );
+      }
     }
     return keys.size;
   }
