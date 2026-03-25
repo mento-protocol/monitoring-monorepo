@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { SWRResponse } from "swr";
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
@@ -69,18 +70,20 @@ beforeEach(() => {
 
 describe("PoolsPage OLS badge loading", () => {
   it("shows degraded-state feedback when OLS query fails", () => {
-    vi.mocked(useGQL).mockImplementation((query: string | null) => {
-      if (query?.includes("query AllPoolsWithHealth"))
-        return basePoolResult as any;
-      if (query?.includes("query AllOlsPools")) {
-        return {
-          data: undefined,
-          error: new Error("Hasura timeout"),
-          isLoading: false,
-        } as any;
-      }
-      return baseSwapsResult as any;
-    });
+    vi.mocked(useGQL).mockImplementation(
+      (query: string | null): SWRResponse => {
+        if (query?.includes("query AllPoolsWithHealth"))
+          return basePoolResult as SWRResponse;
+        if (query?.includes("query AllOlsPools")) {
+          return {
+            data: undefined,
+            error: new Error("Hasura timeout"),
+            isLoading: false,
+          } as SWRResponse;
+        }
+        return baseSwapsResult as SWRResponse;
+      },
+    );
 
     const html = renderToStaticMarkup(<PoolsPage />);
     expect(html).toContain("OLS status unavailable right now: Hasura timeout");
