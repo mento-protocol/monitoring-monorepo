@@ -114,18 +114,14 @@ function GlobalContent() {
 
   // Build a flat list of all pool entries and a merged volume24h map keyed by
   // `${network.id}:${pool.id}` to avoid collisions across chains.
-  const { globalEntries, volume24hByKey, anyVolume24hError } = useMemo(() => {
+  // Pools from chains with snapshot errors get null in the map → rendered as "N/A" per-row.
+  const { globalEntries, volume24hByKey } = useMemo(() => {
     const entries: GlobalPoolEntry[] = [];
     const volMap = new Map<string, number | null>();
-    let volError = false;
 
     for (const netData of networkData) {
       if (netData.error !== null) continue;
       const { network, pools, snapshots, snapshotsError } = netData;
-
-      if (snapshotsError !== null) {
-        volError = true;
-      }
 
       const perChainVolMap =
         snapshotsError === null
@@ -147,7 +143,6 @@ function GlobalContent() {
     return {
       globalEntries: entries,
       volume24hByKey: volMap,
-      anyVolume24hError: volError,
     };
   }, [networkData]);
 
@@ -273,8 +268,6 @@ function GlobalContent() {
           <GlobalPoolsTable
             entries={globalEntries}
             volume24hByKey={volume24hByKey}
-            volume24hLoading={false}
-            volume24hError={anyVolume24hError}
           />
         )}
       </section>
