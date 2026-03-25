@@ -190,6 +190,39 @@ describe("POST /api/address-labels/import", () => {
       expect(importLabels).not.toHaveBeenCalled();
     });
 
+    it("rejects scientific-notation chainId strings (e.g. '1e3')", async () => {
+      const gnosisSafe = [
+        { address: validAddress, chainId: "1e3", name: "Safe" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain("chainId");
+      expect(importLabels).not.toHaveBeenCalled();
+    });
+
+    it("rejects hex chainId strings (e.g. '0x1')", async () => {
+      const gnosisSafe = [
+        { address: validAddress, chainId: "0x1", name: "Safe" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain("chainId");
+      expect(importLabels).not.toHaveBeenCalled();
+    });
+
+    it("rejects whitespace-padded chainId strings (e.g. ' 42220 ')", async () => {
+      const gnosisSafe = [
+        { address: validAddress, chainId: " 42220 ", name: "Safe" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain("chainId");
+      expect(importLabels).not.toHaveBeenCalled();
+    });
+
     it("rejects an entry with an invalid address", async () => {
       const gnosisSafe = [
         { address: "not-an-address", chainId: "42220", name: "Safe" },

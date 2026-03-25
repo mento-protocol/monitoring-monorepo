@@ -36,7 +36,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Group by chainId
     const byChain = new Map<number, Record<string, AddressLabelEntry>>();
     for (const entry of entries) {
-      const chainId = Number(entry.chainId);
+      // Strict decimal-only parse — reject "1e3", "0x1", and whitespace-padded
+      // strings that Number() silently coerces to valid-looking chain IDs.
+      // We intentionally do NOT trim: leading/trailing spaces are malformed input.
+      if (!/^\d+$/.test(entry.chainId)) {
+        return NextResponse.json(
+          { error: `Invalid chainId: ${entry.chainId}` },
+          { status: 400 },
+        );
+      }
+      const chainId = parseInt(entry.chainId, 10);
       if (!Number.isInteger(chainId) || chainId <= 0) {
         return NextResponse.json(
           { error: `Invalid chainId: ${entry.chainId}` },

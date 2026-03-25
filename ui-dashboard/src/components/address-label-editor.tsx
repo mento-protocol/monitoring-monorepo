@@ -4,6 +4,58 @@ import { useRef, useEffect, useState } from "react";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import type { AddressLabelEntry } from "@/lib/address-labels";
 
+// ---------------------------------------------------------------------------
+// Pure helpers (exported for testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Determine whether the editor is operating on a contract row (existing address
+ * that hasn't yet received a custom label). In this mode the label field is
+ * optional; leaving it blank preserves the static contract name.
+ */
+export function resolveIsContractRow(opts: {
+  isNewAddress: boolean;
+  initial: { label?: string } | undefined;
+  isCustom: boolean;
+}): boolean {
+  return !opts.isNewAddress && opts.initial !== undefined && !opts.isCustom;
+}
+
+/**
+ * Compute the label that will actually be persisted.
+ * - For contract rows an empty label input falls back to the initial contract name.
+ * - For all other rows the typed value is used as-is (required, validated upstream).
+ */
+export function resolveEffectiveLabel(
+  labelInput: string,
+  isContractRow: boolean,
+  initialLabel: string | undefined,
+): string {
+  if (isContractRow && !labelInput.trim()) {
+    return initialLabel ?? "";
+  }
+  return labelInput.trim();
+}
+
+/**
+ * Validate the form inputs for the label editor.
+ * Returns an error string or null when valid.
+ */
+export function validateLabelForm(opts: {
+  isNewAddress: boolean;
+  address: string;
+  label: string;
+  isContractRow: boolean;
+}): string | null {
+  if (opts.isNewAddress && !/^0x[0-9a-fA-F]{40}$/.test(opts.address.trim())) {
+    return "Enter a valid 0x address.";
+  }
+  if (!opts.isContractRow && !opts.label.trim()) {
+    return "Label is required.";
+  }
+  return null;
+}
+
 const CATEGORIES = [
   "CEX",
   "DEX",
@@ -61,21 +113,29 @@ export function AddressLabelEditor({
 
   // When editing an existing contract row (not a new address, no custom label yet),
   // label is optional — empty means "keep the contract name".
-  const isContractRow =
-    !isNewAddress && initial !== undefined && !isCustomLabel(address);
+  const isContractRow = resolveIsContractRow({
+    isNewAddress,
+    initial,
+    isCustom: isCustomLabel(address),
+  });
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (isNewAddress && !/^0x[0-9a-fA-F]{40}$/.test(address.trim())) {
-      setError("Enter a valid 0x address.");
+    const validationError = validateLabelForm({
+      isNewAddress,
+      address,
+      label,
+      isContractRow,
+    });
+    if (validationError) {
+      setError(validationError);
       return;
     }
-    if (!isContractRow && !label.trim()) {
-      setError("Label is required.");
-      return;
-    }
-    // For contract rows with no custom label yet, fall back to the static name
-    const effectiveLabel = label.trim() || initial?.label || "";
+    const effectiveLabel = resolveEffectiveLabel(
+      label,
+      isContractRow,
+      initial?.label,
+    );
     setSaving(true);
     setError(null);
     try {
