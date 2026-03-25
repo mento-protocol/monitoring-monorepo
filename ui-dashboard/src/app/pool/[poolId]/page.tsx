@@ -31,7 +31,7 @@ import {
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   POOL_LIQUIDITY,
-  POOL_LIQUIDITY_ALL,
+  POOL_LP_POSITIONS,
   POOL_REBALANCES,
   POOL_RESERVES,
   POOL_SNAPSHOTS,
@@ -42,6 +42,7 @@ import { computeHealthStatus, computeRebalancerLiveness } from "@/lib/health";
 import { isFpmm, poolName, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import type {
   LiquidityEvent,
+  LiquidityPosition,
   OracleSnapshot,
   Pool,
   PoolSnapshot,
@@ -695,47 +696,33 @@ function LiquidityTab({
 }
 
 function ProvidersTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
-  // Guard: only FPMM pools have LP mechanics
-  if (pool && !isFpmm(pool)) {
+  // Only FPMM pools have LP mechanics — skip the fetch for non-FPMM pools.
+  // Pass null to useGQL when we know the pool type and it isn't FPMM so the
+  // hook is always called (Rules of Hooks) but the network request is skipped.
+  const isFpmmPool = pool ? isFpmm(pool) : null; // null = still loading
+  const query = isFpmmPool === false ? null : POOL_LP_POSITIONS;
+
+  const { data, error, isLoading } = useGQL<{
+    LiquidityPosition: LiquidityPosition[];
+  }>(query, { poolId });
+
+  const positions = (data?.LiquidityPosition ?? [])
+    .map((position) => ({
+      address: position.address,
+      netLiquidity: BigInt(position.netLiquidity),
+    }))
+    .filter((position) => position.netLiquidity > BigInt(0));
+
+  const totalLiquidity = positions.reduce(
+    (acc, position) => acc + position.netLiquidity,
+    BigInt(0),
+  );
+
+  if (isFpmmPool === false) {
     return (
       <EmptyBox message="LP provider data is only available for FPMM pools." />
     );
   }
-
-  // Phase 1 (Option A shim): fetch all events and aggregate client-side
-  const { data, error, isLoading } = useGQL<{
-    LiquidityEvent: Pick<
-      LiquidityEvent,
-      "kind" | "sender" | "recipient" | "liquidity"
-    >[];
-  }>(POOL_LIQUIDITY_ALL, { poolId });
-
-  const events = data?.LiquidityEvent ?? [];
-  const cappedAt10k = events.length >= 10000;
-
-  // Aggregate into positions map
-  const positionMap = new Map<string, bigint>();
-  for (const e of events) {
-    // MINT: recipient receives LP tokens. BURN: recipient gets underlying back
-    // (sender may be a router/strategy). Mirror the indexer keying so positions
-    // from both sources stay consistent: always attribute to the token recipient.
-    const address = e.recipient;
-    const delta =
-      e.kind === "MINT" ? BigInt(e.liquidity) : -BigInt(e.liquidity);
-    positionMap.set(address, (positionMap.get(address) ?? BigInt(0)) + delta);
-  }
-
-  // Build sorted array, filter to positive balances
-  const positions = [...positionMap.entries()]
-    .filter(([, bal]) => bal > BigInt(0))
-    .map(([address, netLiquidity]) => ({ address, netLiquidity }))
-    .sort((a, b) => (b.netLiquidity > a.netLiquidity ? 1 : -1));
-
-  const totalLiquidity = positions.reduce(
-    (acc, p) => acc + p.netLiquidity,
-    BigInt(0),
-  );
-
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
   if (positions.length === 0)
@@ -743,12 +730,11 @@ function ProvidersTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
 
   return (
     <>
-      {cappedAt10k && (
-        <div className="mb-3 rounded border border-amber-800 bg-amber-950/40 px-3 py-2 text-xs text-amber-400">
-          ⚠ Showing first 10,000 events — totals may be incomplete for
-          high-activity pools.
-        </div>
-      )}
+      <div className="mb-3 rounded border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
+        LP balances are shown in LP token units. Until we index LP token
+        decimals explicitly, the formatted display assumes the standard 18
+        decimals.
+      </div>
       <LpConcentrationChart
         positions={positions}
         totalLiquidity={totalLiquidity}
@@ -758,32 +744,33 @@ function ProvidersTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
           <tr className="border-b border-slate-800 bg-slate-900/50">
             <Th>#</Th>
             <Th>Address</Th>
-            <Th align="right">Net Liquidity</Th>
+            <Th align="right">Net LP Tokens</Th>
             <Th align="right">Share</Th>
           </tr>
         </thead>
         <tbody>
-          {positions.map((p, i) => {
+          {positions.map((position, i) => {
             // Scale up by 1e6 before converting to Number to preserve precision
             // for large bigint liquidity values that exceed JS safe integer range.
             const sharePct =
               totalLiquidity > BigInt(0)
                 ? (
                     Number(
-                      (p.netLiquidity * BigInt(1_000_000)) / totalLiquidity,
+                      (position.netLiquidity * BigInt(1_000_000)) /
+                        totalLiquidity,
                     ) / 10000
                   ).toFixed(2)
                 : "0.00";
             return (
-              <Row key={p.address}>
+              <Row key={position.address}>
                 <Td small muted>
                   {i + 1}
                 </Td>
                 <Td>
-                  <AddressLink address={p.address} />
+                  <AddressLink address={position.address} />
                 </Td>
                 <Td mono small align="right">
-                  {formatWei(p.netLiquidity.toString())}
+                  {formatWei(position.netLiquidity.toString())}
                 </Td>
                 <Td mono small align="right">
                   {sharePct}%
