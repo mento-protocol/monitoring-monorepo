@@ -716,7 +716,10 @@ function ProvidersTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
   // Aggregate into positions map
   const positionMap = new Map<string, bigint>();
   for (const e of events) {
-    const address = e.kind === "MINT" ? e.recipient : e.sender;
+    // MINT: recipient receives LP tokens. BURN: recipient gets underlying back
+    // (sender may be a router/strategy). Mirror the indexer keying so positions
+    // from both sources stay consistent: always attribute to the token recipient.
+    const address = e.recipient;
     const delta =
       e.kind === "MINT" ? BigInt(e.liquidity) : -BigInt(e.liquidity);
     positionMap.set(address, (positionMap.get(address) ?? BigInt(0)) + delta);
@@ -761,11 +764,14 @@ function ProvidersTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
         </thead>
         <tbody>
           {positions.map((p, i) => {
+            // Scale up by 1e6 before converting to Number to preserve precision
+            // for large bigint liquidity values that exceed JS safe integer range.
             const sharePct =
               totalLiquidity > BigInt(0)
                 ? (
-                    (Number(p.netLiquidity) / Number(totalLiquidity)) *
-                    100
+                    Number(
+                      (p.netLiquidity * BigInt(1_000_000)) / totalLiquidity,
+                    ) / 10000
                   ).toFixed(2)
                 : "0.00";
             return (
