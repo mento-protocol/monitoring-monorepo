@@ -9,18 +9,9 @@ type Props = {
   searchParams: Promise<{ callbackUrl?: string; error?: string }>;
 };
 
-const isPreview = process.env.VERCEL_ENV === "preview";
-
 export default async function SignInPage({ searchParams }: Props) {
   const { callbackUrl, error } = await searchParams;
   const redirectTo = sanitizeCallbackUrl(callbackUrl);
-
-  // On preview deployments auth is bypassed (Vercel SSO handles access control),
-  // so redirect straight to the destination instead of showing the sign-in form.
-  if (isPreview) {
-    const { redirect } = await import("next/navigation");
-    redirect(redirectTo);
-  }
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
