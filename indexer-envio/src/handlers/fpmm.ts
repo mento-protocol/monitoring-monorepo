@@ -9,6 +9,7 @@ import {
   type FactoryDeployment,
   type SwapEvent,
   type LiquidityEvent,
+  type LiquidityPosition,
   type ReserveUpdate,
   type RebalanceEvent,
   type OracleSnapshot,
@@ -315,6 +316,18 @@ FPMM.Mint.handler(async ({ event, context }) => {
   };
 
   context.LiquidityEvent.set(liquidityEvent);
+
+  // Track LP position: recipient receives LP tokens on mint
+  const lpMintId = `${poolId}-${liquidityEvent.recipient}`;
+  const existingMint = await context.LiquidityPosition.get(lpMintId);
+  context.LiquidityPosition.set({
+    id: lpMintId,
+    poolId,
+    address: liquidityEvent.recipient,
+    netLiquidity: (existingMint?.netLiquidity ?? 0n) + event.params.liquidity,
+    lastUpdatedBlock: blockNumber,
+    lastUpdatedTimestamp: blockTimestamp,
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -359,6 +372,23 @@ FPMM.Burn.handler(async ({ event, context }) => {
   };
 
   context.LiquidityEvent.set(liquidityEvent);
+
+  // Track LP position: sender burns LP tokens on withdraw
+  const lpBurnId = `${poolId}-${liquidityEvent.sender}`;
+  const existingBurn = await context.LiquidityPosition.get(lpBurnId);
+  const prevBalance = existingBurn?.netLiquidity ?? 0n;
+  const newBalance =
+    prevBalance > event.params.liquidity
+      ? prevBalance - event.params.liquidity
+      : 0n; // clamp to 0 — negative balance = data anomaly (incomplete history)
+  context.LiquidityPosition.set({
+    id: lpBurnId,
+    poolId,
+    address: liquidityEvent.sender,
+    netLiquidity: newBalance,
+    lastUpdatedBlock: blockNumber,
+    lastUpdatedTimestamp: blockTimestamp,
+  });
 });
 
 // ---------------------------------------------------------------------------

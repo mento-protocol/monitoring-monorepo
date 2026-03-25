@@ -180,6 +180,15 @@ type VirtualPoolLifecycle {
   blockTimestamp: BigInt!
 }
 
+type LiquidityPosition @index(fields: ["poolId", "address"]) {
+  id: ID! # "{poolId}-{address}"
+  poolId: String! @index
+  address: String! @index
+  netLiquidity: BigInt! # Running sum: +mint, -burn. Always >= 0 in practice.
+  lastUpdatedBlock: BigInt!
+  lastUpdatedTimestamp: BigInt!
+}
+
 type ProtocolFeeTransfer {
   id: ID!
   token: String! @index

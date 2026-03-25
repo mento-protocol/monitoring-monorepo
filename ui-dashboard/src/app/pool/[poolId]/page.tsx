@@ -13,6 +13,7 @@ import { OraclePriceChart } from "@/components/oracle-price-chart";
 import { ReserveChart } from "@/components/reserve-chart";
 import { SenderCell } from "@/components/sender-cell";
 import { LiquidityChart } from "@/components/liquidity-chart";
+import { LpConcentrationChart } from "@/components/lp-concentration-chart";
 import { SnapshotChart } from "@/components/snapshot-chart";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
@@ -30,6 +31,7 @@ import {
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   POOL_LIQUIDITY,
+  POOL_LIQUIDITY_ALL,
   POOL_REBALANCES,
   POOL_RESERVES,
   POOL_SNAPSHOTS,
@@ -69,6 +71,7 @@ const TABS = [
   "rebalances",
   "liquidity",
   "oracle",
+  "providers",
 ] as const;
 type Tab = (typeof TABS)[number];
 
@@ -212,6 +215,7 @@ function PoolDetail() {
         {tab === "oracle" && (
           <OracleTab poolId={decodedId} limit={limit} pool={pool} />
         )}
+        {tab === "providers" && <ProvidersTab poolId={decodedId} pool={pool} />}
       </div>
     </div>
   );
@@ -686,6 +690,103 @@ function LiquidityTab({
           </tbody>
         </Table>
       )}
+    </>
+  );
+}
+
+function ProvidersTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
+  // Guard: only FPMM pools have LP mechanics
+  if (pool && !isFpmm(pool)) {
+    return (
+      <EmptyBox message="LP provider data is only available for FPMM pools." />
+    );
+  }
+
+  // Phase 1 (Option A shim): fetch all events and aggregate client-side
+  const { data, error, isLoading } = useGQL<{
+    LiquidityEvent: Pick<
+      LiquidityEvent,
+      "kind" | "sender" | "recipient" | "liquidity"
+    >[];
+  }>(POOL_LIQUIDITY_ALL, { poolId });
+
+  const events = data?.LiquidityEvent ?? [];
+  const cappedAt10k = events.length >= 10000;
+
+  // Aggregate into positions map
+  const positionMap = new Map<string, bigint>();
+  for (const e of events) {
+    const address = e.kind === "MINT" ? e.recipient : e.sender;
+    const delta =
+      e.kind === "MINT" ? BigInt(e.liquidity) : -BigInt(e.liquidity);
+    positionMap.set(address, (positionMap.get(address) ?? BigInt(0)) + delta);
+  }
+
+  // Build sorted array, filter to positive balances
+  const positions = [...positionMap.entries()]
+    .filter(([, bal]) => bal > BigInt(0))
+    .map(([address, netLiquidity]) => ({ address, netLiquidity }))
+    .sort((a, b) => (b.netLiquidity > a.netLiquidity ? 1 : -1));
+
+  const totalLiquidity = positions.reduce(
+    (acc, p) => acc + p.netLiquidity,
+    BigInt(0),
+  );
+
+  if (error) return <ErrorBox message={error.message} />;
+  if (isLoading) return <Skeleton rows={5} />;
+  if (positions.length === 0)
+    return <EmptyBox message="No active LP positions for this pool." />;
+
+  return (
+    <>
+      {cappedAt10k && (
+        <div className="mb-3 rounded border border-amber-800 bg-amber-950/40 px-3 py-2 text-xs text-amber-400">
+          ⚠ Showing first 10,000 events — totals may be incomplete for
+          high-activity pools.
+        </div>
+      )}
+      <LpConcentrationChart
+        positions={positions}
+        totalLiquidity={totalLiquidity}
+      />
+      <Table>
+        <thead>
+          <tr className="border-b border-slate-800 bg-slate-900/50">
+            <Th>#</Th>
+            <Th>Address</Th>
+            <Th align="right">Net Liquidity</Th>
+            <Th align="right">Share</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {positions.map((p, i) => {
+            const sharePct =
+              totalLiquidity > BigInt(0)
+                ? (
+                    (Number(p.netLiquidity) / Number(totalLiquidity)) *
+                    100
+                  ).toFixed(2)
+                : "0.00";
+            return (
+              <Row key={p.address}>
+                <Td small muted>
+                  {i + 1}
+                </Td>
+                <Td>
+                  <AddressLink address={p.address} />
+                </Td>
+                <Td mono small align="right">
+                  {formatWei(p.netLiquidity.toString())}
+                </Td>
+                <Td mono small align="right">
+                  {sharePct}%
+                </Td>
+              </Row>
+            );
+          })}
+        </tbody>
+      </Table>
     </>
   );
 }

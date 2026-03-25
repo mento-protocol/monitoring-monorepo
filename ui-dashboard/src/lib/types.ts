@@ -142,6 +142,15 @@ export type TradingLimit = {
   updatedAtTimestamp: string;
 };
 
+export type LiquidityPosition = {
+  id: string;
+  poolId: string;
+  address: string;
+  netLiquidity: string; // BigInt serialized as string
+  lastUpdatedBlock: string;
+  lastUpdatedTimestamp: string;
+};
+
 export type ProtocolFeeTransfer = {
   tokenSymbol: string;
   tokenDecimals: number;
