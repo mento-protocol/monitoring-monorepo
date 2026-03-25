@@ -370,16 +370,8 @@ function SwapsTab({
         />
       )}
       <p className="text-xs text-slate-500 mb-3">
-        User trades only — LP rebalance swaps are excluded. See the{" "}
-        <button
-          className="underline hover:text-slate-300"
-          onClick={() => {
-            /* parent controls tab; surface this note inline */
-          }}
-        >
-          Liquidity tab
-        </button>{" "}
-        for LP activity.
+        User trades only — LP rebalance swaps are excluded. See the Liquidity
+        tab for LP activity.
       </p>
       {swaps.length === 0 ? (
         <EmptyBox message="No trades for this pool." />

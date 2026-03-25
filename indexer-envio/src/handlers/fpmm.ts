@@ -77,6 +77,9 @@ interface BackfillContext {
           swapCount: number;
           swapVolume0: bigint;
           swapVolume1: bigint;
+          cumulativeSwapCount: number;
+          cumulativeVolume0: bigint;
+          cumulativeVolume1: bigint;
           [key: string]: unknown;
         }
       | undefined
@@ -131,7 +134,10 @@ async function backfillLpSwap({
     });
   }
 
-  // Subtract from the PoolSnapshot bucket that the Swap handler wrote into
+  // Subtract from the PoolSnapshot bucket that the Swap handler wrote into.
+  // Also correct the cumulative fields — upsertSnapshot copies pool.swapCount
+  // into cumulativeSwapCount *before* this backfill runs, so those fields
+  // reflect the inflated value and must be decremented here too.
   const hourTs = hourBucket(blockTimestamp);
   const snapId = snapshotId(poolId, hourTs);
   const snapshot = await context.PoolSnapshot.get(snapId);
@@ -143,6 +149,15 @@ async function backfillLpSwap({
         snapshot.swapVolume0 > lpVol0 ? snapshot.swapVolume0 - lpVol0 : 0n,
       swapVolume1:
         snapshot.swapVolume1 > lpVol1 ? snapshot.swapVolume1 - lpVol1 : 0n,
+      cumulativeSwapCount: Math.max(0, snapshot.cumulativeSwapCount - 1),
+      cumulativeVolume0:
+        snapshot.cumulativeVolume0 > lpVol0
+          ? snapshot.cumulativeVolume0 - lpVol0
+          : 0n,
+      cumulativeVolume1:
+        snapshot.cumulativeVolume1 > lpVol1
+          ? snapshot.cumulativeVolume1 - lpVol1
+          : 0n,
     });
   }
 }
