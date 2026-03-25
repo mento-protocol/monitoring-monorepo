@@ -33,6 +33,7 @@ vi.mock("@/components/global-pools-table", () => ({
 }));
 
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
+import * as volumeModule from "@/lib/volume";
 import GlobalPage from "../page";
 
 // ---------------------------------------------------------------------------
@@ -347,6 +348,18 @@ describe("GlobalPage — cross-chain key collision", () => {
     expect(map.has("celo-mainnet-hosted:0xpool1")).toBe(true);
     expect(map.has("celo-sepolia-hosted:0xpool1")).toBe(true);
     expect(map.size).toBe(2);
+  });
+
+  it("preserves undefined volume entries instead of coercing them to null", () => {
+    const pool = makePool("0xpool1");
+    vi.spyOn(volumeModule, "buildPool24hVolumeMap").mockReturnValue(new Map());
+
+    render([makeNetworkData({ network: BASE_NETWORK, pools: [pool] })]);
+
+    expect(capturedProps).not.toBeNull();
+    const map = capturedProps!.volume24hByKey as Map<string, number | null>;
+    expect(map.has("celo-mainnet-hosted:0xpool1")).toBe(true);
+    expect(map.get("celo-mainnet-hosted:0xpool1")).toBeUndefined();
   });
 });
 

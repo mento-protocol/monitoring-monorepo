@@ -53,7 +53,7 @@ export function globalPoolKey(entry: GlobalPoolEntry): string {
 export interface GlobalSortContext {
   tvlByKey: Map<string, number>;
   totalVolumeByKey: Map<string, number | null>;
-  volume24hByKey?: Map<string, number | null>;
+  volume24hByKey?: Map<string, number | null | undefined>;
 }
 
 export function sortGlobalPools(
@@ -169,7 +169,7 @@ interface GlobalPoolsTableProps {
    * Volume map keyed by `${network.id}:${pool.id}`.
    * Use `globalPoolKey()` to build keys when constructing this map.
    */
-  volume24hByKey?: Map<string, number | null>;
+  volume24hByKey?: Map<string, number | null | undefined>;
   volume24hLoading?: boolean;
   volume24hError?: boolean;
 }
