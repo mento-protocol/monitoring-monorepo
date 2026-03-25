@@ -244,6 +244,42 @@ describe("POST /api/address-labels/import", () => {
       expect(res.status).toBe(400);
     });
 
+    it("rejects an entry with an empty name", async () => {
+      const gnosisSafe = [
+        { address: validAddress, chainId: "42220", name: "" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain("empty name");
+      expect(importLabels).not.toHaveBeenCalled();
+    });
+
+    it("rejects an entry with a whitespace-only name", async () => {
+      const gnosisSafe = [
+        { address: validAddress, chainId: "42220", name: "   " },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain("empty name");
+      expect(importLabels).not.toHaveBeenCalled();
+    });
+
+    it("returns 500 and does not import if getLabels throws", async () => {
+      (getLabels as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error("Redis connection failed"),
+      );
+      const gnosisSafe = [
+        { address: validAddress, chainId: "42220", name: "Safe" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(500);
+      const body = await res.json();
+      expect(body.error).toContain("Redis connection failed");
+      expect(importLabels).not.toHaveBeenCalled();
+    });
+
     it("merges with existing label metadata instead of overwriting", async () => {
       // Existing label has category/notes/isPublic set
       const existingEntry = {
