@@ -109,6 +109,17 @@ type SwapEvent @index(fields: ["poolId", "blockTimestamp"]) {
   txHash: String!
   blockNumber: BigInt!
   blockTimestamp: BigInt! @index
+  # true when this swap was triggered internally by a Mint/Burn rebalance,
+  # not by a direct user trade through the Router
+  isLpSwap: Boolean!
+}
+
+# Ephemeral lookup: lets the Mint/Burn handler find the Swap that fired
+# earlier in the same transaction and backfill isLpSwap = true.
+# id format: "{chainId}:{poolId}:{txHash}"
+type SwapTxIndex {
+  id: ID!
+  swapEventId: String!
 }
 
 type LiquidityEvent @index(fields: ["poolId", "blockTimestamp"]) {

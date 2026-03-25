@@ -59,6 +59,8 @@ export type SwapEvent = {
   txHash: string;
   blockNumber: string;
   blockTimestamp: string;
+  /** true = LP-rebalance swap (internal); false = user trade via Router */
+  isLpSwap: boolean;
 };
 
 export type LiquidityEvent = {

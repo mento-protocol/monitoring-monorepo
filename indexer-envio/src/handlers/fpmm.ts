@@ -8,6 +8,7 @@ import {
   type Pool,
   type FactoryDeployment,
   type SwapEvent,
+  type SwapTxIndex,
   type LiquidityEvent,
   type ReserveUpdate,
   type RebalanceEvent,
@@ -35,6 +36,116 @@ import {
   fetchTradingLimits,
 } from "../rpc";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
+import { hourBucket, snapshotId } from "../helpers";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Called from Mint/Burn handlers to mark the co-transaction Swap (if any) as
+ * an LP-rebalance swap and subtract its volume from the pool / snapshot
+ * cumulative trade metrics.
+ *
+ * Envio guarantees log-order processing within a block, so by the time
+ * Mint/Burn fires the Swap handler has already run and written:
+ *   - SwapEvent (with isLpSwap: false)
+ *   - SwapTxIndex ("{chainId}:{poolId}:{txHash}" → swapEventId)
+ *   - Pool.swapCount / notionalVolume0/1 (already incremented)
+ *   - PoolSnapshot.swapCount / swapVolume0/1 (already incremented)
+ *
+ * We undo those increments here so that all cumulative metrics reflect only
+ * genuine user trades.
+ */
+// Minimal interface for the context object needed by backfillLpSwap.
+// The full generated context type is a superset of this.
+interface BackfillContext {
+  SwapTxIndex: {
+    get(id: string): Promise<{ swapEventId: string } | undefined>;
+  };
+  SwapEvent: {
+    get(id: string): Promise<SwapEvent | undefined>;
+    set(entity: SwapEvent): void;
+  };
+  Pool: {
+    get(id: string): Promise<Pool | undefined>;
+    set(entity: Pool): void;
+  };
+  PoolSnapshot: {
+    get(id: string): Promise<
+      | {
+          swapCount: number;
+          swapVolume0: bigint;
+          swapVolume1: bigint;
+          [key: string]: unknown;
+        }
+      | undefined
+    >;
+    set(entity: unknown): void;
+  };
+}
+
+async function backfillLpSwap({
+  context,
+  chainId,
+  poolId,
+  txHash,
+  blockTimestamp,
+}: {
+  context: BackfillContext;
+  chainId: number;
+  poolId: string;
+  txHash: string;
+  blockTimestamp: bigint;
+}): Promise<void> {
+  const indexId = `${chainId}:${poolId}:${txHash}`;
+  const swapIndex = await context.SwapTxIndex.get(indexId);
+  if (!swapIndex) return; // No swap in this tx — nothing to backfill
+
+  const existingSwap = await context.SwapEvent.get(swapIndex.swapEventId);
+  if (!existingSwap) return;
+
+  // Mark the swap as LP-triggered
+  context.SwapEvent.set({ ...existingSwap, isLpSwap: true });
+
+  // Compute the volume that was incorrectly attributed to user trades
+  const lpVol0 =
+    existingSwap.amount0In > existingSwap.amount0Out
+      ? existingSwap.amount0In
+      : existingSwap.amount0Out;
+  const lpVol1 =
+    existingSwap.amount1In > existingSwap.amount1Out
+      ? existingSwap.amount1In
+      : existingSwap.amount1Out;
+
+  // Subtract from Pool cumulative trade metrics
+  const pool = await context.Pool.get(poolId);
+  if (pool) {
+    context.Pool.set({
+      ...pool,
+      swapCount: Math.max(0, pool.swapCount - 1),
+      notionalVolume0:
+        pool.notionalVolume0 > lpVol0 ? pool.notionalVolume0 - lpVol0 : 0n,
+      notionalVolume1:
+        pool.notionalVolume1 > lpVol1 ? pool.notionalVolume1 - lpVol1 : 0n,
+    });
+  }
+
+  // Subtract from the PoolSnapshot bucket that the Swap handler wrote into
+  const hourTs = hourBucket(blockTimestamp);
+  const snapId = snapshotId(poolId, hourTs);
+  const snapshot = await context.PoolSnapshot.get(snapId);
+  if (snapshot) {
+    context.PoolSnapshot.set({
+      ...snapshot,
+      swapCount: Math.max(0, snapshot.swapCount - 1),
+      swapVolume0:
+        snapshot.swapVolume0 > lpVol0 ? snapshot.swapVolume0 - lpVol0 : 0n,
+      swapVolume1:
+        snapshot.swapVolume1 > lpVol1 ? snapshot.swapVolume1 - lpVol1 : 0n,
+    });
+  }
+}
 
 // ---------------------------------------------------------------------------
 // FPMMFactory
@@ -268,9 +379,20 @@ FPMM.Swap.handler(async ({ event, context }) => {
     txHash: event.transaction.hash,
     blockNumber,
     blockTimestamp,
+    // Assume user trade by default; Mint/Burn handlers will backfill to true
+    // if a Mint or Burn event fires in the same transaction (LP rebalance swap).
+    isLpSwap: false,
   };
 
   context.SwapEvent.set(swap);
+
+  // Store a txHash-keyed lookup so the Mint/Burn handler (which fires later
+  // in the same tx) can find this swap by chainId:poolId:txHash.
+  const swapTxIndex: SwapTxIndex = {
+    id: `${event.chainId}:${poolId}:${event.transaction.hash}`,
+    swapEventId: id,
+  };
+  context.SwapTxIndex.set(swapTxIndex);
 });
 
 // ---------------------------------------------------------------------------
@@ -298,6 +420,17 @@ FPMM.Mint.handler(async ({ event, context }) => {
     blockTimestamp,
     blockNumber,
     mintDelta: true,
+  });
+
+  // If a Swap event fired earlier in this same transaction it was an internal
+  // LP-rebalance swap, not a user trade. Backfill isLpSwap = true and subtract
+  // its volume from the pool / snapshot cumulative trade counters.
+  await backfillLpSwap({
+    context,
+    chainId: event.chainId,
+    poolId,
+    txHash: event.transaction.hash,
+    blockTimestamp,
   });
 
   const liquidityEvent: LiquidityEvent = {
@@ -342,6 +475,15 @@ FPMM.Burn.handler(async ({ event, context }) => {
     blockTimestamp,
     blockNumber,
     burnDelta: true,
+  });
+
+  // Same as Mint: if a Swap event fired in this tx, it was LP-triggered.
+  await backfillLpSwap({
+    context,
+    chainId: event.chainId,
+    poolId,
+    txHash: event.transaction.hash,
+    blockTimestamp,
   });
 
   const liquidityEvent: LiquidityEvent = {
