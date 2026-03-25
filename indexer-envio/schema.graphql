@@ -114,12 +114,12 @@ type SwapEvent @index(fields: ["poolId", "blockTimestamp"]) {
   isLpSwap: Boolean!
 }
 
-# Ephemeral lookup: lets the Mint/Burn handler find the immediately preceding
-# Swap that fired in the same transaction and backfill isLpSwap = true.
-# id format: "{chainId}:{poolId}:{txHash}:{swapLogIndex}"
-# The Mint/Burn handler queries by logIndex-1 so only the swap *directly*
-# before it (the internal LP-rebalance swap) is matched — not unrelated user
-# swaps that happen to share the same tx.
+# Lookup index for LP-rebalance swap detection.
+# id format: "{chainId}:{poolId}:{txHash}"
+# Each FPMM.Swap handler overwrites this entry. Because Envio processes events
+# in log-index order, the LAST swap in a given pool+tx is stored here when
+# Mint/Burn fires — which is always the internal LP-rebalance swap (since it
+# fires inside mint()/burn(), after any earlier user swaps in the same tx).
 type SwapTxIndex {
   id: ID!
   swapEventId: String!

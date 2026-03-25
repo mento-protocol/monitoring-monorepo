@@ -57,15 +57,25 @@ import { hourBucket, snapshotId } from "../helpers";
  * We undo those increments here so that all cumulative metrics reflect only
  * genuine user trades.
  *
- * Key design — why logIndex is required:
- * An external contract CAN batch FPMM.swap() + FPMM.mint() calls in one tx.
- * Using only {chainId}:{poolId}:{txHash} would misclassify the user swap.
- * The LP-rebalance swap emitted by _rebalanceSwap() inside mint()/burn() is
- * *always* the event at (mintLogIndex - 1) for the same pool — the FPMM
- * contract emits Swap immediately before Mint/Burn with no events between
- * them. By keying on the swap's logIndex and querying (mintLogIndex - 1),
- * we match only the internally-triggered rebalance swap, not any earlier user
- * swap that happened to be in the same tx.
+ * Key design — txHash-only key with last-writer-wins semantics:
+ * The SwapTxIndex key is {chainId}:{poolId}:{txHash}. Each Swap event in the
+ * tx overwrites the previous entry for that key. Because Envio processes events
+ * in log-index order, the LAST swap written for a given pool+tx is the one
+ * stored when Mint/Burn fires.
+ *
+ * Multicall safety: if an external contract batches FPMM.swap() (user trade)
+ * + FPMM.mint() (LP operation) in one tx, the log order is:
+ *   logN:   Swap (user trade, from FPMM.swap())
+ *   logN+k: Swap (LP rebalance, from _rebalanceSwap() inside FPMM.mint())
+ *   logN+m: Mint
+ * The LP rebalance swap always fires AFTER the user swap (it is emitted
+ * *inside* mint()), so it overwrites the SwapTxIndex entry. When Mint fires,
+ * the index points to the LP rebalance swap — exactly what we want.
+ * The user swap keeps isLpSwap=false. ✓
+ *
+ * Non-adjacent logs: UpdateReserves events fire between Swap and Mint in the
+ * real contract flow. Using (mintLogIndex - 1) would fail for this reason.
+ * The txHash+overwrite approach is immune to intermediate log events.
  */
 // Minimal interface for the context object needed by backfillLpSwap.
 // The full generated context type is a superset of this.
@@ -103,21 +113,19 @@ async function backfillLpSwap({
   chainId,
   poolId,
   txHash,
-  mintBurnLogIndex,
   blockTimestamp,
 }: {
   context: BackfillContext;
   chainId: number;
   poolId: string;
   txHash: string;
-  /** logIndex of the Mint/Burn event; we look for a Swap at logIndex - 1 */
-  mintBurnLogIndex: number;
   blockTimestamp: bigint;
 }): Promise<void> {
-  // Key includes the swap's log index so we only match the swap that fired
-  // *immediately before* this Mint/Burn (the internal LP-rebalance swap).
-  const swapLogIndex = mintBurnLogIndex - 1;
-  const indexId = `${chainId}:${poolId}:${txHash}:${swapLogIndex}`;
+  // The txHash key points to the LAST swap written for this pool+tx.
+  // Because Envio processes in log order and the LP rebalance swap fires
+  // inside mint()/burn() (after any earlier user swap), this always resolves
+  // to the LP rebalance swap — not a user trade. See comment above.
+  const indexId = `${chainId}:${poolId}:${txHash}`;
   const swapIndex = await context.SwapTxIndex.get(indexId);
   if (!swapIndex) return; // No swap in this tx — nothing to backfill
 
@@ -422,12 +430,11 @@ FPMM.Swap.handler(async ({ event, context }) => {
 
   context.SwapEvent.set(swap);
 
-  // Store a logIndex-keyed lookup so the Mint/Burn handler can find this swap
-  // by its exact position in the tx log. The Mint/Burn handler queries
-  // logIndex = (mintLogIndex - 1) so it only matches the swap that fired
-  // *directly before* it — which is the internal LP-rebalance swap.
+  // Store a txHash-keyed lookup. Each swap in this tx overwrites the previous
+  // entry. The LP-rebalance swap fires last (inside mint/burn), so when
+  // Mint/Burn runs this entry points to the LP swap — not any earlier user swap.
   const swapTxIndex: SwapTxIndex = {
-    id: `${event.chainId}:${poolId}:${event.transaction.hash}:${event.logIndex}`,
+    id: `${event.chainId}:${poolId}:${event.transaction.hash}`,
     swapEventId: id,
   };
   context.SwapTxIndex.set(swapTxIndex);
@@ -460,15 +467,14 @@ FPMM.Mint.handler(async ({ event, context }) => {
     mintDelta: true,
   });
 
-  // If a Swap fired *immediately before* this Mint in the tx log it was an
-  // internal LP-rebalance swap. Backfill isLpSwap = true and subtract its
-  // volume from the pool / snapshot cumulative trade counters.
+  // If a Swap was emitted earlier in this transaction it was an internal
+  // LP-rebalance swap. Backfill isLpSwap = true and subtract its volume
+  // from pool / snapshot cumulative trade counters.
   await backfillLpSwap({
     context,
     chainId: event.chainId,
     poolId,
     txHash: event.transaction.hash,
-    mintBurnLogIndex: event.logIndex,
     blockTimestamp,
   });
 
@@ -516,13 +522,12 @@ FPMM.Burn.handler(async ({ event, context }) => {
     burnDelta: true,
   });
 
-  // Same as Mint: if a Swap fired directly before this Burn it was LP-triggered.
+  // Same as Mint: if a Swap was emitted in this transaction it was LP-triggered.
   await backfillLpSwap({
     context,
     chainId: event.chainId,
     poolId,
     txHash: event.transaction.hash,
-    mintBurnLogIndex: event.logIndex,
     blockTimestamp,
   });
 

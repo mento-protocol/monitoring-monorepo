@@ -629,8 +629,11 @@ function LiquidityTab({
     txHashes.length > 0 ? POOL_LP_SWAPS : null,
     { poolId, txHashes },
   );
-  // Build a map txHash → SwapEvent[] to handle multiple LP swaps per tx.
-  // Each LiquidityEvent row shows all linked swap badges.
+  // Build a map txHash → SwapEvent[] for the badge display.
+  // If multiple LiquidityEvents share one txHash they each show the same
+  // swap badges (all LP swaps for that tx). In practice FPMM emits at most
+  // one rebalance swap per mint()/burn() call, so duplicate badge display is
+  // not a concern for current pool contracts.
   const lpSwapsByTx = new Map<string, SwapEvent[]>();
   for (const s of lpSwapData?.SwapEvent ?? []) {
     const existing = lpSwapsByTx.get(s.txHash) ?? [];
