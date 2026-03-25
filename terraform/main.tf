@@ -176,8 +176,8 @@ resource "vercel_project_environment_variable" "cron_secret" {
   value      = var.cron_secret
   # Production-only: preview deployments do not run cron jobs and should not
   # have access to the backup trigger secret.
-  target     = ["production"]
-  sensitive  = true
+  target    = ["production"]
+  sensitive = true
 }
 
 # Preview auth proxy — routes Google OAuth through the prod domain (already
@@ -190,7 +190,7 @@ resource "vercel_project_environment_variable" "auth_redirect_proxy_url" {
   # Must be set on BOTH production and preview — Auth.js only enables proxy
   # mode when this var is present in the stable (prod) env too.
   # See: https://authjs.dev/getting-started/deployment#securing-a-preview-deployment
-  target     = ["production", "preview"]
+  target = ["production", "preview"]
 }
 
 # Cron jobs are defined in ui-dashboard/vercel.json and activated automatically
