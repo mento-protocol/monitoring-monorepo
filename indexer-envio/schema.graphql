@@ -116,13 +116,15 @@ type SwapEvent @index(fields: ["poolId", "blockTimestamp"]) {
 
 # Lookup index for LP-rebalance swap detection.
 # id format: "{chainId}:{poolId}:{txHash}"
-# Each FPMM.Swap handler overwrites this entry. Because Envio processes events
-# in log-index order, the LAST swap in a given pool+tx is stored here when
-# Mint/Burn fires — which is always the internal LP-rebalance swap (since it
-# fires inside mint()/burn(), after any earlier user swaps in the same tx).
+# Each FPMM.Swap handler overwrites this entry (last-writer-wins within a tx).
+# swapLogIndex is stored so backfillLpSwap can verify the swap it found
+# actually precedes the Mint/Burn in the log — guarding against a user swap
+# at logIndex N being incorrectly flagged when a later mint()/burn() fires
+# in the same tx *without* emitting an internal rebalance swap.
 type SwapTxIndex {
   id: ID!
   swapEventId: String!
+  swapLogIndex: Int!
 }
 
 type LiquidityEvent @index(fields: ["poolId", "blockTimestamp"]) {

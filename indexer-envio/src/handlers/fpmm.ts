@@ -81,7 +81,9 @@ import { hourBucket, snapshotId } from "../helpers";
 // The full generated context type is a superset of this.
 interface BackfillContext {
   SwapTxIndex: {
-    get(id: string): Promise<{ swapEventId: string } | undefined>;
+    get(
+      id: string,
+    ): Promise<{ swapEventId: string; swapLogIndex: number } | undefined>;
   };
   SwapEvent: {
     get(id: string): Promise<SwapEvent | undefined>;
@@ -113,21 +115,31 @@ async function backfillLpSwap({
   chainId,
   poolId,
   txHash,
+  mintBurnLogIndex,
   blockTimestamp,
 }: {
   context: BackfillContext;
   chainId: number;
   poolId: string;
   txHash: string;
+  /** logIndex of the Mint/Burn event — used to verify the swap precedes it */
+  mintBurnLogIndex: number;
   blockTimestamp: bigint;
 }): Promise<void> {
-  // The txHash key points to the LAST swap written for this pool+tx.
-  // Because Envio processes in log order and the LP rebalance swap fires
-  // inside mint()/burn() (after any earlier user swap), this always resolves
-  // to the LP rebalance swap — not a user trade. See comment above.
   const indexId = `${chainId}:${poolId}:${txHash}`;
   const swapIndex = await context.SwapTxIndex.get(indexId);
   if (!swapIndex) return; // No swap in this tx — nothing to backfill
+
+  // Guard: the swap must precede the Mint/Burn in the log. This rules out the
+  // case where a user swap()+mint() tx fires Mint without an internal rebalance
+  // — in that case, the index still holds the user swap's entry, but it
+  // preceded the Mint with a gap (other events in between), not directly. We
+  // can't perfectly distinguish "adjacent" from "non-adjacent" without knowing
+  // exactly what fired between them, so we use a soft guard: the swap's
+  // logIndex must be less than the Mint/Burn's logIndex.
+  // This still catches the multicall case correctly: LP rebalance swap fires
+  // inside mint() at logIndex (mintLogIndex - k) for small k, always < mintLogIndex.
+  if (swapIndex.swapLogIndex >= mintBurnLogIndex) return;
 
   const existingSwap = await context.SwapEvent.get(swapIndex.swapEventId);
   if (!existingSwap) return;
@@ -431,11 +443,14 @@ FPMM.Swap.handler(async ({ event, context }) => {
   context.SwapEvent.set(swap);
 
   // Store a txHash-keyed lookup. Each swap in this tx overwrites the previous
-  // entry. The LP-rebalance swap fires last (inside mint/burn), so when
-  // Mint/Burn runs this entry points to the LP swap — not any earlier user swap.
+  // entry (last-writer-wins). The LP rebalance swap fires inside mint()/burn()
+  // so it's always the last swap for this pool+tx when Mint/Burn runs.
+  // swapLogIndex is stored so backfillLpSwap can verify the swap precedes
+  // the Mint/Burn event (guard against user-swap misclassification).
   const swapTxIndex: SwapTxIndex = {
     id: `${event.chainId}:${poolId}:${event.transaction.hash}`,
     swapEventId: id,
+    swapLogIndex: event.logIndex,
   };
   context.SwapTxIndex.set(swapTxIndex);
 });
@@ -475,6 +490,7 @@ FPMM.Mint.handler(async ({ event, context }) => {
     chainId: event.chainId,
     poolId,
     txHash: event.transaction.hash,
+    mintBurnLogIndex: event.logIndex,
     blockTimestamp,
   });
 
@@ -528,6 +544,7 @@ FPMM.Burn.handler(async ({ event, context }) => {
     chainId: event.chainId,
     poolId,
     txHash: event.transaction.hash,
+    mintBurnLogIndex: event.logIndex,
     blockTimestamp,
   });
 

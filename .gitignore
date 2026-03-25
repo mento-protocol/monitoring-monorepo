@@ -13,3 +13,7 @@ dist/
 .env*.local
 .claude/worktrees
 WORK.md
+
+# Ephemeral operational/planning files
+BABYSIT.md
+WORK.md

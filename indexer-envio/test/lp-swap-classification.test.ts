@@ -20,7 +20,12 @@
  */
 import { assert } from "chai";
 import generated from "generated";
-import { _clearMockReserves } from "../src/EventHandlers.ts";
+import {
+  _clearMockReserves,
+  _clearMockRateFeedIDs,
+  _setMockRateFeedID,
+  _clearMockRebalancingStates,
+} from "../src/EventHandlers.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -264,8 +269,15 @@ async function fireBurn(
 // ---------------------------------------------------------------------------
 
 describe("LP swap classification — isLpSwap + volume backfill", () => {
+  beforeEach(() => {
+    // Prevent real RPC calls during FPMMDeployed (oracle data fetching)
+    _setMockRateFeedID(CHAIN_ID, POOL_ADDR, null);
+  });
+
   afterEach(() => {
     _clearMockReserves();
+    _clearMockRateFeedIDs();
+    _clearMockRebalancingStates();
   });
 
   // --------------------------------------------------------------------------
@@ -508,8 +520,14 @@ describe("LP swap classification — isLpSwap + volume backfill", () => {
 // ---------------------------------------------------------------------------
 
 describe("LP swap classification — block isolation", () => {
+  beforeEach(() => {
+    _setMockRateFeedID(CHAIN_ID, POOL_ADDR, null);
+  });
+
   afterEach(() => {
     _clearMockReserves();
+    _clearMockRateFeedIDs();
+    _clearMockRebalancingStates();
   });
 
   it("Mint only backfills LP swap from its own block, not a prior block's user trade", async () => {
