@@ -1711,7 +1711,9 @@ describe("Envio Celo indexer handlers", () => {
         mockDb,
       });
 
-      const olsPool = (mockDb.entities as any).OlsPool.get(POOL_ADDR) as
+      const olsPool = (mockDb.entities as any).OlsPool.get(
+        `${POOL_ADDR}-${OLS_ADDR}`,
+      ) as
         | {
             id: string;
             olsAddress: string;
@@ -1728,7 +1730,7 @@ describe("Envio Celo indexer handlers", () => {
           }
         | undefined;
       assert.ok(olsPool, "OlsPool should be created by PoolAdded");
-      assert.equal(olsPool?.id, POOL_ADDR);
+      assert.equal(olsPool?.id, `${POOL_ADDR}-${OLS_ADDR}`);
       assert.equal(olsPool?.olsAddress, OLS_ADDR);
       assert.equal(olsPool?.isActive, true);
       assert.equal(olsPool?.debtToken, DEBT_TOKEN.toLowerCase());
@@ -1798,9 +1800,9 @@ describe("Envio Celo indexer handlers", () => {
         mockDb,
       });
 
-      const olsPool = (mockDb.entities as any).OlsPool.get(POOL_ADDR) as
-        | { isActive: boolean; debtToken: string }
-        | undefined;
+      const olsPool = (mockDb.entities as any).OlsPool.get(
+        `${POOL_ADDR}-${OLS_ADDR}`,
+      ) as { isActive: boolean; debtToken: string } | undefined;
       assert.ok(olsPool, "OlsPool should still exist after PoolRemoved");
       assert.equal(
         olsPool?.isActive,
@@ -1845,7 +1847,9 @@ describe("Envio Celo indexer handlers", () => {
         mockDb,
       });
 
-      const olsPool = (mockDb.entities as any).OlsPool.get(POOL_ADDR) as
+      const olsPool = (mockDb.entities as any).OlsPool.get(
+        `${POOL_ADDR}-${OLS_ADDR}`,
+      ) as
         | {
             id: string;
             olsAddress: string;
@@ -1856,7 +1860,7 @@ describe("Envio Celo indexer handlers", () => {
           }
         | undefined;
       assert.ok(olsPool, "OlsPool should be created from cooldown update");
-      assert.equal(olsPool?.id, POOL_ADDR);
+      assert.equal(olsPool?.id, `${POOL_ADDR}-${OLS_ADDR}`);
       assert.equal(olsPool?.olsAddress, OLS_ADDR);
       assert.equal(olsPool?.rebalanceCooldown, 3600n);
       assert.equal(olsPool?.isActive, true);
@@ -1889,7 +1893,9 @@ describe("Envio Celo indexer handlers", () => {
         mockDb,
       });
 
-      const olsPool = (mockDb.entities as any).OlsPool.get(POOL_ADDR) as
+      const olsPool = (mockDb.entities as any).OlsPool.get(
+        `${POOL_ADDR}-${OLS_ADDR}`,
+      ) as
         | {
             lastRebalance: bigint;
             olsRebalanceCount: number;
