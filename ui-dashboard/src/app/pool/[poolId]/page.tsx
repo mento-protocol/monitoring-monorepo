@@ -1019,8 +1019,19 @@ function OlsStatusPanel({
     pool?.token0?.toLowerCase() === olsPool.debtToken.toLowerCase();
 
   // Incentives: raw uint64, denominator 1e18. Show as percentage.
-  const toPercent = (raw: string) =>
-    (Number(BigInt(raw)) / 1e16).toFixed(4) + "%";
+  // Incentive denominator is 1e18 (FEE_DENOMINATOR). Values can exceed
+  // Number.MAX_SAFE_INTEGER so we use BigInt division for the integer part
+  // and modulo for the fractional part to avoid precision loss.
+  const toPercent = (raw: string): string => {
+    const v = BigInt(raw);
+    // Multiply by 10000 first (4 decimal places), then divide by 1e16
+    const TEN_K = BigInt(10000);
+    const DIVISOR = BigInt("10000000000000000"); // 1e16
+    const scaled = (v * TEN_K) / DIVISOR;
+    const integer = scaled / TEN_K;
+    const frac = scaled % TEN_K;
+    return `${integer}.${String(frac).padStart(4, "0")}%`;
+  };
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-4">

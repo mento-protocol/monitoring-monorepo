@@ -260,8 +260,6 @@ export const ALL_OLS_POOLS = `
   query AllOlsPools {
     OlsPool(where: { isActive: { _eq: true } }) {
       id
-      olsRebalanceCount
-      lastRebalance
     }
   }
 `;
