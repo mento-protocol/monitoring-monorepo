@@ -17,29 +17,23 @@ vi.mock("@/hooks/use-all-networks-data", () => ({
   useAllNetworksData: vi.fn(),
 }));
 
-// NetworkProvider reads URL params — stub it out
-vi.mock("@/components/network-provider", () => ({
-  StaticNetworkProvider: ({ children }: { children: React.ReactNode }) =>
-    children,
-  useNetwork: vi.fn(() => ({
-    network: {
-      id: "celo-mainnet-hosted",
-      tokenSymbols: {},
-      addressLabels: {},
-      hasVirtualPools: false,
-      testnet: false,
-    },
-    networkId: "celo-mainnet-hosted",
-    setNetworkId: vi.fn(),
-  })),
-}));
-
-// PoolsTable has complex deps — stub it
-vi.mock("@/components/pools-table", () => ({
-  PoolsTable: () => <div data-testid="pools-table" />,
+// GlobalPoolsTable has complex deps — stub it, but capture props for assertions
+interface CapturedTableProps {
+  entries: { pool: { id: string }; network: { id: string } }[];
+  volume24hByKey?: Map<string, number | null>;
+}
+let capturedProps: CapturedTableProps | null = null;
+vi.mock("@/components/global-pools-table", () => ({
+  GlobalPoolsTable: (props: CapturedTableProps) => {
+    capturedProps = props;
+    return <div data-testid="global-pools-table" />;
+  },
+  globalPoolKey: (entry: { pool: { id: string }; network: { id: string } }) =>
+    `${entry.network.id}:${entry.pool.id}`,
 }));
 
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
+import * as volumeModule from "@/lib/volume";
 import GlobalPage from "../page";
 
 // ---------------------------------------------------------------------------
@@ -68,6 +62,21 @@ const NETWORK_2: Network = {
   chainId: 11142220,
 };
 
+import type { Pool } from "@/lib/types";
+
+function makePool(id: string): Pool {
+  return {
+    id,
+    token0: null,
+    token1: null,
+    source: "FPMM",
+    createdAtBlock: "0",
+    createdAtTimestamp: "0",
+    updatedAtBlock: "0",
+    updatedAtTimestamp: "0",
+  };
+}
+
 function makeNetworkData(overrides: Partial<NetworkData> = {}): NetworkData {
   return {
     network: BASE_NETWORK,
@@ -92,6 +101,7 @@ function render(networkData: NetworkData[], isLoading = false): string {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  capturedProps = null;
 });
 
 // ---------------------------------------------------------------------------
@@ -319,5 +329,61 @@ describe("GlobalPage — unpriced symbols behavior", () => {
     ]);
     expect(html).toContain("debank.com");
     expect(html).toContain("Swap Fees Earned");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-chain key collision — same pool ID on two different chains
+// ---------------------------------------------------------------------------
+
+describe("GlobalPage — cross-chain key collision", () => {
+  it("produces distinct volume24hByKey entries for same pool ID on different networks", () => {
+    const pool = makePool("0xpool1");
+    render([
+      makeNetworkData({ network: BASE_NETWORK, pools: [pool] }),
+      makeNetworkData({ network: NETWORK_2, pools: [pool] }),
+    ]);
+    expect(capturedProps).not.toBeNull();
+    const map = capturedProps!.volume24hByKey as Map<string, number | null>;
+    expect(map.has("celo-mainnet-hosted:0xpool1")).toBe(true);
+    expect(map.has("celo-sepolia-hosted:0xpool1")).toBe(true);
+    expect(map.size).toBe(2);
+  });
+
+  it("preserves undefined volume entries instead of coercing them to null", () => {
+    const pool = makePool("0xpool1");
+    const spy = vi
+      .spyOn(volumeModule, "buildPool24hVolumeMap")
+      .mockReturnValue(new Map());
+
+    render([makeNetworkData({ network: BASE_NETWORK, pools: [pool] })]);
+
+    spy.mockRestore();
+
+    expect(capturedProps).not.toBeNull();
+    const map = capturedProps!.volume24hByKey as Map<string, number | null>;
+    expect(map.has("celo-mainnet-hosted:0xpool1")).toBe(true);
+    expect(map.get("celo-mainnet-hosted:0xpool1")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// All-networks-failed — EmptyBox must NOT render
+// ---------------------------------------------------------------------------
+
+describe("GlobalPage — all networks failed", () => {
+  it("shows ErrorBox notices but no EmptyBox when every network fails", () => {
+    const html = render([
+      makeNetworkData({
+        network: BASE_NETWORK,
+        error: new Error("mainnet down"),
+      }),
+      makeNetworkData({
+        network: NETWORK_2,
+        error: new Error("sepolia down"),
+      }),
+    ]);
+    expect(html).toContain("Failed to load pools");
+    expect(html).not.toContain("No pools found across any chain.");
   });
 });
