@@ -56,5 +56,30 @@
 - All 383 tests pass (368 original + 15 new).
 - `tsc --noEmit` clean (no TypeScript errors).
 
-### Next
-- Final summary.
+---
+
+## Final Summary
+
+### Feature shipped
+The home page (`/`) now shows ONE unified pool table sorted by TVL descending instead of separate tables per chain.
+
+### Files changed
+- **New**: `ui-dashboard/src/components/global-pools-table.tsx`
+  The `GlobalPoolsTable` component and supporting types/helpers.
+- **New**: `ui-dashboard/src/components/__tests__/global-pools-table.test.tsx`
+  15 tests covering the new component and sort logic.
+- **Modified**: `ui-dashboard/src/app/page.tsx`
+  Replaced `ChainPoolsSection` / per-chain rendering with a single `GlobalPoolsTable`. Added logic to build a flat `GlobalPoolEntry[]` and a cross-chain `volume24hByKey` map.
+- **Modified**: `ui-dashboard/src/app/__tests__/page.test.tsx`
+  Updated mocks to reflect the new imports.
+
+### Design decisions
+- Pool rows are uniquely keyed by `${network.id}:${pool.id}` to avoid ID collisions across chains.
+- The "Chain" column is hidden on small screens (same responsive pattern as other secondary columns).
+- Pool detail links use `?network=<id>` explicitly; `NetworkAwareLink` was not used since each row has a concrete network.
+- When any chain's snapshot query fails, that chain's volume cells show "N/A" individually (not a whole-table error).
+- Top-level network failures (pools query failure) render as `ErrorBox` notices above the table.
+- The `Source` column only appears when at least one entry's network has `hasVirtualPools: true`; rows from non-virtual chains show `—`.
+
+### Test results
+All 383 tests pass. `tsc --noEmit` clean.
