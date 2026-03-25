@@ -72,26 +72,44 @@ export function resolveCanEdit(
 }
 
 /**
+ * Canonical key used by the import API when persisting a label.
+ * - chainId is parsed as a decimal integer (so "1" and "001" collapse to 1)
+ * - address is lowercased (so checksummed and lowercase forms merge)
+ */
+function importKey(chainId: string | number, address: string): string {
+  return `${Number(chainId)}:${address.toLowerCase()}`;
+}
+
+/**
  * Count the number of distinct labels that will be persisted from a parsed
- * import payload. Deduplicates Gnosis Safe entries by (chainId, address)
- * to match what the import API actually persists (lowercase address per chain).
+ * import payload. Normalises all three formats to the same canonical
+ * (Number(chainId), address.toLowerCase()) key used by the import API so
+ * that the success toast never over-reports.
  */
 export function countImportLabels(parsed: unknown): number {
+  const keys = new Set<string>();
+
   if (Array.isArray(parsed)) {
     // Gnosis Safe format: Array<{ address, chainId, name }>
-    const entries = parsed as Array<Record<string, unknown>>;
-    return new Set(
-      entries.map(
-        (e) => `${String(e.chainId)}:${String(e.address).toLowerCase()}`,
-      ),
-    ).size;
+    for (const e of parsed as Array<Record<string, unknown>>) {
+      keys.add(importKey(String(e.chainId), String(e.address)));
+    }
+    return keys.size;
   }
+
   if (typeof parsed === "object" && parsed !== null && "chains" in parsed) {
     // Snapshot format: { chains: { chainId: { address: entry } } }
-    return Object.values(
-      (parsed as { chains: Record<string, Record<string, unknown>> }).chains,
-    ).reduce((sum, entries) => sum + Object.keys(entries).length, 0);
+    const chains = (
+      parsed as { chains: Record<string, Record<string, unknown>> }
+    ).chains;
+    for (const [chainId, entries] of Object.entries(chains)) {
+      for (const address of Object.keys(entries)) {
+        keys.add(importKey(chainId, address));
+      }
+    }
+    return keys.size;
   }
+
   if (
     typeof parsed === "object" &&
     parsed !== null &&
@@ -99,8 +117,15 @@ export function countImportLabels(parsed: unknown): number {
     typeof (parsed as { labels: unknown }).labels === "object"
   ) {
     // Simple format: { chainId, labels: { address: entry } }
-    return Object.keys((parsed as { labels: Record<string, unknown> }).labels)
-      .length;
+    const { chainId, labels } = parsed as {
+      chainId: number;
+      labels: Record<string, unknown>;
+    };
+    for (const address of Object.keys(labels)) {
+      keys.add(importKey(chainId, address));
+    }
+    return keys.size;
   }
+
   return 0;
 }
