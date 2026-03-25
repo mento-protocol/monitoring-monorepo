@@ -4,6 +4,15 @@ import Google from "next-auth/providers/google";
 const ALLOWED_DOMAIN = "@mentolabs.xyz";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  // On preview deployments NEXTAUTH_URL is set to the production URL so that
+  // the Google OAuth callback always lands on the whitelisted prod domain.
+  // AUTH_REDIRECT_PROXY_URL tells NextAuth to forward the session back to the
+  // actual preview URL after a successful sign-in.
+  // In production both env vars are unset and NextAuth resolves URLs normally.
+  ...(process.env.AUTH_REDIRECT_PROXY_URL
+    ? { redirectProxyUrl: process.env.AUTH_REDIRECT_PROXY_URL }
+    : {}),
+
   providers: [
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
