@@ -1064,7 +1064,7 @@ function OlsStatusPanel({
         <Stat
           label="Debt Token"
           value={
-            debtTokenSym === "UNKNOWN" && debtTokenSide === "unknown"
+            !olsPool.debtToken
               ? "Unknown"
               : `${debtTokenSym} (${debtTokenSide})`
           }
@@ -1095,7 +1095,13 @@ function OlsStatusPanel({
         />
         <Stat
           label="Protocol Fee Recipient"
-          value={<AddressLink address={olsPool.protocolFeeRecipient} />}
+          value={
+            olsPool.protocolFeeRecipient ? (
+              <AddressLink address={olsPool.protocolFeeRecipient} />
+            ) : (
+              "Unknown"
+            )
+          }
         />
         <Stat
           label="Expansion Incentive (Liquidity Source)"

@@ -240,12 +240,90 @@ type GeneratedModule = {
         }) => Promise<MockDb>;
       };
     };
+    OpenLiquidityStrategy: {
+      PoolAdded: {
+        createMockEvent: (args: {
+          pool?: string;
+          params?: readonly [
+            string,
+            string,
+            bigint,
+            string,
+            bigint,
+            bigint,
+            bigint,
+            bigint,
+          ];
+          mockEventData?: {
+            chainId?: number;
+            logIndex?: number;
+            srcAddress?: string;
+            block?: { number?: number; timestamp?: number };
+          };
+        }) => unknown;
+        processEvent: (args: {
+          event: unknown;
+          mockDb: MockDb;
+        }) => Promise<MockDb>;
+      };
+      PoolRemoved: {
+        createMockEvent: (args: {
+          pool?: string;
+          mockEventData?: {
+            chainId?: number;
+            logIndex?: number;
+            srcAddress?: string;
+            block?: { number?: number; timestamp?: number };
+          };
+        }) => unknown;
+        processEvent: (args: {
+          event: unknown;
+          mockDb: MockDb;
+        }) => Promise<MockDb>;
+      };
+      RebalanceCooldownSet: {
+        createMockEvent: (args: {
+          pool?: string;
+          cooldown?: bigint;
+          mockEventData?: {
+            chainId?: number;
+            logIndex?: number;
+            srcAddress?: string;
+            block?: { number?: number; timestamp?: number };
+          };
+        }) => unknown;
+        processEvent: (args: {
+          event: unknown;
+          mockDb: MockDb;
+        }) => Promise<MockDb>;
+      };
+      LiquidityMoved: {
+        createMockEvent: (args: {
+          pool?: string;
+          direction?: bigint;
+          tokenGivenToPool?: string;
+          amountGivenToPool?: bigint;
+          tokenTakenFromPool?: string;
+          amountTakenFromPool?: bigint;
+          mockEventData?: {
+            chainId?: number;
+            logIndex?: number;
+            srcAddress?: string;
+            block?: { number?: number; timestamp?: number };
+          };
+        }) => unknown;
+        processEvent: (args: {
+          event: unknown;
+          mockDb: MockDb;
+        }) => Promise<MockDb>;
+      };
+    };
   };
 };
 
 const { TestHelpers } = generated as unknown as GeneratedModule;
-const { MockDb, FPMMFactory, FPMM, SortedOracles } = TestHelpers;
-const OpenLiquidityStrategy = (TestHelpers as any).OpenLiquidityStrategy;
+const { MockDb, FPMMFactory, FPMM, SortedOracles, OpenLiquidityStrategy } =
+  TestHelpers;
 
 type PoolEntity = {
   id: string;
@@ -1595,6 +1673,153 @@ describe("Envio Celo indexer handlers", () => {
         EXISTING_FEED,
         "referenceRateFeedID should remain unchanged when already populated",
       );
+    });
+  });
+
+  describe("open liquidity strategy PoolAdded and PoolRemoved", () => {
+    it("creates OlsPool with correct tuple-decoded fields on PoolAdded", async () => {
+      const POOL_ADDR = "0x0000000000000000000000000000000000000b01";
+      const OLS_ADDR = "0x0000000000000000000000000000000000000e01";
+      const DEBT_TOKEN = "0x0000000000000000000000000000000000000c01";
+      const FEE_RECIPIENT = "0x0000000000000000000000000000000000000d01";
+      let mockDb = MockDb.createMockDb();
+
+      // tuple: [pool, debtToken, cooldown, protocolFeeRecipient,
+      //         liquiditySourceIncentiveExpansion, protocolIncentiveExpansion,
+      //         liquiditySourceIncentiveContraction, protocolIncentiveContraction]
+      const addedEvent = OpenLiquidityStrategy.PoolAdded.createMockEvent({
+        pool: POOL_ADDR,
+        params: [
+          POOL_ADDR,
+          DEBT_TOKEN,
+          7200n, // cooldown
+          FEE_RECIPIENT,
+          100n, // liquiditySourceIncentiveExpansion (index 4)
+          200n, // protocolIncentiveExpansion (index 5)
+          300n, // liquiditySourceIncentiveContraction (index 6)
+          400n, // protocolIncentiveContraction (index 7)
+        ] as const,
+        mockEventData: {
+          chainId: 42220,
+          logIndex: 1,
+          srcAddress: OLS_ADDR,
+          block: { number: 500, timestamp: 1_700_005_000 },
+        },
+      });
+      mockDb = await OpenLiquidityStrategy.PoolAdded.processEvent({
+        event: addedEvent,
+        mockDb,
+      });
+
+      const olsPool = (mockDb.entities as any).OlsPool.get(POOL_ADDR) as
+        | {
+            id: string;
+            olsAddress: string;
+            isActive: boolean;
+            debtToken: string;
+            rebalanceCooldown: bigint;
+            protocolFeeRecipient: string;
+            liquiditySourceIncentiveExpansion: bigint;
+            protocolIncentiveExpansion: bigint;
+            liquiditySourceIncentiveContraction: bigint;
+            protocolIncentiveContraction: bigint;
+            olsRebalanceCount: number;
+            lastRebalance: bigint;
+          }
+        | undefined;
+      assert.ok(olsPool, "OlsPool should be created by PoolAdded");
+      assert.equal(olsPool?.id, POOL_ADDR);
+      assert.equal(olsPool?.olsAddress, OLS_ADDR);
+      assert.equal(olsPool?.isActive, true);
+      assert.equal(olsPool?.debtToken, DEBT_TOKEN.toLowerCase());
+      assert.equal(olsPool?.rebalanceCooldown, 7200n);
+      assert.equal(olsPool?.protocolFeeRecipient, FEE_RECIPIENT.toLowerCase());
+      // Verify tuple index mapping: expansion/contraction must not be swapped
+      assert.equal(olsPool?.liquiditySourceIncentiveExpansion, 100n);
+      assert.equal(olsPool?.protocolIncentiveExpansion, 200n);
+      assert.equal(olsPool?.liquiditySourceIncentiveContraction, 300n);
+      assert.equal(olsPool?.protocolIncentiveContraction, 400n);
+      assert.equal(olsPool?.olsRebalanceCount, 0);
+      assert.equal(olsPool?.lastRebalance, 0n);
+
+      // lifecycle event should also be written
+      const eventId = `42220_500_1`;
+      const lifecycle = (mockDb.entities as any).OlsLifecycleEvent.get(
+        eventId,
+      ) as { action: string; poolId: string } | undefined;
+      assert.ok(lifecycle, "OlsLifecycleEvent should be written for PoolAdded");
+      assert.equal(lifecycle?.action, "POOL_ADDED");
+      assert.equal(lifecycle?.poolId, POOL_ADDR);
+    });
+
+    it("marks OlsPool inactive and writes lifecycle event on PoolRemoved", async () => {
+      const POOL_ADDR = "0x0000000000000000000000000000000000000b02";
+      const OLS_ADDR = "0x0000000000000000000000000000000000000e02";
+      const DEBT_TOKEN = "0x0000000000000000000000000000000000000c02";
+      let mockDb = MockDb.createMockDb();
+
+      // First add the pool
+      const addedEvent = OpenLiquidityStrategy.PoolAdded.createMockEvent({
+        pool: POOL_ADDR,
+        params: [
+          POOL_ADDR,
+          DEBT_TOKEN,
+          3600n,
+          "0x0000000000000000000000000000000000000000",
+          0n,
+          0n,
+          0n,
+          0n,
+        ] as const,
+        mockEventData: {
+          chainId: 42220,
+          logIndex: 1,
+          srcAddress: OLS_ADDR,
+          block: { number: 600, timestamp: 1_700_006_000 },
+        },
+      });
+      mockDb = await OpenLiquidityStrategy.PoolAdded.processEvent({
+        event: addedEvent,
+        mockDb,
+      });
+
+      // Then remove it
+      const removedEvent = OpenLiquidityStrategy.PoolRemoved.createMockEvent({
+        pool: POOL_ADDR,
+        mockEventData: {
+          chainId: 42220,
+          logIndex: 2,
+          srcAddress: OLS_ADDR,
+          block: { number: 700, timestamp: 1_700_007_000 },
+        },
+      });
+      mockDb = await OpenLiquidityStrategy.PoolRemoved.processEvent({
+        event: removedEvent,
+        mockDb,
+      });
+
+      const olsPool = (mockDb.entities as any).OlsPool.get(POOL_ADDR) as
+        | { isActive: boolean; debtToken: string }
+        | undefined;
+      assert.ok(olsPool, "OlsPool should still exist after PoolRemoved");
+      assert.equal(
+        olsPool?.isActive,
+        false,
+        "OlsPool should be marked inactive",
+      );
+      // Existing fields should be preserved
+      assert.equal(olsPool?.debtToken, DEBT_TOKEN.toLowerCase());
+
+      // lifecycle event for POOL_REMOVED
+      const eventId = `42220_700_2`;
+      const lifecycle = (mockDb.entities as any).OlsLifecycleEvent.get(
+        eventId,
+      ) as { action: string } | undefined;
+      assert.ok(
+        lifecycle,
+        "OlsLifecycleEvent should be written for PoolRemoved",
+      );
+      assert.equal(lifecycle?.action, "POOL_REMOVED");
     });
   });
 
