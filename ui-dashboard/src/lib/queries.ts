@@ -55,12 +55,8 @@ export const POOL_SNAPSHOTS_24H = `
 
 export const RECENT_SWAPS = `
   query RecentSwaps($limit: Int!) {
-    SwapEvent(
-      where: { isLpSwap: { _eq: false } }
-      order_by: { blockNumber: desc }
-      limit: $limit
-    ) {
-      id poolId sender recipient isLpSwap
+    SwapEvent(order_by: { blockNumber: desc }, limit: $limit) {
+      id poolId sender recipient
       amount0In amount1In amount0Out amount1Out
       txHash blockNumber blockTimestamp
     }
@@ -70,24 +66,11 @@ export const RECENT_SWAPS = `
 export const POOL_SWAPS = `
   query PoolSwaps($poolId: String!, $limit: Int!) {
     SwapEvent(
-      where: { poolId: { _eq: $poolId }, isLpSwap: { _eq: false } }
+      where: { poolId: { _eq: $poolId } }
       order_by: { blockNumber: desc }
       limit: $limit
     ) {
-      id poolId sender recipient isLpSwap
-      amount0In amount1In amount0Out amount1Out
-      txHash blockNumber blockTimestamp
-    }
-  }
-`;
-
-export const POOL_LP_SWAPS = `
-  query PoolLpSwaps($poolId: String!, $txHashes: [String!]!) {
-    SwapEvent(
-      where: { poolId: { _eq: $poolId }, isLpSwap: { _eq: true }, txHash: { _in: $txHashes } }
-      order_by: { blockNumber: desc }
-    ) {
-      id poolId sender recipient isLpSwap
+      id poolId sender recipient
       amount0In amount1In amount0Out amount1Out
       txHash blockNumber blockTimestamp
     }

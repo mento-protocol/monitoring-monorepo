@@ -109,26 +109,6 @@ type SwapEvent @index(fields: ["poolId", "blockTimestamp"]) {
   txHash: String!
   blockNumber: BigInt!
   blockTimestamp: BigInt! @index
-  # true when this swap was triggered internally by a Mint/Burn rebalance,
-  # not by a direct user trade through the Router.
-  # MIGRATION NOTE: This field was added in the LP-trade separation PR.
-  # Deploying this schema change requires a full reindex — historical SwapEvent
-  # rows written before this schema version will not have isLpSwap set and must
-  # not be queried against filters that depend on it until reindexing is complete.
-  isLpSwap: Boolean!
-}
-
-# Lookup index for LP-rebalance swap detection.
-# id format: "{chainId}:{poolId}:{txHash}"
-# Each FPMM.Swap handler overwrites this entry (last-writer-wins within a tx).
-# swapLogIndex is stored so backfillLpSwap can verify the swap it found
-# actually precedes the Mint/Burn in the log — guarding against a user swap
-# at logIndex N being incorrectly flagged when a later mint()/burn() fires
-# in the same tx *without* emitting an internal rebalance swap.
-type SwapTxIndex {
-  id: ID!
-  swapEventId: String!
-  swapLogIndex: Int!
 }
 
 type LiquidityEvent @index(fields: ["poolId", "blockTimestamp"]) {

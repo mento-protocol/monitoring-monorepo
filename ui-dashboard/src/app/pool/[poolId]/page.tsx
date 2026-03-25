@@ -30,7 +30,6 @@ import {
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   POOL_LIQUIDITY,
-  POOL_LP_SWAPS,
   POOL_REBALANCES,
   POOL_RESERVES,
   POOL_SNAPSHOTS,
@@ -65,7 +64,7 @@ export default function PoolDetailPage() {
 // ---------------------------------------------------------------------------
 
 const TABS = [
-  "trades",
+  "swaps",
   "reserves",
   "rebalances",
   "liquidity",
@@ -81,13 +80,13 @@ function PoolDetail() {
 
   const decodedId = decodeURIComponent(poolId);
   const rawTab = searchParams.get("tab");
-  const tab: Tab = TABS.includes(rawTab as Tab) ? (rawTab as Tab) : "trades";
+  const tab: Tab = TABS.includes(rawTab as Tab) ? (rawTab as Tab) : "swaps";
   const limit = Number(searchParams.get("limit") ?? "25");
 
   const setURL = useCallback(
     (t: Tab, lim: number) => {
       const p = new URLSearchParams(searchParams.toString());
-      if (t !== "trades") p.set("tab", t);
+      if (t !== "swaps") p.set("tab", t);
       else p.delete("tab");
       if (lim !== 25) p.set("limit", String(lim));
       else p.delete("limit");
@@ -198,7 +197,7 @@ function PoolDetail() {
       </div>
 
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-        {tab === "trades" && (
+        {tab === "swaps" && (
           <SwapsTab poolId={decodedId} limit={limit} pool={pool} />
         )}
         {tab === "reserves" && (
@@ -369,12 +368,8 @@ function SwapsTab({
           token1Symbol={sym1}
         />
       )}
-      <p className="text-xs text-slate-500 mb-3">
-        User trades only — LP rebalance swaps are excluded. See the Liquidity
-        tab for LP activity.
-      </p>
       {swaps.length === 0 ? (
-        <EmptyBox message="No trades for this pool." />
+        <EmptyBox message="No swaps for this pool." />
       ) : (
         <Table>
           <thead>
@@ -623,26 +618,7 @@ function LiquidityTab({
   }>(POOL_LIQUIDITY, { poolId, limit });
   const rows = data?.LiquidityEvent ?? [];
 
-  // Fetch LP-rebalance swaps that share a txHash with any liquidity event
-  const txHashes = rows.map((r) => r.txHash);
-  const { data: lpSwapData } = useGQL<{ SwapEvent: SwapEvent[] }>(
-    txHashes.length > 0 ? POOL_LP_SWAPS : null,
-    { poolId, txHashes },
-  );
-  // Build a map txHash → SwapEvent[] for the badge display.
-  // If multiple LiquidityEvents share one txHash they each show the same
-  // swap badges (all LP swaps for that tx). In practice FPMM emits at most
-  // one rebalance swap per mint()/burn() call, so duplicate badge display is
-  // not a concern for current pool contracts.
-  const lpSwapsByTx = new Map<string, SwapEvent[]>();
-  for (const s of lpSwapData?.SwapEvent ?? []) {
-    const existing = lpSwapsByTx.get(s.txHash) ?? [];
-    existing.push(s);
-    lpSwapsByTx.set(s.txHash, existing);
-  }
-
   const fpmmPool = pool ? isFpmm(pool) : false;
-  // Passing null as the query key skips the request — VirtualPools have no snapshots.
   const { data: snapshotData } = useGQL<{ PoolSnapshot: PoolSnapshot[] }>(
     fpmmPool ? POOL_SNAPSHOTS : null,
     { poolId, limit },
@@ -682,58 +658,30 @@ function LiquidityTab({
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
-              const linkedSwaps = lpSwapsByTx.get(r.txHash) ?? [];
-              return (
-                <Row key={r.id}>
-                  <TxHashCell txHash={r.txHash} />
-                  <td className="px-4 py-2">
-                    <div className="flex items-center gap-1.5">
-                      <KindBadge kind={r.kind} />
-                      {linkedSwaps.map((s) => {
-                        const swapLabel = `Included a rebalance swap: ${formatWei(
-                          BigInt(s.amount0In) > BigInt(s.amount0Out)
-                            ? s.amount0In
-                            : s.amount0Out,
-                          pool?.token0Decimals ?? 18,
-                        )} ${sym0} ⇄ ${formatWei(
-                          BigInt(s.amount1In) > BigInt(s.amount1Out)
-                            ? s.amount1In
-                            : s.amount1Out,
-                          pool?.token1Decimals ?? 18,
-                        )} ${sym1}`;
-                        return (
-                          <span
-                            key={s.id}
-                            title={swapLabel}
-                            aria-label={swapLabel}
-                            className="text-xs text-indigo-400 border border-indigo-700 rounded px-1 py-0.5"
-                          >
-                            ⇄ swap
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </td>
-                  <SenderCell address={r.sender} />
-                  <Td mono small align="right">
-                    {formatWei(r.amount0)}
-                  </Td>
-                  <Td mono small align="right">
-                    {formatWei(r.amount1)}
-                  </Td>
-                  <Td mono small align="right">
-                    {formatWei(r.liquidity)}
-                  </Td>
-                  <Td mono small muted align="right">
-                    {formatBlock(r.blockNumber)}
-                  </Td>
-                  <Td small muted title={formatTimestamp(r.blockTimestamp)}>
-                    {relativeTime(r.blockTimestamp)}
-                  </Td>
-                </Row>
-              );
-            })}
+            {rows.map((r) => (
+              <Row key={r.id}>
+                <TxHashCell txHash={r.txHash} />
+                <td className="px-4 py-2">
+                  <KindBadge kind={r.kind} />
+                </td>
+                <SenderCell address={r.sender} />
+                <Td mono small align="right">
+                  {formatWei(r.amount0)}
+                </Td>
+                <Td mono small align="right">
+                  {formatWei(r.amount1)}
+                </Td>
+                <Td mono small align="right">
+                  {formatWei(r.liquidity)}
+                </Td>
+                <Td mono small muted align="right">
+                  {formatBlock(r.blockNumber)}
+                </Td>
+                <Td small muted title={formatTimestamp(r.blockTimestamp)}>
+                  {relativeTime(r.blockTimestamp)}
+                </Td>
+              </Row>
+            ))}
           </tbody>
         </Table>
       )}

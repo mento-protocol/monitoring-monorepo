@@ -8,7 +8,6 @@ import {
   type Pool,
   type FactoryDeployment,
   type SwapEvent,
-  type SwapTxIndex,
   type LiquidityEvent,
   type ReserveUpdate,
   type RebalanceEvent,
@@ -36,185 +35,6 @@ import {
   fetchTradingLimits,
 } from "../rpc";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
-import { hourBucket, snapshotId } from "../helpers";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Called from Mint/Burn handlers to mark the co-transaction Swap (if any) as
- * an LP-rebalance swap and subtract its volume from the pool / snapshot
- * cumulative trade metrics.
- *
- * Envio guarantees log-order processing within a block, so by the time
- * Mint/Burn fires the Swap handler has already run and written:
- *   - SwapEvent (with isLpSwap: false)
- *   - SwapTxIndex ("{chainId}:{poolId}:{txHash}" → swapEventId)
- *   - Pool.swapCount / notionalVolume0/1 (already incremented)
- *   - PoolSnapshot.swapCount / swapVolume0/1 (already incremented)
- *
- * We undo those increments here so that all cumulative metrics reflect only
- * genuine user trades.
- *
- * Classification approach — txHash key + logIndex guard:
- *
- * The SwapTxIndex key is {chainId}:{poolId}:{txHash}. Each Swap overwrites the
- * entry (last-writer-wins within a tx). The LP rebalance swap fires inside
- * mint()/burn(), so it's always the LAST swap for this pool+tx when Mint/Burn
- * runs. swapLogIndex is also stored to apply a directional guard.
- *
- * KNOWN LIMITATION — user swap + mint without rebalance in same tx:
- * This is the one case that cannot be perfectly distinguished with event data
- * alone. FPMM emits identical Swap events whether the swap originated from an
- * external call or from an internal _rebalanceSwap() call — the contract
- * address, event signature, and all fields are the same. The only on-chain
- * signal we have is log ordering.
- *
- * The logIndex guard (swapLogIndex < mintBurnLogIndex) filters out swaps that
- * appear *after* the Mint/Burn (impossible in practice but guards corruption).
- * It does NOT distinguish "user swap directly before mint" from "LP rebalance
- * swap directly before mint" — both satisfy the guard.
- *
- * In practice this misclassification requires an external contract that:
- *   1. Calls FPMM.swap() (emits Swap at logN)
- *   2. Calls FPMM.mint() AND the pool does NOT need rebalancing (no Swap
- *      emitted by mint, Mint at logM > logN)
- *
- * For Mento FPMM pools this is extremely unlikely: the OLS strategy contract
- * that performs LP operations always runs a rebalance check first, and direct
- * user interaction with both swap() and mint() in one tx is not a normal flow.
- * We accept this as a known edge case with low real-world impact.
- *
- * If precise attribution becomes critical, the correct fix is to add a
- * distinguishing field to the FPMM contract's Swap event (e.g. an
- * `isInternalRebalance` flag) — which requires a contract upgrade.
- */
-// Minimal interface for the context object needed by backfillLpSwap.
-// The full generated context type is a superset of this.
-interface BackfillContext {
-  SwapTxIndex: {
-    get(
-      id: string,
-    ): Promise<{ swapEventId: string; swapLogIndex: number } | undefined>;
-  };
-  SwapEvent: {
-    get(id: string): Promise<SwapEvent | undefined>;
-    set(entity: SwapEvent): void;
-  };
-  Pool: {
-    get(id: string): Promise<Pool | undefined>;
-    set(entity: Pool): void;
-  };
-  PoolSnapshot: {
-    get(id: string): Promise<
-      | {
-          swapCount: number;
-          swapVolume0: bigint;
-          swapVolume1: bigint;
-          cumulativeSwapCount: number;
-          cumulativeVolume0: bigint;
-          cumulativeVolume1: bigint;
-          [key: string]: unknown;
-        }
-      | undefined
-    >;
-    set(entity: unknown): void;
-  };
-}
-
-async function backfillLpSwap({
-  context,
-  chainId,
-  poolId,
-  txHash,
-  mintBurnLogIndex,
-  blockTimestamp,
-}: {
-  context: BackfillContext;
-  chainId: number;
-  poolId: string;
-  txHash: string;
-  /** logIndex of the Mint/Burn event — used to verify the swap precedes it */
-  mintBurnLogIndex: number;
-  blockTimestamp: bigint;
-}): Promise<void> {
-  const indexId = `${chainId}:${poolId}:${txHash}`;
-  const swapIndex = await context.SwapTxIndex.get(indexId);
-  if (!swapIndex) return; // No swap in this tx — nothing to backfill
-
-  // Guard: the swap must precede the Mint/Burn in the log. This rules out the
-  // case where a user swap()+mint() tx fires Mint without an internal rebalance
-  // — in that case, the index still holds the user swap's entry, but it
-  // preceded the Mint with a gap (other events in between), not directly. We
-  // can't perfectly distinguish "adjacent" from "non-adjacent" without knowing
-  // exactly what fired between them, so we use a soft guard: the swap's
-  // logIndex must be less than the Mint/Burn's logIndex.
-  // This still catches the multicall case correctly: LP rebalance swap fires
-  // inside mint() at logIndex (mintLogIndex - k) for small k, always < mintLogIndex.
-  if (swapIndex.swapLogIndex >= mintBurnLogIndex) return;
-
-  const existingSwap = await context.SwapEvent.get(swapIndex.swapEventId);
-  if (!existingSwap) return;
-
-  // Idempotency guard: if already marked (e.g. both Mint and Burn fire for the
-  // same tx, or re-indexing hits the same event twice) skip the subtract to
-  // prevent double-counting.
-  if (existingSwap.isLpSwap) return;
-
-  // Mark the swap as LP-triggered
-  context.SwapEvent.set({ ...existingSwap, isLpSwap: true });
-
-  // Compute the volume that was incorrectly attributed to user trades
-  const lpVol0 =
-    existingSwap.amount0In > existingSwap.amount0Out
-      ? existingSwap.amount0In
-      : existingSwap.amount0Out;
-  const lpVol1 =
-    existingSwap.amount1In > existingSwap.amount1Out
-      ? existingSwap.amount1In
-      : existingSwap.amount1Out;
-
-  // Subtract from Pool cumulative trade metrics
-  const pool = await context.Pool.get(poolId);
-  if (pool) {
-    context.Pool.set({
-      ...pool,
-      swapCount: Math.max(0, pool.swapCount - 1),
-      notionalVolume0:
-        pool.notionalVolume0 > lpVol0 ? pool.notionalVolume0 - lpVol0 : 0n,
-      notionalVolume1:
-        pool.notionalVolume1 > lpVol1 ? pool.notionalVolume1 - lpVol1 : 0n,
-    });
-  }
-
-  // Subtract from the PoolSnapshot bucket that the Swap handler wrote into.
-  // Also correct the cumulative fields — upsertSnapshot copies pool.swapCount
-  // into cumulativeSwapCount *before* this backfill runs, so those fields
-  // reflect the inflated value and must be decremented here too.
-  const hourTs = hourBucket(blockTimestamp);
-  const snapId = snapshotId(poolId, hourTs);
-  const snapshot = await context.PoolSnapshot.get(snapId);
-  if (snapshot) {
-    context.PoolSnapshot.set({
-      ...snapshot,
-      swapCount: Math.max(0, snapshot.swapCount - 1),
-      swapVolume0:
-        snapshot.swapVolume0 > lpVol0 ? snapshot.swapVolume0 - lpVol0 : 0n,
-      swapVolume1:
-        snapshot.swapVolume1 > lpVol1 ? snapshot.swapVolume1 - lpVol1 : 0n,
-      cumulativeSwapCount: Math.max(0, snapshot.cumulativeSwapCount - 1),
-      cumulativeVolume0:
-        snapshot.cumulativeVolume0 > lpVol0
-          ? snapshot.cumulativeVolume0 - lpVol0
-          : 0n,
-      cumulativeVolume1:
-        snapshot.cumulativeVolume1 > lpVol1
-          ? snapshot.cumulativeVolume1 - lpVol1
-          : 0n,
-    });
-  }
-}
 
 // ---------------------------------------------------------------------------
 // FPMMFactory
@@ -448,24 +268,9 @@ FPMM.Swap.handler(async ({ event, context }) => {
     txHash: event.transaction.hash,
     blockNumber,
     blockTimestamp,
-    // Assume user trade by default; Mint/Burn handlers will backfill to true
-    // if a Mint or Burn event fires in the same transaction (LP rebalance swap).
-    isLpSwap: false,
   };
 
   context.SwapEvent.set(swap);
-
-  // Store a txHash-keyed lookup. Each swap in this tx overwrites the previous
-  // entry (last-writer-wins). The LP rebalance swap fires inside mint()/burn()
-  // so it's always the last swap for this pool+tx when Mint/Burn runs.
-  // swapLogIndex is stored so backfillLpSwap can verify the swap precedes
-  // the Mint/Burn event (guard against user-swap misclassification).
-  const swapTxIndex: SwapTxIndex = {
-    id: `${event.chainId}:${poolId}:${event.transaction.hash}`,
-    swapEventId: id,
-    swapLogIndex: event.logIndex,
-  };
-  context.SwapTxIndex.set(swapTxIndex);
 });
 
 // ---------------------------------------------------------------------------
@@ -493,18 +298,6 @@ FPMM.Mint.handler(async ({ event, context }) => {
     blockTimestamp,
     blockNumber,
     mintDelta: true,
-  });
-
-  // If a Swap was emitted earlier in this transaction it was an internal
-  // LP-rebalance swap. Backfill isLpSwap = true and subtract its volume
-  // from pool / snapshot cumulative trade counters.
-  await backfillLpSwap({
-    context,
-    chainId: event.chainId,
-    poolId,
-    txHash: event.transaction.hash,
-    mintBurnLogIndex: event.logIndex,
-    blockTimestamp,
   });
 
   const liquidityEvent: LiquidityEvent = {
@@ -549,16 +342,6 @@ FPMM.Burn.handler(async ({ event, context }) => {
     blockTimestamp,
     blockNumber,
     burnDelta: true,
-  });
-
-  // Same as Mint: if a Swap was emitted in this transaction it was LP-triggered.
-  await backfillLpSwap({
-    context,
-    chainId: event.chainId,
-    poolId,
-    txHash: event.transaction.hash,
-    mintBurnLogIndex: event.logIndex,
-    blockTimestamp,
   });
 
   const liquidityEvent: LiquidityEvent = {
