@@ -153,7 +153,7 @@ export function sortGlobalPools(
       case "volume24h": {
         const aV = volume24hByKey?.get(aKey) ?? 0;
         const bV = volume24hByKey?.get(bKey) ?? 0;
-        cmp = (aV ?? 0) - (bV ?? 0);
+        cmp = aV - bV;
         break;
       }
       case "totalVolume":
