@@ -157,3 +157,37 @@ export type ProtocolFeeTransfer = {
   amount: string;
   blockTimestamp: string;
 };
+
+export type OlsPool = {
+  id: string;
+  olsAddress: string;
+  isActive: boolean;
+  debtToken: string;
+  rebalanceCooldown: string;
+  lastRebalance: string;
+  protocolFeeRecipient: string;
+  liquiditySourceIncentiveExpansion: string;
+  liquiditySourceIncentiveContraction: string;
+  protocolIncentiveExpansion: string;
+  protocolIncentiveContraction: string;
+  olsRebalanceCount: number;
+  addedAtBlock: string;
+  addedAtTimestamp: string;
+  updatedAtBlock: string;
+  updatedAtTimestamp: string;
+};
+
+export type OlsLiquidityEvent = {
+  id: string;
+  poolId: string;
+  olsAddress: string;
+  direction: number;
+  tokenGivenToPool: string;
+  amountGivenToPool: string;
+  tokenTakenFromPool: string;
+  amountTakenFromPool: string;
+  caller: string;
+  txHash: string;
+  blockNumber: string;
+  blockTimestamp: string;
+};

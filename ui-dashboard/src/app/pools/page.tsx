@@ -4,7 +4,12 @@ import { Suspense, useState, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { NetworkAwareLink } from "@/components/network-aware-link";
 import { useGQL } from "@/lib/graphql";
-import { ALL_POOLS_WITH_HEALTH, RECENT_SWAPS, POOL_SWAPS } from "@/lib/queries";
+import {
+  ALL_POOLS_WITH_HEALTH,
+  RECENT_SWAPS,
+  POOL_SWAPS,
+  ALL_OLS_POOLS,
+} from "@/lib/queries";
 import {
   truncateAddress,
   formatWei,
@@ -16,7 +21,7 @@ import {
 import { buildPoolNameMap, tokenSymbol } from "@/lib/tokens";
 import { PoolsTable } from "@/components/pools-table";
 import { useNetwork } from "@/components/network-provider";
-import type { Pool, SwapEvent } from "@/lib/types";
+import type { OlsPool, Pool, SwapEvent } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import { LimitSelect } from "@/components/controls";
@@ -56,6 +61,11 @@ function HomeContent() {
     error: poolsErr,
     isLoading: poolsLoading,
   } = useGQL<{ Pool: Pool[] }>(ALL_POOLS_WITH_HEALTH);
+
+  const { data: olsData } = useGQL<{ OlsPool: Pick<OlsPool, "id">[] }>(
+    ALL_OLS_POOLS,
+  );
+  const olsPoolIds = new Set((olsData?.OlsPool ?? []).map((p) => p.id));
 
   const swapQuery = poolFilter ? POOL_SWAPS : RECENT_SWAPS;
   const swapVars = poolFilter ? { poolId: poolFilter, limit } : { limit };
@@ -130,7 +140,7 @@ function HomeContent() {
         ) : pools.length === 0 ? (
           <EmptyBox message="No pools found. Is the indexer running?" />
         ) : (
-          <PoolsTable pools={pools} />
+          <PoolsTable pools={pools} olsPoolIds={olsPoolIds} />
         )}
       </section>
 
