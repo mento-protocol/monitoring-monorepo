@@ -60,6 +60,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           { status: 400 },
         );
       }
+      if (!entry.name.trim()) {
+        return NextResponse.json(
+          { error: `Entry with address ${entry.address} has an empty name` },
+          { status: 400 },
+        );
+      }
       parsed.push({ chainId, address: entry.address, name: entry.name });
     }
 
@@ -70,8 +76,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       Record<string, AddressLabelEntry>
     >();
     const distinctChainIds = [...new Set(parsed.map((e) => e.chainId))];
-    for (const chainId of distinctChainIds) {
-      existingByChain.set(chainId, await getLabels(chainId));
+    try {
+      for (const chainId of distinctChainIds) {
+        existingByChain.set(chainId, await getLabels(chainId));
+      }
+    } catch (err) {
+      return serverError(err);
     }
 
     const byChain = new Map<number, Record<string, AddressLabelEntry>>();
