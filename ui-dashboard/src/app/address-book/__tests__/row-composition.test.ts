@@ -285,6 +285,15 @@ describe("countImportLabels", () => {
     expect(countImportLabels(entries)).toBe(1);
   });
 
+  it("deduplicates zero-padded chainId strings ('1' vs '001')", () => {
+    // Both parse to chainId 1 via Number(); should count as the same chain.
+    const entries = [
+      { address: addr, chainId: "1", name: "A" },
+      { address: addr, chainId: "001", name: "A again" },
+    ];
+    expect(countImportLabels(entries)).toBe(1);
+  });
+
   it("counts entries in snapshot format", () => {
     const snapshot = {
       chains: {
@@ -293,6 +302,19 @@ describe("countImportLabels", () => {
       },
     };
     expect(countImportLabels(snapshot)).toBe(2);
+  });
+
+  it("deduplicates checksummed vs lowercase addresses in snapshot format", () => {
+    // Both map to the same stored key.
+    const snapshot = {
+      chains: {
+        "42220": {
+          [addr.toLowerCase()]: { label: "A", updatedAt: "" },
+          [addr.toUpperCase()]: { label: "A upper", updatedAt: "" },
+        },
+      },
+    };
+    expect(countImportLabels(snapshot)).toBe(1);
   });
 
   it("counts entries in simple format", () => {
@@ -304,6 +326,17 @@ describe("countImportLabels", () => {
       },
     };
     expect(countImportLabels(simple)).toBe(2);
+  });
+
+  it("deduplicates checksummed vs lowercase addresses in simple format", () => {
+    const simple = {
+      chainId: 42220,
+      labels: {
+        [addr.toLowerCase()]: { label: "A", updatedAt: "" },
+        [addr.toUpperCase()]: { label: "A upper", updatedAt: "" },
+      },
+    };
+    expect(countImportLabels(simple)).toBe(1);
   });
 
   it("returns 0 for unrecognised payload", () => {
