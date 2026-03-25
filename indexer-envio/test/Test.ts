@@ -245,6 +245,7 @@ type GeneratedModule = {
 
 const { TestHelpers } = generated as unknown as GeneratedModule;
 const { MockDb, FPMMFactory, FPMM, SortedOracles } = TestHelpers;
+const OpenLiquidityStrategy = (TestHelpers as any).OpenLiquidityStrategy;
 
 type PoolEntity = {
   id: string;
@@ -1594,6 +1595,101 @@ describe("Envio Celo indexer handlers", () => {
         EXISTING_FEED,
         "referenceRateFeedID should remain unchanged when already populated",
       );
+    });
+  });
+
+  describe("open liquidity strategy self-heal", () => {
+    it("materializes OlsPool on cooldown updates even when PoolAdded was missed", async () => {
+      const POOL_ADDR = "0x0000000000000000000000000000000000000a01";
+      const OLS_ADDR = "0x0000000000000000000000000000000000000f01";
+      let mockDb = MockDb.createMockDb();
+
+      const cooldownEvent =
+        OpenLiquidityStrategy.RebalanceCooldownSet.createMockEvent({
+          pool: POOL_ADDR,
+          cooldown: 3600n,
+          mockEventData: {
+            chainId: 42220,
+            logIndex: 1,
+            srcAddress: OLS_ADDR,
+            block: { number: 1200, timestamp: 1_700_012_000 },
+          },
+        });
+      mockDb = await OpenLiquidityStrategy.RebalanceCooldownSet.processEvent({
+        event: cooldownEvent,
+        mockDb,
+      });
+
+      const olsPool = (mockDb.entities as any).OlsPool.get(POOL_ADDR) as
+        | {
+            id: string;
+            olsAddress: string;
+            rebalanceCooldown: bigint;
+            isActive: boolean;
+            olsRebalanceCount: number;
+            debtToken: string;
+          }
+        | undefined;
+      assert.ok(olsPool, "OlsPool should be created from cooldown update");
+      assert.equal(olsPool?.id, POOL_ADDR);
+      assert.equal(olsPool?.olsAddress, OLS_ADDR);
+      assert.equal(olsPool?.rebalanceCooldown, 3600n);
+      assert.equal(olsPool?.isActive, true);
+      assert.equal(olsPool?.olsRebalanceCount, 0);
+      assert.equal(olsPool?.debtToken, "");
+    });
+
+    it("materializes OlsPool on liquidity moves and increments rebalance count", async () => {
+      const POOL_ADDR = "0x0000000000000000000000000000000000000a02";
+      const OLS_ADDR = "0x0000000000000000000000000000000000000f02";
+      let mockDb = MockDb.createMockDb();
+
+      const liquidityEvent =
+        OpenLiquidityStrategy.LiquidityMoved.createMockEvent({
+          pool: POOL_ADDR,
+          direction: 0n,
+          tokenGivenToPool: "0x0000000000000000000000000000000000000003",
+          amountGivenToPool: 1000n,
+          tokenTakenFromPool: "0x0000000000000000000000000000000000000004",
+          amountTakenFromPool: 900n,
+          mockEventData: {
+            chainId: 42220,
+            logIndex: 2,
+            srcAddress: OLS_ADDR,
+            block: { number: 1201, timestamp: 1_700_012_100 },
+          },
+        });
+      mockDb = await OpenLiquidityStrategy.LiquidityMoved.processEvent({
+        event: liquidityEvent,
+        mockDb,
+      });
+
+      const olsPool = (mockDb.entities as any).OlsPool.get(POOL_ADDR) as
+        | {
+            lastRebalance: bigint;
+            olsRebalanceCount: number;
+            isActive: boolean;
+          }
+        | undefined;
+      assert.ok(olsPool, "OlsPool should be created from LiquidityMoved");
+      assert.equal(olsPool?.lastRebalance, 1_700_012_100n);
+      assert.equal(olsPool?.olsRebalanceCount, 1);
+      assert.equal(olsPool?.isActive, true);
+
+      const eventId = `42220_1201_2`;
+      const liquidityRow = (mockDb.entities as any).OlsLiquidityEvent.get(
+        eventId,
+      ) as
+        | {
+            poolId: string;
+            amountGivenToPool: bigint;
+            amountTakenFromPool: bigint;
+          }
+        | undefined;
+      assert.ok(liquidityRow, "Liquidity event row should still be written");
+      assert.equal(liquidityRow?.poolId, POOL_ADDR);
+      assert.equal(liquidityRow?.amountGivenToPool, 1000n);
+      assert.equal(liquidityRow?.amountTakenFromPool, 900n);
     });
   });
 });

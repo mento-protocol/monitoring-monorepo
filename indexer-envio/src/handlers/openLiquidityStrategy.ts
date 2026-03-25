@@ -10,6 +10,51 @@ import {
 } from "generated";
 import { eventId, asAddress, asBigInt } from "../helpers";
 
+function placeholderOlsPool(args: {
+  poolId: string;
+  olsAddress: string;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+}): OlsPool {
+  return {
+    id: args.poolId,
+    olsAddress: args.olsAddress,
+    isActive: true,
+    debtToken: "",
+    rebalanceCooldown: 0n,
+    lastRebalance: 0n,
+    protocolFeeRecipient: "",
+    liquiditySourceIncentiveExpansion: 0n,
+    liquiditySourceIncentiveContraction: 0n,
+    protocolIncentiveExpansion: 0n,
+    protocolIncentiveContraction: 0n,
+    olsRebalanceCount: 0,
+    addedAtBlock: args.blockNumber,
+    addedAtTimestamp: args.blockTimestamp,
+    updatedAtBlock: args.blockNumber,
+    updatedAtTimestamp: args.blockTimestamp,
+  };
+}
+
+async function getOrCreateOlsPool(args: {
+  context: { OlsPool: { get: (id: string) => Promise<OlsPool | undefined> } };
+  poolId: string;
+  olsAddress: string;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+}): Promise<OlsPool> {
+  const existing = await args.context.OlsPool.get(args.poolId);
+  return (
+    existing ??
+    placeholderOlsPool({
+      poolId: args.poolId,
+      olsAddress: args.olsAddress,
+      blockNumber: args.blockNumber,
+      blockTimestamp: args.blockTimestamp,
+    })
+  );
+}
+
 // ---------------------------------------------------------------------------
 // PoolAdded
 // ---------------------------------------------------------------------------
@@ -69,15 +114,19 @@ OpenLiquidityStrategy.PoolRemoved.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  const existing = await context.OlsPool.get(poolId);
-  if (existing) {
-    context.OlsPool.set({
-      ...existing,
-      isActive: false,
-      updatedAtBlock: blockNumber,
-      updatedAtTimestamp: blockTimestamp,
-    });
-  }
+  const existing = await getOrCreateOlsPool({
+    context,
+    poolId,
+    olsAddress: asAddress(event.srcAddress),
+    blockNumber,
+    blockTimestamp,
+  });
+  context.OlsPool.set({
+    ...existing,
+    isActive: false,
+    updatedAtBlock: blockNumber,
+    updatedAtTimestamp: blockTimestamp,
+  });
 
   const lifecycle: OlsLifecycleEvent = {
     id,
@@ -105,15 +154,19 @@ OpenLiquidityStrategy.RebalanceCooldownSet.handler(
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
-    const existing = await context.OlsPool.get(poolId);
-    if (existing) {
-      context.OlsPool.set({
-        ...existing,
-        rebalanceCooldown: cooldown,
-        updatedAtBlock: blockNumber,
-        updatedAtTimestamp: blockTimestamp,
-      });
-    }
+    const existing = await getOrCreateOlsPool({
+      context,
+      poolId,
+      olsAddress: asAddress(event.srcAddress),
+      blockNumber,
+      blockTimestamp,
+    });
+    context.OlsPool.set({
+      ...existing,
+      rebalanceCooldown: cooldown,
+      updatedAtBlock: blockNumber,
+      updatedAtTimestamp: blockTimestamp,
+    });
 
     const lifecycle: OlsLifecycleEvent = {
       id,
@@ -140,17 +193,22 @@ OpenLiquidityStrategy.LiquidityMoved.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Update lastRebalance + counter on OlsPool
-  const existing = await context.OlsPool.get(poolId);
-  if (existing) {
-    context.OlsPool.set({
-      ...existing,
-      lastRebalance: blockTimestamp,
-      olsRebalanceCount: existing.olsRebalanceCount + 1,
-      updatedAtBlock: blockNumber,
-      updatedAtTimestamp: blockTimestamp,
-    });
-  }
+  // Update lastRebalance + counter on OlsPool, even if indexing started
+  // after the historical PoolAdded event.
+  const existing = await getOrCreateOlsPool({
+    context,
+    poolId,
+    olsAddress: asAddress(event.srcAddress),
+    blockNumber,
+    blockTimestamp,
+  });
+  context.OlsPool.set({
+    ...existing,
+    lastRebalance: blockTimestamp,
+    olsRebalanceCount: existing.olsRebalanceCount + 1,
+    updatedAtBlock: blockNumber,
+    updatedAtTimestamp: blockTimestamp,
+  });
 
   const olsEvent: OlsLiquidityEvent = {
     id,

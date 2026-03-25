@@ -85,6 +85,17 @@ function getTabLabel(tab: Tab) {
   return tab === "providers" ? "LPs" : tab;
 }
 
+export function getDebtTokenSideLabel(
+  pool: Pool | null,
+  debtToken: string,
+): "token0" | "token1" | "unknown" {
+  if (!pool?.token0 || !pool?.token1 || !debtToken) return "unknown";
+  const normalizedDebtToken = debtToken.toLowerCase();
+  if (pool.token0.toLowerCase() === normalizedDebtToken) return "token0";
+  if (pool.token1.toLowerCase() === normalizedDebtToken) return "token1";
+  return "unknown";
+}
+
 function PoolDetail() {
   const { network } = useNetwork();
   const { poolId } = useParams<{ poolId: string }>();
@@ -1014,9 +1025,8 @@ function OlsStatusPanel({
     cooldownStatus = "—";
   }
 
-  const debtTokenSym = tokenSymbol(network, olsPool.debtToken);
-  const isDebtToken0 =
-    pool?.token0?.toLowerCase() === olsPool.debtToken.toLowerCase();
+  const debtTokenSym = tokenSymbol(network, olsPool.debtToken || null);
+  const debtTokenSide = getDebtTokenSideLabel(pool, olsPool.debtToken);
 
   // Incentives: raw uint64, denominator 1e18. Show as percentage.
   // Incentive denominator is 1e18 (FEE_DENOMINATOR). Values can exceed
@@ -1053,7 +1063,11 @@ function OlsStatusPanel({
       <dl className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
         <Stat
           label="Debt Token"
-          value={`${debtTokenSym} (token${isDebtToken0 ? "0" : "1"})`}
+          value={
+            debtTokenSym === "UNKNOWN" && debtTokenSide === "unknown"
+              ? "Unknown"
+              : `${debtTokenSym} (${debtTokenSide})`
+          }
         />
         <Stat
           label="Cooldown"
