@@ -34,6 +34,15 @@ networks:
         events:
           - event: VirtualPoolDeployed
           - event: PoolDeprecated
+      - name: OpenLiquidityStrategy
+        abi_file_path: abis/OpenLiquidityStrategy.json
+        address: [] # Not deployed on devnet
+        handler: src/EventHandlers.ts
+        events:
+          - event: PoolAdded
+          - event: PoolRemoved
+          - event: RebalanceCooldownSet
+          - event: LiquidityMoved
 unordered_multichain_mode: true
 preload_handlers: true
 field_selection:
