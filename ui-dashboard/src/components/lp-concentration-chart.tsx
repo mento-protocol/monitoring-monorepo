@@ -32,9 +32,14 @@ export function LpConcentrationChart({
     ...top.map((p) => fmt(p.address)),
     ...(otherTotal > BigInt(0) ? ["Other"] : []),
   ];
+  // Scale to basis points (×10000) before converting to Number so that large
+  // bigint values (which can exceed JS safe integer range) don't lose precision
+  // in the relative proportions used for pie slice sizes.
+  const toRelative = (v: bigint) =>
+    Number((v * BigInt(10_000)) / totalLiquidity) / 10000;
   const values = [
-    ...top.map((p) => Number(p.netLiquidity)),
-    ...(otherTotal > BigInt(0) ? [Number(otherTotal)] : []),
+    ...top.map((p) => toRelative(p.netLiquidity)),
+    ...(otherTotal > BigInt(0) ? [toRelative(otherTotal)] : []),
   ];
   const customdata = [
     ...top.map((p) => p.address),

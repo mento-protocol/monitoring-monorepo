@@ -373,8 +373,10 @@ FPMM.Burn.handler(async ({ event, context }) => {
 
   context.LiquidityEvent.set(liquidityEvent);
 
-  // Track LP position: sender burns LP tokens on withdraw
-  const lpBurnId = `${poolId}-${liquidityEvent.sender}`;
+  // Track LP position: on burn, LP tokens are pulled from `to` (the recipient who
+  // receives the underlying tokens back). Using `to` rather than `sender` avoids
+  // misattribution when a router/strategy contract is the msg.sender.
+  const lpBurnId = `${poolId}-${liquidityEvent.recipient}`;
   const existingBurn = await context.LiquidityPosition.get(lpBurnId);
   const prevBalance = existingBurn?.netLiquidity ?? 0n;
   const newBalance =
@@ -384,7 +386,7 @@ FPMM.Burn.handler(async ({ event, context }) => {
   context.LiquidityPosition.set({
     id: lpBurnId,
     poolId,
-    address: liquidityEvent.sender,
+    address: liquidityEvent.recipient,
     netLiquidity: newBalance,
     lastUpdatedBlock: blockNumber,
     lastUpdatedTimestamp: blockTimestamp,
