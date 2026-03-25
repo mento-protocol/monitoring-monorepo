@@ -108,6 +108,11 @@ async function backfillLpSwap({
   const existingSwap = await context.SwapEvent.get(swapIndex.swapEventId);
   if (!existingSwap) return;
 
+  // Idempotency guard: if already marked (e.g. both Mint and Burn fire for the
+  // same tx, or re-indexing hits the same event twice) skip the subtract to
+  // prevent double-counting.
+  if (existingSwap.isLpSwap) return;
+
   // Mark the swap as LP-triggered
   context.SwapEvent.set({ ...existingSwap, isLpSwap: true });
 
