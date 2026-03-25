@@ -204,9 +204,11 @@ type ProtocolFeeTransfer {
 # ─── Open Liquidity Strategy ───────────────────────────────────
 
 # Registered OLS pool config. One record per (pool, OLS contract).
-# id = pool address (same as Pool.id) — OLS is an additive overlay.
+# id = "<poolAddress>-<olsAddress>" — composite key so re-registration to a
+# new OLS contract creates a fresh record instead of silently overwriting history.
 type OlsPool {
-  id: ID! # pool address (same as Pool.id)
+  id: ID! # "<poolAddress>-<olsAddress>" composite key
+  poolId: String! @index # pool address (FK to Pool.id)
   olsAddress: String! # OpenLiquidityStrategy contract address
   isActive: Boolean! # false after PoolRemoved
   debtToken: String! # address of debt token (from AddPoolParams)

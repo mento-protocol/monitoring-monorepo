@@ -66,9 +66,9 @@ function HomeContent() {
     data: olsData,
     error: olsErr,
     isLoading: olsLoading,
-  } = useGQL<{ OlsPool: Pick<OlsPool, "id">[] }>(ALL_OLS_POOLS);
+  } = useGQL<{ OlsPool: Pick<OlsPool, "poolId">[] }>(ALL_OLS_POOLS);
   const olsPoolIds = useMemo(
-    () => new Set((olsData?.OlsPool ?? []).map((p) => p.id)),
+    () => new Set((olsData?.OlsPool ?? []).map((p) => p.poolId)),
     [olsData],
   );
 
