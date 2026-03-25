@@ -126,17 +126,16 @@ function GlobalContent() {
       const perChainVolMap =
         snapshotsError === null
           ? buildPool24hVolumeMap(snapshots, pools, network)
-          : new Map<string, number | null>();
+          : null;
 
       for (const pool of pools) {
         const entry: GlobalPoolEntry = { pool, network };
         entries.push(entry);
         const key = globalPoolKey(entry);
-        if (snapshotsError !== null) {
-          volMap.set(key, null);
-        } else {
-          volMap.set(key, perChainVolMap.get(pool.id) ?? null);
-        }
+        volMap.set(
+          key,
+          perChainVolMap ? (perChainVolMap.get(pool.id) ?? null) : null,
+        );
       }
     }
 
