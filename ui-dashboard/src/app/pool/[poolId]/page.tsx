@@ -1,6 +1,7 @@
 "use client";
 
 import { AddressLink } from "@/components/address-link";
+import { useAddressLabels } from "@/components/address-labels-provider";
 import { KindBadge, RebalancerBadge, SourceBadge } from "@/components/badges";
 import { LimitSelect } from "@/components/controls";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
@@ -15,6 +16,7 @@ import { SenderCell } from "@/components/sender-cell";
 import { LiquidityChart } from "@/components/liquidity-chart";
 import { SnapshotChart } from "@/components/snapshot-chart";
 import { Row, Table, Td, Th } from "@/components/table";
+import { TableSearch } from "@/components/table-search";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import {
   formatBlock,
@@ -38,6 +40,11 @@ import {
 } from "@/lib/queries";
 import { computeHealthStatus, computeRebalancerLiveness } from "@/lib/health";
 import { isFpmm, poolName, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
+import {
+  buildSearchBlob,
+  matchesSearch,
+  normalizeSearch,
+} from "@/lib/table-search";
 import type {
   LiquidityEvent,
   OracleSnapshot,
@@ -50,7 +57,13 @@ import type {
 } from "@/lib/types";
 import { NetworkAwareLink } from "@/components/network-aware-link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import React, { Suspense, useCallback, useEffect } from "react";
+import React, {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { buildPoolNotFoundDest } from "@/lib/routing";
 
 export default function PoolDetailPage() {
@@ -339,6 +352,10 @@ function SwapsTab({
   pool: Pool | null;
 }) {
   const { network } = useNetwork();
+  const { getLabel } = useAddressLabels();
+  const [search, setSearch] = useState("");
+  const query = normalizeSearch(search);
+
   const { data, error, isLoading } = useGQL<{ SwapEvent: SwapEvent[] }>(
     POOL_SWAPS,
     { poolId, limit },
@@ -356,6 +373,37 @@ function SwapsTab({
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
+  const filteredSwaps = useMemo(() => {
+    if (!query) return swaps;
+    return swaps.filter((s) => {
+      const soldToken0 = BigInt(s.amount0In) > BigInt(0);
+      const soldAmt = soldToken0 ? s.amount0In : s.amount1In;
+      const boughtAmt = soldToken0 ? s.amount1Out : s.amount0Out;
+      const soldSym = soldToken0 ? sym0 : sym1;
+      const boughtSym = soldToken0 ? sym1 : sym0;
+      const soldDec = soldToken0
+        ? (pool?.token0Decimals ?? 18)
+        : (pool?.token1Decimals ?? 18);
+      const boughtDec = soldToken0
+        ? (pool?.token1Decimals ?? 18)
+        : (pool?.token0Decimals ?? 18);
+
+      const blob = buildSearchBlob([
+        s.txHash,
+        s.sender,
+        getLabel(s.sender),
+        s.recipient,
+        getLabel(s.recipient),
+        soldSym,
+        boughtSym,
+        formatWei(soldAmt, soldDec),
+        formatWei(boughtAmt, boughtDec),
+        s.blockNumber,
+      ]);
+      return matchesSearch(blob, query);
+    });
+  }, [swaps, query, sym0, sym1, pool, getLabel]);
+
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
 
@@ -368,8 +416,18 @@ function SwapsTab({
           token1Symbol={sym1}
         />
       )}
+      {swaps.length > 0 && (
+        <TableSearch
+          value={search}
+          onChange={setSearch}
+          placeholder="Search swaps by tx, address, label, token, amount, or block…"
+          ariaLabel="Search swaps"
+        />
+      )}
       {swaps.length === 0 ? (
         <EmptyBox message="No swaps for this pool." />
+      ) : filteredSwaps.length === 0 ? (
+        <EmptyBox message="No swaps match your search." />
       ) : (
         <Table>
           <thead>
@@ -394,7 +452,7 @@ function SwapsTab({
             </tr>
           </thead>
           <tbody>
-            {swaps.map((s) => {
+            {filteredSwaps.map((s) => {
               const soldToken0 = BigInt(s.amount0In) > BigInt(0);
               const soldAmt = soldToken0 ? s.amount0In : s.amount1In;
               const boughtAmt = soldToken0 ? s.amount1Out : s.amount0Out;
@@ -450,9 +508,49 @@ function ReservesTab({
     { poolId, limit },
   );
   const { network } = useNetwork();
+  const [search, setSearch] = useState("");
+  const query = normalizeSearch(search);
+
   const rows = data?.ReserveUpdate ?? [];
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
+
+  // Reverse once to get newest-first order, then filter
+  const orderedRows = useMemo(() => [...rows].reverse(), [rows]);
+
+  const feedVal =
+    pool?.oraclePrice && pool.oraclePrice !== "0"
+      ? Number(pool.oraclePrice) / 1e24
+      : null;
+  const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
+  const showUsd = feedVal !== null;
+
+  const filteredRows = useMemo(() => {
+    if (!query) return orderedRows;
+    return orderedRows.filter((r) => {
+      const raw0 = parseWei(r.reserve0, pool?.token0Decimals ?? 18);
+      const raw1 = parseWei(r.reserve1, pool?.token1Decimals ?? 18);
+      const usd0 = feedVal && !usdmIsToken0 ? raw0 * feedVal : raw0;
+      const usd1 = feedVal && usdmIsToken0 ? raw1 * feedVal : raw1;
+      const total = usd0 + usd1;
+
+      const blob = buildSearchBlob([
+        r.txHash,
+        sym0,
+        sym1,
+        formatWei(r.reserve0, pool?.token0Decimals ?? 18, 2),
+        formatWei(r.reserve1, pool?.token1Decimals ?? 18, 2),
+        showUsd
+          ? total.toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })
+          : null,
+        r.blockNumber,
+      ]);
+      return matchesSearch(blob, query);
+    });
+  }, [orderedRows, query, sym0, sym1, pool, feedVal, usdmIsToken0, showUsd]);
 
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
@@ -467,29 +565,30 @@ function ReservesTab({
         token1={pool?.token1 ?? null}
         pool={pool}
       />
-      <Table>
-        <thead>
-          <tr className="border-b border-slate-800 bg-slate-900/50">
-            <Th>Tx</Th>
-            <Th align="right">{sym0} Reserve</Th>
-            <Th align="right">{sym1} Reserve</Th>
-            <Th align="right">Total (USD)</Th>
-            <Th align="right">Block</Th>
-            <Th>Time</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {(() => {
-            const feedVal =
-              pool?.oraclePrice && pool.oraclePrice !== "0"
-                ? Number(pool.oraclePrice) / 1e24
-                : null;
-            const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
-            const showUsd = feedVal !== null;
-            return [...rows].reverse().map((r) => {
+      <TableSearch
+        value={search}
+        onChange={setSearch}
+        placeholder="Search reserves by tx, token, amount, or block…"
+        ariaLabel="Search reserves"
+      />
+      {filteredRows.length === 0 ? (
+        <EmptyBox message="No reserve updates match your search." />
+      ) : (
+        <Table>
+          <thead>
+            <tr className="border-b border-slate-800 bg-slate-900/50">
+              <Th>Tx</Th>
+              <Th align="right">{sym0} Reserve</Th>
+              <Th align="right">{sym1} Reserve</Th>
+              <Th align="right">Total (USD)</Th>
+              <Th align="right">Block</Th>
+              <Th>Time</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredRows.map((r) => {
               const raw0 = parseWei(r.reserve0, pool?.token0Decimals ?? 18);
               const raw1 = parseWei(r.reserve1, pool?.token1Decimals ?? 18);
-              // USD values: USDm ≈ $1, non-USDm × feedVal
               const usd0 = feedVal && !usdmIsToken0 ? raw0 * feedVal : raw0;
               const usd1 = feedVal && usdmIsToken0 ? raw1 * feedVal : raw1;
               const total = usd0 + usd1;
@@ -540,19 +639,43 @@ function ReservesTab({
                   </Td>
                 </Row>
               );
-            });
-          })()}
-        </tbody>
-      </Table>
+            })}
+          </tbody>
+        </Table>
+      )}
     </>
   );
 }
 
 function RebalancesTab({ poolId, limit }: { poolId: string; limit: number }) {
+  const { getLabel } = useAddressLabels();
+  const [search, setSearch] = useState("");
+  const query = normalizeSearch(search);
+
   const { data, error, isLoading } = useGQL<{
     RebalanceEvent: RebalanceEvent[];
   }>(POOL_REBALANCES, { poolId, limit });
   const rows = data?.RebalanceEvent ?? [];
+
+  const filteredRows = useMemo(() => {
+    if (!query) return rows;
+    return rows.filter((r) => {
+      const blob = buildSearchBlob([
+        r.txHash,
+        r.sender,
+        getLabel(r.sender),
+        r.caller,
+        getLabel(r.caller),
+        Number(r.priceDifferenceBefore).toLocaleString(),
+        Number(r.priceDifferenceAfter).toLocaleString(),
+        r.effectivenessRatio
+          ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
+          : null,
+        r.blockNumber,
+      ]);
+      return matchesSearch(blob, query);
+    });
+  }, [rows, query, getLabel]);
 
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
@@ -560,46 +683,58 @@ function RebalancesTab({ poolId, limit }: { poolId: string; limit: number }) {
     return <EmptyBox message="No rebalance events for this pool." />;
 
   return (
-    <Table>
-      <thead>
-        <tr className="border-b border-slate-800 bg-slate-900/50">
-          <Th>Tx</Th>
-          <Th>Strategy</Th>
-          <Th>Rebalancer</Th>
-          <Th align="right">Before (bps)</Th>
-          <Th align="right">After (bps)</Th>
-          <Th align="right">Effectiveness</Th>
-          <Th align="right">Block</Th>
-          <Th>Time</Th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => (
-          <Row key={r.id}>
-            <TxHashCell txHash={r.txHash} />
-            <SenderCell address={r.sender} />
-            <SenderCell address={r.caller} />
-            <Td mono small align="right">
-              {Number(r.priceDifferenceBefore).toLocaleString()}
-            </Td>
-            <Td mono small align="right">
-              {Number(r.priceDifferenceAfter).toLocaleString()}
-            </Td>
-            <Td mono small align="right">
-              {r.effectivenessRatio
-                ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
-                : "—"}
-            </Td>
-            <Td mono small muted align="right">
-              {formatBlock(r.blockNumber)}
-            </Td>
-            <Td small muted title={formatTimestamp(r.blockTimestamp)}>
-              {relativeTime(r.blockTimestamp)}
-            </Td>
-          </Row>
-        ))}
-      </tbody>
-    </Table>
+    <>
+      <TableSearch
+        value={search}
+        onChange={setSearch}
+        placeholder="Search rebalances by tx, strategy, rebalancer, label, or block…"
+        ariaLabel="Search rebalances"
+      />
+      {filteredRows.length === 0 ? (
+        <EmptyBox message="No rebalances match your search." />
+      ) : (
+        <Table>
+          <thead>
+            <tr className="border-b border-slate-800 bg-slate-900/50">
+              <Th>Tx</Th>
+              <Th>Strategy</Th>
+              <Th>Rebalancer</Th>
+              <Th align="right">Before (bps)</Th>
+              <Th align="right">After (bps)</Th>
+              <Th align="right">Effectiveness</Th>
+              <Th align="right">Block</Th>
+              <Th>Time</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredRows.map((r) => (
+              <Row key={r.id}>
+                <TxHashCell txHash={r.txHash} />
+                <SenderCell address={r.sender} />
+                <SenderCell address={r.caller} />
+                <Td mono small align="right">
+                  {Number(r.priceDifferenceBefore).toLocaleString()}
+                </Td>
+                <Td mono small align="right">
+                  {Number(r.priceDifferenceAfter).toLocaleString()}
+                </Td>
+                <Td mono small align="right">
+                  {r.effectivenessRatio
+                    ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
+                    : "—"}
+                </Td>
+                <Td mono small muted align="right">
+                  {formatBlock(r.blockNumber)}
+                </Td>
+                <Td small muted title={formatTimestamp(r.blockTimestamp)}>
+                  {relativeTime(r.blockTimestamp)}
+                </Td>
+              </Row>
+            ))}
+          </tbody>
+        </Table>
+      )}
+    </>
   );
 }
 
@@ -613,6 +748,10 @@ function LiquidityTab({
   pool: Pool | null;
 }) {
   const { network } = useNetwork();
+  const { getLabel } = useAddressLabels();
+  const [search, setSearch] = useState("");
+  const query = normalizeSearch(search);
+
   const { data, error, isLoading } = useGQL<{
     LiquidityEvent: LiquidityEvent[];
   }>(POOL_LIQUIDITY, { poolId, limit });
@@ -629,6 +768,25 @@ function LiquidityTab({
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
+  const filteredRows = useMemo(() => {
+    if (!query) return rows;
+    return rows.filter((r) => {
+      const blob = buildSearchBlob([
+        r.txHash,
+        r.kind,
+        r.sender,
+        getLabel(r.sender),
+        formatWei(r.amount0),
+        formatWei(r.amount1),
+        formatWei(r.liquidity),
+        sym0,
+        sym1,
+        r.blockNumber,
+      ]);
+      return matchesSearch(blob, query);
+    });
+  }, [rows, query, getLabel, sym0, sym1]);
+
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
 
@@ -642,8 +800,18 @@ function LiquidityTab({
           token1Symbol={sym1}
         />
       )}
+      {rows.length > 0 && (
+        <TableSearch
+          value={search}
+          onChange={setSearch}
+          placeholder="Search liquidity by tx, sender, label, kind, amount, or block…"
+          ariaLabel="Search liquidity"
+        />
+      )}
       {rows.length === 0 ? (
         <EmptyBox message="No liquidity events for this pool." />
+      ) : filteredRows.length === 0 ? (
+        <EmptyBox message="No liquidity events match your search." />
       ) : (
         <Table>
           <thead>
@@ -659,7 +827,7 @@ function LiquidityTab({
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {filteredRows.map((r) => (
               <Row key={r.id}>
                 <TxHashCell txHash={r.txHash} />
                 <td className="px-4 py-2">
@@ -700,6 +868,9 @@ function OracleTab({
   pool: Pool | null;
 }) {
   const { network } = useNetwork();
+  const [search, setSearch] = useState("");
+  const query = normalizeSearch(search);
+
   const { data, error, isLoading } = useGQL<{
     OracleSnapshot: OracleSnapshot[];
   }>(ORACLE_SNAPSHOTS, { poolId, limit });
@@ -707,6 +878,29 @@ function OracleTab({
 
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
+
+  // Reverse once to get newest-first order, then filter
+  const orderedRows = useMemo(() => [...rows].reverse(), [rows]);
+
+  const filteredRows = useMemo(() => {
+    if (!query) return orderedRows;
+    return orderedRows.filter((r) => {
+      const statusAliases = r.oracleOk
+        ? "ok true healthy pass good ✓"
+        : "fail false unhealthy bad ✗";
+
+      const blob = buildSearchBlob([
+        r.source,
+        statusAliases,
+        parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6),
+        Number(r.priceDifference) > 0 ? r.priceDifference : null,
+        r.rebalanceThreshold > 0 ? String(r.rebalanceThreshold) : null,
+        r.numReporters,
+        r.blockNumber,
+      ]);
+      return matchesSearch(blob, query);
+    });
+  }, [orderedRows, query, sym0]);
 
   if (pool?.source?.includes("virtual")) {
     return <EmptyBox message="VirtualPool — no oracle data available." />;
@@ -727,58 +921,68 @@ function OracleTab({
         token0={pool?.token0 ?? null}
         token1={pool?.token1 ?? null}
       />
-      <Table>
-        <thead>
-          <tr className="border-b border-slate-800 bg-slate-900/50">
-            <Th>Source</Th>
-            <Th align="right">Oracle OK</Th>
-            <Th align="right">
-              Price ({sym0}/{sym1})
-            </Th>
-            <Th align="right">Price Diff</Th>
-            <Th align="right">Threshold</Th>
-            <Th align="right">Reporters</Th>
-            <Th align="right">Block</Th>
-            <Th>Time</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {[...rows].reverse().map((r) => (
-            <Row key={r.id}>
-              <Td small>
-                <span className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono">
-                  {r.source}
-                </span>
-              </Td>
-              <Td small align="right">
-                <span
-                  className={r.oracleOk ? "text-emerald-400" : "text-red-400"}
-                >
-                  {r.oracleOk ? "✓" : "✗"}
-                </span>
-              </Td>
-              <Td mono small align="right">
-                {parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6)}
-              </Td>
-              <Td mono small align="right">
-                {Number(r.priceDifference) > 0 ? r.priceDifference : "—"}
-              </Td>
-              <Td mono small align="right">
-                {r.rebalanceThreshold > 0 ? r.rebalanceThreshold : "—"}
-              </Td>
-              <Td mono small align="right">
-                {r.numReporters}
-              </Td>
-              <Td mono small muted align="right">
-                {formatBlock(r.blockNumber)}
-              </Td>
-              <Td small muted title={formatTimestamp(r.timestamp)}>
-                {relativeTime(r.timestamp)}
-              </Td>
-            </Row>
-          ))}
-        </tbody>
-      </Table>
+      <TableSearch
+        value={search}
+        onChange={setSearch}
+        placeholder="Search oracle rows by source, status, price, or block…"
+        ariaLabel="Search oracle"
+      />
+      {filteredRows.length === 0 ? (
+        <EmptyBox message="No oracle snapshots match your search." />
+      ) : (
+        <Table>
+          <thead>
+            <tr className="border-b border-slate-800 bg-slate-900/50">
+              <Th>Source</Th>
+              <Th align="right">Oracle OK</Th>
+              <Th align="right">
+                Price ({sym0}/{sym1})
+              </Th>
+              <Th align="right">Price Diff</Th>
+              <Th align="right">Threshold</Th>
+              <Th align="right">Reporters</Th>
+              <Th align="right">Block</Th>
+              <Th>Time</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredRows.map((r) => (
+              <Row key={r.id}>
+                <Td small>
+                  <span className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono">
+                    {r.source}
+                  </span>
+                </Td>
+                <Td small align="right">
+                  <span
+                    className={r.oracleOk ? "text-emerald-400" : "text-red-400"}
+                  >
+                    {r.oracleOk ? "✓" : "✗"}
+                  </span>
+                </Td>
+                <Td mono small align="right">
+                  {parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6)}
+                </Td>
+                <Td mono small align="right">
+                  {Number(r.priceDifference) > 0 ? r.priceDifference : "—"}
+                </Td>
+                <Td mono small align="right">
+                  {r.rebalanceThreshold > 0 ? r.rebalanceThreshold : "—"}
+                </Td>
+                <Td mono small align="right">
+                  {r.numReporters}
+                </Td>
+                <Td mono small muted align="right">
+                  {formatBlock(r.blockNumber)}
+                </Td>
+                <Td small muted title={formatTimestamp(r.timestamp)}>
+                  {relativeTime(r.timestamp)}
+                </Td>
+              </Row>
+            ))}
+          </tbody>
+        </Table>
+      )}
     </>
   );
 }
