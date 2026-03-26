@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import React from "react";
 import {
   getDebtTokenSideLabel,
+  selectActiveOlsPool,
   OlsStatusPanel,
   OlsLiquidityTable,
 } from "../page";
@@ -199,6 +200,59 @@ describe("getDebtTokenSideLabel", () => {
         "0x0000000000000000000000000000000000000003",
       ),
     ).toBe("unknown");
+  });
+});
+
+describe("selectActiveOlsPool", () => {
+  it("returns null for empty input", () => {
+    expect(selectActiveOlsPool([])).toBeNull();
+    expect(selectActiveOlsPool(undefined)).toBeNull();
+  });
+
+  it("returns the newest active OLS row when a pool has historical inactive registrations", () => {
+    const staleInactive = makeOlsPool({
+      id: "0xpool-0xold",
+      olsAddress: "0x00000000000000000000000000000000000000aa",
+      isActive: false,
+      updatedAtTimestamp: "300",
+    });
+    const currentActive = makeOlsPool({
+      id: "0xpool-0xnew",
+      olsAddress: "0x00000000000000000000000000000000000000bb",
+      isActive: true,
+      updatedAtTimestamp: "200",
+    });
+
+    expect(selectActiveOlsPool([staleInactive, currentActive])).toEqual(
+      currentActive,
+    );
+  });
+
+  it("prefers the newest active row when multiple active rows are present", () => {
+    const olderActive = makeOlsPool({
+      id: "0xpool-0xolder",
+      olsAddress: "0x00000000000000000000000000000000000000cc",
+      isActive: true,
+      updatedAtTimestamp: "100",
+    });
+    const newerActive = makeOlsPool({
+      id: "0xpool-0xnewer",
+      olsAddress: "0x00000000000000000000000000000000000000dd",
+      isActive: true,
+      updatedAtTimestamp: "200",
+    });
+
+    expect(selectActiveOlsPool([olderActive, newerActive])).toEqual(
+      newerActive,
+    );
+  });
+
+  it("returns null when all registrations are inactive", () => {
+    expect(
+      selectActiveOlsPool([
+        makeOlsPool({ isActive: false, updatedAtTimestamp: "100" }),
+      ]),
+    ).toBeNull();
   });
 });
 
