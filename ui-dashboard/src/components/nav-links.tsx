@@ -1,8 +1,11 @@
 "use client";
 
+import { useSession } from "next-auth/react";
 import { NetworkAwareLink } from "@/components/network-aware-link";
 
 export function NavLinks() {
+  const { data: session } = useSession();
+
   return (
     <>
       <NetworkAwareLink
@@ -17,12 +20,14 @@ export function NavLinks() {
       >
         Pools
       </NetworkAwareLink>
-      <NetworkAwareLink
-        href="/address-book"
-        className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
-      >
-        Addresses
-      </NetworkAwareLink>
+      {session && (
+        <NetworkAwareLink
+          href="/address-book"
+          className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+        >
+          Addresses
+        </NetworkAwareLink>
+      )}
     </>
   );
 }
