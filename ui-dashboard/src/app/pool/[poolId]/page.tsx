@@ -1094,7 +1094,10 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
       ? Number(pool.oraclePrice) / 1e24
       : null;
   const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
-  const showUsd = feedVal !== null && hasReserves;
+  const usdmIsToken1 = USDM_SYMBOLS.has(sym1);
+  // Only show USD values when exactly one side is USDm (ensures meaningful conversion)
+  const hasUsdmSide = usdmIsToken0 !== usdmIsToken1; // XOR: exactly one side is USDm
+  const showUsd = feedVal !== null && hasReserves && hasUsdmSide;
 
   return (
     <>
@@ -1128,7 +1131,8 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
             const shareNum =
               totalLiquidity > BigInt(0)
                 ? Number(
-                    (position.netLiquidity * BigInt(1_000_000)) / totalLiquidity,
+                    (position.netLiquidity * BigInt(1_000_000)) /
+                      totalLiquidity,
                   ) / 1_000_000
                 : 0;
             const sharePct = (shareNum * 100).toFixed(2);
@@ -1136,15 +1140,27 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
             const tok0 = hasReserves ? shareNum * reserves0Raw : null;
             const tok1 = hasReserves ? shareNum * reserves1Raw : null;
 
-            // Convert each token to USD: the non-stable token uses the oracle price
-            const tok0Usd =
-              tok0 !== null && feedVal && !usdmIsToken0
-                ? tok0 * feedVal
-                : tok0;
-            const tok1Usd =
-              tok1 !== null && feedVal && usdmIsToken0
-                ? tok1 * feedVal
-                : tok1;
+            // Convert each token to USD only when we have a valid USDm-paired oracle price.
+            // tok0Usd = USD value of tok0:
+            //   - if tok0 IS USDm → already in USD, value = tok0
+            //   - if tok1 IS USDm → tok0 is the non-stable, convert via feedVal
+            //   - otherwise → no valid conversion, null
+            const tok0Usd: number | null =
+              tok0 === null || !hasUsdmSide
+                ? null
+                : usdmIsToken0
+                  ? tok0 // tok0 is USDm → already USD
+                  : feedVal !== null
+                    ? tok0 * feedVal // tok0 is non-stable → convert
+                    : null;
+            const tok1Usd: number | null =
+              tok1 === null || !hasUsdmSide
+                ? null
+                : usdmIsToken1
+                  ? tok1 // tok1 is USDm → already USD
+                  : feedVal !== null
+                    ? tok1 * feedVal // tok1 is non-stable → convert
+                    : null;
             const totalUsd =
               tok0Usd !== null && tok1Usd !== null ? tok0Usd + tok1Usd : null;
 
