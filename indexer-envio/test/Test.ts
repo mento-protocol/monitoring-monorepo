@@ -1712,7 +1712,7 @@ describe("Envio Celo indexer handlers", () => {
       });
 
       const olsPool = (mockDb.entities as any).OlsPool.get(
-        `${POOL_ADDR}-${OLS_ADDR}`,
+        `${POOL_ADDR}-${OLS_ADDR.toLowerCase()}`,
       ) as
         | {
             id: string;
@@ -1730,8 +1730,8 @@ describe("Envio Celo indexer handlers", () => {
           }
         | undefined;
       assert.ok(olsPool, "OlsPool should be created by PoolAdded");
-      assert.equal(olsPool?.id, `${POOL_ADDR}-${OLS_ADDR}`);
-      assert.equal(olsPool?.olsAddress, OLS_ADDR);
+      assert.equal(olsPool?.id, `${POOL_ADDR}-${OLS_ADDR.toLowerCase()}`);
+      assert.equal(olsPool?.olsAddress, OLS_ADDR.toLowerCase());
       assert.equal(olsPool?.isActive, true);
       assert.equal(olsPool?.debtToken, DEBT_TOKEN.toLowerCase());
       assert.equal(olsPool?.rebalanceCooldown, 7200n);
@@ -1801,7 +1801,7 @@ describe("Envio Celo indexer handlers", () => {
       });
 
       const olsPool = (mockDb.entities as any).OlsPool.get(
-        `${POOL_ADDR}-${OLS_ADDR}`,
+        `${POOL_ADDR}-${OLS_ADDR.toLowerCase()}`,
       ) as { isActive: boolean; debtToken: string } | undefined;
       assert.ok(olsPool, "OlsPool should still exist after PoolRemoved");
       assert.equal(
@@ -1848,7 +1848,7 @@ describe("Envio Celo indexer handlers", () => {
       });
 
       const olsPool = (mockDb.entities as any).OlsPool.get(
-        `${POOL_ADDR}-${OLS_ADDR}`,
+        `${POOL_ADDR}-${OLS_ADDR.toLowerCase()}`,
       ) as
         | {
             id: string;
@@ -1860,8 +1860,8 @@ describe("Envio Celo indexer handlers", () => {
           }
         | undefined;
       assert.ok(olsPool, "OlsPool should be created from cooldown update");
-      assert.equal(olsPool?.id, `${POOL_ADDR}-${OLS_ADDR}`);
-      assert.equal(olsPool?.olsAddress, OLS_ADDR);
+      assert.equal(olsPool?.id, `${POOL_ADDR}-${OLS_ADDR.toLowerCase()}`);
+      assert.equal(olsPool?.olsAddress, OLS_ADDR.toLowerCase());
       assert.equal(olsPool?.rebalanceCooldown, 3600n);
       assert.equal(olsPool?.isActive, true);
       assert.equal(olsPool?.olsRebalanceCount, 0);
@@ -1894,7 +1894,7 @@ describe("Envio Celo indexer handlers", () => {
       });
 
       const olsPool = (mockDb.entities as any).OlsPool.get(
-        `${POOL_ADDR}-${OLS_ADDR}`,
+        `${POOL_ADDR}-${OLS_ADDR.toLowerCase()}`,
       ) as
         | {
             lastRebalance: bigint;
@@ -1921,6 +1921,198 @@ describe("Envio Celo indexer handlers", () => {
       assert.equal(liquidityRow?.poolId, POOL_ADDR);
       assert.equal(liquidityRow?.amountGivenToPool, 1000n);
       assert.equal(liquidityRow?.amountTakenFromPool, 900n);
+    });
+  });
+
+  describe("open liquidity strategy re-registration (multi-OLS per pool)", () => {
+    /**
+     * The schema supports multiple OlsPool rows per poolId via composite key
+     * id = "<poolAddress>-<olsAddress>". This suite verifies that:
+     *  1. Re-registration to a new OLS contract creates a new row (new id).
+     *  2. The old row is marked inactive (PoolRemoved on the old contract).
+     *  3. LiquidityMoved events carry the correct olsAddress for per-contract scoping.
+     */
+
+    it("creates a distinct OlsPool row per OLS contract on re-registration", async () => {
+      const POOL_ADDR = "0x0000000000000000000000000000000000000b10";
+      const OLS_ADDR_1 = "0x0000000000000000000000000000000000000e10";
+      const OLS_ADDR_2 = "0x0000000000000000000000000000000000000e11";
+      const DEBT_TOKEN = "0x0000000000000000000000000000000000000c10";
+      let mockDb = MockDb.createMockDb();
+
+      // Register pool with first OLS contract
+      const addedEvent1 = OpenLiquidityStrategy.PoolAdded.createMockEvent({
+        pool: POOL_ADDR,
+        params: [
+          POOL_ADDR,
+          DEBT_TOKEN,
+          3600n,
+          "0x0000000000000000000000000000000000000000",
+          0n,
+          0n,
+          0n,
+          0n,
+        ] as const,
+        mockEventData: {
+          chainId: 42220,
+          logIndex: 1,
+          srcAddress: OLS_ADDR_1,
+          block: { number: 2000, timestamp: 1_700_020_000 },
+        },
+      });
+      mockDb = await OpenLiquidityStrategy.PoolAdded.processEvent({
+        event: addedEvent1,
+        mockDb,
+      });
+
+      // Remove from first OLS contract
+      const removedEvent = OpenLiquidityStrategy.PoolRemoved.createMockEvent({
+        pool: POOL_ADDR,
+        mockEventData: {
+          chainId: 42220,
+          logIndex: 2,
+          srcAddress: OLS_ADDR_1,
+          block: { number: 2001, timestamp: 1_700_020_100 },
+        },
+      });
+      mockDb = await OpenLiquidityStrategy.PoolRemoved.processEvent({
+        event: removedEvent,
+        mockDb,
+      });
+
+      // Register pool with second OLS contract
+      const addedEvent2 = OpenLiquidityStrategy.PoolAdded.createMockEvent({
+        pool: POOL_ADDR,
+        params: [
+          POOL_ADDR,
+          DEBT_TOKEN,
+          7200n,
+          "0x0000000000000000000000000000000000000000",
+          0n,
+          0n,
+          0n,
+          0n,
+        ] as const,
+        mockEventData: {
+          chainId: 42220,
+          logIndex: 3,
+          srcAddress: OLS_ADDR_2,
+          block: { number: 2002, timestamp: 1_700_020_200 },
+        },
+      });
+      mockDb = await OpenLiquidityStrategy.PoolAdded.processEvent({
+        event: addedEvent2,
+        mockDb,
+      });
+
+      const entities = mockDb.entities as any;
+
+      // Old row (OLS_ADDR_1) should be inactive
+      const row1 = entities.OlsPool.get(
+        `${POOL_ADDR}-${OLS_ADDR_1.toLowerCase()}`,
+      ) as
+        | { isActive: boolean; rebalanceCooldown: bigint; olsAddress: string }
+        | undefined;
+      assert.ok(row1, "OlsPool row for first OLS contract should exist");
+      assert.equal(
+        row1?.isActive,
+        false,
+        "First OLS contract row should be inactive after PoolRemoved",
+      );
+      assert.equal(row1?.rebalanceCooldown, 3600n);
+
+      // New row (OLS_ADDR_2) should be active with new config
+      const row2 = entities.OlsPool.get(
+        `${POOL_ADDR}-${OLS_ADDR_2.toLowerCase()}`,
+      ) as
+        | { isActive: boolean; rebalanceCooldown: bigint; olsAddress: string }
+        | undefined;
+      assert.ok(row2, "OlsPool row for second OLS contract should be created");
+      assert.equal(
+        row2?.isActive,
+        true,
+        "New OLS contract row should be active",
+      );
+      assert.equal(row2?.rebalanceCooldown, 7200n);
+    });
+
+    it("LiquidityMoved events carry the correct olsAddress for per-contract scoping", async () => {
+      const POOL_ADDR = "0x0000000000000000000000000000000000000b11";
+      const OLS_ADDR_1 = "0x0000000000000000000000000000000000000e20";
+      const OLS_ADDR_2 = "0x0000000000000000000000000000000000000e21";
+      let mockDb = MockDb.createMockDb();
+
+      // Emit a LiquidityMoved from the first OLS contract
+      const event1 = OpenLiquidityStrategy.LiquidityMoved.createMockEvent({
+        pool: POOL_ADDR,
+        direction: 0n,
+        tokenGivenToPool: "0x0000000000000000000000000000000000000003",
+        amountGivenToPool: 500n,
+        tokenTakenFromPool: "0x0000000000000000000000000000000000000004",
+        amountTakenFromPool: 400n,
+        mockEventData: {
+          chainId: 42220,
+          logIndex: 1,
+          srcAddress: OLS_ADDR_1,
+          block: { number: 3000, timestamp: 1_700_030_000 },
+        },
+      });
+      mockDb = await OpenLiquidityStrategy.LiquidityMoved.processEvent({
+        event: event1,
+        mockDb,
+      });
+
+      // Emit a LiquidityMoved from the second OLS contract
+      const event2 = OpenLiquidityStrategy.LiquidityMoved.createMockEvent({
+        pool: POOL_ADDR,
+        direction: 1n,
+        tokenGivenToPool: "0x0000000000000000000000000000000000000003",
+        amountGivenToPool: 200n,
+        tokenTakenFromPool: "0x0000000000000000000000000000000000000004",
+        amountTakenFromPool: 150n,
+        mockEventData: {
+          chainId: 42220,
+          logIndex: 2,
+          srcAddress: OLS_ADDR_2,
+          block: { number: 3001, timestamp: 1_700_030_100 },
+        },
+      });
+      mockDb = await OpenLiquidityStrategy.LiquidityMoved.processEvent({
+        event: event2,
+        mockDb,
+      });
+
+      const entities = mockDb.entities as any;
+
+      const liqEvent1 = entities.OlsLiquidityEvent.get("42220_3000_1") as
+        | { poolId: string; olsAddress: string; amountGivenToPool: bigint }
+        | undefined;
+      assert.ok(
+        liqEvent1,
+        "LiquidityEvent from first OLS contract should exist",
+      );
+      assert.equal(
+        liqEvent1?.olsAddress,
+        OLS_ADDR_1.toLowerCase(),
+        "Event 1 must be scoped to OLS_ADDR_1",
+      );
+
+      const liqEvent2 = entities.OlsLiquidityEvent.get("42220_3001_2") as
+        | { poolId: string; olsAddress: string; amountGivenToPool: bigint }
+        | undefined;
+      assert.ok(
+        liqEvent2,
+        "LiquidityEvent from second OLS contract should exist",
+      );
+      assert.equal(
+        liqEvent2?.olsAddress,
+        OLS_ADDR_2.toLowerCase(),
+        "Event 2 must be scoped to OLS_ADDR_2",
+      );
+
+      // Both events share the same poolId but different olsAddress — confirms they're independently queryable
+      assert.equal(liqEvent1?.poolId, POOL_ADDR);
+      assert.equal(liqEvent2?.poolId, POOL_ADDR);
     });
   });
 });
