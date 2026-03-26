@@ -28,7 +28,9 @@ interface LpConcentrationChartProps {
 
 export function resolvePieLabel(
   addr: string,
-  getLabel?: ((address: string | null) => string) | ((address: string) => string),
+  getLabel?:
+    | ((address: string | null) => string)
+    | ((address: string) => string),
 ): string {
   const truncated = truncateAddress(addr) ?? addr;
   if (!getLabel) return truncated;
@@ -126,8 +128,11 @@ export function LpConcentrationChart({
   const totalPositions = positions.length;
   const topShare =
     positions.length > 0
-      ? (Number((positions[0].netLiquidity * BigInt(10_000)) / totalLiquidity) /
-          100).toFixed(1)
+      ? (
+          Number(
+            (positions[0].netLiquidity * BigInt(10_000)) / totalLiquidity,
+          ) / 100
+        ).toFixed(1)
       : "0";
   const top3Share =
     positions.length > 0
@@ -197,8 +202,12 @@ export function LpConcentrationChart({
               <p className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">
                 Pool Reserves
               </p>
-              {sym0 && <StatRow label={sym0} value={fmtReserve(reserves0Raw, sym0)} />}
-              {sym1 && <StatRow label={sym1} value={fmtReserve(reserves1Raw, sym1)} />}
+              {sym0 && (
+                <StatRow label={sym0} value={fmtReserve(reserves0Raw, sym0)} />
+              )}
+              {sym1 && (
+                <StatRow label={sym1} value={fmtReserve(reserves1Raw, sym1)} />
+              )}
               {totalTvl !== null && (
                 <StatRow label="Total TVL" value={fmtUsd(totalTvl)} highlight />
               )}
