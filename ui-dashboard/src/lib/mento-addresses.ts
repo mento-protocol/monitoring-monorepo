@@ -17,8 +17,8 @@ export const ROUTER_ADDRESSES: Record<number, Set<string>> = {
 // Known LP strategy addresses per chainId
 export const STRATEGY_ADDRESSES: Record<number, Set<string>> = {
   42220: new Set([
-    "0xa0fb8b16ce6af3634ff9f3f4f40e49e1c1ae4f0b",
-    "0x4e78bd9565341eabe99cdc024acb044d9bdbcb985",
+    "0xa0fb8b16ce6af3634ff9f3f4f40e49e1c1ae4f0b", // ReserveLiquidityStrategy
+    "0x4e78bd9565341eabe99cdc024acb044d9bdcb985", // CDPLiquidityStrategy
   ]),
   143: new Set([
     "0x54e2ae8c8448912e17ce0b2453bafb7b0d80e40f",
