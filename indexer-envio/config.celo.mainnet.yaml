@@ -71,7 +71,8 @@ networks:
           - event: TokenReportExpirySet
       - name: OpenLiquidityStrategy
         abi_file_path: abis/OpenLiquidityStrategy.json
-        address: [] # Not yet deployed on Celo — add address when available
+        address:
+          - 0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f # CREATE3 deterministic address (pre-deploy)
         handler: src/EventHandlers.ts
         events:
           - event: PoolAdded
