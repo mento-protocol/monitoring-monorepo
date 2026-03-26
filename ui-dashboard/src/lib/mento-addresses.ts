@@ -35,8 +35,18 @@ function getContractsByName(
 const ROUTER_NAME = (name: string) =>
   name === "Router" || name === "MentoRouter" || name === "Routerv300";
 
-const STRATEGY_NAME = (name: string) =>
-  name.includes("Strategy") || name.includes("LiquidityStrategy");
+// Explicit allowlist of swap-producing LP strategy contract names.
+// Substring matching is intentionally avoided: a non-liquidity strategy added
+// to @mento-protocol/contracts must not silently become classified as "lp_swap".
+const KNOWN_LP_STRATEGY_NAMES = new Set([
+  "ReserveLiquidityStrategy",
+  "ReserveLiquidityStrategyv300",
+  "ReserveLiquidityStrategyv301",
+  "CDPLiquidityStrategy",
+  "OpenLiquidityStrategy",
+]);
+
+const STRATEGY_NAME = (name: string) => KNOWN_LP_STRATEGY_NAMES.has(name);
 
 function buildAddressMap(
   namePredicate: (name: string) => boolean,
