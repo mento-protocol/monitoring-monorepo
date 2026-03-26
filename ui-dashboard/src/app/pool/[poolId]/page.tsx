@@ -1273,7 +1273,7 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
               });
-              const showSubUsd = vUsd !== null && sym !== "USDm";
+              const showSubUsd = vUsd !== null && !USDM_SYMBOLS.has(sym);
               return (
                 <div>
                   <span>
