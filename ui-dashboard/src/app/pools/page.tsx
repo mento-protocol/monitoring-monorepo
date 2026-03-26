@@ -123,10 +123,10 @@ function HomeContent() {
         <Tile label="Pools" value={poolsLoading ? "…" : String(pools.length)} />
         <Tile
           label="Showing"
-          value={swapsLoading ? "…" : `${swaps.length} swaps`}
+          value={swapsLoading ? "…" : `${swaps.length} trades`}
         />
         <Tile
-          label="Latest Swap Block"
+          label="Latest Trade Block"
           value={latestBlock ? formatBlock(latestBlock) : "—"}
         />
       </div>
@@ -158,14 +158,14 @@ function HomeContent() {
         )}
       </section>
 
-      <section aria-labelledby="swaps-heading">
+      <section aria-labelledby="trades-heading">
         <h2
-          id="swaps-heading"
+          id="trades-heading"
           className="text-lg font-semibold text-white mb-3"
         >
           {poolFilter
-            ? `Swaps for ${poolNames[poolFilter] ?? truncateAddress(poolFilter)}`
-            : "Recent Swaps"}
+            ? `Trades for ${poolNames[poolFilter] ?? truncateAddress(poolFilter)}`
+            : "Recent Trades"}
         </h2>
 
         <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -182,7 +182,7 @@ function HomeContent() {
             }}
             onKeyDown={(e) => e.key === "Enter" && applyFilter()}
             placeholder="0x…"
-            aria-label="Filter swaps by pool address"
+            aria-label="Filter trades by pool address"
             aria-describedby={filterError ? "filter-error" : undefined}
             aria-invalid={filterError ? true : undefined}
             className="w-96 rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm font-mono text-slate-200 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -219,15 +219,15 @@ function HomeContent() {
         )}
 
         {swapsErr ? (
-          <ErrorBox message={`Failed to load swaps: ${swapsErr.message}`} />
+          <ErrorBox message={`Failed to load trades: ${swapsErr.message}`} />
         ) : swapsLoading ? (
           <Skeleton rows={5} />
         ) : swaps.length === 0 ? (
           <EmptyBox
             message={
               poolFilter
-                ? "No swaps found for this pool."
-                : "No swap events yet."
+                ? "No trades found for this pool."
+                : "No trade events yet."
             }
           />
         ) : (

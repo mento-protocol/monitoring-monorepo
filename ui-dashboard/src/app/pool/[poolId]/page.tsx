@@ -78,7 +78,7 @@ export default function PoolDetailPage() {
 // ---------------------------------------------------------------------------
 
 const TABS = [
-  "swaps",
+  "trades",
   "reserves",
   "rebalances",
   "liquidity",
@@ -89,11 +89,11 @@ const TABS = [
 type Tab = (typeof TABS)[number];
 type SearchableTab = Extract<
   Tab,
-  "swaps" | "reserves" | "rebalances" | "liquidity" | "oracle"
+  "trades" | "reserves" | "rebalances" | "liquidity" | "oracle"
 >;
 
 const SEARCH_PARAM_BY_TAB: Record<SearchableTab, string> = {
-  swaps: "swapsQ",
+  trades: "tradesQ",
   reserves: "reservesQ",
   rebalances: "rebalancesQ",
   liquidity: "liquidityQ",
@@ -102,7 +102,7 @@ const SEARCH_PARAM_BY_TAB: Record<SearchableTab, string> = {
 
 function isSearchableTab(tab: Tab): tab is SearchableTab {
   return (
-    tab === "swaps" ||
+    tab === "trades" ||
     tab === "reserves" ||
     tab === "rebalances" ||
     tab === "liquidity" ||
@@ -170,7 +170,7 @@ function PoolDetail() {
 
   const decodedId = decodeURIComponent(poolId);
   const rawTab = searchParams.get("tab");
-  const tab: Tab = TABS.includes(rawTab as Tab) ? (rawTab as Tab) : "swaps";
+  const tab: Tab = TABS.includes(rawTab as Tab) ? (rawTab as Tab) : "trades";
   const limit = Number(searchParams.get("limit") ?? "25");
   const activeSearch = isSearchableTab(tab)
     ? (searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "")
@@ -197,7 +197,7 @@ function PoolDetail() {
   const setURL = useCallback(
     (t: Tab, lim: number) => {
       const p = getCurrentParams();
-      if (t !== "swaps") p.set("tab", t);
+      if (t !== "trades") p.set("tab", t);
       else p.delete("tab");
       if (lim !== 25) p.set("limit", String(lim));
       else p.delete("limit");
@@ -316,13 +316,13 @@ function PoolDetail() {
       </div>
 
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-        {tab === "swaps" && (
-          <SwapsTab
+        {tab === "trades" && (
+          <TradesTab
             poolId={decodedId}
             limit={limit}
             pool={pool}
             search={activeSearch}
-            onSearchChange={(value) => setTabSearch("swaps", value)}
+            onSearchChange={(value) => setTabSearch("trades", value)}
           />
         )}
         {tab === "reserves" && (
@@ -481,7 +481,7 @@ function Stat({
 // Tab content
 // ---------------------------------------------------------------------------
 
-function SwapsTab({
+function TradesTab({
   poolId,
   limit,
   pool,
@@ -559,14 +559,14 @@ function SwapsTab({
         <TableSearch
           value={search}
           onChange={onSearchChange}
-          placeholder="Search swaps by tx, address, label, token, amount, or block…"
-          ariaLabel="Search swaps"
+          placeholder="Search trades by tx, address, label, token, amount, or block…"
+          ariaLabel="Search trades"
         />
       )}
       {swaps.length === 0 ? (
-        <EmptyBox message="No swaps for this pool." />
+        <EmptyBox message="No trades for this pool." />
       ) : filteredSwaps.length === 0 ? (
-        <EmptyBox message="No swaps match your search." />
+        <EmptyBox message="No trades match your search." />
       ) : (
         <Table>
           <thead>
