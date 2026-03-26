@@ -123,7 +123,7 @@ function gqlResult(data: unknown, error?: Error) {
   };
 }
 
-describe("Pool detail providers tab", () => {
+describe("Pool detail LPs tab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
