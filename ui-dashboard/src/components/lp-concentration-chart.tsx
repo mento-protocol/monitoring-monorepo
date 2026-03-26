@@ -66,14 +66,22 @@ export function LpConcentrationChart({
     ...top.map((p) => toRelative(p.netLiquidity)),
     ...(otherTotal > BigInt(0) ? [toRelative(otherTotal)] : []),
   ];
+  // customdata: resolved label for hover. If a named label exists, show only the
+  // label. If no label, show only the truncated address. Never show both.
+  const customdata = [
+    ...top.map((p) => resolvePieLabel(p.address, getLabel)),
+    ...(otherTotal > BigInt(0) ? ["(multiple)"] : []),
+  ];
 
-  const hovertemplate = "%{label}<br>%{percent} of pool<br><extra></extra>";
+  const hovertemplate =
+    "<b>%{customdata}</b><br>%{percent} of pool<br><extra></extra>";
 
   const trace = {
     type: "pie" as const,
     hole: 0.4,
     labels,
     values,
+    customdata,
     hovertemplate,
     textinfo: "percent" as const,
     marker: {
