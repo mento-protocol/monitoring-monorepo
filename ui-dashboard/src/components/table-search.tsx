@@ -5,7 +5,7 @@
  * instance with a tab-specific placeholder.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 
 type TableSearchProps = {
   value: string;
@@ -22,23 +22,40 @@ export function TableSearch({
   ariaLabel = "Search table",
   debounceMs = 150,
 }: TableSearchProps) {
-  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const timeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (draft === value) return;
-    const timeoutId = window.setTimeout(() => {
-      onChange(draft);
-    }, debounceMs);
-    return () => window.clearTimeout(timeoutId);
-  }, [draft, value, onChange, debounceMs]);
+    const input = inputRef.current;
+    if (!input || input.value === value) return;
+    input.value = value;
+  }, [value]);
+
+  useEffect(
+    () => () => {
+      if (timeoutRef.current !== null) {
+        window.clearTimeout(timeoutRef.current);
+      }
+    },
+    [],
+  );
 
   return (
     <div className="mb-4">
       <input
+        ref={inputRef}
         type="search"
         placeholder={placeholder}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        defaultValue={value}
+        onChange={(e) => {
+          if (timeoutRef.current !== null) {
+            window.clearTimeout(timeoutRef.current);
+          }
+          const nextValue = e.target.value;
+          timeoutRef.current = window.setTimeout(() => {
+            onChange(nextValue);
+          }, debounceMs);
+        }}
         aria-label={ariaLabel}
         className="w-full max-w-sm rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
       />

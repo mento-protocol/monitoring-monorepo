@@ -484,7 +484,6 @@ function SwapsTab({
       )}
       {swaps.length > 0 && (
         <TableSearch
-          key={`swaps:${search}`}
           value={search}
           onChange={onSearchChange}
           placeholder="Search swaps by tx, address, label, token, amount, or block…"
@@ -635,7 +634,6 @@ function ReservesTab({
         pool={pool}
       />
       <TableSearch
-        key={`reserves:${search}`}
         value={search}
         onChange={onSearchChange}
         placeholder="Search reserves by tx, token, amount, or block…"
@@ -761,7 +759,6 @@ function RebalancesTab({
   return (
     <>
       <TableSearch
-        key={`rebalances:${search}`}
         value={search}
         onChange={onSearchChange}
         placeholder="Search rebalances by tx, strategy, rebalancer, label, or block…"
@@ -880,7 +877,6 @@ function LiquidityTab({
       )}
       {rows.length > 0 && (
         <TableSearch
-          key={`liquidity:${search}`}
           value={search}
           onChange={onSearchChange}
           placeholder="Search liquidity by tx, sender, label, kind, amount, or block…"
@@ -1003,7 +999,6 @@ function OracleTab({
         token1={pool?.token1 ?? null}
       />
       <TableSearch
-        key={`oracle:${search}`}
         value={search}
         onChange={onSearchChange}
         placeholder="Search oracle rows by source, status, price, or block…"

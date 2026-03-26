@@ -137,15 +137,6 @@ vi.mock("@/components/table", () => ({
   Td: ({ children }: { children: React.ReactNode }) => <td>{children}</td>,
   Th: ({ children }: { children: React.ReactNode }) => <th>{children}</th>,
 }));
-vi.mock("@/components/table-search", () => ({
-  TableSearch: ({
-    value,
-    ariaLabel,
-  }: {
-    value: string;
-    ariaLabel?: string;
-  }) => <input aria-label={ariaLabel} value={value} readOnly />,
-}));
 vi.mock("@/components/tx-hash-cell", () => ({
   TxHashCell: ({ txHash }: { txHash: string }) => <td>{txHash}</td>,
 }));
