@@ -57,8 +57,6 @@ export function LpConcentrationChart({
 
   const resolveLabel = (addr: string) => resolvePieLabel(addr, getLabel);
 
-  // Use raw addresses as labels — Plotly merges slices with duplicate labels,
-  // so human names must not be the label key. Display names go in `text`.
   const labels = [
     ...top.map((p) => p.address),
     ...(otherTotal > BigInt(0) ? ["other"] : []),
