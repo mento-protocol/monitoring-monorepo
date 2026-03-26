@@ -11,7 +11,8 @@ describe("resolvePieLabel", () => {
   });
 
   it("returns named label when getLabel resolves a real name", () => {
-    expect(resolvePieLabel(ADDR, () => "Team Wallet")).toBe("Team Wallet");
+    const getLabel = (_address: string) => "Team Wallet";
+    expect(resolvePieLabel(ADDR, getLabel)).toBe("Team Wallet");
   });
 
   it("returns truncated address when getLabel returns the truncated form", () => {
@@ -20,7 +21,8 @@ describe("resolvePieLabel", () => {
   });
 
   it("does not include raw address when a named label exists", () => {
-    const result = resolvePieLabel(ADDR, () => "Team Wallet");
+    const getLabel = (_address: string) => "Team Wallet";
+    const result = resolvePieLabel(ADDR, getLabel);
     expect(result).not.toContain("0x1015");
     expect(result).toBe("Team Wallet");
   });
@@ -33,7 +35,8 @@ describe("resolvePieLabel", () => {
   });
 
   it("allows multiple addresses to resolve to the same human label", () => {
-    expect(resolvePieLabel(ADDR, () => "Shared Label")).toBe("Shared Label");
-    expect(resolvePieLabel(ADDR2, () => "Shared Label")).toBe("Shared Label");
+    const getLabel = (_address: string) => "Shared Label";
+    expect(resolvePieLabel(ADDR, getLabel)).toBe("Shared Label");
+    expect(resolvePieLabel(ADDR2, getLabel)).toBe("Shared Label");
   });
 });
