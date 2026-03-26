@@ -5,7 +5,7 @@
  * instance with a tab-specific placeholder.
  */
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 
 type TableSearchProps = {
   value: string;
@@ -22,14 +22,19 @@ export function TableSearch({
   ariaLabel = "Search table",
   debounceMs = 150,
 }: TableSearchProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [draft, dispatchDraft] = useReducer(
+    (_: string, nextValue: string) => nextValue,
+    value,
+  );
   const timeoutRef = useRef<number | null>(null);
+  const syncFromValue = useCallback((nextValue: string) => {
+    dispatchDraft(nextValue);
+  }, []);
 
   useEffect(() => {
-    const input = inputRef.current;
-    if (!input || input.value === value) return;
-    input.value = value;
-  }, [value]);
+    if (draft === value) return;
+    syncFromValue(value);
+  }, [value, draft, syncFromValue]);
 
   useEffect(
     () => () => {
@@ -43,15 +48,15 @@ export function TableSearch({
   return (
     <div className="mb-4">
       <input
-        ref={inputRef}
         type="search"
         placeholder={placeholder}
-        defaultValue={value}
+        value={draft}
         onChange={(e) => {
+          const nextValue = e.target.value;
+          dispatchDraft(nextValue);
           if (timeoutRef.current !== null) {
             window.clearTimeout(timeoutRef.current);
           }
-          const nextValue = e.target.value;
           timeoutRef.current = window.setTimeout(() => {
             onChange(nextValue);
           }, debounceMs);

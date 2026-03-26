@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+/** @vitest-environment jsdom */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import type {
   LiquidityEvent,
@@ -144,6 +148,8 @@ vi.mock("@/components/tx-hash-cell", () => ({
 import PoolDetailPage from "./page";
 
 let currentSearchParams = new URLSearchParams();
+let interactiveContainer: HTMLDivElement | null = null;
+let interactiveRoot: Root | null = null;
 
 const basePool: Pool = {
   id: "pool-1",
@@ -245,9 +251,12 @@ function renderWithParams(params: Record<string, string> = {}) {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
   replaceMock.mockReset();
   useGQLMock.mockReset();
   getLabelMock.mockClear();
+  currentSearchParams = new URLSearchParams();
+  window.history.replaceState({}, "", "/pool/pool-1");
 
   useGQLMock.mockImplementation((query: unknown) => {
     if (query === POOL_DETAIL_WITH_HEALTH)
@@ -269,6 +278,31 @@ beforeEach(() => {
     return makeGqlResult({});
   });
 });
+
+afterEach(() => {
+  if (interactiveRoot) {
+    act(() => {
+      interactiveRoot?.unmount();
+    });
+    interactiveRoot = null;
+  }
+  interactiveContainer?.remove();
+  interactiveContainer = null;
+  vi.useRealTimers();
+});
+
+function renderInteractive(params: Record<string, string> = {}) {
+  currentSearchParams = new URLSearchParams(params);
+  const qs = currentSearchParams.toString();
+  window.history.replaceState({}, "", `/pool/pool-1${qs ? `?${qs}` : ""}`);
+  interactiveContainer = document.createElement("div");
+  document.body.appendChild(interactiveContainer);
+  interactiveRoot = createRoot(interactiveContainer);
+  act(() => {
+    interactiveRoot?.render(<PoolDetailPage />);
+  });
+  return interactiveContainer;
+}
 
 describe("Pool detail tab search", () => {
   it("hydrates swaps search from URL and matches full addresses via labels/raw values", () => {
@@ -339,5 +373,43 @@ describe("Pool detail tab search", () => {
   it("shows oracle no-match state", () => {
     const html = renderWithParams({ tab: "oracle", oracleQ: "chainlink" });
     expect(html).toContain("No oracle snapshots match your search.");
+  });
+
+  it("preserves newer url params when a debounced search commit fires later", () => {
+    const container = renderInteractive();
+    const input = container.querySelector(
+      'input[aria-label="Search swaps"]',
+    ) as HTMLInputElement;
+
+    expect(input).toBeTruthy();
+
+    act(() => {
+      input.focus();
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, "0xabc");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(document.activeElement).toBe(input);
+    expect(replaceMock).not.toHaveBeenCalled();
+
+    act(() => {
+      currentSearchParams = new URLSearchParams({ limit: "50" });
+      window.history.replaceState({}, "", "/pool/pool-1?limit=50");
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+
+    const lastCall = replaceMock.mock.calls.at(-1)?.[0] as string | undefined;
+    expect(lastCall).toBeTruthy();
+    expect(lastCall).toContain("limit=50");
+    expect(lastCall).toContain("swapsQ=0xabc");
+    expect(document.activeElement).toBe(input);
   });
 });

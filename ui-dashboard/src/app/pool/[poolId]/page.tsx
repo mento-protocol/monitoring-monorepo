@@ -114,6 +114,13 @@ function PoolDetail() {
   const limit = Number(searchParams.get("limit") ?? "25");
   const activeSearch = searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "";
 
+  const getCurrentParams = useCallback(() => {
+    if (typeof window !== "undefined") {
+      return new URLSearchParams(window.location.search);
+    }
+    return new URLSearchParams(searchParams.toString());
+  }, [searchParams]);
+
   const replaceURL = useCallback(
     (params: URLSearchParams) => {
       const qs = params.toString();
@@ -127,26 +134,26 @@ function PoolDetail() {
 
   const setURL = useCallback(
     (t: Tab, lim: number) => {
-      const p = new URLSearchParams(searchParams.toString());
+      const p = getCurrentParams();
       if (t !== "swaps") p.set("tab", t);
       else p.delete("tab");
       if (lim !== 25) p.set("limit", String(lim));
       else p.delete("limit");
       replaceURL(p);
     },
-    [searchParams, replaceURL],
+    [getCurrentParams, replaceURL],
   );
 
   const setTabSearch = useCallback(
     (t: Tab, value: string) => {
-      const p = new URLSearchParams(searchParams.toString());
+      const p = getCurrentParams();
       const key = SEARCH_PARAM_BY_TAB[t];
       const trimmedValue = value.trim();
       if (trimmedValue) p.set(key, trimmedValue);
       else p.delete(key);
       replaceURL(p);
     },
-    [searchParams, replaceURL],
+    [getCurrentParams, replaceURL],
   );
 
   const {
