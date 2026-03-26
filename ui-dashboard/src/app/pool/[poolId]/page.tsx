@@ -87,14 +87,28 @@ const TABS = [
   "ols",
 ] as const;
 type Tab = (typeof TABS)[number];
+type SearchableTab = Extract<
+  Tab,
+  "swaps" | "reserves" | "rebalances" | "liquidity" | "oracle"
+>;
 
-const SEARCH_PARAM_BY_TAB: Record<Tab, string> = {
+const SEARCH_PARAM_BY_TAB: Record<SearchableTab, string> = {
   swaps: "swapsQ",
   reserves: "reservesQ",
   rebalances: "rebalancesQ",
   liquidity: "liquidityQ",
   oracle: "oracleQ",
 };
+
+function isSearchableTab(tab: Tab): tab is SearchableTab {
+  return (
+    tab === "swaps" ||
+    tab === "reserves" ||
+    tab === "rebalances" ||
+    tab === "liquidity" ||
+    tab === "oracle"
+  );
+}
 
 function addressSearchTerms(
   address: string | null | undefined,
@@ -158,7 +172,9 @@ function PoolDetail() {
   const rawTab = searchParams.get("tab");
   const tab: Tab = TABS.includes(rawTab as Tab) ? (rawTab as Tab) : "swaps";
   const limit = Number(searchParams.get("limit") ?? "25");
-  const activeSearch = searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "";
+  const activeSearch = isSearchableTab(tab)
+    ? (searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "")
+    : "";
 
   const getCurrentParams = useCallback(() => {
     if (typeof window !== "undefined") {
@@ -191,7 +207,7 @@ function PoolDetail() {
   );
 
   const setTabSearch = useCallback(
-    (t: Tab, value: string) => {
+    (t: SearchableTab, value: string) => {
       const p = getCurrentParams();
       const key = SEARCH_PARAM_BY_TAB[t];
       const trimmedValue = value.trim();

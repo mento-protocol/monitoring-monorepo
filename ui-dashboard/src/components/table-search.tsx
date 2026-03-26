@@ -30,6 +30,10 @@ export function TableSearch({
   const lastCommittedValueRef = useRef(value);
 
   useEffect(() => {
+    if (timeoutRef.current !== null) {
+      window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
     if (value === lastCommittedValueRef.current) return;
     lastCommittedValueRef.current = value;
     dispatchDraft(value);
@@ -57,6 +61,7 @@ export function TableSearch({
             window.clearTimeout(timeoutRef.current);
           }
           timeoutRef.current = window.setTimeout(() => {
+            timeoutRef.current = null;
             lastCommittedValueRef.current = nextValue;
             onChange(nextValue);
           }, debounceMs);

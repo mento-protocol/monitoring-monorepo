@@ -85,4 +85,56 @@ describe("TableSearch", () => {
     expect(rerenderedInput.value).toBe("0xabc");
     expect(document.activeElement).toBe(rerenderedInput);
   });
+
+  it("cancels a pending stale debounce when value changes externally", () => {
+    const onChange = vi.fn();
+
+    act(() => {
+      root.render(
+        <TableSearch
+          value=""
+          onChange={onChange}
+          ariaLabel="Search swaps"
+          debounceMs={150}
+        />,
+      );
+    });
+
+    const input = container.querySelector("input") as HTMLInputElement;
+
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, "old-search");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(input.value).toBe("old-search");
+    expect(onChange).not.toHaveBeenCalled();
+
+    act(() => {
+      root.render(
+        <TableSearch
+          value="new-search"
+          onChange={onChange}
+          ariaLabel="Search swaps"
+          debounceMs={150}
+        />,
+      );
+    });
+
+    expect((container.querySelector("input") as HTMLInputElement).value).toBe(
+      "new-search",
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+
+    expect(onChange).not.toHaveBeenCalledWith("old-search");
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });
