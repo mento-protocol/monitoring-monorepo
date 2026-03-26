@@ -2,8 +2,29 @@
 
 import dynamic from "next/dynamic";
 import { PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
+import { truncateAddress } from "@/lib/format";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
+
+// ---------------------------------------------------------------------------
+// Pure helpers (exported for testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the human-readable display label for an LP pie chart entry.
+ * - If getLabel resolves a named label (different from the truncated address),
+ *   that name is returned.
+ * - Otherwise the truncated address is returned.
+ */
+export function resolvePieLabel(
+  addr: string,
+  getLabel?: (address: string) => string,
+): string {
+  const truncated = truncateAddress(addr) ?? addr;
+  if (!getLabel) return truncated;
+  const resolved = getLabel(addr);
+  return resolved !== truncated ? resolved : truncated;
+}
 
 interface LpPosition {
   address: string;
@@ -13,11 +34,14 @@ interface LpPosition {
 interface LpConcentrationChartProps {
   positions: LpPosition[]; // pre-sorted descending by netLiquidity
   totalLiquidity: bigint;
+  /** Optional resolver: returns a human-readable label for an address */
+  getLabel?: (address: string) => string;
 }
 
 export function LpConcentrationChart({
   positions,
   totalLiquidity,
+  getLabel,
 }: LpConcentrationChartProps) {
   if (positions.length === 0 || totalLiquidity === BigInt(0)) return null;
 
@@ -26,12 +50,13 @@ export function LpConcentrationChart({
   const rest = positions.slice(TOP_N);
   const otherTotal = rest.reduce((acc, p) => acc + p.netLiquidity, BigInt(0));
 
-  const fmt = (addr: string) => `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-
+  // Human-readable labels for both legend and hover. If two addresses share the
+  // same label they collapse into one slice — accepted trade-off for readability.
   const labels = [
-    ...top.map((p) => fmt(p.address)),
+    ...top.map((p) => resolvePieLabel(p.address, getLabel)),
     ...(otherTotal > BigInt(0) ? ["Other"] : []),
   ];
+
   // Scale to basis points (×10000) before converting to Number so that large
   // bigint values (which can exceed JS safe integer range) don't lose precision
   // in the relative proportions used for pie slice sizes.
@@ -41,20 +66,14 @@ export function LpConcentrationChart({
     ...top.map((p) => toRelative(p.netLiquidity)),
     ...(otherTotal > BigInt(0) ? [toRelative(otherTotal)] : []),
   ];
-  const customdata = [
-    ...top.map((p) => p.address),
-    ...(otherTotal > BigInt(0) ? ["(multiple)"] : []),
-  ];
 
-  const hovertemplate =
-    "<b>%{customdata}</b><br>%{percent} of pool<br><extra></extra>";
+  const hovertemplate = "%{label}<br>%{percent} of pool<br><extra></extra>";
 
   const trace = {
     type: "pie" as const,
     hole: 0.4,
     labels,
     values,
-    customdata,
     hovertemplate,
     textinfo: "percent" as const,
     marker: {
