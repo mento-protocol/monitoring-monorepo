@@ -307,6 +307,7 @@ function renderInteractive(params: Record<string, string> = {}) {
 describe("Pool detail tab search", () => {
   it("hydrates swaps search from URL and matches full addresses via labels/raw values", () => {
     const html = renderWithParams({
+      tab: "swaps",
       swapsQ: "0xsender000000000000000000000000000000000001",
     });
     expect(html).toContain(
@@ -317,7 +318,7 @@ describe("Pool detail tab search", () => {
   });
 
   it("shows swaps no-match state from URL-backed search", () => {
-    const html = renderWithParams({ swapsQ: "not-found" });
+    const html = renderWithParams({ tab: "swaps", swapsQ: "not-found" });
     expect(html).toContain("No swaps match your search.");
   });
 
@@ -331,21 +332,6 @@ describe("Pool detail tab search", () => {
   it("shows reserves no-match state", () => {
     const html = renderWithParams({ tab: "reserves", reservesQ: "kraken" });
     expect(html).toContain("No reserve updates match your search.");
-  });
-
-  it("matches rebalances rows by resolved label", () => {
-    const html = renderWithParams({ tab: "rebalances", rebalancesQ: "keeper" });
-    expect(html).toContain('value="keeper"');
-    expect(html).toContain("Keeper Bot");
-    expect(html).not.toContain("No rebalances match your search.");
-  });
-
-  it("shows rebalances no-match state", () => {
-    const html = renderWithParams({
-      tab: "rebalances",
-      rebalancesQ: "missing-bot",
-    });
-    expect(html).toContain("No rebalances match your search.");
   });
 
   it("matches liquidity rows by kind or sender label", () => {
@@ -376,7 +362,7 @@ describe("Pool detail tab search", () => {
   });
 
   it("preserves newer url params when a debounced search commit fires later", () => {
-    const container = renderInteractive();
+    const container = renderInteractive({ tab: "swaps" });
     const input = container.querySelector(
       'input[aria-label="Search swaps"]',
     ) as HTMLInputElement;

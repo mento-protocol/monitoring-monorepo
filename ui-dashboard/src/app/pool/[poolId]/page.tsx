@@ -78,24 +78,22 @@ export default function PoolDetailPage() {
 // ---------------------------------------------------------------------------
 
 const TABS = [
+  "providers",
   "swaps",
   "reserves",
-  "rebalances",
   "liquidity",
   "oracle",
-  "providers",
   "ols",
 ] as const;
 type Tab = (typeof TABS)[number];
 type SearchableTab = Extract<
   Tab,
-  "swaps" | "reserves" | "rebalances" | "liquidity" | "oracle"
+  "swaps" | "reserves" | "liquidity" | "oracle"
 >;
 
 const SEARCH_PARAM_BY_TAB: Record<SearchableTab, string> = {
   swaps: "swapsQ",
   reserves: "reservesQ",
-  rebalances: "rebalancesQ",
   liquidity: "liquidityQ",
   oracle: "oracleQ",
 };
@@ -104,7 +102,6 @@ function isSearchableTab(tab: Tab): tab is SearchableTab {
   return (
     tab === "swaps" ||
     tab === "reserves" ||
-    tab === "rebalances" ||
     tab === "liquidity" ||
     tab === "oracle"
   );
@@ -126,7 +123,9 @@ function matchesRowSearch(
 }
 
 function getTabLabel(tab: Tab) {
-  return tab === "providers" ? "LPs" : tab;
+  if (tab === "providers") return "LPs";
+  if (tab === "ols") return "OLS";
+  return tab;
 }
 
 export function getDebtTokenSideLabel(
@@ -170,11 +169,10 @@ function PoolDetail() {
 
   const decodedId = decodeURIComponent(poolId);
   const rawTab = searchParams.get("tab");
-  const tab: Tab = TABS.includes(rawTab as Tab) ? (rawTab as Tab) : "swaps";
+  const requestedTab: Tab = TABS.includes(rawTab as Tab)
+    ? (rawTab as Tab)
+    : "providers";
   const limit = Number(searchParams.get("limit") ?? "25");
-  const activeSearch = isSearchableTab(tab)
-    ? (searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "")
-    : "";
 
   const getCurrentParams = useCallback(() => {
     if (typeof window !== "undefined") {
@@ -197,7 +195,7 @@ function PoolDetail() {
   const setURL = useCallback(
     (t: Tab, lim: number) => {
       const p = getCurrentParams();
-      if (t !== "swaps") p.set("tab", t);
+      if (t !== "providers") p.set("tab", t);
       else p.delete("tab");
       if (lim !== 25) p.set("limit", String(lim));
       else p.delete("limit");
@@ -251,6 +249,18 @@ function PoolDetail() {
   }>(POOL_DEPLOYMENT, { poolId: decodedId });
   const deployTxHash = deployData?.FactoryDeployment?.[0]?.txHash;
 
+  const { data: olsData } = useGQL<{
+    OlsPool: OlsPool[];
+  }>(OLS_POOL, { poolId: decodedId });
+  const hasOlsPool = selectActiveOlsPool(olsData?.OlsPool) !== null;
+  const visibleTabs = TABS.filter((t) => t !== "ols" || hasOlsPool);
+  const tab = visibleTabs.includes(requestedTab)
+    ? requestedTab
+    : (visibleTabs[0] ?? "providers");
+  const activeSearch = isSearchableTab(tab)
+    ? (searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "")
+    : "";
+
   return (
     <div className="space-y-6">
       <nav aria-label="Breadcrumb" className="text-sm text-slate-400">
@@ -289,7 +299,7 @@ function PoolDetail() {
         role="tablist"
         aria-label="Pool data tabs"
       >
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t}
             role="tab"
@@ -332,14 +342,6 @@ function PoolDetail() {
             pool={pool}
             search={activeSearch}
             onSearchChange={(value) => setTabSearch("reserves", value)}
-          />
-        )}
-        {tab === "rebalances" && (
-          <RebalancesTab
-            poolId={decodedId}
-            limit={limit}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("rebalances", value)}
           />
         )}
         {tab === "liquidity" && (
@@ -788,7 +790,7 @@ function ReservesTab({
   );
 }
 
-function RebalancesTab({
+export function RebalancesTab({
   poolId,
   limit,
   search,
