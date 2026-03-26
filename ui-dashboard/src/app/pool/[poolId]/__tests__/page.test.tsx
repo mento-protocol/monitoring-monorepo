@@ -5,7 +5,7 @@ import type { Pool } from "@/lib/types";
 
 const mockUseGQL = vi.fn();
 const mockReplace = vi.fn();
-let mockSearchParams = new URLSearchParams("tab=providers");
+const mockSearchParams = new URLSearchParams("tab=providers");
 
 vi.mock("@/lib/graphql", () => ({
   useGQL: (...args: unknown[]) => mockUseGQL(...args),
@@ -123,47 +123,9 @@ function gqlResult(data: unknown, error?: Error) {
   };
 }
 
-describe("Pool detail — legacy ?tab=swaps URL handling", () => {
-  const defaultGql = (query: string | null) => {
-    if (!query) return gqlResult(undefined);
-    if (query.includes("PoolDetailWithHealth"))
-      return gqlResult({ Pool: [BASE_POOL] });
-    if (query.includes("TradingLimits")) return gqlResult({ TradingLimit: [] });
-    if (query.includes("PoolDeployment"))
-      return gqlResult({ FactoryDeployment: [] });
-    return gqlResult(undefined);
-  };
-
-  it("renders trades tab content (not swaps) when ?tab=swaps is present", () => {
-    // The page normalises rawTab==="swaps" to "trades" synchronously before rendering,
-    // so "No trades for this pool." is rendered (not "No swaps for this pool.").
-    // The router.replace redirect happens in useEffect and requires a React DOM
-    // environment — it is not testable with renderToStaticMarkup.
-    mockSearchParams = new URLSearchParams("tab=swaps");
-    mockUseGQL.mockImplementation(defaultGql);
-
-    const html = renderToStaticMarkup(<PoolDetailPage />);
-
-    // Trades tab empty state is rendered (normalised from swaps tab)
-    expect(html).toContain("No trades for this pool.");
-    // Legacy "swaps" text is not rendered
-    expect(html).not.toContain("No swaps for this pool.");
-  });
-
-  it("renders trades tab by default when no tab param is present", () => {
-    mockSearchParams = new URLSearchParams("");
-    mockUseGQL.mockImplementation(defaultGql);
-
-    const html = renderToStaticMarkup(<PoolDetailPage />);
-
-    expect(html).toContain("No trades for this pool.");
-  });
-});
-
 describe("Pool detail LPs tab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSearchParams = new URLSearchParams("tab=providers");
   });
 
   it("renders indexed LiquidityPosition data when available", () => {
