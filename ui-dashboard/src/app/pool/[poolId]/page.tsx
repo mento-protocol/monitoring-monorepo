@@ -31,6 +31,7 @@ import {
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   POOL_LIQUIDITY,
+  POOL_LIQUIDITY_ALL,
   POOL_LP_POSITIONS,
   POOL_REBALANCES,
   POOL_RESERVES,
@@ -695,23 +696,80 @@ function LiquidityTab({
   );
 }
 
+function isLiquidityPositionSchemaError(error: Error | undefined) {
+  if (!error) return false;
+  const msg = error.message.toLowerCase();
+  return (
+    msg.includes("liquidityposition") &&
+    (msg.includes("cannot query field") ||
+      msg.includes("not found in type") ||
+      msg.includes("field not found"))
+  );
+}
+
 function ProvidersTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
   // Only FPMM pools have LP mechanics — skip the fetch for non-FPMM pools.
   // Pass null to useGQL when we know the pool type and it isn't FPMM so the
   // hook is always called (Rules of Hooks) but the network request is skipped.
   const isFpmmPool = pool ? isFpmm(pool) : null; // null = still loading
-  const query = isFpmmPool === false ? null : POOL_LP_POSITIONS;
+  const shouldSkip = isFpmmPool === false;
 
-  const { data, error, isLoading } = useGQL<{
+  const {
+    data: indexedData,
+    error: indexedError,
+    isLoading: indexedLoading,
+  } = useGQL<{
     LiquidityPosition: LiquidityPosition[];
-  }>(query, { poolId });
+  }>(shouldSkip ? null : POOL_LP_POSITIONS, { poolId });
 
-  const positions = (data?.LiquidityPosition ?? [])
-    .map((position) => ({
-      address: position.address,
-      netLiquidity: BigInt(position.netLiquidity),
-    }))
-    .filter((position) => position.netLiquidity > BigInt(0));
+  const shouldFallback = isLiquidityPositionSchemaError(indexedError);
+  const {
+    data: fallbackData,
+    error: fallbackError,
+    isLoading: fallbackLoading,
+  } = useGQL<{
+    LiquidityEvent: Pick<
+      LiquidityEvent,
+      "kind" | "sender" | "recipient" | "liquidity"
+    >[];
+  }>(shouldSkip || !shouldFallback ? null : POOL_LIQUIDITY_ALL, { poolId });
+
+  const positions = shouldFallback
+    ? (() => {
+        const balances = new Map<string, bigint>();
+        for (const event of fallbackData?.LiquidityEvent ?? []) {
+          const address =
+            event.kind === "MINT" ? event.recipient : event.sender;
+          const delta =
+            event.kind === "MINT"
+              ? BigInt(event.liquidity)
+              : -BigInt(event.liquidity);
+          balances.set(address, (balances.get(address) ?? BigInt(0)) + delta);
+        }
+        return [...balances.entries()]
+          .filter(([, netLiquidity]) => netLiquidity > BigInt(0))
+          .map(([address, netLiquidity]) => ({ address, netLiquidity }))
+          .sort((a, b) =>
+            a.netLiquidity === b.netLiquidity
+              ? 0
+              : a.netLiquidity > b.netLiquidity
+                ? -1
+                : 1,
+          );
+      })()
+    : (indexedData?.LiquidityPosition ?? [])
+        .map((position) => ({
+          address: position.address,
+          netLiquidity: BigInt(position.netLiquidity),
+        }))
+        .filter((position) => position.netLiquidity > BigInt(0))
+        .sort((a, b) =>
+          a.netLiquidity === b.netLiquidity
+            ? 0
+            : a.netLiquidity > b.netLiquidity
+              ? -1
+              : 1,
+        );
 
   const totalLiquidity = positions.reduce(
     (acc, position) => acc + position.netLiquidity,
@@ -723,13 +781,23 @@ function ProvidersTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
       <EmptyBox message="LP provider data is only available for FPMM pools." />
     );
   }
-  if (error) return <ErrorBox message={error.message} />;
-  if (isLoading) return <Skeleton rows={5} />;
+  if (indexedError && !shouldFallback)
+    return <ErrorBox message={indexedError.message} />;
+  if (fallbackError) return <ErrorBox message={fallbackError.message} />;
+  if (indexedLoading || fallbackLoading) return <Skeleton rows={5} />;
   if (positions.length === 0)
     return <EmptyBox message="No active LP positions for this pool." />;
 
   return (
     <>
+      {shouldFallback && (
+        <div className="mb-3 rounded border border-amber-800 bg-amber-950/40 px-3 py-2 text-xs text-amber-400">
+          Falling back to event-based LP aggregation because this environment
+          has not indexed `LiquidityPosition` yet. Ownership may be incomplete
+          for historical router-mediated burns until the new indexer schema is
+          deployed and reindexed.
+        </div>
+      )}
       <div className="mb-3 rounded border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
         LP balances are shown in LP token units. Until we index LP token
         decimals explicitly, the formatted display assumes the standard 18

@@ -23,6 +23,7 @@ networks:
           - event: Swap
           - event: Mint
           - event: Burn
+          - event: Transfer
           - event: UpdateReserves
           - event: Rebalanced
           - event: TradingLimitConfigured
