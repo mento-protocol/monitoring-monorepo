@@ -1,7 +1,6 @@
 "use client";
 
 import { AddressLink } from "@/components/address-link";
-import { useAddressLabels } from "@/components/address-labels-provider";
 import { KindBadge, RebalancerBadge, SourceBadge } from "@/components/badges";
 import { LimitSelect } from "@/components/controls";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
@@ -17,7 +16,6 @@ import { LiquidityChart } from "@/components/liquidity-chart";
 import { LpConcentrationChart } from "@/components/lp-concentration-chart";
 import { SnapshotChart } from "@/components/snapshot-chart";
 import { Row, Table, Td, Th } from "@/components/table";
-import { TableSearch } from "@/components/table-search";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import {
   formatBlock,
@@ -44,11 +42,6 @@ import {
 } from "@/lib/queries";
 import { computeHealthStatus, computeRebalancerLiveness } from "@/lib/health";
 import { isFpmm, poolName, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
-import {
-  buildSearchBlob,
-  matchesSearch,
-  normalizeSearch,
-} from "@/lib/table-search";
 import type {
   LiquidityEvent,
   LiquidityPosition,
@@ -87,43 +80,6 @@ const TABS = [
   "ols",
 ] as const;
 type Tab = (typeof TABS)[number];
-type SearchableTab = Extract<
-  Tab,
-  "trades" | "reserves" | "rebalances" | "liquidity" | "oracle"
->;
-
-const SEARCH_PARAM_BY_TAB: Record<SearchableTab, string> = {
-  trades: "tradesQ",
-  reserves: "reservesQ",
-  rebalances: "rebalancesQ",
-  liquidity: "liquidityQ",
-  oracle: "oracleQ",
-};
-
-function isSearchableTab(tab: Tab): tab is SearchableTab {
-  return (
-    tab === "trades" ||
-    tab === "reserves" ||
-    tab === "rebalances" ||
-    tab === "liquidity" ||
-    tab === "oracle"
-  );
-}
-
-function addressSearchTerms(
-  address: string | null | undefined,
-  getLabel: (address: string | null) => string,
-): Array<string | null | undefined> {
-  if (!address) return [];
-  return [address, getLabel(address)];
-}
-
-function matchesRowSearch(
-  query: string,
-  parts: Array<string | number | null | undefined>,
-): boolean {
-  return matchesSearch(buildSearchBlob(parts), query);
-}
 
 function getTabLabel(tab: Tab) {
   return tab === "providers" ? "LPs" : tab;
@@ -172,50 +128,21 @@ function PoolDetail() {
   const rawTab = searchParams.get("tab");
   const tab: Tab = TABS.includes(rawTab as Tab) ? (rawTab as Tab) : "trades";
   const limit = Number(searchParams.get("limit") ?? "25");
-  const activeSearch = isSearchableTab(tab)
-    ? (searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "")
-    : "";
 
-  const getCurrentParams = useCallback(() => {
-    if (typeof window !== "undefined") {
-      return new URLSearchParams(window.location.search);
-    }
-    return new URLSearchParams(searchParams.toString());
-  }, [searchParams]);
-
-  const replaceURL = useCallback(
-    (params: URLSearchParams) => {
-      const qs = params.toString();
+  const setURL = useCallback(
+    (t: Tab, lim: number) => {
+      const p = new URLSearchParams(searchParams.toString());
+      if (t !== "trades") p.set("tab", t);
+      else p.delete("tab");
+      if (lim !== 25) p.set("limit", String(lim));
+      else p.delete("limit");
+      const qs = p.toString();
       router.replace(
         `/pool/${encodeURIComponent(decodedId)}${qs ? `?${qs}` : ""}`,
         { scroll: false },
       );
     },
-    [router, decodedId],
-  );
-
-  const setURL = useCallback(
-    (t: Tab, lim: number) => {
-      const p = getCurrentParams();
-      if (t !== "trades") p.set("tab", t);
-      else p.delete("tab");
-      if (lim !== 25) p.set("limit", String(lim));
-      else p.delete("limit");
-      replaceURL(p);
-    },
-    [getCurrentParams, replaceURL],
-  );
-
-  const setTabSearch = useCallback(
-    (t: SearchableTab, value: string) => {
-      const p = getCurrentParams();
-      const key = SEARCH_PARAM_BY_TAB[t];
-      const trimmedValue = value.trim();
-      if (trimmedValue) p.set(key, trimmedValue);
-      else p.delete(key);
-      replaceURL(p);
-    },
-    [getCurrentParams, replaceURL],
+    [router, decodedId, searchParams],
   );
 
   const {
@@ -317,48 +244,19 @@ function PoolDetail() {
 
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
         {tab === "trades" && (
-          <TradesTab
-            poolId={decodedId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("trades", value)}
-          />
+          <TradesTab poolId={decodedId} limit={limit} pool={pool} />
         )}
         {tab === "reserves" && (
-          <ReservesTab
-            poolId={decodedId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("reserves", value)}
-          />
+          <ReservesTab poolId={decodedId} limit={limit} pool={pool} />
         )}
         {tab === "rebalances" && (
-          <RebalancesTab
-            poolId={decodedId}
-            limit={limit}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("rebalances", value)}
-          />
+          <RebalancesTab poolId={decodedId} limit={limit} />
         )}
         {tab === "liquidity" && (
-          <LiquidityTab
-            poolId={decodedId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("liquidity", value)}
-          />
+          <LiquidityTab poolId={decodedId} limit={limit} pool={pool} />
         )}
         {tab === "oracle" && (
-          <OracleTab
-            poolId={decodedId}
-            limit={limit}
-            pool={pool}
-            search={activeSearch}
-            onSearchChange={(value) => setTabSearch("oracle", value)}
-          />
+          <OracleTab poolId={decodedId} limit={limit} pool={pool} />
         )}
         {tab === "providers" && <LpsTab poolId={decodedId} pool={pool} />}
         {tab === "ols" && (
@@ -485,19 +383,12 @@ function TradesTab({
   poolId,
   limit,
   pool,
-  search,
-  onSearchChange,
 }: {
   poolId: string;
   limit: number;
   pool: Pool | null;
-  search: string;
-  onSearchChange: (value: string) => void;
 }) {
   const { network } = useNetwork();
-  const { getLabel } = useAddressLabels();
-  const query = normalizeSearch(search);
-
   const { data, error, isLoading } = useGQL<{ SwapEvent: SwapEvent[] }>(
     POOL_SWAPS,
     { poolId, limit },
@@ -515,34 +406,6 @@ function TradesTab({
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
-  const filteredSwaps = useMemo(() => {
-    if (!query) return swaps;
-    return swaps.filter((s) => {
-      const soldToken0 = BigInt(s.amount0In) > BigInt(0);
-      const soldAmt = soldToken0 ? s.amount0In : s.amount1In;
-      const boughtAmt = soldToken0 ? s.amount1Out : s.amount0Out;
-      const soldSym = soldToken0 ? sym0 : sym1;
-      const boughtSym = soldToken0 ? sym1 : sym0;
-      const soldDec = soldToken0
-        ? (pool?.token0Decimals ?? 18)
-        : (pool?.token1Decimals ?? 18);
-      const boughtDec = soldToken0
-        ? (pool?.token1Decimals ?? 18)
-        : (pool?.token0Decimals ?? 18);
-
-      return matchesRowSearch(query, [
-        s.txHash,
-        ...addressSearchTerms(s.sender, getLabel),
-        ...addressSearchTerms(s.recipient, getLabel),
-        soldSym,
-        boughtSym,
-        formatWei(soldAmt, soldDec),
-        formatWei(boughtAmt, boughtDec),
-        s.blockNumber,
-      ]);
-    });
-  }, [swaps, query, sym0, sym1, pool, getLabel]);
-
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
 
@@ -555,18 +418,8 @@ function TradesTab({
           token1Symbol={sym1}
         />
       )}
-      {swaps.length > 0 && (
-        <TableSearch
-          value={search}
-          onChange={onSearchChange}
-          placeholder="Search trades by tx, address, label, token, amount, or block…"
-          ariaLabel="Search trades"
-        />
-      )}
       {swaps.length === 0 ? (
         <EmptyBox message="No trades for this pool." />
-      ) : filteredSwaps.length === 0 ? (
-        <EmptyBox message="No trades match your search." />
       ) : (
         <Table>
           <thead>
@@ -591,7 +444,7 @@ function TradesTab({
             </tr>
           </thead>
           <tbody>
-            {filteredSwaps.map((s) => {
+            {swaps.map((s) => {
               const soldToken0 = BigInt(s.amount0In) > BigInt(0);
               const soldAmt = soldToken0 ? s.amount0In : s.amount1In;
               const boughtAmt = soldToken0 ? s.amount1Out : s.amount0Out;
@@ -637,61 +490,19 @@ function ReservesTab({
   poolId,
   limit,
   pool,
-  search,
-  onSearchChange,
 }: {
   poolId: string;
   limit: number;
   pool: Pool | null;
-  search: string;
-  onSearchChange: (value: string) => void;
 }) {
   const { data, error, isLoading } = useGQL<{ ReserveUpdate: ReserveUpdate[] }>(
     POOL_RESERVES,
     { poolId, limit },
   );
   const { network } = useNetwork();
-  const query = normalizeSearch(search);
-
   const rows = data?.ReserveUpdate ?? [];
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
-
-  // Reverse once to get newest-first order, then filter
-  const orderedRows = useMemo(() => [...rows].reverse(), [rows]);
-
-  const feedVal =
-    pool?.oraclePrice && pool.oraclePrice !== "0"
-      ? Number(pool.oraclePrice) / 1e24
-      : null;
-  const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
-  const showUsd = feedVal !== null;
-
-  const filteredRows = useMemo(() => {
-    if (!query) return orderedRows;
-    return orderedRows.filter((r) => {
-      const raw0 = parseWei(r.reserve0, pool?.token0Decimals ?? 18);
-      const raw1 = parseWei(r.reserve1, pool?.token1Decimals ?? 18);
-      const usd0 = feedVal && !usdmIsToken0 ? raw0 * feedVal : raw0;
-      const usd1 = feedVal && usdmIsToken0 ? raw1 * feedVal : raw1;
-      const total = usd0 + usd1;
-
-      return matchesRowSearch(query, [
-        r.txHash,
-        sym0,
-        sym1,
-        formatWei(r.reserve0, pool?.token0Decimals ?? 18, 2),
-        formatWei(r.reserve1, pool?.token1Decimals ?? 18, 2),
-        showUsd
-          ? total.toLocaleString(undefined, {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })
-          : null,
-        r.blockNumber,
-      ]);
-    });
-  }, [orderedRows, query, sym0, sym1, pool, feedVal, usdmIsToken0, showUsd]);
 
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
@@ -706,30 +517,29 @@ function ReservesTab({
         token1={pool?.token1 ?? null}
         pool={pool}
       />
-      <TableSearch
-        value={search}
-        onChange={onSearchChange}
-        placeholder="Search reserves by tx, token, amount, or block…"
-        ariaLabel="Search reserves"
-      />
-      {filteredRows.length === 0 ? (
-        <EmptyBox message="No reserve updates match your search." />
-      ) : (
-        <Table>
-          <thead>
-            <tr className="border-b border-slate-800 bg-slate-900/50">
-              <Th>Tx</Th>
-              <Th align="right">{sym0} Reserve</Th>
-              <Th align="right">{sym1} Reserve</Th>
-              <Th align="right">Total (USD)</Th>
-              <Th align="right">Block</Th>
-              <Th>Time</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredRows.map((r) => {
+      <Table>
+        <thead>
+          <tr className="border-b border-slate-800 bg-slate-900/50">
+            <Th>Tx</Th>
+            <Th align="right">{sym0} Reserve</Th>
+            <Th align="right">{sym1} Reserve</Th>
+            <Th align="right">Total (USD)</Th>
+            <Th align="right">Block</Th>
+            <Th>Time</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {(() => {
+            const feedVal =
+              pool?.oraclePrice && pool.oraclePrice !== "0"
+                ? Number(pool.oraclePrice) / 1e24
+                : null;
+            const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
+            const showUsd = feedVal !== null;
+            return [...rows].reverse().map((r) => {
               const raw0 = parseWei(r.reserve0, pool?.token0Decimals ?? 18);
               const raw1 = parseWei(r.reserve1, pool?.token1Decimals ?? 18);
+              // USD values: USDm ≈ $1, non-USDm × feedVal
               const usd0 = feedVal && !usdmIsToken0 ? raw0 * feedVal : raw0;
               const usd1 = feedVal && usdmIsToken0 ? raw1 * feedVal : raw1;
               const total = usd0 + usd1;
@@ -780,49 +590,19 @@ function ReservesTab({
                   </Td>
                 </Row>
               );
-            })}
-          </tbody>
-        </Table>
-      )}
+            });
+          })()}
+        </tbody>
+      </Table>
     </>
   );
 }
 
-function RebalancesTab({
-  poolId,
-  limit,
-  search,
-  onSearchChange,
-}: {
-  poolId: string;
-  limit: number;
-  search: string;
-  onSearchChange: (value: string) => void;
-}) {
-  const { getLabel } = useAddressLabels();
-  const query = normalizeSearch(search);
-
+function RebalancesTab({ poolId, limit }: { poolId: string; limit: number }) {
   const { data, error, isLoading } = useGQL<{
     RebalanceEvent: RebalanceEvent[];
   }>(POOL_REBALANCES, { poolId, limit });
   const rows = data?.RebalanceEvent ?? [];
-
-  const filteredRows = useMemo(() => {
-    if (!query) return rows;
-    return rows.filter((r) => {
-      return matchesRowSearch(query, [
-        r.txHash,
-        ...addressSearchTerms(r.sender, getLabel),
-        ...addressSearchTerms(r.caller, getLabel),
-        Number(r.priceDifferenceBefore).toLocaleString(),
-        Number(r.priceDifferenceAfter).toLocaleString(),
-        r.effectivenessRatio
-          ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
-          : null,
-        r.blockNumber,
-      ]);
-    });
-  }, [rows, query, getLabel]);
 
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
@@ -830,58 +610,46 @@ function RebalancesTab({
     return <EmptyBox message="No rebalance events for this pool." />;
 
   return (
-    <>
-      <TableSearch
-        value={search}
-        onChange={onSearchChange}
-        placeholder="Search rebalances by tx, strategy, rebalancer, label, or block…"
-        ariaLabel="Search rebalances"
-      />
-      {filteredRows.length === 0 ? (
-        <EmptyBox message="No rebalances match your search." />
-      ) : (
-        <Table>
-          <thead>
-            <tr className="border-b border-slate-800 bg-slate-900/50">
-              <Th>Tx</Th>
-              <Th>Strategy</Th>
-              <Th>Rebalancer</Th>
-              <Th align="right">Before (bps)</Th>
-              <Th align="right">After (bps)</Th>
-              <Th align="right">Effectiveness</Th>
-              <Th align="right">Block</Th>
-              <Th>Time</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredRows.map((r) => (
-              <Row key={r.id}>
-                <TxHashCell txHash={r.txHash} />
-                <SenderCell address={r.sender} />
-                <SenderCell address={r.caller} />
-                <Td mono small align="right">
-                  {Number(r.priceDifferenceBefore).toLocaleString()}
-                </Td>
-                <Td mono small align="right">
-                  {Number(r.priceDifferenceAfter).toLocaleString()}
-                </Td>
-                <Td mono small align="right">
-                  {r.effectivenessRatio
-                    ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
-                    : "—"}
-                </Td>
-                <Td mono small muted align="right">
-                  {formatBlock(r.blockNumber)}
-                </Td>
-                <Td small muted title={formatTimestamp(r.blockTimestamp)}>
-                  {relativeTime(r.blockTimestamp)}
-                </Td>
-              </Row>
-            ))}
-          </tbody>
-        </Table>
-      )}
-    </>
+    <Table>
+      <thead>
+        <tr className="border-b border-slate-800 bg-slate-900/50">
+          <Th>Tx</Th>
+          <Th>Strategy</Th>
+          <Th>Rebalancer</Th>
+          <Th align="right">Before (bps)</Th>
+          <Th align="right">After (bps)</Th>
+          <Th align="right">Effectiveness</Th>
+          <Th align="right">Block</Th>
+          <Th>Time</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <Row key={r.id}>
+            <TxHashCell txHash={r.txHash} />
+            <SenderCell address={r.sender} />
+            <SenderCell address={r.caller} />
+            <Td mono small align="right">
+              {Number(r.priceDifferenceBefore).toLocaleString()}
+            </Td>
+            <Td mono small align="right">
+              {Number(r.priceDifferenceAfter).toLocaleString()}
+            </Td>
+            <Td mono small align="right">
+              {r.effectivenessRatio
+                ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
+                : "—"}
+            </Td>
+            <Td mono small muted align="right">
+              {formatBlock(r.blockNumber)}
+            </Td>
+            <Td small muted title={formatTimestamp(r.blockTimestamp)}>
+              {relativeTime(r.blockTimestamp)}
+            </Td>
+          </Row>
+        ))}
+      </tbody>
+    </Table>
   );
 }
 
@@ -889,19 +657,12 @@ function LiquidityTab({
   poolId,
   limit,
   pool,
-  search,
-  onSearchChange,
 }: {
   poolId: string;
   limit: number;
   pool: Pool | null;
-  search: string;
-  onSearchChange: (value: string) => void;
 }) {
   const { network } = useNetwork();
-  const { getLabel } = useAddressLabels();
-  const query = normalizeSearch(search);
-
   const { data, error, isLoading } = useGQL<{
     LiquidityEvent: LiquidityEvent[];
   }>(POOL_LIQUIDITY, { poolId, limit });
@@ -918,23 +679,6 @@ function LiquidityTab({
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
-  const filteredRows = useMemo(() => {
-    if (!query) return rows;
-    return rows.filter((r) => {
-      return matchesRowSearch(query, [
-        r.txHash,
-        r.kind,
-        ...addressSearchTerms(r.sender, getLabel),
-        formatWei(r.amount0),
-        formatWei(r.amount1),
-        formatWei(r.liquidity),
-        sym0,
-        sym1,
-        r.blockNumber,
-      ]);
-    });
-  }, [rows, query, getLabel, sym0, sym1]);
-
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
 
@@ -948,18 +692,8 @@ function LiquidityTab({
           token1Symbol={sym1}
         />
       )}
-      {rows.length > 0 && (
-        <TableSearch
-          value={search}
-          onChange={onSearchChange}
-          placeholder="Search liquidity by tx, sender, label, kind, amount, or block…"
-          ariaLabel="Search liquidity"
-        />
-      )}
       {rows.length === 0 ? (
         <EmptyBox message="No liquidity events for this pool." />
-      ) : filteredRows.length === 0 ? (
-        <EmptyBox message="No liquidity events match your search." />
       ) : (
         <Table>
           <thead>
@@ -975,7 +709,7 @@ function LiquidityTab({
             </tr>
           </thead>
           <tbody>
-            {filteredRows.map((r) => (
+            {rows.map((r) => (
               <Row key={r.id}>
                 <TxHashCell txHash={r.txHash} />
                 <td className="px-4 py-2">
@@ -1136,18 +870,12 @@ function OracleTab({
   poolId,
   limit,
   pool,
-  search,
-  onSearchChange,
 }: {
   poolId: string;
   limit: number;
   pool: Pool | null;
-  search: string;
-  onSearchChange: (value: string) => void;
 }) {
   const { network } = useNetwork();
-  const query = normalizeSearch(search);
-
   const { data, error, isLoading } = useGQL<{
     OracleSnapshot: OracleSnapshot[];
   }>(ORACLE_SNAPSHOTS, { poolId, limit });
@@ -1155,28 +883,6 @@ function OracleTab({
 
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
-
-  // Reverse once to get newest-first order, then filter
-  const orderedRows = useMemo(() => [...rows].reverse(), [rows]);
-
-  const filteredRows = useMemo(() => {
-    if (!query) return orderedRows;
-    return orderedRows.filter((r) => {
-      const statusAliases = r.oracleOk
-        ? "ok true healthy pass good ✓"
-        : "fail false unhealthy bad ✗";
-
-      return matchesRowSearch(query, [
-        r.source,
-        statusAliases,
-        parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6),
-        Number(r.priceDifference) > 0 ? r.priceDifference : null,
-        r.rebalanceThreshold > 0 ? String(r.rebalanceThreshold) : null,
-        r.numReporters,
-        r.blockNumber,
-      ]);
-    });
-  }, [orderedRows, query, sym0]);
 
   if (pool?.source?.includes("virtual")) {
     return <EmptyBox message="VirtualPool — no oracle data available." />;
@@ -1197,68 +903,59 @@ function OracleTab({
         token0={pool?.token0 ?? null}
         token1={pool?.token1 ?? null}
       />
-      <TableSearch
-        value={search}
-        onChange={onSearchChange}
-        placeholder="Search oracle rows by source, status, price, or block…"
-        ariaLabel="Search oracle"
-      />
-      {filteredRows.length === 0 ? (
-        <EmptyBox message="No oracle snapshots match your search." />
-      ) : (
-        <Table>
-          <thead>
-            <tr className="border-b border-slate-800 bg-slate-900/50">
-              <Th>Source</Th>
-              <Th align="right">Oracle OK</Th>
-              <Th align="right">
-                Price ({sym0}/{sym1})
-              </Th>
-              <Th align="right">Price Diff</Th>
-              <Th align="right">Threshold</Th>
-              <Th align="right">Reporters</Th>
-              <Th align="right">Block</Th>
-              <Th>Time</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredRows.map((r) => (
-              <Row key={r.id}>
-                <Td small>
-                  <span className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono">
-                    {r.source}
-                  </span>
-                </Td>
-                <Td small align="right">
-                  <span
-                    className={r.oracleOk ? "text-emerald-400" : "text-red-400"}
-                  >
-                    {r.oracleOk ? "✓" : "✗"}
-                  </span>
-                </Td>
-                <Td mono small align="right">
-                  {parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6)}
-                </Td>
-                <Td mono small align="right">
-                  {Number(r.priceDifference) > 0 ? r.priceDifference : "—"}
-                </Td>
-                <Td mono small align="right">
-                  {r.rebalanceThreshold > 0 ? r.rebalanceThreshold : "—"}
-                </Td>
-                <Td mono small align="right">
-                  {r.numReporters}
-                </Td>
-                <Td mono small muted align="right">
-                  {formatBlock(r.blockNumber)}
-                </Td>
-                <Td small muted title={formatTimestamp(r.timestamp)}>
-                  {relativeTime(r.timestamp)}
-                </Td>
-              </Row>
-            ))}
-          </tbody>
-        </Table>
-      )}
+
+      <Table>
+        <thead>
+          <tr className="border-b border-slate-800 bg-slate-900/50">
+            <Th>Source</Th>
+            <Th align="right">Oracle OK</Th>
+            <Th align="right">
+              Price ({sym0}/{sym1})
+            </Th>
+            <Th align="right">Price Diff</Th>
+            <Th align="right">Threshold</Th>
+            <Th align="right">Reporters</Th>
+            <Th align="right">Block</Th>
+            <Th>Time</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {[...rows].reverse().map((r) => (
+            <Row key={r.id}>
+              <Td small>
+                <span className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono">
+                  {r.source}
+                </span>
+              </Td>
+              <Td small align="right">
+                <span
+                  className={r.oracleOk ? "text-emerald-400" : "text-red-400"}
+                >
+                  {r.oracleOk ? "✓" : "✗"}
+                </span>
+              </Td>
+              <Td mono small align="right">
+                {parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6)}
+              </Td>
+              <Td mono small align="right">
+                {Number(r.priceDifference) > 0 ? r.priceDifference : "—"}
+              </Td>
+              <Td mono small align="right">
+                {r.rebalanceThreshold > 0 ? r.rebalanceThreshold : "—"}
+              </Td>
+              <Td mono small align="right">
+                {r.numReporters}
+              </Td>
+              <Td mono small muted align="right">
+                {formatBlock(r.blockNumber)}
+              </Td>
+              <Td small muted title={formatTimestamp(r.timestamp)}>
+                {relativeTime(r.timestamp)}
+              </Td>
+            </Row>
+          ))}
+        </tbody>
+      </Table>
     </>
   );
 }
