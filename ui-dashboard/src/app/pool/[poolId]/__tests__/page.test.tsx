@@ -210,4 +210,33 @@ describe("Pool detail providers tab", () => {
     expect(html).toContain("0xlp1");
     expect(html.indexOf("0xlp2")).toBeLessThan(html.indexOf("0xlp1"));
   });
+
+  it("shows the FPMM-only empty state for virtual pools", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return gqlResult({
+          Pool: [
+            {
+              ...BASE_POOL,
+              source: "virtual_pool",
+            },
+          ],
+        });
+      }
+      if (query.includes("TradingLimits")) {
+        return gqlResult({ TradingLimit: [] });
+      }
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderToStaticMarkup(<PoolDetailPage />);
+    expect(html).toContain(
+      "LP provider data is only available for FPMM pools.",
+    );
+    expect(html).not.toContain("Falling back to event-based LP aggregation");
+  });
 });
