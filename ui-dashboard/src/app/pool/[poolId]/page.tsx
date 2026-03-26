@@ -76,6 +76,10 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number];
 
+function getTabLabel(tab: Tab) {
+  return tab === "providers" ? "LPs" : tab;
+}
+
 function PoolDetail() {
   const { network } = useNetwork();
   const { poolId } = useParams<{ poolId: string }>();
@@ -188,7 +192,7 @@ function PoolDetail() {
                 : "text-slate-400 hover:text-slate-200"
             }`}
           >
-            {t}
+            {getTabLabel(t)}
           </button>
         ))}
         <div className="ml-auto hidden sm:flex items-center">
@@ -216,7 +220,7 @@ function PoolDetail() {
         {tab === "oracle" && (
           <OracleTab poolId={decodedId} limit={limit} pool={pool} />
         )}
-        {tab === "providers" && <ProvidersTab poolId={decodedId} pool={pool} />}
+        {tab === "providers" && <LpsTab poolId={decodedId} pool={pool} />}
       </div>
     </div>
   );
@@ -706,7 +710,7 @@ function isLiquidityPositionSchemaError(error: Error | undefined) {
   );
 }
 
-function ProvidersTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
+function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
   // Only FPMM pools have LP mechanics — skip the fetch for non-FPMM pools.
   // Pass null to useGQL when we know the pool type and it isn't FPMM so the
   // hook is always called (Rules of Hooks) but the network request is skipped.
