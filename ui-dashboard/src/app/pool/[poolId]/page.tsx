@@ -96,6 +96,28 @@ export function getDebtTokenSideLabel(
   return "unknown";
 }
 
+/**
+ * Defensive selector for the current OLS row shown in the pool detail view.
+ *
+ * The GraphQL query already filters `isActive = true`, but this helper makes the
+ * UI robust against stale/misconfigured query changes and gives us a focused
+ * regression test for multi-registration pools.
+ */
+export function selectActiveOlsPool(
+  rows: OlsPool[] | null | undefined,
+): OlsPool | null {
+  if (!rows || rows.length === 0) return null;
+
+  const activeRows = rows.filter((row) => row.isActive);
+  if (activeRows.length === 0) return null;
+
+  return (
+    [...activeRows].sort(
+      (a, b) => Number(b.updatedAtTimestamp) - Number(a.updatedAtTimestamp),
+    )[0] ?? null
+  );
+}
+
 function PoolDetail() {
   const { network } = useNetwork();
   const { poolId } = useParams<{ poolId: string }>();
@@ -959,7 +981,7 @@ function OlsTab({
   } = useGQL<{
     OlsPool: OlsPool[];
   }>(OLS_POOL, { poolId });
-  const olsPool = olsData?.OlsPool?.[0] ?? null;
+  const olsPool = selectActiveOlsPool(olsData?.OlsPool);
 
   if (olsErr) return <ErrorBox message={olsErr.message} />;
   if (olsLoading) return <Skeleton rows={3} />;
