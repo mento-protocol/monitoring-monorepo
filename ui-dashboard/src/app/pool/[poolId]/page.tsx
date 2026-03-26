@@ -1024,6 +1024,7 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
   const isFpmmPool = pool ? isFpmm(pool) : null; // null = still loading
   const shouldSkip = isFpmmPool === false;
   const { getLabel } = useAddressLabels();
+  const { network } = useNetwork();
 
   const {
     data: indexedData,
@@ -1077,24 +1078,46 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
   if (positions.length === 0)
     return <EmptyBox message="No active LP positions for this pool." />;
 
+  // Derive per-position token amounts from pool reserves and LP share.
+  // positionTokenAmount = positionShare * poolReserve
+  const sym0 = tokenSymbol(network, pool?.token0 ?? null);
+  const sym1 = tokenSymbol(network, pool?.token1 ?? null);
+  const dec0 = pool?.token0Decimals ?? 18;
+  const dec1 = pool?.token1Decimals ?? 18;
+  const reserves0Raw = parseWei(pool?.reserves0 ?? "0", dec0);
+  const reserves1Raw = parseWei(pool?.reserves1 ?? "0", dec1);
+  const hasReserves = reserves0Raw > 0 || reserves1Raw > 0;
+
+  // Oracle price for USD conversion — same logic as ReservesTab.
+  const feedVal =
+    pool?.oraclePrice && pool.oraclePrice !== "0"
+      ? Number(pool.oraclePrice) / 1e24
+      : null;
+  const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
+  const showUsd = feedVal !== null && hasReserves;
+
   return (
     <>
-      <div className="mb-3 rounded border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
-        LP balances are shown in LP token units. Until we index LP token
-        decimals explicitly, the formatted display assumes the standard 18
-        decimals.
-      </div>
       <LpConcentrationChart
         positions={positions}
         totalLiquidity={totalLiquidity}
         getLabel={(addr) => getLabel(addr)}
+        pool={pool}
+        sym0={sym0}
+        sym1={sym1}
+        reserves0Raw={reserves0Raw}
+        reserves1Raw={reserves1Raw}
+        feedVal={feedVal}
+        usdmIsToken0={usdmIsToken0}
       />
       <Table>
         <thead>
           <tr className="border-b border-slate-800 bg-slate-900/50">
             <Th>#</Th>
             <Th>Address</Th>
-            <Th align="right">Net LP Tokens</Th>
+            <Th align="right">{sym0}</Th>
+            <Th align="right">{sym1}</Th>
+            {showUsd && <Th align="right">Total Value</Th>}
             <Th align="right">Share</Th>
           </tr>
         </thead>
@@ -1102,15 +1125,58 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
           {positions.map((position, i) => {
             // Scale up by 1e6 before converting to Number to preserve precision
             // for large bigint liquidity values that exceed JS safe integer range.
-            const sharePct =
+            const shareNum =
               totalLiquidity > BigInt(0)
-                ? (
-                    Number(
-                      (position.netLiquidity * BigInt(1_000_000)) /
-                        totalLiquidity,
-                    ) / 10000
-                  ).toFixed(2)
-                : "0.00";
+                ? Number(
+                    (position.netLiquidity * BigInt(1_000_000)) / totalLiquidity,
+                  ) / 1_000_000
+                : 0;
+            const sharePct = (shareNum * 100).toFixed(2);
+
+            const tok0 = hasReserves ? shareNum * reserves0Raw : null;
+            const tok1 = hasReserves ? shareNum * reserves1Raw : null;
+
+            // Convert each token to USD: the non-stable token uses the oracle price
+            const tok0Usd =
+              tok0 !== null && feedVal && !usdmIsToken0
+                ? tok0 * feedVal
+                : tok0;
+            const tok1Usd =
+              tok1 !== null && feedVal && usdmIsToken0
+                ? tok1 * feedVal
+                : tok1;
+            const totalUsd =
+              tok0Usd !== null && tok1Usd !== null ? tok0Usd + tok1Usd : null;
+
+            const fmtTok = (
+              v: number | null,
+              sym: string,
+              vUsd: number | null,
+            ) => {
+              if (v === null) return "—";
+              const formatted = v.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              });
+              const showSubUsd = vUsd !== null && sym !== "USDm";
+              return (
+                <div>
+                  <span>
+                    {formatted} {sym}
+                  </span>
+                  {showSubUsd && (
+                    <div className="text-xs text-slate-500">
+                      ≈ $
+                      {vUsd!.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            };
+
             return (
               <Row key={position.address}>
                 <Td small muted>
@@ -1120,8 +1186,18 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
                   <AddressLink address={position.address} />
                 </Td>
                 <Td mono small align="right">
-                  {formatWei(position.netLiquidity.toString())}
+                  {fmtTok(tok0, sym0, tok0Usd)}
                 </Td>
+                <Td mono small align="right">
+                  {fmtTok(tok1, sym1, tok1Usd)}
+                </Td>
+                {showUsd && (
+                  <Td mono small align="right">
+                    {totalUsd !== null
+                      ? `$${totalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      : "—"}
+                  </Td>
+                )}
                 <Td mono small align="right">
                   {sharePct}%
                 </Td>
