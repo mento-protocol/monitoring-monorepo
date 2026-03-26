@@ -165,7 +165,7 @@ describe("Pool detail LPs tab", () => {
     });
 
     const html = renderToStaticMarkup(<PoolDetailPage />);
-    expect(html).toContain("Net LP Tokens");
+    expect(html).toContain("Share");
     expect(html).toContain("0xa");
     expect(html).toContain("0xb");
     expect(html.indexOf("0xa")).toBeLessThan(html.indexOf("0xb"));
