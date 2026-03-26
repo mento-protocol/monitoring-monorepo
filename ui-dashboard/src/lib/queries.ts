@@ -207,8 +207,9 @@ export const POOL_DEPLOYMENT = `
   }
 `;
 
-// Fetch all mint/burn events for client-side position aggregation.
-// Capped at 10,000 rows; the UI shows a warning when the cap is hit.
+// Compatibility fallback for environments that have not reindexed the
+// LiquidityPosition entity yet. The UI aggregates current balances from
+// LiquidityEvent rows client-side when the schema query is unavailable.
 export const POOL_LIQUIDITY_ALL = `
   query PoolLiquidityAll($poolId: String!) {
     LiquidityEvent(
@@ -221,8 +222,8 @@ export const POOL_LIQUIDITY_ALL = `
   }
 `;
 
-// Direct LP position query — used once the indexer has been reindexed with
-// the LiquidityPosition entity (replaces client-side aggregation in POOL_LIQUIDITY_ALL).
+// Preferred LP ownership query. The providers tab tries this first and falls
+// back to POOL_LIQUIDITY_ALL only when the LiquidityPosition schema is absent.
 export const POOL_LP_POSITIONS = `
   query PoolLpPositions($poolId: String!) {
     LiquidityPosition(

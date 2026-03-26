@@ -37,6 +37,45 @@ import {
 } from "../rpc";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
 
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+async function applyLiquidityPositionDelta({
+  context,
+  poolId,
+  address,
+  delta,
+  blockNumber,
+  blockTimestamp,
+}: {
+  context: {
+    LiquidityPosition: {
+      get: (id: string) => Promise<LiquidityPosition | undefined>;
+      set: (entity: LiquidityPosition) => void;
+    };
+  };
+  poolId: string;
+  address: string;
+  delta: bigint;
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+}) {
+  if (address === ZERO_ADDRESS || address === poolId || delta === 0n) return;
+
+  const id = `${poolId}-${address}`;
+  const existing = await context.LiquidityPosition.get(id);
+  const prevBalance = existing?.netLiquidity ?? 0n;
+  const nextBalance = prevBalance + delta;
+
+  context.LiquidityPosition.set({
+    id,
+    poolId,
+    address,
+    netLiquidity: nextBalance > 0n ? nextBalance : 0n,
+    lastUpdatedBlock: blockNumber,
+    lastUpdatedTimestamp: blockTimestamp,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // FPMMFactory
 // ---------------------------------------------------------------------------
@@ -316,18 +355,6 @@ FPMM.Mint.handler(async ({ event, context }) => {
   };
 
   context.LiquidityEvent.set(liquidityEvent);
-
-  // Track LP position: recipient receives LP tokens on mint
-  const lpMintId = `${poolId}-${liquidityEvent.recipient}`;
-  const existingMint = await context.LiquidityPosition.get(lpMintId);
-  context.LiquidityPosition.set({
-    id: lpMintId,
-    poolId,
-    address: liquidityEvent.recipient,
-    netLiquidity: (existingMint?.netLiquidity ?? 0n) + event.params.liquidity,
-    lastUpdatedBlock: blockNumber,
-    lastUpdatedTimestamp: blockTimestamp,
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -372,23 +399,38 @@ FPMM.Burn.handler(async ({ event, context }) => {
   };
 
   context.LiquidityEvent.set(liquidityEvent);
+});
 
-  // Track LP position: on burn, the LP recipient is the holder whose position
-  // shrinks. Using `to` rather than `sender` avoids router misattribution.
-  const lpBurnId = `${poolId}-${liquidityEvent.recipient}`;
-  const existingBurn = await context.LiquidityPosition.get(lpBurnId);
-  const prevBalance = existingBurn?.netLiquidity ?? 0n;
-  const newBalance =
-    prevBalance > event.params.liquidity
-      ? prevBalance - event.params.liquidity
-      : 0n; // clamp to 0 — negative balance = data anomaly (incomplete history)
-  context.LiquidityPosition.set({
-    id: lpBurnId,
+// ---------------------------------------------------------------------------
+// FPMM.Transfer (LP token ownership)
+// ---------------------------------------------------------------------------
+
+FPMM.Transfer.handler(async ({ event, context }) => {
+  const poolId = asAddress(event.srcAddress);
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
+  const from = asAddress(event.params.from);
+  const to = asAddress(event.params.to);
+  const value = event.params.value;
+
+  // LiquidityPosition tracks actual LP token ownership. For burns, the owner is
+  // only observable via LP token Transfer events (owner -> pool, then pool -> 0x0),
+  // not the Burn event's `to` beneficiary.
+  await applyLiquidityPositionDelta({
+    context,
     poolId,
-    address: liquidityEvent.recipient,
-    netLiquidity: newBalance,
-    lastUpdatedBlock: blockNumber,
-    lastUpdatedTimestamp: blockTimestamp,
+    address: from,
+    delta: -value,
+    blockNumber,
+    blockTimestamp,
+  });
+  await applyLiquidityPositionDelta({
+    context,
+    poolId,
+    address: to,
+    delta: value,
+    blockNumber,
+    blockTimestamp,
   });
 });
 
