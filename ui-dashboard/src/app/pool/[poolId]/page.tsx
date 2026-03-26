@@ -959,16 +959,7 @@ function OlsTab({
   } = useGQL<{
     OlsPool: OlsPool[];
   }>(OLS_POOL, { poolId });
-  const {
-    data: eventsData,
-    error: eventsErr,
-    isLoading: eventsLoading,
-  } = useGQL<{
-    OlsLiquidityEvent: OlsLiquidityEvent[];
-  }>(OLS_LIQUIDITY_EVENTS, { poolId, limit });
-
   const olsPool = olsData?.OlsPool?.[0] ?? null;
-  const events = eventsData?.OlsLiquidityEvent ?? [];
 
   if (olsErr) return <ErrorBox message={olsErr.message} />;
   if (olsLoading) return <Skeleton rows={3} />;
@@ -976,12 +967,12 @@ function OlsTab({
   return (
     <div className="space-y-6">
       <OlsStatusPanel olsPool={olsPool} pool={pool} network={network} />
-      <OlsLiquidityTable
-        events={events}
+      <OlsLiquidityEvents
+        poolId={poolId}
+        olsAddress={olsPool?.olsAddress ?? null}
+        limit={limit}
         pool={pool}
         network={network}
-        isLoading={eventsLoading}
-        error={eventsErr ?? null}
       />
     </div>
   );
@@ -1126,6 +1117,43 @@ export function OlsStatusPanel({
         />
       </dl>
     </div>
+  );
+}
+
+/**
+ * Fetches OLS liquidity events scoped to the active OLS contract address,
+ * preventing event mixing when a pool has been re-registered to a new OLS contract.
+ */
+function OlsLiquidityEvents({
+  poolId,
+  olsAddress,
+  limit,
+  pool,
+  network,
+}: {
+  poolId: string;
+  olsAddress: string | null;
+  limit: number;
+  pool: Pool | null;
+  network: ReturnType<typeof useNetwork>["network"];
+}) {
+  // Skip the query until the active olsAddress is known (avoids mixing events
+  // from historical OLS contracts in pools that have been re-registered).
+  const query = olsAddress ? OLS_LIQUIDITY_EVENTS : null;
+  const { data, error, isLoading } = useGQL<{
+    OlsLiquidityEvent: OlsLiquidityEvent[];
+  }>(query, olsAddress ? { poolId, olsAddress, limit } : {});
+
+  const events = data?.OlsLiquidityEvent ?? [];
+
+  return (
+    <OlsLiquidityTable
+      events={events}
+      pool={pool}
+      network={network}
+      isLoading={isLoading}
+      error={error ?? null}
+    />
   );
 }
 
