@@ -87,6 +87,21 @@ const SEARCH_PARAM_BY_TAB: Record<Tab, string> = {
   oracle: "oracleQ",
 };
 
+function addressSearchTerms(
+  address: string | null | undefined,
+  getLabel: (address: string | null) => string,
+): Array<string | null | undefined> {
+  if (!address) return [];
+  return [address, getLabel(address)];
+}
+
+function matchesRowSearch(
+  query: string,
+  parts: Array<string | number | null | undefined>,
+): boolean {
+  return matchesSearch(buildSearchBlob(parts), query);
+}
+
 function PoolDetail() {
   const { network } = useNetwork();
   const { poolId } = useParams<{ poolId: string }>();
@@ -126,7 +141,8 @@ function PoolDetail() {
     (t: Tab, value: string) => {
       const p = new URLSearchParams(searchParams.toString());
       const key = SEARCH_PARAM_BY_TAB[t];
-      if (value) p.set(key, value);
+      const trimmedValue = value.trim();
+      if (trimmedValue) p.set(key, trimmedValue);
       else p.delete(key);
       replaceURL(p);
     },
@@ -441,19 +457,16 @@ function SwapsTab({
         ? (pool?.token1Decimals ?? 18)
         : (pool?.token0Decimals ?? 18);
 
-      const blob = buildSearchBlob([
+      return matchesRowSearch(query, [
         s.txHash,
-        s.sender,
-        getLabel(s.sender),
-        s.recipient,
-        getLabel(s.recipient),
+        ...addressSearchTerms(s.sender, getLabel),
+        ...addressSearchTerms(s.recipient, getLabel),
         soldSym,
         boughtSym,
         formatWei(soldAmt, soldDec),
         formatWei(boughtAmt, boughtDec),
         s.blockNumber,
       ]);
-      return matchesSearch(blob, query);
     });
   }, [swaps, query, sym0, sym1, pool, getLabel]);
 
@@ -471,6 +484,7 @@ function SwapsTab({
       )}
       {swaps.length > 0 && (
         <TableSearch
+          key={`swaps:${search}`}
           value={search}
           onChange={onSearchChange}
           placeholder="Search swaps by tx, address, label, token, amount, or block…"
@@ -590,7 +604,7 @@ function ReservesTab({
       const usd1 = feedVal && usdmIsToken0 ? raw1 * feedVal : raw1;
       const total = usd0 + usd1;
 
-      const blob = buildSearchBlob([
+      return matchesRowSearch(query, [
         r.txHash,
         sym0,
         sym1,
@@ -604,7 +618,6 @@ function ReservesTab({
           : null,
         r.blockNumber,
       ]);
-      return matchesSearch(blob, query);
     });
   }, [orderedRows, query, sym0, sym1, pool, feedVal, usdmIsToken0, showUsd]);
 
@@ -622,6 +635,7 @@ function ReservesTab({
         pool={pool}
       />
       <TableSearch
+        key={`reserves:${search}`}
         value={search}
         onChange={onSearchChange}
         placeholder="Search reserves by tx, token, amount, or block…"
@@ -725,12 +739,10 @@ function RebalancesTab({
   const filteredRows = useMemo(() => {
     if (!query) return rows;
     return rows.filter((r) => {
-      const blob = buildSearchBlob([
+      return matchesRowSearch(query, [
         r.txHash,
-        r.sender,
-        getLabel(r.sender),
-        r.caller,
-        getLabel(r.caller),
+        ...addressSearchTerms(r.sender, getLabel),
+        ...addressSearchTerms(r.caller, getLabel),
         Number(r.priceDifferenceBefore).toLocaleString(),
         Number(r.priceDifferenceAfter).toLocaleString(),
         r.effectivenessRatio
@@ -738,7 +750,6 @@ function RebalancesTab({
           : null,
         r.blockNumber,
       ]);
-      return matchesSearch(blob, query);
     });
   }, [rows, query, getLabel]);
 
@@ -750,6 +761,7 @@ function RebalancesTab({
   return (
     <>
       <TableSearch
+        key={`rebalances:${search}`}
         value={search}
         onChange={onSearchChange}
         placeholder="Search rebalances by tx, strategy, rebalancer, label, or block…"
@@ -839,11 +851,10 @@ function LiquidityTab({
   const filteredRows = useMemo(() => {
     if (!query) return rows;
     return rows.filter((r) => {
-      const blob = buildSearchBlob([
+      return matchesRowSearch(query, [
         r.txHash,
         r.kind,
-        r.sender,
-        getLabel(r.sender),
+        ...addressSearchTerms(r.sender, getLabel),
         formatWei(r.amount0),
         formatWei(r.amount1),
         formatWei(r.liquidity),
@@ -851,7 +862,6 @@ function LiquidityTab({
         sym1,
         r.blockNumber,
       ]);
-      return matchesSearch(blob, query);
     });
   }, [rows, query, getLabel, sym0, sym1]);
 
@@ -870,6 +880,7 @@ function LiquidityTab({
       )}
       {rows.length > 0 && (
         <TableSearch
+          key={`liquidity:${search}`}
           value={search}
           onChange={onSearchChange}
           placeholder="Search liquidity by tx, sender, label, kind, amount, or block…"
@@ -960,7 +971,7 @@ function OracleTab({
         ? "ok true healthy pass good ✓"
         : "fail false unhealthy bad ✗";
 
-      const blob = buildSearchBlob([
+      return matchesRowSearch(query, [
         r.source,
         statusAliases,
         parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6),
@@ -969,7 +980,6 @@ function OracleTab({
         r.numReporters,
         r.blockNumber,
       ]);
-      return matchesSearch(blob, query);
     });
   }, [orderedRows, query, sym0]);
 
@@ -993,6 +1003,7 @@ function OracleTab({
         token1={pool?.token1 ?? null}
       />
       <TableSearch
+        key={`oracle:${search}`}
         value={search}
         onChange={onSearchChange}
         placeholder="Search oracle rows by source, status, price, or block…"
