@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAuthSession } from "@/auth";
 import { getLabels, upsertLabel, deleteLabel } from "@/lib/address-labels";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -7,7 +8,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });
   }
   try {
-    const labels = await getLabels(chainId);
+    const session = await getAuthSession();
+    const labels = await getLabels(chainId, {
+      publicOnly: session === null,
+    });
     return NextResponse.json(labels);
   } catch (err) {
     return serverError(err);
@@ -15,6 +19,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(req: NextRequest): Promise<NextResponse> {
+  const session = await getAuthSession();
+  if (!session) {
+    return NextResponse.json(
+      { error: "Authentication required" },
+      { status: 401 },
+    );
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -22,7 +34,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { chainId, address, label, category, notes } = body as Record<
+  const { chainId, address, label, category, notes, isPublic } = body as Record<
     string,
     unknown
   >;
@@ -46,6 +58,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
       category:
         typeof category === "string" ? category.trim() || undefined : undefined,
       notes: typeof notes === "string" ? notes.trim() || undefined : undefined,
+      isPublic: isPublic === true,
     });
     return NextResponse.json({ ok: true });
   } catch (err) {
@@ -54,6 +67,14 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
 }
 
 export async function DELETE(req: NextRequest): Promise<NextResponse> {
+  const session = await getAuthSession();
+  if (!session) {
+    return NextResponse.json(
+      { error: "Authentication required" },
+      { status: 401 },
+    );
+  }
+
   let body: unknown;
   try {
     body = await req.json();

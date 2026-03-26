@@ -132,13 +132,65 @@ resource "vercel_project_environment_variable" "redis_token" {
 # exists in the Vercel provider). Run `vercel blob create-store` once and add
 # the resulting token to terraform.tfvars as `blob_read_write_token`.
 resource "vercel_project_environment_variable" "blob_token" {
-  count      = var.blob_read_write_token != "" ? 1 : 0
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id
   key        = "BLOB_READ_WRITE_TOKEN"
   value      = var.blob_read_write_token
+  target     = ["production"]
+  sensitive  = true
+}
+
+# ── Auth Environment Variables ────────────────────────────────────────────
+
+resource "vercel_project_environment_variable" "auth_google_id" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "AUTH_GOOGLE_ID"
+  value      = var.auth_google_id
   target     = ["production", "preview"]
   sensitive  = true
+}
+
+resource "vercel_project_environment_variable" "auth_google_secret" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "AUTH_GOOGLE_SECRET"
+  value      = var.auth_google_secret
+  target     = ["production", "preview"]
+  sensitive  = true
+}
+
+resource "vercel_project_environment_variable" "auth_secret" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "AUTH_SECRET"
+  value      = var.auth_secret
+  target     = ["production", "preview"]
+  sensitive  = true
+}
+
+resource "vercel_project_environment_variable" "cron_secret" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "CRON_SECRET"
+  value      = var.cron_secret
+  # Production-only: preview deployments do not run cron jobs and should not
+  # have access to the backup trigger secret.
+  target    = ["production"]
+  sensitive = true
+}
+
+# Preview auth proxy — routes Google OAuth through the prod domain (already
+# whitelisted in GCP), then forwards the session back to the preview URL.
+resource "vercel_project_environment_variable" "auth_redirect_proxy_url" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "AUTH_REDIRECT_PROXY_URL"
+  value      = "https://monitoring.mento.org/api/auth"
+  # Must be set on BOTH production and preview — Auth.js only enables proxy
+  # mode when this var is present in the stable (prod) env too.
+  # See: https://authjs.dev/getting-started/deployment#securing-a-preview-deployment
+  target = ["production", "preview"]
 }
 
 # Cron jobs are defined in ui-dashboard/vercel.json and activated automatically

@@ -54,7 +54,11 @@ actions:
         - git_hooks: [pre-push]
     - id: typecheck-pre-push
       display_name: TypeCheck Pre-Push
-      run: pnpm --filter @mento-protocol/ui-dashboard --filter @mento-protocol/indexer-envio typecheck
+      description: >
+        Runs codegen for indexer-envio (to produce the generated/ types) then
+        typechecks both workspaces. Combined into one action so the generated
+        module is guaranteed to exist before tsc runs.
+      run: pnpm indexer:celo-mainnet:codegen && pnpm --filter @mento-protocol/ui-dashboard --filter @mento-protocol/indexer-envio typecheck
       triggers:
         - git_hooks: [pre-push]
     - id: test-pre-push
@@ -68,17 +72,10 @@ actions:
       run: trunk fmt --all
       triggers:
         - git_hooks: [pre-push]
-    - id: indexer-codegen-pre-push
-      display_name: Indexer Schema Codegen (pre-push)
-      description: Validates schema.graphql by running envio codegen — catches duplicate fields, bad types, etc. before CI.
-      run: pnpm indexer:celo-mainnet:codegen
-      triggers:
-        - git_hooks: [pre-push]
   enabled:
     - trunk-fmt-pre-commit
     - trunk-fmt-pre-push
     - trunk-check-all-pre-push
     - typecheck-pre-push
     - test-pre-push
-    - indexer-codegen-pre-push
     - trunk-upgrade-available

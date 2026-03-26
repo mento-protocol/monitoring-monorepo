@@ -11,6 +11,7 @@ import "./handlers/fpmm";
 import "./handlers/sortedOracles";
 import "./handlers/virtualPool";
 import "./handlers/feeToken";
+import "./handlers/openLiquidityStrategy";
 
 // ---------------------------------------------------------------------------
 // Re-exports for backwards compatibility with existing tests.

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAuthSession } from "@/auth";
 import {
   getLabels,
   getAllChainLabels,
@@ -7,6 +8,14 @@ import {
 } from "@/lib/address-labels";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  const session = await getAuthSession();
+  if (!session) {
+    return NextResponse.json(
+      { error: "Authentication required" },
+      { status: 401 },
+    );
+  }
+
   const chainIdParam = req.nextUrl.searchParams.get("chainId");
 
   try {
