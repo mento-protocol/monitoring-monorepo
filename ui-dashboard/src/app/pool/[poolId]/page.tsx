@@ -1087,7 +1087,7 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
       <LpConcentrationChart
         positions={positions}
         totalLiquidity={totalLiquidity}
-        getLabel={(addr) => getLabel(addr)}
+        getLabel={getLabel}
       />
       <Table>
         <thead>
