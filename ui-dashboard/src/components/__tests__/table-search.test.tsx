@@ -58,6 +58,7 @@ describe("TableSearch", () => {
     });
 
     expect(document.activeElement).toBe(input);
+    expect(input.value).toBe("0xabc");
     expect(onChange).not.toHaveBeenCalled();
 
     act(() => {

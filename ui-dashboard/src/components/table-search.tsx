@@ -5,7 +5,7 @@
  * instance with a tab-specific placeholder.
  */
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef } from "react";
 
 type TableSearchProps = {
   value: string;
@@ -27,14 +27,13 @@ export function TableSearch({
     value,
   );
   const timeoutRef = useRef<number | null>(null);
-  const syncFromValue = useCallback((nextValue: string) => {
-    dispatchDraft(nextValue);
-  }, []);
+  const lastCommittedValueRef = useRef(value);
 
   useEffect(() => {
-    if (draft === value) return;
-    syncFromValue(value);
-  }, [value, draft, syncFromValue]);
+    if (value === lastCommittedValueRef.current) return;
+    lastCommittedValueRef.current = value;
+    dispatchDraft(value);
+  }, [value]);
 
   useEffect(
     () => () => {
@@ -58,6 +57,7 @@ export function TableSearch({
             window.clearTimeout(timeoutRef.current);
           }
           timeoutRef.current = window.setTimeout(() => {
+            lastCommittedValueRef.current = nextValue;
             onChange(nextValue);
           }, debounceMs);
         }}
