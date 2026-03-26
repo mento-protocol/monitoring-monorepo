@@ -24,6 +24,7 @@ networks:
           - event: Swap
           - event: Mint
           - event: Burn
+          - event: Transfer
           - event: UpdateReserves
           - event: Rebalanced
           - event: TradingLimitConfigured
@@ -68,6 +69,16 @@ networks:
           - event: MedianUpdated
           - event: ReportExpirySet
           - event: TokenReportExpirySet
+      - name: OpenLiquidityStrategy
+        abi_file_path: abis/OpenLiquidityStrategy.json
+        address:
+          - 0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f # CREATE3 deterministic address (pre-deploy)
+        handler: src/EventHandlers.ts
+        events:
+          - event: PoolAdded
+          - event: PoolRemoved
+          - event: RebalanceCooldownSet
+          - event: LiquidityMoved
       - name: ERC20FeeToken
         abi_file_path: abis/ERC20.json
         address: [] # Dynamically registered from FPMMDeployed events

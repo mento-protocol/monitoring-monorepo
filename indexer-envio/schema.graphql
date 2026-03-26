@@ -180,6 +180,15 @@ type VirtualPoolLifecycle {
   blockTimestamp: BigInt!
 }
 
+type LiquidityPosition @index(fields: ["poolId", "address"]) {
+  id: ID! # "{poolId}-{address}"
+  poolId: String! @index
+  address: String! @index
+  netLiquidity: BigInt! # Running sum: +mint, -burn. Always >= 0 in practice.
+  lastUpdatedBlock: BigInt!
+  lastUpdatedTimestamp: BigInt!
+}
+
 type ProtocolFeeTransfer {
   id: ID!
   token: String! @index
@@ -190,4 +199,57 @@ type ProtocolFeeTransfer {
   txHash: String!
   blockNumber: BigInt!
   blockTimestamp: BigInt! @index
+}
+
+# ─── Open Liquidity Strategy ───────────────────────────────────
+
+# Registered OLS pool config. One record per (pool, OLS contract).
+# id = "<poolAddress>-<olsAddress>" — composite key so re-registration to a
+# new OLS contract creates a fresh record instead of silently overwriting history.
+type OlsPool {
+  id: ID! # "<poolAddress>-<olsAddress>" composite key
+  poolId: String! @index # pool address (FK to Pool.id)
+  olsAddress: String! # OpenLiquidityStrategy contract address
+  isActive: Boolean! # false after PoolRemoved
+  debtToken: String! # address of debt token (from AddPoolParams)
+  rebalanceCooldown: BigInt! # uint32 seconds
+  lastRebalance: BigInt! # uint32 Unix timestamp (0 = never rebalanced)
+  protocolFeeRecipient: String!
+  liquiditySourceIncentiveExpansion: BigInt!
+  liquiditySourceIncentiveContraction: BigInt!
+  protocolIncentiveExpansion: BigInt!
+  protocolIncentiveContraction: BigInt!
+  olsRebalanceCount: Int! # count of LiquidityMoved events for this pool
+  addedAtBlock: BigInt!
+  addedAtTimestamp: BigInt!
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
+# Individual LiquidityMoved events from OLS
+type OlsLiquidityEvent @index(fields: ["poolId", "blockTimestamp"]) {
+  id: ID!
+  poolId: String! @index # pool address (FK to Pool.id)
+  olsAddress: String!
+  direction: Int! # 0 = Expand, 1 = Contract
+  tokenGivenToPool: String!
+  amountGivenToPool: BigInt!
+  tokenTakenFromPool: String!
+  amountTakenFromPool: BigInt!
+  caller: String! # tx.from — the rebalancer EOA
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
+}
+
+# Lifecycle events: PoolAdded, PoolRemoved, RebalanceCooldownSet
+type OlsLifecycleEvent {
+  id: ID!
+  poolId: String! @index
+  olsAddress: String!
+  action: String! # "POOL_ADDED" | "POOL_REMOVED" | "COOLDOWN_SET"
+  cooldown: BigInt! # 0 for non-cooldown events; value for COOLDOWN_SET
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
 }

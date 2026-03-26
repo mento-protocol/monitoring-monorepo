@@ -14,6 +14,7 @@ import { OraclePriceChart } from "@/components/oracle-price-chart";
 import { ReserveChart } from "@/components/reserve-chart";
 import { SenderCell } from "@/components/sender-cell";
 import { LiquidityChart } from "@/components/liquidity-chart";
+import { LpConcentrationChart } from "@/components/lp-concentration-chart";
 import { SnapshotChart } from "@/components/snapshot-chart";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
@@ -29,9 +30,12 @@ import {
 import { useGQL } from "@/lib/graphql";
 import {
   ORACLE_SNAPSHOTS,
+  OLS_LIQUIDITY_EVENTS,
+  OLS_POOL,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   POOL_LIQUIDITY,
+  POOL_LP_POSITIONS,
   POOL_REBALANCES,
   POOL_RESERVES,
   POOL_SNAPSHOTS,
@@ -47,6 +51,9 @@ import {
 } from "@/lib/table-search";
 import type {
   LiquidityEvent,
+  LiquidityPosition,
+  OlsLiquidityEvent,
+  OlsPool,
   OracleSnapshot,
   Pool,
   PoolSnapshot,
@@ -76,6 +83,8 @@ const TABS = [
   "rebalances",
   "liquidity",
   "oracle",
+  "providers",
+  "ols",
 ] as const;
 type Tab = (typeof TABS)[number];
 
@@ -100,6 +109,43 @@ function matchesRowSearch(
   parts: Array<string | number | null | undefined>,
 ): boolean {
   return matchesSearch(buildSearchBlob(parts), query);
+}
+
+function getTabLabel(tab: Tab) {
+  return tab === "providers" ? "LPs" : tab;
+}
+
+export function getDebtTokenSideLabel(
+  pool: Pool | null,
+  debtToken: string,
+): "token0" | "token1" | "unknown" {
+  if (!pool?.token0 || !pool?.token1 || !debtToken) return "unknown";
+  const normalizedDebtToken = debtToken.toLowerCase();
+  if (pool.token0.toLowerCase() === normalizedDebtToken) return "token0";
+  if (pool.token1.toLowerCase() === normalizedDebtToken) return "token1";
+  return "unknown";
+}
+
+/**
+ * Defensive selector for the current OLS row shown in the pool detail view.
+ *
+ * The GraphQL query already filters `isActive = true`, but this helper makes the
+ * UI robust against stale/misconfigured query changes and gives us a focused
+ * regression test for multi-registration pools.
+ */
+export function selectActiveOlsPool(
+  rows: OlsPool[] | null | undefined,
+): OlsPool | null {
+  if (!rows || rows.length === 0) return null;
+
+  const activeRows = rows.filter((row) => row.isActive);
+  if (activeRows.length === 0) return null;
+
+  return (
+    [...activeRows].sort(
+      (a, b) => Number(b.updatedAtTimestamp) - Number(a.updatedAtTimestamp),
+    )[0] ?? null
+  );
 }
 
 function PoolDetail() {
@@ -241,7 +287,7 @@ function PoolDetail() {
                 : "text-slate-400 hover:text-slate-200"
             }`}
           >
-            {t}
+            {getTabLabel(t)}
           </button>
         ))}
         <div className="ml-auto hidden sm:flex items-center">
@@ -297,6 +343,10 @@ function PoolDetail() {
             search={activeSearch}
             onSearchChange={(value) => setTabSearch("oracle", value)}
           />
+        )}
+        {tab === "providers" && <LpsTab poolId={decodedId} pool={pool} />}
+        {tab === "ols" && (
+          <OlsTab poolId={decodedId} limit={limit} pool={pool} />
         )}
       </div>
     </div>
@@ -940,6 +990,132 @@ function LiquidityTab({
   );
 }
 
+function isLiquidityPositionSchemaError(error: Error | undefined) {
+  if (!error) return false;
+  const msg = error.message.toLowerCase();
+  return (
+    msg.includes("liquidityposition") &&
+    (msg.includes("cannot query field") ||
+      msg.includes("not found in type") ||
+      msg.includes("field not found"))
+  );
+}
+
+function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
+  // Only FPMM pools have LP mechanics — skip the fetch for non-FPMM pools.
+  // Pass null to useGQL when we know the pool type and it isn't FPMM so the
+  // hook is always called (Rules of Hooks) but the network request is skipped.
+  const isFpmmPool = pool ? isFpmm(pool) : null; // null = still loading
+  const shouldSkip = isFpmmPool === false;
+
+  const {
+    data: indexedData,
+    error: indexedError,
+    isLoading: indexedLoading,
+  } = useGQL<{
+    LiquidityPosition: LiquidityPosition[];
+  }>(shouldSkip ? null : POOL_LP_POSITIONS, { poolId });
+
+  const positions = useMemo(
+    () =>
+      (indexedData?.LiquidityPosition ?? [])
+        .map((position) => ({
+          address: position.address,
+          netLiquidity: BigInt(position.netLiquidity),
+        }))
+        .filter((position) => position.netLiquidity > BigInt(0))
+        .sort((a, b) =>
+          a.netLiquidity === b.netLiquidity
+            ? 0
+            : a.netLiquidity > b.netLiquidity
+              ? -1
+              : 1,
+        ),
+    [indexedData],
+  );
+
+  const totalLiquidity = useMemo(
+    () =>
+      positions.reduce(
+        (acc, position) => acc + position.netLiquidity,
+        BigInt(0),
+      ),
+    [positions],
+  );
+
+  if (isFpmmPool === false) {
+    return (
+      <EmptyBox message="LP provider data is only available for FPMM pools." />
+    );
+  }
+  if (indexedError) {
+    if (isLiquidityPositionSchemaError(indexedError)) {
+      return (
+        <EmptyBox message="LP provider data is unavailable until this environment is reindexed with the LiquidityPosition schema." />
+      );
+    }
+    return <ErrorBox message={indexedError.message} />;
+  }
+  if (indexedLoading) return <Skeleton rows={5} />;
+  if (positions.length === 0)
+    return <EmptyBox message="No active LP positions for this pool." />;
+
+  return (
+    <>
+      <div className="mb-3 rounded border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
+        LP balances are shown in LP token units. Until we index LP token
+        decimals explicitly, the formatted display assumes the standard 18
+        decimals.
+      </div>
+      <LpConcentrationChart
+        positions={positions}
+        totalLiquidity={totalLiquidity}
+      />
+      <Table>
+        <thead>
+          <tr className="border-b border-slate-800 bg-slate-900/50">
+            <Th>#</Th>
+            <Th>Address</Th>
+            <Th align="right">Net LP Tokens</Th>
+            <Th align="right">Share</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {positions.map((position, i) => {
+            // Scale up by 1e6 before converting to Number to preserve precision
+            // for large bigint liquidity values that exceed JS safe integer range.
+            const sharePct =
+              totalLiquidity > BigInt(0)
+                ? (
+                    Number(
+                      (position.netLiquidity * BigInt(1_000_000)) /
+                        totalLiquidity,
+                    ) / 10000
+                  ).toFixed(2)
+                : "0.00";
+            return (
+              <Row key={position.address}>
+                <Td small muted>
+                  {i + 1}
+                </Td>
+                <Td>
+                  <AddressLink address={position.address} />
+                </Td>
+                <Td mono small align="right">
+                  {formatWei(position.netLiquidity.toString())}
+                </Td>
+                <Td mono small align="right">
+                  {sharePct}%
+                </Td>
+              </Row>
+            );
+          })}
+        </tbody>
+      </Table>
+    </>
+  );
+}
+
 function OracleTab({
   poolId,
   limit,
@@ -1068,5 +1244,298 @@ function OracleTab({
         </Table>
       )}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// OLS Tab
+// ---------------------------------------------------------------------------
+
+function OlsTab({
+  poolId,
+  limit,
+  pool,
+}: {
+  poolId: string;
+  limit: number;
+  pool: Pool | null;
+}) {
+  const { network } = useNetwork();
+  const {
+    data: olsData,
+    error: olsErr,
+    isLoading: olsLoading,
+  } = useGQL<{
+    OlsPool: OlsPool[];
+  }>(OLS_POOL, { poolId });
+  const olsPool = selectActiveOlsPool(olsData?.OlsPool);
+
+  if (olsErr) return <ErrorBox message={olsErr.message} />;
+  if (olsLoading) return <Skeleton rows={3} />;
+
+  return (
+    <div className="space-y-6">
+      <OlsStatusPanel olsPool={olsPool} pool={pool} network={network} />
+      <OlsLiquidityEvents
+        poolId={poolId}
+        olsAddress={olsPool?.olsAddress ?? null}
+        limit={limit}
+        pool={pool}
+        network={network}
+      />
+    </div>
+  );
+}
+
+export function OlsStatusPanel({
+  olsPool,
+  pool,
+  network,
+}: {
+  olsPool: OlsPool | null;
+  pool: Pool | null;
+  network: ReturnType<typeof useNetwork>["network"];
+}) {
+  if (!olsPool) {
+    return (
+      <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
+        <p className="text-slate-400 text-sm">
+          This pool is not registered with the Open Liquidity Strategy.
+        </p>
+      </div>
+    );
+  }
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const lastRebalance = Number(olsPool.lastRebalance);
+  const cooldown = Number(olsPool.rebalanceCooldown);
+  const elapsed = lastRebalance > 0 ? nowSeconds - lastRebalance : null;
+
+  let cooldownStatus: string;
+  if (lastRebalance === 0) {
+    cooldownStatus = "—";
+  } else if (elapsed !== null && elapsed >= cooldown) {
+    cooldownStatus = "Ready to rebalance";
+  } else if (elapsed !== null) {
+    const remaining = cooldown - elapsed;
+    const h = Math.floor(remaining / 3600);
+    const m = Math.floor((remaining % 3600) / 60);
+    cooldownStatus = `Cooling down (${h}h ${m}m left)`;
+  } else {
+    cooldownStatus = "—";
+  }
+
+  const debtTokenSym = tokenSymbol(network, olsPool.debtToken || null);
+  const debtTokenSide = getDebtTokenSideLabel(pool, olsPool.debtToken);
+
+  // Incentives: raw uint64, FEE_DENOMINATOR = 1e18 in the contract.
+  // percentage = value / 1e18 * 100. With 4 decimal places: (v * 10000) / 1e16.
+  // Sanity: v=1e18 (100%) → 1e22/1e16 = 1e6 scaled → integer=100, frac=0 → "100.0000%" ✓
+  //         v=1e15 (0.1%) → 1e19/1e16 = 1000 scaled → integer=0, frac=1000 → "0.1000%" ✓
+  // Use BigInt to avoid precision loss on large uint64 values.
+  const toPercent = (raw: string): string => {
+    if (!raw || raw === "0") return "0.0000%";
+    const v = BigInt(raw);
+    const TEN_K = BigInt(10000);
+    const DIVISOR = BigInt("10000000000000000"); // 1e16
+    const scaled = (v * TEN_K) / DIVISOR;
+    const integer = scaled / TEN_K;
+    const frac = scaled % TEN_K;
+    return `${integer}.${String(frac).padStart(4, "0")}%`;
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <h3 className="text-base font-semibold text-white">
+          Open Liquidity Strategy
+        </h3>
+        {olsPool.isActive ? (
+          <span className="inline-flex items-center rounded-full bg-emerald-900/60 px-2.5 py-0.5 text-xs font-medium text-emerald-300 ring-1 ring-emerald-700/50">
+            Active
+          </span>
+        ) : (
+          <span className="inline-flex items-center rounded-full bg-red-900/60 px-2.5 py-0.5 text-xs font-medium text-red-300 ring-1 ring-red-700/50">
+            Removed
+          </span>
+        )}
+      </div>
+
+      <dl className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+        <Stat
+          label="Debt Token"
+          value={
+            !olsPool.debtToken
+              ? "Unknown"
+              : `${debtTokenSym} (${debtTokenSide})`
+          }
+        />
+        <Stat
+          label="Cooldown"
+          value={
+            cooldown > 0
+              ? `${Math.floor(cooldown / 3600)}h ${Math.floor((cooldown % 3600) / 60)}m`
+              : "None"
+          }
+        />
+        <Stat label="Cooldown Status" value={cooldownStatus} />
+        <Stat
+          label="OLS Rebalances"
+          value={String(olsPool.olsRebalanceCount)}
+        />
+        <Stat
+          label="Last Rebalance"
+          value={
+            lastRebalance > 0 ? relativeTime(String(lastRebalance)) : "Never"
+          }
+          title={
+            lastRebalance > 0
+              ? formatTimestamp(String(lastRebalance))
+              : undefined
+          }
+        />
+        <Stat
+          label="Protocol Fee Recipient"
+          value={
+            olsPool.protocolFeeRecipient ? (
+              <AddressLink address={olsPool.protocolFeeRecipient} />
+            ) : (
+              "Unknown"
+            )
+          }
+        />
+        <Stat
+          label="Expansion Incentive (Liquidity Source)"
+          value={toPercent(olsPool.liquiditySourceIncentiveExpansion)}
+        />
+        <Stat
+          label="Contraction Incentive (Liquidity Source)"
+          value={toPercent(olsPool.liquiditySourceIncentiveContraction)}
+        />
+        <Stat
+          label="Expansion Incentive (Protocol)"
+          value={toPercent(olsPool.protocolIncentiveExpansion)}
+        />
+        <Stat
+          label="Contraction Incentive (Protocol)"
+          value={toPercent(olsPool.protocolIncentiveContraction)}
+        />
+        <Stat
+          label="OLS Contract"
+          value={<AddressLink address={olsPool.olsAddress} />}
+        />
+      </dl>
+    </div>
+  );
+}
+
+/**
+ * Fetches OLS liquidity events scoped to the active OLS contract address,
+ * preventing event mixing when a pool has been re-registered to a new OLS contract.
+ */
+function OlsLiquidityEvents({
+  poolId,
+  olsAddress,
+  limit,
+  pool,
+  network,
+}: {
+  poolId: string;
+  olsAddress: string | null;
+  limit: number;
+  pool: Pool | null;
+  network: ReturnType<typeof useNetwork>["network"];
+}) {
+  // Skip the query until the active olsAddress is known (avoids mixing events
+  // from historical OLS contracts in pools that have been re-registered).
+  const query = olsAddress ? OLS_LIQUIDITY_EVENTS : null;
+  const { data, error, isLoading } = useGQL<{
+    OlsLiquidityEvent: OlsLiquidityEvent[];
+  }>(query, olsAddress ? { poolId, olsAddress, limit } : {});
+
+  const events = data?.OlsLiquidityEvent ?? [];
+
+  return (
+    <OlsLiquidityTable
+      events={events}
+      pool={pool}
+      network={network}
+      isLoading={isLoading}
+      error={error ?? null}
+    />
+  );
+}
+
+export function OlsLiquidityTable({
+  events,
+  pool,
+  network,
+  isLoading,
+  error,
+}: {
+  events: OlsLiquidityEvent[];
+  pool: Pool | null;
+  network: ReturnType<typeof useNetwork>["network"];
+  isLoading: boolean;
+  error: Error | null;
+}) {
+  if (error) return <ErrorBox message={error.message} />;
+  if (isLoading) return <Skeleton rows={5} />;
+  if (events.length === 0)
+    return <EmptyBox message="No OLS liquidity events for this pool." />;
+
+  return (
+    <Table>
+      <thead>
+        <tr className="border-b border-slate-800 bg-slate-900/50">
+          <Th>Time</Th>
+          <Th>Direction</Th>
+          <Th align="right">Given to Pool</Th>
+          <Th align="right">Taken from Pool</Th>
+          <Th>Caller</Th>
+          <Th>Tx</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {events.map((e) => {
+          const givenSym = tokenSymbol(network, e.tokenGivenToPool);
+          const takenSym = tokenSymbol(network, e.tokenTakenFromPool);
+          const givenDec =
+            pool?.token0?.toLowerCase() === e.tokenGivenToPool.toLowerCase()
+              ? (pool?.token0Decimals ?? 18)
+              : (pool?.token1Decimals ?? 18);
+          const takenDec =
+            pool?.token0?.toLowerCase() === e.tokenTakenFromPool.toLowerCase()
+              ? (pool?.token0Decimals ?? 18)
+              : (pool?.token1Decimals ?? 18);
+          return (
+            <Row key={e.id}>
+              <Td small muted title={formatTimestamp(e.blockTimestamp)}>
+                {relativeTime(e.blockTimestamp)}
+              </Td>
+              <td className="px-4 py-2">
+                {e.direction === 0 ? (
+                  <span className="inline-flex items-center rounded-full bg-emerald-900/60 px-2 py-0.5 text-xs font-medium text-emerald-300 ring-1 ring-emerald-700/50">
+                    EXPAND
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-red-900/60 px-2 py-0.5 text-xs font-medium text-red-300 ring-1 ring-red-700/50">
+                    CONTRACT
+                  </span>
+                )}
+              </td>
+              <Td mono small align="right">
+                {formatWei(e.amountGivenToPool, givenDec)} {givenSym}
+              </Td>
+              <Td mono small align="right">
+                {formatWei(e.amountTakenFromPool, takenDec)} {takenSym}
+              </Td>
+              <SenderCell address={e.caller} />
+              <TxHashCell txHash={e.txHash} />
+            </Row>
+          );
+        })}
+      </tbody>
+    </Table>
   );
 }

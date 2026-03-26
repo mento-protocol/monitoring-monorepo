@@ -207,6 +207,63 @@ export const POOL_DEPLOYMENT = `
   }
 `;
 
+// Preferred LP ownership query. Environments without LiquidityPosition should
+// show a migration message rather than attempt a correctness-risky fallback.
+export const POOL_LP_POSITIONS = `
+  query PoolLpPositions($poolId: String!) {
+    LiquidityPosition(
+      where: { poolId: { _eq: $poolId } }
+      order_by: { netLiquidity: desc }
+    ) {
+      id address netLiquidity lastUpdatedBlock lastUpdatedTimestamp
+    }
+  }
+`;
+
+export const OLS_POOL = `
+  query OlsPool($poolId: String!) {
+    OlsPool(
+      where: { poolId: { _eq: $poolId }, isActive: { _eq: true } }
+      order_by: { updatedAtTimestamp: desc }
+      limit: 1
+    ) {
+      id poolId olsAddress isActive debtToken
+      rebalanceCooldown lastRebalance
+      protocolFeeRecipient
+      liquiditySourceIncentiveExpansion
+      liquiditySourceIncentiveContraction
+      protocolIncentiveExpansion
+      protocolIncentiveContraction
+      olsRebalanceCount
+      addedAtBlock addedAtTimestamp
+      updatedAtBlock updatedAtTimestamp
+    }
+  }
+`;
+
+export const OLS_LIQUIDITY_EVENTS = `
+  query OlsLiquidityEvents($poolId: String!, $olsAddress: String!, $limit: Int!) {
+    OlsLiquidityEvent(
+      where: { poolId: { _eq: $poolId }, olsAddress: { _eq: $olsAddress } }
+      order_by: { blockTimestamp: desc }
+      limit: $limit
+    ) {
+      id direction caller
+      tokenGivenToPool amountGivenToPool
+      tokenTakenFromPool amountTakenFromPool
+      txHash blockNumber blockTimestamp
+    }
+  }
+`;
+
+export const ALL_OLS_POOLS = `
+  query AllOlsPools {
+    OlsPool(where: { isActive: { _eq: true } }, limit: 1000) {
+      poolId
+    }
+  }
+`;
+
 /**
  * Fetch all protocol fee transfers for client-side USD aggregation.
  *

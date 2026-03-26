@@ -6,7 +6,7 @@
     "clean": "tsc --clean",
     "build": "tsc --build",
     "watch": "tsc --watch",
-    "mocha": "ts-mocha test/**/*.ts",
+    "mocha": "ts-mocha --timeout 10000 test/**/*.ts",
     "codegen": "node ./scripts/run-envio-with-env.mjs codegen",
     "dev": "node ./scripts/run-envio-with-env.mjs dev",
     "start": "node ./scripts/run-envio-with-env.mjs start",
