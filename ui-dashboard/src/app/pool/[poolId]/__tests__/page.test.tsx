@@ -21,7 +21,13 @@ vi.mock("@/components/network-provider", () => ({
       hasuraUrl: "https://example.com/v1/graphql",
       hasuraSecret: "",
       explorerBaseUrl: "https://celoscan.io",
-      tokenSymbols: {},
+      tokenSymbols: {
+        "0xt0": "GBPm",
+        "0xt1": "USDm",
+        "0xgbp": "GBPm",
+        "0xusd": "USDm",
+        "0xeur": "EURm",
+      },
       addressLabels: {},
       local: false,
       hasVirtualPools: false,
@@ -156,13 +162,88 @@ describe("Pool detail LPs tab", () => {
     });
 
     const html = renderToStaticMarkup(<PoolDetailPage />);
-    expect(html).toContain("Net LP Tokens");
+    expect(html).toContain("GBPm");
+    expect(html).toContain("USDm");
+    expect(html).toContain("Total Value");
+    expect(html).toContain("Share");
+    expect(html).toContain("0.00 GBPm");
+    expect(html).toContain("0.00 USDm");
+    expect(html).toContain("$0.00");
     expect(html).toContain("0xa");
     expect(html).toContain("0xb");
     expect(html.indexOf("0xa")).toBeLessThan(html.indexOf("0xb"));
     expect(html).not.toContain(
       "LP provider data is unavailable until this environment is reindexed",
     );
+  });
+
+  it("hides USD-specific columns when the pool has no USDm side", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return gqlResult({
+          Pool: [
+            {
+              ...BASE_POOL,
+              token0: "0xgbp",
+              token1: "0xeur",
+            },
+          ],
+        });
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      if (query.includes("PoolLpPositions")) {
+        return gqlResult({
+          LiquidityPosition: [
+            { id: "1", poolId: "0xpool", address: "0xb", netLiquidity: "100" },
+          ],
+        });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderToStaticMarkup(<PoolDetailPage />);
+    expect(html).not.toContain("Total Value");
+    expect(html).not.toContain("≈ $");
+  });
+
+  it("hides USD-specific columns when oracle price is missing", () => {
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth")) {
+        return gqlResult({
+          Pool: [
+            {
+              ...BASE_POOL,
+              token0: "0xgbp",
+              token1: "0xusd",
+              oraclePrice: "0",
+            },
+          ],
+        });
+      }
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment")) {
+        return gqlResult({ FactoryDeployment: [] });
+      }
+      if (query.includes("PoolLpPositions")) {
+        return gqlResult({
+          LiquidityPosition: [
+            { id: "1", poolId: "0xpool", address: "0xb", netLiquidity: "100" },
+          ],
+        });
+      }
+      return gqlResult(undefined);
+    });
+
+    const html = renderToStaticMarkup(<PoolDetailPage />);
+    expect(html).not.toContain("Total Value");
+    expect(html).not.toContain("≈ $");
   });
 
   it("shows a migration message when LiquidityPosition schema is unavailable", () => {
