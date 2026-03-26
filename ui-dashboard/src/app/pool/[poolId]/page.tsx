@@ -1023,6 +1023,7 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
   // hook is always called (Rules of Hooks) but the network request is skipped.
   const isFpmmPool = pool ? isFpmm(pool) : null; // null = still loading
   const shouldSkip = isFpmmPool === false;
+  const { getLabel } = useAddressLabels();
 
   const {
     data: indexedData,
@@ -1086,6 +1087,7 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
       <LpConcentrationChart
         positions={positions}
         totalLiquidity={totalLiquidity}
+        getLabel={(addr) => getLabel(addr)}
       />
       <Table>
         <thead>

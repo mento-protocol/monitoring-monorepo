@@ -88,6 +88,11 @@ vi.mock("@/components/snapshot-chart", () => ({
   SnapshotChart: () => <div />,
 }));
 vi.mock("@/components/tx-hash-cell", () => ({ TxHashCell: () => <div /> }));
+vi.mock("@/components/address-labels-provider", () => ({
+  useAddressLabels: () => ({
+    getLabel: (address: string | null) => address ?? "—",
+  }),
+}));
 vi.mock("@/components/table", () => ({
   Row: ({ children }: { children: ReactNode }) => <tr>{children}</tr>,
   Table: ({ children }: { children: ReactNode }) => <table>{children}</table>,
