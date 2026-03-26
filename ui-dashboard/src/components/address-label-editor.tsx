@@ -4,6 +4,58 @@ import { useRef, useEffect, useState } from "react";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import type { AddressLabelEntry } from "@/lib/address-labels";
 
+// ---------------------------------------------------------------------------
+// Pure helpers (exported for testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Determine whether the editor is operating on a contract row (existing address
+ * that hasn't yet received a custom label). In this mode the label field is
+ * optional; leaving it blank preserves the static contract name.
+ */
+export function resolveIsContractRow(opts: {
+  isNewAddress: boolean;
+  initial: { label?: string } | undefined;
+  isCustom: boolean;
+}): boolean {
+  return !opts.isNewAddress && opts.initial !== undefined && !opts.isCustom;
+}
+
+/**
+ * Compute the label that will actually be persisted.
+ * - For contract rows an empty label input falls back to the initial contract name.
+ * - For all other rows the typed value is used as-is (required, validated upstream).
+ */
+export function resolveEffectiveLabel(
+  labelInput: string,
+  isContractRow: boolean,
+  initialLabel: string | undefined,
+): string {
+  if (isContractRow && !labelInput.trim()) {
+    return initialLabel ?? "";
+  }
+  return labelInput.trim();
+}
+
+/**
+ * Validate the form inputs for the label editor.
+ * Returns an error string or null when valid.
+ */
+export function validateLabelForm(opts: {
+  isNewAddress: boolean;
+  address: string;
+  label: string;
+  isContractRow: boolean;
+}): string | null {
+  if (opts.isNewAddress && !/^0x[0-9a-fA-F]{40}$/.test(opts.address.trim())) {
+    return "Enter a valid 0x address.";
+  }
+  if (!opts.isContractRow && !opts.label.trim()) {
+    return "Label is required.";
+  }
+  return null;
+}
+
 const CATEGORIES = [
   "CEX",
   "DEX",
@@ -59,22 +111,37 @@ export function AddressLabelEditor({
     return () => dialog.removeEventListener("click", handleBackdropClick);
   }, [onClose]);
 
+  // When editing an existing contract row (not a new address, no custom label yet),
+  // label is optional — empty means "keep the contract name".
+  const isContractRow = resolveIsContractRow({
+    isNewAddress,
+    initial,
+    isCustom: isCustomLabel(address),
+  });
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (isNewAddress && !/^0x[0-9a-fA-F]{40}$/.test(address.trim())) {
-      setError("Enter a valid 0x address.");
+    const validationError = validateLabelForm({
+      isNewAddress,
+      address,
+      label,
+      isContractRow,
+    });
+    if (validationError) {
+      setError(validationError);
       return;
     }
-    if (!label.trim()) {
-      setError("Label is required.");
-      return;
-    }
+    const effectiveLabel = resolveEffectiveLabel(
+      label,
+      isContractRow,
+      initial?.label,
+    );
     setSaving(true);
     setError(null);
     try {
       await upsertLabel(
         address,
-        label.trim(),
+        effectiveLabel,
         category.trim() || undefined,
         notes.trim() || undefined,
         isPublic,
@@ -106,7 +173,7 @@ export function AddressLabelEditor({
     <dialog
       ref={dialogRef}
       onClose={onClose}
-      className="rounded-xl border border-slate-700 bg-slate-900 p-0 text-slate-100 shadow-2xl backdrop:bg-black/60 w-full max-w-md"
+      className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 mx-auto rounded-xl border border-slate-700 bg-slate-900 p-0 text-slate-100 shadow-2xl backdrop:bg-black/60 w-full max-w-md"
     >
       <form onSubmit={handleSave} noValidate>
         <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
@@ -156,7 +223,12 @@ export function AddressLabelEditor({
               htmlFor="al-label"
               className="block text-xs font-medium text-slate-400 mb-1"
             >
-              Label <span className="text-indigo-400">*</span>
+              Label{" "}
+              {isContractRow ? (
+                <span className="text-slate-500">(optional)</span>
+              ) : (
+                <span className="text-indigo-400">*</span>
+              )}
             </label>
             <input
               ref={isNewAddress ? undefined : firstInputRef}
@@ -164,8 +236,12 @@ export function AddressLabelEditor({
               type="text"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="e.g. Binance Hot Wallet"
-              required
+              placeholder={
+                isContractRow
+                  ? "Leave blank to keep contract name"
+                  : "e.g. Binance Hot Wallet"
+              }
+              required={!isContractRow}
               className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
