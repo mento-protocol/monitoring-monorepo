@@ -31,7 +31,6 @@ import {
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   POOL_LIQUIDITY,
-  POOL_LIQUIDITY_ALL,
   POOL_LP_POSITIONS,
   POOL_REBALANCES,
   POOL_RESERVES,
@@ -54,7 +53,7 @@ import type {
 } from "@/lib/types";
 import { NetworkAwareLink } from "@/components/network-aware-link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import React, { Suspense, useCallback, useEffect } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo } from "react";
 import { buildPoolNotFoundDest } from "@/lib/routing";
 
 export default function PoolDetailPage() {
@@ -722,42 +721,9 @@ function ProvidersTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
     LiquidityPosition: LiquidityPosition[];
   }>(shouldSkip ? null : POOL_LP_POSITIONS, { poolId });
 
-  const shouldFallback = isLiquidityPositionSchemaError(indexedError);
-  const {
-    data: fallbackData,
-    error: fallbackError,
-    isLoading: fallbackLoading,
-  } = useGQL<{
-    LiquidityEvent: Pick<
-      LiquidityEvent,
-      "kind" | "sender" | "recipient" | "liquidity"
-    >[];
-  }>(shouldSkip || !shouldFallback ? null : POOL_LIQUIDITY_ALL, { poolId });
-
-  const positions = shouldFallback
-    ? (() => {
-        const balances = new Map<string, bigint>();
-        for (const event of fallbackData?.LiquidityEvent ?? []) {
-          const address =
-            event.kind === "MINT" ? event.recipient : event.sender;
-          const delta =
-            event.kind === "MINT"
-              ? BigInt(event.liquidity)
-              : -BigInt(event.liquidity);
-          balances.set(address, (balances.get(address) ?? BigInt(0)) + delta);
-        }
-        return [...balances.entries()]
-          .filter(([, netLiquidity]) => netLiquidity > BigInt(0))
-          .map(([address, netLiquidity]) => ({ address, netLiquidity }))
-          .sort((a, b) =>
-            a.netLiquidity === b.netLiquidity
-              ? 0
-              : a.netLiquidity > b.netLiquidity
-                ? -1
-                : 1,
-          );
-      })()
-    : (indexedData?.LiquidityPosition ?? [])
+  const positions = useMemo(
+    () =>
+      (indexedData?.LiquidityPosition ?? [])
         .map((position) => ({
           address: position.address,
           netLiquidity: BigInt(position.netLiquidity),
@@ -769,11 +735,17 @@ function ProvidersTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
             : a.netLiquidity > b.netLiquidity
               ? -1
               : 1,
-        );
+        ),
+    [indexedData],
+  );
 
-  const totalLiquidity = positions.reduce(
-    (acc, position) => acc + position.netLiquidity,
-    BigInt(0),
+  const totalLiquidity = useMemo(
+    () =>
+      positions.reduce(
+        (acc, position) => acc + position.netLiquidity,
+        BigInt(0),
+      ),
+    [positions],
   );
 
   if (isFpmmPool === false) {
@@ -781,23 +753,20 @@ function ProvidersTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
       <EmptyBox message="LP provider data is only available for FPMM pools." />
     );
   }
-  if (indexedError && !shouldFallback)
+  if (indexedError) {
+    if (isLiquidityPositionSchemaError(indexedError)) {
+      return (
+        <EmptyBox message="LP provider data is unavailable until this environment is reindexed with the LiquidityPosition schema." />
+      );
+    }
     return <ErrorBox message={indexedError.message} />;
-  if (fallbackError) return <ErrorBox message={fallbackError.message} />;
-  if (indexedLoading || fallbackLoading) return <Skeleton rows={5} />;
+  }
+  if (indexedLoading) return <Skeleton rows={5} />;
   if (positions.length === 0)
     return <EmptyBox message="No active LP positions for this pool." />;
 
   return (
     <>
-      {shouldFallback && (
-        <div className="mb-3 rounded border border-amber-800 bg-amber-950/40 px-3 py-2 text-xs text-amber-400">
-          Falling back to event-based LP aggregation because this environment
-          has not indexed `LiquidityPosition` yet. Ownership may be incomplete
-          for historical router-mediated burns until the new indexer schema is
-          deployed and reindexed.
-        </div>
-      )}
       <div className="mb-3 rounded border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
         LP balances are shown in LP token units. Until we index LP token
         decimals explicitly, the formatted display assumes the standard 18

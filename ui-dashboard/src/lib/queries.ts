@@ -207,23 +207,8 @@ export const POOL_DEPLOYMENT = `
   }
 `;
 
-// Compatibility fallback for environments that have not reindexed the
-// LiquidityPosition entity yet. The UI aggregates current balances from
-// LiquidityEvent rows client-side when the schema query is unavailable.
-export const POOL_LIQUIDITY_ALL = `
-  query PoolLiquidityAll($poolId: String!) {
-    LiquidityEvent(
-      where: { poolId: { _eq: $poolId } }
-      order_by: { blockNumber: asc }
-      limit: 10000
-    ) {
-      kind sender recipient liquidity
-    }
-  }
-`;
-
-// Preferred LP ownership query. The providers tab tries this first and falls
-// back to POOL_LIQUIDITY_ALL only when the LiquidityPosition schema is absent.
+// Preferred LP ownership query. Environments without LiquidityPosition should
+// show a migration message rather than attempt a correctness-risky fallback.
 export const POOL_LP_POSITIONS = `
   query PoolLpPositions($poolId: String!) {
     LiquidityPosition(

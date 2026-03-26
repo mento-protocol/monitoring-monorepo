@@ -155,10 +155,12 @@ describe("Pool detail providers tab", () => {
     expect(html).toContain("0xa");
     expect(html).toContain("0xb");
     expect(html.indexOf("0xa")).toBeLessThan(html.indexOf("0xb"));
-    expect(html).not.toContain("Falling back to event-based LP aggregation");
+    expect(html).not.toContain(
+      "LP provider data is unavailable until this environment is reindexed",
+    );
   });
 
-  it("falls back to LiquidityEvent aggregation when LiquidityPosition schema is unavailable", () => {
+  it("shows a migration message when LiquidityPosition schema is unavailable", () => {
     mockUseGQL.mockImplementation((query: string | null) => {
       if (!query) return gqlResult(undefined);
       if (query.includes("PoolDetailWithHealth")) {
@@ -177,38 +179,14 @@ describe("Pool detail providers tab", () => {
           ),
         );
       }
-      if (query.includes("PoolLiquidityAll")) {
-        return gqlResult({
-          LiquidityEvent: [
-            {
-              kind: "MINT",
-              sender: "0xrouter",
-              recipient: "0xlp1",
-              liquidity: "100",
-            },
-            {
-              kind: "MINT",
-              sender: "0xrouter",
-              recipient: "0xlp2",
-              liquidity: "300",
-            },
-            {
-              kind: "BURN",
-              sender: "0xlp2",
-              recipient: "0xbeneficiary",
-              liquidity: "50",
-            },
-          ],
-        });
-      }
       return gqlResult(undefined);
     });
 
     const html = renderToStaticMarkup(<PoolDetailPage />);
-    expect(html).toContain("Falling back to event-based LP aggregation");
-    expect(html).toContain("0xlp2");
-    expect(html).toContain("0xlp1");
-    expect(html.indexOf("0xlp2")).toBeLessThan(html.indexOf("0xlp1"));
+    expect(html).toContain(
+      "LP provider data is unavailable until this environment is reindexed with the LiquidityPosition schema.",
+    );
+    expect(html).not.toContain("0xlp2");
   });
 
   it("shows the FPMM-only empty state for virtual pools", () => {
@@ -237,6 +215,8 @@ describe("Pool detail providers tab", () => {
     expect(html).toContain(
       "LP provider data is only available for FPMM pools.",
     );
-    expect(html).not.toContain("Falling back to event-based LP aggregation");
+    expect(html).not.toContain(
+      "LP provider data is unavailable until this environment is reindexed",
+    );
   });
 });
