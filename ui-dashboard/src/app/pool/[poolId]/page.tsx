@@ -1104,7 +1104,7 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
       <LpConcentrationChart
         positions={positions}
         totalLiquidity={totalLiquidity}
-        getLabel={(addr) => getLabel(addr)}
+        getLabel={getLabel}
         pool={pool}
         sym0={sym0}
         sym1={sym1}
@@ -1174,7 +1174,7 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
               });
-              const showSubUsd = vUsd !== null && sym !== "USDm";
+              const showSubUsd = vUsd !== null && !USDM_SYMBOLS.has(sym);
               return (
                 <div>
                   <span>
