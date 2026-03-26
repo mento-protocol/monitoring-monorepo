@@ -57,13 +57,7 @@ import type {
 } from "@/lib/types";
 import { NetworkAwareLink } from "@/components/network-aware-link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import React, {
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import React, { Suspense, useCallback, useEffect, useMemo } from "react";
 import { buildPoolNotFoundDest } from "@/lib/routing";
 
 export default function PoolDetailPage() {
@@ -85,6 +79,14 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number];
 
+const SEARCH_PARAM_BY_TAB: Record<Tab, string> = {
+  swaps: "swapsQ",
+  reserves: "reservesQ",
+  rebalances: "rebalancesQ",
+  liquidity: "liquidityQ",
+  oracle: "oracleQ",
+};
+
 function PoolDetail() {
   const { network } = useNetwork();
   const { poolId } = useParams<{ poolId: string }>();
@@ -95,6 +97,18 @@ function PoolDetail() {
   const rawTab = searchParams.get("tab");
   const tab: Tab = TABS.includes(rawTab as Tab) ? (rawTab as Tab) : "swaps";
   const limit = Number(searchParams.get("limit") ?? "25");
+  const activeSearch = searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "";
+
+  const replaceURL = useCallback(
+    (params: URLSearchParams) => {
+      const qs = params.toString();
+      router.replace(
+        `/pool/${encodeURIComponent(decodedId)}${qs ? `?${qs}` : ""}`,
+        { scroll: false },
+      );
+    },
+    [router, decodedId],
+  );
 
   const setURL = useCallback(
     (t: Tab, lim: number) => {
@@ -103,13 +117,20 @@ function PoolDetail() {
       else p.delete("tab");
       if (lim !== 25) p.set("limit", String(lim));
       else p.delete("limit");
-      const qs = p.toString();
-      router.replace(
-        `/pool/${encodeURIComponent(decodedId)}${qs ? `?${qs}` : ""}`,
-        { scroll: false },
-      );
+      replaceURL(p);
     },
-    [router, decodedId, searchParams],
+    [searchParams, replaceURL],
+  );
+
+  const setTabSearch = useCallback(
+    (t: Tab, value: string) => {
+      const p = new URLSearchParams(searchParams.toString());
+      const key = SEARCH_PARAM_BY_TAB[t];
+      if (value) p.set(key, value);
+      else p.delete(key);
+      replaceURL(p);
+    },
+    [searchParams, replaceURL],
   );
 
   const {
@@ -211,19 +232,48 @@ function PoolDetail() {
 
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
         {tab === "swaps" && (
-          <SwapsTab poolId={decodedId} limit={limit} pool={pool} />
+          <SwapsTab
+            poolId={decodedId}
+            limit={limit}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("swaps", value)}
+          />
         )}
         {tab === "reserves" && (
-          <ReservesTab poolId={decodedId} limit={limit} pool={pool} />
+          <ReservesTab
+            poolId={decodedId}
+            limit={limit}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("reserves", value)}
+          />
         )}
         {tab === "rebalances" && (
-          <RebalancesTab poolId={decodedId} limit={limit} />
+          <RebalancesTab
+            poolId={decodedId}
+            limit={limit}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("rebalances", value)}
+          />
         )}
         {tab === "liquidity" && (
-          <LiquidityTab poolId={decodedId} limit={limit} pool={pool} />
+          <LiquidityTab
+            poolId={decodedId}
+            limit={limit}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("liquidity", value)}
+          />
         )}
         {tab === "oracle" && (
-          <OracleTab poolId={decodedId} limit={limit} pool={pool} />
+          <OracleTab
+            poolId={decodedId}
+            limit={limit}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("oracle", value)}
+          />
         )}
       </div>
     </div>
@@ -346,14 +396,17 @@ function SwapsTab({
   poolId,
   limit,
   pool,
+  search,
+  onSearchChange,
 }: {
   poolId: string;
   limit: number;
   pool: Pool | null;
+  search: string;
+  onSearchChange: (value: string) => void;
 }) {
   const { network } = useNetwork();
   const { getLabel } = useAddressLabels();
-  const [search, setSearch] = useState("");
   const query = normalizeSearch(search);
 
   const { data, error, isLoading } = useGQL<{ SwapEvent: SwapEvent[] }>(
@@ -419,7 +472,7 @@ function SwapsTab({
       {swaps.length > 0 && (
         <TableSearch
           value={search}
-          onChange={setSearch}
+          onChange={onSearchChange}
           placeholder="Search swaps by tx, address, label, token, amount, or block…"
           ariaLabel="Search swaps"
         />
@@ -498,17 +551,20 @@ function ReservesTab({
   poolId,
   limit,
   pool,
+  search,
+  onSearchChange,
 }: {
   poolId: string;
   limit: number;
   pool: Pool | null;
+  search: string;
+  onSearchChange: (value: string) => void;
 }) {
   const { data, error, isLoading } = useGQL<{ ReserveUpdate: ReserveUpdate[] }>(
     POOL_RESERVES,
     { poolId, limit },
   );
   const { network } = useNetwork();
-  const [search, setSearch] = useState("");
   const query = normalizeSearch(search);
 
   const rows = data?.ReserveUpdate ?? [];
@@ -567,7 +623,7 @@ function ReservesTab({
       />
       <TableSearch
         value={search}
-        onChange={setSearch}
+        onChange={onSearchChange}
         placeholder="Search reserves by tx, token, amount, or block…"
         ariaLabel="Search reserves"
       />
@@ -647,9 +703,18 @@ function ReservesTab({
   );
 }
 
-function RebalancesTab({ poolId, limit }: { poolId: string; limit: number }) {
+function RebalancesTab({
+  poolId,
+  limit,
+  search,
+  onSearchChange,
+}: {
+  poolId: string;
+  limit: number;
+  search: string;
+  onSearchChange: (value: string) => void;
+}) {
   const { getLabel } = useAddressLabels();
-  const [search, setSearch] = useState("");
   const query = normalizeSearch(search);
 
   const { data, error, isLoading } = useGQL<{
@@ -686,7 +751,7 @@ function RebalancesTab({ poolId, limit }: { poolId: string; limit: number }) {
     <>
       <TableSearch
         value={search}
-        onChange={setSearch}
+        onChange={onSearchChange}
         placeholder="Search rebalances by tx, strategy, rebalancer, label, or block…"
         ariaLabel="Search rebalances"
       />
@@ -742,14 +807,17 @@ function LiquidityTab({
   poolId,
   limit,
   pool,
+  search,
+  onSearchChange,
 }: {
   poolId: string;
   limit: number;
   pool: Pool | null;
+  search: string;
+  onSearchChange: (value: string) => void;
 }) {
   const { network } = useNetwork();
   const { getLabel } = useAddressLabels();
-  const [search, setSearch] = useState("");
   const query = normalizeSearch(search);
 
   const { data, error, isLoading } = useGQL<{
@@ -803,7 +871,7 @@ function LiquidityTab({
       {rows.length > 0 && (
         <TableSearch
           value={search}
-          onChange={setSearch}
+          onChange={onSearchChange}
           placeholder="Search liquidity by tx, sender, label, kind, amount, or block…"
           ariaLabel="Search liquidity"
         />
@@ -862,13 +930,16 @@ function OracleTab({
   poolId,
   limit,
   pool,
+  search,
+  onSearchChange,
 }: {
   poolId: string;
   limit: number;
   pool: Pool | null;
+  search: string;
+  onSearchChange: (value: string) => void;
 }) {
   const { network } = useNetwork();
-  const [search, setSearch] = useState("");
   const query = normalizeSearch(search);
 
   const { data, error, isLoading } = useGQL<{
@@ -923,7 +994,7 @@ function OracleTab({
       />
       <TableSearch
         value={search}
-        onChange={setSearch}
+        onChange={onSearchChange}
         placeholder="Search oracle rows by source, status, price, or block…"
         ariaLabel="Search oracle"
       />
