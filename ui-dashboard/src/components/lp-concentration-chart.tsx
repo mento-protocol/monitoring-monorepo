@@ -1,8 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
 import { truncateAddress } from "@/lib/format";
+import { PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
 import { USDM_SYMBOLS } from "@/lib/tokens";
 import type { Pool } from "@/lib/types";
 
@@ -57,7 +57,13 @@ export function LpConcentrationChart({
 
   const resolveLabel = (addr: string) => resolvePieLabel(addr, getLabel);
 
+  // Use raw addresses as labels — Plotly merges slices with duplicate labels,
+  // so human names must not be the label key. Display names go in `text`.
   const labels = [
+    ...top.map((p) => p.address),
+    ...(otherTotal > BigInt(0) ? ["other"] : []),
+  ];
+  const text = [
     ...top.map((p) => resolveLabel(p.address)),
     ...(otherTotal > BigInt(0) ? ["Other"] : []),
   ];
@@ -81,6 +87,7 @@ export function LpConcentrationChart({
     type: "pie" as const,
     hole: 0.4,
     labels,
+    text,
     values,
     customdata,
     hovertemplate,
