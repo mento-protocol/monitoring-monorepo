@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { resolvePieLabel } from "@/components/lp-concentration-chart";
 import { truncateAddress } from "@/lib/format";
 
@@ -14,8 +14,8 @@ describe("resolvePieLabel", () => {
     expect(resolvePieLabel(ADDR, () => "Team Wallet")).toBe("Team Wallet");
   });
 
-  it("returns truncated address when getLabel returns the truncated form (no label set)", () => {
-    const getLabel = (a: string) => truncateAddress(a) ?? a;
+  it("returns truncated address when getLabel returns the truncated form", () => {
+    const getLabel = (address: string) => truncateAddress(address) ?? address;
     expect(resolvePieLabel(ADDR, getLabel)).toBe(truncateAddress(ADDR));
   });
 
@@ -25,16 +25,14 @@ describe("resolvePieLabel", () => {
     expect(result).toBe("Team Wallet");
   });
 
-  it("does not duplicate — unlabelled address returns truncated form only", () => {
-    const getLabel = (a: string) => truncateAddress(a) ?? a;
+  it("does not duplicate unlabelled addresses", () => {
+    const getLabel = (address: string) => truncateAddress(address) ?? address;
     const result = resolvePieLabel(ADDR, getLabel);
-    expect(result).not.toBe(ADDR); // not the full raw address
+    expect(result).not.toBe(ADDR);
     expect(result).toBe(truncateAddress(ADDR));
   });
 
-  it("two addresses with the same label both resolve to that label", () => {
-    // Both get the same display name — Plotly will merge them into one slice.
-    // This is an accepted trade-off for human readability.
+  it("allows multiple addresses to resolve to the same human label", () => {
     expect(resolvePieLabel(ADDR, () => "Shared Label")).toBe("Shared Label");
     expect(resolvePieLabel(ADDR2, () => "Shared Label")).toBe("Shared Label");
   });
