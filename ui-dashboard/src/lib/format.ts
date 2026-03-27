@@ -57,24 +57,12 @@ export function isValidAddress(value: string): boolean {
   return /^0x[0-9a-fA-F]{40}$/.test(value);
 }
 
-export function isNamespacedPoolId(value: string): boolean {
-  return /^\d+-0x[0-9a-fA-F]{40}$/.test(value);
-}
-
-export function extractChainIdFromPoolId(value: string): number | null {
-  if (!isNamespacedPoolId(value)) return null;
-  const [chainId] = value.split("-", 1);
-  return Number(chainId);
-}
-
-export function normalizePoolIdForChain(
-  value: string,
-  chainId: number,
-): string {
-  if (isNamespacedPoolId(value)) return value.toLowerCase();
-  if (isValidAddress(value)) return `${chainId}-${value.toLowerCase()}`;
-  return value;
-}
+// Pool ID utilities live in lib/pool-id.ts — re-exported here for backward compatibility.
+export {
+  isNamespacedPoolId,
+  extractChainIdFromPoolId,
+  normalizePoolIdForChain,
+} from "@/lib/pool-id";
 
 export function formatUSD(value: number): string {
   if (!Number.isFinite(value)) return "N/A";
