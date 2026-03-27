@@ -237,6 +237,7 @@ FPMM.Swap.handler(async ({ event, context }) => {
       worstP0 = Math.max(worstP0, p0, p1);
       const tl: TradingLimit = {
         id: `${poolId}-${pool.token0}`,
+        chainId: event.chainId,
         poolId,
         token: pool.token0,
         limit0: limits0.config.limit0,
@@ -265,6 +266,7 @@ FPMM.Swap.handler(async ({ event, context }) => {
       worstP1 = Math.max(worstP1, p0, p1);
       const tl: TradingLimit = {
         id: `${poolId}-${pool.token1}`,
+        chainId: event.chainId,
         poolId,
         token: pool.token1,
         limit0: limits1.config.limit0,
@@ -665,6 +667,7 @@ FPMM.TradingLimitConfigured.handler(async ({ event, context }) => {
 
   const tl: TradingLimit = {
     id: `${poolId}-${token}`,
+    chainId: event.chainId,
     poolId,
     token,
     limit0,

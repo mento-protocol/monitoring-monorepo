@@ -160,6 +160,7 @@ type RebalanceEvent @index(fields: ["poolId", "blockTimestamp"]) {
 
 type TradingLimit @index(fields: ["poolId"]) {
   id: ID! # "{poolId}-{tokenAddress}"
+  chainId: Int! @index
   poolId: String!
   token: String!
   limit0: BigInt!
@@ -200,6 +201,7 @@ type LiquidityPosition @index(fields: ["poolId", "address"]) {
 
 type ProtocolFeeTransfer {
   id: ID!
+  chainId: Int! @index
   token: String! @index
   tokenSymbol: String!
   tokenDecimals: Int!

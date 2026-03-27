@@ -389,12 +389,12 @@ type LiquidityPositionEntity = {
 async function seedPoolWithFeed(
   mockDb: MockDb,
   {
-    poolId,
+    poolAddress, // raw Ethereum address — the handler will namespace it to "{chainId}-{address}"
     feedId,
     oracleExpiry = 600n,
     oracleNumReporters = 7,
   }: {
-    poolId: string;
+    poolAddress: string;
     feedId: string;
     oracleExpiry?: bigint;
     oracleNumReporters?: number;
@@ -403,7 +403,7 @@ async function seedPoolWithFeed(
   const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
     token0: "0x0000000000000000000000000000000000000003",
     token1: "0x0000000000000000000000000000000000000004",
-    fpmmProxy: poolId,
+    fpmmProxy: poolAddress,
     fpmmImplementation: "0x00000000000000000000000000000000000000bc",
     mockEventData: {
       chainId: 42220,
@@ -417,7 +417,7 @@ async function seedPoolWithFeed(
     mockDb,
   });
 
-  const existingPool = nextDb.entities.Pool.get(pid(poolId)) as
+  const existingPool = nextDb.entities.Pool.get(pid(poolAddress)) as
     | PoolEntity
     | undefined;
   assert.ok(existingPool, "Expected seeded pool entity to exist");
@@ -803,7 +803,7 @@ describe("Envio Celo indexer handlers", () => {
 
     let mockDb = MockDb.createMockDb();
     mockDb = await seedPoolWithFeed(mockDb, {
-      poolId: POOL_ADDR,
+      poolAddress: POOL_ADDR,
       feedId: FEED_ID,
       oracleExpiry: 600n,
     });
@@ -845,7 +845,7 @@ describe("Envio Celo indexer handlers", () => {
 
     let mockDb = MockDb.createMockDb();
     mockDb = await seedPoolWithFeed(mockDb, {
-      poolId: POOL_ADDR,
+      poolAddress: POOL_ADDR,
       feedId: FEED_ID,
       oracleNumReporters: 7,
     });
@@ -915,7 +915,7 @@ describe("Envio Celo indexer handlers", () => {
 
     let mockDb = MockDb.createMockDb();
     mockDb = await seedPoolWithFeed(mockDb, {
-      poolId: POOL_ADDR,
+      poolAddress: POOL_ADDR,
       feedId: FEED_ID,
     });
 
@@ -979,7 +979,7 @@ describe("Envio Celo indexer handlers", () => {
 
     let mockDb = MockDb.createMockDb();
     mockDb = await seedPoolWithFeed(mockDb, {
-      poolId: POOL_ADDR,
+      poolAddress: POOL_ADDR,
       feedId: FEED_ID,
     });
 
@@ -1194,7 +1194,7 @@ describe("Envio Celo indexer handlers", () => {
 
     let mockDb = MockDb.createMockDb();
     mockDb = await seedPoolWithFeed(mockDb, {
-      poolId: POOL_ADDR,
+      poolAddress: POOL_ADDR,
       feedId: FEED_ID,
     });
 
@@ -1257,7 +1257,7 @@ describe("Envio Celo indexer handlers", () => {
 
     let mockDb = MockDb.createMockDb();
     mockDb = await seedPoolWithFeed(mockDb, {
-      poolId: POOL_ADDR,
+      poolAddress: POOL_ADDR,
       feedId: FEED_ID,
     });
 
@@ -1554,6 +1554,94 @@ describe("Envio Celo indexer handlers", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Cross-chain oracle isolation
+  // ---------------------------------------------------------------------------
+
+  describe("cross-chain oracle isolation", () => {
+    afterEach(() => {
+      _clearMockRateFeedIDs();
+      _clearMockReportExpiry();
+    });
+
+    it("SortedOracles event on chain A does NOT update a pool on chain B that shares the same rateFeedID", async () => {
+      // This is the primary correctness guarantee of the multichain refactor.
+      // Both Celo (42220) and Monad (143) use the same rateFeedID format, so
+      // without chainId scoping in getPoolsByFeed, an oracle event on one chain
+      // would incorrectly update pools on the other.
+
+      const CELO_CHAIN = 42220;
+      const MONAD_CHAIN = 143;
+      const SHARED_FEED_ID = "0x000000000000000000000000000000000000feed";
+      const CELO_POOL_ADDR = "0x000000000000000000000000000000000000ce10";
+      const MONAD_POOL_ADDR = "0x000000000000000000000000000000000000ce10"; // same address, different chain
+
+      // Seed a Celo pool with the shared feed
+      let mockDb = await seedPoolWithFeed(MockDb.createMockDb(), {
+        poolAddress: CELO_POOL_ADDR,
+        feedId: SHARED_FEED_ID,
+      });
+
+      // Manually seed a Monad pool with the same feed ID.
+      // We set it up by injecting a Pool entity directly (simulating what
+      // FPMMDeployed would have created on chainId 143).
+      const celoPool = mockDb.entities.Pool.get(
+        pid(CELO_POOL_ADDR),
+      ) as PoolEntity;
+      assert.ok(celoPool, "Celo pool must exist");
+
+      // Insert a synthetic Monad pool with the same address + same feed
+      const monadPoolId = makePoolId(MONAD_CHAIN, MONAD_POOL_ADDR);
+      mockDb = mockDb.entities.Pool.set({
+        ...celoPool,
+        id: monadPoolId,
+        chainId: MONAD_CHAIN,
+        oraclePrice: 0n, // not yet updated — will stay 0 if isolation is correct
+        oracleTimestamp: 0n,
+      });
+
+      // Fire a SortedOracles.OracleReported event on Celo (chainId 42220)
+      const ORACLE_PRICE = BigInt("1000000000000000000000000");
+      const oracleEvent = SortedOracles.OracleReported.createMockEvent({
+        token: SHARED_FEED_ID,
+        value: ORACLE_PRICE,
+        timestamp: BigInt(1_700_005_000),
+        mockEventData: {
+          chainId: CELO_CHAIN,
+          logIndex: 77,
+          srcAddress: "0x0000000000000000000000000000000000000099",
+          block: { number: 999, timestamp: 1_700_005_000 },
+        },
+      });
+      mockDb = await SortedOracles.OracleReported.processEvent({
+        event: oracleEvent,
+        mockDb,
+      });
+
+      // Celo pool MUST have been updated
+      const celoAfter = mockDb.entities.Pool.get(pid(CELO_POOL_ADDR)) as
+        | PoolEntity
+        | undefined;
+      assert.ok(celoAfter, "Celo pool must still exist after OracleReported");
+      assert.equal(
+        celoAfter!.oraclePrice,
+        ORACLE_PRICE,
+        "Celo pool oracle price must be updated",
+      );
+
+      // Monad pool MUST NOT have been updated — oracle event was on Celo only
+      const monadAfter = mockDb.entities.Pool.get(monadPoolId) as
+        | PoolEntity
+        | undefined;
+      assert.ok(monadAfter, "Monad pool must still exist after OracleReported");
+      assert.equal(
+        monadAfter!.oraclePrice,
+        0n,
+        "Monad pool oracle price must NOT be updated by a Celo oracle event",
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Self-heal: backfill referenceRateFeedID on subsequent events
   // ---------------------------------------------------------------------------
 
@@ -1651,7 +1739,7 @@ describe("Envio Celo indexer handlers", () => {
 
       // 1. Seed pool with an existing referenceRateFeedID
       let mockDb = await seedPoolWithFeed(MockDb.createMockDb(), {
-        poolId: POOL_ADDR,
+        poolAddress: POOL_ADDR,
         feedId: EXISTING_FEED,
         oracleExpiry: 600n,
       });

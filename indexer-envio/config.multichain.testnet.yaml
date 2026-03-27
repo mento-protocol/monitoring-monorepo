@@ -1,10 +1,9 @@
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
-name: mento-multichain-mainnet
-description: Mento v3 multichain mainnet indexer — Celo (42220) + Monad (143)
+name: mento-multichain-testnet
+description: Mento v3 multichain testnet indexer — Celo Sepolia (11142220) + Monad Testnet (10143)
 
 # ---------------------------------------------------------------------------
 # Global contract definitions (shared ABI + handler across all networks)
-# Network-level entries below reference these by name and specify addresses.
 # ---------------------------------------------------------------------------
 contracts:
   - name: FPMMFactory
@@ -69,75 +68,70 @@ contracts:
 
 networks:
   # ---------------------------------------------------------------------------
-  # Celo Mainnet (chain 42220)
+  # Celo Sepolia (chain 11142220)
   # ---------------------------------------------------------------------------
-  - id: 42220
-    start_block: ${ENVIO_START_BLOCK_CELO:-60664500}
+  - id: 11142220
+    rpc_config:
+      url: ${ENVIO_RPC_URL_CELO_SEPOLIA:-https://forno.celo-sepolia.celo-testnet.org}
+    start_block: ${ENVIO_START_BLOCK_CELO_SEPOLIA:-18946570}
     contracts:
       - name: FPMMFactory
         address:
-          - 0xa849b475FE5a4B5C9C3280152c7a1945b907613b # proxy
+          - 0x353ED52bF8482027C0e0b9e3c0e5d96A9F680980
       - name: FPMM
         address:
-          - 0x8c0014afe032e4574481d8934504100bf23fcb56 # USDm/ccf663b
-          - 0xb285d4c7133d6f27bfb29224fb0d22e7ec3ddd2d # USDm/eb4663
-          - 0x462fe04b4fd719cbd04c0310365d421d02aaa19e # USDm/USDC
-          - 0x0feba760d93423d127de1b6abecdb60e5253228d # USDT/USDm
+          - 0x550d9ecb4c373510b8a41f5fb7d98e9e1c51a07e # GBPm/USDm
       - name: VirtualPool
         address:
-          - 0xab945882018b81bdf62629e98ffdafd9495a0076
-          - 0x6daa327e0cbe2ce84c0f312f20b9432fe744ed58
-          - 0x1d013077b00b28038a3f1e7a29aba34e12e562e9
-          - 0xbe6d2165173a29889652c7bf2dc3a02076a22f2a
-          - 0xaea92e8006e6edf0f9e9368ee9af36814b738855
-          - 0xa337a498e4e061f4029fcb3b9f4e3d535e885dc5
-          - 0x62fa288e3ac844dcfce5469af4f8feb7d6f7ba61
-          - 0x30214efe28ab44d6a5c739eba5e0729b1d4213e4
-          - 0xeb433ce1f2ce4981b76fe7ca3a96070705d8ede4
-          - 0x71f55035a49c972c5c3197e874f6b7fd94672b6e
-          - 0x62753ec2956f84af240b4666a130c88a83933848
-          - 0x3d6e023177bac13d6e316d95161d4bb9dcf0e276
+          - 0x671334256a893fdbc4ffe55f98f156a168bd897a
+          - 0x1e2506edca4ef3030e51be8b571b935d55677604
+          - 0x8103fb2db87ac96cc62faa399b98e1173720ab19
+          - 0x62722497dc8992337117ee79a02015dcea43b2c2
+          - 0x68d19b5a48cbbfd11057e97da9960b09d771e7b6
+          - 0x58f08739ea9764097b9500b6e4a4db64d168b807
+          - 0x284c2d99c5a12a65f10eff7183c33c1217b65a56
+          - 0xcbfc8c84168d7f34faba0018a3a63b998f1ffece
+          - 0x49a968c539599385c69c2d528500da58d933fafa
+          - 0x917ee035bf0a964acc75539f919a5b4f16336373
+          - 0x6b66271811615f4b6dadb8620ed71a1e90f41deb
+          - 0x22118009665b1d6810d4560a098d3e67bbcb934f
       - name: VirtualPoolFactory
         address:
-          - 0x22abd4ADF6aab38aC1022352d496A07Acee5aCB3
+          - 0x887955f28723B0e9Bddc358448CB5B1FDe692da4
       - name: SortedOracles
         address:
-          - "0xefB84935239dAcdecF7c5bA76d8dE40b077B7b33"
+          - "0xfaa7Ca2B056E60F6733aE75AA0709140a6eAfD20"
       - name: OpenLiquidityStrategy
-        address:
-          - 0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f
+        address: [] # Not yet deployed on Celo Sepolia — add address when available
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
 
   # ---------------------------------------------------------------------------
-  # Monad Mainnet (chain 143)
+  # Monad Testnet (chain 10143)
   # ---------------------------------------------------------------------------
-  - id: 143 # Monad Mainnet — HyperSync: https://143.hypersync.xyz
-    start_block: ${ENVIO_START_BLOCK_MONAD:-60730000} # SortedOracles ~60733096, FPMMFactory ~60747398
+  - id: 10143 # Monad Testnet — HyperSync: https://10143.hypersync.xyz
+    start_block: ${ENVIO_START_BLOCK_MONAD_TESTNET:-17932300} # SortedOracles ~17932362, FPMMFactory ~17932599
     contracts:
       - name: FPMMFactory
         address:
-          - 0xa849b475FE5a4B5C9C3280152c7a1945b907613b # TransparentUpgradeableProxy:FPMMFactory
+          - 0x353ED52bF8482027C0e0b9e3c0e5d96A9F680980
       - name: FPMM
         address:
-          - 0xd0e9c1a718d2a693d41eacd4b2696180403ce081 # GBPm/USDm
-          - 0x463c0d1f04bcd99a1efcf94ac2a75bc19ea4a7e5 # USDC/USDm
-          - 0xb0a0264ce6847f101b76ba36a4a3083ba489f501 # AUSD/USDm
+          - 0xd9e9e6f6b5298e8bad390f7748035c49d6eeb055
+          - 0x1229e8a7b266c6db52712ba5c6899a6c4c3025cd
+          - 0x6d4c4b663541bf21015afb22669b0e1bbb3e2b1c
       - name: VirtualPool
-        address: [] # VirtualPoolFactory not yet deployed — add when live
+        address: [] # VirtualPoolFactory not yet deployed on testnet
       - name: VirtualPoolFactory
-        address: [] # Not yet deployed — add when live
+        address: [] # Not yet deployed on testnet
       - name: SortedOracles
         address:
-          - "0x6f92C745346057a61b259579256159458a0a6A92" # TransparentUpgradeableProxy:SortedOracles
+          - "0x85ed9ac57827132B8F60938F3165BC139E1F53cd"
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
       - name: OpenLiquidityStrategy
         address:
-          # CREATE2 deterministic — same address as Celo. Verify deployment
-          # at https://monad-explorer.monad.xyz/address/0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f
-          # before going live. Set to [] if not yet deployed on Monad.
-          - 0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f
+          - 0xCCd2aD0603a08EBc14D223a983171ef18192e8c9
 
 unordered_multichain_mode: true
 preload_handlers: true
