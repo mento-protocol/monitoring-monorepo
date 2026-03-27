@@ -36,6 +36,7 @@ ERC20FeeToken.Transfer.handler(
 
     const transfer: ProtocolFeeTransfer = {
       id,
+      chainId,
       token: normalizedToken,
       tokenSymbol: symbol,
       tokenDecimals: decimals,

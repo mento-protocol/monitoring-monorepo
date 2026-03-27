@@ -13,6 +13,8 @@
     "stop": "node ./scripts/run-envio-with-env.mjs stop",
     "indexer:multichain:codegen": "node ./scripts/run-envio-with-env.mjs codegen --config config.multichain.mainnet.yaml",
     "indexer:multichain:dev": "node ./scripts/run-envio-with-env.mjs dev --config config.multichain.mainnet.yaml",
+    "indexer:multichain:testnet:codegen": "node ./scripts/run-envio-with-env.mjs codegen --config config.multichain.testnet.yaml",
+    "indexer:multichain:testnet:dev": "node ./scripts/run-envio-with-env.mjs dev --config config.multichain.testnet.yaml",
     "test": "pnpm mocha",
     "typecheck": "tsc --noEmit"
   },
