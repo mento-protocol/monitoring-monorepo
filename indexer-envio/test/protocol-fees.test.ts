@@ -8,6 +8,10 @@ import {
   _clearFeeTokenMetaCache,
   selectStaleTransfers,
 } from "../src/EventHandlers.ts";
+import { makePoolId } from "../src/helpers.ts";
+
+/** Shorthand: create a namespaced pool ID for chainId 42220 (used in all tests). */
+const pid = (addr: string): string => makePoolId(42220, addr);
 
 // ---------------------------------------------------------------------------
 // Types & helpers

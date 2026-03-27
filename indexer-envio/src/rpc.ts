@@ -556,15 +556,20 @@ export async function fetchTradingLimits(
 // Oracle DB query helpers (used by SortedOracles handlers)
 // ---------------------------------------------------------------------------
 
-/** Returns all FPMM pool IDs that reference the given rateFeedID.
+/** Returns all FPMM pool IDs on the given chain that reference the given rateFeedID.
  * Uses context.Pool.getWhere (DB-backed) so it works correctly in Envio's
- * multi-process hosted environment. */
+ * multi-process hosted environment.
+ *
+ * Filters by chainId in-memory after the DB query: each SortedOracles contract
+ * is per-chain, so cross-chain feed bleed is the main multichain collision risk.
+ * The result set is always small (≤ ~16 pools per chain). */
 export async function getPoolsByFeed(
   context: HandlerContext,
+  chainId: number,
   rateFeedID: string,
 ): Promise<string[]> {
   const pools = await context.Pool.getWhere.referenceRateFeedID.eq(rateFeedID);
-  return pools.map((p) => p.id);
+  return pools.filter((p) => p.chainId === chainId).map((p) => p.id);
 }
 
 export async function updatePoolsOracleExpiry(
@@ -592,6 +597,8 @@ export async function updatePoolsOracleExpiry(
 
 export async function getPoolsWithReferenceFeed(
   context: HandlerContext,
+  chainId: number,
 ): Promise<Pool[]> {
-  return context.Pool.getWhere.referenceRateFeedID.gt("");
+  const pools = await context.Pool.getWhere.referenceRateFeedID.gt("");
+  return pools.filter((p) => p.chainId === chainId);
 }

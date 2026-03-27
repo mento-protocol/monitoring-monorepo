@@ -15,7 +15,7 @@ import {
   type OracleSnapshot,
   type TradingLimit,
 } from "generated";
-import { eventId, asAddress, asBigInt } from "../helpers";
+import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
 import {
   scalingFactorToDecimals,
   ORACLE_ADAPTER_SCALE_FACTOR,
@@ -90,7 +90,8 @@ FPMMFactory.FPMMDeployed.contractRegister(({ event, context }) => {
 
 FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.params.fpmmProxy);
+  const poolAddr = asAddress(event.params.fpmmProxy); // raw address for RPC calls
+  const poolId = makePoolId(event.chainId, poolAddr); // namespaced ID for DB entities
   const token0 = asAddress(event.params.token0);
   const token1 = asAddress(event.params.token1);
   const blockNumber = asBigInt(event.block.number);
@@ -101,14 +102,14 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
 
   const [rateFeedID, rebalanceThreshold, dec0Raw, dec1Raw, invertRateFeed] =
     await Promise.all([
-      fetchReferenceRateFeedID(event.chainId, poolId),
+      fetchReferenceRateFeedID(event.chainId, poolAddr),
       // Use standalone getters — they work even when the oracle is stale,
       // unlike getRebalancingState() which reverts on stale/expired oracle data.
-      fetchRebalanceThreshold(event.chainId, poolId),
+      fetchRebalanceThreshold(event.chainId, poolAddr),
       // Fetch token decimals scaling factors (e.g. 1e18 for 18-decimal tokens)
-      fetchTokenDecimalsScaling(event.chainId, poolId, "decimals0", token0),
-      fetchTokenDecimalsScaling(event.chainId, poolId, "decimals1", token1),
-      fetchInvertRateFeed(event.chainId, poolId),
+      fetchTokenDecimalsScaling(event.chainId, poolAddr, "decimals0", token0),
+      fetchTokenDecimalsScaling(event.chainId, poolAddr, "decimals1", token1),
+      fetchInvertRateFeed(event.chainId, poolAddr),
     ]);
   // Convert scaling factor (1e18, 1e6, etc.) to decimals count (18, 6, etc.)
   const token0Decimals = dec0Raw
@@ -155,6 +156,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
 
   const deployment: FactoryDeployment = {
     id,
+    chainId: event.chainId,
     poolId,
     token0,
     token1,
@@ -174,7 +176,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
 
 FPMM.Swap.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.srcAddress);
+  const poolId = makePoolId(event.chainId, event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -298,6 +300,7 @@ FPMM.Swap.handler(async ({ event, context }) => {
 
   const swap: SwapEvent = {
     id,
+    chainId: event.chainId,
     poolId,
     sender: asAddress(event.params.sender),
     recipient: asAddress(event.params.to),
@@ -319,7 +322,7 @@ FPMM.Swap.handler(async ({ event, context }) => {
 
 FPMM.Mint.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.srcAddress);
+  const poolId = makePoolId(event.chainId, event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -342,6 +345,7 @@ FPMM.Mint.handler(async ({ event, context }) => {
 
   const liquidityEvent: LiquidityEvent = {
     id,
+    chainId: event.chainId,
     poolId,
     kind: "MINT",
     sender: asAddress(event.params.sender),
@@ -363,7 +367,7 @@ FPMM.Mint.handler(async ({ event, context }) => {
 
 FPMM.Burn.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.srcAddress);
+  const poolId = makePoolId(event.chainId, event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -386,6 +390,7 @@ FPMM.Burn.handler(async ({ event, context }) => {
 
   const liquidityEvent: LiquidityEvent = {
     id,
+    chainId: event.chainId,
     poolId,
     kind: "BURN",
     sender: asAddress(event.params.sender),
@@ -406,7 +411,7 @@ FPMM.Burn.handler(async ({ event, context }) => {
 // ---------------------------------------------------------------------------
 
 FPMM.Transfer.handler(async ({ event, context }) => {
-  const poolId = asAddress(event.srcAddress);
+  const poolId = makePoolId(event.chainId, event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
   const from = asAddress(event.params.from);
@@ -440,13 +445,14 @@ FPMM.Transfer.handler(async ({ event, context }) => {
 
 FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.srcAddress);
+  const poolId = makePoolId(event.chainId, event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
+  // Use raw srcAddress for RPC calls (not the namespaced poolId)
   const rebalancingState = await fetchRebalancingState(
     event.chainId,
-    poolId,
+    asAddress(event.srcAddress),
     blockNumber,
   );
 
@@ -483,6 +489,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   if (rebalancingState) {
     const snapshot: OracleSnapshot = {
       id: eventId(event.chainId, event.block.number, event.logIndex),
+      chainId: event.chainId,
       poolId,
       timestamp: blockTimestamp,
       oraclePrice: oracleDelta.oraclePrice!,
@@ -505,6 +512,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
 
   const reserveUpdate: ReserveUpdate = {
     id,
+    chainId: event.chainId,
     poolId,
     reserve0: event.params.reserve0,
     reserve1: event.params.reserve1,
@@ -523,13 +531,14 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
 
 FPMM.Rebalanced.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.srcAddress);
+  const poolId = makePoolId(event.chainId, event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
+  // Use raw srcAddress for RPC calls (not the namespaced poolId)
   const rebalancingState = await fetchRebalancingState(
     event.chainId,
-    poolId,
+    asAddress(event.srcAddress),
     blockNumber,
   );
 
@@ -571,6 +580,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   if (rebalancingState) {
     const snapshot: OracleSnapshot = {
       id: eventId(event.chainId, event.block.number, event.logIndex),
+      chainId: event.chainId,
       poolId,
       timestamp: blockTimestamp,
       oraclePrice: oracleDelta.oraclePrice!,
@@ -602,6 +612,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
 
   const rebalanced: RebalanceEvent = {
     id,
+    chainId: event.chainId,
     poolId,
     sender: rebalancerAddress,
     caller: event.transaction.from ?? "",
@@ -622,7 +633,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
 // ---------------------------------------------------------------------------
 
 FPMM.TradingLimitConfigured.handler(async ({ event, context }) => {
-  const poolId = asAddress(event.srcAddress);
+  const poolId = makePoolId(event.chainId, event.srcAddress);
   const token = asAddress(event.params.token);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
@@ -687,7 +698,7 @@ FPMM.TradingLimitConfigured.handler(async ({ event, context }) => {
 // ---------------------------------------------------------------------------
 
 FPMM.LiquidityStrategyUpdated.handler(async ({ event, context }) => {
-  const poolId = asAddress(event.srcAddress);
+  const poolId = makePoolId(event.chainId, event.srcAddress);
   const strategy = asAddress(event.params.strategy);
   const status = event.params.status;
 

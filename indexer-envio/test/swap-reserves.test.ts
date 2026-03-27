@@ -7,6 +7,10 @@ import {
   _setMockERC20Decimals,
   _clearMockERC20Decimals,
 } from "../src/EventHandlers.ts";
+import { makePoolId } from "../src/helpers.ts";
+
+/** Shorthand: create a namespaced pool ID for chainId 42220 (used in all tests). */
+const pid = (addr: string): string => makePoolId(42220, addr);
 
 type MockDb = {
   entities: {
@@ -122,7 +126,9 @@ describe("Swap handler — reserve syncing", () => {
     });
     mockDb = await FPMM.Swap.processEvent({ event: swapEvent, mockDb });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
+      | PoolEntity
+      | undefined;
     assert.ok(pool, "Pool must exist after Swap");
     assert.equal(
       pool!.reserves0,
@@ -162,7 +168,7 @@ describe("Swap handler — reserve syncing", () => {
     });
 
     // Pre-seed reserves on the pool entity (simulates prior UpdateReserves)
-    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     assert.ok(seeded, "Pool must exist after deploy");
     mockDb = mockDb.entities.Pool.set({
       ...seeded,
@@ -187,7 +193,9 @@ describe("Swap handler — reserve syncing", () => {
     });
     mockDb = await FPMM.Swap.processEvent({ event: swapEvent, mockDb });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
+      | PoolEntity
+      | undefined;
     assert.ok(pool, "Pool must exist after Swap");
     // Reserves must NOT be zeroed — they should remain at seeded values
     assert.equal(
@@ -267,7 +275,9 @@ describe("Swap handler — reserve syncing", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
+      | PoolEntity
+      | undefined;
     assert.ok(pool, "VirtualPool must exist after Swap");
     assert.equal(
       pool!.reserves0,
@@ -306,7 +316,7 @@ describe("Swap handler — reserve syncing", () => {
     });
 
     // Pre-seed reserves (simulates prior UpdateReserves)
-    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     assert.ok(seeded, "VirtualPool must exist after deploy");
     mockDb = mockDb.entities.Pool.set({
       ...seeded,
@@ -333,7 +343,9 @@ describe("Swap handler — reserve syncing", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
+      | PoolEntity
+      | undefined;
     assert.ok(pool, "VirtualPool must exist after Swap");
     assert.equal(
       pool!.reserves0,
@@ -384,7 +396,7 @@ describe("Swap handler — reserve syncing", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
       | (PoolEntity & { token0Decimals: number; token1Decimals: number })
       | undefined;
     assert.ok(pool, "Pool must exist after FPMMDeployed");
@@ -423,7 +435,7 @@ describe("Swap handler — reserve syncing", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
       | (PoolEntity & { token0Decimals: number; token1Decimals: number })
       | undefined;
     assert.ok(pool, "Pool must exist after FPMMDeployed");

@@ -11,6 +11,8 @@
     "dev": "node ./scripts/run-envio-with-env.mjs dev",
     "start": "node ./scripts/run-envio-with-env.mjs start",
     "stop": "node ./scripts/run-envio-with-env.mjs stop",
+    "indexer:multichain:codegen": "node ./scripts/run-envio-with-env.mjs codegen --config config.multichain.mainnet.yaml",
+    "indexer:multichain:dev": "node ./scripts/run-envio-with-env.mjs dev --config config.multichain.mainnet.yaml",
     "test": "pnpm mocha",
     "typecheck": "tsc --noEmit"
   },

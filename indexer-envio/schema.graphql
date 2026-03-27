@@ -1,5 +1,6 @@
 type Pool {
-  id: ID!
+  id: ID! # "{chainId}-{poolAddress}"
+  chainId: Int! @index
   token0: String
   token1: String
   token0Decimals: Int!
@@ -49,6 +50,7 @@ type Pool {
 
 type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {
   id: ID!
+  chainId: Int! @index
   poolId: String! @index
   timestamp: BigInt! @index
   oraclePrice: BigInt!
@@ -62,6 +64,7 @@ type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {
 
 type PoolSnapshot @index(fields: ["poolId", "timestamp"]) {
   id: ID!
+  chainId: Int! @index
   poolId: String! @index
   timestamp: BigInt! @index
 
@@ -87,6 +90,7 @@ type PoolSnapshot @index(fields: ["poolId", "timestamp"]) {
 
 type FactoryDeployment {
   id: ID!
+  chainId: Int! @index
   poolId: String!
   token0: String!
   token1: String!
@@ -99,6 +103,7 @@ type FactoryDeployment {
 
 type SwapEvent @index(fields: ["poolId", "blockTimestamp"]) {
   id: ID!
+  chainId: Int! @index
   poolId: String! @index
   sender: String!
   recipient: String!
@@ -113,6 +118,7 @@ type SwapEvent @index(fields: ["poolId", "blockTimestamp"]) {
 
 type LiquidityEvent @index(fields: ["poolId", "blockTimestamp"]) {
   id: ID!
+  chainId: Int! @index
   poolId: String! @index
   kind: String!
   sender: String!
@@ -127,6 +133,7 @@ type LiquidityEvent @index(fields: ["poolId", "blockTimestamp"]) {
 
 type ReserveUpdate @index(fields: ["poolId", "blockTimestamp"]) {
   id: ID!
+  chainId: Int! @index
   poolId: String! @index
   reserve0: BigInt!
   reserve1: BigInt!
@@ -138,6 +145,7 @@ type ReserveUpdate @index(fields: ["poolId", "blockTimestamp"]) {
 
 type RebalanceEvent @index(fields: ["poolId", "blockTimestamp"]) {
   id: ID!
+  chainId: Int! @index
   poolId: String! @index
   sender: String! # Strategy contract (event.params.sender)
   caller: String! # EOA that triggered the rebalance (tx.from)
@@ -170,6 +178,7 @@ type TradingLimit @index(fields: ["poolId"]) {
 
 type VirtualPoolLifecycle {
   id: ID!
+  chainId: Int! @index
   poolId: String!
   action: String!
   token0: String
@@ -207,8 +216,9 @@ type ProtocolFeeTransfer {
 # id = "<poolAddress>-<olsAddress>" — composite key so re-registration to a
 # new OLS contract creates a fresh record instead of silently overwriting history.
 type OlsPool {
-  id: ID! # "<poolAddress>-<olsAddress>" composite key
-  poolId: String! @index # pool address (FK to Pool.id)
+  id: ID! # "{chainId}-<poolAddress>-<olsAddress>" composite key
+  chainId: Int! @index
+  poolId: String! @index # "{chainId}-{poolAddress}" (FK to Pool.id)
   olsAddress: String! # OpenLiquidityStrategy contract address
   isActive: Boolean! # false after PoolRemoved
   debtToken: String! # address of debt token (from AddPoolParams)
@@ -229,7 +239,8 @@ type OlsPool {
 # Individual LiquidityMoved events from OLS
 type OlsLiquidityEvent @index(fields: ["poolId", "blockTimestamp"]) {
   id: ID!
-  poolId: String! @index # pool address (FK to Pool.id)
+  chainId: Int! @index
+  poolId: String! @index # "{chainId}-{poolAddress}" (FK to Pool.id)
   olsAddress: String!
   direction: Int! # 0 = Expand, 1 = Contract
   tokenGivenToPool: String!
@@ -245,6 +256,7 @@ type OlsLiquidityEvent @index(fields: ["poolId", "blockTimestamp"]) {
 # Lifecycle events: PoolAdded, PoolRemoved, RebalanceCooldownSet
 type OlsLifecycleEvent {
   id: ID!
+  chainId: Int! @index
   poolId: String! @index
   olsAddress: String!
   action: String! # "POOL_ADDED" | "POOL_REMOVED" | "COOLDOWN_SET"
