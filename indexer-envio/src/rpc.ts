@@ -174,9 +174,7 @@ export function _clearMockReportExpiry(): void {
 // Lazy RPC clients per chainId
 const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
 
-// Per-chain RPC defaults. ENVIO_RPC_URL overrides the RPC for ALL chains — it applies
-// globally, not per-chain. For multichain setups, prefer Envio's native rpc_config in
-// the YAML config (per-network) rather than this env var.
+// Per-chain RPC defaults used when no env var override is present.
 const DEFAULT_RPC_BY_CHAIN: Record<number, string> = {
   42220: "https://forno.celo.org", // Celo Mainnet
   11142220: "https://forno.celo-sepolia.celo-testnet.org", // Celo Sepolia
@@ -184,6 +182,27 @@ const DEFAULT_RPC_BY_CHAIN: Record<number, string> = {
   10143: "https://10143.rpc.hypersync.xyz", // Monad Testnet (Envio HyperRPC)
 };
 
+// Per-chain RPC env var names. Each chain can be overridden independently.
+// The generic ENVIO_RPC_URL fallback is still checked for single-chain
+// compatibility, but MUST NOT be used in multichain mode as it would route
+// all chains to the same endpoint.
+const RPC_ENV_VAR_BY_CHAIN: Record<number, string> = {
+  42220: "ENVIO_RPC_URL_42220",
+  11142220: "ENVIO_RPC_URL_11142220",
+  143: "ENVIO_RPC_URL_143",
+  10143: "ENVIO_RPC_URL_10143",
+};
+
+/**
+ * Returns a viem public client for the given chainId.
+ *
+ * RPC resolution order (first match wins):
+ * 1. `ENVIO_RPC_URL_{chainId}` — per-chain override (e.g. ENVIO_RPC_URL_42220)
+ * 2. `ENVIO_RPC_URL` — legacy single-chain override; only safe when indexing
+ *    exactly one chain. Do NOT set this in multichain mode — it will route
+ *    all chains to the same endpoint, causing incorrect RPC calls.
+ * 3. Hardcoded default in DEFAULT_RPC_BY_CHAIN.
+ */
 export function getRpcClient(
   chainId: number,
 ): ReturnType<typeof createPublicClient> {
@@ -195,12 +214,17 @@ export function getRpcClient(
           `Add an entry to DEFAULT_RPC_BY_CHAIN in rpc.ts.`,
       );
     }
+    // Prefer per-chain env var, then legacy global override, then hardcoded default.
+    const perChainEnvVar = RPC_ENV_VAR_BY_CHAIN[chainId];
+    const rpcUrl =
+      (perChainEnvVar && process.env[perChainEnvVar]) ??
+      process.env.ENVIO_RPC_URL ??
+      defaultRpc;
+
     rpcClients.set(
       chainId,
       createPublicClient({
-        transport: http(process.env.ENVIO_RPC_URL ?? defaultRpc, {
-          batch: true,
-        }),
+        transport: http(rpcUrl, { batch: true }),
       }),
     );
   }
