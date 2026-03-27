@@ -1,5 +1,6 @@
 export type Pool = {
   id: string;
+  chainId: number;
   token0: string | null;
   token1: string | null;
   source: string;
@@ -36,6 +37,7 @@ export type Pool = {
 
 export type OracleSnapshot = {
   id: string;
+  chainId: number;
   poolId: string;
   timestamp: string;
   oraclePrice: string;
@@ -49,6 +51,7 @@ export type OracleSnapshot = {
 
 export type SwapEvent = {
   id: string;
+  chainId: number;
   poolId: string;
   sender: string;
   recipient: string;
@@ -63,6 +66,7 @@ export type SwapEvent = {
 
 export type LiquidityEvent = {
   id: string;
+  chainId: number;
   poolId: string;
   kind: string;
   sender: string;
@@ -77,6 +81,7 @@ export type LiquidityEvent = {
 
 export type ReserveUpdate = {
   id: string;
+  chainId: number;
   poolId: string;
   reserve0: string;
   reserve1: string;
@@ -104,6 +109,7 @@ export type PoolSnapshot = {
 
 export type RebalanceEvent = {
   id: string;
+  chainId: number;
   poolId: string;
   sender: string;
   caller: string;
@@ -152,6 +158,7 @@ export type LiquidityPosition = {
 };
 
 export type ProtocolFeeTransfer = {
+  chainId: number;
   tokenSymbol: string;
   tokenDecimals: number;
   amount: string;
@@ -160,6 +167,7 @@ export type ProtocolFeeTransfer = {
 
 export type OlsPool = {
   id: string;
+  chainId: number;
   poolId: string;
   olsAddress: string;
   isActive: boolean;
@@ -180,6 +188,7 @@ export type OlsPool = {
 
 export type OlsLiquidityEvent = {
   id: string;
+  chainId: number;
   poolId: string;
   olsAddress: string;
   direction: number;

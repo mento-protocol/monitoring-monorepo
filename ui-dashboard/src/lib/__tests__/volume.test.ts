@@ -74,6 +74,7 @@ describe("buildPool24hVolumeMap", () => {
     const pools: Pool[] = [
       {
         id: "pool-1",
+        chainId: 42220,
         token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
         token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
         token0Decimals: 18,
@@ -104,6 +105,7 @@ describe("buildPool24hVolumeMap", () => {
     const pools: Pool[] = [
       {
         id: "pool-2",
+        chainId: 42220,
         token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
         token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
         token0Decimals: 18,
@@ -134,6 +136,7 @@ describe("buildPool24hVolumeMap", () => {
     const pools: Pool[] = [
       {
         id: "pool-3",
+        chainId: 42220,
         token0: "0x0000000000000000000000000000000000000003",
         token1: "0x0000000000000000000000000000000000000004",
         token0Decimals: 18,
@@ -174,6 +177,7 @@ describe("poolTotalVolumeUSD", () => {
     const pool: Pool = {
       ...BASE_POOL_FIELDS,
       id: "pool-1",
+      chainId: 42220,
       token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
       token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
       token0Decimals: 18,
@@ -188,6 +192,7 @@ describe("poolTotalVolumeUSD", () => {
     const pool: Pool = {
       ...BASE_POOL_FIELDS,
       id: "pool-2",
+      chainId: 42220,
       token0: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
       token1: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
       token0Decimals: 18,
@@ -202,6 +207,7 @@ describe("poolTotalVolumeUSD", () => {
     const pool: Pool = {
       ...BASE_POOL_FIELDS,
       id: "pool-3",
+      chainId: 42220,
       token0: "0x0000000000000000000000000000000000000003",
       token1: "0x0000000000000000000000000000000000000004",
       token0Decimals: 18,
@@ -216,6 +222,7 @@ describe("poolTotalVolumeUSD", () => {
     const pool: Pool = {
       ...BASE_POOL_FIELDS,
       id: "pool-4",
+      chainId: 42220,
       token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b", // USDm
       token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf", // KESm
       token0Decimals: 18,

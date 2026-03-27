@@ -153,6 +153,7 @@ let interactiveRoot: Root | null = null;
 
 const basePool: Pool = {
   id: "pool-1",
+  chainId: 42220,
   token0: "token0",
   token1: "token1",
   source: "fpmm_factory",
@@ -169,6 +170,7 @@ const basePool: Pool = {
 const swaps: SwapEvent[] = [
   {
     id: "swap-1",
+    chainId: 42220,
     poolId: "pool-1",
     txHash: "0xabcdeffedcba1234567890abcdeffedcba1234567890abcdeffedcba1234",
     sender: "0xsender000000000000000000000000000000000001",
@@ -185,6 +187,7 @@ const swaps: SwapEvent[] = [
 const reserves: ReserveUpdate[] = [
   {
     id: "reserve-1",
+    chainId: 42220,
     poolId: "pool-1",
     txHash: "0xreservehash",
     reserve0: "1500000000000000000",
@@ -198,6 +201,7 @@ const reserves: ReserveUpdate[] = [
 const rebalances: RebalanceEvent[] = [
   {
     id: "rebalance-1",
+    chainId: 42220,
     poolId: "pool-1",
     txHash: "0xrebalancehash",
     sender: "0xstrategy00000000000000000000000000000003",
@@ -213,6 +217,7 @@ const rebalances: RebalanceEvent[] = [
 const liquidity: LiquidityEvent[] = [
   {
     id: "liq-1",
+    chainId: 42220,
     poolId: "pool-1",
     txHash: "0xliquidityhash",
     kind: "mint",
@@ -229,6 +234,7 @@ const liquidity: LiquidityEvent[] = [
 const oracleRows: OracleSnapshot[] = [
   {
     id: "oracle-1",
+    chainId: 42220,
     poolId: "pool-1",
     source: "median-feed",
     oracleOk: true,

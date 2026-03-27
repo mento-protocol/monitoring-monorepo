@@ -16,7 +16,10 @@ import {
   relativeTime,
   formatTimestamp,
   formatBlock,
+  extractChainIdFromPoolId,
+  isNamespacedPoolId,
   isValidAddress,
+  normalizePoolIdForChain,
 } from "@/lib/format";
 import { buildPoolNameMap, tokenSymbol } from "@/lib/tokens";
 import { PoolsTable } from "@/components/pools-table";
@@ -60,20 +63,36 @@ function HomeContent() {
     data: poolsData,
     error: poolsErr,
     isLoading: poolsLoading,
-  } = useGQL<{ Pool: Pool[] }>(ALL_POOLS_WITH_HEALTH);
+  } = useGQL<{ Pool: Pool[] }>(ALL_POOLS_WITH_HEALTH, {
+    chainId: network.chainId,
+  });
 
   const {
     data: olsData,
     error: olsErr,
     isLoading: olsLoading,
-  } = useGQL<{ OlsPool: Pick<OlsPool, "poolId">[] }>(ALL_OLS_POOLS);
+  } = useGQL<{ OlsPool: Pick<OlsPool, "poolId">[] }>(ALL_OLS_POOLS, {
+    chainId: network.chainId,
+  });
   const olsPoolIds = useMemo(
     () => new Set((olsData?.OlsPool ?? []).map((p) => p.poolId)),
     [olsData],
   );
 
-  const swapQuery = poolFilter ? POOL_SWAPS : RECENT_SWAPS;
-  const swapVars = poolFilter ? { poolId: poolFilter, limit } : { limit };
+  const normalizedPoolFilter = poolFilter
+    ? normalizePoolIdForChain(poolFilter, network.chainId)
+    : "";
+  const filteredPoolChainId = extractChainIdFromPoolId(normalizedPoolFilter);
+  const hasForeignChainPoolFilter =
+    filteredPoolChainId !== null && filteredPoolChainId !== network.chainId;
+  const swapQuery = hasForeignChainPoolFilter
+    ? null
+    : normalizedPoolFilter
+      ? POOL_SWAPS
+      : RECENT_SWAPS;
+  const swapVars = normalizedPoolFilter
+    ? { poolId: normalizedPoolFilter, limit }
+    : { chainId: network.chainId, limit };
   const {
     data: swapsData,
     error: swapsErr,
@@ -96,13 +115,23 @@ function HomeContent() {
 
   const applyFilter = useCallback(() => {
     const v = filterInput.trim();
-    if (v && !isValidAddress(v)) {
-      setFilterError("Invalid address (expected 0x + 40 hex chars)");
+    if (v && !isValidAddress(v) && !isNamespacedPoolId(v)) {
+      setFilterError("Invalid pool filter (expected 0x... or {chainId}-0x...)");
       return;
     }
+
+    const normalized = normalizePoolIdForChain(v, network.chainId);
+    const filterChainId = extractChainIdFromPoolId(normalized);
+    if (filterChainId !== null && filterChainId !== network.chainId) {
+      setFilterError(
+        `Pool ${normalized} belongs to chain ${filterChainId}. Switch networks before filtering it here.`,
+      );
+      return;
+    }
+
     setFilterError("");
-    setURL(v, limit);
-  }, [filterInput, limit, setURL]);
+    setURL(normalized, limit);
+  }, [filterInput, limit, network.chainId, setURL]);
 
   const clearFilter = useCallback(() => {
     setFilterInput("");
@@ -163,8 +192,8 @@ function HomeContent() {
           id="swaps-heading"
           className="text-lg font-semibold text-white mb-3"
         >
-          {poolFilter
-            ? `Swaps for ${poolNames[poolFilter] ?? truncateAddress(poolFilter)}`
+          {normalizedPoolFilter
+            ? `Swaps for ${poolNames[normalizedPoolFilter] ?? truncateAddress(normalizedPoolFilter)}`
             : "Recent Swaps"}
         </h2>
 
@@ -181,8 +210,8 @@ function HomeContent() {
               setFilterError("");
             }}
             onKeyDown={(e) => e.key === "Enter" && applyFilter()}
-            placeholder="0x…"
-            aria-label="Filter swaps by pool address"
+            placeholder="0x… or 42220-0x…"
+            aria-label="Filter swaps by pool ID or pool address"
             aria-describedby={filterError ? "filter-error" : undefined}
             aria-invalid={filterError ? true : undefined}
             className="w-96 rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm font-mono text-slate-200 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -208,18 +237,21 @@ function HomeContent() {
           />
         </div>
 
-        {filterError && (
+        {(filterError || hasForeignChainPoolFilter) && (
           <p
             id="filter-error"
             className="mb-3 text-sm text-red-400"
             role="alert"
           >
-            {filterError}
+            {filterError ||
+              `Pool ${normalizedPoolFilter} belongs to chain ${filteredPoolChainId}. Switch networks before filtering it here.`}
           </p>
         )}
 
         {swapsErr ? (
           <ErrorBox message={`Failed to load swaps: ${swapsErr.message}`} />
+        ) : hasForeignChainPoolFilter ? (
+          <EmptyBox message="This pool belongs to a different chain. Switch networks to view its swaps." />
         ) : swapsLoading ? (
           <Skeleton rows={5} />
         ) : swaps.length === 0 ? (

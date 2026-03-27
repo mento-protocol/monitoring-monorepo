@@ -38,6 +38,7 @@ const MOCK_NETWORK_WITH_SECRET: Network = {
 function makePool(id: string): Pool {
   return {
     id,
+    chainId: 42220,
     token0: null,
     token1: null,
     source: "FPMM",
@@ -98,6 +99,12 @@ describe("fetchNetworkData — happy path", () => {
     expect(result.pools).toHaveLength(1);
     expect(result.pools[0].id).toBe("pool-1");
     expect(result.fees).not.toBeNull();
+
+    const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mock.calls;
+    expect(calls[0][1]).toEqual({ chainId: 42220 });
+    expect(calls[1][1]).toEqual({ chainId: 42220 });
+    expect(calls[2][1]).toEqual({ from: 0, to: 1000, poolIds: ["pool-1"] });
   });
 
   it("trims whitespace from hasuraSecret before setting auth header", async () => {

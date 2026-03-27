@@ -71,6 +71,8 @@ vi.mock("@/lib/tokens", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/lib/tokens")>();
   return {
     ...mod,
+    chainId: 42220,
+
     tokenSymbol: (_network: unknown, address: string | null) =>
       address ? address.slice(0, 6) : "???",
   };
@@ -89,6 +91,7 @@ vi.mock("@/lib/format", () => ({
 function makePool(overrides: Partial<Pool> = {}): Pool {
   return {
     id: "0xpool",
+    chainId: 42220,
     source: "fpmm_factory",
     token0: "0x0000000000000000000000000000000000000001",
     token1: "0x0000000000000000000000000000000000000002",
@@ -124,6 +127,7 @@ function makePool(overrides: Partial<Pool> = {}): Pool {
 function makeOlsPool(overrides: Partial<OlsPool> = {}): OlsPool {
   return {
     id: "0xpool-0xols",
+    chainId: 42220,
     poolId: "0xpool",
     olsAddress: "0x000000000000000000000000000000000000aabb",
     isActive: true,
@@ -149,6 +153,7 @@ function makeOlsEvent(
 ): OlsLiquidityEvent {
   return {
     id: "evt-1",
+    chainId: 42220,
     poolId: "0xpool",
     olsAddress: "0x000000000000000000000000000000000000aabb",
     direction: 0,

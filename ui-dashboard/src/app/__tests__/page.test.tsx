@@ -67,6 +67,7 @@ import type { Pool } from "@/lib/types";
 function makePool(id: string): Pool {
   return {
     id,
+    chainId: 42220,
     token0: null,
     token1: null,
     source: "FPMM",

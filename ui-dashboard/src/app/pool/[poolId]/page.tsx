@@ -23,6 +23,7 @@ import {
   formatBlock,
   formatTimestamp,
   formatWei,
+  normalizePoolIdForChain,
   parseWei,
   parseOraclePriceToNumber,
   relativeTime,
@@ -65,7 +66,7 @@ import type {
 import { NetworkAwareLink } from "@/components/network-aware-link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import React, { Suspense, useCallback, useEffect, useMemo } from "react";
-import { buildPoolNotFoundDest } from "@/lib/routing";
+import { buildPoolDetailUrl, buildPoolNotFoundDest } from "@/lib/routing";
 
 export default function PoolDetailPage() {
   return (
@@ -169,6 +170,7 @@ function PoolDetail() {
   const router = useRouter();
 
   const decodedId = decodeURIComponent(poolId);
+  const normalizedPoolId = normalizePoolIdForChain(decodedId, network.chainId);
   const rawTab = searchParams.get("tab");
   const tab: Tab = TABS.includes(rawTab as Tab) ? (rawTab as Tab) : "swaps";
   const limit = Number(searchParams.get("limit") ?? "25");
@@ -185,13 +187,11 @@ function PoolDetail() {
 
   const replaceURL = useCallback(
     (params: URLSearchParams) => {
-      const qs = params.toString();
-      router.replace(
-        `/pool/${encodeURIComponent(decodedId)}${qs ? `?${qs}` : ""}`,
-        { scroll: false },
-      );
+      router.replace(buildPoolDetailUrl(normalizedPoolId, params), {
+        scroll: false,
+      });
     },
-    [router, decodedId],
+    [router, normalizedPoolId],
   );
 
   const setURL = useCallback(
@@ -222,9 +222,32 @@ function PoolDetail() {
     data: poolData,
     error: poolErr,
     isLoading: poolLoading,
-  } = useGQL<{ Pool: Pool[] }>(POOL_DETAIL_WITH_HEALTH, { id: decodedId });
+  } = useGQL<{ Pool: Pool[] }>(POOL_DETAIL_WITH_HEALTH, {
+    id: normalizedPoolId,
+    chainId: network.chainId,
+  });
 
   const pool = poolData?.Pool?.[0] ?? null;
+
+  // Canonicalize legacy raw-address pool URLs onto namespaced multichain IDs,
+  // but only after the pool resolves on the active network. That avoids
+  // rewriting ambiguous raw links into a wrong namespaced id before we know the
+  // current network actually serves that pool.
+  useEffect(() => {
+    if (!poolLoading && !poolErr && pool && decodedId !== normalizedPoolId) {
+      router.replace(buildPoolDetailUrl(normalizedPoolId, searchParams), {
+        scroll: false,
+      });
+    }
+  }, [
+    decodedId,
+    normalizedPoolId,
+    pool,
+    poolErr,
+    poolLoading,
+    router,
+    searchParams,
+  ]);
 
   // When the pool is not found on the current network (e.g. user switched
   // networks while viewing a pool), redirect to /pools rather than showing
@@ -242,13 +265,13 @@ function PoolDetail() {
 
   const { data: limitsData } = useGQL<{ TradingLimit: TradingLimit[] }>(
     TRADING_LIMITS,
-    { poolId: decodedId },
+    { poolId: normalizedPoolId },
   );
   const tradingLimits = limitsData?.TradingLimit ?? [];
 
   const { data: deployData } = useGQL<{
     FactoryDeployment: { txHash: string }[];
-  }>(POOL_DEPLOYMENT, { poolId: decodedId });
+  }>(POOL_DEPLOYMENT, { poolId: normalizedPoolId });
   const deployTxHash = deployData?.FactoryDeployment?.[0]?.txHash;
 
   return (
@@ -262,7 +285,7 @@ function PoolDetail() {
           {pool ? (
             poolName(network, pool.token0, pool.token1)
           ) : (
-            <AddressLink address={decodedId} />
+            <AddressLink address={normalizedPoolId} />
           )}
         </span>
       </nav>
@@ -272,7 +295,7 @@ function PoolDetail() {
       ) : poolLoading ? (
         <Skeleton rows={2} />
       ) : !pool ? (
-        <ErrorBox message={`Pool ${decodedId} not found.`} />
+        <ErrorBox message={`Pool ${normalizedPoolId} not found.`} />
       ) : (
         <>
           <PoolHeader pool={pool} deployTxHash={deployTxHash} />
@@ -318,7 +341,7 @@ function PoolDetail() {
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
         {tab === "swaps" && (
           <SwapsTab
-            poolId={decodedId}
+            poolId={normalizedPoolId}
             limit={limit}
             pool={pool}
             search={activeSearch}
@@ -327,7 +350,7 @@ function PoolDetail() {
         )}
         {tab === "reserves" && (
           <ReservesTab
-            poolId={decodedId}
+            poolId={normalizedPoolId}
             limit={limit}
             pool={pool}
             search={activeSearch}
@@ -336,7 +359,7 @@ function PoolDetail() {
         )}
         {tab === "rebalances" && (
           <RebalancesTab
-            poolId={decodedId}
+            poolId={normalizedPoolId}
             limit={limit}
             search={activeSearch}
             onSearchChange={(value) => setTabSearch("rebalances", value)}
@@ -344,7 +367,7 @@ function PoolDetail() {
         )}
         {tab === "liquidity" && (
           <LiquidityTab
-            poolId={decodedId}
+            poolId={normalizedPoolId}
             limit={limit}
             pool={pool}
             search={activeSearch}
@@ -353,16 +376,18 @@ function PoolDetail() {
         )}
         {tab === "oracle" && (
           <OracleTab
-            poolId={decodedId}
+            poolId={normalizedPoolId}
             limit={limit}
             pool={pool}
             search={activeSearch}
             onSearchChange={(value) => setTabSearch("oracle", value)}
           />
         )}
-        {tab === "providers" && <LpsTab poolId={decodedId} pool={pool} />}
+        {tab === "providers" && (
+          <LpsTab poolId={normalizedPoolId} pool={pool} />
+        )}
         {tab === "ols" && (
-          <OlsTab poolId={decodedId} limit={limit} pool={pool} />
+          <OlsTab poolId={normalizedPoolId} limit={limit} pool={pool} />
         )}
       </div>
     </div>

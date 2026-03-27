@@ -35,3 +35,11 @@ export function buildPoolsFilterUrl(
   const qs = p.toString();
   return qs ? `/pools?${qs}` : "/pools";
 }
+
+export function buildPoolDetailUrl(
+  poolId: string,
+  currentParams: URLSearchParams,
+): string {
+  const qs = currentParams.toString();
+  return `/pool/${encodeURIComponent(poolId)}${qs ? `?${qs}` : ""}`;
+}

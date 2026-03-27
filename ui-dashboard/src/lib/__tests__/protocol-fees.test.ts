@@ -105,6 +105,8 @@ function transfer(
   overrides: Partial<ProtocolFeeTransfer> = {},
 ): ProtocolFeeTransfer {
   return {
+    chainId: 42220,
+
     tokenSymbol: "USDm",
     tokenDecimals: 18,
     amount: "1000000000000000000", // 1e18 = 1 token
@@ -138,6 +140,8 @@ describe("aggregateProtocolFees", () => {
   it("handles 6-decimal tokens (USDC)", () => {
     const transfers = [
       transfer({
+        chainId: 42220,
+
         tokenSymbol: "USDC",
         tokenDecimals: 6,
         amount: "1500000", // 1.5 USDC
@@ -150,6 +154,8 @@ describe("aggregateProtocolFees", () => {
   it("applies FX rates for non-USD tokens", () => {
     const transfers = [
       transfer({
+        chainId: 42220,
+
         tokenSymbol: "GBPm",
         tokenDecimals: 18,
         amount: "1000000000000000000", // 1 GBPm
@@ -173,8 +179,16 @@ describe("aggregateProtocolFees", () => {
 
   it("silently skips UNKNOWN (indexer placeholder) without flagging as unpriced", () => {
     const transfers = [
-      transfer({ tokenSymbol: "UNKNOWN", amount: "1000000000000000000" }),
-      transfer({ tokenSymbol: "USDm", amount: "1000000000000000000" }),
+      transfer({
+        chainId: 42220,
+        tokenSymbol: "UNKNOWN",
+        amount: "1000000000000000000",
+      }),
+      transfer({
+        chainId: 42220,
+        tokenSymbol: "USDm",
+        amount: "1000000000000000000",
+      }),
     ];
     const result = aggregateProtocolFees(transfers);
     expect(result.unpricedSymbols).toEqual([]);
@@ -183,8 +197,16 @@ describe("aggregateProtocolFees", () => {
 
   it("reports unpriced symbols when genuinely unknown tokens appear", () => {
     const transfers = [
-      transfer({ tokenSymbol: "NEWTOK", amount: "1000000000000000000" }),
-      transfer({ tokenSymbol: "USDm", amount: "1000000000000000000" }),
+      transfer({
+        chainId: 42220,
+        tokenSymbol: "NEWTOK",
+        amount: "1000000000000000000",
+      }),
+      transfer({
+        chainId: 42220,
+        tokenSymbol: "USDm",
+        amount: "1000000000000000000",
+      }),
     ];
     const result = aggregateProtocolFees(transfers);
     expect(result.unpricedSymbols).toEqual(["NEWTOK"]);
@@ -194,8 +216,13 @@ describe("aggregateProtocolFees", () => {
 
   it("returns empty unpricedSymbols when all tokens are known", () => {
     const transfers = [
-      transfer({ tokenSymbol: "USDm" }),
-      transfer({ tokenSymbol: "USDC", tokenDecimals: 6, amount: "1000000" }),
+      transfer({ chainId: 42220, tokenSymbol: "USDm" }),
+      transfer({
+        chainId: 42220,
+        tokenSymbol: "USDC",
+        tokenDecimals: 6,
+        amount: "1000000",
+      }),
     ];
     const result = aggregateProtocolFees(transfers);
     expect(result.unpricedSymbols).toEqual([]);
@@ -204,14 +231,22 @@ describe("aggregateProtocolFees", () => {
   it("handles mixed decimals and currencies", () => {
     const now = Math.floor(Date.now() / 1000);
     const transfers = [
-      transfer({ tokenSymbol: "USDm", amount: "10000000000000000000" }), // 10 USDm
       transfer({
+        chainId: 42220,
+        tokenSymbol: "USDm",
+        amount: "10000000000000000000",
+      }), // 10 USDm
+      transfer({
+        chainId: 42220,
+
         tokenSymbol: "USDC",
         tokenDecimals: 6,
         amount: "5000000", // 5 USDC
         blockTimestamp: String(now - 100),
       }),
       transfer({
+        chainId: 42220,
+
         tokenSymbol: "GBPm",
         amount: "2000000000000000000", // 2 GBPm = 2.54 USD
       }),
@@ -239,10 +274,12 @@ describe("aggregateProtocolFees", () => {
     const now = Math.floor(Date.now() / 1000);
     const transfers = [
       transfer({
+        chainId: 42220,
+
         tokenSymbol: "SOMENEWTOK",
         blockTimestamp: String(now - 3600), // 1h ago — within 24h
       }),
-      transfer({ tokenSymbol: "USDm" }),
+      transfer({ chainId: 42220, tokenSymbol: "USDm" }),
     ];
     const result = aggregateProtocolFees(transfers);
     expect(result.unpricedSymbols).toContain("SOMENEWTOK");
@@ -252,10 +289,12 @@ describe("aggregateProtocolFees", () => {
   it("unpricedSymbols24h: excludes unpriced symbol outside 24h window", () => {
     const transfers = [
       transfer({
+        chainId: 42220,
+
         tokenSymbol: "OLDTOK",
         blockTimestamp: "100", // very old — outside 24h
       }),
-      transfer({ tokenSymbol: "USDm" }),
+      transfer({ chainId: 42220, tokenSymbol: "USDm" }),
     ];
     const result = aggregateProtocolFees(transfers);
     expect(result.unpricedSymbols).toContain("OLDTOK");
@@ -266,9 +305,9 @@ describe("aggregateProtocolFees", () => {
 
   it("unresolvedCount: counts UNKNOWN transfers without marking them as unpriced", () => {
     const transfers = [
-      transfer({ tokenSymbol: "UNKNOWN" }),
-      transfer({ tokenSymbol: "UNKNOWN" }),
-      transfer({ tokenSymbol: "USDm" }),
+      transfer({ chainId: 42220, tokenSymbol: "UNKNOWN" }),
+      transfer({ chainId: 42220, tokenSymbol: "UNKNOWN" }),
+      transfer({ chainId: 42220, tokenSymbol: "USDm" }),
     ];
     const result = aggregateProtocolFees(transfers);
     expect(result.unresolvedCount).toBe(2);
@@ -280,12 +319,18 @@ describe("aggregateProtocolFees", () => {
   it("unresolvedCount24h: counts recent UNKNOWN transfers for 24h approximation", () => {
     const now = Math.floor(Date.now() / 1000);
     const transfers = [
-      transfer({ tokenSymbol: "UNKNOWN", blockTimestamp: "100" }), // old
       transfer({
+        chainId: 42220,
+        tokenSymbol: "UNKNOWN",
+        blockTimestamp: "100",
+      }), // old
+      transfer({
+        chainId: 42220,
+
         tokenSymbol: "UNKNOWN",
         blockTimestamp: String(now - 3600),
       }), // 1h ago — within 24h
-      transfer({ tokenSymbol: "USDm" }),
+      transfer({ chainId: 42220, tokenSymbol: "USDm" }),
     ];
     const result = aggregateProtocolFees(transfers);
     expect(result.unresolvedCount).toBe(2);
