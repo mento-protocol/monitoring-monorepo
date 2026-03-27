@@ -23,6 +23,7 @@ import {
   formatBlock,
   formatTimestamp,
   formatWei,
+  isNamespacedPoolId,
   normalizePoolIdForChain,
   parseWei,
   parseOraclePriceToNumber,
@@ -171,6 +172,9 @@ function PoolDetail() {
 
   const decodedId = decodeURIComponent(poolId);
   const normalizedPoolId = normalizePoolIdForChain(decodedId, network.chainId);
+  const poolAddress = isNamespacedPoolId(normalizedPoolId)
+    ? normalizedPoolId.split("-").slice(1).join("-")
+    : normalizedPoolId;
   const rawTab = searchParams.get("tab");
   const tab: Tab = TABS.includes(rawTab as Tab) ? (rawTab as Tab) : "swaps";
   const limit = Number(searchParams.get("limit") ?? "25");
@@ -285,7 +289,7 @@ function PoolDetail() {
           {pool ? (
             poolName(network, pool.token0, pool.token1)
           ) : (
-            <AddressLink address={normalizedPoolId} />
+            <AddressLink address={poolAddress} />
           )}
         </span>
       </nav>

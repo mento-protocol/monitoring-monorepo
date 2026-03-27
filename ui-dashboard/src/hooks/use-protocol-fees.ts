@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useNetwork } from "@/components/network-provider";
 import { useGQL } from "@/lib/graphql";
 import { PROTOCOL_FEE_TRANSFERS_ALL } from "@/lib/queries";
 import {
@@ -18,13 +19,14 @@ export function useProtocolFees(): {
   isLoading: boolean;
   error: Error | undefined;
 } {
+  const { network } = useNetwork();
   const {
     data: raw,
     error,
     isLoading,
   } = useGQL<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
     PROTOCOL_FEE_TRANSFERS_ALL,
-    undefined,
+    { chainId: network.chainId },
     300_000, // 5 minutes
   );
 
