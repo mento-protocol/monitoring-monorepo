@@ -170,6 +170,20 @@ describe("NETWORKS — Monad networks", () => {
     expect(networks.isConfiguredNetworkId("monad-mainnet-hosted")).toBe(false);
   });
 
+  it("falls back to chain-specific hosted URL when multichain env var is empty", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED", "");
+    vi.stubEnv(
+      "NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED",
+      "https://monad.example/v1/graphql",
+    );
+
+    const networks = await import("../networks");
+    expect(networks.NETWORKS["monad-mainnet-hosted"].hasuraUrl).toBe(
+      "https://monad.example/v1/graphql",
+    );
+    expect(networks.isConfiguredNetworkId("monad-mainnet-hosted")).toBe(true);
+  });
+
   it("monad-mainnet-hosted has tokenSymbols populated from contracts package", () => {
     const monad = NETWORKS["monad-mainnet-hosted"];
     expect(Object.keys(monad.tokenSymbols).length).toBeGreaterThan(0);
