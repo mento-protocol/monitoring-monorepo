@@ -16,34 +16,41 @@ export const asAddress = (value: string): string => value.toLowerCase();
  * Using this consistently across all handlers prevents cross-chain entity
  * collisions when the same contract address appears on multiple chains
  * (e.g. CREATE2-deployed contracts with identical addresses on Celo and Monad).
+ *
+ * chainId is typed as number | bigint to match Envio's event.chainId runtime type,
+ * which may be either depending on the Envio version.
  */
-export const makePoolId = (chainId: number, address: string): string =>
+export const makePoolId = (chainId: number | bigint, address: string): string =>
   `${chainId}-${asAddress(address)}`;
 
 /**
- * Extract the raw pool address from a namespaced pool ID.
- * "{chainId}-{address}" → "{address}"
+ * Extract the raw Ethereum address from a namespaced pool ID.
+ * "{chainId}-{0xaddress}" → "{0xaddress}"
  *
- * Ethereum addresses are hex-only and can never contain a dash, so the first
- * dash in the poolId is always the chainId separator. Asserts the expected
- * format in development to catch accidental double-namespacing early.
+ * This function must only ever receive namespaced IDs produced by makePoolId.
+ * If a bare address reaches here post-migration, it indicates a bug at the
+ * call site — we throw unconditionally rather than silently returning garbage.
  *
- * Used when passing poolId to RPC functions that expect a raw address.
+ * Ethereum addresses are hex-only (0-9a-f) and can never contain a dash, so
+ * the first dash is always the chainId separator. We validate the extracted
+ * value starts with "0x" in all environments to catch double-namespacing
+ * (e.g. "42220-42220-0x...") as early as possible.
+ *
+ * Used when passing poolId to RPC functions that expect a raw contract address.
  */
-export const poolIdToAddress = (poolId: string): string => {
-  const idx = poolId.indexOf("-");
-  if (idx < 0) {
-    // Already a raw address — nothing to strip. This should not happen in
-    // normal operation but guard defensively rather than returning garbage.
-    return poolId;
-  }
-  const addr = poolId.slice(idx + 1);
-  // Sanity check: result must look like an Ethereum address (0x + hex chars).
-  // Catches double-namespacing like "42220-42220-0x..." at call sites.
-  if (process.env.NODE_ENV !== "production" && !addr.startsWith("0x")) {
+export const extractAddressFromPoolId = (poolId: string): string => {
+  const match = poolId.match(/^\d+-(.+)$/);
+  if (!match) {
     throw new Error(
-      `[poolIdToAddress] Unexpected format — extracted "${addr}" from poolId "${poolId}". ` +
-        `Expected "{chainId}-0x{hex}".`,
+      `[extractAddressFromPoolId] Expected namespaced pool ID "{chainId}-0x{hex}", got "${poolId}". ` +
+        `Call site is passing a bare address — use event.srcAddress instead.`,
+    );
+  }
+  const addr = match[1]!;
+  if (!addr.startsWith("0x")) {
+    throw new Error(
+      `[extractAddressFromPoolId] Unexpected format — extracted "${addr}" from poolId "${poolId}". ` +
+        `Possible double-namespacing (e.g. "42220-42220-0x..."). Expected "{chainId}-0x{hex}".`,
     );
   }
   return addr;

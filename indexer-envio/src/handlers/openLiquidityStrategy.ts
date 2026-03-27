@@ -10,7 +10,15 @@ import {
 } from "generated";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
 
-function olsPoolId(poolId: string, olsAddress: string): string {
+/**
+ * Canonical OLS pool record ID: "{chainId}-{poolAddress}-{olsAddress}"
+ *
+ * The poolId arg must already be a namespaced pool ID (from makePoolId), so
+ * the resulting format is: "{chainId}-{poolAddress}-{olsAddress}".
+ * One record per (pool, OLS contract) so re-registration to a new OLS contract
+ * creates a fresh record instead of silently overwriting history.
+ */
+function makeOlsPoolId(poolId: string, olsAddress: string): string {
   return `${poolId}-${olsAddress}`;
 }
 
@@ -52,7 +60,7 @@ async function getOrCreateOlsPool(args: {
   blockNumber: bigint;
   blockTimestamp: bigint;
 }): Promise<OlsPool> {
-  const id = olsPoolId(args.poolId, args.olsAddress);
+  const id = makeOlsPoolId(args.poolId, args.olsAddress);
   const existing = await args.context.OlsPool.get(id);
   return (
     existing ??
@@ -83,7 +91,7 @@ OpenLiquidityStrategy.PoolAdded.handler(async ({ event, context }) => {
   //                liquiditySourceIncentiveExpansion, protocolIncentiveExpansion,
   //                liquiditySourceIncentiveContraction, protocolIncentiveContraction]
   const olsPool: OlsPool = {
-    id: olsPoolId(poolId, olsAddress),
+    id: makeOlsPoolId(poolId, olsAddress),
     chainId: event.chainId,
     poolId,
     olsAddress,

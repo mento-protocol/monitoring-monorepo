@@ -560,9 +560,12 @@ export async function fetchTradingLimits(
  * Uses context.Pool.getWhere (DB-backed) so it works correctly in Envio's
  * multi-process hosted environment.
  *
- * Filters by chainId in-memory after the DB query: each SortedOracles contract
- * is per-chain, so cross-chain feed bleed is the main multichain collision risk.
- * The result set is always small (≤ ~16 pools per chain). */
+ * NOTE — in-memory chainId filter: Envio's getWhere only supports single-field
+ * queries, so there is no compound "referenceRateFeedID + chainId" DB query.
+ * We fetch all pools with the matching feedId across all chains and filter
+ * locally. This is correct and safe: each oracle feed maps to at most ~4 FPMM
+ * pools total across both chains, so the result set is always tiny. Do NOT
+ * "simplify" this to a DB query — the API does not support it. */
 export async function getPoolsByFeed(
   context: HandlerContext,
   chainId: number,
@@ -595,6 +598,9 @@ export async function updatePoolsOracleExpiry(
   }
 }
 
+/** Same in-memory filter rationale as getPoolsByFeed above — Envio getWhere is
+ * single-field only, so we fetch all pools with a non-empty referenceRateFeedID
+ * and filter by chainId locally. Result set is always small. */
 export async function getPoolsWithReferenceFeed(
   context: HandlerContext,
   chainId: number,
