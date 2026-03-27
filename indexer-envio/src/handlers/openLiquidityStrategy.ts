@@ -11,12 +11,9 @@ import {
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
 
 /**
- * Canonical OLS pool record ID: "{chainId}-{poolAddress}-{olsAddress}"
- *
- * The poolId arg must already be a namespaced pool ID (from makePoolId), so
- * the resulting format is: "{chainId}-{poolAddress}-{olsAddress}".
- * One record per (pool, OLS contract) so re-registration to a new OLS contract
- * creates a fresh record instead of silently overwriting history.
+ * OLS pool record ID: "{chainId}-{poolAddress}-{olsAddress}".
+ * One record per (pool, OLS contract) — re-registration creates a fresh record
+ * instead of silently overwriting history.
  */
 function makeOlsPoolId(poolId: string, olsAddress: string): string {
   return `${poolId}-${olsAddress}`;

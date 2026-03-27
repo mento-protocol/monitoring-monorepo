@@ -174,7 +174,9 @@ export function _clearMockReportExpiry(): void {
 // Lazy RPC clients per chainId
 const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
 
-// Per-chain RPC defaults. ENVIO_RPC_URL overrides the default for the active chain.
+// Per-chain RPC defaults. ENVIO_RPC_URL overrides the RPC for ALL chains — it applies
+// globally, not per-chain. For multichain setups, prefer Envio's native rpc_config in
+// the YAML config (per-network) rather than this env var.
 const DEFAULT_RPC_BY_CHAIN: Record<number, string> = {
   42220: "https://forno.celo.org", // Celo Mainnet
   11142220: "https://forno.celo-sepolia.celo-testnet.org", // Celo Sepolia

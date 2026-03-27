@@ -67,8 +67,8 @@ async function applyLiquidityPositionDelta({
   blockNumber: bigint;
   blockTimestamp: bigint;
 }) {
-  // Compare against the raw pool address (poolId is namespaced "{chainId}-0x...").
-  // Skip mints where the pool itself receives LP tokens (self-transfer during liquidity ops).
+  // Skip self-transfers where the pool contract receives its own LP tokens
+  // (this happens during mint/burn ops — pool is neither an LP owner nor zero).
   const rawPoolAddress = extractAddressFromPoolId(poolId);
   if (address === ZERO_ADDRESS || address === rawPoolAddress || delta === 0n)
     return;
@@ -299,6 +299,15 @@ FPMM.Swap.handler(async ({ event, context }) => {
     }
 
     if (limits0 || limits1) {
+      // Log when only one token's limits were fetched — partial state is usable
+      // but indicates an RPC hiccup that will be retried on the next Swap.
+      if (!limits0 || !limits1) {
+        console.warn(
+          `[FPMM.Swap] Partial trading limit fetch for pool ${poolId}: ` +
+            `limits0=${!!limits0} limits1=${!!limits1}. ` +
+            `limitStatus will reflect the available data only.`,
+        );
+      }
       const overallWorst = Math.max(worstP0, worstP1);
       const limitStatus = computeLimitStatus(overallWorst, 0);
       const updatedPool = await context.Pool.get(poolId);
