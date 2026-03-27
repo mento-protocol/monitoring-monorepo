@@ -231,6 +231,32 @@ describe("Pool detail LPs tab", () => {
     );
   });
 
+  it("renders pool header address link with raw hex address, not namespaced id", () => {
+    // Regression test: pool.id is now the namespaced ID ("42220-0x…") but
+    // AddressLink in PoolHeader must receive the raw hex address only.
+    // This test uses a full 40-char hex address so isNamespacedPoolId fires.
+    const namespacedPool: Pool = {
+      ...BASE_POOL,
+      id: "42220-0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      chainId: 42220,
+    };
+    mockPoolId = "42220-0xd8da6bf26964af9d7eed9e03e53415d37aa96045";
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth"))
+        return gqlResult({ Pool: [namespacedPool] });
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      return gqlResult(undefined);
+    });
+
+    const html = renderToStaticMarkup(<PoolDetailPage />);
+    // The explorer link should use the raw hex address, not the namespaced form.
+    expect(html).not.toContain("42220-0xd8da6bf2");
+    expect(html).toContain("0xd8da6bf2");
+  });
+
   it("queries pool detail with both the namespaced id and active chainId", () => {
     mockPoolId = "0xpool";
 
