@@ -15,7 +15,13 @@ import {
   type OracleSnapshot,
   type TradingLimit,
 } from "generated";
-import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
+import {
+  eventId,
+  asAddress,
+  asBigInt,
+  makePoolId,
+  extractAddressFromPoolId,
+} from "../helpers";
 import {
   scalingFactorToDecimals,
   ORACLE_ADAPTER_SCALE_FACTOR,
@@ -41,6 +47,7 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 async function applyLiquidityPositionDelta({
   context,
+  chainId,
   poolId,
   address,
   delta,
@@ -53,13 +60,18 @@ async function applyLiquidityPositionDelta({
       set: (entity: LiquidityPosition) => void;
     };
   };
+  chainId: number;
   poolId: string;
   address: string;
   delta: bigint;
   blockNumber: bigint;
   blockTimestamp: bigint;
 }) {
-  if (address === ZERO_ADDRESS || address === poolId || delta === 0n) return;
+  // Compare against the raw pool address (poolId is namespaced "{chainId}-0x...").
+  // Skip mints where the pool itself receives LP tokens (self-transfer during liquidity ops).
+  const rawPoolAddress = extractAddressFromPoolId(poolId);
+  if (address === ZERO_ADDRESS || address === rawPoolAddress || delta === 0n)
+    return;
 
   const id = `${poolId}-${address}`;
   const existing = await context.LiquidityPosition.get(id);
@@ -68,6 +80,7 @@ async function applyLiquidityPositionDelta({
 
   context.LiquidityPosition.set({
     id,
+    chainId,
     poolId,
     address,
     netLiquidity: nextBalance > 0n ? nextBalance : 0n,
@@ -425,6 +438,7 @@ FPMM.Transfer.handler(async ({ event, context }) => {
   // not the Burn event's `to` beneficiary.
   await applyLiquidityPositionDelta({
     context,
+    chainId: event.chainId,
     poolId,
     address: from,
     delta: -value,
@@ -433,6 +447,7 @@ FPMM.Transfer.handler(async ({ event, context }) => {
   });
   await applyLiquidityPositionDelta({
     context,
+    chainId: event.chainId,
     poolId,
     address: to,
     delta: value,

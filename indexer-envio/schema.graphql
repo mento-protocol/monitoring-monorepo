@@ -192,6 +192,7 @@ type VirtualPoolLifecycle {
 
 type LiquidityPosition @index(fields: ["poolId", "address"]) {
   id: ID! # "{poolId}-{address}"
+  chainId: Int! @index
   poolId: String! @index
   address: String! @index
   netLiquidity: BigInt! # Running sum: +mint, -burn. Always >= 0 in practice.
