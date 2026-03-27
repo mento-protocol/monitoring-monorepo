@@ -11,7 +11,7 @@ import {
   type RebalanceEvent,
   type VirtualPoolLifecycle,
 } from "generated";
-import { eventId, asAddress, asBigInt } from "../helpers";
+import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
 
 // ---------------------------------------------------------------------------
@@ -20,7 +20,7 @@ import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
 
 VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.params.pool);
+  const poolId = makePoolId(event.chainId, event.params.pool);
   const token0 = asAddress(event.params.token0);
   const token1 = asAddress(event.params.token1);
 
@@ -41,6 +41,7 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
 
   const lifecycle: VirtualPoolLifecycle = {
     id,
+    chainId: event.chainId,
     poolId,
     action: "DEPLOYED",
     token0,
@@ -60,7 +61,7 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
 
 VirtualPoolFactory.PoolDeprecated.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.params.pool);
+  const poolId = makePoolId(event.chainId, event.params.pool);
 
   await upsertPool({
     context,
@@ -73,6 +74,7 @@ VirtualPoolFactory.PoolDeprecated.handler(async ({ event, context }) => {
 
   const lifecycle: VirtualPoolLifecycle = {
     id,
+    chainId: event.chainId,
     poolId,
     action: "DEPRECATED",
     token0: undefined,
@@ -92,7 +94,7 @@ VirtualPoolFactory.PoolDeprecated.handler(async ({ event, context }) => {
 
 VirtualPool.Swap.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.srcAddress);
+  const poolId = makePoolId(event.chainId, event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -127,6 +129,7 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
 
   const swap: SwapEvent = {
     id,
+    chainId: event.chainId,
     poolId,
     sender: asAddress(event.params.sender),
     recipient: asAddress(event.params.to),
@@ -148,7 +151,7 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
 
 VirtualPool.Mint.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.srcAddress);
+  const poolId = makePoolId(event.chainId, event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -171,6 +174,7 @@ VirtualPool.Mint.handler(async ({ event, context }) => {
 
   const liquidityEvent: LiquidityEvent = {
     id,
+    chainId: event.chainId,
     poolId,
     kind: "MINT",
     sender: asAddress(event.params.sender),
@@ -192,7 +196,7 @@ VirtualPool.Mint.handler(async ({ event, context }) => {
 
 VirtualPool.Burn.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.srcAddress);
+  const poolId = makePoolId(event.chainId, event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -215,6 +219,7 @@ VirtualPool.Burn.handler(async ({ event, context }) => {
 
   const liquidityEvent: LiquidityEvent = {
     id,
+    chainId: event.chainId,
     poolId,
     kind: "BURN",
     sender: asAddress(event.params.sender),
@@ -236,7 +241,7 @@ VirtualPool.Burn.handler(async ({ event, context }) => {
 
 VirtualPool.UpdateReserves.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.srcAddress);
+  const poolId = makePoolId(event.chainId, event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -262,6 +267,7 @@ VirtualPool.UpdateReserves.handler(async ({ event, context }) => {
 
   const reserveUpdate: ReserveUpdate = {
     id,
+    chainId: event.chainId,
     poolId,
     reserve0: event.params.reserve0,
     reserve1: event.params.reserve1,
@@ -281,7 +287,7 @@ VirtualPool.UpdateReserves.handler(async ({ event, context }) => {
 VirtualPool.Rebalanced.handler(async ({ event, context }) => {
   // VirtualPools shouldn't normally rebalance, but handle defensively
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.srcAddress);
+  const poolId = makePoolId(event.chainId, event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -313,6 +319,7 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
 
   const rebalanced: RebalanceEvent = {
     id,
+    chainId: event.chainId,
     poolId,
     sender: asAddress(event.params.sender),
     caller: event.transaction.from ?? "",
