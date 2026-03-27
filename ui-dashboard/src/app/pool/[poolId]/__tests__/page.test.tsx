@@ -258,24 +258,33 @@ describe("Pool detail LPs tab", () => {
   });
 
   it("queries pool detail with both the namespaced id and active chainId", () => {
-    mockPoolId = "0xpool";
+    // expect.assertions ensures the expects inside mockImplementation actually
+    // run — without this the test would pass vacuously if the mock were never
+    // called (PoolDetailWithHealth + TradingLimits + PoolDeployment = 3 expects).
+    //
+    // Note: we use a full valid 40-char hex address here. "0xpool" is NOT a
+    // valid address so normalizePoolIdForChain would return it unchanged
+    // (passthrough), breaking the namespaced-variable assertion.
+    expect.assertions(3);
+    mockPoolId = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045";
+    const namespacedId = "42220-0xd8da6bf26964af9d7eed9e03e53415d37aa96045";
 
     mockUseGQL.mockImplementation(
       (query: string | null, variables?: unknown) => {
         if (!query) return gqlResult(undefined);
         if (query.includes("PoolDetailWithHealth")) {
           expect(variables).toEqual({
-            id: "42220-0xpool",
+            id: namespacedId,
             chainId: 42220,
           });
-          return gqlResult({ Pool: [BASE_POOL] });
+          return gqlResult({ Pool: [{ ...BASE_POOL, id: namespacedId }] });
         }
         if (query.includes("TradingLimits")) {
-          expect(variables).toEqual({ poolId: "42220-0xpool" });
+          expect(variables).toEqual({ poolId: namespacedId });
           return gqlResult({ TradingLimit: [] });
         }
         if (query.includes("PoolDeployment")) {
-          expect(variables).toEqual({ poolId: "42220-0xpool" });
+          expect(variables).toEqual({ poolId: namespacedId });
           return gqlResult({ FactoryDeployment: [] });
         }
         return gqlResult(undefined);

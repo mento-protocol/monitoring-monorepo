@@ -12,6 +12,8 @@ import {
   normalizePoolIdForChain,
   TRADING_LIMITS_INTERNAL_DECIMALS,
 } from "../format";
+// Pool ID utils are tested comprehensively in pool-id.test.ts;
+// the imports above verify the re-exports from format.ts still resolve.
 
 // ---------------------------------------------------------------------------
 // truncateAddress
