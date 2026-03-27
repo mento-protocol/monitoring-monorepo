@@ -85,6 +85,9 @@ function HomeContent() {
   const filteredPoolChainId = extractChainIdFromPoolId(normalizedPoolFilter);
   const hasForeignChainPoolFilter =
     filteredPoolChainId !== null && filteredPoolChainId !== network.chainId;
+  const foreignChainErrorMsg = hasForeignChainPoolFilter
+    ? `Pool ${normalizedPoolFilter} belongs to chain ${filteredPoolChainId}. Switch networks to view its swaps.`
+    : "";
   const swapQuery = hasForeignChainPoolFilter
     ? null
     : normalizedPoolFilter
@@ -124,7 +127,7 @@ function HomeContent() {
     const filterChainId = extractChainIdFromPoolId(normalized);
     if (filterChainId !== null && filterChainId !== network.chainId) {
       setFilterError(
-        `Pool ${normalized} belongs to chain ${filterChainId}. Switch networks before filtering it here.`,
+        `Pool ${normalized} belongs to chain ${filterChainId}. Switch networks to view its swaps.`,
       );
       return;
     }
@@ -237,21 +240,20 @@ function HomeContent() {
           />
         </div>
 
-        {(filterError || hasForeignChainPoolFilter) && (
+        {(filterError || foreignChainErrorMsg) && (
           <p
             id="filter-error"
             className="mb-3 text-sm text-red-400"
             role="alert"
           >
-            {filterError ||
-              `Pool ${normalizedPoolFilter} belongs to chain ${filteredPoolChainId}. Switch networks before filtering it here.`}
+            {filterError || foreignChainErrorMsg}
           </p>
         )}
 
         {swapsErr ? (
           <ErrorBox message={`Failed to load swaps: ${swapsErr.message}`} />
         ) : hasForeignChainPoolFilter ? (
-          <EmptyBox message="This pool belongs to a different chain. Switch networks to view its swaps." />
+          <EmptyBox message={foreignChainErrorMsg} />
         ) : swapsLoading ? (
           <Skeleton rows={5} />
         ) : swaps.length === 0 ? (
