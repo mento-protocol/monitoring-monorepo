@@ -77,6 +77,15 @@ resource "vercel_project" "dashboard" {
 # ── Environment Variables ─────────────────────────────────────────────────────
 # Using individual resources so optional vars can use count without type-mixing.
 
+resource "vercel_project_environment_variable" "hasura_url_multichain" {
+  count      = var.hasura_url_multichain_hosted != "" ? 1 : 0
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED"
+  value      = var.hasura_url_multichain_hosted
+  target     = ["production", "preview"]
+}
+
 resource "vercel_project_environment_variable" "hasura_url_celo_sepolia" {
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id
