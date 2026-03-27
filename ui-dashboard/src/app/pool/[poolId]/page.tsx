@@ -417,6 +417,11 @@ function PoolHeader({
     { ...pool, healthStatus: computeHealthStatus(pool, network.chainId) },
     nowSeconds,
   );
+  // pool.id is the namespaced multichain ID ("42220-0x…"). Strip the chain
+  // prefix so AddressLink receives a plain hex address for explorer links.
+  const poolContractAddress = isNamespacedPoolId(pool.id)
+    ? pool.id.split("-").slice(1).join("-")
+    : pool.id;
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -424,7 +429,7 @@ function PoolHeader({
         <h1 className="text-xl font-bold text-white">{name}</h1>
         {network.hasVirtualPools && <SourceBadge source={pool.source} />}
         <span className="text-sm">
-          <AddressLink address={pool.id} />
+          <AddressLink address={poolContractAddress} />
         </span>
       </div>
       <dl className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-sm">
