@@ -22,8 +22,8 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Chain-scoped: only look up pools on this chain to prevent cross-chain bleed
-  // (same rateFeedID may exist on both Celo and Monad after multichain merge).
+  // Chain-scoped — getPoolsByFeed filters by chainId to prevent cross-chain
+  // oracle bleed (same rateFeedID exists on both Celo and Monad). See rpc.ts.
   const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
   if (poolIds.length === 0) return;
 
@@ -91,7 +91,6 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Chain-scoped: only look up pools on this chain.
   const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
   if (poolIds.length === 0) return;
 
@@ -177,7 +176,6 @@ SortedOracles.TokenReportExpirySet.handler(async ({ event, context }) => {
 SortedOracles.ReportExpirySet.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
-  // Chain-scoped: only update pools on this chain.
   const pools = await getPoolsWithReferenceFeed(context, event.chainId);
 
   for (const pool of pools) {
