@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Deploy indexer to Envio Hosted by pushing to deploy branch
+# Deploy indexer to Envio Hosted by pushing to a deploy branch.
 #
-# Usage: pnpm deploy:indexer [network]
-#   With network: pnpm deploy:indexer celo-mainnet
-#   Without: prompts interactively with arrow keys
+# Usage:
+#   pnpm deploy:indexer              → push to `envio` branch (multichain mainnet, default)
+#   pnpm deploy:indexer <network>    → push to `deploy/<network>` branch (legacy per-network)
+#
+# Envio project: https://envio.dev/app/mento-protocol/mento-v3-celo-sepolia
+#   (repurposed for multichain; triggered by `envio` branch pushes)
 
 set -euo pipefail
 
@@ -95,18 +98,20 @@ fi
 
 NETWORK="${1:-}"
 
+# Default (no arg): deploy multichain indexer via `envio` branch
 if [[ -z "$NETWORK" ]]; then
-  prompt_for_network
+  DEPLOY_BRANCH="envio"
+  echo "🌐 Deploying multichain indexer (Celo + Monad) → branch: $DEPLOY_BRANCH"
+else
+  if ! validate_network "$NETWORK"; then
+    echo "Invalid network: $NETWORK"
+    echo "Available: ${VALID_NETWORKS[*]}"
+    echo "Example: pnpm deploy:indexer celo-mainnet"
+    exit 1
+  fi
+  DEPLOY_BRANCH="deploy/${NETWORK}"
+  echo "🚀 Deploying indexer (network: $NETWORK) → branch: $DEPLOY_BRANCH"
 fi
-
-if [[ -z "$NETWORK" ]] || ! validate_network "$NETWORK"; then
-  echo "Invalid or missing network."
-  echo "Available: ${VALID_NETWORKS[*]}"
-  echo "Example: pnpm deploy:indexer celo-mainnet"
-  exit 1
-fi
-
-DEPLOY_BRANCH="deploy/${NETWORK}"
 
 # Check if we're on a clean working tree
 if [[ -n "$(git status --porcelain)" ]]; then
@@ -122,7 +127,6 @@ if ! git ls-remote --heads origin "$DEPLOY_BRANCH" | grep -q "$DEPLOY_BRANCH"; t
   git push --no-verify origin "main:refs/heads/$DEPLOY_BRANCH"
 fi
 
-echo "🚀 Deploying indexer to Envio Hosted (network: $NETWORK)"
 echo "   Branch: $DEPLOY_BRANCH"
 echo ""
 
@@ -152,7 +156,7 @@ echo ""
 echo "📋 POST-DEPLOY CHECKLIST:"
 echo ""
 echo "   1. Watch sync progress:"
-echo "      https://envio.dev/app/mento-protocol/mento-v3-${NETWORK}"
+echo "      https://envio.dev/app/mento-protocol/mento-v3-celo-sepolia"
 echo ""
 echo "   2. Once synced, verify the dashboard:"
 echo "      https://monitoring.mento.org"
