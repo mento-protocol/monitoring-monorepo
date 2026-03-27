@@ -78,7 +78,7 @@ export const POOL_SWAPS = `
       order_by: { blockNumber: desc }
       limit: $limit
     ) {
-      id poolId sender recipient
+      id chainId poolId sender recipient
       amount0In amount1In amount0Out amount1Out
       txHash blockNumber blockTimestamp
     }
