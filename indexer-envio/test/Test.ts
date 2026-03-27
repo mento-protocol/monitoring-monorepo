@@ -405,6 +405,7 @@ type OracleSnapshotEntity = {
 
 type LiquidityPositionEntity = {
   id: string;
+  chainId: number;
   poolId: string;
   address: string;
   netLiquidity: bigint;
@@ -650,6 +651,7 @@ describe("Envio Celo indexer handlers", () => {
     let mockDb = MockDb.createMockDb();
     mockDb = mockDb.entities.LiquidityPosition.set({
       id: `${pid(POOL_ADDR)}-${OWNER_ADDR}`,
+      chainId: 42220,
       poolId: pid(POOL_ADDR),
       address: OWNER_ADDR,
       netLiquidity: 40n,
