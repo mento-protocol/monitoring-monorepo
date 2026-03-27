@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type { Pool, PoolSnapshot } from "generated";
-import { hourBucket, snapshotId, poolIdToAddress } from "./helpers";
+import { hourBucket, snapshotId, extractAddressFromPoolId } from "./helpers";
 import { computePriceDifference } from "./priceDifference";
 import { fetchReferenceRateFeedID, fetchReportExpiry } from "./rpc";
 
@@ -148,7 +148,7 @@ export const upsertPool = async ({
   // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
   // pool creation), retry now so oracle events can start flowing.
   // Use the raw address (not the namespaced poolId) for RPC calls.
-  const poolAddr = poolIdToAddress(poolId);
+  const poolAddr = extractAddressFromPoolId(poolId);
   let healedOracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> | undefined;
   if (
     existing.referenceRateFeedID === "" &&

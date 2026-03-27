@@ -326,8 +326,34 @@ type GeneratedModule = {
 };
 
 const { TestHelpers } = generated as unknown as GeneratedModule;
-const { MockDb, FPMMFactory, FPMM, SortedOracles, OpenLiquidityStrategy } =
-  TestHelpers;
+const {
+  MockDb,
+  FPMMFactory,
+  FPMM,
+  SortedOracles,
+  OpenLiquidityStrategy,
+  ERC20FeeToken,
+} = TestHelpers as typeof TestHelpers & {
+  ERC20FeeToken: {
+    Transfer: {
+      createMockEvent: (args: {
+        from: string;
+        to: string;
+        value: bigint;
+        mockEventData: {
+          chainId: number;
+          logIndex: number;
+          srcAddress: string;
+          block: { number: number; timestamp: number };
+        };
+      }) => unknown;
+      processEvent: (args: {
+        event: unknown;
+        mockDb: MockDb;
+      }) => Promise<MockDb>;
+    };
+  };
+};
 
 type PoolEntity = {
   id: string;
@@ -2216,6 +2242,259 @@ describe("Envio Celo indexer handlers", () => {
       // Both events share the same poolId but different olsAddress — confirms they're independently queryable
       assert.equal(liqEvent1?.poolId, pid(POOL_ADDR));
       assert.equal(liqEvent2?.poolId, pid(POOL_ADDR));
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // chainId correctness on TradingLimit and ProtocolFeeTransfer
+  // ---------------------------------------------------------------------------
+
+  describe("chainId field correctness", () => {
+    it("TradingLimitConfigured: TradingLimit entity carries the correct chainId", async () => {
+      const POOL_ADDR = "0x00000000000000000000000000000000000001f0";
+      const TOKEN_ADDR = "0x00000000000000000000000000000000000001f1";
+      let mockDb = MockDb.createMockDb();
+
+      // Deploy pool first so the Pool.get inside TradingLimitConfigured handler succeeds
+      const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+        token0: TOKEN_ADDR,
+        token1: "0x0000000000000000000000000000000000000004",
+        fpmmProxy: POOL_ADDR,
+        fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+        mockEventData: {
+          chainId: 42220,
+          logIndex: 1,
+          srcAddress: "0x00000000000000000000000000000000000000cc",
+          block: { number: 5000, timestamp: 1_700_050_000 },
+        },
+      });
+      mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+        event: deployEvent,
+        mockDb,
+      });
+
+      const configEvent = (FPMM as any).TradingLimitConfigured.createMockEvent({
+        token: TOKEN_ADDR,
+        config: [1_000_000n, 5_000_000n, 0],
+        mockEventData: {
+          chainId: 42220,
+          logIndex: 2,
+          srcAddress: POOL_ADDR,
+          block: { number: 5001, timestamp: 1_700_050_100 },
+        },
+      });
+      mockDb = await (FPMM as any).TradingLimitConfigured.processEvent({
+        event: configEvent,
+        mockDb,
+      });
+
+      const tlId = `${pid(POOL_ADDR)}-${TOKEN_ADDR.toLowerCase()}`;
+      const tl = (mockDb.entities as any).TradingLimit.get(tlId) as
+        | { chainId: number; poolId: string }
+        | undefined;
+      assert.ok(tl, `TradingLimit should exist at id=${tlId}`);
+      assert.equal(
+        tl!.chainId,
+        42220,
+        "TradingLimit.chainId must equal the event chainId",
+      );
+      assert.equal(
+        tl!.poolId,
+        pid(POOL_ADDR),
+        "TradingLimit.poolId must be namespaced",
+      );
+    });
+
+    // ProtocolFeeTransfer.chainId is tested via protocol-fees.test.ts which
+    // already seeds the pool and fires ERC20FeeToken.Transfer. The chainId
+    // field is verified inline here for completeness.
+    it("ERC20FeeToken.Transfer: ProtocolFeeTransfer entity carries the correct chainId", async () => {
+      // This test mirrors the setup in protocol-fees.test.ts but explicitly
+      // asserts the chainId field added in the multichain refactor.
+      const POOL_ADDR = "0x00000000000000000000000000000000000001f2";
+      const TOKEN_ADDR = "0x00000000000000000000000000000000000001f3";
+      let mockDb = MockDb.createMockDb();
+
+      // Seed the FPMM pool so ERC20FeeToken handler recognizes the sender
+      const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+        token0: TOKEN_ADDR,
+        token1: "0x0000000000000000000000000000000000000004",
+        fpmmProxy: POOL_ADDR,
+        fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+        mockEventData: {
+          chainId: 42220,
+          logIndex: 1,
+          srcAddress: "0x00000000000000000000000000000000000000cc",
+          block: { number: 6000, timestamp: 1_700_060_000 },
+        },
+      });
+      mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+        event: deployEvent,
+        mockDb,
+      });
+
+      const transferEvent = ERC20FeeToken.Transfer.createMockEvent({
+        from: POOL_ADDR,
+        to: "0x6e7a5820baD6cebA8Ef5ea69c0C92EbbDAc9CE48", // yield split address
+        value: 100n,
+        mockEventData: {
+          chainId: 42220,
+          logIndex: 2,
+          srcAddress: TOKEN_ADDR,
+          block: { number: 6001, timestamp: 1_700_060_100 },
+        },
+      });
+      mockDb = await ERC20FeeToken.Transfer.processEvent({
+        event: transferEvent,
+        mockDb,
+      });
+
+      const feeId = `42220_6001_2`;
+      const feeTransfer = (mockDb.entities as any).ProtocolFeeTransfer.get(
+        feeId,
+      ) as { chainId: number; from: string } | undefined;
+      assert.ok(feeTransfer, "ProtocolFeeTransfer should exist");
+      assert.equal(
+        feeTransfer!.chainId,
+        42220,
+        "ProtocolFeeTransfer.chainId must equal the event chainId",
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Cross-chain oracle isolation — additional event types
+  // ---------------------------------------------------------------------------
+
+  describe("cross-chain oracle isolation (MedianUpdated + expiry events)", () => {
+    const CELO_CHAIN = 42220;
+    const MONAD_CHAIN = 143;
+    const SHARED_FEED_ID = "0x000000000000000000000000000000000000feeb";
+    const POOL_ADDR = "0x000000000000000000000000000000000000ce11";
+
+    async function setupTwoChainPools(
+      base: MockDb,
+    ): Promise<{ mockDb: MockDb; monadPoolId: string }> {
+      let mockDb = await seedPoolWithFeed(base, {
+        poolAddress: POOL_ADDR,
+        feedId: SHARED_FEED_ID,
+      });
+      const celoPool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+      assert.ok(celoPool, "Celo pool must exist");
+      const monadPoolId = makePoolId(MONAD_CHAIN, POOL_ADDR);
+      mockDb = mockDb.entities.Pool.set({
+        ...celoPool,
+        id: monadPoolId,
+        chainId: MONAD_CHAIN,
+        oraclePrice: 0n,
+        oracleTimestamp: 0n,
+      });
+      return { mockDb, monadPoolId };
+    }
+
+    afterEach(() => {
+      _clearMockRateFeedIDs();
+      _clearMockReportExpiry();
+    });
+
+    it("MedianUpdated on Celo does NOT update Monad pool with same rateFeedID", async () => {
+      let { mockDb, monadPoolId } = await setupTwoChainPools(
+        MockDb.createMockDb(),
+      );
+      const ORACLE_PRICE = BigInt("1000000000000000000000000");
+      mockDb = await SortedOracles.MedianUpdated.processEvent({
+        event: SortedOracles.MedianUpdated.createMockEvent({
+          token: SHARED_FEED_ID,
+          value: ORACLE_PRICE,
+          mockEventData: {
+            chainId: CELO_CHAIN,
+            logIndex: 80,
+            srcAddress: "0x0000000000000000000000000000000000000099",
+            block: { number: 1000, timestamp: 1_700_010_000 },
+          },
+        }),
+        mockDb,
+      });
+
+      const celoAfter = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+      assert.equal(
+        celoAfter?.oraclePrice,
+        ORACLE_PRICE,
+        "Celo pool must be updated",
+      );
+      const monadAfter = mockDb.entities.Pool.get(monadPoolId) as PoolEntity;
+      assert.equal(
+        monadAfter?.oraclePrice,
+        0n,
+        "Monad pool must NOT be updated by Celo MedianUpdated",
+      );
+    });
+
+    it("TokenReportExpirySet on Celo does NOT update Monad pool oracle expiry", async () => {
+      let { mockDb, monadPoolId } = await setupTwoChainPools(
+        MockDb.createMockDb(),
+      );
+      const NEW_EXPIRY = 900n;
+      _setMockReportExpiry(CELO_CHAIN, SHARED_FEED_ID, NEW_EXPIRY);
+
+      mockDb = await (SortedOracles as any).TokenReportExpirySet.processEvent({
+        event: (SortedOracles as any).TokenReportExpirySet.createMockEvent({
+          token: SHARED_FEED_ID,
+          mockEventData: {
+            chainId: CELO_CHAIN,
+            logIndex: 81,
+            srcAddress: "0x0000000000000000000000000000000000000099",
+            block: { number: 1001, timestamp: 1_700_010_100 },
+          },
+        }),
+        mockDb,
+      });
+
+      const celoAfter = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+      assert.equal(
+        celoAfter?.oracleExpiry,
+        NEW_EXPIRY,
+        "Celo pool expiry must be updated",
+      );
+      const monadAfter = mockDb.entities.Pool.get(monadPoolId) as PoolEntity;
+      assert.equal(
+        monadAfter?.oracleExpiry,
+        600n,
+        "Monad pool expiry must NOT be updated by Celo TokenReportExpirySet",
+      );
+    });
+
+    it("ReportExpirySet on Celo does NOT update Monad pool oracle expiry", async () => {
+      let { mockDb, monadPoolId } = await setupTwoChainPools(
+        MockDb.createMockDb(),
+      );
+      const NEW_EXPIRY = 1200n;
+      _setMockReportExpiry(CELO_CHAIN, SHARED_FEED_ID, NEW_EXPIRY);
+
+      mockDb = await (SortedOracles as any).ReportExpirySet.processEvent({
+        event: (SortedOracles as any).ReportExpirySet.createMockEvent({
+          mockEventData: {
+            chainId: CELO_CHAIN,
+            logIndex: 82,
+            srcAddress: "0x0000000000000000000000000000000000000099",
+            block: { number: 1002, timestamp: 1_700_010_200 },
+          },
+        }),
+        mockDb,
+      });
+
+      const celoAfter = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+      assert.equal(
+        celoAfter?.oracleExpiry,
+        NEW_EXPIRY,
+        "Celo pool expiry must be updated by ReportExpirySet",
+      );
+      const monadAfter = mockDb.entities.Pool.get(monadPoolId) as PoolEntity;
+      assert.equal(
+        monadAfter?.oracleExpiry,
+        600n,
+        "Monad pool expiry must NOT be updated by Celo ReportExpirySet",
+      );
     });
   });
 });
