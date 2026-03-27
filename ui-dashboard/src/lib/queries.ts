@@ -1,7 +1,11 @@
 export const ALL_POOLS_WITH_HEALTH = `
-  query AllPoolsWithHealth {
-    Pool(order_by: { createdAtBlock: desc }) {
+  query AllPoolsWithHealth($chainId: Int!) {
+    Pool(
+      where: { chainId: { _eq: $chainId } }
+      order_by: { createdAtBlock: desc }
+    ) {
       id
+      chainId
       token0
       token1
       token0Decimals
@@ -54,9 +58,13 @@ export const POOL_SNAPSHOTS_24H = `
 `;
 
 export const RECENT_SWAPS = `
-  query RecentSwaps($limit: Int!) {
-    SwapEvent(order_by: { blockNumber: desc }, limit: $limit) {
-      id poolId sender recipient
+  query RecentSwaps($chainId: Int!, $limit: Int!) {
+    SwapEvent(
+      where: { chainId: { _eq: $chainId } }
+      order_by: { blockNumber: desc }
+      limit: $limit
+    ) {
+      id chainId poolId sender recipient
       amount0In amount1In amount0Out amount1Out
       txHash blockNumber blockTimestamp
     }
@@ -84,7 +92,7 @@ export const POOL_RESERVES = `
       order_by: { blockNumber: asc }
       limit: $limit
     ) {
-      id reserve0 reserve1
+      id chainId reserve0 reserve1
       txHash blockNumber blockTimestamp
     }
   }
@@ -97,7 +105,7 @@ export const POOL_REBALANCES = `
       order_by: { blockNumber: desc }
       limit: $limit
     ) {
-      id sender caller priceDifferenceBefore priceDifferenceAfter
+      id chainId sender caller priceDifferenceBefore priceDifferenceAfter
       txHash blockNumber blockTimestamp
       improvement effectivenessRatio
     }
@@ -111,7 +119,7 @@ export const POOL_LIQUIDITY = `
       order_by: { blockNumber: desc }
       limit: $limit
     ) {
-      id kind sender recipient
+      id chainId kind sender recipient
       amount0 amount1 liquidity
       txHash blockNumber blockTimestamp
     }
@@ -119,9 +127,9 @@ export const POOL_LIQUIDITY = `
 `;
 
 export const POOL_DETAIL_WITH_HEALTH = `
-  query PoolDetailWithHealth($id: String!) {
-    Pool(where: { id: { _eq: $id } }) {
-      id token0 token1 token0Decimals token1Decimals source
+  query PoolDetailWithHealth($id: String!, $chainId: Int!) {
+    Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
+      id chainId token0 token1 token0Decimals token1Decimals source
       createdAtBlock createdAtTimestamp
       updatedAtBlock updatedAtTimestamp
       healthStatus
@@ -182,7 +190,7 @@ export const ORACLE_SNAPSHOTS = `
       order_by: { timestamp: asc }
       limit: $limit
     ) {
-      id
+      id chainId
       poolId
       timestamp
       oraclePrice
@@ -227,7 +235,7 @@ export const OLS_POOL = `
       order_by: { updatedAtTimestamp: desc }
       limit: 1
     ) {
-      id poolId olsAddress isActive debtToken
+      id chainId poolId olsAddress isActive debtToken
       rebalanceCooldown lastRebalance
       protocolFeeRecipient
       liquiditySourceIncentiveExpansion
@@ -248,7 +256,7 @@ export const OLS_LIQUIDITY_EVENTS = `
       order_by: { blockTimestamp: desc }
       limit: $limit
     ) {
-      id direction caller
+      id chainId direction caller
       tokenGivenToPool amountGivenToPool
       tokenTakenFromPool amountTakenFromPool
       txHash blockNumber blockTimestamp
@@ -257,8 +265,11 @@ export const OLS_LIQUIDITY_EVENTS = `
 `;
 
 export const ALL_OLS_POOLS = `
-  query AllOlsPools {
-    OlsPool(where: { isActive: { _eq: true } }, limit: 1000) {
+  query AllOlsPools($chainId: Int!) {
+    OlsPool(
+      where: { isActive: { _eq: true }, chainId: { _eq: $chainId } }
+      limit: 1000
+    ) {
       poolId
     }
   }
@@ -275,8 +286,13 @@ export const ALL_OLS_POOLS = `
  * view so the browser only receives two numbers instead of N rows.
  */
 export const PROTOCOL_FEE_TRANSFERS_ALL = `
-  query ProtocolFeeTransfersAll {
-    ProtocolFeeTransfer(limit: 10000, order_by: { blockTimestamp: desc }) {
+  query ProtocolFeeTransfersAll($chainId: Int!) {
+    ProtocolFeeTransfer(
+      where: { chainId: { _eq: $chainId } }
+      limit: 10000
+      order_by: { blockTimestamp: desc }
+    ) {
+      chainId
       tokenSymbol
       tokenDecimals
       amount

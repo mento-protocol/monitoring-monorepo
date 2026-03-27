@@ -30,8 +30,10 @@ vi.mock("@/components/network-provider", () => ({
   }),
 }));
 
+let mockPoolId = "0xpool";
+
 vi.mock("next/navigation", () => ({
-  useParams: () => ({ poolId: encodeURIComponent("0xpool") }),
+  useParams: () => ({ poolId: encodeURIComponent(mockPoolId) }),
   useRouter: () => ({ replace: mockReplace }),
   useSearchParams: () => mockSearchParams,
 }));
@@ -103,7 +105,8 @@ vi.mock("@/components/table", () => ({
 import PoolDetailPage from "../page";
 
 const BASE_POOL: Pool = {
-  id: "0xpool",
+  id: "42220-0xpool",
+  chainId: 42220,
   token0: "0xt0",
   token1: "0xt1",
   source: "fpmm_factory",
@@ -131,6 +134,9 @@ function gqlResult(data: unknown, error?: Error) {
 describe("Pool detail LPs tab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPoolId = "0xpool";
+    mockSearchParams.forEach((_, key) => mockSearchParams.delete(key));
+    mockSearchParams.set("tab", "providers");
   });
 
   it("renders indexed LiquidityPosition data when available", () => {
@@ -223,5 +229,33 @@ describe("Pool detail LPs tab", () => {
     expect(html).not.toContain(
       "LP provider data is unavailable until this environment is reindexed",
     );
+  });
+
+  it("queries pool detail with both the namespaced id and active chainId", () => {
+    mockPoolId = "0xpool";
+
+    mockUseGQL.mockImplementation(
+      (query: string | null, variables?: unknown) => {
+        if (!query) return gqlResult(undefined);
+        if (query.includes("PoolDetailWithHealth")) {
+          expect(variables).toEqual({
+            id: "42220-0xpool",
+            chainId: 42220,
+          });
+          return gqlResult({ Pool: [BASE_POOL] });
+        }
+        if (query.includes("TradingLimits")) {
+          expect(variables).toEqual({ poolId: "42220-0xpool" });
+          return gqlResult({ TradingLimit: [] });
+        }
+        if (query.includes("PoolDeployment")) {
+          expect(variables).toEqual({ poolId: "42220-0xpool" });
+          return gqlResult({ FactoryDeployment: [] });
+        }
+        return gqlResult(undefined);
+      },
+    );
+
+    renderToStaticMarkup(<PoolDetailPage />);
   });
 });

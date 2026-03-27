@@ -4,12 +4,17 @@
  * Focus: addressLabels and tokenSymbols overrides take precedence over
  * package-derived maps, tested via real same-key collisions.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { NETWORKS, makeNetwork, isConfiguredNetworkId } from "../networks";
 
 // Known Celo mainnet addresses from @mento-protocol/contracts (42220/mainnet).
 // These are in the package-derived maps for any network using chainId 42220.
 const USDM_ADDR = "0x765de816845861e75a25fca122bb6898b8b1282a";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
 
 describe("makeNetwork — addressLabels merge/override contract", () => {
   it("config override wins for same address key (real collision)", () => {
@@ -151,6 +156,19 @@ describe("NETWORKS — local development defaults", () => {
 describe("NETWORKS — Monad networks", () => {
   const USDM_MONAD_MAINNET = "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115";
   const USDM_MONAD_TESTNET = "0x5ecc03111ad2a78f981a108759bc73bae2ab31bc";
+
+  it("does not mark monad-mainnet-hosted configured when only the Celo hosted URL is set", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED", "");
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED", "");
+    vi.stubEnv(
+      "NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED",
+      "https://celo.example/v1/graphql",
+    );
+
+    const networks = await import("../networks");
+    expect(networks.NETWORKS["monad-mainnet-hosted"].hasuraUrl).toBe("");
+    expect(networks.isConfiguredNetworkId("monad-mainnet-hosted")).toBe(false);
+  });
 
   it("monad-mainnet-hosted has tokenSymbols populated from contracts package", () => {
     const monad = NETWORKS["monad-mainnet-hosted"];

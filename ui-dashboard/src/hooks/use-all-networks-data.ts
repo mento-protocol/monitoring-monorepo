@@ -57,6 +57,7 @@ export async function fetchNetworkData(
   try {
     const poolsRes = await client.request<{ Pool: Pool[] }>(
       ALL_POOLS_WITH_HEALTH,
+      { chainId: network.chainId },
     );
     pools = poolsRes.Pool ?? [];
   } catch (err) {
@@ -78,6 +79,7 @@ export async function fetchNetworkData(
   const [feesResult, snapshotsResult] = await Promise.allSettled([
     client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
       PROTOCOL_FEE_TRANSFERS_ALL,
+      { chainId: network.chainId },
     ),
     shouldQueryPoolSnapshots24h(poolIds)
       ? client.request<{ PoolSnapshot: PoolSnapshot24h[] }>(

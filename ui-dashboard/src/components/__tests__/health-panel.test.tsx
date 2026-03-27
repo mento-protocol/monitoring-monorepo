@@ -49,6 +49,7 @@ const FRESH_TS = String(Math.floor(Date.now() / 1000) - 60);
 
 const BASE_POOL: Pool = {
   id: "pool-1",
+  chainId: 42220,
   token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b",
   token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf",
   source: "fpmm_factory",

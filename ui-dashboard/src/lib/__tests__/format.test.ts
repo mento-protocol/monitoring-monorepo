@@ -6,8 +6,10 @@ import {
   formatTimestamp,
   relativeTime,
   formatBlock,
+  isNamespacedPoolId,
   isValidAddress,
   formatUSD,
+  normalizePoolIdForChain,
   TRADING_LIMITS_INTERNAL_DECIMALS,
 } from "../format";
 
@@ -36,6 +38,38 @@ describe("truncateAddress", () => {
     expect(result.startsWith("0xd8dA")).toBe(true);
     expect(result.endsWith("6045")).toBe(true);
     expect(result).toContain("…");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pool ID normalization
+// ---------------------------------------------------------------------------
+describe("pool ID normalization", () => {
+  it("detects namespaced pool IDs", () => {
+    expect(
+      isNamespacedPoolId("42220-0xd8da6bf26964af9d7eed9e03e53415d37aa96045"),
+    ).toBe(true);
+    expect(
+      isNamespacedPoolId("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"),
+    ).toBe(false);
+  });
+
+  it("normalizes raw addresses onto the active chain", () => {
+    expect(
+      normalizePoolIdForChain(
+        "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+        42220,
+      ),
+    ).toBe("42220-0xd8da6bf26964af9d7eed9e03e53415d37aa96045");
+  });
+
+  it("preserves already-namespaced pool IDs", () => {
+    expect(
+      normalizePoolIdForChain(
+        "143-0xBC69212B8E4D445B2307C9D32Dd68E2A4Df00115",
+        42220,
+      ),
+    ).toBe("143-0xbc69212b8e4d445b2307c9d32dd68e2a4df00115");
   });
 });
 
