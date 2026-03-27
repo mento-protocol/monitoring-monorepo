@@ -8,7 +8,7 @@ import {
   type OlsLiquidityEvent,
   type OlsLifecycleEvent,
 } from "generated";
-import { eventId, asAddress, asBigInt } from "../helpers";
+import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
 
 function olsPoolId(poolId: string, olsAddress: string): string {
   return `${poolId}-${olsAddress}`;
@@ -16,6 +16,7 @@ function olsPoolId(poolId: string, olsAddress: string): string {
 
 function placeholderOlsPool(args: {
   id: string;
+  chainId: number;
   poolId: string;
   olsAddress: string;
   blockNumber: bigint;
@@ -23,6 +24,7 @@ function placeholderOlsPool(args: {
 }): OlsPool {
   return {
     id: args.id,
+    chainId: args.chainId,
     poolId: args.poolId,
     olsAddress: args.olsAddress,
     isActive: true,
@@ -44,6 +46,7 @@ function placeholderOlsPool(args: {
 
 async function getOrCreateOlsPool(args: {
   context: { OlsPool: { get: (id: string) => Promise<OlsPool | undefined> } };
+  chainId: number;
   poolId: string;
   olsAddress: string;
   blockNumber: bigint;
@@ -55,6 +58,7 @@ async function getOrCreateOlsPool(args: {
     existing ??
     placeholderOlsPool({
       id,
+      chainId: args.chainId,
       poolId: args.poolId,
       olsAddress: args.olsAddress,
       blockNumber: args.blockNumber,
@@ -69,7 +73,8 @@ async function getOrCreateOlsPool(args: {
 
 OpenLiquidityStrategy.PoolAdded.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.params.pool);
+  const poolId = makePoolId(event.chainId, event.params.pool);
+  const olsAddress = asAddress(event.srcAddress);
   const p = event.params.params;
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
@@ -78,9 +83,10 @@ OpenLiquidityStrategy.PoolAdded.handler(async ({ event, context }) => {
   //                liquiditySourceIncentiveExpansion, protocolIncentiveExpansion,
   //                liquiditySourceIncentiveContraction, protocolIncentiveContraction]
   const olsPool: OlsPool = {
-    id: olsPoolId(poolId, asAddress(event.srcAddress)),
+    id: olsPoolId(poolId, olsAddress),
+    chainId: event.chainId,
     poolId,
-    olsAddress: asAddress(event.srcAddress),
+    olsAddress,
     isActive: true,
     debtToken: asAddress(p[1]),
     rebalanceCooldown: p[2], // already bigint
@@ -101,8 +107,9 @@ OpenLiquidityStrategy.PoolAdded.handler(async ({ event, context }) => {
 
   const lifecycle: OlsLifecycleEvent = {
     id,
+    chainId: event.chainId,
     poolId,
-    olsAddress: asAddress(event.srcAddress),
+    olsAddress,
     action: "POOL_ADDED",
     cooldown: 0n,
     txHash: event.transaction.hash,
@@ -119,14 +126,16 @@ OpenLiquidityStrategy.PoolAdded.handler(async ({ event, context }) => {
 
 OpenLiquidityStrategy.PoolRemoved.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.params.pool);
+  const poolId = makePoolId(event.chainId, event.params.pool);
+  const olsAddress = asAddress(event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
   const existing = await getOrCreateOlsPool({
     context,
+    chainId: event.chainId,
     poolId,
-    olsAddress: asAddress(event.srcAddress),
+    olsAddress,
     blockNumber,
     blockTimestamp,
   });
@@ -139,8 +148,9 @@ OpenLiquidityStrategy.PoolRemoved.handler(async ({ event, context }) => {
 
   const lifecycle: OlsLifecycleEvent = {
     id,
+    chainId: event.chainId,
     poolId,
-    olsAddress: asAddress(event.srcAddress),
+    olsAddress,
     action: "POOL_REMOVED",
     cooldown: 0n,
     txHash: event.transaction.hash,
@@ -158,15 +168,17 @@ OpenLiquidityStrategy.PoolRemoved.handler(async ({ event, context }) => {
 OpenLiquidityStrategy.RebalanceCooldownSet.handler(
   async ({ event, context }) => {
     const id = eventId(event.chainId, event.block.number, event.logIndex);
-    const poolId = asAddress(event.params.pool);
+    const poolId = makePoolId(event.chainId, event.params.pool);
+    const olsAddress = asAddress(event.srcAddress);
     const cooldown = event.params.cooldown; // already bigint
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
     const existing = await getOrCreateOlsPool({
       context,
+      chainId: event.chainId,
       poolId,
-      olsAddress: asAddress(event.srcAddress),
+      olsAddress,
       blockNumber,
       blockTimestamp,
     });
@@ -179,8 +191,9 @@ OpenLiquidityStrategy.RebalanceCooldownSet.handler(
 
     const lifecycle: OlsLifecycleEvent = {
       id,
+      chainId: event.chainId,
       poolId,
-      olsAddress: asAddress(event.srcAddress),
+      olsAddress,
       action: "COOLDOWN_SET",
       cooldown,
       txHash: event.transaction.hash,
@@ -198,7 +211,8 @@ OpenLiquidityStrategy.RebalanceCooldownSet.handler(
 
 OpenLiquidityStrategy.LiquidityMoved.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
-  const poolId = asAddress(event.params.pool);
+  const poolId = makePoolId(event.chainId, event.params.pool);
+  const olsAddress = asAddress(event.srcAddress);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -206,8 +220,9 @@ OpenLiquidityStrategy.LiquidityMoved.handler(async ({ event, context }) => {
   // after the historical PoolAdded event.
   const existing = await getOrCreateOlsPool({
     context,
+    chainId: event.chainId,
     poolId,
-    olsAddress: asAddress(event.srcAddress),
+    olsAddress,
     blockNumber,
     blockTimestamp,
   });
@@ -221,8 +236,9 @@ OpenLiquidityStrategy.LiquidityMoved.handler(async ({ event, context }) => {
 
   const olsEvent: OlsLiquidityEvent = {
     id,
+    chainId: event.chainId,
     poolId,
-    olsAddress: asAddress(event.srcAddress),
+    olsAddress,
     direction: Number(event.params.direction), // 0=Expand, 1=Contract
     tokenGivenToPool: asAddress(event.params.tokenGivenToPool),
     amountGivenToPool: event.params.amountGivenToPool,

@@ -22,7 +22,9 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  const poolIds = await getPoolsByFeed(context, rateFeedID);
+  // Chain-scoped: only look up pools on this chain to prevent cross-chain bleed
+  // (same rateFeedID may exist on both Celo and Monad after multichain merge).
+  const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
   if (poolIds.length === 0) return;
 
   const oracleTimestamp = event.params.timestamp;
@@ -65,6 +67,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       id:
         eventId(event.chainId, event.block.number, event.logIndex) +
         `-${poolId}`,
+      chainId: event.chainId,
       poolId,
       timestamp: blockTimestamp,
       oraclePrice,
@@ -88,7 +91,8 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  const poolIds = await getPoolsByFeed(context, rateFeedID);
+  // Chain-scoped: only look up pools on this chain.
+  const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
   if (poolIds.length === 0) return;
 
   for (const poolId of poolIds) {
@@ -127,6 +131,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       id:
         eventId(event.chainId, event.block.number, event.logIndex) +
         `-${poolId}`,
+      chainId: event.chainId,
       poolId,
       timestamp: blockTimestamp,
       oraclePrice,
@@ -149,7 +154,7 @@ SortedOracles.TokenReportExpirySet.handler(async ({ event, context }) => {
   const rateFeedID = asAddress(event.params.token);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
-  const poolIds = await getPoolsByFeed(context, rateFeedID);
+  const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
   const oracleExpiry = await fetchReportExpiry(
     event.chainId,
     rateFeedID,
@@ -172,7 +177,8 @@ SortedOracles.TokenReportExpirySet.handler(async ({ event, context }) => {
 SortedOracles.ReportExpirySet.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
-  const pools = await getPoolsWithReferenceFeed(context);
+  // Chain-scoped: only update pools on this chain.
+  const pools = await getPoolsWithReferenceFeed(context, event.chainId);
 
   for (const pool of pools) {
     const oracleExpiry = await fetchReportExpiry(

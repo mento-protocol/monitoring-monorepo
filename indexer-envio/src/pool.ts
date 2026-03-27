@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type { Pool, PoolSnapshot } from "generated";
-import { hourBucket, snapshotId } from "./helpers";
+import { hourBucket, snapshotId, poolIdToAddress } from "./helpers";
 import { computePriceDifference } from "./priceDifference";
 import { fetchReferenceRateFeedID, fetchReportExpiry } from "./rpc";
 
@@ -85,6 +85,7 @@ export const DEFAULT_ORACLE_FIELDS = {
 
 const getOrCreatePool = async (
   context: PoolContext,
+  chainId: number,
   poolId: string,
   defaults?: { token0?: string; token1?: string },
 ): Promise<Pool> => {
@@ -92,6 +93,7 @@ const getOrCreatePool = async (
   if (existing) return existing;
   return {
     id: poolId,
+    chainId,
     token0: defaults?.token0,
     token1: defaults?.token1,
     source: "",
@@ -138,17 +140,22 @@ export const upsertPool = async ({
   oracleDelta?: Partial<typeof DEFAULT_ORACLE_FIELDS>;
   tokenDecimals?: { token0Decimals: number; token1Decimals: number };
 }): Promise<Pool> => {
-  const existing = await getOrCreatePool(context, poolId, { token0, token1 });
+  const existing = await getOrCreatePool(context, chainId, poolId, {
+    token0,
+    token1,
+  });
 
   // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
   // pool creation), retry now so oracle events can start flowing.
+  // Use the raw address (not the namespaced poolId) for RPC calls.
+  const poolAddr = poolIdToAddress(poolId);
   let healedOracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> | undefined;
   if (
     existing.referenceRateFeedID === "" &&
     existing.source !== "" &&
     !existing.source?.includes("virtual")
   ) {
-    const rateFeedID = await fetchReferenceRateFeedID(chainId, poolId);
+    const rateFeedID = await fetchReferenceRateFeedID(chainId, poolAddr);
     if (rateFeedID) {
       healedOracleDelta = { referenceRateFeedID: rateFeedID };
       const expiry = await fetchReportExpiry(chainId, rateFeedID, blockNumber);
@@ -158,6 +165,7 @@ export const upsertPool = async ({
 
   let next: Pool = {
     ...existing,
+    chainId,
     token0: token0 ?? existing.token0,
     token1: token1 ?? existing.token1,
     source: pickPreferredSource(existing.source, source),
@@ -249,6 +257,7 @@ export const upsertSnapshot = async ({
       }
     : {
         id,
+        chainId: pool.chainId,
         poolId: pool.id,
         timestamp: hourTs,
         reserves0: pool.reserves0,

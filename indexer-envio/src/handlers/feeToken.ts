@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { ERC20FeeToken, type ProtocolFeeTransfer } from "generated";
-import { eventId, asAddress } from "../helpers";
+import { eventId, asAddress, makePoolId } from "../helpers";
 import {
   YIELD_SPLIT_ADDRESS,
   resolveFeeTokenMeta,
@@ -17,7 +17,9 @@ ERC20FeeToken.Transfer.handler(
     // FPMM pools. This prevents arbitrary third-party transfers to the yield
     // split address from inflating the protocol fee KPIs.
     const sender = asAddress(event.params.from);
-    const pool = await context.Pool.get(sender);
+    // Pool IDs are now namespaced: "{chainId}-{address}" — look up by the
+    // canonical ID for this chain.
+    const pool = await context.Pool.get(makePoolId(event.chainId, sender));
     if (!pool || !pool.source?.includes("fpmm")) {
       return; // Not from a known FPMM pool — skip
     }

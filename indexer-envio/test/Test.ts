@@ -9,6 +9,10 @@ import {
   _setMockReportExpiry,
   _clearMockReportExpiry,
 } from "../src/EventHandlers.ts";
+import { makePoolId } from "../src/helpers.ts";
+
+/** Shorthand: create a namespaced pool ID for chainId 42220 (used in all tests). */
+const pid = (addr: string): string => makePoolId(42220, addr);
 
 type MockDb = {
   entities: {
@@ -413,7 +417,7 @@ async function seedPoolWithFeed(
     mockDb,
   });
 
-  const existingPool = nextDb.entities.Pool.get(poolId) as
+  const existingPool = nextDb.entities.Pool.get(pid(poolId)) as
     | PoolEntity
     | undefined;
   assert.ok(existingPool, "Expected seeded pool entity to exist");
@@ -468,7 +472,7 @@ describe("Envio Celo indexer handlers", () => {
     }
     assert.equal(
       deployment.poolId,
-      "0x00000000000000000000000000000000000000aa",
+      pid("0x00000000000000000000000000000000000000aa"),
     );
     assert.equal(
       deployment.implementation,
@@ -476,7 +480,7 @@ describe("Envio Celo indexer handlers", () => {
     );
 
     const pool = mockDbUpdated.entities.Pool.get(
-      "0x00000000000000000000000000000000000000aa",
+      pid("0x00000000000000000000000000000000000000aa"),
     ) as { token0?: string; token1?: string; source: string } | undefined;
     assert.ok(pool);
     if (!pool) {
@@ -517,12 +521,15 @@ describe("Envio Celo indexer handlers", () => {
     if (!swap) {
       throw new Error("Expected SwapEvent entity to be written");
     }
-    assert.equal(swap.poolId, "0x00000000000000000000000000000000000000dd");
+    assert.equal(
+      swap.poolId,
+      pid("0x00000000000000000000000000000000000000dd"),
+    );
     assert.equal(swap.sender, "0x0000000000000000000000000000000000000011");
     assert.equal(swap.recipient, "0x0000000000000000000000000000000000000022");
 
     const pool = mockDbUpdated.entities.Pool.get(
-      "0x00000000000000000000000000000000000000dd",
+      pid("0x00000000000000000000000000000000000000dd"),
     ) as { source: string; token0?: string; token1?: string } | undefined;
     assert.ok(pool);
     if (!pool) {
@@ -589,7 +596,7 @@ describe("Envio Celo indexer handlers", () => {
     });
 
     const position = mockDb.entities.LiquidityPosition.get(
-      `${POOL_ADDR}-${LP_ADDR}`,
+      `${pid(POOL_ADDR)}-${LP_ADDR}`,
     ) as LiquidityPositionEntity | undefined;
     assert.ok(
       position,
@@ -601,7 +608,7 @@ describe("Envio Celo indexer handlers", () => {
       );
     }
 
-    assert.equal(position.poolId, POOL_ADDR);
+    assert.equal(position.poolId, pid(POOL_ADDR));
     assert.equal(position.address, LP_ADDR);
     assert.equal(position.netLiquidity, 225n);
     assert.equal(position.lastUpdatedBlock, 121n);
@@ -616,8 +623,8 @@ describe("Envio Celo indexer handlers", () => {
 
     let mockDb = MockDb.createMockDb();
     mockDb = mockDb.entities.LiquidityPosition.set({
-      id: `${POOL_ADDR}-${OWNER_ADDR}`,
-      poolId: POOL_ADDR,
+      id: `${pid(POOL_ADDR)}-${OWNER_ADDR}`,
+      poolId: pid(POOL_ADDR),
       address: OWNER_ADDR,
       netLiquidity: 40n,
       lastUpdatedBlock: 1n,
@@ -651,7 +658,7 @@ describe("Envio Celo indexer handlers", () => {
     mockDb = await FPMM.Transfer.processEvent({ event: poolToZero, mockDb });
 
     const ownerPosition = mockDb.entities.LiquidityPosition.get(
-      `${POOL_ADDR}-${OWNER_ADDR}`,
+      `${pid(POOL_ADDR)}-${OWNER_ADDR}`,
     ) as LiquidityPositionEntity | undefined;
     assert.ok(ownerPosition, "owner position must exist after burn");
     if (!ownerPosition) {
@@ -664,7 +671,7 @@ describe("Envio Celo indexer handlers", () => {
     );
 
     const beneficiaryPosition = mockDb.entities.LiquidityPosition.get(
-      `${POOL_ADDR}-${BENEFICIARY_ADDR}`,
+      `${pid(POOL_ADDR)}-${BENEFICIARY_ADDR}`,
     ) as LiquidityPositionEntity | undefined;
     assert.equal(
       beneficiaryPosition,
@@ -732,7 +739,7 @@ describe("Envio Celo indexer handlers", () => {
     // contract call) the pool won't be mapped to FEED_ID unless the indexer
     // made an RPC call. In unit tests, RPC is mocked to return zero values.
     // Validate that the handler ran without throwing.
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
       | { oraclePrice?: bigint; source: string }
       | undefined;
     assert.ok(pool, "Pool entity must exist after FPMMDeployed");
@@ -785,7 +792,7 @@ describe("Envio Celo indexer handlers", () => {
     // wasn't mapped). The real integration test for source value happens on mainnet.
     // This unit test confirms the handler runs without errors after the source rename.
     const pool = mockDb.entities.Pool.get(
-      "0x00000000000000000000000000000000000000ab",
+      pid("0x00000000000000000000000000000000000000ab"),
     ) as { source: string } | undefined;
     assert.ok(pool, "Pool entity must still exist after MedianUpdated");
   });
@@ -816,7 +823,9 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
+      | PoolEntity
+      | undefined;
     assert.ok(pool, "Pool entity must still exist after TokenReportExpirySet");
     if (!pool) {
       throw new Error("Expected Pool entity after TokenReportExpirySet");
@@ -856,7 +865,9 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
+      | PoolEntity
+      | undefined;
     assert.ok(pool, "Pool entity must still exist after MedianUpdated");
     if (!pool) {
       throw new Error("Expected Pool entity after MedianUpdated");
@@ -867,7 +878,7 @@ describe("Envio Celo indexer handlers", () => {
       "MedianUpdated preserves the DB-seeded reporter count (no per-event RPC)",
     );
 
-    const snapshotId = `${42220}_${303}_${13}-${POOL_ADDR}`;
+    const snapshotId = `${42220}_${303}_${13}-${pid(POOL_ADDR)}`;
     const snapshot = mockDb.entities.OracleSnapshot.get(snapshotId) as
       | OracleSnapshotEntity
       | undefined;
@@ -909,7 +920,7 @@ describe("Envio Celo indexer handlers", () => {
     });
 
     // Seed non-zero reserves + oracle price so computePriceDifference has data
-    const seededPool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const seededPool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...seededPool,
       reserves0: R0,
@@ -938,7 +949,7 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     assert.ok(pool, "Pool must exist after OracleReported");
     // With reserves R0=60k/R1=40k and oracle=1.0, reserve1/reserve0 ≈ 0.667, deviation ≈ 3333 bps
     assert.ok(
@@ -946,7 +957,7 @@ describe("Envio Celo indexer handlers", () => {
       `expected priceDifference ~3333 bps (fallback), got ${pool.priceDifference}`,
     );
 
-    const snapshotId = `${42220}_${400}_${20}-${POOL_ADDR}`;
+    const snapshotId = `${42220}_${400}_${20}-${pid(POOL_ADDR)}`;
     const snapshot = mockDb.entities.OracleSnapshot.get(snapshotId) as
       | OracleSnapshotEntity
       | undefined;
@@ -972,7 +983,7 @@ describe("Envio Celo indexer handlers", () => {
       feedId: FEED_ID,
     });
 
-    const seededPool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const seededPool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...seededPool,
       reserves0: R0,
@@ -999,14 +1010,14 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     assert.ok(pool, "Pool must exist after MedianUpdated");
     assert.ok(
       pool.priceDifference >= 3330n && pool.priceDifference <= 3340n,
       `expected priceDifference ~3333 bps (fallback), got ${pool.priceDifference}`,
     );
 
-    const snapshotId = `${42220}_${401}_${21}-${POOL_ADDR}`;
+    const snapshotId = `${42220}_${401}_${21}-${pid(POOL_ADDR)}`;
     const snapshot = mockDb.entities.OracleSnapshot.get(snapshotId) as
       | OracleSnapshotEntity
       | undefined;
@@ -1054,7 +1065,7 @@ describe("Envio Celo indexer handlers", () => {
     });
 
     // Pre-seed with oracle price + decimals so computePriceDifference has data
-    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...seeded,
       oraclePrice: ORACLE_PRICE_24DP,
@@ -1080,7 +1091,7 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     assert.ok(pool, "Pool must exist after UpdateReserves");
     assert.ok(
       pool.priceDifference >= 3330n && pool.priceDifference <= 3340n,
@@ -1117,7 +1128,7 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...seeded,
       reserves0: R0,
@@ -1145,7 +1156,7 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     assert.ok(pool, "Pool must exist after Rebalanced");
     // event.params.priceDifferenceAfter must win — not computePriceDifference (~3333)
     // and not getRebalancingState (RPC fails in tests anyway).
@@ -1187,7 +1198,7 @@ describe("Envio Celo indexer handlers", () => {
       feedId: FEED_ID,
     });
 
-    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...seeded,
       reserves0: 60_000_000_000_000_000_000_000n,
@@ -1216,7 +1227,7 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     assert.ok(pool, "Pool must exist after OracleReported");
     // oraclePrice must come from event.params.value, NOT getRebalancingState
     assert.equal(
@@ -1250,7 +1261,7 @@ describe("Envio Celo indexer handlers", () => {
       feedId: FEED_ID,
     });
 
-    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...seeded,
       reserves0: 60_000_000_000_000_000_000_000n,
@@ -1277,7 +1288,7 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     assert.ok(pool, "Pool must exist after MedianUpdated");
     // oraclePrice must come from event.params.value, NOT getRebalancingState
     assert.equal(
@@ -1325,7 +1336,7 @@ describe("Envio Celo indexer handlers", () => {
     });
 
     // Seed with imbalanced reserves — local computation would give ~3333 bps
-    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...seeded,
       oraclePrice: 1_000_000_000_000_000_000_000_000n,
@@ -1350,7 +1361,7 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     assert.ok(pool, "Pool must exist after UpdateReserves");
     // Contract value (200 bps) must win over local computation (~3333 bps)
     assert.equal(
@@ -1387,7 +1398,9 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
+      | PoolEntity
+      | undefined;
     assert.ok(pool, "Pool entity must exist after FPMMDeployed");
     if (!pool) throw new Error("Expected pool");
     // oracleTxHash must NOT be populated with the deployment tx hash — it
@@ -1424,7 +1437,7 @@ describe("Envio Celo indexer handlers", () => {
     });
 
     // Simulate a prior oracle report having set oracleTxHash.
-    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...seeded,
       oracleTxHash: KNOWN_ORACLE_TX,
@@ -1456,7 +1469,9 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity | undefined;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
+      | PoolEntity
+      | undefined;
     assert.ok(pool, "Pool must exist after Rebalanced");
     if (!pool) throw new Error("Expected pool");
     // The oracle tx hash set by a prior oracle report must be preserved —
@@ -1499,7 +1514,7 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    const seeded = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     mockDb = mockDb.entities.Pool.set({
       ...seeded,
       reserves0: 40_000_000_000_000_000_000_000n,
@@ -1527,7 +1542,7 @@ describe("Envio Celo indexer handlers", () => {
       mockDb,
     });
 
-    const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
     assert.ok(pool, "Pool must exist after Rebalanced");
     // event.params.priceDifferenceAfter (50 bps) must win over RPC value (999 bps)
     assert.equal(
@@ -1578,7 +1593,7 @@ describe("Envio Celo indexer handlers", () => {
       });
 
       // Verify the pool was created with empty referenceRateFeedID
-      const poolBefore = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+      const poolBefore = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
       assert.ok(poolBefore, "Pool must exist after deploy");
       assert.equal(
         poolBefore.referenceRateFeedID,
@@ -1613,7 +1628,7 @@ describe("Envio Celo indexer handlers", () => {
       mockDb = await FPMM.Swap.processEvent({ event: swapEvent, mockDb });
 
       // 4. Verify self-heal populated the fields
-      const poolAfter = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+      const poolAfter = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
       assert.ok(poolAfter, "Pool must exist after Swap");
       assert.equal(
         poolAfter.referenceRateFeedID,
@@ -1666,7 +1681,7 @@ describe("Envio Celo indexer handlers", () => {
       mockDb = await FPMM.Swap.processEvent({ event: swapEvent, mockDb });
 
       // 4. Verify feed was NOT changed
-      const pool = mockDb.entities.Pool.get(POOL_ADDR) as PoolEntity;
+      const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
       assert.ok(pool, "Pool must exist after Swap");
       assert.equal(
         pool.referenceRateFeedID,
@@ -1712,7 +1727,7 @@ describe("Envio Celo indexer handlers", () => {
       });
 
       const olsPool = (mockDb.entities as any).OlsPool.get(
-        `${POOL_ADDR}-${OLS_ADDR.toLowerCase()}`,
+        `${pid(POOL_ADDR)}-${OLS_ADDR.toLowerCase()}`,
       ) as
         | {
             id: string;
@@ -1730,7 +1745,7 @@ describe("Envio Celo indexer handlers", () => {
           }
         | undefined;
       assert.ok(olsPool, "OlsPool should be created by PoolAdded");
-      assert.equal(olsPool?.id, `${POOL_ADDR}-${OLS_ADDR.toLowerCase()}`);
+      assert.equal(olsPool?.id, `${pid(POOL_ADDR)}-${OLS_ADDR.toLowerCase()}`);
       assert.equal(olsPool?.olsAddress, OLS_ADDR.toLowerCase());
       assert.equal(olsPool?.isActive, true);
       assert.equal(olsPool?.debtToken, DEBT_TOKEN.toLowerCase());
@@ -1751,7 +1766,7 @@ describe("Envio Celo indexer handlers", () => {
       ) as { action: string; poolId: string } | undefined;
       assert.ok(lifecycle, "OlsLifecycleEvent should be written for PoolAdded");
       assert.equal(lifecycle?.action, "POOL_ADDED");
-      assert.equal(lifecycle?.poolId, POOL_ADDR);
+      assert.equal(lifecycle?.poolId, pid(POOL_ADDR));
     });
 
     it("marks OlsPool inactive and writes lifecycle event on PoolRemoved", async () => {
@@ -1801,7 +1816,7 @@ describe("Envio Celo indexer handlers", () => {
       });
 
       const olsPool = (mockDb.entities as any).OlsPool.get(
-        `${POOL_ADDR}-${OLS_ADDR.toLowerCase()}`,
+        `${pid(POOL_ADDR)}-${OLS_ADDR.toLowerCase()}`,
       ) as { isActive: boolean; debtToken: string } | undefined;
       assert.ok(olsPool, "OlsPool should still exist after PoolRemoved");
       assert.equal(
@@ -1848,7 +1863,7 @@ describe("Envio Celo indexer handlers", () => {
       });
 
       const olsPool = (mockDb.entities as any).OlsPool.get(
-        `${POOL_ADDR}-${OLS_ADDR.toLowerCase()}`,
+        `${pid(POOL_ADDR)}-${OLS_ADDR.toLowerCase()}`,
       ) as
         | {
             id: string;
@@ -1860,7 +1875,7 @@ describe("Envio Celo indexer handlers", () => {
           }
         | undefined;
       assert.ok(olsPool, "OlsPool should be created from cooldown update");
-      assert.equal(olsPool?.id, `${POOL_ADDR}-${OLS_ADDR.toLowerCase()}`);
+      assert.equal(olsPool?.id, `${pid(POOL_ADDR)}-${OLS_ADDR.toLowerCase()}`);
       assert.equal(olsPool?.olsAddress, OLS_ADDR.toLowerCase());
       assert.equal(olsPool?.rebalanceCooldown, 3600n);
       assert.equal(olsPool?.isActive, true);
@@ -1894,7 +1909,7 @@ describe("Envio Celo indexer handlers", () => {
       });
 
       const olsPool = (mockDb.entities as any).OlsPool.get(
-        `${POOL_ADDR}-${OLS_ADDR.toLowerCase()}`,
+        `${pid(POOL_ADDR)}-${OLS_ADDR.toLowerCase()}`,
       ) as
         | {
             lastRebalance: bigint;
@@ -1918,7 +1933,7 @@ describe("Envio Celo indexer handlers", () => {
           }
         | undefined;
       assert.ok(liquidityRow, "Liquidity event row should still be written");
-      assert.equal(liquidityRow?.poolId, POOL_ADDR);
+      assert.equal(liquidityRow?.poolId, pid(POOL_ADDR));
       assert.equal(liquidityRow?.amountGivenToPool, 1000n);
       assert.equal(liquidityRow?.amountTakenFromPool, 900n);
     });
@@ -2009,7 +2024,7 @@ describe("Envio Celo indexer handlers", () => {
 
       // Old row (OLS_ADDR_1) should be inactive
       const row1 = entities.OlsPool.get(
-        `${POOL_ADDR}-${OLS_ADDR_1.toLowerCase()}`,
+        `${pid(POOL_ADDR)}-${OLS_ADDR_1.toLowerCase()}`,
       ) as
         | { isActive: boolean; rebalanceCooldown: bigint; olsAddress: string }
         | undefined;
@@ -2023,7 +2038,7 @@ describe("Envio Celo indexer handlers", () => {
 
       // New row (OLS_ADDR_2) should be active with new config
       const row2 = entities.OlsPool.get(
-        `${POOL_ADDR}-${OLS_ADDR_2.toLowerCase()}`,
+        `${pid(POOL_ADDR)}-${OLS_ADDR_2.toLowerCase()}`,
       ) as
         | { isActive: boolean; rebalanceCooldown: bigint; olsAddress: string }
         | undefined;
@@ -2111,8 +2126,8 @@ describe("Envio Celo indexer handlers", () => {
       );
 
       // Both events share the same poolId but different olsAddress — confirms they're independently queryable
-      assert.equal(liqEvent1?.poolId, POOL_ADDR);
-      assert.equal(liqEvent2?.poolId, POOL_ADDR);
+      assert.equal(liqEvent1?.poolId, pid(POOL_ADDR));
+      assert.equal(liqEvent2?.poolId, pid(POOL_ADDR));
     });
   });
 });
