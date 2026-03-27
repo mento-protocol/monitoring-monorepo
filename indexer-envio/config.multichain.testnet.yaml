@@ -1,6 +1,9 @@
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
 name: mento-multichain-testnet
 description: Mento v3 multichain testnet indexer — Celo Sepolia (11142220) + Monad Testnet (10143)
+#
+# Per-chain RPC overrides: ENVIO_RPC_URL_11142220 and ENVIO_RPC_URL_10143.
+# Do NOT use the generic ENVIO_RPC_URL in multichain mode.
 
 # ---------------------------------------------------------------------------
 # Global contract definitions (shared ABI + handler across all networks)

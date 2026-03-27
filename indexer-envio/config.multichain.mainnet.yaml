@@ -1,6 +1,31 @@
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
 name: mento-multichain-mainnet
 description: Mento v3 multichain mainnet indexer — Celo (42220) + Monad (143)
+#
+# ⚠️  BREAKING CHANGE — DEPLOYMENT CHECKLIST ⚠️
+#
+# This config introduces a NEW Envio deployment. Do NOT replace the existing
+# Celo-only deployment in place. Deployment sequence:
+#
+# 1. Deploy as a NEW Envio hosted project (new endpoint, new DB).
+#    Pool.id changes from "0x..." to "{chainId}-0x..." — no in-place migration.
+#    Full reindex required.
+#
+# 2. Validate parity against the existing Celo endpoint:
+#    pool count, swap counts for a fixed window, oracle snapshots on both chains.
+#
+# 3. Update dashboard consumers BEFORE cutover:
+#    - Pool route params assume raw addresses → must handle "{chainId}-{address}"
+#    - GraphQL queries filtering by Pool.id must use the new format
+#    - Any hardcoded pool address references in the dashboard
+#
+# 4. Switch NEXT_PUBLIC_HASURA_URL only after (2) and (3) are done.
+#
+# 5. Keep the old Celo-only endpoint running for ≥1 week as rollback.
+#
+# 6. Per-chain RPC overrides: set ENVIO_RPC_URL_42220 and ENVIO_RPC_URL_143
+#    independently. Do NOT use the generic ENVIO_RPC_URL in multichain mode —
+#    it routes all chains to the same endpoint.
 
 # ---------------------------------------------------------------------------
 # Global contract definitions (shared ABI + handler across all networks)
