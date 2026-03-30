@@ -93,10 +93,12 @@ async function applyLiquidityPositionDelta({
 // FPMMFactory
 // ---------------------------------------------------------------------------
 
-// Dynamically register pool tokens for ERC20FeeToken Transfer indexing.
-// Only FPMM pools generate protocol fees (VirtualPools have no fee mechanism).
-// Envio deduplicates addresses, so re-registering the same token is harmless.
+// Dynamically register the deployed pool + its fee tokens so Envio starts
+// indexing all FPMM events (Swap, Mint, Burn, etc.) without needing a
+// hardcoded address list in the config. Envio deduplicates addresses, so
+// re-registering the same address on re-runs is harmless.
 FPMMFactory.FPMMDeployed.contractRegister(({ event, context }) => {
+  context.addFPMM(event.params.fpmmProxy);
   context.addERC20FeeToken(event.params.token0);
   context.addERC20FeeToken(event.params.token1);
 });

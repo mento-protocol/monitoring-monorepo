@@ -103,25 +103,9 @@ networks:
         address:
           - 0xa849b475FE5a4B5C9C3280152c7a1945b907613b # proxy
       - name: FPMM
-        address:
-          - 0x8c0014afe032e4574481d8934504100bf23fcb56 # USDm/ccf663b
-          - 0xb285d4c7133d6f27bfb29224fb0d22e7ec3ddd2d # USDm/eb4663
-          - 0x462fe04b4fd719cbd04c0310365d421d02aaa19e # USDm/USDC
-          - 0x0feba760d93423d127de1b6abecdb60e5253228d # USDT/USDm
+        address: [] # Dynamically registered via FPMMFactory.FPMMDeployed.contractRegister
       - name: VirtualPool
-        address:
-          - 0xab945882018b81bdf62629e98ffdafd9495a0076
-          - 0x6daa327e0cbe2ce84c0f312f20b9432fe744ed58
-          - 0x1d013077b00b28038a3f1e7a29aba34e12e562e9
-          - 0xbe6d2165173a29889652c7bf2dc3a02076a22f2a
-          - 0xaea92e8006e6edf0f9e9368ee9af36814b738855
-          - 0xa337a498e4e061f4029fcb3b9f4e3d535e885dc5
-          - 0x62fa288e3ac844dcfce5469af4f8feb7d6f7ba61
-          - 0x30214efe28ab44d6a5c739eba5e0729b1d4213e4
-          - 0xeb433ce1f2ce4981b76fe7ca3a96070705d8ede4
-          - 0x71f55035a49c972c5c3197e874f6b7fd94672b6e
-          - 0x62753ec2956f84af240b4666a130c88a83933848
-          - 0x3d6e023177bac13d6e316d95161d4bb9dcf0e276
+        address: [] # Dynamically registered via VirtualPoolFactory.VirtualPoolDeployed.contractRegister
       - name: VirtualPoolFactory
         address:
           - 0x22abd4ADF6aab38aC1022352d496A07Acee5aCB3
@@ -144,14 +128,11 @@ networks:
         address:
           - 0xa849b475FE5a4B5C9C3280152c7a1945b907613b # TransparentUpgradeableProxy:FPMMFactory
       - name: FPMM
-        address:
-          - 0xd0e9c1a718d2a693d41eacd4b2696180403ce081 # GBPm/USDm
-          - 0x463c0d1f04bcd99a1efcf94ac2a75bc19ea4a7e5 # USDC/USDm
-          - 0xb0a0264ce6847f101b76ba36a4a3083ba489f501 # AUSD/USDm
+        address: [] # Dynamically registered via FPMMFactory.FPMMDeployed.contractRegister
       - name: VirtualPool
-        address: [] # VirtualPoolFactory not yet deployed — add when live
+        address: [] # Dynamically registered via VirtualPoolFactory.VirtualPoolDeployed.contractRegister
       - name: VirtualPoolFactory
-        address: [] # Not yet deployed — add when live
+        address: [] # Not yet deployed on Monad — add address when live
       - name: SortedOracles
         address:
           - "0x6f92C745346057a61b259579256159458a0a6A92" # TransparentUpgradeableProxy:SortedOracles
