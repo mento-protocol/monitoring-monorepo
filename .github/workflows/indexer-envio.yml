@@ -56,13 +56,13 @@ jobs:
       - name: Validate all Envio configs (codegen)
         if: steps.changes.outputs.indexer == 'true'
         # Run codegen against every config file to catch schema/config drift early.
-        # Celo mainnet is run last (its output is used by typecheck + tests below).
-        # Monad configs are validated for syntax/schema correctness even with empty
-        # address arrays — this catches drift before deploy time.
+        # config.multichain.mainnet.yaml is run last — its output is used by
+        # typecheck + tests below.
         run: |
-          pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
+          pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.celo.sepolia.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.monad.testnet.yaml
+          pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
       - name: Link generated package
         if: steps.changes.outputs.indexer == 'true'
         # pnpm install runs before generated/ exists, so the workspace symlink for

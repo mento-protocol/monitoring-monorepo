@@ -15,8 +15,8 @@ pnpm --filter @mento-protocol/ui-dashboard typecheck
 pnpm --filter @mento-protocol/indexer-envio typecheck
 
 echo "🧪 Running tests..."
-pnpm --filter @mento-protocol/ui-dashboard test -- --run 2>/dev/null || echo "   ⚠️ Dashboard tests: some failures (check manually)"
-pnpm --filter @mento-protocol/indexer-envio test 2>/dev/null || echo "   ⚠️ Indexer tests: some failures (check manually)"
+pnpm --filter @mento-protocol/ui-dashboard test -- --run
+pnpm --filter @mento-protocol/indexer-envio test
 
 echo ""
 echo "🚀 monitoring-monorepo is ready to code"
