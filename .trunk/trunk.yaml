@@ -58,7 +58,7 @@ actions:
         Runs codegen for indexer-envio (to produce the generated/ types) then
         typechecks both workspaces. Combined into one action so the generated
         module is guaranteed to exist before tsc runs.
-      run: pnpm indexer:celo-mainnet:codegen && pnpm --filter @mento-protocol/ui-dashboard --filter @mento-protocol/indexer-envio typecheck
+      run: pnpm indexer:codegen && pnpm --filter @mento-protocol/ui-dashboard --filter @mento-protocol/indexer-envio typecheck
       triggers:
         - git_hooks: [pre-push]
     - id: test-pre-push
