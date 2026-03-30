@@ -18,7 +18,7 @@
 //   Celo Sepolia (11142220): ~18946570 — testnet deployment
 //   Monad testnet (10143): ~17932599 — testnet FPMMFactory deployment
 // ---------------------------------------------------------------------------
-const FPMM_FIRST_DEPLOY_BLOCK: Record<number, number> = {
+export const FPMM_FIRST_DEPLOY_BLOCK: Record<number, number> = {
   42220: 60668100, // Celo mainnet
   143: 60759432, // Monad mainnet
   11142220: 18946570, // Celo Sepolia
@@ -29,32 +29,50 @@ const FPMM_FIRST_DEPLOY_BLOCK: Record<number, number> = {
 // Using ENVIO_START_BLOCK here would cause false-fatal errors when running a
 // single-network config where the value is valid for one chain but > the first
 // deploy block on another chain that isn't even active in that run.
-const START_BLOCK_ENV: Record<number, string | undefined> = {
-  42220: process.env.ENVIO_START_BLOCK_CELO,
-  143: process.env.ENVIO_START_BLOCK_MONAD,
-  11142220: process.env.ENVIO_START_BLOCK_CELO_SEPOLIA,
-  10143: process.env.ENVIO_START_BLOCK_MONAD_TESTNET,
+export const START_BLOCK_ENV_NAME: Record<number, string> = {
+  42220: "ENVIO_START_BLOCK_CELO",
+  143: "ENVIO_START_BLOCK_MONAD",
+  11142220: "ENVIO_START_BLOCK_CELO_SEPOLIA",
+  10143: "ENVIO_START_BLOCK_MONAD_TESTNET",
 };
 
-for (const [chainIdStr, firstDeployBlock] of Object.entries(
-  FPMM_FIRST_DEPLOY_BLOCK,
-)) {
-  const chainId = Number(chainIdStr);
-  const envVal = START_BLOCK_ENV[chainId];
-  if (envVal !== undefined && envVal !== "") {
+/**
+ * Validate that no ENVIO_START_BLOCK_* env var is set above the first
+ * FPMMFactory deployment block for its chain. If it is, all factory deploy
+ * events are missed and no pools are ever registered — a silent data loss.
+ *
+ * Exported for testing. Called at module load time below.
+ */
+export function assertStartBlocksValid(
+  envOverrides: Record<number, string | undefined>,
+): void {
+  for (const [chainIdStr, firstDeployBlock] of Object.entries(
+    FPMM_FIRST_DEPLOY_BLOCK,
+  )) {
+    const chainId = Number(chainIdStr);
+    const envVal = envOverrides[chainId];
+    if (envVal === undefined || envVal === "") continue;
     const startBlock = Number(envVal);
     if (!Number.isFinite(startBlock)) continue;
     if (startBlock > firstDeployBlock) {
+      const envVarName = START_BLOCK_ENV_NAME[chainId];
       throw new Error(
         `[EventHandlers] FATAL: start block for chain ${chainId} is ${startBlock}, ` +
           `but FPMMFactory first deployed at block ${firstDeployBlock}. ` +
           `All factory deploy events will be missed and no pools will be indexed. ` +
-          `Lower ENVIO_START_BLOCK${chainId === 42220 ? "_CELO" : chainId === 143 ? "_MONAD" : ""} ` +
-          `to ≤${firstDeployBlock} or remove the override.`,
+          `Lower ${envVarName} to ≤${firstDeployBlock} or remove the override.`,
       );
     }
   }
 }
+
+// Run the check at startup with values from the actual environment.
+assertStartBlocksValid({
+  42220: process.env.ENVIO_START_BLOCK_CELO,
+  143: process.env.ENVIO_START_BLOCK_MONAD,
+  11142220: process.env.ENVIO_START_BLOCK_CELO_SEPOLIA,
+  10143: process.env.ENVIO_START_BLOCK_MONAD_TESTNET,
+});
 
 // Handler registrations (side-effect imports)
 import "./handlers/fpmm";
