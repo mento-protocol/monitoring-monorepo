@@ -1,41 +1,44 @@
 # Mento Monitoring Monorepo
 
-Real-time monitoring infrastructure for Mento v3 on-chain pools — an [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
+Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
 ## Packages
 
-| Package                             | Description                                                                    |
-| ----------------------------------- | ------------------------------------------------------------------------------ |
-| [`indexer-envio`](./indexer-envio/) | Envio HyperIndex indexer for Celo + Monad (FPMM pools + VirtualPools)          |
-| [`ui-dashboard`](./ui-dashboard/)   | Next.js 16 + Plotly.js monitoring dashboard with multi-chain network switching |
-| [`shared-config`](./shared-config/) | Shared deployment config (chain ID → treb namespace mappings)                  |
+| Package                             | Description                                                         |
+| ----------------------------------- | ------------------------------------------------------------------- |
+| [`indexer-envio`](./indexer-envio/) | Envio HyperIndex indexer — Celo + Monad multichain                  |
+| [`ui-dashboard`](./ui-dashboard/)   | Next.js 16 + Plotly.js dashboard with multi-chain network switching |
+| [`shared-config`](./shared-config/) | Shared deployment config (chain ID → treb namespace mappings)       |
 
 ## Architecture
 
 ```text
-┌─────────────────┐     ┌──────────────────┐     ┌────────────────┐
-│  Celo Chain     │────▶│  Envio HyperIndex │────▶│  Hasura        │
-│  (RPC / GRPC)   │     │  (Hosted)         │     │  (GraphQL API) │
-└─────────────────┘     └──────────────────┘     └───────┬────────┘
-                                                          │
-                                                   ┌──────▼──────┐
-                                                   │  Next.js    │
-                                                   │  Dashboard  │
-                                                   │  (Vercel)   │
-                                                   └─────────────┘
+┌──────────────────────┐     ┌──────────────────┐     ┌────────────────┐
+│  Celo + Monad Chains │────▶│  Envio HyperIndex │────▶│  Hasura        │
+│  (HyperSync / RPC)   │     │  (Hosted, mento)  │     │  (GraphQL API) │
+└──────────────────────┘     └──────────────────┘     └───────┬────────┘
+                                                               │
+                                                        ┌──────▼──────┐
+                                                        │  Next.js    │
+                                                        │  Dashboard  │
+                                                        │  (Vercel)   │
+                                                        └─────────────┘
 ```
 
-The indexer runs on Envio's hosted free tier. Each deploy produces a new GraphQL endpoint hash. The dashboard reads from this endpoint via Hasura's GraphQL API.
+Both Celo Mainnet (42220) and Monad Mainnet (143) are served from a single Envio project (`mento`) using `config.multichain.mainnet.yaml`. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions.
+
+**Static production endpoint:** `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql`
 
 ## Networks
 
-| Network       | Chain ID | Status                        |
-| ------------- | -------- | ----------------------------- |
-| Celo Mainnet  | 42220    | ✅ Live                       |
-| Celo Sepolia  | 44787    | ✅ Live                       |
-| Monad Mainnet | —        | ⏳ Blocked on contract deploy |
+| Network       | Chain ID | Status  |
+| ------------- | -------- | ------- |
+| Celo Mainnet  | 42220    | ✅ Live |
+| Monad Mainnet | 143      | ✅ Live |
+| Celo Sepolia  | 11142220 | ✅ Live |
+| Monad Testnet | 10143    | ✅ Live |
 
 ## Getting Started
 
@@ -70,132 +73,74 @@ pnpm indexer:monad-testnet:codegen && pnpm indexer:monad-testnet:dev
 pnpm dashboard:dev
 ```
 
-The dashboard connects to Hasura (local or hosted) to display real-time pool data.
-
 ## Environment Variables
 
 ### Indexer
 
 Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
-| Variable            | Description                  | Default    |
-| ------------------- | ---------------------------- | ---------- |
-| `ENVIO_API_TOKEN`   | Envio platform API token     | —          |
-| `ENVIO_RPC_URL`     | Celo RPC endpoint            | —          |
-| `ENVIO_START_BLOCK` | Block to start indexing from | `60664513` |
+| Variable                  | Description                           |
+| ------------------------- | ------------------------------------- |
+| `ENVIO_RPC_URL_42220`     | Celo Mainnet RPC endpoint             |
+| `ENVIO_RPC_URL_143`       | Monad Mainnet RPC endpoint            |
+| `ENVIO_START_BLOCK_CELO`  | Celo start block (default: 60664500)  |
+| `ENVIO_START_BLOCK_MONAD` | Monad start block (default: 60730000) |
 
 ### Dashboard
 
-The dashboard supports multiple network targets via `_<NETWORK>` suffix env vars:
+| Variable                                     | Description                                       |
+| -------------------------------------------- | ------------------------------------------------- |
+| `NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED`   | Shared multichain GraphQL endpoint (Celo + Monad) |
+| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED` | Celo Sepolia hosted endpoint                      |
+| `UPSTASH_REDIS_REST_URL`                     | Address labels storage (Upstash Redis)            |
+| `UPSTASH_REDIS_REST_TOKEN`                   | Address labels Redis auth token                   |
+| `BLOB_READ_WRITE_TOKEN`                      | Vercel Blob token for daily label backups         |
 
-| Variable                                      | Description                                      |
-| --------------------------------------------- | ------------------------------------------------ |
-| `NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED`  | Hasura/GraphQL endpoint — Celo Mainnet (hosted)  |
-| `NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED` | Hasura/GraphQL endpoint — Monad Mainnet (hosted) |
-| `NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED` | Hasura/GraphQL endpoint — Monad Testnet (hosted) |
-| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED`  | Hasura/GraphQL endpoint — Celo Sepolia (hosted)  |
-| `NEXT_PUBLIC_HASURA_URL_CELO_MAINNET`         | Hasura endpoint — Celo Mainnet (local)           |
-| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`         | Hasura endpoint — Celo Sepolia (local)           |
-| `NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET`       | Block explorer — Celo Mainnet                    |
-| `NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA`       | Block explorer — Celo Sepolia                    |
-| `UPSTASH_REDIS_REST_URL`                      | Address labels storage (Upstash Redis)           |
-| `UPSTASH_REDIS_REST_TOKEN`                    | Address labels Redis auth token                  |
-| `BLOB_READ_WRITE_TOKEN`                       | Vercel Blob token for daily label backups        |
-
-Production env vars are managed by Terraform — do not edit them in the Vercel dashboard. See [`terraform/`](./terraform/) and [`docs/deployment.md`](./docs/deployment.md).
-
-## Contract Addresses
-
-Contract addresses and ABIs are sourced from the published [`@mento-protocol/contracts`](https://www.npmjs.com/package/@mento-protocol/contracts) npm package — no vendored JSON files. The active treb deployment namespace per chain is declared in [`shared-config/deployment-namespaces.json`](./shared-config/deployment-namespaces.json):
-
-```json
-{
-  "42220": "mainnet",
-  "11142220": "testnet-v2-rc5"
-}
-```
-
-**To promote a new treb deployment** (e.g. after a new `mento-deployments-v2` release):
-
-1. Publish a new `@mento-protocol/contracts` version from `mento-deployments-v2`
-2. Update the package version in `indexer-envio/package.json` and `ui-dashboard/package.json`
-3. Update the namespace string(s) in `shared-config/deployment-namespaces.json`
-4. Run `pnpm install`
+Production env vars are managed by Terraform. See [`terraform/`](./terraform/).
 
 ## Deployment
 
 ### Indexer → Envio Hosted
 
-Each network has a dedicated deploy branch Envio watches:
-
-| Network       | Deploy Branch          |
-| ------------- | ---------------------- |
-| Celo Mainnet  | `deploy/celo-mainnet`  |
-| Celo Sepolia  | `deploy/celo-sepolia`  |
-| Monad Mainnet | `deploy/monad-mainnet` |
-| Monad Testnet | `deploy/monad-testnet` |
-
-Push to trigger a redeploy:
+Push to the `envio` branch to trigger a hosted reindex:
 
 ```bash
-pnpm deploy:indexer celo-mainnet
-# or run without args to be prompted:
 pnpm deploy:indexer
-# or push directly:
-git push origin main:deploy/celo-mainnet
 ```
 
-> ⚠️ **Celo Sepolia endpoint changes on each Envio redeploy.** After redeploying the Celo Sepolia indexer, update `hasura_url_celo_sepolia_hosted` in `terraform/terraform.tfvars` and run `pnpm infra:apply`.
+The `mento` project on [Envio Cloud](https://envio.dev/app/mento-protocol/mento) watches this branch.
 
 ### Dashboard → Vercel
 
-Vercel's native Git integration watches `main` — every push that touches `ui-dashboard/` auto-deploys the dashboard to [monitoring.mento.org](https://monitoring.mento.org).
+Every push to `main` that touches `ui-dashboard/` auto-deploys to [monitoring.mento.org](https://monitoring.mento.org).
 
-All infrastructure (Vercel project, env vars, Upstash Redis, custom domain) is managed by Terraform:
+Infrastructure (Vercel project, env vars, Upstash Redis) is managed by Terraform:
 
 ```bash
 pnpm infra:plan    # preview changes
 pnpm infra:apply   # apply changes
 ```
 
-See [`docs/deployment.md`](./docs/deployment.md) for the full setup guide and troubleshooting.
+## Contract Addresses
 
-## CI
-
-GitHub Actions runs on every PR:
-
-- ESLint 10 (no `eslint-config-next` — uses `@eslint/js` + `typescript-eslint` + `@eslint-react`)
-- Vitest (105 tests)
-- TypeScript typecheck
-- Codecov coverage reporting
+Sourced from the published [`@mento-protocol/contracts`](https://www.npmjs.com/package/@mento-protocol/contracts) npm package. The active treb deployment namespace per chain is declared in [`shared-config/deployment-namespaces.json`](./shared-config/deployment-namespaces.json).
 
 ## Key Files
 
-| What                           | Where                                        |
-| ------------------------------ | -------------------------------------------- |
-| **Deployment namespace map**   | `shared-config/deployment-namespaces.json`   |
-| Indexer schema                 | `indexer-envio/schema.graphql`               |
-| Event handlers                 | `indexer-envio/src/EventHandlers.ts`         |
-| Contract address resolution    | `indexer-envio/src/contractAddresses.ts`     |
-| Celo mainnet config            | `indexer-envio/config.celo.mainnet.yaml`     |
-| Celo Sepolia config            | `indexer-envio/config.celo.sepolia.yaml`     |
-| Monad mainnet/testnet configs  | `indexer-envio/config.monad.*.yaml`          |
-| Dashboard app                  | `ui-dashboard/src/app/`                      |
-| Address book page              | `ui-dashboard/src/app/address-book/page.tsx` |
-| Address labels API             | `ui-dashboard/src/app/api/address-labels/`   |
-| Address labels storage         | `ui-dashboard/src/lib/address-labels.ts`     |
-| Network defs + contract labels | `ui-dashboard/src/lib/networks.ts`           |
-| GraphQL queries                | `ui-dashboard/src/lib/queries.ts`            |
-| Pool type helper               | `ui-dashboard/src/lib/tokens.ts`             |
-| Terraform infrastructure       | `terraform/`                                 |
-| Deployment guide               | `docs/deployment.md`                         |
-| Technical spec                 | `SPEC.md`                                    |
-| Roadmap                        | `docs/ROADMAP.md`                            |
+| What                      | Where                                          |
+| ------------------------- | ---------------------------------------------- |
+| Indexer schema            | `indexer-envio/schema.graphql`                 |
+| Event handlers            | `indexer-envio/src/EventHandlers.ts`           |
+| Pool ID helpers           | `indexer-envio/src/helpers.ts`                 |
+| Multichain config         | `indexer-envio/config.multichain.mainnet.yaml` |
+| Indexer status + endpoint | `indexer-envio/STATUS.md`                      |
+| Dashboard app             | `ui-dashboard/src/app/`                        |
+| Network defs              | `ui-dashboard/src/lib/networks.ts`             |
+| GraphQL queries           | `ui-dashboard/src/lib/queries.ts`              |
+| Terraform infrastructure  | `terraform/`                                   |
 
 ## Documentation
 
-- [`SPEC.md`](./SPEC.md) — Full technical specification
-- [`docs/ROADMAP.md`](./docs/ROADMAP.md) — Current state + upcoming work
-- [`docs/BACKLOG.md`](./docs/BACKLOG.md) — Detailed task backlog
-- [`docs/deployment.md`](./docs/deployment.md) — Deployment guide
 - [`indexer-envio/README.md`](./indexer-envio/README.md) — Indexer reference
+- [`indexer-envio/STATUS.md`](./indexer-envio/STATUS.md) — Current sync state + endpoint
+- [`docs/deployment.md`](./docs/deployment.md) — Full deployment guide
