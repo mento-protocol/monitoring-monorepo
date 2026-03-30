@@ -16,8 +16,7 @@ networks:
           - event: FPMMDeployed
       - name: FPMM
         abi_file_path: abis/FPMM.json
-        address:
-          - 0x550d9ecb4c373510b8a41f5fb7d98e9e1c51a07e # GBPm/USDm
+        address: [] # Dynamically registered via FPMMFactory.FPMMDeployed.contractRegister
         handler: src/EventHandlers.ts
         events:
           - event: Swap
@@ -30,19 +29,7 @@ networks:
           - event: LiquidityStrategyUpdated
       - name: VirtualPool
         abi_file_path: abis/FPMM.json
-        address:
-          - 0x671334256a893fdbc4ffe55f98f156a168bd897a
-          - 0x1e2506edca4ef3030e51be8b571b935d55677604
-          - 0x8103fb2db87ac96cc62faa399b98e1173720ab19
-          - 0x62722497dc8992337117ee79a02015dcea43b2c2
-          - 0x68d19b5a48cbbfd11057e97da9960b09d771e7b6
-          - 0x58f08739ea9764097b9500b6e4a4db64d168b807
-          - 0x284c2d99c5a12a65f10eff7183c33c1217b65a56
-          - 0xcbfc8c84168d7f34faba0018a3a63b998f1ffece
-          - 0x49a968c539599385c69c2d528500da58d933fafa
-          - 0x917ee035bf0a964acc75539f919a5b4f16336373
-          - 0x6b66271811615f4b6dadb8620ed71a1e90f41deb
-          - 0x22118009665b1d6810d4560a098d3e67bbcb934f
+        address: [] # Dynamically registered via VirtualPoolFactory.VirtualPoolDeployed.contractRegister
         handler: src/EventHandlers.ts
         events:
           - event: Swap

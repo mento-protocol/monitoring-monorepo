@@ -20,6 +20,8 @@ import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
 
 // Dynamically register the deployed VirtualPool so Envio indexes its events
 // (Swap, Mint, Burn, etc.) without a hardcoded address list in the config.
+// Note: contractRegister is not exercised by the Envio test harness — see
+// fpmm.ts for the same pattern and the explanation of why it's untestable.
 VirtualPoolFactory.VirtualPoolDeployed.contractRegister(
   ({ event, context }) => {
     context.addVirtualPool(event.params.pool);

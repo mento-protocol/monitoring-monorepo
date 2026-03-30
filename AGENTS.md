@@ -15,14 +15,10 @@ pnpm monorepo with three packages:
 pnpm install
 
 # Indexer
-pnpm indexer:codegen              # Generate types from schema (devnet)
-pnpm indexer:dev                   # Start indexer (devnet)
-pnpm indexer:celo-sepolia:codegen  # Generate types (Celo Sepolia config)
-pnpm indexer:celo-sepolia:dev     # Start indexer (Celo Sepolia)
-pnpm indexer:celo-mainnet:codegen  # Generate types (Celo mainnet)
-pnpm indexer:celo-mainnet:dev      # Start indexer (Celo mainnet)
-pnpm indexer:monad-mainnet:codegen  # Generate types (Monad mainnet)
-pnpm indexer:monad-mainnet:dev      # Start indexer (Monad mainnet)
+pnpm indexer:codegen              # Generate types from schema (multichain mainnet)
+pnpm indexer:dev                   # Start indexer (multichain mainnet: Celo + Monad)
+pnpm indexer:celo-sepolia:codegen  # Generate types (Celo Sepolia testnet)
+pnpm indexer:celo-sepolia:dev     # Start indexer (Celo Sepolia testnet)
 pnpm indexer:monad-testnet:codegen  # Generate types (Monad testnet)
 pnpm indexer:monad-testnet:dev      # Start indexer (Monad testnet)
 
@@ -89,11 +85,10 @@ monitoring-monorepo/
 │   ├── package.json
 │   └── deployment-namespaces.json  # ← edit this when promoting a new deployment
 ├── indexer-envio/
-│   ├── config.celo.devnet.yaml   # Devnet indexer config
-│   ├── config.celo.mainnet.yaml  # Celo Mainnet config
-│   ├── config.celo.sepolia.yaml  # Celo Sepolia config
-│   ├── config.monad.mainnet.yaml # Monad Mainnet config
-│   ├── config.monad.testnet.yaml # Monad Testnet config
+│   ├── config.multichain.mainnet.yaml  # Mainnet indexer config (Celo + Monad) — DEFAULT
+│   ├── config.multichain.testnet.yaml  # Testnet multichain config
+│   ├── config.celo.sepolia.yaml        # Celo Sepolia testnet config
+│   ├── config.monad.testnet.yaml       # Monad testnet config
 │   ├── schema.graphql        # Entity definitions
 │   ├── src/
 │   │   ├── EventHandlers.ts  # Envio entry point (imports handlers, re-exports for tests)
@@ -170,7 +165,7 @@ This installs deps and runs Envio codegen (required for `indexer-envio` TypeScri
 pnpm --filter @mento-protocol/ui-dashboard typecheck
 pnpm --filter @mento-protocol/indexer-envio typecheck
 pnpm --filter @mento-protocol/indexer-envio test
-pnpm indexer:celo-mainnet:codegen   # Validates Envio can parse handler entry point + module imports
+pnpm indexer:codegen   # Validates Envio can parse handler entry point + module imports
 pnpm --filter @mento-protocol/ui-dashboard test:coverage
 ```
 
@@ -182,7 +177,7 @@ pnpm --filter @mento-protocol/ui-dashboard test:coverage
 
 ### EventHandlers.ts must remain the handler entry point
 
-Every `config.*.yaml` specifies `handler: src/EventHandlers.ts`. Envio expects all handler registrations (e.g. `FPMM.Swap.handler(...)`) to be reachable from this file at module load time. The actual logic lives in `src/handlers/*.ts` — these are imported as side effects from `EventHandlers.ts`. If you add a new handler file, you **must** add a corresponding `import "./handlers/yourFile"` in `EventHandlers.ts` and then re-run `pnpm indexer:celo-mainnet:codegen` to verify Envio picks it up.
+Every `config.*.yaml` specifies `handler: src/EventHandlers.ts`. Envio expects all handler registrations (e.g. `FPMM.Swap.handler(...)`) to be reachable from this file at module load time. The actual logic lives in `src/handlers/*.ts` — these are imported as side effects from `EventHandlers.ts`. If you add a new handler file, you **must** add a corresponding `import "./handlers/yourFile"` in `EventHandlers.ts` and then re-run `pnpm indexer:codegen` to verify Envio picks it up.
 
 ## Common Tasks
 

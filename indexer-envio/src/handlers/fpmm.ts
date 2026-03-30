@@ -97,6 +97,11 @@ async function applyLiquidityPositionDelta({
 // indexing all FPMM events (Swap, Mint, Burn, etc.) without needing a
 // hardcoded address list in the config. Envio deduplicates addresses, so
 // re-registering the same address on re-runs is harmless.
+//
+// Note: contractRegister callbacks are a framework-level hook that Envio
+// invokes before the handler. The Envio test harness (processEvent) only
+// exercises the .handler() path, so this callback has no direct test
+// coverage — this is a framework limitation, not an oversight.
 FPMMFactory.FPMMDeployed.contractRegister(({ event, context }) => {
   context.addFPMM(event.params.fpmmProxy);
   context.addERC20FeeToken(event.params.token0);
