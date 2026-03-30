@@ -15,7 +15,7 @@ pnpm --filter @mento-protocol/ui-dashboard typecheck
 pnpm --filter @mento-protocol/indexer-envio typecheck
 
 echo "🧪 Running tests..."
-pnpm --filter @mento-protocol/ui-dashboard test -- --run
+pnpm --filter @mento-protocol/ui-dashboard test
 pnpm --filter @mento-protocol/indexer-envio test
 
 echo ""
