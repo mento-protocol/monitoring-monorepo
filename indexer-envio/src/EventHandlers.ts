@@ -12,28 +12,24 @@
 // high, FPMMDeployed events are never seen, contractRegister never fires,
 // and all pool events are silently dropped — no error, just missing data.
 //
-// First factory deployment blocks (inclusive):
-//   Celo mainnet (42220):  60668100 — initial batch of 4 FPMM pools
-//   Monad mainnet (143):   60759432 — initial batch of 3 FPMM pools
-//   Celo Sepolia (11142220): ~18946570 — testnet deployment
-//   Monad testnet (10143): ~17932599 — testnet FPMMFactory deployment
+// First factory deployment blocks for production mainnet chains only.
+// We only validate mainnet chains here to avoid false-fatal errors when a
+// testnet env var (e.g. ENVIO_START_BLOCK_MONAD_TESTNET) is left set in
+// .env from a previous testnet run — that should never block a mainnet start.
+// Testnet configs are dev-only and not deployed to hosted Envio production.
+//
+// Celo mainnet (42220):  60668100 — initial batch of 4 FPMM pools
+// Monad mainnet (143):   60759432 — initial batch of 3 FPMM pools
 // ---------------------------------------------------------------------------
 export const FPMM_FIRST_DEPLOY_BLOCK: Record<number, number> = {
   42220: 60668100, // Celo mainnet
   143: 60759432, // Monad mainnet
-  11142220: 18946570, // Celo Sepolia
-  10143: 17932599, // Monad testnet
 };
 
-// Each chain maps to its dedicated env var (never the generic ENVIO_START_BLOCK).
-// Using ENVIO_START_BLOCK here would cause false-fatal errors when running a
-// single-network config where the value is valid for one chain but > the first
-// deploy block on another chain that isn't even active in that run.
+// Each mainnet chain maps to its dedicated env var.
 export const START_BLOCK_ENV_NAME: Record<number, string> = {
   42220: "ENVIO_START_BLOCK_CELO",
   143: "ENVIO_START_BLOCK_MONAD",
-  11142220: "ENVIO_START_BLOCK_CELO_SEPOLIA",
-  10143: "ENVIO_START_BLOCK_MONAD_TESTNET",
 };
 
 /**
@@ -66,12 +62,10 @@ export function assertStartBlocksValid(
   }
 }
 
-// Run the check at startup with values from the actual environment.
+// Run the check at startup with mainnet env var values only.
 assertStartBlocksValid({
   42220: process.env.ENVIO_START_BLOCK_CELO,
   143: process.env.ENVIO_START_BLOCK_MONAD,
-  11142220: process.env.ENVIO_START_BLOCK_CELO_SEPOLIA,
-  10143: process.env.ENVIO_START_BLOCK_MONAD_TESTNET,
 });
 
 // Handler registrations (side-effect imports)
