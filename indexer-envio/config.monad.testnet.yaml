@@ -14,10 +14,7 @@ networks:
           - event: FPMMDeployed
       - name: FPMM
         abi_file_path: abis/FPMM.json
-        address:
-          - 0xd9e9e6f6b5298e8bad390f7748035c49d6eeb055
-          - 0x1229e8a7b266c6db52712ba5c6899a6c4c3025cd
-          - 0x6d4c4b663541bf21015afb22669b0e1bbb3e2b1c
+        address: [] # Dynamically registered via FPMMFactory.FPMMDeployed.contractRegister
         handler: src/EventHandlers.ts
         events:
           - event: Swap
