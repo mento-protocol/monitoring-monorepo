@@ -56,4 +56,4 @@ Copy `.env.example` → `.env` and set:
 - `ENVIO_RPC_URL` — Celo RPC endpoint
 - `ENVIO_START_BLOCK` — Block number to start indexing from
 
-For Celo Sepolia: use root `pnpm indexer:celo-sepolia:dev`. For Celo mainnet: `pnpm indexer:celo-mainnet:dev`. For Monad: `pnpm indexer:monad-mainnet:dev` or `pnpm indexer:monad-testnet:dev`.
+Default (multichain Celo + Monad mainnet): `pnpm indexer:codegen && pnpm indexer:dev`. For Celo Sepolia testnet: `pnpm indexer:celo-sepolia:dev`. For Monad Testnet: `pnpm indexer:monad-testnet:dev`.
