@@ -25,11 +25,15 @@ const FPMM_FIRST_DEPLOY_BLOCK: Record<number, number> = {
   10143: 17932599, // Monad testnet
 };
 
+// Each chain maps to its dedicated env var (never the generic ENVIO_START_BLOCK).
+// Using ENVIO_START_BLOCK here would cause false-fatal errors when running a
+// single-network config where the value is valid for one chain but > the first
+// deploy block on another chain that isn't even active in that run.
 const START_BLOCK_ENV: Record<number, string | undefined> = {
   42220: process.env.ENVIO_START_BLOCK_CELO,
   143: process.env.ENVIO_START_BLOCK_MONAD,
-  11142220: process.env.ENVIO_START_BLOCK,
-  10143: process.env.ENVIO_START_BLOCK,
+  11142220: process.env.ENVIO_START_BLOCK_CELO_SEPOLIA,
+  10143: process.env.ENVIO_START_BLOCK_MONAD_TESTNET,
 };
 
 for (const [chainIdStr, firstDeployBlock] of Object.entries(
