@@ -55,7 +55,7 @@ All entities have `chainId: Int! @index` and namespaced IDs since PR #95 (2026-0
 See [`README.md`](./README.md#local-development) for setup instructions.
 
 ```bash
-pnpm indexer:multichain:codegen
-pnpm indexer:multichain:dev
+pnpm indexer:codegen
+pnpm indexer:dev
 # Hasura: http://localhost:8080 (secret: testing)
 ```
