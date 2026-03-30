@@ -8,11 +8,7 @@ echo "📦 Installing dependencies..."
 pnpm install --frozen-lockfile
 
 echo "🔧 Running indexer codegen (multichain mainnet)..."
-pnpm indexer:codegen 2>/dev/null || {
-  # Fallback: try default devnet config
-  echo "   ⚠️ Multichain codegen failed, trying devnet..."
-  pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
-}
+pnpm indexer:codegen
 
 echo "✅ Verifying typecheck..."
 pnpm --filter @mento-protocol/ui-dashboard typecheck

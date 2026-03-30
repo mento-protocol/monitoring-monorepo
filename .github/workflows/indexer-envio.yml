@@ -60,10 +60,9 @@ jobs:
         # Monad configs are validated for syntax/schema correctness even with empty
         # address arrays — this catches drift before deploy time.
         run: |
-          pnpm --filter @mento-protocol/indexer-envio codegen --config config.monad.testnet.yaml
-          pnpm --filter @mento-protocol/indexer-envio codegen --config config.monad.mainnet.yaml
+          pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.celo.sepolia.yaml
-          pnpm --filter @mento-protocol/indexer-envio codegen --config config.celo.mainnet.yaml
+          pnpm --filter @mento-protocol/indexer-envio codegen --config config.monad.testnet.yaml
       - name: Link generated package
         if: steps.changes.outputs.indexer == 'true'
         # pnpm install runs before generated/ exists, so the workspace symlink for
