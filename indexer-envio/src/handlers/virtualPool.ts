@@ -18,6 +18,14 @@ import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
 // VirtualPoolFactory.VirtualPoolDeployed
 // ---------------------------------------------------------------------------
 
+// Dynamically register the deployed VirtualPool so Envio indexes its events
+// (Swap, Mint, Burn, etc.) without a hardcoded address list in the config.
+VirtualPoolFactory.VirtualPoolDeployed.contractRegister(
+  ({ event, context }) => {
+    context.addVirtualPool(event.params.pool);
+  },
+);
+
 VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
   const poolId = makePoolId(event.chainId, event.params.pool);
