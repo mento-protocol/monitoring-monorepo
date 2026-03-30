@@ -23,8 +23,8 @@ echo "  core.hooksPath → .trunk/hooks"
 echo "▶ Installing dependencies..."
 pnpm install --frozen-lockfile
 
-echo "▶ Running Envio codegen (celo-mainnet config)..."
-pnpm indexer:celo-mainnet:codegen
+echo "▶ Running Envio codegen (multichain config)..."
+pnpm indexer:codegen
 
 echo ""
 echo "✅ Setup complete. You're ready to work and push."

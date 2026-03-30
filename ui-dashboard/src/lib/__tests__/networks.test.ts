@@ -165,12 +165,24 @@ describe("NETWORKS — Monad networks", () => {
     expect(networks.isConfiguredNetworkId("monad-mainnet-hosted")).toBe(false);
   });
 
-  it("uses multichain URL and is hidden when multichain env var is empty", async () => {
-    vi.stubEnv("NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED", "");
+  it("wires the multichain URL into both celo-mainnet-hosted and monad-mainnet-hosted, trimming whitespace", async () => {
+    // Positive-path: non-empty multichain URL → both hosted networks visible.
+    // Also verifies that leading/trailing whitespace is stripped (env var may
+    // contain spaces in some CI setups).
+    vi.stubEnv(
+      "NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED",
+      "  https://indexer.hyperindex.xyz/2f3dd15/v1/graphql  ",
+    );
 
     const networks = await import("../networks");
-    expect(networks.NETWORKS["monad-mainnet-hosted"].hasuraUrl).toBe("");
-    expect(networks.isConfiguredNetworkId("monad-mainnet-hosted")).toBe(false);
+    expect(networks.NETWORKS["celo-mainnet-hosted"].hasuraUrl).toBe(
+      "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql",
+    );
+    expect(networks.NETWORKS["monad-mainnet-hosted"].hasuraUrl).toBe(
+      "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql",
+    );
+    expect(networks.isConfiguredNetworkId("celo-mainnet-hosted")).toBe(true);
+    expect(networks.isConfiguredNetworkId("monad-mainnet-hosted")).toBe(true);
   });
 
   it("monad-mainnet-hosted has tokenSymbols populated from contracts package", () => {
