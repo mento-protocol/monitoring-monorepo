@@ -60,8 +60,6 @@ jobs:
         # typecheck + tests below.
         run: |
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml
-          pnpm --filter @mento-protocol/indexer-envio codegen --config config.celo.sepolia.yaml
-          pnpm --filter @mento-protocol/indexer-envio codegen --config config.monad.testnet.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
       - name: Link generated package
         if: steps.changes.outputs.indexer == 'true'

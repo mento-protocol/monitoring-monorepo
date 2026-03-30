@@ -17,10 +17,8 @@ pnpm install
 # Indexer
 pnpm indexer:codegen              # Generate types from schema (multichain mainnet)
 pnpm indexer:dev                   # Start indexer (multichain mainnet: Celo + Monad)
-pnpm indexer:celo-sepolia:codegen  # Generate types (Celo Sepolia testnet)
-pnpm indexer:celo-sepolia:dev     # Start indexer (Celo Sepolia testnet)
-pnpm indexer:monad-testnet:codegen  # Generate types (Monad testnet)
-pnpm indexer:monad-testnet:dev      # Start indexer (Monad testnet)
+pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet)
+pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 
 # Dashboard
 pnpm dashboard:dev            # Dev server
@@ -44,7 +42,7 @@ pnpm infra:apply              # Apply infrastructure changes
 
 - **Runtime:** Envio HyperIndex (envio@2.32.3)
 - **Schema:** `schema.graphql` defines indexed entities (FPMM, Swap, Mint, Burn, etc.)
-- **Configs:** `config.multichain.mainnet.yaml` (default), `config.multichain.testnet.yaml`, `config.celo.sepolia.yaml`, `config.monad.testnet.yaml`
+- **Configs:** `config.multichain.mainnet.yaml` (default), `config.multichain.testnet.yaml`
 - **Handlers:** `src/EventHandlers.ts` is the Envio entry point (all `config.*.yaml` files reference it). It imports handler modules from `src/handlers/` and re-exports test utilities. Handler logic lives in `src/handlers/fpmm.ts`, `src/handlers/sortedOracles.ts`, `src/handlers/virtualPool.ts`, `src/handlers/feeToken.ts`. Shared logic: `src/rpc.ts` (RPC + caches), `src/pool.ts` (upsert), `src/priceDifference.ts`, `src/tradingLimits.ts`, `src/feeToken.ts`, `src/abis.ts`, `src/helpers.ts`.
 - **Contract addresses:** `src/contractAddresses.ts` — resolves addresses from `@mento-protocol/contracts` using the namespace map from `shared-config`
 - **ABIs:** `abis/` — FPMMFactory, FPMM, VirtualPoolFactory (indexer-specific); SortedOracles + token ABIs come from `@mento-protocol/contracts`
@@ -87,8 +85,7 @@ monitoring-monorepo/
 ├── indexer-envio/
 │   ├── config.multichain.mainnet.yaml  # Mainnet indexer config (Celo + Monad) — DEFAULT
 │   ├── config.multichain.testnet.yaml  # Testnet multichain config
-│   ├── config.celo.sepolia.yaml        # Celo Sepolia testnet config
-│   ├── config.monad.testnet.yaml       # Monad testnet config
+
 │   ├── schema.graphql        # Entity definitions
 │   ├── src/
 │   │   ├── EventHandlers.ts  # Envio entry point (imports handlers, re-exports for tests)
@@ -193,7 +190,7 @@ When a new set of contracts has been deployed and a new `@mento-protocol/contrac
 ### Adding a new contract to index
 
 1. Add ABI to `indexer-envio/abis/`
-2. Add contract entry in the relevant config(s): `config.multichain.mainnet.yaml`, `config.multichain.testnet.yaml`, `config.celo.sepolia.yaml`, `config.monad.testnet.yaml`
+2. Add contract entry in the relevant config(s): `config.multichain.mainnet.yaml`, `config.multichain.testnet.yaml`
 3. Add entity to `schema.graphql`
 4. Add handler in the appropriate `src/handlers/*.ts` file (or create a new one and import it from `src/EventHandlers.ts`)
 5. Run `pnpm indexer:codegen` to regenerate types

@@ -8,8 +8,7 @@ Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on
 
 - `config.multichain.mainnet.yaml` — **Default** mainnet config (Celo + Monad)
 - `config.multichain.testnet.yaml` — Testnet multichain config
-- `config.celo.sepolia.yaml` — Celo Sepolia testnet config
-- `config.monad.testnet.yaml` — Monad testnet config
+
 - `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced)
 - `src/EventHandlers.ts` — Event processing logic
 - `src/contractAddresses.ts` — Contract address resolution from `@mento-protocol/contracts`; also exports `CONTRACT_NAMESPACE_BY_CHAIN` (backed by `config/deployment-namespaces.json`)
@@ -58,4 +57,4 @@ Copy `.env.example` → `.env` and set:
 
 Do **not** set the generic `ENVIO_RPC_URL` in multichain mode — it would route all chains to the same endpoint and produce incorrect RPC reads for chain-specific calls.
 
-Default (multichain Celo + Monad mainnet): `pnpm indexer:codegen && pnpm indexer:dev`. For Celo Sepolia testnet: `pnpm indexer:celo-sepolia:dev`. For Monad Testnet: `pnpm indexer:monad-testnet:dev`.
+Mainnet (Celo + Monad): `pnpm indexer:codegen && pnpm indexer:dev`. Testnet (Celo Sepolia + Monad Testnet): `pnpm indexer:testnet:dev`.
