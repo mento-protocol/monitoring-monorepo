@@ -45,7 +45,7 @@ variable "upstash_region" {
 # ── Hasura / Envio ────────────────────────────────────────────────────────────
 
 variable "hasura_url_multichain_hosted" {
-  description = "GraphQL endpoint for the shared multichain Envio indexer (Celo + Monad). When set, both celo-mainnet-hosted and monad-mainnet-hosted networks will query this endpoint filtered by chainId. Takes precedence over per-chain URLs."
+  description = "GraphQL endpoint for the shared multichain Envio indexer (Celo + Monad). Both celo-mainnet-hosted and monad-mainnet-hosted networks query this single endpoint, filtered by chainId."
   type        = string
   default     = "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql"
 }
@@ -54,18 +54,6 @@ variable "hasura_url_celo_sepolia_hosted" {
   description = "GraphQL endpoint for the hosted Celo Sepolia Envio indexer."
   type        = string
   default     = "https://indexer.hyperindex.xyz/fc3170d/v1/graphql"
-}
-
-variable "hasura_url_celo_mainnet_hosted" {
-  description = "GraphQL endpoint for the hosted Celo Mainnet Envio indexer."
-  type        = string
-  default     = "https://indexer.hyperindex.xyz/60ff18c/v1/graphql"
-}
-
-variable "hasura_url_monad_mainnet_hosted" {
-  description = "GraphQL endpoint for the hosted Monad Mainnet Envio indexer. Leave empty until indexer is deployed."
-  type        = string
-  default     = "https://indexer.hyperindex.xyz/cfeda9e/v1/graphql"
 }
 
 variable "hasura_url_monad_testnet_hosted" {

@@ -157,31 +157,20 @@ describe("NETWORKS — Monad networks", () => {
   const USDM_MONAD_MAINNET = "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115";
   const USDM_MONAD_TESTNET = "0x5ecc03111ad2a78f981a108759bc73bae2ab31bc";
 
-  it("does not mark monad-mainnet-hosted configured when only the Celo hosted URL is set", async () => {
+  it("does not mark monad-mainnet-hosted configured when multichain URL is not set", async () => {
     vi.stubEnv("NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED", "");
-    vi.stubEnv("NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED", "");
-    vi.stubEnv(
-      "NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED",
-      "https://celo.example/v1/graphql",
-    );
 
     const networks = await import("../networks");
     expect(networks.NETWORKS["monad-mainnet-hosted"].hasuraUrl).toBe("");
     expect(networks.isConfiguredNetworkId("monad-mainnet-hosted")).toBe(false);
   });
 
-  it("falls back to chain-specific hosted URL when multichain env var is empty", async () => {
+  it("uses multichain URL and is hidden when multichain env var is empty", async () => {
     vi.stubEnv("NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED", "");
-    vi.stubEnv(
-      "NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED",
-      "https://monad.example/v1/graphql",
-    );
 
     const networks = await import("../networks");
-    expect(networks.NETWORKS["monad-mainnet-hosted"].hasuraUrl).toBe(
-      "https://monad.example/v1/graphql",
-    );
-    expect(networks.isConfiguredNetworkId("monad-mainnet-hosted")).toBe(true);
+    expect(networks.NETWORKS["monad-mainnet-hosted"].hasuraUrl).toBe("");
+    expect(networks.isConfiguredNetworkId("monad-mainnet-hosted")).toBe(false);
   });
 
   it("monad-mainnet-hosted has tokenSymbols populated from contracts package", () => {

@@ -191,12 +191,8 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
     rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
-    // Prefer the shared multichain endpoint, then the chain-specific override.
-    // Empty strings should not block fallback.
     hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED?.trim() ||
-      process.env.NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED?.trim() ||
-      "",
+      process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED?.trim() ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET_HOSTED ??
@@ -212,15 +208,8 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     contractsNamespace: NS["monad-mainnet"],
     rpcUrl:
       process.env.NEXT_PUBLIC_RPC_URL_MONAD_MAINNET ?? "https://rpc2.monad.xyz",
-    // Prefer the shared multichain endpoint, then a Monad-specific override.
-    // No Celo fallback — silently pointing Monad at the Celo backend masks bad
-    // rollouts and causes isConfiguredNetworkId() to return true for the wrong
-    // backend. Monad is hidden unless explicitly configured.
-    // Empty strings should not block fallback.
     hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED?.trim() ||
-      process.env.NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED?.trim() ||
-      "",
+      process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED?.trim() ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_MAINNET_HOSTED ??
