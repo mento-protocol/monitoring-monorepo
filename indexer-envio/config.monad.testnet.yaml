@@ -14,6 +14,9 @@ networks:
           - event: FPMMDeployed
       - name: FPMM
         abi_file_path: abis/FPMM.json
+        # Dynamic-only: EventHandlers.ts throws a fatal error at startup if
+        # ENVIO_START_BLOCK is raised above the FPMMFactory's first deploy block
+        # (17932599), so misconfiguration fails loudly rather than silently.
         address: [] # Dynamically registered via FPMMFactory.FPMMDeployed.contractRegister
         handler: src/EventHandlers.ts
         events:

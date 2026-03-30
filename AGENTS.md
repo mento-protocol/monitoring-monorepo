@@ -44,7 +44,7 @@ pnpm infra:apply              # Apply infrastructure changes
 
 - **Runtime:** Envio HyperIndex (envio@2.32.3)
 - **Schema:** `schema.graphql` defines indexed entities (FPMM, Swap, Mint, Burn, etc.)
-- **Configs:** `config.celo.devnet.yaml`, `config.celo.mainnet.yaml`, `config.celo.sepolia.yaml`, `config.monad.mainnet.yaml`, `config.monad.testnet.yaml`
+- **Configs:** `config.multichain.mainnet.yaml` (default), `config.multichain.testnet.yaml`, `config.celo.sepolia.yaml`, `config.monad.testnet.yaml`
 - **Handlers:** `src/EventHandlers.ts` is the Envio entry point (all `config.*.yaml` files reference it). It imports handler modules from `src/handlers/` and re-exports test utilities. Handler logic lives in `src/handlers/fpmm.ts`, `src/handlers/sortedOracles.ts`, `src/handlers/virtualPool.ts`, `src/handlers/feeToken.ts`. Shared logic: `src/rpc.ts` (RPC + caches), `src/pool.ts` (upsert), `src/priceDifference.ts`, `src/tradingLimits.ts`, `src/feeToken.ts`, `src/abis.ts`, `src/helpers.ts`.
 - **Contract addresses:** `src/contractAddresses.ts` — resolves addresses from `@mento-protocol/contracts` using the namespace map from `shared-config`
 - **ABIs:** `abis/` — FPMMFactory, FPMM, VirtualPoolFactory (indexer-specific); SortedOracles + token ABIs come from `@mento-protocol/contracts`
@@ -193,7 +193,7 @@ When a new set of contracts has been deployed and a new `@mento-protocol/contrac
 ### Adding a new contract to index
 
 1. Add ABI to `indexer-envio/abis/`
-2. Add contract entry in the relevant config(s): `config.celo.mainnet.yaml`, `config.celo.sepolia.yaml`, `config.monad.mainnet.yaml`, `config.monad.testnet.yaml`
+2. Add contract entry in the relevant config(s): `config.multichain.mainnet.yaml`, `config.multichain.testnet.yaml`, `config.celo.sepolia.yaml`, `config.monad.testnet.yaml`
 3. Add entity to `schema.graphql`
 4. Add handler in the appropriate `src/handlers/*.ts` file (or create a new one and import it from `src/EventHandlers.ts`)
 5. Run `pnpm indexer:codegen` to regenerate types
