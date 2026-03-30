@@ -76,12 +76,10 @@ GraphQL endpoint: `http://localhost:8080/v1/graphql`
 ### Available Commands (from repo root)
 
 ```bash
-pnpm indexer:codegen                # Generate types (multichain — Celo + Monad mainnet)
-pnpm indexer:dev                    # Start local multichain indexer
-pnpm indexer:celo-sepolia:codegen   # Generate types for Celo Sepolia testnet
-pnpm indexer:celo-sepolia:dev       # Start local Celo Sepolia indexer
-pnpm indexer:monad-testnet:codegen  # Generate types for Monad Testnet
-pnpm indexer:monad-testnet:dev      # Start local Monad Testnet indexer
+pnpm indexer:codegen                # Generate types (multichain mainnet — Celo + Monad)
+pnpm indexer:dev                    # Start local multichain mainnet indexer
+pnpm indexer:testnet:codegen        # Generate types (multichain testnet — Celo Sepolia + Monad testnet)
+pnpm indexer:testnet:dev            # Start local multichain testnet indexer
 pnpm deploy:indexer                 # Push to envio branch → triggers hosted reindex
 ```
 

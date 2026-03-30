@@ -57,14 +57,11 @@ pnpm install
 ### Run the Indexer (local)
 
 ```bash
-# Multichain (Celo + Monad mainnet) — default
+# Multichain mainnet (Celo + Monad) — default
 pnpm indexer:codegen && pnpm indexer:dev
 
-# Celo Sepolia (testnet)
-pnpm indexer:celo-sepolia:codegen && pnpm indexer:celo-sepolia:dev
-
-# Monad Testnet
-pnpm indexer:monad-testnet:codegen && pnpm indexer:monad-testnet:dev
+# Multichain testnet (Celo Sepolia + Monad testnet)
+pnpm indexer:testnet:codegen && pnpm indexer:testnet:dev
 ```
 
 ### Run the Dashboard
