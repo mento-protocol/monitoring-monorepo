@@ -94,23 +94,6 @@ resource "vercel_project_environment_variable" "hasura_url_celo_sepolia" {
   target     = ["production", "preview"]
 }
 
-resource "vercel_project_environment_variable" "hasura_url_celo_mainnet" {
-  project_id = vercel_project.dashboard.id
-  team_id    = var.vercel_team_id
-  key        = "NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED"
-  value      = var.hasura_url_celo_mainnet_hosted
-  target     = ["production", "preview"]
-}
-
-resource "vercel_project_environment_variable" "hasura_url_monad_mainnet" {
-  count      = var.hasura_url_monad_mainnet_hosted != "" ? 1 : 0
-  project_id = vercel_project.dashboard.id
-  team_id    = var.vercel_team_id
-  key        = "NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED"
-  value      = var.hasura_url_monad_mainnet_hosted
-  target     = ["production", "preview"]
-}
-
 resource "vercel_project_environment_variable" "hasura_url_monad_testnet" {
   count      = var.hasura_url_monad_testnet_hosted != "" ? 1 : 0
   project_id = vercel_project.dashboard.id
