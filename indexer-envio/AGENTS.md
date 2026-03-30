@@ -52,8 +52,11 @@ pnpm test      # Run tests (mocha + chai)
 
 Copy `.env.example` → `.env` and set:
 
-- `ENVIO_API_TOKEN` — Get from <https://envio.dev/app/api-tokens>
-- `ENVIO_RPC_URL` — Celo RPC endpoint
-- `ENVIO_START_BLOCK` — Block number to start indexing from
+- `ENVIO_RPC_URL_42220` — Celo Mainnet RPC endpoint (e.g. `https://forno.celo.org`)
+- `ENVIO_RPC_URL_143` — Monad Mainnet RPC endpoint (e.g. `https://rpc2.monad.xyz`)
+- `ENVIO_START_BLOCK_CELO` — (optional) Celo start block, defaults to 60664500
+- `ENVIO_START_BLOCK_MONAD` — (optional) Monad start block, defaults to 60730000
+
+Do **not** set the generic `ENVIO_RPC_URL` in multichain mode — it would route all chains to the same endpoint and produce incorrect RPC reads for chain-specific calls.
 
 Default (multichain Celo + Monad mainnet): `pnpm indexer:codegen && pnpm indexer:dev`. For Celo Sepolia testnet: `pnpm indexer:celo-sepolia:dev`. For Monad Testnet: `pnpm indexer:monad-testnet:dev`.
