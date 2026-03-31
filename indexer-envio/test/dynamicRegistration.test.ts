@@ -1,45 +1,30 @@
 /// <reference types="mocha" />
 /**
- * Dynamic Contract Registration — Behavioral Documentation
+ * Dynamic Contract Registration
  *
- * This file documents the testing strategy (and limitations) for the
- * contractRegister callbacks in fpmm.ts and virtualPool.ts.
+ * Tests for the contractRegister hooks that auto-discover new pools from
+ * factory deploy events, replacing the old hardcoded address list approach.
  *
- * The core behavioral change in this PR:
- *   Before: FPMM/VirtualPool addresses were hardcoded in config YAML.
- *   After:  Addresses are registered dynamically via contractRegister hooks
- *           triggered by FPMMFactory.FPMMDeployed and
- *           VirtualPoolFactory.VirtualPoolDeployed events.
+ * Two complementary test strategies:
  *
- * WHY contractRegister CALLBACKS CANNOT BE UNIT TESTED:
- *   Envio's TestHelpers.processEvent() only exercises the .handler() path.
- *   The .contractRegister() callback is a framework-level hook that Envio
- *   invokes before the handler during real indexing. The test harness does
- *   not expose a processContractRegister() equivalent — this is a framework
- *   limitation, not an oversight.
+ * 1. REGISTRATION INTROSPECTION (new — will catch removed contractRegister calls)
+ *    Read the Envio handler registry directly after importing EventHandlers.
+ *    If fpmm.ts stops calling FPMMFactory.FPMMDeployed.contractRegister(...),
+ *    EventRegister.getContractRegister(handlerRegister) returns undefined and
+ *    these tests fail.
  *
- * WHAT IS TESTED:
- *   - FPMMDeployed.handler creates a Pool entity (swap-reserves.test.ts)
- *   - VirtualPoolDeployed.handler creates a Pool entity (swap-reserves.test.ts)
- *   - The startup start-block guard (startBlockInvariant.test.ts)
- *
- * WHAT IS VERIFIED BY INSPECTION:
- *   fpmm.ts: FPMMFactory.FPMMDeployed.contractRegister calls
- *     context.addFPMM(event.params.fpmmProxy) — the correct Envio API for
- *     dynamic registration. This is the same API used for ERC20FeeToken
- *     (context.addERC20FeeToken) which was already present and working.
- *
- *   virtualPool.ts: VirtualPoolFactory.VirtualPoolDeployed.contractRegister
- *     calls context.addVirtualPool(event.params.pool) — correct Envio API.
- *
- * INTEGRATION EVIDENCE:
- *   On-chain verification (2026-03-30): EURm/USDm pool on Celo mainnet
- *   (0x1ad2ea06...) had 123 real Swap events but 0 in the indexer because
- *   it was missing from the hardcoded config list. After deploying this fix,
- *   a full reindex will capture all events for all factory-deployed pools.
+ * 2. HANDLER SMOKE TESTS (existing)
+ *    TestHelpers.processEvent() exercises .handler() — proves the handler
+ *    creates DB entities correctly. Does NOT test .contractRegister() path
+ *    (Envio test harness limitation — no processContractRegister() equivalent).
  */
 import { strict as assert } from "assert";
 import generated from "generated";
+
+// Import EventHandlers to trigger handler registrations (side-effect import).
+// This causes fpmm.ts / virtualPool.ts to call their .contractRegister() and
+// .handler() setup — which is what the introspection tests below verify.
+import "../src/EventHandlers.ts";
 
 // The `generated` module ships as CommonJS with its own hand-rolled type
 // definitions in generated/index.d.ts. It does not export clean standalone
@@ -69,19 +54,81 @@ type GeneratedModule = {
 };
 
 const { TestHelpers } = generated as unknown as GeneratedModule;
-const { MockDb, FPMMFactory, VirtualPoolFactory } = TestHelpers;
+const {
+  MockDb,
+  FPMMFactory: TestFPMMFactory,
+  VirtualPoolFactory: TestVirtualPoolFactory,
+} = TestHelpers;
+
+// ---------------------------------------------------------------------------
+// Registry introspection
+//
+// Access the Envio handler registry directly to assert that contractRegister
+// callbacks are wired up. These tests WILL FAIL if someone removes the
+// contractRegister() calls from fpmm.ts or virtualPool.ts.
+//
+// Envio types.res.js exposes Types.FPMMFactory.FPMMDeployed.handlerRegister
+// and EventRegister.getContractRegister(). We use the internal JS modules
+// since the TypeScript types don't expose these. If the Envio package changes
+// its internal structure, these imports will fail — that's intentional.
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const EventRegister = require("envio/src/EventRegister.res.js") as {
+  getContractRegister: (reg: unknown) => unknown;
+};
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const GeneratedTypes = require("generated/src/Types.res.js") as {
+  FPMMFactory: { FPMMDeployed: { handlerRegister: unknown } };
+  VirtualPoolFactory: { VirtualPoolDeployed: { handlerRegister: unknown } };
+};
+
+describe("Dynamic contract registration — registry introspection", () => {
+  it("FPMMFactory.FPMMDeployed has a contractRegister callback registered", () => {
+    // This test FAILS if fpmm.ts removes:
+    //   FPMMFactory.FPMMDeployed.contractRegister(({ event, context }) => {
+    //     context.addFPMM(event.params.fpmmProxy);
+    //   })
+    const reg = EventRegister.getContractRegister(
+      GeneratedTypes.FPMMFactory.FPMMDeployed.handlerRegister,
+    );
+    assert.ok(
+      reg !== undefined && reg !== null,
+      "FPMMFactory.FPMMDeployed must have a contractRegister callback. " +
+        "If this test fails, check that fpmm.ts calls .contractRegister() " +
+        "with context.addFPMM() — removing it silently breaks pool discovery.",
+    );
+  });
+
+  it("VirtualPoolFactory.VirtualPoolDeployed has a contractRegister callback registered", () => {
+    // This test FAILS if virtualPool.ts removes:
+    //   VirtualPoolFactory.VirtualPoolDeployed.contractRegister(({ event, context }) => {
+    //     context.addVirtualPool(event.params.pool);
+    //   })
+    const reg = EventRegister.getContractRegister(
+      GeneratedTypes.VirtualPoolFactory.VirtualPoolDeployed.handlerRegister,
+    );
+    assert.ok(
+      reg !== undefined && reg !== null,
+      "VirtualPoolFactory.VirtualPoolDeployed must have a contractRegister callback. " +
+        "If this test fails, check that virtualPool.ts calls .contractRegister() " +
+        "with context.addVirtualPool() — removing it silently breaks VirtualPool discovery.",
+    );
+  });
+});
 
 const POOL_ADDR = "0x1ad2ea06502919f935d9c09028df73a462979e29";
 const VPOOL_ADDR = "0xab945882018b81bdf62629e98ffdafd9495a0076";
 const TOKEN0 = "0x765de816845861e75a25fca122bb6898b8b1282a";
 const TOKEN1 = "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73";
 
-describe("Dynamic contract registration — handler coverage", () => {
+describe("Dynamic contract registration — handler smoke tests", () => {
   it("FPMMDeployed.handler creates a Pool entity for the deployed pool", async () => {
-    // This tests the .handler() path. The .contractRegister() path
-    // (context.addFPMM) cannot be tested via this harness — see file header.
+    // Tests .handler() path only. .contractRegister() path is verified by the
+    // introspection suite above (registry-level assertion) rather than via
+    // TestHelpers.processEvent, which does not exercise contractRegister.
     let mockDb = MockDb.createMockDb();
-    const event = FPMMFactory.FPMMDeployed.createMockEvent({
+    const event = TestFPMMFactory.FPMMDeployed.createMockEvent({
       fpmmProxy: POOL_ADDR,
       fpmmImplementation: "0x00000000000000000000000000000000000000bc",
       token0: TOKEN0,
@@ -93,7 +140,7 @@ describe("Dynamic contract registration — handler coverage", () => {
         block: { number: 62725622, timestamp: 1_700_010_000 },
       },
     });
-    mockDb = await FPMMFactory.FPMMDeployed.processEvent({ event, mockDb });
+    mockDb = await TestFPMMFactory.FPMMDeployed.processEvent({ event, mockDb });
     const poolId = `42220-${POOL_ADDR}`;
     const pool = mockDb.entities.Pool.get(poolId);
     assert.ok(
@@ -104,7 +151,7 @@ describe("Dynamic contract registration — handler coverage", () => {
 
   it("VirtualPoolDeployed.handler creates a Pool entity for the deployed pool", async () => {
     let mockDb = MockDb.createMockDb();
-    const event = VirtualPoolFactory.VirtualPoolDeployed.createMockEvent({
+    const event = TestVirtualPoolFactory.VirtualPoolDeployed.createMockEvent({
       pool: VPOOL_ADDR,
       token0: TOKEN0,
       token1: TOKEN1,
@@ -115,7 +162,7 @@ describe("Dynamic contract registration — handler coverage", () => {
         block: { number: 60668100, timestamp: 1_700_020_000 },
       },
     });
-    mockDb = await VirtualPoolFactory.VirtualPoolDeployed.processEvent({
+    mockDb = await TestVirtualPoolFactory.VirtualPoolDeployed.processEvent({
       event,
       mockDb,
     });
