@@ -399,6 +399,7 @@ function splitCsvLine(line: string): { cols: string[] } | { error: string } {
   let current = "";
   let inQuote = false;
   let atFieldStart = true;
+  let justClosedQuote = false;
 
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
@@ -410,6 +411,7 @@ function splitCsvLine(line: string): { cols: string[] } | { error: string } {
           i++;
         } else {
           inQuote = false;
+          justClosedQuote = true;
         }
       } else {
         // Quotes are only valid at the start of a field.
@@ -417,12 +419,18 @@ function splitCsvLine(line: string): { cols: string[] } | { error: string } {
           return { error: "unexpected quote character" };
         }
         inQuote = true;
+        justClosedQuote = false;
       }
     } else if (ch === "," && !inQuote) {
       cols.push(current);
       current = "";
       atFieldStart = true;
+      justClosedQuote = false;
     } else {
+      // After a closing quote, only a comma or EOL is valid.
+      if (justClosedQuote) {
+        return { error: "unexpected trailing characters after closing quote" };
+      }
       current += ch;
       atFieldStart = false;
     }

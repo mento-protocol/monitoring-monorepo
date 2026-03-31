@@ -290,6 +290,15 @@ describe("POST /api/address-labels/import", () => {
       expect(json.error).toMatch(/quote/i);
     });
 
+    it("returns 400 for trailing junk after closing quote", async () => {
+      const csv = `address,name\n${validAddress},"Label"junk`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(400);
+      const json = (await body.json()) as { error: string };
+      expect(json.error).toMatch(/trailing characters/i);
+    });
+
     it("returns 400 for row with missing address but non-empty name", async () => {
       const csv = `address,name\n,Treasury`;
       const res = await csvReq(csv);
