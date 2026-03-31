@@ -117,9 +117,13 @@ export default function AddressBookPage({
       e.target.value = "";
 
       const isCsv =
-        file.name.endsWith(".csv") ||
+        file.name.toLowerCase().endsWith(".csv") ||
         file.type === "text/csv" ||
-        file.type === "text/plain";
+        // text/plain is treated as CSV only when the filename confirms it —
+        // some OSes send text/plain for .csv files, but JSON files can also
+        // arrive as text/plain and should still go through the JSON path.
+        (file.type === "text/plain" &&
+          file.name.toLowerCase().endsWith(".csv"));
 
       if (isCsv) {
         // Send CSV directly — backend parses it and imports into all mainnet chains.
