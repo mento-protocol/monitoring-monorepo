@@ -286,6 +286,17 @@ describe("POST /api/address-labels/import", () => {
       expect(((await body.json()) as { imported: number }).imported).toBe(0);
     });
 
+    it("strips UTF-8 BOM from Excel/Sheets exports", async () => {
+      // Excel and Google Sheets prepend BOM (U+FEFF) to CSV exports.
+      // Without stripping, the header becomes BOM+address and column detection fails.
+      const BOM = "\uFEFF";
+      const csv = BOM + "address,name\n" + validAddress + ",BOM Label";
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(200);
+      expect(((await body.json()) as { imported: number }).imported).toBe(1);
+    });
+
     it("sniffs CSV from JSON content-type when content has no { or [ prefix", async () => {
       // Some upload paths may send text/csv content with wrong content-type
       const req = new NextRequest(
