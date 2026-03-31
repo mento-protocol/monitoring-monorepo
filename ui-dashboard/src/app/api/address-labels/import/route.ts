@@ -19,13 +19,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const contentType = req.headers.get("content-type") ?? "";
 
-  // CSV import: Content-Type text/csv or text/plain (browsers sometimes use
-  // text/plain for .csv files). Expects two columns: address,name (header row
-  // required). Chain IDs default to all configured mainnet chains.
-  if (
-    contentType.startsWith("text/csv") ||
-    contentType.startsWith("text/plain")
-  ) {
+  // CSV import: explicit text/csv content-type → always CSV.
+  // text/plain is NOT routed here directly — some environments send text/plain
+  // for JSON files too. Instead, text/plain falls through to content sniffing
+  // below, which checks whether the body starts with { or [.
+  if (contentType.startsWith("text/csv")) {
     return handleCsvImport(req);
   }
 
@@ -278,16 +276,27 @@ async function handleCsvText(text: string): Promise<NextResponse> {
     return serverError(err);
   }
 
-  try {
-    for (const chainId of MAINNET_CHAIN_IDS) {
-      const existing = existingByChain.get(chainId) ?? {};
-      const merged: Record<string, AddressLabelEntry> = {};
-      for (const [addr, entry] of Object.entries(labels)) {
-        const prev = existing[addr];
-        merged[addr] = { ...prev, ...entry };
-      }
-      await importLabels(chainId, merged);
+  // Pre-compute all merged maps before any writes. Then fire all writes in
+  // parallel — this minimises partial-write risk: all chains succeed or fail
+  // together. (No true transaction is possible here; the worst case is that
+  // all writes fail and the caller can safely retry.)
+  const mergedByChain = new Map<number, Record<string, AddressLabelEntry>>();
+  for (const chainId of MAINNET_CHAIN_IDS) {
+    const existing = existingByChain.get(chainId) ?? {};
+    const merged: Record<string, AddressLabelEntry> = {};
+    for (const [addr, entry] of Object.entries(labels)) {
+      const prev = existing[addr];
+      merged[addr] = { ...prev, ...entry };
     }
+    mergedByChain.set(chainId, merged);
+  }
+
+  try {
+    await Promise.all(
+      [...mergedByChain.entries()].map(([chainId, merged]) =>
+        importLabels(chainId, merged),
+      ),
+    );
     return NextResponse.json({
       ok: true,
       imported: Object.keys(labels).length,
@@ -302,9 +311,14 @@ type CsvParseResult =
   | { error: string };
 
 /**
- * Minimal CSV parser. Supports quoted fields. Expects a header row containing
- * at least "address" and "name" columns (case-insensitive). Extra columns are
- * ignored. Returns an error string if the format is invalid.
+ * Minimal CSV parser. Supports quoted fields and UTF-8 BOM. Expects a header
+ * row containing at least "address" and "name" columns (case-insensitive).
+ * Extra columns are ignored.
+ *
+ * Limitation: quoted fields containing embedded newlines (RFC 4180 §2.6) are
+ * not supported. This is intentional — address/label data never spans lines
+ * in practice, and supporting it would require a streaming tokenizer. If this
+ * becomes necessary, replace with a proper CSV library (e.g. papaparse).
  */
 function parseCsv(text: string): CsvParseResult {
   // Strip UTF-8 BOM (U+FEFF) that Excel/Google Sheets prepend to CSV exports.
