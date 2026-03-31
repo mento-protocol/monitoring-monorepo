@@ -297,8 +297,38 @@ describe("POST /api/address-labels/import", () => {
       expect(((await body.json()) as { imported: number }).imported).toBe(1);
     });
 
-    it("sniffs CSV from JSON content-type when content has no { or [ prefix", async () => {
-      // Some upload paths may send text/csv content with wrong content-type
+    it("sniffs CSV when content-type is omitted but body looks like CSV", async () => {
+      // Some upload paths send no content-type — body sniffing should detect CSV.
+      const req = new NextRequest(
+        "http://localhost/api/address-labels/import",
+        {
+          method: "POST",
+          // No Content-Type header — sniffing fires
+          body: `address,name\n${validAddress},My Label`,
+        },
+      );
+      const body = await POST(req);
+      expect(body.status).toBe(200);
+    });
+
+    it("returns 400 for application/json with empty body (not a CSV no-op)", async () => {
+      // Regression: empty body with application/json must not silently succeed
+      // as a CSV no-op (imported: 0). It's a client bug and should be rejected.
+      const req = new NextRequest(
+        "http://localhost/api/address-labels/import",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "",
+        },
+      );
+      const body = await POST(req);
+      expect(body.status).toBe(400);
+    });
+
+    it("returns 400 for application/json with CSV-looking body (not sniffed)", async () => {
+      // Callers who send application/json must send valid JSON. CSV-looking
+      // body with explicit application/json should return 400, not 200.
       const req = new NextRequest(
         "http://localhost/api/address-labels/import",
         {
@@ -308,7 +338,7 @@ describe("POST /api/address-labels/import", () => {
         },
       );
       const body = await POST(req);
-      expect(body.status).toBe(200);
+      expect(body.status).toBe(400);
     });
   });
 
