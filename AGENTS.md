@@ -85,7 +85,6 @@ monitoring-monorepo/
 ├── indexer-envio/
 │   ├── config.multichain.mainnet.yaml  # Mainnet indexer config (Celo + Monad) — DEFAULT
 │   ├── config.multichain.testnet.yaml  # Testnet multichain config
-
 │   ├── schema.graphql        # Entity definitions
 │   ├── src/
 │   │   ├── EventHandlers.ts  # Envio entry point (imports handlers, re-exports for tests)

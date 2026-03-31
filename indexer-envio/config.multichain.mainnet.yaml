@@ -140,9 +140,8 @@ networks:
         address: [] # Dynamically registered from FPMMDeployed events
       - name: OpenLiquidityStrategy
         address:
-          # CREATE2 deterministic — same address as Celo. Verify deployment
-          # at https://monad-explorer.monad.xyz/address/0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f
-          # before going live. Set to [] if not yet deployed on Monad.
+          # CREATE2 deterministic — same address as Celo.
+          # Verified deployed on Monad mainnet (eth_getCode returned bytecode).
           - 0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f
 
 unordered_multichain_mode: true

@@ -295,7 +295,9 @@ VirtualPool.UpdateReserves.handler(async ({ event, context }) => {
 // ---------------------------------------------------------------------------
 
 VirtualPool.Rebalanced.handler(async ({ event, context }) => {
-  // VirtualPools shouldn't normally rebalance, but handle defensively
+  // VirtualPools rarely emit Rebalanced — handler is intentionally minimal
+  // (no oracle/RPC fetch) compared to the FPMM version, since VirtualPools
+  // manage reserves differently. If the contract emits this event, it's real.
   const id = eventId(event.chainId, event.block.number, event.logIndex);
   const poolId = makePoolId(event.chainId, event.srcAddress);
   const blockNumber = asBigInt(event.block.number);

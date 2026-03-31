@@ -8,7 +8,6 @@ Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on
 
 - `config.multichain.mainnet.yaml` — **Default** mainnet config (Celo + Monad)
 - `config.multichain.testnet.yaml` — Testnet multichain config
-
 - `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced)
 - `src/EventHandlers.ts` — Event processing logic
 - `src/contractAddresses.ts` — Contract address resolution from `@mento-protocol/contracts`; also exports `CONTRACT_NAMESPACE_BY_CHAIN` (backed by `config/deployment-namespaces.json`)
