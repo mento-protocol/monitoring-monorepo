@@ -116,11 +116,41 @@ export default function AddressBookPage({
       if (!file) return;
       e.target.value = "";
 
+      const isCsv =
+        file.name.endsWith(".csv") ||
+        file.type === "text/csv" ||
+        file.type === "text/plain";
+
+      if (isCsv) {
+        // Send CSV directly — backend parses it and imports into all mainnet chains.
+        try {
+          const text = await file.text();
+          const res = await fetch("/api/address-labels/import", {
+            method: "POST",
+            headers: { "Content-Type": "text/csv" },
+            body: text,
+          });
+          if (!res.ok) {
+            const body = (await res.json()) as { error?: string };
+            setImportError(body.error ?? "Import failed.");
+            return;
+          }
+          const { imported } = (await res.json()) as { imported?: number };
+          const count = imported ?? 0;
+          setImportSuccess(
+            `Imported ${count} label${count !== 1 ? "s" : ""} from CSV.`,
+          );
+        } catch (err) {
+          setImportError(err instanceof Error ? err.message : "Import failed.");
+        }
+        return;
+      }
+
       let parsed: unknown;
       try {
         parsed = JSON.parse(await file.text());
       } catch {
-        setImportError("Invalid JSON file.");
+        setImportError("Invalid file. Expected JSON or CSV (address,name).");
         return;
       }
 
@@ -172,7 +202,7 @@ export default function AddressBookPage({
                 onClick={handleImportClick}
                 className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
               >
-                Import JSON
+                Import
               </button>
               <details className="relative">
                 <summary
@@ -200,7 +230,7 @@ export default function AddressBookPage({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".json,application/json"
+              accept=".json,.csv,application/json,text/csv,text/plain"
               onChange={handleFileChange}
               className="hidden"
               aria-label="Import address labels JSON"

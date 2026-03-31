@@ -22,6 +22,14 @@ function jsonReq(body: unknown) {
   });
 }
 
+function csvReq(csvText: string) {
+  return new NextRequest("http://localhost/api/address-labels/import", {
+    method: "POST",
+    headers: { "Content-Type": "text/csv" },
+    body: csvText,
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -134,6 +142,147 @@ describe("POST /api/address-labels/import", () => {
     );
     expect(res.status).toBe(400);
     expect(importLabels).not.toHaveBeenCalled();
+  });
+
+  describe("CSV format", () => {
+    const validAddress = "0x1234567890123456789012345678901234567890";
+    const validCsv = `address,name\n${validAddress},My Label`;
+
+    it("imports a valid CSV (text/csv content-type)", async () => {
+      const res = await csvReq(validCsv);
+      const body = await POST(res);
+      expect(body.status).toBe(200);
+      const json = (await body.json()) as { ok: boolean; imported: number };
+      expect(json.ok).toBe(true);
+      expect(json.imported).toBe(1);
+      // Should import into both mainnet chains (42220 + 143)
+      expect(importLabels).toHaveBeenCalledWith(
+        42220,
+        expect.objectContaining({
+          [validAddress.toLowerCase()]: expect.objectContaining({
+            label: "My Label",
+            isPublic: true,
+          }),
+        }),
+      );
+      expect(importLabels).toHaveBeenCalledWith(
+        143,
+        expect.objectContaining({
+          [validAddress.toLowerCase()]: expect.objectContaining({
+            label: "My Label",
+          }),
+        }),
+      );
+    });
+
+    it("handles CSV with extra columns (ignored)", async () => {
+      const csv = `address,name,extra\n${validAddress},Team Label,ignored`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(200);
+      const json = (await body.json()) as { imported: number };
+      expect(json.imported).toBe(1);
+    });
+
+    it("handles columns in different order", async () => {
+      const csv = `name,address\nMy Label,${validAddress}`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(200);
+    });
+
+    it("handles Windows line endings (CRLF)", async () => {
+      const csv = `address,name\r\n${validAddress},My Label\r\n`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(200);
+    });
+
+    it("skips blank rows", async () => {
+      const csv = `address,name\n${validAddress},Label\n\n`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(200);
+      expect(((await body.json()) as { imported: number }).imported).toBe(1);
+    });
+
+    it("handles quoted fields with commas", async () => {
+      const csv = `address,name\n${validAddress},"Label, with comma"`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(200);
+    });
+
+    it("merges with existing labels (preserves category/notes/isPublic)", async () => {
+      const existingEntry = {
+        label: "Old Label",
+        category: "DeFi",
+        notes: "Important",
+        isPublic: false,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+      (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+        [validAddress.toLowerCase()]: existingEntry,
+      });
+
+      const res = await csvReq(validCsv);
+      const body = await POST(res);
+      expect(body.status).toBe(200);
+      expect(importLabels).toHaveBeenCalledWith(
+        42220,
+        expect.objectContaining({
+          [validAddress.toLowerCase()]: expect.objectContaining({
+            label: "My Label",
+            category: "DeFi",
+            notes: "Important",
+          }),
+        }),
+      );
+    });
+
+    it("returns 400 for CSV missing required columns", async () => {
+      const csv = `address,label\n${validAddress},My Label`; // 'name' column missing
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(400);
+      const json = (await body.json()) as { error: string };
+      expect(json.error).toMatch(/name/i);
+    });
+
+    it("returns 400 for invalid address in CSV", async () => {
+      const csv = `address,name\nnot-an-address,Label`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(400);
+    });
+
+    it("returns 400 for empty name in CSV", async () => {
+      const csv = `address,name\n${validAddress},`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(400);
+    });
+
+    it("returns 200 with imported:0 for CSV with header only", async () => {
+      const res = await csvReq("address,name\n");
+      const body = await POST(res);
+      expect(body.status).toBe(200);
+      expect(((await body.json()) as { imported: number }).imported).toBe(0);
+    });
+
+    it("sniffs CSV from JSON content-type when content has no { or [ prefix", async () => {
+      // Some upload paths may send text/csv content with wrong content-type
+      const req = new NextRequest(
+        "http://localhost/api/address-labels/import",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: `address,name\n${validAddress},My Label`,
+        },
+      );
+      const body = await POST(req);
+      expect(body.status).toBe(200);
+    });
   });
 
   describe("Gnosis Safe format", () => {
