@@ -272,6 +272,24 @@ describe("POST /api/address-labels/import", () => {
       expect(body.status).toBe(400);
     });
 
+    it("returns 400 for unterminated quoted field", async () => {
+      const csv = `address,name\n${validAddress},"Broken label`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(400);
+      const json = (await body.json()) as { error: string };
+      expect(json.error).toMatch(/unterminated/i);
+    });
+
+    it("returns 400 for stray quote in unquoted field", async () => {
+      const csv = `address,name\n${validAddress},Bad"Label`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(400);
+      const json = (await body.json()) as { error: string };
+      expect(json.error).toMatch(/quote/i);
+    });
+
     it("returns 400 for row with missing address but non-empty name", async () => {
       const csv = `address,name\n,Treasury`;
       const res = await csvReq(csv);

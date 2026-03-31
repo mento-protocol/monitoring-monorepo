@@ -341,7 +341,11 @@ function parseCsv(text: string): CsvParseResult {
   if (lines.length === 0) return { rows: [] };
 
   // Parse header
-  const header = splitCsvLine(lines[0]).map((h) => h.toLowerCase().trim());
+  const headerParsed = splitCsvLine(lines[0]);
+  if ("error" in headerParsed) {
+    return { error: `Malformed CSV header: ${headerParsed.error}` };
+  }
+  const header = headerParsed.cols.map((h) => h.toLowerCase().trim());
   const addrIdx = header.indexOf("address");
   const nameIdx = header.indexOf("name");
 
@@ -355,7 +359,13 @@ function parseCsv(text: string): CsvParseResult {
 
   const rows: Array<{ address: string; name: string }> = [];
   for (let i = 1; i < lines.length; i++) {
-    const cols = splitCsvLine(lines[i]);
+    const parsedLine = splitCsvLine(lines[i]);
+    if ("error" in parsedLine) {
+      return {
+        error: `Malformed CSV on line ${i + 1}: ${parsedLine.error}`,
+      };
+    }
+    const cols = parsedLine.cols;
     const address = cols[addrIdx]?.trim() ?? "";
     const name = cols[nameIdx]?.trim() ?? "";
 
@@ -384,28 +394,44 @@ function parseCsv(text: string): CsvParseResult {
 }
 
 /** Split a single CSV line respecting double-quoted fields. */
-function splitCsvLine(line: string): string[] {
+function splitCsvLine(line: string): { cols: string[] } | { error: string } {
   const cols: string[] = [];
   let current = "";
   let inQuote = false;
+  let atFieldStart = true;
 
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
     if (ch === '"') {
-      if (inQuote && line[i + 1] === '"') {
-        // Escaped quote
-        current += '"';
-        i++;
+      if (inQuote) {
+        if (line[i + 1] === '"') {
+          // Escaped quote
+          current += '"';
+          i++;
+        } else {
+          inQuote = false;
+        }
       } else {
-        inQuote = !inQuote;
+        // Quotes are only valid at the start of a field.
+        if (!atFieldStart) {
+          return { error: "unexpected quote character" };
+        }
+        inQuote = true;
       }
     } else if (ch === "," && !inQuote) {
       cols.push(current);
       current = "";
+      atFieldStart = true;
     } else {
       current += ch;
+      atFieldStart = false;
     }
   }
+
+  if (inQuote) {
+    return { error: "unterminated quoted field" };
+  }
+
   cols.push(current);
-  return cols;
+  return { cols };
 }

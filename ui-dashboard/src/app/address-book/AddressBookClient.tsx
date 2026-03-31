@@ -142,7 +142,7 @@ export default function AddressBookPage({
           const { imported } = (await res.json()) as { imported?: number };
           const count = imported ?? 0;
           setImportSuccess(
-            `Imported ${count} label${count !== 1 ? "s" : ""} from CSV.`,
+            `Imported ${count} label${count !== 1 ? "s" : ""} from CSV to both mainnet chains.`,
           );
         } catch (err) {
           setImportError(err instanceof Error ? err.message : "Import failed.");
@@ -229,7 +229,7 @@ export default function AddressBookPage({
                   </p>
                   <pre className="mb-2 overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`[{ "address": "0x...",\n   "chainId": "1",\n   "name": "My Label" }]`}</pre>
                   <p className="mb-1 font-medium text-slate-400">
-                    CSV (address,name):
+                    CSV (address,name) — imports into both mainnet chains:
                   </p>
                   <pre className="overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`address,name\n0x...,My Label`}</pre>
                 </div>
