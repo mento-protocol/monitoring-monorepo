@@ -262,14 +262,15 @@ async function handleCsvText(text: string): Promise<NextResponse> {
   const labels: Record<string, AddressLabelEntry> = {};
   const now = new Date().toISOString();
   for (const { address, name } of rows) {
-    labels[address.toLowerCase()] = {
-      label: name,
-      isPublic: true,
-      updatedAt: now,
-    };
+    // Do NOT set isPublic here — the merge below preserves the existing value.
+    // Forcing isPublic:true would silently un-private any previously private label.
+    labels[address.toLowerCase()] = { label: name, updatedAt: now };
   }
 
   // Fetch existing labels to merge (preserve category, notes, isPublic).
+  // Mainnet chains: keep in sync with hosted networks in src/lib/networks.ts
+  // (celo-mainnet-hosted = 42220, monad-mainnet-hosted = 143). Can't import
+  // networks.ts here because it reads NEXT_PUBLIC_* env vars at module load.
   const MAINNET_CHAINS = [42220, 143] as const;
   const existingByChain = new Map<number, Record<string, AddressLabelEntry>>();
   try {

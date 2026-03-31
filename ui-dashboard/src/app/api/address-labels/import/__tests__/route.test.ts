@@ -35,6 +35,7 @@ beforeEach(() => {
   (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
     user: { email: "alice@mentolabs.xyz" },
   });
+  (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
 });
 
 describe("POST /api/address-labels/import", () => {
@@ -161,7 +162,7 @@ describe("POST /api/address-labels/import", () => {
         expect.objectContaining({
           [validAddress.toLowerCase()]: expect.objectContaining({
             label: "My Label",
-            isPublic: true,
+            // isPublic is NOT forced — no opinion on new entries
           }),
         }),
       );
@@ -221,9 +222,11 @@ describe("POST /api/address-labels/import", () => {
         isPublic: false,
         updatedAt: "2026-01-01T00:00:00.000Z",
       };
-      (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
-        [validAddress.toLowerCase()]: existingEntry,
-      });
+      // Use mockResolvedValueOnce so subsequent tests get the default {} mock.
+      // Called twice (once per chain: 42220 + 143).
+      (getLabels as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ [validAddress.toLowerCase()]: existingEntry })
+        .mockResolvedValueOnce({ [validAddress.toLowerCase()]: existingEntry });
 
       const res = await csvReq(validCsv);
       const body = await POST(res);
@@ -235,9 +238,22 @@ describe("POST /api/address-labels/import", () => {
             label: "My Label",
             category: "DeFi",
             notes: "Important",
+            // isPublic must be preserved — CSV import must NOT overwrite to true
+            isPublic: false,
           }),
         }),
       );
+    });
+
+    it("does not force isPublic:true on new CSV entries (no opinion)", async () => {
+      const res = await csvReq(validCsv);
+      const body = await POST(res);
+      expect(body.status).toBe(200);
+      const callArg = (
+        importLabels as ReturnType<typeof vi.fn>
+      ).mock.calls.find(([chainId]) => chainId === 42220)?.[1];
+      const entry = callArg?.[validAddress.toLowerCase()];
+      expect(entry?.isPublic).toBeUndefined();
     });
 
     it("returns 400 for CSV missing required columns", async () => {

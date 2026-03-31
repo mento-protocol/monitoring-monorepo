@@ -233,7 +233,7 @@ export default function AddressBookPage({
               accept=".json,.csv,application/json,text/csv,text/plain"
               onChange={handleFileChange}
               className="hidden"
-              aria-label="Import address labels JSON"
+              aria-label="Import address labels (JSON or CSV)"
             />
             <button
               type="button"
