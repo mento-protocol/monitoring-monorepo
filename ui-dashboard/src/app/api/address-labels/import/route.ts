@@ -359,7 +359,14 @@ function parseCsv(text: string): CsvParseResult {
     const address = cols[addrIdx]?.trim() ?? "";
     const name = cols[nameIdx]?.trim() ?? "";
 
-    if (!address) continue; // skip blank rows
+    // Skip only fully empty rows. Half-empty rows are malformed input and
+    // should fail loudly rather than silently disappearing from the import.
+    if (!address && !name) continue;
+    if (!address) {
+      return {
+        error: `Empty address on line ${i + 1}`,
+      };
+    }
     if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
       return {
         error: `Invalid address on line ${i + 1}: "${address}"`,
