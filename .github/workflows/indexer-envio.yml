@@ -58,6 +58,10 @@ jobs:
         # Run codegen against every config file to catch schema/config drift early.
         # config.multichain.mainnet.yaml is run last — its output is used by
         # typecheck + tests below.
+        # ENVIO_STRICT_START_BLOCK=true ensures the startup guard throws (not warns)
+        # if start-block env vars are misconfigured, catching the issue before deploy.
+        env:
+          ENVIO_STRICT_START_BLOCK: "true"
         run: |
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml

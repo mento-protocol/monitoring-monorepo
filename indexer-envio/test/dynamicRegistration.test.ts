@@ -41,6 +41,13 @@
 import { strict as assert } from "assert";
 import generated from "generated";
 
+// The `generated` module ships as CommonJS with its own hand-rolled type
+// definitions in generated/index.d.ts. It does not export clean standalone
+// interface types for MockDb or EventProcessor — only the full namespace shape.
+// Importing and narrowing inline avoids duplicating the entire generated
+// module's type surface while still giving TS enough to catch call-site errors.
+// If generated/index.d.ts gains proper exports in a future Envio version,
+// replace these local types with direct imports.
 type MockDb = {
   entities: {
     Pool: { get: (id: string) => unknown };

@@ -4,6 +4,14 @@ description: Mento v3 multichain testnet indexer — Celo Sepolia (11142220) + M
 #
 # Per-chain RPC overrides: ENVIO_RPC_URL_11142220 and ENVIO_RPC_URL_10143.
 # Do NOT use the generic ENVIO_RPC_URL in multichain mode.
+#
+# NOTE — Mixed static + dynamic address model:
+# FPMM and VirtualPool addresses here are a mix of hardcoded seed addresses
+# (for pools deployed before dynamic contractRegister support was added) and
+# dynamic registration via contractRegister hooks (for all new deployments).
+# Any testnet pool deployed before this config was updated that is NOT in the
+# hardcoded list will be silently missing on a fresh sync. New pools are
+# automatically discovered going forward. This is the same pattern as mainnet.
 
 # ---------------------------------------------------------------------------
 # Global contract definitions (shared ABI + handler across all networks)
