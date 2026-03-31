@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { NETWORKS, makeNetwork, isConfiguredNetworkId } from "../networks";
+import { MAINNET_CHAIN_IDS } from "../types";
 
 // Known Celo mainnet addresses from @mento-protocol/contracts (42220/mainnet).
 // These are in the package-derived maps for any network using chainId 42220.
@@ -14,6 +15,20 @@ const USDM_ADDR = "0x765de816845861e75a25fca122bb6898b8b1282a";
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.resetModules();
+});
+
+describe("network constants stay in sync", () => {
+  it("MAINNET_CHAIN_IDS matches hosted mainnet networks", () => {
+    const hostedMainnetChainIds = Object.values(NETWORKS)
+      .filter((net) => !net.local && /mainnet/i.test(net.label))
+      .map((net) => net.chainId)
+      .filter((chainId, idx, arr) => arr.indexOf(chainId) === idx)
+      .sort((a, b) => a - b);
+
+    expect([...MAINNET_CHAIN_IDS].sort((a, b) => a - b)).toEqual(
+      hostedMainnetChainIds,
+    );
+  });
 });
 
 describe("makeNetwork — addressLabels merge/override contract", () => {
