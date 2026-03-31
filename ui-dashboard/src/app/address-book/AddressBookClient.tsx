@@ -223,7 +223,11 @@ export default function AddressBookPage({
                   <p className="mb-1 font-medium text-slate-400">
                     Gnosis Safe address book:
                   </p>
-                  <pre className="overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`[{ "address": "0x...",\n   "chainId": "1",\n   "name": "My Label" }]`}</pre>
+                  <pre className="mb-2 overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`[{ "address": "0x...",\n   "chainId": "1",\n   "name": "My Label" }]`}</pre>
+                  <p className="mb-1 font-medium text-slate-400">
+                    CSV (address,name):
+                  </p>
+                  <pre className="overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`address,name\n0x...,My Label`}</pre>
                 </div>
               </details>
             </div>
