@@ -30,10 +30,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let body: unknown;
   try {
     const text = await req.text();
-    // Sniff for CSV: if content looks like a CSV (no leading { or [), try CSV
     const trimmed = text.trimStart();
-    if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    // CSV sniffing: only attempt if the caller did NOT send application/json.
+    // An empty body or non-JSON body with application/json should return 400,
+    // not silently succeed as a CSV no-op. For other content-types (text/plain,
+    // no content-type, etc.) we sniff: if the body doesn't start with { or [
+    // it's likely CSV.
+    const isJsonContentType = contentType.startsWith("application/json");
+    if (
+      !isJsonContentType &&
+      trimmed &&
+      !trimmed.startsWith("{") &&
+      !trimmed.startsWith("[")
+    ) {
       return handleCsvText(text);
+    }
+    if (!trimmed) {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
     body = JSON.parse(text);
   } catch {
@@ -277,9 +290,10 @@ async function handleCsvText(text: string): Promise<NextResponse> {
   }
 
   // Pre-compute all merged maps before any writes. Then fire all writes in
-  // parallel — this minimises partial-write risk: all chains succeed or fail
-  // together. (No true transaction is possible here; the worst case is that
-  // all writes fail and the caller can safely retry.)
+  // parallel via Promise.all — reduces (but does not eliminate) partial-write
+  // risk compared to sequential writes. Note: Promise.all is NOT atomic; one
+  // chain can succeed before another rejects. On failure, the caller should
+  // retry — re-importing already-written chains is idempotent.
   const mergedByChain = new Map<number, Record<string, AddressLabelEntry>>();
   for (const chainId of MAINNET_CHAIN_IDS) {
     const existing = existingByChain.get(chainId) ?? {};
