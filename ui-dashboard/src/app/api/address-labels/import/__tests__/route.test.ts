@@ -376,6 +376,29 @@ describe("POST /api/address-labels/import", () => {
       const body = await POST(req);
       expect(body.status).toBe(400);
     });
+
+    it("accepts BOM-prefixed JSON payloads", async () => {
+      const req = new NextRequest(
+        "http://localhost/api/address-labels/import",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body:
+            "\uFEFF" +
+            JSON.stringify({
+              chainId: 42220,
+              labels: {
+                [validAddress]: {
+                  label: "My Label",
+                  updatedAt: "2026-01-01T00:00:00.000Z",
+                },
+              },
+            }),
+        },
+      );
+      const body = await POST(req);
+      expect(body.status).toBe(200);
+    });
   });
 
   describe("Gnosis Safe format", () => {

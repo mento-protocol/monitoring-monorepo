@@ -30,7 +30,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let body: unknown;
   try {
     const text = await req.text();
-    const trimmed = text.trimStart();
+    // Strip UTF-8 BOM so BOM-prefixed JSON payloads keep working.
+    const normalized = text.startsWith("\uFEFF") ? text.slice(1) : text;
+    const trimmed = normalized.trimStart();
     // CSV sniffing: only attempt if the caller did NOT send application/json.
     // An empty body or non-JSON body with application/json should return 400,
     // not silently succeed as a CSV no-op. For other content-types (text/plain,
@@ -43,12 +45,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       !trimmed.startsWith("{") &&
       !trimmed.startsWith("[")
     ) {
-      return handleCsvText(text);
+      return handleCsvText(normalized);
     }
     if (!trimmed) {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
-    body = JSON.parse(text);
+    body = JSON.parse(normalized);
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
