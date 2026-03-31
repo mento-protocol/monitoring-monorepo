@@ -6,6 +6,7 @@ import {
   type AddressLabelEntry,
   type AddressLabelsSnapshot,
 } from "@/lib/address-labels";
+import { MAINNET_CHAIN_IDS } from "@/lib/types";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const session = await getAuthSession();
@@ -268,13 +269,9 @@ async function handleCsvText(text: string): Promise<NextResponse> {
   }
 
   // Fetch existing labels to merge (preserve category, notes, isPublic).
-  // Mainnet chains: keep in sync with hosted networks in src/lib/networks.ts
-  // (celo-mainnet-hosted = 42220, monad-mainnet-hosted = 143). Can't import
-  // networks.ts here because it reads NEXT_PUBLIC_* env vars at module load.
-  const MAINNET_CHAINS = [42220, 143] as const;
   const existingByChain = new Map<number, Record<string, AddressLabelEntry>>();
   try {
-    for (const chainId of MAINNET_CHAINS) {
+    for (const chainId of MAINNET_CHAIN_IDS) {
       existingByChain.set(chainId, await getLabels(chainId));
     }
   } catch (err) {
@@ -282,7 +279,7 @@ async function handleCsvText(text: string): Promise<NextResponse> {
   }
 
   try {
-    for (const chainId of MAINNET_CHAINS) {
+    for (const chainId of MAINNET_CHAIN_IDS) {
       const existing = existingByChain.get(chainId) ?? {};
       const merged: Record<string, AddressLabelEntry> = {};
       for (const [addr, entry] of Object.entries(labels)) {
@@ -310,7 +307,9 @@ type CsvParseResult =
  * ignored. Returns an error string if the format is invalid.
  */
 function parseCsv(text: string): CsvParseResult {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+  // Strip UTF-8 BOM (U+FEFF) that Excel/Google Sheets prepend to CSV exports.
+  const stripped = text.startsWith("\uFEFF") ? text.slice(1) : text;
+  const lines = stripped.split(/\r?\n/).filter((l) => l.trim() !== "");
   if (lines.length === 0) return { rows: [] };
 
   // Parse header
