@@ -33,14 +33,20 @@ export const START_BLOCK_ENV_NAME: Record<number, string> = {
 };
 
 /**
- * Validate that no ENVIO_START_BLOCK_* env var is set above the first
- * FPMMFactory deployment block for its chain. If it is, all factory deploy
- * events are missed and no pools are ever registered — a silent data loss.
+ * Warn (or throw in CI) if an ENVIO_START_BLOCK_* env var is set above the
+ * first FPMMFactory deployment block for its chain. If start_block is too
+ * high, FPMMDeployed events are never seen, contractRegister never fires,
+ * and pool events are silently dropped.
+ *
+ * Throws only when ENVIO_STRICT_START_BLOCK=true (e.g. in CI/hosted runs).
+ * In local dev mode it logs a warning instead, so a leftover mainnet env var
+ * doesn't hard-fail an unrelated testnet run.
  *
  * Exported for testing. Called at module load time below.
  */
 export function assertStartBlocksValid(
   envOverrides: Record<number, string | undefined>,
+  strict = process.env.ENVIO_STRICT_START_BLOCK === "true",
 ): void {
   for (const [chainIdStr, firstDeployBlock] of Object.entries(
     FPMM_FIRST_DEPLOY_BLOCK,
@@ -52,12 +58,16 @@ export function assertStartBlocksValid(
     if (!Number.isFinite(startBlock)) continue;
     if (startBlock > firstDeployBlock) {
       const envVarName = START_BLOCK_ENV_NAME[chainId];
-      throw new Error(
-        `[EventHandlers] FATAL: start block for chain ${chainId} is ${startBlock}, ` +
-          `but FPMMFactory first deployed at block ${firstDeployBlock}. ` +
-          `All factory deploy events will be missed and no pools will be indexed. ` +
-          `Lower ${envVarName} to ≤${firstDeployBlock} or remove the override.`,
-      );
+      const msg =
+        `[EventHandlers] start block for chain ${chainId} is ${startBlock}, ` +
+        `but FPMMFactory first deployed at block ${firstDeployBlock}. ` +
+        `All factory deploy events will be missed and no pools will be indexed. ` +
+        `Lower ${envVarName} to ≤${firstDeployBlock} or remove the override.`;
+      if (strict) {
+        throw new Error(`FATAL: ${msg}`);
+      } else {
+        console.warn(`⚠️  WARNING: ${msg}`);
+      }
     }
   }
 }

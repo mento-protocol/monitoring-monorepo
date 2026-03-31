@@ -41,10 +41,27 @@ describe("assertStartBlocksValid", () => {
     );
   });
 
-  it("throws when Celo start block is above first deploy block", () => {
+  it("warns (does not throw) when start block is too high in non-strict mode", () => {
+    const tooHigh = FPMM_FIRST_DEPLOY_BLOCK[CELO] + 1;
+    const warnings: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (msg: string) => warnings.push(msg);
+    try {
+      assert.doesNotThrow(() =>
+        assertStartBlocksValid({ [CELO]: String(tooHigh) }, false),
+      );
+      assert.equal(warnings.length, 1);
+      assert(warnings[0].includes(START_BLOCK_ENV_NAME[CELO]));
+      assert(warnings[0].includes(String(tooHigh)));
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
+  it("throws when start block is too high in strict mode", () => {
     const tooHigh = FPMM_FIRST_DEPLOY_BLOCK[CELO] + 1;
     assert.throws(
-      () => assertStartBlocksValid({ [CELO]: String(tooHigh) }),
+      () => assertStartBlocksValid({ [CELO]: String(tooHigh) }, true),
       (err: unknown) => {
         assert(err instanceof Error);
         assert(err.message.includes(START_BLOCK_ENV_NAME[CELO]));
@@ -55,10 +72,10 @@ describe("assertStartBlocksValid", () => {
     );
   });
 
-  it("throws when Monad start block is above first deploy block", () => {
+  it("throws for Monad in strict mode with correct env var name", () => {
     const tooHigh = FPMM_FIRST_DEPLOY_BLOCK[MONAD] + 1000;
     assert.throws(
-      () => assertStartBlocksValid({ [MONAD]: String(tooHigh) }),
+      () => assertStartBlocksValid({ [MONAD]: String(tooHigh) }, true),
       (err: unknown) => {
         assert(err instanceof Error);
         assert(err.message.includes(START_BLOCK_ENV_NAME[MONAD]));

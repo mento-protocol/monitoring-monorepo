@@ -44,11 +44,10 @@ This prevents collisions when the same contract address is deployed on multiple 
 
 ## Configuration
 
-| File                             | Networks                       |
-| -------------------------------- | ------------------------------ |
-| `config.multichain.mainnet.yaml` | Celo Mainnet + Monad (default) |
-| `config.celo.sepolia.yaml`       | Celo Sepolia (testnet)         |
-| `config.monad.testnet.yaml`      | Monad Testnet                  |
+| File                             | Networks                                          |
+| -------------------------------- | ------------------------------------------------- |
+| `config.multichain.mainnet.yaml` | Celo Mainnet + Monad Mainnet (default/production) |
+| `config.multichain.testnet.yaml` | Celo Sepolia + Monad Testnet                      |
 
 Deploy branch: `envio` → triggers hosted reindex on push.
 
