@@ -272,6 +272,15 @@ describe("POST /api/address-labels/import", () => {
       expect(body.status).toBe(400);
     });
 
+    it("returns 400 for row with missing address but non-empty name", async () => {
+      const csv = `address,name\n,Treasury`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(400);
+      const json = (await body.json()) as { error: string };
+      expect(json.error).toMatch(/empty address/i);
+    });
+
     it("returns 400 for empty name in CSV", async () => {
       const csv = `address,name\n${validAddress},`;
       const res = await csvReq(csv);
