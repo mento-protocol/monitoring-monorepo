@@ -1178,9 +1178,7 @@ type OracleSortCol =
   | "timestamp"
   | "oracleOk"
   | "oraclePrice"
-  | "priceDifference"
-  | "numReporters"
-  | "blockNumber";
+  | "priceDifference";
 
 const ORACLE_PAGE_SIZE = 25;
 // When search is active, fetch up to this many rows so filtering is global
@@ -1284,8 +1282,7 @@ function OracleTab({
         parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6),
         Number(r.priceDifference) > 0 ? r.priceDifference : null,
         r.rebalanceThreshold > 0 ? String(r.rebalanceThreshold) : null,
-        r.numReporters,
-        r.blockNumber,
+        r.txHash,
       ]);
     });
   }, [rows, query, sym0]);
@@ -1332,7 +1329,7 @@ function OracleTab({
       <TableSearch
         value={search}
         onChange={handleSearchChange}
-        placeholder="Search oracle rows by source, status, price, or block…"
+        placeholder="Search oracle rows by source, status, price, or tx hash…"
         ariaLabel="Search oracle"
       />
       {filteredRows.length === 0 ? (
@@ -1345,6 +1342,7 @@ function OracleTab({
                 <Th>Source</Th>
                 <Th align="right">
                   <button
+                    type="button"
                     onClick={() => toggleSort("oracleOk")}
                     className="hover:text-indigo-400 transition-colors"
                   >
@@ -1353,6 +1351,7 @@ function OracleTab({
                 </Th>
                 <Th align="right">
                   <button
+                    type="button"
                     onClick={() => toggleSort("oraclePrice")}
                     className="hover:text-indigo-400 transition-colors"
                   >
@@ -1361,6 +1360,7 @@ function OracleTab({
                 </Th>
                 <Th align="right">
                   <button
+                    type="button"
                     onClick={() => toggleSort("priceDifference")}
                     className="hover:text-indigo-400 transition-colors"
                   >
@@ -1368,24 +1368,9 @@ function OracleTab({
                   </button>
                 </Th>
                 <Th align="right">Threshold</Th>
-                <Th align="right">
-                  <button
-                    onClick={() => toggleSort("numReporters")}
-                    className="hover:text-indigo-400 transition-colors"
-                  >
-                    Reporters{arrow("numReporters")}
-                  </button>
-                </Th>
-                <Th align="right">
-                  <button
-                    onClick={() => toggleSort("blockNumber")}
-                    className="hover:text-indigo-400 transition-colors"
-                  >
-                    Block{arrow("blockNumber")}
-                  </button>
-                </Th>
                 <Th>
                   <button
+                    type="button"
                     onClick={() => toggleSort("timestamp")}
                     className="hover:text-indigo-400 transition-colors"
                   >
@@ -1395,42 +1380,81 @@ function OracleTab({
               </tr>
             </thead>
             <tbody>
-              {filteredRows.map((r) => (
-                <Row key={r.id}>
-                  <Td small>
-                    <span className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono">
-                      {r.source}
-                    </span>
-                  </Td>
-                  <Td small align="right">
-                    <span
-                      className={
-                        r.oracleOk ? "text-emerald-400" : "text-red-400"
-                      }
-                    >
-                      {r.oracleOk ? "✓" : "✗"}
-                    </span>
-                  </Td>
-                  <Td mono small align="right">
-                    {parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6)}
-                  </Td>
-                  <Td mono small align="right">
-                    {Number(r.priceDifference) > 0 ? r.priceDifference : "—"}
-                  </Td>
-                  <Td mono small align="right">
-                    {r.rebalanceThreshold > 0 ? r.rebalanceThreshold : "—"}
-                  </Td>
-                  <Td mono small align="right">
-                    {r.numReporters}
-                  </Td>
-                  <Td mono small muted align="right">
-                    {formatBlock(r.blockNumber)}
-                  </Td>
-                  <Td small muted title={formatTimestamp(r.timestamp)}>
-                    {relativeTime(r.timestamp)}
-                  </Td>
-                </Row>
-              ))}
+              {filteredRows.map((r) => {
+                const txUrl = r.txHash
+                  ? `${network.explorerBaseUrl}/tx/${r.txHash}`
+                  : null;
+                const diffBps = Number(r.priceDifference);
+                const thresholdBps = r.rebalanceThreshold;
+                const diffPct =
+                  diffBps > 0 && thresholdBps > 0
+                    ? ((diffBps / thresholdBps) * 100).toFixed(1)
+                    : null;
+                return (
+                  <Row key={r.id}>
+                    <Td small>
+                      {txUrl ? (
+                        <a
+                          href={txUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono hover:text-indigo-400 transition-colors"
+                        >
+                          {r.source}
+                        </a>
+                      ) : (
+                        <span className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono">
+                          {r.source}
+                        </span>
+                      )}
+                    </Td>
+                    <Td small align="right">
+                      <span
+                        className={
+                          r.oracleOk ? "text-emerald-400" : "text-red-400"
+                        }
+                      >
+                        {r.oracleOk ? "✓" : "✗"}
+                      </span>
+                    </Td>
+                    <Td mono small align="right">
+                      {parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6)}
+                    </Td>
+                    <Td mono small align="right">
+                      {diffBps > 0 ? (
+                        <span title={`${diffBps.toLocaleString()} bps`}>
+                          {diffPct !== null ? `${diffPct}%` : `${diffBps} bps`}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </Td>
+                    <Td mono small align="right">
+                      {thresholdBps > 0 ? (
+                        <span title={`${thresholdBps.toLocaleString()} bps`}>
+                          {(thresholdBps / 100).toFixed(2)}%
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </Td>
+                    <Td small muted title={formatTimestamp(r.timestamp)}>
+                      {txUrl ? (
+                        <a
+                          href={txUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-indigo-400 transition-colors"
+                        >
+                          {relativeTime(r.timestamp)}
+                        </a>
+                      ) : (
+                        relativeTime(r.timestamp)
+                      )}
+                    </Td>
+                  </Row>
+                );
+              })}
             </tbody>
           </Table>
           {!isSearching && (

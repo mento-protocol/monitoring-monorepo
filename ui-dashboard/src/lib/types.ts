@@ -57,6 +57,7 @@ export type OracleSnapshot = {
   rebalanceThreshold: number;
   source: string;
   blockNumber: string;
+  txHash: string;
 };
 
 export type SwapEvent = {
