@@ -201,6 +201,7 @@ export const ORACLE_SNAPSHOTS = `
       rebalanceThreshold
       source
       blockNumber
+      txHash
     }
   }
 `;
@@ -225,6 +226,7 @@ export const ORACLE_SNAPSHOTS_CHART = `
       rebalanceThreshold
       source
       blockNumber
+      txHash
     }
   }
 `;

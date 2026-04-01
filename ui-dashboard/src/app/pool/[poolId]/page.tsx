@@ -1282,6 +1282,7 @@ function OracleTab({
         parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6),
         Number(r.priceDifference) > 0 ? r.priceDifference : null,
         r.rebalanceThreshold > 0 ? String(r.rebalanceThreshold) : null,
+        r.txHash,
       ]);
     });
   }, [rows, query, sym0]);
@@ -1380,6 +1381,9 @@ function OracleTab({
             </thead>
             <tbody>
               {filteredRows.map((r) => {
+                const txUrl = r.txHash
+                  ? `${network.explorerBaseUrl}/tx/${r.txHash}`
+                  : null;
                 const diffBps = Number(r.priceDifference);
                 const thresholdBps = r.rebalanceThreshold;
                 const diffPct =
@@ -1389,9 +1393,20 @@ function OracleTab({
                 return (
                   <Row key={r.id}>
                     <Td small>
-                      <span className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono">
-                        {r.source}
-                      </span>
+                      {txUrl ? (
+                        <a
+                          href={txUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono hover:text-indigo-400 transition-colors"
+                        >
+                          {r.source}
+                        </a>
+                      ) : (
+                        <span className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono">
+                          {r.source}
+                        </span>
+                      )}
                     </Td>
                     <Td small align="right">
                       <span
@@ -1424,7 +1439,18 @@ function OracleTab({
                       )}
                     </Td>
                     <Td small muted title={formatTimestamp(r.timestamp)}>
-                      {relativeTime(r.timestamp)}
+                      {txUrl ? (
+                        <a
+                          href={txUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-indigo-400 transition-colors"
+                        >
+                          {relativeTime(r.timestamp)}
+                        </a>
+                      ) : (
+                        relativeTime(r.timestamp)
+                      )}
                     </Td>
                   </Row>
                 );

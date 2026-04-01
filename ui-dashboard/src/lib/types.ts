@@ -57,7 +57,7 @@ export type OracleSnapshot = {
   rebalanceThreshold: number;
   source: string;
   blockNumber: string;
-  // txHash not yet in OracleSnapshot schema — tracked in follow-up issue
+  txHash: string;
 };
 
 export type SwapEvent = {
