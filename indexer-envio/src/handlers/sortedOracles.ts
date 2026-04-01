@@ -77,6 +77,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       rebalanceThreshold: existing.rebalanceThreshold,
       source: "oracle_reported",
       blockNumber,
+      txHash: event.transaction.hash,
     };
     context.OracleSnapshot.set(snapshot);
   }
@@ -140,6 +141,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       rebalanceThreshold: existing.rebalanceThreshold,
       source: "oracle_median_updated",
       blockNumber,
+      txHash: event.transaction.hash,
     };
     context.OracleSnapshot.set(snapshot);
   }

@@ -60,6 +60,7 @@ type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {
   rebalanceThreshold: Int!
   source: String!
   blockNumber: BigInt!
+  txHash: String!
 }
 
 type PoolSnapshot @index(fields: ["poolId", "timestamp"]) {

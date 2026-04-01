@@ -532,6 +532,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       rebalanceThreshold: pool.rebalanceThreshold,
       source: "update_reserves",
       blockNumber,
+      txHash: event.transaction.hash,
     };
     context.OracleSnapshot.set(snapshot);
   }
@@ -623,6 +624,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       rebalanceThreshold: pool.rebalanceThreshold,
       source: "rebalanced",
       blockNumber,
+      txHash: event.transaction.hash,
     };
     context.OracleSnapshot.set(snapshot);
   }
