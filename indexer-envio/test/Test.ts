@@ -401,6 +401,7 @@ type OracleSnapshotEntity = {
   rebalanceThreshold: number;
   source: string;
   blockNumber: bigint;
+  txHash: string;
 };
 
 type LiquidityPositionEntity = {
@@ -923,6 +924,11 @@ describe("Envio Celo indexer handlers", () => {
       7,
       "MedianUpdated snapshot preserves the DB-seeded reporter count",
     );
+    assert.equal(
+      snapshot.txHash,
+      pool.oracleTxHash,
+      "MedianUpdated snapshot should persist the triggering tx hash",
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -996,6 +1002,11 @@ describe("Envio Celo indexer handlers", () => {
       "Snapshot priceDifference must match pool priceDifference",
     );
     assert.equal(snapshot!.source, "oracle_reported");
+    assert.equal(
+      snapshot!.txHash,
+      pool.oracleTxHash,
+      "OracleReported snapshot should persist the triggering tx hash",
+    );
   });
 
   it("MedianUpdated: stores priceDifference computed from event oracle + existing reserves", async () => {
@@ -1056,6 +1067,11 @@ describe("Envio Celo indexer handlers", () => {
       "Snapshot priceDifference must match pool priceDifference",
     );
     assert.equal(snapshot!.source, "oracle_median_updated");
+    assert.equal(
+      snapshot!.txHash,
+      pool.oracleTxHash,
+      "MedianUpdated snapshot should persist the triggering tx hash",
+    );
   });
 
   // ---------------------------------------------------------------------------
