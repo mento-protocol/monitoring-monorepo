@@ -15,6 +15,8 @@ import type {
 } from "@/lib/types";
 import {
   ORACLE_SNAPSHOTS,
+  ORACLE_SNAPSHOTS_CHART,
+  ORACLE_SNAPSHOTS_COUNT,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   POOL_LIQUIDITY,
@@ -138,8 +140,24 @@ vi.mock("@/components/table", () => ({
   Table: ({ children }: { children: React.ReactNode }) => (
     <table>{children}</table>
   ),
-  Td: ({ children }: { children: React.ReactNode }) => <td>{children}</td>,
-  Th: ({ children }: { children: React.ReactNode }) => <th>{children}</th>,
+  Td: (
+    props: React.ComponentPropsWithoutRef<"td"> & {
+      small?: boolean;
+      mono?: boolean;
+      muted?: boolean;
+      align?: "left" | "right";
+    },
+  ) => {
+    const { children, small, mono, muted, align, ...domProps } = props;
+    void small;
+    void mono;
+    void muted;
+    void align;
+    return <td {...domProps}>{children}</td>;
+  },
+  Th: ({ children, ...props }: React.ComponentPropsWithoutRef<"th">) => (
+    <th {...props}>{children}</th>
+  ),
 }));
 vi.mock("@/components/tx-hash-cell", () => ({
   TxHashCell: ({ txHash }: { txHash: string }) => <td>{txHash}</td>,
@@ -282,6 +300,12 @@ beforeEach(() => {
       return makeGqlResult({ LiquidityEvent: liquidity });
     if (query === ORACLE_SNAPSHOTS)
       return makeGqlResult({ OracleSnapshot: oracleRows });
+    if (query === ORACLE_SNAPSHOTS_CHART)
+      return makeGqlResult({ OracleSnapshot: oracleRows });
+    if (query === ORACLE_SNAPSHOTS_COUNT)
+      return makeGqlResult({
+        OracleSnapshot_aggregate: { aggregate: { count: 51 } },
+      });
     return makeGqlResult({});
   });
 });
@@ -380,6 +404,61 @@ describe("Pool detail tab search", () => {
   it("shows oracle no-match state", () => {
     const html = renderWithParams({ tab: "oracle", oracleQ: "chainlink" });
     expect(html).toContain("No oracle snapshots match your search.");
+  });
+
+  it("links oracle source and time to the transaction explorer URL", () => {
+    const html = renderWithParams({ tab: "oracle" });
+    expect(html).toContain('href="https://celoscan.io/tx/0xabc123def456"');
+    expect(html).toContain(">median-feed</a>");
+  });
+
+  it("loads chart and count oracle queries and renders pagination metadata", () => {
+    const html = renderWithParams({ tab: "oracle" });
+    expect(useGQLMock).toHaveBeenCalledWith(
+      ORACLE_SNAPSHOTS_COUNT,
+      expect.objectContaining({ poolId: "pool-1" }),
+    );
+    expect(useGQLMock).toHaveBeenCalledWith(
+      ORACLE_SNAPSHOTS_CHART,
+      expect.objectContaining({ poolId: "pool-1", limit: 200 }),
+    );
+    expect(html).toContain("51 total");
+    expect(html).toContain("page 1 of 3");
+  });
+
+  it("exposes aria-sort on sortable oracle headers", () => {
+    const html = renderWithParams({ tab: "oracle" });
+    expect(html).toContain('aria-sort="descending"');
+    expect(html).toContain("Time ↓");
+    expect(html).toContain('aria-label="First page"');
+  });
+
+  it("updates aria-sort when oracle sort changes", () => {
+    const container = renderInteractive({ tab: "oracle" });
+    const priceDiffButton = Array.from(
+      container.querySelectorAll("button"),
+    ).find((button) => button.textContent?.includes("Price Diff")) as
+      | HTMLButtonElement
+      | undefined;
+
+    expect(priceDiffButton).toBeTruthy();
+
+    act(() => {
+      priceDiffButton?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+
+    const ascendingHeaders = Array.from(
+      container.querySelectorAll("th"),
+    ).filter((th) => th.getAttribute("aria-sort") === "ascending");
+    expect(ascendingHeaders).toHaveLength(0);
+    const descendingHeaders = Array.from(
+      container.querySelectorAll("th"),
+    ).filter((th) => th.getAttribute("aria-sort") === "descending");
+    expect(
+      descendingHeaders.some((th) => th.textContent?.includes("Price Diff")),
+    ).toBe(true);
   });
 
   it("preserves newer url params when a debounced search commit fires later", () => {

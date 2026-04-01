@@ -1181,21 +1181,22 @@ type OracleSortCol =
   | "priceDifference";
 
 const ORACLE_PAGE_SIZE = 25;
-// When search is active, fetch up to this many rows so filtering is global
-const ORACLE_SEARCH_LIMIT = 500;
+// Before the aggregate count arrives, fetch a bounded first window so search
+// works immediately. Once count resolves, search expands to the full result set.
+const ORACLE_SEARCH_BOOTSTRAP_LIMIT = 500;
 
 /**
  * Build a stable Hasura order_by array. The primary sort is the chosen column;
- * timestamp+id are always appended as tiebreakers so page boundaries remain
- * deterministic even for non-unique fields (oracleOk, numReporters, etc.).
+ * id is always appended as a unique tiebreaker so page boundaries remain
+ * deterministic even when multiple rows share the same timestamp or sort key.
  */
 function buildOrderBy(
   col: OracleSortCol,
   dir: "asc" | "desc",
 ): Array<Partial<Record<string, "asc" | "desc">>> {
   const primary: Partial<Record<string, "asc" | "desc">> = { [col]: dir };
-  if (col === "timestamp") return [primary];
-  // Secondary: timestamp desc; tertiary: id asc (unique) for full stability
+  if (col === "timestamp") return [primary, { id: "asc" }];
+  // Secondary: timestamp desc; tertiary: id asc (unique) for full stability.
   return [primary, { timestamp: "desc" }, { id: "asc" }];
 }
 
@@ -1226,10 +1227,21 @@ function OracleTab({
     [onSearchChange],
   );
 
-  // When search is active: fetch a large window at offset 0 so filtering is
-  // global, not limited to the current page. Pagination is suppressed.
+  const { data: countData, error: countError } = useGQL<{
+    OracleSnapshot_aggregate: { aggregate: { count: number } };
+  }>(ORACLE_SNAPSHOTS_COUNT, { poolId });
+  // Preserve last known total on count error so pagination stays visible.
+  const lastKnownTotalRef = React.useRef(0);
+  const rawTotal = countData?.OracleSnapshot_aggregate?.aggregate?.count ?? 0;
+  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
+  const total = countError ? lastKnownTotalRef.current : rawTotal;
+
+  // When search is active: fetch from offset 0 so filtering spans the whole
+  // dataset, not just the current page. Bootstrap with a bounded window before
+  // count resolves, then expand to the full row count.
   const isSearching = query.length > 0;
-  const fetchLimit = isSearching ? ORACLE_SEARCH_LIMIT : ORACLE_PAGE_SIZE;
+  const searchFetchLimit = total > 0 ? total : ORACLE_SEARCH_BOOTSTRAP_LIMIT;
+  const fetchLimit = isSearching ? searchFetchLimit : ORACLE_PAGE_SIZE;
   const fetchOffset = isSearching ? 0 : (page - 1) * ORACLE_PAGE_SIZE;
   const orderBy = useMemo(
     () => buildOrderBy(sortCol, sortDir),
@@ -1244,15 +1256,6 @@ function OracleTab({
     offset: fetchOffset,
     orderBy,
   });
-
-  const { data: countData, error: countError } = useGQL<{
-    OracleSnapshot_aggregate: { aggregate: { count: number } };
-  }>(ORACLE_SNAPSHOTS_COUNT, { poolId });
-  // Preserve last known total on count error so pagination stays visible
-  const lastKnownTotalRef = React.useRef(0);
-  const rawTotal = countData?.OracleSnapshot_aggregate?.aggregate?.count ?? 0;
-  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
-  const total = countError ? lastKnownTotalRef.current : rawTotal;
 
   const rows = data?.OracleSnapshot ?? [];
 
@@ -1340,7 +1343,16 @@ function OracleTab({
             <thead>
               <tr className="border-b border-slate-800 bg-slate-900/50">
                 <Th>Source</Th>
-                <Th align="right">
+                <Th
+                  align="right"
+                  aria-sort={
+                    sortCol === "oracleOk"
+                      ? sortDir === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : "none"
+                  }
+                >
                   <button
                     type="button"
                     onClick={() => toggleSort("oracleOk")}
@@ -1349,7 +1361,16 @@ function OracleTab({
                     Oracle OK{arrow("oracleOk")}
                   </button>
                 </Th>
-                <Th align="right">
+                <Th
+                  align="right"
+                  aria-sort={
+                    sortCol === "oraclePrice"
+                      ? sortDir === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : "none"
+                  }
+                >
                   <button
                     type="button"
                     onClick={() => toggleSort("oraclePrice")}
@@ -1358,7 +1379,16 @@ function OracleTab({
                     Price ({sym0}/{sym1}){arrow("oraclePrice")}
                   </button>
                 </Th>
-                <Th align="right">
+                <Th
+                  align="right"
+                  aria-sort={
+                    sortCol === "priceDifference"
+                      ? sortDir === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : "none"
+                  }
+                >
                   <button
                     type="button"
                     onClick={() => toggleSort("priceDifference")}
@@ -1368,7 +1398,15 @@ function OracleTab({
                   </button>
                 </Th>
                 <Th align="right">Threshold</Th>
-                <Th>
+                <Th
+                  aria-sort={
+                    sortCol === "timestamp"
+                      ? sortDir === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : "none"
+                  }
+                >
                   <button
                     type="button"
                     onClick={() => toggleSort("timestamp")}
