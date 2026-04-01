@@ -13,7 +13,8 @@ export function Pagination({
   total,
   onPageChange,
 }: PaginationProps) {
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (pageSize <= 0 || total <= 0) return null;
+  const totalPages = Math.ceil(total / pageSize);
   if (totalPages <= 1) return null;
 
   const canPrev = page > 1;

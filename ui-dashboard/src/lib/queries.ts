@@ -205,6 +205,30 @@ export const ORACLE_SNAPSHOTS = `
   }
 `;
 
+// Separate query for charts — always fetches the most recent N snapshots
+// ordered by timestamp desc, then reversed client-side for chronological display.
+// Decoupled from table pagination so charts always show full history context.
+export const ORACLE_SNAPSHOTS_CHART = `
+  query OracleSnapshotsChart($poolId: String!, $limit: Int!) {
+    OracleSnapshot(
+      where: { poolId: { _eq: $poolId } }
+      order_by: { timestamp: desc }
+      limit: $limit
+    ) {
+      id chainId
+      poolId
+      timestamp
+      oraclePrice
+      oracleOk
+      numReporters
+      priceDifference
+      rebalanceThreshold
+      source
+      blockNumber
+    }
+  }
+`;
+
 export const ORACLE_SNAPSHOTS_COUNT = `
   query OracleSnapshotsCount($poolId: String!) {
     OracleSnapshot_aggregate(where: { poolId: { _eq: $poolId } }) {

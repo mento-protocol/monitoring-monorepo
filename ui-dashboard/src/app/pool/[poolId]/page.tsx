@@ -32,6 +32,7 @@ import {
 import { useGQL } from "@/lib/graphql";
 import {
   ORACLE_SNAPSHOTS,
+  ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT,
   OLS_LIQUIDITY_EVENTS,
   OLS_POOL,
@@ -1182,12 +1183,12 @@ const ORACLE_PAGE_SIZE = 25;
 // When search is active, fetch up to this many rows so filtering is global
 const ORACLE_SEARCH_LIMIT = 500;
 
-/** Map UI column key → Hasura order_by object */
+/** Build a Hasura order_by array from a column key and direction. */
 function buildOrderBy(
   col: OracleSortCol,
   dir: "asc" | "desc",
-): Record<string, string> {
-  return { [col]: dir };
+): Array<Partial<Record<OracleSortCol, "asc" | "desc">>> {
+  return [{ [col]: dir }];
 }
 
 function OracleTab({
@@ -1222,7 +1223,10 @@ function OracleTab({
   const isSearching = query.length > 0;
   const fetchLimit = isSearching ? ORACLE_SEARCH_LIMIT : ORACLE_PAGE_SIZE;
   const fetchOffset = isSearching ? 0 : (page - 1) * ORACLE_PAGE_SIZE;
-  const orderBy = buildOrderBy(sortCol, sortDir);
+  const orderBy = useMemo(
+    () => buildOrderBy(sortCol, sortDir),
+    [sortCol, sortDir],
+  );
 
   const { data, error, isLoading } = useGQL<{
     OracleSnapshot: OracleSnapshot[];
@@ -1236,18 +1240,27 @@ function OracleTab({
   const { data: countData, error: countError } = useGQL<{
     OracleSnapshot_aggregate: { aggregate: { count: number } };
   }>(ORACLE_SNAPSHOTS_COUNT, { poolId });
-  const total = countData?.OracleSnapshot_aggregate?.aggregate?.count ?? 0;
+  // Preserve last known total on count error so pagination stays visible
+  const lastKnownTotalRef = React.useRef(0);
+  const rawTotal = countData?.OracleSnapshot_aggregate?.aggregate?.count ?? 0;
+  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
+  const total = countError ? lastKnownTotalRef.current : rawTotal;
 
   const rows = data?.OracleSnapshot ?? [];
 
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
-  // Charts always get timestamp-ascending data regardless of table sort
-  const chartRows = useMemo(
-    () => [...rows].sort((a, b) => Number(a.timestamp) - Number(b.timestamp)),
-    [rows],
+  // Charts use a dedicated query (200 most recent rows) so they always show
+  // full history context regardless of table pagination or sort state.
+  const { data: chartData } = useGQL<{ OracleSnapshot: OracleSnapshot[] }>(
+    ORACLE_SNAPSHOTS_CHART,
+    { poolId, limit: 200 },
   );
+  const chartRows = useMemo(() => {
+    const raw = chartData?.OracleSnapshot ?? [];
+    return [...raw].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+  }, [chartData]);
 
   const filteredRows = useMemo(() => {
     if (!query) return rows;
@@ -1267,15 +1280,18 @@ function OracleTab({
     });
   }, [rows, query, sym0]);
 
-  function toggleSort(col: OracleSortCol) {
-    if (sortCol === col) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortCol(col);
-      setSortDir(col === "oracleOk" ? "asc" : "desc");
-    }
-    setPage(1);
-  }
+  const toggleSort = React.useCallback(
+    (col: OracleSortCol) => {
+      if (sortCol === col) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      } else {
+        setSortCol(col);
+        setSortDir(col === "oracleOk" ? "asc" : "desc");
+      }
+      setPage(1);
+    },
+    [sortCol],
+  );
 
   if (pool?.source?.includes("virtual")) {
     return <EmptyBox message="VirtualPool — no oracle data available." />;
@@ -1283,7 +1299,7 @@ function OracleTab({
 
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
-  if (rows.length === 0 && !isLoading)
+  if (rows.length === 0)
     return (
       <EmptyBox message="No oracle snapshots yet. Oracle data is captured on pool activity (swaps, rebalances)." />
     );
@@ -1415,7 +1431,7 @@ function OracleTab({
               onPageChange={setPage}
             />
           )}
-          {countError && !isSearching && (
+          {countError && !isSearching && total === 0 && (
             <p className="px-1 pt-1 text-xs text-amber-400">
               Could not load total count — pagination may be incomplete.
             </p>
