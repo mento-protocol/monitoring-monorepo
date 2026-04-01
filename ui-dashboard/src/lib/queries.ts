@@ -184,11 +184,12 @@ export const TRADING_LIMITS = `
 `;
 
 export const ORACLE_SNAPSHOTS = `
-  query OracleSnapshots($poolId: String!, $limit: Int!) {
+  query OracleSnapshots($poolId: String!, $limit: Int!, $offset: Int!) {
     OracleSnapshot(
       where: { poolId: { _eq: $poolId } }
-      order_by: { timestamp: asc }
+      order_by: { timestamp: desc }
       limit: $limit
+      offset: $offset
     ) {
       id chainId
       poolId
@@ -200,6 +201,14 @@ export const ORACLE_SNAPSHOTS = `
       rebalanceThreshold
       source
       blockNumber
+    }
+  }
+`;
+
+export const ORACLE_SNAPSHOTS_COUNT = `
+  query OracleSnapshotsCount($poolId: String!) {
+    OracleSnapshot_aggregate(where: { poolId: { _eq: $poolId } }) {
+      aggregate { count }
     }
   }
 `;
