@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ComponentPropsWithoutRef, ReactNode } from "react";
 
 export function Table({ children }: { children: ReactNode }) {
   return (
@@ -19,14 +19,23 @@ export function Row({ children }: { children: ReactNode }) {
 export function Th({
   children,
   align = "left",
+  className,
+  ...props
 }: {
   children: ReactNode;
   align?: "left" | "right";
-}) {
+} & ComponentPropsWithoutRef<"th">) {
   return (
     <th
       scope="col"
-      className={`px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 whitespace-nowrap ${align === "right" ? "text-right" : "text-left"}`}
+      className={[
+        "px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 whitespace-nowrap",
+        align === "right" ? "text-right" : "text-left",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      {...props}
     >
       {children}
     </th>
