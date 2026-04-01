@@ -1216,7 +1216,7 @@ function OracleTab({
   const { network } = useNetwork();
   const query = normalizeSearch(search);
 
-  const [page, setPage] = React.useState(1);
+  const [rawPage, setRawPage] = React.useState(1);
   const [sortCol, setSortCol] = React.useState<OracleSortCol>("timestamp");
   const [sortDir, setSortDir] = React.useState<"asc" | "desc">("desc");
 
@@ -1224,7 +1224,7 @@ function OracleTab({
   const handleSearchChange = React.useCallback(
     (value: string) => {
       onSearchChange(value);
-      setPage(1);
+      setRawPage(1);
     },
     [onSearchChange],
   );
@@ -1237,6 +1237,12 @@ function OracleTab({
   const rawTotal = countData?.OracleSnapshot_aggregate?.aggregate?.count ?? 0;
   if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
   const total = countError ? lastKnownTotalRef.current : rawTotal;
+
+  // Clamp page to valid range once total is known, so a stale page
+  // index never leaves the user stranded past the last page.
+  const totalPages = total > 0 ? Math.ceil(total / ORACLE_PAGE_SIZE) : 1;
+  const page = Math.max(1, Math.min(rawPage, totalPages));
+  const setPage = React.useCallback((p: number) => setRawPage(p), []);
 
   // When search is active: fetch from offset 0 so filtering spans a large
   // bounded window rather than just the current page. Bootstrap before count
@@ -1311,7 +1317,7 @@ function OracleTab({
         setSortCol(col);
         setSortDir(col === "oracleOk" ? "asc" : "desc");
       }
-      setPage(1);
+      setRawPage(1);
     },
     [sortCol],
   );
@@ -1327,8 +1333,19 @@ function OracleTab({
       <EmptyBox message="No oracle snapshots yet. Oracle data is captured on pool activity (swaps, rebalances)." />
     );
 
+  // Arrows and aria-sort are suppressed during search: sort controls remain
+  // clickable (to stage a sort for when search is cleared) but the UI does not
+  // announce a sort that isn't currently applied to the visible rows.
   const arrow = (col: OracleSortCol) =>
-    sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+    !isSearching && sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+  const ariaSortFor = (
+    col: OracleSortCol,
+  ): "ascending" | "descending" | "none" =>
+    !isSearching && sortCol === col
+      ? sortDir === "asc"
+        ? "ascending"
+        : "descending"
+      : "none";
 
   return (
     <>
@@ -1356,16 +1373,7 @@ function OracleTab({
             <thead>
               <tr className="border-b border-slate-800 bg-slate-900/50">
                 <Th>Source</Th>
-                <Th
-                  align="right"
-                  aria-sort={
-                    sortCol === "oracleOk"
-                      ? sortDir === "asc"
-                        ? "ascending"
-                        : "descending"
-                      : "none"
-                  }
-                >
+                <Th align="right" aria-sort={ariaSortFor("oracleOk")}>
                   <button
                     type="button"
                     onClick={() => toggleSort("oracleOk")}
@@ -1374,16 +1382,7 @@ function OracleTab({
                     Oracle OK{arrow("oracleOk")}
                   </button>
                 </Th>
-                <Th
-                  align="right"
-                  aria-sort={
-                    sortCol === "oraclePrice"
-                      ? sortDir === "asc"
-                        ? "ascending"
-                        : "descending"
-                      : "none"
-                  }
-                >
+                <Th align="right" aria-sort={ariaSortFor("oraclePrice")}>
                   <button
                     type="button"
                     onClick={() => toggleSort("oraclePrice")}
@@ -1392,16 +1391,7 @@ function OracleTab({
                     Price ({sym0}/{sym1}){arrow("oraclePrice")}
                   </button>
                 </Th>
-                <Th
-                  align="right"
-                  aria-sort={
-                    sortCol === "priceDifference"
-                      ? sortDir === "asc"
-                        ? "ascending"
-                        : "descending"
-                      : "none"
-                  }
-                >
+                <Th align="right" aria-sort={ariaSortFor("priceDifference")}>
                   <button
                     type="button"
                     onClick={() => toggleSort("priceDifference")}
@@ -1411,15 +1401,7 @@ function OracleTab({
                   </button>
                 </Th>
                 <Th align="right">Threshold</Th>
-                <Th
-                  aria-sort={
-                    sortCol === "timestamp"
-                      ? sortDir === "asc"
-                        ? "ascending"
-                        : "descending"
-                      : "none"
-                  }
-                >
+                <Th aria-sort={ariaSortFor("timestamp")}>
                   <button
                     type="button"
                     onClick={() => toggleSort("timestamp")}

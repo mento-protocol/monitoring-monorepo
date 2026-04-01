@@ -533,6 +533,53 @@ describe("Pool detail tab search", () => {
     );
   });
 
+  it("clamps oracle fetch offset when total count shrinks below current page", () => {
+    // Start on page 3 of 3 with count=51
+    const container = renderInteractive({ tab: "oracle" });
+    const nextButton = container.querySelector(
+      'button[aria-label="Next page"]',
+    ) as HTMLButtonElement;
+    act(() => {
+      nextButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    act(() => {
+      nextButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(container.textContent).toContain("page 3 of 3");
+    // On page 3, offset should be 50
+    expect(useGQLMock).toHaveBeenCalledWith(
+      ORACLE_SNAPSHOTS,
+      expect.objectContaining({ offset: 50 }),
+    );
+
+    // Count shrinks — only 1 page now
+    oracleCount = 20;
+    useGQLMock.mockClear();
+    act(() => {
+      interactiveRoot?.render(<PoolDetailPage />);
+    });
+
+    // rawPage is still 3, but totalPages is now 1 — clamped page = 1 → offset = 0.
+    // Pagination hides when there's only 1 page, so we assert on the query offset.
+    expect(useGQLMock).toHaveBeenCalledWith(
+      ORACLE_SNAPSHOTS,
+      expect.objectContaining({ offset: 0 }),
+    );
+    // Pagination is hidden (single page)
+    expect(container.textContent).not.toContain("page 3");
+  });
+
+  it("aria-sort is none for all headers while search is active", () => {
+    // Default sort is timestamp desc — aria-sort should be hidden during search
+    const html = renderWithParams({ tab: "oracle", oracleQ: "median" });
+    // No header should advertise a sort while search overrides it
+    expect(html).not.toContain('aria-sort="descending"');
+    expect(html).not.toContain('aria-sort="ascending"');
+    // All should be none
+    const noneMatches = (html.match(/aria-sort="none"/g) ?? []).length;
+    expect(noneMatches).toBeGreaterThan(0);
+  });
+
   it("oracle search always uses timestamp desc order regardless of active table sort", () => {
     // With a non-default sort active, a search must still fetch the most recent
     // window (timestamp desc) so the "most recent N" warning text is accurate.
