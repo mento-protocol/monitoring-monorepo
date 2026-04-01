@@ -184,10 +184,10 @@ export const TRADING_LIMITS = `
 `;
 
 export const ORACLE_SNAPSHOTS = `
-  query OracleSnapshots($poolId: String!, $limit: Int!, $offset: Int!) {
+  query OracleSnapshots($poolId: String!, $limit: Int!, $offset: Int!, $orderBy: [OracleSnapshot_order_by!]!) {
     OracleSnapshot(
       where: { poolId: { _eq: $poolId } }
-      order_by: { timestamp: desc }
+      order_by: $orderBy
       limit: $limit
       offset: $offset
     ) {
