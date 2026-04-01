@@ -336,13 +336,16 @@ function PoolDetail() {
             {getTabLabel(t)}
           </button>
         ))}
-        <div className="ml-auto hidden sm:flex items-center">
-          <LimitSelect
-            id="tab-limit"
-            value={limit}
-            onChange={(l) => setURL(tab, l)}
-          />
-        </div>
+        {/* Oracle tab manages its own page size — hide the global limit selector */}
+        {tab !== "oracle" && (
+          <div className="ml-auto hidden sm:flex items-center">
+            <LimitSelect
+              id="tab-limit"
+              value={limit}
+              onChange={(l) => setURL(tab, l)}
+            />
+          </div>
+        )}
       </div>
 
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
@@ -1183,12 +1186,19 @@ const ORACLE_PAGE_SIZE = 25;
 // When search is active, fetch up to this many rows so filtering is global
 const ORACLE_SEARCH_LIMIT = 500;
 
-/** Build a Hasura order_by array from a column key and direction. */
+/**
+ * Build a stable Hasura order_by array. The primary sort is the chosen column;
+ * timestamp+id are always appended as tiebreakers so page boundaries remain
+ * deterministic even for non-unique fields (oracleOk, numReporters, etc.).
+ */
 function buildOrderBy(
   col: OracleSortCol,
   dir: "asc" | "desc",
-): Array<Partial<Record<OracleSortCol, "asc" | "desc">>> {
-  return [{ [col]: dir }];
+): Array<Partial<Record<string, "asc" | "desc">>> {
+  const primary: Partial<Record<string, "asc" | "desc">> = { [col]: dir };
+  if (col === "timestamp") return [primary];
+  // Secondary: timestamp desc; tertiary: id asc (unique) for full stability
+  return [primary, { timestamp: "desc" }, { id: "asc" }];
 }
 
 function OracleTab({

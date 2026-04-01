@@ -33,6 +33,7 @@ export function Pagination({
       </span>
       <div className="flex items-center gap-1.5">
         <button
+          type="button"
           className={`${btnBase} ${canPrev ? btnActive : btnDisabled}`}
           onClick={() => canPrev && onPageChange(1)}
           disabled={!canPrev}
@@ -41,6 +42,7 @@ export function Pagination({
           «
         </button>
         <button
+          type="button"
           className={`${btnBase} ${canPrev ? btnActive : btnDisabled}`}
           onClick={() => canPrev && onPageChange(page - 1)}
           disabled={!canPrev}
@@ -49,6 +51,7 @@ export function Pagination({
           ‹ Prev
         </button>
         <button
+          type="button"
           className={`${btnBase} ${canNext ? btnActive : btnDisabled}`}
           onClick={() => canNext && onPageChange(page + 1)}
           disabled={!canNext}
@@ -57,6 +60,7 @@ export function Pagination({
           Next ›
         </button>
         <button
+          type="button"
           className={`${btnBase} ${canNext ? btnActive : btnDisabled}`}
           onClick={() => canNext && onPageChange(totalPages)}
           disabled={!canNext}
