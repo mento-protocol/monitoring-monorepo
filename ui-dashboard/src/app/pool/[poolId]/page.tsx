@@ -1241,6 +1241,8 @@ function OracleTab({
   // When search is active: fetch from offset 0 so filtering spans a large
   // bounded window rather than just the current page. Bootstrap before count
   // resolves, then expand up to a capped maximum to avoid unbounded pulls.
+  // Always use timestamp desc for search queries so "most recent N" is accurate
+  // regardless of the current table sort column.
   const isSearching = query.length > 0;
   const searchFetchLimit =
     total > 0
@@ -1249,10 +1251,15 @@ function OracleTab({
   const fetchLimit = isSearching ? searchFetchLimit : ORACLE_PAGE_SIZE;
   const isSearchCapped = isSearching && total > ORACLE_SEARCH_MAX_LIMIT;
   const fetchOffset = isSearching ? 0 : (page - 1) * ORACLE_PAGE_SIZE;
-  const orderBy = useMemo(
+  // Table sort (user-controlled)
+  const tableOrderBy = useMemo(
     () => buildOrderBy(sortCol, sortDir),
     [sortCol, sortDir],
   );
+  // Search always uses newest-first so the bounded window is chronologically
+  // consistent with what the warning text says ("most recent N snapshots")
+  const searchOrderBy = useMemo(() => buildOrderBy("timestamp", "desc"), []);
+  const orderBy = isSearching ? searchOrderBy : tableOrderBy;
 
   const { data, error, isLoading } = useGQL<{
     OracleSnapshot: OracleSnapshot[];
