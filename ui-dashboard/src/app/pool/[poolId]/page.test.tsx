@@ -168,6 +168,8 @@ import PoolDetailPage from "./page";
 let currentSearchParams = new URLSearchParams();
 let interactiveContainer: HTMLDivElement | null = null;
 let interactiveRoot: Root | null = null;
+let oracleCount = 51;
+let oracleCountError = false;
 
 const basePool: Pool = {
   id: "pool-1",
@@ -281,33 +283,44 @@ beforeEach(() => {
   useGQLMock.mockReset();
   getLabelMock.mockClear();
   currentSearchParams = new URLSearchParams();
+  oracleCount = 51;
+  oracleCountError = false;
   window.history.replaceState({}, "", "/pool/pool-1");
 
-  useGQLMock.mockImplementation((query: unknown) => {
-    if (query === POOL_DETAIL_WITH_HEALTH)
-      return makeGqlResult({ Pool: [basePool] });
-    if (query === TRADING_LIMITS)
-      return makeGqlResult({ TradingLimit: [] satisfies TradingLimit[] });
-    if (query === POOL_DEPLOYMENT)
-      return makeGqlResult({ FactoryDeployment: [{ txHash: "0xdeploy" }] });
-    if (query === POOL_SWAPS) return makeGqlResult({ SwapEvent: swaps });
-    if (query === POOL_SNAPSHOTS) return makeGqlResult({ PoolSnapshot: [] });
-    if (query === POOL_RESERVES)
-      return makeGqlResult({ ReserveUpdate: reserves });
-    if (query === POOL_REBALANCES)
-      return makeGqlResult({ RebalanceEvent: rebalances });
-    if (query === POOL_LIQUIDITY)
-      return makeGqlResult({ LiquidityEvent: liquidity });
-    if (query === ORACLE_SNAPSHOTS)
-      return makeGqlResult({ OracleSnapshot: oracleRows });
-    if (query === ORACLE_SNAPSHOTS_CHART)
-      return makeGqlResult({ OracleSnapshot: oracleRows });
-    if (query === ORACLE_SNAPSHOTS_COUNT)
-      return makeGqlResult({
-        OracleSnapshot_aggregate: { aggregate: { count: 51 } },
-      });
-    return makeGqlResult({});
-  });
+  useGQLMock.mockImplementation(
+    (query: unknown, variables?: { offset?: number; limit?: number }) => {
+      if (query === POOL_DETAIL_WITH_HEALTH)
+        return makeGqlResult({ Pool: [basePool] });
+      if (query === TRADING_LIMITS)
+        return makeGqlResult({ TradingLimit: [] satisfies TradingLimit[] });
+      if (query === POOL_DEPLOYMENT)
+        return makeGqlResult({ FactoryDeployment: [{ txHash: "0xdeploy" }] });
+      if (query === POOL_SWAPS) return makeGqlResult({ SwapEvent: swaps });
+      if (query === POOL_SNAPSHOTS) return makeGqlResult({ PoolSnapshot: [] });
+      if (query === POOL_RESERVES)
+        return makeGqlResult({ ReserveUpdate: reserves });
+      if (query === POOL_REBALANCES)
+        return makeGqlResult({ RebalanceEvent: rebalances });
+      if (query === POOL_LIQUIDITY)
+        return makeGqlResult({ LiquidityEvent: liquidity });
+      if (query === ORACLE_SNAPSHOTS)
+        return makeGqlResult({
+          OracleSnapshot: oracleRows.map((row, index) => ({
+            ...row,
+            id: `oracle-${(variables?.offset ?? 0) + index + 1}`,
+          })),
+        });
+      if (query === ORACLE_SNAPSHOTS_CHART)
+        return makeGqlResult({ OracleSnapshot: oracleRows });
+      if (query === ORACLE_SNAPSHOTS_COUNT)
+        return oracleCountError
+          ? { data: null, error: new Error("count failed"), isLoading: false }
+          : makeGqlResult({
+              OracleSnapshot_aggregate: { aggregate: { count: oracleCount } },
+            });
+      return makeGqlResult({});
+    },
+  );
 });
 
 afterEach(() => {
@@ -459,6 +472,57 @@ describe("Pool detail tab search", () => {
     expect(
       descendingHeaders.some((th) => th.textContent?.includes("Price Diff")),
     ).toBe(true);
+  });
+
+  it("updates oracle query offset when pagination changes page", () => {
+    const container = renderInteractive({ tab: "oracle" });
+    const nextButton = container.querySelector(
+      'button[aria-label="Next page"]',
+    ) as HTMLButtonElement;
+
+    expect(nextButton).toBeTruthy();
+    expect(useGQLMock).toHaveBeenCalledWith(
+      ORACLE_SNAPSHOTS,
+      expect.objectContaining({ offset: 0, limit: 25 }),
+    );
+
+    act(() => {
+      nextButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(useGQLMock).toHaveBeenCalledWith(
+      ORACLE_SNAPSHOTS,
+      expect.objectContaining({ offset: 25, limit: 25 }),
+    );
+    expect(container.textContent).toContain("page 2 of 3");
+  });
+
+  it("preserves pagination metadata when the count query later fails", () => {
+    const container = renderInteractive({ tab: "oracle" });
+    expect(container.textContent).toContain("51 total · page 1 of 3");
+
+    oracleCountError = true;
+    act(() => {
+      interactiveRoot?.render(<PoolDetailPage />);
+    });
+
+    expect(container.textContent).toContain("51 total · page 1 of 3");
+    expect(container.textContent).toContain(
+      "Could not load total count — pagination may be incomplete.",
+    );
+  });
+
+  it("caps oracle search fetch size and shows a warning for large result sets", () => {
+    oracleCount = 5000;
+    const html = renderWithParams({ tab: "oracle", oracleQ: "median" });
+
+    expect(useGQLMock).toHaveBeenCalledWith(
+      ORACLE_SNAPSHOTS,
+      expect.objectContaining({ offset: 0, limit: 2000 }),
+    );
+    expect(html).toContain(
+      "Search is limited to the most recent 2,000 snapshots.",
+    );
   });
 
   it("preserves newer url params when a debounced search commit fires later", () => {

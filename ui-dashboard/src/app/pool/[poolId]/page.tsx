@@ -1182,8 +1182,10 @@ type OracleSortCol =
 
 const ORACLE_PAGE_SIZE = 25;
 // Before the aggregate count arrives, fetch a bounded first window so search
-// works immediately. Once count resolves, search expands to the full result set.
+// works immediately.
 const ORACLE_SEARCH_BOOTSTRAP_LIMIT = 500;
+// Keep client-side search bounded even after count resolves.
+const ORACLE_SEARCH_MAX_LIMIT = 2000;
 
 /**
  * Build a stable Hasura order_by array. The primary sort is the chosen column;
@@ -1236,12 +1238,16 @@ function OracleTab({
   if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
   const total = countError ? lastKnownTotalRef.current : rawTotal;
 
-  // When search is active: fetch from offset 0 so filtering spans the whole
-  // dataset, not just the current page. Bootstrap with a bounded window before
-  // count resolves, then expand to the full row count.
+  // When search is active: fetch from offset 0 so filtering spans a large
+  // bounded window rather than just the current page. Bootstrap before count
+  // resolves, then expand up to a capped maximum to avoid unbounded pulls.
   const isSearching = query.length > 0;
-  const searchFetchLimit = total > 0 ? total : ORACLE_SEARCH_BOOTSTRAP_LIMIT;
+  const searchFetchLimit =
+    total > 0
+      ? Math.min(total, ORACLE_SEARCH_MAX_LIMIT)
+      : ORACLE_SEARCH_BOOTSTRAP_LIMIT;
   const fetchLimit = isSearching ? searchFetchLimit : ORACLE_PAGE_SIZE;
+  const isSearchCapped = isSearching && total > ORACLE_SEARCH_MAX_LIMIT;
   const fetchOffset = isSearching ? 0 : (page - 1) * ORACLE_PAGE_SIZE;
   const orderBy = useMemo(
     () => buildOrderBy(sortCol, sortDir),
@@ -1499,11 +1505,17 @@ function OracleTab({
             <Pagination
               page={page}
               pageSize={ORACLE_PAGE_SIZE}
-              total={countError ? rows.length : total}
+              total={total}
               onPageChange={setPage}
             />
           )}
-          {countError && !isSearching && total === 0 && (
+          {isSearchCapped && (
+            <p className="px-1 pt-1 text-xs text-amber-400">
+              Search is limited to the most recent{" "}
+              {ORACLE_SEARCH_MAX_LIMIT.toLocaleString()} snapshots.
+            </p>
+          )}
+          {countError && !isSearching && (
             <p className="px-1 pt-1 text-xs text-amber-400">
               Could not load total count — pagination may be incomplete.
             </p>
