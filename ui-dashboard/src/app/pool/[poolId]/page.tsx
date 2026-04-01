@@ -1515,6 +1515,12 @@ function OracleTab({
               {ORACLE_SEARCH_MAX_LIMIT.toLocaleString()} snapshots.
             </p>
           )}
+          {countError && isSearching && (
+            <p className="px-1 pt-1 text-xs text-amber-400">
+              Could not load total count — search covers the most recent{" "}
+              {ORACLE_SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} snapshots only.
+            </p>
+          )}
           {countError && !isSearching && (
             <p className="px-1 pt-1 text-xs text-amber-400">
               Could not load total count — pagination may be incomplete.

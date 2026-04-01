@@ -1390,6 +1390,8 @@ describe("Envio Celo indexer handlers", () => {
       source: "fpmm_update_reserves",
     });
 
+    const UPDATE_TX_HASH =
+      "0x000000000000000000000000000000000000000000000000000000000000b001";
     const updateEvent = FPMM.UpdateReserves.createMockEvent({
       reserve0: 40_000_000_000_000_000_000_000n,
       reserve1: 60_000_000_000_000_000_000_000n,
@@ -1398,6 +1400,7 @@ describe("Envio Celo indexer handlers", () => {
         logIndex: 11,
         srcAddress: POOL_ADDR,
         block: { number: 801, timestamp: 1_700_006_100 },
+        transaction: { hash: UPDATE_TX_HASH },
       },
     });
     mockDb = await FPMM.UpdateReserves.processEvent({
@@ -1413,6 +1416,22 @@ describe("Envio Celo indexer handlers", () => {
       CONTRACT_PRICE_DIFF,
       `expected contract priceDifference ${CONTRACT_PRICE_DIFF} bps, got ${pool.priceDifference}`,
     );
+
+    // OracleSnapshot must be written with the triggering tx hash
+    const snapshotId = `${42220}_${801}_${11}`;
+    const snapshot = mockDb.entities.OracleSnapshot.get(snapshotId) as
+      | OracleSnapshotEntity
+      | undefined;
+    assert.ok(
+      snapshot,
+      "UpdateReserves snapshot must be written when rebalancingState is available",
+    );
+    assert.equal(
+      snapshot!.txHash,
+      UPDATE_TX_HASH,
+      "UpdateReserves snapshot must carry the triggering tx hash",
+    );
+    assert.equal(snapshot!.source, "update_reserves");
   });
 
   // ---------------------------------------------------------------------------
@@ -1570,6 +1589,8 @@ describe("Envio Celo indexer handlers", () => {
       source: "fpmm_update_reserves",
     });
 
+    const REBALANCED_TX_HASH =
+      "0x000000000000000000000000000000000000000000000000000000000000b002";
     const rebalancedEvent = FPMM.Rebalanced.createMockEvent({
       sender: "0x0000000000000000000000000000000000000099",
       priceDifferenceBefore: 3333n,
@@ -1579,6 +1600,7 @@ describe("Envio Celo indexer handlers", () => {
         logIndex: 11,
         srcAddress: POOL_ADDR,
         block: { number: 901, timestamp: 1_700_007_100 },
+        transaction: { hash: REBALANCED_TX_HASH },
       },
     });
     mockDb = await FPMM.Rebalanced.processEvent({
@@ -1595,6 +1617,22 @@ describe("Envio Celo indexer handlers", () => {
       `expected event priceDifference ${EVENT_PRICE_DIFF} bps, got ${pool.priceDifference} (RPC was ${RPC_PRICE_DIFF})`,
     );
     assert.equal(pool.rebalanceCount, 1);
+
+    // OracleSnapshot must be written with the triggering tx hash
+    const snapshotId = `${42220}_${901}_${11}`;
+    const snapshot = mockDb.entities.OracleSnapshot.get(snapshotId) as
+      | OracleSnapshotEntity
+      | undefined;
+    assert.ok(
+      snapshot,
+      "Rebalanced snapshot must be written when rebalancingState is available",
+    );
+    assert.equal(
+      snapshot!.txHash,
+      REBALANCED_TX_HASH,
+      "Rebalanced snapshot must carry the triggering tx hash",
+    );
+    assert.equal(snapshot!.source, "rebalanced");
   });
 
   // ---------------------------------------------------------------------------

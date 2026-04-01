@@ -512,6 +512,14 @@ describe("Pool detail tab search", () => {
     );
   });
 
+  it("shows degraded search warning when count fails before first success", () => {
+    oracleCountError = true;
+    const html = renderWithParams({ tab: "oracle", oracleQ: "median" });
+    expect(html).toContain(
+      "Could not load total count — search covers the most recent 500 snapshots only.",
+    );
+  });
+
   it("caps oracle search fetch size and shows a warning for large result sets", () => {
     oracleCount = 5000;
     const html = renderWithParams({ tab: "oracle", oracleQ: "median" });
