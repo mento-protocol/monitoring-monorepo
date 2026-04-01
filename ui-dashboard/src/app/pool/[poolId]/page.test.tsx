@@ -244,7 +244,6 @@ const oracleRows: OracleSnapshot[] = [
     numReporters: 5,
     blockNumber: "5001",
     timestamp: "1700000600",
-    txHash: "0xabc123",
   },
 ];
 
