@@ -32,6 +32,7 @@ import {
 import { useGQL } from "@/lib/graphql";
 import {
   ORACLE_SNAPSHOTS,
+  ORACLE_SNAPSHOTS_COUNT,
   OLS_LIQUIDITY_EVENTS,
   OLS_POOL,
   POOL_DEPLOYMENT,
@@ -44,6 +45,7 @@ import {
   POOL_SWAPS,
   TRADING_LIMITS,
 } from "@/lib/queries";
+import { Pagination } from "@/components/pagination";
 import { computeHealthStatus, computeRebalancerLiveness } from "@/lib/health";
 import { isFpmm, poolName, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import {
@@ -381,7 +383,6 @@ function PoolDetail() {
         {tab === "oracle" && (
           <OracleTab
             poolId={normalizedPoolId}
-            limit={limit}
             pool={pool}
             search={activeSearch}
             onSearchChange={(value) => setTabSearch("oracle", value)}
@@ -1168,15 +1169,24 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
   );
 }
 
+// Column keys that can be sorted
+type OracleSortCol =
+  | "timestamp"
+  | "oracleOk"
+  | "oraclePrice"
+  | "priceDifference"
+  | "numReporters"
+  | "blockNumber";
+
+const ORACLE_PAGE_SIZE = 25;
+
 function OracleTab({
   poolId,
-  limit,
   pool,
   search,
   onSearchChange,
 }: {
   poolId: string;
-  limit: number;
   pool: Pool | null;
   search: string;
   onSearchChange: (value: string) => void;
@@ -1184,24 +1194,76 @@ function OracleTab({
   const { network } = useNetwork();
   const query = normalizeSearch(search);
 
+  const [page, setPage] = React.useState(1);
+  const [sortCol, setSortCol] = React.useState<OracleSortCol>("timestamp");
+  const [sortDir, setSortDir] = React.useState<"asc" | "desc">("desc");
+
+  // Reset to page 1 when search changes (derived from query length changes)
+  const prevQueryRef = React.useRef(query);
+  if (prevQueryRef.current !== query) {
+    prevQueryRef.current = query;
+    if (page !== 1) setPage(1);
+  }
+
+  const offset = (page - 1) * ORACLE_PAGE_SIZE;
+
   const { data, error, isLoading } = useGQL<{
     OracleSnapshot: OracleSnapshot[];
-  }>(ORACLE_SNAPSHOTS, { poolId, limit });
+  }>(ORACLE_SNAPSHOTS, { poolId, limit: ORACLE_PAGE_SIZE, offset });
+
+  const { data: countData } = useGQL<{
+    OracleSnapshot_aggregate: { aggregate: { count: number } };
+  }>(ORACLE_SNAPSHOTS_COUNT, { poolId });
+  const total = countData?.OracleSnapshot_aggregate?.aggregate?.count ?? 0;
+
   const rows = data?.OracleSnapshot ?? [];
 
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
-  // Reverse once to get newest-first order, then filter
-  const orderedRows = useMemo(() => [...rows].reverse(), [rows]);
+  // Client-side sort of the current page
+  const sortedRows = useMemo(() => {
+    if (!rows.length) return rows;
+    return [...rows].sort((a, b) => {
+      let av: number, bv: number;
+      switch (sortCol) {
+        case "timestamp":
+          av = Number(a.timestamp);
+          bv = Number(b.timestamp);
+          break;
+        case "oracleOk":
+          av = a.oracleOk ? 1 : 0;
+          bv = b.oracleOk ? 1 : 0;
+          break;
+        case "oraclePrice":
+          av = parseOraclePriceToNumber(a.oraclePrice, sym0);
+          bv = parseOraclePriceToNumber(b.oraclePrice, sym0);
+          break;
+        case "priceDifference":
+          av = Number(a.priceDifference);
+          bv = Number(b.priceDifference);
+          break;
+        case "numReporters":
+          av = a.numReporters;
+          bv = b.numReporters;
+          break;
+        case "blockNumber":
+          av = Number(a.blockNumber);
+          bv = Number(b.blockNumber);
+          break;
+        default:
+          return 0;
+      }
+      return sortDir === "asc" ? av - bv : bv - av;
+    });
+  }, [rows, sortCol, sortDir, sym0]);
 
   const filteredRows = useMemo(() => {
-    if (!query) return orderedRows;
-    return orderedRows.filter((r) => {
+    if (!query) return sortedRows;
+    return sortedRows.filter((r) => {
       const statusAliases = r.oracleOk
         ? "ok true healthy pass good ✓"
         : "fail false unhealthy bad ✗";
-
       return matchesRowSearch(query, [
         r.source,
         statusAliases,
@@ -1212,7 +1274,18 @@ function OracleTab({
         r.blockNumber,
       ]);
     });
-  }, [orderedRows, query, sym0]);
+  }, [sortedRows, query, sym0]);
+
+  function toggleSort(col: OracleSortCol) {
+    if (sortCol === col) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortCol(col);
+      // Sensible default directions per column
+      setSortDir(col === "oracleOk" ? "asc" : "desc");
+    }
+    setPage(1);
+  }
 
   if (pool?.source?.includes("virtual")) {
     return <EmptyBox message="VirtualPool — no oracle data available." />;
@@ -1220,16 +1293,26 @@ function OracleTab({
 
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
-  if (rows.length === 0)
+  if (rows.length === 0 && !isLoading)
     return (
       <EmptyBox message="No oracle snapshots yet. Oracle data is captured on pool activity (swaps, rebalances)." />
     );
 
+  const arrow = (col: OracleSortCol) =>
+    sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+
+  // Charts always use all fetched rows (current page) for context
+  const chartRows = sortedRows;
+
   return (
     <>
-      <OracleChart snapshots={rows} token0Symbol={sym0} token1Symbol={sym1} />
+      <OracleChart
+        snapshots={chartRows}
+        token0Symbol={sym0}
+        token1Symbol={sym1}
+      />
       <OraclePriceChart
-        snapshots={rows}
+        snapshots={chartRows}
         token0={pool?.token0 ?? null}
         token1={pool?.token1 ?? null}
       />
@@ -1242,58 +1325,108 @@ function OracleTab({
       {filteredRows.length === 0 ? (
         <EmptyBox message="No oracle snapshots match your search." />
       ) : (
-        <Table>
-          <thead>
-            <tr className="border-b border-slate-800 bg-slate-900/50">
-              <Th>Source</Th>
-              <Th align="right">Oracle OK</Th>
-              <Th align="right">
-                Price ({sym0}/{sym1})
-              </Th>
-              <Th align="right">Price Diff</Th>
-              <Th align="right">Threshold</Th>
-              <Th align="right">Reporters</Th>
-              <Th align="right">Block</Th>
-              <Th>Time</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredRows.map((r) => (
-              <Row key={r.id}>
-                <Td small>
-                  <span className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono">
-                    {r.source}
-                  </span>
-                </Td>
-                <Td small align="right">
-                  <span
-                    className={r.oracleOk ? "text-emerald-400" : "text-red-400"}
+        <>
+          <Table>
+            <thead>
+              <tr className="border-b border-slate-800 bg-slate-900/50">
+                <Th>Source</Th>
+                <Th align="right">
+                  <button
+                    onClick={() => toggleSort("oracleOk")}
+                    className="hover:text-indigo-400 transition-colors"
                   >
-                    {r.oracleOk ? "✓" : "✗"}
-                  </span>
-                </Td>
-                <Td mono small align="right">
-                  {parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6)}
-                </Td>
-                <Td mono small align="right">
-                  {Number(r.priceDifference) > 0 ? r.priceDifference : "—"}
-                </Td>
-                <Td mono small align="right">
-                  {r.rebalanceThreshold > 0 ? r.rebalanceThreshold : "—"}
-                </Td>
-                <Td mono small align="right">
-                  {r.numReporters}
-                </Td>
-                <Td mono small muted align="right">
-                  {formatBlock(r.blockNumber)}
-                </Td>
-                <Td small muted title={formatTimestamp(r.timestamp)}>
-                  {relativeTime(r.timestamp)}
-                </Td>
-              </Row>
-            ))}
-          </tbody>
-        </Table>
+                    Oracle OK{arrow("oracleOk")}
+                  </button>
+                </Th>
+                <Th align="right">
+                  <button
+                    onClick={() => toggleSort("oraclePrice")}
+                    className="hover:text-indigo-400 transition-colors"
+                  >
+                    Price ({sym0}/{sym1}){arrow("oraclePrice")}
+                  </button>
+                </Th>
+                <Th align="right">
+                  <button
+                    onClick={() => toggleSort("priceDifference")}
+                    className="hover:text-indigo-400 transition-colors"
+                  >
+                    Price Diff{arrow("priceDifference")}
+                  </button>
+                </Th>
+                <Th align="right">Threshold</Th>
+                <Th align="right">
+                  <button
+                    onClick={() => toggleSort("numReporters")}
+                    className="hover:text-indigo-400 transition-colors"
+                  >
+                    Reporters{arrow("numReporters")}
+                  </button>
+                </Th>
+                <Th align="right">
+                  <button
+                    onClick={() => toggleSort("blockNumber")}
+                    className="hover:text-indigo-400 transition-colors"
+                  >
+                    Block{arrow("blockNumber")}
+                  </button>
+                </Th>
+                <Th>
+                  <button
+                    onClick={() => toggleSort("timestamp")}
+                    className="hover:text-indigo-400 transition-colors"
+                  >
+                    Time{arrow("timestamp")}
+                  </button>
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRows.map((r) => (
+                <Row key={r.id}>
+                  <Td small>
+                    <span className="rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-300 font-mono">
+                      {r.source}
+                    </span>
+                  </Td>
+                  <Td small align="right">
+                    <span
+                      className={
+                        r.oracleOk ? "text-emerald-400" : "text-red-400"
+                      }
+                    >
+                      {r.oracleOk ? "✓" : "✗"}
+                    </span>
+                  </Td>
+                  <Td mono small align="right">
+                    {parseOraclePriceToNumber(r.oraclePrice, sym0).toFixed(6)}
+                  </Td>
+                  <Td mono small align="right">
+                    {Number(r.priceDifference) > 0 ? r.priceDifference : "—"}
+                  </Td>
+                  <Td mono small align="right">
+                    {r.rebalanceThreshold > 0 ? r.rebalanceThreshold : "—"}
+                  </Td>
+                  <Td mono small align="right">
+                    {r.numReporters}
+                  </Td>
+                  <Td mono small muted align="right">
+                    {formatBlock(r.blockNumber)}
+                  </Td>
+                  <Td small muted title={formatTimestamp(r.timestamp)}>
+                    {relativeTime(r.timestamp)}
+                  </Td>
+                </Row>
+              ))}
+            </tbody>
+          </Table>
+          <Pagination
+            page={page}
+            pageSize={ORACLE_PAGE_SIZE}
+            total={total}
+            onPageChange={setPage}
+          />
+        </>
       )}
     </>
   );
