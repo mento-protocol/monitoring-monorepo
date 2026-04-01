@@ -533,6 +533,28 @@ describe("Pool detail tab search", () => {
     );
   });
 
+  it("oracle search always uses timestamp desc order regardless of active table sort", () => {
+    // With a non-default sort active, a search must still fetch the most recent
+    // window (timestamp desc) so the "most recent N" warning text is accurate.
+    // We test this by rendering with oracleQ already set AND checking what
+    // orderBy was passed to ORACLE_SNAPSHOTS when search is active.
+    const html = renderWithParams({ tab: "oracle", oracleQ: "median" });
+    expect(html).toContain("median-feed"); // search found a result
+
+    // All ORACLE_SNAPSHOTS calls while searching must use timestamp desc
+    const oracleCalls = useGQLMock.mock.calls.filter(
+      (call) => call[0] === ORACLE_SNAPSHOTS,
+    );
+    expect(oracleCalls.length).toBeGreaterThan(0);
+    for (const [, vars] of oracleCalls) {
+      const orderJson = JSON.stringify(vars?.orderBy ?? []);
+      expect(orderJson).toContain("timestamp");
+      expect(orderJson).not.toContain("priceDifference");
+      expect(orderJson).not.toContain("oracleOk");
+      expect(orderJson).not.toContain("oraclePrice");
+    }
+  });
+
   it("preserves newer url params when a debounced search commit fires later", () => {
     const container = renderInteractive();
     const input = container.querySelector(
