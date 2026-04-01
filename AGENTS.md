@@ -8,6 +8,26 @@ pnpm monorepo with three packages:
 - `indexer-envio/` — Envio HyperIndex indexer for Celo v3 FPMM pools
 - `ui-dashboard/` — Next.js 16 + Plotly.js monitoring dashboard
 
+## Operating Rule (read this before opening PRs)
+
+> **Any PR that adds or changes stateful data flow across layers must ship with explicit invariants, degraded-mode behavior, and interaction tests before opening.**
+
+This repo has already paid the tax for learning this the hard way.
+
+If your change touches any combination of:
+
+- Envio schema/entities
+- event handlers / entity writers
+- generated types / GraphQL queries / dashboard types
+- paginated or sortable UI state
+- partial failure behavior (missing counts, stale RPC, missing txHash, etc.)
+
+then you are expected to run the dedicated PR checklist before opening or updating the PR:
+
+- **Checklist:** `docs/pr-checklists/stateful-data-ui.md`
+
+Do not rely on PR review to finish the design. Reviews should catch misses, not define the invariants for the first time.
+
 ## Quick Commands
 
 ```bash
@@ -164,6 +184,10 @@ pnpm --filter @mento-protocol/indexer-envio test
 pnpm indexer:codegen   # Validates Envio can parse handler entry point + module imports
 pnpm --filter @mento-protocol/ui-dashboard test:coverage
 ```
+
+Before pushing any cross-layer or stateful UI change, also read and apply:
+
+- **`docs/pr-checklists/stateful-data-ui.md`**
 
 **Common traps:**
 
