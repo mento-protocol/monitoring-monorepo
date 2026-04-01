@@ -4,6 +4,14 @@
 
 Next.js 16 monitoring dashboard for Mento v3 pools. Displays real-time pool data (reserves, swaps, mints, burns) using Plotly.js charts, sourced from Hasura GraphQL.
 
+## Before Opening PRs
+
+If your dashboard change touches stateful data flow — pagination, sort, search, charts tied to table state, GraphQL shape changes, degraded/error behavior, or any indexer→query→UI field path — read and apply:
+
+- `../docs/pr-checklists/stateful-data-ui.md`
+
+This is mandatory for cross-layer/stateful UI work. The checklist exists because this repo repeatedly burned review cycles on exactly these failure modes.
+
 ## Key Files
 
 - `src/app/` — Next.js App Router pages and layouts

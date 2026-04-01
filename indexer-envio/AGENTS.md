@@ -4,6 +4,14 @@
 
 Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain).
 
+## Before Opening PRs
+
+If your indexer change propagates into Hasura/UI behavior — schema changes, entity additions, new fields on existing entities, degraded RPC/error handling, or any stateful dashboard behavior fed by indexer data — read and apply:
+
+- `../docs/pr-checklists/stateful-data-ui.md`
+
+This is mandatory for cross-layer/stateful data work. Do not assume the UI/query layer will “just catch up” later.
+
 ## Key Files
 
 - `config.multichain.mainnet.yaml` — **Default** mainnet config (Celo + Monad)
