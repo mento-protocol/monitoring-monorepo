@@ -1169,7 +1169,7 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
   );
 }
 
-// Column keys that can be sorted
+// Server-sortable columns (mapped to Hasura order_by fields)
 type OracleSortCol =
   | "timestamp"
   | "oracleOk"
@@ -1179,6 +1179,16 @@ type OracleSortCol =
   | "blockNumber";
 
 const ORACLE_PAGE_SIZE = 25;
+// When search is active, fetch up to this many rows so filtering is global
+const ORACLE_SEARCH_LIMIT = 500;
+
+/** Map UI column key → Hasura order_by object */
+function buildOrderBy(
+  col: OracleSortCol,
+  dir: "asc" | "desc",
+): Record<string, string> {
+  return { [col]: dir };
+}
 
 function OracleTab({
   poolId,
@@ -1198,20 +1208,32 @@ function OracleTab({
   const [sortCol, setSortCol] = React.useState<OracleSortCol>("timestamp");
   const [sortDir, setSortDir] = React.useState<"asc" | "desc">("desc");
 
-  // Reset to page 1 when search changes (derived from query length changes)
-  const prevQueryRef = React.useRef(query);
-  if (prevQueryRef.current !== query) {
-    prevQueryRef.current = query;
-    if (page !== 1) setPage(1);
-  }
+  // Wrap search handler so changing the query always resets to page 1
+  const handleSearchChange = React.useCallback(
+    (value: string) => {
+      onSearchChange(value);
+      setPage(1);
+    },
+    [onSearchChange],
+  );
 
-  const offset = (page - 1) * ORACLE_PAGE_SIZE;
+  // When search is active: fetch a large window at offset 0 so filtering is
+  // global, not limited to the current page. Pagination is suppressed.
+  const isSearching = query.length > 0;
+  const fetchLimit = isSearching ? ORACLE_SEARCH_LIMIT : ORACLE_PAGE_SIZE;
+  const fetchOffset = isSearching ? 0 : (page - 1) * ORACLE_PAGE_SIZE;
+  const orderBy = buildOrderBy(sortCol, sortDir);
 
   const { data, error, isLoading } = useGQL<{
     OracleSnapshot: OracleSnapshot[];
-  }>(ORACLE_SNAPSHOTS, { poolId, limit: ORACLE_PAGE_SIZE, offset });
+  }>(ORACLE_SNAPSHOTS, {
+    poolId,
+    limit: fetchLimit,
+    offset: fetchOffset,
+    orderBy,
+  });
 
-  const { data: countData } = useGQL<{
+  const { data: countData, error: countError } = useGQL<{
     OracleSnapshot_aggregate: { aggregate: { count: number } };
   }>(ORACLE_SNAPSHOTS_COUNT, { poolId });
   const total = countData?.OracleSnapshot_aggregate?.aggregate?.count ?? 0;
@@ -1221,46 +1243,15 @@ function OracleTab({
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
-  // Client-side sort of the current page
-  const sortedRows = useMemo(() => {
-    if (!rows.length) return rows;
-    return [...rows].sort((a, b) => {
-      let av: number, bv: number;
-      switch (sortCol) {
-        case "timestamp":
-          av = Number(a.timestamp);
-          bv = Number(b.timestamp);
-          break;
-        case "oracleOk":
-          av = a.oracleOk ? 1 : 0;
-          bv = b.oracleOk ? 1 : 0;
-          break;
-        case "oraclePrice":
-          av = parseOraclePriceToNumber(a.oraclePrice, sym0);
-          bv = parseOraclePriceToNumber(b.oraclePrice, sym0);
-          break;
-        case "priceDifference":
-          av = Number(a.priceDifference);
-          bv = Number(b.priceDifference);
-          break;
-        case "numReporters":
-          av = a.numReporters;
-          bv = b.numReporters;
-          break;
-        case "blockNumber":
-          av = Number(a.blockNumber);
-          bv = Number(b.blockNumber);
-          break;
-        default:
-          return 0;
-      }
-      return sortDir === "asc" ? av - bv : bv - av;
-    });
-  }, [rows, sortCol, sortDir, sym0]);
+  // Charts always get timestamp-ascending data regardless of table sort
+  const chartRows = useMemo(
+    () => [...rows].sort((a, b) => Number(a.timestamp) - Number(b.timestamp)),
+    [rows],
+  );
 
   const filteredRows = useMemo(() => {
-    if (!query) return sortedRows;
-    return sortedRows.filter((r) => {
+    if (!query) return rows;
+    return rows.filter((r) => {
       const statusAliases = r.oracleOk
         ? "ok true healthy pass good ✓"
         : "fail false unhealthy bad ✗";
@@ -1274,14 +1265,13 @@ function OracleTab({
         r.blockNumber,
       ]);
     });
-  }, [sortedRows, query, sym0]);
+  }, [rows, query, sym0]);
 
   function toggleSort(col: OracleSortCol) {
     if (sortCol === col) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortCol(col);
-      // Sensible default directions per column
       setSortDir(col === "oracleOk" ? "asc" : "desc");
     }
     setPage(1);
@@ -1301,9 +1291,6 @@ function OracleTab({
   const arrow = (col: OracleSortCol) =>
     sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
-  // Charts always use all fetched rows (current page) for context
-  const chartRows = sortedRows;
-
   return (
     <>
       <OracleChart
@@ -1318,7 +1305,7 @@ function OracleTab({
       />
       <TableSearch
         value={search}
-        onChange={onSearchChange}
+        onChange={handleSearchChange}
         placeholder="Search oracle rows by source, status, price, or block…"
         ariaLabel="Search oracle"
       />
@@ -1420,12 +1407,19 @@ function OracleTab({
               ))}
             </tbody>
           </Table>
-          <Pagination
-            page={page}
-            pageSize={ORACLE_PAGE_SIZE}
-            total={total}
-            onPageChange={setPage}
-          />
+          {!isSearching && (
+            <Pagination
+              page={page}
+              pageSize={ORACLE_PAGE_SIZE}
+              total={countError ? rows.length : total}
+              onPageChange={setPage}
+            />
+          )}
+          {countError && !isSearching && (
+            <p className="px-1 pt-1 text-xs text-amber-400">
+              Could not load total count — pagination may be incomplete.
+            </p>
+          )}
         </>
       )}
     </>
