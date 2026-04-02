@@ -271,3 +271,47 @@ Extend existing Discord alert infra:
 
 1. **Newly deployed pool with zero oracle history** — N/A until first oracle event. ✅ Confirmed 2026-04-01.
 2. **Alerting thresholds** — hardcoded (95%) or configurable? → Stretch goal, decide when we get there.
+
+---
+
+## Plan Evaluation Against AGENTS.md Checklist (2026-04-02)
+
+### Gaps identified and resolved:
+
+**1. Old row backward compatibility**
+- ~750k existing OracleSnapshot rows will be written with `deviationRatio = "0.0"` as Envio default on resync
+- `d = 0.0` would be treated as healthy (d ≤ 1.0) — that's misleading
+- **Decision:** Use `"-1"` as a sentinel for "no data" on old rows. UI computation filters out snapshots with `deviationRatio = "-1"`. Health score only covers spans where real data exists.
+- In practice this means the all-time score starts accumulating from today's resync, not from pre-PR history.
+
+**2. FPMM handlers also write OracleSnapshots**
+- `UpdateReserves` and `Rebalanced` in `fpmm.ts` both create OracleSnapshot records
+- These must also compute and write `deviationRatio` and `healthContribution`
+- Pool accumulator update logic must also be invoked from these paths
+- Added to Phase 2 scope explicitly.
+
+**3. Degraded mode for health score panel**
+- No oracle history → N/A badge (not zero, not 100%)
+- Query failure → error state with message
+- Pool accumulators are zero → N/A
+- `deviationRatio = "-1"` snapshots → excluded from computation
+
+**4. Deviation chart decoupled from computation**
+- Chart uses the same snapshot query already fetched for 30d window
+- No separate query. Chart is a visualization of `deviationRatio` over time from the same data slice.
+
+**5. Pool list 24h score — avoid N per-pool queries**
+- Fetching 24h snapshots for each of 30+ pools is expensive
+- **Decision:** Add `healthScore24h: String!` and `healthScore7d: String!` pre-computed fields to Pool entity
+- Updated in the handler on each oracle event (same place as accumulator update)
+- Pool list reads these fields directly — no rolling window query needed at list level
+- Pool detail still does the full rolling window computation (better precision, chart support)
+
+### Invariants (explicit before coding)
+1. `deviationRatio = "-1"` is the sentinel for "no data"; all computation code must filter these out
+2. Pool `healthScore24h`/`healthScore7d` are best-effort rolling estimates updated at each oracle event
+3. All-time score is computed from `healthBinarySeconds / healthTotalSeconds`; zero means N/A
+4. Gaps ≤ 300s → carry last state; gaps > 300s → unhealthy for the stale portion
+5. VirtualPools never receive health fields — they have no oracle data
+6. Charts must not depend on paginated table state (use the standalone 30d window query)
+7. Health computation is pure (no side effects); test independently of rendering
