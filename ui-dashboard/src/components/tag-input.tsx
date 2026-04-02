@@ -116,6 +116,10 @@ export function TagInput({
             setHighlightIndex(-1);
           }}
           onFocus={() => setShowDropdown(true)}
+          onBlur={() => {
+            // Delay so onMouseDown on suggestions fires before dropdown hides
+            setTimeout(() => setShowDropdown(false), 150);
+          }}
           onKeyDown={handleKeyDown}
           placeholder={tags.length === 0 ? "Add tags…" : ""}
           aria-label={ariaLabelledBy ? undefined : "Add tag"}

@@ -45,7 +45,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const text = await req.text();
     // Post-read size check for requests without Content-Length header
-    if (text.length > 2 * 1024 * 1024) {
+    if (Buffer.byteLength(text, "utf8") > 2 * 1024 * 1024) {
       return NextResponse.json(
         { error: "Request body too large (max 2MB)" },
         { status: 413 },
@@ -304,7 +304,7 @@ async function handleCsvImport(req: NextRequest): Promise<NextResponse> {
     );
   }
   // Post-read size check for requests without Content-Length header
-  if (text.length > 2 * 1024 * 1024) {
+  if (Buffer.byteLength(text, "utf8") > 2 * 1024 * 1024) {
     return NextResponse.json(
       { error: "Request body too large (max 2MB)" },
       { status: 413 },
