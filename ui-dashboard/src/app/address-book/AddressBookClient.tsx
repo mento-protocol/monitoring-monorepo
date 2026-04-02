@@ -171,7 +171,9 @@ export default function AddressBookPage({
       try {
         parsed = JSON.parse(await file.text());
       } catch {
-        setImportError("Invalid file. Expected JSON or CSV (address,name).");
+        setImportError(
+          "Invalid file. Expected JSON or CSV (address,name,tags).",
+        );
         return;
       }
 

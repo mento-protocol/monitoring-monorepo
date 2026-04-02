@@ -45,7 +45,9 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
   if (typeof entry.name === "string") {
     return {
       name: entry.name,
-      tags: Array.isArray(entry.tags) ? entry.tags : [],
+      tags: Array.isArray(entry.tags)
+        ? entry.tags.filter((t): t is string => typeof t === "string")
+        : [],
       notes: typeof entry.notes === "string" ? entry.notes : undefined,
       isPublic: entry.isPublic === true ? true : undefined,
       updatedAt:
