@@ -269,8 +269,53 @@ describe("recordHealthSample", () => {
     assert.equal(poolUpdate.healthBinarySeconds, 100n);
     // Timestamp advances to prevent next valid sample from accumulating gap
     assert.equal(poolUpdate.lastOracleSnapshotTimestamp, 1200n);
-    assert.equal(poolUpdate.lastDeviationRatio, "0.500000");
+    // lastDeviationRatio set to sentinel so next valid sample skips gap
+    assert.equal(poolUpdate.lastDeviationRatio, "-1");
     assert.isTrue(poolUpdate.hasHealthData); // preserves existing state
+  });
+
+  it("valid -> no-data -> valid: excludes no-data gap from both numerator and denominator", () => {
+    // Step 1: healthy pool at t=1000
+    const pool1 = makePool({
+      lastOracleSnapshotTimestamp: 1000n,
+      lastDeviationRatio: "0.500000",
+      healthTotalSeconds: 100n,
+      healthBinarySeconds: 100n,
+      hasHealthData: true,
+      oracleExpiry: 300n,
+    });
+
+    // Step 2: no-data event at t=1200 (rebalanceThreshold=0)
+    const { poolUpdate: afterNoData } = recordHealthSample(
+      pool1,
+      5000n,
+      0, // no valid data
+      1200n,
+    );
+
+    // Accumulators unchanged, but timestamp advanced and ratio is sentinel
+    assert.equal(afterNoData.healthTotalSeconds, 100n);
+    assert.equal(afterNoData.healthBinarySeconds, 100n);
+    assert.equal(afterNoData.lastOracleSnapshotTimestamp, 1200n);
+    assert.equal(afterNoData.lastDeviationRatio, "-1");
+
+    // Step 3: valid healthy event at t=1500 — the 300s gap should be excluded
+    const pool2 = makePool({
+      ...afterNoData,
+      oracleExpiry: 300n,
+    });
+    const { poolUpdate: afterValid } = recordHealthSample(
+      pool2,
+      2500n, // healthy (d=0.5)
+      5000, // rebalanceThreshold=5000
+      1500n,
+    );
+
+    // The 300s gap (1200→1500) should NOT be added to totalSeconds
+    assert.equal(afterValid.healthTotalSeconds, 100n);
+    assert.equal(afterValid.healthBinarySeconds, 100n);
+    assert.equal(afterValid.lastOracleSnapshotTimestamp, 1500n);
+    assert.equal(afterValid.lastDeviationRatio, "0.500000");
   });
 
   it("combines snapshot fields and pool update", () => {
