@@ -1,13 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import type { Pool } from "@/lib/types";
+import { useMemo, useState } from "react";
+import type { OracleSnapshot, Pool } from "@/lib/types";
 import { HealthBadge } from "@/components/badges";
 import {
   computeHealthStatus,
   getOracleStalenessThreshold,
   isOracleFresh,
 } from "@/lib/health";
+import {
+  computeBinaryHealthWindow,
+  formatBinaryHealthPct,
+  formatNines,
+} from "@/lib/pool-health-score";
 import { isWeekend } from "@/lib/weekend";
 import {
   tokenSymbol,
@@ -16,6 +21,11 @@ import {
   USDM_SYMBOLS,
 } from "@/lib/tokens";
 import { relativeTime, formatTimestamp } from "@/lib/format";
+import { useGQL } from "@/lib/graphql";
+import {
+  ORACLE_SNAPSHOT_PREDECESSOR,
+  ORACLE_SNAPSHOTS_WINDOW,
+} from "@/lib/queries";
 import { useNetwork } from "@/components/network-provider";
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
 import type { RebalanceCheckResult } from "@/lib/rebalance-check";
@@ -113,6 +123,59 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   const chainlinkUrl =
     chainlinkFeedUrl(sym1, network.chainId) ??
     chainlinkFeedUrl(sym0, network.chainId);
+
+  const windowEnd = Math.floor(Date.now() / 1000);
+  const windowStart = windowEnd - 24 * 3600;
+
+  const { data: healthWindowData } = useGQL<{
+    OracleSnapshot: OracleSnapshot[];
+  }>(
+    ORACLE_SNAPSHOTS_WINDOW,
+    {
+      poolId: pool.id,
+      from: String(windowStart),
+      to: String(windowEnd),
+      limit: 1000,
+    },
+    60_000,
+  );
+  const { data: predecessorData } = useGQL<{
+    OracleSnapshot: OracleSnapshot[];
+  }>(
+    ORACLE_SNAPSHOT_PREDECESSOR,
+    {
+      poolId: pool.id,
+      before: String(windowStart),
+    },
+    60_000,
+  );
+
+  const windowSnapshots = healthWindowData?.OracleSnapshot ?? [];
+  const predecessor = predecessorData?.OracleSnapshot?.[0];
+  const healthSnapshots = useMemo(() => {
+    const out = predecessor
+      ? [predecessor, ...windowSnapshots]
+      : windowSnapshots;
+    return out.sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+  }, [predecessor, windowSnapshots]);
+
+  const health24h = useMemo(
+    () =>
+      computeBinaryHealthWindow(
+        healthSnapshots,
+        pool,
+        network.chainId,
+        windowStart,
+        windowEnd,
+      ),
+    [healthSnapshots, network.chainId, pool, windowEnd, windowStart],
+  );
+
+  const allTimeScore =
+    Number(pool.healthTotalSeconds ?? "0") > 0
+      ? Number(pool.healthBinarySeconds ?? "0") /
+        Number(pool.healthTotalSeconds ?? "1")
+      : null;
 
   const {
     data: rebalanceCheck,
@@ -256,6 +319,46 @@ export function HealthPanel({ pool }: HealthPanelProps) {
                   priceDifference={pool.priceDifference ?? "0"}
                   rebalanceThreshold={pool.rebalanceThreshold ?? 0}
                 />
+              </dd>
+            </div>
+
+            {/* 24h health score */}
+            <div>
+              <dt className="text-slate-400 mb-1">24h Health Score</dt>
+              <dd className="text-white">
+                {health24h.score == null ? (
+                  <span className="text-slate-500">N/A</span>
+                ) : (
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-medium text-white">
+                      {formatBinaryHealthPct(health24h.score)}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      {health24h.hasEnoughDataForNines
+                        ? formatNines(health24h.score)
+                        : `${health24h.observedHours.toFixed(1)}h observed`}
+                    </span>
+                  </div>
+                )}
+              </dd>
+            </div>
+
+            {/* All-time health score */}
+            <div>
+              <dt className="text-slate-400 mb-1">All-time Health</dt>
+              <dd className="text-white">
+                {allTimeScore == null ? (
+                  <span className="text-slate-500">N/A</span>
+                ) : (
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-medium text-white">
+                      {formatBinaryHealthPct(allTimeScore)}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      {formatNines(allTimeScore)}
+                    </span>
+                  </div>
+                )}
               </dd>
             </div>
 

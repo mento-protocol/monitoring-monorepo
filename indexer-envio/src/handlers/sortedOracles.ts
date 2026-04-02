@@ -6,6 +6,7 @@ import { SortedOracles, type Pool, type OracleSnapshot } from "generated";
 import { eventId, asAddress, asBigInt } from "../helpers";
 import { computePriceDifference } from "../priceDifference";
 import { computeHealthStatus } from "../pool";
+import { recordHealthSample } from "../healthScore";
 import {
   fetchReportExpiry,
   getPoolsByFeed,
@@ -63,6 +64,18 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
     const finalPool = { ...withDev, healthStatus };
     context.Pool.set(finalPool);
 
+    // Health score: compute snapshot fields + update pool accumulators
+    const { snapshotFields, poolUpdate } = recordHealthSample(
+      finalPool,
+      priceDifference,
+      existing.rebalanceThreshold,
+      blockTimestamp,
+    );
+    context.Pool.set({
+      ...finalPool,
+      ...poolUpdate,
+    });
+
     const snapshot: OracleSnapshot = {
       id:
         eventId(event.chainId, event.block.number, event.logIndex) +
@@ -78,6 +91,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       source: "oracle_reported",
       blockNumber,
       txHash: event.transaction.hash,
+      ...snapshotFields,
     };
     context.OracleSnapshot.set(snapshot);
   }
@@ -125,7 +139,18 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
     const withDev = { ...updatedPool, priceDifference };
     const healthStatus = computeHealthStatus(withDev);
     const finalPool = { ...withDev, healthStatus };
-    context.Pool.set(finalPool);
+
+    // Health score: compute snapshot fields + update pool accumulators
+    const { snapshotFields, poolUpdate } = recordHealthSample(
+      finalPool,
+      priceDifference,
+      existing.rebalanceThreshold,
+      blockTimestamp,
+    );
+    context.Pool.set({
+      ...finalPool,
+      ...poolUpdate,
+    });
 
     const snapshot: OracleSnapshot = {
       id:
@@ -142,6 +167,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       source: "oracle_median_updated",
       blockNumber,
       txHash: event.transaction.hash,
+      ...snapshotFields,
     };
     context.OracleSnapshot.set(snapshot);
   }

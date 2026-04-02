@@ -43,6 +43,11 @@ export type Pool = {
   notionalVolume1?: string;
   reserves0?: string;
   reserves1?: string;
+  healthTotalSeconds?: string;
+  healthBinarySeconds?: string;
+  lastOracleSnapshotTimestamp?: string;
+  lastDeviationRatio?: string;
+  hasHealthData?: boolean;
 };
 
 export type OracleSnapshot = {
@@ -58,6 +63,9 @@ export type OracleSnapshot = {
   source: string;
   blockNumber: string;
   txHash: string;
+  deviationRatio?: string;
+  healthBinaryValue?: string;
+  hasHealthData?: boolean;
 };
 
 export type SwapEvent = {

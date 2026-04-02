@@ -35,6 +35,12 @@ type Pool {
   # Health
   healthStatus: String!
 
+  # Health score accumulators (FPMM pools only)
+  healthTotalSeconds: BigInt! # total tracked seconds with oracle coverage
+  healthBinarySeconds: BigInt! # seconds where deviationRatio ≤ 1.0
+  lastOracleSnapshotTimestamp: BigInt! # timestamp of most recent oracle snapshot
+  lastDeviationRatio: String! # deviationRatio at most recent snapshot
+  hasHealthData: Boolean! # true once first health snapshot recorded
   # Trading limits (FPMM pools only; defaults to "N/A" for VirtualPools)
   limitStatus: String! # "OK" | "WARN" | "CRITICAL" | "N/A"
   limitPressure0: String! # e.g. "0.1230"
@@ -61,6 +67,9 @@ type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {
   source: String!
   blockNumber: BigInt!
   txHash: String!
+  deviationRatio: String! # priceDifference / rebalanceThreshold, 6dp fixed
+  healthBinaryValue: String! # "1.000000" if d ≤ 1.0, "0.000000" otherwise
+  hasHealthData: Boolean! # false for legacy/no-data rows
 }
 
 type PoolSnapshot @index(fields: ["poolId", "timestamp"]) {
