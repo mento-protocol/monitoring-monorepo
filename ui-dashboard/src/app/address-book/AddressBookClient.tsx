@@ -88,7 +88,7 @@ export default function AddressBookPage({
         if (!search) return true;
         const q = search.toLowerCase();
         return (
-          row.address.includes(q) ||
+          row.address.toLowerCase().includes(q) ||
           row.label.toLowerCase().includes(q) ||
           (row.network?.label.toLowerCase().includes(q) ?? false)
         );
