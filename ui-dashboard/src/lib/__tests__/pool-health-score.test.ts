@@ -98,6 +98,25 @@ describe("computeBinaryHealthWindow", () => {
     expect(result.healthySeconds).toBe(300);
     expect(result.score).toBe(0.5);
   });
+
+  it("excludes hasHealthData=false snapshots from tracked time", () => {
+    const noDataSnap: OracleSnapshot = {
+      ...snap(0, "0.000000", "1.000000"),
+      hasHealthData: false,
+    };
+    const result = computeBinaryHealthWindow(
+      [noDataSnap, snap(300, "0.500000", "1.000000")],
+      pool,
+      42220,
+      0,
+      600,
+    );
+    // First segment (0..300) should be skipped entirely (no-data)
+    // Second segment (300..600) = 300s, carry 300s healthy
+    expect(result.trackedSeconds).toBe(300);
+    expect(result.healthySeconds).toBe(300);
+    expect(result.score).toBe(1.0);
+  });
 });
 
 describe("format helpers", () => {

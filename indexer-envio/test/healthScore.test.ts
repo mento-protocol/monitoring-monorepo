@@ -245,6 +245,33 @@ describe("updateHealthAccumulators", () => {
 // ---------------------------------------------------------------------------
 
 describe("recordHealthSample", () => {
+  it("skips accumulator update when hasHealthData is false (rebalanceThreshold=0)", () => {
+    const pool = makePool({
+      lastOracleSnapshotTimestamp: 1000n,
+      lastDeviationRatio: "0.500000",
+      healthTotalSeconds: 100n,
+      healthBinarySeconds: 100n,
+      hasHealthData: true,
+      oracleExpiry: 300n,
+    });
+
+    const { snapshotFields, poolUpdate } = recordHealthSample(
+      pool,
+      5000n, // priceDifference
+      0, // rebalanceThreshold = 0 → no valid data
+      1200n, // blockTimestamp
+    );
+
+    // Snapshot should be flagged as no-data
+    assert.isFalse(snapshotFields.hasHealthData);
+    // Pool accumulators should NOT be modified
+    assert.equal(poolUpdate.healthTotalSeconds, 100n);
+    assert.equal(poolUpdate.healthBinarySeconds, 100n);
+    assert.equal(poolUpdate.lastOracleSnapshotTimestamp, 1000n);
+    assert.equal(poolUpdate.lastDeviationRatio, "0.500000");
+    assert.isTrue(poolUpdate.hasHealthData); // preserves existing state
+  });
+
   it("combines snapshot fields and pool update", () => {
     const pool = makePool({
       lastOracleSnapshotTimestamp: 1000n,

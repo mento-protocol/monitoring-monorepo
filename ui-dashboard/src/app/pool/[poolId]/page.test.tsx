@@ -359,6 +359,7 @@ describe("pool detail helpers", () => {
     expect(parseTabLimit("-5")).toBe(25);
     expect(parseTabLimit("NaN")).toBe(25);
     expect(parseTabLimit("50")).toBe(50);
+    expect(parseTabLimit("9999")).toBe(200); // capped at MAX_TAB_LIMIT
   });
 });
 
