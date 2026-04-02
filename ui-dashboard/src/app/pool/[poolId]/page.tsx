@@ -916,14 +916,14 @@ function RebalancesTab({
                 scope="col"
                 className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400"
               >
-                Tags
+                Strat. Tags
               </th>
               <Th>Rebalancer</Th>
               <th
                 scope="col"
                 className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400"
               >
-                Tags
+                Caller Tags
               </th>
               <Th align="right">Before (bps)</Th>
               <Th align="right">After (bps)</Th>
