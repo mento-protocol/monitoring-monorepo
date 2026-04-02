@@ -104,7 +104,7 @@ export default function AddressBookPage({
         if (!search) return true;
         const q = search.toLowerCase();
         return (
-          row.address.includes(q) ||
+          row.address.toLowerCase().includes(q) ||
           row.name.toLowerCase().includes(q) ||
           (row.network?.label.toLowerCase().includes(q) ?? false) ||
           row.tags.some((t) => t.toLowerCase().includes(q))
