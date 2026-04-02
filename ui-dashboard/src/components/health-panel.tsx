@@ -127,10 +127,12 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   const windowEnd = Math.floor(Date.now() / 1000);
   const windowStart = windowEnd - 24 * 3600;
 
-  const { data: healthWindowData } = useGQL<{
+  const shouldFetchHealth = !pool.source?.includes("virtual");
+
+  const { data: healthWindowData, error: healthWindowError } = useGQL<{
     OracleSnapshot: OracleSnapshot[];
   }>(
-    ORACLE_SNAPSHOTS_WINDOW,
+    shouldFetchHealth ? ORACLE_SNAPSHOTS_WINDOW : null,
     {
       poolId: pool.id,
       from: String(windowStart),
@@ -139,10 +141,10 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     },
     60_000,
   );
-  const { data: predecessorData } = useGQL<{
+  const { data: predecessorData, error: predecessorError } = useGQL<{
     OracleSnapshot: OracleSnapshot[];
   }>(
-    ORACLE_SNAPSHOT_PREDECESSOR,
+    shouldFetchHealth ? ORACLE_SNAPSHOT_PREDECESSOR : null,
     {
       poolId: pool.id,
       before: String(windowStart),
@@ -172,10 +174,12 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   );
 
   const allTimeScore =
-    Number(pool.healthTotalSeconds ?? "0") > 0
+    pool.hasHealthData === true && Number(pool.healthTotalSeconds ?? "0") > 0
       ? Number(pool.healthBinarySeconds ?? "0") /
         Number(pool.healthTotalSeconds ?? "1")
       : null;
+
+  const healthQueryError = healthWindowError || predecessorError;
 
   const {
     data: rebalanceCheck,
@@ -326,7 +330,9 @@ export function HealthPanel({ pool }: HealthPanelProps) {
             <div>
               <dt className="text-slate-400 mb-1">24h Health Score</dt>
               <dd className="text-white">
-                {health24h.score == null ? (
+                {healthQueryError ? (
+                  <span className="text-amber-400 text-xs">Query failed</span>
+                ) : health24h.score == null ? (
                   <span className="text-slate-500">N/A</span>
                 ) : (
                   <div className="flex flex-col gap-0.5">

@@ -85,7 +85,7 @@ export const DEFAULT_ORACLE_FIELDS = {
   healthTotalSeconds: 0n,
   healthBinarySeconds: 0n,
   lastOracleSnapshotTimestamp: 0n,
-  lastDeviationRatio: "0.000000",
+  lastDeviationRatio: "-1",
   hasHealthData: false,
 };
 

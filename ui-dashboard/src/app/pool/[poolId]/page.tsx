@@ -1498,7 +1498,7 @@ function OracleTab({
               onPageChange={setPage}
             />
           )}
-          {isSearchCapped && (
+          {!countError && isSearchCapped && (
             <p className="px-1 pt-1 text-xs text-amber-400">
               Search is limited to the most recent{" "}
               {ORACLE_SEARCH_MAX_LIMIT.toLocaleString()} snapshots.
