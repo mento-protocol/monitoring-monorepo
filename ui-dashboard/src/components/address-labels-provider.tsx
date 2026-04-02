@@ -15,7 +15,7 @@ import {
   type AddressEntry,
   type AddressEntryRecord,
   type AddressLabelRecord,
-} from "@/lib/address-labels";
+} from "@/lib/address-labels-shared";
 
 // ---------------------------------------------------------------------------
 // Context shape
