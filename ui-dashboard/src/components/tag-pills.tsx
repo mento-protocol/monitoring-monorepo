@@ -50,24 +50,26 @@ export function TagPills({ tags, maxHeight = 48 }: TagPillsProps) {
   const tooltipText = tags.join(", ");
 
   return (
-    <div
-      ref={containerRef}
-      className="flex flex-wrap gap-1 overflow-hidden relative"
-      style={{ maxHeight }}
-      title={hiddenCount > 0 ? tooltipText : undefined}
-    >
-      {tags.map((tag) => (
-        <span
-          key={tag}
-          className="inline-flex items-center rounded-full bg-slate-700 px-2 py-0.5 text-[10px] font-medium text-slate-300 whitespace-nowrap"
-        >
-          {tag}
-        </span>
-      ))}
+    <div className="flex flex-wrap items-start gap-1" title={tooltipText}>
+      <div
+        ref={containerRef}
+        className="flex flex-wrap gap-1 overflow-hidden"
+        style={{ maxHeight }}
+      >
+        {tags.map((tag) => (
+          <span
+            key={tag}
+            className="inline-flex items-center rounded-full bg-slate-700 px-2 py-0.5 text-[10px] font-medium text-slate-300 whitespace-nowrap"
+          >
+            {tag}
+          </span>
+        ))}
+      </div>
       {hiddenCount > 0 && (
         <span
           data-overflow="true"
           className="inline-flex items-center rounded-full bg-slate-600 px-2 py-0.5 text-[10px] font-medium text-slate-200 whitespace-nowrap"
+          aria-label={`${hiddenCount} more tags: ${tooltipText}`}
         >
           +{hiddenCount}
         </span>

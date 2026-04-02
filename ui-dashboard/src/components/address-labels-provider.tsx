@@ -1,6 +1,12 @@
 "use client";
 
-import { createContext, use, useCallback, type ReactNode } from "react";
+import {
+  createContext,
+  use,
+  useCallback,
+  useMemo,
+  type ReactNode,
+} from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { useNetwork } from "@/components/network-provider";
 import { truncateAddress } from "@/lib/format";
@@ -126,15 +132,22 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     { refreshInterval: 30_000, fallbackData: {} },
   );
 
-  // Client-side backward compat for stale SWR cache
-  const customData = data
-    ? ensureUpgraded(data as Record<string, unknown>)
-    : {};
+  // Client-side backward compat for stale SWR cache.
+  // Memoised on `data` identity — SWR stabilises the reference when data
+  // hasn't changed, so this only re-runs on actual fetches/mutations.
+  const customData = useMemo(
+    () => (data ? ensureUpgraded(data as Record<string, unknown>) : {}),
+    [data],
+  );
 
-  // Pre-build sorted records list once per render
-  const customEntries: AddressEntryRecord[] = Object.entries(customData)
-    .map(([address, entry]) => ({ address, ...entry }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // Pre-build sorted records list — stable as long as customData is stable.
+  const customEntries: AddressEntryRecord[] = useMemo(
+    () =>
+      Object.entries(customData)
+        .map(([address, entry]) => ({ address, ...entry }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [customData],
+  );
 
   const getName = useCallback(
     (address: string | null): string => {
