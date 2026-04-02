@@ -332,9 +332,7 @@ Three different states must render differently:
 - Tracking started recently (e.g. < 7d) → show score with `(X.Xd observed)` annotation
 - **No nines labeling** until at least 7d of observed coverage
 
-**W5. "All-time" is misleading — rename to "Since tracking".**
-All-time accumulators start from the date of indexer redeployment, not pool launch. Old pools will have truncated history.
-- **Decision:** Rename the UI label to "Since tracking" and expose `healthTrackingStartedAt` if needed.
+**W5. "All-time" label** — full reindex from genesis means all-time accumulators cover actual pool history, not just from feature launch. Label stays "All-time". ✅ Resolved 2026-04-02
 
 **W6. Protocol health tile needs freshness filter and active-pool definition.**
 Median across stale or dormant pools is theater. Define:
@@ -360,7 +358,7 @@ At 1 oracle event/minute, 30d = ~43,200 rows. At 5 events/minute = 216,000.
 | Staleness threshold | hardcoded 300s | `min(pool.oracleExpiry, 3600n)` |
 | OracleSnapshot writers | two independent paths | single shared `recordHealthSample()` helper |
 | Weighted score in UI | toggle in v1 | internal only in v1; toggle in v2 |
-| "All-time" label | "All-time" | "Since tracking" |
+| "All-time" label | "All-time" | "All-time" (full reindex handles retroactive history) |
 | Predecessor query | missing | required; always fetch latest snapshot before windowStart |
 
 ---
@@ -368,8 +366,11 @@ At 1 oracle event/minute, 30d = ~43,200 rows. At 5 events/minute = 216,000.
 ## Open Questions
 
 
-1. **Newly deployed pool with zero oracle history** — N/A until first oracle event. ✅ Confirmed 2026-04-01.
-2. **Alerting thresholds** — hardcoded (95%) or configurable? → Stretch goal, decide when we get there.
+1. **Retroactive history** — Full reindex from genesis computes health on all historical oracle events. All-time = true all-time from pool launch. ✅ 2026-04-02
+2. **Minimum observation before showing nines** — 24h. Below that: show `X.X% (Yh observed)`, no nines label. ✅ 2026-04-02
+3. **Stale time treatment** — Unhealthy. Gaps > `oracleExpiry` count against the pool. ✅ 2026-04-02
+4. **Newly deployed pool with zero oracle history** — N/A until first oracle event. ✅ 2026-04-01
+5. **Alerting thresholds** — hardcoded (95%) or configurable? → Stretch goal, decide when we get there.
 
 ---
 
