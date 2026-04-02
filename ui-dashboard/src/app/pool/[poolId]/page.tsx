@@ -175,9 +175,12 @@ export function decodePoolId(rawPoolId: string): string {
   }
 }
 
+const MAX_TAB_LIMIT = 200;
+
 export function parseTabLimit(rawLimit: string | null): number {
   const parsed = Number(rawLimit ?? "25");
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : 25;
+  if (!Number.isInteger(parsed) || parsed <= 0) return 25;
+  return Math.min(parsed, MAX_TAB_LIMIT);
 }
 
 function PoolDetail() {

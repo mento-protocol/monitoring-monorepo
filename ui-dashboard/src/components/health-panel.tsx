@@ -161,16 +161,26 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     return out.sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
   }, [predecessor, windowSnapshots]);
 
+  // If the window query hit the 1000 cap, narrow windowStart to the oldest
+  // fetched snapshot so we score only the portion we actually have data for.
+  const effectiveWindowStart = useMemo(() => {
+    const inWindow = windowSnapshots;
+    if (inWindow.length >= 1000 && inWindow.length > 0) {
+      return Math.max(windowStart, Number(inWindow[0]!.timestamp));
+    }
+    return windowStart;
+  }, [windowSnapshots, windowStart]);
+
   const health24h = useMemo(
     () =>
       computeBinaryHealthWindow(
         healthSnapshots,
         pool,
         network.chainId,
-        windowStart,
+        effectiveWindowStart,
         windowEnd,
       ),
-    [healthSnapshots, network.chainId, pool, windowEnd, windowStart],
+    [healthSnapshots, network.chainId, pool, windowEnd, effectiveWindowStart],
   );
 
   const allTimeScore =

@@ -180,6 +180,21 @@ export function recordHealthSample(
     rebalanceThreshold,
   );
 
+  // If snapshot has no valid health data (e.g. rebalanceThreshold <= 0),
+  // don't update pool accumulators — avoid polluting health state.
+  if (!snapshotFields.hasHealthData) {
+    return {
+      snapshotFields,
+      poolUpdate: {
+        healthTotalSeconds: pool.healthTotalSeconds,
+        healthBinarySeconds: pool.healthBinarySeconds,
+        lastOracleSnapshotTimestamp: pool.lastOracleSnapshotTimestamp,
+        lastDeviationRatio: pool.lastDeviationRatio,
+        hasHealthData: pool.hasHealthData,
+      },
+    };
+  }
+
   const poolUpdate = updateHealthAccumulators(
     pool,
     blockTimestamp,

@@ -18,8 +18,12 @@ function parseDeviationRatio(snapshot: OracleSnapshot): number {
   return Number(snapshot.priceDifference ?? "0") / threshold;
 }
 
+function hasValidHealthData(snapshot: OracleSnapshot): boolean {
+  return snapshot.hasHealthData !== false;
+}
+
 function isHealthySnapshot(snapshot: OracleSnapshot): boolean {
-  if (snapshot.hasHealthData === false) return false;
+  if (!hasValidHealthData(snapshot)) return false;
   if (snapshot.healthBinaryValue != null) {
     return Number(snapshot.healthBinaryValue) >= 1;
   }
@@ -74,6 +78,9 @@ export function computeBinaryHealthWindow(
     const segmentStart = Math.max(currTs, windowStart);
     const segmentEnd = Math.min(nextTs, windowEnd);
     if (segmentEnd <= segmentStart) continue;
+
+    // Skip no-data snapshots entirely — don't count their intervals in the denominator
+    if (!hasValidHealthData(curr)) continue;
 
     const duration = segmentEnd - segmentStart;
     trackedSeconds += duration;
