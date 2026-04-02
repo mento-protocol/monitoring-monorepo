@@ -52,9 +52,12 @@ export function computeHealthSnapshotFields(
     };
   }
 
+  // Use integer comparison for the binary threshold to avoid float precision
+  // issues at the d=1.0 boundary (e.g. priceDifference=5000, threshold=5000).
+  const isHealthy = priceDifference <= BigInt(rebalanceThreshold);
   const d = Number(priceDifference) / rebalanceThreshold;
   const deviationRatio = d.toFixed(PRECISION);
-  const healthBinaryValue = d <= 1.0 ? "1.000000" : "0.000000";
+  const healthBinaryValue = isHealthy ? "1.000000" : "0.000000";
 
   return { deviationRatio, healthBinaryValue, hasHealthData: true };
 }
@@ -128,9 +131,15 @@ export function updateHealthAccumulators(
   const carrySeconds = duration <= freshnessLimit ? duration : freshnessLimit;
   // staleSeconds = duration - carrySeconds (always unhealthy, h=0)
 
-  // Was the PREVIOUS interval healthy? (deviationRatio of the previous snapshot)
-  const prevD = parseFloat(pool.lastDeviationRatio);
-  const prevHealthy = !isNaN(prevD) && prevD <= 1.0;
+  // Was the PREVIOUS interval healthy?
+  // Use string comparison against sentinel to avoid float boundary issues.
+  // lastDeviationRatio is "-1" for no-data, or a 6dp decimal string.
+  const prevRatio = pool.lastDeviationRatio;
+  const prevHealthy =
+    prevRatio !== "-1" &&
+    prevRatio !== "" &&
+    parseFloat(prevRatio) <= 1.0 &&
+    !isNaN(parseFloat(prevRatio));
 
   let newTotalSeconds = pool.healthTotalSeconds + duration;
   let newBinarySeconds = pool.healthBinarySeconds;
