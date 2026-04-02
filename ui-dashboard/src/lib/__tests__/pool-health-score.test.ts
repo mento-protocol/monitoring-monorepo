@@ -40,8 +40,10 @@ describe("computeBinaryHealthWindow", () => {
     expect(result.trackedSeconds).toBe(0);
   });
 
-  it("does not punish pre-first-snapshot time", () => {
-    // First known state starts 1h into the window and is healthy for 10 min.
+  it("excludes pre-first-snapshot time from denominator (new pools not punished)", () => {
+    // First known state starts 1h into the 2h window.
+    // Denominator begins at first snapshot (t=3600), not at windowStart (t=0).
+    // After the snapshot, freshnessLimit=300s counts as healthy, rest as stale.
     const result = computeBinaryHealthWindow(
       [snap(3600, "0.500000", "1.000000")],
       pool,
@@ -145,7 +147,7 @@ describe("normalizeWindowSnapshots", () => {
 
 describe("format helpers", () => {
   it("formats percentages", () => {
-    expect(formatBinaryHealthPct(0.9912)).toBe("99.1%");
+    expect(formatBinaryHealthPct(0.9912)).toBe("99.12%");
     expect(formatBinaryHealthPct(null)).toBe("N/A");
   });
 

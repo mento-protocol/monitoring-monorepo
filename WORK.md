@@ -354,7 +354,7 @@ At 1 oracle event/minute, 30d = ~43,200 rows. At 5 events/minute = 216,000.
 | Pool list health column source | `Pool.healthScore24h` | 24h query at render time (or separate light materializer) |
 | Weighted accumulator | `healthWeightedSum: String!` | `healthWeightedMicros: BigInt!` (1e6 scale) |
 | Snapshot fields | single `healthContribution: String!` | `healthValueBinary: String!` + `healthValueWeighted: String!` |
-| Legacy sentinel | `deviationRatio = "-1"`, `healthContribution` undefined | both fields `"-1"` + `hasHealthData: Boolean!` |
+| Legacy sentinel | `deviationRatio = "-1"`, `healthContribution` undefined | `hasHealthData: Boolean!` (canonical gate) + `deviationRatio = "-1"` / `healthBinaryValue = "0.000000"` as defensive sentinels |
 | Staleness threshold | hardcoded 300s | `min(pool.oracleExpiry, 3600n)` |
 | OracleSnapshot writers | two independent paths | single shared `recordHealthSample()` helper |
 | Weighted score in UI | toggle in v1 | internal only in v1; toggle in v2 |
@@ -402,16 +402,13 @@ At 1 oracle event/minute, 30d = ~43,200 rows. At 5 events/minute = 216,000.
 
 **5. Pool list 24h score — avoid N per-pool queries**
 - Fetching 24h snapshots for each of 30+ pools is expensive
-- **Decision:** Add `healthScore24h: String!` and `healthScore7d: String!` pre-computed fields to Pool entity
-- Updated in the handler on each oracle event (same place as accumulator update)
-- Pool list reads these fields directly — no rolling window query needed at list level
-- Pool detail still does the full rolling window computation (better precision, chart support)
+- **Decision (B1 superseded this):** `healthScore24h`/`healthScore7d` pre-computed fields on Pool were dropped (see Blocker B1 above). Rolling windows are UI-only, computed from raw OracleSnapshot history. Pool list health column sources from a 24h window query at render time or a separate light materializer.
 
-### Invariants (explicit before coding)
-1. `deviationRatio = "-1"` is the sentinel for "no data"; all computation code must filter these out
-2. Pool `healthScore24h`/`healthScore7d` are best-effort rolling estimates updated at each oracle event
-3. All-time score is computed from `healthBinarySeconds / healthTotalSeconds`; zero means N/A
-4. Gaps ≤ 300s → carry last state; gaps > 300s → unhealthy for the stale portion
-5. VirtualPools never receive health fields — they have no oracle data
-6. Charts must not depend on paginated table state (use the standalone 30d window query)
-7. Health computation is pure (no side effects); test independently of rendering
+### Invariants (as implemented)
+1. `hasHealthData: Boolean!` is the canonical no-data gate — check it before using `deviationRatio` or `healthBinaryValue`. No-data snapshots write `deviationRatio = "-1"` and `healthBinaryValue = "0.000000"` as defensive sentinels.
+2. All-time score is computed from `healthBinarySeconds / healthTotalSeconds`; zero denominator means N/A
+3. Gaps ≤ min(oracleExpiry, 3600s) → carry last state; gaps > freshness limit → unhealthy for the stale portion
+4. VirtualPools never receive health fields — they have no oracle data
+5. Charts must not depend on paginated table state (use the standalone 30d window query)
+6. Health computation is pure (no side effects); test independently of rendering
+7. No-data intervals (hasHealthData=false) are excluded from BOTH numerator AND denominator in both the indexer accumulator and the UI window scorer

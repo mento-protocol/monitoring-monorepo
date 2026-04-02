@@ -81,8 +81,10 @@ describe("computeHealthSnapshotFields", () => {
 
   it("handles rebalanceThreshold = 0 (edge case)", () => {
     const result = computeHealthSnapshotFields(5000n, 0);
-    assert.equal(result.deviationRatio, "0.000000");
-    assert.equal(result.healthBinaryValue, "1.000000");
+    // No-data sentinel: "-1" for ratio, "0.000000" for binary (not healthy).
+    // hasHealthData=false is the canonical gate; check it before using values.
+    assert.equal(result.deviationRatio, "-1");
+    assert.equal(result.healthBinaryValue, "0.000000");
     assert.isFalse(result.hasHealthData);
   });
 

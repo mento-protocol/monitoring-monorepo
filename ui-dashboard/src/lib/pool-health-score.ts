@@ -9,16 +9,31 @@ export type BinaryHealthWindow = {
   hasEnoughDataForNines: boolean;
 };
 
+/**
+ * Parse deviationRatio from a snapshot for legacy fallback.
+ * Returns NaN for no-data sentinels ("-1") and invalid values so callers
+ * treat them as unhealthy rather than silently classifying them as healthy.
+ * Only used for pre-migration snapshots without healthBinaryValue.
+ */
 function parseDeviationRatio(snapshot: OracleSnapshot): number {
   const explicit = Number(snapshot.deviationRatio ?? "NaN");
+  // Guard: negative values are no-data sentinels ("-1"), not real ratios.
+  // Without this, Number("-1") = -1 passes isFinite and returns -1 ≤ 1.0,
+  // silently classifying a no-data interval as healthy.
+  if (explicit < 0) return NaN;
   if (Number.isFinite(explicit)) return explicit;
   const threshold = Number(snapshot.rebalanceThreshold ?? 0);
   if (threshold <= 0) return NaN;
+  // Legacy fallback: compute from raw fields. Uses float division which has
+  // precision risk at d=1.0, but only applies to pre-migration rows without
+  // deviationRatio string. Prefer parseFloat(deviationRatio) over raw division.
   return Number(snapshot.priceDifference ?? "0") / threshold;
 }
 
 function hasValidHealthData(snapshot: OracleSnapshot): boolean {
-  return snapshot.hasHealthData !== false;
+  // Strict equality: undefined (absent field during schema migration) must NOT
+  // be treated as valid data. Use === true to exclude missing fields.
+  return snapshot.hasHealthData === true;
 }
 
 function isHealthySnapshot(snapshot: OracleSnapshot): boolean {
@@ -72,15 +87,16 @@ export function computeBinaryHealthWindow(
   windowStart: number,
   windowEnd: number,
 ): BinaryHealthWindow {
-  if (snapshots.length === 0) {
-    return {
-      score: null,
-      trackedSeconds: 0,
-      healthySeconds: 0,
-      staleSeconds: 0,
-      observedHours: 0,
-      hasEnoughDataForNines: false,
-    };
+  const emptyResult: BinaryHealthWindow = {
+    score: null,
+    trackedSeconds: 0,
+    healthySeconds: 0,
+    staleSeconds: 0,
+    observedHours: 0,
+    hasEnoughDataForNines: false,
+  };
+  if (snapshots.length === 0 || windowEnd <= windowStart) {
+    return emptyResult;
   }
 
   // Match indexer exactly: when oracleExpiry is 0/missing, indexer uses 3600s
@@ -137,7 +153,7 @@ export function computeBinaryHealthWindow(
 
 export function formatBinaryHealthPct(score: number | null): string {
   if (score == null) return "N/A";
-  return `${(score * 100).toFixed(1)}%`;
+  return `${(score * 100).toFixed(2)}%`;
 }
 
 export function formatNines(score: number | null): string {
