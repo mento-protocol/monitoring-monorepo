@@ -267,7 +267,106 @@ Extend existing Discord alert infra:
 
 ---
 
+## 3x Codex Review — Findings (2026-04-02)
+
+### 🔴 Blockers (all 3 passes agreed)
+
+**B1. `healthScore24h`/`healthScore7d` on Pool is architecturally impossible in handlers.**
+Updating a sliding 24h window requires subtracting aging-out contributions. The handler has no access to history — it can only `get` entities, not query historical ranges. The plan says "update on each event" but that's a dead end.
+- **Decision:** Drop `healthScore24h`/`healthScore7d` from Pool. Rolling windows (24h/7d/30d) are UI-only, computed from raw OracleSnapshot history. If pool-list performance requires a fast path, add a separate nightly materializer job — not handler logic.
+
+**B2. Dual OracleSnapshot writers are a correctness footgun.**
+Both `SortedOracles.ts` and `fpmm.ts` update `pool.lastOracleSnapshotTimestamp` and accumulate health intervals. If both fire on the same block or same economic transition, you get double-counting, zero-duration intervals, or inconsistent state.
+- **Decision:** Extract a single `recordHealthSample(pool, event, priceDifference, rebalanceThreshold)` shared helper. Both handler paths call it. Only one canonical path mutates time accumulators.
+
+**B3. Same-block / same-timestamp events produce zero-duration intervals.**
+Multiple events in one block share the same block timestamp. Zero-duration snapshots pollute the timeline and can cause divide-by-zero or meaningless accumulation.
+- **Decision:** Only accumulate duration when `currentTimestamp > pool.lastOracleSnapshotTimestamp`. For same-timestamp events, update the current state but add nothing to accumulators. Still write the OracleSnapshot for auditability.
+
+**B4. Rolling window computation needs the snapshot BEFORE `windowStart`.**
+To compute a correct 24h/7d/30d score, you need to know what state was "in progress" at `windowStart`. Without the predecessor snapshot, the early portion of every window is treated as unknown.
+- **Decision:** The UI always fetches two queries per pool detail view: (A) snapshots inside window ordered asc, (B) single latest snapshot before windowStart. Prepend B to A before computing. Spell this out in `health-score.ts`.
+
+**B5. Sentinel `-1` inconsistency — `healthContribution` undefined for legacy rows.**
+The plan defines `deviationRatio = "-1"` for legacy rows but doesn't define `healthContribution`. Using `"0.0"` for healthContribution is wrong (valid unhealthy value). Inconsistent sentinels will corrupt averages silently.
+- **Decision:** Both `deviationRatio` and `healthContribution` use `"-1"` as the no-data sentinel. Add a `hasHealthData: Boolean!` field defaulting to `false`. All computation code checks `hasHealthData` before using values — no magic string parsing.
+
+**B6. Schema conflates binary and weighted into single `healthContribution`.**
+The formula has two distinct modes. Storing one `healthContribution` per snapshot is ambiguous — is it binary or weighted?
+- **Decision:** Store both explicitly on OracleSnapshot: `healthValueBinary: String!` and `healthValueWeighted: String!`. Pool accumulators also split: keep `healthBinarySeconds` and add `healthWeightedMicros: BigInt!` (scaled integer, not float string — see B7).
+
+**B7. `healthWeightedSum: String!` and all other ratio fields as strings are precision traps.**
+String arithmetic across 750k+ events = rounding drift, inconsistent precision, silent accumulation bugs. `healthWeightedSum` after years of events could be meaningless.
+- **Decision:**
+  - `deviationRatio` and `healthValueBinary`/`healthValueWeighted` stay as strings on snapshots (for auditability/readability, stored to 6dp fixed precision)
+  - `healthBinarySeconds: BigInt!` — clean integer, no precision issue
+  - `healthWeightedMicros: BigInt!` — weighted contribution scaled by 1e6, accumulated as integer. Divide only at read time. Eliminates drift entirely.
+  - `healthScore24h`/`healthScore7d` removed (see B1)
+  - No float strings in accumulators.
+
+---
+
+### 🟡 Warnings (2/3 passes)
+
+**W1. 300s staleness hardcode should use `pool.oracleExpiry`.**
+Hardcoding 300s while pools have different oracle expiry configurations will misclassify healthy vs stale intervals.
+- **Decision:** Use `pool.oracleExpiry` (already stored on Pool entity) as the freshness limit, with a safety cap of `min(pool.oracleExpiry, 3600n)` to avoid runaway carry. Document this in code.
+
+**W2. Gap handling needs explicit interval-split math.**
+For a gap from `t0` to `t1` where `t1 - t0 > freshnessLimit`:
+```
+healthySegment = [t0, t0 + freshnessLimit] → carry last state
+staleSegment   = [t0 + freshnessLimit, t1] → h=0
+```
+This split must be applied identically in handler accumulators AND UI rolling-window code. Document and test it.
+
+**W3. Weighted formula `1/d²` is uncalibrated.**
+`d=1.01 → h=0.980`, `d=1.5 → h=0.444`, `d=2 → h=0.25`. Near threshold, barely penalized. Before showing weighted score to users, backtest against historical Celo data and compare to `1/d` and linear penalty bands.
+- **Decision:** Implement both formula variants in `health-score.ts` but **only ship binary score in v1 UI**. Weighted stays as an internal/advanced metric only. Add to plan as a post-v1 toggle.
+
+**W4. UX states: N/A vs 0% vs Collecting Data are not distinct.**
+Three different states must render differently:
+- `healthTotalSeconds = 0` → **N/A** (no data ever)
+- `healthTotalSeconds > 0 && healthBinarySeconds = 0` → **0%** (tracked but always unhealthy)
+- `healthTotalSeconds > 0, healthBinarySeconds > 0` → show score
+- Tracking started recently (e.g. < 7d) → show score with `(X.Xd observed)` annotation
+- **No nines labeling** until at least 7d of observed coverage
+
+**W5. "All-time" is misleading — rename to "Since tracking".**
+All-time accumulators start from the date of indexer redeployment, not pool launch. Old pools will have truncated history.
+- **Decision:** Rename the UI label to "Since tracking" and expose `healthTrackingStartedAt` if needed.
+
+**W6. Protocol health tile needs freshness filter and active-pool definition.**
+Median across stale or dormant pools is theater. Define:
+- Active = has `observedSeconds24h >= 12h` (50% coverage minimum)
+- Exclude VirtualPools
+- Liquidity-weighted median or simple median? (Simple is fine for v1, document the choice)
+
+**W7. Client-side 30d raw snapshot query volume could be large.**
+At 1 oracle event/minute, 30d = ~43,200 rows. At 5 events/minute = 216,000.
+- **Decision:** Cap the pool detail query at 1,000 snapshots for the deviation chart. For health score computation, use the cap too — note in the UI if the full 30d window couldn't be covered. This is already bounded by actual pool oracle cadence (real pools update every few minutes at most).
+
+---
+
+### Updated Plan Decisions Summary
+
+| Change | Before | After |
+|---|---|---|
+| `healthScore24h`/`7d` on Pool | pre-computed in handler | removed; UI-only rolling computation |
+| Pool list health column source | `Pool.healthScore24h` | 24h query at render time (or separate light materializer) |
+| Weighted accumulator | `healthWeightedSum: String!` | `healthWeightedMicros: BigInt!` (1e6 scale) |
+| Snapshot fields | single `healthContribution: String!` | `healthValueBinary: String!` + `healthValueWeighted: String!` |
+| Legacy sentinel | `deviationRatio = "-1"`, `healthContribution` undefined | both fields `"-1"` + `hasHealthData: Boolean!` |
+| Staleness threshold | hardcoded 300s | `min(pool.oracleExpiry, 3600n)` |
+| OracleSnapshot writers | two independent paths | single shared `recordHealthSample()` helper |
+| Weighted score in UI | toggle in v1 | internal only in v1; toggle in v2 |
+| "All-time" label | "All-time" | "Since tracking" |
+| Predecessor query | missing | required; always fetch latest snapshot before windowStart |
+
+---
+
 ## Open Questions
+
 
 1. **Newly deployed pool with zero oracle history** — N/A until first oracle event. ✅ Confirmed 2026-04-01.
 2. **Alerting thresholds** — hardcoded (95%) or configurable? → Stretch goal, decide when we get there.
