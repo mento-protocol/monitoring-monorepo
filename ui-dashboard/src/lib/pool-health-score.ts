@@ -1,5 +1,4 @@
 import type { OracleSnapshot, Pool } from "@/lib/types";
-import { getOracleStalenessThreshold } from "@/lib/health";
 
 export type BinaryHealthWindow = {
   score: number | null; // 0..1, null => no data
@@ -62,9 +61,11 @@ export function computeBinaryHealthWindow(
     };
   }
 
-  // Match indexer: min(oracleExpiry, 3600s) — see healthScore.ts MAX_CARRY_SECONDS
+  // Match indexer exactly: when oracleExpiry is 0/missing, indexer uses 3600s
+  // (MAX_CARRY_SECONDS), not chain-specific fallbacks. Then cap at 3600s.
   const MAX_CARRY_SECONDS = 3600;
-  const oracleExpiry = getOracleStalenessThreshold(pool, chainId);
+  const rawExpiry = Number(pool.oracleExpiry ?? "0");
+  const oracleExpiry = rawExpiry > 0 ? rawExpiry : MAX_CARRY_SECONDS;
   const freshnessLimit = Math.min(oracleExpiry, MAX_CARRY_SECONDS);
   let trackedSeconds = 0;
   let healthySeconds = 0;
