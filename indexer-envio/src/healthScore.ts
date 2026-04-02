@@ -190,14 +190,16 @@ export function recordHealthSample(
   );
 
   // If snapshot has no valid health data (e.g. rebalanceThreshold <= 0),
-  // don't update pool accumulators — avoid polluting health state.
+  // don't add to accumulators but DO advance lastOracleSnapshotTimestamp.
+  // This ensures the next valid sample doesn't retroactively accumulate
+  // the no-data gap — matching UI semantics which skip these intervals.
   if (!snapshotFields.hasHealthData) {
     return {
       snapshotFields,
       poolUpdate: {
         healthTotalSeconds: pool.healthTotalSeconds,
         healthBinarySeconds: pool.healthBinarySeconds,
-        lastOracleSnapshotTimestamp: pool.lastOracleSnapshotTimestamp,
+        lastOracleSnapshotTimestamp: blockTimestamp,
         lastDeviationRatio: pool.lastDeviationRatio,
         hasHealthData: pool.hasHealthData,
       },

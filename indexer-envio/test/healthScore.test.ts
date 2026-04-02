@@ -264,10 +264,11 @@ describe("recordHealthSample", () => {
 
     // Snapshot should be flagged as no-data
     assert.isFalse(snapshotFields.hasHealthData);
-    // Pool accumulators should NOT be modified
+    // Pool accumulators should NOT be modified (except timestamp advances)
     assert.equal(poolUpdate.healthTotalSeconds, 100n);
     assert.equal(poolUpdate.healthBinarySeconds, 100n);
-    assert.equal(poolUpdate.lastOracleSnapshotTimestamp, 1000n);
+    // Timestamp advances to prevent next valid sample from accumulating gap
+    assert.equal(poolUpdate.lastOracleSnapshotTimestamp, 1200n);
     assert.equal(poolUpdate.lastDeviationRatio, "0.500000");
     assert.isTrue(poolUpdate.hasHealthData); // preserves existing state
   });
