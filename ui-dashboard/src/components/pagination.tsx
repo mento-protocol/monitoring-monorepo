@@ -15,7 +15,7 @@ export function Pagination({
 }: PaginationProps) {
   if (pageSize <= 0 || total <= 0) return null;
   const totalPages = Math.ceil(total / pageSize);
-  if (totalPages <= 1) return null;
+  const showControls = totalPages > 1;
 
   const canPrev = page > 1;
   const canNext = page < totalPages;
@@ -29,46 +29,54 @@ export function Pagination({
   return (
     <div className="flex items-center justify-between px-1 pt-2 pb-1">
       <span className="text-xs text-slate-500">
-        {total.toLocaleString()} total &middot; page {page} of {totalPages}
+        {total.toLocaleString()} total
+        {showControls && (
+          <>
+            {" "}
+            &middot; page {page} of {totalPages}
+          </>
+        )}
       </span>
-      <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          className={`${btnBase} ${canPrev ? btnActive : btnDisabled}`}
-          onClick={() => canPrev && onPageChange(1)}
-          disabled={!canPrev}
-          aria-label="First page"
-        >
-          «
-        </button>
-        <button
-          type="button"
-          className={`${btnBase} ${canPrev ? btnActive : btnDisabled}`}
-          onClick={() => canPrev && onPageChange(page - 1)}
-          disabled={!canPrev}
-          aria-label="Previous page"
-        >
-          ‹ Prev
-        </button>
-        <button
-          type="button"
-          className={`${btnBase} ${canNext ? btnActive : btnDisabled}`}
-          onClick={() => canNext && onPageChange(page + 1)}
-          disabled={!canNext}
-          aria-label="Next page"
-        >
-          Next ›
-        </button>
-        <button
-          type="button"
-          className={`${btnBase} ${canNext ? btnActive : btnDisabled}`}
-          onClick={() => canNext && onPageChange(totalPages)}
-          disabled={!canNext}
-          aria-label="Last page"
-        >
-          »
-        </button>
-      </div>
+      {showControls && (
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            className={`${btnBase} ${canPrev ? btnActive : btnDisabled}`}
+            onClick={() => canPrev && onPageChange(1)}
+            disabled={!canPrev}
+            aria-label="First page"
+          >
+            «
+          </button>
+          <button
+            type="button"
+            className={`${btnBase} ${canPrev ? btnActive : btnDisabled}`}
+            onClick={() => canPrev && onPageChange(page - 1)}
+            disabled={!canPrev}
+            aria-label="Previous page"
+          >
+            ‹ Prev
+          </button>
+          <button
+            type="button"
+            className={`${btnBase} ${canNext ? btnActive : btnDisabled}`}
+            onClick={() => canNext && onPageChange(page + 1)}
+            disabled={!canNext}
+            aria-label="Next page"
+          >
+            Next ›
+          </button>
+          <button
+            type="button"
+            className={`${btnBase} ${canNext ? btnActive : btnDisabled}`}
+            onClick={() => canNext && onPageChange(totalPages)}
+            disabled={!canNext}
+            aria-label="Last page"
+          >
+            »
+          </button>
+        </div>
+      )}
     </div>
   );
 }
