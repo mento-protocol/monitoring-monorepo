@@ -22,15 +22,21 @@ export function TagInput({
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Filter suggestions: not already added, matches typed text
+  const tagsLower = tags.map((t) => t.toLowerCase());
   const filtered = suggestions.filter(
     (s) =>
-      !tags.includes(s) && s.toLowerCase().includes(input.toLowerCase().trim()),
+      !tagsLower.includes(s.toLowerCase()) &&
+      s.toLowerCase().includes(input.toLowerCase().trim()),
   );
 
   const addTag = useCallback(
     (tag: string) => {
       const trimmed = tag.trim();
-      if (!trimmed || tags.includes(trimmed)) return;
+      if (
+        !trimmed ||
+        tags.some((t) => t.toLowerCase() === trimmed.toLowerCase())
+      )
+        return;
       onChange([...tags, trimmed]);
       setInput("");
       setShowDropdown(false);
