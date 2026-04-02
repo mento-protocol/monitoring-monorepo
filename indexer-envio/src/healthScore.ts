@@ -55,8 +55,15 @@ export function computeHealthSnapshotFields(
   // Use integer comparison for the binary threshold to avoid float precision
   // issues at the d=1.0 boundary (e.g. priceDifference=5000, threshold=5000).
   const isHealthy = priceDifference <= BigInt(rebalanceThreshold);
-  const d = Number(priceDifference) / rebalanceThreshold;
-  const deviationRatio = d.toFixed(PRECISION);
+  // Compute deviationRatio using bigint arithmetic to avoid Number() precision
+  // loss for large priceDifference values (>2^53 would corrupt float conversion).
+  // Scale numerator by 10^PRECISION before dividing, then format as fixed decimal.
+  const SCALE = BigInt(10 ** PRECISION);
+  const threshold = BigInt(rebalanceThreshold);
+  const scaledRatio = (priceDifference * SCALE) / threshold;
+  const intPart = scaledRatio / SCALE;
+  const fracPart = scaledRatio % SCALE;
+  const deviationRatio = `${intPart}.${fracPart.toString().padStart(PRECISION, "0")}`;
   const healthBinaryValue = isHealthy ? "1.000000" : "0.000000";
 
   return { deviationRatio, healthBinaryValue, hasHealthData: true };

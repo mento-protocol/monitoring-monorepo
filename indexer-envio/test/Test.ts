@@ -402,6 +402,9 @@ type OracleSnapshotEntity = {
   source: string;
   blockNumber: bigint;
   txHash: string;
+  deviationRatio?: string;
+  healthBinaryValue?: string;
+  hasHealthData?: boolean;
 };
 
 type LiquidityPositionEntity = {
@@ -2552,5 +2555,419 @@ describe("Envio Celo indexer handlers", () => {
         "Monad pool expiry must NOT be updated by Celo ReportExpirySet",
       );
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Health score handler integration tests
+// Validates that both writer paths (OracleReported + Rebalanced) correctly
+// persist health fields to OracleSnapshot and update Pool accumulators,
+// including no-data transitions and same-timestamp (duplicate block) events.
+// ---------------------------------------------------------------------------
+
+describe("Health score handler integration", () => {
+  afterEach(() => {
+    _clearMockRebalancingStates();
+  });
+
+  // -------------------------------------------------------------------------
+  // SortedOracles.OracleReported path
+  // -------------------------------------------------------------------------
+
+  it("OracleReported: writes health fields to OracleSnapshot and updates Pool accumulators", async () => {
+    const POOL_ADDR = "0x000000000000000000000000000000000000ff01";
+    const FEED_ID = "0x000000000000000000000000000000000000ff02";
+    // Oracle price ≈ 1.0 at 24dp. Reserves perfectly balanced → priceDifference ≈ 0.
+    const ORACLE_PRICE = 1_000_000_000_000_000_000_000_000n;
+    const R0 = 50_000_000_000_000_000_000_000n;
+    const R1 = 50_000_000_000_000_000_000_000n;
+    const REBALANCE_THRESHOLD = 5000; // 5000 bps
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolAddress: POOL_ADDR,
+      feedId: FEED_ID,
+      oracleExpiry: 600n,
+    });
+
+    // Seed pool with known reserves, oracle price, threshold, and initial timestamp
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: R0,
+      reserves1: R1,
+      oraclePrice: ORACLE_PRICE,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      source: "fpmm_update_reserves",
+      rebalanceThreshold: REBALANCE_THRESHOLD,
+      // Seed a prior snapshot at t=1000 so accumulators can accumulate
+      lastOracleSnapshotTimestamp: 1_700_000_000n,
+      lastDeviationRatio: "0.000000", // prior state was healthy
+      healthTotalSeconds: 0n,
+      healthBinarySeconds: 0n,
+      hasHealthData: true,
+    });
+
+    const oracleEvent = SortedOracles.OracleReported.createMockEvent({
+      token: FEED_ID,
+      oracle: "0x0000000000000000000000000000000000000099",
+      timestamp: 1_700_000_600n,
+      value: ORACLE_PRICE,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 1,
+        srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+        block: { number: 1000, timestamp: 1_700_000_600 },
+      },
+    });
+    mockDb = await SortedOracles.OracleReported.processEvent({
+      event: oracleEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity & {
+      healthTotalSeconds: bigint;
+      healthBinarySeconds: bigint;
+      lastDeviationRatio: string;
+      hasHealthData: boolean;
+    };
+    assert.ok(pool, "Pool must exist after OracleReported");
+    // 600s elapsed since prior snapshot (t=1_700_000_000 → t=1_700_000_600)
+    assert.equal(
+      pool.healthTotalSeconds,
+      600n,
+      "healthTotalSeconds must accumulate 600s",
+    );
+    // Balanced pool → all 600s should be healthy
+    assert.equal(
+      pool.healthBinarySeconds,
+      600n,
+      "healthBinarySeconds must be 600s for healthy pool",
+    );
+    assert.isTrue(pool.hasHealthData, "hasHealthData must be true");
+
+    // Validate OracleSnapshot health fields
+    const snapshotId = `${42220}_${1000}_${1}-${pid(POOL_ADDR)}`;
+    const snapshot = mockDb.entities.OracleSnapshot.get(
+      snapshotId,
+    ) as OracleSnapshotEntity;
+    assert.ok(snapshot, "OracleSnapshot must be written by OracleReported");
+    assert.equal(snapshot.hasHealthData, true, "snapshot hasHealthData");
+    assert.equal(
+      snapshot.healthBinaryValue,
+      "1.000000",
+      "balanced pool snapshot must be healthy",
+    );
+    assert.ok(
+      snapshot.deviationRatio !== undefined,
+      "deviationRatio must be set on snapshot",
+    );
+  });
+
+  it("OracleReported: valid → no-data → valid — no-data gap excluded from accumulator denominator", async () => {
+    const POOL_ADDR = "0x000000000000000000000000000000000000ff03";
+    const FEED_ID = "0x000000000000000000000000000000000000ff04";
+    const ORACLE_PRICE = 1_000_000_000_000_000_000_000_000n;
+    const R0 = 50_000_000_000_000_000_000_000n;
+    const R1 = 50_000_000_000_000_000_000_000n;
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolAddress: POOL_ADDR,
+      feedId: FEED_ID,
+      oracleExpiry: 600n,
+    });
+
+    // Step 1: seed pool with valid prior health state and rebalanceThreshold=0
+    // (simulating no-data because threshold=0 → hasHealthData=false).
+    // First establish a valid healthy state at t=1000.
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: R0,
+      reserves1: R1,
+      oraclePrice: ORACLE_PRICE,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      source: "fpmm_update_reserves",
+      rebalanceThreshold: 5000,
+      lastOracleSnapshotTimestamp: 1_700_000_000n,
+      lastDeviationRatio: "0.000000", // healthy prior state
+      healthTotalSeconds: 0n,
+      healthBinarySeconds: 0n,
+      hasHealthData: true,
+    });
+
+    // Step 2: fire an oracle event with rebalanceThreshold=0 → no-data snapshot
+    // Manually set threshold to 0 to trigger hasHealthData=false path
+    const poolBeforeNoData = mockDb.entities.Pool.get(
+      pid(POOL_ADDR),
+    ) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...poolBeforeNoData,
+      rebalanceThreshold: 0, // triggers hasHealthData=false in recordHealthSample
+    });
+
+    const noDataEvent = SortedOracles.OracleReported.createMockEvent({
+      token: FEED_ID,
+      oracle: "0x0000000000000000000000000000000000000099",
+      timestamp: 1_700_001_000n,
+      value: ORACLE_PRICE,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 2,
+        srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+        block: { number: 1001, timestamp: 1_700_001_000 },
+      },
+    });
+    mockDb = await SortedOracles.OracleReported.processEvent({
+      event: noDataEvent,
+      mockDb,
+    });
+
+    // After no-data event: accumulators should NOT advance (gap excluded)
+    const poolAfterNoData = mockDb.entities.Pool.get(
+      pid(POOL_ADDR),
+    ) as PoolEntity & {
+      healthTotalSeconds: bigint;
+      lastDeviationRatio: string;
+    };
+    assert.equal(
+      poolAfterNoData.healthTotalSeconds,
+      0n,
+      "no-data gap must NOT be added to totalSeconds",
+    );
+    assert.equal(
+      poolAfterNoData.lastDeviationRatio,
+      "-1",
+      "lastDeviationRatio must be sentinel after no-data event",
+    );
+
+    // Step 3: restore valid threshold, fire next event at t=1_700_002_000
+    mockDb = mockDb.entities.Pool.set({
+      ...poolAfterNoData,
+      rebalanceThreshold: 5000,
+    });
+
+    const validEvent = SortedOracles.OracleReported.createMockEvent({
+      token: FEED_ID,
+      oracle: "0x0000000000000000000000000000000000000099",
+      timestamp: 1_700_002_000n,
+      value: ORACLE_PRICE,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 3,
+        srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+        block: { number: 1002, timestamp: 1_700_002_000 },
+      },
+    });
+    mockDb = await SortedOracles.OracleReported.processEvent({
+      event: validEvent,
+      mockDb,
+    });
+
+    // The 1000s no-data gap (t=1000 → t=2000) must be excluded from denominator.
+    // totalSeconds should remain 0 (no valid preceding state for the gap).
+    const poolFinal = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity & {
+      healthTotalSeconds: bigint;
+      healthBinarySeconds: bigint;
+    };
+    assert.equal(
+      poolFinal.healthTotalSeconds,
+      0n,
+      "no-data gap (t=1000→2000) must be excluded from totalSeconds denominator",
+    );
+    assert.equal(
+      poolFinal.healthBinarySeconds,
+      0n,
+      "no-data gap must not contribute to healthBinarySeconds",
+    );
+  });
+
+  it("OracleReported: same-timestamp duplicate events in same block don't corrupt accumulators", async () => {
+    const POOL_ADDR = "0x000000000000000000000000000000000000ff05";
+    const FEED_ID = "0x000000000000000000000000000000000000ff06";
+    const ORACLE_PRICE = 1_000_000_000_000_000_000_000_000n;
+    const R0 = 50_000_000_000_000_000_000_000n;
+    const R1 = 50_000_000_000_000_000_000_000n;
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolAddress: POOL_ADDR,
+      feedId: FEED_ID,
+      oracleExpiry: 600n,
+    });
+
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: R0,
+      reserves1: R1,
+      oraclePrice: ORACLE_PRICE,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      source: "fpmm_update_reserves",
+      rebalanceThreshold: 5000,
+      lastOracleSnapshotTimestamp: 1_700_000_000n,
+      lastDeviationRatio: "0.000000",
+      healthTotalSeconds: 0n,
+      healthBinarySeconds: 0n,
+      hasHealthData: true,
+    });
+
+    // Fire two events with the same block timestamp (same-block duplicates)
+    for (let logIndex = 1; logIndex <= 2; logIndex++) {
+      const event = SortedOracles.OracleReported.createMockEvent({
+        token: FEED_ID,
+        oracle: "0x0000000000000000000000000000000000000099",
+        timestamp: 1_700_000_600n,
+        value: ORACLE_PRICE,
+        mockEventData: {
+          chainId: 42220,
+          logIndex,
+          srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+          block: { number: 1000, timestamp: 1_700_000_600 },
+        },
+      });
+      mockDb = await SortedOracles.OracleReported.processEvent({
+        event,
+        mockDb,
+      });
+    }
+
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity & {
+      healthTotalSeconds: bigint;
+      healthBinarySeconds: bigint;
+    };
+    assert.ok(pool, "Pool must exist after duplicate events");
+    // First event: 600s elapsed since t=1_700_000_000 → adds 600s.
+    // Second event: same timestamp → currentTimestamp <= lastTs → adds 0s (guard).
+    assert.equal(
+      pool.healthTotalSeconds,
+      600n,
+      "same-timestamp second event must not double-count totalSeconds",
+    );
+    assert.equal(
+      pool.healthBinarySeconds,
+      600n,
+      "same-timestamp second event must not double-count binarySeconds",
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // FPMM.Rebalanced path
+  // -------------------------------------------------------------------------
+
+  it("Rebalanced: writes health fields to OracleSnapshot and updates Pool accumulators", async () => {
+    const POOL_ADDR = "0x000000000000000000000000000000000000ff07";
+    const ORACLE_PRICE = 1_000_000_000_000_000_000_000_000n;
+    const R0 = 50_000_000_000_000_000_000_000n;
+    const R1 = 50_000_000_000_000_000_000_000n;
+    const REBALANCE_THRESHOLD = 5000;
+    // After rebalancing, priceDifference is well within threshold → healthy
+    const PRICE_DIFF_AFTER = 100n;
+
+    _setMockRebalancingState(42220, POOL_ADDR, {
+      oraclePriceNumerator: 1_000_000_000_000_000_000n,
+      oraclePriceDenominator: 1_000_000_000_000_000_000n,
+      rebalanceThreshold: REBALANCE_THRESHOLD,
+      priceDifference: 100n,
+    });
+
+    let mockDb = MockDb.createMockDb();
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 700, timestamp: 1_700_005_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: R0,
+      reserves1: R1,
+      oraclePrice: ORACLE_PRICE,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      source: "fpmm_update_reserves",
+      rebalanceThreshold: REBALANCE_THRESHOLD,
+      lastOracleSnapshotTimestamp: 1_700_005_000n,
+      lastDeviationRatio: "0.500000", // prior healthy state
+      healthTotalSeconds: 0n,
+      healthBinarySeconds: 0n,
+      hasHealthData: true,
+    });
+
+    const rebalancedEvent = FPMM.Rebalanced.createMockEvent({
+      sender: "0x0000000000000000000000000000000000000099",
+      priceDifferenceBefore: 3333n,
+      priceDifferenceAfter: PRICE_DIFF_AFTER,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 11,
+        srcAddress: POOL_ADDR,
+        block: { number: 701, timestamp: 1_700_005_600 },
+      },
+    });
+    mockDb = await FPMM.Rebalanced.processEvent({
+      event: rebalancedEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity & {
+      healthTotalSeconds: bigint;
+      healthBinarySeconds: bigint;
+      hasHealthData: boolean;
+    };
+    assert.ok(pool, "Pool must exist after Rebalanced");
+    // 600s elapsed since t=1_700_005_000 → t=1_700_005_600
+    assert.equal(
+      pool.healthTotalSeconds,
+      600n,
+      "Rebalanced path must accumulate 600s in healthTotalSeconds",
+    );
+    assert.equal(
+      pool.healthBinarySeconds,
+      600n,
+      "Rebalanced path: prior healthy state → 600s healthBinarySeconds",
+    );
+    assert.isTrue(
+      pool.hasHealthData,
+      "hasHealthData must be true after Rebalanced",
+    );
+
+    // Validate OracleSnapshot health fields
+    // Rebalanced snapshot id = eventId(chainId, blockNumber, logIndex) — no poolId suffix
+    const snapshotId = `${42220}_${701}_${11}`;
+    const snapshot = mockDb.entities.OracleSnapshot.get(
+      snapshotId,
+    ) as OracleSnapshotEntity;
+    assert.ok(snapshot, "OracleSnapshot must be written by Rebalanced handler");
+    assert.equal(
+      snapshot.hasHealthData,
+      true,
+      "Rebalanced snapshot must have hasHealthData=true",
+    );
+    assert.equal(
+      snapshot.healthBinaryValue,
+      "1.000000",
+      "post-rebalance snapshot with small priceDifference must be healthy",
+    );
   });
 });

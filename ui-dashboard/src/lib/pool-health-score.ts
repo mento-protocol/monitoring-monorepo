@@ -52,10 +52,18 @@ export function normalizeWindowSnapshots(
     ? rawSnapshotsDesc.slice(0, maxSnapshots)
     : rawSnapshotsDesc;
 
-  return {
-    snapshotsAsc: [...keptDesc].reverse(),
-    truncated,
-  };
+  // Sort ascending with the same tie-breakers as the query
+  // (timestamp asc, blockNumber asc, id asc) to ensure deterministic ordering
+  // when multiple events share the same timestamp (same block).
+  const snapshotsAsc = [...keptDesc].sort((a, b) => {
+    const tsDiff = Number(a.timestamp) - Number(b.timestamp);
+    if (tsDiff !== 0) return tsDiff;
+    const bnDiff = Number(a.blockNumber) - Number(b.blockNumber);
+    if (bnDiff !== 0) return bnDiff;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+
+  return { snapshotsAsc, truncated };
 }
 
 export function computeBinaryHealthWindow(
