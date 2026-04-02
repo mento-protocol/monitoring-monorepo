@@ -163,7 +163,7 @@ vi.mock("@/components/tx-hash-cell", () => ({
   TxHashCell: ({ txHash }: { txHash: string }) => <td>{txHash}</td>,
 }));
 
-import PoolDetailPage from "./page";
+import PoolDetailPage, { decodePoolId, parseTabLimit } from "./page";
 
 let currentSearchParams = new URLSearchParams();
 let interactiveContainer: HTMLDivElement | null = null;
@@ -347,6 +347,20 @@ function renderInteractive(params: Record<string, string> = {}) {
   });
   return interactiveContainer;
 }
+
+describe("pool detail helpers", () => {
+  it("falls back to the raw pool id when decodeURIComponent would throw", () => {
+    expect(decodePoolId("%E0%A4%A")).toBe("%E0%A4%A");
+  });
+
+  it("sanitises invalid tab limits back to the default page size", () => {
+    expect(parseTabLimit(null)).toBe(25);
+    expect(parseTabLimit("0")).toBe(25);
+    expect(parseTabLimit("-5")).toBe(25);
+    expect(parseTabLimit("NaN")).toBe(25);
+    expect(parseTabLimit("50")).toBe(50);
+  });
+});
 
 describe("Pool detail tab search", () => {
   it("hydrates swaps search from URL and matches full addresses via labels/raw values", () => {

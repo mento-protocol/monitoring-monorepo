@@ -167,20 +167,33 @@ export function selectActiveOlsPool(
   );
 }
 
+export function decodePoolId(rawPoolId: string): string {
+  try {
+    return decodeURIComponent(rawPoolId);
+  } catch {
+    return rawPoolId;
+  }
+}
+
+export function parseTabLimit(rawLimit: string | null): number {
+  const parsed = Number(rawLimit ?? "25");
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 25;
+}
+
 function PoolDetail() {
   const { network } = useNetwork();
   const { poolId } = useParams<{ poolId: string }>();
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const decodedId = decodeURIComponent(poolId);
+  const decodedId = decodePoolId(poolId);
   const normalizedPoolId = normalizePoolIdForChain(decodedId, network.chainId);
   const poolAddress = isNamespacedPoolId(normalizedPoolId)
     ? normalizedPoolId.split("-").slice(1).join("-")
     : normalizedPoolId;
   const rawTab = searchParams.get("tab");
   const tab: Tab = TABS.includes(rawTab as Tab) ? (rawTab as Tab) : "swaps";
-  const limit = Number(searchParams.get("limit") ?? "25");
+  const limit = parseTabLimit(searchParams.get("limit"));
   const activeSearch = isSearchableTab(tab)
     ? (searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "")
     : "";
