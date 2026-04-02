@@ -4,6 +4,7 @@ import { useRef, useState, useCallback, useMemo } from "react";
 import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
+import { TagPills } from "@/components/tag-pills";
 import { explorerAddressUrl } from "@/lib/tokens";
 import { truncateAddress } from "@/lib/format";
 import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
@@ -30,8 +31,15 @@ export default function AddressBookPage({
   canEdit?: boolean;
 }) {
   const { network: selectedNetwork } = useNetwork();
-  const { customLabels, getLabel, isCustomLabel, getEntry, isLoading, error } =
-    useAddressLabels();
+  const {
+    customEntries,
+    getName,
+    getTags,
+    isCustom: isCustomLabel,
+    getEntry,
+    isLoading,
+    error,
+  } = useAddressLabels();
 
   const [search, setSearch] = useState("");
   const [editingAddress, setEditingAddress] = useState<string | null>(null);
@@ -72,15 +80,15 @@ export default function AddressBookPage({
   // Using getLabel() is correct here since these ARE on the selected network.
   const customRows = useMemo<AddressRow[]>(
     () =>
-      customLabels.map((r) => ({
+      customEntries.map((r) => ({
         key: `custom:${r.address}`,
         address: r.address,
-        name: getLabel(r.address),
-        tags: r.tags ?? [],
+        name: getName(r.address),
+        tags: getTags(r.address),
         isCustom: true,
         network: selectedNetwork,
       })),
-    [customLabels, getLabel, selectedNetwork],
+    [customEntries, getName, getTags, selectedNetwork],
   );
 
   // Merge: custom labels on the selected network take precedence over contract
@@ -98,7 +106,8 @@ export default function AddressBookPage({
         return (
           row.address.includes(q) ||
           row.name.toLowerCase().includes(q) ||
-          (row.network?.label.toLowerCase().includes(q) ?? false)
+          (row.network?.label.toLowerCase().includes(q) ?? false) ||
+          row.tags.some((t) => t.toLowerCase().includes(q))
         );
       }),
     [customRows, contractRows, selectedNetwork.chainId, search],
@@ -231,15 +240,15 @@ export default function AddressBookPage({
                   <p className="mb-1 font-medium text-slate-400">
                     Mento export:
                   </p>
-                  <pre className="mb-2 overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`{ "exportedAt": "...",\n  "chains": { "42220": {\n    "0x...": { "label": "...",\n      "category": "...",\n      "notes": "..." } } } }`}</pre>
+                  <pre className="mb-2 overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`{ "exportedAt": "...",\n  "chains": { "42220": {\n    "0x...": { "name": "...",\n      "tags": ["..."],\n      "notes": "..." } } } }`}</pre>
                   <p className="mb-1 font-medium text-slate-400">
                     Gnosis Safe address book:
                   </p>
                   <pre className="mb-2 overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`[{ "address": "0x...",\n   "chainId": "1",\n   "name": "My Label" }]`}</pre>
                   <p className="mb-1 font-medium text-slate-400">
-                    CSV (address,name) — imports into both mainnet chains:
+                    CSV (address,name,tags) — imports into both mainnet chains:
                   </p>
-                  <pre className="overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`address,name\n0x...,My Label`}</pre>
+                  <pre className="overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`address,name,tags\n0x...,My Label,"Market Maker;Whale"`}</pre>
                 </div>
               </details>
             </div>
@@ -282,7 +291,7 @@ export default function AddressBookPage({
       <div>
         <input
           type="search"
-          placeholder="Search by address, label, or chain…"
+          placeholder="Search by address, name, tag, or chain…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Search address book"
@@ -312,13 +321,13 @@ export default function AddressBookPage({
                   Address
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Label
+                  Name
+                </th>
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Tags
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Chain
-                </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Category
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Notes
@@ -354,13 +363,13 @@ export default function AddressBookPage({
                   <AddressTableRow
                     key={`${row.network?.id ?? selectedNetwork.id}:${row.address}`}
                     address={row.address}
-                    label={row.name}
+                    name={row.name}
+                    tags={row.tags}
                     networkLabel={
                       row.network
                         ? row.network.label.replace(/ \(.*\)$/, "")
                         : null
                     }
-                    category={entry?.tags?.[0]}
                     notes={entry?.notes}
                     isPublic={entry?.isPublic}
                     isCustom={isCustomResolved}
@@ -405,9 +414,9 @@ export default function AddressBookPage({
 
 type AddressRowProps = {
   address: string;
-  label: string;
+  name: string;
+  tags: string[];
   networkLabel: string | null;
-  category?: string;
   notes?: string;
   isPublic?: boolean;
   isCustom: boolean;
@@ -419,9 +428,9 @@ type AddressRowProps = {
 
 function AddressTableRow({
   address,
-  label,
+  name,
+  tags,
   networkLabel,
-  category,
   notes,
   isPublic,
   isCustom,
@@ -449,14 +458,18 @@ function AddressTableRow({
         <span
           className={`text-sm ${isCustom ? "font-medium text-indigo-400" : "text-slate-300"}`}
         >
-          {label}
+          {name}
         </span>
+      </td>
+      <td className="px-4 py-3">
+        {tags.length > 0 ? (
+          <TagPills tags={tags} />
+        ) : (
+          <span className="text-xs text-slate-600">—</span>
+        )}
       </td>
       <td className="px-4 py-3 text-xs text-slate-400">
         {networkLabel ?? <span className="text-slate-600">All chains</span>}
-      </td>
-      <td className="px-4 py-3 text-xs text-slate-400">
-        {category ?? <span className="text-slate-600">—</span>}
       </td>
       <td className="px-4 py-3 text-xs text-slate-400 max-w-xs truncate">
         {notes ?? <span className="text-slate-600">—</span>}
@@ -506,10 +519,10 @@ function AddressTableRow({
           <button
             type="button"
             onClick={onEdit}
-            title="Add category or notes to this contract"
+            title="Add tags or notes to this contract"
             className="text-xs text-slate-600 hover:text-indigo-300 transition-colors"
           >
-            + Category
+            + Tag
           </button>
         )}
       </td>

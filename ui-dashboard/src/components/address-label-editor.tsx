@@ -1,8 +1,10 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useMemo } from "react";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import type { AddressEntry } from "@/lib/address-labels";
+import { TagInput } from "@/components/tag-input";
+import { SUGGESTED_TAGS, getUsedTags } from "@/lib/tag-suggestions";
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for testing)
@@ -78,19 +80,6 @@ export function validateLabelForm(opts: {
   });
 }
 
-const CATEGORIES = [
-  "CEX",
-  "DEX",
-  "Market Maker",
-  "Arbitrageur",
-  "DAO",
-  "Team",
-  "Treasury",
-  "Protocol",
-  "Wallet",
-  "Other",
-] as const;
-
 type Props = {
   /** Pass empty string to allow the user to type a new address */
   address: string;
@@ -104,19 +93,30 @@ export function AddressLabelEditor({
   initial,
   onClose,
 }: Props) {
-  const { upsertLabel, deleteLabel, isCustomLabel } = useAddressLabels();
+  const {
+    upsertEntry,
+    deleteEntry,
+    isCustom: isCustomLabel,
+    customEntries,
+  } = useAddressLabels();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
 
   const isNewAddress = initialAddress === "";
   const [address, setAddress] = useState(initialAddress);
-  const [label, setLabel] = useState(initial?.name ?? "");
-  const [category, setCategory] = useState(initial?.tags?.[0] ?? "");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [isPublic, setIsPublic] = useState(initial?.isPublic ?? false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const tagSuggestions = useMemo(() => {
+    const used = getUsedTags(customEntries);
+    const all = new Set([...SUGGESTED_TAGS, ...used]);
+    return [...all].sort((a, b) => a.localeCompare(b));
+  }, [customEntries]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -143,31 +143,31 @@ export function AddressLabelEditor({
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    const validationError = validateLabelForm({
+    const validationError = validateEntryForm({
       isNewAddress,
       address,
-      label,
+      name,
+      tags,
       isContractRow,
     });
     if (validationError) {
       setError(validationError);
       return;
     }
-    const effectiveLabel = resolveEffectiveName(
-      label,
+    const effectiveName = resolveEffectiveName(
+      name,
       isContractRow,
       initial?.name,
     );
     setSaving(true);
     setError(null);
     try {
-      await upsertLabel(
-        address,
-        effectiveLabel,
-        category.trim() || undefined,
-        notes.trim() || undefined,
+      await upsertEntry(address, {
+        name: effectiveName,
+        tags,
+        notes: notes.trim() || undefined,
         isPublic,
-      );
+      });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save label.");
@@ -180,7 +180,7 @@ export function AddressLabelEditor({
     setDeleting(true);
     setError(null);
     try {
-      await deleteLabel(address);
+      await deleteEntry(address);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete label.");
@@ -189,7 +189,7 @@ export function AddressLabelEditor({
     }
   }
 
-  const hasExistingCustomLabel = isCustomLabel(address);
+  const hasExistingCustomEntry = isCustomLabel(address);
 
   return (
     <dialog
@@ -200,7 +200,7 @@ export function AddressLabelEditor({
       <form onSubmit={handleSave} noValidate>
         <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
           <h2 className="text-sm font-semibold text-white">
-            {hasExistingCustomLabel ? "Edit label" : "Add label"}
+            {hasExistingCustomEntry ? "Edit label" : "Add label"}
           </h2>
           <button
             type="button"
@@ -239,56 +239,44 @@ export function AddressLabelEditor({
             )}
           </div>
 
-          {/* Label */}
+          {/* Name */}
           <div>
             <label
-              htmlFor="al-label"
+              htmlFor="al-name"
               className="block text-xs font-medium text-slate-400 mb-1"
             >
-              Label{" "}
+              Name{" "}
               {isContractRow ? (
                 <span className="text-slate-500">(optional)</span>
               ) : (
-                <span className="text-indigo-400">*</span>
+                <span className="text-slate-500">(optional if tags added)</span>
               )}
             </label>
             <input
               ref={isNewAddress ? undefined : firstInputRef}
-              id="al-label"
+              id="al-name"
               type="text"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
               placeholder={
                 isContractRow
                   ? "Leave blank to keep contract name"
                   : "e.g. Binance Hot Wallet"
               }
-              required={!isContractRow}
               className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
 
-          {/* Category */}
+          {/* Tags */}
           <div>
-            <label
-              htmlFor="al-category"
-              className="block text-xs font-medium text-slate-400 mb-1"
-            >
-              Category <span className="text-slate-500">(optional)</span>
+            <label className="block text-xs font-medium text-slate-400 mb-1">
+              Tags <span className="text-slate-500">(optional)</span>
             </label>
-            <select
-              id="al-category"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            >
-              <option value="">— none —</option>
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+            <TagInput
+              tags={tags}
+              onChange={setTags}
+              suggestions={tagSuggestions}
+            />
           </div>
 
           {/* Notes */}
@@ -349,7 +337,7 @@ export function AddressLabelEditor({
 
         <div className="flex items-center justify-between border-t border-slate-800 px-5 py-4">
           <div>
-            {hasExistingCustomLabel && (
+            {hasExistingCustomEntry && (
               <button
                 type="button"
                 onClick={handleDelete}
