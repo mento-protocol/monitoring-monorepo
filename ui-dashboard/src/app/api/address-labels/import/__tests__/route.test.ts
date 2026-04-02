@@ -91,6 +91,7 @@ vi.mock("@/lib/address-labels", () => ({
           : new Date().toISOString(),
     };
   }),
+  sanitizeEntry: vi.fn((entry: Record<string, unknown>) => entry),
 }));
 
 import { getAuthSession } from "@/auth";

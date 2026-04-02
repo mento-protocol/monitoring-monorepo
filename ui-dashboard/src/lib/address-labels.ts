@@ -99,6 +99,44 @@ export function upgradeEntries(
 }
 
 // ---------------------------------------------------------------------------
+// Entry sanitization — shared limits for PUT + import paths
+// ---------------------------------------------------------------------------
+
+const MAX_NAME_LENGTH = 200;
+const MAX_NOTES_LENGTH = 500;
+const MAX_TAGS_COUNT = 20;
+const MAX_TAG_LENGTH = 50;
+
+/**
+ * Sanitize an AddressEntry: truncate name/notes, cap tag count/length,
+ * trim + case-insensitive dedup tags.
+ */
+export function sanitizeEntry(entry: AddressEntry): AddressEntry {
+  const name = entry.name.slice(0, MAX_NAME_LENGTH);
+  const notes = entry.notes?.slice(0, MAX_NOTES_LENGTH);
+
+  // Trim, truncate, and case-insensitive dedup tags
+  const seenTags = new Set<string>();
+  const tags = entry.tags
+    .slice(0, MAX_TAGS_COUNT)
+    .map((t) => t.trim().slice(0, MAX_TAG_LENGTH))
+    .filter((t) => {
+      if (!t) return false;
+      const key = t.toLowerCase();
+      if (seenTags.has(key)) return false;
+      seenTags.add(key);
+      return true;
+    });
+
+  return {
+    ...entry,
+    name,
+    tags,
+    ...(notes !== undefined ? { notes } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Redis key helpers
 // ---------------------------------------------------------------------------
 

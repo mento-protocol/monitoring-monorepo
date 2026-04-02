@@ -4,6 +4,7 @@ import {
   importLabels,
   getLabels,
   upgradeEntries,
+  sanitizeEntry,
   type AddressEntry,
   type AddressLabelsSnapshot,
 } from "@/lib/address-labels";
@@ -19,8 +20,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // Body size guard: reject payloads > 2MB before reading into memory (#5)
-  const contentLength = Number(req.headers.get("content-length") ?? "0");
-  if (contentLength > 2 * 1024 * 1024) {
+  const contentLengthHeader = req.headers.get("content-length");
+  if (
+    contentLengthHeader !== null &&
+    Number(contentLengthHeader) > 2 * 1024 * 1024
+  ) {
     return NextResponse.json(
       { error: "Request body too large (max 2MB)" },
       { status: 413 },
@@ -40,6 +44,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let body: unknown;
   try {
     const text = await req.text();
+    // Post-read size check for requests without Content-Length header
+    if (text.length > 2 * 1024 * 1024) {
+      return NextResponse.json(
+        { error: "Request body too large (max 2MB)" },
+        { status: 413 },
+      );
+    }
     // Strip UTF-8 BOM so BOM-prefixed JSON payloads keep working.
     const normalized = text.startsWith("\uFEFF") ? text.slice(1) : text;
     const trimmed = normalized.trimStart();
@@ -173,11 +184,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       for (const [chainId, labels] of chainEntries) {
         // Auto-upgrade legacy entries (label→name, category→tags[0])
         const upgraded = upgradeEntries(labels as Record<string, unknown>);
-        // Filter out entries where both name and tags are empty (#7)
+        // Sanitize (enforce limits) + filter empty entries (#4, #7)
         const filtered = Object.fromEntries(
-          Object.entries(upgraded).filter(
-            ([, e]) => e.name !== "" || e.tags.length > 0,
-          ),
+          Object.entries(upgraded)
+            .map(([addr, e]) => [addr, sanitizeEntry(e)] as const)
+            .filter(([, e]) => e.name !== "" || e.tags.length > 0),
         );
         await importLabels(Number(chainId), filtered);
       }
@@ -205,11 +216,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     // Auto-upgrade legacy entries (label→name, category→tags[0])
     const upgraded = upgradeEntries(labels as Record<string, unknown>);
-    // Filter out entries where both name and tags are empty (#7)
+    // Sanitize (enforce limits) + filter empty entries (#4, #7)
     const filtered = Object.fromEntries(
-      Object.entries(upgraded).filter(
-        ([, e]) => e.name !== "" || e.tags.length > 0,
-      ),
+      Object.entries(upgraded)
+        .map(([addr, e]) => [addr, sanitizeEntry(e)] as const)
+        .filter(([, e]) => e.name !== "" || e.tags.length > 0),
     );
     await importLabels(chainId, filtered);
     return NextResponse.json({ ok: true });
@@ -290,6 +301,13 @@ async function handleCsvImport(req: NextRequest): Promise<NextResponse> {
       { status: 400 },
     );
   }
+  // Post-read size check for requests without Content-Length header
+  if (text.length > 2 * 1024 * 1024) {
+    return NextResponse.json(
+      { error: "Request body too large (max 2MB)" },
+      { status: 413 },
+    );
+  }
   return handleCsvText(text);
 }
 
@@ -347,13 +365,13 @@ async function handleCsvText(text: string): Promise<NextResponse> {
     const merged: Record<string, AddressEntry> = {};
     for (const [addr, entry] of Object.entries(labels)) {
       const prev = existing[addr];
-      merged[addr] = {
+      merged[addr] = sanitizeEntry({
         ...prev,
         ...entry,
         // When CSV has no tags column, preserve existing tags instead of
         // overwriting with [] (#1)
         tags: hasTagsColumn ? entry.tags : (prev?.tags ?? []),
-      };
+      });
     }
     mergedByChain.set(chainId, merged);
   }
