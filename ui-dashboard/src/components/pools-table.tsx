@@ -235,7 +235,7 @@ export function PoolsTable({
             >
               Pool
             </SortableTh>
-            {network.hasVirtualPools && <Th>Source</Th>}
+            <Th>Source</Th>
             <SortableTh
               sortKey="health"
               activeSortKey={sortKey}
@@ -329,11 +329,9 @@ export function PoolsTable({
                     {poolName(network, p.token0, p.token1)}
                   </NetworkAwareLink>
                 </td>
-                {network.hasVirtualPools && (
-                  <td className="px-2 sm:px-4 py-2 sm:py-3">
-                    <SourceBadge source={p.source} />
-                  </td>
-                )}
+                <td className="px-2 sm:px-4 py-2 sm:py-3">
+                  <SourceBadge source={p.source} />
+                </td>
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
                   <button
                     type="button"
