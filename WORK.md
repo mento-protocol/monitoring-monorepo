@@ -43,7 +43,7 @@ Two score variants:
 - **Binary** — `h(d) = d ≤ 1.0 ? 1.0 : 0.0` → maps directly to "nines of availability"
 - **Weighted** — quadratic inverse as above → penalizes severity of deviation
 
-Both are shown in the UI; binary leads (it's the intuitive "uptime" number).
+**Binary only.** Confirmed 2026-04-02 after historical calibration against real pool data.
 
 ---
 
