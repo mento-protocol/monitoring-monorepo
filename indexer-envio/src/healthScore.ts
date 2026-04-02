@@ -45,9 +45,12 @@ export function computeHealthSnapshotFields(
   rebalanceThreshold: number,
 ): HealthSnapshotFields {
   if (rebalanceThreshold <= 0) {
+    // No-data sentinel: use "-1" for deviationRatio and "0.000000" for
+    // healthBinaryValue so consumers can't accidentally treat this as healthy.
+    // hasHealthData=false is the canonical gate — check it before using values.
     return {
-      deviationRatio: "0.000000",
-      healthBinaryValue: "1.000000",
+      deviationRatio: "-1",
+      healthBinaryValue: "0.000000",
       hasHealthData: false,
     };
   }

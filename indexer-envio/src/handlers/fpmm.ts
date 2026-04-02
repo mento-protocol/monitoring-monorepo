@@ -491,15 +491,18 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   );
 
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
+  // Hoist oraclePrice outside the if-block so it's accessible for OracleSnapshot
+  // construction without a non-null assertion on oracleDelta.oraclePrice.
+  let updateReservesOraclePrice = 0n;
   if (rebalancingState) {
     const existing = await context.Pool.get(poolId);
     const isInverted = existing?.invertRateFeed ?? false;
-    const oraclePrice = isInverted
+    updateReservesOraclePrice = isInverted
       ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
       : rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
 
     oracleDelta = {
-      oraclePrice,
+      oraclePrice: updateReservesOraclePrice,
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
       priceDifference: rebalancingState.priceDifference,
       oracleTimestamp: blockTimestamp,
@@ -521,7 +524,12 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   });
 
   if (rebalancingState) {
-    // Health score: compute snapshot fields + update pool accumulators
+    // Health score: compute snapshot fields + update pool accumulators.
+    // Note: upsertPool above calls context.Pool.set(pool) internally with
+    // default health fields. We immediately overwrite with the correct
+    // health accumulators here. Safe because Envio is single-threaded, but
+    // the double-write is intentional — health update must come after upsertPool
+    // so we have the final pool state to accumulate against.
     const { snapshotFields, poolUpdate } = recordHealthSample(
       pool,
       pool.priceDifference,
@@ -529,13 +537,12 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       blockTimestamp,
     );
     context.Pool.set({ ...pool, ...poolUpdate });
-
     const snapshot: OracleSnapshot = {
       id: eventId(event.chainId, event.block.number, event.logIndex),
       chainId: event.chainId,
       poolId,
       timestamp: blockTimestamp,
-      oraclePrice: oracleDelta.oraclePrice!,
+      oraclePrice: updateReservesOraclePrice,
       oracleOk: pool.oracleOk,
       numReporters: pool.oracleNumReporters,
       priceDifference: pool.priceDifference,
@@ -596,16 +603,19 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     priceDifference: event.params.priceDifferenceAfter,
   };
 
+  // Hoist oraclePrice outside the if-block so it's accessible for OracleSnapshot
+  // construction without a non-null assertion on oracleDelta.oraclePrice.
+  let rebalancedOraclePrice = 0n;
   if (rebalancingState) {
     const existing = await context.Pool.get(poolId);
     const isInverted = existing?.invertRateFeed ?? false;
-    const oraclePrice = isInverted
+    rebalancedOraclePrice = isInverted
       ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
       : rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
 
     oracleDelta = {
       ...oracleDelta,
-      oraclePrice,
+      oraclePrice: rebalancedOraclePrice,
       rebalanceThreshold: rebalancingState.rebalanceThreshold,
       oracleTimestamp: blockTimestamp,
     };
@@ -623,7 +633,12 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   });
 
   if (rebalancingState) {
-    // Health score: compute snapshot fields + update pool accumulators
+    // Health score: compute snapshot fields + update pool accumulators.
+    // Note: upsertPool above calls context.Pool.set(pool) internally with
+    // default health fields. We immediately overwrite with the correct
+    // health accumulators here. Safe because Envio is single-threaded, but
+    // the double-write is intentional — health update must come after upsertPool
+    // so we have the final pool state to accumulate against.
     const { snapshotFields, poolUpdate } = recordHealthSample(
       pool,
       pool.priceDifference,
@@ -637,7 +652,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       chainId: event.chainId,
       poolId,
       timestamp: blockTimestamp,
-      oraclePrice: oracleDelta.oraclePrice!,
+      oraclePrice: rebalancedOraclePrice,
       oracleOk: pool.oracleOk,
       numReporters: pool.oracleNumReporters,
       priceDifference: pool.priceDifference,

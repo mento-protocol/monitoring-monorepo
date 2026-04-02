@@ -402,9 +402,9 @@ type OracleSnapshotEntity = {
   source: string;
   blockNumber: bigint;
   txHash: string;
-  deviationRatio?: string;
-  healthBinaryValue?: string;
-  hasHealthData?: boolean;
+  deviationRatio: string;
+  healthBinaryValue: string;
+  hasHealthData: boolean;
 };
 
 type LiquidityPositionEntity = {
@@ -2660,9 +2660,11 @@ describe("Health score handler integration", () => {
       "1.000000",
       "balanced pool snapshot must be healthy",
     );
-    assert.ok(
-      snapshot.deviationRatio !== undefined,
-      "deviationRatio must be set on snapshot",
+    // deviationRatio should be a valid non-negative string (not the "-1" no-data sentinel)
+    const ratio = parseFloat(snapshot.deviationRatio);
+    assert.isTrue(
+      Number.isFinite(ratio) && ratio >= 0,
+      `deviationRatio must be a valid non-negative ratio, got: ${snapshot.deviationRatio}`,
     );
   });
 
@@ -2745,6 +2747,29 @@ describe("Health score handler integration", () => {
       "-1",
       "lastDeviationRatio must be sentinel after no-data event",
     );
+
+    // Validate OracleSnapshot for the no-data event has correct sentinel fields
+    const noDataSnapshotId = `${42220}_${1001}_${2}-${pid(POOL_ADDR)}`;
+    const noDataSnapshot = mockDb.entities.OracleSnapshot.get(
+      noDataSnapshotId,
+    ) as OracleSnapshotEntity | undefined;
+    if (noDataSnapshot) {
+      assert.equal(
+        noDataSnapshot.hasHealthData,
+        false,
+        "no-data snapshot must have hasHealthData=false",
+      );
+      assert.equal(
+        noDataSnapshot.deviationRatio,
+        "-1",
+        'no-data snapshot deviationRatio must be "-1" sentinel',
+      );
+      assert.equal(
+        noDataSnapshot.healthBinaryValue,
+        "0.000000",
+        'no-data snapshot healthBinaryValue must be "0.000000" (not healthy)',
+      );
+    }
 
     // Step 3: restore valid threshold, fire next event at t=1_700_002_000
     mockDb = mockDb.entities.Pool.set({

@@ -28,6 +28,10 @@ import {
   ORACLE_SNAPSHOTS_WINDOW,
 } from "@/lib/queries";
 import { useNetwork } from "@/components/network-provider";
+
+const HEALTH_WINDOW_LIMIT = 1000;
+/** Fetch one extra so we can detect truncation without a separate count query. */
+const HEALTH_WINDOW_QUERY_LIMIT = HEALTH_WINDOW_LIMIT + 1;
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
 import type { RebalanceCheckResult } from "@/lib/rebalance-check";
 
@@ -141,9 +145,6 @@ export function HealthPanel({ pool }: HealthPanelProps) {
 
   const windowEnd = Math.floor(windowAnchorMs / 1000);
   const windowStart = windowEnd - 24 * 3600;
-  const HEALTH_WINDOW_LIMIT = 1000;
-  const HEALTH_WINDOW_QUERY_LIMIT = HEALTH_WINDOW_LIMIT + 1;
-
   const shouldFetchHealth = !pool.source?.includes("virtual");
 
   const { data: healthWindowData, error: healthWindowError } = useGQL<{
@@ -176,9 +177,11 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     }, [healthWindowData]);
   const predecessor = predecessorData?.OracleSnapshot?.[0];
   const healthSnapshots = useMemo(() => {
+    // Spread into a new array before sorting to avoid mutating the memoized
+    // windowSnapshotsAsc reference (React immutability invariant).
     const out = predecessor
       ? [predecessor, ...windowSnapshotsAsc]
-      : windowSnapshotsAsc;
+      : [...windowSnapshotsAsc];
     return out.sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
   }, [predecessor, windowSnapshotsAsc]);
 
