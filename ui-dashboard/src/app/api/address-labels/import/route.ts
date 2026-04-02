@@ -264,8 +264,10 @@ function isEntriesMap(v: unknown): v is Record<string, AddressEntry> {
   return Object.values(v as Record<string, unknown>).every((entry) => {
     if (typeof entry !== "object" || entry === null) return false;
     const e = entry as Record<string, unknown>;
+    // Accept v1 (label), v2 (name), or tag-only entries
     const hasName = typeof e.label === "string" || typeof e.name === "string";
-    return hasName;
+    const hasTags = Array.isArray(e.tags) && e.tags.length > 0;
+    return hasName || hasTags;
   });
 }
 
