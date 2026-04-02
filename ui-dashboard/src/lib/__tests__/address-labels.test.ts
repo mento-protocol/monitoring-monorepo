@@ -17,8 +17,9 @@ vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "fake-token");
 import {
   getAllChainLabels,
   getLabels,
-  upsertLabel,
+  upsertEntry,
   importLabels,
+  upgradeEntry,
 } from "@/lib/address-labels";
 import { Redis } from "@upstash/redis";
 
@@ -31,16 +32,22 @@ describe("getLabels — publicOnly filter", () => {
     (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       {
         "0xaaa": {
-          label: "Public",
+          name: "Public",
+          tags: [],
           isPublic: true,
           updatedAt: "2026-01-01T00:00:00Z",
         },
         "0xbbb": {
-          label: "Private",
+          name: "Private",
+          tags: [],
           isPublic: false,
           updatedAt: "2026-01-01T00:00:00Z",
         },
-        "0xccc": { label: "NoFlag", updatedAt: "2026-01-01T00:00:00Z" },
+        "0xccc": {
+          name: "NoFlag",
+          tags: [],
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
       },
     );
     const result = await getLabels(42220);
@@ -51,27 +58,37 @@ describe("getLabels — publicOnly filter", () => {
     (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       {
         "0xaaa": {
-          label: "Public",
+          name: "Public",
+          tags: [],
           isPublic: true,
           updatedAt: "2026-01-01T00:00:00Z",
         },
         "0xbbb": {
-          label: "Private",
+          name: "Private",
+          tags: [],
           isPublic: false,
           updatedAt: "2026-01-01T00:00:00Z",
         },
-        "0xccc": { label: "NoFlag", updatedAt: "2026-01-01T00:00:00Z" },
+        "0xccc": {
+          name: "NoFlag",
+          tags: [],
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
       },
     );
     const result = await getLabels(42220, { publicOnly: true });
     expect(Object.keys(result)).toHaveLength(1);
-    expect(result["0xaaa"].label).toBe("Public");
+    expect(result["0xaaa"].name).toBe("Public");
   });
 
   it("treats missing isPublic as private when publicOnly is true", async () => {
     (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       {
-        "0xaaa": { label: "NoFlag", updatedAt: "2026-01-01T00:00:00Z" },
+        "0xaaa": {
+          name: "NoFlag",
+          tags: [],
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
       },
     );
     const result = await getLabels(42220, { publicOnly: true });
@@ -82,12 +99,14 @@ describe("getLabels — publicOnly filter", () => {
     (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       {
         "0xaaa": {
-          label: "Public",
+          name: "Public",
+          tags: [],
           isPublic: true,
           updatedAt: "2026-01-01T00:00:00Z",
         },
         "0xbbb": {
-          label: "Private",
+          name: "Private",
+          tags: [],
           isPublic: false,
           updatedAt: "2026-01-01T00:00:00Z",
         },
@@ -98,11 +117,12 @@ describe("getLabels — publicOnly filter", () => {
   });
 });
 
-describe("upsertLabel — persists isPublic", () => {
+describe("upsertEntry — persists isPublic", () => {
   it("stores isPublic: true when provided", async () => {
     (Redis.prototype.hset as ReturnType<typeof vi.fn>).mockResolvedValueOnce(1);
-    await upsertLabel(42220, "0xABC", {
-      label: "Test",
+    await upsertEntry(42220, "0xABC", {
+      name: "Test",
+      tags: [],
       isPublic: true,
     });
     const [, fields] = (Redis.prototype.hset as ReturnType<typeof vi.fn>).mock
@@ -113,7 +133,7 @@ describe("upsertLabel — persists isPublic", () => {
 
   it("stores isPublic: false when not provided", async () => {
     (Redis.prototype.hset as ReturnType<typeof vi.fn>).mockResolvedValueOnce(1);
-    await upsertLabel(42220, "0xABC", { label: "Test" });
+    await upsertEntry(42220, "0xABC", { name: "Test", tags: [] });
     const [, fields] = (Redis.prototype.hset as ReturnType<typeof vi.fn>).mock
       .calls[0];
     const stored = Object.values(fields)[0] as {
@@ -128,7 +148,8 @@ describe("importLabels — isPublic coercion", () => {
     (Redis.prototype.hset as ReturnType<typeof vi.fn>).mockResolvedValueOnce(1);
     await importLabels(42220, {
       "0xabc": {
-        label: "Test",
+        name: "Test",
+        tags: [],
         // @ts-expect-error intentionally passing wrong type to test coercion
         isPublic: "yes",
         updatedAt: "2026-01-01T00:00:00Z",
@@ -144,7 +165,8 @@ describe("importLabels — isPublic coercion", () => {
     (Redis.prototype.hset as ReturnType<typeof vi.fn>).mockResolvedValueOnce(1);
     await importLabels(42220, {
       "0xabc": {
-        label: "Test",
+        name: "Test",
+        tags: [],
         isPublic: true,
         updatedAt: "2026-01-01T00:00:00Z",
       },
@@ -164,13 +186,13 @@ describe("getAllChainLabels — paginated SCAN", () => {
     ]);
     (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       {
-        "0xabc": { label: "Test", updatedAt: "2026-01-01T00:00:00Z" },
+        "0xabc": { name: "Test", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
       },
     );
 
     const result = await getAllChainLabels();
     expect(result).toHaveProperty("42220");
-    expect(result["42220"]["0xabc"].label).toBe("Test");
+    expect(result["42220"]["0xabc"].name).toBe("Test");
     expect(Redis.prototype.scan).toHaveBeenCalledTimes(1);
   });
 
@@ -183,10 +205,18 @@ describe("getAllChainLabels — paginated SCAN", () => {
 
     (Redis.prototype.hgetall as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({
-        "0xaaa": { label: "Mainnet", updatedAt: "2026-01-01T00:00:00Z" },
+        "0xaaa": {
+          name: "Mainnet",
+          tags: [],
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
       })
       .mockResolvedValueOnce({
-        "0xbbb": { label: "Sepolia", updatedAt: "2026-01-01T00:00:00Z" },
+        "0xbbb": {
+          name: "Sepolia",
+          tags: [],
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
       });
 
     const result = await getAllChainLabels();
@@ -194,8 +224,8 @@ describe("getAllChainLabels — paginated SCAN", () => {
     expect(Redis.prototype.scan).toHaveBeenCalledTimes(2);
     expect(result).toHaveProperty("42220");
     expect(result).toHaveProperty("11142220");
-    expect(result["42220"]["0xaaa"].label).toBe("Mainnet");
-    expect(result["11142220"]["0xbbb"].label).toBe("Sepolia");
+    expect(result["42220"]["0xaaa"].name).toBe("Mainnet");
+    expect(result["11142220"]["0xbbb"].name).toBe("Sepolia");
   });
 
   it("returns empty object when no labels:* keys exist", async () => {
@@ -207,5 +237,62 @@ describe("getAllChainLabels — paginated SCAN", () => {
     const result = await getAllChainLabels();
     expect(result).toEqual({});
     expect(Redis.prototype.scan).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("upgradeEntry — backward compat", () => {
+  it("passes through v2 entries", () => {
+    const entry = upgradeEntry({
+      name: "Wintermute",
+      tags: ["Market Maker"],
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+    expect(entry.name).toBe("Wintermute");
+    expect(entry.tags).toEqual(["Market Maker"]);
+  });
+
+  it("upgrades v1 entries (label → name, category → tags[0])", () => {
+    const entry = upgradeEntry({
+      label: "Old Name",
+      category: "CEX",
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+    expect(entry.name).toBe("Old Name");
+    expect(entry.tags).toEqual(["CEX"]);
+  });
+
+  it("upgrades v1 entries without category (empty tags)", () => {
+    const entry = upgradeEntry({
+      label: "Old Name",
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+    expect(entry.name).toBe("Old Name");
+    expect(entry.tags).toEqual([]);
+  });
+
+  it("handles entries with neither name nor label", () => {
+    const entry = upgradeEntry({ updatedAt: "2026-01-01T00:00:00Z" });
+    expect(entry.name).toBe("");
+    expect(entry.tags).toEqual([]);
+  });
+
+  it("auto-upgrades v1 entries on getLabels read", async () => {
+    (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      {
+        "0xaaa": {
+          label: "Legacy",
+          category: "DeFi",
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+      },
+    );
+    const result = await getLabels(42220);
+    expect(result["0xaaa"].name).toBe("Legacy");
+    expect(result["0xaaa"].tags).toEqual(["DeFi"]);
+    // label/category should not exist in returned entry
+    expect((result["0xaaa"] as Record<string, unknown>).label).toBeUndefined();
+    expect(
+      (result["0xaaa"] as Record<string, unknown>).category,
+    ).toBeUndefined();
   });
 });

@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useState } from "react";
 import { useAddressLabels } from "@/components/address-labels-provider";
-import type { AddressLabelEntry } from "@/lib/address-labels";
+import type { AddressEntry } from "@/lib/address-labels";
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for testing)
@@ -10,50 +10,72 @@ import type { AddressLabelEntry } from "@/lib/address-labels";
 
 /**
  * Determine whether the editor is operating on a contract row (existing address
- * that hasn't yet received a custom label). In this mode the label field is
+ * that hasn't yet received a custom label). In this mode the name field is
  * optional; leaving it blank preserves the static contract name.
  */
 export function resolveIsContractRow(opts: {
   isNewAddress: boolean;
-  initial: { label?: string } | undefined;
+  initial: { name?: string; label?: string } | undefined;
   isCustom: boolean;
 }): boolean {
   return !opts.isNewAddress && opts.initial !== undefined && !opts.isCustom;
 }
 
 /**
- * Compute the label that will actually be persisted.
- * - For contract rows an empty label input falls back to the initial contract name.
+ * Compute the name that will actually be persisted.
+ * - For contract rows an empty name input falls back to the initial contract name.
  * - For all other rows the typed value is used as-is (required, validated upstream).
  */
-export function resolveEffectiveLabel(
-  labelInput: string,
+export function resolveEffectiveName(
+  nameInput: string,
   isContractRow: boolean,
-  initialLabel: string | undefined,
+  initialName: string | undefined,
 ): string {
-  if (isContractRow && !labelInput.trim()) {
-    return initialLabel ?? "";
+  if (isContractRow && !nameInput.trim()) {
+    return initialName ?? "";
   }
-  return labelInput.trim();
+  return nameInput.trim();
 }
 
+/** @deprecated Use resolveEffectiveName instead */
+export const resolveEffectiveLabel = resolveEffectiveName;
+
 /**
- * Validate the form inputs for the label editor.
+ * Validate the form inputs for the entry editor.
  * Returns an error string or null when valid.
+ *
+ * Relaxed validation: name is not required if tags are present.
  */
+export function validateEntryForm(opts: {
+  isNewAddress: boolean;
+  address: string;
+  name: string;
+  tags?: string[];
+  isContractRow: boolean;
+}): string | null {
+  if (opts.isNewAddress && !/^0x[0-9a-fA-F]{40}$/.test(opts.address.trim())) {
+    return "Enter a valid 0x address.";
+  }
+  const hasTags = opts.tags && opts.tags.length > 0;
+  if (!opts.isContractRow && !opts.name.trim() && !hasTags) {
+    return "Name or at least one tag is required.";
+  }
+  return null;
+}
+
+/** @deprecated Use validateEntryForm instead */
 export function validateLabelForm(opts: {
   isNewAddress: boolean;
   address: string;
   label: string;
   isContractRow: boolean;
 }): string | null {
-  if (opts.isNewAddress && !/^0x[0-9a-fA-F]{40}$/.test(opts.address.trim())) {
-    return "Enter a valid 0x address.";
-  }
-  if (!opts.isContractRow && !opts.label.trim()) {
-    return "Label is required.";
-  }
-  return null;
+  return validateEntryForm({
+    isNewAddress: opts.isNewAddress,
+    address: opts.address,
+    name: opts.label,
+    isContractRow: opts.isContractRow,
+  });
 }
 
 const CATEGORIES = [
@@ -72,8 +94,8 @@ const CATEGORIES = [
 type Props = {
   /** Pass empty string to allow the user to type a new address */
   address: string;
-  /** Pre-filled initial values when editing an existing label */
-  initial?: AddressLabelEntry;
+  /** Pre-filled initial values when editing an existing entry */
+  initial?: AddressEntry;
   onClose: () => void;
 };
 
@@ -88,8 +110,8 @@ export function AddressLabelEditor({
 
   const isNewAddress = initialAddress === "";
   const [address, setAddress] = useState(initialAddress);
-  const [label, setLabel] = useState(initial?.label ?? "");
-  const [category, setCategory] = useState(initial?.category ?? "");
+  const [label, setLabel] = useState(initial?.name ?? "");
+  const [category, setCategory] = useState(initial?.tags?.[0] ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [isPublic, setIsPublic] = useState(initial?.isPublic ?? false);
   const [saving, setSaving] = useState(false);
@@ -131,10 +153,10 @@ export function AddressLabelEditor({
       setError(validationError);
       return;
     }
-    const effectiveLabel = resolveEffectiveLabel(
+    const effectiveLabel = resolveEffectiveName(
       label,
       isContractRow,
-      initial?.label,
+      initial?.name,
     );
     setSaving(true);
     setError(null);

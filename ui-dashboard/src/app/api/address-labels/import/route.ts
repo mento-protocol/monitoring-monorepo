@@ -3,7 +3,8 @@ import { getAuthSession } from "@/auth";
 import {
   importLabels,
   getLabels,
-  type AddressLabelEntry,
+  upgradeEntry,
+  type AddressEntry,
   type AddressLabelsSnapshot,
 } from "@/lib/address-labels";
 import { MAINNET_CHAIN_IDS } from "@/lib/types";
@@ -103,11 +104,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // Fetch existing labels for each distinct chainId so we can merge instead
-    // of overwriting — preserves category, notes, isPublic from prior entries.
-    const existingByChain = new Map<
-      number,
-      Record<string, AddressLabelEntry>
-    >();
+    // of overwriting — preserves tags, notes, isPublic from prior entries.
+    const existingByChain = new Map<number, Record<string, AddressEntry>>();
     const distinctChainIds = [...new Set(parsed.map((e) => e.chainId))];
     try {
       for (const chainId of distinctChainIds) {
@@ -117,16 +115,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return serverError(err);
     }
 
-    const byChain = new Map<number, Record<string, AddressLabelEntry>>();
+    const byChain = new Map<number, Record<string, AddressEntry>>();
     for (const entry of parsed) {
       const { chainId, address, name } = entry;
       const existing = existingByChain.get(chainId) ?? {};
       const prev = existing[address.toLowerCase()];
       if (!byChain.has(chainId)) byChain.set(chainId, {});
       byChain.get(chainId)![address] = {
-        // Preserve existing metadata; only overwrite label and timestamp.
+        // Preserve existing metadata; only overwrite name and timestamp.
         ...prev,
-        label: name,
+        name,
+        tags: prev?.tags ?? [],
         updatedAt: new Date().toISOString(),
       };
     }
@@ -153,7 +152,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           { status: 400 },
         );
       }
-      if (!isLabelsMap(labels)) {
+      if (!isEntriesMap(labels)) {
         return NextResponse.json(
           { error: `Invalid labels map for chainId ${key}` },
           { status: 400 },
@@ -163,7 +162,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     try {
       for (const [chainId, labels] of chainEntries) {
-        await importLabels(Number(chainId), labels);
+        // Auto-upgrade legacy entries (label→name, category→tags[0])
+        const upgraded = upgradeEntriesMap(
+          labels as Record<string, Record<string, unknown>>,
+        );
+        await importLabels(Number(chainId), upgraded);
       }
       return NextResponse.json({ ok: true });
     } catch (err) {
@@ -179,7 +182,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   ) {
     return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });
   }
-  if (!isLabelsMap(labels)) {
+  if (!isEntriesMap(labels)) {
     return NextResponse.json(
       { error: "labels must be an object mapping address → entry" },
       { status: 400 },
@@ -187,7 +190,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    await importLabels(chainId, labels);
+    // Auto-upgrade legacy entries (label→name, category→tags[0])
+    const upgraded = upgradeEntriesMap(
+      labels as Record<string, Record<string, unknown>>,
+    );
+    await importLabels(chainId, upgraded);
     return NextResponse.json({ ok: true });
   } catch (err) {
     return serverError(err);
@@ -219,14 +226,34 @@ function isSnapshot(v: unknown): v is AddressLabelsSnapshot {
   );
 }
 
-function isLabelsMap(v: unknown): v is Record<string, AddressLabelEntry> {
+/**
+ * Validates that a value is a map of address → entry objects.
+ * Accepts both v1 (label field) and v2 (name field) entry shapes.
+ */
+function isEntriesMap(v: unknown): v is Record<string, AddressEntry> {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
   return Object.values(v as Record<string, unknown>).every(
     (entry) =>
       typeof entry === "object" &&
       entry !== null &&
-      typeof (entry as AddressLabelEntry).label === "string",
+      (typeof (entry as Record<string, unknown>).label === "string" ||
+        typeof (entry as Record<string, unknown>).name === "string"),
   );
+}
+
+/**
+ * Upgrade a map of entries, handling both v1 (label/category) and v2 (name/tags).
+ */
+function upgradeEntriesMap(
+  entries: Record<string, Record<string, unknown>>,
+): Record<string, AddressEntry> {
+  const result: Record<string, AddressEntry> = {};
+  for (const [address, entry] of Object.entries(entries)) {
+    if (typeof entry === "object" && entry !== null) {
+      result[address] = upgradeEntry(entry);
+    }
+  }
+  return result;
 }
 
 function serverError(err: unknown): NextResponse {
@@ -243,11 +270,13 @@ function serverError(err: unknown): NextResponse {
  * Parse a CSV body and import into all configured mainnet chains.
  *
  * Expected format (header row required):
- *   address,name
- *   0x1234...,My Label
+ *   address,name,tags
+ *   0x1234...,My Label,"Market Maker;Arbitrageur"
  *
- * Additional columns are ignored. Duplicate addresses are merged (last label
- * for an address wins). Chain defaults to Celo (42220) + Monad (143) mainnet.
+ * The `tags` column is optional. Tags are semicolon-delimited within the CSV
+ * column. Additional columns are ignored. Duplicate addresses are merged (last
+ * entry for an address wins). Chain defaults to Celo (42220) + Monad (143)
+ * mainnet.
  */
 async function handleCsvImport(req: NextRequest): Promise<NextResponse> {
   let text: string;
@@ -273,16 +302,16 @@ async function handleCsvText(text: string): Promise<NextResponse> {
   }
 
   // Build labels map — last row wins for duplicate addresses.
-  const labels: Record<string, AddressLabelEntry> = {};
+  const labels: Record<string, AddressEntry> = {};
   const now = new Date().toISOString();
-  for (const { address, name } of rows) {
+  for (const { address, name, tags } of rows) {
     // Do NOT set isPublic here — the merge below preserves the existing value.
     // Forcing isPublic:true would silently un-private any previously private label.
-    labels[address.toLowerCase()] = { label: name, updatedAt: now };
+    labels[address.toLowerCase()] = { name, tags, updatedAt: now };
   }
 
-  // Fetch existing labels to merge (preserve category, notes, isPublic).
-  const existingByChain = new Map<number, Record<string, AddressLabelEntry>>();
+  // Fetch existing labels to merge (preserve notes, isPublic).
+  const existingByChain = new Map<number, Record<string, AddressEntry>>();
   try {
     for (const chainId of MAINNET_CHAIN_IDS) {
       existingByChain.set(chainId, await getLabels(chainId));
@@ -296,10 +325,10 @@ async function handleCsvText(text: string): Promise<NextResponse> {
   // risk compared to sequential writes. Note: Promise.all is NOT atomic; one
   // chain can succeed before another rejects. On failure, the caller should
   // retry — re-importing already-written chains is idempotent.
-  const mergedByChain = new Map<number, Record<string, AddressLabelEntry>>();
+  const mergedByChain = new Map<number, Record<string, AddressEntry>>();
   for (const chainId of MAINNET_CHAIN_IDS) {
     const existing = existingByChain.get(chainId) ?? {};
-    const merged: Record<string, AddressLabelEntry> = {};
+    const merged: Record<string, AddressEntry> = {};
     for (const [addr, entry] of Object.entries(labels)) {
       const prev = existing[addr];
       merged[addr] = { ...prev, ...entry };
@@ -323,12 +352,13 @@ async function handleCsvText(text: string): Promise<NextResponse> {
 }
 
 type CsvParseResult =
-  | { rows: Array<{ address: string; name: string }> }
+  | { rows: Array<{ address: string; name: string; tags: string[] }> }
   | { error: string };
 
 /**
  * Minimal CSV parser. Supports quoted fields and UTF-8 BOM. Expects a header
  * row containing at least "address" and "name" columns (case-insensitive).
+ * Optional "tags" column with semicolon-delimited values.
  * Extra columns are ignored.
  *
  * Limitation: quoted fields containing embedded newlines (RFC 4180 §2.6) are
@@ -350,6 +380,7 @@ function parseCsv(text: string): CsvParseResult {
   const header = headerParsed.cols.map((h) => h.toLowerCase().trim());
   const addrIdx = header.indexOf("address");
   const nameIdx = header.indexOf("name");
+  const tagsIdx = header.indexOf("tags");
 
   if (addrIdx === -1 || nameIdx === -1) {
     return {
@@ -359,7 +390,7 @@ function parseCsv(text: string): CsvParseResult {
     };
   }
 
-  const rows: Array<{ address: string; name: string }> = [];
+  const rows: Array<{ address: string; name: string; tags: string[] }> = [];
   for (let i = 1; i < lines.length; i++) {
     const parsedLine = splitCsvLine(lines[i]);
     if ("error" in parsedLine) {
@@ -370,10 +401,17 @@ function parseCsv(text: string): CsvParseResult {
     const cols = parsedLine.cols;
     const address = cols[addrIdx]?.trim() ?? "";
     const name = cols[nameIdx]?.trim() ?? "";
+    const tagsRaw = tagsIdx !== -1 ? (cols[tagsIdx]?.trim() ?? "") : "";
+    const tags = tagsRaw
+      ? tagsRaw
+          .split(";")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : [];
 
     // Skip only fully empty rows. Half-empty rows are malformed input and
     // should fail loudly rather than silently disappearing from the import.
-    if (!address && !name) continue;
+    if (!address && !name && tags.length === 0) continue;
     if (!address) {
       return {
         error: `Empty address on line ${i + 1}`,
@@ -384,12 +422,13 @@ function parseCsv(text: string): CsvParseResult {
         error: `Invalid address on line ${i + 1}: "${address}"`,
       };
     }
-    if (!name) {
+    // Relaxed validation: at least one of name or tags must be non-empty
+    if (!name && tags.length === 0) {
       return {
         error: `Empty name for address ${address} on line ${i + 1}`,
       };
     }
-    rows.push({ address, name });
+    rows.push({ address, name, tags });
   }
 
   return { rows };

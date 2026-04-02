@@ -3,7 +3,7 @@ import { getAuthSession } from "@/auth";
 import {
   getLabels,
   getAllChainLabels,
-  type AddressLabelEntry,
+  type AddressEntry,
   type AddressLabelsSnapshot,
 } from "@/lib/address-labels";
 
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const chainIdParam = req.nextUrl.searchParams.get("chainId");
 
   try {
-    let chains: Record<string, Record<string, AddressLabelEntry>>;
+    let chains: Record<string, Record<string, AddressEntry>>;
     let filename: string;
 
     if (chainIdParam !== null) {

@@ -54,7 +54,14 @@ export default function AddressBookPage({
         const key = `${id}:${address}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        rows.push({ key, address, label, isCustom: false, network: net });
+        rows.push({
+          key,
+          address,
+          name: label,
+          tags: [],
+          isCustom: false,
+          network: net,
+        });
       }
     }
 
@@ -68,7 +75,8 @@ export default function AddressBookPage({
       customLabels.map((r) => ({
         key: `custom:${r.address}`,
         address: r.address,
-        label: getLabel(r.address),
+        name: getLabel(r.address),
+        tags: r.tags ?? [],
         isCustom: true,
         network: selectedNetwork,
       })),
@@ -88,8 +96,8 @@ export default function AddressBookPage({
         if (!search) return true;
         const q = search.toLowerCase();
         return (
-          row.address.toLowerCase().includes(q) ||
-          row.label.toLowerCase().includes(q) ||
+          row.address.includes(q) ||
+          row.name.toLowerCase().includes(q) ||
           (row.network?.label.toLowerCase().includes(q) ?? false)
         );
       }),
@@ -346,13 +354,13 @@ export default function AddressBookPage({
                   <AddressTableRow
                     key={`${row.network?.id ?? selectedNetwork.id}:${row.address}`}
                     address={row.address}
-                    label={row.label}
+                    label={row.name}
                     networkLabel={
                       row.network
                         ? row.network.label.replace(/ \(.*\)$/, "")
                         : null
                     }
-                    category={entry?.category}
+                    category={entry?.tags?.[0]}
                     notes={entry?.notes}
                     isPublic={entry?.isPublic}
                     isCustom={isCustomResolved}
@@ -378,7 +386,8 @@ export default function AddressBookPage({
             getEntry(editingAddress) ??
             (selectedNetwork.addressLabels[editingAddress]
               ? {
-                  label: selectedNetwork.addressLabels[editingAddress],
+                  name: selectedNetwork.addressLabels[editingAddress],
+                  tags: [],
                   updatedAt: new Date().toISOString(),
                 }
               : undefined)

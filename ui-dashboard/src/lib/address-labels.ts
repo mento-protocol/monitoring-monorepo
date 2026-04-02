@@ -4,25 +4,99 @@ import { Redis } from "@upstash/redis";
 // Types
 // ---------------------------------------------------------------------------
 
-export type AddressLabelEntry = {
-  label: string;
-  category?: string;
+export type AddressEntry = {
+  name: string;
+  tags: string[];
   notes?: string;
   isPublic?: boolean;
   updatedAt: string;
 };
 
+/** @deprecated Use AddressEntry instead */
+export type AddressLabelEntry = AddressEntry;
+
 /** Full record as returned from the API -- includes the address itself. */
-export type AddressLabelRecord = AddressLabelEntry & {
+export type AddressEntryRecord = AddressEntry & {
   address: string;
 };
+
+/** @deprecated Use AddressEntryRecord instead */
+export type AddressLabelRecord = AddressEntryRecord;
 
 /** Shape of a full export/backup snapshot. */
 export type AddressLabelsSnapshot = {
   exportedAt: string;
   /** chainId → address (lower) → entry */
-  chains: Record<string, Record<string, AddressLabelEntry>>;
+  chains: Record<string, Record<string, AddressEntry>>;
 };
+
+// ---------------------------------------------------------------------------
+// Backward-compat: auto-upgrade legacy entries on read
+// ---------------------------------------------------------------------------
+
+/**
+ * If a Redis entry has `label` but no `name`, auto-upgrade to the new schema.
+ * This handles both partially-migrated Redis data and stale SWR cache entries.
+ */
+export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
+  const entry = raw as Record<string, unknown>;
+
+  // Already in v2 format
+  if (typeof entry.name === "string") {
+    return {
+      name: entry.name,
+      tags: Array.isArray(entry.tags) ? entry.tags : [],
+      notes: typeof entry.notes === "string" ? entry.notes : undefined,
+      isPublic: entry.isPublic === true ? true : undefined,
+      updatedAt:
+        typeof entry.updatedAt === "string"
+          ? entry.updatedAt
+          : new Date().toISOString(),
+    };
+  }
+
+  // Legacy v1 format: { label, category?, ... }
+  if (typeof entry.label === "string") {
+    const tags: string[] = [];
+    if (typeof entry.category === "string" && entry.category.trim()) {
+      tags.push(entry.category.trim());
+    }
+    return {
+      name: entry.label,
+      tags,
+      notes: typeof entry.notes === "string" ? entry.notes : undefined,
+      isPublic: entry.isPublic === true ? true : undefined,
+      updatedAt:
+        typeof entry.updatedAt === "string"
+          ? entry.updatedAt
+          : new Date().toISOString(),
+    };
+  }
+
+  // Fallback: unknown shape — return minimal valid entry
+  return {
+    name: "",
+    tags: [],
+    notes: typeof entry.notes === "string" ? entry.notes : undefined,
+    isPublic: entry.isPublic === true ? true : undefined,
+    updatedAt:
+      typeof entry.updatedAt === "string"
+        ? entry.updatedAt
+        : new Date().toISOString(),
+  };
+}
+
+function upgradeEntries(
+  raw: Record<string, unknown>,
+): Record<string, AddressEntry> {
+  const result: Record<string, AddressEntry> = {};
+  for (const [address, entry] of Object.entries(raw)) {
+    if (typeof entry === "object" && entry !== null) {
+      result[address] = upgradeEntry(entry as Record<string, unknown>);
+    }
+  }
+  return result;
+}
 
 // ---------------------------------------------------------------------------
 // Redis key helpers
@@ -54,12 +128,12 @@ function getRedis(): Redis {
 export async function getLabels(
   chainId: number,
   options?: { publicOnly?: boolean },
-): Promise<Record<string, AddressLabelEntry>> {
+): Promise<Record<string, AddressEntry>> {
   const redis = getRedis();
-  const raw = await redis.hgetall<Record<string, AddressLabelEntry>>(
+  const raw = await redis.hgetall<Record<string, Record<string, unknown>>>(
     labelsKey(chainId),
   );
-  const all = raw ?? {};
+  const all = raw ? upgradeEntries(raw as Record<string, unknown>) : {};
   if (options?.publicOnly) {
     return Object.fromEntries(
       Object.entries(all).filter(([, entry]) => entry.isPublic === true),
@@ -68,18 +142,21 @@ export async function getLabels(
   return all;
 }
 
-export async function upsertLabel(
+export async function upsertEntry(
   chainId: number,
   address: string,
-  entry: Omit<AddressLabelEntry, "updatedAt">,
+  entry: Omit<AddressEntry, "updatedAt">,
 ): Promise<void> {
   const redis = getRedis();
-  const value: AddressLabelEntry = {
+  const value: AddressEntry = {
     ...entry,
     updatedAt: new Date().toISOString(),
   };
   await redis.hset(labelsKey(chainId), { [address.toLowerCase()]: value });
 }
+
+/** @deprecated Use upsertEntry instead */
+export const upsertLabel = upsertEntry;
 
 export async function deleteLabel(
   chainId: number,
@@ -90,7 +167,7 @@ export async function deleteLabel(
 }
 
 export async function getAllChainLabels(): Promise<
-  Record<string, Record<string, AddressLabelEntry>>
+  Record<string, Record<string, AddressEntry>>
 > {
   const redis = getRedis();
 
@@ -107,13 +184,14 @@ export async function getAllChainLabels(): Promise<
     allKeys.push(...batch);
   } while (cursor !== 0);
 
-  const result: Record<string, Record<string, AddressLabelEntry>> = {};
+  const result: Record<string, Record<string, AddressEntry>> = {};
   await Promise.all(
     allKeys.map(async (key) => {
-      const raw = await redis.hgetall<Record<string, AddressLabelEntry>>(key);
+      const raw =
+        await redis.hgetall<Record<string, Record<string, unknown>>>(key);
       if (raw) {
         const chainId = key.replace("labels:", "");
-        result[chainId] = raw;
+        result[chainId] = upgradeEntries(raw as Record<string, unknown>);
       }
     }),
   );
@@ -122,7 +200,7 @@ export async function getAllChainLabels(): Promise<
 
 export async function importLabels(
   chainId: number,
-  labels: Record<string, AddressLabelEntry>,
+  labels: Record<string, AddressEntry>,
 ): Promise<void> {
   if (Object.keys(labels).length === 0) return;
   const redis = getRedis();

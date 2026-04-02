@@ -52,12 +52,13 @@ function makeNet(id: string, chainId: number): Network {
 function contractRow(
   address: string,
   net: Network,
-  label = "Contract",
+  name = "Contract",
 ): AddressBookRow {
   return {
     key: `${net.id}:${address.toLowerCase()}`,
     address,
-    label,
+    name,
+    tags: [],
     isCustom: false,
     network: net,
   };
@@ -67,7 +68,8 @@ function customRow(address: string, net: Network): AddressBookRow {
   return {
     key: `custom:${address.toLowerCase()}`,
     address,
-    label: "Custom label",
+    name: "Custom label",
+    tags: [],
     isCustom: true,
     network: net,
   };
@@ -231,7 +233,8 @@ describe("resolveCanEdit", () => {
     const row: AddressBookRow = {
       key: "custom",
       address: ADDR_A,
-      label: "lbl",
+      name: "lbl",
+      tags: [],
       isCustom: true,
       network: null,
     };
@@ -294,14 +297,23 @@ describe("countImportLabels", () => {
     expect(countImportLabels(entries)).toBe(1);
   });
 
-  it("counts entries in snapshot format", () => {
+  it("counts entries in snapshot format (v2 schema)", () => {
     const snapshot = {
       chains: {
-        "42220": { [addr]: { label: "A", updatedAt: "" } },
-        "1": { [addr2]: { label: "B", updatedAt: "" } },
+        "42220": { [addr]: { name: "A", tags: [], updatedAt: "" } },
+        "1": { [addr2]: { name: "B", tags: [], updatedAt: "" } },
       },
     };
     expect(countImportLabels(snapshot)).toBe(2);
+  });
+
+  it("counts entries in snapshot format (legacy v1 schema)", () => {
+    const snapshot = {
+      chains: {
+        "42220": { [addr]: { label: "A", updatedAt: "" } },
+      },
+    };
+    expect(countImportLabels(snapshot)).toBe(1);
   });
 
   it("deduplicates checksummed vs lowercase addresses in snapshot format", () => {
@@ -309,31 +321,41 @@ describe("countImportLabels", () => {
     const snapshot = {
       chains: {
         "42220": {
-          [addr.toLowerCase()]: { label: "A", updatedAt: "" },
-          [addr.toUpperCase()]: { label: "A upper", updatedAt: "" },
+          [addr.toLowerCase()]: { name: "A", tags: [], updatedAt: "" },
+          [addr.toUpperCase()]: { name: "A upper", tags: [], updatedAt: "" },
         },
       },
     };
     expect(countImportLabels(snapshot)).toBe(1);
   });
 
-  it("counts entries in simple format", () => {
+  it("counts entries in simple format (v2 schema)", () => {
+    const simple = {
+      chainId: 42220,
+      labels: {
+        [addr]: { name: "A", tags: [], updatedAt: "" },
+        [addr2]: { name: "B", tags: [], updatedAt: "" },
+      },
+    };
+    expect(countImportLabels(simple)).toBe(2);
+  });
+
+  it("counts entries in simple format (legacy v1 schema)", () => {
     const simple = {
       chainId: 42220,
       labels: {
         [addr]: { label: "A", updatedAt: "" },
-        [addr2]: { label: "B", updatedAt: "" },
       },
     };
-    expect(countImportLabels(simple)).toBe(2);
+    expect(countImportLabels(simple)).toBe(1);
   });
 
   it("deduplicates checksummed vs lowercase addresses in simple format", () => {
     const simple = {
       chainId: 42220,
       labels: {
-        [addr.toLowerCase()]: { label: "A", updatedAt: "" },
-        [addr.toUpperCase()]: { label: "A upper", updatedAt: "" },
+        [addr.toLowerCase()]: { name: "A", tags: [], updatedAt: "" },
+        [addr.toUpperCase()]: { name: "A upper", tags: [], updatedAt: "" },
       },
     };
     expect(countImportLabels(simple)).toBe(1);
