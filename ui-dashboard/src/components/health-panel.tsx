@@ -98,7 +98,8 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   const { network } = useNetwork();
   const [priceInverted, setPriceInverted] = useState(false);
   const isVirtual = pool.source?.includes("virtual");
-  const hasHealthData = pool.healthStatus !== undefined;
+  const hasHealthData =
+    pool.hasHealthData === true || pool.healthStatus !== undefined;
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const oracleAge =
@@ -152,24 +153,29 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     60_000,
   );
 
-  const windowSnapshots = healthWindowData?.OracleSnapshot ?? [];
+  // Query returns desc order (newest first) with limit 1000.
+  // Reverse to chronological for scoring. If capped, we have the most recent
+  // 1000 snapshots — narrow windowStart to the oldest one we got.
+  const windowSnapshotsAsc = useMemo(() => {
+    const raw = healthWindowData?.OracleSnapshot ?? [];
+    return [...raw].reverse();
+  }, [healthWindowData]);
   const predecessor = predecessorData?.OracleSnapshot?.[0];
   const healthSnapshots = useMemo(() => {
     const out = predecessor
-      ? [predecessor, ...windowSnapshots]
-      : windowSnapshots;
+      ? [predecessor, ...windowSnapshotsAsc]
+      : windowSnapshotsAsc;
     return out.sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
-  }, [predecessor, windowSnapshots]);
+  }, [predecessor, windowSnapshotsAsc]);
 
   // If the window query hit the 1000 cap, narrow windowStart to the oldest
   // fetched snapshot so we score only the portion we actually have data for.
   const effectiveWindowStart = useMemo(() => {
-    const inWindow = windowSnapshots;
-    if (inWindow.length >= 1000 && inWindow.length > 0) {
-      return Math.max(windowStart, Number(inWindow[0]!.timestamp));
+    if (windowSnapshotsAsc.length >= 1000 && windowSnapshotsAsc.length > 0) {
+      return Math.max(windowStart, Number(windowSnapshotsAsc[0]!.timestamp));
     }
     return windowStart;
-  }, [windowSnapshots, windowStart]);
+  }, [windowSnapshotsAsc, windowStart]);
 
   const health24h = useMemo(
     () =>

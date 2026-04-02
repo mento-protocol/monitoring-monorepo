@@ -254,7 +254,7 @@ export const ORACLE_SNAPSHOTS_WINDOW = `
         poolId: { _eq: $poolId }
         timestamp: { _gte: $from, _lte: $to }
       }
-      order_by: { timestamp: asc }
+      order_by: { timestamp: desc }
       limit: $limit
     ) {
       id chainId

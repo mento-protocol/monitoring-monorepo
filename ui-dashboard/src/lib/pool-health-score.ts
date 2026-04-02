@@ -62,7 +62,10 @@ export function computeBinaryHealthWindow(
     };
   }
 
-  const freshnessLimit = getOracleStalenessThreshold(pool, chainId);
+  // Match indexer: min(oracleExpiry, 3600s) — see healthScore.ts MAX_CARRY_SECONDS
+  const MAX_CARRY_SECONDS = 3600;
+  const oracleExpiry = getOracleStalenessThreshold(pool, chainId);
+  const freshnessLimit = Math.min(oracleExpiry, MAX_CARRY_SECONDS);
   let trackedSeconds = 0;
   let healthySeconds = 0;
   let staleSeconds = 0;
