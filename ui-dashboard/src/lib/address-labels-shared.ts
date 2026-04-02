@@ -117,7 +117,7 @@ const MAX_TAG_LENGTH = 50;
  * trim + case-insensitive dedup tags.
  */
 export function sanitizeEntry(entry: AddressEntry): AddressEntry {
-  const name = entry.name.slice(0, MAX_NAME_LENGTH);
+  const name = entry.name.trim().slice(0, MAX_NAME_LENGTH);
   const notes = entry.notes?.slice(0, MAX_NOTES_LENGTH);
 
   // Trim, truncate, and case-insensitive dedup tags
