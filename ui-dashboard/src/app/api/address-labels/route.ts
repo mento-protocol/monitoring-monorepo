@@ -59,11 +59,51 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // DoS guards: cap input sizes (#4)
+  if (trimmedName.length > 200) {
+    return NextResponse.json(
+      { error: "name must be 200 characters or fewer" },
+      { status: 400 },
+    );
+  }
+  const trimmedNotes =
+    typeof notes === "string" ? notes.trim() || undefined : undefined;
+  if (trimmedNotes && trimmedNotes.length > 500) {
+    return NextResponse.json(
+      { error: "notes must be 500 characters or fewer" },
+      { status: 400 },
+    );
+  }
+  if (parsedTags.length > 20) {
+    return NextResponse.json(
+      { error: "tags must have 20 items or fewer" },
+      { status: 400 },
+    );
+  }
+  const longTag = parsedTags.find((t) => t.trim().length > 50);
+  if (longTag) {
+    return NextResponse.json(
+      { error: "each tag must be 50 characters or fewer" },
+      { status: 400 },
+    );
+  }
+
+  // Deduplicate tags: case-insensitive, preserve first-occurrence casing (#6)
+  const seenTags = new Set<string>();
+  const deduplicatedTags = parsedTags
+    .map((t) => t.trim())
+    .filter((t) => {
+      const key = t.toLowerCase();
+      if (seenTags.has(key)) return false;
+      seenTags.add(key);
+      return true;
+    });
+
   try {
     await upsertEntry(chainId as number, address, {
       name: trimmedName,
-      tags: parsedTags.map((t) => t.trim()),
-      notes: typeof notes === "string" ? notes.trim() || undefined : undefined,
+      tags: deduplicatedTags,
+      notes: trimmedNotes,
       isPublic: isPublic === true,
     });
     return NextResponse.json({ ok: true });

@@ -11,7 +11,7 @@ import useSWR, { useSWRConfig } from "swr";
 import { useNetwork } from "@/components/network-provider";
 import { truncateAddress } from "@/lib/format";
 import {
-  upgradeEntry,
+  upgradeEntries,
   type AddressEntry,
   type AddressEntryRecord,
   type AddressLabelRecord,
@@ -93,32 +93,12 @@ async function fetchLabels(
 /**
  * Client-side backward compat: if SWR cache contains stale v1 entries
  * (with `label` instead of `name`), auto-upgrade them.
+ * Delegates to the shared upgradeEntries() from address-labels.ts (#9).
  */
 function ensureUpgraded(
   data: Record<string, unknown>,
 ): Record<string, AddressEntry> {
-  const result: Record<string, AddressEntry> = {};
-  for (const [address, rawEntry] of Object.entries(data)) {
-    if (typeof rawEntry !== "object" || rawEntry === null) continue;
-    const entry = rawEntry as Record<string, unknown>;
-    // Already v2 shape
-    if (typeof entry.name === "string") {
-      result[address] = {
-        name: entry.name,
-        tags: Array.isArray(entry.tags) ? entry.tags : [],
-        notes: typeof entry.notes === "string" ? entry.notes : undefined,
-        isPublic: entry.isPublic === true ? true : undefined,
-        updatedAt:
-          typeof entry.updatedAt === "string"
-            ? entry.updatedAt
-            : new Date().toISOString(),
-      };
-    } else {
-      // Stale v1 cache entry — upgrade
-      result[address] = upgradeEntry(entry);
-    }
-  }
-  return result;
+  return upgradeEntries(data);
 }
 
 export function AddressLabelsProvider({ children }: { children: ReactNode }) {
@@ -172,9 +152,12 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     (address: string | null): boolean => {
       if (!address) return false;
       const lower = address.toLowerCase();
-      const customName = customData[lower]?.name;
+      const entry = customData[lower];
+      // True if address has a named entry, a tag-only custom entry, or a
+      // static contract label — tag-only entries should not appear as unlabeled
+      // (#2)
       return (
-        (customName !== undefined && customName !== "") ||
+        (entry !== undefined && (entry.name !== "" || entry.tags.length > 0)) ||
         lower in network.addressLabels
       );
     },

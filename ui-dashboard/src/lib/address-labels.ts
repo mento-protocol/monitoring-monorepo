@@ -86,7 +86,7 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
   };
 }
 
-function upgradeEntries(
+export function upgradeEntries(
   raw: Record<string, unknown>,
 ): Record<string, AddressEntry> {
   const result: Record<string, AddressEntry> = {};
