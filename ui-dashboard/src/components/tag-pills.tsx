@@ -37,8 +37,12 @@ export function TagPills({ tags, maxHeight = 48 }: TagPillsProps) {
 
     const ro = new ResizeObserver(() => recalc());
     ro.observe(container);
-    recalc();
-    return () => ro.disconnect();
+    // Initial calculation via rAF to satisfy the no-direct-set-state-in-useEffect rule
+    const raf = requestAnimationFrame(() => recalc());
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
   }, [recalc, tags]);
 
   if (tags.length === 0) return null;

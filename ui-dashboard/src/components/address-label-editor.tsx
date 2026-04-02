@@ -269,13 +269,17 @@ export function AddressLabelEditor({
 
           {/* Tags */}
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">
+            <span
+              id="al-tags-label"
+              className="block text-xs font-medium text-slate-400 mb-1"
+            >
               Tags <span className="text-slate-500">(optional)</span>
-            </label>
+            </span>
             <TagInput
               tags={tags}
               onChange={setTags}
               suggestions={tagSuggestions}
+              aria-labelledby="al-tags-label"
             />
           </div>
 

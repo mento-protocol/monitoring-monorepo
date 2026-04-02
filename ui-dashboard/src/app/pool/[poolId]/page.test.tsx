@@ -40,9 +40,8 @@ const getNameMock = vi.fn((address: string | null | undefined) => {
   };
   return labels[address] ?? address;
 });
-const getTagsMock = vi.fn((_address: string | null | undefined) => {
-  return [] as string[];
-});
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const getTagsMock = vi.fn((_address: string | null) => [] as string[]);
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ poolId: encodeURIComponent("pool-1") }),
