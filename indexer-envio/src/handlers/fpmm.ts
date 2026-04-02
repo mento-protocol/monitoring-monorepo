@@ -42,6 +42,7 @@ import {
   fetchTradingLimits,
 } from "../rpc";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
+import { recordHealthSample } from "../healthScore";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -520,6 +521,15 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   });
 
   if (rebalancingState) {
+    // Health score: compute snapshot fields + update pool accumulators
+    const { snapshotFields, poolUpdate } = recordHealthSample(
+      pool,
+      pool.priceDifference,
+      pool.rebalanceThreshold,
+      blockTimestamp,
+    );
+    context.Pool.set({ ...pool, ...poolUpdate });
+
     const snapshot: OracleSnapshot = {
       id: eventId(event.chainId, event.block.number, event.logIndex),
       chainId: event.chainId,
@@ -533,6 +543,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       source: "update_reserves",
       blockNumber,
       txHash: event.transaction.hash,
+      ...snapshotFields,
     };
     context.OracleSnapshot.set(snapshot);
   }
@@ -612,6 +623,15 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   });
 
   if (rebalancingState) {
+    // Health score: compute snapshot fields + update pool accumulators
+    const { snapshotFields, poolUpdate } = recordHealthSample(
+      pool,
+      pool.priceDifference,
+      pool.rebalanceThreshold,
+      blockTimestamp,
+    );
+    context.Pool.set({ ...pool, ...poolUpdate });
+
     const snapshot: OracleSnapshot = {
       id: eventId(event.chainId, event.block.number, event.logIndex),
       chainId: event.chainId,
@@ -625,6 +645,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       source: "rebalanced",
       blockNumber,
       txHash: event.transaction.hash,
+      ...snapshotFields,
     };
     context.OracleSnapshot.set(snapshot);
   }

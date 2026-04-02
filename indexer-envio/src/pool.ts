@@ -81,6 +81,12 @@ export const DEFAULT_ORACLE_FIELDS = {
   rebalanceLivenessStatus: "N/A" as string,
   token0Decimals: 18,
   token1Decimals: 18,
+  // Health score accumulators
+  healthTotalSeconds: 0n,
+  healthBinarySeconds: 0n,
+  lastOracleSnapshotTimestamp: 0n,
+  lastDeviationRatio: "0.000000",
+  hasHealthData: false,
 };
 
 const getOrCreatePool = async (

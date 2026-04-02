@@ -37,6 +37,11 @@ export const ALL_POOLS_WITH_HEALTH = `
       notionalVolume1
       reserves0
       reserves1
+      healthTotalSeconds
+      healthBinarySeconds
+      lastOracleSnapshotTimestamp
+      lastDeviationRatio
+      hasHealthData
     }
   }
 `;
@@ -150,6 +155,11 @@ export const POOL_DETAIL_WITH_HEALTH = `
       rebalanceLivenessStatus
       reserves0
       reserves1
+      healthTotalSeconds
+      healthBinarySeconds
+      lastOracleSnapshotTimestamp
+      lastDeviationRatio
+      hasHealthData
     }
   }
 `;
@@ -202,6 +212,9 @@ export const ORACLE_SNAPSHOTS = `
       source
       blockNumber
       txHash
+      deviationRatio
+      healthBinaryValue
+      hasHealthData
     }
   }
 `;
@@ -227,6 +240,65 @@ export const ORACLE_SNAPSHOTS_CHART = `
       source
       blockNumber
       txHash
+      deviationRatio
+      healthBinaryValue
+      hasHealthData
+    }
+  }
+`;
+
+export const ORACLE_SNAPSHOTS_WINDOW = `
+  query OracleSnapshotsWindow($poolId: String!, $from: numeric!, $to: numeric!, $limit: Int!) {
+    OracleSnapshot(
+      where: {
+        poolId: { _eq: $poolId }
+        timestamp: { _gte: $from, _lte: $to }
+      }
+      order_by: { timestamp: asc }
+      limit: $limit
+    ) {
+      id chainId
+      poolId
+      timestamp
+      oraclePrice
+      oracleOk
+      numReporters
+      priceDifference
+      rebalanceThreshold
+      source
+      blockNumber
+      txHash
+      deviationRatio
+      healthBinaryValue
+      hasHealthData
+    }
+  }
+`;
+
+export const ORACLE_SNAPSHOT_PREDECESSOR = `
+  query OracleSnapshotPredecessor($poolId: String!, $before: numeric!) {
+    OracleSnapshot(
+      where: {
+        poolId: { _eq: $poolId }
+        timestamp: { _lt: $before }
+      }
+      order_by: { timestamp: desc }
+      limit: 1
+    ) {
+      id chainId
+      poolId
+      timestamp
+      oraclePrice
+      oracleOk
+      numReporters
+      priceDifference
+      rebalanceThreshold
+      source
+      blockNumber
+      txHash
+      deviationRatio
+      healthBinaryValue
+      hasHealthData
     }
   }
 `;
