@@ -139,7 +139,7 @@ describe("PoolsTable 24h volume states", () => {
   });
 });
 
-describe("PoolsTable network-specific virtual pool UI", () => {
+describe("PoolsTable source column", () => {
   it("shows the Source column on networks with virtual pools", () => {
     mockNetwork.hasVirtualPools = true;
     const html = renderPoolTableMarkup({});
@@ -147,12 +147,11 @@ describe("PoolsTable network-specific virtual pool UI", () => {
     expect(html).toContain("FPMM");
   });
 
-  it("hides the Source column on networks without virtual pools", () => {
+  it("still shows the Source column on networks without virtual pools", () => {
     mockNetwork.hasVirtualPools = false;
     const html = renderPoolTableMarkup({});
-    expect(html).not.toContain(">Source</th>");
-    expect(html).not.toContain("Virtual");
-    expect(html).not.toContain("FPMM");
+    expect(html).toContain(">Source</th>");
+    expect(html).toContain("FPMM");
     mockNetwork.hasVirtualPools = true;
   });
 });
