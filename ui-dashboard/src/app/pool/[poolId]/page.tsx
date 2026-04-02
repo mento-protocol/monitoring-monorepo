@@ -13,6 +13,7 @@ import { OracleChart } from "@/components/oracle-chart";
 import { OraclePriceChart } from "@/components/oracle-price-chart";
 import { ReserveChart } from "@/components/reserve-chart";
 import { SenderCell } from "@/components/sender-cell";
+import { TagsCell } from "@/components/tags-cell";
 import { LiquidityChart } from "@/components/liquidity-chart";
 import { LpConcentrationChart } from "@/components/lp-concentration-chart";
 import { SnapshotChart } from "@/components/snapshot-chart";
@@ -117,10 +118,11 @@ function isSearchableTab(tab: Tab): tab is SearchableTab {
 
 function addressSearchTerms(
   address: string | null | undefined,
-  getLabel: (address: string | null) => string,
+  getName: (address: string | null) => string,
+  getTags: (address: string | null) => string[],
 ): Array<string | null | undefined> {
   if (!address) return [];
-  return [address, getLabel(address)];
+  return [address, getName(address), ...getTags(address)];
 }
 
 function matchesRowSearch(
@@ -550,7 +552,7 @@ function SwapsTab({
   onSearchChange: (value: string) => void;
 }) {
   const { network } = useNetwork();
-  const { getLabel } = useAddressLabels();
+  const { getName, getTags } = useAddressLabels();
   const query = normalizeSearch(search);
 
   const { data, error, isLoading } = useGQL<{ SwapEvent: SwapEvent[] }>(
@@ -587,8 +589,8 @@ function SwapsTab({
 
       return matchesRowSearch(query, [
         s.txHash,
-        ...addressSearchTerms(s.sender, getLabel),
-        ...addressSearchTerms(s.recipient, getLabel),
+        ...addressSearchTerms(s.sender, getName, getTags),
+        ...addressSearchTerms(s.recipient, getName, getTags),
         soldSym,
         boughtSym,
         formatWei(soldAmt, soldDec),
@@ -596,7 +598,7 @@ function SwapsTab({
         s.blockNumber,
       ]);
     });
-  }, [swaps, query, sym0, sym1, pool, getLabel]);
+  }, [swaps, query, sym0, sym1, pool, getName, getTags]);
 
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
@@ -633,6 +635,12 @@ function SwapsTab({
               >
                 Sender
               </th>
+              <th
+                scope="col"
+                className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400"
+              >
+                Tags
+              </th>
               <Th>Trader</Th>
               <Th align="right">Sold</Th>
               <Th align="right">Bought</Th>
@@ -662,6 +670,10 @@ function SwapsTab({
                 <Row key={s.id}>
                   <TxHashCell txHash={s.txHash} />
                   <SenderCell
+                    address={s.sender}
+                    className="hidden sm:table-cell"
+                  />
+                  <TagsCell
                     address={s.sender}
                     className="hidden sm:table-cell"
                   />
@@ -854,7 +866,7 @@ function RebalancesTab({
   search: string;
   onSearchChange: (value: string) => void;
 }) {
-  const { getLabel } = useAddressLabels();
+  const { getName, getTags } = useAddressLabels();
   const query = normalizeSearch(search);
 
   const { data, error, isLoading } = useGQL<{
@@ -867,8 +879,8 @@ function RebalancesTab({
     return rows.filter((r) => {
       return matchesRowSearch(query, [
         r.txHash,
-        ...addressSearchTerms(r.sender, getLabel),
-        ...addressSearchTerms(r.caller, getLabel),
+        ...addressSearchTerms(r.sender, getName, getTags),
+        ...addressSearchTerms(r.caller, getName, getTags),
         Number(r.priceDifferenceBefore).toLocaleString(),
         Number(r.priceDifferenceAfter).toLocaleString(),
         r.effectivenessRatio
@@ -877,7 +889,7 @@ function RebalancesTab({
         r.blockNumber,
       ]);
     });
-  }, [rows, query, getLabel]);
+  }, [rows, query, getName, getTags]);
 
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
@@ -900,7 +912,19 @@ function RebalancesTab({
             <tr className="border-b border-slate-800 bg-slate-900/50">
               <Th>Tx</Th>
               <Th>Strategy</Th>
+              <th
+                scope="col"
+                className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400"
+              >
+                Tags
+              </th>
               <Th>Rebalancer</Th>
+              <th
+                scope="col"
+                className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400"
+              >
+                Tags
+              </th>
               <Th align="right">Before (bps)</Th>
               <Th align="right">After (bps)</Th>
               <Th align="right">Effectiveness</Th>
@@ -913,7 +937,9 @@ function RebalancesTab({
               <Row key={r.id}>
                 <TxHashCell txHash={r.txHash} />
                 <SenderCell address={r.sender} />
+                <TagsCell address={r.sender} className="hidden sm:table-cell" />
                 <SenderCell address={r.caller} />
+                <TagsCell address={r.caller} className="hidden sm:table-cell" />
                 <Td mono small align="right">
                   {Number(r.priceDifferenceBefore).toLocaleString()}
                 </Td>
@@ -954,7 +980,7 @@ function LiquidityTab({
   onSearchChange: (value: string) => void;
 }) {
   const { network } = useNetwork();
-  const { getLabel } = useAddressLabels();
+  const { getName, getTags } = useAddressLabels();
   const query = normalizeSearch(search);
 
   const { data, error, isLoading } = useGQL<{
@@ -979,7 +1005,7 @@ function LiquidityTab({
       return matchesRowSearch(query, [
         r.txHash,
         r.kind,
-        ...addressSearchTerms(r.sender, getLabel),
+        ...addressSearchTerms(r.sender, getName, getTags),
         formatWei(r.amount0),
         formatWei(r.amount1),
         formatWei(r.liquidity),
@@ -988,7 +1014,7 @@ function LiquidityTab({
         r.blockNumber,
       ]);
     });
-  }, [rows, query, getLabel, sym0, sym1]);
+  }, [rows, query, getName, getTags, sym0, sym1]);
 
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
@@ -1022,6 +1048,12 @@ function LiquidityTab({
               <Th>Tx</Th>
               <Th>Kind</Th>
               <Th>Sender</Th>
+              <th
+                scope="col"
+                className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400"
+              >
+                Tags
+              </th>
               <Th align="right">Amount 0</Th>
               <Th align="right">Amount 1</Th>
               <Th align="right">Liquidity</Th>
@@ -1037,6 +1069,7 @@ function LiquidityTab({
                   <KindBadge kind={r.kind} />
                 </td>
                 <SenderCell address={r.sender} />
+                <TagsCell address={r.sender} className="hidden sm:table-cell" />
                 <Td mono small align="right">
                   {formatWei(r.amount0)}
                 </Td>
@@ -1078,7 +1111,7 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
   // hook is always called (Rules of Hooks) but the network request is skipped.
   const isFpmmPool = pool ? isFpmm(pool) : null; // null = still loading
   const shouldSkip = isFpmmPool === false;
-  const { getLabel } = useAddressLabels();
+  const { getName, getTags } = useAddressLabels();
 
   const {
     data: indexedData,
@@ -1142,13 +1175,19 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
       <LpConcentrationChart
         positions={positions}
         totalLiquidity={totalLiquidity}
-        getLabel={(addr) => getLabel(addr)}
+        getLabel={(addr) => getName(addr)}
       />
       <Table>
         <thead>
           <tr className="border-b border-slate-800 bg-slate-900/50">
             <Th>#</Th>
             <Th>Address</Th>
+            <th
+              scope="col"
+              className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400"
+            >
+              Tags
+            </th>
             <Th align="right">Net LP Tokens</Th>
             <Th align="right">Share</Th>
           </tr>
@@ -1174,6 +1213,10 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
                 <Td>
                   <AddressLink address={position.address} />
                 </Td>
+                <TagsCell
+                  address={position.address}
+                  className="hidden sm:table-cell"
+                />
                 <Td mono small align="right">
                   {formatWei(position.netLiquidity.toString())}
                 </Td>

@@ -29,7 +29,7 @@ import {
 
 const replaceMock = vi.fn();
 const useGQLMock = vi.fn();
-const getLabelMock = vi.fn((address: string | null | undefined) => {
+const getNameMock = vi.fn((address: string | null | undefined) => {
   if (!address) return "";
   const labels: Record<string, string> = {
     "0xsender000000000000000000000000000000000001": "Treasury Wallet",
@@ -39,6 +39,9 @@ const getLabelMock = vi.fn((address: string | null | undefined) => {
     "0xliquidity00000000000000000000000000000005": "LP Desk",
   };
   return labels[address] ?? address;
+});
+const getTagsMock = vi.fn((_address: string | null | undefined) => {
+  return [] as string[];
 });
 
 vi.mock("next/navigation", () => ({
@@ -70,7 +73,11 @@ vi.mock("@/components/network-provider", () => ({
 }));
 
 vi.mock("@/components/address-labels-provider", () => ({
-  useAddressLabels: () => ({ getLabel: getLabelMock }),
+  useAddressLabels: () => ({
+    getName: getNameMock,
+    getTags: getTagsMock,
+    getLabel: getNameMock,
+  }),
 }));
 
 vi.mock("@/lib/graphql", () => ({
@@ -132,7 +139,12 @@ vi.mock("@/components/snapshot-chart", () => ({
 }));
 vi.mock("@/components/sender-cell", () => ({
   SenderCell: ({ address }: { address: string }) => (
-    <td>{getLabelMock(address)}</td>
+    <td>{getNameMock(address)}</td>
+  ),
+}));
+vi.mock("@/components/tags-cell", () => ({
+  TagsCell: ({ address }: { address: string }) => (
+    <td>{getTagsMock(address).join(", ")}</td>
   ),
 }));
 vi.mock("@/components/table", () => ({
@@ -281,7 +293,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   replaceMock.mockReset();
   useGQLMock.mockReset();
-  getLabelMock.mockClear();
+  getNameMock.mockClear();
+  getTagsMock.mockClear();
   currentSearchParams = new URLSearchParams();
   oracleCount = 51;
   oracleCountError = false;

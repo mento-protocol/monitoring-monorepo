@@ -83,6 +83,7 @@ vi.mock("@/components/oracle-price-chart", () => ({
 }));
 vi.mock("@/components/reserve-chart", () => ({ ReserveChart: () => <div /> }));
 vi.mock("@/components/sender-cell", () => ({ SenderCell: () => <div /> }));
+vi.mock("@/components/tags-cell", () => ({ TagsCell: () => <div /> }));
 vi.mock("@/components/liquidity-chart", () => ({
   LiquidityChart: () => <div />,
 }));
@@ -92,6 +93,8 @@ vi.mock("@/components/snapshot-chart", () => ({
 vi.mock("@/components/tx-hash-cell", () => ({ TxHashCell: () => <div /> }));
 vi.mock("@/components/address-labels-provider", () => ({
   useAddressLabels: () => ({
+    getName: (address: string | null) => address ?? "—",
+    getTags: () => [] as string[],
     getLabel: (address: string | null) => address ?? "—",
   }),
 }));

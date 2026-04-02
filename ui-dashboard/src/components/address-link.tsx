@@ -14,12 +14,12 @@ type Props = {
 
 export function AddressLink({ address, readOnly = false }: Props) {
   const { network } = useNetwork();
-  const { getLabel, hasLabel, isCustomLabel, getEntry } = useAddressLabels();
+  const { getName, hasName, isCustom, getEntry } = useAddressLabels();
   const [editing, setEditing] = useState(false);
 
-  const label = getLabel(address);
-  const labeled = hasLabel(address);
-  const isCustom = isCustomLabel(address);
+  const label = getName(address);
+  const labeled = hasName(address);
+  const custom = isCustom(address);
   const entry = getEntry(address);
 
   return (
@@ -45,11 +45,9 @@ export function AddressLink({ address, readOnly = false }: Props) {
             type="button"
             onClick={() => setEditing(true)}
             aria-label={
-              isCustom
-                ? `Edit label for ${address}`
-                : `Add label for ${address}`
+              custom ? `Edit label for ${address}` : `Add label for ${address}`
             }
-            title={isCustom ? "Edit label" : "Add label"}
+            title={custom ? "Edit label" : "Add label"}
             className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-0.5 text-slate-600 hover:text-slate-300 transition-all"
           >
             <PencilIcon />
