@@ -8,7 +8,9 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/lib/address-labels", () => ({
   getAllChainLabels: vi.fn().mockResolvedValue({
-    "42220": { "0xabc": { label: "Test", updatedAt: "2026-01-01T00:00:00Z" } },
+    "42220": {
+      "0xabc": { name: "Test", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
+    },
   }),
 }));
 
@@ -89,6 +91,9 @@ describe("POST /api/address-labels/backup", () => {
     expect(stored).toHaveProperty("exportedAt");
     expect(stored).toHaveProperty("chains");
     expect(stored.chains).toHaveProperty("42220");
+    // Verify v2 schema in backup
+    expect(stored.chains["42220"]["0xabc"].name).toBe("Test");
+    expect(stored.chains["42220"]["0xabc"].tags).toEqual([]);
   });
 
   it("overwrites same-day backup (deterministic filename)", async () => {

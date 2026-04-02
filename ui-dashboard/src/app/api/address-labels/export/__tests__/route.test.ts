@@ -36,7 +36,7 @@ describe("GET /api/address-labels/export", () => {
 
   it("exports a single chain when ?chainId= is provided", async () => {
     (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
-      "0xabc": { label: "Test", updatedAt: "2026-01-01T00:00:00Z" },
+      "0xabc": { name: "Test", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
     });
 
     const req = new NextRequest(
@@ -48,6 +48,9 @@ describe("GET /api/address-labels/export", () => {
     const body = await res.json();
     expect(body.chains).toHaveProperty("42220");
     expect(body.exportedAt).toBeDefined();
+    // Verify v2 schema in export
+    expect(body.chains["42220"]["0xabc"].name).toBe("Test");
+    expect(body.chains["42220"]["0xabc"].tags).toEqual([]);
 
     const disposition = res.headers.get("Content-Disposition") ?? "";
     expect(disposition).toContain("chain-42220");
@@ -57,7 +60,11 @@ describe("GET /api/address-labels/export", () => {
   it("exports all chains when ?chainId is omitted", async () => {
     (getAllChainLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
       "42220": {
-        "0xabc": { label: "Mainnet", updatedAt: "2026-01-01T00:00:00Z" },
+        "0xabc": {
+          name: "Mainnet",
+          tags: ["Whale"],
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
       },
       "11142220": {},
     });

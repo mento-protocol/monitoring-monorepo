@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthSession } from "@/auth";
-import { getLabels, upsertLabel, deleteLabel } from "@/lib/address-labels";
+import { getLabels, upsertEntry, deleteLabel } from "@/lib/address-labels";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const chainId = Number(req.nextUrl.searchParams.get("chainId"));
@@ -34,7 +34,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { chainId, address, label, category, notes, isPublic } = body as Record<
+  const { chainId, address, name, tags, notes, isPublic } = body as Record<
     string,
     unknown
   >;
@@ -45,18 +45,24 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
   if (typeof address !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
     return NextResponse.json({ error: "Invalid address" }, { status: 400 });
   }
-  if (typeof label !== "string" || label.trim() === "") {
+
+  const trimmedName = typeof name === "string" ? name.trim() : "";
+  const parsedTags = Array.isArray(tags)
+    ? tags.filter((t): t is string => typeof t === "string" && t.trim() !== "")
+    : [];
+
+  // Relaxed validation: at least one of name or tags must be non-empty
+  if (!trimmedName && parsedTags.length === 0) {
     return NextResponse.json(
-      { error: "label must be a non-empty string" },
+      { error: "At least one of name or tags must be provided" },
       { status: 400 },
     );
   }
 
   try {
-    await upsertLabel(chainId as number, address, {
-      label: label.trim(),
-      category:
-        typeof category === "string" ? category.trim() || undefined : undefined,
+    await upsertEntry(chainId as number, address, {
+      name: trimmedName,
+      tags: parsedTags.map((t) => t.trim()),
       notes: typeof notes === "string" ? notes.trim() || undefined : undefined,
       isPublic: isPublic === true,
     });

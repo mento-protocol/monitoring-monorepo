@@ -16,7 +16,8 @@ import type { Network } from "@/lib/networks";
 export type AddressBookRow = {
   key: string;
   address: string;
-  label: string;
+  name: string;
+  tags: string[];
   isCustom: boolean;
   /** Network this contract label belongs to; null for custom-only rows */
   network: Network | null;

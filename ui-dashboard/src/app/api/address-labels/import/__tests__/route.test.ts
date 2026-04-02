@@ -9,6 +9,45 @@ vi.mock("@/auth", () => ({
 vi.mock("@/lib/address-labels", () => ({
   importLabels: vi.fn().mockResolvedValue(undefined),
   getLabels: vi.fn().mockResolvedValue({}),
+  upgradeEntry: vi.fn((raw: Record<string, unknown>) => {
+    // Minimal real upgradeEntry for tests
+    if (typeof raw.name === "string") {
+      return {
+        name: raw.name,
+        tags: Array.isArray(raw.tags) ? raw.tags : [],
+        notes: typeof raw.notes === "string" ? raw.notes : undefined,
+        isPublic: raw.isPublic === true ? true : undefined,
+        updatedAt:
+          typeof raw.updatedAt === "string"
+            ? raw.updatedAt
+            : new Date().toISOString(),
+      };
+    }
+    if (typeof raw.label === "string") {
+      const tags: string[] = [];
+      if (typeof raw.category === "string" && raw.category.trim()) {
+        tags.push(raw.category.trim());
+      }
+      return {
+        name: raw.label,
+        tags,
+        notes: typeof raw.notes === "string" ? raw.notes : undefined,
+        isPublic: raw.isPublic === true ? true : undefined,
+        updatedAt:
+          typeof raw.updatedAt === "string"
+            ? raw.updatedAt
+            : new Date().toISOString(),
+      };
+    }
+    return {
+      name: "",
+      tags: [],
+      updatedAt:
+        typeof raw.updatedAt === "string"
+          ? raw.updatedAt
+          : new Date().toISOString(),
+    };
+  }),
 }));
 
 import { getAuthSession } from "@/auth";
@@ -45,21 +84,48 @@ describe("POST /api/address-labels/import", () => {
     expect(res.status).toBe(401);
   });
 
-  it("imports simple format with valid chainId", async () => {
+  it("imports simple format with valid chainId (v2 schema)", async () => {
     const labels = {
-      "0xabc": { label: "Test", updatedAt: "2026-01-01T00:00:00Z" },
+      "0xabc": { name: "Test", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
     };
     const res = await POST(jsonReq({ chainId: 42220, labels }));
     expect(res.status).toBe(200);
-    expect(importLabels).toHaveBeenCalledWith(42220, labels);
+    expect(importLabels).toHaveBeenCalledWith(
+      42220,
+      expect.objectContaining({
+        "0xabc": expect.objectContaining({ name: "Test" }),
+      }),
+    );
   });
 
-  it("imports snapshot format", async () => {
+  it("imports simple format with legacy v1 entries (label→name)", async () => {
+    const labels = {
+      "0xabc": {
+        label: "Legacy",
+        category: "CEX",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    };
+    const res = await POST(jsonReq({ chainId: 42220, labels }));
+    expect(res.status).toBe(200);
+    expect(importLabels).toHaveBeenCalledWith(
+      42220,
+      expect.objectContaining({
+        "0xabc": expect.objectContaining({ name: "Legacy", tags: ["CEX"] }),
+      }),
+    );
+  });
+
+  it("imports snapshot format (v2 schema)", async () => {
     const snapshot = {
       exportedAt: "2026-01-01T00:00:00Z",
       chains: {
         "42220": {
-          "0xabc": { label: "Test", updatedAt: "2026-01-01T00:00:00Z" },
+          "0xabc": {
+            name: "Test",
+            tags: ["Whale"],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
         },
       },
     };
@@ -68,11 +134,40 @@ describe("POST /api/address-labels/import", () => {
     expect(importLabels).toHaveBeenCalledTimes(1);
   });
 
+  it("imports snapshot format with legacy v1 entries", async () => {
+    const snapshot = {
+      exportedAt: "2026-01-01T00:00:00Z",
+      chains: {
+        "42220": {
+          "0xabc": {
+            label: "Old",
+            category: "DeFi",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+      },
+    };
+    const res = await POST(jsonReq(snapshot));
+    expect(res.status).toBe(200);
+    expect(importLabels).toHaveBeenCalledWith(
+      42220,
+      expect.objectContaining({
+        "0xabc": expect.objectContaining({ name: "Old", tags: ["DeFi"] }),
+      }),
+    );
+  });
+
   it("rejects snapshot with invalid chainId keys", async () => {
     const snapshot = {
       exportedAt: "2026-01-01T00:00:00Z",
       chains: {
-        foo: { "0xabc": { label: "Test", updatedAt: "2026-01-01T00:00:00Z" } },
+        foo: {
+          "0xabc": {
+            name: "Test",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
       },
     };
     const res = await POST(jsonReq(snapshot));
@@ -86,7 +181,11 @@ describe("POST /api/address-labels/import", () => {
     const snapshot = {
       chains: {
         "-1": {
-          "0xabc": { label: "Test", updatedAt: "2026-01-01T00:00:00Z" },
+          "0xabc": {
+            name: "Test",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
         },
       },
     };
@@ -104,11 +203,11 @@ describe("POST /api/address-labels/import", () => {
     expect(res.status).toBe(400);
   });
 
-  it("rejects labels where entries lack a label field", async () => {
+  it("rejects labels where entries lack both name and label fields", async () => {
     const res = await POST(
       jsonReq({
         chainId: 42220,
-        labels: { "0xabc": { notes: "no label field" } },
+        labels: { "0xabc": { notes: "no name field" } },
       }),
     );
     expect(res.status).toBe(400);
@@ -128,15 +227,19 @@ describe("POST /api/address-labels/import", () => {
     expect(importLabels).not.toHaveBeenCalled();
   });
 
-  it("rejects snapshot where one chain has entries missing label", async () => {
+  it("rejects snapshot where one chain has entries missing both name and label", async () => {
     const res = await POST(
       jsonReq({
         chains: {
           "42220": {
-            "0xabc": { label: "Valid", updatedAt: "2026-01-01T00:00:00Z" },
+            "0xabc": {
+              name: "Valid",
+              tags: [],
+              updatedAt: "2026-01-01T00:00:00Z",
+            },
           },
           "143": {
-            "0xdef": { notes: "missing label field" },
+            "0xdef": { notes: "missing name field" },
           },
         },
       }),
@@ -161,8 +264,8 @@ describe("POST /api/address-labels/import", () => {
         42220,
         expect.objectContaining({
           [validAddress.toLowerCase()]: expect.objectContaining({
-            label: "My Label",
-            // isPublic is NOT forced — no opinion on new entries
+            name: "My Label",
+            tags: [],
           }),
         }),
       );
@@ -170,7 +273,40 @@ describe("POST /api/address-labels/import", () => {
         143,
         expect.objectContaining({
           [validAddress.toLowerCase()]: expect.objectContaining({
-            label: "My Label",
+            name: "My Label",
+            tags: [],
+          }),
+        }),
+      );
+    });
+
+    it("imports CSV with tags column", async () => {
+      const csv = `address,name,tags\n${validAddress},Wintermute,"Market Maker;Arbitrageur"`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(200);
+      expect(importLabels).toHaveBeenCalledWith(
+        42220,
+        expect.objectContaining({
+          [validAddress.toLowerCase()]: expect.objectContaining({
+            name: "Wintermute",
+            tags: ["Market Maker", "Arbitrageur"],
+          }),
+        }),
+      );
+    });
+
+    it("allows tag-only CSV rows (empty name with tags)", async () => {
+      const csv = `address,name,tags\n${validAddress},,Whale;ETH Staker`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(200);
+      expect(importLabels).toHaveBeenCalledWith(
+        42220,
+        expect.objectContaining({
+          [validAddress.toLowerCase()]: expect.objectContaining({
+            name: "",
+            tags: ["Whale", "ETH Staker"],
           }),
         }),
       );
@@ -214,10 +350,10 @@ describe("POST /api/address-labels/import", () => {
       expect(body.status).toBe(200);
     });
 
-    it("merges with existing labels (preserves category/notes/isPublic)", async () => {
+    it("merges with existing entries (preserves notes/isPublic)", async () => {
       const existingEntry = {
-        label: "Old Label",
-        category: "DeFi",
+        name: "Old Label",
+        tags: ["DeFi"],
         notes: "Important",
         isPublic: false,
         updatedAt: "2026-01-01T00:00:00.000Z",
@@ -235,8 +371,8 @@ describe("POST /api/address-labels/import", () => {
         42220,
         expect.objectContaining({
           [validAddress.toLowerCase()]: expect.objectContaining({
-            label: "My Label",
-            category: "DeFi",
+            name: "My Label",
+            tags: [],
             notes: "Important",
             // isPublic must be preserved — CSV import must NOT overwrite to true
             isPublic: false,
@@ -251,7 +387,7 @@ describe("POST /api/address-labels/import", () => {
       expect(body.status).toBe(200);
       const callArg = (
         importLabels as ReturnType<typeof vi.fn>
-      ).mock.calls.find(([chainId]) => chainId === 42220)?.[1];
+      ).mock.calls.find((args: unknown[]) => args[0] === 42220)?.[1];
       const entry = callArg?.[validAddress.toLowerCase()];
       expect(entry?.isPublic).toBeUndefined();
     });
@@ -308,7 +444,7 @@ describe("POST /api/address-labels/import", () => {
       expect(json.error).toMatch(/empty address/i);
     });
 
-    it("returns 400 for empty name in CSV", async () => {
+    it("returns 400 for empty name and no tags in CSV", async () => {
       const csv = `address,name\n${validAddress},`;
       const res = await csvReq(csv);
       const body = await POST(res);
@@ -389,7 +525,8 @@ describe("POST /api/address-labels/import", () => {
               chainId: 42220,
               labels: {
                 [validAddress]: {
-                  label: "My Label",
+                  name: "My Label",
+                  tags: [],
                   updatedAt: "2026-01-01T00:00:00.000Z",
                 },
               },
@@ -414,7 +551,7 @@ describe("POST /api/address-labels/import", () => {
       expect(importLabels).toHaveBeenCalledWith(
         42220,
         expect.objectContaining({
-          [validAddress]: expect.objectContaining({ label: "My Safe" }),
+          [validAddress]: expect.objectContaining({ name: "My Safe" }),
         }),
       );
     });
@@ -545,11 +682,11 @@ describe("POST /api/address-labels/import", () => {
       expect(importLabels).not.toHaveBeenCalled();
     });
 
-    it("merges with existing label metadata instead of overwriting", async () => {
-      // Existing label has category/notes/isPublic set
+    it("merges with existing entry metadata instead of overwriting", async () => {
+      // Existing entry has tags/notes/isPublic set
       const existingEntry = {
-        label: "Old Name",
-        category: "Team",
+        name: "Old Name",
+        tags: ["Team"],
         notes: "Important contract",
         isPublic: true,
         updatedAt: "2026-01-01T00:00:00.000Z",
@@ -569,8 +706,8 @@ describe("POST /api/address-labels/import", () => {
         42220,
         expect.objectContaining({
           [validAddress]: expect.objectContaining({
-            label: "New Name",
-            category: "Team",
+            name: "New Name",
+            tags: ["Team"],
             notes: "Important contract",
             isPublic: true,
           }),
