@@ -62,7 +62,6 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
     const withDev = { ...updatedPool, priceDifference };
     const healthStatus = computeHealthStatus(withDev);
     const finalPool = { ...withDev, healthStatus };
-    context.Pool.set(finalPool);
 
     // Health score: compute snapshot fields + update pool accumulators
     const { snapshotFields, poolUpdate } = recordHealthSample(
@@ -71,10 +70,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       existing.rebalanceThreshold,
       blockTimestamp,
     );
-    context.Pool.set({
-      ...finalPool,
-      ...poolUpdate,
-    });
+    context.Pool.set({ ...finalPool, ...poolUpdate });
 
     const snapshot: OracleSnapshot = {
       id:
