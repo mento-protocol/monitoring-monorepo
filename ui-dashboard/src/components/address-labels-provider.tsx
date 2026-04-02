@@ -8,7 +8,6 @@ import {
   upgradeEntry,
   type AddressEntry,
   type AddressEntryRecord,
-  type AddressLabelEntry,
   type AddressLabelRecord,
 } from "@/lib/address-labels";
 

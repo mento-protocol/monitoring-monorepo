@@ -6,9 +6,15 @@ type TagInputProps = {
   tags: string[];
   onChange: (tags: string[]) => void;
   suggestions: string[];
+  "aria-labelledby"?: string;
 };
 
-export function TagInput({ tags, onChange, suggestions }: TagInputProps) {
+export function TagInput({
+  tags,
+  onChange,
+  suggestions,
+  "aria-labelledby": ariaLabelledBy,
+}: TagInputProps) {
   const [input, setInput] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(-1);
@@ -106,7 +112,8 @@ export function TagInput({ tags, onChange, suggestions }: TagInputProps) {
           onFocus={() => setShowDropdown(true)}
           onKeyDown={handleKeyDown}
           placeholder={tags.length === 0 ? "Add tags…" : ""}
-          aria-label="Add tag"
+          aria-label={ariaLabelledBy ? undefined : "Add tag"}
+          aria-labelledby={ariaLabelledBy}
           className="flex-1 min-w-[80px] bg-transparent text-sm text-white placeholder-slate-500 outline-none py-0.5"
         />
       </div>
