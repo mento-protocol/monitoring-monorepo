@@ -135,11 +135,23 @@ export function updateHealthAccumulators(
   // Use string comparison against sentinel to avoid float boundary issues.
   // lastDeviationRatio is "-1" for no-data, or a 6dp decimal string.
   const prevRatio = pool.lastDeviationRatio;
+  const prevIsNoData = prevRatio === "-1" || prevRatio === "";
   const prevHealthy =
-    prevRatio !== "-1" &&
-    prevRatio !== "" &&
+    !prevIsNoData &&
     parseFloat(prevRatio) <= 1.0 &&
     !isNaN(parseFloat(prevRatio));
+
+  // If previous interval was no-data, exclude this duration from the
+  // denominator entirely — matching UI which skips hasHealthData=false segments.
+  if (prevIsNoData) {
+    return {
+      healthTotalSeconds: pool.healthTotalSeconds,
+      healthBinarySeconds: pool.healthBinarySeconds,
+      lastOracleSnapshotTimestamp: currentTimestamp,
+      lastDeviationRatio: currentDeviationRatio,
+      hasHealthData: true,
+    };
+  }
 
   let newTotalSeconds = pool.healthTotalSeconds + duration;
   let newBinarySeconds = pool.healthBinarySeconds;
@@ -200,7 +212,7 @@ export function recordHealthSample(
         healthTotalSeconds: pool.healthTotalSeconds,
         healthBinarySeconds: pool.healthBinarySeconds,
         lastOracleSnapshotTimestamp: blockTimestamp,
-        lastDeviationRatio: pool.lastDeviationRatio,
+        lastDeviationRatio: "-1", // sentinel: next sample skips this gap
         hasHealthData: pool.hasHealthData,
       },
     };
