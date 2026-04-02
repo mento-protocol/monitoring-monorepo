@@ -43,10 +43,24 @@ function isHealthySnapshot(snapshot: OracleSnapshot): boolean {
  * - after first snapshot, stale time counts as unhealthy
  * - nines only shown after >= 24h tracked coverage
  */
+export function normalizeWindowSnapshots(
+  rawSnapshotsDesc: OracleSnapshot[],
+  maxSnapshots: number,
+): { snapshotsAsc: OracleSnapshot[]; truncated: boolean } {
+  const truncated = rawSnapshotsDesc.length > maxSnapshots;
+  const keptDesc = truncated
+    ? rawSnapshotsDesc.slice(0, maxSnapshots)
+    : rawSnapshotsDesc;
+
+  return {
+    snapshotsAsc: [...keptDesc].reverse(),
+    truncated,
+  };
+}
+
 export function computeBinaryHealthWindow(
   snapshots: OracleSnapshot[],
   pool: Pick<Pool, "oracleExpiry">,
-  chainId: number,
   windowStart: number,
   windowEnd: number,
 ): BinaryHealthWindow {

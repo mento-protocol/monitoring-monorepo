@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { OracleSnapshot, Pool } from "@/lib/types";
 import { HealthBadge } from "@/components/badges";
 import {
@@ -12,6 +12,7 @@ import {
   computeBinaryHealthWindow,
   formatBinaryHealthPct,
   formatNines,
+  normalizeWindowSnapshots,
 } from "@/lib/pool-health-score";
 import { isWeekend } from "@/lib/weekend";
 import {
@@ -125,8 +126,23 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     chainlinkFeedUrl(sym1, network.chainId) ??
     chainlinkFeedUrl(sym0, network.chainId);
 
-  const windowEnd = Math.floor(Date.now() / 1000);
+  const [windowAnchorMs, setWindowAnchorMs] = useState(
+    () => Math.floor(Date.now() / 60_000) * 60_000,
+  );
+
+  useEffect(() => {
+    const updateWindowAnchor = () => {
+      setWindowAnchorMs(Math.floor(Date.now() / 60_000) * 60_000);
+    };
+
+    const intervalId = setInterval(updateWindowAnchor, 60_000);
+    return () => clearInterval(intervalId);
+  }, []);
+
+  const windowEnd = Math.floor(windowAnchorMs / 1000);
   const windowStart = windowEnd - 24 * 3600;
+  const HEALTH_WINDOW_LIMIT = 1000;
+  const HEALTH_WINDOW_QUERY_LIMIT = HEALTH_WINDOW_LIMIT + 1;
 
   const shouldFetchHealth = !pool.source?.includes("virtual");
 
@@ -138,7 +154,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
       poolId: pool.id,
       from: String(windowStart),
       to: String(windowEnd),
-      limit: 1000,
+      limit: HEALTH_WINDOW_QUERY_LIMIT,
     },
     60_000,
   );
@@ -153,13 +169,11 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     60_000,
   );
 
-  // Query returns desc order (newest first) with limit 1000.
-  // Reverse to chronological for scoring. If capped, we have the most recent
-  // 1000 snapshots — narrow windowStart to the oldest one we got.
-  const windowSnapshotsAsc = useMemo(() => {
-    const raw = healthWindowData?.OracleSnapshot ?? [];
-    return [...raw].reverse();
-  }, [healthWindowData]);
+  const { snapshotsAsc: windowSnapshotsAsc, truncated: windowWasTruncated } =
+    useMemo(() => {
+      const raw = healthWindowData?.OracleSnapshot ?? [];
+      return normalizeWindowSnapshots(raw, HEALTH_WINDOW_LIMIT);
+    }, [healthWindowData]);
   const predecessor = predecessorData?.OracleSnapshot?.[0];
   const healthSnapshots = useMemo(() => {
     const out = predecessor
@@ -168,25 +182,24 @@ export function HealthPanel({ pool }: HealthPanelProps) {
     return out.sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
   }, [predecessor, windowSnapshotsAsc]);
 
-  // If the window query hit the 1000 cap, narrow windowStart to the oldest
-  // fetched snapshot so we score only the portion we actually have data for.
+  // If the query was truly truncated (> limit), narrow windowStart to the
+  // oldest kept snapshot so we score only the covered portion.
   const effectiveWindowStart = useMemo(() => {
-    if (windowSnapshotsAsc.length >= 1000 && windowSnapshotsAsc.length > 0) {
+    if (windowWasTruncated && windowSnapshotsAsc.length > 0) {
       return Math.max(windowStart, Number(windowSnapshotsAsc[0]!.timestamp));
     }
     return windowStart;
-  }, [windowSnapshotsAsc, windowStart]);
+  }, [windowSnapshotsAsc, windowStart, windowWasTruncated]);
 
   const health24h = useMemo(
     () =>
       computeBinaryHealthWindow(
         healthSnapshots,
         pool,
-        network.chainId,
         effectiveWindowStart,
         windowEnd,
       ),
-    [healthSnapshots, network.chainId, pool, windowEnd, effectiveWindowStart],
+    [healthSnapshots, pool, windowEnd, effectiveWindowStart],
   );
 
   const allTimeScore =
