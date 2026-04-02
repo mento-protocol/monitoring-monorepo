@@ -9,6 +9,49 @@ vi.mock("@/auth", () => ({
 vi.mock("@/lib/address-labels", () => ({
   importLabels: vi.fn().mockResolvedValue(undefined),
   getLabels: vi.fn().mockResolvedValue({}),
+  upgradeEntries: vi.fn((raw: Record<string, unknown>) => {
+    const result: Record<string, unknown> = {};
+    for (const [address, entry] of Object.entries(raw)) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const e = entry as Record<string, unknown>;
+      if (typeof e.name === "string") {
+        result[address] = {
+          name: e.name,
+          tags: Array.isArray(e.tags) ? e.tags : [],
+          notes: typeof e.notes === "string" ? e.notes : undefined,
+          isPublic: e.isPublic === true ? true : undefined,
+          updatedAt:
+            typeof e.updatedAt === "string"
+              ? e.updatedAt
+              : new Date().toISOString(),
+        };
+      } else if (typeof e.label === "string") {
+        const tags: string[] = [];
+        if (typeof e.category === "string" && e.category.trim())
+          tags.push(e.category.trim());
+        result[address] = {
+          name: e.label,
+          tags,
+          notes: typeof e.notes === "string" ? e.notes : undefined,
+          isPublic: e.isPublic === true ? true : undefined,
+          updatedAt:
+            typeof e.updatedAt === "string"
+              ? e.updatedAt
+              : new Date().toISOString(),
+        };
+      } else {
+        result[address] = {
+          name: "",
+          tags: [],
+          updatedAt:
+            typeof e.updatedAt === "string"
+              ? e.updatedAt
+              : new Date().toISOString(),
+        };
+      }
+    }
+    return result;
+  }),
   upgradeEntry: vi.fn((raw: Record<string, unknown>) => {
     // Minimal real upgradeEntry for tests
     if (typeof raw.name === "string") {
@@ -372,7 +415,8 @@ describe("POST /api/address-labels/import", () => {
         expect.objectContaining({
           [validAddress.toLowerCase()]: expect.objectContaining({
             name: "My Label",
-            tags: [],
+            // CSV with no tags column must preserve existing tags (fix #1)
+            tags: ["DeFi"],
             notes: "Important",
             // isPublic must be preserved — CSV import must NOT overwrite to true
             isPublic: false,

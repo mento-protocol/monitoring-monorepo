@@ -3,7 +3,7 @@ import { getAuthSession } from "@/auth";
 import {
   importLabels,
   getLabels,
-  upgradeEntry,
+  upgradeEntries,
   type AddressEntry,
   type AddressLabelsSnapshot,
 } from "@/lib/address-labels";
@@ -15,6 +15,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json(
       { error: "Authentication required" },
       { status: 401 },
+    );
+  }
+
+  // Body size guard: reject payloads > 2MB before reading into memory (#5)
+  const contentLength = Number(req.headers.get("content-length") ?? "0");
+  if (contentLength > 2 * 1024 * 1024) {
+    return NextResponse.json(
+      { error: "Request body too large (max 2MB)" },
+      { status: 413 },
     );
   }
 
@@ -163,10 +172,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     try {
       for (const [chainId, labels] of chainEntries) {
         // Auto-upgrade legacy entries (label→name, category→tags[0])
-        const upgraded = upgradeEntriesMap(
-          labels as Record<string, Record<string, unknown>>,
+        const upgraded = upgradeEntries(labels as Record<string, unknown>);
+        // Filter out entries where both name and tags are empty (#7)
+        const filtered = Object.fromEntries(
+          Object.entries(upgraded).filter(
+            ([, e]) => e.name !== "" || e.tags.length > 0,
+          ),
         );
-        await importLabels(Number(chainId), upgraded);
+        await importLabels(Number(chainId), filtered);
       }
       return NextResponse.json({ ok: true });
     } catch (err) {
@@ -191,10 +204,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   try {
     // Auto-upgrade legacy entries (label→name, category→tags[0])
-    const upgraded = upgradeEntriesMap(
-      labels as Record<string, Record<string, unknown>>,
+    const upgraded = upgradeEntries(labels as Record<string, unknown>);
+    // Filter out entries where both name and tags are empty (#7)
+    const filtered = Object.fromEntries(
+      Object.entries(upgraded).filter(
+        ([, e]) => e.name !== "" || e.tags.length > 0,
+      ),
     );
-    await importLabels(chainId, upgraded);
+    await importLabels(chainId, filtered);
     return NextResponse.json({ ok: true });
   } catch (err) {
     return serverError(err);
@@ -229,31 +246,16 @@ function isSnapshot(v: unknown): v is AddressLabelsSnapshot {
 /**
  * Validates that a value is a map of address → entry objects.
  * Accepts both v1 (label field) and v2 (name field) entry shapes.
+ * Entries where both name/label is empty and tags is empty are excluded (#7).
  */
 function isEntriesMap(v: unknown): v is Record<string, AddressEntry> {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
-  return Object.values(v as Record<string, unknown>).every(
-    (entry) =>
-      typeof entry === "object" &&
-      entry !== null &&
-      (typeof (entry as Record<string, unknown>).label === "string" ||
-        typeof (entry as Record<string, unknown>).name === "string"),
-  );
-}
-
-/**
- * Upgrade a map of entries, handling both v1 (label/category) and v2 (name/tags).
- */
-function upgradeEntriesMap(
-  entries: Record<string, Record<string, unknown>>,
-): Record<string, AddressEntry> {
-  const result: Record<string, AddressEntry> = {};
-  for (const [address, entry] of Object.entries(entries)) {
-    if (typeof entry === "object" && entry !== null) {
-      result[address] = upgradeEntry(entry);
-    }
-  }
-  return result;
+  return Object.values(v as Record<string, unknown>).every((entry) => {
+    if (typeof entry !== "object" || entry === null) return false;
+    const e = entry as Record<string, unknown>;
+    const hasName = typeof e.label === "string" || typeof e.name === "string";
+    return hasName;
+  });
 }
 
 function serverError(err: unknown): NextResponse {
@@ -296,7 +298,7 @@ async function handleCsvText(text: string): Promise<NextResponse> {
   if ("error" in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  const { rows } = parsed;
+  const { rows, hasTagsColumn } = parsed;
   if (rows.length === 0) {
     return NextResponse.json({ ok: true, imported: 0 });
   }
@@ -307,7 +309,21 @@ async function handleCsvText(text: string): Promise<NextResponse> {
   for (const { address, name, tags } of rows) {
     // Do NOT set isPublic here — the merge below preserves the existing value.
     // Forcing isPublic:true would silently un-private any previously private label.
-    labels[address.toLowerCase()] = { name, tags, updatedAt: now };
+    // Deduplicate tags case-insensitively (#6)
+    const seenTags = new Set<string>();
+    const deduplicatedTags = tags
+      .map((t) => t.trim())
+      .filter((t) => {
+        const key = t.toLowerCase();
+        if (seenTags.has(key)) return false;
+        seenTags.add(key);
+        return true;
+      });
+    labels[address.toLowerCase()] = {
+      name,
+      tags: deduplicatedTags,
+      updatedAt: now,
+    };
   }
 
   // Fetch existing labels to merge (preserve notes, isPublic).
@@ -331,7 +347,13 @@ async function handleCsvText(text: string): Promise<NextResponse> {
     const merged: Record<string, AddressEntry> = {};
     for (const [addr, entry] of Object.entries(labels)) {
       const prev = existing[addr];
-      merged[addr] = { ...prev, ...entry };
+      merged[addr] = {
+        ...prev,
+        ...entry,
+        // When CSV has no tags column, preserve existing tags instead of
+        // overwriting with [] (#1)
+        tags: hasTagsColumn ? entry.tags : (prev?.tags ?? []),
+      };
     }
     mergedByChain.set(chainId, merged);
   }
@@ -352,7 +374,11 @@ async function handleCsvText(text: string): Promise<NextResponse> {
 }
 
 type CsvParseResult =
-  | { rows: Array<{ address: string; name: string; tags: string[] }> }
+  | {
+      rows: Array<{ address: string; name: string; tags: string[] }>;
+      /** True when the CSV contained a "tags" column; false = column absent */
+      hasTagsColumn: boolean;
+    }
   | { error: string };
 
 /**
@@ -370,7 +396,7 @@ function parseCsv(text: string): CsvParseResult {
   // Strip UTF-8 BOM (U+FEFF) that Excel/Google Sheets prepend to CSV exports.
   const stripped = text.startsWith("\uFEFF") ? text.slice(1) : text;
   const lines = stripped.split(/\r?\n/).filter((l) => l.trim() !== "");
-  if (lines.length === 0) return { rows: [] };
+  if (lines.length === 0) return { rows: [], hasTagsColumn: false };
 
   // Parse header
   const headerParsed = splitCsvLine(lines[0]);
@@ -431,7 +457,7 @@ function parseCsv(text: string): CsvParseResult {
     rows.push({ address, name, tags });
   }
 
-  return { rows };
+  return { rows, hasTagsColumn: tagsIdx !== -1 };
 }
 
 /** Split a single CSV line respecting double-quoted fields. */

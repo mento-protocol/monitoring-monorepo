@@ -73,7 +73,7 @@ export function TagInput({
       setHighlightIndex((i) => Math.min(i + 1, filtered.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setHighlightIndex((i) => Math.max(i - 1, 0));
+      setHighlightIndex((i) => Math.max(i - 1, -1));
     } else if (e.key === "Escape") {
       setShowDropdown(false);
     } else if (e.key === "Backspace" && !input && tags.length > 0) {

@@ -2,4 +2,4 @@
 # amountin: valid Solidity parameter name (amountIn) in ABI JSON files
 # wether: genuine typo in compiled contract metadata (rawMetadata) that
 #         cannot be changed without invalidating the bytecode hash
-ignore-words-list = amountin,wether,afterall
+ignore-words-list = amountin,wether,afterall,strat
