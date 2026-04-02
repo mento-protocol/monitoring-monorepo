@@ -141,13 +141,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const existing = existingByChain.get(chainId) ?? {};
       const prev = existing[address.toLowerCase()];
       if (!byChain.has(chainId)) byChain.set(chainId, {});
-      byChain.get(chainId)![address] = {
+      byChain.get(chainId)![address] = sanitizeEntry({
         // Preserve existing metadata; only overwrite name and timestamp.
         ...prev,
         name,
         tags: prev?.tags ?? [],
         updatedAt: new Date().toISOString(),
-      };
+      });
     }
 
     try {
