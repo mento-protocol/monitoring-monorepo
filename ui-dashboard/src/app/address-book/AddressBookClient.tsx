@@ -12,7 +12,6 @@ import {
   buildAddressBookRows,
   resolveIsCustom,
   resolveCanEdit,
-  countImportLabels,
   type AddressBookRow,
 } from "@/lib/address-book";
 
@@ -188,7 +187,8 @@ export default function AddressBookPage({
           setImportError(body.error ?? "Import failed.");
           return;
         }
-        const count = countImportLabels(parsed);
+        const { imported } = (await res.json()) as { imported?: number };
+        const count = imported ?? 0;
         setImportSuccess(`Imported ${count} label${count !== 1 ? "s" : ""}.`);
       } catch (err) {
         setImportError(err instanceof Error ? err.message : "Import failed.");

@@ -181,6 +181,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     try {
+      let imported = 0;
       for (const [chainId, labels] of chainEntries) {
         // Auto-upgrade legacy entries (label→name, category→tags[0])
         const upgraded = upgradeEntries(labels as Record<string, unknown>);
@@ -190,9 +191,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             .map(([addr, e]) => [addr, sanitizeEntry(e)] as const)
             .filter(([, e]) => e.name !== "" || e.tags.length > 0),
         );
+        imported += Object.keys(filtered).length;
         await importLabels(Number(chainId), filtered);
       }
-      return NextResponse.json({ ok: true });
+      return NextResponse.json({ ok: true, imported });
     } catch (err) {
       return serverError(err);
     }
@@ -223,7 +225,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         .filter(([, e]) => e.name !== "" || e.tags.length > 0),
     );
     await importLabels(chainId, filtered);
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      imported: Object.keys(filtered).length,
+    });
   } catch (err) {
     return serverError(err);
   }

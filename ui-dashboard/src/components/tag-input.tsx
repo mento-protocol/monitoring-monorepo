@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useId } from "react";
 
 type TagInputProps = {
   tags: string[];
@@ -20,6 +20,7 @@ export function TagInput({
   const [highlightIndex, setHighlightIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const listboxId = useId();
 
   // Filter suggestions: not already added, matches typed text
   const tagsLower = tags.map((t) => t.toLowerCase());
@@ -28,6 +29,11 @@ export function TagInput({
       !tagsLower.includes(s.toLowerCase()) &&
       s.toLowerCase().includes(input.toLowerCase().trim()),
   );
+
+  const activeOptionId =
+    showDropdown && highlightIndex >= 0 && highlightIndex < filtered.length
+      ? `${listboxId}-option-${highlightIndex}`
+      : undefined;
 
   const addTag = useCallback(
     (tag: string) => {
@@ -109,6 +115,7 @@ export function TagInput({
         <input
           ref={inputRef}
           type="text"
+          role="combobox"
           value={input}
           onChange={(e) => {
             setInput(e.target.value);
@@ -124,18 +131,26 @@ export function TagInput({
           placeholder={tags.length === 0 ? "Add tags…" : ""}
           aria-label={ariaLabelledBy ? undefined : "Add tag"}
           aria-labelledby={ariaLabelledBy}
+          aria-expanded={showDropdown && filtered.length > 0}
+          aria-controls={
+            showDropdown && filtered.length > 0 ? listboxId : undefined
+          }
+          aria-activedescendant={activeOptionId}
+          aria-autocomplete="list"
           className="flex-1 min-w-[80px] bg-transparent text-sm text-white placeholder-slate-500 outline-none py-0.5"
         />
       </div>
 
       {showDropdown && filtered.length > 0 && (
         <ul
+          id={listboxId}
           role="listbox"
           className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-slate-700 bg-slate-800 py-1 shadow-xl"
         >
           {filtered.map((suggestion, i) => (
             <li
               key={suggestion}
+              id={`${listboxId}-option-${i}`}
               role="option"
               aria-selected={i === highlightIndex}
               onMouseDown={(e) => {
