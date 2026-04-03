@@ -44,26 +44,35 @@ export type AddressLabelsSnapshot = {
 export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
   const entry = raw as Record<string, unknown>;
 
-  // Already in v2 format
+  const normalizedTags = Array.isArray(entry.tags)
+    ? entry.tags.filter((t): t is string => typeof t === "string")
+    : [];
+
+  // Already in v2 format — unless the name is blank and we can recover a
+  // valid legacy label from mixed/partially-corrupted data.
   if (typeof entry.name === "string") {
-    return {
-      name: entry.name,
-      tags: Array.isArray(entry.tags)
-        ? entry.tags.filter((t): t is string => typeof t === "string")
-        : [],
-      notes: typeof entry.notes === "string" ? entry.notes : undefined,
-      isPublic: entry.isPublic === true ? true : undefined,
-      updatedAt:
-        typeof entry.updatedAt === "string"
-          ? entry.updatedAt
-          : new Date().toISOString(),
-    };
+    if (entry.name.trim() || typeof entry.label !== "string") {
+      return {
+        name: entry.name,
+        tags: normalizedTags,
+        notes: typeof entry.notes === "string" ? entry.notes : undefined,
+        isPublic: entry.isPublic === true ? true : undefined,
+        updatedAt:
+          typeof entry.updatedAt === "string"
+            ? entry.updatedAt
+            : new Date().toISOString(),
+      };
+    }
   }
 
   // Legacy v1 format: { label, category?, ... }
   if (typeof entry.label === "string") {
-    const tags: string[] = [];
-    if (typeof entry.category === "string" && entry.category.trim()) {
+    const tags = normalizedTags.length > 0 ? normalizedTags : [];
+    if (
+      tags.length === 0 &&
+      typeof entry.category === "string" &&
+      entry.category.trim()
+    ) {
       tags.push(entry.category.trim());
     }
     return {

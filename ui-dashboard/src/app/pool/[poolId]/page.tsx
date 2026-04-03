@@ -616,7 +616,7 @@ function SwapsTab({
         <TableSearch
           value={search}
           onChange={onSearchChange}
-          placeholder="Search swaps by tx, address, label, token, amount, or block…"
+          placeholder="Search swaps by tx, address, name, tag, token, amount, or block…"
           ariaLabel="Search swaps"
         />
       )}
@@ -901,7 +901,7 @@ function RebalancesTab({
       <TableSearch
         value={search}
         onChange={onSearchChange}
-        placeholder="Search rebalances by tx, strategy, rebalancer, label, or block…"
+        placeholder="Search rebalances by tx, strategy, rebalancer, name, tag, or block…"
         ariaLabel="Search rebalances"
       />
       {filteredRows.length === 0 ? (
@@ -1033,7 +1033,7 @@ function LiquidityTab({
         <TableSearch
           value={search}
           onChange={onSearchChange}
-          placeholder="Search liquidity by tx, sender, label, kind, amount, or block…"
+          placeholder="Search liquidity by tx, sender, name, tag, kind, amount, or block…"
           ariaLabel="Search liquidity"
         />
       )}

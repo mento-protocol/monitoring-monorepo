@@ -599,6 +599,7 @@ describe("POST /api/address-labels/import", () => {
           [validAddress]: expect.objectContaining({ name: "My Safe" }),
         }),
       );
+      expect(((await res.json()) as { imported: number }).imported).toBe(1);
     });
 
     it("imports multiple entries grouped by chainId", async () => {
@@ -610,12 +611,14 @@ describe("POST /api/address-labels/import", () => {
       const res = await POST(jsonReq(gnosisSafe));
       expect(res.status).toBe(200);
       expect(importLabels).toHaveBeenCalledTimes(2);
+      expect(((await res.json()) as { imported: number }).imported).toBe(2);
     });
 
     it("succeeds with an empty array (no-op)", async () => {
       const res = await POST(jsonReq([]));
       expect(res.status).toBe(200);
       expect(importLabels).not.toHaveBeenCalled();
+      expect(((await res.json()) as { imported: number }).imported).toBe(0);
     });
 
     it("rejects an entry with an invalid chainId", async () => {
