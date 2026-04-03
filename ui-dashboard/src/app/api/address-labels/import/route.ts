@@ -151,10 +151,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     try {
+      let imported = 0;
       for (const [chainId, labels] of byChain.entries()) {
+        imported += Object.keys(labels).length;
         await importLabels(chainId, labels);
       }
-      return NextResponse.json({ ok: true });
+      return NextResponse.json({ ok: true, imported });
     } catch (err) {
       return serverError(err);
     }
