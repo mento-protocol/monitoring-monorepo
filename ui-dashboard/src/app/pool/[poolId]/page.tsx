@@ -450,7 +450,7 @@ function PoolHeader({
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <div className="flex flex-wrap items-center gap-3 mb-3">
         <h1 className="text-xl font-bold text-white">{name}</h1>
-        {network.hasVirtualPools && <SourceBadge source={pool.source} />}
+        <SourceBadge source={pool.source} />
         <span className="text-sm">
           <AddressLink address={poolContractAddress} />
         </span>
