@@ -138,10 +138,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const byChain = new Map<number, Record<string, AddressEntry>>();
     for (const entry of parsed) {
       const { chainId, address, name } = entry;
+      const normalizedAddress = address.toLowerCase();
       const existing = existingByChain.get(chainId) ?? {};
-      const prev = existing[address.toLowerCase()];
+      const prev = existing[normalizedAddress];
       if (!byChain.has(chainId)) byChain.set(chainId, {});
-      byChain.get(chainId)![address] = sanitizeEntry({
+      byChain.get(chainId)![normalizedAddress] = sanitizeEntry({
         // Preserve existing metadata; only overwrite name and timestamp.
         ...prev,
         name,
@@ -268,14 +269,17 @@ function isSnapshot(v: unknown): v is AddressLabelsSnapshot {
  */
 function isEntriesMap(v: unknown): v is Record<string, AddressEntry> {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
-  return Object.values(v as Record<string, unknown>).every((entry) => {
-    if (typeof entry !== "object" || entry === null) return false;
-    const e = entry as Record<string, unknown>;
-    // Accept v1 (label), v2 (name), or tag-only entries
-    const hasName = typeof e.label === "string" || typeof e.name === "string";
-    const hasTags = Array.isArray(e.tags) && e.tags.length > 0;
-    return hasName || hasTags;
-  });
+  return Object.entries(v as Record<string, unknown>).every(
+    ([address, entry]) => {
+      if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return false;
+      if (typeof entry !== "object" || entry === null) return false;
+      const e = entry as Record<string, unknown>;
+      // Accept v1 (label), v2 (name), or tag-only entries
+      const hasName = typeof e.label === "string" || typeof e.name === "string";
+      const hasTags = Array.isArray(e.tags) && e.tags.length > 0;
+      return hasName || hasTags;
+    },
+  );
 }
 
 function serverError(err: unknown): NextResponse {

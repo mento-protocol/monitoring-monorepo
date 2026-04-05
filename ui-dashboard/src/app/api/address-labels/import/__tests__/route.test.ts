@@ -122,6 +122,8 @@ beforeEach(() => {
 });
 
 describe("POST /api/address-labels/import", () => {
+  const validAddress = "0x" + "a".repeat(40);
+
   it("returns 401 when unauthenticated", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     const res = await POST(jsonReq({ chainId: 42220, labels: {} }));
@@ -130,21 +132,25 @@ describe("POST /api/address-labels/import", () => {
 
   it("imports simple format with valid chainId (v2 schema)", async () => {
     const labels = {
-      "0xabc": { name: "Test", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
+      [validAddress]: {
+        name: "Test",
+        tags: [],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
     };
     const res = await POST(jsonReq({ chainId: 42220, labels }));
     expect(res.status).toBe(200);
     expect(importLabels).toHaveBeenCalledWith(
       42220,
       expect.objectContaining({
-        "0xabc": expect.objectContaining({ name: "Test" }),
+        [validAddress]: expect.objectContaining({ name: "Test" }),
       }),
     );
   });
 
   it("imports simple format with legacy v1 entries (label→name)", async () => {
     const labels = {
-      "0xabc": {
+      [validAddress]: {
         label: "Legacy",
         category: "CEX",
         updatedAt: "2026-01-01T00:00:00Z",
@@ -155,7 +161,10 @@ describe("POST /api/address-labels/import", () => {
     expect(importLabels).toHaveBeenCalledWith(
       42220,
       expect.objectContaining({
-        "0xabc": expect.objectContaining({ name: "Legacy", tags: ["CEX"] }),
+        [validAddress]: expect.objectContaining({
+          name: "Legacy",
+          tags: ["CEX"],
+        }),
       }),
     );
   });
@@ -165,7 +174,7 @@ describe("POST /api/address-labels/import", () => {
       exportedAt: "2026-01-01T00:00:00Z",
       chains: {
         "42220": {
-          "0xabc": {
+          [validAddress]: {
             name: "Test",
             tags: ["Whale"],
             updatedAt: "2026-01-01T00:00:00Z",
@@ -183,7 +192,7 @@ describe("POST /api/address-labels/import", () => {
       exportedAt: "2026-01-01T00:00:00Z",
       chains: {
         "42220": {
-          "0xabc": {
+          [validAddress]: {
             label: "Old",
             category: "DeFi",
             updatedAt: "2026-01-01T00:00:00Z",
@@ -196,7 +205,10 @@ describe("POST /api/address-labels/import", () => {
     expect(importLabels).toHaveBeenCalledWith(
       42220,
       expect.objectContaining({
-        "0xabc": expect.objectContaining({ name: "Old", tags: ["DeFi"] }),
+        [validAddress]: expect.objectContaining({
+          name: "Old",
+          tags: ["DeFi"],
+        }),
       }),
     );
   });
@@ -245,6 +257,42 @@ describe("POST /api/address-labels/import", () => {
   it("rejects simple format with invalid labels shape", async () => {
     const res = await POST(jsonReq({ chainId: 42220, labels: "not-object" }));
     expect(res.status).toBe(400);
+  });
+
+  it("rejects simple format with invalid address keys", async () => {
+    const res = await POST(
+      jsonReq({
+        chainId: 42220,
+        labels: {
+          notAnAddress: {
+            name: "Bad",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importLabels).not.toHaveBeenCalled();
+  });
+
+  it("rejects snapshot format with invalid address keys", async () => {
+    const res = await POST(
+      jsonReq({
+        exportedAt: "2026-01-01T00:00:00Z",
+        chains: {
+          "42220": {
+            badKey: {
+              name: "Bad",
+              tags: [],
+              updatedAt: "2026-01-01T00:00:00Z",
+            },
+          },
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(importLabels).not.toHaveBeenCalled();
   });
 
   it("rejects labels where entries lack both name and label fields", async () => {
@@ -612,6 +660,26 @@ describe("POST /api/address-labels/import", () => {
       expect(res.status).toBe(200);
       expect(importLabels).toHaveBeenCalledTimes(2);
       expect(((await res.json()) as { imported: number }).imported).toBe(2);
+    });
+
+    it("deduplicates mixed-case duplicate addresses when reporting imported count", async () => {
+      const upper = validAddress.toUpperCase().replace(/^0X/, "0x");
+      const gnosisSafe = [
+        { address: validAddress, chainId: "42220", name: "First" },
+        { address: upper, chainId: "42220", name: "Second" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(200);
+      expect(importLabels).toHaveBeenCalledTimes(1);
+      expect(((await res.json()) as { imported: number }).imported).toBe(1);
+      expect(importLabels).toHaveBeenCalledWith(
+        42220,
+        expect.objectContaining({
+          [validAddress.toLowerCase()]: expect.objectContaining({
+            name: "Second",
+          }),
+        }),
+      );
     });
 
     it("succeeds with an empty array (no-op)", async () => {
