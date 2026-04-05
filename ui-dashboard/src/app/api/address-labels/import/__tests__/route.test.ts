@@ -169,6 +169,34 @@ describe("POST /api/address-labels/import", () => {
     );
   });
 
+  it("deduplicates mixed-case duplicate addresses in simple JSON imports", async () => {
+    const upper = validAddress.toUpperCase().replace(/^0X/, "0x");
+    const labels = {
+      [validAddress]: {
+        name: "First",
+        tags: [],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+      [upper]: {
+        name: "Second",
+        tags: ["Whale"],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    };
+    const res = await POST(jsonReq({ chainId: 42220, labels }));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { imported: number }).imported).toBe(1);
+    expect(importLabels).toHaveBeenCalledWith(
+      42220,
+      expect.objectContaining({
+        [validAddress.toLowerCase()]: expect.objectContaining({
+          name: "Second",
+          tags: ["Whale"],
+        }),
+      }),
+    );
+  });
+
   it("imports snapshot format (v2 schema)", async () => {
     const snapshot = {
       exportedAt: "2026-01-01T00:00:00Z",
@@ -208,6 +236,39 @@ describe("POST /api/address-labels/import", () => {
         [validAddress]: expect.objectContaining({
           name: "Old",
           tags: ["DeFi"],
+        }),
+      }),
+    );
+  });
+
+  it("deduplicates mixed-case duplicate addresses in snapshot JSON imports", async () => {
+    const upper = validAddress.toUpperCase().replace(/^0X/, "0x");
+    const snapshot = {
+      exportedAt: "2026-01-01T00:00:00Z",
+      chains: {
+        "42220": {
+          [validAddress]: {
+            name: "First",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+          [upper]: {
+            name: "Second",
+            tags: ["Whale"],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+      },
+    };
+    const res = await POST(jsonReq(snapshot));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { imported: number }).imported).toBe(1);
+    expect(importLabels).toHaveBeenCalledWith(
+      42220,
+      expect.objectContaining({
+        [validAddress.toLowerCase()]: expect.objectContaining({
+          name: "Second",
+          tags: ["Whale"],
         }),
       }),
     );
