@@ -191,7 +191,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // Sanitize (enforce limits) + filter empty entries (#4, #7)
         const filtered = Object.fromEntries(
           Object.entries(upgraded)
-            .map(([addr, e]) => [addr, sanitizeEntry(e)] as const)
+            .map(([addr, e]) => [addr.toLowerCase(), sanitizeEntry(e)] as const)
             .filter(([, e]) => e.name !== "" || e.tags.length > 0),
         );
         imported += Object.keys(filtered).length;
@@ -224,7 +224,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Sanitize (enforce limits) + filter empty entries (#4, #7)
     const filtered = Object.fromEntries(
       Object.entries(upgraded)
-        .map(([addr, e]) => [addr, sanitizeEntry(e)] as const)
+        .map(([addr, e]) => [addr.toLowerCase(), sanitizeEntry(e)] as const)
         .filter(([, e]) => e.name !== "" || e.tags.length > 0),
     );
     await importLabels(chainId, filtered);
