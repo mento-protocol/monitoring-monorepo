@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import React from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { TagPills } from "@/components/tag-pills";
@@ -19,8 +19,16 @@ globalThis.ResizeObserver =
 describe("TagPills", () => {
   let container: HTMLDivElement;
   let root: Root;
+  let rafQueue: FrameRequestCallback[];
 
   beforeEach(() => {
+    rafQueue = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      rafQueue.push(cb);
+      return rafQueue.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -31,6 +39,7 @@ describe("TagPills", () => {
       root.unmount();
     });
     container.remove();
+    vi.unstubAllGlobals();
   });
 
   it("renders nothing when tags is empty", () => {
@@ -68,5 +77,56 @@ describe("TagPills", () => {
     });
     const overflow = container.querySelector("[data-overflow]");
     expect(overflow).toBeNull();
+  });
+
+  it("shows a +N overflow indicator when pills exceed maxHeight", () => {
+    act(() => {
+      root.render(<TagPills tags={["One", "Two", "Three"]} maxHeight={48} />);
+    });
+
+    const pillRects = [
+      { top: 0, bottom: 16 },
+      { top: 20, bottom: 36 },
+      { top: 40, bottom: 64 },
+    ];
+
+    const containerEl = container.querySelector("div[style]") as HTMLDivElement;
+    expect(containerEl).not.toBeNull();
+
+    vi.spyOn(containerEl, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 200,
+      bottom: 48,
+      width: 200,
+      height: 48,
+      toJSON: () => ({}),
+    });
+
+    const pills = containerEl.querySelectorAll("span");
+    pills.forEach((pill, index) => {
+      vi.spyOn(pill, "getBoundingClientRect").mockReturnValue({
+        x: 0,
+        y: pillRects[index].top,
+        top: pillRects[index].top,
+        left: 0,
+        right: 80,
+        bottom: pillRects[index].bottom,
+        width: 80,
+        height: pillRects[index].bottom - pillRects[index].top,
+        toJSON: () => ({}),
+      });
+    });
+
+    act(() => {
+      const cb = rafQueue.shift();
+      cb?.(0);
+    });
+
+    const overflow = container.querySelector("[data-overflow]");
+    expect(overflow).not.toBeNull();
+    expect(overflow!.textContent).toBe("+1");
   });
 });
