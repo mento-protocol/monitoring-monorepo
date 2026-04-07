@@ -110,6 +110,7 @@ describe("fetchNetworkData — happy path", () => {
     expect(calls[1][1]).toEqual({ chainId: 42220 });
     expect(calls[2][1]).toEqual({ from: 0, to: 1000, poolIds: ["pool-1"] });
     expect(calls[3][1]).toEqual({ from: 0, to: 7000, poolIds: ["pool-1"] });
+    expect(calls[4][1]).toEqual({ from: 0, to: 30000, poolIds: ["pool-1"] });
   });
 
   it("trims whitespace from hasuraSecret before setting auth header", async () => {

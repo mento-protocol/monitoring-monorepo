@@ -70,8 +70,7 @@ function GlobalContent() {
       anyFeesError || anyNetworkError ? null : 0;
     let totalFees24h: number | null =
       anyFeesError || anyNetworkError ? null : 0;
-    let totalFees7d: number | null =
-      anyFeesError || anyNetworkError ? null : 0;
+    let totalFees7d: number | null = anyFeesError || anyNetworkError ? null : 0;
     let totalFees30d: number | null =
       anyFeesError || anyNetworkError ? null : 0;
     const unpricedSymbolSet = new Set<string>();
@@ -193,56 +192,46 @@ function GlobalContent() {
   // Build a flat list of all pool entries and merged volume maps keyed by
   // `${network.id}:${pool.id}` to avoid collisions across chains.
   // Pools from chains with snapshot errors get null in the map → rendered as "N/A" per-row.
-  const { globalEntries, volume24hByKey, volume7dByKey, volume30dByKey } =
-    useMemo(() => {
-      const entries: GlobalPoolEntry[] = [];
-      const vol24hMap = new Map<string, number | null | undefined>();
-      const vol7dMap = new Map<string, number | null | undefined>();
-      const vol30dMap = new Map<string, number | null | undefined>();
+  const { globalEntries, volume24hByKey, volume7dByKey } = useMemo(() => {
+    const entries: GlobalPoolEntry[] = [];
+    const vol24hMap = new Map<string, number | null | undefined>();
+    const vol7dMap = new Map<string, number | null | undefined>();
 
-      for (const netData of networkData) {
-        if (netData.error !== null) continue;
-        const {
-          network,
-          pools,
-          snapshots,
-          snapshots7d,
-          snapshots30d,
-          snapshotsError,
-          snapshots7dError,
-          snapshots30dError,
-        } = netData;
+    for (const netData of networkData) {
+      if (netData.error !== null) continue;
+      const {
+        network,
+        pools,
+        snapshots,
+        snapshots7d,
+        snapshotsError,
+        snapshots7dError,
+      } = netData;
 
-        const perChain24h =
-          snapshotsError === null
-            ? buildPoolVolumeMap(snapshots, pools, network)
-            : null;
-        const perChain7d =
-          snapshots7dError === null
-            ? buildPoolVolumeMap(snapshots7d, pools, network)
-            : null;
-        const perChain30d =
-          snapshots30dError === null
-            ? buildPoolVolumeMap(snapshots30d, pools, network)
-            : null;
+      const perChain24h =
+        snapshotsError === null
+          ? buildPoolVolumeMap(snapshots, pools, network)
+          : null;
+      const perChain7d =
+        snapshots7dError === null
+          ? buildPoolVolumeMap(snapshots7d, pools, network)
+          : null;
 
-        for (const pool of pools) {
-          const entry: GlobalPoolEntry = { pool, network };
-          entries.push(entry);
-          const key = globalPoolKey(entry);
-          vol24hMap.set(key, perChain24h ? perChain24h.get(pool.id) : null);
-          vol7dMap.set(key, perChain7d ? perChain7d.get(pool.id) : null);
-          vol30dMap.set(key, perChain30d ? perChain30d.get(pool.id) : null);
-        }
+      for (const pool of pools) {
+        const entry: GlobalPoolEntry = { pool, network };
+        entries.push(entry);
+        const key = globalPoolKey(entry);
+        vol24hMap.set(key, perChain24h ? perChain24h.get(pool.id) : null);
+        vol7dMap.set(key, perChain7d ? perChain7d.get(pool.id) : null);
       }
+    }
 
-      return {
-        globalEntries: entries,
-        volume24hByKey: vol24hMap,
-        volume7dByKey: vol7dMap,
-        volume30dByKey: vol30dMap,
-      };
-    }, [networkData]);
+    return {
+      globalEntries: entries,
+      volume24hByKey: vol24hMap,
+      volume7dByKey: vol7dMap,
+    };
+  }, [networkData]);
 
   // Networks that failed at the top level — show an error notice per chain
   const failedNetworks = networkData.filter((net) => net.error !== null);
@@ -329,7 +318,9 @@ function GlobalContent() {
               },
             ]}
             subtitle={
-              aggregated.totalVolume24h === null
+              aggregated.totalVolume24h === null ||
+              aggregated.totalVolume7d === null ||
+              aggregated.totalVolume30d === null
                 ? "Some chains failed to load"
                 : undefined
             }
@@ -362,6 +353,13 @@ function GlobalContent() {
                     : aggregated.totalSwaps30dFpmm.toLocaleString(),
               },
             ]}
+            subtitle={
+              aggregated.totalSwaps24hFpmm === null ||
+              aggregated.totalSwaps7dFpmm === null ||
+              aggregated.totalSwaps30dFpmm === null
+                ? "Some chains failed to load"
+                : undefined
+            }
           />
           <MultiPeriodTile
             label="Swap Fees"

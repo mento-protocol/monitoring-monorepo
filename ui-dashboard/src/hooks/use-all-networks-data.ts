@@ -58,6 +58,19 @@ type AllNetworksResult = {
 
 export type TimeRange = { from: number; to: number };
 
+function unpackSnapshots(
+  result: PromiseSettledResult<{ PoolSnapshot: PoolSnapshotWindow[] }>,
+): [PoolSnapshotWindow[], Error | null] {
+  if (result.status === "fulfilled") {
+    return [result.value.PoolSnapshot ?? [], null];
+  }
+  const error =
+    result.reason instanceof Error
+      ? result.reason
+      : new Error(String(result.reason));
+  return [[], error];
+}
+
 /** @internal Exported for testing only. */
 export async function fetchNetworkData(
   network: Network,
@@ -142,38 +155,9 @@ export async function fetchNetworkData(
         : new Error(String(feesResult.reason))
       : null;
 
-  const snapshots =
-    snapshotsResult.status === "fulfilled"
-      ? (snapshotsResult.value.PoolSnapshot ?? [])
-      : [];
-  const snapshotsError =
-    snapshotsResult.status === "rejected"
-      ? snapshotsResult.reason instanceof Error
-        ? snapshotsResult.reason
-        : new Error(String(snapshotsResult.reason))
-      : null;
-
-  const snapshots7d =
-    snapshots7dResult.status === "fulfilled"
-      ? (snapshots7dResult.value.PoolSnapshot ?? [])
-      : [];
-  const snapshots7dError =
-    snapshots7dResult.status === "rejected"
-      ? snapshots7dResult.reason instanceof Error
-        ? snapshots7dResult.reason
-        : new Error(String(snapshots7dResult.reason))
-      : null;
-
-  const snapshots30d =
-    snapshots30dResult.status === "fulfilled"
-      ? (snapshots30dResult.value.PoolSnapshot ?? [])
-      : [];
-  const snapshots30dError =
-    snapshots30dResult.status === "rejected"
-      ? snapshots30dResult.reason instanceof Error
-        ? snapshots30dResult.reason
-        : new Error(String(snapshots30dResult.reason))
-      : null;
+  const [snapshots, snapshotsError] = unpackSnapshots(snapshotsResult);
+  const [snapshots7d, snapshots7dError] = unpackSnapshots(snapshots7dResult);
+  const [snapshots30d, snapshots30dError] = unpackSnapshots(snapshots30dResult);
 
   return {
     network,

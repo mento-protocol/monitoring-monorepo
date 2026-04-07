@@ -233,10 +233,66 @@ describe("GlobalPage — snapshots-only failure", () => {
         },
       }),
     ]);
-    expect(html).toContain("Volume");
+    expect(html).toContain(">Volume<");
     expect(html).toContain("N/A");
     // All-time fees should still show (not N/A)
     expect(html).toContain("Swap Fees Earned");
+  });
+
+  it("shows N/A for 30d only when snapshots30dError fires, 24h/7d values survive", () => {
+    const html = render([
+      makeNetworkData({
+        snapshots30dError: new Error("30d timeout"),
+        fees: {
+          totalFeesUSD: 500,
+          fees24hUSD: 20,
+          fees7dUSD: 100,
+          fees30dUSD: 400,
+          unpricedSymbols: [],
+          unpricedSymbols24h: [],
+          unpricedSymbols7d: [],
+          unpricedSymbols30d: [],
+          unresolvedCount: 0,
+          unresolvedCount24h: 0,
+          unresolvedCount7d: 0,
+          unresolvedCount30d: 0,
+          isTruncated: false,
+        },
+      }),
+    ]);
+    // 30d values should show N/A
+    expect(html).toContain("N/A");
+    // Subtitle should explain partial failure
+    expect(html).toContain("Some chains failed to load");
+    // 24h values should still render (not N/A) — $0.00 from empty snapshots
+    expect(html).toContain("$0.00");
+  });
+
+  it("shows N/A for 7d only when snapshots7dError fires, 24h values survive", () => {
+    const html = render([
+      makeNetworkData({
+        snapshots7dError: new Error("7d timeout"),
+        fees: {
+          totalFeesUSD: 500,
+          fees24hUSD: 20,
+          fees7dUSD: 100,
+          fees30dUSD: 400,
+          unpricedSymbols: [],
+          unpricedSymbols24h: [],
+          unpricedSymbols7d: [],
+          unpricedSymbols30d: [],
+          unresolvedCount: 0,
+          unresolvedCount24h: 0,
+          unresolvedCount7d: 0,
+          unresolvedCount30d: 0,
+          isTruncated: false,
+        },
+      }),
+    ]);
+    expect(html).toContain("N/A");
+    expect(html).toContain("Some chains failed to load");
+    // 24h values should still render
+    expect(html).toContain("$0.00");
   });
 });
 

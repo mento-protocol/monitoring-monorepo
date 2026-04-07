@@ -27,7 +27,8 @@ export function ErrorBox({ message }: { message: string }) {
   );
 }
 
-type PeriodValue = { label: string; value: string };
+const TILE_CONTAINER =
+  "rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between";
 
 export function MultiPeriodTile({
   label,
@@ -35,11 +36,11 @@ export function MultiPeriodTile({
   subtitle,
 }: {
   label: string;
-  periods: PeriodValue[];
+  periods: { label: string; value: string }[];
   subtitle?: string;
 }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[120px]">
+    <div className={`${TILE_CONTAINER} min-h-[120px]`}>
       <div>
         <p className="text-sm text-slate-400 mb-2">{label}</p>
         {periods.map((p, i) => (
@@ -80,7 +81,7 @@ export function Tile({
   href?: string;
 }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px]">
+    <div className={`${TILE_CONTAINER} min-h-[88px]`}>
       <div>
         <p className="text-sm text-slate-400">{label}</p>
         {href ? (

@@ -194,6 +194,21 @@ describe("aggregateProtocolFees", () => {
     expect(result.fees30dUSD).toBeCloseTo(3, 2);
   });
 
+  it("includes transfers exactly at the cutoff boundary (>= comparison)", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const transfers = [
+      transfer({ blockTimestamp: String(now - 86400) }), // exactly at 24h cutoff
+      transfer({ blockTimestamp: String(now - 7 * 86400) }), // exactly at 7d cutoff
+      transfer({ blockTimestamp: String(now - 30 * 86400) }), // exactly at 30d cutoff
+      transfer({ blockTimestamp: String(now - 30 * 86400 - 1) }), // 1s before 30d cutoff — outside
+    ];
+    const result = aggregateProtocolFees(transfers);
+    expect(result.fees24hUSD).toBeCloseTo(1, 2); // only the 24h-boundary transfer
+    expect(result.fees7dUSD).toBeCloseTo(2, 2); // 24h + 7d boundary
+    expect(result.fees30dUSD).toBeCloseTo(3, 2); // 24h + 7d + 30d boundary
+    expect(result.totalFeesUSD).toBeCloseTo(4, 2); // all 4 transfers
+  });
+
   it("silently skips UNKNOWN (indexer placeholder) without flagging as unpriced", () => {
     const transfers = [
       transfer({
