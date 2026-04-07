@@ -135,7 +135,12 @@ function SortableTh({
             {sortDir === "asc" ? "↑" : "↓"}
           </span>
         ) : (
-          <span className="text-slate-600 text-[1.1em] leading-none" style={{ fontVariantEmoji: "text" }}>↕</span>
+          <span
+            className="text-slate-600 text-[1.1em] leading-none"
+            style={{ fontVariantEmoji: "text" }}
+          >
+            ↕
+          </span>
         )}
       </button>
     </th>
