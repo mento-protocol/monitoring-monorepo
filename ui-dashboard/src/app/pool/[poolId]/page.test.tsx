@@ -728,10 +728,10 @@ describe("Pool detail tab search", () => {
       },
     );
     const html = renderWithParams({});
-    expect(useGQLMock).not.toHaveBeenCalledWith(
-      POOL_SNAPSHOTS_CHART,
-      expect.anything(),
+    const chartCalls = useGQLMock.mock.calls.filter(
+      (args: unknown[]) => args[0] === POOL_SNAPSHOTS_CHART,
     );
+    expect(chartCalls).toHaveLength(0);
     expect(html).not.toContain("snapshot-chart");
   });
 
