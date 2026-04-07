@@ -19,7 +19,11 @@ import {
   shouldQueryPoolSnapshots,
   SNAPSHOT_REFRESH_MS,
 } from "@/lib/volume";
-import type { Pool, PoolSnapshotWindow, ProtocolFeeTransfer } from "@/lib/types";
+import type {
+  Pool,
+  PoolSnapshotWindow,
+  ProtocolFeeTransfer,
+} from "@/lib/types";
 
 export type NetworkData = {
   network: Network;
@@ -89,7 +93,9 @@ export async function fetchNetworkData(
   // silently reporting $0 or zero volume.
   const poolIds = pools.map((p) => p.id);
   const shouldQuery = shouldQueryPoolSnapshots(poolIds);
-  const emptySnapshots = Promise.resolve<{ PoolSnapshot: PoolSnapshotWindow[] }>({
+  const emptySnapshots = Promise.resolve<{
+    PoolSnapshot: PoolSnapshotWindow[];
+  }>({
     PoolSnapshot: [],
   });
   const [feesResult, snapshotsResult, snapshots7dResult] =
@@ -168,9 +174,7 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
   };
 
   const results = await Promise.allSettled(
-    configuredNetworkIds.map((id) =>
-      fetchNetworkData(NETWORKS[id], windows),
-    ),
+    configuredNetworkIds.map((id) => fetchNetworkData(NETWORKS[id], windows)),
   );
 
   return results.map((result, i) => {

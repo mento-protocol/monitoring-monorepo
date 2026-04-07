@@ -87,6 +87,9 @@ function renderPoolTableMarkup(props: {
   volume24h?: Map<string, number | null>;
   volume24hLoading?: boolean;
   volume24hError?: boolean;
+  volume7d?: Map<string, number | null>;
+  volume7dLoading?: boolean;
+  volume7dError?: boolean;
 }): string {
   return renderToStaticMarkup(<PoolsTable pools={[BASE_POOL]} {...props} />);
 }
@@ -139,6 +142,30 @@ describe("PoolsTable 24h volume states", () => {
   });
 });
 
+describe("PoolsTable 7d volume states", () => {
+  it("renders loading placeholder while 7d volume is loading", () => {
+    const html = renderPoolTableMarkup({ volume7dLoading: true });
+    expect(html).toContain("…");
+  });
+
+  it("renders N/A when 7d volume query failed", () => {
+    const html = renderPoolTableMarkup({ volume7dError: true });
+    expect(html).toContain("N/A");
+  });
+
+  it("renders N/A for non-convertible and formatted USD for convertible 7d volumes", () => {
+    const nullVolumeHtml = renderPoolTableMarkup({
+      volume7d: new Map([["pool-1", null]]),
+    });
+    expect(nullVolumeHtml).toContain("N/A");
+
+    const usdVolumeHtml = renderPoolTableMarkup({
+      volume7d: new Map([["pool-1", 456]]),
+    });
+    expect(usdVolumeHtml).toContain("$456.00");
+  });
+});
+
 describe("PoolsTable source column", () => {
   it("shows the Source column on networks with virtual pools", () => {
     mockNetwork.hasVirtualPools = true;
@@ -160,6 +187,7 @@ describe("PoolsTable column structure", () => {
   it("renders the new column headers and omits removed ones", () => {
     const html = renderPoolTableMarkup({});
     expect(html).toContain("24h Volume");
+    expect(html).toContain("7d Volume");
     expect(html).toContain("Total Volume");
     expect(html).toContain("Swaps");
     expect(html).toContain("Rebalances");
@@ -329,6 +357,35 @@ describe("sortPools — default totalVolume desc", () => {
     const pools = [makePool("low"), makePool("mid"), makePool("high")];
     const result = sortPools(pools, "totalVolume", "asc", ctx);
     expect(result.map((p) => p.id)).toEqual(["low", "mid", "high"]);
+  });
+});
+
+describe("sortPools — volume7d", () => {
+  it("orders pools by 7d volume descending", () => {
+    const pools = [makePool("low"), makePool("high"), makePool("mid")];
+    const ctx: SortContext = {
+      ...SORT_CONTEXT,
+      volume7d: new Map<string, number | null>([
+        ["low", 10],
+        ["high", 500],
+        ["mid", 100],
+      ]),
+    };
+    const result = sortPools(pools, "volume7d", "desc", ctx);
+    expect(result.map((p) => p.id)).toEqual(["high", "mid", "low"]);
+  });
+
+  it("treats null volume as 0 for sorting", () => {
+    const pools = [makePool("null-vol"), makePool("some-vol")];
+    const ctx: SortContext = {
+      ...SORT_CONTEXT,
+      volume7d: new Map<string, number | null>([
+        ["null-vol", null],
+        ["some-vol", 5],
+      ]),
+    };
+    const result = sortPools(pools, "volume7d", "desc", ctx);
+    expect(result.map((p) => p.id)).toEqual(["some-vol", "null-vol"]);
   });
 });
 

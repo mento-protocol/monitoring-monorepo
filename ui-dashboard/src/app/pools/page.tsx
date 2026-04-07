@@ -86,12 +86,14 @@ function HomeContent() {
     [olsData],
   );
 
-  // 24h volume snapshots — query uses the same time window as the global page.
+  // Volume snapshots — derive both windows from a single timestamp so the
+  // 24h and 7d columns always share the same `to` bucket.
   const poolIds = useMemo(
     () => (poolsData?.Pool ?? []).map((p) => p.id),
     [poolsData],
   );
-  const snapshotWindow = snapshotWindow24h(Date.now());
+  const now = Date.now();
+  const snapshotWindow = snapshotWindow24h(now);
   const {
     data: snapshotData,
     error: snapshotErr,
@@ -113,8 +115,7 @@ function HomeContent() {
     [snapshotData, poolsData, network],
   );
 
-  // 7d volume snapshots
-  const snapshotWindow7 = snapshotWindow7d(Date.now());
+  const snapshotWindow7 = snapshotWindow7d(now);
   const {
     data: snapshot7dData,
     error: snapshot7dErr,

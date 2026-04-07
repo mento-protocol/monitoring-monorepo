@@ -54,9 +54,7 @@ export function snapshotWindow7d(nowMs: number): { from: number; to: number } {
   };
 }
 
-export function shouldQueryPoolSnapshots(
-  poolIds: readonly string[],
-): boolean {
+export function shouldQueryPoolSnapshots(poolIds: readonly string[]): boolean {
   return poolIds.length > 0;
 }
 
