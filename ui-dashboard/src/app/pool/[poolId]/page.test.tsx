@@ -684,6 +684,52 @@ describe("Pool detail tab search", () => {
     expect(html).toContain("liquidity-chart");
   });
 
+  it("skips snapshot chart query for virtual pools", () => {
+    useGQLMock.mockImplementation(
+      (query: unknown, variables?: { offset?: number; limit?: number }) => {
+        if (query === POOL_DETAIL_WITH_HEALTH)
+          return makeGqlResult({
+            Pool: [{ ...basePool, source: "virtual_pool" }],
+          });
+        if (query === TRADING_LIMITS)
+          return makeGqlResult({ TradingLimit: [] satisfies TradingLimit[] });
+        if (query === POOL_DEPLOYMENT)
+          return makeGqlResult({
+            FactoryDeployment: [{ txHash: "0xdeploy" }],
+          });
+        if (query === POOL_SWAPS) return makeGqlResult({ SwapEvent: swaps });
+        if (query === POOL_SNAPSHOTS_CHART)
+          return makeGqlResult({ PoolSnapshot: poolSnapshots });
+        if (query === POOL_RESERVES)
+          return makeGqlResult({ ReserveUpdate: reserves });
+        if (query === POOL_REBALANCES)
+          return makeGqlResult({ RebalanceEvent: rebalances });
+        if (query === POOL_LIQUIDITY)
+          return makeGqlResult({ LiquidityEvent: liquidity });
+        if (query === ORACLE_SNAPSHOTS)
+          return makeGqlResult({
+            OracleSnapshot: oracleRows.map((row, index) => ({
+              ...row,
+              id: `oracle-${(variables?.offset ?? 0) + index + 1}`,
+            })),
+          });
+        if (query === ORACLE_SNAPSHOTS_CHART)
+          return makeGqlResult({ OracleSnapshot: oracleRows });
+        if (query === ORACLE_SNAPSHOTS_COUNT)
+          return makeGqlResult({
+            OracleSnapshot_aggregate: { aggregate: { count: oracleCount } },
+          });
+        return makeGqlResult({});
+      },
+    );
+    const html = renderWithParams({});
+    expect(useGQLMock).not.toHaveBeenCalledWith(
+      POOL_SNAPSHOTS_CHART,
+      expect.anything(),
+    );
+    expect(html).not.toContain("snapshot-chart");
+  });
+
   it("preserves newer url params when a debounced search commit fires later", () => {
     const container = renderInteractive();
     const input = container.querySelector(
