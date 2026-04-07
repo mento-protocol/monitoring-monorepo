@@ -100,6 +100,8 @@ describe("fetchNetworkData — happy path", () => {
     expect(result.error).toBeNull();
     expect(result.feesError).toBeNull();
     expect(result.snapshotsError).toBeNull();
+    expect(result.snapshots7dError).toBeNull();
+    expect(result.snapshots30dError).toBeNull();
     expect(result.pools).toHaveLength(1);
     expect(result.pools[0].id).toBe("pool-1");
     expect(result.fees).not.toBeNull();

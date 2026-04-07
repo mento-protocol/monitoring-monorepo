@@ -264,8 +264,11 @@ describe("GlobalPage — snapshots-only failure", () => {
     expect(html).toContain("N/A");
     // Subtitle should explain partial failure
     expect(html).toContain("Some chains failed to load");
-    // 24h values should still render (not N/A) — $0.00 from empty snapshots
+    // 24h values should still render — $0.00 appears before N/A (24h renders first)
     expect(html).toContain("$0.00");
+    const firstValue = html.indexOf("$0.00");
+    const firstNA = html.indexOf("N/A");
+    expect(firstValue).toBeLessThan(firstNA);
   });
 
   it("shows N/A for 7d only when snapshots7dError fires, 24h values survive", () => {
@@ -291,8 +294,11 @@ describe("GlobalPage — snapshots-only failure", () => {
     ]);
     expect(html).toContain("N/A");
     expect(html).toContain("Some chains failed to load");
-    // 24h values should still render
+    // 24h values should still render — $0.00 appears before N/A (24h renders first)
     expect(html).toContain("$0.00");
+    const firstValue = html.indexOf("$0.00");
+    const firstNA = html.indexOf("N/A");
+    expect(firstValue).toBeLessThan(firstNA);
   });
 });
 
