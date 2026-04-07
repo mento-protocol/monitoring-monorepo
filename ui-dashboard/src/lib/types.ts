@@ -142,7 +142,7 @@ export type RebalanceEvent = {
   effectivenessRatio?: string;
 };
 
-export type PoolSnapshot24h = {
+export type PoolSnapshotWindow = {
   poolId: string;
   swapCount: number;
   swapVolume0: string;

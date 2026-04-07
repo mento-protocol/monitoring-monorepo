@@ -23,6 +23,7 @@ export type SortKey =
   | "health"
   | "tvl"
   | "volume24h"
+  | "volume7d"
   | "totalVolume"
   | "swaps"
   | "rebalances";
@@ -42,13 +43,14 @@ export interface SortContext {
   tvlByPoolId: Map<string, number>;
   totalVolumeByPoolId: Map<string, number | null>;
   volume24h?: Map<string, number | null>;
+  volume7d?: Map<string, number | null>;
 }
 
 export function sortPools(
   pools: Pool[],
   sortKey: SortKey,
   sortDir: SortDir,
-  { network, tvlByPoolId, totalVolumeByPoolId, volume24h }: SortContext,
+  { network, tvlByPoolId, totalVolumeByPoolId, volume24h, volume7d }: SortContext,
 ): Pool[] {
   return [...pools].sort((a, b) => {
     let cmp = 0;
@@ -76,7 +78,13 @@ export function sortPools(
       case "volume24h": {
         const aV = volume24h?.get(a.id) ?? 0;
         const bV = volume24h?.get(b.id) ?? 0;
-        cmp = (aV ?? 0) - (bV ?? 0);
+        cmp = aV - bV;
+        break;
+      }
+      case "volume7d": {
+        const aV7 = volume7d?.get(a.id) ?? 0;
+        const bV7 = volume7d?.get(b.id) ?? 0;
+        cmp = aV7 - bV7;
         break;
       }
       case "totalVolume":
@@ -135,7 +143,7 @@ function SortableTh({
             {sortDir === "asc" ? "↑" : "↓"}
           </span>
         ) : (
-          <span className="text-slate-600">↕</span>
+          <span className="text-slate-600 text-[1.1em] leading-none" style={{ fontVariantEmoji: "text" }}>↕</span>
         )}
       </button>
     </th>
@@ -147,6 +155,9 @@ interface PoolsTableProps {
   volume24h?: Map<string, number | null>;
   volume24hLoading?: boolean;
   volume24hError?: boolean;
+  volume7d?: Map<string, number | null>;
+  volume7dLoading?: boolean;
+  volume7dError?: boolean;
   olsPoolIds?: Set<string>;
 }
 
@@ -155,6 +166,9 @@ export function PoolsTable({
   volume24h,
   volume24hLoading = false,
   volume24hError = false,
+  volume7d,
+  volume7dLoading = false,
+  volume7dError = false,
   olsPoolIds,
 }: PoolsTableProps) {
   const { network } = useNetwork();
@@ -190,6 +204,7 @@ export function PoolsTable({
         tvlByPoolId,
         totalVolumeByPoolId,
         volume24h,
+        volume7d,
       }),
     [
       pools,
@@ -198,6 +213,7 @@ export function PoolsTable({
       tvlByPoolId,
       totalVolumeByPoolId,
       volume24h,
+      volume7d,
       network,
     ],
   );
@@ -263,6 +279,15 @@ export function PoolsTable({
               24h Volume
             </SortableTh>
             <SortableTh
+              sortKey="volume7d"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              className="hidden md:table-cell"
+            >
+              7d Volume
+            </SortableTh>
+            <SortableTh
               sortKey="totalVolume"
               activeSortKey={sortKey}
               sortDir={sortDir}
@@ -318,6 +343,7 @@ export function PoolsTable({
             );
             const tvl = tvlByPoolId.get(p.id) ?? 0;
             const vol24h = volume24h?.get(p.id);
+            const vol7d = volume7d?.get(p.id);
             const totalVol = totalVolumeByPoolId.get(p.id);
             return (
               <Row key={p.id}>
@@ -358,6 +384,17 @@ export function PoolsTable({
                         ? "N/A"
                         : vol24h && vol24h > 0
                           ? formatUSD(vol24h)
+                          : "—"}
+                </td>
+                <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
+                  {volume7dLoading
+                    ? "…"
+                    : volume7dError
+                      ? "N/A"
+                      : vol7d === null
+                        ? "N/A"
+                        : vol7d && vol7d > 0
+                          ? formatUSD(vol7d)
                           : "—"}
                 </td>
                 <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">

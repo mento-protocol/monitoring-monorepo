@@ -34,8 +34,48 @@ vi.mock("@/lib/graphql", () => ({
 }));
 
 vi.mock("@/components/pools-table", () => ({
-  PoolsTable: ({ olsPoolIds }: { olsPoolIds: Set<string> }) => (
-    <div data-testid="pools-table">ols:{Array.from(olsPoolIds).join(",")}</div>
+  PoolsTable: ({
+    olsPoolIds,
+    volume24h,
+    volume24hLoading,
+    volume24hError,
+    volume7d,
+    volume7dLoading,
+    volume7dError,
+  }: {
+    olsPoolIds: Set<string>;
+    volume24h?: Map<string, number | null>;
+    volume24hLoading?: boolean;
+    volume24hError?: boolean;
+    volume7d?: Map<string, number | null>;
+    volume7dLoading?: boolean;
+    volume7dError?: boolean;
+  }) => (
+    <div data-testid="pools-table">
+      ols:{Array.from(olsPoolIds).join(",")}
+      {volume24hLoading !== undefined && (
+        <span data-testid="vol24h-loading">{String(volume24hLoading)}</span>
+      )}
+      {volume24hError !== undefined && (
+        <span data-testid="vol24h-error">{String(volume24hError)}</span>
+      )}
+      {volume24h && (
+        <span data-testid="vol24h-data">
+          {JSON.stringify(Array.from(volume24h.entries()))}
+        </span>
+      )}
+      {volume7dLoading !== undefined && (
+        <span data-testid="vol7d-loading">{String(volume7dLoading)}</span>
+      )}
+      {volume7dError !== undefined && (
+        <span data-testid="vol7d-error">{String(volume7dError)}</span>
+      )}
+      {volume7d && (
+        <span data-testid="vol7d-data">
+          {JSON.stringify(Array.from(volume7d.entries()))}
+        </span>
+      )}
+    </div>
   ),
 }));
 
@@ -68,6 +108,12 @@ const baseSwapsResult = {
   isLoading: false,
 };
 
+const baseSnapshotResult = {
+  data: { PoolSnapshot: [] },
+  error: null,
+  isLoading: false,
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockSearchParams = new URLSearchParams();
@@ -86,6 +132,8 @@ describe("PoolsPage OLS badge loading", () => {
             isLoading: false,
           } as SWRResponse;
         }
+        if (query?.includes("query PoolSnapshotsWindow"))
+          return baseSnapshotResult as SWRResponse;
         return baseSwapsResult as SWRResponse;
       },
     );
@@ -112,6 +160,17 @@ describe("PoolsPage OLS badge loading", () => {
             isLoading: false,
           } as SWRResponse;
         }
+        if (query?.includes("query PoolSnapshotsWindow")) {
+          const vars = variables as {
+            from: number;
+            to: number;
+            poolIds: string[];
+          };
+          expect(vars.poolIds).toEqual(["42220-0xpool"]);
+          // Both 24h (86400s) and 7d (604800s) windows hit this branch
+          expect([86400, 604800]).toContain(vars.to - vars.from);
+          return baseSnapshotResult as SWRResponse;
+        }
         if (query?.includes("query RecentSwaps")) {
           expect(variables).toEqual({ chainId: 42220, limit: 25 });
           return baseSwapsResult as SWRResponse;
@@ -121,6 +180,56 @@ describe("PoolsPage OLS badge loading", () => {
     );
 
     renderToStaticMarkup(<PoolsPage />);
+  });
+
+  it("passes volume props to PoolsTable for both 24h and 7d", () => {
+    vi.mocked(useGQL).mockImplementation(
+      (query: string | null): SWRResponse => {
+        if (query?.includes("query AllPoolsWithHealth"))
+          return basePoolResult as SWRResponse;
+        if (query?.includes("query AllOlsPools"))
+          return {
+            data: { OlsPool: [] },
+            error: null,
+            isLoading: false,
+          } as SWRResponse;
+        if (query?.includes("query PoolSnapshotsWindow"))
+          return baseSnapshotResult as SWRResponse;
+        return baseSwapsResult as SWRResponse;
+      },
+    );
+
+    const html = renderToStaticMarkup(<PoolsPage />);
+    expect(html).toContain('data-testid="vol24h-loading"');
+    expect(html).toContain('data-testid="vol24h-error"');
+    expect(html).toContain('data-testid="vol7d-loading"');
+    expect(html).toContain('data-testid="vol7d-error"');
+  });
+
+  it("forwards snapshot error to PoolsTable as volume24hError and volume7dError", () => {
+    vi.mocked(useGQL).mockImplementation(
+      (query: string | null): SWRResponse => {
+        if (query?.includes("query AllPoolsWithHealth"))
+          return basePoolResult as SWRResponse;
+        if (query?.includes("query AllOlsPools"))
+          return {
+            data: { OlsPool: [] },
+            error: null,
+            isLoading: false,
+          } as SWRResponse;
+        if (query?.includes("query PoolSnapshotsWindow"))
+          return {
+            data: undefined,
+            error: new Error("snapshot fail"),
+            isLoading: false,
+          } as SWRResponse;
+        return baseSwapsResult as SWRResponse;
+      },
+    );
+
+    const html = renderToStaticMarkup(<PoolsPage />);
+    expect(html).toContain('data-testid="vol24h-error">true</span>');
+    expect(html).toContain('data-testid="vol7d-error">true</span>');
   });
 
   it("blocks foreign-chain namespaced pool filters on the pools page", () => {
@@ -142,6 +251,8 @@ describe("PoolsPage OLS badge loading", () => {
             isLoading: false,
           } as SWRResponse;
         }
+        if (query?.includes("query PoolSnapshotsWindow"))
+          return baseSnapshotResult as SWRResponse;
         if (
           query?.includes("query RecentSwaps") ||
           query?.includes("query PoolSwaps")
