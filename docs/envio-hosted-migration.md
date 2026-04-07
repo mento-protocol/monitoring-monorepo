@@ -155,11 +155,11 @@ The config file is the same. No code changes needed between environments — onl
 
 | Step | Task                                                                                 | Time  |
 | ---- | ------------------------------------------------------------------------------------ | ----- |
-| 13   | Add `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED` to Vercel env vars (hosted GQL URL) | 2 min |
-| 14   | Add `NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_HOSTED` to Vercel env vars                | 1 min |
+| 13   | Add `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` to Vercel env vars (hosted GQL URL) | 2 min |
+| 14   | Add `NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA` to Vercel env vars                | 1 min |
 | 15   | Create Vercel project pointing to `ui-dashboard/` — see `docs/deployment.md`         | 5 min |
 | 16   | Deploy dashboard to Vercel                                                           | 5 min |
-| 17   | Switch network selector to "Celo Sepolia (hosted)" and verify data loads             | 5 min |
+| 17   | Switch network selector to "Celo Sepolia" and verify data loads             | 5 min |
 
 ### Post-Deploy
 

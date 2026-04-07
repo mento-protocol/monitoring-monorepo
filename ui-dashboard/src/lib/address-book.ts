@@ -3,7 +3,7 @@
  * Shared between page.tsx and tests so both always exercise the same logic.
  *
  * IMPORTANT: custom labels are persisted and fetched by chainId (not network.id).
- * Two network configs can share the same chainId (e.g. "celo-mainnet-hosted" and
+ * Two network configs can share the same chainId (e.g. "celo-mainnet" and
  * "celo-mainnet-local" both have chainId 42220). All scoping here uses chainId.
  *
  * Address comparisons are always case-insensitive (toLowerCase) because

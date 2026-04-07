@@ -17,7 +17,7 @@ All code changes are merged into `main`. No further implementation is needed.
 | `indexer-envio/src/EventHandlers.ts`               | `DEFAULT_RPC_BY_CHAIN` map — chain 143 → `rpc2.monad.xyz`, chain 10143 → Envio HyperRPC                |
 | `indexer-envio/config.monad.mainnet.yaml`          | Envio config for mainnet, start block 60730000                                                         |
 | `indexer-envio/config.monad.testnet.yaml`          | Envio config for testnet, start block 17932300, 3 pools wired                                          |
-| `ui-dashboard/src/lib/networks.ts`                 | `monad-mainnet-hosted` + `monad-testnet-hosted` network definitions                                    |
+| `ui-dashboard/src/lib/networks.ts`                 | `monad-mainnet` + `monad-testnet` network definitions                                    |
 | `ui-dashboard/src/components/network-selector.tsx` | Networks hidden until `NEXT_PUBLIC_HASURA_URL_MONAD_*` is set                                          |
 | `ui-dashboard/src/components/network-provider.tsx` | `isConfiguredNetworkId()` guards URL routing — `?network=monad-*` falls back to default when URL unset |
 | `terraform/`                                       | Needs updates (see Step 3 below)                                                                       |
@@ -79,8 +79,8 @@ Testnet start block is 17,932,300 — sync should be fast.
 Add to `terraform/variables.tf`:
 
 ```hcl
-variable "hasura_url_monad_testnet_hosted" {
-  description = "Hasura GraphQL endpoint for Monad Testnet (Envio hosted)"
+variable "hasura_url_monad_testnet" {
+  description = "Hasura GraphQL endpoint for Monad Testnet (Envio)"
   type        = string
   default     = ""
 }
@@ -89,7 +89,7 @@ variable "hasura_url_monad_testnet_hosted" {
 Add to `terraform/terraform.tfvars`:
 
 ```hcl
-hasura_url_monad_testnet_hosted = "https://indexer.hyperindex.xyz/<hash>/v1/graphql"
+hasura_url_monad_testnet = "https://indexer.hyperindex.xyz/<hash>/v1/graphql"
 ```
 
 Add to `terraform/main.tf` (same pattern as the Sepolia block):
@@ -98,8 +98,8 @@ Add to `terraform/main.tf` (same pattern as the Sepolia block):
 resource "vercel_project_environment_variable" "hasura_url_monad_testnet" {
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id
-  key        = "NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED"
-  value      = var.hasura_url_monad_testnet_hosted
+  key        = "NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET"
+  value      = var.hasura_url_monad_testnet
   target     = ["production", "preview"]
 }
 ```
@@ -108,7 +108,7 @@ Then apply:
 
 ```bash
 pnpm infra:plan   # preview
-pnpm infra:apply  # apply → sets NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED in Vercel
+pnpm infra:apply  # apply → sets NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET in Vercel
 ```
 
 #### Step 4 — Verify (~5 min)
@@ -128,7 +128,7 @@ Differences from testnet:
 
 - Envio project name: `mento-v3-monad-mainnet`
 - Deploy branch: `deploy/monad-mainnet` (`pnpm deploy:indexer monad-mainnet`)
-- Terraform var: `hasura_url_monad_mainnet_hosted` → `NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED`
+- Terraform var: `hasura_url_monad_mainnet` → `NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET`
 - Start block: 60,730,000 (SortedOracles deployed ~60,733,096)
 - No pools in the config yet — the indexer will catch `FPMMDeployed` events and add them automatically
 
@@ -149,7 +149,7 @@ pnpm run dev:monad-testnet
 
 # 3. Run the dashboard against the local indexer
 cd ui-dashboard
-NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED=http://localhost:8080/v1/graphql pnpm dev
+NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET=http://localhost:8080/v1/graphql pnpm dev
 # Visit http://localhost:3000 → select "Monad Testnet"
 # Verify: pools visible, health badges render, oracle prices shown
 ```

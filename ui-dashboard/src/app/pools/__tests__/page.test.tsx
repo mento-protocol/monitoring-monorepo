@@ -13,7 +13,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/components/network-provider", () => ({
   useNetwork: () => ({
     network: {
-      id: "celo-mainnet-hosted",
+      id: "celo-mainnet",
       label: "Celo Mainnet",
       chainId: 42220,
       hasuraUrl: "https://example.com/graphql",

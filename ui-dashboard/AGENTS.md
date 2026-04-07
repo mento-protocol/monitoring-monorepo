@@ -48,11 +48,11 @@ The dashboard supports multiple network targets (all defined in `src/lib/network
 | ---------------------- | ------------- | ------ |
 | `devnet`               | Celo devnet   | local  |
 | `celo-sepolia-local`   | Celo Sepolia  | local  |
-| `celo-sepolia-hosted`  | Celo Sepolia  | hosted |
+| `celo-sepolia`  | Celo Sepolia  | prod |
 | `celo-mainnet-local`   | Celo Mainnet  | local  |
-| `celo-mainnet-hosted`  | Celo Mainnet  | hosted |
-| `monad-mainnet-hosted` | Monad Mainnet | hosted |
-| `monad-testnet-hosted` | Monad Testnet | hosted |
+| `celo-mainnet`  | Celo Mainnet  | prod |
+| `monad-mainnet` | Monad Mainnet | prod |
+| `monad-testnet` | Monad Testnet | prod |
 
 Token symbols and address labels are derived automatically from `@mento-protocol/contracts` using the active treb namespace from `shared-config/deployment-namespaces.json`. Custom address labels (stored in Upstash Redis) merge on top and take precedence. Individual networks can also declare custom `addressLabels` overrides in `makeNetwork(...)`.
 

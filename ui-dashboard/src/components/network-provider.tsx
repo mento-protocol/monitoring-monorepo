@@ -31,7 +31,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
 
   const paramNetwork = searchParams.get("network") ?? "";
   // Only accept URL network params that are actually configured (have a Hasura URL).
-  // This prevents ?network=monad-mainnet-hosted from resolving to a broken state
+  // This prevents ?network=monad-mainnet from resolving to a broken state
   // before the Envio indexer has been deployed and the env var set.
   const fromURL: IndexerNetworkId = isConfiguredNetworkId(paramNetwork)
     ? paramNetwork

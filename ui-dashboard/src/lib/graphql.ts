@@ -13,7 +13,7 @@ function getClient(network: Network): GraphQLClient {
   const client = new GraphQLClient(network.hasuraUrl, {
     // Omit the secret header entirely when empty — sending an empty/whitespace
     // value causes Hasura to return access-denied instead of falling through to
-    // unauthenticated access (which is what public hosted endpoints allow).
+    // unauthenticated access (which is what public Envio endpoints allow).
     headers: secret ? { "x-hasura-admin-secret": secret } : {},
   });
   clientCache.set(network.hasuraUrl, client);
@@ -25,7 +25,7 @@ function getClient(network: Network): GraphQLClient {
  * Automatically switches Hasura endpoint based on the current network context.
  * SWR cache keys include the network ID so data doesn't bleed across networks.
  *
- * When the network's Hasura URL is empty (unconfigured hosted network),
+ * When the network's Hasura URL is empty (unconfigured network),
  * the fetch is skipped and a descriptive error is returned immediately.
  */
 export function useGQL<T>(

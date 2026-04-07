@@ -18,11 +18,11 @@ const NS = {
 export type IndexerNetworkId =
   | "devnet"
   | "celo-sepolia-local"
-  | "celo-sepolia-hosted"
+  | "celo-sepolia"
   | "celo-mainnet-local"
-  | "celo-mainnet-hosted"
-  | "monad-mainnet-hosted"
-  | "monad-testnet-hosted";
+  | "celo-mainnet"
+  | "monad-mainnet"
+  | "monad-testnet";
 
 export type Network = {
   id: IndexerNetworkId;
@@ -140,17 +140,17 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
       process.env.NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA ??
       "https://forno.celo-sepolia.celo-testnet.org",
     hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA ??
+      process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_LOCAL ??
       "http://localhost:8080/v1/graphql",
     hasuraSecret:
-      process.env.NEXT_PUBLIC_HASURA_SECRET_CELO_SEPOLIA ?? "testing",
+      process.env.NEXT_PUBLIC_HASURA_SECRET_CELO_SEPOLIA_LOCAL ?? "testing",
     explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA ??
+      process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_LOCAL ??
       "https://celo-sepolia.blockscout.com",
   }),
-  "celo-sepolia-hosted": makeNetwork({
-    id: "celo-sepolia-hosted",
-    label: "Celo Sepolia (hosted)",
+  "celo-sepolia": makeNetwork({
+    id: "celo-sepolia",
+    label: "Celo Sepolia",
     testnet: true,
     hasVirtualPools: true,
     chainId: 11142220,
@@ -158,10 +158,10 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     rpcUrl:
       process.env.NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA ??
       "https://forno.celo-sepolia.celo-testnet.org",
-    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED ?? "",
+    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_HOSTED ??
+      process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA ??
       "https://celo-sepolia.blockscout.com",
   }),
   "celo-mainnet-local": makeNetwork({
@@ -173,10 +173,27 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     contractsNamespace: NS["celo-mainnet"],
     rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
     hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_CELO_MAINNET ??
+      process.env.NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_LOCAL ??
       "http://localhost:8080/v1/graphql",
     hasuraSecret:
-      process.env.NEXT_PUBLIC_HASURA_SECRET_CELO_MAINNET ?? "testing",
+      process.env.NEXT_PUBLIC_HASURA_SECRET_CELO_MAINNET_LOCAL ?? "testing",
+    explorerBaseUrl:
+      process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET_LOCAL ??
+      "https://celoscan.io",
+    addressLabels: {
+      "0x0dd57f6f181d0469143fe9380762d8a112e96e4a": "Yield Split",
+    },
+  }),
+  "celo-mainnet": makeNetwork({
+    id: "celo-mainnet",
+    label: "Celo Mainnet",
+    hasVirtualPools: true,
+    chainId: 42220,
+    contractsNamespace: NS["celo-mainnet"],
+    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
+    hasuraUrl:
+      process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN?.trim() ?? "",
+    hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET ??
       "https://celoscan.io",
@@ -184,54 +201,37 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
       "0x0dd57f6f181d0469143fe9380762d8a112e96e4a": "Yield Split",
     },
   }),
-  "celo-mainnet-hosted": makeNetwork({
-    id: "celo-mainnet-hosted",
-    label: "Celo Mainnet (hosted)",
-    hasVirtualPools: true,
-    chainId: 42220,
-    contractsNamespace: NS["celo-mainnet"],
-    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
-    hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED?.trim() ?? "",
-    hasuraSecret: "",
-    explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET_HOSTED ??
-      "https://celoscan.io",
-    addressLabels: {
-      "0x0dd57f6f181d0469143fe9380762d8a112e96e4a": "Yield Split",
-    },
-  }),
-  "monad-mainnet-hosted": makeNetwork({
-    id: "monad-mainnet-hosted",
+  "monad-mainnet": makeNetwork({
+    id: "monad-mainnet",
     label: "Monad Mainnet",
     chainId: 143,
     contractsNamespace: NS["monad-mainnet"],
     rpcUrl:
       process.env.NEXT_PUBLIC_RPC_URL_MONAD_MAINNET ?? "https://rpc2.monad.xyz",
     hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED?.trim() ?? "",
+      process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN?.trim() ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_MAINNET_HOSTED ??
+      process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_MAINNET ??
       "https://monadscan.com",
   }),
-  "monad-testnet-hosted": makeNetwork({
-    id: "monad-testnet-hosted",
+  "monad-testnet": makeNetwork({
+    id: "monad-testnet",
     label: "Monad Testnet",
     testnet: true,
     chainId: 10143,
     contractsNamespace: NS["monad-testnet"],
     rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_MONAD_TESTNET,
-    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED ?? "",
+    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_TESTNET_HOSTED ??
+      process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_TESTNET ??
       "https://testnet.monadscan.com",
   }),
 };
 
 export const NETWORK_IDS = Object.keys(NETWORKS) as IndexerNetworkId[];
-export const DEFAULT_NETWORK: IndexerNetworkId = "celo-mainnet-hosted";
+export const DEFAULT_NETWORK: IndexerNetworkId = "celo-mainnet";
 
 export function isNetworkId(v: string): v is IndexerNetworkId {
   return v in NETWORKS;
