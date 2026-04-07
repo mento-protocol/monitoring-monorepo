@@ -1,13 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { NETWORKS } from "../networks";
 import {
-  buildPool24hVolumeMap,
+  buildPoolVolumeMap,
   poolTotalVolumeUSD,
-  shouldQueryPoolSnapshots24h,
+  shouldQueryPoolSnapshots,
   snapshotWindow24h,
-  sumFpmmSwaps24h,
+  snapshotWindow7d,
+  sumFpmmSwaps,
 } from "../volume";
-import type { Pool, PoolSnapshot24h } from "../types";
+import type { Pool, PoolSnapshotWindow } from "../types";
 
 const network = NETWORKS["celo-sepolia-local"];
 
@@ -22,29 +23,40 @@ describe("snapshotWindow24h", () => {
   });
 });
 
-describe("shouldQueryPoolSnapshots24h", () => {
-  it("returns false when there are no pool ids", () => {
-    expect(shouldQueryPoolSnapshots24h([])).toBe(false);
-  });
-
-  it("returns true when at least one pool id is present", () => {
-    expect(shouldQueryPoolSnapshots24h(["pool-1"])).toBe(true);
+describe("snapshotWindow7d", () => {
+  it("returns a bounded 7d hourly window", () => {
+    const now = Date.UTC(2026, 2, 9, 21, 26, 45, 0); // 21:26:45 UTC
+    const { from, to } = snapshotWindow7d(now);
+    const expectedHourStart = Date.UTC(2026, 2, 9, 21, 0, 0, 0) / 1000;
+    expect(from).toBe(expectedHourStart - 7 * 24 * 3600);
+    expect(to).toBe(expectedHourStart);
+    expect(to - from).toBe(7 * 24 * 3600);
   });
 });
 
-describe("sumFpmmSwaps24h", () => {
+describe("shouldQueryPoolSnapshots", () => {
+  it("returns false when there are no pool ids", () => {
+    expect(shouldQueryPoolSnapshots([])).toBe(false);
+  });
+
+  it("returns true when at least one pool id is present", () => {
+    expect(shouldQueryPoolSnapshots(["pool-1"])).toBe(true);
+  });
+});
+
+describe("sumFpmmSwaps", () => {
   it("sums swapCount across all hourly snapshots for FPMM pools", () => {
-    const snapshots: PoolSnapshot24h[] = [
+    const snapshots: PoolSnapshotWindow[] = [
       { poolId: "fpmm-1", swapCount: 3, swapVolume0: "0", swapVolume1: "0" },
       { poolId: "fpmm-1", swapCount: 5, swapVolume0: "0", swapVolume1: "0" },
       { poolId: "fpmm-2", swapCount: 2, swapVolume0: "0", swapVolume1: "0" },
     ];
     const fpmmIds = new Set(["fpmm-1", "fpmm-2"]);
-    expect(sumFpmmSwaps24h(snapshots, fpmmIds)).toBe(10);
+    expect(sumFpmmSwaps(snapshots, fpmmIds)).toBe(10);
   });
 
   it("excludes snapshots from non-FPMM pools", () => {
-    const snapshots: PoolSnapshot24h[] = [
+    const snapshots: PoolSnapshotWindow[] = [
       { poolId: "fpmm-1", swapCount: 4, swapVolume0: "0", swapVolume1: "0" },
       {
         poolId: "virtual-1",
@@ -54,22 +66,22 @@ describe("sumFpmmSwaps24h", () => {
       },
     ];
     const fpmmIds = new Set(["fpmm-1"]);
-    expect(sumFpmmSwaps24h(snapshots, fpmmIds)).toBe(4);
+    expect(sumFpmmSwaps(snapshots, fpmmIds)).toBe(4);
   });
 
   it("returns 0 when there are no snapshots", () => {
-    expect(sumFpmmSwaps24h([], new Set(["fpmm-1"]))).toBe(0);
+    expect(sumFpmmSwaps([], new Set(["fpmm-1"]))).toBe(0);
   });
 
   it("returns 0 when fpmmPoolIds is empty", () => {
-    const snapshots: PoolSnapshot24h[] = [
+    const snapshots: PoolSnapshotWindow[] = [
       { poolId: "fpmm-1", swapCount: 7, swapVolume0: "0", swapVolume1: "0" },
     ];
-    expect(sumFpmmSwaps24h(snapshots, new Set())).toBe(0);
+    expect(sumFpmmSwaps(snapshots, new Set())).toBe(0);
   });
 });
 
-describe("buildPool24hVolumeMap", () => {
+describe("buildPoolVolumeMap", () => {
   it("uses USDm side for USD volume when oracle price is present", () => {
     const pools: Pool[] = [
       {
@@ -88,7 +100,7 @@ describe("buildPool24hVolumeMap", () => {
       },
     ];
 
-    const snapshots: PoolSnapshot24h[] = [
+    const snapshots: PoolSnapshotWindow[] = [
       {
         poolId: "pool-1",
         swapVolume0: "2000000000000000000", // 2 USDm
@@ -97,7 +109,7 @@ describe("buildPool24hVolumeMap", () => {
       },
     ];
 
-    const volumeByPool = buildPool24hVolumeMap(snapshots, pools, network);
+    const volumeByPool = buildPoolVolumeMap(snapshots, pools, network);
     expect(volumeByPool.get("pool-1")).toBeCloseTo(2, 8);
   });
 
@@ -119,7 +131,7 @@ describe("buildPool24hVolumeMap", () => {
       },
     ];
 
-    const snapshots: PoolSnapshot24h[] = [
+    const snapshots: PoolSnapshotWindow[] = [
       {
         poolId: "pool-2",
         swapVolume0: "1000000000000000000", // 1
@@ -128,7 +140,7 @@ describe("buildPool24hVolumeMap", () => {
       },
     ];
 
-    const volumeByPool = buildPool24hVolumeMap(snapshots, pools, network);
+    const volumeByPool = buildPoolVolumeMap(snapshots, pools, network);
     expect(volumeByPool.get("pool-2")).toBeCloseTo(1, 8);
   });
 
@@ -150,7 +162,7 @@ describe("buildPool24hVolumeMap", () => {
       },
     ];
 
-    const snapshots: PoolSnapshot24h[] = [
+    const snapshots: PoolSnapshotWindow[] = [
       {
         poolId: "pool-3",
         swapVolume0: "1000000000000000000",
@@ -159,7 +171,7 @@ describe("buildPool24hVolumeMap", () => {
       },
     ];
 
-    const volumeByPool = buildPool24hVolumeMap(snapshots, pools, network);
+    const volumeByPool = buildPoolVolumeMap(snapshots, pools, network);
     expect(volumeByPool.get("pool-3")).toBeNull();
   });
 });

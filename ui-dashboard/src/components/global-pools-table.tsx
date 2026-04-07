@@ -30,6 +30,7 @@ export type GlobalSortKey =
   | "health"
   | "tvl"
   | "volume24h"
+  | "volume7d"
   | "totalVolume"
   | "swaps"
   | "rebalances";
@@ -54,13 +55,14 @@ export interface GlobalSortContext {
   tvlByKey: Map<string, number>;
   totalVolumeByKey: Map<string, number | null>;
   volume24hByKey?: Map<string, number | null | undefined>;
+  volume7dByKey?: Map<string, number | null | undefined>;
 }
 
 export function sortGlobalPools(
   entries: GlobalPoolEntry[],
   sortKey: GlobalSortKey,
   sortDir: SortDir,
-  { tvlByKey, totalVolumeByKey, volume24hByKey }: GlobalSortContext,
+  { tvlByKey, totalVolumeByKey, volume24hByKey, volume7dByKey }: GlobalSortContext,
 ): GlobalPoolEntry[] {
   return [...entries].sort((a, b) => {
     const aKey = globalPoolKey(a);
@@ -94,6 +96,12 @@ export function sortGlobalPools(
         const aV = volume24hByKey?.get(aKey) ?? 0;
         const bV = volume24hByKey?.get(bKey) ?? 0;
         cmp = aV - bV;
+        break;
+      }
+      case "volume7d": {
+        const aV7 = volume7dByKey?.get(aKey) ?? 0;
+        const bV7 = volume7dByKey?.get(bKey) ?? 0;
+        cmp = aV7 - bV7;
         break;
       }
       case "totalVolume":
@@ -151,7 +159,7 @@ function SortableTh({
             {sortDir === "asc" ? "↑" : "↓"}
           </span>
         ) : (
-          <span className="text-slate-600">↕</span>
+          <span className="text-slate-600 text-[1.1em] leading-none" style={{ fontVariantEmoji: "text" }}>↕</span>
         )}
       </button>
     </th>
@@ -172,6 +180,9 @@ interface GlobalPoolsTableProps {
   volume24hByKey?: Map<string, number | null | undefined>;
   volume24hLoading?: boolean;
   volume24hError?: boolean;
+  volume7dByKey?: Map<string, number | null | undefined>;
+  volume7dLoading?: boolean;
+  volume7dError?: boolean;
 }
 
 export function GlobalPoolsTable({
@@ -179,6 +190,9 @@ export function GlobalPoolsTable({
   volume24hByKey,
   volume24hLoading = false,
   volume24hError = false,
+  volume7dByKey,
+  volume7dLoading = false,
+  volume7dError = false,
 }: GlobalPoolsTableProps) {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const [sortKey, setSortKey] = useState<GlobalSortKey>("tvl");
@@ -218,8 +232,9 @@ export function GlobalPoolsTable({
         tvlByKey,
         totalVolumeByKey,
         volume24hByKey,
+        volume7dByKey,
       }),
-    [entries, sortKey, sortDir, tvlByKey, totalVolumeByKey, volume24hByKey],
+    [entries, sortKey, sortDir, tvlByKey, totalVolumeByKey, volume24hByKey, volume7dByKey],
   );
 
   const showVirtualPoolSource = hasAnyVirtualPools(entries);
@@ -292,6 +307,15 @@ export function GlobalPoolsTable({
               24h Volume
             </SortableTh>
             <SortableTh
+              sortKey="volume7d"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              className="hidden md:table-cell"
+            >
+              7d Volume
+            </SortableTh>
+            <SortableTh
               sortKey="totalVolume"
               activeSortKey={sortKey}
               sortDir={sortDir}
@@ -341,6 +365,7 @@ export function GlobalPoolsTable({
             );
             const tvl = tvlByKey.get(key) ?? 0;
             const vol24h = volume24hByKey?.get(key);
+            const vol7d = volume7dByKey?.get(key);
             const totalVol = totalVolumeByKey.get(key);
             // Build pool detail link preserving network param when non-default
             const poolHref = `/pool/${encodeURIComponent(p.id)}?network=${network.id}`;
@@ -392,6 +417,17 @@ export function GlobalPoolsTable({
                         ? "N/A"
                         : vol24h && vol24h > 0
                           ? formatUSD(vol24h)
+                          : "—"}
+                </td>
+                <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
+                  {volume7dLoading
+                    ? "…"
+                    : volume7dError
+                      ? "N/A"
+                      : vol7d === null
+                        ? "N/A"
+                        : vol7d && vol7d > 0
+                          ? formatUSD(vol7d)
                           : "—"}
                 </td>
                 <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">

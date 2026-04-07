@@ -46,13 +46,14 @@ export const ALL_POOLS_WITH_HEALTH = `
   }
 `;
 
-export const POOL_SNAPSHOTS_24H = `
-  query PoolSnapshots24h($from: numeric!, $to: numeric!, $poolIds: [String!]!) {
+export const POOL_SNAPSHOTS_WINDOW = `
+  query PoolSnapshotsWindow($from: numeric!, $to: numeric!, $poolIds: [String!]!) {
     PoolSnapshot(
       where: {
         timestamp: { _gte: $from, _lt: $to }
         poolId: { _in: $poolIds }
       }
+      limit: 50000
     ) {
       poolId
       swapCount

@@ -8,6 +8,7 @@ import {
   aggregateProtocolFees,
   type ProtocolFeeSummary,
 } from "@/lib/protocol-fees";
+import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import type { ProtocolFeeTransfer } from "@/lib/types";
 
 /**
@@ -27,7 +28,7 @@ export function useProtocolFees(): {
   } = useGQL<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
     PROTOCOL_FEE_TRANSFERS_ALL,
     { chainId: network.chainId },
-    300_000, // 5 minutes
+    SNAPSHOT_REFRESH_MS,
   );
 
   const data = useMemo(() => {

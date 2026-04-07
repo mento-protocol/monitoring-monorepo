@@ -3,7 +3,7 @@
 import { Suspense, useMemo } from "react";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD } from "@/lib/tokens";
-import { buildPool24hVolumeMap, sumFpmmSwaps24h } from "@/lib/volume";
+import { buildPoolVolumeMap, sumFpmmSwaps } from "@/lib/volume";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import {
@@ -68,7 +68,7 @@ function GlobalContent() {
 
       // Only add volume/swaps when snapshots succeeded for this network
       if (netData.snapshotsError === null) {
-        const volume24hMap = buildPool24hVolumeMap(snapshots, pools, network);
+        const volume24hMap = buildPoolVolumeMap(snapshots, pools, network);
         if (totalVolume24h !== null) {
           totalVolume24h += Array.from(volume24hMap.values()).reduce<number>(
             (sum, v) => (typeof v === "number" ? sum + v : sum),
@@ -77,7 +77,7 @@ function GlobalContent() {
         }
         if (totalSwaps24hFpmm !== null) {
           const fpmmPoolIdSet = new Set(fpmmPools.map((p) => p.id));
-          totalSwaps24hFpmm += sumFpmmSwaps24h(snapshots, fpmmPoolIdSet);
+          totalSwaps24hFpmm += sumFpmmSwaps(snapshots, fpmmPoolIdSet);
         }
       }
 
@@ -112,33 +112,40 @@ function GlobalContent() {
     };
   }, [networkData, anyNetworkError, anySnapshotsError, anyFeesError]);
 
-  // Build a flat list of all pool entries and a merged volume24h map keyed by
+  // Build a flat list of all pool entries and merged volume maps keyed by
   // `${network.id}:${pool.id}` to avoid collisions across chains.
   // Pools from chains with snapshot errors get null in the map → rendered as "N/A" per-row.
-  const { globalEntries, volume24hByKey } = useMemo(() => {
+  const { globalEntries, volume24hByKey, volume7dByKey } = useMemo(() => {
     const entries: GlobalPoolEntry[] = [];
-    const volMap = new Map<string, number | null | undefined>();
+    const vol24hMap = new Map<string, number | null | undefined>();
+    const vol7dMap = new Map<string, number | null | undefined>();
 
     for (const netData of networkData) {
       if (netData.error !== null) continue;
-      const { network, pools, snapshots, snapshotsError } = netData;
+      const { network, pools, snapshots, snapshots7d, snapshotsError, snapshots7dError } = netData;
 
-      const perChainVolMap =
+      const perChain24h =
         snapshotsError === null
-          ? buildPool24hVolumeMap(snapshots, pools, network)
+          ? buildPoolVolumeMap(snapshots, pools, network)
+          : null;
+      const perChain7d =
+        snapshots7dError === null
+          ? buildPoolVolumeMap(snapshots7d, pools, network)
           : null;
 
       for (const pool of pools) {
         const entry: GlobalPoolEntry = { pool, network };
         entries.push(entry);
         const key = globalPoolKey(entry);
-        volMap.set(key, perChainVolMap ? perChainVolMap.get(pool.id) : null);
+        vol24hMap.set(key, perChain24h ? perChain24h.get(pool.id) : null);
+        vol7dMap.set(key, perChain7d ? perChain7d.get(pool.id) : null);
       }
     }
 
     return {
       globalEntries: entries,
-      volume24hByKey: volMap,
+      volume24hByKey: vol24hMap,
+      volume7dByKey: vol7dMap,
     };
   }, [networkData]);
 
@@ -264,6 +271,7 @@ function GlobalContent() {
           <GlobalPoolsTable
             entries={globalEntries}
             volume24hByKey={volume24hByKey}
+            volume7dByKey={volume7dByKey}
           />
         )}
       </section>
