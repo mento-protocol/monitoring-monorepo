@@ -6,6 +6,7 @@ import { NetworkAwareLink } from "@/components/network-aware-link";
 import { useGQL } from "@/lib/graphql";
 import {
   ALL_POOLS_WITH_HEALTH,
+  POOL_SNAPSHOTS_WINDOW,
   RECENT_SWAPS,
   POOL_SWAPS,
   ALL_OLS_POOLS,
@@ -22,9 +23,15 @@ import {
   normalizePoolIdForChain,
 } from "@/lib/format";
 import { buildPoolNameMap, tokenSymbol } from "@/lib/tokens";
+import {
+  snapshotWindow24h,
+  snapshotWindow7d,
+  buildPoolVolumeMap,
+  SNAPSHOT_REFRESH_MS,
+} from "@/lib/volume";
 import { PoolsTable } from "@/components/pools-table";
 import { useNetwork } from "@/components/network-provider";
-import type { OlsPool, Pool, SwapEvent } from "@/lib/types";
+import type { OlsPool, Pool, PoolSnapshotWindow, SwapEvent } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import { LimitSelect } from "@/components/controls";
@@ -77,6 +84,57 @@ function HomeContent() {
   const olsPoolIds = useMemo(
     () => new Set((olsData?.OlsPool ?? []).map((p) => p.poolId)),
     [olsData],
+  );
+
+  // Volume snapshots — derive both windows from a single timestamp so the
+  // 24h and 7d columns always share the same `to` bucket.
+  const poolIds = useMemo(
+    () => (poolsData?.Pool ?? []).map((p) => p.id),
+    [poolsData],
+  );
+  const now = Date.now();
+  const snapshotWindow = snapshotWindow24h(now);
+  const {
+    data: snapshotData,
+    error: snapshotErr,
+    isLoading: snapshotLoading,
+  } = useGQL<{ PoolSnapshot: PoolSnapshotWindow[] }>(
+    poolIds.length > 0 ? POOL_SNAPSHOTS_WINDOW : null,
+    { from: snapshotWindow.from, to: snapshotWindow.to, poolIds },
+    SNAPSHOT_REFRESH_MS,
+  );
+  const volume24h = useMemo(
+    () =>
+      snapshotData
+        ? buildPoolVolumeMap(
+            snapshotData.PoolSnapshot ?? [],
+            poolsData?.Pool ?? [],
+            network,
+          )
+        : undefined,
+    [snapshotData, poolsData, network],
+  );
+
+  const snapshotWindow7 = snapshotWindow7d(now);
+  const {
+    data: snapshot7dData,
+    error: snapshot7dErr,
+    isLoading: snapshot7dLoading,
+  } = useGQL<{ PoolSnapshot: PoolSnapshotWindow[] }>(
+    poolIds.length > 0 ? POOL_SNAPSHOTS_WINDOW : null,
+    { from: snapshotWindow7.from, to: snapshotWindow7.to, poolIds },
+    SNAPSHOT_REFRESH_MS,
+  );
+  const volume7d = useMemo(
+    () =>
+      snapshot7dData
+        ? buildPoolVolumeMap(
+            snapshot7dData.PoolSnapshot ?? [],
+            poolsData?.Pool ?? [],
+            network,
+          )
+        : undefined,
+    [snapshot7dData, poolsData, network],
   );
 
   const normalizedPoolFilter = poolFilter
@@ -185,7 +243,16 @@ function HomeContent() {
                 />
               </div>
             )}
-            <PoolsTable pools={pools} olsPoolIds={olsPoolIds} />
+            <PoolsTable
+              pools={pools}
+              volume24h={volume24h}
+              volume24hLoading={snapshotLoading}
+              volume24hError={!!snapshotErr}
+              volume7d={volume7d}
+              volume7dLoading={snapshot7dLoading}
+              volume7dError={!!snapshot7dErr}
+              olsPoolIds={olsPoolIds}
+            />
           </>
         )}
       </section>

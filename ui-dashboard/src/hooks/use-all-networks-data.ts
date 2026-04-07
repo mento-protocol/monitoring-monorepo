@@ -6,30 +6,43 @@ import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 import type { Network } from "@/lib/networks";
 import {
   ALL_POOLS_WITH_HEALTH,
-  POOL_SNAPSHOTS_24H,
+  POOL_SNAPSHOTS_WINDOW,
   PROTOCOL_FEE_TRANSFERS_ALL,
 } from "@/lib/queries";
 import {
   aggregateProtocolFees,
   type ProtocolFeeSummary,
 } from "@/lib/protocol-fees";
-import { snapshotWindow24h, shouldQueryPoolSnapshots24h } from "@/lib/volume";
-import type { Pool, PoolSnapshot24h, ProtocolFeeTransfer } from "@/lib/types";
+import {
+  snapshotWindow24h,
+  snapshotWindow7d,
+  shouldQueryPoolSnapshots,
+  SNAPSHOT_REFRESH_MS,
+} from "@/lib/volume";
+import type {
+  Pool,
+  PoolSnapshotWindow,
+  ProtocolFeeTransfer,
+} from "@/lib/types";
 
 export type NetworkData = {
   network: Network;
   /** Non-empty only if the pools query itself succeeded. */
   pools: Pool[];
   /** Non-empty only when snapshotsError is null. */
-  snapshots: PoolSnapshot24h[];
+  snapshots: PoolSnapshotWindow[];
+  /** Non-empty only when snapshots7dError is null. */
+  snapshots7d: PoolSnapshotWindow[];
   /** Non-null only when feesError is null. */
   fees: ProtocolFeeSummary | null;
   /** Set when the top-level pools query fails (whole network unusable). */
   error: Error | null;
   /** Set when the ProtocolFeeTransfer sub-query fails. Fees should show N/A. */
   feesError: Error | null;
-  /** Set when the PoolSnapshot sub-query fails. Volume/swaps should show N/A. */
+  /** Set when the 24h PoolSnapshot sub-query fails. Volume/swaps should show N/A. */
   snapshotsError: Error | null;
+  /** Set when the 7d PoolSnapshot sub-query fails. 7d volume should show N/A. */
+  snapshots7dError: Error | null;
 };
 
 type AllNetworksResult = {
@@ -38,11 +51,12 @@ type AllNetworksResult = {
   error: Error | null;
 };
 
+export type TimeRange = { from: number; to: number };
+
 /** @internal Exported for testing only. */
 export async function fetchNetworkData(
   network: Network,
-  from: number,
-  to: number,
+  windows: { w24h: TimeRange; w7d: TimeRange },
 ): Promise<NetworkData> {
   // Trim whitespace — matches useGQL behaviour; Hasura treats whitespace-only
   // secrets as invalid auth and returns access-denied rather than falling
@@ -65,10 +79,12 @@ export async function fetchNetworkData(
       network,
       pools: [],
       snapshots: [],
+      snapshots7d: [],
       fees: null,
       error: err instanceof Error ? err : new Error(String(err)),
       feesError: null,
       snapshotsError: null,
+      snapshots7dError: null,
     };
   }
 
@@ -76,24 +92,31 @@ export async function fetchNetworkData(
   // Failures are surfaced per-field so the UI can show "N/A" rather than
   // silently reporting $0 or zero volume.
   const poolIds = pools.map((p) => p.id);
-  const [feesResult, snapshotsResult] = await Promise.allSettled([
-    client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
-      PROTOCOL_FEE_TRANSFERS_ALL,
-      { chainId: network.chainId },
-    ),
-    shouldQueryPoolSnapshots24h(poolIds)
-      ? client.request<{ PoolSnapshot: PoolSnapshot24h[] }>(
-          POOL_SNAPSHOTS_24H,
-          {
-            from,
-            to,
-            poolIds,
-          },
-        )
-      : Promise.resolve<{ PoolSnapshot: PoolSnapshot24h[] }>({
-          PoolSnapshot: [],
-        }),
-  ]);
+  const shouldQuery = shouldQueryPoolSnapshots(poolIds);
+  const emptySnapshots = Promise.resolve<{
+    PoolSnapshot: PoolSnapshotWindow[];
+  }>({
+    PoolSnapshot: [],
+  });
+  const [feesResult, snapshotsResult, snapshots7dResult] =
+    await Promise.allSettled([
+      client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
+        PROTOCOL_FEE_TRANSFERS_ALL,
+        { chainId: network.chainId },
+      ),
+      shouldQuery
+        ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
+            POOL_SNAPSHOTS_WINDOW,
+            { from: windows.w24h.from, to: windows.w24h.to, poolIds },
+          )
+        : emptySnapshots,
+      shouldQuery
+        ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
+            POOL_SNAPSHOTS_WINDOW,
+            { from: windows.w7d.from, to: windows.w7d.to, poolIds },
+          )
+        : emptySnapshots,
+    ]);
 
   const fees =
     feesResult.status === "fulfilled"
@@ -117,24 +140,41 @@ export async function fetchNetworkData(
         : new Error(String(snapshotsResult.reason))
       : null;
 
+  const snapshots7d =
+    snapshots7dResult.status === "fulfilled"
+      ? (snapshots7dResult.value.PoolSnapshot ?? [])
+      : [];
+  const snapshots7dError =
+    snapshots7dResult.status === "rejected"
+      ? snapshots7dResult.reason instanceof Error
+        ? snapshots7dResult.reason
+        : new Error(String(snapshots7dResult.reason))
+      : null;
+
   return {
     network,
     pools,
     snapshots,
+    snapshots7d,
     fees,
     error: null,
     feesError,
     snapshotsError,
+    snapshots7dError,
   };
 }
 
 /** @internal Exported for testing only. */
 export async function fetchAllNetworks(): Promise<NetworkData[]> {
   const configuredNetworkIds = NETWORK_IDS.filter(isConfiguredNetworkId);
-  const { from, to } = snapshotWindow24h(Date.now());
+  const now = Date.now();
+  const windows = {
+    w24h: snapshotWindow24h(now),
+    w7d: snapshotWindow7d(now),
+  };
 
   const results = await Promise.allSettled(
-    configuredNetworkIds.map((id) => fetchNetworkData(NETWORKS[id], from, to)),
+    configuredNetworkIds.map((id) => fetchNetworkData(NETWORKS[id], windows)),
   );
 
   return results.map((result, i) => {
@@ -143,6 +183,7 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
       network: NETWORKS[configuredNetworkIds[i]],
       pools: [],
       snapshots: [],
+      snapshots7d: [],
       fees: null,
       error:
         result.reason instanceof Error
@@ -150,6 +191,7 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
           : new Error(String(result.reason)),
       feesError: null,
       snapshotsError: null,
+      snapshots7dError: null,
     };
   });
 }
@@ -165,7 +207,7 @@ export function useAllNetworksData(): AllNetworksResult {
   const { data, error, isLoading } = useSWR<NetworkData[]>(
     "all-networks-data",
     fetchAllNetworks,
-    { refreshInterval: 300_000 },
+    { refreshInterval: SNAPSHOT_REFRESH_MS },
   );
 
   return {

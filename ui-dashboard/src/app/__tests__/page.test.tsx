@@ -83,10 +83,12 @@ function makeNetworkData(overrides: Partial<NetworkData> = {}): NetworkData {
     network: BASE_NETWORK,
     pools: [],
     snapshots: [],
+    snapshots7d: [],
     fees: null,
     error: null,
     feesError: null,
     snapshotsError: null,
+    snapshots7dError: null,
     ...overrides,
   };
 }
@@ -354,7 +356,7 @@ describe("GlobalPage — cross-chain key collision", () => {
   it("preserves undefined volume entries instead of coercing them to null", () => {
     const pool = makePool("0xpool1");
     const spy = vi
-      .spyOn(volumeModule, "buildPool24hVolumeMap")
+      .spyOn(volumeModule, "buildPoolVolumeMap")
       .mockReturnValue(new Map());
 
     render([makeNetworkData({ network: BASE_NETWORK, pools: [pool] })]);

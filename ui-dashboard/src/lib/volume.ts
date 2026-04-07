@@ -1,7 +1,7 @@
 import { parseWei } from "./format";
 import { tokenSymbol, USDM_SYMBOLS } from "./tokens";
 import type { Network } from "./networks";
-import type { Pool, PoolSnapshot24h } from "./types";
+import type { Pool, PoolSnapshotWindow } from "./types";
 
 /**
  * Compute all-time total volume in USD for a pool.
@@ -27,6 +27,10 @@ export function poolTotalVolumeUSD(
 
 const SECONDS_PER_HOUR = 3600;
 const SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR;
+const SECONDS_PER_WEEK = 7 * SECONDS_PER_DAY;
+
+/** Shared refresh interval (ms) for snapshot and fee queries (5 minutes). */
+export const SNAPSHOT_REFRESH_MS = 300_000;
 
 export function hourBucket(timestampSeconds: number): number {
   return Math.floor(timestampSeconds / SECONDS_PER_HOUR) * SECONDS_PER_HOUR;
@@ -41,14 +45,21 @@ export function snapshotWindow24h(nowMs: number): { from: number; to: number } {
   };
 }
 
-export function shouldQueryPoolSnapshots24h(
-  poolIds: readonly string[],
-): boolean {
+export function snapshotWindow7d(nowMs: number): { from: number; to: number } {
+  const nowSeconds = Math.floor(nowMs / 1000);
+  const to = hourBucket(nowSeconds);
+  return {
+    from: to - SECONDS_PER_WEEK,
+    to,
+  };
+}
+
+export function shouldQueryPoolSnapshots(poolIds: readonly string[]): boolean {
   return poolIds.length > 0;
 }
 
-export function buildPool24hVolumeMap(
-  snapshots: PoolSnapshot24h[],
+export function buildPoolVolumeMap(
+  snapshots: PoolSnapshotWindow[],
   pools: Pool[],
   network: Network,
 ): Map<string, number | null> {
@@ -79,7 +90,7 @@ export function buildPool24hVolumeMap(
 }
 
 function getSnapshotVolumeInUsd(
-  snapshot: PoolSnapshot24h,
+  snapshot: PoolSnapshotWindow,
   pool: Pool | undefined,
   network: Network,
 ): number | null {
@@ -95,8 +106,8 @@ function getSnapshotVolumeInUsd(
   return null;
 }
 
-export function sumFpmmSwaps24h(
-  snapshots: PoolSnapshot24h[],
+export function sumFpmmSwaps(
+  snapshots: PoolSnapshotWindow[],
   fpmmPoolIds: ReadonlySet<string>,
 ): number {
   return snapshots

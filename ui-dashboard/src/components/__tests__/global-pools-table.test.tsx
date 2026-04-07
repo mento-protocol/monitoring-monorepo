@@ -133,6 +133,7 @@ describe("GlobalPoolsTable — column structure", () => {
     expect(html).toContain("Health");
     expect(html).toContain("TVL");
     expect(html).toContain("24h Volume");
+    expect(html).toContain("7d Volume");
     expect(html).toContain("Total Volume");
     expect(html).toContain("Swaps");
     expect(html).toContain("Rebalances");
@@ -191,6 +192,31 @@ describe("GlobalPoolsTable — 24h volume states", () => {
       <GlobalPoolsTable entries={[entry]} volume24hByKey={volMap} />,
     );
     expect(html).toContain("$500.00");
+  });
+});
+
+describe("GlobalPoolsTable — 7d volume states", () => {
+  it("renders loading placeholder when volume7dLoading is true", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry()]} volume7dLoading={true} />,
+    );
+    expect(html).toContain("…");
+  });
+
+  it("renders N/A when volume7dError is true", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry()]} volume7dError={true} />,
+    );
+    expect(html).toContain("N/A");
+  });
+
+  it("renders formatted USD 7d volume when present", () => {
+    const entry = makeEntry({ id: "pool-1" });
+    const volMap = new Map([[globalPoolKey(entry), 750]]);
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[entry]} volume7dByKey={volMap} />,
+    );
+    expect(html).toContain("$750.00");
   });
 });
 
