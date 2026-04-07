@@ -390,14 +390,14 @@ The dashboard supports multiple network targets via a network switcher. Each net
 - A Hasura admin secret
 - A block explorer base URL
 
-| Target                | Description                 |
-| --------------------- | --------------------------- |
-| `CELO_MAINNET_HOSTED` | Celo Mainnet (Envio hosted) |
-| `CELO_SEPOLIA_HOSTED` | Celo Sepolia (Envio hosted) |
-| `CELO_MAINNET`        | Celo Mainnet (local dev)    |
-| `CELO_SEPOLIA`        | Celo Sepolia (local dev)    |
+| Target               | Description              |
+| -------------------- | ------------------------ |
+| `CELO_MAINNET`       | Celo Mainnet (Envio)     |
+| `CELO_SEPOLIA`       | Celo Sepolia (Envio)     |
+| `CELO_MAINNET_LOCAL` | Celo Mainnet (local dev) |
+| `CELO_SEPOLIA_LOCAL` | Celo Sepolia (local dev) |
 
-The live dashboard (monitoring.mento.org) uses `CELO_MAINNET_HOSTED` by default.
+The live dashboard (monitoring.mento.org) uses `CELO_MAINNET` by default.
 
 ---
 

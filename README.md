@@ -85,13 +85,13 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
 ### Dashboard
 
-| Variable                                     | Description                                       |
-| -------------------------------------------- | ------------------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED`   | Shared multichain GraphQL endpoint (Celo + Monad) |
-| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED` | Celo Sepolia hosted endpoint                      |
-| `UPSTASH_REDIS_REST_URL`                     | Address labels storage (Upstash Redis)            |
-| `UPSTASH_REDIS_REST_TOKEN`                   | Address labels Redis auth token                   |
-| `BLOB_READ_WRITE_TOKEN`                      | Vercel Blob token for daily label backups         |
+| Variable                              | Description                                       |
+| ------------------------------------- | ------------------------------------------------- |
+| `NEXT_PUBLIC_HASURA_URL_MULTICHAIN`   | Shared multichain GraphQL endpoint (Celo + Monad) |
+| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` | Celo Sepolia endpoint                             |
+| `UPSTASH_REDIS_REST_URL`              | Address labels storage (Upstash Redis)            |
+| `UPSTASH_REDIS_REST_TOKEN`            | Address labels Redis auth token                   |
+| `BLOB_READ_WRITE_TOKEN`               | Vercel Blob token for daily label backups         |
 
 Production env vars are managed by Terraform. See [`terraform/`](./terraform/).
 
