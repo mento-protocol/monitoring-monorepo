@@ -22,7 +22,7 @@ import {
   POOL_LIQUIDITY,
   POOL_REBALANCES,
   POOL_RESERVES,
-  POOL_SNAPSHOTS,
+  POOL_SNAPSHOTS_CHART,
   POOL_SWAPS,
   TRADING_LIMITS,
 } from "@/lib/queries";
@@ -308,7 +308,7 @@ beforeEach(() => {
       if (query === POOL_DEPLOYMENT)
         return makeGqlResult({ FactoryDeployment: [{ txHash: "0xdeploy" }] });
       if (query === POOL_SWAPS) return makeGqlResult({ SwapEvent: swaps });
-      if (query === POOL_SNAPSHOTS) return makeGqlResult({ PoolSnapshot: [] });
+      if (query === POOL_SNAPSHOTS_CHART) return makeGqlResult({ PoolSnapshot: [] });
       if (query === POOL_RESERVES)
         return makeGqlResult({ ReserveUpdate: reserves });
       if (query === POOL_REBALANCES)

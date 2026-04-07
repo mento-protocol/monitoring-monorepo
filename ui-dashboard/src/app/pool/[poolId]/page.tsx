@@ -43,7 +43,7 @@ import {
   POOL_LP_POSITIONS,
   POOL_REBALANCES,
   POOL_RESERVES,
-  POOL_SNAPSHOTS,
+  POOL_SNAPSHOTS_CHART,
   POOL_SWAPS,
   TRADING_LIMITS,
 } from "@/lib/queries";
@@ -564,8 +564,8 @@ function SwapsTab({
   const fpmmPool = pool ? isFpmm(pool) : false;
   // Passing null as the query key skips the request — VirtualPools have no snapshots.
   const { data: snapshotData } = useGQL<{ PoolSnapshot: PoolSnapshot[] }>(
-    fpmmPool ? POOL_SNAPSHOTS : null,
-    { poolId, limit },
+    fpmmPool ? POOL_SNAPSHOTS_CHART : null,
+    { poolId },
   );
   const snapshots = snapshotData?.PoolSnapshot ?? [];
 
@@ -991,8 +991,8 @@ function LiquidityTab({
   const fpmmPool = pool ? isFpmm(pool) : false;
   // Passing null as the query key skips the request — VirtualPools have no snapshots.
   const { data: snapshotData } = useGQL<{ PoolSnapshot: PoolSnapshot[] }>(
-    fpmmPool ? POOL_SNAPSHOTS : null,
-    { poolId, limit },
+    fpmmPool ? POOL_SNAPSHOTS_CHART : null,
+    { poolId },
   );
   const snapshots = snapshotData?.PoolSnapshot ?? [];
 
