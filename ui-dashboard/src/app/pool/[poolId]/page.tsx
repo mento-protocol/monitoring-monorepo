@@ -50,6 +50,7 @@ import {
 import { Pagination } from "@/components/pagination";
 import { computeHealthStatus, computeRebalancerLiveness } from "@/lib/health";
 import { isFpmm, poolName, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
+import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import {
   buildSearchBlob,
   matchesSearch,
@@ -566,6 +567,7 @@ function SwapsTab({
   const { data: snapshotData } = useGQL<{ PoolSnapshot: PoolSnapshot[] }>(
     fpmmPool ? POOL_SNAPSHOTS_CHART : null,
     { poolId },
+    SNAPSHOT_REFRESH_MS,
   );
   // Query fetches newest-first (desc) with a cap; reverse for chronological display.
   const snapshots = useMemo(
@@ -997,6 +999,7 @@ function LiquidityTab({
   const { data: snapshotData } = useGQL<{ PoolSnapshot: PoolSnapshot[] }>(
     fpmmPool ? POOL_SNAPSHOTS_CHART : null,
     { poolId },
+    SNAPSHOT_REFRESH_MS,
   );
   // Query fetches newest-first (desc) with a cap; reverse for chronological display.
   const snapshots = useMemo(

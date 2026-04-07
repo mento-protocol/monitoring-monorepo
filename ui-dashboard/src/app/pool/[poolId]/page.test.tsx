@@ -27,6 +27,7 @@ import {
   POOL_SWAPS,
   TRADING_LIMITS,
 } from "@/lib/queries";
+import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 
 const replaceMock = vi.fn();
 const useGQLMock = vi.fn();
@@ -666,9 +667,11 @@ describe("Pool detail tab search", () => {
 
   it("calls POOL_SNAPSHOTS_CHART with poolId only (no limit) on swaps tab", () => {
     renderWithParams({});
-    expect(useGQLMock).toHaveBeenCalledWith(POOL_SNAPSHOTS_CHART, {
-      poolId: "pool-1",
-    });
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_SNAPSHOTS_CHART,
+      { poolId: "pool-1" },
+      SNAPSHOT_REFRESH_MS,
+    );
   });
 
   it("renders snapshot chart when snapshots are available on swaps tab", () => {
@@ -678,9 +681,11 @@ describe("Pool detail tab search", () => {
 
   it("calls POOL_SNAPSHOTS_CHART on liquidity tab and renders chart", () => {
     const html = renderWithParams({ tab: "liquidity" });
-    expect(useGQLMock).toHaveBeenCalledWith(POOL_SNAPSHOTS_CHART, {
-      poolId: "pool-1",
-    });
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_SNAPSHOTS_CHART,
+      { poolId: "pool-1" },
+      SNAPSHOT_REFRESH_MS,
+    );
     expect(html).toContain("liquidity-chart");
   });
 
