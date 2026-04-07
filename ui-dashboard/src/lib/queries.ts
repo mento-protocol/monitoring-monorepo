@@ -169,7 +169,7 @@ export const POOL_SNAPSHOTS_CHART = `
   query PoolSnapshotsChart($poolId: String!) {
     PoolSnapshot(
       where: { poolId: { _eq: $poolId } }
-      order_by: { timestamp: asc }
+      order_by: { timestamp: desc }
       limit: 50000
     ) {
       id poolId timestamp

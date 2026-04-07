@@ -567,7 +567,11 @@ function SwapsTab({
     fpmmPool ? POOL_SNAPSHOTS_CHART : null,
     { poolId },
   );
-  const snapshots = snapshotData?.PoolSnapshot ?? [];
+  // Query fetches newest-first (desc) with a cap; reverse for chronological display.
+  const snapshots = useMemo(
+    () => [...(snapshotData?.PoolSnapshot ?? [])].reverse(),
+    [snapshotData],
+  );
 
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
@@ -994,7 +998,11 @@ function LiquidityTab({
     fpmmPool ? POOL_SNAPSHOTS_CHART : null,
     { poolId },
   );
-  const snapshots = snapshotData?.PoolSnapshot ?? [];
+  // Query fetches newest-first (desc) with a cap; reverse for chronological display.
+  const snapshots = useMemo(
+    () => [...(snapshotData?.PoolSnapshot ?? [])].reverse(),
+    [snapshotData],
+  );
 
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
