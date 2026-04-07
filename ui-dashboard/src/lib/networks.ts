@@ -191,8 +191,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
     rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
-    hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN?.trim() ?? "",
+    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN?.trim() ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET ??
@@ -208,8 +207,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     contractsNamespace: NS["monad-mainnet"],
     rpcUrl:
       process.env.NEXT_PUBLIC_RPC_URL_MONAD_MAINNET ?? "https://rpc2.monad.xyz",
-    hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN?.trim() ?? "",
+    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN?.trim() ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_MAINNET ??
