@@ -167,7 +167,7 @@ Current entity IDs (e.g., pool IDs like `0x8c0014afe...`) don't include chain id
 
 ### 5.4 Dashboard Endpoint Change
 
-The dashboard currently uses `NEXT_PUBLIC_HASURA_URL_CELO_MAINNET`. After merge, this becomes a single multichain URL. The Vercel env var needs updating, and any chain-specific filtering in the dashboard needs a `chainId` field on entities.
+The dashboard uses `NEXT_PUBLIC_HASURA_URL_MULTICHAIN` — a single multichain URL shared by all mainnet networks. Chain-specific filtering in the dashboard uses the `chainId` field on entities.
 
 ### 5.5 Envio Hosted Service Limits
 

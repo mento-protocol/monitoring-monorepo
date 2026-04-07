@@ -128,7 +128,7 @@ Differences from testnet:
 
 - Envio project name: `mento-v3-monad-mainnet`
 - Deploy branch: `deploy/monad-mainnet` (`pnpm deploy:indexer monad-mainnet`)
-- Terraform var: `hasura_url_monad_mainnet` → `NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET`
+- Terraform var: `hasura_url_multichain` → `NEXT_PUBLIC_HASURA_URL_MULTICHAIN` (shared with Celo Mainnet)
 - Start block: 60,730,000 (SortedOracles deployed ~60,733,096)
 - No pools in the config yet — the indexer will catch `FPMMDeployed` events and add them automatically
 
