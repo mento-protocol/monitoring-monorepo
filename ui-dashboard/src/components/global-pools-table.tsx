@@ -62,7 +62,12 @@ export function sortGlobalPools(
   entries: GlobalPoolEntry[],
   sortKey: GlobalSortKey,
   sortDir: SortDir,
-  { tvlByKey, totalVolumeByKey, volume24hByKey, volume7dByKey }: GlobalSortContext,
+  {
+    tvlByKey,
+    totalVolumeByKey,
+    volume24hByKey,
+    volume7dByKey,
+  }: GlobalSortContext,
 ): GlobalPoolEntry[] {
   return [...entries].sort((a, b) => {
     const aKey = globalPoolKey(a);
@@ -159,7 +164,12 @@ function SortableTh({
             {sortDir === "asc" ? "↑" : "↓"}
           </span>
         ) : (
-          <span className="text-slate-600 text-[1.1em] leading-none" style={{ fontVariantEmoji: "text" }}>↕</span>
+          <span
+            className="text-slate-600 text-[1.1em] leading-none"
+            style={{ fontVariantEmoji: "text" }}
+          >
+            ↕
+          </span>
         )}
       </button>
     </th>
@@ -234,7 +244,15 @@ export function GlobalPoolsTable({
         volume24hByKey,
         volume7dByKey,
       }),
-    [entries, sortKey, sortDir, tvlByKey, totalVolumeByKey, volume24hByKey, volume7dByKey],
+    [
+      entries,
+      sortKey,
+      sortDir,
+      tvlByKey,
+      totalVolumeByKey,
+      volume24hByKey,
+      volume7dByKey,
+    ],
   );
 
   const showVirtualPoolSource = hasAnyVirtualPools(entries);
