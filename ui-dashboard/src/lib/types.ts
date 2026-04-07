@@ -1,9 +1,9 @@
 /**
- * Chain IDs for production mainnet networks hosted on the multichain indexer.
+ * Chain IDs for production mainnet networks on the multichain indexer.
  * These are safe to import in API routes (no NEXT_PUBLIC_* side effects).
- * Keep in sync with hosted network entries in src/lib/networks.ts:
- *   - celo-mainnet-hosted → 42220
- *   - monad-mainnet-hosted → 143
+ * Keep in sync with mainnet network entries in src/lib/networks.ts:
+ *   - celo-mainnet → 42220
+ *   - monad-mainnet → 143
  */
 export const MAINNET_CHAIN_IDS = [42220, 143] as const;
 export type MainnetChainId = (typeof MAINNET_CHAIN_IDS)[number];

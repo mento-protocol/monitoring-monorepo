@@ -5,7 +5,7 @@
  * Key invariants:
  * - Scoping uses chainId (not network.id) because custom labels are stored
  *   by chainId in Redis. Two network configs can share the same chainId
- *   (e.g. "celo-mainnet-hosted" and "celo-mainnet-local").
+ *   (e.g. "celo-mainnet" and "celo-mainnet-local").
  * - Address comparisons are case-insensitive.
  */
 
@@ -27,10 +27,10 @@ const ADDR_A = "0xAbCdEf1234567890AbCdEf1234567890AbCdEf12"; // mixed-case
 const ADDR_A_LC = "0xabcdef1234567890abcdef1234567890abcdef12"; // lowercase
 const ADDR_B = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-/** Two network IDs sharing the same chainId (hosted + local variant) */
-const NET_CELO_HOSTED = makeNet("celo-mainnet-hosted", 42220);
+/** Two network IDs sharing the same chainId (production + local variant) */
+const NET_CELO = makeNet("celo-mainnet", 42220);
 const NET_CELO_LOCAL = makeNet("celo-mainnet-local", 42220); // same chainId!
-const NET_MONAD = makeNet("monad-mainnet-hosted", 143);
+const NET_MONAD = makeNet("monad-mainnet", 143);
 
 function makeNet(id: string, chainId: number): Network {
   return {
@@ -82,27 +82,27 @@ function customRow(address: string, net: Network): AddressBookRow {
 describe("buildAddressBookRows", () => {
   it("returns all contract rows when no custom labels exist", () => {
     const rows = buildAddressBookRows(
-      [contractRow(ADDR_A, NET_CELO_HOSTED), contractRow(ADDR_B, NET_MONAD)],
+      [contractRow(ADDR_A, NET_CELO), contractRow(ADDR_B, NET_MONAD)],
       [],
-      NET_CELO_HOSTED.chainId,
+      NET_CELO.chainId,
     );
     expect(rows).toHaveLength(2);
   });
 
   it("keeps same address from different chains as separate rows", () => {
     const rows = buildAddressBookRows(
-      [contractRow(ADDR_A, NET_CELO_HOSTED), contractRow(ADDR_A, NET_MONAD)],
+      [contractRow(ADDR_A, NET_CELO), contractRow(ADDR_A, NET_MONAD)],
       [],
-      NET_CELO_HOSTED.chainId,
+      NET_CELO.chainId,
     );
     expect(rows).toHaveLength(2);
   });
 
   it("hides contract row on selected chain when custom label exists", () => {
     const rows = buildAddressBookRows(
-      [contractRow(ADDR_A, NET_CELO_HOSTED)],
-      [customRow(ADDR_A, NET_CELO_HOSTED)],
-      NET_CELO_HOSTED.chainId,
+      [contractRow(ADDR_A, NET_CELO)],
+      [customRow(ADDR_A, NET_CELO)],
+      NET_CELO.chainId,
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].isCustom).toBe(true);
@@ -110,9 +110,9 @@ describe("buildAddressBookRows", () => {
 
   it("does NOT hide contract row from other chain when custom exists on selected", () => {
     const rows = buildAddressBookRows(
-      [contractRow(ADDR_A, NET_CELO_HOSTED), contractRow(ADDR_A, NET_MONAD)],
-      [customRow(ADDR_A, NET_CELO_HOSTED)],
-      NET_CELO_HOSTED.chainId,
+      [contractRow(ADDR_A, NET_CELO), contractRow(ADDR_A, NET_MONAD)],
+      [customRow(ADDR_A, NET_CELO)],
+      NET_CELO.chainId,
     );
     // Custom + Monad contract row (Celo contract row replaced by custom)
     expect(rows).toHaveLength(2);
@@ -121,15 +121,15 @@ describe("buildAddressBookRows", () => {
     );
   });
 
-  it("same-chainId different-networkId: custom on hosted suppresses local contract row", () => {
-    // Both NET_CELO_HOSTED and NET_CELO_LOCAL have chainId 42220
+  it("same-chainId different-networkId: custom on production suppresses local contract row", () => {
+    // Both NET_CELO and NET_CELO_LOCAL have chainId 42220
     const rows = buildAddressBookRows(
       [
-        contractRow(ADDR_A, NET_CELO_HOSTED),
+        contractRow(ADDR_A, NET_CELO),
         contractRow(ADDR_A, NET_CELO_LOCAL),
       ],
-      [customRow(ADDR_A, NET_CELO_HOSTED)],
-      NET_CELO_HOSTED.chainId, // = 42220
+      [customRow(ADDR_A, NET_CELO)],
+      NET_CELO.chainId, // = 42220
     );
     // Both contract rows share chainId 42220, so both are suppressed by the custom label
     expect(rows).toHaveLength(1);
@@ -138,9 +138,9 @@ describe("buildAddressBookRows", () => {
 
   it("matches addresses case-insensitively (checksummed vs lowercase)", () => {
     const rows = buildAddressBookRows(
-      [contractRow(ADDR_A, NET_CELO_HOSTED)], // checksummed
-      [customRow(ADDR_A_LC, NET_CELO_HOSTED)], // lowercase
-      NET_CELO_HOSTED.chainId,
+      [contractRow(ADDR_A, NET_CELO)], // checksummed
+      [customRow(ADDR_A_LC, NET_CELO)], // lowercase
+      NET_CELO.chainId,
     );
     // Should dedupe even though casing differs
     expect(rows).toHaveLength(1);
@@ -149,9 +149,9 @@ describe("buildAddressBookRows", () => {
 
   it("custom rows come first in the result", () => {
     const rows = buildAddressBookRows(
-      [contractRow(ADDR_B, NET_CELO_HOSTED)],
-      [customRow(ADDR_A, NET_CELO_HOSTED)],
-      NET_CELO_HOSTED.chainId,
+      [contractRow(ADDR_B, NET_CELO)],
+      [customRow(ADDR_A, NET_CELO)],
+      NET_CELO.chainId,
     );
     expect(rows[0].isCustom).toBe(true);
   });
@@ -163,22 +163,22 @@ describe("buildAddressBookRows", () => {
 
 describe("resolveIsCustom", () => {
   it("contract row on selected chain is NOT marked custom by default", () => {
-    const row = contractRow(ADDR_B, NET_CELO_HOSTED);
-    expect(resolveIsCustom(row, NET_CELO_HOSTED.chainId, () => false)).toBe(
+    const row = contractRow(ADDR_B, NET_CELO);
+    expect(resolveIsCustom(row, NET_CELO.chainId, () => false)).toBe(
       false,
     );
   });
 
   it("contract row on selected chain IS marked custom when isCustomLabel returns true", () => {
-    const row = contractRow(ADDR_A, NET_CELO_HOSTED);
-    expect(resolveIsCustom(row, NET_CELO_HOSTED.chainId, () => true)).toBe(
+    const row = contractRow(ADDR_A, NET_CELO);
+    expect(resolveIsCustom(row, NET_CELO.chainId, () => true)).toBe(
       true,
     );
   });
 
   it("contract row on OTHER chain is NOT marked custom even if address has custom on selected", () => {
     const row = contractRow(ADDR_A, NET_MONAD);
-    expect(resolveIsCustom(row, NET_CELO_HOSTED.chainId, () => true)).toBe(
+    expect(resolveIsCustom(row, NET_CELO.chainId, () => true)).toBe(
       false,
     );
   });
@@ -186,14 +186,14 @@ describe("resolveIsCustom", () => {
   it("same-chainId different-networkId: both treated as same chain scope", () => {
     const rowLocal = contractRow(ADDR_A, NET_CELO_LOCAL);
     // isCustomLabel returns true (custom exists on chain 42220)
-    expect(resolveIsCustom(rowLocal, NET_CELO_HOSTED.chainId, () => true)).toBe(
+    expect(resolveIsCustom(rowLocal, NET_CELO.chainId, () => true)).toBe(
       true,
     );
   });
 
   it("custom row is always marked custom", () => {
-    const row = customRow(ADDR_A, NET_CELO_HOSTED);
-    expect(resolveIsCustom(row, NET_CELO_HOSTED.chainId, () => false)).toBe(
+    const row = customRow(ADDR_A, NET_CELO);
+    expect(resolveIsCustom(row, NET_CELO.chainId, () => false)).toBe(
       true,
     );
   });
@@ -207,24 +207,24 @@ describe("resolveCanEdit", () => {
   it("allows editing rows on the selected chain", () => {
     expect(
       resolveCanEdit(
-        contractRow(ADDR_A, NET_CELO_HOSTED),
-        NET_CELO_HOSTED.chainId,
+        contractRow(ADDR_A, NET_CELO),
+        NET_CELO.chainId,
       ),
     ).toBe(true);
   });
 
   it("disables editing for contract rows on a different chain", () => {
     expect(
-      resolveCanEdit(contractRow(ADDR_A, NET_MONAD), NET_CELO_HOSTED.chainId),
+      resolveCanEdit(contractRow(ADDR_A, NET_MONAD), NET_CELO.chainId),
     ).toBe(false);
   });
 
   it("same-chainId different-networkId: both editable on same chain", () => {
-    // NET_CELO_LOCAL has chainId 42220 = same as NET_CELO_HOSTED
+    // NET_CELO_LOCAL has chainId 42220 = same as NET_CELO
     expect(
       resolveCanEdit(
         contractRow(ADDR_A, NET_CELO_LOCAL),
-        NET_CELO_HOSTED.chainId,
+        NET_CELO.chainId,
       ),
     ).toBe(true);
   });
@@ -238,7 +238,7 @@ describe("resolveCanEdit", () => {
       isCustom: true,
       network: null,
     };
-    expect(resolveCanEdit(row, NET_CELO_HOSTED.chainId)).toBe(true);
+    expect(resolveCanEdit(row, NET_CELO.chainId)).toBe(true);
   });
 });
 

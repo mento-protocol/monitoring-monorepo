@@ -19,7 +19,7 @@ The multichain indexer uses a **static** production endpoint (hash does not chan
 https://indexer.hyperindex.xyz/2f3dd15/v1/graphql
 ```
 
-Stored as `NEXT_PUBLIC_HASURA_URL_MULTICHAIN_HOSTED` in Vercel project settings and as the `hasura_url_multichain_hosted` Terraform variable default.
+Stored as `NEXT_PUBLIC_HASURA_URL_MULTICHAIN` in Vercel project settings and as the `hasura_url_multichain` Terraform variable default.
 
 > Only update these if the `mento` project is deleted and recreated (which would issue a new endpoint hash).
 > Redeployments to the same project preserve the static endpoint.

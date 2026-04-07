@@ -26,9 +26,7 @@ export function NetworkSelector() {
       className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-xs font-mono text-slate-300 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
     >
       {VISIBLE_NETWORK_IDS.map((id) => {
-        const label = NETWORKS[id].local
-          ? NETWORKS[id].label
-          : NETWORKS[id].label.replace(" (hosted)", "");
+        const label = NETWORKS[id].label;
         return (
           <option key={id} value={id}>
             {label}
