@@ -122,7 +122,14 @@ function GlobalContent() {
 
     for (const netData of networkData) {
       if (netData.error !== null) continue;
-      const { network, pools, snapshots, snapshots7d, snapshotsError, snapshots7dError } = netData;
+      const {
+        network,
+        pools,
+        snapshots,
+        snapshots7d,
+        snapshotsError,
+        snapshots7dError,
+      } = netData;
 
       const perChain24h =
         snapshotsError === null
