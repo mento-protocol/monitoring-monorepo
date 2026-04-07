@@ -17,7 +17,7 @@ All code changes are merged into `main`. No further implementation is needed.
 | `indexer-envio/src/EventHandlers.ts`               | `DEFAULT_RPC_BY_CHAIN` map — chain 143 → `rpc2.monad.xyz`, chain 10143 → Envio HyperRPC                |
 | `indexer-envio/config.monad.mainnet.yaml`          | Envio config for mainnet, start block 60730000                                                         |
 | `indexer-envio/config.monad.testnet.yaml`          | Envio config for testnet, start block 17932300, 3 pools wired                                          |
-| `ui-dashboard/src/lib/networks.ts`                 | `monad-mainnet` + `monad-testnet` network definitions                                    |
+| `ui-dashboard/src/lib/networks.ts`                 | `monad-mainnet` + `monad-testnet` network definitions                                                  |
 | `ui-dashboard/src/components/network-selector.tsx` | Networks hidden until `NEXT_PUBLIC_HASURA_URL_MONAD_*` is set                                          |
 | `ui-dashboard/src/components/network-provider.tsx` | `isConfiguredNetworkId()` guards URL routing — `?network=monad-*` falls back to default when URL unset |
 | `terraform/`                                       | Needs updates (see Step 3 below)                                                                       |

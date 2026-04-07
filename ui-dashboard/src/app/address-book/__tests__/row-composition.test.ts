@@ -124,10 +124,7 @@ describe("buildAddressBookRows", () => {
   it("same-chainId different-networkId: custom on production suppresses local contract row", () => {
     // Both NET_CELO and NET_CELO_LOCAL have chainId 42220
     const rows = buildAddressBookRows(
-      [
-        contractRow(ADDR_A, NET_CELO),
-        contractRow(ADDR_A, NET_CELO_LOCAL),
-      ],
+      [contractRow(ADDR_A, NET_CELO), contractRow(ADDR_A, NET_CELO_LOCAL)],
       [customRow(ADDR_A, NET_CELO)],
       NET_CELO.chainId, // = 42220
     );
@@ -164,38 +161,28 @@ describe("buildAddressBookRows", () => {
 describe("resolveIsCustom", () => {
   it("contract row on selected chain is NOT marked custom by default", () => {
     const row = contractRow(ADDR_B, NET_CELO);
-    expect(resolveIsCustom(row, NET_CELO.chainId, () => false)).toBe(
-      false,
-    );
+    expect(resolveIsCustom(row, NET_CELO.chainId, () => false)).toBe(false);
   });
 
   it("contract row on selected chain IS marked custom when isCustomLabel returns true", () => {
     const row = contractRow(ADDR_A, NET_CELO);
-    expect(resolveIsCustom(row, NET_CELO.chainId, () => true)).toBe(
-      true,
-    );
+    expect(resolveIsCustom(row, NET_CELO.chainId, () => true)).toBe(true);
   });
 
   it("contract row on OTHER chain is NOT marked custom even if address has custom on selected", () => {
     const row = contractRow(ADDR_A, NET_MONAD);
-    expect(resolveIsCustom(row, NET_CELO.chainId, () => true)).toBe(
-      false,
-    );
+    expect(resolveIsCustom(row, NET_CELO.chainId, () => true)).toBe(false);
   });
 
   it("same-chainId different-networkId: both treated as same chain scope", () => {
     const rowLocal = contractRow(ADDR_A, NET_CELO_LOCAL);
     // isCustomLabel returns true (custom exists on chain 42220)
-    expect(resolveIsCustom(rowLocal, NET_CELO.chainId, () => true)).toBe(
-      true,
-    );
+    expect(resolveIsCustom(rowLocal, NET_CELO.chainId, () => true)).toBe(true);
   });
 
   it("custom row is always marked custom", () => {
     const row = customRow(ADDR_A, NET_CELO);
-    expect(resolveIsCustom(row, NET_CELO.chainId, () => false)).toBe(
-      true,
-    );
+    expect(resolveIsCustom(row, NET_CELO.chainId, () => false)).toBe(true);
   });
 });
 
@@ -206,10 +193,7 @@ describe("resolveIsCustom", () => {
 describe("resolveCanEdit", () => {
   it("allows editing rows on the selected chain", () => {
     expect(
-      resolveCanEdit(
-        contractRow(ADDR_A, NET_CELO),
-        NET_CELO.chainId,
-      ),
+      resolveCanEdit(contractRow(ADDR_A, NET_CELO), NET_CELO.chainId),
     ).toBe(true);
   });
 
@@ -222,10 +206,7 @@ describe("resolveCanEdit", () => {
   it("same-chainId different-networkId: both editable on same chain", () => {
     // NET_CELO_LOCAL has chainId 42220 = same as NET_CELO
     expect(
-      resolveCanEdit(
-        contractRow(ADDR_A, NET_CELO_LOCAL),
-        NET_CELO.chainId,
-      ),
+      resolveCanEdit(contractRow(ADDR_A, NET_CELO_LOCAL), NET_CELO.chainId),
     ).toBe(true);
   });
 

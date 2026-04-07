@@ -458,9 +458,7 @@ describe("fetchAllNetworks — orchestration", () => {
     });
 
     const results = await fetchAllNetworks();
-    const mainnet = results.find(
-      (r) => r.network.id === "celo-mainnet",
-    )!;
+    const mainnet = results.find((r) => r.network.id === "celo-mainnet")!;
 
     expect(mainnet.error).toBeNull();
     expect(mainnet.pools).toHaveLength(1);
@@ -485,9 +483,7 @@ describe("fetchAllNetworks — orchestration", () => {
     });
 
     const results = await fetchAllNetworks();
-    const sepolia = results.find(
-      (r) => r.network.id === "celo-sepolia",
-    )!;
+    const sepolia = results.find((r) => r.network.id === "celo-sepolia")!;
 
     expect(sepolia.network.id).toBe("celo-sepolia");
     expect(sepolia.error).toBe(err);
@@ -518,12 +514,8 @@ describe("fetchAllNetworks — orchestration", () => {
     });
 
     const results = await fetchAllNetworks();
-    const mainnet = results.find(
-      (r) => r.network.id === "celo-mainnet",
-    )!;
-    const sepolia = results.find(
-      (r) => r.network.id === "celo-sepolia",
-    )!;
+    const mainnet = results.find((r) => r.network.id === "celo-mainnet")!;
+    const sepolia = results.find((r) => r.network.id === "celo-sepolia")!;
 
     expect(mainnet.error).toBeNull();
     expect(sepolia.error).not.toBeNull();

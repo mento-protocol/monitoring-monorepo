@@ -44,15 +44,15 @@ pnpm lint   # Run ESLint
 
 The dashboard supports multiple network targets (all defined in `src/lib/networks.ts`):
 
-| ID                     | Chain         | Mode   |
-| ---------------------- | ------------- | ------ |
-| `devnet`               | Celo devnet   | local  |
-| `celo-sepolia-local`   | Celo Sepolia  | local  |
-| `celo-sepolia`  | Celo Sepolia  | prod |
-| `celo-mainnet-local`   | Celo Mainnet  | local  |
-| `celo-mainnet`  | Celo Mainnet  | prod |
-| `monad-mainnet` | Monad Mainnet | prod |
-| `monad-testnet` | Monad Testnet | prod |
+| ID                   | Chain         | Mode  |
+| -------------------- | ------------- | ----- |
+| `devnet`             | Celo devnet   | local |
+| `celo-sepolia-local` | Celo Sepolia  | local |
+| `celo-sepolia`       | Celo Sepolia  | prod  |
+| `celo-mainnet-local` | Celo Mainnet  | local |
+| `celo-mainnet`       | Celo Mainnet  | prod  |
+| `monad-mainnet`      | Monad Mainnet | prod  |
+| `monad-testnet`      | Monad Testnet | prod  |
 
 Token symbols and address labels are derived automatically from `@mento-protocol/contracts` using the active treb namespace from `shared-config/deployment-namespaces.json`. Custom address labels (stored in Upstash Redis) merge on top and take precedence. Individual networks can also declare custom `addressLabels` overrides in `makeNetwork(...)`.
 
