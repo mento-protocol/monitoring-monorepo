@@ -165,25 +165,6 @@ export const POOL_DETAIL_WITH_HEALTH = `
   }
 `;
 
-export const POOL_SNAPSHOTS = `
-  query PoolSnapshots($poolId: String!, $limit: Int!) {
-    PoolSnapshot(
-      where: { poolId: { _eq: $poolId } }
-      order_by: { timestamp: asc }
-      limit: $limit
-    ) {
-      id poolId timestamp
-      reserves0 reserves1
-      swapCount swapVolume0 swapVolume1
-      rebalanceCount cumulativeSwapCount
-      cumulativeVolume0 cumulativeVolume1
-      blockNumber
-    }
-  }
-`;
-
-// Separate query for charts — fetches all snapshots for a pool with a safety
-// cap, decoupled from table pagination so charts show full history.
 export const POOL_SNAPSHOTS_CHART = `
   query PoolSnapshotsChart($poolId: String!) {
     PoolSnapshot(
