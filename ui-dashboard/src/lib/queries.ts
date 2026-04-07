@@ -182,6 +182,25 @@ export const POOL_SNAPSHOTS = `
   }
 `;
 
+// Separate query for charts — fetches all snapshots for a pool with a safety
+// cap, decoupled from table pagination so charts show full history.
+export const POOL_SNAPSHOTS_CHART = `
+  query PoolSnapshotsChart($poolId: String!) {
+    PoolSnapshot(
+      where: { poolId: { _eq: $poolId } }
+      order_by: { timestamp: asc }
+      limit: 50000
+    ) {
+      id poolId timestamp
+      reserves0 reserves1
+      swapCount swapVolume0 swapVolume1
+      rebalanceCount cumulativeSwapCount
+      cumulativeVolume0 cumulativeVolume1
+      blockNumber
+    }
+  }
+`;
+
 export const TRADING_LIMITS = `
   query TradingLimits($poolId: String!) {
     TradingLimit(where: { poolId: { _eq: $poolId } }) {
