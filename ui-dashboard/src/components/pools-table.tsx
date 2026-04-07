@@ -50,7 +50,13 @@ export function sortPools(
   pools: Pool[],
   sortKey: SortKey,
   sortDir: SortDir,
-  { network, tvlByPoolId, totalVolumeByPoolId, volume24h, volume7d }: SortContext,
+  {
+    network,
+    tvlByPoolId,
+    totalVolumeByPoolId,
+    volume24h,
+    volume7d,
+  }: SortContext,
 ): Pool[] {
   return [...pools].sort((a, b) => {
     let cmp = 0;
@@ -143,7 +149,12 @@ function SortableTh({
             {sortDir === "asc" ? "↑" : "↓"}
           </span>
         ) : (
-          <span className="text-slate-600 text-[1.1em] leading-none" style={{ fontVariantEmoji: "text" }}>↕</span>
+          <span
+            className="text-slate-600 text-[1.1em] leading-none"
+            style={{ fontVariantEmoji: "text" }}
+          >
+            ↕
+          </span>
         )}
       </button>
     </th>
