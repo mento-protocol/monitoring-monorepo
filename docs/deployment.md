@@ -107,15 +107,14 @@ pnpm infra:apply   # apply changes
 
 All env vars are managed by Terraform (set for `production` and `preview` targets). Do not edit them manually in the Vercel dashboard.
 
-| Variable                               | Source             | Description                             |
-| -------------------------------------- | ------------------ | --------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL_CELO_MAINNET`  | `terraform.tfvars` | Hasura endpoint — Celo Mainnet          |
-| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`  | `terraform.tfvars` | Hasura endpoint — Celo Sepolia          |
-| `NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET` | `terraform.tfvars` | Hasura endpoint — Monad Mainnet         |
-| `NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET` | `terraform.tfvars` | Hasura endpoint — Monad Testnet         |
-| `UPSTASH_REDIS_REST_URL`               | Terraform output   | Address labels Redis — auto-set from DB |
-| `UPSTASH_REDIS_REST_TOKEN`             | Terraform output   | Address labels Redis token — auto-set   |
-| `BLOB_READ_WRITE_TOKEN`                | `terraform.tfvars` | Vercel Blob token for backup cron       |
+| Variable                               | Source             | Description                               |
+| -------------------------------------- | ------------------ | ----------------------------------------- |
+| `NEXT_PUBLIC_HASURA_URL_MULTICHAIN`    | `terraform.tfvars` | Shared multichain endpoint (Celo + Monad) |
+| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`  | `terraform.tfvars` | Hasura endpoint — Celo Sepolia            |
+| `NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET` | `terraform.tfvars` | Hasura endpoint — Monad Testnet           |
+| `UPSTASH_REDIS_REST_URL`               | Terraform output   | Address labels Redis — auto-set from DB   |
+| `UPSTASH_REDIS_REST_TOKEN`             | Terraform output   | Address labels Redis token — auto-set     |
+| `BLOB_READ_WRITE_TOKEN`                | `terraform.tfvars` | Vercel Blob token for backup cron         |
 
 ### Address Book & Backup Cron
 
