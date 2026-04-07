@@ -5,7 +5,12 @@
  * package-derived maps, tested via real same-key collisions.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { NETWORKS, makeNetwork, isConfiguredNetworkId } from "../networks";
+import {
+  NETWORKS,
+  makeNetwork,
+  isConfiguredNetworkId,
+  isNetworkId,
+} from "../networks";
 import { MAINNET_CHAIN_IDS } from "../types";
 
 // Known Celo mainnet addresses from @mento-protocol/contracts (42220/mainnet).
@@ -255,16 +260,19 @@ describe("isConfiguredNetworkId — URL routing guard", () => {
   it("returns a boolean for any known network id", () => {
     // Correctness: the function must not throw for any defined network.
     expect(typeof isConfiguredNetworkId("celo-mainnet")).toBe("boolean");
-    expect(typeof isConfiguredNetworkId("monad-mainnet")).toBe(
-      "boolean",
-    );
-    expect(typeof isConfiguredNetworkId("monad-testnet")).toBe(
-      "boolean",
-    );
+    expect(typeof isConfiguredNetworkId("monad-mainnet")).toBe("boolean");
+    expect(typeof isConfiguredNetworkId("monad-testnet")).toBe("boolean");
   });
 
   it("returns false for unknown network id regardless of env", () => {
     expect(isConfiguredNetworkId("not-a-real-network")).toBe(false);
+  });
+
+  it("rejects legacy -hosted network IDs", () => {
+    expect(isNetworkId("celo-mainnet-hosted")).toBe(false);
+    expect(isNetworkId("celo-sepolia-hosted")).toBe(false);
+    expect(isNetworkId("monad-mainnet-hosted")).toBe(false);
+    expect(isNetworkId("monad-testnet-hosted")).toBe(false);
   });
 
   it("never returns true for a network with empty hasuraUrl", () => {
