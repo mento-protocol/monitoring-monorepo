@@ -28,6 +28,7 @@ export function poolTotalVolumeUSD(
 const SECONDS_PER_HOUR = 3600;
 const SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR;
 const SECONDS_PER_WEEK = 7 * SECONDS_PER_DAY;
+const SECONDS_PER_MONTH = 30 * SECONDS_PER_DAY;
 
 /** Shared refresh interval (ms) for snapshot and fee queries (5 minutes). */
 export const SNAPSHOT_REFRESH_MS = 300_000;
@@ -50,6 +51,15 @@ export function snapshotWindow7d(nowMs: number): { from: number; to: number } {
   const to = hourBucket(nowSeconds);
   return {
     from: to - SECONDS_PER_WEEK,
+    to,
+  };
+}
+
+export function snapshotWindow30d(nowMs: number): { from: number; to: number } {
+  const nowSeconds = Math.floor(nowMs / 1000);
+  const to = hourBucket(nowSeconds);
+  return {
+    from: to - SECONDS_PER_MONTH,
     to,
   };
 }

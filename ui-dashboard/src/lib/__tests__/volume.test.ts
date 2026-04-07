@@ -6,6 +6,7 @@ import {
   shouldQueryPoolSnapshots,
   snapshotWindow24h,
   snapshotWindow7d,
+  snapshotWindow30d,
   sumFpmmSwaps,
 } from "../volume";
 import type { Pool, PoolSnapshotWindow } from "../types";
@@ -31,6 +32,17 @@ describe("snapshotWindow7d", () => {
     expect(from).toBe(expectedHourStart - 7 * 24 * 3600);
     expect(to).toBe(expectedHourStart);
     expect(to - from).toBe(7 * 24 * 3600);
+  });
+});
+
+describe("snapshotWindow30d", () => {
+  it("returns a bounded 30d hourly window", () => {
+    const now = Date.UTC(2026, 2, 9, 21, 26, 45, 0); // 21:26:45 UTC
+    const { from, to } = snapshotWindow30d(now);
+    const expectedHourStart = Date.UTC(2026, 2, 9, 21, 0, 0, 0) / 1000;
+    expect(from).toBe(expectedHourStart - 30 * 24 * 3600);
+    expect(to).toBe(expectedHourStart);
+    expect(to - from).toBe(30 * 24 * 3600);
   });
 });
 

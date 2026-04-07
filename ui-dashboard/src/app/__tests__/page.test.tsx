@@ -84,11 +84,13 @@ function makeNetworkData(overrides: Partial<NetworkData> = {}): NetworkData {
     pools: [],
     snapshots: [],
     snapshots7d: [],
+    snapshots30d: [],
     fees: null,
     error: null,
     feesError: null,
     snapshotsError: null,
     snapshots7dError: null,
+    snapshots30dError: null,
     ...overrides,
   };
 }
@@ -140,10 +142,16 @@ describe("GlobalPage — all networks succeed", () => {
         fees: {
           totalFeesUSD: 1000,
           fees24hUSD: 50,
+          fees7dUSD: 200,
+          fees30dUSD: 800,
           unpricedSymbols: [],
           unpricedSymbols24h: [],
+          unpricedSymbols7d: [],
+          unpricedSymbols30d: [],
           unresolvedCount: 0,
           unresolvedCount24h: 0,
+          unresolvedCount7d: 0,
+          unresolvedCount30d: 0,
           isTruncated: false,
         },
       }),
@@ -211,15 +219,21 @@ describe("GlobalPage — snapshots-only failure", () => {
         fees: {
           totalFeesUSD: 500,
           fees24hUSD: 20,
+          fees7dUSD: 0,
+          fees30dUSD: 0,
           unpricedSymbols: [],
           unpricedSymbols24h: [],
+          unpricedSymbols7d: [],
+          unpricedSymbols30d: [],
           unresolvedCount: 0,
           unresolvedCount24h: 0,
+          unresolvedCount7d: 0,
+          unresolvedCount30d: 0,
           isTruncated: false,
         },
       }),
     ]);
-    expect(html).toContain("24h Volume");
+    expect(html).toContain("Volume");
     expect(html).toContain("N/A");
     // All-time fees should still show (not N/A)
     expect(html).toContain("Swap Fees Earned");
@@ -237,10 +251,16 @@ describe("GlobalPage — unpriced symbols behavior", () => {
         fees: {
           totalFeesUSD: 1000,
           fees24hUSD: 50,
+          fees7dUSD: 200,
+          fees30dUSD: 800,
           unpricedSymbols: ["FOO"],
           unpricedSymbols24h: [],
+          unpricedSymbols7d: [],
+          unpricedSymbols30d: [],
           unresolvedCount: 0,
           unresolvedCount24h: 0,
+          unresolvedCount7d: 0,
+          unresolvedCount30d: 0,
           isTruncated: false,
         },
       }),
@@ -255,11 +275,17 @@ describe("GlobalPage — unpriced symbols behavior", () => {
         fees: {
           totalFeesUSD: 1000,
           fees24hUSD: 50,
+          fees7dUSD: 200,
+          fees30dUSD: 800,
           // FOO appears in all-time history but NOT in last 24h
           unpricedSymbols: ["FOO"],
           unpricedSymbols24h: [],
+          unpricedSymbols7d: [],
+          unpricedSymbols30d: [],
           unresolvedCount: 0,
           unresolvedCount24h: 0,
+          unresolvedCount7d: 0,
+          unresolvedCount30d: 0,
           isTruncated: false,
         },
       }),
@@ -267,15 +293,17 @@ describe("GlobalPage — unpriced symbols behavior", () => {
     // All-time tile should show ≈
     expect(html).toContain("≈");
     // 24h fees section should NOT show approximation subtitle
-    // The all-time subtitle has "Approximate — unpriced: FOO" but not 24h
+    // The all-time subtitle has "Approximate — unpriced: FOO" but not the
+    // per-period Swap Fees tile (since unpricedSymbols24h is empty).
     const unpricedIdx = html.indexOf("Approximate — unpriced:");
     expect(unpricedIdx).toBeGreaterThan(-1);
-    // 24h Swap Fees label appears after the all-time fees section
-    const fees24hIdx = html.indexOf("24h Swap Fees");
-    // Approximation should not appear after the 24h section start
-    // (i.e. it appears only in the all-time section)
-    const afterFees24h = html.slice(fees24hIdx);
-    expect(afterFees24h).not.toContain("Approximate — unpriced");
+    // The MultiPeriodTile "Swap Fees" section is after the "Volume" tile.
+    // Find it by searching for the period tile label.
+    const swapFeesMultiIdx = html.indexOf(">Swap Fees<");
+    expect(swapFeesMultiIdx).toBeGreaterThan(-1);
+    // Approximation should not appear in the per-period Swap Fees tile
+    const afterSwapFeesTile = html.slice(swapFeesMultiIdx);
+    expect(afterSwapFeesTile).not.toContain("Approximate — unpriced");
   });
 
   it("shows approximate on 24h tile when unresolvedCount24h > 0", () => {
@@ -284,10 +312,16 @@ describe("GlobalPage — unpriced symbols behavior", () => {
         fees: {
           totalFeesUSD: 100,
           fees24hUSD: 50,
+          fees7dUSD: 50,
+          fees30dUSD: 100,
           unpricedSymbols: [],
           unpricedSymbols24h: [],
+          unpricedSymbols7d: [],
+          unpricedSymbols30d: [],
           unresolvedCount: 1,
           unresolvedCount24h: 1, // UNKNOWN transfer was in last 24h
+          unresolvedCount7d: 1,
+          unresolvedCount30d: 1,
           isTruncated: false,
         },
       }),
@@ -302,10 +336,16 @@ describe("GlobalPage — unpriced symbols behavior", () => {
         fees: {
           totalFeesUSD: 100,
           fees24hUSD: 10,
+          fees7dUSD: 50,
+          fees30dUSD: 100,
           unpricedSymbols: [],
           unpricedSymbols24h: [],
+          unpricedSymbols7d: [],
+          unpricedSymbols30d: [],
           unresolvedCount: 3,
           unresolvedCount24h: 0,
+          unresolvedCount7d: 0,
+          unresolvedCount30d: 0,
           isTruncated: false,
         },
       }),
@@ -322,10 +362,16 @@ describe("GlobalPage — unpriced symbols behavior", () => {
         fees: {
           totalFeesUSD: 500,
           fees24hUSD: 20,
+          fees7dUSD: 0,
+          fees30dUSD: 0,
           unpricedSymbols: [],
           unpricedSymbols24h: [],
+          unpricedSymbols7d: [],
+          unpricedSymbols30d: [],
           unresolvedCount: 0,
           unresolvedCount24h: 0,
+          unresolvedCount7d: 0,
+          unresolvedCount30d: 0,
           isTruncated: false,
         },
       }),

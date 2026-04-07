@@ -5,7 +5,13 @@ import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD } from "@/lib/tokens";
 import { buildPoolVolumeMap, sumFpmmSwaps } from "@/lib/volume";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
-import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
+import {
+  Skeleton,
+  EmptyBox,
+  ErrorBox,
+  Tile,
+  MultiPeriodTile,
+} from "@/components/feedback";
 import {
   GlobalPoolsTable,
   globalPoolKey,
@@ -32,6 +38,12 @@ function GlobalContent() {
   const anySnapshotsError = networkData.some(
     (netData) => netData.snapshotsError !== null && netData.error === null,
   );
+  const anySnapshots7dError = networkData.some(
+    (netData) => netData.snapshots7dError !== null && netData.error === null,
+  );
+  const anySnapshots30dError = networkData.some(
+    (netData) => netData.snapshots30dError !== null && netData.error === null,
+  );
 
   // Aggregate KPIs across all networks.
   // Pools/TVL include only successfully loaded chains — but we track whether
@@ -44,27 +56,45 @@ function GlobalContent() {
     let totalTvl = 0;
     let totalVolume24h: number | null =
       anySnapshotsError || anyNetworkError ? null : 0;
+    let totalVolume7d: number | null =
+      anySnapshots7dError || anyNetworkError ? null : 0;
+    let totalVolume30d: number | null =
+      anySnapshots30dError || anyNetworkError ? null : 0;
     let totalSwaps24hFpmm: number | null =
       anySnapshotsError || anyNetworkError ? null : 0;
+    let totalSwaps7dFpmm: number | null =
+      anySnapshots7dError || anyNetworkError ? null : 0;
+    let totalSwaps30dFpmm: number | null =
+      anySnapshots30dError || anyNetworkError ? null : 0;
     let totalFeesAllTime: number | null =
       anyFeesError || anyNetworkError ? null : 0;
     let totalFees24h: number | null =
       anyFeesError || anyNetworkError ? null : 0;
+    let totalFees7d: number | null =
+      anyFeesError || anyNetworkError ? null : 0;
+    let totalFees30d: number | null =
+      anyFeesError || anyNetworkError ? null : 0;
     const unpricedSymbolSet = new Set<string>();
     const unpricedSymbols24hSet = new Set<string>();
+    const unpricedSymbols7dSet = new Set<string>();
+    const unpricedSymbols30dSet = new Set<string>();
     let isTruncated = false;
     let totalUnresolvedCount = 0;
     let totalUnresolvedCount24h = 0;
+    let totalUnresolvedCount7d = 0;
+    let totalUnresolvedCount30d = 0;
 
     for (const netData of networkData) {
       // Skip whole-network errors (pools = [] anyway, already flagged via anyNetworkError)
       if (netData.error !== null) continue;
 
-      const { network, pools, snapshots, fees } = netData;
+      const { network, pools, snapshots, snapshots7d, snapshots30d, fees } =
+        netData;
       const fpmmPools = pools.filter(isFpmm);
       totalPools += pools.length;
       totalFpmmPools += fpmmPools.length;
       totalTvl += fpmmPools.reduce((sum, p) => sum + poolTvlUSD(p, network), 0);
+      const fpmmPoolIdSet = new Set(fpmmPools.map((p) => p.id));
 
       // Only add volume/swaps when snapshots succeeded for this network
       if (netData.snapshotsError === null) {
@@ -76,8 +106,31 @@ function GlobalContent() {
           );
         }
         if (totalSwaps24hFpmm !== null) {
-          const fpmmPoolIdSet = new Set(fpmmPools.map((p) => p.id));
           totalSwaps24hFpmm += sumFpmmSwaps(snapshots, fpmmPoolIdSet);
+        }
+      }
+      if (netData.snapshots7dError === null) {
+        const volume7dMap = buildPoolVolumeMap(snapshots7d, pools, network);
+        if (totalVolume7d !== null) {
+          totalVolume7d += Array.from(volume7dMap.values()).reduce<number>(
+            (sum, v) => (typeof v === "number" ? sum + v : sum),
+            0,
+          );
+        }
+        if (totalSwaps7dFpmm !== null) {
+          totalSwaps7dFpmm += sumFpmmSwaps(snapshots7d, fpmmPoolIdSet);
+        }
+      }
+      if (netData.snapshots30dError === null) {
+        const volume30dMap = buildPoolVolumeMap(snapshots30d, pools, network);
+        if (totalVolume30d !== null) {
+          totalVolume30d += Array.from(volume30dMap.values()).reduce<number>(
+            (sum, v) => (typeof v === "number" ? sum + v : sum),
+            0,
+          );
+        }
+        if (totalSwaps30dFpmm !== null) {
+          totalSwaps30dFpmm += sumFpmmSwaps(snapshots30d, fpmmPoolIdSet);
         }
       }
 
@@ -85,76 +138,111 @@ function GlobalContent() {
       if (netData.feesError === null && fees !== null) {
         if (totalFeesAllTime !== null) totalFeesAllTime += fees.totalFeesUSD;
         if (totalFees24h !== null) totalFees24h += fees.fees24hUSD;
+        if (totalFees7d !== null) totalFees7d += fees.fees7dUSD;
+        if (totalFees30d !== null) totalFees30d += fees.fees30dUSD;
         fees.unpricedSymbols.forEach((s) => unpricedSymbolSet.add(s));
         fees.unpricedSymbols24h.forEach((s) => unpricedSymbols24hSet.add(s));
+        fees.unpricedSymbols7d.forEach((s) => unpricedSymbols7dSet.add(s));
+        fees.unpricedSymbols30d.forEach((s) => unpricedSymbols30dSet.add(s));
         totalUnresolvedCount += fees.unresolvedCount;
         totalUnresolvedCount24h += fees.unresolvedCount24h;
+        totalUnresolvedCount7d += fees.unresolvedCount7d;
+        totalUnresolvedCount30d += fees.unresolvedCount30d;
         if (fees.isTruncated) isTruncated = true;
       }
     }
 
     const unpricedSymbols = Array.from(unpricedSymbolSet).sort();
     const unpricedSymbols24h = Array.from(unpricedSymbols24hSet).sort();
+    const unpricedSymbols7d = Array.from(unpricedSymbols7dSet).sort();
+    const unpricedSymbols30d = Array.from(unpricedSymbols30dSet).sort();
 
     return {
       totalPools,
       totalFpmmPools,
       totalTvl,
       totalVolume24h,
+      totalVolume7d,
+      totalVolume30d,
       totalSwaps24hFpmm,
+      totalSwaps7dFpmm,
+      totalSwaps30dFpmm,
       totalFeesAllTime,
       totalFees24h,
+      totalFees7d,
+      totalFees30d,
       unpricedSymbols,
       unpricedSymbols24h,
+      unpricedSymbols7d,
+      unpricedSymbols30d,
       totalUnresolvedCount,
       totalUnresolvedCount24h,
+      totalUnresolvedCount7d,
+      totalUnresolvedCount30d,
       isTruncated,
     };
-  }, [networkData, anyNetworkError, anySnapshotsError, anyFeesError]);
+  }, [
+    networkData,
+    anyNetworkError,
+    anySnapshotsError,
+    anySnapshots7dError,
+    anySnapshots30dError,
+    anyFeesError,
+  ]);
 
   // Build a flat list of all pool entries and merged volume maps keyed by
   // `${network.id}:${pool.id}` to avoid collisions across chains.
   // Pools from chains with snapshot errors get null in the map → rendered as "N/A" per-row.
-  const { globalEntries, volume24hByKey, volume7dByKey } = useMemo(() => {
-    const entries: GlobalPoolEntry[] = [];
-    const vol24hMap = new Map<string, number | null | undefined>();
-    const vol7dMap = new Map<string, number | null | undefined>();
+  const { globalEntries, volume24hByKey, volume7dByKey, volume30dByKey } =
+    useMemo(() => {
+      const entries: GlobalPoolEntry[] = [];
+      const vol24hMap = new Map<string, number | null | undefined>();
+      const vol7dMap = new Map<string, number | null | undefined>();
+      const vol30dMap = new Map<string, number | null | undefined>();
 
-    for (const netData of networkData) {
-      if (netData.error !== null) continue;
-      const {
-        network,
-        pools,
-        snapshots,
-        snapshots7d,
-        snapshotsError,
-        snapshots7dError,
-      } = netData;
+      for (const netData of networkData) {
+        if (netData.error !== null) continue;
+        const {
+          network,
+          pools,
+          snapshots,
+          snapshots7d,
+          snapshots30d,
+          snapshotsError,
+          snapshots7dError,
+          snapshots30dError,
+        } = netData;
 
-      const perChain24h =
-        snapshotsError === null
-          ? buildPoolVolumeMap(snapshots, pools, network)
-          : null;
-      const perChain7d =
-        snapshots7dError === null
-          ? buildPoolVolumeMap(snapshots7d, pools, network)
-          : null;
+        const perChain24h =
+          snapshotsError === null
+            ? buildPoolVolumeMap(snapshots, pools, network)
+            : null;
+        const perChain7d =
+          snapshots7dError === null
+            ? buildPoolVolumeMap(snapshots7d, pools, network)
+            : null;
+        const perChain30d =
+          snapshots30dError === null
+            ? buildPoolVolumeMap(snapshots30d, pools, network)
+            : null;
 
-      for (const pool of pools) {
-        const entry: GlobalPoolEntry = { pool, network };
-        entries.push(entry);
-        const key = globalPoolKey(entry);
-        vol24hMap.set(key, perChain24h ? perChain24h.get(pool.id) : null);
-        vol7dMap.set(key, perChain7d ? perChain7d.get(pool.id) : null);
+        for (const pool of pools) {
+          const entry: GlobalPoolEntry = { pool, network };
+          entries.push(entry);
+          const key = globalPoolKey(entry);
+          vol24hMap.set(key, perChain24h ? perChain24h.get(pool.id) : null);
+          vol7dMap.set(key, perChain7d ? perChain7d.get(pool.id) : null);
+          vol30dMap.set(key, perChain30d ? perChain30d.get(pool.id) : null);
+        }
       }
-    }
 
-    return {
-      globalEntries: entries,
-      volume24hByKey: vol24hMap,
-      volume7dByKey: vol7dMap,
-    };
-  }, [networkData]);
+      return {
+        globalEntries: entries,
+        volume24hByKey: vol24hMap,
+        volume7dByKey: vol7dMap,
+        volume30dByKey: vol30dMap,
+      };
+    }, [networkData]);
 
   // Networks that failed at the top level — show an error notice per chain
   const failedNetworks = networkData.filter((net) => net.error !== null);
@@ -212,40 +300,97 @@ function GlobalContent() {
                       : "All-time cumulative"
             }
           />
-          <Tile
-            label="24h Volume"
-            value={
-              isLoading
-                ? "…"
-                : aggregated.totalVolume24h === null
-                  ? "N/A"
-                  : formatUSD(aggregated.totalVolume24h)
-            }
+          <MultiPeriodTile
+            label="Volume"
+            periods={[
+              {
+                label: "24h",
+                value: isLoading
+                  ? "…"
+                  : aggregated.totalVolume24h === null
+                    ? "N/A"
+                    : formatUSD(aggregated.totalVolume24h),
+              },
+              {
+                label: "7d",
+                value: isLoading
+                  ? "…"
+                  : aggregated.totalVolume7d === null
+                    ? "N/A"
+                    : formatUSD(aggregated.totalVolume7d),
+              },
+              {
+                label: "30d",
+                value: isLoading
+                  ? "…"
+                  : aggregated.totalVolume30d === null
+                    ? "N/A"
+                    : formatUSD(aggregated.totalVolume30d),
+              },
+            ]}
             subtitle={
               aggregated.totalVolume24h === null
                 ? "Some chains failed to load"
                 : undefined
             }
           />
-          <Tile
-            label="24h Swaps (FPMMs)"
-            value={
-              isLoading
-                ? "…"
-                : aggregated.totalSwaps24hFpmm === null
-                  ? "N/A"
-                  : aggregated.totalSwaps24hFpmm.toLocaleString()
-            }
+          <MultiPeriodTile
+            label="Swaps (FPMMs)"
+            periods={[
+              {
+                label: "24h",
+                value: isLoading
+                  ? "…"
+                  : aggregated.totalSwaps24hFpmm === null
+                    ? "N/A"
+                    : aggregated.totalSwaps24hFpmm.toLocaleString(),
+              },
+              {
+                label: "7d",
+                value: isLoading
+                  ? "…"
+                  : aggregated.totalSwaps7dFpmm === null
+                    ? "N/A"
+                    : aggregated.totalSwaps7dFpmm.toLocaleString(),
+              },
+              {
+                label: "30d",
+                value: isLoading
+                  ? "…"
+                  : aggregated.totalSwaps30dFpmm === null
+                    ? "N/A"
+                    : aggregated.totalSwaps30dFpmm.toLocaleString(),
+              },
+            ]}
           />
-          <Tile
-            label="24h Swap Fees"
-            value={
-              isLoading
-                ? "…"
-                : aggregated.totalFees24h === null
-                  ? "N/A"
-                  : `${aggregated.unpricedSymbols24h.length > 0 || aggregated.totalUnresolvedCount24h > 0 ? "≈ " : ""}${formatUSD(aggregated.totalFees24h)}`
-            }
+          <MultiPeriodTile
+            label="Swap Fees"
+            periods={[
+              {
+                label: "24h",
+                value: isLoading
+                  ? "…"
+                  : aggregated.totalFees24h === null
+                    ? "N/A"
+                    : `${aggregated.unpricedSymbols24h.length > 0 || aggregated.totalUnresolvedCount24h > 0 ? "≈ " : ""}${formatUSD(aggregated.totalFees24h)}`,
+              },
+              {
+                label: "7d",
+                value: isLoading
+                  ? "…"
+                  : aggregated.totalFees7d === null
+                    ? "N/A"
+                    : `${aggregated.unpricedSymbols7d.length > 0 || aggregated.totalUnresolvedCount7d > 0 ? "≈ " : ""}${formatUSD(aggregated.totalFees7d)}`,
+              },
+              {
+                label: "30d",
+                value: isLoading
+                  ? "…"
+                  : aggregated.totalFees30d === null
+                    ? "N/A"
+                    : `${aggregated.unpricedSymbols30d.length > 0 || aggregated.totalUnresolvedCount30d > 0 ? "≈ " : ""}${formatUSD(aggregated.totalFees30d)}`,
+              },
+            ]}
             subtitle={
               aggregated.totalFees24h === null
                 ? "Some chains failed to load"

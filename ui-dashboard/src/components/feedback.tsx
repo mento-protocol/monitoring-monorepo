@@ -27,6 +27,46 @@ export function ErrorBox({ message }: { message: string }) {
   );
 }
 
+type PeriodValue = { label: string; value: string };
+
+export function MultiPeriodTile({
+  label,
+  periods,
+  subtitle,
+}: {
+  label: string;
+  periods: PeriodValue[];
+  subtitle?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[120px]">
+      <div>
+        <p className="text-sm text-slate-400 mb-2">{label}</p>
+        {periods.map((p, i) => (
+          <div
+            key={p.label}
+            className={`flex items-baseline justify-between${i === 0 ? "" : " mt-1"}`}
+          >
+            <p
+              className={`font-semibold font-mono ${i === 0 ? "text-2xl text-white" : "text-lg text-slate-300"}`}
+            >
+              {p.value}
+            </p>
+            <span
+              className={`text-xs ml-2 ${i === 0 ? "text-slate-400" : "text-slate-500"}`}
+            >
+              {p.label}
+            </span>
+          </div>
+        ))}
+      </div>
+      {subtitle && (
+        <p className="mt-2 text-xs text-slate-500 min-h-4">{subtitle}</p>
+      )}
+    </div>
+  );
+}
+
 export function Tile({
   label,
   value,

@@ -16,6 +16,7 @@ import {
 import {
   snapshotWindow24h,
   snapshotWindow7d,
+  snapshotWindow30d,
   shouldQueryPoolSnapshots,
   SNAPSHOT_REFRESH_MS,
 } from "@/lib/volume";
@@ -33,6 +34,8 @@ export type NetworkData = {
   snapshots: PoolSnapshotWindow[];
   /** Non-empty only when snapshots7dError is null. */
   snapshots7d: PoolSnapshotWindow[];
+  /** Non-empty only when snapshots30dError is null. */
+  snapshots30d: PoolSnapshotWindow[];
   /** Non-null only when feesError is null. */
   fees: ProtocolFeeSummary | null;
   /** Set when the top-level pools query fails (whole network unusable). */
@@ -43,6 +46,8 @@ export type NetworkData = {
   snapshotsError: Error | null;
   /** Set when the 7d PoolSnapshot sub-query fails. 7d volume should show N/A. */
   snapshots7dError: Error | null;
+  /** Set when the 30d PoolSnapshot sub-query fails. 30d volume should show N/A. */
+  snapshots30dError: Error | null;
 };
 
 type AllNetworksResult = {
@@ -56,7 +61,7 @@ export type TimeRange = { from: number; to: number };
 /** @internal Exported for testing only. */
 export async function fetchNetworkData(
   network: Network,
-  windows: { w24h: TimeRange; w7d: TimeRange },
+  windows: { w24h: TimeRange; w7d: TimeRange; w30d: TimeRange },
 ): Promise<NetworkData> {
   // Trim whitespace — matches useGQL behaviour; Hasura treats whitespace-only
   // secrets as invalid auth and returns access-denied rather than falling
@@ -80,11 +85,13 @@ export async function fetchNetworkData(
       pools: [],
       snapshots: [],
       snapshots7d: [],
+      snapshots30d: [],
       fees: null,
       error: err instanceof Error ? err : new Error(String(err)),
       feesError: null,
       snapshotsError: null,
       snapshots7dError: null,
+      snapshots30dError: null,
     };
   }
 
@@ -98,7 +105,7 @@ export async function fetchNetworkData(
   }>({
     PoolSnapshot: [],
   });
-  const [feesResult, snapshotsResult, snapshots7dResult] =
+  const [feesResult, snapshotsResult, snapshots7dResult, snapshots30dResult] =
     await Promise.allSettled([
       client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
         PROTOCOL_FEE_TRANSFERS_ALL,
@@ -114,6 +121,12 @@ export async function fetchNetworkData(
         ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
             POOL_SNAPSHOTS_WINDOW,
             { from: windows.w7d.from, to: windows.w7d.to, poolIds },
+          )
+        : emptySnapshots,
+      shouldQuery
+        ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
+            POOL_SNAPSHOTS_WINDOW,
+            { from: windows.w30d.from, to: windows.w30d.to, poolIds },
           )
         : emptySnapshots,
     ]);
@@ -151,16 +164,29 @@ export async function fetchNetworkData(
         : new Error(String(snapshots7dResult.reason))
       : null;
 
+  const snapshots30d =
+    snapshots30dResult.status === "fulfilled"
+      ? (snapshots30dResult.value.PoolSnapshot ?? [])
+      : [];
+  const snapshots30dError =
+    snapshots30dResult.status === "rejected"
+      ? snapshots30dResult.reason instanceof Error
+        ? snapshots30dResult.reason
+        : new Error(String(snapshots30dResult.reason))
+      : null;
+
   return {
     network,
     pools,
     snapshots,
     snapshots7d,
+    snapshots30d,
     fees,
     error: null,
     feesError,
     snapshotsError,
     snapshots7dError,
+    snapshots30dError,
   };
 }
 
@@ -171,6 +197,7 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
   const windows = {
     w24h: snapshotWindow24h(now),
     w7d: snapshotWindow7d(now),
+    w30d: snapshotWindow30d(now),
   };
 
   const results = await Promise.allSettled(
@@ -184,6 +211,7 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
       pools: [],
       snapshots: [],
       snapshots7d: [],
+      snapshots30d: [],
       fees: null,
       error:
         result.reason instanceof Error
@@ -192,6 +220,7 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
       feesError: null,
       snapshotsError: null,
       snapshots7dError: null,
+      snapshots30dError: null,
     };
   });
 }
