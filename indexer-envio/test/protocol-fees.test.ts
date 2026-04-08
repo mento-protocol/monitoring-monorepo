@@ -377,7 +377,7 @@ describe("KNOWN_TOKEN_META static fallback", () => {
   });
 
   it("returns static metadata for a known Mento token when RPC fails", async () => {
-    // Simulate RPC failure for cUSD on Celo mainnet
+    // Simulate RPC failure for USDm on Celo mainnet
     _setMockFeeTokenMeta(
       42220,
       "0x765de816845861e75a25fca122bb6898b8b1282a",
@@ -389,6 +389,6 @@ describe("KNOWN_TOKEN_META static fallback", () => {
       "0x765de816845861e75a25fca122bb6898b8b1282a",
     );
 
-    assert.deepEqual(meta, { symbol: "cUSD", decimals: 18 });
+    assert.deepEqual(meta, { symbol: "USDm", decimals: 18 });
   });
 });

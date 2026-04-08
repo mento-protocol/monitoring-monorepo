@@ -60,7 +60,7 @@ const KNOWN_TOKEN_META: ReadonlyMap<
   // Celo Mainnet (42220)
   [
     "42220:0x765de816845861e75a25fca122bb6898b8b1282a",
-    { symbol: "cUSD", decimals: 18 },
+    { symbol: "USDm", decimals: 18 },
   ],
   [
     "42220:0xceba9300f2b948710d2653dd7b07f33a8b32118c",
