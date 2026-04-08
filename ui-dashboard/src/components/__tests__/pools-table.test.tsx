@@ -162,9 +162,9 @@ describe("PoolsTable type column", () => {
 describe("PoolsTable column structure", () => {
   it("renders the new column headers and omits removed ones", () => {
     const html = renderPoolTableMarkup({});
-    expect(html).toContain("24h Volume");
-    expect(html).toContain("7d Volume");
-    expect(html).toContain("Total Volume");
+    expect(html).toContain("24h Vol.");
+    expect(html).toContain("7d Vol.");
+    expect(html).toContain("Total Vol.");
     expect(html).toContain("Swaps");
     expect(html).toContain("Rebalances");
     // Removed columns
@@ -238,7 +238,7 @@ describe("PoolsTable weekend banner", () => {
   });
 });
 
-describe("PoolsTable Total Volume column", () => {
+describe("PoolsTable Total Vol. column", () => {
   it("shows formatted USD for a pool with USDm as token0", () => {
     const html = renderSinglePool({
       ...BASE_POOL,

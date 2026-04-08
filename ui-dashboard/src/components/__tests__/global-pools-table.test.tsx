@@ -132,9 +132,9 @@ describe("GlobalPoolsTable — column structure", () => {
     expect(html).toContain("Chain");
     expect(html).toContain("Health");
     expect(html).toContain("TVL");
-    expect(html).toContain("24h Volume");
-    expect(html).toContain("7d Volume");
-    expect(html).toContain("Total Volume");
+    expect(html).toContain("24h Vol.");
+    expect(html).toContain("7d Vol.");
+    expect(html).toContain("Total Vol.");
     expect(html).toContain("Swaps");
     expect(html).toContain("Rebalances");
   });

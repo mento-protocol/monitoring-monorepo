@@ -321,7 +321,7 @@ export function GlobalPoolsTable({
               onSort={handleSort}
               className="hidden md:table-cell"
             >
-              24h Volume
+              24h Vol.
               <VolumeInfo />
             </SortableTh>
             <SortableTh
@@ -331,7 +331,7 @@ export function GlobalPoolsTable({
               onSort={handleSort}
               className="hidden md:table-cell"
             >
-              7d Volume
+              7d Vol.
               <VolumeInfo />
             </SortableTh>
             <SortableTh
@@ -341,7 +341,7 @@ export function GlobalPoolsTable({
               onSort={handleSort}
               className="hidden md:table-cell"
             >
-              Total Volume
+              Total Vol.
               <VolumeInfo />
             </SortableTh>
             <SortableTh
