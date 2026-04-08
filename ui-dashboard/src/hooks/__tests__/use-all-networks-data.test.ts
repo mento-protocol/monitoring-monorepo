@@ -272,6 +272,40 @@ describe("fetchNetworkData — non-Error thrown values", () => {
 });
 
 // ---------------------------------------------------------------------------
+// fetchNetworkData — LP query failure only
+// ---------------------------------------------------------------------------
+
+describe("fetchNetworkData — LP query failure only", () => {
+  it("surfaces uniqueLpCount as null when LP aggregate query rejects", async () => {
+    const pool = makePool("pool-lp");
+    const lpErr = new Error("LP aggregate timeout");
+
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((query: string) => {
+      if (query.includes("LiquidityPosition_aggregate"))
+        return Promise.reject(lpErr);
+      if (query.includes("PoolSnapshot")) return { PoolSnapshot: [] };
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
+      if (query.includes("Pool")) return { Pool: [pool] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.pools).toHaveLength(1);
+    expect(result.fees).not.toBeNull();
+    expect(result.uniqueLpCount).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // fetchNetworkData — cross-network isolation
 // (These tests exercise fetchNetworkData in isolation, not fetchAllNetworks.
 //  See the fetchAllNetworks section below for orchestration-level tests.)
