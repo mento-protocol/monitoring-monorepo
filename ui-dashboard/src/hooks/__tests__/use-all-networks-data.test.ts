@@ -87,6 +87,8 @@ describe("fetchNetworkData — happy path", () => {
       if (query.includes("PoolSnapshot")) return { PoolSnapshot: [] };
       if (query.includes("ProtocolFeeTransfer"))
         return { ProtocolFeeTransfer: [] };
+      if (query.includes("LiquidityPosition_aggregate"))
+        return { LiquidityPosition_aggregate: { aggregate: { count: 5 } } };
       if (query.includes("Pool")) return { Pool: [pool] };
       return {};
     });
@@ -100,9 +102,11 @@ describe("fetchNetworkData — happy path", () => {
     expect(result.error).toBeNull();
     expect(result.feesError).toBeNull();
     expect(result.snapshotsError).toBeNull();
+    expect(result.snapshots30dError).toBeNull();
     expect(result.pools).toHaveLength(1);
     expect(result.pools[0].id).toBe("pool-1");
     expect(result.fees).not.toBeNull();
+    expect(result.uniqueLpCount).toBe(5);
 
     const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
       .mock.calls;
@@ -110,6 +114,8 @@ describe("fetchNetworkData — happy path", () => {
     expect(calls[1][1]).toEqual({ chainId: 42220 });
     expect(calls[2][1]).toEqual({ from: 0, to: 1000, poolIds: ["pool-1"] });
     expect(calls[3][1]).toEqual({ from: 0, to: 7000, poolIds: ["pool-1"] });
+    expect(calls[4][1]).toEqual({ from: 0, to: 30000, poolIds: ["pool-1"] });
+    expect(calls[5][1]).toEqual({ poolIds: ["pool-1"] });
   });
 
   it("trims whitespace from hasuraSecret before setting auth header", async () => {

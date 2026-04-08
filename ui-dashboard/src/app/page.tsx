@@ -233,7 +233,12 @@ function GlobalContent() {
             sub7d={aggregated.totalVolume7d}
             sub30d={aggregated.totalVolume30d}
             isLoading={isLoading}
-            hasError={anyNetworkError || anySnapshotsError}
+            hasError={
+              anyNetworkError ||
+              anySnapshotsError ||
+              anySnapshots7dError ||
+              anySnapshots30dError
+            }
             format={formatUSD}
           />
 
@@ -292,7 +297,7 @@ function GlobalContent() {
                   ? "N/A"
                   : aggregated.totalUniqueLps.toLocaleString()
             }
-            subtitle="Unique FPMM LP addresses"
+            subtitle="Unique FPMM LP addresses (per-chain)"
           />
 
           {/* 6. Swaps */}
