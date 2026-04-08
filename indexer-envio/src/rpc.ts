@@ -268,11 +268,29 @@ let reservesCacheLastBlock: bigint | undefined;
 // Block fallback helper
 // ---------------------------------------------------------------------------
 
+/** Matches common RPC error messages indicating the requested block is not
+ * yet available on the node. Different providers emit different messages:
+ * - "block is out of range" (forno.celo.org)
+ * - "block number out of range" (some Geth variants)
+ * - "header not found" (Erigon, some Geth configurations)
+ * - "unknown block" (Nethermind) */
+const BLOCK_NOT_AVAILABLE_RE =
+  /block is out of range|block number out of range|header not found|unknown block/i;
+
+export type BlockFallbackResult = {
+  result: unknown;
+  usedFallback: boolean;
+};
+
 /**
  * Wrapper around `client.readContract` that retries without `blockNumber` when
- * the RPC node returns "block is out of range". This happens when HyperSync
- * delivers events faster than the RPC node syncs — reading latest state is
- * far better than losing the data entirely.
+ * the RPC node indicates the requested block is not available. This happens
+ * when HyperSync delivers events faster than the RPC node syncs — reading
+ * latest state is far better than losing the data entirely.
+ *
+ * Returns `{ result, usedFallback }` so callers can skip block-scoped cache
+ * writes when fallback was used (the result is from "latest", not the
+ * requested block).
  *
  * Rethrows all other errors so callers handle logging as before.
  */
@@ -280,19 +298,21 @@ export async function readContractWithBlockFallback(
   client: ReturnType<typeof createPublicClient>,
   args: Record<string, unknown>,
   blockNumber?: bigint,
-): Promise<unknown> {
+): Promise<BlockFallbackResult> {
   try {
-    return await client.readContract({
+    const result = await client.readContract({
       ...args,
       ...(blockNumber !== undefined && { blockNumber }),
     } as any);
+    return { result, usedFallback: false };
   } catch (err) {
     if (
       blockNumber !== undefined &&
       err instanceof Error &&
-      err.message.includes("block is out of range")
+      BLOCK_NOT_AVAILABLE_RE.test(err.message)
     ) {
-      return await client.readContract(args as any);
+      const result = await client.readContract(args as any);
+      return { result, usedFallback: true };
     }
     throw err;
   }
@@ -332,7 +352,7 @@ export async function fetchRebalancingState(
 
   try {
     const client = getRpcClient(chainId);
-    const result = await readContractWithBlockFallback(
+    const { result } = await readContractWithBlockFallback(
       client,
       {
         address: poolAddress as `0x${string}`,
@@ -380,7 +400,7 @@ export async function fetchReserves(
 
   try {
     const client = getRpcClient(chainId);
-    const result = await readContractWithBlockFallback(
+    const { result, usedFallback } = await readContractWithBlockFallback(
       client,
       {
         address: poolAddress as `0x${string}`,
@@ -391,7 +411,9 @@ export async function fetchReserves(
     );
     const r = result as readonly [bigint, bigint, bigint];
     const reserves = { reserve0: r[0], reserve1: r[1] };
-    reservesCache.set(cacheKey, reserves);
+    if (!usedFallback) {
+      reservesCache.set(cacheKey, reserves);
+    }
     return reserves;
   } catch (err) {
     logRpcFailure(chainId, "getReserves", poolAddress, err, blockNumber);
@@ -487,7 +509,7 @@ export async function fetchNumReporters(
 
   try {
     const client = getRpcClient(chainId);
-    const count = await readContractWithBlockFallback(
+    const { result, usedFallback } = await readContractWithBlockFallback(
       client,
       {
         address,
@@ -497,8 +519,10 @@ export async function fetchNumReporters(
       },
       blockNumber,
     );
-    const value = Number(count);
-    numReportersCache.set(cacheKey, value);
+    const value = Number(result);
+    if (!usedFallback) {
+      numReportersCache.set(cacheKey, value);
+    }
     return value;
   } catch (err) {
     logRpcFailure(chainId, "numRates", rateFeedID, err, blockNumber);
@@ -529,7 +553,8 @@ export async function fetchReportExpiry(
 
   try {
     const client = getRpcClient(chainId);
-    const tokenExpiry = (await readContractWithBlockFallback(
+    let usedAnyFallback = false;
+    const tokenExpiryRes = await readContractWithBlockFallback(
       client,
       {
         address,
@@ -538,21 +563,29 @@ export async function fetchReportExpiry(
         args: [rateFeedID as `0x${string}`],
       },
       blockNumber,
-    )) as bigint;
-    const expiry: bigint =
-      tokenExpiry > 0n
-        ? tokenExpiry
-        : ((await readContractWithBlockFallback(
-            client,
-            {
-              address,
-              abi: SortedOraclesContract.abi,
-              functionName: "reportExpirySeconds",
-            },
-            blockNumber,
-          )) as bigint);
+    );
+    if (tokenExpiryRes.usedFallback) usedAnyFallback = true;
+    const tokenExpiry = tokenExpiryRes.result as bigint;
+    let expiry: bigint;
+    if (tokenExpiry > 0n) {
+      expiry = tokenExpiry;
+    } else {
+      const globalRes = await readContractWithBlockFallback(
+        client,
+        {
+          address,
+          abi: SortedOraclesContract.abi,
+          functionName: "reportExpirySeconds",
+        },
+        blockNumber,
+      );
+      if (globalRes.usedFallback) usedAnyFallback = true;
+      expiry = globalRes.result as bigint;
+    }
     if (expiry <= 0n) return null;
-    reportExpiryCache.set(cacheKey, expiry);
+    if (!usedAnyFallback) {
+      reportExpiryCache.set(cacheKey, expiry);
+    }
     return expiry;
   } catch (err) {
     logRpcFailure(chainId, "reportExpiry", rateFeedID, err, blockNumber);

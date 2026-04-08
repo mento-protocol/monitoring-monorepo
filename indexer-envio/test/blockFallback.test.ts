@@ -1,6 +1,9 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
-import { readContractWithBlockFallback } from "../src/rpc";
+import {
+  readContractWithBlockFallback,
+  type BlockFallbackResult,
+} from "../src/rpc";
 
 // ---------------------------------------------------------------------------
 // Mock client factory
@@ -25,35 +28,45 @@ describe("readContractWithBlockFallback", () => {
     functionName: "foo",
   };
 
-  it("calls with blockNumber when provided", async () => {
+  // -------------------------------------------------------------------------
+  // Happy path
+  // -------------------------------------------------------------------------
+
+  it("calls with blockNumber when provided, usedFallback=false", async () => {
     const calls: Record<string, unknown>[] = [];
     const client = mockClient(async (args) => {
       calls.push(args);
       return "ok";
     });
-    const result = await readContractWithBlockFallback(client, baseArgs, 100n);
-    assert.equal(result, "ok");
+    const res = await readContractWithBlockFallback(client, baseArgs, 100n);
+    assert.equal(res.result, "ok");
+    assert.equal(res.usedFallback, false);
     assert.equal(calls.length, 1);
     assert.equal((calls[0] as any).blockNumber, 100n);
   });
 
-  it("calls without blockNumber when not provided", async () => {
+  it("calls without blockNumber when not provided, usedFallback=false", async () => {
     const calls: Record<string, unknown>[] = [];
     const client = mockClient(async (args) => {
       calls.push(args);
       return "ok";
     });
-    const result = await readContractWithBlockFallback(
+    const res = await readContractWithBlockFallback(
       client,
       baseArgs,
       undefined,
     );
-    assert.equal(result, "ok");
+    assert.equal(res.result, "ok");
+    assert.equal(res.usedFallback, false);
     assert.equal(calls.length, 1);
     assert.equal((calls[0] as any).blockNumber, undefined);
   });
 
-  it("retries without blockNumber on 'block is out of range'", async () => {
+  // -------------------------------------------------------------------------
+  // Fallback retry behavior
+  // -------------------------------------------------------------------------
+
+  it("retries without blockNumber on 'block is out of range', usedFallback=true", async () => {
     let callCount = 0;
     const client = mockClient(async (args) => {
       callCount++;
@@ -62,12 +75,44 @@ describe("readContractWithBlockFallback", () => {
       }
       return "fallback-ok";
     });
-    const result = await readContractWithBlockFallback(client, baseArgs, 100n);
-    assert.equal(result, "fallback-ok");
+    const res = await readContractWithBlockFallback(client, baseArgs, 100n);
+    assert.equal(res.result, "fallback-ok");
+    assert.equal(res.usedFallback, true);
     assert.equal(callCount, 2);
   });
 
-  it("does not retry when blockNumber is undefined and error contains 'block is out of range'", async () => {
+  // -------------------------------------------------------------------------
+  // Broader error message variants (different RPC providers)
+  // -------------------------------------------------------------------------
+
+  for (const errorMsg of [
+    "block number out of range",
+    "header not found",
+    "unknown block",
+    "Header Not Found", // case-insensitive
+    "BLOCK IS OUT OF RANGE", // case-insensitive
+  ]) {
+    it(`retries on provider variant: "${errorMsg}"`, async () => {
+      let callCount = 0;
+      const client = mockClient(async (args) => {
+        callCount++;
+        if ((args as any).blockNumber !== undefined) {
+          throw new Error(errorMsg);
+        }
+        return "ok";
+      });
+      const res = await readContractWithBlockFallback(client, baseArgs, 100n);
+      assert.equal(res.result, "ok");
+      assert.equal(res.usedFallback, true);
+      assert.equal(callCount, 2);
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // No-retry conditions
+  // -------------------------------------------------------------------------
+
+  it("does not retry when blockNumber is undefined", async () => {
     let callCount = 0;
     const client = mockClient(async () => {
       callCount++;
@@ -105,6 +150,10 @@ describe("readContractWithBlockFallback", () => {
     assert.equal(callCount, 1);
   });
 
+  // -------------------------------------------------------------------------
+  // Retry failure propagation
+  // -------------------------------------------------------------------------
+
   it("propagates retry failure", async () => {
     let callCount = 0;
     const client = mockClient(async (args) => {
@@ -120,6 +169,10 @@ describe("readContractWithBlockFallback", () => {
     );
     assert.equal(callCount, 2);
   });
+
+  // -------------------------------------------------------------------------
+  // Arg preservation
+  // -------------------------------------------------------------------------
 
   it("preserves all args except blockNumber on retry", async () => {
     const calls: Record<string, unknown>[] = [];
