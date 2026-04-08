@@ -32,6 +32,12 @@ function GlobalContent() {
   const anySnapshotsError = networkData.some(
     (netData) => netData.snapshotsError !== null && netData.error === null,
   );
+  const anySnapshots7dError = networkData.some(
+    (netData) => netData.snapshots7dError !== null && netData.error === null,
+  );
+  const anySnapshots30dError = networkData.some(
+    (netData) => netData.snapshots30dError !== null && netData.error === null,
+  );
 
   // Aggregate KPIs across all networks.
   const aggregated = useMemo(() => {
@@ -42,9 +48,9 @@ function GlobalContent() {
     let totalVolume24h: number | null =
       anySnapshotsError || anyNetworkError ? null : 0;
     let totalVolume7d: number | null =
-      anySnapshotsError || anyNetworkError ? null : 0;
+      anySnapshots7dError || anyNetworkError ? null : 0;
     let totalVolume30d: number | null =
-      anySnapshotsError || anyNetworkError ? null : 0;
+      anySnapshots30dError || anyNetworkError ? null : 0;
     let totalSwapsAllTime: number | null = anyNetworkError ? null : 0;
     let totalFeesAllTime: number | null =
       anyFeesError || anyNetworkError ? null : 0;
@@ -146,7 +152,14 @@ function GlobalContent() {
       totalUnresolvedCount,
       isTruncated,
     };
-  }, [networkData, anyNetworkError, anySnapshotsError, anyFeesError]);
+  }, [
+    networkData,
+    anyNetworkError,
+    anySnapshotsError,
+    anySnapshots7dError,
+    anySnapshots30dError,
+    anyFeesError,
+  ]);
 
   // Build a flat list of all pool entries and merged volume maps keyed by
   // `${network.id}:${pool.id}` to avoid collisions across chains.
@@ -242,18 +255,17 @@ function GlobalContent() {
             sub30d={aggregated.totalFees30d}
             isLoading={isLoading}
             hasError={anyNetworkError || anyFeesError}
-            format={(v) => `${feesApprox ? "≈ " : ""}${formatUSD(v)}`}
+            format={formatUSD}
+            totalPrefix={feesApprox ? "≈ " : ""}
             href="https://debank.com/profile/0x0dd57f6f181d0469143fe9380762d8a112e96e4a"
             subtitle={
-              aggregated.totalFeesAllTime === null
-                ? undefined
-                : aggregated.isTruncated
-                  ? "Lower bound — data exceeds query limit"
-                  : aggregated.unpricedSymbols.length > 0
-                    ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
-                    : aggregated.totalUnresolvedCount > 0
-                      ? "Approximate — some tokens unresolved"
-                      : undefined
+              aggregated.isTruncated
+                ? "Lower bound — data exceeds query limit"
+                : aggregated.unpricedSymbols.length > 0
+                  ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
+                  : aggregated.totalUnresolvedCount > 0
+                    ? "Approximate — some tokens unresolved"
+                    : undefined
             }
           />
 
@@ -338,6 +350,7 @@ function BreakdownTile({
   isLoading,
   hasError,
   format,
+  totalPrefix = "",
   href,
   subtitle,
 }: {
@@ -349,10 +362,16 @@ function BreakdownTile({
   isLoading: boolean;
   hasError: boolean;
   format: (v: number) => string;
+  /** Prefix for the headline value only (e.g. "≈ "), not applied to sub-values */
+  totalPrefix?: string;
   href?: string;
   subtitle?: string;
 }) {
-  const mainValue = isLoading ? "…" : total === null ? "N/A" : format(total);
+  const mainValue = isLoading
+    ? "…"
+    : total === null
+      ? "N/A"
+      : `${totalPrefix}${format(total)}`;
 
   const subItems =
     !isLoading && total !== null

@@ -165,16 +165,19 @@ describe("aggregateProtocolFees", () => {
     expect(result.totalFeesUSD).toBeCloseTo(1.3263, 2); // 1 * 1.3263
   });
 
-  it("splits 24h fees correctly", () => {
+  it("splits 24h/7d/30d fees correctly", () => {
     const now = Math.floor(Date.now() / 1000);
     const transfers = [
-      transfer({ blockTimestamp: "100" }), // old
+      transfer({ blockTimestamp: "100" }), // old (outside 30d)
+      transfer({ blockTimestamp: String(now - 20 * 86400) }), // 20d ago (within 30d, outside 7d)
+      transfer({ blockTimestamp: String(now - 3 * 86400) }), // 3d ago (within 7d, outside 24h)
       transfer({ blockTimestamp: String(now - 3600) }), // 1h ago (within 24h)
-      transfer({ blockTimestamp: String(now - 100) }), // recent
     ];
     const result = aggregateProtocolFees(transfers);
-    expect(result.totalFeesUSD).toBeCloseTo(3, 2);
-    expect(result.fees24hUSD).toBeCloseTo(2, 2); // 2 recent transfers
+    expect(result.totalFeesUSD).toBeCloseTo(4, 2);
+    expect(result.fees24hUSD).toBeCloseTo(1, 2);
+    expect(result.fees7dUSD).toBeCloseTo(2, 2);
+    expect(result.fees30dUSD).toBeCloseTo(3, 2);
   });
 
   it("silently skips UNKNOWN (indexer placeholder) without flagging as unpriced", () => {

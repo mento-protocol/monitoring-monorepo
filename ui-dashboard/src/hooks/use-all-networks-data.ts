@@ -51,7 +51,7 @@ type AllNetworksResult = {
 
 export type TimeRange = { from: number; to: number };
 
-const EMPTY_NETWORK_DATA = (network: Network, error: Error): NetworkData => ({
+const emptyNetworkData = (network: Network, error: Error): NetworkData => ({
   network,
   pools: [],
   snapshots: [],
@@ -84,7 +84,7 @@ export async function fetchNetworkData(
     );
     pools = poolsRes.Pool ?? [];
   } catch (err) {
-    return EMPTY_NETWORK_DATA(
+    return emptyNetworkData(
       network,
       err instanceof Error ? err : new Error(String(err)),
     );
@@ -203,7 +203,7 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
 
   return results.map((result, i) => {
     if (result.status === "fulfilled") return result.value;
-    return EMPTY_NETWORK_DATA(
+    return emptyNetworkData(
       NETWORKS[configuredNetworkIds[i]],
       result.reason instanceof Error
         ? result.reason

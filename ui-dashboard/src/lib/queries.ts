@@ -340,9 +340,8 @@ export const UNIQUE_LP_COUNT = `
   query UniqueLpCount($poolIds: [String!]!) {
     LiquidityPosition_aggregate(
       where: { poolId: { _in: $poolIds }, netLiquidity: { _gt: "0" } }
-      distinct_on: address
     ) {
-      aggregate { count }
+      aggregate { count(columns: address, distinct: true) }
     }
   }
 `;
