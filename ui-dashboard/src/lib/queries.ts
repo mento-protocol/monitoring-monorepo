@@ -53,7 +53,8 @@ export const POOL_SNAPSHOTS_WINDOW = `
         timestamp: { _gte: $from, _lt: $to }
         poolId: { _in: $poolIds }
       }
-      limit: 50000
+      order_by: { timestamp: desc }
+      limit: 100000
     ) {
       poolId
       swapCount
@@ -332,6 +333,16 @@ export const POOL_LP_POSITIONS = `
       order_by: { netLiquidity: desc }
     ) {
       id address netLiquidity lastUpdatedBlock lastUpdatedTimestamp
+    }
+  }
+`;
+
+export const UNIQUE_LP_COUNT = `
+  query UniqueLpCount($poolIds: [String!]!) {
+    LiquidityPosition_aggregate(
+      where: { poolId: { _in: $poolIds }, netLiquidity: { _gt: "0" } }
+    ) {
+      aggregate { count(columns: address, distinct: true) }
     }
   }
 `;

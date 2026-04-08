@@ -87,6 +87,8 @@ describe("fetchNetworkData — happy path", () => {
       if (query.includes("PoolSnapshot")) return { PoolSnapshot: [] };
       if (query.includes("ProtocolFeeTransfer"))
         return { ProtocolFeeTransfer: [] };
+      if (query.includes("LiquidityPosition_aggregate"))
+        return { LiquidityPosition_aggregate: { aggregate: { count: 5 } } };
       if (query.includes("Pool")) return { Pool: [pool] };
       return {};
     });
@@ -94,14 +96,17 @@ describe("fetchNetworkData — happy path", () => {
     const result = await fetchNetworkData(MOCK_NETWORK, {
       w24h: { from: 0, to: 1000 },
       w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
     });
 
     expect(result.error).toBeNull();
     expect(result.feesError).toBeNull();
     expect(result.snapshotsError).toBeNull();
+    expect(result.snapshots30dError).toBeNull();
     expect(result.pools).toHaveLength(1);
     expect(result.pools[0].id).toBe("pool-1");
     expect(result.fees).not.toBeNull();
+    expect(result.uniqueLpCount).toBe(5);
 
     const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
       .mock.calls;
@@ -109,6 +114,8 @@ describe("fetchNetworkData — happy path", () => {
     expect(calls[1][1]).toEqual({ chainId: 42220 });
     expect(calls[2][1]).toEqual({ from: 0, to: 1000, poolIds: ["pool-1"] });
     expect(calls[3][1]).toEqual({ from: 0, to: 7000, poolIds: ["pool-1"] });
+    expect(calls[4][1]).toEqual({ from: 0, to: 30000, poolIds: ["pool-1"] });
+    expect(calls[5][1]).toEqual({ poolIds: ["pool-1"] });
   });
 
   it("trims whitespace from hasuraSecret before setting auth header", async () => {
@@ -121,6 +128,7 @@ describe("fetchNetworkData — happy path", () => {
     await fetchNetworkData(MOCK_NETWORK_WITH_SECRET, {
       w24h: { from: 0, to: 1000 },
       w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
     });
 
     const constructorArgs = (GraphQLClient as ReturnType<typeof vi.fn>).mock
@@ -139,6 +147,7 @@ describe("fetchNetworkData — happy path", () => {
     await fetchNetworkData(MOCK_NETWORK, {
       w24h: { from: 0, to: 1000 },
       w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
     });
 
     const constructorArgs = (GraphQLClient as ReturnType<typeof vi.fn>).mock
@@ -162,6 +171,7 @@ describe("fetchNetworkData — pools query failure", () => {
     const result = await fetchNetworkData(MOCK_NETWORK, {
       w24h: { from: 0, to: 1000 },
       w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
     });
 
     expect(result.error).toBe(poolsError);
@@ -195,6 +205,7 @@ describe("fetchNetworkData — fees query failure only", () => {
     const result = await fetchNetworkData(MOCK_NETWORK, {
       w24h: { from: 0, to: 1000 },
       w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
     });
 
     expect(result.error).toBeNull();
@@ -227,6 +238,7 @@ describe("fetchNetworkData — snapshots query failure only", () => {
     const result = await fetchNetworkData(MOCK_NETWORK, {
       w24h: { from: 0, to: 1000 },
       w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
     });
 
     expect(result.error).toBeNull();
@@ -251,10 +263,46 @@ describe("fetchNetworkData — non-Error thrown values", () => {
     const result = await fetchNetworkData(MOCK_NETWORK, {
       w24h: { from: 0, to: 1000 },
       w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
     });
 
     expect(result.error).toBeInstanceOf(Error);
     expect(result.error?.message).toBe("something went wrong");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchNetworkData — LP query failure only
+// ---------------------------------------------------------------------------
+
+describe("fetchNetworkData — LP query failure only", () => {
+  it("surfaces uniqueLpCount as null when LP aggregate query rejects", async () => {
+    const pool = makePool("pool-lp");
+    const lpErr = new Error("LP aggregate timeout");
+
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((query: string) => {
+      if (query.includes("LiquidityPosition_aggregate"))
+        return Promise.reject(lpErr);
+      if (query.includes("PoolSnapshot")) return { PoolSnapshot: [] };
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
+      if (query.includes("Pool")) return { Pool: [pool] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.pools).toHaveLength(1);
+    expect(result.fees).not.toBeNull();
+    expect(result.uniqueLpCount).toBeNull();
+    expect(result.lpError).toBe(lpErr);
   });
 });
 
@@ -284,6 +332,7 @@ describe("fetchNetworkData — cross-network isolation", () => {
       return fetchNetworkData(MOCK_NETWORK, {
         w24h: { from: 0, to: 1000 },
         w7d: { from: 0, to: 7000 },
+        w30d: { from: 0, to: 30000 },
       });
     })();
 
@@ -296,6 +345,7 @@ describe("fetchNetworkData — cross-network isolation", () => {
       return fetchNetworkData(MOCK_NETWORK_2, {
         w24h: { from: 0, to: 1000 },
         w7d: { from: 0, to: 7000 },
+        w30d: { from: 0, to: 30000 },
       });
     })();
 
@@ -320,6 +370,7 @@ describe("fetchNetworkData — cross-network isolation", () => {
     const result = await fetchNetworkData(MOCK_NETWORK_2, {
       w24h: { from: 0, to: 1000 },
       w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
     });
 
     expect(result.network).toBe(MOCK_NETWORK_2);
@@ -343,6 +394,7 @@ describe("fetchNetworkData — cross-network isolation", () => {
     const result = await fetchNetworkData(MOCK_NETWORK, {
       w24h: { from: 0, to: 1000 },
       w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
     });
 
     expect(result.error).toBeNull();
@@ -369,6 +421,7 @@ describe("fetchNetworkData — cross-network isolation", () => {
     const result = await fetchNetworkData(MOCK_NETWORK, {
       w24h: { from: 0, to: 1000 },
       w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
     });
 
     expect(result.error).toBeNull();

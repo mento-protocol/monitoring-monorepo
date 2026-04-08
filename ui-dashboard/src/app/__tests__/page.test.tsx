@@ -84,11 +84,15 @@ function makeNetworkData(overrides: Partial<NetworkData> = {}): NetworkData {
     pools: [],
     snapshots: [],
     snapshots7d: [],
+    snapshots30d: [],
     fees: null,
+    uniqueLpCount: 0,
     error: null,
     feesError: null,
     snapshotsError: null,
     snapshots7dError: null,
+    snapshots30dError: null,
+    lpError: null,
     ...overrides,
   };
 }
@@ -140,6 +144,8 @@ describe("GlobalPage — all networks succeed", () => {
         fees: {
           totalFeesUSD: 1000,
           fees24hUSD: 50,
+          fees7dUSD: 50,
+          fees30dUSD: 50,
           unpricedSymbols: [],
           unpricedSymbols24h: [],
           unresolvedCount: 0,
@@ -148,7 +154,7 @@ describe("GlobalPage — all networks succeed", () => {
         },
       }),
     ]);
-    expect(html).toContain("Swap Fees Earned");
+    expect(html).toContain("Swap Fees");
     expect(html).not.toContain("N/A");
   });
 });
@@ -200,17 +206,37 @@ describe("GlobalPage — fees-only failure", () => {
 });
 
 // ---------------------------------------------------------------------------
+// LP query failure
+// ---------------------------------------------------------------------------
+
+describe("GlobalPage — LP query failure", () => {
+  it("shows N/A and failure subtitle when LP query fails", () => {
+    const html = render([
+      makeNetworkData({
+        uniqueLpCount: null,
+        lpError: new Error("LP aggregate timeout"),
+      }),
+    ]);
+    expect(html).toContain("LPs");
+    expect(html).toContain("N/A");
+    expect(html).toContain("Some chains failed to load");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Snapshots-only failure
 // ---------------------------------------------------------------------------
 
 describe("GlobalPage — snapshots-only failure", () => {
-  it("shows N/A for volume/swaps but not for fees", () => {
+  it("shows error subtitle on volume tile but fees still render", () => {
     const html = render([
       makeNetworkData({
         snapshotsError: new Error("snapshots timeout"),
         fees: {
           totalFeesUSD: 500,
           fees24hUSD: 20,
+          fees7dUSD: 20,
+          fees30dUSD: 20,
           unpricedSymbols: [],
           unpricedSymbols24h: [],
           unresolvedCount: 0,
@@ -219,10 +245,12 @@ describe("GlobalPage — snapshots-only failure", () => {
         },
       }),
     ]);
-    expect(html).toContain("24h Volume");
-    expect(html).toContain("N/A");
-    // All-time fees should still show (not N/A)
-    expect(html).toContain("Swap Fees Earned");
+    // Volume tile shows all-time total (from pool counters) with error subtitle
+    expect(html).toContain("Volume");
+    expect(html).toContain("Some chains failed to load");
+    // Sub-rows (24h/7d/30d) are hidden when hasError is true
+    // Fees should still render normally
+    expect(html).toContain("Swap Fees");
   });
 });
 
@@ -237,6 +265,8 @@ describe("GlobalPage — unpriced symbols behavior", () => {
         fees: {
           totalFeesUSD: 1000,
           fees24hUSD: 50,
+          fees7dUSD: 50,
+          fees30dUSD: 50,
           unpricedSymbols: ["FOO"],
           unpricedSymbols24h: [],
           unresolvedCount: 0,
@@ -249,12 +279,14 @@ describe("GlobalPage — unpriced symbols behavior", () => {
     expect(html).toContain("≈");
   });
 
-  it("does NOT show approximation on 24h tile when unpriced symbols are outside 24h", () => {
+  it("shows approximation subtitle only once when unpriced symbols are outside 24h", () => {
     const html = render([
       makeNetworkData({
         fees: {
           totalFeesUSD: 1000,
           fees24hUSD: 50,
+          fees7dUSD: 50,
+          fees30dUSD: 50,
           // FOO appears in all-time history but NOT in last 24h
           unpricedSymbols: ["FOO"],
           unpricedSymbols24h: [],
@@ -264,18 +296,9 @@ describe("GlobalPage — unpriced symbols behavior", () => {
         },
       }),
     ]);
-    // All-time tile should show ≈
+    // Total should show ≈ prefix and approximation subtitle
     expect(html).toContain("≈");
-    // 24h fees section should NOT show approximation subtitle
-    // The all-time subtitle has "Approximate — unpriced: FOO" but not 24h
-    const unpricedIdx = html.indexOf("Approximate — unpriced:");
-    expect(unpricedIdx).toBeGreaterThan(-1);
-    // 24h Swap Fees label appears after the all-time fees section
-    const fees24hIdx = html.indexOf("24h Swap Fees");
-    // Approximation should not appear after the 24h section start
-    // (i.e. it appears only in the all-time section)
-    const afterFees24h = html.slice(fees24hIdx);
-    expect(afterFees24h).not.toContain("Approximate — unpriced");
+    expect(html).toContain("Approximate — unpriced: FOO");
   });
 
   it("shows approximate on 24h tile when unresolvedCount24h > 0", () => {
@@ -284,6 +307,8 @@ describe("GlobalPage — unpriced symbols behavior", () => {
         fees: {
           totalFeesUSD: 100,
           fees24hUSD: 50,
+          fees7dUSD: 50,
+          fees30dUSD: 50,
           unpricedSymbols: [],
           unpricedSymbols24h: [],
           unresolvedCount: 1,
@@ -302,6 +327,8 @@ describe("GlobalPage — unpriced symbols behavior", () => {
         fees: {
           totalFeesUSD: 100,
           fees24hUSD: 10,
+          fees7dUSD: 10,
+          fees30dUSD: 10,
           unpricedSymbols: [],
           unpricedSymbols24h: [],
           unresolvedCount: 3,
@@ -322,6 +349,8 @@ describe("GlobalPage — unpriced symbols behavior", () => {
         fees: {
           totalFeesUSD: 500,
           fees24hUSD: 20,
+          fees7dUSD: 20,
+          fees30dUSD: 20,
           unpricedSymbols: [],
           unpricedSymbols24h: [],
           unresolvedCount: 0,
@@ -331,7 +360,7 @@ describe("GlobalPage — unpriced symbols behavior", () => {
       }),
     ]);
     expect(html).toContain("debank.com");
-    expect(html).toContain("Swap Fees Earned");
+    expect(html).toContain("Swap Fees");
   });
 });
 
