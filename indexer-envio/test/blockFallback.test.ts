@@ -1,9 +1,6 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
-import {
-  readContractWithBlockFallback,
-  type BlockFallbackResult,
-} from "../src/rpc";
+import { readContractWithBlockFallback } from "../src/rpc";
 
 // ---------------------------------------------------------------------------
 // Mock client factory

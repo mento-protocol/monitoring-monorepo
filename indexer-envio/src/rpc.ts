@@ -311,6 +311,11 @@ export async function readContractWithBlockFallback(
       err instanceof Error &&
       BLOCK_NOT_AVAILABLE_RE.test(err.message)
     ) {
+      const fn = (args.functionName as string) ?? "unknown";
+      const target = (args.address as string) ?? "unknown";
+      console.warn(
+        `[RPC_BLOCK_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — reading latest instead`,
+      );
       const result = await client.readContract(args as any);
       return { result, usedFallback: true };
     }
