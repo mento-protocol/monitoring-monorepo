@@ -86,7 +86,7 @@ function makeNetworkData(overrides: Partial<NetworkData> = {}): NetworkData {
     snapshots7d: [],
     snapshots30d: [],
     fees: null,
-    uniqueLpCount: null,
+    uniqueLpCount: 0,
     error: null,
     feesError: null,
     snapshotsError: null,

@@ -46,6 +46,9 @@ function GlobalContent() {
   const anySnapshots30dError = networkData.some(
     (netData) => netData.snapshots30dError !== null && netData.error === null,
   );
+  const anyLpError = networkData.some(
+    (netData) => netData.uniqueLpCount === null && netData.error === null,
+  );
 
   // Aggregate KPIs and per-pool volume maps in a single pass (no duplicate
   // buildPoolVolumeMap calls).
@@ -73,7 +76,8 @@ function GlobalContent() {
         anyFeesError || anyNetworkError ? null : 0;
       let totalFees30d: number | null =
         anyFeesError || anyNetworkError ? null : 0;
-      let totalUniqueLps: number | null = anyNetworkError ? null : 0;
+      let totalUniqueLps: number | null =
+        anyLpError || anyNetworkError ? null : 0;
       const unpricedSymbolSet = new Set<string>();
       let isTruncated = false;
       let totalUnresolvedCount = 0;
@@ -186,6 +190,7 @@ function GlobalContent() {
       anySnapshots7dError,
       anySnapshots30dError,
       anyFeesError,
+      anyLpError,
     ]);
 
   // Networks that failed at the top level — show an error notice per chain
