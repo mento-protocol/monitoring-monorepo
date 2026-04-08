@@ -200,6 +200,7 @@ function GlobalContent() {
       anySnapshots7dError,
       anySnapshots30dError,
       anyFeesError,
+      anyLpError,
     ]);
 
   // Networks that failed at the top level — show an error notice per chain

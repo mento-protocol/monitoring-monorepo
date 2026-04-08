@@ -107,6 +107,7 @@ describe("fetchNetworkData — happy path", () => {
     expect(result.pools[0].id).toBe("pool-1");
     expect(result.fees).not.toBeNull();
     expect(result.uniqueLpCount).toBe(5);
+    expect(result.rates).toBeInstanceOf(Map);
 
     const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
       .mock.calls;
