@@ -100,7 +100,7 @@ function GlobalContent() {
         // All-time volume & swaps from pool-level counters
         if (totalVolumeAllTime !== null) {
           for (const pool of pools) {
-            const v = poolTotalVolumeUSD(pool, network);
+            const v = poolTotalVolumeUSD(pool, network, netData.rates);
             if (typeof v === "number") totalVolumeAllTime += v;
           }
         }
@@ -115,15 +115,15 @@ function GlobalContent() {
         // both KPI totals and per-pool table columns below.
         const vol24hMap =
           netData.snapshotsError === null
-            ? buildPoolVolumeMap(snapshots, pools, network)
+            ? buildPoolVolumeMap(snapshots, pools, network, netData.rates)
             : null;
         const vol7dMap =
           netData.snapshots7dError === null
-            ? buildPoolVolumeMap(snapshots7d, pools, network)
+            ? buildPoolVolumeMap(snapshots7d, pools, network, netData.rates)
             : null;
         const vol30dMap =
           netData.snapshots30dError === null
-            ? buildPoolVolumeMap(snapshots30d, pools, network)
+            ? buildPoolVolumeMap(snapshots30d, pools, network, netData.rates)
             : null;
 
         if (vol24hMap && totalVolume24h !== null) {
@@ -138,7 +138,11 @@ function GlobalContent() {
 
         // Store per-pool volume for the table columns
         for (const pool of pools) {
-          const entry: GlobalPoolEntry = { pool, network };
+          const entry: GlobalPoolEntry = {
+            pool,
+            network,
+            rates: netData.rates,
+          };
           allEntries.push(entry);
           const key = globalPoolKey(entry);
           allVol24h.set(key, vol24hMap ? vol24hMap.get(pool.id) : null);

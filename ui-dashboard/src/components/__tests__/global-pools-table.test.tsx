@@ -82,7 +82,7 @@ function makeEntry(
   pool: Partial<Pool> = {},
   network: Network = CELO_NETWORK,
 ): GlobalPoolEntry {
-  return { pool: { ...BASE_POOL, ...pool }, network };
+  return { pool: { ...BASE_POOL, ...pool }, network, rates: new Map() };
 }
 
 // ---------------------------------------------------------------------------

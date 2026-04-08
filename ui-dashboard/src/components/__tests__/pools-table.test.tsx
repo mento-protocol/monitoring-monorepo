@@ -80,7 +80,7 @@ const BASE_POOL: Pool = {
 };
 
 function renderSinglePool(pool: Pool): string {
-  return renderToStaticMarkup(<PoolsTable pools={[pool]} />);
+  return renderToStaticMarkup(<PoolsTable pools={[pool]} rates={new Map()} />);
 }
 
 function renderPoolTableMarkup(props: {
@@ -91,7 +91,7 @@ function renderPoolTableMarkup(props: {
   volume7dLoading?: boolean;
   volume7dError?: boolean;
 }): string {
-  return renderToStaticMarkup(<PoolsTable pools={[BASE_POOL]} {...props} />);
+  return renderToStaticMarkup(<PoolsTable pools={[BASE_POOL]} rates={new Map()} {...props} />);
 }
 
 describe("PoolsTable 24h volume states", () => {

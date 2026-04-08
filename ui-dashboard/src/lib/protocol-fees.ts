@@ -6,11 +6,8 @@
  */
 
 import { parseWei } from "./format";
-import { tokenToUSD } from "./tokens";
+import { tokenToUSD, type OracleRateMap } from "./tokens";
 import type { ProtocolFeeTransfer } from "./types";
-
-// Re-export for backward compatibility (tests import from here)
-export { tokenToUSD } from "./tokens";
 
 /**
  * Token symbols the indexer emits when it cannot resolve the on-chain symbol.
@@ -63,6 +60,7 @@ export type ProtocolFeeSummary = {
  */
 export function aggregateProtocolFees(
   transfers: ProtocolFeeTransfer[],
+  rates: OracleRateMap,
 ): ProtocolFeeSummary {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const cutoff24h = nowSeconds - 86400;
@@ -89,7 +87,7 @@ export function aggregateProtocolFees(
       continue;
     }
     const amount = parseWei(t.amount, t.tokenDecimals);
-    const usd = tokenToUSD(t.tokenSymbol, amount);
+    const usd = tokenToUSD(t.tokenSymbol, amount, rates);
     if (usd === null) {
       unpricedSymbolSet.add(t.tokenSymbol);
       if (ts >= cutoff24h) unpricedSymbols24hSet.add(t.tokenSymbol);

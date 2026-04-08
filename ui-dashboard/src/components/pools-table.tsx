@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { NetworkAwareLink } from "@/components/network-aware-link";
 import { formatUSD } from "@/lib/format";
-import { poolName, poolTvlUSD } from "@/lib/tokens";
+import { poolName, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool } from "@/lib/types";
 import { Table, Row, Th } from "@/components/table";
@@ -162,6 +162,7 @@ function SortableTh({
 
 interface PoolsTableProps {
   pools: Pool[];
+  rates: OracleRateMap;
   volume24h?: Map<string, number | null>;
   volume24hLoading?: boolean;
   volume24hError?: boolean;
@@ -173,6 +174,7 @@ interface PoolsTableProps {
 
 export function PoolsTable({
   pools,
+  rates,
   volume24h,
   volume24hLoading = false,
   volume24hError = false,
@@ -192,7 +194,7 @@ export function PoolsTable({
   const totalVolumeByPoolId = useMemo(
     () =>
       new Map(
-        pools.map((pool) => [pool.id, poolTotalVolumeUSD(pool, network)]),
+        pools.map((pool) => [pool.id, poolTotalVolumeUSD(pool, network, rates)]),
       ),
     [pools, network],
   );

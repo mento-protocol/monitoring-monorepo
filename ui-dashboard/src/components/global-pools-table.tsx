@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { formatUSD } from "@/lib/format";
-import { poolName, poolTvlUSD } from "@/lib/tokens";
+import { poolName, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
 import { Table, Row, Th } from "@/components/table";
@@ -17,10 +17,11 @@ import { combinedTooltip } from "@/lib/pool-table-utils";
 import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 
-/** A pool entry enriched with its originating network. */
+/** A pool entry enriched with its originating network and oracle rates. */
 export type GlobalPoolEntry = {
   pool: Pool;
   network: Network;
+  rates: OracleRateMap;
 };
 
 export type GlobalSortKey =
@@ -219,7 +220,7 @@ export function GlobalPoolsTable({
       new Map(
         entries.map((e) => [
           globalPoolKey(e),
-          poolTotalVolumeUSD(e.pool, e.network),
+          poolTotalVolumeUSD(e.pool, e.network, e.rates),
         ]),
       ),
     [entries],
