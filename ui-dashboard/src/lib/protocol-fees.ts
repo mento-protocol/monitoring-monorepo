@@ -86,6 +86,8 @@ export const PROTOCOL_FEE_QUERY_LIMIT = 10_000;
 export type ProtocolFeeSummary = {
   totalFeesUSD: number;
   fees24hUSD: number;
+  fees7dUSD: number;
+  fees30dUSD: number;
   /**
    * Symbols that appeared in all-time transfers but have no USD conversion.
    * Empty array = all tokens priced. Non-empty = all-time total is approximate.
@@ -120,41 +122,48 @@ export type ProtocolFeeSummary = {
 export function aggregateProtocolFees(
   transfers: ProtocolFeeTransfer[],
 ): ProtocolFeeSummary {
-  const cutoff24h = Math.floor(Date.now() / 1000) - 86400;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const cutoff24h = nowSeconds - 86400;
+  const cutoff7d = nowSeconds - 7 * 86400;
+  const cutoff30d = nowSeconds - 30 * 86400;
   let totalFeesUSD = 0;
   let fees24hUSD = 0;
+  let fees7dUSD = 0;
+  let fees30dUSD = 0;
   const unpricedSymbolSet = new Set<string>();
   const unpricedSymbols24hSet = new Set<string>();
   let unresolvedCount = 0;
   let unresolvedCount24h = 0;
 
   for (const t of transfers) {
-    const is24h = Number(t.blockTimestamp) >= cutoff24h;
+    const ts = Number(t.blockTimestamp);
 
     // Count indexer placeholder symbols — excluded from USD totals but tracked
     // so the UI can signal the total may be understated if resolution keeps
     // failing (persistent RPC issue, non-standard token).
     if (UNRESOLVED_SYMBOLS.has(t.tokenSymbol)) {
       unresolvedCount++;
-      if (is24h) unresolvedCount24h++;
+      if (ts >= cutoff24h) unresolvedCount24h++;
       continue;
     }
     const amount = parseWei(t.amount, t.tokenDecimals);
     const usd = tokenToUSD(t.tokenSymbol, amount);
     if (usd === null) {
       unpricedSymbolSet.add(t.tokenSymbol);
-      if (is24h) unpricedSymbols24hSet.add(t.tokenSymbol);
+      if (ts >= cutoff24h) unpricedSymbols24hSet.add(t.tokenSymbol);
       continue;
     }
     totalFeesUSD += usd;
-    if (is24h) {
-      fees24hUSD += usd;
-    }
+    if (ts >= cutoff24h) fees24hUSD += usd;
+    if (ts >= cutoff7d) fees7dUSD += usd;
+    if (ts >= cutoff30d) fees30dUSD += usd;
   }
 
   return {
     totalFeesUSD,
     fees24hUSD,
+    fees7dUSD,
+    fees30dUSD,
     unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
     unpricedSymbols24h: Array.from(unpricedSymbols24hSet).sort(),
     unresolvedCount,

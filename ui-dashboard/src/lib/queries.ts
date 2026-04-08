@@ -336,6 +336,17 @@ export const POOL_LP_POSITIONS = `
   }
 `;
 
+export const UNIQUE_LP_COUNT = `
+  query UniqueLpCount($poolIds: [String!]!) {
+    LiquidityPosition_aggregate(
+      where: { poolId: { _in: $poolIds }, netLiquidity: { _gt: "0" } }
+      distinct_on: address
+    ) {
+      aggregate { count }
+    }
+  }
+`;
+
 export const OLS_POOL = `
   query OlsPool($poolId: String!) {
     OlsPool(

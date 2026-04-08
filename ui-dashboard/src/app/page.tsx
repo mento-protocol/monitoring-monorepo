@@ -3,7 +3,7 @@
 import { Suspense, useMemo } from "react";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD } from "@/lib/tokens";
-import { buildPoolVolumeMap, sumFpmmSwaps } from "@/lib/volume";
+import { buildPoolVolumeMap, poolTotalVolumeUSD } from "@/lib/volume";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import {
@@ -34,87 +34,122 @@ function GlobalContent() {
   );
 
   // Aggregate KPIs across all networks.
-  // Pools/TVL include only successfully loaded chains — but we track whether
-  // any chain failed so tiles can show N/A / "partial data" subtitles.
-  // Fees and volume/swaps go null when *any* relevant sub-query failed so we
-  // never mix real values with silently zeroed-out failures.
   const aggregated = useMemo(() => {
     let totalPools = 0;
     let totalFpmmPools = 0;
     let totalTvl = 0;
+    let totalVolumeAllTime: number | null = anyNetworkError ? null : 0;
     let totalVolume24h: number | null =
       anySnapshotsError || anyNetworkError ? null : 0;
-    let totalSwaps24hFpmm: number | null =
+    let totalVolume7d: number | null =
       anySnapshotsError || anyNetworkError ? null : 0;
+    let totalVolume30d: number | null =
+      anySnapshotsError || anyNetworkError ? null : 0;
+    let totalSwapsAllTime: number | null = anyNetworkError ? null : 0;
     let totalFeesAllTime: number | null =
       anyFeesError || anyNetworkError ? null : 0;
     let totalFees24h: number | null =
       anyFeesError || anyNetworkError ? null : 0;
+    let totalFees7d: number | null = anyFeesError || anyNetworkError ? null : 0;
+    let totalFees30d: number | null =
+      anyFeesError || anyNetworkError ? null : 0;
+    let totalUniqueLps: number | null = anyNetworkError ? null : 0;
     const unpricedSymbolSet = new Set<string>();
-    const unpricedSymbols24hSet = new Set<string>();
     let isTruncated = false;
     let totalUnresolvedCount = 0;
-    let totalUnresolvedCount24h = 0;
 
     for (const netData of networkData) {
-      // Skip whole-network errors (pools = [] anyway, already flagged via anyNetworkError)
       if (netData.error !== null) continue;
 
-      const { network, pools, snapshots, fees } = netData;
+      const { network, pools, snapshots, snapshots7d, snapshots30d, fees } =
+        netData;
       const fpmmPools = pools.filter(isFpmm);
       totalPools += pools.length;
       totalFpmmPools += fpmmPools.length;
       totalTvl += fpmmPools.reduce((sum, p) => sum + poolTvlUSD(p, network), 0);
 
-      // Only add volume/swaps when snapshots succeeded for this network
+      // All-time volume & swaps from pool-level counters
+      if (totalVolumeAllTime !== null) {
+        for (const pool of pools) {
+          const v = poolTotalVolumeUSD(pool, network);
+          if (typeof v === "number") totalVolumeAllTime += v;
+        }
+      }
+      if (totalSwapsAllTime !== null) {
+        totalSwapsAllTime += pools.reduce(
+          (sum, p) => sum + (p.swapCount ?? 0),
+          0,
+        );
+      }
+
+      // Windowed volume from snapshots
       if (netData.snapshotsError === null) {
-        const volume24hMap = buildPoolVolumeMap(snapshots, pools, network);
+        const vol24hMap = buildPoolVolumeMap(snapshots, pools, network);
         if (totalVolume24h !== null) {
-          totalVolume24h += Array.from(volume24hMap.values()).reduce<number>(
+          totalVolume24h += Array.from(vol24hMap.values()).reduce<number>(
             (sum, v) => (typeof v === "number" ? sum + v : sum),
             0,
           );
         }
-        if (totalSwaps24hFpmm !== null) {
-          const fpmmPoolIdSet = new Set(fpmmPools.map((p) => p.id));
-          totalSwaps24hFpmm += sumFpmmSwaps(snapshots, fpmmPoolIdSet);
+      }
+      if (netData.snapshots7dError === null) {
+        const vol7dMap = buildPoolVolumeMap(snapshots7d, pools, network);
+        if (totalVolume7d !== null) {
+          totalVolume7d += Array.from(vol7dMap.values()).reduce<number>(
+            (sum, v) => (typeof v === "number" ? sum + v : sum),
+            0,
+          );
+        }
+      }
+      if (netData.snapshots30dError === null) {
+        const vol30dMap = buildPoolVolumeMap(snapshots30d, pools, network);
+        if (totalVolume30d !== null) {
+          totalVolume30d += Array.from(vol30dMap.values()).reduce<number>(
+            (sum, v) => (typeof v === "number" ? sum + v : sum),
+            0,
+          );
         }
       }
 
-      // Only add fees when fees query succeeded for this network
+      // Fees
       if (netData.feesError === null && fees !== null) {
         if (totalFeesAllTime !== null) totalFeesAllTime += fees.totalFeesUSD;
         if (totalFees24h !== null) totalFees24h += fees.fees24hUSD;
+        if (totalFees7d !== null) totalFees7d += fees.fees7dUSD;
+        if (totalFees30d !== null) totalFees30d += fees.fees30dUSD;
         fees.unpricedSymbols.forEach((s) => unpricedSymbolSet.add(s));
-        fees.unpricedSymbols24h.forEach((s) => unpricedSymbols24hSet.add(s));
         totalUnresolvedCount += fees.unresolvedCount;
-        totalUnresolvedCount24h += fees.unresolvedCount24h;
         if (fees.isTruncated) isTruncated = true;
       }
-    }
 
-    const unpricedSymbols = Array.from(unpricedSymbolSet).sort();
-    const unpricedSymbols24h = Array.from(unpricedSymbols24hSet).sort();
+      // LP count
+      if (netData.uniqueLpCount !== null && totalUniqueLps !== null) {
+        totalUniqueLps += netData.uniqueLpCount;
+      }
+    }
 
     return {
       totalPools,
       totalFpmmPools,
       totalTvl,
+      totalVolumeAllTime,
       totalVolume24h,
-      totalSwaps24hFpmm,
+      totalVolume7d,
+      totalVolume30d,
+      totalSwapsAllTime,
       totalFeesAllTime,
       totalFees24h,
-      unpricedSymbols,
-      unpricedSymbols24h,
+      totalFees7d,
+      totalFees30d,
+      totalUniqueLps,
+      unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
       totalUnresolvedCount,
-      totalUnresolvedCount24h,
       isTruncated,
     };
   }, [networkData, anyNetworkError, anySnapshotsError, anyFeesError]);
 
   // Build a flat list of all pool entries and merged volume maps keyed by
   // `${network.id}:${pool.id}` to avoid collisions across chains.
-  // Pools from chains with snapshot errors get null in the map → rendered as "N/A" per-row.
   const { globalEntries, volume24hByKey, volume7dByKey } = useMemo(() => {
     const entries: GlobalPoolEntry[] = [];
     const vol24hMap = new Map<string, number | null | undefined>();
@@ -159,6 +194,11 @@ function GlobalContent() {
   // Networks that failed at the top level — show an error notice per chain
   const failedNetworks = networkData.filter((net) => net.error !== null);
 
+  const feesApprox =
+    aggregated.unpricedSymbols.length > 0 ||
+    aggregated.isTruncated ||
+    aggregated.totalUnresolvedCount > 0;
+
   return (
     <div className="space-y-8">
       <div>
@@ -172,6 +212,52 @@ function GlobalContent() {
       <section>
         <h2 className="text-lg font-semibold text-white mb-3">Summary</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          {/* 1. Volume */}
+          <BreakdownTile
+            label="Volume"
+            total={aggregated.totalVolumeAllTime}
+            sub24h={aggregated.totalVolume24h}
+            sub7d={aggregated.totalVolume7d}
+            sub30d={aggregated.totalVolume30d}
+            isLoading={isLoading}
+            hasError={anyNetworkError || anySnapshotsError}
+            format={formatUSD}
+          />
+
+          {/* 2. TVL */}
+          <Tile
+            label="TVL (FPMMs)"
+            value={isLoading ? "…" : formatUSD(aggregated.totalTvl)}
+            subtitle={
+              anyNetworkError ? "Partial data — some chains failed" : undefined
+            }
+          />
+
+          {/* 3. Swap Fees (Total) */}
+          <BreakdownTile
+            label="Swap Fees"
+            total={aggregated.totalFeesAllTime}
+            sub24h={aggregated.totalFees24h}
+            sub7d={aggregated.totalFees7d}
+            sub30d={aggregated.totalFees30d}
+            isLoading={isLoading}
+            hasError={anyNetworkError || anyFeesError}
+            format={(v) => `${feesApprox ? "≈ " : ""}${formatUSD(v)}`}
+            href="https://debank.com/profile/0x0dd57f6f181d0469143fe9380762d8a112e96e4a"
+            subtitle={
+              aggregated.totalFeesAllTime === null
+                ? undefined
+                : aggregated.isTruncated
+                  ? "Lower bound — data exceeds query limit"
+                  : aggregated.unpricedSymbols.length > 0
+                    ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
+                    : aggregated.totalUnresolvedCount > 0
+                      ? "Approximate — some tokens unresolved"
+                      : undefined
+            }
+          />
+
+          {/* 4. Pools */}
           <Tile
             label="Total Pools"
             value={isLoading ? "…" : String(aggregated.totalPools)}
@@ -183,78 +269,31 @@ function GlobalContent() {
                   : `${aggregated.totalFpmmPools} FPMMs · ${aggregated.totalPools - aggregated.totalFpmmPools} Virtual`
             }
           />
+
+          {/* 5. LPs */}
           <Tile
-            label="TVL (FPMMs)"
-            value={isLoading ? "…" : formatUSD(aggregated.totalTvl)}
-            subtitle={
-              anyNetworkError ? "Partial data — some chains failed" : undefined
-            }
-          />
-          <Tile
-            label="Swap Fees Earned"
+            label="LPs"
             value={
               isLoading
                 ? "…"
-                : aggregated.totalFeesAllTime === null
+                : aggregated.totalUniqueLps === null
                   ? "N/A"
-                  : `${aggregated.unpricedSymbols.length > 0 || aggregated.isTruncated || aggregated.totalUnresolvedCount > 0 ? "≈ " : ""}${formatUSD(aggregated.totalFeesAllTime)}`
+                  : aggregated.totalUniqueLps.toLocaleString()
             }
-            href="https://debank.com/profile/0x0dd57f6f181d0469143fe9380762d8a112e96e4a"
-            subtitle={
-              aggregated.totalFeesAllTime === null
-                ? "Some chains failed to load"
-                : aggregated.isTruncated
-                  ? "Lower bound — data exceeds query limit"
-                  : aggregated.unpricedSymbols.length > 0
-                    ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
-                    : aggregated.totalUnresolvedCount > 0
-                      ? "Approximate — some tokens unresolved"
-                      : "All-time cumulative"
-            }
+            subtitle="Unique FPMM LP addresses"
           />
+
+          {/* 6. Swaps */}
           <Tile
-            label="24h Volume"
+            label="Swaps"
             value={
               isLoading
                 ? "…"
-                : aggregated.totalVolume24h === null
+                : aggregated.totalSwapsAllTime === null
                   ? "N/A"
-                  : formatUSD(aggregated.totalVolume24h)
+                  : aggregated.totalSwapsAllTime.toLocaleString()
             }
-            subtitle={
-              aggregated.totalVolume24h === null
-                ? "Some chains failed to load"
-                : undefined
-            }
-          />
-          <Tile
-            label="24h Swaps (FPMMs)"
-            value={
-              isLoading
-                ? "…"
-                : aggregated.totalSwaps24hFpmm === null
-                  ? "N/A"
-                  : aggregated.totalSwaps24hFpmm.toLocaleString()
-            }
-          />
-          <Tile
-            label="24h Swap Fees"
-            value={
-              isLoading
-                ? "…"
-                : aggregated.totalFees24h === null
-                  ? "N/A"
-                  : `${aggregated.unpricedSymbols24h.length > 0 || aggregated.totalUnresolvedCount24h > 0 ? "≈ " : ""}${formatUSD(aggregated.totalFees24h)}`
-            }
-            subtitle={
-              aggregated.totalFees24h === null
-                ? "Some chains failed to load"
-                : aggregated.unpricedSymbols24h.length > 0
-                  ? `Approximate — unpriced: ${aggregated.unpricedSymbols24h.join(", ")}`
-                  : aggregated.totalUnresolvedCount24h > 0
-                    ? "Approximate — some tokens unresolved"
-                    : undefined
-            }
+            subtitle="All-time across all pools"
           />
         </div>
       </section>
@@ -282,6 +321,84 @@ function GlobalContent() {
           />
         )}
       </section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BreakdownTile — shows a "Total" headline value with 24h / 7d / 30d below
+// ---------------------------------------------------------------------------
+
+function BreakdownTile({
+  label,
+  total,
+  sub24h,
+  sub7d,
+  sub30d,
+  isLoading,
+  hasError,
+  format,
+  href,
+  subtitle,
+}: {
+  label: string;
+  total: number | null;
+  sub24h: number | null;
+  sub7d: number | null;
+  sub30d: number | null;
+  isLoading: boolean;
+  hasError: boolean;
+  format: (v: number) => string;
+  href?: string;
+  subtitle?: string;
+}) {
+  const mainValue = isLoading ? "…" : total === null ? "N/A" : format(total);
+
+  const subItems =
+    !isLoading && total !== null
+      ? [
+          { label: "24h", value: sub24h },
+          { label: "7d", value: sub7d },
+          { label: "30d", value: sub30d },
+        ]
+      : null;
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px]">
+      <div>
+        <p className="text-sm text-slate-400">{label}</p>
+        {href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`${label}: ${mainValue}`}
+            className="mt-1 block text-2xl font-semibold text-white font-mono hover:text-indigo-400 transition-colors"
+          >
+            {mainValue}
+          </a>
+        ) : (
+          <p className="mt-1 text-2xl font-semibold text-white font-mono">
+            {mainValue}
+          </p>
+        )}
+        {subItems && (
+          <div className="mt-1.5 flex gap-3 text-xs text-slate-500 font-mono">
+            {subItems.map((s) => (
+              <span key={s.label}>
+                <span className="text-slate-600">{s.label}</span>{" "}
+                {s.value === null ? "N/A" : format(s.value)}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      <p
+        className="mt-2 text-xs text-slate-500 min-h-4"
+        aria-hidden={!subtitle && !hasError}
+      >
+        {hasError ? "Some chains failed to load" : subtitle}
+      </p>
     </div>
   );
 }

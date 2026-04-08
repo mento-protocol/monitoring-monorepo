@@ -8,6 +8,7 @@ import {
   ALL_POOLS_WITH_HEALTH,
   POOL_SNAPSHOTS_WINDOW,
   PROTOCOL_FEE_TRANSFERS_ALL,
+  UNIQUE_LP_COUNT,
 } from "@/lib/queries";
 import {
   aggregateProtocolFees,
@@ -16,6 +17,7 @@ import {
 import {
   snapshotWindow24h,
   snapshotWindow7d,
+  snapshotWindow30d,
   shouldQueryPoolSnapshots,
   SNAPSHOT_REFRESH_MS,
 } from "@/lib/volume";
@@ -24,25 +26,21 @@ import type {
   PoolSnapshotWindow,
   ProtocolFeeTransfer,
 } from "@/lib/types";
+import { isFpmm } from "@/lib/tokens";
 
 export type NetworkData = {
   network: Network;
-  /** Non-empty only if the pools query itself succeeded. */
   pools: Pool[];
-  /** Non-empty only when snapshotsError is null. */
   snapshots: PoolSnapshotWindow[];
-  /** Non-empty only when snapshots7dError is null. */
   snapshots7d: PoolSnapshotWindow[];
-  /** Non-null only when feesError is null. */
+  snapshots30d: PoolSnapshotWindow[];
   fees: ProtocolFeeSummary | null;
-  /** Set when the top-level pools query fails (whole network unusable). */
+  uniqueLpCount: number | null;
   error: Error | null;
-  /** Set when the ProtocolFeeTransfer sub-query fails. Fees should show N/A. */
   feesError: Error | null;
-  /** Set when the 24h PoolSnapshot sub-query fails. Volume/swaps should show N/A. */
   snapshotsError: Error | null;
-  /** Set when the 7d PoolSnapshot sub-query fails. 7d volume should show N/A. */
   snapshots7dError: Error | null;
+  snapshots30dError: Error | null;
 };
 
 type AllNetworksResult = {
@@ -53,20 +51,31 @@ type AllNetworksResult = {
 
 export type TimeRange = { from: number; to: number };
 
+const EMPTY_NETWORK_DATA = (network: Network, error: Error): NetworkData => ({
+  network,
+  pools: [],
+  snapshots: [],
+  snapshots7d: [],
+  snapshots30d: [],
+  fees: null,
+  uniqueLpCount: null,
+  error,
+  feesError: null,
+  snapshotsError: null,
+  snapshots7dError: null,
+  snapshots30dError: null,
+});
+
 /** @internal Exported for testing only. */
 export async function fetchNetworkData(
   network: Network,
-  windows: { w24h: TimeRange; w7d: TimeRange },
+  windows: { w24h: TimeRange; w7d: TimeRange; w30d: TimeRange },
 ): Promise<NetworkData> {
-  // Trim whitespace — matches useGQL behaviour; Hasura treats whitespace-only
-  // secrets as invalid auth and returns access-denied rather than falling
-  // through to unauthenticated access.
   const secret = network.hasuraSecret.trim();
   const client = new GraphQLClient(network.hasuraUrl, {
     headers: secret ? { "x-hasura-admin-secret": secret } : {},
   });
 
-  // Pools are required — if this fails, the whole network entry is an error.
   let pools: Pool[];
   try {
     const poolsRes = await client.request<{ Pool: Pool[] }>(
@@ -75,80 +84,81 @@ export async function fetchNetworkData(
     );
     pools = poolsRes.Pool ?? [];
   } catch (err) {
-    return {
+    return EMPTY_NETWORK_DATA(
       network,
-      pools: [],
-      snapshots: [],
-      snapshots7d: [],
-      fees: null,
-      error: err instanceof Error ? err : new Error(String(err)),
-      feesError: null,
-      snapshotsError: null,
-      snapshots7dError: null,
-    };
+      err instanceof Error ? err : new Error(String(err)),
+    );
   }
 
-  // Fees and snapshots are independent — run concurrently after pools succeeds.
-  // Failures are surfaced per-field so the UI can show "N/A" rather than
-  // silently reporting $0 or zero volume.
   const poolIds = pools.map((p) => p.id);
+  const fpmmPoolIds = pools.filter(isFpmm).map((p) => p.id);
   const shouldQuery = shouldQueryPoolSnapshots(poolIds);
   const emptySnapshots = Promise.resolve<{
     PoolSnapshot: PoolSnapshotWindow[];
-  }>({
-    PoolSnapshot: [],
-  });
-  const [feesResult, snapshotsResult, snapshots7dResult] =
-    await Promise.allSettled([
-      client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
-        PROTOCOL_FEE_TRANSFERS_ALL,
-        { chainId: network.chainId },
-      ),
-      shouldQuery
-        ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
-            POOL_SNAPSHOTS_WINDOW,
-            { from: windows.w24h.from, to: windows.w24h.to, poolIds },
-          )
-        : emptySnapshots,
-      shouldQuery
-        ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
-            POOL_SNAPSHOTS_WINDOW,
-            { from: windows.w7d.from, to: windows.w7d.to, poolIds },
-          )
-        : emptySnapshots,
-    ]);
+  }>({ PoolSnapshot: [] });
+
+  const [
+    feesResult,
+    snapshotsResult,
+    snapshots7dResult,
+    snapshots30dResult,
+    lpResult,
+  ] = await Promise.allSettled([
+    client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
+      PROTOCOL_FEE_TRANSFERS_ALL,
+      { chainId: network.chainId },
+    ),
+    shouldQuery
+      ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
+          POOL_SNAPSHOTS_WINDOW,
+          { from: windows.w24h.from, to: windows.w24h.to, poolIds },
+        )
+      : emptySnapshots,
+    shouldQuery
+      ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
+          POOL_SNAPSHOTS_WINDOW,
+          { from: windows.w7d.from, to: windows.w7d.to, poolIds },
+        )
+      : emptySnapshots,
+    shouldQuery
+      ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
+          POOL_SNAPSHOTS_WINDOW,
+          { from: windows.w30d.from, to: windows.w30d.to, poolIds },
+        )
+      : emptySnapshots,
+    fpmmPoolIds.length > 0
+      ? client.request<{
+          LiquidityPosition_aggregate: { aggregate: { count: number } };
+        }>(UNIQUE_LP_COUNT, { poolIds: fpmmPoolIds })
+      : Promise.resolve({
+          LiquidityPosition_aggregate: { aggregate: { count: 0 } },
+        }),
+  ]);
+
+  const toError = (reason: unknown) =>
+    reason instanceof Error ? reason : new Error(String(reason));
 
   const fees =
     feesResult.status === "fulfilled"
       ? aggregateProtocolFees(feesResult.value.ProtocolFeeTransfer ?? [])
-      : null;
-  const feesError =
-    feesResult.status === "rejected"
-      ? feesResult.reason instanceof Error
-        ? feesResult.reason
-        : new Error(String(feesResult.reason))
       : null;
 
   const snapshots =
     snapshotsResult.status === "fulfilled"
       ? (snapshotsResult.value.PoolSnapshot ?? [])
       : [];
-  const snapshotsError =
-    snapshotsResult.status === "rejected"
-      ? snapshotsResult.reason instanceof Error
-        ? snapshotsResult.reason
-        : new Error(String(snapshotsResult.reason))
-      : null;
-
   const snapshots7d =
     snapshots7dResult.status === "fulfilled"
       ? (snapshots7dResult.value.PoolSnapshot ?? [])
       : [];
-  const snapshots7dError =
-    snapshots7dResult.status === "rejected"
-      ? snapshots7dResult.reason instanceof Error
-        ? snapshots7dResult.reason
-        : new Error(String(snapshots7dResult.reason))
+  const snapshots30d =
+    snapshots30dResult.status === "fulfilled"
+      ? (snapshots30dResult.value.PoolSnapshot ?? [])
+      : [];
+
+  const uniqueLpCount =
+    lpResult.status === "fulfilled"
+      ? (lpResult.value.LiquidityPosition_aggregate?.aggregate?.count ?? 0)
       : null;
 
   return {
@@ -156,11 +166,24 @@ export async function fetchNetworkData(
     pools,
     snapshots,
     snapshots7d,
+    snapshots30d,
     fees,
+    uniqueLpCount,
     error: null,
-    feesError,
-    snapshotsError,
-    snapshots7dError,
+    feesError:
+      feesResult.status === "rejected" ? toError(feesResult.reason) : null,
+    snapshotsError:
+      snapshotsResult.status === "rejected"
+        ? toError(snapshotsResult.reason)
+        : null,
+    snapshots7dError:
+      snapshots7dResult.status === "rejected"
+        ? toError(snapshots7dResult.reason)
+        : null,
+    snapshots30dError:
+      snapshots30dResult.status === "rejected"
+        ? toError(snapshots30dResult.reason)
+        : null,
   };
 }
 
@@ -171,6 +194,7 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
   const windows = {
     w24h: snapshotWindow24h(now),
     w7d: snapshotWindow7d(now),
+    w30d: snapshotWindow30d(now),
   };
 
   const results = await Promise.allSettled(
@@ -179,29 +203,20 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
 
   return results.map((result, i) => {
     if (result.status === "fulfilled") return result.value;
-    return {
-      network: NETWORKS[configuredNetworkIds[i]],
-      pools: [],
-      snapshots: [],
-      snapshots7d: [],
-      fees: null,
-      error:
-        result.reason instanceof Error
-          ? result.reason
-          : new Error(String(result.reason)),
-      feesError: null,
-      snapshotsError: null,
-      snapshots7dError: null,
-    };
+    return EMPTY_NETWORK_DATA(
+      NETWORKS[configuredNetworkIds[i]],
+      result.reason instanceof Error
+        ? result.reason
+        : new Error(String(result.reason)),
+    );
   });
 }
 
 /**
- * Fetches pools, snapshots (24h/7d/30d), and protocol fees for ALL configured
- * networks in parallel. Uses Promise.allSettled so one failing network doesn't
- * block others. Sub-query failures (fees, snapshots) are surfaced as per-field
- * errors so the UI can show "N/A" instead of silently reporting $0 or zero
- * volume. Ignores the global network selector — always fetches all chains.
+ * Fetches pools, snapshots (24h/7d/30d), protocol fees, and LP counts for ALL
+ * configured networks in parallel. Uses Promise.allSettled so one failing network
+ * doesn't block others. Sub-query failures are surfaced as per-field errors so
+ * the UI can show "N/A" instead of silently reporting $0 or zero volume.
  */
 export function useAllNetworksData(): AllNetworksResult {
   const { data, error, isLoading } = useSWR<NetworkData[]>(
