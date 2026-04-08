@@ -1,14 +1,14 @@
 import { parseWei } from "./format";
-import { tokenSymbol, USDM_SYMBOLS } from "./tokens";
+import { tokenSymbol, USDM_SYMBOLS, tokenToUSD } from "./tokens";
 import type { Network } from "./networks";
 import type { Pool, PoolSnapshotWindow } from "./types";
 
 /**
  * Compute all-time total volume in USD for a pool.
  *
- * Returns null when the pool has no USD-convertible leg (i.e. neither token
- * is in USDM_SYMBOLS). Returns 0 when the pool is USD-convertible but has no
- * recorded volume yet (notionalVolume fields absent or "0").
+ * Prefers the USDm leg (1:1 USD). Falls back to FX-rate conversion for
+ * non-USDm tokens (e.g. EURm, axlEUROC). Returns null only when neither
+ * token has a known USD conversion.
  */
 export function poolTotalVolumeUSD(
   pool: Pool,
@@ -22,7 +22,19 @@ export function poolTotalVolumeUSD(
   if (USDM_SYMBOLS.has(sym1)) {
     return parseWei(pool.notionalVolume1 ?? "0", pool.token1Decimals ?? 18);
   }
-  return null;
+  return (
+    volumeViaFxRate(sym0, pool.notionalVolume0, pool.token0Decimals) ??
+    volumeViaFxRate(sym1, pool.notionalVolume1, pool.token1Decimals)
+  );
+}
+
+function volumeViaFxRate(
+  symbol: string,
+  rawVolume: string | undefined,
+  decimals: number | undefined,
+): number | null {
+  const amount = parseWei(rawVolume ?? "0", decimals ?? 18);
+  return tokenToUSD(symbol, amount);
 }
 
 const SECONDS_PER_HOUR = 3600;
@@ -113,7 +125,10 @@ function getSnapshotVolumeInUsd(
   if (USDM_SYMBOLS.has(sym1)) {
     return parseWei(snapshot.swapVolume1, pool.token1Decimals ?? 18);
   }
-  return null;
+  return (
+    volumeViaFxRate(sym0, snapshot.swapVolume0, pool.token0Decimals) ??
+    volumeViaFxRate(sym1, snapshot.swapVolume1, pool.token1Decimals)
+  );
 }
 
 export function sumFpmmSwaps(
@@ -131,5 +146,10 @@ function isUsdConvertible(
 ): boolean {
   const sym0 = tokenSymbol(network, pool.token0 ?? null);
   const sym1 = tokenSymbol(network, pool.token1 ?? null);
-  return USDM_SYMBOLS.has(sym0) || USDM_SYMBOLS.has(sym1);
+  return (
+    USDM_SYMBOLS.has(sym0) ||
+    USDM_SYMBOLS.has(sym1) ||
+    tokenToUSD(sym0, 1) !== null ||
+    tokenToUSD(sym1, 1) !== null
+  );
 }

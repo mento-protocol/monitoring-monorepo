@@ -12,6 +12,7 @@ import {
 import type { Pool, PoolSnapshotWindow } from "../types";
 
 const network = NETWORKS["celo-sepolia-local"];
+const mainnet = NETWORKS["celo-mainnet"];
 
 describe("snapshotWindow24h", () => {
   it("returns a bounded 24h hourly window", () => {
@@ -156,7 +157,7 @@ describe("buildPoolVolumeMap", () => {
     expect(volumeByPool.get("pool-2")).toBeCloseTo(1, 8);
   });
 
-  it("marks volume as non-convertible when pool has no USDm leg", () => {
+  it("marks volume as non-convertible when neither token has a known USD rate", () => {
     const pools: Pool[] = [
       {
         id: "pool-3",
@@ -227,7 +228,7 @@ describe("poolTotalVolumeUSD", () => {
     expect(poolTotalVolumeUSD(pool, network)).toBeCloseTo(10, 8);
   });
 
-  it("returns null when pool has no USDm leg", () => {
+  it("returns null when neither token has a known USD rate", () => {
     const pool: Pool = {
       ...BASE_POOL_FIELDS,
       id: "pool-3",
@@ -240,6 +241,23 @@ describe("poolTotalVolumeUSD", () => {
       notionalVolume1: "2000000000000000000",
     };
     expect(poolTotalVolumeUSD(pool, network)).toBeNull();
+  });
+
+  it("converts volume via FX rate for non-USDm pools (e.g. axlEUROC/EURm)", () => {
+    const pool: Pool = {
+      ...BASE_POOL_FIELDS,
+      id: "pool-eur",
+      chainId: 42220,
+      token0: "0x061cc5a2c863e0c1cb404006d559db18a34c762d", // axlEUROC
+      token1: "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73", // EURm
+      token0Decimals: 6,
+      token1Decimals: 18,
+      notionalVolume0: "100000000", // 100 axlEUROC (6 decimals)
+      notionalVolume1: "200000000000000000000", // 200 EURm (18 decimals)
+    };
+    // axlEUROC FX rate = 1.1455 USD per EUR token
+    // 100 * 1.1455 = 114.55
+    expect(poolTotalVolumeUSD(pool, mainnet)).toBeCloseTo(114.55, 2);
   });
 
   it("returns 0 when pool is USD-convertible but has no recorded volume", () => {

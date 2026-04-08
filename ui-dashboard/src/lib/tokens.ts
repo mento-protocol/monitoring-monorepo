@@ -8,6 +8,48 @@ import { truncateAddress, parseWei } from "./format";
 
 export const USDM_SYMBOLS = new Set(["USDm"]);
 
+/** Tokens treated as $1.00 for USD conversion. */
+export const USD_PEGGED_SYMBOLS = new Set([
+  "cUSD",
+  "USDC",
+  "axlUSDC",
+  "USDT",
+  "USD\u20AE",
+  "USDm",
+  "AUSD",
+]);
+
+/**
+ * FX rates for non-USD stablecoins (USD per 1 token).
+ * Approximate spot rates — acceptable for a monitoring dashboard.
+ */
+export const FX_RATES: Record<string, number> = {
+  cEUR: 1.1455,
+  EURm: 1.1455,
+  GBPm: 1.3263,
+  AUDm: 0.6993,
+  CADm: 0.7299,
+  CHFm: 1.2674,
+  KESm: 0.0077,
+  BRLm: 0.1905,
+  COPm: 0.00027,
+  GHSm: 0.0924,
+  JPYm: 0.00627,
+  NGNm: 0.00073,
+  PHPm: 0.01675,
+  XOFm: 0.00175,
+  ZARm: 0.0593,
+  axlEUROC: 1.1455,
+};
+
+/** Convert a token amount to USD. Returns null for unknown tokens. */
+export function tokenToUSD(symbol: string, amount: number): number | null {
+  if (USD_PEGGED_SYMBOLS.has(symbol)) return amount;
+  const rate = FX_RATES[symbol];
+  if (rate !== undefined) return amount * rate;
+  return null;
+}
+
 export function tokenSymbol(network: Network, address: string | null): string {
   if (!address) return "?";
   const lower = address.toLowerCase();

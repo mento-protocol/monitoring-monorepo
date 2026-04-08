@@ -6,75 +6,17 @@
  */
 
 import { parseWei } from "./format";
+import { tokenToUSD } from "./tokens";
 import type { ProtocolFeeTransfer } from "./types";
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/** Tokens treated as $1.00 for USD conversion. */
-// Note: "USD₮" (with Unicode ₮ U+20AE) is how USDT appears on Celo — the Celo
-// token contract uses the Mongolian Tögrög sign as the ticker suffix.
-const USD_PEGGED_SYMBOLS = new Set([
-  "cUSD",
-  "USDC",
-  "axlUSDC",
-  "USDT",
-  "USD₮",
-  "USDm",
-  // AUSD (Monad) is the USD-pegged spoke token
-  "AUSD",
-]);
+// Re-export for backward compatibility (tests import from here)
+export { tokenToUSD } from "./tokens";
 
 /**
- * FX rates for non-USD stablecoins (USD per 1 token).
- * Covers all Mento v3 tokens on Celo and Monad.
- * Approximate spot rates sourced from exchangerate-api.com — update periodically.
- * Hardcoded for v1 — acceptable for a monitoring dashboard.
- */
-const FX_RATES: Record<string, number> = {
-  // Legacy symbol (kept for backward-compat with any old indexed data)
-  cEUR: 1.1455,
-  // Celo v3 tokens (symbols from on-chain ERC20.symbol())
-  EURm: 1.1455,
-  GBPm: 1.3263,
-  AUDm: 0.6993,
-  CADm: 0.7299,
-  CHFm: 1.2674,
-  KESm: 0.0077,
-  BRLm: 0.1905,
-  COPm: 0.00027,
-  GHSm: 0.0924,
-  JPYm: 0.00627,
-  NGNm: 0.00073,
-  PHPm: 0.01675,
-  XOFm: 0.00175,
-  ZARm: 0.0593,
-  // axlEUROC: euro-pegged bridged stablecoin (same rate as EUR)
-  axlEUROC: 1.1455,
-};
-
-// ---------------------------------------------------------------------------
-// USD conversion
-// ---------------------------------------------------------------------------
-
-/**
- * Token symbols the indexer emits when it cannot resolve the on-chain symbol
- * (e.g. tokens not yet in @mento-protocol/contracts). These are silently
- * skipped rather than flagging the summary as approximate.
+ * Token symbols the indexer emits when it cannot resolve the on-chain symbol.
+ * Silently skipped rather than flagging the summary as approximate.
  */
 const UNRESOLVED_SYMBOLS = new Set(["UNKNOWN"]);
-
-/**
- * Convert a token amount to USD. Returns `null` for unknown tokens
- * so callers can track unconverted fees separately.
- */
-export function tokenToUSD(symbol: string, amount: number): number | null {
-  if (USD_PEGGED_SYMBOLS.has(symbol)) return amount;
-  const rate = FX_RATES[symbol];
-  if (rate !== undefined) return amount * rate;
-  return null;
-}
 
 // ---------------------------------------------------------------------------
 // Public API

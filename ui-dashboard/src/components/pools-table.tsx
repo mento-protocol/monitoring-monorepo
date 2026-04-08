@@ -16,7 +16,6 @@ import {
 import { combinedTooltip } from "@/lib/pool-table-utils";
 import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
-import { VolumeInfo } from "@/components/volume-info";
 
 export type SortKey =
   | "pool"
@@ -286,8 +285,7 @@ export function PoolsTable({
               onSort={handleSort}
               className="hidden md:table-cell"
             >
-              24h Vol.
-              <VolumeInfo />
+              24h Vol.{" "}
             </SortableTh>
             <SortableTh
               sortKey="volume7d"
@@ -296,8 +294,7 @@ export function PoolsTable({
               onSort={handleSort}
               className="hidden md:table-cell"
             >
-              7d Vol.
-              <VolumeInfo />
+              7d Vol.{" "}
             </SortableTh>
             <SortableTh
               sortKey="totalVolume"
@@ -306,8 +303,7 @@ export function PoolsTable({
               onSort={handleSort}
               className="hidden md:table-cell"
             >
-              Total Vol.
-              <VolumeInfo />
+              Total Vol.{" "}
             </SortableTh>
             <SortableTh
               sortKey="swaps"
