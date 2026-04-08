@@ -17,9 +17,12 @@ import _namespaces from "../config/deployment-namespaces.json";
 // cannot depend on the shared workspace package at deploy time.
 export const CONTRACT_NAMESPACE_BY_CHAIN: Record<string, string> = _namespaces;
 
-type ContractsJson = Record<
+export type ContractsJson = Record<
   string,
-  Record<string, Record<string, { address: string }>>
+  Record<
+    string,
+    Record<string, { address: string; type?: string; decimals?: number }>
+  >
 >;
 
 /**

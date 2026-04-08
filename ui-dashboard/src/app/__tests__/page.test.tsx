@@ -232,6 +232,7 @@ describe("GlobalPage — LP query failure", () => {
       }),
     ]);
     expect(html).not.toContain("N/A");
+    expect(html).toContain("0");
     expect(html).toContain("Partial");
   });
 

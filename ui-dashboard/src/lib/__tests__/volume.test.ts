@@ -323,6 +323,23 @@ describe("poolTotalVolumeUSD", () => {
     expect(poolTotalVolumeUSD(pool, mainnet, EUR_RATES)).toBeCloseTo(114.55, 2);
   });
 
+  it("converts volume via token1 FX rate when token0 is unknown", () => {
+    const pool: Pool = {
+      ...BASE_POOL_FIELDS,
+      id: "pool-eur-t1",
+      chainId: 42220,
+      token0: "0x0000000000000000000000000000000000000099", // unknown
+      token1: "0x061cc5a2c863e0c1cb404006d559db18a34c762d", // axlEUROC
+      token0Decimals: 18,
+      token1Decimals: 6,
+      notionalVolume0: "500000000000000000000", // 500 unknown (no rate)
+      notionalVolume1: "200000000", // 200 axlEUROC (6 decimals)
+    };
+    // token0 has no rate, so falls through to token1 (axlEUROC @ 1.1455)
+    // 200 * 1.1455 = 229.10
+    expect(poolTotalVolumeUSD(pool, mainnet, EUR_RATES)).toBeCloseTo(229.1, 2);
+  });
+
   it("returns 0 when pool is USD-convertible but has no recorded volume", () => {
     const pool: Pool = {
       ...BASE_POOL_FIELDS,

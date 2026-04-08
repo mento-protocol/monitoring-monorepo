@@ -300,4 +300,34 @@ describe("buildOracleRateMap", () => {
     const rates = buildOracleRateMap(pools, mainnet);
     expect(rates.size).toBe(0);
   });
+
+  it("populates legacy cEUR alias when EURm has a rate", () => {
+    const EURM_MAINNET = "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73";
+    const pools = [
+      {
+        token0: USDM_MAINNET,
+        token1: EURM_MAINNET,
+        oraclePrice: ORACLE_HALF,
+        oracleOk: true,
+      },
+    ];
+    const rates = buildOracleRateMap(pools, mainnet);
+    expect(rates.get("EURm")).toBeCloseTo(0.5, 8);
+    expect(rates.get("cEUR")).toBeCloseTo(0.5, 8);
+  });
+
+  it("includes pool when oracleOk is undefined (documents current behavior)", () => {
+    const pools = [
+      {
+        token0: USDM_MAINNET,
+        token1: KESM_MAINNET,
+        oraclePrice: ORACLE_1e24,
+        oracleOk: undefined,
+      },
+    ];
+    const rates = buildOracleRateMap(pools, mainnet);
+    // oracleOk === undefined does NOT trigger the `=== false` guard,
+    // so the pool IS included.
+    expect(rates.get("KESm")).toBeCloseTo(1.0, 8);
+  });
 });
