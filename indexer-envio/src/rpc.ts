@@ -265,8 +265,60 @@ const reservesCache = new Map<string, { reserve0: bigint; reserve1: bigint }>();
 let reservesCacheLastBlock: bigint | undefined;
 
 // ---------------------------------------------------------------------------
+// Block fallback helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Wrapper around `client.readContract` that retries without `blockNumber` when
+ * the RPC node returns "block is out of range". This happens when HyperSync
+ * delivers events faster than the RPC node syncs — reading latest state is
+ * far better than losing the data entirely.
+ *
+ * Rethrows all other errors so callers handle logging as before.
+ */
+export async function readContractWithBlockFallback(
+  client: ReturnType<typeof createPublicClient>,
+  args: Record<string, unknown>,
+  blockNumber?: bigint,
+): Promise<unknown> {
+  try {
+    return await client.readContract({
+      ...args,
+      ...(blockNumber !== undefined && { blockNumber }),
+    } as any);
+  } catch (err) {
+    if (
+      blockNumber !== undefined &&
+      err instanceof Error &&
+      err.message.includes("block is out of range")
+    ) {
+      return await client.readContract(args as any);
+    }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Fetch functions
 // ---------------------------------------------------------------------------
+
+function parseRebalancingState(result: unknown): RebalancingState {
+  const r = result as readonly [
+    bigint,
+    bigint,
+    bigint,
+    bigint,
+    boolean,
+    number,
+    bigint,
+  ];
+  return {
+    oraclePriceNumerator: r[0],
+    oraclePriceDenominator: r[1],
+    rebalanceThreshold: Number(r[5]),
+    priceDifference: r[6],
+  };
+}
 
 export async function fetchRebalancingState(
   chainId: number,
@@ -277,29 +329,19 @@ export async function fetchRebalancingState(
   if (_testRebalancingStates.has(testKey)) {
     return _testRebalancingStates.get(testKey) ?? null;
   }
+
   try {
     const client = getRpcClient(chainId);
-    const result = await client.readContract({
-      address: poolAddress as `0x${string}`,
-      abi: FPMM_MINIMAL_ABI,
-      functionName: "getRebalancingState",
-      ...(blockNumber !== undefined && { blockNumber }),
-    });
-    const r = result as readonly [
-      bigint,
-      bigint,
-      bigint,
-      bigint,
-      boolean,
-      number,
-      bigint,
-    ];
-    return {
-      oraclePriceNumerator: r[0],
-      oraclePriceDenominator: r[1],
-      rebalanceThreshold: Number(r[5]),
-      priceDifference: r[6],
-    };
+    const result = await readContractWithBlockFallback(
+      client,
+      {
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_MINIMAL_ABI,
+        functionName: "getRebalancingState",
+      },
+      blockNumber,
+    );
+    return parseRebalancingState(result);
   } catch (err) {
     logRpcFailure(
       chainId,
@@ -338,12 +380,15 @@ export async function fetchReserves(
 
   try {
     const client = getRpcClient(chainId);
-    const result = await client.readContract({
-      address: poolAddress as `0x${string}`,
-      abi: FPMM_MINIMAL_ABI,
-      functionName: "getReserves",
-      ...(blockNumber !== undefined && { blockNumber }),
-    });
+    const result = await readContractWithBlockFallback(
+      client,
+      {
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_MINIMAL_ABI,
+        functionName: "getReserves",
+      },
+      blockNumber,
+    );
     const r = result as readonly [bigint, bigint, bigint];
     const reserves = { reserve0: r[0], reserve1: r[1] };
     reservesCache.set(cacheKey, reserves);
@@ -442,13 +487,16 @@ export async function fetchNumReporters(
 
   try {
     const client = getRpcClient(chainId);
-    const count = await client.readContract({
-      address,
-      abi: SortedOraclesContract.abi,
-      functionName: "numRates",
-      args: [rateFeedID as `0x${string}`],
+    const count = await readContractWithBlockFallback(
+      client,
+      {
+        address,
+        abi: SortedOraclesContract.abi,
+        functionName: "numRates",
+        args: [rateFeedID as `0x${string}`],
+      },
       blockNumber,
-    });
+    );
     const value = Number(count);
     numReportersCache.set(cacheKey, value);
     return value;
@@ -481,22 +529,28 @@ export async function fetchReportExpiry(
 
   try {
     const client = getRpcClient(chainId);
-    const tokenExpiry = (await client.readContract({
-      address,
-      abi: SortedOraclesContract.abi,
-      functionName: "tokenReportExpirySeconds",
-      args: [rateFeedID as `0x${string}`],
+    const tokenExpiry = (await readContractWithBlockFallback(
+      client,
+      {
+        address,
+        abi: SortedOraclesContract.abi,
+        functionName: "tokenReportExpirySeconds",
+        args: [rateFeedID as `0x${string}`],
+      },
       blockNumber,
-    })) as bigint;
+    )) as bigint;
     const expiry: bigint =
       tokenExpiry > 0n
         ? tokenExpiry
-        : ((await client.readContract({
-            address,
-            abi: SortedOraclesContract.abi,
-            functionName: "reportExpirySeconds",
+        : ((await readContractWithBlockFallback(
+            client,
+            {
+              address,
+              abi: SortedOraclesContract.abi,
+              functionName: "reportExpirySeconds",
+            },
             blockNumber,
-          })) as bigint);
+          )) as bigint);
     if (expiry <= 0n) return null;
     reportExpiryCache.set(cacheKey, expiry);
     return expiry;
