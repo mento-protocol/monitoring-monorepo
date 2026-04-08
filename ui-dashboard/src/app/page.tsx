@@ -77,6 +77,7 @@ function GlobalContent() {
       let totalFees30d: number | null =
         anyFeesError || anyNetworkError ? null : 0;
       let totalUniqueLps: number | null = anyNetworkError ? null : 0;
+      let hasSuccessfulLpResult = false;
       const unpricedSymbolSet = new Set<string>();
       let isTruncated = false;
       let totalUnresolvedCount = 0;
@@ -160,11 +161,12 @@ function GlobalContent() {
         // LP count — accumulate from successful chains
         if (netData.uniqueLpCount !== null && totalUniqueLps !== null) {
           totalUniqueLps += netData.uniqueLpCount;
+          hasSuccessfulLpResult = true;
         }
       }
 
-      // If every LP query failed (no successful chain contributed), show N/A
-      if (totalUniqueLps === 0 && anyLpError) {
+      // Show N/A only when no chain contributed a successful LP result
+      if (!hasSuccessfulLpResult && anyLpError) {
         totalUniqueLps = null;
       }
 

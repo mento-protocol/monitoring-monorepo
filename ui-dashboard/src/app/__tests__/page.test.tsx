@@ -223,6 +223,18 @@ describe("GlobalPage — LP query failure", () => {
     expect(html).toContain("Partial");
   });
 
+  it("shows 0 when a chain reports 0 LPs and another fails", () => {
+    const html = render([
+      makeNetworkData({ uniqueLpCount: 0 }),
+      makeNetworkData({
+        uniqueLpCount: null,
+        lpError: new Error("LP aggregate timeout"),
+      }),
+    ]);
+    expect(html).not.toContain("N/A");
+    expect(html).toContain("Partial");
+  });
+
   it("sums LP counts from successful chains even when one fails", () => {
     const html = render([
       makeNetworkData({ uniqueLpCount: 42 }),
