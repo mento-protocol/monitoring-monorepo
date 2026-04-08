@@ -7,8 +7,7 @@
 #   pnpm deploy:indexer              → push to `envio` branch (multichain mainnet, default)
 #   pnpm deploy:indexer <network>    → push to `deploy/<network>` branch (legacy per-network)
 #
-# Envio project: https://envio.dev/app/mento-protocol/mento-v3-celo-sepolia
-#   (repurposed for multichain; triggered by `envio` branch pushes)
+# Envio project: https://envio.dev/app/mento-protocol/mento
 
 set -euo pipefail
 
@@ -37,7 +36,7 @@ NETWORK="${1:-}"
 # Default (no arg): deploy multichain indexer via `envio` branch
 if [[ -z "$NETWORK" ]]; then
   DEPLOY_BRANCH="envio"
-  SYNC_URL="https://envio.dev/app/mento-protocol/mento-v3-celo-sepolia"
+  SYNC_URL="https://envio.dev/app/mento-protocol/mento"
   echo "🌐 Deploying multichain indexer (Celo + Monad) → branch: $DEPLOY_BRANCH"
 else
   if ! validate_network "$NETWORK"; then
