@@ -165,12 +165,12 @@ export const POOL_DETAIL_WITH_HEALTH = `
   }
 `;
 
-export const POOL_SNAPSHOTS = `
-  query PoolSnapshots($poolId: String!, $limit: Int!) {
+export const POOL_SNAPSHOTS_CHART = `
+  query PoolSnapshotsChart($poolId: String!) {
     PoolSnapshot(
       where: { poolId: { _eq: $poolId } }
-      order_by: { timestamp: asc }
-      limit: $limit
+      order_by: { timestamp: desc }
+      limit: 50000
     ) {
       id poolId timestamp
       reserves0 reserves1

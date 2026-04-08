@@ -8,6 +8,7 @@ import type {
   LiquidityEvent,
   OracleSnapshot,
   Pool,
+  PoolSnapshot,
   RebalanceEvent,
   ReserveUpdate,
   SwapEvent,
@@ -22,10 +23,11 @@ import {
   POOL_LIQUIDITY,
   POOL_REBALANCES,
   POOL_RESERVES,
-  POOL_SNAPSHOTS,
+  POOL_SNAPSHOTS_CHART,
   POOL_SWAPS,
   TRADING_LIMITS,
 } from "@/lib/queries";
+import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 
 const replaceMock = vi.fn();
 const useGQLMock = vi.fn();
@@ -279,6 +281,39 @@ const oracleRows: OracleSnapshot[] = [
   },
 ];
 
+const poolSnapshots: PoolSnapshot[] = [
+  {
+    id: "snap-1",
+    poolId: "pool-1",
+    timestamp: "1700000000",
+    reserves0: "1000000000000000000",
+    reserves1: "2000000000000000000",
+    swapCount: 5,
+    swapVolume0: "500000000000000000",
+    swapVolume1: "900000000000000000",
+    rebalanceCount: 1,
+    cumulativeSwapCount: 10,
+    cumulativeVolume0: "5000000000000000000",
+    cumulativeVolume1: "9000000000000000000",
+    blockNumber: "100",
+  },
+  {
+    id: "snap-2",
+    poolId: "pool-1",
+    timestamp: "1700003600",
+    reserves0: "1100000000000000000",
+    reserves1: "2100000000000000000",
+    swapCount: 3,
+    swapVolume0: "300000000000000000",
+    swapVolume1: "600000000000000000",
+    rebalanceCount: 0,
+    cumulativeSwapCount: 13,
+    cumulativeVolume0: "5300000000000000000",
+    cumulativeVolume1: "9600000000000000000",
+    blockNumber: "200",
+  },
+];
+
 function makeGqlResult(data: unknown) {
   return { data, error: null, isLoading: false };
 }
@@ -308,7 +343,8 @@ beforeEach(() => {
       if (query === POOL_DEPLOYMENT)
         return makeGqlResult({ FactoryDeployment: [{ txHash: "0xdeploy" }] });
       if (query === POOL_SWAPS) return makeGqlResult({ SwapEvent: swaps });
-      if (query === POOL_SNAPSHOTS) return makeGqlResult({ PoolSnapshot: [] });
+      if (query === POOL_SNAPSHOTS_CHART)
+        return makeGqlResult({ PoolSnapshot: poolSnapshots });
       if (query === POOL_RESERVES)
         return makeGqlResult({ ReserveUpdate: reserves });
       if (query === POOL_REBALANCES)
@@ -627,6 +663,76 @@ describe("Pool detail tab search", () => {
       expect(orderJson).not.toContain("oracleOk");
       expect(orderJson).not.toContain("oraclePrice");
     }
+  });
+
+  it("calls POOL_SNAPSHOTS_CHART with poolId only (no limit) on swaps tab", () => {
+    renderWithParams({});
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_SNAPSHOTS_CHART,
+      { poolId: "pool-1" },
+      SNAPSHOT_REFRESH_MS,
+    );
+  });
+
+  it("renders snapshot chart when snapshots are available on swaps tab", () => {
+    const html = renderWithParams({});
+    expect(html).toContain("snapshot-chart");
+  });
+
+  it("calls POOL_SNAPSHOTS_CHART on liquidity tab and renders chart", () => {
+    const html = renderWithParams({ tab: "liquidity" });
+    expect(useGQLMock).toHaveBeenCalledWith(
+      POOL_SNAPSHOTS_CHART,
+      { poolId: "pool-1" },
+      SNAPSHOT_REFRESH_MS,
+    );
+    expect(html).toContain("liquidity-chart");
+  });
+
+  it("skips snapshot chart query for virtual pools", () => {
+    useGQLMock.mockImplementation(
+      (query: unknown, variables?: { offset?: number; limit?: number }) => {
+        if (query === POOL_DETAIL_WITH_HEALTH)
+          return makeGqlResult({
+            Pool: [{ ...basePool, source: "virtual_pool" }],
+          });
+        if (query === TRADING_LIMITS)
+          return makeGqlResult({ TradingLimit: [] satisfies TradingLimit[] });
+        if (query === POOL_DEPLOYMENT)
+          return makeGqlResult({
+            FactoryDeployment: [{ txHash: "0xdeploy" }],
+          });
+        if (query === POOL_SWAPS) return makeGqlResult({ SwapEvent: swaps });
+        if (query === POOL_SNAPSHOTS_CHART)
+          return makeGqlResult({ PoolSnapshot: poolSnapshots });
+        if (query === POOL_RESERVES)
+          return makeGqlResult({ ReserveUpdate: reserves });
+        if (query === POOL_REBALANCES)
+          return makeGqlResult({ RebalanceEvent: rebalances });
+        if (query === POOL_LIQUIDITY)
+          return makeGqlResult({ LiquidityEvent: liquidity });
+        if (query === ORACLE_SNAPSHOTS)
+          return makeGqlResult({
+            OracleSnapshot: oracleRows.map((row, index) => ({
+              ...row,
+              id: `oracle-${(variables?.offset ?? 0) + index + 1}`,
+            })),
+          });
+        if (query === ORACLE_SNAPSHOTS_CHART)
+          return makeGqlResult({ OracleSnapshot: oracleRows });
+        if (query === ORACLE_SNAPSHOTS_COUNT)
+          return makeGqlResult({
+            OracleSnapshot_aggregate: { aggregate: { count: oracleCount } },
+          });
+        return makeGqlResult({});
+      },
+    );
+    const html = renderWithParams({});
+    const chartCalls = useGQLMock.mock.calls.filter(
+      (args: unknown[]) => args[0] === POOL_SNAPSHOTS_CHART,
+    );
+    expect(chartCalls).toHaveLength(0);
+    expect(html).not.toContain("snapshot-chart");
   });
 
   it("preserves newer url params when a debounced search commit fires later", () => {
