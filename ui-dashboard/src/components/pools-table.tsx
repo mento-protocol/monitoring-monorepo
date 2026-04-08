@@ -7,14 +7,13 @@ import { poolName, poolTvlUSD } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool } from "@/lib/types";
 import { Table, Row, Th } from "@/components/table";
-import { SourceBadge, HealthBadge, RebalancerBadge } from "@/components/badges";
+import { SourceBadge, HealthBadge } from "@/components/badges";
 import {
   computeHealthStatus,
   computeLimitStatus,
-  computeRebalancerLiveness,
   worstStatus,
 } from "@/lib/health";
-import { combinedTooltip, rebalancerTooltip } from "@/lib/pool-table-utils";
+import { combinedTooltip } from "@/lib/pool-table-utils";
 import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 import { VolumeInfo } from "@/components/volume-info";
@@ -184,7 +183,6 @@ export function PoolsTable({
   olsPoolIds,
 }: PoolsTableProps) {
   const { network } = useNetwork();
-  const nowSeconds = Math.floor(Date.now() / 1000);
   const [sortKey, setSortKey] = useState<SortKey>("totalVolume");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -263,7 +261,7 @@ export function PoolsTable({
             >
               Pool
             </SortableTh>
-            <Th>Source</Th>
+            <Th>Type</Th>
             <SortableTh
               sortKey="health"
               activeSortKey={sortKey}
@@ -331,12 +329,6 @@ export function PoolsTable({
             >
               Rebalances
             </SortableTh>
-            <th
-              scope="col"
-              className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
-            >
-              Rebalancer
-            </th>
             {olsPoolIds && (
               <th
                 scope="col"
@@ -352,10 +344,6 @@ export function PoolsTable({
             const healthStatus = computeHealthStatus(p, network.chainId);
             const limitStatus = p.limitStatus ?? computeLimitStatus(p);
             const effectiveStatus = worstStatus(healthStatus, limitStatus);
-            const rebalancerStatus = computeRebalancerLiveness(
-              { ...p, healthStatus },
-              nowSeconds,
-            );
             const tvl = tvlByPoolId.get(p.id) ?? 0;
             const vol24h = volume24h?.get(p.id);
             const vol7d = volume7d?.get(p.id);
@@ -420,11 +408,6 @@ export function PoolsTable({
                 </td>
                 <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
                   {p.rebalanceCount ?? 0}
-                </td>
-                <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
-                  <span title={rebalancerTooltip(rebalancerStatus)}>
-                    <RebalancerBadge status={rebalancerStatus} />
-                  </span>
                 </td>
                 {olsPoolIds && (
                   <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">

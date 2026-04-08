@@ -66,8 +66,14 @@ export {
 
 export function formatUSD(value: number): string {
   if (!Number.isFinite(value)) return "N/A";
-  if (value >= 999_950) return `$${(value / 1_000_000).toFixed(2)}M`;
-  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  if (value >= 999_950) {
+    const m = (value / 1_000_000).toFixed(2).replace(/\.?0+$/, "");
+    return `$${m}M`;
+  }
+  if (value >= 1_000) {
+    const k = (value / 1_000).toFixed(1).replace(/\.0$/, "");
+    return `$${k}K`;
+  }
   return `$${value.toFixed(2)}`;
 }
 

@@ -7,6 +7,7 @@ import {
   _clearBackfilledTokens,
   _clearFeeTokenMetaCache,
   selectStaleTransfers,
+  resolveFeeTokenMeta,
 } from "../src/EventHandlers.ts";
 import { makePoolId } from "../src/helpers.ts";
 
@@ -361,5 +362,33 @@ describe("selectStaleTransfers", () => {
       0,
       "42220_ should not be matched by chainId=42 prefix check",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// KNOWN_TOKEN_META static fallback — covers the catch branch that uses
+// the hardcoded map when RPC is unavailable for a known Mento token.
+// ---------------------------------------------------------------------------
+
+describe("KNOWN_TOKEN_META static fallback", () => {
+  afterEach(() => {
+    _clearMockFeeTokenMeta();
+    _clearFeeTokenMetaCache();
+  });
+
+  it("returns static metadata for a known Mento token when RPC fails", async () => {
+    // Simulate RPC failure for cUSD on Celo mainnet
+    _setMockFeeTokenMeta(
+      42220,
+      "0x765de816845861e75a25fca122bb6898b8b1282a",
+      "FAIL",
+    );
+
+    const meta = await resolveFeeTokenMeta(
+      42220,
+      "0x765de816845861e75a25fca122bb6898b8b1282a",
+    );
+
+    assert.deepEqual(meta, { symbol: "cUSD", decimals: 18 });
   });
 });

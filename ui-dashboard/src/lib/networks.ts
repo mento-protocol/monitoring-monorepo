@@ -166,7 +166,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
   }),
   "celo-mainnet-local": makeNetwork({
     id: "celo-mainnet-local",
-    label: "Celo Mainnet (local)",
+    label: "Celo (local)",
     local: true,
     hasVirtualPools: true,
     chainId: 42220,
@@ -186,7 +186,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
   }),
   "celo-mainnet": makeNetwork({
     id: "celo-mainnet",
-    label: "Celo Mainnet",
+    label: "Celo",
     hasVirtualPools: true,
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
@@ -202,7 +202,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
   }),
   "monad-mainnet": makeNetwork({
     id: "monad-mainnet",
-    label: "Monad Mainnet",
+    label: "Monad",
     chainId: 143,
     contractsNamespace: NS["monad-mainnet"],
     rpcUrl:

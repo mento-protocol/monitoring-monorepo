@@ -25,7 +25,7 @@ afterEach(() => {
 describe("network constants stay in sync", () => {
   it("MAINNET_CHAIN_IDS matches production mainnet networks", () => {
     const prodMainnetChainIds = Object.values(NETWORKS)
-      .filter((net) => !net.local && /mainnet/i.test(net.label))
+      .filter((net) => !net.local && !net.testnet)
       .map((net) => net.chainId)
       .filter((chainId, idx, arr) => arr.indexOf(chainId) === idx)
       .sort((a, b) => a - b);

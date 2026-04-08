@@ -94,30 +94,6 @@ function renderPoolTableMarkup(props: {
   return renderToStaticMarkup(<PoolsTable pools={[BASE_POOL]} {...props} />);
 }
 
-describe("PoolsTable rebalancer tooltip", () => {
-  it('shows "No rebalance events recorded yet" for FPMM with no lastRebalancedAt', () => {
-    const html = renderSinglePool({ ...BASE_POOL, source: "fpmm_factory" });
-    expect(html).toContain("No rebalance events recorded yet");
-  });
-
-  it('shows "No rebalance events recorded yet" for FPMM with lastRebalancedAt "0"', () => {
-    const html = renderSinglePool({
-      ...BASE_POOL,
-      source: "fpmm_factory",
-      lastRebalancedAt: "0",
-    });
-    expect(html).toContain("No rebalance events recorded yet");
-  });
-
-  it('shows "VirtualPool — rebalancer not applicable" for VirtualPool', () => {
-    const html = renderSinglePool({
-      ...BASE_POOL,
-      source: "virtual_pool_factory",
-    });
-    expect(html).toContain("VirtualPool \u2014 rebalancer not applicable");
-  });
-});
-
 describe("PoolsTable 24h volume states", () => {
   it("renders loading placeholder while 24h volume is loading", () => {
     const html = renderPoolTableMarkup({ volume24hLoading: true });
@@ -166,18 +142,18 @@ describe("PoolsTable 7d volume states", () => {
   });
 });
 
-describe("PoolsTable source column", () => {
-  it("shows the Source column on networks with virtual pools", () => {
+describe("PoolsTable type column", () => {
+  it("always shows the Type column (unconditional in per-network view)", () => {
     mockNetwork.hasVirtualPools = true;
     const html = renderPoolTableMarkup({});
-    expect(html).toContain(">Source</th>");
+    expect(html).toContain(">Type</th>");
     expect(html).toContain("FPMM");
   });
 
-  it("still shows the Source column on networks without virtual pools", () => {
+  it("always shows the Type column even when hasVirtualPools is false", () => {
     mockNetwork.hasVirtualPools = false;
     const html = renderPoolTableMarkup({});
-    expect(html).toContain(">Source</th>");
+    expect(html).toContain(">Type</th>");
     expect(html).toContain("FPMM");
     mockNetwork.hasVirtualPools = true;
   });

@@ -42,7 +42,7 @@ import GlobalPage from "../page";
 
 const BASE_NETWORK: Network = {
   id: "celo-mainnet",
-  label: "Celo Mainnet",
+  label: "Celo",
   chainId: 42220,
   contractsNamespace: null,
   hasuraUrl: "https://mainnet.example.com/v1/graphql",
@@ -210,7 +210,7 @@ describe("GlobalPage — fees-only failure", () => {
 // ---------------------------------------------------------------------------
 
 describe("GlobalPage — LP query failure", () => {
-  it("shows N/A and failure subtitle when LP query fails", () => {
+  it("shows partial data subtitle when LP query fails on one chain", () => {
     const html = render([
       makeNetworkData({
         uniqueLpCount: null,
@@ -218,8 +218,23 @@ describe("GlobalPage — LP query failure", () => {
       }),
     ]);
     expect(html).toContain("LPs");
-    expect(html).toContain("N/A");
-    expect(html).toContain("Some chains failed to load");
+    // Should still show a number (0) instead of N/A — partial data is better
+    // than no data. The subtitle indicates incomplete results.
+    expect(html).toContain("0");
+    expect(html).not.toContain("N/A");
+    expect(html).toContain("Partial");
+  });
+
+  it("sums LP counts from successful chains even when one fails", () => {
+    const html = render([
+      makeNetworkData({ uniqueLpCount: 42 }),
+      makeNetworkData({
+        uniqueLpCount: null,
+        lpError: new Error("LP aggregate timeout"),
+      }),
+    ]);
+    expect(html).toContain("42");
+    expect(html).toContain("Partial");
   });
 });
 

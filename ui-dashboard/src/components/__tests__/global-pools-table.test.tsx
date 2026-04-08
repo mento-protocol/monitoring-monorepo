@@ -40,7 +40,7 @@ import {
 
 const CELO_NETWORK: Network = {
   id: "celo-mainnet",
-  label: "Celo Mainnet",
+  label: "Celo",
   chainId: 42220,
   contractsNamespace: null,
   hasuraUrl: "https://example.com",
@@ -59,7 +59,7 @@ const CELO_NETWORK: Network = {
 const MONAD_NETWORK: Network = {
   ...CELO_NETWORK,
   id: "monad-mainnet",
-  label: "Monad Mainnet",
+  label: "Monad",
   chainId: 143,
   hasVirtualPools: false,
 };
@@ -118,7 +118,7 @@ describe("GlobalPoolsTable — column structure", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry()]} />,
     );
-    expect(html).toContain("Celo Mainnet");
+    expect(html).toContain("Celo");
     // Pool name: KESm/USDm (USDm is always last)
     expect(html).toContain("KESm");
     expect(html).toContain("USDm");
@@ -137,17 +137,16 @@ describe("GlobalPoolsTable — column structure", () => {
     expect(html).toContain("Total Volume");
     expect(html).toContain("Swaps");
     expect(html).toContain("Rebalances");
-    expect(html).toContain("Rebalancer");
   });
 
-  it("hides Source column when no network has virtual pools", () => {
+  it("hides Type column when no network has virtual pools", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry({}, CELO_NETWORK)]} />,
     );
-    expect(html).not.toContain(">Source</th>");
+    expect(html).not.toContain(">Type</th>");
   });
 
-  it("shows Source column when at least one network has virtual pools", () => {
+  it("shows Type column when at least one network has virtual pools", () => {
     const virtualNetwork: Network = {
       ...CELO_NETWORK,
       hasVirtualPools: true,
@@ -155,7 +154,25 @@ describe("GlobalPoolsTable — column structure", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry({}, virtualNetwork)]} />,
     );
-    expect(html).toContain(">Source</th>");
+    expect(html).toContain(">Type</th>");
+  });
+
+  it("renders FPMM badge for a Monad entry when Type column is visible", () => {
+    const virtualCelo: Network = {
+      ...CELO_NETWORK,
+      hasVirtualPools: true,
+    };
+    const celoEntry = makeEntry({}, virtualCelo);
+    const monadEntry = makeEntry(
+      { id: "monad-pool-1", source: "fpmm_factory" },
+      MONAD_NETWORK,
+    );
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[celoEntry, monadEntry]} />,
+    );
+    expect(html).toContain(">Type</th>");
+    expect(html).toContain("FPMM");
+    expect(html).toContain("Monad");
   });
 });
 
@@ -227,8 +244,8 @@ describe("GlobalPoolsTable — multiple chains", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[celoEntry, monadEntry]} />,
     );
-    expect(html).toContain("Celo Mainnet");
-    expect(html).toContain("Monad Mainnet");
+    expect(html).toContain("Celo");
+    expect(html).toContain("Monad");
   });
 });
 
@@ -284,8 +301,8 @@ describe("sortGlobalPools — chain sort", () => {
       "asc",
       BASE_SORT_CTX,
     );
-    expect(asc[0].network.label).toBe("Celo Mainnet");
-    expect(asc[1].network.label).toBe("Monad Mainnet");
+    expect(asc[0].network.label).toBe("Celo");
+    expect(asc[1].network.label).toBe("Monad");
 
     const desc = sortGlobalPools(
       [celoEntry, monadEntry],
@@ -293,7 +310,7 @@ describe("sortGlobalPools — chain sort", () => {
       "desc",
       BASE_SORT_CTX,
     );
-    expect(desc[0].network.label).toBe("Monad Mainnet");
-    expect(desc[1].network.label).toBe("Celo Mainnet");
+    expect(desc[0].network.label).toBe("Monad");
+    expect(desc[1].network.label).toBe("Celo");
   });
 });
