@@ -8,8 +8,8 @@ import type { Pool } from "@/lib/types";
 // ---------------------------------------------------------------------------
 
 const MOCK_NETWORK: Network = {
-  id: "celo-mainnet-hosted",
-  label: "Celo Mainnet (hosted)",
+  id: "celo-mainnet",
+  label: "Celo Mainnet",
   chainId: 42220,
   contractsNamespace: null,
   hasuraUrl: "https://hasura.example.com/v1/graphql",
@@ -24,8 +24,8 @@ const MOCK_NETWORK: Network = {
 
 const MOCK_NETWORK_2: Network = {
   ...MOCK_NETWORK,
-  id: "celo-sepolia-hosted",
-  label: "Celo Sepolia (hosted)",
+  id: "celo-sepolia",
+  label: "Celo Sepolia",
   chainId: 11142220,
   hasuraUrl: "https://hasura-sepolia.example.com/v1/graphql",
 };
@@ -302,12 +302,12 @@ describe("fetchNetworkData — cross-network isolation", () => {
     // Network 1: success
     expect(result1.error).toBeNull();
     expect(result1.pools).toHaveLength(1);
-    expect(result1.network.id).toBe("celo-mainnet-hosted");
+    expect(result1.network.id).toBe("celo-mainnet");
 
     // Network 2: error, but still returns correct network metadata
     expect(result2.error).toBe(poolsErr);
     expect(result2.pools).toHaveLength(0);
-    expect(result2.network.id).toBe("celo-sepolia-hosted");
+    expect(result2.network.id).toBe("celo-sepolia");
   });
 
   it("network index maps correctly to network metadata on rejection", async () => {
@@ -391,11 +391,11 @@ vi.mock("@/lib/networks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/networks")>();
   return {
     ...actual,
-    NETWORK_IDS: ["celo-mainnet-hosted", "celo-sepolia-hosted"],
+    NETWORK_IDS: ["celo-mainnet", "celo-sepolia"],
     NETWORKS: {
-      "celo-mainnet-hosted": {
-        id: "celo-mainnet-hosted",
-        label: "Celo Mainnet (hosted)",
+      "celo-mainnet": {
+        id: "celo-mainnet",
+        label: "Celo Mainnet",
         chainId: 42220,
         contractsNamespace: null,
         hasuraUrl: "https://mainnet.example.com/v1/graphql",
@@ -407,9 +407,9 @@ vi.mock("@/lib/networks", async (importOriginal) => {
         hasVirtualPools: false,
         testnet: false,
       },
-      "celo-sepolia-hosted": {
-        id: "celo-sepolia-hosted",
-        label: "Celo Sepolia (hosted)",
+      "celo-sepolia": {
+        id: "celo-sepolia",
+        label: "Celo Sepolia",
         chainId: 11142220,
         contractsNamespace: null,
         hasuraUrl: "https://sepolia.example.com/v1/graphql",
@@ -423,7 +423,7 @@ vi.mock("@/lib/networks", async (importOriginal) => {
       },
     },
     isConfiguredNetworkId: (id: string) =>
-      ["celo-mainnet-hosted", "celo-sepolia-hosted"].includes(id),
+      ["celo-mainnet", "celo-sepolia"].includes(id),
   };
 });
 
@@ -440,8 +440,8 @@ describe("fetchAllNetworks — orchestration", () => {
     const results = await fetchAllNetworks();
 
     expect(results).toHaveLength(2);
-    expect(results[0].network.id).toBe("celo-mainnet-hosted");
-    expect(results[1].network.id).toBe("celo-sepolia-hosted");
+    expect(results[0].network.id).toBe("celo-mainnet");
+    expect(results[1].network.id).toBe("celo-sepolia");
   });
 
   it("fulfilled network has correct pools and no error", async () => {
@@ -458,9 +458,7 @@ describe("fetchAllNetworks — orchestration", () => {
     });
 
     const results = await fetchAllNetworks();
-    const mainnet = results.find(
-      (r) => r.network.id === "celo-mainnet-hosted",
-    )!;
+    const mainnet = results.find((r) => r.network.id === "celo-mainnet")!;
 
     expect(mainnet.error).toBeNull();
     expect(mainnet.pools).toHaveLength(1);
@@ -485,11 +483,9 @@ describe("fetchAllNetworks — orchestration", () => {
     });
 
     const results = await fetchAllNetworks();
-    const sepolia = results.find(
-      (r) => r.network.id === "celo-sepolia-hosted",
-    )!;
+    const sepolia = results.find((r) => r.network.id === "celo-sepolia")!;
 
-    expect(sepolia.network.id).toBe("celo-sepolia-hosted");
+    expect(sepolia.network.id).toBe("celo-sepolia");
     expect(sepolia.error).toBe(err);
     expect(sepolia.pools).toHaveLength(0);
   });
@@ -518,12 +514,8 @@ describe("fetchAllNetworks — orchestration", () => {
     });
 
     const results = await fetchAllNetworks();
-    const mainnet = results.find(
-      (r) => r.network.id === "celo-mainnet-hosted",
-    )!;
-    const sepolia = results.find(
-      (r) => r.network.id === "celo-sepolia-hosted",
-    )!;
+    const mainnet = results.find((r) => r.network.id === "celo-mainnet")!;
+    const sepolia = results.find((r) => r.network.id === "celo-sepolia")!;
 
     expect(mainnet.error).toBeNull();
     expect(sepolia.error).not.toBeNull();

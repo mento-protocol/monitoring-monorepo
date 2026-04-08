@@ -35,7 +35,7 @@ https://indexer.hyperindex.xyz/60ff18c/v1/graphql
 https://indexer.hyperindex.xyz/<hash>/v1/graphql
 ```
 
-After a Celo Sepolia redeploy, update `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED` in Vercel via `terraform apply`.
+After a Celo Sepolia redeploy, update `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` in Vercel via `terraform apply`.
 
 ### Deployment Workflow
 
@@ -51,7 +51,7 @@ pnpm deploy:indexer celo-mainnet
 
 ```bash
 pnpm deploy:indexer celo-sepolia
-# After Envio finishes syncing, update hasura_url_celo_sepolia_hosted in
+# After Envio finishes syncing, update hasura_url_celo_sepolia in
 # terraform/terraform.tfvars and run: pnpm infra:apply
 ```
 
@@ -72,7 +72,7 @@ git push origin main:deploy/celo-mainnet
 ### After Redeployment Checklist
 
 1. ✅ Wait for Envio to reach 100% sync (check [envio.dev/app](https://envio.dev/app))
-2. ✅ If Celo Sepolia: get the new GraphQL endpoint URL from the Envio dashboard, update `hasura_url_celo_sepolia_hosted` in `terraform/terraform.tfvars`, run `pnpm infra:apply`
+2. ✅ If Celo Sepolia: get the new GraphQL endpoint URL from the Envio dashboard, update `hasura_url_celo_sepolia` in `terraform/terraform.tfvars`, run `pnpm infra:apply`
 3. ✅ Trigger a Vercel redeploy (or wait for next push to `main`)
 4. ✅ Verify monitoring.mento.org loads data
 
@@ -107,15 +107,14 @@ pnpm infra:apply   # apply changes
 
 All env vars are managed by Terraform (set for `production` and `preview` targets). Do not edit them manually in the Vercel dashboard.
 
-| Variable                                      | Source             | Description                              |
-| --------------------------------------------- | ------------------ | ---------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_HOSTED`  | `terraform.tfvars` | Hasura endpoint — Celo Mainnet (hosted)  |
-| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_HOSTED`  | `terraform.tfvars` | Hasura endpoint — Celo Sepolia (hosted)  |
-| `NEXT_PUBLIC_HASURA_URL_MONAD_MAINNET_HOSTED` | `terraform.tfvars` | Hasura endpoint — Monad Mainnet (hosted) |
-| `NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET_HOSTED` | `terraform.tfvars` | Hasura endpoint — Monad Testnet (hosted) |
-| `UPSTASH_REDIS_REST_URL`                      | Terraform output   | Address labels Redis — auto-set from DB  |
-| `UPSTASH_REDIS_REST_TOKEN`                    | Terraform output   | Address labels Redis token — auto-set    |
-| `BLOB_READ_WRITE_TOKEN`                       | `terraform.tfvars` | Vercel Blob token for backup cron        |
+| Variable                               | Source             | Description                               |
+| -------------------------------------- | ------------------ | ----------------------------------------- |
+| `NEXT_PUBLIC_HASURA_URL_MULTICHAIN`    | `terraform.tfvars` | Shared multichain endpoint (Celo + Monad) |
+| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`  | `terraform.tfvars` | Hasura endpoint — Celo Sepolia            |
+| `NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET` | `terraform.tfvars` | Hasura endpoint — Monad Testnet           |
+| `UPSTASH_REDIS_REST_URL`               | Terraform output   | Address labels Redis — auto-set from DB   |
+| `UPSTASH_REDIS_REST_TOKEN`             | Terraform output   | Address labels Redis token — auto-set     |
+| `BLOB_READ_WRITE_TOKEN`                | `terraform.tfvars` | Vercel Blob token for backup cron         |
 
 ### Address Book & Backup Cron
 
@@ -212,12 +211,12 @@ Env vars were renamed for multi-chain clarity. If you have an existing `terrafor
 
 ```hcl
 # Old (remove)
-# hasura_url_mainnet_hosted  = "..."
-# hasura_url_sepolia_hosted  = "..."
+# hasura_url_mainnet  = "..."
+# hasura_url_sepolia  = "..."
 
 # New
-hasura_url_celo_mainnet_hosted  = "https://indexer.hyperindex.xyz/60ff18c/v1/graphql"
-hasura_url_celo_sepolia_hosted  = "https://indexer.hyperindex.xyz/fc3170d/v1/graphql"
+hasura_url_celo_mainnet  = "https://indexer.hyperindex.xyz/60ff18c/v1/graphql"
+hasura_url_celo_sepolia  = "https://indexer.hyperindex.xyz/fc3170d/v1/graphql"
 ```
 
 Then run `pnpm infra:apply`. Terraform will replace the old Vercel env vars with the new ones. Brief downtime during apply is expected.
@@ -244,7 +243,7 @@ Check build logs in the Envio dashboard → Build Logs tab. Common issues:
 
 ### Dashboard shows no data after indexer redeploy
 
-The Celo Sepolia endpoint hash changed. Update `hasura_url_celo_sepolia_hosted` in `terraform/terraform.tfvars` and run `pnpm infra:apply`. Vercel will pick up the new env var on the next deploy.
+The Celo Sepolia endpoint hash changed. Update `hasura_url_celo_sepolia` in `terraform/terraform.tfvars` and run `pnpm infra:apply`. Vercel will pick up the new env var on the next deploy.
 
 ### Indexer not syncing
 

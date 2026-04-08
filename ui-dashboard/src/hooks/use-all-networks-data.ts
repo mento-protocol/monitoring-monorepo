@@ -197,11 +197,11 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
 }
 
 /**
- * Fetches pools, 24h snapshots, and protocol fees for ALL configured networks
- * in parallel. Uses Promise.allSettled so one failing network doesn't block
- * others. Sub-query failures (fees, snapshots) are surfaced as per-field errors
- * so the UI can show "N/A" instead of silently reporting $0 or zero volume.
- * Ignores the global network selector — always fetches all chains.
+ * Fetches pools, snapshots (24h/7d/30d), and protocol fees for ALL configured
+ * networks in parallel. Uses Promise.allSettled so one failing network doesn't
+ * block others. Sub-query failures (fees, snapshots) are surfaced as per-field
+ * errors so the UI can show "N/A" instead of silently reporting $0 or zero
+ * volume. Ignores the global network selector — always fetches all chains.
  */
 export function useAllNetworksData(): AllNetworksResult {
   const { data, error, isLoading } = useSWR<NetworkData[]>(

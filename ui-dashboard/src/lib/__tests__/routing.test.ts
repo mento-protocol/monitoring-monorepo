@@ -11,14 +11,14 @@ describe("buildPoolNotFoundDest", () => {
   });
 
   it("preserves ?network= for non-default networks", () => {
-    expect(buildPoolNotFoundDest("celo-sepolia-hosted")).toBe(
-      "/pools?network=celo-sepolia-hosted",
+    expect(buildPoolNotFoundDest("celo-sepolia")).toBe(
+      "/pools?network=celo-sepolia",
     );
   });
 
   it("preserves ?network= for monad mainnet", () => {
-    expect(buildPoolNotFoundDest("monad-mainnet-hosted")).toBe(
-      "/pools?network=monad-mainnet-hosted",
+    expect(buildPoolNotFoundDest("monad-mainnet")).toBe(
+      "/pools?network=monad-mainnet",
     );
   });
 
@@ -60,11 +60,11 @@ describe("buildPoolsFilterUrl", () => {
 
   it("preserves existing params like ?network= from currentParams", () => {
     const url = buildPoolsFilterUrl(
-      new URLSearchParams("network=celo-sepolia-hosted"),
+      new URLSearchParams("network=celo-sepolia"),
       "0xabc",
       25,
     );
-    expect(url).toContain("network=celo-sepolia-hosted");
+    expect(url).toContain("network=celo-sepolia");
     expect(url).toContain("pool=0xabc");
     expect(url).toContain("/pools?");
   });

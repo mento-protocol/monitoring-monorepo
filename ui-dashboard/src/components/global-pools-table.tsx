@@ -17,6 +17,7 @@ import {
 import { combinedTooltip, rebalancerTooltip } from "@/lib/pool-table-utils";
 import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
+import { VolumeInfo } from "@/components/volume-info";
 
 /** A pool entry enriched with its originating network. */
 export type GlobalPoolEntry = {
@@ -323,6 +324,7 @@ export function GlobalPoolsTable({
               className="hidden md:table-cell"
             >
               24h Volume
+              <VolumeInfo />
             </SortableTh>
             <SortableTh
               sortKey="volume7d"
@@ -332,6 +334,7 @@ export function GlobalPoolsTable({
               className="hidden md:table-cell"
             >
               7d Volume
+              <VolumeInfo />
             </SortableTh>
             <SortableTh
               sortKey="totalVolume"
@@ -341,6 +344,7 @@ export function GlobalPoolsTable({
               className="hidden md:table-cell"
             >
               Total Volume
+              <VolumeInfo />
             </SortableTh>
             <SortableTh
               sortKey="swaps"

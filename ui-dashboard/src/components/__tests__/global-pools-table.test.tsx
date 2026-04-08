@@ -39,7 +39,7 @@ import {
 } from "@/components/global-pools-table";
 
 const CELO_NETWORK: Network = {
-  id: "celo-mainnet-hosted",
+  id: "celo-mainnet",
   label: "Celo Mainnet",
   chainId: 42220,
   contractsNamespace: null,
@@ -58,7 +58,7 @@ const CELO_NETWORK: Network = {
 
 const MONAD_NETWORK: Network = {
   ...CELO_NETWORK,
-  id: "monad-mainnet-hosted",
+  id: "monad-mainnet",
   label: "Monad Mainnet",
   chainId: 143,
   hasVirtualPools: false,
@@ -92,7 +92,7 @@ function makeEntry(
 describe("globalPoolKey", () => {
   it("generates network:poolId key", () => {
     const entry = makeEntry({ id: "abc" }, CELO_NETWORK);
-    expect(globalPoolKey(entry)).toBe("celo-mainnet-hosted:abc");
+    expect(globalPoolKey(entry)).toBe("celo-mainnet:abc");
   });
 
   it("produces distinct keys for same pool ID on different chains", () => {
@@ -165,7 +165,7 @@ describe("GlobalPoolsTable — pool detail link", () => {
       <GlobalPoolsTable entries={[makeEntry({ id: "pool-abc" })]} />,
     );
     expect(html).toContain(
-      `/pool/${encodeURIComponent("pool-abc")}?network=celo-mainnet-hosted`,
+      `/pool/${encodeURIComponent("pool-abc")}?network=celo-mainnet`,
     );
   });
 });

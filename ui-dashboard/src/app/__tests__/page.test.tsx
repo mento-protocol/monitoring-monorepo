@@ -41,7 +41,7 @@ import GlobalPage from "../page";
 // ---------------------------------------------------------------------------
 
 const BASE_NETWORK: Network = {
-  id: "celo-mainnet-hosted",
+  id: "celo-mainnet",
   label: "Celo Mainnet",
   chainId: 42220,
   contractsNamespace: null,
@@ -57,7 +57,7 @@ const BASE_NETWORK: Network = {
 
 const NETWORK_2: Network = {
   ...BASE_NETWORK,
-  id: "celo-sepolia-hosted",
+  id: "celo-sepolia",
   label: "Celo Sepolia",
   chainId: 11142220,
 };
@@ -348,8 +348,8 @@ describe("GlobalPage — cross-chain key collision", () => {
     ]);
     expect(capturedProps).not.toBeNull();
     const map = capturedProps!.volume24hByKey as Map<string, number | null>;
-    expect(map.has("celo-mainnet-hosted:0xpool1")).toBe(true);
-    expect(map.has("celo-sepolia-hosted:0xpool1")).toBe(true);
+    expect(map.has("celo-mainnet:0xpool1")).toBe(true);
+    expect(map.has("celo-sepolia:0xpool1")).toBe(true);
     expect(map.size).toBe(2);
   });
 
@@ -365,8 +365,8 @@ describe("GlobalPage — cross-chain key collision", () => {
 
     expect(capturedProps).not.toBeNull();
     const map = capturedProps!.volume24hByKey as Map<string, number | null>;
-    expect(map.has("celo-mainnet-hosted:0xpool1")).toBe(true);
-    expect(map.get("celo-mainnet-hosted:0xpool1")).toBeUndefined();
+    expect(map.has("celo-mainnet:0xpool1")).toBe(true);
+    expect(map.get("celo-mainnet:0xpool1")).toBeUndefined();
   });
 });
 

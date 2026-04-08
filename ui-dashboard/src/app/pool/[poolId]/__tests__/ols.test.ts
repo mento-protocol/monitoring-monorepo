@@ -17,7 +17,7 @@ import type { Network } from "@/lib/networks";
 vi.mock("@/components/network-provider", () => ({
   useNetwork: () => ({
     network: {
-      id: "celo-mainnet-hosted",
+      id: "celo-mainnet",
       label: "Celo Mainnet",
       chainId: 42220,
       hasuraUrl: "https://example.com/graphql",
@@ -265,7 +265,7 @@ describe("selectActiveOlsPool", () => {
 // The inline network object in vi.mock("@/components/network-provider") above
 // must be a literal duplicate. This const is used for prop-based tests below.
 const mockNetwork: Network = {
-  id: "celo-mainnet-hosted",
+  id: "celo-mainnet",
   label: "Celo Mainnet",
   chainId: 42220,
   hasuraUrl: "https://example.com/graphql",
