@@ -41,6 +41,7 @@ export type NetworkData = {
   snapshotsError: Error | null;
   snapshots7dError: Error | null;
   snapshots30dError: Error | null;
+  lpError: Error | null;
 };
 
 type AllNetworksResult = {
@@ -64,6 +65,7 @@ const emptyNetworkData = (network: Network, error: Error): NetworkData => ({
   snapshotsError: null,
   snapshots7dError: null,
   snapshots30dError: null,
+  lpError: null,
 });
 
 /** @internal Exported for testing only. */
@@ -184,6 +186,7 @@ export async function fetchNetworkData(
       snapshots30dResult.status === "rejected"
         ? toError(snapshots30dResult.reason)
         : null,
+    lpError: lpResult.status === "rejected" ? toError(lpResult.reason) : null,
   };
 }
 

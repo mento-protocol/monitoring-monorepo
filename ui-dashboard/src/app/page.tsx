@@ -47,7 +47,7 @@ function GlobalContent() {
     (netData) => netData.snapshots30dError !== null && netData.error === null,
   );
   const anyLpError = networkData.some(
-    (netData) => netData.uniqueLpCount === null && netData.error === null,
+    (netData) => netData.lpError !== null && netData.error === null,
   );
 
   // Aggregate KPIs and per-pool volume maps in a single pass (no duplicate
@@ -286,7 +286,11 @@ function GlobalContent() {
                   ? "N/A"
                   : aggregated.totalUniqueLps.toLocaleString()
             }
-            subtitle="Unique FPMM LP addresses (per-chain)"
+            subtitle={
+              anyLpError
+                ? "Some chains failed to load"
+                : "Unique FPMM LP addresses (per-chain)"
+            }
           />
 
           {/* 6. Swaps */}

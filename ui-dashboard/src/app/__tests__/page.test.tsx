@@ -92,6 +92,7 @@ function makeNetworkData(overrides: Partial<NetworkData> = {}): NetworkData {
     snapshotsError: null,
     snapshots7dError: null,
     snapshots30dError: null,
+    lpError: null,
     ...overrides,
   };
 }
@@ -200,6 +201,24 @@ describe("GlobalPage — fees-only failure", () => {
     const html = render([
       makeNetworkData({ feesError: new Error("fees timeout") }),
     ]);
+    expect(html).toContain("Some chains failed to load");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LP query failure
+// ---------------------------------------------------------------------------
+
+describe("GlobalPage — LP query failure", () => {
+  it("shows N/A and failure subtitle when LP query fails", () => {
+    const html = render([
+      makeNetworkData({
+        uniqueLpCount: null,
+        lpError: new Error("LP aggregate timeout"),
+      }),
+    ]);
+    expect(html).toContain("LPs");
+    expect(html).toContain("N/A");
     expect(html).toContain("Some chains failed to load");
   });
 });

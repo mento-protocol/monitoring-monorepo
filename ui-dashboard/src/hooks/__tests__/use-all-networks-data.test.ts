@@ -302,6 +302,7 @@ describe("fetchNetworkData — LP query failure only", () => {
     expect(result.pools).toHaveLength(1);
     expect(result.fees).not.toBeNull();
     expect(result.uniqueLpCount).toBeNull();
+    expect(result.lpError).toBe(lpErr);
   });
 });
 
