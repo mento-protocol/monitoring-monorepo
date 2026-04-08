@@ -22,7 +22,11 @@ import {
   isValidAddress,
   normalizePoolIdForChain,
 } from "@/lib/format";
-import { buildPoolNameMap, tokenSymbol } from "@/lib/tokens";
+import {
+  buildPoolNameMap,
+  tokenSymbol,
+  buildOracleRateMap,
+} from "@/lib/tokens";
 import {
   snapshotWindow24h,
   snapshotWindow7d,
@@ -86,12 +90,15 @@ function HomeContent() {
     [olsData],
   );
 
+  const pools = poolsData?.Pool ?? [];
+  const rates = useMemo(
+    () => buildOracleRateMap(pools, network),
+    [pools, network],
+  );
+
   // Volume snapshots — derive both windows from a single timestamp so the
   // 24h and 7d columns always share the same `to` bucket.
-  const poolIds = useMemo(
-    () => (poolsData?.Pool ?? []).map((p) => p.id),
-    [poolsData],
-  );
+  const poolIds = useMemo(() => pools.map((p) => p.id), [pools]);
   const now = Date.now();
   const snapshotWindow = snapshotWindow24h(now);
   const {
@@ -103,16 +110,18 @@ function HomeContent() {
     { from: snapshotWindow.from, to: snapshotWindow.to, poolIds },
     SNAPSHOT_REFRESH_MS,
   );
+
   const volume24h = useMemo(
     () =>
       snapshotData
         ? buildPoolVolumeMap(
             snapshotData.PoolSnapshot ?? [],
-            poolsData?.Pool ?? [],
+            pools,
             network,
+            rates,
           )
         : undefined,
-    [snapshotData, poolsData, network],
+    [snapshotData, pools, network, rates],
   );
 
   const snapshotWindow7 = snapshotWindow7d(now);
@@ -130,11 +139,12 @@ function HomeContent() {
       snapshot7dData
         ? buildPoolVolumeMap(
             snapshot7dData.PoolSnapshot ?? [],
-            poolsData?.Pool ?? [],
+            pools,
             network,
+            rates,
           )
         : undefined,
-    [snapshot7dData, poolsData, network],
+    [snapshot7dData, pools, network, rates],
   );
 
   const normalizedPoolFilter = poolFilter
@@ -160,7 +170,6 @@ function HomeContent() {
     isLoading: swapsLoading,
   } = useGQL<{ SwapEvent: SwapEvent[] }>(swapQuery, swapVars);
 
-  const pools = poolsData?.Pool ?? [];
   const swaps = swapsData?.SwapEvent ?? [];
   const poolNames = buildPoolNameMap(network, pools);
   const poolMap = Object.fromEntries(pools.map((p) => [p.id, p]));
@@ -245,6 +254,7 @@ function HomeContent() {
             )}
             <PoolsTable
               pools={pools}
+              rates={rates}
               volume24h={volume24h}
               volume24hLoading={snapshotLoading}
               volume24hError={!!snapshotErr}

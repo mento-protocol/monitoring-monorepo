@@ -76,8 +76,8 @@ function GlobalContent() {
         anyFeesError || anyNetworkError ? null : 0;
       let totalFees30d: number | null =
         anyFeesError || anyNetworkError ? null : 0;
-      let totalUniqueLps: number | null =
-        anyLpError || anyNetworkError ? null : 0;
+      let totalUniqueLps: number | null = anyNetworkError ? null : 0;
+      let hasSuccessfulLpResult = false;
       const unpricedSymbolSet = new Set<string>();
       let isTruncated = false;
       let totalUnresolvedCount = 0;
@@ -98,7 +98,7 @@ function GlobalContent() {
         // All-time volume & swaps from pool-level counters
         if (totalVolumeAllTime !== null) {
           for (const pool of pools) {
-            const v = poolTotalVolumeUSD(pool, network);
+            const v = poolTotalVolumeUSD(pool, network, netData.rates);
             if (typeof v === "number") totalVolumeAllTime += v;
           }
         }
@@ -113,15 +113,15 @@ function GlobalContent() {
         // both KPI totals and per-pool table columns below.
         const vol24hMap =
           netData.snapshotsError === null
-            ? buildPoolVolumeMap(snapshots, pools, network)
+            ? buildPoolVolumeMap(snapshots, pools, network, netData.rates)
             : null;
         const vol7dMap =
           netData.snapshots7dError === null
-            ? buildPoolVolumeMap(snapshots7d, pools, network)
+            ? buildPoolVolumeMap(snapshots7d, pools, network, netData.rates)
             : null;
         const vol30dMap =
           netData.snapshots30dError === null
-            ? buildPoolVolumeMap(snapshots30d, pools, network)
+            ? buildPoolVolumeMap(snapshots30d, pools, network, netData.rates)
             : null;
 
         if (vol24hMap && totalVolume24h !== null) {
@@ -136,7 +136,11 @@ function GlobalContent() {
 
         // Store per-pool volume for the table columns
         for (const pool of pools) {
-          const entry: GlobalPoolEntry = { pool, network };
+          const entry: GlobalPoolEntry = {
+            pool,
+            network,
+            rates: netData.rates,
+          };
           allEntries.push(entry);
           const key = globalPoolKey(entry);
           allVol24h.set(key, vol24hMap ? vol24hMap.get(pool.id) : null);
@@ -154,10 +158,16 @@ function GlobalContent() {
           if (fees.isTruncated) isTruncated = true;
         }
 
-        // LP count
+        // LP count — accumulate from successful chains
         if (netData.uniqueLpCount !== null && totalUniqueLps !== null) {
           totalUniqueLps += netData.uniqueLpCount;
+          hasSuccessfulLpResult = true;
         }
+      }
+
+      // Show N/A only when no chain contributed a successful LP result
+      if (!hasSuccessfulLpResult && anyLpError) {
+        totalUniqueLps = null;
       }
 
       return {
@@ -190,7 +200,6 @@ function GlobalContent() {
       anySnapshots7dError,
       anySnapshots30dError,
       anyFeesError,
-      anyLpError,
     ]);
 
   // Networks that failed at the top level — show an error notice per chain
@@ -214,7 +223,6 @@ function GlobalContent() {
       <section>
         <h2 className="text-lg font-semibold text-white mb-3">Summary</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          {/* 1. Volume */}
           <BreakdownTile
             label="Volume"
             total={aggregated.totalVolumeAllTime}
@@ -231,7 +239,6 @@ function GlobalContent() {
             format={formatUSD}
           />
 
-          {/* 2. TVL */}
           <Tile
             label="TVL (FPMMs)"
             value={isLoading ? "…" : formatUSD(aggregated.totalTvl)}
@@ -240,7 +247,6 @@ function GlobalContent() {
             }
           />
 
-          {/* 3. Swap Fees (Total) */}
           <BreakdownTile
             label="Swap Fees"
             total={aggregated.totalFeesAllTime}
@@ -263,7 +269,6 @@ function GlobalContent() {
             }
           />
 
-          {/* 4. Pools */}
           <Tile
             label="Total Pools"
             value={isLoading ? "…" : String(aggregated.totalPools)}
@@ -276,7 +281,6 @@ function GlobalContent() {
             }
           />
 
-          {/* 5. LPs */}
           <Tile
             label="LPs"
             value={
@@ -288,12 +292,11 @@ function GlobalContent() {
             }
             subtitle={
               anyLpError
-                ? "Some chains failed to load"
+                ? "Partial — some chains failed to load"
                 : "Unique FPMM LP addresses (per-chain)"
             }
           />
 
-          {/* 6. Swaps */}
           <Tile
             label="Swaps"
             value={
@@ -308,7 +311,6 @@ function GlobalContent() {
         </div>
       </section>
 
-      {/* Per-chain error notices — shown when a chain fails at the top level */}
       {failedNetworks.map((net) => (
         <ErrorBox
           key={net.network.id}
@@ -316,7 +318,6 @@ function GlobalContent() {
         />
       ))}
 
-      {/* Unified global pool table sorted by TVL descending */}
       <section>
         <h2 className="text-lg font-semibold text-white mb-3">All Pools</h2>
         {isLoading ? (
@@ -400,11 +401,13 @@ function BreakdownTile({
           </p>
         )}
         {subItems && (
-          <div className="mt-1.5 flex gap-3 text-xs text-slate-500 font-mono">
+          <div className="mt-1.5 flex gap-3 text-sm font-mono">
             {subItems.map((s) => (
               <span key={s.label}>
-                <span className="text-slate-600">{s.label}</span>{" "}
-                {s.value === null ? "N/A" : format(s.value)}
+                <span className="text-slate-500">{s.label}</span>{" "}
+                <span className="text-slate-400">
+                  {s.value === null ? "N/A" : format(s.value)}
+                </span>
               </span>
             ))}
           </div>

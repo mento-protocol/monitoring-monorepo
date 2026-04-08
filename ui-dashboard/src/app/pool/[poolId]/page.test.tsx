@@ -55,7 +55,7 @@ vi.mock("@/components/network-provider", () => ({
   useNetwork: () => ({
     network: {
       id: "celo-mainnet",
-      label: "Celo Mainnet",
+      label: "Celo",
       chainId: 42220,
       contractsNamespace: null,
       hasuraUrl: "",

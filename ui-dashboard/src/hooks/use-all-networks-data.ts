@@ -26,7 +26,7 @@ import type {
   PoolSnapshotWindow,
   ProtocolFeeTransfer,
 } from "@/lib/types";
-import { isFpmm } from "@/lib/tokens";
+import { isFpmm, buildOracleRateMap, type OracleRateMap } from "@/lib/tokens";
 
 export type NetworkData = {
   network: Network;
@@ -36,6 +36,7 @@ export type NetworkData = {
   snapshots30d: PoolSnapshotWindow[];
   fees: ProtocolFeeSummary | null;
   uniqueLpCount: number | null;
+  rates: OracleRateMap;
   error: Error | null;
   feesError: Error | null;
   snapshotsError: Error | null;
@@ -60,6 +61,7 @@ const emptyNetworkData = (network: Network, error: Error): NetworkData => ({
   snapshots30d: [],
   fees: null,
   uniqueLpCount: null,
+  rates: new Map(),
   error,
   feesError: null,
   snapshotsError: null,
@@ -140,9 +142,11 @@ export async function fetchNetworkData(
   const toError = (reason: unknown) =>
     reason instanceof Error ? reason : new Error(String(reason));
 
+  const rates = buildOracleRateMap(pools, network);
+
   const fees =
     feesResult.status === "fulfilled"
-      ? aggregateProtocolFees(feesResult.value.ProtocolFeeTransfer ?? [])
+      ? aggregateProtocolFees(feesResult.value.ProtocolFeeTransfer ?? [], rates)
       : null;
 
   const snapshots =
@@ -171,6 +175,7 @@ export async function fetchNetworkData(
     snapshots30d,
     fees,
     uniqueLpCount,
+    rates,
     error: null,
     feesError:
       feesResult.status === "rejected" ? toError(feesResult.reason) : null,

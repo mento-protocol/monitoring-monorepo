@@ -9,9 +9,14 @@ import {
   snapshotWindow30d,
   sumFpmmSwaps,
 } from "../volume";
+import type { OracleRateMap } from "../tokens";
 import type { Pool, PoolSnapshotWindow } from "../types";
 
 const network = NETWORKS["celo-sepolia-local"];
+const mainnet = NETWORKS["celo-mainnet"];
+
+const EMPTY_RATES: OracleRateMap = new Map();
+const EUR_RATES: OracleRateMap = new Map([["axlEUROC", 1.1455]]);
 
 describe("snapshotWindow24h", () => {
   it("returns a bounded 24h hourly window", () => {
@@ -121,7 +126,12 @@ describe("buildPoolVolumeMap", () => {
       },
     ];
 
-    const volumeByPool = buildPoolVolumeMap(snapshots, pools, network);
+    const volumeByPool = buildPoolVolumeMap(
+      snapshots,
+      pools,
+      network,
+      EMPTY_RATES,
+    );
     expect(volumeByPool.get("pool-1")).toBeCloseTo(2, 8);
   });
 
@@ -152,11 +162,60 @@ describe("buildPoolVolumeMap", () => {
       },
     ];
 
-    const volumeByPool = buildPoolVolumeMap(snapshots, pools, network);
+    const volumeByPool = buildPoolVolumeMap(
+      snapshots,
+      pools,
+      network,
+      EMPTY_RATES,
+    );
     expect(volumeByPool.get("pool-2")).toBeCloseTo(1, 8);
   });
 
-  it("marks volume as non-convertible when pool has no USDm leg", () => {
+  it("converts snapshot volume via FX rate for non-USDm pool (e.g. axlEUROC/EURm)", () => {
+    const pools: Pool[] = [
+      {
+        id: "pool-eur",
+        chainId: 42220,
+        token0: "0x061cc5a2c863e0c1cb404006d559db18a34c762d", // axlEUROC
+        token1: "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73", // EURm
+        token0Decimals: 6,
+        token1Decimals: 18,
+        oraclePrice: "0",
+        source: "FPMM",
+        createdAtBlock: "0",
+        createdAtTimestamp: "0",
+        updatedAtBlock: "0",
+        updatedAtTimestamp: "0",
+      },
+    ];
+
+    const snapshots: PoolSnapshotWindow[] = [
+      {
+        poolId: "pool-eur",
+        swapVolume0: "50000000", // 50 axlEUROC (6 decimals)
+        swapVolume1: "100000000000000000000", // 100 EURm (18 decimals)
+        swapCount: 3,
+      },
+      {
+        poolId: "pool-eur",
+        swapVolume0: "25000000", // 25 axlEUROC
+        swapVolume1: "50000000000000000000", // 50 EURm
+        swapCount: 1,
+      },
+    ];
+
+    // axlEUROC rate = 1.1455 USD per token
+    // Snapshot volumes: 50 + 25 = 75 axlEUROC → 75 * 1.1455 = 85.9125
+    const volumeByPool = buildPoolVolumeMap(
+      snapshots,
+      pools,
+      mainnet,
+      EUR_RATES,
+    );
+    expect(volumeByPool.get("pool-eur")).toBeCloseTo(85.9125, 2);
+  });
+
+  it("marks volume as non-convertible when neither token has a known USD rate", () => {
     const pools: Pool[] = [
       {
         id: "pool-3",
@@ -183,7 +242,12 @@ describe("buildPoolVolumeMap", () => {
       },
     ];
 
-    const volumeByPool = buildPoolVolumeMap(snapshots, pools, network);
+    const volumeByPool = buildPoolVolumeMap(
+      snapshots,
+      pools,
+      network,
+      EMPTY_RATES,
+    );
     expect(volumeByPool.get("pool-3")).toBeNull();
   });
 });
@@ -209,7 +273,7 @@ describe("poolTotalVolumeUSD", () => {
       notionalVolume0: "5000000000000000000", // 5e18 = 5 USDm
       notionalVolume1: "900000000000000000000",
     };
-    expect(poolTotalVolumeUSD(pool, network)).toBeCloseTo(5, 8);
+    expect(poolTotalVolumeUSD(pool, network, EMPTY_RATES)).toBeCloseTo(5, 8);
   });
 
   it("returns volume in USD when token1 is USDm", () => {
@@ -224,10 +288,10 @@ describe("poolTotalVolumeUSD", () => {
       notionalVolume0: "900000000000000000000",
       notionalVolume1: "10000000000000000000", // 10e18 = 10 USDm
     };
-    expect(poolTotalVolumeUSD(pool, network)).toBeCloseTo(10, 8);
+    expect(poolTotalVolumeUSD(pool, network, EMPTY_RATES)).toBeCloseTo(10, 8);
   });
 
-  it("returns null when pool has no USDm leg", () => {
+  it("returns null when neither token has a known USD rate", () => {
     const pool: Pool = {
       ...BASE_POOL_FIELDS,
       id: "pool-3",
@@ -239,7 +303,24 @@ describe("poolTotalVolumeUSD", () => {
       notionalVolume0: "1000000000000000000",
       notionalVolume1: "2000000000000000000",
     };
-    expect(poolTotalVolumeUSD(pool, network)).toBeNull();
+    expect(poolTotalVolumeUSD(pool, network, EMPTY_RATES)).toBeNull();
+  });
+
+  it("converts volume via FX rate for non-USDm pools (e.g. axlEUROC/EURm)", () => {
+    const pool: Pool = {
+      ...BASE_POOL_FIELDS,
+      id: "pool-eur",
+      chainId: 42220,
+      token0: "0x061cc5a2c863e0c1cb404006d559db18a34c762d", // axlEUROC
+      token1: "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73", // EURm
+      token0Decimals: 6,
+      token1Decimals: 18,
+      notionalVolume0: "100000000", // 100 axlEUROC (6 decimals)
+      notionalVolume1: "200000000000000000000", // 200 EURm (18 decimals)
+    };
+    // axlEUROC FX rate = 1.1455 USD per EUR token
+    // 100 * 1.1455 = 114.55
+    expect(poolTotalVolumeUSD(pool, mainnet, EUR_RATES)).toBeCloseTo(114.55, 2);
   });
 
   it("returns 0 when pool is USD-convertible but has no recorded volume", () => {
@@ -253,6 +334,6 @@ describe("poolTotalVolumeUSD", () => {
       token1Decimals: 18,
       // notionalVolume0 intentionally absent
     };
-    expect(poolTotalVolumeUSD(pool, network)).toBe(0);
+    expect(poolTotalVolumeUSD(pool, network, EMPTY_RATES)).toBe(0);
   });
 });

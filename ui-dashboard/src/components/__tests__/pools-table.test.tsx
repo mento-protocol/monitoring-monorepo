@@ -80,7 +80,7 @@ const BASE_POOL: Pool = {
 };
 
 function renderSinglePool(pool: Pool): string {
-  return renderToStaticMarkup(<PoolsTable pools={[pool]} />);
+  return renderToStaticMarkup(<PoolsTable pools={[pool]} rates={new Map()} />);
 }
 
 function renderPoolTableMarkup(props: {
@@ -91,32 +91,10 @@ function renderPoolTableMarkup(props: {
   volume7dLoading?: boolean;
   volume7dError?: boolean;
 }): string {
-  return renderToStaticMarkup(<PoolsTable pools={[BASE_POOL]} {...props} />);
+  return renderToStaticMarkup(
+    <PoolsTable pools={[BASE_POOL]} rates={new Map()} {...props} />,
+  );
 }
-
-describe("PoolsTable rebalancer tooltip", () => {
-  it('shows "No rebalance events recorded yet" for FPMM with no lastRebalancedAt', () => {
-    const html = renderSinglePool({ ...BASE_POOL, source: "fpmm_factory" });
-    expect(html).toContain("No rebalance events recorded yet");
-  });
-
-  it('shows "No rebalance events recorded yet" for FPMM with lastRebalancedAt "0"', () => {
-    const html = renderSinglePool({
-      ...BASE_POOL,
-      source: "fpmm_factory",
-      lastRebalancedAt: "0",
-    });
-    expect(html).toContain("No rebalance events recorded yet");
-  });
-
-  it('shows "VirtualPool — rebalancer not applicable" for VirtualPool', () => {
-    const html = renderSinglePool({
-      ...BASE_POOL,
-      source: "virtual_pool_factory",
-    });
-    expect(html).toContain("VirtualPool \u2014 rebalancer not applicable");
-  });
-});
 
 describe("PoolsTable 24h volume states", () => {
   it("renders loading placeholder while 24h volume is loading", () => {
@@ -166,18 +144,18 @@ describe("PoolsTable 7d volume states", () => {
   });
 });
 
-describe("PoolsTable source column", () => {
-  it("shows the Source column on networks with virtual pools", () => {
+describe("PoolsTable type column", () => {
+  it("always shows the Type column (unconditional in per-network view)", () => {
     mockNetwork.hasVirtualPools = true;
     const html = renderPoolTableMarkup({});
-    expect(html).toContain(">Source</th>");
+    expect(html).toContain(">Type</th>");
     expect(html).toContain("FPMM");
   });
 
-  it("still shows the Source column on networks without virtual pools", () => {
+  it("always shows the Type column even when hasVirtualPools is false", () => {
     mockNetwork.hasVirtualPools = false;
     const html = renderPoolTableMarkup({});
-    expect(html).toContain(">Source</th>");
+    expect(html).toContain(">Type</th>");
     expect(html).toContain("FPMM");
     mockNetwork.hasVirtualPools = true;
   });
@@ -186,9 +164,9 @@ describe("PoolsTable source column", () => {
 describe("PoolsTable column structure", () => {
   it("renders the new column headers and omits removed ones", () => {
     const html = renderPoolTableMarkup({});
-    expect(html).toContain("24h Volume");
-    expect(html).toContain("7d Volume");
-    expect(html).toContain("Total Volume");
+    expect(html).toContain("24h Vol.");
+    expect(html).toContain("7d Vol.");
+    expect(html).toContain("Total Vol.");
     expect(html).toContain("Swaps");
     expect(html).toContain("Rebalances");
     // Removed columns
@@ -262,7 +240,7 @@ describe("PoolsTable weekend banner", () => {
   });
 });
 
-describe("PoolsTable Total Volume column", () => {
+describe("PoolsTable Total Vol. column", () => {
   it("shows formatted USD for a pool with USDm as token0", () => {
     const html = renderSinglePool({
       ...BASE_POOL,

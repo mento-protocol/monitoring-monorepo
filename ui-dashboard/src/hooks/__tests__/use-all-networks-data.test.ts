@@ -9,7 +9,7 @@ import type { Pool } from "@/lib/types";
 
 const MOCK_NETWORK: Network = {
   id: "celo-mainnet",
-  label: "Celo Mainnet",
+  label: "Celo",
   chainId: 42220,
   contractsNamespace: null,
   hasuraUrl: "https://hasura.example.com/v1/graphql",
@@ -448,7 +448,7 @@ vi.mock("@/lib/networks", async (importOriginal) => {
     NETWORKS: {
       "celo-mainnet": {
         id: "celo-mainnet",
-        label: "Celo Mainnet",
+        label: "Celo",
         chainId: 42220,
         contractsNamespace: null,
         hasuraUrl: "https://mainnet.example.com/v1/graphql",
