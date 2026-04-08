@@ -397,7 +397,7 @@ function BreakdownTile({
             {subItems.map((s) => (
               <span key={s.label}>
                 <span className="text-slate-500">{s.label}</span>{" "}
-                <span className="text-slate-200">
+                <span className="text-slate-400">
                   {s.value === null ? "N/A" : format(s.value)}
                 </span>
               </span>
