@@ -1,9 +1,19 @@
 import { describe, it, expect } from "vitest";
-import { tokenSymbol, poolName, poolTvlUSD } from "../tokens";
+import {
+  tokenSymbol,
+  poolName,
+  poolTvlUSD,
+  buildOracleRateMap,
+} from "../tokens";
 import { NETWORKS } from "../networks";
 
 const sepolia = NETWORKS["celo-sepolia-local"];
+const mainnet = NETWORKS["celo-mainnet"];
 const devnet = NETWORKS.devnet;
+
+// Mainnet token addresses (from @mento-protocol/contracts)
+const USDM_MAINNET = "0x765de816845861e75a25fca122bb6898b8b1282a";
+const KESM_MAINNET = "0x456a3d042c0dbd3db53d5489e98dfb038553b0d0";
 
 describe("tokenSymbol", () => {
   it("resolves known Sepolia token", () => {
@@ -143,5 +153,151 @@ describe("poolTvlUSD", () => {
     );
 
     expect(tvl).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildOracleRateMap
+// ---------------------------------------------------------------------------
+describe("buildOracleRateMap", () => {
+  // 1e24 raw = feedVal 1.0
+  const ORACLE_1e24 = "1000000000000000000000000";
+  // 0.5e24 = feedVal 0.5
+  const ORACLE_HALF = "500000000000000000000000";
+
+  it("extracts rate for token1 when token0 is USDm", () => {
+    const pools = [
+      {
+        token0: USDM_MAINNET,
+        token1: KESM_MAINNET,
+        oraclePrice: ORACLE_HALF,
+        oracleOk: true,
+      },
+    ];
+    const rates = buildOracleRateMap(pools, mainnet);
+    expect(rates.get("KESm")).toBeCloseTo(0.5, 8);
+    expect(rates.has("USDm")).toBe(false);
+  });
+
+  it("extracts rate for token0 when token1 is USDm", () => {
+    const pools = [
+      {
+        token0: KESM_MAINNET,
+        token1: USDM_MAINNET,
+        oraclePrice: ORACLE_HALF,
+        oracleOk: true,
+      },
+    ];
+    const rates = buildOracleRateMap(pools, mainnet);
+    expect(rates.get("KESm")).toBeCloseTo(0.5, 8);
+  });
+
+  it("skips pool when oracleOk is false", () => {
+    const pools = [
+      {
+        token0: USDM_MAINNET,
+        token1: KESM_MAINNET,
+        oraclePrice: ORACLE_1e24,
+        oracleOk: false,
+      },
+    ];
+    const rates = buildOracleRateMap(pools, mainnet);
+    expect(rates.size).toBe(0);
+  });
+
+  it('skips pool when oraclePrice is "0"', () => {
+    const pools = [
+      {
+        token0: USDM_MAINNET,
+        token1: KESM_MAINNET,
+        oraclePrice: "0",
+        oracleOk: true,
+      },
+    ];
+    const rates = buildOracleRateMap(pools, mainnet);
+    expect(rates.size).toBe(0);
+  });
+
+  it("skips pool when oraclePrice is missing/falsy", () => {
+    const pools = [
+      {
+        token0: USDM_MAINNET,
+        token1: KESM_MAINNET,
+        oraclePrice: undefined,
+        oracleOk: true,
+      },
+      {
+        token0: USDM_MAINNET,
+        token1: KESM_MAINNET,
+        oraclePrice: "",
+        oracleOk: true,
+      },
+    ];
+    const rates = buildOracleRateMap(pools, mainnet);
+    expect(rates.size).toBe(0);
+  });
+
+  it("skips pool when feedVal is non-positive or non-finite", () => {
+    const pools = [
+      {
+        token0: USDM_MAINNET,
+        token1: KESM_MAINNET,
+        oraclePrice: "-1000000000000000000000000",
+        oracleOk: true,
+      },
+      {
+        token0: USDM_MAINNET,
+        token1: KESM_MAINNET,
+        oraclePrice: "not-a-number",
+        oracleOk: true,
+      },
+    ];
+    const rates = buildOracleRateMap(pools, mainnet);
+    expect(rates.size).toBe(0);
+  });
+
+  it("neither token rated when both are USDm", () => {
+    const pools = [
+      {
+        token0: USDM_MAINNET,
+        token1: USDM_MAINNET,
+        oraclePrice: ORACLE_1e24,
+        oracleOk: true,
+      },
+    ];
+    const rates = buildOracleRateMap(pools, mainnet);
+    expect(rates.size).toBe(0);
+  });
+
+  it("last pool wins when two pools map the same symbol", () => {
+    const pools = [
+      {
+        token0: USDM_MAINNET,
+        token1: KESM_MAINNET,
+        oraclePrice: ORACLE_HALF,
+        oracleOk: true,
+      },
+      {
+        token0: USDM_MAINNET,
+        token1: KESM_MAINNET,
+        oraclePrice: ORACLE_1e24,
+        oracleOk: true,
+      },
+    ];
+    const rates = buildOracleRateMap(pools, mainnet);
+    expect(rates.get("KESm")).toBeCloseTo(1.0, 8);
+  });
+
+  it("skips pool with no USDm leg", () => {
+    const pools = [
+      {
+        token0: KESM_MAINNET,
+        token1: "0x0000000000000000000000000000000000000099",
+        oraclePrice: ORACLE_1e24,
+        oracleOk: true,
+      },
+    ];
+    const rates = buildOracleRateMap(pools, mainnet);
+    expect(rates.size).toBe(0);
   });
 });

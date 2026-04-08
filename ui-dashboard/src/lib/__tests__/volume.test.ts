@@ -126,7 +126,12 @@ describe("buildPoolVolumeMap", () => {
       },
     ];
 
-    const volumeByPool = buildPoolVolumeMap(snapshots, pools, network, EMPTY_RATES);
+    const volumeByPool = buildPoolVolumeMap(
+      snapshots,
+      pools,
+      network,
+      EMPTY_RATES,
+    );
     expect(volumeByPool.get("pool-1")).toBeCloseTo(2, 8);
   });
 
@@ -157,8 +162,57 @@ describe("buildPoolVolumeMap", () => {
       },
     ];
 
-    const volumeByPool = buildPoolVolumeMap(snapshots, pools, network, EMPTY_RATES);
+    const volumeByPool = buildPoolVolumeMap(
+      snapshots,
+      pools,
+      network,
+      EMPTY_RATES,
+    );
     expect(volumeByPool.get("pool-2")).toBeCloseTo(1, 8);
+  });
+
+  it("converts snapshot volume via FX rate for non-USDm pool (e.g. axlEUROC/EURm)", () => {
+    const pools: Pool[] = [
+      {
+        id: "pool-eur",
+        chainId: 42220,
+        token0: "0x061cc5a2c863e0c1cb404006d559db18a34c762d", // axlEUROC
+        token1: "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73", // EURm
+        token0Decimals: 6,
+        token1Decimals: 18,
+        oraclePrice: "0",
+        source: "FPMM",
+        createdAtBlock: "0",
+        createdAtTimestamp: "0",
+        updatedAtBlock: "0",
+        updatedAtTimestamp: "0",
+      },
+    ];
+
+    const snapshots: PoolSnapshotWindow[] = [
+      {
+        poolId: "pool-eur",
+        swapVolume0: "50000000", // 50 axlEUROC (6 decimals)
+        swapVolume1: "100000000000000000000", // 100 EURm (18 decimals)
+        swapCount: 3,
+      },
+      {
+        poolId: "pool-eur",
+        swapVolume0: "25000000", // 25 axlEUROC
+        swapVolume1: "50000000000000000000", // 50 EURm
+        swapCount: 1,
+      },
+    ];
+
+    // axlEUROC rate = 1.1455 USD per token
+    // Snapshot volumes: 50 + 25 = 75 axlEUROC → 75 * 1.1455 = 85.9125
+    const volumeByPool = buildPoolVolumeMap(
+      snapshots,
+      pools,
+      mainnet,
+      EUR_RATES,
+    );
+    expect(volumeByPool.get("pool-eur")).toBeCloseTo(85.9125, 2);
   });
 
   it("marks volume as non-convertible when neither token has a known USD rate", () => {
@@ -188,7 +242,12 @@ describe("buildPoolVolumeMap", () => {
       },
     ];
 
-    const volumeByPool = buildPoolVolumeMap(snapshots, pools, network, EMPTY_RATES);
+    const volumeByPool = buildPoolVolumeMap(
+      snapshots,
+      pools,
+      network,
+      EMPTY_RATES,
+    );
     expect(volumeByPool.get("pool-3")).toBeNull();
   });
 });

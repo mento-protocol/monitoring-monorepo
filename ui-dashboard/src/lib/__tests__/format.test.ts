@@ -159,6 +159,10 @@ describe("formatUSD", () => {
     expect(formatUSD(2_100_000)).toBe("$2.1M");
   });
 
+  it("rounds 1.001M down to $1M (documents intentional .00 stripping)", () => {
+    expect(formatUSD(1_001_000)).toBe("$1M");
+  });
+
   it("strips trailing .0 from thousands", () => {
     expect(formatUSD(114_000)).toBe("$114K");
   });

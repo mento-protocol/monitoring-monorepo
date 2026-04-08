@@ -53,10 +53,7 @@ export function _clearFeeTokenMetaCache(): void {
  * Intentionally separate from the dashboard's @mento-protocol/contracts
  * package -- the indexer runs independently and needs a self-contained fallback.
  */
-const KNOWN_TOKEN_META: ReadonlyMap<
-  string,
-  { symbol: string; decimals: number }
-> = new Map([
+const KNOWN_TOKEN_META = new Map<string, { symbol: string; decimals: number }>([
   // Celo Mainnet (42220)
   [
     "42220:0x765de816845861e75a25fca122bb6898b8b1282a",

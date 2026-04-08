@@ -194,9 +194,12 @@ export function PoolsTable({
   const totalVolumeByPoolId = useMemo(
     () =>
       new Map(
-        pools.map((pool) => [pool.id, poolTotalVolumeUSD(pool, network, rates)]),
+        pools.map((pool) => [
+          pool.id,
+          poolTotalVolumeUSD(pool, network, rates),
+        ]),
       ),
-    [pools, network],
+    [pools, network, rates],
   );
 
   const handleSort = (key: SortKey) => {

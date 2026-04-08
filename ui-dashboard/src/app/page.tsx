@@ -76,9 +76,6 @@ function GlobalContent() {
         anyFeesError || anyNetworkError ? null : 0;
       let totalFees30d: number | null =
         anyFeesError || anyNetworkError ? null : 0;
-      // Intentionally only null when a top-level network error occurs.
-      // LP-only failures (lpError) still show partial data (0 + successful chains)
-      // rather than N/A, so users see the best available count.
       let totalUniqueLps: number | null = anyNetworkError ? null : 0;
       const unpricedSymbolSet = new Set<string>();
       let isTruncated = false;
