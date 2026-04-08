@@ -136,7 +136,7 @@ const KNOWN_TOKEN_META = new Map<string, { symbol: string; decimals: number }>([
   // Monad Mainnet (143)
   [
     "143:0x00000000efe302beaa2b3e6e1b18d08d69a9012a",
-    { symbol: "AUSD", decimals: 18 },
+    { symbol: "AUSD", decimals: 6 },
   ],
   [
     "143:0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",

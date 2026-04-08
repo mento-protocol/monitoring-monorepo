@@ -157,10 +157,15 @@ function GlobalContent() {
           if (fees.isTruncated) isTruncated = true;
         }
 
-        // LP count
+        // LP count — accumulate from successful chains
         if (netData.uniqueLpCount !== null && totalUniqueLps !== null) {
           totalUniqueLps += netData.uniqueLpCount;
         }
+      }
+
+      // If every LP query failed (no successful chain contributed), show N/A
+      if (totalUniqueLps === 0 && anyLpError) {
+        totalUniqueLps = null;
       }
 
       return {

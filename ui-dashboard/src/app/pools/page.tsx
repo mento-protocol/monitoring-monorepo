@@ -98,10 +98,7 @@ function HomeContent() {
 
   // Volume snapshots — derive both windows from a single timestamp so the
   // 24h and 7d columns always share the same `to` bucket.
-  const poolIds = useMemo(
-    () => pools.map((p) => p.id),
-    [pools],
-  );
+  const poolIds = useMemo(() => pools.map((p) => p.id), [pools]);
   const now = Date.now();
   const snapshotWindow = snapshotWindow24h(now);
   const {

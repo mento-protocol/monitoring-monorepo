@@ -26,11 +26,7 @@ import type {
   PoolSnapshotWindow,
   ProtocolFeeTransfer,
 } from "@/lib/types";
-import {
-  isFpmm,
-  buildOracleRateMap,
-  type OracleRateMap,
-} from "@/lib/tokens";
+import { isFpmm, buildOracleRateMap, type OracleRateMap } from "@/lib/tokens";
 
 export type NetworkData = {
   network: Network;
@@ -150,10 +146,7 @@ export async function fetchNetworkData(
 
   const fees =
     feesResult.status === "fulfilled"
-      ? aggregateProtocolFees(
-          feesResult.value.ProtocolFeeTransfer ?? [],
-          rates,
-        )
+      ? aggregateProtocolFees(feesResult.value.ProtocolFeeTransfer ?? [], rates)
       : null;
 
   const snapshots =

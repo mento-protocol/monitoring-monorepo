@@ -211,7 +211,7 @@ describe("GlobalPage — fees-only failure", () => {
 // ---------------------------------------------------------------------------
 
 describe("GlobalPage — LP query failure", () => {
-  it("shows partial data subtitle when LP query fails on one chain", () => {
+  it("shows N/A when all LP queries fail", () => {
     const html = render([
       makeNetworkData({
         uniqueLpCount: null,
@@ -219,10 +219,7 @@ describe("GlobalPage — LP query failure", () => {
       }),
     ]);
     expect(html).toContain("LPs");
-    // Should still show a number (0) instead of N/A — partial data is better
-    // than no data. The subtitle indicates incomplete results.
-    expect(html).toContain("0");
-    expect(html).not.toContain("N/A");
+    expect(html).toContain("N/A");
     expect(html).toContain("Partial");
   });
 

@@ -91,7 +91,9 @@ function renderPoolTableMarkup(props: {
   volume7dLoading?: boolean;
   volume7dError?: boolean;
 }): string {
-  return renderToStaticMarkup(<PoolsTable pools={[BASE_POOL]} rates={new Map()} {...props} />);
+  return renderToStaticMarkup(
+    <PoolsTable pools={[BASE_POOL]} rates={new Map()} {...props} />,
+  );
 }
 
 describe("PoolsTable 24h volume states", () => {

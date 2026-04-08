@@ -1,13 +1,28 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { aggregateProtocolFees, PROTOCOL_FEE_QUERY_LIMIT } from "../protocol-fees";
+import {
+  aggregateProtocolFees,
+  PROTOCOL_FEE_QUERY_LIMIT,
+} from "../protocol-fees";
 import { tokenToUSD, type OracleRateMap } from "../tokens";
 import type { ProtocolFeeTransfer } from "../types";
 
 const TEST_RATES: OracleRateMap = new Map([
-  ["cEUR", 1.1455], ["EURm", 1.1455], ["GBPm", 1.3263], ["AUDm", 0.6993],
-  ["CADm", 0.7299], ["CHFm", 1.2674], ["KESm", 0.0077], ["BRLm", 0.1905],
-  ["COPm", 0.00027], ["GHSm", 0.0924], ["JPYm", 0.00627], ["NGNm", 0.00073],
-  ["PHPm", 0.01675], ["XOFm", 0.00175], ["ZARm", 0.0593], ["axlEUROC", 1.1455],
+  ["cEUR", 1.1455],
+  ["EURm", 1.1455],
+  ["GBPm", 1.3263],
+  ["AUDm", 0.6993],
+  ["CADm", 0.7299],
+  ["CHFm", 1.2674],
+  ["KESm", 0.0077],
+  ["BRLm", 0.1905],
+  ["COPm", 0.00027],
+  ["GHSm", 0.0924],
+  ["JPYm", 0.00627],
+  ["NGNm", 0.00073],
+  ["PHPm", 0.01675],
+  ["XOFm", 0.00175],
+  ["ZARm", 0.0593],
+  ["axlEUROC", 1.1455],
 ]);
 
 // ---------------------------------------------------------------------------
