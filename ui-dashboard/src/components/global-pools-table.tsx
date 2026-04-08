@@ -3,26 +3,25 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { formatUSD } from "@/lib/format";
-import { poolName, poolTvlUSD } from "@/lib/tokens";
+import { poolName, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
 import { Table, Row, Th } from "@/components/table";
-import { SourceBadge, HealthBadge, RebalancerBadge } from "@/components/badges";
+import { SourceBadge, HealthBadge } from "@/components/badges";
 import {
   computeHealthStatus,
   computeLimitStatus,
-  computeRebalancerLiveness,
   worstStatus,
 } from "@/lib/health";
-import { combinedTooltip, rebalancerTooltip } from "@/lib/pool-table-utils";
+import { combinedTooltip } from "@/lib/pool-table-utils";
 import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
-import { VolumeInfo } from "@/components/volume-info";
 
-/** A pool entry enriched with its originating network. */
+/** A pool entry enriched with its originating network and oracle rates. */
 export type GlobalPoolEntry = {
   pool: Pool;
   network: Network;
+  rates: OracleRateMap;
 };
 
 export type GlobalSortKey =
@@ -177,7 +176,7 @@ function SortableTh({
   );
 }
 
-/** Whether any network in the entry list has virtual pools (controls Source column visibility). */
+/** Whether any network in the entry list has virtual pools (controls Type column visibility). */
 function hasAnyVirtualPools(entries: GlobalPoolEntry[]): boolean {
   return entries.some((e) => e.network.hasVirtualPools);
 }
@@ -205,7 +204,6 @@ export function GlobalPoolsTable({
   volume7dLoading = false,
   volume7dError = false,
 }: GlobalPoolsTableProps) {
-  const nowSeconds = Math.floor(Date.now() / 1000);
   const [sortKey, setSortKey] = useState<GlobalSortKey>("tvl");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -222,7 +220,7 @@ export function GlobalPoolsTable({
       new Map(
         entries.map((e) => [
           globalPoolKey(e),
-          poolTotalVolumeUSD(e.pool, e.network),
+          poolTotalVolumeUSD(e.pool, e.network, e.rates),
         ]),
       ),
     [entries],
@@ -298,7 +296,7 @@ export function GlobalPoolsTable({
             >
               Chain
             </SortableTh>
-            {showVirtualPoolSource && <Th>Source</Th>}
+            {showVirtualPoolSource && <Th>Type</Th>}
             <SortableTh
               sortKey="health"
               activeSortKey={sortKey}
@@ -323,8 +321,7 @@ export function GlobalPoolsTable({
               onSort={handleSort}
               className="hidden md:table-cell"
             >
-              24h Volume
-              <VolumeInfo />
+              24h Vol.{" "}
             </SortableTh>
             <SortableTh
               sortKey="volume7d"
@@ -333,8 +330,7 @@ export function GlobalPoolsTable({
               onSort={handleSort}
               className="hidden md:table-cell"
             >
-              7d Volume
-              <VolumeInfo />
+              7d Vol.{" "}
             </SortableTh>
             <SortableTh
               sortKey="totalVolume"
@@ -343,8 +339,7 @@ export function GlobalPoolsTable({
               onSort={handleSort}
               className="hidden md:table-cell"
             >
-              Total Volume
-              <VolumeInfo />
+              Total Vol.{" "}
             </SortableTh>
             <SortableTh
               sortKey="swaps"
@@ -366,12 +361,6 @@ export function GlobalPoolsTable({
             >
               Rebalances
             </SortableTh>
-            <th
-              scope="col"
-              className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
-            >
-              Rebalancer
-            </th>
           </tr>
         </thead>
         <tbody>
@@ -381,10 +370,6 @@ export function GlobalPoolsTable({
             const healthStatus = computeHealthStatus(p, network.chainId);
             const limitStatus = p.limitStatus ?? computeLimitStatus(p);
             const effectiveStatus = worstStatus(healthStatus, limitStatus);
-            const rebalancerStatus = computeRebalancerLiveness(
-              { ...p, healthStatus },
-              nowSeconds,
-            );
             const tvl = tvlByKey.get(key) ?? 0;
             const vol24h = volume24hByKey?.get(key);
             const vol7d = volume7dByKey?.get(key);
@@ -406,7 +391,7 @@ export function GlobalPoolsTable({
                 </td>
                 {showVirtualPoolSource && (
                   <td className="px-2 sm:px-4 py-2 sm:py-3">
-                    {network.hasVirtualPools ? (
+                    {p.source ? (
                       <SourceBadge source={p.source} />
                     ) : (
                       <span className="text-slate-600 text-xs">—</span>
@@ -460,11 +445,6 @@ export function GlobalPoolsTable({
                 </td>
                 <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
                   {p.rebalanceCount ?? 0}
-                </td>
-                <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
-                  <span title={rebalancerTooltip(rebalancerStatus)}>
-                    <RebalancerBadge status={rebalancerStatus} />
-                  </span>
                 </td>
               </Row>
             );

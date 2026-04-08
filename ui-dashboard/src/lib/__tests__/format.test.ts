@@ -144,7 +144,31 @@ describe("formatWei", () => {
 // ---------------------------------------------------------------------------
 describe("formatUSD", () => {
   it("switches to millions at the 999.95K rounding boundary", () => {
-    expect(formatUSD(999_950)).toBe("$1.00M");
+    expect(formatUSD(999_950)).toBe("$1M");
+  });
+
+  it("strips trailing .00 from millions", () => {
+    expect(formatUSD(2_000_000)).toBe("$2M");
+  });
+
+  it("keeps non-zero decimals for millions", () => {
+    expect(formatUSD(1_250_000)).toBe("$1.25M");
+  });
+
+  it("strips trailing zero from millions (e.g. $2.10M → $2.1M)", () => {
+    expect(formatUSD(2_100_000)).toBe("$2.1M");
+  });
+
+  it("rounds 1.001M down to $1M (documents intentional .00 stripping)", () => {
+    expect(formatUSD(1_001_000)).toBe("$1M");
+  });
+
+  it("strips trailing .0 from thousands", () => {
+    expect(formatUSD(114_000)).toBe("$114K");
+  });
+
+  it("keeps non-zero decimals for thousands", () => {
+    expect(formatUSD(114_500)).toBe("$114.5K");
   });
 
   it("returns N/A for non-finite values", () => {

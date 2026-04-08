@@ -3,21 +3,19 @@
 import { useMemo, useState } from "react";
 import { NetworkAwareLink } from "@/components/network-aware-link";
 import { formatUSD } from "@/lib/format";
-import { poolName, poolTvlUSD } from "@/lib/tokens";
+import { poolName, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 import type { Pool } from "@/lib/types";
 import { Table, Row, Th } from "@/components/table";
-import { SourceBadge, HealthBadge, RebalancerBadge } from "@/components/badges";
+import { SourceBadge, HealthBadge } from "@/components/badges";
 import {
   computeHealthStatus,
   computeLimitStatus,
-  computeRebalancerLiveness,
   worstStatus,
 } from "@/lib/health";
-import { combinedTooltip, rebalancerTooltip } from "@/lib/pool-table-utils";
+import { combinedTooltip } from "@/lib/pool-table-utils";
 import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
-import { VolumeInfo } from "@/components/volume-info";
 
 export type SortKey =
   | "pool"
@@ -164,6 +162,7 @@ function SortableTh({
 
 interface PoolsTableProps {
   pools: Pool[];
+  rates: OracleRateMap;
   volume24h?: Map<string, number | null>;
   volume24hLoading?: boolean;
   volume24hError?: boolean;
@@ -175,6 +174,7 @@ interface PoolsTableProps {
 
 export function PoolsTable({
   pools,
+  rates,
   volume24h,
   volume24hLoading = false,
   volume24hError = false,
@@ -184,7 +184,6 @@ export function PoolsTable({
   olsPoolIds,
 }: PoolsTableProps) {
   const { network } = useNetwork();
-  const nowSeconds = Math.floor(Date.now() / 1000);
   const [sortKey, setSortKey] = useState<SortKey>("totalVolume");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -195,9 +194,12 @@ export function PoolsTable({
   const totalVolumeByPoolId = useMemo(
     () =>
       new Map(
-        pools.map((pool) => [pool.id, poolTotalVolumeUSD(pool, network)]),
+        pools.map((pool) => [
+          pool.id,
+          poolTotalVolumeUSD(pool, network, rates),
+        ]),
       ),
-    [pools, network],
+    [pools, network, rates],
   );
 
   const handleSort = (key: SortKey) => {
@@ -263,7 +265,7 @@ export function PoolsTable({
             >
               Pool
             </SortableTh>
-            <Th>Source</Th>
+            <Th>Type</Th>
             <SortableTh
               sortKey="health"
               activeSortKey={sortKey}
@@ -288,8 +290,7 @@ export function PoolsTable({
               onSort={handleSort}
               className="hidden md:table-cell"
             >
-              24h Volume
-              <VolumeInfo />
+              24h Vol.{" "}
             </SortableTh>
             <SortableTh
               sortKey="volume7d"
@@ -298,8 +299,7 @@ export function PoolsTable({
               onSort={handleSort}
               className="hidden md:table-cell"
             >
-              7d Volume
-              <VolumeInfo />
+              7d Vol.{" "}
             </SortableTh>
             <SortableTh
               sortKey="totalVolume"
@@ -308,8 +308,7 @@ export function PoolsTable({
               onSort={handleSort}
               className="hidden md:table-cell"
             >
-              Total Volume
-              <VolumeInfo />
+              Total Vol.{" "}
             </SortableTh>
             <SortableTh
               sortKey="swaps"
@@ -331,12 +330,6 @@ export function PoolsTable({
             >
               Rebalances
             </SortableTh>
-            <th
-              scope="col"
-              className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
-            >
-              Rebalancer
-            </th>
             {olsPoolIds && (
               <th
                 scope="col"
@@ -352,10 +345,6 @@ export function PoolsTable({
             const healthStatus = computeHealthStatus(p, network.chainId);
             const limitStatus = p.limitStatus ?? computeLimitStatus(p);
             const effectiveStatus = worstStatus(healthStatus, limitStatus);
-            const rebalancerStatus = computeRebalancerLiveness(
-              { ...p, healthStatus },
-              nowSeconds,
-            );
             const tvl = tvlByPoolId.get(p.id) ?? 0;
             const vol24h = volume24h?.get(p.id);
             const vol7d = volume7d?.get(p.id);
@@ -420,11 +409,6 @@ export function PoolsTable({
                 </td>
                 <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
                   {p.rebalanceCount ?? 0}
-                </td>
-                <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
-                  <span title={rebalancerTooltip(rebalancerStatus)}>
-                    <RebalancerBadge status={rebalancerStatus} />
-                  </span>
                 </td>
                 {olsPoolIds && (
                   <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">

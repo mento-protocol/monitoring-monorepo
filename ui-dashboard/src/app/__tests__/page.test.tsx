@@ -42,7 +42,7 @@ import GlobalPage from "../page";
 
 const BASE_NETWORK: Network = {
   id: "celo-mainnet",
-  label: "Celo Mainnet",
+  label: "Celo",
   chainId: 42220,
   contractsNamespace: null,
   hasuraUrl: "https://mainnet.example.com/v1/graphql",
@@ -87,6 +87,7 @@ function makeNetworkData(overrides: Partial<NetworkData> = {}): NetworkData {
     snapshots30d: [],
     fees: null,
     uniqueLpCount: 0,
+    rates: new Map(),
     error: null,
     feesError: null,
     snapshotsError: null,
@@ -210,7 +211,7 @@ describe("GlobalPage — fees-only failure", () => {
 // ---------------------------------------------------------------------------
 
 describe("GlobalPage — LP query failure", () => {
-  it("shows N/A and failure subtitle when LP query fails", () => {
+  it("shows N/A when all LP queries fail", () => {
     const html = render([
       makeNetworkData({
         uniqueLpCount: null,
@@ -219,7 +220,31 @@ describe("GlobalPage — LP query failure", () => {
     ]);
     expect(html).toContain("LPs");
     expect(html).toContain("N/A");
-    expect(html).toContain("Some chains failed to load");
+    expect(html).toContain("Partial");
+  });
+
+  it("shows 0 when a chain reports 0 LPs and another fails", () => {
+    const html = render([
+      makeNetworkData({ uniqueLpCount: 0 }),
+      makeNetworkData({
+        uniqueLpCount: null,
+        lpError: new Error("LP aggregate timeout"),
+      }),
+    ]);
+    expect(html).not.toContain("N/A");
+    expect(html).toContain("Partial");
+  });
+
+  it("sums LP counts from successful chains even when one fails", () => {
+    const html = render([
+      makeNetworkData({ uniqueLpCount: 42 }),
+      makeNetworkData({
+        uniqueLpCount: null,
+        lpError: new Error("LP aggregate timeout"),
+      }),
+    ]);
+    expect(html).toContain("42");
+    expect(html).toContain("Partial");
   });
 });
 

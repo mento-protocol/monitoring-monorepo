@@ -1,18 +1,24 @@
 import { parseWei } from "./format";
-import { tokenSymbol, USDM_SYMBOLS } from "./tokens";
+import {
+  tokenSymbol,
+  USDM_SYMBOLS,
+  tokenToUSD,
+  type OracleRateMap,
+} from "./tokens";
 import type { Network } from "./networks";
 import type { Pool, PoolSnapshotWindow } from "./types";
 
 /**
  * Compute all-time total volume in USD for a pool.
  *
- * Returns null when the pool has no USD-convertible leg (i.e. neither token
- * is in USDM_SYMBOLS). Returns 0 when the pool is USD-convertible but has no
- * recorded volume yet (notionalVolume fields absent or "0").
+ * Prefers the USDm leg (1:1 USD). Falls back to oracle-rate conversion for
+ * non-USDm tokens (e.g. EURm, axlEUROC). Returns null only when neither
+ * token has a known USD conversion.
  */
 export function poolTotalVolumeUSD(
   pool: Pool,
   network: Network,
+  rates: OracleRateMap,
 ): number | null {
   const sym0 = tokenSymbol(network, pool.token0 ?? null);
   const sym1 = tokenSymbol(network, pool.token1 ?? null);
@@ -22,7 +28,20 @@ export function poolTotalVolumeUSD(
   if (USDM_SYMBOLS.has(sym1)) {
     return parseWei(pool.notionalVolume1 ?? "0", pool.token1Decimals ?? 18);
   }
-  return null;
+  return (
+    volumeViaFxRate(sym0, pool.notionalVolume0, pool.token0Decimals, rates) ??
+    volumeViaFxRate(sym1, pool.notionalVolume1, pool.token1Decimals, rates)
+  );
+}
+
+function volumeViaFxRate(
+  symbol: string,
+  rawVolume: string | undefined,
+  decimals: number | undefined,
+  rates: OracleRateMap,
+): number | null {
+  const amount = parseWei(rawVolume ?? "0", decimals ?? 18);
+  return tokenToUSD(symbol, amount, rates);
 }
 
 const SECONDS_PER_HOUR = 3600;
@@ -72,19 +91,20 @@ export function buildPoolVolumeMap(
   snapshots: PoolSnapshotWindow[],
   pools: Pool[],
   network: Network,
+  rates: OracleRateMap,
 ): Map<string, number | null> {
   const poolById = new Map<string, Pool>(pools.map((pool) => [pool.id, pool]));
   const volumeByPool = new Map<string, number | null>();
 
   for (const pool of pools) {
-    if (!isUsdConvertible(pool, network)) {
+    if (!isUsdConvertible(pool, network, rates)) {
       volumeByPool.set(pool.id, null);
     }
   }
 
   for (const snapshot of snapshots) {
     const pool = poolById.get(snapshot.poolId);
-    const volume = getSnapshotVolumeInUsd(snapshot, pool, network);
+    const volume = getSnapshotVolumeInUsd(snapshot, pool, network, rates);
     const existingVolume = volumeByPool.get(snapshot.poolId);
     if (volume === null) {
       volumeByPool.set(snapshot.poolId, null);
@@ -103,8 +123,9 @@ function getSnapshotVolumeInUsd(
   snapshot: PoolSnapshotWindow,
   pool: Pool | undefined,
   network: Network,
+  rates: OracleRateMap,
 ): number | null {
-  if (!pool || !isUsdConvertible(pool, network)) return null;
+  if (!pool || !isUsdConvertible(pool, network, rates)) return null;
   const sym0 = tokenSymbol(network, pool.token0 ?? null);
   const sym1 = tokenSymbol(network, pool.token1 ?? null);
   if (USDM_SYMBOLS.has(sym0)) {
@@ -113,7 +134,10 @@ function getSnapshotVolumeInUsd(
   if (USDM_SYMBOLS.has(sym1)) {
     return parseWei(snapshot.swapVolume1, pool.token1Decimals ?? 18);
   }
-  return null;
+  return (
+    volumeViaFxRate(sym0, snapshot.swapVolume0, pool.token0Decimals, rates) ??
+    volumeViaFxRate(sym1, snapshot.swapVolume1, pool.token1Decimals, rates)
+  );
 }
 
 export function sumFpmmSwaps(
@@ -128,8 +152,14 @@ export function sumFpmmSwaps(
 function isUsdConvertible(
   pool: Pick<Pool, "token0" | "token1">,
   network: Network,
+  rates: OracleRateMap,
 ): boolean {
   const sym0 = tokenSymbol(network, pool.token0 ?? null);
   const sym1 = tokenSymbol(network, pool.token1 ?? null);
-  return USDM_SYMBOLS.has(sym0) || USDM_SYMBOLS.has(sym1);
+  return (
+    USDM_SYMBOLS.has(sym0) ||
+    USDM_SYMBOLS.has(sym1) ||
+    tokenToUSD(sym0, 1, rates) !== null ||
+    tokenToUSD(sym1, 1, rates) !== null
+  );
 }

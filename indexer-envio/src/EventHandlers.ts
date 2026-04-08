@@ -46,6 +46,7 @@ export {
   _clearBackfilledTokens,
   _clearFeeTokenMetaCache,
   selectStaleTransfers,
+  resolveFeeTokenMeta,
 } from "./feeToken";
 
 // Price math (used by priceDifference.test.ts, decimals.test.ts)
