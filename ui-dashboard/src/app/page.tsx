@@ -20,6 +20,14 @@ export default function GlobalPage() {
   );
 }
 
+function sumVolumeMap(map: Map<string, number | null>): number {
+  let total = 0;
+  for (const v of map.values()) {
+    if (typeof v === "number") total += v;
+  }
+  return total;
+}
+
 function GlobalContent() {
   const { networkData, isLoading } = useAllNetworksData();
 
@@ -39,170 +47,146 @@ function GlobalContent() {
     (netData) => netData.snapshots30dError !== null && netData.error === null,
   );
 
-  // Aggregate KPIs across all networks.
-  const aggregated = useMemo(() => {
-    let totalPools = 0;
-    let totalFpmmPools = 0;
-    let totalTvl = 0;
-    let totalVolumeAllTime: number | null = anyNetworkError ? null : 0;
-    let totalVolume24h: number | null =
-      anySnapshotsError || anyNetworkError ? null : 0;
-    let totalVolume7d: number | null =
-      anySnapshots7dError || anyNetworkError ? null : 0;
-    let totalVolume30d: number | null =
-      anySnapshots30dError || anyNetworkError ? null : 0;
-    let totalSwapsAllTime: number | null = anyNetworkError ? null : 0;
-    let totalFeesAllTime: number | null =
-      anyFeesError || anyNetworkError ? null : 0;
-    let totalFees24h: number | null =
-      anyFeesError || anyNetworkError ? null : 0;
-    let totalFees7d: number | null = anyFeesError || anyNetworkError ? null : 0;
-    let totalFees30d: number | null =
-      anyFeesError || anyNetworkError ? null : 0;
-    let totalUniqueLps: number | null = anyNetworkError ? null : 0;
-    const unpricedSymbolSet = new Set<string>();
-    let isTruncated = false;
-    let totalUnresolvedCount = 0;
+  // Aggregate KPIs and per-pool volume maps in a single pass (no duplicate
+  // buildPoolVolumeMap calls).
+  const { aggregated, globalEntries, volume24hByKey, volume7dByKey } =
+    useMemo(() => {
+      let totalPools = 0;
+      let totalFpmmPools = 0;
+      let totalTvl = 0;
+      const allEntries: GlobalPoolEntry[] = [];
+      const allVol24h = new Map<string, number | null | undefined>();
+      const allVol7d = new Map<string, number | null | undefined>();
+      let totalVolumeAllTime: number | null = anyNetworkError ? null : 0;
+      let totalVolume24h: number | null =
+        anySnapshotsError || anyNetworkError ? null : 0;
+      let totalVolume7d: number | null =
+        anySnapshots7dError || anyNetworkError ? null : 0;
+      let totalVolume30d: number | null =
+        anySnapshots30dError || anyNetworkError ? null : 0;
+      let totalSwapsAllTime: number | null = anyNetworkError ? null : 0;
+      let totalFeesAllTime: number | null =
+        anyFeesError || anyNetworkError ? null : 0;
+      let totalFees24h: number | null =
+        anyFeesError || anyNetworkError ? null : 0;
+      let totalFees7d: number | null =
+        anyFeesError || anyNetworkError ? null : 0;
+      let totalFees30d: number | null =
+        anyFeesError || anyNetworkError ? null : 0;
+      let totalUniqueLps: number | null = anyNetworkError ? null : 0;
+      const unpricedSymbolSet = new Set<string>();
+      let isTruncated = false;
+      let totalUnresolvedCount = 0;
 
-    for (const netData of networkData) {
-      if (netData.error !== null) continue;
+      for (const netData of networkData) {
+        if (netData.error !== null) continue;
 
-      const { network, pools, snapshots, snapshots7d, snapshots30d, fees } =
-        netData;
-      const fpmmPools = pools.filter(isFpmm);
-      totalPools += pools.length;
-      totalFpmmPools += fpmmPools.length;
-      totalTvl += fpmmPools.reduce((sum, p) => sum + poolTvlUSD(p, network), 0);
-
-      // All-time volume & swaps from pool-level counters
-      if (totalVolumeAllTime !== null) {
-        for (const pool of pools) {
-          const v = poolTotalVolumeUSD(pool, network);
-          if (typeof v === "number") totalVolumeAllTime += v;
-        }
-      }
-      if (totalSwapsAllTime !== null) {
-        totalSwapsAllTime += pools.reduce(
-          (sum, p) => sum + (p.swapCount ?? 0),
+        const { network, pools, snapshots, snapshots7d, snapshots30d, fees } =
+          netData;
+        const fpmmPools = pools.filter(isFpmm);
+        totalPools += pools.length;
+        totalFpmmPools += fpmmPools.length;
+        totalTvl += fpmmPools.reduce(
+          (sum, p) => sum + poolTvlUSD(p, network),
           0,
         );
-      }
 
-      // Windowed volume from snapshots
-      if (netData.snapshotsError === null) {
-        const vol24hMap = buildPoolVolumeMap(snapshots, pools, network);
-        if (totalVolume24h !== null) {
-          totalVolume24h += Array.from(vol24hMap.values()).reduce<number>(
-            (sum, v) => (typeof v === "number" ? sum + v : sum),
+        // All-time volume & swaps from pool-level counters
+        if (totalVolumeAllTime !== null) {
+          for (const pool of pools) {
+            const v = poolTotalVolumeUSD(pool, network);
+            if (typeof v === "number") totalVolumeAllTime += v;
+          }
+        }
+        if (totalSwapsAllTime !== null) {
+          totalSwapsAllTime += pools.reduce(
+            (sum, p) => sum + (p.swapCount ?? 0),
             0,
           );
         }
-      }
-      if (netData.snapshots7dError === null) {
-        const vol7dMap = buildPoolVolumeMap(snapshots7d, pools, network);
-        if (totalVolume7d !== null) {
-          totalVolume7d += Array.from(vol7dMap.values()).reduce<number>(
-            (sum, v) => (typeof v === "number" ? sum + v : sum),
-            0,
-          );
+
+        // Windowed volume from snapshots — maps built once, reused for
+        // both KPI totals and per-pool table columns below.
+        const vol24hMap =
+          netData.snapshotsError === null
+            ? buildPoolVolumeMap(snapshots, pools, network)
+            : null;
+        const vol7dMap =
+          netData.snapshots7dError === null
+            ? buildPoolVolumeMap(snapshots7d, pools, network)
+            : null;
+        const vol30dMap =
+          netData.snapshots30dError === null
+            ? buildPoolVolumeMap(snapshots30d, pools, network)
+            : null;
+
+        if (vol24hMap && totalVolume24h !== null) {
+          totalVolume24h += sumVolumeMap(vol24hMap);
+        }
+        if (vol7dMap && totalVolume7d !== null) {
+          totalVolume7d += sumVolumeMap(vol7dMap);
+        }
+        if (vol30dMap && totalVolume30d !== null) {
+          totalVolume30d += sumVolumeMap(vol30dMap);
+        }
+
+        // Store per-pool volume for the table columns
+        for (const pool of pools) {
+          const entry: GlobalPoolEntry = { pool, network };
+          allEntries.push(entry);
+          const key = globalPoolKey(entry);
+          allVol24h.set(key, vol24hMap ? vol24hMap.get(pool.id) : null);
+          allVol7d.set(key, vol7dMap ? vol7dMap.get(pool.id) : null);
+        }
+
+        // Fees
+        if (netData.feesError === null && fees !== null) {
+          if (totalFeesAllTime !== null) totalFeesAllTime += fees.totalFeesUSD;
+          if (totalFees24h !== null) totalFees24h += fees.fees24hUSD;
+          if (totalFees7d !== null) totalFees7d += fees.fees7dUSD;
+          if (totalFees30d !== null) totalFees30d += fees.fees30dUSD;
+          fees.unpricedSymbols.forEach((s) => unpricedSymbolSet.add(s));
+          totalUnresolvedCount += fees.unresolvedCount;
+          if (fees.isTruncated) isTruncated = true;
+        }
+
+        // LP count
+        if (netData.uniqueLpCount !== null && totalUniqueLps !== null) {
+          totalUniqueLps += netData.uniqueLpCount;
         }
       }
-      if (netData.snapshots30dError === null) {
-        const vol30dMap = buildPoolVolumeMap(snapshots30d, pools, network);
-        if (totalVolume30d !== null) {
-          totalVolume30d += Array.from(vol30dMap.values()).reduce<number>(
-            (sum, v) => (typeof v === "number" ? sum + v : sum),
-            0,
-          );
-        }
-      }
 
-      // Fees
-      if (netData.feesError === null && fees !== null) {
-        if (totalFeesAllTime !== null) totalFeesAllTime += fees.totalFeesUSD;
-        if (totalFees24h !== null) totalFees24h += fees.fees24hUSD;
-        if (totalFees7d !== null) totalFees7d += fees.fees7dUSD;
-        if (totalFees30d !== null) totalFees30d += fees.fees30dUSD;
-        fees.unpricedSymbols.forEach((s) => unpricedSymbolSet.add(s));
-        totalUnresolvedCount += fees.unresolvedCount;
-        if (fees.isTruncated) isTruncated = true;
-      }
-
-      // LP count
-      if (netData.uniqueLpCount !== null && totalUniqueLps !== null) {
-        totalUniqueLps += netData.uniqueLpCount;
-      }
-    }
-
-    return {
-      totalPools,
-      totalFpmmPools,
-      totalTvl,
-      totalVolumeAllTime,
-      totalVolume24h,
-      totalVolume7d,
-      totalVolume30d,
-      totalSwapsAllTime,
-      totalFeesAllTime,
-      totalFees24h,
-      totalFees7d,
-      totalFees30d,
-      totalUniqueLps,
-      unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
-      totalUnresolvedCount,
-      isTruncated,
-    };
-  }, [
-    networkData,
-    anyNetworkError,
-    anySnapshotsError,
-    anySnapshots7dError,
-    anySnapshots30dError,
-    anyFeesError,
-  ]);
-
-  // Build a flat list of all pool entries and merged volume maps keyed by
-  // `${network.id}:${pool.id}` to avoid collisions across chains.
-  const { globalEntries, volume24hByKey, volume7dByKey } = useMemo(() => {
-    const entries: GlobalPoolEntry[] = [];
-    const vol24hMap = new Map<string, number | null | undefined>();
-    const vol7dMap = new Map<string, number | null | undefined>();
-
-    for (const netData of networkData) {
-      if (netData.error !== null) continue;
-      const {
-        network,
-        pools,
-        snapshots,
-        snapshots7d,
-        snapshotsError,
-        snapshots7dError,
-      } = netData;
-
-      const perChain24h =
-        snapshotsError === null
-          ? buildPoolVolumeMap(snapshots, pools, network)
-          : null;
-      const perChain7d =
-        snapshots7dError === null
-          ? buildPoolVolumeMap(snapshots7d, pools, network)
-          : null;
-
-      for (const pool of pools) {
-        const entry: GlobalPoolEntry = { pool, network };
-        entries.push(entry);
-        const key = globalPoolKey(entry);
-        vol24hMap.set(key, perChain24h ? perChain24h.get(pool.id) : null);
-        vol7dMap.set(key, perChain7d ? perChain7d.get(pool.id) : null);
-      }
-    }
-
-    return {
-      globalEntries: entries,
-      volume24hByKey: vol24hMap,
-      volume7dByKey: vol7dMap,
-    };
-  }, [networkData]);
+      return {
+        aggregated: {
+          totalPools,
+          totalFpmmPools,
+          totalTvl,
+          totalVolumeAllTime,
+          totalVolume24h,
+          totalVolume7d,
+          totalVolume30d,
+          totalSwapsAllTime,
+          totalFeesAllTime,
+          totalFees24h,
+          totalFees7d,
+          totalFees30d,
+          totalUniqueLps,
+          unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
+          totalUnresolvedCount,
+          isTruncated,
+        },
+        globalEntries: allEntries,
+        volume24hByKey: allVol24h,
+        volume7dByKey: allVol7d,
+      };
+    }, [
+      networkData,
+      anyNetworkError,
+      anySnapshotsError,
+      anySnapshots7dError,
+      anySnapshots30dError,
+      anyFeesError,
+    ]);
 
   // Networks that failed at the top level — show an error notice per chain
   const failedNetworks = networkData.filter((net) => net.error !== null);
@@ -379,7 +363,7 @@ function BreakdownTile({
       : `${totalPrefix}${format(total)}`;
 
   const subItems =
-    !isLoading && total !== null
+    !isLoading && !hasError && total !== null
       ? [
           { label: "24h", value: sub24h },
           { label: "7d", value: sub7d },

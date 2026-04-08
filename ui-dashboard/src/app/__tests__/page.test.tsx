@@ -209,7 +209,7 @@ describe("GlobalPage — fees-only failure", () => {
 // ---------------------------------------------------------------------------
 
 describe("GlobalPage — snapshots-only failure", () => {
-  it("shows N/A for volume/swaps but not for fees", () => {
+  it("shows error subtitle on volume tile but fees still render", () => {
     const html = render([
       makeNetworkData({
         snapshotsError: new Error("snapshots timeout"),
@@ -226,9 +226,11 @@ describe("GlobalPage — snapshots-only failure", () => {
         },
       }),
     ]);
+    // Volume tile shows all-time total (from pool counters) with error subtitle
     expect(html).toContain("Volume");
-    expect(html).toContain("N/A");
-    // All-time fees should still show (not N/A)
+    expect(html).toContain("Some chains failed to load");
+    // Sub-rows (24h/7d/30d) are hidden when hasError is true
+    // Fees should still render normally
     expect(html).toContain("Swap Fees");
   });
 });

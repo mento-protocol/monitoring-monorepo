@@ -53,7 +53,8 @@ export const POOL_SNAPSHOTS_WINDOW = `
         timestamp: { _gte: $from, _lt: $to }
         poolId: { _in: $poolIds }
       }
-      limit: 50000
+      order_by: { timestamp: desc }
+      limit: 100000
     ) {
       poolId
       swapCount
