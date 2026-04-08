@@ -265,8 +265,85 @@ const reservesCache = new Map<string, { reserve0: bigint; reserve1: bigint }>();
 let reservesCacheLastBlock: bigint | undefined;
 
 // ---------------------------------------------------------------------------
+// Block fallback helper
+// ---------------------------------------------------------------------------
+
+/** Matches common RPC error messages indicating the requested block is not
+ * yet available on the node. Different providers emit different messages:
+ * - "block is out of range" (forno.celo.org)
+ * - "block number out of range" (some Geth variants)
+ * - "header not found" (Erigon, some Geth configurations)
+ * - "unknown block" (Nethermind) */
+const BLOCK_NOT_AVAILABLE_RE =
+  /block is out of range|block number out of range|header not found|unknown block/i;
+
+export type BlockFallbackResult = {
+  result: unknown;
+  usedFallback: boolean;
+};
+
+/**
+ * Wrapper around `client.readContract` that retries without `blockNumber` when
+ * the RPC node indicates the requested block is not available. This happens
+ * when HyperSync delivers events faster than the RPC node syncs — reading
+ * latest state is far better than losing the data entirely.
+ *
+ * Returns `{ result, usedFallback }` so callers can skip block-scoped cache
+ * writes when fallback was used (the result is from "latest", not the
+ * requested block).
+ *
+ * Rethrows all other errors so callers handle logging as before.
+ */
+export async function readContractWithBlockFallback(
+  client: ReturnType<typeof createPublicClient>,
+  args: Record<string, unknown>,
+  blockNumber?: bigint,
+): Promise<BlockFallbackResult> {
+  try {
+    const result = await client.readContract({
+      ...args,
+      ...(blockNumber !== undefined && { blockNumber }),
+    } as any);
+    return { result, usedFallback: false };
+  } catch (err) {
+    if (
+      blockNumber !== undefined &&
+      err instanceof Error &&
+      BLOCK_NOT_AVAILABLE_RE.test(err.message)
+    ) {
+      const fn = (args.functionName as string) ?? "unknown";
+      const target = (args.address as string) ?? "unknown";
+      console.warn(
+        `[RPC_BLOCK_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — reading latest instead`,
+      );
+      const result = await client.readContract(args as any);
+      return { result, usedFallback: true };
+    }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Fetch functions
 // ---------------------------------------------------------------------------
+
+function parseRebalancingState(result: unknown): RebalancingState {
+  const r = result as readonly [
+    bigint,
+    bigint,
+    bigint,
+    bigint,
+    boolean,
+    number,
+    bigint,
+  ];
+  return {
+    oraclePriceNumerator: r[0],
+    oraclePriceDenominator: r[1],
+    rebalanceThreshold: Number(r[5]),
+    priceDifference: r[6],
+  };
+}
 
 export async function fetchRebalancingState(
   chainId: number,
@@ -277,29 +354,19 @@ export async function fetchRebalancingState(
   if (_testRebalancingStates.has(testKey)) {
     return _testRebalancingStates.get(testKey) ?? null;
   }
+
   try {
     const client = getRpcClient(chainId);
-    const result = await client.readContract({
-      address: poolAddress as `0x${string}`,
-      abi: FPMM_MINIMAL_ABI,
-      functionName: "getRebalancingState",
-      ...(blockNumber !== undefined && { blockNumber }),
-    });
-    const r = result as readonly [
-      bigint,
-      bigint,
-      bigint,
-      bigint,
-      boolean,
-      number,
-      bigint,
-    ];
-    return {
-      oraclePriceNumerator: r[0],
-      oraclePriceDenominator: r[1],
-      rebalanceThreshold: Number(r[5]),
-      priceDifference: r[6],
-    };
+    const { result } = await readContractWithBlockFallback(
+      client,
+      {
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_MINIMAL_ABI,
+        functionName: "getRebalancingState",
+      },
+      blockNumber,
+    );
+    return parseRebalancingState(result);
   } catch (err) {
     logRpcFailure(
       chainId,
@@ -338,15 +405,20 @@ export async function fetchReserves(
 
   try {
     const client = getRpcClient(chainId);
-    const result = await client.readContract({
-      address: poolAddress as `0x${string}`,
-      abi: FPMM_MINIMAL_ABI,
-      functionName: "getReserves",
-      ...(blockNumber !== undefined && { blockNumber }),
-    });
+    const { result, usedFallback } = await readContractWithBlockFallback(
+      client,
+      {
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_MINIMAL_ABI,
+        functionName: "getReserves",
+      },
+      blockNumber,
+    );
     const r = result as readonly [bigint, bigint, bigint];
     const reserves = { reserve0: r[0], reserve1: r[1] };
-    reservesCache.set(cacheKey, reserves);
+    if (!usedFallback) {
+      reservesCache.set(cacheKey, reserves);
+    }
     return reserves;
   } catch (err) {
     logRpcFailure(chainId, "getReserves", poolAddress, err, blockNumber);
@@ -442,15 +514,20 @@ export async function fetchNumReporters(
 
   try {
     const client = getRpcClient(chainId);
-    const count = await client.readContract({
-      address,
-      abi: SortedOraclesContract.abi,
-      functionName: "numRates",
-      args: [rateFeedID as `0x${string}`],
+    const { result, usedFallback } = await readContractWithBlockFallback(
+      client,
+      {
+        address,
+        abi: SortedOraclesContract.abi,
+        functionName: "numRates",
+        args: [rateFeedID as `0x${string}`],
+      },
       blockNumber,
-    });
-    const value = Number(count);
-    numReportersCache.set(cacheKey, value);
+    );
+    const value = Number(result);
+    if (!usedFallback) {
+      numReportersCache.set(cacheKey, value);
+    }
     return value;
   } catch (err) {
     logRpcFailure(chainId, "numRates", rateFeedID, err, blockNumber);
@@ -481,24 +558,39 @@ export async function fetchReportExpiry(
 
   try {
     const client = getRpcClient(chainId);
-    const tokenExpiry = (await client.readContract({
-      address,
-      abi: SortedOraclesContract.abi,
-      functionName: "tokenReportExpirySeconds",
-      args: [rateFeedID as `0x${string}`],
+    let usedAnyFallback = false;
+    const tokenExpiryRes = await readContractWithBlockFallback(
+      client,
+      {
+        address,
+        abi: SortedOraclesContract.abi,
+        functionName: "tokenReportExpirySeconds",
+        args: [rateFeedID as `0x${string}`],
+      },
       blockNumber,
-    })) as bigint;
-    const expiry: bigint =
-      tokenExpiry > 0n
-        ? tokenExpiry
-        : ((await client.readContract({
-            address,
-            abi: SortedOraclesContract.abi,
-            functionName: "reportExpirySeconds",
-            blockNumber,
-          })) as bigint);
+    );
+    if (tokenExpiryRes.usedFallback) usedAnyFallback = true;
+    const tokenExpiry = tokenExpiryRes.result as bigint;
+    let expiry: bigint;
+    if (tokenExpiry > 0n) {
+      expiry = tokenExpiry;
+    } else {
+      const globalRes = await readContractWithBlockFallback(
+        client,
+        {
+          address,
+          abi: SortedOraclesContract.abi,
+          functionName: "reportExpirySeconds",
+        },
+        blockNumber,
+      );
+      if (globalRes.usedFallback) usedAnyFallback = true;
+      expiry = globalRes.result as bigint;
+    }
     if (expiry <= 0n) return null;
-    reportExpiryCache.set(cacheKey, expiry);
+    if (!usedAnyFallback) {
+      reportExpiryCache.set(cacheKey, expiry);
+    }
     return expiry;
   } catch (err) {
     logRpcFailure(chainId, "reportExpiry", rateFeedID, err, blockNumber);
