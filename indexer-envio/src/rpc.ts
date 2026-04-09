@@ -196,11 +196,21 @@ const RPC_ENV_VAR_BY_CHAIN: Record<number, string> = {
 /**
  * Appends the ENVIO_API_TOKEN to a HyperRPC base URL.
  * HyperRPC requires the token as a path segment: `https://143.rpc.hypersync.xyz/<token>`
- * Returns the URL unchanged if no token is set or the URL is not a HyperRPC endpoint.
+ * Returns the URL unchanged if:
+ * - no token is set
+ * - the URL is not a HyperRPC endpoint
+ * - the URL already contains a path segment (i.e. already tokenized)
  */
-function withHyperRpcToken(url: string): string {
+export function withHyperRpcToken(url: string): string {
   const token = process.env.ENVIO_API_TOKEN;
   if (!token || !url.includes(".rpc.hypersync.xyz")) return url;
+  // Skip if the URL already has a path beyond "/" (already tokenized).
+  try {
+    const parsed = new URL(url);
+    if (parsed.pathname !== "/" && parsed.pathname !== "") return url;
+  } catch {
+    return url;
+  }
   return url.replace(/\/?$/, `/${token}`);
 }
 

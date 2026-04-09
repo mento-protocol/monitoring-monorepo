@@ -14,7 +14,7 @@ All code changes are merged into `main`. No further implementation is needed.
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `shared-config/deployment-namespaces.json`         | Added `143 → mainnet`, `10143 → testnet-v2-rc5`                                                        |
 | `@mento-protocol/contracts`                        | Bumped to **v0.3.0** — ships addresses for both Monad chains                                           |
-| `indexer-envio/src/EventHandlers.ts`               | `DEFAULT_RPC_BY_CHAIN` map — chain 143 → Envio HyperRPC, chain 10143 → Envio HyperRPC                  |
+| `indexer-envio/src/rpc.ts`                         | `DEFAULT_RPC_BY_CHAIN` map — chain 143 → Envio HyperRPC, chain 10143 → Envio HyperRPC                  |
 | `indexer-envio/config.monad.mainnet.yaml`          | Envio config for mainnet, start block 60730000                                                         |
 | `indexer-envio/config.monad.testnet.yaml`          | Envio config for testnet, start block 17932300, 3 pools wired                                          |
 | `ui-dashboard/src/lib/networks.ts`                 | `monad-mainnet` + `monad-testnet` network definitions                                                  |
