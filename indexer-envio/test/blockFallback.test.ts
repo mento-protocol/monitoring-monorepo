@@ -1,6 +1,10 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
-import { readContractWithBlockFallback } from "../src/rpc";
+import {
+  readContractWithBlockFallback,
+  _setDelayFn,
+  _delayFn,
+} from "../src/rpc";
 
 // ---------------------------------------------------------------------------
 // Mock client factory
@@ -24,6 +28,16 @@ describe("readContractWithBlockFallback", () => {
     abi: [],
     functionName: "foo",
   };
+
+  // Replace the delay function with an instant no-op for tests.
+  let originalDelayFn: typeof _delayFn;
+  before(() => {
+    originalDelayFn = _delayFn;
+    _setDelayFn(async () => {});
+  });
+  after(() => {
+    _setDelayFn(originalDelayFn);
+  });
 
   // -------------------------------------------------------------------------
   // Happy path
@@ -60,10 +74,10 @@ describe("readContractWithBlockFallback", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Fallback retry behavior
+  // Retry behavior: retries with original block before falling back
   // -------------------------------------------------------------------------
 
-  it("retries without blockNumber on 'block is out of range', usedFallback=true", async () => {
+  it("retries original block 3 times then falls back to latest, usedFallback=true", async () => {
     let callCount = 0;
     const client = mockClient(async (args) => {
       callCount++;
@@ -75,7 +89,57 @@ describe("readContractWithBlockFallback", () => {
     const res = await readContractWithBlockFallback(client, baseArgs, 100n);
     assert.equal(res.result, "fallback-ok");
     assert.equal(res.usedFallback, true);
+    // 1 initial + 3 retries + 1 fallback (latest) = 5
+    assert.equal(callCount, 5);
+  });
+
+  it("succeeds on second retry without falling back", async () => {
+    let callCount = 0;
+    const client = mockClient(async (args) => {
+      callCount++;
+      if ((args as any).blockNumber !== undefined && callCount < 3) {
+        throw new Error("block is out of range");
+      }
+      return "retry-ok";
+    });
+    const res = await readContractWithBlockFallback(client, baseArgs, 100n);
+    assert.equal(res.result, "retry-ok");
+    assert.equal(res.usedFallback, false);
+    // 1 initial + 1 failed retry + 1 successful retry = 3
+    assert.equal(callCount, 3);
+  });
+
+  it("succeeds on first retry without falling back", async () => {
+    let callCount = 0;
+    const client = mockClient(async (args) => {
+      callCount++;
+      if ((args as any).blockNumber !== undefined && callCount < 2) {
+        throw new Error("block is out of range");
+      }
+      return "retry-ok";
+    });
+    const res = await readContractWithBlockFallback(client, baseArgs, 100n);
+    assert.equal(res.result, "retry-ok");
+    assert.equal(res.usedFallback, false);
+    // 1 initial + 1 successful retry = 2
     assert.equal(callCount, 2);
+  });
+
+  it("tracks delay values passed to the delay function", async () => {
+    const delays: number[] = [];
+    _setDelayFn(async (ms) => {
+      delays.push(ms);
+    });
+    const client = mockClient(async (args) => {
+      if ((args as any).blockNumber !== undefined) {
+        throw new Error("block is out of range");
+      }
+      return "ok";
+    });
+    await readContractWithBlockFallback(client, baseArgs, 100n);
+    assert.deepEqual(delays, [500, 1000, 2000]);
+    // Reset to no-op
+    _setDelayFn(async () => {});
   });
 
   // -------------------------------------------------------------------------
@@ -89,7 +153,7 @@ describe("readContractWithBlockFallback", () => {
     "Header Not Found", // case-insensitive
     "BLOCK IS OUT OF RANGE", // case-insensitive
   ]) {
-    it(`retries on provider variant: "${errorMsg}"`, async () => {
+    it(`retries and falls back on provider variant: "${errorMsg}"`, async () => {
       let callCount = 0;
       const client = mockClient(async (args) => {
         callCount++;
@@ -101,7 +165,8 @@ describe("readContractWithBlockFallback", () => {
       const res = await readContractWithBlockFallback(client, baseArgs, 100n);
       assert.equal(res.result, "ok");
       assert.equal(res.usedFallback, true);
-      assert.equal(callCount, 2);
+      // 1 initial + 3 retries + 1 fallback = 5
+      assert.equal(callCount, 5);
     });
   }
 
@@ -151,7 +216,7 @@ describe("readContractWithBlockFallback", () => {
   // Retry failure propagation
   // -------------------------------------------------------------------------
 
-  it("propagates retry failure", async () => {
+  it("propagates non-block error from fallback (latest) call", async () => {
     let callCount = 0;
     const client = mockClient(async (args) => {
       callCount++;
@@ -164,6 +229,25 @@ describe("readContractWithBlockFallback", () => {
       () => readContractWithBlockFallback(client, baseArgs, 100n),
       { message: "node is down" },
     );
+    // 1 initial + 3 retries + 1 fallback (fails) = 5
+    assert.equal(callCount, 5);
+  });
+
+  it("propagates non-block error that occurs during a retry", async () => {
+    let callCount = 0;
+    const client = mockClient(async (args) => {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error("block is out of range");
+      }
+      // Second call (first retry) throws a different error
+      throw new Error("execution reverted");
+    });
+    await assert.rejects(
+      () => readContractWithBlockFallback(client, baseArgs, 100n),
+      { message: "execution reverted" },
+    );
+    // 1 initial + 1 retry that throws different error = 2
     assert.equal(callCount, 2);
   });
 
@@ -171,7 +255,7 @@ describe("readContractWithBlockFallback", () => {
   // Arg preservation
   // -------------------------------------------------------------------------
 
-  it("preserves all args except blockNumber on retry", async () => {
+  it("preserves all args except blockNumber on fallback", async () => {
     const calls: Record<string, unknown>[] = [];
     const argsWithExtra = {
       address: "0xabc",
@@ -187,14 +271,17 @@ describe("readContractWithBlockFallback", () => {
       return "ok";
     });
     await readContractWithBlockFallback(client, argsWithExtra, 42n);
-    assert.equal(calls.length, 2);
-    // First call: has blockNumber
-    assert.equal((calls[0] as any).blockNumber, 42n);
-    assert.equal((calls[0] as any).functionName, "bar");
-    assert.deepEqual((calls[0] as any).args, ["0xfeed"]);
-    // Retry: no blockNumber, same args
-    assert.equal((calls[1] as any).blockNumber, undefined);
-    assert.equal((calls[1] as any).functionName, "bar");
-    assert.deepEqual((calls[1] as any).args, ["0xfeed"]);
+    // 1 initial + 3 retries (all with blockNumber) + 1 fallback (no blockNumber) = 5
+    assert.equal(calls.length, 5);
+    // First 4 calls: has blockNumber
+    for (let i = 0; i < 4; i++) {
+      assert.equal((calls[i] as any).blockNumber, 42n);
+      assert.equal((calls[i] as any).functionName, "bar");
+      assert.deepEqual((calls[i] as any).args, ["0xfeed"]);
+    }
+    // Fallback: no blockNumber, same args
+    assert.equal((calls[4] as any).blockNumber, undefined);
+    assert.equal((calls[4] as any).functionName, "bar");
+    assert.deepEqual((calls[4] as any).args, ["0xfeed"]);
   });
 });
