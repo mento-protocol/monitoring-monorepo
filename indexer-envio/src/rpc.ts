@@ -209,13 +209,18 @@ export function _clearMockReportExpiry(): void {
 // RPC client management
 // ---------------------------------------------------------------------------
 
-// Lazy RPC clients per chainId
+// Lazy RPC clients per chainId (primary + fallback)
 const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
+const fallbackRpcClients = new Map<
+  number,
+  ReturnType<typeof createPublicClient>
+>();
 
 /** @internal Test-only: clear the cached RPC clients so getRpcClient()
  * re-evaluates URL resolution and fail-fast logic. */
 export function _clearRpcClients(): void {
   rpcClients.clear();
+  fallbackRpcClients.clear();
 }
 
 // Per-chain RPC config for contract reads (eth_call).
@@ -332,6 +337,54 @@ export function getRpcClient(
   return rpcClients.get(chainId)!;
 }
 
+/**
+ * Returns a fallback viem public client for the given chainId.
+ * Uses the hardcoded default RPC (public endpoint) — only created when the
+ * primary client is a different URL (env-var override). Returns null if the
+ * primary already IS the default (no point falling back to the same endpoint).
+ */
+function getFallbackRpcClient(
+  chainId: number,
+): ReturnType<typeof createPublicClient> | null {
+  if (fallbackRpcClients.has(chainId)) {
+    return fallbackRpcClients.get(chainId) ?? null;
+  }
+  const config = RPC_CONFIG_BY_CHAIN[chainId];
+  if (!config) return null;
+
+  const fallbackUrl = withHyperRpcToken(config.default);
+  // Don't create a fallback if it's a bare HyperRPC URL without a token.
+  if (isBareHyperRpcUrl(fallbackUrl)) return null;
+
+  // Check if primary is already using the default — no point falling back to same URL.
+  const perChainOverride = process.env[config.envVar];
+  const legacyGlobal = process.env.ENVIO_RPC_URL;
+  if (!perChainOverride && !legacyGlobal) return null;
+
+  const client = createPublicClient({
+    transport: http(fallbackUrl, { batch: true }),
+  });
+  fallbackRpcClients.set(chainId, client);
+  return client;
+}
+
+// ---------------------------------------------------------------------------
+// Rate limit detection & retry
+// ---------------------------------------------------------------------------
+
+/** Matches common rate-limit error messages from RPC providers. */
+const RATE_LIMIT_RE =
+  /rate limit|request limit reached|too many requests|429|throttl/i;
+
+/** Returns true if the error looks like a rate-limit / 429 response. */
+function isRateLimitError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return RATE_LIMIT_RE.test(err.message);
+}
+
+/** Delays for rate-limit retries before falling back. */
+const RATE_LIMIT_RETRY_DELAYS_MS = [200, 500, 1000];
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -394,9 +447,12 @@ export const _testHooks = {
 };
 
 /**
- * Wrapper around `client.readContract` that retries the original blockNumber
- * with increasing delays, then falls back to reading "latest" when the RPC
- * node indicates the requested block is not yet available.
+ * Wrapper around `client.readContract` that handles two transient failure modes:
+ *
+ * 1. **Rate limits** — retries with backoff, then falls back to a secondary
+ *    (public) RPC client if available.
+ * 2. **Block not available** — retries the original block with backoff, then
+ *    falls back to reading "latest".
  *
  * Returns `{ result, usedFallback }` so callers can skip block-scoped cache
  * writes when fallback was used.
@@ -405,25 +461,59 @@ export async function readContractWithBlockFallback(
   client: ReturnType<typeof createPublicClient>,
   args: Record<string, unknown>,
   blockNumber?: bigint,
+  fallbackClient?: ReturnType<typeof createPublicClient> | null,
 ): Promise<BlockFallbackResult> {
-  const callWithBlock = () =>
-    client.readContract({
+  const makeCall = (c: ReturnType<typeof createPublicClient>, block?: bigint) =>
+    c.readContract({
       ...args,
-      ...(blockNumber !== undefined && { blockNumber }),
+      ...(block !== undefined && { blockNumber: block }),
     } as any);
+
+  const callWithBlock = () => makeCall(client, blockNumber);
+  const fn = (args.functionName as string) ?? "unknown";
+  const target = (args.address as string) ?? "unknown";
 
   try {
     const result = await callWithBlock();
     return { result, usedFallback: false };
   } catch (err) {
+    // --- Rate limit handling: retry then fall back to secondary RPC ---
+    if (isRateLimitError(err)) {
+      for (let i = 0; i < RATE_LIMIT_RETRY_DELAYS_MS.length; i++) {
+        const delay = RATE_LIMIT_RETRY_DELAYS_MS[i];
+        console.debug(
+          `[RPC_RATE_LIMIT_RETRY] fn=${fn} target=${target} retry=${i + 1}/${RATE_LIMIT_RETRY_DELAYS_MS.length} delay=${delay}ms`,
+        );
+        await _testHooks.delayFn(delay);
+        try {
+          const result = await callWithBlock();
+          return { result, usedFallback: false };
+        } catch (retryErr) {
+          if (!isRateLimitError(retryErr)) throw retryErr;
+        }
+      }
+      // Retries exhausted — try fallback client if available.
+      if (fallbackClient) {
+        console.warn(
+          `[RPC_RATE_LIMIT_FALLBACK] fn=${fn} target=${target} — primary rate-limited, using fallback RPC`,
+        );
+        try {
+          const result = await makeCall(fallbackClient, blockNumber);
+          return { result, usedFallback: true };
+        } catch (fallbackErr) {
+          // Fallback also failed — throw the original rate limit error.
+          throw err;
+        }
+      }
+      throw err;
+    }
+
+    // --- Block-not-available handling: retry then read "latest" ---
     if (
       blockNumber !== undefined &&
       err instanceof Error &&
       BLOCK_NOT_AVAILABLE_RE.test(err.message)
     ) {
-      const fn = (args.functionName as string) ?? "unknown";
-      const target = (args.address as string) ?? "unknown";
-
       // Retry the original blockNumber a few times with increasing delays —
       // the RPC node may just be slightly behind HyperSync.
       for (let i = 0; i < BLOCK_RETRY_DELAYS_MS.length; i++) {
@@ -440,10 +530,8 @@ export async function readContractWithBlockFallback(
             !(retryErr instanceof Error) ||
             !BLOCK_NOT_AVAILABLE_RE.test(retryErr.message)
           ) {
-            // Different error during retry — propagate immediately.
             throw retryErr;
           }
-          // Same block-not-available error — continue to next retry or fallback.
         }
       }
 
@@ -451,7 +539,7 @@ export async function readContractWithBlockFallback(
       console.warn(
         `[RPC_BLOCK_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — retries exhausted, reading latest instead`,
       );
-      const result = await client.readContract(args as any);
+      const result = await makeCall(client, undefined);
       return { result, usedFallback: true };
     }
     throw err;
@@ -500,6 +588,7 @@ export async function fetchRebalancingState(
         functionName: "getRebalancingState",
       },
       blockNumber,
+      getFallbackRpcClient(chainId),
     );
     return parseRebalancingState(result);
   } catch (err) {
@@ -548,6 +637,7 @@ export async function fetchReserves(
         functionName: "getReserves",
       },
       blockNumber,
+      getFallbackRpcClient(chainId),
     );
     const r = result as readonly [bigint, bigint, bigint];
     const reserves = { reserve0: r[0], reserve1: r[1] };
@@ -658,6 +748,7 @@ export async function fetchNumReporters(
         args: [rateFeedID as `0x${string}`],
       },
       blockNumber,
+      getFallbackRpcClient(chainId),
     );
     const value = Number(result);
     if (!usedFallback) {
@@ -703,6 +794,7 @@ export async function fetchReportExpiry(
         args: [rateFeedID as `0x${string}`],
       },
       blockNumber,
+      getFallbackRpcClient(chainId),
     );
     if (tokenExpiryRes.usedFallback) usedAnyFallback = true;
     const tokenExpiry = tokenExpiryRes.result as bigint;
@@ -718,6 +810,7 @@ export async function fetchReportExpiry(
           functionName: "reportExpirySeconds",
         },
         blockNumber,
+        getFallbackRpcClient(chainId),
       );
       if (globalRes.usedFallback) usedAnyFallback = true;
       expiry = globalRes.result as bigint;
@@ -793,6 +886,7 @@ export async function fetchTradingLimits(
         args: [token as `0x${string}`],
       },
       blockNumber,
+      getFallbackRpcClient(chainId),
     );
     const result = raw as unknown as [
       { limit0: bigint; limit1: bigint; decimals: number },
