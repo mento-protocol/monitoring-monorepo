@@ -3,6 +3,8 @@
 import { Suspense, useMemo } from "react";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD } from "@/lib/tokens";
+import type { Pool, PoolSnapshotWindow } from "@/lib/types";
+import type { Network } from "@/lib/networks";
 import { buildPoolVolumeMap, poolTotalVolumeUSD } from "@/lib/volume";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
@@ -26,6 +28,37 @@ function sumVolumeMap(map: Map<string, number | null>): number {
     if (typeof v === "number") total += v;
   }
   return total;
+}
+
+/**
+ * Computes the aggregate TVL at the start of a snapshot window by picking the
+ * earliest snapshot per FPMM pool and applying the current oracle price.
+ */
+function historicalTvl(
+  snapshots: PoolSnapshotWindow[],
+  pools: Pool[],
+  network: Network,
+): number {
+  const fpmmMap = new Map(pools.filter(isFpmm).map((p) => [p.id, p]));
+  // Find earliest snapshot per pool (closest to window start)
+  const earliest = new Map<string, PoolSnapshotWindow>();
+  for (const s of snapshots) {
+    if (!fpmmMap.has(s.poolId)) continue;
+    if (!s.reserves0 || !s.timestamp) continue;
+    const existing = earliest.get(s.poolId);
+    if (!existing || Number(s.timestamp) < Number(existing.timestamp)) {
+      earliest.set(s.poolId, s);
+    }
+  }
+  let tvl = 0;
+  for (const [poolId, snap] of earliest) {
+    const pool = fpmmMap.get(poolId)!;
+    tvl += poolTvlUSD(
+      { ...pool, reserves0: snap.reserves0, reserves1: snap.reserves1 },
+      network,
+    );
+  }
+  return tvl;
 }
 
 function GlobalContent() {
@@ -57,6 +90,12 @@ function GlobalContent() {
       let totalPools = 0;
       let totalFpmmPools = 0;
       let totalTvl = 0;
+      let totalTvl24hAgo = 0;
+      let totalTvl7dAgo = 0;
+      let totalTvl30dAgo = 0;
+      let hasTvlSnapshots24h = false;
+      let hasTvlSnapshots7d = false;
+      let hasTvlSnapshots30d = false;
       const allEntries: GlobalPoolEntry[] = [];
       const allVol24h = new Map<string, number | null | undefined>();
       const allVol7d = new Map<string, number | null | undefined>();
@@ -94,6 +133,20 @@ function GlobalContent() {
           (sum, p) => sum + poolTvlUSD(p, network),
           0,
         );
+
+        // Historical TVL from earliest snapshot in each window
+        if (netData.snapshotsError === null && snapshots.length > 0) {
+          totalTvl24hAgo += historicalTvl(snapshots, pools, network);
+          hasTvlSnapshots24h = true;
+        }
+        if (netData.snapshots7dError === null && snapshots7d.length > 0) {
+          totalTvl7dAgo += historicalTvl(snapshots7d, pools, network);
+          hasTvlSnapshots7d = true;
+        }
+        if (netData.snapshots30dError === null && snapshots30d.length > 0) {
+          totalTvl30dAgo += historicalTvl(snapshots30d, pools, network);
+          hasTvlSnapshots30d = true;
+        }
 
         // All-time volume & swaps from pool-level counters
         if (totalVolumeAllTime !== null) {
@@ -185,6 +238,18 @@ function GlobalContent() {
           totalFees7d,
           totalFees30d,
           totalUniqueLps,
+          tvlChange24h:
+            hasTvlSnapshots24h && totalTvl24hAgo > 0
+              ? ((totalTvl - totalTvl24hAgo) / totalTvl24hAgo) * 100
+              : null,
+          tvlChange7d:
+            hasTvlSnapshots7d && totalTvl7dAgo > 0
+              ? ((totalTvl - totalTvl7dAgo) / totalTvl7dAgo) * 100
+              : null,
+          tvlChange30d:
+            hasTvlSnapshots30d && totalTvl30dAgo > 0
+              ? ((totalTvl - totalTvl30dAgo) / totalTvl30dAgo) * 100
+              : null,
           unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
           totalUnresolvedCount,
           isTruncated,
@@ -240,12 +305,13 @@ function GlobalContent() {
             format={formatUSD}
           />
 
-          <Tile
-            label="TVL (FPMMs)"
-            value={isLoading ? "…" : formatUSD(aggregated.totalTvl)}
-            subtitle={
-              anyNetworkError ? "Partial data — some chains failed" : undefined
-            }
+          <TvlTile
+            tvl={aggregated.totalTvl}
+            change24h={aggregated.tvlChange24h}
+            change7d={aggregated.tvlChange7d}
+            change30d={aggregated.tvlChange30d}
+            isLoading={isLoading}
+            hasError={anyNetworkError}
           />
 
           <BreakdownTile
@@ -419,6 +485,76 @@ function BreakdownTile({
         aria-hidden={!subtitle && !hasError}
       >
         {hasError ? "Some chains failed to load" : subtitle}
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// TvlTile — TVL headline with 24h / 7d / 30d percentage change sub-KPIs
+// ---------------------------------------------------------------------------
+
+function formatPctChange(pct: number): string {
+  const sign = pct >= 0 ? "+" : "";
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
+function TvlTile({
+  tvl,
+  change24h,
+  change7d,
+  change30d,
+  isLoading,
+  hasError,
+}: {
+  tvl: number;
+  change24h: number | null;
+  change7d: number | null;
+  change30d: number | null;
+  isLoading: boolean;
+  hasError: boolean;
+}) {
+  const changes = [
+    { label: "24h", value: change24h },
+    { label: "7d", value: change7d },
+    { label: "30d", value: change30d },
+  ];
+  const hasAnyChange =
+    !isLoading && !hasError && changes.some((c) => c.value !== null);
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px]">
+      <div>
+        <p className="text-sm text-slate-400">TVL (FPMMs)</p>
+        <p className="mt-1 text-2xl font-semibold text-white font-mono">
+          {isLoading ? "…" : formatUSD(tvl)}
+        </p>
+        {hasAnyChange && (
+          <div className="mt-1.5 flex gap-3 text-sm font-mono">
+            {changes.map((c) => (
+              <span key={c.label}>
+                <span className="text-slate-500">{c.label}</span>{" "}
+                <span
+                  className={
+                    c.value === null
+                      ? "text-slate-500"
+                      : c.value >= 0
+                        ? "text-emerald-400"
+                        : "text-red-400"
+                  }
+                >
+                  {c.value === null ? "—" : formatPctChange(c.value)}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      <p
+        className="mt-2 text-xs text-slate-500 min-h-4"
+        aria-hidden={!hasError}
+      >
+        {hasError ? "Partial data — some chains failed" : undefined}
       </p>
     </div>
   );
