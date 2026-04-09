@@ -57,6 +57,9 @@ export const POOL_SNAPSHOTS_WINDOW = `
       limit: 100000
     ) {
       poolId
+      timestamp
+      reserves0
+      reserves1
       swapCount
       swapVolume0
       swapVolume1
