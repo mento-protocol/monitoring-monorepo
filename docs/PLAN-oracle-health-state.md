@@ -255,8 +255,12 @@ Envio supports contract calls via the `client` object in handlers. Example patte
 ```typescript
 import { createPublicClient, http } from "viem";
 
+// Note: HyperRPC requires ENVIO_API_TOKEN appended as a path segment.
+// In practice, use getRpcClient() from rpc.ts which handles this automatically.
 const client = createPublicClient({
-  transport: http(process.env.ENVIO_RPC_URL || "https://forno.celo.org"),
+  transport: http(
+    process.env.ENVIO_RPC_URL || "https://42220.rpc.hypersync.xyz",
+  ),
 });
 
 // In handler:

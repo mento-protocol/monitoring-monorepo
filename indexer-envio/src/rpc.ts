@@ -174,11 +174,17 @@ export function _clearMockReportExpiry(): void {
 // Lazy RPC clients per chainId
 const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
 
+/** @internal Test-only: clear the cached RPC clients so getRpcClient()
+ * re-evaluates URL resolution and fail-fast logic. */
+export function _clearRpcClients(): void {
+  rpcClients.clear();
+}
+
 // Per-chain RPC defaults used when no env var override is present.
 const DEFAULT_RPC_BY_CHAIN: Record<number, string> = {
-  42220: "https://forno.celo.org", // Celo Mainnet
-  11142220: "https://forno.celo-sepolia.celo-testnet.org", // Celo Sepolia
-  143: "https://rpc2.monad.xyz", // Monad Mainnet
+  42220: "https://42220.rpc.hypersync.xyz", // Celo Mainnet (Envio HyperRPC)
+  11142220: "https://forno.celo-sepolia.celo-testnet.org", // Celo Sepolia (forno — no HyperSync)
+  143: "https://143.rpc.hypersync.xyz", // Monad Mainnet (Envio HyperRPC)
   10143: "https://10143.rpc.hypersync.xyz", // Monad Testnet (Envio HyperRPC)
 };
 
@@ -194,6 +200,42 @@ const RPC_ENV_VAR_BY_CHAIN: Record<number, string> = {
 };
 
 /**
+ * Appends the ENVIO_API_TOKEN to a HyperRPC base URL.
+ * HyperRPC requires the token as a path segment: `https://143.rpc.hypersync.xyz/<token>`
+ * Returns the URL unchanged if:
+ * - no token is set
+ * - the URL is not a HyperRPC endpoint
+ * - the URL already contains a path segment (i.e. already tokenized)
+ */
+export function withHyperRpcToken(url: string): string {
+  const token = process.env.ENVIO_API_TOKEN;
+  if (!token) return url;
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.endsWith(".rpc.hypersync.xyz")) return url;
+    // Skip if the URL already has a path beyond "/" (already tokenized).
+    if (parsed.pathname !== "/" && parsed.pathname !== "") return url;
+    parsed.pathname = `/${token}`;
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+/** Returns true if the URL is a bare (untokenized) HyperRPC endpoint. */
+function isBarHyperRpcUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.hostname.endsWith(".rpc.hypersync.xyz") &&
+      (parsed.pathname === "/" || parsed.pathname === "")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Returns a viem public client for the given chainId.
  *
  * RPC resolution order (first match wins):
@@ -202,6 +244,9 @@ const RPC_ENV_VAR_BY_CHAIN: Record<number, string> = {
  *    exactly one chain. Do NOT set this in multichain mode — it will route
  *    all chains to the same endpoint, causing incorrect RPC calls.
  * 3. Hardcoded default in DEFAULT_RPC_BY_CHAIN.
+ *
+ * If the resolved URL is a HyperRPC endpoint, the ENVIO_API_TOKEN is
+ * automatically appended as a path segment for authentication.
  */
 export function getRpcClient(
   chainId: number,
@@ -216,10 +261,20 @@ export function getRpcClient(
     }
     // Prefer per-chain env var, then legacy global override, then hardcoded default.
     const perChainEnvVar = RPC_ENV_VAR_BY_CHAIN[chainId];
-    const rpcUrl =
+    const rawUrl =
       (perChainEnvVar && process.env[perChainEnvVar]) ??
       process.env.ENVIO_RPC_URL ??
       defaultRpc;
+    const rpcUrl = withHyperRpcToken(rawUrl);
+
+    // Fail fast if a HyperRPC URL is selected but no token was appended.
+    if (isBarHyperRpcUrl(rpcUrl)) {
+      throw new Error(
+        `[getRpcClient] chainId=${chainId} resolved to HyperRPC (${rawUrl}) ` +
+          `but ENVIO_API_TOKEN is not set. Set it in .env or use a non-HyperRPC ` +
+          `override via ${perChainEnvVar ?? "ENVIO_RPC_URL"}.`,
+      );
+    }
 
     rpcClients.set(
       chainId,
