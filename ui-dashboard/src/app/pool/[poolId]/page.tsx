@@ -1302,10 +1302,6 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
                 <Td>
                   <AddressLink address={position.address} />
                 </Td>
-                <TagsCell
-                  address={position.address}
-                  className="hidden sm:table-cell"
-                />
                 <Td mono small align="right">
                   {fmtTok(tok0, sym0, tok0Usd)}
                 </Td>
