@@ -301,11 +301,13 @@ function PoolDetail() {
   }>(POOL_DEPLOYMENT, { poolId: normalizedPoolId });
   const deployTxHash = deployData?.FactoryDeployment?.[0]?.txHash;
 
-  const { data: olsData } = useGQL<{
+  const { data: olsData, isLoading: olsLoading } = useGQL<{
     OlsPool: OlsPool[];
-  }>(OLS_POOL, { poolId: decodedId });
+  }>(OLS_POOL, { poolId: normalizedPoolId });
   const hasOlsPool = selectActiveOlsPool(olsData?.OlsPool) !== null;
-  const visibleTabs = TABS.filter((t) => t !== "ols" || hasOlsPool);
+  // Keep OLS tab visible while loading so ?tab=ols deep links don't flicker
+  const olsTabVisible = hasOlsPool || olsLoading;
+  const visibleTabs = TABS.filter((t) => t !== "ols" || olsTabVisible);
   const tab = visibleTabs.includes(requestedTab)
     ? requestedTab
     : (visibleTabs[0] ?? "providers");
