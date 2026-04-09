@@ -216,6 +216,19 @@ export function withHyperRpcToken(url: string): string {
   }
 }
 
+/** Returns true if the URL is a bare (untokenized) HyperRPC endpoint. */
+function isBarHyperRpcUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.hostname.endsWith(".rpc.hypersync.xyz") &&
+      (parsed.pathname === "/" || parsed.pathname === "")
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Returns a viem public client for the given chainId.
  *
@@ -242,11 +255,20 @@ export function getRpcClient(
     }
     // Prefer per-chain env var, then legacy global override, then hardcoded default.
     const perChainEnvVar = RPC_ENV_VAR_BY_CHAIN[chainId];
-    const rpcUrl = withHyperRpcToken(
+    const rawUrl =
       (perChainEnvVar && process.env[perChainEnvVar]) ??
-        process.env.ENVIO_RPC_URL ??
-        defaultRpc,
-    );
+      process.env.ENVIO_RPC_URL ??
+      defaultRpc;
+    const rpcUrl = withHyperRpcToken(rawUrl);
+
+    // Fail fast if a HyperRPC URL is selected but no token was appended.
+    if (isBarHyperRpcUrl(rpcUrl)) {
+      throw new Error(
+        `[getRpcClient] chainId=${chainId} resolved to HyperRPC (${rawUrl}) ` +
+          `but ENVIO_API_TOKEN is not set. Set it in .env or use a non-HyperRPC ` +
+          `override via ${perChainEnvVar ?? "ENVIO_RPC_URL"}.`,
+      );
+    }
 
     rpcClients.set(
       chainId,

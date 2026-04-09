@@ -1,6 +1,6 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
-import { withHyperRpcToken } from "../src/rpc";
+import { withHyperRpcToken, getRpcClient } from "../src/rpc";
 
 describe("withHyperRpcToken", () => {
   const ORIGINAL_TOKEN = process.env.ENVIO_API_TOKEN;
@@ -38,8 +38,10 @@ describe("withHyperRpcToken", () => {
     );
   });
 
-  it("returns URL unchanged when no ENVIO_API_TOKEN is set", () => {
+  it("returns bare HyperRPC URL unchanged when no ENVIO_API_TOKEN is set", () => {
     delete process.env.ENVIO_API_TOKEN;
+    // withHyperRpcToken itself doesn't throw — the fail-fast guard lives in
+    // getRpcClient(). This test verifies the function is a no-op without a token.
     assert.equal(
       withHyperRpcToken("https://143.rpc.hypersync.xyz"),
       "https://143.rpc.hypersync.xyz",
@@ -68,5 +70,41 @@ describe("withHyperRpcToken", () => {
       withHyperRpcToken("https://monad.rpc.hypersync.xyz"),
       "https://monad.rpc.hypersync.xyz/my-token",
     );
+  });
+});
+
+describe("getRpcClient fail-fast", () => {
+  const ORIGINAL_TOKEN = process.env.ENVIO_API_TOKEN;
+  const ORIGINAL_RPC = process.env.ENVIO_RPC_URL_143;
+
+  afterEach(() => {
+    if (ORIGINAL_TOKEN !== undefined) {
+      process.env.ENVIO_API_TOKEN = ORIGINAL_TOKEN;
+    } else {
+      delete process.env.ENVIO_API_TOKEN;
+    }
+    if (ORIGINAL_RPC !== undefined) {
+      process.env.ENVIO_RPC_URL_143 = ORIGINAL_RPC;
+    } else {
+      delete process.env.ENVIO_RPC_URL_143;
+    }
+  });
+
+  it("throws when HyperRPC default is used without ENVIO_API_TOKEN", () => {
+    delete process.env.ENVIO_API_TOKEN;
+    delete process.env.ENVIO_RPC_URL_143;
+    assert.throws(() => getRpcClient(143), /ENVIO_API_TOKEN is not set/);
+  });
+
+  it("does not throw when ENVIO_API_TOKEN is set", () => {
+    process.env.ENVIO_API_TOKEN = "test-token";
+    delete process.env.ENVIO_RPC_URL_143;
+    assert.doesNotThrow(() => getRpcClient(143));
+  });
+
+  it("does not throw when a non-HyperRPC override is used", () => {
+    delete process.env.ENVIO_API_TOKEN;
+    process.env.ENVIO_RPC_URL_143 = "https://rpc2.monad.xyz";
+    assert.doesNotThrow(() => getRpcClient(143));
   });
 });
