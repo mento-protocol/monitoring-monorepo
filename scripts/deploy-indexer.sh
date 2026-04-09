@@ -6,6 +6,12 @@
 # Usage:
 #   pnpm deploy:indexer              → push to `envio` branch (multichain mainnet, default)
 #   pnpm deploy:indexer <network>    → push to `deploy/<network>` branch (legacy per-network)
+#   pnpm deploy:indexer --yes        → skip confirmation prompt (CI / agent friendly)
+#
+# After pushing, use companion scripts:
+#   pnpm deploy:indexer:status       → watch sync progress
+#   pnpm deploy:indexer:promote      → promote latest deployment to prod
+#   pnpm deploy:indexer:logs         → tail runtime logs
 #
 # Envio project: https://envio.dev/app/mento-protocol/mento
 
@@ -18,6 +24,8 @@ restore_cursor() {
 trap restore_cursor EXIT
 
 VALID_NETWORKS=(celo-sepolia celo-mainnet monad-testnet monad-mainnet)
+ENVIO_ORG="mento-protocol"
+ENVIO_INDEXER="mento"
 
 validate_network() {
   local n="$1"
@@ -27,16 +35,21 @@ validate_network() {
   return 1
 }
 
-if [[ "${1:-}" == "--" ]]; then
-  shift
-fi
-
-NETWORK="${1:-}"
+# Parse flags
+AUTO_YES=false
+NETWORK=""
+for arg in "$@"; do
+  case "$arg" in
+    --yes|-y) AUTO_YES=true ;;
+    --) ;;
+    *) NETWORK="$arg" ;;
+  esac
+done
 
 # Default (no arg): deploy multichain indexer via `envio` branch
 if [[ -z "$NETWORK" ]]; then
   DEPLOY_BRANCH="envio"
-  SYNC_URL="https://envio.dev/app/mento-protocol/mento"
+  SYNC_URL="https://envio.dev/app/${ENVIO_ORG}/${ENVIO_INDEXER}"
   echo "🌐 Deploying multichain indexer (Celo + Monad) → branch: $DEPLOY_BRANCH"
 else
   if ! validate_network "$NETWORK"; then
@@ -46,7 +59,7 @@ else
     exit 1
   fi
   DEPLOY_BRANCH="deploy/${NETWORK}"
-  SYNC_URL="https://envio.dev/app/mento-protocol/mento-v3-${NETWORK}"
+  SYNC_URL="https://envio.dev/app/${ENVIO_ORG}/mento-v3-${NETWORK}"
   echo "🚀 Deploying indexer (network: $NETWORK) → branch: $DEPLOY_BRANCH"
 fi
 
@@ -69,18 +82,21 @@ echo ""
 
 # Get current commit info
 COMMIT_SHA=$(git rev-parse HEAD)
+COMMIT_SHORT=$(git rev-parse --short HEAD)
 COMMIT_MSG=$(git log -1 --pretty=format:"%s" "$COMMIT_SHA")
 
 echo "   Commit: $COMMIT_SHA"
 echo "   Message: $COMMIT_MSG"
 echo ""
 
-# Confirm
-read -p "Push to $DEPLOY_BRANCH? [y/N] " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-  echo "Aborted."
-  exit 0
+# Confirm (skip with --yes)
+if [[ "$AUTO_YES" == "false" ]]; then
+  read -p "Push to $DEPLOY_BRANCH? [y/N] " -n 1 -r
+  echo
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 0
+  fi
 fi
 
 # Push current HEAD to deploy branch
@@ -93,8 +109,12 @@ echo ""
 echo "📋 POST-DEPLOY CHECKLIST:"
 echo ""
 echo "   1. Watch sync progress:"
+echo "      pnpm deploy:indexer:status"
 echo "      $SYNC_URL"
 echo ""
-echo "   2. Once synced, verify the dashboard:"
+echo "   2. Once synced, promote to prod:"
+echo "      pnpm deploy:indexer:promote"
+echo ""
+echo "   3. Verify the dashboard:"
 echo "      https://monitoring.mento.org"
 echo ""
