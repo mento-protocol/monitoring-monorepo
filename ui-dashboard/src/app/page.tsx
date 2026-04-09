@@ -46,7 +46,6 @@ function historicalTvl(
   const earliest = new Map<string, PoolSnapshotWindow>();
   for (const s of snapshots) {
     if (!fpmmMap.has(s.poolId)) continue;
-    if (!s.reserves0 || !s.reserves1 || !s.timestamp) continue;
     const existing = earliest.get(s.poolId);
     if (!existing || Number(s.timestamp) < Number(existing.timestamp)) {
       earliest.set(s.poolId, s);
@@ -324,6 +323,9 @@ function GlobalContent() {
             change30d={aggregated.tvlChange30d}
             isLoading={isLoading}
             hasError={anyNetworkError}
+            hasSnapshotError={
+              anySnapshotsError || anySnapshots7dError || anySnapshots30dError
+            }
           />
 
           <BreakdownTile
@@ -518,6 +520,7 @@ function TvlTile({
   change30d,
   isLoading,
   hasError,
+  hasSnapshotError,
 }: {
   tvl: number;
   change24h: number | null;
@@ -525,6 +528,7 @@ function TvlTile({
   change30d: number | null;
   isLoading: boolean;
   hasError: boolean;
+  hasSnapshotError: boolean;
 }) {
   const changes = [
     { label: "24h", value: change24h },
@@ -564,9 +568,13 @@ function TvlTile({
       </div>
       <p
         className="mt-2 text-xs text-slate-500 min-h-4"
-        aria-hidden={!hasError}
+        aria-hidden={!hasError && !hasSnapshotError}
       >
-        {hasError ? "Partial data — some chains failed" : undefined}
+        {hasError
+          ? "Partial data — some chains failed"
+          : hasSnapshotError
+            ? "Deltas partial — some snapshot queries failed"
+            : undefined}
       </p>
     </div>
   );

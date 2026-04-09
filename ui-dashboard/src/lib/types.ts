@@ -144,9 +144,9 @@ export type RebalanceEvent = {
 
 export type PoolSnapshotWindow = {
   poolId: string;
-  timestamp?: string;
-  reserves0?: string;
-  reserves1?: string;
+  timestamp: string;
+  reserves0: string;
+  reserves1: string;
   swapCount: number;
   swapVolume0: string;
   swapVolume1: string;

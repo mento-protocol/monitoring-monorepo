@@ -62,7 +62,16 @@ const NETWORK_2: Network = {
   chainId: 11142220,
 };
 
-import type { Pool } from "@/lib/types";
+import type { Pool, PoolSnapshotWindow } from "@/lib/types";
+
+/** Network with token symbols for TVL computation. */
+const TVL_NETWORK: Network = {
+  ...BASE_NETWORK,
+  tokenSymbols: {
+    "0xtoken0": "USDm",
+    "0xtoken1": "KESm",
+  },
+};
 
 function makePool(id: string): Pool {
   return {
@@ -443,5 +452,171 @@ describe("GlobalPage — all networks failed", () => {
     ]);
     expect(html).toContain("Failed to load pools");
     expect(html).not.toContain("No pools found across any chain.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TVL delta sub-KPIs
+// ---------------------------------------------------------------------------
+
+function makeTvlPool(id: string, reserves0: string, reserves1: string): Pool {
+  return {
+    id,
+    chainId: 42220,
+    token0: "0xtoken0",
+    token1: "0xtoken1",
+    token0Decimals: 18,
+    token1Decimals: 18,
+    oraclePrice: "1000000000000000000000000", // 1e24 = 1:1 rate
+    source: "FPMM",
+    createdAtBlock: "0",
+    createdAtTimestamp: "0",
+    updatedAtBlock: "0",
+    updatedAtTimestamp: "0",
+    reserves0,
+    reserves1,
+  };
+}
+
+function makeSnapshot(
+  poolId: string,
+  timestamp: string,
+  reserves0: string,
+  reserves1: string,
+): PoolSnapshotWindow {
+  return {
+    poolId,
+    timestamp,
+    reserves0,
+    reserves1,
+    swapCount: 0,
+    swapVolume0: "0",
+    swapVolume1: "0",
+  };
+}
+
+describe("GlobalPage — TVL delta sub-KPIs", () => {
+  it("renders percentage changes when snapshots have historical reserves", () => {
+    // Current reserves: 200 USDm + 100 KESm at 1:1 = $300 TVL
+    // Historical (24h): 100 USDm + 50 KESm = $150 TVL → +100%
+    const pool = makeTvlPool(
+      "pool-tvl",
+      "200000000000000000000",
+      "100000000000000000000",
+    );
+    const snap24h = makeSnapshot(
+      "pool-tvl",
+      "1000",
+      "100000000000000000000",
+      "50000000000000000000",
+    );
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [pool],
+        snapshots: [snap24h],
+        snapshots7d: [snap24h],
+        snapshots30d: [snap24h],
+      }),
+    ]);
+    expect(html).toContain("+100.0%");
+    expect(html).toContain("TVL (FPMMs)");
+  });
+
+  it("shows dash when no snapshots are available", () => {
+    const pool = makeTvlPool(
+      "pool-tvl",
+      "200000000000000000000",
+      "100000000000000000000",
+    );
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [pool],
+        // No snapshots → deltas should be null → dashes
+      }),
+    ]);
+    // Should not show any percentage, but should show TVL value
+    expect(html).toContain("TVL (FPMMs)");
+    expect(html).not.toContain("%");
+  });
+
+  it("shows negative percentage for TVL decrease", () => {
+    // Current: 50 USDm + 50 KESm = $100
+    // Historical: 100 USDm + 100 KESm = $200 → -50%
+    const pool = makeTvlPool(
+      "pool-tvl",
+      "50000000000000000000",
+      "50000000000000000000",
+    );
+    const snap = makeSnapshot(
+      "pool-tvl",
+      "1000",
+      "100000000000000000000",
+      "100000000000000000000",
+    );
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [pool],
+        snapshots: [snap],
+        snapshots7d: [snap],
+        snapshots30d: [snap],
+      }),
+    ]);
+    expect(html).toContain("-50.0%");
+  });
+
+  it("shows snapshot error subtitle when snapshot queries fail", () => {
+    const pool = makeTvlPool(
+      "pool-tvl",
+      "200000000000000000000",
+      "100000000000000000000",
+    );
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [pool],
+        snapshotsError: new Error("timeout"),
+      }),
+    ]);
+    expect(html).toContain("Deltas partial");
+  });
+
+  it("computes correct delta with matched numerator/denominator across chains", () => {
+    // Chain A: current $300, historical $150 → +100%
+    // Chain B: has pools but no snapshots → excluded from delta
+    const poolA = makeTvlPool(
+      "pool-a",
+      "200000000000000000000",
+      "100000000000000000000",
+    );
+    const snapA = makeSnapshot(
+      "pool-a",
+      "1000",
+      "100000000000000000000",
+      "50000000000000000000",
+    );
+    const poolB = makeTvlPool(
+      "pool-b",
+      "500000000000000000000",
+      "500000000000000000000",
+    );
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [poolA],
+        snapshots: [snapA],
+        snapshots7d: [snapA],
+        snapshots30d: [snapA],
+      }),
+      makeNetworkData({
+        network: NETWORK_2,
+        pools: [poolB],
+        // No snapshots for chain B — should NOT inflate the delta
+      }),
+    ]);
+    // Delta should be +100% (only chain A), not inflated by chain B's TVL
+    expect(html).toContain("+100.0%");
   });
 });
