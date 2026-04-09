@@ -176,7 +176,7 @@ const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
 
 // Per-chain RPC defaults used when no env var override is present.
 const DEFAULT_RPC_BY_CHAIN: Record<number, string> = {
-  42220: "https://forno.celo.org", // Celo Mainnet
+  42220: "https://42220.rpc.hypersync.xyz", // Celo Mainnet (Envio HyperRPC)
   11142220: "https://forno.celo-sepolia.celo-testnet.org", // Celo Sepolia
   143: "https://143.rpc.hypersync.xyz", // Monad Mainnet (Envio HyperRPC)
   10143: "https://10143.rpc.hypersync.xyz", // Monad Testnet (Envio HyperRPC)
