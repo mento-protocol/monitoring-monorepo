@@ -138,7 +138,7 @@ describe("poolTvlUSD", () => {
     expect(tvl).toBe(0);
   });
 
-  it("returns 0 when neither token side is USDm", () => {
+  it("returns 0 when neither token side is USDm and no rates provided", () => {
     const tvl = poolTvlUSD(
       {
         token0: "0x0000000000000000000000000000000000000003",
@@ -153,6 +153,57 @@ describe("poolTvlUSD", () => {
     );
 
     expect(tvl).toBe(0);
+  });
+
+  it("uses oracle rate map via sym1 when neither token is USDm", () => {
+    // EURm address on mainnet (cEUR)
+    const EURM = "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73";
+    // axlEUROC address on mainnet
+    const AXLEUROC = "0x061cc5a2c863e0c1cb404006d559db18a34c762d";
+
+    const rates = new Map([["EURm", 1.08]]); // 1 EURm ≈ $1.08
+    const tvl = poolTvlUSD(
+      {
+        token0: AXLEUROC,
+        token1: EURM,
+        token0Decimals: 6,
+        token1Decimals: 18,
+        reserves0: "2000000", // 2 axlEUROC (6 decimals)
+        reserves1: "3000000000000000000", // 3 EURm
+        oraclePrice: "500000000000000000000000", // feedVal = 0.5
+      },
+      mainnet,
+      rates,
+    );
+
+    // feedVal = 0.5, sym1 (EURm) has rate 1.08
+    // TVL = (r0 * feedVal + r1) * usd1 = (2 * 0.5 + 3) * 1.08 = 4.32
+    expect(tvl).toBeCloseTo(4.32, 8);
+  });
+
+  it("uses oracle rate map via sym0 when sym0 has a known rate", () => {
+    const EURM = "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73";
+    const AXLEUROC = "0x061cc5a2c863e0c1cb404006d559db18a34c762d";
+
+    // Only axlEUROC has a rate — exercises the sym0 (usd0) branch
+    const rates = new Map([["axlEUROC", 1.1]]);
+    const tvl = poolTvlUSD(
+      {
+        token0: AXLEUROC,
+        token1: EURM,
+        token0Decimals: 6,
+        token1Decimals: 18,
+        reserves0: "2000000", // 2 axlEUROC
+        reserves1: "3000000000000000000", // 3 EURm
+        oraclePrice: "500000000000000000000000", // feedVal = 0.5
+      },
+      mainnet,
+      rates,
+    );
+
+    // feedVal = 0.5, sym0 (axlEUROC) has rate 1.10
+    // TVL = (r0 + r1 * feedVal) * usd0 = (2 + 3 * 0.5) * 1.10 = 3.85
+    expect(tvl).toBeCloseTo(3.85, 8);
   });
 });
 
