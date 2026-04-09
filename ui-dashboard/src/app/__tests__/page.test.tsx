@@ -619,4 +619,37 @@ describe("GlobalPage — TVL delta sub-KPIs", () => {
     // Delta should be +100% (only chain A), not inflated by chain B's TVL
     expect(html).toContain("+100.0%");
   });
+
+  it("excludes new pools without snapshots on the same chain from delta", () => {
+    // Pool A: has snapshot, current $300, historical $150 → +100%
+    // Pool B: same chain, no snapshot (newly created) — must NOT inflate delta
+    const poolA = makeTvlPool(
+      "pool-a",
+      "200000000000000000000",
+      "100000000000000000000",
+    );
+    const poolB = makeTvlPool(
+      "pool-b",
+      "500000000000000000000",
+      "500000000000000000000",
+    );
+    const snapA = makeSnapshot(
+      "pool-a",
+      "1000",
+      "100000000000000000000",
+      "50000000000000000000",
+    );
+    // Only pool-a has a snapshot; pool-b is new (no snapshot in window)
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [poolA, poolB],
+        snapshots: [snapA],
+        snapshots7d: [snapA],
+        snapshots30d: [snapA],
+      }),
+    ]);
+    // Delta should be +100% (pool A only), not ~+766% if pool B's $1000 leaked in
+    expect(html).toContain("+100.0%");
+  });
 });
