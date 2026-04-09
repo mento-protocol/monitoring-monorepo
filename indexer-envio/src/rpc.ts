@@ -36,9 +36,35 @@ function sanitizeErrorMessage(msg: string): string {
   });
 }
 
+/** Known contract revert signatures and their human-readable meaning.
+ * When a contract call reverts with one of these, it's expected behaviour
+ * (e.g. stale oracle data) rather than an infrastructure problem, so we
+ * log at debug level instead of warn. */
+const KNOWN_REVERT_SIGNATURES: Record<string, string> = {
+  "0xa407143a":
+    "OracleStaleOrExpired — oracle data is stale or expired, getRebalancingState cannot compute",
+};
+
+/** Extract a 4-byte revert selector from an error message, if present. */
+function extractRevertSignature(msg: string): string | undefined {
+  const match = msg.match(/reverted with the following signature:\s*$/m);
+  if (match) {
+    // The signature is typically on the next line or nearby in the message.
+    const sigMatch = msg.match(/\b(0x[0-9a-f]{8})\b/i);
+    return sigMatch?.[1]?.toLowerCase();
+  }
+  // Also match inline: "reverted with the following signature: 0x..."
+  const inline = msg.match(
+    /reverted with the following signature:?\s*(0x[0-9a-f]{8})/i,
+  );
+  return inline?.[1]?.toLowerCase();
+}
+
 /**
- * Log a structured RPC failure warning and emit a burst-summary line every
- * `RPC_BURST_INTERVAL` failures for the same chain+function combination.
+ * Log a structured RPC failure. Known contract reverts are logged at debug
+ * level with a human-readable explanation; unexpected failures are logged at
+ * warn level. A burst-summary line is emitted every `RPC_BURST_INTERVAL`
+ * failures for the same chain+function combination regardless of level.
  */
 function logRpcFailure(
   chainId: number,
@@ -52,17 +78,29 @@ function logRpcFailure(
       ? sanitizeErrorMessage(err.message)
       : String(err ?? "unknown error");
   const blockStr = block !== undefined ? ` block=${block}` : "";
-  console.warn(
-    `[RPC_FAILURE] chainId=${chainId} fn=${fn} target=${target}${blockStr} error=${message}`,
-  );
+
+  // Check if this is a known contract revert (expected, not an RPC problem).
+  const revertSig = extractRevertSignature(message);
+  const knownRevert = revertSig
+    ? KNOWN_REVERT_SIGNATURES[revertSig]
+    : undefined;
+
+  if (knownRevert) {
+    console.debug(
+      `[CONTRACT_REVERT] chainId=${chainId} fn=${fn} target=${target}${blockStr} — ${knownRevert}`,
+    );
+  } else {
+    console.warn(
+      `[RPC_FAILURE] chainId=${chainId} fn=${fn} target=${target}${blockStr} error=${message}`,
+    );
+  }
 
   const burstKey = `${chainId}:${fn}`;
   const count = (_rpcFailureCounts.get(burstKey) ?? 0) + 1;
   _rpcFailureCounts.set(burstKey, count);
   if (count % RPC_BURST_INTERVAL === 0) {
-    console.warn(
-      `[RPC_FAILURE_BURST] chainId=${chainId} fn=${fn} failureCount=${count}`,
-    );
+    const tag = knownRevert ? "CONTRACT_REVERT_BURST" : "RPC_FAILURE_BURST";
+    console.warn(`[${tag}] chainId=${chainId} fn=${fn} failureCount=${count}`);
   }
 }
 
