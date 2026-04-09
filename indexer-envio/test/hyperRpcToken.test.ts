@@ -1,6 +1,6 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
-import { withHyperRpcToken, getRpcClient } from "../src/rpc";
+import { withHyperRpcToken, getRpcClient, _clearRpcClients } from "../src/rpc";
 
 describe("withHyperRpcToken", () => {
   const ORIGINAL_TOKEN = process.env.ENVIO_API_TOKEN;
@@ -77,7 +77,12 @@ describe("getRpcClient fail-fast", () => {
   const ORIGINAL_TOKEN = process.env.ENVIO_API_TOKEN;
   const ORIGINAL_RPC = process.env.ENVIO_RPC_URL_143;
 
+  beforeEach(() => {
+    _clearRpcClients();
+  });
+
   afterEach(() => {
+    _clearRpcClients();
     if (ORIGINAL_TOKEN !== undefined) {
       process.env.ENVIO_API_TOKEN = ORIGINAL_TOKEN;
     } else {

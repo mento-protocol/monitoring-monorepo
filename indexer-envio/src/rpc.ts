@@ -174,6 +174,12 @@ export function _clearMockReportExpiry(): void {
 // Lazy RPC clients per chainId
 const rpcClients = new Map<number, ReturnType<typeof createPublicClient>>();
 
+/** @internal Test-only: clear the cached RPC clients so getRpcClient()
+ * re-evaluates URL resolution and fail-fast logic. */
+export function _clearRpcClients(): void {
+  rpcClients.clear();
+}
+
 // Per-chain RPC defaults used when no env var override is present.
 const DEFAULT_RPC_BY_CHAIN: Record<number, string> = {
   42220: "https://42220.rpc.hypersync.xyz", // Celo Mainnet (Envio HyperRPC)
