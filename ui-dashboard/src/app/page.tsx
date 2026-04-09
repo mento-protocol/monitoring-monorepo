@@ -31,17 +31,18 @@ function sumVolumeMap(map: Map<string, number | null>): number {
 }
 
 /**
- * Computes the aggregate TVL at the start of a snapshot window by picking the
- * earliest snapshot per FPMM pool and applying the current oracle price.
+ * Returns matched current/historical TVL for pools that have snapshot data.
+ * Only pools with a snapshot in the window contribute to both sides, so
+ * newly-created pools (no historical snapshot) don't inflate the delta.
  *
  * Uses today's oracle rate (not the historical rate) so the percentage change
  * isolates reserve-quantity movements from price movements.
  */
-function historicalTvl(
+function matchedTvl(
   snapshots: PoolSnapshotWindow[],
   pools: Pool[],
   network: Network,
-): number {
+): { now: number; ago: number } {
   const fpmmMap = new Map(pools.filter(isFpmm).map((p) => [p.id, p]));
   const earliest = new Map<string, PoolSnapshotWindow>();
   for (const s of snapshots) {
@@ -51,15 +52,17 @@ function historicalTvl(
       earliest.set(s.poolId, s);
     }
   }
-  let tvl = 0;
+  let now = 0;
+  let ago = 0;
   for (const [poolId, snap] of earliest) {
     const pool = fpmmMap.get(poolId)!;
-    tvl += poolTvlUSD(
+    now += poolTvlUSD(pool, network);
+    ago += poolTvlUSD(
       { ...pool, reserves0: snap.reserves0, reserves1: snap.reserves1 },
       network,
     );
   }
-  return tvl;
+  return { now, ago };
 }
 
 function GlobalContent() {
@@ -141,21 +144,24 @@ function GlobalContent() {
         );
         totalTvl += chainTvlNow;
 
-        // Historical TVL — only include chains where we have snapshot data,
-        // and pair with that chain's current TVL so the delta is consistent.
+        // Historical TVL — only pools with snapshot data contribute to both
+        // sides of the delta, so new pools don't inflate the percentage.
         if (netData.snapshotsError === null && snapshots.length > 0) {
-          tvlNow24h += chainTvlNow;
-          tvlAgo24h += historicalTvl(snapshots, pools, network);
+          const m = matchedTvl(snapshots, pools, network);
+          tvlNow24h += m.now;
+          tvlAgo24h += m.ago;
           hasTvlSnapshots24h = true;
         }
         if (netData.snapshots7dError === null && snapshots7d.length > 0) {
-          tvlNow7d += chainTvlNow;
-          tvlAgo7d += historicalTvl(snapshots7d, pools, network);
+          const m = matchedTvl(snapshots7d, pools, network);
+          tvlNow7d += m.now;
+          tvlAgo7d += m.ago;
           hasTvlSnapshots7d = true;
         }
         if (netData.snapshots30dError === null && snapshots30d.length > 0) {
-          tvlNow30d += chainTvlNow;
-          tvlAgo30d += historicalTvl(snapshots30d, pools, network);
+          const m = matchedTvl(snapshots30d, pools, network);
+          tvlNow30d += m.now;
+          tvlAgo30d += m.ago;
           hasTvlSnapshots30d = true;
         }
 
