@@ -3,14 +3,21 @@
 import type { Pool } from "@/lib/types";
 import { parseWei, formatWei, formatUSD } from "@/lib/format";
 import { computeReservePcts, computeThresholdLines } from "@/lib/reserves";
-import { tokenSymbol, poolTvlUSD, USDM_SYMBOLS } from "@/lib/tokens";
+import {
+  tokenSymbol,
+  poolTvlUSD,
+  tokenToUSD,
+  USDM_SYMBOLS,
+  type OracleRateMap,
+} from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 
 interface ReservesPanelProps {
   pool: Pool;
+  rates?: OracleRateMap;
 }
 
-export function ReservesPanel({ pool }: ReservesPanelProps) {
+export function ReservesPanel({ pool, rates }: ReservesPanelProps) {
   const { network } = useNetwork();
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
@@ -37,13 +44,19 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
       : null;
   const usdm0 = USDM_SYMBOLS.has(sym0);
   const usdm1 = USDM_SYMBOLS.has(sym1);
+  const fxRate0 = rates ? tokenToUSD(sym0, 1, rates) : null;
+  const fxRate1 = rates ? tokenToUSD(sym1, 1, rates) : null;
   const usd0 =
     feedVal !== null && r0 !== null
       ? usdm0
         ? r0
         : usdm1
           ? r0 * feedVal
-          : null
+          : fxRate0 !== null
+            ? r0 * fxRate0
+            : fxRate1 !== null
+              ? r0 * feedVal * fxRate1
+              : null
       : null;
   const usd1 =
     feedVal !== null && r1 !== null
@@ -51,7 +64,11 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
         ? r1
         : usdm0
           ? r1 * feedVal
-          : null
+          : fxRate1 !== null
+            ? r1 * fxRate1
+            : fxRate0 !== null
+              ? r1 * feedVal * fxRate0
+              : null
       : null;
 
   const usdTotal = usd0 !== null && usd1 !== null ? usd0 + usd1 : null;
@@ -62,7 +79,7 @@ export function ReservesPanel({ pool }: ReservesPanelProps) {
   const color1 = pct1 > 50 ? "bg-indigo-500" : "bg-emerald-500";
 
   // Reuse the shared TVL helper — it has tests and handles all edge cases.
-  const totalUsdRaw = poolTvlUSD(pool, network);
+  const totalUsdRaw = poolTvlUSD(pool, network, rates);
   const totalUsd = totalUsdRaw > 0 ? totalUsdRaw : null;
 
   const thresholds = computeThresholdLines(pool.rebalanceThreshold, usdTotal);

@@ -2,7 +2,7 @@
 
 import { Suspense, useMemo } from "react";
 import { formatUSD } from "@/lib/format";
-import { isFpmm, poolTvlUSD } from "@/lib/tokens";
+import { isFpmm, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { buildPoolVolumeMap, poolTotalVolumeUSD } from "@/lib/volume";
@@ -42,6 +42,7 @@ function matchedTvl(
   snapshots: PoolSnapshotWindow[],
   pools: Pool[],
   network: Network,
+  rates: OracleRateMap,
 ): { now: number; ago: number } {
   const fpmmMap = new Map(pools.filter(isFpmm).map((p) => [p.id, p]));
   const earliest = new Map<string, PoolSnapshotWindow>();
@@ -56,10 +57,11 @@ function matchedTvl(
   let ago = 0;
   for (const [poolId, snap] of earliest) {
     const pool = fpmmMap.get(poolId)!;
-    now += poolTvlUSD(pool, network);
+    now += poolTvlUSD(pool, network, rates);
     ago += poolTvlUSD(
       { ...pool, reserves0: snap.reserves0, reserves1: snap.reserves1 },
       network,
+      rates,
     );
   }
   return { now, ago };
@@ -133,13 +135,20 @@ function GlobalContent() {
       for (const netData of networkData) {
         if (netData.error !== null) continue;
 
-        const { network, pools, snapshots, snapshots7d, snapshots30d, fees } =
-          netData;
+        const {
+          network,
+          pools,
+          snapshots,
+          snapshots7d,
+          snapshots30d,
+          fees,
+          rates,
+        } = netData;
         const fpmmPools = pools.filter(isFpmm);
         totalPools += pools.length;
         totalFpmmPools += fpmmPools.length;
         const chainTvlNow = fpmmPools.reduce(
-          (sum, p) => sum + poolTvlUSD(p, network),
+          (sum, p) => sum + poolTvlUSD(p, network, rates),
           0,
         );
         totalTvl += chainTvlNow;
@@ -147,19 +156,19 @@ function GlobalContent() {
         // Historical TVL — only pools with snapshot data contribute to both
         // sides of the delta, so new pools don't inflate the percentage.
         if (netData.snapshotsError === null && snapshots.length > 0) {
-          const m = matchedTvl(snapshots, pools, network);
+          const m = matchedTvl(snapshots, pools, network, rates);
           tvlNow24h += m.now;
           tvlAgo24h += m.ago;
           hasTvlSnapshots24h = true;
         }
         if (netData.snapshots7dError === null && snapshots7d.length > 0) {
-          const m = matchedTvl(snapshots7d, pools, network);
+          const m = matchedTvl(snapshots7d, pools, network, rates);
           tvlNow7d += m.now;
           tvlAgo7d += m.ago;
           hasTvlSnapshots7d = true;
         }
         if (netData.snapshots30dError === null && snapshots30d.length > 0) {
-          const m = matchedTvl(snapshots30d, pools, network);
+          const m = matchedTvl(snapshots30d, pools, network, rates);
           tvlNow30d += m.now;
           tvlAgo30d += m.ago;
           hasTvlSnapshots30d = true;

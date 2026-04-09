@@ -170,6 +170,7 @@ export function poolTvlUSD(
     token1?: string | null;
   },
   network: Network,
+  rates?: OracleRateMap,
 ): number {
   if (!pool.oraclePrice || pool.oraclePrice === "0") return 0;
   if (!pool.reserves0 && !pool.reserves1) return 0;
@@ -183,6 +184,17 @@ export function poolTvlUSD(
   }
   if (USDM_SYMBOLS.has(sym1)) {
     return r0 * feedVal + r1;
+  }
+  // Neither leg is USDm — try to convert via oracle rate map.
+  if (rates) {
+    const usd0 = tokenToUSD(sym0, 1, rates);
+    if (usd0 !== null) {
+      return (r0 + r1 * feedVal) * usd0;
+    }
+    const usd1 = tokenToUSD(sym1, 1, rates);
+    if (usd1 !== null) {
+      return (r0 * feedVal + r1) * usd1;
+    }
   }
   return 0;
 }
