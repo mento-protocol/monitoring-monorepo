@@ -40,6 +40,7 @@ const BASE_POOL: Pool = {
   token0: "0xgbp",
   token1: "0xusd",
   source: "fpmm_factory",
+  chainId: 42220,
   createdAtBlock: "1",
   createdAtTimestamp: "1700000000",
   updatedAtBlock: "1",
