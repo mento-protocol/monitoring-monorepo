@@ -33,6 +33,9 @@ function sumVolumeMap(map: Map<string, number | null>): number {
 /**
  * Computes the aggregate TVL at the start of a snapshot window by picking the
  * earliest snapshot per FPMM pool and applying the current oracle price.
+ *
+ * Uses today's oracle rate (not the historical rate) so the percentage change
+ * isolates reserve-quantity movements from price movements.
  */
 function historicalTvl(
   snapshots: PoolSnapshotWindow[],
@@ -40,11 +43,10 @@ function historicalTvl(
   network: Network,
 ): number {
   const fpmmMap = new Map(pools.filter(isFpmm).map((p) => [p.id, p]));
-  // Find earliest snapshot per pool (closest to window start)
   const earliest = new Map<string, PoolSnapshotWindow>();
   for (const s of snapshots) {
     if (!fpmmMap.has(s.poolId)) continue;
-    if (!s.reserves0 || !s.timestamp) continue;
+    if (!s.reserves0 || !s.reserves1 || !s.timestamp) continue;
     const existing = earliest.get(s.poolId);
     if (!existing || Number(s.timestamp) < Number(existing.timestamp)) {
       earliest.set(s.poolId, s);
@@ -90,9 +92,14 @@ function GlobalContent() {
       let totalPools = 0;
       let totalFpmmPools = 0;
       let totalTvl = 0;
-      let totalTvl24hAgo = 0;
-      let totalTvl7dAgo = 0;
-      let totalTvl30dAgo = 0;
+      // Track current + historical TVL only for chains that contributed
+      // snapshot data, so numerator and denominator always match.
+      let tvlNow24h = 0;
+      let tvlAgo24h = 0;
+      let tvlNow7d = 0;
+      let tvlAgo7d = 0;
+      let tvlNow30d = 0;
+      let tvlAgo30d = 0;
       let hasTvlSnapshots24h = false;
       let hasTvlSnapshots7d = false;
       let hasTvlSnapshots30d = false;
@@ -129,22 +136,27 @@ function GlobalContent() {
         const fpmmPools = pools.filter(isFpmm);
         totalPools += pools.length;
         totalFpmmPools += fpmmPools.length;
-        totalTvl += fpmmPools.reduce(
+        const chainTvlNow = fpmmPools.reduce(
           (sum, p) => sum + poolTvlUSD(p, network),
           0,
         );
+        totalTvl += chainTvlNow;
 
-        // Historical TVL from earliest snapshot in each window
+        // Historical TVL — only include chains where we have snapshot data,
+        // and pair with that chain's current TVL so the delta is consistent.
         if (netData.snapshotsError === null && snapshots.length > 0) {
-          totalTvl24hAgo += historicalTvl(snapshots, pools, network);
+          tvlNow24h += chainTvlNow;
+          tvlAgo24h += historicalTvl(snapshots, pools, network);
           hasTvlSnapshots24h = true;
         }
         if (netData.snapshots7dError === null && snapshots7d.length > 0) {
-          totalTvl7dAgo += historicalTvl(snapshots7d, pools, network);
+          tvlNow7d += chainTvlNow;
+          tvlAgo7d += historicalTvl(snapshots7d, pools, network);
           hasTvlSnapshots7d = true;
         }
         if (netData.snapshots30dError === null && snapshots30d.length > 0) {
-          totalTvl30dAgo += historicalTvl(snapshots30d, pools, network);
+          tvlNow30d += chainTvlNow;
+          tvlAgo30d += historicalTvl(snapshots30d, pools, network);
           hasTvlSnapshots30d = true;
         }
 
@@ -239,16 +251,16 @@ function GlobalContent() {
           totalFees30d,
           totalUniqueLps,
           tvlChange24h:
-            hasTvlSnapshots24h && totalTvl24hAgo > 0
-              ? ((totalTvl - totalTvl24hAgo) / totalTvl24hAgo) * 100
+            hasTvlSnapshots24h && tvlAgo24h > 0
+              ? ((tvlNow24h - tvlAgo24h) / tvlAgo24h) * 100
               : null,
           tvlChange7d:
-            hasTvlSnapshots7d && totalTvl7dAgo > 0
-              ? ((totalTvl - totalTvl7dAgo) / totalTvl7dAgo) * 100
+            hasTvlSnapshots7d && tvlAgo7d > 0
+              ? ((tvlNow7d - tvlAgo7d) / tvlAgo7d) * 100
               : null,
           tvlChange30d:
-            hasTvlSnapshots30d && totalTvl30dAgo > 0
-              ? ((totalTvl - totalTvl30dAgo) / totalTvl30dAgo) * 100
+            hasTvlSnapshots30d && tvlAgo30d > 0
+              ? ((tvlNow30d - tvlAgo30d) / tvlAgo30d) * 100
               : null,
           unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
           totalUnresolvedCount,
