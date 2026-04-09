@@ -75,7 +75,8 @@ describe("withHyperRpcToken", () => {
 
 describe("getRpcClient fail-fast", () => {
   const ORIGINAL_TOKEN = process.env.ENVIO_API_TOKEN;
-  const ORIGINAL_RPC = process.env.ENVIO_RPC_URL_143;
+  const ORIGINAL_RPC_143 = process.env.ENVIO_RPC_URL_143;
+  const ORIGINAL_RPC_10143 = process.env.ENVIO_RPC_URL_10143;
 
   beforeEach(() => {
     _clearRpcClients();
@@ -88,21 +89,38 @@ describe("getRpcClient fail-fast", () => {
     } else {
       delete process.env.ENVIO_API_TOKEN;
     }
-    if (ORIGINAL_RPC !== undefined) {
-      process.env.ENVIO_RPC_URL_143 = ORIGINAL_RPC;
+    if (ORIGINAL_RPC_143 !== undefined) {
+      process.env.ENVIO_RPC_URL_143 = ORIGINAL_RPC_143;
     } else {
       delete process.env.ENVIO_RPC_URL_143;
     }
+    if (ORIGINAL_RPC_10143 !== undefined) {
+      process.env.ENVIO_RPC_URL_10143 = ORIGINAL_RPC_10143;
+    } else {
+      delete process.env.ENVIO_RPC_URL_10143;
+    }
   });
 
-  it("throws when HyperRPC default is used without ENVIO_API_TOKEN", () => {
+  it("throws when HyperRPC override is used without ENVIO_API_TOKEN", () => {
     delete process.env.ENVIO_API_TOKEN;
-    delete process.env.ENVIO_RPC_URL_143;
+    process.env.ENVIO_RPC_URL_143 = "https://143.rpc.hypersync.xyz";
     assert.throws(() => getRpcClient(143), /ENVIO_API_TOKEN is not set/);
   });
 
-  it("does not throw when ENVIO_API_TOKEN is set", () => {
+  it("throws when HyperRPC default is used without ENVIO_API_TOKEN (chain 10143)", () => {
+    delete process.env.ENVIO_API_TOKEN;
+    delete process.env.ENVIO_RPC_URL_10143;
+    assert.throws(() => getRpcClient(10143), /ENVIO_API_TOKEN is not set/);
+  });
+
+  it("does not throw when ENVIO_API_TOKEN is set for HyperRPC default", () => {
     process.env.ENVIO_API_TOKEN = "test-token";
+    delete process.env.ENVIO_RPC_URL_10143;
+    assert.doesNotThrow(() => getRpcClient(10143));
+  });
+
+  it("does not throw for full-node RPC defaults (chain 143)", () => {
+    delete process.env.ENVIO_API_TOKEN;
     delete process.env.ENVIO_RPC_URL_143;
     assert.doesNotThrow(() => getRpcClient(143));
   });

@@ -180,12 +180,14 @@ export function _clearRpcClients(): void {
   rpcClients.clear();
 }
 
-// Per-chain RPC defaults used when no env var override is present.
+// Per-chain RPC defaults for contract reads (eth_call).
+// These MUST be full-node RPCs — Envio HyperRPC does NOT support eth_call.
+// (Envio's own event syncing uses HyperSync, configured in the YAML files.)
 const DEFAULT_RPC_BY_CHAIN: Record<number, string> = {
-  42220: "https://42220.rpc.hypersync.xyz", // Celo Mainnet (Envio HyperRPC)
-  11142220: "https://forno.celo-sepolia.celo-testnet.org", // Celo Sepolia (forno — no HyperSync)
-  143: "https://143.rpc.hypersync.xyz", // Monad Mainnet (Envio HyperRPC)
-  10143: "https://10143.rpc.hypersync.xyz", // Monad Testnet (Envio HyperRPC)
+  42220: "https://forno.celo.org", // Celo Mainnet
+  11142220: "https://forno.celo-sepolia.celo-testnet.org", // Celo Sepolia
+  143: "https://rpc2.monad.xyz", // Monad Mainnet
+  10143: "https://10143.rpc.hypersync.xyz", // Monad Testnet (no public full-node RPC known)
 };
 
 // Per-chain RPC env var names. Each chain can be overridden independently.
