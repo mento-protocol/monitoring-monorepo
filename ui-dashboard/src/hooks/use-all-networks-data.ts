@@ -8,7 +8,7 @@ import {
   ALL_POOLS_WITH_HEALTH,
   POOL_SNAPSHOTS_WINDOW,
   PROTOCOL_FEE_TRANSFERS_ALL,
-  UNIQUE_LP_COUNT,
+  UNIQUE_LP_ADDRESSES,
 } from "@/lib/queries";
 import {
   aggregateProtocolFees,
@@ -132,10 +132,10 @@ export async function fetchNetworkData(
       : emptySnapshots,
     fpmmPoolIds.length > 0
       ? client.request<{
-          LiquidityPosition_aggregate: { aggregate: { count: number } };
-        }>(UNIQUE_LP_COUNT, { poolIds: fpmmPoolIds })
+          LiquidityPosition: { address: string }[];
+        }>(UNIQUE_LP_ADDRESSES, { poolIds: fpmmPoolIds })
       : Promise.resolve({
-          LiquidityPosition_aggregate: { aggregate: { count: 0 } },
+          LiquidityPosition: [] as { address: string }[],
         }),
   ]);
 
@@ -164,7 +164,9 @@ export async function fetchNetworkData(
 
   const uniqueLpCount =
     lpResult.status === "fulfilled"
-      ? (lpResult.value.LiquidityPosition_aggregate?.aggregate?.count ?? 0)
+      ? new Set(
+          (lpResult.value.LiquidityPosition ?? []).map((lp) => lp.address),
+        ).size
       : null;
 
   return {
