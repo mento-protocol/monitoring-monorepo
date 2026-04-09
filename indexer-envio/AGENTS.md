@@ -57,8 +57,8 @@ pnpm test      # Run tests (mocha + chai)
 
 Copy `.env.example` → `.env` and set:
 
-- `ENVIO_RPC_URL_42220` — Celo Mainnet RPC endpoint (e.g. `https://forno.celo.org`)
-- `ENVIO_RPC_URL_143` — Monad Mainnet RPC endpoint (e.g. `https://rpc2.monad.xyz`)
+- `ENVIO_RPC_URL_42220` — Celo Mainnet RPC endpoint (e.g. `https://42220.rpc.hypersync.xyz`)
+- `ENVIO_RPC_URL_143` — Monad Mainnet RPC endpoint (e.g. `https://143.rpc.hypersync.xyz`)
 - `ENVIO_START_BLOCK_CELO` — (optional) Celo start block, defaults to 60664500
 - `ENVIO_START_BLOCK_MONAD` — (optional) Monad start block, defaults to 60730000
 

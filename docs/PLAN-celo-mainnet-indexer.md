@@ -121,7 +121,7 @@ The existing schema works for v3 FPMM pools. For v2 BiPoolManager:
 
 3. **Add Vercel env var:** `NEXT_PUBLIC_HASURA_URL_MULTICHAIN=<endpoint>`
 
-4. No credentials needed from Philip — Celo mainnet RPC is public (`https://forno.celo.org`), HyperSync is available for chain 42220.
+4. No credentials needed from Philip — Celo mainnet RPC uses Envio HyperRPC (`https://42220.rpc.hypersync.xyz`), HyperSync is available for chain 42220.
 
 ---
 

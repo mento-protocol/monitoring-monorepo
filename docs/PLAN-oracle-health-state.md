@@ -256,7 +256,9 @@ Envio supports contract calls via the `client` object in handlers. Example patte
 import { createPublicClient, http } from "viem";
 
 const client = createPublicClient({
-  transport: http(process.env.ENVIO_RPC_URL || "https://forno.celo.org"),
+  transport: http(
+    process.env.ENVIO_RPC_URL || "https://42220.rpc.hypersync.xyz",
+  ),
 });
 
 // In handler:
