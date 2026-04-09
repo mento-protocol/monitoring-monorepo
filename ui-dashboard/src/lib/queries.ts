@@ -305,9 +305,9 @@ export const ORACLE_SNAPSHOT_PREDECESSOR = `
   }
 `;
 
-export const ORACLE_SNAPSHOTS_COUNT = `
-  query OracleSnapshotsCount($poolId: String!, $limit: Int!) {
-    OracleSnapshot(where: { poolId: { _eq: $poolId } }, limit: $limit) {
+export const ORACLE_SNAPSHOTS_COUNT_PAGE = `
+  query OracleSnapshotsCountPage($poolId: String!, $limit: Int!, $offset: Int!) {
+    OracleSnapshot(where: { poolId: { _eq: $poolId } }, limit: $limit, offset: $offset) {
       id
     }
   }

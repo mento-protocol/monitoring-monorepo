@@ -34,7 +34,7 @@ import { useGQL } from "@/lib/graphql";
 import {
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
-  ORACLE_SNAPSHOTS_COUNT,
+  ORACLE_SNAPSHOTS_COUNT_PAGE,
   OLS_LIQUIDITY_EVENTS,
   OLS_POOL,
   POOL_DEPLOYMENT,
@@ -1272,6 +1272,9 @@ function buildOrderBy(
   return [primary, { timestamp: "desc" }, { id: "asc" }];
 }
 
+// Envio caps queries at 1000 rows — use this as the count query limit.
+const ENVIO_MAX_ROWS = 1000;
+
 function OracleTab({
   poolId,
   pool,
@@ -1301,12 +1304,17 @@ function OracleTab({
 
   const { data: countData, error: countError } = useGQL<{
     OracleSnapshot: { id: string }[];
-  }>(ORACLE_SNAPSHOTS_COUNT, { poolId, limit: 10000 });
+  }>(ORACLE_SNAPSHOTS_COUNT_PAGE, {
+    poolId,
+    limit: ENVIO_MAX_ROWS,
+    offset: 0,
+  });
   // Preserve last known total on count error so pagination stays visible.
   const lastKnownTotalRef = React.useRef(0);
   const rawTotal = countData?.OracleSnapshot?.length ?? 0;
   if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
   const total = countError ? lastKnownTotalRef.current : rawTotal;
+  const countCapped = rawTotal >= ENVIO_MAX_ROWS;
 
   // Clamp page to valid range once total is known, so a stale page
   // index never leaves the user stranded past the last page.
@@ -1567,6 +1575,12 @@ function OracleTab({
               total={total}
               onPageChange={setPage}
             />
+          )}
+          {countCapped && !isSearching && (
+            <p className="px-1 pt-1 text-xs text-amber-400">
+              Showing first {ENVIO_MAX_ROWS.toLocaleString()} snapshots — older
+              entries may exist beyond this page range.
+            </p>
           )}
           {!countError && isSearchCapped && (
             <p className="px-1 pt-1 text-xs text-amber-400">
