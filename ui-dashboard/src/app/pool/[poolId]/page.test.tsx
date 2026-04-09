@@ -364,7 +364,9 @@ beforeEach(() => {
         return oracleCountError
           ? { data: null, error: new Error("count failed"), isLoading: false }
           : makeGqlResult({
-              OracleSnapshot_aggregate: { aggregate: { count: oracleCount } },
+              OracleSnapshot: Array.from({ length: oracleCount }, (_, i) => ({
+                id: `snap-${i}`,
+              })),
             });
       return makeGqlResult({});
     },
@@ -722,7 +724,9 @@ describe("Pool detail tab search", () => {
           return makeGqlResult({ OracleSnapshot: oracleRows });
         if (query === ORACLE_SNAPSHOTS_COUNT)
           return makeGqlResult({
-            OracleSnapshot_aggregate: { aggregate: { count: oracleCount } },
+            OracleSnapshot: Array.from({ length: oracleCount }, (_, i) => ({
+              id: `snap-${i}`,
+            })),
           });
         return makeGqlResult({});
       },

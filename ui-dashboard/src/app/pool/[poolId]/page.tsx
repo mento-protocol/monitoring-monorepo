@@ -1300,11 +1300,11 @@ function OracleTab({
   );
 
   const { data: countData, error: countError } = useGQL<{
-    OracleSnapshot_aggregate: { aggregate: { count: number } };
-  }>(ORACLE_SNAPSHOTS_COUNT, { poolId });
+    OracleSnapshot: { id: string }[];
+  }>(ORACLE_SNAPSHOTS_COUNT, { poolId, limit: 10000 });
   // Preserve last known total on count error so pagination stays visible.
   const lastKnownTotalRef = React.useRef(0);
-  const rawTotal = countData?.OracleSnapshot_aggregate?.aggregate?.count ?? 0;
+  const rawTotal = countData?.OracleSnapshot?.length ?? 0;
   if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
   const total = countError ? lastKnownTotalRef.current : rawTotal;
 

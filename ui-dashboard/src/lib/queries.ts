@@ -306,9 +306,9 @@ export const ORACLE_SNAPSHOT_PREDECESSOR = `
 `;
 
 export const ORACLE_SNAPSHOTS_COUNT = `
-  query OracleSnapshotsCount($poolId: String!) {
-    OracleSnapshot_aggregate(where: { poolId: { _eq: $poolId } }) {
-      aggregate { count }
+  query OracleSnapshotsCount($poolId: String!, $limit: Int!) {
+    OracleSnapshot(where: { poolId: { _eq: $poolId } }, limit: $limit) {
+      id
     }
   }
 `;
@@ -341,6 +341,7 @@ export const UNIQUE_LP_ADDRESSES = `
   query UniqueLpAddresses($poolIds: [String!]!) {
     LiquidityPosition(
       where: { poolId: { _in: $poolIds }, netLiquidity: { _gt: "0" } }
+      limit: 10000
     ) {
       address
     }

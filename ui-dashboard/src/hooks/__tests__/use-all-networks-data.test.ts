@@ -127,6 +127,35 @@ describe("fetchNetworkData — happy path", () => {
     expect(calls[5][1]).toEqual({ poolIds: ["pool-1"] });
   });
 
+  it("deduplicates LP addresses across multiple positions", async () => {
+    const pool = makePool("pool-dedup");
+    mockRequest((query) => {
+      if (query.includes("PoolSnapshot")) return { PoolSnapshot: [] };
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
+      if (query.includes("LiquidityPosition"))
+        return {
+          LiquidityPosition: [
+            { address: "0xa" },
+            { address: "0xa" },
+            { address: "0xb" },
+            { address: "0xb" },
+            { address: "0xc" },
+          ],
+        };
+      if (query.includes("Pool")) return { Pool: [pool] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.uniqueLpCount).toBe(3);
+  });
+
   it("trims whitespace from hasuraSecret before setting auth header", async () => {
     mockRequest(() => ({
       Pool: [],
@@ -285,9 +314,9 @@ describe("fetchNetworkData — non-Error thrown values", () => {
 // ---------------------------------------------------------------------------
 
 describe("fetchNetworkData — LP query failure only", () => {
-  it("surfaces uniqueLpCount as null when LP aggregate query rejects", async () => {
+  it("surfaces uniqueLpCount as null when LP query rejects", async () => {
     const pool = makePool("pool-lp");
-    const lpErr = new Error("LP aggregate timeout");
+    const lpErr = new Error("LP query timeout");
 
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
