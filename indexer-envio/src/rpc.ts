@@ -282,32 +282,24 @@ export type BlockFallbackResult = {
   usedFallback: boolean;
 };
 
-/**
- * Wrapper around `client.readContract` that retries without `blockNumber` when
- * the RPC node indicates the requested block is not available. This happens
- * when HyperSync delivers events faster than the RPC node syncs — reading
- * latest state is far better than losing the data entirely.
- *
- * Returns `{ result, usedFallback }` so callers can skip block-scoped cache
- * writes when fallback was used (the result is from "latest", not the
- * requested block).
- *
- * Rethrows all other errors so callers handle logging as before.
- */
 /** Maximum number of retries with the original blockNumber before falling back
  * to reading "latest". Each retry uses an increasing delay. */
 const BLOCK_RETRY_DELAYS_MS = [500, 1000, 2000];
 
-/** Exposed for tests — allows overriding the delay function so tests don't
- * actually wait. */
-export let _delayFn: (ms: number) => Promise<void> = (ms) =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+/** @internal Test-only hooks for overriding the delay function. */
+export const _testHooks = {
+  delayFn: (ms: number): Promise<void> =>
+    new Promise((resolve) => setTimeout(resolve, ms)),
+};
 
-/** @internal Test-only: override the delay function (e.g. to make it instant). */
-export function _setDelayFn(fn: (ms: number) => Promise<void>): void {
-  _delayFn = fn;
-}
-
+/**
+ * Wrapper around `client.readContract` that retries the original blockNumber
+ * with increasing delays, then falls back to reading "latest" when the RPC
+ * node indicates the requested block is not yet available.
+ *
+ * Returns `{ result, usedFallback }` so callers can skip block-scoped cache
+ * writes when fallback was used.
+ */
 export async function readContractWithBlockFallback(
   client: ReturnType<typeof createPublicClient>,
   args: Record<string, unknown>,
@@ -338,7 +330,7 @@ export async function readContractWithBlockFallback(
         console.warn(
           `[RPC_BLOCK_RETRY] fn=${fn} target=${target} requestedBlock=${blockNumber} retry=${i + 1}/${BLOCK_RETRY_DELAYS_MS.length} delay=${delay}ms`,
         );
-        await _delayFn(delay);
+        await _testHooks.delayFn(delay);
         try {
           const result = await callWithBlock();
           return { result, usedFallback: false };
