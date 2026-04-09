@@ -654,7 +654,7 @@ describe("Pool detail tab search", () => {
   });
 
   it("calls POOL_SNAPSHOTS_CHART with poolId only (no limit) on swaps tab", () => {
-    renderWithParams({});
+    renderWithParams({ tab: "swaps" });
     expect(useGQLMock).toHaveBeenCalledWith(
       POOL_SNAPSHOTS_CHART,
       { poolId: "pool-1" },
@@ -663,7 +663,7 @@ describe("Pool detail tab search", () => {
   });
 
   it("renders snapshot chart when snapshots are available on swaps tab", () => {
-    const html = renderWithParams({});
+    const html = renderWithParams({ tab: "swaps" });
     expect(html).toContain("snapshot-chart");
   });
 
