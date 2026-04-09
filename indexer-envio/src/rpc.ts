@@ -203,15 +203,17 @@ const RPC_ENV_VAR_BY_CHAIN: Record<number, string> = {
  */
 export function withHyperRpcToken(url: string): string {
   const token = process.env.ENVIO_API_TOKEN;
-  if (!token || !url.includes(".rpc.hypersync.xyz")) return url;
-  // Skip if the URL already has a path beyond "/" (already tokenized).
+  if (!token) return url;
   try {
     const parsed = new URL(url);
+    if (!parsed.hostname.endsWith(".rpc.hypersync.xyz")) return url;
+    // Skip if the URL already has a path beyond "/" (already tokenized).
     if (parsed.pathname !== "/" && parsed.pathname !== "") return url;
+    parsed.pathname = `/${token}`;
+    return parsed.toString();
   } catch {
     return url;
   }
-  return url.replace(/\/?$/, `/${token}`);
 }
 
 /**
