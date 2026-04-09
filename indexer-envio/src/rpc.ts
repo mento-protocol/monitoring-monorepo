@@ -180,24 +180,22 @@ export function _clearRpcClients(): void {
   rpcClients.clear();
 }
 
-// Per-chain RPC defaults used when no env var override is present.
-const DEFAULT_RPC_BY_CHAIN: Record<number, string> = {
-  42220: "https://42220.rpc.hypersync.xyz", // Celo Mainnet (Envio HyperRPC)
-  11142220: "https://forno.celo-sepolia.celo-testnet.org", // Celo Sepolia (forno — no HyperSync)
-  143: "https://143.rpc.hypersync.xyz", // Monad Mainnet (Envio HyperRPC)
-  10143: "https://10143.rpc.hypersync.xyz", // Monad Testnet (Envio HyperRPC)
-};
-
-// Per-chain RPC env var names. Each chain can be overridden independently.
-// The generic ENVIO_RPC_URL fallback is still checked for single-chain
-// compatibility, but MUST NOT be used in multichain mode as it would route
-// all chains to the same endpoint.
-const RPC_ENV_VAR_BY_CHAIN: Record<number, string> = {
-  42220: "ENVIO_RPC_URL_42220",
-  11142220: "ENVIO_RPC_URL_11142220",
-  143: "ENVIO_RPC_URL_143",
-  10143: "ENVIO_RPC_URL_10143",
-};
+// Per-chain RPC config for contract reads (eth_call).
+// Defaults MUST be full-node RPCs — Envio HyperRPC does NOT support eth_call.
+// (Envio's own event syncing uses HyperSync, configured in the YAML files.)
+const RPC_CONFIG_BY_CHAIN: Record<number, { default: string; envVar: string }> =
+  {
+    42220: { default: "https://forno.celo.org", envVar: "ENVIO_RPC_URL_42220" }, // Celo Mainnet
+    11142220: {
+      default: "https://forno.celo-sepolia.celo-testnet.org",
+      envVar: "ENVIO_RPC_URL_11142220",
+    }, // Celo Sepolia
+    143: { default: "https://rpc2.monad.xyz", envVar: "ENVIO_RPC_URL_143" }, // Monad Mainnet
+    10143: {
+      default: "https://10143.rpc.hypersync.xyz",
+      envVar: "ENVIO_RPC_URL_10143",
+    }, // Monad Testnet (no public full-node RPC known)
+  };
 
 /**
  * Appends the ENVIO_API_TOKEN to a HyperRPC base URL.
@@ -223,7 +221,7 @@ export function withHyperRpcToken(url: string): string {
 }
 
 /** Returns true if the URL is a bare (untokenized) HyperRPC endpoint. */
-function isBarHyperRpcUrl(url: string): boolean {
+function isBareHyperRpcUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     return (
@@ -252,27 +250,37 @@ export function getRpcClient(
   chainId: number,
 ): ReturnType<typeof createPublicClient> {
   if (!rpcClients.has(chainId)) {
-    const defaultRpc = DEFAULT_RPC_BY_CHAIN[chainId];
-    if (!defaultRpc) {
+    const config = RPC_CONFIG_BY_CHAIN[chainId];
+    if (!config) {
       throw new Error(
-        `[getRpcClient] No default RPC configured for chainId ${chainId}. ` +
-          `Add an entry to DEFAULT_RPC_BY_CHAIN in rpc.ts.`,
+        `[getRpcClient] No RPC config for chainId ${chainId}. ` +
+          `Add an entry to RPC_CONFIG_BY_CHAIN in rpc.ts.`,
       );
     }
     // Prefer per-chain env var, then legacy global override, then hardcoded default.
-    const perChainEnvVar = RPC_ENV_VAR_BY_CHAIN[chainId];
-    const rawUrl =
-      (perChainEnvVar && process.env[perChainEnvVar]) ??
-      process.env.ENVIO_RPC_URL ??
-      defaultRpc;
+    const perChainOverride = process.env[config.envVar];
+    const legacyGlobal = process.env.ENVIO_RPC_URL;
+    let rawUrl: string;
+    if (perChainOverride) {
+      rawUrl = perChainOverride;
+    } else if (legacyGlobal) {
+      console.warn(
+        `[getRpcClient] chainId=${chainId} using legacy ENVIO_RPC_URL fallback. ` +
+          `This routes ALL chains to the same endpoint. ` +
+          `Set ${config.envVar} instead for multichain mode.`,
+      );
+      rawUrl = legacyGlobal;
+    } else {
+      rawUrl = config.default;
+    }
     const rpcUrl = withHyperRpcToken(rawUrl);
 
     // Fail fast if a HyperRPC URL is selected but no token was appended.
-    if (isBarHyperRpcUrl(rpcUrl)) {
+    if (isBareHyperRpcUrl(rpcUrl)) {
       throw new Error(
         `[getRpcClient] chainId=${chainId} resolved to HyperRPC (${rawUrl}) ` +
           `but ENVIO_API_TOKEN is not set. Set it in .env or use a non-HyperRPC ` +
-          `override via ${perChainEnvVar ?? "ENVIO_RPC_URL"}.`,
+          `override via ${config.envVar}.`,
       );
     }
 

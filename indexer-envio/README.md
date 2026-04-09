@@ -63,7 +63,8 @@ Deploy branch: `envio` → triggers hosted reindex on push.
 
 ```bash
 cp indexer-envio/.env.example indexer-envio/.env
-# Set ENVIO_RPC_URL_42220 and ENVIO_RPC_URL_143
+# Mainnet defaults (forno, rpc2.monad.xyz) work out of the box.
+# For testnet, set ENVIO_API_TOKEN or override ENVIO_RPC_URL_10143.
 
 # Generate types + start multichain indexer
 pnpm indexer:codegen && pnpm indexer:dev

@@ -12,4 +12,5 @@ dist/
 .vercel
 .env*.local
 .claude/worktrees
+.reviews/
 WORK.md

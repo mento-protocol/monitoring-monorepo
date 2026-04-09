@@ -73,9 +73,15 @@ describe("withHyperRpcToken", () => {
   });
 });
 
-describe("getRpcClient fail-fast", () => {
+// These tests verify the fail-fast guard in getRpcClient() — they check whether
+// the guard throws or allows client construction. They do NOT test RPC
+// reachability; viem's createPublicClient is lazy and defers I/O to the first
+// actual call.
+describe("getRpcClient fail-fast guard", () => {
   const ORIGINAL_TOKEN = process.env.ENVIO_API_TOKEN;
-  const ORIGINAL_RPC = process.env.ENVIO_RPC_URL_143;
+  const ORIGINAL_RPC_42220 = process.env.ENVIO_RPC_URL_42220;
+  const ORIGINAL_RPC_143 = process.env.ENVIO_RPC_URL_143;
+  const ORIGINAL_RPC_10143 = process.env.ENVIO_RPC_URL_10143;
 
   beforeEach(() => {
     _clearRpcClients();
@@ -88,21 +94,53 @@ describe("getRpcClient fail-fast", () => {
     } else {
       delete process.env.ENVIO_API_TOKEN;
     }
-    if (ORIGINAL_RPC !== undefined) {
-      process.env.ENVIO_RPC_URL_143 = ORIGINAL_RPC;
+    if (ORIGINAL_RPC_42220 !== undefined) {
+      process.env.ENVIO_RPC_URL_42220 = ORIGINAL_RPC_42220;
+    } else {
+      delete process.env.ENVIO_RPC_URL_42220;
+    }
+    if (ORIGINAL_RPC_143 !== undefined) {
+      process.env.ENVIO_RPC_URL_143 = ORIGINAL_RPC_143;
     } else {
       delete process.env.ENVIO_RPC_URL_143;
     }
+    if (ORIGINAL_RPC_10143 !== undefined) {
+      process.env.ENVIO_RPC_URL_10143 = ORIGINAL_RPC_10143;
+    } else {
+      delete process.env.ENVIO_RPC_URL_10143;
+    }
   });
 
-  it("throws when HyperRPC default is used without ENVIO_API_TOKEN", () => {
+  // --- Guard should THROW for bare HyperRPC without token ---
+
+  it("throws when HyperRPC override is used without ENVIO_API_TOKEN", () => {
     delete process.env.ENVIO_API_TOKEN;
-    delete process.env.ENVIO_RPC_URL_143;
+    process.env.ENVIO_RPC_URL_143 = "https://143.rpc.hypersync.xyz";
     assert.throws(() => getRpcClient(143), /ENVIO_API_TOKEN is not set/);
   });
 
-  it("does not throw when ENVIO_API_TOKEN is set", () => {
+  it("throws when HyperRPC default is used without ENVIO_API_TOKEN (chain 10143)", () => {
+    delete process.env.ENVIO_API_TOKEN;
+    delete process.env.ENVIO_RPC_URL_10143;
+    assert.throws(() => getRpcClient(10143), /ENVIO_API_TOKEN is not set/);
+  });
+
+  // --- Guard should NOT throw for full-node defaults or valid HyperRPC ---
+
+  it("does not throw when ENVIO_API_TOKEN is set for HyperRPC default (chain 10143)", () => {
     process.env.ENVIO_API_TOKEN = "test-token";
+    delete process.env.ENVIO_RPC_URL_10143;
+    assert.doesNotThrow(() => getRpcClient(10143));
+  });
+
+  it("does not throw for full-node default: Celo Mainnet (chain 42220)", () => {
+    delete process.env.ENVIO_API_TOKEN;
+    delete process.env.ENVIO_RPC_URL_42220;
+    assert.doesNotThrow(() => getRpcClient(42220));
+  });
+
+  it("does not throw for full-node default: Monad Mainnet (chain 143)", () => {
+    delete process.env.ENVIO_API_TOKEN;
     delete process.env.ENVIO_RPC_URL_143;
     assert.doesNotThrow(() => getRpcClient(143));
   });
