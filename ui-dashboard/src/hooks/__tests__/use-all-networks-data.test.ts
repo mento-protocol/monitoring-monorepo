@@ -87,8 +87,16 @@ describe("fetchNetworkData — happy path", () => {
       if (query.includes("PoolSnapshot")) return { PoolSnapshot: [] };
       if (query.includes("ProtocolFeeTransfer"))
         return { ProtocolFeeTransfer: [] };
-      if (query.includes("LiquidityPosition_aggregate"))
-        return { LiquidityPosition_aggregate: { aggregate: { count: 5 } } };
+      if (query.includes("LiquidityPosition"))
+        return {
+          LiquidityPosition: [
+            { address: "0xa" },
+            { address: "0xb" },
+            { address: "0xc" },
+            { address: "0xd" },
+            { address: "0xe" },
+          ],
+        };
       if (query.includes("Pool")) return { Pool: [pool] };
       return {};
     });
@@ -284,8 +292,7 @@ describe("fetchNetworkData — LP query failure only", () => {
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
     ).mockImplementation((query: string) => {
-      if (query.includes("LiquidityPosition_aggregate"))
-        return Promise.reject(lpErr);
+      if (query.includes("LiquidityPosition")) return Promise.reject(lpErr);
       if (query.includes("PoolSnapshot")) return { PoolSnapshot: [] };
       if (query.includes("ProtocolFeeTransfer"))
         return { ProtocolFeeTransfer: [] };

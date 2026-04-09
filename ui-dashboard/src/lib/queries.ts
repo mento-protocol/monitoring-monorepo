@@ -337,12 +337,12 @@ export const POOL_LP_POSITIONS = `
   }
 `;
 
-export const UNIQUE_LP_COUNT = `
-  query UniqueLpCount($poolIds: [String!]!) {
-    LiquidityPosition_aggregate(
+export const UNIQUE_LP_ADDRESSES = `
+  query UniqueLpAddresses($poolIds: [String!]!) {
+    LiquidityPosition(
       where: { poolId: { _in: $poolIds }, netLiquidity: { _gt: "0" } }
     ) {
-      aggregate { count(columns: address, distinct: true) }
+      address
     }
   }
 `;
