@@ -171,8 +171,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasVirtualPools: true,
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
-    rpcUrl:
-      process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://42220.rpc.hypersync.xyz",
+    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_LOCAL ??
       "http://localhost:8080/v1/graphql",
@@ -191,8 +190,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasVirtualPools: true,
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
-    rpcUrl:
-      process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://42220.rpc.hypersync.xyz",
+    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN?.trim() ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
@@ -208,8 +206,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 143,
     contractsNamespace: NS["monad-mainnet"],
     rpcUrl:
-      process.env.NEXT_PUBLIC_RPC_URL_MONAD_MAINNET ??
-      "https://143.rpc.hypersync.xyz",
+      process.env.NEXT_PUBLIC_RPC_URL_MONAD_MAINNET ?? "https://rpc2.monad.xyz",
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN?.trim() ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
@@ -222,9 +219,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     testnet: true,
     chainId: 10143,
     contractsNamespace: NS["monad-testnet"],
-    rpcUrl:
-      process.env.NEXT_PUBLIC_RPC_URL_MONAD_TESTNET ??
-      "https://10143.rpc.hypersync.xyz",
+    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_MONAD_TESTNET,
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET ?? "",
     hasuraSecret: "",
     explorerBaseUrl:

@@ -194,6 +194,17 @@ const RPC_ENV_VAR_BY_CHAIN: Record<number, string> = {
 };
 
 /**
+ * Appends the ENVIO_API_TOKEN to a HyperRPC base URL.
+ * HyperRPC requires the token as a path segment: `https://143.rpc.hypersync.xyz/<token>`
+ * Returns the URL unchanged if no token is set or the URL is not a HyperRPC endpoint.
+ */
+function withHyperRpcToken(url: string): string {
+  const token = process.env.ENVIO_API_TOKEN;
+  if (!token || !url.includes(".rpc.hypersync.xyz")) return url;
+  return url.replace(/\/?$/, `/${token}`);
+}
+
+/**
  * Returns a viem public client for the given chainId.
  *
  * RPC resolution order (first match wins):
@@ -202,6 +213,9 @@ const RPC_ENV_VAR_BY_CHAIN: Record<number, string> = {
  *    exactly one chain. Do NOT set this in multichain mode — it will route
  *    all chains to the same endpoint, causing incorrect RPC calls.
  * 3. Hardcoded default in DEFAULT_RPC_BY_CHAIN.
+ *
+ * If the resolved URL is a HyperRPC endpoint, the ENVIO_API_TOKEN is
+ * automatically appended as a path segment for authentication.
  */
 export function getRpcClient(
   chainId: number,
@@ -216,10 +230,11 @@ export function getRpcClient(
     }
     // Prefer per-chain env var, then legacy global override, then hardcoded default.
     const perChainEnvVar = RPC_ENV_VAR_BY_CHAIN[chainId];
-    const rpcUrl =
+    const rpcUrl = withHyperRpcToken(
       (perChainEnvVar && process.env[perChainEnvVar]) ??
-      process.env.ENVIO_RPC_URL ??
-      defaultRpc;
+        process.env.ENVIO_RPC_URL ??
+        defaultRpc,
+    );
 
     rpcClients.set(
       chainId,
