@@ -282,28 +282,37 @@ export type BlockFallbackResult = {
   usedFallback: boolean;
 };
 
+/** Maximum number of retries with the original blockNumber before falling back
+ * to reading "latest". Each retry uses an increasing delay. */
+const BLOCK_RETRY_DELAYS_MS = [500, 1000, 2000];
+
+/** @internal Test-only hooks for overriding the delay function. */
+export const _testHooks = {
+  delayFn: (ms: number): Promise<void> =>
+    new Promise((resolve) => setTimeout(resolve, ms)),
+};
+
 /**
- * Wrapper around `client.readContract` that retries without `blockNumber` when
- * the RPC node indicates the requested block is not available. This happens
- * when HyperSync delivers events faster than the RPC node syncs — reading
- * latest state is far better than losing the data entirely.
+ * Wrapper around `client.readContract` that retries the original blockNumber
+ * with increasing delays, then falls back to reading "latest" when the RPC
+ * node indicates the requested block is not yet available.
  *
  * Returns `{ result, usedFallback }` so callers can skip block-scoped cache
- * writes when fallback was used (the result is from "latest", not the
- * requested block).
- *
- * Rethrows all other errors so callers handle logging as before.
+ * writes when fallback was used.
  */
 export async function readContractWithBlockFallback(
   client: ReturnType<typeof createPublicClient>,
   args: Record<string, unknown>,
   blockNumber?: bigint,
 ): Promise<BlockFallbackResult> {
-  try {
-    const result = await client.readContract({
+  const callWithBlock = () =>
+    client.readContract({
       ...args,
       ...(blockNumber !== undefined && { blockNumber }),
     } as any);
+
+  try {
+    const result = await callWithBlock();
     return { result, usedFallback: false };
   } catch (err) {
     if (
@@ -313,8 +322,33 @@ export async function readContractWithBlockFallback(
     ) {
       const fn = (args.functionName as string) ?? "unknown";
       const target = (args.address as string) ?? "unknown";
+
+      // Retry the original blockNumber a few times with increasing delays —
+      // the RPC node may just be slightly behind HyperSync.
+      for (let i = 0; i < BLOCK_RETRY_DELAYS_MS.length; i++) {
+        const delay = BLOCK_RETRY_DELAYS_MS[i];
+        console.warn(
+          `[RPC_BLOCK_RETRY] fn=${fn} target=${target} requestedBlock=${blockNumber} retry=${i + 1}/${BLOCK_RETRY_DELAYS_MS.length} delay=${delay}ms`,
+        );
+        await _testHooks.delayFn(delay);
+        try {
+          const result = await callWithBlock();
+          return { result, usedFallback: false };
+        } catch (retryErr) {
+          if (
+            !(retryErr instanceof Error) ||
+            !BLOCK_NOT_AVAILABLE_RE.test(retryErr.message)
+          ) {
+            // Different error during retry — propagate immediately.
+            throw retryErr;
+          }
+          // Same block-not-available error — continue to next retry or fallback.
+        }
+      }
+
+      // All retries exhausted — fall back to reading latest.
       console.warn(
-        `[RPC_BLOCK_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — reading latest instead`,
+        `[RPC_BLOCK_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — retries exhausted, reading latest instead`,
       );
       const result = await client.readContract(args as any);
       return { result, usedFallback: true };
@@ -645,15 +679,21 @@ export async function fetchTradingLimits(
   chainId: number,
   poolAddress: string,
   token: string,
+  blockNumber?: bigint,
 ): Promise<TradingLimitData | null> {
   try {
     const client = getRpcClient(chainId);
-    const result = (await client.readContract({
-      address: poolAddress as `0x${string}`,
-      abi: FPMM_TRADING_LIMITS_ABI,
-      functionName: "getTradingLimits",
-      args: [token as `0x${string}`],
-    })) as unknown as [
+    const { result: raw } = await readContractWithBlockFallback(
+      client,
+      {
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_TRADING_LIMITS_ABI,
+        functionName: "getTradingLimits",
+        args: [token as `0x${string}`],
+      },
+      blockNumber,
+    );
+    const result = raw as unknown as [
       { limit0: bigint; limit1: bigint; decimals: number },
       {
         lastUpdated0: number;
@@ -665,7 +705,7 @@ export async function fetchTradingLimits(
     const [config, state] = result;
     return { config, state };
   } catch (err) {
-    logRpcFailure(chainId, "getTradingLimits", poolAddress, err);
+    logRpcFailure(chainId, "getTradingLimits", poolAddress, err, blockNumber);
     return null;
   }
 }

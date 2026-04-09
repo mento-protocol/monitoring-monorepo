@@ -241,8 +241,18 @@ FPMM.Swap.handler(async ({ event, context }) => {
     pool.token1
   ) {
     const [limits0, limits1] = await Promise.all([
-      fetchTradingLimits(event.chainId, event.srcAddress, pool.token0),
-      fetchTradingLimits(event.chainId, event.srcAddress, pool.token1),
+      fetchTradingLimits(
+        event.chainId,
+        event.srcAddress,
+        pool.token0,
+        blockNumber,
+      ),
+      fetchTradingLimits(
+        event.chainId,
+        event.srcAddress,
+        pool.token1,
+        blockNumber,
+      ),
     ]);
 
     let worstP0 = 0;
@@ -721,6 +731,7 @@ FPMM.TradingLimitConfigured.handler(async ({ event, context }) => {
     event.chainId,
     event.srcAddress,
     event.params.token,
+    blockNumber,
   );
 
   const limit0 = limits ? limits.config.limit0 : eventLimit0;
