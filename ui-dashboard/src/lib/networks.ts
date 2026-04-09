@@ -206,7 +206,8 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 143,
     contractsNamespace: NS["monad-mainnet"],
     rpcUrl:
-      process.env.NEXT_PUBLIC_RPC_URL_MONAD_MAINNET ?? "https://rpc2.monad.xyz",
+      process.env.NEXT_PUBLIC_RPC_URL_MONAD_MAINNET ??
+      "https://143.rpc.hypersync.xyz",
     hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN?.trim() ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
