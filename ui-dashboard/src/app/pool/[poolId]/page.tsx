@@ -88,6 +88,7 @@ const TABS = [
   "providers",
   "swaps",
   "reserves",
+  "rebalances",
   "liquidity",
   "oracle",
   "ols",
@@ -95,12 +96,13 @@ const TABS = [
 type Tab = (typeof TABS)[number];
 type SearchableTab = Extract<
   Tab,
-  "swaps" | "reserves" | "liquidity" | "oracle"
+  "swaps" | "reserves" | "rebalances" | "liquidity" | "oracle"
 >;
 
 const SEARCH_PARAM_BY_TAB: Record<SearchableTab, string> = {
   swaps: "swapsQ",
   reserves: "reservesQ",
+  rebalances: "rebalancesQ",
   liquidity: "liquidityQ",
   oracle: "oracleQ",
 };
@@ -109,6 +111,7 @@ function isSearchableTab(tab: Tab): tab is SearchableTab {
   return (
     tab === "swaps" ||
     tab === "reserves" ||
+    tab === "rebalances" ||
     tab === "liquidity" ||
     tab === "oracle"
   );
@@ -394,6 +397,14 @@ function PoolDetail() {
             pool={pool}
             search={activeSearch}
             onSearchChange={(value) => setTabSearch("reserves", value)}
+          />
+        )}
+        {tab === "rebalances" && (
+          <RebalancesTab
+            poolId={normalizedPoolId}
+            limit={limit}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("rebalances", value)}
           />
         )}
         {tab === "liquidity" && (
