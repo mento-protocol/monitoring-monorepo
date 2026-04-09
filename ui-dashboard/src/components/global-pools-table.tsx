@@ -210,7 +210,10 @@ export function GlobalPoolsTable({
   const tvlByKey = useMemo(
     () =>
       new Map(
-        entries.map((e) => [globalPoolKey(e), poolTvlUSD(e.pool, e.network)]),
+        entries.map((e) => [
+          globalPoolKey(e),
+          poolTvlUSD(e.pool, e.network, e.rates),
+        ]),
       ),
     [entries],
   );
