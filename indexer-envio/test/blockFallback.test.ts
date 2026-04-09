@@ -1,10 +1,6 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
-import {
-  readContractWithBlockFallback,
-  _setDelayFn,
-  _delayFn,
-} from "../src/rpc";
+import { readContractWithBlockFallback, _testHooks } from "../src/rpc";
 
 // ---------------------------------------------------------------------------
 // Mock client factory
@@ -30,13 +26,13 @@ describe("readContractWithBlockFallback", () => {
   };
 
   // Replace the delay function with an instant no-op for tests.
-  let originalDelayFn: typeof _delayFn;
+  let originalDelayFn: typeof _testHooks.delayFn;
   before(() => {
-    originalDelayFn = _delayFn;
-    _setDelayFn(async () => {});
+    originalDelayFn = _testHooks.delayFn;
+    _testHooks.delayFn = async () => {};
   });
   after(() => {
-    _setDelayFn(originalDelayFn);
+    _testHooks.delayFn = originalDelayFn;
   });
 
   // -------------------------------------------------------------------------
@@ -127,19 +123,21 @@ describe("readContractWithBlockFallback", () => {
 
   it("tracks delay values passed to the delay function", async () => {
     const delays: number[] = [];
-    _setDelayFn(async (ms) => {
+    _testHooks.delayFn = async (ms) => {
       delays.push(ms);
-    });
-    const client = mockClient(async (args) => {
-      if ((args as any).blockNumber !== undefined) {
-        throw new Error("block is out of range");
-      }
-      return "ok";
-    });
-    await readContractWithBlockFallback(client, baseArgs, 100n);
-    assert.deepEqual(delays, [500, 1000, 2000]);
-    // Reset to no-op
-    _setDelayFn(async () => {});
+    };
+    try {
+      const client = mockClient(async (args) => {
+        if ((args as any).blockNumber !== undefined) {
+          throw new Error("block is out of range");
+        }
+        return "ok";
+      });
+      await readContractWithBlockFallback(client, baseArgs, 100n);
+      assert.deepEqual(delays, [500, 1000, 2000]);
+    } finally {
+      _testHooks.delayFn = async () => {};
+    }
   });
 
   // -------------------------------------------------------------------------
