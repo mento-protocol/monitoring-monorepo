@@ -17,7 +17,7 @@ import type {
 import {
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
-  ORACLE_SNAPSHOTS_COUNT,
+  ORACLE_SNAPSHOTS_COUNT_PAGE,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   POOL_LIQUIDITY,
@@ -360,11 +360,13 @@ beforeEach(() => {
         });
       if (query === ORACLE_SNAPSHOTS_CHART)
         return makeGqlResult({ OracleSnapshot: oracleRows });
-      if (query === ORACLE_SNAPSHOTS_COUNT)
+      if (query === ORACLE_SNAPSHOTS_COUNT_PAGE)
         return oracleCountError
           ? { data: null, error: new Error("count failed"), isLoading: false }
           : makeGqlResult({
-              OracleSnapshot_aggregate: { aggregate: { count: oracleCount } },
+              OracleSnapshot: Array.from({ length: oracleCount }, (_, i) => ({
+                id: `snap-${i}`,
+              })),
             });
       return makeGqlResult({});
     },
@@ -491,7 +493,7 @@ describe("Pool detail tab search", () => {
   it("loads chart and count oracle queries and renders pagination metadata", () => {
     const html = renderWithParams({ tab: "oracle" });
     expect(useGQLMock).toHaveBeenCalledWith(
-      ORACLE_SNAPSHOTS_COUNT,
+      ORACLE_SNAPSHOTS_COUNT_PAGE,
       expect.objectContaining({ poolId: "pool-1" }),
     );
     expect(useGQLMock).toHaveBeenCalledWith(
@@ -720,9 +722,11 @@ describe("Pool detail tab search", () => {
           });
         if (query === ORACLE_SNAPSHOTS_CHART)
           return makeGqlResult({ OracleSnapshot: oracleRows });
-        if (query === ORACLE_SNAPSHOTS_COUNT)
+        if (query === ORACLE_SNAPSHOTS_COUNT_PAGE)
           return makeGqlResult({
-            OracleSnapshot_aggregate: { aggregate: { count: oracleCount } },
+            OracleSnapshot: Array.from({ length: oracleCount }, (_, i) => ({
+              id: `snap-${i}`,
+            })),
           });
         return makeGqlResult({});
       },

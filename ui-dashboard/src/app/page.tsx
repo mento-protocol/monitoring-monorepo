@@ -3,6 +3,8 @@
 import { Suspense, useMemo } from "react";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD } from "@/lib/tokens";
+import type { Pool, PoolSnapshotWindow } from "@/lib/types";
+import type { Network } from "@/lib/networks";
 import { buildPoolVolumeMap, poolTotalVolumeUSD } from "@/lib/volume";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
@@ -26,6 +28,41 @@ function sumVolumeMap(map: Map<string, number | null>): number {
     if (typeof v === "number") total += v;
   }
   return total;
+}
+
+/**
+ * Returns matched current/historical TVL for pools that have snapshot data.
+ * Only pools with a snapshot in the window contribute to both sides, so
+ * newly-created pools (no historical snapshot) don't inflate the delta.
+ *
+ * Uses today's oracle rate (not the historical rate) so the percentage change
+ * isolates reserve-quantity movements from price movements.
+ */
+function matchedTvl(
+  snapshots: PoolSnapshotWindow[],
+  pools: Pool[],
+  network: Network,
+): { now: number; ago: number } {
+  const fpmmMap = new Map(pools.filter(isFpmm).map((p) => [p.id, p]));
+  const earliest = new Map<string, PoolSnapshotWindow>();
+  for (const s of snapshots) {
+    if (!fpmmMap.has(s.poolId)) continue;
+    const existing = earliest.get(s.poolId);
+    if (!existing || Number(s.timestamp) < Number(existing.timestamp)) {
+      earliest.set(s.poolId, s);
+    }
+  }
+  let now = 0;
+  let ago = 0;
+  for (const [poolId, snap] of earliest) {
+    const pool = fpmmMap.get(poolId)!;
+    now += poolTvlUSD(pool, network);
+    ago += poolTvlUSD(
+      { ...pool, reserves0: snap.reserves0, reserves1: snap.reserves1 },
+      network,
+    );
+  }
+  return { now, ago };
 }
 
 function GlobalContent() {
@@ -57,6 +94,17 @@ function GlobalContent() {
       let totalPools = 0;
       let totalFpmmPools = 0;
       let totalTvl = 0;
+      // Track current + historical TVL only for chains that contributed
+      // snapshot data, so numerator and denominator always match.
+      let tvlNow24h = 0;
+      let tvlAgo24h = 0;
+      let tvlNow7d = 0;
+      let tvlAgo7d = 0;
+      let tvlNow30d = 0;
+      let tvlAgo30d = 0;
+      let hasTvlSnapshots24h = false;
+      let hasTvlSnapshots7d = false;
+      let hasTvlSnapshots30d = false;
       const allEntries: GlobalPoolEntry[] = [];
       const allVol24h = new Map<string, number | null | undefined>();
       const allVol7d = new Map<string, number | null | undefined>();
@@ -90,10 +138,32 @@ function GlobalContent() {
         const fpmmPools = pools.filter(isFpmm);
         totalPools += pools.length;
         totalFpmmPools += fpmmPools.length;
-        totalTvl += fpmmPools.reduce(
+        const chainTvlNow = fpmmPools.reduce(
           (sum, p) => sum + poolTvlUSD(p, network),
           0,
         );
+        totalTvl += chainTvlNow;
+
+        // Historical TVL — only pools with snapshot data contribute to both
+        // sides of the delta, so new pools don't inflate the percentage.
+        if (netData.snapshotsError === null && snapshots.length > 0) {
+          const m = matchedTvl(snapshots, pools, network);
+          tvlNow24h += m.now;
+          tvlAgo24h += m.ago;
+          hasTvlSnapshots24h = true;
+        }
+        if (netData.snapshots7dError === null && snapshots7d.length > 0) {
+          const m = matchedTvl(snapshots7d, pools, network);
+          tvlNow7d += m.now;
+          tvlAgo7d += m.ago;
+          hasTvlSnapshots7d = true;
+        }
+        if (netData.snapshots30dError === null && snapshots30d.length > 0) {
+          const m = matchedTvl(snapshots30d, pools, network);
+          tvlNow30d += m.now;
+          tvlAgo30d += m.ago;
+          hasTvlSnapshots30d = true;
+        }
 
         // All-time volume & swaps from pool-level counters
         if (totalVolumeAllTime !== null) {
@@ -185,6 +255,18 @@ function GlobalContent() {
           totalFees7d,
           totalFees30d,
           totalUniqueLps,
+          tvlChange24h:
+            hasTvlSnapshots24h && tvlAgo24h > 0
+              ? ((tvlNow24h - tvlAgo24h) / tvlAgo24h) * 100
+              : null,
+          tvlChange7d:
+            hasTvlSnapshots7d && tvlAgo7d > 0
+              ? ((tvlNow7d - tvlAgo7d) / tvlAgo7d) * 100
+              : null,
+          tvlChange30d:
+            hasTvlSnapshots30d && tvlAgo30d > 0
+              ? ((tvlNow30d - tvlAgo30d) / tvlAgo30d) * 100
+              : null,
           unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
           totalUnresolvedCount,
           isTruncated,
@@ -240,11 +322,15 @@ function GlobalContent() {
             format={formatUSD}
           />
 
-          <Tile
-            label="TVL (FPMMs)"
-            value={isLoading ? "…" : formatUSD(aggregated.totalTvl)}
-            subtitle={
-              anyNetworkError ? "Partial data — some chains failed" : undefined
+          <TvlTile
+            tvl={aggregated.totalTvl}
+            change24h={aggregated.tvlChange24h}
+            change7d={aggregated.tvlChange7d}
+            change30d={aggregated.tvlChange30d}
+            isLoading={isLoading}
+            hasError={anyNetworkError}
+            hasSnapshotError={
+              anySnapshotsError || anySnapshots7dError || anySnapshots30dError
             }
           />
 
@@ -419,6 +505,82 @@ function BreakdownTile({
         aria-hidden={!subtitle && !hasError}
       >
         {hasError ? "Some chains failed to load" : subtitle}
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// TvlTile — TVL headline with 24h / 7d / 30d percentage change sub-KPIs
+// ---------------------------------------------------------------------------
+
+function formatPctChange(pct: number): string {
+  const sign = pct >= 0 ? "+" : "";
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
+function TvlTile({
+  tvl,
+  change24h,
+  change7d,
+  change30d,
+  isLoading,
+  hasError,
+  hasSnapshotError,
+}: {
+  tvl: number;
+  change24h: number | null;
+  change7d: number | null;
+  change30d: number | null;
+  isLoading: boolean;
+  hasError: boolean;
+  hasSnapshotError: boolean;
+}) {
+  const changes = [
+    { label: "24h", value: change24h },
+    { label: "7d", value: change7d },
+    { label: "30d", value: change30d },
+  ];
+  const hasAnyChange =
+    !isLoading && !hasError && changes.some((c) => c.value !== null);
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px]">
+      <div>
+        <p className="text-sm text-slate-400">TVL (FPMMs)</p>
+        <p className="mt-1 text-2xl font-semibold text-white font-mono">
+          {isLoading ? "…" : formatUSD(tvl)}
+        </p>
+        {hasAnyChange && (
+          <div className="mt-1.5 flex gap-3 text-sm font-mono">
+            {changes.map((c) => (
+              <span key={c.label}>
+                <span className="text-slate-500">{c.label}</span>{" "}
+                <span
+                  className={
+                    c.value === null
+                      ? "text-slate-500"
+                      : c.value >= 0
+                        ? "text-emerald-400"
+                        : "text-red-400"
+                  }
+                >
+                  {c.value === null ? "—" : formatPctChange(c.value)}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      <p
+        className="mt-2 text-xs text-slate-500 min-h-4"
+        aria-hidden={!hasError && !hasSnapshotError}
+      >
+        {hasError
+          ? "Partial data — some chains failed"
+          : hasSnapshotError
+            ? "Deltas partial — some snapshot queries failed"
+            : undefined}
       </p>
     </div>
   );

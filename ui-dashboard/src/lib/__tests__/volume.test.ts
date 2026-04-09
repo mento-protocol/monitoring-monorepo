@@ -64,9 +64,33 @@ describe("shouldQueryPoolSnapshots", () => {
 describe("sumFpmmSwaps", () => {
   it("sums swapCount across all hourly snapshots for FPMM pools", () => {
     const snapshots: PoolSnapshotWindow[] = [
-      { poolId: "fpmm-1", swapCount: 3, swapVolume0: "0", swapVolume1: "0" },
-      { poolId: "fpmm-1", swapCount: 5, swapVolume0: "0", swapVolume1: "0" },
-      { poolId: "fpmm-2", swapCount: 2, swapVolume0: "0", swapVolume1: "0" },
+      {
+        poolId: "fpmm-1",
+        timestamp: "0",
+        reserves0: "0",
+        reserves1: "0",
+        swapCount: 3,
+        swapVolume0: "0",
+        swapVolume1: "0",
+      },
+      {
+        poolId: "fpmm-1",
+        timestamp: "0",
+        reserves0: "0",
+        reserves1: "0",
+        swapCount: 5,
+        swapVolume0: "0",
+        swapVolume1: "0",
+      },
+      {
+        poolId: "fpmm-2",
+        timestamp: "0",
+        reserves0: "0",
+        reserves1: "0",
+        swapCount: 2,
+        swapVolume0: "0",
+        swapVolume1: "0",
+      },
     ];
     const fpmmIds = new Set(["fpmm-1", "fpmm-2"]);
     expect(sumFpmmSwaps(snapshots, fpmmIds)).toBe(10);
@@ -74,9 +98,20 @@ describe("sumFpmmSwaps", () => {
 
   it("excludes snapshots from non-FPMM pools", () => {
     const snapshots: PoolSnapshotWindow[] = [
-      { poolId: "fpmm-1", swapCount: 4, swapVolume0: "0", swapVolume1: "0" },
+      {
+        poolId: "fpmm-1",
+        timestamp: "0",
+        reserves0: "0",
+        reserves1: "0",
+        swapCount: 4,
+        swapVolume0: "0",
+        swapVolume1: "0",
+      },
       {
         poolId: "virtual-1",
+        timestamp: "0",
+        reserves0: "0",
+        reserves1: "0",
         swapCount: 99,
         swapVolume0: "0",
         swapVolume1: "0",
@@ -92,7 +127,15 @@ describe("sumFpmmSwaps", () => {
 
   it("returns 0 when fpmmPoolIds is empty", () => {
     const snapshots: PoolSnapshotWindow[] = [
-      { poolId: "fpmm-1", swapCount: 7, swapVolume0: "0", swapVolume1: "0" },
+      {
+        poolId: "fpmm-1",
+        timestamp: "0",
+        reserves0: "0",
+        reserves1: "0",
+        swapCount: 7,
+        swapVolume0: "0",
+        swapVolume1: "0",
+      },
     ];
     expect(sumFpmmSwaps(snapshots, new Set())).toBe(0);
   });
@@ -120,6 +163,9 @@ describe("buildPoolVolumeMap", () => {
     const snapshots: PoolSnapshotWindow[] = [
       {
         poolId: "pool-1",
+        timestamp: "0",
+        reserves0: "0",
+        reserves1: "0",
         swapVolume0: "2000000000000000000", // 2 USDm
         swapVolume1: "900000000000000000000", // should be ignored when oracle exists
         swapCount: 1,
@@ -156,6 +202,9 @@ describe("buildPoolVolumeMap", () => {
     const snapshots: PoolSnapshotWindow[] = [
       {
         poolId: "pool-2",
+        timestamp: "0",
+        reserves0: "0",
+        reserves1: "0",
         swapVolume0: "1000000000000000000", // 1
         swapVolume1: "3000000000000000000", // 3
         swapCount: 1,
@@ -192,12 +241,18 @@ describe("buildPoolVolumeMap", () => {
     const snapshots: PoolSnapshotWindow[] = [
       {
         poolId: "pool-eur",
+        timestamp: "0",
+        reserves0: "0",
+        reserves1: "0",
         swapVolume0: "50000000", // 50 axlEUROC (6 decimals)
         swapVolume1: "100000000000000000000", // 100 EURm (18 decimals)
         swapCount: 3,
       },
       {
         poolId: "pool-eur",
+        timestamp: "0",
+        reserves0: "0",
+        reserves1: "0",
         swapVolume0: "25000000", // 25 axlEUROC
         swapVolume1: "50000000000000000000", // 50 EURm
         swapCount: 1,
@@ -236,6 +291,9 @@ describe("buildPoolVolumeMap", () => {
     const snapshots: PoolSnapshotWindow[] = [
       {
         poolId: "pool-3",
+        timestamp: "0",
+        reserves0: "0",
+        reserves1: "0",
         swapVolume0: "1000000000000000000",
         swapVolume1: "3000000000000000000",
         swapCount: 1,
