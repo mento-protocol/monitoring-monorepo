@@ -362,7 +362,11 @@ function GlobalContent() {
                   : aggregated.totalUniqueLps.toLocaleString()
             }
             subtitle={
-              anyLpError
+              // totalUniqueLps is forced to null whenever any chain failed at
+              // the top level, so the subtitle must degrade for network errors
+              // too — not just lpError — otherwise we'd claim a complete
+              // global metric while actually showing N/A.
+              anyNetworkError || anyLpError
                 ? "Partial — some chains failed to load"
                 : "Unique LP addresses across all chains"
             }
