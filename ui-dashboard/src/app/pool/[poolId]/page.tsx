@@ -487,12 +487,14 @@ function PoolHeader({
           )}
         </span>
       </div>
-      {/* Flex + content-sized cells: each metric column hugs its text, so
-          Health Score (short) doesn't float in the same width as Rebalance
-          Status (long subtitle). Gap-x-10 keeps cells readable without the
-          equal-column dead space grid-cols-4 produced. */}
-      <dl className="flex flex-wrap gap-x-10 gap-y-4 text-sm">
+      {/* `justify-between` distributes any trailing slack on the row as
+          wider uniform gaps between cells, so the row spans edge-to-edge
+          instead of leaving whitespace at the right. Each text cell gets
+          `min-w-36` so the shortest one (Health Score) doesn't feel
+          squished against the left edge while long cells size to content. */}
+      <dl className="flex flex-wrap justify-between gap-x-6 gap-y-4 text-sm">
         <Stat
+          className="min-w-36"
           label="Health Score"
           value={
             isVirtual ? (
@@ -503,6 +505,7 @@ function PoolHeader({
           }
         />
         <Stat
+          className="min-w-36"
           label="Oracle Status"
           value={
             isVirtual ? (
@@ -513,6 +516,7 @@ function PoolHeader({
           }
         />
         <Stat
+          className="min-w-36"
           label="Oracle Price"
           value={
             isVirtual ? (
@@ -523,6 +527,7 @@ function PoolHeader({
           }
         />
         <Stat
+          className="min-w-36"
           label="Rebalance Status"
           value={
             isVirtual || !pool.rebalancerAddress ? (
@@ -547,14 +552,16 @@ function Stat({
   value,
   title,
   mono,
+  className,
 }: {
   label: string;
   value: React.ReactNode;
   title?: string;
   mono?: boolean;
+  className?: string;
 }) {
   return (
-    <div>
+    <div className={className}>
       <dt className="text-slate-400">{label}</dt>
       <dd className={`text-white ${mono ? "font-mono" : ""}`} title={title}>
         {value}
