@@ -117,6 +117,26 @@ describe("OraclePriceValue", () => {
     expect(html).not.toContain("↗");
   });
 
+  it("prefers the non-USDm leg even when USDm is token1 (reversed pair)", () => {
+    // Mirror of the "Chainlink link" test with token0/token1 swapped.
+    // With `usdmIsToken0=false`, sym0=USDC is the non-USDm leg and must win
+    // feed selection over sym1=USDm. Checking sym1 first would pick USDm
+    // (which has no Chainlink feed here) and fall through to no link.
+    const pool: Pool = {
+      ...BASE_POOL,
+      token0: USDC_ADDR,
+      token1: USDM_ADDR,
+      oraclePrice: String(BigInt(1) * BigInt(10) ** BigInt(24)),
+    };
+    const html = renderToStaticMarkup(
+      <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
+    );
+    expect(html).toContain(
+      'href="https://data.chain.link/feeds/celo/mainnet/usdc-usd"',
+    );
+    expect(html).toContain("Chainlink USDC/USD oracle");
+  });
+
   it("renders plain 'via SortedOracles' when no Chainlink mapping exists", () => {
     const pool: Pool = {
       ...BASE_POOL,

@@ -28,11 +28,15 @@ export function OraclePriceValue({
   const displayPrice =
     feedVal > 0 ? formatOraclePrice(inverted ? 1 / feedVal : feedVal) : "—";
 
-  // Try the non-USDm leg first (more specific feed), fall back to the USDm
-  // leg in the unusual case where both legs resolve to different pairs.
+  // Prefer the non-USDm leg first (more specific feed), fall back to the
+  // USDm leg in the unusual case where both legs resolve to different pairs.
+  // The legs must be addressed via `usdmIsToken0` — checking sym1 first
+  // unconditionally picks the wrong leg when USDm happens to be token1.
+  const nonUsdmSym = usdmIsToken0 ? sym1 : sym0;
+  const usdmSym = usdmIsToken0 ? sym0 : sym1;
   const feed =
-    chainlinkFeed(sym1, network.chainId) ??
-    chainlinkFeed(sym0, network.chainId);
+    chainlinkFeed(nonUsdmSym, network.chainId) ??
+    chainlinkFeed(usdmSym, network.chainId);
 
   return (
     <span className="flex flex-col gap-0.5">
@@ -40,6 +44,8 @@ export function OraclePriceValue({
         <button
           type="button"
           onClick={() => setInverted((v) => !v)}
+          aria-pressed={inverted}
+          aria-label={`Showing 1 ${base} = ${displayPrice} ${quote}. Activate to invert direction.`}
           title="Click to toggle price direction"
           className="font-mono text-white hover:text-indigo-300 transition-colors text-left"
         >
