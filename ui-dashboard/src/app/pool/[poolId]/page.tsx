@@ -470,9 +470,17 @@ function PoolHeader({
           label="Token 0/1"
           value={
             <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-              {pool.token0 ? <AddressLink address={pool.token0} /> : "—"}
+              {pool.token0 ? (
+                <AddressLink address={pool.token0} readOnly />
+              ) : (
+                "—"
+              )}
               <span className="text-slate-600">/</span>
-              {pool.token1 ? <AddressLink address={pool.token1} /> : "—"}
+              {pool.token1 ? (
+                <AddressLink address={pool.token1} readOnly />
+              ) : (
+                "—"
+              )}
             </span>
           }
         />
