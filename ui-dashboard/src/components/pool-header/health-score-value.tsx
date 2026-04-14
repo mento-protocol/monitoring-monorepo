@@ -61,13 +61,13 @@ export function HealthScoreValue({ pool }: { pool: Pool }) {
 
 function HealthScoreInfoIcon() {
   return (
-    <span
-      role="img"
-      aria-label="About the Health Score"
+    <button
+      type="button"
+      aria-label={`About the Health Score. ${HEALTH_SCORE_EXPLAINER}`}
       title={HEALTH_SCORE_EXPLAINER}
-      className="cursor-help text-xs text-slate-500 hover:text-slate-300"
+      className="cursor-help text-xs text-slate-500 hover:text-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-500 focus:rounded"
     >
       ⓘ
-    </span>
+    </button>
   );
 }
