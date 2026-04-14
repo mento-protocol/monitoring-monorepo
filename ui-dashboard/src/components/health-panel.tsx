@@ -483,19 +483,22 @@ function RebalanceDiagnostics({
 
   if (!result) return null;
 
-  const statusColor = result.canRebalance ? "text-emerald-400" : "text-red-400";
-  const statusIcon = result.canRebalance ? "✓" : "✗";
+  // A feasible rebalance means the pool is imbalanced AND a fix is
+  // possible — that's a call to action (amber), not a green success.
+  // "Blocked" means we can't fix it at all — red.
+  const statusColor = result.canRebalance ? "text-amber-400" : "text-red-400";
+  const statusIcon = result.canRebalance ? "⚠" : "✗";
   const statusLabel = result.canRebalance
-    ? "Rebalance possible"
+    ? "Rebalance required"
     : "Rebalance blocked";
-  // When a rebalance is feasible, link the status to the strategy's write
-  // page so an operator (or any OLS caller) can jump straight to signing
-  // the tx. Strategies are upgradeable proxies — use #writeProxyContract#F4
-  // so the link opens on the proxy-write tab with rebalance() expanded.
-  // Reverts don't link anywhere — the error text is the next step.
+  // Strategies are upgradeable proxies — link to #writeProxyContract#F<n>
+  // with the rebalance() function index so the deep-link opens straight
+  // on the right row ready to sign. All current strategies expose
+  // rebalance() at F4 but keep this as a map so new strategies (with a
+  // different ABI ordering) are a single-point update.
   const writeContractUrl =
     result.canRebalance && strategyAddress
-      ? `${explorerBaseUrl}/address/${strategyAddress}#writeProxyContract#F4`
+      ? `${explorerBaseUrl}/address/${strategyAddress}#writeProxyContract#F${REBALANCE_FN_INDEX[result.strategyType]}`
       : null;
 
   return (
@@ -521,10 +524,9 @@ function RebalanceDiagnostics({
           </span>
         )}
 
-        {/* Human-readable reason with raw error. OLS success has nuance
-            worth surfacing (awaits external caller); other success cases
-            are self-explanatory from the "Rebalance possible" headline. */}
-        {(!result.canRebalance || result.strategyType === "ols") && (
+        {/* Human-readable reason with raw error — only when blocked.
+            "Rebalance required" headline is self-explanatory on its own. */}
+        {!result.canRebalance && (
           <p className="text-sm text-slate-300 leading-relaxed">
             {result.message}
             {result.rawError && (
@@ -611,3 +613,13 @@ function formatStrategyType(strategyType: StrategyType): string {
       return "Unknown";
   }
 }
+
+/** rebalance(address) is the 4th writable function on each strategy's ABI
+ *  as currently deployed. Monadscan/Celoscan index writable functions
+ *  starting at F1 in source order, so F4 maps to rebalance() on all three. */
+const REBALANCE_FN_INDEX: Record<StrategyType, number> = {
+  cdp: 4,
+  reserve: 4,
+  ols: 4,
+  unknown: 4,
+};

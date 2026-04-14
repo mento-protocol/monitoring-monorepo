@@ -233,10 +233,6 @@ export async function checkRebalanceStatus(
   //    CDP/Reserve source tokens from the strategy contract itself, so the
   //    rebalance() simulation from address(0) is valid for them.
   const probeFn = strategyType === "ols" ? "determineAction" : "rebalance";
-  const successMessage =
-    strategyType === "ols"
-      ? "Rebalance available — open-liquidity strategy, awaits external caller"
-      : "Rebalance is currently possible";
 
   try {
     await client.call({
@@ -251,7 +247,7 @@ export async function checkRebalanceStatus(
     // If we reach here, the probe succeeded.
     return {
       canRebalance: true,
-      message: successMessage,
+      message: "Rebalance is currently possible",
       rawError: null,
       strategyType,
       enrichment: null,
