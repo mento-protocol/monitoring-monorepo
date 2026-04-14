@@ -82,7 +82,7 @@ describe("RebalanceStatusValue", () => {
     expect(html).toContain("text-slate-400");
   });
 
-  it('renders "Rebalance required" in amber when the hook surfaces an error', () => {
+  it('renders neutral "Diagnostics unavailable" (no CTA) when the hook surfaces an error', () => {
     mockUseRebalanceCheck.mockReturnValue(
       rebalanceState({ error: new Error("rpc down") }),
     );
@@ -93,8 +93,12 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toContain("Rebalance required");
-    expect(html).toContain("text-amber-400");
+    expect(html).toContain("Diagnostics unavailable");
+    // Slate/neutral, NOT amber (no "Rebalance required" claim on transport
+    // failures) and no #writeProxyContract deep-link.
+    expect(html).toContain("text-slate-400");
+    expect(html).not.toContain("Rebalance required");
+    expect(html).not.toContain("#writeProxyContract");
   });
 
   it('renders "Balanced" in emerald when rebalanceCheck is null', () => {

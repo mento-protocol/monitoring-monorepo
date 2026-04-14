@@ -31,8 +31,12 @@ export function RebalanceStatusValue({
     statusText = "Checking…";
     statusColor = "text-slate-400";
   } else if (error) {
-    statusText = "Rebalance required";
-    statusColor = "text-amber-400";
+    // Transport/server errors (rate-limit propagation, 502, 503, 400 for
+    // missing RPC, …) are NOT evidence the pool needs rebalancing — we just
+    // couldn't diagnose. Surface a neutral state matching the HealthPanel's
+    // "Diagnostics unavailable" copy and suppress the rebalance CTA.
+    statusText = "Diagnostics unavailable";
+    statusColor = "text-slate-400";
   } else if (rebalanceCheck === null) {
     statusText = "Balanced";
     statusColor = "text-emerald-400";

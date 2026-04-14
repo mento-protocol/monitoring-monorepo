@@ -29,7 +29,10 @@ export function useRebalanceCheck(
   isLoading: boolean;
   error: Error | undefined;
 } {
-  const shouldCheck = shouldRunCheck(pool, network.chainId);
+  // Also gate on rpcUrl client-side — the server returns 400 when it's
+  // missing, and without this guard every SWR refresh burns a guaranteed
+  // failing request that would then surface as "Diagnostics unavailable".
+  const shouldCheck = shouldRunCheck(pool, network.chainId) && !!network.rpcUrl;
   const key = shouldCheck
     ? `/api/rebalance-check?network=${encodeURIComponent(network.id)}&pool=${encodeURIComponent(stripChainIdFromPoolId(pool!.id))}&strategy=${encodeURIComponent(pool!.rebalancerAddress!)}`
     : null;

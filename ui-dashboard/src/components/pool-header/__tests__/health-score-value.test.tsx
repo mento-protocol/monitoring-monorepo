@@ -44,13 +44,31 @@ function healthResult(overrides: {
 }
 
 describe("HealthScoreValue", () => {
-  it('renders "Query failed" when the hook surfaces an error', () => {
+  it('renders "Query failed" on error when allTimeScore is also null', () => {
     mockUseHealthScore.mockReturnValue(
-      healthResult({ error: new Error("boom") }),
+      healthResult({ error: new Error("boom"), allTimeScore: null }),
     );
     const html = renderToStaticMarkup(<HealthScoreValue pool={BASE_POOL} />);
     expect(html).toContain("Query failed");
     expect(html).toContain("text-amber-400");
+  });
+
+  it("keeps the all-time line on error when allTimeScore is still available", () => {
+    // allTimeScore is derived from Pool fields directly, not the 24h GQL
+    // queries, so a transient window-query failure must not blank it.
+    mockUseHealthScore.mockReturnValue(
+      healthResult({
+        error: new Error("timeout"),
+        score: null,
+        allTimeScore: 0.87,
+      }),
+    );
+    const html = renderToStaticMarkup(<HealthScoreValue pool={BASE_POOL} />);
+    // 24h row degrades to "Query failed" (amber), all-time row stays.
+    expect(html).toContain("Query failed");
+    expect(html).toContain("text-amber-400");
+    expect(html).toContain("87.00%");
+    expect(html).toContain("all-time");
   });
 
   it('renders "N/A" when both scores are null', () => {
