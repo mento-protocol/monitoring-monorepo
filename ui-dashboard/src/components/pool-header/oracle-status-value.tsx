@@ -19,7 +19,7 @@ export function OracleStatusValue({
   const hasTs = pool.oracleTimestamp != null && pool.oracleTimestamp !== "0";
   const stalenessThreshold = getOracleStalenessThreshold(pool, network.chainId);
   const fresh = isOracleFresh(pool, nowSeconds, network.chainId);
-  const expiresLabel = `expires ${Math.round(stalenessThreshold / 60)}m`;
+  const expiresLabel = `Expiry: ${Math.round(stalenessThreshold / 60)}m`;
 
   // Subtitle: "Updated Ns ago · expires 6m" — the first half links to the
   // oracle-report tx on the explorer when available; the "expires" half is

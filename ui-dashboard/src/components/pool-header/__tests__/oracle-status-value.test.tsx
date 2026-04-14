@@ -65,9 +65,9 @@ describe("OracleStatusValue", () => {
       <OracleStatusValue pool={pool} network={MOCK_NETWORK} />,
     );
     expect(html).toContain('href="https://celoscan.io/tx/0xdeadbeef"');
-    // Subtitle shape: `<a>Updated Ns ago</a> · expires 5m` — no ↗ on
+    // Subtitle shape: `<a>Updated Ns ago</a> · Expiry: 5m` — no ↗ on
     // non-primary links (indigo-hover is the clickability signal).
-    expect(html).toMatch(/Updated [^<]+<\/a> · expires/);
+    expect(html).toMatch(/Updated [^<]+<\/a> · Expiry:/);
     expect(html).not.toContain("↗");
   });
 
@@ -84,13 +84,13 @@ describe("OracleStatusValue", () => {
     expect(html).not.toContain("/tx/");
   });
 
-  it("omits the Updated prefix but still shows expires when oracleTimestamp is missing", () => {
+  it("omits the Updated prefix but still shows Expiry: when oracleTimestamp is missing", () => {
     const pool: Pool = { ...BASE_POOL, oracleTimestamp: undefined };
     const html = renderToStaticMarkup(
       <OracleStatusValue pool={pool} network={MOCK_NETWORK} />,
     );
     expect(html).not.toContain("Updated");
-    expect(html).toContain("expires");
+    expect(html).toContain("Expiry:");
   });
 
   it('omits the Updated prefix when oracleTimestamp is the sentinel "0"', () => {
@@ -99,15 +99,15 @@ describe("OracleStatusValue", () => {
       <OracleStatusValue pool={pool} network={MOCK_NETWORK} />,
     );
     expect(html).not.toContain("Updated");
-    expect(html).toContain("expires");
+    expect(html).toContain("Expiry:");
   });
 
-  it("renders a single-line subtitle with 'expires Nm' from the staleness threshold", () => {
+  it("renders a single-line subtitle with 'Expiry: Nm' from the staleness threshold", () => {
     const pool: Pool = { ...BASE_POOL, oracleTimestamp: FRESH_TS };
     const html = renderToStaticMarkup(
       <OracleStatusValue pool={pool} network={MOCK_NETWORK} />,
     );
-    // oracleExpiry=300s → 5m. Subtitle is "Updated Ns ago · expires 5m".
-    expect(html).toContain("expires 5m");
+    // oracleExpiry=300s → 5m. Subtitle is "Updated Ns ago · Expiry: 5m".
+    expect(html).toContain("Expiry: 5m");
   });
 });
