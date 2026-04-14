@@ -336,19 +336,6 @@ export function HealthPanel({ pool }: HealthPanelProps) {
               </dd>
             </div>
 
-            {/* Reporters */}
-            <div>
-              <dt className="text-slate-400 mb-1">Oracle Reporters</dt>
-              <dd className="text-white">
-                {pool.oracleNumReporters != null &&
-                pool.oracleNumReporters > 0 ? (
-                  pool.oracleNumReporters
-                ) : (
-                  <span className="text-slate-500">—</span>
-                )}
-              </dd>
-            </div>
-
             {/* Deviation */}
             <div className="sm:col-span-2">
               <dt className="text-slate-400 mb-1">Deviation vs Threshold</dt>
