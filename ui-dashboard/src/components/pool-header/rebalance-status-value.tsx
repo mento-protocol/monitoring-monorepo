@@ -110,13 +110,17 @@ export function RebalanceStatusValue({
 
   // Fetch the most recent rebalance tx so the "last Ns ago" label can link
   // to it on the explorer. Gated on hasLastRebalance to skip the query for
-  // pools that have never rebalanced. SWR dedupes across components (the
-  // Rebalances tab uses the same POOL_REBALANCES query with larger limits).
+  // pools that have never rebalanced. `refreshInterval: 0` disables polling
+  // — the latest-rebalance txHash rarely changes within a page session, and
+  // when it does, a stale-but-valid explorer link is an acceptable tradeoff
+  // for not issuing a background GQL read every 10s per open pool page.
+  // (Different `limit` than the Rebalances tab means SWR can't dedupe them.)
   const { data: lastRebalanceData } = useGQL<{
     RebalanceEvent: Pick<RebalanceEvent, "txHash">[];
   }>(
     hasLastRebalance ? POOL_REBALANCES : null,
     hasLastRebalance ? { poolId: pool.id, limit: 1 } : undefined,
+    0,
   );
   const lastRebalanceTxHash =
     lastRebalanceData?.RebalanceEvent?.[0]?.txHash ?? null;
