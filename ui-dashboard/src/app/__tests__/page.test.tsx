@@ -41,10 +41,7 @@ vi.mock("@/components/global-pools-table", () => ({
 
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import * as volumeModule from "@/lib/volume";
-import {
-  buildSnapshotWindows,
-  snapshotWindowPrior7dFromCurrent,
-} from "@/lib/volume";
+import { buildSnapshotWindows } from "@/lib/volume";
 import GlobalPage from "../page";
 
 // ---------------------------------------------------------------------------
@@ -581,55 +578,25 @@ describe("GlobalPage — TVL delta sub-KPIs", () => {
   });
 });
 
-describe("GlobalPage — volume delta sub-KPIs", () => {
-  it("uses the fetch-time snapshot window anchor for week-over-week volume", () => {
-    const queryAnchor = Date.UTC(2026, 3, 14, 10, 30, 0, 0);
-    const snapshotWindows = buildSnapshotWindows(queryAnchor);
-    const priorWindow = snapshotWindowPrior7dFromCurrent(snapshotWindows.w7d);
-    const pool = makeTvlPool({
-      id: "pool-volume",
-      reserves0: "0",
-      reserves1: "0",
-    });
-
-    const nowSpy = vi
-      .spyOn(Date, "now")
-      .mockReturnValue(queryAnchor + 3600_000);
-
+describe("GlobalPage — Volume chart wiring", () => {
+  it("uses the 'Volume' label without a time-range suffix in the title", () => {
     const html = render([
       makeNetworkData({
         network: TVL_NETWORK,
-        snapshotWindows,
-        pools: [pool],
-        snapshots7d: [
-          makeSnapshot({
-            poolId: "pool-volume",
-            timestamp: snapshotWindows.w7d.from + 3600,
-            swapVolume0: "20000000000000000000",
-          }),
-        ],
-        snapshots30d: [
-          makeSnapshot({
-            poolId: "pool-volume",
-            timestamp: snapshotWindows.w7d.from + 3600,
-            swapVolume0: "20000000000000000000",
-          }),
-          makeSnapshot({
-            poolId: "pool-volume",
-            timestamp: priorWindow.from + 1800,
-            swapVolume0: "10000000000000000000",
-          }),
-        ],
+        pools: [makeTvlPool({ id: "pool-volume" })],
       }),
     ]);
 
-    nowSpy.mockRestore();
-
-    expect(html).toContain("Volume (past 7d)");
-    expect(html).toContain("+100.00%");
+    expect(html).toContain(">Volume<");
+    expect(html).not.toContain("Volume (past 7d)");
+    expect(html).not.toContain("Volume (24h)");
   });
 
-  it("omits the volume delta when the prior window is empty", () => {
+  it("suppresses the Volume delta at the default 1M range", () => {
+    // At default 1M range, we don't have two full 7-day windows' worth of
+    // comparable data, so the chart intentionally suppresses the delta pill.
+    // week-over-week text only appears in the Volume card's delta — the TVL
+    // card's delta has its own week-over-week label when a TVL delta exists.
     const queryAnchor = Date.UTC(2026, 3, 14, 10, 30, 0, 0);
     const snapshotWindows = buildSnapshotWindows(queryAnchor);
     const pool = makeTvlPool({
@@ -637,19 +604,11 @@ describe("GlobalPage — volume delta sub-KPIs", () => {
       reserves0: "0",
       reserves1: "0",
     });
-
     const html = render([
       makeNetworkData({
         network: TVL_NETWORK,
         snapshotWindows,
         pools: [pool],
-        snapshots7d: [
-          makeSnapshot({
-            poolId: "pool-volume",
-            timestamp: snapshotWindows.w7d.from + 3600,
-            swapVolume0: "20000000000000000000",
-          }),
-        ],
         snapshots30d: [
           makeSnapshot({
             poolId: "pool-volume",
@@ -660,7 +619,8 @@ describe("GlobalPage — volume delta sub-KPIs", () => {
       }),
     ]);
 
-    expect(html).toContain("Volume (past 7d)");
+    // Volume card at 1M range: no delta pill from volume. TVL card has no
+    // 7d-ago snapshot in this fixture, so its delta is also null.
     expect(html).not.toContain("week-over-week");
   });
 
@@ -672,7 +632,7 @@ describe("GlobalPage — volume delta sub-KPIs", () => {
       }),
     ]);
 
-    expect(html).toContain("Volume (past 7d)");
+    // Both chart cards render a "· partial data" badge when snapshots fail.
     expect(html.split("· partial data").length - 1).toBe(2);
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { formatUSD } from "@/lib/format";
 import { isFpmm } from "@/lib/tokens";
 import { getSnapshotVolumeInUsd } from "@/lib/volume";
@@ -8,6 +8,8 @@ import type { NetworkData } from "@/hooks/use-all-networks-data";
 import {
   SECONDS_PER_DAY,
   TimeSeriesChartCard,
+  filterSeriesByRange,
+  type RangeKey,
   type TimeSeriesPoint,
 } from "@/components/time-series-chart-card";
 
@@ -58,10 +60,28 @@ export function buildDailyVolumeSeries(
   return series;
 }
 
+/**
+ * Week-over-week % change: sum of the last 7 completed UTC days vs the 7 days
+ * before that. The final bucket in `fullSeries` is usually the partial current
+ * UTC day (still filling up), so the comparison excludes it and uses the
+ * trailing [-8, -1] vs [-15, -8] windows. Returns null when history is too
+ * short or the prior window was zero.
+ */
+export function weekOverWeekChangePct(
+  series: TimeSeriesPoint[],
+): number | null {
+  if (series.length < 15) return null;
+  const last7 = series.slice(-8, -1);
+  const prior7 = series.slice(-15, -8);
+  const sum = (arr: TimeSeriesPoint[]) =>
+    arr.reduce((total, point) => total + point.value, 0);
+  const prior = sum(prior7);
+  if (prior <= 0) return null;
+  return ((sum(last7) - prior) / prior) * 100;
+}
+
 interface VolumeOverTimeChartProps {
   networkData: NetworkData[];
-  totalVolume7d: number | null;
-  change7d: number | null;
   isLoading: boolean;
   hasError: boolean;
   hasSnapshotError: boolean;
@@ -69,12 +89,12 @@ interface VolumeOverTimeChartProps {
 
 export function VolumeOverTimeChart({
   networkData,
-  totalVolume7d,
-  change7d,
   isLoading,
   hasError,
   hasSnapshotError,
 }: VolumeOverTimeChartProps) {
+  const [range, setRange] = useState<RangeKey>("30d");
+
   const fullSeries = useMemo<TimeSeriesPoint[]>(
     () =>
       buildDailyVolumeSeries(networkData).map((point) => ({
@@ -84,11 +104,31 @@ export function VolumeOverTimeChart({
     [networkData],
   );
 
+  const visibleSeries = useMemo(
+    () => filterSeriesByRange(fullSeries, range),
+    [fullSeries, range],
+  );
+
+  // Hero reflects the selected range — sum of the visible bars. Avoids the
+  // "title says 7d but chart shows 30d" mismatch flagged in PR review.
+  const rangeTotal = useMemo(
+    () => visibleSeries.reduce((sum, point) => sum + point.value, 0),
+    [visibleSeries],
+  );
+
+  // Show "N/A" only on explicit failure. An empty series without errors
+  // legitimately sums to $0 (no volume yet) — flagging that as N/A would
+  // incorrectly conflate "no activity" with "data missing".
   const headline = isLoading
     ? "…"
-    : totalVolume7d === null
+    : hasError || (hasSnapshotError && fullSeries.length === 0)
       ? "N/A"
-      : formatUSD(totalVolume7d);
+      : formatUSD(rangeTotal);
+
+  // Only show a delta when the comparison basis matches the visible range.
+  // At 30d range we'd need 60d of data for a month-over-month comparison,
+  // which we don't have — suppress rather than mislabel.
+  const change = range === "7d" ? weekOverWeekChangePct(fullSeries) : null;
 
   const emptyMessage = hasError
     ? "Unable to load volume history"
@@ -98,11 +138,13 @@ export function VolumeOverTimeChart({
 
   return (
     <TimeSeriesChartCard
-      title="Volume (past 7d)"
+      title="Volume"
       rangeAriaLabel="Volume chart time range"
       series={fullSeries}
+      range={range}
+      onRangeChange={setRange}
       headline={headline}
-      change={change7d}
+      change={change}
       isLoading={isLoading}
       hasError={hasError}
       hasSnapshotError={hasSnapshotError}

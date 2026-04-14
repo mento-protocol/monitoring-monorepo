@@ -23,6 +23,7 @@ vi.mock("next/dynamic", () => ({
 import {
   VolumeOverTimeChart,
   buildDailyVolumeSeries,
+  weekOverWeekChangePct,
 } from "@/components/volume-over-time-chart";
 import {
   TVL_NETWORK,
@@ -31,6 +32,7 @@ import {
   makeTvlPool,
 } from "@/test-utils/network-fixtures";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
+import type { TimeSeriesPoint } from "@/components/time-series-chart-card";
 
 const SECONDS_PER_DAY = 86_400;
 
@@ -58,8 +60,6 @@ function renderChart(
 ): string {
   const props: React.ComponentProps<typeof VolumeOverTimeChart> = {
     networkData: [],
-    totalVolume7d: 0,
-    change7d: null,
     isLoading: false,
     hasError: false,
     hasSnapshotError: false,
@@ -92,24 +92,78 @@ describe("buildDailyVolumeSeries", () => {
   });
 });
 
+describe("weekOverWeekChangePct", () => {
+  function buildSeries(values: number[]): TimeSeriesPoint[] {
+    const start = dayAlignedNow() - (values.length - 1) * SECONDS_PER_DAY;
+    return values.map((value, i) => ({
+      timestamp: start + i * SECONDS_PER_DAY,
+      value,
+    }));
+  }
+
+  it("returns null when fewer than 15 buckets exist", () => {
+    expect(weekOverWeekChangePct(buildSeries(Array(14).fill(10)))).toBeNull();
+  });
+
+  it("returns null when the prior 7-day window is zero", () => {
+    // 15 buckets: first 7 are prior window (zero), then 7 active days, then today
+    const vals = [0, 0, 0, 0, 0, 0, 0, 10, 10, 10, 10, 10, 10, 10, 5];
+    expect(weekOverWeekChangePct(buildSeries(vals))).toBeNull();
+  });
+
+  it("computes a positive delta comparing the last 7 full days vs the prior 7", () => {
+    // prior 7 = sum 70, last 7 = sum 140, today (partial) = ignored
+    const vals = [10, 10, 10, 10, 10, 10, 10, 20, 20, 20, 20, 20, 20, 20, 99];
+    expect(weekOverWeekChangePct(buildSeries(vals))).toBeCloseTo(100, 5);
+  });
+
+  it("excludes the trailing partial-day bucket from the last-7 window", () => {
+    // prior 7 sum 70, last 7 sum 70 → 0%, today wildly different shouldn't matter
+    const vals = [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 999];
+    expect(weekOverWeekChangePct(buildSeries(vals))).toBe(0);
+  });
+});
+
 describe("VolumeOverTimeChart render", () => {
   beforeEach(() => {
     capturedPlotProps = {};
   });
 
-  it("renders N/A, not ellipsis, for partial historical data when the 7d total is unavailable", () => {
-    const today = dayAlignedNow();
-    const html = renderChart({
-      networkData: makeVolumeNetworkData([
-        { timestamp: today, swapVolume0: "1000000000000000000" },
-      ]),
-      totalVolume7d: null,
-      hasSnapshotError: true,
-    });
+  it("renders the 'Volume' title without a time-range suffix", () => {
+    const html = renderChart();
+    expect(html).toContain("Volume");
+    expect(html).not.toContain("Volume (past 7d)");
+    expect(html).not.toContain("Volume (24h)");
+  });
 
+  it("starts with the 1M range active by default", () => {
+    const html = renderChart();
+    expect(html).toMatch(/aria-pressed="true"[^>]*>1M</);
+    expect(html).toMatch(/aria-pressed="false"[^>]*>1W</);
+  });
+
+  it("renders N/A when no data and a top-level error", () => {
+    const html = renderChart({ hasError: true });
+    expect(html).toContain("N/A");
+    expect(html).not.toContain("…");
+  });
+
+  it("renders N/A when snapshots partially failed and no data survived", () => {
+    const html = renderChart({ hasSnapshotError: true });
     expect(html).toContain("N/A");
     expect(html).toContain("· partial data");
-    expect(html).not.toContain("…");
+  });
+
+  it("renders $0.00 (not N/A) when there's simply no volume yet and no errors", () => {
+    const html = renderChart();
+    expect(html).toContain("$0.00");
+    expect(html).not.toContain("N/A");
+  });
+
+  it("shows ellipsis while loading", () => {
+    const html = renderChart({ isLoading: true });
+    expect(html).toContain("…");
+    expect(html).not.toContain("N/A");
   });
 
   it("renders 'Not enough history yet' when no data and no errors", () => {
@@ -127,61 +181,32 @@ describe("VolumeOverTimeChart render", () => {
     );
   });
 
-  it("hides the delta pill when the change is unavailable", () => {
+  it("shows the headline as a formatted USD total covering the default (30d) range", () => {
     const today = dayAlignedNow();
+    // Build two snapshots within the last 30 days that sum to $3
     const html = renderChart({
       networkData: makeVolumeNetworkData([
-        { timestamp: today, swapVolume0: "1000000000000000000" },
+        {
+          timestamp: today - SECONDS_PER_DAY,
+          swapVolume0: "1000000000000000000",
+        },
+        { timestamp: today, swapVolume0: "2000000000000000000" },
       ]),
-      totalVolume7d: 1,
-      change7d: null,
     });
 
-    expect(html).not.toContain("week-over-week");
-    expect(html).not.toContain("%");
-  });
-
-  it("hides the delta pill when a top-level error makes the delta untrustworthy", () => {
-    const today = dayAlignedNow();
-    const html = renderChart({
-      networkData: makeVolumeNetworkData([
-        { timestamp: today, swapVolume0: "1000000000000000000" },
-      ]),
-      totalVolume7d: 1,
-      change7d: 12.34,
-      hasError: true,
-    });
-
-    expect(html).not.toContain("+12.34%");
+    expect(html).toContain("$3.00");
+    // At 30d default range we don't have two full 7d windows, so delta is null.
     expect(html).not.toContain("week-over-week");
   });
 
-  it("renders a negative delta pill", () => {
+  it("passes Plotly config overrides when data is present", () => {
     const today = dayAlignedNow();
-    const html = renderChart({
+    renderChart({
       networkData: makeVolumeNetworkData([
         { timestamp: today, swapVolume0: "1000000000000000000" },
       ]),
-      totalVolume7d: 1,
-      change7d: -12.34,
     });
 
-    expect(html).toContain("-12.34%");
-    expect(html).toContain("week-over-week");
-  });
-
-  it("renders a positive delta pill and Plotly config overrides", () => {
-    const today = dayAlignedNow();
-    const html = renderChart({
-      networkData: makeVolumeNetworkData([
-        { timestamp: today, swapVolume0: "1000000000000000000" },
-      ]),
-      totalVolume7d: 1,
-      change7d: 12.34,
-    });
-
-    expect(html).toContain("+12.34%");
-    expect(html).toContain("week-over-week");
     expect(capturedPlotProps.config?.scrollZoom).toBe(false);
     expect(capturedPlotProps.config?.displayModeBar).toBe(false);
   });

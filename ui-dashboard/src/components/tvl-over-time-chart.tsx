@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD } from "@/lib/tokens";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
@@ -10,6 +10,7 @@ import type { OracleRateMap } from "@/lib/tokens";
 import {
   SECONDS_PER_DAY,
   TimeSeriesChartCard,
+  type RangeKey,
   type TimeSeriesPoint,
 } from "@/components/time-series-chart-card";
 
@@ -117,6 +118,8 @@ export function TvlOverTimeChart({
   hasError,
   hasSnapshotError,
 }: TvlOverTimeChartProps) {
+  const [range, setRange] = useState<RangeKey>("30d");
+
   const fullSeries = useMemo<TimeSeriesPoint[]>(() => {
     const { series: base, nowTvl } = buildDailySeries(networkData);
     if (base.length === 0) return [];
@@ -143,6 +146,8 @@ export function TvlOverTimeChart({
       title="Total Value Locked"
       rangeAriaLabel="TVL chart time range"
       series={fullSeries}
+      range={range}
+      onRangeChange={setRange}
       headline={headline}
       change={change7d}
       isLoading={isLoading}

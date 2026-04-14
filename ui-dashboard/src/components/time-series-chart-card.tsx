@@ -1,22 +1,26 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
 export const SECONDS_PER_DAY = 86_400;
 
-type RangeKey = "7d" | "30d";
+export type RangeKey = "7d" | "30d";
+
+export const RANGE_DAYS: Record<RangeKey, number> = {
+  "7d": 7,
+  "30d": 30,
+};
 
 const RANGES: ReadonlyArray<{
   key: RangeKey;
   label: string;
-  days: number;
 }> = [
-  { key: "7d", label: "1W", days: 7 },
-  { key: "30d", label: "1M", days: 30 },
+  { key: "7d", label: "1W" },
+  { key: "30d", label: "1M" },
 ];
 
 export type TimeSeriesPoint = {
@@ -24,12 +28,24 @@ export type TimeSeriesPoint = {
   value: number;
 };
 
+export function filterSeriesByRange(
+  series: readonly TimeSeriesPoint[],
+  range: RangeKey,
+): TimeSeriesPoint[] {
+  const cutoff =
+    Math.floor(Date.now() / 1000) - RANGE_DAYS[range] * SECONDS_PER_DAY;
+  return series.filter((point) => point.timestamp >= cutoff);
+}
+
 interface TimeSeriesChartCardProps {
   title: string;
   rangeAriaLabel: string;
   series: TimeSeriesPoint[];
+  range: RangeKey;
+  onRangeChange: (range: RangeKey) => void;
   headline: string;
   change: number | null;
+  changeLabel?: string;
   isLoading: boolean;
   hasError: boolean;
   hasSnapshotError: boolean;
@@ -40,21 +56,20 @@ export function TimeSeriesChartCard({
   title,
   rangeAriaLabel,
   series,
+  range,
+  onRangeChange,
   headline,
   change,
+  changeLabel = "week-over-week",
   isLoading,
   hasError,
   hasSnapshotError,
   emptyMessage,
 }: TimeSeriesChartCardProps) {
-  const [range, setRange] = useState<RangeKey>("30d");
-
-  const visibleSeries = useMemo(() => {
-    const currentRange = RANGES.find((item) => item.key === range)!;
-    const cutoff =
-      Math.floor(Date.now() / 1000) - currentRange.days * SECONDS_PER_DAY;
-    return series.filter((point) => point.timestamp >= cutoff);
-  }, [range, series]);
+  const visibleSeries = useMemo(
+    () => filterSeriesByRange(series, range),
+    [range, series],
+  );
 
   const { traces, layout } = useMemo(() => {
     const xs = visibleSeries.map((point) =>
@@ -137,9 +152,7 @@ export function TimeSeriesChartCard({
           </p>
           <div className="mt-1 flex h-5 items-center gap-1.5 font-mono text-sm">
             {deltaPill}
-            {deltaPill && (
-              <span className="text-slate-500">week-over-week</span>
-            )}
+            {deltaPill && <span className="text-slate-500">{changeLabel}</span>}
             {(hasError || hasSnapshotError) && !isLoading && (
               <span className="text-xs text-slate-500">· partial data</span>
             )}
@@ -158,7 +171,7 @@ export function TimeSeriesChartCard({
                 key={item.key}
                 type="button"
                 aria-pressed={active}
-                onClick={() => setRange(item.key)}
+                onClick={() => onRangeChange(item.key)}
                 className={
                   "rounded px-3 py-1 text-xs font-medium transition-colors " +
                   (active

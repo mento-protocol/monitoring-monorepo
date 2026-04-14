@@ -7,9 +7,7 @@ import type { Pool, PoolSnapshotWindow } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import {
   buildPoolVolumeMap,
-  buildPoolVolumeMapInWindow,
   poolTotalVolumeUSD,
-  snapshotWindowPrior7dFromCurrent,
   sumVolumeMap,
 } from "@/lib/volume";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
@@ -112,8 +110,6 @@ function GlobalContent() {
         anySnapshots7dError || anyNetworkError ? null : 0;
       let totalVolume30d: number | null =
         anySnapshots30dError || anyNetworkError ? null : 0;
-      let totalVolumePrior7d: number | null =
-        anySnapshots30dError || anyNetworkError ? null : 0;
       let totalSwapsAllTime: number | null = anyNetworkError ? null : 0;
       let totalFeesAllTime: number | null =
         anyFeesError || anyNetworkError ? null : 0;
@@ -189,16 +185,6 @@ function GlobalContent() {
           netData.snapshots30dError === null
             ? buildPoolVolumeMap(snapshots30d, pools, network, netData.rates)
             : null;
-        const prior7dMap =
-          netData.snapshots30dError === null
-            ? buildPoolVolumeMapInWindow(
-                snapshots30d,
-                pools,
-                network,
-                netData.rates,
-                snapshotWindowPrior7dFromCurrent(netData.snapshotWindows.w7d),
-              )
-            : null;
 
         if (vol24hMap && totalVolume24h !== null) {
           totalVolume24h += sumVolumeMap(vol24hMap);
@@ -208,9 +194,6 @@ function GlobalContent() {
         }
         if (vol30dMap && totalVolume30d !== null) {
           totalVolume30d += sumVolumeMap(vol30dMap);
-        }
-        if (prior7dMap && totalVolumePrior7d !== null) {
-          totalVolumePrior7d += sumVolumeMap(prior7dMap);
         }
 
         // Store per-pool volume for the table columns
@@ -268,13 +251,6 @@ function GlobalContent() {
             hasTvlSnapshots7d && tvlAgo7d > 0
               ? ((tvlNow7d - tvlAgo7d) / tvlAgo7d) * 100
               : null,
-          volumeChange7d:
-            totalVolume7d !== null &&
-            totalVolumePrior7d !== null &&
-            totalVolumePrior7d > 0
-              ? ((totalVolume7d - totalVolumePrior7d) / totalVolumePrior7d) *
-                100
-              : null,
           unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
           totalUnresolvedCount,
           isTruncated,
@@ -321,8 +297,6 @@ function GlobalContent() {
         />
         <VolumeOverTimeChart
           networkData={networkData}
-          totalVolume7d={aggregated.totalVolume7d}
-          change7d={aggregated.volumeChange7d}
           isLoading={isLoading}
           hasError={anyNetworkError}
           hasSnapshotError={anySnapshots7dError || anySnapshots30dError}
