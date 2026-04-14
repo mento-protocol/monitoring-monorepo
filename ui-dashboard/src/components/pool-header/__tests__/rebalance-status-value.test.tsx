@@ -9,7 +9,6 @@ const mockUseRebalanceCheck = vi.fn();
 const mockGetName = vi.fn((address: string | null) =>
   address ? `name-for-${address.slice(-4)}` : "",
 );
-const mockUseNetwork = vi.fn();
 
 vi.mock("@/hooks/use-rebalance-check", () => ({
   useRebalanceCheck: (pool: Pool, network: Network) =>
@@ -17,9 +16,6 @@ vi.mock("@/hooks/use-rebalance-check", () => ({
 }));
 vi.mock("@/components/address-labels-provider", () => ({
   useAddressLabels: () => ({ getName: mockGetName }),
-}));
-vi.mock("@/components/network-provider", () => ({
-  useNetwork: () => mockUseNetwork(),
 }));
 
 import { RebalanceStatusValue } from "@/components/pool-header/rebalance-status-value";
@@ -37,11 +33,11 @@ const NETWORK: Network = {
   local: false,
   testnet: false,
   hasVirtualPools: false,
+  rpcUrl: "https://forno.celo.org",
 };
 
-mockUseNetwork.mockReturnValue({ network: NETWORK, setNetworkId: vi.fn() });
-
 const STRATEGY_ADDR = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const nowSeconds = Math.floor(Date.now() / 1000);
 
 const BASE_POOL: Pool = {
   id: "42220-0xpool",
@@ -54,6 +50,10 @@ const BASE_POOL: Pool = {
   updatedAtBlock: "2",
   updatedAtTimestamp: "2000",
   rebalancerAddress: STRATEGY_ADDR,
+  oracleTimestamp: String(nowSeconds - 60),
+  oracleExpiry: "300",
+  priceDifference: "0",
+  rebalanceThreshold: 5000,
 };
 
 function rebalanceState(overrides: {
@@ -94,14 +94,12 @@ describe("RebalanceStatusValue", () => {
       />,
     );
     expect(html).toContain("Diagnostics unavailable");
-    // Slate/neutral, NOT amber (no "Rebalance required" claim on transport
-    // failures) and no #writeProxyContract deep-link.
     expect(html).toContain("text-slate-400");
     expect(html).not.toContain("Rebalance required");
     expect(html).not.toContain("#writeProxyContract");
   });
 
-  it('renders "Balanced" in emerald when rebalanceCheck is null', () => {
+  it('renders "Balanced" in emerald when the rebalance check is skipped for a healthy pool', () => {
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     const html = renderToStaticMarkup(
       <RebalanceStatusValue
@@ -114,7 +112,50 @@ describe("RebalanceStatusValue", () => {
     expect(html).toContain("text-emerald-400");
   });
 
-  it("renders deep-link to strategyRebalanceWriteUrl when canRebalance=true", () => {
+  it('renders "Near threshold" in amber when the pool is WARN but below rebalance threshold', () => {
+    mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={{ ...BASE_POOL, priceDifference: "4500" }}
+        network={NETWORK}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    expect(html).toContain("Near threshold");
+    expect(html).toContain("text-amber-400");
+  });
+
+  it('renders "Oracle stale" in red when health is CRITICAL but the check was skipped because deviation is still below threshold', () => {
+    mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={{
+          ...BASE_POOL,
+          oracleTimestamp: String(nowSeconds - 600),
+          priceDifference: "1000",
+        }}
+        network={NETWORK}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    expect(html).toContain("Oracle stale");
+    expect(html).toContain("text-red-400");
+  });
+
+  it('renders "Diagnostics unavailable" when the network has no rpcUrl and the hook returned null', () => {
+    mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={BASE_POOL}
+        network={{ ...NETWORK, rpcUrl: undefined }}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    expect(html).toContain("Diagnostics unavailable");
+    expect(html).toContain("text-slate-400");
+  });
+
+  it("renders deep-link to the strategy proxy-write tab when canRebalance=true", () => {
     mockUseRebalanceCheck.mockReturnValue(
       rebalanceState({
         data: {
@@ -135,10 +176,10 @@ describe("RebalanceStatusValue", () => {
     );
     expect(html).toContain("Rebalance required");
     expect(html).toContain("text-amber-400");
-    // Deep-link format: {explorer}/address/{strategy}#writeProxyContract#F{REBALANCE_FN_INDEX}
     expect(html).toContain(
-      `href="https://celoscan.io/address/${STRATEGY_ADDR}#writeProxyContract#F`,
+      `href="https://celoscan.io/address/${STRATEGY_ADDR}#writeProxyContract"`,
     );
+    expect(html).not.toContain("#writeProxyContract#F");
   });
 
   it('renders "Rebalance blocked" in red when canRebalance=false (no deep-link)', () => {
@@ -162,7 +203,6 @@ describe("RebalanceStatusValue", () => {
     );
     expect(html).toContain("Rebalance blocked");
     expect(html).toContain("text-red-400");
-    // No writeProxy deep-link.
     expect(html).not.toContain("#writeProxyContract");
   });
 
@@ -179,7 +219,6 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    // Subtitle: "via <Strategy> · last Ns ago" — one line.
     expect(html).toMatch(/· last [0-9]+[smhd] ago/);
   });
 
@@ -218,14 +257,10 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    // Subtitle now wraps the strategy name in its own <a>, so the full
-    // "via name-for-aaaa" is split by markup. Assert the link + name
-    // separately.
     expect(html).toContain(
       `href="https://celoscan.io/address/${STRATEGY_ADDR}"`,
     );
     expect(html).toContain("name-for-aaaa");
-    // No ↗ on non-primary subtitles.
     expect(html).not.toContain("name-for-aaaa ↗");
   });
 });

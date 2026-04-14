@@ -113,19 +113,21 @@ export function HealthPanel({ pool }: HealthPanelProps) {
         <div
           className={`flex flex-col ${showRebalanceDiag ? "lg:flex-row" : ""} gap-6`}
         >
-          <div
+          <dl
             className={showRebalanceDiag ? "lg:flex-1 lg:min-w-0" : "w-full"}
           >
-            <dt className="text-sm text-slate-400 mb-1">
-              Deviation vs Threshold
-            </dt>
-            <dd>
-              <DeviationBar
-                priceDifference={pool.priceDifference ?? "0"}
-                rebalanceThreshold={pool.rebalanceThreshold ?? 0}
-              />
-            </dd>
-          </div>
+            <div>
+              <dt className="text-sm text-slate-400 mb-1">
+                Deviation vs Threshold
+              </dt>
+              <dd>
+                <DeviationBar
+                  priceDifference={pool.priceDifference ?? "0"}
+                  rebalanceThreshold={pool.rebalanceThreshold ?? 0}
+                />
+              </dd>
+            </div>
+          </dl>
 
           {showRebalanceDiag && (
             <RebalanceDiagnostics

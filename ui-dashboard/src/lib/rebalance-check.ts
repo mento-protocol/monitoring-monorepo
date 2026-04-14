@@ -196,16 +196,18 @@ export type StrategyEnrichment =
 // Explorer deep-link for rebalance()
 // ---------------------------------------------------------------------------
 
-// rebalance(address) currently sits at F4 on every strategy's proxy-write tab.
-export const REBALANCE_FN_INDEX = 4;
-
-/** Deep-link into the explorer's proxy-write tab with the rebalance() row
- *  expanded, so a caller can connect wallet and sign the tx in one click. */
+/**
+ * Deep-link into the explorer's proxy-write tab for the strategy.
+ *
+ * Avoid row-index anchors like `#F4`: explorer ABI ordering is not a stable
+ * contract, and different strategy implementations/proxies can shift function
+ * positions while still exposing rebalance(address).
+ */
 export function strategyRebalanceWriteUrl(
   explorerBaseUrl: string,
   strategyAddress: string,
 ): string {
-  return `${explorerBaseUrl}/address/${strategyAddress}#writeProxyContract#F${REBALANCE_FN_INDEX}`;
+  return `${explorerBaseUrl}/address/${strategyAddress}#writeProxyContract`;
 }
 
 // ---------------------------------------------------------------------------

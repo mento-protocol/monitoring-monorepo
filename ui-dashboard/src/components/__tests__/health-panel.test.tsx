@@ -101,5 +101,6 @@ describe("HealthPanel weekend mode", () => {
     // Oracle Status ("✓ Fresh" / "✗ Stale") moved to the pool header top row,
     // so the panel no longer renders that label — it renders the Deviation bar.
     expect(html).toContain("Deviation vs Threshold");
+    expect(html).toContain("<dl");
   });
 });

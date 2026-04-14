@@ -4,8 +4,48 @@ import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
+import { computeHealthStatus } from "@/lib/health";
 import { strategyRebalanceWriteUrl } from "@/lib/rebalance-check";
 import { formatTimestamp, relativeTime } from "@/lib/format";
+
+function getPassiveStatus(pool: Pool, network: Network): {
+  text: string;
+  color: string;
+} {
+  if (!network.rpcUrl) {
+    return {
+      text: "Diagnostics unavailable",
+      color: "text-slate-400",
+    };
+  }
+
+  const health = computeHealthStatus(pool, network.chainId);
+  if (health === "OK") {
+    return { text: "Balanced", color: "text-emerald-400" };
+  }
+  if (health === "WARN") {
+    return { text: "Near threshold", color: "text-amber-400" };
+  }
+  if (health === "WEEKEND") {
+    return { text: "Markets closed", color: "text-slate-400" };
+  }
+  if (health === "N/A") {
+    return { text: "N/A", color: "text-slate-500" };
+  }
+
+  const diff = Number(pool.priceDifference ?? "0");
+  const threshold =
+    (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
+
+  if (diff < threshold) {
+    return { text: "Oracle stale", color: "text-red-400" };
+  }
+
+  return {
+    text: "Diagnostics unavailable",
+    color: "text-slate-400",
+  };
+}
 
 export function RebalanceStatusValue({
   pool,
@@ -38,8 +78,7 @@ export function RebalanceStatusValue({
     statusText = "Diagnostics unavailable";
     statusColor = "text-slate-400";
   } else if (rebalanceCheck === null) {
-    statusText = "Balanced";
-    statusColor = "text-emerald-400";
+    ({ text: statusText, color: statusColor } = getPassiveStatus(pool, network));
   } else if (rebalanceCheck.canRebalance) {
     statusText = "Rebalance required";
     statusColor = "text-amber-400";
