@@ -22,12 +22,12 @@ export function buildDailyVolumeSeries(
   let earliestBucket = Infinity;
 
   for (const netData of networkData) {
-    if (netData.error !== null || netData.snapshots30dError !== null) continue;
+    if (netData.error !== null || netData.snapshotsAllError !== null) continue;
     const fpmmPoolIds = new Set(
       netData.pools.filter(isFpmm).map((pool) => pool.id),
     );
     const poolById = new Map(netData.pools.map((pool) => [pool.id, pool]));
-    for (const snapshot of netData.snapshots30d) {
+    for (const snapshot of netData.snapshotsAll) {
       if (!fpmmPoolIds.has(snapshot.poolId)) continue;
       const pool = poolById.get(snapshot.poolId);
       const volume = getSnapshotVolumeInUsd(

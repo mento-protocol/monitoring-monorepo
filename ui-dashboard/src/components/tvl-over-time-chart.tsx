@@ -31,10 +31,10 @@ export function buildDailySeries(networkData: NetworkData[]): {
   let earliestTs = Infinity;
 
   for (const netData of networkData) {
-    if (netData.error !== null || netData.snapshots30dError !== null) continue;
+    if (netData.error !== null || netData.snapshotsAllError !== null) continue;
     const fpmmPools = netData.pools.filter(isFpmm);
     const snapsByPool = new Map<string, PoolSnapshotWindow[]>();
-    for (const snap of netData.snapshots30d) {
+    for (const snap of netData.snapshotsAll) {
       const list = snapsByPool.get(snap.poolId);
       if (list) list.push(snap);
       else snapsByPool.set(snap.poolId, [snap]);

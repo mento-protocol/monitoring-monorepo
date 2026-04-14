@@ -6,6 +6,7 @@ import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 import type { Network } from "@/lib/networks";
 import {
   ALL_POOLS_WITH_HEALTH,
+  POOL_SNAPSHOTS_ALL,
   POOL_SNAPSHOTS_WINDOW,
   PROTOCOL_FEE_TRANSFERS_ALL,
   UNIQUE_LP_ADDRESSES,
@@ -35,6 +36,8 @@ export type NetworkData = {
   snapshots: PoolSnapshotWindow[];
   snapshots7d: PoolSnapshotWindow[];
   snapshots30d: PoolSnapshotWindow[];
+  /** All-time snapshots (unbounded) — used by chart series with the "All" range. */
+  snapshotsAll: PoolSnapshotWindow[];
   fees: ProtocolFeeSummary | null;
   uniqueLpCount: number | null;
   rates: OracleRateMap;
@@ -43,6 +46,7 @@ export type NetworkData = {
   snapshotsError: Error | null;
   snapshots7dError: Error | null;
   snapshots30dError: Error | null;
+  snapshotsAllError: Error | null;
   lpError: Error | null;
 };
 
@@ -63,6 +67,7 @@ const emptyNetworkData = (
   snapshots: [],
   snapshots7d: [],
   snapshots30d: [],
+  snapshotsAll: [],
   fees: null,
   uniqueLpCount: null,
   rates: new Map(),
@@ -71,6 +76,7 @@ const emptyNetworkData = (
   snapshotsError: null,
   snapshots7dError: null,
   snapshots30dError: null,
+  snapshotsAllError: null,
   lpError: null,
 });
 
@@ -111,6 +117,7 @@ export async function fetchNetworkData(
     snapshotsResult,
     snapshots7dResult,
     snapshots30dResult,
+    snapshotsAllResult,
     lpResult,
   ] = await Promise.allSettled([
     client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
@@ -133,6 +140,12 @@ export async function fetchNetworkData(
       ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
           POOL_SNAPSHOTS_WINDOW,
           { from: windows.w30d.from, to: windows.w30d.to, poolIds },
+        )
+      : emptySnapshots,
+    shouldQuery
+      ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
+          POOL_SNAPSHOTS_ALL,
+          { poolIds },
         )
       : emptySnapshots,
     fpmmPoolIds.length > 0
@@ -166,6 +179,10 @@ export async function fetchNetworkData(
     snapshots30dResult.status === "fulfilled"
       ? (snapshots30dResult.value.PoolSnapshot ?? [])
       : [];
+  const snapshotsAll =
+    snapshotsAllResult.status === "fulfilled"
+      ? (snapshotsAllResult.value.PoolSnapshot ?? [])
+      : [];
 
   const uniqueLpCount =
     lpResult.status === "fulfilled"
@@ -181,6 +198,7 @@ export async function fetchNetworkData(
     snapshots,
     snapshots7d,
     snapshots30d,
+    snapshotsAll,
     fees,
     uniqueLpCount,
     rates,
@@ -198,6 +216,10 @@ export async function fetchNetworkData(
     snapshots30dError:
       snapshots30dResult.status === "rejected"
         ? toError(snapshots30dResult.reason)
+        : null,
+    snapshotsAllError:
+      snapshotsAllResult.status === "rejected"
+        ? toError(snapshotsAllResult.reason)
         : null,
     lpError: lpResult.status === "rejected" ? toError(lpResult.reason) : null,
   };

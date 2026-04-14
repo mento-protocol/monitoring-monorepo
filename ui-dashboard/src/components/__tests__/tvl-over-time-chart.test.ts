@@ -70,7 +70,7 @@ describe("buildDailySeries — empty / error short-circuits", () => {
     expect(out).toEqual({ series: [], nowTvl: 0 });
   });
 
-  it("skips networks with a snapshots30dError and returns nothing", () => {
+  it("skips networks with a snapshotsAllError and returns nothing", () => {
     const today = dayAlignedNow();
     const pool = makeTvlPool({ reserves0: HUNDRED, reserves1: HUNDRED });
     const snap = makeSnapshot({
@@ -82,8 +82,8 @@ describe("buildDailySeries — empty / error short-circuits", () => {
       makeNetworkData({
         network: TVL_NETWORK,
         pools: [pool],
-        snapshots30d: [snap],
-        snapshots30dError: new Error("snapshots timeout"),
+        snapshotsAll: [snap],
+        snapshotsAllError: new Error("snapshots timeout"),
       }),
     ]);
     expect(out).toEqual({ series: [], nowTvl: 0 });
@@ -532,8 +532,8 @@ describe("TvlOverTimeChart render", () => {
           makeNetworkData({
             network: TVL_NETWORK,
             pools: [pool],
-            snapshots30d: [snap],
-            snapshots30dError: new Error("snapshots timeout"),
+            snapshotsAll: [snap],
+            snapshotsAllError: new Error("snapshots timeout"),
           }),
         ],
         totalTvl: 0,
@@ -672,7 +672,7 @@ describe("TvlOverTimeChart render", () => {
     );
     expect(html).toMatch(/aria-pressed="true"[^>]*>1M</);
     expect(html).toMatch(/aria-pressed="false"[^>]*>1W</);
-    expect(html).not.toContain(">All<");
+    expect(html).toMatch(/aria-pressed="false"[^>]*>All</);
   });
 
   it("passes scrollZoom=false and displayModeBar=false to Plotly config", () => {

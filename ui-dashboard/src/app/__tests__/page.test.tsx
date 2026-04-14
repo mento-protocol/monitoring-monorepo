@@ -495,13 +495,13 @@ describe("GlobalPage — TVL delta sub-KPIs", () => {
       reserves0: "200000000000000000000",
       reserves1: "100000000000000000000",
     });
-    // Chart's `hasSnapshotError` is wired to `anySnapshots30dError` in page.tsx,
-    // so we trigger the partial-data badge via snapshots30dError specifically.
+    // Chart's `hasSnapshotError` is wired to `anySnapshotsAllError` in page.tsx,
+    // so we trigger the partial-data badge via snapshotsAllError specifically.
     const html = render([
       makeNetworkData({
         network: TVL_NETWORK,
         pools: [pool],
-        snapshots30dError: new Error("timeout"),
+        snapshotsAllError: new Error("timeout"),
       }),
     ]);
     expect(html).toContain("· partial data");
@@ -628,7 +628,7 @@ describe("GlobalPage — Volume chart wiring", () => {
     const html = render([
       makeNetworkData({
         network: TVL_NETWORK,
-        snapshots7dError: new Error("7d timeout"),
+        snapshotsAllError: new Error("all-history timeout"),
       }),
     ]);
 

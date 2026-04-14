@@ -67,6 +67,24 @@ export const POOL_SNAPSHOTS_WINDOW = `
   }
 `;
 
+export const POOL_SNAPSHOTS_ALL = `
+  query PoolSnapshotsAll($poolIds: [String!]!) {
+    PoolSnapshot(
+      where: { poolId: { _in: $poolIds } }
+      order_by: { timestamp: desc }
+      limit: 100000
+    ) {
+      poolId
+      timestamp
+      reserves0
+      reserves1
+      swapCount
+      swapVolume0
+      swapVolume1
+    }
+  }
+`;
+
 export const RECENT_SWAPS = `
   query RecentSwaps($chainId: Int!, $limit: Int!) {
     SwapEvent(

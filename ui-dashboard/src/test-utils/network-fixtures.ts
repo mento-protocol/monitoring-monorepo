@@ -96,13 +96,18 @@ export function makeSnapshot(
 export function makeNetworkData(
   overrides: Partial<NetworkData> = {},
 ): NetworkData {
-  return {
+  // Default snapshotsAll to snapshots30d so existing fixture callers that
+  // only populate snapshots30d still exercise chart series code paths.
+  const snapshots30d = overrides.snapshots30d ?? [];
+  const snapshotsAll = overrides.snapshotsAll ?? snapshots30d;
+  const base: NetworkData = {
     network: BASE_NETWORK,
     snapshotWindows: buildSnapshotWindows(Date.now()),
     pools: [],
     snapshots: [],
     snapshots7d: [],
-    snapshots30d: [],
+    snapshots30d,
+    snapshotsAll,
     fees: null,
     uniqueLpCount: 0,
     rates: new Map(),
@@ -111,7 +116,8 @@ export function makeNetworkData(
     snapshotsError: null,
     snapshots7dError: null,
     snapshots30dError: null,
+    snapshotsAllError: null,
     lpError: null,
-    ...overrides,
   };
+  return { ...base, ...overrides };
 }
