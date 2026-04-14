@@ -53,7 +53,13 @@ import {
   TRADING_LIMITS,
 } from "@/lib/queries";
 import { Pagination } from "@/components/pagination";
-import { isFpmm, poolName, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
+import {
+  explorerAddressUrl,
+  isFpmm,
+  poolName,
+  tokenSymbol,
+  USDM_SYMBOLS,
+} from "@/lib/tokens";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import {
   buildSearchBlob,
@@ -451,11 +457,34 @@ function PoolHeader({
   deployTxHash?: string;
 }) {
   const { network } = useNetwork();
-  const name = poolName(network, pool.token0, pool.token1);
   const isVirtual = pool.source?.includes("virtual");
   // pool.id is the namespaced multichain ID ("42220-0x…"). Strip the chain
   // prefix so AddressLink receives a plain hex address for explorer links.
   const poolContractAddress = stripChainIdFromPoolId(pool.id);
+
+  // Mirror poolName's USDm-last ordering so the linked title matches the
+  // breadcrumb and historical display, but keep each symbol as a separate
+  // anchor to its token contract on the explorer.
+  const sym0 = tokenSymbol(network, pool.token0);
+  const sym1 = tokenSymbol(network, pool.token1);
+  const usdmIsToken0 = USDM_SYMBOLS.has(sym0) && !USDM_SYMBOLS.has(sym1);
+  const firstSym = usdmIsToken0 ? sym1 : sym0;
+  const firstAddr = usdmIsToken0 ? pool.token1 : pool.token0;
+  const secondSym = usdmIsToken0 ? sym0 : sym1;
+  const secondAddr = usdmIsToken0 ? pool.token0 : pool.token1;
+  const titleSymbol = (sym: string, addr: string | null) =>
+    addr ? (
+      <a
+        href={explorerAddressUrl(network, addr)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="hover:text-indigo-300 transition-colors"
+      >
+        {sym}
+      </a>
+    ) : (
+      sym
+    );
 
   const createdRelative = relativeTime(pool.createdAtTimestamp);
   const createdTitle = formatTimestamp(pool.createdAtTimestamp);
@@ -463,7 +492,10 @@ function PoolHeader({
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <div className="flex flex-wrap items-center gap-3 mb-3">
-        <h1 className="text-xl font-bold text-white">{name}</h1>
+        <h1 className="text-xl font-bold text-white">
+          {titleSymbol(firstSym, firstAddr)}/
+          {titleSymbol(secondSym, secondAddr)}
+        </h1>
         <SourceBadge source={pool.source} />
         <span className="text-sm">
           <AddressLink address={poolContractAddress} />
