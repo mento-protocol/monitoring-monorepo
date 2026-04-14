@@ -467,10 +467,10 @@ function PoolHeader({
         <span className="text-sm">
           <AddressLink address={poolContractAddress} />
         </span>
-        {/* Inline "Created …" sits with the address row so it shares the
-            document-header rhythm as name/source/address and frees the 5th
-            grid column for high-signal live metrics below. */}
-        <span className="text-sm text-slate-500" title={createdTitle}>
+        {/* `ml-auto` pushes "Created …" to the far edge so the title row
+            reads as `identity ← → metadata` rather than trailing ragged-left
+            after the address. */}
+        <span className="ml-auto text-sm text-slate-500" title={createdTitle}>
           Created{" "}
           {deployTxHash ? (
             <a
@@ -486,7 +486,11 @@ function PoolHeader({
           )}
         </span>
       </div>
-      <dl className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-8 text-sm">
+      {/* Flex + content-sized cells: each metric column hugs its text, so
+          Health Score (short) doesn't float in the same width as Rebalance
+          Status (long subtitle). Gap-x-10 keeps cells readable without the
+          equal-column dead space grid-cols-4 produced. */}
+      <dl className="flex flex-wrap gap-x-10 gap-y-4 text-sm">
         <Stat
           label="Oracle Status"
           value={
