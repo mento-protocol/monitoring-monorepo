@@ -3,11 +3,9 @@
 import useSWR from "swr";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
-import {
-  checkRebalanceStatus,
-  type RebalanceCheckResult,
-} from "@/lib/rebalance-check";
+import { type RebalanceCheckResult } from "@/lib/rebalance-check";
 import { computeHealthStatus } from "@/lib/health";
+import { isNamespacedPoolId } from "@/lib/pool-id";
 
 /**
  * Hook that checks whether a rebalance is currently feasible for a pool.
@@ -18,7 +16,10 @@ import { computeHealthStatus } from "@/lib/health";
  * - Pool health is WARN or CRITICAL (i.e. it needs a rebalance)
  * - Price deviation >= rebalance threshold (actually out of balance)
  *
- * Returns null when the check is skipped (pool is healthy / not applicable).
+ * The actual eth_call happens on the server (/api/rebalance-check) so public
+ * RPC rate limits are shared across users via a short-lived cache, instead of
+ * burned per browser tab. Returns null when the check is skipped (pool is
+ * healthy / not applicable).
  */
 export function useRebalanceCheck(
   pool: Pool | null,
@@ -28,15 +29,14 @@ export function useRebalanceCheck(
   isLoading: boolean;
   error: Error | undefined;
 } {
-  const shouldCheck = shouldRunCheck(pool, network.chainId) && !!network.rpcUrl;
+  const shouldCheck = shouldRunCheck(pool, network.chainId);
   const key = shouldCheck
-    ? `rebalance-check:${network.id}:${pool!.id}:${pool!.rebalancerAddress}`
+    ? `/api/rebalance-check?network=${encodeURIComponent(network.id)}&pool=${encodeURIComponent(poolContractAddress(pool!.id))}&strategy=${encodeURIComponent(pool!.rebalancerAddress!)}`
     : null;
 
   const { data, error, isLoading } = useSWR<RebalanceCheckResult | null>(
     key,
-    () =>
-      checkRebalanceStatus(pool!.id, pool!.rebalancerAddress!, network.rpcUrl!),
+    fetchRebalanceCheck,
     {
       refreshInterval: 30_000,
       revalidateOnFocus: false,
@@ -50,6 +50,26 @@ export function useRebalanceCheck(
     isLoading: shouldCheck && isLoading,
     error,
   };
+}
+
+async function fetchRebalanceCheck(url: string): Promise<RebalanceCheckResult> {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(
+      body?.error ?? `Rebalance check failed (HTTP ${res.status})`,
+    );
+  }
+  return (await res.json()) as RebalanceCheckResult;
+}
+
+// Strip the "{chainId}-" prefix from a namespaced pool ID so the server gets
+// a raw 0x address for eth_call. Plain addresses pass through unchanged.
+function poolContractAddress(poolId: string): string {
+  if (!isNamespacedPoolId(poolId)) return poolId;
+  return poolId.split("-").slice(1).join("-");
 }
 
 function shouldRunCheck(pool: Pool | null, chainId?: number): boolean {
