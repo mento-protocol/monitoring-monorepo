@@ -58,7 +58,7 @@ export function OraclePriceValue({
             rel="noopener noreferrer"
             className="hover:text-indigo-400 transition-colors"
           >
-            {feed.pair} oracle
+            Chainlink {feed.pair} oracle
           </a>
         ) : (
           "SortedOracles"

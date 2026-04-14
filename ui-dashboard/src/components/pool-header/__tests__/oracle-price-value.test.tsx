@@ -112,7 +112,7 @@ describe("OraclePriceValue", () => {
       'href="https://data.chain.link/feeds/celo/mainnet/usdc-usd"',
     );
     // Slug "usdc-usd" formats to "USDC/USD" in the label.
-    expect(html).toContain("USDC/USD oracle");
+    expect(html).toContain("Chainlink USDC/USD oracle");
     // No ↗ on non-primary subtitles — indigo-hover signals clickability.
     expect(html).not.toContain("↗");
   });
