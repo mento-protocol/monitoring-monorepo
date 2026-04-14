@@ -3,6 +3,7 @@
 import { AddressLink } from "@/components/address-link";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { KindBadge, SourceBadge } from "@/components/badges";
+import { DeviationRow } from "@/components/pool-header/deviation-row";
 import { HealthScoreValue } from "@/components/pool-header/health-score-value";
 import { OraclePriceValue } from "@/components/pool-header/oracle-price-value";
 import { OracleStatusValue } from "@/components/pool-header/oracle-status-value";
@@ -536,6 +537,7 @@ function PoolHeader({
           }
         />
       </dl>
+      <DeviationRow pool={pool} network={network} />
     </div>
   );
 }

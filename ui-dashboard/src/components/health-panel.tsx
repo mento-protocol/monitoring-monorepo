@@ -8,55 +8,17 @@ import { useNetwork } from "@/components/network-provider";
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
 import type { RebalanceCheckResult } from "@/lib/rebalance-check";
 
-interface DeviationBarProps {
-  priceDifference: string;
-  rebalanceThreshold: number;
-}
-
-function DeviationBar({
-  priceDifference,
-  rebalanceThreshold,
-}: DeviationBarProps) {
-  const diff = Number(priceDifference);
-  if (!rebalanceThreshold || rebalanceThreshold === 0 || diff === 0) {
-    return <span className="text-slate-400 text-sm">—</span>;
-  }
-  const threshold = rebalanceThreshold;
-  const ratio = Math.min(diff / threshold, 1.5); // cap at 150%
-  const pct = Math.min(ratio * 100, 100);
-  const pctOfThreshold = ((diff / threshold) * 100).toFixed(1);
-  const color =
-    ratio >= 1.0
-      ? "bg-red-500"
-      : ratio >= 0.8
-        ? "bg-amber-500"
-        : "bg-emerald-500";
-
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-sm text-slate-200">
-        {pctOfThreshold}% of rebalance threshold
-        <span className="ml-2 text-xs text-slate-500">
-          ({diff.toLocaleString()} / {threshold.toLocaleString()} bps)
-        </span>
-      </span>
-      <div className="h-2 w-full rounded-full bg-slate-700">
-        <div
-          className={`h-2 rounded-full transition-all ${color}`}
-          style={{ width: `${pct}%` }}
-          role="progressbar"
-          aria-valuenow={diff}
-          aria-valuemax={threshold}
-        />
-      </div>
-    </div>
-  );
-}
-
 interface HealthPanelProps {
   pool: Pool;
 }
 
+/**
+ * Exception-only panel — the pool header owns the primary health surface
+ * (DeviationRow + metric cells). This panel stays mounted only when it has
+ * something the header doesn't already show: a virtual-pool notice, missing
+ * health-data notice, the weekend pause copy, or a rebalance diagnostics
+ * bundle. Otherwise it returns null and gets out of the way.
+ */
 export function HealthPanel({ pool }: HealthPanelProps) {
   const { network } = useNetwork();
   const isVirtual = pool.source?.includes("virtual");
@@ -65,17 +27,25 @@ export function HealthPanel({ pool }: HealthPanelProps) {
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const oracleIsFresh = isOracleFresh(pool, nowSeconds, network.chainId);
+  const weekendPause = !oracleIsFresh && isWeekend();
 
   const { data: rebalanceCheck, error: rebalanceCheckError } =
     useRebalanceCheck(pool, network);
 
-  // Only show the diagnostics panel when it carries info the top-row status
-  // doesn't already convey: a blocked revert with a decoded message, an
-  // enrichment bundle (CDP / Reserve balances), or a transport-level error.
+  // Show diagnostics when they carry info the top-row status cells don't:
+  // a blocked revert with a decoded message, a CDP/Reserve enrichment bundle,
+  // or a transport-level error.
   const showRebalanceDiag =
-    !!rebalanceCheckError ||
-    (rebalanceCheck !== null &&
-      (!rebalanceCheck.canRebalance || rebalanceCheck.enrichment !== null));
+    !isVirtual &&
+    hasHealthData &&
+    !weekendPause &&
+    (!!rebalanceCheckError ||
+      (rebalanceCheck !== null &&
+        (!rebalanceCheck.canRebalance || rebalanceCheck.enrichment !== null)));
+
+  const hasContent =
+    isVirtual || !hasHealthData || weekendPause || showRebalanceDiag;
+  if (!hasContent) return null;
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -92,7 +62,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
         <p className="text-sm text-slate-400">
           Oracle health data not yet available — indexer schema update pending.
         </p>
-      ) : !oracleIsFresh && isWeekend() ? (
+      ) : weekendPause ? (
         <div className="flex items-start gap-3 rounded-lg border border-slate-700 bg-slate-800/40 px-4 py-3 text-sm text-slate-300">
           <span
             className="text-base leading-5 flex-shrink-0"
@@ -110,30 +80,10 @@ export function HealthPanel({ pool }: HealthPanelProps) {
           </span>
         </div>
       ) : (
-        <div
-          className={`flex flex-col ${showRebalanceDiag ? "lg:flex-row" : ""} gap-6`}
-        >
-          <dl className={showRebalanceDiag ? "lg:flex-1 lg:min-w-0" : "w-full"}>
-            <div>
-              <dt className="text-sm text-slate-400 mb-1">
-                Deviation vs Threshold
-              </dt>
-              <dd>
-                <DeviationBar
-                  priceDifference={pool.priceDifference ?? "0"}
-                  rebalanceThreshold={pool.rebalanceThreshold ?? 0}
-                />
-              </dd>
-            </div>
-          </dl>
-
-          {showRebalanceDiag && (
-            <RebalanceDiagnostics
-              result={rebalanceCheck}
-              error={rebalanceCheckError}
-            />
-          )}
-        </div>
+        <RebalanceDiagnostics
+          result={rebalanceCheck}
+          error={rebalanceCheckError}
+        />
       )}
     </div>
   );
@@ -148,7 +98,7 @@ function RebalanceDiagnostics({
 }) {
   if (error) {
     return (
-      <div className="lg:w-72 lg:flex-shrink-0 lg:border-l lg:border-slate-800 lg:pl-6">
+      <div>
         <h3 className="text-sm font-medium text-slate-400 mb-3">
           Rebalance Details
         </h3>

@@ -93,14 +93,15 @@ describe("HealthPanel weekend mode", () => {
   });
 
   it("does not show weekend explanation when oracle is stale but it is not the weekend", () => {
-    // isWeekend mock returns false by default
+    // isWeekend mock returns false by default. The deviation widget moved to
+    // the pool header (DeviationRow), and with no weekend pause, no missing-
+    // data case, and no rebalance diagnostics, the panel has nothing left
+    // to render and collapses.
     const stalePool: Pool = { ...BASE_POOL, oracleTimestamp: STALE_TS };
     const html = renderToStaticMarkup(<HealthPanel pool={stalePool} />);
 
     expect(html).not.toContain("Trading is paused for the weekend");
-    // Oracle Status ("✓ Fresh" / "✗ Stale") moved to the pool header top row,
-    // so the panel no longer renders that label — it renders the Deviation bar.
-    expect(html).toContain("Deviation vs Threshold");
-    expect(html).toContain("<dl");
+    expect(html).not.toContain("Deviation vs Threshold");
+    expect(html).toBe("");
   });
 });
