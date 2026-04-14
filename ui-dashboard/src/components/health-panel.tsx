@@ -426,6 +426,8 @@ export function HealthPanel({ pool }: HealthPanelProps) {
               result={rebalanceCheck}
               isLoading={rebalanceCheckLoading}
               error={rebalanceCheckError}
+              strategyAddress={pool.rebalancerAddress ?? null}
+              explorerBaseUrl={network.explorerBaseUrl}
             />
           )}
         </div>
@@ -442,10 +444,14 @@ function RebalanceDiagnostics({
   result,
   isLoading,
   error,
+  strategyAddress,
+  explorerBaseUrl,
 }: {
   result: RebalanceCheckResult | null;
   isLoading: boolean;
   error: Error | undefined;
+  strategyAddress: string | null;
+  explorerBaseUrl: string;
 }) {
   if (isLoading) {
     return (
@@ -478,8 +484,17 @@ function RebalanceDiagnostics({
   if (!result) return null;
 
   const statusColor = result.canRebalance ? "text-emerald-400" : "text-red-400";
-  const statusDot = result.canRebalance ? "bg-emerald-400" : "bg-red-400";
   const statusIcon = result.canRebalance ? "✓" : "✗";
+  const statusLabel = result.canRebalance
+    ? "Rebalance possible"
+    : "Rebalance blocked";
+  // When a rebalance is feasible, link the status to the strategy's write
+  // page so an operator (or any OLS caller) can jump straight to signing
+  // the tx. Reverts don't link anywhere — the error text is the next step.
+  const writeContractUrl =
+    result.canRebalance && strategyAddress
+      ? `${explorerBaseUrl}/address/${strategyAddress}#writeContract`
+      : null;
 
   return (
     <div className="lg:w-72 lg:flex-shrink-0 lg:border-l lg:border-slate-800 lg:pl-6">
@@ -489,15 +504,20 @@ function RebalanceDiagnostics({
 
       <div className="flex flex-col gap-3">
         {/* Status line */}
-        <div className="flex items-start gap-2">
-          <span
-            className={`inline-block w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0 ${statusDot}`}
-          />
+        {writeContractUrl ? (
+          <a
+            href={writeContractUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`text-sm font-medium ${statusColor} hover:underline`}
+          >
+            {statusIcon} {statusLabel} ↗
+          </a>
+        ) : (
           <span className={`text-sm font-medium ${statusColor}`}>
-            {statusIcon}{" "}
-            {result.canRebalance ? "Rebalance possible" : "Rebalance blocked"}
+            {statusIcon} {statusLabel}
           </span>
-        </div>
+        )}
 
         {/* Human-readable reason with raw error. OLS success has nuance
             worth surfacing (awaits external caller); other success cases
