@@ -97,7 +97,7 @@ describe("OraclePriceValue", () => {
     expect(html).toMatch(/1 KESm = [0-9.]+ USDm/);
   });
 
-  it("renders the via Chainlink link when a known symbol is mapped", () => {
+  it("renders 'via {PAIR} oracle' with a Chainlink link when a known symbol is mapped", () => {
     // USDC symbol is mapped to celo-mainnet/usdc-usd.
     const pool: Pool = {
       ...BASE_POOL,
@@ -111,12 +111,13 @@ describe("OraclePriceValue", () => {
     expect(html).toContain(
       'href="https://data.chain.link/feeds/celo/mainnet/usdc-usd"',
     );
-    expect(html).toContain("via Chainlink");
+    // Slug "usdc-usd" formats to "USDC/USD" in the label.
+    expect(html).toContain("USDC/USD oracle");
     // No ↗ on non-primary subtitles — indigo-hover signals clickability.
-    expect(html).not.toContain("via Chainlink ↗");
+    expect(html).not.toContain("↗");
   });
 
-  it("renders plain via SortedOracles text when no Chainlink mapping exists", () => {
+  it("renders plain 'via SortedOracles' when no Chainlink mapping exists", () => {
     const pool: Pool = {
       ...BASE_POOL,
       oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
@@ -125,7 +126,7 @@ describe("OraclePriceValue", () => {
       <OraclePriceValue pool={pool} network={NETWORK_WITHOUT_CHAINLINK} />,
     );
     expect(html).toContain("via SortedOracles");
-    expect(html).not.toContain("via Chainlink");
+    expect(html).not.toContain("oracle"); // no "X/Y oracle" link
     expect(html).not.toContain("data.chain.link");
   });
 });

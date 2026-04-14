@@ -4,7 +4,7 @@ import React from "react";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { formatOraclePrice } from "@/lib/format";
-import { chainlinkFeedUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
+import { chainlinkFeed, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 
 export function OraclePriceValue({
   pool,
@@ -28,9 +28,11 @@ export function OraclePriceValue({
   const displayPrice =
     feedVal > 0 ? formatOraclePrice(inverted ? 1 / feedVal : feedVal) : "—";
 
-  const chainlinkUrl =
-    chainlinkFeedUrl(sym1, network.chainId) ??
-    chainlinkFeedUrl(sym0, network.chainId);
+  // Try the non-USDm leg first (more specific feed), fall back to the USDm
+  // leg in the unusual case where both legs resolve to different pairs.
+  const feed =
+    chainlinkFeed(sym1, network.chainId) ??
+    chainlinkFeed(sym0, network.chainId);
 
   return (
     <span className="flex flex-col gap-0.5">
@@ -47,18 +49,21 @@ export function OraclePriceValue({
       ) : (
         <span className="text-slate-500">—</span>
       )}
-      {chainlinkUrl ? (
-        <a
-          href={chainlinkUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-slate-500 hover:text-indigo-400 transition-colors"
-        >
-          via Chainlink
-        </a>
-      ) : (
-        <span className="text-xs text-slate-500">via SortedOracles</span>
-      )}
+      <span className="text-xs text-slate-500">
+        via{" "}
+        {feed ? (
+          <a
+            href={feed.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-indigo-400 transition-colors"
+          >
+            {feed.pair} oracle
+          </a>
+        ) : (
+          "SortedOracles"
+        )}
+      </span>
     </span>
   );
 }

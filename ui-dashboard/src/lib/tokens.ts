@@ -138,21 +138,36 @@ export function buildPoolNameMap(
 }
 
 /**
- * Returns the Chainlink data feed URL for a given token symbol and chainId,
- * or null if no mapping exists for that chain. Only applicable to FPMM pools.
- * Add new chains to CHAINLINK_FEEDS as they go live.
+ * Returns the Chainlink data feed URL + display pair for a given token
+ * symbol and chainId, or null if no mapping exists. Only applicable to
+ * FPMM pools. Add new chains / symbols to CHAINLINK_FEEDS as they go live.
+ *
+ * `pair` is derived from the slug: `"gbp-usd"` → `"GBP/USD"`, suitable
+ * for "via {pair} oracle" labels in the UI.
  */
-export function chainlinkFeedUrl(
+export function chainlinkFeed(
   tokenSymbol: string,
   chainId: number,
-): string | null {
+): { url: string; pair: string } | null {
   const chainConfig = CHAINLINK_FEEDS[chainId];
   if (!chainConfig) return null;
   // Normalise: strip "axl" prefix and lowercase for matching
   const sym = tokenSymbol.replace(/^axl/i, "").toLowerCase();
   const slug = chainConfig.slugs[sym];
   if (!slug) return null;
-  return `${chainConfig.baseUrl}/${slug}`;
+  const pair = slug
+    .split("-")
+    .map((s) => s.toUpperCase())
+    .join("/");
+  return { url: `${chainConfig.baseUrl}/${slug}`, pair };
+}
+
+/** @deprecated Use chainlinkFeed() — returns {url, pair}. */
+export function chainlinkFeedUrl(
+  tokenSymbol: string,
+  chainId: number,
+): string | null {
+  return chainlinkFeed(tokenSymbol, chainId)?.url ?? null;
 }
 
 /**
@@ -212,7 +227,23 @@ const CHAINLINK_FEEDS: Record<
       usdt: "usdt-usd",
       gbp: "gbp-usd",
       gbpm: "gbp-usd",
+      eur: "eur-usd",
+      eurm: "eur-usd",
+      euroc: "eur-usd",
     },
   },
-  // 10143: { baseUrl: "...", slugs: { ... } }, // Monad — add when live
+  143: {
+    // Monad Mainnet
+    baseUrl: "https://data.chain.link/feeds/monad/monad",
+    slugs: {
+      usdc: "usdc-usd",
+      usdt: "usdt-usd",
+      ausd: "ausd-usd",
+      gbp: "gbp-usd",
+      gbpm: "gbp-usd",
+      eur: "eur-usd",
+      eurm: "eur-usd",
+    },
+  },
+  // 10143: { baseUrl: "...", slugs: { ... } }, // Monad Testnet — add when live
 };
