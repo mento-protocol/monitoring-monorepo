@@ -22,6 +22,12 @@ const POOL = "0x1111111111111111111111111111111111111111";
 const STRATEGY = "0x2222222222222222222222222222222222222222";
 const RPC_URL = "https://forno.celo.org";
 
+// 4-byte selector for determineAction(address). OLS must probe this function
+// (not rebalance) to avoid an ERC20 revert when simulating from address(0).
+const DETERMINE_ACTION_SELECTOR = keccak256(
+  toBytes("determineAction(address)"),
+).slice(0, 10);
+
 beforeEach(() => {
   vi.resetAllMocks();
 });
@@ -142,6 +148,10 @@ describe("checkRebalanceStatus", () => {
     const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
     expect(result.strategyType).toBe("ols");
     expect(result.canRebalance).toBe(true);
+    // OLS must probe determineAction(address), NOT rebalance(address) — the
+    // latter triggers an ERC20 transfer revert when simulated from address(0).
+    const callData = mockCall.mock.calls[0][0].data as string;
+    expect(callData.slice(0, 10)).toBe(DETERMINE_ACTION_SELECTOR);
   });
 
   it("decodes OLS_OUT_OF_COLLATERAL revert with human-readable message", async () => {
@@ -164,6 +174,9 @@ describe("checkRebalanceStatus", () => {
     expect(result.strategyType).toBe("ols");
     expect(result.rawError).toBe("OLS_OUT_OF_COLLATERAL");
     expect(result.message).toContain("collateral");
+    // Regression guard: ensure probe went through determineAction, not rebalance.
+    const callData = mockCall.mock.calls[0][0].data as string;
+    expect(callData.slice(0, 10)).toBe(DETERMINE_ACTION_SELECTOR);
   });
 
   it("propagates transport errors during strategy detection", async () => {

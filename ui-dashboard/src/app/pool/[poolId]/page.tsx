@@ -484,7 +484,6 @@ function RebalanceStatusValue({
     statusHref = strategyRebalanceWriteUrl(
       network.explorerBaseUrl,
       strategyAddress,
-      rebalanceCheck.strategyType,
     );
   } else {
     statusText = "Rebalance blocked";

@@ -210,17 +210,34 @@ describe("GlobalPage — LP query failure", () => {
         lpError: new Error("LP aggregate timeout"),
       }),
     ]);
-    expect(html).toContain("42");
+    // Match the tile value surrounded by > < so we don't collide with Tailwind
+    // class digits (e.g. border-4, gap-4). 42 is deliberately chosen to avoid
+    // collision with common Tailwind spacing scales.
+    expect(html).toContain(">42<");
     expect(html).toContain("Partial");
   });
 
   it("deduplicates LP addresses that appear on multiple chains", () => {
+    // Craft two chains with a deliberate overlap so the union size (13) is
+    // distinctive and won't collide with Tailwind spacing classes. Sum of
+    // counts would be 20 (the bug signal).
+    const chain1 = Array.from({ length: 10 }, (_, i) => `0xlp1-${i}`);
+    const chain2 = [
+      // 7 addresses shared with chain1
+      ...chain1.slice(0, 7),
+      // 3 addresses unique to chain2
+      ...Array.from({ length: 3 }, (_, i) => `0xlp2-${i}`),
+    ];
+    // |chain1 ∪ chain2| = 10 + 3 = 13
     const html = render([
-      makeNetworkData({ uniqueLpAddresses: ["0xa", "0xb", "0xc"] }),
-      makeNetworkData({ uniqueLpAddresses: ["0xa", "0xd"] }),
+      makeNetworkData({ uniqueLpAddresses: chain1 }),
+      makeNetworkData({ uniqueLpAddresses: chain2 }),
     ]);
     expect(html).toContain("LPs");
-    expect(html).toContain("4");
+    // Angle-bracketed match guards against false positives from Tailwind classes.
+    expect(html).toContain(">13<");
+    // Rule out the un-deduped sum (10 + 10 = 20).
+    expect(html).not.toContain(">20<");
   });
 });
 

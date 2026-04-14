@@ -63,15 +63,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   let pending = inFlight.get(key);
   if (!pending) {
-    pending = runWithRetry(pool, strategy, rpcUrl).finally(() => {
-      inFlight.delete(key);
-    });
+    // Populate the cache INSIDE the promise chain (before .finally clears
+    // inFlight) so we never leave a window where a new request sees neither
+    // inFlight nor cache and fires a duplicate upstream RPC.
+    pending = runWithRetry(pool, strategy, rpcUrl)
+      .then((result) => {
+        cache.set(key, { result, expiresAt: Date.now() + CACHE_TTL_MS });
+        return result;
+      })
+      .finally(() => {
+        inFlight.delete(key);
+      });
     inFlight.set(key, pending);
   }
 
   try {
     const result = await pending;
-    cache.set(key, { result, expiresAt: Date.now() + CACHE_TTL_MS });
     return NextResponse.json(result);
   } catch (err) {
     console.error("[rebalance-check]", network, pool, err);
