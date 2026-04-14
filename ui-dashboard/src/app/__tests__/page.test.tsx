@@ -179,7 +179,7 @@ describe("GlobalPage — LP query failure", () => {
   it("shows N/A when all LP queries fail", () => {
     const html = render([
       makeNetworkData({
-        uniqueLpCount: null,
+        uniqueLpAddresses: null,
         lpError: new Error("LP aggregate timeout"),
       }),
     ]);
@@ -190,9 +190,9 @@ describe("GlobalPage — LP query failure", () => {
 
   it("shows 0 when a chain reports 0 LPs and another fails", () => {
     const html = render([
-      makeNetworkData({ uniqueLpCount: 0 }),
+      makeNetworkData({ uniqueLpAddresses: [] }),
       makeNetworkData({
-        uniqueLpCount: null,
+        uniqueLpAddresses: null,
         lpError: new Error("LP aggregate timeout"),
       }),
     ]);
@@ -201,16 +201,26 @@ describe("GlobalPage — LP query failure", () => {
     expect(html).toContain("Partial");
   });
 
-  it("sums LP counts from successful chains even when one fails", () => {
+  it("unions LP addresses across successful chains even when one fails", () => {
+    const addrs = Array.from({ length: 42 }, (_, i) => `0x${i}`);
     const html = render([
-      makeNetworkData({ uniqueLpCount: 42 }),
+      makeNetworkData({ uniqueLpAddresses: addrs }),
       makeNetworkData({
-        uniqueLpCount: null,
+        uniqueLpAddresses: null,
         lpError: new Error("LP aggregate timeout"),
       }),
     ]);
     expect(html).toContain("42");
     expect(html).toContain("Partial");
+  });
+
+  it("deduplicates LP addresses that appear on multiple chains", () => {
+    const html = render([
+      makeNetworkData({ uniqueLpAddresses: ["0xa", "0xb", "0xc"] }),
+      makeNetworkData({ uniqueLpAddresses: ["0xa", "0xd"] }),
+    ]);
+    expect(html).toContain("LPs");
+    expect(html).toContain("4");
   });
 });
 

@@ -121,7 +121,7 @@ function GlobalContent() {
         anyFeesError || anyNetworkError ? null : 0;
       let totalFees30d: number | null =
         anyFeesError || anyNetworkError ? null : 0;
-      let totalUniqueLps: number | null = anyNetworkError ? null : 0;
+      const uniqueLpSet = new Set<string>();
       let hasSuccessfulLpResult = false;
       const unpricedSymbolSet = new Set<string>();
       let isTruncated = false;
@@ -220,17 +220,20 @@ function GlobalContent() {
           if (fees.isTruncated) isTruncated = true;
         }
 
-        // LP count — accumulate from successful chains
-        if (netData.uniqueLpCount !== null && totalUniqueLps !== null) {
-          totalUniqueLps += netData.uniqueLpCount;
+        // LP addresses — union across successful chains so an address that
+        // provides liquidity on multiple chains counts once globally.
+        if (netData.uniqueLpAddresses !== null) {
+          for (const addr of netData.uniqueLpAddresses) uniqueLpSet.add(addr);
           hasSuccessfulLpResult = true;
         }
       }
 
-      // Show N/A only when no chain contributed a successful LP result
-      if (!hasSuccessfulLpResult && anyLpError) {
-        totalUniqueLps = null;
-      }
+      // Show N/A when no chain contributed a successful LP result OR any
+      // top-level chain error means we can't claim a complete global count.
+      const totalUniqueLps =
+        anyNetworkError || (!hasSuccessfulLpResult && anyLpError)
+          ? null
+          : uniqueLpSet.size;
 
       return {
         aggregated: {
@@ -361,7 +364,7 @@ function GlobalContent() {
             subtitle={
               anyLpError
                 ? "Partial — some chains failed to load"
-                : "Unique FPMM LP addresses (per-chain)"
+                : "Unique LP addresses across all chains"
             }
           />
 

@@ -35,7 +35,7 @@ export type NetworkData = {
   snapshots7d: PoolSnapshotWindow[];
   snapshots30d: PoolSnapshotWindow[];
   fees: ProtocolFeeSummary | null;
-  uniqueLpCount: number | null;
+  uniqueLpAddresses: string[] | null;
   rates: OracleRateMap;
   error: Error | null;
   feesError: Error | null;
@@ -60,7 +60,7 @@ const emptyNetworkData = (network: Network, error: Error): NetworkData => ({
   snapshots7d: [],
   snapshots30d: [],
   fees: null,
-  uniqueLpCount: null,
+  uniqueLpAddresses: null,
   rates: new Map(),
   error,
   feesError: null,
@@ -162,11 +162,13 @@ export async function fetchNetworkData(
       ? (snapshots30dResult.value.PoolSnapshot ?? [])
       : [];
 
-  const uniqueLpCount =
+  const uniqueLpAddresses =
     lpResult.status === "fulfilled"
-      ? new Set(
-          (lpResult.value.LiquidityPosition ?? []).map((lp) => lp.address),
-        ).size
+      ? Array.from(
+          new Set(
+            (lpResult.value.LiquidityPosition ?? []).map((lp) => lp.address),
+          ),
+        )
       : null;
 
   return {
@@ -176,7 +178,7 @@ export async function fetchNetworkData(
     snapshots7d,
     snapshots30d,
     fees,
-    uniqueLpCount,
+    uniqueLpAddresses,
     rates,
     error: null,
     feesError:

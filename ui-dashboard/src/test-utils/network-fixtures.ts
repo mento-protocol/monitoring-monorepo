@@ -102,7 +102,7 @@ export function makeNetworkData(
     snapshots7d: [],
     snapshots30d: [],
     fees: null,
-    uniqueLpCount: 0,
+    uniqueLpAddresses: [],
     rates: new Map(),
     error: null,
     feesError: null,
