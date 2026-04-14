@@ -574,19 +574,6 @@ function PoolHeader({
           }
         />
         <Stat
-          label="Created at block"
-          value={
-            <a
-              href={`${network.explorerBaseUrl}/block/${pool.createdAtBlock}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-indigo-400 hover:text-indigo-300 font-mono"
-            >
-              {formatBlock(pool.createdAtBlock)}
-            </a>
-          }
-        />
-        <Stat
           label="Created"
           value={
             deployTxHash ? (
