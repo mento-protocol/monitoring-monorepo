@@ -222,8 +222,12 @@ function GlobalContent() {
 
         // LP addresses — union across successful chains so an address that
         // provides liquidity on multiple chains counts once globally.
+        // `.toLowerCase()` defends against any per-chain source returning the
+        // same wallet in checksum vs. lowercase; the per-chain hook already
+        // lowercases before dedup, but this layer accepts any string input.
         if (netData.uniqueLpAddresses !== null) {
-          for (const addr of netData.uniqueLpAddresses) uniqueLpSet.add(addr);
+          for (const addr of netData.uniqueLpAddresses)
+            uniqueLpSet.add(addr.toLowerCase());
           hasSuccessfulLpResult = true;
         }
       }

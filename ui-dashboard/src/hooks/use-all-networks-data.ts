@@ -166,7 +166,12 @@ export async function fetchNetworkData(
     lpResult.status === "fulfilled"
       ? Array.from(
           new Set(
-            (lpResult.value.LiquidityPosition ?? []).map((lp) => lp.address),
+            // Lowercase before dedup: upstream rows can arrive in mixed casing
+            // (checksum on some sources, lowercase on others) and Set keys on
+            // raw strings would count the same wallet twice.
+            (lpResult.value.LiquidityPosition ?? []).map((lp) =>
+              lp.address.toLowerCase(),
+            ),
           ),
         )
       : null;
