@@ -83,6 +83,23 @@ export function snapshotWindow30d(nowMs: number): { from: number; to: number } {
   };
 }
 
+/**
+ * Window covering the 7 days immediately preceding the current 7-day window —
+ * i.e. [now - 14d, now - 7d]. Used to compute week-over-week volume deltas
+ * without refetching: the caller filters `snapshots30d` by this window.
+ */
+export function snapshotWindowPrior7d(nowMs: number): {
+  from: number;
+  to: number;
+} {
+  const nowSeconds = Math.floor(nowMs / 1000);
+  const to = hourBucket(nowSeconds) - SECONDS_PER_WEEK;
+  return {
+    from: to - SECONDS_PER_WEEK,
+    to,
+  };
+}
+
 export function shouldQueryPoolSnapshots(poolIds: readonly string[]): boolean {
   return poolIds.length > 0;
 }

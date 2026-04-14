@@ -521,7 +521,7 @@ describe("TvlOverTimeChart render", () => {
           }),
         ],
         totalTvl: 0,
-        change24h: null,
+        change7d: null,
         isLoading: false,
         hasError: false,
         hasSnapshotError: false,
@@ -537,7 +537,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
-        change24h: null,
+        change7d: null,
         isLoading: false,
         hasError: true,
         hasSnapshotError: false,
@@ -565,7 +565,7 @@ describe("TvlOverTimeChart render", () => {
           }),
         ],
         totalTvl: 0,
-        change24h: null,
+        change7d: null,
         isLoading: false,
         hasError: false,
         hasSnapshotError: true,
@@ -581,7 +581,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 1_234_567,
-        change24h: null,
+        change7d: null,
         isLoading: true,
         hasError: false,
         hasSnapshotError: false,
@@ -596,7 +596,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
-        change24h: 2.13,
+        change7d: 2.13,
         isLoading: false,
         hasError: false,
         hasSnapshotError: false,
@@ -612,7 +612,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
-        change24h: -5.14,
+        change7d: -5.14,
         isLoading: false,
         hasError: false,
         hasSnapshotError: false,
@@ -645,23 +645,23 @@ describe("TvlOverTimeChart render", () => {
           }),
         ],
         totalTvl: 200,
-        change24h: 5.5,
+        change7d: 5.5,
         isLoading: false,
         hasError: true,
         hasSnapshotError: false,
       }),
     );
     expect(html).not.toContain("5.50%");
-    expect(html).not.toContain("past 24h");
+    expect(html).not.toContain("week-over-week");
     expect(html).toContain("· partial data");
   });
 
-  it("renders no delta pill when change24h is null", () => {
+  it("renders no delta pill when change7d is null", () => {
     const html = renderToStaticMarkup(
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
-        change24h: null,
+        change7d: null,
         isLoading: false,
         hasError: true,
         hasSnapshotError: false,
@@ -669,7 +669,7 @@ describe("TvlOverTimeChart render", () => {
     );
     expect(html).not.toContain("text-emerald-400");
     expect(html).not.toContain("text-red-400");
-    expect(html).not.toContain("past 24h");
+    expect(html).not.toContain("week-over-week");
   });
 
   it("suppresses the delta pill while loading", () => {
@@ -677,14 +677,14 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
-        change24h: 5.0,
+        change7d: 5.0,
         isLoading: true,
         hasError: false,
         hasSnapshotError: false,
       }),
     );
     expect(html).not.toContain("5.00%");
-    expect(html).not.toContain("past 24h");
+    expect(html).not.toContain("week-over-week");
   });
 
   it("starts with the 'All' range active by default", () => {
@@ -692,7 +692,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
-        change24h: null,
+        change7d: null,
         isLoading: false,
         hasError: true,
         hasSnapshotError: false,
@@ -721,7 +721,7 @@ describe("TvlOverTimeChart render", () => {
           }),
         ],
         totalTvl: 200,
-        change24h: null,
+        change7d: null,
         isLoading: false,
         hasError: false,
         hasSnapshotError: false,
@@ -749,7 +749,7 @@ describe("TvlOverTimeChart render", () => {
           }),
         ],
         totalTvl: 200,
-        change24h: null,
+        change7d: null,
         isLoading: false,
         hasError: false,
         hasSnapshotError: false,

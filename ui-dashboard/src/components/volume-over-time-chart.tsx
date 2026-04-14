@@ -70,23 +70,10 @@ export function buildDailyVolumeSeries(
   return series;
 }
 
-/**
- * Day-over-day % change between the last two completed UTC-day buckets. The
- * final bucket is usually the partial current UTC day, so we compare index -2
- * (last full day) vs -3 (day before). Returns null when there isn't enough
- * history or the prior day had zero volume.
- */
-function dayOverDayVolumeChangePct(series: SeriesPoint[]): number | null {
-  if (series.length < 3) return null;
-  const prev = series[series.length - 3].volumeUSD;
-  const current = series[series.length - 2].volumeUSD;
-  if (prev <= 0) return null;
-  return ((current - prev) / prev) * 100;
-}
-
 interface VolumeOverTimeChartProps {
   networkData: NetworkData[];
-  totalVolume24h: number | null;
+  totalVolume7d: number | null;
+  change7d: number | null;
   isLoading: boolean;
   hasError: boolean;
   hasSnapshotError: boolean;
@@ -94,7 +81,8 @@ interface VolumeOverTimeChartProps {
 
 export function VolumeOverTimeChart({
   networkData,
-  totalVolume24h,
+  totalVolume7d,
+  change7d,
   isLoading,
   hasError,
   hasSnapshotError,
@@ -112,11 +100,6 @@ export function VolumeOverTimeChart({
     const cutoff = Math.floor(Date.now() / 1000) - r.days * SECONDS_PER_DAY;
     return fullSeries.filter((p) => p.timestamp >= cutoff);
   }, [fullSeries, range]);
-
-  const changePct = useMemo(
-    () => dayOverDayVolumeChangePct(fullSeries),
-    [fullSeries],
-  );
 
   const { traces, layout } = useMemo(() => {
     const xs = visibleSeries.map((p) =>
@@ -179,13 +162,13 @@ export function VolumeOverTimeChart({
   }, [visibleSeries]);
 
   const headline =
-    isLoading || totalVolume24h === null ? "…" : formatUSD(totalVolume24h);
+    isLoading || totalVolume7d === null ? "…" : formatUSD(totalVolume7d);
 
   const deltaPill =
-    changePct === null || isLoading || hasError ? null : (
-      <span className={changePct >= 0 ? "text-emerald-400" : "text-red-400"}>
-        {changePct >= 0 ? "+" : ""}
-        {changePct.toFixed(2)}%
+    change7d === null || isLoading || hasError ? null : (
+      <span className={change7d >= 0 ? "text-emerald-400" : "text-red-400"}>
+        {change7d >= 0 ? "+" : ""}
+        {change7d.toFixed(2)}%
       </span>
     );
 
@@ -200,13 +183,15 @@ export function VolumeOverTimeChart({
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-sm text-slate-400">Volume (24h)</p>
+          <p className="text-sm text-slate-400">Volume (past 7d)</p>
           <p className="mt-1 font-mono text-3xl font-semibold tracking-tight text-white sm:text-4xl">
             {headline}
           </p>
           <div className="mt-1 flex h-5 items-center gap-1.5 font-mono text-sm">
             {deltaPill}
-            {deltaPill && <span className="text-slate-500">day-over-day</span>}
+            {deltaPill && (
+              <span className="text-slate-500">week-over-week</span>
+            )}
             {(hasError || hasSnapshotError) && !isLoading && (
               <span className="text-xs text-slate-500">· partial data</span>
             )}

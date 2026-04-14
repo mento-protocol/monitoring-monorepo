@@ -5,7 +5,11 @@ import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
 import type { Network } from "@/lib/networks";
-import { buildPoolVolumeMap, poolTotalVolumeUSD } from "@/lib/volume";
+import {
+  buildPoolVolumeMap,
+  poolTotalVolumeUSD,
+  snapshotWindowPrior7d,
+} from "@/lib/volume";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import {
@@ -99,10 +103,11 @@ function GlobalContent() {
       let totalFpmmPools = 0;
       let totalTvl = 0;
       // Track current + historical TVL only for chains that contributed
-      // snapshot data, so numerator and denominator always match.
-      let tvlNow24h = 0;
-      let tvlAgo24h = 0;
-      let hasTvlSnapshots24h = false;
+      // snapshot data, so numerator and denominator always match. Uses the 7d
+      // window so weekend oracle stalls in FX pools don't distort the delta.
+      let tvlNow7d = 0;
+      let tvlAgo7d = 0;
+      let hasTvlSnapshots7d = false;
       const allEntries: GlobalPoolEntry[] = [];
       const allVol24h = new Map<string, number | null | undefined>();
       const allVol7d = new Map<string, number | null | undefined>();
@@ -113,6 +118,11 @@ function GlobalContent() {
         anySnapshots7dError || anyNetworkError ? null : 0;
       let totalVolume30d: number | null =
         anySnapshots30dError || anyNetworkError ? null : 0;
+      // Prior 7d window [-14d, -7d], filtered from snapshots30d. Used only for
+      // the volume chart's week-over-week delta — no extra network request.
+      let totalVolumePrior7d: number | null =
+        anySnapshots30dError || anyNetworkError ? null : 0;
+      const priorWindow = snapshotWindowPrior7d(Date.now());
       let totalSwapsAllTime: number | null = anyNetworkError ? null : 0;
       let totalFeesAllTime: number | null =
         anyFeesError || anyNetworkError ? null : 0;
@@ -150,12 +160,14 @@ function GlobalContent() {
         totalTvl += chainTvlNow;
 
         // Historical TVL — only pools with snapshot data contribute to both
-        // sides of the delta, so new pools don't inflate the percentage.
-        if (netData.snapshotsError === null && snapshots.length > 0) {
-          const m = matchedTvl(snapshots, pools, network, rates);
-          tvlNow24h += m.now;
-          tvlAgo24h += m.ago;
-          hasTvlSnapshots24h = true;
+        // sides of the delta, so new pools don't inflate the percentage. Uses
+        // the 7d window (not 24h) so weekend oracle stalls don't produce
+        // Monday spikes in the delta.
+        if (netData.snapshots7dError === null && snapshots7d.length > 0) {
+          const m = matchedTvl(snapshots7d, pools, network, rates);
+          tvlNow7d += m.now;
+          tvlAgo7d += m.ago;
+          hasTvlSnapshots7d = true;
         }
 
         // All-time volume & swaps from pool-level counters
@@ -195,6 +207,21 @@ function GlobalContent() {
         }
         if (vol30dMap && totalVolume30d !== null) {
           totalVolume30d += sumVolumeMap(vol30dMap);
+        }
+
+        // Prior-7d volume (WoW denominator) — reuses snapshots30d by filtering.
+        if (netData.snapshots30dError === null && totalVolumePrior7d !== null) {
+          const priorSnaps = snapshots30d.filter((s) => {
+            const t = Number(s.timestamp);
+            return t >= priorWindow.from && t < priorWindow.to;
+          });
+          const priorMap = buildPoolVolumeMap(
+            priorSnaps,
+            pools,
+            network,
+            netData.rates,
+          );
+          totalVolumePrior7d += sumVolumeMap(priorMap);
         }
 
         // Store per-pool volume for the table columns
@@ -248,9 +275,16 @@ function GlobalContent() {
           totalFees7d,
           totalFees30d,
           totalUniqueLps,
-          tvlChange24h:
-            hasTvlSnapshots24h && tvlAgo24h > 0
-              ? ((tvlNow24h - tvlAgo24h) / tvlAgo24h) * 100
+          tvlChange7d:
+            hasTvlSnapshots7d && tvlAgo7d > 0
+              ? ((tvlNow7d - tvlAgo7d) / tvlAgo7d) * 100
+              : null,
+          volumeChange7d:
+            totalVolume7d !== null &&
+            totalVolumePrior7d !== null &&
+            totalVolumePrior7d > 0
+              ? ((totalVolume7d - totalVolumePrior7d) / totalVolumePrior7d) *
+                100
               : null,
           unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
           totalUnresolvedCount,
@@ -291,17 +325,18 @@ function GlobalContent() {
         <TvlOverTimeChart
           networkData={networkData}
           totalTvl={aggregated.totalTvl}
-          change24h={aggregated.tvlChange24h}
+          change7d={aggregated.tvlChange7d}
           isLoading={isLoading}
           hasError={anyNetworkError}
-          hasSnapshotError={anySnapshotsError || anySnapshots30dError}
+          hasSnapshotError={anySnapshots7dError || anySnapshots30dError}
         />
         <VolumeOverTimeChart
           networkData={networkData}
-          totalVolume24h={aggregated.totalVolume24h}
+          totalVolume7d={aggregated.totalVolume7d}
+          change7d={aggregated.volumeChange7d}
           isLoading={isLoading}
           hasError={anyNetworkError}
-          hasSnapshotError={anySnapshotsError || anySnapshots30dError}
+          hasSnapshotError={anySnapshots7dError || anySnapshots30dError}
         />
       </div>
 
