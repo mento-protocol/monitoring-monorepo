@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { formatUSD } from "@/lib/format";
-import { isFpmm } from "@/lib/tokens";
 import { getSnapshotVolumeInUsd } from "@/lib/volume";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
 import {
@@ -15,6 +14,12 @@ import {
 
 type SeriesPoint = { timestamp: number; volumeUSD: number };
 
+/**
+ * Includes swap volume from every pool type (FPMM and virtual), matching the
+ * Summary tile's volume totals. Virtual pools also emit hourly PoolSnapshot
+ * rows with per-hour swapVolume0/1, so excluding them would silently undercount
+ * protocol volume and desync the chart from its Summary-tile counterpart.
+ */
 export function buildDailyVolumeSeries(
   networkData: NetworkData[],
 ): SeriesPoint[] {
@@ -23,12 +28,8 @@ export function buildDailyVolumeSeries(
 
   for (const netData of networkData) {
     if (netData.error !== null || netData.snapshotsAllError !== null) continue;
-    const fpmmPoolIds = new Set(
-      netData.pools.filter(isFpmm).map((pool) => pool.id),
-    );
     const poolById = new Map(netData.pools.map((pool) => [pool.id, pool]));
     for (const snapshot of netData.snapshotsAll) {
-      if (!fpmmPoolIds.has(snapshot.poolId)) continue;
       const pool = poolById.get(snapshot.poolId);
       const volume = getSnapshotVolumeInUsd(
         snapshot,
