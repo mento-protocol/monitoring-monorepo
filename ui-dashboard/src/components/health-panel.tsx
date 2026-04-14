@@ -33,7 +33,7 @@ const HEALTH_WINDOW_LIMIT = 1000;
 /** Fetch one extra so we can detect truncation without a separate count query. */
 const HEALTH_WINDOW_QUERY_LIMIT = HEALTH_WINDOW_LIMIT + 1;
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
-import type { RebalanceCheckResult, StrategyType } from "@/lib/rebalance-check";
+import type { RebalanceCheckResult } from "@/lib/rebalance-check";
 
 /** Format a price float with smart decimal places.
  * Prices near 1.0 (stablecoins) → 4dp; others → 6dp. */
@@ -213,14 +213,16 @@ export function HealthPanel({ pool }: HealthPanelProps) {
 
   const healthQueryError = healthWindowError || predecessorError;
 
-  const {
-    data: rebalanceCheck,
-    isLoading: rebalanceCheckLoading,
-    error: rebalanceCheckError,
-  } = useRebalanceCheck(pool, network);
+  const { data: rebalanceCheck, error: rebalanceCheckError } =
+    useRebalanceCheck(pool, network);
 
+  // Only show the diagnostics panel when it carries info the top-row status
+  // doesn't already convey: a blocked revert with a decoded message, an
+  // enrichment bundle (CDP / Reserve balances), or a transport-level error.
   const showRebalanceDiag =
-    rebalanceCheck !== null || rebalanceCheckLoading || !!rebalanceCheckError;
+    !!rebalanceCheckError ||
+    (rebalanceCheck !== null &&
+      (!rebalanceCheck.canRebalance || rebalanceCheck.enrichment !== null));
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
@@ -424,10 +426,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
           {showRebalanceDiag && (
             <RebalanceDiagnostics
               result={rebalanceCheck}
-              isLoading={rebalanceCheckLoading}
               error={rebalanceCheckError}
-              strategyAddress={pool.rebalancerAddress ?? null}
-              explorerBaseUrl={network.explorerBaseUrl}
             />
           )}
         </div>
@@ -442,90 +441,43 @@ export function HealthPanel({ pool }: HealthPanelProps) {
 
 function RebalanceDiagnostics({
   result,
-  isLoading,
   error,
-  strategyAddress,
-  explorerBaseUrl,
 }: {
   result: RebalanceCheckResult | null;
-  isLoading: boolean;
   error: Error | undefined;
-  strategyAddress: string | null;
-  explorerBaseUrl: string;
 }) {
-  if (isLoading) {
-    return (
-      <div className="lg:w-72 lg:flex-shrink-0 lg:border-l lg:border-slate-800 lg:pl-6">
-        <h3 className="text-sm font-medium text-slate-400 mb-3">
-          Rebalance Status
-        </h3>
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <span className="inline-block w-3 h-3 rounded-full bg-slate-600 animate-pulse" />
-          Checking rebalance feasibility…
-        </div>
-      </div>
-    );
-  }
-
+  // Headline / strategy type / write-link live on the pool header top row.
+  // This panel only exists to carry info the header can't fit: the decoded
+  // revert reason and strategy-specific enrichment.
   if (error) {
     return (
       <div className="lg:w-72 lg:flex-shrink-0 lg:border-l lg:border-slate-800 lg:pl-6">
         <h3 className="text-sm font-medium text-slate-400 mb-3">
-          Rebalance Status
+          Rebalance Details
         </h3>
-        <div className="flex items-center gap-2 text-sm text-amber-400">
-          <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-400 flex-shrink-0" />
+        <p className="text-sm text-slate-300 leading-relaxed">
           Diagnostics unavailable
-        </div>
+          <span
+            className="ml-1.5 text-xs text-slate-600 border-b border-dotted border-slate-600"
+            role="note"
+            aria-label={`Raw error: ${error.message}`}
+          >
+            [{error.message.slice(0, 120)}]
+          </span>
+        </p>
       </div>
     );
   }
 
   if (!result) return null;
 
-  // A feasible rebalance means the pool is imbalanced AND a fix is
-  // possible — that's a call to action (amber), not a green success.
-  // "Blocked" means we can't fix it at all — red.
-  const statusColor = result.canRebalance ? "text-amber-400" : "text-red-400";
-  const statusIcon = result.canRebalance ? "⚠" : "✗";
-  const statusLabel = result.canRebalance
-    ? "Rebalance required"
-    : "Rebalance blocked";
-  // Strategies are upgradeable proxies — link to #writeProxyContract#F<n>
-  // with the rebalance() function index so the deep-link opens straight
-  // on the right row ready to sign. All current strategies expose
-  // rebalance() at F4 but keep this as a map so new strategies (with a
-  // different ABI ordering) are a single-point update.
-  const writeContractUrl =
-    result.canRebalance && strategyAddress
-      ? `${explorerBaseUrl}/address/${strategyAddress}#writeProxyContract#F${REBALANCE_FN_INDEX[result.strategyType]}`
-      : null;
-
   return (
     <div className="lg:w-72 lg:flex-shrink-0 lg:border-l lg:border-slate-800 lg:pl-6">
       <h3 className="text-sm font-medium text-slate-400 mb-3">
-        Rebalance Status
+        Rebalance Details
       </h3>
 
       <div className="flex flex-col gap-3">
-        {/* Status line */}
-        {writeContractUrl ? (
-          <a
-            href={writeContractUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`text-sm font-medium ${statusColor} hover:underline`}
-          >
-            {statusIcon} {statusLabel} ↗
-          </a>
-        ) : (
-          <span className={`text-sm font-medium ${statusColor}`}>
-            {statusIcon} {statusLabel}
-          </span>
-        )}
-
-        {/* Human-readable reason with raw error — only when blocked.
-            "Rebalance required" headline is self-explanatory on its own. */}
         {!result.canRebalance && (
           <p className="text-sm text-slate-300 leading-relaxed">
             {result.message}
@@ -541,15 +493,9 @@ function RebalanceDiagnostics({
           </p>
         )}
 
-        {/* Strategy-specific enrichment */}
         {result.enrichment && (
           <EnrichmentDetail enrichment={result.enrichment} />
         )}
-
-        {/* Strategy type label */}
-        <span className="text-xs text-slate-600">
-          Strategy: {formatStrategyType(result.strategyType)}
-        </span>
       </div>
     </div>
   );
@@ -600,26 +546,3 @@ function EnrichmentDetail({
 
   return null;
 }
-
-function formatStrategyType(strategyType: StrategyType): string {
-  switch (strategyType) {
-    case "cdp":
-      return "CDP Liquidity";
-    case "reserve":
-      return "Reserve Liquidity";
-    case "ols":
-      return "Open Liquidity";
-    case "unknown":
-      return "Unknown";
-  }
-}
-
-/** rebalance(address) is the 4th writable function on each strategy's ABI
- *  as currently deployed. Monadscan/Celoscan index writable functions
- *  starting at F1 in source order, so F4 maps to rebalance() on all three. */
-const REBALANCE_FN_INDEX: Record<StrategyType, number> = {
-  cdp: 4,
-  reserve: 4,
-  ols: 4,
-  unknown: 4,
-};

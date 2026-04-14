@@ -193,6 +193,30 @@ export type StrategyEnrichment =
     };
 
 // ---------------------------------------------------------------------------
+// Explorer deep-link for rebalance()
+// ---------------------------------------------------------------------------
+
+/** Function-index on the block explorer's "Write as Proxy" tab for each
+ *  strategy type. rebalance(address) currently sits at F4 in every
+ *  strategy's ABI — adding a new strategy means updating this map. */
+export const REBALANCE_FN_INDEX: Record<StrategyType, number> = {
+  cdp: 4,
+  reserve: 4,
+  ols: 4,
+  unknown: 4,
+};
+
+/** Deep-link into the explorer's proxy-write tab with the rebalance() row
+ *  expanded, so a caller can connect wallet and sign the tx in one click. */
+export function strategyRebalanceWriteUrl(
+  explorerBaseUrl: string,
+  strategyAddress: string,
+  strategyType: StrategyType,
+): string {
+  return `${explorerBaseUrl}/address/${strategyAddress}#writeProxyContract#F${REBALANCE_FN_INDEX[strategyType]}`;
+}
+
+// ---------------------------------------------------------------------------
 // Core check
 // ---------------------------------------------------------------------------
 

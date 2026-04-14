@@ -2,7 +2,10 @@
 
 import { AddressLink } from "@/components/address-link";
 import { useAddressLabels } from "@/components/address-labels-provider";
-import { KindBadge, RebalancerBadge, SourceBadge } from "@/components/badges";
+import { KindBadge, SourceBadge } from "@/components/badges";
+import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
+import { strategyRebalanceWriteUrl } from "@/lib/rebalance-check";
+import type { Network } from "@/lib/networks";
 import { LimitSelect } from "@/components/controls";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { HealthPanel } from "@/components/health-panel";
@@ -48,7 +51,7 @@ import {
   TRADING_LIMITS,
 } from "@/lib/queries";
 import { Pagination } from "@/components/pagination";
-import { computeHealthStatus, computeRebalancerLiveness } from "@/lib/health";
+import { computeHealthStatus } from "@/lib/health";
 import { isFpmm, poolName, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import {
@@ -438,6 +441,87 @@ function PoolDetail() {
 }
 
 // ---------------------------------------------------------------------------
+// Rebalance status cell for the pool header
+// ---------------------------------------------------------------------------
+
+/** Collapses the rebalance-check hook into the three states an operator cares
+ *  about at a glance — Balanced / Rebalance required / Rebalance blocked —
+ *  with a sub-line that points to the strategy contract. When a rebalance is
+ *  required the headline deep-links to the explorer's proxy-write tab on the
+ *  rebalance() row; otherwise the strategy name below is the click target. */
+function RebalanceStatusValue({
+  pool,
+  network,
+  strategyAddress,
+}: {
+  pool: Pool;
+  network: Network;
+  strategyAddress: string;
+}) {
+  const { getName } = useAddressLabels();
+  const {
+    data: rebalanceCheck,
+    isLoading,
+    error,
+  } = useRebalanceCheck(pool, network);
+
+  let statusText: string;
+  let statusColor: string;
+  let statusHref: string | null = null;
+
+  if (isLoading) {
+    statusText = "Checking…";
+    statusColor = "text-slate-400";
+  } else if (error) {
+    statusText = "Rebalance required";
+    statusColor = "text-amber-400";
+  } else if (rebalanceCheck === null) {
+    statusText = "Balanced";
+    statusColor = "text-emerald-400";
+  } else if (rebalanceCheck.canRebalance) {
+    statusText = "Rebalance required";
+    statusColor = "text-amber-400";
+    statusHref = strategyRebalanceWriteUrl(
+      network.explorerBaseUrl,
+      strategyAddress,
+      rebalanceCheck.strategyType,
+    );
+  } else {
+    statusText = "Rebalance blocked";
+    statusColor = "text-red-400";
+  }
+
+  const strategyName = getName(strategyAddress);
+  const strategyHref = `${network.explorerBaseUrl}/address/${strategyAddress}`;
+
+  return (
+    <span className="flex flex-col gap-0.5">
+      {statusHref ? (
+        <a
+          href={statusHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`font-medium ${statusColor} hover:underline`}
+        >
+          {statusText} ↗
+        </a>
+      ) : (
+        <span className={`font-medium ${statusColor}`}>{statusText}</span>
+      )}
+      <a
+        href={strategyHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-xs text-slate-500 hover:text-slate-300"
+        title={strategyAddress}
+      >
+        via {strategyName} ↗
+      </a>
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Pool header
 // ---------------------------------------------------------------------------
 
@@ -451,11 +535,6 @@ function PoolHeader({
   const { network } = useNetwork();
   const name = poolName(network, pool.token0, pool.token1);
   const isVirtual = pool.source?.includes("virtual");
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const rebalancerLiveness = computeRebalancerLiveness(
-    { ...pool, healthStatus: computeHealthStatus(pool, network.chainId) },
-    nowSeconds,
-  );
   // pool.id is the namespaced multichain ID ("42220-0x…"). Strip the chain
   // prefix so AddressLink receives a plain hex address for explorer links.
   const poolContractAddress = isNamespacedPoolId(pool.id)
@@ -481,15 +560,16 @@ function PoolHeader({
           value={pool.token1 ? <AddressLink address={pool.token1} /> : "—"}
         />
         <Stat
-          label="Rebalancing Strategy"
+          label="Rebalance Status"
           value={
             isVirtual || !pool.rebalancerAddress ? (
               <span className="text-slate-500">—</span>
             ) : (
-              <span className="flex items-center gap-1.5 flex-wrap">
-                <AddressLink address={pool.rebalancerAddress} />
-                <RebalancerBadge status={rebalancerLiveness} />
-              </span>
+              <RebalanceStatusValue
+                pool={pool}
+                network={network}
+                strategyAddress={pool.rebalancerAddress}
+              />
             )
           }
         />
