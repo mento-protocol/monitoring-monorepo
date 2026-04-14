@@ -4,8 +4,11 @@ import { AddressLink } from "@/components/address-link";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { KindBadge, SourceBadge } from "@/components/badges";
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
+import { useHealthScore } from "@/hooks/use-health-score";
 import { strategyRebalanceWriteUrl } from "@/lib/rebalance-check";
 import type { Network } from "@/lib/networks";
+import { formatBinaryHealthPct, formatNines } from "@/lib/pool-health-score";
+import { getOracleStalenessThreshold, isOracleFresh } from "@/lib/health";
 import { LimitSelect } from "@/components/controls";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { HealthPanel } from "@/components/health-panel";
@@ -51,8 +54,14 @@ import {
   TRADING_LIMITS,
 } from "@/lib/queries";
 import { Pagination } from "@/components/pagination";
-import { computeHealthStatus } from "@/lib/health";
-import { isFpmm, poolName, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
+import {
+  chainlinkFeedUrl,
+  explorerTxUrl,
+  isFpmm,
+  poolName,
+  tokenSymbol,
+  USDM_SYMBOLS,
+} from "@/lib/tokens";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import {
   buildSearchBlob,
@@ -441,14 +450,9 @@ function PoolDetail() {
 }
 
 // ---------------------------------------------------------------------------
-// Rebalance status cell for the pool header
+// Header cells — current-state signals the top row surfaces at a glance
 // ---------------------------------------------------------------------------
 
-/** Collapses the rebalance-check hook into the three states an operator cares
- *  about at a glance — Balanced / Rebalance required / Rebalance blocked —
- *  with a sub-line that points to the strategy contract. When a rebalance is
- *  required the headline deep-links to the explorer's proxy-write tab on the
- *  rebalance() row; otherwise the strategy name below is the click target. */
 function RebalanceStatusValue({
   pool,
   network,
@@ -492,6 +496,8 @@ function RebalanceStatusValue({
 
   const strategyName = getName(strategyAddress);
   const strategyHref = `${network.explorerBaseUrl}/address/${strategyAddress}`;
+  const hasLastRebalance =
+    pool.lastRebalancedAt !== undefined && pool.lastRebalancedAt !== "0";
 
   return (
     <span className="flex flex-col gap-0.5">
@@ -516,6 +522,155 @@ function RebalanceStatusValue({
       >
         via {strategyName} ↗
       </a>
+      <span
+        className="text-xs text-slate-500"
+        title={
+          hasLastRebalance ? formatTimestamp(pool.lastRebalancedAt!) : undefined
+        }
+      >
+        Last rebalance:{" "}
+        {hasLastRebalance ? relativeTime(pool.lastRebalancedAt!) : "never"}
+      </span>
+    </span>
+  );
+}
+
+function OracleStatusValue({
+  pool,
+  network,
+}: {
+  pool: Pool;
+  network: Network;
+}) {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const oracleAge =
+    pool.oracleTimestamp && pool.oracleTimestamp !== "0"
+      ? nowSeconds - Number(pool.oracleTimestamp)
+      : Infinity;
+  const stalenessThreshold = getOracleStalenessThreshold(pool, network.chainId);
+  const fresh = isOracleFresh(pool, nowSeconds, network.chainId);
+  const hasTs = pool.oracleTimestamp && pool.oracleTimestamp !== "0";
+
+  return (
+    <span className="flex flex-col gap-0.5">
+      <span
+        className={`font-medium ${fresh ? "text-emerald-400" : "text-red-400"}`}
+      >
+        {fresh ? "✓ Fresh" : "✗ Stale"}
+      </span>
+      {hasTs &&
+        (pool.oracleTxHash ? (
+          <a
+            href={explorerTxUrl(network, pool.oracleTxHash)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-slate-500 hover:text-indigo-400 transition-colors"
+            title={formatTimestamp(pool.oracleTimestamp!)}
+          >
+            Updated {relativeTime(pool.oracleTimestamp!)} ↗
+          </a>
+        ) : (
+          <span
+            className="text-xs text-slate-500"
+            title={formatTimestamp(pool.oracleTimestamp!)}
+          >
+            Updated {relativeTime(pool.oracleTimestamp!)}
+          </span>
+        ))}
+      <span className="text-xs text-slate-500">
+        Expires after {Math.round(stalenessThreshold / 60)}m
+        {oracleAge !== Infinity && ` · ${oracleAge}s old`}
+      </span>
+    </span>
+  );
+}
+
+function OraclePriceValue({ pool, network }: { pool: Pool; network: Network }) {
+  const [inverted, setInverted] = React.useState(false);
+  const sym0 = tokenSymbol(network, pool.token0);
+  const sym1 = tokenSymbol(network, pool.token1);
+  const feedVal =
+    pool.oraclePrice && pool.oraclePrice !== "0"
+      ? Number(pool.oraclePrice) / 10 ** 24
+      : 0;
+  const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
+  const titleToken = usdmIsToken0 ? sym1 : sym0;
+  const quoteToken = usdmIsToken0 ? sym0 : sym1;
+  const base = inverted ? quoteToken : titleToken;
+  const quote = inverted ? titleToken : quoteToken;
+  const displayPrice =
+    feedVal > 0 ? formatOraclePrice(inverted ? 1 / feedVal : feedVal) : "—";
+
+  const chainlinkUrl =
+    chainlinkFeedUrl(sym1, network.chainId) ??
+    chainlinkFeedUrl(sym0, network.chainId);
+
+  return (
+    <span className="flex flex-col gap-0.5">
+      {displayPrice !== "—" ? (
+        <button
+          type="button"
+          onClick={() => setInverted((v) => !v)}
+          title="Click to toggle price direction"
+          className="font-mono text-white hover:text-indigo-300 transition-colors text-left"
+        >
+          1 {base} = {displayPrice} {quote}
+          <span className="ml-1.5 text-xs text-slate-500">⇄</span>
+        </button>
+      ) : (
+        <span className="text-slate-500">—</span>
+      )}
+      {chainlinkUrl ? (
+        <a
+          href={chainlinkUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-slate-500 hover:text-indigo-400 transition-colors"
+        >
+          via Chainlink ↗
+        </a>
+      ) : (
+        <span className="text-xs text-slate-500">via SortedOracles</span>
+      )}
+    </span>
+  );
+}
+
+function formatOraclePrice(price: number): string {
+  if (price <= 0) return "—";
+  const dp = price > 0.9 && price < 1.1 ? 4 : 6;
+  return price.toFixed(dp);
+}
+
+function HealthScoreValue({ pool }: { pool: Pool }) {
+  const { health24h, allTimeScore, error } = useHealthScore(pool);
+
+  if (error) {
+    return <span className="text-xs text-amber-400">Query failed</span>;
+  }
+  if (health24h.score == null && allTimeScore == null) {
+    return <span className="text-slate-500">N/A</span>;
+  }
+
+  return (
+    <span className="flex flex-col gap-0.5">
+      <span className="font-medium text-white">
+        {health24h.score == null
+          ? "N/A"
+          : formatBinaryHealthPct(health24h.score)}
+        <span className="ml-1 text-xs text-slate-500">24h</span>
+      </span>
+      {allTimeScore != null && (
+        <span className="text-xs text-slate-500">
+          {formatBinaryHealthPct(allTimeScore)} all-time ·{" "}
+          {formatNines(allTimeScore)}
+        </span>
+      )}
+      {health24h.score != null && !health24h.hasEnoughDataForNines && (
+        <span className="text-xs text-slate-600">
+          {health24h.observedHours.toFixed(1)}h observed
+        </span>
+      )}
     </span>
   );
 }
@@ -549,7 +704,7 @@ function PoolHeader({
           <AddressLink address={poolContractAddress} />
         </span>
       </div>
-      <dl className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-sm">
+      <dl className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-4 text-sm">
         <Stat
           label="Token 0"
           value={pool.token0 ? <AddressLink address={pool.token0} /> : "—"}
@@ -557,6 +712,26 @@ function PoolHeader({
         <Stat
           label="Token 1"
           value={pool.token1 ? <AddressLink address={pool.token1} /> : "—"}
+        />
+        <Stat
+          label="Oracle Status"
+          value={
+            isVirtual ? (
+              <span className="text-slate-500">—</span>
+            ) : (
+              <OracleStatusValue pool={pool} network={network} />
+            )
+          }
+        />
+        <Stat
+          label="Oracle Price"
+          value={
+            isVirtual ? (
+              <span className="text-slate-500">—</span>
+            ) : (
+              <OraclePriceValue pool={pool} network={network} />
+            )
+          }
         />
         <Stat
           label="Rebalance Status"
@@ -569,6 +744,16 @@ function PoolHeader({
                 network={network}
                 strategyAddress={pool.rebalancerAddress}
               />
+            )
+          }
+        />
+        <Stat
+          label="Health Score"
+          value={
+            isVirtual ? (
+              <span className="text-slate-500">—</span>
+            ) : (
+              <HealthScoreValue pool={pool} />
             )
           }
         />

@@ -98,7 +98,8 @@ describe("HealthPanel weekend mode", () => {
     const html = renderToStaticMarkup(<HealthPanel pool={stalePool} />);
 
     expect(html).not.toContain("Trading is paused for the weekend");
-    // Should show standard stale oracle UI instead
-    expect(html).toContain("Stale");
+    // Oracle Status ("✓ Fresh" / "✗ Stale") moved to the pool header top row,
+    // so the panel no longer renders that label — it renders the Deviation bar.
+    expect(html).toContain("Deviation vs Threshold");
   });
 });
