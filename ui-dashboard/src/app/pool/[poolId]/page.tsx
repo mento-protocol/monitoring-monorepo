@@ -493,6 +493,16 @@ function PoolHeader({
           equal-column dead space grid-cols-4 produced. */}
       <dl className="flex flex-wrap gap-x-10 gap-y-4 text-sm">
         <Stat
+          label="Health Score"
+          value={
+            isVirtual ? (
+              <span className="text-slate-500">—</span>
+            ) : (
+              <HealthScoreValue pool={pool} />
+            )
+          }
+        />
+        <Stat
           label="Oracle Status"
           value={
             isVirtual ? (
@@ -523,16 +533,6 @@ function PoolHeader({
                 network={network}
                 strategyAddress={pool.rebalancerAddress}
               />
-            )
-          }
-        />
-        <Stat
-          label="Health Score"
-          value={
-            isVirtual ? (
-              <span className="text-slate-500">—</span>
-            ) : (
-              <HealthScoreValue pool={pool} />
             )
           }
         />
