@@ -30,7 +30,7 @@ function healthResult(overrides: {
   error?: Error | null;
 }) {
   return {
-    health24h: {
+    healthWindow: {
       score: overrides.score ?? null,
       trackedSeconds: 0,
       healthySeconds: 0,
@@ -79,7 +79,7 @@ describe("HealthScoreValue", () => {
     expect(html).toContain("N/A");
   });
 
-  it("renders 24h score and all-time line together with correct formatting", () => {
+  it("renders rolling-window score and all-time line together with correct formatting", () => {
     mockUseHealthScore.mockReturnValue(
       healthResult({
         score: 0.995,
@@ -89,7 +89,7 @@ describe("HealthScoreValue", () => {
     );
     const html = renderToStaticMarkup(<HealthScoreValue pool={BASE_POOL} />);
     expect(html).toContain("99.50%"); // formatBinaryHealthPct(0.995)
-    expect(html).toContain("24h");
+    expect(html).toContain("7d");
     expect(html).toContain("99.99%"); // formatBinaryHealthPct(0.9999)
     expect(html).toContain("all-time");
   });

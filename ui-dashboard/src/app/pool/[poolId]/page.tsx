@@ -465,14 +465,16 @@ function PoolHeader({
           <AddressLink address={poolContractAddress} />
         </span>
       </div>
-      <dl className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-4 text-sm">
+      <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 text-sm">
         <Stat
-          label="Token 0"
-          value={pool.token0 ? <AddressLink address={pool.token0} /> : "—"}
-        />
-        <Stat
-          label="Token 1"
-          value={pool.token1 ? <AddressLink address={pool.token1} /> : "—"}
+          label="Token 0/1"
+          value={
+            <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+              {pool.token0 ? <AddressLink address={pool.token0} /> : "—"}
+              <span className="text-slate-600">/</span>
+              {pool.token1 ? <AddressLink address={pool.token1} /> : "—"}
+            </span>
+          }
         />
         <Stat
           label="Oracle Status"

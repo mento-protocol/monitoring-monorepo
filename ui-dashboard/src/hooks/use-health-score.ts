@@ -15,12 +15,17 @@ import {
 const HEALTH_WINDOW_LIMIT = 1000;
 /** Fetch one extra so we can detect truncation without a separate count query. */
 const HEALTH_WINDOW_QUERY_LIMIT = HEALTH_WINDOW_LIMIT + 1;
+/** Rolling window length for the live health score. 7d balances
+ *  responsiveness (recent regressions visible within a day) with
+ *  statistical stability (a single bad hour doesn't dominate). */
+const HEALTH_WINDOW_SECONDS = 7 * 24 * 3600;
 
-export type Health24h = ReturnType<typeof computeBinaryHealthWindow>;
+export type HealthWindow = ReturnType<typeof computeBinaryHealthWindow>;
 
 export type HealthScoreResult = {
-  /** Rolling 24h window score (fraction 0..1) with observed-hours info. */
-  health24h: Health24h;
+  /** Rolling-window score (fraction 0..1) with observed-hours info.
+   *  Window length is HEALTH_WINDOW_SECONDS. */
+  healthWindow: HealthWindow;
   /** All-time fraction of healthy time (0..1) or null when never measured. */
   allTimeScore: number | null;
   /** Non-null when either SWR call rejected — the window is partial. */
@@ -41,7 +46,7 @@ export function useHealthScore(pool: Pool): HealthScoreResult {
   }, []);
 
   const windowEnd = Math.floor(windowAnchorMs / 1000);
-  const windowStart = windowEnd - 24 * 3600;
+  const windowStart = windowEnd - HEALTH_WINDOW_SECONDS;
   const shouldFetch = !pool.source?.includes("virtual");
 
   const { data: windowData, error: windowError } = useGQL<{
@@ -86,7 +91,7 @@ export function useHealthScore(pool: Pool): HealthScoreResult {
     return windowStart;
   }, [snapshotsAsc, windowStart, truncated]);
 
-  const health24h = useMemo(
+  const healthWindow = useMemo(
     () =>
       computeBinaryHealthWindow(
         snapshots,
@@ -104,7 +109,7 @@ export function useHealthScore(pool: Pool): HealthScoreResult {
       : null;
 
   return {
-    health24h,
+    healthWindow,
     allTimeScore,
     error: windowError ?? predecessorError ?? null,
   };

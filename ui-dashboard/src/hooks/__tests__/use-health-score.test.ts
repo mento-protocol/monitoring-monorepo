@@ -100,7 +100,7 @@ describe("useHealthScore — virtual pools", () => {
     const virtualPool: Pool = { ...BASE_POOL, source: "virtual" };
     const { result, unmount } = captureHookResult(virtualPool);
 
-    expect(result.health24h.score).toBeNull();
+    expect(result.healthWindow.score).toBeNull();
     expect(result.allTimeScore).toBeNull();
     expect(result.error).toBeNull();
     // Both GQL calls were made, but with null query (shouldFetch=false).
@@ -114,7 +114,7 @@ describe("useHealthScore — virtual pools", () => {
 });
 
 describe("useHealthScore — non-virtual pools", () => {
-  it("returns null 24h score when no snapshots are available", () => {
+  it("returns null rolling window score when no snapshots are available", () => {
     useGQLMock.mockImplementation((query: string | null) => {
       if (query == null) return { data: undefined, error: undefined };
       return {
@@ -124,7 +124,7 @@ describe("useHealthScore — non-virtual pools", () => {
     });
 
     const { result, unmount } = captureHookResult(BASE_POOL);
-    expect(result.health24h.score).toBeNull();
+    expect(result.healthWindow.score).toBeNull();
     // With no snapshots and no all-time data, overall score is null but not an error.
     expect(result.allTimeScore).toBeNull();
     expect(result.error).toBeNull();
@@ -133,7 +133,7 @@ describe("useHealthScore — non-virtual pools", () => {
 
   it("returns a computed score when in-window snapshots are available", () => {
     const now = Math.floor(Date.now() / 60_000) * 60; // minute-aligned seconds
-    // Two healthy snapshots covering the full 24h window.
+    // Two healthy snapshots within the rolling window.
     const snapshots = [
       makeSnapshot({
         timestamp: String(now - 23 * 3600),
@@ -155,7 +155,7 @@ describe("useHealthScore — non-virtual pools", () => {
     });
 
     const { result, unmount } = captureHookResult(BASE_POOL);
-    expect(result.health24h.score).not.toBeNull();
+    expect(result.healthWindow.score).not.toBeNull();
     expect(result.error).toBeNull();
     unmount();
   });
@@ -188,8 +188,8 @@ describe("useHealthScore — non-virtual pools", () => {
     // When truncated, the score is still computed over the narrower window
     // but observedHours is bounded by the kept span. Verify we didn't crash
     // and that the score is a finite fraction.
-    expect(result.health24h.score).not.toBeNull();
-    expect(Number.isFinite(result.health24h.observedHours)).toBe(true);
+    expect(result.healthWindow.score).not.toBeNull();
+    expect(Number.isFinite(result.healthWindow.observedHours)).toBe(true);
     unmount();
   });
 });
