@@ -13,6 +13,7 @@ import {
   globalPoolKey,
   type GlobalPoolEntry,
 } from "@/components/global-pools-table";
+import { TvlOverTimeChart } from "@/components/tvl-over-time-chart";
 
 export default function GlobalPage() {
   return (
@@ -100,13 +101,7 @@ function GlobalContent() {
       // snapshot data, so numerator and denominator always match.
       let tvlNow24h = 0;
       let tvlAgo24h = 0;
-      let tvlNow7d = 0;
-      let tvlAgo7d = 0;
-      let tvlNow30d = 0;
-      let tvlAgo30d = 0;
       let hasTvlSnapshots24h = false;
-      let hasTvlSnapshots7d = false;
-      let hasTvlSnapshots30d = false;
       const allEntries: GlobalPoolEntry[] = [];
       const allVol24h = new Map<string, number | null | undefined>();
       const allVol7d = new Map<string, number | null | undefined>();
@@ -160,18 +155,6 @@ function GlobalContent() {
           tvlNow24h += m.now;
           tvlAgo24h += m.ago;
           hasTvlSnapshots24h = true;
-        }
-        if (netData.snapshots7dError === null && snapshots7d.length > 0) {
-          const m = matchedTvl(snapshots7d, pools, network, rates);
-          tvlNow7d += m.now;
-          tvlAgo7d += m.ago;
-          hasTvlSnapshots7d = true;
-        }
-        if (netData.snapshots30dError === null && snapshots30d.length > 0) {
-          const m = matchedTvl(snapshots30d, pools, network, rates);
-          tvlNow30d += m.now;
-          tvlAgo30d += m.ago;
-          hasTvlSnapshots30d = true;
         }
 
         // All-time volume & swaps from pool-level counters
@@ -268,14 +251,6 @@ function GlobalContent() {
             hasTvlSnapshots24h && tvlAgo24h > 0
               ? ((tvlNow24h - tvlAgo24h) / tvlAgo24h) * 100
               : null,
-          tvlChange7d:
-            hasTvlSnapshots7d && tvlAgo7d > 0
-              ? ((tvlNow7d - tvlAgo7d) / tvlAgo7d) * 100
-              : null,
-          tvlChange30d:
-            hasTvlSnapshots30d && tvlAgo30d > 0
-              ? ((tvlNow30d - tvlAgo30d) / tvlAgo30d) * 100
-              : null,
           unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
           totalUnresolvedCount,
           isTruncated,
@@ -311,6 +286,15 @@ function GlobalContent() {
         </p>
       </div>
 
+      <TvlOverTimeChart
+        networkData={networkData}
+        totalTvl={aggregated.totalTvl}
+        change24h={aggregated.tvlChange24h}
+        isLoading={isLoading}
+        hasError={anyNetworkError}
+        hasSnapshotError={anySnapshots30dError}
+      />
+
       {/* Summary tiles */}
       <section>
         <h2 className="text-lg font-semibold text-white mb-3">Summary</h2>
@@ -329,18 +313,6 @@ function GlobalContent() {
               anySnapshots30dError
             }
             format={formatUSD}
-          />
-
-          <TvlTile
-            tvl={aggregated.totalTvl}
-            change24h={aggregated.tvlChange24h}
-            change7d={aggregated.tvlChange7d}
-            change30d={aggregated.tvlChange30d}
-            isLoading={isLoading}
-            hasError={anyNetworkError}
-            hasSnapshotError={
-              anySnapshotsError || anySnapshots7dError || anySnapshots30dError
-            }
           />
 
           <BreakdownTile
@@ -514,82 +486,6 @@ function BreakdownTile({
         aria-hidden={!subtitle && !hasError}
       >
         {hasError ? "Some chains failed to load" : subtitle}
-      </p>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// TvlTile — TVL headline with 24h / 7d / 30d percentage change sub-KPIs
-// ---------------------------------------------------------------------------
-
-function formatPctChange(pct: number): string {
-  const sign = pct >= 0 ? "+" : "";
-  return `${sign}${pct.toFixed(1)}%`;
-}
-
-function TvlTile({
-  tvl,
-  change24h,
-  change7d,
-  change30d,
-  isLoading,
-  hasError,
-  hasSnapshotError,
-}: {
-  tvl: number;
-  change24h: number | null;
-  change7d: number | null;
-  change30d: number | null;
-  isLoading: boolean;
-  hasError: boolean;
-  hasSnapshotError: boolean;
-}) {
-  const changes = [
-    { label: "24h", value: change24h },
-    { label: "7d", value: change7d },
-    { label: "30d", value: change30d },
-  ];
-  const hasAnyChange =
-    !isLoading && !hasError && changes.some((c) => c.value !== null);
-
-  return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px]">
-      <div>
-        <p className="text-sm text-slate-400">TVL (FPMMs)</p>
-        <p className="mt-1 text-2xl font-semibold text-white font-mono">
-          {isLoading ? "…" : formatUSD(tvl)}
-        </p>
-        {hasAnyChange && (
-          <div className="mt-1.5 flex gap-3 text-sm font-mono">
-            {changes.map((c) => (
-              <span key={c.label}>
-                <span className="text-slate-500">{c.label}</span>{" "}
-                <span
-                  className={
-                    c.value === null
-                      ? "text-slate-500"
-                      : c.value >= 0
-                        ? "text-emerald-400"
-                        : "text-red-400"
-                  }
-                >
-                  {c.value === null ? "—" : formatPctChange(c.value)}
-                </span>
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-      <p
-        className="mt-2 text-xs text-slate-500 min-h-4"
-        aria-hidden={!hasError && !hasSnapshotError}
-      >
-        {hasError
-          ? "Partial data — some chains failed"
-          : hasSnapshotError
-            ? "Deltas partial — some snapshot queries failed"
-            : undefined}
       </p>
     </div>
   );
