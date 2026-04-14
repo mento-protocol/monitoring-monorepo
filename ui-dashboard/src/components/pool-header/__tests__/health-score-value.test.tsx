@@ -92,6 +92,23 @@ describe("HealthScoreValue", () => {
     expect(html).toContain("7d");
     expect(html).toContain("99.99%"); // formatBinaryHealthPct(0.9999)
     expect(html).toContain("all-time");
+    // `X nines` shorthand was removed — the raw percentage carries the signal.
+    expect(html).not.toMatch(/nines?/);
+  });
+
+  it("renders an info icon with a tooltip explaining the health score", () => {
+    mockUseHealthScore.mockReturnValue(
+      healthResult({
+        score: 0.99,
+        allTimeScore: 0.98,
+        hasEnoughDataForNines: true,
+      }),
+    );
+    const html = renderToStaticMarkup(<HealthScoreValue pool={BASE_POOL} />);
+    // Native `title` tooltip — the established pattern in this codebase.
+    expect(html).toContain("ⓘ");
+    expect(html).toMatch(/title="Fraction of tracked time/);
+    expect(html).toContain("cursor-help");
   });
 
   it("renders the Nh observed line when hasEnoughDataForNines is false", () => {
