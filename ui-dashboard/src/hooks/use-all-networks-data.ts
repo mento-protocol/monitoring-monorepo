@@ -6,9 +6,7 @@ import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 import type { Network } from "@/lib/networks";
 import {
   ALL_POOLS_WITH_HEALTH,
-  POOL_SNAPSHOT_QUERY_LIMIT,
   POOL_SNAPSHOTS_ALL,
-  POOL_SNAPSHOTS_WINDOW,
   PROTOCOL_FEE_TRANSFERS_ALL,
   UNIQUE_LP_ADDRESSES,
 } from "@/lib/queries";
@@ -18,6 +16,7 @@ import {
 } from "@/lib/protocol-fees";
 import {
   buildSnapshotWindows,
+  filterSnapshotsToWindow,
   shouldQueryPoolSnapshots,
   SNAPSHOT_REFRESH_MS,
   type SnapshotWindows,
@@ -34,22 +33,26 @@ export type NetworkData = {
   network: Network;
   snapshotWindows: SnapshotWindows;
   pools: Pool[];
+  /**
+   * Snapshot arrays for the three standard rolling windows. All derived
+   * client-side from `snapshotsAll` (one paginated query), so the three
+   * window-specific error fields below all alias to `snapshotsAllError`.
+   */
   snapshots: PoolSnapshotWindow[];
   snapshots7d: PoolSnapshotWindow[];
   snapshots30d: PoolSnapshotWindow[];
-  /** All-time snapshots (unbounded) — used by chart series with the "All" range. */
+  /** Full-history snapshots (paginated). Source of truth for the chart. */
   snapshotsAll: PoolSnapshotWindow[];
-  /**
-   * True when the all-history query hit the server-side row limit and older
-   * rows were dropped. Consumers should treat the series as partial when this
-   * is set — same UX as a snapshot-query failure.
-   */
-  snapshotsAllTruncated: boolean;
   fees: ProtocolFeeSummary | null;
   uniqueLpCount: number | null;
   rates: OracleRateMap;
   error: Error | null;
   feesError: Error | null;
+  /**
+   * Snapshot error fields. All four alias to a single underlying failure since
+   * the three window arrays are derived from `snapshotsAll`. Field names
+   * retained for backward compatibility with existing consumers.
+   */
   snapshotsError: Error | null;
   snapshots7dError: Error | null;
   snapshots30dError: Error | null;
@@ -75,7 +78,6 @@ const emptyNetworkData = (
   snapshots7d: [],
   snapshots30d: [],
   snapshotsAll: [],
-  snapshotsAllTruncated: false,
   fees: null,
   uniqueLpCount: null,
   rates: new Map(),
@@ -87,6 +89,40 @@ const emptyNetworkData = (
   snapshotsAllError: null,
   lpError: null,
 });
+
+/**
+ * Envio's hosted Hasura silently caps every PoolSnapshot query at 1000 rows
+ * regardless of the `limit` we send, so for full history we paginate with
+ * offset. Stop as soon as a page comes back under the page size (that's the
+ * last page); bail if we exceed the max-pages safety cap so a pathological
+ * response can't loop forever — the resulting error flows into the chart's
+ * `· partial data` badge.
+ */
+const SNAPSHOT_PAGE_SIZE = 1000;
+const SNAPSHOT_MAX_PAGES = 100;
+
+async function fetchAllSnapshotPages(
+  client: GraphQLClient,
+  poolIds: string[],
+): Promise<PoolSnapshotWindow[]> {
+  const rows: PoolSnapshotWindow[] = [];
+  for (let page = 0; page < SNAPSHOT_MAX_PAGES; page++) {
+    const result = await client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
+      POOL_SNAPSHOTS_ALL,
+      {
+        poolIds,
+        limit: SNAPSHOT_PAGE_SIZE,
+        offset: page * SNAPSHOT_PAGE_SIZE,
+      },
+    );
+    const batch = result.PoolSnapshot ?? [];
+    rows.push(...batch);
+    if (batch.length < SNAPSHOT_PAGE_SIZE) return rows;
+  }
+  throw new Error(
+    `Snapshot history exceeded ${SNAPSHOT_MAX_PAGES * SNAPSHOT_PAGE_SIZE} rows; pagination bailed out`,
+  );
+}
 
 /** @internal Exported for testing only. */
 export async function fetchNetworkData(
@@ -116,46 +152,15 @@ export async function fetchNetworkData(
   const poolIds = pools.map((p) => p.id);
   const fpmmPoolIds = pools.filter(isFpmm).map((p) => p.id);
   const shouldQuery = shouldQueryPoolSnapshots(poolIds);
-  const emptySnapshots = Promise.resolve<{
-    PoolSnapshot: PoolSnapshotWindow[];
-  }>({ PoolSnapshot: [] });
 
-  const [
-    feesResult,
-    snapshotsResult,
-    snapshots7dResult,
-    snapshots30dResult,
-    snapshotsAllResult,
-    lpResult,
-  ] = await Promise.allSettled([
+  const [feesResult, snapshotsAllResult, lpResult] = await Promise.allSettled([
     client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
       PROTOCOL_FEE_TRANSFERS_ALL,
       { chainId: network.chainId },
     ),
     shouldQuery
-      ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
-          POOL_SNAPSHOTS_WINDOW,
-          { from: windows.w24h.from, to: windows.w24h.to, poolIds },
-        )
-      : emptySnapshots,
-    shouldQuery
-      ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
-          POOL_SNAPSHOTS_WINDOW,
-          { from: windows.w7d.from, to: windows.w7d.to, poolIds },
-        )
-      : emptySnapshots,
-    shouldQuery
-      ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
-          POOL_SNAPSHOTS_WINDOW,
-          { from: windows.w30d.from, to: windows.w30d.to, poolIds },
-        )
-      : emptySnapshots,
-    shouldQuery
-      ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
-          POOL_SNAPSHOTS_ALL,
-          { poolIds },
-        )
-      : emptySnapshots,
+      ? fetchAllSnapshotPages(client, poolIds)
+      : Promise.resolve<PoolSnapshotWindow[]>([]),
     fpmmPoolIds.length > 0
       ? client.request<{
           LiquidityPosition: { address: string }[];
@@ -175,24 +180,18 @@ export async function fetchNetworkData(
       ? aggregateProtocolFees(feesResult.value.ProtocolFeeTransfer ?? [], rates)
       : null;
 
-  const snapshots =
-    snapshotsResult.status === "fulfilled"
-      ? (snapshotsResult.value.PoolSnapshot ?? [])
-      : [];
-  const snapshots7d =
-    snapshots7dResult.status === "fulfilled"
-      ? (snapshots7dResult.value.PoolSnapshot ?? [])
-      : [];
-  const snapshots30d =
-    snapshots30dResult.status === "fulfilled"
-      ? (snapshots30dResult.value.PoolSnapshot ?? [])
-      : [];
+  // Single source of truth: the paginated all-history fetch. Window-specific
+  // arrays are derived in-memory — no separate requests, no server-side cap.
   const snapshotsAll =
-    snapshotsAllResult.status === "fulfilled"
-      ? (snapshotsAllResult.value.PoolSnapshot ?? [])
-      : [];
-  const snapshotsAllTruncated =
-    snapshotsAll.length >= POOL_SNAPSHOT_QUERY_LIMIT;
+    snapshotsAllResult.status === "fulfilled" ? snapshotsAllResult.value : [];
+  const snapshotsAllError =
+    snapshotsAllResult.status === "rejected"
+      ? toError(snapshotsAllResult.reason)
+      : null;
+
+  const snapshots = filterSnapshotsToWindow(snapshotsAll, windows.w24h);
+  const snapshots7d = filterSnapshotsToWindow(snapshotsAll, windows.w7d);
+  const snapshots30d = filterSnapshotsToWindow(snapshotsAll, windows.w30d);
 
   const uniqueLpCount =
     lpResult.status === "fulfilled"
@@ -209,29 +208,17 @@ export async function fetchNetworkData(
     snapshots7d,
     snapshots30d,
     snapshotsAll,
-    snapshotsAllTruncated,
     fees,
     uniqueLpCount,
     rates,
     error: null,
     feesError:
       feesResult.status === "rejected" ? toError(feesResult.reason) : null,
-    snapshotsError:
-      snapshotsResult.status === "rejected"
-        ? toError(snapshotsResult.reason)
-        : null,
-    snapshots7dError:
-      snapshots7dResult.status === "rejected"
-        ? toError(snapshots7dResult.reason)
-        : null,
-    snapshots30dError:
-      snapshots30dResult.status === "rejected"
-        ? toError(snapshots30dResult.reason)
-        : null,
-    snapshotsAllError:
-      snapshotsAllResult.status === "rejected"
-        ? toError(snapshotsAllResult.reason)
-        : null,
+    // All four alias to the same error — see NetworkData comment.
+    snapshotsError: snapshotsAllError,
+    snapshots7dError: snapshotsAllError,
+    snapshots30dError: snapshotsAllError,
+    snapshotsAllError,
     lpError: lpResult.status === "rejected" ? toError(lpResult.reason) : null,
   };
 }
@@ -259,10 +246,12 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
 }
 
 /**
- * Fetches pools, snapshots (24h/7d/30d), protocol fees, and LP counts for ALL
- * configured networks in parallel. Uses Promise.allSettled so one failing network
- * doesn't block others. Sub-query failures are surfaced as per-field errors so
- * the UI can show "N/A" instead of silently reporting $0 or zero volume.
+ * Fetches pools, full-history snapshots (paginated), protocol fees, and LP
+ * counts for ALL configured networks in parallel. Window-specific snapshot
+ * arrays (24h/7d/30d) are derived in-memory from `snapshotsAll` so we make one
+ * GraphQL request instead of four overlapping ones, and avoid Hasura's silent
+ * 1000-row cap on windowed queries. Uses Promise.allSettled so one failing
+ * network doesn't block others.
  */
 export function useAllNetworksData(): AllNetworksResult {
   const { data, error, isLoading } = useSWR<NetworkData[]>(

@@ -96,8 +96,8 @@ export function makeSnapshot(
 export function makeNetworkData(
   overrides: Partial<NetworkData> = {},
 ): NetworkData {
-  // Default snapshotsAll to snapshots30d so existing fixture callers that
-  // only populate snapshots30d still exercise chart series code paths.
+  // snapshotsAll is now the source of truth; old tests that only set
+  // snapshots30d still work thanks to the fallback here.
   const snapshots30d = overrides.snapshots30d ?? [];
   const snapshotsAll = overrides.snapshotsAll ?? snapshots30d;
   const base: NetworkData = {
@@ -108,7 +108,6 @@ export function makeNetworkData(
     snapshots7d: [],
     snapshots30d,
     snapshotsAll,
-    snapshotsAllTruncated: false,
     fees: null,
     uniqueLpCount: 0,
     rates: new Map(),

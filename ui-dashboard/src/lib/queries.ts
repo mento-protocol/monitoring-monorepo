@@ -46,13 +46,6 @@ export const ALL_POOLS_WITH_HEALTH = `
   }
 `;
 
-/**
- * Server-side row cap shared by all PoolSnapshot queries. Kept as a TS constant
- * so callers can compare against `result.length` to detect truncation — if the
- * query returns exactly this many rows, older history was dropped server-side.
- */
-export const POOL_SNAPSHOT_QUERY_LIMIT = 100_000;
-
 export const POOL_SNAPSHOTS_WINDOW = `
   query PoolSnapshotsWindow($from: numeric!, $to: numeric!, $poolIds: [String!]!) {
     PoolSnapshot(
@@ -61,7 +54,7 @@ export const POOL_SNAPSHOTS_WINDOW = `
         poolId: { _in: $poolIds }
       }
       order_by: { timestamp: desc }
-      limit: ${POOL_SNAPSHOT_QUERY_LIMIT}
+      limit: 1000
     ) {
       poolId
       timestamp
@@ -74,12 +67,16 @@ export const POOL_SNAPSHOTS_WINDOW = `
   }
 `;
 
+// Envio's hosted Hasura silently caps every query at 1000 rows regardless of
+// the requested limit. To fetch full history we must paginate with $offset;
+// the hook's fetchAllSnapshotPages wrapper handles the loop.
 export const POOL_SNAPSHOTS_ALL = `
-  query PoolSnapshotsAll($poolIds: [String!]!) {
+  query PoolSnapshotsAll($poolIds: [String!]!, $limit: Int!, $offset: Int!) {
     PoolSnapshot(
       where: { poolId: { _in: $poolIds } }
       order_by: { timestamp: desc }
-      limit: ${POOL_SNAPSHOT_QUERY_LIMIT}
+      limit: $limit
+      offset: $offset
     ) {
       poolId
       timestamp
