@@ -548,7 +548,7 @@ describe("TvlOverTimeChart render", () => {
     expect(html).not.toContain("Not enough history yet");
   });
 
-  it("shows ellipsis headline when isLoading is true", () => {
+  it("renders a skeleton (not the real value) in the hero while loading", () => {
     const html = renderToStaticMarkup(
       React.createElement(TvlOverTimeChart, {
         networkData: [],
@@ -559,8 +559,10 @@ describe("TvlOverTimeChart render", () => {
         hasSnapshotError: false,
       }),
     );
-    expect(html).toContain("\u2026");
+    // Hero row + delta row both carry an animate-pulse shimmer during load.
+    expect(html).toMatch(/animate-pulse/);
     expect(html).not.toContain("$1.23M");
+    expect(html).not.toContain("\u2026");
   });
 
   it("renders a positive delta pill in emerald", () => {

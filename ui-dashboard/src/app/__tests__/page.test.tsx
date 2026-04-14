@@ -624,7 +624,9 @@ describe("GlobalPage — Volume chart wiring", () => {
     expect(html).not.toContain("week-over-week");
   });
 
-  it("wires snapshot-query failures through to both chart cards", () => {
+  it("wires an all-history snapshots failure through to both chart cards", () => {
+    // snapshotsAll is the series source for both TVL and Volume, so a failure
+    // partial-badges both cards.
     const html = render([
       makeNetworkData({
         network: TVL_NETWORK,
@@ -632,7 +634,20 @@ describe("GlobalPage — Volume chart wiring", () => {
       }),
     ]);
 
-    // Both chart cards render a "· partial data" badge when snapshots fail.
     expect(html.split("· partial data").length - 1).toBe(2);
+  });
+
+  it("only partial-badges the TVL card when the 7d-only snapshot query fails", () => {
+    // The 7d window is only used by the TVL delta (matchedTvl). Volume depends
+    // solely on snapshotsAll — a 7d-only failure must NOT leak into the Volume
+    // card's partial-data state.
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        snapshots7dError: new Error("7d timeout"),
+      }),
+    ]);
+
+    expect(html.split("· partial data").length - 1).toBe(1);
   });
 });

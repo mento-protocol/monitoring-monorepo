@@ -174,9 +174,10 @@ describe("VolumeOverTimeChart render", () => {
     expect(html).not.toContain("N/A");
   });
 
-  it("shows ellipsis while loading", () => {
+  it("renders a skeleton (not the real value or N/A) while loading", () => {
     const html = renderChart({ isLoading: true });
-    expect(html).toContain("…");
+    expect(html).toMatch(/animate-pulse/);
+    expect(html).not.toContain("…");
     expect(html).not.toContain("N/A");
   });
 

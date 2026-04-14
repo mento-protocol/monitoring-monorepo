@@ -4,7 +4,17 @@ import dynamic from "next/dynamic";
 import { useMemo } from "react";
 import { PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
 
-const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
+// A skeleton rendered while the Plotly chunk is still loading. Without this
+// fallback there's a brief gap between `isLoading` flipping to false and the
+// <Plot> chunk resolving — the card's plot area goes blank for a frame.
+const PlotSkeleton = () => (
+  <div className="h-[200px] animate-pulse rounded bg-slate-800/30" />
+);
+
+const Plot = dynamic(() => import("react-plotly.js"), {
+  ssr: false,
+  loading: PlotSkeleton,
+});
 
 export const SECONDS_PER_DAY = 86_400;
 
@@ -152,13 +162,27 @@ export function TimeSeriesChartCard({
         <div>
           <p className="text-sm text-slate-400">{title}</p>
           <p className="mt-1 font-mono text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-            {headline}
+            {isLoading ? (
+              // Pre-reserve the hero width so the transition from skeleton to
+              // the real number doesn't shift the tab row on its right.
+              <span className="inline-block h-[1em] w-36 animate-pulse rounded bg-slate-800/60 align-middle" />
+            ) : (
+              headline
+            )}
           </p>
           <div className="mt-1 flex h-5 items-center gap-1.5 font-mono text-sm">
-            {deltaPill}
-            {deltaPill && <span className="text-slate-500">{changeLabel}</span>}
-            {(hasError || hasSnapshotError) && !isLoading && (
-              <span className="text-xs text-slate-500">· partial data</span>
+            {isLoading ? (
+              <span className="h-3 w-24 animate-pulse rounded bg-slate-800/40" />
+            ) : (
+              <>
+                {deltaPill}
+                {deltaPill && (
+                  <span className="text-slate-500">{changeLabel}</span>
+                )}
+                {(hasError || hasSnapshotError) && (
+                  <span className="text-xs text-slate-500">· partial data</span>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -192,7 +216,7 @@ export function TimeSeriesChartCard({
 
       <div className="mt-4 -mx-2 sm:-mx-3">
         {isLoading ? (
-          <div className="h-[200px] animate-pulse rounded bg-slate-800/30" />
+          <PlotSkeleton />
         ) : showEmptyState ? (
           <div className="flex h-[200px] items-center justify-center text-sm text-slate-500">
             {emptyMessage}
