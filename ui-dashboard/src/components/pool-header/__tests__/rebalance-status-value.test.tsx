@@ -166,7 +166,7 @@ describe("RebalanceStatusValue", () => {
     expect(html).not.toContain("#writeProxyContract");
   });
 
-  it("renders Last rebalance: <relative> when pool.lastRebalancedAt is present", () => {
+  it("renders 'last <relative>' in the merged subtitle when pool.lastRebalancedAt is present", () => {
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     const poolWithLast: Pool = {
       ...BASE_POOL,
@@ -179,10 +179,11 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toMatch(/Last rebalance: [0-9]+[smhd] ago/);
+    // Subtitle: "via <Strategy> · last Ns ago" — one line.
+    expect(html).toMatch(/· last [0-9]+[smhd] ago/);
   });
 
-  it('renders "Last rebalance: never" when pool.lastRebalancedAt is null', () => {
+  it("renders 'never rebalanced' in the subtitle when pool.lastRebalancedAt is null", () => {
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     const poolWithoutLast: Pool = { ...BASE_POOL, lastRebalancedAt: undefined };
     const html = renderToStaticMarkup(
@@ -192,10 +193,10 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toContain("Last rebalance: never");
+    expect(html).toContain("· never rebalanced");
   });
 
-  it('renders "Last rebalance: never" when pool.lastRebalancedAt is "0"', () => {
+  it("renders 'never rebalanced' when pool.lastRebalancedAt is the sentinel \"0\"", () => {
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     const poolWithZero: Pool = { ...BASE_POOL, lastRebalancedAt: "0" };
     const html = renderToStaticMarkup(
@@ -205,10 +206,10 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toContain("Last rebalance: never");
+    expect(html).toContain("· never rebalanced");
   });
 
-  it('renders the strategy name from useAddressLabels in the "via …" subtitle', () => {
+  it("links the strategy name from useAddressLabels inside the 'via …' subtitle", () => {
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     const html = renderToStaticMarkup(
       <RebalanceStatusValue
@@ -217,10 +218,14 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    // Our mock returns "name-for-<last4>" for any input.
-    expect(html).toContain("via name-for-aaaa");
+    // Subtitle now wraps the strategy name in its own <a>, so the full
+    // "via name-for-aaaa" is split by markup. Assert the link + name
+    // separately.
     expect(html).toContain(
       `href="https://celoscan.io/address/${STRATEGY_ADDR}"`,
     );
+    expect(html).toContain("name-for-aaaa");
+    // No ↗ on non-primary subtitles.
+    expect(html).not.toContain("name-for-aaaa ↗");
   });
 });

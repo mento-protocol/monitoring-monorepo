@@ -56,7 +56,13 @@ export function RebalanceStatusValue({
   const strategyHref = `${network.explorerBaseUrl}/address/${strategyAddress}`;
   const hasLastRebalance =
     pool.lastRebalancedAt !== undefined && pool.lastRebalancedAt !== "0";
+  const lastRebalanceLabel = hasLastRebalance
+    ? `last ${relativeTime(pool.lastRebalancedAt!)}`
+    : "never rebalanced";
 
+  // Subtitle: "via <Strategy> · last Ns ago" — one line, primary ↗ stays on
+  // the headline as the only CTA affordance; strategy link relies on the
+  // indigo-hover color to signal clickability.
   return (
     <span className="flex flex-col gap-0.5">
       {statusHref ? (
@@ -71,23 +77,24 @@ export function RebalanceStatusValue({
       ) : (
         <span className={`font-medium ${statusColor}`}>{statusText}</span>
       )}
-      <a
-        href={strategyHref}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-xs text-slate-500 hover:text-slate-300"
-        title={strategyAddress}
-      >
-        via {strategyName} ↗
-      </a>
       <span
         className="text-xs text-slate-500"
         title={
           hasLastRebalance ? formatTimestamp(pool.lastRebalancedAt!) : undefined
         }
       >
-        Last rebalance:{" "}
-        {hasLastRebalance ? relativeTime(pool.lastRebalancedAt!) : "never"}
+        via{" "}
+        <a
+          href={strategyHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-indigo-400 transition-colors"
+          title={strategyAddress}
+        >
+          {strategyName}
+        </a>
+        {" · "}
+        {lastRebalanceLabel}
       </span>
     </span>
   );

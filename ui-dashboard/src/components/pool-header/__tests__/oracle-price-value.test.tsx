@@ -97,7 +97,7 @@ describe("OraclePriceValue", () => {
     expect(html).toMatch(/1 KESm = [0-9.]+ USDm/);
   });
 
-  it("renders via Chainlink ↗ link when a known symbol is mapped", () => {
+  it("renders the via Chainlink link when a known symbol is mapped", () => {
     // USDC symbol is mapped to celo-mainnet/usdc-usd.
     const pool: Pool = {
       ...BASE_POOL,
@@ -111,7 +111,9 @@ describe("OraclePriceValue", () => {
     expect(html).toContain(
       'href="https://data.chain.link/feeds/celo/mainnet/usdc-usd"',
     );
-    expect(html).toContain("via Chainlink ↗");
+    expect(html).toContain("via Chainlink");
+    // No ↗ on non-primary subtitles — indigo-hover signals clickability.
+    expect(html).not.toContain("via Chainlink ↗");
   });
 
   it("renders plain via SortedOracles text when no Chainlink mapping exists", () => {

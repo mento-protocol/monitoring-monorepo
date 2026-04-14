@@ -55,7 +55,7 @@ describe("OracleStatusValue", () => {
     expect(html).toContain("text-red-400");
   });
 
-  it("renders an explorer anchor for Updated … when oracleTxHash is present", () => {
+  it("renders an explorer anchor wrapping the Updated label when oracleTxHash is present", () => {
     const pool: Pool = {
       ...BASE_POOL,
       oracleTimestamp: FRESH_TS,
@@ -65,7 +65,10 @@ describe("OracleStatusValue", () => {
       <OracleStatusValue pool={pool} network={MOCK_NETWORK} />,
     );
     expect(html).toContain('href="https://celoscan.io/tx/0xdeadbeef"');
-    expect(html).toMatch(/Updated [^<]+↗/);
+    // Subtitle shape: `<a>Updated Ns ago</a> · expires 5m` — no ↗ on
+    // non-primary links (indigo-hover is the clickability signal).
+    expect(html).toMatch(/Updated [^<]+<\/a> · expires/);
+    expect(html).not.toContain("↗");
   });
 
   it("renders plain span for Updated … without oracleTxHash", () => {
@@ -81,29 +84,30 @@ describe("OracleStatusValue", () => {
     expect(html).not.toContain("/tx/");
   });
 
-  it("omits the Updated row entirely when oracleTimestamp is missing", () => {
+  it("omits the Updated prefix but still shows expires when oracleTimestamp is missing", () => {
     const pool: Pool = { ...BASE_POOL, oracleTimestamp: undefined };
     const html = renderToStaticMarkup(
       <OracleStatusValue pool={pool} network={MOCK_NETWORK} />,
     );
     expect(html).not.toContain("Updated");
+    expect(html).toContain("expires");
   });
 
-  it('omits the Updated row when oracleTimestamp is the sentinel "0"', () => {
+  it('omits the Updated prefix when oracleTimestamp is the sentinel "0"', () => {
     const pool: Pool = { ...BASE_POOL, oracleTimestamp: "0" };
     const html = renderToStaticMarkup(
       <OracleStatusValue pool={pool} network={MOCK_NETWORK} />,
     );
     expect(html).not.toContain("Updated");
+    expect(html).toContain("expires");
   });
 
-  it("renders Expires after N minutes and Ns old subtitle with correct minute count", () => {
-    // oracleExpiry=300s → 5m (300/60). Age = nowSeconds - FRESH_TS = 60s.
+  it("renders a single-line subtitle with 'expires Nm' from the staleness threshold", () => {
     const pool: Pool = { ...BASE_POOL, oracleTimestamp: FRESH_TS };
     const html = renderToStaticMarkup(
       <OracleStatusValue pool={pool} network={MOCK_NETWORK} />,
     );
-    expect(html).toContain("Expires after 5m");
-    expect(html).toMatch(/· \d+s old/);
+    // oracleExpiry=300s → 5m. Subtitle is "Updated Ns ago · expires 5m".
+    expect(html).toContain("expires 5m");
   });
 });

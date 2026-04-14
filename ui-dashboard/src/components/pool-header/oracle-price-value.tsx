@@ -54,7 +54,7 @@ export function OraclePriceValue({
           rel="noopener noreferrer"
           className="text-xs text-slate-500 hover:text-indigo-400 transition-colors"
         >
-          via Chainlink ↗
+          via Chainlink
         </a>
       ) : (
         <span className="text-xs text-slate-500">via SortedOracles</span>
