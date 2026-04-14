@@ -490,10 +490,12 @@ function RebalanceDiagnostics({
     : "Rebalance blocked";
   // When a rebalance is feasible, link the status to the strategy's write
   // page so an operator (or any OLS caller) can jump straight to signing
-  // the tx. Reverts don't link anywhere — the error text is the next step.
+  // the tx. Strategies are upgradeable proxies — use #writeProxyContract#F4
+  // so the link opens on the proxy-write tab with rebalance() expanded.
+  // Reverts don't link anywhere — the error text is the next step.
   const writeContractUrl =
     result.canRebalance && strategyAddress
-      ? `${explorerBaseUrl}/address/${strategyAddress}#writeContract`
+      ? `${explorerBaseUrl}/address/${strategyAddress}#writeProxyContract#F4`
       : null;
 
   return (
