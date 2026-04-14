@@ -14,6 +14,7 @@ import {
   type GlobalPoolEntry,
 } from "@/components/global-pools-table";
 import { TvlOverTimeChart } from "@/components/tvl-over-time-chart";
+import { VolumeOverTimeChart } from "@/components/volume-over-time-chart";
 
 export default function GlobalPage() {
   return (
@@ -286,14 +287,23 @@ function GlobalContent() {
         </p>
       </div>
 
-      <TvlOverTimeChart
-        networkData={networkData}
-        totalTvl={aggregated.totalTvl}
-        change24h={aggregated.tvlChange24h}
-        isLoading={isLoading}
-        hasError={anyNetworkError}
-        hasSnapshotError={anySnapshotsError || anySnapshots30dError}
-      />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <TvlOverTimeChart
+          networkData={networkData}
+          totalTvl={aggregated.totalTvl}
+          change24h={aggregated.tvlChange24h}
+          isLoading={isLoading}
+          hasError={anyNetworkError}
+          hasSnapshotError={anySnapshotsError || anySnapshots30dError}
+        />
+        <VolumeOverTimeChart
+          networkData={networkData}
+          totalVolume24h={aggregated.totalVolume24h}
+          isLoading={isLoading}
+          hasError={anyNetworkError}
+          hasSnapshotError={anySnapshotsError || anySnapshots30dError}
+        />
+      </div>
 
       {/* Summary tiles */}
       <section>

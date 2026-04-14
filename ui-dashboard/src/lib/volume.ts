@@ -119,7 +119,7 @@ export function buildPoolVolumeMap(
   return volumeByPool;
 }
 
-function getSnapshotVolumeInUsd(
+export function getSnapshotVolumeInUsd(
   snapshot: PoolSnapshotWindow,
   pool: Pool | undefined,
   network: Network,
