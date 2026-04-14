@@ -91,9 +91,14 @@ export function buildDailySeries(networkData: NetworkData[]): {
     let tvl = 0;
     for (let i = 0; i < histories.length; i++) {
       const h = histories[i];
+      // Bucket t represents the END of UTC day t — include any snapshot whose
+      // timestamp falls anywhere in [t, t + SECONDS_PER_DAY). Using `<= t`
+      // would exclude mid-day snapshots and produce a synthetic zero on the
+      // first bucket whenever the earliest in-range snapshot isn't exactly at
+      // midnight (which is the typical hour-aligned case from the indexer).
       while (
         cursors[i] + 1 < h.points.length &&
-        h.points[cursors[i] + 1].ts <= t
+        h.points[cursors[i] + 1].ts < t + SECONDS_PER_DAY
       ) {
         cursors[i]++;
       }
@@ -223,8 +228,10 @@ export function TvlOverTimeChart({
 
   const headline = isLoading ? "…" : formatUSD(totalTvl);
 
+  // Suppress the delta pill on top-level chain failure — the headline TVL is
+  // computed from the surviving chain subset, so the delta isn't trustworthy.
   const deltaPill =
-    change24h === null || isLoading ? null : (
+    change24h === null || isLoading || hasError ? null : (
       <span className={change24h >= 0 ? "text-emerald-400" : "text-red-400"}>
         {change24h >= 0 ? "+" : ""}
         {change24h.toFixed(2)}%
@@ -249,7 +256,7 @@ export function TvlOverTimeChart({
           <div className="mt-1 flex h-5 items-center gap-1.5 font-mono text-sm">
             {deltaPill}
             {deltaPill && <span className="text-slate-500">past 24h</span>}
-            {hasSnapshotError && !isLoading && (
+            {(hasError || hasSnapshotError) && !isLoading && (
               <span className="text-xs text-slate-500">· partial data</span>
             )}
           </div>

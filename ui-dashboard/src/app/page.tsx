@@ -292,7 +292,7 @@ function GlobalContent() {
         change24h={aggregated.tvlChange24h}
         isLoading={isLoading}
         hasError={anyNetworkError}
-        hasSnapshotError={anySnapshots30dError}
+        hasSnapshotError={anySnapshotsError || anySnapshots30dError}
       />
 
       {/* Summary tiles */}

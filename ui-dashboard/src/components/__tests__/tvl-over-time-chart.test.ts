@@ -210,26 +210,19 @@ describe("buildDailySeries — forward-fill across days", () => {
   });
 
   it("picks the latest when two snapshots fall in the same bucket iteration", () => {
-    // Forces the while-vs-if distinction: two snapshots both need to be
-    // absorbed on a single bucket pass. If the cursor used `if` instead of
-    // `while`, it would advance only once and leave the later snapshot on
-    // the floor. Layout:
-    //   dayMinus1 (bucket 0) — no snapshots ≤ bucket ts → skipped (cursor=-1)
-    //   day0      (bucket 1) — TWO snapshots have ts ≤ day0; the cursor must
-    //                          step twice in one iteration to land on the
-    //                          later one ($100), not the earlier ($200).
+    // Pins the while-vs-if distinction: two snapshots in the SAME calendar-day
+    // bucket. The cursor must advance twice in one iteration to land on the
+    // later one. An `if` would stop at $200; the while-loop produces $100.
     const today = dayAlignedNow();
     const day0 = today - 1 * SECONDS_PER_DAY;
     const pool = makeTvlPool({ reserves0: TEN, reserves1: TEN });
-    // Earlier snap: 12:00 on dayMinus1 (within dayMinus1's bucket range).
     const earlier = makeSnapshot({
-      timestamp: day0 - 3600,
+      timestamp: day0, // 00:00 on day0
       reserves0: HUNDRED,
       reserves1: HUNDRED,
     }); // $200
-    // Later snap: exactly at day0 start.
     const later = makeSnapshot({
-      timestamp: day0,
+      timestamp: day0 + 3600, // 01:00 on day0 — same bucket
       reserves0: FIFTY,
       reserves1: FIFTY,
     }); // $100
@@ -242,17 +235,66 @@ describe("buildDailySeries — forward-fill across days", () => {
       }),
     ]);
 
-    // Buckets: dayMinus1, day0, today (3 total).
-    expect(series).toHaveLength(3);
-    // dayMinus1 bucket: earlier.ts = day0-3600 > dayMinus1 → skipped, tvl=0.
-    expect(series[0].timestamp).toBe(day0 - SECONDS_PER_DAY);
-    expect(series[0].tvlUSD).toBeCloseTo(0, 6);
-    // day0 bucket: while-loop must absorb BOTH snaps in one pass and land on
-    // the later one ($100). An `if` here would stop at $200.
-    expect(series[1].timestamp).toBe(day0);
+    // Buckets: day0, today (2 total; startDay = day0).
+    expect(series).toHaveLength(2);
+    expect(series[0].timestamp).toBe(day0);
+    expect(series[0].tvlUSD).toBeCloseTo(100, 6);
     expect(series[1].tvlUSD).toBeCloseTo(100, 6);
-    // today: forward-fills from later snap.
-    expect(series[2].tvlUSD).toBeCloseTo(100, 6);
+  });
+
+  it("uses the first snapshot's reserves for its calendar-day bucket (no synthetic zero)", () => {
+    // Regression guard: if the cursor check used `<= t` (bucket start) instead
+    // of `< t + SECONDS_PER_DAY` (bucket end), a mid-day first snapshot would
+    // leave the first bucket at $0. Production snapshots are hour-aligned, so
+    // the earliest in-range timestamp is virtually never exactly at midnight.
+    const today = dayAlignedNow();
+    const day0 = today - 1 * SECONDS_PER_DAY;
+    const pool = makeTvlPool({ reserves0: TEN, reserves1: TEN });
+    const snap = makeSnapshot({
+      timestamp: day0 + 14 * 3600, // 14:00 on day0
+      reserves0: FIFTY,
+      reserves1: FIFTY,
+    }); // $100
+
+    const { series } = buildDailySeries([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [pool],
+        snapshots30d: [snap],
+      }),
+    ]);
+
+    expect(series[0].timestamp).toBe(day0);
+    expect(series[0].tvlUSD).toBeCloseTo(100, 6);
+  });
+
+  it("places mid-day snapshot updates in the same calendar-day bucket", () => {
+    // A change at 14:00 on day0 must appear in day0's bucket, not drift into
+    // day1. Each bucket t covers the half-open interval [t, t + 86400).
+    const today = dayAlignedNow();
+    const day0 = today - 1 * SECONDS_PER_DAY;
+    const pool = makeTvlPool({ reserves0: TEN, reserves1: TEN });
+    const morning = makeSnapshot({
+      timestamp: day0 + 3600, // 01:00
+      reserves0: HUNDRED,
+      reserves1: HUNDRED,
+    }); // $200
+    const afternoon = makeSnapshot({
+      timestamp: day0 + 14 * 3600, // 14:00 — same calendar day
+      reserves0: FIFTY,
+      reserves1: FIFTY,
+    }); // $100
+
+    const { series } = buildDailySeries([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [pool],
+        snapshots30d: [morning, afternoon],
+      }),
+    ]);
+
+    expect(series[0].timestamp).toBe(day0);
+    expect(series[0].tvlUSD).toBeCloseTo(100, 6);
   });
 });
 
@@ -556,7 +598,7 @@ describe("TvlOverTimeChart render", () => {
         totalTvl: 0,
         change24h: 2.13,
         isLoading: false,
-        hasError: true,
+        hasError: false,
         hasSnapshotError: false,
       }),
     );
@@ -572,13 +614,46 @@ describe("TvlOverTimeChart render", () => {
         totalTvl: 0,
         change24h: -5.14,
         isLoading: false,
-        hasError: true,
+        hasError: false,
         hasSnapshotError: false,
       }),
     );
     expect(html).toContain("-5.14%");
     expect(html).toContain("text-red-400");
     expect(html).not.toContain("text-emerald-400");
+  });
+
+  it("suppresses the delta pill and shows a partial badge when hasError is true", () => {
+    // Regression guard: when one chain's top-level pools query fails, the
+    // headline TVL is computed from the surviving subset. The delta pill must
+    // disappear and the partial-data badge must surface so the user isn't
+    // misled into treating the number as complete.
+    const today = dayAlignedNow();
+    const pool = makeTvlPool({ reserves0: HUNDRED, reserves1: HUNDRED });
+    const snap = makeSnapshot({
+      timestamp: today - SECONDS_PER_DAY,
+      reserves0: HUNDRED,
+      reserves1: HUNDRED,
+    });
+    const html = renderToStaticMarkup(
+      React.createElement(TvlOverTimeChart, {
+        networkData: [
+          makeNetworkData({
+            network: TVL_NETWORK,
+            pools: [pool],
+            snapshots30d: [snap],
+          }),
+        ],
+        totalTvl: 200,
+        change24h: 5.5,
+        isLoading: false,
+        hasError: true,
+        hasSnapshotError: false,
+      }),
+    );
+    expect(html).not.toContain("5.50%");
+    expect(html).not.toContain("past 24h");
+    expect(html).toContain("· partial data");
   });
 
   it("renders no delta pill when change24h is null", () => {
