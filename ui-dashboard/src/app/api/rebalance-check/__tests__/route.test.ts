@@ -61,9 +61,8 @@ function makeDeferred<T>(): {
 // Per-test module reset — keeps the route's `cache` and `inFlight` maps clean.
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function loadRoute(): Promise<{
-  GET: (req: NextRequest) => Promise<any>;
+  GET: (req: NextRequest) => Promise<Response>;
 }> {
   vi.resetModules();
   // Re-register mocks after resetModules — resetModules clears them.
@@ -87,10 +86,6 @@ async function loadRoute(): Promise<{
 beforeEach(() => {
   mockCheckRebalanceStatus.mockReset();
 });
-
-// ---------------------------------------------------------------------------
-// Validation errors
-// ---------------------------------------------------------------------------
 
 describe("GET /api/rebalance-check — validation", () => {
   it("returns 400 when network is missing", async () => {
@@ -159,10 +154,6 @@ describe("GET /api/rebalance-check — validation", () => {
     expect(await res.json()).toEqual({ error: "Invalid strategy address" });
   });
 });
-
-// ---------------------------------------------------------------------------
-// Happy path + caching
-// ---------------------------------------------------------------------------
 
 describe("GET /api/rebalance-check — happy path", () => {
   it("calls checkRebalanceStatus once and returns its result as JSON", async () => {
@@ -238,10 +229,6 @@ describe("GET /api/rebalance-check — happy path", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// In-flight dedup (concurrent calls)
-// ---------------------------------------------------------------------------
-
 describe("GET /api/rebalance-check — in-flight dedup", () => {
   it("deduplicates two concurrent calls for the same key", async () => {
     const { GET } = await loadRoute();
@@ -270,11 +257,40 @@ describe("GET /api/rebalance-check — in-flight dedup", () => {
     // requests — this is the core dedup guarantee.
     expect(mockCheckRebalanceStatus).toHaveBeenCalledTimes(1);
   });
-});
 
-// ---------------------------------------------------------------------------
-// Rate-limit retry + non-retryable errors
-// ---------------------------------------------------------------------------
+  it("populates cache BEFORE releasing inFlight (race-ordering guard)", async () => {
+    // Regression guard: cache.set must happen inside the .then() that runs
+    // BEFORE .finally() deletes the inFlight entry. If someone reorders those
+    // two callbacks, a 3rd request arriving right after the in-flight promise
+    // settles would see neither inFlight nor cache populated and fire a
+    // duplicate upstream RPC. Behavioral invariant checked here:
+    // upstream call count stays at 1 across all three requests.
+    const { GET } = await loadRoute();
+    const deferred = makeDeferred<typeof BASE_RESULT>();
+    mockCheckRebalanceStatus.mockReturnValueOnce(deferred.promise);
+
+    const params = {
+      network: MOCK_NETWORK_ID,
+      pool: POOL,
+      strategy: STRATEGY,
+    };
+
+    // R1 and R2 are concurrent → both attach to the same inFlight promise.
+    const r1 = GET(new NextRequest(buildUrl(params)));
+    const r2 = GET(new NextRequest(buildUrl(params)));
+
+    // Release the upstream call. This schedules the route's .then/.finally
+    // microtasks — when they run, cache.set must happen before inFlight.delete.
+    deferred.resolve(BASE_RESULT);
+    await Promise.all([r1, r2]);
+
+    // R3 arrives AFTER R1/R2 settle — if cache was populated before inFlight
+    // was cleared, this is a cache hit and upstream is NOT re-invoked.
+    const r3 = await GET(new NextRequest(buildUrl(params)));
+    expect(r3.status).toBe(200);
+    expect(mockCheckRebalanceStatus).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("GET /api/rebalance-check — retry behavior", () => {
   it("retries once on a rate-limit error and returns the retry result", async () => {
@@ -339,10 +355,6 @@ describe("GET /api/rebalance-check — retry behavior", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// inFlight cleared after settled request
-// ---------------------------------------------------------------------------
-
 describe("GET /api/rebalance-check — inFlight cleanup", () => {
   it("clears inFlight after a settled request so the next call goes through cache", async () => {
     const { GET } = await loadRoute();
@@ -386,5 +398,125 @@ describe("GET /api/rebalance-check — inFlight cleanup", () => {
     const res2 = await GET(new NextRequest(buildUrl(params)));
     expect(res2.status).toBe(200);
     expect(mockCheckRebalanceStatus).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("GET /api/rebalance-check — DoS caps", () => {
+  // Helper: build a distinct pool address. We keep strategy fixed and vary
+  // the pool so each request maps to a fresh cache key.
+  function makePool(i: number): string {
+    // 40-char hex — pad i across the tail so each index yields a unique addr.
+    const tail = i.toString(16).padStart(40, "0");
+    return "0x" + tail;
+  }
+
+  it("evicts the oldest entry once cache reaches 1024 (FIFO)", async () => {
+    const { GET } = await loadRoute();
+    // Each request resolves immediately with the base result, populating cache.
+    mockCheckRebalanceStatus.mockImplementation(async () => BASE_RESULT);
+
+    // Fill cache to exactly 1024 entries.
+    for (let i = 0; i < 1024; i++) {
+      const res = await GET(
+        new NextRequest(
+          buildUrl({
+            network: MOCK_NETWORK_ID,
+            pool: makePool(i),
+            strategy: STRATEGY,
+          }),
+        ),
+      );
+      expect(res.status).toBe(200);
+    }
+
+    // First pool (pool-0) should still be cached — verify a repeat hit doesn't
+    // re-invoke upstream.
+    const callsBeforeEvict = mockCheckRebalanceStatus.mock.calls.length;
+    const hit = await GET(
+      new NextRequest(
+        buildUrl({
+          network: MOCK_NETWORK_ID,
+          pool: makePool(0),
+          strategy: STRATEGY,
+        }),
+      ),
+    );
+    expect(hit.status).toBe(200);
+    expect(mockCheckRebalanceStatus).toHaveBeenCalledTimes(callsBeforeEvict);
+
+    // Insert the 1025th distinct entry — this must evict pool-0 (oldest).
+    const overflow = await GET(
+      new NextRequest(
+        buildUrl({
+          network: MOCK_NETWORK_ID,
+          pool: makePool(9999),
+          strategy: STRATEGY,
+        }),
+      ),
+    );
+    expect(overflow.status).toBe(200);
+
+    // Now pool-0 should miss → re-invoke upstream exactly once more.
+    const countAfterOverflow = mockCheckRebalanceStatus.mock.calls.length;
+    const missAfterEvict = await GET(
+      new NextRequest(
+        buildUrl({
+          network: MOCK_NETWORK_ID,
+          pool: makePool(0),
+          strategy: STRATEGY,
+        }),
+      ),
+    );
+    expect(missAfterEvict.status).toBe(200);
+    expect(mockCheckRebalanceStatus).toHaveBeenCalledTimes(
+      countAfterOverflow + 1,
+    );
+  });
+
+  it("rejects with 503 when inFlight reaches 64 concurrent entries", async () => {
+    const { GET } = await loadRoute();
+    // Keep every upstream call pending so inFlight fills up without draining.
+    const deferreds: Array<
+      ReturnType<typeof makeDeferred<typeof BASE_RESULT>>
+    > = [];
+    mockCheckRebalanceStatus.mockImplementation(() => {
+      const d = makeDeferred<typeof BASE_RESULT>();
+      deferreds.push(d);
+      return d.promise;
+    });
+
+    // Fire 64 concurrent requests for distinct keys — fills inFlight to cap.
+    const pending: Array<Promise<Response>> = [];
+    for (let i = 0; i < 64; i++) {
+      pending.push(
+        GET(
+          new NextRequest(
+            buildUrl({
+              network: MOCK_NETWORK_ID,
+              pool: makePool(i),
+              strategy: STRATEGY,
+            }),
+          ),
+        ),
+      );
+    }
+
+    // 65th distinct key — should be rejected with 503 immediately.
+    const overflow = await GET(
+      new NextRequest(
+        buildUrl({
+          network: MOCK_NETWORK_ID,
+          pool: makePool(500),
+          strategy: STRATEGY,
+        }),
+      ),
+    );
+    expect(overflow.status).toBe(503);
+    expect(await overflow.json()).toEqual({ error: "Server busy" });
+
+    // Resolve everything so the test cleans up (pending promises don't leak
+    // across tests thanks to vi.resetModules() in loadRoute, but being tidy).
+    for (const d of deferreds) d.resolve(BASE_RESULT);
+    await Promise.all(pending);
   });
 });

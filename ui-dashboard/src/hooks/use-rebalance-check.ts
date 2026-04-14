@@ -5,7 +5,7 @@ import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { type RebalanceCheckResult } from "@/lib/rebalance-check";
 import { computeHealthStatus } from "@/lib/health";
-import { isNamespacedPoolId } from "@/lib/pool-id";
+import { stripChainIdFromPoolId } from "@/lib/pool-id";
 
 /**
  * Hook that checks whether a rebalance is currently feasible for a pool.
@@ -31,7 +31,7 @@ export function useRebalanceCheck(
 } {
   const shouldCheck = shouldRunCheck(pool, network.chainId);
   const key = shouldCheck
-    ? `/api/rebalance-check?network=${encodeURIComponent(network.id)}&pool=${encodeURIComponent(poolContractAddress(pool!.id))}&strategy=${encodeURIComponent(pool!.rebalancerAddress!)}`
+    ? `/api/rebalance-check?network=${encodeURIComponent(network.id)}&pool=${encodeURIComponent(stripChainIdFromPoolId(pool!.id))}&strategy=${encodeURIComponent(pool!.rebalancerAddress!)}`
     : null;
 
   const { data, error, isLoading } = useSWR<RebalanceCheckResult | null>(
@@ -63,13 +63,6 @@ async function fetchRebalanceCheck(url: string): Promise<RebalanceCheckResult> {
     );
   }
   return (await res.json()) as RebalanceCheckResult;
-}
-
-// Strip the "{chainId}-" prefix from a namespaced pool ID so the server gets
-// a raw 0x address for eth_call. Plain addresses pass through unchanged.
-function poolContractAddress(poolId: string): string {
-  if (!isNamespacedPoolId(poolId)) return poolId;
-  return poolId.split("-").slice(1).join("-");
 }
 
 function shouldRunCheck(pool: Pool | null, chainId?: number): boolean {

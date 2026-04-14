@@ -3,12 +3,10 @@
 import { AddressLink } from "@/components/address-link";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { KindBadge, SourceBadge } from "@/components/badges";
-import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
-import { useHealthScore } from "@/hooks/use-health-score";
-import { strategyRebalanceWriteUrl } from "@/lib/rebalance-check";
-import type { Network } from "@/lib/networks";
-import { formatBinaryHealthPct, formatNines } from "@/lib/pool-health-score";
-import { getOracleStalenessThreshold, isOracleFresh } from "@/lib/health";
+import { HealthScoreValue } from "@/components/pool-header/health-score-value";
+import { OraclePriceValue } from "@/components/pool-header/oracle-price-value";
+import { OracleStatusValue } from "@/components/pool-header/oracle-status-value";
+import { RebalanceStatusValue } from "@/components/pool-header/rebalance-status-value";
 import { LimitSelect } from "@/components/controls";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { HealthPanel } from "@/components/health-panel";
@@ -30,12 +28,12 @@ import {
   formatBlock,
   formatTimestamp,
   formatWei,
-  isNamespacedPoolId,
   normalizePoolIdForChain,
   parseWei,
   parseOraclePriceToNumber,
   relativeTime,
 } from "@/lib/format";
+import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import { useGQL } from "@/lib/graphql";
 import {
   ORACLE_SNAPSHOTS,
@@ -54,14 +52,7 @@ import {
   TRADING_LIMITS,
 } from "@/lib/queries";
 import { Pagination } from "@/components/pagination";
-import {
-  chainlinkFeedUrl,
-  explorerTxUrl,
-  isFpmm,
-  poolName,
-  tokenSymbol,
-  USDM_SYMBOLS,
-} from "@/lib/tokens";
+import { isFpmm, poolName, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import {
   buildSearchBlob,
@@ -208,9 +199,7 @@ function PoolDetail() {
 
   const decodedId = decodePoolId(poolId);
   const normalizedPoolId = normalizePoolIdForChain(decodedId, network.chainId);
-  const poolAddress = isNamespacedPoolId(normalizedPoolId)
-    ? normalizedPoolId.split("-").slice(1).join("-")
-    : normalizedPoolId;
+  const poolAddress = stripChainIdFromPoolId(normalizedPoolId);
   const rawTab = searchParams.get("tab");
   const requestedTab: Tab = TABS.includes(rawTab as Tab)
     ? (rawTab as Tab)
@@ -450,232 +439,6 @@ function PoolDetail() {
 }
 
 // ---------------------------------------------------------------------------
-// Header cells — current-state signals the top row surfaces at a glance
-// ---------------------------------------------------------------------------
-
-function RebalanceStatusValue({
-  pool,
-  network,
-  strategyAddress,
-}: {
-  pool: Pool;
-  network: Network;
-  strategyAddress: string;
-}) {
-  const { getName } = useAddressLabels();
-  const {
-    data: rebalanceCheck,
-    isLoading,
-    error,
-  } = useRebalanceCheck(pool, network);
-
-  let statusText: string;
-  let statusColor: string;
-  let statusHref: string | null = null;
-
-  if (isLoading) {
-    statusText = "Checking…";
-    statusColor = "text-slate-400";
-  } else if (error) {
-    statusText = "Rebalance required";
-    statusColor = "text-amber-400";
-  } else if (rebalanceCheck === null) {
-    statusText = "Balanced";
-    statusColor = "text-emerald-400";
-  } else if (rebalanceCheck.canRebalance) {
-    statusText = "Rebalance required";
-    statusColor = "text-amber-400";
-    statusHref = strategyRebalanceWriteUrl(
-      network.explorerBaseUrl,
-      strategyAddress,
-    );
-  } else {
-    statusText = "Rebalance blocked";
-    statusColor = "text-red-400";
-  }
-
-  const strategyName = getName(strategyAddress);
-  const strategyHref = `${network.explorerBaseUrl}/address/${strategyAddress}`;
-  const hasLastRebalance =
-    pool.lastRebalancedAt !== undefined && pool.lastRebalancedAt !== "0";
-
-  return (
-    <span className="flex flex-col gap-0.5">
-      {statusHref ? (
-        <a
-          href={statusHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`font-medium ${statusColor} hover:underline`}
-        >
-          {statusText} ↗
-        </a>
-      ) : (
-        <span className={`font-medium ${statusColor}`}>{statusText}</span>
-      )}
-      <a
-        href={strategyHref}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-xs text-slate-500 hover:text-slate-300"
-        title={strategyAddress}
-      >
-        via {strategyName} ↗
-      </a>
-      <span
-        className="text-xs text-slate-500"
-        title={
-          hasLastRebalance ? formatTimestamp(pool.lastRebalancedAt!) : undefined
-        }
-      >
-        Last rebalance:{" "}
-        {hasLastRebalance ? relativeTime(pool.lastRebalancedAt!) : "never"}
-      </span>
-    </span>
-  );
-}
-
-function OracleStatusValue({
-  pool,
-  network,
-}: {
-  pool: Pool;
-  network: Network;
-}) {
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const oracleAge =
-    pool.oracleTimestamp && pool.oracleTimestamp !== "0"
-      ? nowSeconds - Number(pool.oracleTimestamp)
-      : Infinity;
-  const stalenessThreshold = getOracleStalenessThreshold(pool, network.chainId);
-  const fresh = isOracleFresh(pool, nowSeconds, network.chainId);
-  const hasTs = pool.oracleTimestamp && pool.oracleTimestamp !== "0";
-
-  return (
-    <span className="flex flex-col gap-0.5">
-      <span
-        className={`font-medium ${fresh ? "text-emerald-400" : "text-red-400"}`}
-      >
-        {fresh ? "✓ Fresh" : "✗ Stale"}
-      </span>
-      {hasTs &&
-        (pool.oracleTxHash ? (
-          <a
-            href={explorerTxUrl(network, pool.oracleTxHash)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-slate-500 hover:text-indigo-400 transition-colors"
-            title={formatTimestamp(pool.oracleTimestamp!)}
-          >
-            Updated {relativeTime(pool.oracleTimestamp!)} ↗
-          </a>
-        ) : (
-          <span
-            className="text-xs text-slate-500"
-            title={formatTimestamp(pool.oracleTimestamp!)}
-          >
-            Updated {relativeTime(pool.oracleTimestamp!)}
-          </span>
-        ))}
-      <span className="text-xs text-slate-500">
-        Expires after {Math.round(stalenessThreshold / 60)}m
-        {oracleAge !== Infinity && ` · ${oracleAge}s old`}
-      </span>
-    </span>
-  );
-}
-
-function OraclePriceValue({ pool, network }: { pool: Pool; network: Network }) {
-  const [inverted, setInverted] = React.useState(false);
-  const sym0 = tokenSymbol(network, pool.token0);
-  const sym1 = tokenSymbol(network, pool.token1);
-  const feedVal =
-    pool.oraclePrice && pool.oraclePrice !== "0"
-      ? Number(pool.oraclePrice) / 10 ** 24
-      : 0;
-  const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
-  const titleToken = usdmIsToken0 ? sym1 : sym0;
-  const quoteToken = usdmIsToken0 ? sym0 : sym1;
-  const base = inverted ? quoteToken : titleToken;
-  const quote = inverted ? titleToken : quoteToken;
-  const displayPrice =
-    feedVal > 0 ? formatOraclePrice(inverted ? 1 / feedVal : feedVal) : "—";
-
-  const chainlinkUrl =
-    chainlinkFeedUrl(sym1, network.chainId) ??
-    chainlinkFeedUrl(sym0, network.chainId);
-
-  return (
-    <span className="flex flex-col gap-0.5">
-      {displayPrice !== "—" ? (
-        <button
-          type="button"
-          onClick={() => setInverted((v) => !v)}
-          title="Click to toggle price direction"
-          className="font-mono text-white hover:text-indigo-300 transition-colors text-left"
-        >
-          1 {base} = {displayPrice} {quote}
-          <span className="ml-1.5 text-xs text-slate-500">⇄</span>
-        </button>
-      ) : (
-        <span className="text-slate-500">—</span>
-      )}
-      {chainlinkUrl ? (
-        <a
-          href={chainlinkUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-slate-500 hover:text-indigo-400 transition-colors"
-        >
-          via Chainlink ↗
-        </a>
-      ) : (
-        <span className="text-xs text-slate-500">via SortedOracles</span>
-      )}
-    </span>
-  );
-}
-
-function formatOraclePrice(price: number): string {
-  if (price <= 0) return "—";
-  const dp = price > 0.9 && price < 1.1 ? 4 : 6;
-  return price.toFixed(dp);
-}
-
-function HealthScoreValue({ pool }: { pool: Pool }) {
-  const { health24h, allTimeScore, error } = useHealthScore(pool);
-
-  if (error) {
-    return <span className="text-xs text-amber-400">Query failed</span>;
-  }
-  if (health24h.score == null && allTimeScore == null) {
-    return <span className="text-slate-500">N/A</span>;
-  }
-
-  return (
-    <span className="flex flex-col gap-0.5">
-      <span className="font-medium text-white">
-        {health24h.score == null
-          ? "N/A"
-          : formatBinaryHealthPct(health24h.score)}
-        <span className="ml-1 text-xs text-slate-500">24h</span>
-      </span>
-      {allTimeScore != null && (
-        <span className="text-xs text-slate-500">
-          {formatBinaryHealthPct(allTimeScore)} all-time ·{" "}
-          {formatNines(allTimeScore)}
-        </span>
-      )}
-      {health24h.score != null && !health24h.hasEnoughDataForNines && (
-        <span className="text-xs text-slate-600">
-          {health24h.observedHours.toFixed(1)}h observed
-        </span>
-      )}
-    </span>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Pool header
 // ---------------------------------------------------------------------------
 
@@ -691,9 +454,7 @@ function PoolHeader({
   const isVirtual = pool.source?.includes("virtual");
   // pool.id is the namespaced multichain ID ("42220-0x…"). Strip the chain
   // prefix so AddressLink receives a plain hex address for explorer links.
-  const poolContractAddress = isNamespacedPoolId(pool.id)
-    ? pool.id.split("-").slice(1).join("-")
-    : pool.id;
+  const poolContractAddress = stripChainIdFromPoolId(pool.id);
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">

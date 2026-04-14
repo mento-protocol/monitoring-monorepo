@@ -105,3 +105,12 @@ export function parseOraclePriceToNumber(
   if (!isFinite(feedValue) || feedValue <= 0) return 0;
   return USD_STABLE_SYMS.has(sym0) ? 1 / feedValue : feedValue;
 }
+
+/**
+ * Formats a positive oracle price for display. Uses 4dp near parity
+ * (0.9..1.1) and 6dp elsewhere. Callers must gate on price > 0.
+ */
+export function formatOraclePrice(price: number): string {
+  const dp = price > 0.9 && price < 1.1 ? 4 : 6;
+  return price.toFixed(dp);
+}

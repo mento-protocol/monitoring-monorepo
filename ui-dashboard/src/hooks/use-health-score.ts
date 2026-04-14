@@ -27,17 +27,9 @@ export type HealthScoreResult = {
   error: Error | null;
 };
 
-/**
- * Computes pool health scores over two windows: the trailing 24h (requires
- * fetching OracleSnapshots), and all-time (a cumulative counter indexed on
- * the Pool row itself).
- *
- * Virtual pools return a null 24h score and all-time = null, since there's
- * no oracle to measure against.
- */
+/** Virtual pools short-circuit to null scores — no oracle to measure against. */
 export function useHealthScore(pool: Pool): HealthScoreResult {
-  // Minute-aligned anchor so the 24h window doesn't shift every render —
-  // keeps the GQL query key stable and avoids a refetch storm.
+  // Minute-aligned anchor for refetch-storm avoidance.
   const [windowAnchorMs, setWindowAnchorMs] = useState(
     () => Math.floor(Date.now() / 60_000) * 60_000,
   );
@@ -78,7 +70,7 @@ export function useHealthScore(pool: Pool): HealthScoreResult {
   }, [windowData]);
   const predecessor = predecessorData?.OracleSnapshot?.[0];
   const snapshots = useMemo(() => {
-    // New array before sort — React immutability on the memoized input.
+    // .sort() mutates; spread first to preserve memoized inputs.
     const out = predecessor
       ? [predecessor, ...snapshotsAsc]
       : [...snapshotsAsc];

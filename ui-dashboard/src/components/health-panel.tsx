@@ -139,10 +139,6 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Rebalance diagnostics panel (right side of health panel)
-// ---------------------------------------------------------------------------
-
 function RebalanceDiagnostics({
   result,
   error,
@@ -150,9 +146,6 @@ function RebalanceDiagnostics({
   result: RebalanceCheckResult | null;
   error: Error | undefined;
 }) {
-  // Headline / strategy type / write-link live on the pool header top row.
-  // This panel only exists to carry info the header can't fit: the decoded
-  // revert reason and strategy-specific enrichment.
   if (error) {
     return (
       <div className="lg:w-72 lg:flex-shrink-0 lg:border-l lg:border-slate-800 lg:pl-6">
@@ -204,10 +197,6 @@ function RebalanceDiagnostics({
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Strategy enrichment details
-// ---------------------------------------------------------------------------
 
 function EnrichmentDetail({
   enrichment,
