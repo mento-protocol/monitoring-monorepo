@@ -1,12 +1,15 @@
 "use client";
 
-import type { Pool } from "@/lib/types";
+import type { Pool, RebalanceEvent } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
 import { computeHealthStatus } from "@/lib/health";
 import { strategyRebalanceWriteUrl } from "@/lib/rebalance-check";
 import { formatTimestamp, relativeTime } from "@/lib/format";
+import { useGQL } from "@/lib/graphql";
+import { POOL_REBALANCES } from "@/lib/queries";
+import { explorerTxUrl } from "@/lib/tokens";
 
 function getPassiveStatus(
   pool: Pool,
@@ -105,6 +108,19 @@ export function RebalanceStatusValue({
     ? `last ${relativeTime(pool.lastRebalancedAt!)}`
     : "never rebalanced";
 
+  // Fetch the most recent rebalance tx so the "last Ns ago" label can link
+  // to it on the explorer. Gated on hasLastRebalance to skip the query for
+  // pools that have never rebalanced. SWR dedupes across components (the
+  // Rebalances tab uses the same POOL_REBALANCES query with larger limits).
+  const { data: lastRebalanceData } = useGQL<{
+    RebalanceEvent: Pick<RebalanceEvent, "txHash">[];
+  }>(
+    hasLastRebalance ? POOL_REBALANCES : null,
+    hasLastRebalance ? { poolId: pool.id, limit: 1 } : undefined,
+  );
+  const lastRebalanceTxHash =
+    lastRebalanceData?.RebalanceEvent?.[0]?.txHash ?? null;
+
   // Subtitle: "via <Strategy> · last Ns ago" — one line, primary ↗ stays on
   // the headline as the only CTA affordance; strategy link relies on the
   // indigo-hover color to signal clickability.
@@ -139,7 +155,18 @@ export function RebalanceStatusValue({
           {strategyName}
         </a>
         {" · "}
-        {lastRebalanceLabel}
+        {hasLastRebalance && lastRebalanceTxHash ? (
+          <a
+            href={explorerTxUrl(network, lastRebalanceTxHash)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-indigo-400 transition-colors"
+          >
+            {lastRebalanceLabel}
+          </a>
+        ) : (
+          lastRebalanceLabel
+        )}
       </span>
     </span>
   );

@@ -6,6 +6,14 @@ import type { RebalanceCheckResult } from "@/lib/rebalance-check";
 
 // Mock external dependencies so we can control the component's inputs.
 const mockUseRebalanceCheck = vi.fn();
+const mockUseGQL = vi.fn<
+  (
+    query: string | null,
+    variables?: Record<string, unknown>,
+  ) => {
+    data?: { RebalanceEvent: { txHash: string }[] };
+  }
+>(() => ({}));
 const mockGetName = vi.fn((address: string | null) =>
   address ? `name-for-${address.slice(-4)}` : "",
 );
@@ -16,6 +24,10 @@ vi.mock("@/hooks/use-rebalance-check", () => ({
 }));
 vi.mock("@/components/address-labels-provider", () => ({
   useAddressLabels: () => ({ getName: mockGetName }),
+}));
+vi.mock("@/lib/graphql", () => ({
+  useGQL: (query: string | null, variables?: Record<string, unknown>) =>
+    mockUseGQL(query, variables),
 }));
 
 import { RebalanceStatusValue } from "@/components/pool-header/rebalance-status-value";
@@ -208,6 +220,7 @@ describe("RebalanceStatusValue", () => {
 
   it("renders 'last <relative>' in the merged subtitle when pool.lastRebalancedAt is present", () => {
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
+    mockUseGQL.mockReturnValueOnce({ data: undefined });
     const poolWithLast: Pool = {
       ...BASE_POOL,
       lastRebalancedAt: String(Math.floor(Date.now() / 1000) - 120),
@@ -220,6 +233,28 @@ describe("RebalanceStatusValue", () => {
       />,
     );
     expect(html).toMatch(/· last [0-9]+[smhd] ago/);
+  });
+
+  it("links 'last <relative>' to the latest rebalance tx on the explorer when available", () => {
+    mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
+    mockUseGQL.mockReturnValueOnce({
+      data: { RebalanceEvent: [{ txHash: "0xdeadbeef" }] },
+    });
+    const poolWithLast: Pool = {
+      ...BASE_POOL,
+      lastRebalancedAt: String(Math.floor(Date.now() / 1000) - 120),
+    };
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={poolWithLast}
+        network={NETWORK}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    // Subtitle shape: "…· <a>last Ns ago</a>" — subtitle link leans on
+    // indigo-hover for its clickability signal (no ↗).
+    expect(html).toContain('href="https://celoscan.io/tx/0xdeadbeef"');
+    expect(html).toMatch(/· <a [^>]*>last [0-9]+[smhd] ago<\/a>/);
   });
 
   it("renders 'never rebalanced' in the subtitle when pool.lastRebalancedAt is null", () => {
