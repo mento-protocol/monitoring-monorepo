@@ -46,6 +46,13 @@ export const ALL_POOLS_WITH_HEALTH = `
   }
 `;
 
+/**
+ * Server-side row cap shared by all PoolSnapshot queries. Kept as a TS constant
+ * so callers can compare against `result.length` to detect truncation — if the
+ * query returns exactly this many rows, older history was dropped server-side.
+ */
+export const POOL_SNAPSHOT_QUERY_LIMIT = 100_000;
+
 export const POOL_SNAPSHOTS_WINDOW = `
   query PoolSnapshotsWindow($from: numeric!, $to: numeric!, $poolIds: [String!]!) {
     PoolSnapshot(
@@ -54,7 +61,7 @@ export const POOL_SNAPSHOTS_WINDOW = `
         poolId: { _in: $poolIds }
       }
       order_by: { timestamp: desc }
-      limit: 100000
+      limit: ${POOL_SNAPSHOT_QUERY_LIMIT}
     ) {
       poolId
       timestamp
@@ -72,7 +79,7 @@ export const POOL_SNAPSHOTS_ALL = `
     PoolSnapshot(
       where: { poolId: { _in: $poolIds } }
       order_by: { timestamp: desc }
-      limit: 100000
+      limit: ${POOL_SNAPSHOT_QUERY_LIMIT}
     ) {
       poolId
       timestamp

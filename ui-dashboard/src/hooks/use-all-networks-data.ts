@@ -6,6 +6,7 @@ import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 import type { Network } from "@/lib/networks";
 import {
   ALL_POOLS_WITH_HEALTH,
+  POOL_SNAPSHOT_QUERY_LIMIT,
   POOL_SNAPSHOTS_ALL,
   POOL_SNAPSHOTS_WINDOW,
   PROTOCOL_FEE_TRANSFERS_ALL,
@@ -38,6 +39,12 @@ export type NetworkData = {
   snapshots30d: PoolSnapshotWindow[];
   /** All-time snapshots (unbounded) — used by chart series with the "All" range. */
   snapshotsAll: PoolSnapshotWindow[];
+  /**
+   * True when the all-history query hit the server-side row limit and older
+   * rows were dropped. Consumers should treat the series as partial when this
+   * is set — same UX as a snapshot-query failure.
+   */
+  snapshotsAllTruncated: boolean;
   fees: ProtocolFeeSummary | null;
   uniqueLpCount: number | null;
   rates: OracleRateMap;
@@ -68,6 +75,7 @@ const emptyNetworkData = (
   snapshots7d: [],
   snapshots30d: [],
   snapshotsAll: [],
+  snapshotsAllTruncated: false,
   fees: null,
   uniqueLpCount: null,
   rates: new Map(),
@@ -183,6 +191,8 @@ export async function fetchNetworkData(
     snapshotsAllResult.status === "fulfilled"
       ? (snapshotsAllResult.value.PoolSnapshot ?? [])
       : [];
+  const snapshotsAllTruncated =
+    snapshotsAll.length >= POOL_SNAPSHOT_QUERY_LIMIT;
 
   const uniqueLpCount =
     lpResult.status === "fulfilled"
@@ -199,6 +209,7 @@ export async function fetchNetworkData(
     snapshots7d,
     snapshots30d,
     snapshotsAll,
+    snapshotsAllTruncated,
     fees,
     uniqueLpCount,
     rates,

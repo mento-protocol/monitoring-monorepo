@@ -86,6 +86,9 @@ function GlobalContent() {
   const anySnapshotsAllError = networkData.some(
     (netData) => netData.snapshotsAllError !== null && netData.error === null,
   );
+  const anySnapshotsAllTruncated = networkData.some(
+    (netData) => netData.snapshotsAllTruncated && netData.error === null,
+  );
   const anyLpError = networkData.some(
     (netData) => netData.lpError !== null && netData.error === null,
   );
@@ -296,13 +299,17 @@ function GlobalContent() {
           change7d={aggregated.tvlChange7d}
           isLoading={isLoading}
           hasError={anyNetworkError}
-          hasSnapshotError={anySnapshots7dError || anySnapshotsAllError}
+          hasSnapshotError={
+            anySnapshots7dError ||
+            anySnapshotsAllError ||
+            anySnapshotsAllTruncated
+          }
         />
         <VolumeOverTimeChart
           networkData={networkData}
           isLoading={isLoading}
           hasError={anyNetworkError}
-          hasSnapshotError={anySnapshotsAllError}
+          hasSnapshotError={anySnapshotsAllError || anySnapshotsAllTruncated}
         />
       </div>
 

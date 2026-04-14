@@ -637,6 +637,19 @@ describe("GlobalPage — Volume chart wiring", () => {
     expect(html.split("· partial data").length - 1).toBe(2);
   });
 
+  it("partial-badges both cards when the all-history query truncated server-side", () => {
+    // Guards against silently undercounted "All" series: when the server cap
+    // drops older rows the data is incomplete even though the request succeeded.
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        snapshotsAllTruncated: true,
+      }),
+    ]);
+
+    expect(html.split("· partial data").length - 1).toBe(2);
+  });
+
   it("only partial-badges the TVL card when the 7d-only snapshot query fails", () => {
     // The 7d window is only used by the TVL delta (matchedTvl). Volume depends
     // solely on snapshotsAll — a 7d-only failure must NOT leak into the Volume
