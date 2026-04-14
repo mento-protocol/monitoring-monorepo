@@ -465,7 +465,7 @@ function PoolHeader({
           <AddressLink address={poolContractAddress} />
         </span>
       </div>
-      <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 text-sm">
+      <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-[auto_repeat(4,minmax(0,1fr))_auto] gap-4 lg:gap-8 text-sm">
         <Stat
           label="Token 0/1"
           value={
