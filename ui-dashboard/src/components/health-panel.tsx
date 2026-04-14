@@ -33,7 +33,7 @@ const HEALTH_WINDOW_LIMIT = 1000;
 /** Fetch one extra so we can detect truncation without a separate count query. */
 const HEALTH_WINDOW_QUERY_LIMIT = HEALTH_WINDOW_LIMIT + 1;
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
-import type { RebalanceCheckResult } from "@/lib/rebalance-check";
+import type { RebalanceCheckResult, StrategyType } from "@/lib/rebalance-check";
 
 /** Format a price float with smart decimal places.
  * Prices near 1.0 (stablecoins) → 4dp; others → 6dp. */
@@ -522,12 +522,7 @@ function RebalanceDiagnostics({
 
         {/* Strategy type label */}
         <span className="text-xs text-slate-600">
-          Strategy:{" "}
-          {result.strategyType === "cdp"
-            ? "CDP Liquidity"
-            : result.strategyType === "reserve"
-              ? "Reserve Liquidity"
-              : "Unknown"}
+          Strategy: {formatStrategyType(result.strategyType)}
         </span>
       </div>
     </div>
@@ -578,4 +573,17 @@ function EnrichmentDetail({
   }
 
   return null;
+}
+
+function formatStrategyType(strategyType: StrategyType): string {
+  switch (strategyType) {
+    case "cdp":
+      return "CDP Liquidity";
+    case "reserve":
+      return "Reserve Liquidity";
+    case "ols":
+      return "Open Liquidity";
+    case "unknown":
+      return "Unknown";
+  }
 }

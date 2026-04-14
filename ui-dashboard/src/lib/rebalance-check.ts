@@ -28,6 +28,9 @@ const STRATEGY_ABI = parseAbi([
   "function getCDPConfig(address pool) external view returns ((address stabilityPool, address collateralRegistry, uint256 stabilityPoolPercentage, uint256 maxIterations))",
   // ReserveLiquidityStrategy-specific
   "function reserve() external view returns (address)",
+  // OpenLiquidityStrategy-specific — used only for strategy-type detection.
+  // getPools() is zero-arg so the probe is cheap and OLS-exclusive.
+  "function getPools() external view returns (address[])",
   // Errors — shared (LS_*)
   "error LS_BAD_INCENTIVE()",
   "error LS_CAN_ONLY_REBALANCE_ONCE(address pool)",
@@ -61,6 +64,9 @@ const STRATEGY_ABI = parseAbi([
   "error RLS_RESERVE_OUT_OF_COLLATERAL()",
   "error RLS_TOKEN_IN_NOT_SUPPORTED()",
   "error RLS_TOKEN_OUT_NOT_SUPPORTED()",
+  // OpenLiquidityStrategy errors
+  "error OLS_OUT_OF_COLLATERAL()",
+  "error OLS_OUT_OF_DEBT()",
   // FPMM pool-side errors (can bubble through strategy.rebalance → pool.rebalance)
   "error NotLiquidityStrategy()",
   "error PriceDifferenceTooSmall()",
@@ -108,6 +114,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   RLS_COLLATERAL_TO_POOL_FAILED: "Collateral transfer to pool failed",
   RLS_TOKEN_IN_NOT_SUPPORTED: "Collateral token not supported by reserve",
   RLS_TOKEN_OUT_NOT_SUPPORTED: "Debt token not supported by reserve",
+  // Open liquidity strategy
+  OLS_OUT_OF_COLLATERAL:
+    "Strategy has no collateral liquidity available to rebalance",
+  OLS_OUT_OF_DEBT: "Strategy has no debt liquidity available to rebalance",
   // Shared
   LS_COOLDOWN_ACTIVE: "Rebalance cooldown is active — retry shortly",
   LS_POOL_NOT_REBALANCEABLE: "Pool deviation is below the rebalance threshold",
@@ -148,7 +158,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 // Types
 // ---------------------------------------------------------------------------
 
-export type StrategyType = "cdp" | "reserve" | "unknown";
+export type StrategyType = "cdp" | "reserve" | "ols" | "unknown";
 
 export type RebalanceCheckResult = {
   canRebalance: boolean;
@@ -284,6 +294,19 @@ async function detectStrategyType(
     if (!isContractRevert(err)) throw err;
   }
 
+  // OLS probe — getPools() is OLS-exclusive and zero-arg, so the selector alone
+  // is enough to distinguish from CDP / Reserve strategies.
+  try {
+    await client.readContract({
+      address: strategy,
+      abi: STRATEGY_ABI,
+      functionName: "getPools",
+    });
+    return "ols";
+  } catch (err) {
+    if (!isContractRevert(err)) throw err;
+  }
+
   return "unknown";
 }
 
@@ -314,12 +337,14 @@ async function handleRevert(
 
   // Decode the custom error
   let errorName: string;
+  let errorArgs: readonly unknown[] | undefined;
   try {
     const decoded = decodeErrorResult({
       abi: STRATEGY_ABI,
       data: revertData,
     });
     errorName = decoded.errorName;
+    errorArgs = decoded.args;
   } catch {
     return {
       canRebalance: false,
@@ -330,8 +355,17 @@ async function handleRevert(
     };
   }
 
-  const humanMessage =
-    ERROR_MESSAGES[errorName] ?? `Rebalance reverted: ${errorName}`;
+  // Built-in Solidity reverts don't carry a meaningful error name — surface
+  // the embedded message/code instead of "Rebalance reverted: Error".
+  let humanMessage: string;
+  if (errorName === "Error" && typeof errorArgs?.[0] === "string") {
+    humanMessage = `Rebalance reverted: ${errorArgs[0]}`;
+  } else if (errorName === "Panic" && typeof errorArgs?.[0] === "bigint") {
+    humanMessage = `Rebalance panicked (code 0x${errorArgs[0].toString(16)})`;
+  } else {
+    humanMessage =
+      ERROR_MESSAGES[errorName] ?? `Rebalance reverted: ${errorName}`;
+  }
 
   // Fetch enrichment data for specific errors
   let enrichment: StrategyEnrichment | null = null;
@@ -347,10 +381,14 @@ async function handleRevert(
     enrichment = await fetchReserveEnrichment(client, strategy, pool);
   }
 
+  // Suppress noisy "[Error]" / "[Panic]" tags on the UI — for built-in reverts
+  // the meaningful bit is already embedded in `message`.
+  const isBuiltInRevert = errorName === "Error" || errorName === "Panic";
+
   return {
     canRebalance: false,
     message: humanMessage,
-    rawError: errorName,
+    rawError: isBuiltInRevert ? null : errorName,
     strategyType,
     enrichment,
   };

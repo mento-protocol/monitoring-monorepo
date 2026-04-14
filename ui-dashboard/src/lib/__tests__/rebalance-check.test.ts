@@ -116,8 +116,9 @@ describe("checkRebalanceStatus", () => {
   });
 
   it("returns blocked when strategy type is unknown (no false green)", async () => {
-    // Both strategy probes revert (contract-level) → unknown
+    // CDP, Reserve and OLS probes all revert (contract-level) → unknown
     mockReadContract
+      .mockRejectedValueOnce(new Error("execution reverted"))
       .mockRejectedValueOnce(new Error("execution reverted"))
       .mockRejectedValueOnce(new Error("execution reverted"));
     // eth_call should NOT be made — unknown strategy short-circuits
@@ -129,6 +130,40 @@ describe("checkRebalanceStatus", () => {
     expect(result.message).toContain("Unable to identify");
     // Verify simulation was never attempted
     expect(mockCall).not.toHaveBeenCalled();
+  });
+
+  it("detects OLS strategy type when getCDPConfig and reserve() fail but getPools() succeeds", async () => {
+    mockReadContract
+      .mockRejectedValueOnce(new Error("execution reverted")) // getCDPConfig
+      .mockRejectedValueOnce(new Error("execution reverted")) // reserve()
+      .mockResolvedValueOnce([]); // getPools()
+    mockCall.mockResolvedValueOnce({ data: "0x" });
+
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
+    expect(result.strategyType).toBe("ols");
+    expect(result.canRebalance).toBe(true);
+  });
+
+  it("decodes OLS_OUT_OF_COLLATERAL revert with human-readable message", async () => {
+    mockReadContract
+      .mockRejectedValueOnce(new Error("execution reverted")) // getCDPConfig
+      .mockRejectedValueOnce(new Error("execution reverted")) // reserve()
+      .mockResolvedValueOnce([]); // getPools()
+
+    const OLS_SELECTOR = keccak256(toBytes("OLS_OUT_OF_COLLATERAL()")).slice(
+      0,
+      10,
+    ) as `0x${string}`;
+    const err = new Error("execution reverted");
+    Object.assign(err, { data: OLS_SELECTOR });
+    mockCall.mockRejectedValueOnce(err);
+
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
+
+    expect(result.canRebalance).toBe(false);
+    expect(result.strategyType).toBe("ols");
+    expect(result.rawError).toBe("OLS_OUT_OF_COLLATERAL");
+    expect(result.message).toContain("collateral");
   });
 
   it("propagates transport errors during strategy detection", async () => {
