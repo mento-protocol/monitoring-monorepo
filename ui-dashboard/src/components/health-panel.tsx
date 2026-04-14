@@ -499,8 +499,10 @@ function RebalanceDiagnostics({
           </span>
         </div>
 
-        {/* Human-readable reason with raw error */}
-        {!result.canRebalance && (
+        {/* Human-readable reason with raw error. OLS success has nuance
+            worth surfacing (awaits external caller); other success cases
+            are self-explanatory from the "Rebalance possible" headline. */}
+        {(!result.canRebalance || result.strategyType === "ols") && (
           <p className="text-sm text-slate-300 leading-relaxed">
             {result.message}
             {result.rawError && (

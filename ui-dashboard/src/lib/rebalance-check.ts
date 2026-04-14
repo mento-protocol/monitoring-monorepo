@@ -226,21 +226,32 @@ export async function checkRebalanceStatus(
     };
   }
 
-  // 2. Simulate rebalance(pool) via eth_call
+  // 2. Probe the strategy. OLS rebalance() transfers tokens to/from msg.sender,
+  //    so simulating from address(0) always reverts inside ERC20 — meaningless.
+  //    Use determineAction(pool) instead, which is view-only and handles the
+  //    zero-sender path explicitly in _clampExpansion/_clampContraction.
+  //    CDP/Reserve source tokens from the strategy contract itself, so the
+  //    rebalance() simulation from address(0) is valid for them.
+  const probeFn = strategyType === "ols" ? "determineAction" : "rebalance";
+  const successMessage =
+    strategyType === "ols"
+      ? "Rebalance available — open-liquidity strategy, awaits external caller"
+      : "Rebalance is currently possible";
+
   try {
     await client.call({
       to: strategy,
       data: encodeFunctionData({
         abi: STRATEGY_ABI,
-        functionName: "rebalance",
+        functionName: probeFn,
         args: [pool],
       }),
     });
 
-    // If we reach here, rebalance would succeed
+    // If we reach here, the probe succeeded.
     return {
       canRebalance: true,
-      message: "Rebalance is currently possible",
+      message: successMessage,
       rawError: null,
       strategyType,
       enrichment: null,
