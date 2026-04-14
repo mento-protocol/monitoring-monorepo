@@ -7,6 +7,7 @@ import {
   snapshotWindow24h,
   snapshotWindow7d,
   snapshotWindow30d,
+  snapshotWindowPrior7d,
   sumFpmmSwaps,
 } from "../volume";
 import type { OracleRateMap } from "../tokens";
@@ -48,6 +49,17 @@ describe("snapshotWindow30d", () => {
     expect(from).toBe(expectedHourStart - 30 * 24 * 3600);
     expect(to).toBe(expectedHourStart);
     expect(to - from).toBe(30 * 24 * 3600);
+  });
+});
+
+describe("snapshotWindowPrior7d", () => {
+  it("returns the 7d window immediately before the current 7d window", () => {
+    const now = Date.UTC(2026, 2, 9, 21, 26, 45, 0); // 21:26:45 UTC
+    const { from, to } = snapshotWindowPrior7d(now);
+    const expectedHourStart = Date.UTC(2026, 2, 9, 21, 0, 0, 0) / 1000;
+    expect(to).toBe(expectedHourStart - 7 * 24 * 3600);
+    expect(from).toBe(expectedHourStart - 14 * 24 * 3600);
+    expect(to - from).toBe(7 * 24 * 3600);
   });
 });
 

@@ -161,8 +161,11 @@ export function VolumeOverTimeChart({
     return { traces: [trace], layout: l };
   }, [visibleSeries]);
 
-  const headline =
-    isLoading || totalVolume7d === null ? "…" : formatUSD(totalVolume7d);
+  const headline = isLoading
+    ? "…"
+    : totalVolume7d === null
+      ? "N/A"
+      : formatUSD(totalVolume7d);
 
   const deltaPill =
     change7d === null || isLoading || hasError ? null : (
