@@ -1,13 +1,19 @@
 import { describe, it, expect } from "vitest";
 import { NETWORKS } from "../networks";
 import {
+  buildPoolVolumeMapInWindow,
+  buildSnapshotWindows,
   buildPoolVolumeMap,
+  filterSnapshotsToWindow,
+  getSnapshotVolumeInUsd,
   poolTotalVolumeUSD,
   shouldQueryPoolSnapshots,
+  snapshotWindowPrior7dFromCurrent,
   snapshotWindow24h,
   snapshotWindow7d,
   snapshotWindow30d,
   snapshotWindowPrior7d,
+  sumVolumeMap,
   sumFpmmSwaps,
 } from "../volume";
 import type { OracleRateMap } from "../tokens";
@@ -60,6 +66,28 @@ describe("snapshotWindowPrior7d", () => {
     expect(to).toBe(expectedHourStart - 7 * 24 * 3600);
     expect(from).toBe(expectedHourStart - 14 * 24 * 3600);
     expect(to - from).toBe(7 * 24 * 3600);
+  });
+});
+
+describe("buildSnapshotWindows", () => {
+  it("reuses one anchored clock for all snapshot windows", () => {
+    const now = Date.UTC(2026, 2, 9, 21, 26, 45, 0);
+    const windows = buildSnapshotWindows(now);
+    const expectedHourStart = Date.UTC(2026, 2, 9, 21, 0, 0, 0) / 1000;
+
+    expect(windows.w24h.to).toBe(expectedHourStart);
+    expect(windows.w7d.to).toBe(expectedHourStart);
+    expect(windows.w30d.to).toBe(expectedHourStart);
+  });
+});
+
+describe("snapshotWindowPrior7dFromCurrent", () => {
+  it("derives the same prior window as snapshotWindowPrior7d", () => {
+    const now = Date.UTC(2026, 2, 9, 21, 26, 45, 0);
+
+    expect(snapshotWindowPrior7dFromCurrent(snapshotWindow7d(now))).toEqual(
+      snapshotWindowPrior7d(now),
+    );
   });
 });
 
@@ -319,6 +347,120 @@ describe("buildPoolVolumeMap", () => {
       EMPTY_RATES,
     );
     expect(volumeByPool.get("pool-3")).toBeNull();
+  });
+});
+
+describe("filterSnapshotsToWindow", () => {
+  it("keeps the lower bound inclusive and the upper bound exclusive", () => {
+    const filtered = filterSnapshotsToWindow(
+      [
+        {
+          poolId: "pool-1",
+          timestamp: "100",
+          reserves0: "0",
+          reserves1: "0",
+          swapCount: 0,
+          swapVolume0: "0",
+          swapVolume1: "0",
+        },
+        {
+          poolId: "pool-1",
+          timestamp: "150",
+          reserves0: "0",
+          reserves1: "0",
+          swapCount: 0,
+          swapVolume0: "0",
+          swapVolume1: "0",
+        },
+        {
+          poolId: "pool-1",
+          timestamp: "200",
+          reserves0: "0",
+          reserves1: "0",
+          swapCount: 0,
+          swapVolume0: "0",
+          swapVolume1: "0",
+        },
+      ],
+      { from: 100, to: 200 },
+    );
+
+    expect(filtered.map((snapshot) => snapshot.timestamp)).toEqual([
+      "100",
+      "150",
+    ]);
+  });
+});
+
+describe("buildPoolVolumeMapInWindow", () => {
+  it("only aggregates snapshots inside the requested window", () => {
+    const pools: Pool[] = [
+      {
+        id: "pool-1",
+        chainId: 42220,
+        token0: "0xde9e4c3ce781b4ba68120d6261cbad65ce0ab00b",
+        token1: "0xc7e4635651e3e3af82b61d3e23c159438dae3bbf",
+        token0Decimals: 18,
+        token1Decimals: 18,
+        oraclePrice: "1000000000000000000000000",
+        source: "FPMM",
+        createdAtBlock: "0",
+        createdAtTimestamp: "0",
+        updatedAtBlock: "0",
+        updatedAtTimestamp: "0",
+      },
+    ];
+
+    const volumeByPool = buildPoolVolumeMapInWindow(
+      [
+        {
+          poolId: "pool-1",
+          timestamp: "100",
+          reserves0: "0",
+          reserves1: "0",
+          swapCount: 0,
+          swapVolume0: "1000000000000000000",
+          swapVolume1: "0",
+        },
+        {
+          poolId: "pool-1",
+          timestamp: "200",
+          reserves0: "0",
+          reserves1: "0",
+          swapCount: 0,
+          swapVolume0: "3000000000000000000",
+          swapVolume1: "0",
+        },
+      ],
+      pools,
+      network,
+      EMPTY_RATES,
+      { from: 100, to: 200 },
+    );
+
+    expect(volumeByPool.get("pool-1")).toBeCloseTo(1, 8);
+    expect(sumVolumeMap(volumeByPool)).toBeCloseTo(1, 8);
+  });
+});
+
+describe("getSnapshotVolumeInUsd", () => {
+  it("returns null when the pool is missing", () => {
+    expect(
+      getSnapshotVolumeInUsd(
+        {
+          poolId: "pool-1",
+          timestamp: "0",
+          reserves0: "0",
+          reserves1: "0",
+          swapCount: 0,
+          swapVolume0: "1000000000000000000",
+          swapVolume1: "0",
+        },
+        undefined,
+        mainnet,
+        EMPTY_RATES,
+      ),
+    ).toBeNull();
   });
 });
 

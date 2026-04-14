@@ -1,18 +1,3 @@
-/**
- * Unit tests for `buildDailySeries` — the pure data transform behind the
- * homepage TVL-over-time chart. Covers the empty/error short-circuits, the
- * FPMM-with-snapshots filter (which guards against new-pool inflation on the
- * "now" endpoint), per-day forward-fill semantics, intra-day snapshot picking,
- * mid-window pool starts, input normalisation, live vs snapshot reserves for
- * `nowTvl`, and multi-chain aggregation.
- *
- * Plus render-level tests for `TvlOverTimeChart` (empty states, headline,
- * delta pill, range buttons, Plotly prop overrides). Rendering is done via
- * `renderToStaticMarkup` with `next/dynamic` mocked to capture Plot props
- * without loading the real plotly-js. Mirrors the pattern used in
- * `lp-concentration-chart.test.ts`. Fixture helpers are shared via
- * `@/test-utils/network-fixtures`.
- */
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -47,31 +32,18 @@ import {
   makeTvlPool,
 } from "@/test-utils/network-fixtures";
 
-// ---------------------------------------------------------------------------
-// Constants & day alignment
-// ---------------------------------------------------------------------------
-
 const SECONDS_PER_DAY = 86_400;
 
-/** Day-aligned "today" used as the anchor for all snapshot timestamps. The
- *  function itself reads `Math.floor(Date.now()/1000)` at call time, so we
- *  align timestamps to a fresh day boundary captured per-test to keep bucket
- *  arithmetic deterministic regardless of wall-clock drift during the run. */
 function dayAlignedNow(): number {
   const nowSec = Math.floor(Date.now() / 1000);
   return Math.floor(nowSec / SECONDS_PER_DAY) * SECONDS_PER_DAY;
 }
 
-// Commonly-reused wei magnitudes (18 decimals).
 const TEN = "10000000000000000000"; //  10 tokens
 const TWENTY = "20000000000000000000"; //  20
 const FIFTY = "50000000000000000000"; //  50
 const HUNDRED = "100000000000000000000"; // 100
 const TWO_HUNDRED = "200000000000000000000"; // 200
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 describe("buildDailySeries — empty / error short-circuits", () => {
   it("returns empty series and nowTvl=0 when networkData is empty", () => {
@@ -687,7 +659,7 @@ describe("TvlOverTimeChart render", () => {
     expect(html).not.toContain("week-over-week");
   });
 
-  it("starts with the 'All' range active by default", () => {
+  it("starts with the 1M range active by default", () => {
     const html = renderToStaticMarkup(
       React.createElement(TvlOverTimeChart, {
         networkData: [],
@@ -698,9 +670,9 @@ describe("TvlOverTimeChart render", () => {
         hasSnapshotError: false,
       }),
     );
-    expect(html).toMatch(/aria-pressed="true"[^>]*>All</);
+    expect(html).toMatch(/aria-pressed="true"[^>]*>1M</);
     expect(html).toMatch(/aria-pressed="false"[^>]*>1W</);
-    expect(html).toMatch(/aria-pressed="false"[^>]*>1M</);
+    expect(html).not.toContain(">All<");
   });
 
   it("passes scrollZoom=false and displayModeBar=false to Plotly config", () => {

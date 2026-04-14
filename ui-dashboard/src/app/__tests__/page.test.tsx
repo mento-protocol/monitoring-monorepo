@@ -41,6 +41,10 @@ vi.mock("@/components/global-pools-table", () => ({
 
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import * as volumeModule from "@/lib/volume";
+import {
+  buildSnapshotWindows,
+  snapshotWindowPrior7dFromCurrent,
+} from "@/lib/volume";
 import GlobalPage from "../page";
 
 // ---------------------------------------------------------------------------
@@ -574,5 +578,101 @@ describe("GlobalPage — TVL delta sub-KPIs", () => {
     ]);
     // Delta should be +100% (pool A only), not ~+766% if pool B's $1000 leaked in
     expect(html).toContain("+100.00%");
+  });
+});
+
+describe("GlobalPage — volume delta sub-KPIs", () => {
+  it("uses the fetch-time snapshot window anchor for week-over-week volume", () => {
+    const queryAnchor = Date.UTC(2026, 3, 14, 10, 30, 0, 0);
+    const snapshotWindows = buildSnapshotWindows(queryAnchor);
+    const priorWindow = snapshotWindowPrior7dFromCurrent(snapshotWindows.w7d);
+    const pool = makeTvlPool({
+      id: "pool-volume",
+      reserves0: "0",
+      reserves1: "0",
+    });
+
+    const nowSpy = vi
+      .spyOn(Date, "now")
+      .mockReturnValue(queryAnchor + 3600_000);
+
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        snapshotWindows,
+        pools: [pool],
+        snapshots7d: [
+          makeSnapshot({
+            poolId: "pool-volume",
+            timestamp: snapshotWindows.w7d.from + 3600,
+            swapVolume0: "20000000000000000000",
+          }),
+        ],
+        snapshots30d: [
+          makeSnapshot({
+            poolId: "pool-volume",
+            timestamp: snapshotWindows.w7d.from + 3600,
+            swapVolume0: "20000000000000000000",
+          }),
+          makeSnapshot({
+            poolId: "pool-volume",
+            timestamp: priorWindow.from + 1800,
+            swapVolume0: "10000000000000000000",
+          }),
+        ],
+      }),
+    ]);
+
+    nowSpy.mockRestore();
+
+    expect(html).toContain("Volume (past 7d)");
+    expect(html).toContain("+100.00%");
+  });
+
+  it("omits the volume delta when the prior window is empty", () => {
+    const queryAnchor = Date.UTC(2026, 3, 14, 10, 30, 0, 0);
+    const snapshotWindows = buildSnapshotWindows(queryAnchor);
+    const pool = makeTvlPool({
+      id: "pool-volume",
+      reserves0: "0",
+      reserves1: "0",
+    });
+
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        snapshotWindows,
+        pools: [pool],
+        snapshots7d: [
+          makeSnapshot({
+            poolId: "pool-volume",
+            timestamp: snapshotWindows.w7d.from + 3600,
+            swapVolume0: "20000000000000000000",
+          }),
+        ],
+        snapshots30d: [
+          makeSnapshot({
+            poolId: "pool-volume",
+            timestamp: snapshotWindows.w7d.from + 3600,
+            swapVolume0: "20000000000000000000",
+          }),
+        ],
+      }),
+    ]);
+
+    expect(html).toContain("Volume (past 7d)");
+    expect(html).not.toContain("week-over-week");
+  });
+
+  it("wires snapshot-query failures through to both chart cards", () => {
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        snapshots7dError: new Error("7d timeout"),
+      }),
+    ]);
+
+    expect(html).toContain("Volume (past 7d)");
+    expect(html.split("· partial data").length - 1).toBe(2);
   });
 });

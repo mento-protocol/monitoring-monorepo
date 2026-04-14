@@ -1,6 +1,7 @@
 import type { NetworkData } from "@/hooks/use-all-networks-data";
 import type { Network } from "@/lib/networks";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
+import { buildSnapshotWindows } from "@/lib/volume";
 
 export const BASE_NETWORK: Network = {
   id: "celo-mainnet",
@@ -97,6 +98,7 @@ export function makeNetworkData(
 ): NetworkData {
   return {
     network: BASE_NETWORK,
+    snapshotWindows: buildSnapshotWindows(Date.now()),
     pools: [],
     snapshots: [],
     snapshots7d: [],

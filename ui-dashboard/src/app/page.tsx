@@ -7,8 +7,10 @@ import type { Pool, PoolSnapshotWindow } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import {
   buildPoolVolumeMap,
+  buildPoolVolumeMapInWindow,
   poolTotalVolumeUSD,
-  snapshotWindowPrior7d,
+  snapshotWindowPrior7dFromCurrent,
+  sumVolumeMap,
 } from "@/lib/volume";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
@@ -26,14 +28,6 @@ export default function GlobalPage() {
       <GlobalContent />
     </Suspense>
   );
-}
-
-function sumVolumeMap(map: Map<string, number | null>): number {
-  let total = 0;
-  for (const v of map.values()) {
-    if (typeof v === "number") total += v;
-  }
-  return total;
 }
 
 /**
@@ -118,11 +112,8 @@ function GlobalContent() {
         anySnapshots7dError || anyNetworkError ? null : 0;
       let totalVolume30d: number | null =
         anySnapshots30dError || anyNetworkError ? null : 0;
-      // Prior 7d window [-14d, -7d], filtered from snapshots30d. Used only for
-      // the volume chart's week-over-week delta — no extra network request.
       let totalVolumePrior7d: number | null =
         anySnapshots30dError || anyNetworkError ? null : 0;
-      const priorWindow = snapshotWindowPrior7d(Date.now());
       let totalSwapsAllTime: number | null = anyNetworkError ? null : 0;
       let totalFeesAllTime: number | null =
         anyFeesError || anyNetworkError ? null : 0;
@@ -198,6 +189,16 @@ function GlobalContent() {
           netData.snapshots30dError === null
             ? buildPoolVolumeMap(snapshots30d, pools, network, netData.rates)
             : null;
+        const prior7dMap =
+          netData.snapshots30dError === null
+            ? buildPoolVolumeMapInWindow(
+                snapshots30d,
+                pools,
+                network,
+                netData.rates,
+                snapshotWindowPrior7dFromCurrent(netData.snapshotWindows.w7d),
+              )
+            : null;
 
         if (vol24hMap && totalVolume24h !== null) {
           totalVolume24h += sumVolumeMap(vol24hMap);
@@ -208,20 +209,8 @@ function GlobalContent() {
         if (vol30dMap && totalVolume30d !== null) {
           totalVolume30d += sumVolumeMap(vol30dMap);
         }
-
-        // Prior-7d volume (WoW denominator) — reuses snapshots30d by filtering.
-        if (netData.snapshots30dError === null && totalVolumePrior7d !== null) {
-          const priorSnaps = snapshots30d.filter((s) => {
-            const t = Number(s.timestamp);
-            return t >= priorWindow.from && t < priorWindow.to;
-          });
-          const priorMap = buildPoolVolumeMap(
-            priorSnaps,
-            pools,
-            network,
-            netData.rates,
-          );
-          totalVolumePrior7d += sumVolumeMap(priorMap);
+        if (prior7dMap && totalVolumePrior7d !== null) {
+          totalVolumePrior7d += sumVolumeMap(prior7dMap);
         }
 
         // Store per-pool volume for the table columns

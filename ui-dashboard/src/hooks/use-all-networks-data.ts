@@ -15,11 +15,11 @@ import {
   type ProtocolFeeSummary,
 } from "@/lib/protocol-fees";
 import {
-  snapshotWindow24h,
-  snapshotWindow7d,
-  snapshotWindow30d,
+  buildSnapshotWindows,
   shouldQueryPoolSnapshots,
   SNAPSHOT_REFRESH_MS,
+  type SnapshotWindows,
+  type TimeRange,
 } from "@/lib/volume";
 import type {
   Pool,
@@ -30,6 +30,7 @@ import { isFpmm, buildOracleRateMap, type OracleRateMap } from "@/lib/tokens";
 
 export type NetworkData = {
   network: Network;
+  snapshotWindows: SnapshotWindows;
   pools: Pool[];
   snapshots: PoolSnapshotWindow[];
   snapshots7d: PoolSnapshotWindow[];
@@ -51,10 +52,13 @@ type AllNetworksResult = {
   error: Error | null;
 };
 
-export type TimeRange = { from: number; to: number };
-
-const emptyNetworkData = (network: Network, error: Error): NetworkData => ({
+const emptyNetworkData = (
+  network: Network,
+  snapshotWindows: SnapshotWindows,
+  error: Error,
+): NetworkData => ({
   network,
+  snapshotWindows,
   pools: [],
   snapshots: [],
   snapshots7d: [],
@@ -90,6 +94,7 @@ export async function fetchNetworkData(
   } catch (err) {
     return emptyNetworkData(
       network,
+      windows,
       err instanceof Error ? err : new Error(String(err)),
     );
   }
@@ -171,6 +176,7 @@ export async function fetchNetworkData(
 
   return {
     network,
+    snapshotWindows: windows,
     pools,
     snapshots,
     snapshots7d,
@@ -201,11 +207,7 @@ export async function fetchNetworkData(
 export async function fetchAllNetworks(): Promise<NetworkData[]> {
   const configuredNetworkIds = NETWORK_IDS.filter(isConfiguredNetworkId);
   const now = Date.now();
-  const windows = {
-    w24h: snapshotWindow24h(now),
-    w7d: snapshotWindow7d(now),
-    w30d: snapshotWindow30d(now),
-  };
+  const windows = buildSnapshotWindows(now);
 
   const results = await Promise.allSettled(
     configuredNetworkIds.map((id) => fetchNetworkData(NETWORKS[id], windows)),
@@ -215,6 +217,7 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
     if (result.status === "fulfilled") return result.value;
     return emptyNetworkData(
       NETWORKS[configuredNetworkIds[i]],
+      windows,
       result.reason instanceof Error
         ? result.reason
         : new Error(String(result.reason)),
