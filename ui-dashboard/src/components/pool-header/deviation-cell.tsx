@@ -7,14 +7,15 @@ import { computeHealthStatus, isOracleFresh } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
 
 /**
- * Full-width "Deviation vs Threshold" row for the pool header — the most
- * information-dense widget on the pool page, promoted out of the legacy
- * Health Status panel so headline state lives in one box.
+ * "Deviation vs Threshold" cell for the pool header's metric row. Carries
+ * the HealthBadge inline with its label and a compact progress bar sized
+ * to the cell, sitting alongside the other metric cells instead of
+ * stretching across the full width of the box.
  *
  * Returns null for cases where HealthPanel below still has a clearer
  * story to tell (virtual, pre-migration data, weekend pause).
  */
-export function DeviationRow({
+export function DeviationCell({
   pool,
   network,
 }: {
@@ -34,15 +35,17 @@ export function DeviationRow({
   const status = computeHealthStatus(pool, network.chainId);
 
   return (
-    <div className="mt-5 flex flex-col gap-2 border-t border-slate-800 pt-5">
-      <div className="flex items-center gap-3">
-        <span className="text-sm text-slate-400">Deviation vs Threshold</span>
+    <div className="min-w-56">
+      <dt className="flex items-center gap-2 text-slate-400">
+        Deviation vs Threshold
         <HealthBadge status={status} />
-      </div>
-      <DeviationBar
-        priceDifference={pool.priceDifference ?? "0"}
-        rebalanceThreshold={pool.rebalanceThreshold ?? 0}
-      />
+      </dt>
+      <dd className="mt-1">
+        <DeviationBar
+          priceDifference={pool.priceDifference ?? "0"}
+          rebalanceThreshold={pool.rebalanceThreshold ?? 0}
+        />
+      </dd>
     </div>
   );
 }
@@ -72,12 +75,12 @@ function DeviationBar({
   return (
     <div className="flex flex-col gap-1">
       <span className="text-sm text-slate-200">
-        {pctOfThreshold}% of rebalance threshold
-        <span className="ml-2 text-xs text-slate-500">
+        {pctOfThreshold}% of threshold
+        <span className="ml-1.5 text-xs text-slate-500">
           ({diff.toLocaleString()} / {threshold.toLocaleString()} bps)
         </span>
       </span>
-      <div className="h-2 w-full rounded-full bg-slate-700">
+      <div className="h-2 w-56 rounded-full bg-slate-700">
         <div
           className={`h-2 rounded-full transition-all ${color}`}
           style={{ width: `${pct}%` }}
