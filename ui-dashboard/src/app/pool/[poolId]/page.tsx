@@ -456,6 +456,9 @@ function PoolHeader({
   // prefix so AddressLink receives a plain hex address for explorer links.
   const poolContractAddress = stripChainIdFromPoolId(pool.id);
 
+  const createdRelative = relativeTime(pool.createdAtTimestamp);
+  const createdTitle = formatTimestamp(pool.createdAtTimestamp);
+
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <div className="flex flex-wrap items-center gap-3 mb-3">
@@ -464,8 +467,26 @@ function PoolHeader({
         <span className="text-sm">
           <AddressLink address={poolContractAddress} />
         </span>
+        {/* Inline "Created …" sits with the address row so it shares the
+            document-header rhythm as name/source/address and frees the 5th
+            grid column for high-signal live metrics below. */}
+        <span className="text-sm text-slate-500" title={createdTitle}>
+          Created{" "}
+          {deployTxHash ? (
+            <a
+              href={`${network.explorerBaseUrl}/tx/${deployTxHash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-indigo-400 transition-colors"
+            >
+              {createdRelative}
+            </a>
+          ) : (
+            createdRelative
+          )}
+        </span>
       </div>
-      <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 lg:gap-8 text-sm">
+      <dl className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-8 text-sm">
         <Stat
           label="Oracle Status"
           value={
@@ -509,24 +530,6 @@ function PoolHeader({
               <HealthScoreValue pool={pool} />
             )
           }
-        />
-        <Stat
-          label="Created"
-          value={
-            deployTxHash ? (
-              <a
-                href={`${network.explorerBaseUrl}/tx/${deployTxHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-indigo-400 hover:text-indigo-300"
-              >
-                {relativeTime(pool.createdAtTimestamp)}
-              </a>
-            ) : (
-              relativeTime(pool.createdAtTimestamp)
-            )
-          }
-          title={formatTimestamp(pool.createdAtTimestamp)}
         />
       </dl>
     </div>
