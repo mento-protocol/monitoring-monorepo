@@ -328,7 +328,9 @@ describe("GET /api/rebalance-check — retry behavior", () => {
     const res = await GET(req);
 
     expect(res.status).toBe(502);
-    expect(await res.json()).toEqual({ error: "execution reverted" });
+    // Public error string is a stable sentinel — raw upstream messages (RPC
+    // URLs, provider wording) stay in server logs only. See route.ts.
+    expect(await res.json()).toEqual({ error: "Upstream RPC error" });
     expect(mockCheckRebalanceStatus).toHaveBeenCalledTimes(1);
   });
 

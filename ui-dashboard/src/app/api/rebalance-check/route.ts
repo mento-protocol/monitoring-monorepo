@@ -104,9 +104,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const result = await pending;
     return NextResponse.json(result);
   } catch (err) {
+    // Log the raw upstream error (may include RPC URL, provider wording,
+    // stack frames, API-key-bearing URLs) to server logs only; return a
+    // stable public string so the endpoint's contract doesn't drift with
+    // provider error phrasing and nothing sensitive leaks to the browser.
     console.error("[rebalance-check]", network, pool, err);
-    const message = err instanceof Error ? err.message : "Upstream RPC error";
-    return NextResponse.json({ error: message }, { status: 502 });
+    return NextResponse.json({ error: "Upstream RPC error" }, { status: 502 });
   }
 }
 
