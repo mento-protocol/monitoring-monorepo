@@ -113,9 +113,7 @@ export function HealthPanel({ pool }: HealthPanelProps) {
         <div
           className={`flex flex-col ${showRebalanceDiag ? "lg:flex-row" : ""} gap-6`}
         >
-          <dl
-            className={showRebalanceDiag ? "lg:flex-1 lg:min-w-0" : "w-full"}
-          >
+          <dl className={showRebalanceDiag ? "lg:flex-1 lg:min-w-0" : "w-full"}>
             <div>
               <dt className="text-sm text-slate-400 mb-1">
                 Deviation vs Threshold

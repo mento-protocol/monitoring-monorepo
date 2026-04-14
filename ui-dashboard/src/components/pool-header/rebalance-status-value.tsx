@@ -8,7 +8,10 @@ import { computeHealthStatus } from "@/lib/health";
 import { strategyRebalanceWriteUrl } from "@/lib/rebalance-check";
 import { formatTimestamp, relativeTime } from "@/lib/format";
 
-function getPassiveStatus(pool: Pool, network: Network): {
+function getPassiveStatus(
+  pool: Pool,
+  network: Network,
+): {
   text: string;
   color: string;
 } {
@@ -78,7 +81,10 @@ export function RebalanceStatusValue({
     statusText = "Diagnostics unavailable";
     statusColor = "text-slate-400";
   } else if (rebalanceCheck === null) {
-    ({ text: statusText, color: statusColor } = getPassiveStatus(pool, network));
+    ({ text: statusText, color: statusColor } = getPassiveStatus(
+      pool,
+      network,
+    ));
   } else if (rebalanceCheck.canRebalance) {
     statusText = "Rebalance required";
     statusColor = "text-amber-400";
