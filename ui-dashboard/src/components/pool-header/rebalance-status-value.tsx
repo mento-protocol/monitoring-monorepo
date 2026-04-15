@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import type { Pool, RebalanceEvent } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { useAddressLabels } from "@/components/address-labels-provider";
@@ -171,13 +172,16 @@ export function RebalanceStatusValue({
   // when it does, a stale-but-valid explorer link is an acceptable tradeoff
   // for not issuing a background GQL read every 10s per open pool page.
   // (Different `limit` than the Rebalances tab means SWR can't dedupe them.)
+  //
+  // Memoize the variables object so its identity only changes when inputs
+  // actually change — keeps SWR's cache key churn-free across renders.
+  const lastRebalanceVars = useMemo(
+    () => (hasLastRebalance ? { poolId: pool.id, limit: 1 } : undefined),
+    [hasLastRebalance, pool.id],
+  );
   const { data: lastRebalanceData } = useGQL<{
     RebalanceEvent: Pick<RebalanceEvent, "txHash">[];
-  }>(
-    hasLastRebalance ? POOL_REBALANCES : null,
-    hasLastRebalance ? { poolId: pool.id, limit: 1 } : undefined,
-    0,
-  );
+  }>(hasLastRebalance ? POOL_REBALANCES : null, lastRebalanceVars, 0);
   const lastRebalanceTxHash =
     lastRebalanceData?.RebalanceEvent?.[0]?.txHash ?? null;
 
