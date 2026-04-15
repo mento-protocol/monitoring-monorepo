@@ -47,6 +47,7 @@ describe("buildPoolNotFoundDest", () => {
 describe("buildPoolDetailHref", () => {
   const poolId = "42220-0x0000000000000000000000000000000000000001";
   const monadPoolId = "143-0x0000000000000000000000000000000000000002";
+  const rawPoolId = "0x0000000000000000000000000000000000000001";
 
   it("omits ?network= for canonical prod networks (chainId alone resolves them)", () => {
     expect(buildPoolDetailHref(poolId, "celo-mainnet")).toBe(
@@ -72,6 +73,20 @@ describe("buildPoolDetailHref", () => {
     );
     expect(buildPoolDetailHref(poolId, "devnet")).toBe(
       `/pool/${encodeURIComponent(poolId)}?network=devnet`,
+    );
+  });
+
+  it("preserves ?network= when the pool id is a raw address — chainId isn't recoverable from the path, so dropping the param would silently switch the user to DEFAULT_NETWORK", () => {
+    expect(buildPoolDetailHref(rawPoolId, "monad-mainnet")).toBe(
+      `/pool/${encodeURIComponent(rawPoolId)}?network=monad-mainnet`,
+    );
+    expect(buildPoolDetailHref(rawPoolId, "celo-sepolia")).toBe(
+      `/pool/${encodeURIComponent(rawPoolId)}?network=celo-sepolia`,
+    );
+    // Even for DEFAULT: include the param so the route is explicit. The
+    // param is redundant here (falls back to DEFAULT anyway) but harmless.
+    expect(buildPoolDetailHref(rawPoolId, "celo-mainnet")).toBe(
+      `/pool/${encodeURIComponent(rawPoolId)}?network=celo-mainnet`,
     );
   });
 });

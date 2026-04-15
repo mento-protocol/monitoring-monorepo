@@ -185,22 +185,24 @@ describe("GlobalPoolsTable — column structure", () => {
 });
 
 describe("GlobalPoolsTable — pool detail link", () => {
-  it("omits ?network= for canonical networks", () => {
+  const NAMESPACED_ID = "42220-0x0000000000000000000000000000000000000001";
+
+  it("omits ?network= for canonical networks with namespaced pool ids", () => {
     const html = renderToStaticMarkup(
-      <GlobalPoolsTable entries={[makeEntry({ id: "pool-abc" })]} />,
+      <GlobalPoolsTable entries={[makeEntry({ id: NAMESPACED_ID })]} />,
     );
-    expect(html).toContain(`href="/pool/${encodeURIComponent("pool-abc")}"`);
+    expect(html).toContain(`href="/pool/${encodeURIComponent(NAMESPACED_ID)}"`);
     expect(html).not.toContain("?network=");
   });
 
   it("preserves ?network= for non-canonical (local) networks", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable
-        entries={[makeEntry({ id: "pool-abc" }, CELO_MAINNET_LOCAL_NETWORK)]}
+        entries={[makeEntry({ id: NAMESPACED_ID }, CELO_MAINNET_LOCAL_NETWORK)]}
       />,
     );
     expect(html).toContain(
-      `href="/pool/${encodeURIComponent("pool-abc")}?network=celo-mainnet-local"`,
+      `href="/pool/${encodeURIComponent(NAMESPACED_ID)}?network=celo-mainnet-local"`,
     );
   });
 });

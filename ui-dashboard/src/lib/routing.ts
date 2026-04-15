@@ -7,6 +7,7 @@ import {
   isCanonicalNetwork,
   type IndexerNetworkId,
 } from "@/lib/networks";
+import { isNamespacedPoolId } from "@/lib/pool-id";
 
 /**
  * Redirect destination when a pool isn't found on the active network.
@@ -53,15 +54,17 @@ export function buildPoolDetailUrl(
   return `/pool/${encodeURIComponent(poolId)}${qs ? `?${qs}` : ""}`;
 }
 
-// New pool detail link from a listing. Canonical networks resolve from the
-// pool id's chainId alone; non-canonical (local/devnet) must carry ?network=
-// or navigation would silently swap the user onto the prod indexer.
+// New pool detail link from a listing. Drops ?network= only when BOTH the
+// active network is canonical for its chainId AND the pool id is namespaced
+// (so NetworkProvider can recover the chain from the path). Non-canonical
+// networks or raw `0x…` pool ids must keep the param, otherwise navigation
+// would silently fall back to DEFAULT_NETWORK.
 export function buildPoolDetailHref(
   poolId: string,
   activeNetworkId: IndexerNetworkId,
 ): string {
   const base = `/pool/${encodeURIComponent(poolId)}`;
-  return isCanonicalNetwork(activeNetworkId)
-    ? base
-    : `${base}?network=${activeNetworkId}`;
+  const chainRecoverableFromPath =
+    isCanonicalNetwork(activeNetworkId) && isNamespacedPoolId(poolId);
+  return chainRecoverableFromPath ? base : `${base}?network=${activeNetworkId}`;
 }
