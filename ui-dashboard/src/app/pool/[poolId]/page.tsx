@@ -503,7 +503,7 @@ function PoolHeader({
         {/* `ml-auto` pushes "Created …" to the far edge so the title row
             reads as `identity ← → metadata` rather than trailing ragged-left
             after the address. */}
-        <span className="ml-auto text-sm text-slate-500" title={createdTitle}>
+        <span className="ml-auto text-xs text-slate-500" title={createdTitle}>
           Created{" "}
           {deployTxHash ? (
             <a
