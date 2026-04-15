@@ -24,8 +24,11 @@ export function DeviationCell({
   network: Network;
 }) {
   const isVirtual = pool.source?.includes("virtual");
-  const hasHealthData =
-    pool.hasHealthData === true || pool.healthStatus !== undefined;
+  // Trust only `hasHealthData === true` — the indexer's default values
+  // populate `pool.healthStatus` with "N/A" even for no-data pools, so a
+  // `!== undefined` disjunction would let this cell render a synthetic
+  // deviation bar for rows the indexer explicitly marked as no-data.
+  const hasHealthData = pool.hasHealthData === true;
   const nowSeconds = Math.floor(Date.now() / 1000);
   const oracleIsFresh = isOracleFresh(pool, nowSeconds, network.chainId);
 
@@ -89,16 +92,20 @@ function DeviationBar({
   // Frame the primary number as a signed delta from the threshold so the
   // alarm direction reads directly: "52.1% above threshold" instead of
   // "152.1% of threshold" (which requires mental math to extract the
-  // overage). At exactly-threshold, skip the "0.0% below" noise and say
-  // "At threshold" — matches the Rebalance Status cell's copy for the
-  // same boundary.
+  // overage). Within 1% below the limit reads as "At threshold" — users
+  // read "0.3% below threshold" as if the pool is safely under when it's
+  // actually on the verge. Overages still get the explicit "% above"
+  // signal at any magnitude.
   const deltaPct = (Math.abs(diff - threshold) / threshold) * 100;
-  const deltaLabel =
-    diff === threshold
-      ? "At threshold"
-      : diff > threshold
-        ? `${deltaPct.toFixed(1)}% above threshold`
-        : `${deltaPct.toFixed(1)}% below threshold`;
+  const AT_THRESHOLD_TOLERANCE_PCT = 1;
+  const atThreshold =
+    diff === threshold ||
+    (diff < threshold && deltaPct <= AT_THRESHOLD_TOLERANCE_PCT);
+  const deltaLabel = atThreshold
+    ? "At threshold"
+    : diff > threshold
+      ? `${deltaPct.toFixed(1)}% above threshold`
+      : `${deltaPct.toFixed(1)}% below threshold`;
 
   return (
     <div className="flex flex-col gap-1">

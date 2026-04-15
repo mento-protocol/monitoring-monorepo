@@ -4,13 +4,18 @@ import type { Pool } from "generated";
 import { DEFAULT_ORACLE_FIELDS, computeHealthStatus } from "../src/pool";
 
 // ---------------------------------------------------------------------------
-// Cross-package parity: these cases MUST match the assertions in
-// `ui-dashboard/src/lib/__tests__/health.test.ts`. The indexer and the UI
-// compute pool health independently, and any drift between them produces
-// a user-visible divergence (indexed badge vs live-recomputed badge).
+// Cross-package parity for the DEVIATION + GRACE branch of
+// computeHealthStatus only. The indexer and the UI diverge intentionally
+// on other branches (oracle-staleness via wall-clock vs. the indexed
+// `oracleOk` flag, weekend reclassification at render time, per-chain
+// expiry fallbacks) — see the pool.ts header comment for the full list.
 //
-// If you change `computeHealthStatus` in either package, mirror the change
-// and update the parity case here so the invariant can't slip silently.
+// Cases in this file MUST match the corresponding assertions in
+// `ui-dashboard/src/lib/__tests__/health.test.ts`. If you change the
+// devRatio boundary or grace-window behaviour in either package, mirror
+// the change and update the case here so the shared invariant can't slip
+// silently. Adding a staleness / weekend / chain-fallback parity test
+// would require the indexer to actually mirror those branches first.
 // ---------------------------------------------------------------------------
 
 function makePool(overrides: Partial<Pool> = {}): Pool {
@@ -45,11 +50,6 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
   it("returns 'N/A' for virtual pools", () => {
     const pool = makePool({ source: "virtual_pool_factory", oracleOk: false });
     assert.equal(computeHealthStatus(pool, NOW), "N/A");
-  });
-
-  it("returns 'CRITICAL' when oracleOk is false", () => {
-    const pool = makePool({ oracleOk: false, priceDifference: 0n });
-    assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
   });
 
   it("returns 'OK' when devRatio is below 0.8", () => {

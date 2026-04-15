@@ -21,19 +21,20 @@ import { fetchReferenceRateFeedID, fetchReportExpiry } from "./rpc";
 export const DEVIATION_BREACH_GRACE_SECONDS = 3600n;
 
 /**
- * MUST stay in lockstep with `computeHealthStatus` in
- * `ui-dashboard/src/lib/health.ts`. Parity cases live in
- * `test/healthStatusParity.test.ts` and
- * `ui-dashboard/src/lib/__tests__/health.test.ts`.
- *
- * Key boundaries:
+ * This indexer branch MUST stay in lockstep with the dashboard's deviation
+ * + grace logic in `ui-dashboard/src/lib/health.ts`. Mirrored cases live in
+ * `test/healthStatusParity.test.ts`:
  *  - `devRatio > 1.0` → CRITICAL (strict; exactly-at-threshold stays WARN)
  *  - Breach + rebalance within DEVIATION_BREACH_GRACE_SECONDS → WARN
+ *  - `devRatio >= 0.8` → WARN; below → OK
  *
- * The indexer has no wall-clock `isWeekend()` at event time (batch
- * processing historical blocks), so the WEEKEND status is produced only
- * by the UI at render time. Indexed weekend-stale pools surface as
- * CRITICAL here; the UI reclassifies them when rendering.
+ * Intentional divergences (NOT covered by the parity suite):
+ *  - Oracle staleness: indexer reads the event-time `oracleOk` flag;
+ *    the UI reads `oracleTimestamp` + `oracleExpiry` against wall clock
+ *    at render time with per-chain fallbacks.
+ *  - Weekend reclassification: only the UI has `isWeekend()` at render
+ *    time. Indexed weekend-stale pools surface as CRITICAL here; the UI
+ *    reclassifies them to WEEKEND when rendering.
  */
 export function computeHealthStatus(pool: Pool, nowSeconds: bigint): string {
   if (pool.source?.includes("virtual")) return "N/A";

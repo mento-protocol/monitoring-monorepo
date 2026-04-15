@@ -121,6 +121,40 @@ describe("DeviationCell — bar color boundaries", () => {
     expect(html).not.toContain("0.0% above threshold");
   });
 
+  it("says 'At threshold' when deviation is within 1% below the limit", () => {
+    // 4975/5000 = 0.995 → 0.5% below. Would otherwise read as "0.5%
+    // below threshold", which understates how close the pool is to
+    // breach. Treat the 1% band as "At threshold".
+    const pool: Pool = { ...BASE_POOL, priceDifference: "4975" };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("At threshold");
+    expect(html).not.toMatch(/% below threshold/);
+  });
+
+  it("still says '% below threshold' once the gap exceeds the 1% tolerance", () => {
+    // 4900/5000 = 0.98 → 2.0% below. Outside the "At threshold" band,
+    // so the explicit delta shows.
+    const pool: Pool = { ...BASE_POOL, priceDifference: "4900" };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("2.0% below threshold");
+    expect(html).not.toContain("At threshold");
+  });
+
+  it("does NOT widen the 'At threshold' band on the above side", () => {
+    // 5050/5000 = 1.01 → 1.0% above. Breach direction always shows the
+    // explicit overage, no matter how small.
+    const pool: Pool = { ...BASE_POOL, priceDifference: "5050" };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("1.0% above threshold");
+    expect(html).not.toContain("At threshold");
+  });
+
   it("keeps the bar amber while a recent rebalance (within 1h) is still settling", () => {
     // dev > 100% but rebalance landed 30m ago → health status stays WARN
     // within the grace window, and the bar must stay amber to match.

@@ -31,17 +31,23 @@ export function HealthScoreValue({ pool }: { pool: Pool }) {
   // Otherwise degrade honestly to the observed duration ("5.3d") so the
   // label can't overstate how much data the score is based on — the
   // snapshot cap or a young pool can both produce sub-window coverage.
+  // On error we omit the period label entirely: `observedHours` will be
+  // 0 from the empty window, and "Query failed 0.0h" is nonsense.
   const fullyCovered =
     !truncated && healthWindow.trackedSeconds >= nominalWindowSeconds;
-  const periodLabel = fullyCovered
-    ? `${Math.round(nominalWindowSeconds / 86400)}d`
-    : formatObservedDuration(healthWindow.observedHours);
+  const periodLabel = error
+    ? null
+    : fullyCovered
+      ? `${Math.round(nominalWindowSeconds / 86400)}d`
+      : formatObservedDuration(healthWindow.observedHours);
 
   return (
     <span className="flex flex-col gap-0.5">
       <span className={`font-medium ${windowColor}`}>
         {windowLabel}
-        <span className="ml-1 text-xs text-slate-500">{periodLabel}</span>
+        {periodLabel && (
+          <span className="ml-1 text-xs text-slate-500">{periodLabel}</span>
+        )}
       </span>
       {allTimeScore != null && (
         <span className="text-xs text-slate-500">

@@ -20,8 +20,11 @@ interface HealthPanelProps {
 export function HealthPanel({ pool }: HealthPanelProps) {
   const { network } = useNetwork();
   const isVirtual = pool.source?.includes("virtual");
-  const hasHealthData =
-    pool.hasHealthData === true || pool.healthStatus !== undefined;
+  // Trust only `hasHealthData === true` — `pool.healthStatus` is always
+  // populated now (indexer's DEFAULT_ORACLE_FIELDS sets it to "N/A" even
+  // for no-data pools), so a `!== undefined` check would silently hide
+  // the "not yet available" fallback message this panel is meant to show.
+  const hasHealthData = pool.hasHealthData === true;
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const oracleIsFresh = isOracleFresh(pool, nowSeconds, network.chainId);

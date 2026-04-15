@@ -63,6 +63,10 @@ const BASE_POOL: Pool = {
   oracleExpiry: "300",
   priceDifference: "0",
   rebalanceThreshold: 5000,
+  // `hasHealthData: true` is the gate that lets HealthPanel reach its
+  // weekend / diagnostics branches. Pools missing this flag hit the
+  // "Oracle health data not yet available" fallback first.
+  hasHealthData: true,
 };
 
 describe("HealthPanel weekend mode", () => {
