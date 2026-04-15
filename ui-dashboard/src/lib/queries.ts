@@ -46,11 +46,14 @@ export const ALL_POOLS_WITH_HEALTH = `
   }
 `;
 
-// WARNING: Envio's hosted Hasura silently caps results at 1000 rows. A single
-// call to this query returns up to 1000 snapshots within the window — safe for
-// 24h windows today, risky for 7d/30d as protocol activity grows. For paginated
-// / truncation-safe fetches use `fetchAllSnapshotPages` in
-// `src/hooks/use-all-networks-data.ts` (paginates via POOL_SNAPSHOTS_ALL).
+// WARNING: Envio's hosted Hasura silently caps results at 1000 rows regardless
+// of the requested limit. The `limit: 100000` is honored by self-hosted /
+// local Hasura (no such cap), so the explicit value stays high for the
+// benefit of dev/local envs. On hosted, this query returns at most 1000
+// rows per call — safe for 24h windows today, risky for 7d/30d as protocol
+// activity grows. For paginated / truncation-safe fetches use
+// `fetchAllSnapshotPages` in `src/hooks/use-all-networks-data.ts`
+// (paginates via POOL_SNAPSHOTS_ALL).
 export const POOL_SNAPSHOTS_WINDOW = `
   query PoolSnapshotsWindow($from: numeric!, $to: numeric!, $poolIds: [String!]!) {
     PoolSnapshot(
@@ -59,7 +62,7 @@ export const POOL_SNAPSHOTS_WINDOW = `
         poolId: { _in: $poolIds }
       }
       order_by: { timestamp: desc }
-      limit: 1000
+      limit: 100000
     ) {
       poolId
       timestamp
