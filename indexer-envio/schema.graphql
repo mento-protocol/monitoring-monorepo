@@ -31,6 +31,9 @@ type Pool {
   priceDifference: BigInt!
   rebalanceThreshold: Int!
   lastRebalancedAt: BigInt!
+  # Rising-edge timestamp: block time when devRatio crossed from <1.0 to >=1.0.
+  # 0n when not currently breached. Does not track oracle staleness.
+  deviationBreachStartedAt: BigInt!
 
   # Health
   healthStatus: String!

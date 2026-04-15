@@ -355,6 +355,16 @@ export function HealthPanel({ pool }: HealthPanelProps) {
                   priceDifference={pool.priceDifference ?? "0"}
                   rebalanceThreshold={pool.rebalanceThreshold ?? 0}
                 />
+                {pool.deviationBreachStartedAt &&
+                  pool.deviationBreachStartedAt !== "0" && (
+                    <div
+                      className="mt-1 text-xs text-red-400"
+                      title={formatTimestamp(pool.deviationBreachStartedAt)}
+                    >
+                      Breach started{" "}
+                      {relativeTime(pool.deviationBreachStartedAt)}
+                    </div>
+                  )}
               </dd>
             </div>
 
