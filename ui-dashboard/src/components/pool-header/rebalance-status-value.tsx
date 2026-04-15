@@ -62,7 +62,16 @@ function getPassiveStatus(
     return { text: "Balanced", color: "text-emerald-400" };
   }
   if (health === "WARN") {
-    return { text: "Near threshold", color: "text-amber-400" };
+    // Distinguish exactly-at-threshold from the 80–99% warning band so the
+    // edge case reads as "At threshold" (not "Near threshold"), matching
+    // the CRITICAL rule that kicks in only strictly above it.
+    const diff = Number(pool.priceDifference ?? "0");
+    const threshold = pool.rebalanceThreshold ?? 0;
+    const atThreshold = threshold > 0 && diff === threshold;
+    return {
+      text: atThreshold ? "At threshold" : "Near threshold",
+      color: "text-amber-400",
+    };
   }
   if (health === "WEEKEND") {
     return { text: "Markets closed", color: "text-slate-400" };

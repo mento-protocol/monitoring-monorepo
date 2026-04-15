@@ -274,8 +274,11 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    // Health is WARN at ratio=1.0 under the new semantics → "Near threshold".
-    expect(html).toContain("Near threshold");
+    // Health is WARN at ratio=1.0 under the new semantics; exactly-at-
+    // threshold reads as "At threshold" (not "Near threshold") so the
+    // edge case is visually distinct from the 80–99% warning band.
+    expect(html).toContain("At threshold");
+    expect(html).not.toContain("Near threshold");
     expect(html).not.toContain("Rebalance blocked");
     expect(html).not.toContain("text-red-400");
   });
