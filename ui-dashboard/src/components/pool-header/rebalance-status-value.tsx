@@ -211,13 +211,11 @@ function getPassiveStatus(
   text: string;
   color: string;
 } {
-  if (!network.rpcUrl) {
-    return {
-      text: "Diagnostics unavailable",
-      color: "text-slate-400",
-    };
-  }
-
+  // Passive status is derived entirely from indexed pool data — no RPC
+  // required. Earlier versions gated this on `network.rpcUrl` and ended
+  // up wiping "Balanced" / "Near threshold" / etc. for every healthy pool
+  // on an RPC-less network. The rpcUrl gate lives only in the live-probe
+  // path (useRebalanceCheck) where it belongs.
   const health = computeHealthStatus(pool, network.chainId);
   if (health === "OK") {
     return { text: "Balanced", color: "text-emerald-400" };

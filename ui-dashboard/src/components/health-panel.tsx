@@ -33,11 +33,20 @@ export function HealthPanel({ pool }: HealthPanelProps) {
   const hasContent = isVirtual || !hasHealthData || weekendPause;
   if (!hasContent) return null;
 
+  // For the no-data branch, skip computeHealthStatus — with the indexer's
+  // zero-initialised fields it would return CRITICAL from the stale
+  // timestamp, contradicting the "not yet available" copy below. Show
+  // N/A instead, which matches the virtual-pool branch visually.
+  const badgeStatus =
+    isVirtual || !hasHealthData
+      ? "N/A"
+      : computeHealthStatus(pool, network.chainId);
+
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <div className="flex items-center gap-3 mb-4">
         <h2 className="text-base font-semibold text-white">Health Status</h2>
-        <HealthBadge status={computeHealthStatus(pool, network.chainId)} />
+        <HealthBadge status={badgeStatus} />
       </div>
 
       {isVirtual ? (

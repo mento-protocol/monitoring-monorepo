@@ -154,7 +154,12 @@ describe("RebalanceStatusValue", () => {
     expect(html).toContain("text-red-400");
   });
 
-  it('renders "Diagnostics unavailable" when the network has no rpcUrl and the hook returned null', () => {
+  it("still renders the passive status (from indexed data) when rpcUrl is missing", () => {
+    // The passive path is derived entirely from indexed Pool fields,
+    // so an RPC-less network should still render "Balanced" / "Near
+    // threshold" / etc. Earlier versions gated this on rpcUrl and wiped
+    // healthy pools to "Diagnostics unavailable" — regression per the
+    // codex review.
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     const html = renderToStaticMarkup(
       <RebalanceStatusValue
@@ -163,8 +168,10 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toContain("Diagnostics unavailable");
-    expect(html).toContain("text-slate-400");
+    // BASE_POOL has priceDifference=0 / fresh oracle → Balanced
+    expect(html).toContain("Balanced");
+    expect(html).toContain("text-emerald-400");
+    expect(html).not.toContain("Diagnostics unavailable");
   });
 
   it("renders deep-link to the strategy proxy-write tab when canRebalance=true", () => {
