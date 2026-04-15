@@ -80,12 +80,19 @@ function DeviationBar({
         ? "bg-amber-500"
         : "bg-emerald-500";
 
+  // Raw deviation / threshold are stored in basis points (10000 bps = 100%),
+  // but humans reason about this in percentages. Convert before rendering
+  // so the parenthetical reads `(49.97% / 50.00%)` instead of the opaque
+  // `(4997 / 5000 bps)` that the indexer emits.
+  const diffPct = (diff / 100).toFixed(2);
+  const thresholdPct = (threshold / 100).toFixed(2);
+
   return (
     <div className="flex flex-col gap-1">
       <span className="text-sm text-slate-200">
         {pctOfThreshold}% of threshold
         <span className="ml-1.5 text-xs text-slate-500">
-          ({diff.toLocaleString()} / {threshold.toLocaleString()} bps)
+          ({diffPct}% / {thresholdPct}%)
         </span>
       </span>
       <div className="h-2 w-56 rounded-full bg-slate-700">
