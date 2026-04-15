@@ -16,6 +16,7 @@
 // ---------------------------------------------------------------------------
 
 import type { Pool, OracleSnapshot } from "generated";
+import FX_CALENDAR from "../config/fx-calendar.json";
 
 /** Safety cap for carry-forward duration (1 hour) */
 const MAX_CARRY_SECONDS = 3600n;
@@ -27,14 +28,22 @@ const PRECISION = 6;
 // Trading-second arithmetic: subtract FX weekend overlap from durations so
 // weekends are excluded from both numerator and denominator of the all-time
 // health score. Half-open semantics: Fri 21:00 UTC inclusive, Sun 23:00 UTC
-// exclusive. Mirrors the UI helper in ui-dashboard/src/lib/weekend.ts — kept
-// as a local copy because the indexer has no UI imports.
+// exclusive. Constants come from config/fx-calendar.json (vendored copy of
+// shared-config/fx-calendar.json — Envio builds outside the pnpm workspace, so
+// the indexer can't depend on the shared package directly). The sync test at
+// test/fx-calendar.test.ts keeps the two files from drifting apart.
 // ---------------------------------------------------------------------------
 
 /** Fri 2024-01-05 21:00:00 UTC — anchor for the 7-day weekend cycle. */
-const ANCHOR_FRI_2100 = 1704488400n;
+const ANCHOR_FRI_2100 = BigInt(FX_CALENDAR.anchorFri2100UnixSec);
 const WEEK_SECONDS = 7n * 24n * 3600n;
-const WEEKEND_DURATION_SECONDS = 50n * 3600n;
+/** Derived from all four calendar fields so the weekend arithmetic stays
+ * in lockstep with isWeekend() on the UI side. For Fri 21:00 → Sun 23:00
+ * this evaluates to 50h (180000s). */
+const WEEKEND_DURATION_SECONDS = BigInt(
+  ((FX_CALENDAR.fxReopenDay - FX_CALENDAR.fxCloseDay + 7) % 7) * 86400 +
+    (FX_CALENDAR.fxReopenHourUtc - FX_CALENDAR.fxCloseHourUtc) * 3600,
+);
 
 /**
  * Seconds in [startTs, endTs) that fall inside FX weekend windows.

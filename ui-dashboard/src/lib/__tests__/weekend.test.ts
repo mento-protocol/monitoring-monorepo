@@ -130,12 +130,21 @@ describe("isWeekendOracleStale", () => {
 
 describe("ANCHOR_FRI_2100", () => {
   // Guard: if the FX close/reopen constants change, the anchor must be
-  // re-derived. This catches that mistake.
+  // re-derived. These tests catch that mistake on both boundaries.
   it("is a Friday 21:00 UTC", () => {
     const d = new Date(ANCHOR_FRI_2100 * 1000);
     expect(d.getUTCDay()).toBe(5);
     expect(d.getUTCHours()).toBe(FX_CLOSE_HOUR_UTC);
     expect(d.getUTCMinutes()).toBe(0);
+  });
+
+  it("anchor + 50h lands on Sunday 23:00 UTC (reopen boundary)", () => {
+    // 50h = Fri 21:00 → Sun 23:00 for the default calendar. Catches a
+    // reopen-side edit to fx-calendar.json that the close-side guard misses.
+    const reopen = new Date((ANCHOR_FRI_2100 + 50 * 3600) * 1000);
+    expect(reopen.getUTCDay()).toBe(0);
+    expect(reopen.getUTCHours()).toBe(FX_REOPEN_HOUR_UTC);
+    expect(reopen.getUTCMinutes()).toBe(0);
   });
 });
 
