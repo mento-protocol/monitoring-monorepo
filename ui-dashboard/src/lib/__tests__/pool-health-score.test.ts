@@ -117,6 +117,117 @@ describe("computeBinaryHealthWindow", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Weekend exclusion
+// ---------------------------------------------------------------------------
+
+/** Seconds of a fixed UTC moment. 2026-03-09 is a Monday. */
+function ts(day: number, hour: number, minute = 0): number {
+  // day: 0=Sun(after Sat), 1=Mon, ..., 5=Fri, 6=Sat — see weekend.test.ts
+  const base = new Date("2026-03-09T00:00:00Z");
+  const offset = (day - 1 + 7) % 7;
+  const d = new Date(base);
+  d.setUTCDate(base.getUTCDate() + offset);
+  d.setUTCHours(hour, minute, 0, 0);
+  return Math.floor(d.getTime() / 1000);
+}
+
+describe("computeBinaryHealthWindow (weekend-aware)", () => {
+  const oneHourExpiry: Pick<Pool, "oracleExpiry"> = { oracleExpiry: "3600" };
+
+  it("counts only trading-seconds when a segment straddles Friday close", () => {
+    // Snapshot at Fri 20:30, window ends Sat 02:00. Only Fri 20:30→21:00
+    // (30 min) counts as trading; freshness carry 1h (20:30→21:30) is
+    // 30 min trading. Score = 1.0, tracked = 1800.
+    const snapTs = ts(5, 20, 30);
+    const windowEnd = ts(6, 2); // Sat 02:00
+    const result = computeBinaryHealthWindow(
+      [snap(snapTs, "0.500000", "1.000000")],
+      oneHourExpiry,
+      snapTs,
+      windowEnd,
+    );
+    expect(result.trackedSeconds).toBe(1800);
+    expect(result.healthySeconds).toBe(1800);
+    expect(result.staleSeconds).toBe(0);
+    expect(result.score).toBe(1);
+  });
+
+  it("returns null score for a weekend-only window", () => {
+    const snapTs = ts(6, 0); // Sat 00:00
+    const windowEnd = ts(0, 22); // Sun 22:00 (same weekend)
+    const result = computeBinaryHealthWindow(
+      [snap(snapTs, "0.500000", "1.000000")],
+      oneHourExpiry,
+      snapTs,
+      windowEnd,
+    );
+    expect(result.trackedSeconds).toBe(0);
+    expect(result.score).toBeNull();
+  });
+
+  it("excludes the weekend from a Fri→Mon gap (stale weekday tail only)", () => {
+    // Healthy snap at Fri 20:00, window ends Mon 03:00. No new snapshots.
+    // trading-seconds: 1h Fri (20:00→21:00) + 4h Mon (Sun 23:00 → Mon 03:00)
+    //   = 5h = 18000s tracked
+    // carry: Fri 20:00→21:00 = 1h trading = 3600s healthy (healthy snap)
+    // stale: 18000 - 3600 = 14400s (post-freshness on Monday morning)
+    const snapTs = ts(5, 20);
+    const windowEnd = ts(1, 3) + 7 * 86400; // Mon 03:00 NEXT week
+    const result = computeBinaryHealthWindow(
+      [snap(snapTs, "0.500000", "1.000000")],
+      oneHourExpiry,
+      snapTs,
+      windowEnd,
+    );
+    expect(result.trackedSeconds).toBe(18000);
+    expect(result.healthySeconds).toBe(3600);
+    expect(result.staleSeconds).toBe(14400);
+    expect(result.score).toBeCloseTo(3600 / 18000);
+  });
+
+  it("scores a perfect Mon→Fri trading week at 100%", () => {
+    // Snapshots every 5 min from Mon 00:00 to Fri 20:55, window ends Fri 21:00.
+    // Each segment is 5 min all on weekday → fully tracked and healthy (carry
+    // covers all 300s at 300s freshness). Tracked ≈ 117h, score = 1.0.
+    const windowStart = ts(1, 0); // Mon 00:00
+    const windowEnd = ts(5, 21); // Fri 21:00
+    const snapshots: OracleSnapshot[] = [];
+    for (let t = windowStart; t < windowEnd; t += 300) {
+      snapshots.push(snap(t, "0.500000", "1.000000"));
+    }
+    const result = computeBinaryHealthWindow(
+      snapshots,
+      { oracleExpiry: "300" },
+      windowStart,
+      windowEnd,
+    );
+    expect(result.trackedSeconds).toBe(117 * 3600);
+    expect(result.healthySeconds).toBe(117 * 3600);
+    expect(result.score).toBe(1);
+  });
+
+  it("matches pre-weekend-change math for weekday-only windows", () => {
+    // Regression: a Tue→Wed window behaves identically to the old
+    // wall-clock formula (sanity check that the trading-seconds helper is
+    // a no-op on weekdays).
+    const windowStart = ts(2, 12); // Tue 12:00
+    const result = computeBinaryHealthWindow(
+      [
+        snap(windowStart, "0.500000", "1.000000"),
+        snap(windowStart + 600, "0.500000", "1.000000"),
+      ],
+      pool, // oracleExpiry=300
+      windowStart,
+      windowStart + 600,
+    );
+    expect(result.trackedSeconds).toBe(600);
+    expect(result.healthySeconds).toBe(300);
+    expect(result.staleSeconds).toBe(300);
+    expect(result.score).toBe(0.5);
+  });
+});
+
 describe("normalizeWindowSnapshots", () => {
   it("does not mark exact-limit results as truncated", () => {
     const raw = Array.from({ length: 1000 }, (_, i) =>

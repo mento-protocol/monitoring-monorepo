@@ -24,6 +24,54 @@ const MAX_CARRY_SECONDS = 3600n;
 const PRECISION = 6;
 
 // ---------------------------------------------------------------------------
+// Trading-second arithmetic: subtract FX weekend overlap from durations so
+// weekends are excluded from both numerator and denominator of the all-time
+// health score. Half-open semantics: Fri 21:00 UTC inclusive, Sun 23:00 UTC
+// exclusive. Mirrors the UI helper in ui-dashboard/src/lib/weekend.ts — kept
+// as a local copy because the indexer has no UI imports.
+// ---------------------------------------------------------------------------
+
+/** Fri 2024-01-05 21:00:00 UTC — anchor for the 7-day weekend cycle. */
+const ANCHOR_FRI_2100 = 1704488400n;
+const WEEK_SECONDS = 7n * 24n * 3600n;
+const WEEKEND_DURATION_SECONDS = 50n * 3600n;
+
+/**
+ * Seconds in [startTs, endTs) that fall inside FX weekend windows.
+ * Closed-form, one iteration per overlapping week.
+ */
+function weekendOverlapSeconds(startTs: bigint, endTs: bigint): bigint {
+  if (endTs <= startTs) return 0n;
+  let total = 0n;
+  // BigInt `/` truncates toward zero; adjust for negative non-exact offsets
+  // so k floors toward -∞ (weekends before the anchor enumerate correctly).
+  const offset = startTs - ANCHOR_FRI_2100;
+  let k = offset / WEEK_SECONDS;
+  if (offset < 0n && offset % WEEK_SECONDS !== 0n) k -= 1n;
+  while (true) {
+    const wStart = ANCHOR_FRI_2100 + k * WEEK_SECONDS;
+    const wEnd = wStart + WEEKEND_DURATION_SECONDS;
+    if (wStart >= endTs) break;
+    if (wEnd > startTs) {
+      const lo = wStart > startTs ? wStart : startTs;
+      const hi = wEnd < endTs ? wEnd : endTs;
+      total += hi - lo;
+    }
+    k += 1n;
+  }
+  return total;
+}
+
+/**
+ * Seconds in [startTs, endTs) that fall outside FX weekend windows.
+ * Used by the accumulator so weekend gaps aren't counted as stale.
+ */
+export function tradingSecondsInRange(startTs: bigint, endTs: bigint): bigint {
+  if (endTs <= startTs) return 0n;
+  return endTs - startTs - weekendOverlapSeconds(startTs, endTs);
+}
+
+// ---------------------------------------------------------------------------
 // Pure computation: per-snapshot fields
 // ---------------------------------------------------------------------------
 
@@ -127,8 +175,22 @@ export function updateHealthAccumulators(
     };
   }
 
-  // Normal case: positive duration interval
-  const duration = currentTimestamp - lastTs;
+  // Normal case: positive duration interval.
+  // Measure in trading-seconds so FX weekend wall-clock time is excluded
+  // from both numerator and denominator (matches UI computeBinaryHealthWindow).
+  const duration = tradingSecondsInRange(lastTs, currentTimestamp);
+
+  // Zero trading-seconds (entire interval on a weekend) — advance state
+  // without accumulating duration.
+  if (duration === 0n) {
+    return {
+      healthTotalSeconds: pool.healthTotalSeconds,
+      healthBinarySeconds: pool.healthBinarySeconds,
+      lastOracleSnapshotTimestamp: currentTimestamp,
+      lastDeviationRatio: currentDeviationRatio,
+      hasHealthData: true,
+    };
+  }
 
   // Freshness limit = min(pool.oracleExpiry, MAX_CARRY_SECONDS)
   // oracleExpiry of 0 means unknown — fall back to MAX_CARRY_SECONDS

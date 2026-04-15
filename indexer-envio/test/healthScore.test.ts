@@ -348,3 +348,92 @@ describe("recordHealthSample", () => {
     assert.equal(poolUpdate.lastDeviationRatio, "0.500000");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Weekend exclusion (matches UI computeBinaryHealthWindow)
+// ---------------------------------------------------------------------------
+
+/** Seconds since epoch for a UTC date. */
+function utcSec(
+  year: number,
+  monthIdx: number, // 0-based
+  day: number,
+  hour: number,
+  minute = 0,
+): bigint {
+  return BigInt(Math.floor(Date.UTC(year, monthIdx, day, hour, minute) / 1000));
+}
+
+describe("updateHealthAccumulators (weekend-aware)", () => {
+  // Anchor test dates in 2026-03 (same week as UI tests). 2026-03-13 is
+  // Friday, 2026-03-16 is Monday.
+  const FRI_20 = utcSec(2026, 2, 13, 20, 0); // Fri 20:00 UTC
+  const FRI_22 = utcSec(2026, 2, 13, 22, 0); // Fri 22:00 UTC (inside weekend)
+  const SAT_12 = utcSec(2026, 2, 14, 12, 0); // Sat 12:00 UTC (inside weekend)
+  const MON_09 = utcSec(2026, 2, 16, 9, 0); // Mon 09:00 UTC
+  const TUE_12 = utcSec(2026, 2, 17, 12, 0); // Tue 12:00 UTC
+
+  it("healthy across a weekend: duration counts only trading-seconds", () => {
+    // Pool healthy at Fri 20:00, next event Mon 09:00.
+    // Wall-clock = 61h. Trading-seconds = 1h Fri (20:00→21:00) + 10h Mon
+    // (Sun 23:00→Mon 09:00) = 11h = 39600s.
+    // Carry = min(39600, 300) = 300s healthy. Rest (39300s) is stale.
+    const pool = makePool({
+      lastOracleSnapshotTimestamp: FRI_20,
+      lastDeviationRatio: "0.500000",
+      healthTotalSeconds: 0n,
+      healthBinarySeconds: 0n,
+      oracleExpiry: 300n,
+    });
+    const result = updateHealthAccumulators(pool, MON_09, "0.500000");
+    assert.equal(result.healthTotalSeconds, 39600n);
+    assert.equal(result.healthBinarySeconds, 300n);
+    assert.equal(result.lastOracleSnapshotTimestamp, MON_09);
+  });
+
+  it("weekend-only gap: no accumulator change, timestamp advances", () => {
+    // Fri 22:00 → Sat 12:00 is entirely inside the weekend window.
+    // trading-seconds = 0 → early return, no change to accumulators.
+    const pool = makePool({
+      lastOracleSnapshotTimestamp: FRI_22,
+      lastDeviationRatio: "0.500000",
+      healthTotalSeconds: 1000n,
+      healthBinarySeconds: 1000n,
+      oracleExpiry: 300n,
+    });
+    const result = updateHealthAccumulators(pool, SAT_12, "0.500000");
+    assert.equal(result.healthTotalSeconds, 1000n);
+    assert.equal(result.healthBinarySeconds, 1000n);
+    assert.equal(result.lastOracleSnapshotTimestamp, SAT_12);
+    assert.equal(result.lastDeviationRatio, "0.500000");
+  });
+
+  it("weekday-only interval: unaffected by weekend arithmetic", () => {
+    // Mon 09:00 → Tue 12:00 = 27h = 97200s, all trading.
+    const pool = makePool({
+      lastOracleSnapshotTimestamp: MON_09,
+      lastDeviationRatio: "0.500000",
+      healthTotalSeconds: 0n,
+      healthBinarySeconds: 0n,
+      oracleExpiry: 300n,
+    });
+    const result = updateHealthAccumulators(pool, TUE_12, "0.500000");
+    assert.equal(result.healthTotalSeconds, 97200n);
+    assert.equal(result.healthBinarySeconds, 300n); // carry capped at freshness
+  });
+
+  it("same-block event still no-ops after weekend change (regression)", () => {
+    const pool = makePool({
+      lastOracleSnapshotTimestamp: FRI_20,
+      lastDeviationRatio: "0.500000",
+      healthTotalSeconds: 50n,
+      healthBinarySeconds: 50n,
+      oracleExpiry: 300n,
+    });
+    const result = updateHealthAccumulators(pool, FRI_20, "0.800000");
+    assert.equal(result.healthTotalSeconds, 50n);
+    assert.equal(result.healthBinarySeconds, 50n);
+    assert.equal(result.lastOracleSnapshotTimestamp, FRI_20);
+    assert.equal(result.lastDeviationRatio, "0.800000");
+  });
+});

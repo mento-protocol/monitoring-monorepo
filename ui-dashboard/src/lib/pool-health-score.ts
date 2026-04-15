@@ -1,4 +1,5 @@
 import type { OracleSnapshot, Pool } from "@/lib/types";
+import { tradingSecondsInRange } from "@/lib/weekend";
 
 export type BinaryHealthWindow = {
   score: number | null; // 0..1, null => no data
@@ -124,13 +125,18 @@ export function computeBinaryHealthWindow(
     // Skip no-data snapshots entirely — don't count their intervals in the denominator
     if (!hasValidHealthData(curr)) continue;
 
-    const duration = segmentEnd - segmentStart;
+    // Measure segment + carry in trading-seconds so FX weekend wall-clock
+    // time is excluded from both numerator (healthy carry) and denominator
+    // (tracked). See weekend.ts for half-open semantics.
+    const duration = tradingSecondsInRange(segmentStart, segmentEnd);
     trackedSeconds += duration;
 
-    // Once a snapshot exists, only freshnessLimit seconds can carry its state.
+    // Freshness uses wall-clock: a snapshot expires at a wall-clock moment
+    // regardless of weekend. The carry range is then re-measured in
+    // trading-seconds below.
     const freshnessEnd = currTs + freshnessLimit;
     const carryEnd = Math.min(segmentEnd, freshnessEnd);
-    const carrySeconds = Math.max(0, carryEnd - segmentStart);
+    const carrySeconds = tradingSecondsInRange(segmentStart, carryEnd);
     const stalePart = duration - carrySeconds;
 
     if (isHealthySnapshot(curr)) {
