@@ -214,6 +214,35 @@ describe("fetchNetworkData — happy path", () => {
 // ---------------------------------------------------------------------------
 
 describe("fetchNetworkData — snapshot pagination", () => {
+  it("issues POOL_SNAPSHOTS_ALL with a deterministic tiebreaker", async () => {
+    // Regression guard: without a secondary sort key, Postgres tie order on
+    // shared timestamps isn't stable across paginated offsets, which
+    // duplicates/skips rows at page boundaries.
+    mockRequest((query) => {
+      if (query.includes("PoolSnapshot")) return { PoolSnapshot: [] };
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [makePool("pool-sort")] };
+      return {};
+    });
+
+    await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mock.calls;
+    const snapshotCall = calls.find(
+      ([q]) => typeof q === "string" && q.includes("PoolSnapshotsAll"),
+    );
+    expect(snapshotCall).toBeDefined();
+    const queryText = String(snapshotCall![0]).replace(/\s+/g, " ");
+    expect(queryText).toMatch(/order_by:\s*\[.*timestamp.*id.*\]/);
+  });
+
   it("stops paginating once a page returns fewer than the page size", async () => {
     // First page: exactly page-size rows (could be more). Second page: partial
     // (< page size) → signal that this is the last page, stop.
@@ -251,13 +280,15 @@ describe("fetchNetworkData — snapshot pagination", () => {
     expect(result.snapshotsAllError).toBeNull();
   });
 
-  it("surfaces pagination overflow as snapshotsAllError", async () => {
-    // Every page returns a full page → loop hits MAX_PAGES and throws. The
-    // error lands in snapshotsAllError (and aliases) rather than crashing,
-    // so the UI can show a `· partial data` badge instead of nothing.
+  it("flags truncation on overflow but preserves already-fetched rows", async () => {
+    // Every page returns a full page → loop hits MAX_PAGES without finding a
+    // short page. Returns the accumulated rows (newest-first) with
+    // `truncated: true`; rows that WERE fetched stay intact so 24h/7d/30d
+    // windows still work — only the "All" range is partial.
+    const now = Math.floor(Date.now() / 1000);
     const fullPage = Array.from({ length: 1000 }, (_, i) => ({
       poolId: "pool-overflow",
-      timestamp: String(i),
+      timestamp: String(now - i * 60), // every row within the last ~17h → all fit in w24h
       reserves0: "0",
       reserves1: "0",
       swapCount: 0,
@@ -274,16 +305,20 @@ describe("fetchNetworkData — snapshot pagination", () => {
     });
 
     const result = await fetchNetworkData(MOCK_NETWORK, {
-      w24h: { from: 0, to: 1000 },
-      w7d: { from: 0, to: 7000 },
-      w30d: { from: 0, to: 30000 },
+      w24h: { from: now - 86400, to: now },
+      w7d: { from: now - 7 * 86400, to: now },
+      w30d: { from: now - 30 * 86400, to: now },
     });
 
-    expect(result.snapshotsAllError).not.toBeNull();
-    // All four snapshot error fields alias to the same error.
-    expect(result.snapshotsError).toBe(result.snapshotsAllError);
-    expect(result.snapshots7dError).toBe(result.snapshotsAllError);
-    expect(result.snapshots30dError).toBe(result.snapshotsAllError);
+    // No error — pagination succeeded, just with a cap.
+    expect(result.snapshotsAllError).toBeNull();
+    // Truncation flagged for the "All" range.
+    expect(result.snapshotsAllTruncated).toBe(true);
+    // Recent windows are NOT blanked — they carry the fetched rows.
+    expect(result.snapshots.length).toBeGreaterThan(0);
+    expect(result.snapshotsAll.length).toBeGreaterThan(0);
+    // Exactly 100 pages × 1000 rows = 100k accumulated before bail-out.
+    expect(result.snapshotsAll.length).toBe(100 * 1000);
   });
 
   it("derives window arrays from snapshotsAll by timestamp", async () => {

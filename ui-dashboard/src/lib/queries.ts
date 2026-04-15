@@ -70,11 +70,16 @@ export const POOL_SNAPSHOTS_WINDOW = `
 // Envio's hosted Hasura silently caps every query at 1000 rows regardless of
 // the requested limit. To fetch full history we must paginate with $offset;
 // the hook's fetchAllSnapshotPages wrapper handles the loop.
+//
+// Order includes `id` as a deterministic tiebreaker — multiple pools' hourly
+// snapshots share the same UTC-hour timestamp, and without a unique secondary
+// sort key Postgres tie ordering isn't stable across paginated requests,
+// which would duplicate or skip rows at page boundaries.
 export const POOL_SNAPSHOTS_ALL = `
   query PoolSnapshotsAll($poolIds: [String!]!, $limit: Int!, $offset: Int!) {
     PoolSnapshot(
       where: { poolId: { _in: $poolIds } }
-      order_by: { timestamp: desc }
+      order_by: [{ timestamp: desc }, { id: desc }]
       limit: $limit
       offset: $offset
     ) {

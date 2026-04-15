@@ -43,6 +43,13 @@ export type NetworkData = {
   snapshots30d: PoolSnapshotWindow[];
   /** Full-history snapshots (paginated). Source of truth for the chart. */
   snapshotsAll: PoolSnapshotWindow[];
+  /**
+   * True when pagination hit the `SNAPSHOT_MAX_PAGES` safety cap. Older rows
+   * were dropped, but the `snapshotsAll` array still carries the most recent
+   * pages — so 24h/7d/30d windows remain correct and only the "All" chart
+   * range is incomplete. Surfaced via the partial-data badge.
+   */
+  snapshotsAllTruncated: boolean;
   fees: ProtocolFeeSummary | null;
   uniqueLpCount: number | null;
   rates: OracleRateMap;
@@ -78,6 +85,7 @@ const emptyNetworkData = (
   snapshots7d: [],
   snapshots30d: [],
   snapshotsAll: [],
+  snapshotsAllTruncated: false,
   fees: null,
   uniqueLpCount: null,
   rates: new Map(),
@@ -94,17 +102,23 @@ const emptyNetworkData = (
  * Envio's hosted Hasura silently caps every PoolSnapshot query at 1000 rows
  * regardless of the `limit` we send, so for full history we paginate with
  * offset. Stop as soon as a page comes back under the page size (that's the
- * last page); bail if we exceed the max-pages safety cap so a pathological
- * response can't loop forever — the resulting error flows into the chart's
- * `· partial data` badge.
+ * last page). If we hit the safety cap `SNAPSHOT_MAX_PAGES`, return what we
+ * have with `truncated: true` — since rows are ordered newest-first, the
+ * missing rows are the oldest ones, so 24h/7d/30d windows stay correct and
+ * only the "All" range is incomplete.
  */
 const SNAPSHOT_PAGE_SIZE = 1000;
 const SNAPSHOT_MAX_PAGES = 100;
 
+type SnapshotPageResult = {
+  rows: PoolSnapshotWindow[];
+  truncated: boolean;
+};
+
 async function fetchAllSnapshotPages(
   client: GraphQLClient,
   poolIds: string[],
-): Promise<PoolSnapshotWindow[]> {
+): Promise<SnapshotPageResult> {
   const rows: PoolSnapshotWindow[] = [];
   for (let page = 0; page < SNAPSHOT_MAX_PAGES; page++) {
     const result = await client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
@@ -117,11 +131,9 @@ async function fetchAllSnapshotPages(
     );
     const batch = result.PoolSnapshot ?? [];
     rows.push(...batch);
-    if (batch.length < SNAPSHOT_PAGE_SIZE) return rows;
+    if (batch.length < SNAPSHOT_PAGE_SIZE) return { rows, truncated: false };
   }
-  throw new Error(
-    `Snapshot history exceeded ${SNAPSHOT_MAX_PAGES * SNAPSHOT_PAGE_SIZE} rows; pagination bailed out`,
-  );
+  return { rows, truncated: true };
 }
 
 /** @internal Exported for testing only. */
@@ -160,7 +172,7 @@ export async function fetchNetworkData(
     ),
     shouldQuery
       ? fetchAllSnapshotPages(client, poolIds)
-      : Promise.resolve<PoolSnapshotWindow[]>([]),
+      : Promise.resolve<SnapshotPageResult>({ rows: [], truncated: false }),
     fpmmPoolIds.length > 0
       ? client.request<{
           LiquidityPosition: { address: string }[];
@@ -182,8 +194,16 @@ export async function fetchNetworkData(
 
   // Single source of truth: the paginated all-history fetch. Window-specific
   // arrays are derived in-memory — no separate requests, no server-side cap.
+  // If pagination truncated (hit MAX_PAGES), we keep the most-recent rows we
+  // did fetch: 24h/7d/30d derive correctly, "All" is flagged as partial.
   const snapshotsAll =
-    snapshotsAllResult.status === "fulfilled" ? snapshotsAllResult.value : [];
+    snapshotsAllResult.status === "fulfilled"
+      ? snapshotsAllResult.value.rows
+      : [];
+  const snapshotsAllTruncated =
+    snapshotsAllResult.status === "fulfilled"
+      ? snapshotsAllResult.value.truncated
+      : false;
   const snapshotsAllError =
     snapshotsAllResult.status === "rejected"
       ? toError(snapshotsAllResult.reason)
@@ -208,6 +228,7 @@ export async function fetchNetworkData(
     snapshots7d,
     snapshots30d,
     snapshotsAll,
+    snapshotsAllTruncated,
     fees,
     uniqueLpCount,
     rates,

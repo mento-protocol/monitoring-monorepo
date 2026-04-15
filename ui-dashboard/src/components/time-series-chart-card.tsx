@@ -201,7 +201,7 @@ export function TimeSeriesChartCard({
                 aria-pressed={active}
                 onClick={() => onRangeChange(item.key)}
                 className={
-                  "rounded px-3 py-1 text-xs font-medium transition-colors " +
+                  "rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
                   (active
                     ? "bg-slate-700 text-white shadow-sm"
                     : "text-slate-400 hover:text-slate-200")
