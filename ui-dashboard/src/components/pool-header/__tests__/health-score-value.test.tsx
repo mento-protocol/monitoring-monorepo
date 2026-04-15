@@ -96,7 +96,10 @@ describe("HealthScoreValue", () => {
     expect(html).not.toMatch(/nines?/);
   });
 
-  it("renders an info icon with a tooltip explaining the health score", () => {
+  it("no longer renders the info icon inside the value (it moved next to the label)", () => {
+    // The ⓘ is now rendered by HealthScoreInfoIcon alongside the cell's
+    // `<dt>` label in PoolHeader, not inline with the 7d number. Keeps the
+    // value line tight and makes the explainer read as "about this metric".
     mockUseHealthScore.mockReturnValue(
       healthResult({
         score: 0.99,
@@ -105,10 +108,8 @@ describe("HealthScoreValue", () => {
       }),
     );
     const html = renderToStaticMarkup(<HealthScoreValue pool={BASE_POOL} />);
-    // Native `title` tooltip — the established pattern in this codebase.
-    expect(html).toContain("ⓘ");
-    expect(html).toMatch(/title="Fraction of tracked time/);
-    expect(html).toContain("cursor-help");
+    expect(html).not.toContain("ⓘ");
+    expect(html).not.toContain("cursor-help");
   });
 
   it("renders the Nh observed line when hasEnoughDataForNines is false", () => {

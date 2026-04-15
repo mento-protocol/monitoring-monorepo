@@ -4,7 +4,10 @@ import { AddressLink } from "@/components/address-link";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { KindBadge, SourceBadge } from "@/components/badges";
 import { DeviationCell } from "@/components/pool-header/deviation-cell";
-import { HealthScoreValue } from "@/components/pool-header/health-score-value";
+import {
+  HealthScoreInfoIcon,
+  HealthScoreValue,
+} from "@/components/pool-header/health-score-value";
 import { OraclePriceValue } from "@/components/pool-header/oracle-price-value";
 import { OracleStatusValue } from "@/components/pool-header/oracle-status-value";
 import { RebalanceStatusValue } from "@/components/pool-header/rebalance-status-value";
@@ -527,7 +530,12 @@ function PoolHeader({
       <dl className="flex flex-wrap justify-between gap-x-6 gap-y-4 text-sm">
         <Stat
           className="min-w-36"
-          label="Health Score"
+          label={
+            <span className="inline-flex items-center gap-1">
+              Health Score
+              <HealthScoreInfoIcon />
+            </span>
+          }
           value={
             isVirtual ? (
               <span className="text-slate-500">—</span>
@@ -586,7 +594,7 @@ function Stat({
   mono,
   className,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: React.ReactNode;
   title?: string;
   mono?: boolean;

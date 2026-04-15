@@ -5,7 +5,7 @@ import { useHealthScore } from "@/hooks/use-health-score";
 import { formatBinaryHealthPct } from "@/lib/pool-health-score";
 
 const HEALTH_SCORE_EXPLAINER =
-  "Fraction of tracked time the oracle was both fresh (within expiry) and on-price (below the rebalance threshold). 7d is a rolling window; all-time aggregates since pool creation. Time before the first snapshot is excluded so new pools aren't penalised.";
+  "Fraction of tracked time the oracle was both fresh (within expiry) and on-price (below the rebalance threshold). 7d is a rolling window; all-time aggregates since pool creation.";
 
 export function HealthScoreValue({ pool }: { pool: Pool }) {
   const { healthWindow, allTimeScore, error } = useHealthScore(pool);
@@ -13,20 +13,10 @@ export function HealthScoreValue({ pool }: { pool: Pool }) {
   // allTimeScore is derived from the Pool row directly, not the window GQL
   // queries, so a transient query failure should degrade only the 7d line.
   if (error && allTimeScore == null) {
-    return (
-      <span className="flex items-center gap-1 text-xs text-amber-400">
-        Query failed
-        <HealthScoreInfoIcon />
-      </span>
-    );
+    return <span className="text-xs text-amber-400">Query failed</span>;
   }
   if (!error && healthWindow.score == null && allTimeScore == null) {
-    return (
-      <span className="flex items-center gap-1 text-slate-500">
-        N/A
-        <HealthScoreInfoIcon />
-      </span>
-    );
+    return <span className="text-slate-500">N/A</span>;
   }
 
   const windowLabel = error
@@ -38,10 +28,9 @@ export function HealthScoreValue({ pool }: { pool: Pool }) {
 
   return (
     <span className="flex flex-col gap-0.5">
-      <span className={`flex items-center gap-1 font-medium ${windowColor}`}>
+      <span className={`font-medium ${windowColor}`}>
         {windowLabel}
-        <span className="text-xs text-slate-500">7d</span>
-        <HealthScoreInfoIcon />
+        <span className="ml-1 text-xs text-slate-500">7d</span>
       </span>
       {allTimeScore != null && (
         <span className="text-xs text-slate-500">
@@ -59,7 +48,13 @@ export function HealthScoreValue({ pool }: { pool: Pool }) {
   );
 }
 
-function HealthScoreInfoIcon() {
+/**
+ * Info icon for the Health Score header label. Rendered in the cell's
+ * `<dt>` so the explainer reads as "about this metric" rather than
+ * hanging off the 7d value. Native-title tooltip matches the rest of the
+ * codebase's hover-help pattern.
+ */
+export function HealthScoreInfoIcon() {
   return (
     <button
       type="button"
