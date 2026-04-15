@@ -503,21 +503,21 @@ function PoolHeader({
         {/* `ml-auto` pushes "Created …" to the far edge so the title row
             reads as `identity ← → metadata` rather than trailing ragged-left
             after the address. */}
-        <span className="ml-auto text-xs text-slate-500" title={createdTitle}>
-          Created{" "}
-          {deployTxHash ? (
-            <a
-              href={`${network.explorerBaseUrl}/tx/${deployTxHash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-indigo-400 transition-colors"
-            >
-              {createdRelative}
-            </a>
-          ) : (
-            createdRelative
-          )}
-        </span>
+        {deployTxHash ? (
+          <a
+            href={`${network.explorerBaseUrl}/tx/${deployTxHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={createdTitle}
+            className="ml-auto text-xs text-slate-500 hover:text-indigo-400 transition-colors"
+          >
+            Created {createdRelative}
+          </a>
+        ) : (
+          <span className="ml-auto text-xs text-slate-500" title={createdTitle}>
+            Created {createdRelative}
+          </span>
+        )}
       </div>
       {/* `justify-between` distributes any trailing slack on the row as
           wider uniform gaps between cells, so the row spans edge-to-edge
