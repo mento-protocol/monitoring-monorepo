@@ -102,8 +102,12 @@ export function RebalanceStatusValue({
 
   const strategyName = getName(strategyAddress);
   const strategyHref = `${network.explorerBaseUrl}/address/${strategyAddress}`;
+  // `!= null` catches both undefined AND null — the Pool type says
+  // `string | undefined` but Hasura returns null for absent nullable
+  // fields, and `null !== undefined` would otherwise slip past the gate,
+  // rendering "last —" and firing an unnecessary POOL_REBALANCES query.
   const hasLastRebalance =
-    pool.lastRebalancedAt !== undefined && pool.lastRebalancedAt !== "0";
+    pool.lastRebalancedAt != null && pool.lastRebalancedAt !== "0";
   const lastRebalanceLabel = hasLastRebalance
     ? `last ${relativeTime(pool.lastRebalancedAt!)}`
     : "never rebalanced";
