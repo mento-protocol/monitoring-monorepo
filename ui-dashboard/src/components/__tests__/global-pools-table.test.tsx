@@ -115,12 +115,12 @@ describe("globalPoolKey", () => {
 // ---------------------------------------------------------------------------
 
 describe("GlobalPoolsTable — column structure", () => {
-  it("renders a chain icon (with SVG title + Celo fill) before the pool name", () => {
+  it("renders a branded chain icon before the pool name", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry()]} />,
     );
-    expect(html).toContain("<title>Celo</title>");
-    expect(html).toContain('fill="#FCFF52"');
+    expect(html).toContain('aria-label="Celo"');
+    expect(html).toContain('class="web3icons"');
   });
 
   it("renders pool name in the row", () => {
@@ -187,7 +187,7 @@ describe("GlobalPoolsTable — column structure", () => {
     );
     expect(html).toContain(">Type</th>");
     expect(html).toContain("FPMM");
-    expect(html).toContain("<title>Monad</title>");
+    expect(html).toContain('aria-label="Monad"');
   });
 });
 
@@ -373,8 +373,8 @@ describe("GlobalPoolsTable — multiple chains", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[celoEntry, monadEntry]} />,
     );
-    expect(html).toContain("<title>Celo</title>");
-    expect(html).toContain("<title>Monad</title>");
+    expect(html).toContain('aria-label="Celo"');
+    expect(html).toContain('aria-label="Monad"');
     // header row + 2 data rows = 3 <tr>
     const trCount = (html.match(/<tr\b/g) ?? []).length;
     expect(trCount).toBe(3);
