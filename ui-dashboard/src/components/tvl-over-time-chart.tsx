@@ -15,6 +15,8 @@ import {
   type TimeSeriesPoint,
 } from "@/components/time-series-chart-card";
 
+const SECONDS_PER_HOUR = 3600;
+
 type SeriesPoint = { timestamp: number; tvlUSD: number };
 
 type PoolHistory = {
@@ -24,7 +26,17 @@ type PoolHistory = {
   points: Array<{ ts: number; r0: string; r1: string }>;
 };
 
-export function buildDailySeries(networkData: NetworkData[]): {
+/**
+ * Builds a forward-filled TVL time series. `bucketSeconds` selects the
+ * granularity — default is UTC-day (SECONDS_PER_DAY). The 1W range passes
+ * SECONDS_PER_HOUR for hour-level fidelity; the indexer writes snapshots on
+ * an hourly bucket already, so hour-level granularity doesn't add any
+ * server-side cost, just more cursor steps client-side.
+ */
+export function buildDailySeries(
+  networkData: NetworkData[],
+  bucketSeconds: number = SECONDS_PER_DAY,
+): {
   series: SeriesPoint[];
   nowTvl: number;
 } {
@@ -63,23 +75,23 @@ export function buildDailySeries(networkData: NetworkData[]): {
   if (histories.length === 0) return { series: [], nowTvl: 0 };
 
   const nowSec = Math.floor(Date.now() / 1000);
-  const startDay = Math.floor(earliestTs / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-  const endDay = Math.floor(nowSec / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  const startBucket = Math.floor(earliestTs / bucketSeconds) * bucketSeconds;
+  const endBucket = Math.floor(nowSec / bucketSeconds) * bucketSeconds;
 
   const cursors = new Array<number>(histories.length).fill(-1);
   const series: SeriesPoint[] = [];
 
   for (
-    let timestamp = startDay;
-    timestamp <= endDay;
-    timestamp += SECONDS_PER_DAY
+    let timestamp = startBucket;
+    timestamp <= endBucket;
+    timestamp += bucketSeconds
   ) {
     let tvl = 0;
     for (let i = 0; i < histories.length; i++) {
       const history = histories[i];
       while (
         cursors[i] + 1 < history.points.length &&
-        history.points[cursors[i] + 1].ts < timestamp + SECONDS_PER_DAY
+        history.points[cursors[i] + 1].ts < timestamp + bucketSeconds
       ) {
         cursors[i]++;
       }
@@ -121,8 +133,15 @@ export function TvlOverTimeChart({
 }: TvlOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("30d");
 
+  // 1W range uses hour-level buckets for higher fidelity (168 points across
+  // the week); 1M and All stay daily so the longer views don't get sluggish.
+  const bucketSeconds = range === "7d" ? SECONDS_PER_HOUR : SECONDS_PER_DAY;
+
   const fullSeries = useMemo<TimeSeriesPoint[]>(() => {
-    const { series: base, nowTvl } = buildDailySeries(networkData);
+    const { series: base, nowTvl } = buildDailySeries(
+      networkData,
+      bucketSeconds,
+    );
     if (base.length === 0) return [];
 
     const nowSec = Math.floor(Date.now() / 1000);
@@ -133,7 +152,7 @@ export function TvlOverTimeChart({
       })),
       { timestamp: nowSec, value: nowTvl },
     ];
-  }, [networkData]);
+  }, [networkData, bucketSeconds]);
 
   // TVL is a stock — cutoff-based range filtering on UTC-day-stamped buckets
   // is fine: the headline shows current TVL (not a bar-sum), so no invariant
@@ -159,6 +178,9 @@ export function TvlOverTimeChart({
       onRangeChange={setRange}
       headline={headline}
       change={change7d}
+      hoverDateFormat={
+        bucketSeconds === SECONDS_PER_HOUR ? "%b %d, %H:00 UTC" : "%b %d, %Y"
+      }
       isLoading={isLoading}
       hasError={hasError}
       hasSnapshotError={hasSnapshotError}

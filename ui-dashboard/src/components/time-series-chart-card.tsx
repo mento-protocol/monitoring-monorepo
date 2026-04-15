@@ -65,6 +65,13 @@ interface TimeSeriesChartCardProps {
   headline: string;
   change: number | null;
   changeLabel?: string;
+  /**
+   * Plotly time-format string used in the hover tooltip. Default is
+   * day-level (`%b %d, %Y`); charts with sub-day bucket granularity (e.g.
+   * TVL's hourly 1W view) should pass a finer-grained format like
+   * `%b %d, %H:00 UTC`.
+   */
+  hoverDateFormat?: string;
   isLoading: boolean;
   hasError: boolean;
   hasSnapshotError: boolean;
@@ -80,6 +87,7 @@ export function TimeSeriesChartCard({
   headline,
   change,
   changeLabel = "week-over-week",
+  hoverDateFormat = "%b %d, %Y",
   isLoading,
   hasError,
   hasSnapshotError,
@@ -98,7 +106,7 @@ export function TimeSeriesChartCard({
       line: { color: "#6366f1", width: 2 },
       fill: "tozeroy" as const,
       fillcolor: "rgba(99,102,241,0.08)",
-      hovertemplate: `<b>$%{y:,.0f}</b><br>%{x|%b %d, %Y}<extra></extra>`,
+      hovertemplate: `<b>$%{y:,.0f}</b><br>%{x|${hoverDateFormat}}<extra></extra>`,
     };
     const ymin = ys.length > 0 ? Math.min(...ys) : 0;
     const ymax = ys.length > 0 ? Math.max(...ys) : 1;
@@ -144,7 +152,7 @@ export function TimeSeriesChartCard({
         },
       },
     };
-  }, [series]);
+  }, [series, hoverDateFormat]);
 
   const deltaPill =
     change === null || isLoading || hasError ? null : (

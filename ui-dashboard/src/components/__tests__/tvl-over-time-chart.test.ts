@@ -472,6 +472,52 @@ describe("buildDailySeries — multi-chain aggregation", () => {
   });
 });
 
+describe("buildDailySeries — bucket granularity", () => {
+  it("emits hour-level buckets when bucketSeconds=3600", () => {
+    // Two snapshots 3 hours apart; the first sets reserves, the second
+    // bumps them. With hourly bucketing we should see distinct values
+    // before vs after the second snapshot lands.
+    const today = dayAlignedNow();
+    const hour0 = today + 6 * 3600;
+    const hour3 = hour0 + 3 * 3600;
+    const pool = makeTvlPool({
+      reserves0: TWO_HUNDRED,
+      reserves1: TWO_HUNDRED,
+    });
+    const snapA = makeSnapshot({
+      timestamp: hour0,
+      reserves0: TEN,
+      reserves1: TEN,
+    });
+    const snapB = makeSnapshot({
+      timestamp: hour3,
+      reserves0: FIFTY,
+      reserves1: FIFTY,
+    });
+
+    const { series } = buildDailySeries(
+      [
+        makeNetworkData({
+          network: TVL_NETWORK,
+          pools: [pool],
+          snapshots30d: [snapA, snapB],
+        }),
+      ],
+      3600,
+    );
+
+    // Buckets: hour0 sees snapA → $20; the next two hourly buckets forward-
+    // fill to $20; the hour3 bucket sees snapB → $100.
+    const hour0Bucket = series.find((p) => p.timestamp === hour0);
+    const hour1Bucket = series.find((p) => p.timestamp === hour0 + 3600);
+    const hour3Bucket = series.find((p) => p.timestamp === hour3);
+
+    expect(hour0Bucket?.tvlUSD).toBeCloseTo(20, 6);
+    expect(hour1Bucket?.tvlUSD).toBeCloseTo(20, 6); // forward-filled
+    expect(hour3Bucket?.tvlUSD).toBeCloseTo(100, 6);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // React render tests — exercises TvlOverTimeChart output. next/dynamic is
 // mocked above so Plot renders as a sentinel div and its props are captured.

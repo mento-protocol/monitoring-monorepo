@@ -66,11 +66,18 @@ export function buildDailyVolumeSeries(
     : minSnapshotBucket;
   const endRef = window?.to ?? Math.floor(Date.now() / 1000);
   const endBucket = Math.floor(endRef / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  // When endRef lands exactly on a UTC-day boundary (e.g. the user loads at
+  // midnight UTC, or window.to = hourBucket(midnight)), the bucket at
+  // endBucket covers [endBucket, endBucket + SECONDS_PER_DAY) — entirely
+  // outside the half-open filter range [window.from, window.to). Skip it or
+  // we'd emit a synthetic zero bar at the right edge.
+  const lastBucket =
+    endRef > endBucket ? endBucket : endBucket - SECONDS_PER_DAY;
 
   const series: SeriesPoint[] = [];
   for (
     let timestamp = startBucket;
-    timestamp <= endBucket;
+    timestamp <= lastBucket;
     timestamp += SECONDS_PER_DAY
   ) {
     series.push({ timestamp, volumeUSD: bucketTotals.get(timestamp) ?? 0 });

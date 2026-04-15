@@ -128,6 +128,36 @@ describe("buildDailyVolumeSeries", () => {
     );
     expect(series).toEqual([]);
   });
+
+  it("does not emit a synthetic zero bucket when window.to aligns with a UTC-day boundary", () => {
+    // When the user loads at UTC midnight, window.to == endBucket exactly.
+    // The filter excludes timestamps at or after window.to, so the endBucket
+    // would emit an empty zero bar on the right edge if we iterated with
+    // `timestamp <= endBucket`. Loop must stop at the bucket BEFORE that.
+    const today = dayAlignedNow();
+    const from = today - 3 * SECONDS_PER_DAY;
+    const to = today; // day-aligned upper bound
+    const series = buildDailyVolumeSeries(
+      makeVolumeNetworkData([
+        { timestamp: from + 3600, swapVolume0: "1000000000000000000" },
+        {
+          timestamp: from + SECONDS_PER_DAY + 3600,
+          swapVolume0: "2000000000000000000",
+        },
+      ]),
+      { from, to },
+    );
+
+    // Expect buckets for day (to - 3d), (to - 2d), (to - 1d). No zero bar at `to`.
+    expect(series.map((p) => p.timestamp)).toEqual([
+      today - 3 * SECONDS_PER_DAY,
+      today - 2 * SECONDS_PER_DAY,
+      today - 1 * SECONDS_PER_DAY,
+    ]);
+    // And the totals reflect only in-window snapshots.
+    const total = series.reduce((s, p) => s + p.volumeUSD, 0);
+    expect(total).toBe(3);
+  });
 });
 
 describe("weekOverWeekChangePct", () => {
