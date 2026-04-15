@@ -109,4 +109,3 @@ describe("HealthPanel weekend mode", () => {
     expect(html).toBe("");
   });
 });
-
