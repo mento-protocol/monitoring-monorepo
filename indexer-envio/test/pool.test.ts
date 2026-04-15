@@ -42,8 +42,8 @@ describe("isInDeviationBreach", () => {
     );
   });
 
-  it("true when priceDifference === threshold (integer >= boundary)", () => {
-    assert.isTrue(
+  it("false at exact threshold (strict >; exactly-at-threshold stays WARN per computeHealthStatus)", () => {
+    assert.isFalse(
       isInDeviationBreach(
         makePool({ priceDifference: 5000n, rebalanceThreshold: 5000 }),
       ),
@@ -73,12 +73,12 @@ describe("isInDeviationBreach", () => {
   it("falls back to threshold=10000 when rebalanceThreshold === 0", () => {
     assert.isFalse(
       isInDeviationBreach(
-        makePool({ priceDifference: 9999n, rebalanceThreshold: 0 }),
+        makePool({ priceDifference: 10_000n, rebalanceThreshold: 0 }),
       ),
     );
     assert.isTrue(
       isInDeviationBreach(
-        makePool({ priceDifference: 10_000n, rebalanceThreshold: 0 }),
+        makePool({ priceDifference: 10_001n, rebalanceThreshold: 0 }),
       ),
     );
   });

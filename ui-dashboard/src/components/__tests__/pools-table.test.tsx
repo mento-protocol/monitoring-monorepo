@@ -204,7 +204,9 @@ describe("PoolsTable combined Health + Limit badge", () => {
       healthStatus: "CRITICAL",
       limitStatus: "OK",
       oracleTimestamp: String(Math.floor(Date.now() / 1000)), // fresh oracle → deviation-driven
-      priceDifference: "5000",
+      // 6000/5000 = 1.2 — must strictly exceed the threshold to trigger
+      // CRITICAL now (equal stays WARN).
+      priceDifference: "6000",
       rebalanceThreshold: 5000,
     });
     expect(html).toContain("Needs rebalance: price deviation");

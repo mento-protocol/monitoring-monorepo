@@ -62,3 +62,16 @@ export function normalizePoolIdForChain(
   // filter) or rely on the resulting not-found redirect (pool detail page URL).
   return value;
 }
+
+/**
+ * Strips the "{chainId}-" prefix from a namespaced pool ID so callers receive
+ * a raw 0x address (e.g. for AddressLink, explorer URLs, or eth_call).
+ * Non-namespaced inputs pass through unchanged.
+ *
+ * @example stripChainIdFromPoolId("42220-0x02fa...")  // "0x02fa..."
+ * @example stripChainIdFromPoolId("0x02fa...")        // "0x02fa..."
+ */
+export function stripChainIdFromPoolId(value: string): string {
+  if (!isNamespacedPoolId(value)) return value;
+  return value.split("-").slice(1).join("-");
+}

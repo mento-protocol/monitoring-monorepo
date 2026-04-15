@@ -16,11 +16,17 @@ vi.mock("viem", async () => {
   };
 });
 
-import { checkRebalanceStatus } from "../rebalance-check";
+import { checkRebalanceStatus, toHumanUnits } from "../rebalance-check";
 
 const POOL = "0x1111111111111111111111111111111111111111";
 const STRATEGY = "0x2222222222222222222222222222222222222222";
 const RPC_URL = "https://forno.celo.org";
+
+// 4-byte selector for determineAction(address). OLS must probe this function
+// (not rebalance) to avoid an ERC20 revert when simulating from address(0).
+const DETERMINE_ACTION_SELECTOR = keccak256(
+  toBytes("determineAction(address)"),
+).slice(0, 10);
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -116,8 +122,9 @@ describe("checkRebalanceStatus", () => {
   });
 
   it("returns blocked when strategy type is unknown (no false green)", async () => {
-    // Both strategy probes revert (contract-level) → unknown
+    // CDP, Reserve and OLS probes all revert (contract-level) → unknown
     mockReadContract
+      .mockRejectedValueOnce(new Error("execution reverted"))
       .mockRejectedValueOnce(new Error("execution reverted"))
       .mockRejectedValueOnce(new Error("execution reverted"));
     // eth_call should NOT be made — unknown strategy short-circuits
@@ -129,6 +136,70 @@ describe("checkRebalanceStatus", () => {
     expect(result.message).toContain("Unable to identify");
     // Verify simulation was never attempted
     expect(mockCall).not.toHaveBeenCalled();
+  });
+
+  it("treats viem's 'returned no data' error as a probe miss, not a transport failure", async () => {
+    // Real-world shape viem throws for EOAs / non-matching ABIs. Without
+    // swallowing it we bubble out to SWR and render "Diagnostics
+    // unavailable" instead of the neutral "Unable to identify" fallback.
+    const noDataMessage =
+      'The contract function "getCDPConfig" returned no data ("0x"). ' +
+      "This could be due to any of the following:\n" +
+      '  - The contract does not have the function "getCDPConfig",\n' +
+      "  - The parameters passed to the contract function may be invalid,\n" +
+      "  - The address is not a contract.";
+    mockReadContract
+      .mockRejectedValueOnce(new Error(noDataMessage))
+      .mockRejectedValueOnce(new Error(noDataMessage))
+      .mockRejectedValueOnce(new Error(noDataMessage));
+
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
+
+    expect(result.canRebalance).toBe(false);
+    expect(result.strategyType).toBe("unknown");
+    expect(result.message).toContain("Unable to identify");
+    expect(mockCall).not.toHaveBeenCalled();
+  });
+
+  it("detects OLS strategy type when getCDPConfig and reserve() fail but getPools() succeeds", async () => {
+    mockReadContract
+      .mockRejectedValueOnce(new Error("execution reverted")) // getCDPConfig
+      .mockRejectedValueOnce(new Error("execution reverted")) // reserve()
+      .mockResolvedValueOnce([]); // getPools()
+    mockCall.mockResolvedValueOnce({ data: "0x" });
+
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
+    expect(result.strategyType).toBe("ols");
+    expect(result.canRebalance).toBe(true);
+    // OLS must probe determineAction(address), NOT rebalance(address) — the
+    // latter triggers an ERC20 transfer revert when simulated from address(0).
+    const callData = mockCall.mock.calls[0][0].data as string;
+    expect(callData.slice(0, 10)).toBe(DETERMINE_ACTION_SELECTOR);
+  });
+
+  it("decodes OLS_OUT_OF_COLLATERAL revert with human-readable message", async () => {
+    mockReadContract
+      .mockRejectedValueOnce(new Error("execution reverted")) // getCDPConfig
+      .mockRejectedValueOnce(new Error("execution reverted")) // reserve()
+      .mockResolvedValueOnce([]); // getPools()
+
+    const OLS_SELECTOR = keccak256(toBytes("OLS_OUT_OF_COLLATERAL()")).slice(
+      0,
+      10,
+    ) as `0x${string}`;
+    const err = new Error("execution reverted");
+    Object.assign(err, { data: OLS_SELECTOR });
+    mockCall.mockRejectedValueOnce(err);
+
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
+
+    expect(result.canRebalance).toBe(false);
+    expect(result.strategyType).toBe("ols");
+    expect(result.rawError).toBe("OLS_OUT_OF_COLLATERAL");
+    expect(result.message).toContain("collateral");
+    // Regression guard: ensure probe went through determineAction, not rebalance.
+    const callData = mockCall.mock.calls[0][0].data as string;
+    expect(callData.slice(0, 10)).toBe(DETERMINE_ACTION_SELECTOR);
   });
 
   it("propagates transport errors during strategy detection", async () => {
@@ -274,5 +345,40 @@ describe("checkRebalanceStatus", () => {
     expect(result.canRebalance).toBe(false);
     expect(result.message).toBe("Rebalance reverted with an unknown error");
     expect(result.strategyType).toBe("reserve");
+  });
+});
+
+describe("toHumanUnits — large-balance precision", () => {
+  // BigInt(...) call form — ui-dashboard tsconfig targets ES2017, which
+  // doesn't emit BigInt `10n`-style literals.
+  const ten = BigInt(10);
+
+  it("returns 0 for zero", () => {
+    expect(toHumanUnits(BigInt(0), 18)).toBe(0);
+  });
+
+  it("returns the raw value when decimals is 0", () => {
+    expect(toHumanUnits(BigInt(12345), 0)).toBe(12345);
+  });
+
+  it("preserves precision for balances well above 2^53 (18 decimals)", () => {
+    // 10M tokens at 18 decimals = 1e25 wei — raw > 2^53 (~9e15).
+    // Previous `Number(bigint) / 10**decimals` would round the low-order
+    // bits; we should still see 10,000,000 exactly.
+    const tenMillion = BigInt(10_000_000) * ten ** BigInt(18);
+    expect(toHumanUnits(tenMillion, 18)).toBe(10_000_000);
+  });
+
+  it("keeps fractional digits within the 6-digit scale", () => {
+    // 1.5 tokens at 6 decimals = 1_500_000 wei.
+    expect(toHumanUnits(BigInt(1_500_000), 6)).toBeCloseTo(1.5, 6);
+  });
+
+  it("represents large whole + small fractional without cross-contamination", () => {
+    // 123,456,789.123456 tokens at 18 decimals
+    const raw =
+      BigInt(123_456_789) * ten ** BigInt(18) +
+      BigInt(123_456) * ten ** BigInt(12); /* .123456 */
+    expect(toHumanUnits(raw, 18)).toBeCloseTo(123_456_789.123456, 5);
   });
 });

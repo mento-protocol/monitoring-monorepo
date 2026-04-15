@@ -114,17 +114,31 @@ describe("fetchNetworkData — happy path", () => {
     expect(result.pools).toHaveLength(1);
     expect(result.pools[0].id).toBe("pool-1");
     expect(result.fees).not.toBeNull();
-    expect(result.uniqueLpCount).toBe(5);
+    expect(result.uniqueLpAddresses).toHaveLength(5);
     expect(result.rates).toBeInstanceOf(Map);
 
+    // Verify the request shape per query type (call order can vary because
+    // the fees/snapshots/LP triad fires via Promise.allSettled after Pool).
     const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
       .mock.calls;
-    expect(calls[0][1]).toEqual({ chainId: 42220 });
-    expect(calls[1][1]).toEqual({ chainId: 42220 });
-    expect(calls[2][1]).toEqual({ from: 0, to: 1000, poolIds: ["pool-1"] });
-    expect(calls[3][1]).toEqual({ from: 0, to: 7000, poolIds: ["pool-1"] });
-    expect(calls[4][1]).toEqual({ from: 0, to: 30000, poolIds: ["pool-1"] });
-    expect(calls[5][1]).toEqual({ poolIds: ["pool-1"] });
+    const byQuery = (needle: string) =>
+      calls.filter(([q]) => typeof q === "string" && q.includes(needle));
+
+    // One pool query, one fees query, one LP query.
+    expect(byQuery("Pool(")[0][1]).toEqual({ chainId: 42220 });
+    expect(byQuery("ProtocolFeeTransfer")[0][1]).toEqual({ chainId: 42220 });
+    expect(byQuery("LiquidityPosition")[0][1]).toEqual({
+      poolIds: ["pool-1"],
+    });
+    // PoolSnapshotsAll paginates: with an empty response, the loop exits after
+    // the first page. Assert that page was requested with limit + offset=0.
+    const snapshotCalls = byQuery("PoolSnapshot");
+    expect(snapshotCalls).toHaveLength(1);
+    expect(snapshotCalls[0][1]).toEqual({
+      poolIds: ["pool-1"],
+      limit: 1000,
+      offset: 0,
+    });
   });
 
   it("deduplicates LP addresses across multiple positions", async () => {
@@ -153,7 +167,10 @@ describe("fetchNetworkData — happy path", () => {
       w30d: { from: 0, to: 30000 },
     });
 
-    expect(result.uniqueLpCount).toBe(3);
+    expect(result.uniqueLpAddresses).toEqual(
+      expect.arrayContaining(["0xa", "0xb", "0xc"]),
+    );
+    expect(result.uniqueLpAddresses).toHaveLength(3);
   });
 
   it("trims whitespace from hasuraSecret before setting auth header", async () => {
@@ -192,6 +209,293 @@ describe("fetchNetworkData — happy path", () => {
       .calls[0];
     const headers = constructorArgs[1]?.headers ?? {};
     expect(headers["x-hasura-admin-secret"]).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchNetworkData — snapshot pagination
+// ---------------------------------------------------------------------------
+
+describe("fetchNetworkData — snapshot pagination", () => {
+  it("issues POOL_SNAPSHOTS_ALL with a deterministic tiebreaker", async () => {
+    // Regression guard: without a secondary sort key, Postgres tie order on
+    // shared timestamps isn't stable across paginated offsets, which
+    // duplicates/skips rows at page boundaries.
+    mockRequest((query) => {
+      if (query.includes("PoolSnapshot")) return { PoolSnapshot: [] };
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [makePool("pool-sort")] };
+      return {};
+    });
+
+    await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mock.calls;
+    const snapshotCall = calls.find(
+      ([q]) => typeof q === "string" && q.includes("PoolSnapshotsAll"),
+    );
+    expect(snapshotCall).toBeDefined();
+    const queryText = String(snapshotCall![0]).replace(/\s+/g, " ");
+    expect(queryText).toMatch(/order_by:\s*\[.*timestamp.*id.*\]/);
+  });
+
+  it("stops paginating once a page returns fewer than the page size", async () => {
+    // First page: exactly page-size rows. Second page: partial (< page size)
+    // → last page, stop. Each row has a unique (poolId, timestamp) so the
+    // client-side dedup is a no-op here.
+    const makeRow = (timestamp: number) => ({
+      poolId: "pool-p",
+      timestamp: String(timestamp),
+      reserves0: "0",
+      reserves1: "0",
+      swapCount: 0,
+      swapVolume0: "0",
+      swapVolume1: "0",
+    });
+    const page1 = Array.from({ length: 1000 }, (_, i) => makeRow(i));
+    const page2 = Array.from({ length: 42 }, (_, i) => makeRow(1000 + i));
+    let snapshotCall = 0;
+    mockRequest((query) => {
+      if (query.includes("PoolSnapshot")) {
+        snapshotCall++;
+        return { PoolSnapshot: snapshotCall === 1 ? page1 : page2 };
+      }
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [makePool("pool-p")] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(snapshotCall).toBe(2);
+    expect(result.snapshotsAll).toHaveLength(1042);
+    expect(result.snapshotsAllError).toBeNull();
+  });
+
+  it("dedups rows that appear in multiple pages (concurrent-insert drift)", async () => {
+    // If a new snapshot arrives between page 1 and page 2, offset pagination
+    // overlaps: the last row of page 1 reappears as the first row of page 2.
+    // Dedup by (poolId, timestamp) should collapse the duplicate — otherwise
+    // the chart would double-count that hour's volume.
+    const makeRow = (timestamp: number) => ({
+      poolId: "pool-dup",
+      timestamp: String(timestamp),
+      reserves0: "0",
+      reserves1: "0",
+      swapCount: 0,
+      swapVolume0: "0",
+      swapVolume1: "0",
+    });
+    // Page 1: rows 0..999. Page 2: rows 999..1038 (first row overlaps). Page 3: empty.
+    const page1 = Array.from({ length: 1000 }, (_, i) => makeRow(i));
+    const page2 = Array.from({ length: 40 }, (_, i) => makeRow(999 + i));
+    let call = 0;
+    mockRequest((query) => {
+      if (query.includes("PoolSnapshot")) {
+        call++;
+        if (call === 1) return { PoolSnapshot: page1 };
+        if (call === 2) return { PoolSnapshot: page2 };
+        return { PoolSnapshot: [] };
+      }
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [makePool("pool-dup")] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    // 1000 from page 1 + 40 from page 2 − 1 overlap = 1039.
+    expect(result.snapshotsAll).toHaveLength(1039);
+  });
+
+  it("flags truncation on overflow but preserves already-fetched rows", async () => {
+    // Every page returns 1000 UNIQUE rows → loop hits MAX_PAGES without
+    // finding a short page. Return accumulated rows with `truncated: true,
+    // error: null` — 24h/7d/30d windows still work from what we have.
+    const now = Math.floor(Date.now() / 1000);
+    let rowCursor = 0;
+    mockRequest((query) => {
+      if (query.includes("PoolSnapshot")) {
+        const batch = Array.from({ length: 1000 }, () => {
+          // Unique timestamps across all pages so dedup doesn't collapse.
+          // All fit in the 24h window (minute-granularity across ~70 days
+          // worth of minutes — still > 24h but page 1 alone covers >24h).
+          const ts = now - rowCursor * 60;
+          rowCursor++;
+          return {
+            poolId: "pool-overflow",
+            timestamp: String(ts),
+            reserves0: "0",
+            reserves1: "0",
+            swapCount: 0,
+            swapVolume0: "0",
+            swapVolume1: "0",
+          };
+        });
+        return { PoolSnapshot: batch };
+      }
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [makePool("pool-overflow")] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: now - 86400, to: now },
+      w7d: { from: now - 7 * 86400, to: now },
+      w30d: { from: now - 30 * 86400, to: now },
+    });
+
+    // Overflow is a known safety cap, not a fault — error stays null.
+    expect(result.snapshotsAllError).toBeNull();
+    expect(result.snapshotsAllTruncated).toBe(true);
+    expect(result.snapshots.length).toBeGreaterThan(0);
+    expect(result.snapshotsAll).toHaveLength(100 * 1000);
+  });
+
+  it("on mid-loop failure, only flags the window whose coverage is actually incomplete", async () => {
+    // Page 1 succeeds (1000 rows at 30-minute spacing → ~20.8 days of
+    // history); page 2 errors. Windows fully covered by those rows stay
+    // error-free; windows that extend beyond the oldest fetched row surface
+    // an error so Summary subs can partial-badge selectively.
+    const now = Math.floor(Date.now() / 1000);
+    const page1 = Array.from({ length: 1000 }, (_, i) => ({
+      poolId: "pool-mid-err",
+      timestamp: String(now - i * 1800), // 30-min spacing → oldest ≈ 20.8d
+      reserves0: "0",
+      reserves1: "0",
+      swapCount: 0,
+      swapVolume0: "0",
+      swapVolume1: "0",
+    }));
+    let snapshotCall = 0;
+    (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mockReset()
+      .mockImplementation((query: string) => {
+        if (query.includes("PoolSnapshot")) {
+          snapshotCall++;
+          if (snapshotCall === 1)
+            return Promise.resolve({ PoolSnapshot: page1 });
+          return Promise.reject(new Error("upstream timeout on page 2"));
+        }
+        if (query.includes("ProtocolFeeTransfer"))
+          return Promise.resolve({ ProtocolFeeTransfer: [] });
+        if (query.includes("LiquidityPosition"))
+          return Promise.resolve({ LiquidityPosition: [] });
+        if (query.includes("Pool"))
+          return Promise.resolve({ Pool: [makePool("pool-mid-err")] });
+        return Promise.resolve({});
+      });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: now - 86400, to: now },
+      w7d: { from: now - 7 * 86400, to: now },
+      w30d: { from: now - 30 * 86400, to: now },
+    });
+
+    // snapshotsAllError is set (pagination failed).
+    expect(result.snapshotsAllError).not.toBeNull();
+    expect(result.snapshotsAllTruncated).toBe(true);
+    // 24h and 7d windows are inside the fetched rows → no per-window error.
+    expect(result.snapshotsError).toBeNull();
+    expect(result.snapshots7dError).toBeNull();
+    // 30d window extends beyond oldestFetched (≈ 20.8d) → flagged.
+    expect(result.snapshots30dError).not.toBeNull();
+    // Preserved rows still drive the derived window arrays.
+    expect(result.snapshotsAll).toHaveLength(1000);
+    expect(result.snapshots.length).toBeGreaterThan(0);
+    expect(result.snapshots7d.length).toBeGreaterThan(0);
+  });
+
+  it("propagates the error when the very first page fails", async () => {
+    // No rows accumulated yet → nothing to salvage; caller should see an
+    // explicit error state rather than a confident-but-empty dashboard.
+    (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mockReset()
+      .mockImplementation((query: string) => {
+        if (query.includes("PoolSnapshot"))
+          return Promise.reject(new Error("upstream timeout on page 1"));
+        if (query.includes("ProtocolFeeTransfer"))
+          return Promise.resolve({ ProtocolFeeTransfer: [] });
+        if (query.includes("LiquidityPosition"))
+          return Promise.resolve({ LiquidityPosition: [] });
+        if (query.includes("Pool"))
+          return Promise.resolve({ Pool: [makePool("pool-first-err")] });
+        return Promise.resolve({});
+      });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.snapshotsAllError).not.toBeNull();
+    expect(result.snapshotsAll).toHaveLength(0);
+    expect(result.snapshotsAllTruncated).toBe(false);
+    // With no preserved rows, every window is incomplete — all three per-
+    // window errors light up so consumers show the fully-errored state.
+    expect(result.snapshotsError).toBe(result.snapshotsAllError);
+    expect(result.snapshots7dError).toBe(result.snapshotsAllError);
+    expect(result.snapshots30dError).toBe(result.snapshotsAllError);
+  });
+
+  it("derives window arrays from snapshotsAll by timestamp", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const snap = (timestamp: number) => ({
+      poolId: "pool-window",
+      timestamp: String(timestamp),
+      reserves0: "0",
+      reserves1: "0",
+      swapCount: 0,
+      swapVolume0: "0",
+      swapVolume1: "0",
+    });
+    // 3h ago → in 24h window. 2 days ago → in 7d/30d only. 10d ago → 30d only.
+    const allSnapshots = [
+      snap(now - 3 * 3600),
+      snap(now - 2 * 86400),
+      snap(now - 10 * 86400),
+    ];
+    mockRequest((query) => {
+      if (query.includes("PoolSnapshot")) return { PoolSnapshot: allSnapshots };
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [makePool("pool-window")] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: now - 86400, to: now },
+      w7d: { from: now - 7 * 86400, to: now },
+      w30d: { from: now - 30 * 86400, to: now },
+    });
+
+    expect(result.snapshotsAll).toHaveLength(3);
+    expect(result.snapshots).toHaveLength(1); // only 3h-ago fits in 24h
+    expect(result.snapshots7d).toHaveLength(2); // 3h-ago + 2d-ago
+    expect(result.snapshots30d).toHaveLength(3); // all three
   });
 });
 
@@ -314,7 +618,7 @@ describe("fetchNetworkData — non-Error thrown values", () => {
 // ---------------------------------------------------------------------------
 
 describe("fetchNetworkData — LP query failure only", () => {
-  it("surfaces uniqueLpCount as null when LP query rejects", async () => {
+  it("surfaces uniqueLpAddresses as null when LP query rejects", async () => {
     const pool = makePool("pool-lp");
     const lpErr = new Error("LP query timeout");
 
@@ -338,7 +642,7 @@ describe("fetchNetworkData — LP query failure only", () => {
     expect(result.error).toBeNull();
     expect(result.pools).toHaveLength(1);
     expect(result.fees).not.toBeNull();
-    expect(result.uniqueLpCount).toBeNull();
+    expect(result.uniqueLpAddresses).toBeNull();
     expect(result.lpError).toBe(lpErr);
   });
 });

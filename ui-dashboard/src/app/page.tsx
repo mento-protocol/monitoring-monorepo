@@ -5,7 +5,11 @@ import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
 import type { Network } from "@/lib/networks";
-import { buildPoolVolumeMap, poolTotalVolumeUSD } from "@/lib/volume";
+import {
+  buildPoolVolumeMap,
+  poolTotalVolumeUSD,
+  sumVolumeMap,
+} from "@/lib/volume";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import {
@@ -14,6 +18,7 @@ import {
   type GlobalPoolEntry,
 } from "@/components/global-pools-table";
 import { TvlOverTimeChart } from "@/components/tvl-over-time-chart";
+import { VolumeOverTimeChart } from "@/components/volume-over-time-chart";
 
 export default function GlobalPage() {
   return (
@@ -21,14 +26,6 @@ export default function GlobalPage() {
       <GlobalContent />
     </Suspense>
   );
-}
-
-function sumVolumeMap(map: Map<string, number | null>): number {
-  let total = 0;
-  for (const v of map.values()) {
-    if (typeof v === "number") total += v;
-  }
-  return total;
 }
 
 /**
@@ -86,6 +83,12 @@ function GlobalContent() {
   const anySnapshots30dError = networkData.some(
     (netData) => netData.snapshots30dError !== null && netData.error === null,
   );
+  const anySnapshotsAllError = networkData.some(
+    (netData) => netData.snapshotsAllError !== null && netData.error === null,
+  );
+  const anySnapshotsAllTruncated = networkData.some(
+    (netData) => netData.snapshotsAllTruncated && netData.error === null,
+  );
   const anyLpError = networkData.some(
     (netData) => netData.lpError !== null && netData.error === null,
   );
@@ -98,10 +101,11 @@ function GlobalContent() {
       let totalFpmmPools = 0;
       let totalTvl = 0;
       // Track current + historical TVL only for chains that contributed
-      // snapshot data, so numerator and denominator always match.
-      let tvlNow24h = 0;
-      let tvlAgo24h = 0;
-      let hasTvlSnapshots24h = false;
+      // snapshot data, so numerator and denominator always match. Uses the 7d
+      // window so weekend oracle stalls in FX pools don't distort the delta.
+      let tvlNow7d = 0;
+      let tvlAgo7d = 0;
+      let hasTvlSnapshots7d = false;
       const allEntries: GlobalPoolEntry[] = [];
       const allVol24h = new Map<string, number | null | undefined>();
       const allVol7d = new Map<string, number | null | undefined>();
@@ -121,7 +125,7 @@ function GlobalContent() {
         anyFeesError || anyNetworkError ? null : 0;
       let totalFees30d: number | null =
         anyFeesError || anyNetworkError ? null : 0;
-      let totalUniqueLps: number | null = anyNetworkError ? null : 0;
+      const uniqueLpSet = new Set<string>();
       let hasSuccessfulLpResult = false;
       const unpricedSymbolSet = new Set<string>();
       let isTruncated = false;
@@ -149,12 +153,14 @@ function GlobalContent() {
         totalTvl += chainTvlNow;
 
         // Historical TVL — only pools with snapshot data contribute to both
-        // sides of the delta, so new pools don't inflate the percentage.
-        if (netData.snapshotsError === null && snapshots.length > 0) {
-          const m = matchedTvl(snapshots, pools, network, rates);
-          tvlNow24h += m.now;
-          tvlAgo24h += m.ago;
-          hasTvlSnapshots24h = true;
+        // sides of the delta, so new pools don't inflate the percentage. Uses
+        // the 7d window (not 24h) so weekend oracle stalls don't produce
+        // Monday spikes in the delta.
+        if (netData.snapshots7dError === null && snapshots7d.length > 0) {
+          const m = matchedTvl(snapshots7d, pools, network, rates);
+          tvlNow7d += m.now;
+          tvlAgo7d += m.ago;
+          hasTvlSnapshots7d = true;
         }
 
         // All-time volume & swaps from pool-level counters
@@ -220,17 +226,24 @@ function GlobalContent() {
           if (fees.isTruncated) isTruncated = true;
         }
 
-        // LP count — accumulate from successful chains
-        if (netData.uniqueLpCount !== null && totalUniqueLps !== null) {
-          totalUniqueLps += netData.uniqueLpCount;
+        // LP addresses — union across successful chains so an address that
+        // provides liquidity on multiple chains counts once globally.
+        // `.toLowerCase()` defends against any per-chain source returning the
+        // same wallet in checksum vs. lowercase; the per-chain hook already
+        // lowercases before dedup, but this layer accepts any string input.
+        if (netData.uniqueLpAddresses !== null) {
+          for (const addr of netData.uniqueLpAddresses)
+            uniqueLpSet.add(addr.toLowerCase());
           hasSuccessfulLpResult = true;
         }
       }
 
-      // Show N/A only when no chain contributed a successful LP result
-      if (!hasSuccessfulLpResult && anyLpError) {
-        totalUniqueLps = null;
-      }
+      // Show N/A when no chain contributed a successful LP result OR any
+      // top-level chain error means we can't claim a complete global count.
+      const totalUniqueLps =
+        anyNetworkError || (!hasSuccessfulLpResult && anyLpError)
+          ? null
+          : uniqueLpSet.size;
 
       return {
         aggregated: {
@@ -247,9 +260,9 @@ function GlobalContent() {
           totalFees7d,
           totalFees30d,
           totalUniqueLps,
-          tvlChange24h:
-            hasTvlSnapshots24h && tvlAgo24h > 0
-              ? ((tvlNow24h - tvlAgo24h) / tvlAgo24h) * 100
+          tvlChange7d:
+            hasTvlSnapshots7d && tvlAgo7d > 0
+              ? ((tvlNow7d - tvlAgo7d) / tvlAgo7d) * 100
               : null,
           unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
           totalUnresolvedCount,
@@ -286,35 +299,29 @@ function GlobalContent() {
         </p>
       </div>
 
-      <TvlOverTimeChart
-        networkData={networkData}
-        totalTvl={aggregated.totalTvl}
-        change24h={aggregated.tvlChange24h}
-        isLoading={isLoading}
-        hasError={anyNetworkError}
-        hasSnapshotError={anySnapshotsError || anySnapshots30dError}
-      />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <TvlOverTimeChart
+          networkData={networkData}
+          totalTvl={aggregated.totalTvl}
+          change7d={aggregated.tvlChange7d}
+          isLoading={isLoading}
+          hasError={anyNetworkError}
+          hasSnapshotError={
+            anySnapshots7dError ||
+            anySnapshotsAllError ||
+            anySnapshotsAllTruncated
+          }
+        />
+        <VolumeOverTimeChart
+          networkData={networkData}
+          isLoading={isLoading}
+          hasError={anyNetworkError}
+          hasSnapshotError={anySnapshotsAllError || anySnapshotsAllTruncated}
+        />
+      </div>
 
-      {/* Summary tiles */}
       <section>
-        <h2 className="text-lg font-semibold text-white mb-3">Summary</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          <BreakdownTile
-            label="Volume"
-            total={aggregated.totalVolumeAllTime}
-            sub24h={aggregated.totalVolume24h}
-            sub7d={aggregated.totalVolume7d}
-            sub30d={aggregated.totalVolume30d}
-            isLoading={isLoading}
-            hasError={
-              anyNetworkError ||
-              anySnapshotsError ||
-              anySnapshots7dError ||
-              anySnapshots30dError
-            }
-            format={formatUSD}
-          />
-
           <BreakdownTile
             label="Swap Fees"
             total={aggregated.totalFeesAllTime}
@@ -338,18 +345,6 @@ function GlobalContent() {
           />
 
           <Tile
-            label="Total Pools"
-            value={isLoading ? "…" : String(aggregated.totalPools)}
-            subtitle={
-              isLoading
-                ? undefined
-                : anyNetworkError
-                  ? `${aggregated.totalFpmmPools} FPMMs · ${aggregated.totalPools - aggregated.totalFpmmPools} Virtual · partial data`
-                  : `${aggregated.totalFpmmPools} FPMMs · ${aggregated.totalPools - aggregated.totalFpmmPools} Virtual`
-            }
-          />
-
-          <Tile
             label="LPs"
             value={
               isLoading
@@ -359,9 +354,13 @@ function GlobalContent() {
                   : aggregated.totalUniqueLps.toLocaleString()
             }
             subtitle={
-              anyLpError
+              // totalUniqueLps is forced to null whenever any chain failed at
+              // the top level, so the subtitle must degrade for network errors
+              // too — not just lpError — otherwise we'd claim a complete
+              // global metric while actually showing N/A.
+              anyNetworkError || anyLpError
                 ? "Partial — some chains failed to load"
-                : "Unique FPMM LP addresses (per-chain)"
+                : "Unique LP addresses across all chains"
             }
           />
 

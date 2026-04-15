@@ -60,7 +60,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         ? computePriceDifference(updatedPool)
         : updatedPool.priceDifference;
     const withDev = { ...updatedPool, priceDifference };
-    const healthStatus = computeHealthStatus(withDev);
+    const healthStatus = computeHealthStatus(withDev, blockTimestamp);
     const deviationBreachStartedAt = nextDeviationBreachStartedAt(
       existing,
       withDev,
@@ -138,7 +138,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         ? computePriceDifference(updatedPool)
         : updatedPool.priceDifference;
     const withDev = { ...updatedPool, priceDifference };
-    const healthStatus = computeHealthStatus(withDev);
+    const healthStatus = computeHealthStatus(withDev, blockTimestamp);
     const deviationBreachStartedAt = nextDeviationBreachStartedAt(
       existing,
       withDev,

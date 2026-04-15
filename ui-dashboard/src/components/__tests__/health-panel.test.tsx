@@ -63,6 +63,10 @@ const BASE_POOL: Pool = {
   oracleExpiry: "300",
   priceDifference: "0",
   rebalanceThreshold: 5000,
+  // `hasHealthData: true` is the gate that lets HealthPanel reach its
+  // weekend / diagnostics branches. Pools missing this flag hit the
+  // "Oracle health data not yet available" fallback first.
+  hasHealthData: true,
 };
 
 describe("HealthPanel weekend mode", () => {
@@ -93,50 +97,16 @@ describe("HealthPanel weekend mode", () => {
   });
 
   it("does not show weekend explanation when oracle is stale but it is not the weekend", () => {
-    // isWeekend mock returns false by default
+    // isWeekend mock returns false by default. The deviation widget moved to
+    // the pool header (DeviationRow), and with no weekend pause, no missing-
+    // data case, and no rebalance diagnostics, the panel has nothing left
+    // to render and collapses.
     const stalePool: Pool = { ...BASE_POOL, oracleTimestamp: STALE_TS };
     const html = renderToStaticMarkup(<HealthPanel pool={stalePool} />);
 
     expect(html).not.toContain("Trading is paused for the weekend");
-    // Should show standard stale oracle UI instead
-    expect(html).toContain("Stale");
+    expect(html).not.toContain("Deviation vs Threshold");
+    expect(html).toBe("");
   });
 });
 
-describe("HealthPanel deviation breach indicator", () => {
-  it("renders 'Breach started' line with relative time and accessible absolute timestamp when breached", () => {
-    const breachStart = String(Math.floor(Date.now() / 1000) - 3600); // 1h ago
-    const breachedPool: Pool = {
-      ...BASE_POOL,
-      healthStatus: "CRITICAL",
-      priceDifference: "6000", // > 5000 threshold → breach
-      deviationBreachStartedAt: breachStart,
-    };
-    const html = renderToStaticMarkup(<HealthPanel pool={breachedPool} />);
-
-    expect(html).toContain("Breach started");
-    expect(html).toContain("1h ago");
-    // a11y: absolute timestamp available via aria-label (not just hover)
-    expect(html).toContain("Deviation breach started at");
-    // semantic <time> element with machine-readable dateTime
-    expect(html).toMatch(/<time[^>]*dateTime=/);
-  });
-
-  it("does not render breach line when deviationBreachStartedAt is '0' (not breached)", () => {
-    const pool: Pool = {
-      ...BASE_POOL,
-      deviationBreachStartedAt: "0",
-    };
-    const html = renderToStaticMarkup(<HealthPanel pool={pool} />);
-    expect(html).not.toContain("Breach started");
-  });
-
-  it("does not render breach line when deviationBreachStartedAt is undefined (old indexer schema)", () => {
-    // Omitting the optional field simulates a Hasura endpoint that hasn't
-    // rolled out the new schema yet — the UI must degrade gracefully.
-    const pool: Pool = { ...BASE_POOL };
-    expect(pool.deviationBreachStartedAt).toBeUndefined();
-    const html = renderToStaticMarkup(<HealthPanel pool={pool} />);
-    expect(html).not.toContain("Breach started");
-  });
-});

@@ -2,8 +2,9 @@
   "name": "@mento-protocol/monitoring-config",
   "version": "0.0.0",
   "private": true,
-  "description": "Shared deployment configuration for the monitoring monorepo. The single source of truth for chain ID → active treb namespace mappings consumed by both the indexer and the dashboard.",
+  "description": "Shared deployment configuration for the monitoring monorepo. The single source of truth for chain ID → active treb namespace mappings and the FX calendar constants consumed by both the indexer and the dashboard.",
   "exports": {
-    "./deployment-namespaces.json": "./deployment-namespaces.json"
+    "./deployment-namespaces.json": "./deployment-namespaces.json",
+    "./fx-calendar.json": "./fx-calendar.json"
   }
 }

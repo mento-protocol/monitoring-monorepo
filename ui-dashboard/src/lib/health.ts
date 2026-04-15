@@ -41,7 +41,21 @@ export interface PoolHealthState {
   oracleExpiry?: string;
   priceDifference?: string;
   rebalanceThreshold?: number;
+  lastRebalancedAt?: string | null;
 }
+
+/**
+ * Grace window for a deviation breach before it escalates to CRITICAL. Used
+ * as a proxy for "is a rebalance in flight?" — cross-chain rebalances take
+ * time to land, so a fresh breach where a rebalance happened recently stays
+ * WARN. Beyond this window, the pool is treated as genuinely stuck.
+ *
+ * A precise implementation would need an indexer-side `deviationBreachedAt`
+ * field; using lastRebalancedAt as the anchor is an over-estimate of grace
+ * (breach can start any time after the last rebalance, not at it) but it's
+ * directionally correct with the data we have.
+ */
+export const DEVIATION_BREACH_GRACE_SECONDS = 3600;
 
 export function getOracleStalenessThreshold(
   pool: { oracleExpiry?: string },
@@ -73,10 +87,19 @@ export function isOracleFresh(
  * Compute the health status for a pool based on its oracle state.
  *
  * - "N/A":       VirtualPools (source includes "virtual") — no oracle
- * - "CRITICAL":  Oracle is stale (age > expiry) OR deviation >= threshold
+ * - "CRITICAL":  Oracle is stale (age > expiry), OR deviation > threshold
+ *                AND no rebalance within DEVIATION_BREACH_GRACE_SECONDS
+ *                (proxy for "breach is no longer recoverable by an in-flight
+ *                rebalance")
  * - "WEEKEND":   Oracle is stale because FX markets are closed (Fri 21:00 – Sun 23:00 UTC)
- * - "WARN":      Oracle is fresh but deviation >= 80% of threshold
+ * - "WARN":      Oracle is fresh and deviation >= 80% of threshold, OR
+ *                deviation > threshold but a rebalance landed within the
+ *                last DEVIATION_BREACH_GRACE_SECONDS seconds
  * - "OK":        Oracle is fresh and deviation is below 80% of threshold
+ *
+ * The `>` (rather than `>=`) on the CRITICAL boundary gives the exact-
+ * threshold case a moment of wiggle room: sitting right at the rebalance
+ * line stays WARN instead of flipping straight to CRITICAL.
  *
  * Uses wall-clock time comparison rather than the indexed oracleOk flag,
  * which is only set at event time and never expires.
@@ -88,9 +111,10 @@ export function isOracleFresh(
 export function computeHealthStatus(
   pool: PoolHealthState,
   chainId?: number,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
 ): HealthStatus {
   if (pool.source?.includes("virtual")) return "N/A";
-  const isOracleStale = !isOracleFresh(pool, undefined, chainId);
+  const isOracleStale = !isOracleFresh(pool, nowSeconds, chainId);
   if (isOracleStale) {
     // Distinguish expected weekend staleness from a real incident
     if (isWeekend()) return "WEEKEND";
@@ -100,7 +124,16 @@ export function computeHealthStatus(
   const threshold =
     (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
   const devRatio = diff / threshold;
-  if (devRatio >= 1.0) return "CRITICAL";
+  if (devRatio > 1.0) {
+    // Cross-chain rebalances take time to land. If a rebalance completed
+    // within the grace window, assume another one may be in flight and
+    // stay at WARN; otherwise escalate.
+    const lastRebalancedAt = Number(pool.lastRebalancedAt ?? "0");
+    const rebalancedRecently =
+      lastRebalancedAt > 0 &&
+      nowSeconds - lastRebalancedAt < DEVIATION_BREACH_GRACE_SECONDS;
+    return rebalancedRecently ? "WARN" : "CRITICAL";
+  }
   if (devRatio >= 0.8) return "WARN";
   return "OK";
 }

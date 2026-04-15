@@ -11,24 +11,56 @@ import { fetchReferenceRateFeedID, fetchReportExpiry } from "./rpc";
 // Health status computation
 // ---------------------------------------------------------------------------
 
-export function computeHealthStatus(pool: Pool): string {
+/**
+ * Grace window for a deviation breach before it escalates to CRITICAL.
+ * Mirrors `DEVIATION_BREACH_GRACE_SECONDS` in
+ * `ui-dashboard/src/lib/health.ts`. Cross-chain rebalances take minutes
+ * to confirm; if a rebalance landed within this window, we stay at WARN
+ * rather than flagging an incident.
+ */
+export const DEVIATION_BREACH_GRACE_SECONDS = 3600n;
+
+/**
+ * This indexer branch MUST stay in lockstep with the dashboard's deviation
+ * + grace logic in `ui-dashboard/src/lib/health.ts`. Mirrored cases live in
+ * `test/healthStatusParity.test.ts`:
+ *  - `devRatio > 1.0` → CRITICAL (strict; exactly-at-threshold stays WARN)
+ *  - Breach + rebalance within DEVIATION_BREACH_GRACE_SECONDS → WARN
+ *  - `devRatio >= 0.8` → WARN; below → OK
+ *
+ * Intentional divergences (NOT covered by the parity suite):
+ *  - Oracle staleness: indexer reads the event-time `oracleOk` flag;
+ *    the UI reads `oracleTimestamp` + `oracleExpiry` against wall clock
+ *    at render time with per-chain fallbacks.
+ *  - Weekend reclassification: only the UI has `isWeekend()` at render
+ *    time. Indexed weekend-stale pools surface as CRITICAL here; the UI
+ *    reclassifies them to WEEKEND when rendering.
+ */
+export function computeHealthStatus(pool: Pool, nowSeconds: bigint): string {
   if (pool.source?.includes("virtual")) return "N/A";
   if (!pool.oracleOk) return "CRITICAL";
   const threshold =
     pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
   const devRatio = Number(pool.priceDifference) / threshold;
-  if (devRatio >= 1.0) return "CRITICAL";
+  if (devRatio > 1.0) {
+    const withinGrace =
+      pool.lastRebalancedAt > 0n &&
+      nowSeconds - pool.lastRebalancedAt < DEVIATION_BREACH_GRACE_SECONDS;
+    return withinGrace ? "WARN" : "CRITICAL";
+  }
   if (devRatio >= 0.8) return "WARN";
   return "OK";
 }
 
 // Integer comparison avoids float pathology at the devRatio = 1.0 boundary.
-// Oracle staleness is intentionally NOT counted — this tracks price action only.
+// Strict `>` matches `computeHealthStatus`: exactly-at-threshold stays WARN,
+// not CRITICAL, so it is NOT counted as a breach either. Oracle staleness
+// is intentionally NOT counted — this tracks price action only.
 export function isInDeviationBreach(pool: Pool): boolean {
   if (pool.source?.includes("virtual")) return false;
   const threshold =
     pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
-  return pool.priceDifference >= BigInt(threshold);
+  return pool.priceDifference > BigInt(threshold);
 }
 
 export function nextDeviationBreachStartedAt(
@@ -238,7 +270,7 @@ export const upsertPool = async ({
       : next.priceDifference;
 
   const withDeviation = { ...next, priceDifference };
-  const healthStatus = computeHealthStatus(withDeviation);
+  const healthStatus = computeHealthStatus(withDeviation, blockTimestamp);
   const deviationBreachStartedAt = nextDeviationBreachStartedAt(
     existing,
     withDeviation,

@@ -1,18 +1,3 @@
-/**
- * Unit tests for `buildDailySeries` — the pure data transform behind the
- * homepage TVL-over-time chart. Covers the empty/error short-circuits, the
- * FPMM-with-snapshots filter (which guards against new-pool inflation on the
- * "now" endpoint), per-day forward-fill semantics, intra-day snapshot picking,
- * mid-window pool starts, input normalisation, live vs snapshot reserves for
- * `nowTvl`, and multi-chain aggregation.
- *
- * Plus render-level tests for `TvlOverTimeChart` (empty states, headline,
- * delta pill, range buttons, Plotly prop overrides). Rendering is done via
- * `renderToStaticMarkup` with `next/dynamic` mocked to capture Plot props
- * without loading the real plotly-js. Mirrors the pattern used in
- * `lp-concentration-chart.test.ts`. Fixture helpers are shared via
- * `@/test-utils/network-fixtures`.
- */
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -47,31 +32,18 @@ import {
   makeTvlPool,
 } from "@/test-utils/network-fixtures";
 
-// ---------------------------------------------------------------------------
-// Constants & day alignment
-// ---------------------------------------------------------------------------
-
 const SECONDS_PER_DAY = 86_400;
 
-/** Day-aligned "today" used as the anchor for all snapshot timestamps. The
- *  function itself reads `Math.floor(Date.now()/1000)` at call time, so we
- *  align timestamps to a fresh day boundary captured per-test to keep bucket
- *  arithmetic deterministic regardless of wall-clock drift during the run. */
 function dayAlignedNow(): number {
   const nowSec = Math.floor(Date.now() / 1000);
   return Math.floor(nowSec / SECONDS_PER_DAY) * SECONDS_PER_DAY;
 }
 
-// Commonly-reused wei magnitudes (18 decimals).
 const TEN = "10000000000000000000"; //  10 tokens
 const TWENTY = "20000000000000000000"; //  20
 const FIFTY = "50000000000000000000"; //  50
 const HUNDRED = "100000000000000000000"; // 100
 const TWO_HUNDRED = "200000000000000000000"; // 200
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 describe("buildDailySeries — empty / error short-circuits", () => {
   it("returns empty series and nowTvl=0 when networkData is empty", () => {
@@ -98,7 +70,12 @@ describe("buildDailySeries — empty / error short-circuits", () => {
     expect(out).toEqual({ series: [], nowTvl: 0 });
   });
 
-  it("skips networks with a snapshots30dError and returns nothing", () => {
+  it("still uses preserved rows when snapshotsAllError is set (fail-open path)", () => {
+    // When the hook's paginator fails mid-loop after page 1, it preserves the
+    // already-fetched recent rows + surfaces the error. The chart builder
+    // should forward-fill from those preserved rows rather than blanking the
+    // series — otherwise a transient network glitch produces a black chart
+    // despite valid recent data being available.
     const today = dayAlignedNow();
     const pool = makeTvlPool({ reserves0: HUNDRED, reserves1: HUNDRED });
     const snap = makeSnapshot({
@@ -110,11 +87,12 @@ describe("buildDailySeries — empty / error short-circuits", () => {
       makeNetworkData({
         network: TVL_NETWORK,
         pools: [pool],
-        snapshots30d: [snap],
-        snapshots30dError: new Error("snapshots timeout"),
+        snapshotsAll: [snap],
+        snapshotsAllError: new Error("snapshots timeout"),
       }),
     ]);
-    expect(out).toEqual({ series: [], nowTvl: 0 });
+    expect(out.series.length).toBeGreaterThan(0);
+    expect(out.nowTvl).toBeCloseTo(200, 6);
   });
 });
 
@@ -500,6 +478,52 @@ describe("buildDailySeries — multi-chain aggregation", () => {
   });
 });
 
+describe("buildDailySeries — bucket granularity", () => {
+  it("emits hour-level buckets when bucketSeconds=3600", () => {
+    // Two snapshots 3 hours apart; the first sets reserves, the second
+    // bumps them. With hourly bucketing we should see distinct values
+    // before vs after the second snapshot lands.
+    const today = dayAlignedNow();
+    const hour0 = today + 6 * 3600;
+    const hour3 = hour0 + 3 * 3600;
+    const pool = makeTvlPool({
+      reserves0: TWO_HUNDRED,
+      reserves1: TWO_HUNDRED,
+    });
+    const snapA = makeSnapshot({
+      timestamp: hour0,
+      reserves0: TEN,
+      reserves1: TEN,
+    });
+    const snapB = makeSnapshot({
+      timestamp: hour3,
+      reserves0: FIFTY,
+      reserves1: FIFTY,
+    });
+
+    const { series } = buildDailySeries(
+      [
+        makeNetworkData({
+          network: TVL_NETWORK,
+          pools: [pool],
+          snapshots30d: [snapA, snapB],
+        }),
+      ],
+      3600,
+    );
+
+    // Buckets: hour0 sees snapA → $20; the next two hourly buckets forward-
+    // fill to $20; the hour3 bucket sees snapB → $100.
+    const hour0Bucket = series.find((p) => p.timestamp === hour0);
+    const hour1Bucket = series.find((p) => p.timestamp === hour0 + 3600);
+    const hour3Bucket = series.find((p) => p.timestamp === hour3);
+
+    expect(hour0Bucket?.tvlUSD).toBeCloseTo(20, 6);
+    expect(hour1Bucket?.tvlUSD).toBeCloseTo(20, 6); // forward-filled
+    expect(hour3Bucket?.tvlUSD).toBeCloseTo(100, 6);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // React render tests — exercises TvlOverTimeChart output. next/dynamic is
 // mocked above so Plot renders as a sentinel div and its props are captured.
@@ -521,7 +545,7 @@ describe("TvlOverTimeChart render", () => {
           }),
         ],
         totalTvl: 0,
-        change24h: null,
+        change7d: null,
         isLoading: false,
         hasError: false,
         hasSnapshotError: false,
@@ -537,7 +561,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
-        change24h: null,
+        change7d: null,
         isLoading: false,
         hasError: true,
         hasSnapshotError: false,
@@ -546,26 +570,23 @@ describe("TvlOverTimeChart render", () => {
     expect(html).toContain("Unable to load TVL history");
   });
 
-  it("renders 'Historical data partial' when hasSnapshotError and series empty", () => {
-    const today = dayAlignedNow();
+  it("renders 'Historical data partial' when hasSnapshotError and no rows survived", () => {
+    // First-page failure on the paginated all-history fetch: snapshotsAll
+    // comes back empty AND snapshotsAllError is set. Chart shows the
+    // partial-history empty state (not a confident-but-blank plot).
     const pool = makeTvlPool({ reserves0: HUNDRED, reserves1: HUNDRED });
-    const snap = makeSnapshot({
-      timestamp: today,
-      reserves0: HUNDRED,
-      reserves1: HUNDRED,
-    });
     const html = renderToStaticMarkup(
       React.createElement(TvlOverTimeChart, {
         networkData: [
           makeNetworkData({
             network: TVL_NETWORK,
             pools: [pool],
-            snapshots30d: [snap],
-            snapshots30dError: new Error("snapshots timeout"),
+            snapshotsAll: [],
+            snapshotsAllError: new Error("page-1 timeout"),
           }),
         ],
         totalTvl: 0,
-        change24h: null,
+        change7d: null,
         isLoading: false,
         hasError: false,
         hasSnapshotError: true,
@@ -576,19 +597,21 @@ describe("TvlOverTimeChart render", () => {
     expect(html).not.toContain("Not enough history yet");
   });
 
-  it("shows ellipsis headline when isLoading is true", () => {
+  it("renders a skeleton (not the real value) in the hero while loading", () => {
     const html = renderToStaticMarkup(
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 1_234_567,
-        change24h: null,
+        change7d: null,
         isLoading: true,
         hasError: false,
         hasSnapshotError: false,
       }),
     );
-    expect(html).toContain("\u2026");
+    // Hero row + delta row both carry an animate-pulse shimmer during load.
+    expect(html).toMatch(/animate-pulse/);
     expect(html).not.toContain("$1.23M");
+    expect(html).not.toContain("\u2026");
   });
 
   it("renders a positive delta pill in emerald", () => {
@@ -596,7 +619,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
-        change24h: 2.13,
+        change7d: 2.13,
         isLoading: false,
         hasError: false,
         hasSnapshotError: false,
@@ -612,7 +635,7 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
-        change24h: -5.14,
+        change7d: -5.14,
         isLoading: false,
         hasError: false,
         hasSnapshotError: false,
@@ -645,23 +668,23 @@ describe("TvlOverTimeChart render", () => {
           }),
         ],
         totalTvl: 200,
-        change24h: 5.5,
+        change7d: 5.5,
         isLoading: false,
         hasError: true,
         hasSnapshotError: false,
       }),
     );
     expect(html).not.toContain("5.50%");
-    expect(html).not.toContain("past 24h");
+    expect(html).not.toContain("week-over-week");
     expect(html).toContain("· partial data");
   });
 
-  it("renders no delta pill when change24h is null", () => {
+  it("renders no delta pill when change7d is null", () => {
     const html = renderToStaticMarkup(
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
-        change24h: null,
+        change7d: null,
         isLoading: false,
         hasError: true,
         hasSnapshotError: false,
@@ -669,7 +692,7 @@ describe("TvlOverTimeChart render", () => {
     );
     expect(html).not.toContain("text-emerald-400");
     expect(html).not.toContain("text-red-400");
-    expect(html).not.toContain("past 24h");
+    expect(html).not.toContain("week-over-week");
   });
 
   it("suppresses the delta pill while loading", () => {
@@ -677,30 +700,30 @@ describe("TvlOverTimeChart render", () => {
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
-        change24h: 5.0,
+        change7d: 5.0,
         isLoading: true,
         hasError: false,
         hasSnapshotError: false,
       }),
     );
     expect(html).not.toContain("5.00%");
-    expect(html).not.toContain("past 24h");
+    expect(html).not.toContain("week-over-week");
   });
 
-  it("starts with the 'All' range active by default", () => {
+  it("starts with the 1M range active by default", () => {
     const html = renderToStaticMarkup(
       React.createElement(TvlOverTimeChart, {
         networkData: [],
         totalTvl: 0,
-        change24h: null,
+        change7d: null,
         isLoading: false,
         hasError: true,
         hasSnapshotError: false,
       }),
     );
-    expect(html).toMatch(/aria-pressed="true"[^>]*>All</);
+    expect(html).toMatch(/aria-pressed="true"[^>]*>1M</);
     expect(html).toMatch(/aria-pressed="false"[^>]*>1W</);
-    expect(html).toMatch(/aria-pressed="false"[^>]*>1M</);
+    expect(html).toMatch(/aria-pressed="false"[^>]*>All</);
   });
 
   it("passes scrollZoom=false and displayModeBar=false to Plotly config", () => {
@@ -721,7 +744,7 @@ describe("TvlOverTimeChart render", () => {
           }),
         ],
         totalTvl: 200,
-        change24h: null,
+        change7d: null,
         isLoading: false,
         hasError: false,
         hasSnapshotError: false,
@@ -749,7 +772,7 @@ describe("TvlOverTimeChart render", () => {
           }),
         ],
         totalTvl: 200,
-        change24h: null,
+        change7d: null,
         isLoading: false,
         hasError: false,
         hasSnapshotError: false,

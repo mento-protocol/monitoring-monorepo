@@ -16,12 +16,69 @@
 // ---------------------------------------------------------------------------
 
 import type { Pool, OracleSnapshot } from "generated";
+import FX_CALENDAR from "../config/fx-calendar.json";
 
 /** Safety cap for carry-forward duration (1 hour) */
 const MAX_CARRY_SECONDS = 3600n;
 
 /** Fixed decimal precision for ratio strings */
 const PRECISION = 6;
+
+// ---------------------------------------------------------------------------
+// Trading-second arithmetic: subtract FX weekend overlap from durations so
+// weekends are excluded from both numerator and denominator of the all-time
+// health score. Half-open semantics: Fri 21:00 UTC inclusive, Sun 23:00 UTC
+// exclusive. Constants come from config/fx-calendar.json (vendored copy of
+// shared-config/fx-calendar.json — Envio builds outside the pnpm workspace, so
+// the indexer can't depend on the shared package directly). The sync test at
+// test/fx-calendar.test.ts keeps the two files from drifting apart.
+// ---------------------------------------------------------------------------
+
+/** Fri 2024-01-05 21:00:00 UTC — anchor for the 7-day weekend cycle. */
+const ANCHOR_FRI_2100 = BigInt(FX_CALENDAR.anchorFri2100UnixSec);
+const WEEK_SECONDS = 7n * 24n * 3600n;
+/** Derived from all four calendar fields so the weekend arithmetic stays
+ * in lockstep with isWeekend() on the UI side. For Fri 21:00 → Sun 23:00
+ * this evaluates to 50h (180000s). */
+const WEEKEND_DURATION_SECONDS = BigInt(
+  ((FX_CALENDAR.fxReopenDay - FX_CALENDAR.fxCloseDay + 7) % 7) * 86400 +
+    (FX_CALENDAR.fxReopenHourUtc - FX_CALENDAR.fxCloseHourUtc) * 3600,
+);
+
+/**
+ * Seconds in [startTs, endTs) that fall inside FX weekend windows.
+ * Closed-form, one iteration per overlapping week.
+ */
+function weekendOverlapSeconds(startTs: bigint, endTs: bigint): bigint {
+  if (endTs <= startTs) return 0n;
+  let total = 0n;
+  // BigInt `/` truncates toward zero; adjust for negative non-exact offsets
+  // so k floors toward -∞ (weekends before the anchor enumerate correctly).
+  const offset = startTs - ANCHOR_FRI_2100;
+  let k = offset / WEEK_SECONDS;
+  if (offset < 0n && offset % WEEK_SECONDS !== 0n) k -= 1n;
+  while (true) {
+    const wStart = ANCHOR_FRI_2100 + k * WEEK_SECONDS;
+    const wEnd = wStart + WEEKEND_DURATION_SECONDS;
+    if (wStart >= endTs) break;
+    if (wEnd > startTs) {
+      const lo = wStart > startTs ? wStart : startTs;
+      const hi = wEnd < endTs ? wEnd : endTs;
+      total += hi - lo;
+    }
+    k += 1n;
+  }
+  return total;
+}
+
+/**
+ * Seconds in [startTs, endTs) that fall outside FX weekend windows.
+ * Used by the accumulator so weekend gaps aren't counted as stale.
+ */
+export function tradingSecondsInRange(startTs: bigint, endTs: bigint): bigint {
+  if (endTs <= startTs) return 0n;
+  return endTs - startTs - weekendOverlapSeconds(startTs, endTs);
+}
 
 // ---------------------------------------------------------------------------
 // Pure computation: per-snapshot fields
@@ -127,19 +184,24 @@ export function updateHealthAccumulators(
     };
   }
 
-  // Normal case: positive duration interval
-  const duration = currentTimestamp - lastTs;
+  // Normal case: positive duration interval.
+  // Measure in trading-seconds so FX weekend wall-clock time is excluded
+  // from both numerator and denominator (matches UI computeBinaryHealthWindow).
+  const duration = tradingSecondsInRange(lastTs, currentTimestamp);
 
-  // Freshness limit = min(pool.oracleExpiry, MAX_CARRY_SECONDS)
-  // oracleExpiry of 0 means unknown — fall back to MAX_CARRY_SECONDS
+  // Match UI computeBinaryHealthWindow: freshness is wall-clock (a snapshot
+  // expires at a wall-clock moment regardless of weekend), then the carry
+  // range is measured in trading-seconds.
+  // oracleExpiry of 0 means unknown — fall back to MAX_CARRY_SECONDS.
   const oracleExpiry =
     pool.oracleExpiry > 0n ? pool.oracleExpiry : MAX_CARRY_SECONDS;
   const freshnessLimit =
     oracleExpiry < MAX_CARRY_SECONDS ? oracleExpiry : MAX_CARRY_SECONDS;
-
-  // Split: carry segment + stale segment
-  const carrySeconds = duration <= freshnessLimit ? duration : freshnessLimit;
-  // staleSeconds = duration - carrySeconds (always unhealthy, h=0)
+  const freshnessEnd = lastTs + freshnessLimit;
+  const carryEnd =
+    currentTimestamp < freshnessEnd ? currentTimestamp : freshnessEnd;
+  const carrySeconds = tradingSecondsInRange(lastTs, carryEnd);
+  // duration is already trading-seconds; so is carrySeconds. stale = duration - carry.
 
   // Was the PREVIOUS interval healthy?
   // Use string comparison against sentinel to avoid float boundary issues.

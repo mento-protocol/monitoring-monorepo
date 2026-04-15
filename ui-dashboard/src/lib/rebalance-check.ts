@@ -28,6 +28,9 @@ const STRATEGY_ABI = parseAbi([
   "function getCDPConfig(address pool) external view returns ((address stabilityPool, address collateralRegistry, uint256 stabilityPoolPercentage, uint256 maxIterations))",
   // ReserveLiquidityStrategy-specific
   "function reserve() external view returns (address)",
+  // OpenLiquidityStrategy-specific — used only for strategy-type detection.
+  // getPools() is zero-arg so the probe is cheap and OLS-exclusive.
+  "function getPools() external view returns (address[])",
   // Errors — shared (LS_*)
   "error LS_BAD_INCENTIVE()",
   "error LS_CAN_ONLY_REBALANCE_ONCE(address pool)",
@@ -61,6 +64,9 @@ const STRATEGY_ABI = parseAbi([
   "error RLS_RESERVE_OUT_OF_COLLATERAL()",
   "error RLS_TOKEN_IN_NOT_SUPPORTED()",
   "error RLS_TOKEN_OUT_NOT_SUPPORTED()",
+  // OpenLiquidityStrategy errors
+  "error OLS_OUT_OF_COLLATERAL()",
+  "error OLS_OUT_OF_DEBT()",
   // FPMM pool-side errors (can bubble through strategy.rebalance → pool.rebalance)
   "error NotLiquidityStrategy()",
   "error PriceDifferenceTooSmall()",
@@ -108,6 +114,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   RLS_COLLATERAL_TO_POOL_FAILED: "Collateral transfer to pool failed",
   RLS_TOKEN_IN_NOT_SUPPORTED: "Collateral token not supported by reserve",
   RLS_TOKEN_OUT_NOT_SUPPORTED: "Debt token not supported by reserve",
+  // Open liquidity strategy
+  OLS_OUT_OF_COLLATERAL:
+    "Strategy has no collateral liquidity available to rebalance",
+  OLS_OUT_OF_DEBT: "Strategy has no debt liquidity available to rebalance",
   // Shared
   LS_COOLDOWN_ACTIVE: "Rebalance cooldown is active — retry shortly",
   LS_POOL_NOT_REBALANCEABLE: "Pool deviation is below the rebalance threshold",
@@ -148,7 +158,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 // Types
 // ---------------------------------------------------------------------------
 
-export type StrategyType = "cdp" | "reserve" | "unknown";
+export type StrategyType = "cdp" | "reserve" | "ols" | "unknown";
 
 export type RebalanceCheckResult = {
   canRebalance: boolean;
@@ -181,6 +191,48 @@ export type StrategyEnrichment =
       /** Decimals of the collateral token */
       collateralTokenDecimals: number;
     };
+
+// ---------------------------------------------------------------------------
+// Healthy no-op detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Revert codes where the strategy refuses to rebalance BECAUSE the pool
+ * is healthy — not because anything is wrong. Callers should treat these
+ * as passive "no action needed" states rather than rendering a red
+ * "Rebalance blocked" alarm.
+ *
+ * Both the strategy-side (`LS_POOL_NOT_REBALANCEABLE`) and pool-side
+ * (`PriceDifferenceTooSmall`) codes map to "deviation is below the
+ * rebalance threshold" — the expected healthy outcome, especially at
+ * exactly-threshold deviation under the `> threshold` CRITICAL semantics.
+ */
+const HEALTHY_NO_OP_ERRORS: ReadonlySet<string> = new Set([
+  "LS_POOL_NOT_REBALANCEABLE",
+  "PriceDifferenceTooSmall",
+]);
+
+export function isHealthyNoOp(rawError: string | null | undefined): boolean {
+  return rawError != null && HEALTHY_NO_OP_ERRORS.has(rawError);
+}
+
+// ---------------------------------------------------------------------------
+// Explorer deep-link for rebalance()
+// ---------------------------------------------------------------------------
+
+/**
+ * Deep-link into the explorer's proxy-write tab for the strategy.
+ *
+ * Avoid row-index anchors like `#F4`: explorer ABI ordering is not a stable
+ * contract, and different strategy implementations/proxies can shift function
+ * positions while still exposing rebalance(address).
+ */
+export function strategyRebalanceWriteUrl(
+  explorerBaseUrl: string,
+  strategyAddress: string,
+): string {
+  return `${explorerBaseUrl}/address/${strategyAddress}#writeProxyContract`;
+}
 
 // ---------------------------------------------------------------------------
 // Core check
@@ -216,18 +268,25 @@ export async function checkRebalanceStatus(
     };
   }
 
-  // 2. Simulate rebalance(pool) via eth_call
+  // 2. Probe the strategy. OLS rebalance() transfers tokens to/from msg.sender,
+  //    so simulating from address(0) always reverts inside ERC20 — meaningless.
+  //    Use determineAction(pool) instead, which is view-only and handles the
+  //    zero-sender path explicitly in _clampExpansion/_clampContraction.
+  //    CDP/Reserve source tokens from the strategy contract itself, so the
+  //    rebalance() simulation from address(0) is valid for them.
+  const probeFn = strategyType === "ols" ? "determineAction" : "rebalance";
+
   try {
     await client.call({
       to: strategy,
       data: encodeFunctionData({
         abi: STRATEGY_ABI,
-        functionName: "rebalance",
+        functionName: probeFn,
         args: [pool],
       }),
     });
 
-    // If we reach here, rebalance would succeed
+    // If we reach here, the probe succeeded.
     return {
       canRebalance: true,
       message: "Rebalance is currently possible",
@@ -284,6 +343,19 @@ async function detectStrategyType(
     if (!isContractRevert(err)) throw err;
   }
 
+  // OLS probe — getPools() is OLS-exclusive and zero-arg, so the selector alone
+  // is enough to distinguish from CDP / Reserve strategies.
+  try {
+    await client.readContract({
+      address: strategy,
+      abi: STRATEGY_ABI,
+      functionName: "getPools",
+    });
+    return "ols";
+  } catch (err) {
+    if (!isContractRevert(err)) throw err;
+  }
+
   return "unknown";
 }
 
@@ -314,12 +386,14 @@ async function handleRevert(
 
   // Decode the custom error
   let errorName: string;
+  let errorArgs: readonly unknown[] | undefined;
   try {
     const decoded = decodeErrorResult({
       abi: STRATEGY_ABI,
       data: revertData,
     });
     errorName = decoded.errorName;
+    errorArgs = decoded.args;
   } catch {
     return {
       canRebalance: false,
@@ -330,8 +404,17 @@ async function handleRevert(
     };
   }
 
-  const humanMessage =
-    ERROR_MESSAGES[errorName] ?? `Rebalance reverted: ${errorName}`;
+  // Built-in Solidity reverts don't carry a meaningful error name — surface
+  // the embedded message/code instead of "Rebalance reverted: Error".
+  let humanMessage: string;
+  if (errorName === "Error" && typeof errorArgs?.[0] === "string") {
+    humanMessage = `Rebalance reverted: ${errorArgs[0]}`;
+  } else if (errorName === "Panic" && typeof errorArgs?.[0] === "bigint") {
+    humanMessage = `Rebalance panicked (code 0x${errorArgs[0].toString(16)})`;
+  } else {
+    humanMessage =
+      ERROR_MESSAGES[errorName] ?? `Rebalance reverted: ${errorName}`;
+  }
 
   // Fetch enrichment data for specific errors
   let enrichment: StrategyEnrichment | null = null;
@@ -347,10 +430,14 @@ async function handleRevert(
     enrichment = await fetchReserveEnrichment(client, strategy, pool);
   }
 
+  // Suppress noisy "[Error]" / "[Panic]" tags on the UI — for built-in reverts
+  // the meaningful bit is already embedded in `message`.
+  const isBuiltInRevert = errorName === "Error" || errorName === "Panic";
+
   return {
     canRebalance: false,
     message: humanMessage,
-    rawError: errorName,
+    rawError: isBuiltInRevert ? null : errorName,
     strategyType,
     enrichment,
   };
@@ -366,8 +453,15 @@ function isContractRevert(err: unknown): boolean {
   // Viem tags contract reverts with "revert" — match that specifically,
   // but NOT loose "execution" which also appears in provider-level errors
   // like "execution timeout" or "execution aborted".
+  //
+  // `returned no data ("0x")` covers viem's no-code / wrong-ABI path
+  // (ContractFunctionZeroDataError) — we want to treat "contract doesn't
+  // implement this function" the same as an explicit revert for probe
+  // purposes so EOAs / misconfigured strategy addresses land in the
+  // neutral "Unable to identify" fallback instead of bubbling up as a
+  // transport-level "Diagnostics unavailable".
   const msg = (err as { message?: string }).message ?? "";
-  return /revert/i.test(msg);
+  return /revert|returned no data/i.test(msg);
 }
 
 function extractRevertData(err: unknown): Hex | null {
@@ -406,6 +500,27 @@ function extractRawMessage(err: unknown): string | null {
 // ---------------------------------------------------------------------------
 // Strategy-specific enrichment
 // ---------------------------------------------------------------------------
+
+/**
+ * Convert a raw on-chain uint256 balance to a human-units number without
+ * losing precision when the raw value exceeds 2^53. `Number(bigint) /
+ * 10**decimals` truncates bits past 2^53, which for an 18-decimal token
+ * kicks in around 9M whole tokens — well within realistic supplies. We
+ * scale down in BigInt first so the Number cast is always safe.
+ *
+ * Fractional precision is capped at 6 digits (far more than the tooltip
+ * needs) to keep the final Number representation lossless.
+ */
+export function toHumanUnits(raw: bigint, decimals: number): number {
+  if (decimals <= 0) return Number(raw);
+  // BigInt(...) call form rather than `10n` literal — the ui-dashboard
+  // tsconfig targets ES2017, which doesn't emit BigInt literals.
+  const divisor = BigInt(10) ** BigInt(decimals);
+  const whole = raw / divisor;
+  const fractionScale = BigInt(1_000_000);
+  const fraction = ((raw % divisor) * fractionScale) / divisor;
+  return Number(whole) + Number(fraction) / Number(fractionScale);
+}
 
 async function fetchCDPEnrichment(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -451,8 +566,10 @@ async function fetchCDPEnrichment(
 
     return {
       type: "cdp",
-      stabilityPoolBalance:
-        Number(totalDeposits as bigint) / 10 ** Number(decimals),
+      stabilityPoolBalance: toHumanUnits(
+        totalDeposits as bigint,
+        Number(decimals),
+      ),
       stabilityPoolTokenSymbol: symbol as string,
       stabilityPoolTokenDecimals: Number(decimals),
     };
@@ -530,8 +647,10 @@ async function fetchReserveEnrichment(
 
     return {
       type: "reserve",
-      reserveCollateralBalance:
-        Number(balance as bigint) / 10 ** Number(decimals),
+      reserveCollateralBalance: toHumanUnits(
+        balance as bigint,
+        Number(decimals),
+      ),
       collateralTokenSymbol: symbol as string,
       collateralTokenDecimals: Number(decimals),
     };

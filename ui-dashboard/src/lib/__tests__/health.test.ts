@@ -100,8 +100,9 @@ describe("computeHealthStatus", () => {
     ).toBe("WARN");
   });
 
-  it('returns "CRITICAL" when deviation >= threshold', () => {
-    // priceDifference = 5000, threshold = 5000 → ratio = 1.0 → CRITICAL
+  it('returns "WARN" (not "CRITICAL") when deviation is exactly at threshold', () => {
+    // priceDifference = 5000, threshold = 5000 → ratio = 1.0. Sitting right
+    // at the rebalance line stays WARN — CRITICAL triggers only above it.
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
@@ -110,11 +111,13 @@ describe("computeHealthStatus", () => {
         priceDifference: "5000",
         rebalanceThreshold: 5000,
       }),
-    ).toBe("CRITICAL");
+    ).toBe("WARN");
   });
 
   it('returns "CRITICAL" when deviation exceeds threshold', () => {
     // priceDifference = 8000, threshold = 5000 → ratio = 1.6 → CRITICAL
+    // No lastRebalancedAt means we don't have a recent-rebalance anchor
+    // to justify staying at WARN.
     expect(
       computeHealthStatus({
         source: "fpmm_rebalanced",
@@ -122,6 +125,57 @@ describe("computeHealthStatus", () => {
         oracleTimestamp: FRESH_TS,
         priceDifference: "8000",
         rebalanceThreshold: 5000,
+      }),
+    ).toBe("CRITICAL");
+  });
+
+  it("keeps a fresh breach at WARN when a rebalance landed within the grace window", () => {
+    // Cross-chain rebalances take time to land. If a rebalance settled
+    // within the last hour, assume another may be in flight and don't
+    // escalate yet.
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "fpmm_factory",
+          oracleTimestamp: FRESH_TS,
+          priceDifference: "8000",
+          rebalanceThreshold: 5000,
+          lastRebalancedAt: String(now - 30 * 60), // 30 minutes ago
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("WARN");
+  });
+
+  it("escalates to CRITICAL once the breach outlasts the grace window", () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "fpmm_factory",
+          oracleTimestamp: FRESH_TS,
+          priceDifference: "8000",
+          rebalanceThreshold: 5000,
+          lastRebalancedAt: String(now - 2 * 3600), // 2h ago — past 1h grace
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it("treats null lastRebalancedAt like no rebalance ever → CRITICAL when breached", () => {
+    // Hasura emits null for absent nullable fields; the grace window has
+    // no anchor, so we fall straight to CRITICAL.
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "8000",
+        rebalanceThreshold: 5000,
+        lastRebalancedAt: null,
       }),
     ).toBe("CRITICAL");
   });
@@ -397,11 +451,13 @@ describe("worstStatus", () => {
 
 describe("computeEffectiveStatus", () => {
   it("returns the oracle health when limit is better", () => {
+    // priceDifference = 6000, threshold = 5000 → ratio = 1.2 → CRITICAL
+    // (needs to be strictly above threshold, not merely equal to it)
     expect(
       computeEffectiveStatus({
         source: "fpmm_factory",
         oracleTimestamp: FRESH_TS,
-        priceDifference: "5000",
+        priceDifference: "6000",
         rebalanceThreshold: 5000,
         limitPressure0: "0.1",
         limitPressure1: "0.1",

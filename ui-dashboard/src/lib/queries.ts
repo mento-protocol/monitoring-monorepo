@@ -47,6 +47,14 @@ export const ALL_POOLS_WITH_HEALTH = `
   }
 `;
 
+// WARNING: Envio's hosted Hasura silently caps results at 1000 rows regardless
+// of the requested limit. The `limit: 100000` is honored by self-hosted /
+// local Hasura (no such cap), so the explicit value stays high for the
+// benefit of dev/local envs. On hosted, this query returns at most 1000
+// rows per call — safe for 24h windows today, risky for 7d/30d as protocol
+// activity grows. For paginated / truncation-safe fetches use
+// `fetchAllSnapshotPages` in `src/hooks/use-all-networks-data.ts`
+// (paginates via POOL_SNAPSHOTS_ALL).
 export const POOL_SNAPSHOTS_WINDOW = `
   query PoolSnapshotsWindow($from: numeric!, $to: numeric!, $poolIds: [String!]!) {
     PoolSnapshot(
@@ -56,6 +64,33 @@ export const POOL_SNAPSHOTS_WINDOW = `
       }
       order_by: { timestamp: desc }
       limit: 100000
+    ) {
+      poolId
+      timestamp
+      reserves0
+      reserves1
+      swapCount
+      swapVolume0
+      swapVolume1
+    }
+  }
+`;
+
+// Envio's hosted Hasura silently caps every query at 1000 rows regardless of
+// the requested limit. To fetch full history we must paginate with $offset;
+// the hook's fetchAllSnapshotPages wrapper handles the loop.
+//
+// Order includes `id` as a deterministic tiebreaker — multiple pools' hourly
+// snapshots share the same UTC-hour timestamp, and without a unique secondary
+// sort key Postgres tie ordering isn't stable across paginated requests,
+// which would duplicate or skip rows at page boundaries.
+export const POOL_SNAPSHOTS_ALL = `
+  query PoolSnapshotsAll($poolIds: [String!]!, $limit: Int!, $offset: Int!) {
+    PoolSnapshot(
+      where: { poolId: { _in: $poolIds } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+      offset: $offset
     ) {
       poolId
       timestamp
@@ -119,6 +154,30 @@ export const POOL_REBALANCES = `
       id chainId sender caller priceDifferenceBefore priceDifferenceAfter
       txHash blockNumber blockTimestamp
       improvement effectivenessRatio
+    }
+  }
+`;
+
+/**
+ * Latest rebalance tx for a pool scoped to a specific strategy. Used by the
+ * pool header's Rebalance Status cell to attribute the "last Ns ago" link
+ * to the ACTIVE strategy — unscoped lookups would return txs from rotated
+ * strategies and link the wrong event under the current strategy label.
+ *
+ * `sender` is the strategy address on RebalanceEvent (the "Strategy" column
+ * in the Rebalances tab). Pass lowercased; Envio stores addresses lowercase.
+ */
+export const LATEST_POOL_REBALANCE_FOR_STRATEGY = `
+  query LatestPoolRebalanceForStrategy($poolId: String!, $strategy: String!) {
+    RebalanceEvent(
+      where: {
+        poolId: { _eq: $poolId }
+        sender: { _eq: $strategy }
+      }
+      order_by: { blockNumber: desc }
+      limit: 1
+    ) {
+      txHash
     }
   }
 `;
