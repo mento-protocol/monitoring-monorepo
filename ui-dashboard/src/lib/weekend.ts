@@ -4,15 +4,17 @@
  * Traditional FX markets are closed from Friday ~21:00 UTC to Sunday ~23:00 UTC.
  * During this window, oracle price data goes stale and pools cannot be traded.
  * This is expected behaviour — NOT a health incident.
+ *
+ * All weekday/hour constants come from shared-config/fx-calendar.json so the UI
+ * and the indexer's healthscore math stay in lockstep.
  */
 
-/** UTC hour on Friday when FX markets close (approx). */
-export const FX_CLOSE_DAY = 5; // Friday (0=Sun, 5=Fri, 6=Sat)
-export const FX_CLOSE_HOUR_UTC = 21;
+import FX_CALENDAR from "@mento-protocol/monitoring-config/fx-calendar.json";
 
-/** UTC hour on Sunday when FX markets reopen (approx). */
-export const FX_REOPEN_DAY = 0; // Sunday
-export const FX_REOPEN_HOUR_UTC = 23;
+export const FX_CLOSE_DAY = FX_CALENDAR.fxCloseDay;
+export const FX_CLOSE_HOUR_UTC = FX_CALENDAR.fxCloseHourUtc;
+export const FX_REOPEN_DAY = FX_CALENDAR.fxReopenDay;
+export const FX_REOPEN_HOUR_UTC = FX_CALENDAR.fxReopenHourUtc;
 
 /**
  * Returns true if the given time falls within the FX weekend closure window.
@@ -67,11 +69,11 @@ export function isWeekendOracleStale(
 // numerator and denominator.
 //
 // Half-open semantics match isWeekend(): Fri 21:00 UTC inclusive,
-// Sun 23:00 UTC exclusive. 50h = 180000s per weekend.
+// Sun 23:00 UTC exclusive.
 // ---------------------------------------------------------------------------
 
 /** Fri 2024-01-05 21:00:00 UTC — anchor for the 7-day weekend cycle. */
-export const ANCHOR_FRI_2100 = 1704488400;
+export const ANCHOR_FRI_2100 = FX_CALENDAR.anchorFri2100UnixSec;
 const WEEK_SECONDS = 7 * 24 * 3600;
 const WEEKEND_DURATION_SECONDS =
   (24 - FX_CLOSE_HOUR_UTC + 24 + FX_REOPEN_HOUR_UTC) * 3600;
