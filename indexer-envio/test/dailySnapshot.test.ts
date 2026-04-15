@@ -33,7 +33,12 @@ type GeneratedModule = {
   TestHelpers: {
     MockDb: { createMockDb: () => MockDb };
     FPMMFactory: { FPMMDeployed: EventProcessor };
-    FPMM: { Swap: EventProcessor; UpdateReserves: EventProcessor };
+    FPMM: {
+      Swap: EventProcessor;
+      UpdateReserves: EventProcessor;
+      Mint: EventProcessor;
+      Burn: EventProcessor;
+    };
     VirtualPoolFactory: { VirtualPoolDeployed: EventProcessor };
     VirtualPool: { Swap: EventProcessor; UpdateReserves: EventProcessor };
   };
@@ -50,6 +55,8 @@ type SnapshotLike = {
   swapCount: number;
   swapVolume0: bigint;
   swapVolume1: bigint;
+  mintCount: number;
+  burnCount: number;
   cumulativeSwapCount: number;
   cumulativeVolume0: bigint;
 };
@@ -73,6 +80,50 @@ const deployPool = async (
     },
   });
   return FPMMFactory.FPMMDeployed.processEvent({ event: deployEvent, mockDb });
+};
+
+const fireMint = async (
+  mockDb: MockDb,
+  poolAddr: string,
+  blockNumber: number,
+  blockTimestamp: number,
+): Promise<MockDb> => {
+  const mintEvent = FPMM.Mint.createMockEvent({
+    sender: "0x0000000000000000000000000000000000000011",
+    to: "0x0000000000000000000000000000000000000022",
+    amount0: 1_000_000_000_000_000_000n,
+    amount1: 1_000_000_000_000_000_000n,
+    liquidity: 1_000_000_000_000_000_000n,
+    mockEventData: {
+      chainId: 42220,
+      logIndex: 1,
+      srcAddress: poolAddr,
+      block: { number: blockNumber, timestamp: blockTimestamp },
+    },
+  });
+  return FPMM.Mint.processEvent({ event: mintEvent, mockDb });
+};
+
+const fireBurn = async (
+  mockDb: MockDb,
+  poolAddr: string,
+  blockNumber: number,
+  blockTimestamp: number,
+): Promise<MockDb> => {
+  const burnEvent = FPMM.Burn.createMockEvent({
+    sender: "0x0000000000000000000000000000000000000011",
+    to: "0x0000000000000000000000000000000000000022",
+    amount0: 1_000_000_000_000_000_000n,
+    amount1: 1_000_000_000_000_000_000n,
+    liquidity: 1_000_000_000_000_000_000n,
+    mockEventData: {
+      chainId: 42220,
+      logIndex: 1,
+      srcAddress: poolAddr,
+      block: { number: blockNumber, timestamp: blockTimestamp },
+    },
+  });
+  return FPMM.Burn.processEvent({ event: burnEvent, mockDb });
 };
 
 /**
@@ -330,6 +381,47 @@ describe("PoolDailySnapshot rollup", () => {
       5_000_000_000_000_000_000n,
       "swapVolume0 correct",
     );
+  });
+
+  it("FPMM.Mint increments mintCount but leaves swapCount zero in PoolDailySnapshot", async () => {
+    // Mints don't carry volume — the rollup must not confuse mintCount with
+    // swapCount or touch swapVolume fields.
+    const POOL_ADDR = "0x00000000000000000000000000000000000000f4";
+    const TS = 1_736_940_000;
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await deployPool(mockDb, POOL_ADDR, 500, TS - 10);
+    mockDb = await fireMint(mockDb, POOL_ADDR, 501, TS);
+
+    const dayTs = dayBucket(BigInt(TS));
+    const dailyId = dailySnapshotId(pid(POOL_ADDR), dayTs);
+    const daily = mockDb.entities.PoolDailySnapshot.get(dailyId) as
+      | SnapshotLike
+      | undefined;
+    assert.ok(daily, "PoolDailySnapshot must exist after Mint");
+    assert.equal(daily!.mintCount, 1, "mintCount incremented");
+    assert.equal(daily!.swapCount, 0, "swapCount untouched by Mint");
+    assert.equal(daily!.swapVolume0, 0n, "swapVolume0 untouched by Mint");
+  });
+
+  it("FPMM.Burn increments burnCount but leaves swapCount zero in PoolDailySnapshot", async () => {
+    // Burns don't carry volume — same guard as Mint.
+    const POOL_ADDR = "0x00000000000000000000000000000000000000f5";
+    const TS = 1_736_940_000;
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await deployPool(mockDb, POOL_ADDR, 600, TS - 10);
+    mockDb = await fireBurn(mockDb, POOL_ADDR, 601, TS);
+
+    const dayTs = dayBucket(BigInt(TS));
+    const dailyId = dailySnapshotId(pid(POOL_ADDR), dayTs);
+    const daily = mockDb.entities.PoolDailySnapshot.get(dailyId) as
+      | SnapshotLike
+      | undefined;
+    assert.ok(daily, "PoolDailySnapshot must exist after Burn");
+    assert.equal(daily!.burnCount, 1, "burnCount incremented");
+    assert.equal(daily!.swapCount, 0, "swapCount untouched by Burn");
+    assert.equal(daily!.swapVolume0, 0n, "swapVolume0 untouched by Burn");
   });
 });
 

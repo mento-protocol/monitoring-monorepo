@@ -62,13 +62,31 @@ vi.mock("graphql-request", () => {
 import { GraphQLClient } from "graphql-request";
 
 /**
- * Sets up a per-query mock. IMPORTANT: check PoolSnapshot before Pool,
- * since "Pool" is a substring of "PoolSnapshot".
+ * Sets up a per-query mock.
+ *
+ * Ordering matters — each entity name is a substring of every longer entity
+ * name that shares its prefix:
+ *   "Pool"              matches Pool, PoolSnapshot, PoolDailySnapshot
+ *   "PoolSnapshot"      matches PoolSnapshot, PoolDailySnapshot
+ *   "PoolDailySnapshot" matches only PoolDailySnapshot
+ *
+ * Check most-specific first (PoolDailySnapshot > PoolSnapshot > Pool).
+ * If `impl` does not handle a PoolDailySnapshot query (impl returns something
+ * without that key), we default to an empty page so the pagination loop exits
+ * cleanly rather than silently routing the query to the PoolSnapshot branch.
  */
 function mockRequest(impl: (query: string) => unknown) {
   (
     GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
-  ).mockImplementation((query: string) => Promise.resolve(impl(query)));
+  ).mockImplementation((query: string) => {
+    if (query.includes("PoolDailySnapshot")) {
+      const r = impl(query);
+      if (r != null && typeof r === "object" && "PoolDailySnapshot" in r)
+        return Promise.resolve(r);
+      return Promise.resolve({ PoolDailySnapshot: [] });
+    }
+    return Promise.resolve(impl(query));
+  });
 }
 
 beforeEach(() => {
