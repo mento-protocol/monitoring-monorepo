@@ -115,18 +115,18 @@ describe("globalPoolKey", () => {
 // ---------------------------------------------------------------------------
 
 describe("GlobalPoolsTable — column structure", () => {
-  it("renders Chain column header", () => {
+  it("renders a chain icon (with SVG title + Celo fill) before the pool name", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry()]} />,
     );
-    expect(html).toContain("Chain");
+    expect(html).toContain("<title>Celo</title>");
+    expect(html).toContain('fill="#FCFF52"');
   });
 
-  it("renders pool name and chain label in the row", () => {
+  it("renders pool name in the row", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry()]} />,
     );
-    expect(html).toContain("Celo");
     // Pool name: KESm/USDm (USDm is always last)
     expect(html).toContain("KESm");
     expect(html).toContain("USDm");
@@ -136,15 +136,22 @@ describe("GlobalPoolsTable — column structure", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[makeEntry()]} />,
     );
-    expect(html).toContain("Pool");
-    expect(html).toContain("Chain");
-    expect(html).toContain("Health");
-    expect(html).toContain("TVL");
+    expect(html).toContain(">Pool<");
+    expect(html).toContain(">Health<");
+    expect(html).toContain(">TVL<");
+    expect(html).toContain("TVL Δ WoW");
     expect(html).toContain("24h Vol.");
     expect(html).toContain("7d Vol.");
     expect(html).toContain("Total Vol.");
-    expect(html).toContain("Swaps");
-    expect(html).toContain("Rebalances");
+    expect(html).toContain(">Swaps<");
+    expect(html).toContain(">Rebalances<");
+  });
+
+  it("does not render a Chain column header", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry()]} />,
+    );
+    expect(html).not.toContain(">Chain</button>");
   });
 
   it("hides Type column when no network has virtual pools", () => {
@@ -180,7 +187,7 @@ describe("GlobalPoolsTable — column structure", () => {
     );
     expect(html).toContain(">Type</th>");
     expect(html).toContain("FPMM");
-    expect(html).toContain("Monad");
+    expect(html).toContain("<title>Monad</title>");
   });
 });
 
@@ -257,15 +264,96 @@ describe("GlobalPoolsTable — 7d volume states", () => {
   });
 });
 
+describe("GlobalPoolsTable — TVL WoW column", () => {
+  it("renders em-dash in the WoW cell when tvlChangeWoWByKey is missing", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[makeEntry()]} />,
+    );
+    expect(html).toMatch(/font-mono text-slate-600[^>]*>—/);
+  });
+
+  it("renders em-dash in the WoW cell when WoW value is null", () => {
+    const entry = makeEntry({ id: "pool-1" });
+    const wowMap = new Map<string, number | null>([
+      [globalPoolKey(entry), null],
+    ]);
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
+    );
+    expect(html).toMatch(/font-mono text-slate-600[^>]*>—/);
+  });
+
+  it("renders positive WoW with + prefix and emerald color in the same cell", () => {
+    const entry = makeEntry({ id: "pool-1" });
+    const wowMap = new Map<string, number | null>([
+      [globalPoolKey(entry), 2.345],
+    ]);
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
+    );
+    expect(html).toMatch(/text-emerald-400[^<]*>\+2\.35%/);
+  });
+
+  it("renders negative WoW with - prefix and red color in the same cell", () => {
+    const entry = makeEntry({ id: "pool-1" });
+    const wowMap = new Map<string, number | null>([
+      [globalPoolKey(entry), -1.1],
+    ]);
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
+    );
+    expect(html).toMatch(/text-red-400[^<]*>-1\.10%/);
+  });
+});
+
+describe("sortGlobalPools — tvlChangeWoW nulls last", () => {
+  it("sinks null WoW entries to the bottom when sorted desc", () => {
+    const a = makeEntry({ id: "a" });
+    const b = makeEntry({ id: "b" });
+    const c = makeEntry({ id: "c" });
+    const wowMap = new Map<string, number | null>([
+      [globalPoolKey(a), 5],
+      [globalPoolKey(b), null],
+      [globalPoolKey(c), -3],
+    ]);
+    const ctx: GlobalSortContext = {
+      ...BASE_SORT_CTX,
+      tvlChangeWoWByKey: wowMap,
+    };
+    const desc = sortGlobalPools([b, a, c], "tvlChangeWoW", "desc", ctx);
+    expect(desc.map((e) => e.pool.id)).toEqual(["a", "c", "b"]);
+  });
+
+  it("sinks null WoW entries to the bottom when sorted asc", () => {
+    const a = makeEntry({ id: "a" });
+    const b = makeEntry({ id: "b" });
+    const c = makeEntry({ id: "c" });
+    const wowMap = new Map<string, number | null>([
+      [globalPoolKey(a), 5],
+      [globalPoolKey(b), null],
+      [globalPoolKey(c), -3],
+    ]);
+    const ctx: GlobalSortContext = {
+      ...BASE_SORT_CTX,
+      tvlChangeWoWByKey: wowMap,
+    };
+    const asc = sortGlobalPools([b, a, c], "tvlChangeWoW", "asc", ctx);
+    expect(asc.map((e) => e.pool.id)).toEqual(["c", "a", "b"]);
+  });
+});
+
 describe("GlobalPoolsTable — multiple chains", () => {
-  it("renders rows for pools from multiple chains", () => {
+  it("renders one row per pool entry across chains", () => {
     const celoEntry = makeEntry({ id: "pool-1" }, CELO_NETWORK);
     const monadEntry = makeEntry({ id: "pool-1" }, MONAD_NETWORK);
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[celoEntry, monadEntry]} />,
     );
-    expect(html).toContain("Celo");
-    expect(html).toContain("Monad");
+    expect(html).toContain("<title>Celo</title>");
+    expect(html).toContain("<title>Monad</title>");
+    // header row + 2 data rows = 3 <tr>
+    const trCount = (html.match(/<tr\b/g) ?? []).length;
+    expect(trCount).toBe(3);
   });
 });
 
@@ -307,30 +395,5 @@ describe("sortGlobalPools — TVL descending (default)", () => {
     };
     const result = sortGlobalPools([high, low], "tvl", "asc", ctx);
     expect(result.map((e) => e.pool.id)).toEqual(["low", "high"]);
-  });
-});
-
-describe("sortGlobalPools — chain sort", () => {
-  it("orders by chain label alphabetically", () => {
-    const celoEntry = makeEntry({ id: "pool-a" }, CELO_NETWORK);
-    const monadEntry = makeEntry({ id: "pool-b" }, MONAD_NETWORK);
-    // "Celo" < "Monad" alphabetically
-    const asc = sortGlobalPools(
-      [monadEntry, celoEntry],
-      "chain",
-      "asc",
-      BASE_SORT_CTX,
-    );
-    expect(asc[0].network.label).toBe("Celo");
-    expect(asc[1].network.label).toBe("Monad");
-
-    const desc = sortGlobalPools(
-      [celoEntry, monadEntry],
-      "chain",
-      "desc",
-      BASE_SORT_CTX,
-    );
-    expect(desc[0].network.label).toBe("Monad");
-    expect(desc[1].network.label).toBe("Celo");
   });
 });

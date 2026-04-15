@@ -8,6 +8,7 @@ import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
 import { Table, Row, Th } from "@/components/table";
 import { SourceBadge, HealthBadge } from "@/components/badges";
+import { ChainIcon } from "@/components/chain-icon";
 import {
   computeHealthStatus,
   computeLimitStatus,
@@ -27,9 +28,9 @@ export type GlobalPoolEntry = {
 
 export type GlobalSortKey =
   | "pool"
-  | "chain"
   | "health"
   | "tvl"
+  | "tvlChangeWoW"
   | "volume24h"
   | "volume7d"
   | "totalVolume"
@@ -57,6 +58,7 @@ export interface GlobalSortContext {
   totalVolumeByKey: Map<string, number | null>;
   volume24hByKey?: Map<string, number | null | undefined>;
   volume7dByKey?: Map<string, number | null | undefined>;
+  tvlChangeWoWByKey?: Map<string, number | null>;
 }
 
 export function sortGlobalPools(
@@ -68,6 +70,7 @@ export function sortGlobalPools(
     totalVolumeByKey,
     volume24hByKey,
     volume7dByKey,
+    tvlChangeWoWByKey,
   }: GlobalSortContext,
 ): GlobalPoolEntry[] {
   return [...entries].sort((a, b) => {
@@ -79,9 +82,6 @@ export function sortGlobalPools(
         cmp = poolName(a.network, a.pool.token0, a.pool.token1).localeCompare(
           poolName(b.network, b.pool.token0, b.pool.token1),
         );
-        break;
-      case "chain":
-        cmp = a.network.label.localeCompare(b.network.label);
         break;
       case "health": {
         const aH = worstStatus(
@@ -98,6 +98,15 @@ export function sortGlobalPools(
       case "tvl":
         cmp = (tvlByKey.get(aKey) ?? 0) - (tvlByKey.get(bKey) ?? 0);
         break;
+      case "tvlChangeWoW": {
+        // Nulls always sink to the bottom regardless of sort direction.
+        const aW = tvlChangeWoWByKey?.get(aKey);
+        const bW = tvlChangeWoWByKey?.get(bKey);
+        if (aW == null && bW == null) return 0;
+        if (aW == null) return 1;
+        if (bW == null) return -1;
+        return sortDir === "asc" ? aW - bW : bW - aW;
+      }
       case "volume24h": {
         const aV = volume24hByKey?.get(aKey) ?? 0;
         const bV = volume24hByKey?.get(bKey) ?? 0;
@@ -194,6 +203,8 @@ interface GlobalPoolsTableProps {
   volume7dByKey?: Map<string, number | null | undefined>;
   volume7dLoading?: boolean;
   volume7dError?: boolean;
+  /** Per-pool 7d TVL change in percent. `null` means no data for that pool. */
+  tvlChangeWoWByKey?: Map<string, number | null>;
 }
 
 export function GlobalPoolsTable({
@@ -204,6 +215,7 @@ export function GlobalPoolsTable({
   volume7dByKey,
   volume7dLoading = false,
   volume7dError = false,
+  tvlChangeWoWByKey,
 }: GlobalPoolsTableProps) {
   const [sortKey, setSortKey] = useState<GlobalSortKey>("tvl");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -246,6 +258,7 @@ export function GlobalPoolsTable({
         totalVolumeByKey,
         volume24hByKey,
         volume7dByKey,
+        tvlChangeWoWByKey,
       }),
     [
       entries,
@@ -255,6 +268,7 @@ export function GlobalPoolsTable({
       totalVolumeByKey,
       volume24hByKey,
       volume7dByKey,
+      tvlChangeWoWByKey,
     ],
   );
 
@@ -292,14 +306,6 @@ export function GlobalPoolsTable({
             >
               Pool
             </SortableTh>
-            <SortableTh
-              sortKey="chain"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
-            >
-              Chain
-            </SortableTh>
             {showVirtualPoolSource && <Th>Type</Th>}
             <SortableTh
               sortKey="health"
@@ -317,6 +323,15 @@ export function GlobalPoolsTable({
               className="hidden sm:table-cell"
             >
               TVL
+            </SortableTh>
+            <SortableTh
+              sortKey="tvlChangeWoW"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              className="hidden sm:table-cell"
+            >
+              TVL Δ WoW
             </SortableTh>
             <SortableTh
               sortKey="volume24h"
@@ -378,19 +393,28 @@ export function GlobalPoolsTable({
             const vol24h = volume24hByKey?.get(key);
             const vol7d = volume7dByKey?.get(key);
             const totalVol = totalVolumeByKey.get(key);
+            const wow = tvlChangeWoWByKey?.get(key) ?? null;
+            const wowColor =
+              wow == null
+                ? "text-slate-600"
+                : wow > 0
+                  ? "text-emerald-400"
+                  : wow < 0
+                    ? "text-red-400"
+                    : "text-slate-400";
             const poolHref = buildPoolDetailHref(p.id, network.id);
             return (
               <Row key={key}>
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
-                  <Link
-                    href={poolHref}
-                    className="font-semibold text-sm sm:text-base text-indigo-400 hover:text-indigo-300"
-                  >
-                    {poolName(network, p.token0, p.token1)}
-                  </Link>
-                </td>
-                <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-400 whitespace-nowrap">
-                  {network.label}
+                  <div className="flex items-center gap-2">
+                    <ChainIcon network={network} />
+                    <Link
+                      href={poolHref}
+                      className="font-semibold text-sm sm:text-base text-indigo-400 hover:text-indigo-300"
+                    >
+                      {poolName(network, p.token0, p.token1)}
+                    </Link>
+                  </div>
                 </td>
                 {showVirtualPoolSource && (
                   <td className="px-2 sm:px-4 py-2 sm:py-3">
@@ -417,6 +441,13 @@ export function GlobalPoolsTable({
                 </td>
                 <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
                   {tvl > 0 ? formatUSD(tvl) : "—"}
+                </td>
+                <td
+                  className={`hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm font-mono ${wowColor}`}
+                >
+                  {wow == null
+                    ? "—"
+                    : `${wow >= 0 ? "+" : ""}${wow.toFixed(2)}%`}
                 </td>
                 <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
                   {volume24hLoading

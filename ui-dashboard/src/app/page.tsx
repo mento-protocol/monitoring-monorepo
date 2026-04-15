@@ -29,19 +29,20 @@ export default function GlobalPage() {
 }
 
 /**
- * Returns matched current/historical TVL for pools that have snapshot data.
- * Only pools with a snapshot in the window contribute to both sides, so
- * newly-created pools (no historical snapshot) don't inflate the delta.
+ * For each FPMM pool with a snapshot in the window, returns current TVL (`now`)
+ * and historical TVL (`ago`, using today's rates on the earliest in-window
+ * reserves). Used for both the aggregate KPI delta and the per-pool WoW column,
+ * ensuring both derive from a single scan.
  *
  * Uses today's oracle rate (not the historical rate) so the percentage change
  * isolates reserve-quantity movements from price movements.
  */
-function matchedTvl(
+function perPoolTvlWindow(
   snapshots: PoolSnapshotWindow[],
   pools: Pool[],
   network: Network,
   rates: OracleRateMap,
-): { now: number; ago: number } {
+): Map<string, { now: number; ago: number }> {
   const fpmmMap = new Map(pools.filter(isFpmm).map((p) => [p.id, p]));
   const earliest = new Map<string, PoolSnapshotWindow>();
   for (const s of snapshots) {
@@ -51,18 +52,19 @@ function matchedTvl(
       earliest.set(s.poolId, s);
     }
   }
-  let now = 0;
-  let ago = 0;
+  const result = new Map<string, { now: number; ago: number }>();
   for (const [poolId, snap] of earliest) {
     const pool = fpmmMap.get(poolId)!;
-    now += poolTvlUSD(pool, network, rates);
-    ago += poolTvlUSD(
-      { ...pool, reserves0: snap.reserves0, reserves1: snap.reserves1 },
-      network,
-      rates,
-    );
+    result.set(poolId, {
+      now: poolTvlUSD(pool, network, rates),
+      ago: poolTvlUSD(
+        { ...pool, reserves0: snap.reserves0, reserves1: snap.reserves1 },
+        network,
+        rates,
+      ),
+    });
   }
-  return { now, ago };
+  return result;
 }
 
 function GlobalContent() {
@@ -95,192 +97,208 @@ function GlobalContent() {
 
   // Aggregate KPIs and per-pool volume maps in a single pass (no duplicate
   // buildPoolVolumeMap calls).
-  const { aggregated, globalEntries, volume24hByKey, volume7dByKey } =
-    useMemo(() => {
-      let totalPools = 0;
-      let totalFpmmPools = 0;
-      let totalTvl = 0;
-      // Track current + historical TVL only for chains that contributed
-      // snapshot data, so numerator and denominator always match. Uses the 7d
-      // window so weekend oracle stalls in FX pools don't distort the delta.
-      let tvlNow7d = 0;
-      let tvlAgo7d = 0;
-      let hasTvlSnapshots7d = false;
-      const allEntries: GlobalPoolEntry[] = [];
-      const allVol24h = new Map<string, number | null | undefined>();
-      const allVol7d = new Map<string, number | null | undefined>();
-      let totalVolumeAllTime: number | null = anyNetworkError ? null : 0;
-      let totalVolume24h: number | null =
-        anySnapshotsError || anyNetworkError ? null : 0;
-      let totalVolume7d: number | null =
-        anySnapshots7dError || anyNetworkError ? null : 0;
-      let totalVolume30d: number | null =
-        anySnapshots30dError || anyNetworkError ? null : 0;
-      let totalSwapsAllTime: number | null = anyNetworkError ? null : 0;
-      let totalFeesAllTime: number | null =
-        anyFeesError || anyNetworkError ? null : 0;
-      let totalFees24h: number | null =
-        anyFeesError || anyNetworkError ? null : 0;
-      let totalFees7d: number | null =
-        anyFeesError || anyNetworkError ? null : 0;
-      let totalFees30d: number | null =
-        anyFeesError || anyNetworkError ? null : 0;
-      const uniqueLpSet = new Set<string>();
-      let hasSuccessfulLpResult = false;
-      const unpricedSymbolSet = new Set<string>();
-      let isTruncated = false;
-      let totalUnresolvedCount = 0;
+  const {
+    aggregated,
+    globalEntries,
+    volume24hByKey,
+    volume7dByKey,
+    tvlChangeWoWByKey,
+  } = useMemo(() => {
+    let totalPools = 0;
+    let totalFpmmPools = 0;
+    let totalTvl = 0;
+    // Track current + historical TVL only for chains that contributed
+    // snapshot data, so numerator and denominator always match. Uses the 7d
+    // window so weekend oracle stalls in FX pools don't distort the delta.
+    let tvlNow7d = 0;
+    let tvlAgo7d = 0;
+    let hasTvlSnapshots7d = false;
+    const allEntries: GlobalPoolEntry[] = [];
+    const allVol24h = new Map<string, number | null | undefined>();
+    const allVol7d = new Map<string, number | null | undefined>();
+    const allTvlWoW = new Map<string, number | null>();
+    let totalVolumeAllTime: number | null = anyNetworkError ? null : 0;
+    let totalVolume24h: number | null =
+      anySnapshotsError || anyNetworkError ? null : 0;
+    let totalVolume7d: number | null =
+      anySnapshots7dError || anyNetworkError ? null : 0;
+    let totalVolume30d: number | null =
+      anySnapshots30dError || anyNetworkError ? null : 0;
+    let totalSwapsAllTime: number | null = anyNetworkError ? null : 0;
+    let totalFeesAllTime: number | null =
+      anyFeesError || anyNetworkError ? null : 0;
+    let totalFees24h: number | null =
+      anyFeesError || anyNetworkError ? null : 0;
+    let totalFees7d: number | null = anyFeesError || anyNetworkError ? null : 0;
+    let totalFees30d: number | null =
+      anyFeesError || anyNetworkError ? null : 0;
+    const uniqueLpSet = new Set<string>();
+    let hasSuccessfulLpResult = false;
+    const unpricedSymbolSet = new Set<string>();
+    let isTruncated = false;
+    let totalUnresolvedCount = 0;
 
-      for (const netData of networkData) {
-        if (netData.error !== null) continue;
+    for (const netData of networkData) {
+      if (netData.error !== null) continue;
 
-        const {
-          network,
-          pools,
-          snapshots,
-          snapshots7d,
-          snapshots30d,
-          fees,
-          rates,
-        } = netData;
-        const fpmmPools = pools.filter(isFpmm);
-        totalPools += pools.length;
-        totalFpmmPools += fpmmPools.length;
-        const chainTvlNow = fpmmPools.reduce(
-          (sum, p) => sum + poolTvlUSD(p, network, rates),
-          0,
-        );
-        totalTvl += chainTvlNow;
+      const {
+        network,
+        pools,
+        snapshots,
+        snapshots7d,
+        snapshots30d,
+        fees,
+        rates,
+      } = netData;
+      const fpmmPools = pools.filter(isFpmm);
+      totalPools += pools.length;
+      totalFpmmPools += fpmmPools.length;
+      const chainTvlNow = fpmmPools.reduce(
+        (sum, p) => sum + poolTvlUSD(p, network, rates),
+        0,
+      );
+      totalTvl += chainTvlNow;
 
-        // Historical TVL — only pools with snapshot data contribute to both
-        // sides of the delta, so new pools don't inflate the percentage. Uses
-        // the 7d window (not 24h) so weekend oracle stalls don't produce
-        // Monday spikes in the delta.
-        if (netData.snapshots7dError === null && snapshots7d.length > 0) {
-          const m = matchedTvl(snapshots7d, pools, network, rates);
-          tvlNow7d += m.now;
-          tvlAgo7d += m.ago;
-          hasTvlSnapshots7d = true;
+      // 7d-window per-pool TVL — computed once, reused for the aggregate
+      // KPI delta and the per-pool WoW column below. Uses the 7d window so
+      // weekend FX oracle stalls don't produce Monday spikes.
+      const perPool7dTvl =
+        netData.snapshots7dError === null && snapshots7d.length > 0
+          ? perPoolTvlWindow(snapshots7d, pools, network, rates)
+          : null;
+      if (perPool7dTvl && perPool7dTvl.size > 0) {
+        for (const v of perPool7dTvl.values()) {
+          tvlNow7d += v.now;
+          tvlAgo7d += v.ago;
         }
-
-        // All-time volume & swaps from pool-level counters
-        if (totalVolumeAllTime !== null) {
-          for (const pool of pools) {
-            const v = poolTotalVolumeUSD(pool, network, netData.rates);
-            if (typeof v === "number") totalVolumeAllTime += v;
-          }
-        }
-        if (totalSwapsAllTime !== null) {
-          totalSwapsAllTime += pools.reduce(
-            (sum, p) => sum + (p.swapCount ?? 0),
-            0,
-          );
-        }
-
-        // Windowed volume from snapshots — maps built once, reused for
-        // both KPI totals and per-pool table columns below.
-        const vol24hMap =
-          netData.snapshotsError === null
-            ? buildPoolVolumeMap(snapshots, pools, network, netData.rates)
-            : null;
-        const vol7dMap =
-          netData.snapshots7dError === null
-            ? buildPoolVolumeMap(snapshots7d, pools, network, netData.rates)
-            : null;
-        const vol30dMap =
-          netData.snapshots30dError === null
-            ? buildPoolVolumeMap(snapshots30d, pools, network, netData.rates)
-            : null;
-
-        if (vol24hMap && totalVolume24h !== null) {
-          totalVolume24h += sumVolumeMap(vol24hMap);
-        }
-        if (vol7dMap && totalVolume7d !== null) {
-          totalVolume7d += sumVolumeMap(vol7dMap);
-        }
-        if (vol30dMap && totalVolume30d !== null) {
-          totalVolume30d += sumVolumeMap(vol30dMap);
-        }
-
-        // Store per-pool volume for the table columns
-        for (const pool of pools) {
-          const entry: GlobalPoolEntry = {
-            pool,
-            network,
-            rates: netData.rates,
-          };
-          allEntries.push(entry);
-          const key = globalPoolKey(entry);
-          allVol24h.set(key, vol24hMap ? vol24hMap.get(pool.id) : null);
-          allVol7d.set(key, vol7dMap ? vol7dMap.get(pool.id) : null);
-        }
-
-        // Fees
-        if (netData.feesError === null && fees !== null) {
-          if (totalFeesAllTime !== null) totalFeesAllTime += fees.totalFeesUSD;
-          if (totalFees24h !== null) totalFees24h += fees.fees24hUSD;
-          if (totalFees7d !== null) totalFees7d += fees.fees7dUSD;
-          if (totalFees30d !== null) totalFees30d += fees.fees30dUSD;
-          fees.unpricedSymbols.forEach((s) => unpricedSymbolSet.add(s));
-          totalUnresolvedCount += fees.unresolvedCount;
-          if (fees.isTruncated) isTruncated = true;
-        }
-
-        // LP addresses — union across successful chains so an address that
-        // provides liquidity on multiple chains counts once globally.
-        // `.toLowerCase()` defends against any per-chain source returning the
-        // same wallet in checksum vs. lowercase; the per-chain hook already
-        // lowercases before dedup, but this layer accepts any string input.
-        if (netData.uniqueLpAddresses !== null) {
-          for (const addr of netData.uniqueLpAddresses)
-            uniqueLpSet.add(addr.toLowerCase());
-          hasSuccessfulLpResult = true;
-        }
+        hasTvlSnapshots7d = true;
       }
 
-      // Show N/A when no chain contributed a successful LP result OR any
-      // top-level chain error means we can't claim a complete global count.
-      const totalUniqueLps =
-        anyNetworkError || (!hasSuccessfulLpResult && anyLpError)
-          ? null
-          : uniqueLpSet.size;
+      // All-time volume & swaps from pool-level counters
+      if (totalVolumeAllTime !== null) {
+        for (const pool of pools) {
+          const v = poolTotalVolumeUSD(pool, network, netData.rates);
+          if (typeof v === "number") totalVolumeAllTime += v;
+        }
+      }
+      if (totalSwapsAllTime !== null) {
+        totalSwapsAllTime += pools.reduce(
+          (sum, p) => sum + (p.swapCount ?? 0),
+          0,
+        );
+      }
 
-      return {
-        aggregated: {
-          totalPools,
-          totalFpmmPools,
-          totalTvl,
-          totalVolumeAllTime,
-          totalVolume24h,
-          totalVolume7d,
-          totalVolume30d,
-          totalSwapsAllTime,
-          totalFeesAllTime,
-          totalFees24h,
-          totalFees7d,
-          totalFees30d,
-          totalUniqueLps,
-          tvlChange7d:
-            hasTvlSnapshots7d && tvlAgo7d > 0
-              ? ((tvlNow7d - tvlAgo7d) / tvlAgo7d) * 100
-              : null,
-          unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
-          totalUnresolvedCount,
-          isTruncated,
-        },
-        globalEntries: allEntries,
-        volume24hByKey: allVol24h,
-        volume7dByKey: allVol7d,
-      };
-    }, [
-      networkData,
-      anyNetworkError,
-      anySnapshotsError,
-      anySnapshots7dError,
-      anySnapshots30dError,
-      anyFeesError,
-      anyLpError,
-    ]);
+      // Windowed volume from snapshots — maps built once, reused for
+      // both KPI totals and per-pool table columns below.
+      const vol24hMap =
+        netData.snapshotsError === null
+          ? buildPoolVolumeMap(snapshots, pools, network, netData.rates)
+          : null;
+      const vol7dMap =
+        netData.snapshots7dError === null
+          ? buildPoolVolumeMap(snapshots7d, pools, network, netData.rates)
+          : null;
+      const vol30dMap =
+        netData.snapshots30dError === null
+          ? buildPoolVolumeMap(snapshots30d, pools, network, netData.rates)
+          : null;
+
+      if (vol24hMap && totalVolume24h !== null) {
+        totalVolume24h += sumVolumeMap(vol24hMap);
+      }
+      if (vol7dMap && totalVolume7d !== null) {
+        totalVolume7d += sumVolumeMap(vol7dMap);
+      }
+      if (vol30dMap && totalVolume30d !== null) {
+        totalVolume30d += sumVolumeMap(vol30dMap);
+      }
+
+      // Store per-pool volume for the table columns
+      for (const pool of pools) {
+        const entry: GlobalPoolEntry = {
+          pool,
+          network,
+          rates: netData.rates,
+        };
+        allEntries.push(entry);
+        const key = globalPoolKey(entry);
+        allVol24h.set(key, vol24hMap ? vol24hMap.get(pool.id) : null);
+        allVol7d.set(key, vol7dMap ? vol7dMap.get(pool.id) : null);
+
+        const v = perPool7dTvl?.get(pool.id);
+        allTvlWoW.set(
+          key,
+          v && v.ago > 0 ? ((v.now - v.ago) / v.ago) * 100 : null,
+        );
+      }
+
+      // Fees
+      if (netData.feesError === null && fees !== null) {
+        if (totalFeesAllTime !== null) totalFeesAllTime += fees.totalFeesUSD;
+        if (totalFees24h !== null) totalFees24h += fees.fees24hUSD;
+        if (totalFees7d !== null) totalFees7d += fees.fees7dUSD;
+        if (totalFees30d !== null) totalFees30d += fees.fees30dUSD;
+        fees.unpricedSymbols.forEach((s) => unpricedSymbolSet.add(s));
+        totalUnresolvedCount += fees.unresolvedCount;
+        if (fees.isTruncated) isTruncated = true;
+      }
+
+      // LP addresses — union across successful chains so an address that
+      // provides liquidity on multiple chains counts once globally.
+      // `.toLowerCase()` defends against any per-chain source returning the
+      // same wallet in checksum vs. lowercase; the per-chain hook already
+      // lowercases before dedup, but this layer accepts any string input.
+      if (netData.uniqueLpAddresses !== null) {
+        for (const addr of netData.uniqueLpAddresses)
+          uniqueLpSet.add(addr.toLowerCase());
+        hasSuccessfulLpResult = true;
+      }
+    }
+
+    // Show N/A when no chain contributed a successful LP result OR any
+    // top-level chain error means we can't claim a complete global count.
+    const totalUniqueLps =
+      anyNetworkError || (!hasSuccessfulLpResult && anyLpError)
+        ? null
+        : uniqueLpSet.size;
+
+    return {
+      aggregated: {
+        totalPools,
+        totalFpmmPools,
+        totalTvl,
+        totalVolumeAllTime,
+        totalVolume24h,
+        totalVolume7d,
+        totalVolume30d,
+        totalSwapsAllTime,
+        totalFeesAllTime,
+        totalFees24h,
+        totalFees7d,
+        totalFees30d,
+        totalUniqueLps,
+        tvlChange7d:
+          hasTvlSnapshots7d && tvlAgo7d > 0
+            ? ((tvlNow7d - tvlAgo7d) / tvlAgo7d) * 100
+            : null,
+        unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
+        totalUnresolvedCount,
+        isTruncated,
+      },
+      globalEntries: allEntries,
+      volume24hByKey: allVol24h,
+      volume7dByKey: allVol7d,
+      tvlChangeWoWByKey: allTvlWoW,
+    };
+  }, [
+    networkData,
+    anyNetworkError,
+    anySnapshotsError,
+    anySnapshots7dError,
+    anySnapshots30dError,
+    anyFeesError,
+    anyLpError,
+  ]);
 
   // Networks that failed at the top level — show an error notice per chain
   const failedNetworks = networkData.filter((net) => net.error !== null);
@@ -396,6 +414,7 @@ function GlobalContent() {
             entries={globalEntries}
             volume24hByKey={volume24hByKey}
             volume7dByKey={volume7dByKey}
+            tvlChangeWoWByKey={tvlChangeWoWByKey}
           />
         )}
       </section>
