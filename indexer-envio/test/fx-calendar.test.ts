@@ -32,4 +32,20 @@ describe("FX calendar config", () => {
     assert.equal(d.getUTCMinutes(), 0);
     assert.equal(d.getUTCSeconds(), 0);
   });
+
+  it("anchor + weekend duration lands on the configured reopen day and hour", () => {
+    // Closes the other half of the boundary: if someone edits reopen day/hour,
+    // the derived WEEKEND_DURATION_SECONDS must still land exactly on the
+    // reopen moment. Catches day-field changes that the close-side test misses.
+    const weekendDurationSec =
+      ((shared.fxReopenDay - shared.fxCloseDay + 7) % 7) * 86400 +
+      (shared.fxReopenHourUtc - shared.fxCloseHourUtc) * 3600;
+    const reopen = new Date(
+      (shared.anchorFri2100UnixSec + weekendDurationSec) * 1000,
+    );
+    assert.equal(reopen.getUTCDay(), shared.fxReopenDay);
+    assert.equal(reopen.getUTCHours(), shared.fxReopenHourUtc);
+    assert.equal(reopen.getUTCMinutes(), 0);
+    assert.equal(reopen.getUTCSeconds(), 0);
+  });
 });

@@ -18,22 +18,21 @@ export const FX_REOPEN_HOUR_UTC = FX_CALENDAR.fxReopenHourUtc;
 
 /**
  * Returns true if the given time falls within the FX weekend closure window.
- * Window: Friday 21:00 UTC → Sunday 23:00 UTC
+ * Window: close day @ close hour UTC (inclusive) → reopen day @ reopen hour UTC
+ * (exclusive). Defaults from fx-calendar.json give Fri 21:00 → Sun 23:00.
  */
 export function isWeekend(now = new Date()): boolean {
   const day = now.getUTCDay(); // 0=Sun, 1=Mon, ..., 5=Fri, 6=Sat
   const hour = now.getUTCHours();
 
-  // Saturday is always in the window
-  if (day === 6) return true;
+  if (day === FX_CLOSE_DAY) return hour >= FX_CLOSE_HOUR_UTC;
+  if (day === FX_REOPEN_DAY) return hour < FX_REOPEN_HOUR_UTC;
 
-  // Friday from FX_CLOSE_HOUR_UTC onward
-  if (day === FX_CLOSE_DAY && hour >= FX_CLOSE_HOUR_UTC) return true;
-
-  // Sunday before FX_REOPEN_HOUR_UTC
-  if (day === FX_REOPEN_DAY && hour < FX_REOPEN_HOUR_UTC) return true;
-
-  return false;
+  // Days strictly between close day and reopen day (mod 7) are fully inside
+  // the window. For Fri(5) → Sun(0), that's just Saturday.
+  const dayGap = (FX_REOPEN_DAY - FX_CLOSE_DAY + 7) % 7;
+  const daysFromClose = (day - FX_CLOSE_DAY + 7) % 7;
+  return daysFromClose > 0 && daysFromClose < dayGap;
 }
 
 /**
@@ -75,8 +74,12 @@ export function isWeekendOracleStale(
 /** Fri 2024-01-05 21:00:00 UTC — anchor for the 7-day weekend cycle. */
 export const ANCHOR_FRI_2100 = FX_CALENDAR.anchorFri2100UnixSec;
 const WEEK_SECONDS = 7 * 24 * 3600;
+/** Derived from all four calendar fields so the weekend arithmetic stays
+ * in lockstep with what isWeekend() accepts. For Fri 21:00 → Sun 23:00 this
+ * evaluates to 50h (180000s). */
 const WEEKEND_DURATION_SECONDS =
-  (24 - FX_CLOSE_HOUR_UTC + 24 + FX_REOPEN_HOUR_UTC) * 3600;
+  ((FX_REOPEN_DAY - FX_CLOSE_DAY + 7) % 7) * 86400 +
+  (FX_REOPEN_HOUR_UTC - FX_CLOSE_HOUR_UTC) * 3600;
 
 /**
  * Seconds in [startTs, endTs) that fall inside FX weekend windows

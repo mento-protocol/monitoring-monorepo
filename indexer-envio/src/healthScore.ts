@@ -37,10 +37,13 @@ const PRECISION = 6;
 /** Fri 2024-01-05 21:00:00 UTC — anchor for the 7-day weekend cycle. */
 const ANCHOR_FRI_2100 = BigInt(FX_CALENDAR.anchorFri2100UnixSec);
 const WEEK_SECONDS = 7n * 24n * 3600n;
-/** 50h = (24 − fxCloseHourUtc + 24 + fxReopenHourUtc) hours as seconds. */
-const WEEKEND_DURATION_SECONDS =
-  BigInt(24 - FX_CALENDAR.fxCloseHourUtc + 24 + FX_CALENDAR.fxReopenHourUtc) *
-  3600n;
+/** Derived from all four calendar fields so the weekend arithmetic stays
+ * in lockstep with isWeekend() on the UI side. For Fri 21:00 → Sun 23:00
+ * this evaluates to 50h (180000s). */
+const WEEKEND_DURATION_SECONDS = BigInt(
+  ((FX_CALENDAR.fxReopenDay - FX_CALENDAR.fxCloseDay + 7) % 7) * 86400 +
+    (FX_CALENDAR.fxReopenHourUtc - FX_CALENDAR.fxCloseHourUtc) * 3600,
+);
 
 /**
  * Seconds in [startTs, endTs) that fall inside FX weekend windows.
