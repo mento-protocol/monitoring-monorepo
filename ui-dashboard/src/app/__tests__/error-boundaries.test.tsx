@@ -77,11 +77,11 @@ describe("app/error boundaries", () => {
     expect(container.textContent).toContain("Something went wrong");
   });
 
-  it("PoolDetailError links back to the overview on the default network", () => {
+  it("PoolDetailError links back to the pools list on the default network", () => {
     render(<PoolDetailError error={new Error("nope")} reset={vi.fn()} />);
-    const link = container.querySelector<HTMLAnchorElement>('a[href="/"]');
+    const link = container.querySelector<HTMLAnchorElement>('a[href="/pools"]');
     expect(link).not.toBeNull();
-    expect(link?.textContent).toContain("Back to overview");
+    expect(link?.textContent).toContain("Back to pools");
   });
 
   it("PoolDetailError preserves the active network on the recovery link", () => {
@@ -91,7 +91,21 @@ describe("app/error boundaries", () => {
       'a[href*="network=monad-mainnet"]',
     );
     expect(link).not.toBeNull();
-    expect(link?.getAttribute("href")).toBe("/?network=monad-mainnet");
+    expect(link?.getAttribute("href")).toBe("/pools?network=monad-mainnet");
+  });
+
+  it("PoolDetailError surfaces error.digest when present", () => {
+    const error = Object.assign(new Error("render crash"), {
+      digest: "abc123xyz",
+    });
+    render(<PoolDetailError error={error} reset={vi.fn()} />);
+    expect(container.textContent).toContain("Error ID:");
+    expect(container.textContent).toContain("abc123xyz");
+  });
+
+  it("RootError hides the digest line when no digest is attached", () => {
+    render(<RootError error={new Error("no-digest")} reset={vi.fn()} />);
+    expect(container.textContent).not.toContain("Error ID");
   });
 
   it("AddressBookError shows a generic retry and invokes reset", () => {

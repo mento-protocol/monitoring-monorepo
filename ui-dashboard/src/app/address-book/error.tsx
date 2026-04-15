@@ -26,6 +26,11 @@ export default function AddressBookError({
           error.message || "Failed to load the address book. Try refreshing."
         }
       />
+      {error.digest && (
+        <p className="text-xs text-slate-500">
+          Error ID: <code className="font-mono">{error.digest}</code>
+        </p>
+      )}
       <button
         type="button"
         onClick={reset}

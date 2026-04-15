@@ -57,6 +57,18 @@ export default function GlobalError({
           >
             {error.message || "The application failed to load. Try refreshing."}
           </p>
+          {error.digest && (
+            <p
+              style={{
+                marginTop: "0.5rem",
+                fontSize: "0.75rem",
+                color: "#94a3b8",
+              }}
+            >
+              Error ID:{" "}
+              <code style={{ fontFamily: "monospace" }}>{error.digest}</code>
+            </p>
+          )}
           <button
             type="button"
             onClick={reset}
