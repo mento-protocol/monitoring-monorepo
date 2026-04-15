@@ -53,10 +53,14 @@ export function DeviationCell({
         />
         {pool.deviationBreachStartedAt &&
           pool.deviationBreachStartedAt !== "0" && (
+            // Match the subtext color to the badge/bar severity: during the
+            // 1h rebalance grace window the status stays WARN even though
+            // devRatio > 1.0, so red would contradict the amber bar.
             <div
-              className="mt-1 text-xs text-red-400"
+              className={`mt-1 text-xs ${
+                status === "CRITICAL" ? "text-red-400" : "text-amber-400"
+              }`}
               title={formatTimestamp(pool.deviationBreachStartedAt)}
-              aria-label={`Deviation breach started at ${formatTimestamp(pool.deviationBreachStartedAt)}`}
             >
               Breach started{" "}
               <time
@@ -66,6 +70,13 @@ export function DeviationCell({
               >
                 {relativeTime(pool.deviationBreachStartedAt)}
               </time>
+              {/* Visually-hidden absolute timestamp so screen readers in
+                  browse mode read the exact time alongside the relative
+                  label, not only via the hover-only title. */}
+              <span className="sr-only">
+                {" "}
+                (at {formatTimestamp(pool.deviationBreachStartedAt)})
+              </span>
             </div>
           )}
       </dd>

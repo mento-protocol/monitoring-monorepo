@@ -31,8 +31,10 @@ type Pool {
   priceDifference: BigInt!
   rebalanceThreshold: Int!
   lastRebalancedAt: BigInt!
-  # Rising-edge timestamp: block time when devRatio crossed from <1.0 to >=1.0.
-  # 0n when not currently breached. Does not track oracle staleness.
+  # Rising-edge timestamp: block time when priceDifference crossed strictly
+  # above rebalanceThreshold (devRatio > 1.0). Exact-threshold pools stay
+  # WARN and do NOT start this timer. 0n when not currently breached. Does
+  # not track oracle staleness — this is price-action only.
   deviationBreachStartedAt: BigInt!
 
   # Health

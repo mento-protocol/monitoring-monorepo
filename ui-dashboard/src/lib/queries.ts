@@ -25,7 +25,6 @@ export const ALL_POOLS_WITH_HEALTH = `
       oracleNumReporters
       oracleExpiry
       lastRebalancedAt
-      deviationBreachStartedAt
       limitStatus
       limitPressure0
       limitPressure1

@@ -173,11 +173,11 @@ describe("DeviationCell — bar color boundaries", () => {
 });
 
 describe("DeviationCell — breach start indicator", () => {
-  it("renders 'Breach started' line with relative time and accessible absolute timestamp when breached", () => {
+  it("renders 'Breach started' line in red when breached (CRITICAL) with accessible absolute timestamp", () => {
     const breachStart = String(Math.floor(Date.now() / 1000) - 3600); // 1h ago
     const pool: Pool = {
       ...BASE_POOL,
-      priceDifference: "6000", // above 5000 threshold → breach
+      priceDifference: "6000", // above 5000 threshold → CRITICAL
       deviationBreachStartedAt: breachStart,
     };
     const html = renderToStaticMarkup(
@@ -186,10 +186,33 @@ describe("DeviationCell — breach start indicator", () => {
 
     expect(html).toContain("Breach started");
     expect(html).toContain("1h ago");
-    // a11y: absolute timestamp exposed via aria-label (not only via hover title)
-    expect(html).toContain("Deviation breach started at");
+    // Color matches the CRITICAL badge/bar severity
+    expect(html).toContain("text-red-400");
+    // a11y: screen readers in browse mode read the absolute timestamp
+    // alongside the relative label via a visually-hidden sr-only span
+    expect(html).toMatch(/class="sr-only">\s*\(at/);
     // semantic <time> element with machine-readable dateTime
     expect(html).toMatch(/<time[^>]*dateTime=/);
+  });
+
+  it("renders 'Breach started' line in amber when breached but within the 1h rebalance grace (WARN)", () => {
+    // devRatio > 1 AND rebalance landed 30 min ago → computeHealthStatus
+    // keeps status at WARN. The subtext must match: amber, not red.
+    const now = Math.floor(Date.now() / 1000);
+    const breachStart = String(now - 1800); // 30 min ago
+    const pool: Pool = {
+      ...BASE_POOL,
+      priceDifference: "6000",
+      deviationBreachStartedAt: breachStart,
+      lastRebalancedAt: String(now - 30 * 60),
+    };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+
+    expect(html).toContain("Breach started");
+    expect(html).toContain("text-amber-400");
+    expect(html).not.toContain("text-red-400");
   });
 
   it("does not render breach line when deviationBreachStartedAt is '0' (not currently breached)", () => {
