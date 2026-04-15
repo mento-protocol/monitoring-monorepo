@@ -102,10 +102,18 @@ const emptyNetworkData = (
  * Envio's hosted Hasura silently caps every PoolSnapshot query at 1000 rows
  * regardless of the `limit` we send, so for full history we paginate with
  * offset. Stop as soon as a page comes back under the page size (that's the
- * last page). If we hit the safety cap `SNAPSHOT_MAX_PAGES`, return what we
- * have with `truncated: true` — since rows are ordered newest-first, the
- * missing rows are the oldest ones, so 24h/7d/30d windows stay correct and
- * only the "All" range is incomplete.
+ * last page).
+ *
+ * Failure modes, all designed to fail open rather than blank the dashboard:
+ * - Safety cap `SNAPSHOT_MAX_PAGES` reached → return accumulated rows with
+ *   `truncated: true`. Since rows are ordered newest-first, the missing rows
+ *   are the oldest ones, so 24h/7d/30d windows stay correct.
+ * - Mid-loop request error AFTER some pages succeeded → same behavior: keep
+ *   what we have, flag truncation. A transient network glitch shouldn't
+ *   discard already-fetched recent data.
+ * - First-page failure → rethrow. No rows at all means there's nothing to
+ *   salvage; the caller surfaces it as `snapshotsAllError` (empty state with
+ *   explicit error message, not a misleading `$0` dashboard).
  */
 const SNAPSHOT_PAGE_SIZE = 1000;
 const SNAPSHOT_MAX_PAGES = 100;
@@ -121,15 +129,22 @@ async function fetchAllSnapshotPages(
 ): Promise<SnapshotPageResult> {
   const rows: PoolSnapshotWindow[] = [];
   for (let page = 0; page < SNAPSHOT_MAX_PAGES; page++) {
-    const result = await client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
-      POOL_SNAPSHOTS_ALL,
-      {
+    let batch: PoolSnapshotWindow[];
+    try {
+      const result = await client.request<{
+        PoolSnapshot: PoolSnapshotWindow[];
+      }>(POOL_SNAPSHOTS_ALL, {
         poolIds,
         limit: SNAPSHOT_PAGE_SIZE,
         offset: page * SNAPSHOT_PAGE_SIZE,
-      },
-    );
-    const batch = result.PoolSnapshot ?? [];
+      });
+      batch = result.PoolSnapshot ?? [];
+    } catch (err) {
+      // First-page failure is a hard error — nothing to degrade to.
+      if (rows.length === 0) throw err;
+      // Otherwise preserve the pages we did fetch; surface as "partial".
+      return { rows, truncated: true };
+    }
     rows.push(...batch);
     if (batch.length < SNAPSHOT_PAGE_SIZE) return { rows, truncated: false };
   }

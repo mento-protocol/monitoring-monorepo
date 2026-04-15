@@ -321,6 +321,81 @@ describe("fetchNetworkData — snapshot pagination", () => {
     expect(result.snapshotsAll.length).toBe(100 * 1000);
   });
 
+  it("preserves already-fetched rows when a later page errors mid-loop", async () => {
+    // Page 1 succeeds, page 2 errors (network glitch). Before this fix the
+    // whole pagination promise would reject, blanking every snapshot window
+    // even though page 1 had valid recent data. Now: return the accumulated
+    // rows + truncated=true, surface via the partial-data badge.
+    const now = Math.floor(Date.now() / 1000);
+    const fullPage = Array.from({ length: 1000 }, (_, i) => ({
+      poolId: "pool-mid-err",
+      timestamp: String(now - i * 60),
+      reserves0: "0",
+      reserves1: "0",
+      swapCount: 0,
+      swapVolume0: "0",
+      swapVolume1: "0",
+    }));
+    let snapshotCall = 0;
+    (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mockReset()
+      .mockImplementation((query: string) => {
+        if (query.includes("PoolSnapshot")) {
+          snapshotCall++;
+          if (snapshotCall === 1)
+            return Promise.resolve({ PoolSnapshot: fullPage });
+          return Promise.reject(new Error("upstream timeout on page 2"));
+        }
+        if (query.includes("ProtocolFeeTransfer"))
+          return Promise.resolve({ ProtocolFeeTransfer: [] });
+        if (query.includes("LiquidityPosition"))
+          return Promise.resolve({ LiquidityPosition: [] });
+        if (query.includes("Pool"))
+          return Promise.resolve({ Pool: [makePool("pool-mid-err")] });
+        return Promise.resolve({});
+      });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: now - 86400, to: now },
+      w7d: { from: now - 7 * 86400, to: now },
+      w30d: { from: now - 30 * 86400, to: now },
+    });
+
+    expect(result.snapshotsAllError).toBeNull();
+    expect(result.snapshotsAllTruncated).toBe(true);
+    // Page 1's 1000 rows survive — recent windows don't blank.
+    expect(result.snapshotsAll.length).toBe(1000);
+    expect(result.snapshots.length).toBeGreaterThan(0);
+  });
+
+  it("propagates the error when the very first page fails", async () => {
+    // No rows accumulated yet → nothing to salvage; caller should see an
+    // explicit error state rather than a confident-but-empty dashboard.
+    (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mockReset()
+      .mockImplementation((query: string) => {
+        if (query.includes("PoolSnapshot"))
+          return Promise.reject(new Error("upstream timeout on page 1"));
+        if (query.includes("ProtocolFeeTransfer"))
+          return Promise.resolve({ ProtocolFeeTransfer: [] });
+        if (query.includes("LiquidityPosition"))
+          return Promise.resolve({ LiquidityPosition: [] });
+        if (query.includes("Pool"))
+          return Promise.resolve({ Pool: [makePool("pool-first-err")] });
+        return Promise.resolve({});
+      });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.snapshotsAllError).not.toBeNull();
+    expect(result.snapshotsAll).toHaveLength(0);
+    expect(result.snapshotsAllTruncated).toBe(false);
+  });
+
   it("derives window arrays from snapshotsAll by timestamp", async () => {
     const now = Math.floor(Date.now() / 1000);
     const snap = (timestamp: number) => ({
