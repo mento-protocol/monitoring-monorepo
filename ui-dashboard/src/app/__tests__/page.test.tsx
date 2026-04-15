@@ -95,12 +95,14 @@ describe("GlobalPage — loading state", () => {
 // ---------------------------------------------------------------------------
 
 describe("GlobalPage — all networks succeed", () => {
-  it("shows pool count tile", () => {
+  it("renders the summary tiles without error state on all-success", () => {
     const html = render([
       makeNetworkData({ pools: [], fees: null }),
       makeNetworkData({ network: NETWORK_2, pools: [], fees: null }),
     ]);
-    expect(html).toContain("Total Pools");
+    // Volume and Swap Fees tiles present; no fallback-error UI.
+    expect(html).toContain("Volume");
+    expect(html).toContain("Swap Fees");
     expect(html).not.toContain("N/A");
     expect(html).not.toContain("partial data");
   });
@@ -154,13 +156,14 @@ describe("GlobalPage — network-level failure", () => {
 // ---------------------------------------------------------------------------
 
 describe("GlobalPage — fees-only failure", () => {
-  it("shows N/A for fee tiles but normal values for pools/TVL", () => {
+  it("shows N/A on fee-tile failure but leaves other tiles alone", () => {
     const html = render([
       makeNetworkData({ feesError: new Error("fees timeout") }),
     ]);
     expect(html).toContain("N/A");
-    // Pool count tile should still show "0", not N/A
-    expect(html).toContain("Total Pools");
+    // LPs/Swaps tiles still render their headers.
+    expect(html).toContain("LPs");
+    expect(html).toContain("Swaps");
     expect(html).not.toContain("partial data");
   });
 

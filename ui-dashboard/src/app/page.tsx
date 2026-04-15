@@ -313,10 +313,8 @@ function GlobalContent() {
         />
       </div>
 
-      {/* Summary tiles */}
       <section>
-        <h2 className="text-lg font-semibold text-white mb-3">Summary</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <BreakdownTile
             label="Volume"
             total={aggregated.totalVolumeAllTime}
@@ -352,18 +350,6 @@ function GlobalContent() {
                   : aggregated.totalUnresolvedCount > 0
                     ? "Approximate — some tokens unresolved"
                     : undefined
-            }
-          />
-
-          <Tile
-            label="Total Pools"
-            value={isLoading ? "…" : String(aggregated.totalPools)}
-            subtitle={
-              isLoading
-                ? undefined
-                : anyNetworkError
-                  ? `${aggregated.totalFpmmPools} FPMMs · ${aggregated.totalPools - aggregated.totalFpmmPools} Virtual · partial data`
-                  : `${aggregated.totalFpmmPools} FPMMs · ${aggregated.totalPools - aggregated.totalFpmmPools} Virtual`
             }
           />
 
