@@ -16,7 +16,7 @@ vi.mock("viem", async () => {
   };
 });
 
-import { checkRebalanceStatus } from "../rebalance-check";
+import { checkRebalanceStatus, toHumanUnits } from "../rebalance-check";
 
 const POOL = "0x1111111111111111111111111111111111111111";
 const STRATEGY = "0x2222222222222222222222222222222222222222";
@@ -345,5 +345,40 @@ describe("checkRebalanceStatus", () => {
     expect(result.canRebalance).toBe(false);
     expect(result.message).toBe("Rebalance reverted with an unknown error");
     expect(result.strategyType).toBe("reserve");
+  });
+});
+
+describe("toHumanUnits — large-balance precision", () => {
+  // BigInt(...) call form — ui-dashboard tsconfig targets ES2017, which
+  // doesn't emit BigInt `10n`-style literals.
+  const ten = BigInt(10);
+
+  it("returns 0 for zero", () => {
+    expect(toHumanUnits(BigInt(0), 18)).toBe(0);
+  });
+
+  it("returns the raw value when decimals is 0", () => {
+    expect(toHumanUnits(BigInt(12345), 0)).toBe(12345);
+  });
+
+  it("preserves precision for balances well above 2^53 (18 decimals)", () => {
+    // 10M tokens at 18 decimals = 1e25 wei — raw > 2^53 (~9e15).
+    // Previous `Number(bigint) / 10**decimals` would round the low-order
+    // bits; we should still see 10,000,000 exactly.
+    const tenMillion = BigInt(10_000_000) * ten ** BigInt(18);
+    expect(toHumanUnits(tenMillion, 18)).toBe(10_000_000);
+  });
+
+  it("keeps fractional digits within the 6-digit scale", () => {
+    // 1.5 tokens at 6 decimals = 1_500_000 wei.
+    expect(toHumanUnits(BigInt(1_500_000), 6)).toBeCloseTo(1.5, 6);
+  });
+
+  it("represents large whole + small fractional without cross-contamination", () => {
+    // 123,456,789.123456 tokens at 18 decimals
+    const raw =
+      BigInt(123_456_789) * ten ** BigInt(18) +
+      BigInt(123_456) * ten ** BigInt(12); /* .123456 */
+    expect(toHumanUnits(raw, 18)).toBeCloseTo(123_456_789.123456, 5);
   });
 });

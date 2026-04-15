@@ -224,10 +224,14 @@ function getPassiveStatus(
   if (health === "WARN") {
     // Distinguish exactly-at-threshold from the 80–99% warning band so the
     // edge case reads as "At threshold" (not "Near threshold"), matching
-    // the CRITICAL rule that kicks in only strictly above it.
+    // the CRITICAL rule that kicks in only strictly above it. Use the same
+    // 10000 bps fallback computeHealthStatus uses when rebalanceThreshold
+    // is 0 — otherwise a pool at diff=10000, threshold=0 would render
+    // "Near threshold" while the health pipeline treats it as the boundary.
     const diff = Number(pool.priceDifference ?? "0");
-    const threshold = pool.rebalanceThreshold ?? 0;
-    const atThreshold = threshold > 0 && diff === threshold;
+    const effectiveThreshold =
+      (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
+    const atThreshold = diff === effectiveThreshold;
     return {
       text: atThreshold ? "At threshold" : "Near threshold",
       color: "text-amber-400",

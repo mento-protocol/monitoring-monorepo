@@ -137,6 +137,24 @@ describe("RebalanceStatusValue", () => {
     expect(html).toContain("text-amber-400");
   });
 
+  it('uses the 10000 bps fallback for "At threshold" when rebalanceThreshold is 0', () => {
+    // Pools without a configured rebalanceThreshold fall back to 10000 bps
+    // in computeHealthStatus. The passive label must follow the same
+    // convention — otherwise diff=10000/threshold=0 renders "Near
+    // threshold" while the health pipeline says the pool is exactly at
+    // the (effective) boundary.
+    mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={{ ...BASE_POOL, priceDifference: "10000", rebalanceThreshold: 0 }}
+        network={NETWORK}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    expect(html).toContain("At threshold");
+    expect(html).not.toContain("Near threshold");
+  });
+
   it('renders "Oracle stale" in red when health is CRITICAL but the check was skipped because deviation is still below threshold', () => {
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     const html = renderToStaticMarkup(
