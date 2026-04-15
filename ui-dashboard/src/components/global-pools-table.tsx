@@ -99,12 +99,14 @@ export function sortGlobalPools(
         cmp = (tvlByKey.get(aKey) ?? 0) - (tvlByKey.get(bKey) ?? 0);
         break;
       case "tvlChangeWoW": {
-        // Nulls always sink to the bottom regardless of sort direction.
+        // Both error (null) and missing-data (undefined) sink regardless of direction.
         const aW = tvlChangeWoWByKey?.get(aKey);
         const bW = tvlChangeWoWByKey?.get(bKey);
-        if (aW == null && bW == null) return 0;
-        if (aW == null) return 1;
-        if (bW == null) return -1;
+        const aMissing = aW == null;
+        const bMissing = bW == null;
+        if (aMissing && bMissing) return 0;
+        if (aMissing) return 1;
+        if (bMissing) return -1;
         return sortDir === "asc" ? aW - bW : bW - aW;
       }
       case "volume24h": {
@@ -203,7 +205,12 @@ interface GlobalPoolsTableProps {
   volume7dByKey?: Map<string, number | null | undefined>;
   volume7dLoading?: boolean;
   volume7dError?: boolean;
-  /** Per-pool 7d TVL change in percent. `null` means no data for that pool. */
+  /**
+   * Per-pool 7d TVL change in percent. Three states:
+   * - `number` — real WoW value (rendered as `±X.XX%`).
+   * - `null` — backend snapshot query failed for that chain (rendered as `N/A`).
+   * - absent key — no comparable 7d snapshot for that pool (rendered as `—`).
+   */
   tvlChangeWoWByKey?: Map<string, number | null>;
 }
 
@@ -393,15 +400,17 @@ export function GlobalPoolsTable({
             const vol24h = volume24hByKey?.get(key);
             const vol7d = volume7dByKey?.get(key);
             const totalVol = totalVolumeByKey.get(key);
-            const wow = tvlChangeWoWByKey?.get(key) ?? null;
+            const wow = tvlChangeWoWByKey?.get(key);
             const wowColor =
-              wow == null
-                ? "text-slate-600"
-                : wow > 0
-                  ? "text-emerald-400"
-                  : wow < 0
-                    ? "text-red-400"
-                    : "text-slate-400";
+              wow === null
+                ? "text-slate-400"
+                : wow === undefined
+                  ? "text-slate-600"
+                  : wow > 0
+                    ? "text-emerald-400"
+                    : wow < 0
+                      ? "text-red-400"
+                      : "text-slate-400";
             const poolHref = buildPoolDetailHref(p.id, network.id);
             return (
               <Row key={key}>
@@ -445,9 +454,11 @@ export function GlobalPoolsTable({
                 <td
                   className={`hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm font-mono ${wowColor}`}
                 >
-                  {wow == null
-                    ? "—"
-                    : `${wow >= 0 ? "+" : ""}${wow.toFixed(2)}%`}
+                  {wow === null
+                    ? "N/A"
+                    : wow === undefined
+                      ? "—"
+                      : `${wow >= 0 ? "+" : ""}${wow.toFixed(2)}%`}
                 </td>
                 <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
                   {volume24hLoading

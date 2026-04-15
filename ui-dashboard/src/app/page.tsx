@@ -213,7 +213,10 @@ function GlobalContent() {
         totalVolume30d += sumVolumeMap(vol30dMap);
       }
 
-      // Store per-pool volume for the table columns
+      // Store per-pool volume for the table columns. WoW uses three states:
+      // explicit `null` = backend snapshot query failed (renders "N/A");
+      // absent key = no comparable 7d snapshot for this pool (renders "—");
+      // number = real WoW %.
       for (const pool of pools) {
         const entry: GlobalPoolEntry = {
           pool,
@@ -225,11 +228,14 @@ function GlobalContent() {
         allVol24h.set(key, vol24hMap ? vol24hMap.get(pool.id) : null);
         allVol7d.set(key, vol7dMap ? vol7dMap.get(pool.id) : null);
 
-        const v = perPool7dTvl?.get(pool.id);
-        allTvlWoW.set(
-          key,
-          v && v.ago > 0 ? ((v.now - v.ago) / v.ago) * 100 : null,
-        );
+        if (netData.snapshots7dError !== null) {
+          allTvlWoW.set(key, null);
+        } else {
+          const v = perPool7dTvl?.get(pool.id);
+          if (v && v.ago > 0) {
+            allTvlWoW.set(key, ((v.now - v.ago) / v.ago) * 100);
+          }
+        }
       }
 
       // Fees

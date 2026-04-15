@@ -272,7 +272,17 @@ describe("GlobalPoolsTable — TVL WoW column", () => {
     expect(html).toMatch(/font-mono text-slate-600[^>]*>—/);
   });
 
-  it("renders em-dash in the WoW cell when WoW value is null", () => {
+  it("renders em-dash when the pool has no WoW entry (no comparable snapshot)", () => {
+    const entry = makeEntry({ id: "pool-1" });
+    // Empty map — no entry for this pool's key.
+    const wowMap = new Map<string, number | null>();
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
+    );
+    expect(html).toMatch(/font-mono text-slate-600[^>]*>—/);
+  });
+
+  it("renders N/A when the WoW value is explicitly null (snapshot query failed)", () => {
     const entry = makeEntry({ id: "pool-1" });
     const wowMap = new Map<string, number | null>([
       [globalPoolKey(entry), null],
@@ -280,7 +290,7 @@ describe("GlobalPoolsTable — TVL WoW column", () => {
     const html = renderToStaticMarkup(
       <GlobalPoolsTable entries={[entry]} tvlChangeWoWByKey={wowMap} />,
     );
-    expect(html).toMatch(/font-mono text-slate-600[^>]*>—/);
+    expect(html).toMatch(/font-mono text-slate-400[^>]*>N\/A/);
   });
 
   it("renders positive WoW with + prefix and emerald color in the same cell", () => {
@@ -306,11 +316,12 @@ describe("GlobalPoolsTable — TVL WoW column", () => {
   });
 });
 
-describe("sortGlobalPools — tvlChangeWoW nulls last", () => {
-  it("sinks null WoW entries to the bottom when sorted desc", () => {
+describe("sortGlobalPools — tvlChangeWoW null + missing both sink", () => {
+  it("sinks null (error) and missing-key (no data) entries to bottom when sorted desc", () => {
     const a = makeEntry({ id: "a" });
-    const b = makeEntry({ id: "b" });
+    const b = makeEntry({ id: "b" }); // null = error
     const c = makeEntry({ id: "c" });
+    const d = makeEntry({ id: "d" }); // absent = no data
     const wowMap = new Map<string, number | null>([
       [globalPoolKey(a), 5],
       [globalPoolKey(b), null],
@@ -320,14 +331,21 @@ describe("sortGlobalPools — tvlChangeWoW nulls last", () => {
       ...BASE_SORT_CTX,
       tvlChangeWoWByKey: wowMap,
     };
-    const desc = sortGlobalPools([b, a, c], "tvlChangeWoW", "desc", ctx);
-    expect(desc.map((e) => e.pool.id)).toEqual(["a", "c", "b"]);
+    const desc = sortGlobalPools([b, d, a, c], "tvlChangeWoW", "desc", ctx);
+    expect(desc.map((e) => e.pool.id).slice(0, 2)).toEqual(["a", "c"]);
+    expect(
+      desc
+        .map((e) => e.pool.id)
+        .slice(2)
+        .sort(),
+    ).toEqual(["b", "d"]);
   });
 
-  it("sinks null WoW entries to the bottom when sorted asc", () => {
+  it("sinks null and missing-key entries to bottom when sorted asc", () => {
     const a = makeEntry({ id: "a" });
     const b = makeEntry({ id: "b" });
     const c = makeEntry({ id: "c" });
+    const d = makeEntry({ id: "d" });
     const wowMap = new Map<string, number | null>([
       [globalPoolKey(a), 5],
       [globalPoolKey(b), null],
@@ -337,8 +355,14 @@ describe("sortGlobalPools — tvlChangeWoW nulls last", () => {
       ...BASE_SORT_CTX,
       tvlChangeWoWByKey: wowMap,
     };
-    const asc = sortGlobalPools([b, a, c], "tvlChangeWoW", "asc", ctx);
-    expect(asc.map((e) => e.pool.id)).toEqual(["c", "a", "b"]);
+    const asc = sortGlobalPools([b, d, a, c], "tvlChangeWoW", "asc", ctx);
+    expect(asc.map((e) => e.pool.id).slice(0, 2)).toEqual(["c", "a"]);
+    expect(
+      asc
+        .map((e) => e.pool.id)
+        .slice(2)
+        .sort(),
+    ).toEqual(["b", "d"]);
   });
 });
 

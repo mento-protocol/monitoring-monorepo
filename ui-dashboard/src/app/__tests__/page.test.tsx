@@ -28,6 +28,7 @@ vi.mock("@/hooks/use-all-networks-data", () => ({
 interface CapturedTableProps {
   entries: { pool: { id: string }; network: { id: string } }[];
   volume24hByKey?: Map<string, number | null>;
+  tvlChangeWoWByKey?: Map<string, number | null>;
 }
 let capturedProps: CapturedTableProps | null = null;
 vi.mock("@/components/global-pools-table", () => ({
@@ -571,6 +572,62 @@ describe("GlobalPage — TVL delta sub-KPIs", () => {
     ]);
     // Delta should be +100% (only chain A), not inflated by chain B's TVL
     expect(html).toContain("+100.00%");
+  });
+
+  it("builds tvlChangeWoWByKey: number for pools with snapshot, absent for pools without", () => {
+    // Pool A has a 7d snapshot — should produce a real WoW number.
+    // Pool B has no snapshot but no error either — absent key (renders "—" downstream).
+    const poolA = makeTvlPool({
+      id: "pool-a",
+      reserves0: "200000000000000000000",
+      reserves1: "100000000000000000000",
+    });
+    const poolB = makeTvlPool({
+      id: "pool-b",
+      reserves0: "500000000000000000000",
+      reserves1: "500000000000000000000",
+    });
+    const snapA = makeSnapshot({
+      poolId: "pool-a",
+      timestamp: "1000",
+      reserves0: "100000000000000000000",
+      reserves1: "50000000000000000000",
+    });
+    render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [poolA, poolB],
+        snapshots7d: [snapA],
+      }),
+    ]);
+    expect(capturedProps).not.toBeNull();
+    const wow = capturedProps!.tvlChangeWoWByKey!;
+    const keyA = `${TVL_NETWORK.id}:pool-a`;
+    const keyB = `${TVL_NETWORK.id}:pool-b`;
+    expect(wow.get(keyA)).toBeCloseTo(100, 2);
+    expect(wow.has(keyB)).toBe(false);
+  });
+
+  it("builds tvlChangeWoWByKey: explicit null for every pool when snapshots7dError is set", () => {
+    // When the 7d snapshot query fails, the table must render "N/A" — not "—".
+    // The page surfaces this by setting an explicit null per pool.
+    const poolA = makeTvlPool({ id: "pool-a" });
+    const poolB = makeTvlPool({ id: "pool-b" });
+    render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [poolA, poolB],
+        snapshots7dError: new Error("hasura timeout"),
+      }),
+    ]);
+    expect(capturedProps).not.toBeNull();
+    const wow = capturedProps!.tvlChangeWoWByKey!;
+    const keyA = `${TVL_NETWORK.id}:pool-a`;
+    const keyB = `${TVL_NETWORK.id}:pool-b`;
+    expect(wow.has(keyA)).toBe(true);
+    expect(wow.get(keyA)).toBeNull();
+    expect(wow.has(keyB)).toBe(true);
+    expect(wow.get(keyB)).toBeNull();
   });
 
   it("excludes new pools without snapshots on the same chain from delta", () => {
