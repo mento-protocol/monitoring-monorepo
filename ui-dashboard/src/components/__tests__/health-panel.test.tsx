@@ -102,3 +102,41 @@ describe("HealthPanel weekend mode", () => {
     expect(html).toContain("Stale");
   });
 });
+
+describe("HealthPanel deviation breach indicator", () => {
+  it("renders 'Breach started' line with relative time and accessible absolute timestamp when breached", () => {
+    const breachStart = String(Math.floor(Date.now() / 1000) - 3600); // 1h ago
+    const breachedPool: Pool = {
+      ...BASE_POOL,
+      healthStatus: "CRITICAL",
+      priceDifference: "6000", // > 5000 threshold → breach
+      deviationBreachStartedAt: breachStart,
+    };
+    const html = renderToStaticMarkup(<HealthPanel pool={breachedPool} />);
+
+    expect(html).toContain("Breach started");
+    expect(html).toContain("1h ago");
+    // a11y: absolute timestamp available via aria-label (not just hover)
+    expect(html).toContain("Deviation breach started at");
+    // semantic <time> element with machine-readable dateTime
+    expect(html).toMatch(/<time[^>]*dateTime=/);
+  });
+
+  it("does not render breach line when deviationBreachStartedAt is '0' (not breached)", () => {
+    const pool: Pool = {
+      ...BASE_POOL,
+      deviationBreachStartedAt: "0",
+    };
+    const html = renderToStaticMarkup(<HealthPanel pool={pool} />);
+    expect(html).not.toContain("Breach started");
+  });
+
+  it("does not render breach line when deviationBreachStartedAt is undefined (old indexer schema)", () => {
+    // Omitting the optional field simulates a Hasura endpoint that hasn't
+    // rolled out the new schema yet — the UI must degrade gracefully.
+    const pool: Pool = { ...BASE_POOL };
+    expect(pool.deviationBreachStartedAt).toBeUndefined();
+    const html = renderToStaticMarkup(<HealthPanel pool={pool} />);
+    expect(html).not.toContain("Breach started");
+  });
+});

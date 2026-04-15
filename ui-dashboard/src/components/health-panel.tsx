@@ -360,9 +360,16 @@ export function HealthPanel({ pool }: HealthPanelProps) {
                     <div
                       className="mt-1 text-xs text-red-400"
                       title={formatTimestamp(pool.deviationBreachStartedAt)}
+                      aria-label={`Deviation breach started at ${formatTimestamp(pool.deviationBreachStartedAt)}`}
                     >
                       Breach started{" "}
-                      {relativeTime(pool.deviationBreachStartedAt)}
+                      <time
+                        dateTime={new Date(
+                          Number(pool.deviationBreachStartedAt) * 1000,
+                        ).toISOString()}
+                      >
+                        {relativeTime(pool.deviationBreachStartedAt)}
+                      </time>
                     </div>
                   )}
               </dd>
