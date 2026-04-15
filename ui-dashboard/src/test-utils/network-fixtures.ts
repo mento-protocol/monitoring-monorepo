@@ -1,6 +1,7 @@
 import type { NetworkData } from "@/hooks/use-all-networks-data";
 import type { Network } from "@/lib/networks";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
+import { buildSnapshotWindows } from "@/lib/volume";
 
 export const BASE_NETWORK: Network = {
   id: "celo-mainnet",
@@ -95,12 +96,19 @@ export function makeSnapshot(
 export function makeNetworkData(
   overrides: Partial<NetworkData> = {},
 ): NetworkData {
-  return {
+  // snapshotsAll is now the source of truth; old tests that only set
+  // snapshots30d still work thanks to the fallback here.
+  const snapshots30d = overrides.snapshots30d ?? [];
+  const snapshotsAll = overrides.snapshotsAll ?? snapshots30d;
+  const base: NetworkData = {
     network: BASE_NETWORK,
+    snapshotWindows: buildSnapshotWindows(Date.now()),
     pools: [],
     snapshots: [],
     snapshots7d: [],
-    snapshots30d: [],
+    snapshots30d,
+    snapshotsAll,
+    snapshotsAllTruncated: false,
     fees: null,
     uniqueLpAddresses: [],
     rates: new Map(),
@@ -109,7 +117,8 @@ export function makeNetworkData(
     snapshotsError: null,
     snapshots7dError: null,
     snapshots30dError: null,
+    snapshotsAllError: null,
     lpError: null,
-    ...overrides,
   };
+  return { ...base, ...overrides };
 }

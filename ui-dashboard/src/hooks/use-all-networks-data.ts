@@ -6,7 +6,7 @@ import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 import type { Network } from "@/lib/networks";
 import {
   ALL_POOLS_WITH_HEALTH,
-  POOL_SNAPSHOTS_WINDOW,
+  POOL_SNAPSHOTS_ALL,
   PROTOCOL_FEE_TRANSFERS_ALL,
   UNIQUE_LP_ADDRESSES,
 } from "@/lib/queries";
@@ -15,11 +15,12 @@ import {
   type ProtocolFeeSummary,
 } from "@/lib/protocol-fees";
 import {
-  snapshotWindow24h,
-  snapshotWindow7d,
-  snapshotWindow30d,
+  buildSnapshotWindows,
+  filterSnapshotsToWindow,
   shouldQueryPoolSnapshots,
   SNAPSHOT_REFRESH_MS,
+  type SnapshotWindows,
+  type TimeRange,
 } from "@/lib/volume";
 import type {
   Pool,
@@ -30,18 +31,44 @@ import { isFpmm, buildOracleRateMap, type OracleRateMap } from "@/lib/tokens";
 
 export type NetworkData = {
   network: Network;
+  snapshotWindows: SnapshotWindows;
   pools: Pool[];
+  /**
+   * Snapshot arrays for the three standard rolling windows. All derived
+   * client-side by filtering `snapshotsAll` (one paginated query). The
+   * corresponding error fields below are per-window — each is set only
+   * when that specific window's coverage is incomplete, not merely when
+   * the all-history pagination had trouble.
+   */
   snapshots: PoolSnapshotWindow[];
   snapshots7d: PoolSnapshotWindow[];
   snapshots30d: PoolSnapshotWindow[];
+  /** Full-history snapshots (paginated). Source of truth for the chart. */
+  snapshotsAll: PoolSnapshotWindow[];
+  /**
+   * True when pagination hit the `SNAPSHOT_MAX_PAGES` safety cap. Older rows
+   * were dropped, but the `snapshotsAll` array still carries the most recent
+   * pages — so 24h/7d/30d windows remain correct and only the "All" chart
+   * range is incomplete. Surfaced via the partial-data badge.
+   */
+  snapshotsAllTruncated: boolean;
   fees: ProtocolFeeSummary | null;
   uniqueLpAddresses: string[] | null;
   rates: OracleRateMap;
   error: Error | null;
   feesError: Error | null;
+  /**
+   * Per-window snapshot errors. A window only gets an error when the
+   * pagination failure / truncation actually affects that window — i.e.,
+   * we didn't fetch rows going back as far as the window's lower bound.
+   * Mid-loop failure after page 1 typically preserves ~12 days of hourly
+   * rows, so 24h and 7d stay error-free while 30d errors out.
+   */
   snapshotsError: Error | null;
   snapshots7dError: Error | null;
   snapshots30dError: Error | null;
+  /** Error on the paginated all-history fetch (non-null iff pagination failed). */
+  snapshotsAllError: Error | null;
   lpError: Error | null;
 };
 
@@ -51,14 +78,19 @@ type AllNetworksResult = {
   error: Error | null;
 };
 
-export type TimeRange = { from: number; to: number };
-
-const emptyNetworkData = (network: Network, error: Error): NetworkData => ({
+const emptyNetworkData = (
+  network: Network,
+  snapshotWindows: SnapshotWindows,
+  error: Error,
+): NetworkData => ({
   network,
+  snapshotWindows,
   pools: [],
   snapshots: [],
   snapshots7d: [],
   snapshots30d: [],
+  snapshotsAll: [],
+  snapshotsAllTruncated: false,
   fees: null,
   uniqueLpAddresses: null,
   rates: new Map(),
@@ -67,8 +99,91 @@ const emptyNetworkData = (network: Network, error: Error): NetworkData => ({
   snapshotsError: null,
   snapshots7dError: null,
   snapshots30dError: null,
+  snapshotsAllError: null,
   lpError: null,
 });
+
+/**
+ * Envio's hosted Hasura silently caps every PoolSnapshot query at 1000 rows
+ * regardless of the `limit` we send, so for full history we paginate with
+ * offset. Stop as soon as a page comes back under the page size (that's the
+ * last page).
+ *
+ * Failure modes, all designed to fail open rather than blank the dashboard:
+ * - Safety cap `SNAPSHOT_MAX_PAGES` reached → return accumulated rows with
+ *   `truncated: true, error: null`. Since rows are ordered newest-first, the
+ *   missing rows are the oldest ones, so 24h/7d/30d windows stay correct.
+ *   No `error` because this is an intentional safety cap, not a fault.
+ * - Mid-loop request error AFTER some pages succeeded → keep what we have,
+ *   flag `truncated: true` AND set `error` so error-aware consumers (e.g.
+ *   the Summary Volume tile) partial-badge correctly. Without the error
+ *   signal the degraded state would be invisible to anything that only
+ *   checks the error channel.
+ * - First-page failure → rethrow. No rows at all means there's nothing to
+ *   salvage; the caller surfaces it as `snapshotsAllError` (empty state with
+ *   explicit error message, not a misleading `$0` dashboard).
+ *
+ * Dedup: offset pagination on an append-only table isn't stable under
+ * concurrent inserts — a new snapshot at position 0 shifts everything one
+ * row right, so the next page's offset overlaps with the previous page's
+ * tail. We dedup by `(poolId, timestamp)` (which uniquely identifies a
+ * snapshot per the indexer's hourBucket upsert id) before pushing into the
+ * result. This mitigates duplicates; omissions are still theoretically
+ * possible but rare and self-heal on the next refresh. A proper fix is
+ * keyset pagination — tracked as a follow-up.
+ */
+const SNAPSHOT_PAGE_SIZE = 1000;
+const SNAPSHOT_MAX_PAGES = 100;
+
+type SnapshotPageResult = {
+  rows: PoolSnapshotWindow[];
+  truncated: boolean;
+  error: Error | null;
+};
+
+const snapshotDedupKey = (s: PoolSnapshotWindow) =>
+  `${s.poolId}-${s.timestamp}`;
+
+async function fetchAllSnapshotPages(
+  client: GraphQLClient,
+  poolIds: string[],
+): Promise<SnapshotPageResult> {
+  const seen = new Set<string>();
+  const rows: PoolSnapshotWindow[] = [];
+  for (let page = 0; page < SNAPSHOT_MAX_PAGES; page++) {
+    let batch: PoolSnapshotWindow[];
+    try {
+      const result = await client.request<{
+        PoolSnapshot: PoolSnapshotWindow[];
+      }>(POOL_SNAPSHOTS_ALL, {
+        poolIds,
+        limit: SNAPSHOT_PAGE_SIZE,
+        offset: page * SNAPSHOT_PAGE_SIZE,
+      });
+      batch = result.PoolSnapshot ?? [];
+    } catch (err) {
+      // First-page failure is a hard error — nothing to degrade to.
+      if (rows.length === 0) throw err;
+      // Otherwise preserve the pages we did fetch; surface error AND flag
+      // truncation so consumers know the data is partial.
+      return {
+        rows,
+        truncated: true,
+        error: err instanceof Error ? err : new Error(String(err)),
+      };
+    }
+    for (const row of batch) {
+      const key = snapshotDedupKey(row);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+    }
+    if (batch.length < SNAPSHOT_PAGE_SIZE) {
+      return { rows, truncated: false, error: null };
+    }
+  }
+  return { rows, truncated: true, error: null };
+}
 
 /** @internal Exported for testing only. */
 export async function fetchNetworkData(
@@ -90,6 +205,7 @@ export async function fetchNetworkData(
   } catch (err) {
     return emptyNetworkData(
       network,
+      windows,
       err instanceof Error ? err : new Error(String(err)),
     );
   }
@@ -97,39 +213,19 @@ export async function fetchNetworkData(
   const poolIds = pools.map((p) => p.id);
   const fpmmPoolIds = pools.filter(isFpmm).map((p) => p.id);
   const shouldQuery = shouldQueryPoolSnapshots(poolIds);
-  const emptySnapshots = Promise.resolve<{
-    PoolSnapshot: PoolSnapshotWindow[];
-  }>({ PoolSnapshot: [] });
 
-  const [
-    feesResult,
-    snapshotsResult,
-    snapshots7dResult,
-    snapshots30dResult,
-    lpResult,
-  ] = await Promise.allSettled([
+  const [feesResult, snapshotsAllResult, lpResult] = await Promise.allSettled([
     client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
       PROTOCOL_FEE_TRANSFERS_ALL,
       { chainId: network.chainId },
     ),
     shouldQuery
-      ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
-          POOL_SNAPSHOTS_WINDOW,
-          { from: windows.w24h.from, to: windows.w24h.to, poolIds },
-        )
-      : emptySnapshots,
-    shouldQuery
-      ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
-          POOL_SNAPSHOTS_WINDOW,
-          { from: windows.w7d.from, to: windows.w7d.to, poolIds },
-        )
-      : emptySnapshots,
-    shouldQuery
-      ? client.request<{ PoolSnapshot: PoolSnapshotWindow[] }>(
-          POOL_SNAPSHOTS_WINDOW,
-          { from: windows.w30d.from, to: windows.w30d.to, poolIds },
-        )
-      : emptySnapshots,
+      ? fetchAllSnapshotPages(client, poolIds)
+      : Promise.resolve<SnapshotPageResult>({
+          rows: [],
+          truncated: false,
+          error: null,
+        }),
     fpmmPoolIds.length > 0
       ? client.request<{
           LiquidityPosition: { address: string }[];
@@ -149,18 +245,54 @@ export async function fetchNetworkData(
       ? aggregateProtocolFees(feesResult.value.ProtocolFeeTransfer ?? [], rates)
       : null;
 
-  const snapshots =
-    snapshotsResult.status === "fulfilled"
-      ? (snapshotsResult.value.PoolSnapshot ?? [])
+  // Single source of truth: the paginated all-history fetch. Window-specific
+  // arrays are derived in-memory — no separate requests, no server-side cap.
+  // If pagination truncated (hit MAX_PAGES or mid-loop fetch failure), we keep
+  // the most-recent rows we did fetch: 24h/7d/30d derive correctly from those,
+  // and "All" is flagged as partial. Mid-loop failure also surfaces via
+  // `snapshotsAllError` so error-aware consumers (Summary tile) partial-badge.
+  const snapshotsAll =
+    snapshotsAllResult.status === "fulfilled"
+      ? snapshotsAllResult.value.rows
       : [];
-  const snapshots7d =
-    snapshots7dResult.status === "fulfilled"
-      ? (snapshots7dResult.value.PoolSnapshot ?? [])
-      : [];
-  const snapshots30d =
-    snapshots30dResult.status === "fulfilled"
-      ? (snapshots30dResult.value.PoolSnapshot ?? [])
-      : [];
+  const snapshotsAllTruncated =
+    snapshotsAllResult.status === "fulfilled"
+      ? snapshotsAllResult.value.truncated
+      : false;
+  const snapshotsAllError =
+    snapshotsAllResult.status === "rejected"
+      ? toError(snapshotsAllResult.reason)
+      : (snapshotsAllResult.value.error ?? null);
+
+  const snapshots = filterSnapshotsToWindow(snapshotsAll, windows.w24h);
+  const snapshots7d = filterSnapshotsToWindow(snapshotsAll, windows.w7d);
+  const snapshots30d = filterSnapshotsToWindow(snapshotsAll, windows.w30d);
+
+  // Per-window error detection. Pagination issues (error or truncation) only
+  // affect a specific window if we didn't fetch far enough back to cover its
+  // `from` bound. With a mid-loop failure after page 1 (~1000 most-recent
+  // rows ≈ 12 days at current activity) the 24h and 7d windows are still
+  // fully covered — aliasing all three to `snapshotsAllError` would blank
+  // valid recent totals. Rows come in newest-first, so the last element is
+  // the oldest we fetched.
+  const oldestFetchedTs =
+    snapshotsAll.length > 0
+      ? Number(snapshotsAll[snapshotsAll.length - 1].timestamp)
+      : Number.POSITIVE_INFINITY;
+  const paginationIssue: Error | null =
+    snapshotsAllError ??
+    (snapshotsAllTruncated
+      ? new Error(
+          "Snapshot pagination truncated before reaching the requested window",
+        )
+      : null);
+  const windowError = (windowFrom: number): Error | null =>
+    paginationIssue !== null && oldestFetchedTs > windowFrom
+      ? paginationIssue
+      : null;
+  const snapshotsError = windowError(windows.w24h.from);
+  const snapshots7dError = windowError(windows.w7d.from);
+  const snapshots30dError = windowError(windows.w30d.from);
 
   const uniqueLpAddresses =
     lpResult.status === "fulfilled"
@@ -178,28 +310,25 @@ export async function fetchNetworkData(
 
   return {
     network,
+    snapshotWindows: windows,
     pools,
     snapshots,
     snapshots7d,
     snapshots30d,
+    snapshotsAll,
+    snapshotsAllTruncated,
     fees,
     uniqueLpAddresses,
     rates,
     error: null,
     feesError:
       feesResult.status === "rejected" ? toError(feesResult.reason) : null,
-    snapshotsError:
-      snapshotsResult.status === "rejected"
-        ? toError(snapshotsResult.reason)
-        : null,
-    snapshots7dError:
-      snapshots7dResult.status === "rejected"
-        ? toError(snapshots7dResult.reason)
-        : null,
-    snapshots30dError:
-      snapshots30dResult.status === "rejected"
-        ? toError(snapshots30dResult.reason)
-        : null,
+    // Per-window errors — only set when the specific window is incomplete.
+    // See the `windowError` helper above.
+    snapshotsError,
+    snapshots7dError,
+    snapshots30dError,
+    snapshotsAllError,
     lpError: lpResult.status === "rejected" ? toError(lpResult.reason) : null,
   };
 }
@@ -208,11 +337,7 @@ export async function fetchNetworkData(
 export async function fetchAllNetworks(): Promise<NetworkData[]> {
   const configuredNetworkIds = NETWORK_IDS.filter(isConfiguredNetworkId);
   const now = Date.now();
-  const windows = {
-    w24h: snapshotWindow24h(now),
-    w7d: snapshotWindow7d(now),
-    w30d: snapshotWindow30d(now),
-  };
+  const windows = buildSnapshotWindows(now);
 
   const results = await Promise.allSettled(
     configuredNetworkIds.map((id) => fetchNetworkData(NETWORKS[id], windows)),
@@ -222,6 +347,7 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
     if (result.status === "fulfilled") return result.value;
     return emptyNetworkData(
       NETWORKS[configuredNetworkIds[i]],
+      windows,
       result.reason instanceof Error
         ? result.reason
         : new Error(String(result.reason)),
@@ -230,10 +356,12 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
 }
 
 /**
- * Fetches pools, snapshots (24h/7d/30d), protocol fees, and LP counts for ALL
- * configured networks in parallel. Uses Promise.allSettled so one failing network
- * doesn't block others. Sub-query failures are surfaced as per-field errors so
- * the UI can show "N/A" instead of silently reporting $0 or zero volume.
+ * Fetches pools, full-history snapshots (paginated), protocol fees, and LP
+ * counts for ALL configured networks in parallel. Window-specific snapshot
+ * arrays (24h/7d/30d) are derived in-memory from `snapshotsAll` so we make one
+ * GraphQL request instead of four overlapping ones, and avoid Hasura's silent
+ * 1000-row cap on windowed queries. Uses Promise.allSettled so one failing
+ * network doesn't block others.
  */
 export function useAllNetworksData(): AllNetworksResult {
   const { data, error, isLoading } = useSWR<NetworkData[]>(
