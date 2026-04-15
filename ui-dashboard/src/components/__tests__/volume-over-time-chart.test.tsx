@@ -160,6 +160,36 @@ describe("buildDailyVolumeSeries", () => {
     const total = series.reduce((s, p) => s + p.volumeUSD, 0);
     expect(total).toBe(3);
   });
+
+  it("excludes today's bucket when window.to is mid-day (production case)", () => {
+    // Production windows come from hourBucket(Date.now()), so window.to is
+    // always a mid-day hour boundary, not midnight. Today's PoolDailySnapshot
+    // row contains the FULL 24h total even at 10:00 UTC — emitting it would
+    // count hours after window.to and overstate the range total.
+    const today = dayAlignedNow();
+    const from = today - 2 * SECONDS_PER_DAY;
+    const to = today + 6 * 3600; // window.to is 06:00 UTC today (non-midnight)
+
+    const series = buildDailyVolumeSeries(
+      makeVolumeNetworkData([
+        { timestamp: from, swapVolume0: "1000000000000000000" }, // day-2: $1
+        {
+          timestamp: from + SECONDS_PER_DAY,
+          swapVolume0: "2000000000000000000",
+        }, // day-1: $2
+        { timestamp: today, swapVolume0: "99000000000000000000" }, // today: must be excluded
+      ]),
+      { from, to },
+    );
+
+    // today's bucket must NOT appear even though today < window.to
+    expect(series.map((p) => p.timestamp)).toEqual([
+      today - 2 * SECONDS_PER_DAY,
+      today - 1 * SECONDS_PER_DAY,
+    ]);
+    // $99 from today must not be counted
+    expect(series.reduce((s, p) => s + p.volumeUSD, 0)).toBe(3);
+  });
 });
 
 describe("weekOverWeekChangePct", () => {
@@ -268,14 +298,18 @@ describe("VolumeOverTimeChart render", () => {
 
   it("shows the headline as a formatted USD total covering the default (30d) range", () => {
     const today = dayAlignedNow();
-    // Build two snapshots within the last 30 days that sum to $3
+    // Today's bucket is excluded (window.to is mid-day, today's PoolDailySnapshot
+    // would include post-window.to hours). Use completed past days instead.
     const html = renderChart({
       networkData: makeVolumeNetworkData([
         {
-          timestamp: today - SECONDS_PER_DAY,
+          timestamp: today - 2 * SECONDS_PER_DAY,
           swapVolume0: "1000000000000000000",
         },
-        { timestamp: today, swapVolume0: "2000000000000000000" },
+        {
+          timestamp: today - SECONDS_PER_DAY,
+          swapVolume0: "2000000000000000000",
+        },
       ]),
     });
 
