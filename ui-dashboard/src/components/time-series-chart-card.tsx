@@ -130,6 +130,10 @@ export function TimeSeriesChartCard({
           tickcolor: "transparent",
           tickfont: { size: 10, color: "#64748b" },
           nticks: 5,
+          // Flat single-line tick label; without this Plotly draws a
+          // secondary year label under each primary tick that gets clipped
+          // to a dashed-looking fragment by the tight bottom margin.
+          tickformat: "%b %d",
           fixedrange: true,
         },
         yaxis: {
