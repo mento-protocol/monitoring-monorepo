@@ -85,12 +85,15 @@ type Props = {
   address: string;
   /** Pre-filled initial values when editing an existing entry */
   initial?: AddressEntry;
+  /** Target chainId for the entry; defaults to the current network. */
+  chainId?: number;
   onClose: () => void;
 };
 
 export function AddressLabelEditor({
   address: initialAddress,
   initial,
+  chainId,
   onClose,
 }: Props) {
   const {
@@ -138,7 +141,7 @@ export function AddressLabelEditor({
   const isContractRow = resolveIsContractRow({
     isNewAddress,
     initial,
-    isCustom: isCustomLabel(address),
+    isCustom: isCustomLabel(address, chainId),
   });
 
   async function handleSave(e: React.FormEvent) {
@@ -162,12 +165,16 @@ export function AddressLabelEditor({
     setSaving(true);
     setError(null);
     try {
-      await upsertEntry(address, {
-        name: effectiveName,
-        tags,
-        notes: notes.trim() || undefined,
-        isPublic,
-      });
+      await upsertEntry(
+        address,
+        {
+          name: effectiveName,
+          tags,
+          notes: notes.trim() || undefined,
+          isPublic,
+        },
+        chainId,
+      );
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save label.");
@@ -180,7 +187,7 @@ export function AddressLabelEditor({
     setDeleting(true);
     setError(null);
     try {
-      await deleteEntry(address);
+      await deleteEntry(address, chainId);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete label.");
@@ -189,7 +196,7 @@ export function AddressLabelEditor({
     }
   }
 
-  const hasExistingCustomEntry = isCustomLabel(address);
+  const hasExistingCustomEntry = isCustomLabel(address, chainId);
 
   return (
     <dialog

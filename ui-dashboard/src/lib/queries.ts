@@ -103,9 +103,8 @@ export const POOL_SNAPSHOTS_ALL = `
 `;
 
 export const RECENT_SWAPS = `
-  query RecentSwaps($chainId: Int!, $limit: Int!) {
+  query RecentSwaps($limit: Int!) {
     SwapEvent(
-      where: { chainId: { _eq: $chainId } }
       order_by: { blockNumber: desc }
       limit: $limit
     ) {
@@ -490,9 +489,9 @@ export const OLS_LIQUIDITY_EVENTS = `
 `;
 
 export const ALL_OLS_POOLS = `
-  query AllOlsPools($chainId: Int!) {
+  query AllOlsPools {
     OlsPool(
-      where: { isActive: { _eq: true }, chainId: { _eq: $chainId } }
+      where: { isActive: { _eq: true } }
       limit: 1000
     ) {
       poolId

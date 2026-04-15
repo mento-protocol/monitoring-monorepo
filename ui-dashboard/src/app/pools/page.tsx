@@ -3,56 +3,48 @@
 import { Suspense, useState, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { buildPoolDetailHref } from "@/lib/routing";
+import { buildPoolDetailHref, buildPoolsFilterUrl } from "@/lib/routing";
 import { useGQL } from "@/lib/graphql";
-import {
-  ALL_POOLS_WITH_HEALTH,
-  POOL_SNAPSHOTS_WINDOW,
-  RECENT_SWAPS,
-  POOL_SWAPS,
-  ALL_OLS_POOLS,
-} from "@/lib/queries";
+import { useAllNetworksData } from "@/hooks/use-all-networks-data";
+import { buildGlobalPoolEntries } from "@/lib/global-pool-entries";
+import { ALL_OLS_POOLS, RECENT_SWAPS, POOL_SWAPS } from "@/lib/queries";
 import {
   truncateAddress,
   formatWei,
   relativeTime,
   formatTimestamp,
   formatBlock,
-  extractChainIdFromPoolId,
   isNamespacedPoolId,
   isValidAddress,
-  normalizePoolIdForChain,
 } from "@/lib/format";
+import { poolName, tokenSymbol } from "@/lib/tokens";
 import {
-  buildPoolNameMap,
-  tokenSymbol,
-  buildOracleRateMap,
-} from "@/lib/tokens";
+  GlobalPoolsTable,
+  type GlobalPoolEntry,
+} from "@/components/global-pools-table";
+import { ChainIcon } from "@/components/chain-icon";
 import {
-  snapshotWindow24h,
-  snapshotWindow7d,
-  buildPoolVolumeMap,
-  SNAPSHOT_REFRESH_MS,
-} from "@/lib/volume";
-import { PoolsTable } from "@/components/pools-table";
-import { useNetwork } from "@/components/network-provider";
-import type { OlsPool, Pool, PoolSnapshotWindow, SwapEvent } from "@/lib/types";
+  NETWORKS,
+  networkIdForChainId,
+  DEFAULT_NETWORK,
+  type Network,
+} from "@/lib/networks";
+import type { OlsPool, Pool, SwapEvent } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import { LimitSelect } from "@/components/controls";
 import { SenderCell } from "@/components/sender-cell";
-import { buildPoolsFilterUrl } from "@/lib/routing";
 
-export default function HomePage() {
+export default function PoolsPage() {
   return (
     <Suspense>
-      <HomeContent />
+      <PoolsContent />
     </Suspense>
   );
 }
 
-function HomeContent() {
-  const { network } = useNetwork();
+function PoolsContent() {
+  const { networkData, isLoading: poolsLoading } = useAllNetworksData();
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -62,8 +54,6 @@ function HomeContent() {
   const [filterInput, setFilterInput] = useState(poolFilter);
   const [filterError, setFilterError] = useState("");
 
-  // Sync URL → input state when the URL changes externally (derived state
-  // pattern, avoids calling setState inside useEffect).
   const [prevPoolFilter, setPrevPoolFilter] = useState(poolFilter);
   if (prevPoolFilter !== poolFilter) {
     setPrevPoolFilter(poolFilter);
@@ -71,100 +61,37 @@ function HomeContent() {
     setFilterError("");
   }
 
-  const {
-    data: poolsData,
-    error: poolsErr,
-    isLoading: poolsLoading,
-  } = useGQL<{ Pool: Pool[] }>(ALL_POOLS_WITH_HEALTH, {
-    chainId: network.chainId,
-  });
+  const { entries, volume24hByKey, volume7dByKey, tvlChangeWoWByKey } = useMemo(
+    () => buildGlobalPoolEntries(networkData),
+    [networkData],
+  );
+
+  const poolsByNamespacedId = useMemo(() => {
+    const m = new Map<string, GlobalPoolEntry>();
+    for (const e of entries) m.set(e.pool.id, e);
+    return m;
+  }, [entries]);
+
+  const poolNames = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const [id, { pool, network }] of poolsByNamespacedId) {
+      m[id] = poolName(network, pool.token0, pool.token1);
+    }
+    return m;
+  }, [poolsByNamespacedId]);
 
   const {
     data: olsData,
     error: olsErr,
     isLoading: olsLoading,
-  } = useGQL<{ OlsPool: Pick<OlsPool, "poolId">[] }>(ALL_OLS_POOLS, {
-    chainId: network.chainId,
-  });
+  } = useGQL<{ OlsPool: Pick<OlsPool, "poolId">[] }>(ALL_OLS_POOLS);
   const olsPoolIds = useMemo(
     () => new Set((olsData?.OlsPool ?? []).map((p) => p.poolId)),
     [olsData],
   );
 
-  const pools = poolsData?.Pool ?? [];
-  const rates = useMemo(
-    () => buildOracleRateMap(pools, network),
-    [pools, network],
-  );
-
-  // Volume snapshots — derive both windows from a single timestamp so the
-  // 24h and 7d columns always share the same `to` bucket.
-  const poolIds = useMemo(() => pools.map((p) => p.id), [pools]);
-  const now = Date.now();
-  const snapshotWindow = snapshotWindow24h(now);
-  const {
-    data: snapshotData,
-    error: snapshotErr,
-    isLoading: snapshotLoading,
-  } = useGQL<{ PoolSnapshot: PoolSnapshotWindow[] }>(
-    poolIds.length > 0 ? POOL_SNAPSHOTS_WINDOW : null,
-    { from: snapshotWindow.from, to: snapshotWindow.to, poolIds },
-    SNAPSHOT_REFRESH_MS,
-  );
-
-  const volume24h = useMemo(
-    () =>
-      snapshotData
-        ? buildPoolVolumeMap(
-            snapshotData.PoolSnapshot ?? [],
-            pools,
-            network,
-            rates,
-          )
-        : undefined,
-    [snapshotData, pools, network, rates],
-  );
-
-  const snapshotWindow7 = snapshotWindow7d(now);
-  const {
-    data: snapshot7dData,
-    error: snapshot7dErr,
-    isLoading: snapshot7dLoading,
-  } = useGQL<{ PoolSnapshot: PoolSnapshotWindow[] }>(
-    poolIds.length > 0 ? POOL_SNAPSHOTS_WINDOW : null,
-    { from: snapshotWindow7.from, to: snapshotWindow7.to, poolIds },
-    SNAPSHOT_REFRESH_MS,
-  );
-  const volume7d = useMemo(
-    () =>
-      snapshot7dData
-        ? buildPoolVolumeMap(
-            snapshot7dData.PoolSnapshot ?? [],
-            pools,
-            network,
-            rates,
-          )
-        : undefined,
-    [snapshot7dData, pools, network, rates],
-  );
-
-  const normalizedPoolFilter = poolFilter
-    ? normalizePoolIdForChain(poolFilter, network.chainId)
-    : "";
-  const filteredPoolChainId = extractChainIdFromPoolId(normalizedPoolFilter);
-  const hasForeignChainPoolFilter =
-    filteredPoolChainId !== null && filteredPoolChainId !== network.chainId;
-  const foreignChainErrorMsg = hasForeignChainPoolFilter
-    ? `Pool ${normalizedPoolFilter} belongs to chain ${filteredPoolChainId}. Switch networks to view its swaps.`
-    : "";
-  const swapQuery = hasForeignChainPoolFilter
-    ? null
-    : normalizedPoolFilter
-      ? POOL_SWAPS
-      : RECENT_SWAPS;
-  const swapVars = normalizedPoolFilter
-    ? { poolId: normalizedPoolFilter, limit }
-    : { chainId: network.chainId, limit };
+  const swapQuery = poolFilter ? POOL_SWAPS : RECENT_SWAPS;
+  const swapVars = poolFilter ? { poolId: poolFilter, limit } : { limit };
   const {
     data: swapsData,
     error: swapsErr,
@@ -172,8 +99,7 @@ function HomeContent() {
   } = useGQL<{ SwapEvent: SwapEvent[] }>(swapQuery, swapVars);
 
   const swaps = swapsData?.SwapEvent ?? [];
-  const poolNames = buildPoolNameMap(network, pools);
-  const poolMap = Object.fromEntries(pools.map((p) => [p.id, p]));
+  const failedNetworks = networkData.filter((n) => n.error !== null);
 
   const setURL = useCallback(
     (pool: string, lim: number) => {
@@ -187,22 +113,12 @@ function HomeContent() {
   const applyFilter = useCallback(() => {
     const v = filterInput.trim();
     if (v && !isValidAddress(v) && !isNamespacedPoolId(v)) {
-      setFilterError("Invalid pool filter (expected 0x... or {chainId}-0x...)");
+      setFilterError("Invalid pool filter (expected 0x… or {chainId}-0x…)");
       return;
     }
-
-    const normalized = normalizePoolIdForChain(v, network.chainId);
-    const filterChainId = extractChainIdFromPoolId(normalized);
-    if (filterChainId !== null && filterChainId !== network.chainId) {
-      setFilterError(
-        `Pool ${normalized} belongs to chain ${filterChainId}. Switch networks to view its swaps.`,
-      );
-      return;
-    }
-
     setFilterError("");
-    setURL(normalized, limit);
-  }, [filterInput, limit, network.chainId, setURL]);
+    setURL(v, limit);
+  }, [filterInput, limit, setURL]);
 
   const clearFilter = useCallback(() => {
     setFilterInput("");
@@ -210,17 +126,15 @@ function HomeContent() {
     setURL("", limit);
   }, [limit, setURL]);
 
-  const latestBlock =
-    swaps.length > 0
-      ? swaps[0].blockNumber
-      : pools.length > 0
-        ? pools[0].createdAtBlock
-        : null;
+  const latestBlock = swaps.length > 0 ? swaps[0].blockNumber : null;
 
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Tile label="Pools" value={poolsLoading ? "…" : String(pools.length)} />
+        <Tile
+          label="Pools"
+          value={poolsLoading ? "…" : String(entries.length)}
+        />
         <Tile
           label="Showing"
           value={swapsLoading ? "…" : `${swaps.length} swaps`}
@@ -231,6 +145,13 @@ function HomeContent() {
         />
       </div>
 
+      {failedNetworks.map((net) => (
+        <ErrorBox
+          key={net.network.id}
+          message={`${net.network.label}: Failed to load pools — ${net.error?.message}`}
+        />
+      ))}
+
       <section aria-labelledby="pools-heading">
         <h2
           id="pools-heading"
@@ -238,33 +159,25 @@ function HomeContent() {
         >
           Pools
         </h2>
-        {poolsErr ? (
-          <ErrorBox message={`Failed to load pools: ${poolsErr.message}`} />
-        ) : poolsLoading ? (
-          <Skeleton rows={3} />
-        ) : pools.length === 0 ? (
-          <EmptyBox message="No pools found. Is the indexer running?" />
-        ) : (
-          <>
-            {olsErr && !olsLoading && (
-              <div className="mb-3">
-                <ErrorBox
-                  message={`OLS status unavailable right now: ${olsErr.message}. Pool list is loaded, but OLS badges may be incomplete.`}
-                />
-              </div>
-            )}
-            <PoolsTable
-              pools={pools}
-              rates={rates}
-              volume24h={volume24h}
-              volume24hLoading={snapshotLoading}
-              volume24hError={!!snapshotErr}
-              volume7d={volume7d}
-              volume7dLoading={snapshot7dLoading}
-              volume7dError={!!snapshot7dErr}
-              olsPoolIds={olsPoolIds}
+        {olsErr && !olsLoading && (
+          <div className="mb-3">
+            <ErrorBox
+              message={`OLS status unavailable right now: ${olsErr.message}. Pool list is loaded, but OLS badges may be incomplete.`}
             />
-          </>
+          </div>
+        )}
+        {poolsLoading ? (
+          <Skeleton rows={3} />
+        ) : failedNetworks.length === 0 && entries.length === 0 ? (
+          <EmptyBox message="No pools found across any chain." />
+        ) : (
+          <GlobalPoolsTable
+            entries={entries}
+            volume24hByKey={volume24hByKey}
+            volume7dByKey={volume7dByKey}
+            tvlChangeWoWByKey={tvlChangeWoWByKey}
+            olsPoolIds={olsPoolIds}
+          />
         )}
       </section>
 
@@ -273,8 +186,8 @@ function HomeContent() {
           id="swaps-heading"
           className="text-lg font-semibold text-white mb-3"
         >
-          {normalizedPoolFilter
-            ? `Swaps for ${poolNames[normalizedPoolFilter] ?? truncateAddress(normalizedPoolFilter)}`
+          {poolFilter
+            ? `Swaps for ${poolNames[poolFilter] ?? truncateAddress(poolFilter)}`
             : "Recent Swaps"}
         </h2>
 
@@ -318,20 +231,18 @@ function HomeContent() {
           />
         </div>
 
-        {(filterError || foreignChainErrorMsg) && (
+        {filterError && (
           <p
             id="filter-error"
             className="mb-3 text-sm text-red-400"
             role="alert"
           >
-            {filterError || foreignChainErrorMsg}
+            {filterError}
           </p>
         )}
 
         {swapsErr ? (
           <ErrorBox message={`Failed to load swaps: ${swapsErr.message}`} />
-        ) : hasForeignChainPoolFilter ? (
-          <EmptyBox message={foreignChainErrorMsg} />
         ) : swapsLoading ? (
           <Skeleton rows={5} />
         ) : swaps.length === 0 ? (
@@ -347,7 +258,7 @@ function HomeContent() {
             swaps={swaps}
             showPool={!poolFilter}
             poolNames={poolNames}
-            poolMap={poolMap}
+            poolsByNamespacedId={poolsByNamespacedId}
           />
         )}
       </section>
@@ -355,24 +266,27 @@ function HomeContent() {
   );
 }
 
-// ---------------------------------------------------------------------------
+function networkForChainId(chainId: number): Network {
+  const id = networkIdForChainId(chainId);
+  return id ? NETWORKS[id] : NETWORKS[DEFAULT_NETWORK];
+}
 
 function SwapTable({
   swaps,
   showPool,
   poolNames,
-  poolMap,
+  poolsByNamespacedId,
 }: {
   swaps: SwapEvent[];
   showPool: boolean;
   poolNames: Record<string, string>;
-  poolMap: Record<string, Pool>;
+  poolsByNamespacedId: Map<string, GlobalPoolEntry>;
 }) {
-  const { network } = useNetwork();
   return (
     <Table>
       <thead>
         <tr className="border-b border-slate-800 bg-slate-900/50">
+          <Th>Chain</Th>
           {showPool && <Th>Pool</Th>}
           <Th>Sender</Th>
           <Th>Trader</Th>
@@ -384,7 +298,9 @@ function SwapTable({
       </thead>
       <tbody>
         {swaps.map((s) => {
-          const pool = poolMap[s.poolId];
+          const entry = poolsByNamespacedId.get(s.poolId);
+          const network = entry?.network ?? networkForChainId(s.chainId);
+          const pool: Pool | undefined = entry?.pool;
           const sym0 = tokenSymbol(network, pool?.token0 ?? null);
           const sym1 = tokenSymbol(network, pool?.token1 ?? null);
           const soldToken0 = BigInt(s.amount0In) > BigInt(0);
@@ -394,10 +310,13 @@ function SwapTable({
           const boughtSym = soldToken0 ? sym1 : sym0;
           return (
             <Row key={s.id}>
+              <td className="px-4 py-2">
+                <ChainIcon network={network} />
+              </td>
               {showPool && (
                 <td className="px-4 py-2">
                   <Link
-                    href={buildPoolDetailHref(s.poolId, network.id)}
+                    href={buildPoolDetailHref(s.poolId)}
                     className="text-sm font-medium text-indigo-400 hover:text-indigo-300"
                     title={s.poolId}
                   >
@@ -405,8 +324,8 @@ function SwapTable({
                   </Link>
                 </td>
               )}
-              <SenderCell address={s.sender} />
-              <SenderCell address={s.recipient} />
+              <SenderCell address={s.sender} chainId={s.chainId} />
+              <SenderCell address={s.recipient} chainId={s.chainId} />
               <Td mono small align="right">
                 {formatWei(soldAmt)} {soldSym}
               </Td>

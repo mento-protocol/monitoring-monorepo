@@ -2,23 +2,8 @@
  * Routing helpers used across pages and tests.
  */
 
-import {
-  DEFAULT_NETWORK,
-  isCanonicalNetwork,
-  type IndexerNetworkId,
-} from "@/lib/networks";
-import { isNamespacedPoolId } from "@/lib/pool-id";
-
-/**
- * Redirect destination when a pool isn't found on the active network.
- * Must be the caller's *active* network id (from `useNetwork()`) — if the
- * user just changed the selector, they land on the new chain's pools list.
- */
-export function buildPoolNotFoundDest(networkId: IndexerNetworkId): string {
-  if (networkId === DEFAULT_NETWORK) return "/pools";
-  const params = new URLSearchParams({ network: networkId });
-  return `/pools?${params.toString()}`;
-}
+/** Redirect destination when a pool isn't found. */
+export const POOL_NOT_FOUND_DEST = "/pools";
 
 /**
  * Returns the /pools navigation URL for a given pool filter and limit,
@@ -43,9 +28,10 @@ export function buildPoolsFilterUrl(
   return qs ? `/pools?${qs}` : "/pools";
 }
 
-// In-page URL updates (tab/limit/search, raw→namespaced canonicalization).
-// Preserves all params — the network param may be the only anchor for a
-// non-canonical network that shares a chainId with a canonical one.
+/**
+ * In-page URL updates (tab/limit/search, raw→namespaced canonicalization).
+ * Preserves existing params (tab, limit, etc.).
+ */
 export function buildPoolDetailUrl(
   poolId: string,
   currentParams: URLSearchParams,
@@ -54,17 +40,10 @@ export function buildPoolDetailUrl(
   return `/pool/${encodeURIComponent(poolId)}${qs ? `?${qs}` : ""}`;
 }
 
-// New pool detail link from a listing. Drops ?network= only when BOTH the
-// active network is canonical for its chainId AND the pool id is namespaced
-// (so NetworkProvider can recover the chain from the path). Non-canonical
-// networks or raw `0x…` pool ids must keep the param, otherwise navigation
-// would silently fall back to DEFAULT_NETWORK.
-export function buildPoolDetailHref(
-  poolId: string,
-  activeNetworkId: IndexerNetworkId,
-): string {
-  const base = `/pool/${encodeURIComponent(poolId)}`;
-  const chainRecoverableFromPath =
-    isCanonicalNetwork(activeNetworkId) && isNamespacedPoolId(poolId);
-  return chainRecoverableFromPath ? base : `${base}?network=${activeNetworkId}`;
+/**
+ * Pool detail link from a listing. Pool IDs are namespaced `{chainId}-{addr}`
+ * so the chain is recoverable from the path — no extra query params needed.
+ */
+export function buildPoolDetailHref(poolId: string): string {
+  return `/pool/${encodeURIComponent(poolId)}`;
 }
