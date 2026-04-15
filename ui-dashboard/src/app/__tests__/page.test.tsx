@@ -626,23 +626,37 @@ describe("GlobalPage — Volume chart wiring", () => {
     expect(html).not.toContain("week-over-week");
   });
 
-  it("wires an all-history snapshots failure through to both chart cards", () => {
-    // snapshotsAll is the series source for both TVL and Volume, so a failure
-    // partial-badges both cards.
+  it("partial-badges only the TVL card when the hourly all-history fetch fails", () => {
+    // The TVL chart still reads the hourly `snapshotsAll` for its 7d hourly
+    // resolution; the Volume chart reads the daily rollup `snapshotsAllDaily`.
+    // A failure on the hourly path should NOT bleed into the Volume card.
     const html = render([
       makeNetworkData({
         network: TVL_NETWORK,
-        snapshotsAllError: new Error("all-history timeout"),
+        snapshotsAllError: new Error("all-history hourly timeout"),
       }),
     ]);
 
-    expect(html.split("· partial data").length - 1).toBe(2);
+    expect(html.split("· partial data").length - 1).toBe(1);
+  });
+
+  it("partial-badges only the Volume card when the daily all-history fetch fails", () => {
+    // Mirror of the above: a daily-rollup failure only affects the Volume
+    // chart — the TVL chart keeps rendering from the hourly snapshotsAll.
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        snapshotsAllDailyError: new Error("all-history daily timeout"),
+      }),
+    ]);
+
+    expect(html.split("· partial data").length - 1).toBe(1);
   });
 
   it("only partial-badges the TVL card when the 7d-only snapshot query fails", () => {
     // The 7d window is only used by the TVL delta (matchedTvl). Volume depends
-    // solely on snapshotsAll — a 7d-only failure must NOT leak into the Volume
-    // card's partial-data state.
+    // solely on snapshotsAllDaily — a 7d-only failure must NOT leak into the
+    // Volume card's partial-data state.
     const html = render([
       makeNetworkData({
         network: TVL_NETWORK,

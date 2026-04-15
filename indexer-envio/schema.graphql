@@ -98,6 +98,34 @@ type PoolSnapshot @index(fields: ["poolId", "timestamp"]) {
   blockNumber: BigInt!
 }
 
+# Daily rollup of PoolSnapshot — same shape, day-bucketed instead of hour-bucketed.
+# Exists so homepage volume-over-time and per-pool snapshot charts fit in a single
+# Hasura page for years of history instead of hitting the 1000-row cap.
+type PoolDailySnapshot @index(fields: ["poolId", "timestamp"]) {
+  id: ID!
+  chainId: Int! @index
+  poolId: String! @index
+  timestamp: BigInt! @index # UTC day bucket (ts / 86400 * 86400)
+  # Point-in-time state (latest values at end of this day)
+  reserves0: BigInt!
+  reserves1: BigInt!
+
+  # Per-day activity
+  swapCount: Int!
+  swapVolume0: BigInt!
+  swapVolume1: BigInt!
+  rebalanceCount: Int!
+  mintCount: Int!
+  burnCount: Int!
+
+  # Running cumulative totals (snapshot of Pool cumulatives at this day)
+  cumulativeSwapCount: Int!
+  cumulativeVolume0: BigInt!
+  cumulativeVolume1: BigInt!
+
+  blockNumber: BigInt!
+}
+
 type FactoryDeployment {
   id: ID!
   chainId: Int! @index

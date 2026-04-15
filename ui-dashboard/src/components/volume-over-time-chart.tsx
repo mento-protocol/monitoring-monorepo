@@ -20,9 +20,13 @@ type SeriesPoint = { timestamp: number; volumeUSD: number };
 
 /**
  * Includes swap volume from every pool type (FPMM and virtual), matching the
- * Summary tile's volume totals. Virtual pools also emit hourly PoolSnapshot
- * rows with per-hour swapVolume0/1, so excluding them would silently undercount
+ * Summary tile's volume totals. Virtual pools also emit PoolDailySnapshot
+ * rows with per-day swapVolume0/1, so excluding them would silently undercount
  * protocol volume and desync the chart from its Summary-tile counterpart.
+ *
+ * Input is the indexer's PoolDailySnapshot rollup (one row per pool per UTC
+ * day). The bucketing math still rounds to SECONDS_PER_DAY below, but each
+ * row already lands on a day boundary so the mapping is 1-to-1.
  *
  * When `window` is provided, snapshots are filtered to `[window.from, window.to)`
  * *before* bucketing. This keeps the chart's range totals consistent with the
@@ -39,13 +43,13 @@ export function buildDailyVolumeSeries(
   let minSnapshotBucket = Infinity;
 
   for (const netData of networkData) {
-    // Only skip on top-level failure. `snapshotsAllError` may be set while
-    // `snapshotsAll` still carries preserved recent rows (fail-open path
-    // for mid-loop pagination failure) — use those rows, the caller shows
-    // a partial-data badge separately.
+    // Only skip on top-level failure. `snapshotsAllDailyError` may be set
+    // while `snapshotsAllDaily` still carries preserved recent rows (fail-open
+    // path for mid-loop pagination failure) — use those rows, the caller
+    // shows a partial-data badge separately.
     if (netData.error !== null) continue;
     const poolById = new Map(netData.pools.map((pool) => [pool.id, pool]));
-    for (const snapshot of netData.snapshotsAll) {
+    for (const snapshot of netData.snapshotsAllDaily) {
       const timestamp = Number(snapshot.timestamp);
       if (window && (timestamp < window.from || timestamp >= window.to))
         continue;

@@ -15,42 +15,13 @@ import {
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
 interface SnapshotChartProps {
+  // PoolDailySnapshot rows from the indexer: one row per pool per UTC day,
+  // already aggregated server-side. `timestamp` is the UTC-day bucket
+  // (midnight seconds), `swapVolume{0,1}` is the per-day total, and
+  // `cumulativeSwapCount` is the running total as of that day.
   snapshots: PoolSnapshot[];
   token0Symbol?: string;
   token1Symbol?: string;
-}
-
-/** Groups hourly snapshots into UTC day buckets.
- * Sums volume/swapCount per day; uses last cumulativeSwapCount in each day. */
-function aggregateByDay(snapshots: PoolSnapshot[]): {
-  days: string[];
-  vol0: number[];
-  vol1: number[];
-  cumSwaps: number[];
-} {
-  const buckets = new Map<
-    string,
-    { vol0: number; vol1: number; cumSwaps: number }
-  >();
-
-  for (const s of snapshots) {
-    const day = new Date(Number(s.timestamp) * 1000).toISOString().slice(0, 10); // "YYYY-MM-DD"
-    const existing = buckets.get(day) ?? { vol0: 0, vol1: 0, cumSwaps: 0 };
-    buckets.set(day, {
-      vol0: existing.vol0 + parseWei(s.swapVolume0),
-      vol1: existing.vol1 + parseWei(s.swapVolume1),
-      // Last snapshot in the day has the highest cumulative count
-      cumSwaps: Math.max(existing.cumSwaps, s.cumulativeSwapCount),
-    });
-  }
-
-  const days = [...buckets.keys()].sort();
-  return {
-    days,
-    vol0: days.map((d) => buckets.get(d)!.vol0),
-    vol1: days.map((d) => buckets.get(d)!.vol1),
-    cumSwaps: days.map((d) => buckets.get(d)!.cumSwaps),
-  };
 }
 
 export function SnapshotChart({
@@ -60,7 +31,12 @@ export function SnapshotChart({
 }: SnapshotChartProps) {
   if (snapshots.length === 0) return null;
 
-  const { days, vol0, vol1, cumSwaps } = aggregateByDay(snapshots);
+  const days = snapshots.map((s) =>
+    new Date(Number(s.timestamp) * 1000).toISOString().slice(0, 10),
+  );
+  const vol0 = snapshots.map((s) => parseWei(s.swapVolume0));
+  const vol1 = snapshots.map((s) => parseWei(s.swapVolume1));
+  const cumSwaps = snapshots.map((s) => s.cumulativeSwapCount);
 
   const volumeTrace0 = {
     x: days,

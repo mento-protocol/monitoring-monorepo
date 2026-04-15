@@ -18,6 +18,7 @@ import {
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
+  POOL_DAILY_SNAPSHOTS_CHART,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   POOL_LIQUIDITY,
@@ -345,6 +346,8 @@ beforeEach(() => {
       if (query === POOL_SWAPS) return makeGqlResult({ SwapEvent: swaps });
       if (query === POOL_SNAPSHOTS_CHART)
         return makeGqlResult({ PoolSnapshot: poolSnapshots });
+      if (query === POOL_DAILY_SNAPSHOTS_CHART)
+        return makeGqlResult({ PoolDailySnapshot: poolSnapshots });
       if (query === POOL_RESERVES)
         return makeGqlResult({ ReserveUpdate: reserves });
       if (query === POOL_REBALANCES)
@@ -653,10 +656,12 @@ describe("Pool detail tab search", () => {
     }
   });
 
-  it("calls POOL_SNAPSHOTS_CHART with poolId only (no limit) on swaps tab", () => {
+  it("calls POOL_DAILY_SNAPSHOTS_CHART with poolId only on swaps tab", () => {
+    // Swaps tab consumes the daily rollup (server-side day bucketing) to keep
+    // full-history charts inside Envio's 1000-row per-query cap.
     renderWithParams({ tab: "swaps" });
     expect(useGQLMock).toHaveBeenCalledWith(
-      POOL_SNAPSHOTS_CHART,
+      POOL_DAILY_SNAPSHOTS_CHART,
       { poolId: "pool-1" },
       SNAPSHOT_REFRESH_MS,
     );
@@ -693,6 +698,8 @@ describe("Pool detail tab search", () => {
         if (query === POOL_SWAPS) return makeGqlResult({ SwapEvent: swaps });
         if (query === POOL_SNAPSHOTS_CHART)
           return makeGqlResult({ PoolSnapshot: poolSnapshots });
+        if (query === POOL_DAILY_SNAPSHOTS_CHART)
+          return makeGqlResult({ PoolDailySnapshot: poolSnapshots });
         if (query === POOL_RESERVES)
           return makeGqlResult({ ReserveUpdate: reserves });
         if (query === POOL_REBALANCES)
@@ -719,7 +726,9 @@ describe("Pool detail tab search", () => {
     );
     const html = renderWithParams({});
     const chartCalls = useGQLMock.mock.calls.filter(
-      (args: unknown[]) => args[0] === POOL_SNAPSHOTS_CHART,
+      (args: unknown[]) =>
+        args[0] === POOL_SNAPSHOTS_CHART ||
+        args[0] === POOL_DAILY_SNAPSHOTS_CHART,
     );
     expect(chartCalls).toHaveLength(0);
     expect(html).not.toContain("snapshot-chart");

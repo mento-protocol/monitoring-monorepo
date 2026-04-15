@@ -6,6 +6,7 @@ import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 import type { Network } from "@/lib/networks";
 import {
   ALL_POOLS_WITH_HEALTH,
+  POOL_DAILY_SNAPSHOTS_ALL,
   POOL_SNAPSHOTS_ALL,
   PROTOCOL_FEE_TRANSFERS_ALL,
   UNIQUE_LP_ADDRESSES,
@@ -52,6 +53,16 @@ export type NetworkData = {
    * range is incomplete. Surfaced via the partial-data badge.
    */
   snapshotsAllTruncated: boolean;
+  /**
+   * Full-history daily rollup snapshots, one row per pool per UTC day.
+   * Feeds the homepage volume-over-time chart. Fetched in parallel with the
+   * hourly `snapshotsAll` via its own pagination loop. Populated much faster
+   * than `snapshotsAll` (~20× fewer rows) so the chart doesn't stall on the
+   * bigger hourly fetch.
+   */
+  snapshotsAllDaily: PoolSnapshotWindow[];
+  /** True when the daily pagination loop hit its safety cap. */
+  snapshotsAllDailyTruncated: boolean;
   fees: ProtocolFeeSummary | null;
   uniqueLpCount: number | null;
   rates: OracleRateMap;
@@ -69,6 +80,9 @@ export type NetworkData = {
   snapshots30dError: Error | null;
   /** Error on the paginated all-history fetch (non-null iff pagination failed). */
   snapshotsAllError: Error | null;
+  /** Error on the paginated all-history daily fetch. Isolated from the hourly
+   * error so a volume-chart failure doesn't blank the TVL chart or tiles. */
+  snapshotsAllDailyError: Error | null;
   lpError: Error | null;
 };
 
@@ -91,6 +105,8 @@ const emptyNetworkData = (
   snapshots30d: [],
   snapshotsAll: [],
   snapshotsAllTruncated: false,
+  snapshotsAllDaily: [],
+  snapshotsAllDailyTruncated: false,
   fees: null,
   uniqueLpCount: null,
   rates: new Map(),
@@ -100,6 +116,7 @@ const emptyNetworkData = (
   snapshots7dError: null,
   snapshots30dError: null,
   snapshotsAllError: null,
+  snapshotsAllDailyError: null,
   lpError: null,
 });
 
@@ -148,19 +165,51 @@ async function fetchAllSnapshotPages(
   client: GraphQLClient,
   poolIds: string[],
 ): Promise<SnapshotPageResult> {
+  return fetchPaginatedSnapshotPages(
+    client,
+    poolIds,
+    POOL_SNAPSHOTS_ALL,
+    "PoolSnapshot",
+  );
+}
+
+/**
+ * Daily rollup of the same shape. ~365 rows/pool/year instead of ~8760,
+ * so for typical history a few pages cover everything. Uses the same safety
+ * cap and fail-open semantics as the hourly loop.
+ */
+async function fetchAllDailySnapshotPages(
+  client: GraphQLClient,
+  poolIds: string[],
+): Promise<SnapshotPageResult> {
+  return fetchPaginatedSnapshotPages(
+    client,
+    poolIds,
+    POOL_DAILY_SNAPSHOTS_ALL,
+    "PoolDailySnapshot",
+  );
+}
+
+async function fetchPaginatedSnapshotPages<K extends string>(
+  client: GraphQLClient,
+  poolIds: string[],
+  query: string,
+  responseKey: K,
+): Promise<SnapshotPageResult> {
   const seen = new Set<string>();
   const rows: PoolSnapshotWindow[] = [];
   for (let page = 0; page < SNAPSHOT_MAX_PAGES; page++) {
     let batch: PoolSnapshotWindow[];
     try {
-      const result = await client.request<{
-        PoolSnapshot: PoolSnapshotWindow[];
-      }>(POOL_SNAPSHOTS_ALL, {
-        poolIds,
-        limit: SNAPSHOT_PAGE_SIZE,
-        offset: page * SNAPSHOT_PAGE_SIZE,
-      });
-      batch = result.PoolSnapshot ?? [];
+      const result = await client.request<Record<K, PoolSnapshotWindow[]>>(
+        query,
+        {
+          poolIds,
+          limit: SNAPSHOT_PAGE_SIZE,
+          offset: page * SNAPSHOT_PAGE_SIZE,
+        },
+      );
+      batch = result[responseKey] ?? [];
     } catch (err) {
       // First-page failure is a hard error — nothing to degrade to.
       if (rows.length === 0) throw err;
@@ -214,26 +263,31 @@ export async function fetchNetworkData(
   const fpmmPoolIds = pools.filter(isFpmm).map((p) => p.id);
   const shouldQuery = shouldQueryPoolSnapshots(poolIds);
 
-  const [feesResult, snapshotsAllResult, lpResult] = await Promise.allSettled([
-    client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
-      PROTOCOL_FEE_TRANSFERS_ALL,
-      { chainId: network.chainId },
-    ),
-    shouldQuery
-      ? fetchAllSnapshotPages(client, poolIds)
-      : Promise.resolve<SnapshotPageResult>({
-          rows: [],
-          truncated: false,
-          error: null,
-        }),
-    fpmmPoolIds.length > 0
-      ? client.request<{
-          LiquidityPosition: { address: string }[];
-        }>(UNIQUE_LP_ADDRESSES, { poolIds: fpmmPoolIds })
-      : Promise.resolve({
-          LiquidityPosition: [] as { address: string }[],
-        }),
-  ]);
+  const emptySnapshotPage: SnapshotPageResult = {
+    rows: [],
+    truncated: false,
+    error: null,
+  };
+  const [feesResult, snapshotsAllResult, snapshotsAllDailyResult, lpResult] =
+    await Promise.allSettled([
+      client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
+        PROTOCOL_FEE_TRANSFERS_ALL,
+        { chainId: network.chainId },
+      ),
+      shouldQuery
+        ? fetchAllSnapshotPages(client, poolIds)
+        : Promise.resolve(emptySnapshotPage),
+      shouldQuery
+        ? fetchAllDailySnapshotPages(client, poolIds)
+        : Promise.resolve(emptySnapshotPage),
+      fpmmPoolIds.length > 0
+        ? client.request<{
+            LiquidityPosition: { address: string }[];
+          }>(UNIQUE_LP_ADDRESSES, { poolIds: fpmmPoolIds })
+        : Promise.resolve({
+            LiquidityPosition: [] as { address: string }[],
+          }),
+    ]);
 
   const toError = (reason: unknown) =>
     reason instanceof Error ? reason : new Error(String(reason));
@@ -263,6 +317,19 @@ export async function fetchNetworkData(
     snapshotsAllResult.status === "rejected"
       ? toError(snapshotsAllResult.reason)
       : (snapshotsAllResult.value.error ?? null);
+
+  const snapshotsAllDaily =
+    snapshotsAllDailyResult.status === "fulfilled"
+      ? snapshotsAllDailyResult.value.rows
+      : [];
+  const snapshotsAllDailyTruncated =
+    snapshotsAllDailyResult.status === "fulfilled"
+      ? snapshotsAllDailyResult.value.truncated
+      : false;
+  const snapshotsAllDailyError =
+    snapshotsAllDailyResult.status === "rejected"
+      ? toError(snapshotsAllDailyResult.reason)
+      : (snapshotsAllDailyResult.value.error ?? null);
 
   const snapshots = filterSnapshotsToWindow(snapshotsAll, windows.w24h);
   const snapshots7d = filterSnapshotsToWindow(snapshotsAll, windows.w7d);
@@ -310,6 +377,8 @@ export async function fetchNetworkData(
     snapshots30d,
     snapshotsAll,
     snapshotsAllTruncated,
+    snapshotsAllDaily,
+    snapshotsAllDailyTruncated,
     fees,
     uniqueLpCount,
     rates,
@@ -322,6 +391,7 @@ export async function fetchNetworkData(
     snapshots7dError,
     snapshots30dError,
     snapshotsAllError,
+    snapshotsAllDailyError,
     lpError: lpResult.status === "rejected" ? toError(lpResult.reason) : null,
   };
 }

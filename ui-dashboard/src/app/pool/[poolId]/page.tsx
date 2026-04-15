@@ -37,6 +37,7 @@ import {
   ORACLE_SNAPSHOTS_COUNT_PAGE,
   OLS_LIQUIDITY_EVENTS,
   OLS_POOL,
+  POOL_DAILY_SNAPSHOTS_CHART,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   POOL_LIQUIDITY,
@@ -578,16 +579,16 @@ function SwapsTab({
 
   const fpmmPool = pool ? isFpmm(pool) : false;
   // Passing null as the query key skips the request — VirtualPools have no snapshots.
-  const { data: snapshotData } = useGQL<{ PoolSnapshot: PoolSnapshot[] }>(
-    fpmmPool ? POOL_SNAPSHOTS_CHART : null,
+  // Daily rollup: one row per pool per UTC day, returned in chronological (asc)
+  // order. Server-side aggregation avoids the 1000-row cap that hourly hit.
+  const { data: snapshotData } = useGQL<{
+    PoolDailySnapshot: PoolSnapshot[];
+  }>(
+    fpmmPool ? POOL_DAILY_SNAPSHOTS_CHART : null,
     { poolId },
     SNAPSHOT_REFRESH_MS,
   );
-  // Query fetches newest-first (desc) with a cap; reverse for chronological display.
-  const snapshots = useMemo(
-    () => [...(snapshotData?.PoolSnapshot ?? [])].reverse(),
-    [snapshotData],
-  );
+  const snapshots = snapshotData?.PoolDailySnapshot ?? [];
 
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
