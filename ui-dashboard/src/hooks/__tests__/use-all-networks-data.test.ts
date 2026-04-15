@@ -114,7 +114,7 @@ describe("fetchNetworkData — happy path", () => {
     expect(result.pools).toHaveLength(1);
     expect(result.pools[0].id).toBe("pool-1");
     expect(result.fees).not.toBeNull();
-    expect(result.uniqueLpCount).toBe(5);
+    expect(result.uniqueLpAddresses).toHaveLength(5);
     expect(result.rates).toBeInstanceOf(Map);
 
     // Verify the request shape per query type (call order can vary because
@@ -167,7 +167,10 @@ describe("fetchNetworkData — happy path", () => {
       w30d: { from: 0, to: 30000 },
     });
 
-    expect(result.uniqueLpCount).toBe(3);
+    expect(result.uniqueLpAddresses).toEqual(
+      expect.arrayContaining(["0xa", "0xb", "0xc"]),
+    );
+    expect(result.uniqueLpAddresses).toHaveLength(3);
   });
 
   it("trims whitespace from hasuraSecret before setting auth header", async () => {
@@ -615,7 +618,7 @@ describe("fetchNetworkData — non-Error thrown values", () => {
 // ---------------------------------------------------------------------------
 
 describe("fetchNetworkData — LP query failure only", () => {
-  it("surfaces uniqueLpCount as null when LP query rejects", async () => {
+  it("surfaces uniqueLpAddresses as null when LP query rejects", async () => {
     const pool = makePool("pool-lp");
     const lpErr = new Error("LP query timeout");
 
@@ -639,7 +642,7 @@ describe("fetchNetworkData — LP query failure only", () => {
     expect(result.error).toBeNull();
     expect(result.pools).toHaveLength(1);
     expect(result.fees).not.toBeNull();
-    expect(result.uniqueLpCount).toBeNull();
+    expect(result.uniqueLpAddresses).toBeNull();
     expect(result.lpError).toBe(lpErr);
   });
 });

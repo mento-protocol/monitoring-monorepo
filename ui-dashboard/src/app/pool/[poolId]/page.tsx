@@ -2,7 +2,15 @@
 
 import { AddressLink } from "@/components/address-link";
 import { useAddressLabels } from "@/components/address-labels-provider";
-import { KindBadge, RebalancerBadge, SourceBadge } from "@/components/badges";
+import { KindBadge, SourceBadge } from "@/components/badges";
+import { DeviationCell } from "@/components/pool-header/deviation-cell";
+import {
+  HealthScoreInfoIcon,
+  HealthScoreValue,
+} from "@/components/pool-header/health-score-value";
+import { OraclePriceValue } from "@/components/pool-header/oracle-price-value";
+import { OracleStatusValue } from "@/components/pool-header/oracle-status-value";
+import { RebalanceStatusValue } from "@/components/pool-header/rebalance-status-value";
 import { LimitSelect } from "@/components/controls";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { HealthPanel } from "@/components/health-panel";
@@ -24,12 +32,12 @@ import {
   formatBlock,
   formatTimestamp,
   formatWei,
-  isNamespacedPoolId,
   normalizePoolIdForChain,
   parseWei,
   parseOraclePriceToNumber,
   relativeTime,
 } from "@/lib/format";
+import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import { useGQL } from "@/lib/graphql";
 import {
   ORACLE_SNAPSHOTS,
@@ -48,8 +56,13 @@ import {
   TRADING_LIMITS,
 } from "@/lib/queries";
 import { Pagination } from "@/components/pagination";
-import { computeHealthStatus, computeRebalancerLiveness } from "@/lib/health";
-import { isFpmm, poolName, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
+import {
+  explorerAddressUrl,
+  isFpmm,
+  poolName,
+  tokenSymbol,
+  USDM_SYMBOLS,
+} from "@/lib/tokens";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import {
   buildSearchBlob,
@@ -196,9 +209,7 @@ function PoolDetail() {
 
   const decodedId = decodePoolId(poolId);
   const normalizedPoolId = normalizePoolIdForChain(decodedId, network.chainId);
-  const poolAddress = isNamespacedPoolId(normalizedPoolId)
-    ? normalizedPoolId.split("-").slice(1).join("-")
-    : normalizedPoolId;
+  const poolAddress = stripChainIdFromPoolId(normalizedPoolId);
   const rawTab = searchParams.get("tab");
   const requestedTab: Tab = TABS.includes(rawTab as Tab)
     ? (rawTab as Tab)
@@ -285,10 +296,6 @@ function PoolDetail() {
     }
   }, [pool, poolLoading, poolErr, router, network.id]);
 
-  // Return null while redirect is pending to avoid a transient error flash
-  // and unnecessary error announcement for assistive tech.
-  if (!poolLoading && !poolErr && !pool) return null;
-
   const { data: limitsData } = useGQL<{ TradingLimit: TradingLimit[] }>(
     TRADING_LIMITS,
     { poolId: normalizedPoolId },
@@ -303,6 +310,13 @@ function PoolDetail() {
   const { data: olsData, isLoading: olsLoading } = useGQL<{
     OlsPool: OlsPool[];
   }>(OLS_POOL, { poolId: normalizedPoolId });
+
+  // Return null while redirect is pending to avoid a transient error flash
+  // and unnecessary error announcement for assistive tech. MUST sit below
+  // all hook declarations so React sees the same hook order every render —
+  // an early return above a hook violates the Rules of Hooks and throws
+  // "Rendered fewer hooks than expected" when the query resolves mid-page.
+  if (!poolLoading && !poolErr && !pool) return null;
   const hasOlsPool = selectActiveOlsPool(olsData?.OlsPool) !== null;
   // Keep OLS tab visible while loading so ?tab=ols deep links don't flicker
   const olsTabVisible = hasOlsPool || olsLoading;
@@ -448,81 +462,128 @@ function PoolHeader({
   deployTxHash?: string;
 }) {
   const { network } = useNetwork();
-  const name = poolName(network, pool.token0, pool.token1);
   const isVirtual = pool.source?.includes("virtual");
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const rebalancerLiveness = computeRebalancerLiveness(
-    { ...pool, healthStatus: computeHealthStatus(pool, network.chainId) },
-    nowSeconds,
-  );
   // pool.id is the namespaced multichain ID ("42220-0x…"). Strip the chain
   // prefix so AddressLink receives a plain hex address for explorer links.
-  const poolContractAddress = isNamespacedPoolId(pool.id)
-    ? pool.id.split("-").slice(1).join("-")
-    : pool.id;
+  const poolContractAddress = stripChainIdFromPoolId(pool.id);
+
+  // Mirror poolName's USDm-last ordering so the linked title matches the
+  // breadcrumb and historical display, but keep each symbol as a separate
+  // anchor to its token contract on the explorer.
+  const sym0 = tokenSymbol(network, pool.token0);
+  const sym1 = tokenSymbol(network, pool.token1);
+  const usdmIsToken0 = USDM_SYMBOLS.has(sym0) && !USDM_SYMBOLS.has(sym1);
+  const firstSym = usdmIsToken0 ? sym1 : sym0;
+  const firstAddr = usdmIsToken0 ? pool.token1 : pool.token0;
+  const secondSym = usdmIsToken0 ? sym0 : sym1;
+  const secondAddr = usdmIsToken0 ? pool.token0 : pool.token1;
+  const titleSymbol = (sym: string, addr: string | null) =>
+    addr ? (
+      <a
+        href={explorerAddressUrl(network, addr)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="hover:text-indigo-300 transition-colors"
+      >
+        {sym}
+      </a>
+    ) : (
+      sym
+    );
+
+  const createdRelative = relativeTime(pool.createdAtTimestamp);
+  const createdTitle = formatTimestamp(pool.createdAtTimestamp);
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <div className="flex flex-wrap items-center gap-3 mb-3">
-        <h1 className="text-xl font-bold text-white">{name}</h1>
+        <h1 className="text-xl font-bold text-white">
+          {titleSymbol(firstSym, firstAddr)}/
+          {titleSymbol(secondSym, secondAddr)}
+        </h1>
         <SourceBadge source={pool.source} />
         <span className="text-sm">
           <AddressLink address={poolContractAddress} />
         </span>
+        {/* `ml-auto` pushes "Created …" to the far edge so the title row
+            reads as `identity ← → metadata` rather than trailing ragged-left
+            after the address. */}
+        {deployTxHash ? (
+          <a
+            href={`${network.explorerBaseUrl}/tx/${deployTxHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={createdTitle}
+            className="ml-auto text-xs text-slate-500 hover:text-indigo-400 transition-colors"
+          >
+            Created {createdRelative}
+          </a>
+        ) : (
+          <span className="ml-auto text-xs text-slate-500" title={createdTitle}>
+            Created {createdRelative}
+          </span>
+        )}
       </div>
-      <dl className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-sm">
+      {/* `justify-between` distributes any trailing slack on the row as
+          wider uniform gaps between cells, so the row spans edge-to-edge
+          instead of leaving whitespace at the right. Each text cell gets
+          `min-w-36` so the shortest one (Health Score) doesn't feel
+          squished against the left edge while long cells size to content. */}
+      <dl className="flex flex-wrap justify-between gap-x-6 gap-y-4 text-sm">
         <Stat
-          label="Token 0"
-          value={pool.token0 ? <AddressLink address={pool.token0} /> : "—"}
+          className="min-w-36"
+          label={
+            <span className="inline-flex items-center gap-1">
+              Health Score
+              <HealthScoreInfoIcon />
+            </span>
+          }
+          value={
+            isVirtual ? (
+              <span className="text-slate-500">—</span>
+            ) : (
+              <HealthScoreValue pool={pool} />
+            )
+          }
         />
         <Stat
-          label="Token 1"
-          value={pool.token1 ? <AddressLink address={pool.token1} /> : "—"}
+          className="min-w-36"
+          label="Oracle Status"
+          value={
+            isVirtual ? (
+              <span className="text-slate-500">—</span>
+            ) : (
+              <OracleStatusValue pool={pool} network={network} />
+            )
+          }
         />
         <Stat
-          label="Rebalancing Strategy"
+          className="min-w-36"
+          label="Oracle Price"
+          value={
+            isVirtual ? (
+              <span className="text-slate-500">—</span>
+            ) : (
+              <OraclePriceValue pool={pool} network={network} />
+            )
+          }
+        />
+        <Stat
+          className="min-w-36"
+          label="Rebalance Status"
           value={
             isVirtual || !pool.rebalancerAddress ? (
               <span className="text-slate-500">—</span>
             ) : (
-              <span className="flex items-center gap-1.5 flex-wrap">
-                <AddressLink address={pool.rebalancerAddress} />
-                <RebalancerBadge status={rebalancerLiveness} />
-              </span>
+              <RebalanceStatusValue
+                pool={pool}
+                network={network}
+                strategyAddress={pool.rebalancerAddress}
+              />
             )
           }
         />
-        <Stat
-          label="Created at block"
-          value={
-            <a
-              href={`${network.explorerBaseUrl}/block/${pool.createdAtBlock}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-indigo-400 hover:text-indigo-300 font-mono"
-            >
-              {formatBlock(pool.createdAtBlock)}
-            </a>
-          }
-        />
-        <Stat
-          label="Created"
-          value={
-            deployTxHash ? (
-              <a
-                href={`${network.explorerBaseUrl}/tx/${deployTxHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-indigo-400 hover:text-indigo-300"
-              >
-                {relativeTime(pool.createdAtTimestamp)}
-              </a>
-            ) : (
-              relativeTime(pool.createdAtTimestamp)
-            )
-          }
-          title={formatTimestamp(pool.createdAtTimestamp)}
-        />
+        <DeviationCell pool={pool} network={network} />
       </dl>
     </div>
   );
@@ -533,14 +594,16 @@ function Stat({
   value,
   title,
   mono,
+  className,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: React.ReactNode;
   title?: string;
   mono?: boolean;
+  className?: string;
 }) {
   return (
-    <div>
+    <div className={className}>
       <dt className="text-slate-400">{label}</dt>
       <dd className={`text-white ${mono ? "font-mono" : ""}`} title={title}>
         {value}

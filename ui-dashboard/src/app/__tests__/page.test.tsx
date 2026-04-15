@@ -183,7 +183,7 @@ describe("GlobalPage — LP query failure", () => {
   it("shows N/A when all LP queries fail", () => {
     const html = render([
       makeNetworkData({
-        uniqueLpCount: null,
+        uniqueLpAddresses: null,
         lpError: new Error("LP aggregate timeout"),
       }),
     ]);
@@ -194,9 +194,9 @@ describe("GlobalPage — LP query failure", () => {
 
   it("shows 0 when a chain reports 0 LPs and another fails", () => {
     const html = render([
-      makeNetworkData({ uniqueLpCount: 0 }),
+      makeNetworkData({ uniqueLpAddresses: [] }),
       makeNetworkData({
-        uniqueLpCount: null,
+        uniqueLpAddresses: null,
         lpError: new Error("LP aggregate timeout"),
       }),
     ]);
@@ -205,16 +205,43 @@ describe("GlobalPage — LP query failure", () => {
     expect(html).toContain("Partial");
   });
 
-  it("sums LP counts from successful chains even when one fails", () => {
+  it("unions LP addresses across successful chains even when one fails", () => {
+    const addrs = Array.from({ length: 42 }, (_, i) => `0x${i}`);
     const html = render([
-      makeNetworkData({ uniqueLpCount: 42 }),
+      makeNetworkData({ uniqueLpAddresses: addrs }),
       makeNetworkData({
-        uniqueLpCount: null,
+        uniqueLpAddresses: null,
         lpError: new Error("LP aggregate timeout"),
       }),
     ]);
-    expect(html).toContain("42");
+    // Match the tile value surrounded by > < so we don't collide with Tailwind
+    // class digits (e.g. border-4, gap-4). 42 is deliberately chosen to avoid
+    // collision with common Tailwind spacing scales.
+    expect(html).toContain(">42<");
     expect(html).toContain("Partial");
+  });
+
+  it("deduplicates LP addresses that appear on multiple chains", () => {
+    // Craft two chains with a deliberate overlap so the union size (13) is
+    // distinctive and won't collide with Tailwind spacing classes. Sum of
+    // counts would be 20 (the bug signal).
+    const chain1 = Array.from({ length: 10 }, (_, i) => `0xlp1-${i}`);
+    const chain2 = [
+      // 7 addresses shared with chain1
+      ...chain1.slice(0, 7),
+      // 3 addresses unique to chain2
+      ...Array.from({ length: 3 }, (_, i) => `0xlp2-${i}`),
+    ];
+    // |chain1 ∪ chain2| = 10 + 3 = 13
+    const html = render([
+      makeNetworkData({ uniqueLpAddresses: chain1 }),
+      makeNetworkData({ uniqueLpAddresses: chain2 }),
+    ]);
+    expect(html).toContain("LPs");
+    // Angle-bracketed match guards against false positives from Tailwind classes.
+    expect(html).toContain(">13<");
+    // Rule out the un-deduped sum (10 + 10 = 20).
+    expect(html).not.toContain(">20<");
   });
 });
 

@@ -53,7 +53,7 @@ export type NetworkData = {
    */
   snapshotsAllTruncated: boolean;
   fees: ProtocolFeeSummary | null;
-  uniqueLpCount: number | null;
+  uniqueLpAddresses: string[] | null;
   rates: OracleRateMap;
   error: Error | null;
   feesError: Error | null;
@@ -92,7 +92,7 @@ const emptyNetworkData = (
   snapshotsAll: [],
   snapshotsAllTruncated: false,
   fees: null,
-  uniqueLpCount: null,
+  uniqueLpAddresses: null,
   rates: new Map(),
   error,
   feesError: null,
@@ -294,11 +294,18 @@ export async function fetchNetworkData(
   const snapshots7dError = windowError(windows.w7d.from);
   const snapshots30dError = windowError(windows.w30d.from);
 
-  const uniqueLpCount =
+  const uniqueLpAddresses =
     lpResult.status === "fulfilled"
-      ? new Set(
-          (lpResult.value.LiquidityPosition ?? []).map((lp) => lp.address),
-        ).size
+      ? Array.from(
+          new Set(
+            // Lowercase before dedup: upstream rows can arrive in mixed casing
+            // (checksum on some sources, lowercase on others) and Set keys on
+            // raw strings would count the same wallet twice.
+            (lpResult.value.LiquidityPosition ?? []).map((lp) =>
+              lp.address.toLowerCase(),
+            ),
+          ),
+        )
       : null;
 
   return {
@@ -311,7 +318,7 @@ export async function fetchNetworkData(
     snapshotsAll,
     snapshotsAllTruncated,
     fees,
-    uniqueLpCount,
+    uniqueLpAddresses,
     rates,
     error: null,
     feesError:
