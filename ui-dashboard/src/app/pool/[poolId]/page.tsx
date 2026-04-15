@@ -276,15 +276,14 @@ function PoolDetail() {
     searchParams,
   ]);
 
-  // When the pool is not found on the current network (e.g. user switched
-  // networks while viewing a pool), redirect to /pools rather than showing
-  // an error — the pool may simply not exist on the new chain.
-  // Preserve the active ?network= param so the user lands on the correct chain.
+  // Pool not found on the current network → redirect to the active
+  // network's /pools. Using network.id (not the pool id's chainId) honors a
+  // selector change the user may have just made.
   useEffect(() => {
     if (!poolLoading && !poolErr && !pool) {
-      router.replace(buildPoolNotFoundDest(searchParams.get("network")));
+      router.replace(buildPoolNotFoundDest(network.id));
     }
-  }, [pool, poolLoading, poolErr, router, searchParams]);
+  }, [pool, poolLoading, poolErr, router, network.id]);
 
   // Return null while redirect is pending to avoid a transient error flash
   // and unnecessary error announcement for assistive tech.

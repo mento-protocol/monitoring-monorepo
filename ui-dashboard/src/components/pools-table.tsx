@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { NetworkAwareLink } from "@/components/network-aware-link";
+import Link from "next/link";
 import { formatUSD } from "@/lib/format";
 import { poolName, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
+import { buildPoolDetailHref } from "@/lib/routing";
 import type { Pool } from "@/lib/types";
 import { Table, Row, Th } from "@/components/table";
 import { SourceBadge, HealthBadge } from "@/components/badges";
@@ -353,12 +354,12 @@ export function PoolsTable({
             return (
               <Row key={p.id}>
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
-                  <NetworkAwareLink
-                    href={`/pool/${encodeURIComponent(p.id)}`}
+                  <Link
+                    href={buildPoolDetailHref(p.id, network.id)}
                     className="font-semibold text-sm sm:text-base text-indigo-400 hover:text-indigo-300"
                   >
                     {poolName(network, p.token0, p.token1)}
-                  </NetworkAwareLink>
+                  </Link>
                 </td>
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
                   <SourceBadge source={p.source} />

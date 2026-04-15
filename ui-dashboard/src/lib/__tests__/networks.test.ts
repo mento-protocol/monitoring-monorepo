@@ -8,9 +8,16 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   NETWORKS,
   makeNetwork,
+  isCanonicalNetwork,
   isConfiguredNetworkId,
   isNetworkId,
+  networkIdForChainId,
 } from "../networks";
+
+// Mirror of the private map in networks.ts — kept here so the drift-guard
+// test can assert every canonical chainId still resolves to a matching
+// NETWORKS entry. If the real map changes, update this too.
+const EXPECTED_PROD_CHAIN_IDS = [42220, 11142220, 143, 10143];
 import { MAINNET_CHAIN_IDS } from "../types";
 
 // Known Celo mainnet addresses from @mento-protocol/contracts (42220/mainnet).
@@ -253,6 +260,44 @@ describe("NETWORKS — virtual pool support", () => {
     expect(NETWORKS["celo-sepolia"].hasVirtualPools).toBe(true);
     expect(NETWORKS["celo-mainnet-local"].hasVirtualPools).toBe(true);
     expect(NETWORKS["celo-mainnet"].hasVirtualPools).toBe(true);
+  });
+});
+
+describe("isCanonicalNetwork", () => {
+  it("returns true for canonical prod networks", () => {
+    expect(isCanonicalNetwork("celo-mainnet")).toBe(true);
+    expect(isCanonicalNetwork("celo-sepolia")).toBe(true);
+    expect(isCanonicalNetwork("monad-mainnet")).toBe(true);
+    expect(isCanonicalNetwork("monad-testnet")).toBe(true);
+  });
+
+  it("returns false for local variants sharing a chainId with a canonical one", () => {
+    expect(isCanonicalNetwork("celo-mainnet-local")).toBe(false);
+    expect(isCanonicalNetwork("celo-sepolia-local")).toBe(false);
+    expect(isCanonicalNetwork("devnet")).toBe(false);
+  });
+});
+
+describe("networkIdForChainId — pool-ID-driven network resolution", () => {
+  it("maps each prod chainId to its prod IndexerNetworkId", () => {
+    expect(networkIdForChainId(42220)).toBe("celo-mainnet");
+    expect(networkIdForChainId(11142220)).toBe("celo-sepolia");
+    expect(networkIdForChainId(143)).toBe("monad-mainnet");
+    expect(networkIdForChainId(10143)).toBe("monad-testnet");
+  });
+
+  it("returns null for unknown chainIds", () => {
+    expect(networkIdForChainId(1)).toBeNull();
+    expect(networkIdForChainId(0)).toBeNull();
+    expect(networkIdForChainId(99999)).toBeNull();
+  });
+
+  it("resolves to a network whose chainId actually matches (drift guard)", () => {
+    for (const chainId of EXPECTED_PROD_CHAIN_IDS) {
+      const networkId = networkIdForChainId(chainId);
+      expect(networkId).not.toBeNull();
+      expect(NETWORKS[networkId!].chainId).toBe(chainId);
+    }
   });
 });
 
