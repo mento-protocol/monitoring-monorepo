@@ -453,8 +453,15 @@ function isContractRevert(err: unknown): boolean {
   // Viem tags contract reverts with "revert" — match that specifically,
   // but NOT loose "execution" which also appears in provider-level errors
   // like "execution timeout" or "execution aborted".
+  //
+  // `returned no data ("0x")` covers viem's no-code / wrong-ABI path
+  // (ContractFunctionZeroDataError) — we want to treat "contract doesn't
+  // implement this function" the same as an explicit revert for probe
+  // purposes so EOAs / misconfigured strategy addresses land in the
+  // neutral "Unable to identify" fallback instead of bubbling up as a
+  // transport-level "Diagnostics unavailable".
   const msg = (err as { message?: string }).message ?? "";
-  return /revert/i.test(msg);
+  return /revert|returned no data/i.test(msg);
 }
 
 function extractRevertData(err: unknown): Hex | null {

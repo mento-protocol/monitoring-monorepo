@@ -122,6 +122,10 @@ function DeviationBar({
           role="progressbar"
           aria-valuenow={diff}
           aria-valuemax={threshold}
+          // Screen readers announce aria-valuetext verbatim when set,
+          // keeping the spoken unit (percentages) aligned with the
+          // visible copy instead of announcing raw basis points.
+          aria-valuetext={deltaLabel}
         />
       </div>
     </div>

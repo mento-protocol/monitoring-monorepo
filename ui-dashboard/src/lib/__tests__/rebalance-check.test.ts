@@ -138,6 +138,29 @@ describe("checkRebalanceStatus", () => {
     expect(mockCall).not.toHaveBeenCalled();
   });
 
+  it("treats viem's 'returned no data' error as a probe miss, not a transport failure", async () => {
+    // Real-world shape viem throws for EOAs / non-matching ABIs. Without
+    // swallowing it we bubble out to SWR and render "Diagnostics
+    // unavailable" instead of the neutral "Unable to identify" fallback.
+    const noDataMessage =
+      'The contract function "getCDPConfig" returned no data ("0x"). ' +
+      "This could be due to any of the following:\n" +
+      '  - The contract does not have the function "getCDPConfig",\n' +
+      "  - The parameters passed to the contract function may be invalid,\n" +
+      "  - The address is not a contract.";
+    mockReadContract
+      .mockRejectedValueOnce(new Error(noDataMessage))
+      .mockRejectedValueOnce(new Error(noDataMessage))
+      .mockRejectedValueOnce(new Error(noDataMessage));
+
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
+
+    expect(result.canRebalance).toBe(false);
+    expect(result.strategyType).toBe("unknown");
+    expect(result.message).toContain("Unable to identify");
+    expect(mockCall).not.toHaveBeenCalled();
+  });
+
   it("detects OLS strategy type when getCDPConfig and reserve() fail but getPools() succeeds", async () => {
     mockReadContract
       .mockRejectedValueOnce(new Error("execution reverted")) // getCDPConfig
