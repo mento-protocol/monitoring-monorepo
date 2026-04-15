@@ -180,28 +180,19 @@ export function updateHealthAccumulators(
   // from both numerator and denominator (matches UI computeBinaryHealthWindow).
   const duration = tradingSecondsInRange(lastTs, currentTimestamp);
 
-  // Zero trading-seconds (entire interval on a weekend) — advance state
-  // without accumulating duration.
-  if (duration === 0n) {
-    return {
-      healthTotalSeconds: pool.healthTotalSeconds,
-      healthBinarySeconds: pool.healthBinarySeconds,
-      lastOracleSnapshotTimestamp: currentTimestamp,
-      lastDeviationRatio: currentDeviationRatio,
-      hasHealthData: true,
-    };
-  }
-
-  // Freshness limit = min(pool.oracleExpiry, MAX_CARRY_SECONDS)
-  // oracleExpiry of 0 means unknown — fall back to MAX_CARRY_SECONDS
+  // Match UI computeBinaryHealthWindow: freshness is wall-clock (a snapshot
+  // expires at a wall-clock moment regardless of weekend), then the carry
+  // range is measured in trading-seconds.
+  // oracleExpiry of 0 means unknown — fall back to MAX_CARRY_SECONDS.
   const oracleExpiry =
     pool.oracleExpiry > 0n ? pool.oracleExpiry : MAX_CARRY_SECONDS;
   const freshnessLimit =
     oracleExpiry < MAX_CARRY_SECONDS ? oracleExpiry : MAX_CARRY_SECONDS;
-
-  // Split: carry segment + stale segment
-  const carrySeconds = duration <= freshnessLimit ? duration : freshnessLimit;
-  // staleSeconds = duration - carrySeconds (always unhealthy, h=0)
+  const freshnessEnd = lastTs + freshnessLimit;
+  const carryEnd =
+    currentTimestamp < freshnessEnd ? currentTimestamp : freshnessEnd;
+  const carrySeconds = tradingSecondsInRange(lastTs, carryEnd);
+  // duration is already trading-seconds; so is carrySeconds. stale = duration - carry.
 
   // Was the PREVIOUS interval healthy?
   // Use string comparison against sentinel to avoid float boundary issues.

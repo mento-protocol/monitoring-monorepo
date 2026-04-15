@@ -436,4 +436,25 @@ describe("updateHealthAccumulators (weekend-aware)", () => {
     assert.equal(result.lastOracleSnapshotTimestamp, FRI_20);
     assert.equal(result.lastDeviationRatio, "0.800000");
   });
+
+  it("healthy at Fri 20:45 with 1h freshness, next event Mon 10:00 → carry measured in trading-seconds within wall-clock freshness window", () => {
+    // Snap Fri 20:45 healthy, freshness 3600s (wall-clock). freshnessEnd = Fri 21:45
+    // wall-clock, but only Fri 20:45→21:00 (15 min = 900s) is trading time.
+    // Next event Mon 10:00 → gap = 11h15m trading-seconds = 40500s.
+    // carrySeconds = tradingSecondsInRange(Fri20:45, Fri21:45) = 900s.
+    // stalePart = 40500 - 900 = 39600s.
+    // healthBinarySeconds += 900 (not 3600 — that would be the old broken math).
+    const FRI_2045 = utcSec(2026, 2, 13, 20, 45);
+    const MON_10 = utcSec(2026, 2, 16, 10, 0);
+    const pool = makePool({
+      lastOracleSnapshotTimestamp: FRI_2045,
+      lastDeviationRatio: "0.500000",
+      healthTotalSeconds: 0n,
+      healthBinarySeconds: 0n,
+      oracleExpiry: 3600n,
+    });
+    const result = updateHealthAccumulators(pool, MON_10, "0.500000");
+    assert.equal(result.healthTotalSeconds, 40500n);
+    assert.equal(result.healthBinarySeconds, 900n);
+  });
 });
