@@ -1012,6 +1012,197 @@ describe("Envio Celo indexer handlers", () => {
     );
   });
 
+  it("OracleReported: sets, preserves, and clears deviationBreachStartedAt across transitions", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000d1";
+    const FEED_ID = "0x000000000000000000000000000000000000d100";
+    const ORACLE_PRICE_24DP = 1_000_000_000_000_000_000_000_000n;
+    // 60k/40k → reserve1/reserve0 ≈ 0.667, deviation ≈ 3333 bps
+    const R0_BREACH = 60_000_000_000_000_000_000_000n;
+    const R1_BREACH = 40_000_000_000_000_000_000_000n;
+    // 50k/50k → reserve1/reserve0 = 1.0, deviation ≈ 0 bps
+    const R0_BAL = 50_000_000_000_000_000_000_000n;
+    const R1_BAL = 50_000_000_000_000_000_000_000n;
+    // Threshold 3000 bps → 3333-bps deviation is a breach, 0-bps is not
+    const THRESHOLD = 3000;
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolAddress: POOL_ADDR,
+      feedId: FEED_ID,
+    });
+
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: R0_BAL,
+      reserves1: R1_BAL,
+      oraclePrice: ORACLE_PRICE_24DP,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      rebalanceThreshold: THRESHOLD,
+      source: "fpmm_update_reserves",
+    });
+
+    const fireOracle = async (db: MockDb, logIndex: number, ts: number) =>
+      SortedOracles.OracleReported.processEvent({
+        event: SortedOracles.OracleReported.createMockEvent({
+          token: FEED_ID,
+          oracle: "0x0000000000000000000000000000000000000099",
+          timestamp: BigInt(ts),
+          value: ORACLE_PRICE_24DP,
+          mockEventData: {
+            chainId: 42220,
+            logIndex,
+            srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+            block: { number: 400 + logIndex, timestamp: ts },
+          },
+        }),
+        mockDb: db,
+      });
+
+    // Step 1: balanced reserves → OK. deviationBreachStartedAt stays 0n.
+    mockDb = await fireOracle(mockDb, 1, 1_700_002_000);
+    let pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.equal(
+      pool.deviationBreachStartedAt,
+      0n,
+      "balanced pool: deviationBreachStartedAt stays 0n",
+    );
+
+    // Step 2: rebalance imbalance → CRITICAL. Sets to current block timestamp.
+    mockDb = mockDb.entities.Pool.set({
+      ...pool,
+      reserves0: R0_BREACH,
+      reserves1: R1_BREACH,
+    });
+    const BREACH_TS = 1_700_002_100;
+    mockDb = await fireOracle(mockDb, 2, BREACH_TS);
+    pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.equal(
+      pool.deviationBreachStartedAt,
+      BigInt(BREACH_TS),
+      "rising edge: deviationBreachStartedAt = block timestamp of first breach",
+    );
+
+    // Step 3: still breached — timestamp preserved across subsequent events.
+    mockDb = await fireOracle(mockDb, 3, 1_700_002_200);
+    pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.equal(
+      pool.deviationBreachStartedAt,
+      BigInt(BREACH_TS),
+      "still-breached: timestamp preserved, does NOT advance to latest event",
+    );
+
+    // Step 4: reserves restored → OK. Timestamp cleared to 0n.
+    mockDb = mockDb.entities.Pool.set({
+      ...pool,
+      reserves0: R0_BAL,
+      reserves1: R1_BAL,
+    });
+    mockDb = await fireOracle(mockDb, 4, 1_700_002_300);
+    pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.equal(
+      pool.deviationBreachStartedAt,
+      0n,
+      "falling edge: deviationBreachStartedAt reset to 0n",
+    );
+  });
+
+  it("MedianUpdated: sets, preserves, and clears deviationBreachStartedAt across transitions", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000d2";
+    const FEED_ID = "0x000000000000000000000000000000000000d200";
+    const ORACLE_PRICE_24DP = 1_000_000_000_000_000_000_000_000n;
+    // 60k/40k → deviation ≈ 3333 bps (above THRESHOLD)
+    const R0_BREACH = 60_000_000_000_000_000_000_000n;
+    const R1_BREACH = 40_000_000_000_000_000_000_000n;
+    // 50k/50k → deviation ≈ 0 bps (below THRESHOLD)
+    const R0_BAL = 50_000_000_000_000_000_000_000n;
+    const R1_BAL = 50_000_000_000_000_000_000_000n;
+    const THRESHOLD = 3000;
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolAddress: POOL_ADDR,
+      feedId: FEED_ID,
+    });
+
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: R0_BAL,
+      reserves1: R1_BAL,
+      oraclePrice: ORACLE_PRICE_24DP,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      rebalanceThreshold: THRESHOLD,
+      source: "fpmm_update_reserves",
+    });
+
+    const fireMedian = async (db: MockDb, logIndex: number, ts: number) =>
+      SortedOracles.MedianUpdated.processEvent({
+        event: SortedOracles.MedianUpdated.createMockEvent({
+          token: FEED_ID,
+          value: ORACLE_PRICE_24DP,
+          mockEventData: {
+            chainId: 42220,
+            logIndex,
+            srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+            block: { number: 500 + logIndex, timestamp: ts },
+          },
+        }),
+        mockDb: db,
+      });
+
+    // Step 1: balanced reserves → OK. deviationBreachStartedAt stays 0n.
+    mockDb = await fireMedian(mockDb, 1, 1_700_003_000);
+    let pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.equal(
+      pool.deviationBreachStartedAt,
+      0n,
+      "MedianUpdated balanced: deviationBreachStartedAt stays 0n",
+    );
+
+    // Step 2: switch to imbalanced reserves → CRITICAL. Sets to block timestamp.
+    mockDb = mockDb.entities.Pool.set({
+      ...pool,
+      reserves0: R0_BREACH,
+      reserves1: R1_BREACH,
+    });
+    const BREACH_TS = 1_700_003_100;
+    mockDb = await fireMedian(mockDb, 2, BREACH_TS);
+    pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.equal(
+      pool.deviationBreachStartedAt,
+      BigInt(BREACH_TS),
+      "MedianUpdated rising edge: deviationBreachStartedAt = block timestamp of first breach",
+    );
+
+    // Step 3: still breached — timestamp preserved.
+    mockDb = await fireMedian(mockDb, 3, 1_700_003_200);
+    pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.equal(
+      pool.deviationBreachStartedAt,
+      BigInt(BREACH_TS),
+      "MedianUpdated still-breached: timestamp preserved",
+    );
+
+    // Step 4: reserves restored → OK. Timestamp cleared to 0n.
+    mockDb = mockDb.entities.Pool.set({
+      ...pool,
+      reserves0: R0_BAL,
+      reserves1: R1_BAL,
+    });
+    mockDb = await fireMedian(mockDb, 4, 1_700_003_300);
+    pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.equal(
+      pool.deviationBreachStartedAt,
+      0n,
+      "MedianUpdated falling edge: deviationBreachStartedAt reset to 0n",
+    );
+  });
+
   it("MedianUpdated: stores priceDifference computed from event oracle + existing reserves", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000af";
     const FEED_ID = "0x000000000000000000000000000000000000deaf";
@@ -1213,6 +1404,99 @@ describe("Envio Celo indexer handlers", () => {
       `expected priceDifference = ${PRICE_DIFF_AFTER} (from event), got ${pool.priceDifference}`,
     );
     assert.equal(pool.rebalanceCount, 1);
+  });
+
+  it("Rebalanced: sets, preserves, and clears deviationBreachStartedAt via upsertPool", async () => {
+    // Rebalanced events feed priceDifferenceAfter into upsertPool, which calls
+    // nextDeviationBreachStartedAt. Verify all three transitions here.
+    const POOL_ADDR = "0x00000000000000000000000000000000000000d3";
+    const ORACLE_PRICE_24DP = 1_000_000_000_000_000_000_000_000n;
+    // Imbalanced: deviation ~3333 bps (above THRESHOLD = 3000)
+    const R0_BREACH = 60_000_000_000_000_000_000_000n;
+    const R1_BREACH = 40_000_000_000_000_000_000_000n;
+    const THRESHOLD = 3000;
+
+    let mockDb = MockDb.createMockDb();
+
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 700, timestamp: 1_700_005_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: R0_BREACH,
+      reserves1: R1_BREACH,
+      oraclePrice: ORACLE_PRICE_24DP,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      rebalanceThreshold: THRESHOLD,
+      source: "fpmm_update_reserves",
+    });
+
+    const fireRebalanced = async (
+      db: MockDb,
+      logIndex: number,
+      ts: number,
+      priceDiffAfter: bigint,
+    ) =>
+      FPMM.Rebalanced.processEvent({
+        event: FPMM.Rebalanced.createMockEvent({
+          sender: "0x0000000000000000000000000000000000000099",
+          priceDifferenceBefore: 3333n,
+          priceDifferenceAfter: priceDiffAfter,
+          mockEventData: {
+            chainId: 42220,
+            logIndex,
+            srcAddress: POOL_ADDR,
+            block: { number: 700 + logIndex, timestamp: ts },
+          },
+        }),
+        mockDb: db,
+      });
+
+    // Step 1: rebalance didn't fix the breach (priceDiffAfter still > threshold).
+    // deviationBreachStartedAt should be set to the block timestamp.
+    const BREACH_TS = 1_700_005_100;
+    mockDb = await fireRebalanced(mockDb, 1, BREACH_TS, 3100n); // 3100 > 3000
+    let pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.equal(
+      pool.deviationBreachStartedAt,
+      BigInt(BREACH_TS),
+      "Rebalanced rising edge: deviationBreachStartedAt = block timestamp",
+    );
+
+    // Step 2: another partial rebalance, still breached → timestamp preserved.
+    mockDb = await fireRebalanced(mockDb, 2, 1_700_005_200, 3050n); // still > 3000
+    pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.equal(
+      pool.deviationBreachStartedAt,
+      BigInt(BREACH_TS),
+      "Rebalanced still-breached: timestamp preserved",
+    );
+
+    // Step 3: full rebalance → priceDiffAfter well below threshold → clears to 0n.
+    mockDb = await fireRebalanced(mockDb, 3, 1_700_005_300, 100n); // 100 < 3000
+    pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.equal(
+      pool.deviationBreachStartedAt,
+      0n,
+      "Rebalanced falling edge: deviationBreachStartedAt cleared to 0n",
+    );
   });
 
   // ---------------------------------------------------------------------------

@@ -52,6 +52,34 @@ export function computeHealthStatus(pool: Pool, nowSeconds: bigint): string {
   return "OK";
 }
 
+// Integer comparison avoids float pathology at the devRatio = 1.0 boundary.
+// Strict `>` matches `computeHealthStatus`: exactly-at-threshold stays WARN,
+// not CRITICAL, so it is NOT counted as a breach either. Oracle staleness
+// is intentionally NOT counted — this tracks price action only.
+export function isInDeviationBreach(pool: Pool): boolean {
+  if (pool.source?.includes("virtual")) return false;
+  const threshold =
+    pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
+  return pool.priceDifference > BigInt(threshold);
+}
+
+export function nextDeviationBreachStartedAt(
+  prev: Pool | undefined,
+  next: Pool,
+  blockTimestamp: bigint,
+): bigint {
+  const wasBreached = prev ? isInDeviationBreach(prev) : false;
+  const isBreached = isInDeviationBreach(next);
+  if (!isBreached) return 0n;
+  if (!wasBreached) return blockTimestamp;
+  // Self-heal: a breached row with a 0n sentinel (partial restore, pre-backfill
+  // state, etc) would stay 0n forever. Adopt the current block time as a
+  // best-effort start so the UI stops suppressing the indicator.
+  return prev!.deviationBreachStartedAt > 0n
+    ? prev!.deviationBreachStartedAt
+    : blockTimestamp;
+}
+
 // ---------------------------------------------------------------------------
 // Pool upsert (with cumulative fields)
 // ---------------------------------------------------------------------------
@@ -103,6 +131,7 @@ export const DEFAULT_ORACLE_FIELDS = {
   priceDifference: 0n,
   rebalanceThreshold: 0,
   lastRebalancedAt: 0n,
+  deviationBreachStartedAt: 0n,
   healthStatus: "N/A" as string,
   limitStatus: "N/A" as string,
   limitPressure0: "0.0000" as string,
@@ -242,7 +271,12 @@ export const upsertPool = async ({
 
   const withDeviation = { ...next, priceDifference };
   const healthStatus = computeHealthStatus(withDeviation, blockTimestamp);
-  const final = { ...withDeviation, healthStatus };
+  const deviationBreachStartedAt = nextDeviationBreachStartedAt(
+    existing,
+    withDeviation,
+    blockTimestamp,
+  );
+  const final = { ...withDeviation, healthStatus, deviationBreachStartedAt };
 
   context.Pool.set(final);
   return final;

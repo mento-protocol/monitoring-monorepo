@@ -6,6 +6,7 @@ import { HealthBadge } from "@/components/badges";
 import type { HealthStatus } from "@/lib/health";
 import { computeHealthStatus, isOracleFresh } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
+import { relativeTime, formatTimestamp } from "@/lib/format";
 
 /**
  * "Deviation" cell for the pool header's metric row. Carries the
@@ -50,6 +51,34 @@ export function DeviationCell({
           rebalanceThreshold={pool.rebalanceThreshold ?? 0}
           status={status}
         />
+        {pool.deviationBreachStartedAt &&
+          pool.deviationBreachStartedAt !== "0" && (
+            // Match the subtext color to the badge/bar severity: during the
+            // 1h rebalance grace window the status stays WARN even though
+            // devRatio > 1.0, so red would contradict the amber bar.
+            <div
+              className={`mt-1 text-xs ${
+                status === "CRITICAL" ? "text-red-400" : "text-amber-400"
+              }`}
+              title={formatTimestamp(pool.deviationBreachStartedAt)}
+            >
+              Breach started{" "}
+              <time
+                dateTime={new Date(
+                  Number(pool.deviationBreachStartedAt) * 1000,
+                ).toISOString()}
+              >
+                {relativeTime(pool.deviationBreachStartedAt)}
+              </time>
+              {/* Visually-hidden absolute timestamp so screen readers in
+                  browse mode read the exact time alongside the relative
+                  label, not only via the hover-only title. */}
+              <span className="sr-only">
+                {" "}
+                (at {formatTimestamp(pool.deviationBreachStartedAt)})
+              </span>
+            </div>
+          )}
       </dd>
     </div>
   );

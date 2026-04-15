@@ -212,6 +212,7 @@ export const POOL_DETAIL_WITH_HEALTH = `
       priceDifference
       rebalanceThreshold
       lastRebalancedAt
+      deviationBreachStartedAt
       limitStatus
       limitPressure0
       limitPressure1

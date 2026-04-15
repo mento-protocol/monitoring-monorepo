@@ -5,7 +5,7 @@
 import { SortedOracles, type Pool, type OracleSnapshot } from "generated";
 import { eventId, asAddress, asBigInt } from "../helpers";
 import { computePriceDifference } from "../priceDifference";
-import { computeHealthStatus } from "../pool";
+import { computeHealthStatus, nextDeviationBreachStartedAt } from "../pool";
 import { recordHealthSample } from "../healthScore";
 import {
   fetchReportExpiry,
@@ -61,7 +61,12 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         : updatedPool.priceDifference;
     const withDev = { ...updatedPool, priceDifference };
     const healthStatus = computeHealthStatus(withDev, blockTimestamp);
-    const finalPool = { ...withDev, healthStatus };
+    const deviationBreachStartedAt = nextDeviationBreachStartedAt(
+      existing,
+      withDev,
+      blockTimestamp,
+    );
+    const finalPool = { ...withDev, healthStatus, deviationBreachStartedAt };
 
     // Health score: compute snapshot fields + update pool accumulators
     const { snapshotFields, poolUpdate } = recordHealthSample(
@@ -134,7 +139,12 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         : updatedPool.priceDifference;
     const withDev = { ...updatedPool, priceDifference };
     const healthStatus = computeHealthStatus(withDev, blockTimestamp);
-    const finalPool = { ...withDev, healthStatus };
+    const deviationBreachStartedAt = nextDeviationBreachStartedAt(
+      existing,
+      withDev,
+      blockTimestamp,
+    );
+    const finalPool = { ...withDev, healthStatus, deviationBreachStartedAt };
 
     // Health score: compute snapshot fields + update pool accumulators
     const { snapshotFields, poolUpdate } = recordHealthSample(
