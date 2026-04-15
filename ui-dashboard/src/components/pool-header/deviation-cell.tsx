@@ -89,14 +89,16 @@ function DeviationBar({
   // Frame the primary number as a signed delta from the threshold so the
   // alarm direction reads directly: "52.1% above threshold" instead of
   // "152.1% of threshold" (which requires mental math to extract the
-  // overage). The `ratio > 1` branch means breached, `< 1` means safely
-  // under, `=== 1` is handled by the Rebalance Status cell's "At
-  // threshold" label and won't reach this bar.
+  // overage). At exactly-threshold, skip the "0.0% below" noise and say
+  // "At threshold" — matches the Rebalance Status cell's copy for the
+  // same boundary.
   const deltaPct = (Math.abs(diff - threshold) / threshold) * 100;
   const deltaLabel =
-    diff > threshold
-      ? `${deltaPct.toFixed(1)}% above threshold`
-      : `${deltaPct.toFixed(1)}% below threshold`;
+    diff === threshold
+      ? "At threshold"
+      : diff > threshold
+        ? `${deltaPct.toFixed(1)}% above threshold`
+        : `${deltaPct.toFixed(1)}% below threshold`;
 
   return (
     <div className="flex flex-col gap-1">

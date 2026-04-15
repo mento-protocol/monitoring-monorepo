@@ -109,6 +109,18 @@ describe("DeviationCell — bar color boundaries", () => {
     expect(html).not.toContain("above threshold");
   });
 
+  it("says 'At threshold' (not '0.0% below') when deviation is exactly at the limit", () => {
+    // diff === threshold — the exact-boundary case. Matches the "At
+    // threshold" copy the Rebalance Status cell uses for the same state.
+    const pool: Pool = { ...BASE_POOL, priceDifference: "5000" };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("At threshold");
+    expect(html).not.toContain("0.0% below threshold");
+    expect(html).not.toContain("0.0% above threshold");
+  });
+
   it("keeps the bar amber while a recent rebalance (within 1h) is still settling", () => {
     // dev > 100% but rebalance landed 30m ago → health status stays WARN
     // within the grace window, and the bar must stay amber to match.
