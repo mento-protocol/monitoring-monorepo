@@ -370,15 +370,15 @@ describe("fetchNetworkData — snapshot pagination", () => {
     expect(result.snapshotsAll).toHaveLength(100 * 1000);
   });
 
-  it("preserves already-fetched rows AND surfaces the error when a later page fails mid-loop", async () => {
-    // Page 1 succeeds (1000 unique rows), page 2 errors (network glitch).
-    // Pre-fix: whole pagination rejected → every window blanked. Now: keep
-    // the rows, flag truncated=true AND populate snapshotsAllError so error-
-    // aware consumers (Summary tile) partial-badge correctly.
+  it("on mid-loop failure, only flags the window whose coverage is actually incomplete", async () => {
+    // Page 1 succeeds (1000 rows at 30-minute spacing → ~20.8 days of
+    // history); page 2 errors. Windows fully covered by those rows stay
+    // error-free; windows that extend beyond the oldest fetched row surface
+    // an error so Summary subs can partial-badge selectively.
     const now = Math.floor(Date.now() / 1000);
     const page1 = Array.from({ length: 1000 }, (_, i) => ({
       poolId: "pool-mid-err",
-      timestamp: String(now - i * 60),
+      timestamp: String(now - i * 1800), // 30-min spacing → oldest ≈ 20.8d
       reserves0: "0",
       reserves1: "0",
       swapCount: 0,
@@ -410,15 +410,18 @@ describe("fetchNetworkData — snapshot pagination", () => {
       w30d: { from: now - 30 * 86400, to: now },
     });
 
-    // Error now surfaces (and aliases) so error-aware consumers partial-badge.
+    // snapshotsAllError is set (pagination failed).
     expect(result.snapshotsAllError).not.toBeNull();
-    expect(result.snapshotsError).toBe(result.snapshotsAllError);
-    expect(result.snapshots7dError).toBe(result.snapshotsAllError);
-    expect(result.snapshots30dError).toBe(result.snapshotsAllError);
     expect(result.snapshotsAllTruncated).toBe(true);
-    // Page 1's rows survive — recent windows still populate.
+    // 24h and 7d windows are inside the fetched rows → no per-window error.
+    expect(result.snapshotsError).toBeNull();
+    expect(result.snapshots7dError).toBeNull();
+    // 30d window extends beyond oldestFetched (≈ 20.8d) → flagged.
+    expect(result.snapshots30dError).not.toBeNull();
+    // Preserved rows still drive the derived window arrays.
     expect(result.snapshotsAll).toHaveLength(1000);
     expect(result.snapshots.length).toBeGreaterThan(0);
+    expect(result.snapshots7d.length).toBeGreaterThan(0);
   });
 
   it("propagates the error when the very first page fails", async () => {
@@ -447,6 +450,11 @@ describe("fetchNetworkData — snapshot pagination", () => {
     expect(result.snapshotsAllError).not.toBeNull();
     expect(result.snapshotsAll).toHaveLength(0);
     expect(result.snapshotsAllTruncated).toBe(false);
+    // With no preserved rows, every window is incomplete — all three per-
+    // window errors light up so consumers show the fully-errored state.
+    expect(result.snapshotsError).toBe(result.snapshotsAllError);
+    expect(result.snapshots7dError).toBe(result.snapshotsAllError);
+    expect(result.snapshots30dError).toBe(result.snapshotsAllError);
   });
 
   it("derives window arrays from snapshotsAll by timestamp", async () => {

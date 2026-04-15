@@ -70,7 +70,12 @@ describe("buildDailySeries — empty / error short-circuits", () => {
     expect(out).toEqual({ series: [], nowTvl: 0 });
   });
 
-  it("skips networks with a snapshotsAllError and returns nothing", () => {
+  it("still uses preserved rows when snapshotsAllError is set (fail-open path)", () => {
+    // When the hook's paginator fails mid-loop after page 1, it preserves the
+    // already-fetched recent rows + surfaces the error. The chart builder
+    // should forward-fill from those preserved rows rather than blanking the
+    // series — otherwise a transient network glitch produces a black chart
+    // despite valid recent data being available.
     const today = dayAlignedNow();
     const pool = makeTvlPool({ reserves0: HUNDRED, reserves1: HUNDRED });
     const snap = makeSnapshot({
@@ -86,7 +91,8 @@ describe("buildDailySeries — empty / error short-circuits", () => {
         snapshotsAllError: new Error("snapshots timeout"),
       }),
     ]);
-    expect(out).toEqual({ series: [], nowTvl: 0 });
+    expect(out.series.length).toBeGreaterThan(0);
+    expect(out.nowTvl).toBeCloseTo(200, 6);
   });
 });
 
@@ -564,22 +570,19 @@ describe("TvlOverTimeChart render", () => {
     expect(html).toContain("Unable to load TVL history");
   });
 
-  it("renders 'Historical data partial' when hasSnapshotError and series empty", () => {
-    const today = dayAlignedNow();
+  it("renders 'Historical data partial' when hasSnapshotError and no rows survived", () => {
+    // First-page failure on the paginated all-history fetch: snapshotsAll
+    // comes back empty AND snapshotsAllError is set. Chart shows the
+    // partial-history empty state (not a confident-but-blank plot).
     const pool = makeTvlPool({ reserves0: HUNDRED, reserves1: HUNDRED });
-    const snap = makeSnapshot({
-      timestamp: today,
-      reserves0: HUNDRED,
-      reserves1: HUNDRED,
-    });
     const html = renderToStaticMarkup(
       React.createElement(TvlOverTimeChart, {
         networkData: [
           makeNetworkData({
             network: TVL_NETWORK,
             pools: [pool],
-            snapshotsAll: [snap],
-            snapshotsAllError: new Error("snapshots timeout"),
+            snapshotsAll: [],
+            snapshotsAllError: new Error("page-1 timeout"),
           }),
         ],
         totalTvl: 0,

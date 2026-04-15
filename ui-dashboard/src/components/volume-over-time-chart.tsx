@@ -39,7 +39,11 @@ export function buildDailyVolumeSeries(
   let minSnapshotBucket = Infinity;
 
   for (const netData of networkData) {
-    if (netData.error !== null || netData.snapshotsAllError !== null) continue;
+    // Only skip on top-level failure. `snapshotsAllError` may be set while
+    // `snapshotsAll` still carries preserved recent rows (fail-open path
+    // for mid-loop pagination failure) — use those rows, the caller shows
+    // a partial-data badge separately.
+    if (netData.error !== null) continue;
     const poolById = new Map(netData.pools.map((pool) => [pool.id, pool]));
     for (const snapshot of netData.snapshotsAll) {
       const timestamp = Number(snapshot.timestamp);

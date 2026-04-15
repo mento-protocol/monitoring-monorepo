@@ -44,7 +44,10 @@ export function buildDailySeries(
   let earliestTs = Infinity;
 
   for (const netData of networkData) {
-    if (netData.error !== null || netData.snapshotsAllError !== null) continue;
+    // Only skip on top-level failure. `snapshotsAllError` may be set while
+    // `snapshotsAll` still carries preserved recent rows (fail-open path);
+    // forward-fill from what we have and let the caller partial-badge.
+    if (netData.error !== null) continue;
     const fpmmPools = netData.pools.filter(isFpmm);
     const snapsByPool = new Map<string, PoolSnapshotWindow[]>();
     for (const snap of netData.snapshotsAll) {

@@ -56,13 +56,16 @@ export type NetworkData = {
   error: Error | null;
   feesError: Error | null;
   /**
-   * Snapshot error fields. All four alias to a single underlying failure since
-   * the three window arrays are derived from `snapshotsAll`. Field names
-   * retained for backward compatibility with existing consumers.
+   * Per-window snapshot errors. A window only gets an error when the
+   * pagination failure / truncation actually affects that window — i.e.,
+   * we didn't fetch rows going back as far as the window's lower bound.
+   * Mid-loop failure after page 1 typically preserves ~12 days of hourly
+   * rows, so 24h and 7d stay error-free while 30d errors out.
    */
   snapshotsError: Error | null;
   snapshots7dError: Error | null;
   snapshots30dError: Error | null;
+  /** Error on the paginated all-history fetch (non-null iff pagination failed). */
   snapshotsAllError: Error | null;
   lpError: Error | null;
 };
@@ -263,6 +266,32 @@ export async function fetchNetworkData(
   const snapshots7d = filterSnapshotsToWindow(snapshotsAll, windows.w7d);
   const snapshots30d = filterSnapshotsToWindow(snapshotsAll, windows.w30d);
 
+  // Per-window error detection. Pagination issues (error or truncation) only
+  // affect a specific window if we didn't fetch far enough back to cover its
+  // `from` bound. With a mid-loop failure after page 1 (~1000 most-recent
+  // rows ≈ 12 days at current activity) the 24h and 7d windows are still
+  // fully covered — aliasing all three to `snapshotsAllError` would blank
+  // valid recent totals. Rows come in newest-first, so the last element is
+  // the oldest we fetched.
+  const oldestFetchedTs =
+    snapshotsAll.length > 0
+      ? Number(snapshotsAll[snapshotsAll.length - 1].timestamp)
+      : Number.POSITIVE_INFINITY;
+  const paginationIssue: Error | null =
+    snapshotsAllError ??
+    (snapshotsAllTruncated
+      ? new Error(
+          "Snapshot pagination truncated before reaching the requested window",
+        )
+      : null);
+  const windowError = (windowFrom: number): Error | null =>
+    paginationIssue !== null && oldestFetchedTs > windowFrom
+      ? paginationIssue
+      : null;
+  const snapshotsError = windowError(windows.w24h.from);
+  const snapshots7dError = windowError(windows.w7d.from);
+  const snapshots30dError = windowError(windows.w30d.from);
+
   const uniqueLpCount =
     lpResult.status === "fulfilled"
       ? new Set(
@@ -285,10 +314,11 @@ export async function fetchNetworkData(
     error: null,
     feesError:
       feesResult.status === "rejected" ? toError(feesResult.reason) : null,
-    // All four alias to the same error — see NetworkData comment.
-    snapshotsError: snapshotsAllError,
-    snapshots7dError: snapshotsAllError,
-    snapshots30dError: snapshotsAllError,
+    // Per-window errors — only set when the specific window is incomplete.
+    // See the `windowError` helper above.
+    snapshotsError,
+    snapshots7dError,
+    snapshots30dError,
     snapshotsAllError,
     lpError: lpResult.status === "rejected" ? toError(lpResult.reason) : null,
   };
