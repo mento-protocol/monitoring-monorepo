@@ -122,6 +122,30 @@ export const POOL_REBALANCES = `
   }
 `;
 
+/**
+ * Latest rebalance tx for a pool scoped to a specific strategy. Used by the
+ * pool header's Rebalance Status cell to attribute the "last Ns ago" link
+ * to the ACTIVE strategy — unscoped lookups would return txs from rotated
+ * strategies and link the wrong event under the current strategy label.
+ *
+ * `sender` is the strategy address on RebalanceEvent (the "Strategy" column
+ * in the Rebalances tab). Pass lowercased; Envio stores addresses lowercase.
+ */
+export const LATEST_POOL_REBALANCE_FOR_STRATEGY = `
+  query LatestPoolRebalanceForStrategy($poolId: String!, $strategy: String!) {
+    RebalanceEvent(
+      where: {
+        poolId: { _eq: $poolId }
+        sender: { _eq: $strategy }
+      }
+      order_by: { blockNumber: desc }
+      limit: 1
+    ) {
+      txHash
+    }
+  }
+`;
+
 export const POOL_LIQUIDITY = `
   query PoolLiquidity($poolId: String!, $limit: Int!) {
     LiquidityEvent(

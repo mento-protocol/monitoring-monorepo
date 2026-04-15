@@ -250,6 +250,34 @@ describe("RebalanceStatusValue", () => {
     );
   });
 
+  it("renders a focusable info icon beside 'Rebalance blocked' so the detail is keyboard-reachable", () => {
+    // Native `title` on a <span> is mouse-only. The ⓘ sits in a <button>
+    // so keyboard, touch, and screen-reader users can reach the
+    // diagnostic without relying on hover.
+    mockUseRebalanceCheck.mockReturnValue(
+      rebalanceState({
+        data: {
+          canRebalance: false,
+          message: "Stability pool has insufficient liquidity",
+          rawError: "CDPLS_STABILITY_POOL_BALANCE_TOO_LOW",
+          strategyType: "cdp",
+          enrichment: null,
+        },
+      }),
+    );
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={BASE_POOL}
+        network={NETWORK}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    expect(html).toContain("ⓘ");
+    expect(html).toMatch(
+      /<button [^>]*aria-label="Rebalance diagnostics: Stability pool has insufficient liquidity/,
+    );
+  });
+
   it('treats LS_POOL_NOT_REBALANCEABLE as a healthy no-op, not "Rebalance blocked"', () => {
     // Strategy refused because deviation is still below its internal
     // threshold — that's the expected healthy outcome (especially at

@@ -153,6 +153,43 @@ describe("GET /api/rebalance-check — validation", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "Invalid strategy address" });
   });
+
+  it("returns 400 when the configured network has no rpcUrl", async () => {
+    // The network is registered (passes isConfiguredNetworkId) but its
+    // rpcUrl is unset — we can't proxy the check, so refuse up front with
+    // a stable error payload rather than reaching the eth_call path.
+    vi.resetModules();
+    vi.doMock("@/lib/networks", () => ({
+      NETWORKS: {
+        [MOCK_NETWORK_ID]: {
+          id: MOCK_NETWORK_ID,
+          rpcUrl: undefined,
+        },
+      },
+      isConfiguredNetworkId: (v: string) => v === MOCK_NETWORK_ID,
+    }));
+    vi.doMock("@/lib/rebalance-check", () => ({
+      checkRebalanceStatus: mockCheckRebalanceStatus,
+    }));
+    const { GET } = (await import("../route")) as {
+      GET: (req: NextRequest) => Promise<Response>;
+    };
+
+    const req = new NextRequest(
+      buildUrl({
+        network: MOCK_NETWORK_ID,
+        pool: POOL,
+        strategy: STRATEGY,
+      }),
+    );
+    const res = await GET(req);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: `No RPC URL configured for ${MOCK_NETWORK_ID}`,
+    });
+    // Refused before the eth_call path — checkRebalanceStatus must not run.
+    expect(mockCheckRebalanceStatus).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/rebalance-check — happy path", () => {
