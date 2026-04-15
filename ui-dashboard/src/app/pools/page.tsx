@@ -2,7 +2,8 @@
 
 import { Suspense, useState, useCallback, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { NetworkAwareLink } from "@/components/network-aware-link";
+import Link from "next/link";
+import { buildPoolDetailHref } from "@/lib/routing";
 import { useGQL } from "@/lib/graphql";
 import {
   ALL_POOLS_WITH_HEALTH,
@@ -395,13 +396,13 @@ function SwapTable({
             <Row key={s.id}>
               {showPool && (
                 <td className="px-4 py-2">
-                  <NetworkAwareLink
-                    href={`/pool/${encodeURIComponent(s.poolId)}`}
+                  <Link
+                    href={buildPoolDetailHref(s.poolId, network.id)}
                     className="text-sm font-medium text-indigo-400 hover:text-indigo-300"
                     title={s.poolId}
                   >
                     {poolNames[s.poolId] ?? truncateAddress(s.poolId)}
-                  </NetworkAwareLink>
+                  </Link>
                 </td>
               )}
               <SenderCell address={s.sender} />

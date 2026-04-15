@@ -16,6 +16,7 @@ import {
 import { combinedTooltip } from "@/lib/pool-table-utils";
 import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
+import { buildPoolDetailHref } from "@/lib/routing";
 
 /** A pool entry enriched with its originating network and oracle rates. */
 export type GlobalPoolEntry = {
@@ -377,8 +378,7 @@ export function GlobalPoolsTable({
             const vol24h = volume24hByKey?.get(key);
             const vol7d = volume7dByKey?.get(key);
             const totalVol = totalVolumeByKey.get(key);
-            // Build pool detail link preserving network param when non-default
-            const poolHref = `/pool/${encodeURIComponent(p.id)}?network=${network.id}`;
+            const poolHref = buildPoolDetailHref(p.id, network.id);
             return (
               <Row key={key}>
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
