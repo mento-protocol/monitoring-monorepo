@@ -3,8 +3,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
+
+// NetworkAwareLink reads useNetwork(); stub it so the boundary renders in a
+// plain-render test without mounting the full provider. Mutated per-test.
+const mockNetwork = { networkId: "celo-mainnet" as string };
+vi.mock("@/components/network-provider", () => ({
+  useNetwork: () => mockNetwork,
+}));
 
 import RootError from "@/app/error";
+import GlobalError from "@/app/global-error";
 import PoolDetailError from "@/app/pool/[poolId]/error";
 import AddressBookError from "@/app/address-book/error";
 
@@ -16,6 +25,7 @@ describe("app/error boundaries", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
+    mockNetwork.networkId = "celo-mainnet";
     // Silence intentional console.error logging from the boundaries
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
@@ -56,30 +66,29 @@ describe("app/error boundaries", () => {
     expect(container.textContent).toContain("Something went wrong");
   });
 
-  it("PoolDetailError surfaces a back-to-overview link", () => {
+  it("PoolDetailError links back to the overview on the default network", () => {
     render(<PoolDetailError error={new Error("nope")} reset={vi.fn()} />);
     const link = container.querySelector<HTMLAnchorElement>('a[href="/"]');
     expect(link).not.toBeNull();
     expect(link?.textContent).toContain("Back to overview");
   });
 
-  it("AddressBookError shows a sign-in link when the error looks like an auth failure", () => {
-    render(
-      <AddressBookError error={new Error("Unauthorized")} reset={vi.fn()} />,
-    );
+  it("PoolDetailError preserves the active network on the recovery link", () => {
+    mockNetwork.networkId = "monad-mainnet";
+    render(<PoolDetailError error={new Error("nope")} reset={vi.fn()} />);
     const link = container.querySelector<HTMLAnchorElement>(
-      'a[href^="/sign-in"]',
+      'a[href*="network=monad-mainnet"]',
     );
     expect(link).not.toBeNull();
-    expect(container.textContent).toContain("session expired");
+    expect(link?.getAttribute("href")).toBe("/?network=monad-mainnet");
   });
 
-  it("AddressBookError shows retry (not sign-in) for non-auth errors", () => {
+  it("AddressBookError shows a generic retry and invokes reset", () => {
     const reset = vi.fn();
     render(<AddressBookError error={new Error("500 oops")} reset={reset} />);
 
-    const signInLink = container.querySelector('a[href^="/sign-in"]');
-    expect(signInLink).toBeNull();
+    expect(container.textContent).toContain("500 oops");
+    expect(container.querySelector('a[href^="/sign-in"]')).toBeNull();
 
     const button = container.querySelector<HTMLButtonElement>(
       'button[type="button"]',
@@ -89,5 +98,18 @@ describe("app/error boundaries", () => {
       button?.click();
     });
     expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it("GlobalError renders its own html shell with the error message", () => {
+    // GlobalError renders <html><body>…</body></html>; asserting on static
+    // markup is simpler than mounting a nested <html> into jsdom.
+    const html = renderToStaticMarkup(
+      <GlobalError error={new Error("root crash")} reset={vi.fn()} />,
+    );
+    expect(html).toContain("root crash");
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("<html");
+    expect(html).toContain("<body");
+    expect(html).toContain("Try again");
   });
 });
