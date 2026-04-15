@@ -231,6 +231,27 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
 export const NETWORK_IDS = Object.keys(NETWORKS) as IndexerNetworkId[];
 export const DEFAULT_NETWORK: IndexerNetworkId = "celo-mainnet";
 
+// Explicit (not derived from NETWORKS) so a future local/staging variant
+// sharing a chainId can't silently reroute prod pool URLs.
+const PROD_NETWORK_BY_CHAIN_ID: Record<number, IndexerNetworkId> = {
+  42220: "celo-mainnet",
+  11142220: "celo-sepolia",
+  143: "monad-mainnet",
+  10143: "monad-testnet",
+};
+
+// Canonical network id for a chainId (used to derive the active network
+// from a namespaced pool id without needing ?network=).
+export function networkIdForChainId(chainId: number): IndexerNetworkId | null {
+  return PROD_NETWORK_BY_CHAIN_ID[chainId] ?? null;
+}
+
+// True when `networkId` is the canonical variant for its chainId. Used by
+// link builders to decide whether ?network= can be omitted.
+export function isCanonicalNetwork(networkId: IndexerNetworkId): boolean {
+  return networkIdForChainId(NETWORKS[networkId].chainId) === networkId;
+}
+
 export function isNetworkId(v: string): v is IndexerNetworkId {
   return v in NETWORKS;
 }

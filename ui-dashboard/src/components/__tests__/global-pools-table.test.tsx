@@ -64,6 +64,14 @@ const MONAD_NETWORK: Network = {
   hasVirtualPools: false,
 };
 
+// Non-canonical variant sharing chainId 42220 with celo-mainnet.
+const CELO_MAINNET_LOCAL_NETWORK: Network = {
+  ...CELO_NETWORK,
+  id: "celo-mainnet-local",
+  label: "Celo (local)",
+  local: true,
+};
+
 const BASE_POOL: Pool = {
   id: "pool-1",
   chainId: 42220,
@@ -177,12 +185,24 @@ describe("GlobalPoolsTable — column structure", () => {
 });
 
 describe("GlobalPoolsTable — pool detail link", () => {
-  it("links to pool detail page with network param", () => {
+  const NAMESPACED_ID = "42220-0x0000000000000000000000000000000000000001";
+
+  it("omits ?network= for canonical networks with namespaced pool ids", () => {
     const html = renderToStaticMarkup(
-      <GlobalPoolsTable entries={[makeEntry({ id: "pool-abc" })]} />,
+      <GlobalPoolsTable entries={[makeEntry({ id: NAMESPACED_ID })]} />,
+    );
+    expect(html).toContain(`href="/pool/${encodeURIComponent(NAMESPACED_ID)}"`);
+    expect(html).not.toContain("?network=");
+  });
+
+  it("preserves ?network= for non-canonical (local) networks", () => {
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[makeEntry({ id: NAMESPACED_ID }, CELO_MAINNET_LOCAL_NETWORK)]}
+      />,
     );
     expect(html).toContain(
-      `/pool/${encodeURIComponent("pool-abc")}?network=celo-mainnet`,
+      `href="/pool/${encodeURIComponent(NAMESPACED_ID)}?network=celo-mainnet-local"`,
     );
   });
 });
