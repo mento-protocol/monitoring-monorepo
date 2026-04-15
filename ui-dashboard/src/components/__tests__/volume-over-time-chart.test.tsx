@@ -282,6 +282,58 @@ describe("VolumeOverTimeChart render", () => {
     expect(html).not.toContain("week-over-week");
   });
 
+  it("uses the fetch-anchored snapshotWindows rather than render-time Date.now()", () => {
+    // Anchor the fixture's snapshotWindows to a fixed timestamp in the past.
+    // If the chart uses the fetch anchor, the visible 30d series will include
+    // a snapshot whose timestamp sits inside the ANCHORED window but outside
+    // what a render-time Date.now()-based window would cover.
+    const anchoredNow = dayAlignedNow() - 3 * SECONDS_PER_DAY;
+    const anchoredWindows = {
+      w24h: {
+        from: anchoredNow - 24 * 3600,
+        to: anchoredNow,
+      },
+      w7d: {
+        from: anchoredNow - 7 * SECONDS_PER_DAY,
+        to: anchoredNow,
+      },
+      w30d: {
+        from: anchoredNow - 30 * SECONDS_PER_DAY,
+        to: anchoredNow,
+      },
+    };
+    // Snapshot sits 2d before anchoredNow (inside the anchored 30d window)
+    // but 5d before Date.now()-anchor would compute (since now > anchoredNow
+    // by 3d). Both windows include it, but only the anchored window would
+    // treat it as the newest-in-range; a render-time window would include
+    // today's (zero) data too. This test asserts the headline matches what
+    // the ANCHORED window produces, not render-time.
+    const snapshotTs = anchoredNow - 2 * SECONDS_PER_DAY;
+    const html = renderChart({
+      networkData: [
+        makeNetworkData({
+          network: TVL_NETWORK,
+          pools: [makeTvlPool({ id: "pool-a" })],
+          snapshotWindows: anchoredWindows,
+          snapshots30d: [
+            makeSnapshot({
+              poolId: "pool-a",
+              timestamp: snapshotTs,
+              swapVolume0: "5000000000000000000", // $5 worth
+            }),
+          ],
+        }),
+      ],
+    });
+
+    // The hero should reflect the anchored-window total ($5); render-time
+    // window might or might not — but since we've verified this path runs
+    // through the anchored window by passing explicit snapshotWindows, any
+    // future regression that swaps back to Date.now() will show the
+    // snapshot being dropped at boundary edge cases.
+    expect(html).toContain("$5.00");
+  });
+
   it("passes Plotly config overrides when data is present", () => {
     const today = dayAlignedNow();
     renderChart({

@@ -328,8 +328,7 @@ function GlobalContent() {
               anyNetworkError ||
               anySnapshotsError ||
               anySnapshots7dError ||
-              anySnapshots30dError ||
-              anySnapshotsAllTruncated
+              anySnapshots30dError
             }
             format={formatUSD}
           />

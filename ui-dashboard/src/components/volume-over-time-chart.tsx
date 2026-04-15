@@ -135,9 +135,19 @@ export function VolumeOverTimeChart({
 
   const visibleSeries = useMemo<TimeSeriesPoint[]>(() => {
     if (range === "all") return fullSeries;
-    const now = Date.now();
-    const window =
-      range === "7d" ? snapshotWindow7d(now) : snapshotWindow30d(now);
+    // Use the fetch-anchored snapshot window (captured once by the hook
+    // during fetchAllNetworks) rather than a fresh `Date.now()` window at
+    // render time. The Summary tile's 7d/30d subtotals are derived from
+    // those fetch-time windows; using a render-time window drifts by up
+    // to the SWR refresh interval around hour boundaries.
+    const fetchWindows = networkData[0]?.snapshotWindows;
+    const window = fetchWindows
+      ? range === "7d"
+        ? fetchWindows.w7d
+        : fetchWindows.w30d
+      : range === "7d"
+        ? snapshotWindow7d(Date.now())
+        : snapshotWindow30d(Date.now());
     return buildDailyVolumeSeries(networkData, window).map((point) => ({
       timestamp: point.timestamp,
       value: point.volumeUSD,
