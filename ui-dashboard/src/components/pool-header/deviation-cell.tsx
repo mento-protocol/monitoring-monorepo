@@ -68,7 +68,6 @@ function DeviationBar({
   const threshold = rebalanceThreshold;
   const ratio = Math.min(diff / threshold, 1.5);
   const pct = Math.min(ratio * 100, 100);
-  const pctOfThreshold = ((diff / threshold) * 100).toFixed(1);
   // Source the bar color from computeHealthStatus instead of recomputing
   // from the raw ratio, so the bar and the HealthBadge always agree on
   // severity — including at the exact-threshold boundary (WARN, not
@@ -87,10 +86,22 @@ function DeviationBar({
   const diffPct = (diff / 100).toFixed(2);
   const thresholdPct = (threshold / 100).toFixed(2);
 
+  // Frame the primary number as a signed delta from the threshold so the
+  // alarm direction reads directly: "52.1% above threshold" instead of
+  // "152.1% of threshold" (which requires mental math to extract the
+  // overage). The `ratio > 1` branch means breached, `< 1` means safely
+  // under, `=== 1` is handled by the Rebalance Status cell's "At
+  // threshold" label and won't reach this bar.
+  const deltaPct = (Math.abs(diff - threshold) / threshold) * 100;
+  const deltaLabel =
+    diff > threshold
+      ? `${deltaPct.toFixed(1)}% above threshold`
+      : `${deltaPct.toFixed(1)}% below threshold`;
+
   return (
     <div className="flex flex-col gap-1">
       <span className="text-sm text-slate-200">
-        {pctOfThreshold}% of threshold
+        {deltaLabel}
         <span className="ml-1.5 text-xs text-slate-500">
           ({diffPct}% / {thresholdPct}%)
         </span>

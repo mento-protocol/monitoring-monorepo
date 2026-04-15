@@ -88,6 +88,27 @@ describe("DeviationCell — bar color boundaries", () => {
     expect(html).toContain("bg-red-500");
   });
 
+  it("frames the primary label as '% above threshold' when deviation is above the limit", () => {
+    // 7610/5000 = 1.522 → (7610-5000)/5000 = 52.2% above. Reads as a
+    // direct overage instead of the "152.2% of threshold" ratio form.
+    const pool: Pool = { ...BASE_POOL, priceDifference: "7610" };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("52.2% above threshold");
+    expect(html).not.toContain("% of threshold");
+  });
+
+  it("frames the primary label as '% below threshold' when deviation is under the limit", () => {
+    // 3000/5000 = 0.6 → 40% below threshold.
+    const pool: Pool = { ...BASE_POOL, priceDifference: "3000" };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("40.0% below threshold");
+    expect(html).not.toContain("above threshold");
+  });
+
   it("keeps the bar amber while a recent rebalance (within 1h) is still settling", () => {
     // dev > 100% but rebalance landed 30m ago → health status stays WARN
     // within the grace window, and the bar must stay amber to match.
