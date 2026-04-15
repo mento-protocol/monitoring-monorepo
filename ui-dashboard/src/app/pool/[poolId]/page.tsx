@@ -581,7 +581,9 @@ function SwapsTab({
   // Passing null as the query key skips the request — VirtualPools have no snapshots.
   // Daily rollup: one row per pool per UTC day, returned in chronological (asc)
   // order. Server-side aggregation avoids the 1000-row cap that hourly hit.
-  const { data: snapshotData } = useGQL<{
+  // `snapshotError` is surfaced inline below so a rollout lag or transient
+  // Hasura failure doesn't silently strip the chart from the swaps tab.
+  const { data: snapshotData, error: snapshotError } = useGQL<{
     PoolDailySnapshot: PoolSnapshot[];
   }>(
     fpmmPool ? POOL_DAILY_SNAPSHOTS_CHART : null,
@@ -626,6 +628,11 @@ function SwapsTab({
 
   return (
     <>
+      {fpmmPool && snapshotError && (
+        <ErrorBox
+          message={`Daily volume chart unavailable: ${snapshotError.message}`}
+        />
+      )}
       {fpmmPool && snapshots.length > 0 && (
         <SnapshotChart
           snapshots={snapshots}

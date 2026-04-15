@@ -672,6 +672,32 @@ describe("Pool detail tab search", () => {
     expect(html).toContain("snapshot-chart");
   });
 
+  it("surfaces an inline error on the swaps tab when the daily chart query fails", () => {
+    // The rollup entity may be missing during indexer rollout or return a
+    // transient failure. The swaps tab must not silently drop the chart —
+    // it should render an explicit error so the absence is visible.
+    useGQLMock.mockImplementation((query: unknown) => {
+      if (query === POOL_DETAIL_WITH_HEALTH)
+        return makeGqlResult({ Pool: [basePool] });
+      if (query === TRADING_LIMITS)
+        return makeGqlResult({ TradingLimit: [] satisfies TradingLimit[] });
+      if (query === POOL_DEPLOYMENT)
+        return makeGqlResult({ FactoryDeployment: [{ txHash: "0xdeploy" }] });
+      if (query === POOL_SWAPS) return makeGqlResult({ SwapEvent: swaps });
+      if (query === POOL_DAILY_SNAPSHOTS_CHART)
+        return {
+          data: null,
+          error: new Error("field PoolDailySnapshot not found"),
+          isLoading: false,
+        };
+      return makeGqlResult({});
+    });
+    const html = renderWithParams({ tab: "swaps" });
+    expect(html).toContain("Daily volume chart unavailable");
+    expect(html).toContain("field PoolDailySnapshot not found");
+    expect(html).not.toContain("snapshot-chart");
+  });
+
   it("calls POOL_SNAPSHOTS_CHART on liquidity tab and renders chart", () => {
     const html = renderWithParams({ tab: "liquidity" });
     expect(useGQLMock).toHaveBeenCalledWith(
