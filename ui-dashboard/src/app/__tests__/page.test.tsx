@@ -41,6 +41,7 @@ vi.mock("@/components/global-pools-table", () => ({
 
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import * as volumeModule from "@/lib/volume";
+import { buildSnapshotWindows } from "@/lib/volume";
 import GlobalPage from "../page";
 
 // ---------------------------------------------------------------------------
@@ -94,12 +95,14 @@ describe("GlobalPage — loading state", () => {
 // ---------------------------------------------------------------------------
 
 describe("GlobalPage — all networks succeed", () => {
-  it("shows pool count tile", () => {
+  it("renders the summary tiles without error state on all-success", () => {
     const html = render([
       makeNetworkData({ pools: [], fees: null }),
       makeNetworkData({ network: NETWORK_2, pools: [], fees: null }),
     ]);
-    expect(html).toContain("Total Pools");
+    // Volume and Swap Fees tiles present; no fallback-error UI.
+    expect(html).toContain("Volume");
+    expect(html).toContain("Swap Fees");
     expect(html).not.toContain("N/A");
     expect(html).not.toContain("partial data");
   });
@@ -153,13 +156,14 @@ describe("GlobalPage — network-level failure", () => {
 // ---------------------------------------------------------------------------
 
 describe("GlobalPage — fees-only failure", () => {
-  it("shows N/A for fee tiles but normal values for pools/TVL", () => {
+  it("shows N/A on fee-tile failure but leaves other tiles alone", () => {
     const html = render([
       makeNetworkData({ feesError: new Error("fees timeout") }),
     ]);
     expect(html).toContain("N/A");
-    // Pool count tile should still show "0", not N/A
-    expect(html).toContain("Total Pools");
+    // LPs/Swaps tiles still render their headers.
+    expect(html).toContain("LPs");
+    expect(html).toContain("Swaps");
     expect(html).not.toContain("partial data");
   });
 
@@ -219,7 +223,10 @@ describe("GlobalPage — LP query failure", () => {
 // ---------------------------------------------------------------------------
 
 describe("GlobalPage — snapshots-only failure", () => {
-  it("shows error subtitle on volume tile but fees still render", () => {
+  it("fees tile still renders normally when only snapshots failed", () => {
+    // Volume tile was removed from the Summary — the chart card handles
+    // snapshot-failure UX now. Fees come from a separate query, so a
+    // snapshot-only failure shouldn't affect fees rendering.
     const html = render([
       makeNetworkData({
         snapshotsError: new Error("snapshots timeout"),
@@ -236,12 +243,8 @@ describe("GlobalPage — snapshots-only failure", () => {
         },
       }),
     ]);
-    // Volume tile shows all-time total (from pool counters) with error subtitle
-    expect(html).toContain("Volume");
-    expect(html).toContain("Some chains failed to load");
-    // Sub-rows (24h/7d/30d) are hidden when hasError is true
-    // Fees should still render normally
     expect(html).toContain("Swap Fees");
+    expect(html).not.toContain("Some chains failed to load");
   });
 });
 
@@ -494,13 +497,13 @@ describe("GlobalPage — TVL delta sub-KPIs", () => {
       reserves0: "200000000000000000000",
       reserves1: "100000000000000000000",
     });
-    // Chart's `hasSnapshotError` is wired to `anySnapshots30dError` in page.tsx,
-    // so we trigger the partial-data badge via snapshots30dError specifically.
+    // Chart's `hasSnapshotError` is wired to `anySnapshotsAllError` in page.tsx,
+    // so we trigger the partial-data badge via snapshotsAllError specifically.
     const html = render([
       makeNetworkData({
         network: TVL_NETWORK,
         pools: [pool],
-        snapshots30dError: new Error("timeout"),
+        snapshotsAllError: new Error("timeout"),
       }),
     ]);
     expect(html).toContain("· partial data");
@@ -574,5 +577,79 @@ describe("GlobalPage — TVL delta sub-KPIs", () => {
     ]);
     // Delta should be +100% (pool A only), not ~+766% if pool B's $1000 leaked in
     expect(html).toContain("+100.00%");
+  });
+});
+
+describe("GlobalPage — Volume chart wiring", () => {
+  it("uses the 'Volume' label without a time-range suffix in the title", () => {
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [makeTvlPool({ id: "pool-volume" })],
+      }),
+    ]);
+
+    expect(html).toContain(">Volume<");
+    expect(html).not.toContain("Volume (past 7d)");
+    expect(html).not.toContain("Volume (24h)");
+  });
+
+  it("suppresses the Volume delta at the default 1M range", () => {
+    // At default 1M range, we don't have two full 7-day windows' worth of
+    // comparable data, so the chart intentionally suppresses the delta pill.
+    // week-over-week text only appears in the Volume card's delta — the TVL
+    // card's delta has its own week-over-week label when a TVL delta exists.
+    const queryAnchor = Date.UTC(2026, 3, 14, 10, 30, 0, 0);
+    const snapshotWindows = buildSnapshotWindows(queryAnchor);
+    const pool = makeTvlPool({
+      id: "pool-volume",
+      reserves0: "0",
+      reserves1: "0",
+    });
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        snapshotWindows,
+        pools: [pool],
+        snapshots30d: [
+          makeSnapshot({
+            poolId: "pool-volume",
+            timestamp: snapshotWindows.w7d.from + 3600,
+            swapVolume0: "20000000000000000000",
+          }),
+        ],
+      }),
+    ]);
+
+    // Volume card at 1M range: no delta pill from volume. TVL card has no
+    // 7d-ago snapshot in this fixture, so its delta is also null.
+    expect(html).not.toContain("week-over-week");
+  });
+
+  it("wires an all-history snapshots failure through to both chart cards", () => {
+    // snapshotsAll is the series source for both TVL and Volume, so a failure
+    // partial-badges both cards.
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        snapshotsAllError: new Error("all-history timeout"),
+      }),
+    ]);
+
+    expect(html.split("· partial data").length - 1).toBe(2);
+  });
+
+  it("only partial-badges the TVL card when the 7d-only snapshot query fails", () => {
+    // The 7d window is only used by the TVL delta (matchedTvl). Volume depends
+    // solely on snapshotsAll — a 7d-only failure must NOT leak into the Volume
+    // card's partial-data state.
+    const html = render([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        snapshots7dError: new Error("7d timeout"),
+      }),
+    ]);
+
+    expect(html.split("· partial data").length - 1).toBe(1);
   });
 });

@@ -8,6 +8,14 @@ import {
 import type { Network } from "./networks";
 import type { Pool, PoolSnapshotWindow } from "./types";
 
+export type TimeRange = { from: number; to: number };
+
+export type SnapshotWindows = {
+  w24h: TimeRange;
+  w7d: TimeRange;
+  w30d: TimeRange;
+};
+
 /**
  * Compute all-time total volume in USD for a pool.
  *
@@ -56,7 +64,7 @@ export function hourBucket(timestampSeconds: number): number {
   return Math.floor(timestampSeconds / SECONDS_PER_HOUR) * SECONDS_PER_HOUR;
 }
 
-export function snapshotWindow24h(nowMs: number): { from: number; to: number } {
+export function snapshotWindow24h(nowMs: number): TimeRange {
   const nowSeconds = Math.floor(nowMs / 1000);
   const to = hourBucket(nowSeconds);
   return {
@@ -65,7 +73,7 @@ export function snapshotWindow24h(nowMs: number): { from: number; to: number } {
   };
 }
 
-export function snapshotWindow7d(nowMs: number): { from: number; to: number } {
+export function snapshotWindow7d(nowMs: number): TimeRange {
   const nowSeconds = Math.floor(nowMs / 1000);
   const to = hourBucket(nowSeconds);
   return {
@@ -74,7 +82,7 @@ export function snapshotWindow7d(nowMs: number): { from: number; to: number } {
   };
 }
 
-export function snapshotWindow30d(nowMs: number): { from: number; to: number } {
+export function snapshotWindow30d(nowMs: number): TimeRange {
   const nowSeconds = Math.floor(nowMs / 1000);
   const to = hourBucket(nowSeconds);
   return {
@@ -83,8 +91,68 @@ export function snapshotWindow30d(nowMs: number): { from: number; to: number } {
   };
 }
 
+export function buildSnapshotWindows(nowMs: number): SnapshotWindows {
+  return {
+    w24h: snapshotWindow24h(nowMs),
+    w7d: snapshotWindow7d(nowMs),
+    w30d: snapshotWindow30d(nowMs),
+  };
+}
+
+export function snapshotWindowPrior7dFromCurrent(window: TimeRange): TimeRange {
+  return {
+    from: window.from - SECONDS_PER_WEEK,
+    to: window.from,
+  };
+}
+
+/**
+ * Window covering the 7 days immediately preceding the current 7-day window —
+ * i.e. [now - 14d, now - 7d]. Used to compute week-over-week volume deltas
+ * without refetching: the caller filters `snapshots30d` by this window.
+ */
+export function snapshotWindowPrior7d(nowMs: number): {
+  from: number;
+  to: number;
+} {
+  return snapshotWindowPrior7dFromCurrent(snapshotWindow7d(nowMs));
+}
+
 export function shouldQueryPoolSnapshots(poolIds: readonly string[]): boolean {
   return poolIds.length > 0;
+}
+
+export function sumVolumeMap(map: ReadonlyMap<string, number | null>): number {
+  let total = 0;
+  for (const value of map.values()) {
+    if (typeof value === "number") total += value;
+  }
+  return total;
+}
+
+export function filterSnapshotsToWindow(
+  snapshots: PoolSnapshotWindow[],
+  window: TimeRange,
+): PoolSnapshotWindow[] {
+  return snapshots.filter((snapshot) => {
+    const timestamp = Number(snapshot.timestamp);
+    return timestamp >= window.from && timestamp < window.to;
+  });
+}
+
+export function buildPoolVolumeMapInWindow(
+  snapshots: PoolSnapshotWindow[],
+  pools: Pool[],
+  network: Network,
+  rates: OracleRateMap,
+  window: TimeRange,
+): Map<string, number | null> {
+  return buildPoolVolumeMap(
+    filterSnapshotsToWindow(snapshots, window),
+    pools,
+    network,
+    rates,
+  );
 }
 
 export function buildPoolVolumeMap(
@@ -119,7 +187,7 @@ export function buildPoolVolumeMap(
   return volumeByPool;
 }
 
-function getSnapshotVolumeInUsd(
+export function getSnapshotVolumeInUsd(
   snapshot: PoolSnapshotWindow,
   pool: Pool | undefined,
   network: Network,
