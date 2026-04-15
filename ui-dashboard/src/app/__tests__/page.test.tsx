@@ -223,7 +223,10 @@ describe("GlobalPage — LP query failure", () => {
 // ---------------------------------------------------------------------------
 
 describe("GlobalPage — snapshots-only failure", () => {
-  it("shows error subtitle on volume tile but fees still render", () => {
+  it("fees tile still renders normally when only snapshots failed", () => {
+    // Volume tile was removed from the Summary — the chart card handles
+    // snapshot-failure UX now. Fees come from a separate query, so a
+    // snapshot-only failure shouldn't affect fees rendering.
     const html = render([
       makeNetworkData({
         snapshotsError: new Error("snapshots timeout"),
@@ -240,12 +243,8 @@ describe("GlobalPage — snapshots-only failure", () => {
         },
       }),
     ]);
-    // Volume tile shows all-time total (from pool counters) with error subtitle
-    expect(html).toContain("Volume");
-    expect(html).toContain("Some chains failed to load");
-    // Sub-rows (24h/7d/30d) are hidden when hasError is true
-    // Fees should still render normally
     expect(html).toContain("Swap Fees");
+    expect(html).not.toContain("Some chains failed to load");
   });
 });
 

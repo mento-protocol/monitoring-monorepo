@@ -35,8 +35,10 @@ export type NetworkData = {
   pools: Pool[];
   /**
    * Snapshot arrays for the three standard rolling windows. All derived
-   * client-side from `snapshotsAll` (one paginated query), so the three
-   * window-specific error fields below all alias to `snapshotsAllError`.
+   * client-side by filtering `snapshotsAll` (one paginated query). The
+   * corresponding error fields below are per-window — each is set only
+   * when that specific window's coverage is incomplete, not merely when
+   * the all-history pagination had trouble.
    */
   snapshots: PoolSnapshotWindow[];
   snapshots7d: PoolSnapshotWindow[];

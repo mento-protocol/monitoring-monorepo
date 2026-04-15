@@ -32,10 +32,17 @@ type PoolHistory = {
  * SECONDS_PER_HOUR for hour-level fidelity; the indexer writes snapshots on
  * an hourly bucket already, so hour-level granularity doesn't add any
  * server-side cost, just more cursor steps client-side.
+ *
+ * `fromTimestamp` clamps the emitted series to `[fromTimestamp, now]` —
+ * callers that only need a recent window (e.g. 1W hourly = 168 buckets)
+ * should pass this to avoid materializing buckets they'll immediately
+ * discard. Forward-fill still works correctly: older snapshots are used to
+ * seed each pool's cursor before the clamped window begins.
  */
 export function buildDailySeries(
   networkData: NetworkData[],
   bucketSeconds: number = SECONDS_PER_DAY,
+  fromTimestamp?: number,
 ): {
   series: SeriesPoint[];
   nowTvl: number;
@@ -78,14 +85,27 @@ export function buildDailySeries(
   if (histories.length === 0) return { series: [], nowTvl: 0 };
 
   const nowSec = Math.floor(Date.now() / 1000);
-  const startBucket = Math.floor(earliestTs / bucketSeconds) * bucketSeconds;
+  const dataStartBucket =
+    Math.floor(earliestTs / bucketSeconds) * bucketSeconds;
+  // When a window clamp is requested, start emission at the later of the
+  // window's bucket and the earliest snapshot's bucket. Earlier iterations
+  // are skipped entirely (not materialized), but the per-pool cursor fast-
+  // forwards naturally on the first emitted iteration, so forward-fill
+  // still uses the correct reserves from before the window start.
+  const windowStartBucket =
+    fromTimestamp !== undefined
+      ? Math.max(
+          dataStartBucket,
+          Math.floor(fromTimestamp / bucketSeconds) * bucketSeconds,
+        )
+      : dataStartBucket;
   const endBucket = Math.floor(nowSec / bucketSeconds) * bucketSeconds;
 
   const cursors = new Array<number>(histories.length).fill(-1);
   const series: SeriesPoint[] = [];
 
   for (
-    let timestamp = startBucket;
+    let timestamp = windowStartBucket;
     timestamp <= endBucket;
     timestamp += bucketSeconds
   ) {
@@ -141,9 +161,17 @@ export function TvlOverTimeChart({
   const bucketSeconds = range === "7d" ? SECONDS_PER_HOUR : SECONDS_PER_DAY;
 
   const fullSeries = useMemo<TimeSeriesPoint[]>(() => {
+    // 1W hourly only needs the last ~168 buckets — clamping the build
+    // horizon avoids materializing full-history hourly buckets we'd
+    // immediately discard. 1M/All keep the default (full history).
+    const fromTimestamp =
+      range === "7d"
+        ? Math.floor(Date.now() / 1000) - 7 * SECONDS_PER_DAY
+        : undefined;
     const { series: base, nowTvl } = buildDailySeries(
       networkData,
       bucketSeconds,
+      fromTimestamp,
     );
     if (base.length === 0) return [];
 
@@ -155,7 +183,7 @@ export function TvlOverTimeChart({
       })),
       { timestamp: nowSec, value: nowTvl },
     ];
-  }, [networkData, bucketSeconds]);
+  }, [networkData, bucketSeconds, range]);
 
   // TVL is a stock — cutoff-based range filtering on UTC-day-stamped buckets
   // is fine: the headline shows current TVL (not a bar-sum), so no invariant

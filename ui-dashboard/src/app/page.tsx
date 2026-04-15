@@ -314,23 +314,7 @@ function GlobalContent() {
       </div>
 
       <section>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <BreakdownTile
-            label="Volume"
-            total={aggregated.totalVolumeAllTime}
-            sub24h={aggregated.totalVolume24h}
-            sub7d={aggregated.totalVolume7d}
-            sub30d={aggregated.totalVolume30d}
-            isLoading={isLoading}
-            hasError={
-              anyNetworkError ||
-              anySnapshotsError ||
-              anySnapshots7dError ||
-              anySnapshots30dError
-            }
-            format={formatUSD}
-          />
-
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <BreakdownTile
             label="Swap Fees"
             total={aggregated.totalFeesAllTime}
