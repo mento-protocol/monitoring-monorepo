@@ -61,13 +61,13 @@ export function RebalanceStatusValue({
     );
   } else if (isHealthyNoOp(rebalanceCheck.rawError)) {
     // The strategy refused the rebalance because the pool is already
-    // under its internal threshold — that's the healthy outcome, not an
-    // alarm. Fall back to the passive signal so we don't render red
-    // "Rebalance blocked" text at exactly-threshold deviation.
-    ({ text: statusText, color: statusColor } = getPassiveStatus(
-      pool,
-      network,
-    ));
+    // under its internal threshold — the live probe IS the authoritative
+    // signal, so render a fixed "Balanced" label derived from it. Do NOT
+    // recompute from indexed `pool` props: if the indexer hasn't caught up
+    // post-rebalance, getPassiveStatus would surface a stale CRITICAL /
+    // "Diagnostics unavailable" state over a clean live result.
+    statusText = "Balanced";
+    statusColor = "text-emerald-400";
   } else {
     statusText = "Rebalance blocked";
     statusColor = "text-red-400";

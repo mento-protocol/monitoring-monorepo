@@ -28,6 +28,14 @@ export type HealthScoreResult = {
   healthWindow: HealthWindow;
   /** All-time fraction of healthy time (0..1) or null when never measured. */
   allTimeScore: number | null;
+  /** True when the snapshot query hit HEALTH_WINDOW_LIMIT and the window
+   *  was narrowed to the earliest snapshot we kept. Callers must NOT
+   *  render the score under the nominal "7d" label in this case — the
+   *  actual covered window is shorter. */
+  truncated: boolean;
+  /** Nominal window length in seconds so consumers don't have to know
+   *  HEALTH_WINDOW_SECONDS directly. */
+  nominalWindowSeconds: number;
   /** Non-null when either SWR call rejected — the window is partial. */
   error: Error | null;
 };
@@ -111,6 +119,8 @@ export function useHealthScore(pool: Pool): HealthScoreResult {
   return {
     healthWindow,
     allTimeScore,
+    truncated,
+    nominalWindowSeconds: HEALTH_WINDOW_SECONDS,
     error: windowError ?? predecessorError ?? null,
   };
 }

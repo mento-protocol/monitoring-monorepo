@@ -60,7 +60,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         ? computePriceDifference(updatedPool)
         : updatedPool.priceDifference;
     const withDev = { ...updatedPool, priceDifference };
-    const healthStatus = computeHealthStatus(withDev);
+    const healthStatus = computeHealthStatus(withDev, blockTimestamp);
     const finalPool = { ...withDev, healthStatus };
 
     // Health score: compute snapshot fields + update pool accumulators
@@ -133,7 +133,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         ? computePriceDifference(updatedPool)
         : updatedPool.priceDifference;
     const withDev = { ...updatedPool, priceDifference };
-    const healthStatus = computeHealthStatus(withDev);
+    const healthStatus = computeHealthStatus(withDev, blockTimestamp);
     const finalPool = { ...withDev, healthStatus };
 
     // Health score: compute snapshot fields + update pool accumulators

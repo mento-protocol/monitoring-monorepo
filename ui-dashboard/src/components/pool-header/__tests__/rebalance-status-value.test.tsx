@@ -279,11 +279,10 @@ describe("RebalanceStatusValue", () => {
   });
 
   it('treats LS_POOL_NOT_REBALANCEABLE as a healthy no-op, not "Rebalance blocked"', () => {
-    // Strategy refused because deviation is still below its internal
-    // threshold — that's the expected healthy outcome (especially at
-    // exactly-threshold deviation under the `> threshold` CRITICAL rule).
-    // We should fall back to the passive status instead of firing a red
-    // "blocked" alarm.
+    // Live probe says the pool is below its internal threshold — that's
+    // the authoritative signal, so render a fixed "Balanced" state. Must
+    // NOT recompute from indexed pool props (which may still show a stale
+    // CRITICAL state post-rebalance until the indexer catches up).
     mockUseRebalanceCheck.mockReturnValue(
       rebalanceState({
         data: {
@@ -297,17 +296,18 @@ describe("RebalanceStatusValue", () => {
     );
     const html = renderToStaticMarkup(
       <RebalanceStatusValue
-        pool={{ ...BASE_POOL, priceDifference: "5000" }} // exactly at threshold
+        // Indexed priceDifference is stale-high — simulating the indexer
+        // not having caught up to the just-landed rebalance. Cell must
+        // still render green "Balanced", not "At threshold"/CRITICAL.
+        pool={{ ...BASE_POOL, priceDifference: "5000" }}
         network={NETWORK}
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    // Health is WARN at ratio=1.0 under the new semantics; exactly-at-
-    // threshold reads as "At threshold" (not "Near threshold") so the
-    // edge case is visually distinct from the 80–99% warning band.
-    expect(html).toContain("At threshold");
-    expect(html).not.toContain("Near threshold");
+    expect(html).toContain("Balanced");
+    expect(html).toContain("text-emerald-400");
     expect(html).not.toContain("Rebalance blocked");
+    expect(html).not.toContain("At threshold");
     expect(html).not.toContain("text-red-400");
   });
 

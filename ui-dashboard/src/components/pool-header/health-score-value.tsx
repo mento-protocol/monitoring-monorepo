@@ -8,7 +8,8 @@ const HEALTH_SCORE_EXPLAINER =
   "% of time the pool was healthy — oracle rate fresh AND price deviation within threshold.";
 
 export function HealthScoreValue({ pool }: { pool: Pool }) {
-  const { healthWindow, allTimeScore, error } = useHealthScore(pool);
+  const { healthWindow, allTimeScore, truncated, nominalWindowSeconds, error } =
+    useHealthScore(pool);
 
   // allTimeScore is derived from the Pool row directly, not the window GQL
   // queries, so a transient query failure should degrade only the 7d line.
@@ -26,26 +27,39 @@ export function HealthScoreValue({ pool }: { pool: Pool }) {
       : formatBinaryHealthPct(healthWindow.score);
   const windowColor = error ? "text-amber-400" : "text-white";
 
+  // Show the nominal window ("7d") only when coverage actually reached it.
+  // Otherwise degrade honestly to the observed duration ("5.3d") so the
+  // label can't overstate how much data the score is based on — the
+  // snapshot cap or a young pool can both produce sub-window coverage.
+  const fullyCovered =
+    !truncated && healthWindow.trackedSeconds >= nominalWindowSeconds;
+  const periodLabel = fullyCovered
+    ? `${Math.round(nominalWindowSeconds / 86400)}d`
+    : formatObservedDuration(healthWindow.observedHours);
+
   return (
     <span className="flex flex-col gap-0.5">
       <span className={`font-medium ${windowColor}`}>
         {windowLabel}
-        <span className="ml-1 text-xs text-slate-500">7d</span>
+        <span className="ml-1 text-xs text-slate-500">{periodLabel}</span>
       </span>
       {allTimeScore != null && (
         <span className="text-xs text-slate-500">
           {formatBinaryHealthPct(allTimeScore)} all-time
         </span>
       )}
-      {!error &&
-        healthWindow.score != null &&
-        !healthWindow.hasEnoughDataForNines && (
-          <span className="text-xs text-slate-600">
-            {healthWindow.observedHours.toFixed(1)}h observed
-          </span>
-        )}
     </span>
   );
+}
+
+/**
+ * Format observed duration as the most meaningful unit: hours under 24h
+ * (so nobody reads "0.2d"), days otherwise. Matches the existing "Nh
+ * observed" pattern but promotes to days for longer spans.
+ */
+function formatObservedDuration(observedHours: number): string {
+  if (observedHours < 24) return `${observedHours.toFixed(1)}h`;
+  return `${(observedHours / 24).toFixed(1)}d`;
 }
 
 /**

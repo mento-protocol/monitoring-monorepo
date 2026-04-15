@@ -11,13 +11,42 @@ import { fetchReferenceRateFeedID, fetchReportExpiry } from "./rpc";
 // Health status computation
 // ---------------------------------------------------------------------------
 
-export function computeHealthStatus(pool: Pool): string {
+/**
+ * Grace window for a deviation breach before it escalates to CRITICAL.
+ * Mirrors `DEVIATION_BREACH_GRACE_SECONDS` in
+ * `ui-dashboard/src/lib/health.ts`. Cross-chain rebalances take minutes
+ * to confirm; if a rebalance landed within this window, we stay at WARN
+ * rather than flagging an incident.
+ */
+export const DEVIATION_BREACH_GRACE_SECONDS = 3600n;
+
+/**
+ * MUST stay in lockstep with `computeHealthStatus` in
+ * `ui-dashboard/src/lib/health.ts`. Parity cases live in
+ * `test/healthStatusParity.test.ts` and
+ * `ui-dashboard/src/lib/__tests__/health.test.ts`.
+ *
+ * Key boundaries:
+ *  - `devRatio > 1.0` → CRITICAL (strict; exactly-at-threshold stays WARN)
+ *  - Breach + rebalance within DEVIATION_BREACH_GRACE_SECONDS → WARN
+ *
+ * The indexer has no wall-clock `isWeekend()` at event time (batch
+ * processing historical blocks), so the WEEKEND status is produced only
+ * by the UI at render time. Indexed weekend-stale pools surface as
+ * CRITICAL here; the UI reclassifies them when rendering.
+ */
+export function computeHealthStatus(pool: Pool, nowSeconds: bigint): string {
   if (pool.source?.includes("virtual")) return "N/A";
   if (!pool.oracleOk) return "CRITICAL";
   const threshold =
     pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
   const devRatio = Number(pool.priceDifference) / threshold;
-  if (devRatio >= 1.0) return "CRITICAL";
+  if (devRatio > 1.0) {
+    const withinGrace =
+      pool.lastRebalancedAt > 0n &&
+      nowSeconds - pool.lastRebalancedAt < DEVIATION_BREACH_GRACE_SECONDS;
+    return withinGrace ? "WARN" : "CRITICAL";
+  }
   if (devRatio >= 0.8) return "WARN";
   return "OK";
 }
@@ -211,7 +240,7 @@ export const upsertPool = async ({
       : next.priceDifference;
 
   const withDeviation = { ...next, priceDifference };
-  const healthStatus = computeHealthStatus(withDeviation);
+  const healthStatus = computeHealthStatus(withDeviation, blockTimestamp);
   const final = { ...withDeviation, healthStatus };
 
   context.Pool.set(final);

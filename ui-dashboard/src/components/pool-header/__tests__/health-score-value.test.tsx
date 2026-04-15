@@ -22,23 +22,30 @@ const BASE_POOL: Pool = {
   updatedAtTimestamp: "2000",
 };
 
+const NOMINAL_WINDOW_SECONDS = 7 * 24 * 3600;
+
 function healthResult(overrides: {
   score?: number | null;
   allTimeScore?: number | null;
   observedHours?: number;
+  trackedSeconds?: number;
   hasEnoughDataForNines?: boolean;
+  truncated?: boolean;
   error?: Error | null;
 }) {
   return {
     healthWindow: {
       score: overrides.score ?? null,
-      trackedSeconds: 0,
+      trackedSeconds:
+        overrides.trackedSeconds ?? (overrides.observedHours ?? 0) * 3600,
       healthySeconds: 0,
       staleSeconds: 0,
       observedHours: overrides.observedHours ?? 0,
       hasEnoughDataForNines: overrides.hasEnoughDataForNines ?? false,
     },
     allTimeScore: overrides.allTimeScore ?? null,
+    truncated: overrides.truncated ?? false,
+    nominalWindowSeconds: NOMINAL_WINDOW_SECONDS,
     error: overrides.error ?? null,
   };
 }
@@ -84,6 +91,9 @@ describe("HealthScoreValue", () => {
       healthResult({
         score: 0.995,
         allTimeScore: 0.9999,
+        // Full 7d coverage (168h) — label stays "7d".
+        observedHours: 168,
+        trackedSeconds: NOMINAL_WINDOW_SECONDS,
         hasEnoughDataForNines: true,
       }),
     );
@@ -112,7 +122,9 @@ describe("HealthScoreValue", () => {
     expect(html).not.toContain("cursor-help");
   });
 
-  it("renders the Nh observed line when hasEnoughDataForNines is false", () => {
+  it("renders hours-unit coverage inline when sub-24h of data has been observed", () => {
+    // Sub-24h coverage (young pool) — inline label drops from "7d" to the
+    // actual hour count so it can't overstate the window.
     mockUseHealthScore.mockReturnValue(
       healthResult({
         score: 0.98,
@@ -122,6 +134,40 @@ describe("HealthScoreValue", () => {
       }),
     );
     const html = renderToStaticMarkup(<HealthScoreValue pool={BASE_POOL} />);
-    expect(html).toContain("6.5h observed");
+    expect(html).toContain("6.5h");
+    expect(html).not.toContain(">7d<");
+  });
+
+  it("renders days-unit coverage when the window was truncated by the snapshot cap", () => {
+    // >1000 snapshots in 7d → normalizeWindowSnapshots truncates and
+    // effectiveWindowStart narrows. Label degrades to the actual covered
+    // duration so "7d" can't mask a shorter-than-nominal window.
+    mockUseHealthScore.mockReturnValue(
+      healthResult({
+        score: 0.97,
+        allTimeScore: 0.95,
+        observedHours: 72, // 3 days of coverage
+        truncated: true,
+      }),
+    );
+    const html = renderToStaticMarkup(<HealthScoreValue pool={BASE_POOL} />);
+    expect(html).toContain("3.0d");
+    expect(html).not.toContain(">7d<");
+  });
+
+  it("renders days-unit coverage when a young pool hasn't accumulated 7d yet", () => {
+    // Coverage shorter than nominal window but no truncation — same
+    // treatment: show what we actually have, not the nominal window.
+    mockUseHealthScore.mockReturnValue(
+      healthResult({
+        score: 0.99,
+        allTimeScore: 0.99,
+        observedHours: 96, // 4 days old
+        trackedSeconds: 96 * 3600,
+      }),
+    );
+    const html = renderToStaticMarkup(<HealthScoreValue pool={BASE_POOL} />);
+    expect(html).toContain("4.0d");
+    expect(html).not.toContain(">7d<");
   });
 });
