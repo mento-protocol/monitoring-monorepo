@@ -54,6 +54,11 @@ export function filterSeriesByRange(
 interface TimeSeriesChartCardProps {
   title: string;
   rangeAriaLabel: string;
+  /**
+   * The points to plot — callers are responsible for range-filtering this
+   * themselves (`filterSeriesByRange` is exported for simple cutoff cases;
+   * the Volume chart uses a rolling-window rebucketing strategy instead).
+   */
   series: TimeSeriesPoint[];
   range: RangeKey;
   onRangeChange: (range: RangeKey) => void;
@@ -80,16 +85,11 @@ export function TimeSeriesChartCard({
   hasSnapshotError,
   emptyMessage,
 }: TimeSeriesChartCardProps) {
-  const visibleSeries = useMemo(
-    () => filterSeriesByRange(series, range),
-    [range, series],
-  );
-
   const { traces, layout } = useMemo(() => {
-    const xs = visibleSeries.map((point) =>
+    const xs = series.map((point) =>
       new Date(point.timestamp * 1000).toISOString(),
     );
-    const ys = visibleSeries.map((point) => point.value);
+    const ys = series.map((point) => point.value);
     const trace = {
       x: xs,
       y: ys,
@@ -144,7 +144,7 @@ export function TimeSeriesChartCard({
         },
       },
     };
-  }, [visibleSeries]);
+  }, [series]);
 
   const deltaPill =
     change === null || isLoading || hasError ? null : (

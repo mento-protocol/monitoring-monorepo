@@ -10,6 +10,7 @@ import type { OracleRateMap } from "@/lib/tokens";
 import {
   SECONDS_PER_DAY,
   TimeSeriesChartCard,
+  filterSeriesByRange,
   type RangeKey,
   type TimeSeriesPoint,
 } from "@/components/time-series-chart-card";
@@ -134,6 +135,14 @@ export function TvlOverTimeChart({
     ];
   }, [networkData]);
 
+  // TVL is a stock — cutoff-based range filtering on UTC-day-stamped buckets
+  // is fine: the headline shows current TVL (not a bar-sum), so no invariant
+  // to preserve against a rolling-hour summary window.
+  const visibleSeries = useMemo(
+    () => filterSeriesByRange(fullSeries, range),
+    [fullSeries, range],
+  );
+
   const headline = isLoading ? "…" : formatUSD(totalTvl);
   const emptyMessage = hasError
     ? "Unable to load TVL history"
@@ -145,7 +154,7 @@ export function TvlOverTimeChart({
     <TimeSeriesChartCard
       title="Total Value Locked"
       rangeAriaLabel="TVL chart time range"
-      series={fullSeries}
+      series={visibleSeries}
       range={range}
       onRangeChange={setRange}
       headline={headline}

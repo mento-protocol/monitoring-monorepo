@@ -90,6 +90,44 @@ describe("buildDailyVolumeSeries", () => {
     });
     expect(series[2]).toMatchObject({ timestamp: day2, volumeUSD: 3 });
   });
+
+  it("filters snapshots to the provided window before bucketing — partial edge buckets included", () => {
+    // Three snapshots: one inside the window, one before, one at the window
+    // boundary (exclusive). Bucketed totals should reflect only the in-window
+    // snapshot; the leftmost bucket appears even though it only contains the
+    // in-window portion of that UTC day (partial edge bar semantics).
+    const dayStart = dayAlignedNow() - 3 * SECONDS_PER_DAY;
+    const windowFrom = dayStart + 6 * 3600; // 6h into the day
+    const windowTo = dayStart + 2 * SECONDS_PER_DAY + 6 * 3600;
+
+    const series = buildDailyVolumeSeries(
+      makeVolumeNetworkData([
+        { timestamp: dayStart + 2 * 3600, swapVolume0: "1000000000000000000" }, // before window → excluded
+        { timestamp: dayStart + 10 * 3600, swapVolume0: "2000000000000000000" }, // inside → $2
+        { timestamp: windowTo, swapVolume0: "4000000000000000000" }, // at upper bound (exclusive) → excluded
+      ]),
+      { from: windowFrom, to: windowTo },
+    );
+
+    // 3 buckets emitted (window spans parts of 3 UTC days); only the middle
+    // one has volume since the other two snapshots were filtered out.
+    const total = series.reduce((s, p) => s + p.volumeUSD, 0);
+    expect(total).toBe(2);
+  });
+
+  it("returns empty when no snapshots fall inside the window", () => {
+    const today = dayAlignedNow();
+    const series = buildDailyVolumeSeries(
+      makeVolumeNetworkData([
+        {
+          timestamp: today - 20 * SECONDS_PER_DAY,
+          swapVolume0: "1000000000000000000",
+        },
+      ]),
+      { from: today - 5 * SECONDS_PER_DAY, to: today },
+    );
+    expect(series).toEqual([]);
+  });
 });
 
 describe("weekOverWeekChangePct", () => {

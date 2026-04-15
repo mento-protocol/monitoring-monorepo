@@ -2,12 +2,16 @@
 
 import { useMemo, useState } from "react";
 import { formatUSD } from "@/lib/format";
-import { getSnapshotVolumeInUsd } from "@/lib/volume";
+import {
+  getSnapshotVolumeInUsd,
+  snapshotWindow7d,
+  snapshotWindow30d,
+  type TimeRange,
+} from "@/lib/volume";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
 import {
   SECONDS_PER_DAY,
   TimeSeriesChartCard,
-  filterSeriesByRange,
   type RangeKey,
   type TimeSeriesPoint,
 } from "@/components/time-series-chart-card";
@@ -19,17 +23,28 @@ type SeriesPoint = { timestamp: number; volumeUSD: number };
  * Summary tile's volume totals. Virtual pools also emit hourly PoolSnapshot
  * rows with per-hour swapVolume0/1, so excluding them would silently undercount
  * protocol volume and desync the chart from its Summary-tile counterpart.
+ *
+ * When `window` is provided, snapshots are filtered to `[window.from, window.to)`
+ * *before* bucketing. This keeps the chart's range totals consistent with the
+ * Summary tile's rolling-window subtotals — the edge buckets may be partial
+ * (e.g. 1W's leftmost bucket covers the last N hours of a UTC day instead of
+ * the full 24h) but the sum over all buckets equals the sum of snapshots in
+ * that exact rolling window.
  */
 export function buildDailyVolumeSeries(
   networkData: NetworkData[],
+  window?: TimeRange,
 ): SeriesPoint[] {
   const bucketTotals = new Map<number, number>();
-  let earliestBucket = Infinity;
+  let minSnapshotBucket = Infinity;
 
   for (const netData of networkData) {
     if (netData.error !== null || netData.snapshotsAllError !== null) continue;
     const poolById = new Map(netData.pools.map((pool) => [pool.id, pool]));
     for (const snapshot of netData.snapshotsAll) {
+      const timestamp = Number(snapshot.timestamp);
+      if (window && (timestamp < window.from || timestamp >= window.to))
+        continue;
       const pool = poolById.get(snapshot.poolId);
       const volume = getSnapshotVolumeInUsd(
         snapshot,
@@ -38,21 +53,23 @@ export function buildDailyVolumeSeries(
         netData.rates,
       );
       if (volume === null) continue;
-      const timestamp = Number(snapshot.timestamp);
       const bucket = Math.floor(timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-      earliestBucket = Math.min(earliestBucket, bucket);
+      minSnapshotBucket = Math.min(minSnapshotBucket, bucket);
       bucketTotals.set(bucket, (bucketTotals.get(bucket) ?? 0) + volume);
     }
   }
 
-  if (!Number.isFinite(earliestBucket)) return [];
+  if (!Number.isFinite(minSnapshotBucket)) return [];
 
-  const nowSec = Math.floor(Date.now() / 1000);
-  const endBucket = Math.floor(nowSec / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  const startBucket = window
+    ? Math.floor(window.from / SECONDS_PER_DAY) * SECONDS_PER_DAY
+    : minSnapshotBucket;
+  const endRef = window?.to ?? Math.floor(Date.now() / 1000);
+  const endBucket = Math.floor(endRef / SECONDS_PER_DAY) * SECONDS_PER_DAY;
 
   const series: SeriesPoint[] = [];
   for (
-    let timestamp = earliestBucket;
+    let timestamp = startBucket;
     timestamp <= endBucket;
     timestamp += SECONDS_PER_DAY
   ) {
@@ -96,6 +113,10 @@ export function VolumeOverTimeChart({
 }: VolumeOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("30d");
 
+  // Full-history series kept for the WoW delta (which needs ≥15 UTC-day
+  // buckets). The chart's visible series for 7d/30d uses a different,
+  // rolling-window bucketing path so the range total matches the Summary
+  // tile's rolling-window subtotals exactly.
   const fullSeries = useMemo<TimeSeriesPoint[]>(
     () =>
       buildDailyVolumeSeries(networkData).map((point) => ({
@@ -105,13 +126,19 @@ export function VolumeOverTimeChart({
     [networkData],
   );
 
-  const visibleSeries = useMemo(
-    () => filterSeriesByRange(fullSeries, range),
-    [fullSeries, range],
-  );
+  const visibleSeries = useMemo<TimeSeriesPoint[]>(() => {
+    if (range === "all") return fullSeries;
+    const now = Date.now();
+    const window =
+      range === "7d" ? snapshotWindow7d(now) : snapshotWindow30d(now);
+    return buildDailyVolumeSeries(networkData, window).map((point) => ({
+      timestamp: point.timestamp,
+      value: point.volumeUSD,
+    }));
+  }, [networkData, range, fullSeries]);
 
-  // Hero reflects the selected range — sum of the visible bars. Avoids the
-  // "title says 7d but chart shows 30d" mismatch flagged in PR review.
+  // Hero = sum of visible bars. With rolling-window bucketing on 7d/30d this
+  // exactly equals the Summary tile's subtotal for the same window.
   const rangeTotal = useMemo(
     () => visibleSeries.reduce((sum, point) => sum + point.value, 0),
     [visibleSeries],
@@ -141,7 +168,7 @@ export function VolumeOverTimeChart({
     <TimeSeriesChartCard
       title="Volume"
       rangeAriaLabel="Volume chart time range"
-      series={fullSeries}
+      series={visibleSeries}
       range={range}
       onRangeChange={setRange}
       headline={headline}
