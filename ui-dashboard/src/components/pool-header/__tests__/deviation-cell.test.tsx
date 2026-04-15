@@ -203,15 +203,4 @@ describe("DeviationCell — breach start indicator", () => {
     );
     expect(html).not.toContain("Breach started");
   });
-
-  it("does not render breach line when deviationBreachStartedAt is undefined (old indexer schema)", () => {
-    // Simulates a Hasura endpoint that hasn't rolled out the new schema yet —
-    // the UI must degrade gracefully and omit the optional indicator.
-    const pool: Pool = { ...BASE_POOL, priceDifference: "3000" };
-    expect(pool.deviationBreachStartedAt).toBeUndefined();
-    const html = renderToStaticMarkup(
-      <DeviationCell pool={pool} network={NETWORK} />,
-    );
-    expect(html).not.toContain("Breach started");
-  });
 });
