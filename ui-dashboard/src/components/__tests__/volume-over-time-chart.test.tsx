@@ -161,11 +161,12 @@ describe("buildDailyVolumeSeries", () => {
     expect(total).toBe(3);
   });
 
-  it("excludes today's bucket when window.to is mid-day (production case)", () => {
+  it("includes today's partial bucket when window.to is mid-day (production case)", () => {
     // Production windows come from hourBucket(Date.now()), so window.to is
-    // always a mid-day hour boundary, not midnight. Today's PoolDailySnapshot
-    // row contains the FULL 24h total even at 10:00 UTC — emitting it would
-    // count hours after window.to and overstate the range total.
+    // always a mid-day hour boundary, not midnight. PoolDailySnapshot is an
+    // incremental accumulator: today's row only contains swaps seen so far
+    // today (not a precomputed full-day total), so it should contribute its
+    // partial volume to the 1W/1M headline.
     const today = dayAlignedNow();
     const from = today - 2 * SECONDS_PER_DAY;
     const to = today + 6 * 3600; // window.to is 06:00 UTC today (non-midnight)
@@ -177,18 +178,18 @@ describe("buildDailyVolumeSeries", () => {
           timestamp: from + SECONDS_PER_DAY,
           swapVolume0: "2000000000000000000",
         }, // day-1: $2
-        { timestamp: today, swapVolume0: "99000000000000000000" }, // today: must be excluded
+        { timestamp: today, swapVolume0: "3000000000000000000" }, // today (partial): $3
       ]),
       { from, to },
     );
 
-    // today's bucket must NOT appear even though today < window.to
+    // today's bucket must appear with its in-window (partial) data
     expect(series.map((p) => p.timestamp)).toEqual([
       today - 2 * SECONDS_PER_DAY,
       today - 1 * SECONDS_PER_DAY,
+      today,
     ]);
-    // $99 from today must not be counted
-    expect(series.reduce((s, p) => s + p.volumeUSD, 0)).toBe(3);
+    expect(series.reduce((s, p) => s + p.volumeUSD, 0)).toBe(6); // $1 + $2 + $3
   });
 });
 
@@ -298,18 +299,16 @@ describe("VolumeOverTimeChart render", () => {
 
   it("shows the headline as a formatted USD total covering the default (30d) range", () => {
     const today = dayAlignedNow();
-    // Today's bucket is excluded (window.to is mid-day, today's PoolDailySnapshot
-    // would include post-window.to hours). Use completed past days instead.
+    // Both snapshots are within the default 30d window. Today's bucket is
+    // included because PoolDailySnapshot is incremental (partial today data
+    // is valid in-window volume, not a precomputed full-day total).
     const html = renderChart({
       networkData: makeVolumeNetworkData([
         {
-          timestamp: today - 2 * SECONDS_PER_DAY,
+          timestamp: today - SECONDS_PER_DAY,
           swapVolume0: "1000000000000000000",
         },
-        {
-          timestamp: today - SECONDS_PER_DAY,
-          swapVolume0: "2000000000000000000",
-        },
+        { timestamp: today, swapVolume0: "2000000000000000000" },
       ]),
     });
 

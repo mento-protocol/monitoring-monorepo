@@ -79,15 +79,14 @@ export function buildDailyVolumeSeries(
     : minSnapshotBucket;
   const endRef = window?.to ?? Math.floor(Date.now() / 1000);
   const endBucket = Math.floor(endRef / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-  // For windowed views, stop one day before endBucket: today's PoolDailySnapshot
-  // is a full-day total even mid-day, so emitting it would count hours after
-  // window.to. The "All" tab (no window) still shows today's partial data as
-  // the rightmost bar.
-  const lastBucket = window
-    ? endBucket - SECONDS_PER_DAY
-    : endRef > endBucket
-      ? endBucket
-      : endBucket - SECONDS_PER_DAY;
+  // When window.to lands exactly on a UTC-day boundary the bucket at endBucket
+  // starts at window.to and is excluded by the strict filter (timestamp >=
+  // window.to), so we clamp the loop to avoid an empty bar there. When window.to
+  // is mid-day (the production case from hourBucket(Date.now())) endRef >
+  // endBucket and we emit today's bucket — PoolDailySnapshot is incremental, so
+  // today's row contains only swaps seen so far today, which is valid in-window data.
+  const lastBucket =
+    endRef > endBucket ? endBucket : endBucket - SECONDS_PER_DAY;
 
   const series: SeriesPoint[] = [];
   for (
