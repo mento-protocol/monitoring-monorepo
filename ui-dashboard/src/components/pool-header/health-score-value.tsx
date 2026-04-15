@@ -5,7 +5,7 @@ import { useHealthScore } from "@/hooks/use-health-score";
 import { formatBinaryHealthPct } from "@/lib/pool-health-score";
 
 const HEALTH_SCORE_EXPLAINER =
-  "Fraction of tracked time the oracle was both fresh (within expiry) and on-price (below the rebalance threshold). 7d is a rolling window; all-time aggregates since pool creation.";
+  "% of time the pool was healthy — oracle rate fresh AND price deviation within threshold.";
 
 export function HealthScoreValue({ pool }: { pool: Pool }) {
   const { healthWindow, allTimeScore, error } = useHealthScore(pool);
