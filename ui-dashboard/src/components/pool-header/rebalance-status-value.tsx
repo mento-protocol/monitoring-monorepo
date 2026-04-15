@@ -5,11 +5,43 @@ import type { Network } from "@/lib/networks";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
 import { computeHealthStatus } from "@/lib/health";
-import { strategyRebalanceWriteUrl } from "@/lib/rebalance-check";
+import type { RebalanceCheckResult } from "@/lib/rebalance-check";
+import {
+  isHealthyNoOp,
+  strategyRebalanceWriteUrl,
+} from "@/lib/rebalance-check";
 import { formatTimestamp, relativeTime } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
 import { POOL_REBALANCES } from "@/lib/queries";
 import { explorerTxUrl } from "@/lib/tokens";
+
+/**
+ * Compose the hover-tooltip for a genuinely blocked rebalance. Folds in the
+ * decoded message, the raw error code, and any strategy enrichment (CDP
+ * stability pool balance or reserve collateral) so the header cell carries
+ * the detail previously shown in the standalone HealthPanel diagnostics.
+ */
+function buildBlockedTitle(result: RebalanceCheckResult): string {
+  const parts: string[] = [];
+  if (result.message) parts.push(result.message);
+  if (result.rawError) parts.push(`[${result.rawError}]`);
+  if (result.enrichment?.type === "cdp") {
+    const balance = result.enrichment.stabilityPoolBalance;
+    const formatted =
+      balance >= 1000 ? `${(balance / 1000).toFixed(1)}k` : balance.toFixed(2);
+    parts.push(
+      `Stability pool: ${formatted} ${result.enrichment.stabilityPoolTokenSymbol}`,
+    );
+  } else if (result.enrichment?.type === "reserve") {
+    const balance = result.enrichment.reserveCollateralBalance;
+    const formatted =
+      balance >= 1000 ? `${(balance / 1000).toFixed(1)}k` : balance.toFixed(2);
+    parts.push(
+      `Reserve collateral: ${formatted} ${result.enrichment.collateralTokenSymbol}`,
+    );
+  }
+  return parts.join(" — ");
+}
 
 function getPassiveStatus(
   pool: Pool,
@@ -72,6 +104,7 @@ export function RebalanceStatusValue({
   let statusText: string;
   let statusColor: string;
   let statusHref: string | null = null;
+  let statusTitle: string | undefined;
 
   if (isLoading) {
     statusText = "Checking…";
@@ -95,9 +128,19 @@ export function RebalanceStatusValue({
       network.explorerBaseUrl,
       strategyAddress,
     );
+  } else if (isHealthyNoOp(rebalanceCheck.rawError)) {
+    // The strategy refused the rebalance because the pool is already
+    // under its internal threshold — that's the healthy outcome, not an
+    // alarm. Fall back to the passive signal so we don't render red
+    // "Rebalance blocked" text at exactly-threshold deviation.
+    ({ text: statusText, color: statusColor } = getPassiveStatus(
+      pool,
+      network,
+    ));
   } else {
     statusText = "Rebalance blocked";
     statusColor = "text-red-400";
+    statusTitle = buildBlockedTitle(rebalanceCheck);
   }
 
   const strategyName = getName(strategyAddress);
@@ -139,12 +182,15 @@ export function RebalanceStatusValue({
           href={statusHref}
           target="_blank"
           rel="noopener noreferrer"
+          title={statusTitle}
           className={`font-medium ${statusColor} hover:underline`}
         >
           {statusText} ↗
         </a>
       ) : (
-        <span className={`font-medium ${statusColor}`}>{statusText}</span>
+        <span className={`font-medium ${statusColor}`} title={statusTitle}>
+          {statusText}
+        </span>
       )}
       <span
         className="text-xs text-slate-500"

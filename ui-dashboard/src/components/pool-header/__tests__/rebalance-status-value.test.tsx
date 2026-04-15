@@ -218,6 +218,90 @@ describe("RebalanceStatusValue", () => {
     expect(html).not.toContain("#writeProxyContract");
   });
 
+  it("surfaces block reason + raw error + enrichment in the tooltip when blocked", () => {
+    mockUseRebalanceCheck.mockReturnValue(
+      rebalanceState({
+        data: {
+          canRebalance: false,
+          message: "Stability pool has insufficient liquidity",
+          rawError: "CDPLS_STABILITY_POOL_BALANCE_TOO_LOW",
+          strategyType: "cdp",
+          enrichment: {
+            type: "cdp",
+            stabilityPoolBalance: 34500,
+            stabilityPoolTokenSymbol: "BOLD",
+            stabilityPoolTokenDecimals: 18,
+          },
+        },
+      }),
+    );
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={BASE_POOL}
+        network={NETWORK}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    // Content previously lived in the HealthPanel's Rebalance Details
+    // block — now folded into a native title so the header tells the
+    // full story on hover without a separate panel.
+    expect(html).toContain(
+      'title="Stability pool has insufficient liquidity — [CDPLS_STABILITY_POOL_BALANCE_TOO_LOW] — Stability pool: 34.5k BOLD"',
+    );
+  });
+
+  it('treats LS_POOL_NOT_REBALANCEABLE as a healthy no-op, not "Rebalance blocked"', () => {
+    // Strategy refused because deviation is still below its internal
+    // threshold — that's the expected healthy outcome (especially at
+    // exactly-threshold deviation under the `> threshold` CRITICAL rule).
+    // We should fall back to the passive status instead of firing a red
+    // "blocked" alarm.
+    mockUseRebalanceCheck.mockReturnValue(
+      rebalanceState({
+        data: {
+          canRebalance: false,
+          message: "Pool deviation is below the rebalance threshold",
+          rawError: "LS_POOL_NOT_REBALANCEABLE",
+          strategyType: "reserve",
+          enrichment: null,
+        },
+      }),
+    );
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={{ ...BASE_POOL, priceDifference: "5000" }} // exactly at threshold
+        network={NETWORK}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    // Health is WARN at ratio=1.0 under the new semantics → "Near threshold".
+    expect(html).toContain("Near threshold");
+    expect(html).not.toContain("Rebalance blocked");
+    expect(html).not.toContain("text-red-400");
+  });
+
+  it("also treats PriceDifferenceTooSmall (pool-side) as a healthy no-op", () => {
+    mockUseRebalanceCheck.mockReturnValue(
+      rebalanceState({
+        data: {
+          canRebalance: false,
+          message: "Pool deviation is below the rebalance threshold",
+          rawError: "PriceDifferenceTooSmall",
+          strategyType: "reserve",
+          enrichment: null,
+        },
+      }),
+    );
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={BASE_POOL}
+        network={NETWORK}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    expect(html).not.toContain("Rebalance blocked");
+  });
+
   it("renders 'last <relative>' in the merged subtitle when pool.lastRebalancedAt is present", () => {
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     mockUseGQL.mockReturnValueOnce({ data: undefined });

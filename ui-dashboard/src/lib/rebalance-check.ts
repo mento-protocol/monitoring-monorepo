@@ -193,6 +193,30 @@ export type StrategyEnrichment =
     };
 
 // ---------------------------------------------------------------------------
+// Healthy no-op detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Revert codes where the strategy refuses to rebalance BECAUSE the pool
+ * is healthy — not because anything is wrong. Callers should treat these
+ * as passive "no action needed" states rather than rendering a red
+ * "Rebalance blocked" alarm.
+ *
+ * Both the strategy-side (`LS_POOL_NOT_REBALANCEABLE`) and pool-side
+ * (`PriceDifferenceTooSmall`) codes map to "deviation is below the
+ * rebalance threshold" — the expected healthy outcome, especially at
+ * exactly-threshold deviation under the `> threshold` CRITICAL semantics.
+ */
+const HEALTHY_NO_OP_ERRORS: ReadonlySet<string> = new Set([
+  "LS_POOL_NOT_REBALANCEABLE",
+  "PriceDifferenceTooSmall",
+]);
+
+export function isHealthyNoOp(rawError: string | null | undefined): boolean {
+  return rawError != null && HEALTHY_NO_OP_ERRORS.has(rawError);
+}
+
+// ---------------------------------------------------------------------------
 // Explorer deep-link for rebalance()
 // ---------------------------------------------------------------------------
 
