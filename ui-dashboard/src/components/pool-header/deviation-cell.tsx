@@ -7,10 +7,10 @@ import { computeHealthStatus, isOracleFresh } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
 
 /**
- * "Deviation vs Threshold" cell for the pool header's metric row. Carries
- * the HealthBadge inline with its label and a compact progress bar sized
- * to the cell, sitting alongside the other metric cells instead of
- * stretching across the full width of the box.
+ * "Deviation" cell for the pool header's metric row. Carries the
+ * HealthBadge inline with its label and a compact progress bar sized to
+ * the cell, sitting alongside the other metric cells instead of stretching
+ * across the full width of the box.
  *
  * Returns null for cases where HealthPanel below still has a clearer
  * story to tell (virtual, pre-migration data, weekend pause).
@@ -37,7 +37,7 @@ export function DeviationCell({
   return (
     <div className="min-w-56">
       <dt className="flex items-center gap-2 text-slate-400">
-        Deviation vs Threshold
+        Deviation
         <HealthBadge status={status} />
       </dt>
       <dd className="mt-1">
