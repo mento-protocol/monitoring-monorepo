@@ -100,8 +100,9 @@ describe("computeHealthStatus", () => {
     ).toBe("WARN");
   });
 
-  it('returns "CRITICAL" when deviation >= threshold', () => {
-    // priceDifference = 5000, threshold = 5000 → ratio = 1.0 → CRITICAL
+  it('returns "WARN" (not "CRITICAL") when deviation is exactly at threshold', () => {
+    // priceDifference = 5000, threshold = 5000 → ratio = 1.0. Sitting right
+    // at the rebalance line stays WARN — CRITICAL triggers only above it.
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
@@ -110,7 +111,7 @@ describe("computeHealthStatus", () => {
         priceDifference: "5000",
         rebalanceThreshold: 5000,
       }),
-    ).toBe("CRITICAL");
+    ).toBe("WARN");
   });
 
   it('returns "CRITICAL" when deviation exceeds threshold', () => {
@@ -397,11 +398,13 @@ describe("worstStatus", () => {
 
 describe("computeEffectiveStatus", () => {
   it("returns the oracle health when limit is better", () => {
+    // priceDifference = 6000, threshold = 5000 → ratio = 1.2 → CRITICAL
+    // (needs to be strictly above threshold, not merely equal to it)
     expect(
       computeEffectiveStatus({
         source: "fpmm_factory",
         oracleTimestamp: FRESH_TS,
-        priceDifference: "5000",
+        priceDifference: "6000",
         rebalanceThreshold: 5000,
         limitPressure0: "0.1",
         limitPressure1: "0.1",

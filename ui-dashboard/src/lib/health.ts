@@ -73,10 +73,14 @@ export function isOracleFresh(
  * Compute the health status for a pool based on its oracle state.
  *
  * - "N/A":       VirtualPools (source includes "virtual") — no oracle
- * - "CRITICAL":  Oracle is stale (age > expiry) OR deviation >= threshold
+ * - "CRITICAL":  Oracle is stale (age > expiry) OR deviation > threshold
  * - "WEEKEND":   Oracle is stale because FX markets are closed (Fri 21:00 – Sun 23:00 UTC)
- * - "WARN":      Oracle is fresh but deviation >= 80% of threshold
+ * - "WARN":      Oracle is fresh and deviation >= 80% of threshold (incl. exactly 100%)
  * - "OK":        Oracle is fresh and deviation is below 80% of threshold
+ *
+ * The `>` (rather than `>=`) on the CRITICAL boundary gives the exact-
+ * threshold case a moment of wiggle room: sitting right at the rebalance
+ * line stays WARN instead of flipping straight to CRITICAL.
  *
  * Uses wall-clock time comparison rather than the indexed oracleOk flag,
  * which is only set at event time and never expires.
@@ -100,7 +104,7 @@ export function computeHealthStatus(
   const threshold =
     (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
   const devRatio = diff / threshold;
-  if (devRatio >= 1.0) return "CRITICAL";
+  if (devRatio > 1.0) return "CRITICAL";
   if (devRatio >= 0.8) return "WARN";
   return "OK";
 }
