@@ -3,6 +3,7 @@
 import type { Pool } from "@/lib/types";
 import { useHealthScore } from "@/hooks/use-health-score";
 import { formatBinaryHealthPct } from "@/lib/pool-health-score";
+import { InfoPopover } from "@/components/info-popover";
 
 const HEALTH_SCORE_EXPLAINER =
   "% of time the pool was healthy — oracle rate fresh AND price deviation within threshold.";
@@ -71,18 +72,14 @@ function formatObservedDuration(observedHours: number): string {
 /**
  * Info icon for the Health Score header label. Rendered in the cell's
  * `<dt>` so the explainer reads as "about this metric" rather than
- * hanging off the 7d value. Native-title tooltip matches the rest of the
- * codebase's hover-help pattern.
+ * hanging off the 7d value. Click / Enter / Space opens the explainer
+ * so keyboard users get the same access as mouse hover.
  */
 export function HealthScoreInfoIcon() {
   return (
-    <button
-      type="button"
-      aria-label={`About the Health Score. ${HEALTH_SCORE_EXPLAINER}`}
-      title={HEALTH_SCORE_EXPLAINER}
-      className="cursor-help text-xs text-slate-500 hover:text-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-500 focus:rounded"
-    >
-      ⓘ
-    </button>
+    <InfoPopover
+      label={`About the Health Score. ${HEALTH_SCORE_EXPLAINER}`}
+      content={HEALTH_SCORE_EXPLAINER}
+    />
   );
 }

@@ -190,6 +190,42 @@ describe("useHealthScore — non-virtual pools", () => {
     // and that the score is a finite fraction.
     expect(result.healthWindow.score).not.toBeNull();
     expect(Number.isFinite(result.healthWindow.observedHours)).toBe(true);
+    // HealthScoreValue's period-label degradation keys off `truncated` —
+    // without this flag the UI would still render the nominal "7d" copy
+    // even though the covered window is shorter. Lock the contract here.
+    expect(result.truncated).toBe(true);
+    expect(result.nominalWindowSeconds).toBe(7 * 24 * 3600);
+    // Observed span is bounded by the kept 1000 snapshots spaced 1 min
+    // apart ≈ 1000 minutes ≈ 16.67 hours, far below the 168h nominal.
+    expect(result.healthWindow.observedHours).toBeLessThan(24);
+    unmount();
+  });
+
+  it("reports truncated=false when snapshots fit under the HEALTH_WINDOW_LIMIT", () => {
+    // Symmetric lower-bound case so the contract is pinned on both sides.
+    const now = Math.floor(Date.now() / 60_000) * 60;
+    const snapshots: OracleSnapshot[] = [];
+    for (let i = 0; i < 10; i++) {
+      snapshots.push(
+        makeSnapshot({
+          id: `s-${i}`,
+          timestamp: String(now - i * 60),
+          healthBinaryValue: "1",
+        }),
+      );
+    }
+    useGQLMock.mockImplementation((query: string | null) => {
+      if (query === ORACLE_SNAPSHOTS_WINDOW) {
+        return { data: { OracleSnapshot: snapshots }, error: undefined };
+      }
+      if (query === ORACLE_SNAPSHOT_PREDECESSOR) {
+        return { data: { OracleSnapshot: [] }, error: undefined };
+      }
+      return { data: undefined, error: undefined };
+    });
+
+    const { result, unmount } = captureHookResult(BASE_POOL);
+    expect(result.truncated).toBe(false);
     unmount();
   });
 });

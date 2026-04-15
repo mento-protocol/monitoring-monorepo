@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { useAddressLabels } from "@/components/address-labels-provider";
+import { InfoPopover } from "@/components/info-popover";
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
 import { computeHealthStatus } from "@/lib/health";
 import type { RebalanceCheckResult } from "@/lib/rebalance-check";
@@ -254,21 +255,12 @@ function getPassiveStatus(
 }
 
 /**
- * Focusable ⓘ button beside "Rebalance blocked" so the decoded failure
- * reason is reachable via keyboard / screen reader / touch. Native-title
- * tooltip matches the rest of the codebase's hover-help pattern; the
- * `<button>` wrapper and `aria-label` make the detail accessible beyond
- * mouse-hover alone.
+ * Focusable ⓘ beside "Rebalance blocked" so the decoded failure reason
+ * is reachable via keyboard / screen reader / touch. Click / Enter /
+ * Space opens the explainer inline — no dead tab stop.
  */
 function RebalanceDiagnosticsInfoIcon({ title }: { title: string }) {
   return (
-    <button
-      type="button"
-      aria-label={`Rebalance diagnostics: ${title}`}
-      title={title}
-      className="cursor-help text-xs text-slate-500 hover:text-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-500 focus:rounded"
-    >
-      ⓘ
-    </button>
+    <InfoPopover label={`Rebalance diagnostics: ${title}`} content={title} />
   );
 }

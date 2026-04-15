@@ -52,6 +52,17 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
     assert.equal(computeHealthStatus(pool, NOW), "N/A");
   });
 
+  it("returns 'N/A' for any source string containing 'virtual' (substring match)", () => {
+    // Dashboard uses `source.includes("virtual")` — the indexer mirrors
+    // that so namespaced variants (e.g. "virtual_pool_bridge") stay
+    // N/A rather than flowing into the deviation code path.
+    const pool = makePool({
+      source: "virtual_pool_bridge_variant",
+      oracleOk: false,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "N/A");
+  });
+
   it("returns 'OK' when devRatio is below 0.8", () => {
     // 3000/5000 = 0.6
     const pool = makePool({ priceDifference: 3000n });
@@ -62,6 +73,18 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
     // 4500/5000 = 0.9
     const pool = makePool({ priceDifference: 4500n });
     assert.equal(computeHealthStatus(pool, NOW), "WARN");
+  });
+
+  it("returns 'WARN' at exactly the 0.8 WARN boundary", () => {
+    // 4000/5000 = 0.8 — inclusive lower bound of the WARN band.
+    const pool = makePool({ priceDifference: 4000n });
+    assert.equal(computeHealthStatus(pool, NOW), "WARN");
+  });
+
+  it("returns 'OK' just below the 0.8 WARN boundary", () => {
+    // 3999/5000 = 0.7998 — one bp under the band stays OK.
+    const pool = makePool({ priceDifference: 3999n });
+    assert.equal(computeHealthStatus(pool, NOW), "OK");
   });
 
   it("returns 'WARN' (not 'CRITICAL') when devRatio is exactly 1.0", () => {
