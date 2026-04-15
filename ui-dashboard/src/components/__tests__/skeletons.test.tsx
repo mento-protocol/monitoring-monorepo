@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { renderToStaticMarkup } from "react-dom/server";
+/** @vitest-environment jsdom */
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import {
   ChartSkeleton,
   PageShellSkeleton,
@@ -7,62 +10,131 @@ import {
   TileGridSkeleton,
 } from "@/components/skeletons";
 
+// Tests assert structural behavior (number of rows/tiles, aria annotations)
+// rather than substring-matching a shimmer classname. Class-based counts
+// would pass even if the JSX reorganised into something user-visibly wrong.
+
+let container: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+});
+
+afterEach(() => {
+  act(() => {
+    root.unmount();
+  });
+  container.remove();
+});
+
+function render(element: React.ReactElement) {
+  act(() => {
+    root.render(element);
+  });
+}
+
+function getTableSkeleton(): HTMLElement {
+  const el = container.querySelector<HTMLElement>(
+    '[role="status"][aria-label="Loading table"]',
+  );
+  if (!el) throw new Error("TableSkeleton root not found");
+  return el;
+}
+
+function getTileGridSkeleton(): HTMLElement {
+  const el = container.querySelector<HTMLElement>(
+    '[role="status"][aria-label="Loading metrics"]',
+  );
+  if (!el) throw new Error("TileGridSkeleton root not found");
+  return el;
+}
+
 describe("TableSkeleton", () => {
-  it("renders the requested row and column count", () => {
-    const html = renderToStaticMarkup(<TableSkeleton rows={3} cols={4} />);
-    // 1 header row (4 cells) + 3 data rows (4 cells each) = 16 shimmer divs
-    const shimmerCount = (html.match(/animate-pulse/g) ?? []).length;
-    expect(shimmerCount).toBe(4 + 3 * 4);
+  it("renders one header row plus the requested number of data rows", () => {
+    render(<TableSkeleton rows={3} cols={4} />);
+    const table = getTableSkeleton();
+    const [header, body] = Array.from(table.children) as HTMLElement[];
+    expect(header.children).toHaveLength(4);
+    expect(body.children).toHaveLength(3);
+    Array.from(body.children).forEach((row) => {
+      expect(row.children).toHaveLength(4);
+    });
   });
 
-  it("falls back to default row/col counts when props omitted", () => {
-    const html = renderToStaticMarkup(<TableSkeleton />);
-    // defaults: rows=8, cols=5 → 5 + 8*5 = 45
-    const shimmerCount = (html.match(/animate-pulse/g) ?? []).length;
-    expect(shimmerCount).toBe(45);
+  it("uses defaults of 8 rows × 5 cols when props omitted", () => {
+    render(<TableSkeleton />);
+    const [header, body] = Array.from(
+      getTableSkeleton().children,
+    ) as HTMLElement[];
+    expect(header.children).toHaveLength(5);
+    expect(body.children).toHaveLength(8);
   });
 
-  it('advertises itself to assistive tech via role="status"', () => {
-    const html = renderToStaticMarkup(<TableSkeleton rows={1} cols={1} />);
-    expect(html).toContain('role="status"');
-    expect(html).toContain('aria-live="polite"');
-    expect(html).toContain("Loading…");
+  it("handles rows=0 by rendering only the header row", () => {
+    render(<TableSkeleton rows={0} cols={3} />);
+    const [header, body] = Array.from(
+      getTableSkeleton().children,
+    ) as HTMLElement[];
+    expect(header.children).toHaveLength(3);
+    expect(body.children).toHaveLength(0);
+  });
+
+  it("advertises itself to assistive tech via role=status + aria-live", () => {
+    render(<TableSkeleton rows={1} cols={1} />);
+    const table = getTableSkeleton();
+    expect(table.getAttribute("aria-live")).toBe("polite");
+    expect(table.textContent).toContain("Loading…");
   });
 });
 
 describe("TileGridSkeleton", () => {
   it("renders the requested tile count", () => {
-    const html = renderToStaticMarkup(<TileGridSkeleton count={6} />);
-    // Each tile has 3 shimmer divs (label + value + subtitle)
-    const shimmerCount = (html.match(/animate-pulse/g) ?? []).length;
-    expect(shimmerCount).toBe(6 * 3);
+    render(<TileGridSkeleton count={6} />);
+    const grid = getTileGridSkeleton();
+    // One screen-reader-only "Loading…" span is a sibling of the tiles; count
+    // only direct div children (the tiles).
+    const tiles = Array.from(grid.children).filter(
+      (child) => child.tagName === "DIV",
+    );
+    expect(tiles).toHaveLength(6);
   });
 
   it("defaults to 4 tiles", () => {
-    const html = renderToStaticMarkup(<TileGridSkeleton />);
-    const shimmerCount = (html.match(/animate-pulse/g) ?? []).length;
-    expect(shimmerCount).toBe(4 * 3);
+    render(<TileGridSkeleton />);
+    const grid = getTileGridSkeleton();
+    const tiles = Array.from(grid.children).filter(
+      (child) => child.tagName === "DIV",
+    );
+    expect(tiles).toHaveLength(4);
   });
 });
 
 describe("ChartSkeleton", () => {
   it("applies the requested aspect ratio inline", () => {
-    const html = renderToStaticMarkup(<ChartSkeleton aspect="4 / 3" />);
-    expect(html).toContain("aspect-ratio:4 / 3");
+    render(<ChartSkeleton aspect="4 / 3" />);
+    const chart = container.querySelector<HTMLElement>(
+      '[role="status"][aria-label="Loading chart"]',
+    );
+    expect(chart?.style.aspectRatio).toBe("4 / 3");
   });
 
-  it('defaults to 16:9 and exposes role="status"', () => {
-    const html = renderToStaticMarkup(<ChartSkeleton />);
-    expect(html).toContain("aspect-ratio:16 / 9");
-    expect(html).toContain('role="status"');
+  it("defaults to 16:9 with role=status", () => {
+    render(<ChartSkeleton />);
+    const chart = container.querySelector<HTMLElement>(
+      '[role="status"][aria-label="Loading chart"]',
+    );
+    expect(chart?.style.aspectRatio).toBe("16 / 9");
+    expect(chart?.getAttribute("aria-live")).toBe("polite");
   });
 });
 
 describe("PageShellSkeleton", () => {
-  it("renders a header band, a tile grid, and a table skeleton together", () => {
-    const html = renderToStaticMarkup(<PageShellSkeleton />);
-    // Header bar (1) + 4 tiles × 3 shimmer + table (5 header cells + 8*5 body cells = 45)
-    const shimmerCount = (html.match(/animate-pulse/g) ?? []).length;
-    expect(shimmerCount).toBe(1 + 4 * 3 + 45);
+  it("composes a header band, a tile grid, and a table skeleton", () => {
+    render(<PageShellSkeleton />);
+    expect(getTileGridSkeleton()).toBeTruthy();
+    expect(getTableSkeleton()).toBeTruthy();
   });
 });

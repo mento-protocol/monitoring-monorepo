@@ -7,7 +7,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 // NetworkAwareLink reads useNetwork(); stub it so the boundary renders in a
 // plain-render test without mounting the full provider. Mutated per-test.
-const mockNetwork = { networkId: "celo-mainnet" as string };
+// Typed as the real provider shape (sans `network` object, which no consumer
+// in these boundaries needs) so a future refactor that starts reading
+// `network.id` or `setNetworkId` breaks this at compile time instead of
+// silently passing with a stale mock.
+import type { IndexerNetworkId } from "@/lib/networks";
+const mockNetwork: {
+  networkId: IndexerNetworkId;
+  setNetworkId: (id: IndexerNetworkId) => void;
+} = {
+  networkId: "celo-mainnet",
+  setNetworkId: () => {},
+};
 vi.mock("@/components/network-provider", () => ({
   useNetwork: () => mockNetwork,
 }));
