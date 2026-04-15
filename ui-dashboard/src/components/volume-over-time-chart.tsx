@@ -20,16 +20,21 @@ type SeriesPoint = { timestamp: number; volumeUSD: number };
 
 /**
  * Includes swap volume from every pool type (FPMM and virtual), matching the
- * Summary tile's volume totals. Virtual pools also emit hourly PoolSnapshot
- * rows with per-hour swapVolume0/1, so excluding them would silently undercount
+ * Summary tile's volume totals. Virtual pools also emit PoolDailySnapshot
+ * rows with per-day swapVolume0/1, so excluding them would silently undercount
  * protocol volume and desync the chart from its Summary-tile counterpart.
  *
- * When `window` is provided, snapshots are filtered to `[window.from, window.to)`
- * *before* bucketing. This keeps the chart's range totals consistent with the
- * Summary tile's rolling-window subtotals — the edge buckets may be partial
- * (e.g. 1W's leftmost bucket covers the last N hours of a UTC day instead of
- * the full 24h) but the sum over all buckets equals the sum of snapshots in
- * that exact rolling window.
+ * Input is the indexer's PoolDailySnapshot rollup (one row per pool per UTC
+ * day). Each row's `timestamp` is the start of its UTC-day bucket and its
+ * volume is the total for the full day.
+ *
+ * When `window` is provided only buckets whose timestamp falls strictly inside
+ * the half-open window `[window.from, window.to)` are included. Because
+ * `window.from` is an hour boundary (not midnight), the first UTC-day bucket
+ * is included only when it starts at or after `window.from`, which means a
+ * refresh at 10:00 UTC on day D shows the last 7 full days starting from day
+ * D-7 (midnight). The chart's headline total therefore matches the exact
+ * rolling-window period implied by the selected range tab.
  */
 export function buildDailyVolumeSeries(
   networkData: NetworkData[],
@@ -39,16 +44,17 @@ export function buildDailyVolumeSeries(
   let minSnapshotBucket = Infinity;
 
   for (const netData of networkData) {
-    // Only skip on top-level failure. `snapshotsAllError` may be set while
-    // `snapshotsAll` still carries preserved recent rows (fail-open path
-    // for mid-loop pagination failure) — use those rows, the caller shows
-    // a partial-data badge separately.
+    // Only skip on top-level failure. `snapshotsAllDailyError` may be set
+    // while `snapshotsAllDaily` still carries preserved recent rows (fail-open
+    // path for mid-loop pagination failure) — use those rows, the caller
+    // shows a partial-data badge separately.
     if (netData.error !== null) continue;
     const poolById = new Map(netData.pools.map((pool) => [pool.id, pool]));
-    for (const snapshot of netData.snapshotsAll) {
+    for (const snapshot of netData.snapshotsAllDaily) {
       const timestamp = Number(snapshot.timestamp);
-      if (window && (timestamp < window.from || timestamp >= window.to))
-        continue;
+      if (window) {
+        if (timestamp < window.from || timestamp >= window.to) continue;
+      }
       const pool = poolById.get(snapshot.poolId);
       const volume = getSnapshotVolumeInUsd(
         snapshot,
@@ -65,16 +71,20 @@ export function buildDailyVolumeSeries(
 
   if (!Number.isFinite(minSnapshotBucket)) return [];
 
+  // Use ceil so the emission range starts at the first full UTC day that begins
+  // at or after window.from — prevents a synthetic zero bar for any partial day
+  // whose bucket starts before window.from but was excluded by the strict filter.
   const startBucket = window
-    ? Math.floor(window.from / SECONDS_PER_DAY) * SECONDS_PER_DAY
+    ? Math.ceil(window.from / SECONDS_PER_DAY) * SECONDS_PER_DAY
     : minSnapshotBucket;
   const endRef = window?.to ?? Math.floor(Date.now() / 1000);
   const endBucket = Math.floor(endRef / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-  // When endRef lands exactly on a UTC-day boundary (e.g. the user loads at
-  // midnight UTC, or window.to = hourBucket(midnight)), the bucket at
-  // endBucket covers [endBucket, endBucket + SECONDS_PER_DAY) — entirely
-  // outside the half-open filter range [window.from, window.to). Skip it or
-  // we'd emit a synthetic zero bar at the right edge.
+  // When window.to lands exactly on a UTC-day boundary the bucket at endBucket
+  // starts at window.to and is excluded by the strict filter (timestamp >=
+  // window.to), so we clamp the loop to avoid an empty bar there. When window.to
+  // is mid-day (the production case from hourBucket(Date.now())) endRef >
+  // endBucket and we emit today's bucket — PoolDailySnapshot is incremental, so
+  // today's row contains only swaps seen so far today, which is valid in-window data.
   const lastBucket =
     endRef > endBucket ? endBucket : endBucket - SECONDS_PER_DAY;
 

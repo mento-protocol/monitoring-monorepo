@@ -246,6 +246,48 @@ export const POOL_SNAPSHOTS_CHART = `
   }
 `;
 
+// Daily rollup of PoolSnapshot — one row per pool per UTC day. At ~365 rows per
+// pool per year the full history fits in Hasura's 1000-row cap for ~2.7 years.
+// Older pools lose oldest rows first — fetching newest-first means the chart
+// always shows the most recent history and reverses client-side to chronological.
+export const POOL_DAILY_SNAPSHOTS_CHART = `
+  query PoolDailySnapshotsChart($poolId: String!) {
+    PoolDailySnapshot(
+      where: { poolId: { _eq: $poolId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+    ) {
+      id poolId timestamp
+      reserves0 reserves1
+      swapCount swapVolume0 swapVolume1
+      rebalanceCount cumulativeSwapCount
+      cumulativeVolume0 cumulativeVolume1
+      blockNumber
+    }
+  }
+`;
+
+// Daily rollup across all pools on a chain — used for the homepage volume-over-time
+// chart. Still paginated (across all pools the row count exceeds 1000 after a few
+// years), but pagination cost is ~20× lower than the hourly cross-pool query.
+export const POOL_DAILY_SNAPSHOTS_ALL = `
+  query PoolDailySnapshotsAll($poolIds: [String!]!, $limit: Int!, $offset: Int!) {
+    PoolDailySnapshot(
+      where: { poolId: { _in: $poolIds } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+      offset: $offset
+    ) {
+      poolId
+      timestamp
+      reserves0
+      reserves1
+      swapCount
+      swapVolume0
+      swapVolume1
+    }
+  }
+`;
+
 export const TRADING_LIMITS = `
   query TradingLimits($poolId: String!) {
     TradingLimit(where: { poolId: { _eq: $poolId } }) {

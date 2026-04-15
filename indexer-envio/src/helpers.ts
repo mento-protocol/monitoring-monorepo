@@ -58,11 +58,20 @@ export const extractAddressFromPoolId = (poolId: string): string => {
 export const asBigInt = (value: number): bigint => BigInt(value);
 
 export const SECONDS_PER_HOUR = 3600n;
+export const SECONDS_PER_DAY = 86400n;
 
 /** Round a unix timestamp down to the start of its hour. */
 export const hourBucket = (timestamp: bigint): bigint =>
   (timestamp / SECONDS_PER_HOUR) * SECONDS_PER_HOUR;
 
+/** Round a unix timestamp down to the start of its UTC day. */
+export const dayBucket = (timestamp: bigint): bigint =>
+  (timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+
 /** Deterministic snapshot ID: "{poolId}-{hourTimestamp}" */
 export const snapshotId = (poolId: string, hourTs: bigint): string =>
   `${poolId}-${hourTs}`;
+
+/** Deterministic daily-snapshot ID: "{poolId}-{dayTimestamp}" */
+export const dailySnapshotId = (poolId: string, dayTs: bigint): string =>
+  `${poolId}-${dayTs}`;

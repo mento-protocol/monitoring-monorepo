@@ -89,6 +89,13 @@ function GlobalContent() {
   const anySnapshotsAllTruncated = networkData.some(
     (netData) => netData.snapshotsAllTruncated && netData.error === null,
   );
+  const anySnapshotsAllDailyError = networkData.some(
+    (netData) =>
+      netData.snapshotsAllDailyError !== null && netData.error === null,
+  );
+  const anySnapshotsAllDailyTruncated = networkData.some(
+    (netData) => netData.snapshotsAllDailyTruncated && netData.error === null,
+  );
   const anyLpError = networkData.some(
     (netData) => netData.lpError !== null && netData.error === null,
   );
@@ -316,7 +323,9 @@ function GlobalContent() {
           networkData={networkData}
           isLoading={isLoading}
           hasError={anyNetworkError}
-          hasSnapshotError={anySnapshotsAllError || anySnapshotsAllTruncated}
+          hasSnapshotError={
+            anySnapshotsAllDailyError || anySnapshotsAllDailyTruncated
+          }
         />
       </div>
 

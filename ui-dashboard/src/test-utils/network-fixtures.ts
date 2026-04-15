@@ -100,6 +100,10 @@ export function makeNetworkData(
   // snapshots30d still work thanks to the fallback here.
   const snapshots30d = overrides.snapshots30d ?? [];
   const snapshotsAll = overrides.snapshotsAll ?? snapshots30d;
+  // snapshotsAllDaily feeds the VolumeOverTimeChart. Default to the same
+  // rows as snapshotsAll so existing volume-chart tests keep working; callers
+  // that need to distinguish the two can pass snapshotsAllDaily explicitly.
+  const snapshotsAllDaily = overrides.snapshotsAllDaily ?? snapshotsAll;
   const base: NetworkData = {
     network: BASE_NETWORK,
     snapshotWindows: buildSnapshotWindows(Date.now()),
@@ -109,6 +113,8 @@ export function makeNetworkData(
     snapshots30d,
     snapshotsAll,
     snapshotsAllTruncated: false,
+    snapshotsAllDaily,
+    snapshotsAllDailyTruncated: false,
     fees: null,
     uniqueLpAddresses: [],
     rates: new Map(),
@@ -118,6 +124,7 @@ export function makeNetworkData(
     snapshots7dError: null,
     snapshots30dError: null,
     snapshotsAllError: null,
+    snapshotsAllDailyError: null,
     lpError: null,
   };
   return { ...base, ...overrides };

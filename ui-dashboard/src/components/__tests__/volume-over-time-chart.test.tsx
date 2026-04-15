@@ -91,26 +91,28 @@ describe("buildDailyVolumeSeries", () => {
     expect(series[2]).toMatchObject({ timestamp: day2, volumeUSD: 3 });
   });
 
-  it("filters snapshots to the provided window before bucketing — partial edge buckets included", () => {
-    // Three snapshots: one inside the window, one before, one at the window
-    // boundary (exclusive). Bucketed totals should reflect only the in-window
-    // snapshot; the leftmost bucket appears even though it only contains the
-    // in-window portion of that UTC day (partial edge bar semantics).
-    const dayStart = dayAlignedNow() - 3 * SECONDS_PER_DAY;
-    const windowFrom = dayStart + 6 * 3600; // 6h into the day
-    const windowTo = dayStart + 2 * SECONDS_PER_DAY + 6 * 3600;
+  it("excludes buckets that start before window.from even if they partially overlap", () => {
+    // Strict half-open filter [window.from, window.to):
+    //   - Day 0 (bucket timestamp < window.from): EXCLUDED — strict filter.
+    //   - Day 1 (timestamp >= window.from AND < window.to): INCLUDED.
+    //   - Day 2 (bucket timestamp == window.to): EXCLUDED — half-open upper bound.
+    // This keeps the 1W/1M headline accurate: no extra-day volume from a partial
+    // first day is counted in a range labeled as 7 or 30 days.
+    const day0 = dayAlignedNow() - 3 * SECONDS_PER_DAY;
+    const day1 = day0 + SECONDS_PER_DAY;
+    const day2 = day0 + 2 * SECONDS_PER_DAY;
+    const windowFrom = day0 + 6 * 3600; // window starts 6h into day 0 → day0 excluded
+    const windowTo = day2; // upper bound lands on day 2's boundary → day2 excluded
 
     const series = buildDailyVolumeSeries(
       makeVolumeNetworkData([
-        { timestamp: dayStart + 2 * 3600, swapVolume0: "1000000000000000000" }, // before window → excluded
-        { timestamp: dayStart + 10 * 3600, swapVolume0: "2000000000000000000" }, // inside → $2
-        { timestamp: windowTo, swapVolume0: "4000000000000000000" }, // at upper bound (exclusive) → excluded
+        { timestamp: day0, swapVolume0: "1000000000000000000" }, // starts before window.from → excluded
+        { timestamp: day1, swapVolume0: "2000000000000000000" }, // fully inside → $2
+        { timestamp: day2, swapVolume0: "4000000000000000000" }, // bucket starts at windowTo → excluded
       ]),
       { from: windowFrom, to: windowTo },
     );
 
-    // 3 buckets emitted (window spans parts of 3 UTC days); only the middle
-    // one has volume since the other two snapshots were filtered out.
     const total = series.reduce((s, p) => s + p.volumeUSD, 0);
     expect(total).toBe(2);
   });
@@ -157,6 +159,37 @@ describe("buildDailyVolumeSeries", () => {
     // And the totals reflect only in-window snapshots.
     const total = series.reduce((s, p) => s + p.volumeUSD, 0);
     expect(total).toBe(3);
+  });
+
+  it("includes today's partial bucket when window.to is mid-day (production case)", () => {
+    // Production windows come from hourBucket(Date.now()), so window.to is
+    // always a mid-day hour boundary, not midnight. PoolDailySnapshot is an
+    // incremental accumulator: today's row only contains swaps seen so far
+    // today (not a precomputed full-day total), so it should contribute its
+    // partial volume to the 1W/1M headline.
+    const today = dayAlignedNow();
+    const from = today - 2 * SECONDS_PER_DAY;
+    const to = today + 6 * 3600; // window.to is 06:00 UTC today (non-midnight)
+
+    const series = buildDailyVolumeSeries(
+      makeVolumeNetworkData([
+        { timestamp: from, swapVolume0: "1000000000000000000" }, // day-2: $1
+        {
+          timestamp: from + SECONDS_PER_DAY,
+          swapVolume0: "2000000000000000000",
+        }, // day-1: $2
+        { timestamp: today, swapVolume0: "3000000000000000000" }, // today (partial): $3
+      ]),
+      { from, to },
+    );
+
+    // today's bucket must appear with its in-window (partial) data
+    expect(series.map((p) => p.timestamp)).toEqual([
+      today - 2 * SECONDS_PER_DAY,
+      today - 1 * SECONDS_PER_DAY,
+      today,
+    ]);
+    expect(series.reduce((s, p) => s + p.volumeUSD, 0)).toBe(6); // $1 + $2 + $3
   });
 });
 
@@ -266,7 +299,9 @@ describe("VolumeOverTimeChart render", () => {
 
   it("shows the headline as a formatted USD total covering the default (30d) range", () => {
     const today = dayAlignedNow();
-    // Build two snapshots within the last 30 days that sum to $3
+    // Both snapshots are within the default 30d window. Today's bucket is
+    // included because PoolDailySnapshot is incremental (partial today data
+    // is valid in-window volume, not a precomputed full-day total).
     const html = renderChart({
       networkData: makeVolumeNetworkData([
         {
