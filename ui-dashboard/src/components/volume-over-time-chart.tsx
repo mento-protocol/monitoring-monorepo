@@ -28,14 +28,13 @@ type SeriesPoint = { timestamp: number; volumeUSD: number };
  * day). Each row's `timestamp` is the start of its UTC-day bucket and its
  * volume is the total for the full day.
  *
- * When `window` is provided, each daily bucket is included if it *overlaps*
- * the window — i.e. the bucket at `t` covers `[t, t + SECONDS_PER_DAY)` and
- * we keep it as long as that interval intersects `[window.from, window.to)`.
- * Because buckets are full UTC days, the chart's range totals can exceed the
- * Summary tile's exact rolling-window subtotals by up to one day at each
- * edge (≤ ~14% at 1W, ≤ ~3% at 1M). This trades the old exact-rolling-window
- * invariant for a chart that doesn't silently drop the first partial day;
- * the Summary tile continues to use hourly data for its exact window totals.
+ * When `window` is provided only buckets whose timestamp falls strictly inside
+ * the half-open window `[window.from, window.to)` are included. Because
+ * `window.from` is an hour boundary (not midnight), the first UTC-day bucket
+ * is included only when it starts at or after `window.from`, which means a
+ * refresh at 10:00 UTC on day D shows the last 7 full days starting from day
+ * D-7 (midnight). The chart's headline total therefore matches the exact
+ * rolling-window period implied by the selected range tab.
  */
 export function buildDailyVolumeSeries(
   networkData: NetworkData[],
@@ -53,13 +52,8 @@ export function buildDailyVolumeSeries(
     const poolById = new Map(netData.pools.map((pool) => [pool.id, pool]));
     for (const snapshot of netData.snapshotsAllDaily) {
       const timestamp = Number(snapshot.timestamp);
-      // Each PoolDailySnapshot covers [timestamp, timestamp + SECONDS_PER_DAY).
-      // Include the row when that interval overlaps the window at all — this
-      // keeps the leftmost partial day (would start before window.from) and
-      // any open-ended current day (timestamp < window.to) in the series.
       if (window) {
-        const dayEnd = timestamp + SECONDS_PER_DAY;
-        if (dayEnd <= window.from || timestamp >= window.to) continue;
+        if (timestamp < window.from || timestamp >= window.to) continue;
       }
       const pool = poolById.get(snapshot.poolId);
       const volume = getSnapshotVolumeInUsd(
@@ -77,16 +71,17 @@ export function buildDailyVolumeSeries(
 
   if (!Number.isFinite(minSnapshotBucket)) return [];
 
+  // Use ceil so the emission range starts at the first full UTC day that begins
+  // at or after window.from — prevents a synthetic zero bar for any partial day
+  // whose bucket starts before window.from but was excluded by the strict filter.
   const startBucket = window
-    ? Math.floor(window.from / SECONDS_PER_DAY) * SECONDS_PER_DAY
+    ? Math.ceil(window.from / SECONDS_PER_DAY) * SECONDS_PER_DAY
     : minSnapshotBucket;
   const endRef = window?.to ?? Math.floor(Date.now() / 1000);
   const endBucket = Math.floor(endRef / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-  // With overlap-inclusive filtering above, a window.to that lands exactly on
-  // a UTC-day boundary means `endBucket`'s interval [endBucket, endBucket + 1d)
-  // starts at window.to and therefore does NOT overlap the half-open window —
-  // so no matching rows land in that bucket. Clamp the emission range so we
-  // don't stamp an empty synthetic bar at the right edge in that case.
+  // When window.to lands exactly on a UTC-day boundary, the bucket at endBucket
+  // starts at window.to and is excluded by the strict filter above (timestamp >=
+  // window.to). Clamp the emission loop so we don't stamp an empty bar there.
   const lastBucket =
     endRef > endBucket ? endBucket : endBucket - SECONDS_PER_DAY;
 

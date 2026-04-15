@@ -34,11 +34,14 @@ type GeneratedModule = {
     MockDb: { createMockDb: () => MockDb };
     FPMMFactory: { FPMMDeployed: EventProcessor };
     FPMM: { Swap: EventProcessor; UpdateReserves: EventProcessor };
+    VirtualPoolFactory: { VirtualPoolDeployed: EventProcessor };
+    VirtualPool: { Swap: EventProcessor; UpdateReserves: EventProcessor };
   };
 };
 
 const { TestHelpers } = generated as unknown as GeneratedModule;
-const { MockDb, FPMMFactory, FPMM } = TestHelpers;
+const { MockDb, FPMMFactory, FPMM, VirtualPoolFactory, VirtualPool } =
+  TestHelpers;
 
 type SnapshotLike = {
   id: string;
@@ -253,6 +256,80 @@ describe("PoolDailySnapshot rollup", () => {
     assert.ok(daily, "daily PoolDailySnapshot also written");
     assert.equal(daily!.swapCount, 1);
     assert.equal(daily!.swapVolume0, 2_000_000_000_000_000_000n);
+  });
+
+  it("VirtualPool.Swap writes to PoolDailySnapshot (non-FPMM writer path)", async () => {
+    // VirtualPool events share upsertSnapshot() → upsertDailySnapshot() via the
+    // same shared handler as FPMM. This test ensures the rollup isn't accidentally
+    // gated on a FPMM-specific branch.
+    const POOL_ADDR = "0x00000000000000000000000000000000000000f3";
+    const TS = 1_737_100_800; // 2025-01-17 08:00:00 UTC
+
+    let mockDb = MockDb.createMockDb();
+
+    // Deploy VirtualPool
+    const deployEvent = VirtualPoolFactory.VirtualPoolDeployed.createMockEvent({
+      pool: POOL_ADDR,
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 0,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 400, timestamp: TS - 10 },
+      },
+    });
+    mockDb = await VirtualPoolFactory.VirtualPoolDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    // UpdateReserves precedes Swap (mirrors on-chain tx ordering)
+    const updateEvent = VirtualPool.UpdateReserves.createMockEvent({
+      reserve0: 1_000_000_000_000_000_000_000n,
+      reserve1: 1_000_000_000_000_000_000_000n,
+      blockTimestamp: BigInt(TS),
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 1,
+        srcAddress: POOL_ADDR,
+        block: { number: 401, timestamp: TS },
+      },
+    });
+    mockDb = await VirtualPool.UpdateReserves.processEvent({
+      event: updateEvent,
+      mockDb,
+    });
+
+    // Fire VirtualPool.Swap
+    const swapEvent = VirtualPool.Swap.createMockEvent({
+      sender: "0x0000000000000000000000000000000000000011",
+      to: "0x0000000000000000000000000000000000000022",
+      amount0In: 5_000_000_000_000_000_000n,
+      amount1In: 0n,
+      amount0Out: 0n,
+      amount1Out: 9_000_000_000_000_000_000n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 2,
+        srcAddress: POOL_ADDR,
+        block: { number: 401, timestamp: TS },
+      },
+    });
+    mockDb = await VirtualPool.Swap.processEvent({ event: swapEvent, mockDb });
+
+    const dayTs = dayBucket(BigInt(TS));
+    const dailyId = dailySnapshotId(pid(POOL_ADDR), dayTs);
+    const daily = mockDb.entities.PoolDailySnapshot.get(dailyId) as
+      | SnapshotLike
+      | undefined;
+    assert.ok(daily, "PoolDailySnapshot must exist after VirtualPool.Swap");
+    assert.equal(daily!.swapCount, 1, "swap accumulated from VirtualPool path");
+    assert.equal(
+      daily!.swapVolume0,
+      5_000_000_000_000_000_000n,
+      "swapVolume0 correct",
+    );
   });
 });
 

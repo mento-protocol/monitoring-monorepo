@@ -222,14 +222,14 @@ export const POOL_SNAPSHOTS_CHART = `
 `;
 
 // Daily rollup of PoolSnapshot — one row per pool per UTC day. At ~365 rows per
-// pool per year, the full history of any single pool fits in one Hasura page
-// for years (the hosted endpoint silently caps every query at 1000 rows), so
-// this query does not need pagination.
+// pool per year the full history fits in Hasura's 1000-row cap for ~2.7 years.
+// Older pools lose oldest rows first — fetching newest-first means the chart
+// always shows the most recent history and reverses client-side to chronological.
 export const POOL_DAILY_SNAPSHOTS_CHART = `
   query PoolDailySnapshotsChart($poolId: String!) {
     PoolDailySnapshot(
       where: { poolId: { _eq: $poolId } }
-      order_by: { timestamp: asc }
+      order_by: [{ timestamp: desc }, { id: desc }]
     ) {
       id poolId timestamp
       reserves0 reserves1

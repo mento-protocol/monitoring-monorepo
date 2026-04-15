@@ -91,22 +91,22 @@ describe("buildDailyVolumeSeries", () => {
     expect(series[2]).toMatchObject({ timestamp: day2, volumeUSD: 3 });
   });
 
-  it("includes daily buckets whose UTC day overlaps the window at either edge", () => {
-    // Daily rollup: each row's `timestamp` is a UTC-day bucket and its volume
-    // covers the whole 24h. A row is included when its bucket interval
-    // [t, t+86400) overlaps [window.from, window.to). That means:
-    //   - Day 0 (bucket starts before window.from): INCLUDED — dayEnd > window.from.
-    //   - Day 1 (fully inside): INCLUDED.
-    //   - Day 2 (bucket starts at window.to): EXCLUDED — half-open upper bound.
+  it("excludes buckets that start before window.from even if they partially overlap", () => {
+    // Strict half-open filter [window.from, window.to):
+    //   - Day 0 (bucket timestamp < window.from): EXCLUDED — strict filter.
+    //   - Day 1 (timestamp >= window.from AND < window.to): INCLUDED.
+    //   - Day 2 (bucket timestamp == window.to): EXCLUDED — half-open upper bound.
+    // This keeps the 1W/1M headline accurate: no extra-day volume from a partial
+    // first day is counted in a range labeled as 7 or 30 days.
     const day0 = dayAlignedNow() - 3 * SECONDS_PER_DAY;
     const day1 = day0 + SECONDS_PER_DAY;
     const day2 = day0 + 2 * SECONDS_PER_DAY;
-    const windowFrom = day0 + 6 * 3600; // window starts 6h into day 0
-    const windowTo = day2; // upper bound lands on day 2's boundary
+    const windowFrom = day0 + 6 * 3600; // window starts 6h into day 0 → day0 excluded
+    const windowTo = day2; // upper bound lands on day 2's boundary → day2 excluded
 
     const series = buildDailyVolumeSeries(
       makeVolumeNetworkData([
-        { timestamp: day0, swapVolume0: "1000000000000000000" }, // overlaps at left edge → $1
+        { timestamp: day0, swapVolume0: "1000000000000000000" }, // starts before window.from → excluded
         { timestamp: day1, swapVolume0: "2000000000000000000" }, // fully inside → $2
         { timestamp: day2, swapVolume0: "4000000000000000000" }, // bucket starts at windowTo → excluded
       ]),
@@ -114,7 +114,7 @@ describe("buildDailyVolumeSeries", () => {
     );
 
     const total = series.reduce((s, p) => s + p.volumeUSD, 0);
-    expect(total).toBe(3);
+    expect(total).toBe(2);
   });
 
   it("returns empty when no snapshots fall inside the window", () => {

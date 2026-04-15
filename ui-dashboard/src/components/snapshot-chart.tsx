@@ -31,12 +31,15 @@ export function SnapshotChart({
 }: SnapshotChartProps) {
   if (snapshots.length === 0) return null;
 
-  const days = snapshots.map((s) =>
+  // Query returns desc (newest-first) to preserve recent rows when the 1000-row
+  // cap truncates old history. Reverse here so Plotly receives chronological order.
+  const sorted = [...snapshots].reverse();
+  const days = sorted.map((s) =>
     new Date(Number(s.timestamp) * 1000).toISOString().slice(0, 10),
   );
-  const vol0 = snapshots.map((s) => parseWei(s.swapVolume0));
-  const vol1 = snapshots.map((s) => parseWei(s.swapVolume1));
-  const cumSwaps = snapshots.map((s) => s.cumulativeSwapCount);
+  const vol0 = sorted.map((s) => parseWei(s.swapVolume0));
+  const vol1 = sorted.map((s) => parseWei(s.swapVolume1));
+  const cumSwaps = sorted.map((s) => s.cumulativeSwapCount);
 
   const volumeTrace0 = {
     x: days,
