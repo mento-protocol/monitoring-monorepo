@@ -497,6 +497,107 @@ describe("fetchNetworkData — snapshot pagination", () => {
 });
 
 // ---------------------------------------------------------------------------
+// fetchNetworkData — daily snapshot pagination
+// ---------------------------------------------------------------------------
+
+describe("fetchNetworkData — daily snapshot pagination", () => {
+  const makeDaily = (timestamp: number) => ({
+    poolId: "pool-daily",
+    timestamp: String(timestamp),
+    reserves0: "0",
+    reserves1: "0",
+    swapCount: 1,
+    swapVolume0: "1000000000000000000",
+    swapVolume1: "2000000000000000000",
+  });
+
+  it("populates snapshotsAllDaily on success, leaving error null and truncated false", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    mockRequest((query) => {
+      if (query.includes("PoolDailySnapshot"))
+        return { PoolDailySnapshot: [makeDaily(now - 86400)] };
+      if (query.includes("PoolSnapshot")) return { PoolSnapshot: [] };
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [makePool("pool-daily")] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: now - 86400, to: now },
+      w7d: { from: now - 7 * 86400, to: now },
+      w30d: { from: now - 30 * 86400, to: now },
+    });
+
+    expect(result.snapshotsAllDailyError).toBeNull();
+    expect(result.snapshotsAllDailyTruncated).toBe(false);
+    expect(result.snapshotsAllDaily).toHaveLength(1);
+  });
+
+  it("sets snapshotsAllDailyError and returns empty rows on first-page failure", async () => {
+    (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
+      .mockReset()
+      .mockImplementation((query: string) => {
+        if (query.includes("PoolDailySnapshot"))
+          return Promise.reject(new Error("daily snapshot timeout"));
+        if (query.includes("PoolSnapshot"))
+          return Promise.resolve({ PoolSnapshot: [] });
+        if (query.includes("ProtocolFeeTransfer"))
+          return Promise.resolve({ ProtocolFeeTransfer: [] });
+        if (query.includes("LiquidityPosition"))
+          return Promise.resolve({ LiquidityPosition: [] });
+        if (query.includes("Pool"))
+          return Promise.resolve({ Pool: [makePool("pool-daily-err")] });
+        return Promise.resolve({});
+      });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.snapshotsAllDailyError).not.toBeNull();
+    expect(result.snapshotsAllDaily).toHaveLength(0);
+    expect(result.snapshotsAllDailyTruncated).toBe(false);
+  });
+
+  it("flags snapshotsAllDailyTruncated and preserves rows on overflow", async () => {
+    // Every page returns 1000 unique rows → loop hits MAX_PAGES cap.
+    let rowCursor = 0;
+    mockRequest((query) => {
+      if (query.includes("PoolDailySnapshot")) {
+        const batch = Array.from({ length: 1000 }, () => {
+          const ts = Math.floor(Date.now() / 1000) - rowCursor * 86400;
+          rowCursor++;
+          return makeDaily(ts);
+        });
+        return { PoolDailySnapshot: batch };
+      }
+      if (query.includes("PoolSnapshot")) return { PoolSnapshot: [] };
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool"))
+        return { Pool: [makePool("pool-daily-overflow")] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    expect(result.snapshotsAllDailyError).toBeNull();
+    expect(result.snapshotsAllDailyTruncated).toBe(true);
+    // Rows from all MAX_PAGES pages are preserved.
+    expect(result.snapshotsAllDaily.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // fetchNetworkData — pools query failure
 // ---------------------------------------------------------------------------
 
