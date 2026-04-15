@@ -106,14 +106,26 @@ const emptyNetworkData = (
  *
  * Failure modes, all designed to fail open rather than blank the dashboard:
  * - Safety cap `SNAPSHOT_MAX_PAGES` reached → return accumulated rows with
- *   `truncated: true`. Since rows are ordered newest-first, the missing rows
- *   are the oldest ones, so 24h/7d/30d windows stay correct.
- * - Mid-loop request error AFTER some pages succeeded → same behavior: keep
- *   what we have, flag truncation. A transient network glitch shouldn't
- *   discard already-fetched recent data.
+ *   `truncated: true, error: null`. Since rows are ordered newest-first, the
+ *   missing rows are the oldest ones, so 24h/7d/30d windows stay correct.
+ *   No `error` because this is an intentional safety cap, not a fault.
+ * - Mid-loop request error AFTER some pages succeeded → keep what we have,
+ *   flag `truncated: true` AND set `error` so error-aware consumers (e.g.
+ *   the Summary Volume tile) partial-badge correctly. Without the error
+ *   signal the degraded state would be invisible to anything that only
+ *   checks the error channel.
  * - First-page failure → rethrow. No rows at all means there's nothing to
  *   salvage; the caller surfaces it as `snapshotsAllError` (empty state with
  *   explicit error message, not a misleading `$0` dashboard).
+ *
+ * Dedup: offset pagination on an append-only table isn't stable under
+ * concurrent inserts — a new snapshot at position 0 shifts everything one
+ * row right, so the next page's offset overlaps with the previous page's
+ * tail. We dedup by `(poolId, timestamp)` (which uniquely identifies a
+ * snapshot per the indexer's hourBucket upsert id) before pushing into the
+ * result. This mitigates duplicates; omissions are still theoretically
+ * possible but rare and self-heal on the next refresh. A proper fix is
+ * keyset pagination — tracked as a follow-up.
  */
 const SNAPSHOT_PAGE_SIZE = 1000;
 const SNAPSHOT_MAX_PAGES = 100;
@@ -121,12 +133,17 @@ const SNAPSHOT_MAX_PAGES = 100;
 type SnapshotPageResult = {
   rows: PoolSnapshotWindow[];
   truncated: boolean;
+  error: Error | null;
 };
+
+const snapshotDedupKey = (s: PoolSnapshotWindow) =>
+  `${s.poolId}-${s.timestamp}`;
 
 async function fetchAllSnapshotPages(
   client: GraphQLClient,
   poolIds: string[],
 ): Promise<SnapshotPageResult> {
+  const seen = new Set<string>();
   const rows: PoolSnapshotWindow[] = [];
   for (let page = 0; page < SNAPSHOT_MAX_PAGES; page++) {
     let batch: PoolSnapshotWindow[];
@@ -142,13 +159,25 @@ async function fetchAllSnapshotPages(
     } catch (err) {
       // First-page failure is a hard error — nothing to degrade to.
       if (rows.length === 0) throw err;
-      // Otherwise preserve the pages we did fetch; surface as "partial".
-      return { rows, truncated: true };
+      // Otherwise preserve the pages we did fetch; surface error AND flag
+      // truncation so consumers know the data is partial.
+      return {
+        rows,
+        truncated: true,
+        error: err instanceof Error ? err : new Error(String(err)),
+      };
     }
-    rows.push(...batch);
-    if (batch.length < SNAPSHOT_PAGE_SIZE) return { rows, truncated: false };
+    for (const row of batch) {
+      const key = snapshotDedupKey(row);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+    }
+    if (batch.length < SNAPSHOT_PAGE_SIZE) {
+      return { rows, truncated: false, error: null };
+    }
   }
-  return { rows, truncated: true };
+  return { rows, truncated: true, error: null };
 }
 
 /** @internal Exported for testing only. */
@@ -187,7 +216,11 @@ export async function fetchNetworkData(
     ),
     shouldQuery
       ? fetchAllSnapshotPages(client, poolIds)
-      : Promise.resolve<SnapshotPageResult>({ rows: [], truncated: false }),
+      : Promise.resolve<SnapshotPageResult>({
+          rows: [],
+          truncated: false,
+          error: null,
+        }),
     fpmmPoolIds.length > 0
       ? client.request<{
           LiquidityPosition: { address: string }[];
@@ -209,8 +242,10 @@ export async function fetchNetworkData(
 
   // Single source of truth: the paginated all-history fetch. Window-specific
   // arrays are derived in-memory — no separate requests, no server-side cap.
-  // If pagination truncated (hit MAX_PAGES), we keep the most-recent rows we
-  // did fetch: 24h/7d/30d derive correctly, "All" is flagged as partial.
+  // If pagination truncated (hit MAX_PAGES or mid-loop fetch failure), we keep
+  // the most-recent rows we did fetch: 24h/7d/30d derive correctly from those,
+  // and "All" is flagged as partial. Mid-loop failure also surfaces via
+  // `snapshotsAllError` so error-aware consumers (Summary tile) partial-badge.
   const snapshotsAll =
     snapshotsAllResult.status === "fulfilled"
       ? snapshotsAllResult.value.rows
@@ -222,7 +257,7 @@ export async function fetchNetworkData(
   const snapshotsAllError =
     snapshotsAllResult.status === "rejected"
       ? toError(snapshotsAllResult.reason)
-      : null;
+      : (snapshotsAllResult.value.error ?? null);
 
   const snapshots = filterSnapshotsToWindow(snapshotsAll, windows.w24h);
   const snapshots7d = filterSnapshotsToWindow(snapshotsAll, windows.w7d);

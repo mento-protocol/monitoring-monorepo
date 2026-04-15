@@ -244,23 +244,25 @@ describe("fetchNetworkData — snapshot pagination", () => {
   });
 
   it("stops paginating once a page returns fewer than the page size", async () => {
-    // First page: exactly page-size rows (could be more). Second page: partial
-    // (< page size) → signal that this is the last page, stop.
-    const fullPage = Array.from({ length: 1000 }, (_, i) => ({
+    // First page: exactly page-size rows. Second page: partial (< page size)
+    // → last page, stop. Each row has a unique (poolId, timestamp) so the
+    // client-side dedup is a no-op here.
+    const makeRow = (timestamp: number) => ({
       poolId: "pool-p",
-      timestamp: String(i),
+      timestamp: String(timestamp),
       reserves0: "0",
       reserves1: "0",
       swapCount: 0,
       swapVolume0: "0",
       swapVolume1: "0",
-    }));
-    const partialPage = fullPage.slice(0, 42);
+    });
+    const page1 = Array.from({ length: 1000 }, (_, i) => makeRow(i));
+    const page2 = Array.from({ length: 42 }, (_, i) => makeRow(1000 + i));
     let snapshotCall = 0;
     mockRequest((query) => {
       if (query.includes("PoolSnapshot")) {
         snapshotCall++;
-        return { PoolSnapshot: snapshotCall === 1 ? fullPage : partialPage };
+        return { PoolSnapshot: snapshotCall === 1 ? page1 : page2 };
       }
       if (query.includes("ProtocolFeeTransfer"))
         return { ProtocolFeeTransfer: [] };
@@ -280,23 +282,74 @@ describe("fetchNetworkData — snapshot pagination", () => {
     expect(result.snapshotsAllError).toBeNull();
   });
 
-  it("flags truncation on overflow but preserves already-fetched rows", async () => {
-    // Every page returns a full page → loop hits MAX_PAGES without finding a
-    // short page. Returns the accumulated rows (newest-first) with
-    // `truncated: true`; rows that WERE fetched stay intact so 24h/7d/30d
-    // windows still work — only the "All" range is partial.
-    const now = Math.floor(Date.now() / 1000);
-    const fullPage = Array.from({ length: 1000 }, (_, i) => ({
-      poolId: "pool-overflow",
-      timestamp: String(now - i * 60), // every row within the last ~17h → all fit in w24h
+  it("dedups rows that appear in multiple pages (concurrent-insert drift)", async () => {
+    // If a new snapshot arrives between page 1 and page 2, offset pagination
+    // overlaps: the last row of page 1 reappears as the first row of page 2.
+    // Dedup by (poolId, timestamp) should collapse the duplicate — otherwise
+    // the chart would double-count that hour's volume.
+    const makeRow = (timestamp: number) => ({
+      poolId: "pool-dup",
+      timestamp: String(timestamp),
       reserves0: "0",
       reserves1: "0",
       swapCount: 0,
       swapVolume0: "0",
       swapVolume1: "0",
-    }));
+    });
+    // Page 1: rows 0..999. Page 2: rows 999..1038 (first row overlaps). Page 3: empty.
+    const page1 = Array.from({ length: 1000 }, (_, i) => makeRow(i));
+    const page2 = Array.from({ length: 40 }, (_, i) => makeRow(999 + i));
+    let call = 0;
     mockRequest((query) => {
-      if (query.includes("PoolSnapshot")) return { PoolSnapshot: fullPage };
+      if (query.includes("PoolSnapshot")) {
+        call++;
+        if (call === 1) return { PoolSnapshot: page1 };
+        if (call === 2) return { PoolSnapshot: page2 };
+        return { PoolSnapshot: [] };
+      }
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [makePool("pool-dup")] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: 0, to: 1000 },
+      w7d: { from: 0, to: 7000 },
+      w30d: { from: 0, to: 30000 },
+    });
+
+    // 1000 from page 1 + 40 from page 2 − 1 overlap = 1039.
+    expect(result.snapshotsAll).toHaveLength(1039);
+  });
+
+  it("flags truncation on overflow but preserves already-fetched rows", async () => {
+    // Every page returns 1000 UNIQUE rows → loop hits MAX_PAGES without
+    // finding a short page. Return accumulated rows with `truncated: true,
+    // error: null` — 24h/7d/30d windows still work from what we have.
+    const now = Math.floor(Date.now() / 1000);
+    let rowCursor = 0;
+    mockRequest((query) => {
+      if (query.includes("PoolSnapshot")) {
+        const batch = Array.from({ length: 1000 }, () => {
+          // Unique timestamps across all pages so dedup doesn't collapse.
+          // All fit in the 24h window (minute-granularity across ~70 days
+          // worth of minutes — still > 24h but page 1 alone covers >24h).
+          const ts = now - rowCursor * 60;
+          rowCursor++;
+          return {
+            poolId: "pool-overflow",
+            timestamp: String(ts),
+            reserves0: "0",
+            reserves1: "0",
+            swapCount: 0,
+            swapVolume0: "0",
+            swapVolume1: "0",
+          };
+        });
+        return { PoolSnapshot: batch };
+      }
       if (query.includes("ProtocolFeeTransfer"))
         return { ProtocolFeeTransfer: [] };
       if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
@@ -310,24 +363,20 @@ describe("fetchNetworkData — snapshot pagination", () => {
       w30d: { from: now - 30 * 86400, to: now },
     });
 
-    // No error — pagination succeeded, just with a cap.
+    // Overflow is a known safety cap, not a fault — error stays null.
     expect(result.snapshotsAllError).toBeNull();
-    // Truncation flagged for the "All" range.
     expect(result.snapshotsAllTruncated).toBe(true);
-    // Recent windows are NOT blanked — they carry the fetched rows.
     expect(result.snapshots.length).toBeGreaterThan(0);
-    expect(result.snapshotsAll.length).toBeGreaterThan(0);
-    // Exactly 100 pages × 1000 rows = 100k accumulated before bail-out.
-    expect(result.snapshotsAll.length).toBe(100 * 1000);
+    expect(result.snapshotsAll).toHaveLength(100 * 1000);
   });
 
-  it("preserves already-fetched rows when a later page errors mid-loop", async () => {
-    // Page 1 succeeds, page 2 errors (network glitch). Before this fix the
-    // whole pagination promise would reject, blanking every snapshot window
-    // even though page 1 had valid recent data. Now: return the accumulated
-    // rows + truncated=true, surface via the partial-data badge.
+  it("preserves already-fetched rows AND surfaces the error when a later page fails mid-loop", async () => {
+    // Page 1 succeeds (1000 unique rows), page 2 errors (network glitch).
+    // Pre-fix: whole pagination rejected → every window blanked. Now: keep
+    // the rows, flag truncated=true AND populate snapshotsAllError so error-
+    // aware consumers (Summary tile) partial-badge correctly.
     const now = Math.floor(Date.now() / 1000);
-    const fullPage = Array.from({ length: 1000 }, (_, i) => ({
+    const page1 = Array.from({ length: 1000 }, (_, i) => ({
       poolId: "pool-mid-err",
       timestamp: String(now - i * 60),
       reserves0: "0",
@@ -343,7 +392,7 @@ describe("fetchNetworkData — snapshot pagination", () => {
         if (query.includes("PoolSnapshot")) {
           snapshotCall++;
           if (snapshotCall === 1)
-            return Promise.resolve({ PoolSnapshot: fullPage });
+            return Promise.resolve({ PoolSnapshot: page1 });
           return Promise.reject(new Error("upstream timeout on page 2"));
         }
         if (query.includes("ProtocolFeeTransfer"))
@@ -361,10 +410,14 @@ describe("fetchNetworkData — snapshot pagination", () => {
       w30d: { from: now - 30 * 86400, to: now },
     });
 
-    expect(result.snapshotsAllError).toBeNull();
+    // Error now surfaces (and aliases) so error-aware consumers partial-badge.
+    expect(result.snapshotsAllError).not.toBeNull();
+    expect(result.snapshotsError).toBe(result.snapshotsAllError);
+    expect(result.snapshots7dError).toBe(result.snapshotsAllError);
+    expect(result.snapshots30dError).toBe(result.snapshotsAllError);
     expect(result.snapshotsAllTruncated).toBe(true);
-    // Page 1's 1000 rows survive — recent windows don't blank.
-    expect(result.snapshotsAll.length).toBe(1000);
+    // Page 1's rows survive — recent windows still populate.
+    expect(result.snapshotsAll).toHaveLength(1000);
     expect(result.snapshots.length).toBeGreaterThan(0);
   });
 
