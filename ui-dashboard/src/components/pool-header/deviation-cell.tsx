@@ -3,6 +3,7 @@
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { HealthBadge } from "@/components/badges";
+import type { HealthStatus } from "@/lib/health";
 import { computeHealthStatus, isOracleFresh } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
 
@@ -44,6 +45,7 @@ export function DeviationCell({
         <DeviationBar
           priceDifference={pool.priceDifference ?? "0"}
           rebalanceThreshold={pool.rebalanceThreshold ?? 0}
+          status={status}
         />
       </dd>
     </div>
@@ -53,9 +55,11 @@ export function DeviationCell({
 function DeviationBar({
   priceDifference,
   rebalanceThreshold,
+  status,
 }: {
   priceDifference: string;
   rebalanceThreshold: number;
+  status: HealthStatus;
 }) {
   const diff = Number(priceDifference);
   if (!rebalanceThreshold || rebalanceThreshold === 0 || diff === 0) {
@@ -65,10 +69,14 @@ function DeviationBar({
   const ratio = Math.min(diff / threshold, 1.5);
   const pct = Math.min(ratio * 100, 100);
   const pctOfThreshold = ((diff / threshold) * 100).toFixed(1);
+  // Source the bar color from computeHealthStatus instead of recomputing
+  // from the raw ratio, so the bar and the HealthBadge always agree on
+  // severity — including at the exact-threshold boundary (WARN, not
+  // CRITICAL) and during the 1h rebalance grace window.
   const color =
-    ratio >= 1.0
+    status === "CRITICAL"
       ? "bg-red-500"
-      : ratio >= 0.8
+      : status === "WARN"
         ? "bg-amber-500"
         : "bg-emerald-500";
 
