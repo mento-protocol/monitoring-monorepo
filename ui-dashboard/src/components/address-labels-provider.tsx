@@ -128,35 +128,35 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     return rows;
   }, [entriesByChain]);
 
-  const resolveChainId = (chainId?: number) => chainId ?? network.chainId;
+  const defaultChainId = network.chainId;
 
   const getName = useCallback(
     (address: string | null, chainId?: number): string => {
       if (!address) return "\u2014";
       const lower = address.toLowerCase();
-      const cid = resolveChainId(chainId);
+      const cid = chainId ?? defaultChainId;
       const customName = entriesByChain.get(cid)?.[lower]?.name;
       if (customName) return customName;
       const net = networkForChainId(cid) ?? network;
       return net.addressLabels[lower] ?? truncateAddress(address);
     },
-    [entriesByChain, network],
+    [entriesByChain, network, defaultChainId],
   );
 
   const getTags = useCallback(
     (address: string | null, chainId?: number): string[] => {
       if (!address) return [];
-      const cid = resolveChainId(chainId);
+      const cid = chainId ?? defaultChainId;
       return entriesByChain.get(cid)?.[address.toLowerCase()]?.tags ?? [];
     },
-    [entriesByChain],
+    [entriesByChain, defaultChainId],
   );
 
   const hasName = useCallback(
     (address: string | null, chainId?: number): boolean => {
       if (!address) return false;
       const lower = address.toLowerCase();
-      const cid = resolveChainId(chainId);
+      const cid = chainId ?? defaultChainId;
       const entry = entriesByChain.get(cid)?.[lower];
       const net = networkForChainId(cid) ?? network;
       return (
@@ -164,25 +164,25 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
         lower in net.addressLabels
       );
     },
-    [entriesByChain, network],
+    [entriesByChain, network, defaultChainId],
   );
 
   const isCustom = useCallback(
     (address: string | null, chainId?: number): boolean => {
       if (!address) return false;
-      const cid = resolveChainId(chainId);
+      const cid = chainId ?? defaultChainId;
       return address.toLowerCase() in (entriesByChain.get(cid) ?? {});
     },
-    [entriesByChain],
+    [entriesByChain, defaultChainId],
   );
 
   const getEntry = useCallback(
     (address: string | null, chainId?: number): AddressEntry | undefined => {
       if (!address) return undefined;
-      const cid = resolveChainId(chainId);
+      const cid = chainId ?? defaultChainId;
       return entriesByChain.get(cid)?.[address.toLowerCase()];
     },
-    [entriesByChain],
+    [entriesByChain, defaultChainId],
   );
 
   const applyOptimistic = (
@@ -214,7 +214,7 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
       chainId?: number,
     ): Promise<void> => {
       const lower = address.toLowerCase();
-      const cid = resolveChainId(chainId);
+      const cid = chainId ?? defaultChainId;
       const optimistic: AddressEntry = {
         name: entry.name,
         tags: entry.tags,
@@ -251,13 +251,13 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
         },
       );
     },
-    [mutate, network.chainId],
+    [mutate, defaultChainId],
   );
 
   const deleteEntry = useCallback(
     async (address: string, chainId?: number): Promise<void> => {
       const lower = address.toLowerCase();
-      const cid = resolveChainId(chainId);
+      const cid = chainId ?? defaultChainId;
 
       await mutate(
         SWR_KEY,
@@ -280,7 +280,7 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
         },
       );
     },
-    [mutate, network.chainId],
+    [mutate, defaultChainId],
   );
 
   const upsertLabel = useCallback(
