@@ -84,14 +84,12 @@ describe("app/error boundaries", () => {
     expect(link?.textContent).toContain("Back to pools");
   });
 
-  it("PoolDetailError preserves the active network on the recovery link", () => {
+  it("PoolDetailError recovery link always goes to /pools (no ?network= needed)", () => {
     mockNetwork.networkId = "monad-mainnet";
     render(<PoolDetailError error={new Error("nope")} reset={vi.fn()} />);
-    const link = container.querySelector<HTMLAnchorElement>(
-      'a[href*="network=monad-mainnet"]',
-    );
+    const link = container.querySelector<HTMLAnchorElement>('a[href="/pools"]');
     expect(link).not.toBeNull();
-    expect(link?.getAttribute("href")).toBe("/pools?network=monad-mainnet");
+    expect(link?.getAttribute("href")).toBe("/pools");
   });
 
   it("PoolDetailError surfaces error.digest when present", () => {
