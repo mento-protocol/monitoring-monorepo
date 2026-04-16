@@ -120,16 +120,20 @@ export function sortGlobalPools(
         return sortDir === "asc" ? aW - bW : bW - aW;
       }
       case "volume24h": {
-        const aV = volume24hByKey?.get(aKey) ?? 0;
-        const bV = volume24hByKey?.get(bKey) ?? 0;
-        cmp = aV - bV;
-        break;
+        const aV = volume24hByKey?.get(aKey);
+        const bV = volume24hByKey?.get(bKey);
+        if (aV == null && bV == null) return 0;
+        if (aV == null) return 1;
+        if (bV == null) return -1;
+        return sortDir === "asc" ? aV - bV : bV - aV;
       }
       case "volume7d": {
-        const aV7 = volume7dByKey?.get(aKey) ?? 0;
-        const bV7 = volume7dByKey?.get(bKey) ?? 0;
-        cmp = aV7 - bV7;
-        break;
+        const aV7 = volume7dByKey?.get(aKey);
+        const bV7 = volume7dByKey?.get(bKey);
+        if (aV7 == null && bV7 == null) return 0;
+        if (aV7 == null) return 1;
+        if (bV7 == null) return -1;
+        return sortDir === "asc" ? aV7 - bV7 : bV7 - aV7;
       }
       case "totalVolume":
         cmp =
@@ -234,25 +238,29 @@ function LimitHeatmap({
     .join("\n");
 
   return (
-    <button
-      type="button"
-      className="inline-grid grid-cols-2 gap-px rounded cursor-default appearance-none bg-transparent border-0 p-0 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+    /* eslint-disable jsx-a11y/no-noninteractive-tabindex */
+    // Focusable for keyboard tooltip access, not an interactive control
+    <span
+      className="inline-grid grid-cols-2 gap-px rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+      tabIndex={0}
+      role="group"
       aria-label={tooltip.replace(/\n/g, "; ")}
       title={tooltip}
     >
+      {/* eslint-enable jsx-a11y/no-noninteractive-tabindex */}
       {rows.map((r) => (
-        <div key={r.sym} className="contents">
-          <div
-            className={`w-2 h-2 rounded-sm ${pressureColor(r.p0)}`}
-            aria-label={`${r.sym} 5m: ${(r.p0 * 100).toFixed(1)}%`}
+        <span key={r.sym} className="contents">
+          <span
+            className={`block w-2 h-2 rounded-sm ${pressureColor(r.p0)}`}
+            aria-hidden="true"
           />
-          <div
-            className={`w-2 h-2 rounded-sm ${pressureColor(r.p1)}`}
-            aria-label={`${r.sym} 24h: ${(r.p1 * 100).toFixed(1)}%`}
+          <span
+            className={`block w-2 h-2 rounded-sm ${pressureColor(r.p1)}`}
+            aria-hidden="true"
           />
-        </div>
+        </span>
       ))}
-    </button>
+    </span>
   );
 }
 
