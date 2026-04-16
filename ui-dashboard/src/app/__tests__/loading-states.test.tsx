@@ -55,9 +55,7 @@ describe("route-level loading UIs", () => {
     expect(countLiveRegions()).toBe(1);
   });
 
-  it("AddressBookLoading renders a table skeleton that structurally matches the real table", () => {
-    // Real address-book table has 8 header columns (AddressBookClient.tsx);
-    // the skeleton must stay in sync to prevent layout jump on load.
+  it("AddressBookLoading skeleton matches the real table shape (8 cols)", () => {
     render(<AddressBookLoading />);
     const table = container.querySelector<HTMLElement>(
       '[role="status"][aria-label="Loading table"]',
@@ -65,5 +63,20 @@ describe("route-level loading UIs", () => {
     expect(table).not.toBeNull();
     const [header] = Array.from(table!.children) as HTMLElement[];
     expect(header.children).toHaveLength(8);
+  });
+
+  it("PoolDetailLoading skeleton matches the real page shape (7 tabs, 6-col table)", () => {
+    render(<PoolDetailLoading />);
+    const table = container.querySelector<HTMLElement>(
+      '[role="status"][aria-label="Loading table"]',
+    );
+    expect(table).not.toBeNull();
+    const [header] = Array.from(table!.children) as HTMLElement[];
+    expect(header.children).toHaveLength(6);
+
+    // Tab strip: 7 placeholder bars inside a flex container with a bottom border
+    const tabStrip = container.querySelector(".flex.gap-1.border-b");
+    expect(tabStrip).not.toBeNull();
+    expect(tabStrip!.children).toHaveLength(7);
   });
 });

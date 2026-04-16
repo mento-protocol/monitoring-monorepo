@@ -139,12 +139,10 @@ describe("PageShellSkeleton", () => {
     expect(regions[0].getAttribute("aria-label")).toBe("Loading");
   });
 
-  it("composes a tile grid and a table skeleton (both presentational)", () => {
+  it("inner skeletons are presentational (no nested role=status)", () => {
     render(<PageShellSkeleton />);
-    // Children are presentational (no role="status") so we find them by structure.
-    const grid = container.querySelector(".grid");
-    expect(grid).not.toBeNull();
-    const table = container.querySelector(".overflow-hidden.rounded-lg.border");
-    expect(table).not.toBeNull();
+    const wrapper = container.querySelector('[aria-live="polite"]')!;
+    const nestedStatuses = wrapper.querySelectorAll('[role="status"]');
+    expect(nestedStatuses).toHaveLength(0);
   });
 });
