@@ -49,7 +49,7 @@ function PoolsContent() {
   const router = useRouter();
 
   const poolFilter = searchParams.get("pool") ?? "";
-  const limit = Number(searchParams.get("limit") ?? "25");
+  const limit = Math.max(1, Number(searchParams.get("limit") ?? "25") || 25);
 
   const [filterInput, setFilterInput] = useState(poolFilter);
   const [filterError, setFilterError] = useState("");
@@ -110,15 +110,30 @@ function PoolsContent() {
     [router, searchParams],
   );
 
+  const resolvePoolFilter = useCallback(
+    (raw: string): string | null => {
+      if (!raw) return "";
+      if (isNamespacedPoolId(raw)) return raw;
+      if (!isValidAddress(raw)) return null;
+      const lower = raw.toLowerCase();
+      for (const [id] of poolsByNamespacedId) {
+        if (id.toLowerCase().endsWith(lower)) return id;
+      }
+      return raw;
+    },
+    [poolsByNamespacedId],
+  );
+
   const applyFilter = useCallback(() => {
     const v = filterInput.trim();
-    if (v && !isValidAddress(v) && !isNamespacedPoolId(v)) {
+    const resolved = resolvePoolFilter(v);
+    if (resolved === null) {
       setFilterError("Invalid pool filter (expected 0x… or {chainId}-0x…)");
       return;
     }
     setFilterError("");
-    setURL(v, limit);
-  }, [filterInput, limit, setURL]);
+    setURL(resolved, limit);
+  }, [filterInput, resolvePoolFilter, limit, setURL]);
 
   const clearFilter = useCallback(() => {
     setFilterInput("");
