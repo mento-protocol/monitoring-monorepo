@@ -306,6 +306,7 @@ function poolStrategies(pool: Pool, isOls: boolean): string[] {
 // ---------------------------------------------------------------------------
 
 function formatFee(pool: Pool): string {
+  if (pool.source?.includes("virtual")) return "—";
   if (pool.lpFee == null && pool.protocolFee == null) return "—";
   const total = (pool.lpFee ?? 0) + (pool.protocolFee ?? 0);
   return `${(total / 100).toFixed(2)}%`;
