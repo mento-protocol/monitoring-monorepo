@@ -1914,6 +1914,13 @@ function OracleTab({
             deviation exceeds the rebalance threshold.
           </div>
         )}
+      {chartRows.length > 0 && chartRows.length < 20 && (
+        <div className="rounded-lg border border-slate-700/50 bg-slate-800/40 px-4 py-2 mb-4 text-xs text-slate-400">
+          Only {chartRows.length} oracle snapshot
+          {chartRows.length === 1 ? "" : "s"} recorded so far — data is still
+          collecting.
+        </div>
+      )}
       <OracleChart
         snapshots={chartRows}
         token0Symbol={sym0}

@@ -29,6 +29,8 @@ export function OracleChart({
 }: OracleChartProps) {
   if (snapshots.length === 0) return null;
 
+  const isSparse = snapshots.length < 20;
+
   const timestamps = snapshots.map((s) =>
     new Date(Number(s.timestamp) * 1000).toISOString(),
   );
@@ -73,14 +75,18 @@ export function OracleChart({
     );
   });
 
+  const traceMode = isSparse
+    ? ("markers" as const)
+    : ("lines+markers" as const);
+
   const priceTrace = {
     x: timestamps,
     y: prices,
     type: "scatter" as const,
-    mode: "lines+markers" as const,
+    mode: traceMode,
     name: `Price (${token1Symbol}/${token0Symbol})`,
     line: { color: "#6366f1", width: 2 },
-    marker: { size: 6, color: markerColors },
+    marker: { size: isSparse ? 10 : 6, color: markerColors },
     yaxis: "y" as const,
     hoverinfo: "text" as const,
     text: hoverText,
@@ -90,10 +96,10 @@ export function OracleChart({
     x: timestamps,
     y: deviations,
     type: "scatter" as const,
-    mode: "lines+markers" as const,
+    mode: traceMode,
     name: "Deviation %",
     line: { color: "#f59e0b", width: 2, dash: "dot" as const },
-    marker: { size: 4, color: "#f59e0b" },
+    marker: { size: isSparse ? 8 : 4, color: "#f59e0b" },
     yaxis: "y2" as const,
     hoverinfo: "skip" as const,
   };
@@ -169,10 +175,23 @@ export function OracleChart({
     });
   }
 
+  // Auto-zoom to data range when sparse — avoids tiny dots in vast empty chart
+  const xaxisBase = makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY);
+  if (isSparse && timestamps.length >= 2) {
+    const minTs = new Date(timestamps[0]).getTime();
+    const maxTs = new Date(timestamps[timestamps.length - 1]).getTime();
+    const pad = Math.max((maxTs - minTs) * 0.1, 3600_000); // 10% or 1h minimum
+    xaxisBase.range = [
+      new Date(minTs - pad).toISOString(),
+      new Date(maxTs + pad).toISOString(),
+    ];
+    xaxisBase.autorange = false;
+  }
+
   const layout = {
     ...PLOTLY_BASE_LAYOUT,
     shapes,
-    xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY),
+    xaxis: xaxisBase,
     yaxis: {
       title: { text: "Price", font: { size: 10 } },
       ...PLOTLY_AXIS_DEFAULTS,
