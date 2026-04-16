@@ -218,6 +218,21 @@ describe("buildDailyFeeSeries", () => {
     expect(result[0].protocolFeesUSD).toBeCloseTo(1, 2);
   });
 
+  it("contributes nothing from networks with feesError (feeTransfers is empty)", () => {
+    const ts = NOW_S - 3600;
+    const bucket = Math.floor(ts / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+    const window = { from: bucket, to: NOW_S + 1 };
+    const net1 = networkData([transfer({ blockTimestamp: String(ts) })]);
+    // feesError is set but error is null — feeTransfers is [] (as the hook sets it)
+    const net2 = networkData([], {
+      feesError: new Error("fee fetch failed"),
+    });
+    const result = buildDailyFeeSeries([net1, net2], window);
+    expect(result).toHaveLength(1);
+    // Only net1's 1 USDm counted; net2 contributed nothing
+    expect(result[0].protocolFeesUSD).toBeCloseTo(1, 2);
+  });
+
   it("respects window filter — excludes out-of-range transfers", () => {
     const day5ago = TODAY_BUCKET - 5 * SECONDS_PER_DAY;
     const day2ago = TODAY_BUCKET - 2 * SECONDS_PER_DAY;

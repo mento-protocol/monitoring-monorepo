@@ -10,13 +10,12 @@
  */
 
 import { parseWei } from "./format";
+import { UNRESOLVED_SYMBOLS } from "./protocol-fees";
 import { tokenToUSD } from "./tokens";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
 import type { TimeRange } from "./volume";
 
 const SECONDS_PER_DAY = 86_400;
-
-const UNRESOLVED_SYMBOLS = new Set(["UNKNOWN"]);
 
 export type FeeSeriesPoint = {
   timestamp: number;
