@@ -53,15 +53,23 @@ import {
   ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
   OLS_LIQUIDITY_EVENTS,
+  OLS_LIQUIDITY_EVENTS_COUNT,
+  OLS_LIQUIDITY_EVENTS_PAGE,
   OLS_POOL,
   POOL_DAILY_SNAPSHOTS_CHART,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   POOL_LIQUIDITY,
+  POOL_LIQUIDITY_COUNT,
+  POOL_LIQUIDITY_PAGE,
   POOL_LP_POSITIONS,
   POOL_REBALANCES,
+  POOL_REBALANCES_COUNT,
+  POOL_REBALANCES_PAGE,
   POOL_RESERVES,
   POOL_SWAPS,
+  POOL_SWAPS_COUNT,
+  POOL_SWAPS_PAGE,
   TRADING_LIMITS,
 } from "@/lib/queries";
 import { Pagination } from "@/components/pagination";
@@ -461,6 +469,7 @@ function PoolDetail() {
         {tab === "providers" && (
           <LpsTab
             poolId={normalizedPoolId}
+            limit={limit}
             pool={pool}
             search={activeSearch}
             onSearchChange={(value) => setTabSearch("providers", value)}
@@ -662,10 +671,37 @@ function SwapsTab({
   const { network } = useNetwork();
   const { getName, getTags } = useAddressLabels();
   const query = normalizeSearch(search);
+  const [rawPage, setRawPage] = React.useState(1);
+
+  const handleSearchChange = React.useCallback(
+    (value: string) => {
+      onSearchChange(value);
+      setRawPage(1);
+    },
+    [onSearchChange],
+  );
+
+  const { data: countData, error: countError } = useGQL<{
+    SwapEvent: { id: string }[];
+  }>(POOL_SWAPS_COUNT, { poolId, limit: ENVIO_MAX_ROWS, offset: 0 });
+  const lastKnownTotalRef = React.useRef(0);
+  const rawTotal = countData?.SwapEvent?.length ?? 0;
+  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
+  const total = countError ? lastKnownTotalRef.current : rawTotal;
+  const countCapped = rawTotal >= ENVIO_MAX_ROWS;
+
+  const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
+  const page = Math.max(1, Math.min(rawPage, totalPages));
+  const isSearching = query.length > 0;
+  const searchFetchLimit =
+    total > 0 ? Math.min(total, SEARCH_MAX_LIMIT) : SEARCH_BOOTSTRAP_LIMIT;
+  const fetchLimit = isSearching ? searchFetchLimit : limit;
+  const fetchOffset = isSearching ? 0 : (page - 1) * limit;
+  const orderBy = useMemo(() => buildOrderBy("blockNumber", "desc"), []);
 
   const { data, error, isLoading } = useGQL<{ SwapEvent: SwapEvent[] }>(
-    POOL_SWAPS,
-    { poolId, limit },
+    POOL_SWAPS_PAGE,
+    { poolId, limit: fetchLimit, offset: fetchOffset, orderBy },
   );
   const swaps = data?.SwapEvent ?? [];
 
@@ -728,7 +764,7 @@ function SwapsTab({
       {swaps.length > 0 && (
         <TableSearch
           value={search}
-          onChange={onSearchChange}
+          onChange={handleSearchChange}
           placeholder="Search swaps by tx, address, name, tag, token, amount, or block…"
           ariaLabel="Search swaps"
         />
@@ -798,6 +834,20 @@ function SwapsTab({
             })}
           </tbody>
         </Table>
+      )}
+      {!isSearching && (
+        <Pagination
+          page={page}
+          pageSize={limit}
+          total={total}
+          onPageChange={setRawPage}
+        />
+      )}
+      {countCapped && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Showing first {ENVIO_MAX_ROWS.toLocaleString()} swaps — older entries
+          may exist beyond this page range.
+        </p>
       )}
     </>
   );
@@ -973,10 +1023,42 @@ export function RebalancesTab({
 }) {
   const { getName, getTags } = useAddressLabels();
   const query = normalizeSearch(search);
+  const [rawPage, setRawPage] = React.useState(1);
+
+  const handleSearchChange = React.useCallback(
+    (value: string) => {
+      onSearchChange(value);
+      setRawPage(1);
+    },
+    [onSearchChange],
+  );
+
+  const { data: countData, error: countError } = useGQL<{
+    RebalanceEvent: { id: string }[];
+  }>(POOL_REBALANCES_COUNT, { poolId, limit: ENVIO_MAX_ROWS, offset: 0 });
+  const lastKnownTotalRef = React.useRef(0);
+  const rawTotal = countData?.RebalanceEvent?.length ?? 0;
+  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
+  const total = countError ? lastKnownTotalRef.current : rawTotal;
+  const countCapped = rawTotal >= ENVIO_MAX_ROWS;
+
+  const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
+  const page = Math.max(1, Math.min(rawPage, totalPages));
+  const isSearching = query.length > 0;
+  const searchFetchLimit =
+    total > 0 ? Math.min(total, SEARCH_MAX_LIMIT) : SEARCH_BOOTSTRAP_LIMIT;
+  const fetchLimit = isSearching ? searchFetchLimit : limit;
+  const fetchOffset = isSearching ? 0 : (page - 1) * limit;
+  const orderBy = useMemo(() => buildOrderBy("blockNumber", "desc"), []);
 
   const { data, error, isLoading } = useGQL<{
     RebalanceEvent: RebalanceEvent[];
-  }>(POOL_REBALANCES, { poolId, limit });
+  }>(POOL_REBALANCES_PAGE, {
+    poolId,
+    limit: fetchLimit,
+    offset: fetchOffset,
+    orderBy,
+  });
   const rows = data?.RebalanceEvent ?? [];
 
   const filteredRows = useMemo(() => {
@@ -1005,7 +1087,7 @@ export function RebalancesTab({
     <>
       <TableSearch
         value={search}
-        onChange={onSearchChange}
+        onChange={handleSearchChange}
         placeholder="Search rebalances by tx, strategy, rebalancer, name, tag, or block…"
         ariaLabel="Search rebalances"
       />
@@ -1067,6 +1149,20 @@ export function RebalancesTab({
           </tbody>
         </Table>
       )}
+      {!isSearching && (
+        <Pagination
+          page={page}
+          pageSize={limit}
+          total={total}
+          onPageChange={setRawPage}
+        />
+      )}
+      {countCapped && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Showing first {ENVIO_MAX_ROWS.toLocaleString()} rebalances — older
+          entries may exist beyond this page range.
+        </p>
+      )}
     </>
   );
 }
@@ -1087,10 +1183,42 @@ function LiquidityTab({
   const { network } = useNetwork();
   const { getName, getTags } = useAddressLabels();
   const query = normalizeSearch(search);
+  const [rawPage, setRawPage] = React.useState(1);
+
+  const handleSearchChange = React.useCallback(
+    (value: string) => {
+      onSearchChange(value);
+      setRawPage(1);
+    },
+    [onSearchChange],
+  );
+
+  const { data: countData, error: countError } = useGQL<{
+    LiquidityEvent: { id: string }[];
+  }>(POOL_LIQUIDITY_COUNT, { poolId, limit: ENVIO_MAX_ROWS, offset: 0 });
+  const lastKnownTotalRef = React.useRef(0);
+  const rawTotal = countData?.LiquidityEvent?.length ?? 0;
+  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
+  const total = countError ? lastKnownTotalRef.current : rawTotal;
+  const countCapped = rawTotal >= ENVIO_MAX_ROWS;
+
+  const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
+  const page = Math.max(1, Math.min(rawPage, totalPages));
+  const isSearching = query.length > 0;
+  const searchFetchLimit =
+    total > 0 ? Math.min(total, SEARCH_MAX_LIMIT) : SEARCH_BOOTSTRAP_LIMIT;
+  const fetchLimit = isSearching ? searchFetchLimit : limit;
+  const fetchOffset = isSearching ? 0 : (page - 1) * limit;
+  const orderBy = useMemo(() => buildOrderBy("blockNumber", "desc"), []);
 
   const { data, error, isLoading } = useGQL<{
     LiquidityEvent: LiquidityEvent[];
-  }>(POOL_LIQUIDITY, { poolId, limit });
+  }>(POOL_LIQUIDITY_PAGE, {
+    poolId,
+    limit: fetchLimit,
+    offset: fetchOffset,
+    orderBy,
+  });
   const rows = data?.LiquidityEvent ?? [];
 
   const fpmmPool = pool ? isFpmm(pool) : false;
@@ -1147,7 +1275,7 @@ function LiquidityTab({
       {rows.length > 0 && (
         <TableSearch
           value={search}
-          onChange={onSearchChange}
+          onChange={handleSearchChange}
           placeholder="Search liquidity by tx, sender, name, tag, kind, amount, or block…"
           ariaLabel="Search liquidity"
         />
@@ -1205,6 +1333,20 @@ function LiquidityTab({
           </tbody>
         </Table>
       )}
+      {!isSearching && (
+        <Pagination
+          page={page}
+          pageSize={limit}
+          total={total}
+          onPageChange={setRawPage}
+        />
+      )}
+      {countCapped && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Showing first {ENVIO_MAX_ROWS.toLocaleString()} liquidity events —
+          older entries may exist beyond this page range.
+        </p>
+      )}
     </>
   );
 }
@@ -1222,11 +1364,13 @@ function isLiquidityPositionSchemaError(error: Error | undefined) {
 
 function LpsTab({
   poolId,
+  limit,
   pool,
   search,
   onSearchChange,
 }: {
   poolId: string;
+  limit: number;
   pool: Pool | null;
   search: string;
   onSearchChange: (value: string) => void;
@@ -1236,6 +1380,15 @@ function LpsTab({
   const { getName, getTags } = useAddressLabels();
   const { network } = useNetwork();
   const query = normalizeSearch(search);
+  const [rawPage, setRawPage] = React.useState(1);
+
+  const handleSearchChange = React.useCallback(
+    (value: string) => {
+      onSearchChange(value);
+      setRawPage(1);
+    },
+    [onSearchChange],
+  );
 
   const {
     data: indexedData,
@@ -1298,6 +1451,14 @@ function LpsTab({
       )
     : rankedPositions;
 
+  const isSearching = query.length > 0;
+  const lpTotal = filteredPositions.length;
+  const lpTotalPages = lpTotal > 0 ? Math.ceil(lpTotal / limit) : 1;
+  const lpPage = Math.max(1, Math.min(rawPage, lpTotalPages));
+  const pagedPositions = isSearching
+    ? filteredPositions
+    : filteredPositions.slice((lpPage - 1) * limit, lpPage * limit);
+
   // Derive per-position token amounts from pool reserves and LP share.
   // positionTokenAmount = positionShare * poolReserve
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
@@ -1335,7 +1496,7 @@ function LpsTab({
       />
       <TableSearch
         value={search}
-        onChange={onSearchChange}
+        onChange={handleSearchChange}
         placeholder="Search LPs by address, name, or tag..."
         ariaLabel="Search LPs"
       />
@@ -1354,7 +1515,7 @@ function LpsTab({
             </tr>
           </thead>
           <tbody>
-            {filteredPositions.map((position) => {
+            {pagedPositions.map((position) => {
               // Scale up by 1e6 before converting to Number to preserve precision
               // for large bigint liquidity values that exceed JS safe integer range.
               const shareNum =
@@ -1451,6 +1612,14 @@ function LpsTab({
             })}
           </tbody>
         </Table>
+      )}
+      {!isSearching && (
+        <Pagination
+          page={lpPage}
+          pageSize={limit}
+          total={lpTotal}
+          onPageChange={setRawPage}
+        />
       )}
     </>
   );
@@ -1985,11 +2154,47 @@ function OlsLiquidityEvents({
 }) {
   const { getName, getTags } = useAddressLabels();
   const searchQuery = normalizeSearch(search);
+  const [rawPage, setRawPage] = React.useState(1);
 
-  const gqlQuery = olsAddress ? OLS_LIQUIDITY_EVENTS : null;
+  const handleSearchChange = React.useCallback(
+    (value: string) => {
+      onSearchChange(value);
+      setRawPage(1);
+    },
+    [onSearchChange],
+  );
+
+  const countQuery = olsAddress ? OLS_LIQUIDITY_EVENTS_COUNT : null;
+  const { data: countData, error: countError } = useGQL<{
+    OlsLiquidityEvent: { id: string }[];
+  }>(
+    countQuery,
+    olsAddress ? { poolId, olsAddress, limit: ENVIO_MAX_ROWS, offset: 0 } : {},
+  );
+  const lastKnownTotalRef = React.useRef(0);
+  const rawTotal = countData?.OlsLiquidityEvent?.length ?? 0;
+  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
+  const total = countError ? lastKnownTotalRef.current : rawTotal;
+  const countCapped = rawTotal >= ENVIO_MAX_ROWS;
+
+  const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
+  const page = Math.max(1, Math.min(rawPage, totalPages));
+  const isSearching = searchQuery.length > 0;
+  const searchFetchLimit =
+    total > 0 ? Math.min(total, SEARCH_MAX_LIMIT) : SEARCH_BOOTSTRAP_LIMIT;
+  const fetchLimit = isSearching ? searchFetchLimit : limit;
+  const fetchOffset = isSearching ? 0 : (page - 1) * limit;
+  const orderBy = useMemo(() => buildOrderBy("blockTimestamp", "desc"), []);
+
+  const gqlQuery = olsAddress ? OLS_LIQUIDITY_EVENTS_PAGE : null;
   const { data, error, isLoading } = useGQL<{
     OlsLiquidityEvent: OlsLiquidityEvent[];
-  }>(gqlQuery, olsAddress ? { poolId, olsAddress, limit } : {});
+  }>(
+    gqlQuery,
+    olsAddress
+      ? { poolId, olsAddress, limit: fetchLimit, offset: fetchOffset, orderBy }
+      : {},
+  );
 
   const events = data?.OlsLiquidityEvent ?? [];
 
@@ -2023,7 +2228,7 @@ function OlsLiquidityEvents({
       {events.length > 0 && (
         <TableSearch
           value={search}
-          onChange={onSearchChange}
+          onChange={handleSearchChange}
           placeholder="Search OLS events by tx, caller, direction, amount, or token..."
           ariaLabel="Search OLS events"
         />
@@ -2038,6 +2243,20 @@ function OlsLiquidityEvents({
           isLoading={isLoading}
           error={error ?? null}
         />
+      )}
+      {!isSearching && (
+        <Pagination
+          page={page}
+          pageSize={limit}
+          total={total}
+          onPageChange={setRawPage}
+        />
+      )}
+      {countCapped && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Showing first {ENVIO_MAX_ROWS.toLocaleString()} OLS events — older
+          entries may exist beyond this page range.
+        </p>
       )}
     </>
   );

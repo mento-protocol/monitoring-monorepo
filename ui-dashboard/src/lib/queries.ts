@@ -130,6 +130,29 @@ export const POOL_SWAPS = `
   }
 `;
 
+export const POOL_SWAPS_PAGE = `
+  query PoolSwapsPage($poolId: String!, $limit: Int!, $offset: Int!, $orderBy: [SwapEvent_order_by!]!) {
+    SwapEvent(
+      where: { poolId: { _eq: $poolId } }
+      order_by: $orderBy
+      limit: $limit
+      offset: $offset
+    ) {
+      id chainId poolId sender recipient
+      amount0In amount1In amount0Out amount1Out
+      txHash blockNumber blockTimestamp
+    }
+  }
+`;
+
+export const POOL_SWAPS_COUNT = `
+  query PoolSwapsCount($poolId: String!, $limit: Int!, $offset: Int!) {
+    SwapEvent(where: { poolId: { _eq: $poolId } }, limit: $limit, offset: $offset) {
+      id
+    }
+  }
+`;
+
 export const POOL_RESERVES = `
   query PoolReserves($poolId: String!, $limit: Int!) {
     ReserveUpdate(
@@ -153,6 +176,29 @@ export const POOL_REBALANCES = `
       id chainId sender caller priceDifferenceBefore priceDifferenceAfter
       txHash blockNumber blockTimestamp
       improvement effectivenessRatio
+    }
+  }
+`;
+
+export const POOL_REBALANCES_PAGE = `
+  query PoolRebalancesPage($poolId: String!, $limit: Int!, $offset: Int!, $orderBy: [RebalanceEvent_order_by!]!) {
+    RebalanceEvent(
+      where: { poolId: { _eq: $poolId } }
+      order_by: $orderBy
+      limit: $limit
+      offset: $offset
+    ) {
+      id chainId sender caller priceDifferenceBefore priceDifferenceAfter
+      txHash blockNumber blockTimestamp
+      improvement effectivenessRatio
+    }
+  }
+`;
+
+export const POOL_REBALANCES_COUNT = `
+  query PoolRebalancesCount($poolId: String!, $limit: Int!, $offset: Int!) {
+    RebalanceEvent(where: { poolId: { _eq: $poolId } }, limit: $limit, offset: $offset) {
+      id
     }
   }
 `;
@@ -191,6 +237,29 @@ export const POOL_LIQUIDITY = `
       id chainId kind sender
       amount0 amount1 liquidity
       txHash blockNumber blockTimestamp
+    }
+  }
+`;
+
+export const POOL_LIQUIDITY_PAGE = `
+  query PoolLiquidityPage($poolId: String!, $limit: Int!, $offset: Int!, $orderBy: [LiquidityEvent_order_by!]!) {
+    LiquidityEvent(
+      where: { poolId: { _eq: $poolId } }
+      order_by: $orderBy
+      limit: $limit
+      offset: $offset
+    ) {
+      id chainId kind sender
+      amount0 amount1 liquidity
+      txHash blockNumber blockTimestamp
+    }
+  }
+`;
+
+export const POOL_LIQUIDITY_COUNT = `
+  query PoolLiquidityCount($poolId: String!, $limit: Int!, $offset: Int!) {
+    LiquidityEvent(where: { poolId: { _eq: $poolId } }, limit: $limit, offset: $offset) {
+      id
     }
   }
 `;
@@ -485,6 +554,34 @@ export const OLS_LIQUIDITY_EVENTS = `
       tokenGivenToPool amountGivenToPool
       tokenTakenFromPool amountTakenFromPool
       txHash blockNumber blockTimestamp
+    }
+  }
+`;
+
+export const OLS_LIQUIDITY_EVENTS_PAGE = `
+  query OlsLiquidityEventsPage($poolId: String!, $olsAddress: String!, $limit: Int!, $offset: Int!, $orderBy: [OlsLiquidityEvent_order_by!]!) {
+    OlsLiquidityEvent(
+      where: { poolId: { _eq: $poolId }, olsAddress: { _eq: $olsAddress } }
+      order_by: $orderBy
+      limit: $limit
+      offset: $offset
+    ) {
+      id chainId direction caller
+      tokenGivenToPool amountGivenToPool
+      tokenTakenFromPool amountTakenFromPool
+      txHash blockNumber blockTimestamp
+    }
+  }
+`;
+
+export const OLS_LIQUIDITY_EVENTS_COUNT = `
+  query OlsLiquidityEventsCount($poolId: String!, $olsAddress: String!, $limit: Int!, $offset: Int!) {
+    OlsLiquidityEvent(
+      where: { poolId: { _eq: $poolId }, olsAddress: { _eq: $olsAddress } }
+      limit: $limit
+      offset: $offset
+    ) {
+      id
     }
   }
 `;

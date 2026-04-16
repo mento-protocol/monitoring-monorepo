@@ -22,10 +22,16 @@ import {
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
   POOL_LIQUIDITY,
+  POOL_LIQUIDITY_COUNT,
+  POOL_LIQUIDITY_PAGE,
   POOL_REBALANCES,
+  POOL_REBALANCES_COUNT,
+  POOL_REBALANCES_PAGE,
   POOL_RESERVES,
   POOL_SNAPSHOTS_CHART,
   POOL_SWAPS,
+  POOL_SWAPS_COUNT,
+  POOL_SWAPS_PAGE,
   TRADING_LIMITS,
 } from "@/lib/queries";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
@@ -342,17 +348,28 @@ beforeEach(() => {
         return makeGqlResult({ TradingLimit: [] satisfies TradingLimit[] });
       if (query === POOL_DEPLOYMENT)
         return makeGqlResult({ FactoryDeployment: [{ txHash: "0xdeploy" }] });
-      if (query === POOL_SWAPS) return makeGqlResult({ SwapEvent: swaps });
+      if (query === POOL_SWAPS || query === POOL_SWAPS_PAGE)
+        return makeGqlResult({ SwapEvent: swaps });
+      if (query === POOL_SWAPS_COUNT)
+        return makeGqlResult({ SwapEvent: swaps.map((s) => ({ id: s.id })) });
       if (query === POOL_SNAPSHOTS_CHART)
         return makeGqlResult({ PoolSnapshot: poolSnapshots });
       if (query === POOL_DAILY_SNAPSHOTS_CHART)
         return makeGqlResult({ PoolDailySnapshot: poolSnapshots });
       if (query === POOL_RESERVES)
         return makeGqlResult({ ReserveUpdate: reserves });
-      if (query === POOL_REBALANCES)
+      if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)
         return makeGqlResult({ RebalanceEvent: rebalances });
-      if (query === POOL_LIQUIDITY)
+      if (query === POOL_REBALANCES_COUNT)
+        return makeGqlResult({
+          RebalanceEvent: rebalances.map((r) => ({ id: r.id })),
+        });
+      if (query === POOL_LIQUIDITY || query === POOL_LIQUIDITY_PAGE)
         return makeGqlResult({ LiquidityEvent: liquidity });
+      if (query === POOL_LIQUIDITY_COUNT)
+        return makeGqlResult({
+          LiquidityEvent: liquidity.map((l) => ({ id: l.id })),
+        });
       if (query === ORACLE_SNAPSHOTS)
         return makeGqlResult({
           OracleSnapshot: oracleRows.map((row, index) => ({
@@ -720,17 +737,28 @@ describe("Pool detail tab search", () => {
           return makeGqlResult({
             FactoryDeployment: [{ txHash: "0xdeploy" }],
           });
-        if (query === POOL_SWAPS) return makeGqlResult({ SwapEvent: swaps });
+        if (query === POOL_SWAPS || query === POOL_SWAPS_PAGE)
+          return makeGqlResult({ SwapEvent: swaps });
+        if (query === POOL_SWAPS_COUNT)
+          return makeGqlResult({ SwapEvent: swaps.map((s) => ({ id: s.id })) });
         if (query === POOL_SNAPSHOTS_CHART)
           return makeGqlResult({ PoolSnapshot: poolSnapshots });
         if (query === POOL_DAILY_SNAPSHOTS_CHART)
           return makeGqlResult({ PoolDailySnapshot: poolSnapshots });
         if (query === POOL_RESERVES)
           return makeGqlResult({ ReserveUpdate: reserves });
-        if (query === POOL_REBALANCES)
+        if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)
           return makeGqlResult({ RebalanceEvent: rebalances });
-        if (query === POOL_LIQUIDITY)
+        if (query === POOL_REBALANCES_COUNT)
+          return makeGqlResult({
+            RebalanceEvent: rebalances.map((r) => ({ id: r.id })),
+          });
+        if (query === POOL_LIQUIDITY || query === POOL_LIQUIDITY_PAGE)
           return makeGqlResult({ LiquidityEvent: liquidity });
+        if (query === POOL_LIQUIDITY_COUNT)
+          return makeGqlResult({
+            LiquidityEvent: liquidity.map((l) => ({ id: l.id })),
+          });
         if (query === ORACLE_SNAPSHOTS)
           return makeGqlResult({
             OracleSnapshot: oracleRows.map((row, index) => ({
