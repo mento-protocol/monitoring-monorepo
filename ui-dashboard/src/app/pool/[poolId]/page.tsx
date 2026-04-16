@@ -32,11 +32,20 @@ import {
   formatBlock,
   formatTimestamp,
   formatWei,
+  getSwapDirection,
   normalizePoolIdForChain,
   parseWei,
   parseOraclePriceToNumber,
   relativeTime,
+  toPercent,
 } from "@/lib/format";
+import {
+  DEFAULT_PAGE_SIZE,
+  ENVIO_MAX_ROWS,
+  SEARCH_BOOTSTRAP_LIMIT,
+  SEARCH_MAX_LIMIT,
+} from "@/lib/constants";
+import { buildOrderBy } from "@/lib/table-sort";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import { useGQL } from "@/lib/graphql";
 import {
@@ -678,33 +687,26 @@ function SwapsTab({
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
+  const dec0 = pool?.token0Decimals ?? 18;
+  const dec1 = pool?.token1Decimals ?? 18;
+
   const filteredSwaps = useMemo(() => {
     if (!query) return swaps;
     return swaps.filter((s) => {
-      const soldToken0 = BigInt(s.amount0In) > BigInt(0);
-      const soldAmt = soldToken0 ? s.amount0In : s.amount1In;
-      const boughtAmt = soldToken0 ? s.amount1Out : s.amount0Out;
-      const soldSym = soldToken0 ? sym0 : sym1;
-      const boughtSym = soldToken0 ? sym1 : sym0;
-      const soldDec = soldToken0
-        ? (pool?.token0Decimals ?? 18)
-        : (pool?.token1Decimals ?? 18);
-      const boughtDec = soldToken0
-        ? (pool?.token1Decimals ?? 18)
-        : (pool?.token0Decimals ?? 18);
+      const d = getSwapDirection(s, sym0, sym1, dec0, dec1);
 
       return matchesRowSearch(query, [
         s.txHash,
         ...addressSearchTerms(s.sender, getName, getTags),
         ...addressSearchTerms(s.recipient, getName, getTags),
-        soldSym,
-        boughtSym,
-        formatWei(soldAmt, soldDec),
-        formatWei(boughtAmt, boughtDec),
+        d.soldSym,
+        d.boughtSym,
+        formatWei(d.soldAmt, d.soldDec),
+        formatWei(d.boughtAmt, d.boughtDec),
         s.blockNumber,
       ]);
     });
-  }, [swaps, query, sym0, sym1, pool, getName, getTags]);
+  }, [swaps, query, sym0, sym1, dec0, dec1, getName, getTags]);
 
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
@@ -766,17 +768,7 @@ function SwapsTab({
           </thead>
           <tbody>
             {filteredSwaps.map((s) => {
-              const soldToken0 = BigInt(s.amount0In) > BigInt(0);
-              const soldAmt = soldToken0 ? s.amount0In : s.amount1In;
-              const boughtAmt = soldToken0 ? s.amount1Out : s.amount0Out;
-              const soldSym = soldToken0 ? sym0 : sym1;
-              const boughtSym = soldToken0 ? sym1 : sym0;
-              const soldDec = soldToken0
-                ? (pool?.token0Decimals ?? 18)
-                : (pool?.token1Decimals ?? 18);
-              const boughtDec = soldToken0
-                ? (pool?.token1Decimals ?? 18)
-                : (pool?.token0Decimals ?? 18);
+              const d = getSwapDirection(s, sym0, sym1, dec0, dec1);
               return (
                 <Row key={s.id}>
                   <TxHashCell txHash={s.txHash} />
@@ -790,10 +782,10 @@ function SwapsTab({
                   />
                   <SenderCell address={s.recipient} />
                   <Td mono small align="right">
-                    {formatWei(soldAmt, soldDec)} {soldSym}
+                    {formatWei(d.soldAmt, d.soldDec)} {d.soldSym}
                   </Td>
                   <Td mono small align="right">
-                    {formatWei(boughtAmt, boughtDec)} {boughtSym}
+                    {formatWei(d.boughtAmt, d.boughtDec)} {d.boughtSym}
                   </Td>
                   <td className="hidden md:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
                     {formatBlock(s.blockNumber)}
@@ -1464,37 +1456,11 @@ function LpsTab({
   );
 }
 
-// Server-sortable columns (mapped to Hasura order_by fields)
 type OracleSortCol =
   | "timestamp"
   | "oracleOk"
   | "oraclePrice"
   | "priceDifference";
-
-const ORACLE_PAGE_SIZE = 25;
-// Before the aggregate count arrives, fetch a bounded first window so search
-// works immediately.
-const ORACLE_SEARCH_BOOTSTRAP_LIMIT = 500;
-// Keep client-side search bounded even after count resolves.
-const ORACLE_SEARCH_MAX_LIMIT = 2000;
-
-/**
- * Build a stable Hasura order_by array. The primary sort is the chosen column;
- * id is always appended as a unique tiebreaker so page boundaries remain
- * deterministic even when multiple rows share the same timestamp or sort key.
- */
-function buildOrderBy(
-  col: OracleSortCol,
-  dir: "asc" | "desc",
-): Array<Partial<Record<string, "asc" | "desc">>> {
-  const primary: Partial<Record<string, "asc" | "desc">> = { [col]: dir };
-  if (col === "timestamp") return [primary, { id: "asc" }];
-  // Secondary: timestamp desc; tertiary: id asc (unique) for full stability.
-  return [primary, { timestamp: "desc" }, { id: "asc" }];
-}
-
-// Envio caps queries at 1000 rows — use this as the count query limit.
-const ENVIO_MAX_ROWS = 1000;
 
 function OracleTab({
   poolId,
@@ -1539,7 +1505,7 @@ function OracleTab({
 
   // Clamp page to valid range once total is known, so a stale page
   // index never leaves the user stranded past the last page.
-  const totalPages = total > 0 ? Math.ceil(total / ORACLE_PAGE_SIZE) : 1;
+  const totalPages = total > 0 ? Math.ceil(total / DEFAULT_PAGE_SIZE) : 1;
   const page = Math.max(1, Math.min(rawPage, totalPages));
   const setPage = React.useCallback((p: number) => setRawPage(p), []);
 
@@ -1550,12 +1516,10 @@ function OracleTab({
   // regardless of the current table sort column.
   const isSearching = query.length > 0;
   const searchFetchLimit =
-    total > 0
-      ? Math.min(total, ORACLE_SEARCH_MAX_LIMIT)
-      : ORACLE_SEARCH_BOOTSTRAP_LIMIT;
-  const fetchLimit = isSearching ? searchFetchLimit : ORACLE_PAGE_SIZE;
-  const isSearchCapped = isSearching && total > ORACLE_SEARCH_MAX_LIMIT;
-  const fetchOffset = isSearching ? 0 : (page - 1) * ORACLE_PAGE_SIZE;
+    total > 0 ? Math.min(total, SEARCH_MAX_LIMIT) : SEARCH_BOOTSTRAP_LIMIT;
+  const fetchLimit = isSearching ? searchFetchLimit : DEFAULT_PAGE_SIZE;
+  const isSearchCapped = isSearching && total > SEARCH_MAX_LIMIT;
+  const fetchOffset = isSearching ? 0 : (page - 1) * DEFAULT_PAGE_SIZE;
   // Table sort (user-controlled)
   const tableOrderBy = useMemo(
     () => buildOrderBy(sortCol, sortDir),
@@ -1792,7 +1756,7 @@ function OracleTab({
           {!isSearching && (
             <Pagination
               page={page}
-              pageSize={ORACLE_PAGE_SIZE}
+              pageSize={DEFAULT_PAGE_SIZE}
               total={total}
               onPageChange={setPage}
             />
@@ -1806,13 +1770,13 @@ function OracleTab({
           {!countError && isSearchCapped && (
             <p className="px-1 pt-1 text-xs text-amber-400">
               Search is limited to the most recent{" "}
-              {ORACLE_SEARCH_MAX_LIMIT.toLocaleString()} snapshots.
+              {SEARCH_MAX_LIMIT.toLocaleString()} snapshots.
             </p>
           )}
           {countError && isSearching && (
             <p className="px-1 pt-1 text-xs text-amber-400">
               Could not load total count — search covers the most recent{" "}
-              {ORACLE_SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} snapshots only.
+              {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} snapshots only.
             </p>
           )}
           {countError && !isSearching && (
@@ -1912,22 +1876,6 @@ export function OlsStatusPanel({
 
   const debtTokenSym = tokenSymbol(network, olsPool.debtToken || null);
   const debtTokenSide = getDebtTokenSideLabel(pool, olsPool.debtToken);
-
-  // Incentives: raw uint64, FEE_DENOMINATOR = 1e18 in the contract.
-  // percentage = value / 1e18 * 100. With 4 decimal places: (v * 10000) / 1e16.
-  // Sanity: v=1e18 (100%) → 1e22/1e16 = 1e6 scaled → integer=100, frac=0 → "100.0000%" ✓
-  //         v=1e15 (0.1%) → 1e19/1e16 = 1000 scaled → integer=0, frac=1000 → "0.1000%" ✓
-  // Use BigInt to avoid precision loss on large uint64 values.
-  const toPercent = (raw: string): string => {
-    if (!raw || raw === "0") return "0.0000%";
-    const v = BigInt(raw);
-    const TEN_K = BigInt(10000);
-    const DIVISOR = BigInt("10000000000000000"); // 1e16
-    const scaled = (v * TEN_K) / DIVISOR;
-    const integer = scaled / TEN_K;
-    const frac = scaled % TEN_K;
-    return `${integer}.${String(frac).padStart(4, "0")}%`;
-  };
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-4">

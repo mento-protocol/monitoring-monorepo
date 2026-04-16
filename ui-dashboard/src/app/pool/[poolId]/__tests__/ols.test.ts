@@ -78,11 +78,15 @@ vi.mock("@/lib/tokens", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/format", () => ({
-  formatTimestamp: (ts: string) => `formatted:${ts}`,
-  formatWei: (val: string) => `wei:${val}`,
-  relativeTime: (ts: string) => `rel:${ts}`,
-}));
+vi.mock("@/lib/format", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/lib/format")>();
+  return {
+    ...mod,
+    formatTimestamp: (ts: string) => `formatted:${ts}`,
+    formatWei: (val: string) => `wei:${val}`,
+    relativeTime: (ts: string) => `rel:${ts}`,
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Fixtures
