@@ -60,6 +60,7 @@ import {
   POOL_LIQUIDITY_COUNT,
   POOL_LIQUIDITY_PAGE,
   POOL_LP_POSITIONS,
+  POOL_REBALANCES,
   POOL_REBALANCES_COUNT,
   POOL_REBALANCES_PAGE,
   POOL_RESERVES,
@@ -434,6 +435,7 @@ function PoolDetail() {
           <RebalancesTab
             poolId={normalizedPoolId}
             limit={limit}
+            pool={pool}
             search={activeSearch}
             onSearchChange={(value) => setTabSearch("rebalances", value)}
           />
@@ -709,6 +711,14 @@ function SwapsTab({
   );
   const snapshots = snapshotData?.PoolDailySnapshot ?? [];
 
+  const { data: rebalanceData } = useGQL<{
+    RebalanceEvent: { blockTimestamp: string }[];
+  }>(fpmmPool ? POOL_REBALANCES : null, { poolId, limit: 200 });
+  const rebalanceTimestamps = useMemo(
+    () => (rebalanceData?.RebalanceEvent ?? []).map((r) => r.blockTimestamp),
+    [rebalanceData],
+  );
+
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
@@ -748,6 +758,7 @@ function SwapsTab({
           snapshots={snapshots}
           token0Symbol={sym0}
           token1Symbol={sym1}
+          rebalanceTimestamps={rebalanceTimestamps}
         />
       )}
       {swaps.length > 0 && (
@@ -1020,14 +1031,19 @@ function ReservesTab({
 export function RebalancesTab({
   poolId,
   limit,
+  pool,
   search,
   onSearchChange,
 }: {
   poolId: string;
   limit: number;
+  pool: Pool | null;
   search: string;
   onSearchChange: (value: string) => void;
 }) {
+  const breachStart = pool?.deviationBreachStartedAt
+    ? Number(pool.deviationBreachStartedAt)
+    : 0;
   const { getName, getTags } = useAddressLabels();
   const query = normalizeSearch(search);
   const [rawPage, setRawPage] = React.useState(1);
@@ -1127,32 +1143,50 @@ export function RebalancesTab({
             </tr>
           </thead>
           <tbody>
-            {filteredRows.map((r) => (
-              <Row key={r.id}>
-                <TxHashCell txHash={r.txHash} />
-                <SenderCell address={r.sender} />
-                <TagsCell address={r.sender} className="hidden sm:table-cell" />
-                <SenderCell address={r.caller} />
-                <TagsCell address={r.caller} className="hidden sm:table-cell" />
-                <Td mono small align="right">
-                  {Number(r.priceDifferenceBefore).toLocaleString()}
-                </Td>
-                <Td mono small align="right">
-                  {Number(r.priceDifferenceAfter).toLocaleString()}
-                </Td>
-                <Td mono small align="right">
-                  {r.effectivenessRatio
-                    ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
-                    : "—"}
-                </Td>
-                <Td mono small muted align="right">
-                  {formatBlock(r.blockNumber)}
-                </Td>
-                <Td small muted title={formatTimestamp(r.blockTimestamp)}>
-                  {relativeTime(r.blockTimestamp)}
-                </Td>
-              </Row>
-            ))}
+            {filteredRows.map((r) => {
+              const duringBreach =
+                breachStart > 0 && Number(r.blockTimestamp) >= breachStart;
+              return (
+                <Row key={r.id}>
+                  <TxHashCell txHash={r.txHash} />
+                  <SenderCell address={r.sender} />
+                  <TagsCell
+                    address={r.sender}
+                    className="hidden sm:table-cell"
+                  />
+                  <SenderCell address={r.caller} />
+                  <TagsCell
+                    address={r.caller}
+                    className="hidden sm:table-cell"
+                  />
+                  <Td mono small align="right">
+                    {Number(r.priceDifferenceBefore).toLocaleString()}
+                  </Td>
+                  <Td mono small align="right">
+                    {Number(r.priceDifferenceAfter).toLocaleString()}
+                  </Td>
+                  <Td mono small align="right">
+                    {r.effectivenessRatio
+                      ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
+                      : "—"}
+                  </Td>
+                  <Td mono small muted align="right">
+                    {formatBlock(r.blockNumber)}
+                  </Td>
+                  <Td small muted title={formatTimestamp(r.blockTimestamp)}>
+                    {relativeTime(r.blockTimestamp)}
+                    {duringBreach && (
+                      <span
+                        className="ml-1 text-red-400"
+                        title="Occurred during deviation breach"
+                      >
+                        !
+                      </span>
+                    )}
+                  </Td>
+                </Row>
+              );
+            })}
           </tbody>
         </Table>
       )}
@@ -1822,10 +1856,19 @@ function OracleTab({
 
   return (
     <>
+      {pool?.deviationBreachStartedAt &&
+        Number(pool.deviationBreachStartedAt) > 0 && (
+          <div className="rounded-lg border border-red-800/50 bg-red-900/20 px-4 py-2.5 mb-4 text-sm text-red-300">
+            Deviation breach started{" "}
+            {relativeTime(pool.deviationBreachStartedAt)} — oracle price
+            deviation exceeds the rebalance threshold.
+          </div>
+        )}
       <OracleChart
         snapshots={chartRows}
         token0Symbol={sym0}
         token1Symbol={sym1}
+        breachStartedAt={pool?.deviationBreachStartedAt}
       />
       <TableSearch
         value={search}
