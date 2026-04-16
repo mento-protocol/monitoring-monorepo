@@ -53,9 +53,7 @@ export function formatBlock(bn: string): string {
   return Number(bn).toLocaleString();
 }
 
-export function isValidAddress(value: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(value);
-}
+export { isValidAddress } from "@/lib/validators";
 
 // Pool ID utilities live in lib/pool-id.ts — re-exported here for backward compatibility.
 export {

@@ -14,7 +14,7 @@
  * See: https://github.com/mento-protocol/monitoring-monorepo/pull/111
  */
 
-import { isValidAddress } from "@/lib/format";
+import { isValidAddress } from "@/lib/validators";
 
 /**
  * Returns true if the value matches the `{chainId}-{0x...}` namespaced format.
