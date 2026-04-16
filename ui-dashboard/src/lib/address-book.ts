@@ -19,57 +19,26 @@ export type AddressBookRow = {
   name: string;
   tags: string[];
   isCustom: boolean;
-  /** Network this contract label belongs to; null for custom-only rows */
-  network: Network | null;
+  /** Network this row belongs to — every row is now chain-scoped. */
+  network: Network;
 };
 
 /**
- * Merges contract rows (from all networks) and custom rows (from the selected
- * chain only). Custom rows take precedence over contract rows for the same
- * (selectedChainId, address) pair; contract rows from other chains are always
- * kept.
+ * Merge contract rows and custom rows into a single de-duped list keyed by
+ * `(chainId, lowercaseAddress)`. Custom rows take precedence when both sides
+ * have an entry for the same pair.
  */
 export function buildAddressBookRows(
   contractRows: AddressBookRow[],
   customRows: AddressBookRow[],
-  selectedChainId: number,
 ): AddressBookRow[] {
-  // Key by (chainId, normalised address) — matches custom label storage scope
   const customKeys = new Set(
-    customRows.map((r) => `${selectedChainId}:${r.address.toLowerCase()}`),
+    customRows.map((r) => `${r.network.chainId}:${r.address.toLowerCase()}`),
   );
   const filteredContractRows = contractRows.filter(
-    (r) =>
-      !customKeys.has(`${r.network?.chainId ?? -1}:${r.address.toLowerCase()}`),
+    (r) => !customKeys.has(`${r.network.chainId}:${r.address.toLowerCase()}`),
   );
   return [...customRows, ...filteredContractRows];
-}
-
-/**
- * Returns true when the row should be displayed as a custom label.
- * isCustomLabel() is scoped to the selected chain, so it is only consulted
- * for rows on that chain to avoid false positives on other chains.
- */
-export function resolveIsCustom(
-  row: AddressBookRow,
-  selectedChainId: number,
-  isCustomLabel: (address: string) => boolean,
-): boolean {
-  const isOnSelectedChain =
-    row.network === null || row.network.chainId === selectedChainId;
-  return row.isCustom || (isOnSelectedChain && isCustomLabel(row.address));
-}
-
-/**
- * Returns true when this row can be edited on the current chain.
- * False for contract rows from a different chain — editing would write to the
- * wrong Redis hash via the chain-scoped AddressLabelEditor.
- */
-export function resolveCanEdit(
-  row: AddressBookRow,
-  selectedChainId: number,
-): boolean {
-  return row.network === null || row.network.chainId === selectedChainId;
 }
 
 /**

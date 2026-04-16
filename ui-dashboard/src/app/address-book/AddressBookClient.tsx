@@ -1,119 +1,98 @@
 "use client";
 
 import { useRef, useState, useCallback, useMemo } from "react";
-import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
 import { TagPills } from "@/components/tag-pills";
+import { ChainIcon } from "@/components/chain-icon";
 import { explorerAddressUrl } from "@/lib/tokens";
 import { truncateAddress } from "@/lib/format";
-import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 import {
-  buildAddressBookRows,
-  resolveIsCustom,
-  resolveCanEdit,
-  type AddressBookRow,
-} from "@/lib/address-book";
+  NETWORKS,
+  NETWORK_IDS,
+  isConfiguredNetworkId,
+  networkIdForChainId,
+  type Network,
+} from "@/lib/networks";
+import { buildAddressBookRows, type AddressBookRow } from "@/lib/address-book";
 
-// AddressBookRow is imported from @/lib/address-book (shared with tests).
-// Local alias for brevity.
 type AddressRow = AddressBookRow;
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
+type EditTarget = { address: string; chainId: number };
 
 export default function AddressBookPage({
   canEdit: userCanEdit = false,
 }: {
-  /** Server-determined: true only for authenticated @mentolabs.xyz sessions */
   canEdit?: boolean;
 }) {
-  const { network: selectedNetwork } = useNetwork();
-  const {
-    customEntries,
-    getName,
-    getTags,
-    isCustom: isCustomLabel,
-    getEntry,
-    isLoading,
-    error,
-  } = useAddressLabels();
+  const { customEntries, getEntry, isLoading, error } = useAddressLabels();
 
   const [search, setSearch] = useState("");
-  const [editingAddress, setEditingAddress] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [addingNew, setAddingNew] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Aggregate contract labels from ALL configured non-local networks.
-  // Each address can appear in multiple networks (e.g. same token on mainnet
-  // and testnet) — we emit one row per (address, network) pair.
+  // Contract labels from every configured network — one row per (chainId, address).
   const contractRows = useMemo<AddressRow[]>(() => {
-    const configuredIds = NETWORK_IDS.filter(isConfiguredNetworkId);
     const rows: AddressRow[] = [];
-    const seen = new Set<string>(); // dedupe address within each network
-
-    for (const id of configuredIds) {
+    const seen = new Set<string>();
+    for (const id of NETWORK_IDS.filter(isConfiguredNetworkId)) {
       const net = NETWORKS[id];
-      for (const [address, label] of Object.entries(net.addressLabels)) {
-        const key = `${id}:${address}`;
+      for (const [address, name] of Object.entries(net.addressLabels)) {
+        const key = `${net.chainId}:${address.toLowerCase()}`;
         if (seen.has(key)) continue;
         seen.add(key);
         rows.push({
-          key,
+          key: `${id}:${address}`,
           address,
-          name: label,
+          name,
           tags: [],
           isCustom: false,
           network: net,
         });
       }
     }
-
     return rows;
   }, []);
 
-  // Custom labels are scoped to the selected network (storage is per-chainId).
-  // Using getLabel() is correct here since these ARE on the selected network.
+  // Custom rows are already cross-chain — each row carries its own chainId.
   const customRows = useMemo<AddressRow[]>(
     () =>
-      customEntries.map((r) => ({
-        key: `custom:${r.address}`,
-        address: r.address,
-        name: getName(r.address),
-        tags: getTags(r.address),
-        isCustom: true,
-        network: selectedNetwork,
-      })),
-    [customEntries, getName, getTags, selectedNetwork],
+      customEntries.flatMap((r) => {
+        const net = networkForChainId(r.chainId);
+        if (!net) return [];
+        return [
+          {
+            key: `custom:${r.chainId}:${r.address}`,
+            address: r.address,
+            name: r.name,
+            tags: r.tags,
+            isCustom: true,
+            network: net,
+          },
+        ];
+      }),
+    [customEntries],
   );
 
-  // Merge: custom labels on the selected network take precedence over contract
-  // rows for the same (selectedChainId, address) pair. Contract rows from
-  // OTHER networks are always shown — dedupe is per (chainId, address).
   const allRows = useMemo<AddressRow[]>(
     () =>
-      buildAddressBookRows(
-        contractRows,
-        customRows,
-        selectedNetwork.chainId,
-      ).filter((row) => {
+      buildAddressBookRows(contractRows, customRows).filter((row) => {
         if (!search) return true;
         const q = search.toLowerCase();
         return (
           row.address.toLowerCase().includes(q) ||
           row.name.toLowerCase().includes(q) ||
-          (row.network?.label.toLowerCase().includes(q) ?? false) ||
+          row.network.label.toLowerCase().includes(q) ||
           row.tags.some((t) => t.toLowerCase().includes(q))
         );
       }),
-    [customRows, contractRows, selectedNetwork.chainId, search],
+    [customRows, contractRows, search],
   );
 
   const handleExport = useCallback(() => {
-    // Export all chains
     const a = document.createElement("a");
     a.href = `/api/address-labels/export`;
     a.download = "";
@@ -135,14 +114,10 @@ export default function AddressBookPage({
       const isCsv =
         file.name.toLowerCase().endsWith(".csv") ||
         file.type === "text/csv" ||
-        // text/plain is treated as CSV only when the filename confirms it —
-        // some OSes send text/plain for .csv files, but JSON files can also
-        // arrive as text/plain and should still go through the JSON path.
         (file.type === "text/plain" &&
           file.name.toLowerCase().endsWith(".csv"));
 
       if (isCsv) {
-        // Send CSV directly — backend parses it and imports into all mainnet chains.
         try {
           const text = await file.text();
           const res = await fetch("/api/address-labels/import", {
@@ -203,11 +178,7 @@ export default function AddressBookPage({
         <div>
           <h1 className="text-xl font-bold text-white">Address Book</h1>
           <p className="mt-1 text-sm text-slate-400">
-            Contract labels across all chains. Custom labels for{" "}
-            <span className="text-slate-300">
-              {selectedNetwork.label.replace(/ \(.*\)$/, "")}
-            </span>{" "}
-            — use the network selector to edit labels on other chains.
+            Contract and custom labels across every chain — one unified view.
           </p>
         </div>
         {userCanEdit && (
@@ -320,6 +291,9 @@ export default function AddressBookPage({
             <thead>
               <tr className="border-b border-slate-800 bg-slate-900/50">
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Chain
+                </th>
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Address
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -327,9 +301,6 @@ export default function AddressBookPage({
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Tags
-                </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Chain
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Notes
@@ -347,37 +318,27 @@ export default function AddressBookPage({
             </thead>
             <tbody>
               {allRows.map((row) => {
-                // entry/isCustom are only meaningful on the selected network —
-                // only fetch them for custom rows (which ARE on selectedNetwork).
-                const entry = row.isCustom ? getEntry(row.address) : undefined;
-                // isCustomLabel() is scoped to selectedNetwork; only use it for
-                // Use shared helpers (also used in tests) for consistent resolution.
-                const isCustomResolved = resolveIsCustom(
-                  row,
-                  selectedNetwork.chainId,
-                  isCustomLabel,
-                );
-                const canEdit =
-                  userCanEdit && resolveCanEdit(row, selectedNetwork.chainId);
-                const net = row.network ?? selectedNetwork;
-
+                const entry = row.isCustom
+                  ? getEntry(row.address, row.network.chainId)
+                  : undefined;
                 return (
                   <AddressTableRow
-                    key={`${row.network?.id ?? selectedNetwork.id}:${row.address}`}
+                    key={row.key}
                     address={row.address}
                     name={row.name}
                     tags={row.tags}
-                    networkLabel={
-                      row.network
-                        ? row.network.label.replace(/ \(.*\)$/, "")
-                        : null
-                    }
+                    network={row.network}
                     notes={entry?.notes}
                     isPublic={entry?.isPublic}
-                    isCustom={isCustomResolved}
-                    canEdit={canEdit}
-                    explorerUrl={explorerAddressUrl(net, row.address)}
-                    onEdit={() => setEditingAddress(row.address)}
+                    isCustom={row.isCustom}
+                    canEdit={userCanEdit}
+                    explorerUrl={explorerAddressUrl(row.network, row.address)}
+                    onEdit={() =>
+                      setEditTarget({
+                        address: row.address,
+                        chainId: row.network.chainId,
+                      })
+                    }
                   />
                 );
               })}
@@ -390,24 +351,35 @@ export default function AddressBookPage({
         <AddressLabelEditor address="" onClose={() => setAddingNew(false)} />
       )}
 
-      {userCanEdit && editingAddress && (
+      {userCanEdit && editTarget && (
         <AddressLabelEditor
-          address={editingAddress}
+          address={editTarget.address}
+          chainId={editTarget.chainId}
           initial={
-            getEntry(editingAddress) ??
-            (selectedNetwork.addressLabels[editingAddress]
-              ? {
-                  name: selectedNetwork.addressLabels[editingAddress],
-                  tags: [],
-                  updatedAt: new Date().toISOString(),
-                }
-              : undefined)
+            getEntry(editTarget.address, editTarget.chainId) ??
+            contractInitial(editTarget.address, editTarget.chainId)
           }
-          onClose={() => setEditingAddress(null)}
+          onClose={() => setEditTarget(null)}
         />
       )}
     </div>
   );
+}
+
+function networkForChainId(chainId: number): Network | null {
+  const id = networkIdForChainId(chainId);
+  return id ? NETWORKS[id] : null;
+}
+
+function contractInitial(address: string, chainId: number) {
+  const net = networkForChainId(chainId);
+  const name = net?.addressLabels[address];
+  if (!name) return undefined;
+  return {
+    name,
+    tags: [],
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -418,11 +390,10 @@ type AddressRowProps = {
   address: string;
   name: string;
   tags: string[];
-  networkLabel: string | null;
+  network: Network;
   notes?: string;
   isPublic?: boolean;
   isCustom: boolean;
-  /** False for contract rows on non-selected networks — edit would write to wrong chain */
   canEdit: boolean;
   explorerUrl: string;
   onEdit: () => void;
@@ -432,7 +403,7 @@ function AddressTableRow({
   address,
   name,
   tags,
-  networkLabel,
+  network,
   notes,
   isPublic,
   isCustom,
@@ -442,6 +413,14 @@ function AddressTableRow({
 }: AddressRowProps) {
   return (
     <tr className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-2">
+          <ChainIcon network={network} />
+          <span className="text-xs text-slate-400">
+            {network.label.replace(/ \(.*\)$/, "")}
+          </span>
+        </div>
+      </td>
       <td className="px-4 py-3">
         <a
           href={explorerUrl}
@@ -470,9 +449,6 @@ function AddressTableRow({
           <span className="text-xs text-slate-600">—</span>
         )}
       </td>
-      <td className="px-4 py-3 text-xs text-slate-400">
-        {networkLabel ?? <span className="text-slate-600">All chains</span>}
-      </td>
       <td className="px-4 py-3 text-xs text-slate-400 max-w-xs truncate">
         {notes ?? <span className="text-slate-600">—</span>}
       </td>
@@ -500,16 +476,7 @@ function AddressTableRow({
           ))}
       </td>
       <td className="px-4 py-3">
-        {!canEdit ? (
-          <button
-            type="button"
-            disabled
-            aria-label="Switch to this network to edit"
-            className="text-xs text-slate-700 cursor-not-allowed"
-          >
-            Switch network
-          </button>
-        ) : isCustom ? (
+        {!canEdit ? null : isCustom ? (
           <button
             type="button"
             onClick={onEdit}

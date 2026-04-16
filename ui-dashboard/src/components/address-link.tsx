@@ -5,28 +5,41 @@ import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
 import { explorerAddressUrl } from "@/lib/tokens";
+import { NETWORKS, networkIdForChainId } from "@/lib/networks";
 
 type Props = {
   address: string;
   /** When true, hides the inline edit pencil (e.g. for contract addresses in read-only views) */
   readOnly?: boolean;
+  /**
+   * Overrides the network context (useful in multichain tables where a row's
+   * chain differs from the page-level network). Falls back to `useNetwork()`
+   * when absent.
+   */
+  chainId?: number;
 };
 
-export function AddressLink({ address, readOnly = false }: Props) {
-  const { network } = useNetwork();
+export function AddressLink({ address, readOnly = false, chainId }: Props) {
+  const { network: contextNetwork } = useNetwork();
   const { getName, hasName, isCustom, getEntry } = useAddressLabels();
   const [editing, setEditing] = useState(false);
 
-  const label = getName(address);
-  const labeled = hasName(address);
-  const custom = isCustom(address);
-  const entry = getEntry(address);
+  const resolvedNetwork = (() => {
+    if (chainId == null) return contextNetwork;
+    const id = networkIdForChainId(chainId);
+    return id ? NETWORKS[id] : contextNetwork;
+  })();
+
+  const label = getName(address, chainId);
+  const labeled = hasName(address, chainId);
+  const custom = isCustom(address, chainId);
+  const entry = getEntry(address, chainId);
 
   return (
     <>
       <span className="group inline-flex items-center gap-1">
         <a
-          href={explorerAddressUrl(network, address)}
+          href={explorerAddressUrl(resolvedNetwork, address)}
           target="_blank"
           rel="noopener noreferrer"
           title={address}
@@ -59,6 +72,7 @@ export function AddressLink({ address, readOnly = false }: Props) {
         <AddressLabelEditor
           address={address}
           initial={entry}
+          chainId={chainId}
           onClose={() => setEditing(false)}
         />
       )}

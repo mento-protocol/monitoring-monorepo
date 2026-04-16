@@ -95,10 +95,10 @@ import type {
   SwapEvent,
   TradingLimit,
 } from "@/lib/types";
-import { NetworkAwareLink } from "@/components/network-aware-link";
+import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import React, { Suspense, useCallback, useEffect, useMemo } from "react";
-import { buildPoolDetailUrl, buildPoolNotFoundDest } from "@/lib/routing";
+import { buildPoolDetailUrl, POOL_NOT_FOUND_DEST } from "@/lib/routing";
 
 export default function PoolDetailPage() {
   return (
@@ -310,14 +310,11 @@ function PoolDetail() {
     searchParams,
   ]);
 
-  // Pool not found on the current network → redirect to the active
-  // network's /pools. Using network.id (not the pool id's chainId) honors a
-  // selector change the user may have just made.
   useEffect(() => {
     if (!poolLoading && !poolErr && !pool) {
-      router.replace(buildPoolNotFoundDest(network.id));
+      router.replace(POOL_NOT_FOUND_DEST);
     }
-  }, [pool, poolLoading, poolErr, router, network.id]);
+  }, [pool, poolLoading, poolErr, router]);
 
   const { data: limitsData } = useGQL<{ TradingLimit: TradingLimit[] }>(
     TRADING_LIMITS,
@@ -354,9 +351,9 @@ function PoolDetail() {
   return (
     <div className="space-y-6">
       <nav aria-label="Breadcrumb" className="text-sm text-slate-400">
-        <NetworkAwareLink href="/pools" className="hover:text-indigo-400">
+        <Link href="/pools" className="hover:text-indigo-400">
           Pools
-        </NetworkAwareLink>
+        </Link>
         <span className="mx-2">/</span>
         <span className="text-slate-200">
           {pool ? (
