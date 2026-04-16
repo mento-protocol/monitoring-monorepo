@@ -351,7 +351,10 @@ function PoolDetail() {
         <>
           <PoolHeader pool={pool} deployTxHash={deployTxHash} />
           <HealthPanel pool={pool} />
-          <LimitPanel pool={pool} tradingLimits={tradingLimits} />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <ReservesPanel pool={pool} />
+            <LimitPanel pool={pool} tradingLimits={tradingLimits} />
+          </div>
         </>
       )}
 
@@ -959,7 +962,6 @@ function ReservesTab({
 
   return (
     <>
-      {pool && <ReservesPanel pool={pool} />}
       <ReserveChart
         rows={rows}
         token0={pool?.token0 ?? null}
