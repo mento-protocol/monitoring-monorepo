@@ -44,13 +44,13 @@ vi.mock("@/hooks/use-all-networks-data", () => ({
 vi.mock("@/components/global-pools-table", () => ({
   GlobalPoolsTable: ({
     entries,
-    olsPoolIds,
+    olsPoolKeys,
     volume24hByKey,
     volume7dByKey,
     tvlChangeWoWByKey,
   }: {
     entries: GlobalPoolEntry[];
-    olsPoolIds?: Set<string>;
+    olsPoolKeys?: Set<string>;
     volume24hByKey?: Map<string, number | null | undefined>;
     volume7dByKey?: Map<string, number | null | undefined>;
     tvlChangeWoWByKey?: Map<string, number | null>;
@@ -61,7 +61,7 @@ vi.mock("@/components/global-pools-table", () => ({
         {[...new Set(entries.map((e) => e.network.id))].join(",")}
       </span>
       <span data-testid="ols">
-        {olsPoolIds ? Array.from(olsPoolIds).join(",") : ""}
+        {olsPoolKeys ? Array.from(olsPoolKeys).join(",") : ""}
       </span>
       <span data-testid="vol24h-keys">
         {volume24hByKey ? Array.from(volume24hByKey.keys()).join(",") : ""}
@@ -147,6 +147,8 @@ function makeNetworkData(
     snapshotsAllTruncated: false,
     snapshotsAllDaily: [],
     snapshotsAllDailyTruncated: false,
+    tradingLimits: [],
+    olsPoolIds: new Set(),
     fees: null,
     feeTransfers: [],
     uniqueLpAddresses: null,
@@ -199,55 +201,6 @@ describe("PoolsPage multichain rendering", () => {
     expect(html).toContain("celo-mainnet,monad-mainnet");
   });
 
-  it("passes ALL_OLS_POOLS without chainId (multichain endpoint)", () => {
-    vi.mocked(useGQL).mockImplementation(
-      (query: string | null, variables?: unknown): SWRResponse => {
-        if (query?.includes("query AllOlsPools")) {
-          expect(variables).toBeUndefined();
-          return {
-            data: {
-              OlsPool: [
-                { poolId: "42220-0xpool-celo" },
-                { poolId: "143-0xpool-monad" },
-              ],
-            },
-            error: null,
-            isLoading: false,
-          } as SWRResponse;
-        }
-        if (query?.includes("query RecentSwaps")) {
-          expect(variables).toEqual({ limit: 25 });
-          return baseSwapsResult as SWRResponse;
-        }
-        return baseSwapsResult as SWRResponse;
-      },
-    );
-
-    const html = renderToStaticMarkup(<PoolsPage />);
-    expect(html).toContain("42220-0xpool-celo,143-0xpool-monad");
-  });
-
-  it("surfaces OLS-query errors with degraded-state feedback", () => {
-    vi.mocked(useGQL).mockImplementation(
-      (query: string | null): SWRResponse => {
-        if (query?.includes("query AllOlsPools")) {
-          return {
-            data: undefined,
-            error: new Error("Hasura timeout"),
-            isLoading: false,
-          } as SWRResponse;
-        }
-        return baseSwapsResult as SWRResponse;
-      },
-    );
-
-    const html = renderToStaticMarkup(<PoolsPage />);
-    expect(html).toContain("OLS status unavailable right now: Hasura timeout");
-    expect(html).toContain(
-      "Pool list is loaded, but OLS badges may be incomplete",
-    );
-  });
-
   it("accepts a Monad (foreign-chain) namespaced pool filter without blocking", () => {
     mockSearchParams = new URLSearchParams(
       "pool=143-0xBC69212B8E4D445B2307C9D32Dd68E2A4Df00115",
@@ -256,13 +209,6 @@ describe("PoolsPage multichain rendering", () => {
     const poolSwapsSeen: unknown[] = [];
     vi.mocked(useGQL).mockImplementation(
       (query: string | null, variables?: unknown): SWRResponse => {
-        if (query?.includes("query AllOlsPools")) {
-          return {
-            data: { OlsPool: [] },
-            error: null,
-            isLoading: false,
-          } as SWRResponse;
-        }
         if (query?.includes("query PoolSwaps")) {
           poolSwapsSeen.push(variables);
           return baseSwapsResult as SWRResponse;

@@ -12,11 +12,8 @@ import {
 } from "@/lib/volume";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
-import {
-  GlobalPoolsTable,
-  globalPoolKey,
-  type GlobalPoolEntry,
-} from "@/components/global-pools-table";
+import { GlobalPoolsTable } from "@/components/global-pools-table";
+import { buildGlobalPoolEntries } from "@/lib/global-pool-entries";
 import { TvlOverTimeChart } from "@/components/tvl-over-time-chart";
 import { VolumeOverTimeChart } from "@/components/volume-over-time-chart";
 import { BreakdownTile } from "@/components/breakdown-tile";
@@ -103,15 +100,18 @@ function GlobalContent() {
     (netData) => netData.lpError !== null && netData.error === null,
   );
 
-  // Aggregate KPIs and per-pool volume maps in a single pass (no duplicate
-  // buildPoolVolumeMap calls).
+  // Per-pool entries, volume, WoW, trading limits, OLS — shared with pools page
   const {
-    aggregated,
-    globalEntries,
+    entries: globalEntries,
     volume24hByKey,
     volume7dByKey,
     tvlChangeWoWByKey,
-  } = useMemo(() => {
+    tradingLimitsByKey,
+    olsPoolKeys,
+  } = useMemo(() => buildGlobalPoolEntries(networkData), [networkData]);
+
+  // Aggregate KPIs across all chains for the summary tiles.
+  const aggregated = useMemo(() => {
     let totalPools = 0;
     let totalFpmmPools = 0;
     let totalTvl = 0;
@@ -121,10 +121,6 @@ function GlobalContent() {
     let tvlNow7d = 0;
     let tvlAgo7d = 0;
     let hasTvlSnapshots7d = false;
-    const allEntries: GlobalPoolEntry[] = [];
-    const allVol24h = new Map<string, number | null | undefined>();
-    const allVol7d = new Map<string, number | null | undefined>();
-    const allTvlWoW = new Map<string, number | null>();
     let totalVolumeAllTime: number | null = anyNetworkError ? null : 0;
     let totalVolume24h: number | null =
       anySnapshotsError || anyNetworkError ? null : 0;
@@ -196,8 +192,8 @@ function GlobalContent() {
         );
       }
 
-      // Windowed volume from snapshots — maps built once, reused for
-      // both KPI totals and per-pool table columns below.
+      // Windowed volume from snapshots — used only for KPI totals here.
+      // Per-pool volume maps are built by buildGlobalPoolEntries above.
       const vol24hMap =
         netData.snapshotsError === null
           ? buildPoolVolumeMap(snapshots, pools, network, netData.rates)
@@ -219,31 +215,6 @@ function GlobalContent() {
       }
       if (vol30dMap && totalVolume30d !== null) {
         totalVolume30d += sumVolumeMap(vol30dMap);
-      }
-
-      // Store per-pool volume for the table columns. WoW uses three states:
-      // explicit `null` = backend snapshot query failed (renders "N/A");
-      // absent key = no comparable 7d snapshot for this pool (renders "—");
-      // number = real WoW %.
-      for (const pool of pools) {
-        const entry: GlobalPoolEntry = {
-          pool,
-          network,
-          rates: netData.rates,
-        };
-        allEntries.push(entry);
-        const key = globalPoolKey(entry);
-        allVol24h.set(key, vol24hMap ? vol24hMap.get(pool.id) : null);
-        allVol7d.set(key, vol7dMap ? vol7dMap.get(pool.id) : null);
-
-        if (netData.snapshots7dError !== null) {
-          allTvlWoW.set(key, null);
-        } else {
-          const v = perPool7dTvl?.get(pool.id);
-          if (v && v.ago > 0) {
-            allTvlWoW.set(key, ((v.now - v.ago) / v.ago) * 100);
-          }
-        }
       }
 
       // Fees
@@ -277,32 +248,26 @@ function GlobalContent() {
         : uniqueLpSet.size;
 
     return {
-      aggregated: {
-        totalPools,
-        totalFpmmPools,
-        totalTvl,
-        totalVolumeAllTime,
-        totalVolume24h,
-        totalVolume7d,
-        totalVolume30d,
-        totalSwapsAllTime,
-        totalFeesAllTime,
-        totalFees24h,
-        totalFees7d,
-        totalFees30d,
-        totalUniqueLps,
-        tvlChange7d:
-          hasTvlSnapshots7d && tvlAgo7d > 0
-            ? ((tvlNow7d - tvlAgo7d) / tvlAgo7d) * 100
-            : null,
-        unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
-        totalUnresolvedCount,
-        isTruncated,
-      },
-      globalEntries: allEntries,
-      volume24hByKey: allVol24h,
-      volume7dByKey: allVol7d,
-      tvlChangeWoWByKey: allTvlWoW,
+      totalPools,
+      totalFpmmPools,
+      totalTvl,
+      totalVolumeAllTime,
+      totalVolume24h,
+      totalVolume7d,
+      totalVolume30d,
+      totalSwapsAllTime,
+      totalFeesAllTime,
+      totalFees24h,
+      totalFees7d,
+      totalFees30d,
+      totalUniqueLps,
+      tvlChange7d:
+        hasTvlSnapshots7d && tvlAgo7d > 0
+          ? ((tvlNow7d - tvlAgo7d) / tvlAgo7d) * 100
+          : null,
+      unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
+      totalUnresolvedCount,
+      isTruncated,
     };
   }, [
     networkData,
@@ -431,6 +396,8 @@ function GlobalContent() {
             volume24hByKey={volume24hByKey}
             volume7dByKey={volume7dByKey}
             tvlChangeWoWByKey={tvlChangeWoWByKey}
+            tradingLimitsByKey={tradingLimitsByKey}
+            olsPoolKeys={olsPoolKeys}
           />
         )}
       </section>

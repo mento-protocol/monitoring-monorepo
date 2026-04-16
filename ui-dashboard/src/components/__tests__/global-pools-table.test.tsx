@@ -143,8 +143,9 @@ describe("GlobalPoolsTable — column structure", () => {
     expect(html).toContain("24h Vol.");
     expect(html).toContain("7d Vol.");
     expect(html).toContain("Total Vol.");
-    expect(html).toContain(">Swaps<");
-    expect(html).toContain(">Rebalances<");
+    expect(html).toContain(">Fee<");
+    expect(html).toContain(">Limits<");
+    expect(html).toContain(">Strategy<");
   });
 
   it("does not render a Chain column header", () => {

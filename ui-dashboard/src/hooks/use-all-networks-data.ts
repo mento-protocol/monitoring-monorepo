@@ -6,6 +6,8 @@ import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 import type { Network } from "@/lib/networks";
 import {
   ALL_POOLS_WITH_HEALTH,
+  ALL_TRADING_LIMITS,
+  ALL_OLS_POOLS,
   POOL_DAILY_SNAPSHOTS_ALL,
   POOL_SNAPSHOTS_ALL,
   PROTOCOL_FEE_TRANSFERS_ALL,
@@ -27,6 +29,8 @@ import type {
   Pool,
   PoolSnapshotWindow,
   ProtocolFeeTransfer,
+  TradingLimit,
+  OlsPool,
 } from "@/lib/types";
 import { isFpmm, buildOracleRateMap, type OracleRateMap } from "@/lib/tokens";
 
@@ -63,6 +67,8 @@ export type NetworkData = {
   snapshotsAllDaily: PoolSnapshotWindow[];
   /** True when the daily pagination loop hit its safety cap. */
   snapshotsAllDailyTruncated: boolean;
+  tradingLimits: TradingLimit[];
+  olsPoolIds: Set<string>;
   fees: ProtocolFeeSummary | null;
   /** Raw fee transfer rows — kept for time-series bucketing on the revenue page. */
   feeTransfers: ProtocolFeeTransfer[];
@@ -109,6 +115,8 @@ const emptyNetworkData = (
   snapshotsAllTruncated: false,
   snapshotsAllDaily: [],
   snapshotsAllDailyTruncated: false,
+  tradingLimits: [],
+  olsPoolIds: new Set(),
   fees: null,
   feeTransfers: [],
   uniqueLpAddresses: null,
@@ -271,26 +279,38 @@ export async function fetchNetworkData(
     truncated: false,
     error: null,
   };
-  const [feesResult, snapshotsAllResult, snapshotsAllDailyResult, lpResult] =
-    await Promise.allSettled([
-      client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
-        PROTOCOL_FEE_TRANSFERS_ALL,
-        { chainId: network.chainId },
-      ),
-      shouldQuery
-        ? fetchAllSnapshotPages(client, poolIds)
-        : Promise.resolve(emptySnapshotPage),
-      shouldQuery
-        ? fetchAllDailySnapshotPages(client, poolIds)
-        : Promise.resolve(emptySnapshotPage),
-      fpmmPoolIds.length > 0
-        ? client.request<{
-            LiquidityPosition: { address: string }[];
-          }>(UNIQUE_LP_ADDRESSES, { poolIds: fpmmPoolIds })
-        : Promise.resolve({
-            LiquidityPosition: [] as { address: string }[],
-          }),
-    ]);
+  const [
+    feesResult,
+    snapshotsAllResult,
+    snapshotsAllDailyResult,
+    lpResult,
+    tradingLimitsResult,
+    olsResult,
+  ] = await Promise.allSettled([
+    client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
+      PROTOCOL_FEE_TRANSFERS_ALL,
+      { chainId: network.chainId },
+    ),
+    shouldQuery
+      ? fetchAllSnapshotPages(client, poolIds)
+      : Promise.resolve(emptySnapshotPage),
+    shouldQuery
+      ? fetchAllDailySnapshotPages(client, poolIds)
+      : Promise.resolve(emptySnapshotPage),
+    fpmmPoolIds.length > 0
+      ? client.request<{
+          LiquidityPosition: { address: string }[];
+        }>(UNIQUE_LP_ADDRESSES, { poolIds: fpmmPoolIds })
+      : Promise.resolve({
+          LiquidityPosition: [] as { address: string }[],
+        }),
+    client.request<{ TradingLimit: TradingLimit[] }>(ALL_TRADING_LIMITS, {
+      chainId: network.chainId,
+    }),
+    client.request<{ OlsPool: Pick<OlsPool, "poolId">[] }>(ALL_OLS_POOLS, {
+      chainId: network.chainId,
+    }),
+  ]);
 
   const toError = (reason: unknown) =>
     reason instanceof Error ? reason : new Error(String(reason));
@@ -378,6 +398,16 @@ export async function fetchNetworkData(
         )
       : null;
 
+  const tradingLimits =
+    tradingLimitsResult.status === "fulfilled"
+      ? (tradingLimitsResult.value.TradingLimit ?? [])
+      : [];
+
+  const olsPoolIds =
+    olsResult.status === "fulfilled"
+      ? new Set((olsResult.value.OlsPool ?? []).map((p) => p.poolId))
+      : new Set<string>();
+
   return {
     network,
     snapshotWindows: windows,
@@ -389,6 +419,8 @@ export async function fetchNetworkData(
     snapshotsAllTruncated,
     snapshotsAllDaily,
     snapshotsAllDailyTruncated,
+    tradingLimits,
+    olsPoolIds,
     fees,
     feeTransfers:
       feesResult.status === "fulfilled"

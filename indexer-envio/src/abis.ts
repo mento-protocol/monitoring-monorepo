@@ -42,6 +42,23 @@ export const FPMM_TRADING_LIMITS_ABI = [
   },
 ] as const;
 
+export const FPMM_FEE_ABI = [
+  {
+    type: "function",
+    name: "lpFee",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "protocolFee",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
+
 export const FPMM_MINIMAL_ABI = [
   {
     type: "function",

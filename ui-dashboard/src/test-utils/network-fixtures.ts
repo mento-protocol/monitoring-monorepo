@@ -115,6 +115,8 @@ export function makeNetworkData(
     snapshotsAllTruncated: false,
     snapshotsAllDaily,
     snapshotsAllDailyTruncated: false,
+    tradingLimits: [],
+    olsPoolIds: new Set(),
     fees: null,
     feeTransfers: [],
     uniqueLpAddresses: [],

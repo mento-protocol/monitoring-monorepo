@@ -7,7 +7,7 @@ import { buildPoolDetailHref, buildPoolsFilterUrl } from "@/lib/routing";
 import { useGQL } from "@/lib/graphql";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import { buildGlobalPoolEntries } from "@/lib/global-pool-entries";
-import { ALL_OLS_POOLS, RECENT_SWAPS, POOL_SWAPS } from "@/lib/queries";
+import { RECENT_SWAPS, POOL_SWAPS } from "@/lib/queries";
 import {
   truncateAddress,
   formatWei,
@@ -29,7 +29,7 @@ import {
   DEFAULT_NETWORK,
   type Network,
 } from "@/lib/networks";
-import type { OlsPool, Pool, SwapEvent } from "@/lib/types";
+import type { Pool, SwapEvent } from "@/lib/types";
 import { Table, Row, Th, Td } from "@/components/table";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import { LimitSelect } from "@/components/controls";
@@ -61,10 +61,14 @@ function PoolsContent() {
     setFilterError("");
   }
 
-  const { entries, volume24hByKey, volume7dByKey, tvlChangeWoWByKey } = useMemo(
-    () => buildGlobalPoolEntries(networkData),
-    [networkData],
-  );
+  const {
+    entries,
+    volume24hByKey,
+    volume7dByKey,
+    tvlChangeWoWByKey,
+    tradingLimitsByKey,
+    olsPoolKeys,
+  } = useMemo(() => buildGlobalPoolEntries(networkData), [networkData]);
 
   const poolsByNamespacedId = useMemo(() => {
     const m = new Map<string, GlobalPoolEntry>();
@@ -79,16 +83,6 @@ function PoolsContent() {
     }
     return m;
   }, [poolsByNamespacedId]);
-
-  const {
-    data: olsData,
-    error: olsErr,
-    isLoading: olsLoading,
-  } = useGQL<{ OlsPool: Pick<OlsPool, "poolId">[] }>(ALL_OLS_POOLS);
-  const olsPoolIds = useMemo(
-    () => new Set((olsData?.OlsPool ?? []).map((p) => p.poolId)),
-    [olsData],
-  );
 
   const swapQuery = poolFilter ? POOL_SWAPS : RECENT_SWAPS;
   const swapVars = poolFilter ? { poolId: poolFilter, limit } : { limit };
@@ -174,13 +168,6 @@ function PoolsContent() {
         >
           Pools
         </h2>
-        {olsErr && !olsLoading && (
-          <div className="mb-3">
-            <ErrorBox
-              message={`OLS status unavailable right now: ${olsErr.message}. Pool list is loaded, but OLS badges may be incomplete.`}
-            />
-          </div>
-        )}
         {poolsLoading ? (
           <Skeleton rows={3} />
         ) : failedNetworks.length === 0 && entries.length === 0 ? (
@@ -191,7 +178,8 @@ function PoolsContent() {
             volume24hByKey={volume24hByKey}
             volume7dByKey={volume7dByKey}
             tvlChangeWoWByKey={tvlChangeWoWByKey}
-            olsPoolIds={olsPoolIds}
+            tradingLimitsByKey={tradingLimitsByKey}
+            olsPoolKeys={olsPoolKeys}
           />
         )}
       </section>

@@ -53,6 +53,8 @@ function networkData(
     snapshotsAllTruncated: false,
     snapshotsAllDaily: [],
     snapshotsAllDailyTruncated: false,
+    tradingLimits: [],
+    olsPoolIds: new Set(),
     fees: null,
     feeTransfers,
     uniqueLpAddresses: null,

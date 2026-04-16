@@ -11,7 +11,7 @@ import {
   extractAddressFromPoolId,
 } from "./helpers";
 import { computePriceDifference } from "./priceDifference";
-import { fetchReferenceRateFeedID, fetchReportExpiry } from "./rpc";
+import { fetchReferenceRateFeedID, fetchReportExpiry, fetchFees } from "./rpc";
 
 // ---------------------------------------------------------------------------
 // Health status computation
@@ -146,6 +146,8 @@ export const DEFAULT_ORACLE_FIELDS = {
   limitStatus: "N/A" as string,
   limitPressure0: "0.0000" as string,
   limitPressure1: "0.0000" as string,
+  lpFee: -1,
+  protocolFee: -1,
   rebalancerAddress: "" as string,
   rebalanceLivenessStatus: "N/A" as string,
   token0Decimals: 18,
@@ -238,6 +240,21 @@ export const upsertPool = async ({
     }
   }
 
+  // Self-heal: if fees are still at the -1 sentinel (deploy-time RPC read
+  // failed), retry now. Once we get a successful read — even if the real
+  // fees are 0 — we persist the result and stop retrying.
+  let healedFees: { lpFee: number; protocolFee: number } | undefined;
+  if (
+    (existing.lpFee < 0 || existing.protocolFee < 0) &&
+    existing.source !== "" &&
+    !existing.source?.includes("virtual")
+  ) {
+    const fees = await fetchFees(chainId, poolAddr);
+    if (fees) {
+      healedFees = fees;
+    }
+  }
+
   let next: Pool = {
     ...existing,
     chainId,
@@ -250,9 +267,10 @@ export const upsertPool = async ({
     notionalVolume0: existing.notionalVolume0 + (swapDelta?.volume0 ?? 0n),
     notionalVolume1: existing.notionalVolume1 + (swapDelta?.volume1 ?? 0n),
     rebalanceCount: existing.rebalanceCount + (rebalanceDelta ? 1 : 0),
-    // Merge healed oracle fields first, then explicit delta takes precedence
+    // Merge healed fields first, then explicit delta takes precedence
     ...(healedOracleDelta ?? {}),
     ...(oracleDelta ?? {}),
+    ...(healedFees ?? {}),
     // Persist token decimals if provided (set once at pool creation)
     token0Decimals: tokenDecimals?.token0Decimals ?? existing.token0Decimals,
     token1Decimals: tokenDecimals?.token1Decimals ?? existing.token1Decimals,
