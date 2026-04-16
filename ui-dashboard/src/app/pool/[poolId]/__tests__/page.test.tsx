@@ -64,7 +64,6 @@ vi.mock("@/components/network-aware-link", () => ({
 
 vi.mock("@/components/badges", () => ({
   KindBadge: ({ kind }: { kind: string }) => <span>{kind}</span>,
-  RebalancerBadge: ({ status }: { status: string }) => <span>{status}</span>,
   SourceBadge: ({ source }: { source: string }) => <span>{source}</span>,
 }));
 
