@@ -188,7 +188,7 @@ export const POOL_LIQUIDITY = `
       order_by: { blockNumber: desc }
       limit: $limit
     ) {
-      id chainId kind sender recipient
+      id chainId kind sender
       amount0 amount1 liquidity
       txHash blockNumber blockTimestamp
     }

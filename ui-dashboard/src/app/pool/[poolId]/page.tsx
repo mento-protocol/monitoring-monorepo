@@ -52,7 +52,6 @@ import {
   POOL_LP_POSITIONS,
   POOL_REBALANCES,
   POOL_RESERVES,
-  POOL_SNAPSHOTS_CHART,
   POOL_SWAPS,
   TRADING_LIMITS,
 } from "@/lib/queries";
@@ -110,24 +109,34 @@ const TABS = [
 type Tab = (typeof TABS)[number];
 type SearchableTab = Extract<
   Tab,
-  "swaps" | "reserves" | "rebalances" | "liquidity" | "oracle"
+  | "providers"
+  | "swaps"
+  | "reserves"
+  | "rebalances"
+  | "liquidity"
+  | "oracle"
+  | "ols"
 >;
 
 const SEARCH_PARAM_BY_TAB: Record<SearchableTab, string> = {
+  providers: "providersQ",
   swaps: "swapsQ",
   reserves: "reservesQ",
   rebalances: "rebalancesQ",
   liquidity: "liquidityQ",
   oracle: "oracleQ",
+  ols: "olsQ",
 };
 
 function isSearchableTab(tab: Tab): tab is SearchableTab {
   return (
+    tab === "providers" ||
     tab === "swaps" ||
     tab === "reserves" ||
     tab === "rebalances" ||
     tab === "liquidity" ||
-    tab === "oracle"
+    tab === "oracle" ||
+    tab === "ols"
   );
 }
 
@@ -441,10 +450,21 @@ function PoolDetail() {
           />
         )}
         {tab === "providers" && (
-          <LpsTab poolId={normalizedPoolId} pool={pool} />
+          <LpsTab
+            poolId={normalizedPoolId}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("providers", value)}
+          />
         )}
         {tab === "ols" && (
-          <OlsTab poolId={normalizedPoolId} limit={limit} pool={pool} />
+          <OlsTab
+            poolId={normalizedPoolId}
+            limit={limit}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("ols", value)}
+          />
         )}
       </div>
     </div>
@@ -823,7 +843,9 @@ function ReservesTab({
       ? Number(pool.oraclePrice) / 1e24
       : null;
   const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
-  const showUsd = feedVal !== null;
+  const usdmIsToken1 = USDM_SYMBOLS.has(sym1);
+  const hasUsdmSide = usdmIsToken0 !== usdmIsToken1;
+  const showUsd = feedVal !== null && hasUsdmSide;
 
   const filteredRows = useMemo(() => {
     if (!query) return orderedRows;
@@ -1080,15 +1102,15 @@ function LiquidityTab({
   const rows = data?.LiquidityEvent ?? [];
 
   const fpmmPool = pool ? isFpmm(pool) : false;
-  // Passing null as the query key skips the request — VirtualPools have no snapshots.
-  const { data: snapshotData } = useGQL<{ PoolSnapshot: PoolSnapshot[] }>(
-    fpmmPool ? POOL_SNAPSHOTS_CHART : null,
+  const { data: snapshotData, error: snapshotError } = useGQL<{
+    PoolDailySnapshot: PoolSnapshot[];
+  }>(
+    fpmmPool ? POOL_DAILY_SNAPSHOTS_CHART : null,
     { poolId },
     SNAPSHOT_REFRESH_MS,
   );
-  // Query fetches newest-first (desc) with a cap; reverse for chronological display.
   const snapshots = useMemo(
-    () => [...(snapshotData?.PoolSnapshot ?? [])].reverse(),
+    () => [...(snapshotData?.PoolDailySnapshot ?? [])].reverse(),
     [snapshotData],
   );
 
@@ -1117,6 +1139,11 @@ function LiquidityTab({
 
   return (
     <>
+      {fpmmPool && snapshotError && (
+        <ErrorBox
+          message={`Liquidity chart unavailable: ${snapshotError.message}`}
+        />
+      )}
       {fpmmPool && snapshots.length > 0 && (
         <LiquidityChart
           snapshots={snapshots}
@@ -1201,14 +1228,22 @@ function isLiquidityPositionSchemaError(error: Error | undefined) {
   );
 }
 
-function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
-  // Only FPMM pools have LP mechanics — skip the fetch for non-FPMM pools.
-  // Pass null to useGQL when we know the pool type and it isn't FPMM so the
-  // hook is always called (Rules of Hooks) but the network request is skipped.
-  const isFpmmPool = pool ? isFpmm(pool) : null; // null = still loading
+function LpsTab({
+  poolId,
+  pool,
+  search,
+  onSearchChange,
+}: {
+  poolId: string;
+  pool: Pool | null;
+  search: string;
+  onSearchChange: (value: string) => void;
+}) {
+  const isFpmmPool = pool ? isFpmm(pool) : null;
   const shouldSkip = isFpmmPool === false;
-  const { getName } = useAddressLabels();
+  const { getName, getTags } = useAddressLabels();
   const { network } = useNetwork();
+  const query = normalizeSearch(search);
 
   const {
     data: indexedData,
@@ -1262,6 +1297,14 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
   if (positions.length === 0)
     return <EmptyBox message="No active LP positions for this pool." />;
 
+  const filteredPositions = query
+    ? positions.filter((p) =>
+        matchesRowSearch(query, [
+          ...addressSearchTerms(p.address, getName, getTags),
+        ]),
+      )
+    : positions;
+
   // Derive per-position token amounts from pool reserves and LP share.
   // positionTokenAmount = positionShare * poolReserve
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
@@ -1297,115 +1340,125 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
         feedVal={feedVal}
         usdmIsToken0={usdmIsToken0}
       />
-      <Table>
-        <thead>
-          <tr className="border-b border-slate-800 bg-slate-900/50">
-            <Th>#</Th>
-            <Th>Address</Th>
-            <Th align="right">{sym0}</Th>
-            <Th align="right">{sym1}</Th>
-            {showUsd && <Th align="right">Total Value</Th>}
-            <Th align="right">Share</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {positions.map((position, i) => {
-            // Scale up by 1e6 before converting to Number to preserve precision
-            // for large bigint liquidity values that exceed JS safe integer range.
-            const shareNum =
-              totalLiquidity > BigInt(0)
-                ? Number(
-                    (position.netLiquidity * BigInt(1_000_000)) /
-                      totalLiquidity,
-                  ) / 1_000_000
-                : 0;
-            const sharePct = (shareNum * 100).toFixed(2);
+      <TableSearch
+        value={search}
+        onChange={onSearchChange}
+        placeholder="Search LPs by address, name, or tag..."
+        ariaLabel="Search LPs"
+      />
+      {filteredPositions.length === 0 ? (
+        <EmptyBox message="No LPs match your search." />
+      ) : (
+        <Table>
+          <thead>
+            <tr className="border-b border-slate-800 bg-slate-900/50">
+              <Th>#</Th>
+              <Th>Address</Th>
+              <Th align="right">{sym0}</Th>
+              <Th align="right">{sym1}</Th>
+              {showUsd && <Th align="right">Total Value</Th>}
+              <Th align="right">Share</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredPositions.map((position, i) => {
+              // Scale up by 1e6 before converting to Number to preserve precision
+              // for large bigint liquidity values that exceed JS safe integer range.
+              const shareNum =
+                totalLiquidity > BigInt(0)
+                  ? Number(
+                      (position.netLiquidity * BigInt(1_000_000)) /
+                        totalLiquidity,
+                    ) / 1_000_000
+                  : 0;
+              const sharePct = (shareNum * 100).toFixed(2);
 
-            const tok0 = hasReserves ? shareNum * reserves0Raw : null;
-            const tok1 = hasReserves ? shareNum * reserves1Raw : null;
+              const tok0 = hasReserves ? shareNum * reserves0Raw : null;
+              const tok1 = hasReserves ? shareNum * reserves1Raw : null;
 
-            // Convert each token to USD only when we have a valid USDm-paired oracle price.
-            // tok0Usd = USD value of tok0:
-            //   - if tok0 IS USDm → already in USD, value = tok0
-            //   - if tok1 IS USDm → tok0 is the non-stable, convert via feedVal
-            //   - otherwise → no valid conversion, null
-            const tok0Usd: number | null =
-              tok0 === null || !hasUsdmSide
-                ? null
-                : usdmIsToken0
-                  ? tok0 // tok0 is USDm → already USD
-                  : feedVal !== null
-                    ? tok0 * feedVal // tok0 is non-stable → convert
-                    : null;
-            const tok1Usd: number | null =
-              tok1 === null || !hasUsdmSide
-                ? null
-                : usdmIsToken1
-                  ? tok1 // tok1 is USDm → already USD
-                  : feedVal !== null
-                    ? tok1 * feedVal // tok1 is non-stable → convert
-                    : null;
-            const totalUsd =
-              tok0Usd !== null && tok1Usd !== null ? tok0Usd + tok1Usd : null;
+              // Convert each token to USD only when we have a valid USDm-paired oracle price.
+              // tok0Usd = USD value of tok0:
+              //   - if tok0 IS USDm → already in USD, value = tok0
+              //   - if tok1 IS USDm → tok0 is the non-stable, convert via feedVal
+              //   - otherwise → no valid conversion, null
+              const tok0Usd: number | null =
+                tok0 === null || !hasUsdmSide
+                  ? null
+                  : usdmIsToken0
+                    ? tok0 // tok0 is USDm → already USD
+                    : feedVal !== null
+                      ? tok0 * feedVal // tok0 is non-stable → convert
+                      : null;
+              const tok1Usd: number | null =
+                tok1 === null || !hasUsdmSide
+                  ? null
+                  : usdmIsToken1
+                    ? tok1 // tok1 is USDm → already USD
+                    : feedVal !== null
+                      ? tok1 * feedVal // tok1 is non-stable → convert
+                      : null;
+              const totalUsd =
+                tok0Usd !== null && tok1Usd !== null ? tok0Usd + tok1Usd : null;
 
-            const fmtTok = (
-              v: number | null,
-              sym: string,
-              vUsd: number | null,
-            ) => {
-              if (v === null) return "—";
-              const formatted = v.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              });
-              const showSubUsd = vUsd !== null && !USDM_SYMBOLS.has(sym);
+              const fmtTok = (
+                v: number | null,
+                sym: string,
+                vUsd: number | null,
+              ) => {
+                if (v === null) return "—";
+                const formatted = v.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                });
+                const showSubUsd = vUsd !== null && !USDM_SYMBOLS.has(sym);
+                return (
+                  <div>
+                    <span>
+                      {formatted} {sym}
+                    </span>
+                    {showSubUsd && (
+                      <div className="text-xs text-slate-500">
+                        ≈ $
+                        {vUsd!.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              };
+
               return (
-                <div>
-                  <span>
-                    {formatted} {sym}
-                  </span>
-                  {showSubUsd && (
-                    <div className="text-xs text-slate-500">
-                      ≈ $
-                      {vUsd!.toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            };
-
-            return (
-              <Row key={position.address}>
-                <Td small muted>
-                  {i + 1}
-                </Td>
-                <Td>
-                  <AddressLink address={position.address} />
-                </Td>
-                <Td mono small align="right">
-                  {fmtTok(tok0, sym0, tok0Usd)}
-                </Td>
-                <Td mono small align="right">
-                  {fmtTok(tok1, sym1, tok1Usd)}
-                </Td>
-                {showUsd && (
-                  <Td mono small align="right">
-                    {totalUsd !== null
-                      ? `$${totalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      : "—"}
+                <Row key={position.address}>
+                  <Td small muted>
+                    {i + 1}
                   </Td>
-                )}
-                <Td mono small align="right">
-                  {sharePct}%
-                </Td>
-              </Row>
-            );
-          })}
-        </tbody>
-      </Table>
+                  <Td>
+                    <AddressLink address={position.address} />
+                  </Td>
+                  <Td mono small align="right">
+                    {fmtTok(tok0, sym0, tok0Usd)}
+                  </Td>
+                  <Td mono small align="right">
+                    {fmtTok(tok1, sym1, tok1Usd)}
+                  </Td>
+                  {showUsd && (
+                    <Td mono small align="right">
+                      {totalUsd !== null
+                        ? `$${totalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : "—"}
+                    </Td>
+                  )}
+                  <Td mono small align="right">
+                    {sharePct}%
+                  </Td>
+                </Row>
+              );
+            })}
+          </tbody>
+        </Table>
+      )}
     </>
   );
 }
@@ -1780,10 +1833,14 @@ function OlsTab({
   poolId,
   limit,
   pool,
+  search,
+  onSearchChange,
 }: {
   poolId: string;
   limit: number;
   pool: Pool | null;
+  search: string;
+  onSearchChange: (value: string) => void;
 }) {
   const { network } = useNetwork();
   const {
@@ -1807,6 +1864,8 @@ function OlsTab({
         limit={limit}
         pool={pool}
         network={network}
+        search={search}
+        onSearchChange={onSearchChange}
       />
     </div>
   );
@@ -1964,30 +2023,74 @@ function OlsLiquidityEvents({
   limit,
   pool,
   network,
+  search,
+  onSearchChange,
 }: {
   poolId: string;
   olsAddress: string | null;
   limit: number;
   pool: Pool | null;
   network: ReturnType<typeof useNetwork>["network"];
+  search: string;
+  onSearchChange: (value: string) => void;
 }) {
-  // Skip the query until the active olsAddress is known (avoids mixing events
-  // from historical OLS contracts in pools that have been re-registered).
-  const query = olsAddress ? OLS_LIQUIDITY_EVENTS : null;
+  const { getName, getTags } = useAddressLabels();
+  const searchQuery = normalizeSearch(search);
+
+  const gqlQuery = olsAddress ? OLS_LIQUIDITY_EVENTS : null;
   const { data, error, isLoading } = useGQL<{
     OlsLiquidityEvent: OlsLiquidityEvent[];
-  }>(query, olsAddress ? { poolId, olsAddress, limit } : {});
+  }>(gqlQuery, olsAddress ? { poolId, olsAddress, limit } : {});
 
   const events = data?.OlsLiquidityEvent ?? [];
 
+  const filteredEvents = useMemo(() => {
+    if (!searchQuery) return events;
+    return events.filter((e) => {
+      const givenSym = tokenSymbol(network, e.tokenGivenToPool);
+      const takenSym = tokenSymbol(network, e.tokenTakenFromPool);
+      const givenDec =
+        pool?.token0?.toLowerCase() === e.tokenGivenToPool.toLowerCase()
+          ? (pool?.token0Decimals ?? 18)
+          : (pool?.token1Decimals ?? 18);
+      const takenDec =
+        pool?.token0?.toLowerCase() === e.tokenTakenFromPool.toLowerCase()
+          ? (pool?.token0Decimals ?? 18)
+          : (pool?.token1Decimals ?? 18);
+      return matchesRowSearch(searchQuery, [
+        e.txHash,
+        e.direction === 0 ? "expand" : "contract",
+        ...addressSearchTerms(e.caller, getName, getTags),
+        formatWei(e.amountGivenToPool, givenDec),
+        givenSym,
+        formatWei(e.amountTakenFromPool, takenDec),
+        takenSym,
+      ]);
+    });
+  }, [events, searchQuery, pool, network, getName, getTags]);
+
   return (
-    <OlsLiquidityTable
-      events={events}
-      pool={pool}
-      network={network}
-      isLoading={isLoading}
-      error={error ?? null}
-    />
+    <>
+      {events.length > 0 && (
+        <TableSearch
+          value={search}
+          onChange={onSearchChange}
+          placeholder="Search OLS events by tx, caller, direction, amount, or token..."
+          ariaLabel="Search OLS events"
+        />
+      )}
+      {searchQuery && events.length > 0 && filteredEvents.length === 0 ? (
+        <EmptyBox message="No OLS events match your search." />
+      ) : (
+        <OlsLiquidityTable
+          events={filteredEvents}
+          pool={pool}
+          network={network}
+          isLoading={isLoading}
+          error={error ?? null}
+        />
+      )}
+    </>
   );
 }
 

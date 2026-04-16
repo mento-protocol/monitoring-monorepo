@@ -256,7 +256,6 @@ const liquidity: LiquidityEvent[] = [
     txHash: "0xliquidityhash",
     kind: "mint",
     sender: "0xliquidity00000000000000000000000000000005",
-    recipient: "0xrecipient00000000000000000000000000000002",
     amount0: "5000000000000000000",
     amount1: "7000000000000000000",
     liquidity: "9000000000000000000",
@@ -698,10 +697,10 @@ describe("Pool detail tab search", () => {
     expect(html).not.toContain("snapshot-chart");
   });
 
-  it("calls POOL_SNAPSHOTS_CHART on liquidity tab and renders chart", () => {
+  it("calls POOL_DAILY_SNAPSHOTS_CHART on liquidity tab and renders chart", () => {
     const html = renderWithParams({ tab: "liquidity" });
     expect(useGQLMock).toHaveBeenCalledWith(
-      POOL_SNAPSHOTS_CHART,
+      POOL_DAILY_SNAPSHOTS_CHART,
       { poolId: "pool-1" },
       SNAPSHOT_REFRESH_MS,
     );
