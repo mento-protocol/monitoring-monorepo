@@ -1297,13 +1297,14 @@ function LpsTab({
   if (positions.length === 0)
     return <EmptyBox message="No active LP positions for this pool." />;
 
+  const rankedPositions = positions.map((p, i) => ({ ...p, rank: i + 1 }));
   const filteredPositions = query
-    ? positions.filter((p) =>
+    ? rankedPositions.filter((p) =>
         matchesRowSearch(query, [
           ...addressSearchTerms(p.address, getName, getTags),
         ]),
       )
-    : positions;
+    : rankedPositions;
 
   // Derive per-position token amounts from pool reserves and LP share.
   // positionTokenAmount = positionShare * poolReserve
@@ -1361,7 +1362,7 @@ function LpsTab({
             </tr>
           </thead>
           <tbody>
-            {filteredPositions.map((position, i) => {
+            {filteredPositions.map((position) => {
               // Scale up by 1e6 before converting to Number to preserve precision
               // for large bigint liquidity values that exceed JS safe integer range.
               const shareNum =
@@ -1432,7 +1433,7 @@ function LpsTab({
               return (
                 <Row key={position.address}>
                   <Td small muted>
-                    {i + 1}
+                    {position.rank}
                   </Td>
                   <Td>
                     <AddressLink address={position.address} />
