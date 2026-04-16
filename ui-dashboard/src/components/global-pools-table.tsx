@@ -100,15 +100,11 @@ export function sortGlobalPools(
         break;
       }
       case "fee": {
-        const aVirtual = a.pool.source?.includes("virtual");
-        const bVirtual = b.pool.source?.includes("virtual");
-        const aHasFee =
-          !aVirtual && (a.pool.lpFee != null || a.pool.protocolFee != null);
-        const bHasFee =
-          !bVirtual && (b.pool.lpFee != null || b.pool.protocolFee != null);
-        if (!aHasFee && !bHasFee) return 0;
-        if (!aHasFee) return 1;
-        if (!bHasFee) return -1;
+        const aHas = hasFeeData(a.pool);
+        const bHas = hasFeeData(b.pool);
+        if (!aHas && !bHas) return 0;
+        if (!aHas) return 1;
+        if (!bHas) return -1;
         const aFee = (a.pool.lpFee ?? 0) + (a.pool.protocolFee ?? 0);
         const bFee = (b.pool.lpFee ?? 0) + (b.pool.protocolFee ?? 0);
         return sortDir === "asc" ? aFee - bFee : bFee - aFee;
@@ -327,9 +323,16 @@ function poolStrategies(pool: Pool, isOls: boolean): string[] {
 // Fee display
 // ---------------------------------------------------------------------------
 
+function hasFeeData(pool: Pool): boolean {
+  if (pool.source?.includes("virtual")) return false;
+  if (pool.lpFee == null && pool.protocolFee == null) return false;
+  // Sentinel -1 means fees were never successfully fetched
+  if ((pool.lpFee ?? -1) < 0 || (pool.protocolFee ?? -1) < 0) return false;
+  return true;
+}
+
 function formatFee(pool: Pool): string {
-  if (pool.source?.includes("virtual")) return "—";
-  if (pool.lpFee == null && pool.protocolFee == null) return "—";
+  if (!hasFeeData(pool)) return "—";
   const total = (pool.lpFee ?? 0) + (pool.protocolFee ?? 0);
   return `${(total / 100).toFixed(2)}%`;
 }

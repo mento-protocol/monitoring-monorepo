@@ -146,8 +146,8 @@ export const DEFAULT_ORACLE_FIELDS = {
   limitStatus: "N/A" as string,
   limitPressure0: "0.0000" as string,
   limitPressure1: "0.0000" as string,
-  lpFee: 0,
-  protocolFee: 0,
+  lpFee: -1,
+  protocolFee: -1,
   rebalancerAddress: "" as string,
   rebalanceLivenessStatus: "N/A" as string,
   token0Decimals: 18,
@@ -240,17 +240,17 @@ export const upsertPool = async ({
     }
   }
 
-  // Self-heal: if fees are 0 on an established FPMM pool (transient RPC
-  // failure at creation), retry now so the Fee column shows real data.
+  // Self-heal: if fees are still at the -1 sentinel (deploy-time RPC read
+  // failed), retry now. Once we get a successful read — even if the real
+  // fees are 0 — we persist the result and stop retrying.
   let healedFees: { lpFee: number; protocolFee: number } | undefined;
   if (
-    existing.lpFee === 0 &&
-    existing.protocolFee === 0 &&
+    (existing.lpFee < 0 || existing.protocolFee < 0) &&
     existing.source !== "" &&
     !existing.source?.includes("virtual")
   ) {
     const fees = await fetchFees(chainId, poolAddr);
-    if (fees && (fees.lpFee > 0 || fees.protocolFee > 0)) {
+    if (fees) {
       healedFees = fees;
     }
   }
