@@ -139,10 +139,14 @@ export function sortGlobalPools(
         if (bV7 == null) return -1;
         return sortDir === "asc" ? aV7 - bV7 : bV7 - aV7;
       }
-      case "totalVolume":
-        cmp =
-          (totalVolumeByKey.get(aKey) ?? 0) - (totalVolumeByKey.get(bKey) ?? 0);
-        break;
+      case "totalVolume": {
+        const aTV = totalVolumeByKey.get(aKey);
+        const bTV = totalVolumeByKey.get(bKey);
+        if (aTV == null && bTV == null) return 0;
+        if (aTV == null) return 1;
+        if (bTV == null) return -1;
+        return sortDir === "asc" ? aTV - bTV : bTV - aTV;
+      }
     }
     return sortDir === "asc" ? cmp : -cmp;
   });
