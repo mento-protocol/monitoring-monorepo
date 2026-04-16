@@ -763,7 +763,8 @@ function SwapsTab({
             rebalanceTimestamps={rebalanceTimestamps}
           />
           {(() => {
-            const last = snapshots[snapshots.length - 1];
+            // snapshots are desc (newest-first) from the query
+            const last = snapshots[0];
             if (!last) return null;
             return (
               <div className="flex flex-wrap gap-4 mb-4 text-xs text-slate-400">

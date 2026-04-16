@@ -46,7 +46,7 @@ export function EffectivenessChart({ events }: EffectivenessChartProps) {
     yaxis: {
       title: { text: "Effectiveness %", font: { size: 10 } },
       ...PLOTLY_AXIS_DEFAULTS,
-      range: [0, 105],
+      autorange: true,
     },
     margin: { t: 8, l: 48, r: 16, b: 8 },
     autosize: true,
