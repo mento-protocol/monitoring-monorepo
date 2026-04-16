@@ -118,6 +118,7 @@ export function makeNetworkData(
     tradingLimits: [],
     olsPoolIds: new Set(),
     fees: null,
+    feeTransfers: [],
     uniqueLpAddresses: [],
     rates: new Map(),
     error: null,

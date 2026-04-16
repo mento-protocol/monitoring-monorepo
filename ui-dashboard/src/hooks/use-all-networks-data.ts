@@ -70,6 +70,8 @@ export type NetworkData = {
   tradingLimits: TradingLimit[];
   olsPoolIds: Set<string>;
   fees: ProtocolFeeSummary | null;
+  /** Raw fee transfer rows — kept for time-series bucketing on the revenue page. */
+  feeTransfers: ProtocolFeeTransfer[];
   uniqueLpAddresses: string[] | null;
   rates: OracleRateMap;
   error: Error | null;
@@ -116,6 +118,7 @@ const emptyNetworkData = (
   tradingLimits: [],
   olsPoolIds: new Set(),
   fees: null,
+  feeTransfers: [],
   uniqueLpAddresses: null,
   rates: new Map(),
   error,
@@ -419,6 +422,10 @@ export async function fetchNetworkData(
     tradingLimits,
     olsPoolIds,
     fees,
+    feeTransfers:
+      feesResult.status === "fulfilled"
+        ? (feesResult.value.ProtocolFeeTransfer ?? [])
+        : [],
     uniqueLpAddresses,
     rates,
     error: null,

@@ -150,6 +150,7 @@ function makeNetworkData(
     tradingLimits: [],
     olsPoolIds: new Set(),
     fees: null,
+    feeTransfers: [],
     uniqueLpAddresses: null,
     rates: new Map(),
     error: null,
