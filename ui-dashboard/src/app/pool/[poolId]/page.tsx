@@ -18,7 +18,7 @@ import { LimitPanel } from "@/components/limit-panel";
 import { ReservesPanel } from "@/components/reserves-panel";
 import { useNetwork } from "@/components/network-provider";
 import { OracleChart } from "@/components/oracle-chart";
-import { OraclePriceChart } from "@/components/oracle-price-chart";
+import { EffectivenessChart } from "@/components/effectiveness-chart";
 import { ReserveChart } from "@/components/reserve-chart";
 import { SenderCell } from "@/components/sender-cell";
 import { TagsCell } from "@/components/tags-cell";
@@ -32,28 +32,41 @@ import {
   formatBlock,
   formatTimestamp,
   formatWei,
+  getSwapDirection,
   normalizePoolIdForChain,
   parseWei,
   parseOraclePriceToNumber,
   relativeTime,
+  toPercent,
 } from "@/lib/format";
+import {
+  DEFAULT_PAGE_SIZE,
+  ENVIO_MAX_ROWS,
+  SEARCH_BOOTSTRAP_LIMIT,
+  SEARCH_MAX_LIMIT,
+} from "@/lib/constants";
+import { buildOrderBy } from "@/lib/table-sort";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import { useGQL } from "@/lib/graphql";
 import {
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
-  OLS_LIQUIDITY_EVENTS,
+  OLS_LIQUIDITY_EVENTS_COUNT,
+  OLS_LIQUIDITY_EVENTS_PAGE,
   OLS_POOL,
   POOL_DAILY_SNAPSHOTS_CHART,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
-  POOL_LIQUIDITY,
+  POOL_LIQUIDITY_COUNT,
+  POOL_LIQUIDITY_PAGE,
   POOL_LP_POSITIONS,
   POOL_REBALANCES,
+  POOL_REBALANCES_COUNT,
+  POOL_REBALANCES_PAGE,
   POOL_RESERVES,
-  POOL_SNAPSHOTS_CHART,
-  POOL_SWAPS,
+  POOL_SWAPS_COUNT,
+  POOL_SWAPS_PAGE,
   TRADING_LIMITS,
 } from "@/lib/queries";
 import { Pagination } from "@/components/pagination";
@@ -108,28 +121,16 @@ const TABS = [
   "ols",
 ] as const;
 type Tab = (typeof TABS)[number];
-type SearchableTab = Extract<
-  Tab,
-  "swaps" | "reserves" | "rebalances" | "liquidity" | "oracle"
->;
 
-const SEARCH_PARAM_BY_TAB: Record<SearchableTab, string> = {
+const SEARCH_PARAM_BY_TAB: Record<Tab, string> = {
+  providers: "providersQ",
   swaps: "swapsQ",
   reserves: "reservesQ",
   rebalances: "rebalancesQ",
   liquidity: "liquidityQ",
   oracle: "oracleQ",
+  ols: "olsQ",
 };
-
-function isSearchableTab(tab: Tab): tab is SearchableTab {
-  return (
-    tab === "swaps" ||
-    tab === "reserves" ||
-    tab === "rebalances" ||
-    tab === "liquidity" ||
-    tab === "oracle"
-  );
-}
 
 function addressSearchTerms(
   address: string | null | undefined,
@@ -246,7 +247,7 @@ function PoolDetail() {
   );
 
   const setTabSearch = useCallback(
-    (t: SearchableTab, value: string) => {
+    (t: Tab, value: string) => {
       const p = getCurrentParams();
       const key = SEARCH_PARAM_BY_TAB[t];
       const trimmedValue = value.trim();
@@ -322,9 +323,7 @@ function PoolDetail() {
   const tab = visibleTabs.includes(requestedTab)
     ? requestedTab
     : (visibleTabs[0] ?? "providers");
-  const activeSearch = isSearchableTab(tab)
-    ? (searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "")
-    : "";
+  const activeSearch = searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "";
 
   return (
     <div className="space-y-6">
@@ -416,6 +415,7 @@ function PoolDetail() {
           <RebalancesTab
             poolId={normalizedPoolId}
             limit={limit}
+            pool={pool}
             search={activeSearch}
             onSearchChange={(value) => setTabSearch("rebalances", value)}
           />
@@ -438,10 +438,22 @@ function PoolDetail() {
           />
         )}
         {tab === "providers" && (
-          <LpsTab poolId={normalizedPoolId} pool={pool} />
+          <LpsTab
+            poolId={normalizedPoolId}
+            limit={limit}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("providers", value)}
+          />
         )}
         {tab === "ols" && (
-          <OlsTab poolId={normalizedPoolId} limit={limit} pool={pool} />
+          <OlsTab
+            poolId={normalizedPoolId}
+            limit={limit}
+            pool={pool}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("ols", value)}
+          />
         )}
       </div>
     </div>
@@ -630,10 +642,37 @@ function SwapsTab({
   const { network } = useNetwork();
   const { getName, getTags } = useAddressLabels();
   const query = normalizeSearch(search);
+  const [rawPage, setRawPage] = React.useState(1);
+
+  const handleSearchChange = React.useCallback(
+    (value: string) => {
+      onSearchChange(value);
+      setRawPage(1);
+    },
+    [onSearchChange],
+  );
+
+  const { data: countData, error: countError } = useGQL<{
+    SwapEvent: { id: string }[];
+  }>(POOL_SWAPS_COUNT, { poolId, limit: ENVIO_MAX_ROWS, offset: 0 });
+  const lastKnownTotalRef = React.useRef(0);
+  const rawTotal = countData?.SwapEvent?.length ?? 0;
+  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
+  const total = countError ? lastKnownTotalRef.current : rawTotal;
+  const countCapped = rawTotal >= ENVIO_MAX_ROWS;
+
+  const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
+  const page = Math.max(1, Math.min(rawPage, totalPages));
+  const isSearching = query.length > 0;
+  const searchFetchLimit =
+    total > 0 ? Math.min(total, SEARCH_MAX_LIMIT) : SEARCH_BOOTSTRAP_LIMIT;
+  const fetchLimit = isSearching ? searchFetchLimit : limit;
+  const fetchOffset = isSearching ? 0 : (page - 1) * limit;
+  const orderBy = useMemo(() => buildOrderBy("blockNumber", "desc"), []);
 
   const { data, error, isLoading } = useGQL<{ SwapEvent: SwapEvent[] }>(
-    POOL_SWAPS,
-    { poolId, limit },
+    POOL_SWAPS_PAGE,
+    { poolId, limit: fetchLimit, offset: fetchOffset, orderBy },
   );
   const swaps = data?.SwapEvent ?? [];
 
@@ -652,36 +691,37 @@ function SwapsTab({
   );
   const snapshots = snapshotData?.PoolDailySnapshot ?? [];
 
+  const { data: rebalanceData } = useGQL<{
+    RebalanceEvent: { blockTimestamp: string }[];
+  }>(fpmmPool ? POOL_REBALANCES : null, { poolId, limit: 200 });
+  const rebalanceTimestamps = useMemo(
+    () => (rebalanceData?.RebalanceEvent ?? []).map((r) => r.blockTimestamp),
+    [rebalanceData],
+  );
+
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
+
+  const dec0 = pool?.token0Decimals ?? 18;
+  const dec1 = pool?.token1Decimals ?? 18;
 
   const filteredSwaps = useMemo(() => {
     if (!query) return swaps;
     return swaps.filter((s) => {
-      const soldToken0 = BigInt(s.amount0In) > BigInt(0);
-      const soldAmt = soldToken0 ? s.amount0In : s.amount1In;
-      const boughtAmt = soldToken0 ? s.amount1Out : s.amount0Out;
-      const soldSym = soldToken0 ? sym0 : sym1;
-      const boughtSym = soldToken0 ? sym1 : sym0;
-      const soldDec = soldToken0
-        ? (pool?.token0Decimals ?? 18)
-        : (pool?.token1Decimals ?? 18);
-      const boughtDec = soldToken0
-        ? (pool?.token1Decimals ?? 18)
-        : (pool?.token0Decimals ?? 18);
+      const d = getSwapDirection(s, sym0, sym1, dec0, dec1);
 
       return matchesRowSearch(query, [
         s.txHash,
         ...addressSearchTerms(s.sender, getName, getTags),
         ...addressSearchTerms(s.recipient, getName, getTags),
-        soldSym,
-        boughtSym,
-        formatWei(soldAmt, soldDec),
-        formatWei(boughtAmt, boughtDec),
+        d.soldSym,
+        d.boughtSym,
+        formatWei(d.soldAmt, d.soldDec),
+        formatWei(d.boughtAmt, d.boughtDec),
         s.blockNumber,
       ]);
     });
-  }, [swaps, query, sym0, sym1, pool, getName, getTags]);
+  }, [swaps, query, sym0, sym1, dec0, dec1, getName, getTags]);
 
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
@@ -694,16 +734,47 @@ function SwapsTab({
         />
       )}
       {fpmmPool && snapshots.length > 0 && (
-        <SnapshotChart
-          snapshots={snapshots}
-          token0Symbol={sym0}
-          token1Symbol={sym1}
-        />
+        <>
+          <SnapshotChart
+            snapshots={snapshots}
+            token0Symbol={sym0}
+            token1Symbol={sym1}
+            rebalanceTimestamps={rebalanceTimestamps}
+          />
+          {(() => {
+            // snapshots are desc (newest-first) from the query
+            const last = snapshots[0];
+            if (!last) return null;
+            return (
+              <div className="flex flex-wrap gap-4 mb-4 text-xs text-slate-400">
+                <span>
+                  Cumulative:{" "}
+                  <span className="font-mono text-slate-300">
+                    {formatWei(last.cumulativeVolume0, dec0)}
+                  </span>{" "}
+                  {sym0} sold
+                </span>
+                <span>
+                  <span className="font-mono text-slate-300">
+                    {formatWei(last.cumulativeVolume1, dec1)}
+                  </span>{" "}
+                  {sym1} sold
+                </span>
+                <span>
+                  <span className="font-mono text-slate-300">
+                    {last.cumulativeSwapCount.toLocaleString()}
+                  </span>{" "}
+                  total swaps
+                </span>
+              </div>
+            );
+          })()}
+        </>
       )}
       {swaps.length > 0 && (
         <TableSearch
           value={search}
-          onChange={onSearchChange}
+          onChange={handleSearchChange}
           placeholder="Search swaps by tx, address, name, tag, token, amount, or block…"
           ariaLabel="Search swaps"
         />
@@ -734,6 +805,12 @@ function SwapsTab({
               <Th align="right">Bought</Th>
               <th
                 scope="col"
+                className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-right"
+              >
+                Rate
+              </th>
+              <th
+                scope="col"
                 className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-right"
               >
                 Block
@@ -743,17 +820,7 @@ function SwapsTab({
           </thead>
           <tbody>
             {filteredSwaps.map((s) => {
-              const soldToken0 = BigInt(s.amount0In) > BigInt(0);
-              const soldAmt = soldToken0 ? s.amount0In : s.amount1In;
-              const boughtAmt = soldToken0 ? s.amount1Out : s.amount0Out;
-              const soldSym = soldToken0 ? sym0 : sym1;
-              const boughtSym = soldToken0 ? sym1 : sym0;
-              const soldDec = soldToken0
-                ? (pool?.token0Decimals ?? 18)
-                : (pool?.token1Decimals ?? 18);
-              const boughtDec = soldToken0
-                ? (pool?.token1Decimals ?? 18)
-                : (pool?.token0Decimals ?? 18);
+              const d = getSwapDirection(s, sym0, sym1, dec0, dec1);
               return (
                 <Row key={s.id}>
                   <TxHashCell txHash={s.txHash} />
@@ -767,11 +834,18 @@ function SwapsTab({
                   />
                   <SenderCell address={s.recipient} />
                   <Td mono small align="right">
-                    {formatWei(soldAmt, soldDec)} {soldSym}
+                    {formatWei(d.soldAmt, d.soldDec)} {d.soldSym}
                   </Td>
                   <Td mono small align="right">
-                    {formatWei(boughtAmt, boughtDec)} {boughtSym}
+                    {formatWei(d.boughtAmt, d.boughtDec)} {d.boughtSym}
                   </Td>
+                  <td className="hidden lg:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
+                    {(() => {
+                      const sold = Number(d.soldAmt) / 10 ** d.soldDec;
+                      const bought = Number(d.boughtAmt) / 10 ** d.boughtDec;
+                      return sold > 0 ? (bought / sold).toFixed(6) : "—";
+                    })()}
+                  </td>
                   <td className="hidden md:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
                     {formatBlock(s.blockNumber)}
                   </td>
@@ -783,6 +857,37 @@ function SwapsTab({
             })}
           </tbody>
         </Table>
+      )}
+      {!isSearching && (
+        <Pagination
+          page={page}
+          pageSize={limit}
+          total={total}
+          onPageChange={setRawPage}
+        />
+      )}
+      {countCapped && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Showing first {ENVIO_MAX_ROWS.toLocaleString()} swaps — older entries
+          may exist beyond this page range.
+        </p>
+      )}
+      {countCapped && isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Search covers the most recent {ENVIO_MAX_ROWS.toLocaleString()} swaps
+          only.
+        </p>
+      )}
+      {countError && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — pagination may be incomplete.
+        </p>
+      )}
+      {countError && isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — search covers the most recent{" "}
+          {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} entries only.
+        </p>
       )}
     </>
   );
@@ -820,7 +925,9 @@ function ReservesTab({
       ? Number(pool.oraclePrice) / 1e24
       : null;
   const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
-  const showUsd = feedVal !== null;
+  const usdmIsToken1 = USDM_SYMBOLS.has(sym1);
+  const hasUsdmSide = usdmIsToken0 !== usdmIsToken1;
+  const showUsd = feedVal !== null && hasUsdmSide;
 
   const filteredRows = useMemo(() => {
     if (!query) return orderedRows;
@@ -877,7 +984,12 @@ function ReservesTab({
               <Th align="right">{sym0} Reserve</Th>
               <Th align="right">{sym1} Reserve</Th>
               <Th align="right">Total (USD)</Th>
-              <Th align="right">Block</Th>
+              <th
+                scope="col"
+                className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-right"
+              >
+                Block
+              </th>
               <Th>Time</Th>
             </tr>
           </thead>
@@ -927,9 +1039,9 @@ function ReservesTab({
                       ? `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                       : "—"}
                   </Td>
-                  <Td mono small muted align="right">
+                  <td className="hidden sm:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
                     {formatBlock(r.blockNumber)}
-                  </Td>
+                  </td>
                   <Td small muted title={formatTimestamp(r.blockTimestamp)}>
                     {relativeTime(r.blockTimestamp)}
                   </Td>
@@ -946,21 +1058,72 @@ function ReservesTab({
 export function RebalancesTab({
   poolId,
   limit,
+  pool,
   search,
   onSearchChange,
 }: {
   poolId: string;
   limit: number;
+  pool: Pool | null;
   search: string;
   onSearchChange: (value: string) => void;
 }) {
+  const breachStart = pool?.deviationBreachStartedAt
+    ? Number(pool.deviationBreachStartedAt)
+    : 0;
   const { getName, getTags } = useAddressLabels();
   const query = normalizeSearch(search);
+  const [rawPage, setRawPage] = React.useState(1);
+
+  const handleSearchChange = React.useCallback(
+    (value: string) => {
+      onSearchChange(value);
+      setRawPage(1);
+    },
+    [onSearchChange],
+  );
+
+  const { data: countData, error: countError } = useGQL<{
+    RebalanceEvent: { id: string }[];
+  }>(POOL_REBALANCES_COUNT, { poolId, limit: ENVIO_MAX_ROWS, offset: 0 });
+  const lastKnownTotalRef = React.useRef(0);
+  const rawTotal = countData?.RebalanceEvent?.length ?? 0;
+  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
+  const total = countError ? lastKnownTotalRef.current : rawTotal;
+  const countCapped = rawTotal >= ENVIO_MAX_ROWS;
+
+  const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
+  const page = Math.max(1, Math.min(rawPage, totalPages));
+  const isSearching = query.length > 0;
+  const searchFetchLimit =
+    total > 0 ? Math.min(total, SEARCH_MAX_LIMIT) : SEARCH_BOOTSTRAP_LIMIT;
+  const fetchLimit = isSearching ? searchFetchLimit : limit;
+  const fetchOffset = isSearching ? 0 : (page - 1) * limit;
+  const orderBy = useMemo(() => buildOrderBy("blockNumber", "desc"), []);
 
   const { data, error, isLoading } = useGQL<{
     RebalanceEvent: RebalanceEvent[];
-  }>(POOL_REBALANCES, { poolId, limit });
+  }>(POOL_REBALANCES_PAGE, {
+    poolId,
+    limit: fetchLimit,
+    offset: fetchOffset,
+    orderBy,
+  });
   const rows = data?.RebalanceEvent ?? [];
+
+  // Separate chart query — fetch up to 200 events for the trend chart
+  const { data: chartData } = useGQL<{ RebalanceEvent: RebalanceEvent[] }>(
+    POOL_REBALANCES,
+    { poolId, limit: 200 },
+  );
+  const chartRows = useMemo(() => {
+    const raw = (chartData?.RebalanceEvent ?? []).filter(
+      (r) => r.effectivenessRatio != null,
+    );
+    return [...raw].sort(
+      (a, b) => Number(a.blockTimestamp) - Number(b.blockTimestamp),
+    );
+  }, [chartData]);
 
   const filteredRows = useMemo(() => {
     if (!query) return rows;
@@ -986,9 +1149,10 @@ export function RebalancesTab({
 
   return (
     <>
+      <EffectivenessChart events={chartRows} />
       <TableSearch
         value={search}
-        onChange={onSearchChange}
+        onChange={handleSearchChange}
         placeholder="Search rebalances by tx, strategy, rebalancer, name, tag, or block…"
         ariaLabel="Search rebalances"
       />
@@ -1021,34 +1185,85 @@ export function RebalancesTab({
             </tr>
           </thead>
           <tbody>
-            {filteredRows.map((r) => (
-              <Row key={r.id}>
-                <TxHashCell txHash={r.txHash} />
-                <SenderCell address={r.sender} />
-                <TagsCell address={r.sender} className="hidden sm:table-cell" />
-                <SenderCell address={r.caller} />
-                <TagsCell address={r.caller} className="hidden sm:table-cell" />
-                <Td mono small align="right">
-                  {Number(r.priceDifferenceBefore).toLocaleString()}
-                </Td>
-                <Td mono small align="right">
-                  {Number(r.priceDifferenceAfter).toLocaleString()}
-                </Td>
-                <Td mono small align="right">
-                  {r.effectivenessRatio
-                    ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
-                    : "—"}
-                </Td>
-                <Td mono small muted align="right">
-                  {formatBlock(r.blockNumber)}
-                </Td>
-                <Td small muted title={formatTimestamp(r.blockTimestamp)}>
-                  {relativeTime(r.blockTimestamp)}
-                </Td>
-              </Row>
-            ))}
+            {filteredRows.map((r) => {
+              const duringBreach =
+                breachStart > 0 && Number(r.blockTimestamp) >= breachStart;
+              return (
+                <Row key={r.id}>
+                  <TxHashCell txHash={r.txHash} />
+                  <SenderCell address={r.sender} />
+                  <TagsCell
+                    address={r.sender}
+                    className="hidden sm:table-cell"
+                  />
+                  <SenderCell address={r.caller} />
+                  <TagsCell
+                    address={r.caller}
+                    className="hidden sm:table-cell"
+                  />
+                  <Td mono small align="right">
+                    {Number(r.priceDifferenceBefore).toLocaleString()}
+                  </Td>
+                  <Td mono small align="right">
+                    {Number(r.priceDifferenceAfter).toLocaleString()}
+                  </Td>
+                  <Td mono small align="right">
+                    {r.effectivenessRatio
+                      ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
+                      : "—"}
+                  </Td>
+                  <Td mono small muted align="right">
+                    {formatBlock(r.blockNumber)}
+                  </Td>
+                  <Td small muted title={formatTimestamp(r.blockTimestamp)}>
+                    {relativeTime(r.blockTimestamp)}
+                    {duringBreach && (
+                      <span
+                        className="ml-1 text-red-400"
+                        role="img"
+                        aria-label="Occurred during deviation breach"
+                        title="Occurred during deviation breach"
+                      >
+                        !
+                      </span>
+                    )}
+                  </Td>
+                </Row>
+              );
+            })}
           </tbody>
         </Table>
+      )}
+      {!isSearching && (
+        <Pagination
+          page={page}
+          pageSize={limit}
+          total={total}
+          onPageChange={setRawPage}
+        />
+      )}
+      {countCapped && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Showing first {ENVIO_MAX_ROWS.toLocaleString()} rebalances — older
+          entries may exist beyond this page range.
+        </p>
+      )}
+      {countCapped && isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Search covers the most recent {ENVIO_MAX_ROWS.toLocaleString()}{" "}
+          rebalances only.
+        </p>
+      )}
+      {countError && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — pagination may be incomplete.
+        </p>
+      )}
+      {countError && isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — search covers the most recent{" "}
+          {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} entries only.
+        </p>
       )}
     </>
   );
@@ -1070,22 +1285,54 @@ function LiquidityTab({
   const { network } = useNetwork();
   const { getName, getTags } = useAddressLabels();
   const query = normalizeSearch(search);
+  const [rawPage, setRawPage] = React.useState(1);
+
+  const handleSearchChange = React.useCallback(
+    (value: string) => {
+      onSearchChange(value);
+      setRawPage(1);
+    },
+    [onSearchChange],
+  );
+
+  const { data: countData, error: countError } = useGQL<{
+    LiquidityEvent: { id: string }[];
+  }>(POOL_LIQUIDITY_COUNT, { poolId, limit: ENVIO_MAX_ROWS, offset: 0 });
+  const lastKnownTotalRef = React.useRef(0);
+  const rawTotal = countData?.LiquidityEvent?.length ?? 0;
+  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
+  const total = countError ? lastKnownTotalRef.current : rawTotal;
+  const countCapped = rawTotal >= ENVIO_MAX_ROWS;
+
+  const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
+  const page = Math.max(1, Math.min(rawPage, totalPages));
+  const isSearching = query.length > 0;
+  const searchFetchLimit =
+    total > 0 ? Math.min(total, SEARCH_MAX_LIMIT) : SEARCH_BOOTSTRAP_LIMIT;
+  const fetchLimit = isSearching ? searchFetchLimit : limit;
+  const fetchOffset = isSearching ? 0 : (page - 1) * limit;
+  const orderBy = useMemo(() => buildOrderBy("blockNumber", "desc"), []);
 
   const { data, error, isLoading } = useGQL<{
     LiquidityEvent: LiquidityEvent[];
-  }>(POOL_LIQUIDITY, { poolId, limit });
+  }>(POOL_LIQUIDITY_PAGE, {
+    poolId,
+    limit: fetchLimit,
+    offset: fetchOffset,
+    orderBy,
+  });
   const rows = data?.LiquidityEvent ?? [];
 
   const fpmmPool = pool ? isFpmm(pool) : false;
-  // Passing null as the query key skips the request — VirtualPools have no snapshots.
-  const { data: snapshotData } = useGQL<{ PoolSnapshot: PoolSnapshot[] }>(
-    fpmmPool ? POOL_SNAPSHOTS_CHART : null,
+  const { data: snapshotData, error: snapshotError } = useGQL<{
+    PoolDailySnapshot: PoolSnapshot[];
+  }>(
+    fpmmPool ? POOL_DAILY_SNAPSHOTS_CHART : null,
     { poolId },
     SNAPSHOT_REFRESH_MS,
   );
-  // Query fetches newest-first (desc) with a cap; reverse for chronological display.
   const snapshots = useMemo(
-    () => [...(snapshotData?.PoolSnapshot ?? [])].reverse(),
+    () => [...(snapshotData?.PoolDailySnapshot ?? [])].reverse(),
     [snapshotData],
   );
 
@@ -1114,6 +1361,11 @@ function LiquidityTab({
 
   return (
     <>
+      {fpmmPool && snapshotError && (
+        <ErrorBox
+          message={`Liquidity chart unavailable: ${snapshotError.message}`}
+        />
+      )}
       {fpmmPool && snapshots.length > 0 && (
         <LiquidityChart
           snapshots={snapshots}
@@ -1125,7 +1377,7 @@ function LiquidityTab({
       {rows.length > 0 && (
         <TableSearch
           value={search}
-          onChange={onSearchChange}
+          onChange={handleSearchChange}
           placeholder="Search liquidity by tx, sender, name, tag, kind, amount, or block…"
           ariaLabel="Search liquidity"
         />
@@ -1183,6 +1435,37 @@ function LiquidityTab({
           </tbody>
         </Table>
       )}
+      {!isSearching && (
+        <Pagination
+          page={page}
+          pageSize={limit}
+          total={total}
+          onPageChange={setRawPage}
+        />
+      )}
+      {countCapped && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Showing first {ENVIO_MAX_ROWS.toLocaleString()} liquidity events —
+          older entries may exist beyond this page range.
+        </p>
+      )}
+      {countCapped && isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Search covers the most recent {ENVIO_MAX_ROWS.toLocaleString()}{" "}
+          liquidity events only.
+        </p>
+      )}
+      {countError && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — pagination may be incomplete.
+        </p>
+      )}
+      {countError && isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — search covers the most recent{" "}
+          {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} entries only.
+        </p>
+      )}
     </>
   );
 }
@@ -1198,14 +1481,33 @@ function isLiquidityPositionSchemaError(error: Error | undefined) {
   );
 }
 
-function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
-  // Only FPMM pools have LP mechanics — skip the fetch for non-FPMM pools.
-  // Pass null to useGQL when we know the pool type and it isn't FPMM so the
-  // hook is always called (Rules of Hooks) but the network request is skipped.
-  const isFpmmPool = pool ? isFpmm(pool) : null; // null = still loading
+function LpsTab({
+  poolId,
+  limit,
+  pool,
+  search,
+  onSearchChange,
+}: {
+  poolId: string;
+  limit: number;
+  pool: Pool | null;
+  search: string;
+  onSearchChange: (value: string) => void;
+}) {
+  const isFpmmPool = pool ? isFpmm(pool) : null;
   const shouldSkip = isFpmmPool === false;
-  const { getName } = useAddressLabels();
+  const { getName, getTags } = useAddressLabels();
   const { network } = useNetwork();
+  const query = normalizeSearch(search);
+  const [rawPage, setRawPage] = React.useState(1);
+
+  const handleSearchChange = React.useCallback(
+    (value: string) => {
+      onSearchChange(value);
+      setRawPage(1);
+    },
+    [onSearchChange],
+  );
 
   const {
     data: indexedData,
@@ -1221,6 +1523,7 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
         .map((position) => ({
           address: position.address,
           netLiquidity: BigInt(position.netLiquidity),
+          lastUpdatedTimestamp: position.lastUpdatedTimestamp,
         }))
         .filter((position) => position.netLiquidity > BigInt(0))
         .sort((a, b) =>
@@ -1259,6 +1562,23 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
   if (positions.length === 0)
     return <EmptyBox message="No active LP positions for this pool." />;
 
+  const rankedPositions = positions.map((p, i) => ({ ...p, rank: i + 1 }));
+  const filteredPositions = query
+    ? rankedPositions.filter((p) =>
+        matchesRowSearch(query, [
+          ...addressSearchTerms(p.address, getName, getTags),
+        ]),
+      )
+    : rankedPositions;
+
+  const isSearching = query.length > 0;
+  const lpTotal = filteredPositions.length;
+  const lpTotalPages = lpTotal > 0 ? Math.ceil(lpTotal / limit) : 1;
+  const lpPage = Math.max(1, Math.min(rawPage, lpTotalPages));
+  const pagedPositions = isSearching
+    ? filteredPositions
+    : filteredPositions.slice((lpPage - 1) * limit, lpPage * limit);
+
   // Derive per-position token amounts from pool reserves and LP share.
   // positionTokenAmount = positionShare * poolReserve
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
@@ -1294,150 +1614,149 @@ function LpsTab({ poolId, pool }: { poolId: string; pool: Pool | null }) {
         feedVal={feedVal}
         usdmIsToken0={usdmIsToken0}
       />
-      <Table>
-        <thead>
-          <tr className="border-b border-slate-800 bg-slate-900/50">
-            <Th>#</Th>
-            <Th>Address</Th>
-            <Th align="right">{sym0}</Th>
-            <Th align="right">{sym1}</Th>
-            {showUsd && <Th align="right">Total Value</Th>}
-            <Th align="right">Share</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {positions.map((position, i) => {
-            // Scale up by 1e6 before converting to Number to preserve precision
-            // for large bigint liquidity values that exceed JS safe integer range.
-            const shareNum =
-              totalLiquidity > BigInt(0)
-                ? Number(
-                    (position.netLiquidity * BigInt(1_000_000)) /
-                      totalLiquidity,
-                  ) / 1_000_000
-                : 0;
-            const sharePct = (shareNum * 100).toFixed(2);
+      <TableSearch
+        value={search}
+        onChange={handleSearchChange}
+        placeholder="Search LPs by address, name, or tag..."
+        ariaLabel="Search LPs"
+      />
+      {filteredPositions.length === 0 ? (
+        <EmptyBox message="No LPs match your search." />
+      ) : (
+        <Table>
+          <thead>
+            <tr className="border-b border-slate-800 bg-slate-900/50">
+              <Th>#</Th>
+              <Th>Address</Th>
+              <Th align="right">{sym0}</Th>
+              <Th align="right">{sym1}</Th>
+              {showUsd && <Th align="right">Total Value</Th>}
+              <Th align="right">Share</Th>
+              <Th>Last Active</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {pagedPositions.map((position) => {
+              const fmtTok = (
+                v: number | null,
+                sym: string,
+                vUsd: number | null,
+              ) => {
+                if (v === null) return "—";
+                const formatted = v.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                });
+                const showSubUsd = vUsd !== null && !USDM_SYMBOLS.has(sym);
+                return (
+                  <div>
+                    <span>
+                      {formatted} {sym}
+                    </span>
+                    {showSubUsd && (
+                      <div className="text-xs text-slate-500">
+                        ≈ $
+                        {vUsd!.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              };
+              // Scale up by 1e6 before converting to Number to preserve precision
+              // for large bigint liquidity values that exceed JS safe integer range.
+              const shareNum =
+                totalLiquidity > BigInt(0)
+                  ? Number(
+                      (position.netLiquidity * BigInt(1_000_000)) /
+                        totalLiquidity,
+                    ) / 1_000_000
+                  : 0;
+              const sharePct = (shareNum * 100).toFixed(2);
 
-            const tok0 = hasReserves ? shareNum * reserves0Raw : null;
-            const tok1 = hasReserves ? shareNum * reserves1Raw : null;
+              const tok0 = hasReserves ? shareNum * reserves0Raw : null;
+              const tok1 = hasReserves ? shareNum * reserves1Raw : null;
 
-            // Convert each token to USD only when we have a valid USDm-paired oracle price.
-            // tok0Usd = USD value of tok0:
-            //   - if tok0 IS USDm → already in USD, value = tok0
-            //   - if tok1 IS USDm → tok0 is the non-stable, convert via feedVal
-            //   - otherwise → no valid conversion, null
-            const tok0Usd: number | null =
-              tok0 === null || !hasUsdmSide
-                ? null
-                : usdmIsToken0
-                  ? tok0 // tok0 is USDm → already USD
-                  : feedVal !== null
-                    ? tok0 * feedVal // tok0 is non-stable → convert
-                    : null;
-            const tok1Usd: number | null =
-              tok1 === null || !hasUsdmSide
-                ? null
-                : usdmIsToken1
-                  ? tok1 // tok1 is USDm → already USD
-                  : feedVal !== null
-                    ? tok1 * feedVal // tok1 is non-stable → convert
-                    : null;
-            const totalUsd =
-              tok0Usd !== null && tok1Usd !== null ? tok0Usd + tok1Usd : null;
+              // Convert each token to USD only when we have a valid USDm-paired oracle price.
+              // tok0Usd = USD value of tok0:
+              //   - if tok0 IS USDm → already in USD, value = tok0
+              //   - if tok1 IS USDm → tok0 is the non-stable, convert via feedVal
+              //   - otherwise → no valid conversion, null
+              const tok0Usd: number | null =
+                tok0 === null || !hasUsdmSide
+                  ? null
+                  : usdmIsToken0
+                    ? tok0 // tok0 is USDm → already USD
+                    : feedVal !== null
+                      ? tok0 * feedVal // tok0 is non-stable → convert
+                      : null;
+              const tok1Usd: number | null =
+                tok1 === null || !hasUsdmSide
+                  ? null
+                  : usdmIsToken1
+                    ? tok1 // tok1 is USDm → already USD
+                    : feedVal !== null
+                      ? tok1 * feedVal // tok1 is non-stable → convert
+                      : null;
+              const totalUsd =
+                tok0Usd !== null && tok1Usd !== null ? tok0Usd + tok1Usd : null;
 
-            const fmtTok = (
-              v: number | null,
-              sym: string,
-              vUsd: number | null,
-            ) => {
-              if (v === null) return "—";
-              const formatted = v.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              });
-              const showSubUsd = vUsd !== null && !USDM_SYMBOLS.has(sym);
               return (
-                <div>
-                  <span>
-                    {formatted} {sym}
-                  </span>
-                  {showSubUsd && (
-                    <div className="text-xs text-slate-500">
-                      ≈ $
-                      {vUsd!.toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            };
-
-            return (
-              <Row key={position.address}>
-                <Td small muted>
-                  {i + 1}
-                </Td>
-                <Td>
-                  <AddressLink address={position.address} />
-                </Td>
-                <Td mono small align="right">
-                  {fmtTok(tok0, sym0, tok0Usd)}
-                </Td>
-                <Td mono small align="right">
-                  {fmtTok(tok1, sym1, tok1Usd)}
-                </Td>
-                {showUsd && (
-                  <Td mono small align="right">
-                    {totalUsd !== null
-                      ? `$${totalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      : "—"}
+                <Row key={position.address}>
+                  <Td small muted>
+                    {position.rank}
                   </Td>
-                )}
-                <Td mono small align="right">
-                  {sharePct}%
-                </Td>
-              </Row>
-            );
-          })}
-        </tbody>
-      </Table>
+                  <Td>
+                    <AddressLink address={position.address} />
+                  </Td>
+                  <Td mono small align="right">
+                    {fmtTok(tok0, sym0, tok0Usd)}
+                  </Td>
+                  <Td mono small align="right">
+                    {fmtTok(tok1, sym1, tok1Usd)}
+                  </Td>
+                  {showUsd && (
+                    <Td mono small align="right">
+                      {totalUsd !== null
+                        ? `$${totalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : "—"}
+                    </Td>
+                  )}
+                  <Td mono small align="right">
+                    {sharePct}%
+                  </Td>
+                  <Td
+                    small
+                    muted
+                    title={formatTimestamp(position.lastUpdatedTimestamp)}
+                  >
+                    {relativeTime(position.lastUpdatedTimestamp)}
+                  </Td>
+                </Row>
+              );
+            })}
+          </tbody>
+        </Table>
+      )}
+      {!isSearching && (
+        <Pagination
+          page={lpPage}
+          pageSize={limit}
+          total={lpTotal}
+          onPageChange={setRawPage}
+        />
+      )}
     </>
   );
 }
 
-// Server-sortable columns (mapped to Hasura order_by fields)
 type OracleSortCol =
   | "timestamp"
   | "oracleOk"
   | "oraclePrice"
   | "priceDifference";
-
-const ORACLE_PAGE_SIZE = 25;
-// Before the aggregate count arrives, fetch a bounded first window so search
-// works immediately.
-const ORACLE_SEARCH_BOOTSTRAP_LIMIT = 500;
-// Keep client-side search bounded even after count resolves.
-const ORACLE_SEARCH_MAX_LIMIT = 2000;
-
-/**
- * Build a stable Hasura order_by array. The primary sort is the chosen column;
- * id is always appended as a unique tiebreaker so page boundaries remain
- * deterministic even when multiple rows share the same timestamp or sort key.
- */
-function buildOrderBy(
-  col: OracleSortCol,
-  dir: "asc" | "desc",
-): Array<Partial<Record<string, "asc" | "desc">>> {
-  const primary: Partial<Record<string, "asc" | "desc">> = { [col]: dir };
-  if (col === "timestamp") return [primary, { id: "asc" }];
-  // Secondary: timestamp desc; tertiary: id asc (unique) for full stability.
-  return [primary, { timestamp: "desc" }, { id: "asc" }];
-}
-
-// Envio caps queries at 1000 rows — use this as the count query limit.
-const ENVIO_MAX_ROWS = 1000;
 
 function OracleTab({
   poolId,
@@ -1482,7 +1801,7 @@ function OracleTab({
 
   // Clamp page to valid range once total is known, so a stale page
   // index never leaves the user stranded past the last page.
-  const totalPages = total > 0 ? Math.ceil(total / ORACLE_PAGE_SIZE) : 1;
+  const totalPages = total > 0 ? Math.ceil(total / DEFAULT_PAGE_SIZE) : 1;
   const page = Math.max(1, Math.min(rawPage, totalPages));
   const setPage = React.useCallback((p: number) => setRawPage(p), []);
 
@@ -1493,15 +1812,13 @@ function OracleTab({
   // regardless of the current table sort column.
   const isSearching = query.length > 0;
   const searchFetchLimit =
-    total > 0
-      ? Math.min(total, ORACLE_SEARCH_MAX_LIMIT)
-      : ORACLE_SEARCH_BOOTSTRAP_LIMIT;
-  const fetchLimit = isSearching ? searchFetchLimit : ORACLE_PAGE_SIZE;
-  const isSearchCapped = isSearching && total > ORACLE_SEARCH_MAX_LIMIT;
-  const fetchOffset = isSearching ? 0 : (page - 1) * ORACLE_PAGE_SIZE;
+    total > 0 ? Math.min(total, SEARCH_MAX_LIMIT) : SEARCH_BOOTSTRAP_LIMIT;
+  const fetchLimit = isSearching ? searchFetchLimit : DEFAULT_PAGE_SIZE;
+  const isSearchCapped = isSearching && total > SEARCH_MAX_LIMIT;
+  const fetchOffset = isSearching ? 0 : (page - 1) * DEFAULT_PAGE_SIZE;
   // Table sort (user-controlled)
   const tableOrderBy = useMemo(
-    () => buildOrderBy(sortCol, sortDir),
+    () => buildOrderBy(sortCol, sortDir, "timestamp"),
     [sortCol, sortDir],
   );
   // Search always uses newest-first so the bounded window is chronologically
@@ -1591,15 +1908,26 @@ function OracleTab({
 
   return (
     <>
+      {pool?.deviationBreachStartedAt &&
+        Number(pool.deviationBreachStartedAt) > 0 && (
+          <div className="rounded-lg border border-red-800/50 bg-red-900/20 px-4 py-2.5 mb-4 text-sm text-red-300">
+            Deviation breach started{" "}
+            {relativeTime(pool.deviationBreachStartedAt)} — oracle price
+            deviation exceeds the rebalance threshold.
+          </div>
+        )}
+      {chartRows.length > 0 && chartRows.length < 20 && (
+        <div className="rounded-lg border border-slate-700/50 bg-slate-800/40 px-4 py-2 mb-4 text-xs text-slate-400">
+          Only {chartRows.length} oracle snapshot
+          {chartRows.length === 1 ? "" : "s"} recorded so far — data is still
+          collecting.
+        </div>
+      )}
       <OracleChart
         snapshots={chartRows}
         token0Symbol={sym0}
         token1Symbol={sym1}
-      />
-      <OraclePriceChart
-        snapshots={chartRows}
-        token0={pool?.token0 ?? null}
-        token1={pool?.token1 ?? null}
+        breachStartedAt={pool?.deviationBreachStartedAt}
       />
       <TableSearch
         value={search}
@@ -1735,7 +2063,7 @@ function OracleTab({
           {!isSearching && (
             <Pagination
               page={page}
-              pageSize={ORACLE_PAGE_SIZE}
+              pageSize={DEFAULT_PAGE_SIZE}
               total={total}
               onPageChange={setPage}
             />
@@ -1749,13 +2077,13 @@ function OracleTab({
           {!countError && isSearchCapped && (
             <p className="px-1 pt-1 text-xs text-amber-400">
               Search is limited to the most recent{" "}
-              {ORACLE_SEARCH_MAX_LIMIT.toLocaleString()} snapshots.
+              {SEARCH_MAX_LIMIT.toLocaleString()} snapshots.
             </p>
           )}
           {countError && isSearching && (
             <p className="px-1 pt-1 text-xs text-amber-400">
               Could not load total count — search covers the most recent{" "}
-              {ORACLE_SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} snapshots only.
+              {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} snapshots only.
             </p>
           )}
           {countError && !isSearching && (
@@ -1777,10 +2105,14 @@ function OlsTab({
   poolId,
   limit,
   pool,
+  search,
+  onSearchChange,
 }: {
   poolId: string;
   limit: number;
   pool: Pool | null;
+  search: string;
+  onSearchChange: (value: string) => void;
 }) {
   const { network } = useNetwork();
   const {
@@ -1804,6 +2136,8 @@ function OlsTab({
         limit={limit}
         pool={pool}
         network={network}
+        search={search}
+        onSearchChange={onSearchChange}
       />
     </div>
   );
@@ -1833,41 +2167,25 @@ export function OlsStatusPanel({
   const cooldown = Number(olsPool.rebalanceCooldown);
   const elapsed = lastRebalance > 0 ? nowSeconds - lastRebalance : null;
 
-  let cooldownStatus: string;
-  if (lastRebalance === 0) {
-    cooldownStatus = "—";
-  } else if (elapsed !== null && elapsed >= cooldown) {
-    cooldownStatus = "Ready to rebalance";
-  } else if (elapsed !== null) {
-    const remaining = cooldown - elapsed;
-    const h = Math.floor(remaining / 3600);
-    const m = Math.floor((remaining % 3600) / 60);
-    cooldownStatus = `Cooling down (${h}h ${m}m left)`;
-  } else {
-    cooldownStatus = "—";
-  }
+  const cooldownReady =
+    lastRebalance > 0 && elapsed !== null && elapsed >= cooldown;
+  const cooldownActive =
+    lastRebalance > 0 && elapsed !== null && elapsed < cooldown;
+  const cooldownPct =
+    cooldownActive && cooldown > 0
+      ? Math.max(0, Math.min((elapsed! / cooldown) * 100, 100))
+      : 0;
+  const cooldownRemaining = cooldownActive
+    ? Math.max(0, cooldown - elapsed!)
+    : 0;
+  const cooldownH = Math.floor(cooldownRemaining / 3600);
+  const cooldownM = Math.floor((cooldownRemaining % 3600) / 60);
 
   const debtTokenSym = tokenSymbol(network, olsPool.debtToken || null);
   const debtTokenSide = getDebtTokenSideLabel(pool, olsPool.debtToken);
 
-  // Incentives: raw uint64, FEE_DENOMINATOR = 1e18 in the contract.
-  // percentage = value / 1e18 * 100. With 4 decimal places: (v * 10000) / 1e16.
-  // Sanity: v=1e18 (100%) → 1e22/1e16 = 1e6 scaled → integer=100, frac=0 → "100.0000%" ✓
-  //         v=1e15 (0.1%) → 1e19/1e16 = 1000 scaled → integer=0, frac=1000 → "0.1000%" ✓
-  // Use BigInt to avoid precision loss on large uint64 values.
-  const toPercent = (raw: string): string => {
-    if (!raw || raw === "0") return "0.0000%";
-    const v = BigInt(raw);
-    const TEN_K = BigInt(10000);
-    const DIVISOR = BigInt("10000000000000000"); // 1e16
-    const scaled = (v * TEN_K) / DIVISOR;
-    const integer = scaled / TEN_K;
-    const frac = scaled % TEN_K;
-    return `${integer}.${String(frac).padStart(4, "0")}%`;
-  };
-
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-5">
       <div className="flex flex-wrap items-center gap-3">
         <h3 className="text-base font-semibold text-white">
           Open Liquidity Strategy
@@ -1883,69 +2201,115 @@ export function OlsStatusPanel({
         )}
       </div>
 
-      <dl className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
-        <Stat
-          label="Debt Token"
-          value={
-            !olsPool.debtToken
-              ? "Unknown"
-              : `${debtTokenSym} (${debtTokenSide})`
-          }
-        />
-        <Stat
-          label="Cooldown"
-          value={
-            cooldown > 0
-              ? `${Math.floor(cooldown / 3600)}h ${Math.floor((cooldown % 3600) / 60)}m`
-              : "None"
-          }
-        />
-        <Stat label="Cooldown Status" value={cooldownStatus} />
-        <Stat
-          label="OLS Rebalances"
-          value={String(olsPool.olsRebalanceCount)}
-        />
-        <Stat
-          label="Last Rebalance"
-          value={
-            lastRebalance > 0 ? relativeTime(String(lastRebalance)) : "Never"
-          }
-          title={
-            lastRebalance > 0
-              ? formatTimestamp(String(lastRebalance))
-              : undefined
-          }
-        />
-        <Stat
-          label="Protocol Fee Recipient"
-          value={
-            olsPool.protocolFeeRecipient ? (
-              <AddressLink address={olsPool.protocolFeeRecipient} />
-            ) : (
-              "Unknown"
-            )
-          }
-        />
-        <Stat
-          label="Expansion Incentive (Liquidity Source)"
-          value={toPercent(olsPool.liquiditySourceIncentiveExpansion)}
-        />
-        <Stat
-          label="Contraction Incentive (Liquidity Source)"
-          value={toPercent(olsPool.liquiditySourceIncentiveContraction)}
-        />
-        <Stat
-          label="Expansion Incentive (Protocol)"
-          value={toPercent(olsPool.protocolIncentiveExpansion)}
-        />
-        <Stat
-          label="Contraction Incentive (Protocol)"
-          value={toPercent(olsPool.protocolIncentiveContraction)}
-        />
-        <Stat
-          label="OLS Contract"
-          value={<AddressLink address={olsPool.olsAddress} />}
-        />
+      <dl className="text-sm space-y-4">
+        <div>
+          <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
+            Configuration
+          </h4>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <Stat
+              label="Debt Token"
+              value={
+                !olsPool.debtToken
+                  ? "Unknown"
+                  : `${debtTokenSym} (${debtTokenSide})`
+              }
+            />
+            <Stat
+              label="Cooldown"
+              value={
+                cooldown > 0
+                  ? `${Math.floor(cooldown / 3600)}h ${Math.floor((cooldown % 3600) / 60)}m`
+                  : "None"
+              }
+            />
+            <Stat
+              label="OLS Contract"
+              value={<AddressLink address={olsPool.olsAddress} />}
+            />
+          </div>
+        </div>
+
+        <div className="border-t border-slate-800 pt-4">
+          <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
+            Activity
+          </h4>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <Stat
+              label="OLS Rebalances"
+              value={String(olsPool.olsRebalanceCount)}
+            />
+            <Stat
+              label="Last Rebalance"
+              value={
+                lastRebalance > 0
+                  ? relativeTime(String(lastRebalance))
+                  : "Never"
+              }
+              title={
+                lastRebalance > 0
+                  ? formatTimestamp(String(lastRebalance))
+                  : undefined
+              }
+            />
+            <Stat
+              label="Protocol Fee Recipient"
+              value={
+                olsPool.protocolFeeRecipient ? (
+                  <AddressLink address={olsPool.protocolFeeRecipient} />
+                ) : (
+                  "Unknown"
+                )
+              }
+            />
+            <div className="col-span-2 sm:col-span-3">
+              <dt className="text-slate-400 mb-1">Cooldown Status</dt>
+              <dd className="text-white">
+                {lastRebalance === 0 ? (
+                  <span className="text-slate-500">Never rebalanced</span>
+                ) : cooldownReady ? (
+                  <span className="text-emerald-400">Ready to rebalance</span>
+                ) : (
+                  <div className="space-y-1">
+                    <span>
+                      {cooldownH}h {cooldownM}m remaining
+                    </span>
+                    <div className="w-full max-w-xs h-2 bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-indigo-500 rounded-full transition-all"
+                        style={{ width: `${cooldownPct}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </dd>
+            </div>
+          </div>
+        </div>
+
+        <div className="border-t border-slate-800 pt-4">
+          <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
+            Incentive Structure
+          </h4>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <Stat
+              label="Expansion (Source)"
+              value={toPercent(olsPool.liquiditySourceIncentiveExpansion)}
+            />
+            <Stat
+              label="Contraction (Source)"
+              value={toPercent(olsPool.liquiditySourceIncentiveContraction)}
+            />
+            <Stat
+              label="Expansion (Protocol)"
+              value={toPercent(olsPool.protocolIncentiveExpansion)}
+            />
+            <Stat
+              label="Contraction (Protocol)"
+              value={toPercent(olsPool.protocolIncentiveContraction)}
+            />
+          </div>
+        </div>
       </dl>
     </div>
   );
@@ -1961,30 +2325,149 @@ function OlsLiquidityEvents({
   limit,
   pool,
   network,
+  search,
+  onSearchChange,
 }: {
   poolId: string;
   olsAddress: string | null;
   limit: number;
   pool: Pool | null;
   network: ReturnType<typeof useNetwork>["network"];
+  search: string;
+  onSearchChange: (value: string) => void;
 }) {
-  // Skip the query until the active olsAddress is known (avoids mixing events
-  // from historical OLS contracts in pools that have been re-registered).
-  const query = olsAddress ? OLS_LIQUIDITY_EVENTS : null;
+  const { getName, getTags } = useAddressLabels();
+  const searchQuery = normalizeSearch(search);
+  const [rawPage, setRawPage] = React.useState(1);
+
+  const handleSearchChange = React.useCallback(
+    (value: string) => {
+      onSearchChange(value);
+      setRawPage(1);
+    },
+    [onSearchChange],
+  );
+
+  const countQuery = olsAddress ? OLS_LIQUIDITY_EVENTS_COUNT : null;
+  const { data: countData, error: countError } = useGQL<{
+    OlsLiquidityEvent: { id: string }[];
+  }>(
+    countQuery,
+    olsAddress ? { poolId, olsAddress, limit: ENVIO_MAX_ROWS, offset: 0 } : {},
+  );
+  const lastKnownTotalRef = React.useRef(0);
+  const rawTotal = countData?.OlsLiquidityEvent?.length ?? 0;
+  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
+  const total = countError ? lastKnownTotalRef.current : rawTotal;
+  const countCapped = rawTotal >= ENVIO_MAX_ROWS;
+
+  const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
+  const page = Math.max(1, Math.min(rawPage, totalPages));
+  const isSearching = searchQuery.length > 0;
+  const searchFetchLimit =
+    total > 0 ? Math.min(total, SEARCH_MAX_LIMIT) : SEARCH_BOOTSTRAP_LIMIT;
+  const fetchLimit = isSearching ? searchFetchLimit : limit;
+  const fetchOffset = isSearching ? 0 : (page - 1) * limit;
+  const orderBy = useMemo(() => buildOrderBy("blockTimestamp", "desc"), []);
+
+  const gqlQuery = olsAddress ? OLS_LIQUIDITY_EVENTS_PAGE : null;
   const { data, error, isLoading } = useGQL<{
     OlsLiquidityEvent: OlsLiquidityEvent[];
-  }>(query, olsAddress ? { poolId, olsAddress, limit } : {});
+  }>(
+    gqlQuery,
+    olsAddress
+      ? { poolId, olsAddress, limit: fetchLimit, offset: fetchOffset, orderBy }
+      : {},
+  );
 
   const events = data?.OlsLiquidityEvent ?? [];
 
+  const filteredEvents = useMemo(() => {
+    if (!searchQuery) return events;
+    return events.filter((e) => {
+      const givenSym = tokenSymbol(network, e.tokenGivenToPool);
+      const takenSym = tokenSymbol(network, e.tokenTakenFromPool);
+      const givenDec =
+        pool?.token0?.toLowerCase() === e.tokenGivenToPool.toLowerCase()
+          ? (pool?.token0Decimals ?? 18)
+          : (pool?.token1Decimals ?? 18);
+      const takenDec =
+        pool?.token0?.toLowerCase() === e.tokenTakenFromPool.toLowerCase()
+          ? (pool?.token0Decimals ?? 18)
+          : (pool?.token1Decimals ?? 18);
+      return matchesRowSearch(searchQuery, [
+        e.txHash,
+        e.direction === 0 ? "expand" : "contract",
+        ...addressSearchTerms(e.caller, getName, getTags),
+        formatWei(e.amountGivenToPool, givenDec),
+        givenSym,
+        formatWei(e.amountTakenFromPool, takenDec),
+        takenSym,
+      ]);
+    });
+  }, [events, searchQuery, pool, network, getName, getTags]);
+
   return (
-    <OlsLiquidityTable
-      events={events}
-      pool={pool}
-      network={network}
-      isLoading={isLoading}
-      error={error ?? null}
-    />
+    <>
+      {events.length > 0 && (
+        <TableSearch
+          value={search}
+          onChange={handleSearchChange}
+          placeholder="Search OLS events by tx, caller, direction, amount, or token..."
+          ariaLabel="Search OLS events"
+        />
+      )}
+      {error ? (
+        <OlsLiquidityTable
+          events={[]}
+          pool={pool}
+          network={network}
+          isLoading={false}
+          error={error}
+        />
+      ) : searchQuery && events.length > 0 && filteredEvents.length === 0 ? (
+        <EmptyBox message="No OLS events match your search." />
+      ) : (
+        <OlsLiquidityTable
+          events={filteredEvents}
+          pool={pool}
+          network={network}
+          isLoading={isLoading}
+          error={null}
+        />
+      )}
+      {!error && !isSearching && (
+        <Pagination
+          page={page}
+          pageSize={limit}
+          total={total}
+          onPageChange={setRawPage}
+        />
+      )}
+      {!error && countCapped && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Showing first {ENVIO_MAX_ROWS.toLocaleString()} OLS events — older
+          entries may exist beyond this page range.
+        </p>
+      )}
+      {!error && countCapped && isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Search covers the most recent {ENVIO_MAX_ROWS.toLocaleString()} OLS
+          events only.
+        </p>
+      )}
+      {!error && countError && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — pagination may be incomplete.
+        </p>
+      )}
+      {!error && countError && isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — search covers the most recent{" "}
+          {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} entries only.
+        </p>
+      )}
+    </>
   );
 }
 

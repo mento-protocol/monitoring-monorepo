@@ -84,9 +84,6 @@ vi.mock("@/components/reserves-panel", () => ({
   ReservesPanel: () => <div />,
 }));
 vi.mock("@/components/oracle-chart", () => ({ OracleChart: () => <div /> }));
-vi.mock("@/components/oracle-price-chart", () => ({
-  OraclePriceChart: () => <div />,
-}));
 vi.mock("@/components/reserve-chart", () => ({ ReserveChart: () => <div /> }));
 vi.mock("@/components/sender-cell", () => ({ SenderCell: () => <div /> }));
 vi.mock("@/components/tags-cell", () => ({ TagsCell: () => <div /> }));

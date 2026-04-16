@@ -15,19 +15,17 @@ import {
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
 interface SnapshotChartProps {
-  // PoolDailySnapshot rows from the indexer: one row per pool per UTC day,
-  // already aggregated server-side. `timestamp` is the UTC-day bucket
-  // (midnight seconds), `swapVolume{0,1}` is the per-day total, and
-  // `cumulativeSwapCount` is the running total as of that day.
   snapshots: PoolSnapshot[];
   token0Symbol?: string;
   token1Symbol?: string;
+  rebalanceTimestamps?: string[];
 }
 
 export function SnapshotChart({
   snapshots,
   token0Symbol = "Token 0",
   token1Symbol = "Token 1",
+  rebalanceTimestamps,
 }: SnapshotChartProps) {
   if (snapshots.length === 0) return null;
 
@@ -70,8 +68,23 @@ export function SnapshotChart({
     yaxis: "y2" as const,
   };
 
+  const rebalanceShapes: Plotly.Layout["shapes"] = (
+    rebalanceTimestamps ?? []
+  ).map((ts) => ({
+    type: "line" as const,
+    xref: "x" as const,
+    yref: "paper" as const,
+    x0: new Date(Number(ts) * 1000).toISOString().slice(0, 10),
+    x1: new Date(Number(ts) * 1000).toISOString().slice(0, 10),
+    y0: 0,
+    y1: 1,
+    line: { color: "#f59e0b", width: 1, dash: "dot" as const },
+    layer: "above" as const,
+  }));
+
   const layout = {
     ...PLOTLY_BASE_LAYOUT,
+    shapes: rebalanceShapes,
     font: { ...PLOTLY_BASE_LAYOUT.font, size: 11 },
     barmode: "stack" as const,
     xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_DAILY),

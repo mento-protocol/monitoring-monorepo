@@ -90,7 +90,6 @@ export type LiquidityEvent = {
   poolId: string;
   kind: string;
   sender: string;
-  recipient: string;
   amount0: string;
   amount1: string;
   liquidity: string;
@@ -138,7 +137,6 @@ export type RebalanceEvent = {
   txHash: string;
   blockNumber: string;
   blockTimestamp: string;
-  rebalancerAddress?: string;
   improvement?: string;
   effectivenessRatio?: string;
 };

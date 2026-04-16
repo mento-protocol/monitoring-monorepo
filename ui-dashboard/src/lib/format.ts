@@ -114,3 +114,48 @@ export function formatOraclePrice(price: number): string {
   const dp = price > 0.9 && price < 1.1 ? 4 : 6;
   return price.toFixed(dp);
 }
+
+export function toPercent(raw: string, decimals = 4): string {
+  if (!raw || raw === "0") return `0.${"0".repeat(decimals)}%`;
+  const v = BigInt(raw);
+  const scale = BigInt(10 ** decimals);
+  const DIVISOR = BigInt("10000000000000000"); // 1e16 = 1e18 / 100
+  const scaled = (v * scale) / DIVISOR;
+  const integer = scaled / scale;
+  const frac = scaled % scale;
+  return `${integer}.${String(frac).padStart(decimals, "0")}%`;
+}
+
+export type SwapDirection = {
+  soldToken0: boolean;
+  soldAmt: string;
+  boughtAmt: string;
+  soldSym: string;
+  boughtSym: string;
+  soldDec: number;
+  boughtDec: number;
+};
+
+export function getSwapDirection(
+  swap: {
+    amount0In: string;
+    amount1In: string;
+    amount1Out: string;
+    amount0Out: string;
+  },
+  sym0: string,
+  sym1: string,
+  dec0: number,
+  dec1: number,
+): SwapDirection {
+  const soldToken0 = BigInt(swap.amount0In) > BigInt(0);
+  return {
+    soldToken0,
+    soldAmt: soldToken0 ? swap.amount0In : swap.amount1In,
+    boughtAmt: soldToken0 ? swap.amount1Out : swap.amount0Out,
+    soldSym: soldToken0 ? sym0 : sym1,
+    boughtSym: soldToken0 ? sym1 : sym0,
+    soldDec: soldToken0 ? dec0 : dec1,
+    boughtDec: soldToken0 ? dec1 : dec0,
+  };
+}
