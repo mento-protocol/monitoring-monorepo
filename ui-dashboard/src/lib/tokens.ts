@@ -162,14 +162,6 @@ export function chainlinkFeed(
   return { url: `${chainConfig.baseUrl}/${slug}`, pair };
 }
 
-/** @deprecated Use chainlinkFeed() — returns {url, pair}. */
-export function chainlinkFeedUrl(
-  tokenSymbol: string,
-  chainId: number,
-): string | null {
-  return chainlinkFeed(tokenSymbol, chainId)?.url ?? null;
-}
-
 /**
  * Computes the TVL of a pool in USD using the oracle price and token reserves.
  * Returns 0 if oracle price or reserves are missing.

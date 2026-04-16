@@ -45,9 +45,6 @@ export function resolveEffectiveName(
   return nameInput.trim();
 }
 
-/** @deprecated Use resolveEffectiveName instead */
-export const resolveEffectiveLabel = resolveEffectiveName;
-
 /**
  * Validate the form inputs for the entry editor.
  * Returns an error string or null when valid.
@@ -69,21 +66,6 @@ export function validateEntryForm(opts: {
     return "Name or at least one tag is required.";
   }
   return null;
-}
-
-/** @deprecated Use validateEntryForm instead */
-export function validateLabelForm(opts: {
-  isNewAddress: boolean;
-  address: string;
-  label: string;
-  isContractRow: boolean;
-}): string | null {
-  return validateEntryForm({
-    isNewAddress: opts.isNewAddress,
-    address: opts.address,
-    name: opts.label,
-    isContractRow: opts.isContractRow,
-  });
 }
 
 type Props = {

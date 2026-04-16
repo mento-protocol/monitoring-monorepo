@@ -15,16 +15,10 @@ export type AddressEntry = {
   updatedAt: string;
 };
 
-/** @deprecated Use AddressEntry instead */
-export type AddressLabelEntry = AddressEntry;
-
 /** Full record as returned from the API -- includes the address itself. */
 export type AddressEntryRecord = AddressEntry & {
   address: string;
 };
-
-/** @deprecated Use AddressEntryRecord instead */
-export type AddressLabelRecord = AddressEntryRecord;
 
 /** Shape of a full export/backup snapshot. */
 export type AddressLabelsSnapshot = {
