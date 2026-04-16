@@ -78,11 +78,13 @@ export function buildDailyFeeSeries(
 
   if (!Number.isFinite(minBucket)) return [];
 
-  // Emit range: from the first full UTC day at or after window.from (or the
-  // earliest bucket) to today (or the day before window.to if it lands on
-  // midnight).
+  // Emit range: from the earliest bucket that has data (floor, not ceil) to
+  // today. Using floor ensures a transfer at 12:00 on day D when window.from
+  // is 10:00 on day D still appears — the bucket for day D contains only
+  // in-window transfers because the filter above already excluded anything
+  // before window.from.
   const startBucket = window
-    ? Math.ceil(window.from / SECONDS_PER_DAY) * SECONDS_PER_DAY
+    ? Math.floor(window.from / SECONDS_PER_DAY) * SECONDS_PER_DAY
     : minBucket;
   const endRef = window?.to ?? Math.floor(Date.now() / 1000);
   const endBucket = Math.floor(endRef / SECONDS_PER_DAY) * SECONDS_PER_DAY;

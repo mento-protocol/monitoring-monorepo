@@ -31,6 +31,8 @@ interface FeeOverTimeChartProps {
   isLoading: boolean;
   hasError: boolean;
   hasFeesError: boolean;
+  /** True when fee data is approximate (unpriced tokens, truncated query, etc.) */
+  isApproximate: boolean;
 }
 
 export function FeeOverTimeChart({
@@ -38,6 +40,7 @@ export function FeeOverTimeChart({
   isLoading,
   hasError,
   hasFeesError,
+  isApproximate,
 }: FeeOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("30d");
 
@@ -83,11 +86,12 @@ export function FeeOverTimeChart({
     [fullSeries],
   );
 
+  const approxPrefix = isApproximate ? "≈ " : "";
   const headline = isLoading
     ? "…"
     : hasError || (hasFeesError && fullSeries.length === 0)
       ? "N/A"
-      : formatUSD(rangeTotal);
+      : `${approxPrefix}${formatUSD(rangeTotal)}`;
 
   const change =
     range === "7d" ? weekOverWeekChangePct(fullAsTimeSeries) : null;
@@ -238,6 +242,9 @@ export function FeeOverTimeChart({
                 )}
                 {(hasError || hasFeesError) && (
                   <span className="text-xs text-slate-500">· partial data</span>
+                )}
+                {isApproximate && !hasError && !hasFeesError && (
+                  <span className="text-xs text-slate-500">· approximate</span>
                 )}
               </>
             )}

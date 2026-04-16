@@ -236,6 +236,23 @@ describe("buildDailyFeeSeries", () => {
     expect(totalFees).toBeCloseTo(2, 2); // only 2 in-window transfers
   });
 
+  it("includes first partial-day bucket when window.from is mid-day", () => {
+    // window.from at 10:00 UTC, transfer at 12:00 UTC same day
+    const dayStart = TODAY_BUCKET;
+    const windowFrom = dayStart + 10 * 3600; // 10:00 UTC
+    const transferTs = dayStart + 12 * 3600; // 12:00 UTC
+    const window = { from: windowFrom, to: dayStart + SECONDS_PER_DAY + 1 };
+    const result = buildDailyFeeSeries(
+      [networkData([transfer({ blockTimestamp: String(transferTs) })])],
+      window,
+    );
+    // The transfer at 12:00 should be in the bucket for dayStart (00:00)
+    // and that bucket must be emitted even though window.from is 10:00
+    expect(result.length).toBeGreaterThanOrEqual(1);
+    expect(result[0].timestamp).toBe(dayStart);
+    expect(result[0].protocolFeesUSD).toBeCloseTo(1, 2);
+  });
+
   it("handles 6-decimal tokens correctly", () => {
     const ts = NOW_S - 3600;
     const bucket = Math.floor(ts / SECONDS_PER_DAY) * SECONDS_PER_DAY;
