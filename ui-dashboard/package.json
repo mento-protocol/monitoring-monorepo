@@ -30,7 +30,8 @@
   },
   "knip": {
     "ignoreDependencies": [
-      "plotly.js-basic-dist-min"
+      "plotly.js-basic-dist-min",
+      "postcss"
     ]
   },
   "devDependencies": {
