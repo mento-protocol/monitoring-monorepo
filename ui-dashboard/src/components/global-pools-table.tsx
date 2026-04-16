@@ -3,9 +3,14 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { formatUSD } from "@/lib/format";
-import { poolName, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
+import {
+  poolName,
+  poolTvlUSD,
+  tokenSymbol,
+  type OracleRateMap,
+} from "@/lib/tokens";
 import type { Network } from "@/lib/networks";
-import type { Pool } from "@/lib/types";
+import type { Pool, TradingLimit } from "@/lib/types";
 import { Table, Row, Th } from "@/components/table";
 import { SourceBadge, HealthBadge } from "@/components/badges";
 import { ChainIcon } from "@/components/chain-icon";
@@ -29,13 +34,12 @@ export type GlobalPoolEntry = {
 export type GlobalSortKey =
   | "pool"
   | "health"
+  | "fee"
   | "tvl"
   | "tvlChangeWoW"
   | "volume24h"
   | "volume7d"
-  | "totalVolume"
-  | "swaps"
-  | "rebalances";
+  | "totalVolume";
 
 export type SortDir = "asc" | "desc";
 
@@ -95,6 +99,12 @@ export function sortGlobalPools(
         cmp = (HEALTH_ORDER[aH] ?? 99) - (HEALTH_ORDER[bH] ?? 99);
         break;
       }
+      case "fee":
+        cmp =
+          (a.pool.lpFee ?? 0) +
+          (a.pool.protocolFee ?? 0) -
+          ((b.pool.lpFee ?? 0) + (b.pool.protocolFee ?? 0));
+        break;
       case "tvl":
         cmp = (tvlByKey.get(aKey) ?? 0) - (tvlByKey.get(bKey) ?? 0);
         break;
@@ -124,12 +134,6 @@ export function sortGlobalPools(
       case "totalVolume":
         cmp =
           (totalVolumeByKey.get(aKey) ?? 0) - (totalVolumeByKey.get(bKey) ?? 0);
-        break;
-      case "swaps":
-        cmp = (a.pool.swapCount ?? 0) - (b.pool.swapCount ?? 0);
-        break;
-      case "rebalances":
-        cmp = (a.pool.rebalanceCount ?? 0) - (b.pool.rebalanceCount ?? 0);
         break;
     }
     return sortDir === "asc" ? cmp : -cmp;
@@ -193,27 +197,136 @@ function hasAnyVirtualPools(entries: GlobalPoolEntry[]): boolean {
   return entries.some((e) => e.network.hasVirtualPools);
 }
 
+// ---------------------------------------------------------------------------
+// Compact 2×2 limit heatmap
+// ---------------------------------------------------------------------------
+
+function pressureColor(p: number): string {
+  if (p >= 1.0) return "bg-red-500";
+  if (p >= 0.8) return "bg-amber-500";
+  return "bg-emerald-500";
+}
+
+function LimitHeatmap({
+  limits,
+  network,
+}: {
+  limits: TradingLimit[];
+  network: Network;
+}) {
+  if (limits.length === 0)
+    return <span className="text-slate-600 text-xs">—</span>;
+
+  // Sort so token0 is first (deterministic order)
+  const sorted = [...limits].sort((a, b) => a.token.localeCompare(b.token));
+  const rows = sorted.map((tl) => {
+    const p0 = Number(tl.limitPressure0); // L0 = 5min
+    const p1 = Number(tl.limitPressure1); // L1 = 24h
+    const sym = tokenSymbol(network, tl.token);
+    return { sym, p0, p1 };
+  });
+
+  const tooltip = rows
+    .map(
+      (r) =>
+        `${r.sym}: 5m ${(r.p0 * 100).toFixed(1)}% · 24h ${(r.p1 * 100).toFixed(1)}%`,
+    )
+    .join("\n");
+
+  return (
+    <div className="inline-grid grid-cols-2 gap-px" title={tooltip}>
+      {rows.map((r) => (
+        <div key={r.sym} className="contents">
+          <div
+            className={`w-2 h-2 rounded-sm ${pressureColor(r.p0)}`}
+            aria-label={`${r.sym} 5m: ${(r.p0 * 100).toFixed(1)}%`}
+          />
+          <div
+            className={`w-2 h-2 rounded-sm ${pressureColor(r.p1)}`}
+            aria-label={`${r.sym} 24h: ${(r.p1 * 100).toFixed(1)}%`}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Strategy badges
+// ---------------------------------------------------------------------------
+
+const STRATEGY_STYLES: Record<
+  string,
+  { bg: string; text: string; ring: string }
+> = {
+  Open: {
+    bg: "bg-purple-900/60",
+    text: "text-purple-300",
+    ring: "ring-purple-700/50",
+  },
+  Reserve: {
+    bg: "bg-blue-900/60",
+    text: "text-blue-300",
+    ring: "ring-blue-700/50",
+  },
+  CDP: {
+    bg: "bg-teal-900/60",
+    text: "text-teal-300",
+    ring: "ring-teal-700/50",
+  },
+};
+
+function StrategyBadge({ label }: { label: string }) {
+  const style = STRATEGY_STYLES[label] ?? STRATEGY_STYLES.Reserve;
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${style.bg} ${style.text} ${style.ring}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function poolStrategies(pool: Pool, isOls: boolean): string[] {
+  const strategies: string[] = [];
+  if (isOls) strategies.push("Open");
+  if (
+    pool.rebalancerAddress &&
+    pool.rebalancerAddress !== "" &&
+    pool.rebalanceLivenessStatus === "ACTIVE" &&
+    !isOls
+  ) {
+    strategies.push("Reserve");
+  }
+  return strategies;
+}
+
+// ---------------------------------------------------------------------------
+// Fee display
+// ---------------------------------------------------------------------------
+
+function formatFee(pool: Pool): string {
+  const total = (pool.lpFee ?? 0) + (pool.protocolFee ?? 0);
+  if (total === 0) return "—";
+  // Fees are in basis points (e.g. 15 = 0.15%)
+  return `${(total / 100).toFixed(2)}%`;
+}
+
+// ---------------------------------------------------------------------------
+// Table component
+// ---------------------------------------------------------------------------
+
 interface GlobalPoolsTableProps {
   entries: GlobalPoolEntry[];
-  /**
-   * Volume map keyed by `${network.id}:${pool.id}`.
-   * Use `globalPoolKey()` to build keys when constructing this map.
-   */
   volume24hByKey?: Map<string, number | null | undefined>;
   volume24hLoading?: boolean;
   volume24hError?: boolean;
   volume7dByKey?: Map<string, number | null | undefined>;
   volume7dLoading?: boolean;
   volume7dError?: boolean;
-  /**
-   * Per-pool 7d TVL change in percent. Three states:
-   * - `number` — real WoW value (rendered as `±X.XX%`).
-   * - `null` — backend snapshot query failed for that chain (rendered as `N/A`).
-   * - absent key — no comparable 7d snapshot for that pool (rendered as `—`).
-   */
   tvlChangeWoWByKey?: Map<string, number | null>;
-  /** Set of namespaced pool IDs with active OLS; when provided, renders an OLS column. */
-  olsPoolIds?: Set<string>;
+  tradingLimitsByKey?: Map<string, TradingLimit[]>;
+  olsPoolKeys?: Set<string>;
 }
 
 export function GlobalPoolsTable({
@@ -225,7 +338,8 @@ export function GlobalPoolsTable({
   volume7dLoading = false,
   volume7dError = false,
   tvlChangeWoWByKey,
-  olsPoolIds,
+  tradingLimitsByKey,
+  olsPoolKeys,
 }: GlobalPoolsTableProps) {
   const [sortKey, setSortKey] = useState<GlobalSortKey>("tvl");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -326,6 +440,17 @@ export function GlobalPoolsTable({
               Health
             </SortableTh>
             <SortableTh
+              sortKey="fee"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              align="right"
+              className="hidden sm:table-cell"
+            >
+              Fee
+            </SortableTh>
+            <Th className="hidden sm:table-cell">Limits</Th>
+            <SortableTh
               sortKey="tvl"
               activeSortKey={sortKey}
               sortDir={sortDir}
@@ -370,34 +495,7 @@ export function GlobalPoolsTable({
             >
               Total Vol.{" "}
             </SortableTh>
-            <SortableTh
-              sortKey="swaps"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
-              align="right"
-              className="hidden lg:table-cell"
-            >
-              Swaps
-            </SortableTh>
-            <SortableTh
-              sortKey="rebalances"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
-              align="right"
-              className="hidden lg:table-cell"
-            >
-              Rebalances
-            </SortableTh>
-            {olsPoolIds && (
-              <th
-                scope="col"
-                className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
-              >
-                OLS
-              </th>
-            )}
+            <Th className="hidden lg:table-cell">Strategy</Th>
           </tr>
         </thead>
         <tbody>
@@ -423,6 +521,10 @@ export function GlobalPoolsTable({
                       ? "text-red-400"
                       : "text-slate-400";
             const poolHref = buildPoolDetailHref(p.id);
+            const limits = tradingLimitsByKey?.get(key) ?? [];
+            const isOls = olsPoolKeys?.has(key) ?? false;
+            const strategies = poolStrategies(p, isOls);
+            const isVirtual = p.source?.includes("virtual");
             return (
               <Row key={key}>
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
@@ -458,6 +560,16 @@ export function GlobalPoolsTable({
                   >
                     <HealthBadge status={effectiveStatus} />
                   </button>
+                </td>
+                <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
+                  {formatFee(p)}
+                </td>
+                <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
+                  {isVirtual ? (
+                    <span className="text-slate-600 text-xs">—</span>
+                  ) : (
+                    <LimitHeatmap limits={limits} network={network} />
+                  )}
                 </td>
                 <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
                   {tvl > 0 ? formatUSD(tvl) : "—"}
@@ -496,21 +608,17 @@ export function GlobalPoolsTable({
                 <td className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
                   {totalVol == null ? "—" : formatUSD(totalVol)}
                 </td>
-                <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
-                  {p.swapCount ?? 0}
+                <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3">
+                  {strategies.length > 0 ? (
+                    <div className="flex gap-1">
+                      {strategies.map((s) => (
+                        <StrategyBadge key={s} label={s} />
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-slate-600 text-xs">—</span>
+                  )}
                 </td>
-                <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
-                  {p.rebalanceCount ?? 0}
-                </td>
-                {olsPoolIds && (
-                  <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
-                    {olsPoolIds.has(p.id) && (
-                      <span className="inline-flex items-center rounded-full bg-purple-900/60 px-2 py-0.5 text-xs font-medium text-purple-300 ring-1 ring-purple-700/50">
-                        OLS
-                      </span>
-                    )}
-                  </td>
-                )}
               </Row>
             );
           })}

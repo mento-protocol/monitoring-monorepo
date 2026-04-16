@@ -8,6 +8,7 @@ import type { Pool } from "generated";
 import {
   SortedOraclesContract,
   FPMM_MINIMAL_ABI,
+  FPMM_FEE_ABI,
   FPMM_TRADING_LIMITS_ABI,
   ERC20_DECIMALS_ABI,
 } from "./abis";
@@ -901,6 +902,36 @@ export async function fetchTradingLimits(
     return { config, state };
   } catch (err) {
     logRpcFailure(chainId, "getTradingLimits", poolAddress, err, blockNumber);
+    return null;
+  }
+}
+
+/** Fetch lpFee and protocolFee from the FPMM contract. Both are uint256
+ * in basis points (e.g. 15 = 0.15%). Returns null on error. */
+export async function fetchFees(
+  chainId: number,
+  poolAddress: string,
+): Promise<{ lpFee: number; protocolFee: number } | null> {
+  try {
+    const client = getRpcClient(chainId);
+    const [lpFee, protocolFee] = await Promise.all([
+      client.readContract({
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_FEE_ABI,
+        functionName: "lpFee",
+      }),
+      client.readContract({
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_FEE_ABI,
+        functionName: "protocolFee",
+      }),
+    ]);
+    return {
+      lpFee: Number(lpFee as bigint),
+      protocolFee: Number(protocolFee as bigint),
+    };
+  } catch (err) {
+    logRpcFailure(chainId, "fetchFees", poolAddress, err);
     return null;
   }
 }

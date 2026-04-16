@@ -40,6 +40,7 @@ import {
   fetchReportExpiry,
   fetchNumReporters,
   fetchTradingLimits,
+  fetchFees,
 } from "../rpc";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
 import { recordHealthSample } from "../healthScore";
@@ -121,17 +122,24 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
   // Fetch oracle state from chain at pool creation
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
 
-  const [rateFeedID, rebalanceThreshold, dec0Raw, dec1Raw, invertRateFeed] =
-    await Promise.all([
-      fetchReferenceRateFeedID(event.chainId, poolAddr),
-      // Use standalone getters — they work even when the oracle is stale,
-      // unlike getRebalancingState() which reverts on stale/expired oracle data.
-      fetchRebalanceThreshold(event.chainId, poolAddr),
-      // Fetch token decimals scaling factors (e.g. 1e18 for 18-decimal tokens)
-      fetchTokenDecimalsScaling(event.chainId, poolAddr, "decimals0", token0),
-      fetchTokenDecimalsScaling(event.chainId, poolAddr, "decimals1", token1),
-      fetchInvertRateFeed(event.chainId, poolAddr),
-    ]);
+  const [
+    rateFeedID,
+    rebalanceThreshold,
+    dec0Raw,
+    dec1Raw,
+    invertRateFeed,
+    fees,
+  ] = await Promise.all([
+    fetchReferenceRateFeedID(event.chainId, poolAddr),
+    // Use standalone getters — they work even when the oracle is stale,
+    // unlike getRebalancingState() which reverts on stale/expired oracle data.
+    fetchRebalanceThreshold(event.chainId, poolAddr),
+    // Fetch token decimals scaling factors (e.g. 1e18 for 18-decimal tokens)
+    fetchTokenDecimalsScaling(event.chainId, poolAddr, "decimals0", token0),
+    fetchTokenDecimalsScaling(event.chainId, poolAddr, "decimals1", token1),
+    fetchInvertRateFeed(event.chainId, poolAddr),
+    fetchFees(event.chainId, poolAddr),
+  ]);
   // Convert scaling factor (1e18, 1e6, etc.) to decimals count (18, 6, etc.)
   const token0Decimals = dec0Raw
     ? (scalingFactorToDecimals(dec0Raw) ?? 18)
@@ -174,6 +182,15 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     oracleDelta,
     tokenDecimals: { token0Decimals, token1Decimals },
   });
+
+  // Persist fee config read at pool creation
+  if (fees) {
+    context.Pool.set({
+      ...pool,
+      lpFee: fees.lpFee,
+      protocolFee: fees.protocolFee,
+    });
+  }
 
   const deployment: FactoryDeployment = {
     id,
@@ -793,4 +810,38 @@ FPMM.LiquidityStrategyUpdated.handler(async ({ event, context }) => {
   } else if (pool.rebalancerAddress === strategy) {
     context.Pool.set({ ...pool, rebalancerAddress: "" });
   }
+});
+
+// ---------------------------------------------------------------------------
+// FPMM.LPFeeUpdated
+// ---------------------------------------------------------------------------
+
+FPMM.LPFeeUpdated.handler(async ({ event, context }) => {
+  const poolId = makePoolId(event.chainId, event.srcAddress);
+  const pool = await context.Pool.get(poolId);
+  if (!pool) return;
+
+  context.Pool.set({
+    ...pool,
+    lpFee: Number(event.params.newFee),
+    updatedAtBlock: asBigInt(event.block.number),
+    updatedAtTimestamp: asBigInt(event.block.timestamp),
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FPMM.ProtocolFeeUpdated
+// ---------------------------------------------------------------------------
+
+FPMM.ProtocolFeeUpdated.handler(async ({ event, context }) => {
+  const poolId = makePoolId(event.chainId, event.srcAddress);
+  const pool = await context.Pool.get(poolId);
+  if (!pool) return;
+
+  context.Pool.set({
+    ...pool,
+    protocolFee: Number(event.params.newFee),
+    updatedAtBlock: asBigInt(event.block.number),
+    updatedAtTimestamp: asBigInt(event.block.timestamp),
+  });
 });

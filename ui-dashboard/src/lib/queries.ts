@@ -25,6 +25,8 @@ export const ALL_POOLS_WITH_HEALTH = `
       oracleNumReporters
       oracleExpiry
       lastRebalancedAt
+      lpFee
+      protocolFee
       limitStatus
       limitPressure0
       limitPressure1
@@ -287,6 +289,21 @@ export const POOL_DAILY_SNAPSHOTS_ALL = `
   }
 `;
 
+// Fetches all TradingLimit rows for a chain. With 2 rows per FPMM pool (one
+// per token), this stays well under Hasura's silent 1000-row cap for current
+// pool counts. If pool count exceeds ~500 per chain, add pagination.
+export const ALL_TRADING_LIMITS = `
+  query AllTradingLimits($chainId: Int!) {
+    TradingLimit(where: { chainId: { _eq: $chainId } }) {
+      id poolId token limit0 limit1 decimals
+      netflow0 netflow1
+      lastUpdated0 lastUpdated1
+      limitPressure0 limitPressure1
+      limitStatus updatedAtBlock updatedAtTimestamp
+    }
+  }
+`;
+
 export const TRADING_LIMITS = `
   query TradingLimits($poolId: String!) {
     TradingLimit(where: { poolId: { _eq: $poolId } }) {
@@ -489,9 +506,9 @@ export const OLS_LIQUIDITY_EVENTS = `
 `;
 
 export const ALL_OLS_POOLS = `
-  query AllOlsPools {
+  query AllOlsPools($chainId: Int!) {
     OlsPool(
-      where: { isActive: { _eq: true } }
+      where: { isActive: { _eq: true }, chainId: { _eq: $chainId } }
       limit: 1000
     ) {
       poolId

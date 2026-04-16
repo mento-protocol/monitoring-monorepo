@@ -5,7 +5,7 @@ import {
 } from "@/components/global-pools-table";
 import { isFpmm, poolTvlUSD } from "@/lib/tokens";
 import { buildPoolVolumeMap } from "@/lib/volume";
-import type { Pool, PoolSnapshotWindow } from "@/lib/types";
+import type { Pool, PoolSnapshotWindow, TradingLimit } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import type { OracleRateMap } from "@/lib/tokens";
 
@@ -20,6 +20,10 @@ type DerivedEntries = {
    *  - absent   — no comparable 7d snapshot for that pool.
    */
   tvlChangeWoWByKey: Map<string, number | null>;
+  /** Per-pool trading limits keyed by globalPoolKey → TradingLimit[] (2 per FPMM pool). */
+  tradingLimitsByKey: Map<string, TradingLimit[]>;
+  /** Set of globalPoolKeys that have an active OLS strategy. */
+  olsPoolKeys: Set<string>;
 };
 
 function perPoolTvlWindow(
@@ -64,10 +68,20 @@ export function buildGlobalPoolEntries(
   const volume24hByKey = new Map<string, number | null | undefined>();
   const volume7dByKey = new Map<string, number | null | undefined>();
   const tvlChangeWoWByKey = new Map<string, number | null>();
+  const tradingLimitsByKey = new Map<string, TradingLimit[]>();
+  const olsPoolKeys = new Set<string>();
 
   for (const netData of networkData) {
     if (netData.error !== null) continue;
     const { network, pools, snapshots, snapshots7d, rates } = netData;
+
+    // Build per-pool trading limit lookup from the chain-level flat list
+    const tlByPoolId = new Map<string, TradingLimit[]>();
+    for (const tl of netData.tradingLimits) {
+      const arr = tlByPoolId.get(tl.poolId) ?? [];
+      arr.push(tl);
+      tlByPoolId.set(tl.poolId, arr);
+    }
 
     const vol24hMap =
       netData.snapshotsError === null
@@ -98,8 +112,20 @@ export function buildGlobalPoolEntries(
           tvlChangeWoWByKey.set(key, ((v.now - v.ago) / v.ago) * 100);
         }
       }
+
+      const tls = tlByPoolId.get(pool.id);
+      if (tls) tradingLimitsByKey.set(key, tls);
+
+      if (netData.olsPoolIds.has(pool.id)) olsPoolKeys.add(key);
     }
   }
 
-  return { entries, volume24hByKey, volume7dByKey, tvlChangeWoWByKey };
+  return {
+    entries,
+    volume24hByKey,
+    volume7dByKey,
+    tvlChangeWoWByKey,
+    tradingLimitsByKey,
+    olsPoolKeys,
+  };
 }

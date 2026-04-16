@@ -50,6 +50,8 @@ contracts:
       - event: Rebalanced
       - event: TradingLimitConfigured
       - event: LiquidityStrategyUpdated
+      - event: LPFeeUpdated
+      - event: ProtocolFeeUpdated
 
   - name: VirtualPool
     abi_file_path: abis/FPMM.json

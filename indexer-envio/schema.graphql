@@ -46,6 +46,10 @@ type Pool {
   lastOracleSnapshotTimestamp: BigInt! # timestamp of most recent oracle snapshot
   lastDeviationRatio: String! # deviationRatio at most recent snapshot
   hasHealthData: Boolean! # true once first health snapshot recorded
+  # Fee configuration (FPMM pools only; basis points, e.g. 15 = 0.15%)
+  lpFee: Int!
+  protocolFee: Int!
+
   # Trading limits (FPMM pools only; defaults to "N/A" for VirtualPools)
   limitStatus: String! # "OK" | "WARN" | "CRITICAL" | "N/A"
   limitPressure0: String! # e.g. "0.1230"
