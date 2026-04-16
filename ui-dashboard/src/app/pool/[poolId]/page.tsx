@@ -121,18 +121,8 @@ const TABS = [
   "ols",
 ] as const;
 type Tab = (typeof TABS)[number];
-type SearchableTab = Extract<
-  Tab,
-  | "providers"
-  | "swaps"
-  | "reserves"
-  | "rebalances"
-  | "liquidity"
-  | "oracle"
-  | "ols"
->;
 
-const SEARCH_PARAM_BY_TAB: Record<SearchableTab, string> = {
+const SEARCH_PARAM_BY_TAB: Record<Tab, string> = {
   providers: "providersQ",
   swaps: "swapsQ",
   reserves: "reservesQ",
@@ -141,18 +131,6 @@ const SEARCH_PARAM_BY_TAB: Record<SearchableTab, string> = {
   oracle: "oracleQ",
   ols: "olsQ",
 };
-
-function isSearchableTab(tab: Tab): tab is SearchableTab {
-  return (
-    tab === "providers" ||
-    tab === "swaps" ||
-    tab === "reserves" ||
-    tab === "rebalances" ||
-    tab === "liquidity" ||
-    tab === "oracle" ||
-    tab === "ols"
-  );
-}
 
 function addressSearchTerms(
   address: string | null | undefined,
@@ -269,7 +247,7 @@ function PoolDetail() {
   );
 
   const setTabSearch = useCallback(
-    (t: SearchableTab, value: string) => {
+    (t: Tab, value: string) => {
       const p = getCurrentParams();
       const key = SEARCH_PARAM_BY_TAB[t];
       const trimmedValue = value.trim();
@@ -345,9 +323,7 @@ function PoolDetail() {
   const tab = visibleTabs.includes(requestedTab)
     ? requestedTab
     : (visibleTabs[0] ?? "providers");
-  const activeSearch = isSearchableTab(tab)
-    ? (searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "")
-    : "";
+  const activeSearch = searchParams.get(SEARCH_PARAM_BY_TAB[tab]) ?? "";
 
   return (
     <div className="space-y-6">
@@ -1013,7 +989,12 @@ function ReservesTab({
               <Th align="right">{sym0} Reserve</Th>
               <Th align="right">{sym1} Reserve</Th>
               <Th align="right">Total (USD)</Th>
-              <Th align="right">Block</Th>
+              <th
+                scope="col"
+                className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-right"
+              >
+                Block
+              </th>
               <Th>Time</Th>
             </tr>
           </thead>
@@ -1063,9 +1044,9 @@ function ReservesTab({
                       ? `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                       : "—"}
                   </Td>
-                  <Td mono small muted align="right">
+                  <td className="hidden sm:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
                     {formatBlock(r.blockNumber)}
-                  </Td>
+                  </td>
                   <Td small muted title={formatTimestamp(r.blockTimestamp)}>
                     {relativeTime(r.blockTimestamp)}
                   </Td>
@@ -1659,6 +1640,34 @@ function LpsTab({
           </thead>
           <tbody>
             {pagedPositions.map((position) => {
+              const fmtTok = (
+                v: number | null,
+                sym: string,
+                vUsd: number | null,
+              ) => {
+                if (v === null) return "—";
+                const formatted = v.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                });
+                const showSubUsd = vUsd !== null && !USDM_SYMBOLS.has(sym);
+                return (
+                  <div>
+                    <span>
+                      {formatted} {sym}
+                    </span>
+                    {showSubUsd && (
+                      <div className="text-xs text-slate-500">
+                        ≈ $
+                        {vUsd!.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              };
               // Scale up by 1e6 before converting to Number to preserve precision
               // for large bigint liquidity values that exceed JS safe integer range.
               const shareNum =
@@ -1696,35 +1705,6 @@ function LpsTab({
                       : null;
               const totalUsd =
                 tok0Usd !== null && tok1Usd !== null ? tok0Usd + tok1Usd : null;
-
-              const fmtTok = (
-                v: number | null,
-                sym: string,
-                vUsd: number | null,
-              ) => {
-                if (v === null) return "—";
-                const formatted = v.toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                });
-                const showSubUsd = vUsd !== null && !USDM_SYMBOLS.has(sym);
-                return (
-                  <div>
-                    <span>
-                      {formatted} {sym}
-                    </span>
-                    {showSubUsd && (
-                      <div className="text-xs text-slate-500">
-                        ≈ $
-                        {vUsd!.toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              };
 
               return (
                 <Row key={position.address}>
