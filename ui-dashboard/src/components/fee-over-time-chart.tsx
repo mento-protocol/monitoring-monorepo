@@ -87,14 +87,22 @@ export function FeeOverTimeChart({
   );
 
   const approxPrefix = isApproximate ? "≈ " : "";
+  // Fail closed: match the tile's behavior — show N/A when any chain's
+  // fee fetch failed, not just when the series is empty. This prevents
+  // the chart from showing a partial cross-chain total as if it were
+  // complete while the tile above it reads "N/A".
   const headline = isLoading
     ? "…"
-    : hasError || (hasFeesError && fullSeries.length === 0)
+    : hasError || hasFeesError
       ? "N/A"
       : `${approxPrefix}${formatUSD(rangeTotal)}`;
 
+  // Suppress WoW delta when data is incomplete — a partial-chain
+  // comparison is misleading.
   const change =
-    range === "7d" ? weekOverWeekChangePct(fullAsTimeSeries) : null;
+    range === "7d" && !hasError && !hasFeesError
+      ? weekOverWeekChangePct(fullAsTimeSeries)
+      : null;
 
   const { traces, layout } = useMemo(() => {
     const xs = visibleSeries.map((p) =>
