@@ -5,6 +5,12 @@ import { useAddressLabels } from "@/components/address-labels-provider";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 import { TagInput } from "@/components/tag-input";
 import { SUGGESTED_TAGS, getUsedTags } from "@/lib/tag-suggestions";
+import {
+  NETWORK_IDS,
+  NETWORKS,
+  DEFAULT_NETWORK,
+  isConfiguredNetworkId,
+} from "@/lib/networks";
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for testing)
@@ -85,12 +91,15 @@ type Props = {
   address: string;
   /** Pre-filled initial values when editing an existing entry */
   initial?: AddressEntry;
+  /** Target chainId for the entry; defaults to the current network. */
+  chainId?: number;
   onClose: () => void;
 };
 
 export function AddressLabelEditor({
   address: initialAddress,
   initial,
+  chainId,
   onClose,
 }: Props) {
   const {
@@ -103,6 +112,19 @@ export function AddressLabelEditor({
   const firstInputRef = useRef<HTMLInputElement>(null);
 
   const isNewAddress = initialAddress === "";
+  const showChainPicker = isNewAddress && chainId == null;
+  const configuredChainIds = useMemo(
+    () =>
+      NETWORK_IDS.filter(isConfiguredNetworkId).map(
+        (id) => NETWORKS[id].chainId,
+      ),
+    [],
+  );
+  const [selectedChainId, setSelectedChainId] = useState(
+    chainId ?? NETWORKS[DEFAULT_NETWORK].chainId,
+  );
+  const effectiveChainId = chainId ?? selectedChainId;
+
   const [address, setAddress] = useState(initialAddress);
   const [name, setName] = useState(initial?.name ?? "");
   const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
@@ -138,7 +160,7 @@ export function AddressLabelEditor({
   const isContractRow = resolveIsContractRow({
     isNewAddress,
     initial,
-    isCustom: isCustomLabel(address),
+    isCustom: isCustomLabel(address, effectiveChainId),
   });
 
   async function handleSave(e: React.FormEvent) {
@@ -162,12 +184,16 @@ export function AddressLabelEditor({
     setSaving(true);
     setError(null);
     try {
-      await upsertEntry(address, {
-        name: effectiveName,
-        tags,
-        notes: notes.trim() || undefined,
-        isPublic,
-      });
+      await upsertEntry(
+        address,
+        {
+          name: effectiveName,
+          tags,
+          notes: notes.trim() || undefined,
+          isPublic,
+        },
+        effectiveChainId,
+      );
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save label.");
@@ -180,7 +206,7 @@ export function AddressLabelEditor({
     setDeleting(true);
     setError(null);
     try {
-      await deleteEntry(address);
+      await deleteEntry(address, effectiveChainId);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete label.");
@@ -189,7 +215,7 @@ export function AddressLabelEditor({
     }
   }
 
-  const hasExistingCustomEntry = isCustomLabel(address);
+  const hasExistingCustomEntry = isCustomLabel(address, effectiveChainId);
 
   return (
     <dialog
@@ -238,6 +264,40 @@ export function AddressLabelEditor({
               </p>
             )}
           </div>
+
+          {/* Chain (only shown for new addresses without a pre-set chain) */}
+          {showChainPicker && (
+            <div>
+              <label
+                htmlFor="al-chain"
+                className="block text-xs font-medium text-slate-400 mb-1"
+              >
+                Chain <span className="text-indigo-400">*</span>
+              </label>
+              <select
+                id="al-chain"
+                value={selectedChainId}
+                onChange={(e) => setSelectedChainId(Number(e.target.value))}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              >
+                {configuredChainIds.map((cid) => {
+                  const net =
+                    NETWORKS[
+                      NETWORK_IDS.find(
+                        (id) =>
+                          isConfiguredNetworkId(id) &&
+                          NETWORKS[id].chainId === cid,
+                      )!
+                    ];
+                  return (
+                    <option key={cid} value={cid}>
+                      {net.label}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
 
           {/* Name */}
           <div>

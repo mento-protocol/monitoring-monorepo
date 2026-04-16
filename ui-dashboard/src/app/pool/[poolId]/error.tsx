@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { ErrorBox } from "@/components/feedback";
-import { NetworkAwareLink } from "@/components/network-aware-link";
+import Link from "next/link";
 
 export default function PoolDetailError({
   error,
@@ -36,12 +36,12 @@ export default function PoolDetailError({
         >
           Try again
         </button>
-        <NetworkAwareLink
+        <Link
           href="/pools"
           className="rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800"
         >
           Back to pools
-        </NetworkAwareLink>
+        </Link>
       </div>
     </div>
   );

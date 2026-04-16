@@ -8,12 +8,17 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/lib/address-labels", () => ({
   getLabels: vi.fn().mockResolvedValue({}),
+  getAllChainLabels: vi.fn().mockResolvedValue({}),
   upsertEntry: vi.fn().mockResolvedValue(undefined),
   deleteLabel: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { getAuthSession } from "@/auth";
-import { getLabels, upsertEntry } from "@/lib/address-labels";
+import {
+  getLabels,
+  getAllChainLabels,
+  upsertEntry,
+} from "@/lib/address-labels";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -44,6 +49,76 @@ describe("GET /api/address-labels", () => {
     const res = await GET(req);
     expect(res.status).toBe(200);
     expect(getLabels).toHaveBeenCalledWith(42220, { publicOnly: false });
+  });
+
+  it("returns cross-chain labels when no chainId is provided (authenticated)", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+    (getAllChainLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      "42220": {
+        "0xaaa": {
+          name: "Public A",
+          tags: [],
+          isPublic: true,
+          updatedAt: "1",
+        },
+        "0xbbb": {
+          name: "Private B",
+          tags: [],
+          isPublic: false,
+          updatedAt: "2",
+        },
+      },
+      "143": {
+        "0xccc": {
+          name: "Monad C",
+          tags: [],
+          isPublic: true,
+          updatedAt: "3",
+        },
+      },
+    });
+    const req = new NextRequest("http://localhost/api/address-labels");
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+    expect(getAllChainLabels).toHaveBeenCalledOnce();
+    const body = (await res.json()) as Record<
+      string,
+      Record<string, { name: string }>
+    >;
+    expect(Object.keys(body).sort()).toEqual(["143", "42220"]);
+    expect(body["42220"]["0xaaa"].name).toBe("Public A");
+    expect(body["42220"]["0xbbb"].name).toBe("Private B");
+    expect(body["143"]["0xccc"].name).toBe("Monad C");
+  });
+
+  it("filters to public-only cross-chain entries when unauthenticated", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (getAllChainLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      "42220": {
+        "0xaaa": {
+          name: "Public",
+          tags: [],
+          isPublic: true,
+          updatedAt: "1",
+        },
+        "0xbbb": {
+          name: "Private",
+          tags: [],
+          isPublic: false,
+          updatedAt: "2",
+        },
+      },
+    });
+    const req = new NextRequest("http://localhost/api/address-labels");
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<
+      string,
+      Record<string, { name: string }>
+    >;
+    expect(Object.keys(body["42220"])).toEqual(["0xaaa"]);
   });
 });
 

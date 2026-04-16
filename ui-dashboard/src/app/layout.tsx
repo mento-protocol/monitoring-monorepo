@@ -6,7 +6,6 @@ import { getAuthSession } from "@/auth";
 import { NetworkProvider } from "@/components/network-provider";
 import { AddressLabelsProvider } from "@/components/address-labels-provider";
 import { NavLinks } from "@/components/nav-links";
-import { ConditionalNetworkSelector } from "@/components/conditional-network-selector";
 import { AuthStatus } from "@/components/auth-status";
 import "./globals.css";
 
@@ -40,7 +39,6 @@ export default async function RootLayout({
                   aria-label="Main navigation"
                 >
                   <NavLinks />
-                  <ConditionalNetworkSelector />
                   <AuthStatus />
                 </nav>
                 <div className="mx-auto max-w-7xl px-3 sm:px-6 py-4 sm:py-6">

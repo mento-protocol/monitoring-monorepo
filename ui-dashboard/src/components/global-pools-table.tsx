@@ -212,6 +212,8 @@ interface GlobalPoolsTableProps {
    * - absent key — no comparable 7d snapshot for that pool (rendered as `—`).
    */
   tvlChangeWoWByKey?: Map<string, number | null>;
+  /** Set of namespaced pool IDs with active OLS; when provided, renders an OLS column. */
+  olsPoolIds?: Set<string>;
 }
 
 export function GlobalPoolsTable({
@@ -223,6 +225,7 @@ export function GlobalPoolsTable({
   volume7dLoading = false,
   volume7dError = false,
   tvlChangeWoWByKey,
+  olsPoolIds,
 }: GlobalPoolsTableProps) {
   const [sortKey, setSortKey] = useState<GlobalSortKey>("tvl");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -387,6 +390,14 @@ export function GlobalPoolsTable({
             >
               Rebalances
             </SortableTh>
+            {olsPoolIds && (
+              <th
+                scope="col"
+                className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-left"
+              >
+                OLS
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -411,7 +422,7 @@ export function GlobalPoolsTable({
                     : wow < 0
                       ? "text-red-400"
                       : "text-slate-400";
-            const poolHref = buildPoolDetailHref(p.id, network.id);
+            const poolHref = buildPoolDetailHref(p.id);
             return (
               <Row key={key}>
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
@@ -491,6 +502,15 @@ export function GlobalPoolsTable({
                 <td className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
                   {p.rebalanceCount ?? 0}
                 </td>
+                {olsPoolIds && (
+                  <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3">
+                    {olsPoolIds.has(p.id) && (
+                      <span className="inline-flex items-center rounded-full bg-purple-900/60 px-2 py-0.5 text-xs font-medium text-purple-300 ring-1 ring-purple-700/50">
+                        OLS
+                      </span>
+                    )}
+                  </td>
+                )}
               </Row>
             );
           })}

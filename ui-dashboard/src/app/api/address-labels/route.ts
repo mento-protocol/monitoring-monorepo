@@ -1,17 +1,42 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthSession } from "@/auth";
-import { getLabels, upsertEntry, deleteLabel } from "@/lib/address-labels";
+import {
+  getLabels,
+  getAllChainLabels,
+  upsertEntry,
+  deleteLabel,
+} from "@/lib/address-labels";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const chainId = Number(req.nextUrl.searchParams.get("chainId"));
+  const chainIdParam = req.nextUrl.searchParams.get("chainId");
+  const session = await getAuthSession();
+  const publicOnly = session === null;
+
+  if (chainIdParam === null) {
+    try {
+      const all = await getAllChainLabels();
+      const filtered: Record<string, Record<string, unknown>> = {};
+      for (const [chainId, entries] of Object.entries(all)) {
+        filtered[chainId] = publicOnly
+          ? Object.fromEntries(
+              Object.entries(entries).filter(
+                ([, entry]) => entry.isPublic === true,
+              ),
+            )
+          : entries;
+      }
+      return NextResponse.json(filtered);
+    } catch (err) {
+      return serverError(err);
+    }
+  }
+
+  const chainId = Number(chainIdParam);
   if (!Number.isInteger(chainId) || chainId <= 0) {
     return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });
   }
   try {
-    const session = await getAuthSession();
-    const labels = await getLabels(chainId, {
-      publicOnly: session === null,
-    });
+    const labels = await getLabels(chainId, { publicOnly });
     return NextResponse.json(labels);
   } catch (err) {
     return serverError(err);
