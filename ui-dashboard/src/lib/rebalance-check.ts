@@ -9,6 +9,7 @@
 import {
   decodeErrorResult,
   type Hex,
+  type PublicClient,
   encodeFunctionData,
   parseAbi,
 } from "viem";
@@ -311,8 +312,7 @@ export async function checkRebalanceStatus(
 // ---------------------------------------------------------------------------
 
 async function detectStrategyType(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  client: any,
+  client: PublicClient,
   strategy: `0x${string}`,
   pool: `0x${string}`,
 ): Promise<StrategyType> {
@@ -365,8 +365,7 @@ async function detectStrategyType(
 
 async function handleRevert(
   err: unknown,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  client: any,
+  client: PublicClient,
   strategy: `0x${string}`,
   pool: `0x${string}`,
   strategyType: StrategyType,
@@ -523,8 +522,7 @@ export function toHumanUnits(raw: bigint, decimals: number): number {
 }
 
 async function fetchCDPEnrichment(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  client: any,
+  client: PublicClient,
   strategy: `0x${string}`,
   pool: `0x${string}`,
 ): Promise<StrategyEnrichment | null> {
@@ -579,8 +577,7 @@ async function fetchCDPEnrichment(
 }
 
 async function fetchReserveEnrichment(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  client: any,
+  client: PublicClient,
   strategy: `0x${string}`,
   pool: `0x${string}`,
 ): Promise<StrategyEnrichment | null> {

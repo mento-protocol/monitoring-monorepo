@@ -5,6 +5,7 @@ import {
   getAllChainLabels,
   upsertEntry,
   deleteLabel,
+  type AddressEntry,
 } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
 
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (chainIdParam === null) {
     try {
       const all = await getAllChainLabels();
-      const filtered: Record<string, Record<string, unknown>> = {};
+      const filtered: Record<string, Record<string, AddressEntry>> = {};
       for (const [chainId, entries] of Object.entries(all)) {
         filtered[chainId] = publicOnly
           ? Object.fromEntries(
