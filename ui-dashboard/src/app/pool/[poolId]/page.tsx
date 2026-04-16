@@ -52,22 +52,18 @@ import {
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
-  OLS_LIQUIDITY_EVENTS,
   OLS_LIQUIDITY_EVENTS_COUNT,
   OLS_LIQUIDITY_EVENTS_PAGE,
   OLS_POOL,
   POOL_DAILY_SNAPSHOTS_CHART,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
-  POOL_LIQUIDITY,
   POOL_LIQUIDITY_COUNT,
   POOL_LIQUIDITY_PAGE,
   POOL_LP_POSITIONS,
-  POOL_REBALANCES,
   POOL_REBALANCES_COUNT,
   POOL_REBALANCES_PAGE,
   POOL_RESERVES,
-  POOL_SWAPS,
   POOL_SWAPS_COUNT,
   POOL_SWAPS_PAGE,
   TRADING_LIMITS,
@@ -849,6 +845,17 @@ function SwapsTab({
           may exist beyond this page range.
         </p>
       )}
+      {isSearching && total > SEARCH_MAX_LIMIT && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Search is limited to the most recent{" "}
+          {SEARCH_MAX_LIMIT.toLocaleString()} swaps.
+        </p>
+      )}
+      {countError && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — pagination may be incomplete.
+        </p>
+      )}
     </>
   );
 }
@@ -1163,6 +1170,17 @@ export function RebalancesTab({
           entries may exist beyond this page range.
         </p>
       )}
+      {isSearching && total > SEARCH_MAX_LIMIT && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Search is limited to the most recent{" "}
+          {SEARCH_MAX_LIMIT.toLocaleString()} rebalances.
+        </p>
+      )}
+      {countError && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — pagination may be incomplete.
+        </p>
+      )}
     </>
   );
 }
@@ -1345,6 +1363,17 @@ function LiquidityTab({
         <p className="px-1 pt-1 text-xs text-amber-400">
           Showing first {ENVIO_MAX_ROWS.toLocaleString()} liquidity events —
           older entries may exist beyond this page range.
+        </p>
+      )}
+      {isSearching && total > SEARCH_MAX_LIMIT && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Search is limited to the most recent{" "}
+          {SEARCH_MAX_LIMIT.toLocaleString()} liquidity events.
+        </p>
+      )}
+      {countError && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — pagination may be incomplete.
         </p>
       )}
     </>
@@ -2256,6 +2285,17 @@ function OlsLiquidityEvents({
         <p className="px-1 pt-1 text-xs text-amber-400">
           Showing first {ENVIO_MAX_ROWS.toLocaleString()} OLS events — older
           entries may exist beyond this page range.
+        </p>
+      )}
+      {isSearching && total > SEARCH_MAX_LIMIT && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Search is limited to the most recent{" "}
+          {SEARCH_MAX_LIMIT.toLocaleString()} OLS events.
+        </p>
+      )}
+      {countError && !isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — pagination may be incomplete.
         </p>
       )}
     </>
