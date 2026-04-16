@@ -747,13 +747,13 @@ function SwapsTab({
                 <span>
                   Cumulative:{" "}
                   <span className="font-mono text-slate-300">
-                    {formatWei(last.cumulativeVolume0)}
+                    {formatWei(last.cumulativeVolume0, dec0)}
                   </span>{" "}
                   {sym0} sold
                 </span>
                 <span>
                   <span className="font-mono text-slate-300">
-                    {formatWei(last.cumulativeVolume1)}
+                    {formatWei(last.cumulativeVolume1, dec1)}
                   </span>{" "}
                   {sym1} sold
                 </span>
@@ -831,13 +831,6 @@ function SwapsTab({
                   />
                   <SenderCell address={s.recipient} />
                   <Td mono small align="right">
-                    <span
-                      className={
-                        d.soldToken0 ? "text-red-400/70" : "text-emerald-400/70"
-                      }
-                    >
-                      {d.soldToken0 ? "SELL" : "BUY"}
-                    </span>{" "}
                     {formatWei(d.soldAmt, d.soldDec)} {d.soldSym}
                   </Td>
                   <Td mono small align="right">
