@@ -116,6 +116,7 @@ export function makeNetworkData(
     snapshotsAllDaily,
     snapshotsAllDailyTruncated: false,
     fees: null,
+    feeTransfers: [],
     uniqueLpAddresses: [],
     rates: new Map(),
     error: null,

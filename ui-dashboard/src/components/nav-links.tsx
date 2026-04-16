@@ -20,6 +20,12 @@ export function NavLinks() {
       >
         Pools
       </Link>
+      <Link
+        href="/revenue"
+        className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+      >
+        Revenue
+      </Link>
       {session && (
         <Link
           href="/address-book"
