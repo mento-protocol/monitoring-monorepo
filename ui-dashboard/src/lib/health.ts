@@ -55,7 +55,7 @@ export interface PoolHealthState {
  * (breach can start any time after the last rebalance, not at it) but it's
  * directionally correct with the data we have.
  */
-export const DEVIATION_BREACH_GRACE_SECONDS = 3600;
+const DEVIATION_BREACH_GRACE_SECONDS = 3600;
 
 export function getOracleStalenessThreshold(
   pool: { oracleExpiry?: string },

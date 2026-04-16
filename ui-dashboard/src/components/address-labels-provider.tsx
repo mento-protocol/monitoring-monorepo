@@ -14,7 +14,7 @@ import { NETWORKS, networkIdForChainId, type Network } from "@/lib/networks";
 import { upgradeEntries, type AddressEntry } from "@/lib/address-labels-shared";
 
 /** A custom address entry, labelled across all chains with its originating chainId. */
-export type AddressEntryRow = AddressEntry & {
+type AddressEntryRow = AddressEntry & {
   address: string;
   chainId: number;
 };

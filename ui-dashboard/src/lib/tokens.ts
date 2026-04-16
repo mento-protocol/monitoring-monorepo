@@ -85,18 +85,6 @@ export function tokenSymbol(network: Network, address: string | null): string {
   );
 }
 
-export function addressLabel(network: Network, address: string | null): string {
-  if (!address) return "\u2014";
-  return (
-    network.addressLabels[address.toLowerCase()] ?? truncateAddress(address)
-  );
-}
-
-export function hasLabel(network: Network, address: string | null): boolean {
-  if (!address) return false;
-  return address.toLowerCase() in network.addressLabels;
-}
-
 export function explorerAddressUrl(network: Network, address: string): string {
   return `${network.explorerBaseUrl}/address/${address}`;
 }
@@ -123,18 +111,6 @@ export function poolName(
 /** Returns true if the pool is an FPMM (as opposed to a VirtualPool). */
 export function isFpmm(pool: Pick<Pool, "source">): boolean {
   return pool.source.toLowerCase().includes("fpmm");
-}
-
-/** Lookup from pool ID -> display name for a list of pools. */
-export function buildPoolNameMap(
-  network: Network,
-  pools: Pool[],
-): Record<string, string> {
-  const map: Record<string, string> = {};
-  for (const p of pools) {
-    map[p.id] = poolName(network, p.token0, p.token1);
-  }
-  return map;
 }
 
 /**

@@ -267,7 +267,7 @@ const showLocalNetworks =
   typeof process !== "undefined" &&
   process.env.NEXT_PUBLIC_SHOW_LOCAL_NETWORKS === "true";
 
-export const showTestnetNetworks =
+const showTestnetNetworks =
   typeof process !== "undefined" &&
   process.env.NEXT_PUBLIC_SHOW_TESTNET_NETWORKS === "true";
 

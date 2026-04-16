@@ -32,7 +32,7 @@ export type GlobalPoolEntry = {
   rates: OracleRateMap;
 };
 
-export type GlobalSortKey =
+type GlobalSortKey =
   | "pool"
   | "health"
   | "fee"
