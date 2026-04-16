@@ -148,6 +148,7 @@ function makeNetworkData(
     snapshotsAllDaily: [],
     snapshotsAllDailyTruncated: false,
     fees: null,
+    feeTransfers: [],
     uniqueLpAddresses: null,
     rates: new Map(),
     error: null,

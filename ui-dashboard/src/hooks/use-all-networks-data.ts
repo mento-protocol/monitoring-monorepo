@@ -64,6 +64,8 @@ export type NetworkData = {
   /** True when the daily pagination loop hit its safety cap. */
   snapshotsAllDailyTruncated: boolean;
   fees: ProtocolFeeSummary | null;
+  /** Raw fee transfer rows — kept for time-series bucketing on the revenue page. */
+  feeTransfers: ProtocolFeeTransfer[];
   uniqueLpAddresses: string[] | null;
   rates: OracleRateMap;
   error: Error | null;
@@ -108,6 +110,7 @@ const emptyNetworkData = (
   snapshotsAllDaily: [],
   snapshotsAllDailyTruncated: false,
   fees: null,
+  feeTransfers: [],
   uniqueLpAddresses: null,
   rates: new Map(),
   error,
@@ -387,6 +390,10 @@ export async function fetchNetworkData(
     snapshotsAllDaily,
     snapshotsAllDailyTruncated,
     fees,
+    feeTransfers:
+      feesResult.status === "fulfilled"
+        ? (feesResult.value.ProtocolFeeTransfer ?? [])
+        : [],
     uniqueLpAddresses,
     rates,
     error: null,

@@ -35,11 +35,13 @@ describe("NavLinks", () => {
     expect(html).not.toContain("/address-book");
   });
 
-  it("always shows Pools and home links regardless of auth", () => {
+  it("always shows Pools, Revenue, and home links regardless of auth", () => {
     mockUseSession.mockReturnValue({ data: null });
     const html = renderToStaticMarkup(<NavLinks />);
     expect(html).toContain("Pools");
     expect(html).toContain("/pools");
+    expect(html).toContain("Revenue");
+    expect(html).toContain("/revenue");
     expect(html).toContain("Mento Analytics");
   });
 });

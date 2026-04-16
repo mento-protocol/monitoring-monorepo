@@ -13,7 +13,7 @@ import type { ProtocolFeeTransfer } from "./types";
  * Token symbols the indexer emits when it cannot resolve the on-chain symbol.
  * Silently skipped rather than flagging the summary as approximate.
  */
-const UNRESOLVED_SYMBOLS = new Set(["UNKNOWN"]);
+export const UNRESOLVED_SYMBOLS = new Set(["UNKNOWN"]);
 
 // ---------------------------------------------------------------------------
 // Public API
