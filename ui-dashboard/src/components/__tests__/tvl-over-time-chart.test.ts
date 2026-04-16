@@ -484,7 +484,9 @@ describe("buildDailySeries — bucket granularity", () => {
     // bumps them. With hourly bucketing we should see distinct values
     // before vs after the second snapshot lands.
     const today = dayAlignedNow();
-    const hour0 = today + 6 * 3600;
+    // Use timestamps that are always in the past so the test passes
+    // regardless of UTC hour (buildDailySeries caps buckets at "now").
+    const hour0 = today - 12 * 3600;
     const hour3 = hour0 + 3 * 3600;
     const pool = makeTvlPool({
       reserves0: TWO_HUNDRED,
