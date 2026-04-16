@@ -872,10 +872,10 @@ function SwapsTab({
           may exist beyond this page range.
         </p>
       )}
-      {isSearching && total > SEARCH_MAX_LIMIT && (
+      {countCapped && isSearching && (
         <p className="px-1 pt-1 text-xs text-amber-400">
-          Search is limited to the most recent{" "}
-          {SEARCH_MAX_LIMIT.toLocaleString()} swaps.
+          Search covers the most recent {ENVIO_MAX_ROWS.toLocaleString()} swaps
+          only.
         </p>
       )}
       {countError && !isSearching && (
@@ -1246,10 +1246,10 @@ export function RebalancesTab({
           entries may exist beyond this page range.
         </p>
       )}
-      {isSearching && total > SEARCH_MAX_LIMIT && (
+      {countCapped && isSearching && (
         <p className="px-1 pt-1 text-xs text-amber-400">
-          Search is limited to the most recent{" "}
-          {SEARCH_MAX_LIMIT.toLocaleString()} rebalances.
+          Search covers the most recent {ENVIO_MAX_ROWS.toLocaleString()}{" "}
+          rebalances only.
         </p>
       )}
       {countError && !isSearching && (
@@ -1447,10 +1447,10 @@ function LiquidityTab({
           older entries may exist beyond this page range.
         </p>
       )}
-      {isSearching && total > SEARCH_MAX_LIMIT && (
+      {countCapped && isSearching && (
         <p className="px-1 pt-1 text-xs text-amber-400">
-          Search is limited to the most recent{" "}
-          {SEARCH_MAX_LIMIT.toLocaleString()} liquidity events.
+          Search covers the most recent {ENVIO_MAX_ROWS.toLocaleString()}{" "}
+          liquidity events only.
         </p>
       )}
       {countError && !isSearching && (
@@ -2448,10 +2448,10 @@ function OlsLiquidityEvents({
           entries may exist beyond this page range.
         </p>
       )}
-      {!error && isSearching && total > SEARCH_MAX_LIMIT && (
+      {!error && countCapped && isSearching && (
         <p className="px-1 pt-1 text-xs text-amber-400">
-          Search is limited to the most recent{" "}
-          {SEARCH_MAX_LIMIT.toLocaleString()} OLS events.
+          Search covers the most recent {ENVIO_MAX_ROWS.toLocaleString()} OLS
+          events only.
         </p>
       )}
       {!error && countError && !isSearching && (
