@@ -6,7 +6,7 @@
  *   - monad-mainnet → 143
  */
 export const MAINNET_CHAIN_IDS = [42220, 143] as const;
-export type MainnetChainId = (typeof MAINNET_CHAIN_IDS)[number];
+type MainnetChainId = (typeof MAINNET_CHAIN_IDS)[number];
 
 export type Pool = {
   id: string;

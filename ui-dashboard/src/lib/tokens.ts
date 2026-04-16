@@ -8,7 +8,7 @@ import { truncateAddress, parseWei } from "./format";
 export const USDM_SYMBOLS = new Set(["USDm"]);
 
 /** Tokens treated as $1.00 for USD conversion. */
-export const USD_PEGGED_SYMBOLS = new Set([
+const USD_PEGGED_SYMBOLS = new Set([
   "cUSD",
   "USDC",
   "axlUSDC",

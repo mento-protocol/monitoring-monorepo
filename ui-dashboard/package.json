@@ -28,6 +28,11 @@
     "swr": "^2.4.1",
     "viem": "2.47.0"
   },
+  "knip": {
+    "ignoreDependencies": [
+      "plotly.js-basic-dist-min"
+    ]
+  },
   "devDependencies": {
     "@eslint-react/eslint-plugin": "^2.13.0",
     "@eslint/js": "^10.0.1",
