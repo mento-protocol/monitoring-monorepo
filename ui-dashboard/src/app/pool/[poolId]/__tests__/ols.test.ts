@@ -330,7 +330,7 @@ describe("OlsStatusPanel", () => {
         network: mockNetwork,
       }),
     );
-    expect(html).toContain("Cooling down");
+    expect(html).toContain("remaining");
   });
 
   it("shows Removed badge when isActive is false", () => {

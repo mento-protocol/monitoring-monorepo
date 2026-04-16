@@ -18,7 +18,6 @@ import { LimitPanel } from "@/components/limit-panel";
 import { ReservesPanel } from "@/components/reserves-panel";
 import { useNetwork } from "@/components/network-provider";
 import { OracleChart } from "@/components/oracle-chart";
-import { OraclePriceChart } from "@/components/oracle-price-chart";
 import { ReserveChart } from "@/components/reserve-chart";
 import { SenderCell } from "@/components/sender-cell";
 import { TagsCell } from "@/components/tags-cell";
@@ -374,10 +373,7 @@ function PoolDetail() {
         <>
           <PoolHeader pool={pool} deployTxHash={deployTxHash} />
           <HealthPanel pool={pool} />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ReservesPanel pool={pool} />
-            <LimitPanel pool={pool} tradingLimits={tradingLimits} />
-          </div>
+          <LimitPanel pool={pool} tradingLimits={tradingLimits} />
         </>
       )}
 
@@ -926,6 +922,7 @@ function ReservesTab({
 
   return (
     <>
+      {pool && <ReservesPanel pool={pool} />}
       <ReserveChart
         rows={rows}
         token0={pool?.token0 ?? null}
@@ -1812,11 +1809,6 @@ function OracleTab({
         token0Symbol={sym0}
         token1Symbol={sym1}
       />
-      <OraclePriceChart
-        snapshots={chartRows}
-        token0={pool?.token0 ?? null}
-        token1={pool?.token1 ?? null}
-      />
       <TableSearch
         value={search}
         onChange={handleSearchChange}
@@ -2055,25 +2047,23 @@ export function OlsStatusPanel({
   const cooldown = Number(olsPool.rebalanceCooldown);
   const elapsed = lastRebalance > 0 ? nowSeconds - lastRebalance : null;
 
-  let cooldownStatus: string;
-  if (lastRebalance === 0) {
-    cooldownStatus = "—";
-  } else if (elapsed !== null && elapsed >= cooldown) {
-    cooldownStatus = "Ready to rebalance";
-  } else if (elapsed !== null) {
-    const remaining = cooldown - elapsed;
-    const h = Math.floor(remaining / 3600);
-    const m = Math.floor((remaining % 3600) / 60);
-    cooldownStatus = `Cooling down (${h}h ${m}m left)`;
-  } else {
-    cooldownStatus = "—";
-  }
+  const cooldownReady =
+    lastRebalance > 0 && elapsed !== null && elapsed >= cooldown;
+  const cooldownActive =
+    lastRebalance > 0 && elapsed !== null && elapsed < cooldown;
+  const cooldownPct =
+    cooldownActive && cooldown > 0
+      ? Math.min((elapsed! / cooldown) * 100, 100)
+      : 0;
+  const cooldownRemaining = cooldownActive ? cooldown - elapsed! : 0;
+  const cooldownH = Math.floor(cooldownRemaining / 3600);
+  const cooldownM = Math.floor((cooldownRemaining % 3600) / 60);
 
   const debtTokenSym = tokenSymbol(network, olsPool.debtToken || null);
   const debtTokenSide = getDebtTokenSideLabel(pool, olsPool.debtToken);
 
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 space-y-5">
       <div className="flex flex-wrap items-center gap-3">
         <h3 className="text-base font-semibold text-white">
           Open Liquidity Strategy
@@ -2089,69 +2079,115 @@ export function OlsStatusPanel({
         )}
       </div>
 
-      <dl className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
-        <Stat
-          label="Debt Token"
-          value={
-            !olsPool.debtToken
-              ? "Unknown"
-              : `${debtTokenSym} (${debtTokenSide})`
-          }
-        />
-        <Stat
-          label="Cooldown"
-          value={
-            cooldown > 0
-              ? `${Math.floor(cooldown / 3600)}h ${Math.floor((cooldown % 3600) / 60)}m`
-              : "None"
-          }
-        />
-        <Stat label="Cooldown Status" value={cooldownStatus} />
-        <Stat
-          label="OLS Rebalances"
-          value={String(olsPool.olsRebalanceCount)}
-        />
-        <Stat
-          label="Last Rebalance"
-          value={
-            lastRebalance > 0 ? relativeTime(String(lastRebalance)) : "Never"
-          }
-          title={
-            lastRebalance > 0
-              ? formatTimestamp(String(lastRebalance))
-              : undefined
-          }
-        />
-        <Stat
-          label="Protocol Fee Recipient"
-          value={
-            olsPool.protocolFeeRecipient ? (
-              <AddressLink address={olsPool.protocolFeeRecipient} />
-            ) : (
-              "Unknown"
-            )
-          }
-        />
-        <Stat
-          label="Expansion Incentive (Liquidity Source)"
-          value={toPercent(olsPool.liquiditySourceIncentiveExpansion)}
-        />
-        <Stat
-          label="Contraction Incentive (Liquidity Source)"
-          value={toPercent(olsPool.liquiditySourceIncentiveContraction)}
-        />
-        <Stat
-          label="Expansion Incentive (Protocol)"
-          value={toPercent(olsPool.protocolIncentiveExpansion)}
-        />
-        <Stat
-          label="Contraction Incentive (Protocol)"
-          value={toPercent(olsPool.protocolIncentiveContraction)}
-        />
-        <Stat
-          label="OLS Contract"
-          value={<AddressLink address={olsPool.olsAddress} />}
-        />
+      <dl className="text-sm space-y-4">
+        <div>
+          <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
+            Configuration
+          </h4>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <Stat
+              label="Debt Token"
+              value={
+                !olsPool.debtToken
+                  ? "Unknown"
+                  : `${debtTokenSym} (${debtTokenSide})`
+              }
+            />
+            <Stat
+              label="Cooldown"
+              value={
+                cooldown > 0
+                  ? `${Math.floor(cooldown / 3600)}h ${Math.floor((cooldown % 3600) / 60)}m`
+                  : "None"
+              }
+            />
+            <Stat
+              label="OLS Contract"
+              value={<AddressLink address={olsPool.olsAddress} />}
+            />
+          </div>
+        </div>
+
+        <div className="border-t border-slate-800 pt-4">
+          <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
+            Activity
+          </h4>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <Stat
+              label="OLS Rebalances"
+              value={String(olsPool.olsRebalanceCount)}
+            />
+            <Stat
+              label="Last Rebalance"
+              value={
+                lastRebalance > 0
+                  ? relativeTime(String(lastRebalance))
+                  : "Never"
+              }
+              title={
+                lastRebalance > 0
+                  ? formatTimestamp(String(lastRebalance))
+                  : undefined
+              }
+            />
+            <Stat
+              label="Protocol Fee Recipient"
+              value={
+                olsPool.protocolFeeRecipient ? (
+                  <AddressLink address={olsPool.protocolFeeRecipient} />
+                ) : (
+                  "Unknown"
+                )
+              }
+            />
+            <div className="col-span-2 sm:col-span-3">
+              <dt className="text-slate-400 mb-1">Cooldown Status</dt>
+              <dd className="text-white">
+                {lastRebalance === 0 ? (
+                  <span className="text-slate-500">Never rebalanced</span>
+                ) : cooldownReady ? (
+                  <span className="text-emerald-400">Ready to rebalance</span>
+                ) : (
+                  <div className="space-y-1">
+                    <span>
+                      {cooldownH}h {cooldownM}m remaining
+                    </span>
+                    <div className="w-full max-w-xs h-2 bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-indigo-500 rounded-full transition-all"
+                        style={{ width: `${cooldownPct}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </dd>
+            </div>
+          </div>
+        </div>
+
+        <div className="border-t border-slate-800 pt-4">
+          <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
+            Incentive Structure
+          </h4>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <Stat
+              label="Expansion (Source)"
+              value={toPercent(olsPool.liquiditySourceIncentiveExpansion)}
+            />
+            <Stat
+              label="Contraction (Source)"
+              value={toPercent(olsPool.liquiditySourceIncentiveContraction)}
+            />
+            <Stat
+              label="Expansion (Protocol)"
+              value={toPercent(olsPool.protocolIncentiveExpansion)}
+            />
+            <Stat
+              label="Contraction (Protocol)"
+              value={toPercent(olsPool.protocolIncentiveContraction)}
+            />
+          </div>
+        </div>
       </dl>
     </div>
   );

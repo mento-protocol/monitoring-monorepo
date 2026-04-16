@@ -133,9 +133,6 @@ vi.mock("@/components/reserves-panel", () => ({
 vi.mock("@/components/oracle-chart", () => ({
   OracleChart: () => <div>oracle-chart</div>,
 }));
-vi.mock("@/components/oracle-price-chart", () => ({
-  OraclePriceChart: () => <div>oracle-price-chart</div>,
-}));
 vi.mock("@/components/reserve-chart", () => ({
   ReserveChart: () => <div>reserve-chart</div>,
 }));
