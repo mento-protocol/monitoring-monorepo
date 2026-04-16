@@ -99,12 +99,20 @@ export function sortGlobalPools(
         cmp = (HEALTH_ORDER[aH] ?? 99) - (HEALTH_ORDER[bH] ?? 99);
         break;
       }
-      case "fee":
-        cmp =
-          (a.pool.lpFee ?? 0) +
-          (a.pool.protocolFee ?? 0) -
-          ((b.pool.lpFee ?? 0) + (b.pool.protocolFee ?? 0));
-        break;
+      case "fee": {
+        const aVirtual = a.pool.source?.includes("virtual");
+        const bVirtual = b.pool.source?.includes("virtual");
+        const aHasFee =
+          !aVirtual && (a.pool.lpFee != null || a.pool.protocolFee != null);
+        const bHasFee =
+          !bVirtual && (b.pool.lpFee != null || b.pool.protocolFee != null);
+        if (!aHasFee && !bHasFee) return 0;
+        if (!aHasFee) return 1;
+        if (!bHasFee) return -1;
+        const aFee = (a.pool.lpFee ?? 0) + (a.pool.protocolFee ?? 0);
+        const bFee = (b.pool.lpFee ?? 0) + (b.pool.protocolFee ?? 0);
+        return sortDir === "asc" ? aFee - bFee : bFee - aFee;
+      }
       case "tvl":
         cmp = (tvlByKey.get(aKey) ?? 0) - (tvlByKey.get(bKey) ?? 0);
         break;
@@ -214,15 +222,21 @@ function pressureColor(p: number): string {
 function LimitHeatmap({
   limits,
   network,
+  pool,
 }: {
   limits: TradingLimit[];
   network: Network;
+  pool: Pool;
 }) {
   if (limits.length === 0)
     return <span className="text-slate-600 text-xs">—</span>;
 
-  // Sort so token0 is first (deterministic order)
-  const sorted = [...limits].sort((a, b) => a.token.localeCompare(b.token));
+  // Order by the pool's token0/token1 so heatmap rows match the displayed pair
+  const sorted = [...limits].sort((a, b) => {
+    const aIdx = a.token.toLowerCase() === pool.token0?.toLowerCase() ? 0 : 1;
+    const bIdx = b.token.toLowerCase() === pool.token0?.toLowerCase() ? 0 : 1;
+    return aIdx - bIdx;
+  });
   const rows = sorted.map((tl) => {
     const p0 = Number(tl.limitPressure0); // L0 = 5min
     const p1 = Number(tl.limitPressure1); // L1 = 24h
@@ -576,7 +590,7 @@ export function GlobalPoolsTable({
                   {isVirtual ? (
                     <span className="text-slate-600 text-xs">—</span>
                   ) : (
-                    <LimitHeatmap limits={limits} network={network} />
+                    <LimitHeatmap limits={limits} network={network} pool={p} />
                   )}
                 </td>
                 <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono">
