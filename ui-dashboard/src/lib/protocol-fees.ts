@@ -15,9 +15,7 @@ import type { ProtocolFeeTransfer } from "./types";
  */
 export const UNRESOLVED_SYMBOLS = new Set(["UNKNOWN"]);
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 /** Maximum rows fetched by the PROTOCOL_FEE_TRANSFERS_ALL query. */
 export const PROTOCOL_FEE_QUERY_LIMIT = 10_000;

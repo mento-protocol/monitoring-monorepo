@@ -2,9 +2,7 @@ import type { Pool } from "./types";
 import type { Network } from "./networks";
 import { truncateAddress, parseWei } from "./format";
 
-// ---------------------------------------------------------------------------
 // Network-aware helpers
-// ---------------------------------------------------------------------------
 
 /** All entries here must also appear in USD_PEGGED_SYMBOLS below. */
 export const USDM_SYMBOLS = new Set(["USDm"]);

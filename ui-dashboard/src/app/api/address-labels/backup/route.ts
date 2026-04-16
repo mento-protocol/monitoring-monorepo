@@ -48,7 +48,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       addRandomSuffix: false,
     });
 
-    console.log(`[backup] Stored backup at: ${blob.pathname}`);
     return NextResponse.json({ ok: true, pathname: blob.pathname, date });
   } catch (err) {
     console.error("[backup]", err);

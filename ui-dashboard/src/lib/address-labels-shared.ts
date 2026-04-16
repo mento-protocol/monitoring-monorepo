@@ -3,9 +3,7 @@
  * Safe to import from client components, providers, and server code alike.
  */
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export type AddressEntry = {
   name: string;
@@ -27,9 +25,7 @@ export type AddressLabelsSnapshot = {
   chains: Record<string, Record<string, AddressEntry>>;
 };
 
-// ---------------------------------------------------------------------------
 // Backward-compat: auto-upgrade legacy entries on read
-// ---------------------------------------------------------------------------
 
 /**
  * If a Redis entry has `label` but no `name`, auto-upgrade to the new schema.
@@ -106,9 +102,7 @@ export function upgradeEntries(
   return result;
 }
 
-// ---------------------------------------------------------------------------
 // Entry sanitization — shared limits for PUT + import paths
-// ---------------------------------------------------------------------------
 
 const MAX_NAME_LENGTH = 200;
 const MAX_NOTES_LENGTH = 500;

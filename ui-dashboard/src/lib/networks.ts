@@ -1,6 +1,4 @@
-// ---------------------------------------------------------------------------
 // Network definitions — add new chains here
-// ---------------------------------------------------------------------------
 
 import contractsData from "@mento-protocol/contracts/contracts.json";
 import DEPLOYMENT_NAMESPACES from "@mento-protocol/monitoring-config/deployment-namespaces.json";

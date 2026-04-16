@@ -15,9 +15,7 @@ import {
 } from "viem";
 import { getViemClient, ERC20_ABI } from "./rpc-client";
 
-// ---------------------------------------------------------------------------
 // ABI fragments
-// ---------------------------------------------------------------------------
 
 /** Both ReserveLiquidityStrategy and CDPLiquidityStrategy share this */
 const STRATEGY_ABI = parseAbi([
@@ -90,9 +88,7 @@ const STABILITY_POOL_ABI = parseAbi([
 // Note: ReserveV2 does not expose a collateral balance getter — we use
 // ERC20 balanceOf on the collateral token with the reserve address instead.
 
-// ---------------------------------------------------------------------------
 // Error → human-readable message mapping
-// ---------------------------------------------------------------------------
 
 const ERROR_MESSAGES: Record<string, string> = {
   // CDP strategy
@@ -155,9 +151,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   ReservesEmpty: "Pool reserves are empty",
 };
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export type StrategyType = "cdp" | "reserve" | "ols" | "unknown";
 
@@ -193,9 +187,7 @@ export type StrategyEnrichment =
       collateralTokenDecimals: number;
     };
 
-// ---------------------------------------------------------------------------
 // Healthy no-op detection
-// ---------------------------------------------------------------------------
 
 /**
  * Revert codes where the strategy refuses to rebalance BECAUSE the pool
@@ -217,9 +209,7 @@ export function isHealthyNoOp(rawError: string | null | undefined): boolean {
   return rawError != null && HEALTHY_NO_OP_ERRORS.has(rawError);
 }
 
-// ---------------------------------------------------------------------------
 // Explorer deep-link for rebalance()
-// ---------------------------------------------------------------------------
 
 /**
  * Deep-link into the explorer's proxy-write tab for the strategy.
@@ -235,9 +225,7 @@ export function strategyRebalanceWriteUrl(
   return `${explorerBaseUrl}/address/${strategyAddress}#writeProxyContract`;
 }
 
-// ---------------------------------------------------------------------------
 // Core check
-// ---------------------------------------------------------------------------
 
 /**
  * Simulate a rebalance and return a diagnostic result.
@@ -307,9 +295,7 @@ export async function checkRebalanceStatus(
   }
 }
 
-// ---------------------------------------------------------------------------
 // Strategy type detection
-// ---------------------------------------------------------------------------
 
 async function detectStrategyType(
   client: PublicClient,
@@ -359,9 +345,7 @@ async function detectStrategyType(
   return "unknown";
 }
 
-// ---------------------------------------------------------------------------
 // Revert handling + enrichment
-// ---------------------------------------------------------------------------
 
 async function handleRevert(
   err: unknown,
@@ -496,9 +480,7 @@ function extractRawMessage(err: unknown): string | null {
   return String(err).slice(0, 200);
 }
 
-// ---------------------------------------------------------------------------
 // Strategy-specific enrichment
-// ---------------------------------------------------------------------------
 
 /**
  * Convert a raw on-chain uint256 balance to a human-units number without

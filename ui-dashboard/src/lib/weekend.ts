@@ -59,7 +59,6 @@ export function isWeekendOracleStale(
   return !isOracleFreshFn(pool, nowSeconds, chainId);
 }
 
-// ---------------------------------------------------------------------------
 // Trading-second arithmetic for healthscore math.
 //
 // Healthscore windows count FX weekend wall-clock time as stale, dragging
@@ -69,7 +68,6 @@ export function isWeekendOracleStale(
 //
 // Half-open semantics match isWeekend(): Fri 21:00 UTC inclusive,
 // Sun 23:00 UTC exclusive.
-// ---------------------------------------------------------------------------
 
 /** Fri 2024-01-05 21:00:00 UTC — anchor for the 7-day weekend cycle. */
 export const ANCHOR_FRI_2100 = FX_CALENDAR.anchorFri2100UnixSec;

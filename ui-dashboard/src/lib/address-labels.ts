@@ -15,17 +15,13 @@ export {
 
 import { upgradeEntries, type AddressEntry } from "./address-labels-shared";
 
-// ---------------------------------------------------------------------------
 // Redis key helpers
-// ---------------------------------------------------------------------------
 
 function labelsKey(chainId: number): string {
   return `labels:${chainId}`;
 }
 
-// ---------------------------------------------------------------------------
 // Redis client (server-side only)
-// ---------------------------------------------------------------------------
 
 function getRedis(): Redis {
   const url = process.env.UPSTASH_REDIS_REST_URL;
@@ -38,9 +34,7 @@ function getRedis(): Redis {
   return new Redis({ url, token });
 }
 
-// ---------------------------------------------------------------------------
 // Data access helpers (all server-side)
-// ---------------------------------------------------------------------------
 
 export async function getLabels(
   chainId: number,

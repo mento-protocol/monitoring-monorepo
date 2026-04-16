@@ -208,9 +208,7 @@ function hasAnyVirtualPools(entries: GlobalPoolEntry[]): boolean {
   return entries.some((e) => e.network.hasVirtualPools);
 }
 
-// ---------------------------------------------------------------------------
 // Compact 2×2 limit heatmap
-// ---------------------------------------------------------------------------
 
 function pressureColor(p: number): string {
   if (p >= 1.0) return "bg-red-500";
@@ -277,9 +275,7 @@ function LimitHeatmap({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Strategy badges
-// ---------------------------------------------------------------------------
 
 const STRATEGY_STYLES: Record<
   string,
@@ -322,9 +318,7 @@ function poolStrategies(pool: Pool, isOls: boolean): string[] {
   return strategies;
 }
 
-// ---------------------------------------------------------------------------
 // Fee display
-// ---------------------------------------------------------------------------
 
 function hasFeeData(pool: Pool): boolean {
   if (pool.source?.includes("virtual")) return false;
@@ -340,9 +334,7 @@ function formatFee(pool: Pool): string {
   return `${(total / 100).toFixed(2)}%`;
 }
 
-// ---------------------------------------------------------------------------
 // Table component
-// ---------------------------------------------------------------------------
 
 interface GlobalPoolsTableProps {
   entries: GlobalPoolEntry[];

@@ -13,9 +13,7 @@ import {
   isConfiguredNetworkId,
 } from "@/lib/networks";
 
-// ---------------------------------------------------------------------------
 // Pure helpers (exported for testing)
-// ---------------------------------------------------------------------------
 
 /**
  * Determine whether the editor is operating on a contract row (existing address

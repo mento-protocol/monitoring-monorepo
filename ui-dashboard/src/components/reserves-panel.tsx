@@ -151,8 +151,6 @@ export function ReservesPanel({ pool, rates }: ReservesPanelProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
-
 interface TankProps {
   symbol: string;
   amount: string;

@@ -75,9 +75,7 @@ export function formatUSD(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
-// ---------------------------------------------------------------------------
 // Oracle price formatting
-// ---------------------------------------------------------------------------
 
 /** Set of USD-stable token symbols. If token0 is in this set, the SortedOracles
  * feed value ("1 feedToken = X USD") must be inverted to get the pool display

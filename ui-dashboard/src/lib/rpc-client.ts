@@ -8,9 +8,7 @@
 
 import { createPublicClient, http, parseAbi, type PublicClient } from "viem";
 
-// ---------------------------------------------------------------------------
 // Client cache — keyed by RPC URL (typically 1-2 entries per network)
-// ---------------------------------------------------------------------------
 
 const clientCache = new Map<string, PublicClient>();
 
@@ -22,9 +20,7 @@ export function getViemClient(rpcUrl: string): PublicClient {
   return client;
 }
 
-// ---------------------------------------------------------------------------
 // Shared ERC20 ABI fragments
-// ---------------------------------------------------------------------------
 
 export const ERC20_ABI = parseAbi([
   "function symbol() external view returns (string)",

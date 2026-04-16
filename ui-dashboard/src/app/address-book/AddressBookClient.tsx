@@ -382,9 +382,7 @@ function contractInitial(address: string, chainId: number) {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Row component
-// ---------------------------------------------------------------------------
 
 type AddressRowProps = {
   address: string;

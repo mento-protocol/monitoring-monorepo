@@ -289,9 +289,7 @@ function serverError(err: unknown): NextResponse {
   return NextResponse.json({ error: message }, { status: 500 });
 }
 
-// ---------------------------------------------------------------------------
 // CSV import helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Parse a CSV body and import into all configured mainnet chains.
