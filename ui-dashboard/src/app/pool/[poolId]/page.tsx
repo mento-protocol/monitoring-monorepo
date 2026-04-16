@@ -18,6 +18,7 @@ import { LimitPanel } from "@/components/limit-panel";
 import { ReservesPanel } from "@/components/reserves-panel";
 import { useNetwork } from "@/components/network-provider";
 import { OracleChart } from "@/components/oracle-chart";
+import { EffectivenessChart } from "@/components/effectiveness-chart";
 import { ReserveChart } from "@/components/reserve-chart";
 import { SenderCell } from "@/components/sender-cell";
 import { TagsCell } from "@/components/tags-cell";
@@ -754,12 +755,41 @@ function SwapsTab({
         />
       )}
       {fpmmPool && snapshots.length > 0 && (
-        <SnapshotChart
-          snapshots={snapshots}
-          token0Symbol={sym0}
-          token1Symbol={sym1}
-          rebalanceTimestamps={rebalanceTimestamps}
-        />
+        <>
+          <SnapshotChart
+            snapshots={snapshots}
+            token0Symbol={sym0}
+            token1Symbol={sym1}
+            rebalanceTimestamps={rebalanceTimestamps}
+          />
+          {(() => {
+            const last = snapshots[snapshots.length - 1];
+            if (!last) return null;
+            return (
+              <div className="flex flex-wrap gap-4 mb-4 text-xs text-slate-400">
+                <span>
+                  Cumulative:{" "}
+                  <span className="font-mono text-slate-300">
+                    {formatWei(last.cumulativeVolume0)}
+                  </span>{" "}
+                  {sym0} sold
+                </span>
+                <span>
+                  <span className="font-mono text-slate-300">
+                    {formatWei(last.cumulativeVolume1)}
+                  </span>{" "}
+                  {sym1} sold
+                </span>
+                <span>
+                  <span className="font-mono text-slate-300">
+                    {last.cumulativeSwapCount.toLocaleString()}
+                  </span>{" "}
+                  total swaps
+                </span>
+              </div>
+            );
+          })()}
+        </>
       )}
       {swaps.length > 0 && (
         <TableSearch
@@ -795,6 +825,12 @@ function SwapsTab({
               <Th align="right">Bought</Th>
               <th
                 scope="col"
+                className="hidden lg:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-right"
+              >
+                Rate
+              </th>
+              <th
+                scope="col"
                 className="hidden md:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-right"
               >
                 Block
@@ -818,11 +854,25 @@ function SwapsTab({
                   />
                   <SenderCell address={s.recipient} />
                   <Td mono small align="right">
+                    <span
+                      className={
+                        d.soldToken0 ? "text-red-400/70" : "text-emerald-400/70"
+                      }
+                    >
+                      {d.soldToken0 ? "SELL" : "BUY"}
+                    </span>{" "}
                     {formatWei(d.soldAmt, d.soldDec)} {d.soldSym}
                   </Td>
                   <Td mono small align="right">
                     {formatWei(d.boughtAmt, d.boughtDec)} {d.boughtSym}
                   </Td>
+                  <td className="hidden lg:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
+                    {(() => {
+                      const sold = Number(d.soldAmt) / 10 ** d.soldDec;
+                      const bought = Number(d.boughtAmt) / 10 ** d.boughtDec;
+                      return sold > 0 ? (bought / sold).toFixed(6) : "—";
+                    })()}
+                  </td>
                   <td className="hidden md:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
                     {formatBlock(s.blockNumber)}
                   </td>
@@ -1084,6 +1134,20 @@ export function RebalancesTab({
   });
   const rows = data?.RebalanceEvent ?? [];
 
+  // Separate chart query — fetch up to 200 events for the trend chart
+  const { data: chartData } = useGQL<{ RebalanceEvent: RebalanceEvent[] }>(
+    POOL_REBALANCES,
+    { poolId, limit: 200 },
+  );
+  const chartRows = useMemo(() => {
+    const raw = (chartData?.RebalanceEvent ?? []).filter(
+      (r) => r.effectivenessRatio != null,
+    );
+    return [...raw].sort(
+      (a, b) => Number(a.blockTimestamp) - Number(b.blockTimestamp),
+    );
+  }, [chartData]);
+
   const filteredRows = useMemo(() => {
     if (!query) return rows;
     return rows.filter((r) => {
@@ -1108,6 +1172,7 @@ export function RebalancesTab({
 
   return (
     <>
+      <EffectivenessChart events={chartRows} />
       <TableSearch
         value={search}
         onChange={handleSearchChange}
@@ -1479,6 +1544,7 @@ function LpsTab({
         .map((position) => ({
           address: position.address,
           netLiquidity: BigInt(position.netLiquidity),
+          lastUpdatedTimestamp: position.lastUpdatedTimestamp,
         }))
         .filter((position) => position.netLiquidity > BigInt(0))
         .sort((a, b) =>
@@ -1587,6 +1653,7 @@ function LpsTab({
               <Th align="right">{sym1}</Th>
               {showUsd && <Th align="right">Total Value</Th>}
               <Th align="right">Share</Th>
+              <Th>Last Active</Th>
             </tr>
           </thead>
           <tbody>
@@ -1681,6 +1748,13 @@ function LpsTab({
                   )}
                   <Td mono small align="right">
                     {sharePct}%
+                  </Td>
+                  <Td
+                    small
+                    muted
+                    title={formatTimestamp(position.lastUpdatedTimestamp)}
+                  >
+                    {relativeTime(position.lastUpdatedTimestamp)}
                   </Td>
                 </Row>
               );

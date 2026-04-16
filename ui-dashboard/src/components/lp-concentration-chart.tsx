@@ -145,6 +145,18 @@ export function LpConcentrationChart({
         ).toFixed(1)
       : "0";
 
+  // Herfindahl-Hirschman Index: sum of squared market shares (0-10000 scale).
+  // HHI < 1500 = competitive, 1500-2500 = moderate, > 2500 = concentrated.
+  const hhi =
+    totalLiquidity > BigInt(0)
+      ? positions.reduce((acc, p) => {
+          const shareBps = Number(
+            (p.netLiquidity * BigInt(10_000)) / totalLiquidity,
+          );
+          return acc + shareBps * shareBps;
+        }, 0) / 10_000
+      : 0;
+
   const hasPoolData = Boolean(pool) && (reserves0Raw > 0 || reserves1Raw > 0);
   const usdmIsToken1 = USDM_SYMBOLS.has(sym1 ?? "");
   const hasUsdmSide = usdmIsToken0 !== usdmIsToken1;
@@ -228,6 +240,11 @@ export function LpConcentrationChart({
               <StatRow label="Total LPs" value={String(totalPositions)} />
               <StatRow label="Top holder" value={`${topShare}%`} />
               <StatRow label="Top 3 share" value={`${top3Share}%`} />
+              <StatRow
+                label="HHI"
+                value={hhi.toFixed(0)}
+                highlight={hhi > 2500}
+              />
             </div>
 
             {hasPoolData && (
