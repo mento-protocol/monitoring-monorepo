@@ -306,9 +306,8 @@ function poolStrategies(pool: Pool, isOls: boolean): string[] {
 // ---------------------------------------------------------------------------
 
 function formatFee(pool: Pool): string {
+  if (pool.lpFee == null && pool.protocolFee == null) return "—";
   const total = (pool.lpFee ?? 0) + (pool.protocolFee ?? 0);
-  if (total === 0) return "—";
-  // Fees are in basis points (e.g. 15 = 0.15%)
   return `${(total / 100).toFixed(2)}%`;
 }
 
