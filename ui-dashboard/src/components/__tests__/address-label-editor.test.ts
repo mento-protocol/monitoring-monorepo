@@ -5,9 +5,7 @@ import {
   validateEntryForm,
 } from "@/components/address-label-editor";
 
-// ---------------------------------------------------------------------------
 // resolveIsContractRow
-// ---------------------------------------------------------------------------
 
 describe("resolveIsContractRow", () => {
   it("returns true for an existing address with initial data and no custom label", () => {
@@ -61,9 +59,7 @@ describe("resolveIsContractRow", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // resolveEffectiveName (and deprecated resolveEffectiveLabel alias)
-// ---------------------------------------------------------------------------
 
 describe("resolveEffectiveName", () => {
   it("returns the typed name for a non-contract row", () => {
@@ -93,9 +89,7 @@ describe("resolveEffectiveName", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // validateEntryForm (and deprecated validateLabelForm)
-// ---------------------------------------------------------------------------
 
 const validAddress = "0x" + "a".repeat(40);
 

@@ -1,9 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { computeReservePcts, computeThresholdLines } from "../reserves";
 
-// ---------------------------------------------------------------------------
 // computeReservePcts
-// ---------------------------------------------------------------------------
 
 describe("computeReservePcts", () => {
   describe("USD-normalized path (oracle available)", () => {
@@ -107,9 +105,7 @@ describe("computeReservePcts", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // computeThresholdLines
-// ---------------------------------------------------------------------------
 
 describe("computeThresholdLines", () => {
   describe("normal operation", () => {

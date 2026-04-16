@@ -6,9 +6,7 @@ import { createRoot } from "react-dom/client";
 import { NetworkProvider, useNetwork } from "@/components/network-provider";
 import type { IndexerNetworkId } from "@/lib/networks";
 
-// ---------------------------------------------------------------------------
 // next/navigation mocks — each test mutates `pathname` then renders.
-// ---------------------------------------------------------------------------
 
 let pathname = "/";
 

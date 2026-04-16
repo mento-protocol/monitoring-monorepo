@@ -17,9 +17,7 @@ import {
   makeTvlPool,
 } from "@/test-utils/network-fixtures";
 
-// ---------------------------------------------------------------------------
 // Mock hooks that have side effects / SWR dependency
-// ---------------------------------------------------------------------------
 vi.mock("@/hooks/use-all-networks-data", () => ({
   useAllNetworksData: vi.fn(),
 }));
@@ -45,9 +43,7 @@ import * as volumeModule from "@/lib/volume";
 import { buildSnapshotWindows } from "@/lib/volume";
 import GlobalPage from "../page";
 
-// ---------------------------------------------------------------------------
 // Fixture helpers
-// ---------------------------------------------------------------------------
 
 import type { Pool } from "@/lib/types";
 
@@ -79,9 +75,7 @@ beforeEach(() => {
   capturedProps = null;
 });
 
-// ---------------------------------------------------------------------------
 // Loading state
-// ---------------------------------------------------------------------------
 
 describe("GlobalPage — loading state", () => {
   it("shows ellipsis in all KPI tiles while loading", () => {
@@ -91,9 +85,7 @@ describe("GlobalPage — loading state", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // All networks succeed
-// ---------------------------------------------------------------------------
 
 describe("GlobalPage — all networks succeed", () => {
   it("renders the summary tiles without error state on all-success", () => {
@@ -129,9 +121,7 @@ describe("GlobalPage — all networks succeed", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Network-level failure (pools query fails)
-// ---------------------------------------------------------------------------
 
 describe("GlobalPage — network-level failure", () => {
   it("shows 'partial data' subtitle on pools and TVL tiles", () => {
@@ -152,9 +142,7 @@ describe("GlobalPage — network-level failure", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Fees-only failure
-// ---------------------------------------------------------------------------
 
 describe("GlobalPage — fees-only failure", () => {
   it("shows N/A on fee-tile failure but leaves other tiles alone", () => {
@@ -176,9 +164,7 @@ describe("GlobalPage — fees-only failure", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // LP query failure
-// ---------------------------------------------------------------------------
 
 describe("GlobalPage — LP query failure", () => {
   it("shows N/A when all LP queries fail", () => {
@@ -246,9 +232,7 @@ describe("GlobalPage — LP query failure", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Snapshots-only failure
-// ---------------------------------------------------------------------------
 
 describe("GlobalPage — snapshots-only failure", () => {
   it("fees tile still renders normally when only snapshots failed", () => {
@@ -276,9 +260,7 @@ describe("GlobalPage — snapshots-only failure", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Unpriced symbols — subtitle and 24h scoping
-// ---------------------------------------------------------------------------
 
 describe("GlobalPage — unpriced symbols behavior", () => {
   it("shows 'Approximate — unpriced: FOO' subtitle when all-time unpriced symbols exist", () => {
@@ -386,9 +368,7 @@ describe("GlobalPage — unpriced symbols behavior", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Cross-chain key collision — same pool ID on two different chains
-// ---------------------------------------------------------------------------
 
 describe("GlobalPage — cross-chain key collision", () => {
   it("produces distinct volume24hByKey entries for same pool ID on different networks", () => {
@@ -421,9 +401,7 @@ describe("GlobalPage — cross-chain key collision", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // All-networks-failed — EmptyBox must NOT render
-// ---------------------------------------------------------------------------
 
 describe("GlobalPage — all networks failed", () => {
   it("shows ErrorBox notices but no EmptyBox when every network fails", () => {
@@ -442,9 +420,7 @@ describe("GlobalPage — all networks failed", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // TVL delta sub-KPIs
-// ---------------------------------------------------------------------------
 
 describe("GlobalPage — TVL delta sub-KPIs", () => {
   it("renders percentage changes when snapshots have historical reserves", () => {

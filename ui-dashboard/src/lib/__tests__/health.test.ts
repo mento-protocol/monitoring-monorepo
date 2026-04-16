@@ -503,10 +503,8 @@ describe("computeEffectiveStatus", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Oracle staleness boundary (300s)
 // Timestamps are derived from a frozen clock so these tests are deterministic.
-// ---------------------------------------------------------------------------
 describe("computeHealthStatus oracle staleness boundary", () => {
   const FROZEN_NOW_MS = 1_700_000_000_000;
   const frozenNowSec = Math.floor(FROZEN_NOW_MS / 1000);
@@ -557,9 +555,7 @@ describe("computeHealthStatus oracle staleness boundary", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Oracle staleness with per-feed oracleExpiry (non-default, e.g. Monad)
-// ---------------------------------------------------------------------------
 describe("computeHealthStatus per-feed oracleExpiry", () => {
   const FROZEN_NOW_MS = 1_700_000_000_000;
   const frozenNowSec = Math.floor(FROZEN_NOW_MS / 1000);
@@ -642,9 +638,7 @@ describe("computeHealthStatus per-feed oracleExpiry", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Chain-aware fallback via ORACLE_STALE_SECONDS_BY_CHAIN
-// ---------------------------------------------------------------------------
 describe("computeHealthStatus chain-aware staleness fallback", () => {
   const FROZEN_NOW_MS = 1_700_000_000_000;
   const frozenNowSec = Math.floor(FROZEN_NOW_MS / 1000);

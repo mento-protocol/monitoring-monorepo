@@ -5,9 +5,7 @@ import {
   normalizePoolIdForChain,
 } from "../pool-id";
 
-// ---------------------------------------------------------------------------
 // isNamespacedPoolId
-// ---------------------------------------------------------------------------
 describe("isNamespacedPoolId", () => {
   it("accepts valid namespaced IDs", () => {
     expect(
@@ -46,9 +44,7 @@ describe("isNamespacedPoolId", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // extractChainIdFromPoolId
-// ---------------------------------------------------------------------------
 describe("extractChainIdFromPoolId", () => {
   it("extracts chainId from a namespaced pool ID", () => {
     expect(
@@ -78,9 +74,7 @@ describe("extractChainIdFromPoolId", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // normalizePoolIdForChain
-// ---------------------------------------------------------------------------
 describe("normalizePoolIdForChain", () => {
   it("prefixes a raw address with chainId", () => {
     expect(

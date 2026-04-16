@@ -25,9 +25,7 @@ const TEST_RATES: OracleRateMap = new Map([
   ["axlEUROC", 1.1455],
 ]);
 
-// ---------------------------------------------------------------------------
 // tokenToUSD
-// ---------------------------------------------------------------------------
 describe("tokenToUSD", () => {
   it("returns amount unchanged for USD-pegged tokens", () => {
     expect(tokenToUSD("USDm", 100, TEST_RATES)).toBe(100);
@@ -115,9 +113,7 @@ describe("tokenToUSD", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // aggregateProtocolFees
-// ---------------------------------------------------------------------------
 
 /** Helper to build a transfer with sensible defaults. */
 function transfer(

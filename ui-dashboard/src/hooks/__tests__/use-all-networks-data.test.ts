@@ -3,9 +3,7 @@ import { fetchNetworkData, fetchAllNetworks } from "../use-all-networks-data";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
 
-// ---------------------------------------------------------------------------
 // Minimal fixture helpers
-// ---------------------------------------------------------------------------
 
 const MOCK_NETWORK: Network = {
   id: "celo-mainnet",
@@ -49,9 +47,7 @@ function makePool(id: string): Pool {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Mock graphql-request
-// ---------------------------------------------------------------------------
 
 vi.mock("graphql-request", () => {
   const MockGraphQLClient = vi.fn();
@@ -93,9 +89,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-// ---------------------------------------------------------------------------
 // fetchNetworkData — happy path
-// ---------------------------------------------------------------------------
 
 describe("fetchNetworkData — happy path", () => {
   it("returns pools, fees, and snapshots on full success", async () => {
@@ -230,9 +224,7 @@ describe("fetchNetworkData — happy path", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // fetchNetworkData — snapshot pagination
-// ---------------------------------------------------------------------------
 
 describe("fetchNetworkData — snapshot pagination", () => {
   it("issues POOL_SNAPSHOTS_ALL with a deterministic tiebreaker", async () => {
@@ -517,9 +509,7 @@ describe("fetchNetworkData — snapshot pagination", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // fetchNetworkData — daily snapshot pagination
-// ---------------------------------------------------------------------------
 
 describe("fetchNetworkData — daily snapshot pagination", () => {
   const makeDaily = (timestamp: number) => ({
@@ -618,9 +608,7 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // fetchNetworkData — pools query failure
-// ---------------------------------------------------------------------------
 
 describe("fetchNetworkData — pools query failure", () => {
   it("returns error and empty data when pools query throws", async () => {
@@ -644,9 +632,7 @@ describe("fetchNetworkData — pools query failure", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // fetchNetworkData — fees query failure only
-// ---------------------------------------------------------------------------
 
 describe("fetchNetworkData — fees query failure only", () => {
   it("surfaces feesError, pools succeed, snapshots succeed", async () => {
@@ -677,9 +663,7 @@ describe("fetchNetworkData — fees query failure only", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // fetchNetworkData — snapshots query failure only
-// ---------------------------------------------------------------------------
 
 describe("fetchNetworkData — snapshots query failure only", () => {
   it("surfaces snapshotsError, pools and fees succeed", async () => {
@@ -711,9 +695,7 @@ describe("fetchNetworkData — snapshots query failure only", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // fetchNetworkData — non-Error rejections wrapped
-// ---------------------------------------------------------------------------
 
 describe("fetchNetworkData — non-Error thrown values", () => {
   it("wraps string rejection in Error for pools failure", async () => {
@@ -732,9 +714,7 @@ describe("fetchNetworkData — non-Error thrown values", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // fetchNetworkData — LP query failure only
-// ---------------------------------------------------------------------------
 
 describe("fetchNetworkData — LP query failure only", () => {
   it("surfaces uniqueLpAddresses as null when LP query rejects", async () => {
@@ -766,11 +746,9 @@ describe("fetchNetworkData — LP query failure only", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // fetchNetworkData — cross-network isolation
 // (These tests exercise fetchNetworkData in isolation, not fetchAllNetworks.
 //  See the fetchAllNetworks section below for orchestration-level tests.)
-// ---------------------------------------------------------------------------
 
 describe("fetchNetworkData — cross-network isolation", () => {
   it("one network pools failure does not affect the other network", async () => {
@@ -893,9 +871,7 @@ describe("fetchNetworkData — cross-network isolation", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // fetchAllNetworks — orchestration (Promise.allSettled + rejection mapping)
-// ---------------------------------------------------------------------------
 // These tests call fetchAllNetworks() directly and control which networks it
 // sees by mocking @/lib/networks. This verifies the actual orchestration path:
 // allSettled mapping, index→network metadata preservation, and rejection wrapping.

@@ -117,9 +117,7 @@ describe("computeBinaryHealthWindow", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Weekend exclusion
-// ---------------------------------------------------------------------------
 
 /** Seconds of a fixed UTC moment. 2026-03-09 is a Monday. */
 function ts(day: number, hour: number, minute = 0): number {

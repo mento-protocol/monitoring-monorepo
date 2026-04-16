@@ -15,9 +15,7 @@ import {
 // Pool ID utils are tested comprehensively in pool-id.test.ts;
 // the imports above verify the re-exports from format.ts still resolve.
 
-// ---------------------------------------------------------------------------
 // truncateAddress
-// ---------------------------------------------------------------------------
 describe("truncateAddress", () => {
   it("returns em-dash for null", () => {
     expect(truncateAddress(null)).toBe("—");
@@ -43,9 +41,7 @@ describe("truncateAddress", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // pool ID normalization
-// ---------------------------------------------------------------------------
 describe("pool ID normalization", () => {
   it("detects namespaced pool IDs", () => {
     expect(
@@ -75,9 +71,7 @@ describe("pool ID normalization", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // parseWei
-// ---------------------------------------------------------------------------
 describe("parseWei", () => {
   it("returns 0 for empty string", () => {
     expect(parseWei("")).toBe(0);
@@ -96,9 +90,7 @@ describe("parseWei", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // formatWei
-// ---------------------------------------------------------------------------
 describe("formatWei", () => {
   it('returns "0" for "0"', () => {
     expect(formatWei("0")).toBe("0");
@@ -139,9 +131,7 @@ describe("formatWei", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // formatUSD
-// ---------------------------------------------------------------------------
 describe("formatUSD", () => {
   it("switches to millions at the 999.95K rounding boundary", () => {
     expect(formatUSD(999_950)).toBe("$1M");
@@ -177,9 +167,7 @@ describe("formatUSD", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // formatBlock
-// ---------------------------------------------------------------------------
 describe("formatBlock", () => {
   it("formats block number with locale separators", () => {
     const result = formatBlock("1234567");
@@ -192,9 +180,7 @@ describe("formatBlock", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // formatTimestamp
-// ---------------------------------------------------------------------------
 describe("formatTimestamp", () => {
   it('returns em-dash for "0"', () => {
     expect(formatTimestamp("0")).toBe("—");
@@ -212,9 +198,7 @@ describe("formatTimestamp", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // relativeTime
-// ---------------------------------------------------------------------------
 describe("relativeTime", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -267,14 +251,12 @@ describe("relativeTime", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // Reserve USD calculation with mixed token decimals
 // Mirrors the inline calculation in pool/[poolId]/page.tsx:
 //   raw  = parseWei(reserve, tokenDecimals)
 //   usd0 = usdmIsToken0 ? raw0 : raw0 * feedVal
 //   usd1 = usdmIsToken0 ? raw1 * feedVal : raw1
 //   total = usd0 + usd1
-// ---------------------------------------------------------------------------
 describe("reserve USD calculation (mixed decimals)", () => {
   it("parseWei correctly handles 6-decimal USDm amounts", () => {
     // 1 USDm = 1_000_000 units at 6 decimals
@@ -317,9 +299,7 @@ describe("reserve USD calculation (mixed decimals)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // isValidAddress
-// ---------------------------------------------------------------------------
 describe("isValidAddress", () => {
   it("accepts valid lowercase address", () => {
     expect(isValidAddress("0xd8da6bf26964af9d7eed9e03e53415d37aa96045")).toBe(
