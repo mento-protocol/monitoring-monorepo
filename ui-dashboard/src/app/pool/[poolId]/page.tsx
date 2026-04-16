@@ -849,6 +849,12 @@ function SwapsTab({
           Could not load total count — pagination may be incomplete.
         </p>
       )}
+      {countError && isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — search covers the most recent{" "}
+          {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} entries only.
+        </p>
+      )}
     </>
   );
 }
@@ -1175,6 +1181,12 @@ export function RebalancesTab({
           Could not load total count — pagination may be incomplete.
         </p>
       )}
+      {countError && isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — search covers the most recent{" "}
+          {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} entries only.
+        </p>
+      )}
     </>
   );
 }
@@ -1368,6 +1380,12 @@ function LiquidityTab({
       {countError && !isSearching && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Could not load total count — pagination may be incomplete.
+        </p>
+      )}
+      {countError && isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — search covers the most recent{" "}
+          {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} entries only.
         </p>
       )}
     </>
@@ -2295,7 +2313,15 @@ function OlsLiquidityEvents({
           ariaLabel="Search OLS events"
         />
       )}
-      {searchQuery && events.length > 0 && filteredEvents.length === 0 ? (
+      {error ? (
+        <OlsLiquidityTable
+          events={[]}
+          pool={pool}
+          network={network}
+          isLoading={false}
+          error={error}
+        />
+      ) : searchQuery && events.length > 0 && filteredEvents.length === 0 ? (
         <EmptyBox message="No OLS events match your search." />
       ) : (
         <OlsLiquidityTable
@@ -2303,7 +2329,7 @@ function OlsLiquidityEvents({
           pool={pool}
           network={network}
           isLoading={isLoading}
-          error={error ?? null}
+          error={null}
         />
       )}
       {!isSearching && (
@@ -2329,6 +2355,12 @@ function OlsLiquidityEvents({
       {countError && !isSearching && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Could not load total count — pagination may be incomplete.
+        </p>
+      )}
+      {countError && isSearching && (
+        <p className="px-1 pt-1 text-xs text-amber-400">
+          Could not load total count — search covers the most recent{" "}
+          {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} entries only.
         </p>
       )}
     </>
