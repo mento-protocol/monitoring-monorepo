@@ -1691,7 +1691,7 @@ function OracleTab({
   const fetchOffset = isSearching ? 0 : (page - 1) * DEFAULT_PAGE_SIZE;
   // Table sort (user-controlled)
   const tableOrderBy = useMemo(
-    () => buildOrderBy(sortCol, sortDir),
+    () => buildOrderBy(sortCol, sortDir, "timestamp"),
     [sortCol, sortDir],
   );
   // Search always uses newest-first so the bounded window is chronologically
