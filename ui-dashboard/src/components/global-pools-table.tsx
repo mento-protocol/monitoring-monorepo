@@ -234,7 +234,12 @@ function LimitHeatmap({
     .join("\n");
 
   return (
-    <div className="inline-grid grid-cols-2 gap-px" title={tooltip}>
+    <button
+      type="button"
+      className="inline-grid grid-cols-2 gap-px rounded cursor-default appearance-none bg-transparent border-0 p-0 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+      aria-label={tooltip.replace(/\n/g, "; ")}
+      title={tooltip}
+    >
       {rows.map((r) => (
         <div key={r.sym} className="contents">
           <div
@@ -247,7 +252,7 @@ function LimitHeatmap({
           />
         </div>
       ))}
-    </div>
+    </button>
   );
 }
 
@@ -290,12 +295,7 @@ function StrategyBadge({ label }: { label: string }) {
 function poolStrategies(pool: Pool, isOls: boolean): string[] {
   const strategies: string[] = [];
   if (isOls) strategies.push("Open");
-  if (
-    pool.rebalancerAddress &&
-    pool.rebalancerAddress !== "" &&
-    pool.rebalanceLivenessStatus === "ACTIVE" &&
-    !isOls
-  ) {
+  if (pool.rebalancerAddress && pool.rebalancerAddress !== "" && !isOls) {
     strategies.push("Reserve");
   }
   return strategies;
