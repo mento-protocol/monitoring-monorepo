@@ -2071,9 +2071,11 @@ export function OlsStatusPanel({
     lastRebalance > 0 && elapsed !== null && elapsed < cooldown;
   const cooldownPct =
     cooldownActive && cooldown > 0
-      ? Math.min((elapsed! / cooldown) * 100, 100)
+      ? Math.max(0, Math.min((elapsed! / cooldown) * 100, 100))
       : 0;
-  const cooldownRemaining = cooldownActive ? cooldown - elapsed! : 0;
+  const cooldownRemaining = cooldownActive
+    ? Math.max(0, cooldown - elapsed!)
+    : 0;
   const cooldownH = Math.floor(cooldownRemaining / 3600);
   const cooldownM = Math.floor((cooldownRemaining % 3600) / 60);
 
@@ -2332,7 +2334,7 @@ function OlsLiquidityEvents({
           error={null}
         />
       )}
-      {!isSearching && (
+      {!error && !isSearching && (
         <Pagination
           page={page}
           pageSize={limit}
@@ -2340,24 +2342,24 @@ function OlsLiquidityEvents({
           onPageChange={setRawPage}
         />
       )}
-      {countCapped && !isSearching && (
+      {!error && countCapped && !isSearching && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Showing first {ENVIO_MAX_ROWS.toLocaleString()} OLS events — older
           entries may exist beyond this page range.
         </p>
       )}
-      {isSearching && total > SEARCH_MAX_LIMIT && (
+      {!error && isSearching && total > SEARCH_MAX_LIMIT && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Search is limited to the most recent{" "}
           {SEARCH_MAX_LIMIT.toLocaleString()} OLS events.
         </p>
       )}
-      {countError && !isSearching && (
+      {!error && countError && !isSearching && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Could not load total count — pagination may be incomplete.
         </p>
       )}
-      {countError && isSearching && (
+      {!error && countError && isSearching && (
         <p className="px-1 pt-1 text-xs text-amber-400">
           Could not load total count — search covers the most recent{" "}
           {SEARCH_BOOTSTRAP_LIMIT.toLocaleString()} entries only.
