@@ -1220,6 +1220,8 @@ export function RebalancesTab({
                     {duringBreach && (
                       <span
                         className="ml-1 text-red-400"
+                        role="img"
+                        aria-label="Occurred during deviation breach"
                         title="Occurred during deviation breach"
                       >
                         !
