@@ -1,22 +1,29 @@
-// Route-level navigation skeletons. Not for in-page loading states — use
-// `<Skeleton rows>` from components/feedback.tsx when SWR is mid-fetch after
-// the page has mounted.
-
 const SHIMMER = "animate-pulse rounded bg-slate-800/50";
+
+type SkeletonAriaProps = {
+  // When true, strips role/aria-live from this component so a parent
+  // (e.g. PageShellSkeleton) can provide a single live-region wrapper
+  // instead of each child announcing independently.
+  presentational?: boolean;
+};
+
+function liveRegion(
+  label: string,
+  presentational: boolean | undefined,
+): Record<string, string> {
+  if (presentational) return {};
+  return { role: "status", "aria-live": "polite", "aria-label": label };
+}
 
 export function TableSkeleton({
   rows = 8,
   cols = 5,
-}: {
-  rows?: number;
-  cols?: number;
-}) {
+  presentational,
+}: { rows?: number; cols?: number } & SkeletonAriaProps) {
   return (
     <div
       className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900/30"
-      role="status"
-      aria-live="polite"
-      aria-label="Loading table"
+      {...liveRegion("Loading table", presentational)}
     >
       <div className="flex gap-4 border-b border-slate-800 bg-slate-900/50 px-4 py-3">
         {Array.from({ length: cols }, (_, i) => (
@@ -32,18 +39,19 @@ export function TableSkeleton({
           </div>
         ))}
       </div>
-      <span className="sr-only">Loading…</span>
+      {!presentational && <span className="sr-only">Loading…</span>}
     </div>
   );
 }
 
-export function TileGridSkeleton({ count = 4 }: { count?: number }) {
+export function TileGridSkeleton({
+  count = 4,
+  presentational,
+}: { count?: number } & SkeletonAriaProps) {
   return (
     <div
       className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"
-      role="status"
-      aria-live="polite"
-      aria-label="Loading metrics"
+      {...liveRegion("Loading metrics", presentational)}
     >
       {Array.from({ length: count }, (_, i) => (
         <div
@@ -55,31 +63,38 @@ export function TileGridSkeleton({ count = 4 }: { count?: number }) {
           <div className={`mt-2 h-3 w-1/3 ${SHIMMER}`} />
         </div>
       ))}
-      <span className="sr-only">Loading…</span>
+      {!presentational && <span className="sr-only">Loading…</span>}
     </div>
   );
 }
 
-export function ChartSkeleton({ aspect = "16 / 9" }: { aspect?: string }) {
+export function ChartSkeleton({
+  aspect = "16 / 9",
+  presentational,
+}: { aspect?: string } & SkeletonAriaProps) {
   return (
     <div
       className={`w-full rounded-lg border border-slate-800 bg-slate-900/30 ${SHIMMER}`}
       style={{ aspectRatio: aspect }}
-      role="status"
-      aria-live="polite"
-      aria-label="Loading chart"
+      {...liveRegion("Loading chart", presentational)}
     >
-      <span className="sr-only">Loading…</span>
+      {!presentational && <span className="sr-only">Loading…</span>}
     </div>
   );
 }
 
 export function PageShellSkeleton() {
   return (
-    <div className="space-y-6">
+    <div
+      className="space-y-6"
+      role="status"
+      aria-live="polite"
+      aria-label="Loading"
+    >
       <div className={`h-6 w-48 ${SHIMMER}`} aria-hidden />
-      <TileGridSkeleton />
-      <TableSkeleton />
+      <TileGridSkeleton presentational />
+      <TableSkeleton presentational />
+      <span className="sr-only">Loading…</span>
     </div>
   );
 }

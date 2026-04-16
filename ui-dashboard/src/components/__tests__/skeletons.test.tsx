@@ -132,9 +132,19 @@ describe("ChartSkeleton", () => {
 });
 
 describe("PageShellSkeleton", () => {
-  it("composes a header band, a tile grid, and a table skeleton", () => {
+  it("wraps children in a single live region", () => {
     render(<PageShellSkeleton />);
-    expect(getTileGridSkeleton()).toBeTruthy();
-    expect(getTableSkeleton()).toBeTruthy();
+    const regions = container.querySelectorAll('[aria-live="polite"]');
+    expect(regions).toHaveLength(1);
+    expect(regions[0].getAttribute("aria-label")).toBe("Loading");
+  });
+
+  it("composes a tile grid and a table skeleton (both presentational)", () => {
+    render(<PageShellSkeleton />);
+    // Children are presentational (no role="status") so we find them by structure.
+    const grid = container.querySelector(".grid");
+    expect(grid).not.toBeNull();
+    const table = container.querySelector(".overflow-hidden.rounded-lg.border");
+    expect(table).not.toBeNull();
   });
 });

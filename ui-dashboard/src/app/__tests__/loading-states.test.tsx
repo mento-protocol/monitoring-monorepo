@@ -39,21 +39,10 @@ function countLiveRegions(): number {
 }
 
 describe("route-level loading UIs", () => {
-  it("RootLoading renders exactly one polite live region", () => {
+  it("RootLoading renders exactly one polite live region (PageShellSkeleton wrapper)", () => {
     render(<RootLoading />);
-    // PageShellSkeleton composes TileGridSkeleton + TableSkeleton (two live
-    // regions by design — they are sibling sections announcing different
-    // loading states, not nested). One level deep, no nesting.
-    const regions = Array.from(
-      container.querySelectorAll<HTMLElement>('[aria-live="polite"]'),
-    );
-    expect(regions.length).toBeGreaterThan(0);
-    // No region should be a descendant of another region.
-    regions.forEach((a) =>
-      regions.forEach((b) => {
-        if (a !== b) expect(a.contains(b)).toBe(false);
-      }),
-    );
+    const regions = container.querySelectorAll('[aria-live="polite"]');
+    expect(regions).toHaveLength(1);
   });
 
   it("PoolDetailLoading renders exactly one polite live region (on TableSkeleton)", () => {
