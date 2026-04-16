@@ -5,6 +5,7 @@ import { useAddressLabels } from "@/components/address-labels-provider";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 import { TagInput } from "@/components/tag-input";
 import { SUGGESTED_TAGS, getUsedTags } from "@/lib/tag-suggestions";
+import { isValidAddress } from "@/lib/format";
 import {
   NETWORK_IDS,
   NETWORKS,
@@ -58,7 +59,7 @@ export function validateEntryForm(opts: {
   tags?: string[];
   isContractRow: boolean;
 }): string | null {
-  if (opts.isNewAddress && !/^0x[0-9a-fA-F]{40}$/.test(opts.address.trim())) {
+  if (opts.isNewAddress && !isValidAddress(opts.address.trim())) {
     return "Enter a valid 0x address.";
   }
   const hasTags = opts.tags && opts.tags.length > 0;

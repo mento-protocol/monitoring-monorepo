@@ -4,6 +4,7 @@ import {
   type RebalanceCheckResult,
 } from "@/lib/rebalance-check";
 import { NETWORKS, isConfiguredNetworkId } from "@/lib/networks";
+import { isValidAddress } from "@/lib/format";
 
 const CACHE_TTL_MS = 30_000;
 const RATE_LIMIT_RETRY_DELAY_MS = 500;
@@ -40,8 +41,6 @@ function setCacheEntry(key: string, entry: CacheEntry): void {
   cache.set(key, entry);
 }
 
-const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
-
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const network = req.nextUrl.searchParams.get("network");
   const pool = req.nextUrl.searchParams.get("pool");
@@ -50,13 +49,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!network || !isConfiguredNetworkId(network)) {
     return NextResponse.json({ error: "Invalid network" }, { status: 400 });
   }
-  if (!pool || !ADDRESS_RE.test(pool)) {
+  if (!pool || !isValidAddress(pool)) {
     return NextResponse.json(
       { error: "Invalid pool address" },
       { status: 400 },
     );
   }
-  if (!strategy || !ADDRESS_RE.test(strategy)) {
+  if (!strategy || !isValidAddress(strategy)) {
     return NextResponse.json(
       { error: "Invalid strategy address" },
       { status: 400 },

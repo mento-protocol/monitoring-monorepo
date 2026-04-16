@@ -23,6 +23,7 @@ import { combinedTooltip } from "@/lib/pool-table-utils";
 import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 import { buildPoolDetailHref } from "@/lib/routing";
+import type { SortDir } from "@/lib/table-sort";
 
 /** A pool entry enriched with its originating network and oracle rates. */
 export type GlobalPoolEntry = {
@@ -40,8 +41,6 @@ export type GlobalSortKey =
   | "volume24h"
   | "volume7d"
   | "totalVolume";
-
-export type SortDir = "asc" | "desc";
 
 // Higher rank = more severe. "desc" puts highest rank first → CRITICAL first.
 const HEALTH_ORDER: Record<string, number> = {

@@ -27,7 +27,7 @@ export const RANGE_DAYS: Record<RangeKey, number | null> = {
   all: null,
 };
 
-const RANGES: ReadonlyArray<{
+export const RANGES: ReadonlyArray<{
   key: RangeKey;
   label: string;
 }> = [
