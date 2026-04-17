@@ -2,7 +2,7 @@
 
 import type { Pool, TradingLimit } from "@/lib/types";
 import { LimitBadge } from "@/components/badges";
-import { computeLimitStatus } from "@/lib/health";
+import { computeLimitStatus, pressureColorClass } from "@/lib/health";
 import { tokenSymbol } from "@/lib/tokens";
 import { formatWei, TRADING_LIMITS_INTERNAL_DECIMALS } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
@@ -27,12 +27,7 @@ function PressureBar({
   const ratio = Number(pressure);
   const pct = Math.min(ratio * 100, 100);
   const displayPct = (ratio * 100).toFixed(1);
-  const color =
-    ratio >= 1.0
-      ? "bg-red-500"
-      : ratio >= 0.8
-        ? "bg-amber-500"
-        : "bg-emerald-500";
+  const color = pressureColorClass(ratio);
 
   const netflowHuman = formatWei(netflow.replace(/^-/, ""), decimals, 2);
   const limitHuman = formatWei(limit, decimals, 2);

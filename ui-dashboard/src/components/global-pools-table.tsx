@@ -17,6 +17,7 @@ import { ChainIcon } from "@/components/chain-icon";
 import {
   computeHealthStatus,
   computeLimitStatus,
+  pressureColorClass,
   worstStatus,
 } from "@/lib/health";
 import { combinedTooltip } from "@/lib/pool-table-utils";
@@ -210,12 +211,6 @@ function hasAnyVirtualPools(entries: GlobalPoolEntry[]): boolean {
 
 // Compact 2×2 limit heatmap
 
-function pressureColor(p: number): string {
-  if (p >= 1.0) return "bg-red-500";
-  if (p >= 0.8) return "bg-amber-500";
-  return "bg-emerald-500";
-}
-
 function LimitHeatmap({
   limits,
   network,
@@ -262,11 +257,11 @@ function LimitHeatmap({
       {rows.map((r) => (
         <span key={r.sym} className="contents">
           <span
-            className={`block w-2 h-2 rounded-sm ${pressureColor(r.p0)}`}
+            className={`block w-2 h-2 rounded-sm ${pressureColorClass(r.p0)}`}
             aria-hidden="true"
           />
           <span
-            className={`block w-2 h-2 rounded-sm ${pressureColor(r.p1)}`}
+            className={`block w-2 h-2 rounded-sm ${pressureColorClass(r.p1)}`}
             aria-hidden="true"
           />
         </span>

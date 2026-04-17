@@ -160,6 +160,13 @@ export function computeLimitStatus(pool: {
   return "OK";
 }
 
+/** Tailwind bg-color class for a trading-limit pressure ratio (1.0 = limit breached). */
+export function pressureColorClass(pressure: number): string {
+  if (pressure >= 1.0) return "bg-red-500";
+  if (pressure >= 0.8) return "bg-amber-500";
+  return "bg-emerald-500";
+}
+
 /**
  * Severity rank used to pick the worst status across oracle health and limit health.
  * N/A is least severe; CRITICAL is most severe.
