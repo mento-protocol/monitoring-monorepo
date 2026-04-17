@@ -105,7 +105,7 @@ The `metrics-bridge` package polls Hasura for FPMM pool KPIs and exports them as
   - GBPm TroveManager: `0xb38aEf2bF4e34B997330D626EBCd7629De3885C9`
   - StabilityPool: `0x06346c0fAB682dBde9f245D2D84677592E8aaa15`
 - [ ] **ChainStat / GlobalStat aggregate entities** — protocol-level metrics
-- [ ] **Monad indexing** — blocked on contract deployment to Monad
+- [ ] **Monad indexing** — config ready, contracts deployed
 
 ### Dashboard Backlog
 
@@ -169,7 +169,7 @@ The `metrics-bridge` package polls Hasura for FPMM pool KPIs and exports them as
 | Indexer schema    | `indexer-envio/schema.graphql`                 |
 | Event handlers    | `indexer-envio/src/EventHandlers.ts`           |
 | Multichain config | `indexer-envio/config.multichain.mainnet.yaml` |
-| Mainnet config    | `indexer-envio/config.celo.mainnet.yaml`       |
+| Mainnet config    | `indexer-envio/config.multichain.mainnet.yaml` |
 | Dashboard app     | `ui-dashboard/src/app/`                        |
 | Network defs      | `ui-dashboard/src/lib/networks.ts`             |
 | GraphQL queries   | `ui-dashboard/src/lib/queries.ts`              |

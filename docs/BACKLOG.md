@@ -29,7 +29,7 @@ The `metrics-bridge` package (Cloud Run) exports FPMM pool KPIs as Prometheus ga
   - StabilityPool events: `UserDepositChanged`, `PoolBalanceUpdated`
   - Contracts: TroveManager `0xb38aEf2bF4e34B997330D626EBCd7629De3885C9`, StabilityPool `0x06346c0fAB682dBde9f245D2D84677592E8aaa15`
   - New entities: `Trove`, `StabilityPoolSnapshot`
-- [ ] **Monad indexing** — blocked on contract deployment to Monad
+- [ ] **Monad indexing** — config ready, contracts deployed
 - [ ] **ChainStat / GlobalStat** — protocol-level aggregate entity (total pools, total swaps, global TVL)
 
 ## Backlog — Dashboard

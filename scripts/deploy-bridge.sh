@@ -48,7 +48,7 @@ if [ "$SKIP_CONFIRM" = false ]; then
   fi
 fi
 
-# Step 1: Ensure GCP infra exists (project, APIs, AR repo).
+# Step 1: Ensure GCP infra + IAM exists (project, APIs, AR repo, dev permissions).
 # On subsequent runs this is a no-op.
 echo "Ensuring GCP infrastructure..."
 terraform -chdir=terraform apply $TF_APPROVE \
@@ -56,7 +56,10 @@ terraform -chdir=terraform apply $TF_APPROVE \
   -target=google_project_service.run \
   -target=google_project_service.artifactregistry \
   -target=google_project_service.cloudbuild \
-  -target=google_artifact_registry_repository.metrics_bridge
+  -target=google_artifact_registry_repository.metrics_bridge \
+  -target=google_project_iam_member.dev_run_admin \
+  -target=google_project_iam_member.dev_ar_writer \
+  -target=google_project_iam_member.dev_cloudbuild_editor
 
 # Step 2: Build and push the image.
 echo ""

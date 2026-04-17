@@ -85,11 +85,11 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 
 ## 3. Networks
 
-| Network       | Chain ID | Status                        | Start Block |
-| ------------- | -------- | ----------------------------- | ----------- |
-| Celo Mainnet  | 42220    | ✅ Live                       | 60664513    |
-| Celo Sepolia  | 44787    | ✅ Live                       | —           |
-| Monad Mainnet | —        | ⏳ Blocked on contract deploy | —           |
+| Network       | Chain ID | Status  | Start Block |
+| ------------- | -------- | ------- | ----------- |
+| Celo Mainnet  | 42220    | ✅ Live | 60664513    |
+| Celo Sepolia  | 11142220 | ✅ Live | —           |
+| Monad Mainnet | 143      | ✅ Live | —           |
 
 ---
 
@@ -195,145 +195,11 @@ The `healthStatus` field on Pool encodes the current status: `"OK"` | `"WARN"` |
 
 ## 6. Entity Schema
 
-Full schema: [`indexer-envio/schema.graphql`](./indexer-envio/schema.graphql)
+Source of truth: [`indexer-envio/schema.graphql`](./indexer-envio/schema.graphql)
 
-### Pool
+Key entities: `Pool` (mutable per-pool state), `PoolSnapshot` / `PoolDailySnapshot` (hourly/daily aggregates), `OracleSnapshot` (per-event health timeline), `TradingLimit` (per-pool per-token limit state), `RebalanceEvent` (per-rebalance effectiveness).
 
-Mutable per-pool state. Updated on every relevant event.
-
-```graphql
-type Pool {
-  id: ID! # pool address (lowercase)
-  token0: String # token0 address
-  token1: String # token1 address
-  source: String! # "fpmm" | "virtual"
-  reserves0: BigInt! # current reserve0
-  reserves1: BigInt! # current reserve1
-  swapCount: Int! # cumulative swap count
-  notionalVolume0: BigInt! # cumulative notional volume in token0
-  notionalVolume1: BigInt! # cumulative notional volume in token1
-  rebalanceCount: Int! # cumulative rebalance count
-  # Oracle state (FPMM only; defaults to zero/false for VirtualPools)
-  oracleOk: Boolean!
-  oraclePrice: BigInt!
-  oraclePriceDenom: BigInt!
-  oracleTimestamp: BigInt!
-  oracleExpiry: BigInt!
-  oracleNumReporters: Int!
-  referenceRateFeedID: String!
-  priceDifference: BigInt!
-  rebalanceThreshold: Int!
-  lastRebalancedAt: BigInt!
-  healthStatus: String! # "OK" | "WARN" | "CRITICAL" | "N/A"
-  # Trading limits (FPMM only)
-  limitStatus: String! # "OK" | "WARN" | "CRITICAL" | "N/A"
-  limitPressure0: String!
-  limitPressure1: String!
-
-  # Rebalancer
-  rebalancerAddress: String!
-  rebalanceLivenessStatus: String! # "ACTIVE" | "N/A"
-  createdAtBlock: BigInt!
-  createdAtTimestamp: BigInt!
-  updatedAtBlock: BigInt!
-  updatedAtTimestamp: BigInt!
-}
-```
-
-### PoolSnapshot
-
-Hourly pre-aggregated activity per pool. Industry standard (Uniswap/Balancer pattern).
-
-```graphql
-type PoolSnapshot {
-  id: ID! # "{poolId}-{hourTimestamp}"
-  poolId: String! @index
-  timestamp: BigInt! @index # unix timestamp truncated to hour
-  # Point-in-time state at end of this hour
-  reserves0: BigInt!
-  reserves1: BigInt!
-
-  # Per-hour activity
-  swapCount: Int!
-  swapVolume0: BigInt!
-  swapVolume1: BigInt!
-  rebalanceCount: Int!
-  mintCount: Int!
-  burnCount: Int!
-
-  # Running cumulative totals
-  cumulativeSwapCount: Int!
-  cumulativeVolume0: BigInt!
-  cumulativeVolume1: BigInt!
-
-  blockNumber: BigInt!
-}
-```
-
-Gap-filling (missing hours with no activity) is handled by the dashboard layer via forward-fill — not block handlers (Envio `onBlock` lacks block timestamps).
-
-### OracleSnapshot
-
-Per-oracle-event health snapshot. Powers the dual y-axis oracle chart.
-
-```graphql
-type OracleSnapshot {
-  id: ID!
-  poolId: String! @index
-  timestamp: BigInt! @index
-  oraclePrice: BigInt!
-  oraclePriceDenom: BigInt!
-  oracleOk: Boolean!
-  numReporters: Int!
-  priceDifference: BigInt!
-  rebalanceThreshold: Int!
-  source: String!
-  blockNumber: BigInt!
-}
-```
-
-### TradingLimit
-
-Per-pool per-token trading limit state.
-
-```graphql
-type TradingLimit {
-  id: ID! # "{poolId}-{tokenAddress}"
-  poolId: String!
-  token: String!
-  limit0: BigInt!
-  limit1: BigInt!
-  decimals: Int!
-  netflow0: BigInt!
-  netflow1: BigInt!
-  lastUpdated0: BigInt!
-  lastUpdated1: BigInt!
-  limitPressure0: String!
-  limitPressure1: String!
-  limitStatus: String! # "OK" | "WARN" | "CRITICAL"
-  updatedAtBlock: BigInt!
-  updatedAtTimestamp: BigInt!
-}
-```
-
-### RebalanceEvent
-
-Per-rebalance event with effectiveness measurement.
-
-```graphql
-type RebalanceEvent {
-  id: ID!
-  poolId: String! @index
-  sender: String!
-  priceDifferenceBefore: BigInt!
-  priceDifferenceAfter: BigInt!
-  improvement: BigInt! # priceDifferenceBefore - priceDifferenceAfter
-  effectivenessRatio: String! # improvement / priceDifferenceBefore, e.g. "0.5000"
-  txHash: String!
-  blockNumber: BigInt!
-  blockTimestamp: BigInt! @index
-}
-```
+Pool IDs are namespaced as `{chainId}-{poolAddress}` for multichain support.
 
 ---
 
@@ -449,7 +315,7 @@ Aegis is live for Mento v2 alerts. It polls v2 contract state via RPC every 10-6
 
 ### Next — v3 FPMM Alerts
 
-Extend alerting to cover v3 FPMM pool KPIs (see §5 for thresholds). Strategy TBD: extend Aegis config, export metrics from Envio indexer, or hybrid.
+Extend alerting to cover v3 FPMM pool KPIs (see §5 for thresholds). The `metrics-bridge` package (Cloud Run) exports pool KPIs as Prometheus gauges. Remaining work: Grafana alert rules in Terraform (Slack notifications).
 
 ## 11. Future Plans
 
