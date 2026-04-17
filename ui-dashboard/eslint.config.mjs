@@ -43,6 +43,7 @@ export default tseslint.config(
       "**/.next/**",
       "coverage/**",
       "**/.trunk/**",
+      "**/*.mjs",
     ],
   },
 );
