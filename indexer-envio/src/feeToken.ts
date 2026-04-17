@@ -52,8 +52,12 @@ export function _clearFeeTokenMetaCache(): void {
 
 /**
  * Static fallback for known Mento fee tokens when RPC is unavailable.
- * Built from @mento-protocol/contracts v0.4.0+ which includes decimals.
+ * Relies on `decimals` fields in the contracts package (v0.4.0+).
  * Automatically covers all tokens across all indexed chains.
+ *
+ * Wormhole NTT hub/spoke split: Monad deployments are named "*Spoke" but the
+ * on-chain ERC20 symbol() returns the canonical hub name. Keep name-stripping
+ * in sync with ui-dashboard/src/lib/networks.ts buildNetworkMaps.
  */
 import type { ContractsJson } from "./contractAddresses";
 
@@ -73,8 +77,9 @@ function buildKnownTokenMeta(): Map<
       // Skip internal deployment names (e.g. StableTokenSpoke, MockUSDm).
       // Only real ERC20 symbols like "USDm", "USDC", "EURm" should be used.
       if (name.startsWith("StableToken") || name.startsWith("Mock")) continue;
+      const symbol = name.endsWith("Spoke") ? name.slice(0, -5) : name;
       const key = `${chainId}:${info.address.toLowerCase()}`;
-      meta.set(key, { symbol: name, decimals: info.decimals });
+      meta.set(key, { symbol, decimals: info.decimals });
     }
   }
   return meta;

@@ -141,20 +141,26 @@ describe("contractAddresses — deterministic namespace address resolution", () 
     assert.equal(addr, undefined, "Unknown chain should return undefined");
   });
 
-  it("resolves USDm for Monad mainnet (143) — now an indexed chain", () => {
-    // Chain 143 is in CONTRACT_NAMESPACE_BY_CHAIN as "mainnet".
-    // USDm is present in @mento-protocol/contracts for chain 143/mainnet.
-    const addr = getContractAddress(143, "USDm");
-    assert.ok(addr, "USDm should resolve for chain 143");
+  it("resolves USDmSpoke for Monad mainnet (143) — Wormhole NTT spoke", () => {
+    // Wormhole NTT hub/spoke split (v0.6.0): Monad chains expose the Monad
+    // stablecoin under the "*Spoke" name, Celo chains under the hub name.
+    const addr = getContractAddress(143, "USDmSpoke");
+    assert.ok(addr, "USDmSpoke should resolve for chain 143");
     assert.match(addr!, /^0x[0-9a-fA-F]{40}$/);
+    // Hub name must NOT resolve on a spoke chain — consumers should get
+    // undefined loudly instead of silently matching the wrong ABI.
+    assert.equal(
+      getContractAddress(143, "USDm"),
+      undefined,
+      "hub-only name must be undefined on spoke chains",
+    );
   });
 
-  it("resolves USDm for Monad testnet (10143) — @mento-protocol/contracts v0.3.0", () => {
-    // v0.3.0 ships 10143 under namespace 'testnet-v2-rc5'.
-    const addr = getContractAddress(10143, "USDm");
-    assert.ok(addr, "USDm should resolve for chain 10143");
+  it("resolves USDmSpoke for Monad testnet (10143) — Wormhole NTT spoke", () => {
+    const addr = getContractAddress(10143, "USDmSpoke");
+    assert.ok(addr, "USDmSpoke should resolve for chain 10143");
     assert.match(addr!, /^0x[0-9a-fA-F]{40}$/);
-    // Known address from @mento-protocol/contracts v0.3.0
+    // Known address from @mento-protocol/contracts v0.6.0
     assert.equal(
       addr!.toLowerCase(),
       "0x5ecc03111ad2a78f981a108759bc73bae2ab31bc",

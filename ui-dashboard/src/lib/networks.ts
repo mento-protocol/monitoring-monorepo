@@ -55,6 +55,25 @@ type ContractsData = Record<
   Record<string, Record<string, ContractEntry>>
 >;
 
+// Wormhole NTT hub/spoke split: on Monad chains, token entries are published
+// under names like "USDmSpoke" / "EURmSpoke" / "GBPmSpoke". Strip the suffix
+// for token entries only — implementation-contract rows like
+// "StableTokenSpoke" stay raw so the address book keeps precise names.
+// Keep in sync with indexer-envio/src/feeToken.ts buildKnownTokenMeta.
+function canonicalTokenSymbol(name: string): string {
+  return name.endsWith("Spoke") ? name.slice(0, -5) : name;
+}
+
+// Implementation contracts that should never surface as pool-token symbols.
+// Applied to tokenSymbols only — addressLabels keeps every named entry so the
+// address book still renders `StableTokenV3v300`, `StableTokenSpoke`, etc. as
+// contract rows. Narrower than the indexer's equivalent filter in
+// indexer-envio/src/feeToken.ts:buildKnownTokenMeta: we do NOT exclude Mock*
+// because Sepolia/Monad-testnet MockERC20* deployments ARE real pool tokens.
+function isInternalTokenName(name: string): boolean {
+  return name.startsWith("StableToken");
+}
+
 function buildNetworkMaps(
   chainId: number,
   namespace: string | null,
@@ -65,11 +84,23 @@ function buildNetworkMaps(
   return {
     tokenSymbols: Object.fromEntries(
       entries
-        .filter(([, entry]) => entry.type === "token")
-        .map(([name, entry]) => [entry.address.toLowerCase(), name]),
+        .filter(
+          ([name, entry]) =>
+            entry.type === "token" && !isInternalTokenName(name),
+        )
+        .map(([name, entry]) => [
+          entry.address.toLowerCase(),
+          canonicalTokenSymbol(name),
+        ]),
     ),
     addressLabels: Object.fromEntries(
-      entries.map(([name, entry]) => [entry.address.toLowerCase(), name]),
+      entries.map(([name, entry]) => [
+        entry.address.toLowerCase(),
+        // Canonicalize only the user-facing ERC20 token names (USDmSpoke →
+        // USDm). Leave contract labels like "StableTokenSpoke" raw so
+        // operators can identify the exact deployment in the address book.
+        entry.type === "token" ? canonicalTokenSymbol(name) : name,
+      ]),
     ),
   };
 }
