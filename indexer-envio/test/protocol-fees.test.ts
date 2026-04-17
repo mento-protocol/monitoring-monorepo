@@ -391,4 +391,16 @@ describe("KNOWN_TOKEN_META static fallback", () => {
 
     assert.deepEqual(meta, { symbol: "USDm", decimals: 18 });
   });
+
+  // Wormhole NTT hub/spoke split: Monad ships USDm as "USDmSpoke" in the
+  // contracts package, but the on-chain symbol() returns "USDm". The static
+  // fallback must strip the suffix so the RPC-failure path agrees with RPC.
+  it("strips Spoke suffix for Monad addresses in the static fallback", async () => {
+    const monadUsdm = "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115";
+    _setMockFeeTokenMeta(143, monadUsdm, "FAIL");
+
+    const meta = await resolveFeeTokenMeta(143, monadUsdm);
+
+    assert.deepEqual(meta, { symbol: "USDm", decimals: 18 });
+  });
 });

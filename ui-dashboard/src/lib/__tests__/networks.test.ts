@@ -160,6 +160,15 @@ describe("NETWORKS — general map composition", () => {
     expect(mainnet.addressLabels).toBeDefined();
     expect(mainnet.local).toBe(false);
   });
+
+  it("celo-mainnet retains StableToken* contract rows in addressLabels (address book inventory)", () => {
+    // The StableToken-name filter is tokenSymbols-only; the address book
+    // must still render implementation contracts as labelled rows.
+    const mainnet = NETWORKS["celo-mainnet"];
+    const stableTokenV3v301 = "0x815795c30d0758a297b08cd4e0643620c974c318";
+    expect(mainnet.addressLabels[stableTokenV3v301]).toBe("StableTokenV3v301");
+    expect(mainnet.tokenSymbols[stableTokenV3v301]).toBeUndefined();
+  });
 });
 
 describe("NETWORKS — local development defaults", () => {
@@ -182,7 +191,15 @@ describe("NETWORKS — local development defaults", () => {
 
 describe("NETWORKS — Monad networks", () => {
   const USDM_MONAD_MAINNET = "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115";
+  const EURM_MONAD_MAINNET = "0x4d502d735b4c574b487ed641ae87ceae884731c7";
+  const GBPM_MONAD_MAINNET = "0x39bb4e0a204412bb98e821d25e7d955e69d40fd1";
   const USDM_MONAD_TESTNET = "0x5ecc03111ad2a78f981a108759bc73bae2ab31bc";
+  const EURM_MONAD_TESTNET = "0x666d0a83cdbf3ec62bdb624d9bfcd8f6345ba7d0";
+  const GBPM_MONAD_TESTNET = "0x04de554e875c9797dc4cebd834a9e99fa8fd5df9";
+  // Implementation proxy published as type=token on Monad mainnet — should
+  // be excluded from tokenSymbols so pool titles never use it.
+  const STABLE_TOKEN_SPOKE_GBP_MAINNET =
+    "0xddf082068caa5b941ed8c603adf0cecbdbb59f8e";
 
   it("does not mark monad-mainnet configured when multichain URL is not set", async () => {
     vi.stubEnv("NEXT_PUBLIC_HASURA_URL_MULTICHAIN", "");
@@ -212,24 +229,57 @@ describe("NETWORKS — Monad networks", () => {
     expect(networks.isConfiguredNetworkId("monad-mainnet")).toBe(true);
   });
 
-  it("monad-mainnet has tokenSymbols populated from contracts package", () => {
+  it("monad-mainnet token symbols use canonical hub names (USDm/EURm/GBPm, not *Spoke)", () => {
     const monad = NETWORKS["monad-mainnet"];
-    expect(Object.keys(monad.tokenSymbols).length).toBeGreaterThan(0);
-    expect(monad.tokenSymbols[USDM_MONAD_MAINNET]).toBeDefined();
+    expect(monad.tokenSymbols[USDM_MONAD_MAINNET]).toBe("USDm");
+    expect(monad.tokenSymbols[EURM_MONAD_MAINNET]).toBe("EURm");
+    expect(monad.tokenSymbols[GBPM_MONAD_MAINNET]).toBe("GBPm");
   });
 
-  it("monad-mainnet has addressLabels populated from contracts package", () => {
+  it("monad-mainnet address labels use canonical hub names", () => {
     const monad = NETWORKS["monad-mainnet"];
-    expect(Object.keys(monad.addressLabels).length).toBeGreaterThan(0);
+    expect(monad.addressLabels[USDM_MONAD_MAINNET]).toBe("USDm");
+    expect(monad.addressLabels[EURM_MONAD_MAINNET]).toBe("EURm");
+    expect(monad.addressLabels[GBPM_MONAD_MAINNET]).toBe("GBPm");
   });
 
-  it("monad-testnet has tokenSymbols populated — @mento-protocol/contracts v0.3.0", () => {
+  it("monad-mainnet never exposes trailing *Spoke (user-facing token pool titles, address book labels)", () => {
+    // Strict on the *Spoke suffix form users see in pool titles and address
+    // rows (e.g. USDmSpoke, EURmSpoke, GBPmSpoke). Names that legitimately
+    // *contain* "Spoke" for internal contracts (StableTokenSpokeGBP etc.)
+    // are acceptable in addressLabels — they identify Wormhole implementation
+    // proxies for operators, and are already filtered from tokenSymbols.
+    const monad = NETWORKS["monad-mainnet"];
+    const values = [
+      ...Object.values(monad.tokenSymbols),
+      ...Object.values(monad.addressLabels),
+    ];
+    expect(values.some((v) => v.endsWith("Spoke"))).toBe(false);
+    // tokenSymbols alone must not contain "Spoke" anywhere — pool titles are
+    // the narrow path the user explicitly flagged.
+    expect(
+      Object.values(monad.tokenSymbols).some((v) => v.includes("Spoke")),
+    ).toBe(false);
+  });
+
+  it("monad-mainnet excludes StableTokenSpoke* implementation proxies from tokenSymbols (but keeps them in addressLabels)", () => {
+    // The implementation proxy is type=token in v0.6.0 contracts.json but
+    // must NOT render as a pool token. It MUST still appear in addressLabels
+    // so the address book contract inventory stays complete.
+    const monad = NETWORKS["monad-mainnet"];
+    expect(monad.tokenSymbols[STABLE_TOKEN_SPOKE_GBP_MAINNET]).toBeUndefined();
+    expect(monad.addressLabels[STABLE_TOKEN_SPOKE_GBP_MAINNET]).toBeDefined();
+  });
+
+  it("monad-testnet token symbols use canonical hub names", () => {
     const testnet = NETWORKS["monad-testnet"];
-    expect(Object.keys(testnet.tokenSymbols).length).toBeGreaterThan(0);
-    // USDm on Monad testnet (testnet-v2-rc5 namespace)
-    expect(testnet.tokenSymbols[USDM_MONAD_TESTNET]).toBeDefined();
+    expect(testnet.tokenSymbols[USDM_MONAD_TESTNET]).toBe("USDm");
+    expect(testnet.tokenSymbols[EURM_MONAD_TESTNET]).toBe("EURm");
+    expect(testnet.tokenSymbols[GBPM_MONAD_TESTNET]).toBe("GBPm");
     expect(testnet.chainId).toBe(10143);
     expect(testnet.local).toBe(false);
+    const values = Object.values(testnet.tokenSymbols);
+    expect(values.some((v) => v.includes("Spoke"))).toBe(false);
   });
 
   it("monad network visibility is gated on hasuraUrl being set", () => {
