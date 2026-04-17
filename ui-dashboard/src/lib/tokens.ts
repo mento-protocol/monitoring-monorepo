@@ -155,6 +155,26 @@ export function chainlinkFeed(
 }
 
 /**
+ * True when the pool can be valued in USD with the given rate map: either one
+ * leg is USDm (always convertible via `oraclePrice`), or the rate map can
+ * price one of the non-USDm legs. Callers distinguish "truly $0" from
+ * "rates not ready / unsupported pair" without relying on `poolTvlUSD`'s
+ * collapsed 0-return.
+ */
+export function canPricePool(
+  pool: Pick<Pool, "token0" | "token1">,
+  network: Network,
+  rates: OracleRateMap,
+): boolean {
+  const sym0 = tokenSymbol(network, pool.token0 ?? null);
+  const sym1 = tokenSymbol(network, pool.token1 ?? null);
+  if (USDM_SYMBOLS.has(sym0) || USDM_SYMBOLS.has(sym1)) return true;
+  return (
+    tokenToUSD(sym0, 1, rates) !== null || tokenToUSD(sym1, 1, rates) !== null
+  );
+}
+
+/**
  * Computes the TVL of a pool in USD using the oracle price and token reserves.
  * Returns 0 if oracle price or reserves are missing.
  */

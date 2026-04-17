@@ -8,7 +8,6 @@ import {
   type ReactNode,
 } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { useSession } from "next-auth/react";
 import { useNetwork } from "@/components/network-provider";
 import { truncateAddress } from "@/lib/format";
 import { NETWORKS, networkIdForChainId, type Network } from "@/lib/networks";
@@ -82,13 +81,12 @@ function networkForChainId(chainId: number): Network | null {
 export function AddressLabelsProvider({ children }: { children: ReactNode }) {
   const { network } = useNetwork();
   const { mutate } = useSWRConfig();
-  const { status } = useSession();
 
-  // Gate the fetch behind an authenticated session. Anonymous users don't get
-  // custom labels, and skipping the call avoids a pointless round trip (plus
-  // a loud 500 in local dev when Upstash isn't configured).
+  // Fetch for all sessions — the API returns `isPublic: true` labels for
+  // anonymous requests and full labels for authenticated ones. Gating on the
+  // client would hide public labels from logged-out users.
   const { data, error, isLoading } = useSWR<EntriesByChain>(
-    status === "authenticated" ? SWR_KEY : null,
+    SWR_KEY,
     fetchAllLabels,
     {
       refreshInterval: 30_000,

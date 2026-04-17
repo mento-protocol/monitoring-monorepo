@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { formatUSD } from "@/lib/format";
 import { getSnapshotVolumeInUsd } from "@/lib/volume";
 import type { Network } from "@/lib/networks";
-import type { OracleRateMap } from "@/lib/tokens";
+import { canPricePool, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import {
@@ -32,17 +32,29 @@ export function PoolVolumeOverTimeChart({
 }: PoolVolumeOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("all");
 
+  const priceable = canPricePool(pool, network, rates ?? new Map());
+
+  // Drop snapshots that can't be priced instead of coercing null → 0. Keeping
+  // them as zeros would plot a fake "no-volume" bar and poison the range sum,
+  // which the headline would then render as a real-looking "$0.00".
   const fullSeries = useMemo<TimeSeriesPoint[]>(() => {
-    if (snapshots.length === 0) return [];
+    if (!priceable || snapshots.length === 0) return [];
     const sorted = [...snapshots].sort(
       (a, b) => Number(a.timestamp) - Number(b.timestamp),
     );
-    return sorted.map((snap) => ({
-      timestamp: Number(snap.timestamp),
-      value:
-        getSnapshotVolumeInUsd(snap, pool, network, rates ?? new Map()) ?? 0,
-    }));
-  }, [pool, network, snapshots, rates]);
+    const points: TimeSeriesPoint[] = [];
+    for (const snap of sorted) {
+      const value = getSnapshotVolumeInUsd(
+        snap,
+        pool,
+        network,
+        rates ?? new Map(),
+      );
+      if (value === null) continue;
+      points.push({ timestamp: Number(snap.timestamp), value });
+    }
+    return points;
+  }, [priceable, pool, network, snapshots, rates]);
 
   const visibleSeries = useMemo(
     () => filterSeriesByRange(fullSeries, range),
@@ -54,13 +66,9 @@ export function PoolVolumeOverTimeChart({
     [visibleSeries],
   );
 
-  // Show a placeholder headline when there's no data to aggregate — either the
-  // pool type doesn't expose snapshots (non-FPMM) or the range is empty.
-  // Without this, formatUSD(0) renders as a real-looking "$0.00", masking the
-  // fact that volume data is unavailable rather than actually zero.
   const headline = isLoading
     ? "…"
-    : visibleSeries.length === 0
+    : !priceable || visibleSeries.length === 0
       ? "—"
       : formatUSD(rangeTotal);
 
@@ -77,7 +85,11 @@ export function PoolVolumeOverTimeChart({
       hasError={hasError}
       hasSnapshotError={false}
       emptyMessage={
-        hasError ? "Unable to load volume history" : "Not enough history yet"
+        hasError
+          ? "Unable to load volume history"
+          : !priceable
+            ? "Volume unavailable for this pair"
+            : "Not enough history yet"
       }
     />
   );

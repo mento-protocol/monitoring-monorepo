@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { formatUSD } from "@/lib/format";
-import { poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
+import { canPricePool, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Network } from "@/lib/networks";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
@@ -79,33 +79,37 @@ export function PoolTvlOverTimeChart({
 
   const currentTvl = poolTvlUSD(pool, network, rates);
   const change7d = useMemo(() => tvlWoWChangePct(fullSeries), [fullSeries]);
+  const priceable = canPricePool(pool, network, rates ?? new Map());
 
-  // Show a placeholder headline only when there's truly no TVL signal — no
-  // live reserves AND no snapshot history. Otherwise surface the live
-  // currentTvl (a brand-new pool with non-empty reserves but no snapshots
-  // still deserves its current value as the headline). Without this gate,
-  // a non-FPMM pool without USDm / rates renders formatUSD(0) = "$0.00",
-  // masking the fact that TVL is unavailable rather than actually zero.
+  // Distinguish "unpriceable" (no USDm leg and no rate for either leg) from
+  // real zero TVL. Without this, the chart silently renders $0.00 whenever
+  // rates haven't arrived yet or the pair is unsupported.
   const headline = isLoading
     ? "…"
-    : currentTvl === 0 && fullSeries.length === 0
+    : !priceable
       ? "—"
-      : formatUSD(currentTvl);
+      : currentTvl === 0 && fullSeries.length === 0
+        ? "—"
+        : formatUSD(currentTvl);
 
   return (
     <TimeSeriesChartCard
       title="Pool TVL"
       rangeAriaLabel="Pool TVL chart time range"
-      series={visibleSeries}
+      series={priceable ? visibleSeries : []}
       range={range}
       onRangeChange={setRange}
       headline={headline}
-      change={change7d}
+      change={priceable ? change7d : null}
       isLoading={isLoading}
       hasError={hasError}
       hasSnapshotError={false}
       emptyMessage={
-        hasError ? "Unable to load TVL history" : "Not enough history yet"
+        hasError
+          ? "Unable to load TVL history"
+          : !priceable
+            ? "TVL unavailable for this pair"
+            : "Not enough history yet"
       }
     />
   );

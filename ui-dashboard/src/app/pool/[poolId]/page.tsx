@@ -347,6 +347,7 @@ function PoolDetail() {
     () => buildOracleRateMap(allPools, network),
     [allPools, network],
   );
+  const ratesLoading = allPoolsData === undefined;
 
   // Return null while redirect is pending to avoid a transient error flash
   // and unnecessary error announcement for assistive tech. MUST sit below
@@ -398,7 +399,7 @@ function PoolDetail() {
               pool={pool}
               network={network}
               snapshots={dailySnapshots}
-              isLoading={fpmmPool && dailySnapshotLoading}
+              isLoading={(fpmmPool && dailySnapshotLoading) || ratesLoading}
               hasError={dailySnapshotError !== undefined}
               rates={rates}
             />
@@ -406,7 +407,7 @@ function PoolDetail() {
               pool={pool}
               network={network}
               snapshots={dailySnapshots}
-              isLoading={fpmmPool && dailySnapshotLoading}
+              isLoading={(fpmmPool && dailySnapshotLoading) || ratesLoading}
               hasError={dailySnapshotError !== undefined}
               rates={rates}
             />
