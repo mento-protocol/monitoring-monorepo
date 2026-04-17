@@ -8,6 +8,7 @@ on:
       - metrics-bridge/**
       - cloudbuild.yaml
       - .gcloudignore
+      - .node-version
       - pnpm-workspace.yaml
       - pnpm-lock.yaml
       - package.json
@@ -40,6 +41,7 @@ jobs:
               - metrics-bridge/**
               - cloudbuild.yaml
               - .gcloudignore
+              - .node-version
               - pnpm-workspace.yaml
               - pnpm-lock.yaml
               - package.json
