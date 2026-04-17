@@ -98,13 +98,9 @@ export function parseOraclePriceToNumber(
   return USD_STABLE_SYMS.has(sym0) ? 1 / feedValue : feedValue;
 }
 
-/**
- * Formats a positive oracle price for display. Uses 4dp near parity
- * (0.9..1.1) and 6dp elsewhere. Callers must gate on price > 0.
- */
+/** Display format for a positive oracle price (4dp). Callers needing more precision should read the raw number directly. */
 export function formatOraclePrice(price: number): string {
-  const dp = price > 0.9 && price < 1.1 ? 4 : 6;
-  return price.toFixed(dp);
+  return price.toFixed(4);
 }
 
 export function toPercent(raw: string, decimals = 4): string {

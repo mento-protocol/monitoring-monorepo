@@ -2,21 +2,11 @@
 
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
-import { HealthBadge } from "@/components/badges";
 import type { HealthStatus } from "@/lib/health";
 import { computeHealthStatus, isOracleFresh } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
 import { relativeTime, formatTimestamp } from "@/lib/format";
 
-/**
- * "Deviation" cell for the pool header's metric row. Carries the
- * HealthBadge inline with its label and a compact progress bar sized to
- * the cell, sitting alongside the other metric cells instead of stretching
- * across the full width of the box.
- *
- * Returns null for cases where HealthPanel below still has a clearer
- * story to tell (virtual, pre-migration data, weekend pause).
- */
 export function DeviationCell({
   pool,
   network,
@@ -40,12 +30,9 @@ export function DeviationCell({
   const status = computeHealthStatus(pool, network.chainId);
 
   return (
-    <div className="min-w-56">
-      <dt className="flex items-center gap-2 text-slate-400">
-        Deviation
-        <HealthBadge status={status} />
-      </dt>
-      <dd className="mt-1">
+    <div className="min-w-44">
+      <dt className="text-slate-400">Deviation</dt>
+      <dd>
         <DeviationBar
           priceDifference={pool.priceDifference ?? "0"}
           rebalanceThreshold={pool.rebalanceThreshold ?? 0}
@@ -70,9 +57,9 @@ export function DeviationCell({
               >
                 {relativeTime(pool.deviationBreachStartedAt)}
               </time>
-              {/* Visually-hidden absolute timestamp so screen readers in
-                  browse mode read the exact time alongside the relative
-                  label, not only via the hover-only title. */}
+              {/* sr-only so screen readers in browse mode read the exact
+                  time alongside the relative label, not only via the
+                  hover-only title. */}
               <span className="sr-only">
                 {" "}
                 (at {formatTimestamp(pool.deviationBreachStartedAt)})
@@ -137,26 +124,32 @@ function DeviationBar({
       : `${deltaPct.toFixed(1)}% below threshold`;
 
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-sm text-slate-200">
-        {deltaLabel}
-        <span className="ml-1.5 text-xs text-slate-500">
-          ({diffPct}% / {thresholdPct}%)
-        </span>
-      </span>
-      <div className="h-2 w-56 rounded-full bg-slate-700">
-        <div
-          className={`h-2 rounded-full transition-all ${color}`}
-          style={{ width: `${pct}%` }}
-          role="progressbar"
-          aria-valuenow={diff}
-          aria-valuemax={threshold}
-          // Screen readers announce aria-valuetext verbatim when set,
-          // keeping the spoken unit (percentages) aligned with the
-          // visible copy instead of announcing raw basis points.
-          aria-valuetext={deltaLabel}
-        />
+    <div
+      className="flex flex-col gap-0.5"
+      title={`Deviation ${diffPct}% of ${thresholdPct}% threshold`}
+    >
+      {/* Wrap the 8px bar in a 20px row that matches the text-sm line-height
+          of other cells' middle values (e.g. "Fresh", "Balanced") so the
+          bottom-row subtitle sits on the same baseline across the header.
+          `mt-0.5` nudges the bar ~2px below geometric center to match the
+          optical center of text-sm glyphs (text sits below the cap line, so
+          a geometrically centered bar reads slightly high). */}
+      <div className="flex h-5 items-center">
+        <div className="h-2 w-44 rounded-full bg-slate-700 mt-1">
+          <div
+            className={`h-2 rounded-full transition-all ${color}`}
+            style={{ width: `${pct}%` }}
+            role="progressbar"
+            aria-valuenow={diff}
+            aria-valuemax={threshold}
+            // Screen readers announce aria-valuetext verbatim when set,
+            // keeping the spoken unit (percentages) aligned with the
+            // visible copy instead of announcing raw basis points.
+            aria-valuetext={deltaLabel}
+          />
+        </div>
       </div>
+      <span className="text-xs text-slate-500">{deltaLabel}</span>
     </div>
   );
 }

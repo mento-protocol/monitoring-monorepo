@@ -25,8 +25,14 @@ export function OraclePriceValue({
   const quoteToken = usdmIsToken0 ? sym0 : sym1;
   const base = inverted ? quoteToken : titleToken;
   const quote = inverted ? titleToken : quoteToken;
-  const displayPrice =
-    feedVal > 0 ? formatOraclePrice(inverted ? 1 / feedVal : feedVal) : "—";
+  const rawPrice = inverted ? 1 / feedVal : feedVal;
+  const displayPrice = feedVal > 0 ? formatOraclePrice(rawPrice) : "—";
+  // Full precision for the hover tooltip — 12dp comfortably preserves the
+  // indexer's 24-decimal fixed-point price across any FX pair.
+  const fullPrice =
+    feedVal > 0
+      ? rawPrice.toFixed(12).replace(/0+$/, "").replace(/\.$/, "")
+      : "";
 
   // Prefer the non-USDm leg first (more specific feed), fall back to the
   // USDm leg in the unusual case where both legs resolve to different pairs.
@@ -46,11 +52,11 @@ export function OraclePriceValue({
           onClick={() => setInverted((v) => !v)}
           aria-pressed={inverted}
           aria-label={`Showing 1 ${base} = ${displayPrice} ${quote}. Activate to invert direction.`}
-          title="Click to toggle price direction"
-          className="font-mono text-white hover:text-indigo-300 transition-colors text-left"
+          title={`1 ${base} = ${fullPrice} ${quote} · click to invert`}
+          className="font-mono text-white hover:text-indigo-300 transition-colors text-left cursor-pointer"
         >
-          1 {base} = {displayPrice} {quote}
-          <span className="ml-1.5 text-xs text-slate-500">⇄</span>
+          1 {base} <span className="text-slate-500">⇄</span> {displayPrice}{" "}
+          {quote}
         </button>
       ) : (
         <span className="text-slate-500">—</span>

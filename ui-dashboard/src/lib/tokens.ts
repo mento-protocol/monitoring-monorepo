@@ -112,6 +112,24 @@ export function isFpmm(pool: Pick<Pool, "source">): boolean {
 }
 
 /**
+ * True when the non-USDm leg is a fiat FX currency (EUR, GBP, BRL, …) rather
+ * than another USD-pegged stablecoin (USDC, USDT, AUSD, …).
+ */
+export function isFxPool(
+  network: Network,
+  token0: string | null,
+  token1: string | null,
+): boolean {
+  const sym0 = tokenSymbol(network, token0);
+  const sym1 = tokenSymbol(network, token1);
+  const usdm0 = USDM_SYMBOLS.has(sym0);
+  const usdm1 = USDM_SYMBOLS.has(sym1);
+  if (usdm0 === usdm1) return false;
+  const nonUsdm = usdm0 ? sym1 : sym0;
+  return !USD_PEGGED_SYMBOLS.has(nonUsdm);
+}
+
+/**
  * Returns the Chainlink data feed URL + display pair for a given token
  * symbol and chainId, or null if no mapping exists. Only applicable to
  * FPMM pools. Add new chains / symbols to CHAINLINK_FEEDS as they go live.
