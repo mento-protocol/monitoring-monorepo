@@ -354,6 +354,14 @@ function PoolDetail() {
   // so their cards should keep working; non-USDm pools fall through to the
   // chart's internal `canPricePool` check, which renders "unavailable".
   const ratesLoading = allPoolsData === undefined && !allPoolsError;
+  // Only pools without a USDm leg need the rate-map side query to render. For
+  // USDm-leg pools the pool's own oracle price plus `dailySnapshots` are
+  // enough — keep their charts out of the skeleton while rates are still in
+  // flight.
+  const poolNeedsRates = pool
+    ? !USDM_SYMBOLS.has(tokenSymbol(network, pool.token0)) &&
+      !USDM_SYMBOLS.has(tokenSymbol(network, pool.token1))
+    : false;
 
   // Return null while redirect is pending to avoid a transient error flash
   // and unnecessary error announcement for assistive tech. MUST sit below
@@ -405,7 +413,10 @@ function PoolDetail() {
               pool={pool}
               network={network}
               snapshots={dailySnapshots}
-              isLoading={(fpmmPool && dailySnapshotLoading) || ratesLoading}
+              isLoading={
+                (fpmmPool && dailySnapshotLoading) ||
+                (poolNeedsRates && ratesLoading)
+              }
               hasError={dailySnapshotError !== undefined}
               rates={rates}
               historySupported={fpmmPool}
@@ -414,7 +425,10 @@ function PoolDetail() {
               pool={pool}
               network={network}
               snapshots={dailySnapshots}
-              isLoading={(fpmmPool && dailySnapshotLoading) || ratesLoading}
+              isLoading={
+                (fpmmPool && dailySnapshotLoading) ||
+                (poolNeedsRates && ratesLoading)
+              }
               hasError={dailySnapshotError !== undefined}
               rates={rates}
               historySupported={fpmmPool}

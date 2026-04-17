@@ -155,23 +155,38 @@ export function chainlinkFeed(
 }
 
 /**
- * True when the pool can be valued in USD: a usable `oraclePrice` plus either
- * a USDm leg or a rate-map entry for one non-USDm leg. Callers distinguish
- * "truly $0" from "unpriceable pair / oracle outage / rates not ready"
- * without relying on `poolTvlUSD`'s collapsed 0-return.
+ * True when the pool's legs are USD-convertible: one leg is USDm or the rate
+ * map can price one of the non-USDm legs. Intentionally does NOT require
+ * `oraclePrice` — volume conversion uses per-snapshot `swapVolumeX` values
+ * and does not depend on the live oracle. TVL callers that *do* need the
+ * oracle should gate on `pool.oraclePrice` themselves.
  */
 export function canPricePool(
-  pool: Pick<Pool, "token0" | "token1" | "oraclePrice">,
+  pool: Pick<Pool, "token0" | "token1">,
   network: Network,
   rates: OracleRateMap,
 ): boolean {
-  if (!pool.oraclePrice || pool.oraclePrice === "0") return false;
   const sym0 = tokenSymbol(network, pool.token0 ?? null);
   const sym1 = tokenSymbol(network, pool.token1 ?? null);
   if (USDM_SYMBOLS.has(sym0) || USDM_SYMBOLS.has(sym1)) return true;
   return (
     tokenToUSD(sym0, 1, rates) !== null || tokenToUSD(sym1, 1, rates) !== null
   );
+}
+
+/**
+ * True when the pool's current TVL can be computed in USD: USD-convertible
+ * legs *plus* a usable `oraclePrice` (required for the `reserves × price`
+ * math). Without the oracle gate, `poolTvlUSD()` silently returns 0 during
+ * oracle outages and the card renders a believable $0.00.
+ */
+export function canValueTvl(
+  pool: Pick<Pool, "token0" | "token1" | "oraclePrice">,
+  network: Network,
+  rates: OracleRateMap,
+): boolean {
+  if (!pool.oraclePrice || pool.oraclePrice === "0") return false;
+  return canPricePool(pool, network, rates);
 }
 
 /**

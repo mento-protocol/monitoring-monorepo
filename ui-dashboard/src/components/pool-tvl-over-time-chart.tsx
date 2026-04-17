@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { formatUSD } from "@/lib/format";
-import { canPricePool, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
+import { canValueTvl, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Network } from "@/lib/networks";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
@@ -86,7 +86,7 @@ export function PoolTvlOverTimeChart({
 
   const currentTvl = poolTvlUSD(pool, network, rates);
   const change7d = useMemo(() => tvlWoWChangePct(fullSeries), [fullSeries]);
-  const priceable = canPricePool(pool, network, rates ?? new Map());
+  const priceable = canValueTvl(pool, network, rates ?? new Map());
 
   // Distinguish "unpriceable" (no USDm leg and no rate for either leg) from
   // real zero TVL. Without this, the chart silently renders $0.00 whenever
