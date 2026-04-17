@@ -133,7 +133,7 @@ variable "gcp_region" {
 }
 
 variable "gcp_dev_members" {
-  description = "IAM members who can deploy and manage the metrics-bridge service (e.g. [\"user:alice@mentolabs.xyz\", \"group:eng@mentolabs.xyz\"])."
+  description = "IAM members who can deploy and manage the metrics-bridge service."
   type        = list(string)
-  default     = []
+  default     = ["group:eng@mentolabs.xyz"]
 }
