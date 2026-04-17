@@ -267,61 +267,24 @@ resource "google_artifact_registry_repository" "metrics_bridge" {
 }
 
 locals {
-  # Content-addressed tag so Cloud Run rolls a new revision on each rebuild.
-  metrics_bridge_image_tag = substr(sha256(join("", [
-    filesha256("${path.module}/../metrics-bridge/Dockerfile"),
-    sha256(join("", [for f in sort(fileset("${path.module}/../metrics-bridge/src", "**/*.ts")) : filesha256("${path.module}/../metrics-bridge/src/${f}")])),
-    filesha256("${path.module}/../metrics-bridge/package.json"),
-    filesha256("${path.module}/../metrics-bridge/tsconfig.json"),
-    filesha256("${path.module}/../pnpm-lock.yaml"),
-    filesha256("${path.module}/../pnpm-workspace.yaml"),
-    filesha256("${path.module}/../cloudbuild.yaml"),
-  ])), 0, 12)
-
   metrics_bridge_ar_repo = "${var.gcp_region}-docker.pkg.dev/${google_project.monitoring.project_id}/${google_artifact_registry_repository.metrics_bridge.repository_id}"
-  metrics_bridge_image   = "${local.metrics_bridge_ar_repo}/metrics-bridge:${local.metrics_bridge_image_tag}"
-}
-
-# ── Image Build ──────────────────────────────────────────────────────────────
-# Builds and pushes the metrics-bridge container image via Cloud Build.
-# Triggers on source file content changes (content-addressed tag).
-
-resource "null_resource" "metrics_bridge_build" {
-  triggers = {
-    image_tag = local.metrics_bridge_image_tag
-  }
-
-  provisioner "local-exec" {
-    working_dir = "${path.module}/.."
-    command     = <<-EOT
-      gcloud builds submit \
-        --project="${google_project.monitoring.project_id}" \
-        --config=cloudbuild.yaml \
-        --substitutions=_IMAGE="${local.metrics_bridge_image}" \
-        --timeout=600s \
-        .
-    EOT
-  }
-
-  depends_on = [
-    google_project_service.cloudbuild,
-    google_artifact_registry_repository.metrics_bridge,
-  ]
 }
 
 # ── Metrics Bridge (Cloud Run) ───────────────────────────────────────────────
 # Polls Hasura for FPMM pool KPIs and exports Prometheus gauges.
 # Scraped by Grafana Agent (Aegis repo) → Grafana Cloud alert rules.
+#
+# Image is built and pushed by CI (GitHub Actions), not Terraform.
+# First deploy: run `pnpm bridge:deploy` to build the image, then
+# set metrics_bridge_image in terraform.tfvars and `pnpm infra:apply`.
 
 resource "google_cloud_run_v2_service" "metrics_bridge" {
+  count    = var.metrics_bridge_image != "" ? 1 : 0
   project  = google_project.monitoring.project_id
   name     = "metrics-bridge"
   location = var.gcp_region
 
-  depends_on = [
-    google_project_service.run,
-    null_resource.metrics_bridge_build,
-  ]
+  depends_on = [google_project_service.run]
 
   template {
     scaling {
@@ -329,7 +292,7 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
       max_instance_count = 1
     }
     containers {
-      image = local.metrics_bridge_image
+      image = var.metrics_bridge_image
       ports {
         container_port = 8080
       }
@@ -355,9 +318,10 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
 
 # Allow unauthenticated access so Grafana Agent can scrape /metrics.
 resource "google_cloud_run_v2_service_iam_member" "metrics_bridge_public" {
-  project  = google_cloud_run_v2_service.metrics_bridge.project
-  location = google_cloud_run_v2_service.metrics_bridge.location
-  name     = google_cloud_run_v2_service.metrics_bridge.name
+  count    = var.metrics_bridge_image != "" ? 1 : 0
+  project  = google_cloud_run_v2_service.metrics_bridge[0].project
+  location = google_cloud_run_v2_service.metrics_bridge[0].location
+  name     = google_cloud_run_v2_service.metrics_bridge[0].name
   role     = "roles/run.invoker"
   member   = "allUsers"
 }

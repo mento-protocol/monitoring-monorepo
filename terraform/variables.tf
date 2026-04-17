@@ -132,6 +132,12 @@ variable "gcp_region" {
   default     = "europe-west1"
 }
 
+variable "metrics_bridge_image" {
+  description = "Full container image reference for the metrics bridge (e.g. europe-west1-docker.pkg.dev/mento-monitoring/metrics-bridge/metrics-bridge:abc123). Built and pushed by CI; leave empty until first deploy."
+  type        = string
+  default     = ""
+}
+
 variable "gcp_dev_members" {
   description = "IAM members who can deploy and manage the metrics-bridge service."
   type        = list(string)

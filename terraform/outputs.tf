@@ -35,10 +35,5 @@ output "artifact_registry_url" {
 
 output "metrics_bridge_url" {
   description = "Cloud Run URL for the metrics bridge — add as Grafana Agent scrape target."
-  value       = google_cloud_run_v2_service.metrics_bridge.uri
-}
-
-output "metrics_bridge_image" {
-  description = "Full container image reference used by the Cloud Run service."
-  value       = local.metrics_bridge_image
+  value       = length(google_cloud_run_v2_service.metrics_bridge) > 0 ? google_cloud_run_v2_service.metrics_bridge[0].uri : ""
 }

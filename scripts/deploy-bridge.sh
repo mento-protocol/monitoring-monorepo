@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
-# Rebuild and deploy the metrics-bridge container via Terraform.
-#
-# Terraform handles the full lifecycle: project → APIs → AR → image build → Cloud Run.
-# This script is a convenience wrapper that forces a rebuild and redeploy.
+# Build, push, and deploy the metrics-bridge container to Cloud Run.
 #
 # Usage:
-#   pnpm bridge:deploy           → rebuild image + redeploy (with confirmation)
-#   pnpm bridge:deploy --yes     → skip confirmation prompt (CI / agent friendly)
+#   pnpm bridge:deploy           → build + deploy (with confirmation)
+#   pnpm bridge:deploy --yes     → skip confirmation (CI / agent friendly)
 #
-# For first-time setup, run `pnpm infra:apply` instead — it bootstraps
-# the entire GCP project, not just the bridge.
+# Prerequisites:
+#   - gcloud CLI authenticated with access to the monitoring project
+#   - terraform.tfvars configured with GCP bootstrap variables
+#
+# Flow:
+#   1. Build image via Cloud Build → push to Artifact Registry
+#   2. terraform apply with the new image ref → Cloud Run rolls a new revision
 
 set -euo pipefail
 
+PROJECT="${GCP_PROJECT:-mento-monitoring}"
+REGION="${GCP_REGION:-europe-west1}"
+AR_REPO="${REGION}-docker.pkg.dev/${PROJECT}/metrics-bridge"
+TAG="$(git rev-parse --short HEAD)"
+IMAGE="${AR_REPO}/metrics-bridge:${TAG}"
 SKIP_CONFIRM=false
 
 while [[ $# -gt 0 ]]; do
@@ -23,29 +30,35 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo "━━━ Metrics Bridge Deploy ━━━"
-echo ""
-echo "This will rebuild the container image and redeploy to Cloud Run."
+echo "Project:  ${PROJECT}"
+echo "Image:    ${IMAGE}"
 echo ""
 
 if [ "$SKIP_CONFIRM" = false ]; then
-  read -rp "Continue? [y/N] " confirm
+  read -rp "Build and deploy? [y/N] " confirm
   if [[ ! "$confirm" =~ ^[Yy] ]]; then
     echo "Aborted."
     exit 0
   fi
 fi
 
-TF_AUTO_APPROVE=""
+echo "Building container image via Cloud Build..."
+gcloud builds submit \
+  --project="$PROJECT" \
+  --config=cloudbuild.yaml \
+  --substitutions="_IMAGE=${IMAGE}" \
+  --timeout=600s \
+  .
+
+echo ""
+echo "Deploying to Cloud Run via Terraform..."
+
+TF_ARGS="-var=metrics_bridge_image=${IMAGE}"
 if [ "$SKIP_CONFIRM" = true ]; then
-  TF_AUTO_APPROVE="-auto-approve"
+  TF_ARGS="${TF_ARGS} -auto-approve"
 fi
 
-terraform -chdir=terraform apply \
-  $TF_AUTO_APPROVE \
-  -replace=null_resource.metrics_bridge_build \
-  -target=null_resource.metrics_bridge_build \
-  -target=google_cloud_run_v2_service.metrics_bridge \
-  -target=google_cloud_run_v2_service_iam_member.metrics_bridge_public
+terraform -chdir=terraform apply $TF_ARGS
 
 echo ""
 echo "Done. Service URL:"

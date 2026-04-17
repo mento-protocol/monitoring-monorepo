@@ -37,6 +37,11 @@ gcp_billing_account = "..."
 # GCP project ID — defaults to "mento-monitoring" in variables.tf.
 # gcp_project_id = "mento-monitoring"
 
+# Container image for the metrics-bridge Cloud Run service.
+# Built by CI on merge to main, or manually via `pnpm bridge:deploy`.
+# Leave empty until first image is built — Cloud Run won't be provisioned.
+# metrics_bridge_image = "europe-west1-docker.pkg.dev/mento-monitoring/metrics-bridge/metrics-bridge:abc123"
+
 # Dev team IAM — defaults to group:eng@mentolabs.xyz in variables.tf.
 # gcp_dev_members = ["group:eng@mentolabs.xyz"]
 

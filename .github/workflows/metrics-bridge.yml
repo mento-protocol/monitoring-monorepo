@@ -66,3 +66,47 @@ jobs:
       - name: Test
         if: steps.changes.outputs.bridge == 'true'
         run: pnpm --filter @mento-protocol/metrics-bridge test
+
+  deploy:
+    name: Build & Deploy (metrics-bridge)
+    needs: quality
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT: mento-monitoring
+      GCP_REGION: europe-west1
+      AR_REPO: europe-west1-docker.pkg.dev/mento-monitoring/metrics-bridge
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push image
+        run: |
+          IMAGE="${AR_REPO}/metrics-bridge:${{ github.sha }}"
+          gcloud builds submit \
+            --project="$GCP_PROJECT" \
+            --config=cloudbuild.yaml \
+            --substitutions="_IMAGE=${IMAGE}" \
+            --timeout=600s \
+            .
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Deploy to Cloud Run via Terraform
+        run: |
+          terraform -chdir=terraform init -input=false
+          terraform -chdir=terraform apply \
+            -auto-approve \
+            -var="metrics_bridge_image=${IMAGE}" \
+            -input=false
