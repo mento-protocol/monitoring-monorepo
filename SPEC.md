@@ -274,11 +274,11 @@ NextAuth.js with Google provider. Domain-restricted to `@mentolabs.xyz` accounts
 
 The dashboard is fully multichain — all chains are shown together (no network switcher). Pool IDs are prefixed with `{chainId}-` to disambiguate across chains. A `ChainIcon` component shows the chain logo next to pool identifiers.
 
-| Network       | Chain ID | Indexer Status                           | Dashboard |
-| ------------- | -------- | ---------------------------------------- | --------- |
-| Celo Mainnet  | 42220    | Live                                     | Live      |
-| Celo Sepolia  | 44787    | Live                                     | Live      |
-| Monad Mainnet | 143      | Config ready, blocked on contract deploy | Pending   |
+| Network       | Chain ID | Indexer Status | Dashboard |
+| ------------- | -------- | -------------- | --------- |
+| Celo Mainnet  | 42220    | Live           | Live      |
+| Celo Sepolia  | 11142220 | Live           | Live      |
+| Monad Mainnet | 143      | Live           | Live      |
 
 ---
 
@@ -291,7 +291,7 @@ The dashboard is fully multichain — all chains are shown together (no network 
 | Cannot run two indexers locally      | Port 9898 hardcoded in Envio                                                                                    |
 | SortedOracles on Sepolia             | Contracts return zero address; oracle indexing mainnet-only                                                     |
 | Gap-fill not yet implemented         | PoolSnapshot charts may show gaps for periods with no activity                                                  |
-| Monad blocked                        | Awaiting contract deployment to Monad                                                                           |
+| Monad pools pending                  | Pool contracts deployed; indexer config ready                                                                   |
 | No Liquity v2 indexing               | TroveManager / StabilityPool — needed for Stability Pool headroom alerts                                        |
 | v3 alerting not yet wired            | Aegis covers v2 KPIs; v3 FPMM-specific alerts are next                                                          |
 
@@ -326,7 +326,7 @@ Extend alerting to cover v3 FPMM pool KPIs (see §5 for thresholds). The `metric
 ### Backlog
 
 - Liquity v2 CDP indexing (TroveManager, StabilityPool)
-- Monad indexing (blocked on contract deployment)
+- Monad pool indexing (config ready, deployment pending)
 - Gap-fill logic for snapshot charts
 - Streamlit sandbox
 - ClickHouse sink for heavy analytics

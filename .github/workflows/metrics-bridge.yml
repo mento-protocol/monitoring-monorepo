@@ -103,6 +103,9 @@ jobs:
             .
           echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
 
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
       - name: Deploy to Cloud Run via Terraform
         env:
           # All required Terraform variables from GitHub secrets.

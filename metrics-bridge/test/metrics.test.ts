@@ -64,6 +64,18 @@ describe("updateMetrics", () => {
     ).toBe(0.42);
   });
 
+  it("skips deviationRatio when hasHealthData is false", async () => {
+    updateMetrics([
+      makePool({
+        hasHealthData: false,
+        lastDeviationRatio: "-1",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_deviation_ratio", poolLabels),
+    ).toBeUndefined();
+  });
+
   it("sets deviationBreachStart to 0 when no breach", async () => {
     updateMetrics([makePool()]);
     expect(
