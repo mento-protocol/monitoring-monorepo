@@ -9,12 +9,12 @@ import {
   type TimeRange,
 } from "@/lib/volume";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
+import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import {
   SECONDS_PER_DAY,
-  TimeSeriesChartCard,
   type RangeKey,
   type TimeSeriesPoint,
-} from "@/components/time-series-chart-card";
+} from "@/lib/time-series";
 
 type SeriesPoint = { timestamp: number; volumeUSD: number };
 

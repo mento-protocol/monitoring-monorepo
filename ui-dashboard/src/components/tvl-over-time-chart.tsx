@@ -7,13 +7,13 @@ import type { NetworkData } from "@/hooks/use-all-networks-data";
 import type { Network } from "@/lib/networks";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
 import type { OracleRateMap } from "@/lib/tokens";
+import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import {
   SECONDS_PER_DAY,
-  TimeSeriesChartCard,
   filterSeriesByRange,
   type RangeKey,
   type TimeSeriesPoint,
-} from "@/components/time-series-chart-card";
+} from "@/lib/time-series";
 
 const SECONDS_PER_HOUR = 3600;
 

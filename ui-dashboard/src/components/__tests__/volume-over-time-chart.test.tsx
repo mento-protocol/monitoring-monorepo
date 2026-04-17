@@ -32,7 +32,7 @@ import {
   makeTvlPool,
 } from "@/test-utils/network-fixtures";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
-import type { TimeSeriesPoint } from "@/components/time-series-chart-card";
+import type { TimeSeriesPoint } from "@/lib/time-series";
 
 const SECONDS_PER_DAY = 86_400;
 
