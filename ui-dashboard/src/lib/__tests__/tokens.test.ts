@@ -40,6 +40,22 @@ describe("tokenSymbol", () => {
   it("returns ? for null", () => {
     expect(tokenSymbol(sepolia, null)).toBe("?");
   });
+
+  it("sanitizes the addressLabels fallback to never leak StableToken* names", () => {
+    // End-to-end guard: the implementation-proxy address is present in
+    // addressLabels on Monad (type=token, kept raw for address-book
+    // precision), but must never resolve as a pool-token symbol.
+    // Proves the full tokenSymbols → addressLabels fallback chain is safe.
+    const monad = NETWORKS["monad-mainnet"];
+    const stableTokenSpokeGbp = "0xddf082068caa5b941ed8c603adf0cecbdbb59f8e";
+    expect(monad.addressLabels[stableTokenSpokeGbp]).toBe(
+      "StableTokenSpokeGBP",
+    );
+    expect(tokenSymbol(monad, stableTokenSpokeGbp)).not.toContain(
+      "StableToken",
+    );
+    expect(tokenSymbol(monad, stableTokenSpokeGbp)).toContain("0xddf0");
+  });
 });
 
 describe("poolName", () => {

@@ -76,11 +76,15 @@ export function tokenToUSD(
 export function tokenSymbol(network: Network, address: string | null): string {
   if (!address) return "?";
   const lower = address.toLowerCase();
-  return (
-    network.tokenSymbols[lower] ??
-    network.addressLabels[lower] ??
-    truncateAddress(address)
-  );
+  const primary = network.tokenSymbols[lower];
+  if (primary) return primary;
+  // addressLabels fallback deliberately sanitizes StableToken* — those are
+  // implementation-contract names (e.g. StableTokenSpoke, StableTokenV3v301)
+  // kept raw in addressLabels for the Address Book's precision needs, but
+  // they must never surface as a pool-token symbol.
+  const label = network.addressLabels[lower];
+  if (label && !label.startsWith("StableToken")) return label;
+  return truncateAddress(address);
 }
 
 export function explorerAddressUrl(network: Network, address: string): string {
