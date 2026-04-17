@@ -243,23 +243,24 @@ describe("NETWORKS — Monad networks", () => {
     expect(monad.addressLabels[GBPM_MONAD_MAINNET]).toBe("GBPm");
   });
 
-  it("monad-mainnet never exposes trailing *Spoke (user-facing token pool titles, address book labels)", () => {
-    // Strict on the *Spoke suffix form users see in pool titles and address
-    // rows (e.g. USDmSpoke, EURmSpoke, GBPmSpoke). Names that legitimately
-    // *contain* "Spoke" for internal contracts (StableTokenSpokeGBP etc.)
-    // are acceptable in addressLabels — they identify Wormhole implementation
-    // proxies for operators, and are already filtered from tokenSymbols.
+  it("monad-mainnet pool-token symbols never expose *Spoke (the user-facing invariant)", () => {
+    // Narrow invariant: tokenSymbols feeds pool titles. Address-book labels
+    // for non-token contracts (e.g. StableTokenSpoke) legitimately keep the
+    // raw "Spoke" name so operators can identify the exact deployment.
     const monad = NETWORKS["monad-mainnet"];
-    const values = [
-      ...Object.values(monad.tokenSymbols),
-      ...Object.values(monad.addressLabels),
-    ];
-    expect(values.some((v) => v.endsWith("Spoke"))).toBe(false);
-    // tokenSymbols alone must not contain "Spoke" anywhere — pool titles are
-    // the narrow path the user explicitly flagged.
     expect(
       Object.values(monad.tokenSymbols).some((v) => v.includes("Spoke")),
     ).toBe(false);
+  });
+
+  it("monad-mainnet keeps raw StableTokenSpoke contract label in addressLabels (address-book precision)", () => {
+    // StableTokenSpoke (type=contract) must NOT be collapsed to "StableToken"
+    // — that label collision with Celo's legacy StableToken would mislead
+    // operators. Precise implementation-contract names only strip the suffix
+    // for type=token entries.
+    const monad = NETWORKS["monad-mainnet"];
+    const stableTokenSpokeAddr = "0x6a8ff60a89f3f359fa16f45076d6dd1712b5e62e";
+    expect(monad.addressLabels[stableTokenSpokeAddr]).toBe("StableTokenSpoke");
   });
 
   it("monad-mainnet excludes StableTokenSpoke* implementation proxies from tokenSymbols (but keeps them in addressLabels)", () => {

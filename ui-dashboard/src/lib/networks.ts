@@ -55,19 +55,19 @@ type ContractsData = Record<
   Record<string, Record<string, ContractEntry>>
 >;
 
-// Wormhole NTT hub/spoke split: on Monad chains, tokens are published under
-// names like "USDmSpoke" / "EURmSpoke" / "GBPmSpoke". The user-facing symbol
-// is the canonical hub name ("USDm" etc.) on every chain, so strip the suffix
-// when a contract name flows into a symbol or address label.
+// Wormhole NTT hub/spoke split: on Monad chains, token entries are published
+// under names like "USDmSpoke" / "EURmSpoke" / "GBPmSpoke". Strip the suffix
+// for token entries only — implementation-contract rows like
+// "StableTokenSpoke" stay raw so the address book keeps precise names.
 // Keep in sync with indexer-envio/src/feeToken.ts buildKnownTokenMeta.
-function canonicalName(name: string): string {
+function canonicalTokenSymbol(name: string): string {
   return name.endsWith("Spoke") ? name.slice(0, -5) : name;
 }
 
-// Implementation contracts that should never surface as *pool-token* symbols.
+// Implementation contracts that should never surface as pool-token symbols.
 // Applied to tokenSymbols only — addressLabels keeps every named entry so the
-// address book still renders `StableTokenV3v300` etc. as contract rows.
-// Narrower than the indexer's equivalent filter in
+// address book still renders `StableTokenV3v300`, `StableTokenSpoke`, etc. as
+// contract rows. Narrower than the indexer's equivalent filter in
 // indexer-envio/src/feeToken.ts:buildKnownTokenMeta: we do NOT exclude Mock*
 // because Sepolia/Monad-testnet MockERC20* deployments ARE real pool tokens.
 function isInternalTokenName(name: string): boolean {
@@ -90,13 +90,16 @@ function buildNetworkMaps(
         )
         .map(([name, entry]) => [
           entry.address.toLowerCase(),
-          canonicalName(name),
+          canonicalTokenSymbol(name),
         ]),
     ),
     addressLabels: Object.fromEntries(
       entries.map(([name, entry]) => [
         entry.address.toLowerCase(),
-        canonicalName(name),
+        // Canonicalize only the user-facing ERC20 token names (USDmSpoke →
+        // USDm). Leave contract labels like "StableTokenSpoke" raw so
+        // operators can identify the exact deployment in the address book.
+        entry.type === "token" ? canonicalTokenSymbol(name) : name,
       ]),
     ),
   };
