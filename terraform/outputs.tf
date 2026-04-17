@@ -30,7 +30,7 @@ output "gcp_project_id" {
 
 output "artifact_registry_url" {
   description = "Artifact Registry Docker URL for pushing images."
-  value       = "${var.gcp_region}-docker.pkg.dev/${google_project.monitoring.project_id}/${google_artifact_registry_repository.metrics_bridge.repository_id}"
+  value       = "${var.gcp_region}-docker.pkg.dev/${google_project.monitoring.project_id}/${google_artifact_registry_repository.metrics_bridge.repository_id}/metrics-bridge"
 }
 
 output "metrics_bridge_url" {

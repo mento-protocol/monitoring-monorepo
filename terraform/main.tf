@@ -21,7 +21,7 @@ terraform {
     }
     google = {
       source  = "hashicorp/google"
-      version = ">= 6.11.0"
+      version = "~> 6.11"
     }
   }
 }
@@ -240,18 +240,24 @@ resource "google_project" "monitoring" {
 # ── GCP APIs ─────────────────────────────────────────────────────────────────
 
 resource "google_project_service" "run" {
-  project = google_project.monitoring.project_id
-  service = "run.googleapis.com"
+  project                    = google_project.monitoring.project_id
+  service                    = "run.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
 }
 
 resource "google_project_service" "artifactregistry" {
-  project = google_project.monitoring.project_id
-  service = "artifactregistry.googleapis.com"
+  project                    = google_project.monitoring.project_id
+  service                    = "artifactregistry.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
 }
 
 resource "google_project_service" "cloudbuild" {
-  project = google_project.monitoring.project_id
-  service = "cloudbuild.googleapis.com"
+  project                    = google_project.monitoring.project_id
+  service                    = "cloudbuild.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
 }
 
 # ── Artifact Registry ────────────────────────────────────────────────────────
@@ -266,10 +272,6 @@ resource "google_artifact_registry_repository" "metrics_bridge" {
   depends_on = [google_project_service.artifactregistry]
 }
 
-locals {
-  metrics_bridge_ar_repo = "${var.gcp_region}-docker.pkg.dev/${google_project.monitoring.project_id}/${google_artifact_registry_repository.metrics_bridge.repository_id}"
-}
-
 # ── Metrics Bridge (Cloud Run) ───────────────────────────────────────────────
 # Polls Hasura for FPMM pool KPIs and exports Prometheus gauges.
 # Scraped by Grafana Agent (Aegis repo) → Grafana Cloud alert rules.
@@ -279,10 +281,11 @@ locals {
 # set metrics_bridge_image in terraform.tfvars and `pnpm infra:apply`.
 
 resource "google_cloud_run_v2_service" "metrics_bridge" {
-  count    = var.metrics_bridge_image != "" ? 1 : 0
-  project  = google_project.monitoring.project_id
-  name     = "metrics-bridge"
-  location = var.gcp_region
+  count               = var.metrics_bridge_image != "" ? 1 : 0
+  project             = google_project.monitoring.project_id
+  name                = "metrics-bridge"
+  location            = var.gcp_region
+  deletion_protection = true
 
   depends_on = [google_project_service.run]
 
