@@ -55,6 +55,16 @@ function MiniBar({
 }) {
   const pct = summary ? Math.min(summary.pressure * 100, 100) : 0;
   const color = summary ? pressureColorClass(summary.pressure) : "bg-slate-600";
+  const rawPct = summary ? Math.round(summary.pressure * 100) : 0;
+  // aria-valuenow must stay within [valuemin, valuemax] to be a valid ARIA
+  // progressbar, so the raw (uncapped) percentage goes into aria-valuetext
+  // with an explicit "over limit" suffix when breached — SRs still hear the
+  // overage magnitude, just through the valid-state channel.
+  const valueText = summary
+    ? summary.pressure > 1
+      ? `${rawPct}% (over limit)`
+      : `${rawPct}%`
+    : "no data";
   return (
     <div className="h-2 rounded-full bg-slate-700" title={title}>
       <div
@@ -62,8 +72,10 @@ function MiniBar({
         style={{ width: `${pct}%` }}
         role="progressbar"
         aria-label={title}
-        aria-valuenow={summary ? Math.round(summary.pressure * 100) : 0}
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
         aria-valuemax={100}
+        aria-valuetext={valueText}
       />
     </div>
   );

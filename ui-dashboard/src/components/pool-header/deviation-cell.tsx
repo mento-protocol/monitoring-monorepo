@@ -140,13 +140,15 @@ function DeviationBar({
             className={`h-2 rounded-full transition-all ${color}`}
             style={{ width: `${pct}%` }}
             role="progressbar"
-            aria-valuenow={diff}
-            aria-valuemax={threshold}
-            // Screen readers announce aria-valuetext verbatim when set,
-            // keeping the spoken unit (percentages) aligned with the
-            // visible copy instead of announcing raw basis points. The
-            // precise diff/threshold pair is included here because the
-            // matching tooltip is hover-only (unreachable via keyboard).
+            // Use the same 0-100 % scale as the visual fill rather than the
+            // raw diff/threshold pair: when the pool breaches, `diff` would
+            // exceed `threshold` and aria-valuenow > aria-valuemax is an
+            // invalid ARIA state. The precise diff/threshold pair + breach
+            // direction still reaches SRs via aria-valuetext, which they
+            // announce verbatim.
+            aria-valuenow={Math.round(pct)}
+            aria-valuemin={0}
+            aria-valuemax={100}
             aria-valuetext={`${deltaLabel} (${diffPct}% of ${thresholdPct}% threshold)`}
           />
         </div>

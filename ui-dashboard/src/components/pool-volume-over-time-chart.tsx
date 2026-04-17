@@ -7,11 +7,7 @@ import type { Network } from "@/lib/networks";
 import { canPricePool, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
-import {
-  filterSeriesByRange,
-  type RangeKey,
-  type TimeSeriesPoint,
-} from "@/lib/time-series";
+import { type RangeKey, type TimeSeriesPoint } from "@/lib/time-series";
 
 interface PoolVolumeOverTimeChartProps {
   pool: Pool;
@@ -63,10 +59,18 @@ export function PoolVolumeOverTimeChart({
     return points;
   }, [priceable, pool, network, snapshots, rates]);
 
-  const visibleSeries = useMemo(
-    () => filterSeriesByRange(fullSeries, range),
-    [fullSeries, range],
-  );
+  // Slice by bucket count rather than a rolling-second cutoff. Each
+  // snapshot already represents one UTC day, so "1W" deterministically
+  // means "last 7 buckets (6 full prior days + today's partial)" — no
+  // render-time drift and `rangeTotal` always matches the visible bars.
+  // The fractional first day that a rolling-second cutoff would try to
+  // include is undefined for daily granularity; slicing keeps the semantics
+  // honest about what can actually be shown.
+  const visibleSeries = useMemo(() => {
+    if (range === "all") return fullSeries;
+    const keep = range === "7d" ? 7 : 30;
+    return fullSeries.slice(-keep);
+  }, [fullSeries, range]);
 
   const rangeTotal = useMemo(
     () => visibleSeries.reduce((sum, pt) => sum + pt.value, 0),
