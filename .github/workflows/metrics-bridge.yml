@@ -104,9 +104,20 @@ jobs:
           echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
 
       - name: Deploy to Cloud Run via Terraform
+        env:
+          # All required Terraform variables from GitHub secrets.
+          # GCP vars are provided by the auth step above.
+          TF_VAR_metrics_bridge_image: ${{ env.IMAGE }}
+          TF_VAR_vercel_token: ${{ secrets.VERCEL_TOKEN }}
+          TF_VAR_upstash_email: ${{ secrets.UPSTASH_EMAIL }}
+          TF_VAR_upstash_api_key: ${{ secrets.UPSTASH_API_KEY }}
+          TF_VAR_auth_google_id: ${{ secrets.AUTH_GOOGLE_ID }}
+          TF_VAR_auth_google_secret: ${{ secrets.AUTH_GOOGLE_SECRET }}
+          TF_VAR_auth_secret: ${{ secrets.AUTH_SECRET }}
+          TF_VAR_cron_secret: ${{ secrets.CRON_SECRET }}
+          TF_VAR_blob_read_write_token: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          TF_VAR_gcp_org_id: ${{ secrets.GCP_ORG_ID }}
+          TF_VAR_gcp_billing_account: ${{ secrets.GCP_BILLING_ACCOUNT }}
         run: |
           terraform -chdir=terraform init -input=false
-          terraform -chdir=terraform apply \
-            -auto-approve \
-            -var="metrics_bridge_image=${IMAGE}" \
-            -input=false
+          terraform -chdir=terraform apply -auto-approve -input=false

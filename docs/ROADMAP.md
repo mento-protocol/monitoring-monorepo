@@ -51,7 +51,7 @@ Last updated: 2026-04-16
 
 ### Infrastructure / DX
 
-- [x] CI pipeline — ESLint 10 + Vitest (68 test files) + typecheck + Codecov
+- [x] CI pipeline — ESLint 10 + Vitest (71 test files) + typecheck + Codecov
 - [x] `pnpm deploy:indexer [network]` (prompts if no network passed)
 - [x] `pnpm update-endpoint:mainnet` — updates Vercel env var via API after indexer redeploy
 - [x] **Discord notification on deploy branch push** (`notify-envio-deploy.yml`)
@@ -85,21 +85,15 @@ Aegis is **already live** for Mento v2 alerts. It polls on-chain contract state 
 
 ## Next — v3 Alerting
 
-Extend alerting to cover Mento v3 FPMM pool-specific KPIs. The existing Aegis infrastructure handles the pipeline (RPC → Prometheus → Grafana → Discord/on-call). The work is defining v3-specific metrics and alert rules.
+The `metrics-bridge` package polls Hasura for FPMM pool KPIs and exports them as Prometheus gauges (`mento_pool_*`). It runs on Cloud Run and gets scraped by Grafana Agent. The remaining work is defining Grafana alert rules in Terraform (Slack notifications).
 
 ### v3 KPIs to Alert On
 
 1. **Oracle liveness** (FPMM pools) — warn when liveness ratio >0.8, critical when oracle expired (≥1.0)
-2. **Deviation ratio** (FPMM pools) — warn when `priceDifference/rebalanceThreshold ≥ 0.8` sustained >15min, critical >60min
+2. **Deviation ratio** (FPMM pools) — warn when `deviationBreachStartedAt` sustained >15min, critical >60min
 3. **Trading limit pressure** (FPMM pools) — warn when max pressure >0.8, critical when limit hit (≥1.0)
 4. **Rebalancer liveness** — critical if no rebalance within threshold window when needed
 5. **Stability Pool headroom** — critical if headroom ≤ 0 (requires Liquity v2 indexing)
-
-### Open Questions
-
-- **Data source:** extend Aegis config to poll v3 FPMM contracts directly, or export Prometheus metrics from the Envio indexer, or both?
-- **Deviation breach duration:** the indexer already tracks `deviationBreachStartedAt` — can Grafana alert on duration, or does Aegis need to compute it?
-- **Rebalancer detection:** how to detect "rebalance needed but not happening" — time-since-last-rebalance vs deviation persistence?
 
 ---
 

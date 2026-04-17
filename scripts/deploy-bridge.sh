@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Build, push, and deploy the metrics-bridge container to Cloud Run.
+# Build and deploy the metrics-bridge container to Cloud Run.
+#
+# Handles both first-time bootstrap and subsequent deploys:
+#   1. Ensures GCP project + APIs + Artifact Registry exist (terraform apply)
+#   2. Builds and pushes the container image (gcloud builds submit)
+#   3. Deploys Cloud Run with the new image (terraform apply)
 #
 # Usage:
 #   pnpm bridge:deploy           → build + deploy (with confirmation)
@@ -8,10 +13,6 @@
 # Prerequisites:
 #   - gcloud CLI authenticated with access to the monitoring project
 #   - terraform.tfvars configured with GCP bootstrap variables
-#
-# Flow:
-#   1. Build image via Cloud Build → push to Artifact Registry
-#   2. terraform apply with the new image ref → Cloud Run rolls a new revision
 
 set -euo pipefail
 
@@ -29,6 +30,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+TF_APPROVE=""
+if [ "$SKIP_CONFIRM" = true ]; then
+  TF_APPROVE="-auto-approve"
+fi
+
 echo "━━━ Metrics Bridge Deploy ━━━"
 echo "Project:  ${PROJECT}"
 echo "Image:    ${IMAGE}"
@@ -42,6 +48,18 @@ if [ "$SKIP_CONFIRM" = false ]; then
   fi
 fi
 
+# Step 1: Ensure GCP infra exists (project, APIs, AR repo).
+# On subsequent runs this is a no-op.
+echo "Ensuring GCP infrastructure..."
+terraform -chdir=terraform apply $TF_APPROVE \
+  -target=google_project.monitoring \
+  -target=google_project_service.run \
+  -target=google_project_service.artifactregistry \
+  -target=google_project_service.cloudbuild \
+  -target=google_artifact_registry_repository.metrics_bridge
+
+# Step 2: Build and push the image.
+echo ""
 echo "Building container image via Cloud Build..."
 gcloud builds submit \
   --project="$PROJECT" \
@@ -50,15 +68,11 @@ gcloud builds submit \
   --timeout=600s \
   .
 
+# Step 3: Deploy Cloud Run with the new image.
 echo ""
-echo "Deploying to Cloud Run via Terraform..."
-
-TF_ARGS="-var=metrics_bridge_image=${IMAGE}"
-if [ "$SKIP_CONFIRM" = true ]; then
-  TF_ARGS="${TF_ARGS} -auto-approve"
-fi
-
-terraform -chdir=terraform apply $TF_ARGS
+echo "Deploying to Cloud Run..."
+terraform -chdir=terraform apply $TF_APPROVE \
+  -var="metrics_bridge_image=${IMAGE}"
 
 echo ""
 echo "Done. Service URL:"

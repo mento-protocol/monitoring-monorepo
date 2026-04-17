@@ -20,7 +20,7 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 | What            | URL                                                 |
 | --------------- | --------------------------------------------------- |
 | Dashboard       | <https://monitoring.mento.org>                      |
-| Mainnet GraphQL | `https://indexer.hyperindex.xyz/60ff18c/v1/graphql` |
+| Mainnet GraphQL | `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql` |
 
 ---
 
@@ -481,7 +481,7 @@ pnpm --filter @mento-protocol/ui-dashboard lint
 
 GitHub Actions (`.github/workflows/`):
 
-- `ui-dashboard.yml` — lint + typecheck + test (68 test files) + Codecov
+- `ui-dashboard.yml` — lint + typecheck + test (71 test files) + Codecov
 - `indexer-envio.yml` — typecheck + lint
 - `notify-envio-deploy.yml` — Discord notification on `deploy/*` push
 

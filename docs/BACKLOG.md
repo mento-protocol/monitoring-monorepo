@@ -4,11 +4,7 @@ Last updated: 2026-04-16
 
 ## Next — v3 Alerting
 
-Extend alerting to cover Mento v3 FPMM pool-specific KPIs. Aegis infrastructure (RPC → Prometheus → Grafana Cloud → Discord/Splunk) is already live for v2 alerts. The work is defining v3-specific metrics and alert rules.
-
-### Strategy Decision Needed
-
-- [ ] **Choose data source approach** — extend Aegis config to poll v3 FPMM contracts, export Prometheus metrics from Envio indexer, or hybrid?
+The `metrics-bridge` package (Cloud Run) exports FPMM pool KPIs as Prometheus gauges. The remaining work is defining Grafana alert rules in Terraform (Slack notifications).
 
 ### v3 Alert Rules
 
@@ -20,9 +16,9 @@ Extend alerting to cover Mento v3 FPMM pool-specific KPIs. Aegis infrastructure 
 
 ### Infrastructure
 
-- [ ] **v3 Grafana dashboard** — ops dashboard for FPMM pool health
-- [ ] **Discord channels for v3 alerts** — decide channel structure (per-KPI? per-pool?)
-- [ ] **Terraform for v3 alert rules** — add to `aegis/terraform/grafana-alerts/`
+- [ ] **Grafana Agent scrape target** — add metrics-bridge URL to Aegis agent config
+- [ ] **Slack channel for v3 alerts** — create `#alerts-v3-pools` with webhook
+- [ ] **Terraform alert rules** — add to `terraform/alerts/` in this monorepo
 
 ---
 
@@ -47,7 +43,7 @@ Extend alerting to cover Mento v3 FPMM pool-specific KPIs. Aegis infrastructure 
 
 ## Tech Debt
 
-- [ ] Dashboard component test coverage (68 test files total, but many are lib/util — component tests sparse)
+- [ ] Dashboard component test coverage (71 test files total, but many are lib/util — component tests sparse)
 - [ ] Revenue page placeholders ("CDP Borrowing Fees" and "Reserve Yield" marked "Soon")
 
 ---
@@ -73,9 +69,9 @@ Extend alerting to cover Mento v3 FPMM pool-specific KPIs. Aegis infrastructure 
 - [x] FX calendar extracted to `shared-config` package
 - [x] Multichain config (`config.multichain.mainnet.yaml` — Celo + Monad)
 - [x] `txHash` on all events, `@index` directives for query performance
-- [x] Config files: `config.celo.mainnet.yaml`, `config.celo.sepolia.yaml`
+- [x] Multichain config: `config.multichain.mainnet.yaml`, `config.multichain.testnet.yaml`
 - [x] Deploy branch strategy (`deploy/celo-mainnet`, `deploy/celo-sepolia`)
-- [x] `contracts.json` committed + integrated into network config
+- [x] Token addresses sourced from `@mento-protocol/contracts`
 - [x] Retry + fallback RPC on rate limit and block-out-of-range errors
 
 ### Dashboard
@@ -100,7 +96,7 @@ Extend alerting to cover Mento v3 FPMM pool-specific KPIs. Aegis infrastructure 
 ### Infrastructure (Done)
 
 - [x] Monorepo extraction from devnet repo
-- [x] CI: ESLint 10 + Vitest (68 test files) + typecheck + Codecov
+- [x] CI: ESLint 10 + Vitest (71 test files) + typecheck + Codecov
 - [x] `pnpm deploy:indexer [network]` (prompts if no network passed)
 - [x] `pnpm update-endpoint:mainnet` — Vercel env var update after indexer redeploy
 - [x] Discord notification on deploy branch push (`notify-envio-deploy.yml`)
