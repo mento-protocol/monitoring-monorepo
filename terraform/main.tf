@@ -224,6 +224,7 @@ resource "local_file" "vercel_project_json" {
 
 # ── GCP Project ──────────────────────────────────────────────────────────────
 # Dedicated project for monitoring infrastructure, separate from mento-prod.
+# One `terraform apply` bootstraps everything: project → APIs → AR → image → Cloud Run.
 
 resource "google_project" "monitoring" {
   name            = "Mento Monitoring"
@@ -235,6 +236,8 @@ resource "google_project" "monitoring" {
     prevent_destroy = true
   }
 }
+
+# ── GCP APIs ─────────────────────────────────────────────────────────────────
 
 resource "google_project_service" "run" {
   project = google_project.monitoring.project_id
@@ -251,6 +254,8 @@ resource "google_project_service" "cloudbuild" {
   service = "cloudbuild.googleapis.com"
 }
 
+# ── Artifact Registry ────────────────────────────────────────────────────────
+
 resource "google_artifact_registry_repository" "metrics_bridge" {
   project       = google_project.monitoring.project_id
   location      = var.gcp_region
@@ -261,17 +266,53 @@ resource "google_artifact_registry_repository" "metrics_bridge" {
   depends_on = [google_project_service.artifactregistry]
 }
 
+locals {
+  metrics_bridge_image = "${var.gcp_region}-docker.pkg.dev/${google_project.monitoring.project_id}/${google_artifact_registry_repository.metrics_bridge.repository_id}/metrics-bridge:latest"
+}
+
+# ── Image Build ──────────────────────────────────────────────────────────────
+# Builds and pushes the metrics-bridge container image via Cloud Build.
+# Triggers on changes to the Dockerfile or source files.
+
+resource "null_resource" "metrics_bridge_build" {
+  triggers = {
+    dockerfile = filesha256("${path.module}/../metrics-bridge/Dockerfile")
+    source     = sha256(join("", [for f in sort(fileset("${path.module}/../metrics-bridge/src", "**/*.ts")) : filesha256("${path.module}/../metrics-bridge/src/${f}")]))
+    package    = filesha256("${path.module}/../metrics-bridge/package.json")
+    lockfile   = filesha256("${path.module}/../pnpm-lock.yaml")
+  }
+
+  provisioner "local-exec" {
+    working_dir = "${path.module}/.."
+    command     = <<-EOT
+      gcloud builds submit \
+        --project="${google_project.monitoring.project_id}" \
+        --tag="${local.metrics_bridge_image}" \
+        --timeout=600s \
+        --dockerfile=metrics-bridge/Dockerfile \
+        .
+    EOT
+  }
+
+  depends_on = [
+    google_project_service.cloudbuild,
+    google_artifact_registry_repository.metrics_bridge,
+  ]
+}
+
 # ── Metrics Bridge (Cloud Run) ───────────────────────────────────────────────
 # Polls Hasura for FPMM pool KPIs and exports Prometheus gauges.
 # Scraped by Grafana Agent (Aegis repo) → Grafana Cloud alert rules.
 
 resource "google_cloud_run_v2_service" "metrics_bridge" {
-  count    = var.metrics_bridge_enabled ? 1 : 0
   project  = google_project.monitoring.project_id
   name     = "metrics-bridge"
   location = var.gcp_region
 
-  depends_on = [google_project_service.run]
+  depends_on = [
+    google_project_service.run,
+    null_resource.metrics_bridge_build,
+  ]
 
   template {
     scaling {
@@ -279,7 +320,7 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
       max_instance_count = 1
     }
     containers {
-      image = var.metrics_bridge_image
+      image = local.metrics_bridge_image
       ports {
         container_port = 8080
       }
@@ -303,10 +344,41 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
 
 # Allow unauthenticated access so Grafana Agent can scrape /metrics.
 resource "google_cloud_run_v2_service_iam_member" "metrics_bridge_public" {
-  count    = var.metrics_bridge_enabled ? 1 : 0
-  project  = google_cloud_run_v2_service.metrics_bridge[0].project
-  location = google_cloud_run_v2_service.metrics_bridge[0].location
-  name     = google_cloud_run_v2_service.metrics_bridge[0].name
+  project  = google_cloud_run_v2_service.metrics_bridge.project
+  location = google_cloud_run_v2_service.metrics_bridge.location
+  name     = google_cloud_run_v2_service.metrics_bridge.name
   role     = "roles/run.invoker"
   member   = "allUsers"
+}
+
+# ── Dev Team IAM ─────────────────────────────────────────────────────────────
+# Gives devs the ability to deploy new revisions, push images, and submit builds.
+
+resource "google_project_iam_member" "dev_run_admin" {
+  for_each = toset(var.gcp_dev_members)
+  project  = google_project.monitoring.project_id
+  role     = "roles/run.admin"
+  member   = each.value
+}
+
+resource "google_project_iam_member" "dev_ar_writer" {
+  for_each = toset(var.gcp_dev_members)
+  project  = google_project.monitoring.project_id
+  role     = "roles/artifactregistry.writer"
+  member   = each.value
+}
+
+resource "google_project_iam_member" "dev_cloudbuild_editor" {
+  for_each = toset(var.gcp_dev_members)
+  project  = google_project.monitoring.project_id
+  role     = "roles/cloudbuild.builds.editor"
+  member   = each.value
+}
+
+# Cloud Run needs to act as a service account to pull images.
+resource "google_project_iam_member" "dev_sa_user" {
+  for_each = toset(var.gcp_dev_members)
+  project  = google_project.monitoring.project_id
+  role     = "roles/iam.serviceAccountUser"
+  member   = each.value
 }

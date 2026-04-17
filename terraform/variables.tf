@@ -132,19 +132,8 @@ variable "gcp_region" {
   default     = "europe-west1"
 }
 
-variable "metrics_bridge_enabled" {
-  description = "Whether to provision the metrics-bridge Cloud Run service. Set to true once the first image has been built."
-  type        = bool
-  default     = false
-}
-
-variable "metrics_bridge_image" {
-  description = "Container image for the metrics bridge (e.g. europe-west1-docker.pkg.dev/monitoring/metrics-bridge/metrics-bridge:latest)."
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = var.metrics_bridge_image == "" || can(regex("^[a-z]", var.metrics_bridge_image))
-    error_message = "metrics_bridge_image must be a valid container image reference or empty string."
-  }
+variable "gcp_dev_members" {
+  description = "IAM members who can deploy and manage the metrics-bridge service (e.g. [\"user:alice@mentolabs.xyz\", \"group:eng@mentolabs.xyz\"])."
+  type        = list(string)
+  default     = []
 }
