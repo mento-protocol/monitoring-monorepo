@@ -4,6 +4,7 @@ import type { Pool } from "@/lib/types";
 import { parseWei, formatWei, formatUSD } from "@/lib/format";
 import { computeReservePcts, computeThresholdLines } from "@/lib/reserves";
 import {
+  canPricePool,
   tokenSymbol,
   tokenToUSD,
   USDM_SYMBOLS,
@@ -76,8 +77,14 @@ export function ReservesPanel({ pool, rates }: ReservesPanelProps) {
   const color1 = pct1 > 50 ? "bg-indigo-500" : "bg-emerald-500";
 
   const thresholds = computeThresholdLines(pool.rebalanceThreshold, usdTotal);
-  const showThresholdLegend =
-    hasReserves && !isEmptyPool && thresholds !== null;
+  // For non-USDm pairs without a loaded rate map, computeReservePcts would
+  // fall back to a raw-token split (economically wrong for FX/FX pools
+  // where a balanced USD value implies an unbalanced raw-unit ratio). Gate
+  // tank rendering on USD-priceable so we never show a confident-looking
+  // percentage that's silently wrong.
+  const priceable = canPricePool(pool, network, rates ?? new Map());
+  const showTanks = hasReserves && !isEmptyPool && priceable;
+  const showThresholdLegend = showTanks && thresholds !== null;
 
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6 h-full flex flex-col">
@@ -103,6 +110,10 @@ export function ReservesPanel({ pool, rates }: ReservesPanelProps) {
         <p className="text-sm text-slate-400">No reserve data available yet.</p>
       ) : isEmptyPool ? (
         <p className="text-sm text-slate-400">Pool has no reserves yet.</p>
+      ) : !priceable ? (
+        <p className="text-sm text-slate-400">
+          Reserves pricing unavailable for this pair.
+        </p>
       ) : (
         <div className="flex gap-4 flex-1 min-h-[200px]">
           <Tank

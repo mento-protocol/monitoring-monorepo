@@ -63,25 +63,32 @@ export function PoolVolumeOverTimeChart({
     return points;
   }, [priceable, pool, network, snapshots, rates]);
 
-  // Day-aligned cutoff with gap-fill: "1W" renders exactly 7 UTC-day buckets
-  // (6 prior full + today), "1M" renders 30. Missing daily snapshots — real
-  // in this repo for sparse pools — surface as explicit $0 bars rather than
-  // dropped points, so Plotly doesn't bridge a line across absent days and
-  // the headline total is the honest sum over the full calendar window.
+  // Day-aligned gap-fill. "1W" renders exactly 7 UTC-day buckets (6 prior
+  // full + today), "1M" renders 30, and "All" spans every day from the
+  // pool's first snapshot to today. Missing daily snapshots — real in this
+  // repo for sparse pools — surface as explicit $0 bars rather than
+  // dropped points, so Plotly doesn't bridge a line across inactive days
+  // and the headline total is the honest sum over the window.
   const visibleSeries = useMemo(() => {
-    if (range === "all" || fullSeries.length === 0) return fullSeries;
-    const days = range === "7d" ? 7 : 30;
+    if (fullSeries.length === 0) return fullSeries;
     const todayStart =
       Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
     const byBucket = new Map<number, number>();
+    let earliest = todayStart;
     for (const pt of fullSeries) {
       const bucket =
         Math.floor(pt.timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
       byBucket.set(bucket, pt.value);
+      if (bucket < earliest) earliest = bucket;
     }
+    const windowStart =
+      range === "7d"
+        ? todayStart - 6 * SECONDS_PER_DAY
+        : range === "30d"
+          ? todayStart - 29 * SECONDS_PER_DAY
+          : earliest;
     const points: TimeSeriesPoint[] = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const ts = todayStart - i * SECONDS_PER_DAY;
+    for (let ts = windowStart; ts <= todayStart; ts += SECONDS_PER_DAY) {
       points.push({ timestamp: ts, value: byBucket.get(ts) ?? 0 });
     }
     return points;
