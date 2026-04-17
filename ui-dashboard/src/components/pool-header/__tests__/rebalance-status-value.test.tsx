@@ -358,7 +358,10 @@ describe("RebalanceStatusValue", () => {
     expect(html).not.toContain("Rebalance blocked");
   });
 
-  it("renders 'last <relative>' in the merged subtitle when pool.lastRebalancedAt is present", () => {
+  it("renders 'last <relative>' on the headline line when pool.lastRebalancedAt is present", () => {
+    // The timestamp moved from the subtitle to the headline alongside the
+    // status label ("Balanced · last 2m ago"). The subtitle now carries
+    // only the strategy attribution.
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     mockUseGQL.mockReturnValueOnce({ data: undefined });
     const poolWithLast: Pool = {
@@ -372,7 +375,9 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toMatch(/· last [0-9]+[smhd] ago/);
+    expect(html).toMatch(/last [0-9]+[smhd] ago/);
+    // The "·" separator sits in its own aria-hidden span before the timestamp.
+    expect(html).toContain('aria-hidden="true">·');
   });
 
   it("links 'last <relative>' to the latest rebalance tx on the explorer when available", () => {
@@ -391,13 +396,16 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    // Subtitle shape: "…· <a>last Ns ago</a>" — subtitle link leans on
+    // Headline shape: "<Status>· <a>last Ns ago</a>" — link leans on
     // indigo-hover for its clickability signal (no ↗).
     expect(html).toContain('href="https://celoscan.io/tx/0xdeadbeef"');
-    expect(html).toMatch(/· <a [^>]*>last [0-9]+[smhd] ago<\/a>/);
+    expect(html).toMatch(/<a [^>]*>last [0-9]+[smhd] ago<\/a>/);
   });
 
-  it("renders 'never rebalanced' in the subtitle when pool.lastRebalancedAt is undefined", () => {
+  it("omits the rebalance-time segment entirely when pool.lastRebalancedAt is undefined", () => {
+    // "never rebalanced" copy was dropped — absence of a recorded rebalance
+    // simply means no timestamp segment (and no "·" separator) is rendered
+    // on the headline. Subtitle remains just "via {strategy}".
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     const poolWithoutLast: Pool = { ...BASE_POOL, lastRebalancedAt: undefined };
     const html = renderToStaticMarkup(
@@ -407,10 +415,12 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toContain("· never rebalanced");
+    expect(html).not.toContain("never rebalanced");
+    expect(html).not.toMatch(/last [0-9]+[smhd] ago/);
+    expect(html).not.toContain('aria-hidden="true">·');
   });
 
-  it("renders 'never rebalanced' when pool.lastRebalancedAt is the sentinel \"0\"", () => {
+  it('omits the rebalance-time segment when pool.lastRebalancedAt is the sentinel "0"', () => {
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     const poolWithZero: Pool = { ...BASE_POOL, lastRebalancedAt: "0" };
     const html = renderToStaticMarkup(
@@ -420,12 +430,13 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toContain("· never rebalanced");
+    expect(html).not.toContain("never rebalanced");
+    expect(html).not.toMatch(/last [0-9]+[smhd] ago/);
   });
 
-  it("renders 'never rebalanced' when pool.lastRebalancedAt is null at runtime", () => {
+  it("omits the rebalance-time segment when pool.lastRebalancedAt is null at runtime", () => {
     // Pool type says `string | undefined` but Hasura returns null for absent
-    // nullable fields — the null path must also fall to "never rebalanced"
+    // nullable fields — the null path must also drop the timestamp segment
     // instead of leaking through to "last —" and firing the lookup query.
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     const poolWithNull = {
@@ -439,8 +450,9 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toContain("· never rebalanced");
+    expect(html).not.toContain("never rebalanced");
     expect(html).not.toContain("last —");
+    expect(html).not.toMatch(/last [0-9]+[smhd] ago/);
   });
 
   it("links the strategy name from useAddressLabels inside the 'via …' subtitle", () => {

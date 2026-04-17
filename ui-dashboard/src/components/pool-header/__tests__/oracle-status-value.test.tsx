@@ -65,9 +65,12 @@ describe("OracleStatusValue", () => {
       <OracleStatusValue pool={pool} network={MOCK_NETWORK} />,
     );
     expect(html).toContain('href="https://celoscan.io/tx/0xdeadbeef"');
-    // Subtitle shape: `<a>Updated Ns ago</a> · Expiry: 5m` — no ↗ on
-    // non-primary links (indigo-hover is the clickability signal).
-    expect(html).toMatch(/Updated [^<]+<\/a> · Expiry:/);
+    // Layout: first line is `Fresh · 5m Expiry`, second line is
+    // `<a>Updated Ns ago</a>` — no ↗ on non-primary links (indigo-hover is
+    // the clickability signal).
+    expect(html).toMatch(
+      /<a[^>]+href="https:\/\/celoscan\.io\/tx\/0xdeadbeef"[^>]*>Updated [^<]+<\/a>/,
+    );
     expect(html).not.toContain("↗");
   });
 
@@ -84,13 +87,13 @@ describe("OracleStatusValue", () => {
     expect(html).not.toContain("/tx/");
   });
 
-  it("omits the Updated prefix but still shows Expiry: when oracleTimestamp is missing", () => {
+  it("omits the Updated prefix but still shows the expiry label when oracleTimestamp is missing", () => {
     const pool: Pool = { ...BASE_POOL, oracleTimestamp: undefined };
     const html = renderToStaticMarkup(
       <OracleStatusValue pool={pool} network={MOCK_NETWORK} />,
     );
     expect(html).not.toContain("Updated");
-    expect(html).toContain("Expiry:");
+    expect(html).toContain("5m Expiry");
   });
 
   it('omits the Updated prefix when oracleTimestamp is the sentinel "0"', () => {
@@ -99,15 +102,15 @@ describe("OracleStatusValue", () => {
       <OracleStatusValue pool={pool} network={MOCK_NETWORK} />,
     );
     expect(html).not.toContain("Updated");
-    expect(html).toContain("Expiry:");
+    expect(html).toContain("5m Expiry");
   });
 
-  it("renders a single-line subtitle with 'Expiry: Nm' from the staleness threshold", () => {
+  it("renders the 'Nm Expiry' label derived from the staleness threshold on the status line", () => {
     const pool: Pool = { ...BASE_POOL, oracleTimestamp: FRESH_TS };
     const html = renderToStaticMarkup(
       <OracleStatusValue pool={pool} network={MOCK_NETWORK} />,
     );
-    // oracleExpiry=300s → 5m. Subtitle is "Updated Ns ago · Expiry: 5m".
-    expect(html).toContain("Expiry: 5m");
+    // oracleExpiry=300s → 5m. Status line is `Fresh · 5m Expiry`.
+    expect(html).toContain("5m Expiry");
   });
 });

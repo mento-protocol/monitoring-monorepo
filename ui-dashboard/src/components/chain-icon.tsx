@@ -16,12 +16,12 @@ const CHAIN_ICONS: Record<number, ComponentType<BrandedIconProps>> = {
   137: NetworkPolygon,
 };
 
-function GenericChainIcon() {
+function GenericChainIcon({ size }: { size: number }) {
   return (
     <svg
       viewBox="0 0 24 24"
-      width={14}
-      height={14}
+      width={size}
+      height={size}
       aria-hidden="true"
       focusable="false"
     >
@@ -30,7 +30,13 @@ function GenericChainIcon() {
   );
 }
 
-export function ChainIcon({ network }: { network: Network }) {
+export function ChainIcon({
+  network,
+  size = 14,
+}: {
+  network: Network;
+  size?: number;
+}) {
   const Icon = CHAIN_ICONS[network.chainId];
   const dim = network.testnet || network.local;
   return (
@@ -40,7 +46,11 @@ export function ChainIcon({ network }: { network: Network }) {
       title={network.label}
       className={`inline-flex flex-shrink-0 items-center${dim ? " opacity-60" : ""}`}
     >
-      {Icon ? <Icon size={14} variant="branded" /> : <GenericChainIcon />}
+      {Icon ? (
+        <Icon size={size} variant="branded" />
+      ) : (
+        <GenericChainIcon size={size} />
+      )}
     </span>
   );
 }
