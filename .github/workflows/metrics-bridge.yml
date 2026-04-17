@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - metrics-bridge/**
+      - pnpm-workspace.yaml
       - pnpm-lock.yaml
       - package.json
       - .github/workflows/metrics-bridge.yml
@@ -35,6 +36,7 @@ jobs:
           filters: |
             bridge:
               - metrics-bridge/**
+              - pnpm-workspace.yaml
               - pnpm-lock.yaml
               - package.json
               - .github/workflows/metrics-bridge.yml
