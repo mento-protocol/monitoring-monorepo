@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-PROJECT="${GCP_PROJECT:-mento-prod}"
+PROJECT="${GCP_PROJECT:-monitoring}"
 REGION="${GCP_REGION:-europe-west1}"
 REPO="metrics-bridge"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${REPO}/metrics-bridge"

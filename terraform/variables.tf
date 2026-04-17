@@ -110,9 +110,9 @@ variable "terraform_service_account" {
 }
 
 variable "gcp_project_id" {
-  description = "GCP project ID for Cloud Run deployment."
+  description = "GCP project ID for Cloud Run deployment. Separate from mento-prod (Aegis)."
   type        = string
-  default     = "mento-prod"
+  default     = "monitoring"
 }
 
 variable "gcp_region" {
@@ -128,7 +128,7 @@ variable "metrics_bridge_enabled" {
 }
 
 variable "metrics_bridge_image" {
-  description = "Container image for the metrics bridge (e.g. europe-west1-docker.pkg.dev/mento-prod/metrics-bridge/metrics-bridge:latest)."
+  description = "Container image for the metrics bridge (e.g. europe-west1-docker.pkg.dev/monitoring/metrics-bridge/metrics-bridge:latest)."
   type        = string
   default     = ""
 
