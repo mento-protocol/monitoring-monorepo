@@ -410,17 +410,25 @@ function PoolDetail() {
               pool={pool}
               network={network}
               snapshots={dailySnapshots}
+              // Gate every "waiting on data" state on `fpmmPool`. Non-FPMM
+              // pools skip both the snapshot and rate-map queries at the
+              // render layer — they go straight to the
+              // `historySupported={false}` branch, which shouldn't be
+              // masked by a loading skeleton or error copy driven by
+              // side queries that don't affect its output.
               isLoading={
-                (fpmmPool && dailySnapshotLoading) ||
-                (poolNeedsRates && ratesLoading)
+                fpmmPool &&
+                (dailySnapshotLoading || (poolNeedsRates && ratesLoading))
               }
-              // Only treat a rates-query failure as a chart error for pools
-              // that actually need the rate map (non-USD-pegged pairs).
-              // USDm-leg pools keep rendering from the pool's own row —
-              // they don't care whether ALL_POOLS_WITH_HEALTH succeeded.
+              // Rates-query failure only surfaces as chart error for pools
+              // that actually need the rate map (non-USD-pegged pairs) and
+              // that would render history if they could. USDm-leg pools
+              // keep rendering from the pool's own row without regard to
+              // ALL_POOLS_WITH_HEALTH.
               hasError={
-                dailySnapshotError !== undefined ||
-                (poolNeedsRates && ratesError)
+                fpmmPool &&
+                (dailySnapshotError !== undefined ||
+                  (poolNeedsRates && ratesError))
               }
               rates={rates}
               historySupported={fpmmPool}
@@ -429,22 +437,34 @@ function PoolDetail() {
               pool={pool}
               network={network}
               snapshots={dailySnapshots}
+              // Gate every "waiting on data" state on `fpmmPool`. Non-FPMM
+              // pools skip both the snapshot and rate-map queries at the
+              // render layer — they go straight to the
+              // `historySupported={false}` branch, which shouldn't be
+              // masked by a loading skeleton or error copy driven by
+              // side queries that don't affect its output.
               isLoading={
-                (fpmmPool && dailySnapshotLoading) ||
-                (poolNeedsRates && ratesLoading)
+                fpmmPool &&
+                (dailySnapshotLoading || (poolNeedsRates && ratesLoading))
               }
-              // Only treat a rates-query failure as a chart error for pools
-              // that actually need the rate map (non-USD-pegged pairs).
-              // USDm-leg pools keep rendering from the pool's own row —
-              // they don't care whether ALL_POOLS_WITH_HEALTH succeeded.
+              // Rates-query failure only surfaces as chart error for pools
+              // that actually need the rate map (non-USD-pegged pairs) and
+              // that would render history if they could. USDm-leg pools
+              // keep rendering from the pool's own row without regard to
+              // ALL_POOLS_WITH_HEALTH.
               hasError={
-                dailySnapshotError !== undefined ||
-                (poolNeedsRates && ratesError)
+                fpmmPool &&
+                (dailySnapshotError !== undefined ||
+                  (poolNeedsRates && ratesError))
               }
               rates={rates}
               historySupported={fpmmPool}
             />
-            <ReservesPanel pool={pool} rates={rates} />
+            <ReservesPanel
+              pool={pool}
+              rates={rates}
+              ratesLoading={poolNeedsRates && ratesLoading}
+            />
           </div>
         </>
       )}

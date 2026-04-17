@@ -15,9 +15,19 @@ import { useNetwork } from "@/components/network-provider";
 interface ReservesPanelProps {
   pool: Pool;
   rates?: OracleRateMap;
+  /**
+   * True while the cross-pool rate-map query is still in flight. Lets the
+   * panel show a loading state for pairs that need derived FX rates
+   * instead of flashing the permanent "unavailable" copy on first render.
+   */
+  ratesLoading?: boolean;
 }
 
-export function ReservesPanel({ pool, rates }: ReservesPanelProps) {
+export function ReservesPanel({
+  pool,
+  rates,
+  ratesLoading = false,
+}: ReservesPanelProps) {
   const { network } = useNetwork();
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
@@ -110,6 +120,8 @@ export function ReservesPanel({ pool, rates }: ReservesPanelProps) {
         <p className="text-sm text-slate-400">No reserve data available yet.</p>
       ) : isEmptyPool ? (
         <p className="text-sm text-slate-400">Pool has no reserves yet.</p>
+      ) : !priceable && ratesLoading ? (
+        <p className="text-sm text-slate-400">Loading reserves…</p>
       ) : !priceable ? (
         <p className="text-sm text-slate-400">
           Reserves pricing unavailable for this pair.
