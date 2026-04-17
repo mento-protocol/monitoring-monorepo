@@ -7,7 +7,11 @@ import type { Network } from "@/lib/networks";
 import { canPricePool, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
-import { type RangeKey, type TimeSeriesPoint } from "@/lib/time-series";
+import {
+  SECONDS_PER_DAY,
+  type RangeKey,
+  type TimeSeriesPoint,
+} from "@/lib/time-series";
 
 interface PoolVolumeOverTimeChartProps {
   pool: Pool;
@@ -59,17 +63,18 @@ export function PoolVolumeOverTimeChart({
     return points;
   }, [priceable, pool, network, snapshots, rates]);
 
-  // Slice by bucket count rather than a rolling-second cutoff. Each
-  // snapshot already represents one UTC day, so "1W" deterministically
-  // means "last 7 buckets (6 full prior days + today's partial)" — no
-  // render-time drift and `rangeTotal` always matches the visible bars.
-  // The fractional first day that a rolling-second cutoff would try to
-  // include is undefined for daily granularity; slicing keeps the semantics
-  // honest about what can actually be shown.
+  // Day-aligned cutoff: "1W" = last 7 UTC days (6 prior full + today), "1M"
+  // = last 30. Aligns to the current UTC-day boundary so the window doesn't
+  // drift across renders within the same day, and stays in calendar-day
+  // terms even when the pool has gaps in its daily snapshots (a slice(-N)
+  // over rows would silently widen the window past N days for sparse pools).
   const visibleSeries = useMemo(() => {
     if (range === "all") return fullSeries;
-    const keep = range === "7d" ? 7 : 30;
-    return fullSeries.slice(-keep);
+    const days = range === "7d" ? 7 : 30;
+    const todayStart =
+      Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+    const cutoff = todayStart - (days - 1) * SECONDS_PER_DAY;
+    return fullSeries.filter((pt) => pt.timestamp >= cutoff);
   }, [fullSeries, range]);
 
   const rangeTotal = useMemo(

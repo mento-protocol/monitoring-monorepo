@@ -44,8 +44,13 @@ function PressureBar({
           className={`h-2 rounded-full transition-all ${color}`}
           style={{ width: `${pct}%` }}
           role="progressbar"
-          aria-valuenow={ratio * 100}
+          aria-label={label}
+          aria-valuenow={Math.round(pct)}
+          aria-valuemin={0}
           aria-valuemax={100}
+          aria-valuetext={
+            ratio > 1 ? `${displayPct}% (over limit)` : `${displayPct}%`
+          }
         />
       </div>
       <div className="text-xs text-slate-400">
@@ -59,9 +64,14 @@ function PressureBar({
 interface LimitPanelProps {
   pool: Pool;
   tradingLimits: TradingLimit[];
+  hasError?: boolean;
 }
 
-export function LimitPanel({ pool, tradingLimits }: LimitPanelProps) {
+export function LimitPanel({
+  pool,
+  tradingLimits,
+  hasError = false,
+}: LimitPanelProps) {
   const { network } = useNetwork();
   const isVirtual = pool.source?.includes("virtual");
   const status = isVirtual ? "N/A" : computeLimitStatus(pool);
@@ -76,6 +86,10 @@ export function LimitPanel({ pool, tradingLimits }: LimitPanelProps) {
       {isVirtual ? (
         <p className="text-sm text-slate-400">
           VirtualPool — trading limits not applicable.
+        </p>
+      ) : hasError ? (
+        <p className="text-sm text-red-400">
+          Unable to load trading limits — try again later.
         </p>
       ) : tradingLimits.length === 0 ? (
         <p className="text-sm text-slate-400">

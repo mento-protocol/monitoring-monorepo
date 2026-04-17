@@ -302,11 +302,11 @@ function PoolDetail() {
     }
   }, [pool, poolLoading, poolErr, router]);
 
-  const { data: limitsData } = useGQL<{ TradingLimit: TradingLimit[] }>(
-    TRADING_LIMITS,
-    { poolId: normalizedPoolId },
-  );
+  const { data: limitsData, error: limitsError } = useGQL<{
+    TradingLimit: TradingLimit[];
+  }>(TRADING_LIMITS, { poolId: normalizedPoolId });
   const tradingLimits = limitsData?.TradingLimit ?? [];
+  const tradingLimitsError = limitsError !== undefined;
 
   const { data: deployData } = useGQL<{
     FactoryDeployment: { txHash: string }[];
@@ -526,7 +526,11 @@ function PoolDetail() {
           />
         )}
         {tab === "limits" && pool && (
-          <LimitPanel pool={pool} tradingLimits={tradingLimits} />
+          <LimitPanel
+            pool={pool}
+            tradingLimits={tradingLimits}
+            hasError={tradingLimitsError}
+          />
         )}
         {tab === "ols" && (
           <OlsTab

@@ -140,6 +140,7 @@ function DeviationBar({
             className={`h-2 rounded-full transition-all ${color}`}
             style={{ width: `${pct}%` }}
             role="progressbar"
+            aria-label="Deviation from rebalance threshold"
             // Use the same 0-100 % scale as the visual fill rather than the
             // raw diff/threshold pair: when the pool breaches, `diff` would
             // exceed `threshold` and aria-valuenow > aria-valuemax is an
