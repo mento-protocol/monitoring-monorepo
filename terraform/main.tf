@@ -222,14 +222,56 @@ resource "local_file" "vercel_project_json" {
   file_permission = "0644"
 }
 
+# ── GCP Project ──────────────────────────────────────────────────────────────
+# Dedicated project for monitoring infrastructure, separate from mento-prod.
+
+resource "google_project" "monitoring" {
+  name            = "Mento Monitoring"
+  project_id      = var.gcp_project_id
+  org_id          = var.gcp_org_id
+  billing_account = var.gcp_billing_account
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "google_project_service" "run" {
+  project = google_project.monitoring.project_id
+  service = "run.googleapis.com"
+}
+
+resource "google_project_service" "artifactregistry" {
+  project = google_project.monitoring.project_id
+  service = "artifactregistry.googleapis.com"
+}
+
+resource "google_project_service" "cloudbuild" {
+  project = google_project.monitoring.project_id
+  service = "cloudbuild.googleapis.com"
+}
+
+resource "google_artifact_registry_repository" "metrics_bridge" {
+  project       = google_project.monitoring.project_id
+  location      = var.gcp_region
+  repository_id = "metrics-bridge"
+  format        = "DOCKER"
+  description   = "Container images for the metrics-bridge service"
+
+  depends_on = [google_project_service.artifactregistry]
+}
+
 # ── Metrics Bridge (Cloud Run) ───────────────────────────────────────────────
 # Polls Hasura for FPMM pool KPIs and exports Prometheus gauges.
 # Scraped by Grafana Agent (Aegis repo) → Grafana Cloud alert rules.
 
 resource "google_cloud_run_v2_service" "metrics_bridge" {
   count    = var.metrics_bridge_enabled ? 1 : 0
+  project  = google_project.monitoring.project_id
   name     = "metrics-bridge"
   location = var.gcp_region
+
+  depends_on = [google_project_service.run]
 
   template {
     scaling {

@@ -7,12 +7,12 @@
 #   pnpm bridge:deploy --tag v1.2.3   → deploy with a specific image tag
 #
 # Prerequisites:
-#   - gcloud CLI authenticated with mento-prod project access
+#   - gcloud CLI authenticated with monitoring project access
 #   - terraform.tfvars configured with gcp_project_id
 
 set -euo pipefail
 
-PROJECT="${GCP_PROJECT:-monitoring}"
+PROJECT="${GCP_PROJECT:-mento-monitoring}"
 REGION="${GCP_REGION:-europe-west1}"
 REPO="metrics-bridge"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${REPO}/metrics-bridge"

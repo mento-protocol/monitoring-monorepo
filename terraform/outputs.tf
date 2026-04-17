@@ -23,6 +23,16 @@ output "google_oauth_redirect_uri" {
   value       = "https://${vercel_project_domain.monitoring.domain}/api/auth/callback/google"
 }
 
+output "gcp_project_id" {
+  description = "GCP project ID for the monitoring project."
+  value       = google_project.monitoring.project_id
+}
+
+output "artifact_registry_url" {
+  description = "Artifact Registry Docker URL for pushing images."
+  value       = "${var.gcp_region}-docker.pkg.dev/${google_project.monitoring.project_id}/${google_artifact_registry_repository.metrics_bridge.repository_id}"
+}
+
 output "metrics_bridge_url" {
   description = "Cloud Run URL for the metrics bridge — add as Grafana Agent scrape target."
   value       = length(google_cloud_run_v2_service.metrics_bridge) > 0 ? google_cloud_run_v2_service.metrics_bridge[0].uri : ""

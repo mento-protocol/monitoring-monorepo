@@ -110,9 +110,20 @@ variable "terraform_service_account" {
 }
 
 variable "gcp_project_id" {
-  description = "GCP project ID for Cloud Run deployment. Separate from mento-prod (Aegis)."
+  description = "GCP project ID for the monitoring project. Separate from mento-prod (Aegis)."
   type        = string
-  default     = "monitoring"
+  default     = "mento-monitoring"
+}
+
+variable "gcp_org_id" {
+  description = "GCP organization ID. Find with: gcloud organizations list"
+  type        = string
+}
+
+variable "gcp_billing_account" {
+  description = "GCP billing account ID. Find with: gcloud billing accounts list"
+  type        = string
+  sensitive   = true
 }
 
 variable "gcp_region" {
