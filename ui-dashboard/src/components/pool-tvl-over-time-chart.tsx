@@ -114,10 +114,10 @@ export function PoolTvlOverTimeChart({
       emptyMessage={
         hasError
           ? "Unable to load TVL history"
-          : !priceable
-            ? "TVL unavailable for this pair"
-            : !historySupported
-              ? "History unavailable for this pool type"
+          : !historySupported
+            ? "History unavailable for this pool type"
+            : !priceable
+              ? "TVL unavailable for this pair"
               : "Not enough history yet"
       }
     />

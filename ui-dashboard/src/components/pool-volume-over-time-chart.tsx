@@ -113,10 +113,10 @@ export function PoolVolumeOverTimeChart({
       emptyMessage={
         hasError
           ? "Unable to load volume history"
-          : !priceable
-            ? "Volume unavailable for this pair"
-            : !historySupported
-              ? "History unavailable for this pool type"
+          : !historySupported
+            ? "History unavailable for this pool type"
+            : !priceable
+              ? "Volume unavailable for this pair"
               : "Not enough history yet"
       }
     />
