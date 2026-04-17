@@ -2,6 +2,8 @@ import { GraphQLClient, gql } from "graphql-request";
 import { HASURA_URL } from "./config.js";
 import type { BridgePoolsResponse } from "./types.js";
 
+const REQUEST_TIMEOUT_MS = 15_000;
+
 const BRIDGE_POOLS_QUERY = gql`
   query BridgePools {
     Pool(where: { source: { _like: "%fpmm%" } }) {
@@ -21,6 +23,7 @@ const BRIDGE_POOLS_QUERY = gql`
       limitPressure1
       lastRebalancedAt
       rebalanceLivenessStatus
+      hasHealthData
     }
   }
 `;
@@ -28,5 +31,8 @@ const BRIDGE_POOLS_QUERY = gql`
 const client = new GraphQLClient(HASURA_URL);
 
 export async function fetchPools(): Promise<BridgePoolsResponse> {
-  return client.request<BridgePoolsResponse>(BRIDGE_POOLS_QUERY);
+  return client.request<BridgePoolsResponse>({
+    document: BRIDGE_POOLS_QUERY,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
 }

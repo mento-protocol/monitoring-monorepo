@@ -103,7 +103,11 @@ export function updateMetrics(pools: PoolRow[]): void {
     gauges.oracleOk.set(labels, pool.oracleOk ? 1 : 0);
     gauges.oracleTimestamp.set(labels, Number(pool.oracleTimestamp));
     gauges.oracleExpiry.set(labels, Number(pool.oracleExpiry));
-    gauges.deviationRatio.set(labels, fp(pool.lastDeviationRatio));
+    // Skip sentinel value: indexer initializes lastDeviationRatio to "-1" before
+    // first health snapshot. Exporting -1 would confuse PromQL threshold alerts.
+    if (pool.hasHealthData) {
+      gauges.deviationRatio.set(labels, fp(pool.lastDeviationRatio));
+    }
     gauges.deviationBreachStart.set(
       labels,
       Number(pool.deviationBreachStartedAt),

@@ -274,6 +274,8 @@ locals {
     filesha256("${path.module}/../metrics-bridge/package.json"),
     filesha256("${path.module}/../metrics-bridge/tsconfig.json"),
     filesha256("${path.module}/../pnpm-lock.yaml"),
+    filesha256("${path.module}/../pnpm-workspace.yaml"),
+    filesha256("${path.module}/../cloudbuild.yaml"),
   ])), 0, 12)
 
   metrics_bridge_ar_repo = "${var.gcp_region}-docker.pkg.dev/${google_project.monitoring.project_id}/${google_artifact_registry_repository.metrics_bridge.repository_id}"
@@ -336,6 +338,8 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
           memory = "256Mi"
           cpu    = "1"
         }
+        # CPU must stay allocated between requests for the background polling loop.
+        cpu_idle = false
       }
       env {
         name  = "HASURA_URL"

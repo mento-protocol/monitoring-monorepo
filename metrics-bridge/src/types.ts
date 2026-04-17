@@ -15,6 +15,7 @@ export interface PoolRow {
   limitPressure1: string;
   lastRebalancedAt: string;
   rebalanceLivenessStatus: string;
+  hasHealthData: boolean;
 }
 
 export interface BridgePoolsResponse {

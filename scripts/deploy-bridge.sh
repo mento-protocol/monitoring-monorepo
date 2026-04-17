@@ -35,7 +35,13 @@ if [ "$SKIP_CONFIRM" = false ]; then
   fi
 fi
 
+TF_AUTO_APPROVE=""
+if [ "$SKIP_CONFIRM" = true ]; then
+  TF_AUTO_APPROVE="-auto-approve"
+fi
+
 terraform -chdir=terraform apply \
+  $TF_AUTO_APPROVE \
   -replace=null_resource.metrics_bridge_build \
   -target=null_resource.metrics_bridge_build \
   -target=google_cloud_run_v2_service.metrics_bridge \

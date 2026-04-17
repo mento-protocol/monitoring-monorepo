@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - metrics-bridge/**
+      - cloudbuild.yaml
+      - .gcloudignore
       - pnpm-workspace.yaml
       - pnpm-lock.yaml
       - package.json
@@ -36,6 +38,8 @@ jobs:
           filters: |
             bridge:
               - metrics-bridge/**
+              - cloudbuild.yaml
+              - .gcloudignore
               - pnpm-workspace.yaml
               - pnpm-lock.yaml
               - package.json

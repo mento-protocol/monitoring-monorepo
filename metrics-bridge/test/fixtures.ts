@@ -19,6 +19,7 @@ export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
     limitPressure1: "0.0050",
     lastRebalancedAt: "1713199000",
     rebalanceLivenessStatus: "ACTIVE",
+    hasHealthData: true,
     ...overrides,
   };
 }
