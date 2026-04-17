@@ -14,6 +14,10 @@
     "indexer:dev": "pnpm --filter @mento-protocol/indexer-envio dev --config config.multichain.mainnet.yaml",
     "indexer:testnet:codegen": "pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml",
     "indexer:testnet:dev": "pnpm --filter @mento-protocol/indexer-envio dev --config config.multichain.testnet.yaml",
+    "bridge:dev": "pnpm --filter @mento-protocol/metrics-bridge dev",
+    "bridge:build": "pnpm --filter @mento-protocol/metrics-bridge build",
+    "bridge:test": "pnpm --filter @mento-protocol/metrics-bridge test",
+    "bridge:deploy": "./scripts/deploy-bridge.sh",
     "infra:apply": "terraform -chdir=terraform apply",
     "infra:init": "terraform -chdir=terraform init",
     "infra:plan": "terraform -chdir=terraform plan"
@@ -21,9 +25,12 @@
   "pnpm": {
     "overrides": {
       "undici": ">=6.24.0",
-      "flatted": ">=3.4.0",
-      "serialize-javascript": ">=7.0.3",
-      "diff@>=6": ">=8.0.3"
+      "flatted": ">=3.4.2",
+      "serialize-javascript": ">=7.0.5",
+      "diff@>=6": ">=8.0.3",
+      "brace-expansion": ">=2.0.2",
+      "picomatch": ">=4.0.4",
+      "vite": ">=8.0.8"
     }
   }
 }

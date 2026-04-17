@@ -100,3 +100,46 @@ variable "blob_read_write_token" {
   type        = string
   sensitive   = true
 }
+
+# ── Google Cloud (metrics-bridge) ─────────────────────────────────────────────
+
+variable "terraform_service_account" {
+  description = "GCP service account to impersonate for Terraform operations."
+  type        = string
+  default     = "org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+}
+
+variable "gcp_project_id" {
+  description = "GCP project ID for the monitoring project. Separate from mento-prod (Aegis)."
+  type        = string
+  default     = "mento-monitoring"
+}
+
+variable "gcp_org_id" {
+  description = "GCP organization ID. Find with: gcloud organizations list"
+  type        = string
+}
+
+variable "gcp_billing_account" {
+  description = "GCP billing account ID. Find with: gcloud billing accounts list"
+  type        = string
+  sensitive   = true
+}
+
+variable "gcp_region" {
+  description = "GCP region for Cloud Run deployment."
+  type        = string
+  default     = "europe-west1"
+}
+
+variable "metrics_bridge_image" {
+  description = "Full container image reference for the metrics bridge (e.g. europe-west1-docker.pkg.dev/mento-monitoring/metrics-bridge/metrics-bridge:abc123). Built and pushed by CI; leave empty until first deploy."
+  type        = string
+  default     = ""
+}
+
+variable "gcp_dev_members" {
+  description = "IAM members who can deploy and manage the metrics-bridge service."
+  type        = list(string)
+  default     = ["group:eng@mentolabs.xyz"]
+}

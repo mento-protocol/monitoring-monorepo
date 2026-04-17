@@ -1,6 +1,6 @@
 # Mento v3 Monitoring — Technical Specification
 
-Last updated: 2026-03-05
+Last updated: 2026-04-16
 
 ---
 
@@ -12,72 +12,84 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 
 1. **Operational awareness** — pool health, oracle liveness, trading limit pressure, rebalancer liveness
 2. **Trade analytics** — volume, TVL, fee revenue per pool over time
-3. **Alerting** (Phase 2) — proactive alerts when KPIs breach thresholds
-4. **Data access** (Phase 3) — Streamlit sandbox for quantitative team
+3. **Alerting** — proactive alerts when KPIs breach thresholds (Aegis v2 live; v3 FPMM alerts next)
+4. **Data access** — Streamlit sandbox for quantitative team (backlog)
 
 ### Live Endpoints
 
 | What            | URL                                                 |
 | --------------- | --------------------------------------------------- |
 | Dashboard       | <https://monitoring.mento.org>                      |
-| Mainnet GraphQL | `https://indexer.hyperindex.xyz/60ff18c/v1/graphql` |
+| Mainnet GraphQL | `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql` |
 
 ---
 
 ## 2. Architecture
 
 ```text
-┌───────────────────────────────────────────────────────────────────────┐
-│                           Celo Chain                                  │
-│  FPMMFactory  ·  FPMM pools (×4)  ·  SortedOracles  ·  VPFactory     │
-└──────────────────────────────┬────────────────────────────────────────┘
-                               │ Events (GRPC/RPC)
-                               ▼
-                    ┌──────────────────────┐
-                    │  Envio HyperIndex    │
-                    │  (Hosted, free tier) │
-                    │  EventHandlers.ts    │
-                    └──────────┬───────────┘
-                               │ writes
-                               ▼
-                    ┌──────────────────────┐
-                    │  Postgres + Hasura   │
-                    │  (managed by Envio)  │
-                    └──────────┬───────────┘
-                               │ GraphQL
-              ┌────────────────┴────────────────┐
-              ▼                                 ▼
-   ┌──────────────────────┐         ┌──────────────────────┐
-   │  Next.js Dashboard   │         │  Streamlit Sandbox   │
-   │  (Vercel)            │         │  (Phase 3, Python)   │
-   │  monitoring.mento.org│         │                      │
-   └──────────────────────┘         └──────────────────────┘
-              │
-              ▼ (Phase 2)
-   ┌──────────────────────┐
-   │  Aegis / Grafana     │
-   │  Alerting            │
-   └──────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                     Celo Chain (42220)                       │
+│  FPMMs · SortedOracles · BreakerBox · Broker · Reserve      │
+└────────────┬────────────────────────────┬───────────────────┘
+             │                            │
+   Events (HyperSync)            View calls (RPC, every 10-60s)
+             │                            │
+             ▼                            ▼
+  ┌─────────────────────┐     ┌─────────────────────┐
+  │  Envio HyperIndex   │     │  Aegis (NestJS)     │
+  │  (hosted)           │     │  (GCP App Engine)   │
+  └──────────┬──────────┘     └──────────┬──────────┘
+             │                           │
+        GraphQL API                 /metrics (Prometheus)
+             │                           │
+             ▼                           ▼
+  ┌─────────────────────┐     ┌─────────────────────┐
+  │  Hasura / Postgres  │     │  Grafana Agent      │
+  │  (managed by Envio) │     │  (GCP App Engine)   │
+  └──────────┬──────────┘     └──────────┬──────────┘
+             │                           │
+             ▼                           ▼
+  ┌─────────────────────┐     ┌─────────────────────┐
+  │  Next.js Dashboard  │     │  Grafana Cloud      │
+  │  (Vercel)           │     │  Dashboards + Alerts│
+  │  monitoring.mento.org│    │  Alert Rules (TF)   │
+  └─────────────────────┘     └──────────┬──────────┘
+                                         │
+                                    Notifications
+                                         │
+                              ┌──────────┴──────────┐
+                              │  Discord (8 channels)│
+                              │  Splunk On-Call      │
+                              └─────────────────────┘
 ```
+
+**Two parallel data paths:**
+
+1. **Dashboard path** (left): Envio indexes on-chain events → Hasura GraphQL → Next.js dashboard
+2. **Alerting path** (right): Aegis polls contract state via RPC → Prometheus metrics → Grafana Agent → Grafana Cloud → alert rules → Discord/Splunk notifications
 
 ### Components
 
-| Component         | Technology            | Hosting      | Repo Path        |
-| ----------------- | --------------------- | ------------ | ---------------- |
-| Indexer           | Envio HyperIndex      | Envio hosted | `indexer-envio/` |
-| GraphQL API       | Hasura (auto-managed) | Envio hosted | —                |
-| Dashboard         | Next.js 16 + Plotly   | Vercel       | `ui-dashboard/`  |
-| Alerting (future) | Aegis / Grafana       | TBD          | —                |
+| Component      | Technology            | Hosting       | Repo Path                               |
+| -------------- | --------------------- | ------------- | --------------------------------------- |
+| Indexer        | Envio HyperIndex      | Envio hosted  | `indexer-envio/`                        |
+| GraphQL API    | Hasura (auto-managed) | Envio hosted  | —                                       |
+| Dashboard      | Next.js 16 + Plotly   | Vercel        | `ui-dashboard/`                         |
+| Shared config  | TypeScript            | —             | `shared-config/`                        |
+| Aegis (v2)     | NestJS                | GCP App Eng   | `../aegis/`                             |
+| Grafana Agent  | Docker                | GCP App Eng   | `../aegis/grafana-agent/`               |
+| Alert rules    | Terraform (HCL)       | Grafana Cloud | `../aegis/terraform/grafana-alerts/`    |
+| Grafana dashbd | Terraform (HCL)       | Grafana Cloud | `../aegis/terraform/grafana-dashboard/` |
 
 ---
 
 ## 3. Networks
 
-| Network       | Chain ID | Status                        | Start Block |
-| ------------- | -------- | ----------------------------- | ----------- |
-| Celo Mainnet  | 42220    | ✅ Live                       | 60664513    |
-| Celo Sepolia  | 44787    | ✅ Live                       | —           |
-| Monad Mainnet | —        | ⏳ Blocked on contract deploy | —           |
+| Network       | Chain ID | Status  | Start Block |
+| ------------- | -------- | ------- | ----------- |
+| Celo Mainnet  | 42220    | ✅ Live | 60664513    |
+| Celo Sepolia  | 11142220 | ✅ Live | —           |
+| Monad Mainnet | 143      | ✅ Live | —           |
 
 ---
 
@@ -183,145 +195,11 @@ The `healthStatus` field on Pool encodes the current status: `"OK"` | `"WARN"` |
 
 ## 6. Entity Schema
 
-Full schema: [`indexer-envio/schema.graphql`](./indexer-envio/schema.graphql)
+Source of truth: [`indexer-envio/schema.graphql`](./indexer-envio/schema.graphql)
 
-### Pool
+Key entities: `Pool` (mutable per-pool state), `PoolSnapshot` / `PoolDailySnapshot` (hourly/daily aggregates), `OracleSnapshot` (per-event health timeline), `TradingLimit` (per-pool per-token limit state), `RebalanceEvent` (per-rebalance effectiveness).
 
-Mutable per-pool state. Updated on every relevant event.
-
-```graphql
-type Pool {
-  id: ID! # pool address (lowercase)
-  token0: String # token0 address
-  token1: String # token1 address
-  source: String! # "fpmm" | "virtual"
-  reserves0: BigInt! # current reserve0
-  reserves1: BigInt! # current reserve1
-  swapCount: Int! # cumulative swap count
-  notionalVolume0: BigInt! # cumulative notional volume in token0
-  notionalVolume1: BigInt! # cumulative notional volume in token1
-  rebalanceCount: Int! # cumulative rebalance count
-  # Oracle state (FPMM only; defaults to zero/false for VirtualPools)
-  oracleOk: Boolean!
-  oraclePrice: BigInt!
-  oraclePriceDenom: BigInt!
-  oracleTimestamp: BigInt!
-  oracleExpiry: BigInt!
-  oracleNumReporters: Int!
-  referenceRateFeedID: String!
-  priceDifference: BigInt!
-  rebalanceThreshold: Int!
-  lastRebalancedAt: BigInt!
-  healthStatus: String! # "OK" | "WARN" | "CRITICAL" | "N/A"
-  # Trading limits (FPMM only)
-  limitStatus: String! # "OK" | "WARN" | "CRITICAL" | "N/A"
-  limitPressure0: String!
-  limitPressure1: String!
-
-  # Rebalancer
-  rebalancerAddress: String!
-  rebalanceLivenessStatus: String! # "ACTIVE" | "N/A"
-  createdAtBlock: BigInt!
-  createdAtTimestamp: BigInt!
-  updatedAtBlock: BigInt!
-  updatedAtTimestamp: BigInt!
-}
-```
-
-### PoolSnapshot
-
-Hourly pre-aggregated activity per pool. Industry standard (Uniswap/Balancer pattern).
-
-```graphql
-type PoolSnapshot {
-  id: ID! # "{poolId}-{hourTimestamp}"
-  poolId: String! @index
-  timestamp: BigInt! @index # unix timestamp truncated to hour
-  # Point-in-time state at end of this hour
-  reserves0: BigInt!
-  reserves1: BigInt!
-
-  # Per-hour activity
-  swapCount: Int!
-  swapVolume0: BigInt!
-  swapVolume1: BigInt!
-  rebalanceCount: Int!
-  mintCount: Int!
-  burnCount: Int!
-
-  # Running cumulative totals
-  cumulativeSwapCount: Int!
-  cumulativeVolume0: BigInt!
-  cumulativeVolume1: BigInt!
-
-  blockNumber: BigInt!
-}
-```
-
-Gap-filling (missing hours with no activity) is handled by the dashboard layer via forward-fill — not block handlers (Envio `onBlock` lacks block timestamps).
-
-### OracleSnapshot
-
-Per-oracle-event health snapshot. Powers the dual y-axis oracle chart.
-
-```graphql
-type OracleSnapshot {
-  id: ID!
-  poolId: String! @index
-  timestamp: BigInt! @index
-  oraclePrice: BigInt!
-  oraclePriceDenom: BigInt!
-  oracleOk: Boolean!
-  numReporters: Int!
-  priceDifference: BigInt!
-  rebalanceThreshold: Int!
-  source: String!
-  blockNumber: BigInt!
-}
-```
-
-### TradingLimit
-
-Per-pool per-token trading limit state.
-
-```graphql
-type TradingLimit {
-  id: ID! # "{poolId}-{tokenAddress}"
-  poolId: String!
-  token: String!
-  limit0: BigInt!
-  limit1: BigInt!
-  decimals: Int!
-  netflow0: BigInt!
-  netflow1: BigInt!
-  lastUpdated0: BigInt!
-  lastUpdated1: BigInt!
-  limitPressure0: String!
-  limitPressure1: String!
-  limitStatus: String! # "OK" | "WARN" | "CRITICAL"
-  updatedAtBlock: BigInt!
-  updatedAtTimestamp: BigInt!
-}
-```
-
-### RebalanceEvent
-
-Per-rebalance event with effectiveness measurement.
-
-```graphql
-type RebalanceEvent {
-  id: ID!
-  poolId: String! @index
-  sender: String!
-  priceDifferenceBefore: BigInt!
-  priceDifferenceAfter: BigInt!
-  improvement: BigInt! # priceDifferenceBefore - priceDifferenceAfter
-  effectivenessRatio: String! # improvement / priceDifferenceBefore, e.g. "0.5000"
-  txHash: String!
-  blockNumber: BigInt!
-  blockTimestamp: BigInt! @index
-}
-```
+Pool IDs are namespaced as `{chainId}-{poolAddress}` for multichain support.
 
 ---
 
@@ -336,16 +214,17 @@ Protocol-wide metrics dashboard.
 **Tiles:**
 
 - Total pools (FPMM + VirtualPool count)
-- Active pools (with swap activity in last 24h)
+- Active pools (with swap activity)
 - Health breakdown (OK / WARN / CRITICAL counts)
 - Total swap count
+- TVL with 24h/7d/30d change %
+- LP count
 
 **Components:**
 
-- `PoolsTable` — all pools with HealthBadge, last swap, volume
+- `PoolsTable` — all pools with HealthBadge, LimitBadge, RebalancerBadge, TVL Δ WoW, chain icon prefix
+- TVL-over-time chart
 - Activity ranking by swap count
-
-**Status:** ✅ Live
 
 #### Pool Detail (`/pools/[poolId]`)
 
@@ -354,91 +233,107 @@ Per-pool deep-dive.
 **Tabs:**
 
 1. **Overview** — reserve chart (Plotly), recent swaps table
-2. **Analytics** — PoolSnapshot charts (hourly volume bars + cumulative count), OracleChart (FPMM only)
-3. _(Future)_ **Limits** — TradingLimit pressure panel
-4. _(Future)_ **Rebalancer** — RebalanceEvent timeline
+2. **Analytics** — PoolSnapshot charts (hourly volume bars + cumulative count), OracleChart (FPMM only), daily volume chart
+3. **Limits** — LimitPanel with trading limit pressure per token
+4. **Rebalancer** — RebalancerPanel with liveness status + diagnostics
 
-**Status:** ✅ Live (tabs 1 + 2)
+#### Protocol Revenue (`/revenue`)
+
+Swap fee time-series with 24h/7d/30d/all-time breakdowns. Placeholders for CDP Borrowing Fees and Reserve Yield.
 
 ### Key Components
 
-| Component         | File                              | Status      |
-| ----------------- | --------------------------------- | ----------- |
-| `PoolsTable`      | `components/pools-table.tsx`      | ✅ Live     |
-| `HealthBadge`     | `components/health-badge.tsx`     | ✅ Live     |
-| `HealthPanel`     | `components/health-panel.tsx`     | ✅ Live     |
-| `OracleChart`     | `components/oracle-chart.tsx`     | ✅ Live     |
-| `ReserveChart`    | `components/reserve-chart.tsx`    | ✅ Live     |
-| `SnapshotChart`   | `components/snapshot-chart.tsx`   | ✅ Live     |
-| `NetworkSwitcher` | `components/network-switcher.tsx` | ✅ Live     |
-| `LimitBadge`      | —                                 | 🔜 Stream C |
-| `LimitPanel`      | —                                 | 🔜 Stream C |
-| `LivenessBadge`   | —                                 | 🔜 Stream C |
-| `RebalancerPanel` | —                                 | 🔜 Stream C |
+| Component          | File                                 |
+| ------------------ | ------------------------------------ |
+| `PoolsTable`       | `components/global-pools-table.tsx`  |
+| `HealthBadge`      | `components/badges.tsx`              |
+| `LimitBadge`       | `components/badges.tsx`              |
+| `RebalancerBadge`  | `components/badges.tsx`              |
+| `HealthPanel`      | `components/health-panel.tsx`        |
+| `LimitPanel`       | `components/limit-panel.tsx`         |
+| `RebalancerPanel`  | `components/rebalancer-panel.tsx`    |
+| `OracleChart`      | `components/oracle-chart.tsx`        |
+| `ReserveChart`     | `components/reserve-chart.tsx`       |
+| `SnapshotChart`    | `components/snapshot-chart.tsx`      |
+| `TvlOverTimeChart` | `components/tvl-over-time-chart.tsx` |
+| `FeeOverTimeChart` | `components/fee-over-time-chart.tsx` |
+| `ChainIcon`        | `components/chain-icon.tsx`          |
+| `Skeletons`        | `components/skeletons.tsx`           |
 
 ### Pool Type Detection
 
 `isFpmm(pool)` in `ui-dashboard/src/lib/tokens.ts` is the single source of truth for FPMM vs VirtualPool detection. Used to conditionally render oracle health, trading limit, and rebalancer components (shows "N/A" badges for VirtualPools).
 
+### Authentication
+
+NextAuth.js with Google provider. Domain-restricted to `@mentolabs.xyz` accounts. JWT session strategy with 30-day max age. Custom sign-in page at `/sign-in`.
+
 ---
 
 ## 8. Network Support
 
-The dashboard supports multiple network targets via a network switcher. Each network target has:
+The dashboard is fully multichain — all chains are shown together (no network switcher). Pool IDs are prefixed with `{chainId}-` to disambiguate across chains. A `ChainIcon` component shows the chain logo next to pool identifiers.
 
-- A Hasura/GraphQL endpoint URL
-- A Hasura admin secret
-- A block explorer base URL
-
-| Target               | Description              |
-| -------------------- | ------------------------ |
-| `CELO_MAINNET`       | Celo Mainnet (Envio)     |
-| `CELO_SEPOLIA`       | Celo Sepolia (Envio)     |
-| `CELO_MAINNET_LOCAL` | Celo Mainnet (local dev) |
-| `CELO_SEPOLIA_LOCAL` | Celo Sepolia (local dev) |
-
-The live dashboard (monitoring.mento.org) uses `CELO_MAINNET` by default.
+| Network       | Chain ID | Indexer Status | Dashboard |
+| ------------- | -------- | -------------- | --------- |
+| Celo Mainnet  | 42220    | Live           | Live      |
+| Celo Sepolia  | 11142220 | Live           | Live      |
+| Monad Mainnet | 143      | Live           | Live      |
 
 ---
 
 ## 9. Known Limitations
 
-| Limitation                           | Details                                                                      |
-| ------------------------------------ | ---------------------------------------------------------------------------- |
-| Endpoint hash changes on each deploy | Envio free tier generates new URL per deploy; requires Vercel env var update |
-| No authentication on dashboard       | Google Auth deferred; Envio endpoints are public (no admin secret)           |
-| Cannot run two indexers locally      | Port 9898 hardcoded in Envio                                                 |
-| SortedOracles on Sepolia             | Contracts return zero address; oracle indexing mainnet-only                  |
-| Gap-fill not yet implemented         | PoolSnapshot charts may show gaps for periods with no activity               |
-| Monad blocked                        | Awaiting contract deployment to Monad                                        |
-| No Liquity v2 indexing               | TroveManager / StabilityPool — Phase 2                                       |
-| Dashboard component tests            | Zero component-level tests; only lib utils covered                           |
+| Limitation                           | Details                                                                                                         |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| Endpoint hash changes on each deploy | Envio free tier generates new URL per deploy; requires Vercel env var update                                    |
+| Hasura 1000-row cap                  | Envio hosted Hasura silently caps all queries at 1000 rows; use `fetchAllSnapshotPages` or indexer-side rollups |
+| Cannot run two indexers locally      | Shared Hasura port 8080; use separate Docker projects                                                           |
+| SortedOracles on Sepolia             | Contracts return zero address; oracle indexing mainnet-only                                                     |
+| Gap-fill not yet implemented         | PoolSnapshot charts may show gaps for periods with no activity                                                  |
+| Monad pools pending                  | Pool contracts deployed; indexer config ready                                                                   |
+| No Liquity v2 indexing               | TroveManager / StabilityPool — needed for Stability Pool headroom alerts                                        |
+| v3 alerting not yet wired            | Aegis covers v2 KPIs; v3 FPMM-specific alerts are next                                                          |
 
 ---
 
-## 10. Future Plans
+## 10. Alerting
 
-### Stream C (Next)
+### Current State (Aegis v2)
 
-- Dashboard components for trading limits and rebalancer liveness
-- TVL display on global page
+Aegis is live for Mento v2 alerts. It polls v2 contract state via RPC every 10-60s and exposes Prometheus metrics that Grafana Cloud ingests. All Grafana resources (dashboards, alert rules, contact points, notification policies) are Terraform-managed.
+
+**Live alert groups:**
+
+| Group            | Rules                               | Notification Channels              |
+| ---------------- | ----------------------------------- | ---------------------------------- |
+| Oracle Relayers  | Stale price feeds, low CELO balance | Discord + Splunk On-Call (mainnet) |
+| Reserve Balances | Low USDC/USDT/axlUSDC               | Discord                            |
+| Trading Modes    | Circuit breakers tripped            | Discord                            |
+| Trading Limits   | L0/L1/LG utilization >90%           | Discord + Splunk On-Call (L1/LG)   |
+| Aegis Service    | RPC failures, data staleness        | Discord + Splunk On-Call           |
+
+### Next — v3 FPMM Alerts
+
+Extend alerting to cover v3 FPMM pool KPIs (see §5 for thresholds). The `metrics-bridge` package (Cloud Run) exports pool KPIs as Prometheus gauges. Remaining work: Grafana alert rules in Terraform (Slack notifications).
+
+## 11. Future Plans
+
+### Next
+
+- v3 FPMM alerting (oracle liveness, deviation, trading limits, rebalancer, stability pool)
+
+### Backlog
+
+- Liquity v2 CDP indexing (TroveManager, StabilityPool)
+- Monad pool indexing (config ready, deployment pending)
 - Gap-fill logic for snapshot charts
-
-### Phase 2
-
-- Liquity v2 CDP indexing (TroveManager, StabilityPool, Trove entities)
-- Aegis/Grafana alerting with the 5 KPI thresholds
-- Monad indexing (once contracts are deployed)
-
-### Phase 3
-
-- Roman's Streamlit sandbox (Python, reads from same Hasura backend)
-- Google Auth (NextAuth.js — `@mentolabs.xyz` only)
+- Streamlit sandbox
 - ClickHouse sink for heavy analytics
 
 ---
 
-## 11. Development
+## 12. Development
 
 ### Running Tests
 
@@ -452,7 +347,7 @@ pnpm --filter @mento-protocol/ui-dashboard lint
 
 GitHub Actions (`.github/workflows/`):
 
-- `ui-dashboard.yml` — lint + typecheck + test + Codecov
+- `ui-dashboard.yml` — lint + typecheck + test (71 test files) + Codecov
 - `indexer-envio.yml` — typecheck + lint
 - `notify-envio-deploy.yml` — Discord notification on `deploy/*` push
 

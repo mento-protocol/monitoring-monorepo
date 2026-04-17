@@ -4,6 +4,10 @@ import reactPlugin from "@eslint-react/eslint-plugin";
 import nextPlugin from "@next/eslint-plugin-next";
 import jsxA11y from "eslint-plugin-jsx-a11y";
 import globals from "globals";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default tseslint.config(
   js.configs.recommended,
@@ -14,6 +18,7 @@ export default tseslint.config(
     languageOptions: {
       ...reactPlugin.configs["recommended-typescript"].languageOptions,
       globals: { ...globals.browser, ...globals.node },
+      parserOptions: { tsconfigRootDir: __dirname },
     },
   },
   {
@@ -38,6 +43,7 @@ export default tseslint.config(
       "**/.next/**",
       "coverage/**",
       "**/.trunk/**",
+      "**/*.mjs",
     ],
   },
 );

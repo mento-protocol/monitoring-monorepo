@@ -1,0 +1,51 @@
+import type { Registry } from "prom-client";
+import type { PoolRow, BridgePoolsResponse } from "../src/types.js";
+
+export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
+  return {
+    id: "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
+    chainId: 42220,
+    token0: "0xaaa",
+    token1: "0xbbb",
+    source: "fpmm_factory",
+    healthStatus: "OK",
+    oracleOk: true,
+    oracleTimestamp: "1713200000",
+    oracleExpiry: "300",
+    lastDeviationRatio: "0.420000",
+    deviationBreachStartedAt: "0",
+    limitStatus: "OK",
+    limitPressure0: "0.1230",
+    limitPressure1: "0.0050",
+    lastRebalancedAt: "1713199000",
+    rebalanceLivenessStatus: "ACTIVE",
+    hasHealthData: true,
+    ...overrides,
+  };
+}
+
+export function makePoolResponse(
+  pools: PoolRow[] = [makePool()],
+): BridgePoolsResponse {
+  return { Pool: pools };
+}
+
+export async function getGaugeValue(
+  reg: Registry,
+  name: string,
+  labels: Record<string, string> = {},
+): Promise<number | undefined> {
+  const metrics = await reg.getMetricsAsJSON();
+  const metric = metrics.find((m) => m.name === name);
+  if (!metric || !("values" in metric)) return undefined;
+  const values = metric.values as Array<{
+    labels: Record<string, string>;
+    value: number;
+  }>;
+  if (Object.keys(labels).length === 0) return values[0]?.value;
+  return values.find((v) =>
+    Object.entries(labels).every(([k, val]) => v.labels[k] === val),
+  )?.value;
+}
+
+export const tick = () => new Promise((r) => setTimeout(r, 10));
