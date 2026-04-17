@@ -337,7 +337,7 @@ function PoolDetail() {
   // Non-USDm pairs (axlEUROC/EURm, etc.) need a rate map derived from all
   // pools that have a USDm leg to convert their reserves/volume to USD.
   // Without this the TVL and Volume charts render $0 for such pools.
-  const { data: allPoolsData } = useGQL<{ Pool: Pool[] }>(
+  const { data: allPoolsData, error: allPoolsError } = useGQL<{ Pool: Pool[] }>(
     ALL_POOLS_WITH_HEALTH,
     { chainId: network.chainId },
     SNAPSHOT_REFRESH_MS,
@@ -347,7 +347,11 @@ function PoolDetail() {
     () => buildOracleRateMap(allPools, network),
     [allPools, network],
   );
-  const ratesLoading = allPoolsData === undefined;
+  // Without the error clause the charts stay in the loading skeleton forever
+  // when the rates query fails — undefined data plus no resolved error keeps
+  // `ratesLoading === true` indefinitely.
+  const ratesLoading = allPoolsData === undefined && !allPoolsError;
+  const ratesError = allPoolsError !== undefined;
 
   // Return null while redirect is pending to avoid a transient error flash
   // and unnecessary error announcement for assistive tech. MUST sit below
@@ -400,7 +404,7 @@ function PoolDetail() {
               network={network}
               snapshots={dailySnapshots}
               isLoading={(fpmmPool && dailySnapshotLoading) || ratesLoading}
-              hasError={dailySnapshotError !== undefined}
+              hasError={dailySnapshotError !== undefined || ratesError}
               rates={rates}
             />
             <PoolVolumeOverTimeChart
@@ -408,7 +412,7 @@ function PoolDetail() {
               network={network}
               snapshots={dailySnapshots}
               isLoading={(fpmmPool && dailySnapshotLoading) || ratesLoading}
-              hasError={dailySnapshotError !== undefined}
+              hasError={dailySnapshotError !== undefined || ratesError}
               rates={rates}
             />
             <ReservesPanel pool={pool} rates={rates} />

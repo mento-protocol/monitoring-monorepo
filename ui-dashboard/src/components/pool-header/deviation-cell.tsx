@@ -144,8 +144,10 @@ function DeviationBar({
             aria-valuemax={threshold}
             // Screen readers announce aria-valuetext verbatim when set,
             // keeping the spoken unit (percentages) aligned with the
-            // visible copy instead of announcing raw basis points.
-            aria-valuetext={deltaLabel}
+            // visible copy instead of announcing raw basis points. The
+            // precise diff/threshold pair is included here because the
+            // matching tooltip is hover-only (unreachable via keyboard).
+            aria-valuetext={`${deltaLabel} (${diffPct}% of ${thresholdPct}% threshold)`}
           />
         </div>
       </div>
