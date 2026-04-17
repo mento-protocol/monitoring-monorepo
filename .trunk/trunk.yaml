@@ -29,6 +29,7 @@ lint:
     - linters: [osv-scanner]
       paths:
         - indexer-envio/pnpm-lock.yaml
+        - pnpm-lock.yaml
     - linters: [checkov]
       paths:
         - terraform/main.tf
