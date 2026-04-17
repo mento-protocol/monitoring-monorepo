@@ -267,19 +267,26 @@ resource "google_artifact_registry_repository" "metrics_bridge" {
 }
 
 locals {
-  metrics_bridge_image = "${var.gcp_region}-docker.pkg.dev/${google_project.monitoring.project_id}/${google_artifact_registry_repository.metrics_bridge.repository_id}/metrics-bridge:latest"
+  # Content-addressed tag so Cloud Run rolls a new revision on each rebuild.
+  metrics_bridge_image_tag = substr(sha256(join("", [
+    filesha256("${path.module}/../metrics-bridge/Dockerfile"),
+    sha256(join("", [for f in sort(fileset("${path.module}/../metrics-bridge/src", "**/*.ts")) : filesha256("${path.module}/../metrics-bridge/src/${f}")])),
+    filesha256("${path.module}/../metrics-bridge/package.json"),
+    filesha256("${path.module}/../metrics-bridge/tsconfig.json"),
+    filesha256("${path.module}/../pnpm-lock.yaml"),
+  ])), 0, 12)
+
+  metrics_bridge_ar_repo = "${var.gcp_region}-docker.pkg.dev/${google_project.monitoring.project_id}/${google_artifact_registry_repository.metrics_bridge.repository_id}"
+  metrics_bridge_image   = "${local.metrics_bridge_ar_repo}/metrics-bridge:${local.metrics_bridge_image_tag}"
 }
 
 # ── Image Build ──────────────────────────────────────────────────────────────
 # Builds and pushes the metrics-bridge container image via Cloud Build.
-# Triggers on changes to the Dockerfile or source files.
+# Triggers on source file content changes (content-addressed tag).
 
 resource "null_resource" "metrics_bridge_build" {
   triggers = {
-    dockerfile = filesha256("${path.module}/../metrics-bridge/Dockerfile")
-    source     = sha256(join("", [for f in sort(fileset("${path.module}/../metrics-bridge/src", "**/*.ts")) : filesha256("${path.module}/../metrics-bridge/src/${f}")]))
-    package    = filesha256("${path.module}/../metrics-bridge/package.json")
-    lockfile   = filesha256("${path.module}/../pnpm-lock.yaml")
+    image_tag = local.metrics_bridge_image_tag
   }
 
   provisioner "local-exec" {
@@ -287,9 +294,9 @@ resource "null_resource" "metrics_bridge_build" {
     command     = <<-EOT
       gcloud builds submit \
         --project="${google_project.monitoring.project_id}" \
-        --tag="${local.metrics_bridge_image}" \
+        --config=cloudbuild.yaml \
+        --substitutions=_IMAGE="${local.metrics_bridge_image}" \
         --timeout=600s \
-        --dockerfile=metrics-bridge/Dockerfile \
         .
     EOT
   }
@@ -372,13 +379,5 @@ resource "google_project_iam_member" "dev_cloudbuild_editor" {
   for_each = toset(var.gcp_dev_members)
   project  = google_project.monitoring.project_id
   role     = "roles/cloudbuild.builds.editor"
-  member   = each.value
-}
-
-# Cloud Run needs to act as a service account to pull images.
-resource "google_project_iam_member" "dev_sa_user" {
-  for_each = toset(var.gcp_dev_members)
-  project  = google_project.monitoring.project_id
-  role     = "roles/iam.serviceAccountUser"
   member   = each.value
 }

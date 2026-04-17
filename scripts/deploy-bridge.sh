@@ -2,7 +2,7 @@
 # Rebuild and deploy the metrics-bridge container via Terraform.
 #
 # Terraform handles the full lifecycle: project → APIs → AR → image build → Cloud Run.
-# This script is a convenience wrapper that targets only the bridge resources.
+# This script is a convenience wrapper that forces a rebuild and redeploy.
 #
 # Usage:
 #   pnpm bridge:deploy           → rebuild image + redeploy (with confirmation)
@@ -35,10 +35,8 @@ if [ "$SKIP_CONFIRM" = false ]; then
   fi
 fi
 
-# Taint the build resource so Terraform rebuilds the image
-terraform -chdir=terraform taint null_resource.metrics_bridge_build 2>/dev/null || true
-
 terraform -chdir=terraform apply \
+  -replace=null_resource.metrics_bridge_build \
   -target=null_resource.metrics_bridge_build \
   -target=google_cloud_run_v2_service.metrics_bridge \
   -target=google_cloud_run_v2_service_iam_member.metrics_bridge_public

@@ -26,3 +26,19 @@ upstash_api_key = "..."
 # ── Vercel Blob ───────────────────────────────────────────────────────────────
 # Provision the store once (see README), then paste the token here.
 # blob_read_write_token = "vercel_blob_rw_..."
+
+# ── Google Cloud (metrics-bridge) ─────────────────────────────────────────────
+# Find with: gcloud organizations list
+gcp_org_id = "..."
+
+# Find with: gcloud billing accounts list
+gcp_billing_account = "..."
+
+# GCP project ID — defaults to "mento-monitoring" in variables.tf.
+# gcp_project_id = "mento-monitoring"
+
+# IAM members who can deploy the bridge (users or groups).
+# gcp_dev_members = ["user:alice@mentolabs.xyz", "group:eng@mentolabs.xyz"]
+
+# Caller must have roles/iam.serviceAccountTokenCreator on this SA.
+# terraform_service_account = "org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com"

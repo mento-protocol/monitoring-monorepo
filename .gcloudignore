@@ -1,0 +1,24 @@
+# Restrict Cloud Build upload to metrics-bridge build inputs only.
+# Without this file, gcloud falls back to .gitignore which uploads the
+# entire repo minus gitignored files.
+
+.git/
+.trunk/
+.vercel/
+.next/
+.reviews/
+.claude/
+
+ui-dashboard/
+indexer-envio/
+shared-config/
+docs/
+terraform/
+
+**/node_modules/
+**/dist/
+**/coverage/
+
+*.env
+*.env.*
+terraform.tfvars
