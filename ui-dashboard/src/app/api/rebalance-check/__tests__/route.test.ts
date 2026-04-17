@@ -1,10 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-// ---------------------------------------------------------------------------
 // Mocks — must be hoisted above any import of the route module so the route's
 // module-level `cache` and `inFlight` maps are fresh per `vi.resetModules()`.
-// ---------------------------------------------------------------------------
 
 const MOCK_NETWORK_ID = "celo-mainnet";
 const MOCK_RPC_URL = "https://forno.celo.org";
@@ -57,9 +55,7 @@ function makeDeferred<T>(): {
   return { promise, resolve, reject };
 }
 
-// ---------------------------------------------------------------------------
 // Per-test module reset — keeps the route's `cache` and `inFlight` maps clean.
-// ---------------------------------------------------------------------------
 
 async function loadRoute(): Promise<{
   GET: (req: NextRequest) => Promise<Response>;

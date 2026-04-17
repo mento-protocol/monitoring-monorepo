@@ -173,9 +173,7 @@ export function RebalanceStatusValue({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Compose the hover-tooltip for a genuinely blocked rebalance. Folds in the

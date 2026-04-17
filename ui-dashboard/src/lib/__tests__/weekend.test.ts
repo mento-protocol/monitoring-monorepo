@@ -62,9 +62,7 @@ describe("isWeekend", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // isWeekendOracleStale
-// ---------------------------------------------------------------------------
 import { isWeekendOracleStale } from "../weekend";
 import { isOracleFresh } from "../health";
 
@@ -124,9 +122,7 @@ describe("isWeekendOracleStale", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // tradingSecondsInRange / weekendOverlapSeconds
-// ---------------------------------------------------------------------------
 
 describe("ANCHOR_FRI_2100", () => {
   // Guard: if the FX close/reopen constants change, the anchor must be

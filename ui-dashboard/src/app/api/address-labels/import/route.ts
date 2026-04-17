@@ -9,6 +9,7 @@ import {
   type AddressLabelsSnapshot,
 } from "@/lib/address-labels";
 import { MAINNET_CHAIN_IDS } from "@/lib/types";
+import { isValidAddress } from "@/lib/format";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const session = await getAuthSession();
@@ -108,7 +109,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           { status: 400 },
         );
       }
-      if (!/^0x[0-9a-fA-F]{40}$/.test(entry.address)) {
+      if (!isValidAddress(entry.address)) {
         return NextResponse.json(
           { error: `Invalid address: ${entry.address}` },
           { status: 400 },
@@ -271,7 +272,7 @@ function isEntriesMap(v: unknown): v is Record<string, AddressEntry> {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
   return Object.entries(v as Record<string, unknown>).every(
     ([address, entry]) => {
-      if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return false;
+      if (!isValidAddress(address)) return false;
       if (typeof entry !== "object" || entry === null) return false;
       const e = entry as Record<string, unknown>;
       // Accept v1 (label), v2 (name), or tag-only entries
@@ -288,9 +289,7 @@ function serverError(err: unknown): NextResponse {
   return NextResponse.json({ error: message }, { status: 500 });
 }
 
-// ---------------------------------------------------------------------------
 // CSV import helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Parse a CSV body and import into all configured mainnet chains.
@@ -474,7 +473,7 @@ function parseCsv(text: string): CsvParseResult {
         error: `Empty address on line ${i + 1}`,
       };
     }
-    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+    if (!isValidAddress(address)) {
       return {
         error: `Invalid address on line ${i + 1}: "${address}"`,
       };

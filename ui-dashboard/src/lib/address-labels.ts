@@ -6,9 +6,7 @@ import { Redis } from "@upstash/redis";
 // "@/lib/address-labels-shared" without pulling in Redis.
 export {
   type AddressEntry,
-  type AddressLabelEntry,
   type AddressEntryRecord,
-  type AddressLabelRecord,
   type AddressLabelsSnapshot,
   upgradeEntry,
   upgradeEntries,
@@ -17,17 +15,13 @@ export {
 
 import { upgradeEntries, type AddressEntry } from "./address-labels-shared";
 
-// ---------------------------------------------------------------------------
 // Redis key helpers
-// ---------------------------------------------------------------------------
 
 function labelsKey(chainId: number): string {
   return `labels:${chainId}`;
 }
 
-// ---------------------------------------------------------------------------
 // Redis client (server-side only)
-// ---------------------------------------------------------------------------
 
 function getRedis(): Redis {
   const url = process.env.UPSTASH_REDIS_REST_URL;
@@ -40,9 +34,7 @@ function getRedis(): Redis {
   return new Redis({ url, token });
 }
 
-// ---------------------------------------------------------------------------
 // Data access helpers (all server-side)
-// ---------------------------------------------------------------------------
 
 export async function getLabels(
   chainId: number,
@@ -73,9 +65,6 @@ export async function upsertEntry(
   };
   await redis.hset(labelsKey(chainId), { [address.toLowerCase()]: value });
 }
-
-/** @deprecated Use upsertEntry instead */
-export const upsertLabel = upsertEntry;
 
 export async function deleteLabel(
   chainId: number,

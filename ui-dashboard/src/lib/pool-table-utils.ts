@@ -1,14 +1,9 @@
 import { ORACLE_STALE_SECONDS_BY_CHAIN } from "@/lib/health";
-import type { RebalancerStatus } from "@/lib/health";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
 import { tokenSymbol } from "@/lib/tokens";
 
-export function healthTooltip(
-  status: string,
-  p: Pool,
-  chainId?: number,
-): string {
+function healthTooltip(status: string, p: Pool, chainId?: number): string {
   if (status === "N/A") return "VirtualPool — oracle health not tracked";
   const oracleTs = Number(p.oracleTimestamp ?? "0");
   // Mirror computeHealthStatus: use the indexed per-feed expiry, falling back to the
@@ -31,7 +26,7 @@ export function healthTooltip(
   return "Oracle healthy";
 }
 
-export function limitTooltipFragment(
+function limitTooltipFragment(
   limitStatus: string,
   p: Pool,
   network: Network,
@@ -58,13 +53,4 @@ export function combinedTooltip(
   const hTip = healthTooltip(healthStatus, p, network.chainId);
   const lFrag = limitTooltipFragment(limitStatus, p, network);
   return lFrag ? `${hTip} · ${lFrag}` : hTip;
-}
-
-export function rebalancerTooltip(status: RebalancerStatus): string {
-  if (status === "ACTIVE")
-    return "Rebalancer active — last rebalance within 24h";
-  if (status === "STALE")
-    return "No rebalance in 24h while pool health is not OK";
-  if (status === "NO_DATA") return "No rebalance events recorded yet";
-  return "VirtualPool — rebalancer not applicable";
 }

@@ -1,5 +1,5 @@
 export type SortDir = "asc" | "desc";
-export type OrderByEntry = Partial<Record<string, SortDir>>;
+type OrderByEntry = Partial<Record<string, SortDir>>;
 
 export function buildOrderBy(
   col: string,

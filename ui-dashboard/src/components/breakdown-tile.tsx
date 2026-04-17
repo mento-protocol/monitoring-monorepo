@@ -1,6 +1,4 @@
-// ---------------------------------------------------------------------------
 // BreakdownTile — shows a "Total" headline value with 24h / 7d / 30d below
-// ---------------------------------------------------------------------------
 
 export function BreakdownTile({
   label,

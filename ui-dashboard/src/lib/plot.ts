@@ -69,7 +69,7 @@ export const RANGE_SELECTOR_BUTTONS_HOURLY = [
 ];
 
 /** Range-selector / range-slider common styling. */
-export const PLOTLY_RANGE_SELECTOR_STYLE = {
+const PLOTLY_RANGE_SELECTOR_STYLE = {
   bgcolor: "#1e293b",
   activecolor: "#334155",
   bordercolor: "#475569",
@@ -77,7 +77,7 @@ export const PLOTLY_RANGE_SELECTOR_STYLE = {
   font: { color: "#94a3b8" },
 } as const;
 
-export const PLOTLY_RANGE_SLIDER_STYLE = {
+const PLOTLY_RANGE_SLIDER_STYLE = {
   bgcolor: "#1e293b",
   bordercolor: "#334155",
   thickness: 0.08,
@@ -110,9 +110,6 @@ export const PLOTLY_LEGEND = {
   bordercolor: "#334155",
   borderwidth: 1,
 } as const;
-
-/** Standard chart margins. */
-export const PLOTLY_MARGIN = { t: 16, r: 60, b: 8, l: 60 } as const;
 
 /** Standard Plotly config (no mode bar, responsive, pan on drag). */
 export const PLOTLY_CONFIG = {

@@ -1,6 +1,4 @@
-// ---------------------------------------------------------------------------
 // Network definitions — add new chains here
-// ---------------------------------------------------------------------------
 
 import contractsData from "@mento-protocol/contracts/contracts.json";
 import DEPLOYMENT_NAMESPACES from "@mento-protocol/monitoring-config/deployment-namespaces.json";
@@ -267,7 +265,7 @@ const showLocalNetworks =
   typeof process !== "undefined" &&
   process.env.NEXT_PUBLIC_SHOW_LOCAL_NETWORKS === "true";
 
-export const showTestnetNetworks =
+const showTestnetNetworks =
   typeof process !== "undefined" &&
   process.env.NEXT_PUBLIC_SHOW_TESTNET_NETWORKS === "true";
 

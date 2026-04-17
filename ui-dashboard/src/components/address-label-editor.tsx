@@ -5,6 +5,7 @@ import { useAddressLabels } from "@/components/address-labels-provider";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 import { TagInput } from "@/components/tag-input";
 import { SUGGESTED_TAGS, getUsedTags } from "@/lib/tag-suggestions";
+import { isValidAddress } from "@/lib/format";
 import {
   NETWORK_IDS,
   NETWORKS,
@@ -12,9 +13,7 @@ import {
   isConfiguredNetworkId,
 } from "@/lib/networks";
 
-// ---------------------------------------------------------------------------
 // Pure helpers (exported for testing)
-// ---------------------------------------------------------------------------
 
 /**
  * Determine whether the editor is operating on a contract row (existing address
@@ -45,9 +44,6 @@ export function resolveEffectiveName(
   return nameInput.trim();
 }
 
-/** @deprecated Use resolveEffectiveName instead */
-export const resolveEffectiveLabel = resolveEffectiveName;
-
 /**
  * Validate the form inputs for the entry editor.
  * Returns an error string or null when valid.
@@ -61,7 +57,7 @@ export function validateEntryForm(opts: {
   tags?: string[];
   isContractRow: boolean;
 }): string | null {
-  if (opts.isNewAddress && !/^0x[0-9a-fA-F]{40}$/.test(opts.address.trim())) {
+  if (opts.isNewAddress && !isValidAddress(opts.address.trim())) {
     return "Enter a valid 0x address.";
   }
   const hasTags = opts.tags && opts.tags.length > 0;
@@ -69,21 +65,6 @@ export function validateEntryForm(opts: {
     return "Name or at least one tag is required.";
   }
   return null;
-}
-
-/** @deprecated Use validateEntryForm instead */
-export function validateLabelForm(opts: {
-  isNewAddress: boolean;
-  address: string;
-  label: string;
-  isContractRow: boolean;
-}): string | null {
-  return validateEntryForm({
-    isNewAddress: opts.isNewAddress,
-    address: opts.address,
-    name: opts.label,
-    isContractRow: opts.isContractRow,
-  });
 }
 
 type Props = {

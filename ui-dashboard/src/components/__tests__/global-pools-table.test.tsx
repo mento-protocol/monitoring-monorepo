@@ -93,9 +93,7 @@ function makeEntry(
   return { pool: { ...BASE_POOL, ...pool }, network, rates: new Map() };
 }
 
-// ---------------------------------------------------------------------------
 // globalPoolKey
-// ---------------------------------------------------------------------------
 
 describe("globalPoolKey", () => {
   it("generates network:poolId key", () => {
@@ -110,9 +108,7 @@ describe("globalPoolKey", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // GlobalPoolsTable rendering
-// ---------------------------------------------------------------------------
 
 describe("GlobalPoolsTable — column structure", () => {
   it("renders a branded chain icon before the pool name", () => {
@@ -381,9 +377,7 @@ describe("GlobalPoolsTable — multiple chains", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // sortGlobalPools unit tests
-// ---------------------------------------------------------------------------
 
 const BASE_SORT_CTX: GlobalSortContext = {
   tvlByKey: new Map(),

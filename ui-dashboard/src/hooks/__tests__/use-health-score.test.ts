@@ -9,9 +9,7 @@ import {
   ORACLE_SNAPSHOTS_WINDOW,
 } from "@/lib/queries";
 
-// ---------------------------------------------------------------------------
 // Mocks — useGQL is the only external dependency of the hook.
-// ---------------------------------------------------------------------------
 
 const useGQLMock = vi.fn();
 vi.mock("@/lib/graphql", () => ({

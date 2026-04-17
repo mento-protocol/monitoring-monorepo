@@ -54,7 +54,7 @@ export function computeReservePcts(
  *   At T=1 (10000 bps) exactly: lower=0%, upper=66.7% — still renderable.
  *   At T=2: denominator (2−T)=0, undefined. Guard keeps T strictly below 2.
  */
-export interface ThresholdLines {
+interface ThresholdLines {
   threshold0Lower: number;
   threshold0Upper: number;
   threshold1Lower: number;

@@ -1,7 +1,7 @@
 import type { OracleSnapshot, Pool } from "@/lib/types";
 import { tradingSecondsInRange } from "@/lib/weekend";
 
-export type BinaryHealthWindow = {
+type BinaryHealthWindow = {
   score: number | null; // 0..1, null => no data
   trackedSeconds: number;
   healthySeconds: number;

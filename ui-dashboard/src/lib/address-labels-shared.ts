@@ -3,9 +3,7 @@
  * Safe to import from client components, providers, and server code alike.
  */
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export type AddressEntry = {
   name: string;
@@ -15,16 +13,10 @@ export type AddressEntry = {
   updatedAt: string;
 };
 
-/** @deprecated Use AddressEntry instead */
-export type AddressLabelEntry = AddressEntry;
-
 /** Full record as returned from the API -- includes the address itself. */
 export type AddressEntryRecord = AddressEntry & {
   address: string;
 };
-
-/** @deprecated Use AddressEntryRecord instead */
-export type AddressLabelRecord = AddressEntryRecord;
 
 /** Shape of a full export/backup snapshot. */
 export type AddressLabelsSnapshot = {
@@ -33,9 +25,7 @@ export type AddressLabelsSnapshot = {
   chains: Record<string, Record<string, AddressEntry>>;
 };
 
-// ---------------------------------------------------------------------------
 // Backward-compat: auto-upgrade legacy entries on read
-// ---------------------------------------------------------------------------
 
 /**
  * If a Redis entry has `label` but no `name`, auto-upgrade to the new schema.
@@ -112,9 +102,7 @@ export function upgradeEntries(
   return result;
 }
 
-// ---------------------------------------------------------------------------
 // Entry sanitization — shared limits for PUT + import paths
-// ---------------------------------------------------------------------------
 
 const MAX_NAME_LENGTH = 200;
 const MAX_NOTES_LENGTH = 500;

@@ -14,7 +14,7 @@ import { isWeekend } from "./weekend";
  * before the indexer started capturing it). SortedOracles.reportExpirySeconds()
  * on Celo mainnet = 300s (5 min), which is the lowest value across supported chains.
  */
-export const ORACLE_STALE_SECONDS = 300;
+const ORACLE_STALE_SECONDS = 300;
 
 /**
  * Per-chain fallback for SortedOracles.reportExpirySeconds().
@@ -34,7 +34,7 @@ export const ORACLE_STALE_SECONDS_BY_CHAIN: Record<number, number> = {
   10143: 360, // Monad testnet
 };
 
-export interface PoolHealthState {
+interface PoolHealthState {
   source?: string;
   oracleOk?: boolean;
   oracleTimestamp?: string;
@@ -55,7 +55,7 @@ export interface PoolHealthState {
  * (breach can start any time after the last rebalance, not at it) but it's
  * directionally correct with the data we have.
  */
-export const DEVIATION_BREACH_GRACE_SECONDS = 3600;
+const DEVIATION_BREACH_GRACE_SECONDS = 3600;
 
 export function getOracleStalenessThreshold(
   pool: { oracleExpiry?: string },
@@ -201,7 +201,7 @@ export function computeEffectiveStatus(
   return worstStatus(health, limit);
 }
 
-export type RebalancerStatus = "ACTIVE" | "STALE" | "N/A" | "NO_DATA";
+type RebalancerStatus = "ACTIVE" | "STALE" | "N/A" | "NO_DATA";
 
 /**
  * Compute rebalancer liveness for a pool.

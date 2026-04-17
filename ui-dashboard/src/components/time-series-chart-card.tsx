@@ -21,13 +21,13 @@ export const SECONDS_PER_DAY = 86_400;
 export type RangeKey = "7d" | "30d" | "all";
 
 // Days for the rolling cutoff; null means "show all available history".
-export const RANGE_DAYS: Record<RangeKey, number | null> = {
+const RANGE_DAYS: Record<RangeKey, number | null> = {
   "7d": 7,
   "30d": 30,
   all: null,
 };
 
-const RANGES: ReadonlyArray<{
+export const RANGES: ReadonlyArray<{
   key: RangeKey;
   label: string;
 }> = [

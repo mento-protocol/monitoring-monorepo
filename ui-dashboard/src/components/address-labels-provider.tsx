@@ -11,14 +11,10 @@ import useSWR, { useSWRConfig } from "swr";
 import { useNetwork } from "@/components/network-provider";
 import { truncateAddress } from "@/lib/format";
 import { NETWORKS, networkIdForChainId, type Network } from "@/lib/networks";
-import {
-  upgradeEntries,
-  type AddressEntry,
-  type AddressLabelRecord,
-} from "@/lib/address-labels-shared";
+import { upgradeEntries, type AddressEntry } from "@/lib/address-labels-shared";
 
 /** A custom address entry, labelled across all chains with its originating chainId. */
-export type AddressEntryRow = AddressEntry & {
+type AddressEntryRow = AddressEntry & {
   address: string;
   chainId: number;
 };
@@ -54,26 +50,6 @@ type AddressLabelsContextValue = {
   deleteEntry: (address: string, chainId?: number) => Promise<void>;
   isLoading: boolean;
   error: Error | undefined;
-
-  // Deprecated aliases (kept for existing callers on pool detail pages).
-  /** @deprecated Use getName instead */
-  getLabel: (address: string | null, chainId?: number) => string;
-  /** @deprecated Use hasName instead */
-  hasLabel: (address: string | null, chainId?: number) => boolean;
-  /** @deprecated Use isCustom instead */
-  isCustomLabel: (address: string | null, chainId?: number) => boolean;
-  /** @deprecated Use customEntries instead */
-  customLabels: AddressLabelRecord[];
-  /** @deprecated Use upsertEntry instead */
-  upsertLabel: (
-    address: string,
-    label: string,
-    category?: string,
-    notes?: string,
-    isPublic?: boolean,
-  ) => Promise<void>;
-  /** @deprecated Use deleteEntry instead */
-  deleteLabel: (address: string) => Promise<void>;
 };
 
 const AddressLabelsContext = createContext<AddressLabelsContextValue | null>(
@@ -283,20 +259,6 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     [mutate, defaultChainId],
   );
 
-  const upsertLabel = useCallback(
-    async (
-      address: string,
-      label: string,
-      category?: string,
-      notes?: string,
-      isPublic?: boolean,
-    ): Promise<void> => {
-      const tags = category ? [category] : [];
-      return upsertEntry(address, { name: label, tags, notes, isPublic });
-    },
-    [upsertEntry],
-  );
-
   const value: AddressLabelsContextValue = {
     getName,
     getTags,
@@ -308,12 +270,6 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     deleteEntry,
     isLoading,
     error: error as Error | undefined,
-    getLabel: getName,
-    hasLabel: hasName,
-    isCustomLabel: isCustom,
-    customLabels: customEntries,
-    upsertLabel,
-    deleteLabel: (address: string) => deleteEntry(address),
   };
 
   return <AddressLabelsContext value={value}>{children}</AddressLabelsContext>;

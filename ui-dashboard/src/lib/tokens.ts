@@ -2,15 +2,13 @@ import type { Pool } from "./types";
 import type { Network } from "./networks";
 import { truncateAddress, parseWei } from "./format";
 
-// ---------------------------------------------------------------------------
 // Network-aware helpers
-// ---------------------------------------------------------------------------
 
 /** All entries here must also appear in USD_PEGGED_SYMBOLS below. */
 export const USDM_SYMBOLS = new Set(["USDm"]);
 
 /** Tokens treated as $1.00 for USD conversion. */
-export const USD_PEGGED_SYMBOLS = new Set([
+const USD_PEGGED_SYMBOLS = new Set([
   "cUSD",
   "USDC",
   "axlUSDC",
@@ -85,18 +83,6 @@ export function tokenSymbol(network: Network, address: string | null): string {
   );
 }
 
-export function addressLabel(network: Network, address: string | null): string {
-  if (!address) return "\u2014";
-  return (
-    network.addressLabels[address.toLowerCase()] ?? truncateAddress(address)
-  );
-}
-
-export function hasLabel(network: Network, address: string | null): boolean {
-  if (!address) return false;
-  return address.toLowerCase() in network.addressLabels;
-}
-
 export function explorerAddressUrl(network: Network, address: string): string {
   return `${network.explorerBaseUrl}/address/${address}`;
 }
@@ -125,18 +111,6 @@ export function isFpmm(pool: Pick<Pool, "source">): boolean {
   return pool.source.toLowerCase().includes("fpmm");
 }
 
-/** Lookup from pool ID -> display name for a list of pools. */
-export function buildPoolNameMap(
-  network: Network,
-  pools: Pool[],
-): Record<string, string> {
-  const map: Record<string, string> = {};
-  for (const p of pools) {
-    map[p.id] = poolName(network, p.token0, p.token1);
-  }
-  return map;
-}
-
 /**
  * Returns the Chainlink data feed URL + display pair for a given token
  * symbol and chainId, or null if no mapping exists. Only applicable to
@@ -160,14 +134,6 @@ export function chainlinkFeed(
     .map((s) => s.toUpperCase())
     .join("/");
   return { url: `${chainConfig.baseUrl}/${slug}`, pair };
-}
-
-/** @deprecated Use chainlinkFeed() — returns {url, pair}. */
-export function chainlinkFeedUrl(
-  tokenSymbol: string,
-  chainId: number,
-): string | null {
-  return chainlinkFeed(tokenSymbol, chainId)?.url ?? null;
 }
 
 /**

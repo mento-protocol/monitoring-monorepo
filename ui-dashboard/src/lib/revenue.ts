@@ -17,7 +17,7 @@ import type { TimeRange } from "./volume";
 
 const SECONDS_PER_DAY = 86_400;
 
-export type FeeSeriesPoint = {
+type FeeSeriesPoint = {
   timestamp: number;
   protocolFeesUSD: number;
   lpFeesUSD: number;

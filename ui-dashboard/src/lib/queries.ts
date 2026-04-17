@@ -48,35 +48,6 @@ export const ALL_POOLS_WITH_HEALTH = `
   }
 `;
 
-// WARNING: Envio's hosted Hasura silently caps results at 1000 rows regardless
-// of the requested limit. The `limit: 100000` is honored by self-hosted /
-// local Hasura (no such cap), so the explicit value stays high for the
-// benefit of dev/local envs. On hosted, this query returns at most 1000
-// rows per call — safe for 24h windows today, risky for 7d/30d as protocol
-// activity grows. For paginated / truncation-safe fetches use
-// `fetchAllSnapshotPages` in `src/hooks/use-all-networks-data.ts`
-// (paginates via POOL_SNAPSHOTS_ALL).
-export const POOL_SNAPSHOTS_WINDOW = `
-  query PoolSnapshotsWindow($from: numeric!, $to: numeric!, $poolIds: [String!]!) {
-    PoolSnapshot(
-      where: {
-        timestamp: { _gte: $from, _lt: $to }
-        poolId: { _in: $poolIds }
-      }
-      order_by: { timestamp: desc }
-      limit: 100000
-    ) {
-      poolId
-      timestamp
-      reserves0
-      reserves1
-      swapCount
-      swapVolume0
-      swapVolume1
-    }
-  }
-`;
-
 // Envio's hosted Hasura silently caps every query at 1000 rows regardless of
 // the requested limit. To fetch full history we must paginate with $offset;
 // the hook's fetchAllSnapshotPages wrapper handles the loop.
@@ -555,21 +526,6 @@ export const OLS_POOL = `
       olsRebalanceCount
       addedAtBlock addedAtTimestamp
       updatedAtBlock updatedAtTimestamp
-    }
-  }
-`;
-
-export const OLS_LIQUIDITY_EVENTS = `
-  query OlsLiquidityEvents($poolId: String!, $olsAddress: String!, $limit: Int!) {
-    OlsLiquidityEvent(
-      where: { poolId: { _eq: $poolId }, olsAddress: { _eq: $olsAddress } }
-      order_by: { blockTimestamp: desc }
-      limit: $limit
-    ) {
-      id chainId direction caller
-      tokenGivenToPool amountGivenToPool
-      tokenTakenFromPool amountTakenFromPool
-      txHash blockNumber blockTimestamp
     }
   }
 `;

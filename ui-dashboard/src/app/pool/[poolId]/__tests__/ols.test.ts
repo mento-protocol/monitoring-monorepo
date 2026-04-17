@@ -10,9 +10,7 @@ import {
 import type { OlsLiquidityEvent, OlsPool, Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 
-// ---------------------------------------------------------------------------
 // Mocks — mirror the pattern in pools/__tests__/page.test.tsx
-// ---------------------------------------------------------------------------
 
 vi.mock("@/components/network-provider", () => ({
   useNetwork: () => ({
@@ -88,9 +86,7 @@ vi.mock("@/lib/format", async (importOriginal) => {
   };
 });
 
-// ---------------------------------------------------------------------------
 // Fixtures
-// ---------------------------------------------------------------------------
 
 function makePool(overrides: Partial<Pool> = {}): Pool {
   return {
@@ -173,9 +169,7 @@ function makeOlsEvent(
   };
 }
 
-// ---------------------------------------------------------------------------
 // getDebtTokenSideLabel
-// ---------------------------------------------------------------------------
 
 describe("getDebtTokenSideLabel", () => {
   it("returns token0 when debt token matches token0", () => {
@@ -283,9 +277,7 @@ const mockNetwork: Network = {
   testnet: false,
 };
 
-// ---------------------------------------------------------------------------
 // OlsStatusPanel
-// ---------------------------------------------------------------------------
 
 describe("OlsStatusPanel", () => {
   it("renders key fields with valid data", () => {
@@ -356,9 +348,7 @@ describe("OlsStatusPanel", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // OlsLiquidityTable
-// ---------------------------------------------------------------------------
 
 describe("OlsLiquidityTable", () => {
   it("renders Expand badge for direction=0", () => {

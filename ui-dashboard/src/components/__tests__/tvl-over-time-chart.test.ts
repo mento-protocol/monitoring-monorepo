@@ -526,10 +526,8 @@ describe("buildDailySeries — bucket granularity", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // React render tests — exercises TvlOverTimeChart output. next/dynamic is
 // mocked above so Plot renders as a sentinel div and its props are captured.
-// ---------------------------------------------------------------------------
 
 describe("TvlOverTimeChart render", () => {
   beforeEach(() => {

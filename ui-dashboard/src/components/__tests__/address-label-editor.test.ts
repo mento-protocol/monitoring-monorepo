@@ -2,14 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   resolveIsContractRow,
   resolveEffectiveName,
-  resolveEffectiveLabel,
   validateEntryForm,
-  validateLabelForm,
 } from "@/components/address-label-editor";
 
-// ---------------------------------------------------------------------------
 // resolveIsContractRow
-// ---------------------------------------------------------------------------
 
 describe("resolveIsContractRow", () => {
   it("returns true for an existing address with initial data and no custom label", () => {
@@ -63,9 +59,7 @@ describe("resolveIsContractRow", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // resolveEffectiveName (and deprecated resolveEffectiveLabel alias)
-// ---------------------------------------------------------------------------
 
 describe("resolveEffectiveName", () => {
   it("returns the typed name for a non-contract row", () => {
@@ -93,15 +87,9 @@ describe("resolveEffectiveName", () => {
   it("returns empty string when contract row has no initial name and input is empty", () => {
     expect(resolveEffectiveName("", true, undefined)).toBe("");
   });
-
-  it("resolveEffectiveLabel is an alias for resolveEffectiveName", () => {
-    expect(resolveEffectiveLabel).toBe(resolveEffectiveName);
-  });
 });
 
-// ---------------------------------------------------------------------------
 // validateEntryForm (and deprecated validateLabelForm)
-// ---------------------------------------------------------------------------
 
 const validAddress = "0x" + "a".repeat(40);
 
@@ -179,30 +167,6 @@ describe("validateEntryForm", () => {
         isNewAddress: false,
         address: validAddress,
         name: "   ",
-        isContractRow: false,
-      }),
-    ).toMatch(/required/i);
-  });
-});
-
-describe("validateLabelForm (deprecated alias)", () => {
-  it("returns null for a valid new address with a label", () => {
-    expect(
-      validateLabelForm({
-        isNewAddress: true,
-        address: validAddress,
-        label: "My Wallet",
-        isContractRow: false,
-      }),
-    ).toBeNull();
-  });
-
-  it("returns an error when label is empty on a non-contract row", () => {
-    expect(
-      validateLabelForm({
-        isNewAddress: false,
-        address: validAddress,
-        label: "",
         isContractRow: false,
       }),
     ).toMatch(/required/i);

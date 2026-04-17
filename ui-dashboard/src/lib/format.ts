@@ -3,7 +3,7 @@
  * Divide any raw oracle price value by 10^SORTED_ORACLES_DECIMALS to get the
  * human-readable rate.
  */
-export const SORTED_ORACLES_DECIMALS = 24;
+const SORTED_ORACLES_DECIMALS = 24;
 
 /** TradingLimitsV2 stores all limit/netflow values in 15-decimal internal precision. */
 export const TRADING_LIMITS_INTERNAL_DECIMALS = 15;
@@ -53,16 +53,10 @@ export function formatBlock(bn: string): string {
   return Number(bn).toLocaleString();
 }
 
-export function isValidAddress(value: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(value);
-}
+export { isValidAddress } from "@/lib/validators";
 
 // Pool ID utilities live in lib/pool-id.ts — re-exported here for backward compatibility.
-export {
-  isNamespacedPoolId,
-  extractChainIdFromPoolId,
-  normalizePoolIdForChain,
-} from "@/lib/pool-id";
+export { isNamespacedPoolId, normalizePoolIdForChain } from "@/lib/pool-id";
 
 export function formatUSD(value: number): string {
   if (!Number.isFinite(value)) return "N/A";
@@ -77,9 +71,7 @@ export function formatUSD(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
-// ---------------------------------------------------------------------------
 // Oracle price formatting
-// ---------------------------------------------------------------------------
 
 /** Set of USD-stable token symbols. If token0 is in this set, the SortedOracles
  * feed value ("1 feedToken = X USD") must be inverted to get the pool display
@@ -126,7 +118,7 @@ export function toPercent(raw: string, decimals = 4): string {
   return `${integer}.${String(frac).padStart(decimals, "0")}%`;
 }
 
-export type SwapDirection = {
+type SwapDirection = {
   soldToken0: boolean;
   soldAmt: string;
   boughtAmt: string;

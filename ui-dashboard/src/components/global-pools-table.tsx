@@ -23,6 +23,7 @@ import { combinedTooltip } from "@/lib/pool-table-utils";
 import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 import { buildPoolDetailHref } from "@/lib/routing";
+import type { SortDir } from "@/lib/table-sort";
 
 /** A pool entry enriched with its originating network and oracle rates. */
 export type GlobalPoolEntry = {
@@ -31,7 +32,7 @@ export type GlobalPoolEntry = {
   rates: OracleRateMap;
 };
 
-export type GlobalSortKey =
+type GlobalSortKey =
   | "pool"
   | "health"
   | "fee"
@@ -40,8 +41,6 @@ export type GlobalSortKey =
   | "volume24h"
   | "volume7d"
   | "totalVolume";
-
-export type SortDir = "asc" | "desc";
 
 // Higher rank = more severe. "desc" puts highest rank first → CRITICAL first.
 const HEALTH_ORDER: Record<string, number> = {
@@ -209,9 +208,7 @@ function hasAnyVirtualPools(entries: GlobalPoolEntry[]): boolean {
   return entries.some((e) => e.network.hasVirtualPools);
 }
 
-// ---------------------------------------------------------------------------
 // Compact 2×2 limit heatmap
-// ---------------------------------------------------------------------------
 
 function pressureColor(p: number): string {
   if (p >= 1.0) return "bg-red-500";
@@ -278,9 +275,7 @@ function LimitHeatmap({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Strategy badges
-// ---------------------------------------------------------------------------
 
 const STRATEGY_STYLES: Record<
   string,
@@ -323,9 +318,7 @@ function poolStrategies(pool: Pool, isOls: boolean): string[] {
   return strategies;
 }
 
-// ---------------------------------------------------------------------------
 // Fee display
-// ---------------------------------------------------------------------------
 
 function hasFeeData(pool: Pool): boolean {
   if (pool.source?.includes("virtual")) return false;
@@ -341,9 +334,7 @@ function formatFee(pool: Pool): string {
   return `${(total / 100).toFixed(2)}%`;
 }
 
-// ---------------------------------------------------------------------------
 // Table component
-// ---------------------------------------------------------------------------
 
 interface GlobalPoolsTableProps {
   entries: GlobalPoolEntry[];
