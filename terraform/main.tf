@@ -315,6 +315,22 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
         name  = "POLL_INTERVAL_MS"
         value = "30000"
       }
+      # Restart container if /healthz returns 503 (stale poll data).
+      liveness_probe {
+        http_get {
+          path = "/healthz"
+        }
+        initial_delay_seconds = 10
+        period_seconds        = 30
+        failure_threshold     = 3
+      }
+      startup_probe {
+        http_get {
+          path = "/healthz"
+        }
+        initial_delay_seconds = 5
+        failure_threshold     = 3
+      }
     }
   }
 }

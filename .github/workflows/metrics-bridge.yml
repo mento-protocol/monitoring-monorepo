@@ -131,4 +131,6 @@ jobs:
           TF_VAR_gcp_billing_account: ${{ secrets.GCP_BILLING_ACCOUNT }}
         run: |
           terraform -chdir=terraform init -input=false
-          terraform -chdir=terraform apply -auto-approve -input=false
+          terraform -chdir=terraform apply -auto-approve -input=false \
+            -target='google_cloud_run_v2_service.metrics_bridge[0]' \
+            -target='google_cloud_run_v2_service_iam_member.metrics_bridge_public[0]'

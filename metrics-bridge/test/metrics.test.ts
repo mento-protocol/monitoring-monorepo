@@ -64,10 +64,22 @@ describe("updateMetrics", () => {
     ).toBe(0.42);
   });
 
-  it("skips deviationRatio when hasHealthData is false", async () => {
+  it("skips deviationRatio when sentinel value -1", async () => {
     updateMetrics([
       makePool({
         hasHealthData: false,
+        lastDeviationRatio: "-1",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_deviation_ratio", poolLabels),
+    ).toBeUndefined();
+  });
+
+  it("skips deviationRatio during no-data interval even with hasHealthData true", async () => {
+    updateMetrics([
+      makePool({
+        hasHealthData: true,
         lastDeviationRatio: "-1",
       }),
     ]);
