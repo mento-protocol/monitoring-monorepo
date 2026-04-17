@@ -22,3 +22,8 @@ output "google_oauth_redirect_uri" {
   description = "Redirect URI to add to the Google OAuth client."
   value       = "https://${vercel_project_domain.monitoring.domain}/api/auth/callback/google"
 }
+
+output "metrics_bridge_url" {
+  description = "Cloud Run URL for the metrics bridge — add as Grafana Agent scrape target."
+  value       = length(google_cloud_run_v2_service.metrics_bridge) > 0 ? google_cloud_run_v2_service.metrics_bridge[0].uri : ""
+}

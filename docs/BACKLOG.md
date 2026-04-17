@@ -1,21 +1,32 @@
 # Monitoring Monorepo — Task Backlog
 
-Last updated: 2026-03-05
+Last updated: 2026-04-16
 
-## 🔴 Immediate — Stream C Dashboard KPI Components
+## Next — v3 Alerting
 
-Indexer schema is complete. These are dashboard-only items.
+Extend alerting to cover Mento v3 FPMM pool-specific KPIs. Aegis infrastructure (RPC → Prometheus → Grafana Cloud → Discord/Splunk) is already live for v2 alerts. The work is defining v3-specific metrics and alert rules.
 
-- [ ] **LimitBadge** — show `limitStatus` (OK/WARN/CRITICAL) on pool list + detail
-- [ ] **LimitPanel** — breakdown of `limitPressure0/1` and `netflow0/1` per token on pool detail
-- [ ] **LivenessBadge** — show `rebalanceLivenessStatus` (ACTIVE / N/A) on pool list
-- [ ] **RebalancerPanel** — rebalance event timeline + `effectivenessRatio` on pool detail
-- [ ] **TVL on global page** — sum `reserves0/1` across pools (decide: raw amounts vs USD)
-- [ ] **Gap-fill for snapshot charts** — forward-fill missing hourly buckets in dashboard layer (not block handlers — Envio `onBlock` lacks timestamp)
+### Strategy Decision Needed
 
-## 🟡 Phase 2 — Indexer + Alerting
+- [ ] **Choose data source approach** — extend Aegis config to poll v3 FPMM contracts, export Prometheus metrics from Envio indexer, or hybrid?
 
-### Indexer Enhancements
+### v3 Alert Rules
+
+- [ ] **Oracle liveness** — warn >0.8, crit ≥1 (oracle expired). FPMM pools only.
+- [ ] **Deviation ratio** — warn ≥0.8 sustained >15min, crit >60min. Indexer tracks `deviationBreachStartedAt`.
+- [ ] **Trading limit pressure** — warn >0.8, crit ≥1.0 (limit hit). FPMM pools only.
+- [ ] **Rebalancer liveness** — crit if no rebalance in threshold window when deviation is high
+- [ ] **Stability Pool headroom** — crit ≤0 (undercollateralized). Blocked on Liquity v2 indexing.
+
+### Infrastructure
+
+- [ ] **v3 Grafana dashboard** — ops dashboard for FPMM pool health
+- [ ] **Discord channels for v3 alerts** — decide channel structure (per-KPI? per-pool?)
+- [ ] **Terraform for v3 alert rules** — add to `aegis/terraform/grafana-alerts/`
+
+---
+
+## Backlog — Indexer Enhancements
 
 - [ ] **Liquity v2 CDP indexing**
   - TroveManager events: `TroveOpened`, `TroveClosed`, `TroveUpdated`, `LiquidationEvent`
@@ -25,33 +36,23 @@ Indexer schema is complete. These are dashboard-only items.
 - [ ] **Monad indexing** — blocked on contract deployment to Monad
 - [ ] **ChainStat / GlobalStat** — protocol-level aggregate entity (total pools, total swaps, global TVL)
 
-### Alerting (Aegis/Grafana)
+## Backlog — Dashboard
 
-- [ ] Prometheus metrics export from indexer
-- [ ] Grafana dashboards
-- [ ] Alert rule: oracle liveness (warn >0.8, crit ≥1)
-- [ ] Alert rule: deviation ratio (warn ≥0.8 for >15min, crit >60min)
-- [ ] Alert rule: trading limit pressure (warn >0.8, crit ≥1.0)
-- [ ] Alert rule: rebalancer liveness (crit if no rebalance in threshold window)
-- [ ] Alert rule: Stability Pool headroom (crit ≤0)
-- [ ] Discord/PagerDuty channels
+- [ ] **Gap-fill for snapshot charts** — forward-fill missing hourly buckets in dashboard layer
 
-## 🟢 Phase 3
+## Backlog — Future
 
-- [ ] **Roman's Streamlit sandbox** — Python/Streamlit reads same Hasura backend
-- [ ] **Google Auth** (NextAuth.js) — restrict dashboard to @mentolabs.xyz
+- [ ] **Streamlit sandbox** — Python/Streamlit reads same Hasura backend
 - [ ] **ClickHouse sink** — heavy analytics beyond Postgres
 
-## 📋 Tech Debt
+## Tech Debt
 
-- [ ] Dashboard test coverage (currently 53 tests, all in lib utils — zero component tests)
-- [ ] Hasura admin secret exposed in client bundle — needs server-side proxy or Hasura JWT auth for prod
-- [ ] `setURL` in page.tsx doesn't preserve all query params on filter switch
-- [ ] No error boundaries or loading skeletons in dashboard UI
-- [ ] Port 9898 hardcoded in Envio — can't run multiple indexers simultaneously
-- [ ] DevNet config (`config.celo.devnet.yaml`) may be stale — devnet is no longer primary target
+- [ ] Dashboard component test coverage (68 test files total, but many are lib/util — component tests sparse)
+- [ ] Revenue page placeholders ("CDP Borrowing Fees" and "Reserve Yield" marked "Soon")
 
-## ✅ Done
+---
+
+## Done
 
 ### Indexer
 
@@ -64,13 +65,18 @@ Indexer schema is complete. These are dashboard-only items.
 - [x] SortedOracles event indexing (mainnet only)
 - [x] TradingLimit entity (`limitStatus`, `limitPressure0/1`, `netflow0/1`, `limit0/1`)
 - [x] Rebalancer liveness (`rebalancerAddress`, `rebalanceLivenessStatus`, `effectivenessRatio`)
-- [x] PoolSnapshot pre-aggregation (volume, TVL, fees per pool per hour/day)
+- [x] PoolSnapshot pre-aggregation (volume, TVL, fees per pool per hour)
+- [x] PoolDailySnapshot rollup (daily aggregation)
 - [x] Pool cumulative fields (`swapCount`, `notionalVolume0/1`, `rebalanceCount`)
-- [x] `txHash` on all events
-- [x] `@index` directives for query performance
+- [x] Deviation breach tracking (`deviationBreachStartedAt` on Pool)
+- [x] FX weekend exclusion from healthscore math
+- [x] FX calendar extracted to `shared-config` package
+- [x] Multichain config (`config.multichain.mainnet.yaml` — Celo + Monad)
+- [x] `txHash` on all events, `@index` directives for query performance
 - [x] Config files: `config.celo.mainnet.yaml`, `config.celo.sepolia.yaml`
 - [x] Deploy branch strategy (`deploy/celo-mainnet`, `deploy/celo-sepolia`)
 - [x] `contracts.json` committed + integrated into network config
+- [x] Retry + fallback RPC on rate limit and block-out-of-range errors
 
 ### Dashboard
 
@@ -79,16 +85,39 @@ Indexer schema is complete. These are dashboard-only items.
 - [x] Pool detail page (`/pools/[poolId]`) — trades, reserve chart, analytics tab
 - [x] Oracle health: HealthBadge, HealthPanel, OracleChart (dual y-axis)
 - [x] Analytics tab with PoolSnapshot charts
-- [x] Multi-chain network switcher
+- [x] Fully multichain — network switcher dropped, chain icon prefix on pool IDs
 - [x] Token symbol mapping, `isFpmm()` in `tokens.ts`
 - [x] Shared `PoolsTable` component
+- [x] LimitBadge + LimitPanel (trading limit pressure per token)
+- [x] RebalancerBadge + RebalancerPanel (liveness status + diagnostics)
+- [x] TVL on global page — TVL-over-time chart + tiles with 24h/7d/30d change %
+- [x] TVL Δ WoW column on all pools table
+- [x] Protocol Revenue page (`/revenue`) — swap fee time-series
+- [x] Daily volume chart on pool detail
+- [x] Error boundaries + loading skeletons (route-level)
+- [x] Google Auth (NextAuth.js — `@mentolabs.xyz` only)
 
-### Infrastructure
+### Infrastructure (Done)
 
 - [x] Monorepo extraction from devnet repo
-- [x] CI: ESLint 10 + Vitest (53 tests) + typecheck + Codecov
+- [x] CI: ESLint 10 + Vitest (68 test files) + typecheck + Codecov
 - [x] `pnpm deploy:indexer [network]` (prompts if no network passed)
 - [x] `pnpm update-endpoint:mainnet` — Vercel env var update after indexer redeploy
-- [x] Discord notification on deploy branch push (`notify-envio-deploy.yml`) — PR #17
-- [x] `AGENTS.md` files for indexer + dashboard
+- [x] Discord notification on deploy branch push (`notify-envio-deploy.yml`)
 - [x] Deployment docs (`docs/deployment.md`)
+- [x] Non-interactive deploy scripts (status, promote, logs)
+
+### Alerting (Aegis v2 — live)
+
+- [x] Aegis NestJS service on GCP App Engine — polls v2 contract state via RPC
+- [x] Grafana Agent on GCP → pushes Prometheus metrics to Grafana Cloud
+- [x] Grafana dashboard: "Aegis — On-chain Metrics"
+- [x] Alert rules: oracle relayers (stale feeds, low CELO balance)
+- [x] Alert rules: reserve balances (low USDC/USDT/axlUSDC)
+- [x] Alert rules: trading modes (circuit breakers tripped)
+- [x] Alert rules: trading limits (L0/L1/LG utilization >90%)
+- [x] Alert rules: Aegis service health (RPC failures, data staleness)
+- [x] Contact points: 8 Discord webhooks + Splunk On-Call
+- [x] Notification policies with severity-based routing
+- [x] Weekend mute timings for FX rate feeds
+- [x] All Grafana config Terraform-managed

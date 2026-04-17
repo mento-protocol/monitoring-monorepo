@@ -19,6 +19,10 @@ terraform {
       source  = "hashicorp/local"
       version = "~> 2.5"
     }
+    google = {
+      source  = "hashicorp/google"
+      version = ">= 6.11.0"
+    }
   }
 }
 
@@ -32,6 +36,12 @@ provider "vercel" {
 provider "upstash" {
   email   = var.upstash_email
   api_key = var.upstash_api_key
+}
+
+provider "google" {
+  impersonate_service_account = var.terraform_service_account
+  project                     = var.gcp_project_id
+  region                      = var.gcp_region
 }
 
 # ── Upstash Redis ─────────────────────────────────────────────────────────────
@@ -210,4 +220,51 @@ resource "local_file" "vercel_project_json" {
   })
   filename        = "${path.module}/../.vercel/project.json"
   file_permission = "0644"
+}
+
+# ── Metrics Bridge (Cloud Run) ───────────────────────────────────────────────
+# Polls Hasura for FPMM pool KPIs and exports Prometheus gauges.
+# Scraped by Grafana Agent (Aegis repo) → Grafana Cloud alert rules.
+
+resource "google_cloud_run_v2_service" "metrics_bridge" {
+  count    = var.metrics_bridge_enabled ? 1 : 0
+  name     = "metrics-bridge"
+  location = var.gcp_region
+
+  template {
+    scaling {
+      min_instance_count = 1
+      max_instance_count = 1
+    }
+    containers {
+      image = var.metrics_bridge_image
+      ports {
+        container_port = 8080
+      }
+      resources {
+        limits = {
+          memory = "256Mi"
+          cpu    = "1"
+        }
+      }
+      env {
+        name  = "HASURA_URL"
+        value = var.hasura_url_multichain
+      }
+      env {
+        name  = "POLL_INTERVAL_MS"
+        value = "30000"
+      }
+    }
+  }
+}
+
+# Allow unauthenticated access so Grafana Agent can scrape /metrics.
+resource "google_cloud_run_v2_service_iam_member" "metrics_bridge_public" {
+  count    = var.metrics_bridge_enabled ? 1 : 0
+  project  = google_cloud_run_v2_service.metrics_bridge[0].project
+  location = google_cloud_run_v2_service.metrics_bridge[0].location
+  name     = google_cloud_run_v2_service.metrics_bridge[0].name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }

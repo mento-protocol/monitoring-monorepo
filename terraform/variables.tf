@@ -100,3 +100,40 @@ variable "blob_read_write_token" {
   type        = string
   sensitive   = true
 }
+
+# ── Google Cloud (metrics-bridge) ─────────────────────────────────────────────
+
+variable "terraform_service_account" {
+  description = "GCP service account to impersonate for Terraform operations."
+  type        = string
+  default     = "org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+}
+
+variable "gcp_project_id" {
+  description = "GCP project ID for Cloud Run deployment."
+  type        = string
+  default     = "mento-prod"
+}
+
+variable "gcp_region" {
+  description = "GCP region for Cloud Run deployment."
+  type        = string
+  default     = "europe-west1"
+}
+
+variable "metrics_bridge_enabled" {
+  description = "Whether to provision the metrics-bridge Cloud Run service. Set to true once the first image has been built."
+  type        = bool
+  default     = false
+}
+
+variable "metrics_bridge_image" {
+  description = "Container image for the metrics bridge (e.g. europe-west1-docker.pkg.dev/mento-prod/metrics-bridge/metrics-bridge:latest)."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.metrics_bridge_image == "" || can(regex("^[a-z]", var.metrics_bridge_image))
+    error_message = "metrics_bridge_image must be a valid container image reference or empty string."
+  }
+}

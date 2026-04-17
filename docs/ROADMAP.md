@@ -1,8 +1,8 @@
 # Monitoring Monorepo — Roadmap
 
-Last updated: 2026-03-05
+Last updated: 2026-04-16
 
-## ✅ Done
+## Done
 
 ### Indexer
 
@@ -15,12 +15,17 @@ Last updated: 2026-03-05
 - [x] SortedOracles events indexed (mainnet: `0xefB84935239dAcdecF7c5bA76d8dE40b077B7b33`)
 - [x] **TradingLimit entity** — `limitStatus`, `limitPressure0/1`, `netflow0/1`, per-pool per-token
 - [x] **Rebalancer liveness** — `rebalancerAddress`, `rebalanceLivenessStatus`, `effectivenessRatio` on RebalanceEvent
-- [x] **PoolSnapshot pre-aggregation** — volume, TVL, fees per pool per day (industry-standard pattern)
+- [x] **PoolSnapshot pre-aggregation** — volume, TVL, fees per pool per hour
+- [x] **PoolDailySnapshot rollup** — daily aggregation from hourly snapshots
 - [x] Pool cumulative fields: `swapCount`, `notionalVolume0/1`, `rebalanceCount`
 - [x] `txHash` on all indexed events
 - [x] `@index` directives on schema for query performance
 - [x] Deploy branch strategy (`deploy/celo-sepolia`, `deploy/celo-mainnet`)
-- [x] Config files named `config.celo.{network}.yaml`
+- [x] Multichain config (`config.multichain.mainnet.yaml`) — Celo (42220) + Monad (143)
+- [x] **Deviation breach tracking** — `deviationBreachStartedAt` on Pool entity (rising-edge timestamp)
+- [x] **FX weekend exclusion** — healthscore math excludes FX market closing hours
+- [x] FX calendar extracted to `shared-config` package
+- [x] Retry + fallback RPC on rate limit and block-out-of-range errors
 
 ### Dashboard
 
@@ -30,35 +35,77 @@ Last updated: 2026-03-05
 - [x] **Analytics tab** — PoolSnapshot charts (hourly swap volume + cumulative count)
 - [x] **Oracle health state** — HealthBadge, HealthPanel on pool detail
 - [x] **Oracle chart** on analytics tab (FPMM pools only — dual y-axis price + deviation%)
-- [x] Pool list with health badge column (🟢 OK / 🟡 WARN / 🔴 CRITICAL / ⚪ N/A)
-- [x] Multi-chain network switcher (Mainnet / Sepolia / local)
+- [x] Pool list with health badge column
+- [x] **Fully multichain** — network switcher dropped; all chains shown together with chain icon prefix
 - [x] Token symbol mapping via `isFpmm()` in `tokens.ts`
-- [x] `contracts.json` integrated into `networks.ts`
 - [x] Shared `PoolsTable` component (reused across home + pools pages)
+- [x] **LimitBadge + LimitPanel** — `limitStatus` / `limitPressure0/1` from TradingLimit entity
+- [x] **RebalancerBadge + RebalancerPanel** — rebalancer liveness status + diagnostics
+- [x] **TVL on global page** — TVL-over-time chart + KPI tiles with 24h/7d/30d change %
+- [x] **TVL Δ WoW column** on all pools table
+- [x] **Protocol Revenue page** (`/revenue`) — swap fee time-series with 24h/7d/30d/all-time breakdowns
+- [x] **Daily volume chart** alongside TVL chart on pool detail
+- [x] **Error boundaries + loading skeletons** — route-level error handling
+- [x] **Google Auth** (NextAuth.js) — restricted to `@mentolabs.xyz` accounts
+- [x] **Chain icon prefix** — chain identifier on pool IDs in multichain view
 
 ### Infrastructure / DX
 
-- [x] CI pipeline — ESLint 10 + Vitest (53 tests) + typecheck + Codecov
+- [x] CI pipeline — ESLint 10 + Vitest (68 test files) + typecheck + Codecov
 - [x] `pnpm deploy:indexer [network]` (prompts if no network passed)
 - [x] `pnpm update-endpoint:mainnet` — updates Vercel env var via API after indexer redeploy
 - [x] **Discord notification on deploy branch push** (`notify-envio-deploy.yml`)
-- [x] `AGENTS.md` files for indexer + dashboard
 - [x] Deployment docs (`docs/deployment.md`)
+- [x] Non-interactive deploy scripts (status, promote, logs)
 
 ---
 
-## 🔜 Stream C — Dashboard KPI Components
+## Alerting — Current State (Aegis v2)
 
-These are the next immediate items. Indexer schema already supports them — dashboard components are pending.
+Aegis is **already live** for Mento v2 alerts. It polls on-chain contract state via RPC view calls and exposes Prometheus metrics that Grafana Cloud ingests.
 
-- [ ] **LimitBadge + LimitPanel** — surface `limitStatus` / `limitPressure0/1` from TradingLimit entity
-- [ ] **LivenessBadge + RebalancerPanel** — surface `rebalanceLivenessStatus` + rebalance event timeline
-- [ ] **TVL on global page** — sum of reserves across pools (price conversion or raw display)
-- [ ] **Gap-fill for charts** — forward-fill missing hourly snapshots in dashboard layer
+**Live alert rules** (Terraform-managed in `aegis/terraform/grafana-alerts/`):
+
+| Alert Group      | What it monitors                                        | Channels                           |
+| ---------------- | ------------------------------------------------------- | ---------------------------------- |
+| Oracle Relayers  | Stale price feeds, low CELO balance for relayer wallets | Discord + Splunk On-Call (mainnet) |
+| Reserve Balances | Low USDC/USDT/axlUSDC in reserve                        | Discord                            |
+| Trading Modes    | Circuit breakers tripped (trading halted per rate feed) | Discord                            |
+| Trading Limits   | L0/L1/LG utilization >90%                               | Discord + Splunk On-Call (L1/LG)   |
+| Aegis Service    | RPC failures, data staleness                            | Discord + Splunk On-Call           |
+
+**Infrastructure:**
+
+- Aegis NestJS app on GCP App Engine (`mento-prod`)
+- Grafana Agent on GCP App Engine → pushes to Grafana Cloud (`clabsmento.grafana.net`)
+- 8 Discord webhook contact points + Splunk On-Call for on-call escalation
+- Weekend mute timings for FX rate feeds (Fri 22:00 — Sun 22:00 UTC)
 
 ---
 
-## 🔜 Phase 2 — Indexer Enhancements
+## Next — v3 Alerting
+
+Extend alerting to cover Mento v3 FPMM pool-specific KPIs. The existing Aegis infrastructure handles the pipeline (RPC → Prometheus → Grafana → Discord/on-call). The work is defining v3-specific metrics and alert rules.
+
+### v3 KPIs to Alert On
+
+1. **Oracle liveness** (FPMM pools) — warn when liveness ratio >0.8, critical when oracle expired (≥1.0)
+2. **Deviation ratio** (FPMM pools) — warn when `priceDifference/rebalanceThreshold ≥ 0.8` sustained >15min, critical >60min
+3. **Trading limit pressure** (FPMM pools) — warn when max pressure >0.8, critical when limit hit (≥1.0)
+4. **Rebalancer liveness** — critical if no rebalance within threshold window when needed
+5. **Stability Pool headroom** — critical if headroom ≤ 0 (requires Liquity v2 indexing)
+
+### Open Questions
+
+- **Data source:** extend Aegis config to poll v3 FPMM contracts directly, or export Prometheus metrics from the Envio indexer, or both?
+- **Deviation breach duration:** the indexer already tracks `deviationBreachStartedAt` — can Grafana alert on duration, or does Aegis need to compute it?
+- **Rebalancer detection:** how to detect "rebalance needed but not happening" — time-since-last-rebalance vs deviation persistence?
+
+---
+
+## Backlog
+
+### Indexer Enhancements
 
 - [ ] **Liquity v2 CDP indexing** — TroveManager, StabilityPool events
   - GBPm TroveManager: `0xb38aEf2bF4e34B997330D626EBCd7629De3885C9`
@@ -66,26 +113,13 @@ These are the next immediate items. Indexer schema already supports them — das
 - [ ] **ChainStat / GlobalStat aggregate entities** — protocol-level metrics
 - [ ] **Monad indexing** — blocked on contract deployment to Monad
 
----
+### Dashboard Backlog
 
-## 🔜 Phase 2 — Alerting (Aegis)
+- [ ] **Gap-fill for snapshot charts** — forward-fill missing hourly buckets in dashboard layer
 
-- [ ] Prometheus metrics export from indexer
-- [ ] Grafana dashboards for ops team
-- [ ] Alert thresholds (from spec):
-  1. Oracle liveness (warn >0.8, crit ≥1)
-  2. Deviation ratio (warn ≥0.8 sustained >15min, crit >60min)
-  3. Trading limit pressure (warn >0.8, crit ≥1)
-  4. Rebalancer liveness + effectiveness
-  5. Stability Pool headroom (crit ≤0)
-- [ ] Discord / PagerDuty alert channels
+### Future
 
----
-
-## 🔜 Phase 3
-
-- [ ] **Roman's Streamlit sandbox** — Python/Streamlit app on same Hasura backend
-- [ ] **Google Auth** (NextAuth.js) — restrict dashboard to @mentolabs.xyz accounts
+- [ ] **Streamlit sandbox** — Python/Streamlit app on same Hasura backend
 - [ ] **ClickHouse sink** — heavy analytics beyond Hasura/Postgres
 
 ---
@@ -93,22 +127,62 @@ These are the next immediate items. Indexer schema already supports them — das
 ## Architecture
 
 ```text
-Envio HyperIndex (hosted) → Hasura GraphQL → Next.js Dashboard (Vercel)
-                                            → Streamlit Sandbox (Phase 3)
-                                            → Aegis/Grafana Alerting (Phase 2)
+┌─────────────────────────────────────────────────────────────┐
+│                     Celo Chain (42220)                       │
+│  FPMMs · SortedOracles · BreakerBox · Broker · Reserve      │
+└────────────┬────────────────────────────┬───────────────────┘
+             │                            │
+   Events (HyperSync)            View calls (RPC, every 10-60s)
+             │                            │
+             ▼                            ▼
+  ┌─────────────────────┐     ┌─────────────────────┐
+  │  Envio HyperIndex   │     │  Aegis (NestJS)     │
+  │  (hosted)           │     │  (GCP App Engine)   │
+  └──────────┬──────────┘     └──────────┬──────────┘
+             │                           │
+        GraphQL API                 /metrics (Prometheus)
+             │                           │
+             ▼                           ▼
+  ┌─────────────────────┐     ┌─────────────────────┐
+  │  Hasura / Postgres  │     │  Grafana Agent      │
+  │  (managed by Envio) │     │  (GCP App Engine)   │
+  └──────────┬──────────┘     └──────────┬──────────┘
+             │                           │
+             ▼                           ▼
+  ┌─────────────────────┐     ┌─────────────────────┐
+  │  Next.js Dashboard  │     │  Grafana Cloud      │
+  │  (Vercel)           │     │  Dashboards + Alerts│
+  │  monitoring.mento.org│     │  Alert Rules (TF)  │
+  └─────────────────────┘     └──────────┬──────────┘
+                                         │
+                                    Notifications
+                                         │
+                              ┌──────────┴──────────┐
+                              │  Discord (8 channels)│
+                              │  Splunk On-Call      │
+                              └─────────────────────┘
 ```
+
+**Two parallel data paths:**
+
+1. **Dashboard path** (left): Envio indexes on-chain events into Postgres → Hasura exposes GraphQL → Next.js dashboard renders
+2. **Alerting path** (right): Aegis polls contract state via RPC → exposes Prometheus metrics → Grafana Agent pushes to Grafana Cloud → alert rules evaluate → notifications fire
 
 ## Key Files
 
-| What             | Where                                    |
-| ---------------- | ---------------------------------------- |
-| Indexer schema   | `indexer-envio/schema.graphql`           |
-| Event handlers   | `indexer-envio/src/EventHandlers.ts`     |
-| Mainnet config   | `indexer-envio/config.celo.mainnet.yaml` |
-| Sepolia config   | `indexer-envio/config.celo.sepolia.yaml` |
-| Dashboard app    | `ui-dashboard/src/app/`                  |
-| Network defs     | `ui-dashboard/src/lib/networks.ts`       |
-| GraphQL queries  | `ui-dashboard/src/lib/queries.ts`        |
-| Pool type helper | `ui-dashboard/src/lib/tokens.ts`         |
-| Technical spec   | `SPEC.md`                                |
-| Deployment guide | `docs/deployment.md`                     |
+| What              | Where                                          |
+| ----------------- | ---------------------------------------------- |
+| Indexer schema    | `indexer-envio/schema.graphql`                 |
+| Event handlers    | `indexer-envio/src/EventHandlers.ts`           |
+| Multichain config | `indexer-envio/config.multichain.mainnet.yaml` |
+| Mainnet config    | `indexer-envio/config.celo.mainnet.yaml`       |
+| Dashboard app     | `ui-dashboard/src/app/`                        |
+| Network defs      | `ui-dashboard/src/lib/networks.ts`             |
+| GraphQL queries   | `ui-dashboard/src/lib/queries.ts`              |
+| Pool type helper  | `ui-dashboard/src/lib/tokens.ts`               |
+| FX calendar       | `shared-config/src/fx-calendar.ts`             |
+| Technical spec    | `SPEC.md`                                      |
+| Deployment guide  | `docs/deployment.md`                           |
+| Aegis config      | `../aegis/config.yaml`                         |
+| Aegis alert rules | `../aegis/terraform/grafana-alerts/`           |
+| Aegis dashboards  | `../aegis/terraform/grafana-dashboard/`        |

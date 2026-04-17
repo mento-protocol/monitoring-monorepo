@@ -2,6 +2,7 @@ packages:
   - shared-config
   - indexer-envio
   - ui-dashboard
+  - metrics-bridge
 
 ignoredBuiltDependencies:
   - sharp
