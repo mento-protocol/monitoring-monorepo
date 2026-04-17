@@ -350,11 +350,9 @@ function PoolDetail() {
   );
   // Without the error clause the charts stay in the loading skeleton forever
   // when the rates query fails — undefined data plus no resolved error keeps
-  // `ratesLoading === true` indefinitely. A resolved error is not surfaced as
-  // `hasError` on the charts: USDm-leg pools don't need rates to compute TVL,
-  // so their cards should keep working; non-USDm pools fall through to the
-  // chart's internal `canPricePool` check, which renders "unavailable".
+  // `ratesLoading === true` indefinitely.
   const ratesLoading = allPoolsData === undefined && !allPoolsError;
+  const ratesError = allPoolsError !== undefined;
   // Only pools that can't be priced without the rate map (non-USDm FX pairs)
   // actually need the side query. `canPricePool` against an empty rate map
   // returns true for any USD-pegged leg (USDm, USDC, USDT, AUSD, …), so those
@@ -416,7 +414,14 @@ function PoolDetail() {
                 (fpmmPool && dailySnapshotLoading) ||
                 (poolNeedsRates && ratesLoading)
               }
-              hasError={dailySnapshotError !== undefined}
+              // Only treat a rates-query failure as a chart error for pools
+              // that actually need the rate map (non-USD-pegged pairs).
+              // USDm-leg pools keep rendering from the pool's own row —
+              // they don't care whether ALL_POOLS_WITH_HEALTH succeeded.
+              hasError={
+                dailySnapshotError !== undefined ||
+                (poolNeedsRates && ratesError)
+              }
               rates={rates}
               historySupported={fpmmPool}
             />
@@ -428,7 +433,14 @@ function PoolDetail() {
                 (fpmmPool && dailySnapshotLoading) ||
                 (poolNeedsRates && ratesLoading)
               }
-              hasError={dailySnapshotError !== undefined}
+              // Only treat a rates-query failure as a chart error for pools
+              // that actually need the rate map (non-USD-pegged pairs).
+              // USDm-leg pools keep rendering from the pool's own row —
+              // they don't care whether ALL_POOLS_WITH_HEALTH succeeded.
+              hasError={
+                dailySnapshotError !== undefined ||
+                (poolNeedsRates && ratesError)
+              }
               rates={rates}
               historySupported={fpmmPool}
             />
