@@ -112,8 +112,10 @@ export function isFpmm(pool: Pick<Pool, "source">): boolean {
 }
 
 /**
- * True when the non-USDm leg is a fiat FX currency (EUR, GBP, BRL, …) rather
- * than another USD-pegged stablecoin (USDC, USDT, AUSD, …).
+ * True when at least one leg is a non-USD-pegged token, i.e. the pair has
+ * FX exposure (EUR, GBP, BRL, …). Covers USDm/FX pairs, FX/FX pairs
+ * (e.g. `axlEUROC/EURm`), and stable/FX pairs (e.g. `USDC/GBPm`) — all of
+ * which pause oracle updates over TradFi weekends.
  */
 export function isFxPool(
   network: Network,
@@ -122,11 +124,7 @@ export function isFxPool(
 ): boolean {
   const sym0 = tokenSymbol(network, token0);
   const sym1 = tokenSymbol(network, token1);
-  const usdm0 = USDM_SYMBOLS.has(sym0);
-  const usdm1 = USDM_SYMBOLS.has(sym1);
-  if (usdm0 === usdm1) return false;
-  const nonUsdm = usdm0 ? sym1 : sym0;
-  return !USD_PEGGED_SYMBOLS.has(nonUsdm);
+  return !USD_PEGGED_SYMBOLS.has(sym0) || !USD_PEGGED_SYMBOLS.has(sym1);
 }
 
 /**

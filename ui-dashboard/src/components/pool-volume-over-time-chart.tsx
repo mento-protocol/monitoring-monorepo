@@ -63,18 +63,28 @@ export function PoolVolumeOverTimeChart({
     return points;
   }, [priceable, pool, network, snapshots, rates]);
 
-  // Day-aligned cutoff: "1W" = last 7 UTC days (6 prior full + today), "1M"
-  // = last 30. Aligns to the current UTC-day boundary so the window doesn't
-  // drift across renders within the same day, and stays in calendar-day
-  // terms even when the pool has gaps in its daily snapshots (a slice(-N)
-  // over rows would silently widen the window past N days for sparse pools).
+  // Day-aligned cutoff with gap-fill: "1W" renders exactly 7 UTC-day buckets
+  // (6 prior full + today), "1M" renders 30. Missing daily snapshots — real
+  // in this repo for sparse pools — surface as explicit $0 bars rather than
+  // dropped points, so Plotly doesn't bridge a line across absent days and
+  // the headline total is the honest sum over the full calendar window.
   const visibleSeries = useMemo(() => {
-    if (range === "all") return fullSeries;
+    if (range === "all" || fullSeries.length === 0) return fullSeries;
     const days = range === "7d" ? 7 : 30;
     const todayStart =
       Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-    const cutoff = todayStart - (days - 1) * SECONDS_PER_DAY;
-    return fullSeries.filter((pt) => pt.timestamp >= cutoff);
+    const byBucket = new Map<number, number>();
+    for (const pt of fullSeries) {
+      const bucket =
+        Math.floor(pt.timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+      byBucket.set(bucket, pt.value);
+    }
+    const points: TimeSeriesPoint[] = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const ts = todayStart - i * SECONDS_PER_DAY;
+      points.push({ timestamp: ts, value: byBucket.get(ts) ?? 0 });
+    }
+    return points;
   }, [fullSeries, range]);
 
   const rangeTotal = useMemo(
