@@ -226,8 +226,8 @@ resource "local_file" "vercel_project_json" {
 # Dedicated project for monitoring infrastructure, separate from mento-prod.
 # One `terraform apply` bootstraps everything: project → APIs → AR → image → Cloud Run.
 
-# trunk-ignore(checkov/CKV_GCP_27): default VPC network is unused; project runs only Cloud Run (serverless)
-# trunk-ignore(checkov/CKV2_GCP_5): audit logging configured at org level, not per-project
+# checkov:skip=CKV_GCP_27:Default VPC unused; project runs only Cloud Run (serverless)
+# checkov:skip=CKV2_GCP_5:Audit logging configured at org level, not per-project
 resource "google_project" "monitoring" {
   name            = "Mento Monitoring"
   project_id      = var.gcp_project_id
@@ -258,7 +258,7 @@ resource "google_project_service" "cloudbuild" {
 
 # ── Artifact Registry ────────────────────────────────────────────────────────
 
-# trunk-ignore(checkov/CKV_GCP_84): CSEK encryption not needed; images are public open-source code
+# checkov:skip=CKV_GCP_84:CSEK encryption not needed; images are public open-source code
 resource "google_artifact_registry_repository" "metrics_bridge" {
   project       = google_project.monitoring.project_id
   location      = var.gcp_region
@@ -364,7 +364,7 @@ resource "google_cloud_run_v2_service_iam_member" "metrics_bridge_public" {
 # ── Dev Team IAM ─────────────────────────────────────────────────────────────
 # Gives devs the ability to deploy new revisions, push images, and submit builds.
 
-# trunk-ignore(checkov/CKV_GCP_49): run.admin is intentional — devs need to deploy new Cloud Run revisions
+# checkov:skip=CKV_GCP_49:run.admin is intentional; devs need to deploy new Cloud Run revisions
 resource "google_project_iam_member" "dev_run_admin" {
   for_each = toset(var.gcp_dev_members)
   project  = google_project.monitoring.project_id
