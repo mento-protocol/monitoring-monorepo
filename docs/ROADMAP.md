@@ -174,7 +174,7 @@ The `metrics-bridge` package polls Hasura for FPMM pool KPIs and exports them as
 | Network defs      | `ui-dashboard/src/lib/networks.ts`             |
 | GraphQL queries   | `ui-dashboard/src/lib/queries.ts`              |
 | Pool type helper  | `ui-dashboard/src/lib/tokens.ts`               |
-| FX calendar       | `shared-config/src/fx-calendar.ts`             |
+| FX calendar       | `shared-config/fx-calendar.json`               |
 | Technical spec    | `SPEC.md`                                      |
 | Deployment guide  | `docs/deployment.md`                           |
 | Aegis config      | `../aegis/config.yaml`                         |

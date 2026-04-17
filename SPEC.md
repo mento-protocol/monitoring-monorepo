@@ -288,7 +288,7 @@ The dashboard is fully multichain — all chains are shown together (no network 
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
 | Endpoint hash changes on each deploy | Envio free tier generates new URL per deploy; requires Vercel env var update                                    |
 | Hasura 1000-row cap                  | Envio hosted Hasura silently caps all queries at 1000 rows; use `fetchAllSnapshotPages` or indexer-side rollups |
-| Cannot run two indexers locally      | Port 9898 hardcoded in Envio                                                                                    |
+| Cannot run two indexers locally      | Shared Hasura port 8080; use separate Docker projects                                                           |
 | SortedOracles on Sepolia             | Contracts return zero address; oracle indexing mainnet-only                                                     |
 | Gap-fill not yet implemented         | PoolSnapshot charts may show gaps for periods with no activity                                                  |
 | Monad pools pending                  | Pool contracts deployed; indexer config ready                                                                   |

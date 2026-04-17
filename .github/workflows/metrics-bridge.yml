@@ -94,13 +94,19 @@ jobs:
 
       - name: Build and push image
         run: |
-          IMAGE="${AR_REPO}/metrics-bridge:${{ github.sha }}"
+          TAG="${AR_REPO}/metrics-bridge:${{ github.sha }}"
           gcloud builds submit \
             --project="$GCP_PROJECT" \
             --config=cloudbuild.yaml \
-            --substitutions="_IMAGE=${IMAGE}" \
+            --substitutions="_IMAGE=${TAG}" \
             --timeout=600s \
             .
+          # Resolve to digest so Cloud Run always rolls a new revision,
+          # even on re-runs of the same commit.
+          DIGEST=$(gcloud artifacts docker images describe "$TAG" \
+            --project="$GCP_PROJECT" \
+            --format='value(image_summary.digest)')
+          IMAGE="${AR_REPO}/metrics-bridge@${DIGEST}"
           echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
 
       - name: Set up Terraform

@@ -71,11 +71,18 @@ gcloud builds submit \
   --timeout=600s \
   .
 
+# Resolve to digest so Cloud Run always rolls a new revision.
+DIGEST=$(gcloud artifacts docker images describe "$IMAGE" \
+  --project="$PROJECT" \
+  --format='value(image_summary.digest)')
+IMAGE_BY_DIGEST="${AR_REPO}/metrics-bridge@${DIGEST}"
+echo "Resolved: ${IMAGE_BY_DIGEST}"
+
 # Step 3: Deploy Cloud Run with the new image.
 echo ""
 echo "Deploying to Cloud Run..."
 terraform -chdir=terraform apply $TF_APPROVE \
-  -var="metrics_bridge_image=${IMAGE}"
+  -var="metrics_bridge_image=${IMAGE_BY_DIGEST}"
 
 echo ""
 echo "Done. Service URL:"
