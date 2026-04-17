@@ -25,9 +25,12 @@
   "pnpm": {
     "overrides": {
       "undici": ">=6.24.0",
-      "flatted": ">=3.4.0",
-      "serialize-javascript": ">=7.0.3",
-      "diff@>=6": ">=8.0.3"
+      "flatted": ">=3.4.2",
+      "serialize-javascript": ">=7.0.5",
+      "diff@>=6": ">=8.0.3",
+      "picomatch@<3": ">=2.3.2",
+      "brace-expansion@<2": ">=2.0.2",
+      "vite": ">=8.0.8"
     }
   }
 }
