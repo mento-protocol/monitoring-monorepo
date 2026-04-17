@@ -20,6 +20,12 @@ interface PoolVolumeOverTimeChartProps {
   isLoading: boolean;
   hasError: boolean;
   rates?: OracleRateMap;
+  /**
+   * False when the pool type doesn't expose a snapshot history (non-FPMM).
+   * Changes the empty-state copy from "not enough history yet" to
+   * "history unavailable for this pool type".
+   */
+  historySupported?: boolean;
 }
 
 export function PoolVolumeOverTimeChart({
@@ -29,6 +35,7 @@ export function PoolVolumeOverTimeChart({
   isLoading,
   hasError,
   rates,
+  historySupported = true,
 }: PoolVolumeOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("all");
 
@@ -89,7 +96,9 @@ export function PoolVolumeOverTimeChart({
           ? "Unable to load volume history"
           : !priceable
             ? "Volume unavailable for this pair"
-            : "Not enough history yet"
+            : !historySupported
+              ? "History unavailable for this pool type"
+              : "Not enough history yet"
       }
     />
   );

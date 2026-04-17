@@ -37,6 +37,12 @@ interface PoolTvlOverTimeChartProps {
   isLoading: boolean;
   hasError: boolean;
   rates?: OracleRateMap;
+  /**
+   * False when the pool type doesn't expose a snapshot history (non-FPMM).
+   * Changes the empty-state copy from "not enough history yet" to
+   * "history unavailable for this pool type".
+   */
+  historySupported?: boolean;
 }
 
 /**
@@ -51,6 +57,7 @@ export function PoolTvlOverTimeChart({
   isLoading,
   hasError,
   rates,
+  historySupported = true,
 }: PoolTvlOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("all");
 
@@ -109,7 +116,9 @@ export function PoolTvlOverTimeChart({
           ? "Unable to load TVL history"
           : !priceable
             ? "TVL unavailable for this pair"
-            : "Not enough history yet"
+            : !historySupported
+              ? "History unavailable for this pool type"
+              : "Not enough history yet"
       }
     />
   );

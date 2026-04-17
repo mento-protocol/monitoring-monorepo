@@ -349,9 +349,11 @@ function PoolDetail() {
   );
   // Without the error clause the charts stay in the loading skeleton forever
   // when the rates query fails — undefined data plus no resolved error keeps
-  // `ratesLoading === true` indefinitely.
+  // `ratesLoading === true` indefinitely. A resolved error is not surfaced as
+  // `hasError` on the charts: USDm-leg pools don't need rates to compute TVL,
+  // so their cards should keep working; non-USDm pools fall through to the
+  // chart's internal `canPricePool` check, which renders "unavailable".
   const ratesLoading = allPoolsData === undefined && !allPoolsError;
-  const ratesError = allPoolsError !== undefined;
 
   // Return null while redirect is pending to avoid a transient error flash
   // and unnecessary error announcement for assistive tech. MUST sit below
@@ -404,16 +406,18 @@ function PoolDetail() {
               network={network}
               snapshots={dailySnapshots}
               isLoading={(fpmmPool && dailySnapshotLoading) || ratesLoading}
-              hasError={dailySnapshotError !== undefined || ratesError}
+              hasError={dailySnapshotError !== undefined}
               rates={rates}
+              historySupported={fpmmPool}
             />
             <PoolVolumeOverTimeChart
               pool={pool}
               network={network}
               snapshots={dailySnapshots}
               isLoading={(fpmmPool && dailySnapshotLoading) || ratesLoading}
-              hasError={dailySnapshotError !== undefined || ratesError}
+              hasError={dailySnapshotError !== undefined}
               rates={rates}
+              historySupported={fpmmPool}
             />
             <ReservesPanel pool={pool} rates={rates} />
           </div>
