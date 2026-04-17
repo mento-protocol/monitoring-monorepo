@@ -3,11 +3,13 @@
 import { AddressLink } from "@/components/address-link";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { KindBadge, SourceBadge } from "@/components/badges";
+import { ChainIcon } from "@/components/chain-icon";
 import { DeviationCell } from "@/components/pool-header/deviation-cell";
 import {
   HealthScoreInfoIcon,
   HealthScoreValue,
 } from "@/components/pool-header/health-score-value";
+import { LimitStatusValue } from "@/components/pool-header/limit-status-value";
 import { OraclePriceValue } from "@/components/pool-header/oracle-price-value";
 import { OracleStatusValue } from "@/components/pool-header/oracle-status-value";
 import { RebalanceStatusValue } from "@/components/pool-header/rebalance-status-value";
@@ -24,6 +26,8 @@ import { SenderCell } from "@/components/sender-cell";
 import { TagsCell } from "@/components/tags-cell";
 import { LiquidityChart } from "@/components/liquidity-chart";
 import { LpConcentrationChart } from "@/components/lp-concentration-chart";
+import { PoolTvlOverTimeChart } from "@/components/pool-tvl-over-time-chart";
+import { PoolVolumeOverTimeChart } from "@/components/pool-volume-over-time-chart";
 import { SnapshotChart } from "@/components/snapshot-chart";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
@@ -49,6 +53,7 @@ import { buildOrderBy } from "@/lib/table-sort";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import { useGQL } from "@/lib/graphql";
 import {
+  ALL_POOLS_WITH_HEALTH,
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
@@ -71,6 +76,7 @@ import {
 } from "@/lib/queries";
 import { Pagination } from "@/components/pagination";
 import {
+  buildOracleRateMap,
   explorerAddressUrl,
   isFpmm,
   poolName,
@@ -116,6 +122,7 @@ const TABS = [
   "rebalances",
   "liquidity",
   "oracle",
+  "limits",
   "ols",
 ] as const;
 type Tab = (typeof TABS)[number];
@@ -127,6 +134,7 @@ const SEARCH_PARAM_BY_TAB: Record<Tab, string> = {
   rebalances: "rebalancesQ",
   liquidity: "liquidityQ",
   oracle: "oracleQ",
+  limits: "limitsQ",
   ols: "olsQ",
 };
 
@@ -308,6 +316,38 @@ function PoolDetail() {
     OlsPool: OlsPool[];
   }>(OLS_POOL, { poolId: normalizedPoolId });
 
+  // Non-FPMM pools have no snapshot history — skip the fetch to avoid a
+  // useless network round trip.
+  const fpmmPool = pool ? isFpmm(pool) : false;
+
+  // Lifted from SwapsTab so the sub-hero TVL chart can render independently of
+  // which tab is active. useGQL is SWR-based and dedupes by key + vars, so
+  // SwapsTab's identical query shares this response.
+  const {
+    data: dailySnapshotData,
+    error: dailySnapshotError,
+    isLoading: dailySnapshotLoading,
+  } = useGQL<{ PoolDailySnapshot: PoolSnapshot[] }>(
+    fpmmPool ? POOL_DAILY_SNAPSHOTS_CHART : null,
+    { poolId: normalizedPoolId },
+    SNAPSHOT_REFRESH_MS,
+  );
+  const dailySnapshots = dailySnapshotData?.PoolDailySnapshot ?? [];
+
+  // Non-USDm pairs (axlEUROC/EURm, etc.) need a rate map derived from all
+  // pools that have a USDm leg to convert their reserves/volume to USD.
+  // Without this the TVL and Volume charts render $0 for such pools.
+  const { data: allPoolsData } = useGQL<{ Pool: Pool[] }>(
+    ALL_POOLS_WITH_HEALTH,
+    { chainId: network.chainId },
+    SNAPSHOT_REFRESH_MS,
+  );
+  const allPools = useMemo(() => allPoolsData?.Pool ?? [], [allPoolsData]);
+  const rates = useMemo(
+    () => buildOracleRateMap(allPools, network),
+    [allPools, network],
+  );
+
   // Return null while redirect is pending to avoid a transient error flash
   // and unnecessary error announcement for assistive tech. MUST sit below
   // all hook declarations so React sees the same hook order every render —
@@ -347,11 +387,30 @@ function PoolDetail() {
         <ErrorBox message={`Pool ${normalizedPoolId} not found.`} />
       ) : (
         <>
-          <PoolHeader pool={pool} deployTxHash={deployTxHash} />
+          <PoolHeader
+            pool={pool}
+            deployTxHash={deployTxHash}
+            tradingLimits={tradingLimits}
+          />
           <HealthPanel pool={pool} />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ReservesPanel pool={pool} />
-            <LimitPanel pool={pool} tradingLimits={tradingLimits} />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <PoolTvlOverTimeChart
+              pool={pool}
+              network={network}
+              snapshots={dailySnapshots}
+              isLoading={fpmmPool && dailySnapshotLoading}
+              hasError={dailySnapshotError !== undefined}
+              rates={rates}
+            />
+            <PoolVolumeOverTimeChart
+              pool={pool}
+              network={network}
+              snapshots={dailySnapshots}
+              isLoading={fpmmPool && dailySnapshotLoading}
+              hasError={dailySnapshotError !== undefined}
+              rates={rates}
+            />
+            <ReservesPanel pool={pool} rates={rates} />
           </div>
         </>
       )}
@@ -378,8 +437,8 @@ function PoolDetail() {
             {getTabLabel(t)}
           </button>
         ))}
-        {/* Oracle tab manages its own page size — hide the global limit selector */}
-        {tab !== "oracle" && (
+        {/* Oracle tab manages its own page size; Limits has no paginated data */}
+        {tab !== "oracle" && tab !== "limits" && (
           <div className="ml-auto hidden sm:flex items-center">
             <LimitSelect
               id="tab-limit"
@@ -444,6 +503,9 @@ function PoolDetail() {
             onSearchChange={(value) => setTabSearch("providers", value)}
           />
         )}
+        {tab === "limits" && pool && (
+          <LimitPanel pool={pool} tradingLimits={tradingLimits} />
+        )}
         {tab === "ols" && (
           <OlsTab
             poolId={normalizedPoolId}
@@ -463,9 +525,11 @@ function PoolDetail() {
 function PoolHeader({
   pool,
   deployTxHash,
+  tradingLimits,
 }: {
   pool: Pool;
   deployTxHash?: string;
+  tradingLimits: TradingLimit[];
 }) {
   const { network } = useNetwork();
   const isVirtual = pool.source?.includes("virtual");
@@ -507,13 +571,11 @@ function PoolHeader({
           {titleSymbol(firstSym, firstAddr)}/
           {titleSymbol(secondSym, secondAddr)}
         </h1>
+        <ChainIcon network={network} size={20} />
         <SourceBadge source={pool.source} />
         <span className="text-sm">
-          <AddressLink address={poolContractAddress} />
+          <AddressLink address={poolContractAddress} readOnly />
         </span>
-        {/* `ml-auto` pushes "Created …" to the far edge so the title row
-            reads as `identity ← → metadata` rather than trailing ragged-left
-            after the address. */}
         {deployTxHash ? (
           <a
             href={`${network.explorerBaseUrl}/tx/${deployTxHash}`}
@@ -530,18 +592,13 @@ function PoolHeader({
           </span>
         )}
       </div>
-      {/* `justify-between` distributes any trailing slack on the row as
-          wider uniform gaps between cells, so the row spans edge-to-edge
-          instead of leaving whitespace at the right. Each text cell gets
-          `min-w-36` so the shortest one (Health Score) doesn't feel
-          squished against the left edge while long cells size to content. */}
       <dl className="flex flex-wrap justify-between gap-x-6 gap-y-4 text-sm">
         <Stat
           className="min-w-36"
           label={
             <span className="inline-flex items-center gap-1">
               Health Score
-              <HealthScoreInfoIcon />
+              <HealthScoreInfoIcon pool={pool} />
             </span>
           }
           value={
@@ -549,6 +606,17 @@ function PoolHeader({
               <span className="text-slate-500">—</span>
             ) : (
               <HealthScoreValue pool={pool} />
+            )
+          }
+        />
+        <Stat
+          className="min-w-36"
+          label="Oracle Price"
+          value={
+            isVirtual ? (
+              <span className="text-slate-500">—</span>
+            ) : (
+              <OraclePriceValue pool={pool} network={network} />
             )
           }
         />
@@ -564,15 +632,9 @@ function PoolHeader({
           }
         />
         <Stat
-          className="min-w-36"
-          label="Oracle Price"
-          value={
-            isVirtual ? (
-              <span className="text-slate-500">—</span>
-            ) : (
-              <OraclePriceValue pool={pool} network={network} />
-            )
-          }
+          className="min-w-52"
+          label="Trading Limits"
+          value={<LimitStatusValue pool={pool} tradingLimits={tradingLimits} />}
         />
         <Stat
           className="min-w-36"
