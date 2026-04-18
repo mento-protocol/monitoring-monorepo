@@ -462,6 +462,7 @@ function PoolDetail() {
               pool={pool}
               rates={rates}
               ratesLoading={poolNeedsRates && ratesLoading}
+              ratesError={poolNeedsRates && ratesError}
             />
           </div>
         </>

@@ -21,12 +21,20 @@ interface ReservesPanelProps {
    * instead of flashing the permanent "unavailable" copy on first render.
    */
   ratesLoading?: boolean;
+  /**
+   * True when the cross-pool rate-map query failed. Routes non-USDm pairs
+   * through a transient "couldn't load" state instead of the permanent
+   * "unavailable" copy — which would mislabel a backend hiccup as a
+   * permanent pair-incompatibility.
+   */
+  ratesError?: boolean;
 }
 
 export function ReservesPanel({
   pool,
   rates,
   ratesLoading = false,
+  ratesError = false,
 }: ReservesPanelProps) {
   const { network } = useNetwork();
   const sym0 = tokenSymbol(network, pool.token0);
@@ -124,6 +132,10 @@ export function ReservesPanel({
         <p className="text-sm text-slate-400">Pool has no reserves yet.</p>
       ) : !priceable && ratesLoading ? (
         <p className="text-sm text-slate-400">Loading reserves…</p>
+      ) : !priceable && ratesError ? (
+        <p className="text-sm text-red-400">
+          Couldn't load reserves — try again later.
+        </p>
       ) : !priceable ? (
         <p className="text-sm text-slate-400">
           Reserves pricing unavailable for this pair.
