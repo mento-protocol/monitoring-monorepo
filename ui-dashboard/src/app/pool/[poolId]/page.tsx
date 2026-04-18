@@ -401,6 +401,7 @@ function PoolDetail() {
             pool={pool}
             deployTxHash={deployTxHash}
             tradingLimits={tradingLimits}
+            tradingLimitsError={tradingLimitsError}
           />
           <HealthPanel pool={pool} />
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -583,10 +584,12 @@ function PoolHeader({
   pool,
   deployTxHash,
   tradingLimits,
+  tradingLimitsError = false,
 }: {
   pool: Pool;
   deployTxHash?: string;
   tradingLimits: TradingLimit[];
+  tradingLimitsError?: boolean;
 }) {
   const { network } = useNetwork();
   const isVirtual = pool.source?.includes("virtual");
@@ -691,7 +694,13 @@ function PoolHeader({
         <Stat
           className="min-w-52"
           label="Trading Limits"
-          value={<LimitStatusValue pool={pool} tradingLimits={tradingLimits} />}
+          value={
+            <LimitStatusValue
+              pool={pool}
+              tradingLimits={tradingLimits}
+              hasError={tradingLimitsError}
+            />
+          }
         />
         <Stat
           className="min-w-36"

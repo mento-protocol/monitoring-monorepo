@@ -84,12 +84,22 @@ function MiniBar({
 export function LimitStatusValue({
   pool,
   tradingLimits,
+  hasError = false,
 }: {
   pool: Pool;
   tradingLimits: TradingLimit[];
+  hasError?: boolean;
 }) {
   const isVirtual = pool.source?.includes("virtual");
   if (isVirtual) return <span className="text-slate-500">—</span>;
+
+  // An actual fetch failure leaves `tradingLimits` as `[]`, which would
+  // otherwise render the same neutral em-dash as virtual pools and as
+  // pools with no trading-limit rows yet. Surface the failure explicitly
+  // to match what the Limits tab already shows.
+  if (hasError) {
+    return <span className="text-xs text-amber-400">Query failed</span>;
+  }
 
   const l0 = summarizeWindow(tradingLimits, "0");
   const l1 = summarizeWindow(tradingLimits, "1");
