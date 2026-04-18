@@ -338,8 +338,12 @@ function PoolDetail() {
   // Non-USDm pairs (axlEUROC/EURm, etc.) need a rate map derived from all
   // pools that have a USDm leg to convert their reserves/volume to USD.
   // Without this the TVL and Volume charts render $0 for such pools.
+  // Skip the fetch entirely once we can prove the current pool is already
+  // USD-priceable with an empty rate map (USDm/USDC/USDT/AUSD legs) —
+  // avoids a permanent 5-min-refresh background query on the common case.
+  const poolNeedsRates = pool ? !canPricePool(pool, network, new Map()) : true;
   const { data: allPoolsData, error: allPoolsError } = useGQL<{ Pool: Pool[] }>(
-    ALL_POOLS_WITH_HEALTH,
+    poolNeedsRates ? ALL_POOLS_WITH_HEALTH : null,
     { chainId: network.chainId },
     SNAPSHOT_REFRESH_MS,
   );
@@ -348,17 +352,11 @@ function PoolDetail() {
     () => buildOracleRateMap(allPools, network),
     [allPools, network],
   );
-  // Without the error clause the charts stay in the loading skeleton forever
-  // when the rates query fails — undefined data plus no resolved error keeps
-  // `ratesLoading === true` indefinitely.
-  const ratesLoading = allPoolsData === undefined && !allPoolsError;
+  // ratesLoading only fires for pools that actually need the fetch — a
+  // USD-pegged pair with its query disabled shouldn't block chart render.
+  const ratesLoading =
+    poolNeedsRates && allPoolsData === undefined && !allPoolsError;
   const ratesError = allPoolsError !== undefined;
-  // Only pools that can't be priced without the rate map (non-USDm FX pairs)
-  // actually need the side query. `canPricePool` against an empty rate map
-  // returns true for any USD-pegged leg (USDm, USDC, USDT, AUSD, …), so those
-  // render from the pool's own row plus `dailySnapshots` without waiting on
-  // `ALL_POOLS_WITH_HEALTH`.
-  const poolNeedsRates = pool ? !canPricePool(pool, network, new Map()) : false;
 
   // Return null while redirect is pending to avoid a transient error flash
   // and unnecessary error announcement for assistive tech. MUST sit below

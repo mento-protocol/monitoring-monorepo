@@ -4,7 +4,7 @@ import type { Pool } from "@/lib/types";
 import { parseWei, formatWei, formatUSD } from "@/lib/format";
 import { computeReservePcts, computeThresholdLines } from "@/lib/reserves";
 import {
-  canPricePool,
+  canValueTvl,
   tokenSymbol,
   tokenToUSD,
   USDM_SYMBOLS,
@@ -87,12 +87,14 @@ export function ReservesPanel({
   const color1 = pct1 > 50 ? "bg-indigo-500" : "bg-emerald-500";
 
   const thresholds = computeThresholdLines(pool.rebalanceThreshold, usdTotal);
-  // For non-USDm pairs without a loaded rate map, computeReservePcts would
-  // fall back to a raw-token split (economically wrong for FX/FX pools
-  // where a balanced USD value implies an unbalanced raw-unit ratio). Gate
-  // tank rendering on USD-priceable so we never show a confident-looking
-  // percentage that's silently wrong.
-  const priceable = canPricePool(pool, network, rates ?? new Map());
+  // For non-USDm pairs without a loaded rate map — or any pair with a
+  // missing/zero `oraclePrice` — the USD math above can't normalize the
+  // reserves, and `computeReservePcts` would fall back to a raw-token
+  // split. That's economically wrong for FX/FX pools and equally wrong
+  // during oracle outages on USDm-leg pools, so we gate on `canValueTvl`
+  // (USD-convertible legs AND a usable oracle price) to avoid showing a
+  // confident-looking percentage that's silently off.
+  const priceable = canValueTvl(pool, network, rates ?? new Map());
   const showTanks = hasReserves && !isEmptyPool && priceable;
   const showThresholdLegend = showTanks && thresholds !== null;
 

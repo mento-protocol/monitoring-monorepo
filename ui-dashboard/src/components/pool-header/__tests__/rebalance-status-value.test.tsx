@@ -4,6 +4,17 @@ import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import type { RebalanceCheckResult } from "@/lib/rebalance-check";
 
+// Pin `isWeekend` to false so `computeHealthStatus` doesn't rewrite the
+// "Oracle stale" path to "Markets closed" when this test file happens to
+// run on a Saturday or Sunday. Faking system time doesn't work cleanly
+// here because the module's top-level `nowSeconds` evaluates before any
+// test hook runs.
+vi.mock("@/lib/weekend", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/weekend")>("@/lib/weekend");
+  return { ...actual, isWeekend: () => false };
+});
+
 // Mock external dependencies so we can control the component's inputs.
 const mockUseRebalanceCheck = vi.fn();
 const mockUseGQL = vi.fn<
