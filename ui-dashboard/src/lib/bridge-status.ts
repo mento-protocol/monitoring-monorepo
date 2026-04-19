@@ -49,3 +49,43 @@ export function bridgeStatusClasses(status: BridgeStatusOverlay): string {
 export function bridgeStatusLabel(status: BridgeStatusOverlay): string {
   return STATUS_LABELS[status];
 }
+
+/**
+ * Format a duration in seconds as a compact h/m/s string.
+ * Normalizes to whole seconds once to avoid "60s" / "Nm 60s" artifacts at
+ * unit boundaries (fractional averages can otherwise render 59.6s as "60s"
+ * or 119.5s as "1m 60s").
+ */
+export function formatDurationShort(seconds: number): string {
+  const total = Math.round(seconds);
+  if (total < 60) return `${total}s`;
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+
+/**
+ * Compute average delivery time (in seconds) across DELIVERED transfers,
+ * excluding any row missing `sentTimestamp` (can happen when the
+ * destination event arrives before the source has been indexed).
+ *
+ * Returns `{ avgSec: null, sampleSize: 0 }` if no usable rows.
+ */
+export function computeAvgDeliverTime(
+  transfers: ReadonlyArray<
+    Pick<BridgeTransfer, "status" | "sentTimestamp" | "deliveredTimestamp">
+  >,
+): { avgSec: number | null; sampleSize: number } {
+  const usable = transfers.filter(
+    (t) => t.status === "DELIVERED" && t.deliveredTimestamp && t.sentTimestamp,
+  );
+  if (usable.length === 0) return { avgSec: null, sampleSize: 0 };
+  const total = usable.reduce((acc, t) => {
+    const sent = Number(t.sentTimestamp);
+    const delivered = Number(t.deliveredTimestamp);
+    return acc + Math.max(0, delivered - sent);
+  }, 0);
+  return { avgSec: total / usable.length, sampleSize: usable.length };
+}

@@ -7,7 +7,11 @@ import {
   BRIDGE_TRANSFER_COUNT,
   BRIDGE_PENDING_COUNT,
 } from "@/lib/bridge-queries";
-import { deriveBridgeStatus } from "@/lib/bridge-status";
+import {
+  deriveBridgeStatus,
+  computeAvgDeliverTime,
+  formatDurationShort,
+} from "@/lib/bridge-status";
 import { BridgeStatusBadge } from "@/components/bridge-status-badge";
 import { BridgeProviderBadge } from "@/components/bridge-provider-badge";
 import { ChainIcon } from "@/components/chain-icon";
@@ -55,23 +59,8 @@ function BridgeFlowsContent() {
   // full 30-day window (unique-sender count, avg deliver time) would require
   // bespoke Hasura queries not supported on the free tier — deferred, and
   // the subtitles make the scope explicit.
-  const deliveredOnPage = transfers.filter(
-    (t) => t.status === "DELIVERED" && t.deliveredTimestamp,
-  );
-  // Avg deliver time needs BOTH timestamps; dest-first transfers can appear
-  // as DELIVERED while sentTimestamp is still null (source event not yet
-  // indexed). Exclude them from both numerator and denominator.
-  const deliveredWithSend = deliveredOnPage.filter((t) => t.sentTimestamp);
-
-  let avgTimeToDeliverSec: number | null = null;
-  if (deliveredWithSend.length > 0) {
-    const total = deliveredWithSend.reduce((acc, t) => {
-      const sent = Number(t.sentTimestamp);
-      const delivered = Number(t.deliveredTimestamp);
-      return acc + Math.max(0, delivered - sent);
-    }, 0);
-    avgTimeToDeliverSec = total / deliveredWithSend.length;
-  }
+  const { avgSec: avgTimeToDeliverSec, sampleSize: avgSampleSize } =
+    computeAvgDeliverTime(transfers);
 
   const uniqueSendersOnPage = new Set(
     transfers
@@ -135,7 +124,7 @@ function BridgeFlowsContent() {
           subtitle={
             avgTimeToDeliverSec === null
               ? undefined
-              : `over ${deliveredWithSend.length} recent transfers`
+              : `over ${avgSampleSize} recent transfers`
           }
         />
       </section>
@@ -253,17 +242,4 @@ function SenderCell({
     );
   }
   return <AddressLink address={sender} chainId={chainId} />;
-}
-
-function formatDurationShort(seconds: number): string {
-  // Normalize to whole seconds once, then floor-divide by unit. Avoids the
-  // "1m 60s" / "60s" artifact that occurs when the higher unit is floor'd
-  // but the remainder is round'd.
-  const total = Math.round(seconds);
-  if (total < 60) return `${total}s`;
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
