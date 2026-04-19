@@ -16,7 +16,7 @@ import { BridgeStatusBadge } from "@/components/bridge-status-badge";
 import { BridgeProviderBadge } from "@/components/bridge-provider-badge";
 import { ChainIcon } from "@/components/chain-icon";
 import { Tile, Skeleton, ErrorBox, EmptyBox } from "@/components/feedback";
-import { Table } from "@/components/table";
+import { Table, Th } from "@/components/table";
 import { AddressLink } from "@/components/address-link";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import {
@@ -27,11 +27,14 @@ import {
   truncateAddress,
 } from "@/lib/format";
 import { NETWORKS, networkIdForChainId } from "@/lib/networks";
+import type { Network } from "@/lib/networks";
 import {
   explorerAddressUrl,
+  explorerTxUrl,
   tokenToUSD,
   type OracleRateMap,
 } from "@/lib/tokens";
+import type { BridgeProvider } from "@/lib/types";
 import type { SortDir } from "@/lib/table-sort";
 import type { BridgeTransfer } from "@/lib/types";
 
@@ -429,6 +432,7 @@ function TransfersTable({
           >
             Receiver
           </SortableTh>
+          <Th>Txs</Th>
           <SortableTh
             sortKey="age"
             activeSortKey={sortKey}
@@ -505,6 +509,16 @@ function TransfersTable({
                 title={sameParties ? "Same as sender" : undefined}
               >
                 <SenderCell sender={t.recipient} chainId={t.destChainId} />
+              </td>
+              <td className="px-2 sm:px-4 py-2 sm:py-3">
+                <TxLinks
+                  provider={t.provider}
+                  providerMessageId={t.providerMessageId}
+                  sentTxHash={t.sentTxHash}
+                  sourceChainId={t.sourceChainId}
+                  deliveredTxHash={t.deliveredTxHash}
+                  destChainId={t.destChainId}
+                />
               </td>
               <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-400 font-mono text-right whitespace-nowrap">
                 {t.sentTimestamp
@@ -594,6 +608,94 @@ function RouteCell({
 
 function Dash() {
   return <span className="text-slate-600">{"\u2014"}</span>;
+}
+
+// Wormholescan is the canonical cross-chain trace UI for a Wormhole transfer —
+// takes either the digest (`providerMessageId`) or a source-chain tx hash.
+// Using digest is provider-stable: it resolves even when the source tx hasn't
+// been indexed by Wormholescan yet.
+function wormholescanUrl(digest: string): string {
+  return `https://wormholescan.io/#/tx/${digest}`;
+}
+
+function networkForChainId(chainId: number | null): Network | null {
+  if (!chainId) return null;
+  const id = networkIdForChainId(chainId);
+  return id ? NETWORKS[id] : null;
+}
+
+function TxPill({
+  href,
+  label,
+  title,
+}: {
+  href: string;
+  label: string;
+  title: string;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={title}
+      className="inline-flex items-center gap-0.5 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-colors"
+    >
+      {label}
+      <span aria-hidden="true" className="text-slate-600">
+        {"\u2197"}
+      </span>
+    </a>
+  );
+}
+
+function TxLinks({
+  provider,
+  providerMessageId,
+  sentTxHash,
+  sourceChainId,
+  deliveredTxHash,
+  destChainId,
+}: {
+  provider: BridgeProvider;
+  providerMessageId: string;
+  sentTxHash: string | null;
+  sourceChainId: number | null;
+  deliveredTxHash: string | null;
+  destChainId: number | null;
+}) {
+  const src = networkForChainId(sourceChainId);
+  const dst = networkForChainId(destChainId);
+  const pills: Array<{ href: string; label: string; title: string }> = [];
+  if (sentTxHash && src) {
+    pills.push({
+      href: explorerTxUrl(src, sentTxHash),
+      label: "src",
+      title: `Source tx on ${src.label}`,
+    });
+  }
+  if (deliveredTxHash && dst) {
+    pills.push({
+      href: explorerTxUrl(dst, deliveredTxHash),
+      label: "dst",
+      title: `Destination tx on ${dst.label}`,
+    });
+  }
+  if (provider === "WORMHOLE" && providerMessageId) {
+    pills.push({
+      href: wormholescanUrl(providerMessageId),
+      label: "wh",
+      title: "End-to-end trace on Wormholescan",
+    });
+  }
+  if (pills.length === 0) return <Dash />;
+  return (
+    <span className="inline-flex items-center gap-1">
+      {pills.map((p) => (
+        <TxPill key={p.label} {...p} />
+      ))}
+    </span>
+  );
 }
 
 function TokenCell({
