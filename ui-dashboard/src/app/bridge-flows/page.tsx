@@ -34,20 +34,27 @@ export default function BridgeFlowsPage() {
 }
 
 function BridgeFlowsContent() {
-  const afterSeconds = Math.floor(Date.now() / 1000) - THIRTY_DAYS_SECONDS;
+  // Single cutoff for both queries so the tile and the table cover the
+  // same window. BridgeDailySnapshot.date is UTC-day-bucketed, so we floor
+  // "now - 30d" to the day start — otherwise the snapshot straddling the
+  // cutoff would be dropped. `BridgeTransfer.firstSeenAt` uses the same
+  // floored cutoff so the table + count agree on the window (accepting a
+  // partial-day widening of up to 24h, clearly labelled in the tile).
+  const SECONDS_PER_DAY = 86400;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const afterDayBucket =
+    nowSeconds -
+    THIRTY_DAYS_SECONDS -
+    ((nowSeconds - THIRTY_DAYS_SECONDS) % SECONDS_PER_DAY);
 
   const transfersResult = useGQL<{ BridgeTransfer: BridgeTransfer[] }>(
     BRIDGE_TRANSFERS_WINDOW,
-    { limit: PAGE_LIMIT, offset: 0, after: afterSeconds },
+    { limit: PAGE_LIMIT, offset: 0, after: afterDayBucket },
   );
 
   // Bridge count via snapshot sum — aggregates are disabled on Envio hosted
   // Hasura, so we can't `BridgeTransfer_aggregate`. BridgeDailySnapshot is
   // pre-rolled in the indexer and fits easily under the 1000-row cap.
-  // `date` is day-bucketed (ts / 86400 * 86400), so floor `afterSeconds` to
-  // the corresponding day or we miss the bucket straddling the cutoff.
-  const SECONDS_PER_DAY = 86400;
-  const afterDayBucket = afterSeconds - (afterSeconds % SECONDS_PER_DAY);
   const countResult = useGQL<{
     BridgeDailySnapshot: Array<{ sentCount: number }>;
   }>(BRIDGE_TRANSFER_COUNT_SNAPSHOTS, {
