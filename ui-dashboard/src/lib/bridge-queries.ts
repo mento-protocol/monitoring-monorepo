@@ -7,11 +7,19 @@
  */
 
 // Recent transfers — paginated, newest first.
+//
+// Filter + sort on firstSeenAt (non-null) rather than sentTimestamp (nullable).
+// Under unordered_multichain_mode, a destination-first TransferRedeemed can
+// seed a BridgeTransfer row with sentTimestamp=null before the source events
+// arrive — Hasura's _gte on a null column returns UNKNOWN and drops the row,
+// so a filter on sentTimestamp would hide freshly-delivered transfers during
+// the race window (and permanently hide any transfer whose source chain is
+// not in the indexer's networks: list).
 export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
   query BridgeTransfersWindow($limit: Int!, $offset: Int!, $after: numeric!) {
     BridgeTransfer(
-      where: { sentTimestamp: { _gte: $after } }
-      order_by: { sentTimestamp: desc, id: asc }
+      where: { firstSeenAt: { _gte: $after } }
+      order_by: { firstSeenAt: desc, id: asc }
       limit: $limit
       offset: $offset
     ) {
@@ -40,7 +48,21 @@ export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
 
 export const BRIDGE_TRANSFER_COUNT = /* GraphQL */ `
   query BridgeTransferCount($after: numeric!) {
-    BridgeTransfer_aggregate(where: { sentTimestamp: { _gte: $after } }) {
+    BridgeTransfer_aggregate(where: { firstSeenAt: { _gte: $after } }) {
+      aggregate {
+        count
+      }
+    }
+  }
+`;
+
+// Pending transfers: sent/attested but not yet delivered. Separate aggregate
+// so the KPI tile reflects the entire indexed state (not only the 25-row
+// table page). Status is authoritative — no time window needed; stuck
+// transfers surface via the STUCK overlay in the table row itself.
+export const BRIDGE_PENDING_COUNT = /* GraphQL */ `
+  query BridgePendingCount {
+    BridgeTransfer_aggregate(where: { status: { _in: ["SENT", "ATTESTED"] } }) {
       aggregate {
         count
       }

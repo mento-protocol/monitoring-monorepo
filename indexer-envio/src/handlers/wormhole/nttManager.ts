@@ -272,6 +272,16 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
     pendingId,
   );
 
+  // Snapshot the prior BridgeTransfer BEFORE upserting so we can detect the
+  // destination-first race: if dest already delivered this digest before we
+  // indexed the source, the TransferRedeemed handler couldn't update the
+  // delivered snapshot (no amount/sourceChainId yet). Now that we have both,
+  // backfill the delivered rollup on the day the delivery actually happened.
+  const id = buildTransferId(PROVIDER, digest);
+  const priorTransfer = await (context as HandlerContext).BridgeTransfer.get(
+    id,
+  );
+
   const ts = BigInt(event.block.timestamp);
   const transferDelta: Record<string, unknown> = {
     tokenSymbol: mgr.tokenSymbol,
@@ -319,12 +329,36 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
         destChainId,
         sentDelta: { count: 1, volume: pending.amount },
       });
-      await updateBridger(context as HandlerContext, {
-        sender: pending.sender,
-        sourceChainId: chainId,
-        tokenSymbol: mgr.tokenSymbol,
-        blockTimestamp: ts,
-      });
+      // Catch-up: if the destination event already arrived first, the
+      // TransferRedeemed handler skipped the delivered rollup because amount
+      // wasn't known yet. Apply it now, bucketed on the delivery day so the
+      // snapshot's "delivered on day D" semantics stay correct.
+      if (
+        priorTransfer?.deliveredBlock !== undefined &&
+        priorTransfer?.deliveredBlock !== null &&
+        priorTransfer.deliveredTimestamp !== undefined &&
+        priorTransfer.deliveredTimestamp !== null
+      ) {
+        await updateDailySnapshot(context as HandlerContext, {
+          blockTimestamp: priorTransfer.deliveredTimestamp,
+          tokenSymbol: mgr.tokenSymbol,
+          sourceChainId: chainId,
+          destChainId,
+          deliveredDelta: { count: 1, volume: pending.amount },
+        });
+      }
+      // Skip BridgeBridger update when tx.from was missing — would create a
+      // phantom "" sender row that aggregates unrelated transfers. In practice
+      // Envio HyperSync always supplies tx.from, but the type allows undefined
+      // and an empty-string primary key would silently corrupt the rollup.
+      if (pending.sender) {
+        await updateBridger(context as HandlerContext, {
+          sender: pending.sender,
+          sourceChainId: chainId,
+          tokenSymbol: mgr.tokenSymbol,
+          blockTimestamp: ts,
+        });
+      }
     }
   }
 });

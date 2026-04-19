@@ -5,6 +5,7 @@ import { useGQL } from "@/lib/graphql";
 import {
   BRIDGE_TRANSFERS_WINDOW,
   BRIDGE_TRANSFER_COUNT,
+  BRIDGE_PENDING_COUNT,
 } from "@/lib/bridge-queries";
 import { deriveBridgeStatus } from "@/lib/bridge-status";
 import { BridgeStatusBadge } from "@/components/bridge-status-badge";
@@ -40,20 +41,27 @@ function BridgeFlowsContent() {
     BridgeTransfer_aggregate: { aggregate: { count: number } };
   }>(BRIDGE_TRANSFER_COUNT, { after: afterSeconds });
 
+  const pendingResult = useGQL<{
+    BridgeTransfer_aggregate: { aggregate: { count: number } };
+  }>(BRIDGE_PENDING_COUNT);
+
   const transfers = transfersResult.data?.BridgeTransfer ?? [];
   const count30d =
     countResult.data?.BridgeTransfer_aggregate?.aggregate?.count ?? null;
+  const pendingCount =
+    pendingResult.data?.BridgeTransfer_aggregate?.aggregate?.count ?? null;
 
-  const deliveredInWindow = transfers.filter(
+  // KPIs scoped to the current table page (25 rows). Aggregates across the
+  // full 30-day window (unique-sender count, avg deliver time) would require
+  // bespoke Hasura queries not supported on the free tier — deferred, and
+  // the subtitles make the scope explicit.
+  const deliveredOnPage = transfers.filter(
     (t) => t.status === "DELIVERED" && t.deliveredTimestamp,
   );
-  const pending = transfers.filter(
-    (t) => t.status === "SENT" || t.status === "ATTESTED",
-  ).length;
 
   let avgTimeToDeliverSec: number | null = null;
-  if (deliveredInWindow.length > 0) {
-    const total = deliveredInWindow.reduce((acc, t) => {
+  if (deliveredOnPage.length > 0) {
+    const total = deliveredOnPage.reduce((acc, t) => {
       const sent = t.sentTimestamp ? Number(t.sentTimestamp) : null;
       const delivered = t.deliveredTimestamp
         ? Number(t.deliveredTimestamp)
@@ -61,18 +69,24 @@ function BridgeFlowsContent() {
       if (sent === null || delivered === null) return acc;
       return acc + Math.max(0, delivered - sent);
     }, 0);
-    avgTimeToDeliverSec = total / deliveredInWindow.length;
+    avgTimeToDeliverSec = total / deliveredOnPage.length;
   }
 
-  const uniqueSenders30d = new Set(
+  const uniqueSendersOnPage = new Set(
     transfers
       .map((t) => t.sender?.toLowerCase())
       .filter((s): s is string => !!s),
   ).size;
 
   const error =
-    transfersResult.error?.message ?? countResult.error?.message ?? null;
-  const loading = transfersResult.isLoading || countResult.isLoading;
+    transfersResult.error?.message ??
+    countResult.error?.message ??
+    pendingResult.error?.message ??
+    null;
+  const loading =
+    transfersResult.isLoading ||
+    countResult.isLoading ||
+    pendingResult.isLoading;
 
   return (
     <div className="space-y-8">
@@ -95,32 +109,32 @@ function BridgeFlowsContent() {
           value={count30d === null ? "…" : count30d.toLocaleString()}
         />
         <Tile
-          label="Unique senders (30d)"
-          value={loading ? "…" : uniqueSenders30d.toLocaleString()}
+          label="Pending"
+          value={pendingCount === null ? "…" : pendingCount.toLocaleString()}
           subtitle={
-            loading
-              ? undefined
-              : transfers.length === 0
-                ? "No activity yet"
-                : undefined
+            pendingCount !== null && pendingCount > 0
+              ? "Sent, awaiting delivery"
+              : undefined
           }
         />
         <Tile
-          label="Pending"
-          value={loading ? "…" : pending.toLocaleString()}
-          subtitle={pending > 0 ? "Sent, awaiting delivery" : undefined}
+          label="Unique senders"
+          value={loading ? "…" : uniqueSendersOnPage.toLocaleString()}
+          subtitle={
+            transfers.length === 0 ? "No activity yet" : "among recent 25"
+          }
         />
         <Tile
-          label="Avg time to deliver"
+          label="Avg deliver time"
           value={
             avgTimeToDeliverSec === null
-              ? "\u2014"
+              ? "—"
               : formatDurationShort(avgTimeToDeliverSec)
           }
           subtitle={
             avgTimeToDeliverSec === null
               ? undefined
-              : `over ${deliveredInWindow.length} transfers`
+              : `over ${deliveredOnPage.length} recent transfers`
           }
         />
       </section>
@@ -241,12 +255,14 @@ function SenderCell({
 }
 
 function formatDurationShort(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  const m = Math.floor(seconds / 60);
-  if (m < 60) {
-    const s = Math.round(seconds - m * 60);
-    return s > 0 ? `${m}m ${s}s` : `${m}m`;
-  }
-  const h = Math.floor(m / 60);
-  return `${h}h ${m - h * 60}m`;
+  // Normalize to whole seconds once, then floor-divide by unit. Avoids the
+  // "1m 60s" / "60s" artifact that occurs when the higher unit is floor'd
+  // but the remainder is round'd.
+  const total = Math.round(seconds);
+  if (total < 60) return `${total}s`;
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
