@@ -18,6 +18,8 @@ import "./handlers/sortedOracles";
 import "./handlers/virtualPool";
 import "./handlers/feeToken";
 import "./handlers/openLiquidityStrategy";
+import "./handlers/wormhole/nttManager";
+import "./handlers/wormhole/wormholeTransceiver";
 
 // ---------------------------------------------------------------------------
 // Re-exports for backwards compatibility with existing tests.

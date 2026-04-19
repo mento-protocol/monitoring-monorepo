@@ -315,3 +315,148 @@ type OlsLifecycleEvent {
   blockNumber: BigInt!
   blockTimestamp: BigInt!
 }
+
+# ============================================================================
+# Bridge Flows — generic (provider-agnostic) core
+#
+# Any bridge provider (Wormhole NTT today; LayerZero / Axelar / CCTP later)
+# writes to these entities. Provider-specific fields live in the extension
+# tables below (e.g. WormholeTransferDetail).
+#
+# BridgeTransfer.id = "{provider}-{providerMessageId}", lowercase, URL-safe.
+# ============================================================================
+
+enum BridgeProvider {
+  WORMHOLE
+}
+
+type BridgeTransfer {
+  id: ID! # "{provider}-{providerMessageId}", lowercased
+  provider: BridgeProvider! @index
+  providerMessageId: String! @index # Wormhole digest; LayerZero GUID; etc.
+  status: String! @index # PENDING | SENT | ATTESTED | DELIVERED | QUEUED_OUTBOUND | QUEUED_INBOUND | CANCELLED | FAILED
+  tokenSymbol: String! @index
+  tokenAddress: String!
+  tokenDecimals: Int!
+
+  sourceChainId: Int
+  sourceContract: String # provider's source-chain dispatch contract (e.g. NttManager)
+  destChainId: Int
+  destContract: String
+
+  sender: String @index
+  recipient: String @index
+  amount: BigInt
+
+  sentBlock: BigInt
+  sentTimestamp: BigInt @index
+  sentTxHash: String
+
+  attestationCount: Int!
+  firstAttestedTimestamp: BigInt
+  lastAttestedTimestamp: BigInt
+
+  deliveredBlock: BigInt
+  deliveredTimestamp: BigInt
+  deliveredTxHash: String
+
+  cancelledTimestamp: BigInt
+  failedReason: String
+
+  usdPriceAtSend: String # fixed-point 18dp string
+  usdValueAtSend: String # 2dp string, lex-sortable
+  firstSeenAt: BigInt!
+  lastUpdatedAt: BigInt!
+}
+
+type BridgeAttestation {
+  id: ID! # "{transferId}-{attester}-{attesterIndex}"
+  transferId: String! @index
+  provider: BridgeProvider!
+  attester: String! # guardian address (Wormhole); DVN address (LayerZero)
+  attesterIndex: Int
+  chainId: Int!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
+  txHash: String!
+}
+
+type BridgeDailySnapshot {
+  id: ID! # "{dayTs}-{provider}-{tokenSymbol}-{sourceChainId}-{destChainId}"
+  date: BigInt! @index
+  provider: BridgeProvider!
+  tokenSymbol: String! @index
+  sourceChainId: Int! @index
+  destChainId: Int! @index
+  sentCount: Int!
+  deliveredCount: Int!
+  cancelledCount: Int!
+  sentVolume: BigInt!
+  deliveredVolume: BigInt!
+  sentUsdValue: String!
+  updatedAt: BigInt!
+}
+
+type BridgeBridger {
+  id: ID! # lowercase sender address (cross-chain identity)
+  sender: String! @index
+  totalSentCount: Int!
+  totalSentUsd: String! # 2dp, lex-sortable
+  sourceChainsUsed: String! # JSON array of EVM chainIds
+  tokensUsed: String! # JSON array of token symbols
+  providersUsed: String! # JSON array of BridgeProvider values
+  firstSeenAt: BigInt!
+  lastSeenAt: BigInt!
+}
+
+# ============================================================================
+# Bridge Flows — Wormhole-specific extension
+#
+# These entities only exist for Wormhole-originated transfers. Adding a new
+# provider means adding sibling entities (e.g. LayerZeroTransferDetail); the
+# generic entities above are untouched.
+# ============================================================================
+
+type WormholeNttManager {
+  id: ID! # "{chainId}-{nttManagerAddr}", lowercased
+  chainId: Int! @index
+  nttManager: String! @index
+  transceiver: String! @index
+  helper: String!
+  tokenAddress: String! @index
+  tokenSymbol: String! @index
+  tokenDecimals: Int!
+  wormholeChainId: Int!
+  rateFeedId: String
+  seededAtTimestamp: BigInt! # block.timestamp of the first event that seeded this row
+}
+
+type WormholeTransferDetail {
+  id: ID! # == BridgeTransfer.id
+  digest: String! @index # bytes32, 0x-lowercased — the provider's message id
+  msgSequence: BigInt @index
+  sourceWormholeChainId: Int
+  destWormholeChainId: Int
+  refundAddress: String
+  fee: BigInt # Wormhole delivery fee, native token (not USD)
+  # NTT rate-limiter state (Wormhole-specific)
+  outboundQueuedSequence: BigInt
+  inboundQueuedTimestamp: BigInt
+  rateLimitedCurrentCapacity: BigInt
+}
+
+type WormholeTransferPending {
+  id: ID! # "{chainId}-{txHash}", ephemeral — should be 0 rows in steady state
+  chainId: Int!
+  txHash: String!
+  nttManager: String!
+  sender: String!
+  recipient: String!
+  refundAddress: String!
+  amount: BigInt!
+  fee: BigInt!
+  recipientWormholeChainId: Int!
+  msgSequence: BigInt!
+  sentBlock: BigInt!
+  sentTimestamp: BigInt!
+}

@@ -94,6 +94,35 @@ contracts:
     events:
       - event: Transfer
 
+  # Bridge Flows — Wormhole NTT
+  # Manager + Transceiver proxy addresses are derived from NttDeployHelper
+  # addresses via CREATE nonce derivation. See scripts/generateNttAddresses.mjs
+  # and config/nttAddresses.json. Helpers emit no events so static addresses
+  # are required; `pnpm generate:ntt-addresses` keeps them in sync with
+  # @mento-protocol/contracts when new bridged tokens ship.
+  - name: WormholeNttManager
+    abi_file_path: abis/wormhole/NttManager.json
+    handler: src/EventHandlers.ts
+    events:
+      # The two TransferSent overloads — aliased here because Envio codegen
+      # needs unique handler symbol names per contract.
+      - event: TransferSent(bytes32 indexed recipient, bytes32 indexed refundAddress, uint256 amount, uint256 fee, uint16 recipientChain, uint64 msgSequence)
+        name: TransferSentDetailed
+      - event: TransferSent(bytes32 indexed digest)
+        name: TransferSentDigest
+      - event: TransferRedeemed(bytes32 indexed digest)
+      - event: MessageAttestedTo(bytes32 digest, address transceiver, uint8 index)
+      - event: OutboundTransferQueued(uint64 queueSequence)
+      - event: OutboundTransferRateLimited(address indexed sender, uint64 sequence, uint256 amount, uint256 currentCapacity)
+      - event: OutboundTransferCancelled(uint256 sequence, address recipient, uint256 amount)
+      - event: InboundTransferQueued(bytes32 digest)
+
+  - name: WormholeTransceiver
+    abi_file_path: abis/wormhole/WormholeTransceiver.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: ReceivedMessage(bytes32 digest, uint16 emitterChainId, bytes32 emitterAddress, uint64 sequence)
+
 networks:
   # ---------------------------------------------------------------------------
   # Celo Mainnet (chain 42220)
@@ -119,6 +148,16 @@ networks:
           - 0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
+      - name: WormholeNttManager
+        address:
+          - 0xa4096343485a44c0f8d05ae6da311c18d63e38bc # USDm
+          - 0x7895d03ffdeb14a57ef79c21c3ea14dadf2a7c3f # GBPm
+          - 0x5f8a1e50f83f53951b89fc73ead80b27045c67fd # EURm
+      - name: WormholeTransceiver
+        address:
+          - 0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b # USDm
+          - 0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f # GBPm
+          - 0x6467cfca82184657f32f1195f9a26b5578399479 # EURm
 
   # ---------------------------------------------------------------------------
   # Monad Mainnet (chain 143)
@@ -145,6 +184,19 @@ networks:
           # CREATE2 deterministic — same address as Celo.
           # Verified deployed on Monad mainnet (eth_getCode returned bytecode).
           - 0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f
+      - name: WormholeNttManager
+        # Same proxy addresses as Celo — helpers are CREATE3 across chains and
+        # the proxies are derived by CREATE(helper, nonce) which is also
+        # chain-independent because helpers are fresh at deploy time.
+        address:
+          - 0xa4096343485a44c0f8d05ae6da311c18d63e38bc # USDm
+          - 0x7895d03ffdeb14a57ef79c21c3ea14dadf2a7c3f # GBPm
+          - 0x5f8a1e50f83f53951b89fc73ead80b27045c67fd # EURm
+      - name: WormholeTransceiver
+        address:
+          - 0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b # USDm
+          - 0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f # GBPm
+          - 0x6467cfca82184657f32f1195f9a26b5578399479 # EURm
 
 unordered_multichain_mode: true
 preload_handlers: true
