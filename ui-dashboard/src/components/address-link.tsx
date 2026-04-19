@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSession } from "next-auth/react";
 import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
@@ -22,7 +23,12 @@ type Props = {
 export function AddressLink({ address, readOnly = false, chainId }: Props) {
   const { network: contextNetwork } = useNetwork();
   const { getName, hasName, isCustom, getEntry } = useAddressLabels();
+  const { data: session } = useSession();
   const [editing, setEditing] = useState(false);
+  // Hide the edit pencil for anonymous visitors — the labels API rejects
+  // writes without a session, so exposing the affordance would just produce
+  // a 401 if clicked.
+  const canEdit = !readOnly && !!session;
 
   const resolvedNetwork = (() => {
     if (chainId == null) return contextNetwork;
@@ -53,7 +59,7 @@ export function AddressLink({ address, readOnly = false, chainId }: Props) {
           </span>
         </a>
 
-        {!readOnly && (
+        {canEdit && (
           <button
             type="button"
             onClick={() => setEditing(true)}
