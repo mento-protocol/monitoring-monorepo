@@ -15,6 +15,9 @@
     "indexer:multichain:dev": "node ./scripts/run-envio-with-env.mjs dev --config config.multichain.mainnet.yaml",
     "indexer:multichain:testnet:codegen": "node ./scripts/run-envio-with-env.mjs codegen --config config.multichain.testnet.yaml",
     "indexer:multichain:testnet:dev": "node ./scripts/run-envio-with-env.mjs dev --config config.multichain.testnet.yaml",
+    "indexer:bridge-only:codegen": "node ./scripts/run-envio-with-env.mjs codegen --config config.multichain.bridge-only.yaml",
+    "indexer:bridge-only:dev": "node ./scripts/run-envio-with-env.mjs dev --config config.multichain.bridge-only.yaml",
+    "indexer:bridge-only:start": "node ./scripts/run-envio-with-env.mjs start --config config.multichain.bridge-only.yaml",
     "generate:ntt-addresses": "node ./scripts/generateNttAddresses.mjs",
     "test": "pnpm mocha",
     "typecheck": "tsc --noEmit"
