@@ -138,6 +138,14 @@ export function makeNetwork(
   };
 }
 
+// Backward-compatible env resolution for production multichain endpoint.
+// Prefer the explicit MULTICHAIN key, but accept NEXT_PUBLIC_HASURA_URL so
+// environments that only set the legacy key still hydrate correctly.
+const multichainHasuraUrl =
+  process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN?.trim() ||
+  process.env.NEXT_PUBLIC_HASURA_URL?.trim() ||
+  "";
+
 export const NETWORKS: Record<IndexerNetworkId, Network> = {
   devnet: makeNetwork({
     id: "devnet",
@@ -220,7 +228,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
     rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
-    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN?.trim() ?? "",
+    hasuraUrl: multichainHasuraUrl,
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET ??
@@ -236,7 +244,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     contractsNamespace: NS["monad-mainnet"],
     rpcUrl:
       process.env.NEXT_PUBLIC_RPC_URL_MONAD_MAINNET ?? "https://rpc2.monad.xyz",
-    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN?.trim() ?? "",
+    hasuraUrl: multichainHasuraUrl,
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_MAINNET ??

@@ -229,6 +229,43 @@ describe("NETWORKS — Monad networks", () => {
     expect(networks.isConfiguredNetworkId("monad-mainnet")).toBe(true);
   });
 
+  it("falls back to NEXT_PUBLIC_HASURA_URL when multichain key is unset", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL_MULTICHAIN", "");
+    vi.stubEnv(
+      "NEXT_PUBLIC_HASURA_URL",
+      "  https://indexer.hyperindex.xyz/2f3dd15/v1/graphql  ",
+    );
+
+    const networks = await import("../networks");
+    expect(networks.NETWORKS["celo-mainnet"].hasuraUrl).toBe(
+      "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql",
+    );
+    expect(networks.NETWORKS["monad-mainnet"].hasuraUrl).toBe(
+      "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql",
+    );
+    expect(networks.isConfiguredNetworkId("celo-mainnet")).toBe(true);
+    expect(networks.isConfiguredNetworkId("monad-mainnet")).toBe(true);
+  });
+
+  it("prefers NEXT_PUBLIC_HASURA_URL_MULTICHAIN over NEXT_PUBLIC_HASURA_URL", async () => {
+    vi.stubEnv(
+      "NEXT_PUBLIC_HASURA_URL_MULTICHAIN",
+      "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql",
+    );
+    vi.stubEnv(
+      "NEXT_PUBLIC_HASURA_URL",
+      "https://example.com/legacy-should-not-win",
+    );
+
+    const networks = await import("../networks");
+    expect(networks.NETWORKS["celo-mainnet"].hasuraUrl).toBe(
+      "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql",
+    );
+    expect(networks.NETWORKS["monad-mainnet"].hasuraUrl).toBe(
+      "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql",
+    );
+  });
+
   it("monad-mainnet token symbols use canonical hub names (USDm/EURm/GBPm, not *Spoke)", () => {
     const monad = NETWORKS["monad-mainnet"];
     expect(monad.tokenSymbols[USDM_MONAD_MAINNET]).toBe("USDm");
