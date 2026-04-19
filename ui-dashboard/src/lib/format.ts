@@ -98,9 +98,18 @@ export function parseOraclePriceToNumber(
   return USD_STABLE_SYMS.has(sym0) ? 1 / feedValue : feedValue;
 }
 
-/** Display format for a positive oracle price (4dp). Callers needing more precision should read the raw number directly. */
+/**
+ * Display format for a positive oracle price. Uses 4dp for everything ≥ 0.01
+ * (the common case), and extends precision for sub-cent values — a fiat pair
+ * priced at 0.00067 USD would otherwise collapse to "0.0007" (or to "0.0000"
+ * for even smaller rates) and misquote the pair. The extended path keeps at
+ * least four significant figures, capped at 12dp to stay readable.
+ */
 export function formatOraclePrice(price: number): string {
-  return price.toFixed(4);
+  if (price <= 0) return "0.0000";
+  if (price >= 0.01) return price.toFixed(4);
+  const sigFigDecimals = Math.ceil(-Math.log10(price)) + 3;
+  return price.toFixed(Math.min(sigFigDecimals, 12));
 }
 
 export function toPercent(raw: string, decimals = 4): string {

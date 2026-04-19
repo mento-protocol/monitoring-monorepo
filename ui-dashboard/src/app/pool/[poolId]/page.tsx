@@ -341,7 +341,11 @@ function PoolDetail() {
   // Skip the fetch entirely once we can prove the current pool is already
   // USD-priceable with an empty rate map (USDm/USDC/USDT/AUSD legs) —
   // avoids a permanent 5-min-refresh background query on the common case.
-  const poolNeedsRates = pool ? !canPricePool(pool, network, new Map()) : true;
+  // Default to `false` while pool is still loading so USD-priceable pairs
+  // never kick off the request on first render. FX pairs serialize
+  // briefly behind the pool query, which is fine because charts are
+  // already gated behind `!pool` below.
+  const poolNeedsRates = pool ? !canPricePool(pool, network, new Map()) : false;
   const { data: allPoolsData, error: allPoolsError } = useGQL<{ Pool: Pool[] }>(
     poolNeedsRates ? ALL_POOLS_WITH_HEALTH : null,
     { chainId: network.chainId },
