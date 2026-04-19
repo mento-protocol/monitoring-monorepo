@@ -59,13 +59,22 @@ export const BRIDGE_TRANSFER_COUNT_SNAPSHOTS = /* GraphQL */ `
   }
 `;
 
-// Pending transfers: sent/attested but not yet delivered. No aggregate
-// support; paginate IDs and count client-side. Capped at 1000 (if we ever
-// hit that it's a major bridge incident — surface a warning in the UI).
+// Pending transfers: anything not yet delivered (and not terminally
+// cancelled/failed). Includes:
+//   PENDING         — destination-first race; digest known, source not yet
+//                     indexed or not yet fired
+//   SENT            — source TransferSent seen, awaiting guardian attestation
+//   ATTESTED        — attested on destination, awaiting redeem
+//   QUEUED_INBOUND  — attested but held by destination rate-limit window
+// Excludes DELIVERED, CANCELLED, FAILED (terminal). No aggregate support on
+// hosted Hasura, so paginate IDs + count client-side. Capped at 1000 (render
+// as "1,000+" if we hit that — real bridge incident signal).
 export const BRIDGE_PENDING_IDS = /* GraphQL */ `
   query BridgePendingIds {
     BridgeTransfer(
-      where: { status: { _in: ["SENT", "ATTESTED"] } }
+      where: {
+        status: { _in: ["PENDING", "SENT", "ATTESTED", "QUEUED_INBOUND"] }
+      }
       limit: 1000
     ) {
       id

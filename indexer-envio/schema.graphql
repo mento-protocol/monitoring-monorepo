@@ -393,7 +393,10 @@ type BridgeDailySnapshot {
   cancelledCount: Int!
   sentVolume: BigInt!
   deliveredVolume: BigInt!
-  sentUsdValue: String!
+  # Nullable while USD pricing is deferred (plan §1.5). Writers set null
+  # rather than a "0.00" sentinel so consumers can distinguish "no USD
+  # computation yet" from "genuinely zero value".
+  sentUsdValue: String
   updatedAt: BigInt!
 }
 
@@ -401,7 +404,9 @@ type BridgeBridger {
   id: ID! # lowercase sender address (cross-chain identity)
   sender: String! @index
   totalSentCount: Int!
-  totalSentUsd: String! # 2dp, lex-sortable
+  # Nullable while USD pricing is deferred (plan §1.5). See sentUsdValue
+  # comment on BridgeDailySnapshot.
+  totalSentUsd: String
   sourceChainsUsed: String! # JSON array of EVM chainIds
   tokensUsed: String! # JSON array of token symbols
   providersUsed: String! # JSON array of BridgeProvider values

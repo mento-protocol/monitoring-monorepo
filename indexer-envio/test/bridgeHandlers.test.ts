@@ -82,11 +82,18 @@ type GeneratedModule = {
       MessageAttestedTo: EventProcessor;
       InboundTransferQueued: EventProcessor;
     };
+    WormholeTransceiver: {
+      ReceivedMessage: EventProcessor;
+    };
   };
 };
 
 const { TestHelpers } = generated as unknown as GeneratedModule;
-const { MockDb, WormholeNttManager: TestWormholeNttManager } = TestHelpers;
+const {
+  MockDb,
+  WormholeNttManager: TestWormholeNttManager,
+  WormholeTransceiver: TestWormholeTransceiver,
+} = TestHelpers;
 
 // Pick a real (chainId, manager) from the committed manifest so the handler's
 // findByNttManager seed-lookup succeeds.
@@ -448,5 +455,185 @@ describe("Bridge-flows handlers — multi-send pending pairing", () => {
     );
     assert.equal(pending1, undefined, "pending 1 must be consumed");
     assert.equal(pending2, undefined, "pending 2 must be consumed");
+  });
+});
+
+describe("Bridge-flows handlers — MessageAttestedTo interaction", () => {
+  it("increments attestationCount and writes BridgeAttestation row", async () => {
+    const e = pickManifestEntry();
+    let mockDb = MockDb.createMockDb();
+    const attesterAddr = "0x9999999999999999999999999999999999999999";
+    const id = `wormhole-${DIGEST_1.toLowerCase()}`;
+
+    const event = TestWormholeNttManager.MessageAttestedTo.createMockEvent({
+      digest: DIGEST_1,
+      transceiver: attesterAddr,
+      index: 0n,
+      mockEventData: mockEventData({
+        chainId: e.chainId,
+        manager: e.nttManagerProxy,
+        logIndex: 2,
+      }),
+    });
+    mockDb = await TestWormholeNttManager.MessageAttestedTo.processEvent({
+      event,
+      mockDb,
+    });
+
+    const transfer = mockDb.entities.BridgeTransfer.get(id);
+    assert.equal(transfer?.attestationCount, 1);
+    assert.equal(
+      transfer?.status,
+      "ATTESTED",
+      "status promotes from PENDING to ATTESTED",
+    );
+
+    const attestationId = `${id}-${attesterAddr}-0`;
+    const attestation = mockDb.entities.BridgeAttestation.get(attestationId);
+    assert.ok(attestation, "BridgeAttestation row written");
+    assert.equal(attestation!.transferId, id);
+  });
+
+  it("is replay-idempotent (duplicate event does not double attestationCount)", async () => {
+    const e = pickManifestEntry();
+    let mockDb = MockDb.createMockDb();
+    const attesterAddr = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const id = `wormhole-${DIGEST_1.toLowerCase()}`;
+
+    const makeEvent = () =>
+      TestWormholeNttManager.MessageAttestedTo.createMockEvent({
+        digest: DIGEST_1,
+        transceiver: attesterAddr,
+        index: 0n,
+        mockEventData: mockEventData({
+          chainId: e.chainId,
+          manager: e.nttManagerProxy,
+          logIndex: 2,
+        }),
+      });
+
+    mockDb = await TestWormholeNttManager.MessageAttestedTo.processEvent({
+      event: makeEvent(),
+      mockDb,
+    });
+    mockDb = await TestWormholeNttManager.MessageAttestedTo.processEvent({
+      event: makeEvent(),
+      mockDb,
+    });
+
+    const transfer = mockDb.entities.BridgeTransfer.get(id);
+    assert.equal(
+      transfer?.attestationCount,
+      1,
+      "replay of same attestation does not double the counter",
+    );
+  });
+});
+
+describe("Bridge-flows handlers — InboundTransferQueued interaction", () => {
+  it("sets QUEUED_INBOUND and wins over ATTESTED (status-machine precedence)", async () => {
+    const e = pickManifestEntry();
+    let mockDb = MockDb.createMockDb();
+    const id = `wormhole-${DIGEST_1.toLowerCase()}`;
+    const attesterAddr = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    // Dest-chain emission order in a rate-limited transfer is:
+    // MessageAttestedTo → InboundTransferQueued.
+    const attestEvent =
+      TestWormholeNttManager.MessageAttestedTo.createMockEvent({
+        digest: DIGEST_1,
+        transceiver: attesterAddr,
+        index: 0n,
+        mockEventData: mockEventData({
+          chainId: e.chainId,
+          manager: e.nttManagerProxy,
+          logIndex: 2,
+        }),
+      });
+    mockDb = await TestWormholeNttManager.MessageAttestedTo.processEvent({
+      event: attestEvent,
+      mockDb,
+    });
+    assert.equal(
+      mockDb.entities.BridgeTransfer.get(id)?.status,
+      "ATTESTED",
+      "before the queue event, status is ATTESTED",
+    );
+
+    const queueEvent =
+      TestWormholeNttManager.InboundTransferQueued.createMockEvent({
+        digest: DIGEST_1,
+        mockEventData: mockEventData({
+          chainId: e.chainId,
+          manager: e.nttManagerProxy,
+          logIndex: 3,
+        }),
+      });
+    mockDb = await TestWormholeNttManager.InboundTransferQueued.processEvent({
+      event: queueEvent,
+      mockDb,
+    });
+
+    const transfer = mockDb.entities.BridgeTransfer.get(id);
+    assert.equal(
+      transfer?.status,
+      "QUEUED_INBOUND",
+      "queue event overrides ATTESTED in status machine (codex #2 fix)",
+    );
+
+    const detail = mockDb.entities.WormholeTransferDetail.get(id);
+    assert.ok(
+      detail?.inboundQueuedTimestamp,
+      "inboundQueuedTimestamp is populated",
+    );
+  });
+});
+
+describe("Bridge-flows handlers — ReceivedMessage (transceiver) interaction", () => {
+  it("seeds source-chain identity on the BridgeTransfer when dest-side arrives first", async () => {
+    const e = pickManifestEntry();
+    // Counterparty entry: transceiver on Monad (dest when source is Celo).
+    const monad = findByNttManager(
+      143,
+      "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+    );
+    assert.ok(monad);
+    let mockDb = MockDb.createMockDb();
+    const id = `wormhole-${DIGEST_1.toLowerCase()}`;
+
+    // Emitter is the source-chain NttManager, formatted as bytes32.
+    const emitterBytes32 = padAddr(e.nttManagerProxy);
+
+    const event = TestWormholeTransceiver.ReceivedMessage.createMockEvent({
+      digest: DIGEST_1,
+      emitterChainId: 14, // Wormhole chain id for Celo
+      emitterAddress: emitterBytes32,
+      sequence: 42n,
+      mockEventData: mockEventData({
+        chainId: 143, // destination (Monad)
+        manager: monad!.transceiverProxy,
+        logIndex: 5,
+      }),
+    });
+    mockDb = await TestWormholeTransceiver.ReceivedMessage.processEvent({
+      event,
+      mockDb,
+    });
+
+    const transfer = mockDb.entities.BridgeTransfer.get(id);
+    assert.ok(transfer, "BridgeTransfer is seeded from dest-side event");
+    assert.equal(
+      transfer!.sourceChainId,
+      42220,
+      "sourceChainId resolved from Wormhole emitter chain id",
+    );
+    assert.ok(
+      transfer!.sourceContract,
+      "sourceContract populated from emitter address",
+    );
+
+    const detail = mockDb.entities.WormholeTransferDetail.get(id);
+    assert.equal(detail?.sourceWormholeChainId, 14);
+    assert.equal(detail?.msgSequence, 42n);
   });
 });

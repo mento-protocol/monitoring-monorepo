@@ -111,7 +111,7 @@ export function defaultSnapshot(args: {
     cancelledCount: 0,
     sentVolume: 0n,
     deliveredVolume: 0n,
-    sentUsdValue: "0.00",
+    sentUsdValue: undefined,
     updatedAt: args.blockTimestamp,
   };
 }
@@ -124,7 +124,7 @@ export function defaultBridger(args: {
     id: args.sender.toLowerCase(),
     sender: args.sender.toLowerCase(),
     totalSentCount: 0,
-    totalSentUsd: "0.00",
+    totalSentUsd: undefined,
     sourceChainsUsed: "[]",
     tokensUsed: "[]",
     providersUsed: "[]",

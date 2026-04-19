@@ -106,45 +106,61 @@ function BridgeFlowsContent() {
 
       {error && <ErrorBox message={error} />}
 
+      {/*
+       * When any query errored, render KPIs + table as empty placeholders
+       * ("—") so a user doesn't mistake the error banner for "no activity".
+       * The 4 tile values shown in the error branch are not data — they are
+       * the universal unavailable sentinel.
+       */}
       <section
         aria-label="Key metrics"
         className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
       >
         <Tile
           label="Transfers (30d)"
-          value={count30d === null ? "…" : count30d.toLocaleString()}
+          value={
+            error ? "—" : count30d === null ? "…" : count30d.toLocaleString()
+          }
         />
         <Tile
           label="Pending"
           value={
-            pendingCount === null
-              ? "…"
-              : pendingCapped
-                ? "1,000+"
-                : pendingCount.toLocaleString()
+            error
+              ? "—"
+              : pendingCount === null
+                ? "…"
+                : pendingCapped
+                  ? "1,000+"
+                  : pendingCount.toLocaleString()
           }
           subtitle={
-            pendingCount !== null && pendingCount > 0
+            !error && pendingCount !== null && pendingCount > 0
               ? "Sent, awaiting delivery"
               : undefined
           }
         />
         <Tile
           label="Unique senders"
-          value={loading ? "…" : uniqueSendersOnPage.toLocaleString()}
+          value={
+            error ? "—" : loading ? "…" : uniqueSendersOnPage.toLocaleString()
+          }
           subtitle={
-            transfers.length === 0 ? "No activity yet" : "among recent 25"
+            error
+              ? undefined
+              : transfers.length === 0
+                ? "No activity yet"
+                : "among recent 25"
           }
         />
         <Tile
           label="Avg deliver time"
           value={
-            avgTimeToDeliverSec === null
+            error || avgTimeToDeliverSec === null
               ? "—"
               : formatDurationShort(avgTimeToDeliverSec)
           }
           subtitle={
-            avgTimeToDeliverSec === null
+            error || avgTimeToDeliverSec === null
               ? undefined
               : `over ${avgSampleSize} recent transfers`
           }
@@ -155,7 +171,11 @@ function BridgeFlowsContent() {
         <h2 className="text-lg font-semibold text-white mb-3">
           Recent transfers
         </h2>
-        {loading && transfers.length === 0 ? (
+        {error ? (
+          // Don't claim "no transfers" when we simply couldn't fetch them.
+          // The ErrorBox above carries the actual message.
+          <EmptyBox message="Unable to load transfers — see error above." />
+        ) : loading && transfers.length === 0 ? (
           <Skeleton rows={5} />
         ) : transfers.length === 0 ? (
           <EmptyBox message="No bridge transfers in the last 30 days." />

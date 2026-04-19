@@ -287,7 +287,7 @@ export type BridgeBridger = {
   id: string;
   sender: string;
   totalSentCount: number;
-  totalSentUsd: string;
+  totalSentUsd: string | null;
   sourceChainsUsed: string; // JSON array of chainIds
   tokensUsed: string; // JSON array of token symbols
   providersUsed: string; // JSON array of providers
@@ -307,6 +307,6 @@ export type BridgeDailySnapshot = {
   cancelledCount: number;
   sentVolume: string;
   deliveredVolume: string;
-  sentUsdValue: string;
+  sentUsdValue: string | null;
   updatedAt: string;
 };
