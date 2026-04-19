@@ -36,8 +36,12 @@ export function computeWormholeStatus(
   if (t.cancelledTimestamp) return "CANCELLED";
   if (t.failedReason) return "FAILED";
   if (t.deliveredBlock) return "DELIVERED";
-  if (t.attestationCount > 0) return "ATTESTED";
+  // QUEUED_INBOUND must win over ATTESTED: `MessageAttestedTo` fires on dest
+  // before `InboundTransferQueued`, so a rate-limited inbound transfer always
+  // has attestationCount > 0 by the time it's queued. Ordering ATTESTED first
+  // would make the queue state unreachable.
   if (d?.inboundQueuedTimestamp) return "QUEUED_INBOUND";
+  if (t.attestationCount > 0) return "ATTESTED";
   if (t.sentBlock) return "SENT";
   return "PENDING";
 }

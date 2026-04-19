@@ -58,18 +58,19 @@ function BridgeFlowsContent() {
   const deliveredOnPage = transfers.filter(
     (t) => t.status === "DELIVERED" && t.deliveredTimestamp,
   );
+  // Avg deliver time needs BOTH timestamps; dest-first transfers can appear
+  // as DELIVERED while sentTimestamp is still null (source event not yet
+  // indexed). Exclude them from both numerator and denominator.
+  const deliveredWithSend = deliveredOnPage.filter((t) => t.sentTimestamp);
 
   let avgTimeToDeliverSec: number | null = null;
-  if (deliveredOnPage.length > 0) {
-    const total = deliveredOnPage.reduce((acc, t) => {
-      const sent = t.sentTimestamp ? Number(t.sentTimestamp) : null;
-      const delivered = t.deliveredTimestamp
-        ? Number(t.deliveredTimestamp)
-        : null;
-      if (sent === null || delivered === null) return acc;
+  if (deliveredWithSend.length > 0) {
+    const total = deliveredWithSend.reduce((acc, t) => {
+      const sent = Number(t.sentTimestamp);
+      const delivered = Number(t.deliveredTimestamp);
       return acc + Math.max(0, delivered - sent);
     }, 0);
-    avgTimeToDeliverSec = total / deliveredOnPage.length;
+    avgTimeToDeliverSec = total / deliveredWithSend.length;
   }
 
   const uniqueSendersOnPage = new Set(
@@ -134,7 +135,7 @@ function BridgeFlowsContent() {
           subtitle={
             avgTimeToDeliverSec === null
               ? undefined
-              : `over ${deliveredOnPage.length} recent transfers`
+              : `over ${deliveredWithSend.length} recent transfers`
           }
         />
       </section>

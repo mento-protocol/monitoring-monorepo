@@ -258,10 +258,30 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
   );
   if (!mgr) return;
 
-  const pendingId = `${chainId}-${event.transaction.hash.toLowerCase()}`;
-  const pending = await (context as HandlerContext).WormholeTransferPending.get(
-    pendingId,
-  );
+  // Pair with the TransferSentDetailed row written earlier in the same tx.
+  // Key by logIndex so multiple sends in one tx don't collide. For Mento's
+  // current single-transceiver NTT setup the layout is deterministic:
+  //   N   TransferSent (6-arg)
+  //   N+1 SendTransceiverMessage
+  //   N+2 TransferSent (digest)  ← this event
+  // If a second transceiver is ever registered, extend the offsets list.
+  const txHash = event.transaction.hash.toLowerCase();
+  const digestLogIndex = event.logIndex;
+  let pending: Awaited<
+    ReturnType<HandlerContext["WormholeTransferPending"]["get"]>
+  > = undefined;
+  let pendingId = "";
+  for (const offset of [2, 3, 4]) {
+    const candidateId = `${chainId}-${txHash}-${digestLogIndex - offset}`;
+    const row = await (context as HandlerContext).WormholeTransferPending.get(
+      candidateId,
+    );
+    if (row) {
+      pending = row;
+      pendingId = candidateId;
+      break;
+    }
+  }
 
   // Snapshot the prior BridgeTransfer BEFORE upserting so we can detect the
   // destination-first race: if dest already delivered this digest before we
@@ -313,41 +333,46 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
 
     const destChainId = wormholeToEvmChainId(pending.recipientWormholeChainId);
     if (destChainId !== null && pending.amount) {
-      await updateDailySnapshot(context as HandlerContext, {
-        blockTimestamp: ts,
-        tokenSymbol: mgr.tokenSymbol,
-        sourceChainId: chainId,
-        destChainId,
-        sentDelta: { count: 1, volume: pending.amount },
-      });
-      // Catch-up: if the destination event already arrived first, the
-      // TransferRedeemed handler skipped the delivered rollup because amount
-      // wasn't known yet. Apply it now, bucketed on the delivery day so the
-      // snapshot's "delivered on day D" semantics stay correct.
-      if (
-        priorTransfer?.deliveredBlock !== undefined &&
-        priorTransfer?.deliveredBlock !== null &&
-        priorTransfer.deliveredTimestamp !== undefined &&
-        priorTransfer.deliveredTimestamp !== null
-      ) {
+      // Replay-idempotent: only apply the SENT rollup on the first-time
+      // transition (priorTransfer had no sentBlock yet). On a reorg/restart
+      // replay priorTransfer.sentBlock is already set, so we skip.
+      const firstTimeSent =
+        priorTransfer?.sentBlock == null || priorTransfer.sentBlock === 0n;
+      if (firstTimeSent) {
         await updateDailySnapshot(context as HandlerContext, {
-          blockTimestamp: priorTransfer.deliveredTimestamp,
+          blockTimestamp: ts,
+          tokenSymbol: mgr.tokenSymbol,
+          sourceChainId: chainId,
+          destChainId,
+          sentDelta: { count: 1, volume: pending.amount },
+        });
+        // BridgeBridger is also a monotonic rollup; same replay guard. Also
+        // skip when tx.from was missing — would create a phantom "" sender
+        // row that aggregates unrelated transfers.
+        if (pending.sender) {
+          await updateBridger(context as HandlerContext, {
+            sender: pending.sender,
+            sourceChainId: chainId,
+            tokenSymbol: mgr.tokenSymbol,
+            blockTimestamp: ts,
+          });
+        }
+      }
+      // Dest-first catch-up: fire the delivered rollup only on first-time
+      // transition (delivered block known, but amount/source weren't until
+      // now). priorTransfer.amount == null is the tight invariant — on replay
+      // it's already set, so this branch doesn't fire.
+      const needsDeliveredCatchUp =
+        priorTransfer?.deliveredBlock != null &&
+        priorTransfer?.deliveredTimestamp != null &&
+        priorTransfer?.amount == null;
+      if (needsDeliveredCatchUp) {
+        await updateDailySnapshot(context as HandlerContext, {
+          blockTimestamp: priorTransfer!.deliveredTimestamp!,
           tokenSymbol: mgr.tokenSymbol,
           sourceChainId: chainId,
           destChainId,
           deliveredDelta: { count: 1, volume: pending.amount },
-        });
-      }
-      // Skip BridgeBridger update when tx.from was missing — would create a
-      // phantom "" sender row that aggregates unrelated transfers. In practice
-      // Envio HyperSync always supplies tx.from, but the type allows undefined
-      // and an empty-string primary key would silently corrupt the rollup.
-      if (pending.sender) {
-        await updateBridger(context as HandlerContext, {
-          sender: pending.sender,
-          sourceChainId: chainId,
-          tokenSymbol: mgr.tokenSymbol,
-          blockTimestamp: ts,
         });
       }
     }
@@ -359,13 +384,17 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
  *   uint16 recipientChain, uint64 msgSequence) — 6-arg variant. Fires FIRST in the tx.
  *
  * We can't key by digest yet (unknown until the 1-arg variant fires), so stash
- * the payload in WormholeTransferPending keyed by (chainId, txHash). The 1-arg
- * handler above merges and deletes the pending row.
+ * the payload in WormholeTransferPending keyed by (chainId, txHash, logIndex).
+ * logIndex is needed because a single tx can (in principle — via a wrapper
+ * contract) emit multiple TransferSent pairs; keying only by txHash would
+ * cause later sends to overwrite earlier pending rows and join the wrong
+ * payload to the wrong digest. The matching digest handler walks backward
+ * a few logIndex offsets to find this row.
  */
 WormholeNttManager.TransferSentDetailed.handler(async ({ event, context }) => {
   const p = event.params;
   const chainId = event.chainId;
-  const pendingId = `${chainId}-${event.transaction.hash.toLowerCase()}`;
+  const pendingId = `${chainId}-${event.transaction.hash.toLowerCase()}-${event.logIndex}`;
   (context as HandlerContext).WormholeTransferPending.set({
     id: pendingId,
     chainId,
@@ -394,6 +423,17 @@ WormholeNttManager.TransferRedeemed.handler(async ({ event, context }) => {
     BigInt(event.block.timestamp),
   );
   const ts = BigInt(event.block.timestamp);
+  const id = buildTransferId(PROVIDER, digest);
+
+  // Snapshot prior state before upserting so we can gate the delivered rollup
+  // on the first-time SENT→DELIVERED transition. Replay/reorg would otherwise
+  // double-count (counter entities are monotonic).
+  const priorTransfer = await (context as HandlerContext).BridgeTransfer.get(
+    id,
+  );
+  const alreadyDelivered =
+    priorTransfer?.deliveredBlock != null &&
+    priorTransfer.deliveredBlock !== 0n;
 
   const delta: Record<string, unknown> = {
     destChainId: chainId,
@@ -417,6 +457,7 @@ WormholeNttManager.TransferRedeemed.handler(async ({ event, context }) => {
   );
 
   if (
+    !alreadyDelivered &&
     mgr &&
     transfer.sourceChainId !== undefined &&
     transfer.sourceChainId !== null &&
