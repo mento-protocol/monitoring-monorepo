@@ -46,26 +46,29 @@ export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
   }
 `;
 
-export const BRIDGE_TRANSFER_COUNT = /* GraphQL */ `
-  query BridgeTransferCount($after: numeric!) {
-    BridgeTransfer_aggregate(where: { firstSeenAt: { _gte: $after } }) {
-      aggregate {
-        count
-      }
+// 30d transfer count: aggregates are disabled on Envio hosted Hasura, so we
+// sum BridgeDailySnapshot.sentCount across the window instead. Cheap,
+// indexer-pre-rolled, and caps at 1000 snapshot rows (days × providers ×
+// tokens × routes) which is orders of magnitude under the row limit for any
+// realistic window.
+export const BRIDGE_TRANSFER_COUNT_SNAPSHOTS = /* GraphQL */ `
+  query BridgeTransferCountSnapshots($afterDate: numeric!) {
+    BridgeDailySnapshot(where: { date: { _gte: $afterDate } }, limit: 1000) {
+      sentCount
     }
   }
 `;
 
-// Pending transfers: sent/attested but not yet delivered. Separate aggregate
-// so the KPI tile reflects the entire indexed state (not only the 25-row
-// table page). Status is authoritative — no time window needed; stuck
-// transfers surface via the STUCK overlay in the table row itself.
-export const BRIDGE_PENDING_COUNT = /* GraphQL */ `
-  query BridgePendingCount {
-    BridgeTransfer_aggregate(where: { status: { _in: ["SENT", "ATTESTED"] } }) {
-      aggregate {
-        count
-      }
+// Pending transfers: sent/attested but not yet delivered. No aggregate
+// support; paginate IDs and count client-side. Capped at 1000 (if we ever
+// hit that it's a major bridge incident — surface a warning in the UI).
+export const BRIDGE_PENDING_IDS = /* GraphQL */ `
+  query BridgePendingIds {
+    BridgeTransfer(
+      where: { status: { _in: ["SENT", "ATTESTED"] } }
+      limit: 1000
+    ) {
+      id
     }
   }
 `;

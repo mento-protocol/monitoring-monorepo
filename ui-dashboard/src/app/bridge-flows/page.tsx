@@ -4,8 +4,8 @@ import { Suspense } from "react";
 import { useGQL } from "@/lib/graphql";
 import {
   BRIDGE_TRANSFERS_WINDOW,
-  BRIDGE_TRANSFER_COUNT,
-  BRIDGE_PENDING_COUNT,
+  BRIDGE_TRANSFER_COUNT_SNAPSHOTS,
+  BRIDGE_PENDING_IDS,
 } from "@/lib/bridge-queries";
 import {
   deriveBridgeStatus,
@@ -41,19 +41,35 @@ function BridgeFlowsContent() {
     { limit: PAGE_LIMIT, offset: 0, after: afterSeconds },
   );
 
+  // Bridge count via snapshot sum — aggregates are disabled on Envio hosted
+  // Hasura, so we can't `BridgeTransfer_aggregate`. BridgeDailySnapshot is
+  // pre-rolled in the indexer and fits easily under the 1000-row cap.
+  // `date` is day-bucketed (ts / 86400 * 86400), so floor `afterSeconds` to
+  // the corresponding day or we miss the bucket straddling the cutoff.
+  const SECONDS_PER_DAY = 86400;
+  const afterDayBucket = afterSeconds - (afterSeconds % SECONDS_PER_DAY);
   const countResult = useGQL<{
-    BridgeTransfer_aggregate: { aggregate: { count: number } };
-  }>(BRIDGE_TRANSFER_COUNT, { after: afterSeconds });
+    BridgeDailySnapshot: Array<{ sentCount: number }>;
+  }>(BRIDGE_TRANSFER_COUNT_SNAPSHOTS, {
+    afterDate: afterDayBucket,
+  });
 
-  const pendingResult = useGQL<{
-    BridgeTransfer_aggregate: { aggregate: { count: number } };
-  }>(BRIDGE_PENDING_COUNT);
+  // Pending: paginate IDs and count client-side (capped at 1000 by the query).
+  // A count of 1000 is a wire signal of pagination cap — surface as "1,000+".
+  const pendingResult = useGQL<{ BridgeTransfer: Array<{ id: string }> }>(
+    BRIDGE_PENDING_IDS,
+  );
 
   const transfers = transfersResult.data?.BridgeTransfer ?? [];
   const count30d =
-    countResult.data?.BridgeTransfer_aggregate?.aggregate?.count ?? null;
+    countResult.data?.BridgeDailySnapshot?.reduce(
+      (sum, s) => sum + (s.sentCount ?? 0),
+      0,
+    ) ?? null;
+  const pendingRows = pendingResult.data?.BridgeTransfer?.length ?? null;
   const pendingCount =
-    pendingResult.data?.BridgeTransfer_aggregate?.aggregate?.count ?? null;
+    pendingRows === null ? null : pendingRows >= 1000 ? 1000 : pendingRows;
+  const pendingCapped = pendingRows !== null && pendingRows >= 1000;
 
   // KPIs scoped to the current table page (25 rows). Aggregates across the
   // full 30-day window (unique-sender count, avg deliver time) would require
@@ -100,7 +116,13 @@ function BridgeFlowsContent() {
         />
         <Tile
           label="Pending"
-          value={pendingCount === null ? "…" : pendingCount.toLocaleString()}
+          value={
+            pendingCount === null
+              ? "…"
+              : pendingCapped
+                ? "1,000+"
+                : pendingCount.toLocaleString()
+          }
           subtitle={
             pendingCount !== null && pendingCount > 0
               ? "Sent, awaiting delivery"
