@@ -223,3 +223,93 @@ export type OlsLiquidityEvent = {
   blockNumber: string;
   blockTimestamp: string;
 };
+
+// Bridge Flows — generic (provider-agnostic) core
+
+export type BridgeProvider = "WORMHOLE";
+
+export type BridgeStatus =
+  | "PENDING"
+  | "SENT"
+  | "ATTESTED"
+  | "DELIVERED"
+  | "QUEUED_OUTBOUND"
+  | "QUEUED_INBOUND"
+  | "CANCELLED"
+  | "FAILED";
+
+// Derived client-side overlay: a SENT or ATTESTED transfer older than 24h.
+export type BridgeStatusOverlay = BridgeStatus | "STUCK";
+
+export type BridgeTransfer = {
+  id: string; // "{provider}-{providerMessageId}"
+  provider: BridgeProvider;
+  providerMessageId: string;
+  status: BridgeStatus;
+  tokenSymbol: string;
+  tokenAddress: string;
+  tokenDecimals: number;
+  sourceChainId: number | null;
+  sourceContract: string | null;
+  destChainId: number | null;
+  destContract: string | null;
+  sender: string | null;
+  recipient: string | null;
+  amount: string | null; // BigInt serialized as decimal string
+  sentBlock: string | null;
+  sentTimestamp: string | null;
+  sentTxHash: string | null;
+  attestationCount: number;
+  firstAttestedTimestamp: string | null;
+  lastAttestedTimestamp: string | null;
+  deliveredBlock: string | null;
+  deliveredTimestamp: string | null;
+  deliveredTxHash: string | null;
+  cancelledTimestamp: string | null;
+  failedReason: string | null;
+  usdPriceAtSend: string | null;
+  usdValueAtSend: string | null;
+  firstSeenAt: string;
+  lastUpdatedAt: string;
+};
+
+export type WormholeTransferDetail = {
+  id: string;
+  digest: string;
+  msgSequence: string | null;
+  sourceWormholeChainId: number | null;
+  destWormholeChainId: number | null;
+  refundAddress: string | null;
+  fee: string | null;
+  outboundQueuedSequence: string | null;
+  inboundQueuedTimestamp: string | null;
+  rateLimitedCurrentCapacity: string | null;
+};
+
+export type BridgeBridger = {
+  id: string;
+  sender: string;
+  totalSentCount: number;
+  totalSentUsd: string;
+  sourceChainsUsed: string; // JSON array of chainIds
+  tokensUsed: string; // JSON array of token symbols
+  providersUsed: string; // JSON array of providers
+  firstSeenAt: string;
+  lastSeenAt: string;
+};
+
+export type BridgeDailySnapshot = {
+  id: string;
+  date: string;
+  provider: BridgeProvider;
+  tokenSymbol: string;
+  sourceChainId: number;
+  destChainId: number;
+  sentCount: number;
+  deliveredCount: number;
+  cancelledCount: number;
+  sentVolume: string;
+  deliveredVolume: string;
+  sentUsdValue: string;
+  updatedAt: string;
+};
