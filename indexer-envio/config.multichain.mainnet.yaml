@@ -112,9 +112,9 @@ contracts:
         name: TransferSentDigest
       - event: TransferRedeemed(bytes32 indexed digest)
       - event: MessageAttestedTo(bytes32 digest, address transceiver, uint8 index)
-      - event: OutboundTransferQueued(uint64 queueSequence)
-      - event: OutboundTransferRateLimited(address indexed sender, uint64 sequence, uint256 amount, uint256 currentCapacity)
-      - event: OutboundTransferCancelled(uint256 sequence, address recipient, uint256 amount)
+      # Outbound queue/rate-limit/cancel events fire with only a sequence, not
+      # a digest, so they cannot be correlated to BridgeTransfer without a
+      # sequence→digest lookup. Deferred until that telemetry is needed.
       - event: InboundTransferQueued(bytes32 digest)
 
   - name: WormholeTransceiver

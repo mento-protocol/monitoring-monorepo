@@ -233,7 +233,6 @@ export type BridgeStatus =
   | "SENT"
   | "ATTESTED"
   | "DELIVERED"
-  | "QUEUED_OUTBOUND"
   | "QUEUED_INBOUND"
   | "CANCELLED"
   | "FAILED";
@@ -281,9 +280,7 @@ export type WormholeTransferDetail = {
   destWormholeChainId: number | null;
   refundAddress: string | null;
   fee: string | null;
-  outboundQueuedSequence: string | null;
   inboundQueuedTimestamp: string | null;
-  rateLimitedCurrentCapacity: string | null;
 };
 
 export type BridgeBridger = {

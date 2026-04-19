@@ -128,9 +128,7 @@ export const WORMHOLE_TRANSFER_DETAIL_BY_ID = /* GraphQL */ `
       destWormholeChainId
       refundAddress
       fee
-      outboundQueuedSequence
       inboundQueuedTimestamp
-      rateLimitedCurrentCapacity
     }
   }
 `;

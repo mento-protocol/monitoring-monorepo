@@ -439,10 +439,9 @@ type WormholeTransferDetail {
   destWormholeChainId: Int
   refundAddress: String
   fee: BigInt # Wormhole delivery fee, native token (not USD)
-  # NTT rate-limiter state (Wormhole-specific)
-  outboundQueuedSequence: BigInt
+  # Dest-side rate-limit queue. Source-side queue events carry only a sequence,
+  # not a digest, so they cannot be correlated to a BridgeTransfer in v1.
   inboundQueuedTimestamp: BigInt
-  rateLimitedCurrentCapacity: BigInt
 }
 
 type WormholeTransferPending {

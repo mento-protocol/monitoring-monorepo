@@ -9,11 +9,8 @@
  */
 import { WormholeTransceiver } from "generated";
 import type { BridgeTransfer, WormholeTransferDetail } from "generated";
-import {
-  buildTransferId,
-  bytes32ToAddress,
-  defaultBridgeTransfer,
-} from "../../bridge";
+import { buildTransferId, defaultBridgeTransfer } from "../../bridge";
+import { bytes32ToAddress, defaultWormholeDetail } from "../../wormhole/detail";
 import { computeWormholeStatus } from "../../wormhole/status";
 import { wormholeToEvmChainId } from "../../wormhole/chainIds";
 
@@ -32,18 +29,9 @@ WormholeTransceiver.ReceivedMessage.handler(async ({ event, context }) => {
       providerMessageId: p.digest,
       blockTimestamp: ts,
     });
-  const priorDetail = (await context.WormholeTransferDetail.get(id)) ?? {
-    id,
-    digest: p.digest.toLowerCase(),
-    msgSequence: undefined,
-    sourceWormholeChainId: undefined,
-    destWormholeChainId: undefined,
-    refundAddress: undefined,
-    fee: undefined,
-    outboundQueuedSequence: undefined,
-    inboundQueuedTimestamp: undefined,
-    rateLimitedCurrentCapacity: undefined,
-  };
+  const priorDetail =
+    (await context.WormholeTransferDetail.get(id)) ??
+    defaultWormholeDetail(id, p.digest);
 
   const emitterChainId = Number(p.emitterChainId);
   const sourceEvm = wormholeToEvmChainId(emitterChainId);

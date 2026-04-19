@@ -18,13 +18,13 @@ import type {
 } from "generated";
 import {
   buildTransferId,
-  bytes32ToAddress,
   defaultBridgeTransfer,
   defaultBridger,
   defaultSnapshot,
   snapshotId,
   appendJsonSet,
 } from "../../bridge";
+import { bytes32ToAddress, defaultWormholeDetail } from "../../wormhole/detail";
 import { computeWormholeStatus } from "../../wormhole/status";
 import { wormholeToEvmChainId } from "../../wormhole/chainIds";
 import { findByNttManager } from "../../wormhole/nttAddresses";
@@ -144,18 +144,9 @@ async function upsertTransferByDigest(
       providerMessageId: digest,
       blockTimestamp,
     });
-  const priorDetail = (await context.WormholeTransferDetail.get(id)) ?? {
-    id,
-    digest: digest.toLowerCase(),
-    msgSequence: undefined,
-    sourceWormholeChainId: undefined,
-    destWormholeChainId: undefined,
-    refundAddress: undefined,
-    fee: undefined,
-    outboundQueuedSequence: undefined,
-    inboundQueuedTimestamp: undefined,
-    rateLimitedCurrentCapacity: undefined,
-  };
+  const priorDetail =
+    (await context.WormholeTransferDetail.get(id)) ??
+    defaultWormholeDetail(id, digest);
 
   const nextDetail = {
     ...priorDetail,
@@ -458,7 +449,19 @@ WormholeNttManager.MessageAttestedTo.handler(async ({ event, context }) => {
     blockTimestamp: ts,
     txHash: event.transaction.hash,
   };
+  // Idempotency: if the same event is replayed (restart, reorg), the
+  // BridgeAttestation row's unique id guards the attestation table — but the
+  // counter on BridgeTransfer would double-count. Probe first and skip the
+  // counter bump when the attestation already exists.
+  const existingAttestation = await (
+    context as unknown as {
+      BridgeAttestation: {
+        get: (id: string) => Promise<BridgeAttestation | undefined>;
+      };
+    }
+  ).BridgeAttestation.get(attestation.id);
   (context as HandlerContext).BridgeAttestation.set(attestation);
+  if (existingAttestation) return;
 
   const prior = await (context as HandlerContext).BridgeTransfer.get(id);
   const count = (prior?.attestationCount ?? 0) + 1;
@@ -473,19 +476,6 @@ WormholeNttManager.MessageAttestedTo.handler(async ({ event, context }) => {
     },
     {},
   );
-});
-
-WormholeNttManager.OutboundTransferQueued.handler(async () => {
-  // Queue status is derived client-side from detail fields when they're set via
-  // other events; v1 does not persist queue-only state without a digest.
-});
-
-WormholeNttManager.OutboundTransferRateLimited.handler(async () => {
-  // Rate-limited capacity is informational; not persisted in v1.
-});
-
-WormholeNttManager.OutboundTransferCancelled.handler(async () => {
-  // Cancellation path is rare and would need sequence→digest lookup; deferred.
 });
 
 WormholeNttManager.InboundTransferQueued.handler(async ({ event, context }) => {

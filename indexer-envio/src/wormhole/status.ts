@@ -1,11 +1,15 @@
 /**
  * Wormhole-specific status computer.
  *
- * Writes the generic `BridgeTransfer.status` field by reading both the generic
- * transfer fields and the Wormhole-specific detail fields. Ordered from latest
- * lifecycle stage backward — a fully delivered transfer has seen all prior
- * stages (rate-limit, queue, sent, attested); checking earlier stages first
- * would pin the status at an intermediate value.
+ * Writes the generic `BridgeTransfer.status` field by reading the generic
+ * transfer fields and (only for QUEUED_INBOUND) the Wormhole-specific detail.
+ * Ordered from latest lifecycle stage backward — a fully delivered transfer
+ * has seen all prior stages; checking earlier stages first would pin the
+ * status at an intermediate value.
+ *
+ * Source-side queue/rate-limit events are not indexed (they carry only a
+ * sequence, not a digest — see config.multichain.mainnet.yaml). QUEUED_OUTBOUND
+ * is intentionally absent from the enum until that correlation is built.
  */
 import type { BridgeTransfer, WormholeTransferDetail } from "generated";
 
@@ -14,7 +18,6 @@ export type BridgeStatus =
   | "SENT"
   | "ATTESTED"
   | "DELIVERED"
-  | "QUEUED_OUTBOUND"
   | "QUEUED_INBOUND"
   | "CANCELLED"
   | "FAILED";
@@ -28,10 +31,7 @@ export function computeWormholeStatus(
     | "attestationCount"
     | "sentBlock"
   >,
-  d: Pick<
-    WormholeTransferDetail,
-    "inboundQueuedTimestamp" | "outboundQueuedSequence"
-  > | null,
+  d: Pick<WormholeTransferDetail, "inboundQueuedTimestamp"> | null,
 ): BridgeStatus {
   if (t.cancelledTimestamp) return "CANCELLED";
   if (t.failedReason) return "FAILED";
@@ -39,6 +39,5 @@ export function computeWormholeStatus(
   if (t.attestationCount > 0) return "ATTESTED";
   if (d?.inboundQueuedTimestamp) return "QUEUED_INBOUND";
   if (t.sentBlock) return "SENT";
-  if (d?.outboundQueuedSequence) return "QUEUED_OUTBOUND";
   return "PENDING";
 }

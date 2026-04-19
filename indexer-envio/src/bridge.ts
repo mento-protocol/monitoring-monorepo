@@ -25,22 +25,6 @@ export function buildTransferId(
   return `${provider.toLowerCase()}-${providerMessageId.toLowerCase()}`;
 }
 
-const ADDRESS_ZERO_PADDING = "0".repeat(24);
-
-/**
- * Decode a Wormhole-style bytes32 recipient to an EVM address. Returns the
- * raw bytes32 (lowercase) when upper 12 bytes are non-zero — indicating a
- * non-EVM recipient (e.g., Solana).
- */
-export function bytes32ToAddress(b32: string): string {
-  const hex = b32.toLowerCase().replace(/^0x/, "");
-  if (hex.length !== 64) return b32.toLowerCase();
-  const upper = hex.slice(0, 24);
-  const lower = hex.slice(24);
-  if (upper !== ADDRESS_ZERO_PADDING) return `0x${hex}`;
-  return `0x${lower}`;
-}
-
 /** Default-fill a BridgeTransfer row when first created via any handler. */
 export function defaultBridgeTransfer(args: {
   id: string;
