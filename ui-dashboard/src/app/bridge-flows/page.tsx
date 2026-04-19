@@ -27,7 +27,11 @@ import {
   truncateAddress,
 } from "@/lib/format";
 import { NETWORKS, networkIdForChainId } from "@/lib/networks";
-import { tokenToUSD, type OracleRateMap } from "@/lib/tokens";
+import {
+  explorerAddressUrl,
+  tokenToUSD,
+  type OracleRateMap,
+} from "@/lib/tokens";
 import type { SortDir } from "@/lib/table-sort";
 import type { BridgeTransfer } from "@/lib/types";
 
@@ -392,15 +396,6 @@ function TransfersTable({
             Token
           </SortableTh>
           <SortableTh
-            sortKey="amount"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-            align="right"
-          >
-            Amount
-          </SortableTh>
-          <SortableTh
             sortKey="amountUsd"
             activeSortKey={sortKey}
             sortDir={sortDir}
@@ -408,6 +403,15 @@ function TransfersTable({
             align="right"
           >
             Amount (USD)
+          </SortableTh>
+          <SortableTh
+            sortKey="amount"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+            align="right"
+          >
+            Amount
           </SortableTh>
           <SortableTh
             sortKey="sender"
@@ -432,7 +436,7 @@ function TransfersTable({
             onSort={handleSort}
             align="right"
           >
-            Age
+            Time
           </SortableTh>
         </tr>
       </thead>
@@ -445,6 +449,13 @@ function TransfersTable({
           // as opposed to the indexer-pinned "at send" value. Once the indexer
           // backfills usdValueAtSend for all rows, this branch rarely fires.
           const usdFromLiveRate = usd !== null && !t.usdValueAtSend;
+          // Flag cross-wallet bridges (sender ≠ receiver). Self-bridges are
+          // common and unremarkable; cross-wallet ones are more interesting
+          // (third-party flows, contract sinks) — worth visually popping.
+          const sameParties =
+            !!t.sender &&
+            !!t.recipient &&
+            t.sender.toLowerCase() === t.recipient.toLowerCase();
           return (
             <tr
               key={t.id}
@@ -462,13 +473,12 @@ function TransfersTable({
               <td className="px-2 sm:px-4 py-2 sm:py-3">
                 <BridgeStatusBadge status={status} />
               </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm font-mono text-slate-200">
-                {t.tokenSymbol}
-              </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
-                {amountTokens !== null
-                  ? formatWei(t.amount!, t.tokenDecimals ?? 18, 2)
-                  : "—"}
+              <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm">
+                <TokenCell
+                  symbol={t.tokenSymbol}
+                  address={t.tokenAddress}
+                  chainId={t.sourceChainId ?? t.destChainId}
+                />
               </td>
               <td
                 className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right"
@@ -482,10 +492,18 @@ function TransfersTable({
                   ? "—"
                   : `${usdFromLiveRate ? "~" : ""}${formatUSD(usd)}`}
               </td>
+              <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
+                {amountTokens !== null
+                  ? formatWei(t.amount!, t.tokenDecimals ?? 18, 2)
+                  : "—"}
+              </td>
               <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm">
                 <SenderCell sender={t.sender} chainId={t.sourceChainId} />
               </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm">
+              <td
+                className={`px-2 sm:px-4 py-2 sm:py-3 text-sm ${sameParties ? "opacity-50" : ""}`}
+                title={sameParties ? "Same as sender" : undefined}
+              >
                 <SenderCell sender={t.recipient} chainId={t.destChainId} />
               </td>
               <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-400 font-mono text-right whitespace-nowrap">
@@ -576,6 +594,43 @@ function RouteCell({
 
 function Dash() {
   return <span className="text-slate-600">{"\u2014"}</span>;
+}
+
+function TokenCell({
+  symbol,
+  address,
+  chainId,
+}: {
+  symbol: string;
+  address: string;
+  chainId: number | null;
+}) {
+  // Prefer the source chain; fall back to dest when source is missing (the
+  // destination-first race before the source TransferSent is indexed).
+  const net = chainId
+    ? NETWORKS[networkIdForChainId(chainId) ?? "celo-mainnet"]
+    : null;
+  if (
+    !net ||
+    !address ||
+    address === "0x0000000000000000000000000000000000000000"
+  ) {
+    return <span className="font-mono text-slate-200">{symbol}</span>;
+  }
+  return (
+    <a
+      href={explorerAddressUrl(net, address)}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={address}
+      className="font-mono text-slate-200 hover:text-indigo-300 transition-colors"
+    >
+      {symbol}
+      <span className="ml-1 text-slate-600" aria-hidden="true">
+        {"\u2197"}
+      </span>
+    </a>
+  );
 }
 
 function SenderCell({
