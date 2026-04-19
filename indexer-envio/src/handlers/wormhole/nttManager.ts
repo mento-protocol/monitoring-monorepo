@@ -259,19 +259,20 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
   if (!mgr) return;
 
   // Pair with the TransferSentDetailed row written earlier in the same tx.
-  // Key by logIndex so multiple sends in one tx don't collide. For Mento's
-  // current single-transceiver NTT setup the layout is deterministic:
-  //   N   TransferSent (6-arg)
-  //   N+1 SendTransceiverMessage
-  //   N+2 TransferSent (digest)  ← this event
-  // If a second transceiver is ever registered, extend the offsets list.
+  // Key by logIndex so multiple sends in one tx don't collide. The 6-arg
+  // fires first; the digest fires later with an arbitrary number of
+  // intermediate logs from the Wormhole core bridge + transceiver between
+  // them (empirically observed up to ~50 offsets on Monad). Walk backward
+  // from the digest logIndex until we find the most recent pending row for
+  // this tx.
   const txHash = event.transaction.hash.toLowerCase();
   const digestLogIndex = event.logIndex;
   let pending: Awaited<
     ReturnType<HandlerContext["WormholeTransferPending"]["get"]>
   > = undefined;
   let pendingId = "";
-  for (const offset of [2, 3, 4]) {
+  const maxOffsetSearch = Math.min(digestLogIndex, 256); // cap just in case
+  for (let offset = 1; offset <= maxOffsetSearch; offset++) {
     const candidateId = `${chainId}-${txHash}-${digestLogIndex - offset}`;
     const row = await (context as HandlerContext).WormholeTransferPending.get(
       candidateId,
