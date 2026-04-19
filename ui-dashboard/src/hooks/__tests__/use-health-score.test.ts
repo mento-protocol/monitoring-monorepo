@@ -16,6 +16,22 @@ vi.mock("@/lib/graphql", () => ({
   useGQL: (...args: unknown[]) => useGQLMock(...args),
 }));
 
+// Neutralise weekend arithmetic. Synthetic test windows are anchored to
+// `Date.now()`; when the real calendar lands on a weekend, the FX-weekend
+// subtraction inside `tradingSecondsInRange` shrinks those windows enough
+// to zero out the denominator and force `score === null`, flipping this
+// suite red on Saturdays/Sundays.
+vi.mock("@/lib/weekend", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/weekend")>("@/lib/weekend");
+  return {
+    ...actual,
+    isWeekend: () => false,
+    weekendOverlapSeconds: () => 0,
+    tradingSecondsInRange: (start: number, end: number) => end - start,
+  };
+});
+
 import { useHealthScore, type HealthScoreResult } from "../use-health-score";
 
 // Mount a throwaway component that captures the hook's result into `captured`.

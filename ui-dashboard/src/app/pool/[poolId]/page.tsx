@@ -3,11 +3,13 @@
 import { AddressLink } from "@/components/address-link";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { KindBadge, SourceBadge } from "@/components/badges";
+import { ChainIcon } from "@/components/chain-icon";
 import { DeviationCell } from "@/components/pool-header/deviation-cell";
 import {
   HealthScoreInfoIcon,
   HealthScoreValue,
 } from "@/components/pool-header/health-score-value";
+import { LimitStatusValue } from "@/components/pool-header/limit-status-value";
 import { OraclePriceValue } from "@/components/pool-header/oracle-price-value";
 import { OracleStatusValue } from "@/components/pool-header/oracle-status-value";
 import { RebalanceStatusValue } from "@/components/pool-header/rebalance-status-value";
@@ -24,6 +26,8 @@ import { SenderCell } from "@/components/sender-cell";
 import { TagsCell } from "@/components/tags-cell";
 import { LiquidityChart } from "@/components/liquidity-chart";
 import { LpConcentrationChart } from "@/components/lp-concentration-chart";
+import { PoolTvlOverTimeChart } from "@/components/pool-tvl-over-time-chart";
+import { PoolVolumeOverTimeChart } from "@/components/pool-volume-over-time-chart";
 import { SnapshotChart } from "@/components/snapshot-chart";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
@@ -49,6 +53,7 @@ import { buildOrderBy } from "@/lib/table-sort";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import { useGQL } from "@/lib/graphql";
 import {
+  ALL_POOLS_WITH_HEALTH,
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
@@ -71,6 +76,8 @@ import {
 } from "@/lib/queries";
 import { Pagination } from "@/components/pagination";
 import {
+  buildOracleRateMap,
+  canPricePool,
   explorerAddressUrl,
   isFpmm,
   poolName,
@@ -116,6 +123,7 @@ const TABS = [
   "rebalances",
   "liquidity",
   "oracle",
+  "limits",
   "ols",
 ] as const;
 type Tab = (typeof TABS)[number];
@@ -127,6 +135,7 @@ const SEARCH_PARAM_BY_TAB: Record<Tab, string> = {
   rebalances: "rebalancesQ",
   liquidity: "liquidityQ",
   oracle: "oracleQ",
+  limits: "limitsQ",
   ols: "olsQ",
 };
 
@@ -293,11 +302,11 @@ function PoolDetail() {
     }
   }, [pool, poolLoading, poolErr, router]);
 
-  const { data: limitsData } = useGQL<{ TradingLimit: TradingLimit[] }>(
-    TRADING_LIMITS,
-    { poolId: normalizedPoolId },
-  );
+  const { data: limitsData, error: limitsError } = useGQL<{
+    TradingLimit: TradingLimit[];
+  }>(TRADING_LIMITS, { poolId: normalizedPoolId });
   const tradingLimits = limitsData?.TradingLimit ?? [];
+  const tradingLimitsError = limitsError !== undefined;
 
   const { data: deployData } = useGQL<{
     FactoryDeployment: { txHash: string }[];
@@ -307,6 +316,51 @@ function PoolDetail() {
   const { data: olsData, isLoading: olsLoading } = useGQL<{
     OlsPool: OlsPool[];
   }>(OLS_POOL, { poolId: normalizedPoolId });
+
+  // Non-FPMM pools have no snapshot history — skip the fetch to avoid a
+  // useless network round trip.
+  const fpmmPool = pool ? isFpmm(pool) : false;
+
+  // Lifted from SwapsTab so the sub-hero TVL chart can render independently of
+  // which tab is active. useGQL is SWR-based and dedupes by key + vars, so
+  // SwapsTab's identical query shares this response.
+  const {
+    data: dailySnapshotData,
+    error: dailySnapshotError,
+    isLoading: dailySnapshotLoading,
+  } = useGQL<{ PoolDailySnapshot: PoolSnapshot[] }>(
+    fpmmPool ? POOL_DAILY_SNAPSHOTS_CHART : null,
+    { poolId: normalizedPoolId },
+    SNAPSHOT_REFRESH_MS,
+  );
+  const dailySnapshots = dailySnapshotData?.PoolDailySnapshot ?? [];
+
+  // Non-USDm pairs (axlEUROC/EURm, etc.) need a rate map derived from all
+  // pools that have a USDm leg to convert their reserves/volume to USD.
+  // Without this the TVL and Volume charts render $0 for such pools.
+  // Skip the fetch entirely once we can prove the current pool is already
+  // USD-priceable with an empty rate map (USDm/USDC/USDT/AUSD legs) —
+  // avoids a permanent 5-min-refresh background query on the common case.
+  // Default to `false` while pool is still loading so USD-priceable pairs
+  // never kick off the request on first render. FX pairs serialize
+  // briefly behind the pool query, which is fine because charts are
+  // already gated behind `!pool` below.
+  const poolNeedsRates = pool ? !canPricePool(pool, network, new Map()) : false;
+  const { data: allPoolsData, error: allPoolsError } = useGQL<{ Pool: Pool[] }>(
+    poolNeedsRates ? ALL_POOLS_WITH_HEALTH : null,
+    { chainId: network.chainId },
+    SNAPSHOT_REFRESH_MS,
+  );
+  const allPools = useMemo(() => allPoolsData?.Pool ?? [], [allPoolsData]);
+  const rates = useMemo(
+    () => buildOracleRateMap(allPools, network),
+    [allPools, network],
+  );
+  // ratesLoading only fires for pools that actually need the fetch — a
+  // USD-pegged pair with its query disabled shouldn't block chart render.
+  const ratesLoading =
+    poolNeedsRates && allPoolsData === undefined && !allPoolsError;
+  const ratesError = allPoolsError !== undefined;
 
   // Return null while redirect is pending to avoid a transient error flash
   // and unnecessary error announcement for assistive tech. MUST sit below
@@ -347,11 +401,74 @@ function PoolDetail() {
         <ErrorBox message={`Pool ${normalizedPoolId} not found.`} />
       ) : (
         <>
-          <PoolHeader pool={pool} deployTxHash={deployTxHash} />
+          <PoolHeader
+            pool={pool}
+            deployTxHash={deployTxHash}
+            tradingLimits={tradingLimits}
+            tradingLimitsError={tradingLimitsError}
+          />
           <HealthPanel pool={pool} />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ReservesPanel pool={pool} />
-            <LimitPanel pool={pool} tradingLimits={tradingLimits} />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <PoolTvlOverTimeChart
+              pool={pool}
+              network={network}
+              snapshots={dailySnapshots}
+              // Gate every "waiting on data" state on `fpmmPool`. Non-FPMM
+              // pools skip both the snapshot and rate-map queries at the
+              // render layer — they go straight to the
+              // `historySupported={false}` branch, which shouldn't be
+              // masked by a loading skeleton or error copy driven by
+              // side queries that don't affect its output.
+              isLoading={
+                fpmmPool &&
+                (dailySnapshotLoading || (poolNeedsRates && ratesLoading))
+              }
+              // Rates-query failure only surfaces as chart error for pools
+              // that actually need the rate map (non-USD-pegged pairs) and
+              // that would render history if they could. USDm-leg pools
+              // keep rendering from the pool's own row without regard to
+              // ALL_POOLS_WITH_HEALTH.
+              hasError={
+                fpmmPool &&
+                (dailySnapshotError !== undefined ||
+                  (poolNeedsRates && ratesError))
+              }
+              rates={rates}
+              historySupported={fpmmPool}
+            />
+            <PoolVolumeOverTimeChart
+              pool={pool}
+              network={network}
+              snapshots={dailySnapshots}
+              // Gate every "waiting on data" state on `fpmmPool`. Non-FPMM
+              // pools skip both the snapshot and rate-map queries at the
+              // render layer — they go straight to the
+              // `historySupported={false}` branch, which shouldn't be
+              // masked by a loading skeleton or error copy driven by
+              // side queries that don't affect its output.
+              isLoading={
+                fpmmPool &&
+                (dailySnapshotLoading || (poolNeedsRates && ratesLoading))
+              }
+              // Rates-query failure only surfaces as chart error for pools
+              // that actually need the rate map (non-USD-pegged pairs) and
+              // that would render history if they could. USDm-leg pools
+              // keep rendering from the pool's own row without regard to
+              // ALL_POOLS_WITH_HEALTH.
+              hasError={
+                fpmmPool &&
+                (dailySnapshotError !== undefined ||
+                  (poolNeedsRates && ratesError))
+              }
+              rates={rates}
+              historySupported={fpmmPool}
+            />
+            <ReservesPanel
+              pool={pool}
+              rates={rates}
+              ratesLoading={poolNeedsRates && ratesLoading}
+              ratesError={poolNeedsRates && ratesError}
+            />
           </div>
         </>
       )}
@@ -378,8 +495,8 @@ function PoolDetail() {
             {getTabLabel(t)}
           </button>
         ))}
-        {/* Oracle tab manages its own page size — hide the global limit selector */}
-        {tab !== "oracle" && (
+        {/* Oracle tab manages its own page size; Limits has no paginated data */}
+        {tab !== "oracle" && tab !== "limits" && (
           <div className="ml-auto hidden sm:flex items-center">
             <LimitSelect
               id="tab-limit"
@@ -444,6 +561,13 @@ function PoolDetail() {
             onSearchChange={(value) => setTabSearch("providers", value)}
           />
         )}
+        {tab === "limits" && pool && (
+          <LimitPanel
+            pool={pool}
+            tradingLimits={tradingLimits}
+            hasError={tradingLimitsError}
+          />
+        )}
         {tab === "ols" && (
           <OlsTab
             poolId={normalizedPoolId}
@@ -463,9 +587,13 @@ function PoolDetail() {
 function PoolHeader({
   pool,
   deployTxHash,
+  tradingLimits,
+  tradingLimitsError = false,
 }: {
   pool: Pool;
   deployTxHash?: string;
+  tradingLimits: TradingLimit[];
+  tradingLimitsError?: boolean;
 }) {
   const { network } = useNetwork();
   const isVirtual = pool.source?.includes("virtual");
@@ -507,13 +635,11 @@ function PoolHeader({
           {titleSymbol(firstSym, firstAddr)}/
           {titleSymbol(secondSym, secondAddr)}
         </h1>
+        <ChainIcon network={network} size={20} />
         <SourceBadge source={pool.source} />
         <span className="text-sm">
-          <AddressLink address={poolContractAddress} />
+          <AddressLink address={poolContractAddress} readOnly />
         </span>
-        {/* `ml-auto` pushes "Created …" to the far edge so the title row
-            reads as `identity ← → metadata` rather than trailing ragged-left
-            after the address. */}
         {deployTxHash ? (
           <a
             href={`${network.explorerBaseUrl}/tx/${deployTxHash}`}
@@ -530,18 +656,13 @@ function PoolHeader({
           </span>
         )}
       </div>
-      {/* `justify-between` distributes any trailing slack on the row as
-          wider uniform gaps between cells, so the row spans edge-to-edge
-          instead of leaving whitespace at the right. Each text cell gets
-          `min-w-36` so the shortest one (Health Score) doesn't feel
-          squished against the left edge while long cells size to content. */}
       <dl className="flex flex-wrap justify-between gap-x-6 gap-y-4 text-sm">
         <Stat
           className="min-w-36"
           label={
             <span className="inline-flex items-center gap-1">
               Health Score
-              <HealthScoreInfoIcon />
+              <HealthScoreInfoIcon pool={pool} />
             </span>
           }
           value={
@@ -549,6 +670,17 @@ function PoolHeader({
               <span className="text-slate-500">—</span>
             ) : (
               <HealthScoreValue pool={pool} />
+            )
+          }
+        />
+        <Stat
+          className="min-w-36"
+          label="Oracle Price"
+          value={
+            isVirtual ? (
+              <span className="text-slate-500">—</span>
+            ) : (
+              <OraclePriceValue pool={pool} network={network} />
             )
           }
         />
@@ -564,14 +696,14 @@ function PoolHeader({
           }
         />
         <Stat
-          className="min-w-36"
-          label="Oracle Price"
+          className="min-w-52"
+          label="Trading Limits"
           value={
-            isVirtual ? (
-              <span className="text-slate-500">—</span>
-            ) : (
-              <OraclePriceValue pool={pool} network={network} />
-            )
+            <LimitStatusValue
+              pool={pool}
+              tradingLimits={tradingLimits}
+              hasError={tradingLimitsError}
+            />
           }
         />
         <Stat

@@ -82,6 +82,9 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
   const { network } = useNetwork();
   const { mutate } = useSWRConfig();
 
+  // Fetch for all sessions — the API returns `isPublic: true` labels for
+  // anonymous requests and full labels for authenticated ones. Gating on the
+  // client would hide public labels from logged-out users.
   const { data, error, isLoading } = useSWR<EntriesByChain>(
     SWR_KEY,
     fetchAllLabels,

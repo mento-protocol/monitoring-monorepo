@@ -2,7 +2,7 @@
 
 import type { Pool, TradingLimit } from "@/lib/types";
 import { LimitBadge } from "@/components/badges";
-import { computeLimitStatus } from "@/lib/health";
+import { computeLimitStatus, pressureColorClass } from "@/lib/health";
 import { tokenSymbol } from "@/lib/tokens";
 import { formatWei, TRADING_LIMITS_INTERNAL_DECIMALS } from "@/lib/format";
 import { useNetwork } from "@/components/network-provider";
@@ -13,6 +13,9 @@ interface PressureBarProps {
   netflow: string;
   limit: string;
   decimals: number;
+  /** Token symbol for screen-reader context — avoids repeating unnamed
+   * "5-minute limit (L0)" / "Daily limit (L1)" bars on two-token pools. */
+  tokenSymbol: string;
 }
 
 /** L0 = 5-minute rolling window, L1 = 24-hour rolling window (hardcoded in TradingLimitsV2.sol).
@@ -23,16 +26,12 @@ function PressureBar({
   netflow,
   limit,
   decimals,
+  tokenSymbol,
 }: PressureBarProps) {
   const ratio = Number(pressure);
   const pct = Math.min(ratio * 100, 100);
   const displayPct = (ratio * 100).toFixed(1);
-  const color =
-    ratio >= 1.0
-      ? "bg-red-500"
-      : ratio >= 0.8
-        ? "bg-amber-500"
-        : "bg-emerald-500";
+  const color = pressureColorClass(ratio);
 
   const netflowHuman = formatWei(netflow.replace(/^-/, ""), decimals, 2);
   const limitHuman = formatWei(limit, decimals, 2);
@@ -49,8 +48,13 @@ function PressureBar({
           className={`h-2 rounded-full transition-all ${color}`}
           style={{ width: `${pct}%` }}
           role="progressbar"
-          aria-valuenow={ratio * 100}
+          aria-label={`${label} for ${tokenSymbol}`}
+          aria-valuenow={Math.round(pct)}
+          aria-valuemin={0}
           aria-valuemax={100}
+          aria-valuetext={
+            ratio > 1 ? `${displayPct}% (over limit)` : `${displayPct}%`
+          }
         />
       </div>
       <div className="text-xs text-slate-400">
@@ -64,9 +68,14 @@ function PressureBar({
 interface LimitPanelProps {
   pool: Pool;
   tradingLimits: TradingLimit[];
+  hasError?: boolean;
 }
 
-export function LimitPanel({ pool, tradingLimits }: LimitPanelProps) {
+export function LimitPanel({
+  pool,
+  tradingLimits,
+  hasError = false,
+}: LimitPanelProps) {
   const { network } = useNetwork();
   const isVirtual = pool.source?.includes("virtual");
   const status = isVirtual ? "N/A" : computeLimitStatus(pool);
@@ -81,6 +90,10 @@ export function LimitPanel({ pool, tradingLimits }: LimitPanelProps) {
       {isVirtual ? (
         <p className="text-sm text-slate-400">
           VirtualPool — trading limits not applicable.
+        </p>
+      ) : hasError ? (
+        <p className="text-sm text-red-400">
+          Unable to load trading limits — try again later.
         </p>
       ) : tradingLimits.length === 0 ? (
         <p className="text-sm text-slate-400">
@@ -101,6 +114,7 @@ export function LimitPanel({ pool, tradingLimits }: LimitPanelProps) {
                   netflow={tl.netflow0}
                   limit={tl.limit0}
                   decimals={TRADING_LIMITS_INTERNAL_DECIMALS}
+                  tokenSymbol={sym}
                 />
                 <PressureBar
                   pressure={tl.limitPressure1}
@@ -108,6 +122,7 @@ export function LimitPanel({ pool, tradingLimits }: LimitPanelProps) {
                   netflow={tl.netflow1}
                   limit={tl.limit1}
                   decimals={TRADING_LIMITS_INTERNAL_DECIMALS}
+                  tokenSymbol={sym}
                 />
               </div>
             );

@@ -4,9 +4,13 @@ import type { Pool } from "@/lib/types";
 import { useHealthScore } from "@/hooks/use-health-score";
 import { formatBinaryHealthPct } from "@/lib/pool-health-score";
 import { InfoPopover } from "@/components/info-popover";
+import { isFxPool } from "@/lib/tokens";
+import { useNetwork } from "@/components/network-provider";
 
 const HEALTH_SCORE_EXPLAINER =
-  "% of time the pool was healthy — oracle rate fresh AND price deviation within threshold.";
+  "% of time the oracle rate was fresh and price deviation was within threshold";
+const HEALTH_SCORE_FX_SUFFIX =
+  " (excluding weekends, because there are no oracle updates outside of tradfi market hours)";
 
 export function HealthScoreValue({ pool }: { pool: Pool }) {
   const { healthWindow, allTimeScore, truncated, nominalWindowSeconds, error } =
@@ -59,27 +63,23 @@ export function HealthScoreValue({ pool }: { pool: Pool }) {
   );
 }
 
-/**
- * Format observed duration as the most meaningful unit: hours under 24h
- * (so nobody reads "0.2d"), days otherwise. Matches the existing "Nh
- * observed" pattern but promotes to days for longer spans.
- */
+/** Under 24h show as hours ("5.3h") so nobody reads "0.2d"; otherwise days. */
 function formatObservedDuration(observedHours: number): string {
   if (observedHours < 24) return `${observedHours.toFixed(1)}h`;
   return `${(observedHours / 24).toFixed(1)}d`;
 }
 
-/**
- * Info icon for the Health Score header label. Rendered in the cell's
- * `<dt>` so the explainer reads as "about this metric" rather than
- * hanging off the 7d value. Click / Enter / Space opens the explainer
- * so keyboard users get the same access as mouse hover.
- */
-export function HealthScoreInfoIcon() {
+/** FX pools append a weekend caveat — their oracle pauses when TradFi markets close, so without it the score mechanically decays every weekend. */
+export function HealthScoreInfoIcon({ pool }: { pool: Pool }) {
+  const { network } = useNetwork();
+  const suffix = isFxPool(network, pool.token0, pool.token1)
+    ? HEALTH_SCORE_FX_SUFFIX
+    : "";
+  const content = HEALTH_SCORE_EXPLAINER + suffix;
   return (
     <InfoPopover
-      label={`About the Health Score. ${HEALTH_SCORE_EXPLAINER}`}
-      content={HEALTH_SCORE_EXPLAINER}
+      label={`About the Health Score. ${content}`}
+      content={content}
     />
   );
 }

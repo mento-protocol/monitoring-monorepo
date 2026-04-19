@@ -114,11 +114,27 @@ export function RebalanceStatusValue({
   const lastRebalanceTxHash =
     lastRebalanceData?.RebalanceEvent?.[0]?.txHash ?? null;
 
-  // Subtitle: "via <Strategy> · last Ns ago" — one line, primary ↗ stays on
-  // the headline as the only CTA affordance; strategy link relies on the
-  // indigo-hover color to signal clickability. The blocked-diagnostics ⓘ
-  // button sits next to the headline — keyboard-focusable so the full
-  // reason is reachable without hover.
+  const lastRebalanceNode =
+    hasLastRebalance &&
+    (lastRebalanceTxHash ? (
+      <a
+        href={explorerTxUrl(network, lastRebalanceTxHash)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-xs text-slate-600 font-normal hover:text-indigo-400 transition-colors"
+        title={formatTimestamp(pool.lastRebalancedAt!)}
+      >
+        {lastRebalanceLabel}
+      </a>
+    ) : (
+      <span
+        className="text-xs text-slate-600 font-normal"
+        title={formatTimestamp(pool.lastRebalancedAt!)}
+      >
+        {lastRebalanceLabel}
+      </span>
+    ));
+
   return (
     <span className="flex flex-col gap-0.5">
       <span className={`flex items-center gap-1 font-medium ${statusColor}`}>
@@ -138,13 +154,19 @@ export function RebalanceStatusValue({
         {statusTitle && !statusHref && (
           <RebalanceDiagnosticsInfoIcon title={statusTitle} />
         )}
+        {lastRebalanceNode && (
+          <>
+            <span
+              className="text-xs text-slate-600 font-normal"
+              aria-hidden="true"
+            >
+              ·
+            </span>
+            {lastRebalanceNode}
+          </>
+        )}
       </span>
-      <span
-        className="text-xs text-slate-500"
-        title={
-          hasLastRebalance ? formatTimestamp(pool.lastRebalancedAt!) : undefined
-        }
-      >
+      <span className="text-xs text-slate-500">
         via{" "}
         <a
           href={strategyHref}
@@ -155,19 +177,6 @@ export function RebalanceStatusValue({
         >
           {strategyName}
         </a>
-        {" · "}
-        {hasLastRebalance && lastRebalanceTxHash ? (
-          <a
-            href={explorerTxUrl(network, lastRebalanceTxHash)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-indigo-400 transition-colors"
-          >
-            {lastRebalanceLabel}
-          </a>
-        ) : (
-          lastRebalanceLabel
-        )}
       </span>
     </span>
   );
@@ -175,12 +184,6 @@ export function RebalanceStatusValue({
 
 // Helpers
 
-/**
- * Compose the hover-tooltip for a genuinely blocked rebalance. Folds in the
- * decoded message, the raw error code, and any strategy enrichment (CDP
- * stability pool balance or reserve collateral) so the header cell carries
- * the detail previously shown in the standalone HealthPanel diagnostics.
- */
 function buildBlockedTitle(result: RebalanceCheckResult): string {
   const parts: string[] = [];
   if (result.message) parts.push(result.message);
@@ -256,11 +259,6 @@ function getPassiveStatus(
   };
 }
 
-/**
- * Focusable ⓘ beside "Rebalance blocked" so the decoded failure reason
- * is reachable via keyboard / screen reader / touch. Click / Enter /
- * Space opens the explainer inline — no dead tab stop.
- */
 function RebalanceDiagnosticsInfoIcon({ title }: { title: string }) {
   return (
     <InfoPopover label={`Rebalance diagnostics: ${title}`} content={title} />

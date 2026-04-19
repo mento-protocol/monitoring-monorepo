@@ -14,3 +14,6 @@ dist/
 .claude/worktrees
 .reviews/
 WORK.md
+.playwright-mcp/
+# Screenshots from chrome-devtools/playwright MCP dev sessions
+/*.png

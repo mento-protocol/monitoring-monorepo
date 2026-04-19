@@ -4,8 +4,8 @@ import type { Pool } from "@/lib/types";
 import { parseWei, formatWei, formatUSD } from "@/lib/format";
 import { computeReservePcts, computeThresholdLines } from "@/lib/reserves";
 import {
+  canValueTvl,
   tokenSymbol,
-  poolTvlUSD,
   tokenToUSD,
   USDM_SYMBOLS,
   type OracleRateMap,
@@ -15,9 +15,27 @@ import { useNetwork } from "@/components/network-provider";
 interface ReservesPanelProps {
   pool: Pool;
   rates?: OracleRateMap;
+  /**
+   * True while the cross-pool rate-map query is still in flight. Lets the
+   * panel show a loading state for pairs that need derived FX rates
+   * instead of flashing the permanent "unavailable" copy on first render.
+   */
+  ratesLoading?: boolean;
+  /**
+   * True when the cross-pool rate-map query failed. Routes non-USDm pairs
+   * through a transient "couldn't load" state instead of the permanent
+   * "unavailable" copy — which would mislabel a backend hiccup as a
+   * permanent pair-incompatibility.
+   */
+  ratesError?: boolean;
 }
 
-export function ReservesPanel({ pool, rates }: ReservesPanelProps) {
+export function ReservesPanel({
+  pool,
+  rates,
+  ratesLoading = false,
+  ratesError = false,
+}: ReservesPanelProps) {
   const { network } = useNetwork();
   const sym0 = tokenSymbol(network, pool.token0);
   const sym1 = tokenSymbol(network, pool.token1);
@@ -37,7 +55,6 @@ export function ReservesPanel({ pool, rates }: ReservesPanelProps) {
   // Prevents token1 tank from rendering as 100% full on a fully empty pool.
   const isEmptyPool = hasReserves && r0 === 0 && r1 === 0;
 
-  // Per-token USD values — mirrors poolTvlUSD() logic for which side is the price leg.
   const feedVal =
     pool.oraclePrice && pool.oraclePrice !== "0"
       ? Number(pool.oraclePrice) / 1e24
@@ -74,27 +91,38 @@ export function ReservesPanel({ pool, rates }: ReservesPanelProps) {
   const usdTotal = usd0 !== null && usd1 !== null ? usd0 + usd1 : null;
   const { pct0, pct1 } = computeReservePcts(r0, r1, usd0, usd1);
 
-  // Dominant side (≥50%) gets indigo, recessive gets emerald — consistent visual signal.
   const color0 = pct0 >= 50 ? "bg-indigo-500" : "bg-emerald-500";
   const color1 = pct1 > 50 ? "bg-indigo-500" : "bg-emerald-500";
 
-  // Reuse the shared TVL helper — it has tests and handles all edge cases.
-  const totalUsdRaw = poolTvlUSD(pool, network, rates);
-  const totalUsd = totalUsdRaw > 0 ? totalUsdRaw : null;
-
   const thresholds = computeThresholdLines(pool.rebalanceThreshold, usdTotal);
+  // For non-USDm pairs without a loaded rate map — or any pair with a
+  // missing/zero `oraclePrice` — the USD math above can't normalize the
+  // reserves, and `computeReservePcts` would fall back to a raw-token
+  // split. That's economically wrong for FX/FX pools and equally wrong
+  // during oracle outages on USDm-leg pools, so we gate on `canValueTvl`
+  // (USD-convertible legs AND a usable oracle price) to avoid showing a
+  // confident-looking percentage that's silently off.
+  const priceable = canValueTvl(pool, network, rates ?? new Map());
+  const showTanks = hasReserves && !isEmptyPool && priceable;
+  const showThresholdLegend = showTanks && thresholds !== null;
 
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-4 flex-shrink-0">
-        <h2 className="text-base font-semibold text-white">Reserves</h2>
-        {totalUsd !== null && (
-          <span className="text-sm text-slate-400">
-            TVL{" "}
-            <span className="text-slate-200 font-mono">
-              {formatUSD(totalUsd)}
+    <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6 h-full flex flex-col">
+      <div className="mb-4 flex-shrink-0 flex items-center justify-between gap-2">
+        <p className="text-sm text-slate-400">Reserves</p>
+        {showThresholdLegend && (
+          <div className="flex items-center gap-1.5">
+            <span
+              className="w-5 border-t-2 border-dashed border-amber-400/60 flex-shrink-0"
+              aria-hidden="true"
+            />
+            <span
+              id="reserves-threshold-legend"
+              className="text-xs text-slate-500"
+            >
+              Rebalance threshold
             </span>
-          </span>
+          </div>
         )}
       </div>
 
@@ -102,52 +130,45 @@ export function ReservesPanel({ pool, rates }: ReservesPanelProps) {
         <p className="text-sm text-slate-400">No reserve data available yet.</p>
       ) : isEmptyPool ? (
         <p className="text-sm text-slate-400">Pool has no reserves yet.</p>
+      ) : !priceable && ratesLoading ? (
+        <p className="text-sm text-slate-400">Loading reserves…</p>
+      ) : !priceable && ratesError ? (
+        <p className="text-sm text-red-400">
+          Couldn't load reserves — try again later.
+        </p>
+      ) : !priceable ? (
+        <p className="text-sm text-slate-400">
+          Reserves pricing unavailable for this pair.
+        </p>
       ) : (
-        <>
-          <div className="flex gap-4 flex-1 min-h-[200px]">
-            <Tank
-              symbol={sym0}
-              amount={formatWei(pool.reserves0!, pool.token0Decimals ?? 18, 2)}
-              pct={pct0}
-              usd={usd0}
-              colorClass={color0}
-              thresholdLower={thresholds?.threshold0Lower}
-              thresholdUpper={thresholds?.threshold0Upper}
-              thresholdLegendId={
-                thresholds ? "reserves-threshold-legend" : undefined
-              }
-            />
-            <Tank
-              symbol={sym1}
-              amount={formatWei(pool.reserves1!, pool.token1Decimals ?? 18, 2)}
-              pct={pct1}
-              usd={usd1}
-              colorClass={color1}
-              thresholdLower={thresholds?.threshold1Lower}
-              thresholdUpper={thresholds?.threshold1Upper}
-              thresholdLegendId={
-                thresholds ? "reserves-threshold-legend" : undefined
-              }
-            />
-          </div>
-          {thresholds && (
-            <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-slate-800 flex-shrink-0">
-              {/* Visible legend — also referenced via aria-describedby on the meters */}
-              <span
-                className="w-5 border-t-2 border-dashed border-amber-400/60 flex-shrink-0"
-                aria-hidden="true"
-              />
-              <span
-                id="reserves-threshold-legend"
-                className="text-xs text-slate-500"
-              >
-                Rebalance threshold — amber lines mark the safe operating range
-              </span>
-            </div>
-          )}
-        </>
+        <div className="flex gap-4 flex-1 min-h-[200px]">
+          <Tank
+            symbol={sym0}
+            amount={formatWei(pool.reserves0!, pool.token0Decimals ?? 18, 2)}
+            pct={pct0}
+            usd={usd0}
+            colorClass={color0}
+            thresholdLower={thresholds?.threshold0Lower}
+            thresholdUpper={thresholds?.threshold0Upper}
+            thresholdLegendId={
+              thresholds ? "reserves-threshold-legend" : undefined
+            }
+          />
+          <Tank
+            symbol={sym1}
+            amount={formatWei(pool.reserves1!, pool.token1Decimals ?? 18, 2)}
+            pct={pct1}
+            usd={usd1}
+            colorClass={color1}
+            thresholdLower={thresholds?.threshold1Lower}
+            thresholdUpper={thresholds?.threshold1Upper}
+            thresholdLegendId={
+              thresholds ? "reserves-threshold-legend" : undefined
+            }
+          />
+        </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -160,6 +181,12 @@ interface TankProps {
   thresholdLower?: number;
   thresholdUpper?: number;
   thresholdLegendId?: string;
+}
+
+function gradientFor(colorClass: string): string {
+  if (colorClass === "bg-indigo-500") return "from-indigo-600 to-indigo-400";
+  if (colorClass === "bg-emerald-500") return "from-emerald-600 to-emerald-400";
+  return "from-slate-600 to-slate-500";
 }
 
 function Tank({
@@ -175,7 +202,7 @@ function Tank({
   return (
     <div className="flex flex-col items-center gap-2 flex-1 min-w-0 min-h-0">
       <div
-        className="relative w-full flex-1 min-h-0 rounded border border-slate-700 bg-slate-800/80 overflow-hidden flex flex-col-reverse"
+        className="relative w-full flex-1 min-h-0 rounded-xl border border-slate-700/60 bg-slate-800/80 overflow-hidden flex flex-col-reverse shadow-md shadow-black/40"
         role="meter"
         aria-valuemin={0}
         aria-valuenow={pct}
@@ -183,11 +210,16 @@ function Tank({
         aria-label={`${symbol} reserve: ${pct.toFixed(1)}%`}
         aria-describedby={thresholdLegendId}
       >
+        <div className="absolute inset-0 rounded-xl pointer-events-none ring-1 ring-inset ring-white/5" />
+
         <div
-          className={`w-full transition-all duration-500 ${colorClass} opacity-70`}
+          className={`w-full relative transition-all duration-500 bg-gradient-to-t ${gradientFor(colorClass)} opacity-90`}
           style={{ height: `${pct}%` }}
-        />
-        {/* Safe-zone band between the two critical threshold lines */}
+        >
+          <div className="absolute inset-x-0 top-0 h-px bg-white/40" />
+          <div className="absolute inset-x-0 top-px h-2 bg-gradient-to-b from-white/15 to-transparent" />
+        </div>
+
         {thresholdLower !== undefined && thresholdUpper !== undefined && (
           <div
             className="absolute w-full bg-amber-400/5 pointer-events-none"
@@ -197,34 +229,32 @@ function Tank({
             }}
           />
         )}
-        {/* Lower critical threshold line */}
         {thresholdLower !== undefined && (
           <div
-            className="absolute w-full border-t-2 border-dashed border-amber-400/60 pointer-events-none"
+            className="absolute w-full border-t border-dashed border-amber-400/70 pointer-events-none"
             style={{ bottom: `${thresholdLower}%` }}
             title={`Rebalance threshold lower (${thresholdLower.toFixed(1)}%)`}
           />
         )}
-        {/* Upper critical threshold line */}
         {thresholdUpper !== undefined && (
           <div
-            className="absolute w-full border-t-2 border-dashed border-amber-400/60 pointer-events-none"
+            className="absolute w-full border-t border-dashed border-amber-400/70 pointer-events-none"
             style={{ bottom: `${thresholdUpper}%` }}
             title={`Rebalance threshold upper (${thresholdUpper.toFixed(1)}%)`}
           />
         )}
-        <span className="absolute inset-0 flex items-center justify-center text-xl font-bold text-white [text-shadow:0_1px_4px_rgba(0,0,0,0.8)]">
+        <span className="absolute inset-0 flex items-center justify-center text-xl font-semibold text-white [text-shadow:0_2px_4px_rgba(0,0,0,0.85)]">
           {pct.toFixed(1)}%
         </span>
       </div>
       <div className="text-center flex-shrink-0">
         <div className="text-sm font-medium text-slate-200">{symbol}</div>
-        <div className="text-xs font-mono text-slate-400 mt-0.5">{amount}</div>
-        {usd !== null && (
-          <div className="text-xs text-slate-500 mt-0.5">
-            ≈ {formatUSD(usd)}
-          </div>
-        )}
+        <div className="text-xs font-mono text-slate-400 mt-0.5">
+          {amount}
+          {usd !== null && (
+            <span className="text-slate-500"> ≈ {formatUSD(usd)}</span>
+          )}
+        </div>
       </div>
     </div>
   );

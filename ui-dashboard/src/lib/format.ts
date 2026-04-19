@@ -99,12 +99,17 @@ export function parseOraclePriceToNumber(
 }
 
 /**
- * Formats a positive oracle price for display. Uses 4dp near parity
- * (0.9..1.1) and 6dp elsewhere. Callers must gate on price > 0.
+ * Display format for a positive oracle price. Uses 4dp for everything ≥ 0.01
+ * (the common case), and extends precision for sub-cent values — a fiat pair
+ * priced at 0.00067 USD would otherwise collapse to "0.0007" (or to "0.0000"
+ * for even smaller rates) and misquote the pair. The extended path keeps at
+ * least four significant figures, capped at 12dp to stay readable.
  */
 export function formatOraclePrice(price: number): string {
-  const dp = price > 0.9 && price < 1.1 ? 4 : 6;
-  return price.toFixed(dp);
+  if (price <= 0) return "0.0000";
+  if (price >= 0.01) return price.toFixed(4);
+  const sigFigDecimals = Math.ceil(-Math.log10(price)) + 3;
+  return price.toFixed(Math.min(sigFigDecimals, 12));
 }
 
 export function toPercent(raw: string, decimals = 4): string {

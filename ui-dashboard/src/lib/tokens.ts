@@ -116,6 +116,22 @@ export function isFpmm(pool: Pick<Pool, "source">): boolean {
 }
 
 /**
+ * True when at least one leg is a non-USD-pegged token, i.e. the pair has
+ * FX exposure (EUR, GBP, BRL, …). Covers USDm/FX pairs, FX/FX pairs
+ * (e.g. `axlEUROC/EURm`), and stable/FX pairs (e.g. `USDC/GBPm`) — all of
+ * which pause oracle updates over TradFi weekends.
+ */
+export function isFxPool(
+  network: Network,
+  token0: string | null,
+  token1: string | null,
+): boolean {
+  const sym0 = tokenSymbol(network, token0);
+  const sym1 = tokenSymbol(network, token1);
+  return !USD_PEGGED_SYMBOLS.has(sym0) || !USD_PEGGED_SYMBOLS.has(sym1);
+}
+
+/**
  * Returns the Chainlink data feed URL + display pair for a given token
  * symbol and chainId, or null if no mapping exists. Only applicable to
  * FPMM pools. Add new chains / symbols to CHAINLINK_FEEDS as they go live.
@@ -138,6 +154,41 @@ export function chainlinkFeed(
     .map((s) => s.toUpperCase())
     .join("/");
   return { url: `${chainConfig.baseUrl}/${slug}`, pair };
+}
+
+/**
+ * True when the pool's legs are USD-convertible: one leg is USDm or the rate
+ * map can price one of the non-USDm legs. Intentionally does NOT require
+ * `oraclePrice` — volume conversion uses per-snapshot `swapVolumeX` values
+ * and does not depend on the live oracle. TVL callers that *do* need the
+ * oracle should gate on `pool.oraclePrice` themselves.
+ */
+export function canPricePool(
+  pool: Pick<Pool, "token0" | "token1">,
+  network: Network,
+  rates: OracleRateMap,
+): boolean {
+  const sym0 = tokenSymbol(network, pool.token0 ?? null);
+  const sym1 = tokenSymbol(network, pool.token1 ?? null);
+  if (USDM_SYMBOLS.has(sym0) || USDM_SYMBOLS.has(sym1)) return true;
+  return (
+    tokenToUSD(sym0, 1, rates) !== null || tokenToUSD(sym1, 1, rates) !== null
+  );
+}
+
+/**
+ * True when the pool's current TVL can be computed in USD: USD-convertible
+ * legs *plus* a usable `oraclePrice` (required for the `reserves × price`
+ * math). Without the oracle gate, `poolTvlUSD()` silently returns 0 during
+ * oracle outages and the card renders a believable $0.00.
+ */
+export function canValueTvl(
+  pool: Pick<Pool, "token0" | "token1" | "oraclePrice">,
+  network: Network,
+  rates: OracleRateMap,
+): boolean {
+  if (!pool.oraclePrice || pool.oraclePrice === "0") return false;
+  return canPricePool(pool, network, rates);
 }
 
 /**

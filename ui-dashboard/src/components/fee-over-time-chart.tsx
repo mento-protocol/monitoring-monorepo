@@ -8,7 +8,7 @@ import type { NetworkData } from "@/hooks/use-all-networks-data";
 import { buildDailyFeeSeries } from "@/lib/revenue";
 import { weekOverWeekChangePct } from "@/components/volume-over-time-chart";
 import { PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
-import { RANGES, type RangeKey } from "@/components/time-series-chart-card";
+import { RANGES, type RangeKey } from "@/lib/time-series";
 
 const PlotSkeleton = () => (
   <div className="h-[200px] animate-pulse rounded bg-slate-800/30" />
