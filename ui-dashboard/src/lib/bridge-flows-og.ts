@@ -126,8 +126,16 @@ export async function fetchBridgeFlowsOgDataUncached(): Promise<BridgeFlowsOgDat
 
   const snapshots = snapshotsResult.value.BridgeDailySnapshot ?? [];
 
-  const usdTotals = windowTotals(snapshots, (s) => snapshotUsdValue(s, rates));
-  const countTotals = windowTotals(snapshots, (s) => s.sentCount ?? 0);
+  // Pass the pre-fetch `nowSec` so the 30d KPI totals, chart cutoff,
+  // and WoW pill all share one timestamp — otherwise `windowTotals` would
+  // call `Date.now()` again post-await and a UTC-midnight straddle could
+  // land 24h totals on day N+1 while the chart sat on day N.
+  const usdTotals = windowTotals(
+    snapshots,
+    (s) => snapshotUsdValue(s, rates),
+    nowSec,
+  );
+  const countTotals = windowTotals(snapshots, (s) => s.sentCount ?? 0, nowSec);
   const fullSeries = buildVolumeUsdSeries(snapshots, rates);
 
   // 30d window for the chart, aligned to UTC midnight (matches the page's
