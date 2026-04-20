@@ -181,12 +181,14 @@ const warnedCapKeys = new Set<string>();
 async function fetchAllSnapshotPages(
   client: GraphQLClient,
   poolIds: string[],
+  network: string,
 ): Promise<SnapshotPageResult> {
   return fetchPaginatedSnapshotPages(
     client,
     poolIds,
     POOL_SNAPSHOTS_ALL,
     "PoolSnapshot",
+    network,
   );
 }
 
@@ -198,12 +200,14 @@ async function fetchAllSnapshotPages(
 async function fetchAllDailySnapshotPages(
   client: GraphQLClient,
   poolIds: string[],
+  network: string,
 ): Promise<SnapshotPageResult> {
   return fetchPaginatedSnapshotPages(
     client,
     poolIds,
     POOL_DAILY_SNAPSHOTS_ALL,
     "PoolDailySnapshot",
+    network,
   );
 }
 
@@ -212,6 +216,7 @@ async function fetchPaginatedSnapshotPages<K extends string>(
   poolIds: string[],
   query: string,
   responseKey: K,
+  network: string,
 ): Promise<SnapshotPageResult> {
   const seen = new Set<string>();
   const rows: PoolSnapshotWindow[] = [];
@@ -234,7 +239,12 @@ async function fetchPaginatedSnapshotPages<K extends string>(
       // truncation so consumers know the data is partial. Report to Sentry
       // so partial-data degradation isn't silent.
       Sentry.captureException(err, {
-        tags: { source: "hasura", responseKey, degraded: "partial-pages" },
+        tags: {
+          source: "hasura",
+          responseKey,
+          network,
+          degraded: "partial-pages",
+        },
         extra: { page, rowsFetched: rows.length, poolCount: poolIds.length },
       });
       return {
@@ -256,13 +266,14 @@ async function fetchPaginatedSnapshotPages<K extends string>(
   // Safety-cap exhaustion: we fetched SNAPSHOT_MAX_PAGES × SNAPSHOT_PAGE_SIZE
   // rows without running out. Data is genuinely incomplete — flag as a warning
   // so we can tell when the cap needs raising (or when indexer rollups need
-  // replacing a paginated fetch). warnedCapKeys (module scope) dedups across
-  // the 30s poll cycle.
-  if (!warnedCapKeys.has(responseKey)) {
-    warnedCapKeys.add(responseKey);
+  // replacing a paginated fetch). Dedup key is `${network}:${responseKey}` so
+  // each chain surfaces its own cap event once (not once total across chains).
+  const capKey = `${network}:${responseKey}`;
+  if (!warnedCapKeys.has(capKey)) {
+    warnedCapKeys.add(capKey);
     Sentry.captureMessage("hasura-snapshot-cap-exhausted", {
       level: "warning",
-      tags: { source: "hasura", responseKey },
+      tags: { source: "hasura", responseKey, network },
       extra: {
         rowsFetched: rows.length,
         poolCount: poolIds.length,
@@ -321,10 +332,10 @@ export async function fetchNetworkData(
       { chainId: network.chainId },
     ),
     shouldQuery
-      ? fetchAllSnapshotPages(client, poolIds)
+      ? fetchAllSnapshotPages(client, poolIds, network.id)
       : Promise.resolve(emptySnapshotPage),
     shouldQuery
-      ? fetchAllDailySnapshotPages(client, poolIds)
+      ? fetchAllDailySnapshotPages(client, poolIds, network.id)
       : Promise.resolve(emptySnapshotPage),
     fpmmPoolIds.length > 0
       ? client.request<{

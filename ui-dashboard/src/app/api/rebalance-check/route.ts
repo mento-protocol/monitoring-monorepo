@@ -120,17 +120,30 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 }
 
 function redactRpcUrl(err: unknown, rpcUrl: string): unknown {
-  if (!(err instanceof Error)) return err;
-  const inMessage = err.message.includes(rpcUrl);
-  const inStack = err.stack?.includes(rpcUrl) ?? false;
-  if (!inMessage && !inStack) return err;
+  if (!(err instanceof Error)) {
+    if (typeof err === "string") return err.replaceAll(rpcUrl, "[RPC_URL]");
+    return err;
+  }
+  if (!containsRpcUrl(err, rpcUrl)) return err;
   const copy = new Error(err.message.replaceAll(rpcUrl, "[RPC_URL]"));
   // V8 stacks start with `Error: <message>\n    at …`, so the original
   // URL is embedded in the stack's first line. Scrub the stack string too.
   copy.stack = err.stack?.replaceAll(rpcUrl, "[RPC_URL]");
   copy.name = err.name;
-  if ("cause" in err) copy.cause = err.cause;
+  // viem / ethers wrap the transport error as `cause`; recurse so the URL
+  // can't leak through the cause chain (Sentry serializes `cause`).
+  if ("cause" in err && err.cause !== undefined) {
+    copy.cause = redactRpcUrl(err.cause, rpcUrl);
+  }
   return copy;
+}
+
+function containsRpcUrl(err: Error, rpcUrl: string): boolean {
+  if (err.message.includes(rpcUrl)) return true;
+  if (err.stack?.includes(rpcUrl)) return true;
+  if (err.cause instanceof Error) return containsRpcUrl(err.cause, rpcUrl);
+  if (typeof err.cause === "string") return err.cause.includes(rpcUrl);
+  return false;
 }
 
 async function runWithRetry(
