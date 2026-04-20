@@ -16,6 +16,7 @@ const TILE_BORDER = "#334155";
 
 const OK_COLOR = "#34d399";
 const CRITICAL_COLOR = "#f87171";
+const WARN_COLOR = "#fbbf24";
 
 function formatWoW(pct: number): { text: string; color: string } {
   const arrow = pct >= 0 ? "▲" : "▼";
@@ -28,6 +29,9 @@ function formatWoW(pct: number): { text: string; color: string } {
 function buildAlt(data: HomepageOgData | null): string {
   if (!data) return "Mento Analytics — cross-chain protocol overview";
   const parts: string[] = ["Mento Analytics"];
+  if (data.partial) {
+    parts.push(`partial — ${data.offlineChains.join(", ")} offline`);
+  }
   // `null` = unavailable; `0` = real empty state worth surfacing.
   if (data.totalTvlUsd != null) {
     parts.push(`TVL ${formatUSD(data.totalTvlUsd)}`);
@@ -133,6 +137,21 @@ function Card({ data }: { data: HomepageOgData | null }) {
         </div>
         {data ? (
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            {data.partial ? (
+              <span
+                style={{
+                  fontSize: 22,
+                  fontWeight: 600,
+                  padding: "10px 20px",
+                  borderRadius: 999,
+                  background: "rgba(251, 191, 36, 0.15)",
+                  border: "1px solid rgba(251, 191, 36, 0.4)",
+                  color: WARN_COLOR,
+                }}
+              >
+                Partial · {data.offlineChains.join(", ")} offline
+              </span>
+            ) : null}
             <span style={{ fontSize: 24, color: MUTED }}>
               {data.poolCount} pools
             </span>

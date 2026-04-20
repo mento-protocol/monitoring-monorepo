@@ -30,6 +30,11 @@ function buildDescription(
   data: NonNullable<Awaited<ReturnType<typeof fetchHomepageOgData>>>,
 ): string {
   const parts: string[] = [];
+  // Lead with a partial-overview warning when any chain is offline — the
+  // surviving-chain numbers aren't protocol-wide in that case.
+  if (data.partial) {
+    parts.push(`Partial — ${data.offlineChains.join(", ")} offline`);
+  }
   // `null` = unavailable (omit); `0` = real empty state (render as "$0.00").
   if (data.totalTvlUsd != null)
     parts.push(`TVL ${formatUSD(data.totalTvlUsd)}`);

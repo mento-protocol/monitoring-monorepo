@@ -13,7 +13,7 @@ import {
   type OracleRateMap,
 } from "@/lib/tokens";
 import { computeEffectiveStatus, type HealthStatus } from "@/lib/health";
-import { ALL_POOLS_WITH_HEALTH } from "@/lib/queries";
+import { ALL_POOLS_WITH_HEALTH, POOL_DAILY_SNAPSHOTS_ALL } from "@/lib/queries";
 import { parseWei } from "@/lib/format";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 
@@ -25,30 +25,12 @@ const FOURTEEN_DAYS = 14 * SECONDS_PER_DAY;
 const TVL_CHART_DAYS = 30;
 const VOLUME_SPARKLINE_DAYS = 14;
 const MAX_ATTENTION_POOLS = 3;
-
-// Cross-chain daily-snapshot query. Fixed row cap (no timestamp filter)
-// because Hasura's `timestamp: { _gte }` does a lexical string comparison
-// — the column stores numeric-looking strings, and the predicate silently
-// drops all rows for certain cutoffs. 1000 rows = ~30 days of history for
-// ~30 pools, required so the TVL-chart forward-fill can seed each pool's
-// cursor from pre-window snapshots (pools that didn't change in the
-// 14-day window would otherwise be excluded entirely).
-const HOMEPAGE_OG_DAILY_SNAPSHOTS = `
-  query HomepageOgDailySnapshots($poolIds: [String!]!) {
-    PoolDailySnapshot(
-      where: { poolId: { _in: $poolIds } }
-      order_by: [{ timestamp: desc }, { id: desc }]
-      limit: 1000
-    ) {
-      poolId
-      timestamp
-      reserves0
-      reserves1
-      swapVolume0
-      swapVolume1
-    }
-  }
-`;
+// Pagination settings for the daily-snapshot fetch. Hasura silently caps
+// at 1000 rows, so we page until a response comes back short. SAFETY_CAP
+// bounds total work at ~5000 rows per chain (plenty for years of history
+// across any realistic pool count).
+const DAILY_PAGE_SIZE = 1000;
+const DAILY_MAX_PAGES = 5;
 
 export type AttentionPool = {
   name: string;
@@ -74,6 +56,13 @@ export type HomepageOgData = {
   healthBuckets: Record<HealthStatus, number>;
   /** Pools in WARN/CRITICAL state, highest severity first, up to 3. */
   attentionPools: AttentionPool[];
+  /** True when at least one configured chain's pool query failed. All
+   * protocol-wide aggregates in this payload reflect only the chains in
+   * `chains` — consumers must label them accordingly or the card
+   * silently under-reports the protocol during an outage. */
+  partial: boolean;
+  /** Labels of configured mainnet chains currently offline / excluded. */
+  offlineChains: string[];
 };
 
 type ChainSlice = {
@@ -81,8 +70,8 @@ type ChainSlice = {
   pools: Pool[];
   daily: PoolSnapshot[];
   rates: OracleRateMap;
-  /** True if the daily-snapshot fetch for this chain failed, timed out,
-   * or hit the 1000-row cap. Signals that cross-chain daily-derived
+  /** True if the daily-snapshot fetch for this chain failed or hit the
+   * safety cap mid-pagination. Signals cross-chain daily-derived
    * aggregates (volume, tvl-series) can't be trusted for protocol totals. */
   dailyDegraded: boolean;
 };
@@ -100,8 +89,8 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
     });
     pools = res.Pool ?? [];
   } catch {
-    // Chain entirely unreachable — drop from aggregates rather than fail
-    // the whole card.
+    // Chain pool query failed entirely — treat as offline. Aggregator
+    // will surface this via `partial` / `offlineChains`.
     return null;
   }
 
@@ -115,25 +104,38 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
     };
   }
 
-  let daily: PoolSnapshot[] = [];
+  // Paginate daily snapshots via POOL_DAILY_SNAPSHOTS_ALL (1000-row
+  // Hasura cap). Without pagination the OG card self-disables at normal
+  // growth (≈30 pools × 35 days = 1050 rows on one chain).
+  const poolIds = pools.map((p) => p.id);
+  const seen = new Set<string>();
+  const daily: PoolSnapshot[] = [];
   let dailyDegraded = false;
   try {
-    const res = await client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
-      document: HOMEPAGE_OG_DAILY_SNAPSHOTS,
-      variables: { poolIds: pools.map((p) => p.id) },
-      signal: AbortSignal.timeout(5000),
-    });
-    // No client-side timestamp filter here: the TVL forward-fill needs
-    // pre-window snapshots to seed each pool's cursor. Windowed aggregates
-    // (volume sums, TVL WoW baseline) apply their own explicit windows.
-    daily = res.PoolDailySnapshot ?? [];
-    // Hasura silently truncates at 1000 rows. If we hit that exact count,
-    // we almost certainly lost some history — can't distinguish "got
-    // everything" from "got the newest 1000", so treat as degraded.
-    if (daily.length >= 1000) dailyDegraded = true;
+    for (let page = 0; page < DAILY_MAX_PAGES; page++) {
+      const res = await client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
+        document: POOL_DAILY_SNAPSHOTS_ALL,
+        variables: {
+          poolIds,
+          limit: DAILY_PAGE_SIZE,
+          offset: page * DAILY_PAGE_SIZE,
+        },
+        signal: AbortSignal.timeout(5000),
+      });
+      const rows = res.PoolDailySnapshot ?? [];
+      for (const row of rows) {
+        const key = `${row.poolId}:${row.timestamp}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        daily.push(row);
+      }
+      if (rows.length < DAILY_PAGE_SIZE) break;
+      // Still full at last attempt means we may have truncated — flag it.
+      if (page === DAILY_MAX_PAGES - 1) dailyDegraded = true;
+    }
   } catch {
-    // Pools + rates still usable for TVL / health; mark daily degraded so
-    // the aggregator knows not to trust cross-chain totals.
+    // Daily query failed mid-pagination; mark degraded so the aggregator
+    // nulls out the cross-chain daily-derived fields.
     dailyDegraded = true;
   }
 
@@ -152,22 +154,38 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
   );
   if (configuredChains.length === 0) return null;
 
-  const slices = (
-    await Promise.all(configuredChains.map(fetchChainSlice))
-  ).filter((s): s is ChainSlice => s !== null);
+  const sliceResults = await Promise.all(
+    configuredChains.map(async (network) => ({
+      network,
+      slice: await fetchChainSlice(network),
+    })),
+  );
+  // Track chains whose pool query failed entirely so consumers can surface
+  // "partial overview" rather than ship surviving-chain numbers as complete.
+  const offlineChains = sliceResults
+    .filter((r) => r.slice === null)
+    .map((r) => r.network.label);
+  const slices = sliceResults
+    .map((r) => r.slice)
+    .filter((s): s is ChainSlice => s !== null);
   if (slices.length === 0) return null;
+  const partial = offlineChains.length > 0;
 
-  // Virtual pools have no reserves — skip TVL/volume math, count toward
-  // health buckets only.
+  // TVL aggregation uses only FPMM pools with a live oracle price —
+  // VirtualPools have no reserves and can't be TVL-counted. `canValueTvl`
+  // already requires `oraclePrice`, so virtual and oracle-stale pools
+  // drop out here.
   const fpmmEntries = slices.flatMap((s) =>
     s.pools.filter(isFpmm).map((pool) => ({ pool, slice: s })),
   );
-  // TVL requires a live oraclePrice (canValueTvl). Volume math doesn't —
-  // USDm-leg swap volumes are $1:1 even when a pool's current oraclePrice
-  // is missing. Keep the two filters separate so a stale oracle doesn't
-  // silently drop a healthy pool from the volume aggregate.
   const priceable = fpmmEntries.filter(({ pool, slice }) =>
     canValueTvl(pool, slice.network, slice.rates),
+  );
+  // Volume aggregation includes ALL pools (FPMM + VirtualPool) so the OG
+  // preview matches the dashboard's protocol volume total, which also
+  // counts VirtualPool swaps (see components/volume-over-time-chart.tsx).
+  const allEntries = slices.flatMap((s) =>
+    s.pools.map((pool) => ({ pool, slice: s })),
   );
 
   const totalTvlUsd =
@@ -217,10 +235,10 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
 
   const totalVolume7dUsd = anyChainDegraded
     ? null
-    : sumVolumeInWindow(fpmmEntries, now - SEVEN_DAYS, now);
+    : sumVolumeInWindow(allEntries, now - SEVEN_DAYS, now);
   const priorVolume = anyChainDegraded
     ? null
-    : sumVolumeInWindow(fpmmEntries, now - FOURTEEN_DAYS, now - SEVEN_DAYS);
+    : sumVolumeInWindow(allEntries, now - FOURTEEN_DAYS, now - SEVEN_DAYS);
   const volume7dWoWPct =
     totalVolume7dUsd != null && priorVolume != null && priorVolume > 0
       ? ((totalVolume7dUsd - priorVolume) / priorVolume) * 100
@@ -228,7 +246,7 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
 
   const volumeSeries = anyChainDegraded
     ? []
-    : computeDailyVolumeSeries(fpmmEntries);
+    : computeDailyVolumeSeries(allEntries);
   const tvlSeries = anyChainDegraded ? [] : computeDailyTvlSeries(priceable);
 
   // Health buckets across ALL pools (virtual = N/A, excluded from TVL).
@@ -277,6 +295,8 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
     chains: slices.map((s) => s.network.label),
     healthBuckets,
     attentionPools: attentionPools.slice(0, MAX_ATTENTION_POOLS),
+    partial,
+    offlineChains,
   };
 }
 

@@ -197,6 +197,8 @@ describe("fetchHomepageOgDataUncached", () => {
     expect(result!.healthBuckets.WARN).toBe(0);
     expect(result!.healthBuckets.CRITICAL).toBe(0);
     expect(result!.attentionPools).toEqual([]);
+    expect(result!.partial).toBe(false);
+    expect(result!.offlineChains).toEqual([]);
     // Forward-filled TVL series: 30 UTC-day buckets ending today (matches
     // the dashboard's default "1M" range). Latest bucket uses the most
     // recent snapshot (1d-ago, 1M+1M=2M per pool × 2 pools = 4M). Middle
@@ -252,7 +254,7 @@ describe("fetchHomepageOgDataUncached", () => {
     expect(result!.attentionPools[1].health).toBe("WARN");
   });
 
-  it("degrades gracefully when a chain's pool query fails", async () => {
+  it("flags partial + names offline chain when one chain's pool query fails", async () => {
     const monadPool = makePool(
       143,
       POOL_MONAD,
@@ -271,6 +273,11 @@ describe("fetchHomepageOgDataUncached", () => {
 
     const result = await fetchHomepageOgDataUncached();
     expect(result).not.toBeNull();
+    // Surviving chain's numbers are still present, but the card is
+    // explicitly flagged partial so consumers don't present "Celo + Monad"
+    // numbers labeled as protocol-wide.
+    expect(result!.partial).toBe(true);
+    expect(result!.offlineChains).toEqual(["Celo"]);
     expect(result!.poolCount).toBe(1);
     expect(result!.chainCount).toBe(1);
     expect(result!.chains).toEqual(["Monad"]);
@@ -308,5 +315,155 @@ describe("fetchHomepageOgDataUncached", () => {
     expect(result!.volume7dWoWPct).toBeNull();
     expect(result!.volumeSeries).toEqual([]);
     expect(result!.tvlSeries).toEqual([]);
+  });
+
+  it("includes VirtualPool swap volume in protocol totals", async () => {
+    // VirtualPools can't contribute TVL (no reserves), but the dashboard's
+    // protocol volume total explicitly counts their swaps. The OG card has
+    // to match or shared previews disagree with what users see.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const fpmmPool = makePool(42220, POOL_CELO, ADDR_USDM_CELO, ADDR_CUSD_CELO);
+    const VIRTUAL_POOL_ID = `42220-0xaaa0000000000000000000000000000000000009`;
+    const virtualPool = makePool(
+      42220,
+      VIRTUAL_POOL_ID,
+      ADDR_USDM_CELO,
+      ADDR_CUSD_CELO,
+      { source: "virtual_factory", oraclePrice: "0" },
+    );
+    const recentRow = {
+      timestamp: String(nowSec - 86_400),
+      reserves0: "0",
+      reserves1: "0",
+      swapVolume0: "40000000000000000000000", // 40K USDm
+      swapVolume1: "40000000000000000000000",
+    };
+    routeByChain({
+      42220: (doc) => {
+        if (doc.includes("PoolDailySnapshot")) {
+          return {
+            PoolDailySnapshot: [
+              { poolId: POOL_CELO, ...recentRow },
+              { poolId: VIRTUAL_POOL_ID, ...recentRow },
+            ],
+          };
+        }
+        return { Pool: [fpmmPool, virtualPool] };
+      },
+      143: (doc) => {
+        if (doc.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+        return { Pool: [] };
+      },
+    });
+
+    const result = await fetchHomepageOgDataUncached();
+    expect(result).not.toBeNull();
+    // FPMM 40K + VirtualPool 40K = 80K. If volume filtered by isFpmm we'd
+    // only see 40K.
+    expect(result!.totalVolume7dUsd).toBeCloseTo(80_000, -2);
+  });
+
+  it("truncates attentionPools at MAX_ATTENTION_POOLS + CRITICAL first", async () => {
+    // Make 5 attention pools (3 CRITICAL, 2 WARN) split across chains; the
+    // card must show at most 3, CRITICAL-first, alphabetical within rank.
+    const mkPool = (
+      chainId: number,
+      suffix: string,
+      t0: string,
+      t1: string,
+      overrides: Record<string, unknown>,
+    ) =>
+      makePool(
+        chainId,
+        `${chainId}-0xaaa000000000000000000000000000000000${suffix}`,
+        t0,
+        t1,
+        overrides,
+      );
+    const CRIT = {
+      limitStatus: "CRITICAL",
+      limitPressure0: "1.1",
+    };
+    const WARN = { priceDifference: "8500", rebalanceThreshold: 10000 };
+    routeByChain({
+      42220: (doc) => {
+        if (doc.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+        return {
+          Pool: [
+            mkPool(42220, "0001", ADDR_USDM_CELO, ADDR_CUSD_CELO, CRIT),
+            mkPool(42220, "0002", ADDR_CUSD_CELO, ADDR_USDM_CELO, CRIT),
+            mkPool(42220, "0003", ADDR_USDM_CELO, ADDR_CUSD_CELO, WARN),
+          ],
+        };
+      },
+      143: (doc) => {
+        if (doc.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+        return {
+          Pool: [
+            mkPool(143, "0004", ADDR_USDM_MONAD, ADDR_GBPM_MONAD, CRIT),
+            mkPool(143, "0005", ADDR_USDM_MONAD, ADDR_GBPM_MONAD, WARN),
+          ],
+        };
+      },
+    });
+
+    const result = await fetchHomepageOgDataUncached();
+    expect(result).not.toBeNull();
+    expect(result!.attentionPools).toHaveLength(3);
+    // All three shown should be CRITICAL (WARN ones drop off the cap).
+    for (const p of result!.attentionPools) {
+      expect(p.health).toBe("CRITICAL");
+    }
+    expect(result!.healthBuckets.CRITICAL).toBe(3);
+    expect(result!.healthBuckets.WARN).toBe(2);
+  });
+
+  it("paginates daily snapshots past the 1000-row Hasura cap", async () => {
+    // Hasura silently caps at 1000 rows. Pagination must walk forward via
+    // offset until a short page arrives. Return 1000 rows on page 0 and
+    // 1 row on page 1 — the aggregator must see both.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const celoPool = makePool(42220, POOL_CELO, ADDR_USDM_CELO, ADDR_CUSD_CELO);
+    const fullPage = Array.from({ length: 1000 }, (_, i) => ({
+      poolId: POOL_CELO,
+      timestamp: String(nowSec - i * 3600), // descending, 1h apart — same day-bucketing behavior is fine for test
+      reserves0: "1000000000000000000000000",
+      reserves1: "1000000000000000000000000",
+      swapVolume0: "0",
+      swapVolume1: "0",
+    }));
+    const finalPage = [
+      {
+        poolId: POOL_CELO,
+        timestamp: String(nowSec - 2_000 * 3600),
+        reserves0: "500000000000000000000000",
+        reserves1: "500000000000000000000000",
+        swapVolume0: "0",
+        swapVolume1: "0",
+      },
+    ];
+    let celoDailyCallCount = 0;
+    routeByChain({
+      42220: (doc) => {
+        if (doc.includes("PoolDailySnapshot")) {
+          celoDailyCallCount++;
+          return {
+            PoolDailySnapshot: celoDailyCallCount === 1 ? fullPage : finalPage,
+          };
+        }
+        return { Pool: [celoPool] };
+      },
+      143: (doc) => {
+        if (doc.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+        return { Pool: [] };
+      },
+    });
+
+    const result = await fetchHomepageOgDataUncached();
+    expect(result).not.toBeNull();
+    // Both pages fetched → not degraded (final page came back short).
+    // If pagination were broken (single-page only), we'd expect
+    // `volumeSeries === []` via the 1000-cap degraded path.
+    expect(celoDailyCallCount).toBeGreaterThan(1);
   });
 });
