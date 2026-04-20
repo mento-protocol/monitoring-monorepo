@@ -178,13 +178,13 @@ describe("NETWORKS — local development defaults", () => {
     expect(NETWORKS["celo-mainnet-local"].hasuraSecret).toBe("");
   });
 
-  it("uses port 8080 for every local Hasura endpoint", () => {
-    expect(NETWORKS.devnet.hasuraUrl).toBe("http://localhost:8080/v1/graphql");
+  it("defaults local Hasura URLs to same-origin proxy routes", () => {
+    expect(NETWORKS.devnet.hasuraUrl).toBe("/api/hasura/devnet");
     expect(NETWORKS["celo-sepolia-local"].hasuraUrl).toBe(
-      "http://localhost:8080/v1/graphql",
+      "/api/hasura/celo-sepolia-local",
     );
     expect(NETWORKS["celo-mainnet-local"].hasuraUrl).toBe(
-      "http://localhost:8080/v1/graphql",
+      "/api/hasura/celo-mainnet-local",
     );
   });
 });
