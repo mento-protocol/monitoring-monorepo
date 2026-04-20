@@ -15,6 +15,25 @@ describe("POST /api/hasura/[networkId]", () => {
     vi.unstubAllEnvs();
   });
 
+  it("returns 404 in production regardless of env or network", async () => {
+    // Guard: any non-local deploy that accidentally had HASURA_SECRET_* set
+    // would otherwise let unauthenticated callers run admin queries through
+    // us. The route must 404 before touching config when NODE_ENV=production.
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("HASURA_SECRET_DEVNET", "testing");
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const { POST } = await import("../route");
+
+    const req = makeRequest({ query: "{ __typename }" });
+    const res = await POST(req, {
+      params: Promise.resolve({ networkId: "devnet" }),
+    });
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Not found" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("returns 404 for unsupported networks", async () => {
     const { POST } = await import("../route");
     const req = makeRequest({ query: "{ __typename }" });

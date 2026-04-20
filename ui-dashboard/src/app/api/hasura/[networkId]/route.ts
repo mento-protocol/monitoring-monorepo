@@ -35,10 +35,24 @@ function resolveLocalHasuraConfig(networkId: string): LocalHasuraConfig | null {
   }
 }
 
+// Belt-and-suspenders: this proxy only exists to give local dev a way to
+// forward the admin secret to a locally-running Hasura without leaking it
+// into the browser bundle. If `HASURA_SECRET_*` is ever misconfigured on a
+// production/preview deploy (Vercel auto-sets `NODE_ENV=production` for both),
+// an unauthenticated caller could otherwise run admin queries through us —
+// so refuse outright. Vitest sets `NODE_ENV=test`, so tests still exercise
+// the handler.
+function isProxyEnabled(): boolean {
+  return process.env.NODE_ENV !== "production";
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ networkId: string }> },
 ): Promise<Response> {
+  if (!isProxyEnabled()) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const { networkId } = await params;
   const config = resolveLocalHasuraConfig(networkId);
   if (!config) {

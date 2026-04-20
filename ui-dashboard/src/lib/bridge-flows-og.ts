@@ -1,6 +1,6 @@
 import { unstable_cache } from "next/cache";
-import { GraphQLClient } from "graphql-request";
 import { NETWORKS, NETWORK_IDS, type Network } from "@/lib/networks";
+import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import { buildOracleRateMap, type OracleRateMap } from "@/lib/tokens";
 import { ALL_POOLS_WITH_HEALTH } from "@/lib/queries";
 import { BRIDGE_DAILY_SNAPSHOT } from "@/lib/bridge-queries";
@@ -35,13 +35,6 @@ export type BridgeFlowsOgData = {
   chains: string[];
 };
 
-function makeClient(network: Network): GraphQLClient {
-  const secret = network.hasuraSecret.trim();
-  return new GraphQLClient(network.hasuraUrl, {
-    headers: secret ? { "x-hasura-admin-secret": secret } : {},
-  });
-}
-
 /**
  * Configured bridge-eligible chains. Bridge data lives on the single
  * multichain Hasura endpoint (shared between Celo + Monad mainnet entries
@@ -66,12 +59,18 @@ export async function fetchBridgeFlowsOgDataUncached(): Promise<BridgeFlowsOgDat
 
   // Snapshots live on the multichain endpoint; any configured mainnet
   // network works as the query host (same env var backs both).
-  const snapshotClient = makeClient(chains[0]!);
+  // Cap the window to ~45 days — the OG only needs 30d (hero) + 14d (WoW
+  // baseline). Fetching all-time would silently start dropping recent days
+  // once total cardinality exceeds Hasura's 1000-row cap (~83 days at the
+  // current ~12 rows/day rate).
+  const nowSec = Math.floor(Date.now() / 1000);
+  const snapshotAfterSec = nowSec - 45 * SECONDS_PER_DAY;
+  const snapshotClient = makeOgGraphQLClient(chains[0]!);
   const snapshotsPromise = snapshotClient.request<{
     BridgeDailySnapshot: BridgeDailySnapshot[];
   }>({
     document: BRIDGE_DAILY_SNAPSHOT,
-    variables: { afterDate: 0 },
+    variables: { afterDate: snapshotAfterSec },
     signal,
   });
 
@@ -80,7 +79,7 @@ export async function fetchBridgeFlowsOgDataUncached(): Promise<BridgeFlowsOgDat
   // simply doesn't contribute rates; USDm/EURm/GBPm cross-chain prices
   // resolve from whichever chain is still reachable.
   const poolsPromises = chains.map((network) =>
-    makeClient(network)
+    makeOgGraphQLClient(network)
       .request<{ Pool: Pool[] }>({
         document: ALL_POOLS_WITH_HEALTH,
         variables: { chainId: network.chainId },
@@ -120,13 +119,22 @@ export async function fetchBridgeFlowsOgDataUncached(): Promise<BridgeFlowsOgDat
 
   const snapshots = snapshotsResult.value.BridgeDailySnapshot ?? [];
 
-  const usdTotals = windowTotals(snapshots, (s) => snapshotUsdValue(s, rates));
-  const countTotals = windowTotals(snapshots, (s) => s.sentCount ?? 0);
+  // Pass the pre-fetch `nowSec` so the 30d KPI totals, chart cutoff,
+  // and WoW pill all share one timestamp — otherwise `windowTotals` would
+  // call `Date.now()` again post-await and a UTC-midnight straddle could
+  // land 24h totals on day N+1 while the chart sat on day N.
+  const usdTotals = windowTotals(
+    snapshots,
+    (s) => snapshotUsdValue(s, rates),
+    nowSec,
+  );
+  const countTotals = windowTotals(snapshots, (s) => s.sentCount ?? 0, nowSec);
   const fullSeries = buildVolumeUsdSeries(snapshots, rates);
 
   // 30d window for the chart, aligned to UTC midnight (matches the page's
-  // chart + KPI cutoff math in windowTotals).
-  const nowSec = Math.floor(Date.now() / 1000);
+  // chart + KPI cutoff math in windowTotals). Reuses `nowSec` from the
+  // snapshot-fetch window above so the cutoff math is computed against a
+  // single timestamp.
   const cutoff30d =
     nowSec - THIRTY_DAYS - ((nowSec - THIRTY_DAYS) % SECONDS_PER_DAY);
   const volumeSeries = fullSeries

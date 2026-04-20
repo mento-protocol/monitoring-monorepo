@@ -16,9 +16,23 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Static fallback for every route. The homepage overrides via its own
+// `generateMetadata` in `app/page.tsx` — keeping the dynamic fetch scoped
+// there so non-homepage routes don't inherit the cross-chain I/O latency
+// when the OG cache is cold.
 export const metadata: Metadata = {
   title: "Mento Analytics",
   description: "Cross-chain analytics dashboard for Mento protocol",
+  openGraph: {
+    title: "Mento Analytics",
+    description: "Cross-chain analytics dashboard for Mento protocol",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Mento Analytics",
+    description: "Cross-chain analytics dashboard for Mento protocol",
+  },
 };
 
 export default async function RootLayout({

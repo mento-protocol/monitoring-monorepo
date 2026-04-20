@@ -1,7 +1,7 @@
 import { unstable_cache } from "next/cache";
-import { GraphQLClient } from "graphql-request";
 import { isNamespacedPoolId, extractChainIdFromPoolId } from "@/lib/pool-id";
 import { NETWORKS, networkIdForChainId, type Network } from "@/lib/networks";
+import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import {
   buildOracleRateMap,
   canValueTvl,
@@ -75,10 +75,6 @@ export type PoolOgData = {
   oracleFresh: boolean;
 };
 
-function makeClient(network: Network): GraphQLClient {
-  return new GraphQLClient(network.hasuraUrl);
-}
-
 // Only namespaced `{chainId}-0x...` IDs are supported. Bare 0x addresses
 // would need cross-network probing here, but the pool page at
 // app/pool/[poolId]/page.tsx normalizes bare addresses against
@@ -107,7 +103,7 @@ export async function fetchPoolOgDataUncached(
   const network = NETWORKS[networkId];
   if (!network.hasuraUrl) return null;
 
-  const client = makeClient(network);
+  const client = makeOgGraphQLClient(network);
 
   // Per-request timeout. Without this, a hung upstream prevents allSettled
   // from resolving and the OG route blocks until Vercel's function timeout.

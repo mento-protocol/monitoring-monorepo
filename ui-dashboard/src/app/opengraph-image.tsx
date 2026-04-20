@@ -1,8 +1,5 @@
 import { ImageResponse } from "next/og";
-import {
-  fetchBridgeFlowsOgData,
-  type BridgeFlowsOgData,
-} from "@/lib/bridge-flows-og";
+import { fetchHomepageOgData, type HomepageOgData } from "@/lib/homepage-og";
 import { formatUSD } from "@/lib/format";
 
 export const runtime = "nodejs";
@@ -19,6 +16,7 @@ const TILE_BORDER = "#334155";
 
 const OK_COLOR = "#34d399";
 const CRITICAL_COLOR = "#f87171";
+const WARN_COLOR = "#fbbf24";
 
 function formatWoW(pct: number): { text: string; color: string } {
   const arrow = pct >= 0 ? "▲" : "▼";
@@ -28,32 +26,34 @@ function formatWoW(pct: number): { text: string; color: string } {
   };
 }
 
-function buildAlt(data: BridgeFlowsOgData | null): string {
-  if (!data) return "Mento Bridge Flows — Wormhole cross-chain transfers";
-  const parts: string[] = ["Mento Bridge Flows"];
-  // `null` = snapshots query failed → skip; `0` = truly empty window → keep.
-  if (data.volume30dUsd != null) {
-    parts.push(`30d volume ${formatUSD(data.volume30dUsd)}`);
+function buildAlt(data: HomepageOgData | null): string {
+  if (!data) return "Mento Analytics — cross-chain protocol overview";
+  const parts: string[] = ["Mento Analytics"];
+  if (data.partial) {
+    parts.push(`partial — ${data.offlineChains.join(", ")} offline`);
   }
-  if (data.totalTransfers30d != null) {
-    parts.push(
-      `${data.totalTransfers30d.toLocaleString()} ${
-        data.totalTransfers30d === 1 ? "transfer" : "transfers"
-      }`,
-    );
+  // `null` = unavailable; `0` = real empty state worth surfacing.
+  if (data.totalTvlUsd != null) {
+    parts.push(`TVL ${formatUSD(data.totalTvlUsd)}`);
   }
-  if (data.chains.length > 0) {
-    parts.push(`on ${data.chains.join(" + ")}`);
+  if (data.totalVolume7dUsd != null) {
+    parts.push(`7d volume ${formatUSD(data.totalVolume7dUsd)}`);
   }
-  if (data.volumeWoWPct != null) {
-    parts.push(formatWoW(data.volumeWoWPct).text);
-  }
+  parts.push(`${data.poolCount} pools on ${data.chains.join(" + ")}`);
+  const attention =
+    (data.healthBuckets.WARN ?? 0) + (data.healthBuckets.CRITICAL ?? 0);
+  parts.push(
+    attention === 0
+      ? "all healthy"
+      : `${attention} ${attention === 1 ? "needs" : "need"} attention`,
+  );
   return parts.join(" · ");
 }
 
-// Full-width volume chart, mirroring the homepage TVL OG's area+line style
-// so the three OGs (home, pool, bridge) share a visual grammar.
-function VolumeChart({ series }: { series: number[] }) {
+// Large TVL line chart — fills most of the card as the single main KPI
+// after the hero number. Draws a filled area under the line for extra
+// visual weight at Slack-thumbnail scale.
+function TvlChart({ series }: { series: number[] }) {
   if (series.length < 2) return null;
   const w = 1088;
   const h = 280;
@@ -88,20 +88,11 @@ function VolumeChart({ series }: { series: number[] }) {
   );
 }
 
-function Card({ data }: { data: BridgeFlowsOgData | null }) {
-  // null → "—" (snapshot query failed); 0 → "$0" (genuinely no bridge
-  // activity in the 30d window). Don't conflate.
-  const volume =
-    data && data.volume30dUsd != null
-      ? data.volume30dUsd > 0
-        ? formatUSD(data.volume30dUsd)
-        : "$0"
-      : "—";
-  const wow = data?.volumeWoWPct != null ? formatWoW(data.volumeWoWPct) : null;
-  const chainsLabel =
-    data && data.chains.length > 0
-      ? `Wormhole · ${data.chains.join(" · ")}`
-      : "Wormhole";
+function Card({ data }: { data: HomepageOgData | null }) {
+  // null → "—" (unavailable); 0 → "$0.00" (real empty state).
+  const tvl =
+    data && data.totalTvlUsd != null ? formatUSD(data.totalTvlUsd) : "—";
+  const tvlWow = data?.tvlWoWPct != null ? formatWoW(data.tvlWoWPct) : null;
 
   return (
     <div
@@ -141,21 +132,43 @@ function Card({ data }: { data: BridgeFlowsOgData | null }) {
               color: TEXT,
             }}
           >
-            Mento Bridge Flows
+            Mento Analytics
           </span>
         </div>
-        <span
-          style={{
-            fontSize: 26,
-            padding: "12px 26px",
-            borderRadius: 999,
-            background: TILE_BG,
-            border: `1px solid ${TILE_BORDER}`,
-            color: MUTED,
-          }}
-        >
-          {chainsLabel}
-        </span>
+        {data ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            {data.partial ? (
+              <span
+                style={{
+                  fontSize: 22,
+                  fontWeight: 600,
+                  padding: "10px 20px",
+                  borderRadius: 999,
+                  background: "rgba(251, 191, 36, 0.15)",
+                  border: "1px solid rgba(251, 191, 36, 0.4)",
+                  color: WARN_COLOR,
+                }}
+              >
+                Partial · {data.offlineChains.join(", ")} offline
+              </span>
+            ) : null}
+            <span style={{ fontSize: 24, color: MUTED }}>
+              {data.poolCount} pools
+            </span>
+            <span
+              style={{
+                fontSize: 26,
+                padding: "12px 26px",
+                borderRadius: 999,
+                background: TILE_BG,
+                border: `1px solid ${TILE_BORDER}`,
+                color: MUTED,
+              }}
+            >
+              {data.chains.join(" · ")}
+            </span>
+          </div>
+        ) : null}
       </div>
 
       <div
@@ -180,17 +193,17 @@ function Card({ data }: { data: BridgeFlowsOgData | null }) {
               color: MUTED,
             }}
           >
-            Bridged Volume (30d)
+            Total TVL
           </span>
-          {wow ? (
+          {tvlWow ? (
             <span
               style={{
                 fontSize: 24,
                 fontWeight: 600,
-                color: wow.color,
+                color: tvlWow.color,
               }}
             >
-              {wow.text}
+              {tvlWow.text}
             </span>
           ) : null}
         </div>
@@ -203,7 +216,7 @@ function Card({ data }: { data: BridgeFlowsOgData | null }) {
             lineHeight: 1,
           }}
         >
-          {volume}
+          {tvl}
         </span>
       </div>
 
@@ -213,28 +226,39 @@ function Card({ data }: { data: BridgeFlowsOgData | null }) {
           flexDirection: "column",
           flex: 1,
           justifyContent: "flex-end",
+          gap: 10,
+          marginTop: 32,
         }}
       >
-        {data && data.volumeSeries.length >= 2 ? (
-          <VolumeChart series={data.volumeSeries} />
+        {data && data.tvlSeries.length >= 2 ? (
+          <>
+            <TvlChart series={data.tvlSeries} />
+            <span
+              style={{
+                fontSize: 18,
+                letterSpacing: 1.5,
+                textTransform: "uppercase",
+                color: MUTED,
+                alignSelf: "flex-end",
+              }}
+            >
+              Last 30 days
+            </span>
+          </>
         ) : null}
       </div>
     </div>
   );
 }
 
-// 60s fresh / 24h stale-while-revalidate. Matches the homepage OG cadence;
-// bridge data changes minute-to-minute, so 1h (pool OG cadence) would feel
-// stale in Slack unfurls.
+// 60s fresh / 24h stale-while-revalidate. Edge CDN serves stale bytes
+// instantly while refreshing in the background — so an incident-state
+// flip propagates in ~60s, not ~1h.
 const IMAGE_CACHE_CONTROL =
   "public, max-age=60, s-maxage=60, stale-while-revalidate=86400";
 
-// Both Next.js entry points fetch the same data — `unstable_cache` inside
-// `fetchBridgeFlowsOgData` deduplicates them so the GraphQL request only
-// fires once per 60s revalidation window. Mirrors the homepage + pool OG
-// pattern; intentional, not a missed memo.
 export async function generateImageMetadata() {
-  const data = await fetchBridgeFlowsOgData();
+  const data = await fetchHomepageOgData();
   return [
     {
       id: "og",
@@ -246,7 +270,7 @@ export async function generateImageMetadata() {
 }
 
 export default async function Image() {
-  const data = await fetchBridgeFlowsOgData();
+  const data = await fetchHomepageOgData();
   return new ImageResponse(<Card data={data} />, {
     ...size,
     headers: { "Cache-Control": IMAGE_CACHE_CONTROL },
