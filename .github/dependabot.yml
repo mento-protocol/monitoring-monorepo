@@ -1,0 +1,19 @@
+version: 2
+
+# Keep GitHub Actions pinned to commit SHAs (not floating tags). This file is
+# scoped to github-actions only so Dependabot opens a PR whenever an action
+# we use tags a new release, letting us refresh the pinned SHA under review.
+# npm updates for this monorepo are handled out-of-band (pnpm workspace).
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+      include: scope
+    labels:
+      - ci
+      - dependencies
