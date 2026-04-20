@@ -34,6 +34,10 @@ lint:
       paths:
         - terraform/main.tf
         - pnpm-lock.yaml
+        # Ethereum contract addresses look like base64 high-entropy strings to checkov;
+        # this file holds only public proxy + token addresses generated from
+        # @mento-protocol/contracts by scripts/generateNttAddresses.mjs.
+        - indexer-envio/config/nttAddresses.json
   enabled:
     - checkov@3.2.506
     - eslint@10.0.2

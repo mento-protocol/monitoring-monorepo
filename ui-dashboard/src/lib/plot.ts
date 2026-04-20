@@ -3,6 +3,12 @@
  * Import and spread into chart-specific layouts to reduce duplication.
  */
 
+/** Plot / content area height for the standard row-embedded chart cards
+ *  (TimeSeriesChartCard, and the bridge-flows sibling cards that sit in the
+ *  same row). Centralized so tweaking one card doesn't silently desync
+ *  neighbours in the same grid row. */
+export const ROW_CHART_HEIGHT_PX = 200;
+
 /** Axis styling shared across all charts. */
 export const PLOTLY_AXIS_DEFAULTS = {
   gridcolor: "#1e293b",

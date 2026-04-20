@@ -315,3 +315,190 @@ type OlsLifecycleEvent {
   blockNumber: BigInt!
   blockTimestamp: BigInt!
 }
+
+# ============================================================================
+# Bridge Flows — generic (provider-agnostic) core
+#
+# Any bridge provider (Wormhole NTT today; LayerZero / Axelar / CCTP later)
+# writes to these entities. Provider-specific fields live in the extension
+# tables below (e.g. WormholeTransferDetail).
+#
+# BridgeTransfer.id = "{provider}-{providerMessageId}", lowercase, URL-safe.
+# ============================================================================
+
+enum BridgeProvider {
+  WORMHOLE
+}
+
+type BridgeTransfer {
+  id: ID! # "{provider}-{providerMessageId}", lowercased
+  provider: BridgeProvider! @index
+  providerMessageId: String! @index # Wormhole digest; LayerZero GUID; etc.
+  status: String! @index # PENDING | SENT | ATTESTED | DELIVERED | QUEUED_INBOUND | CANCELLED | FAILED. Source-side queue (QUEUED_OUTBOUND) is intentionally omitted — see src/wormhole/status.ts.
+  tokenSymbol: String! @index
+  tokenAddress: String!
+  tokenDecimals: Int!
+
+  sourceChainId: Int
+  sourceContract: String # provider's source-chain dispatch contract (e.g. NttManager)
+  destChainId: Int
+  destContract: String
+
+  sender: String @index
+  recipient: String @index
+  amount: BigInt
+
+  sentBlock: BigInt
+  sentTimestamp: BigInt @index
+  sentTxHash: String
+
+  attestationCount: Int!
+  firstAttestedTimestamp: BigInt
+  lastAttestedTimestamp: BigInt
+
+  deliveredBlock: BigInt
+  deliveredTimestamp: BigInt
+  deliveredTxHash: String
+
+  cancelledTimestamp: BigInt
+  failedReason: String
+
+  # Nullable while USD pricing is deferred (plan §1.5). Mirrors the deferral
+  # annotation on BridgeDailySnapshot.sentUsdValue — no handler writes these
+  # today; UI falls back to live oracle rates.
+  usdPriceAtSend: String # fixed-point 18dp string
+  usdValueAtSend: String # 2dp string, lex-sortable
+  # `BRIDGE_TRANSFERS_WINDOW` polls Hasura every 10s with `_gte` + descending
+  # sort on this field, so it needs an index to avoid full scans under load.
+  firstSeenAt: BigInt! @index
+  lastUpdatedAt: BigInt!
+}
+
+type BridgeAttestation {
+  id: ID! # "{transferId}-{attester}-{attesterIndex}"
+  transferId: String! @index
+  provider: BridgeProvider!
+  attester: String! # guardian address (Wormhole); DVN address (LayerZero)
+  attesterIndex: Int
+  chainId: Int!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
+  txHash: String!
+}
+
+type BridgeDailySnapshot {
+  id: ID! # "{dayTs}-{provider}-{tokenSymbol}-{sourceChainId}-{destChainId}"
+  date: BigInt! @index
+  provider: BridgeProvider!
+  tokenSymbol: String! @index
+  sourceChainId: Int! @index
+  destChainId: Int! @index
+  sentCount: Int!
+  deliveredCount: Int!
+  cancelledCount: Int!
+  sentVolume: BigInt!
+  deliveredVolume: BigInt!
+  # Nullable while USD pricing is deferred (plan §1.5). Writers set null
+  # rather than a "0.00" sentinel so consumers can distinguish "no USD
+  # computation yet" from "genuinely zero value".
+  sentUsdValue: String
+  updatedAt: BigInt!
+}
+
+type BridgeBridger {
+  id: ID! # lowercase sender address (cross-chain identity)
+  sender: String! @index
+  totalSentCount: Int!
+  # Nullable while USD pricing is deferred (plan §1.5). See sentUsdValue
+  # comment on BridgeDailySnapshot.
+  totalSentUsd: String
+  sourceChainsUsed: String! # JSON array of EVM chainIds
+  tokensUsed: String! # JSON array of token symbols
+  providersUsed: String! # JSON array of BridgeProvider values
+  firstSeenAt: BigInt!
+  lastSeenAt: BigInt!
+}
+
+# ============================================================================
+# Bridge Flows — Wormhole-specific extension
+#
+# These entities only exist for Wormhole-originated transfers. Adding a new
+# provider means adding sibling entities (e.g. LayerZeroTransferDetail); the
+# generic entities above are untouched.
+# ============================================================================
+
+type WormholeNttManager {
+  id: ID! # "{chainId}-{nttManagerAddr}", lowercased
+  chainId: Int! @index
+  nttManager: String! @index
+  transceiver: String! @index
+  helper: String!
+  tokenAddress: String! @index
+  tokenSymbol: String! @index
+  tokenDecimals: Int!
+  wormholeChainId: Int!
+  rateFeedId: String
+  seededAtTimestamp: BigInt! # block.timestamp of the first event that seeded this row
+}
+
+type WormholeTransferDetail {
+  id: ID! # == BridgeTransfer.id
+  digest: String! @index # NTT manager-layer digest (TransceiverStructs.nttManagerMessageDigest). Used by TransferSent/TransferRedeemed/MessageAttestedTo. This is the BridgeTransfer primary-key suffix.
+  transceiverDigest: String @index # Wormhole transceiver-layer digest (TransceiverStructs.transceiverMessageDigest), different bytestring from `digest`. Populated on the destination side when ReceivedMessage pairs with MessageAttestedTo/TransferRedeemed in the same tx.
+  msgSequence: BigInt @index # Wormhole VAA sequence number, unique per (emitterChain, emitterAddress).
+  sourceWormholeChainId: Int
+  destWormholeChainId: Int
+  refundAddress: String
+  fee: BigInt # Wormhole delivery fee, native token (not USD)
+  # Dest-side rate-limit queue. Source-side queue events carry only a sequence,
+  # not a digest, so they cannot be correlated to a BridgeTransfer in v1.
+  inboundQueuedTimestamp: BigInt
+}
+
+# Scratch table for dest-side pairing of ReceivedMessage → MessageAttestedTo
+# (or TransferRedeemed) within a single destination-chain transaction.
+#
+# Why it's necessary: ReceivedMessage carries the transceiver-layer digest
+# (TransceiverStructs.transceiverMessageDigest), which is a DIFFERENT
+# bytestring from the NTT manager-layer digest emitted by TransferSent /
+# MessageAttestedTo / TransferRedeemed. The BridgeTransfer entity is keyed
+# by the manager digest, so ReceivedMessage cannot directly create or
+# enrich the row — it would produce orphans keyed by the wrong digest.
+#
+# Pairing: within a single destination-chain tx, NTT emits (in logIndex order)
+#   1. Transceiver: ReceivedMessage(transceiverDigest, emitterChain, emitterAddress, sequence)
+#   2. NttManager:  MessageAttestedTo(managerDigest, transceiver, index)
+#   3. NttManager:  TransferRedeemed(managerDigest)    -- only if threshold met
+# The MessageAttestedTo/TransferRedeemed handler walks backward through
+# logIndex to find the scratch row and drains it: stamping the source
+# identity (sourceChainId, sourceTransceiver) and transceiverDigest onto
+# the BridgeTransfer/detail keyed by the authoritative manager digest.
+# Steady-state count = 0.
+type WormholeDestPending {
+  id: ID! # "{chainId}-{txHash}-{logIndex}", ephemeral — should be 0 rows in steady state.
+  chainId: Int! # destination chain id
+  txHash: String!
+  transceiverDigest: String! # digest as seen in ReceivedMessage (transceiver-layer)
+  sourceChainId: Int! # resolved from emitterChainId via WORMHOLE_TO_EVM_CHAIN_ID
+  sourceTransceiver: String! # bytes32ToAddress(emitterAddress) — source-chain transceiver proxy
+  sourceWormholeChainId: Int! # raw Wormhole chain id of source
+  msgSequence: BigInt!
+  destTransceiver: String! # event.srcAddress — the receiving transceiver proxy
+  blockTimestamp: BigInt!
+}
+
+type WormholeTransferPending {
+  id: ID! # "{chainId}-{txHash}-{logIndex}", ephemeral — should be 0 rows in steady state. logIndex is load-bearing: a single tx can emit multiple TransferSent pairs (wrapper contracts), and keying only by txHash would collide.
+  chainId: Int!
+  txHash: String!
+  nttManager: String!
+  sender: String!
+  recipient: String!
+  refundAddress: String!
+  amount: BigInt!
+  fee: BigInt!
+  recipientWormholeChainId: Int!
+  msgSequence: BigInt!
+  sentBlock: BigInt!
+  sentTimestamp: BigInt!
+}

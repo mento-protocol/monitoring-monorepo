@@ -1,0 +1,65 @@
+{
+  "$generated": true,
+  "entries": [
+    {
+      "chainId": 143,
+      "wormholeChainId": 48,
+      "tokenSymbol": "EURm",
+      "tokenAddress": "0x4d502d735b4c574b487ed641ae87ceae884731c7",
+      "tokenDecimals": 18,
+      "helper": "0x0e72e26e4e08779d08b2a52f59f41e6659a3547d",
+      "nttManagerProxy": "0x5f8a1e50f83f53951b89fc73ead80b27045c67fd",
+      "transceiverProxy": "0x6467cfca82184657f32f1195f9a26b5578399479"
+    },
+    {
+      "chainId": 143,
+      "wormholeChainId": 48,
+      "tokenSymbol": "GBPm",
+      "tokenAddress": "0x39bb4e0a204412bb98e821d25e7d955e69d40fd1",
+      "tokenDecimals": 18,
+      "helper": "0xf3797e9d818a47a3a604bf2346e4ff50b56ad5c4",
+      "nttManagerProxy": "0x7895d03ffdeb14a57ef79c21c3ea14dadf2a7c3f",
+      "transceiverProxy": "0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f"
+    },
+    {
+      "chainId": 143,
+      "wormholeChainId": 48,
+      "tokenSymbol": "USDm",
+      "tokenAddress": "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",
+      "tokenDecimals": 18,
+      "helper": "0x37316334108c816f9862bab52347a0aab7551127",
+      "nttManagerProxy": "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+      "transceiverProxy": "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b"
+    },
+    {
+      "chainId": 42220,
+      "wormholeChainId": 14,
+      "tokenSymbol": "EURm",
+      "tokenAddress": "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73",
+      "tokenDecimals": 18,
+      "helper": "0x0e72e26e4e08779d08b2a52f59f41e6659a3547d",
+      "nttManagerProxy": "0x5f8a1e50f83f53951b89fc73ead80b27045c67fd",
+      "transceiverProxy": "0x6467cfca82184657f32f1195f9a26b5578399479"
+    },
+    {
+      "chainId": 42220,
+      "wormholeChainId": 14,
+      "tokenSymbol": "GBPm",
+      "tokenAddress": "0xccf663b1ff11028f0b19058d0f7b674004a40746",
+      "tokenDecimals": 18,
+      "helper": "0xf3797e9d818a47a3a604bf2346e4ff50b56ad5c4",
+      "nttManagerProxy": "0x7895d03ffdeb14a57ef79c21c3ea14dadf2a7c3f",
+      "transceiverProxy": "0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f"
+    },
+    {
+      "chainId": 42220,
+      "wormholeChainId": 14,
+      "tokenSymbol": "USDm",
+      "tokenAddress": "0x765de816845861e75a25fca122bb6898b8b1282a",
+      "tokenDecimals": 18,
+      "helper": "0x37316334108c816f9862bab52347a0aab7551127",
+      "nttManagerProxy": "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+      "transceiverProxy": "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b"
+    }
+  ]
+}
