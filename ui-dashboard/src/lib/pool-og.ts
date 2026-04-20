@@ -17,6 +17,7 @@ import {
   isOracleFresh,
   type HealthStatus,
 } from "@/lib/health";
+import { isWeekend } from "@/lib/weekend";
 import { ALL_POOLS_WITH_HEALTH, POOL_DETAIL_WITH_HEALTH } from "@/lib/queries";
 import { parseWei } from "@/lib/format";
 import type { Pool, PoolSnapshot } from "@/lib/types";
@@ -56,6 +57,10 @@ export type PoolOgData = {
   tvlWoWPct: number | null;
   volume7dUsd: number | null;
   health: HealthStatus;
+  /** Short reasons behind the current health — empty for OK/N/A/WEEKEND.
+   * Mirrors the sub-parts that drive computeEffectiveStatus so the card
+   * can answer "why needs attention?" without a second data fetch. */
+  healthReasons: string[];
   /** Chronological TVL series (oldest→newest), up to 14 daily points. */
   tvlSeries: number[];
   /** Seconds since last oracle update; null for virtual pools / missing data. */
@@ -173,10 +178,42 @@ export async function fetchPoolOgDataUncached(
     tvlWoWPct,
     volume7dUsd,
     health: computeEffectiveStatus(pool, chainId),
+    healthReasons: computeHealthReasons(pool, chainId),
     tvlSeries,
     oracleAgeSeconds: oracle.ageSeconds,
     oracleFresh: oracle.fresh,
   };
+}
+
+/** Enumerate the specific sub-issues driving a pool's effective health.
+ * Returns [] for healthy pools and WEEKEND (where the "reason" is the
+ * status itself — markets closed). Each reason is a short lowercase
+ * phrase suitable for display in meta descriptions and card sublines. */
+function computeHealthReasons(pool: Pool, chainId: number): string[] {
+  if (pool.source?.includes("virtual")) return [];
+  const reasons: string[] = [];
+  const now = Math.floor(Date.now() / 1000);
+
+  if (!isOracleFresh(pool, now, chainId)) {
+    // WEEKEND staleness is expected (FX markets closed) — surfaced via
+    // the "Markets closed" label, not as a reason line.
+    if (!isWeekend()) reasons.push("oracle stale");
+  } else {
+    const diff = Number(pool.priceDifference ?? "0");
+    const threshold =
+      (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
+    const devRatio = diff / threshold;
+    if (devRatio > 1.0) reasons.push("price deviation breach");
+    else if (devRatio >= 0.8) reasons.push("price deviation rising");
+  }
+
+  const p0 = Number(pool.limitPressure0 ?? "0");
+  const p1 = Number(pool.limitPressure1 ?? "0");
+  const maxPressure = Math.max(p0, p1);
+  if (maxPressure >= 1.0) reasons.push("trading limits breached");
+  else if (maxPressure >= 0.8) reasons.push("trading limits near cap");
+
+  return reasons;
 }
 
 function computeVolume7d(

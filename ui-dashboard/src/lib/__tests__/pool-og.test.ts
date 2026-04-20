@@ -235,6 +235,7 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result!.volume7dUsd).toBeCloseTo(100_000, -2);
     expect(result!.tvlWoWPct).toBeCloseTo(25, 0);
     expect(result!.health).toBe("OK");
+    expect(result!.healthReasons).toEqual([]);
     // Sparkline: newest-first rows reversed → oldest→newest TVL values.
     // Snapshot 2 (7d-ago) reserves 800K+800K = 1.6M, snapshot 1 (1d-ago) 900K+900K = 1.8M.
     expect(result!.tvlSeries).toHaveLength(2);
@@ -305,6 +306,25 @@ describe("fetchPoolOgDataUncached", () => {
     // breach surfaces here. Label in UI reads "Health" (not "Rebalance") —
     // see buildDescription/buildAlt/Tile label="Health".
     expect(result!.health).toBe("CRITICAL");
+    expect(result!.healthReasons).toContain("trading limits breached");
+  });
+
+  it("explains a WARN health as 'price deviation rising' when applicable", async () => {
+    // Oracle fresh, deviation at 85% of threshold — healthy oracle, rising
+    // price. computeHealthStatus → WARN; reason should surface via
+    // healthReasons so the card explains *why* attention is needed.
+    const detailPool = makeDetailPool({
+      priceDifference: "8500",
+      rebalanceThreshold: 10000,
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.health).toBe("WARN");
+    expect(result!.healthReasons).toContain("price deviation rising");
   });
 
   it("suppresses TVL-derived fields for unpriceable FX/FX pool when rate map unavailable", async () => {
