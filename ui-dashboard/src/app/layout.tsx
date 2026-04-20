@@ -8,8 +8,6 @@ import { AddressLabelsProvider } from "@/components/address-labels-provider";
 import { NavLinks } from "@/components/nav-links";
 import { AuthStatus } from "@/components/auth-status";
 import { SwrProvider } from "@/components/swr-provider";
-import { fetchHomepageOgData } from "@/lib/homepage-og";
-import { formatUSD } from "@/lib/format";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -18,70 +16,24 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// 60s — operational stats (TVL, health, attention count) matter fresh,
-// not cached for an hour. Matches the helper + image route TTLs below.
-export const revalidate = 60;
-
-const FALLBACK_TITLE = "Mento Analytics";
-const FALLBACK_DESCRIPTION =
-  "Cross-chain analytics dashboard for Mento protocol";
-
-function buildDescription(
-  data: NonNullable<Awaited<ReturnType<typeof fetchHomepageOgData>>>,
-): string {
-  const parts: string[] = [];
-  // Lead with a partial-overview warning when any chain is offline — the
-  // surviving-chain numbers aren't protocol-wide in that case.
-  if (data.partial) {
-    parts.push(`Partial — ${data.offlineChains.join(", ")} offline`);
-  }
-  // `null` = unavailable (omit); `0` = real empty state (render as "$0.00").
-  if (data.totalTvlUsd != null)
-    parts.push(`TVL ${formatUSD(data.totalTvlUsd)}`);
-  if (data.totalVolume7dUsd != null) {
-    parts.push(`7d volume ${formatUSD(data.totalVolume7dUsd)}`);
-  }
-  parts.push(`${data.poolCount} pools on ${data.chains.join(" + ")}`);
-  const { WARN = 0, CRITICAL = 0 } = data.healthBuckets;
-  const attention = WARN + CRITICAL;
-  if (attention > 0) parts.push(`${attention} need attention`);
-  return parts.join(" · ");
-}
-
-export async function generateMetadata(): Promise<Metadata> {
-  const data = await fetchHomepageOgData();
-  if (!data) {
-    return {
-      title: FALLBACK_TITLE,
-      description: FALLBACK_DESCRIPTION,
-      openGraph: {
-        title: FALLBACK_TITLE,
-        description: FALLBACK_DESCRIPTION,
-        type: "website",
-      },
-      twitter: {
-        card: "summary_large_image",
-        title: FALLBACK_TITLE,
-        description: FALLBACK_DESCRIPTION,
-      },
-    };
-  }
-  const description = buildDescription(data);
-  return {
-    title: FALLBACK_TITLE,
-    description,
-    openGraph: {
-      title: FALLBACK_TITLE,
-      description,
-      type: "website",
-    },
-    twitter: {
-      card: "summary_large_image",
-      title: FALLBACK_TITLE,
-      description,
-    },
-  };
-}
+// Static fallback for every route. The homepage overrides via its own
+// `generateMetadata` in `app/page.tsx` — keeping the dynamic fetch scoped
+// there so non-homepage routes don't inherit the cross-chain I/O latency
+// when the OG cache is cold.
+export const metadata: Metadata = {
+  title: "Mento Analytics",
+  description: "Cross-chain analytics dashboard for Mento protocol",
+  openGraph: {
+    title: "Mento Analytics",
+    description: "Cross-chain analytics dashboard for Mento protocol",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Mento Analytics",
+    description: "Cross-chain analytics dashboard for Mento protocol",
+  },
+};
 
 export default async function RootLayout({
   children,

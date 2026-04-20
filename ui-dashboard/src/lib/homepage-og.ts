@@ -13,7 +13,7 @@ import {
   type OracleRateMap,
 } from "@/lib/tokens";
 import { computeEffectiveStatus, type HealthStatus } from "@/lib/health";
-import { ALL_POOLS_WITH_HEALTH, POOL_DAILY_SNAPSHOTS_ALL } from "@/lib/queries";
+import { ALL_POOLS_WITH_HEALTH } from "@/lib/queries";
 import { parseWei } from "@/lib/format";
 import type { Pool, PoolSnapshot } from "@/lib/types";
 
@@ -25,12 +25,46 @@ const FOURTEEN_DAYS = 14 * SECONDS_PER_DAY;
 const TVL_CHART_DAYS = 30;
 const VOLUME_SPARKLINE_DAYS = 14;
 const MAX_ATTENTION_POOLS = 3;
+// Daily-snapshot fetch window: 30d chart + 7d WoW baseline + small buffer.
+// Bounds the per-chain row count to ~N_pools × 35 — at current scale a
+// single page covers every chain; the pagination loop is just headroom
+// for future pool growth. Without a window filter this query would
+// fetch every row PoolDailySnapshot ever produced per chain.
+const DAILY_SINCE_DAYS = 35;
 // Pagination settings for the daily-snapshot fetch. Hasura silently caps
-// at 1000 rows, so we page until a response comes back short. SAFETY_CAP
-// bounds total work at ~5000 rows per chain (plenty for years of history
-// across any realistic pool count).
+// at 1000 rows, so we page until a response comes back short. The safety
+// cap protects against catastrophic runaway only — with the $since filter
+// in place, we should never come close at realistic scale.
 const DAILY_PAGE_SIZE = 1000;
 const DAILY_MAX_PAGES = 5;
+
+// OG-specific multi-pool daily-snapshot query. Bounded by $since so we
+// never scan the full table, even for chains with years of history.
+// Pagination still loops in case a chain has many pools × 35 days that
+// overflows a single 1000-row page (50 pools × 35d = 1750 rows).
+const HOMEPAGE_OG_DAILY_SNAPSHOTS = `
+  query HomepageOgDailySnapshots(
+    $poolIds: [String!]!
+    $since: numeric!
+    $limit: Int!
+    $offset: Int!
+  ) {
+    PoolDailySnapshot(
+      where: { poolId: { _in: $poolIds }, timestamp: { _gte: $since } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+      offset: $offset
+    ) {
+      poolId
+      timestamp
+      reserves0
+      reserves1
+      swapCount
+      swapVolume0
+      swapVolume1
+    }
+  }
+`;
 
 export type AttentionPool = {
   name: string;
@@ -104,22 +138,24 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
     };
   }
 
-  // Paginate daily snapshots via POOL_DAILY_SNAPSHOTS_ALL (1000-row
-  // Hasura cap). The query is ordered newest-first, so the first N pages
-  // always contain the most recent N×1000 rows — well above the 30-day
-  // OG window at realistic pool counts. Hitting the safety cap just means
-  // the chain has more total history than we care about, not that the
-  // recent data we need is missing; only an exception flips dailyDegraded.
+  // Paginate the daily-snapshot window (1000-row Hasura cap). With the
+  // $since filter the payload is bounded to ~N_pools × DAILY_SINCE_DAYS
+  // rows per chain; at current scale one page covers everything. Only an
+  // exception flips dailyDegraded — a full final page just means the
+  // chain has >5000 recent-window rows, which is still a successful read.
   const poolIds = pools.map((p) => p.id);
+  const since =
+    Math.floor(Date.now() / 1000) - DAILY_SINCE_DAYS * SECONDS_PER_DAY;
   const seen = new Set<string>();
   const daily: PoolSnapshot[] = [];
   let dailyDegraded = false;
   try {
     for (let page = 0; page < DAILY_MAX_PAGES; page++) {
       const res = await client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
-        document: POOL_DAILY_SNAPSHOTS_ALL,
+        document: HOMEPAGE_OG_DAILY_SNAPSHOTS,
         variables: {
           poolIds,
+          since,
           limit: DAILY_PAGE_SIZE,
           offset: page * DAILY_PAGE_SIZE,
         },
@@ -303,11 +339,15 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
 
 type PriceableEntry = { pool: Pool; slice: ChainSlice };
 
+// Returns `null` when neither token leg can be valued in USD — treating
+// those rows as "unavailable" rather than silently counting them as $0.
+// Callers skip null rows to avoid conflating unpriceable windows with
+// real-zero-volume windows.
 function rowUsdVolume(
   row: PoolSnapshot,
   pool: Pool,
   slice: ChainSlice,
-): number {
+): number | null {
   const sym0 = tokenSymbol(slice.network, pool.token0 ?? null);
   const sym1 = tokenSymbol(slice.network, pool.token1 ?? null);
   const d0 = pool.token0Decimals ?? 18;
@@ -318,8 +358,7 @@ function rowUsdVolume(
   if (USDM_SYMBOLS.has(sym1)) return v1;
   const u0 = tokenToUSD(sym0, v0, slice.rates);
   if (u0 !== null) return u0;
-  const u1 = tokenToUSD(sym1, v1, slice.rates);
-  return u1 ?? 0;
+  return tokenToUSD(sym1, v1, slice.rates);
 }
 
 function sumVolumeInWindow(
@@ -334,7 +373,9 @@ function sumVolumeInWindow(
       if (row.poolId !== pool.id) continue;
       const ts = Number(row.timestamp);
       if (ts < fromSec || ts >= toSec) continue;
-      sum += rowUsdVolume(row, pool, slice);
+      const v = rowUsdVolume(row, pool, slice);
+      if (v === null) continue;
+      sum += v;
       any = true;
     }
   }
@@ -342,15 +383,17 @@ function sumVolumeInWindow(
 }
 
 // Per-day aggregate USD volume across all priceable pools, chronological.
-// Days without any snapshot are omitted — better to show a shorter line
-// than invent carry-forward values.
+// Days without any priceable snapshot are omitted — better to show a
+// shorter line than invent carry-forward or $0-from-unpriceable values.
 function computeDailyVolumeSeries(entries: PriceableEntry[]): number[] {
   const perDay = new Map<number, number>();
   for (const { pool, slice } of entries) {
     for (const row of slice.daily) {
       if (row.poolId !== pool.id) continue;
+      const v = rowUsdVolume(row, pool, slice);
+      if (v === null) continue;
       const ts = Number(row.timestamp);
-      perDay.set(ts, (perDay.get(ts) ?? 0) + rowUsdVolume(row, pool, slice));
+      perDay.set(ts, (perDay.get(ts) ?? 0) + v);
     }
   }
   const days = Array.from(perDay.keys()).sort((a, b) => a - b);
