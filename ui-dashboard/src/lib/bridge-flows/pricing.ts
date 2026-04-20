@@ -27,7 +27,13 @@ export function transferAmountUsd(
   return tokenToUSD(t.tokenSymbol, amt, rates);
 }
 
-/** True when USD was computed client-side from current oracle, not indexer-pinned. */
+/** True when USD was computed client-side from current oracle, not indexer-pinned.
+ * Must match `transferAmountUsd`'s guard exactly — otherwise a legacy "0.00"
+ * row would price via live rate but render without the `~` prefix, looking
+ * deceptively authoritative. Drop the numeric guard alongside the matching
+ * TODO(post-reindex) in `transferAmountUsd` once legacy sentinels are gone. */
 export function usdPricedFromLiveRate(t: BridgeTransfer): boolean {
-  return !t.usdValueAtSend;
+  if (!t.usdValueAtSend) return true;
+  const n = Number(t.usdValueAtSend);
+  return !(Number.isFinite(n) && n > 0);
 }
