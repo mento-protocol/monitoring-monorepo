@@ -104,17 +104,29 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const result = await pending;
     return NextResponse.json(result);
   } catch (err) {
-    // Ship the upstream error to Sentry with scrubbed context — the raw
-    // error may contain RPC URLs / provider wording, but Sentry's
-    // sendDefaultPii:false + beforeSend strips cookies/auth headers. Return
-    // a stable public string so the endpoint's contract doesn't drift with
+    // Ship the upstream error to Sentry after redacting the RPC URL from
+    // the error message. Providers like Infura/Alchemy embed API keys in
+    // the URL PATH (e.g. /v3/<key>), which the generic query-string
+    // scrubber in sentry.shared.ts won't catch. Replace the exact rpcUrl
+    // with a placeholder so the key can't leak via err.message. Return a
+    // stable public string so the endpoint's contract doesn't drift with
     // provider error phrasing and nothing sensitive leaks to the browser.
-    Sentry.captureException(err, {
+    Sentry.captureException(redactRpcUrl(err, rpcUrl), {
       tags: { route: "rebalance-check", network },
     });
     console.error("[rebalance-check]", network, pool, err);
     return NextResponse.json({ error: "Upstream RPC error" }, { status: 502 });
   }
+}
+
+function redactRpcUrl(err: unknown, rpcUrl: string): unknown {
+  if (!(err instanceof Error)) return err;
+  if (!err.message.includes(rpcUrl)) return err;
+  const copy = new Error(err.message.replaceAll(rpcUrl, "[RPC_URL]"));
+  copy.stack = err.stack;
+  copy.name = err.name;
+  if ("cause" in err) copy.cause = err.cause;
+  return copy;
 }
 
 async function runWithRetry(
