@@ -111,13 +111,9 @@ export function BridgeTopBridgersChart({
 }
 
 function parseFirstChainId(json: string): number | null {
-  try {
-    const arr = JSON.parse(json) as unknown;
-    if (!Array.isArray(arr) || arr.length === 0) return null;
-    const first = arr[0];
-    const n = typeof first === "number" ? first : Number(first);
-    return Number.isFinite(n) ? n : null;
-  } catch {
-    return null;
-  }
+  const arr = JSON.parse(json) as unknown;
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  const first = arr[0];
+  const n = typeof first === "number" ? first : Number(first);
+  return Number.isFinite(n) ? n : null;
 }
