@@ -197,18 +197,13 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
   const manager = event.srcAddress.toLowerCase();
 
   // Pair with the TransferSentDetailed row written earlier in the same tx.
-  // Key by logIndex so multiple sends in one tx don't collide. The 6-arg
-  // fires first; the digest fires later with an arbitrary number of
-  // intermediate logs from the Wormhole core bridge + transceiver between
-  // them (empirically observed up to ~50 offsets on Monad). Walk backward
-  // from the digest logIndex until we find the most recent pending row for
-  // this tx. Done before the manifest check so we can reap the pending row
-  // even when the NttManager isn't in the manifest (yaml/manifest drift).
-  // Backward-walk helper shared with the dest-side scratch drain (see
-  // `findAndDrainPendingScratch` usage below). Source-side needs the pending
-  // row's ID as well as its payload so it can delete only after a
-  // successful BridgeTransfer upsert — hence `findPendingScratch` (no auto-
-  // delete) rather than the drain variant.
+  // The 6-arg variant fires first; the digest fires later with an arbitrary
+  // number of intermediate Wormhole-core / transceiver logs between them
+  // (up to ~50 on Monad). Done before the manifest check so we reap the
+  // scratch even when the NttManager isn't in the manifest (yaml drift) —
+  // otherwise every drift-affected tx would leak a pending row. Source-side
+  // uses the non-drain variant because it only wants to delete AFTER the
+  // upsert succeeds.
   const { row: pending, id: pendingId } = await findPendingScratch(
     (context as HandlerContext).WormholeTransferPending,
     {
@@ -411,25 +406,19 @@ WormholeNttManager.TransferRedeemed.handler(async ({ event, context }) => {
     }
   }
 
-  // Defense-in-depth: normally `MessageAttestedTo` fires just before
-  // TransferRedeemed in the same tx and drains the scratch itself. But if
-  // HyperSync drops the MessageAttestedTo log (rare; observed during
-  // historical backfills on other indexers), the scratch would leak and
-  // the row would be missing source identity + transceiverDigest. Drain
-  // here too when it's still present. Idempotent: the MessageAttestedTo
-  // handler already deleted the scratch on the happy path, so this is a
-  // no-op in steady state.
-  const destPending = await drainDestPending(context as HandlerContext, event);
+  // Defense-in-depth: MessageAttestedTo normally fires just before
+  // TransferRedeemed in the same tx and drains the scratch itself. Skip
+  // the walk when the detail row already carries `transceiverDigest` —
+  // that's the happy-path signal MessageAttestedTo ran — otherwise (rare:
+  // HyperSync drops the attest log, historical backfills) drain here too.
+  const priorDetail = await (
+    context as HandlerContext
+  ).WormholeTransferDetail.get(id);
+  const destPending = priorDetail?.transceiverDigest
+    ? undefined
+    : await drainDestPending(context as HandlerContext, event);
   const detailDelta: Record<string, unknown> = {};
-  if (destPending) {
-    if (priorTransfer?.sourceChainId == null)
-      delta.sourceChainId = destPending.sourceChainId;
-    if (!priorTransfer?.sourceContract)
-      delta.sourceContract = destPending.sourceTransceiver;
-    detailDelta.transceiverDigest = destPending.transceiverDigest;
-    detailDelta.msgSequence = destPending.msgSequence;
-    detailDelta.sourceWormholeChainId = destPending.sourceWormholeChainId;
-  }
+  applyDestPendingToDelta(destPending, priorTransfer, delta, detailDelta);
 
   const transfer = await upsertTransferByDigest(
     context as HandlerContext,
@@ -455,6 +444,31 @@ WormholeNttManager.TransferRedeemed.handler(async ({ event, context }) => {
     });
   }
 });
+
+/**
+ * Merge a drained `WormholeDestPending` payload into the transfer + detail
+ * deltas a dest-side handler is about to upsert. No-op when `destPending`
+ * is undefined. Preserves source identity that the source-side handler may
+ * have already set — dest-side is secondary for that field.
+ */
+type DestPendingRow = NonNullable<
+  Awaited<ReturnType<HandlerContext["WormholeDestPending"]["get"]>>
+>;
+function applyDestPendingToDelta(
+  destPending: DestPendingRow | undefined,
+  prior: { sourceChainId?: number; sourceContract?: string } | undefined,
+  transferDelta: Record<string, unknown>,
+  detailDelta: Record<string, unknown>,
+): void {
+  if (!destPending) return;
+  if (prior?.sourceChainId == null)
+    transferDelta.sourceChainId = destPending.sourceChainId;
+  if (!prior?.sourceContract)
+    transferDelta.sourceContract = destPending.sourceTransceiver;
+  detailDelta.transceiverDigest = destPending.transceiverDigest;
+  detailDelta.msgSequence = destPending.msgSequence;
+  detailDelta.sourceWormholeChainId = destPending.sourceWormholeChainId;
+}
 
 /**
  * Drain the `WormholeDestPending` scratch written by the earlier-in-tx
@@ -547,15 +561,7 @@ WormholeNttManager.MessageAttestedTo.handler(async ({ event, context }) => {
     p.transceiver,
   );
   const detailDelta: Record<string, unknown> = {};
-  if (destPending) {
-    if (prior?.sourceChainId == null)
-      destDelta.sourceChainId = destPending.sourceChainId;
-    if (!prior?.sourceContract)
-      destDelta.sourceContract = destPending.sourceTransceiver;
-    detailDelta.transceiverDigest = destPending.transceiverDigest;
-    detailDelta.msgSequence = destPending.msgSequence;
-    detailDelta.sourceWormholeChainId = destPending.sourceWormholeChainId;
-  }
+  applyDestPendingToDelta(destPending, prior, destDelta, detailDelta);
 
   await upsertTransferByDigest(
     context as HandlerContext,

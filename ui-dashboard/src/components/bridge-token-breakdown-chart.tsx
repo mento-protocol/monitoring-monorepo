@@ -3,9 +3,12 @@
 import dynamic from "next/dynamic";
 import { useMemo } from "react";
 import { formatUSD } from "@/lib/format";
-import { PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
+import {
+  PLOTLY_BASE_LAYOUT,
+  PLOTLY_CONFIG,
+  ROW_CHART_HEIGHT_PX,
+} from "@/lib/plot";
 import { buildTokenBreakdown } from "@/lib/bridge-flows/snapshots";
-import { ROW_CHART_HEIGHT_PX } from "@/lib/bridge-flows/layout";
 import type { OracleRateMap } from "@/lib/tokens";
 import type { BridgeDailySnapshot } from "@/lib/types";
 
