@@ -29,7 +29,7 @@ function formatWoW(pct: number): { text: string; color: string } {
 }
 
 function buildAlt(data: BridgeFlowsOgData | null): string {
-  if (!data) return "Mento Bridge Flows — Wormhole NTT cross-chain transfers";
+  if (!data) return "Mento Bridge Flows — Wormhole cross-chain transfers";
   const parts: string[] = ["Mento Bridge Flows"];
   if (data.volume30dUsd != null && data.volume30dUsd > 0) {
     parts.push(`30d volume ${formatUSD(data.volume30dUsd)}`);
@@ -99,8 +99,8 @@ function Card({ data }: { data: BridgeFlowsOgData | null }) {
   const wow = data?.volumeWoWPct != null ? formatWoW(data.volumeWoWPct) : null;
   const chainsLabel =
     data && data.chains.length > 0
-      ? `Wormhole NTT · ${data.chains.join(" · ")}`
-      : "Wormhole NTT";
+      ? `Wormhole · ${data.chains.join(" · ")}`
+      : "Wormhole";
 
   return (
     <div

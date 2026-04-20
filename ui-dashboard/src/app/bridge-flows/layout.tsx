@@ -8,7 +8,7 @@ import { formatUSD } from "@/lib/format";
 
 function buildDescription(data: BridgeFlowsOgData | null): string {
   if (!data) {
-    return "Wormhole NTT bridge transfers of Mento stable tokens across Celo and Monad.";
+    return "Wormhole bridge transfers of Mento stable tokens across Celo and Monad.";
   }
   const parts: string[] = [];
   if (data.volume30dUsd != null && data.volume30dUsd > 0) {
@@ -25,7 +25,7 @@ function buildDescription(data: BridgeFlowsOgData | null): string {
     parts.push(`on ${data.chains.join(" + ")}`);
   }
   if (parts.length === 0) {
-    return "Wormhole NTT bridge transfers of Mento stable tokens across Celo and Monad.";
+    return "Wormhole bridge transfers of Mento stable tokens across Celo and Monad.";
   }
   return parts.join(" · ") + ".";
 }
