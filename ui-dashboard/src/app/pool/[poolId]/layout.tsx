@@ -12,7 +12,7 @@ function healthLabel(status: PoolOgData["health"]): string {
     case "OK":
       return "healthy";
     case "WARN":
-      return "needs attention";
+      return "warn";
     case "CRITICAL":
       return "critical";
     case "WEEKEND":

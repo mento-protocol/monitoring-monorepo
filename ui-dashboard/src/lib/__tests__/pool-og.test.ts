@@ -125,6 +125,7 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result!.volume7dUsd).toBeNull();
     expect(result!.tvlWoWPct).toBeNull();
     expect(result!.tvlSeries).toEqual([]);
+    expect(result!.volumeSeries).toEqual([]);
   });
 
   it("degrades gracefully when all-pools rate-map query fails", async () => {
@@ -241,6 +242,10 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result!.tvlSeries).toHaveLength(2);
     expect(result!.tvlSeries[0]).toBeCloseTo(1_600_000, -2);
     expect(result!.tvlSeries[1]).toBeCloseTo(1_800_000, -2);
+    // Volume series is per-day USDm-leg value, oldest→newest: 50K (7d-ago), 100K (1d-ago).
+    expect(result!.volumeSeries).toHaveLength(2);
+    expect(result!.volumeSeries[0]).toBeCloseTo(50_000, -2);
+    expect(result!.volumeSeries[1]).toBeCloseTo(100_000, -2);
     expect(result!.oracleFresh).toBe(true);
     expect(result!.oracleAgeSeconds).toBeGreaterThanOrEqual(0);
     expect(result!.oracleAgeSeconds).toBeLessThan(60);
@@ -363,5 +368,6 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result!.volume7dUsd).toBeNull();
     expect(result!.tvlWoWPct).toBeNull();
     expect(result!.tvlSeries).toEqual([]);
+    expect(result!.volumeSeries).toEqual([]);
   });
 });

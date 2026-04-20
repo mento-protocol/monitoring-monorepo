@@ -33,7 +33,7 @@ function describeHealth(status: PoolOgData["health"]): HealthView {
     case "OK":
       return { label: "Healthy", tone: "ok" };
     case "WARN":
-      return { label: "Attention", tone: "warn" };
+      return { label: "Warn", tone: "warn" };
     case "CRITICAL":
       return { label: "Critical", tone: "critical" };
     case "WEEKEND":
@@ -303,7 +303,15 @@ function Card({ data }: { data: PoolOgData | null }) {
             ) : null
           }
         />
-        <Tile label="7d Volume" value={volume7d} />
+        <Tile
+          label="7d Volume"
+          value={volume7d}
+          chart={
+            data && data.volumeSeries.length >= 2 ? (
+              <Sparkline series={data.volumeSeries} color={ACCENT} />
+            ) : null
+          }
+        />
         <Tile
           label="Health"
           value={health.label}

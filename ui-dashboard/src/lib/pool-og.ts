@@ -63,6 +63,8 @@ export type PoolOgData = {
   healthReasons: string[];
   /** Chronological TVL series (oldest→newest), up to 14 daily points. */
   tvlSeries: number[];
+  /** Chronological daily USD volume series (oldest→newest), up to 14 points. */
+  volumeSeries: number[];
   /** Seconds since last oracle update; null for virtual pools / missing data. */
   oracleAgeSeconds: number | null;
   /** Whether the oracle is within its configured expiry window. */
@@ -168,6 +170,9 @@ export async function fetchPoolOgDataUncached(
   const tvlSeries = priceable
     ? computeTvlSeries(dailyRows, pool, network, rates)
     : [];
+  const volumeSeries = priceable
+    ? computeVolumeSeries(dailyRows, sym0, sym1, pool, rates)
+    : [];
   const oracle = computeOracleFreshness(pool, chainId);
 
   return {
@@ -180,9 +185,32 @@ export async function fetchPoolOgDataUncached(
     health: computeEffectiveStatus(pool, chainId),
     healthReasons: computeHealthReasons(pool, chainId),
     tvlSeries,
+    volumeSeries,
     oracleAgeSeconds: oracle.ageSeconds,
     oracleFresh: oracle.fresh,
   };
+}
+
+function computeVolumeSeries(
+  daily: PoolSnapshot[],
+  sym0: string,
+  sym1: string,
+  pool: Pool,
+  rates: OracleRateMap,
+): number[] {
+  const slice = daily.slice(0, SPARKLINE_DAYS).reverse();
+  const d0 = pool.token0Decimals ?? 18;
+  const d1 = pool.token1Decimals ?? 18;
+  return slice.map((row) => {
+    const v0 = parseWei(row.swapVolume0 ?? "0", d0);
+    const v1 = parseWei(row.swapVolume1 ?? "0", d1);
+    if (USDM_SYMBOLS.has(sym0)) return v0;
+    if (USDM_SYMBOLS.has(sym1)) return v1;
+    const u0 = tokenToUSD(sym0, v0, rates);
+    if (u0 !== null) return u0;
+    const u1 = tokenToUSD(sym1, v1, rates);
+    return u1 ?? 0;
+  });
 }
 
 /** Enumerate the specific sub-issues driving a pool's effective health.
