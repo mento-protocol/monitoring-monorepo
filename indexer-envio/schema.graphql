@@ -368,7 +368,9 @@ type BridgeTransfer {
   # today; UI falls back to live oracle rates.
   usdPriceAtSend: String # fixed-point 18dp string
   usdValueAtSend: String # 2dp string, lex-sortable
-  firstSeenAt: BigInt!
+  # `BRIDGE_TRANSFERS_WINDOW` polls Hasura every 10s with `_gte` + descending
+  # sort on this field, so it needs an index to avoid full scans under load.
+  firstSeenAt: BigInt! @index
   lastUpdatedAt: BigInt!
 }
 
