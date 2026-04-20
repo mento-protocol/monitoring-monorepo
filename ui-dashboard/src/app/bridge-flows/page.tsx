@@ -153,7 +153,6 @@ function BridgeFlowsContent() {
         <h1 className="text-2xl font-bold text-white mb-1">Bridge Flows</h1>
         <p className="text-sm text-slate-400">
           Wormhole NTT transfers of Mento stable tokens across Celo and Monad
-          (last 30 days)
         </p>
       </div>
 
@@ -239,7 +238,7 @@ function BridgeFlowsContent() {
         ) : transfersResult.isLoading && transfers.length === 0 ? (
           <Skeleton rows={5} />
         ) : transfers.length === 0 ? (
-          <EmptyBox message="No bridge transfers in the last 30 days." />
+          <EmptyBox message="No bridge transfers yet." />
         ) : (
           <TransfersTable transfers={transfers} rates={rates} />
         )}

@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  buildCountSeries,
   buildTokenBreakdown,
   buildVolumeUsdSeries,
   snapshotUsdValue,
@@ -132,17 +131,6 @@ describe("buildVolumeUsdSeries", () => {
     const snaps = [mk({ date: String(mid), sentUsdValue: "42" })];
     const [point] = buildVolumeUsdSeries(snaps, emptyRates);
     expect(point.timestamp).toBe(floored);
-  });
-});
-
-describe("buildCountSeries", () => {
-  it("sums sentCount per day", () => {
-    const day = 1_700_000_000 - (1_700_000_000 % DAY);
-    const snaps = [
-      mk({ date: String(day), sentCount: 3 }),
-      mk({ date: String(day), sentCount: 2 }),
-    ];
-    expect(buildCountSeries(snaps)).toEqual([{ timestamp: day, value: 5 }]);
   });
 });
 

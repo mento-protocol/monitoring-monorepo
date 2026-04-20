@@ -58,21 +58,6 @@ export function buildVolumeUsdSeries(
     .map(([timestamp, value]) => ({ timestamp, value }));
 }
 
-/** Count-valued counterpart to `buildVolumeUsdSeries` — used when USD
- * pricing is unreliable and we only care about directional usage. */
-export function buildCountSeries(
-  snapshots: ReadonlyArray<BridgeDailySnapshot>,
-): TimeSeriesPoint[] {
-  const byDay = new Map<number, number>();
-  for (const s of snapshots) {
-    const day = toDayBucket(Number(s.date));
-    byDay.set(day, (byDay.get(day) ?? 0) + (s.sentCount ?? 0));
-  }
-  return Array.from(byDay.entries())
-    .sort(([a], [b]) => a - b)
-    .map(([timestamp, value]) => ({ timestamp, value }));
-}
-
 type WindowTotals = {
   total: number | null;
   sub24h: number;
