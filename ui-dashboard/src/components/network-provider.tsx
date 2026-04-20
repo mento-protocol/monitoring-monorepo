@@ -1,7 +1,8 @@
 "use client";
 
-import { createContext, use, useMemo, type ReactNode } from "react";
+import { createContext, use, useEffect, useMemo, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
+import * as Sentry from "@sentry/nextjs";
 import {
   NETWORKS,
   DEFAULT_NETWORK,
@@ -41,6 +42,18 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
       return fromPathname;
     return DEFAULT_NETWORK;
   }, [pathname]);
+
+  // Tag every Sentry event with the current chain and drop a breadcrumb on
+  // network changes — makes multi-network issue triage filterable and gives
+  // on-call a navigation trail when an error fires.
+  useEffect(() => {
+    Sentry.setTag("chain", networkId);
+    Sentry.addBreadcrumb({
+      category: "navigation",
+      message: `network → ${networkId}`,
+      level: "info",
+    });
+  }, [networkId]);
 
   const value: NetworkContextValue = {
     network: NETWORKS[networkId],

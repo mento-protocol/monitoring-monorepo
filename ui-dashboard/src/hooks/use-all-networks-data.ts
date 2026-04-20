@@ -2,6 +2,7 @@
 
 import useSWR from "swr";
 import { GraphQLClient } from "graphql-request";
+import * as Sentry from "@sentry/nextjs";
 import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 import type { Network } from "@/lib/networks";
 import {
@@ -225,7 +226,12 @@ async function fetchPaginatedSnapshotPages<K extends string>(
       // First-page failure is a hard error — nothing to degrade to.
       if (rows.length === 0) throw err;
       // Otherwise preserve the pages we did fetch; surface error AND flag
-      // truncation so consumers know the data is partial.
+      // truncation so consumers know the data is partial. Report to Sentry
+      // so partial-data degradation isn't silent.
+      Sentry.captureException(err, {
+        tags: { source: "hasura", responseKey, degraded: "partial-pages" },
+        extra: { page, rowsFetched: rows.length, poolCount: poolIds.length },
+      });
       return {
         rows,
         truncated: true,
@@ -242,6 +248,20 @@ async function fetchPaginatedSnapshotPages<K extends string>(
       return { rows, truncated: false, error: null };
     }
   }
+  // Safety-cap exhaustion: we fetched SNAPSHOT_MAX_PAGES × SNAPSHOT_PAGE_SIZE
+  // rows without running out. Data is genuinely incomplete — flag as a warning
+  // so we can tell when the cap needs raising (or when indexer rollups need
+  // replacing a paginated fetch).
+  Sentry.captureMessage("hasura-snapshot-cap-exhausted", {
+    level: "warning",
+    tags: { source: "hasura", responseKey },
+    extra: {
+      rowsFetched: rows.length,
+      poolCount: poolIds.length,
+      maxPages: SNAPSHOT_MAX_PAGES,
+      pageSize: SNAPSHOT_PAGE_SIZE,
+    },
+  });
   return { rows, truncated: true, error: null };
 }
 

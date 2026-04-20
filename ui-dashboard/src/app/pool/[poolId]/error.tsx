@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
 import { ErrorBox } from "@/components/feedback";
+import { useReportError } from "@/hooks/use-report-error";
 import Link from "next/link";
 
 export default function PoolDetailError({
@@ -11,9 +11,7 @@ export default function PoolDetailError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  useEffect(() => {
-    console.error("[pool/[poolId]/error]", error);
-  }, [error]);
+  useReportError(error);
 
   return (
     <div className="space-y-4">

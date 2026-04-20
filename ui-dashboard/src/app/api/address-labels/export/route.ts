@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { getAuthSession } from "@/auth";
 import {
   getLabels,
@@ -49,6 +50,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       },
     });
   } catch (err) {
+    Sentry.captureException(err, { tags: { route: "address-labels/export" } });
     console.error("[address-labels/export]", err);
     const message =
       err instanceof Error ? err.message : "Internal server error";

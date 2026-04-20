@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import {
   checkRebalanceStatus,
   type RebalanceCheckResult,
@@ -103,10 +104,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const result = await pending;
     return NextResponse.json(result);
   } catch (err) {
-    // Log the raw upstream error (may include RPC URL, provider wording,
-    // stack frames, API-key-bearing URLs) to server logs only; return a
-    // stable public string so the endpoint's contract doesn't drift with
+    // Ship the upstream error to Sentry with scrubbed context — the raw
+    // error may contain RPC URLs / provider wording, but Sentry's
+    // sendDefaultPii:false + beforeSend strips cookies/auth headers. Return
+    // a stable public string so the endpoint's contract doesn't drift with
     // provider error phrasing and nothing sensitive leaks to the browser.
+    Sentry.captureException(err, {
+      tags: { route: "rebalance-check", network },
+    });
     console.error("[rebalance-check]", network, pool, err);
     return NextResponse.json({ error: "Upstream RPC error" }, { status: 502 });
   }

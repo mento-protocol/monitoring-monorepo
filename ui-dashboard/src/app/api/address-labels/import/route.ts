@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { getAuthSession } from "@/auth";
 import {
   importLabels,
@@ -284,6 +285,7 @@ function isEntriesMap(v: unknown): v is Record<string, AddressEntry> {
 }
 
 function serverError(err: unknown): NextResponse {
+  Sentry.captureException(err, { tags: { route: "address-labels/import" } });
   console.error("[address-labels/import]", err);
   const message = err instanceof Error ? err.message : "Internal server error";
   return NextResponse.json({ error: message }, { status: 500 });

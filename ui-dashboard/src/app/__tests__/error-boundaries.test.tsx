@@ -5,6 +5,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 
+vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn() }));
+
 // NetworkAwareLink reads useNetwork(); stub it so the boundary renders in a
 // plain-render test without mounting the full provider. Mutated per-test.
 // Typed as the real provider shape (sans `network` object, which no consumer
@@ -23,6 +25,7 @@ vi.mock("@/components/network-provider", () => ({
   useNetwork: () => mockNetwork,
 }));
 
+import * as Sentry from "@sentry/nextjs";
 import RootError from "@/app/error";
 import GlobalError from "@/app/global-error";
 import PoolDetailError from "@/app/pool/[poolId]/error";
@@ -33,11 +36,14 @@ describe("app/error boundaries", () => {
   let root: Root;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     mockNetwork.networkId = "celo-mainnet";
-    // Silence intentional console.error logging from the boundaries
+    // React logs its own `console.error` for effects that throw during the
+    // jsdom render (e.g. nested <html> warning from GlobalError). Silence so
+    // the test output stays clean; assertions still run.
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -60,6 +66,9 @@ describe("app/error boundaries", () => {
     render(<RootError error={new Error("boom")} reset={reset} />);
 
     expect(container.textContent).toContain("boom");
+    expect(Sentry.captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "boom" }),
+    );
     const button = container.querySelector<HTMLButtonElement>(
       'button[type="button"]',
     );
@@ -78,7 +87,10 @@ describe("app/error boundaries", () => {
   });
 
   it("PoolDetailError links back to the pools list on the default network", () => {
-    render(<PoolDetailError error={new Error("nope")} reset={vi.fn()} />);
+    render(<PoolDetailError error={new Error("boom")} reset={vi.fn()} />);
+    expect(Sentry.captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "boom" }),
+    );
     const link = container.querySelector<HTMLAnchorElement>('a[href="/pools"]');
     expect(link).not.toBeNull();
     expect(link?.textContent).toContain("Back to pools");
@@ -108,9 +120,12 @@ describe("app/error boundaries", () => {
 
   it("AddressBookError shows a generic retry and invokes reset", () => {
     const reset = vi.fn();
-    render(<AddressBookError error={new Error("500 oops")} reset={reset} />);
+    render(<AddressBookError error={new Error("boom")} reset={reset} />);
 
-    expect(container.textContent).toContain("500 oops");
+    expect(container.textContent).toContain("boom");
+    expect(Sentry.captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "boom" }),
+    );
     expect(container.querySelector('a[href^="/sign-in"]')).toBeNull();
 
     const button = container.querySelector<HTMLButtonElement>(
@@ -125,7 +140,9 @@ describe("app/error boundaries", () => {
 
   it("GlobalError renders its own html shell with the error message", () => {
     // GlobalError renders <html><body>…</body></html>; asserting on static
-    // markup is simpler than mounting a nested <html> into jsdom.
+    // markup is simpler than mounting a nested <html> into jsdom. Static
+    // rendering does not run effects, so assert capture via a jsdom render
+    // immediately after.
     const html = renderToStaticMarkup(
       <GlobalError error={new Error("root crash")} reset={vi.fn()} />,
     );
@@ -134,5 +151,10 @@ describe("app/error boundaries", () => {
     expect(html).toContain("<html");
     expect(html).toContain("<body");
     expect(html).toContain("Try again");
+
+    render(<GlobalError error={new Error("boom")} reset={vi.fn()} />);
+    expect(Sentry.captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "boom" }),
+    );
   });
 });

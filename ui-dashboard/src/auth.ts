@@ -1,5 +1,6 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
+import * as Sentry from "@sentry/nextjs";
 
 const ALLOWED_DOMAIN = "@mentolabs.xyz";
 
@@ -36,6 +37,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
   pages: {
     signIn: "/sign-in",
+  },
+
+  // Fire NextAuth internal errors (OAuth handshake failures, JWE verification
+  // breaks, callback URL mismatches) to Sentry so sign-in regressions don't
+  // need "users can't log in" bug reports to be noticed.
+  logger: {
+    error(error) {
+      Sentry.captureException(error, { tags: { source: "nextauth" } });
+    },
   },
 
   callbacks: {
