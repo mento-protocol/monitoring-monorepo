@@ -26,7 +26,7 @@ const PIE_COLORS = [
 const Plot = dynamic(() => import("react-plotly.js"), {
   ssr: false,
   loading: () => (
-    <div className="h-[240px] animate-pulse rounded bg-slate-800/30" />
+    <div className="h-[200px] animate-pulse rounded bg-slate-800/30" />
   ),
 });
 
@@ -79,7 +79,7 @@ export function BridgeTokenBreakdownChart({
       ...PLOTLY_BASE_LAYOUT,
       margin: { t: 8, r: 8, b: 8, l: 8 },
       showlegend: false,
-      height: 240,
+      height: 200,
       autosize: true,
     }),
     [],
@@ -98,9 +98,9 @@ export function BridgeTokenBreakdownChart({
           Unable to load token breakdown.
         </p>
       ) : isLoading ? (
-        <div className="h-[240px] animate-pulse rounded bg-slate-800/30" />
+        <div className="h-[200px] animate-pulse rounded bg-slate-800/30" />
       ) : !hasData ? (
-        <div className="flex h-[240px] items-center justify-center text-sm text-slate-500">
+        <div className="flex h-[200px] items-center justify-center text-sm text-slate-500">
           No priced volume in the selected window.
         </div>
       ) : (
@@ -109,7 +109,7 @@ export function BridgeTokenBreakdownChart({
             data={[trace]}
             layout={layout}
             config={PLOTLY_CONFIG}
-            style={{ width: "100%", height: 240 }}
+            style={{ width: "100%", height: 200 }}
             useResizeHandler
           />
           <ul className="mt-3 grid gap-1.5 text-xs">

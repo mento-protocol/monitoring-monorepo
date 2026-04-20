@@ -43,7 +43,7 @@ import {
   transferAmountUsd,
   usdPricedFromLiveRate,
 } from "@/lib/bridge-flows/pricing";
-import { snapshotUsdValue, windowTotals } from "@/lib/bridge-flows/snapshots";
+import { windowTotals } from "@/lib/bridge-flows/snapshots";
 import { wormholescanUrl } from "@/lib/wormhole/urls";
 import type {
   BridgeBridger,
@@ -118,13 +118,10 @@ function BridgeFlowsContent() {
   const snapshotsCapped = snapshots.length >= 1000;
   const topBridgers = topBridgersResult.data?.BridgeBridger ?? [];
 
-  // 24h / 7d / 30d breakdowns for the KPI row, derived from the same
-  // snapshot fetch that drives the volume chart. `windowTotals` does one
-  // linear pass so the tile + chart + breakdown all share the single read.
-  const volumeTotals = useMemo(
-    () => windowTotals(snapshots, (s) => snapshotUsdValue(s, rates)),
-    [snapshots, rates],
-  );
+  // 24h / 7d / 30d breakdowns for the Transfers KPI tile, derived from the
+  // same snapshot fetch that drives the charts. Volume USD is covered by
+  // the Bridged Volume chart above the KPI row, so it doesn't need a
+  // parallel tile.
   const transferTotals = useMemo(
     () => windowTotals(snapshots, (s) => s.sentCount ?? 0),
     [snapshots],
@@ -166,20 +163,33 @@ function BridgeFlowsContent() {
       {error && <ErrorBox message={error} />}
 
       <section
-        aria-label="Key metrics"
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+        aria-label="Charts"
+        className="grid grid-cols-1 lg:grid-cols-3 gap-6"
       >
-        <BreakdownTile
-          label="Volume (USD)"
-          total={error ? null : volumeTotals.total}
-          sub24h={volumeTotals.sub24h}
-          sub7d={volumeTotals.sub7d}
-          sub30d={volumeTotals.sub30d}
-          isLoading={loading && snapshots.length === 0}
-          hasError={!!error}
-          format={formatUSD}
-          subtitle={snapshotsCapped ? "Partial — snapshot cap hit" : undefined}
+        <BridgeVolumeChart
+          snapshots={snapshots}
+          rates={rates}
+          isLoading={snapshotsResult.isLoading && snapshots.length === 0}
+          hasError={snapshotsError}
+          isCapped={snapshotsCapped}
         />
+        <BridgeTokenBreakdownChart
+          snapshots={snapshots}
+          rates={rates}
+          isLoading={snapshotsResult.isLoading && snapshots.length === 0}
+          hasError={snapshotsError}
+        />
+        <BridgeTopBridgersChart
+          bridgers={topBridgers}
+          isLoading={topBridgersResult.isLoading && topBridgers.length === 0}
+          hasError={topBridgersError}
+        />
+      </section>
+
+      <section
+        aria-label="Key metrics"
+        className="grid grid-cols-1 sm:grid-cols-3 gap-4"
+      >
         <BreakdownTile
           label="Transfers"
           total={error ? null : transferTotals.total}
@@ -221,37 +231,6 @@ function BridgeFlowsContent() {
               : `over ${avgSampleSize} recent transfers`
           }
         />
-      </section>
-
-      <section aria-label="Volume over time">
-        <BridgeVolumeChart
-          snapshots={snapshots}
-          rates={rates}
-          isLoading={snapshotsResult.isLoading && snapshots.length === 0}
-          hasError={snapshotsError}
-          isCapped={snapshotsCapped}
-        />
-      </section>
-
-      <section
-        aria-label="Bridge composition"
-        className="grid grid-cols-1 lg:grid-cols-3 gap-6"
-      >
-        <div className="lg:col-span-2">
-          <BridgeTopBridgersChart
-            bridgers={topBridgers}
-            isLoading={topBridgersResult.isLoading && topBridgers.length === 0}
-            hasError={topBridgersError}
-          />
-        </div>
-        <div className="lg:col-span-1">
-          <BridgeTokenBreakdownChart
-            snapshots={snapshots}
-            rates={rates}
-            isLoading={snapshotsResult.isLoading && snapshots.length === 0}
-            hasError={snapshotsError}
-          />
-        </div>
       </section>
 
       <section aria-label="Recent transfers">
