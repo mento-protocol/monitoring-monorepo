@@ -388,7 +388,6 @@ function TransfersTable({
               <td className="px-2 sm:px-4 py-2 sm:py-3">
                 <TxLinks
                   provider={t.provider}
-                  providerMessageId={t.providerMessageId}
                   sentTxHash={t.sentTxHash}
                   sourceChainId={t.sourceChainId}
                   deliveredTxHash={t.deliveredTxHash}
@@ -457,14 +456,12 @@ function TxPill({
 
 function TxLinks({
   provider,
-  providerMessageId,
   sentTxHash,
   sourceChainId,
   deliveredTxHash,
   destChainId,
 }: {
   provider: BridgeProvider;
-  providerMessageId: string;
   sentTxHash: string | null;
   sourceChainId: number | null;
   deliveredTxHash: string | null;
@@ -487,13 +484,16 @@ function TxLinks({
       title: `Destination tx on ${dst.label}`,
     });
   }
-  if (provider === "WORMHOLE") {
+  // Wormholescan only resolves by source tx hash or VAA ID; digest alone
+  // 404s. Skip the pill when we don't have the source tx yet.
+  if (provider === "WORMHOLE" && sentTxHash) {
     pills.push({
-      href: wormholescanUrl(providerMessageId),
+      href: wormholescanUrl(sentTxHash),
       label: "wh",
       title: "End-to-end trace on Wormholescan",
     });
   }
+  if (pills.length === 0) return <Dash />;
   return (
     <span className="inline-flex items-center gap-1">
       {pills.map((p) => (
