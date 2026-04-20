@@ -2,26 +2,26 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock @upstash/redis before importing the module under test
 vi.mock("@upstash/redis", () => {
-  const pipelineExec = vi.fn().mockResolvedValue([]);
-  const pipelineHset = vi.fn();
-  const pipelineHdel = vi.fn();
-  const pipelineFactory = () => {
-    const pipeline = {
-      hset: pipelineHset,
-      hdel: pipelineHdel,
-      exec: pipelineExec,
+  const multiExec = vi.fn().mockResolvedValue([]);
+  const multiHset = vi.fn();
+  const multiHdel = vi.fn();
+  const multiFactory = () => {
+    const multi = {
+      hset: multiHset,
+      hdel: multiHdel,
+      exec: multiExec,
     };
-    pipelineHset.mockReturnValue(pipeline);
-    pipelineHdel.mockReturnValue(pipeline);
-    return pipeline;
+    multiHset.mockReturnValue(multi);
+    multiHdel.mockReturnValue(multi);
+    return multi;
   };
   const Redis = vi.fn();
   Redis.prototype.scan = vi.fn();
   Redis.prototype.hgetall = vi.fn();
   Redis.prototype.hset = vi.fn();
   Redis.prototype.hdel = vi.fn();
-  Redis.prototype.pipeline = vi.fn(pipelineFactory);
-  return { Redis, __pipeline: { pipelineExec, pipelineHset, pipelineHdel } };
+  Redis.prototype.multi = vi.fn(multiFactory);
+  return { Redis, __multi: { multiExec, multiHset, multiHdel } };
 });
 
 // Stub env vars so getRedis() doesn't throw
@@ -37,16 +37,16 @@ import {
 } from "@/lib/address-labels";
 import { Redis } from "@upstash/redis";
 
-// Grab the pipeline spies the mock factory created so we can assert against
+// Grab the multi spies the mock factory created so we can assert against
 // them. Cast through unknown to bypass the module-type barrier.
 const mockedUpstash = (await import("@upstash/redis")) as unknown as {
-  __pipeline: {
-    pipelineExec: ReturnType<typeof vi.fn>;
-    pipelineHset: ReturnType<typeof vi.fn>;
-    pipelineHdel: ReturnType<typeof vi.fn>;
+  __multi: {
+    multiExec: ReturnType<typeof vi.fn>;
+    multiHset: ReturnType<typeof vi.fn>;
+    multiHdel: ReturnType<typeof vi.fn>;
   };
 };
-const { pipelineExec, pipelineHset, pipelineHdel } = mockedUpstash.__pipeline;
+const { multiExec, multiHset, multiHdel } = mockedUpstash.__multi;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -147,14 +147,14 @@ describe("upsertEntry — persists isPublic and enforces strict either/or", () =
       tags: [],
       isPublic: true,
     });
-    expect(pipelineHset).toHaveBeenCalledTimes(1);
-    const [targetKey, fields] = pipelineHset.mock.calls[0];
+    expect(multiHset).toHaveBeenCalledTimes(1);
+    const [targetKey, fields] = multiHset.mock.calls[0];
     expect(targetKey).toBe("labels:42220");
     const stored = Object.values(fields)[0] as { isPublic: boolean };
     expect(stored.isPublic).toBe(true);
     // No other scopes exist → no HDEL calls.
-    expect(pipelineHdel).not.toHaveBeenCalled();
-    expect(pipelineExec).toHaveBeenCalledTimes(1);
+    expect(multiHdel).not.toHaveBeenCalled();
+    expect(multiExec).toHaveBeenCalledTimes(1);
   });
 
   it("writes to labels:global when scope is 'global'", async () => {
@@ -163,7 +163,7 @@ describe("upsertEntry — persists isPublic and enforces strict either/or", () =
       ["labels:global"],
     ]);
     await upsertEntry("global", "0xABC", { name: "Test", tags: [] });
-    const [targetKey] = pipelineHset.mock.calls[0];
+    const [targetKey] = multiHset.mock.calls[0];
     expect(targetKey).toBe("labels:global");
   });
 
@@ -176,17 +176,17 @@ describe("upsertEntry — persists isPublic and enforces strict either/or", () =
     await upsertEntry(42220, "0xABC", { name: "Celo", tags: [] });
 
     // HSET at the target.
-    const [targetKey] = pipelineHset.mock.calls[0];
+    const [targetKey] = multiHset.mock.calls[0];
     expect(targetKey).toBe("labels:42220");
 
     // HDEL from global AND from labels:143 — but NOT from labels:42220.
-    const hdelKeys = pipelineHdel.mock.calls.map((c) => c[0]);
+    const hdelKeys = multiHdel.mock.calls.map((c) => c[0]);
     expect(hdelKeys).toContain("labels:global");
     expect(hdelKeys).toContain("labels:143");
     expect(hdelKeys).not.toContain("labels:42220");
 
     // All HDELs lowercase the address.
-    for (const call of pipelineHdel.mock.calls) {
+    for (const call of multiHdel.mock.calls) {
       expect(call[1]).toBe("0xabc");
     }
   });
@@ -198,10 +198,10 @@ describe("upsertEntry — persists isPublic and enforces strict either/or", () =
     ]);
     await upsertEntry("global", "0xABC", { name: "Cross-chain", tags: [] });
 
-    const [targetKey] = pipelineHset.mock.calls[0];
+    const [targetKey] = multiHset.mock.calls[0];
     expect(targetKey).toBe("labels:global");
 
-    const hdelKeys = pipelineHdel.mock.calls.map((c) => c[0]);
+    const hdelKeys = multiHdel.mock.calls.map((c) => c[0]);
     expect(hdelKeys).toContain("labels:42220");
     expect(hdelKeys).not.toContain("labels:global");
   });
@@ -222,7 +222,7 @@ describe("importLabels — isPublic coercion and invariant", () => {
         updatedAt: "2026-01-01T00:00:00Z",
       },
     });
-    const [, fields] = pipelineHset.mock.calls[0];
+    const [, fields] = multiHset.mock.calls[0];
     const stored = Object.values(fields)[0] as { isPublic: boolean };
     expect(stored.isPublic).toBe(false);
   });
@@ -240,7 +240,7 @@ describe("importLabels — isPublic coercion and invariant", () => {
         updatedAt: "2026-01-01T00:00:00Z",
       },
     });
-    const [, fields] = pipelineHset.mock.calls[0];
+    const [, fields] = multiHset.mock.calls[0];
     const stored = Object.values(fields)[0] as { isPublic: boolean };
     expect(stored.isPublic).toBe(true);
   });
@@ -263,12 +263,12 @@ describe("importLabels — isPublic coercion and invariant", () => {
       },
     });
 
-    const [targetKey] = pipelineHset.mock.calls[0];
+    const [targetKey] = multiHset.mock.calls[0];
     expect(targetKey).toBe("labels:global");
 
     // One HDEL call per other-scope key with all imported addresses.
-    expect(pipelineHdel).toHaveBeenCalledTimes(1);
-    const [hdelKey, ...fields] = pipelineHdel.mock.calls[0];
+    expect(multiHdel).toHaveBeenCalledTimes(1);
+    const [hdelKey, ...fields] = multiHdel.mock.calls[0];
     expect(hdelKey).toBe("labels:42220");
     expect(fields).toEqual(expect.arrayContaining(["0xaaa", "0xbbb"]));
   });

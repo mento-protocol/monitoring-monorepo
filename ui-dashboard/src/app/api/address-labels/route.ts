@@ -214,18 +214,19 @@ function parseScope(scopeValue: unknown, chainIdValue: unknown): Scope | null {
   return null;
 }
 
-// Narrow-read variant: scope as a string query param, chainId as numeric string.
+// Narrow-read variant: scope as a string query param, chainId as numeric
+// string. Strict decimal-only parse so `?chainId=1e3` doesn't silently
+// resolve to chainId 1000 (matches the import-route guards).
 function parseScopeParam(
   scopeParam: string | null,
   chainIdParam: string | null,
 ): Scope | null {
   if (scopeParam === "global") return "global";
   if (scopeParam !== null) return null;
-  if (chainIdParam !== null) {
-    const n = Number(chainIdParam);
-    return Number.isInteger(n) && n > 0 ? n : null;
-  }
-  return null;
+  if (chainIdParam === null) return null;
+  if (!/^\d+$/.test(chainIdParam)) return null;
+  const n = Number(chainIdParam);
+  return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 function filterPublic(

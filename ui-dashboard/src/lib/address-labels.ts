@@ -31,6 +31,10 @@ function labelsKey(scope: Scope): string {
 function parseScopeFromKey(key: string): Scope | null {
   if (key === GLOBAL_KEY) return "global";
   const suffix = key.slice("labels:".length);
+  // Strict decimal-only parse — matches the import-route guards so malformed
+  // keys like `labels:1e3` or `labels:0x1` don't silently resolve to a valid
+  // chainId and collide with real entries in `getAllLabels`.
+  if (!/^\d+$/.test(suffix)) return null;
   const n = Number(suffix);
   return Number.isInteger(n) && n > 0 ? n : null;
 }
@@ -85,9 +89,11 @@ export async function getLabels(
 /**
  * Upsert an entry at the target scope.
  *
- * Enforces the strict either/or invariant: an address lives in exactly one
- * scope at a time. After HSET-ing at the target scope, this HDELs the same
- * address from every other existing `labels:*` scope in the same pipeline.
+ * Uses MULTI/EXEC so HSET + HDELs all succeed or all fail together. The
+ * SCAN itself is not atomic with the transaction — a new scope created
+ * between SCAN and EXEC will not be cleared — but writes only go through
+ * this same function so the race window is narrow to non-existent in
+ * practice.
  */
 export async function upsertEntry(
   scope: Scope,
@@ -105,12 +111,12 @@ export async function upsertEntry(
   const allKeys = await listAllScopeKeys(redis);
   const otherKeys = allKeys.filter((k) => k !== targetKey);
 
-  const pipeline = redis.pipeline();
-  pipeline.hset(targetKey, { [lower]: value });
+  const tx = redis.multi();
+  tx.hset(targetKey, { [lower]: value });
   for (const k of otherKeys) {
-    pipeline.hdel(k, lower);
+    tx.hdel(k, lower);
   }
-  await pipeline.exec();
+  await tx.exec();
 }
 
 export async function deleteLabel(
@@ -160,8 +166,8 @@ export async function getAllLabels(): Promise<{
 /**
  * Import a batch of labels into a single scope.
  *
- * Enforces the strict either/or invariant: each imported address is HDELed
- * from every other existing scope in the same pipeline.
+ * Uses MULTI/EXEC so HSET + HDELs all succeed or all fail together, same as
+ * `upsertEntry`. See the note on its SCAN-vs-EXEC race.
  */
 export async function importLabels(
   scope: Scope,
@@ -185,12 +191,12 @@ export async function importLabels(
   const otherKeys = allKeys.filter((k) => k !== targetKey);
   const lowers = Object.keys(normalised);
 
-  const pipeline = redis.pipeline();
-  pipeline.hset(targetKey, normalised);
+  const tx = redis.multi();
+  tx.hset(targetKey, normalised);
   if (lowers.length > 0) {
     for (const k of otherKeys) {
-      pipeline.hdel(k, ...lowers);
+      tx.hdel(k, ...lowers);
     }
   }
-  await pipeline.exec();
+  await tx.exec();
 }

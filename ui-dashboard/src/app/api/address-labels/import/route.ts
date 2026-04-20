@@ -3,7 +3,7 @@ import * as Sentry from "@sentry/nextjs";
 import { getAuthSession } from "@/auth";
 import {
   importLabels,
-  getLabels,
+  getAllLabels,
   upgradeEntries,
   sanitizeEntry,
   type AddressEntry,
@@ -11,6 +11,34 @@ import {
   type Scope,
 } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
+
+/**
+ * Build a `lowercase address → existing entry` lookup across every scope.
+ *
+ * When an import moves an address from one scope to another, the server's
+ * strict either/or invariant HDELs the source scope. Merging only against
+ * the target scope's entries would drop the user's notes/isPublic from the
+ * source. This helper flattens every scope into one map so the merge step
+ * can pull metadata forward regardless of which scope the prior entry
+ * lived in.
+ */
+async function buildCrossScopeExisting(): Promise<
+  Record<string, AddressEntry>
+> {
+  const all = await getAllLabels();
+  const out: Record<string, AddressEntry> = { ...all.global };
+  for (const entries of Object.values(all.chains)) {
+    for (const [addr, entry] of Object.entries(entries)) {
+      // Per strict either/or there's at most one scope per address; if the
+      // invariant is ever violated on disk, prefer the first scope we saw
+      // (global wins over chains, lower chainIds win over higher by iteration
+      // order) — deterministic and harmless since the merge only pulls
+      // notes/isPublic.
+      if (!(addr in out)) out[addr] = entry;
+    }
+  }
+  return out;
+}
 
 type ImportedCounts = {
   global: number;
@@ -174,14 +202,13 @@ async function handleGnosisSafe(
     chainByAddress.set(lower, chainId);
   }
 
-  // Fetch existing labels for each distinct chainId so we can merge instead
-  // of overwriting — preserves tags, notes, isPublic from prior entries.
-  const existingByChain = new Map<number, Record<string, AddressEntry>>();
-  const distinctChainIds = [...new Set(parsed.map((e) => e.chainId))];
+  // Cross-scope lookup: merge against any existing entry for this address,
+  // regardless of which scope currently holds it. Without this, moving an
+  // address from (say) chain X to global via Gnosis Safe import would
+  // silently drop the user's prior notes/isPublic.
+  let crossScope: Record<string, AddressEntry>;
   try {
-    for (const chainId of distinctChainIds) {
-      existingByChain.set(chainId, await getLabels(chainId));
-    }
+    crossScope = await buildCrossScopeExisting();
   } catch (err) {
     return serverError(err);
   }
@@ -190,8 +217,7 @@ async function handleGnosisSafe(
   for (const entry of parsed) {
     const { chainId, address, name } = entry;
     const normalizedAddress = address.toLowerCase();
-    const existing = existingByChain.get(chainId) ?? {};
-    const prev = existing[normalizedAddress];
+    const prev = crossScope[normalizedAddress];
     if (!byChain.has(chainId)) byChain.set(chainId, {});
     byChain.get(chainId)![normalizedAddress] = sanitizeEntry({
       // Preserve existing metadata; only overwrite name and timestamp.
@@ -273,18 +299,21 @@ async function handleSnapshot(
   }
 
   try {
+    const crossScope = await buildCrossScopeExisting();
     const counts = emptyCounts();
 
     if (Object.keys(globalEntries).length > 0) {
       const upgraded = upgradeEntries(globalEntries as Record<string, unknown>);
-      const filtered = sanitizeAndFilter(upgraded);
+      const merged = mergeWithCrossScope(upgraded, crossScope);
+      const filtered = sanitizeAndFilter(merged);
       addCount(counts, "global", Object.keys(filtered).length);
       await importLabels("global", filtered);
     }
 
     for (const [chainId, labels] of chainEntries) {
       const upgraded = upgradeEntries(labels as Record<string, unknown>);
-      const filtered = sanitizeAndFilter(upgraded);
+      const merged = mergeWithCrossScope(upgraded, crossScope);
+      const filtered = sanitizeAndFilter(merged);
       addCount(counts, Number(chainId), Object.keys(filtered).length);
       await importLabels(Number(chainId), filtered);
     }
@@ -292,6 +321,32 @@ async function handleSnapshot(
   } catch (err) {
     return serverError(err);
   }
+}
+
+/**
+ * Merge an import batch against a cross-scope existing map so an address
+ * moving from one scope to another keeps its prior `notes` + `isPublic`
+ * unless the import explicitly overwrites them.
+ */
+function mergeWithCrossScope(
+  incoming: Record<string, AddressEntry>,
+  crossScope: Record<string, AddressEntry>,
+): Record<string, AddressEntry> {
+  const out: Record<string, AddressEntry> = {};
+  for (const [addr, entry] of Object.entries(incoming)) {
+    const prev = crossScope[addr.toLowerCase()];
+    out[addr] = prev
+      ? {
+          ...prev,
+          ...entry,
+          // The import's tags are authoritative when the format supports
+          // tags; otherwise (simple + snapshot) incoming `entry.tags`
+          // already reflects the caller's intent (they may be empty).
+          tags: entry.tags,
+        }
+      : entry;
+  }
+  return out;
 }
 
 async function handleSimpleFormat(body: unknown): Promise<NextResponse> {
@@ -311,8 +366,10 @@ async function handleSimpleFormat(body: unknown): Promise<NextResponse> {
   }
 
   try {
+    const crossScope = await buildCrossScopeExisting();
     const upgraded = upgradeEntries(labels as Record<string, unknown>);
-    const filtered = sanitizeAndFilter(upgraded);
+    const merged = mergeWithCrossScope(upgraded, crossScope);
+    const filtered = sanitizeAndFilter(merged);
     await importLabels(chainId, filtered);
     const counts = emptyCounts();
     addCount(counts, chainId, Object.keys(filtered).length);
@@ -478,22 +535,21 @@ async function handleCsvText(text: string): Promise<NextResponse> {
     byScope.set(scope, bucket);
   }
 
-  // Fetch existing labels per scope for merge (preserve notes, isPublic).
-  const existingByScope = new Map<Scope, Record<string, AddressEntry>>();
+  // Cross-scope merge: `prev` comes from whichever scope currently holds
+  // this address (or undefined if none), so a CSV row moving an address to
+  // a new scope keeps its notes + isPublic.
+  let crossScope: Record<string, AddressEntry>;
   try {
-    for (const scope of byScope.keys()) {
-      existingByScope.set(scope, await getLabels(scope));
-    }
+    crossScope = await buildCrossScopeExisting();
   } catch (err) {
     return serverError(err);
   }
 
   const mergedByScope = new Map<Scope, Record<string, AddressEntry>>();
   for (const [scope, labels] of byScope.entries()) {
-    const existing = existingByScope.get(scope) ?? {};
     const merged: Record<string, AddressEntry> = {};
     for (const [addr, entry] of Object.entries(labels)) {
-      const prev = existing[addr];
+      const prev = crossScope[addr];
       merged[addr] = sanitizeEntry({
         ...prev,
         ...entry,

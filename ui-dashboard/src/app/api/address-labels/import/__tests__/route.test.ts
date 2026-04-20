@@ -9,6 +9,7 @@ vi.mock("@/auth", () => ({
 vi.mock("@/lib/address-labels", () => ({
   importLabels: vi.fn().mockResolvedValue(undefined),
   getLabels: vi.fn().mockResolvedValue({}),
+  getAllLabels: vi.fn().mockResolvedValue({ global: {}, chains: {} }),
   upgradeEntries: vi.fn((raw: Record<string, unknown>) => {
     const result: Record<string, unknown> = {};
     for (const [address, entry] of Object.entries(raw)) {
@@ -95,7 +96,7 @@ vi.mock("@/lib/address-labels", () => ({
 }));
 
 import { getAuthSession } from "@/auth";
-import { importLabels, getLabels } from "@/lib/address-labels";
+import { importLabels, getLabels, getAllLabels } from "@/lib/address-labels";
 
 type ImportedCounts = {
   global: number;
@@ -700,9 +701,14 @@ describe("POST /api/address-labels/import", () => {
         isPublic: false,
         updatedAt: "2026-01-01T00:00:00.000Z",
       };
-      // CSV without chainId routes to global; only one getLabels call.
-      (getLabels as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        [validAddress.toLowerCase()]: existingEntry,
+      // Prior entry on chain 42220 should contribute notes/isPublic even
+      // though the CSV (no chainId column) routes to global — cross-scope
+      // merge preserves metadata through scope moves.
+      (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        global: {},
+        chains: {
+          "42220": { [validAddress.toLowerCase()]: existingEntry },
+        },
       });
 
       const res = await csvReq(validCsv);
@@ -1051,8 +1057,8 @@ describe("POST /api/address-labels/import", () => {
       expect(importLabels).not.toHaveBeenCalled();
     });
 
-    it("returns 500 and does not import if getLabels throws", async () => {
-      (getLabels as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+    it("returns 500 and does not import if cross-scope lookup throws", async () => {
+      (getAllLabels as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
         new Error("Redis connection failed"),
       );
       const gnosisSafe = [
@@ -1067,7 +1073,6 @@ describe("POST /api/address-labels/import", () => {
     });
 
     it("merges with existing entry metadata instead of overwriting", async () => {
-      // Existing entry has tags/notes/isPublic set
       const existingEntry = {
         name: "Old Name",
         tags: ["Team"],
@@ -1075,8 +1080,12 @@ describe("POST /api/address-labels/import", () => {
         isPublic: true,
         updatedAt: "2026-01-01T00:00:00.000Z",
       };
-      (getLabels as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        [validAddress.toLowerCase()]: existingEntry,
+      // Same chain: prior entry under labels:42220.
+      (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        global: {},
+        chains: {
+          "42220": { [validAddress.toLowerCase()]: existingEntry },
+        },
       });
 
       const gnosisSafe = [
@@ -1085,7 +1094,6 @@ describe("POST /api/address-labels/import", () => {
       const res = await POST(jsonReq(gnosisSafe));
       expect(res.status).toBe(200);
 
-      // importLabels should be called with merged entry preserving existing metadata
       expect(importLabels).toHaveBeenCalledWith(
         42220,
         expect.objectContaining({
@@ -1093,6 +1101,42 @@ describe("POST /api/address-labels/import", () => {
             name: "New Name",
             tags: ["Team"],
             notes: "Important contract",
+            isPublic: true,
+          }),
+        }),
+      );
+    });
+
+    it("preserves notes/isPublic when an address is moved to a new chain", async () => {
+      // Address currently lives on chain 1; Gnosis import moves it to chain 42220.
+      // Without cross-scope merge, notes/isPublic would be silently dropped.
+      const existingEntry = {
+        name: "Old Name",
+        tags: ["Team"],
+        notes: "Carry me through the move",
+        isPublic: true,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+      (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        global: {},
+        chains: {
+          "1": { [validAddress.toLowerCase()]: existingEntry },
+        },
+      });
+
+      const gnosisSafe = [
+        { address: validAddress, chainId: "42220", name: "Renamed" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(200);
+
+      expect(importLabels).toHaveBeenCalledWith(
+        42220,
+        expect.objectContaining({
+          [validAddress]: expect.objectContaining({
+            name: "Renamed",
+            tags: ["Team"],
+            notes: "Carry me through the move",
             isPublic: true,
           }),
         }),
