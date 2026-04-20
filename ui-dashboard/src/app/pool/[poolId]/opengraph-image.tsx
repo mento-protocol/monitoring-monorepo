@@ -21,12 +21,6 @@ type HealthView = {
   tone: BadgeTone;
 };
 
-type PillStyle = {
-  bg: string;
-  border: string;
-  text: string;
-};
-
 const TONE_COLOR: Record<BadgeTone, { fg: string; bg: string }> = {
   ok: { fg: "#34d399", bg: "rgba(52, 211, 153, 0.15)" },
   warn: { fg: "#fbbf24", bg: "rgba(251, 191, 36, 0.15)" },
@@ -39,7 +33,7 @@ function describeHealth(status: PoolOgData["health"]): HealthView {
     case "OK":
       return { label: "Healthy", tone: "ok" };
     case "WARN":
-      return { label: "Attention", tone: "warn" };
+      return { label: "Warn", tone: "warn" };
     case "CRITICAL":
       return { label: "Critical", tone: "critical" };
     case "WEEKEND":
@@ -47,61 +41,6 @@ function describeHealth(status: PoolOgData["health"]): HealthView {
     default:
       return { label: "N/A", tone: "neutral" };
   }
-}
-
-// Color-code token pills so FX legs pop visually against USD stables.
-// Keys match via `symbol.toLowerCase().includes(key)` (so `eur` covers
-// `EURm` and `axlEUROC`).
-const FX_PILL_STYLES: Record<string, PillStyle> = {
-  eur: {
-    bg: "rgba(59, 130, 246, 0.18)",
-    border: "rgba(96, 165, 250, 0.45)",
-    text: "#bfdbfe",
-  },
-  gbp: {
-    bg: "rgba(139, 92, 246, 0.18)",
-    border: "rgba(167, 139, 250, 0.45)",
-    text: "#ddd6fe",
-  },
-  kes: {
-    bg: "rgba(239, 68, 68, 0.18)",
-    border: "rgba(252, 165, 165, 0.45)",
-    text: "#fecaca",
-  },
-  brl: {
-    bg: "rgba(245, 158, 11, 0.18)",
-    border: "rgba(251, 191, 36, 0.45)",
-    text: "#fde68a",
-  },
-  cop: {
-    bg: "rgba(245, 158, 11, 0.18)",
-    border: "rgba(251, 191, 36, 0.45)",
-    text: "#fde68a",
-  },
-  xof: {
-    bg: "rgba(20, 184, 166, 0.18)",
-    border: "rgba(45, 212, 191, 0.45)",
-    text: "#99f6e4",
-  },
-  php: {
-    bg: "rgba(20, 184, 166, 0.18)",
-    border: "rgba(45, 212, 191, 0.45)",
-    text: "#99f6e4",
-  },
-};
-
-const NEUTRAL_PILL: PillStyle = {
-  bg: TILE_BG,
-  border: TILE_BORDER,
-  text: TEXT,
-};
-
-function pillStyle(symbol: string): PillStyle {
-  const s = symbol.toLowerCase();
-  for (const [key, style] of Object.entries(FX_PILL_STYLES)) {
-    if (s.includes(key)) return style;
-  }
-  return NEUTRAL_PILL;
 }
 
 function formatOracleAge(seconds: number): string {
@@ -119,7 +58,11 @@ function buildAlt(data: PoolOgData | null): string {
     parts.push(`7d volume ${formatUSD(data.volume7dUsd)}`);
   }
   const health = describeHealth(data.health);
-  parts.push(`health ${health.label.toLowerCase()}`);
+  let healthPart = `health ${health.label.toLowerCase()}`;
+  if (data.healthReasons.length > 0) {
+    healthPart += ` (${data.healthReasons.join(", ")})`;
+  }
+  parts.push(healthPart);
   return parts.join(" · ");
 }
 
@@ -150,25 +93,6 @@ function Sparkline({ series, color }: { series: number[]; color: string }) {
         strokeLinejoin="round"
       />
     </svg>
-  );
-}
-
-function TokenPill({ symbol }: { symbol: string }) {
-  const s = pillStyle(symbol);
-  return (
-    <span
-      style={{
-        fontSize: 26,
-        fontWeight: 600,
-        padding: "10px 22px",
-        borderRadius: 999,
-        background: s.bg,
-        border: `1px solid ${s.border}`,
-        color: s.text,
-      }}
-    >
-      {symbol}
-    </span>
   );
 }
 
@@ -246,17 +170,17 @@ function OracleFooter({ data }: { data: PoolOgData }) {
   return (
     <span
       style={{
-        fontSize: 18,
+        fontSize: 26,
         color: MUTED,
         display: "flex",
-        gap: 8,
+        gap: 12,
         alignItems: "center",
       }}
     >
       <span
         style={{
-          width: 8,
-          height: 8,
+          width: 14,
+          height: 14,
           borderRadius: 999,
           background: color,
         }}
@@ -268,22 +192,23 @@ function OracleFooter({ data }: { data: PoolOgData }) {
 
 function Card({ data }: { data: PoolOgData | null }) {
   const name = data?.name ?? "Mento Pool";
-  const tokens = data?.tokenSymbols ?? [];
   // null → "—" (unpriceable / unavailable); 0 → "$0.00" (real empty state).
   const tvl = data && data.tvlUsd != null ? formatUSD(data.tvlUsd) : "—";
   const volume7d =
     data && data.volume7dUsd != null ? formatUSD(data.volume7dUsd) : "—";
 
-  let wowText: string | undefined;
-  let wowColor: string | undefined;
-  let sparkColor = TONE_COLOR.neutral.fg;
-  if (data?.tvlWoWPct != null) {
-    const pct = data.tvlWoWPct;
+  function formatWoW(pct: number): { text: string; color: string } {
     const arrow = pct >= 0 ? "▲" : "▼";
-    wowText = `${arrow} ${Math.abs(pct).toFixed(1)}% 7d`;
-    wowColor = pct >= 0 ? TONE_COLOR.ok.fg : TONE_COLOR.critical.fg;
-    sparkColor = wowColor;
+    return {
+      text: `${arrow} ${Math.abs(pct).toFixed(1)}% 7d`,
+      color: pct >= 0 ? TONE_COLOR.ok.fg : TONE_COLOR.critical.fg,
+    };
   }
+
+  const tvlWow = data?.tvlWoWPct != null ? formatWoW(data.tvlWoWPct) : null;
+  const volWow =
+    data?.volume7dWoWPct != null ? formatWoW(data.volume7dWoWPct) : null;
+  const sparkColor = tvlWow?.color ?? TONE_COLOR.neutral.fg;
 
   const health = describeHealth(data?.health ?? "N/A");
   const healthColor = TONE_COLOR[health.tone];
@@ -333,8 +258,8 @@ function Card({ data }: { data: PoolOgData | null }) {
           {data ? (
             <span
               style={{
-                fontSize: 22,
-                padding: "10px 20px",
+                fontSize: 26,
+                padding: "12px 26px",
                 borderRadius: 999,
                 background: TILE_BG,
                 border: `1px solid ${TILE_BORDER}`,
@@ -350,21 +275,14 @@ function Card({ data }: { data: PoolOgData | null }) {
       <div
         style={{
           display: "flex",
-          flexDirection: "column",
           flex: 1,
           justifyContent: "center",
-          gap: 24,
+          alignItems: "center",
         }}
       >
-        {tokens.length === 2 ? (
-          <div style={{ display: "flex", gap: 14 }}>
-            <TokenPill symbol={tokens[0]} />
-            <TokenPill symbol={tokens[1]} />
-          </div>
-        ) : null}
         <span
           style={{
-            fontSize: name.length > 14 ? 96 : 120,
+            fontSize: name.length > 14 ? 112 : 140,
             fontWeight: 800,
             letterSpacing: -2,
             color: TEXT,
@@ -379,16 +297,32 @@ function Card({ data }: { data: PoolOgData | null }) {
         <Tile
           label="TVL"
           value={tvl}
-          subline={wowText}
-          sublineColor={wowColor}
+          subline={tvlWow?.text}
+          sublineColor={tvlWow?.color}
           chart={
             data && data.tvlSeries.length >= 2 ? (
               <Sparkline series={data.tvlSeries} color={sparkColor} />
             ) : null
           }
         />
-        <Tile label="7d Volume" value={volume7d} />
-        <Tile label="Health" value={health.label} valueColor={healthColor.fg} />
+        <Tile
+          label="7d Volume"
+          value={volume7d}
+          subline={volWow?.text}
+          sublineColor={volWow?.color}
+          chart={
+            data && data.volumeSeries.length >= 2 ? (
+              <Sparkline series={data.volumeSeries} color={ACCENT} />
+            ) : null
+          }
+        />
+        <Tile
+          label="Health"
+          value={health.label}
+          valueColor={healthColor.fg}
+          subline={data?.healthReasons[0]}
+          sublineColor={healthColor.fg}
+        />
       </div>
     </div>
   );
