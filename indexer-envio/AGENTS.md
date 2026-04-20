@@ -62,7 +62,7 @@ Copy `.env.example` → `.env` and set:
 - `ENVIO_RPC_URL_143` — (optional) Monad Mainnet RPC override (default: `https://rpc2.monad.xyz`)
 - `ENVIO_RPC_URL_10143` — (optional) Monad Testnet RPC override (default: HyperRPC — requires `ENVIO_API_TOKEN`)
 - `ENVIO_START_BLOCK_CELO` — (optional) Celo start block, defaults to 60664500
-- `ENVIO_START_BLOCK_MONAD` — (optional) Monad start block, defaults to 60730000
+- `ENVIO_START_BLOCK_MONAD` — (optional) Monad start block, defaults to 60710000
 
 Do **not** set the generic `ENVIO_RPC_URL` in multichain mode — it would route all chains to the same endpoint and produce incorrect RPC reads for chain-specific calls.
 
