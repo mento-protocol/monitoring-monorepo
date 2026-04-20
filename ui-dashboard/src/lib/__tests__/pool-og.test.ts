@@ -125,6 +125,7 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result!.volume7dUsd).toBeNull();
     expect(result!.tvlWoWPct).toBeNull();
     expect(result!.tvlSeries).toEqual([]);
+    expect(result!.volumeSeries).toEqual([]);
   });
 
   it("degrades gracefully when all-pools rate-map query fails", async () => {
@@ -232,14 +233,22 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result!.chainLabel).toBe("Celo");
     expect(result!.tokenSymbols).toEqual(["USDm", "cUSD"]);
     expect(result!.tvlUsd).toBeCloseTo(2_000_000, -2);
+    // Current 7d window captures row 1 only (100K USDm volume); row 2 falls
+    // in the prior-7d window (50K). WoW = (100K - 50K) / 50K * 100 = 100%.
     expect(result!.volume7dUsd).toBeCloseTo(100_000, -2);
+    expect(result!.volume7dWoWPct).toBeCloseTo(100, 0);
     expect(result!.tvlWoWPct).toBeCloseTo(25, 0);
     expect(result!.health).toBe("OK");
+    expect(result!.healthReasons).toEqual([]);
     // Sparkline: newest-first rows reversed → oldest→newest TVL values.
     // Snapshot 2 (7d-ago) reserves 800K+800K = 1.6M, snapshot 1 (1d-ago) 900K+900K = 1.8M.
     expect(result!.tvlSeries).toHaveLength(2);
     expect(result!.tvlSeries[0]).toBeCloseTo(1_600_000, -2);
     expect(result!.tvlSeries[1]).toBeCloseTo(1_800_000, -2);
+    // Volume series is per-day USDm-leg value, oldest→newest: 50K (7d-ago), 100K (1d-ago).
+    expect(result!.volumeSeries).toHaveLength(2);
+    expect(result!.volumeSeries[0]).toBeCloseTo(50_000, -2);
+    expect(result!.volumeSeries[1]).toBeCloseTo(100_000, -2);
     expect(result!.oracleFresh).toBe(true);
     expect(result!.oracleAgeSeconds).toBeGreaterThanOrEqual(0);
     expect(result!.oracleAgeSeconds).toBeLessThan(60);
@@ -305,6 +314,66 @@ describe("fetchPoolOgDataUncached", () => {
     // breach surfaces here. Label in UI reads "Health" (not "Rebalance") —
     // see buildDescription/buildAlt/Tile label="Health".
     expect(result!.health).toBe("CRITICAL");
+    expect(result!.healthReasons).toContain("trading limits breached");
+  });
+
+  it("uses 'rebalance in flight' (not 'breach') when grace window applies", async () => {
+    // A deviation breach that was very recently rebalanced is transient —
+    // computeHealthStatus softens the *status* to WARN, so the *reason*
+    // must match or the tile contradicts itself.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const detailPool = makeDetailPool({
+      priceDifference: "15000", // 1.5x threshold → > 1.0
+      rebalanceThreshold: 10000,
+      lastRebalancedAt: String(nowSec - 1800), // 30m ago → within 1h grace
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.health).toBe("WARN");
+    expect(result!.healthReasons).toContain("rebalance in flight");
+    expect(result!.healthReasons).not.toContain("price deviation breach");
+  });
+
+  it("orders healthReasons by severity (worst first)", async () => {
+    // Limit CRITICAL + deviation WARN: the subline pulls reasons[0], so
+    // highest-severity reason must be first or it will misstate the pool.
+    const detailPool = makeDetailPool({
+      priceDifference: "8500", // 0.85x threshold → WARN
+      rebalanceThreshold: 10000,
+      limitStatus: "CRITICAL",
+      limitPressure0: "1.1", // ≥ 1.0 → CRITICAL
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.health).toBe("CRITICAL");
+    expect(result!.healthReasons[0]).toBe("trading limits breached");
+    expect(result!.healthReasons).toContain("price deviation rising");
+  });
+
+  it("explains a WARN health as 'price deviation rising' when applicable", async () => {
+    // Oracle fresh, deviation at 85% of threshold — healthy oracle, rising
+    // price. computeHealthStatus → WARN; reason should surface via
+    // healthReasons so the card explains *why* attention is needed.
+    const detailPool = makeDetailPool({
+      priceDifference: "8500",
+      rebalanceThreshold: 10000,
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.health).toBe("WARN");
+    expect(result!.healthReasons).toContain("price deviation rising");
   });
 
   it("suppresses TVL-derived fields for unpriceable FX/FX pool when rate map unavailable", async () => {
@@ -341,7 +410,9 @@ describe("fetchPoolOgDataUncached", () => {
     // `null` = unpriceable, NOT `0`. `0` would falsely suggest an empty pool.
     expect(result!.tvlUsd).toBeNull();
     expect(result!.volume7dUsd).toBeNull();
+    expect(result!.volume7dWoWPct).toBeNull();
     expect(result!.tvlWoWPct).toBeNull();
     expect(result!.tvlSeries).toEqual([]);
+    expect(result!.volumeSeries).toEqual([]);
   });
 });

@@ -9,6 +9,7 @@ ignoredBuiltDependencies:
   - unrs-resolver
 
 onlyBuiltDependencies:
+  - "@sentry/cli"
   - es5-ext
   - esbuild
   - rescript

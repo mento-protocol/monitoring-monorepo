@@ -12,7 +12,7 @@ function healthLabel(status: PoolOgData["health"]): string {
     case "OK":
       return "healthy";
     case "WARN":
-      return "needs attention";
+      return "warn";
     case "CRITICAL":
       return "critical";
     case "WEEKEND":
@@ -30,7 +30,11 @@ function buildDescription(data: PoolOgData): string {
   if (data.volume7dUsd != null) {
     parts.push(`7d volume ${formatUSD(data.volume7dUsd)}`);
   }
-  parts.push(`Health: ${healthLabel(data.health)}`);
+  let healthText = `Health: ${healthLabel(data.health)}`;
+  if (data.healthReasons.length > 0) {
+    healthText += ` (${data.healthReasons.join(", ")})`;
+  }
+  parts.push(healthText);
   return parts.join(" · ");
 }
 
@@ -58,7 +62,7 @@ export async function generateMetadata({
     };
   }
 
-  const title = `${data.name} — Mento Analytics`;
+  const title = `${data.name} on ${data.chainLabel} — Mento Analytics`;
   const description = buildDescription(data);
   return {
     title,

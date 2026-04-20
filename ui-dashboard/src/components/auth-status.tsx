@@ -1,12 +1,26 @@
 "use client";
 
+import { useEffect } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useSWRConfig } from "swr";
 import Link from "next/link";
+import * as Sentry from "@sentry/nextjs";
 
 export function AuthStatus() {
   const { data: session, status } = useSession();
   const { mutate } = useSWRConfig();
+
+  // Attach the authenticated user's email to every Sentry event so issues
+  // are filterable by who's affected. Internal-only tool (mentolabs.xyz
+  // domain enforced in auth.ts), so the email is not third-party PII.
+  useEffect(() => {
+    const email = session?.user?.email;
+    if (email) {
+      Sentry.setUser({ email });
+    } else {
+      Sentry.setUser(null);
+    }
+  }, [session?.user?.email]);
 
   if (status === "loading") return null;
 
