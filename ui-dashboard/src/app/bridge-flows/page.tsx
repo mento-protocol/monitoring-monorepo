@@ -1,6 +1,14 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useBridgeGQL } from "@/lib/bridge-flows/use-bridge-gql";
 import {
   BRIDGE_TRANSFERS_WINDOW,
@@ -83,21 +91,48 @@ function BridgeFlowsContent() {
     THIRTY_DAYS_SECONDS -
     ((nowSeconds - THIRTY_DAYS_SECONDS) % SECONDS_PER_DAY);
 
-  // Page + status filter live at the page level so the table's pagination
-  // and count query share the same variables. Default: show all statuses,
-  // start on page 1. Resetting to page 1 when the filter changes keeps
-  // users out of empty trailing pages. The active `page` is derived by
-  // clamping `rawPage` against `totalPages` below — a pattern borrowed
-  // from the pool page so a stale index never leaves the user stranded
-  // past the last page (avoids a setState-in-effect clamping loop).
-  const [rawPage, setRawPage] = useState(1);
-  const [selectedStatuses, setSelectedStatuses] = useState<BridgeStatus[]>(() =>
-    ALL_BRIDGE_STATUSES.slice(),
+  // Page + status filter are URL-backed so users can refresh, share, or
+  // navigate back without losing their view. Pattern mirrors pools/page.tsx
+  // and pool/[poolId]/page.tsx. Resetting page to 1 on filter change keeps
+  // users out of empty trailing pages. The active `page` is clamped against
+  // `totalPages` below to guard against stale indices from count shrinkage.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const rawPage = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
+
+  const selectedStatuses = useMemo<BridgeStatus[]>(() => {
+    const param = searchParams.get("statuses");
+    if (!param) return ALL_BRIDGE_STATUSES.slice();
+    const parts = param
+      .split(",")
+      .filter((s): s is BridgeStatus =>
+        ([...ALL_BRIDGE_STATUSES] as string[]).includes(s),
+      );
+    return parts.length > 0 ? parts : ALL_BRIDGE_STATUSES.slice();
+  }, [searchParams]);
+
+  const setPage = useCallback(
+    (p: number) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (p === 1) params.delete("page");
+      else params.set("page", String(p));
+      router.replace(`?${params.toString()}`, { scroll: false });
+    },
+    [router, searchParams],
   );
-  const handleStatusChange = (next: BridgeStatus[]) => {
-    setSelectedStatuses(next);
-    setRawPage(1);
-  };
+
+  const handleStatusChange = useCallback(
+    (next: BridgeStatus[]) => {
+      const params = new URLSearchParams(searchParams.toString());
+      const isAll = next.length === ALL_BRIDGE_STATUSES.length;
+      if (isAll) params.delete("statuses");
+      else params.set("statuses", next.join(","));
+      params.delete("page"); // reset to page 1 on filter change
+      router.replace(`?${params.toString()}`, { scroll: false });
+    },
+    [router, searchParams],
+  );
 
   // When the user toggles statuses to an empty set, SWR key is nulled and
   // no fetch happens — the EmptyBox below handles the UI copy. Otherwise
@@ -139,14 +174,11 @@ function BridgeFlowsContent() {
   // Clamp the active page against `totalPages` — if `total` shrinks (user
   // was on page 4 of a 100-row filter, then toggled a narrower filter
   // whose total only covers 2 pages) the offset would otherwise land past
-  // the last row and the table would render empty. Deriving rather than
-  // useEffect+setState avoids a redundant render and the ESLint
-  // no-direct-set-state-in-use-effect rule. `handleStatusChange` still
-  // resets `rawPage = 1` for the common filter-change case; this guards
-  // transient shrinkage from a later count refresh or window roll.
+  // Clamp the active page against totalPages — guards against stale URL
+  // indices when the count shrinks (window roll, narrower filter on refresh).
+  // `handleStatusChange` resets via URL param delete for the common case.
   const totalPages = total > 0 ? Math.ceil(total / PAGE_LIMIT) : 1;
   const page = Math.max(1, Math.min(rawPage, totalPages));
-  const setPage = setRawPage;
 
   const transfersResult = useBridgeGQL<{ BridgeTransfer: BridgeTransfer[] }>(
     hasSelectedStatuses ? BRIDGE_TRANSFERS_WINDOW : null,
