@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useReportError } from "@/hooks/use-report-error";
 
 // global-error.tsx is the one boundary that catches failures inside the root
 // layout (`layout.tsx`), including the async `getAuthSession()` call. It must
@@ -15,9 +15,7 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  useEffect(() => {
-    console.error("[global-error]", error);
-  }, [error]);
+  useReportError(error);
 
   return (
     <html lang="en">

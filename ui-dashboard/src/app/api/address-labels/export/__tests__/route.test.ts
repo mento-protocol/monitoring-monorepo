@@ -108,7 +108,8 @@ describe("GET /api/address-labels/export", () => {
     const res = await GET(req);
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error).toBe("Redis connection failed");
+    // serverError returns a generic message — full error is in Sentry.
+    expect(body.error).toBe("Export failed");
   });
 
   it("returns 500 when getAllChainLabels throws", async () => {
@@ -119,6 +120,6 @@ describe("GET /api/address-labels/export", () => {
     const res = await GET(req);
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error).toBe("Redis unavailable");
+    expect(body.error).toBe("Export failed");
   });
 });

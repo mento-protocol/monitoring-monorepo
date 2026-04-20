@@ -7,6 +7,7 @@ import { NetworkProvider } from "@/components/network-provider";
 import { AddressLabelsProvider } from "@/components/address-labels-provider";
 import { NavLinks } from "@/components/nav-links";
 import { AuthStatus } from "@/components/auth-status";
+import { SwrProvider } from "@/components/swr-provider";
 import { fetchHomepageOgData } from "@/lib/homepage-og";
 import { formatUSD } from "@/lib/format";
 import "./globals.css";
@@ -88,22 +89,24 @@ export default async function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
       >
         <SessionProvider session={session}>
-          <Suspense>
-            <NetworkProvider>
-              <AddressLabelsProvider>
-                <nav
-                  className="border-b border-slate-800 px-3 sm:px-6 py-2 sm:py-3 flex items-center gap-2 sm:gap-4 flex-wrap"
-                  aria-label="Main navigation"
-                >
-                  <NavLinks />
-                  <AuthStatus />
-                </nav>
-                <div className="mx-auto max-w-7xl px-3 sm:px-6 py-4 sm:py-6">
-                  {children}
-                </div>
-              </AddressLabelsProvider>
-            </NetworkProvider>
-          </Suspense>
+          <SwrProvider>
+            <Suspense>
+              <NetworkProvider>
+                <AddressLabelsProvider>
+                  <nav
+                    className="border-b border-slate-800 px-3 sm:px-6 py-2 sm:py-3 flex items-center gap-2 sm:gap-4 flex-wrap"
+                    aria-label="Main navigation"
+                  >
+                    <NavLinks />
+                    <AuthStatus />
+                  </nav>
+                  <div className="mx-auto max-w-7xl px-3 sm:px-6 py-4 sm:py-6">
+                    {children}
+                  </div>
+                </AddressLabelsProvider>
+              </NetworkProvider>
+            </Suspense>
+          </SwrProvider>
         </SessionProvider>
       </body>
     </html>

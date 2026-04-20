@@ -7,6 +7,9 @@ cd "$(dirname "$0")"
 echo "📦 Installing dependencies..."
 pnpm install --frozen-lockfile
 
+echo "🔎 Verifying ui-dashboard dependency resolution..."
+pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentry/nextjs/package.json')"
+
 echo "🔧 Running indexer codegen (multichain mainnet)..."
 pnpm indexer:codegen
 

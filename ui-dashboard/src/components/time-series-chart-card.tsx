@@ -2,14 +2,21 @@
 
 import dynamic from "next/dynamic";
 import { useMemo } from "react";
-import { PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
+import {
+  PLOTLY_BASE_LAYOUT,
+  PLOTLY_CONFIG,
+  ROW_CHART_HEIGHT_PX,
+} from "@/lib/plot";
 import { RANGES, type RangeKey, type TimeSeriesPoint } from "@/lib/time-series";
 
 // A skeleton rendered while the Plotly chunk is still loading. Without this
 // fallback there's a brief gap between `isLoading` flipping to false and the
 // <Plot> chunk resolving — the card's plot area goes blank for a frame.
 const PlotSkeleton = () => (
-  <div className="h-[200px] animate-pulse rounded bg-slate-800/30" />
+  <div
+    className="animate-pulse rounded bg-slate-800/30"
+    style={{ height: ROW_CHART_HEIGHT_PX }}
+  />
 );
 
 const Plot = dynamic(() => import("react-plotly.js"), {
@@ -196,7 +203,10 @@ export function TimeSeriesChartCard({
         {isLoading ? (
           <PlotSkeleton />
         ) : showEmptyState ? (
-          <div className="flex h-[200px] items-center justify-center text-sm text-slate-500">
+          <div
+            className="flex items-center justify-center text-sm text-slate-500"
+            style={{ height: ROW_CHART_HEIGHT_PX }}
+          >
             {emptyMessage}
           </div>
         ) : (
@@ -204,7 +214,7 @@ export function TimeSeriesChartCard({
             data={traces}
             layout={layout}
             config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
-            style={{ width: "100%", height: 200 }}
+            style={{ width: "100%", height: ROW_CHART_HEIGHT_PX }}
             useResizeHandler
           />
         )}

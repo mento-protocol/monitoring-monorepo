@@ -12,6 +12,7 @@ import {
 import type { Network } from "@/lib/networks";
 import type { Pool, TradingLimit } from "@/lib/types";
 import { Table, Row, Th } from "@/components/table";
+import { SortableTh } from "@/components/sortable-th";
 import { SourceBadge, HealthBadge } from "@/components/badges";
 import { ChainIcon } from "@/components/chain-icon";
 import {
@@ -150,58 +151,6 @@ export function sortGlobalPools(
     }
     return sortDir === "asc" ? cmp : -cmp;
   });
-}
-
-interface SortableThProps {
-  sortKey: GlobalSortKey;
-  activeSortKey: GlobalSortKey;
-  sortDir: SortDir;
-  onSort: (key: GlobalSortKey) => void;
-  align?: "left" | "right";
-  className?: string;
-  children: React.ReactNode;
-}
-
-function SortableTh({
-  sortKey,
-  activeSortKey,
-  sortDir,
-  onSort,
-  align = "left",
-  className = "",
-  children,
-}: SortableThProps) {
-  const isActive = sortKey === activeSortKey;
-  const alignClass = align === "right" ? "text-right" : "text-left";
-  return (
-    <th
-      scope="col"
-      aria-sort={
-        isActive ? (sortDir === "asc" ? "ascending" : "descending") : "none"
-      }
-      className={`px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 ${alignClass} whitespace-nowrap ${className}`}
-    >
-      <button
-        type="button"
-        className="flex items-center gap-1 cursor-pointer select-none hover:text-slate-200 bg-transparent border-0 p-0 font-medium text-xs sm:text-sm text-slate-400 hover:text-slate-200"
-        onClick={() => onSort(sortKey)}
-      >
-        {children}
-        {isActive ? (
-          <span className="text-indigo-400">
-            {sortDir === "asc" ? "↑" : "↓"}
-          </span>
-        ) : (
-          <span
-            className="text-slate-600 text-[1.1em] leading-none"
-            style={{ fontVariantEmoji: "text" }}
-          >
-            ↕
-          </span>
-        )}
-      </button>
-    </th>
-  );
 }
 
 /** Whether any network in the entry list has virtual pools (controls Type column visibility). */
