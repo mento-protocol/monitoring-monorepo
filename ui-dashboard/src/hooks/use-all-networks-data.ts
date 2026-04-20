@@ -251,19 +251,26 @@ async function fetchPaginatedSnapshotPages<K extends string>(
   // Safety-cap exhaustion: we fetched SNAPSHOT_MAX_PAGES × SNAPSHOT_PAGE_SIZE
   // rows without running out. Data is genuinely incomplete — flag as a warning
   // so we can tell when the cap needs raising (or when indexer rollups need
-  // replacing a paginated fetch).
-  Sentry.captureMessage("hasura-snapshot-cap-exhausted", {
-    level: "warning",
-    tags: { source: "hasura", responseKey },
-    extra: {
-      rowsFetched: rows.length,
-      poolCount: poolIds.length,
-      maxPages: SNAPSHOT_MAX_PAGES,
-      pageSize: SNAPSHOT_PAGE_SIZE,
-    },
-  });
+  // replacing a paginated fetch). Dedup by responseKey for the module lifetime
+  // so the 30s poll cycle doesn't fire the same warning every refresh once
+  // the cap is consistently hit.
+  if (!warnedCapKeys.has(responseKey)) {
+    warnedCapKeys.add(responseKey);
+    Sentry.captureMessage("hasura-snapshot-cap-exhausted", {
+      level: "warning",
+      tags: { source: "hasura", responseKey },
+      extra: {
+        rowsFetched: rows.length,
+        poolCount: poolIds.length,
+        maxPages: SNAPSHOT_MAX_PAGES,
+        pageSize: SNAPSHOT_PAGE_SIZE,
+      },
+    });
+  }
   return { rows, truncated: true, error: null };
 }
+
+const warnedCapKeys = new Set<string>();
 
 /** @internal Exported for testing only. */
 export async function fetchNetworkData(
