@@ -122,6 +122,23 @@ The dashboard includes a private address book at `/address-book` for labeling wa
 
 A daily cron job at `03:00 UTC` (defined in `ui-dashboard/vercel.json`) snapshots all labels to Vercel Blob storage as a backup. The Blob store (`address-labels`) is a team-level resource — it survives project recreation.
 
+### Security Posture — Preview Deployments
+
+Preview deployments receive the **same** `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and `AUTH_SECRET` values as production. This is required by the Auth.js `redirectProxyUrl` flow (see [`terraform/main.tf`](../terraform/main.tf) auth block for the full rationale): Google OAuth callbacks land on the prod domain, and the signed state JWE must verify against the same `AUTH_SECRET` on both ends.
+
+To make this safe, two controls must hold:
+
+1. **Vercel Deployment Protection** is enabled on the `monitoring-dashboard` project — only `mentolabs` team members can reach a preview URL (Project Settings → Deployment Protection → "All Deployments (except production)" → Standard Protection).
+2. **Fork PRs do not produce preview deployments** — on by default for team accounts; verify under Project Settings → Git → "Deploy for Fork Pull Requests" is off.
+
+If either control is ever loosened, treat all three shared secrets as exposed:
+
+- Rotate `AUTH_GOOGLE_SECRET` in GCP (OAuth consent screen) and update `terraform/terraform.tfvars`.
+- Regenerate `AUTH_SECRET` (`openssl rand -base64 32`), update `terraform/terraform.tfvars`.
+- Either split secrets across environments (requires reworking preview auth — different OAuth client + domain-local state, not redirectProxyUrl), or drop app-level auth from preview entirely (see commit `74e533f` for the prior bypass pattern that relied solely on Deployment Protection).
+
+`CRON_SECRET` is scoped to production only — previews cannot forge Bearer auth against the prod `/api/address-labels/backup` endpoint even if the preview build is compromised.
+
 ---
 
 ## Initial Setup (Terraform)
