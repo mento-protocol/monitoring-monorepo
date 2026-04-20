@@ -9,13 +9,7 @@ const clientCache = new Map<string, GraphQLClient>();
 function getClient(network: Network): GraphQLClient {
   const cached = clientCache.get(network.hasuraUrl);
   if (cached) return cached;
-  const secret = network.hasuraSecret.trim();
-  const client = new GraphQLClient(network.hasuraUrl, {
-    // Omit the secret header entirely when empty — sending an empty/whitespace
-    // value causes Hasura to return access-denied instead of falling through to
-    // unauthenticated access (which is what public Envio endpoints allow).
-    headers: secret ? { "x-hasura-admin-secret": secret } : {},
-  });
+  const client = new GraphQLClient(network.hasuraUrl);
   clientCache.set(network.hasuraUrl, client);
   return client;
 }

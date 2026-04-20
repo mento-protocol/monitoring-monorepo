@@ -29,6 +29,8 @@ export type Network = {
   /** Treb deployment namespace in @mento-protocol/contracts backing this network, or null if not yet available */
   contractsNamespace: string | null;
   hasuraUrl: string;
+  // Intentionally unused in client code: admin secrets must never be exposed
+  // via NEXT_PUBLIC_* env vars or sent from the browser.
   hasuraSecret: string;
   explorerBaseUrl: string;
   /** token address (lower) → symbol */
@@ -147,10 +149,10 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
     rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_DEVNET ?? "http://localhost:8545",
-    hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_DEVNET ??
-      "http://localhost:8080/v1/graphql",
-    hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_DEVNET ?? "testing",
+    // Local networks always use the same-origin API proxy so admin secrets can
+    // stay server-only (`HASURA_SECRET_*`) and never enter browser bundles.
+    hasuraUrl: "/api/hasura/devnet",
+    hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_DEVNET ?? "http://localhost:5100",
     addressLabels: {
@@ -168,11 +170,8 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     rpcUrl:
       process.env.NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA ??
       "https://forno.celo-sepolia.celo-testnet.org",
-    hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_LOCAL ??
-      "http://localhost:8080/v1/graphql",
-    hasuraSecret:
-      process.env.NEXT_PUBLIC_HASURA_SECRET_CELO_SEPOLIA_LOCAL ?? "testing",
+    hasuraUrl: "/api/hasura/celo-sepolia-local",
+    hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_LOCAL ??
       "https://celo-sepolia.blockscout.com",
@@ -201,11 +200,8 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
     rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
-    hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_LOCAL ??
-      "http://localhost:8080/v1/graphql",
-    hasuraSecret:
-      process.env.NEXT_PUBLIC_HASURA_SECRET_CELO_MAINNET_LOCAL ?? "testing",
+    hasuraUrl: "/api/hasura/celo-mainnet-local",
+    hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET_LOCAL ??
       "https://celoscan.io",

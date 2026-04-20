@@ -1,6 +1,6 @@
 import { unstable_cache } from "next/cache";
-import { GraphQLClient } from "graphql-request";
 import { NETWORKS, NETWORK_IDS, type Network } from "@/lib/networks";
+import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import { buildOracleRateMap, type OracleRateMap } from "@/lib/tokens";
 import { ALL_POOLS_WITH_HEALTH } from "@/lib/queries";
 import { BRIDGE_DAILY_SNAPSHOT } from "@/lib/bridge-queries";
@@ -35,13 +35,6 @@ export type BridgeFlowsOgData = {
   chains: string[];
 };
 
-function makeClient(network: Network): GraphQLClient {
-  const secret = network.hasuraSecret.trim();
-  return new GraphQLClient(network.hasuraUrl, {
-    headers: secret ? { "x-hasura-admin-secret": secret } : {},
-  });
-}
-
 /**
  * Configured bridge-eligible chains. Bridge data lives on the single
  * multichain Hasura endpoint (shared between Celo + Monad mainnet entries
@@ -72,7 +65,7 @@ export async function fetchBridgeFlowsOgDataUncached(): Promise<BridgeFlowsOgDat
   // current ~12 rows/day rate).
   const nowSec = Math.floor(Date.now() / 1000);
   const snapshotAfterSec = nowSec - 45 * SECONDS_PER_DAY;
-  const snapshotClient = makeClient(chains[0]!);
+  const snapshotClient = makeOgGraphQLClient(chains[0]!);
   const snapshotsPromise = snapshotClient.request<{
     BridgeDailySnapshot: BridgeDailySnapshot[];
   }>({
@@ -86,7 +79,7 @@ export async function fetchBridgeFlowsOgDataUncached(): Promise<BridgeFlowsOgDat
   // simply doesn't contribute rates; USDm/EURm/GBPm cross-chain prices
   // resolve from whichever chain is still reachable.
   const poolsPromises = chains.map((network) =>
-    makeClient(network)
+    makeOgGraphQLClient(network)
       .request<{ Pool: Pool[] }>({
         document: ALL_POOLS_WITH_HEALTH,
         variables: { chainId: network.chainId },
