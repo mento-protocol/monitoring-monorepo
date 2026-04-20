@@ -16,17 +16,6 @@ const TILE_BORDER = "#334155";
 
 const OK_COLOR = "#34d399";
 const CRITICAL_COLOR = "#f87171";
-const WARN_COLOR = "#fbbf24";
-const NEUTRAL_COLOR = "#cbd5e1";
-
-function overallStatusColor(
-  healthBuckets: HomepageOgData["healthBuckets"],
-): string {
-  if (healthBuckets.CRITICAL > 0) return CRITICAL_COLOR;
-  if (healthBuckets.WARN > 0) return WARN_COLOR;
-  if ((healthBuckets.OK ?? 0) > 0) return OK_COLOR;
-  return NEUTRAL_COLOR;
-}
 
 function formatWoW(pct: number): { text: string; color: string } {
   const arrow = pct >= 0 ? "▲" : "▼";
@@ -100,9 +89,6 @@ function Card({ data }: { data: HomepageOgData | null }) {
       ? formatUSD(data.totalTvlUsd)
       : "—";
   const tvlWow = data?.tvlWoWPct != null ? formatWoW(data.tvlWoWPct) : null;
-  const statusDot = data
-    ? overallStatusColor(data.healthBuckets)
-    : NEUTRAL_COLOR;
 
   return (
     <div
@@ -147,23 +133,7 @@ function Card({ data }: { data: HomepageOgData | null }) {
         </div>
         {data ? (
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <span
-              style={{
-                fontSize: 24,
-                color: MUTED,
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-              }}
-            >
-              <span
-                style={{
-                  width: 12,
-                  height: 12,
-                  borderRadius: 999,
-                  background: statusDot,
-                }}
-              />
+            <span style={{ fontSize: 24, color: MUTED }}>
               {data.poolCount} pools
             </span>
             <span
@@ -238,6 +208,7 @@ function Card({ data }: { data: HomepageOgData | null }) {
           flex: 1,
           justifyContent: "flex-end",
           gap: 10,
+          marginTop: 24,
         }}
       >
         {data && data.tvlSeries.length >= 2 ? (
