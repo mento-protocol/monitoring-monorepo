@@ -444,9 +444,18 @@ WormholeNttManager.TransferRedeemed.handler(async ({ event, context }) => {
     deliveredTxHash: event.transaction.hash,
   };
   if (mgr) {
-    delta.tokenSymbol = mgr.tokenSymbol;
-    delta.tokenAddress = mgr.tokenAddress;
-    delta.tokenDecimals = mgr.tokenDecimals;
+    // Destination handler: seed token metadata ONLY for dest-first race rows
+    // (where the source TransferSent hasn't fired yet). Once the source-side
+    // TransferSent handler has set tokenAddress, don't overwrite — the
+    // destination chain's tokenAddress points to a different proxy (hub/spoke
+    // NTT deploys a distinct address per chain) and would break UI links that
+    // assume the stored tokenAddress corresponds to sourceChainId.
+    const sourceHasRun = priorTransfer?.sentBlock != null;
+    if (!sourceHasRun) {
+      delta.tokenSymbol = mgr.tokenSymbol;
+      delta.tokenAddress = mgr.tokenAddress;
+      delta.tokenDecimals = mgr.tokenDecimals;
+    }
   }
 
   const transfer = await upsertTransferByDigest(
