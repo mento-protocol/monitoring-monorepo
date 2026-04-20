@@ -170,6 +170,17 @@ describe("sortTransfers — duration branch", () => {
     });
     const asc = sortTransfers([pending, delivered], "duration", "asc", noRates);
     expect(asc[0].id).toBe("d");
+    // Null sinks on desc too — without this, a page of duration-desc
+    // sorted rows could start with a block of "pending" cells on top,
+    // which is the opposite of the "no-data rows sink" UX contract.
+    const desc = sortTransfers(
+      [delivered, pending],
+      "duration",
+      "desc",
+      noRates,
+    );
+    expect(desc[0].id).toBe("d");
+    expect(desc[1].id).toBe("p");
   });
 });
 

@@ -6,7 +6,13 @@ import type { BridgeStatus } from "@/lib/types";
 interface BridgeStatusFilterProps {
   /** All statuses the user can toggle. Order drives render order. */
   options: readonly BridgeStatus[];
-  /** Currently-selected statuses. */
+  /**
+   * Currently-selected statuses. Invariant: `selected` should be a subset
+   * of `options` — values outside `options` aren't rendered as pills, but
+   * the toggle now preserves them in the emitted array so a caller that
+   * passes a transient superset (e.g. during an options-narrowing
+   * migration) doesn't lose its state mid-toggle.
+   */
   selected: readonly BridgeStatus[];
   onChange: (next: BridgeStatus[]) => void;
 }
@@ -28,12 +34,18 @@ export function BridgeStatusFilter({
   const selectedSet = new Set(selected);
   const allSelected = options.every((s) => selectedSet.has(s));
 
+  // Operate directly on `selected` — the old implementation rebuilt the
+  // next array from `options`, which silently dropped any already-selected
+  // value missing from `options` (e.g. after a status was removed from
+  // ALL_BRIDGE_STATUSES). The pills still render in canonical order
+  // because they're mapped from `options`; this only affects the array
+  // emitted to the parent.
   const toggle = (status: BridgeStatus) => {
-    if (selectedSet.has(status)) {
-      onChange(options.filter((s) => s !== status && selectedSet.has(s)));
-    } else {
-      onChange(options.filter((s) => s === status || selectedSet.has(s)));
-    }
+    onChange(
+      selectedSet.has(status)
+        ? selected.filter((s) => s !== status)
+        : [...selected, status],
+    );
   };
 
   const selectAll = () => onChange([...options]);

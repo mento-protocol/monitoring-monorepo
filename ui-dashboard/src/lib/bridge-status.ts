@@ -9,19 +9,28 @@ const STUCK_THRESHOLD_SECONDS = 24 * 60 * 60;
 /**
  * Canonical order for status-filter UI rendering. Ordered lifecycle-
  * ascending so the pills read as a pipeline (pre-flight → in-flight →
- * terminal). Kept in sync with the enum in indexer-envio/src/wormhole/
- * status.ts — missing any status from here silently drops it from the
- * filter UI.
+ * terminal).
+ *
+ * The union `BridgeStatus` describes the full schema vocabulary (including
+ * CANCELLED / FAILED, which are reserved for post-v1 event wiring). This
+ * list is the *user-filterable* subset — the statuses the indexer actually
+ * writes today. The Wormhole status computer in
+ * `indexer-envio/src/wormhole/status.ts` documents that no handler writes
+ * `cancelledTimestamp` or `failedReason` in v1, so exposing those pills
+ * would let the user filter to a set that's always empty.
+ *
+ * The `satisfies readonly BridgeStatus[]` clause enforces each entry is a
+ * valid `BridgeStatus` so a typo in the literal is caught at compile time,
+ * but the list is intentionally *not* computed from the union — the whole
+ * point is to force a conscious update when a new status is wired.
  */
-export const ALL_BRIDGE_STATUSES: readonly BridgeStatus[] = [
+export const ALL_BRIDGE_STATUSES = [
   "PENDING",
   "SENT",
   "ATTESTED",
   "QUEUED_INBOUND",
   "DELIVERED",
-  "CANCELLED",
-  "FAILED",
-] as const;
+] as const satisfies readonly BridgeStatus[];
 
 /**
  * Derive the display status. Overlays "STUCK" when an in-flight transfer
@@ -103,9 +112,11 @@ export function formatDurationShort(seconds: number): string {
 
 /**
  * Duration between source-send and destination-delivery, in seconds, or
- * `null` when either side is missing (not yet delivered, or race-window row
- * with no sentTimestamp). Returns 0 for a clock skew that produces
- * delivered < sent — the caller treats that as "just now".
+ * `null` when either side is missing (not yet delivered, race-window row
+ * with no sentTimestamp, or a sentinel "0" that an indexer may have
+ * written before the real source event was observed). Returns 0 for a
+ * clock skew that produces delivered < sent — the caller treats that as
+ * "just now". Non-finite strings (e.g. "abc") also return null.
  */
 export function transferDeliveryDurationSec(
   t: Pick<BridgeTransfer, "sentTimestamp" | "deliveredTimestamp">,
@@ -114,6 +125,10 @@ export function transferDeliveryDurationSec(
   const sent = Number(t.sentTimestamp);
   const delivered = Number(t.deliveredTimestamp);
   if (!Number.isFinite(sent) || !Number.isFinite(delivered)) return null;
+  // Epoch sentinel: treat a literal "0" as "not yet known" rather than
+  // producing a 5-decade delivery delta. Negative values (e.g. a bogus
+  // clock-skewed timestamp < 0) fall through to the Math.max clamp.
+  if (sent === 0 || delivered === 0) return null;
   return Math.max(0, delivered - sent);
 }
 

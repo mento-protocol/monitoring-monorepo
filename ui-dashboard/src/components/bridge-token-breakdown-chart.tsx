@@ -43,6 +43,12 @@ interface BridgeTokenBreakdownChartProps {
   rates: OracleRateMap;
   isLoading: boolean;
   hasError: boolean;
+  /**
+   * True when the snapshot query hit Hasura's 1000-row cap. Only affects
+   * the "All" tab subtitle — the 7d/30d tabs have their own fixed cutoff
+   * inside the cap horizon, so the cap doesn't truncate their window.
+   */
+  isCapped?: boolean;
   /** Initial range tab; defaults to 30d to match the pre-toggle behavior. */
   defaultRange?: RangeKey;
 }
@@ -52,6 +58,7 @@ export function BridgeTokenBreakdownChart({
   rates,
   isLoading,
   hasError,
+  isCapped = false,
   defaultRange = "30d",
 }: BridgeTokenBreakdownChartProps) {
   const [range, setRange] = useState<RangeKey>(defaultRange);
@@ -100,10 +107,22 @@ export function BridgeTokenBreakdownChart({
     [],
   );
 
+  // Match the "partial data" copy used on BridgeVolumeChart (via
+  // TimeSeriesChartCard's `hasSnapshotError` branch). Only surface when the
+  // "all" window is active — the bounded ranges don't touch the cap.
+  const showCapNote = isCapped && range === "all";
+
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
       <div className="mb-4 flex items-start justify-between gap-4">
-        <h3 className="text-sm text-slate-400">Volume by token</h3>
+        <div>
+          <h3 className="text-sm text-slate-400">Volume by token</h3>
+          {showCapNote && (
+            <p className="mt-0.5 text-xs text-slate-500">
+              Partial — snapshot cap hit
+            </p>
+          )}
+        </div>
         <div
           role="group"
           aria-label="Volume by token time range"

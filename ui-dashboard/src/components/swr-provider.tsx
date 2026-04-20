@@ -8,11 +8,10 @@ import * as Sentry from "@sentry/nextjs";
 // SWR cache key attached as extra data. Without this, caught errors surface
 // as an ErrorBox in the UI and vanish from observability. Individual hooks
 // can still override by passing their own `onError` to useSWR.
-
-// Polling hooks (useGQL @ 10s, useAllNetworksData @ 30s) across multiple
-// open tabs would otherwise flood Sentry during an upstream outage — one
-// Hasura timeout fans out to dozens of identical events per minute. Cap at
-// one capture per unique SWR key per 60 seconds.
+//
+// Capture is throttled per-key so polling hooks don't flood Sentry during
+// an upstream outage — one Hasura timeout fans out to dozens of identical
+// events per minute otherwise.
 const THROTTLE_MS = 60_000;
 const lastCapturedAt = new Map<string, number>();
 
@@ -31,13 +30,13 @@ function shouldCapture(normalized: string): boolean {
 // Hoisted to module scope so the config object identity is stable across
 // renders — an inline object literal would bust context consumers every
 // time SwrProvider re-renders.
+//
+// Focus/reconnect revalidation is *not* disabled globally — only the
+// bridge-flows hook opts out (see `use-bridge-gql.ts`), since that's where
+// the 429 fanout came from. Leaving the global default on means regular
+// one-shot SWR reads still refresh when the user returns to a tab or the
+// network recovers.
 const swrConfig: SWRConfiguration = {
-  // Disable focus/reconnect revalidation. Polling hooks (useBridgeGQL @ 10s,
-  // useAllNetworksData @ 5min fanning across ~6 chains) already keep data
-  // fresh; focus/reconnect events would fire the whole fan-out again on
-  // every alt-tab, which was tripping Envio's tier quota (GraphQL 429).
-  revalidateOnFocus: false,
-  revalidateOnReconnect: false,
   onError(err, key) {
     const normalized = normalizeKey(key);
     if (!shouldCapture(normalized)) return;

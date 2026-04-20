@@ -57,17 +57,23 @@ export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
   }
 `;
 
-// Count paired with BRIDGE_TRANSFERS_WINDOW. Fetches IDs only (max 1000 rows)
-// so the page indicator can render "Page X of Y" without an `_aggregate`
-// query (aggregates are disabled on hosted Hasura). Applies the same `after`
-// and `statusIn` filters the visible window uses — otherwise the denominator
-// would count hidden rows.
+// Count paired with BRIDGE_TRANSFERS_WINDOW. Fetches IDs only (up to
+// `$limit` rows — callers pass `ENVIO_MAX_ROWS`) so the page indicator can
+// render "Page X of Y" without an `_aggregate` query (aggregates are
+// disabled on hosted Hasura). Applies the same `after` and `statusIn`
+// filters the visible window uses — otherwise the denominator would count
+// hidden rows. The $limit variable mirrors POOL_SWAPS_COUNT so the cap
+// lives in a single TS constant rather than being hardcoded in GraphQL.
 export const BRIDGE_TRANSFERS_COUNT = /* GraphQL */ `
-  query BridgeTransfersCount($after: numeric!, $statusIn: [String!]!) {
+  query BridgeTransfersCount(
+    $after: numeric!
+    $statusIn: [String!]!
+    $limit: Int!
+  ) {
     BridgeTransfer(
       where: { firstSeenAt: { _gte: $after }, status: { _in: $statusIn } }
       order_by: { firstSeenAt: desc, id: asc }
-      limit: 1000
+      limit: $limit
     ) {
       id
     }

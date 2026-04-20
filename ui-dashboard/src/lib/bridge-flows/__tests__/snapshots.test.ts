@@ -255,4 +255,32 @@ describe("buildTokenBreakdown", () => {
     ];
     expect(buildTokenBreakdown(snaps, emptyRates, 30, now)).toEqual([]);
   });
+
+  it("rolls up the entire history when windowDays is null (all-time)", () => {
+    // The "All" range tab passes windowDays=null. Rows older than any
+    // finite window must still contribute to the rollup — confirms the
+    // cutoff is skipped rather than short-circuiting to [].
+    const snaps = [
+      mk({
+        date: String(now - 400 * DAY),
+        tokenSymbol: "USDm",
+        sentUsdValue: "1000",
+      }),
+      mk({
+        date: String(now - 180 * DAY),
+        tokenSymbol: "GBPm",
+        sentUsdValue: "500",
+      }),
+      mk({
+        date: String(now - 1 * DAY),
+        tokenSymbol: "USDm",
+        sentUsdValue: "50",
+      }),
+    ];
+    const slices = buildTokenBreakdown(snaps, emptyRates, null, now);
+    expect(slices).toEqual([
+      { symbol: "USDm", usd: 1050 },
+      { symbol: "GBPm", usd: 500 },
+    ]);
+  });
 });

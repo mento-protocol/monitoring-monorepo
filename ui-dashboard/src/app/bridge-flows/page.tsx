@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useBridgeGQL } from "@/lib/bridge-flows/use-bridge-gql";
 import {
   BRIDGE_TRANSFERS_WINDOW,
@@ -86,18 +86,70 @@ function BridgeFlowsContent() {
   // Page + status filter live at the page level so the table's pagination
   // and count query share the same variables. Default: show all statuses,
   // start on page 1. Resetting to page 1 when the filter changes keeps
-  // users out of empty trailing pages.
-  const [page, setPage] = useState(1);
+  // users out of empty trailing pages. The active `page` is derived by
+  // clamping `rawPage` against `totalPages` below — a pattern borrowed
+  // from the pool page so a stale index never leaves the user stranded
+  // past the last page (avoids a setState-in-effect clamping loop).
+  const [rawPage, setRawPage] = useState(1);
   const [selectedStatuses, setSelectedStatuses] = useState<BridgeStatus[]>(() =>
     ALL_BRIDGE_STATUSES.slice(),
   );
   const handleStatusChange = (next: BridgeStatus[]) => {
     setSelectedStatuses(next);
-    setPage(1);
+    setRawPage(1);
   };
 
+  // When the user toggles statuses to an empty set, SWR key is nulled and
+  // no fetch happens — the EmptyBox below handles the UI copy. Otherwise
+  // callers would poll a `status: _in: []` query on every refresh interval
+  // just to get back an empty array.
+  const hasSelectedStatuses = selectedStatuses.length > 0;
+
+  // Total row count for the pagination denominator. Shape matches
+  // POOL_SWAPS_COUNT: fetch up to ENVIO_MAX_ROWS IDs and count client-side,
+  // since hosted Hasura has no _aggregate support. Preserved-last-known
+  // pattern avoids the pager collapsing on a transient count error.
+  const countResult = useBridgeGQL<{ BridgeTransfer: Array<{ id: string }> }>(
+    hasSelectedStatuses ? BRIDGE_TRANSFERS_COUNT : null,
+    {
+      after: afterDayBucket,
+      statusIn: selectedStatuses,
+      limit: ENVIO_MAX_ROWS,
+    },
+  );
+  const lastKnownTotalRef = useRef(0);
+  // Reset the preserved-last-known denominator whenever the filter inputs
+  // change — otherwise a transient count error on a new filter surfaces
+  // the previous filter's total (e.g. "91 total" for a narrower filter
+  // that really has 3 matches). Stable-serialize the array so React's
+  // dependency comparison doesn't miss in-place mutations.
+  const statusKey = selectedStatuses.join("|");
+  useEffect(() => {
+    lastKnownTotalRef.current = 0;
+  }, [statusKey, afterDayBucket]);
+  const rawTotal = countResult.data?.BridgeTransfer.length ?? 0;
+  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
+  // On count error, fall back to the preserved value but gate `totalCapped`
+  // on that same preserved value — otherwise a transient error with a stale
+  // ref of 0 could claim rawTotal < ENVIO_MAX_ROWS while the banner reads
+  // off whatever last-known count we held.
+  const total = countResult.error ? lastKnownTotalRef.current : rawTotal;
+  const totalCapped = !countResult.error && rawTotal >= ENVIO_MAX_ROWS;
+
+  // Clamp the active page against `totalPages` — if `total` shrinks (user
+  // was on page 4 of a 100-row filter, then toggled a narrower filter
+  // whose total only covers 2 pages) the offset would otherwise land past
+  // the last row and the table would render empty. Deriving rather than
+  // useEffect+setState avoids a redundant render and the ESLint
+  // no-direct-set-state-in-use-effect rule. `handleStatusChange` still
+  // resets `rawPage = 1` for the common filter-change case; this guards
+  // transient shrinkage from a later count refresh or window roll.
+  const totalPages = total > 0 ? Math.ceil(total / PAGE_LIMIT) : 1;
+  const page = Math.max(1, Math.min(rawPage, totalPages));
+  const setPage = setRawPage;
+
   const transfersResult = useBridgeGQL<{ BridgeTransfer: BridgeTransfer[] }>(
-    BRIDGE_TRANSFERS_WINDOW,
+    hasSelectedStatuses ? BRIDGE_TRANSFERS_WINDOW : null,
     {
       limit: PAGE_LIMIT,
       offset: (page - 1) * PAGE_LIMIT,
@@ -105,20 +157,6 @@ function BridgeFlowsContent() {
       statusIn: selectedStatuses,
     },
   );
-
-  // Total row count for the pagination denominator. Shape matches
-  // POOL_SWAPS_COUNT: fetch up to ENVIO_MAX_ROWS IDs and count client-side,
-  // since hosted Hasura has no _aggregate support. Preserved-last-known
-  // pattern avoids the pager collapsing on a transient count error.
-  const countResult = useBridgeGQL<{ BridgeTransfer: Array<{ id: string }> }>(
-    BRIDGE_TRANSFERS_COUNT,
-    { after: afterDayBucket, statusIn: selectedStatuses },
-  );
-  const lastKnownTotalRef = useRef(0);
-  const rawTotal = countResult.data?.BridgeTransfer.length ?? 0;
-  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
-  const total = countResult.error ? lastKnownTotalRef.current : rawTotal;
-  const totalCapped = rawTotal >= ENVIO_MAX_ROWS;
 
   // All-time daily snapshots feed both the KPI row (24h/7d/30d sums) and the
   // charts. One fetch → many derived views. `afterDate: 0` requests all
@@ -212,6 +250,7 @@ function BridgeFlowsContent() {
           rates={rates}
           isLoading={snapshotsResult.isLoading && snapshots.length === 0}
           hasError={snapshotsError}
+          isCapped={snapshotsCapped}
         />
         <BridgeTopBridgersChart
           bridgers={topBridgers}
@@ -303,6 +342,11 @@ function BridgeFlowsContent() {
               <p className="mt-1 text-xs text-slate-500">
                 Showing first {ENVIO_MAX_ROWS.toLocaleString()} transfers —
                 older entries may exist beyond this page range.
+              </p>
+            )}
+            {countResult.error && (
+              <p className="mt-1 text-xs text-slate-500">
+                Total count degraded — showing last known denominator.
               </p>
             )}
           </>
@@ -526,10 +570,17 @@ function TransfersTable({
 function DurationCell({ transfer }: { transfer: BridgeTransfer }) {
   const durationSec = transferDeliveryDurationSec(transfer);
   if (durationSec === null) {
+    // Mirror the STUCK overlay: any non-terminal-delivered status is
+    // "pending" from a duration perspective — including the client-side
+    // STUCK overlay, which should still show "pending" rather than em-dash
+    // (it's unfinished, not unknown). CANCELLED/FAILED are unreachable on
+    // the bridge page today (no indexer handler writes them) but the
+    // em-dash branch is kept for schema-level safety.
+    const derived = deriveBridgeStatus(transfer);
     const pending =
-      transfer.status !== "DELIVERED" &&
-      transfer.status !== "CANCELLED" &&
-      transfer.status !== "FAILED";
+      derived !== "DELIVERED" &&
+      derived !== "CANCELLED" &&
+      derived !== "FAILED";
     return (
       <td
         className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-500 font-mono text-right whitespace-nowrap"
