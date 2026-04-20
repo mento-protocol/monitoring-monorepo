@@ -44,6 +44,7 @@ import {
 } from "../rpc";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
 import { recordHealthSample } from "../healthScore";
+import { isKnownFeeToken } from "../feeToken";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -100,14 +101,51 @@ async function applyLiquidityPositionDelta({
 // hardcoded address list in the config. Envio deduplicates addresses, so
 // re-registering the same address on re-runs is harmless.
 //
+// SECURITY GATE: `addERC20FeeToken` is only called for tokens present in the
+// canonical Mento registry (`@mento-protocol/contracts`). This prevents a
+// compromised factory owner (or a misconfigured deployment) from registering
+// an attacker-controlled ERC20 that spams Transfer events at the yield-split
+// address — each of which would otherwise force the indexer to read pool
+// state and burn RPC/DB quota. Pool creation itself is `onlyOwner` in the
+// FPMMFactory, so this is defense in depth. New legitimate fee tokens ship
+// via a `@mento-protocol/contracts` bump (plus a resync) — if a new token
+// is observed here without a registry entry we log a warning so the gap is
+// visible in operations. See: Codex finding
+// https://chatgpt.com/codex/cloud/security/findings/bcfbd2e38c388191a52fb85205eb326d
+//
 // Note: contractRegister callbacks are a framework-level hook that Envio
 // invokes before the handler. The Envio test harness (processEvent) only
 // exercises the .handler() path, so this callback has no direct test
-// coverage — this is a framework limitation, not an oversight.
+// coverage — this is a framework limitation, not an oversight. We mitigate
+// by unit-testing `isKnownFeeToken` directly and asserting the callback is
+// registered via the handler-registry introspection tests.
 FPMMFactory.FPMMDeployed.contractRegister(({ event, context }) => {
   context.addFPMM(event.params.fpmmProxy);
-  context.addERC20FeeToken(event.params.token0);
-  context.addERC20FeeToken(event.params.token1);
+
+  // Always log the pool address + tokens at registration so operators can
+  // correlate a "token rejected" warning back to its source pool.
+  const token0 = event.params.token0;
+  const token1 = event.params.token1;
+
+  if (isKnownFeeToken(event.chainId, token0)) {
+    context.addERC20FeeToken(token0);
+  } else {
+    console.warn(
+      `[FPMMFactory] Rejecting fee-token registration for unknown token0=${token0} ` +
+        `on chain ${event.chainId} (pool=${event.params.fpmmProxy}). ` +
+        `Bump @mento-protocol/contracts if this token is legitimate.`,
+    );
+  }
+
+  if (isKnownFeeToken(event.chainId, token1)) {
+    context.addERC20FeeToken(token1);
+  } else {
+    console.warn(
+      `[FPMMFactory] Rejecting fee-token registration for unknown token1=${token1} ` +
+        `on chain ${event.chainId} (pool=${event.params.fpmmProxy}). ` +
+        `Bump @mento-protocol/contracts if this token is legitimate.`,
+    );
+  }
 });
 
 FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {

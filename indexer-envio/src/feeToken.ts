@@ -88,6 +88,45 @@ function buildKnownTokenMeta(): Map<
 const KNOWN_TOKEN_META = buildKnownTokenMeta();
 
 /**
+ * Test-only additions to the known-fee-token allowlist. Mirrors the pattern
+ * used by _testFeeTokenMeta. Production code does not populate this set.
+ */
+const _testAllowedFeeTokens = new Set<string>();
+
+/** Add a token to the allowlist for tests. */
+export function _addMockAllowedFeeToken(
+  chainId: number,
+  tokenAddress: string,
+): void {
+  _testAllowedFeeTokens.add(`${chainId}:${tokenAddress.toLowerCase()}`);
+}
+
+/** Clear all test-only allowlist entries. */
+export function _clearMockAllowedFeeTokens(): void {
+  _testAllowedFeeTokens.clear();
+}
+
+/**
+ * Returns true if `(chainId, tokenAddress)` is a known Mento fee token
+ * according to `@mento-protocol/contracts`. Used as a registration gate by
+ * `FPMMFactory.FPMMDeployed.contractRegister` to prevent an attacker-controlled
+ * pool (if one ever slipped past governance) from registering arbitrary ERC20
+ * addresses and forcing the indexer to consume their Transfer events.
+ *
+ * The Mento FPMMFactory is `onlyOwner`, so the exploit path requires a
+ * compromised factory owner, but gating at the indexer is cheap insurance and
+ * bounds the registered-contracts set to the canonical Mento token registry.
+ * New legitimate tokens ship via a `@mento-protocol/contracts` version bump.
+ */
+export function isKnownFeeToken(
+  chainId: number,
+  tokenAddress: string,
+): boolean {
+  const key = `${chainId}:${tokenAddress.toLowerCase()}`;
+  return KNOWN_TOKEN_META.has(key) || _testAllowedFeeTokens.has(key);
+}
+
+/**
  * Resolve symbol + decimals for a fee token via RPC (cached after first call).
  * Falls back to a static map of known Mento tokens when RPC is unavailable.
  */
