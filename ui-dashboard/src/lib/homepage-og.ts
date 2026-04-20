@@ -105,8 +105,11 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
   }
 
   // Paginate daily snapshots via POOL_DAILY_SNAPSHOTS_ALL (1000-row
-  // Hasura cap). Without pagination the OG card self-disables at normal
-  // growth (≈30 pools × 35 days = 1050 rows on one chain).
+  // Hasura cap). The query is ordered newest-first, so the first N pages
+  // always contain the most recent N×1000 rows — well above the 30-day
+  // OG window at realistic pool counts. Hitting the safety cap just means
+  // the chain has more total history than we care about, not that the
+  // recent data we need is missing; only an exception flips dailyDegraded.
   const poolIds = pools.map((p) => p.id);
   const seen = new Set<string>();
   const daily: PoolSnapshot[] = [];
@@ -130,8 +133,6 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
         daily.push(row);
       }
       if (rows.length < DAILY_PAGE_SIZE) break;
-      // Still full at last attempt means we may have truncated — flag it.
-      if (page === DAILY_MAX_PAGES - 1) dailyDegraded = true;
     }
   } catch {
     // Daily query failed mid-pagination; mark degraded so the aggregator
