@@ -29,10 +29,9 @@ type PoolHistory = {
 /**
  * Builds a forward-filled TVL time series. `bucketSeconds` selects the
  * granularity — default is UTC-day (SECONDS_PER_DAY). The 1W range passes
- * SECONDS_PER_HOUR for an hour-level cursor; since the source data is now
- * the daily rollup, reserves step at day boundaries but the higher cadence
- * still produces a smoother line (and lets the hover tooltip show hour-level
- * timestamps).
+ * SECONDS_PER_HOUR for more cursor steps (useful for tooltip granularity);
+ * since the source is the daily rollup, reserves only step at day boundaries
+ * regardless of bucket size.
  *
  * `fromTimestamp` clamps the emitted series to `[fromTimestamp, now]` —
  * callers that only need a recent window (e.g. 1W hourly = 168 buckets)

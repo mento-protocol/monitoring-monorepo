@@ -217,8 +217,8 @@ describe("fetchNetworkData — happy path", () => {
 // fetchNetworkData — daily snapshot pagination
 
 describe("fetchNetworkData — daily snapshot pagination", () => {
-  const makeDaily = (timestamp: number) => ({
-    poolId: "pool-daily",
+  const makeDaily = (timestamp: number, poolId = "pool-daily") => ({
+    poolId,
     timestamp: String(timestamp),
     reserves0: "0",
     reserves1: "0",
