@@ -119,10 +119,6 @@ function BridgeFlowsContent() {
   const snapshotsCapped = snapshots.length >= 1000;
   const topBridgers = topBridgersResult.data?.BridgeBridger ?? [];
 
-  // 24h / 7d / 30d breakdowns for the Transfers KPI tile, derived from the
-  // same snapshot fetch that drives the charts. Volume USD is covered by
-  // the Bridged Volume chart above the KPI row, so it doesn't need a
-  // parallel tile.
   const transferTotals = useMemo(
     () => windowTotals(snapshots, (s) => s.sentCount ?? 0),
     [snapshots],
@@ -475,12 +471,8 @@ function Dash() {
   return <span className="text-slate-600">{"\u2014"}</span>;
 }
 
-/**
- * Wraps children in an anchor to a Wormholescan tx page when `href` is set,
- * or passes them through untouched when the row has no source tx yet. Keeps
- * the cell's typography — the anchor only adds a subtle hover tint so the
- * visible content isn't restyled into blue link colors.
- */
+/** Wraps children in a Wormholescan tx anchor when href is set. Keeps the
+ * cell's typography — no blue link recolor on the content. */
 function WormholescanLink({
   href,
   children,

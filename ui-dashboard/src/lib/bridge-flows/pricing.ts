@@ -7,16 +7,10 @@ export function transferAmountTokens(t: BridgeTransfer): number | null {
   return parseWei(t.amount, t.tokenDecimals ?? 18);
 }
 
-/**
- * USD value of a transfer. Prefers `usdValueAtSend` (indexer-pinned at the
- * source-chain block) when present; otherwise falls back to live oracle rates
- * — which loses the "at-send" timestamp precision but is better than a blank
- * cell for rows the indexer didn't price.
- *
- * Indexer USD-pricing is not implemented yet (plan §1.5 deferred), so the
- * fallback path is the only path today. The two-branch structure is in place
- * so the indexer can start writing `usdValueAtSend` without a UI change.
- */
+/** Prefers indexer-pinned `usdValueAtSend`; falls back to live oracle rates
+ * (loses at-send precision but beats a blank cell). Indexer pricing is not
+ * wired yet — the fallback path is currently the only one — but the branch
+ * is here so the indexer can start pinning values without a UI change. */
 export function transferAmountUsd(
   t: BridgeTransfer,
   rates: OracleRateMap,

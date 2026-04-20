@@ -203,14 +203,8 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
   const chainId = event.chainId;
   const manager = event.srcAddress.toLowerCase();
 
-  // Pair with the TransferSentDetailed row written earlier in the same tx.
-  // The 6-arg variant fires first; the digest fires later with an arbitrary
-  // number of intermediate Wormhole-core / transceiver logs between them
-  // (up to ~50 on Monad). Done before the manifest check so we reap the
-  // scratch even when the NttManager isn't in the manifest (yaml drift) —
-  // otherwise every drift-affected tx would leak a pending row. Source-side
-  // uses the non-drain variant because it only wants to delete AFTER the
-  // upsert succeeds.
+  // Pair BEFORE the manifest check so a yaml-drifted NttManager doesn't leak
+  // a pending row. We don't drain yet — delete only after the upsert succeeds.
   const { row: pending, id: pendingId } = await findPendingScratch(
     (context as HandlerContext).WormholeTransferPending,
     {
@@ -452,12 +446,8 @@ WormholeNttManager.TransferRedeemed.handler(async ({ event, context }) => {
   }
 });
 
-/**
- * Merge a drained `WormholeDestPending` payload into the transfer + detail
- * deltas a dest-side handler is about to upsert. No-op when `destPending`
- * is undefined. Preserves source identity that the source-side handler may
- * have already set — dest-side is secondary for that field.
- */
+/** Dest-side is secondary for source identity — if the source-side handler
+ * has already set sourceChainId/sourceContract, don't clobber. */
 type DestPendingRow = NonNullable<
   Awaited<ReturnType<HandlerContext["WormholeDestPending"]["get"]>>
 >;
@@ -477,15 +467,10 @@ function applyDestPendingToDelta(
   detailDelta.sourceWormholeChainId = destPending.sourceWormholeChainId;
 }
 
-/**
- * Drain the `WormholeDestPending` scratch written by the earlier-in-tx
- * ReceivedMessage. When a caller can identify the destination transceiver
- * (MessageAttestedTo carries it in `p.transceiver`), pass it as a filter so
- * multi-transceiver flows don't cross-pair. TransferRedeemed has no
- * transceiver identifier in its payload — it passes `undefined` and accepts
- * any scratch in the tx (safe because the drain races MessageAttestedTo,
- * which is authoritative when present).
- */
+/** Drain the scratch written by the earlier-in-tx ReceivedMessage. Pass
+ * `transceiver` when the caller can identify it (MessageAttestedTo) so a
+ * multi-transceiver tx doesn't cross-pair; TransferRedeemed passes undefined
+ * because its payload lacks that identifier. */
 async function drainDestPending(
   context: HandlerContext,
   event: {

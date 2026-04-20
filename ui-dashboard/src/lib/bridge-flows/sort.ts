@@ -117,12 +117,8 @@ export function sortTransfers(
       case "receiver":
         return compareString(a.recipient, b.recipient, sortDir);
       case "time": {
-        // Column label is "Time" but the underlying sort is on timestamp —
-        // desc (default) = newest on top, matching user expectation.
-        // Null/NaN timestamps sink regardless of direction via
-        // compareNullable so a row with a garbled ts can't scramble the
-        // neighbourhood around it (the cell still renders relativeTime,
-        // but the row goes to the bottom instead of arbitrary positioning).
+        // Null/NaN timestamps sink regardless of direction so a garbled row
+        // can't scramble the neighbourhood around it.
         return compareNullable(
           timestampSortValue(a),
           timestampSortValue(b),

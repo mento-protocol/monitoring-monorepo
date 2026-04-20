@@ -41,11 +41,8 @@ function toDayBucket(timestampSeconds: number): number {
   return timestampSeconds - (timestampSeconds % SECONDS_PER_DAY);
 }
 
-/**
- * Sum per-day USD volume across the snapshot rows. Input may contain multiple
- * rows per day (one per provider × token × route); output has one point per
- * day, ascending by timestamp, with value = total USD sent that day.
- */
+/** Input has one row per (provider × token × route × day); output has one
+ * point per day, ascending by timestamp. */
 export function buildVolumeUsdSeries(
   snapshots: ReadonlyArray<BridgeDailySnapshot>,
   rates: OracleRateMap,
@@ -61,11 +58,8 @@ export function buildVolumeUsdSeries(
     .map(([timestamp, value]) => ({ timestamp, value }));
 }
 
-/**
- * Same shape as `buildVolumeUsdSeries` but values are counts of transfers
- * sent that day. Useful when USD pricing is unreliable and we just want
- * "is the bridge being used more/less".
- */
+/** Count-valued counterpart to `buildVolumeUsdSeries` — used when USD
+ * pricing is unreliable and we only care about directional usage. */
 export function buildCountSeries(
   snapshots: ReadonlyArray<BridgeDailySnapshot>,
 ): TimeSeriesPoint[] {

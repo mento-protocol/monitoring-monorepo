@@ -26,18 +26,11 @@ export type PairingEntityAccessor<T> = {
   deleteUnsafe?: (id: string) => void;
 };
 
-/**
- * Walk backward from `currentLogIndex - 1` down through up to
- * `MAX_PAIRING_BACKWALK` offsets looking for a scratch row written by an
- * earlier event in this same transaction. Returns `{ row, id }` on hit (with
- * the matching row AND its key so the caller can delete it), or
- * `{ row: undefined, id: "" }` on miss. The caller decides whether to delete.
- *
- * Note: callers MAY want to apply an identity check (e.g. match a dest
- * transceiver address) before claiming the scratch, to guard against
- * multi-transceiver or multi-send flows where multiple scratch rows from
- * distinct logical pairs live in the same tx. Pass `matches` to filter.
- */
+/** Walk backward from `currentLogIndex - 1` looking for an earlier-in-tx
+ * scratch row. Returns the row + its key so the caller can delete it (the
+ * drain variant below does that automatically). `matches` lets callers reject
+ * candidates when a multi-transceiver tx carries several scratch rows that
+ * don't all belong to this pair. */
 export async function findPendingScratch<T>(
   entity: PairingEntityAccessor<T>,
   { chainId, txHash, currentLogIndex }: PairingKey,
@@ -55,11 +48,8 @@ export async function findPendingScratch<T>(
   return { row: undefined, id: "" };
 }
 
-/**
- * Shortcut over `findPendingScratch` that deletes the row on hit. Returns the
- * row payload (or undefined). Most callers want this — they want the payload
- * AND want the scratch reaped so it doesn't leak as ghost rows.
- */
+/** `findPendingScratch` + auto-delete on hit. Use this unless the caller
+ * has a reason to keep the scratch row around after reading it. */
 export async function findAndDrainPendingScratch<T>(
   entity: PairingEntityAccessor<T>,
   key: PairingKey,
