@@ -139,9 +139,9 @@ export function defaultBridger(args: {
  */
 export function appendJsonSet(jsonArray: string, value: string): string {
   try {
-    const arr = JSON.parse(jsonArray) as Array<string | number>;
-    if (arr.includes(value as never)) return jsonArray;
-    arr.push(value as never);
+    const arr = JSON.parse(jsonArray) as Array<string>;
+    if (arr.includes(value)) return jsonArray;
+    arr.push(value);
     return JSON.stringify(arr);
   } catch {
     return JSON.stringify([value]);

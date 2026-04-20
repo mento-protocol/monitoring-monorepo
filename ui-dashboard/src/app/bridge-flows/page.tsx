@@ -234,9 +234,9 @@ function BridgeFlowsContent() {
         <h2 className="text-lg font-semibold text-white mb-3">
           Recent transfers
         </h2>
-        {error ? (
+        {transfersResult.error ? (
           <EmptyBox message="Unable to load transfers — see error above." />
-        ) : loading && transfers.length === 0 ? (
+        ) : transfersResult.isLoading && transfers.length === 0 ? (
           <Skeleton rows={5} />
         ) : transfers.length === 0 ? (
           <EmptyBox message="No bridge transfers in the last 30 days." />

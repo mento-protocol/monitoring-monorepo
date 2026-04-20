@@ -33,6 +33,13 @@ export function computeWormholeStatus(
   >,
   d: Pick<WormholeTransferDetail, "inboundQueuedTimestamp"> | null,
 ): BridgeStatus {
+  // CANCELLED / FAILED are reserved in the enum but no handler writes
+  // `cancelledTimestamp` or `failedReason` in v1 — these branches only fire
+  // once a cancel/fail event is wired (Wormhole NTT has no cancel event on
+  // the source side today; FAILED would come from a failed-redeem event we
+  // don't yet index). Remove the branches when wiring them if unused at
+  // that point; leave in place so we don't have to diff reviewers' mental
+  // models of the status machine.
   if (t.cancelledTimestamp) return "CANCELLED";
   if (t.failedReason) return "FAILED";
   if (t.deliveredBlock) return "DELIVERED";
