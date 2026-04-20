@@ -173,6 +173,11 @@ type SnapshotPageResult = {
 const snapshotDedupKey = (s: PoolSnapshotWindow) =>
   `${s.poolId}-${s.timestamp}`;
 
+// Tracks responseKeys that have already triggered a
+// "hasura-snapshot-cap-exhausted" warning so the 30s poll cycle doesn't
+// re-fire the same signal on every refresh.
+const warnedCapKeys = new Set<string>();
+
 async function fetchAllSnapshotPages(
   client: GraphQLClient,
   poolIds: string[],
@@ -251,9 +256,8 @@ async function fetchPaginatedSnapshotPages<K extends string>(
   // Safety-cap exhaustion: we fetched SNAPSHOT_MAX_PAGES × SNAPSHOT_PAGE_SIZE
   // rows without running out. Data is genuinely incomplete — flag as a warning
   // so we can tell when the cap needs raising (or when indexer rollups need
-  // replacing a paginated fetch). Dedup by responseKey for the module lifetime
-  // so the 30s poll cycle doesn't fire the same warning every refresh once
-  // the cap is consistently hit.
+  // replacing a paginated fetch). warnedCapKeys (module scope) dedups across
+  // the 30s poll cycle.
   if (!warnedCapKeys.has(responseKey)) {
     warnedCapKeys.add(responseKey);
     Sentry.captureMessage("hasura-snapshot-cap-exhausted", {
@@ -269,8 +273,6 @@ async function fetchPaginatedSnapshotPages<K extends string>(
   }
   return { rows, truncated: true, error: null };
 }
-
-const warnedCapKeys = new Set<string>();
 
 /** @internal Exported for testing only. */
 export async function fetchNetworkData(

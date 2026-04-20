@@ -178,8 +178,14 @@ function isPositiveInt(v: unknown): v is number {
 }
 
 function serverError(err: unknown): NextResponse {
+  // Full error + stack is captured in Sentry — return a generic string to
+  // the client. The GET path is partially public (unauthenticated callers
+  // get public-only labels), so Upstash / Blob error messages must not
+  // leak upstream details to them.
   Sentry.captureException(err, { tags: { route: "address-labels" } });
   console.error("[address-labels]", err);
-  const message = err instanceof Error ? err.message : "Internal server error";
-  return NextResponse.json({ error: message }, { status: 500 });
+  return NextResponse.json(
+    { error: "Failed to read address labels" },
+    { status: 500 },
+  );
 }

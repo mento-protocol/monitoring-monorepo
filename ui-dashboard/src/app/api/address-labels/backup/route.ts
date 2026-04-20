@@ -65,9 +65,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
     );
   } catch (err) {
+    // Full error is in Sentry; return a generic string to the client.
     Sentry.captureException(err, { tags: { route: "address-labels/backup" } });
     console.error("[backup]", err);
-    const message = err instanceof Error ? err.message : "Backup failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Backup failed" }, { status: 500 });
   }
 }

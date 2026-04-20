@@ -55,10 +55,12 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
     });
   }, [networkId]);
 
-  const value: NetworkContextValue = {
-    network: NETWORKS[networkId],
-    networkId,
-  };
+  // Memoize so navigating between pages on the same chain doesn't produce
+  // a new object reference and retrigger every context consumer.
+  const value = useMemo<NetworkContextValue>(
+    () => ({ network: NETWORKS[networkId], networkId }),
+    [networkId],
+  );
 
   return <NetworkContext value={value}>{children}</NetworkContext>;
 }

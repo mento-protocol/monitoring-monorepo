@@ -50,10 +50,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       },
     });
   } catch (err) {
+    // Full error is in Sentry; return a generic string to the client.
     Sentry.captureException(err, { tags: { route: "address-labels/export" } });
     console.error("[address-labels/export]", err);
-    const message =
-      err instanceof Error ? err.message : "Internal server error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Export failed" }, { status: 500 });
   }
 }
