@@ -32,6 +32,12 @@ function shouldCapture(normalized: string): boolean {
 // renders — an inline object literal would bust context consumers every
 // time SwrProvider re-renders.
 const swrConfig: SWRConfiguration = {
+  // Disable focus/reconnect revalidation. Polling hooks (useBridgeGQL @ 10s,
+  // useAllNetworksData @ 5min fanning across ~6 chains) already keep data
+  // fresh; focus/reconnect events would fire the whole fan-out again on
+  // every alt-tab, which was tripping Envio's tier quota (GraphQL 429).
+  revalidateOnFocus: false,
+  revalidateOnReconnect: false,
   onError(err, key) {
     const normalized = normalizeKey(key);
     if (!shouldCapture(normalized)) return;

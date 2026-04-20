@@ -4,6 +4,7 @@ import {
   computeAvgDeliverTime,
   formatDurationShort,
   bridgeStatusLabel,
+  transferDeliveryDurationSec,
 } from "../bridge-status";
 import type { BridgeTransfer } from "../types";
 
@@ -279,6 +280,49 @@ describe("formatDurationShort", () => {
 
   it("renders minutes and seconds when s > 0", () => {
     expect(formatDurationShort(95)).toBe("1m 35s");
+  });
+
+  it("renders days + hours once >= 1 day", () => {
+    expect(formatDurationShort(86_400)).toBe("1d 0h");
+    expect(formatDurationShort(3 * 86_400 + 4 * 3600)).toBe("3d 4h");
+  });
+});
+
+describe("transferDeliveryDurationSec", () => {
+  it("returns null when sentTimestamp is missing", () => {
+    expect(
+      transferDeliveryDurationSec({
+        sentTimestamp: null,
+        deliveredTimestamp: "100",
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null when deliveredTimestamp is missing", () => {
+    expect(
+      transferDeliveryDurationSec({
+        sentTimestamp: "100",
+        deliveredTimestamp: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("returns the delta in seconds when both sides are present", () => {
+    expect(
+      transferDeliveryDurationSec({
+        sentTimestamp: "1000",
+        deliveredTimestamp: "1125",
+      }),
+    ).toBe(125);
+  });
+
+  it("clamps a negative delta (clock skew) to 0 instead of surfacing it", () => {
+    expect(
+      transferDeliveryDurationSec({
+        sentTimestamp: "1000",
+        deliveredTimestamp: "999",
+      }),
+    ).toBe(0);
   });
 });
 

@@ -137,6 +137,42 @@ describe("sortTransfers — amountUsd branches", () => {
   });
 });
 
+describe("sortTransfers — duration branch", () => {
+  it("sorts by delivered - sent elapsed time", () => {
+    const fast = mk({
+      id: "fast",
+      sentTimestamp: "1000",
+      deliveredTimestamp: "1010",
+      status: "DELIVERED",
+    });
+    const slow = mk({
+      id: "slow",
+      sentTimestamp: "1000",
+      deliveredTimestamp: "2000",
+      status: "DELIVERED",
+    });
+    const desc = sortTransfers([fast, slow], "duration", "desc", noRates);
+    expect(desc.map((t) => t.id)).toEqual(["slow", "fast"]);
+  });
+
+  it("pending rows (no deliveredTimestamp) sink regardless of direction", () => {
+    const delivered = mk({
+      id: "d",
+      sentTimestamp: "1000",
+      deliveredTimestamp: "1100",
+      status: "DELIVERED",
+    });
+    const pending = mk({
+      id: "p",
+      sentTimestamp: "1000",
+      deliveredTimestamp: null,
+      status: "SENT",
+    });
+    const asc = sortTransfers([pending, delivered], "duration", "asc", noRates);
+    expect(asc[0].id).toBe("d");
+  });
+});
+
 describe("sortTransfers — string branches sink empty values", () => {
   it("empty senders sink on ascending", () => {
     const named = mk({ id: "named", sender: "0xaaa" });

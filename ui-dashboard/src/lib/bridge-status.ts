@@ -1,6 +1,27 @@
-import type { BridgeStatusOverlay, BridgeTransfer } from "./types";
+import type {
+  BridgeStatus,
+  BridgeStatusOverlay,
+  BridgeTransfer,
+} from "./types";
 
 const STUCK_THRESHOLD_SECONDS = 24 * 60 * 60;
+
+/**
+ * Canonical order for status-filter UI rendering. Ordered lifecycle-
+ * ascending so the pills read as a pipeline (pre-flight → in-flight →
+ * terminal). Kept in sync with the enum in indexer-envio/src/wormhole/
+ * status.ts — missing any status from here silently drops it from the
+ * filter UI.
+ */
+export const ALL_BRIDGE_STATUSES: readonly BridgeStatus[] = [
+  "PENDING",
+  "SENT",
+  "ATTESTED",
+  "QUEUED_INBOUND",
+  "DELIVERED",
+  "CANCELLED",
+  "FAILED",
+] as const;
 
 /**
  * Derive the display status. Overlays "STUCK" when an in-flight transfer
@@ -63,7 +84,7 @@ export function bridgeStatusLabel(status: BridgeStatusOverlay): string {
 }
 
 /**
- * Format a duration in seconds as a compact h/m/s string.
+ * Format a duration in seconds as a compact d/h/m/s string.
  * Normalizes to whole seconds once to avoid "60s" / "Nm 60s" artifacts at
  * unit boundaries (fractional averages can otherwise render 59.6s as "60s"
  * or 119.5s as "1m 60s").
@@ -71,11 +92,29 @@ export function bridgeStatusLabel(status: BridgeStatusOverlay): string {
 export function formatDurationShort(seconds: number): string {
   const total = Math.round(seconds);
   if (total < 60) return `${total}s`;
-  const h = Math.floor(total / 3600);
+  const d = Math.floor(total / 86_400);
+  const h = Math.floor((total % 86_400) / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
+  if (d > 0) return `${d}d ${h}h`;
   if (h > 0) return `${h}h ${m}m`;
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+
+/**
+ * Duration between source-send and destination-delivery, in seconds, or
+ * `null` when either side is missing (not yet delivered, or race-window row
+ * with no sentTimestamp). Returns 0 for a clock skew that produces
+ * delivered < sent — the caller treats that as "just now".
+ */
+export function transferDeliveryDurationSec(
+  t: Pick<BridgeTransfer, "sentTimestamp" | "deliveredTimestamp">,
+): number | null {
+  if (!t.sentTimestamp || !t.deliveredTimestamp) return null;
+  const sent = Number(t.sentTimestamp);
+  const delivered = Number(t.deliveredTimestamp);
+  if (!Number.isFinite(sent) || !Number.isFinite(delivered)) return null;
+  return Math.max(0, delivered - sent);
 }
 
 /**

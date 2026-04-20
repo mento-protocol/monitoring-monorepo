@@ -31,3 +31,8 @@ export function filterSeriesByRange(
   const cutoff = Math.floor(Date.now() / 1000) - days * SECONDS_PER_DAY;
   return series.filter((point) => point.timestamp >= cutoff);
 }
+
+/** Days-in-window for a RangeKey; `null` means "all time" (no cutoff). */
+export function rangeKeyToDays(range: RangeKey): number | null {
+  return RANGE_DAYS[range];
+}

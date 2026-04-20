@@ -15,10 +15,20 @@
 // so a filter on sentTimestamp would hide freshly-delivered transfers during
 // the race window (and permanently hide any transfer whose source chain is
 // not in the indexer's networks: list).
+//
+// `statusIn` accepts the full status allowlist the caller wants. Callers that
+// want "show all" pass every status — a null/empty-list variant is avoided to
+// keep the query server-filterable (and the total count honest under the
+// same filter) without branching on optional operators.
 export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
-  query BridgeTransfersWindow($limit: Int!, $offset: Int!, $after: numeric!) {
+  query BridgeTransfersWindow(
+    $limit: Int!
+    $offset: Int!
+    $after: numeric!
+    $statusIn: [String!]!
+  ) {
     BridgeTransfer(
-      where: { firstSeenAt: { _gte: $after } }
+      where: { firstSeenAt: { _gte: $after }, status: { _in: $statusIn } }
       order_by: { firstSeenAt: desc, id: asc }
       limit: $limit
       offset: $offset
@@ -43,6 +53,23 @@ export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
       usdValueAtSend
       firstSeenAt
       lastUpdatedAt
+    }
+  }
+`;
+
+// Count paired with BRIDGE_TRANSFERS_WINDOW. Fetches IDs only (max 1000 rows)
+// so the page indicator can render "Page X of Y" without an `_aggregate`
+// query (aggregates are disabled on hosted Hasura). Applies the same `after`
+// and `statusIn` filters the visible window uses — otherwise the denominator
+// would count hidden rows.
+export const BRIDGE_TRANSFERS_COUNT = /* GraphQL */ `
+  query BridgeTransfersCount($after: numeric!, $statusIn: [String!]!) {
+    BridgeTransfer(
+      where: { firstSeenAt: { _gte: $after }, status: { _in: $statusIn } }
+      order_by: { firstSeenAt: desc, id: asc }
+      limit: 1000
+    ) {
+      id
     }
   }
 `;
