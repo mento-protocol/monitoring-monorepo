@@ -27,14 +27,12 @@ describe("POST /api/hasura/[networkId]", () => {
 
   it("adds x-hasura-admin-secret for local network when configured", async () => {
     vi.stubEnv("HASURA_SECRET_DEVNET", "testing");
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ data: { ok: true } }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-      );
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: { ok: true } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
     const { POST } = await import("../route");
 
     const req = makeRequest({ query: "{ __typename }" });

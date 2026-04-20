@@ -1,18 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
-type LocalNetworkId =
-  | "devnet"
-  | "celo-sepolia-local"
-  | "celo-mainnet-local";
+type LocalNetworkId = "devnet" | "celo-sepolia-local" | "celo-mainnet-local";
 
 type LocalHasuraConfig = {
   upstreamUrl: string;
   adminSecret: string;
 };
 
-function resolveLocalHasuraConfig(
-  networkId: string,
-): LocalHasuraConfig | null {
+function resolveLocalHasuraConfig(networkId: string): LocalHasuraConfig | null {
   switch (networkId as LocalNetworkId) {
     case "devnet":
       return {
@@ -26,16 +21,14 @@ function resolveLocalHasuraConfig(
         upstreamUrl:
           process.env.HASURA_UPSTREAM_URL_CELO_SEPOLIA_LOCAL ??
           "http://localhost:8080/v1/graphql",
-        adminSecret:
-          process.env.HASURA_SECRET_CELO_SEPOLIA_LOCAL?.trim() ?? "",
+        adminSecret: process.env.HASURA_SECRET_CELO_SEPOLIA_LOCAL?.trim() ?? "",
       };
     case "celo-mainnet-local":
       return {
         upstreamUrl:
           process.env.HASURA_UPSTREAM_URL_CELO_MAINNET_LOCAL ??
           "http://localhost:8080/v1/graphql",
-        adminSecret:
-          process.env.HASURA_SECRET_CELO_MAINNET_LOCAL?.trim() ?? "",
+        adminSecret: process.env.HASURA_SECRET_CELO_MAINNET_LOCAL?.trim() ?? "",
       };
     default:
       return null;
