@@ -197,11 +197,18 @@ describe("fetchHomepageOgDataUncached", () => {
     expect(result!.healthBuckets.WARN).toBe(0);
     expect(result!.healthBuckets.CRITICAL).toBe(0);
     expect(result!.attentionPools).toEqual([]);
-    // tvlSeries: 2 distinct day timestamps × 2 pools (each 2M TVL and 1.8M TVL
-    // at those days) = day-1 sum 4M, day-8 sum 3.6M. Oldest→newest: [3.6M, 4M].
-    expect(result!.tvlSeries).toHaveLength(2);
-    expect(result!.tvlSeries[0]).toBeCloseTo(3_600_000, -2);
-    expect(result!.tvlSeries[1]).toBeCloseTo(4_000_000, -2);
+    // Forward-filled TVL series: always 14 UTC-day buckets ending today.
+    // Latest bucket uses the most recent snapshot (1d-ago, 1M+1M=2M per pool
+    // × 2 pools = 4M). Middle buckets forward-fill from the 8d-ago
+    // snapshot (0.9M+0.9M=1.8M × 2 = 3.6M). Early buckets before the 8d
+    // snapshot have no cursor yet and contribute 0.
+    expect(result!.tvlSeries).toHaveLength(14);
+    expect(result!.tvlSeries[13]).toBeCloseTo(4_000_000, -2);
+    // Forward-fill must carry the prior snapshot across gap days — so the
+    // middle of the series sees the 3.6M sum.
+    expect(result!.tvlSeries.some((v) => Math.abs(v - 3_600_000) < 1000)).toBe(
+      true,
+    );
   });
 
   it("surfaces attention pools ordered CRITICAL first", async () => {

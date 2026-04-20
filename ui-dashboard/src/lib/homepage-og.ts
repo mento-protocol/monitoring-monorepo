@@ -23,18 +23,19 @@ const FOURTEEN_DAYS = 14 * SECONDS_PER_DAY;
 const SPARKLINE_DAYS = 14;
 const MAX_ATTENTION_POOLS = 3;
 
-// Lean cross-chain daily-snapshot query. Fixed row cap instead of a
-// timestamp filter because Hasura's `timestamp: { _gte }` does a lexical
-// string comparison (the column stores numeric-looking strings), which
-// silently drops all rows for certain cutoffs. 500 rows gives headroom
-// for ~30 pools × 14 days; client-side filters to the [now-14d, now)
-// window after fetch.
+// Cross-chain daily-snapshot query. Fixed row cap (no timestamp filter)
+// because Hasura's `timestamp: { _gte }` does a lexical string comparison
+// — the column stores numeric-looking strings, and the predicate silently
+// drops all rows for certain cutoffs. 1000 rows = ~30 days of history for
+// ~30 pools, required so the TVL-chart forward-fill can seed each pool's
+// cursor from pre-window snapshots (pools that didn't change in the
+// 14-day window would otherwise be excluded entirely).
 const HOMEPAGE_OG_DAILY_SNAPSHOTS = `
   query HomepageOgDailySnapshots($poolIds: [String!]!) {
     PoolDailySnapshot(
       where: { poolId: { _in: $poolIds } }
       order_by: [{ timestamp: desc }, { id: desc }]
-      limit: 500
+      limit: 1000
     ) {
       poolId
       timestamp
@@ -59,10 +60,10 @@ export type HomepageOgData = {
   volume7dWoWPct: number | null;
   /** Chronological daily USD volume, oldest→newest, up to 14 points. */
   volumeSeries: number[];
-  /** Chronological daily aggregate TVL across all pools, oldest→newest,
-   * up to 14 points. Per day: sum of pool TVLs computed from that day's
-   * reserves snapshot × current oracle rates. Days where no pool had a
-   * snapshot are omitted (no carry-forward). */
+  /** Chronological daily aggregate TVL, oldest→newest, 14 points ending
+   * on today's UTC day. Forward-filled per pool: each bucket sums each
+   * pool's most-recent-snapshot TVL at-or-before that bucket timestamp,
+   * matching the homepage TVL chart's behavior. */
   tvlSeries: number[];
   poolCount: number;
   chainCount: number;
@@ -115,10 +116,10 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
       variables: { poolIds: pools.map((p) => p.id) },
       signal: AbortSignal.timeout(5000),
     });
-    const cutoff = Math.floor(Date.now() / 1000) - FOURTEEN_DAYS;
-    daily = (res.PoolDailySnapshot ?? []).filter(
-      (s) => Number(s.timestamp) >= cutoff,
-    );
+    // No client-side timestamp filter here: the TVL forward-fill needs
+    // pre-window snapshots to seed each pool's cursor. Windowed aggregates
+    // (volume sums, TVL WoW baseline) apply their own explicit windows.
+    daily = res.PoolDailySnapshot ?? [];
   } catch {
     // Pools + rates still usable for TVL / health — volume tiles will "—".
   }
@@ -304,27 +305,63 @@ function computeDailyVolumeSeries(entries: PriceableEntry[]): number[] {
   return days.slice(-SPARKLINE_DAYS).map((d) => perDay.get(d) ?? 0);
 }
 
-// Per-day aggregate TVL across priceable pools. For each daily snapshot
-// row, compute that pool's TVL using the row's reserves × current oracle
-// rates (same approximation the main TVL chart in pool-tvl-over-time-chart
-// makes — historical oracle prices aren't reconstructed). Pools without
-// a snapshot for a given day simply don't contribute to that day's sum.
+// Forward-filled per-day aggregate TVL across priceable pools, clamped
+// to the last SPARKLINE_DAYS buckets. Mirrors `buildDailySeries` in
+// components/tvl-over-time-chart.tsx: per pool, advance a cursor to the
+// most recent snapshot at-or-before each bucket timestamp; sum across
+// pools. Without forward-fill, pools without a snapshot on a given day
+// contribute 0 and the aggregate zigzags based on which pools happened
+// to tick that day — the line chart on the homepage doesn't agree with
+// any real trend.
 function computeDailyTvlSeries(entries: PriceableEntry[]): number[] {
-  const perDay = new Map<number, number>();
+  type History = {
+    pool: Pool;
+    slice: ChainSlice;
+    points: Array<{ ts: number; r0: string; r1: string }>;
+  };
+  const histories: History[] = [];
   for (const { pool, slice } of entries) {
-    for (const row of slice.daily) {
-      if (row.poolId !== pool.id) continue;
-      const ts = Number(row.timestamp);
-      const tvl = poolTvlUSD(
-        { ...pool, reserves0: row.reserves0, reserves1: row.reserves1 },
-        slice.network,
-        slice.rates,
-      );
-      perDay.set(ts, (perDay.get(ts) ?? 0) + tvl);
-    }
+    const points = slice.daily
+      .filter((d) => d.poolId === pool.id)
+      .map((d) => ({
+        ts: Number(d.timestamp),
+        r0: d.reserves0,
+        r1: d.reserves1,
+      }))
+      .sort((a, b) => a.ts - b.ts);
+    if (points.length > 0) histories.push({ pool, slice, points });
   }
-  const days = Array.from(perDay.keys()).sort((a, b) => a - b);
-  return days.slice(-SPARKLINE_DAYS).map((d) => perDay.get(d) ?? 0);
+  if (histories.length === 0) return [];
+
+  const now = Math.floor(Date.now() / 1000);
+  const endBucket = Math.floor(now / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  // Start the window at (endBucket - 13 * day) so the emitted series has
+  // exactly SPARKLINE_DAYS buckets, ending on today's UTC-day.
+  const windowStartBucket = endBucket - (SPARKLINE_DAYS - 1) * SECONDS_PER_DAY;
+
+  const cursors = new Array<number>(histories.length).fill(-1);
+  const series: number[] = [];
+  for (let ts = windowStartBucket; ts <= endBucket; ts += SECONDS_PER_DAY) {
+    let tvl = 0;
+    for (let i = 0; i < histories.length; i++) {
+      const h = histories[i];
+      while (
+        cursors[i] + 1 < h.points.length &&
+        h.points[cursors[i] + 1].ts < ts + SECONDS_PER_DAY
+      ) {
+        cursors[i]++;
+      }
+      if (cursors[i] < 0) continue;
+      const point = h.points[cursors[i]];
+      tvl += poolTvlUSD(
+        { ...h.pool, reserves0: point.r0, reserves1: point.r1 },
+        h.slice.network,
+        h.slice.rates,
+      );
+    }
+    series.push(tvl);
+  }
+  return series;
 }
 
 // 60s TTL — pool health / attention counts change during incidents; a
