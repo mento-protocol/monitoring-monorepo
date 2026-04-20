@@ -44,7 +44,9 @@ For a narrow verify (specific page or feature), skip the list and go directly to
 
 - **KPI row (3 tiles):** `Total Bridge Transfers` (BreakdownTile w/ 24h/7d/30d breakdown), `Pending` (number or "1,000+"), `Avg deliver time` (h/m/s). None should be "—" or "…" on a healthy load.
 - **Charts row (3 columns):** `Bridged Volume (USD)` time-series chart with 7d/30d/all range buttons, `Token Breakdown` donut, `Top Bridgers` ranked list with address links.
-- **Recent transfers table (25 rows):** columns Provider, Route, Status, Token, Amount (USD), Amount, Sender, Receiver, Txs, Time. Each row should have a Wormholescan link via the token/amount/`wh` pill click targets.
+- **Recent transfers table (25 rows):** columns Provider, Route, Status, Token, Amount (USD), Amount, Sender, Receiver, Txs, Time. Per-cell click targets:
+  - **Wormholescan** (`wormholescan.io/#/tx/{sentTxHash}`): Provider badge, Amount (USD), Amount, and the `wh` pill in the Txs column
+  - **Chain explorer** (Celoscan / Monadscan): Token cell (`token contract`), Sender, Receiver, and the `src` pill in the Txs column
 - **Key interactions to spot-check:**
   - Click a sortable header (e.g. "Amount (USD)") → rows re-sort, arrow flips on second click
   - Click an `AddressLink` → opens explorer for the correct chain (Celoscan for 42220 senders, MonadExplorer for 143)
