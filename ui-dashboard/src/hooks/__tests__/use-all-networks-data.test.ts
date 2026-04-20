@@ -40,11 +40,6 @@ const MOCK_NETWORK_2: Network = {
   hasuraUrl: "https://hasura-sepolia.example.com/v1/graphql",
 };
 
-const MOCK_NETWORK_WITH_SECRET: Network = {
-  ...MOCK_NETWORK,
-  hasuraSecret: "  my-secret  ", // intentional whitespace to test trimming
-};
-
 function makePool(id: string): Pool {
   return {
     id,
@@ -201,26 +196,7 @@ describe("fetchNetworkData — happy path", () => {
     expect(result.uniqueLpAddresses).toHaveLength(3);
   });
 
-  it("trims whitespace from hasuraSecret before setting auth header", async () => {
-    mockRequest(() => ({
-      Pool: [],
-      ProtocolFeeTransfer: [],
-      PoolSnapshot: [],
-    }));
-
-    await fetchNetworkData(MOCK_NETWORK_WITH_SECRET, {
-      w24h: { from: 0, to: 1000 },
-      w7d: { from: 0, to: 7000 },
-      w30d: { from: 0, to: 30000 },
-    });
-
-    const constructorArgs = (GraphQLClient as ReturnType<typeof vi.fn>).mock
-      .calls[0];
-    const headers = constructorArgs[1]?.headers ?? {};
-    expect(headers["x-hasura-admin-secret"]).toBe("my-secret");
-  });
-
-  it("omits auth header when secret is empty", async () => {
+  it("does not attach admin-secret headers to client GraphQL requests", async () => {
     mockRequest(() => ({
       Pool: [],
       ProtocolFeeTransfer: [],
@@ -235,8 +211,7 @@ describe("fetchNetworkData — happy path", () => {
 
     const constructorArgs = (GraphQLClient as ReturnType<typeof vi.fn>).mock
       .calls[0];
-    const headers = constructorArgs[1]?.headers ?? {};
-    expect(headers["x-hasura-admin-secret"]).toBeUndefined();
+    expect(constructorArgs[1]).toBeUndefined();
   });
 });
 

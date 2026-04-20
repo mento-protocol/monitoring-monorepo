@@ -76,10 +76,7 @@ export type PoolOgData = {
 };
 
 function makeClient(network: Network): GraphQLClient {
-  const secret = network.hasuraSecret.trim();
-  return new GraphQLClient(network.hasuraUrl, {
-    headers: secret ? { "x-hasura-admin-secret": secret } : {},
-  });
+  return new GraphQLClient(network.hasuraUrl);
 }
 
 // Only namespaced `{chainId}-0x...` IDs are supported. Bare 0x addresses

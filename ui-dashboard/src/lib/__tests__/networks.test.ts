@@ -172,10 +172,10 @@ describe("NETWORKS — general map composition", () => {
 });
 
 describe("NETWORKS — local development defaults", () => {
-  it("uses the local Hasura admin secret by default", () => {
-    expect(NETWORKS.devnet.hasuraSecret).toBe("testing");
-    expect(NETWORKS["celo-sepolia-local"].hasuraSecret).toBe("testing");
-    expect(NETWORKS["celo-mainnet-local"].hasuraSecret).toBe("testing");
+  it("does not expose local Hasura admin secrets in client network config", () => {
+    expect(NETWORKS.devnet.hasuraSecret).toBe("");
+    expect(NETWORKS["celo-sepolia-local"].hasuraSecret).toBe("");
+    expect(NETWORKS["celo-mainnet-local"].hasuraSecret).toBe("");
   });
 
   it("uses port 8080 for every local Hasura endpoint", () => {

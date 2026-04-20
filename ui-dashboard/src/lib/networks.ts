@@ -29,6 +29,8 @@ export type Network = {
   /** Treb deployment namespace in @mento-protocol/contracts backing this network, or null if not yet available */
   contractsNamespace: string | null;
   hasuraUrl: string;
+  // Intentionally unused in client code: admin secrets must never be exposed
+  // via NEXT_PUBLIC_* env vars or sent from the browser.
   hasuraSecret: string;
   explorerBaseUrl: string;
   /** token address (lower) → symbol */
@@ -150,7 +152,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_DEVNET ??
       "http://localhost:8080/v1/graphql",
-    hasuraSecret: process.env.NEXT_PUBLIC_HASURA_SECRET_DEVNET ?? "testing",
+    hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_DEVNET ?? "http://localhost:5100",
     addressLabels: {
@@ -171,8 +173,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_LOCAL ??
       "http://localhost:8080/v1/graphql",
-    hasuraSecret:
-      process.env.NEXT_PUBLIC_HASURA_SECRET_CELO_SEPOLIA_LOCAL ?? "testing",
+    hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_LOCAL ??
       "https://celo-sepolia.blockscout.com",
@@ -204,8 +205,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasuraUrl:
       process.env.NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_LOCAL ??
       "http://localhost:8080/v1/graphql",
-    hasuraSecret:
-      process.env.NEXT_PUBLIC_HASURA_SECRET_CELO_MAINNET_LOCAL ?? "testing",
+    hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET_LOCAL ??
       "https://celoscan.io",

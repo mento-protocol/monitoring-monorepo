@@ -307,10 +307,7 @@ export async function fetchNetworkData(
   network: Network,
   windows: { w24h: TimeRange; w7d: TimeRange; w30d: TimeRange },
 ): Promise<NetworkData> {
-  const secret = network.hasuraSecret.trim();
-  const client = new GraphQLClient(network.hasuraUrl, {
-    headers: secret ? { "x-hasura-admin-secret": secret } : {},
-  });
+  const client = new GraphQLClient(network.hasuraUrl);
 
   let pools: Pool[];
   try {
