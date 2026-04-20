@@ -20,11 +20,16 @@ const MULTICHAIN_HASURA_URL = (
   process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN ?? ""
 ).trim();
 
+// Cap each GraphQL request well below the 10s SWR refresh interval so a
+// wedged TCP connection can't compound into unbounded backpressure on the
+// polling fetcher. AbortSignal.timeout is propagated by graphql-request to
+// the underlying fetch.
+const REQUEST_TIMEOUT_MS = 8_000;
+
 let cachedClient: GraphQLClient | null = null;
 function getClient(): GraphQLClient | null {
   if (!MULTICHAIN_HASURA_URL) return null;
-  if (!cachedClient)
-    cachedClient = new GraphQLClient(MULTICHAIN_HASURA_URL, { headers: {} });
+  if (!cachedClient) cachedClient = new GraphQLClient(MULTICHAIN_HASURA_URL);
   return cachedClient;
 }
 
@@ -37,7 +42,12 @@ export function useBridgeGQL<T>(
 
   const result = useSWR<T>(
     query && client ? ["bridge-multichain", query, variables] : null,
-    () => client!.request<T>(query!, variables),
+    () =>
+      client!.request<T>({
+        document: query!,
+        variables,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
     { refreshInterval },
   );
 

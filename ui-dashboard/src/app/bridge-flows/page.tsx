@@ -95,11 +95,14 @@ function BridgeFlowsContent() {
   }, [networkData]);
 
   const transfers = transfersResult.data?.BridgeTransfer ?? [];
+  const countRows = countResult.data?.BridgeDailySnapshot;
   const count30d =
-    countResult.data?.BridgeDailySnapshot?.reduce(
-      (sum, s) => sum + (s.sentCount ?? 0),
-      0,
-    ) ?? null;
+    countRows?.reduce((sum, s) => sum + (s.sentCount ?? 0), 0) ?? null;
+  // Hasura silently caps this query at 1000 rows (days × providers × tokens
+  // × routes). In the current 30d × 1 provider × 3 tokens × 2 routes window
+  // that's ~180 rows — well under the cap. Mirror the pending-count "1,000+"
+  // idiom so the tile reflects partial data when/if we ever breach it.
+  const count30dCapped = countRows != null && countRows.length >= 1000;
   const pendingRows = pendingResult.data?.BridgeTransfer?.length ?? null;
   const pendingCount =
     pendingRows === null ? null : pendingRows >= 1000 ? 1000 : pendingRows;
@@ -146,8 +149,13 @@ function BridgeFlowsContent() {
         <Tile
           label="Transfers (30d)"
           value={
-            error ? "—" : count30d === null ? "…" : count30d.toLocaleString()
+            error
+              ? "—"
+              : count30d === null
+                ? "…"
+                : `${count30d.toLocaleString()}${count30dCapped ? "+" : ""}`
           }
+          subtitle={count30dCapped ? "Partial — snapshot cap hit" : undefined}
         />
         <Tile
           label="Pending"

@@ -45,22 +45,35 @@ function mkTransfer(overrides: Partial<BridgeTransfer>): BridgeTransfer {
 describe("deriveBridgeStatus", () => {
   it("passes through terminal statuses unchanged", () => {
     expect(
-      deriveBridgeStatus({ status: "DELIVERED", sentTimestamp: "100" }, 99999),
+      deriveBridgeStatus(
+        { status: "DELIVERED", sentTimestamp: "100", firstSeenAt: "100" },
+        99999,
+      ),
     ).toBe("DELIVERED");
     expect(
-      deriveBridgeStatus({ status: "CANCELLED", sentTimestamp: null }, 99999),
+      deriveBridgeStatus(
+        { status: "CANCELLED", sentTimestamp: null, firstSeenAt: "0" },
+        99999,
+      ),
     ).toBe("CANCELLED");
     expect(
-      deriveBridgeStatus({ status: "FAILED", sentTimestamp: null }, 99999),
+      deriveBridgeStatus(
+        { status: "FAILED", sentTimestamp: null, firstSeenAt: "0" },
+        99999,
+      ),
     ).toBe("FAILED");
   });
 
   it("keeps QUEUED_INBOUND within the 24h window", () => {
     const now = 1_700_100_000;
-    const sentRecently = now - 2 * 60 * 60; // 2h ago — still queued
+    const sentRecently = now - 2 * 60 * 60;
     expect(
       deriveBridgeStatus(
-        { status: "QUEUED_INBOUND", sentTimestamp: String(sentRecently) },
+        {
+          status: "QUEUED_INBOUND",
+          sentTimestamp: String(sentRecently),
+          firstSeenAt: String(sentRecently),
+        },
         now,
       ),
     ).toBe("QUEUED_INBOUND");
@@ -68,10 +81,14 @@ describe("deriveBridgeStatus", () => {
 
   it("overlays STUCK for QUEUED_INBOUND transfers past the threshold", () => {
     const now = 1_700_100_000;
-    const sentLongAgo = now - 48 * 60 * 60; // 48h ago — queue should not hold this long
+    const sentLongAgo = now - 48 * 60 * 60;
     expect(
       deriveBridgeStatus(
-        { status: "QUEUED_INBOUND", sentTimestamp: String(sentLongAgo) },
+        {
+          status: "QUEUED_INBOUND",
+          sentTimestamp: String(sentLongAgo),
+          firstSeenAt: String(sentLongAgo),
+        },
         now,
       ),
     ).toBe("STUCK");
@@ -79,10 +96,14 @@ describe("deriveBridgeStatus", () => {
 
   it("keeps SENT within the 24h window", () => {
     const now = 1_700_100_000;
-    const sentRecently = now - 23 * 60 * 60; // 23h ago — still SENT
+    const sentRecently = now - 23 * 60 * 60;
     expect(
       deriveBridgeStatus(
-        { status: "SENT", sentTimestamp: String(sentRecently) },
+        {
+          status: "SENT",
+          sentTimestamp: String(sentRecently),
+          firstSeenAt: String(sentRecently),
+        },
         now,
       ),
     ).toBe("SENT");
@@ -90,10 +111,14 @@ describe("deriveBridgeStatus", () => {
 
   it("overlays STUCK when SENT passes the 24h threshold", () => {
     const now = 1_700_100_000;
-    const sentLongAgo = now - 25 * 60 * 60; // 25h ago
+    const sentLongAgo = now - 25 * 60 * 60;
     expect(
       deriveBridgeStatus(
-        { status: "SENT", sentTimestamp: String(sentLongAgo) },
+        {
+          status: "SENT",
+          sentTimestamp: String(sentLongAgo),
+          firstSeenAt: String(sentLongAgo),
+        },
         now,
       ),
     ).toBe("STUCK");
@@ -104,17 +129,69 @@ describe("deriveBridgeStatus", () => {
     const sentLongAgo = now - 25 * 60 * 60;
     expect(
       deriveBridgeStatus(
-        { status: "ATTESTED", sentTimestamp: String(sentLongAgo) },
+        {
+          status: "ATTESTED",
+          sentTimestamp: String(sentLongAgo),
+          firstSeenAt: String(sentLongAgo),
+        },
         now,
       ),
     ).toBe("STUCK");
   });
 
-  it("does not promote to STUCK when sentTimestamp is null", () => {
-    // Dest-first race: status is SENT/ATTESTED but we don't have the source
-    // timestamp. Don't speculate about age — show the raw status.
+  it("ages SENT via firstSeenAt when sentTimestamp is missing (dest-first race)", () => {
+    // Prior behaviour left this as SENT forever; now firstSeenAt is the
+    // fallback clock so the stuck-transfer view surfaces it.
+    const now = 1_700_100_000;
+    const firstSeenLongAgo = now - 30 * 60 * 60;
     expect(
-      deriveBridgeStatus({ status: "SENT", sentTimestamp: null }, 99999),
+      deriveBridgeStatus(
+        {
+          status: "SENT",
+          sentTimestamp: null,
+          firstSeenAt: String(firstSeenLongAgo),
+        },
+        now,
+      ),
+    ).toBe("STUCK");
+  });
+
+  it("ages PENDING via firstSeenAt past threshold", () => {
+    const now = 1_700_100_000;
+    const firstSeenLongAgo = now - 30 * 60 * 60;
+    expect(
+      deriveBridgeStatus(
+        {
+          status: "PENDING",
+          sentTimestamp: null,
+          firstSeenAt: String(firstSeenLongAgo),
+        },
+        now,
+      ),
+    ).toBe("STUCK");
+  });
+
+  it("keeps PENDING within the 24h window from firstSeenAt", () => {
+    const now = 1_700_100_000;
+    const firstSeenRecently = now - 2 * 60 * 60;
+    expect(
+      deriveBridgeStatus(
+        {
+          status: "PENDING",
+          sentTimestamp: null,
+          firstSeenAt: String(firstSeenRecently),
+        },
+        now,
+      ),
+    ).toBe("PENDING");
+  });
+
+  it("returns the raw status when both timestamps are missing/invalid", () => {
+    expect(
+      deriveBridgeStatus(
+        { status: "SENT", sentTimestamp: null, firstSeenAt: "not-a-number" },
+        99999,
+      ),
     ).toBe("SENT");
   });
 });

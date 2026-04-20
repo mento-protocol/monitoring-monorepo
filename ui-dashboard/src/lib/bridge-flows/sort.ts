@@ -56,6 +56,15 @@ function compareRoute(
   return dir === "asc" ? ad - bd : bd - ad;
 }
 
+function timestampSortValue(
+  t: Pick<BridgeTransfer, "sentTimestamp" | "firstSeenAt">,
+): number | null {
+  const raw = t.sentTimestamp ?? t.firstSeenAt;
+  if (raw == null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 function compareString(
   a: string | null | undefined,
   b: string | null | undefined,
@@ -110,9 +119,16 @@ export function sortTransfers(
       case "time": {
         // Column label is "Time" but the underlying sort is on timestamp —
         // desc (default) = newest on top, matching user expectation.
-        const at = Number(a.sentTimestamp ?? a.firstSeenAt ?? 0);
-        const bt = Number(b.sentTimestamp ?? b.firstSeenAt ?? 0);
-        return sortDir === "desc" ? bt - at : at - bt;
+        // Null/NaN timestamps sink regardless of direction via
+        // compareNullable so a row with a garbled ts can't scramble the
+        // neighbourhood around it (the cell still renders relativeTime,
+        // but the row goes to the bottom instead of arbitrary positioning).
+        return compareNullable(
+          timestampSortValue(a),
+          timestampSortValue(b),
+          (x, y) => x - y,
+          sortDir,
+        );
       }
     }
   });

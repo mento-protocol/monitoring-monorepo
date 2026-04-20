@@ -4,25 +4,32 @@ const STUCK_THRESHOLD_SECONDS = 24 * 60 * 60;
 
 /**
  * Derive the display status. Overlays "STUCK" when an in-flight transfer
- * (SENT, ATTESTED, or QUEUED_INBOUND — i.e. any non-terminal post-send state)
- * hasn't been delivered within 24h. Client-side so the window stays fresh
- * without a bespoke indexer recompute. QUEUED_INBOUND is included because
- * the dest-side rate-limit queue can legitimately hold a transfer for many
- * hours; past 24h it's the operator's concern, same as SENT/ATTESTED stall.
+ * (PENDING, SENT, ATTESTED, or QUEUED_INBOUND — any non-terminal state)
+ * hasn't progressed within 24h. Client-side so the window stays fresh
+ * without a bespoke indexer recompute.
+ *
+ * Age basis: prefer `sentTimestamp` when present; fall back to
+ * `firstSeenAt`. PENDING rows created by a destination-first race have no
+ * `sentTimestamp`, so using only that field would let them live
+ * indefinitely as "Pending" even when the source side has clearly gone
+ * missing — `firstSeenAt` is always populated and is the correct clock
+ * for those rows.
  */
 export function deriveBridgeStatus(
-  transfer: Pick<BridgeTransfer, "status" | "sentTimestamp">,
+  transfer: Pick<BridgeTransfer, "status" | "sentTimestamp" | "firstSeenAt">,
   nowSeconds = Math.floor(Date.now() / 1000),
 ): BridgeStatusOverlay {
   const { status } = transfer;
   const inFlight =
-    status === "SENT" || status === "ATTESTED" || status === "QUEUED_INBOUND";
+    status === "PENDING" ||
+    status === "SENT" ||
+    status === "ATTESTED" ||
+    status === "QUEUED_INBOUND";
   if (!inFlight) return status;
-  const sentTs = transfer.sentTimestamp ? Number(transfer.sentTimestamp) : null;
-  if (sentTs !== null && nowSeconds - sentTs > STUCK_THRESHOLD_SECONDS) {
-    return "STUCK";
-  }
-  return status;
+  const raw = transfer.sentTimestamp ?? transfer.firstSeenAt ?? null;
+  const ts = raw == null ? null : Number(raw);
+  if (ts === null || !Number.isFinite(ts)) return status;
+  return nowSeconds - ts > STUCK_THRESHOLD_SECONDS ? "STUCK" : status;
 }
 
 const STATUS_CLASSES: Record<BridgeStatusOverlay, string> = {
