@@ -167,17 +167,18 @@ describe("fetchBridgeFlowsOgDataUncached", () => {
     expect(data!.volumeSeries).toEqual([500, 1000]);
   });
 
-  it("returns empty volume arrays when there are no snapshots (not null)", async () => {
+  it("returns 0 (not null) when snapshots query succeeded but is empty", async () => {
+    // Truly idle bridge: query came back, just no rows. Distinguish from
+    // "query failed" (which keeps null) so the OG can honestly say
+    // "30d volume $0" instead of falling through to a generic fallback.
     mockRequests({
       snapshots: async () => ({ BridgeDailySnapshot: [] }),
       pools: async () => ({ Pool: [] }),
     });
     const data = await fetchBridgeFlowsOgDataUncached();
     expect(data).not.toBeNull();
-    // `total: null` from windowTotals on empty input → volume30dUsd = null,
-    // matching "snapshots unavailable" semantics. (The header still renders,
-    // the hero falls back to "—".)
-    expect(data!.volume30dUsd).toBeNull();
+    expect(data!.volume30dUsd).toBe(0);
+    expect(data!.totalTransfers30d).toBe(0);
     expect(data!.volumeSeries).toEqual([]);
   });
 });

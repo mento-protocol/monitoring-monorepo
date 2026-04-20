@@ -31,7 +31,8 @@ function formatWoW(pct: number): { text: string; color: string } {
 function buildAlt(data: BridgeFlowsOgData | null): string {
   if (!data) return "Mento Bridge Flows — Wormhole cross-chain transfers";
   const parts: string[] = ["Mento Bridge Flows"];
-  if (data.volume30dUsd != null && data.volume30dUsd > 0) {
+  // `null` = snapshots query failed → skip; `0` = truly empty window → keep.
+  if (data.volume30dUsd != null) {
     parts.push(`30d volume ${formatUSD(data.volume30dUsd)}`);
   }
   if (data.totalTransfers30d != null) {

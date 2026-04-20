@@ -133,11 +133,17 @@ export async function fetchBridgeFlowsOgDataUncached(): Promise<BridgeFlowsOgDat
     .filter((p) => p.timestamp >= cutoff30d)
     .map((p) => p.value);
 
+  // Distinguish "snapshots succeeded but empty" (truly idle bridge → 0) from
+  // "snapshots query failed" (handled above with null). The query-failed
+  // path returned `null` already; reaching this point means the response
+  // came back, even if with zero rows. Return 0 in that case so the OG
+  // says "30d volume $0" + "0 transfers" instead of falling through to the
+  // generic unavailability fallback.
   return {
-    volume30dUsd: usdTotals.total !== null ? usdTotals.sub30d : null,
+    volume30dUsd: snapshots.length === 0 ? 0 : usdTotals.sub30d,
     volumeWoWPct: weekOverWeekChange(fullSeries, nowSec),
     volumeSeries,
-    totalTransfers30d: countTotals.total !== null ? countTotals.sub30d : null,
+    totalTransfers30d: snapshots.length === 0 ? 0 : countTotals.sub30d,
     chains: chains.map((n) => n.label),
   };
 }
