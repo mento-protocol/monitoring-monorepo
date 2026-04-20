@@ -418,6 +418,37 @@ describe("fetchHomepageOgDataUncached", () => {
     expect(result!.healthBuckets.WARN).toBe(2);
   });
 
+  it("includes dormant but funded pools in the TVL series", async () => {
+    // Pool has live reserves (contributes to totalTvlUsd) but no snapshots
+    // in the 35d window — e.g. a pool that hasn't had activity recently.
+    // Without the seed-from-current-reserves fallback, this pool would be
+    // dropped from the chart entirely and the line would end below the
+    // hero number. Every bucket must include its current TVL.
+    const celoPool = makePool(42220, POOL_CELO, ADDR_USDM_CELO, ADDR_CUSD_CELO);
+    routeByChain({
+      42220: (doc) => {
+        if (doc.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+        return { Pool: [celoPool] };
+      },
+      143: (doc) => {
+        if (doc.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+        return { Pool: [] };
+      },
+    });
+
+    const result = await fetchHomepageOgDataUncached();
+    expect(result).not.toBeNull();
+    // Pool has 1M USDm + 1M cUSD @ $1 → $2M live TVL.
+    expect(result!.totalTvlUsd).toBeCloseTo(2_000_000, -2);
+    expect(result!.tvlSeries.length).toBeGreaterThan(0);
+    // Every chart bucket should show the same live TVL — a flat line at
+    // $2M, matching the hero number. If the seed were missing, bucket
+    // values would be 0.
+    for (const tvl of result!.tvlSeries) {
+      expect(tvl).toBeCloseTo(2_000_000, -2);
+    }
+  });
+
   it("paginates daily snapshots past the 1000-row Hasura cap", async () => {
     // Hasura silently caps at 1000 rows. Pagination must walk forward via
     // offset until a short page arrives. Return 1000 rows on page 0 and

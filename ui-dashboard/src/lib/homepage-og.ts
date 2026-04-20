@@ -424,7 +424,22 @@ function computeDailyTvlSeries(entries: PriceableEntry[]): number[] {
         r1: d.reserves1,
       }))
       .sort((a, b) => a.ts - b.ts);
-    if (points.length > 0) histories.push({ pool, slice, points });
+    // Pool has no snapshots in the 35d window. Since PoolDailySnapshot is
+    // written on swap activity, zero snapshots means the pool has been
+    // dormant — reserves in `pool.reserves0/1` haven't changed since the
+    // last (pre-window) snapshot. Seed a synthetic anchor at ts=0 using
+    // current reserves so the pool contributes a flat line at its live
+    // TVL to every bucket. Without this, a quiet-but-funded pool would
+    // count toward `totalTvlUsd` but vanish from the chart — the line
+    // would end below the hero number.
+    if (points.length === 0) {
+      points.push({
+        ts: 0,
+        r0: pool.reserves0 ?? "0",
+        r1: pool.reserves1 ?? "0",
+      });
+    }
+    histories.push({ pool, slice, points });
   }
   if (histories.length === 0) return [];
 
