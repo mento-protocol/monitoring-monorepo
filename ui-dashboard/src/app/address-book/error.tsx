@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
 import { ErrorBox } from "@/components/feedback";
+import { useReportError } from "@/hooks/use-report-error";
 
 // Middleware redirects unauthenticated requests to /sign-in before this page
 // ever mounts, and all foreseeable data-layer failures inside
@@ -15,9 +15,7 @@ export default function AddressBookError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  useEffect(() => {
-    console.error("[address-book/error]", error);
-  }, [error]);
+  useReportError(error);
 
   return (
     <div className="space-y-4">

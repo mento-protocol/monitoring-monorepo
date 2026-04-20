@@ -855,7 +855,8 @@ describe("POST /api/address-labels/import", () => {
       const res = await POST(jsonReq(gnosisSafe));
       expect(res.status).toBe(500);
       const body = await res.json();
-      expect(body.error).toContain("Redis connection failed");
+      // serverError returns a generic message — full error is in Sentry.
+      expect(body.error).toBe("Import failed");
       expect(importLabels).not.toHaveBeenCalled();
     });
 

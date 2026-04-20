@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
 import { ErrorBox } from "@/components/feedback";
+import { useReportError } from "@/hooks/use-report-error";
 
 export default function RootError({
   error,
@@ -10,9 +10,7 @@ export default function RootError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  useEffect(() => {
-    console.error("[app/error]", error);
-  }, [error]);
+  useReportError(error);
 
   return (
     <div className="space-y-4">
