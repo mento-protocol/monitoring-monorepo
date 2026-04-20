@@ -3,7 +3,7 @@ import { fetchPoolForMetadata, type PoolOgData } from "@/lib/pool-og";
 import { formatUSD } from "@/lib/format";
 
 export const runtime = "nodejs";
-export const revalidate = 3600;
+export const revalidate = 60;
 export const contentType = "image/png";
 export const size = { width: 1200, height: 630 };
 
@@ -345,11 +345,13 @@ export async function generateImageMetadata({
   ];
 }
 
-// Cache the rendered PNG at Vercel's edge CDN for 1h, then serve stale for up
-// to 24h while revalidating in the background. Slack/Discord/Twitter cache
-// unfurls on their side too, so most crawler re-fetches never hit our fn.
+// 60s fresh / 24h stale-while-revalidate. Edge CDN serves stale bytes
+// instantly while refreshing in the background — pool health flips
+// during incidents need minutes, not hours, to propagate. Slack also
+// caches on its side (out of our control), but this ensures any first
+// fetch from a new crawler context sees current state.
 const IMAGE_CACHE_CONTROL =
-  "public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400";
+  "public, max-age=60, s-maxage=60, stale-while-revalidate=86400";
 
 export default async function Image({
   params,

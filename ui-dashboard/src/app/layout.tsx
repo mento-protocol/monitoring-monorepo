@@ -7,6 +7,8 @@ import { NetworkProvider } from "@/components/network-provider";
 import { AddressLabelsProvider } from "@/components/address-labels-provider";
 import { NavLinks } from "@/components/nav-links";
 import { AuthStatus } from "@/components/auth-status";
+import { fetchHomepageOgData } from "@/lib/homepage-og";
+import { formatUSD } from "@/lib/format";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -15,10 +17,65 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "Mento Analytics",
-  description: "Cross-chain analytics dashboard for Mento protocol",
-};
+// 60s — operational stats (TVL, health, attention count) matter fresh,
+// not cached for an hour. Matches the helper + image route TTLs below.
+export const revalidate = 60;
+
+const FALLBACK_TITLE = "Mento Analytics";
+const FALLBACK_DESCRIPTION =
+  "Cross-chain analytics dashboard for Mento protocol";
+
+function buildDescription(
+  data: NonNullable<Awaited<ReturnType<typeof fetchHomepageOgData>>>,
+): string {
+  const parts: string[] = [];
+  if (data.totalTvlUsd != null && data.totalTvlUsd > 0) {
+    parts.push(`TVL ${formatUSD(data.totalTvlUsd)}`);
+  }
+  if (data.totalVolume7dUsd != null) {
+    parts.push(`7d volume ${formatUSD(data.totalVolume7dUsd)}`);
+  }
+  parts.push(`${data.poolCount} pools on ${data.chains.join(" + ")}`);
+  const { WARN = 0, CRITICAL = 0 } = data.healthBuckets;
+  const attention = WARN + CRITICAL;
+  if (attention > 0) parts.push(`${attention} need attention`);
+  return parts.join(" · ");
+}
+
+export async function generateMetadata(): Promise<Metadata> {
+  const data = await fetchHomepageOgData();
+  if (!data) {
+    return {
+      title: FALLBACK_TITLE,
+      description: FALLBACK_DESCRIPTION,
+      openGraph: {
+        title: FALLBACK_TITLE,
+        description: FALLBACK_DESCRIPTION,
+        type: "website",
+      },
+      twitter: {
+        card: "summary_large_image",
+        title: FALLBACK_TITLE,
+        description: FALLBACK_DESCRIPTION,
+      },
+    };
+  }
+  const description = buildDescription(data);
+  return {
+    title: FALLBACK_TITLE,
+    description,
+    openGraph: {
+      title: FALLBACK_TITLE,
+      description,
+      type: "website",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: FALLBACK_TITLE,
+      description,
+    },
+  };
+}
 
 export default async function RootLayout({
   children,
