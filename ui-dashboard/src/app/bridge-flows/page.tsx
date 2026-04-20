@@ -113,7 +113,15 @@ function BridgeFlowsContent() {
     return merged;
   }, [networkData]);
 
-  const transfers = transfersResult.data?.BridgeTransfer ?? [];
+  const allTransfers = transfersResult.data?.BridgeTransfer ?? [];
+  // Filter out actionless rows from the Recent Transfers table. These are
+  // dest-side artifacts (ReceivedMessage / MessageAttestedTo fired before
+  // source-side events arrived, or the source was never indexed) — no tx
+  // hash to link, no amount, no sender, nothing for the user to click. The
+  // "Pending" KPI still counts them; they just don't belong in the table.
+  const transfers = allTransfers.filter(
+    (t) => t.sentTxHash || t.deliveredTxHash || t.amount || t.sender,
+  );
   const snapshots = snapshotsResult.data?.BridgeDailySnapshot ?? [];
   const snapshotsCapped = snapshots.length >= 1000;
   const topBridgers = topBridgersResult.data?.BridgeBridger ?? [];

@@ -40,31 +40,24 @@ export function Tile({
   href?: string;
 }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 flex flex-col justify-between min-h-[88px]">
-      <div>
-        <p className="text-sm text-slate-400">{label}</p>
-        {href ? (
-          <a
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={`${label}: ${value}`}
-            className="mt-1 block text-2xl font-semibold text-white font-mono hover:text-indigo-400 transition-colors"
-          >
-            {value}
-          </a>
-        ) : (
-          <p className="mt-1 text-2xl font-semibold text-white font-mono">
-            {value}
-          </p>
-        )}
-      </div>
-      <p
-        className="mt-2 text-xs text-slate-500 min-h-4"
-        aria-hidden={!subtitle}
-      >
-        {subtitle}
-      </p>
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 min-h-[88px]">
+      <p className="text-sm text-slate-400">{label}</p>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`${label}: ${value}`}
+          className="mt-1 block text-2xl font-semibold text-white font-mono hover:text-indigo-400 transition-colors"
+        >
+          {value}
+        </a>
+      ) : (
+        <p className="mt-1 text-2xl font-semibold text-white font-mono">
+          {value}
+        </p>
+      )}
+      {subtitle && <p className="mt-1.5 text-xs text-slate-500">{subtitle}</p>}
     </div>
   );
 }
