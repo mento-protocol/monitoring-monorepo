@@ -66,12 +66,18 @@ export async function fetchBridgeFlowsOgDataUncached(): Promise<BridgeFlowsOgDat
 
   // Snapshots live on the multichain endpoint; any configured mainnet
   // network works as the query host (same env var backs both).
+  // Cap the window to ~45 days — the OG only needs 30d (hero) + 14d (WoW
+  // baseline). Fetching all-time would silently start dropping recent days
+  // once total cardinality exceeds Hasura's 1000-row cap (~83 days at the
+  // current ~12 rows/day rate).
+  const nowSec = Math.floor(Date.now() / 1000);
+  const snapshotAfterSec = nowSec - 45 * SECONDS_PER_DAY;
   const snapshotClient = makeClient(chains[0]!);
   const snapshotsPromise = snapshotClient.request<{
     BridgeDailySnapshot: BridgeDailySnapshot[];
   }>({
     document: BRIDGE_DAILY_SNAPSHOT,
-    variables: { afterDate: 0 },
+    variables: { afterDate: snapshotAfterSec },
     signal,
   });
 
@@ -125,8 +131,9 @@ export async function fetchBridgeFlowsOgDataUncached(): Promise<BridgeFlowsOgDat
   const fullSeries = buildVolumeUsdSeries(snapshots, rates);
 
   // 30d window for the chart, aligned to UTC midnight (matches the page's
-  // chart + KPI cutoff math in windowTotals).
-  const nowSec = Math.floor(Date.now() / 1000);
+  // chart + KPI cutoff math in windowTotals). Reuses `nowSec` from the
+  // snapshot-fetch window above so the cutoff math is computed against a
+  // single timestamp.
   const cutoff30d =
     nowSec - THIRTY_DAYS - ((nowSec - THIRTY_DAYS) % SECONDS_PER_DAY);
   const volumeSeries = fullSeries

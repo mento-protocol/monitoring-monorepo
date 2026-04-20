@@ -229,6 +229,10 @@ function Card({ data }: { data: BridgeFlowsOgData | null }) {
 const IMAGE_CACHE_CONTROL =
   "public, max-age=60, s-maxage=60, stale-while-revalidate=86400";
 
+// Both Next.js entry points fetch the same data — `unstable_cache` inside
+// `fetchBridgeFlowsOgData` deduplicates them so the GraphQL request only
+// fires once per 60s revalidation window. Mirrors the homepage + pool OG
+// pattern; intentional, not a missed memo.
 export async function generateImageMetadata() {
   const data = await fetchBridgeFlowsOgData();
   return [
