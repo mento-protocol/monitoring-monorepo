@@ -64,6 +64,12 @@ type AddressLabelsContextValue = {
   ) => Promise<void>;
   /** Remove a custom entry at the given scope. */
   deleteEntry: (address: string, scope: Scope) => Promise<void>;
+  /**
+   * Force a re-fetch of the labels cache. Use after external writes (e.g. a
+   * bulk import POSTed directly) so the UI doesn't sit on stale data until
+   * the next 30 s poll.
+   */
+  revalidate: () => Promise<void>;
   isLoading: boolean;
   error: Error | undefined;
 };
@@ -351,6 +357,10 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     [mutate],
   );
 
+  const revalidate = useCallback(async (): Promise<void> => {
+    await mutate(SWR_KEY);
+  }, [mutate]);
+
   const value: AddressLabelsContextValue = {
     getName,
     getTags,
@@ -360,6 +370,7 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     customEntries,
     upsertEntry,
     deleteEntry,
+    revalidate,
     isLoading,
     error: error as Error | undefined,
   };

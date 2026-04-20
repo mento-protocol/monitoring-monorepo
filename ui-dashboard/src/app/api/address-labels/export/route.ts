@@ -24,6 +24,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     if (chainIdParam !== null) {
       // Legacy: export a single chain by chainId — no global included.
+      // Strict decimal-only parse matches the rest of the codebase so
+      // `?chainId=1e3` doesn't silently resolve to chainId 1000.
+      if (!/^\d+$/.test(chainIdParam)) {
+        return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });
+      }
       const chainId = Number(chainIdParam);
       if (!Number.isInteger(chainId) || chainId <= 0) {
         return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });

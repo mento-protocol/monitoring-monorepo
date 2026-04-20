@@ -109,6 +109,23 @@ describe("GET /api/address-labels/export", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 400 for chainId with scientific notation", async () => {
+    // Strict decimal-only: `1e3` must not silently resolve to chainId 1000.
+    const req = new NextRequest(
+      "http://localhost/api/address-labels/export?chainId=1e3",
+    );
+    const res = await GET(req);
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for chainId in hex form", async () => {
+    const req = new NextRequest(
+      "http://localhost/api/address-labels/export?chainId=0x1",
+    );
+    const res = await GET(req);
+    expect(res.status).toBe(400);
+  });
+
   it("returns 500 when getLabels throws", async () => {
     (getLabels as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("Redis connection failed"),

@@ -52,7 +52,8 @@ export default function AddressBookPage({
   canEdit?: boolean;
 }) {
   const { network: currentNetwork } = useNetwork();
-  const { customEntries, getEntry, isLoading, error } = useAddressLabels();
+  const { customEntries, getEntry, revalidate, isLoading, error } =
+    useAddressLabels();
 
   const [search, setSearch] = useState("");
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
@@ -182,6 +183,9 @@ export default function AddressBookPage({
           }
           const body = (await res.json()) as { imported?: ImportedCounts };
           setImportSuccess(formatImportCounts(body.imported));
+          // Force an immediate SWR refetch so the table reflects the new
+          // entries without waiting for the 30 s polling interval.
+          await revalidate();
         } catch (err) {
           setImportError(err instanceof Error ? err.message : "Import failed.");
         }
@@ -211,11 +215,12 @@ export default function AddressBookPage({
         }
         const body = (await res.json()) as { imported?: ImportedCounts };
         setImportSuccess(formatImportCounts(body.imported));
+        await revalidate();
       } catch (err) {
         setImportError(err instanceof Error ? err.message : "Import failed.");
       }
     },
-    [],
+    [revalidate],
   );
 
   return (
