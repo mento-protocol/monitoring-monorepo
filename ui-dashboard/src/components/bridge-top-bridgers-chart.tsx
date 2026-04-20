@@ -11,9 +11,9 @@ interface BridgeTopBridgersChartProps {
   hasError: boolean;
 }
 
-// Sized to use the row's vertical space well without overrunning the
-// volume + token-breakdown cards alongside; 25 is the expanded cap.
-const DEFAULT_TOP_N = 6;
+// Sized to match the volume + token-breakdown chart cards in the same row
+// (~200px of content area); 25 is the backing fetch/expanded cap.
+const DEFAULT_TOP_N = 5;
 const EXPANDED_TOP_N = 25;
 
 /**

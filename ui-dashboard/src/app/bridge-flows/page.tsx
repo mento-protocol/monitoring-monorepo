@@ -191,7 +191,7 @@ function BridgeFlowsContent() {
         className="grid grid-cols-1 sm:grid-cols-3 gap-4"
       >
         <BreakdownTile
-          label="Transfers"
+          label="Total Bridge Transfers"
           total={error ? null : transferTotals.total}
           sub24h={transferTotals.sub24h}
           sub7d={transferTotals.sub7d}
