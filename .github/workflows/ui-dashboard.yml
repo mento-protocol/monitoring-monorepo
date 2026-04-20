@@ -8,6 +8,7 @@ on:
       - ui-dashboard/**
       - pnpm-lock.yaml
       - package.json
+      - pnpm-workspace.yaml
       - .github/workflows/ui-dashboard.yml
   pull_request:
     branches: [main]
@@ -38,7 +39,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           if git diff --name-only origin/${{ github.base_ref }}...HEAD \
-            | grep -qE '^(ui-dashboard/|pnpm-lock\.yaml|package\.json|\.github/workflows/ui-dashboard\.yml)'; then
+            | grep -qE '^(ui-dashboard/|pnpm-lock\.yaml|package\.json|pnpm-workspace\.yaml|\.github/workflows/ui-dashboard\.yml)'; then
             echo "has_changes=true" >> $GITHUB_OUTPUT
           else
             echo "has_changes=false" >> $GITHUB_OUTPUT
