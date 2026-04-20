@@ -49,7 +49,10 @@ export type PoolOgData = {
   name: string;
   chainLabel: string;
   tokenSymbols: [string, string];
-  tvlUsd: number;
+  /** USD value of reserves; `null` = unpriceable (e.g. FX/FX pool without
+   * rate map). `0` means the pool is genuinely empty. Collapse these into
+   * "—" at the display layer if you want; don't conflate them in the data. */
+  tvlUsd: number | null;
   tvlWoWPct: number | null;
   volume7dUsd: number | null;
   health: HealthStatus;
@@ -98,20 +101,32 @@ export async function fetchPoolOgDataUncached(
 
   const client = makeClient(network);
 
+  // Per-request timeout. Without this, a hung upstream prevents allSettled
+  // from resolving and the OG route blocks until Vercel's function timeout.
+  // 5s is generous for a public Hasura lookup and short enough that crawler
+  // unfurls fall back to the generic card promptly on indexer issues.
+  const signal = AbortSignal.timeout(5000);
+
   // Fail-open: only the detail query is load-bearing. If daily snapshots or
-  // the all-pools rate-map query transiently fail, still render a card with
-  // real title/chain/health — degraded cards beat generic ones, and a hard
-  // fail here would be cached for an hour by unstable_cache below.
+  // the all-pools rate-map query transiently fail (including timeout), still
+  // render a card with real title/chain/health — degraded cards beat generic
+  // ones, and a hard fail here would be cached for an hour by unstable_cache.
   const [detailResult, dailyResult, allPoolsResult] = await Promise.allSettled([
-    client.request<{ Pool: Pool[] }>(POOL_DETAIL_WITH_HEALTH, {
-      id: poolId,
-      chainId,
+    client.request<{ Pool: Pool[] }>({
+      document: POOL_DETAIL_WITH_HEALTH,
+      variables: { id: poolId, chainId },
+      signal,
     }),
-    client.request<{ PoolDailySnapshot: PoolSnapshot[] }>(
-      POOL_OG_DAILY_SNAPSHOTS,
-      { poolId },
-    ),
-    client.request<{ Pool: Pool[] }>(ALL_POOLS_WITH_HEALTH, { chainId }),
+    client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
+      document: POOL_OG_DAILY_SNAPSHOTS,
+      variables: { poolId },
+      signal,
+    }),
+    client.request<{ Pool: Pool[] }>({
+      document: ALL_POOLS_WITH_HEALTH,
+      variables: { chainId },
+      signal,
+    }),
   ]);
 
   if (detailResult.status !== "fulfilled") return null;
@@ -135,14 +150,15 @@ export async function fetchPoolOgDataUncached(
 
   // For FX/FX pools that need the rate map to price TVL, a failed
   // ALL_POOLS_WITH_HEALTH query leaves `rates` empty and poolTvlUSD silently
-  // returns 0. Suppress TVL-derived fields rather than ship fake zeros.
+  // returns 0. Suppress TVL-derived fields (null, not 0) so consumers can
+  // distinguish "unpriceable" from "genuinely empty pool".
   const priceable = canValueTvl(pool, network, rates);
-  const tvlUsd = priceable ? poolTvlUSD(pool, network, rates) : 0;
+  const rawTvlUsd = priceable ? poolTvlUSD(pool, network, rates) : 0;
   const volume7dUsd = priceable
     ? computeVolume7d(dailyRows, sym0, sym1, pool, rates)
     : null;
   const tvlWoWPct = priceable
-    ? computeTvlWoW(tvlUsd, dailyRows, pool, network, rates)
+    ? computeTvlWoW(rawTvlUsd, dailyRows, pool, network, rates)
     : null;
   const tvlSeries = priceable
     ? computeTvlSeries(dailyRows, pool, network, rates)
@@ -153,7 +169,7 @@ export async function fetchPoolOgDataUncached(
     name: poolName(network, t0, t1),
     chainLabel: network.label,
     tokenSymbols: [sym0, sym1],
-    tvlUsd,
+    tvlUsd: priceable ? rawTvlUsd : null,
     tvlWoWPct,
     volume7dUsd,
     health: computeEffectiveStatus(pool, chainId),

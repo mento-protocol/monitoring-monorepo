@@ -24,8 +24,10 @@ function healthLabel(status: PoolOgData["health"]): string {
 
 function buildDescription(data: PoolOgData): string {
   const parts: string[] = [];
-  if (data.tvlUsd > 0) parts.push(`TVL ${formatUSD(data.tvlUsd)}`);
-  if (data.volume7dUsd != null && data.volume7dUsd > 0) {
+  // `tvlUsd === null` means unpriceable; omit. `0` means empty pool and
+  // renders as "$0.00" — a real state worth communicating.
+  if (data.tvlUsd != null) parts.push(`TVL ${formatUSD(data.tvlUsd)}`);
+  if (data.volume7dUsd != null) {
     parts.push(`7d volume ${formatUSD(data.volume7dUsd)}`);
   }
   parts.push(`Health: ${healthLabel(data.health)}`);

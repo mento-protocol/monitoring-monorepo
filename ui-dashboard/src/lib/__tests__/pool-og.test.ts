@@ -43,9 +43,13 @@ const ADDR_USDM = "0xaaa0000000000000000000000000000000000002";
 const POOL_ID = `42220-${ADDR_CUSD}`;
 
 function mockRequest(impl: (query: string) => unknown) {
+  // pool-og.ts uses the object-form `client.request({ document, variables,
+  // signal })` so we can wire AbortSignal.timeout per call.
   (
     GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
-  ).mockImplementation(async (query: string) => impl(query));
+  ).mockImplementation(async (arg: string | { document: string }) =>
+    impl(typeof arg === "string" ? arg : arg.document),
+  );
 }
 
 function makeDetailPool(overrides: Record<string, unknown> = {}) {
@@ -257,6 +261,34 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result!.oracleAgeSeconds).toBeGreaterThanOrEqual(3600);
   });
 
+  it("preserves volume7dUsd=0 as a real state (not collapsed with null)", async () => {
+    // Pool exists and had daily snapshots, but zero swaps — valid signal
+    // ("inactive pool"), must not be hidden as "unavailable".
+    const nowSec = Math.floor(Date.now() / 1000);
+    const detailPool = makeDetailPool();
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) {
+        return {
+          PoolDailySnapshot: [
+            {
+              poolId: POOL_ID,
+              timestamp: String(nowSec - 86_400),
+              reserves0: "1000000000000000000000000",
+              reserves1: "1000000000000000000000000",
+              swapVolume0: "0",
+              swapVolume1: "0",
+            },
+          ],
+        };
+      }
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.volume7dUsd).toBe(0);
+    expect(result!.volume7dUsd).not.toBeNull();
+  });
+
   it("surfaces limit-breach via effective health (oracle OK, limit CRITICAL)", async () => {
     const detailPool = makeDetailPool({
       limitStatus: "CRITICAL",
@@ -306,7 +338,8 @@ describe("fetchPoolOgDataUncached", () => {
     });
     const result = await fetchPoolOgDataUncached(POOL_ID);
     expect(result).not.toBeNull();
-    expect(result!.tvlUsd).toBe(0);
+    // `null` = unpriceable, NOT `0`. `0` would falsely suggest an empty pool.
+    expect(result!.tvlUsd).toBeNull();
     expect(result!.volume7dUsd).toBeNull();
     expect(result!.tvlWoWPct).toBeNull();
     expect(result!.tvlSeries).toEqual([]);

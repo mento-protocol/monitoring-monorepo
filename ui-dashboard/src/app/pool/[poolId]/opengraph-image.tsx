@@ -114,8 +114,8 @@ function formatOracleAge(seconds: number): string {
 function buildAlt(data: PoolOgData | null): string {
   if (!data) return "Mento pool analytics preview";
   const parts: string[] = [`${data.name} pool on ${data.chainLabel}`];
-  if (data.tvlUsd > 0) parts.push(`TVL ${formatUSD(data.tvlUsd)}`);
-  if (data.volume7dUsd != null && data.volume7dUsd > 0) {
+  if (data.tvlUsd != null) parts.push(`TVL ${formatUSD(data.tvlUsd)}`);
+  if (data.volume7dUsd != null) {
     parts.push(`7d volume ${formatUSD(data.volume7dUsd)}`);
   }
   const health = describeHealth(data.health);
@@ -269,11 +269,10 @@ function OracleFooter({ data }: { data: PoolOgData }) {
 function Card({ data }: { data: PoolOgData | null }) {
   const name = data?.name ?? "Mento Pool";
   const tokens = data?.tokenSymbols ?? [];
-  const tvl = data && data.tvlUsd > 0 ? formatUSD(data.tvlUsd) : "—";
+  // null → "—" (unpriceable / unavailable); 0 → "$0.00" (real empty state).
+  const tvl = data && data.tvlUsd != null ? formatUSD(data.tvlUsd) : "—";
   const volume7d =
-    data && data.volume7dUsd != null && data.volume7dUsd > 0
-      ? formatUSD(data.volume7dUsd)
-      : "—";
+    data && data.volume7dUsd != null ? formatUSD(data.volume7dUsd) : "—";
 
   let wowText: string | undefined;
   let wowColor: string | undefined;
@@ -359,9 +358,8 @@ function Card({ data }: { data: PoolOgData | null }) {
       >
         {tokens.length === 2 ? (
           <div style={{ display: "flex", gap: 14 }}>
-            {tokens.map((sym) => (
-              <TokenPill key={sym} symbol={sym} />
-            ))}
+            <TokenPill symbol={tokens[0]} />
+            <TokenPill symbol={tokens[1]} />
           </div>
         ) : null}
         <span
