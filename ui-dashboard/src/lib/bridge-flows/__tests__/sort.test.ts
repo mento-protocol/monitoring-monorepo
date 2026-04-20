@@ -1,42 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { sortTransfers, compareNullable } from "../sort";
-import type { BridgeTransfer } from "@/lib/types";
 import type { OracleRateMap } from "@/lib/tokens";
-
-function mk(overrides: Partial<BridgeTransfer>): BridgeTransfer {
-  return {
-    id: overrides.id ?? "wormhole-0xabc",
-    provider: "WORMHOLE",
-    providerMessageId: overrides.id ?? "0xabc",
-    status: "PENDING",
-    tokenSymbol: "USDm",
-    tokenAddress: "0x0",
-    tokenDecimals: 18,
-    sourceChainId: null,
-    sourceContract: null,
-    destChainId: null,
-    destContract: null,
-    sender: null,
-    recipient: null,
-    amount: null,
-    sentBlock: null,
-    sentTimestamp: null,
-    sentTxHash: null,
-    attestationCount: 0,
-    firstAttestedTimestamp: null,
-    lastAttestedTimestamp: null,
-    deliveredBlock: null,
-    deliveredTimestamp: null,
-    deliveredTxHash: null,
-    cancelledTimestamp: null,
-    failedReason: null,
-    usdPriceAtSend: null,
-    usdValueAtSend: null,
-    firstSeenAt: "0",
-    lastUpdatedAt: "0",
-    ...overrides,
-  };
-}
+import { makeTransfer as mk } from "./fixtures";
 
 const noRates: OracleRateMap = new Map();
 

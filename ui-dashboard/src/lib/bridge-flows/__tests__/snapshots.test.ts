@@ -7,29 +7,10 @@ import {
   weekOverWeekChange,
   windowTotals,
 } from "../snapshots";
-import type { BridgeDailySnapshot } from "@/lib/types";
 import type { OracleRateMap } from "@/lib/tokens";
+import { makeSnapshot as mk } from "./fixtures";
 
 const DAY = 86_400;
-
-function mk(overrides: Partial<BridgeDailySnapshot>): BridgeDailySnapshot {
-  return {
-    id: "snap",
-    date: "0",
-    provider: "WORMHOLE",
-    tokenSymbol: "USDm",
-    sourceChainId: 42220,
-    destChainId: 143,
-    sentCount: 0,
-    deliveredCount: 0,
-    cancelledCount: 0,
-    sentVolume: "0",
-    deliveredVolume: "0",
-    sentUsdValue: null,
-    updatedAt: "0",
-    ...overrides,
-  };
-}
 
 const emptyRates: OracleRateMap = new Map();
 const ratesWithGbp: OracleRateMap = new Map([["GBPm", 1.32]]);
