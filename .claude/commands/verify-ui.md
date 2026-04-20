@@ -6,13 +6,14 @@ Default to the dev server at <http://localhost:3000> (or 3001 if 3000 is in use)
 
 ## Pages to cover by default
 
-When the user asks for a broad verify (no specific page), hit these in order and report per-page:
+When the user asks for a broad verify (no specific page), hit these in order and report per-page. Routes mirror the nav links in `src/components/nav-links.tsx`.
 
-1. **Homepage** `/` — pool table + KPI tiles + oracle/volume charts
-2. **Pool detail** `/pool/{id}` — pick any active pool from `/`. Verify charts, rebalance history, swap table
-3. **Revenue** `/revenue` — KPI tiles + historical chart
-4. **Bridge Flows** `/bridge-flows` — Wormhole NTT transfers (see below)
-5. **Oracle** `/oracle` — oracle rate snapshots + chart
+1. **Homepage** `/` — KPI tiles + protocol-wide TVL/volume chart + attention pools
+2. **Pools** `/pools` — full pools table with health indicators
+3. **Pool detail** `/pool/{id}` — pick any active pool from `/pools`. Verify TVL/volume charts, oracle freshness, rebalance history, swap table
+4. **Revenue** `/revenue` — KPI tiles + historical chart
+5. **Bridge Flows** `/bridge-flows` — Wormhole NTT transfers (see below)
+6. **Address book** `/address-book` — auth-gated; skip when not signed in, otherwise verify the labels list renders
 
 For a narrow verify (specific page or feature), skip the list and go directly to the requested URL.
 

@@ -35,10 +35,12 @@ Parse `.data.deployments[]` (NOT the top-level — the payload is wrapped in `{o
 ### 2. Per-chain sync status
 
 ```
-pnpm deploy:indexer:status <commit> -o json
+npx envio-cloud deployment status mento <commit> mento-protocol -o json
 ```
 
-Parse `.data[]` (again wrapped — chains are under `.data`, not top level). For each chain, extract:
+Use the raw `envio-cloud` call rather than the `pnpm deploy:indexer:status` wrapper — the wrapper auto-resolves the _latest_ deployment commit and only accepts `--watch`/`--json`, so a positional commit + `-o json` are silently ignored. Direct invocation guarantees we always poll the target commit.
+
+Parse `.data[]` (wrapped — chains are under `.data`, not top level). For each chain, extract:
 
 - `network` or chain id
 - `block_height` (head)
@@ -56,7 +58,9 @@ Compute `sync % = (latest_processed_block - start_block) / (block_height - start
 ## Rules
 
 - **Never auto-promote.** Surfacing `pnpm deploy:indexer:promote <commit>` to the user is the final step — they run it, not you.
-- **Always use the `pnpm deploy:indexer:*` wrappers** over raw `envio-cloud` calls. They handle auth + repo defaults. The one exception is step 1's `indexer get`, which has no wrapper.
+- **Prefer the `pnpm deploy:indexer:*` wrappers** over raw `envio-cloud` calls (they handle auth + repo defaults), with two exceptions:
+  - `indexer get` — no wrapper exists.
+  - `deployment status <commit>` — wrapper auto-resolves _latest_ (we want explicit commit targeting, see step 2).
 - **Stop after 90 minutes** (18 cycles at 5m) without full sync. Typical sync is 15–40 min; 90 min means something is wrong — report last known status and stop.
 - **Stop after 30 minutes if the deployment still 404s** (step 1 miss past cycle 6). Direct the user to `pnpm deploy:indexer:logs --build`.
 - **Don't spam.** On no-op cycles (still syncing, no state change), output one compact status line, not a full report.
