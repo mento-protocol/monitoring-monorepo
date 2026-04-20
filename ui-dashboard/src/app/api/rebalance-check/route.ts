@@ -121,9 +121,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
 function redactRpcUrl(err: unknown, rpcUrl: string): unknown {
   if (!(err instanceof Error)) return err;
-  if (!err.message.includes(rpcUrl)) return err;
+  const inMessage = err.message.includes(rpcUrl);
+  const inStack = err.stack?.includes(rpcUrl) ?? false;
+  if (!inMessage && !inStack) return err;
   const copy = new Error(err.message.replaceAll(rpcUrl, "[RPC_URL]"));
-  copy.stack = err.stack;
+  // V8 stacks start with `Error: <message>\n    at …`, so the original
+  // URL is embedded in the stack's first line. Scrub the stack string too.
+  copy.stack = err.stack?.replaceAll(rpcUrl, "[RPC_URL]");
   copy.name = err.name;
   if ("cause" in err) copy.cause = err.cause;
   return copy;

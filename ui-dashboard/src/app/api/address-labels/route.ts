@@ -30,7 +30,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
       return NextResponse.json(filtered);
     } catch (err) {
-      return serverError(err);
+      return serverError(err, "read");
     }
   }
 
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const labels = await getLabels(chainId, { publicOnly });
     return NextResponse.json(labels);
   } catch (err) {
-    return serverError(err);
+    return serverError(err, "read");
   }
 }
 
@@ -136,7 +136,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     });
     return NextResponse.json({ ok: true });
   } catch (err) {
-    return serverError(err);
+    return serverError(err, "save");
   }
 }
 
@@ -169,7 +169,7 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     await deleteLabel(chainId as number, address);
     return NextResponse.json({ ok: true });
   } catch (err) {
-    return serverError(err);
+    return serverError(err, "delete");
   }
 }
 
@@ -177,15 +177,21 @@ function isPositiveInt(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v > 0;
 }
 
-function serverError(err: unknown): NextResponse {
+// op distinguishes which handler failed (read/save/delete) so both the
+// client-facing message and the Sentry tag reflect the actual operation
+// instead of a blanket "read" for every 500 across GET/PUT/DELETE.
+function serverError(
+  err: unknown,
+  op: "read" | "save" | "delete",
+): NextResponse {
   // Full error + stack is captured in Sentry — return a generic string to
   // the client. The GET path is partially public (unauthenticated callers
   // get public-only labels), so Upstash / Blob error messages must not
   // leak upstream details to them.
-  Sentry.captureException(err, { tags: { route: "address-labels" } });
-  console.error("[address-labels]", err);
+  Sentry.captureException(err, { tags: { route: "address-labels", op } });
+  console.error("[address-labels]", op, err);
   return NextResponse.json(
-    { error: "Failed to read address labels" },
+    { error: `Failed to ${op} address labels` },
     { status: 500 },
   );
 }
