@@ -143,14 +143,45 @@ resource "vercel_project_environment_variable" "blob_token" {
 }
 
 # ── Auth Environment Variables ────────────────────────────────────────────
+#
+# SECURITY POSTURE — shared prod/preview AUTH_* values are intentional.
+#
+# The preview OAuth flow uses Auth.js's `redirectProxyUrl` (see auth.ts):
+# Google callbacks land on the prod domain (the only whitelisted redirect URI
+# in GCP), then proxy the session back to the preview origin. For that to
+# work, `AUTH_SECRET` (which signs the state JWE and session JWTs) and
+# the Google OAuth credentials MUST be identical on both targets — splitting
+# them would break preview sign-in.
+#
+# Mitigating controls that make this acceptable:
+#   1. Vercel Deployment Protection gates preview URLs to `mentolabs` team
+#      SSO — only authorised team members can reach a preview in the first
+#      place. (Verify in Vercel UI → Project Settings → Deployment Protection.)
+#   2. Public PRs from forks are NOT deployed to preview by default for this
+#      team (Vercel setting: Git → "Deploy for Fork Pull Requests" off).
+#      If that setting is ever flipped on, these secrets become reachable to
+#      untrusted contributors and MUST be rotated + scoped to production-only.
+#   3. CRON_SECRET is explicitly scoped to production (see below).
+#
+# If the above controls are ever loosened, treat all three shared values as
+# potentially exposed: rotate AUTH_GOOGLE_SECRET in GCP, regenerate AUTH_SECRET,
+# then either (a) adopt a split-secret preview auth architecture (different
+# OAuth client + domain-local state) or (b) drop preview app-auth entirely and
+# rely on Vercel Deployment Protection alone (see commit 74e533f for the
+# prior bypass pattern).
+#
+# Tracked: Codex finding 75f2920d (2026-04). Fix partial — CRON_SECRET has
+# been scoped to production; AUTH_* sharing retained for the architectural
+# reasons above.
 
 resource "vercel_project_environment_variable" "auth_google_id" {
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id
   key        = "AUTH_GOOGLE_ID"
   value      = var.auth_google_id
-  target     = ["production", "preview"]
-  sensitive  = true
+  # Shared prod+preview: see security posture comment above.
+  target    = ["production", "preview"]
+  sensitive = true
 }
 
 resource "vercel_project_environment_variable" "auth_google_secret" {
@@ -158,8 +189,9 @@ resource "vercel_project_environment_variable" "auth_google_secret" {
   team_id    = var.vercel_team_id
   key        = "AUTH_GOOGLE_SECRET"
   value      = var.auth_google_secret
-  target     = ["production", "preview"]
-  sensitive  = true
+  # Shared prod+preview: see security posture comment above.
+  target    = ["production", "preview"]
+  sensitive = true
 }
 
 resource "vercel_project_environment_variable" "auth_secret" {
@@ -167,8 +199,10 @@ resource "vercel_project_environment_variable" "auth_secret" {
   team_id    = var.vercel_team_id
   key        = "AUTH_SECRET"
   value      = var.auth_secret
-  target     = ["production", "preview"]
-  sensitive  = true
+  # Shared prod+preview: AUTH_SECRET signs the state JWE verified by the
+  # redirectProxyUrl handshake — must match on both targets. See above.
+  target    = ["production", "preview"]
+  sensitive = true
 }
 
 resource "vercel_project_environment_variable" "cron_secret" {
@@ -177,7 +211,8 @@ resource "vercel_project_environment_variable" "cron_secret" {
   key        = "CRON_SECRET"
   value      = var.cron_secret
   # Production-only: preview deployments do not run cron jobs and should not
-  # have access to the backup trigger secret.
+  # have access to the backup trigger secret. This prevents a compromised
+  # preview build from forging Bearer auth against the prod /backup endpoint.
   target    = ["production"]
   sensitive = true
 }
