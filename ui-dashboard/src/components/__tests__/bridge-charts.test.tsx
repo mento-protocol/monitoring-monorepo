@@ -53,6 +53,22 @@ describe("BridgeVolumeChart smoke", () => {
       ),
     ).not.toThrow();
   });
+
+  it("shows N/A (not $0) in the headline when the snapshot query errored", () => {
+    // Regression: a failed snapshot fetch used to render "$0" — visually
+    // indistinguishable from a legitimate empty window. Force the error
+    // branch to present an explicit failure state.
+    const html = renderToStaticMarkup(
+      <BridgeVolumeChart
+        snapshots={[]}
+        rates={new Map()}
+        isLoading={false}
+        hasError
+      />,
+    );
+    expect(html).toContain("N/A");
+    expect(html).not.toContain(">$0<");
+  });
 });
 
 describe("BridgeTokenBreakdownChart smoke", () => {

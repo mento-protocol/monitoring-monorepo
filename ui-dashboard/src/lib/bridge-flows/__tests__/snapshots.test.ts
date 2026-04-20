@@ -170,6 +170,20 @@ describe("windowTotals", () => {
     expect(totals.sub7d).toBe(6); // 1 + 5
     expect(totals.sub30d).toBe(16); // 1 + 5 + 10
   });
+
+  it("includes the boundary-day snapshot when `now` is not aligned to UTC midnight", () => {
+    // Regression: snapshot rows are bucketed to UTC midnight. If the cutoff
+    // is computed as `now - N*DAY` without flooring, the boundary bucket
+    // (whose ts is earlier than the wall-clock cutoff by `now % DAY`) drops
+    // out — the 7d/30d subtotals silently undercount.
+    const midnightUtc = 1_700_006_400; // arbitrary day-aligned ts
+    const middayNow = midnightUtc + 12 * 60 * 60; // +12h
+    const dayMinus7 = midnightUtc - 7 * DAY; // exactly on the 7d boundary
+    const snaps = [mk({ date: String(dayMinus7), sentCount: 42 })];
+    const totals = windowTotals(snaps, (s) => s.sentCount ?? 0, middayNow);
+    expect(totals.sub7d).toBe(42);
+    expect(totals.sub30d).toBe(42);
+  });
 });
 
 describe("weekOverWeekChange", () => {

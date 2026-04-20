@@ -17,7 +17,10 @@ export function transferAmountUsd(
 ): number | null {
   if (t.usdValueAtSend) {
     const n = Number(t.usdValueAtSend);
-    if (Number.isFinite(n)) return n;
+    // Same `n > 0` guard as `snapshotUsdValue` — legacy rows pinned "0.00"
+    // and we want those to fall through to the live-rate path, not show
+    // as a deceptively confident $0.00. Drop after the next full reindex.
+    if (Number.isFinite(n) && n > 0) return n;
   }
   const amt = transferAmountTokens(t);
   if (amt === null) return null;

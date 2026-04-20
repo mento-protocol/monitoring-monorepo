@@ -93,9 +93,12 @@ export function windowTotals(
   if (snapshots.length === 0) {
     return { total: null, sub24h: 0, sub7d: 0, sub30d: 0 };
   }
-  const cutoff24h = nowSeconds - 1 * SECONDS_PER_DAY;
-  const cutoff7d = nowSeconds - 7 * SECONDS_PER_DAY;
-  const cutoff30d = nowSeconds - 30 * SECONDS_PER_DAY;
+  // Snapshot rows are keyed on UTC-midnight day buckets, so floor the
+  // cutoffs to midnight too — otherwise the boundary day (whose bucket
+  // timestamp is earlier than the wall-clock cutoff) drops out.
+  const cutoff24h = toDayBucket(nowSeconds - 1 * SECONDS_PER_DAY);
+  const cutoff7d = toDayBucket(nowSeconds - 7 * SECONDS_PER_DAY);
+  const cutoff30d = toDayBucket(nowSeconds - 30 * SECONDS_PER_DAY);
   let total = 0;
   let sub24h = 0;
   let sub7d = 0;
@@ -116,8 +119,8 @@ export function weekOverWeekChange(
   series: ReadonlyArray<TimeSeriesPoint>,
   nowSeconds = Math.floor(Date.now() / 1000),
 ): number | null {
-  const weekAgo = nowSeconds - 7 * SECONDS_PER_DAY;
-  const twoWeeksAgo = nowSeconds - 14 * SECONDS_PER_DAY;
+  const weekAgo = toDayBucket(nowSeconds - 7 * SECONDS_PER_DAY);
+  const twoWeeksAgo = toDayBucket(nowSeconds - 14 * SECONDS_PER_DAY);
   let thisWeek = 0;
   let lastWeek = 0;
   for (const p of series) {
@@ -142,7 +145,7 @@ export function buildTokenBreakdown(
   windowDays = 30,
   nowSeconds = Math.floor(Date.now() / 1000),
 ): TokenSlice[] {
-  const cutoff = nowSeconds - windowDays * SECONDS_PER_DAY;
+  const cutoff = toDayBucket(nowSeconds - windowDays * SECONDS_PER_DAY);
   const byToken = new Map<string, number>();
   for (const s of snapshots) {
     if (Number(s.date) < cutoff) continue;

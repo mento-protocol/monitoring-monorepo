@@ -48,6 +48,14 @@ export function BridgeVolumeChart({
   const rangeTotal = rangeSeries.reduce((sum, p) => sum + p.value, 0);
   const wow = weekOverWeekChange(fullSeries);
 
+  // On error, render "N/A" — not "$0" — so a failed snapshot query can't
+  // look like a legitimate empty window.
+  const headline = hasError
+    ? "N/A"
+    : rangeTotal > 0
+      ? formatUSD(rangeTotal)
+      : "$0";
+
   return (
     <TimeSeriesChartCard
       title="Bridged Volume (USD)"
@@ -55,7 +63,7 @@ export function BridgeVolumeChart({
       series={rangeSeries}
       range={range}
       onRangeChange={setRange}
-      headline={rangeTotal > 0 ? formatUSD(rangeTotal) : "$0"}
+      headline={headline}
       change={wow}
       isLoading={isLoading}
       hasError={hasError}

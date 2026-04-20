@@ -71,69 +71,6 @@ export const BRIDGE_PENDING_IDS = /* GraphQL */ `
   }
 `;
 
-// Drill-down: full BridgeTransfer + Wormhole detail + recent attestations.
-export const BRIDGE_TRANSFER_BY_ID = /* GraphQL */ `
-  query BridgeTransferById($id: String!) {
-    BridgeTransfer(where: { id: { _eq: $id } }) {
-      id
-      provider
-      providerMessageId
-      status
-      tokenSymbol
-      tokenAddress
-      tokenDecimals
-      sourceChainId
-      sourceContract
-      destChainId
-      destContract
-      sender
-      recipient
-      amount
-      sentBlock
-      sentTimestamp
-      sentTxHash
-      attestationCount
-      firstAttestedTimestamp
-      lastAttestedTimestamp
-      deliveredBlock
-      deliveredTimestamp
-      deliveredTxHash
-      cancelledTimestamp
-      failedReason
-      usdValueAtSend
-      firstSeenAt
-      lastUpdatedAt
-    }
-    BridgeAttestation(
-      where: { transferId: { _eq: $id } }
-      order_by: { blockTimestamp: asc }
-    ) {
-      id
-      provider
-      attester
-      attesterIndex
-      chainId
-      blockTimestamp
-      txHash
-    }
-  }
-`;
-
-export const WORMHOLE_TRANSFER_DETAIL_BY_ID = /* GraphQL */ `
-  query WormholeTransferDetailById($id: String!) {
-    WormholeTransferDetail(where: { id: { _eq: $id } }) {
-      id
-      digest
-      msgSequence
-      sourceWormholeChainId
-      destWormholeChainId
-      refundAddress
-      fee
-      inboundQueuedTimestamp
-    }
-  }
-`;
-
 // Daily aggregates for KPI tiles + the volume-over-time chart. Deterministic
 // `date desc, id asc` ordering means that if the 1000-row cap is ever hit
 // the missing rows are the oldest days, not an arbitrary slice — charts stay

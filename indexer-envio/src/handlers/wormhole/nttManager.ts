@@ -129,7 +129,6 @@ async function updateDailySnapshot(
     destChainId: number;
     sentDelta?: { count: number; volume: bigint };
     deliveredDelta?: { count: number; volume: bigint };
-    cancelledDelta?: { count: number };
   },
 ) {
   const { id, date } = snapshotId({
@@ -158,7 +157,6 @@ async function updateDailySnapshot(
     deliveredCount: prior.deliveredCount + (args.deliveredDelta?.count ?? 0),
     deliveredVolume:
       prior.deliveredVolume + (args.deliveredDelta?.volume ?? 0n),
-    cancelledCount: prior.cancelledCount + (args.cancelledDelta?.count ?? 0),
     updatedAt: args.blockTimestamp,
   });
 }
@@ -436,9 +434,13 @@ WormholeNttManager.TransferRedeemed.handler(async ({ event, context }) => {
     transfer.sourceChainId !== null &&
     transfer.amount
   ) {
+    // Use the merged transfer's tokenSymbol (seeded source-first by
+    // TransferSentDigest) rather than the dest-side manifest — if a future
+    // peer ever registered a different symbol for the same token, this
+    // keeps the sent + delivered rollups bucketed against the same key.
     await updateDailySnapshot(context as HandlerContext, {
       blockTimestamp: ts,
-      tokenSymbol: mgr.tokenSymbol,
+      tokenSymbol: transfer.tokenSymbol,
       sourceChainId: transfer.sourceChainId,
       destChainId: chainId,
       deliveredDelta: { count: 1, volume: transfer.amount },

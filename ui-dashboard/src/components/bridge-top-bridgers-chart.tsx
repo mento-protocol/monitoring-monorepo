@@ -15,9 +15,6 @@ interface BridgeTopBridgersChartProps {
   hasError: boolean;
 }
 
-const DEFAULT_TOP_N = TOP_BRIDGERS_DEFAULT;
-const EXPANDED_TOP_N = TOP_BRIDGERS_EXPANDED;
-
 /**
  * Ranked list of bridgers with a horizontal bar scaled to the top sender's
  * count. Plain DOM — no Plotly — since the visual is just a bar overlay on
@@ -33,10 +30,10 @@ export function BridgeTopBridgersChart({
   hasError,
 }: BridgeTopBridgersChartProps) {
   const [expanded, setExpanded] = useState(false);
-  const limit = expanded ? EXPANDED_TOP_N : DEFAULT_TOP_N;
+  const limit = expanded ? TOP_BRIDGERS_EXPANDED : TOP_BRIDGERS_DEFAULT;
   const rows = bridgers.slice(0, limit);
   const maxCount = rows[0]?.totalSentCount ?? 0;
-  const hasMore = bridgers.length > DEFAULT_TOP_N;
+  const hasMore = bridgers.length > TOP_BRIDGERS_DEFAULT;
 
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
@@ -99,8 +96,8 @@ export function BridgeTopBridgersChart({
                 className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
               >
                 {expanded
-                  ? `Show top ${DEFAULT_TOP_N}`
-                  : `Show top ${EXPANDED_TOP_N}`}
+                  ? `Show top ${TOP_BRIDGERS_DEFAULT}`
+                  : `Show top ${TOP_BRIDGERS_EXPANDED}`}
               </button>
             </div>
           )}
@@ -111,7 +108,16 @@ export function BridgeTopBridgersChart({
 }
 
 function parseFirstChainId(json: string): number | null {
-  const arr = JSON.parse(json) as unknown;
+  // Defense-in-depth: the indexer's `appendJsonSet` already wraps its
+  // JSON.parse in try/catch and emits a safe fallback, so this should
+  // never throw. We keep the symmetric guard so a single mangled row
+  // from any future drift can't crash the whole chart during render.
+  let arr: unknown;
+  try {
+    arr = JSON.parse(json);
+  } catch {
+    return null;
+  }
   if (!Array.isArray(arr) || arr.length === 0) return null;
   const first = arr[0];
   const n = typeof first === "number" ? first : Number(first);

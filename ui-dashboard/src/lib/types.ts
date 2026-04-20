@@ -272,17 +272,6 @@ export type BridgeTransfer = {
   lastUpdatedAt: string;
 };
 
-export type WormholeTransferDetail = {
-  id: string;
-  digest: string;
-  msgSequence: string | null;
-  sourceWormholeChainId: number | null;
-  destWormholeChainId: number | null;
-  refundAddress: string | null;
-  fee: string | null;
-  inboundQueuedTimestamp: string | null;
-};
-
 export type BridgeBridger = {
   id: string;
   sender: string;
