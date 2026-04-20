@@ -1,0 +1,84 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+name: mento-bridge-only
+description: |
+  Bridge-flows minimal local harness — indexes ONLY the Wormhole NTT contracts,
+  no FPMM/SortedOracles/pools. Starts near the NTT helper deploy blocks so a
+  full local sync takes minutes, not hours.
+
+  Purpose: validate that the bridge-flows indexer additions actually work
+  against real RPCs before deploying to Envio hosted. Covers:
+    - YAML + codegen boot without config errors
+    - HyperSync accepts the CREATE-nonce-derived proxy addresses
+    - field_selection.transaction_fields: [hash, from] delivers tx.from
+    - First event triggers findByNttManager seed → WormholeNttManager row
+    - Real BridgeTransfer rows populate for any NTT activity in the window
+
+  Usage:
+    pnpm indexer:bridge-only:codegen
+    pnpm indexer:bridge-only:dev
+    # Hasura: http://localhost:8080/v1/graphql
+
+  Start blocks are hardcoded (no env-var substitution) so the FPMM start-block
+  invariant in src/startupChecks.ts no-ops here — it only fires when the
+  ENVIO_START_BLOCK_CELO / _MONAD env vars are set.
+
+  Note: codegen writes to ./generated/, overwriting mainnet codegen. Switch
+  back with pnpm indexer:multichain:codegen.
+
+contracts:
+  - name: WormholeNttManager
+    abi_file_path: abis/wormhole/NttManager.json
+    handler: src/EventHandlersBridgeOnly.ts
+    events:
+      - event: TransferSent(bytes32 indexed recipient, bytes32 indexed refundAddress, uint256 amount, uint256 fee, uint16 recipientChain, uint64 msgSequence)
+        name: TransferSentDetailed
+      - event: TransferSent(bytes32 indexed digest)
+        name: TransferSentDigest
+      - event: TransferRedeemed(bytes32 indexed digest)
+      - event: MessageAttestedTo(bytes32 digest, address transceiver, uint8 index)
+      - event: InboundTransferQueued(bytes32 digest)
+
+  - name: WormholeTransceiver
+    abi_file_path: abis/wormhole/WormholeTransceiver.json
+    handler: src/EventHandlersBridgeOnly.ts
+    events:
+      - event: ReceivedMessage(bytes32 digest, uint16 emitterChainId, bytes32 emitterAddress, uint64 sequence)
+
+networks:
+  # Celo Mainnet — start at the NttDeployHelper USDm/GBPm/EURm CREATE3 block
+  # so we skip ~4M blocks of unrelated pool/oracle history.
+  - id: 42220
+    start_block: 64257176
+    contracts:
+      - name: WormholeNttManager
+        address:
+          - 0xa4096343485a44c0f8d05ae6da311c18d63e38bc # USDm
+          - 0x7895d03ffdeb14a57ef79c21c3ea14dadf2a7c3f # GBPm
+          - 0x5f8a1e50f83f53951b89fc73ead80b27045c67fd # EURm
+      - name: WormholeTransceiver
+        address:
+          - 0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b # USDm
+          - 0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f # GBPm
+          - 0x6467cfca82184657f32f1195f9a26b5578399479 # EURm
+
+  # Monad Mainnet — same proxy addresses (CREATE3 across chains).
+  - id: 143
+    start_block: 68301940
+    contracts:
+      - name: WormholeNttManager
+        address:
+          - 0xa4096343485a44c0f8d05ae6da311c18d63e38bc # USDm
+          - 0x7895d03ffdeb14a57ef79c21c3ea14dadf2a7c3f # GBPm
+          - 0x5f8a1e50f83f53951b89fc73ead80b27045c67fd # EURm
+      - name: WormholeTransceiver
+        address:
+          - 0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b # USDm
+          - 0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f # GBPm
+          - 0x6467cfca82184657f32f1195f9a26b5578399479 # EURm
+
+unordered_multichain_mode: true
+preload_handlers: true
+field_selection:
+  transaction_fields:
+    - hash
+    - from
