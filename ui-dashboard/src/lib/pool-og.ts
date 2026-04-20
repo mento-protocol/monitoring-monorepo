@@ -18,6 +18,7 @@ import {
   isOracleFresh,
   type HealthStatus,
 } from "@/lib/health";
+import { isWeekend } from "@/lib/weekend";
 import { ALL_POOLS_WITH_HEALTH, POOL_DETAIL_WITH_HEALTH } from "@/lib/queries";
 import { parseWei } from "@/lib/format";
 import type { Pool, PoolSnapshot } from "@/lib/types";
@@ -56,6 +57,9 @@ export type PoolOgData = {
   tvlUsd: number | null;
   tvlWoWPct: number | null;
   volume7dUsd: number | null;
+  /** Week-over-week change in 7d volume (current 7d vs prior 7d). Null when
+   * prior-week data is missing or the prior window was 0 (division undefined). */
+  volume7dWoWPct: number | null;
   health: HealthStatus;
   /** Short reasons behind the current health — empty for OK/N/A/WEEKEND.
    * Mirrors the sub-parts that drive computeEffectiveStatus so the card
@@ -161,9 +165,33 @@ export async function fetchPoolOgDataUncached(
   // distinguish "unpriceable" from "genuinely empty pool".
   const priceable = canValueTvl(pool, network, rates);
   const rawTvlUsd = priceable ? poolTvlUSD(pool, network, rates) : 0;
+  const nowSec = Math.floor(Date.now() / 1000);
   const volume7dUsd = priceable
-    ? computeVolume7d(dailyRows, sym0, sym1, pool, rates)
+    ? sumVolumeInWindow(
+        dailyRows,
+        sym0,
+        sym1,
+        pool,
+        rates,
+        nowSec - SEVEN_DAYS,
+        nowSec,
+      )
     : null;
+  const priorVolume = priceable
+    ? sumVolumeInWindow(
+        dailyRows,
+        sym0,
+        sym1,
+        pool,
+        rates,
+        nowSec - 2 * SEVEN_DAYS,
+        nowSec - SEVEN_DAYS,
+      )
+    : null;
+  const volume7dWoWPct =
+    volume7dUsd != null && priorVolume != null && priorVolume > 0
+      ? ((volume7dUsd - priorVolume) / priorVolume) * 100
+      : null;
   const tvlWoWPct = priceable
     ? computeTvlWoW(rawTvlUsd, dailyRows, pool, network, rates)
     : null;
@@ -182,6 +210,7 @@ export async function fetchPoolOgDataUncached(
     tvlUsd: priceable ? rawTvlUsd : null,
     tvlWoWPct,
     volume7dUsd,
+    volume7dWoWPct,
     health: computeEffectiveStatus(pool, chainId),
     healthReasons: computeHealthReasons(pool, chainId),
     tvlSeries,
@@ -232,8 +261,13 @@ function computeHealthReasons(pool: Pool, chainId: number): string[] {
   const now = Math.floor(Date.now() / 1000);
 
   if (!isOracleFresh(pool, now, chainId)) {
-    // WEEKEND case already short-circuited above.
-    items.push({ text: "oracle stale", severity: REASON_CRITICAL });
+    // Oracle staleness during FX weekends is expected market closure, not
+    // an incident. Guard on isWeekend() even when effective status bumped
+    // to CRITICAL via limits — otherwise "oracle stale" would outrank the
+    // real trigger ("trading limits breached") in the severity sort.
+    if (!isWeekend()) {
+      items.push({ text: "oracle stale", severity: REASON_CRITICAL });
+    }
   } else {
     const diff = Number(pool.priceDifference ?? "0");
     const threshold =
@@ -269,22 +303,28 @@ function computeHealthReasons(pool: Pool, chainId: number): string[] {
   return items.sort((a, b) => b.severity - a.severity).map((r) => r.text);
 }
 
-function computeVolume7d(
+// Sum daily USD volume for rows whose timestamp falls in [fromSec, toSec).
+// Used for both the current 7d total and the prior-7d baseline that drives
+// the volume WoW percentage.
+function sumVolumeInWindow(
   daily: PoolSnapshot[],
   sym0: string,
   sym1: string,
   pool: Pool,
   rates: OracleRateMap,
+  fromSec: number,
+  toSec: number,
 ): number | null {
-  if (daily.length === 0) return null;
-  const cutoff = Math.floor(Date.now() / 1000) - SEVEN_DAYS;
-  const recent = daily.filter((s) => Number(s.timestamp) >= cutoff);
-  if (recent.length === 0) return null;
+  const rows = daily.filter((s) => {
+    const ts = Number(s.timestamp);
+    return ts >= fromSec && ts < toSec;
+  });
+  if (rows.length === 0) return null;
 
   const d0 = pool.token0Decimals ?? 18;
   const d1 = pool.token1Decimals ?? 18;
   let sumUsd = 0;
-  for (const row of recent) {
+  for (const row of rows) {
     const v0 = parseWei(row.swapVolume0 ?? "0", d0);
     const v1 = parseWei(row.swapVolume1 ?? "0", d1);
     if (USDM_SYMBOLS.has(sym0)) {

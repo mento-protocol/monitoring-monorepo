@@ -197,16 +197,18 @@ function Card({ data }: { data: PoolOgData | null }) {
   const volume7d =
     data && data.volume7dUsd != null ? formatUSD(data.volume7dUsd) : "—";
 
-  let wowText: string | undefined;
-  let wowColor: string | undefined;
-  let sparkColor = TONE_COLOR.neutral.fg;
-  if (data?.tvlWoWPct != null) {
-    const pct = data.tvlWoWPct;
+  function formatWoW(pct: number): { text: string; color: string } {
     const arrow = pct >= 0 ? "▲" : "▼";
-    wowText = `${arrow} ${Math.abs(pct).toFixed(1)}% 7d`;
-    wowColor = pct >= 0 ? TONE_COLOR.ok.fg : TONE_COLOR.critical.fg;
-    sparkColor = wowColor;
+    return {
+      text: `${arrow} ${Math.abs(pct).toFixed(1)}% 7d`,
+      color: pct >= 0 ? TONE_COLOR.ok.fg : TONE_COLOR.critical.fg,
+    };
   }
+
+  const tvlWow = data?.tvlWoWPct != null ? formatWoW(data.tvlWoWPct) : null;
+  const volWow =
+    data?.volume7dWoWPct != null ? formatWoW(data.volume7dWoWPct) : null;
+  const sparkColor = tvlWow?.color ?? TONE_COLOR.neutral.fg;
 
   const health = describeHealth(data?.health ?? "N/A");
   const healthColor = TONE_COLOR[health.tone];
@@ -295,8 +297,8 @@ function Card({ data }: { data: PoolOgData | null }) {
         <Tile
           label="TVL"
           value={tvl}
-          subline={wowText}
-          sublineColor={wowColor}
+          subline={tvlWow?.text}
+          sublineColor={tvlWow?.color}
           chart={
             data && data.tvlSeries.length >= 2 ? (
               <Sparkline series={data.tvlSeries} color={sparkColor} />
@@ -306,6 +308,8 @@ function Card({ data }: { data: PoolOgData | null }) {
         <Tile
           label="7d Volume"
           value={volume7d}
+          subline={volWow?.text}
+          sublineColor={volWow?.color}
           chart={
             data && data.volumeSeries.length >= 2 ? (
               <Sparkline series={data.volumeSeries} color={ACCENT} />

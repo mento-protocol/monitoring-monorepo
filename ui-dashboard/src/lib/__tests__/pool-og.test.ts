@@ -233,7 +233,10 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result!.chainLabel).toBe("Celo");
     expect(result!.tokenSymbols).toEqual(["USDm", "cUSD"]);
     expect(result!.tvlUsd).toBeCloseTo(2_000_000, -2);
+    // Current 7d window captures row 1 only (100K USDm volume); row 2 falls
+    // in the prior-7d window (50K). WoW = (100K - 50K) / 50K * 100 = 100%.
     expect(result!.volume7dUsd).toBeCloseTo(100_000, -2);
+    expect(result!.volume7dWoWPct).toBeCloseTo(100, 0);
     expect(result!.tvlWoWPct).toBeCloseTo(25, 0);
     expect(result!.health).toBe("OK");
     expect(result!.healthReasons).toEqual([]);
@@ -407,6 +410,7 @@ describe("fetchPoolOgDataUncached", () => {
     // `null` = unpriceable, NOT `0`. `0` would falsely suggest an empty pool.
     expect(result!.tvlUsd).toBeNull();
     expect(result!.volume7dUsd).toBeNull();
+    expect(result!.volume7dWoWPct).toBeNull();
     expect(result!.tvlWoWPct).toBeNull();
     expect(result!.tvlSeries).toEqual([]);
     expect(result!.volumeSeries).toEqual([]);
