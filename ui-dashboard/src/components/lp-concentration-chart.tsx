@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { truncateAddress } from "@/lib/format";
-import { PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
+import { escapePlotText, PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
 import { USDM_SYMBOLS } from "@/lib/tokens";
 import type { Pool } from "@/lib/types";
 
@@ -91,8 +91,12 @@ export function LpConcentrationChart({
     ...(otherTotal > BigInt(0) ? [toRelative(otherTotal)] : []),
   ];
 
+  // Plotly renders HTML in customdata when interpolated via %{customdata}
+  // in hovertemplate. Labels come from user-controlled address-book entries,
+  // so escape here to prevent stored XSS. The legend (React JSX below)
+  // receives raw text, which React auto-escapes.
   const customdata = [
-    ...top.map((p) => resolveLabel(p.address)),
+    ...top.map((p) => escapePlotText(resolveLabel(p.address))),
     ...(otherTotal > BigInt(0) ? ["(multiple)"] : []),
   ];
 
