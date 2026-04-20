@@ -12,21 +12,21 @@ function resolveLocalHasuraConfig(networkId: string): LocalHasuraConfig | null {
     case "devnet":
       return {
         upstreamUrl:
-          process.env.HASURA_UPSTREAM_URL_DEVNET ??
+          process.env.HASURA_UPSTREAM_URL_DEVNET?.trim() ||
           "http://localhost:8080/v1/graphql",
         adminSecret: process.env.HASURA_SECRET_DEVNET?.trim() ?? "",
       };
     case "celo-sepolia-local":
       return {
         upstreamUrl:
-          process.env.HASURA_UPSTREAM_URL_CELO_SEPOLIA_LOCAL ??
+          process.env.HASURA_UPSTREAM_URL_CELO_SEPOLIA_LOCAL?.trim() ||
           "http://localhost:8080/v1/graphql",
         adminSecret: process.env.HASURA_SECRET_CELO_SEPOLIA_LOCAL?.trim() ?? "",
       };
     case "celo-mainnet-local":
       return {
         upstreamUrl:
-          process.env.HASURA_UPSTREAM_URL_CELO_MAINNET_LOCAL ??
+          process.env.HASURA_UPSTREAM_URL_CELO_MAINNET_LOCAL?.trim() ||
           "http://localhost:8080/v1/graphql",
         adminSecret: process.env.HASURA_SECRET_CELO_MAINNET_LOCAL?.trim() ?? "",
       };
@@ -37,9 +37,9 @@ function resolveLocalHasuraConfig(networkId: string): LocalHasuraConfig | null {
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { networkId: string } },
+  { params }: { params: Promise<{ networkId: string }> },
 ): Promise<Response> {
-  const { networkId } = params;
+  const { networkId } = await params;
   const config = resolveLocalHasuraConfig(networkId);
   if (!config) {
     return NextResponse.json({ error: "Unsupported network" }, { status: 404 });

@@ -19,7 +19,7 @@ describe("POST /api/hasura/[networkId]", () => {
     const { POST } = await import("../route");
     const req = makeRequest({ query: "{ __typename }" });
     const res = await POST(req, {
-      params: { networkId: "celo-mainnet" },
+      params: Promise.resolve({ networkId: "celo-mainnet" }),
     });
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "Unsupported network" });
@@ -37,7 +37,7 @@ describe("POST /api/hasura/[networkId]", () => {
 
     const req = makeRequest({ query: "{ __typename }" });
     const res = await POST(req, {
-      params: { networkId: "devnet" },
+      params: Promise.resolve({ networkId: "devnet" }),
     });
 
     expect(res.status).toBe(200);
@@ -56,7 +56,7 @@ describe("POST /api/hasura/[networkId]", () => {
 
     const req = makeRequest({ query: "{ __typename }" });
     await POST(req, {
-      params: { networkId: "devnet" },
+      params: Promise.resolve({ networkId: "devnet" }),
     });
 
     const [, init] = fetchMock.mock.calls[0];
@@ -70,7 +70,7 @@ describe("POST /api/hasura/[networkId]", () => {
 
     const req = makeRequest({ query: "{ __typename }" });
     const res = await POST(req, {
-      params: { networkId: "devnet" },
+      params: Promise.resolve({ networkId: "devnet" }),
     });
 
     expect(res.status).toBe(502);
