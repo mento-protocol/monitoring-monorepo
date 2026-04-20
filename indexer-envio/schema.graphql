@@ -441,7 +441,7 @@ type WormholeNttManager {
 
 type WormholeTransferDetail {
   id: ID! # == BridgeTransfer.id
-  digest: String! @index # NTT manager-layer digest (TransceiverStructs.nttManagerMessageDigest). This is the digest used by TransferSent/TransferRedeemed/MessageAttestedTo; it is the BridgeTransfer primary key suffix.
+  digest: String! @index # NTT manager-layer digest (TransceiverStructs.nttManagerMessageDigest). This is the digest used by TransferSent/TransferRedeemed/MessageAttestedTo and is the BridgeTransfer primary-key suffix. The value semantics here are unchanged by the ReceivedMessage rewrite — only the docstring is newly precise.
   transceiverDigest: String @index # Wormhole transceiver-layer digest (TransceiverStructs.transceiverMessageDigest), different bytestring from `digest`. Populated on the destination side when ReceivedMessage pairs with MessageAttestedTo/TransferRedeemed in the same tx.
   msgSequence: BigInt @index # Wormhole VAA sequence number, unique per (emitterChain, emitterAddress).
   sourceWormholeChainId: Int

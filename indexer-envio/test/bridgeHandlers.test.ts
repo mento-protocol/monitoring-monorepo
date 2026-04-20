@@ -31,6 +31,7 @@ type MockDb = {
       destChainId?: number;
       sender?: string;
       tokenSymbol: string;
+      tokenAddress: string;
     }>;
     WormholeTransferDetail: EntityGet<{
       id: string;
@@ -361,6 +362,116 @@ describe("Bridge-flows handlers — replay idempotency", () => {
     const after2 = mockDb.entities.BridgeDailySnapshot.getAll();
     const total2 = after2.reduce((a, s) => a + s.deliveredCount, 0);
     assert.equal(total2, 1, "delivered count must stay at 1 on replay");
+  });
+});
+
+describe("Bridge-flows handlers — tokenAddress source-chain resolution", () => {
+  // Regression guard for the dest-first tokenAddress overwrite bug: hub/spoke
+  // NTT deploys DIFFERENT token proxy addresses per chain, so storing the
+  // dest-chain's tokenAddress on a row tagged with sourceChainId produces
+  // broken explorer links in the UI. The TransferRedeemed handler must
+  // seed token metadata ONLY when the source hasn't run yet, and must NOT
+  // overwrite the source-chain's tokenAddress.
+  it("source-first: TransferRedeemed does not overwrite the source-chain tokenAddress", async () => {
+    const celo = pickManifestEntry(); // Celo USDm — source
+    const monad = findByNttManager(
+      143,
+      "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+    );
+    assert.ok(monad);
+    let mockDb = MockDb.createMockDb();
+
+    // Source-first: TransferSent on Celo sets tokenAddress = Celo USDm.
+    mockDb = await processTransferSentPair({
+      mockDb,
+      chainId: celo.chainId,
+      manager: celo.nttManagerProxy,
+      digest: DIGEST_1,
+      amount: 1000n,
+      recipientWormholeChainId: 48,
+      msgSequence: 1,
+      detailLogIndex: 4,
+      blockTimestamp: 1_700_000_000,
+    });
+
+    const afterSource = mockDb.entities.BridgeTransfer.get(
+      `wormhole-${DIGEST_1.toLowerCase()}`,
+    );
+    assert.equal(
+      afterSource!.tokenAddress.toLowerCase(),
+      celo.tokenAddress.toLowerCase(),
+      "source-side seeds Celo tokenAddress",
+    );
+
+    // Dest TransferRedeemed on Monad fires later. Must NOT overwrite.
+    mockDb = await processTransferRedeemed({
+      mockDb,
+      chainId: 143,
+      manager: monad!.nttManagerProxy,
+      digest: DIGEST_1,
+      blockTimestamp: 1_700_001_000,
+      txHash:
+        "0x4444444444444444444444444444444444444444444444444444444444444444",
+    });
+
+    const afterDest = mockDb.entities.BridgeTransfer.get(
+      `wormhole-${DIGEST_1.toLowerCase()}`,
+    );
+    assert.equal(
+      afterDest!.tokenAddress.toLowerCase(),
+      celo.tokenAddress.toLowerCase(),
+      "TransferRedeemed leaves source-chain tokenAddress intact (must not overwrite with Monad's address)",
+    );
+    assert.notEqual(
+      afterDest!.tokenAddress.toLowerCase(),
+      monad!.tokenAddress.toLowerCase(),
+      "tokenAddress is NOT the dest-chain token proxy",
+    );
+  });
+
+  it("dest-first: TransferRedeemed seeds, then TransferSent overwrites with the source-chain tokenAddress", async () => {
+    const celo = pickManifestEntry();
+    const monad = findByNttManager(
+      143,
+      "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+    );
+    assert.ok(monad);
+    let mockDb = MockDb.createMockDb();
+
+    // Dest-first: TransferRedeemed seeds dest tokenAddress (because source
+    // hasn't run yet — this is deliberately the wrong address initially,
+    // corrected below).
+    mockDb = await processTransferRedeemed({
+      mockDb,
+      chainId: 143,
+      manager: monad!.nttManagerProxy,
+      digest: DIGEST_1,
+      blockTimestamp: 1_700_001_000,
+    });
+
+    // Source arrives — must overwrite with Celo tokenAddress.
+    mockDb = await processTransferSentPair({
+      mockDb,
+      chainId: celo.chainId,
+      manager: celo.nttManagerProxy,
+      digest: DIGEST_1,
+      amount: 1000n,
+      recipientWormholeChainId: 48,
+      msgSequence: 1,
+      detailLogIndex: 4,
+      blockTimestamp: 1_700_002_000,
+      txHash:
+        "0x5555555555555555555555555555555555555555555555555555555555555555",
+    });
+
+    const final = mockDb.entities.BridgeTransfer.get(
+      `wormhole-${DIGEST_1.toLowerCase()}`,
+    );
+    assert.equal(
+      final!.tokenAddress.toLowerCase(),
+      celo.tokenAddress.toLowerCase(),
+      "after source catches up, tokenAddress is the source-chain proxy",
+    );
   });
 });
 

@@ -617,7 +617,7 @@ function SenderCell({
   sender: string | null;
   chainId: number | null;
 }) {
-  if (!sender) return <span className="text-slate-500">{"\u2014"}</span>;
+  if (!sender) return <Dash />;
   if (!chainId) {
     return (
       <span className="font-mono text-xs text-slate-400">

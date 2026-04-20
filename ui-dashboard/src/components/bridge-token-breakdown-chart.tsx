@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { formatUSD } from "@/lib/format";
 import { PLOTLY_BASE_LAYOUT, PLOTLY_CONFIG } from "@/lib/plot";
 import { buildTokenBreakdown } from "@/lib/bridge-flows/snapshots";
+import { ROW_CHART_HEIGHT_PX } from "@/lib/bridge-flows/layout";
 import type { OracleRateMap } from "@/lib/tokens";
 import type { BridgeDailySnapshot } from "@/lib/types";
 
@@ -26,7 +27,10 @@ const PIE_COLORS = [
 const Plot = dynamic(() => import("react-plotly.js"), {
   ssr: false,
   loading: () => (
-    <div className="h-[200px] animate-pulse rounded bg-slate-800/30" />
+    <div
+      className="animate-pulse rounded bg-slate-800/30"
+      style={{ height: ROW_CHART_HEIGHT_PX }}
+    />
   ),
 });
 
@@ -79,7 +83,7 @@ export function BridgeTokenBreakdownChart({
       ...PLOTLY_BASE_LAYOUT,
       margin: { t: 8, r: 8, b: 8, l: 8 },
       showlegend: false,
-      height: 200,
+      height: ROW_CHART_HEIGHT_PX,
       autosize: true,
     }),
     [],
@@ -98,9 +102,15 @@ export function BridgeTokenBreakdownChart({
           Unable to load token breakdown.
         </p>
       ) : isLoading ? (
-        <div className="h-[200px] animate-pulse rounded bg-slate-800/30" />
+        <div
+          className="animate-pulse rounded bg-slate-800/30"
+          style={{ height: ROW_CHART_HEIGHT_PX }}
+        />
       ) : !hasData ? (
-        <div className="flex h-[200px] items-center justify-center text-sm text-slate-500">
+        <div
+          className="flex items-center justify-center text-sm text-slate-500"
+          style={{ height: ROW_CHART_HEIGHT_PX }}
+        >
           No priced volume in the selected window.
         </div>
       ) : (
@@ -109,7 +119,7 @@ export function BridgeTokenBreakdownChart({
             data={[trace]}
             layout={layout}
             config={PLOTLY_CONFIG}
-            style={{ width: "100%", height: 200 }}
+            style={{ width: "100%", height: ROW_CHART_HEIGHT_PX }}
             useResizeHandler
           />
           <ul className="mt-3 grid gap-1.5 text-xs">

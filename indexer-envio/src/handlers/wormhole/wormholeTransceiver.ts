@@ -23,26 +23,9 @@
 import { WormholeTransceiver } from "generated";
 import { bytes32ToAddress } from "../../wormhole/detail";
 import { wormholeToEvmChainId } from "../../wormhole/chainIds";
+import type { WormholeTransceiverContext } from "../../wormhole/handlerContext";
 
-// Narrow structural type — only the entity accessor we use here. Mirrors the
-// pattern in src/handlers/wormhole/nttManager.ts which also defines its own
-// HandlerContext shape rather than pulling the wide generated type.
-type HandlerContext = {
-  WormholeDestPending: {
-    set: (entity: {
-      id: string;
-      chainId: number;
-      txHash: string;
-      transceiverDigest: string;
-      sourceChainId: number;
-      sourceTransceiver: string;
-      sourceWormholeChainId: number;
-      msgSequence: bigint;
-      destTransceiver: string;
-      blockTimestamp: bigint;
-    }) => void;
-  };
-};
+type HandlerContext = WormholeTransceiverContext;
 
 WormholeTransceiver.ReceivedMessage.handler(async ({ event, context }) => {
   const p = event.params;

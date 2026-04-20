@@ -11,14 +11,14 @@ const DEFAULT_TOKEN_DECIMALS = 18;
 
 /**
  * USD value of a single snapshot row. Prefers `sentUsdValue` when the
- * indexer has populated a real number; otherwise falls back to
- * `sentVolume × live oracle rate`. Returns 0 when the token can't be
- * priced (unknown symbol with no rate).
+ * indexer has populated a real positive number; otherwise falls back to
+ * `sentVolume × live oracle rate`.
  *
- * Treats `"0.00"` as sentinel-null: legacy indexer rows pre-dating the
- * nullable USD schema wrote a `"0.00"` string on every row whether or
- * not the transfer actually had zero value. Accepting it as a truthy
- * USD reading would make every KPI $0 until the indexer redeploys.
+ * TODO(post-reindex): drop the `n > 0` guard below. It's a safety net for
+ * legacy rows written by indexer deployments that predate the nullable
+ * schema and emitted "0.00" on every row. Current `defaultSnapshot` writes
+ * `undefined`, so after the next full reindex this branch never fires —
+ * the guard becomes dead code and can be removed.
  */
 export function snapshotUsdValue(
   snapshot: Pick<

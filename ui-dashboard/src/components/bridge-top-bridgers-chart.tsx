@@ -3,6 +3,10 @@
 import { useState } from "react";
 import { AddressLink } from "@/components/address-link";
 import { Skeleton, ErrorBox, EmptyBox } from "@/components/feedback";
+import {
+  TOP_BRIDGERS_DEFAULT,
+  TOP_BRIDGERS_EXPANDED,
+} from "@/lib/bridge-flows/layout";
 import type { BridgeBridger } from "@/lib/types";
 
 interface BridgeTopBridgersChartProps {
@@ -11,10 +15,8 @@ interface BridgeTopBridgersChartProps {
   hasError: boolean;
 }
 
-// Sized to match the volume + token-breakdown chart cards in the same row
-// (~200px of content area); 25 is the backing fetch/expanded cap.
-const DEFAULT_TOP_N = 5;
-const EXPANDED_TOP_N = 25;
+const DEFAULT_TOP_N = TOP_BRIDGERS_DEFAULT;
+const EXPANDED_TOP_N = TOP_BRIDGERS_EXPANDED;
 
 /**
  * Ranked list of bridgers with a horizontal bar scaled to the top sender's

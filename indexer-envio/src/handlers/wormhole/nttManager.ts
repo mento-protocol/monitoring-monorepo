@@ -9,12 +9,10 @@
  */
 import { WormholeNttManager } from "generated";
 import type {
+  BridgeAttestation,
   BridgeTransfer,
   WormholeTransferDetail,
   wormholeNttManager as WormholeNttManagerEntity,
-  BridgeAttestation,
-  BridgeDailySnapshot,
-  BridgeBridger,
 } from "generated";
 import {
   buildTransferId,
@@ -28,98 +26,15 @@ import { bytes32ToAddress, defaultWormholeDetail } from "../../wormhole/detail";
 import { computeWormholeStatus } from "../../wormhole/status";
 import { wormholeToEvmChainId } from "../../wormhole/chainIds";
 import { findByNttManager } from "../../wormhole/nttAddresses";
+import {
+  findPendingScratch,
+  findAndDrainPendingScratch,
+} from "../../wormhole/pairing";
+import type { WormholeHandlerContext } from "../../wormhole/handlerContext";
 
 const PROVIDER = "WORMHOLE" as const;
 
-type HandlerContext = {
-  BridgeTransfer: {
-    get: (id: string) => Promise<BridgeTransfer | undefined>;
-    set: (entity: BridgeTransfer) => void;
-  };
-  WormholeTransferDetail: {
-    get: (id: string) => Promise<WormholeTransferDetail | undefined>;
-    set: (entity: WormholeTransferDetail) => void;
-  };
-  WormholeNttManager: {
-    get: (id: string) => Promise<WormholeNttManagerEntity | undefined>;
-    set: (entity: WormholeNttManagerEntity) => void;
-  };
-  WormholeTransferPending: {
-    get: (id: string) => Promise<
-      | {
-          id: string;
-          chainId: number;
-          txHash: string;
-          nttManager: string;
-          sender: string;
-          recipient: string;
-          refundAddress: string;
-          amount: bigint;
-          fee: bigint;
-          recipientWormholeChainId: number;
-          msgSequence: bigint;
-          sentBlock: bigint;
-          sentTimestamp: bigint;
-        }
-      | undefined
-    >;
-    set: (entity: {
-      id: string;
-      chainId: number;
-      txHash: string;
-      nttManager: string;
-      sender: string;
-      recipient: string;
-      refundAddress: string;
-      amount: bigint;
-      fee: bigint;
-      recipientWormholeChainId: number;
-      msgSequence: bigint;
-      sentBlock: bigint;
-      sentTimestamp: bigint;
-    }) => void;
-    deleteUnsafe?: (id: string) => void;
-  };
-  WormholeDestPending: {
-    get: (id: string) => Promise<
-      | {
-          id: string;
-          chainId: number;
-          txHash: string;
-          transceiverDigest: string;
-          sourceChainId: number;
-          sourceTransceiver: string;
-          sourceWormholeChainId: number;
-          msgSequence: bigint;
-          destTransceiver: string;
-          blockTimestamp: bigint;
-        }
-      | undefined
-    >;
-    set: (entity: {
-      id: string;
-      chainId: number;
-      txHash: string;
-      transceiverDigest: string;
-      sourceChainId: number;
-      sourceTransceiver: string;
-      sourceWormholeChainId: number;
-      msgSequence: bigint;
-      destTransceiver: string;
-      blockTimestamp: bigint;
-    }) => void;
-    deleteUnsafe?: (id: string) => void;
-  };
-  BridgeAttestation: { set: (entity: BridgeAttestation) => void };
-  BridgeDailySnapshot: {
-    get: (id: string) => Promise<BridgeDailySnapshot | undefined>;
-    set: (entity: BridgeDailySnapshot) => void;
-  };
-  BridgeBridger: {
-    get: (id: string) => Promise<BridgeBridger | undefined>;
-    set: (entity: BridgeBridger) => void;
-  };
-};
+type HandlerContext = WormholeHandlerContext;
 
 /** Lazy-seed the WormholeNttManager lookup row from the static address manifest. */
 async function ensureNttManagerSeed(
@@ -289,24 +204,19 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
   // from the digest logIndex until we find the most recent pending row for
   // this tx. Done before the manifest check so we can reap the pending row
   // even when the NttManager isn't in the manifest (yaml/manifest drift).
-  const txHash = event.transaction.hash.toLowerCase();
-  const digestLogIndex = event.logIndex;
-  let pending: Awaited<
-    ReturnType<HandlerContext["WormholeTransferPending"]["get"]>
-  > = undefined;
-  let pendingId = "";
-  const maxOffsetSearch = Math.min(digestLogIndex, 256); // cap just in case
-  for (let offset = 1; offset <= maxOffsetSearch; offset++) {
-    const candidateId = `${chainId}-${txHash}-${digestLogIndex - offset}`;
-    const row = await (context as HandlerContext).WormholeTransferPending.get(
-      candidateId,
-    );
-    if (row) {
-      pending = row;
-      pendingId = candidateId;
-      break;
-    }
-  }
+  // Backward-walk helper shared with the dest-side scratch drain (see
+  // `findAndDrainPendingScratch` usage below). Source-side needs the pending
+  // row's ID as well as its payload so it can delete only after a
+  // successful BridgeTransfer upsert — hence `findPendingScratch` (no auto-
+  // delete) rather than the drain variant.
+  const { row: pending, id: pendingId } = await findPendingScratch(
+    (context as HandlerContext).WormholeTransferPending,
+    {
+      chainId,
+      txHash: event.transaction.hash,
+      currentLogIndex: event.logIndex,
+    },
+  );
 
   const mgr = await ensureNttManagerSeed(
     context as HandlerContext,
@@ -501,12 +411,32 @@ WormholeNttManager.TransferRedeemed.handler(async ({ event, context }) => {
     }
   }
 
+  // Defense-in-depth: normally `MessageAttestedTo` fires just before
+  // TransferRedeemed in the same tx and drains the scratch itself. But if
+  // HyperSync drops the MessageAttestedTo log (rare; observed during
+  // historical backfills on other indexers), the scratch would leak and
+  // the row would be missing source identity + transceiverDigest. Drain
+  // here too when it's still present. Idempotent: the MessageAttestedTo
+  // handler already deleted the scratch on the happy path, so this is a
+  // no-op in steady state.
+  const destPending = await drainDestPending(context as HandlerContext, event);
+  const detailDelta: Record<string, unknown> = {};
+  if (destPending) {
+    if (priorTransfer?.sourceChainId == null)
+      delta.sourceChainId = destPending.sourceChainId;
+    if (!priorTransfer?.sourceContract)
+      delta.sourceContract = destPending.sourceTransceiver;
+    detailDelta.transceiverDigest = destPending.transceiverDigest;
+    detailDelta.msgSequence = destPending.msgSequence;
+    detailDelta.sourceWormholeChainId = destPending.sourceWormholeChainId;
+  }
+
   const transfer = await upsertTransferByDigest(
     context as HandlerContext,
     digest,
     ts,
     delta,
-    {},
+    detailDelta,
   );
 
   if (
@@ -527,33 +457,37 @@ WormholeNttManager.TransferRedeemed.handler(async ({ event, context }) => {
 });
 
 /**
- * Walk backward through (chainId, txHash, logIndex - N) to find a
- * `WormholeDestPending` scratch row written by an earlier-in-tx
- * ReceivedMessage, return its payload, and delete the scratch. Returns
- * undefined when no scratch is found in the preceding ~256 log entries,
- * which is enough to cover NTT-typical in-tx spacing between the
- * transceiver's ReceivedMessage and the NttManager's MessageAttestedTo /
- * TransferRedeemed.
+ * Drain the `WormholeDestPending` scratch written by the earlier-in-tx
+ * ReceivedMessage. When a caller can identify the destination transceiver
+ * (MessageAttestedTo carries it in `p.transceiver`), pass it as a filter so
+ * multi-transceiver flows don't cross-pair. TransferRedeemed has no
+ * transceiver identifier in its payload — it passes `undefined` and accepts
+ * any scratch in the tx (safe because the drain races MessageAttestedTo,
+ * which is authoritative when present).
  */
 async function drainDestPending(
   context: HandlerContext,
-  chainId: number,
-  txHash: string,
-  currentLogIndex: number,
+  event: {
+    chainId: number;
+    transaction: { hash: string };
+    logIndex: number;
+  },
+  transceiver?: string,
 ): Promise<
   Awaited<ReturnType<HandlerContext["WormholeDestPending"]["get"]>> | undefined
 > {
-  const txHashLower = txHash.toLowerCase();
-  const maxOffset = Math.min(currentLogIndex, 256);
-  for (let offset = 1; offset <= maxOffset; offset++) {
-    const candidateId = `${chainId}-${txHashLower}-${currentLogIndex - offset}`;
-    const row = await context.WormholeDestPending.get(candidateId);
-    if (row) {
-      context.WormholeDestPending.deleteUnsafe?.(candidateId);
-      return row;
-    }
-  }
-  return undefined;
+  const transceiverLower = transceiver?.toLowerCase();
+  return findAndDrainPendingScratch(
+    context.WormholeDestPending,
+    {
+      chainId: event.chainId,
+      txHash: event.transaction.hash,
+      currentLogIndex: event.logIndex,
+    },
+    transceiverLower
+      ? (row) => row.destTransceiver.toLowerCase() === transceiverLower
+      : undefined,
+  );
 }
 
 WormholeNttManager.MessageAttestedTo.handler(async ({ event, context }) => {
@@ -609,9 +543,8 @@ WormholeNttManager.MessageAttestedTo.handler(async ({ event, context }) => {
   // Stamp the source identity onto the row being upserted here.
   const destPending = await drainDestPending(
     context as HandlerContext,
-    event.chainId,
-    event.transaction.hash,
-    event.logIndex,
+    event,
+    p.transceiver,
   );
   const detailDelta: Record<string, unknown> = {};
   if (destPending) {
