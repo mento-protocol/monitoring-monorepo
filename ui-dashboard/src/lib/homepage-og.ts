@@ -104,9 +104,15 @@ type ChainSlice = {
   pools: Pool[];
   daily: PoolSnapshot[];
   rates: OracleRateMap;
-  /** True if the daily-snapshot fetch for this chain failed or hit the
-   * safety cap mid-pagination. Signals cross-chain daily-derived
-   * aggregates (volume, tvl-series) can't be trusted for protocol totals. */
+  /** True if the daily-snapshot fetch for this chain threw (timeout, query
+   * error, network failure). The pagination safety cap is intentionally
+   * NOT a degraded signal: the query is ordered newest-first with a
+   * `$since: DAILY_SINCE_DAYS` filter, so the first `DAILY_MAX_PAGES *
+   * DAILY_PAGE_SIZE` rows always cover the OG card's read windows
+   * (TVL_CHART_DAYS, 14d volume, 7d WoW). Hitting the cap just means the
+   * chain has more lifetime history than the window — the recent data
+   * we need is still in-hand. Signals cross-chain daily-derived aggregates
+   * (volume, tvl-series) can't be trusted for protocol totals. */
   dailyDegraded: boolean;
 };
 
@@ -142,7 +148,9 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
   // $since filter the payload is bounded to ~N_pools × DAILY_SINCE_DAYS
   // rows per chain; at current scale one page covers everything. Only an
   // exception flips dailyDegraded — a full final page just means the
-  // chain has >5000 recent-window rows, which is still a successful read.
+  // chain has more lifetime history than the OG's read window, and since
+  // the query is ordered newest-first, the recent data we actually need
+  // is always inside the paginated result.
   const poolIds = pools.map((p) => p.id);
   const since =
     Math.floor(Date.now() / 1000) - DAILY_SINCE_DAYS * SECONDS_PER_DAY;

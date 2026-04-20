@@ -496,5 +496,62 @@ describe("fetchHomepageOgDataUncached", () => {
     // If pagination were broken (single-page only), we'd expect
     // `volumeSeries === []` via the 1000-cap degraded path.
     expect(celoDailyCallCount).toBeGreaterThan(1);
+    expect(result!.volumeSeries.length).toBeGreaterThan(0);
+  });
+
+  it("does not flag degraded when pagination exhausts the safety cap with full pages", async () => {
+    // Regression guard for PR #165 Codex P1 (comment id 3112391489):
+    // The daily query is ordered newest-first with $since: DAILY_SINCE_DAYS,
+    // so the first DAILY_MAX_PAGES × DAILY_PAGE_SIZE rows always cover the
+    // OG card's read windows (TVL_CHART_DAYS, 14d volume, 7d WoW). Hitting
+    // the cap just means the chain has more lifetime history than the
+    // window — it is NOT a correctness signal and must NOT null out
+    // daily-derived aggregates. Only exceptions should flip dailyDegraded.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const celoPool = makePool(42220, POOL_CELO, ADDR_USDM_CELO, ADDR_CUSD_CELO);
+    // Rows span the last 30 days with a meaningful swap volume so the
+    // aggregator's daily-derived fields come back non-null/non-empty on
+    // the happy path. If a future change were to re-flip degraded on
+    // cap-hit, these assertions would fail.
+    const fullPage = Array.from({ length: 1000 }, (_, i) => ({
+      poolId: POOL_CELO,
+      timestamp: String(nowSec - i * 3600),
+      reserves0: "1000000000000000000000000",
+      reserves1: "1000000000000000000000000",
+      swapVolume0: "10000000000000000000000", // 10K per row
+      swapVolume1: "10000000000000000000000",
+    }));
+    let celoDailyCallCount = 0;
+    routeByChain({
+      42220: (doc) => {
+        if (doc.includes("PoolDailySnapshot")) {
+          celoDailyCallCount++;
+          // Always return a full page — simulates the chain having more
+          // rows than DAILY_MAX_PAGES × DAILY_PAGE_SIZE can cover.
+          return { PoolDailySnapshot: fullPage };
+        }
+        return { Pool: [celoPool] };
+      },
+      143: (doc) => {
+        if (doc.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+        return { Pool: [] };
+      },
+    });
+
+    const result = await fetchHomepageOgDataUncached();
+    expect(result).not.toBeNull();
+    // Pagination ran all the way to the cap without breaking early.
+    expect(celoDailyCallCount).toBe(5);
+    // Non-degraded: daily-derived aggregates come back populated.
+    expect(result!.totalVolume7dUsd).not.toBeNull();
+    expect(result!.totalVolume7dUsd!).toBeGreaterThan(0);
+    expect(result!.volumeSeries.length).toBeGreaterThan(0);
+    expect(result!.tvlSeries.length).toBeGreaterThan(0);
+    // Live TVL and pool count are reported as usual.
+    expect(result!.totalTvlUsd).toBeGreaterThan(0);
+    expect(result!.poolCount).toBe(1);
+    // Not a chain-offline case either — the pool query succeeded.
+    expect(result!.partial).toBe(false);
+    expect(result!.offlineChains).toEqual([]);
   });
 });
