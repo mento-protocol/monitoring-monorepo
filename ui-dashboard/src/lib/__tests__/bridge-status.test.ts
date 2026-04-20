@@ -53,12 +53,28 @@ describe("deriveBridgeStatus", () => {
     expect(
       deriveBridgeStatus({ status: "FAILED", sentTimestamp: null }, 99999),
     ).toBe("FAILED");
+  });
+
+  it("keeps QUEUED_INBOUND within the 24h window", () => {
+    const now = 1_700_100_000;
+    const sentRecently = now - 2 * 60 * 60; // 2h ago — still queued
     expect(
       deriveBridgeStatus(
-        { status: "QUEUED_INBOUND", sentTimestamp: "100" },
-        99999,
+        { status: "QUEUED_INBOUND", sentTimestamp: String(sentRecently) },
+        now,
       ),
     ).toBe("QUEUED_INBOUND");
+  });
+
+  it("overlays STUCK for QUEUED_INBOUND transfers past the threshold", () => {
+    const now = 1_700_100_000;
+    const sentLongAgo = now - 48 * 60 * 60; // 48h ago — queue should not hold this long
+    expect(
+      deriveBridgeStatus(
+        { status: "QUEUED_INBOUND", sentTimestamp: String(sentLongAgo) },
+        now,
+      ),
+    ).toBe("STUCK");
   });
 
   it("keeps SENT within the 24h window", () => {

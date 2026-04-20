@@ -3,16 +3,21 @@ import type { BridgeStatusOverlay, BridgeTransfer } from "./types";
 const STUCK_THRESHOLD_SECONDS = 24 * 60 * 60;
 
 /**
- * Derive the display status. Overlays "STUCK" when a SENT or ATTESTED transfer
- * hasn't been delivered within 24h. This is client-side so the "stuck" window
- * stays fresh without a bespoke indexer recompute.
+ * Derive the display status. Overlays "STUCK" when an in-flight transfer
+ * (SENT, ATTESTED, or QUEUED_INBOUND — i.e. any non-terminal post-send state)
+ * hasn't been delivered within 24h. Client-side so the window stays fresh
+ * without a bespoke indexer recompute. QUEUED_INBOUND is included because
+ * the dest-side rate-limit queue can legitimately hold a transfer for many
+ * hours; past 24h it's the operator's concern, same as SENT/ATTESTED stall.
  */
 export function deriveBridgeStatus(
   transfer: Pick<BridgeTransfer, "status" | "sentTimestamp">,
   nowSeconds = Math.floor(Date.now() / 1000),
 ): BridgeStatusOverlay {
   const { status } = transfer;
-  if (status !== "SENT" && status !== "ATTESTED") return status;
+  const inFlight =
+    status === "SENT" || status === "ATTESTED" || status === "QUEUED_INBOUND";
+  if (!inFlight) return status;
   const sentTs = transfer.sentTimestamp ? Number(transfer.sentTimestamp) : null;
   if (sentTs !== null && nowSeconds - sentTs > STUCK_THRESHOLD_SECONDS) {
     return "STUCK";

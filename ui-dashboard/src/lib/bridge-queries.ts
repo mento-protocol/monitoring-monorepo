@@ -51,10 +51,16 @@ export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
 // sum BridgeDailySnapshot.sentCount across the window instead. Cheap,
 // indexer-pre-rolled, and caps at 1000 snapshot rows (days × providers ×
 // tokens × routes) which is orders of magnitude under the row limit for any
-// realistic window.
+// realistic window. Deterministic `order_by` so if the cap is ever hit the
+// missing rows are the oldest ones, not an arbitrary slice — matches how
+// pool snapshot pagination handles the same issue elsewhere in the app.
 export const BRIDGE_TRANSFER_COUNT_SNAPSHOTS = /* GraphQL */ `
   query BridgeTransferCountSnapshots($afterDate: numeric!) {
-    BridgeDailySnapshot(where: { date: { _gte: $afterDate } }, limit: 1000) {
+    BridgeDailySnapshot(
+      where: { date: { _gte: $afterDate } }
+      order_by: { date: desc, id: asc }
+      limit: 1000
+    ) {
       sentCount
     }
   }
@@ -76,6 +82,7 @@ export const BRIDGE_PENDING_IDS = /* GraphQL */ `
       where: {
         status: { _in: ["PENDING", "SENT", "ATTESTED", "QUEUED_INBOUND"] }
       }
+      order_by: { firstSeenAt: desc, id: asc }
       limit: 1000
     ) {
       id

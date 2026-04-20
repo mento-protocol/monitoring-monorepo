@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useMemo, useState } from "react";
-import { useGQL } from "@/lib/graphql";
+import { useBridgeGQL } from "@/lib/bridge-flows/use-bridge-gql";
 import {
   BRIDGE_TRANSFERS_WINDOW,
   BRIDGE_TRANSFER_COUNT_SNAPSHOTS,
@@ -64,20 +64,20 @@ function BridgeFlowsContent() {
     THIRTY_DAYS_SECONDS -
     ((nowSeconds - THIRTY_DAYS_SECONDS) % SECONDS_PER_DAY);
 
-  const transfersResult = useGQL<{ BridgeTransfer: BridgeTransfer[] }>(
+  const transfersResult = useBridgeGQL<{ BridgeTransfer: BridgeTransfer[] }>(
     BRIDGE_TRANSFERS_WINDOW,
     { limit: PAGE_LIMIT, offset: 0, after: afterDayBucket },
   );
 
   // Aggregates are disabled on hosted Hasura — sum pre-rolled
   // BridgeDailySnapshot.sentCount instead.
-  const countResult = useGQL<{
+  const countResult = useBridgeGQL<{
     BridgeDailySnapshot: Array<{ sentCount: number }>;
   }>(BRIDGE_TRANSFER_COUNT_SNAPSHOTS, { afterDate: afterDayBucket });
 
   // Pending: paginate IDs, count client-side (capped at 1000). A count of
   // 1000 is a wire signal of pagination cap — surface as "1,000+".
-  const pendingResult = useGQL<{ BridgeTransfer: Array<{ id: string }> }>(
+  const pendingResult = useBridgeGQL<{ BridgeTransfer: Array<{ id: string }> }>(
     BRIDGE_PENDING_IDS,
   );
 
@@ -162,7 +162,7 @@ function BridgeFlowsContent() {
           }
           subtitle={
             !error && pendingCount !== null && pendingCount > 0
-              ? "Sent, awaiting delivery"
+              ? "In-flight or attested, awaiting delivery"
               : undefined
           }
         />

@@ -52,7 +52,11 @@ describe("compareNullable", () => {
   });
 
   it("returns 0 for both-null", () => {
-    expect(compareNullable(null, undefined, (x, y) => x - y, "asc")).toBe(0);
+    // Explicit <number> — with both args null/undefined TS can't infer T from
+    // the arguments, so the comparator's x/y drift to possibly-null.
+    expect(
+      compareNullable<number>(null, undefined, (x, y) => x - y, "asc"),
+    ).toBe(0);
   });
 
   it("ascending sorts smaller first", () => {

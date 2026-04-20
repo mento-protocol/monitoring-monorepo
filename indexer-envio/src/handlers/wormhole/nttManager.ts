@@ -284,16 +284,6 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
     manager,
     BigInt(event.block.timestamp),
   );
-  if (!mgr) {
-    // Manifest miss — reap any pending scratch row before bailing, otherwise
-    // it would leak forever (the digest event won't fire a second time).
-    if (pending) {
-      (context as HandlerContext).WormholeTransferPending.deleteUnsafe?.(
-        pendingId,
-      );
-    }
-    return;
-  }
 
   // Snapshot the prior BridgeTransfer BEFORE upserting so we can detect the
   // destination-first race: if dest already delivered this digest before we
@@ -306,16 +296,24 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
   );
 
   const ts = BigInt(event.block.timestamp);
+  // Manifest miss (yaml declares an NttManager that hasn't been regenerated
+  // into config/nttAddresses.json) persists source identity + sender/amount
+  // in a degraded "UNKNOWN"-token mode rather than dropping the transfer
+  // entirely — we'd rather have recoverable data with wrong symbol than
+  // silent loss. Rollups (daily snapshot, bridger) are gated on mgr below so
+  // they stay consistent with what the manifest knows.
   const transferDelta: Record<string, unknown> = {
-    tokenSymbol: mgr.tokenSymbol,
-    tokenAddress: mgr.tokenAddress,
-    tokenDecimals: mgr.tokenDecimals,
     sourceChainId: chainId,
     sourceContract: manager,
     sentBlock: BigInt(event.block.number),
     sentTimestamp: ts,
     sentTxHash: event.transaction.hash,
   };
+  if (mgr) {
+    transferDelta.tokenSymbol = mgr.tokenSymbol;
+    transferDelta.tokenAddress = mgr.tokenAddress;
+    transferDelta.tokenDecimals = mgr.tokenDecimals;
+  }
   const detailDelta: Record<string, unknown> = {};
 
   if (pending) {
@@ -343,8 +341,12 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
       pendingId,
     );
 
+    // Rollups require resolved token metadata — skip on manifest miss.
+    // The degraded BridgeTransfer row above is still written so the transfer
+    // is not lost; operator can rerun `pnpm generate:ntt-addresses` + replay
+    // to backfill rollups.
     const destChainId = wormholeToEvmChainId(pending.recipientWormholeChainId);
-    if (destChainId !== null && pending.amount) {
+    if (mgr && destChainId !== null && pending.amount) {
       // Replay-idempotent: only apply the SENT rollup on the first-time
       // transition (priorTransfer had no sentBlock yet). On a reorg/restart
       // replay priorTransfer.sentBlock is already set, so we skip.
