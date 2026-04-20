@@ -336,13 +336,23 @@ function TransfersTable({
             !!t.sender &&
             !!t.recipient &&
             t.sender.toLowerCase() === t.recipient.toLowerCase();
+          // Wormholescan URL is the row's "canonical" trace — if we have it,
+          // the transfer-level cells (provider, amount, amountUsd) all link
+          // to it so operators can jump into the trace from any of those
+          // columns instead of hunting for the `wh` pill at the end.
+          const whUrl =
+            t.provider === "WORMHOLE" && t.sentTxHash
+              ? wormholescanUrl(t.sentTxHash)
+              : null;
           return (
             <tr
               key={t.id}
               className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors"
             >
               <td className="px-2 sm:px-4 py-2 sm:py-3">
-                <BridgeProviderBadge provider={t.provider} />
+                <WormholescanLink href={whUrl}>
+                  <BridgeProviderBadge provider={t.provider} />
+                </WormholescanLink>
               </td>
               <td className="px-2 sm:px-4 py-2 sm:py-3">
                 <RouteCell
@@ -367,14 +377,18 @@ function TransfersTable({
                     : undefined
                 }
               >
-                {usd === null
-                  ? "—"
-                  : `${usdFromLive ? "~" : ""}${formatUSD(usd)}`}
+                <WormholescanLink href={whUrl}>
+                  {usd === null
+                    ? "—"
+                    : `${usdFromLive ? "~" : ""}${formatUSD(usd)}`}
+                </WormholescanLink>
               </td>
               <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
-                {amountTokens !== null
-                  ? formatWei(t.amount!, t.tokenDecimals ?? 18, 2)
-                  : "—"}
+                <WormholescanLink href={whUrl}>
+                  {amountTokens !== null
+                    ? formatWei(t.amount!, t.tokenDecimals ?? 18, 2)
+                    : "—"}
+                </WormholescanLink>
               </td>
               <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm">
                 <SenderCell sender={t.sender} chainId={t.sourceChainId} />
@@ -427,6 +441,33 @@ function RouteCell({
 
 function Dash() {
   return <span className="text-slate-600">{"\u2014"}</span>;
+}
+
+/**
+ * Wraps children in an anchor to a Wormholescan tx page when `href` is set,
+ * or passes them through untouched when the row has no source tx yet. Keeps
+ * the cell's typography — the anchor only adds a subtle hover tint so the
+ * visible content isn't restyled into blue link colors.
+ */
+function WormholescanLink({
+  href,
+  children,
+}: {
+  href: string | null;
+  children: React.ReactNode;
+}) {
+  if (!href) return <>{children}</>;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Open on Wormholescan"
+      className="hover:text-indigo-300 transition-colors"
+    >
+      {children}
+    </a>
+  );
 }
 
 function TxPill({
