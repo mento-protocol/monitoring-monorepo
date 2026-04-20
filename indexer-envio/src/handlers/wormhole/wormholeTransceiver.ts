@@ -41,6 +41,11 @@ WormholeTransceiver.ReceivedMessage.handler(async ({ event, context }) => {
     msgSequence: priorDetail.msgSequence ?? p.sequence,
   };
 
+  // ReceivedMessage fires on the destination chain — seed destChainId when
+  // it hasn't been set. Same rationale as MessageAttestedTo: a transfer stuck
+  // pre-redeem permanently has destChainId=null without this. destContract
+  // is not set here because the transceiver emitted this event, not the
+  // NttManager — TransferRedeemed / MessageAttestedTo fill that field later.
   const merged = {
     ...priorTransfer,
     sourceChainId:
@@ -48,6 +53,7 @@ WormholeTransceiver.ReceivedMessage.handler(async ({ event, context }) => {
       (sourceEvm === null ? undefined : sourceEvm),
     sourceContract:
       priorTransfer.sourceContract ?? bytes32ToAddress(p.emitterAddress),
+    destChainId: priorTransfer.destChainId ?? event.chainId,
     lastUpdatedAt: ts,
   };
   const nextTransfer: BridgeTransfer = {

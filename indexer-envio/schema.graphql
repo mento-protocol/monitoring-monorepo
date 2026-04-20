@@ -334,7 +334,7 @@ type BridgeTransfer {
   id: ID! # "{provider}-{providerMessageId}", lowercased
   provider: BridgeProvider! @index
   providerMessageId: String! @index # Wormhole digest; LayerZero GUID; etc.
-  status: String! @index # PENDING | SENT | ATTESTED | DELIVERED | QUEUED_OUTBOUND | QUEUED_INBOUND | CANCELLED | FAILED
+  status: String! @index # PENDING | SENT | ATTESTED | DELIVERED | QUEUED_INBOUND | CANCELLED | FAILED. Source-side queue (QUEUED_OUTBOUND) is intentionally omitted — see src/wormhole/status.ts.
   tokenSymbol: String! @index
   tokenAddress: String!
   tokenDecimals: Int!
@@ -363,6 +363,9 @@ type BridgeTransfer {
   cancelledTimestamp: BigInt
   failedReason: String
 
+  # Nullable while USD pricing is deferred (plan §1.5). Mirrors the deferral
+  # annotation on BridgeDailySnapshot.sentUsdValue — no handler writes these
+  # today; UI falls back to live oracle rates.
   usdPriceAtSend: String # fixed-point 18dp string
   usdValueAtSend: String # 2dp string, lex-sortable
   firstSeenAt: BigInt!
@@ -450,7 +453,7 @@ type WormholeTransferDetail {
 }
 
 type WormholeTransferPending {
-  id: ID! # "{chainId}-{txHash}", ephemeral — should be 0 rows in steady state
+  id: ID! # "{chainId}-{txHash}-{logIndex}", ephemeral — should be 0 rows in steady state. logIndex is load-bearing: a single tx can emit multiple TransferSent pairs (wrapper contracts), and keying only by txHash would collide.
   chainId: Int!
   txHash: String!
   nttManager: String!

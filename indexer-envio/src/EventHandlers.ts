@@ -1,9 +1,13 @@
 // ===========================================================================
-// EventHandlers.ts — Envio entry point
+// EventHandlers.ts — Envio entry point (primary, full multichain configs)
 //
-// CONSTRAINT: Every config.*.yaml specifies `handler: src/EventHandlers.ts`.
-// Envio expects handler registrations to originate from this file. All handler
-// modules are imported below; their registrations fire at module load time.
+// Both `config.multichain.mainnet.yaml` and `config.multichain.testnet.yaml`
+// declare `handler: src/EventHandlers.ts`, so every handler registration in
+// this file fires at module load time for those configs.
+//
+// The bridge-only local harness (`config.multichain.bridge-only.yaml`) uses a
+// separate entry point — `src/EventHandlersBridgeOnly.ts`. Keep the Wormhole
+// handler imports at the bottom of this file in sync with the imports there.
 // ===========================================================================
 
 import { runStartupChecks } from "./startupChecks";

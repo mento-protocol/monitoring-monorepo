@@ -58,9 +58,12 @@ describe("bytes32ToAddress", () => {
   });
 
   it("preserves the raw bytes32 when upper 12 bytes are non-zero (non-EVM)", () => {
-    // First byte non-zero → treat as Solana / non-EVM recipient.
+    // Properly-sized 32-byte (64 hex) input with a non-zero upper byte so we
+    // actually exercise the `upper !== ADDRESS_ZERO_PADDING` branch — the
+    // 66-hex-char string previously here tripped the length-mismatch early
+    // return, bypassing the non-EVM decode path entirely.
     const b32 =
-      "0xFFaaaaaaaaaaaaaaaaaaaaaaaa1111111111111111111111111111111111111111";
+      "0x00ff000000000000000000001111111111111111111111111111111111111111";
     assert.equal(bytes32ToAddress(b32), b32.toLowerCase());
   });
 

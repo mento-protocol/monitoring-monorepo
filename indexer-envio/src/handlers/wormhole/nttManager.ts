@@ -250,13 +250,6 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
   const digest = event.params.digest;
   const chainId = event.chainId;
   const manager = event.srcAddress.toLowerCase();
-  const mgr = await ensureNttManagerSeed(
-    context as HandlerContext,
-    chainId,
-    manager,
-    BigInt(event.block.timestamp),
-  );
-  if (!mgr) return;
 
   // Pair with the TransferSentDetailed row written earlier in the same tx.
   // Key by logIndex so multiple sends in one tx don't collide. The 6-arg
@@ -264,7 +257,8 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
   // intermediate logs from the Wormhole core bridge + transceiver between
   // them (empirically observed up to ~50 offsets on Monad). Walk backward
   // from the digest logIndex until we find the most recent pending row for
-  // this tx.
+  // this tx. Done before the manifest check so we can reap the pending row
+  // even when the NttManager isn't in the manifest (yaml/manifest drift).
   const txHash = event.transaction.hash.toLowerCase();
   const digestLogIndex = event.logIndex;
   let pending: Awaited<
@@ -282,6 +276,23 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
       pendingId = candidateId;
       break;
     }
+  }
+
+  const mgr = await ensureNttManagerSeed(
+    context as HandlerContext,
+    chainId,
+    manager,
+    BigInt(event.block.timestamp),
+  );
+  if (!mgr) {
+    // Manifest miss — reap any pending scratch row before bailing, otherwise
+    // it would leak forever (the digest event won't fire a second time).
+    if (pending) {
+      (context as HandlerContext).WormholeTransferPending.deleteUnsafe?.(
+        pendingId,
+      );
+    }
+    return;
   }
 
   // Snapshot the prior BridgeTransfer BEFORE upserting so we can detect the
@@ -516,15 +527,23 @@ WormholeNttManager.MessageAttestedTo.handler(async ({ event, context }) => {
 
   const prior = await (context as HandlerContext).BridgeTransfer.get(id);
   const count = (prior?.attestationCount ?? 0) + 1;
+  // MessageAttestedTo fires on the destination chain — seed destChainId /
+  // destContract when they haven't been set yet. Without this, a transfer
+  // stuck at ATTESTED (rate-limit queue, failed delivery) permanently has
+  // destChainId=null and drops out of any chain-filtered UI/query.
+  const destDelta: Record<string, unknown> = {
+    attestationCount: count,
+    firstAttestedTimestamp: prior?.firstAttestedTimestamp ?? ts,
+    lastAttestedTimestamp: ts,
+  };
+  if (prior?.destChainId == null) destDelta.destChainId = event.chainId;
+  if (!prior?.destContract)
+    destDelta.destContract = event.srcAddress.toLowerCase();
   await upsertTransferByDigest(
     context as HandlerContext,
     p.digest,
     ts,
-    {
-      attestationCount: count,
-      firstAttestedTimestamp: prior?.firstAttestedTimestamp ?? ts,
-      lastAttestedTimestamp: ts,
-    },
+    destDelta,
     {},
   );
 });
