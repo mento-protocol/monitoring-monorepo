@@ -36,6 +36,13 @@ const PROVIDER = "WORMHOLE" as const;
 
 type HandlerContext = WormholeHandlerContext;
 
+/** Generated entity row types carry `readonly` on every field; the delta
+ * builders below start as partial and mutate, then spread into the final
+ * entity at the upsert boundary. `-readonly` makes that loop type-check. */
+type WritablePartial<T> = { -readonly [K in keyof T]?: T[K] };
+type BridgeTransferDelta = WritablePartial<BridgeTransfer>;
+type WormholeDetailDelta = WritablePartial<WormholeTransferDetail>;
+
 /** Lazy-seed the WormholeNttManager lookup row from the static address manifest. */
 async function ensureNttManagerSeed(
   context: HandlerContext,
@@ -77,8 +84,8 @@ async function upsertTransferByDigest(
   context: HandlerContext,
   digest: string,
   blockTimestamp: bigint,
-  transferDelta: Record<string, unknown>,
-  detailDelta: Record<string, unknown>,
+  transferDelta: BridgeTransferDelta,
+  detailDelta: WormholeDetailDelta,
 ): Promise<BridgeTransfer> {
   const id = buildTransferId(PROVIDER, digest);
   const priorTransfer =
@@ -237,7 +244,7 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
   // entirely — we'd rather have recoverable data with wrong symbol than
   // silent loss. Rollups (daily snapshot, bridger) are gated on mgr below so
   // they stay consistent with what the manifest knows.
-  const transferDelta: Record<string, unknown> = {
+  const transferDelta: BridgeTransferDelta = {
     sourceChainId: chainId,
     sourceContract: manager,
     sentBlock: BigInt(event.block.number),
@@ -249,7 +256,7 @@ WormholeNttManager.TransferSentDigest.handler(async ({ event, context }) => {
     transferDelta.tokenAddress = mgr.tokenAddress;
     transferDelta.tokenDecimals = mgr.tokenDecimals;
   }
-  const detailDelta: Record<string, unknown> = {};
+  const detailDelta: WormholeDetailDelta = {};
 
   if (pending) {
     const destChainId = wormholeToEvmChainId(pending.recipientWormholeChainId);
@@ -384,7 +391,7 @@ WormholeNttManager.TransferRedeemed.handler(async ({ event, context }) => {
     priorTransfer?.deliveredBlock != null &&
     priorTransfer.deliveredBlock !== 0n;
 
-  const delta: Record<string, unknown> = {
+  const delta: BridgeTransferDelta = {
     destChainId: chainId,
     destContract: manager,
     deliveredBlock: BigInt(event.block.number),
@@ -417,7 +424,7 @@ WormholeNttManager.TransferRedeemed.handler(async ({ event, context }) => {
   const destPending = priorDetail?.transceiverDigest
     ? undefined
     : await drainDestPending(context as HandlerContext, event);
-  const detailDelta: Record<string, unknown> = {};
+  const detailDelta: WormholeDetailDelta = {};
   applyDestPendingToDelta(destPending, priorTransfer, delta, detailDelta);
 
   const transfer = await upsertTransferByDigest(
@@ -457,8 +464,8 @@ type DestPendingRow = NonNullable<
 function applyDestPendingToDelta(
   destPending: DestPendingRow | undefined,
   prior: { sourceChainId?: number; sourceContract?: string } | undefined,
-  transferDelta: Record<string, unknown>,
-  detailDelta: Record<string, unknown>,
+  transferDelta: BridgeTransferDelta,
+  detailDelta: WormholeDetailDelta,
 ): void {
   if (!destPending) return;
   if (prior?.sourceChainId == null)
@@ -526,11 +533,7 @@ WormholeNttManager.MessageAttestedTo.handler(async ({ event, context }) => {
   // counter on BridgeTransfer would double-count. Probe first and skip the
   // counter bump when the attestation already exists.
   const existingAttestation = await (
-    context as unknown as {
-      BridgeAttestation: {
-        get: (id: string) => Promise<BridgeAttestation | undefined>;
-      };
-    }
+    context as HandlerContext
   ).BridgeAttestation.get(attestation.id);
   (context as HandlerContext).BridgeAttestation.set(attestation);
   if (existingAttestation) return;
@@ -541,7 +544,7 @@ WormholeNttManager.MessageAttestedTo.handler(async ({ event, context }) => {
   // destContract when they haven't been set yet. Without this, a transfer
   // stuck at ATTESTED (rate-limit queue, failed delivery) permanently has
   // destChainId=null and drops out of any chain-filtered UI/query.
-  const destDelta: Record<string, unknown> = {
+  const destDelta: BridgeTransferDelta = {
     attestationCount: count,
     firstAttestedTimestamp: prior?.firstAttestedTimestamp ?? ts,
     lastAttestedTimestamp: ts,
@@ -560,7 +563,7 @@ WormholeNttManager.MessageAttestedTo.handler(async ({ event, context }) => {
     event,
     p.transceiver,
   );
-  const detailDelta: Record<string, unknown> = {};
+  const detailDelta: WormholeDetailDelta = {};
   applyDestPendingToDelta(destPending, prior, destDelta, detailDelta);
 
   await upsertTransferByDigest(

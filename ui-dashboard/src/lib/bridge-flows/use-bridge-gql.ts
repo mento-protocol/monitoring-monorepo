@@ -1,6 +1,6 @@
 "use client";
 
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient, type Variables } from "graphql-request";
 import useSWR, { type SWRResponse } from "swr";
 
 /**
@@ -35,7 +35,7 @@ function getClient(): GraphQLClient | null {
 
 export function useBridgeGQL<T>(
   query: string | null,
-  variables?: Record<string, unknown>,
+  variables?: Variables,
   refreshInterval = 10_000,
 ): SWRResponse<T> {
   const client = getClient();
