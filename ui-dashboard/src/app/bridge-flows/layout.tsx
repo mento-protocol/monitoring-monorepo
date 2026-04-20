@@ -6,6 +6,13 @@ import {
 } from "@/lib/bridge-flows-og";
 import { formatUSD } from "@/lib/format";
 
+// Match the 60s cadence of the OG image route. Without segment revalidation,
+// /bridge-flows is otherwise treated as fully static (the page itself is a
+// client component with no server-side data fetches), so `generateMetadata`
+// would only re-run on deploys — leaving Slack/Twitter unfurls stale until
+// the next push.
+export const revalidate = 60;
+
 const STATIC_FALLBACK =
   "Wormhole bridge transfers of Mento stable tokens across Celo and Monad.";
 
