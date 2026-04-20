@@ -37,16 +37,18 @@ jobs:
       )
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Minimum permissions Claude needs to comment on PRs/issues and push branches.
-    # id-token is intentionally omitted: we authenticate to Anthropic via
-    # CLAUDE_CODE_OAUTH_TOKEN (direct API), not via Bedrock/Vertex/Foundry OIDC —
-    # so no workflow in this repo needs to mint OIDC tokens from this job.
-    # See https://github.com/anthropics/claude-code-action/blob/main/docs/cloud-providers.md
+    # id-token: write is required by anthropics/claude-code-action itself — the
+    # action exchanges a GitHub OIDC token for a short-lived GitHub App token via
+    # Anthropic's /github-app-token-exchange endpoint (see src/github/token.ts in
+    # the pinned action SHA). It is not related to Bedrock/Vertex/Foundry OIDC
+    # (CLAUDE_CODE_OAUTH_TOKEN handles the Anthropic API auth). To drop this
+    # permission, pass an explicit github_token input to the action instead.
     permissions:
       contents: write
       pull-requests: write
       issues: write
       actions: read
+      id-token: write
     steps:
       # Third-party actions are pinned to an immutable commit SHA (not a tag)
       # so upstream tag retargeting or a compromised release cannot silently run

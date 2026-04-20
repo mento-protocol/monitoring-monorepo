@@ -15,5 +15,4 @@ updates:
       prefix: ci
       include: scope
     labels:
-      - ci
       - dependencies
