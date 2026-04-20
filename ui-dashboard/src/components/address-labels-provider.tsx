@@ -78,6 +78,26 @@ function networkForChainId(chainId: number): Network | null {
   return id ? NETWORKS[id] : null;
 }
 
+/** Fallback for multichain addresses (e.g. CREATE2/CREATE3-deterministic
+ * bridge contracts, multichain operator EOAs) where the user only set the
+ * custom label on one chain. Look at every known chain's custom + static
+ * entries and return the first matching name. Per-chain lookups still take
+ * precedence — this only fires on miss. */
+function findNameAcrossChains(
+  lower: string,
+  entriesByChain: EntriesByChain,
+): string | null {
+  for (const [, chainEntries] of entriesByChain) {
+    const name = chainEntries[lower]?.name;
+    if (name) return name;
+  }
+  for (const net of Object.values(NETWORKS)) {
+    const name = net.addressLabels[lower];
+    if (name) return name;
+  }
+  return null;
+}
+
 export function AddressLabelsProvider({ children }: { children: ReactNode }) {
   const { network } = useNetwork();
   const { mutate } = useSWRConfig();
@@ -117,7 +137,11 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
       const customName = entriesByChain.get(cid)?.[lower]?.name;
       if (customName) return customName;
       const net = networkForChainId(cid) ?? network;
-      return net.addressLabels[lower] ?? truncateAddress(address);
+      const staticName = net.addressLabels[lower];
+      if (staticName) return staticName;
+      const crossChainName = findNameAcrossChains(lower, entriesByChain);
+      if (crossChainName) return crossChainName;
+      return truncateAddress(address);
     },
     [entriesByChain, network, defaultChainId],
   );
@@ -138,10 +162,11 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
       const cid = chainId ?? defaultChainId;
       const entry = entriesByChain.get(cid)?.[lower];
       const net = networkForChainId(cid) ?? network;
-      return (
-        (entry !== undefined && (entry.name !== "" || entry.tags.length > 0)) ||
-        lower in net.addressLabels
-      );
+      if (entry !== undefined && (entry.name !== "" || entry.tags.length > 0)) {
+        return true;
+      }
+      if (lower in net.addressLabels) return true;
+      return findNameAcrossChains(lower, entriesByChain) !== null;
     },
     [entriesByChain, network, defaultChainId],
   );
