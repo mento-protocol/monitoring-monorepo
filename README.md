@@ -50,8 +50,19 @@ Both Celo Mainnet (42220) and Monad Mainnet (143) are served from a single Envio
 
 ### Install
 
+For a fresh clone or worktree, prefer the setup script so workspace deps,
+postinstall hooks, and Envio codegen all run in one place:
+
+```bash
+./scripts/setup.sh
+```
+
+If you install manually, verify the dashboard can resolve its Sentry package
+after `pnpm install`:
+
 ```bash
 pnpm install
+pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentry/nextjs/package.json')"
 ```
 
 ### Run the Indexer (local)
