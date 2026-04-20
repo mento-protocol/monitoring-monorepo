@@ -114,14 +114,24 @@ function BridgeFlowsContent() {
   }, [networkData]);
 
   const allTransfers = transfersResult.data?.BridgeTransfer ?? [];
-  // Filter out actionless rows from the Recent Transfers table. These are
-  // dest-side artifacts (ReceivedMessage / MessageAttestedTo fired before
-  // source-side events arrived, or the source was never indexed) — no tx
-  // hash to link, no amount, no sender, nothing for the user to click. The
-  // "Pending" KPI still counts them; they just don't belong in the table.
-  const transfers = allTransfers.filter(
-    (t) => t.sentTxHash || t.deliveredTxHash || t.amount || t.sender,
-  );
+  // Hide "empty PENDING" rows from the Recent Transfers table — rows where
+  // `status=PENDING` AND we have no tx hash, no amount, no sender, no
+  // attestations. These are dest-side artifacts (ReceivedMessage fired on
+  // dest before source was indexed, or indexer manifest drift) with nothing
+  // for the user to click. Any row with a real status (SENT / ATTESTED /
+  // QUEUED_INBOUND / STUCK / DELIVERED / CANCELLED / FAILED) stays, even if
+  // some columns are still partial — those are legitimate in-flight transfers
+  // operators want to track. The "Pending" KPI still counts the hidden rows.
+  const transfers = allTransfers.filter((t) => {
+    if (t.status !== "PENDING") return true;
+    return (
+      !!t.sentTxHash ||
+      !!t.deliveredTxHash ||
+      !!t.amount ||
+      !!t.sender ||
+      t.attestationCount > 0
+    );
+  });
   const snapshots = snapshotsResult.data?.BridgeDailySnapshot ?? [];
   const snapshotsCapped = snapshots.length >= 1000;
   const topBridgers = topBridgersResult.data?.BridgeBridger ?? [];
