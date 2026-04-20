@@ -8,11 +8,6 @@ export const WORMHOLE_TO_EVM_CHAIN_ID: Record<number, number> = {
   // 5: 137, // Polygon (future)
 };
 
-export const EVM_TO_WORMHOLE_CHAIN_ID: Record<number, number> = {
-  42220: 14,
-  143: 48,
-};
-
 export function wormholeToEvmChainId(wormholeId: number): number | null {
   return WORMHOLE_TO_EVM_CHAIN_ID[wormholeId] ?? null;
 }

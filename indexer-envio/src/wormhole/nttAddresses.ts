@@ -30,24 +30,10 @@ function indexBy(
 const BY_MANAGER = indexBy(
   (e) => `${e.chainId}:${e.nttManagerProxy.toLowerCase()}`,
 );
-const BY_TRANSCEIVER = indexBy(
-  (e) => `${e.chainId}:${e.transceiverProxy.toLowerCase()}`,
-);
 
 export function findByNttManager(
   chainId: number,
   manager: string,
 ): NttAddressEntry | null {
   return BY_MANAGER.get(`${chainId}:${manager.toLowerCase()}`) ?? null;
-}
-
-export function findByTransceiver(
-  chainId: number,
-  transceiver: string,
-): NttAddressEntry | null {
-  return BY_TRANSCEIVER.get(`${chainId}:${transceiver.toLowerCase()}`) ?? null;
-}
-
-export function allEntries(): ReadonlyArray<NttAddressEntry> {
-  return ENTRIES;
 }

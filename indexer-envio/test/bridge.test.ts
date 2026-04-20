@@ -26,13 +26,11 @@ import { computeWormholeStatus } from "../src/wormhole/status";
 import {
   wormholeToEvmChainId,
   WORMHOLE_TO_EVM_CHAIN_ID,
-  EVM_TO_WORMHOLE_CHAIN_ID,
 } from "../src/wormhole/chainIds";
-import {
-  findByNttManager,
-  findByTransceiver,
-  allEntries,
-} from "../src/wormhole/nttAddresses";
+import { findByNttManager } from "../src/wormhole/nttAddresses";
+import nttAddresses from "../config/nttAddresses.json";
+
+const manifestEntries = nttAddresses.entries;
 
 describe("buildTransferId", () => {
   it("lowercases provider and message id and joins with a dash", () => {
@@ -330,45 +328,34 @@ describe("computeWormholeStatus — status machine", () => {
 });
 
 describe("wormhole/chainIds — EVM ↔ Wormhole mapping", () => {
-  it("maps Celo (14) ↔ 42220 and Monad (48) ↔ 143", () => {
+  it("maps Celo (14) → 42220 and Monad (48) → 143", () => {
     assert.equal(WORMHOLE_TO_EVM_CHAIN_ID[14], 42220);
     assert.equal(WORMHOLE_TO_EVM_CHAIN_ID[48], 143);
-    assert.equal(EVM_TO_WORMHOLE_CHAIN_ID[42220], 14);
-    assert.equal(EVM_TO_WORMHOLE_CHAIN_ID[143], 48);
   });
 
   it("wormholeToEvmChainId returns null for unknown ids (e.g. Solana = 1)", () => {
     assert.equal(wormholeToEvmChainId(1), null);
     assert.equal(wormholeToEvmChainId(999), null);
   });
-
-  it("round-trips every mapped pair", () => {
-    for (const [wh, evm] of Object.entries(WORMHOLE_TO_EVM_CHAIN_ID)) {
-      assert.equal(EVM_TO_WORMHOLE_CHAIN_ID[evm], Number(wh));
-    }
-  });
 });
 
 describe("wormhole/nttAddresses — manifest lookup", () => {
   it("ships at least one entry per mapped mainnet chain", () => {
-    const entries = allEntries();
-    assert.ok(entries.length > 0, "manifest must be non-empty");
-    const chainIds = new Set(entries.map((e) => e.chainId));
+    assert.ok(manifestEntries.length > 0, "manifest must be non-empty");
+    const chainIds = new Set(manifestEntries.map((e) => e.chainId));
     assert.ok(chainIds.has(42220), "Celo entries expected");
     assert.ok(chainIds.has(143), "Monad entries expected");
   });
 
   it("findByNttManager returns a matching entry for a real manager", () => {
-    const entries = allEntries();
-    const sample = entries[0];
+    const sample = manifestEntries[0];
     const hit = findByNttManager(sample.chainId, sample.nttManagerProxy);
     assert.ok(hit, "real (chainId, manager) must resolve");
     assert.equal(hit!.tokenSymbol, sample.tokenSymbol);
   });
 
   it("findByNttManager normalizes case and is null for unknowns", () => {
-    const entries = allEntries();
-    const sample = entries[0];
+    const sample = manifestEntries[0];
     const upper = sample.nttManagerProxy.toUpperCase();
     assert.ok(findByNttManager(sample.chainId, upper), "case-insensitive");
     assert.equal(
@@ -378,13 +365,5 @@ describe("wormhole/nttAddresses — manifest lookup", () => {
       ),
       null,
     );
-  });
-
-  it("findByTransceiver resolves the mirror entry", () => {
-    const entries = allEntries();
-    const sample = entries[0];
-    const hit = findByTransceiver(sample.chainId, sample.transceiverProxy);
-    assert.ok(hit);
-    assert.equal(hit!.nttManagerProxy, sample.nttManagerProxy);
   });
 });
