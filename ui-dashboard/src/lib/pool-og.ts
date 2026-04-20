@@ -401,8 +401,13 @@ function computeOracleFreshness(
   };
 }
 
+// 60s TTL — pool health can flip during an incident; a 1h cache meant a
+// link re-shared during rebalance showed stale "Critical" for an hour.
+// 60s gives fresh state on each new unfurl while still batching repeated
+// requests (generateMetadata + generateImageMetadata + Image within one
+// server request all dedupe here).
 const cachedFetch = unstable_cache(fetchPoolOgDataUncached, ["pool-og"], {
-  revalidate: 3600,
+  revalidate: 60,
   tags: ["pool-og"],
 });
 
