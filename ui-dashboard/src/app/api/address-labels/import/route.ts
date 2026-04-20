@@ -152,6 +152,28 @@ async function handleGnosisSafe(
     parsed.push({ chainId, address: entry.address, name: entry.name });
   }
 
+  // Strict either/or: reject if the same address appears on two different
+  // chains. Gnosis Safe exports of counterfactually-deployed Safes legitimately
+  // put the same address on every chain; without this check, sequential
+  // importLabels calls would HDEL each other and silently keep only the last
+  // chain's entry while reporting all as imported. Users who want such a Safe
+  // labelled everywhere should convert the entry to global scope before
+  // importing.
+  const chainByAddress = new Map<string, number>();
+  for (const { address, chainId } of parsed) {
+    const lower = address.toLowerCase();
+    const prior = chainByAddress.get(lower);
+    if (prior !== undefined && prior !== chainId) {
+      return NextResponse.json(
+        {
+          error: `Address ${address} appears in both chain ${prior} and chain ${chainId}; a label must be in exactly one scope. Convert same-address Safes to global scope before importing.`,
+        },
+        { status: 400 },
+      );
+    }
+    chainByAddress.set(lower, chainId);
+  }
+
   // Fetch existing labels for each distinct chainId so we can merge instead
   // of overwriting — preserves tags, notes, isPublic from prior entries.
   const existingByChain = new Map<number, Record<string, AddressEntry>>();
@@ -223,22 +245,30 @@ async function handleSnapshot(
     );
   }
 
-  // Strict either/or: an address must not appear in both global AND a chain.
-  // The alternative (silently letting the last write win) makes import order
-  // load-bearing, which is surprising and error-prone.
-  const globalAddresses = new Set(
-    Object.keys(globalEntries).map((a) => a.toLowerCase()),
-  );
+  // Strict either/or: an address must live in exactly one scope. Reject any
+  // snapshot where the same address appears in two or more scopes (global
+  // and a chain, or two different chains). Without this check, sequential
+  // `importLabels` calls would silently clobber each other via HDEL and the
+  // import result would depend on iteration order.
+  const scopeByAddress = new Map<string, Scope>();
+  for (const addr of Object.keys(globalEntries)) {
+    scopeByAddress.set(addr.toLowerCase(), "global");
+  }
   for (const [chainId, labels] of chainEntries) {
+    const cid = Number(chainId);
     for (const addr of Object.keys(labels as Record<string, unknown>)) {
-      if (globalAddresses.has(addr.toLowerCase())) {
+      const lower = addr.toLowerCase();
+      const prior = scopeByAddress.get(lower);
+      if (prior !== undefined && prior !== cid) {
+        const priorLabel = prior === "global" ? "global" : `chain ${prior}`;
         return NextResponse.json(
           {
-            error: `Address ${addr} appears in both global and chain ${chainId}; a label must be in exactly one scope`,
+            error: `Address ${addr} appears in both ${priorLabel} and chain ${chainId}; a label must be in exactly one scope`,
           },
           { status: 400 },
         );
       }
+      scopeByAddress.set(lower, cid);
     }
   }
 
@@ -399,6 +429,27 @@ async function handleCsvText(text: string): Promise<NextResponse> {
   const { rows, hasTagsColumn } = parsed;
   if (rows.length === 0) {
     return NextResponse.json({ ok: true, imported: emptyCounts() });
+  }
+
+  // Strict either/or: reject a CSV that puts the same address under two
+  // different scopes. Without this check, the later `importLabels(scope, …)`
+  // call would HDEL the address from the earlier scope and the first row
+  // would be silently lost.
+  const scopeByAddress = new Map<string, Scope>();
+  for (const { address, scope } of rows) {
+    const lower = address.toLowerCase();
+    const prior = scopeByAddress.get(lower);
+    if (prior !== undefined && prior !== scope) {
+      const priorLabel = prior === "global" ? "global" : `chain ${prior}`;
+      const scopeLabel = scope === "global" ? "global" : `chain ${scope}`;
+      return NextResponse.json(
+        {
+          error: `Address ${address} appears in both ${priorLabel} and ${scopeLabel}; a label must be in exactly one scope`,
+        },
+        { status: 400 },
+      );
+    }
+    scopeByAddress.set(lower, scope);
   }
 
   // Group rows by scope. Within a scope, last row wins for duplicate addresses.

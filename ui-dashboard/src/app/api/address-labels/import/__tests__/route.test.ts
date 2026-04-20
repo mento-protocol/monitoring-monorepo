@@ -298,6 +298,42 @@ describe("POST /api/address-labels/import", () => {
     expect(importLabels).not.toHaveBeenCalled();
   });
 
+  it("rejects snapshot when same address appears in two different chains", async () => {
+    // Strict either/or must cover chain-vs-chain overlap too, not just
+    // global-vs-chain. Without this, sequential importLabels calls silently
+    // clobber each other via HDEL and the import result depends on iteration
+    // order.
+    const snapshot = {
+      exportedAt: "2026-01-01T00:00:00Z",
+      chains: {
+        "42220": {
+          [validAddress]: {
+            name: "Celo",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+        "143": {
+          [validAddress]: {
+            name: "Monad",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+      },
+    };
+    const res = await POST(jsonReq(snapshot));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    // Object key iteration order is numeric-first in V8, so the rejection
+    // message pairs either chain first; accept both orderings.
+    expect(body.error).toMatch(/chain 42220|chain 143/);
+    expect(body.error).toMatch(
+      /appears in both chain (42220|143) and chain (42220|143)/,
+    );
+    expect(importLabels).not.toHaveBeenCalled();
+  });
+
   it("snapshot without `global` imports chains only (back-compat)", async () => {
     const snapshot = {
       exportedAt: "2026-01-01T00:00:00Z",
@@ -562,6 +598,29 @@ describe("POST /api/address-labels/import", () => {
       expect(body.status).toBe(400);
       const json = (await body.json()) as { error: string };
       expect(json.error).toMatch(/chainId/i);
+    });
+
+    it("rejects CSV when same address appears in two different scopes", async () => {
+      // Strict either/or: without this check, the later importLabels call
+      // HDELs the address from the earlier scope and the first row is
+      // silently lost.
+      const csv = `address,name,tags,chainId\n${validAddress},Global,,\n${validAddress},Celo,,42220`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(400);
+      const json = (await body.json()) as { error: string };
+      expect(json.error).toMatch(/appears in both global and chain 42220/i);
+      expect(importLabels).not.toHaveBeenCalled();
+    });
+
+    it("rejects CSV when same address appears in two different chains", async () => {
+      const csv = `address,name,tags,chainId\n${validAddress},Celo,,42220\n${validAddress},Monad,,143`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(400);
+      const json = (await body.json()) as { error: string };
+      expect(json.error).toMatch(/appears in both chain 42220 and chain 143/i);
+      expect(importLabels).not.toHaveBeenCalled();
     });
 
     it("imports CSV with tags column (routes to global)", async () => {
@@ -852,6 +911,22 @@ describe("POST /api/address-labels/import", () => {
       const counts = await getImported(res);
       expect(totalImported(counts)).toBe(2);
       expect(counts.chains).toEqual({ "42220": 1, "1": 1 });
+    });
+
+    it("rejects Gnosis Safe when same address appears on multiple chains", async () => {
+      // Counterfactually-deployed Safes share the same address across every
+      // chain — strict either/or can't represent that. Without this check,
+      // sequential importLabels would HDEL each other and silently drop all
+      // but the last chain's entry.
+      const gnosisSafe = [
+        { address: validAddress, chainId: "42220", name: "Celo Safe" },
+        { address: validAddress, chainId: "1", name: "Mainnet Safe" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toMatch(/appears in both chain 42220 and chain 1/i);
+      expect(importLabels).not.toHaveBeenCalled();
     });
 
     it("deduplicates mixed-case duplicate addresses when reporting imported count", async () => {

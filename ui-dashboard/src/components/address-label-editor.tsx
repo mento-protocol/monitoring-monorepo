@@ -207,8 +207,22 @@ export function AddressLabelEditor({
   }
 
   const hasExistingCustomEntry = initial !== undefined && !isContractRow;
-  const scopeWillChange =
-    hasExistingCustomEntry && selectedScope !== startingScope;
+
+  // Every existing custom entry for this address at a scope != the one the
+  // user picked. The server's strict either/or invariant will HDEL each of
+  // these on save, so we warn explicitly — critical for the "editing a
+  // contract row on chain Y when a custom label already exists on chain X"
+  // path where the editor would otherwise give no hint of cross-scope impact.
+  const willRemoveScopes: Scope[] =
+    address.trim() === ""
+      ? []
+      : customEntries
+          .filter(
+            (e) =>
+              e.address.toLowerCase() === address.toLowerCase() &&
+              e.scope !== selectedScope,
+          )
+          .map((e) => e.scope);
 
   const perChainLabel =
     (networkIdForChainId(effectiveChainId)
@@ -300,11 +314,11 @@ export function AddressLabelEditor({
                 <span>Only on {perChainLabel}</span>
               </label>
             </div>
-            {scopeWillChange && (
+            {willRemoveScopes.length > 0 && (
               <p className="mt-2 text-xs text-amber-400">
-                Moving this label from &quot;{scopeLabel(startingScope)}&quot;
-                to &quot;{scopeLabel(selectedScope)}&quot;. The old entry will
-                be removed.
+                Saving will remove this address&apos;s existing label
+                {willRemoveScopes.length > 1 ? "s" : ""} on:{" "}
+                {willRemoveScopes.map(scopeLabel).join(", ")}.
               </p>
             )}
           </div>
