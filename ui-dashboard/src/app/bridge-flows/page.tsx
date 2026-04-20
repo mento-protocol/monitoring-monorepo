@@ -135,15 +135,14 @@ function BridgeFlowsContent() {
   const { avgSec: avgTimeToDeliverSec, sampleSize: avgSampleSize } =
     computeAvgDeliverTime(transfers);
 
+  // Aggregate only for the top-of-page ErrorBox banner — each KPI tile +
+  // chart + table below gates on its own backing query's error so a partial
+  // failure doesn't mask valid data from the other queries.
   const error =
     transfersResult.error?.message ??
     snapshotsResult.error?.message ??
     pendingResult.error?.message ??
     null;
-  const loading =
-    transfersResult.isLoading ||
-    snapshotsResult.isLoading ||
-    pendingResult.isLoading;
   const snapshotsError = !!snapshotsResult.error;
   const topBridgersError = !!topBridgersResult.error;
 
@@ -188,19 +187,19 @@ function BridgeFlowsContent() {
       >
         <BreakdownTile
           label="Total Bridge Transfers"
-          total={error ? null : transferTotals.total}
+          total={snapshotsResult.error ? null : transferTotals.total}
           sub24h={transferTotals.sub24h}
           sub7d={transferTotals.sub7d}
           sub30d={transferTotals.sub30d}
-          isLoading={loading && snapshots.length === 0}
-          hasError={!!error}
+          isLoading={snapshotsResult.isLoading && snapshots.length === 0}
+          hasError={!!snapshotsResult.error}
           format={(n) => n.toLocaleString()}
           subtitle={snapshotsCapped ? "Partial — snapshot cap hit" : undefined}
         />
         <Tile
           label="Pending"
           value={
-            error
+            pendingResult.error
               ? "—"
               : pendingCount === null
                 ? "…"
@@ -209,7 +208,7 @@ function BridgeFlowsContent() {
                   : pendingCount.toLocaleString()
           }
           subtitle={
-            !error && pendingCount !== null && pendingCount > 0
+            !pendingResult.error && pendingCount !== null && pendingCount > 0
               ? "In-flight or attested, awaiting delivery"
               : undefined
           }
@@ -217,12 +216,12 @@ function BridgeFlowsContent() {
         <Tile
           label="Avg deliver time"
           value={
-            error || avgTimeToDeliverSec === null
+            transfersResult.error || avgTimeToDeliverSec === null
               ? "—"
               : formatDurationShort(avgTimeToDeliverSec)
           }
           subtitle={
-            error || avgTimeToDeliverSec === null
+            transfersResult.error || avgTimeToDeliverSec === null
               ? undefined
               : `over ${avgSampleSize} recent transfers`
           }
