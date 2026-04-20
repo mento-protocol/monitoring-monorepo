@@ -79,7 +79,7 @@ export function buildCountSeries(
     .map(([timestamp, value]) => ({ timestamp, value }));
 }
 
-export type WindowTotals = {
+type WindowTotals = {
   total: number | null;
   sub24h: number;
   sub7d: number;
@@ -136,7 +136,7 @@ export function weekOverWeekChange(
   return ((thisWeek - lastWeek) / lastWeek) * 100;
 }
 
-export type TokenSlice = { symbol: string; usd: number };
+type TokenSlice = { symbol: string; usd: number };
 
 /**
  * Sum per-token USD volume over a window (default: last 30 days).

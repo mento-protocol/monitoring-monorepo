@@ -33,7 +33,7 @@ export function SortableTh<K extends string>({
     >
       <button
         type="button"
-        className={`flex items-center gap-1 cursor-pointer select-none hover:text-slate-200 bg-transparent border-0 p-0 font-medium text-xs sm:text-sm text-slate-400 hover:text-slate-200 ${buttonAlign}`}
+        className={`flex items-center gap-1 cursor-pointer select-none bg-transparent border-0 p-0 font-medium text-xs sm:text-sm text-slate-400 hover:text-slate-200 ${buttonAlign}`}
         onClick={() => onSort(sortKey)}
       >
         {children}

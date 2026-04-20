@@ -47,25 +47,6 @@ export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
   }
 `;
 
-// 30d transfer count: aggregates are disabled on Envio hosted Hasura, so we
-// sum BridgeDailySnapshot.sentCount across the window instead. Cheap,
-// indexer-pre-rolled, and caps at 1000 snapshot rows (days × providers ×
-// tokens × routes) which is orders of magnitude under the row limit for any
-// realistic window. Deterministic `order_by` so if the cap is ever hit the
-// missing rows are the oldest ones, not an arbitrary slice — matches how
-// pool snapshot pagination handles the same issue elsewhere in the app.
-export const BRIDGE_TRANSFER_COUNT_SNAPSHOTS = /* GraphQL */ `
-  query BridgeTransferCountSnapshots($afterDate: numeric!) {
-    BridgeDailySnapshot(
-      where: { date: { _gte: $afterDate } }
-      order_by: { date: desc, id: asc }
-      limit: 1000
-    ) {
-      sentCount
-    }
-  }
-`;
-
 // Pending transfers: anything not yet delivered (and not terminally
 // cancelled/failed). Includes:
 //   PENDING         — destination-first race; digest known, source not yet

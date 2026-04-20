@@ -8,6 +8,7 @@ import {
   BRIDGE_PENDING_IDS,
   BRIDGE_TOP_BRIDGERS,
 } from "@/lib/bridge-queries";
+import { TOP_BRIDGERS_EXPANDED } from "@/lib/bridge-flows/layout";
 import {
   deriveBridgeStatus,
   computeAvgDeliverTime,
@@ -97,7 +98,7 @@ function BridgeFlowsContent() {
   // Top bridgers for the leaderboard chart. 25 is the expanded-view cap.
   const topBridgersResult = useBridgeGQL<{ BridgeBridger: BridgeBridger[] }>(
     BRIDGE_TOP_BRIDGERS,
-    { limit: 25 },
+    { limit: TOP_BRIDGERS_EXPANDED },
   );
 
   // Oracle rate map for USD conversion. `useAllNetworksData` is cache-shared
