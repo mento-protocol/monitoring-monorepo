@@ -314,6 +314,47 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result!.healthReasons).toContain("trading limits breached");
   });
 
+  it("uses 'rebalance in flight' (not 'breach') when grace window applies", async () => {
+    // A deviation breach that was very recently rebalanced is transient —
+    // computeHealthStatus softens the *status* to WARN, so the *reason*
+    // must match or the tile contradicts itself.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const detailPool = makeDetailPool({
+      priceDifference: "15000", // 1.5x threshold → > 1.0
+      rebalanceThreshold: 10000,
+      lastRebalancedAt: String(nowSec - 1800), // 30m ago → within 1h grace
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.health).toBe("WARN");
+    expect(result!.healthReasons).toContain("rebalance in flight");
+    expect(result!.healthReasons).not.toContain("price deviation breach");
+  });
+
+  it("orders healthReasons by severity (worst first)", async () => {
+    // Limit CRITICAL + deviation WARN: the subline pulls reasons[0], so
+    // highest-severity reason must be first or it will misstate the pool.
+    const detailPool = makeDetailPool({
+      priceDifference: "8500", // 0.85x threshold → WARN
+      rebalanceThreshold: 10000,
+      limitStatus: "CRITICAL",
+      limitPressure0: "1.1", // ≥ 1.0 → CRITICAL
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.health).toBe("CRITICAL");
+    expect(result!.healthReasons[0]).toBe("trading limits breached");
+    expect(result!.healthReasons).toContain("price deviation rising");
+  });
+
   it("explains a WARN health as 'price deviation rising' when applicable", async () => {
     // Oracle fresh, deviation at 85% of threshold — healthy oracle, rising
     // price. computeHealthStatus → WARN; reason should surface via

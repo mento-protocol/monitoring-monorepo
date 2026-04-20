@@ -14,10 +14,10 @@ import {
 } from "@/lib/tokens";
 import {
   computeEffectiveStatus,
+  DEVIATION_BREACH_GRACE_SECONDS,
   isOracleFresh,
   type HealthStatus,
 } from "@/lib/health";
-import { isWeekend } from "@/lib/weekend";
 import { ALL_POOLS_WITH_HEALTH, POOL_DETAIL_WITH_HEALTH } from "@/lib/queries";
 import { parseWei } from "@/lib/format";
 import type { Pool, PoolSnapshot } from "@/lib/types";
@@ -213,35 +213,60 @@ function computeVolumeSeries(
   });
 }
 
+// Severity ranks for reason sorting — mirrors STATUS_RANK in health.ts
+// (WARN=2, CRITICAL=4). Reasons are emitted worst-first so the tile
+// subline's first entry matches the dominant effective status.
+const REASON_WARN = 2;
+const REASON_CRITICAL = 4;
+
 /** Enumerate the specific sub-issues driving a pool's effective health.
- * Returns [] for healthy pools and WEEKEND (where the "reason" is the
- * status itself — markets closed). Each reason is a short lowercase
- * phrase suitable for display in meta descriptions and card sublines. */
+ * Returns [] for healthy / virtual / WEEKEND pools (the "Markets closed"
+ * label is already the full story — stacking reasons contradicts it).
+ * Each reason is a short lowercase phrase suitable for display in meta
+ * descriptions and card sublines, sorted by severity descending. */
 function computeHealthReasons(pool: Pool, chainId: number): string[] {
   if (pool.source?.includes("virtual")) return [];
-  const reasons: string[] = [];
+  if (computeEffectiveStatus(pool, chainId) === "WEEKEND") return [];
+
+  const items: { text: string; severity: number }[] = [];
   const now = Math.floor(Date.now() / 1000);
 
   if (!isOracleFresh(pool, now, chainId)) {
-    // WEEKEND staleness is expected (FX markets closed) — surfaced via
-    // the "Markets closed" label, not as a reason line.
-    if (!isWeekend()) reasons.push("oracle stale");
+    // WEEKEND case already short-circuited above.
+    items.push({ text: "oracle stale", severity: REASON_CRITICAL });
   } else {
     const diff = Number(pool.priceDifference ?? "0");
     const threshold =
       (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
     const devRatio = diff / threshold;
-    if (devRatio > 1.0) reasons.push("price deviation breach");
-    else if (devRatio >= 0.8) reasons.push("price deviation rising");
+    if (devRatio > 1.0) {
+      // Mirror computeHealthStatus: a fresh rebalance within the grace
+      // window keeps the *status* at WARN, so the *reason* shouldn't
+      // imply CRITICAL either — a rebalance is in flight.
+      const lastRebalancedAt = Number(pool.lastRebalancedAt ?? "0");
+      const rebalanceInFlight =
+        lastRebalancedAt > 0 &&
+        now - lastRebalancedAt < DEVIATION_BREACH_GRACE_SECONDS;
+      items.push(
+        rebalanceInFlight
+          ? { text: "rebalance in flight", severity: REASON_WARN }
+          : { text: "price deviation breach", severity: REASON_CRITICAL },
+      );
+    } else if (devRatio >= 0.8) {
+      items.push({ text: "price deviation rising", severity: REASON_WARN });
+    }
   }
 
   const p0 = Number(pool.limitPressure0 ?? "0");
   const p1 = Number(pool.limitPressure1 ?? "0");
   const maxPressure = Math.max(p0, p1);
-  if (maxPressure >= 1.0) reasons.push("trading limits breached");
-  else if (maxPressure >= 0.8) reasons.push("trading limits near cap");
+  if (maxPressure >= 1.0) {
+    items.push({ text: "trading limits breached", severity: REASON_CRITICAL });
+  } else if (maxPressure >= 0.8) {
+    items.push({ text: "trading limits near cap", severity: REASON_WARN });
+  }
 
-  return reasons;
+  return items.sort((a, b) => b.severity - a.severity).map((r) => r.text);
 }
 
 function computeVolume7d(
