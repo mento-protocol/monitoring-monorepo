@@ -275,6 +275,15 @@ export function networkIdForChainId(chainId: number): IndexerNetworkId | null {
   return PROD_NETWORK_BY_CHAIN_ID[chainId] ?? null;
 }
 
+/** Canonical Network for a chainId, or null if the chain isn't configured. */
+export function networkForChainId(
+  chainId: number | null | undefined,
+): Network | null {
+  if (chainId == null) return null;
+  const id = networkIdForChainId(chainId);
+  return id ? NETWORKS[id] : null;
+}
+
 // True when `networkId` is the canonical variant for its chainId. Used by
 // link builders to decide whether ?network= can be omitted.
 export function isCanonicalNetwork(networkId: IndexerNetworkId): boolean {

@@ -17,40 +17,33 @@ import { BridgeProviderBadge } from "@/components/bridge-provider-badge";
 import { ChainIcon } from "@/components/chain-icon";
 import { Tile, Skeleton, ErrorBox, EmptyBox } from "@/components/feedback";
 import { Table, Th } from "@/components/table";
+import { SortableTh } from "@/components/sortable-th";
 import { AddressLink } from "@/components/address-link";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import {
   formatWei,
   formatUSD,
-  parseWei,
   relativeTime,
   truncateAddress,
 } from "@/lib/format";
-import { NETWORKS, networkIdForChainId } from "@/lib/networks";
-import type { Network } from "@/lib/networks";
+import { networkForChainId } from "@/lib/networks";
 import {
   explorerAddressUrl,
   explorerTxUrl,
-  tokenToUSD,
   type OracleRateMap,
 } from "@/lib/tokens";
-import type { BridgeProvider } from "@/lib/types";
-import type { SortDir } from "@/lib/table-sort";
-import type { BridgeTransfer } from "@/lib/types";
+import { sortTransfers, type BridgeSortKey } from "@/lib/bridge-flows/sort";
+import {
+  transferAmountTokens,
+  transferAmountUsd,
+  usdPricedFromLiveRate,
+} from "@/lib/bridge-flows/pricing";
+import { wormholescanUrl } from "@/lib/wormhole/urls";
+import type { BridgeProvider, BridgeTransfer } from "@/lib/types";
 
 const PAGE_LIMIT = 25;
 const THIRTY_DAYS_SECONDS = 30 * 24 * 60 * 60;
-
-type SortKey =
-  | "provider"
-  | "route"
-  | "status"
-  | "token"
-  | "amount"
-  | "amountUsd"
-  | "sender"
-  | "receiver"
-  | "age";
+const SECONDS_PER_DAY = 86_400;
 
 export default function BridgeFlowsPage() {
   return (
@@ -61,13 +54,10 @@ export default function BridgeFlowsPage() {
 }
 
 function BridgeFlowsContent() {
-  // Single cutoff for both queries so the tile and the table cover the
-  // same window. BridgeDailySnapshot.date is UTC-day-bucketed, so we floor
-  // "now - 30d" to the day start — otherwise the snapshot straddling the
-  // cutoff would be dropped. `BridgeTransfer.firstSeenAt` uses the same
-  // floored cutoff so the table + count agree on the window (accepting a
-  // partial-day widening of up to 24h, clearly labelled in the tile).
-  const SECONDS_PER_DAY = 86400;
+  // Floor "now - 30d" to UTC day start — BridgeDailySnapshot.date is day-
+  // bucketed, so a non-aligned cutoff drops the snapshot straddling the
+  // boundary. Both the count tile and the transfers window use the same
+  // cutoff so tile + table agree on coverage.
   const nowSeconds = Math.floor(Date.now() / 1000);
   const afterDayBucket =
     nowSeconds -
@@ -79,25 +69,20 @@ function BridgeFlowsContent() {
     { limit: PAGE_LIMIT, offset: 0, after: afterDayBucket },
   );
 
-  // Bridge count via snapshot sum — aggregates are disabled on Envio hosted
-  // Hasura, so we can't `BridgeTransfer_aggregate`. BridgeDailySnapshot is
-  // pre-rolled in the indexer and fits easily under the 1000-row cap.
+  // Aggregates are disabled on hosted Hasura — sum pre-rolled
+  // BridgeDailySnapshot.sentCount instead.
   const countResult = useGQL<{
     BridgeDailySnapshot: Array<{ sentCount: number }>;
-  }>(BRIDGE_TRANSFER_COUNT_SNAPSHOTS, {
-    afterDate: afterDayBucket,
-  });
+  }>(BRIDGE_TRANSFER_COUNT_SNAPSHOTS, { afterDate: afterDayBucket });
 
-  // Pending: paginate IDs and count client-side (capped at 1000 by the query).
-  // A count of 1000 is a wire signal of pagination cap — surface as "1,000+".
+  // Pending: paginate IDs, count client-side (capped at 1000). A count of
+  // 1000 is a wire signal of pagination cap — surface as "1,000+".
   const pendingResult = useGQL<{ BridgeTransfer: Array<{ id: string }> }>(
     BRIDGE_PENDING_IDS,
   );
 
-  // Oracle rate map for USD conversion — bridged tokens (USDm/GBPm/EURm/…)
-  // are priced via pool oracles already loaded for pools/revenue pages, so
-  // SWR-caches across navigation. Merge rates across all networks so a
-  // Monad-originated transfer can price through Celo oracles if needed.
+  // Oracle rate map for USD conversion. `useAllNetworksData` is cache-shared
+  // with pools/revenue via SWR, so cross-page navigation reuses the fetch.
   const { networkData } = useAllNetworksData();
   const rates = useMemo<OracleRateMap>(() => {
     const merged = new Map<string, number>();
@@ -120,10 +105,9 @@ function BridgeFlowsContent() {
     pendingRows === null ? null : pendingRows >= 1000 ? 1000 : pendingRows;
   const pendingCapped = pendingRows !== null && pendingRows >= 1000;
 
-  // KPIs scoped to the current table page (25 rows). Aggregates across the
-  // full 30-day window (unique-sender count, avg deliver time) would require
-  // bespoke Hasura queries not supported on the free tier — deferred, and
-  // the subtitles make the scope explicit.
+  // KPIs scoped to the current 25-row table page. Cross-window aggregates
+  // (unique senders, avg deliver time) aren't supported on hosted Hasura —
+  // deferred; subtitles make scope explicit.
   const { avgSec: avgTimeToDeliverSec, sampleSize: avgSampleSize } =
     computeAvgDeliverTime(transfers);
 
@@ -155,12 +139,6 @@ function BridgeFlowsContent() {
 
       {error && <ErrorBox message={error} />}
 
-      {/*
-       * When any query errored, render KPIs + table as empty placeholders
-       * ("—") so a user doesn't mistake the error banner for "no activity".
-       * The 4 tile values shown in the error branch are not data — they are
-       * the universal unavailable sentinel.
-       */}
       <section
         aria-label="Key metrics"
         className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
@@ -221,8 +199,6 @@ function BridgeFlowsContent() {
           Recent transfers
         </h2>
         {error ? (
-          // Don't claim "no transfers" when we simply couldn't fetch them.
-          // The ErrorBox above carries the actual message.
           <EmptyBox message="Unable to load transfers — see error above." />
         ) : loading && transfers.length === 0 ? (
           <Skeleton rows={5} />
@@ -236,108 +212,6 @@ function BridgeFlowsContent() {
   );
 }
 
-function transferAmountTokens(t: BridgeTransfer): number | null {
-  if (!t.amount) return null;
-  return parseWei(t.amount, t.tokenDecimals ?? 18);
-}
-
-function transferAmountUsd(
-  t: BridgeTransfer,
-  rates: OracleRateMap,
-): number | null {
-  // Server-side usdValueAtSend is authoritative when the indexer has computed
-  // it. Falls back to live oracle rates — loses the "at send" precision but
-  // better than a blank cell for transfers pre-dating the USD-at-ingest work.
-  if (t.usdValueAtSend) {
-    const n = Number(t.usdValueAtSend);
-    if (Number.isFinite(n)) return n;
-  }
-  const amt = transferAmountTokens(t);
-  if (amt === null) return null;
-  return tokenToUSD(t.tokenSymbol, amt, rates);
-}
-
-function routeLabel(t: BridgeTransfer): string {
-  // Lexical sort key: "{src}-{dst}" with unknown chains sinking to the end.
-  const src = t.sourceChainId ?? 99999;
-  const dst = t.destChainId ?? 99999;
-  return `${src}-${dst}`;
-}
-
-function compareNullable<T>(
-  a: T | null | undefined,
-  b: T | null | undefined,
-  cmp: (x: T, y: T) => number,
-  dir: SortDir,
-): number {
-  const aMissing = a == null;
-  const bMissing = b == null;
-  if (aMissing && bMissing) return 0;
-  if (aMissing) return 1; // nulls always sink
-  if (bMissing) return -1;
-  const r = cmp(a, b);
-  return dir === "asc" ? r : -r;
-}
-
-function sortTransfers(
-  transfers: BridgeTransfer[],
-  sortKey: SortKey,
-  sortDir: SortDir,
-  rates: OracleRateMap,
-): BridgeTransfer[] {
-  const sign = sortDir === "asc" ? 1 : -1;
-  return [...transfers].sort((a, b) => {
-    switch (sortKey) {
-      case "provider":
-        return sign * a.provider.localeCompare(b.provider);
-      case "route":
-        return sign * routeLabel(a).localeCompare(routeLabel(b));
-      case "status":
-        return (
-          sign * deriveBridgeStatus(a).localeCompare(deriveBridgeStatus(b))
-        );
-      case "token":
-        return sign * (a.tokenSymbol ?? "").localeCompare(b.tokenSymbol ?? "");
-      case "amount":
-        return compareNullable(
-          transferAmountTokens(a),
-          transferAmountTokens(b),
-          (x, y) => x - y,
-          sortDir,
-        );
-      case "amountUsd":
-        return compareNullable(
-          transferAmountUsd(a, rates),
-          transferAmountUsd(b, rates),
-          (x, y) => x - y,
-          sortDir,
-        );
-      case "sender":
-        return (
-          sign *
-          (a.sender ?? "")
-            .toLowerCase()
-            .localeCompare((b.sender ?? "").toLowerCase())
-        );
-      case "receiver":
-        return (
-          sign *
-          (a.recipient ?? "")
-            .toLowerCase()
-            .localeCompare((b.recipient ?? "").toLowerCase())
-        );
-      case "age": {
-        // "Age desc" is user-facing shorthand for "newest first" — the column
-        // shows how long ago, but the underlying sort is on timestamp. desc
-        // (default) = biggest timestamp first = newest on top.
-        const at = Number(a.sentTimestamp ?? a.firstSeenAt ?? 0);
-        const bt = Number(b.sentTimestamp ?? b.firstSeenAt ?? 0);
-        return sortDir === "desc" ? bt - at : at - bt;
-      }
-    }
-  });
-}
-
 function TransfersTable({
   transfers,
   rates,
@@ -345,10 +219,10 @@ function TransfersTable({
   transfers: BridgeTransfer[];
   rates: OracleRateMap;
 }) {
-  const [sortKey, setSortKey] = useState<SortKey>("age");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [sortKey, setSortKey] = useState<BridgeSortKey>("time");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  const handleSort = (key: SortKey) => {
+  const handleSort = (key: BridgeSortKey) => {
     if (key === sortKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
@@ -434,7 +308,7 @@ function TransfersTable({
           </SortableTh>
           <Th>Txs</Th>
           <SortableTh
-            sortKey="age"
+            sortKey="time"
             activeSortKey={sortKey}
             sortDir={sortDir}
             onSort={handleSort}
@@ -449,13 +323,7 @@ function TransfersTable({
           const status = deriveBridgeStatus(t);
           const amountTokens = transferAmountTokens(t);
           const usd = transferAmountUsd(t, rates);
-          // A tilde prefix signals "priced at read time from current oracle",
-          // as opposed to the indexer-pinned "at send" value. Once the indexer
-          // backfills usdValueAtSend for all rows, this branch rarely fires.
-          const usdFromLiveRate = usd !== null && !t.usdValueAtSend;
-          // Flag cross-wallet bridges (sender ≠ receiver). Self-bridges are
-          // common and unremarkable; cross-wallet ones are more interesting
-          // (third-party flows, contract sinks) — worth visually popping.
+          const usdFromLive = usd !== null && usdPricedFromLiveRate(t);
           const sameParties =
             !!t.sender &&
             !!t.recipient &&
@@ -487,14 +355,14 @@ function TransfersTable({
               <td
                 className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right"
                 title={
-                  usdFromLiveRate
-                    ? "USD priced at render time via current oracle rate (indexer has no at-send USD for this transfer)"
+                  usdFromLive
+                    ? "USD priced at render time from current oracle rate"
                     : undefined
                 }
               >
                 {usd === null
                   ? "—"
-                  : `${usdFromLiveRate ? "~" : ""}${formatUSD(usd)}`}
+                  : `${usdFromLive ? "~" : ""}${formatUSD(usd)}`}
               </td>
               <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
                 {amountTokens !== null
@@ -533,57 +401,6 @@ function TransfersTable({
   );
 }
 
-interface SortableThProps {
-  sortKey: SortKey;
-  activeSortKey: SortKey;
-  sortDir: SortDir;
-  onSort: (key: SortKey) => void;
-  align?: "left" | "right";
-  children: React.ReactNode;
-}
-
-function SortableTh({
-  sortKey,
-  activeSortKey,
-  sortDir,
-  onSort,
-  align = "left",
-  children,
-}: SortableThProps) {
-  const isActive = sortKey === activeSortKey;
-  const alignClass = align === "right" ? "text-right" : "text-left";
-  const buttonAlign = align === "right" ? "justify-end" : "";
-  return (
-    <th
-      scope="col"
-      aria-sort={
-        isActive ? (sortDir === "asc" ? "ascending" : "descending") : "none"
-      }
-      className={`px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 ${alignClass} whitespace-nowrap`}
-    >
-      <button
-        type="button"
-        className={`flex items-center gap-1 cursor-pointer select-none hover:text-slate-200 bg-transparent border-0 p-0 font-medium text-xs sm:text-sm text-slate-400 hover:text-slate-200 ${buttonAlign} ${align === "right" ? "ml-auto" : ""}`}
-        onClick={() => onSort(sortKey)}
-      >
-        {children}
-        {isActive ? (
-          <span className="text-indigo-400">
-            {sortDir === "asc" ? "↑" : "↓"}
-          </span>
-        ) : (
-          <span
-            className="text-slate-600 text-[1.1em] leading-none"
-            style={{ fontVariantEmoji: "text" }}
-          >
-            ↕
-          </span>
-        )}
-      </button>
-    </th>
-  );
-}
-
 function RouteCell({
   sourceChainId,
   destChainId,
@@ -591,12 +408,8 @@ function RouteCell({
   sourceChainId: number | null;
   destChainId: number | null;
 }) {
-  const src = sourceChainId
-    ? NETWORKS[networkIdForChainId(sourceChainId) ?? "celo-mainnet"]
-    : null;
-  const dst = destChainId
-    ? NETWORKS[networkIdForChainId(destChainId) ?? "celo-mainnet"]
-    : null;
+  const src = networkForChainId(sourceChainId);
+  const dst = networkForChainId(destChainId);
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-slate-300">
       {src ? <ChainIcon network={src} size={14} /> : <Dash />}
@@ -608,20 +421,6 @@ function RouteCell({
 
 function Dash() {
   return <span className="text-slate-600">{"\u2014"}</span>;
-}
-
-// Wormholescan is the canonical cross-chain trace UI for a Wormhole transfer —
-// takes either the digest (`providerMessageId`) or a source-chain tx hash.
-// Using digest is provider-stable: it resolves even when the source tx hasn't
-// been indexed by Wormholescan yet.
-function wormholescanUrl(digest: string): string {
-  return `https://wormholescan.io/#/tx/${digest}`;
-}
-
-function networkForChainId(chainId: number | null): Network | null {
-  if (!chainId) return null;
-  const id = networkIdForChainId(chainId);
-  return id ? NETWORKS[id] : null;
 }
 
 function TxPill({
@@ -681,14 +480,13 @@ function TxLinks({
       title: `Destination tx on ${dst.label}`,
     });
   }
-  if (provider === "WORMHOLE" && providerMessageId) {
+  if (provider === "WORMHOLE") {
     pills.push({
       href: wormholescanUrl(providerMessageId),
       label: "wh",
       title: "End-to-end trace on Wormholescan",
     });
   }
-  if (pills.length === 0) return <Dash />;
   return (
     <span className="inline-flex items-center gap-1">
       {pills.map((p) => (
@@ -707,11 +505,7 @@ function TokenCell({
   address: string;
   chainId: number | null;
 }) {
-  // Prefer the source chain; fall back to dest when source is missing (the
-  // destination-first race before the source TransferSent is indexed).
-  const net = chainId
-    ? NETWORKS[networkIdForChainId(chainId) ?? "celo-mainnet"]
-    : null;
+  const net = networkForChainId(chainId);
   if (
     !net ||
     !address ||
