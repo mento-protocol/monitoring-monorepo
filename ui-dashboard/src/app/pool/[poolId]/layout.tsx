@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { fetchPoolForMetadata, type PoolOgData } from "@/lib/pool-og";
 import { formatUSD } from "@/lib/format";
 
-export const revalidate = 3600;
+// 60s — incident-time state flips should propagate in minutes, not hours.
+export const revalidate = 60;
 
 const FALLBACK_TITLE = "Pool — Mento Analytics";
 const FALLBACK_DESCRIPTION = "Mento protocol pool analytics";

@@ -1,7 +1,7 @@
 import { unstable_cache } from "next/cache";
-import { GraphQLClient } from "graphql-request";
 import { isNamespacedPoolId, extractChainIdFromPoolId } from "@/lib/pool-id";
 import { NETWORKS, networkIdForChainId, type Network } from "@/lib/networks";
+import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import {
   buildOracleRateMap,
   canValueTvl,
@@ -75,13 +75,6 @@ export type PoolOgData = {
   oracleFresh: boolean;
 };
 
-function makeClient(network: Network): GraphQLClient {
-  const secret = network.hasuraSecret.trim();
-  return new GraphQLClient(network.hasuraUrl, {
-    headers: secret ? { "x-hasura-admin-secret": secret } : {},
-  });
-}
-
 // Only namespaced `{chainId}-0x...` IDs are supported. Bare 0x addresses
 // would need cross-network probing here, but the pool page at
 // app/pool/[poolId]/page.tsx normalizes bare addresses against
@@ -110,7 +103,7 @@ export async function fetchPoolOgDataUncached(
   const network = NETWORKS[networkId];
   if (!network.hasuraUrl) return null;
 
-  const client = makeClient(network);
+  const client = makeOgGraphQLClient(network);
 
   // Per-request timeout. Without this, a hung upstream prevents allSettled
   // from resolving and the OG route blocks until Vercel's function timeout.
@@ -404,8 +397,13 @@ function computeOracleFreshness(
   };
 }
 
+// 60s TTL — pool health can flip during an incident; a 1h cache meant a
+// link re-shared during rebalance showed stale "Critical" for an hour.
+// 60s gives fresh state on each new unfurl while still batching repeated
+// requests (generateMetadata + generateImageMetadata + Image within one
+// server request all dedupe here).
 const cachedFetch = unstable_cache(fetchPoolOgDataUncached, ["pool-og"], {
-  revalidate: 3600,
+  revalidate: 60,
   tags: ["pool-og"],
 });
 
