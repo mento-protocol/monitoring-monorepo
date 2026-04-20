@@ -3,44 +3,50 @@ import * as Sentry from "@sentry/nextjs";
 import { getAuthSession } from "@/auth";
 import {
   getLabels,
-  getAllChainLabels,
+  getAllLabels,
   upsertEntry,
   deleteLabel,
   type AddressEntry,
+  type Scope,
 } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const chainIdParam = req.nextUrl.searchParams.get("chainId");
   const session = await getAuthSession();
   const publicOnly = session === null;
 
-  if (chainIdParam === null) {
+  const scopeParam = req.nextUrl.searchParams.get("scope");
+  const chainIdParam = req.nextUrl.searchParams.get("chainId");
+
+  // Narrow read: ?scope=global or ?chainId=42220
+  if (scopeParam !== null || chainIdParam !== null) {
+    const scope = parseScopeParam(scopeParam, chainIdParam);
+    if (scope === null) {
+      return NextResponse.json(
+        { error: "Invalid scope or chainId" },
+        { status: 400 },
+      );
+    }
     try {
-      const all = await getAllChainLabels();
-      const filtered: Record<string, Record<string, AddressEntry>> = {};
-      for (const [chainId, entries] of Object.entries(all)) {
-        filtered[chainId] = publicOnly
-          ? Object.fromEntries(
-              Object.entries(entries).filter(
-                ([, entry]) => entry.isPublic === true,
-              ),
-            )
-          : entries;
-      }
-      return NextResponse.json(filtered);
+      const labels = await getLabels(scope, { publicOnly });
+      return NextResponse.json(labels);
     } catch (err) {
       return serverError(err, "read");
     }
   }
 
-  const chainId = Number(chainIdParam);
-  if (!Number.isInteger(chainId) || chainId <= 0) {
-    return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });
-  }
+  // Full read: { global, chains } with publicOnly filter applied to both.
   try {
-    const labels = await getLabels(chainId, { publicOnly });
-    return NextResponse.json(labels);
+    const { global, chains } = await getAllLabels();
+    const filteredGlobal = publicOnly ? filterPublic(global) : global;
+    const filteredChains: Record<string, Record<string, AddressEntry>> = {};
+    for (const [chainId, entries] of Object.entries(chains)) {
+      filteredChains[chainId] = publicOnly ? filterPublic(entries) : entries;
+    }
+    return NextResponse.json({
+      global: filteredGlobal,
+      chains: filteredChains,
+    });
   } catch (err) {
     return serverError(err, "read");
   }
@@ -62,13 +68,24 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { chainId, address, name, tags, notes, isPublic } = body as Record<
-    string,
-    unknown
-  >;
+  const {
+    scope: scopeBody,
+    chainId: chainIdBody,
+    address,
+    name,
+    tags,
+    notes,
+    isPublic,
+  } = body as Record<string, unknown>;
 
-  if (!isPositiveInt(chainId)) {
-    return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });
+  const scope = parseScope(scopeBody, chainIdBody);
+  if (scope === null) {
+    return NextResponse.json(
+      {
+        error: "Invalid scope (must be 'global' or a positive integer chainId)",
+      },
+      { status: 400 },
+    );
   }
   if (typeof address !== "string" || !isValidAddress(address)) {
     return NextResponse.json({ error: "Invalid address" }, { status: 400 });
@@ -128,7 +145,7 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     });
 
   try {
-    await upsertEntry(chainId as number, address, {
+    await upsertEntry(scope, address, {
       name: trimmedName,
       tags: deduplicatedTags,
       notes: trimmedNotes,
@@ -156,17 +173,27 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { chainId, address } = body as Record<string, unknown>;
+  const {
+    scope: scopeBody,
+    chainId: chainIdBody,
+    address,
+  } = body as Record<string, unknown>;
 
-  if (!isPositiveInt(chainId)) {
-    return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });
+  const scope = parseScope(scopeBody, chainIdBody);
+  if (scope === null) {
+    return NextResponse.json(
+      {
+        error: "Invalid scope (must be 'global' or a positive integer chainId)",
+      },
+      { status: 400 },
+    );
   }
   if (typeof address !== "string" || !isValidAddress(address)) {
     return NextResponse.json({ error: "Invalid address" }, { status: 400 });
   }
 
   try {
-    await deleteLabel(chainId as number, address);
+    await deleteLabel(scope, address);
     return NextResponse.json({ ok: true });
   } catch (err) {
     return serverError(err, "delete");
@@ -175,6 +202,39 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
 
 function isPositiveInt(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v > 0;
+}
+
+// Accepts { scope } or legacy { chainId } alias; returns null on invalid.
+function parseScope(scopeValue: unknown, chainIdValue: unknown): Scope | null {
+  if (scopeValue === "global") return "global";
+  if (isPositiveInt(scopeValue)) return scopeValue;
+  if (scopeValue !== undefined) return null;
+  // Legacy fallback: { chainId: number } (remove in a follow-up)
+  if (isPositiveInt(chainIdValue)) return chainIdValue;
+  return null;
+}
+
+// Narrow-read variant: scope as a string query param, chainId as numeric
+// string. Strict decimal-only parse so `?chainId=1e3` doesn't silently
+// resolve to chainId 1000 (matches the import-route guards).
+function parseScopeParam(
+  scopeParam: string | null,
+  chainIdParam: string | null,
+): Scope | null {
+  if (scopeParam === "global") return "global";
+  if (scopeParam !== null) return null;
+  if (chainIdParam === null) return null;
+  if (!/^\d+$/.test(chainIdParam)) return null;
+  const n = Number(chainIdParam);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function filterPublic(
+  entries: Record<string, AddressEntry>,
+): Record<string, AddressEntry> {
+  return Object.fromEntries(
+    Object.entries(entries).filter(([, entry]) => entry.isPublic === true),
+  );
 }
 
 // op distinguishes which handler failed (read/save/delete) so both the

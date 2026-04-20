@@ -10,11 +10,11 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/lib/address-labels", () => ({
   getLabels: vi.fn(),
-  getAllChainLabels: vi.fn(),
+  getAllLabels: vi.fn(),
 }));
 
 import { getAuthSession } from "@/auth";
-import { getLabels, getAllChainLabels } from "@/lib/address-labels";
+import { getLabels, getAllLabels } from "@/lib/address-labels";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -48,25 +48,35 @@ describe("GET /api/address-labels/export", () => {
     const body = await res.json();
     expect(body.chains).toHaveProperty("42220");
     expect(body.exportedAt).toBeDefined();
-    // Verify v2 schema in export
+    // Single-chain export does not include `global`.
+    expect(body.global).toBeUndefined();
     expect(body.chains["42220"]["0xabc"].name).toBe("Test");
     expect(body.chains["42220"]["0xabc"].tags).toEqual([]);
 
     const disposition = res.headers.get("Content-Disposition") ?? "";
     expect(disposition).toContain("chain-42220");
-    expect(getAllChainLabels).not.toHaveBeenCalled();
+    expect(getAllLabels).not.toHaveBeenCalled();
   });
 
-  it("exports all chains when ?chainId is omitted", async () => {
-    (getAllChainLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
-      "42220": {
-        "0xabc": {
-          name: "Mainnet",
-          tags: ["Whale"],
+  it("exports global + all chains when ?chainId is omitted", async () => {
+    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      global: {
+        "0xggg": {
+          name: "Cross-chain",
+          tags: [],
           updatedAt: "2026-01-01T00:00:00Z",
         },
       },
-      "11142220": {},
+      chains: {
+        "42220": {
+          "0xabc": {
+            name: "Mainnet",
+            tags: ["Whale"],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+        "11142220": {},
+      },
     });
 
     const req = new NextRequest("http://localhost/api/address-labels/export");
@@ -76,6 +86,7 @@ describe("GET /api/address-labels/export", () => {
     const body = await res.json();
     expect(body.chains).toHaveProperty("42220");
     expect(body.chains).toHaveProperty("11142220");
+    expect(body.global["0xggg"].name).toBe("Cross-chain");
 
     const disposition = res.headers.get("Content-Disposition") ?? "";
     expect(disposition).toContain("address-labels-all-");
@@ -98,6 +109,23 @@ describe("GET /api/address-labels/export", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 400 for chainId with scientific notation", async () => {
+    // Strict decimal-only: `1e3` must not silently resolve to chainId 1000.
+    const req = new NextRequest(
+      "http://localhost/api/address-labels/export?chainId=1e3",
+    );
+    const res = await GET(req);
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for chainId in hex form", async () => {
+    const req = new NextRequest(
+      "http://localhost/api/address-labels/export?chainId=0x1",
+    );
+    const res = await GET(req);
+    expect(res.status).toBe(400);
+  });
+
   it("returns 500 when getLabels throws", async () => {
     (getLabels as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("Redis connection failed"),
@@ -108,12 +136,11 @@ describe("GET /api/address-labels/export", () => {
     const res = await GET(req);
     expect(res.status).toBe(500);
     const body = await res.json();
-    // serverError returns a generic message — full error is in Sentry.
     expect(body.error).toBe("Export failed");
   });
 
-  it("returns 500 when getAllChainLabels throws", async () => {
-    (getAllChainLabels as ReturnType<typeof vi.fn>).mockRejectedValue(
+  it("returns 500 when getAllLabels throws", async () => {
+    (getAllLabels as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("Redis unavailable"),
     );
     const req = new NextRequest("http://localhost/api/address-labels/export");

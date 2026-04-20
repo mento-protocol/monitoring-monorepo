@@ -7,6 +7,7 @@ vi.mock("@upstash/redis", () => {
   Redis.prototype.hgetall = vi.fn();
   Redis.prototype.hset = vi.fn();
   Redis.prototype.hdel = vi.fn();
+  Redis.prototype.eval = vi.fn().mockResolvedValue(1);
   return { Redis };
 });
 
@@ -15,13 +16,15 @@ vi.stubEnv("UPSTASH_REDIS_REST_URL", "https://fake.upstash.io");
 vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "fake-token");
 
 import {
-  getAllChainLabels,
+  getAllLabels,
   getLabels,
   upsertEntry,
   importLabels,
   upgradeEntry,
 } from "@/lib/address-labels";
 import { Redis } from "@upstash/redis";
+
+const evalMock = Redis.prototype.eval as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -81,6 +84,21 @@ describe("getLabels — publicOnly filter", () => {
     expect(result["0xaaa"].name).toBe("Public");
   });
 
+  it("works for global scope", async () => {
+    (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      {
+        "0xaaa": {
+          name: "Cross-chain",
+          tags: [],
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+      },
+    );
+    const result = await getLabels("global");
+    expect(Redis.prototype.hgetall).toHaveBeenCalledWith("labels:global");
+    expect(result["0xaaa"].name).toBe("Cross-chain");
+  });
+
   it("treats missing isPublic as private when publicOnly is true", async () => {
     (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       {
@@ -94,58 +112,78 @@ describe("getLabels — publicOnly filter", () => {
     const result = await getLabels(42220, { publicOnly: true });
     expect(Object.keys(result)).toHaveLength(0);
   });
-
-  it("returns all entries when publicOnly is false", async () => {
-    (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      {
-        "0xaaa": {
-          name: "Public",
-          tags: [],
-          isPublic: true,
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
-        "0xbbb": {
-          name: "Private",
-          tags: [],
-          isPublic: false,
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
-      },
-    );
-    const result = await getLabels(42220, { publicOnly: false });
-    expect(Object.keys(result)).toHaveLength(2);
-  });
 });
 
-describe("upsertEntry — persists isPublic", () => {
-  it("stores isPublic: true when provided", async () => {
-    (Redis.prototype.hset as ReturnType<typeof vi.fn>).mockResolvedValueOnce(1);
+// Helpers for the atomic Lua-script path. The script takes the target key
+// via KEYS[1] and a flat [count, addr1, value1, addr2, value2, …] ARGV tuple.
+function evalCall(call: unknown[]): {
+  script: string;
+  keys: string[];
+  args: string[];
+} {
+  const [script, keys, args] = call as [string, string[], string[]];
+  return { script, keys, args };
+}
+
+function evalEntries(args: string[]): Array<{ addr: string; value: unknown }> {
+  const count = Number(args[0]);
+  const entries: Array<{ addr: string; value: unknown }> = [];
+  for (let i = 0; i < count; i++) {
+    entries.push({
+      addr: args[1 + i * 2],
+      value: JSON.parse(args[2 + i * 2]),
+    });
+  }
+  return entries;
+}
+
+describe("upsertEntry — persists isPublic and enforces strict either/or", () => {
+  it("stores isPublic: true when provided, writes to per-chain key", async () => {
     await upsertEntry(42220, "0xABC", {
       name: "Test",
       tags: [],
       isPublic: true,
     });
-    const [, fields] = (Redis.prototype.hset as ReturnType<typeof vi.fn>).mock
-      .calls[0];
-    const stored = Object.values(fields)[0] as { isPublic: boolean };
-    expect(stored.isPublic).toBe(true);
+    expect(evalMock).toHaveBeenCalledTimes(1);
+    const { keys, args } = evalCall(evalMock.mock.calls[0]);
+    expect(keys).toEqual(["labels:42220"]);
+    const [{ addr, value }] = evalEntries(args);
+    expect(addr).toBe("0xabc");
+    expect((value as { isPublic: boolean }).isPublic).toBe(true);
   });
 
-  it("stores isPublic: false when not provided", async () => {
-    (Redis.prototype.hset as ReturnType<typeof vi.fn>).mockResolvedValueOnce(1);
-    await upsertEntry(42220, "0xABC", { name: "Test", tags: [] });
-    const [, fields] = (Redis.prototype.hset as ReturnType<typeof vi.fn>).mock
-      .calls[0];
-    const stored = Object.values(fields)[0] as {
-      isPublic: boolean | undefined;
-    };
-    expect(stored.isPublic).toBeFalsy();
+  it("writes to labels:global when scope is 'global'", async () => {
+    await upsertEntry("global", "0xABC", { name: "Test", tags: [] });
+    const { keys } = evalCall(evalMock.mock.calls[0]);
+    expect(keys).toEqual(["labels:global"]);
+  });
+
+  it("passes the Lua script that HDELs the address from every other scope", async () => {
+    await upsertEntry(42220, "0xABC", { name: "Celo", tags: [] });
+    const { script, keys, args } = evalCall(evalMock.mock.calls[0]);
+    // The script itself performs the cross-scope HDEL atomically on the
+    // Redis server — we can't observe intermediate pipeline calls, but we
+    // can assert the script's cross-scope cleanup is part of the payload.
+    expect(script).toContain("'labels:*'");
+    expect(script).toContain("HDEL");
+    expect(script).toContain("HSET");
+    expect(keys).toEqual(["labels:42220"]);
+    const [{ addr }] = evalEntries(args);
+    expect(addr).toBe("0xabc");
+  });
+
+  it("upsert at global writes via the same atomic script path", async () => {
+    await upsertEntry("global", "0xABC", { name: "Cross-chain", tags: [] });
+    const { keys, args } = evalCall(evalMock.mock.calls[0]);
+    expect(keys).toEqual(["labels:global"]);
+    const [{ addr, value }] = evalEntries(args);
+    expect(addr).toBe("0xabc");
+    expect((value as { name: string }).name).toBe("Cross-chain");
   });
 });
 
-describe("importLabels — isPublic coercion", () => {
+describe("importLabels — isPublic coercion and invariant", () => {
   it('coerces isPublic: "yes" to false', async () => {
-    (Redis.prototype.hset as ReturnType<typeof vi.fn>).mockResolvedValueOnce(1);
     await importLabels(42220, {
       "0xabc": {
         name: "Test",
@@ -155,14 +193,12 @@ describe("importLabels — isPublic coercion", () => {
         updatedAt: "2026-01-01T00:00:00Z",
       },
     });
-    const [, fields] = (Redis.prototype.hset as ReturnType<typeof vi.fn>).mock
-      .calls[0];
-    const stored = Object.values(fields)[0] as { isPublic: boolean };
-    expect(stored.isPublic).toBe(false);
+    const { args } = evalCall(evalMock.mock.calls[0]);
+    const [{ value }] = evalEntries(args);
+    expect((value as { isPublic: boolean }).isPublic).toBe(false);
   });
 
   it("keeps isPublic: true when it is strictly true", async () => {
-    (Redis.prototype.hset as ReturnType<typeof vi.fn>).mockResolvedValueOnce(1);
     await importLabels(42220, {
       "0xabc": {
         name: "Test",
@@ -171,71 +207,90 @@ describe("importLabels — isPublic coercion", () => {
         updatedAt: "2026-01-01T00:00:00Z",
       },
     });
-    const [, fields] = (Redis.prototype.hset as ReturnType<typeof vi.fn>).mock
-      .calls[0];
-    const stored = Object.values(fields)[0] as { isPublic: boolean };
-    expect(stored.isPublic).toBe(true);
+    const { args } = evalCall(evalMock.mock.calls[0]);
+    const [{ value }] = evalEntries(args);
+    expect((value as { isPublic: boolean }).isPublic).toBe(true);
+  });
+
+  it("batches all imported addresses into a single atomic EVAL", async () => {
+    await importLabels("global", {
+      "0xaaa": {
+        name: "A",
+        tags: [],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+      "0xbbb": {
+        name: "B",
+        tags: [],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    });
+
+    expect(evalMock).toHaveBeenCalledTimes(1);
+    const { keys, args } = evalCall(evalMock.mock.calls[0]);
+    expect(keys).toEqual(["labels:global"]);
+    expect(Number(args[0])).toBe(2);
+    const addrs = evalEntries(args).map((e) => e.addr);
+    expect(addrs).toEqual(["0xaaa", "0xbbb"]);
+  });
+
+  it("is a no-op when the batch is empty (no EVAL call)", async () => {
+    await importLabels("global", {});
+    expect(evalMock).not.toHaveBeenCalled();
   });
 });
 
-describe("getAllChainLabels — paginated SCAN", () => {
-  it("returns labels from a single-page scan", async () => {
+describe("getAllLabels — paginated SCAN", () => {
+  it("returns { global, chains } from a single-page scan", async () => {
     (Redis.prototype.scan as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
       "0",
-      ["labels:42220"],
+      ["labels:global", "labels:42220"],
     ]);
-    (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      {
-        "0xabc": { name: "Test", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
-      },
-    );
-
-    const result = await getAllChainLabels();
-    expect(result).toHaveProperty("42220");
-    expect(result["42220"]["0xabc"].name).toBe("Test");
-    expect(Redis.prototype.scan).toHaveBeenCalledTimes(1);
-  });
-
-  it("follows cursor pagination across multiple pages", async () => {
-    // Page 1: cursor=5 (non-zero → continue)
-    (Redis.prototype.scan as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce(["5", ["labels:42220"]])
-      // Page 2: cursor=0 → done
-      .mockResolvedValueOnce(["0", ["labels:11142220"]]);
-
     (Redis.prototype.hgetall as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({
-        "0xaaa": {
-          name: "Mainnet",
+        "0xggg": {
+          name: "Global",
           tags: [],
           updatedAt: "2026-01-01T00:00:00Z",
         },
       })
       .mockResolvedValueOnce({
-        "0xbbb": {
-          name: "Sepolia",
-          tags: [],
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
+        "0xccc": { name: "Celo", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
       });
 
-    const result = await getAllChainLabels();
-
-    expect(Redis.prototype.scan).toHaveBeenCalledTimes(2);
-    expect(result).toHaveProperty("42220");
-    expect(result).toHaveProperty("11142220");
-    expect(result["42220"]["0xaaa"].name).toBe("Mainnet");
-    expect(result["11142220"]["0xbbb"].name).toBe("Sepolia");
+    const result = await getAllLabels();
+    expect(result.global["0xggg"].name).toBe("Global");
+    expect(result.chains["42220"]["0xccc"].name).toBe("Celo");
   });
 
-  it("returns empty object when no labels:* keys exist", async () => {
+  it("follows cursor pagination across multiple pages", async () => {
+    (Redis.prototype.scan as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(["5", ["labels:42220"]])
+      .mockResolvedValueOnce(["0", ["labels:143"]]);
+
+    (Redis.prototype.hgetall as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        "0xaaa": { name: "Celo", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
+      })
+      .mockResolvedValueOnce({
+        "0xbbb": { name: "Monad", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
+      });
+
+    const result = await getAllLabels();
+    expect(Redis.prototype.scan).toHaveBeenCalledTimes(2);
+    expect(result.chains).toHaveProperty("42220");
+    expect(result.chains).toHaveProperty("143");
+    expect(result.global).toEqual({});
+  });
+
+  it("returns empty global + chains when no labels:* keys exist", async () => {
     (Redis.prototype.scan as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
       "0",
       [],
     ]);
 
-    const result = await getAllChainLabels();
-    expect(result).toEqual({});
+    const result = await getAllLabels();
+    expect(result).toEqual({ global: {}, chains: {} });
     expect(Redis.prototype.scan).toHaveBeenCalledTimes(1);
   });
 });

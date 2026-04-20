@@ -39,7 +39,7 @@ export function AddressLink({ address, readOnly = false, chainId }: Props) {
   const label = getName(address, chainId);
   const labeled = hasName(address, chainId);
   const custom = isCustom(address, chainId);
-  const entry = getEntry(address, chainId);
+  const resolved = getEntry(address, chainId);
 
   return (
     <>
@@ -77,7 +77,8 @@ export function AddressLink({ address, readOnly = false, chainId }: Props) {
       {editing && (
         <AddressLabelEditor
           address={address}
-          initial={entry}
+          initial={resolved?.entry}
+          scope={resolved?.scope}
           chainId={chainId}
           onClose={() => setEditing(false)}
         />
