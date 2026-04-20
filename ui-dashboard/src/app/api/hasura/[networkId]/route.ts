@@ -44,9 +44,9 @@ function resolveLocalHasuraConfig(
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ networkId: string }> },
+  { params }: { params: { networkId: string } },
 ): Promise<Response> {
-  const { networkId } = await params;
+  const { networkId } = params;
   const config = resolveLocalHasuraConfig(networkId);
   if (!config) {
     return NextResponse.json({ error: "Unsupported network" }, { status: 404 });
