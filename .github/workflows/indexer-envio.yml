@@ -10,6 +10,7 @@ on:
       - pnpm-lock.yaml
       - package.json
       - pnpm-workspace.yaml
+      - .node-version
       - .github/workflows/indexer-envio.yml
   pull_request:
     branches: [main]
@@ -41,6 +42,7 @@ jobs:
               - pnpm-lock.yaml
               - package.json
               - pnpm-workspace.yaml
+              - .node-version
               - .github/workflows/indexer-envio.yml
       - name: No indexer changes
         if: steps.changes.outputs.indexer != 'true'
