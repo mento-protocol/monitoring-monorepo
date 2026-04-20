@@ -208,7 +208,7 @@ function Card({ data }: { data: HomepageOgData | null }) {
           flex: 1,
           justifyContent: "flex-end",
           gap: 10,
-          marginTop: 24,
+          marginTop: 32,
         }}
       >
         {data && data.tvlSeries.length >= 2 ? (
