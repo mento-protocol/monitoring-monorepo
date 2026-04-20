@@ -51,8 +51,11 @@ export {
   _clearMockFeeTokenMeta,
   _clearBackfilledTokens,
   _clearFeeTokenMetaCache,
+  _addMockAllowedFeeToken,
+  _clearMockAllowedFeeTokens,
   selectStaleTransfers,
   resolveFeeTokenMeta,
+  isKnownFeeToken,
 } from "./feeToken";
 
 // Price math (used by priceDifference.test.ts, decimals.test.ts)
