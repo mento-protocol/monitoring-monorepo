@@ -171,9 +171,6 @@ function BridgeFlowsContent() {
   const total = countResult.error ? lastKnownTotalRef.current : rawTotal;
   const totalCapped = !countResult.error && rawTotal >= ENVIO_MAX_ROWS;
 
-  // Clamp the active page against `totalPages` — if `total` shrinks (user
-  // was on page 4 of a 100-row filter, then toggled a narrower filter
-  // whose total only covers 2 pages) the offset would otherwise land past
   // Clamp the active page against totalPages — guards against stale URL
   // indices when the count shrinks (window roll, narrower filter on refresh).
   // `handleStatusChange` resets via URL param delete for the common case.
