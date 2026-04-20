@@ -153,12 +153,15 @@ export const WORMHOLE_TRANSFER_DETAIL_BY_ID = /* GraphQL */ `
   }
 `;
 
-// Daily aggregates for KPI tiles and the volume-over-time chart.
+// Daily aggregates for KPI tiles + the volume-over-time chart. Deterministic
+// `date desc, id asc` ordering means that if the 1000-row cap is ever hit
+// the missing rows are the oldest days, not an arbitrary slice — charts stay
+// accurate for recent history and the page flags "partial data" for older.
 export const BRIDGE_DAILY_SNAPSHOT = /* GraphQL */ `
   query BridgeDailySnapshot($afterDate: numeric!) {
     BridgeDailySnapshot(
       where: { date: { _gte: $afterDate } }
-      order_by: { date: asc }
+      order_by: { date: desc, id: asc }
       limit: 1000
     ) {
       id

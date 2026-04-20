@@ -4,8 +4,9 @@ import { Suspense, useMemo, useState } from "react";
 import { useBridgeGQL } from "@/lib/bridge-flows/use-bridge-gql";
 import {
   BRIDGE_TRANSFERS_WINDOW,
-  BRIDGE_TRANSFER_COUNT_SNAPSHOTS,
+  BRIDGE_DAILY_SNAPSHOT,
   BRIDGE_PENDING_IDS,
+  BRIDGE_TOP_BRIDGERS,
 } from "@/lib/bridge-queries";
 import {
   deriveBridgeStatus,
@@ -16,6 +17,10 @@ import { BridgeStatusBadge } from "@/components/bridge-status-badge";
 import { BridgeProviderBadge } from "@/components/bridge-provider-badge";
 import { ChainIcon } from "@/components/chain-icon";
 import { Tile, Skeleton, ErrorBox, EmptyBox } from "@/components/feedback";
+import { BreakdownTile } from "@/components/breakdown-tile";
+import { BridgeVolumeChart } from "@/components/bridge-volume-chart";
+import { BridgeTopBridgersChart } from "@/components/bridge-top-bridgers-chart";
+import { BridgeTokenBreakdownChart } from "@/components/bridge-token-breakdown-chart";
 import { Table, Th } from "@/components/table";
 import { SortableTh } from "@/components/sortable-th";
 import { AddressLink } from "@/components/address-link";
@@ -38,8 +43,14 @@ import {
   transferAmountUsd,
   usdPricedFromLiveRate,
 } from "@/lib/bridge-flows/pricing";
+import { snapshotUsdValue, windowTotals } from "@/lib/bridge-flows/snapshots";
 import { wormholescanUrl } from "@/lib/wormhole/urls";
-import type { BridgeProvider, BridgeTransfer } from "@/lib/types";
+import type {
+  BridgeBridger,
+  BridgeDailySnapshot,
+  BridgeProvider,
+  BridgeTransfer,
+} from "@/lib/types";
 
 const PAGE_LIMIT = 25;
 const THIRTY_DAYS_SECONDS = 30 * 24 * 60 * 60;
@@ -69,16 +80,24 @@ function BridgeFlowsContent() {
     { limit: PAGE_LIMIT, offset: 0, after: afterDayBucket },
   );
 
-  // Aggregates are disabled on hosted Hasura — sum pre-rolled
-  // BridgeDailySnapshot.sentCount instead.
-  const countResult = useBridgeGQL<{
-    BridgeDailySnapshot: Array<{ sentCount: number }>;
-  }>(BRIDGE_TRANSFER_COUNT_SNAPSHOTS, { afterDate: afterDayBucket });
+  // All-time daily snapshots feed both the KPI row (24h/7d/30d sums) and the
+  // charts. One fetch → many derived views. `afterDate: 0` requests all
+  // history; at the cap (1000 rows ≈ ~80 days at current cardinality) the
+  // query returns the most-recent days because of the `date desc` ordering.
+  const snapshotsResult = useBridgeGQL<{
+    BridgeDailySnapshot: BridgeDailySnapshot[];
+  }>(BRIDGE_DAILY_SNAPSHOT, { afterDate: 0 });
 
   // Pending: paginate IDs, count client-side (capped at 1000). A count of
   // 1000 is a wire signal of pagination cap — surface as "1,000+".
   const pendingResult = useBridgeGQL<{ BridgeTransfer: Array<{ id: string }> }>(
     BRIDGE_PENDING_IDS,
+  );
+
+  // Top bridgers for the leaderboard chart. 25 is the expanded-view cap.
+  const topBridgersResult = useBridgeGQL<{ BridgeBridger: BridgeBridger[] }>(
+    BRIDGE_TOP_BRIDGERS,
+    { limit: 25 },
   );
 
   // Oracle rate map for USD conversion. `useAllNetworksData` is cache-shared
@@ -95,40 +114,44 @@ function BridgeFlowsContent() {
   }, [networkData]);
 
   const transfers = transfersResult.data?.BridgeTransfer ?? [];
-  const countRows = countResult.data?.BridgeDailySnapshot;
-  const count30d =
-    countRows?.reduce((sum, s) => sum + (s.sentCount ?? 0), 0) ?? null;
-  // Hasura silently caps this query at 1000 rows (days × providers × tokens
-  // × routes). In the current 30d × 1 provider × 3 tokens × 2 routes window
-  // that's ~180 rows — well under the cap. Mirror the pending-count "1,000+"
-  // idiom so the tile reflects partial data when/if we ever breach it.
-  const count30dCapped = countRows != null && countRows.length >= 1000;
+  const snapshots = snapshotsResult.data?.BridgeDailySnapshot ?? [];
+  const snapshotsCapped = snapshots.length >= 1000;
+  const topBridgers = topBridgersResult.data?.BridgeBridger ?? [];
+
+  // 24h / 7d / 30d breakdowns for the KPI row, derived from the same
+  // snapshot fetch that drives the volume chart. `windowTotals` does one
+  // linear pass so the tile + chart + breakdown all share the single read.
+  const volumeTotals = useMemo(
+    () => windowTotals(snapshots, (s) => snapshotUsdValue(s, rates)),
+    [snapshots, rates],
+  );
+  const transferTotals = useMemo(
+    () => windowTotals(snapshots, (s) => s.sentCount ?? 0),
+    [snapshots],
+  );
+
   const pendingRows = pendingResult.data?.BridgeTransfer?.length ?? null;
   const pendingCount =
     pendingRows === null ? null : pendingRows >= 1000 ? 1000 : pendingRows;
   const pendingCapped = pendingRows !== null && pendingRows >= 1000;
 
-  // KPIs scoped to the current 25-row table page. Cross-window aggregates
-  // (unique senders, avg deliver time) aren't supported on hosted Hasura —
-  // deferred; subtitles make scope explicit.
+  // Avg deliver time is scoped to the current 25-row table page — cross-
+  // window averages aren't supported on hosted Hasura; deferred with the
+  // scope explicit in the tile's subtitle.
   const { avgSec: avgTimeToDeliverSec, sampleSize: avgSampleSize } =
     computeAvgDeliverTime(transfers);
 
-  const uniqueSendersOnPage = new Set(
-    transfers
-      .map((t) => t.sender?.toLowerCase())
-      .filter((s): s is string => !!s),
-  ).size;
-
   const error =
     transfersResult.error?.message ??
-    countResult.error?.message ??
+    snapshotsResult.error?.message ??
     pendingResult.error?.message ??
     null;
   const loading =
     transfersResult.isLoading ||
-    countResult.isLoading ||
+    snapshotsResult.isLoading ||
     pendingResult.isLoading;
+  const snapshotsError = !!snapshotsResult.error;
+  const topBridgersError = !!topBridgersResult.error;
 
   return (
     <div className="space-y-8">
@@ -146,16 +169,27 @@ function BridgeFlowsContent() {
         aria-label="Key metrics"
         className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
       >
-        <Tile
-          label="Transfers (30d)"
-          value={
-            error
-              ? "—"
-              : count30d === null
-                ? "…"
-                : `${count30d.toLocaleString()}${count30dCapped ? "+" : ""}`
-          }
-          subtitle={count30dCapped ? "Partial — snapshot cap hit" : undefined}
+        <BreakdownTile
+          label="Volume (USD)"
+          total={error ? null : volumeTotals.total}
+          sub24h={volumeTotals.sub24h}
+          sub7d={volumeTotals.sub7d}
+          sub30d={volumeTotals.sub30d}
+          isLoading={loading && snapshots.length === 0}
+          hasError={!!error}
+          format={formatUSD}
+          subtitle={snapshotsCapped ? "Partial — snapshot cap hit" : undefined}
+        />
+        <BreakdownTile
+          label="Transfers"
+          total={error ? null : transferTotals.total}
+          sub24h={transferTotals.sub24h}
+          sub7d={transferTotals.sub7d}
+          sub30d={transferTotals.sub30d}
+          isLoading={loading && snapshots.length === 0}
+          hasError={!!error}
+          format={(n) => n.toLocaleString()}
+          subtitle={snapshotsCapped ? "Partial — snapshot cap hit" : undefined}
         />
         <Tile
           label="Pending"
@@ -175,19 +209,6 @@ function BridgeFlowsContent() {
           }
         />
         <Tile
-          label="Unique senders"
-          value={
-            error ? "—" : loading ? "…" : uniqueSendersOnPage.toLocaleString()
-          }
-          subtitle={
-            error
-              ? undefined
-              : transfers.length === 0
-                ? "No activity yet"
-                : "among recent 25"
-          }
-        />
-        <Tile
           label="Avg deliver time"
           value={
             error || avgTimeToDeliverSec === null
@@ -200,6 +221,37 @@ function BridgeFlowsContent() {
               : `over ${avgSampleSize} recent transfers`
           }
         />
+      </section>
+
+      <section aria-label="Volume over time">
+        <BridgeVolumeChart
+          snapshots={snapshots}
+          rates={rates}
+          isLoading={snapshotsResult.isLoading && snapshots.length === 0}
+          hasError={snapshotsError}
+          isCapped={snapshotsCapped}
+        />
+      </section>
+
+      <section
+        aria-label="Bridge composition"
+        className="grid grid-cols-1 lg:grid-cols-3 gap-6"
+      >
+        <div className="lg:col-span-2">
+          <BridgeTopBridgersChart
+            bridgers={topBridgers}
+            isLoading={topBridgersResult.isLoading && topBridgers.length === 0}
+            hasError={topBridgersError}
+          />
+        </div>
+        <div className="lg:col-span-1">
+          <BridgeTokenBreakdownChart
+            snapshots={snapshots}
+            rates={rates}
+            isLoading={snapshotsResult.isLoading && snapshots.length === 0}
+            hasError={snapshotsError}
+          />
+        </div>
       </section>
 
       <section aria-label="Recent transfers">
