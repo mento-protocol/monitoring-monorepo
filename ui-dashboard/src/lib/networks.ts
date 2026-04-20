@@ -284,6 +284,24 @@ export function networkForChainId(
   return id ? NETWORKS[id] : null;
 }
 
+/**
+ * Resolve a token address by (network, symbol). Inverts the network's
+ * `tokenSymbols: address→symbol` map. Useful when a caller has a symbol and
+ * needs the per-chain contract address — e.g. linking a bridged transfer's
+ * token to the source-chain explorer without trusting the indexer-stored
+ * `tokenAddress` (which for NTT differs per chain and has been known to be
+ * mis-stored on the opposite chain during dest-first races).
+ */
+export function tokenAddressForSymbol(
+  network: Network,
+  symbol: string,
+): string | null {
+  for (const [address, sym] of Object.entries(network.tokenSymbols)) {
+    if (sym === symbol) return address;
+  }
+  return null;
+}
+
 // True when `networkId` is the canonical variant for its chainId. Used by
 // link builders to decide whether ?network= can be omitted.
 export function isCanonicalNetwork(networkId: IndexerNetworkId): boolean {

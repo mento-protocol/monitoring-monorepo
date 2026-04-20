@@ -26,7 +26,7 @@ import {
   relativeTime,
   truncateAddress,
 } from "@/lib/format";
-import { networkForChainId } from "@/lib/networks";
+import { networkForChainId, tokenAddressForSymbol } from "@/lib/networks";
 import {
   explorerAddressUrl,
   explorerTxUrl,
@@ -356,7 +356,6 @@ function TransfersTable({
               <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm">
                 <TokenCell
                   symbol={t.tokenSymbol}
-                  address={t.tokenAddress}
                   chainId={t.sourceChainId ?? t.destChainId}
                 />
               </td>
@@ -506,19 +505,21 @@ function TxLinks({
 
 function TokenCell({
   symbol,
-  address,
   chainId,
 }: {
   symbol: string;
-  address: string;
   chainId: number | null;
 }) {
+  // Resolve the per-chain token address from @mento-protocol/contracts via
+  // the network's tokenSymbols map — NOT from the indexer-stored
+  // BridgeTransfer.tokenAddress. The NTT hub/spoke model deploys a distinct
+  // token address per chain, and legacy indexer data (pre-b390cc9) can carry
+  // the destination-chain's address tagged with the source chain id, which
+  // would produce broken cross-chain explorer links. Symbol + chainId is
+  // authoritative and stable across indexer state.
   const net = networkForChainId(chainId);
-  if (
-    !net ||
-    !address ||
-    address === "0x0000000000000000000000000000000000000000"
-  ) {
+  const address = net ? tokenAddressForSymbol(net, symbol) : null;
+  if (!net || !address) {
     return <span className="font-mono text-slate-200">{symbol}</span>;
   }
   return (
