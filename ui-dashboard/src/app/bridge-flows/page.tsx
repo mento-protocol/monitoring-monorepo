@@ -114,14 +114,16 @@ function BridgeFlowsContent() {
   }, [networkData]);
 
   const allTransfers = transfersResult.data?.BridgeTransfer ?? [];
-  // Hide "empty PENDING" rows from the Recent Transfers table — rows where
-  // `status=PENDING` AND we have no tx hash, no amount, no sender, no
-  // attestations. These are dest-side artifacts (ReceivedMessage fired on
-  // dest before source was indexed, or indexer manifest drift) with nothing
-  // for the user to click. Any row with a real status (SENT / ATTESTED /
-  // QUEUED_INBOUND / STUCK / DELIVERED / CANCELLED / FAILED) stays, even if
-  // some columns are still partial — those are legitimate in-flight transfers
-  // operators want to track. The "Pending" KPI still counts the hidden rows.
+  // Hide "empty PENDING" rows — defense-in-depth against indexer data we
+  // can't render: status=PENDING AND no tx hash, amount, sender, or
+  // attestations. This was load-bearing on the deployed `31f4e6f` indexer
+  // (237 orphan rows: the ReceivedMessage handler there created
+  // BridgeTransfers keyed by the WormholeTransceiver digest, which is a
+  // different bytestring from the NttManager digest that TransferSent /
+  // MessageAttestedTo / TransferRedeemed use — the orphan rows never got
+  // enriched). Once an indexer built from the current handler code is
+  // promoted, those orphans stop appearing and this filter becomes a
+  // defensive no-op that can be removed.
   const transfers = allTransfers.filter((t) => {
     if (t.status !== "PENDING") return true;
     return (

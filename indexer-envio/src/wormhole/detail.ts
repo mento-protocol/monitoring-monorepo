@@ -23,7 +23,14 @@ export function bytes32ToAddress(b32: string): string {
   return `0x${lower}`;
 }
 
-/** Default-fill a WormholeTransferDetail row when first created by any handler. */
+/**
+ * Default-fill a WormholeTransferDetail row when first created by any handler.
+ *
+ * `digest` is the NTT manager-layer digest (TransferSent/MessageAttestedTo/
+ * TransferRedeemed) and matches `BridgeTransfer.id`'s suffix. The transceiver-
+ * layer digest that ReceivedMessage emits goes into `transceiverDigest` and is
+ * stamped on later when the dest-side scratch is drained.
+ */
 export function defaultWormholeDetail(
   id: string,
   digest: string,
@@ -31,6 +38,7 @@ export function defaultWormholeDetail(
   return {
     id,
     digest: digest.toLowerCase(),
+    transceiverDigest: undefined,
     msgSequence: undefined,
     sourceWormholeChainId: undefined,
     destWormholeChainId: undefined,

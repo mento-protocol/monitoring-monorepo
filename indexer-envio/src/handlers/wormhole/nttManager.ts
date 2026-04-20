@@ -496,6 +496,36 @@ WormholeNttManager.TransferRedeemed.handler(async ({ event, context }) => {
   }
 });
 
+/**
+ * Walk backward through (chainId, txHash, logIndex - N) to find a
+ * `WormholeDestPending` scratch row written by an earlier-in-tx
+ * ReceivedMessage, return its payload, and delete the scratch. Returns
+ * undefined when no scratch is found in the preceding ~256 log entries,
+ * which is enough to cover NTT-typical in-tx spacing between the
+ * transceiver's ReceivedMessage and the NttManager's MessageAttestedTo /
+ * TransferRedeemed.
+ */
+async function drainDestPending(
+  context: HandlerContext,
+  chainId: number,
+  txHash: string,
+  currentLogIndex: number,
+): Promise<
+  Awaited<ReturnType<HandlerContext["WormholeDestPending"]["get"]>> | undefined
+> {
+  const txHashLower = txHash.toLowerCase();
+  const maxOffset = Math.min(currentLogIndex, 256);
+  for (let offset = 1; offset <= maxOffset; offset++) {
+    const candidateId = `${chainId}-${txHashLower}-${currentLogIndex - offset}`;
+    const row = await context.WormholeDestPending.get(candidateId);
+    if (row) {
+      context.WormholeDestPending.deleteUnsafe?.(candidateId);
+      return row;
+    }
+  }
+  return undefined;
+}
+
 WormholeNttManager.MessageAttestedTo.handler(async ({ event, context }) => {
   const p = event.params;
   const ts = BigInt(event.block.timestamp);
@@ -541,12 +571,35 @@ WormholeNttManager.MessageAttestedTo.handler(async ({ event, context }) => {
   if (prior?.destChainId == null) destDelta.destChainId = event.chainId;
   if (!prior?.destContract)
     destDelta.destContract = event.srcAddress.toLowerCase();
+
+  // Drain the `WormholeDestPending` scratch written by the ReceivedMessage
+  // that fired earlier in this same tx. It carries the source identity
+  // (the transceiver-layer digest from ReceivedMessage cannot be used as
+  // a BridgeTransfer key — it's a different hash from the manager digest).
+  // Stamp the source identity onto the row being upserted here.
+  const destPending = await drainDestPending(
+    context as HandlerContext,
+    event.chainId,
+    event.transaction.hash,
+    event.logIndex,
+  );
+  const detailDelta: Record<string, unknown> = {};
+  if (destPending) {
+    if (prior?.sourceChainId == null)
+      destDelta.sourceChainId = destPending.sourceChainId;
+    if (!prior?.sourceContract)
+      destDelta.sourceContract = destPending.sourceTransceiver;
+    detailDelta.transceiverDigest = destPending.transceiverDigest;
+    detailDelta.msgSequence = destPending.msgSequence;
+    detailDelta.sourceWormholeChainId = destPending.sourceWormholeChainId;
+  }
+
   await upsertTransferByDigest(
     context as HandlerContext,
     p.digest,
     ts,
     destDelta,
-    {},
+    detailDelta,
   );
 });
 

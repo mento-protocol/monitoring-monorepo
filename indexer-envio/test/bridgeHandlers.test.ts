@@ -35,11 +35,24 @@ type MockDb = {
     WormholeTransferDetail: EntityGet<{
       id: string;
       digest: string;
+      transceiverDigest?: string;
       msgSequence?: bigint;
+      sourceWormholeChainId?: number;
       inboundQueuedTimestamp?: bigint;
     }>;
     WormholeNttManager: EntityGet<{ id: string; tokenSymbol: string }>;
     WormholeTransferPending: EntityGet<{ id: string; amount: bigint }>;
+    WormholeDestPending: EntityGet<{
+      id: string;
+      chainId: number;
+      txHash: string;
+      transceiverDigest: string;
+      sourceChainId: number;
+      sourceTransceiver: string;
+      sourceWormholeChainId: number;
+      msgSequence: bigint;
+      destTransceiver: string;
+    }>;
     BridgeDailySnapshot: {
       get: (id: string) =>
         | {
@@ -590,27 +603,33 @@ describe("Bridge-flows handlers — InboundTransferQueued interaction", () => {
 });
 
 describe("Bridge-flows handlers — ReceivedMessage (transceiver) interaction", () => {
-  it("seeds source-chain identity on the BridgeTransfer when dest-side arrives first", async () => {
+  // Since the `digest` emitted by WormholeTransceiver.ReceivedMessage is the
+  // transceiver-layer digest (a DIFFERENT bytestring from the manager-layer
+  // digest used by TransferSent/MessageAttestedTo/TransferRedeemed), the
+  // handler cannot create or enrich a BridgeTransfer by that digest — it
+  // would produce orphans. Instead, ReceivedMessage writes a
+  // WormholeDestPending scratch keyed by (chainId, txHash, logIndex), and
+  // MessageAttestedTo / TransferRedeemed walk backward to find it and stamp
+  // the source identity onto the correct BridgeTransfer row.
+  const TRANSCEIVER_DIGEST = DIGEST_1; // shape-wise arbitrary; labelled for clarity
+  const MANAGER_DIGEST = DIGEST_2;
+
+  it("writes scratch only (no BridgeTransfer) when dest-side arrives first", async () => {
     const e = pickManifestEntry();
-    // Counterparty entry: transceiver on Monad (dest when source is Celo).
     const monad = findByNttManager(
       143,
       "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
     );
     assert.ok(monad);
     let mockDb = MockDb.createMockDb();
-    const id = `wormhole-${DIGEST_1.toLowerCase()}`;
-
-    // Emitter is the source-chain NttManager, formatted as bytes32.
-    const emitterBytes32 = padAddr(e.nttManagerProxy);
 
     const event = TestWormholeTransceiver.ReceivedMessage.createMockEvent({
-      digest: DIGEST_1,
-      emitterChainId: 14, // Wormhole chain id for Celo
-      emitterAddress: emitterBytes32,
+      digest: TRANSCEIVER_DIGEST,
+      emitterChainId: 14,
+      emitterAddress: padAddr(e.transceiverProxy),
       sequence: 42n,
       mockEventData: mockEventData({
-        chainId: 143, // destination (Monad)
+        chainId: 143,
         manager: monad!.transceiverProxy,
         logIndex: 5,
       }),
@@ -620,20 +639,145 @@ describe("Bridge-flows handlers — ReceivedMessage (transceiver) interaction", 
       mockDb,
     });
 
-    const transfer = mockDb.entities.BridgeTransfer.get(id);
-    assert.ok(transfer, "BridgeTransfer is seeded from dest-side event");
+    // No BridgeTransfer keyed by the transceiver digest.
     assert.equal(
-      transfer!.sourceChainId,
-      42220,
-      "sourceChainId resolved from Wormhole emitter chain id",
-    );
-    assert.ok(
-      transfer!.sourceContract,
-      "sourceContract populated from emitter address",
+      mockDb.entities.BridgeTransfer.get(
+        `wormhole-${TRANSCEIVER_DIGEST.toLowerCase()}`,
+      ),
+      undefined,
+      "ReceivedMessage must not create a BridgeTransfer keyed by the transceiver digest",
     );
 
-    const detail = mockDb.entities.WormholeTransferDetail.get(id);
-    assert.equal(detail?.sourceWormholeChainId, 14);
+    // Scratch row written keyed by (chainId, txHash, logIndex).
+    const pendingId = `143-${TX_HASH.toLowerCase()}-5`;
+    const pending = mockDb.entities.WormholeDestPending.get(pendingId);
+    assert.ok(pending, "WormholeDestPending scratch row is written");
+    assert.equal(pending!.sourceChainId, 42220);
+    assert.equal(pending!.sourceWormholeChainId, 14);
+    assert.equal(
+      pending!.sourceTransceiver.toLowerCase(),
+      e.transceiverProxy.toLowerCase(),
+    );
+    assert.equal(pending!.msgSequence, 42n);
+    assert.equal(pending!.transceiverDigest, TRANSCEIVER_DIGEST.toLowerCase());
+  });
+
+  it("MessageAttestedTo drains the scratch and stamps source identity + transceiverDigest", async () => {
+    const e = pickManifestEntry(); // Celo USDm — the source side
+    const monad = findByNttManager(
+      143,
+      "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+    );
+    assert.ok(monad);
+    let mockDb = MockDb.createMockDb();
+
+    // 1. Dest-side ReceivedMessage (writes scratch).
+    const receivedEvent =
+      TestWormholeTransceiver.ReceivedMessage.createMockEvent({
+        digest: TRANSCEIVER_DIGEST,
+        emitterChainId: 14,
+        emitterAddress: padAddr(e.transceiverProxy),
+        sequence: 42n,
+        mockEventData: mockEventData({
+          chainId: 143,
+          manager: monad!.transceiverProxy,
+          logIndex: 5,
+        }),
+      });
+    mockDb = await TestWormholeTransceiver.ReceivedMessage.processEvent({
+      event: receivedEvent,
+      mockDb,
+    });
+
+    // 2. Dest-side MessageAttestedTo fires same tx at a higher logIndex.
+    const attestedEvent =
+      TestWormholeNttManager.MessageAttestedTo.createMockEvent({
+        digest: MANAGER_DIGEST,
+        transceiver: monad!.transceiverProxy,
+        index: 0,
+        mockEventData: mockEventData({
+          chainId: 143,
+          manager: monad!.nttManagerProxy,
+          logIndex: 7,
+        }),
+      });
+    mockDb = await TestWormholeNttManager.MessageAttestedTo.processEvent({
+      event: attestedEvent,
+      mockDb,
+    });
+
+    // Scratch row is gone.
+    assert.equal(
+      mockDb.entities.WormholeDestPending.get(`143-${TX_HASH.toLowerCase()}-5`),
+      undefined,
+      "scratch row is deleted after MessageAttestedTo drains it",
+    );
+
+    // BridgeTransfer is keyed by the MANAGER digest, and carries the source
+    // identity that was drained from the scratch.
+    const transfer = mockDb.entities.BridgeTransfer.get(
+      `wormhole-${MANAGER_DIGEST.toLowerCase()}`,
+    );
+    assert.ok(
+      transfer,
+      "BridgeTransfer is created keyed by the manager digest",
+    );
+    assert.equal(transfer!.sourceChainId, 42220);
+    assert.equal(transfer!.destChainId, 143);
+    assert.equal(transfer!.attestationCount, 1);
+
+    const detail = mockDb.entities.WormholeTransferDetail.get(
+      `wormhole-${MANAGER_DIGEST.toLowerCase()}`,
+    );
+    assert.equal(
+      detail?.transceiverDigest,
+      TRANSCEIVER_DIGEST.toLowerCase(),
+      "transceiverDigest is stamped from the scratch",
+    );
     assert.equal(detail?.msgSequence, 42n);
+    assert.equal(detail?.sourceWormholeChainId, 14);
+  });
+
+  it("replay (no MessageAttestedTo) leaves the scratch but does not pollute BridgeTransfer", async () => {
+    // When a VAA is replayed against an already-executed digest, the
+    // NttManager silently returns — MessageAttestedTo does not fire — so
+    // nothing drains the scratch. That's acceptable: the scratch stays
+    // keyed by tx hash, never surfaces in the main dashboard views, and a
+    // periodic sweep can clean it up if the count ever matters.
+    const e = pickManifestEntry();
+    const monad = findByNttManager(
+      143,
+      "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
+    );
+    assert.ok(monad);
+    let mockDb = MockDb.createMockDb();
+
+    const event = TestWormholeTransceiver.ReceivedMessage.createMockEvent({
+      digest: TRANSCEIVER_DIGEST,
+      emitterChainId: 14,
+      emitterAddress: padAddr(e.transceiverProxy),
+      sequence: 99n,
+      mockEventData: mockEventData({
+        chainId: 143,
+        manager: monad!.transceiverProxy,
+        logIndex: 5,
+      }),
+    });
+    mockDb = await TestWormholeTransceiver.ReceivedMessage.processEvent({
+      event,
+      mockDb,
+    });
+
+    assert.equal(
+      mockDb.entities.BridgeTransfer.get(
+        `wormhole-${TRANSCEIVER_DIGEST.toLowerCase()}`,
+      ),
+      undefined,
+      "no BridgeTransfer created under the transceiver digest",
+    );
+    assert.ok(
+      mockDb.entities.WormholeDestPending.get(`143-${TX_HASH.toLowerCase()}-5`),
+      "scratch persists when MessageAttestedTo never fires (replay case)",
+    );
   });
 });

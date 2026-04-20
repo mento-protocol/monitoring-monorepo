@@ -441,8 +441,9 @@ type WormholeNttManager {
 
 type WormholeTransferDetail {
   id: ID! # == BridgeTransfer.id
-  digest: String! @index # bytes32, 0x-lowercased — the provider's message id
-  msgSequence: BigInt @index
+  digest: String! @index # NTT manager-layer digest (TransceiverStructs.nttManagerMessageDigest). This is the digest used by TransferSent/TransferRedeemed/MessageAttestedTo; it is the BridgeTransfer primary key suffix.
+  transceiverDigest: String @index # Wormhole transceiver-layer digest (TransceiverStructs.transceiverMessageDigest), different bytestring from `digest`. Populated on the destination side when ReceivedMessage pairs with MessageAttestedTo/TransferRedeemed in the same tx.
+  msgSequence: BigInt @index # Wormhole VAA sequence number, unique per (emitterChain, emitterAddress).
   sourceWormholeChainId: Int
   destWormholeChainId: Int
   refundAddress: String
@@ -450,6 +451,38 @@ type WormholeTransferDetail {
   # Dest-side rate-limit queue. Source-side queue events carry only a sequence,
   # not a digest, so they cannot be correlated to a BridgeTransfer in v1.
   inboundQueuedTimestamp: BigInt
+}
+
+# Scratch table for dest-side pairing of ReceivedMessage → MessageAttestedTo
+# (or TransferRedeemed) within a single destination-chain transaction.
+#
+# Why it's necessary: ReceivedMessage carries the transceiver-layer digest
+# (TransceiverStructs.transceiverMessageDigest), which is a DIFFERENT
+# bytestring from the NTT manager-layer digest emitted by TransferSent /
+# MessageAttestedTo / TransferRedeemed. The BridgeTransfer entity is keyed
+# by the manager digest, so ReceivedMessage cannot directly create or
+# enrich the row — it would produce orphans keyed by the wrong digest.
+#
+# Pairing: within a single destination-chain tx, NTT emits (in logIndex order)
+#   1. Transceiver: ReceivedMessage(transceiverDigest, emitterChain, emitterAddress, sequence)
+#   2. NttManager:  MessageAttestedTo(managerDigest, transceiver, index)
+#   3. NttManager:  TransferRedeemed(managerDigest)    -- only if threshold met
+# The MessageAttestedTo/TransferRedeemed handler walks backward through
+# logIndex to find the scratch row and drains it: stamping the source
+# identity (sourceChainId, sourceTransceiver) and transceiverDigest onto
+# the BridgeTransfer/detail keyed by the authoritative manager digest.
+# Steady-state count = 0.
+type WormholeDestPending {
+  id: ID! # "{chainId}-{txHash}-{logIndex}", ephemeral — should be 0 rows in steady state.
+  chainId: Int! # destination chain id
+  txHash: String!
+  transceiverDigest: String! # digest as seen in ReceivedMessage (transceiver-layer)
+  sourceChainId: Int! # resolved from emitterChainId via WORMHOLE_TO_EVM_CHAIN_ID
+  sourceTransceiver: String! # bytes32ToAddress(emitterAddress) — source-chain transceiver proxy
+  sourceWormholeChainId: Int! # raw Wormhole chain id of source
+  msgSequence: BigInt!
+  destTransceiver: String! # event.srcAddress — the receiving transceiver proxy
+  blockTimestamp: BigInt!
 }
 
 type WormholeTransferPending {
