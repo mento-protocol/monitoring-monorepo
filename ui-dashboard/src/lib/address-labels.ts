@@ -67,6 +67,47 @@ async function listAllScopeKeys(redis: Redis): Promise<string[]> {
   return keys;
 }
 
+// Lua script that atomically writes a batch of (address, value) pairs to a
+// target scope and HDELs the same addresses from every other `labels:*`
+// scope. The enumeration of "other" scopes happens inside the script's
+// atomic window, closing the race window that a separate SCAN → MULTI
+// opens: two concurrent writers creating first-time entries for the same
+// address on different chain scopes cannot both miss each other's new key.
+//
+// Contract:
+//   KEYS[1]    = target scope key (`labels:global` or `labels:{chainId}`)
+//   ARGV[1]    = decimal count N of (address, value) pairs
+//   ARGV[2..]  = address, JSON-value, address, JSON-value, … (2N strings)
+//
+// Returns the number of pairs written (for assertions/logging).
+const STRICT_EITHER_OR_SCRIPT = `
+local targetKey = KEYS[1]
+local count = tonumber(ARGV[1])
+if count == nil or count <= 0 then return 0 end
+
+local addrs = {}
+local hsetArgs = { targetKey }
+for i = 0, count - 1 do
+  local addr = ARGV[2 + i * 2]
+  local value = ARGV[3 + i * 2]
+  addrs[#addrs + 1] = addr
+  hsetArgs[#hsetArgs + 1] = addr
+  hsetArgs[#hsetArgs + 1] = value
+end
+redis.call('HSET', unpack(hsetArgs))
+
+-- KEYS 'labels:*' is O(total-keys-in-db); labels keyspace is tiny (one per
+-- scope) so this is acceptable and avoids Lua-side SCAN pagination.
+local otherKeys = redis.call('KEYS', 'labels:*')
+for _, k in ipairs(otherKeys) do
+  if k ~= targetKey then
+    redis.call('HDEL', k, unpack(addrs))
+  end
+end
+
+return count
+`;
+
 // Data access helpers (all server-side)
 
 export async function getLabels(
@@ -89,11 +130,10 @@ export async function getLabels(
 /**
  * Upsert an entry at the target scope.
  *
- * Uses MULTI/EXEC so HSET + HDELs all succeed or all fail together. The
- * SCAN itself is not atomic with the transaction — a new scope created
- * between SCAN and EXEC will not be cleared — but writes only go through
- * this same function so the race window is narrow to non-existent in
- * practice.
+ * Executes HSET + HDEL-from-every-other-scope as a single atomic Lua script
+ * on the Redis server. This closes the race where two concurrent writers
+ * creating first-time entries for the same address on different chain
+ * scopes would each miss the other's new key via a separate SCAN.
  */
 export async function upsertEntry(
   scope: Scope,
@@ -108,15 +148,11 @@ export async function upsertEntry(
   const lower = address.toLowerCase();
   const targetKey = labelsKey(scope);
 
-  const allKeys = await listAllScopeKeys(redis);
-  const otherKeys = allKeys.filter((k) => k !== targetKey);
-
-  const tx = redis.multi();
-  tx.hset(targetKey, { [lower]: value });
-  for (const k of otherKeys) {
-    tx.hdel(k, lower);
-  }
-  await tx.exec();
+  await redis.eval(
+    STRICT_EITHER_OR_SCRIPT,
+    [targetKey],
+    ["1", lower, JSON.stringify(value)],
+  );
 }
 
 export async function deleteLabel(
@@ -166,37 +202,28 @@ export async function getAllLabels(): Promise<{
 /**
  * Import a batch of labels into a single scope.
  *
- * Uses MULTI/EXEC so HSET + HDELs all succeed or all fail together, same as
- * `upsertEntry`. See the note on its SCAN-vs-EXEC race.
+ * Uses the same atomic Lua script as `upsertEntry` so a batch write +
+ * cross-scope HDEL completes with strict either/or guarantees even under
+ * concurrent writers.
  */
 export async function importLabels(
   scope: Scope,
   labels: Record<string, AddressEntry>,
 ): Promise<void> {
-  if (Object.keys(labels).length === 0) return;
+  const entries = Object.entries(labels);
+  if (entries.length === 0) return;
   const redis = getRedis();
   const targetKey = labelsKey(scope);
-  const normalised = Object.fromEntries(
-    Object.entries(labels).map(([addr, entry]) => [
-      addr.toLowerCase(),
-      {
-        ...entry,
-        isPublic: entry.isPublic === true,
-        updatedAt: entry.updatedAt ?? new Date().toISOString(),
-      },
-    ]),
-  );
 
-  const allKeys = await listAllScopeKeys(redis);
-  const otherKeys = allKeys.filter((k) => k !== targetKey);
-  const lowers = Object.keys(normalised);
-
-  const tx = redis.multi();
-  tx.hset(targetKey, normalised);
-  if (lowers.length > 0) {
-    for (const k of otherKeys) {
-      tx.hdel(k, ...lowers);
-    }
+  const args: string[] = [String(entries.length)];
+  for (const [addr, entry] of entries) {
+    const normalized: AddressEntry = {
+      ...entry,
+      isPublic: entry.isPublic === true,
+      updatedAt: entry.updatedAt ?? new Date().toISOString(),
+    };
+    args.push(addr.toLowerCase(), JSON.stringify(normalized));
   }
-  await tx.exec();
+
+  await redis.eval(STRICT_EITHER_OR_SCRIPT, [targetKey], args);
 }

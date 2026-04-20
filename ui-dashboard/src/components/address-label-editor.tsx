@@ -107,7 +107,14 @@ export function AddressLabelEditor({
   const firstInputRef = useRef<HTMLInputElement>(null);
 
   const isNewAddress = initialAddress === "";
-  const effectiveChainId = chainId ?? network.chainId;
+  // Chain context for the "Only on X" radio. If the caller passed an explicit
+  // per-chain `scope`, that takes precedence over `chainId` — otherwise the
+  // scope radio would have no matching option when `scope` and `chainId`
+  // disagree (latent bug surface for any future caller).
+  const effectiveChainId =
+    typeof initialScope === "number"
+      ? initialScope
+      : (chainId ?? network.chainId);
 
   // Starting scope: the entry's current scope for edits, "global" for new.
   const startingScope: Scope = initialScope ?? "global";
