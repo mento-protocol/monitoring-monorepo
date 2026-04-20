@@ -10,7 +10,6 @@ import {
   ALL_TRADING_LIMITS,
   ALL_OLS_POOLS,
   POOL_DAILY_SNAPSHOTS_ALL,
-  POOL_SNAPSHOTS_ALL,
   PROTOCOL_FEE_TRANSFERS_ALL,
   UNIQUE_LP_ADDRESSES,
 } from "@/lib/queries";
@@ -40,30 +39,25 @@ export type NetworkData = {
   snapshotWindows: SnapshotWindows;
   pools: Pool[];
   /**
-   * Snapshot arrays for the three standard rolling windows. All derived
-   * client-side by filtering `snapshotsAll` (one paginated query). The
-   * corresponding error fields below are per-window — each is set only
-   * when that specific window's coverage is incomplete, not merely when
-   * the all-history pagination had trouble.
+   * Windowed snapshot arrays derived client-side by filtering
+   * `snapshotsAllDaily`. Since the source is the daily rollup (one row per
+   * pool per UTC day), the 24h window contains at most the current partial-
+   * day row — intra-day precision is intentionally sacrificed to keep the
+   * homepage fetch in one page per network. KPI tiles that used to show a
+   * rolling-hour total now show a UTC-day-aligned total.
+   *
+   * Per-window error fields below are only set when that window's coverage
+   * is incomplete (i.e., we didn't paginate back far enough).
    */
   snapshots: PoolSnapshotWindow[];
   snapshots7d: PoolSnapshotWindow[];
   snapshots30d: PoolSnapshotWindow[];
-  /** Full-history snapshots (paginated). Source of truth for the chart. */
-  snapshotsAll: PoolSnapshotWindow[];
-  /**
-   * True when pagination hit the `SNAPSHOT_MAX_PAGES` safety cap. Older rows
-   * were dropped, but the `snapshotsAll` array still carries the most recent
-   * pages — so 24h/7d/30d windows remain correct and only the "All" chart
-   * range is incomplete. Surfaced via the partial-data badge.
-   */
-  snapshotsAllTruncated: boolean;
   /**
    * Full-history daily rollup snapshots, one row per pool per UTC day.
-   * Feeds the homepage volume-over-time chart. Fetched in parallel with the
-   * hourly `snapshotsAll` via its own pagination loop. Populated much faster
-   * than `snapshotsAll` (~20× fewer rows) so the chart doesn't stall on the
-   * bigger hourly fetch.
+   * Feeds both the TVL and Volume charts. At ~365 rows/pool/year a few pages
+   * cover everything — this replaced the old hourly `snapshotsAll` fetch
+   * whose ~8760 rows/pool/year × multi-chain fan-out routinely tripped the
+   * Envio tier quota (429).
    */
   snapshotsAllDaily: PoolSnapshotWindow[];
   /** True when the daily pagination loop hit its safety cap. */
@@ -81,16 +75,11 @@ export type NetworkData = {
    * Per-window snapshot errors. A window only gets an error when the
    * pagination failure / truncation actually affects that window — i.e.,
    * we didn't fetch rows going back as far as the window's lower bound.
-   * Mid-loop failure after page 1 typically preserves ~12 days of hourly
-   * rows, so 24h and 7d stay error-free while 30d errors out.
    */
   snapshotsError: Error | null;
   snapshots7dError: Error | null;
   snapshots30dError: Error | null;
-  /** Error on the paginated all-history fetch (non-null iff pagination failed). */
-  snapshotsAllError: Error | null;
-  /** Error on the paginated all-history daily fetch. Isolated from the hourly
-   * error so a volume-chart failure doesn't blank the TVL chart or tiles. */
+  /** Error on the paginated all-history daily fetch. */
   snapshotsAllDailyError: Error | null;
   lpError: Error | null;
 };
@@ -112,8 +101,6 @@ const emptyNetworkData = (
   snapshots: [],
   snapshots7d: [],
   snapshots30d: [],
-  snapshotsAll: [],
-  snapshotsAllTruncated: false,
   snapshotsAllDaily: [],
   snapshotsAllDailyTruncated: false,
   tradingLimits: [],
@@ -127,16 +114,16 @@ const emptyNetworkData = (
   snapshotsError: null,
   snapshots7dError: null,
   snapshots30dError: null,
-  snapshotsAllError: null,
   snapshotsAllDailyError: null,
   lpError: null,
 });
 
 /**
- * Envio's hosted Hasura silently caps every PoolSnapshot query at 1000 rows
- * regardless of the `limit` we send, so for full history we paginate with
- * offset. Stop as soon as a page comes back under the page size (that's the
- * last page).
+ * Envio's hosted Hasura silently caps every query at 1000 rows regardless of
+ * the `limit` we send, so for full history we paginate with offset. Stop as
+ * soon as a page comes back under the page size (that's the last page). We
+ * only paginate the daily rollup (PoolDailySnapshot) — at ~365 rows/pool/year
+ * a few pages cover years of history for typical pool counts.
  *
  * Failure modes, all designed to fail open rather than blank the dashboard:
  * - Safety cap `SNAPSHOT_MAX_PAGES` reached → return accumulated rows with
@@ -149,14 +136,14 @@ const emptyNetworkData = (
  *   signal the degraded state would be invisible to anything that only
  *   checks the error channel.
  * - First-page failure → rethrow. No rows at all means there's nothing to
- *   salvage; the caller surfaces it as `snapshotsAllError` (empty state with
- *   explicit error message, not a misleading `$0` dashboard).
+ *   salvage; the caller surfaces it as `snapshotsAllDailyError` (empty state
+ *   with explicit error message, not a misleading `$0` dashboard).
  *
  * Dedup: offset pagination on an append-only table isn't stable under
  * concurrent inserts — a new snapshot at position 0 shifts everything one
  * row right, so the next page's offset overlaps with the previous page's
  * tail. We dedup by `(poolId, timestamp)` (which uniquely identifies a
- * snapshot per the indexer's hourBucket upsert id) before pushing into the
+ * snapshot per the indexer's daily-bucket upsert id) before pushing into the
  * result. This mitigates duplicates; omissions are still theoretically
  * possible but rare and self-heal on the next refresh. A proper fix is
  * keyset pagination — tracked as a follow-up.
@@ -188,24 +175,10 @@ const PARTIAL_PAGE_THROTTLE_MS = 60_000;
 /** @internal */
 export const partialPageLastCapturedAt = new Map<string, number>();
 
-async function fetchAllSnapshotPages(
-  client: GraphQLClient,
-  poolIds: string[],
-  network: string,
-): Promise<SnapshotPageResult> {
-  return fetchPaginatedSnapshotPages(
-    client,
-    poolIds,
-    POOL_SNAPSHOTS_ALL,
-    "PoolSnapshot",
-    network,
-  );
-}
-
 /**
- * Daily rollup of the same shape. ~365 rows/pool/year instead of ~8760,
- * so for typical history a few pages cover everything. Uses the same safety
- * cap and fail-open semantics as the hourly loop.
+ * Daily rollup pagination — ~365 rows/pool/year, so for typical history a
+ * few pages cover everything. Uses the fail-open semantics documented on
+ * `SNAPSHOT_PAGE_SIZE`.
  */
 async function fetchAllDailySnapshotPages(
   client: GraphQLClient,
@@ -335,7 +308,6 @@ export async function fetchNetworkData(
   };
   const [
     feesResult,
-    snapshotsAllResult,
     snapshotsAllDailyResult,
     lpResult,
     tradingLimitsResult,
@@ -345,9 +317,6 @@ export async function fetchNetworkData(
       PROTOCOL_FEE_TRANSFERS_ALL,
       { chainId: network.chainId },
     ),
-    shouldQuery
-      ? fetchAllSnapshotPages(client, poolIds, network.id)
-      : Promise.resolve(emptySnapshotPage),
     shouldQuery
       ? fetchAllDailySnapshotPages(client, poolIds, network.id)
       : Promise.resolve(emptySnapshotPage),
@@ -376,25 +345,11 @@ export async function fetchNetworkData(
       ? aggregateProtocolFees(feesResult.value.ProtocolFeeTransfer ?? [], rates)
       : null;
 
-  // Single source of truth: the paginated all-history fetch. Window-specific
+  // Single source of truth: the paginated daily-rollup fetch. Window-specific
   // arrays are derived in-memory — no separate requests, no server-side cap.
-  // If pagination truncated (hit MAX_PAGES or mid-loop fetch failure), we keep
-  // the most-recent rows we did fetch: 24h/7d/30d derive correctly from those,
-  // and "All" is flagged as partial. Mid-loop failure also surfaces via
-  // `snapshotsAllError` so error-aware consumers (Summary tile) partial-badge.
-  const snapshotsAll =
-    snapshotsAllResult.status === "fulfilled"
-      ? snapshotsAllResult.value.rows
-      : [];
-  const snapshotsAllTruncated =
-    snapshotsAllResult.status === "fulfilled"
-      ? snapshotsAllResult.value.truncated
-      : false;
-  const snapshotsAllError =
-    snapshotsAllResult.status === "rejected"
-      ? toError(snapshotsAllResult.reason)
-      : (snapshotsAllResult.value.error ?? null);
-
+  // If pagination truncated (hit MAX_PAGES or mid-loop fetch failure) we keep
+  // the most-recent rows we did fetch: 24h/7d/30d derive correctly from those
+  // and "All" is flagged as partial.
   const snapshotsAllDaily =
     snapshotsAllDailyResult.status === "fulfilled"
       ? snapshotsAllDailyResult.value.rows
@@ -408,24 +363,23 @@ export async function fetchNetworkData(
       ? toError(snapshotsAllDailyResult.reason)
       : (snapshotsAllDailyResult.value.error ?? null);
 
-  const snapshots = filterSnapshotsToWindow(snapshotsAll, windows.w24h);
-  const snapshots7d = filterSnapshotsToWindow(snapshotsAll, windows.w7d);
-  const snapshots30d = filterSnapshotsToWindow(snapshotsAll, windows.w30d);
+  const snapshots = filterSnapshotsToWindow(snapshotsAllDaily, windows.w24h);
+  const snapshots7d = filterSnapshotsToWindow(snapshotsAllDaily, windows.w7d);
+  const snapshots30d = filterSnapshotsToWindow(snapshotsAllDaily, windows.w30d);
 
   // Per-window error detection. Pagination issues (error or truncation) only
   // affect a specific window if we didn't fetch far enough back to cover its
   // `from` bound. With a mid-loop failure after page 1 (~1000 most-recent
-  // rows ≈ 12 days at current activity) the 24h and 7d windows are still
-  // fully covered — aliasing all three to `snapshotsAllError` would blank
-  // valid recent totals. Rows come in newest-first, so the last element is
-  // the oldest we fetched.
+  // daily rows ≈ 2.7 years per pool) the 24h/7d/30d windows remain fully
+  // covered. Rows come in newest-first, so the last element is the oldest
+  // we fetched.
   const oldestFetchedTs =
-    snapshotsAll.length > 0
-      ? Number(snapshotsAll[snapshotsAll.length - 1].timestamp)
+    snapshotsAllDaily.length > 0
+      ? Number(snapshotsAllDaily[snapshotsAllDaily.length - 1].timestamp)
       : Number.POSITIVE_INFINITY;
   const paginationIssue: Error | null =
-    snapshotsAllError ??
-    (snapshotsAllTruncated
+    snapshotsAllDailyError ??
+    (snapshotsAllDailyTruncated
       ? new Error(
           "Snapshot pagination truncated before reaching the requested window",
         )
@@ -469,8 +423,6 @@ export async function fetchNetworkData(
     snapshots,
     snapshots7d,
     snapshots30d,
-    snapshotsAll,
-    snapshotsAllTruncated,
     snapshotsAllDaily,
     snapshotsAllDailyTruncated,
     tradingLimits,
@@ -490,7 +442,6 @@ export async function fetchNetworkData(
     snapshotsError,
     snapshots7dError,
     snapshots30dError,
-    snapshotsAllError,
     snapshotsAllDailyError,
     lpError: lpResult.status === "rejected" ? toError(lpResult.reason) : null,
   };
@@ -519,12 +470,12 @@ export async function fetchAllNetworks(): Promise<NetworkData[]> {
 }
 
 /**
- * Fetches pools, full-history snapshots (paginated), protocol fees, and LP
- * counts for ALL configured networks in parallel. Window-specific snapshot
- * arrays (24h/7d/30d) are derived in-memory from `snapshotsAll` so we make one
- * GraphQL request instead of four overlapping ones, and avoid Hasura's silent
- * 1000-row cap on windowed queries. Uses Promise.allSettled so one failing
- * network doesn't block others.
+ * Fetches pools, full-history daily snapshots (paginated), protocol fees, and
+ * LP counts for ALL configured networks in parallel. Window-specific snapshot
+ * arrays (24h/7d/30d) are derived in-memory from `snapshotsAllDaily` so we
+ * make one paginated request instead of four overlapping ones, and avoid
+ * Hasura's silent 1000-row cap on windowed queries. Uses Promise.allSettled
+ * so one failing network doesn't block others.
  */
 export function useAllNetworksData(): AllNetworksResult {
   const { data, error, isLoading } = useSWR<NetworkData[]>(

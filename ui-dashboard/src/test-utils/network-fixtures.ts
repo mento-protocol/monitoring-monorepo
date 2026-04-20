@@ -96,14 +96,11 @@ export function makeSnapshot(
 export function makeNetworkData(
   overrides: Partial<NetworkData> = {},
 ): NetworkData {
-  // snapshotsAll is now the source of truth; old tests that only set
-  // snapshots30d still work thanks to the fallback here.
+  // snapshotsAllDaily is the single source of truth for both charts and KPI
+  // windows; old tests that only set snapshots30d still work thanks to the
+  // fallback here.
   const snapshots30d = overrides.snapshots30d ?? [];
-  const snapshotsAll = overrides.snapshotsAll ?? snapshots30d;
-  // snapshotsAllDaily feeds the VolumeOverTimeChart. Default to the same
-  // rows as snapshotsAll so existing volume-chart tests keep working; callers
-  // that need to distinguish the two can pass snapshotsAllDaily explicitly.
-  const snapshotsAllDaily = overrides.snapshotsAllDaily ?? snapshotsAll;
+  const snapshotsAllDaily = overrides.snapshotsAllDaily ?? snapshots30d;
   const base: NetworkData = {
     network: BASE_NETWORK,
     snapshotWindows: buildSnapshotWindows(Date.now()),
@@ -111,8 +108,6 @@ export function makeNetworkData(
     snapshots: [],
     snapshots7d: [],
     snapshots30d,
-    snapshotsAll,
-    snapshotsAllTruncated: false,
     snapshotsAllDaily,
     snapshotsAllDailyTruncated: false,
     tradingLimits: [],
@@ -126,7 +121,6 @@ export function makeNetworkData(
     snapshotsError: null,
     snapshots7dError: null,
     snapshots30dError: null,
-    snapshotsAllError: null,
     snapshotsAllDailyError: null,
     lpError: null,
   };

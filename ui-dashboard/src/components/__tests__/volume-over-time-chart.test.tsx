@@ -244,10 +244,10 @@ describe("VolumeOverTimeChart render", () => {
     expect(html).toMatch(/aria-pressed="false"[^>]*>All</);
   });
 
-  it("exposes an 'All' range tab that maps to snapshotsAll", () => {
-    // Series data lives in snapshotsAll (via the fixture default), so the
-    // "All" tab is unfiltered and will include older snapshots that the 1M
-    // tab would exclude. Default range is 1M so SSR won't show the summed
+  it("exposes an 'All' range tab that maps to snapshotsAllDaily", () => {
+    // Series data lives in snapshotsAllDaily (via the fixture default), so
+    // the "All" tab is unfiltered and will include older snapshots that the
+    // 1M tab would exclude. Default range is 1M so SSR won't show the summed
     // value — this test only asserts the tab is present and reachable.
     const html = renderChart({
       networkData: makeVolumeNetworkData([

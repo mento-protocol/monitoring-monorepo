@@ -29,9 +29,10 @@ type PoolHistory = {
 /**
  * Builds a forward-filled TVL time series. `bucketSeconds` selects the
  * granularity — default is UTC-day (SECONDS_PER_DAY). The 1W range passes
- * SECONDS_PER_HOUR for hour-level fidelity; the indexer writes snapshots on
- * an hourly bucket already, so hour-level granularity doesn't add any
- * server-side cost, just more cursor steps client-side.
+ * SECONDS_PER_HOUR for an hour-level cursor; since the source data is now
+ * the daily rollup, reserves step at day boundaries but the higher cadence
+ * still produces a smoother line (and lets the hover tooltip show hour-level
+ * timestamps).
  *
  * `fromTimestamp` clamps the emitted series to `[fromTimestamp, now]` —
  * callers that only need a recent window (e.g. 1W hourly = 168 buckets)
@@ -51,13 +52,14 @@ export function buildDailySeries(
   let earliestTs = Infinity;
 
   for (const netData of networkData) {
-    // Only skip on top-level failure. `snapshotsAllError` may be set while
-    // `snapshotsAll` still carries preserved recent rows (fail-open path);
-    // forward-fill from what we have and let the caller partial-badge.
+    // Only skip on top-level failure. `snapshotsAllDailyError` may be set
+    // while `snapshotsAllDaily` still carries preserved recent rows
+    // (fail-open path); forward-fill from what we have and let the caller
+    // partial-badge.
     if (netData.error !== null) continue;
     const fpmmPools = netData.pools.filter(isFpmm);
     const snapsByPool = new Map<string, PoolSnapshotWindow[]>();
-    for (const snap of netData.snapshotsAll) {
+    for (const snap of netData.snapshotsAllDaily) {
       const list = snapsByPool.get(snap.poolId);
       if (list) list.push(snap);
       else snapsByPool.set(snap.poolId, [snap]);
