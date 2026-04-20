@@ -237,10 +237,24 @@ function Card({ data }: { data: HomepageOgData | null }) {
           flexDirection: "column",
           flex: 1,
           justifyContent: "flex-end",
+          gap: 10,
         }}
       >
         {data && data.tvlSeries.length >= 2 ? (
           <TvlChart series={data.tvlSeries} />
+        ) : null}
+        {data && data.tvlSeries.length >= 2 ? (
+          <span
+            style={{
+              fontSize: 18,
+              letterSpacing: 1.5,
+              textTransform: "uppercase",
+              color: MUTED,
+              alignSelf: "flex-end",
+            }}
+          >
+            Last 30 days
+          </span>
         ) : null}
       </div>
     </div>

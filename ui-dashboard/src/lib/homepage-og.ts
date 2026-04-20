@@ -20,7 +20,10 @@ import type { Pool, PoolSnapshot } from "@/lib/types";
 const SECONDS_PER_DAY = 86_400;
 const SEVEN_DAYS = 7 * SECONDS_PER_DAY;
 const FOURTEEN_DAYS = 14 * SECONDS_PER_DAY;
-const SPARKLINE_DAYS = 14;
+// Matches the homepage's default TVL-chart range ("1M" / 30d) so the OG
+// preview line shape agrees with what users see when they open the app.
+const TVL_CHART_DAYS = 30;
+const VOLUME_SPARKLINE_DAYS = 14;
 const MAX_ATTENTION_POOLS = 3;
 
 // Cross-chain daily-snapshot query. Fixed row cap (no timestamp filter)
@@ -60,10 +63,10 @@ export type HomepageOgData = {
   volume7dWoWPct: number | null;
   /** Chronological daily USD volume, oldest→newest, up to 14 points. */
   volumeSeries: number[];
-  /** Chronological daily aggregate TVL, oldest→newest, 14 points ending
-   * on today's UTC day. Forward-filled per pool: each bucket sums each
-   * pool's most-recent-snapshot TVL at-or-before that bucket timestamp,
-   * matching the homepage TVL chart's behavior. */
+  /** Chronological daily aggregate TVL, oldest→newest, 30 points ending
+   * on today's UTC day (matches the dashboard's default "1M" range).
+   * Forward-filled per pool: each bucket sums each pool's
+   * most-recent-snapshot TVL at-or-before that bucket timestamp. */
   tvlSeries: number[];
   poolCount: number;
   chainCount: number;
@@ -302,7 +305,7 @@ function computeDailyVolumeSeries(entries: PriceableEntry[]): number[] {
     }
   }
   const days = Array.from(perDay.keys()).sort((a, b) => a - b);
-  return days.slice(-SPARKLINE_DAYS).map((d) => perDay.get(d) ?? 0);
+  return days.slice(-VOLUME_SPARKLINE_DAYS).map((d) => perDay.get(d) ?? 0);
 }
 
 // Forward-filled per-day aggregate TVL across priceable pools, clamped
@@ -335,9 +338,8 @@ function computeDailyTvlSeries(entries: PriceableEntry[]): number[] {
 
   const now = Math.floor(Date.now() / 1000);
   const endBucket = Math.floor(now / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-  // Start the window at (endBucket - 13 * day) so the emitted series has
-  // exactly SPARKLINE_DAYS buckets, ending on today's UTC-day.
-  const windowStartBucket = endBucket - (SPARKLINE_DAYS - 1) * SECONDS_PER_DAY;
+  // Emit exactly TVL_CHART_DAYS buckets ending on today's UTC day.
+  const windowStartBucket = endBucket - (TVL_CHART_DAYS - 1) * SECONDS_PER_DAY;
 
   const cursors = new Array<number>(histories.length).fill(-1);
   const series: number[] = [];
