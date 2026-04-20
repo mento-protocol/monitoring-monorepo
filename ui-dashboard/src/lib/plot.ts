@@ -123,3 +123,20 @@ export const PLOTLY_CONFIG = {
   displayModeBar: false,
   scrollZoom: true,
 } as const;
+
+/**
+ * HTML-escape a string before it reaches Plotly's `labels`, `text`, or
+ * `%{...}` hovertemplate slots. Plotly renders a permissive subset of HTML
+ * in these fields (that's why `<b>Bold</b>` works), so any user-controlled
+ * string interpolated there is an XSS sink — a label like
+ * `<img src=x onerror=alert(1)>` would execute when the legend renders or
+ * a slice is hovered. Escape at the render boundary; keep stored values raw.
+ */
+export function escapePlotText(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
