@@ -1,6 +1,6 @@
 import { unstable_cache } from "next/cache";
-import { GraphQLClient } from "graphql-request";
 import { NETWORKS, NETWORK_IDS, type Network } from "@/lib/networks";
+import { makeOgGraphQLClient } from "@/lib/og-graphql-client";
 import {
   buildOracleRateMap,
   canValueTvl,
@@ -81,18 +81,15 @@ type ChainSlice = {
   pools: Pool[];
   daily: PoolSnapshot[];
   rates: OracleRateMap;
+  /** True if the daily-snapshot fetch for this chain failed, timed out,
+   * or hit the 1000-row cap. Signals that cross-chain daily-derived
+   * aggregates (volume, tvl-series) can't be trusted for protocol totals. */
+  dailyDegraded: boolean;
 };
-
-function makeClient(network: Network): GraphQLClient {
-  const secret = network.hasuraSecret.trim();
-  return new GraphQLClient(network.hasuraUrl, {
-    headers: secret ? { "x-hasura-admin-secret": secret } : {},
-  });
-}
 
 async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
   if (!network.hasuraUrl) return null;
-  const client = makeClient(network);
+  const client = makeOgGraphQLClient(network);
 
   let pools: Pool[];
   try {
@@ -109,10 +106,17 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
   }
 
   if (pools.length === 0) {
-    return { network, pools, daily: [], rates: new Map() };
+    return {
+      network,
+      pools,
+      daily: [],
+      rates: new Map(),
+      dailyDegraded: false,
+    };
   }
 
   let daily: PoolSnapshot[] = [];
+  let dailyDegraded = false;
   try {
     const res = await client.request<{ PoolDailySnapshot: PoolSnapshot[] }>({
       document: HOMEPAGE_OG_DAILY_SNAPSHOTS,
@@ -123,11 +127,23 @@ async function fetchChainSlice(network: Network): Promise<ChainSlice | null> {
     // pre-window snapshots to seed each pool's cursor. Windowed aggregates
     // (volume sums, TVL WoW baseline) apply their own explicit windows.
     daily = res.PoolDailySnapshot ?? [];
+    // Hasura silently truncates at 1000 rows. If we hit that exact count,
+    // we almost certainly lost some history — can't distinguish "got
+    // everything" from "got the newest 1000", so treat as degraded.
+    if (daily.length >= 1000) dailyDegraded = true;
   } catch {
-    // Pools + rates still usable for TVL / health — volume tiles will "—".
+    // Pools + rates still usable for TVL / health; mark daily degraded so
+    // the aggregator knows not to trust cross-chain totals.
+    dailyDegraded = true;
   }
 
-  return { network, pools, daily, rates: buildOracleRateMap(pools, network) };
+  return {
+    network,
+    pools,
+    daily,
+    rates: buildOracleRateMap(pools, network),
+    dailyDegraded,
+  };
 }
 
 export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | null> {
@@ -146,6 +162,10 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
   const fpmmEntries = slices.flatMap((s) =>
     s.pools.filter(isFpmm).map((pool) => ({ pool, slice: s })),
   );
+  // TVL requires a live oraclePrice (canValueTvl). Volume math doesn't —
+  // USDm-leg swap volumes are $1:1 even when a pool's current oraclePrice
+  // is missing. Keep the two filters separate so a stale oracle doesn't
+  // silently drop a healthy pool from the volume aggregate.
   const priceable = fpmmEntries.filter(({ pool, slice }) =>
     canValueTvl(pool, slice.network, slice.rates),
   );
@@ -159,9 +179,15 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
           0,
         );
 
+  const now = Math.floor(Date.now() / 1000);
+  // If any chain's daily-snapshot fetch failed or truncated, the cross-chain
+  // daily-derived totals would silently undercount — surviving chains'
+  // data labeled as "protocol-wide". Null everything daily-derived and let
+  // the card fall back to "—" rather than ship dishonest numbers.
+  const anyChainDegraded = slices.some((s) => s.dailyDegraded);
+
   // TVL WoW: compare current vs 7d-ago reserves, restricted to pools with a
   // snapshot in [now-14d, now-7d] (matches pool-card bounded-window rule).
-  const now = Math.floor(Date.now() / 1000);
   const upperCutoff = now - SEVEN_DAYS;
   const lowerCutoff = now - FOURTEEN_DAYS;
   let priorTvlSum = 0;
@@ -185,23 +211,25 @@ export async function fetchHomepageOgDataUncached(): Promise<HomepageOgData | nu
     anyPrior = true;
   }
   const tvlWoWPct =
-    anyPrior && priorTvlSum > 0
+    !anyChainDegraded && anyPrior && priorTvlSum > 0
       ? ((currentSubsetSum - priorTvlSum) / priorTvlSum) * 100
       : null;
 
-  const totalVolume7dUsd = sumVolumeInWindow(priceable, now - SEVEN_DAYS, now);
-  const priorVolume = sumVolumeInWindow(
-    priceable,
-    now - FOURTEEN_DAYS,
-    now - SEVEN_DAYS,
-  );
+  const totalVolume7dUsd = anyChainDegraded
+    ? null
+    : sumVolumeInWindow(fpmmEntries, now - SEVEN_DAYS, now);
+  const priorVolume = anyChainDegraded
+    ? null
+    : sumVolumeInWindow(fpmmEntries, now - FOURTEEN_DAYS, now - SEVEN_DAYS);
   const volume7dWoWPct =
     totalVolume7dUsd != null && priorVolume != null && priorVolume > 0
       ? ((totalVolume7dUsd - priorVolume) / priorVolume) * 100
       : null;
 
-  const volumeSeries = computeDailyVolumeSeries(priceable);
-  const tvlSeries = computeDailyTvlSeries(priceable);
+  const volumeSeries = anyChainDegraded
+    ? []
+    : computeDailyVolumeSeries(fpmmEntries);
+  const tvlSeries = anyChainDegraded ? [] : computeDailyTvlSeries(priceable);
 
   // Health buckets across ALL pools (virtual = N/A, excluded from TVL).
   const healthBuckets: Record<HealthStatus, number> = {

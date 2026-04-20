@@ -28,7 +28,8 @@ function formatWoW(pct: number): { text: string; color: string } {
 function buildAlt(data: HomepageOgData | null): string {
   if (!data) return "Mento Analytics — cross-chain protocol overview";
   const parts: string[] = ["Mento Analytics"];
-  if (data.totalTvlUsd != null && data.totalTvlUsd > 0) {
+  // `null` = unavailable; `0` = real empty state worth surfacing.
+  if (data.totalTvlUsd != null) {
     parts.push(`TVL ${formatUSD(data.totalTvlUsd)}`);
   }
   if (data.totalVolume7dUsd != null) {
@@ -84,10 +85,9 @@ function TvlChart({ series }: { series: number[] }) {
 }
 
 function Card({ data }: { data: HomepageOgData | null }) {
+  // null → "—" (unavailable); 0 → "$0.00" (real empty state).
   const tvl =
-    data && data.totalTvlUsd != null && data.totalTvlUsd > 0
-      ? formatUSD(data.totalTvlUsd)
-      : "—";
+    data && data.totalTvlUsd != null ? formatUSD(data.totalTvlUsd) : "—";
   const tvlWow = data?.tvlWoWPct != null ? formatWoW(data.tvlWoWPct) : null;
 
   return (

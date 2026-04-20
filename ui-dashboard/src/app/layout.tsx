@@ -30,9 +30,9 @@ function buildDescription(
   data: NonNullable<Awaited<ReturnType<typeof fetchHomepageOgData>>>,
 ): string {
   const parts: string[] = [];
-  if (data.totalTvlUsd != null && data.totalTvlUsd > 0) {
+  // `null` = unavailable (omit); `0` = real empty state (render as "$0.00").
+  if (data.totalTvlUsd != null)
     parts.push(`TVL ${formatUSD(data.totalTvlUsd)}`);
-  }
   if (data.totalVolume7dUsd != null) {
     parts.push(`7d volume ${formatUSD(data.totalVolume7dUsd)}`);
   }
