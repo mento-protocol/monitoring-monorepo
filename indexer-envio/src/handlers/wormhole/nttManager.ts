@@ -80,6 +80,36 @@ type HandlerContext = {
     }) => void;
     deleteUnsafe?: (id: string) => void;
   };
+  WormholeDestPending: {
+    get: (id: string) => Promise<
+      | {
+          id: string;
+          chainId: number;
+          txHash: string;
+          transceiverDigest: string;
+          sourceChainId: number;
+          sourceTransceiver: string;
+          sourceWormholeChainId: number;
+          msgSequence: bigint;
+          destTransceiver: string;
+          blockTimestamp: bigint;
+        }
+      | undefined
+    >;
+    set: (entity: {
+      id: string;
+      chainId: number;
+      txHash: string;
+      transceiverDigest: string;
+      sourceChainId: number;
+      sourceTransceiver: string;
+      sourceWormholeChainId: number;
+      msgSequence: bigint;
+      destTransceiver: string;
+      blockTimestamp: bigint;
+    }) => void;
+    deleteUnsafe?: (id: string) => void;
+  };
   BridgeAttestation: { set: (entity: BridgeAttestation) => void };
   BridgeDailySnapshot: {
     get: (id: string) => Promise<BridgeDailySnapshot | undefined>;
