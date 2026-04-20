@@ -147,6 +147,17 @@ monitoring-monorepo/
 - Production env vars (including Upstash Redis + Blob credentials) are managed by Terraform — see `terraform/terraform.tfvars.example`
 - See root README.md for full env var documentation
 
+## Claude Code Slash Commands
+
+Repo-tracked under `.claude/commands/`. Each `.md` file is the body Claude Code loads when you type `/<filename>`. Add a new one by dropping a markdown file in that directory; remove one by deleting the file.
+
+| Command                              | Purpose                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/verify-ui`                         | Drive chrome-devtools MCP through the dashboard's pages with token-budget guidance and per-page acceptance checks (KPI presence, chart wiring, interaction smoke tests, responsive layouts). Defaults to `localhost:3000`; pass `prod` to verify against `monitoring.mento.org`.                                                    |
+| `/babysit-indexer-deploy [<commit>]` | Poll Envio's deployment registry every 5min, surface per-chain sync %, and prompt for `pnpm deploy:indexer:promote <commit>` once every chain is caught up. Never auto-promotes. Bails after 30min of 404s (build likely failed) or 90min of stagnation. Defaults to `git rev-parse --short origin/envio` when no commit is passed. |
+
+To use them you need [Claude Code](https://claude.com/claude-code). Personal/local-only commands belong in your own `~/.claude/commands/` (or in `.git/info/exclude` if you want to keep them in this directory but not share).
+
 ## Envio Gotchas
 
 ### Hasura must run on port 8080
