@@ -8,9 +8,27 @@ import {
   sanitizeEntry,
   type AddressEntry,
   type AddressLabelsSnapshot,
+  type Scope,
 } from "@/lib/address-labels";
-import { MAINNET_CHAIN_IDS } from "@/lib/types";
 import { isValidAddress } from "@/lib/format";
+
+type ImportedCounts = {
+  global: number;
+  chains: Record<string, number>;
+};
+
+function emptyCounts(): ImportedCounts {
+  return { global: 0, chains: {} };
+}
+
+function addCount(counts: ImportedCounts, scope: Scope, n: number): void {
+  if (n === 0) return;
+  if (scope === "global") {
+    counts.global += n;
+  } else {
+    counts.chains[String(scope)] = (counts.chains[String(scope)] ?? 0) + n;
+  }
+}
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const session = await getAuthSession();
@@ -79,132 +97,174 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // Accept four formats:
-  // 1. Snapshot format:    { exportedAt, chains: { chainId: { address: entry } } }
+  // 1. Snapshot format:    { exportedAt, global?: {...}, chains: { chainId: {...} } }
   // 2. Simple format:      { chainId, labels: { address: entry } }
   // 3. Gnosis Safe format: [{ address, chainId, name }]
   // 4. CSV format:         handled above via Content-Type or content sniffing
   if (isGnosisSafeFormat(body)) {
-    const entries = body as Array<{
-      address: string;
-      chainId: string;
-      name: string;
-    }>;
-
-    // Validate all entries upfront, then group by chainId.
-    type ParsedEntry = { chainId: number; address: string; name: string };
-    const parsed: ParsedEntry[] = [];
-    for (const entry of entries) {
-      // Strict decimal-only parse — reject "1e3", "0x1", and whitespace-padded
-      // strings that Number() silently coerces to valid-looking chain IDs.
-      // We intentionally do NOT trim: leading/trailing spaces are malformed input.
-      if (!/^\d+$/.test(entry.chainId)) {
-        return NextResponse.json(
-          { error: `Invalid chainId: ${entry.chainId}` },
-          { status: 400 },
-        );
-      }
-      const chainId = parseInt(entry.chainId, 10);
-      if (!Number.isInteger(chainId) || chainId <= 0) {
-        return NextResponse.json(
-          { error: `Invalid chainId: ${entry.chainId}` },
-          { status: 400 },
-        );
-      }
-      if (!isValidAddress(entry.address)) {
-        return NextResponse.json(
-          { error: `Invalid address: ${entry.address}` },
-          { status: 400 },
-        );
-      }
-      if (!entry.name.trim()) {
-        return NextResponse.json(
-          { error: `Entry with address ${entry.address} has an empty name` },
-          { status: 400 },
-        );
-      }
-      parsed.push({ chainId, address: entry.address, name: entry.name });
-    }
-
-    // Fetch existing labels for each distinct chainId so we can merge instead
-    // of overwriting — preserves tags, notes, isPublic from prior entries.
-    const existingByChain = new Map<number, Record<string, AddressEntry>>();
-    const distinctChainIds = [...new Set(parsed.map((e) => e.chainId))];
-    try {
-      for (const chainId of distinctChainIds) {
-        existingByChain.set(chainId, await getLabels(chainId));
-      }
-    } catch (err) {
-      return serverError(err);
-    }
-
-    const byChain = new Map<number, Record<string, AddressEntry>>();
-    for (const entry of parsed) {
-      const { chainId, address, name } = entry;
-      const normalizedAddress = address.toLowerCase();
-      const existing = existingByChain.get(chainId) ?? {};
-      const prev = existing[normalizedAddress];
-      if (!byChain.has(chainId)) byChain.set(chainId, {});
-      byChain.get(chainId)![normalizedAddress] = sanitizeEntry({
-        // Preserve existing metadata; only overwrite name and timestamp.
-        ...prev,
-        name,
-        tags: prev?.tags ?? [],
-        updatedAt: new Date().toISOString(),
-      });
-    }
-
-    try {
-      let imported = 0;
-      for (const [chainId, labels] of byChain.entries()) {
-        imported += Object.keys(labels).length;
-        await importLabels(chainId, labels);
-      }
-      return NextResponse.json({ ok: true, imported });
-    } catch (err) {
-      return serverError(err);
-    }
+    return handleGnosisSafe(body);
   }
 
   if (isSnapshot(body)) {
-    const chainEntries = Object.entries(body.chains);
+    return handleSnapshot(body);
+  }
 
-    // Validate all chains upfront before writing anything
-    for (const [key, labels] of chainEntries) {
-      const n = Number(key);
-      if (!Number.isInteger(n) || n <= 0) {
-        return NextResponse.json(
-          { error: `Invalid chainId key: ${key}` },
-          { status: 400 },
-        );
-      }
-      if (!isEntriesMap(labels)) {
-        return NextResponse.json(
-          { error: `Invalid labels map for chainId ${key}` },
-          { status: 400 },
-        );
-      }
+  return handleSimpleFormat(body);
+}
+
+async function handleGnosisSafe(
+  body: Array<{ address: string; chainId: string; name: string }>,
+): Promise<NextResponse> {
+  const entries = body;
+
+  // Validate all entries upfront, then group by chainId.
+  type ParsedEntry = { chainId: number; address: string; name: string };
+  const parsed: ParsedEntry[] = [];
+  for (const entry of entries) {
+    // Strict decimal-only parse — reject "1e3", "0x1", and whitespace-padded
+    // strings that Number() silently coerces to valid-looking chain IDs.
+    // We intentionally do NOT trim: leading/trailing spaces are malformed input.
+    if (!/^\d+$/.test(entry.chainId)) {
+      return NextResponse.json(
+        { error: `Invalid chainId: ${entry.chainId}` },
+        { status: 400 },
+      );
     }
+    const chainId = parseInt(entry.chainId, 10);
+    if (!Number.isInteger(chainId) || chainId <= 0) {
+      return NextResponse.json(
+        { error: `Invalid chainId: ${entry.chainId}` },
+        { status: 400 },
+      );
+    }
+    if (!isValidAddress(entry.address)) {
+      return NextResponse.json(
+        { error: `Invalid address: ${entry.address}` },
+        { status: 400 },
+      );
+    }
+    if (!entry.name.trim()) {
+      return NextResponse.json(
+        { error: `Entry with address ${entry.address} has an empty name` },
+        { status: 400 },
+      );
+    }
+    parsed.push({ chainId, address: entry.address, name: entry.name });
+  }
 
-    try {
-      let imported = 0;
-      for (const [chainId, labels] of chainEntries) {
-        // Auto-upgrade legacy entries (label→name, category→tags[0])
-        const upgraded = upgradeEntries(labels as Record<string, unknown>);
-        // Sanitize (enforce limits) + filter empty entries (#4, #7)
-        const filtered = Object.fromEntries(
-          Object.entries(upgraded)
-            .map(([addr, e]) => [addr.toLowerCase(), sanitizeEntry(e)] as const)
-            .filter(([, e]) => e.name !== "" || e.tags.length > 0),
-        );
-        imported += Object.keys(filtered).length;
-        await importLabels(Number(chainId), filtered);
-      }
-      return NextResponse.json({ ok: true, imported });
-    } catch (err) {
-      return serverError(err);
+  // Fetch existing labels for each distinct chainId so we can merge instead
+  // of overwriting — preserves tags, notes, isPublic from prior entries.
+  const existingByChain = new Map<number, Record<string, AddressEntry>>();
+  const distinctChainIds = [...new Set(parsed.map((e) => e.chainId))];
+  try {
+    for (const chainId of distinctChainIds) {
+      existingByChain.set(chainId, await getLabels(chainId));
+    }
+  } catch (err) {
+    return serverError(err);
+  }
+
+  const byChain = new Map<number, Record<string, AddressEntry>>();
+  for (const entry of parsed) {
+    const { chainId, address, name } = entry;
+    const normalizedAddress = address.toLowerCase();
+    const existing = existingByChain.get(chainId) ?? {};
+    const prev = existing[normalizedAddress];
+    if (!byChain.has(chainId)) byChain.set(chainId, {});
+    byChain.get(chainId)![normalizedAddress] = sanitizeEntry({
+      // Preserve existing metadata; only overwrite name and timestamp.
+      ...prev,
+      name,
+      tags: prev?.tags ?? [],
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  try {
+    const counts = emptyCounts();
+    for (const [chainId, labels] of byChain.entries()) {
+      addCount(counts, chainId, Object.keys(labels).length);
+      await importLabels(chainId, labels);
+    }
+    return NextResponse.json({ ok: true, imported: counts });
+  } catch (err) {
+    return serverError(err);
+  }
+}
+
+async function handleSnapshot(
+  body: AddressLabelsSnapshot,
+): Promise<NextResponse> {
+  const chainEntries = Object.entries(body.chains);
+  const globalEntries = body.global ?? {};
+
+  // Validate chains upfront before writing anything.
+  for (const [key, labels] of chainEntries) {
+    const n = Number(key);
+    if (!Number.isInteger(n) || n <= 0) {
+      return NextResponse.json(
+        { error: `Invalid chainId key: ${key}` },
+        { status: 400 },
+      );
+    }
+    if (!isEntriesMap(labels)) {
+      return NextResponse.json(
+        { error: `Invalid labels map for chainId ${key}` },
+        { status: 400 },
+      );
     }
   }
 
+  // Validate global if present.
+  if (body.global !== undefined && !isEntriesMap(body.global)) {
+    return NextResponse.json(
+      { error: "Invalid labels map for global scope" },
+      { status: 400 },
+    );
+  }
+
+  // Strict either/or: an address must not appear in both global AND a chain.
+  // The alternative (silently letting the last write win) makes import order
+  // load-bearing, which is surprising and error-prone.
+  const globalAddresses = new Set(
+    Object.keys(globalEntries).map((a) => a.toLowerCase()),
+  );
+  for (const [chainId, labels] of chainEntries) {
+    for (const addr of Object.keys(labels as Record<string, unknown>)) {
+      if (globalAddresses.has(addr.toLowerCase())) {
+        return NextResponse.json(
+          {
+            error: `Address ${addr} appears in both global and chain ${chainId}; a label must be in exactly one scope`,
+          },
+          { status: 400 },
+        );
+      }
+    }
+  }
+
+  try {
+    const counts = emptyCounts();
+
+    if (Object.keys(globalEntries).length > 0) {
+      const upgraded = upgradeEntries(globalEntries as Record<string, unknown>);
+      const filtered = sanitizeAndFilter(upgraded);
+      addCount(counts, "global", Object.keys(filtered).length);
+      await importLabels("global", filtered);
+    }
+
+    for (const [chainId, labels] of chainEntries) {
+      const upgraded = upgradeEntries(labels as Record<string, unknown>);
+      const filtered = sanitizeAndFilter(upgraded);
+      addCount(counts, Number(chainId), Object.keys(filtered).length);
+      await importLabels(Number(chainId), filtered);
+    }
+    return NextResponse.json({ ok: true, imported: counts });
+  } catch (err) {
+    return serverError(err);
+  }
+}
+
+async function handleSimpleFormat(body: unknown): Promise<NextResponse> {
   const { chainId, labels } = body as Record<string, unknown>;
   if (
     typeof chainId !== "number" ||
@@ -221,22 +281,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    // Auto-upgrade legacy entries (label→name, category→tags[0])
     const upgraded = upgradeEntries(labels as Record<string, unknown>);
-    // Sanitize (enforce limits) + filter empty entries (#4, #7)
-    const filtered = Object.fromEntries(
-      Object.entries(upgraded)
-        .map(([addr, e]) => [addr.toLowerCase(), sanitizeEntry(e)] as const)
-        .filter(([, e]) => e.name !== "" || e.tags.length > 0),
-    );
+    const filtered = sanitizeAndFilter(upgraded);
     await importLabels(chainId, filtered);
-    return NextResponse.json({
-      ok: true,
-      imported: Object.keys(filtered).length,
-    });
+    const counts = emptyCounts();
+    addCount(counts, chainId, Object.keys(filtered).length);
+    return NextResponse.json({ ok: true, imported: counts });
   } catch (err) {
     return serverError(err);
   }
+}
+
+// Sanitize (enforce limits) + filter empty entries (#4, #7).
+// Lower-cases addresses so downstream writes are canonical.
+function sanitizeAndFilter(
+  entries: Record<string, AddressEntry>,
+): Record<string, AddressEntry> {
+  return Object.fromEntries(
+    Object.entries(entries)
+      .map(([addr, e]) => [addr.toLowerCase(), sanitizeEntry(e)] as const)
+      .filter(([, e]) => e.name !== "" || e.tags.length > 0),
+  );
 }
 
 function isGnosisSafeFormat(
@@ -294,16 +359,17 @@ function serverError(err: unknown): NextResponse {
 // CSV import helpers
 
 /**
- * Parse a CSV body and import into all configured mainnet chains.
+ * Parse a CSV body and route rows per-scope.
  *
  * Expected format (header row required):
- *   address,name,tags
- *   0x1234...,My Label,"Market Maker;Arbitrageur"
+ *   address,name,tags,chainId
+ *   0x1234...,My Label,"Market Maker;Arbitrageur",
+ *   0x5678...,Celo Rebalancer,,42220
  *
- * The `tags` column is optional. Tags are semicolon-delimited within the CSV
- * column. Additional columns are ignored. Duplicate addresses are merged (last
- * entry for an address wins). Chain defaults to Celo (42220) + Monad (143)
- * mainnet.
+ * Columns `tags` and `chainId` are optional. When `chainId` is populated, the
+ * row becomes a chain-specific label; when blank or the column is missing, the
+ * row becomes a cross-chain (global) label. Tags are semicolon-delimited.
+ * Additional columns are ignored. Duplicate (scope, address) pairs: last wins.
  */
 async function handleCsvImport(req: NextRequest): Promise<NextResponse> {
   let text: string;
@@ -332,13 +398,13 @@ async function handleCsvText(text: string): Promise<NextResponse> {
   }
   const { rows, hasTagsColumn } = parsed;
   if (rows.length === 0) {
-    return NextResponse.json({ ok: true, imported: 0 });
+    return NextResponse.json({ ok: true, imported: emptyCounts() });
   }
 
-  // Build labels map — last row wins for duplicate addresses.
-  const labels: Record<string, AddressEntry> = {};
+  // Group rows by scope. Within a scope, last row wins for duplicate addresses.
+  const byScope = new Map<Scope, Record<string, AddressEntry>>();
   const now = new Date().toISOString();
-  for (const { address, name, tags } of rows) {
+  for (const { address, name, tags, scope } of rows) {
     // Do NOT set isPublic here — the merge below preserves the existing value.
     // Forcing isPublic:true would silently un-private any previously private label.
     // Deduplicate tags case-insensitively (#6)
@@ -351,31 +417,29 @@ async function handleCsvText(text: string): Promise<NextResponse> {
         seenTags.add(key);
         return true;
       });
-    labels[address.toLowerCase()] = {
+    const lower = address.toLowerCase();
+    const bucket = byScope.get(scope) ?? {};
+    bucket[lower] = {
       name,
       tags: deduplicatedTags,
       updatedAt: now,
     };
+    byScope.set(scope, bucket);
   }
 
-  // Fetch existing labels to merge (preserve notes, isPublic).
-  const existingByChain = new Map<number, Record<string, AddressEntry>>();
+  // Fetch existing labels per scope for merge (preserve notes, isPublic).
+  const existingByScope = new Map<Scope, Record<string, AddressEntry>>();
   try {
-    for (const chainId of MAINNET_CHAIN_IDS) {
-      existingByChain.set(chainId, await getLabels(chainId));
+    for (const scope of byScope.keys()) {
+      existingByScope.set(scope, await getLabels(scope));
     }
   } catch (err) {
     return serverError(err);
   }
 
-  // Pre-compute all merged maps before any writes. Then fire all writes in
-  // parallel via Promise.all — reduces (but does not eliminate) partial-write
-  // risk compared to sequential writes. Note: Promise.all is NOT atomic; one
-  // chain can succeed before another rejects. On failure, the caller should
-  // retry — re-importing already-written chains is idempotent.
-  const mergedByChain = new Map<number, Record<string, AddressEntry>>();
-  for (const chainId of MAINNET_CHAIN_IDS) {
-    const existing = existingByChain.get(chainId) ?? {};
+  const mergedByScope = new Map<Scope, Record<string, AddressEntry>>();
+  for (const [scope, labels] of byScope.entries()) {
+    const existing = existingByScope.get(scope) ?? {};
     const merged: Record<string, AddressEntry> = {};
     for (const [addr, entry] of Object.entries(labels)) {
       const prev = existing[addr];
@@ -387,27 +451,35 @@ async function handleCsvText(text: string): Promise<NextResponse> {
         tags: hasTagsColumn ? entry.tags : (prev?.tags ?? []),
       });
     }
-    mergedByChain.set(chainId, merged);
+    mergedByScope.set(scope, merged);
   }
 
   try {
-    await Promise.all(
-      [...mergedByChain.entries()].map(([chainId, merged]) =>
-        importLabels(chainId, merged),
-      ),
-    );
-    return NextResponse.json({
-      ok: true,
-      imported: Object.keys(labels).length,
-    });
+    const counts = emptyCounts();
+    // Writes are sequential rather than parallel: `importLabels` enforces the
+    // strict-either/or invariant by HDEL-ing from other scopes, so concurrent
+    // writes across scopes for the same address could race. Sequential is
+    // simpler and the import volume is small.
+    for (const [scope, merged] of mergedByScope.entries()) {
+      await importLabels(scope, merged);
+      addCount(counts, scope, Object.keys(merged).length);
+    }
+    return NextResponse.json({ ok: true, imported: counts });
   } catch (err) {
     return serverError(err);
   }
 }
 
+type CsvRow = {
+  address: string;
+  name: string;
+  tags: string[];
+  scope: Scope;
+};
+
 type CsvParseResult =
   | {
-      rows: Array<{ address: string; name: string; tags: string[] }>;
+      rows: CsvRow[];
       /** True when the CSV contained a "tags" column; false = column absent */
       hasTagsColumn: boolean;
     }
@@ -417,6 +489,7 @@ type CsvParseResult =
  * Minimal CSV parser. Supports quoted fields and UTF-8 BOM. Expects a header
  * row containing at least "address" and "name" columns (case-insensitive).
  * Optional "tags" column with semicolon-delimited values.
+ * Optional "chainId" column: populated → per-chain, blank/missing → global.
  * Extra columns are ignored.
  *
  * Limitation: quoted fields containing embedded newlines (RFC 4180 §2.6) are
@@ -439,6 +512,7 @@ function parseCsv(text: string): CsvParseResult {
   const addrIdx = header.indexOf("address");
   const nameIdx = header.indexOf("name");
   const tagsIdx = header.indexOf("tags");
+  const chainIdIdx = header.indexOf("chainid");
 
   if (addrIdx === -1 || nameIdx === -1) {
     return {
@@ -448,7 +522,7 @@ function parseCsv(text: string): CsvParseResult {
     };
   }
 
-  const rows: Array<{ address: string; name: string; tags: string[] }> = [];
+  const rows: CsvRow[] = [];
   for (let i = 1; i < lines.length; i++) {
     const parsedLine = splitCsvLine(lines[i]);
     if ("error" in parsedLine) {
@@ -460,6 +534,8 @@ function parseCsv(text: string): CsvParseResult {
     const address = cols[addrIdx]?.trim() ?? "";
     const name = cols[nameIdx]?.trim() ?? "";
     const tagsRaw = tagsIdx !== -1 ? (cols[tagsIdx]?.trim() ?? "") : "";
+    const chainIdRaw =
+      chainIdIdx !== -1 ? (cols[chainIdIdx]?.trim() ?? "") : "";
     const tags = tagsRaw
       ? tagsRaw
           .split(";")
@@ -469,7 +545,7 @@ function parseCsv(text: string): CsvParseResult {
 
     // Skip only fully empty rows. Half-empty rows are malformed input and
     // should fail loudly rather than silently disappearing from the import.
-    if (!address && !name && tags.length === 0) continue;
+    if (!address && !name && tags.length === 0 && !chainIdRaw) continue;
     if (!address) {
       return {
         error: `Empty address on line ${i + 1}`,
@@ -486,7 +562,28 @@ function parseCsv(text: string): CsvParseResult {
         error: `Empty name for address ${address} on line ${i + 1}`,
       };
     }
-    rows.push({ address, name, tags });
+
+    // chainId column: blank → global, populated → validated per-chain.
+    let scope: Scope;
+    if (!chainIdRaw) {
+      scope = "global";
+    } else {
+      // Strict decimal-only parse — matches the Gnosis Safe format parser.
+      if (!/^\d+$/.test(chainIdRaw)) {
+        return {
+          error: `Invalid chainId "${chainIdRaw}" on line ${i + 1}`,
+        };
+      }
+      const chainId = parseInt(chainIdRaw, 10);
+      if (!Number.isInteger(chainId) || chainId <= 0) {
+        return {
+          error: `Invalid chainId "${chainIdRaw}" on line ${i + 1}`,
+        };
+      }
+      scope = chainId;
+    }
+
+    rows.push({ address, name, tags, scope });
   }
 
   return { rows, hasTagsColumn: tagsIdx !== -1 };

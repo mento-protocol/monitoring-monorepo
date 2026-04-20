@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { put } from "@vercel/blob";
 import { getAuthSession } from "@/auth";
-import {
-  getAllChainLabels,
-  type AddressLabelsSnapshot,
-} from "@/lib/address-labels";
+import { getAllLabels, type AddressLabelsSnapshot } from "@/lib/address-labels";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const cronSecret = process.env.CRON_SECRET;
@@ -40,9 +37,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return await Sentry.withMonitor(
       "address-labels-backup",
       async () => {
-        const chains = await getAllChainLabels();
+        const { global, chains } = await getAllLabels();
         const snapshot: AddressLabelsSnapshot = {
           exportedAt: new Date().toISOString(),
+          global,
           chains,
         };
 

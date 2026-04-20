@@ -3,8 +3,7 @@ import * as Sentry from "@sentry/nextjs";
 import { getAuthSession } from "@/auth";
 import {
   getLabels,
-  getAllChainLabels,
-  type AddressEntry,
+  getAllLabels,
   type AddressLabelsSnapshot,
 } from "@/lib/address-labels";
 
@@ -20,28 +19,31 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const chainIdParam = req.nextUrl.searchParams.get("chainId");
 
   try {
-    let chains: Record<string, Record<string, AddressEntry>>;
+    let snapshot: AddressLabelsSnapshot;
     let filename: string;
 
     if (chainIdParam !== null) {
-      // Legacy: export a single chain by chainId
+      // Legacy: export a single chain by chainId — no global included.
       const chainId = Number(chainIdParam);
       if (!Number.isInteger(chainId) || chainId <= 0) {
         return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });
       }
       const labels = await getLabels(chainId);
-      chains = { [String(chainId)]: labels };
+      snapshot = {
+        exportedAt: new Date().toISOString(),
+        chains: { [String(chainId)]: labels },
+      };
       filename = `address-labels-chain-${chainId}-${new Date().toISOString().slice(0, 10)}.json`;
     } else {
-      // Export all chains
-      chains = await getAllChainLabels();
+      // Export all scopes — global + every chain.
+      const { global, chains } = await getAllLabels();
+      snapshot = {
+        exportedAt: new Date().toISOString(),
+        global,
+        chains,
+      };
       filename = `address-labels-all-${new Date().toISOString().slice(0, 10)}.json`;
     }
-
-    const snapshot: AddressLabelsSnapshot = {
-      exportedAt: new Date().toISOString(),
-      chains,
-    };
 
     return new NextResponse(JSON.stringify(snapshot, null, 2), {
       headers: {

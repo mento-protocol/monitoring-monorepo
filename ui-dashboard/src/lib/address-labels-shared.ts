@@ -13,6 +13,14 @@ export type AddressEntry = {
   updatedAt: string;
 };
 
+/**
+ * Where a label lives. `"global"` means cross-chain — the label applies to
+ * every chain unless a chain-specific entry exists for that address. A
+ * numeric value is a chainId, meaning the label applies only on that chain.
+ * Per-address, exactly one scope holds the entry (strict either/or).
+ */
+export type Scope = "global" | number;
+
 /** Full record as returned from the API -- includes the address itself. */
 export type AddressEntryRecord = AddressEntry & {
   address: string;
@@ -21,6 +29,8 @@ export type AddressEntryRecord = AddressEntry & {
 /** Shape of a full export/backup snapshot. */
 export type AddressLabelsSnapshot = {
   exportedAt: string;
+  /** Cross-chain entries. Optional for back-compat with older snapshots. */
+  global?: Record<string, AddressEntry>;
   /** chainId → address (lower) → entry */
   chains: Record<string, Record<string, AddressEntry>>;
 };

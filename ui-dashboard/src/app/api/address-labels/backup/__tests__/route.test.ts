@@ -7,9 +7,18 @@ vi.mock("@/auth", () => ({
 }));
 
 vi.mock("@/lib/address-labels", () => ({
-  getAllChainLabels: vi.fn().mockResolvedValue({
-    "42220": {
-      "0xabc": { name: "Test", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
+  getAllLabels: vi.fn().mockResolvedValue({
+    global: {
+      "0xggg": {
+        name: "Cross-chain",
+        tags: [],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    },
+    chains: {
+      "42220": {
+        "0xabc": { name: "Test", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
+      },
     },
   }),
 }));
@@ -89,9 +98,10 @@ describe("POST /api/address-labels/backup", () => {
 
     const stored = JSON.parse(content as string);
     expect(stored).toHaveProperty("exportedAt");
+    expect(stored).toHaveProperty("global");
     expect(stored).toHaveProperty("chains");
+    expect(stored.global["0xggg"].name).toBe("Cross-chain");
     expect(stored.chains).toHaveProperty("42220");
-    // Verify v2 schema in backup
     expect(stored.chains["42220"]["0xabc"].name).toBe("Test");
     expect(stored.chains["42220"]["0xabc"].tags).toEqual([]);
   });

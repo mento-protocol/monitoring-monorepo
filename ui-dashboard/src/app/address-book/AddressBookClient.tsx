@@ -1,15 +1,18 @@
 "use client";
 
 import { useRef, useState, useCallback, useMemo } from "react";
+import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
 import { TagPills } from "@/components/tag-pills";
 import { ChainIcon } from "@/components/chain-icon";
 import { explorerAddressUrl } from "@/lib/tokens";
 import { truncateAddress } from "@/lib/format";
+import type { Scope } from "@/lib/address-labels-shared";
 import {
   NETWORKS,
   NETWORK_IDS,
+  DEFAULT_NETWORK,
   isConfiguredNetworkId,
   networkIdForChainId,
   type Network,
@@ -18,13 +21,37 @@ import { buildAddressBookRows, type AddressBookRow } from "@/lib/address-book";
 
 type AddressRow = AddressBookRow;
 
-type EditTarget = { address: string; chainId: number };
+type EditTarget = { address: string; scope: Scope; chainId: number };
+
+type ImportedCounts = {
+  global: number;
+  chains: Record<string, number>;
+};
+
+function formatImportCounts(counts?: ImportedCounts): string {
+  if (!counts) return "Imported 0 labels.";
+  const parts: string[] = [];
+  if (counts.global > 0) {
+    parts.push(`${counts.global} global`);
+  }
+  for (const [chainId, n] of Object.entries(counts.chains)) {
+    if (n === 0) continue;
+    const id = networkIdForChainId(Number(chainId));
+    const label = id ? NETWORKS[id].label : `Chain ${chainId}`;
+    parts.push(`${n} ${label}-only`);
+  }
+  const total =
+    counts.global + Object.values(counts.chains).reduce((a, b) => a + b, 0);
+  if (parts.length === 0) return "Imported 0 labels.";
+  return `Imported ${total} label${total !== 1 ? "s" : ""}: ${parts.join(", ")}.`;
+}
 
 export default function AddressBookPage({
   canEdit: userCanEdit = false,
 }: {
   canEdit?: boolean;
 }) {
+  const { network: currentNetwork } = useNetwork();
   const { customEntries, getEntry, isLoading, error } = useAddressLabels();
 
   const [search, setSearch] = useState("");
@@ -33,6 +60,11 @@ export default function AddressBookPage({
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Display network for global rows — keeps the Chain column populated with
+  // something reasonable so explorer links don't break. `scope === "global"`
+  // is what actually drives the "All chains" pill in the Chain column.
+  const globalDisplayNetwork = NETWORKS[DEFAULT_NETWORK];
 
   // Contract labels from every configured network — one row per (chainId, address).
   const contractRows = useMemo<AddressRow[]>(() => {
@@ -50,6 +82,7 @@ export default function AddressBookPage({
           name,
           tags: [],
           isCustom: false,
+          scope: net.chainId,
           network: net,
         });
       }
@@ -57,24 +90,39 @@ export default function AddressBookPage({
     return rows;
   }, []);
 
-  // Custom rows are already cross-chain — each row carries its own chainId.
+  // Custom rows: global entries render as a single "All chains" row;
+  // per-chain entries render as one row per chain.
   const customRows = useMemo<AddressRow[]>(
     () =>
       customEntries.flatMap((r) => {
-        const net = networkForChainId(r.chainId);
+        if (r.scope === "global") {
+          return [
+            {
+              key: `custom:global:${r.address}`,
+              address: r.address,
+              name: r.name,
+              tags: r.tags,
+              isCustom: true,
+              scope: "global" as Scope,
+              network: globalDisplayNetwork,
+            },
+          ];
+        }
+        const net = networkForChainId(r.scope);
         if (!net) return [];
         return [
           {
-            key: `custom:${r.chainId}:${r.address}`,
+            key: `custom:${r.scope}:${r.address}`,
             address: r.address,
             name: r.name,
             tags: r.tags,
             isCustom: true,
+            scope: r.scope,
             network: net,
           },
         ];
       }),
-    [customEntries],
+    [customEntries, globalDisplayNetwork],
   );
 
   const allRows = useMemo<AddressRow[]>(
@@ -82,10 +130,12 @@ export default function AddressBookPage({
       buildAddressBookRows(contractRows, customRows).filter((row) => {
         if (!search) return true;
         const q = search.toLowerCase();
+        const chainText =
+          row.scope === "global" ? "all chains" : row.network.label;
         return (
           row.address.toLowerCase().includes(q) ||
           row.name.toLowerCase().includes(q) ||
-          row.network.label.toLowerCase().includes(q) ||
+          chainText.toLowerCase().includes(q) ||
           row.tags.some((t) => t.toLowerCase().includes(q))
         );
       }),
@@ -130,11 +180,8 @@ export default function AddressBookPage({
             setImportError(body.error ?? "Import failed.");
             return;
           }
-          const { imported } = (await res.json()) as { imported?: number };
-          const count = imported ?? 0;
-          setImportSuccess(
-            `Imported ${count} label${count !== 1 ? "s" : ""} from CSV to both mainnet chains.`,
-          );
+          const body = (await res.json()) as { imported?: ImportedCounts };
+          setImportSuccess(formatImportCounts(body.imported));
         } catch (err) {
           setImportError(err instanceof Error ? err.message : "Import failed.");
         }
@@ -146,7 +193,7 @@ export default function AddressBookPage({
         parsed = JSON.parse(await file.text());
       } catch {
         setImportError(
-          "Invalid file. Expected JSON or CSV (address,name,tags).",
+          "Invalid file. Expected JSON or CSV (address,name,tags,chainId).",
         );
         return;
       }
@@ -162,9 +209,8 @@ export default function AddressBookPage({
           setImportError(body.error ?? "Import failed.");
           return;
         }
-        const { imported } = (await res.json()) as { imported?: number };
-        const count = imported ?? 0;
-        setImportSuccess(`Imported ${count} label${count !== 1 ? "s" : ""}.`);
+        const body = (await res.json()) as { imported?: ImportedCounts };
+        setImportSuccess(formatImportCounts(body.imported));
       } catch (err) {
         setImportError(err instanceof Error ? err.message : "Import failed.");
       }
@@ -219,9 +265,10 @@ export default function AddressBookPage({
                   </p>
                   <pre className="mb-2 overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`[{ "address": "0x...",\n   "chainId": "1",\n   "name": "My Label" }]`}</pre>
                   <p className="mb-1 font-medium text-slate-400">
-                    CSV (address,name,tags) — imports into both mainnet chains:
+                    CSV (address,name,tags,chainId) — chainId blank =
+                    cross-chain:
                   </p>
-                  <pre className="overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`address,name,tags\n0x...,My Label,"Market Maker;Whale"`}</pre>
+                  <pre className="overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`address,name,tags,chainId\n0x...,My Label,"Whale",\n0x...,Celo Rebalancer,,42220`}</pre>
                 </div>
               </details>
             </div>
@@ -318,7 +365,7 @@ export default function AddressBookPage({
             </thead>
             <tbody>
               {allRows.map((row) => {
-                const entry = row.isCustom
+                const resolved = row.isCustom
                   ? getEntry(row.address, row.network.chainId)
                   : undefined;
                 return (
@@ -327,16 +374,28 @@ export default function AddressBookPage({
                     address={row.address}
                     name={row.name}
                     tags={row.tags}
+                    scope={row.scope}
                     network={row.network}
-                    notes={entry?.notes}
-                    isPublic={entry?.isPublic}
+                    notes={resolved?.entry.notes}
+                    isPublic={resolved?.entry.isPublic}
                     isCustom={row.isCustom}
                     canEdit={userCanEdit}
                     explorerUrl={explorerAddressUrl(row.network, row.address)}
                     onEdit={() =>
                       setEditTarget({
                         address: row.address,
-                        chainId: row.network.chainId,
+                        // For custom rows, scope is authoritative. For contract
+                        // rows (no custom entry yet), default to "global" so
+                        // new labels are cross-chain by default.
+                        scope: row.isCustom ? row.scope : "global",
+                        // Chain context for the editor's "Only on X" option.
+                        // Global-scope custom rows use the current network
+                        // (user's active view) so "Only on X" means "demote
+                        // to the chain I'm currently looking at".
+                        chainId:
+                          row.scope === "global"
+                            ? currentNetwork.chainId
+                            : row.network.chainId,
                       })
                     }
                   />
@@ -355,8 +414,9 @@ export default function AddressBookPage({
         <AddressLabelEditor
           address={editTarget.address}
           chainId={editTarget.chainId}
+          scope={editTarget.scope}
           initial={
-            getEntry(editTarget.address, editTarget.chainId) ??
+            getEntry(editTarget.address, editTarget.chainId)?.entry ??
             contractInitial(editTarget.address, editTarget.chainId)
           }
           onClose={() => setEditTarget(null)}
@@ -388,6 +448,7 @@ type AddressRowProps = {
   address: string;
   name: string;
   tags: string[];
+  scope: Scope;
   network: Network;
   notes?: string;
   isPublic?: boolean;
@@ -401,6 +462,7 @@ function AddressTableRow({
   address,
   name,
   tags,
+  scope,
   network,
   notes,
   isPublic,
@@ -412,12 +474,18 @@ function AddressTableRow({
   return (
     <tr className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
       <td className="px-4 py-3">
-        <div className="flex items-center gap-2">
-          <ChainIcon network={network} />
-          <span className="text-xs text-slate-400">
-            {network.label.replace(/ \(.*\)$/, "")}
+        {scope === "global" ? (
+          <span className="inline-flex items-center rounded-full bg-purple-950 px-2 py-0.5 text-xs font-medium text-purple-300 ring-1 ring-inset ring-purple-800">
+            All chains
           </span>
-        </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <ChainIcon network={network} />
+            <span className="text-xs text-slate-400">
+              {network.label.replace(/ \(.*\)$/, "")}
+            </span>
+          </div>
+        )}
       </td>
       <td className="px-4 py-3">
         <a

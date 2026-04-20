@@ -97,6 +97,22 @@ vi.mock("@/lib/address-labels", () => ({
 import { getAuthSession } from "@/auth";
 import { importLabels, getLabels } from "@/lib/address-labels";
 
+type ImportedCounts = {
+  global: number;
+  chains: Record<string, number>;
+};
+
+async function getImported(res: Response): Promise<ImportedCounts> {
+  const json = (await res.json()) as { imported?: ImportedCounts };
+  return json.imported ?? { global: 0, chains: {} };
+}
+
+function totalImported(counts: ImportedCounts): number {
+  return (
+    counts.global + Object.values(counts.chains).reduce((a, b) => a + b, 0)
+  );
+}
+
 function jsonReq(body: unknown) {
   return new NextRequest("http://localhost/api/address-labels/import", {
     method: "POST",
@@ -185,7 +201,7 @@ describe("POST /api/address-labels/import", () => {
     };
     const res = await POST(jsonReq({ chainId: 42220, labels }));
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { imported: number }).imported).toBe(1);
+    expect(totalImported(await getImported(res))).toBe(1);
     expect(importLabels).toHaveBeenCalledWith(
       42220,
       expect.objectContaining({
@@ -213,6 +229,93 @@ describe("POST /api/address-labels/import", () => {
     const res = await POST(jsonReq(snapshot));
     expect(res.status).toBe(200);
     expect(importLabels).toHaveBeenCalledTimes(1);
+  });
+
+  it("imports snapshot with global scope", async () => {
+    const addr2 = "0x" + "b".repeat(40);
+    const snapshot = {
+      exportedAt: "2026-01-01T00:00:00Z",
+      global: {
+        [validAddress]: {
+          name: "Cross-chain",
+          tags: [],
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+      },
+      chains: {
+        "42220": {
+          [addr2]: {
+            name: "Celo only",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+      },
+    };
+    const res = await POST(jsonReq(snapshot));
+    expect(res.status).toBe(200);
+    const counts = await getImported(res);
+    expect(counts.global).toBe(1);
+    expect(counts.chains).toEqual({ "42220": 1 });
+    expect(importLabels).toHaveBeenCalledWith(
+      "global",
+      expect.objectContaining({
+        [validAddress]: expect.objectContaining({ name: "Cross-chain" }),
+      }),
+    );
+    expect(importLabels).toHaveBeenCalledWith(
+      42220,
+      expect.objectContaining({
+        [addr2]: expect.objectContaining({ name: "Celo only" }),
+      }),
+    );
+  });
+
+  it("rejects snapshot when same address appears in both global AND a chain", async () => {
+    const snapshot = {
+      exportedAt: "2026-01-01T00:00:00Z",
+      global: {
+        [validAddress]: {
+          name: "Global",
+          tags: [],
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+      },
+      chains: {
+        "42220": {
+          [validAddress]: {
+            name: "Chain",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+      },
+    };
+    const res = await POST(jsonReq(snapshot));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/both global and chain/i);
+    expect(importLabels).not.toHaveBeenCalled();
+  });
+
+  it("snapshot without `global` imports chains only (back-compat)", async () => {
+    const snapshot = {
+      exportedAt: "2026-01-01T00:00:00Z",
+      chains: {
+        "42220": {
+          [validAddress]: {
+            name: "Chain-only",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+      },
+    };
+    const res = await POST(jsonReq(snapshot));
+    expect(res.status).toBe(200);
+    const counts = await getImported(res);
+    expect(counts.global).toBe(0);
+    expect(counts.chains).toEqual({ "42220": 1 });
   });
 
   it("imports snapshot format with legacy v1 entries", async () => {
@@ -262,7 +365,7 @@ describe("POST /api/address-labels/import", () => {
     };
     const res = await POST(jsonReq(snapshot));
     expect(res.status).toBe(200);
-    expect(((await res.json()) as { imported: number }).imported).toBe(1);
+    expect(totalImported(await getImported(res))).toBe(1);
     expect(importLabels).toHaveBeenCalledWith(
       42220,
       expect.objectContaining({
@@ -405,25 +508,17 @@ describe("POST /api/address-labels/import", () => {
     const validAddress = "0x1234567890123456789012345678901234567890";
     const validCsv = `address,name\n${validAddress},My Label`;
 
-    it("imports a valid CSV (text/csv content-type)", async () => {
+    it("imports a valid CSV into global scope (no chainId column)", async () => {
       const res = await csvReq(validCsv);
       const body = await POST(res);
       expect(body.status).toBe(200);
-      const json = (await body.json()) as { ok: boolean; imported: number };
-      expect(json.ok).toBe(true);
-      expect(json.imported).toBe(1);
-      // Should import into both mainnet chains (42220 + 143)
+      const counts = await getImported(body);
+      expect(counts.global).toBe(1);
+      expect(counts.chains).toEqual({});
+      // CSV without a chainId column routes everything to the global scope.
+      expect(importLabels).toHaveBeenCalledTimes(1);
       expect(importLabels).toHaveBeenCalledWith(
-        42220,
-        expect.objectContaining({
-          [validAddress.toLowerCase()]: expect.objectContaining({
-            name: "My Label",
-            tags: [],
-          }),
-        }),
-      );
-      expect(importLabels).toHaveBeenCalledWith(
-        143,
+        "global",
         expect.objectContaining({
           [validAddress.toLowerCase()]: expect.objectContaining({
             name: "My Label",
@@ -433,13 +528,49 @@ describe("POST /api/address-labels/import", () => {
       );
     });
 
-    it("imports CSV with tags column", async () => {
+    it("routes CSV rows with chainId populated to per-chain scope", async () => {
+      const addr2 = "0x" + "b".repeat(40);
+      const csv = `address,name,tags,chainId\n${validAddress},Cross-chain,,\n${addr2},Celo only,,42220`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(200);
+      const counts = await getImported(body);
+      expect(counts.global).toBe(1);
+      expect(counts.chains).toEqual({ "42220": 1 });
+      expect(importLabels).toHaveBeenCalledWith(
+        "global",
+        expect.objectContaining({
+          [validAddress.toLowerCase()]: expect.objectContaining({
+            name: "Cross-chain",
+          }),
+        }),
+      );
+      expect(importLabels).toHaveBeenCalledWith(
+        42220,
+        expect.objectContaining({
+          [addr2.toLowerCase()]: expect.objectContaining({
+            name: "Celo only",
+          }),
+        }),
+      );
+    });
+
+    it("returns 400 for an invalid chainId value in CSV", async () => {
+      const csv = `address,name,chainId\n${validAddress},Bad,not-a-number`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(400);
+      const json = (await body.json()) as { error: string };
+      expect(json.error).toMatch(/chainId/i);
+    });
+
+    it("imports CSV with tags column (routes to global)", async () => {
       const csv = `address,name,tags\n${validAddress},Wintermute,"Market Maker;Arbitrageur"`;
       const res = await csvReq(csv);
       const body = await POST(res);
       expect(body.status).toBe(200);
       expect(importLabels).toHaveBeenCalledWith(
-        42220,
+        "global",
         expect.objectContaining({
           [validAddress.toLowerCase()]: expect.objectContaining({
             name: "Wintermute",
@@ -455,7 +586,7 @@ describe("POST /api/address-labels/import", () => {
       const body = await POST(res);
       expect(body.status).toBe(200);
       expect(importLabels).toHaveBeenCalledWith(
-        42220,
+        "global",
         expect.objectContaining({
           [validAddress.toLowerCase()]: expect.objectContaining({
             name: "",
@@ -470,8 +601,7 @@ describe("POST /api/address-labels/import", () => {
       const res = await csvReq(csv);
       const body = await POST(res);
       expect(body.status).toBe(200);
-      const json = (await body.json()) as { imported: number };
-      expect(json.imported).toBe(1);
+      expect(totalImported(await getImported(body))).toBe(1);
     });
 
     it("handles columns in different order", async () => {
@@ -493,7 +623,7 @@ describe("POST /api/address-labels/import", () => {
       const res = await csvReq(csv);
       const body = await POST(res);
       expect(body.status).toBe(200);
-      expect(((await body.json()) as { imported: number }).imported).toBe(1);
+      expect(totalImported(await getImported(body))).toBe(1);
     });
 
     it("handles quoted fields with commas", async () => {
@@ -511,17 +641,16 @@ describe("POST /api/address-labels/import", () => {
         isPublic: false,
         updatedAt: "2026-01-01T00:00:00.000Z",
       };
-      // Use mockResolvedValueOnce so subsequent tests get the default {} mock.
-      // Called twice (once per chain: 42220 + 143).
-      (getLabels as ReturnType<typeof vi.fn>)
-        .mockResolvedValueOnce({ [validAddress.toLowerCase()]: existingEntry })
-        .mockResolvedValueOnce({ [validAddress.toLowerCase()]: existingEntry });
+      // CSV without chainId routes to global; only one getLabels call.
+      (getLabels as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        [validAddress.toLowerCase()]: existingEntry,
+      });
 
       const res = await csvReq(validCsv);
       const body = await POST(res);
       expect(body.status).toBe(200);
       expect(importLabels).toHaveBeenCalledWith(
-        42220,
+        "global",
         expect.objectContaining({
           [validAddress.toLowerCase()]: expect.objectContaining({
             name: "My Label",
@@ -541,7 +670,7 @@ describe("POST /api/address-labels/import", () => {
       expect(body.status).toBe(200);
       const callArg = (
         importLabels as ReturnType<typeof vi.fn>
-      ).mock.calls.find((args: unknown[]) => args[0] === 42220)?.[1];
+      ).mock.calls.find((args: unknown[]) => args[0] === "global")?.[1];
       const entry = callArg?.[validAddress.toLowerCase()];
       expect(entry?.isPublic).toBeUndefined();
     });
@@ -605,11 +734,11 @@ describe("POST /api/address-labels/import", () => {
       expect(body.status).toBe(400);
     });
 
-    it("returns 200 with imported:0 for CSV with header only", async () => {
+    it("returns 200 with empty counts for CSV with header only", async () => {
       const res = await csvReq("address,name\n");
       const body = await POST(res);
       expect(body.status).toBe(200);
-      expect(((await body.json()) as { imported: number }).imported).toBe(0);
+      expect(totalImported(await getImported(body))).toBe(0);
     });
 
     it("strips UTF-8 BOM from Excel/Sheets exports", async () => {
@@ -620,7 +749,7 @@ describe("POST /api/address-labels/import", () => {
       const res = await csvReq(csv);
       const body = await POST(res);
       expect(body.status).toBe(200);
-      expect(((await body.json()) as { imported: number }).imported).toBe(1);
+      expect(totalImported(await getImported(body))).toBe(1);
     });
 
     it("sniffs CSV when content-type is omitted but body looks like CSV", async () => {
@@ -708,7 +837,7 @@ describe("POST /api/address-labels/import", () => {
           [validAddress]: expect.objectContaining({ name: "My Safe" }),
         }),
       );
-      expect(((await res.json()) as { imported: number }).imported).toBe(1);
+      expect(totalImported(await getImported(res))).toBe(1);
     });
 
     it("imports multiple entries grouped by chainId", async () => {
@@ -720,7 +849,9 @@ describe("POST /api/address-labels/import", () => {
       const res = await POST(jsonReq(gnosisSafe));
       expect(res.status).toBe(200);
       expect(importLabels).toHaveBeenCalledTimes(2);
-      expect(((await res.json()) as { imported: number }).imported).toBe(2);
+      const counts = await getImported(res);
+      expect(totalImported(counts)).toBe(2);
+      expect(counts.chains).toEqual({ "42220": 1, "1": 1 });
     });
 
     it("deduplicates mixed-case duplicate addresses when reporting imported count", async () => {
@@ -732,7 +863,7 @@ describe("POST /api/address-labels/import", () => {
       const res = await POST(jsonReq(gnosisSafe));
       expect(res.status).toBe(200);
       expect(importLabels).toHaveBeenCalledTimes(1);
-      expect(((await res.json()) as { imported: number }).imported).toBe(1);
+      expect(totalImported(await getImported(res))).toBe(1);
       expect(importLabels).toHaveBeenCalledWith(
         42220,
         expect.objectContaining({
@@ -747,7 +878,7 @@ describe("POST /api/address-labels/import", () => {
       const res = await POST(jsonReq([]));
       expect(res.status).toBe(200);
       expect(importLabels).not.toHaveBeenCalled();
-      expect(((await res.json()) as { imported: number }).imported).toBe(0);
+      expect(totalImported(await getImported(res))).toBe(0);
     });
 
     it("rejects an entry with an invalid chainId", async () => {

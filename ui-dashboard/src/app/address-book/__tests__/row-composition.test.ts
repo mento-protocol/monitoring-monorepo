@@ -3,8 +3,9 @@
  * @/lib/address-book — same functions used in page.tsx.
  *
  * Key invariants:
- * - Every row is chain-scoped (row.network is always present now).
- * - Deduplication uses (chainId, lowercaseAddress); custom wins over contract.
+ * - Every row has a scope ("global" or a chainId).
+ * - Per-chain custom rows suppress the contract row at same (chainId, address).
+ * - Global custom rows render alongside contract rows; they do NOT suppress.
  */
 
 import { describe, it, expect } from "vitest";
@@ -51,6 +52,7 @@ function contractRow(
     name,
     tags: [],
     isCustom: false,
+    scope: net.chainId,
     network: net,
   };
 }
@@ -62,7 +64,20 @@ function customRow(address: string, net: Network): AddressBookRow {
     name: "Custom label",
     tags: [],
     isCustom: true,
+    scope: net.chainId,
     network: net,
+  };
+}
+
+function globalCustomRow(address: string, displayNet: Network): AddressBookRow {
+  return {
+    key: `custom:global:${address.toLowerCase()}`,
+    address,
+    name: "Global custom",
+    tags: [],
+    isCustom: true,
+    scope: "global",
+    network: displayNet,
   };
 }
 
@@ -128,6 +143,28 @@ describe("buildAddressBookRows", () => {
     );
     expect(rows[0].isCustom).toBe(true);
   });
+
+  it("global custom row does NOT suppress contract rows on any chain", () => {
+    const rows = buildAddressBookRows(
+      [contractRow(ADDR_A, NET_CELO), contractRow(ADDR_A, NET_MONAD)],
+      [globalCustomRow(ADDR_A, NET_CELO)],
+    );
+    // 1 global custom + 2 per-chain contract rows = 3.
+    expect(rows).toHaveLength(3);
+    expect(rows.filter((r) => r.scope === "global")).toHaveLength(1);
+    expect(rows.filter((r) => r.scope === NET_CELO.chainId)).toHaveLength(1);
+    expect(rows.filter((r) => r.scope === NET_MONAD.chainId)).toHaveLength(1);
+  });
+
+  it("global + per-chain custom for same address: both coexist", () => {
+    // Strict either/or is enforced server-side, but the composer must still
+    // render whatever state the API returns.
+    const rows = buildAddressBookRows(
+      [],
+      [globalCustomRow(ADDR_A, NET_CELO), customRow(ADDR_A, NET_CELO)],
+    );
+    expect(rows).toHaveLength(2);
+  });
 });
 
 describe("countImportLabels", () => {
@@ -183,6 +220,28 @@ describe("countImportLabels", () => {
       chains: {
         "42220": { [addr]: { name: "A", tags: [], updatedAt: "" } },
         "1": { [addr2]: { name: "B", tags: [], updatedAt: "" } },
+      },
+    };
+    expect(countImportLabels(snapshot)).toBe(2);
+  });
+
+  it("counts global + chain entries in new snapshot shape", () => {
+    const snapshot = {
+      global: { [addr]: { name: "Global", tags: [], updatedAt: "" } },
+      chains: {
+        "42220": { [addr2]: { name: "Celo", tags: [], updatedAt: "" } },
+      },
+    };
+    expect(countImportLabels(snapshot)).toBe(2);
+  });
+
+  it("global and chain entries for same address count as distinct keys", () => {
+    // The server will reject this payload (strict either/or), but the counter
+    // uses distinct (scope, address) pairs — so it returns 2 here.
+    const snapshot = {
+      global: { [addr]: { name: "Global", tags: [], updatedAt: "" } },
+      chains: {
+        "42220": { [addr]: { name: "Celo", tags: [], updatedAt: "" } },
       },
     };
     expect(countImportLabels(snapshot)).toBe(2);

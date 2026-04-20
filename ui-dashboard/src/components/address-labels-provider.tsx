@@ -11,31 +11,47 @@ import useSWR, { useSWRConfig } from "swr";
 import { useNetwork } from "@/components/network-provider";
 import { truncateAddress } from "@/lib/format";
 import { NETWORKS, networkIdForChainId, type Network } from "@/lib/networks";
-import { upgradeEntries, type AddressEntry } from "@/lib/address-labels-shared";
+import {
+  upgradeEntries,
+  type AddressEntry,
+  type Scope,
+} from "@/lib/address-labels-shared";
 
-/** A custom address entry, labelled across all chains with its originating chainId. */
-type AddressEntryRow = AddressEntry & {
+/** A custom address entry, labelled across scopes with its originating scope. */
+export type AddressEntryRow = AddressEntry & {
   address: string;
-  chainId: number;
+  scope: Scope;
+};
+
+/** Internal state shape: global entries + per-chain entries. */
+type EntriesState = {
+  global: Record<string, AddressEntry>;
+  chains: Map<number, Record<string, AddressEntry>>;
+};
+
+/** Full resolved entry with the scope it came from. */
+export type ResolvedEntry = {
+  entry: AddressEntry;
+  scope: Scope;
 };
 
 type AddressLabelsContextValue = {
-  /** Merged name: custom name > static contract name > truncated address */
+  /** Merged name: custom (per-chain > global) > static contract > truncated */
   getName: (address: string | null, chainId?: number) => string;
   /** Tags for an address (custom entries only; contracts return []) */
   getTags: (address: string | null, chainId?: number) => string[];
   /** True if address has any name (custom or static) on the given chain */
   hasName: (address: string | null, chainId?: number) => boolean;
-  /** True if address has a user-created custom entry on the given chain */
+  /** True if address has a user-created custom entry (per-chain or global) */
   isCustom: (address: string | null, chainId?: number) => boolean;
-  /** Full entry metadata for custom entries only */
+  /** Full entry metadata + scope for custom entries only */
   getEntry: (
     address: string | null,
     chainId?: number,
-  ) => AddressEntry | undefined;
-  /** All custom entry rows across every chain, sorted by name. */
+  ) => ResolvedEntry | undefined;
+  /** All custom entry rows across every scope, sorted by name. */
   customEntries: AddressEntryRow[];
-  /** Add or update a custom entry. `chainId` defaults to the current network. */
+  /** Add or update a custom entry at the given scope. */
   upsertEntry: (
     address: string,
     entry: {
@@ -44,10 +60,10 @@ type AddressLabelsContextValue = {
       notes?: string;
       isPublic?: boolean;
     },
-    chainId?: number,
+    scope: Scope,
   ) => Promise<void>;
-  /** Remove a custom entry. `chainId` defaults to the current network. */
-  deleteEntry: (address: string, chainId?: number) => Promise<void>;
+  /** Remove a custom entry at the given scope. */
+  deleteEntry: (address: string, scope: Scope) => Promise<void>;
   isLoading: boolean;
   error: Error | undefined;
 };
@@ -56,26 +72,39 @@ const AddressLabelsContext = createContext<AddressLabelsContextValue | null>(
   null,
 );
 
-type EntriesByChain = Map<number, Record<string, AddressEntry>>;
-
 const SWR_KEY = "address-labels:all";
 
-async function fetchAllLabels(): Promise<EntriesByChain> {
+// API GET payload shape: { global: {...}, chains: { [chainId]: {...} } }
+type ApiLabelsPayload = {
+  global?: Record<string, unknown>;
+  chains?: Record<string, Record<string, unknown>>;
+};
+
+async function fetchAllLabels(): Promise<EntriesState> {
   const res = await fetch("/api/address-labels");
   if (!res.ok) throw new Error(`Failed to fetch address labels: ${res.status}`);
-  const raw = (await res.json()) as Record<string, Record<string, unknown>>;
-  const result: EntriesByChain = new Map();
-  for (const [chainIdStr, entries] of Object.entries(raw)) {
-    const chainId = Number(chainIdStr);
-    if (!Number.isFinite(chainId)) continue;
-    result.set(chainId, upgradeEntries(entries as Record<string, unknown>));
+  const raw = (await res.json()) as ApiLabelsPayload;
+  const global = raw.global
+    ? upgradeEntries(raw.global as Record<string, unknown>)
+    : {};
+  const chains = new Map<number, Record<string, AddressEntry>>();
+  if (raw.chains) {
+    for (const [chainIdStr, entries] of Object.entries(raw.chains)) {
+      const chainId = Number(chainIdStr);
+      if (!Number.isFinite(chainId)) continue;
+      chains.set(chainId, upgradeEntries(entries as Record<string, unknown>));
+    }
   }
-  return result;
+  return { global, chains };
 }
 
 function networkForChainId(chainId: number): Network | null {
   const id = networkIdForChainId(chainId);
   return id ? NETWORKS[id] : null;
+}
+
+function emptyState(): EntriesState {
+  return { global: {}, chains: new Map() };
 }
 
 export function AddressLabelsProvider({ children }: { children: ReactNode }) {
@@ -85,27 +114,30 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
   // Fetch for all sessions — the API returns `isPublic: true` labels for
   // anonymous requests and full labels for authenticated ones. Gating on the
   // client would hide public labels from logged-out users.
-  const { data, error, isLoading } = useSWR<EntriesByChain>(
+  const { data, error, isLoading } = useSWR<EntriesState>(
     SWR_KEY,
     fetchAllLabels,
     {
       refreshInterval: 30_000,
-      fallbackData: new Map(),
+      fallbackData: emptyState(),
     },
   );
 
-  const entriesByChain: EntriesByChain = data ?? new Map();
+  const state: EntriesState = data ?? emptyState();
 
   const customEntries: AddressEntryRow[] = useMemo(() => {
     const rows: AddressEntryRow[] = [];
-    for (const [chainId, chainEntries] of entriesByChain) {
+    for (const [address, entry] of Object.entries(state.global)) {
+      rows.push({ address, scope: "global", ...entry });
+    }
+    for (const [chainId, chainEntries] of state.chains) {
       for (const [address, entry] of Object.entries(chainEntries)) {
-        rows.push({ address, chainId, ...entry });
+        rows.push({ address, scope: chainId, ...entry });
       }
     }
     rows.sort((a, b) => a.name.localeCompare(b.name));
     return rows;
-  }, [entriesByChain]);
+  }, [state]);
 
   const defaultChainId = network.chainId;
 
@@ -114,21 +146,26 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
       if (!address) return "\u2014";
       const lower = address.toLowerCase();
       const cid = chainId ?? defaultChainId;
-      const customName = entriesByChain.get(cid)?.[lower]?.name;
-      if (customName) return customName;
+      const chainName = state.chains.get(cid)?.[lower]?.name;
+      if (chainName) return chainName;
+      const globalName = state.global[lower]?.name;
+      if (globalName) return globalName;
       const net = networkForChainId(cid) ?? network;
       return net.addressLabels[lower] ?? truncateAddress(address);
     },
-    [entriesByChain, network, defaultChainId],
+    [state, network, defaultChainId],
   );
 
   const getTags = useCallback(
     (address: string | null, chainId?: number): string[] => {
       if (!address) return [];
+      const lower = address.toLowerCase();
       const cid = chainId ?? defaultChainId;
-      return entriesByChain.get(cid)?.[address.toLowerCase()]?.tags ?? [];
+      const chainTags = state.chains.get(cid)?.[lower]?.tags;
+      if (chainTags && chainTags.length > 0) return chainTags;
+      return state.global[lower]?.tags ?? [];
     },
-    [entriesByChain, defaultChainId],
+    [state, defaultChainId],
   );
 
   const hasName = useCallback(
@@ -136,48 +173,102 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
       if (!address) return false;
       const lower = address.toLowerCase();
       const cid = chainId ?? defaultChainId;
-      const entry = entriesByChain.get(cid)?.[lower];
+      const chainEntry = state.chains.get(cid)?.[lower];
+      if (
+        chainEntry !== undefined &&
+        (chainEntry.name !== "" || chainEntry.tags.length > 0)
+      ) {
+        return true;
+      }
+      const globalEntry = state.global[lower];
+      if (
+        globalEntry !== undefined &&
+        (globalEntry.name !== "" || globalEntry.tags.length > 0)
+      ) {
+        return true;
+      }
       const net = networkForChainId(cid) ?? network;
-      return (
-        (entry !== undefined && (entry.name !== "" || entry.tags.length > 0)) ||
-        lower in net.addressLabels
-      );
+      return lower in net.addressLabels;
     },
-    [entriesByChain, network, defaultChainId],
+    [state, network, defaultChainId],
   );
 
   const isCustom = useCallback(
     (address: string | null, chainId?: number): boolean => {
       if (!address) return false;
+      const lower = address.toLowerCase();
       const cid = chainId ?? defaultChainId;
-      return address.toLowerCase() in (entriesByChain.get(cid) ?? {});
+      return lower in (state.chains.get(cid) ?? {}) || lower in state.global;
     },
-    [entriesByChain, defaultChainId],
+    [state, defaultChainId],
   );
 
   const getEntry = useCallback(
-    (address: string | null, chainId?: number): AddressEntry | undefined => {
+    (address: string | null, chainId?: number): ResolvedEntry | undefined => {
       if (!address) return undefined;
+      const lower = address.toLowerCase();
       const cid = chainId ?? defaultChainId;
-      return entriesByChain.get(cid)?.[address.toLowerCase()];
+      const chainEntry = state.chains.get(cid)?.[lower];
+      if (chainEntry) return { entry: chainEntry, scope: cid };
+      const globalEntry = state.global[lower];
+      if (globalEntry) return { entry: globalEntry, scope: "global" };
+      return undefined;
     },
-    [entriesByChain, defaultChainId],
+    [state, defaultChainId],
   );
 
+  // Apply a write/delete optimistically and enforce strict either/or: remove
+  // the address from every OTHER scope (mirrors the server's pipeline HDEL).
   const applyOptimistic = (
-    current: EntriesByChain,
-    chainId: number,
+    current: EntriesState,
+    scope: Scope,
     address: string,
     next: AddressEntry | null,
-  ): EntriesByChain => {
-    const result = new Map(current);
-    const chainEntries = { ...(result.get(chainId) ?? {}) };
-    if (next === null) {
-      delete chainEntries[address];
+  ): EntriesState => {
+    const lower = address.toLowerCase();
+    const result: EntriesState = {
+      global: { ...current.global },
+      chains: new Map(current.chains),
+    };
+
+    if (scope === "global") {
+      if (next === null) {
+        delete result.global[lower];
+      } else {
+        result.global[lower] = next;
+      }
+      // Strict either/or: drop from every chain scope on upsert.
+      if (next !== null) {
+        for (const [cid, entries] of current.chains) {
+          if (lower in entries) {
+            const copy = { ...entries };
+            delete copy[lower];
+            result.chains.set(cid, copy);
+          }
+        }
+      }
     } else {
-      chainEntries[address] = next;
+      const chainEntries = { ...(current.chains.get(scope) ?? {}) };
+      if (next === null) {
+        delete chainEntries[lower];
+      } else {
+        chainEntries[lower] = next;
+      }
+      result.chains.set(scope, chainEntries);
+      // Strict either/or: drop from global and every other chain on upsert.
+      if (next !== null) {
+        if (lower in result.global) {
+          delete result.global[lower];
+        }
+        for (const [cid, entries] of current.chains) {
+          if (cid !== scope && lower in entries) {
+            const copy = { ...entries };
+            delete copy[lower];
+            result.chains.set(cid, copy);
+          }
+        }
+      }
     }
-    result.set(chainId, chainEntries);
     return result;
   };
 
@@ -190,10 +281,9 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
         notes?: string;
         isPublic?: boolean;
       },
-      chainId?: number,
+      scope: Scope,
     ): Promise<void> => {
       const lower = address.toLowerCase();
-      const cid = chainId ?? defaultChainId;
       const optimistic: AddressEntry = {
         name: entry.name,
         tags: entry.tags,
@@ -204,12 +294,12 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
 
       await mutate(
         SWR_KEY,
-        async (current: EntriesByChain = new Map()) => {
+        async (current: EntriesState = emptyState()) => {
           const res = await fetch("/api/address-labels", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              chainId: cid,
+              scope,
               address,
               name: entry.name,
               tags: entry.tags,
@@ -221,45 +311,44 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
             const body = (await res.json()) as { error?: string };
             throw new Error(body.error ?? "Failed to save entry");
           }
-          return applyOptimistic(current, cid, lower, optimistic);
+          return applyOptimistic(current, scope, lower, optimistic);
         },
         {
-          optimisticData: (current: EntriesByChain = new Map()) =>
-            applyOptimistic(current, cid, lower, optimistic),
+          optimisticData: (current: EntriesState = emptyState()) =>
+            applyOptimistic(current, scope, lower, optimistic),
           rollbackOnError: true,
         },
       );
     },
-    [mutate, defaultChainId],
+    [mutate],
   );
 
   const deleteEntry = useCallback(
-    async (address: string, chainId?: number): Promise<void> => {
+    async (address: string, scope: Scope): Promise<void> => {
       const lower = address.toLowerCase();
-      const cid = chainId ?? defaultChainId;
 
       await mutate(
         SWR_KEY,
-        async (current: EntriesByChain = new Map()) => {
+        async (current: EntriesState = emptyState()) => {
           const res = await fetch("/api/address-labels", {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chainId: cid, address }),
+            body: JSON.stringify({ scope, address }),
           });
           if (!res.ok) {
             const body = (await res.json()) as { error?: string };
             throw new Error(body.error ?? "Failed to delete entry");
           }
-          return applyOptimistic(current, cid, lower, null);
+          return applyOptimistic(current, scope, lower, null);
         },
         {
-          optimisticData: (current: EntriesByChain = new Map()) =>
-            applyOptimistic(current, cid, lower, null),
+          optimisticData: (current: EntriesState = emptyState()) =>
+            applyOptimistic(current, scope, lower, null),
           rollbackOnError: true,
         },
       );
     },
-    [mutate, defaultChainId],
+    [mutate],
   );
 
   const value: AddressLabelsContextValue = {

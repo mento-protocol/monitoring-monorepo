@@ -1,17 +1,13 @@
 "use client";
 
 import { useRef, useEffect, useState, useMemo } from "react";
+import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
-import type { AddressEntry } from "@/lib/address-labels-shared";
+import type { AddressEntry, Scope } from "@/lib/address-labels-shared";
 import { TagInput } from "@/components/tag-input";
 import { SUGGESTED_TAGS, getUsedTags } from "@/lib/tag-suggestions";
 import { isValidAddress } from "@/lib/format";
-import {
-  NETWORK_IDS,
-  NETWORKS,
-  DEFAULT_NETWORK,
-  isConfiguredNetworkId,
-} from "@/lib/networks";
+import { NETWORKS, networkIdForChainId } from "@/lib/networks";
 
 // Pure helpers (exported for testing)
 
@@ -67,13 +63,29 @@ export function validateEntryForm(opts: {
   return null;
 }
 
+/** Human-readable label for a scope, for use in the editor UI. */
+function scopeLabel(scope: Scope): string {
+  if (scope === "global") return "All chains";
+  const id = networkIdForChainId(scope);
+  const net = id ? NETWORKS[id] : null;
+  return net ? `Only on ${net.label}` : `Chain ${scope}`;
+}
+
 type Props = {
   /** Pass empty string to allow the user to type a new address */
   address: string;
   /** Pre-filled initial values when editing an existing entry */
   initial?: AddressEntry;
-  /** Target chainId for the entry; defaults to the current network. */
+  /**
+   * The chain context for this editor session. Used as the target when the
+   * user picks the "Only on {network}" scope. Defaults to the current network.
+   */
   chainId?: number;
+  /**
+   * Current scope of the entry being edited. When omitted (new entry), the
+   * editor defaults to "global".
+   */
+  scope?: Scope;
   onClose: () => void;
 };
 
@@ -81,8 +93,10 @@ export function AddressLabelEditor({
   address: initialAddress,
   initial,
   chainId,
+  scope: initialScope,
   onClose,
 }: Props) {
+  const { network } = useNetwork();
   const {
     upsertEntry,
     deleteEntry,
@@ -93,18 +107,11 @@ export function AddressLabelEditor({
   const firstInputRef = useRef<HTMLInputElement>(null);
 
   const isNewAddress = initialAddress === "";
-  const showChainPicker = isNewAddress && chainId == null;
-  const configuredChainIds = useMemo(
-    () =>
-      NETWORK_IDS.filter(isConfiguredNetworkId).map(
-        (id) => NETWORKS[id].chainId,
-      ),
-    [],
-  );
-  const [selectedChainId, setSelectedChainId] = useState(
-    chainId ?? NETWORKS[DEFAULT_NETWORK].chainId,
-  );
-  const effectiveChainId = chainId ?? selectedChainId;
+  const effectiveChainId = chainId ?? network.chainId;
+
+  // Starting scope: the entry's current scope for edits, "global" for new.
+  const startingScope: Scope = initialScope ?? "global";
+  const [selectedScope, setSelectedScope] = useState<Scope>(startingScope);
 
   const [address, setAddress] = useState(initialAddress);
   const [name, setName] = useState(initial?.name ?? "");
@@ -138,6 +145,9 @@ export function AddressLabelEditor({
 
   // When editing an existing contract row (not a new address, no custom label yet),
   // label is optional — empty means "keep the contract name".
+  // isCustom is evaluated against the effective chain context — contract rows
+  // have no custom entry at the per-chain scope, and we don't want to flag a
+  // global-custom row from another unrelated chain as a contract row here.
   const isContractRow = resolveIsContractRow({
     isNewAddress,
     initial,
@@ -173,7 +183,7 @@ export function AddressLabelEditor({
           notes: notes.trim() || undefined,
           isPublic,
         },
-        effectiveChainId,
+        selectedScope,
       );
       onClose();
     } catch (err) {
@@ -187,7 +197,7 @@ export function AddressLabelEditor({
     setDeleting(true);
     setError(null);
     try {
-      await deleteEntry(address, effectiveChainId);
+      await deleteEntry(address, startingScope);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete label.");
@@ -196,7 +206,14 @@ export function AddressLabelEditor({
     }
   }
 
-  const hasExistingCustomEntry = isCustomLabel(address, effectiveChainId);
+  const hasExistingCustomEntry = initial !== undefined && !isContractRow;
+  const scopeWillChange =
+    hasExistingCustomEntry && selectedScope !== startingScope;
+
+  const perChainLabel =
+    (networkIdForChainId(effectiveChainId)
+      ? NETWORKS[networkIdForChainId(effectiveChainId)!]?.label
+      : null) ?? `Chain ${effectiveChainId}`;
 
   return (
     <dialog
@@ -246,39 +263,51 @@ export function AddressLabelEditor({
             )}
           </div>
 
-          {/* Chain (only shown for new addresses without a pre-set chain) */}
-          {showChainPicker && (
-            <div>
-              <label
-                htmlFor="al-chain"
-                className="block text-xs font-medium text-slate-400 mb-1"
-              >
-                Chain <span className="text-indigo-400">*</span>
+          {/* Scope (always visible) */}
+          <div>
+            <span
+              id="al-scope-label"
+              className="block text-xs font-medium text-slate-400 mb-2"
+            >
+              Applies to
+            </span>
+            <div
+              role="radiogroup"
+              aria-labelledby="al-scope-label"
+              className="space-y-1.5"
+            >
+              <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+                <input
+                  type="radio"
+                  name="al-scope"
+                  checked={selectedScope === "global"}
+                  onChange={() => setSelectedScope("global")}
+                  className="accent-indigo-500"
+                />
+                <span>All chains</span>
+                <span className="text-xs text-slate-500">
+                  (cross-chain default)
+                </span>
               </label>
-              <select
-                id="al-chain"
-                value={selectedChainId}
-                onChange={(e) => setSelectedChainId(Number(e.target.value))}
-                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              >
-                {configuredChainIds.map((cid) => {
-                  const net =
-                    NETWORKS[
-                      NETWORK_IDS.find(
-                        (id) =>
-                          isConfiguredNetworkId(id) &&
-                          NETWORKS[id].chainId === cid,
-                      )!
-                    ];
-                  return (
-                    <option key={cid} value={cid}>
-                      {net.label}
-                    </option>
-                  );
-                })}
-              </select>
+              <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+                <input
+                  type="radio"
+                  name="al-scope"
+                  checked={selectedScope === effectiveChainId}
+                  onChange={() => setSelectedScope(effectiveChainId)}
+                  className="accent-indigo-500"
+                />
+                <span>Only on {perChainLabel}</span>
+              </label>
             </div>
-          )}
+            {scopeWillChange && (
+              <p className="mt-2 text-xs text-amber-400">
+                Moving this label from &quot;{scopeLabel(startingScope)}&quot;
+                to &quot;{scopeLabel(selectedScope)}&quot;. The old entry will
+                be removed.
+              </p>
+            )}
+          </div>
 
           {/* Name */}
           <div>
