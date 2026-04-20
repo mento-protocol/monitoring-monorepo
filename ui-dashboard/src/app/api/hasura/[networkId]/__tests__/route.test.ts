@@ -65,4 +65,19 @@ describe("POST /api/hasura/[networkId]", () => {
     const headers = new Headers(init?.headers);
     expect(headers.get("x-hasura-admin-secret")).toBeNull();
   });
+
+  it("returns 502 when upstream request fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("boom"));
+    const { POST } = await import("../route");
+
+    const req = makeRequest({ query: "{ __typename }" });
+    const res = await POST(req, {
+      params: Promise.resolve({ networkId: "devnet" }),
+    });
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({
+      error: "Local Hasura upstream unavailable",
+    });
+  });
 });

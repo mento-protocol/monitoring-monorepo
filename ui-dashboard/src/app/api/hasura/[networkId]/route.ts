@@ -60,12 +60,21 @@ export async function POST(
     headers.set("x-hasura-admin-secret", config.adminSecret);
   }
 
-  const upstream = await fetch(config.upstreamUrl, {
-    method: "POST",
-    headers,
-    body,
-    cache: "no-store",
-  });
+  let upstream: Response;
+  try {
+    upstream = await fetch(config.upstreamUrl, {
+      method: "POST",
+      headers,
+      body,
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return NextResponse.json(
+      { error: "Local Hasura upstream unavailable" },
+      { status: 502 },
+    );
+  }
 
   const text = await upstream.text();
   return new Response(text, {

@@ -149,7 +149,9 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
     rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_DEVNET ?? "http://localhost:8545",
-    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_DEVNET ?? "/api/hasura/devnet",
+    // Local networks always use the same-origin API proxy so admin secrets can
+    // stay server-only (`HASURA_SECRET_*`) and never enter browser bundles.
+    hasuraUrl: "/api/hasura/devnet",
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_DEVNET ?? "http://localhost:5100",
@@ -168,9 +170,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     rpcUrl:
       process.env.NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA ??
       "https://forno.celo-sepolia.celo-testnet.org",
-    hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA_LOCAL ??
-      "/api/hasura/celo-sepolia-local",
+    hasuraUrl: "/api/hasura/celo-sepolia-local",
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_LOCAL ??
@@ -200,9 +200,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
     rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
-    hasuraUrl:
-      process.env.NEXT_PUBLIC_HASURA_URL_CELO_MAINNET_LOCAL ??
-      "/api/hasura/celo-mainnet-local",
+    hasuraUrl: "/api/hasura/celo-mainnet-local",
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET_LOCAL ??
