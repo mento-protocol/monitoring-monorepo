@@ -1,7 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fetchNetworkData, fetchAllNetworks } from "../use-all-networks-data";
+import {
+  fetchNetworkData,
+  fetchAllNetworks,
+  warnedCapKeys,
+  partialPageLastCapturedAt,
+} from "../use-all-networks-data";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
+
+vi.mock("@sentry/nextjs", () => ({
+  captureException: vi.fn(),
+  captureMessage: vi.fn(),
+}));
+
+import * as Sentry from "@sentry/nextjs";
 
 // Minimal fixture helpers
 
@@ -87,6 +99,10 @@ function mockRequest(impl: (query: string) => unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Sentry de-dup maps live at module scope — clear between tests so
+  // previous runs don't suppress subsequent captures.
+  warnedCapKeys.clear();
+  partialPageLastCapturedAt.clear();
 });
 
 // fetchNetworkData — happy path
@@ -381,6 +397,60 @@ describe("fetchNetworkData — snapshot pagination", () => {
     expect(result.snapshotsAllTruncated).toBe(true);
     expect(result.snapshots.length).toBeGreaterThan(0);
     expect(result.snapshotsAll).toHaveLength(100 * 1000);
+  });
+
+  it("emits captureMessage once per network when the cap is hit", async () => {
+    // Two networks (celo-mainnet, celo-sepolia) both hit the pagination cap.
+    // Dedup key is `${network}:${responseKey}`, so each network should emit
+    // exactly one "hasura-snapshot-cap-exhausted" warning tagged with its
+    // own network id. A third fetch against a network that already warned
+    // should NOT re-emit — that's the dedup guarantee.
+    const now = Math.floor(Date.now() / 1000);
+    let rowCursor = 0;
+    const alwaysFullPage = (query: string) => {
+      if (query.includes("PoolSnapshot")) {
+        const batch = Array.from({ length: 1000 }, () => ({
+          poolId: "pool-cap",
+          timestamp: String(now - rowCursor++ * 60),
+          reserves0: "0",
+          reserves1: "0",
+          swapCount: 0,
+          swapVolume0: "0",
+          swapVolume1: "0",
+        }));
+        return { PoolSnapshot: batch };
+      }
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [makePool("pool-cap")] };
+      return {};
+    };
+    mockRequest(alwaysFullPage);
+
+    const windows = {
+      w24h: { from: now - 86400, to: now },
+      w7d: { from: now - 7 * 86400, to: now },
+      w30d: { from: now - 30 * 86400, to: now },
+    };
+
+    await fetchNetworkData(MOCK_NETWORK, windows);
+    expect(Sentry.captureMessage).toHaveBeenCalledTimes(1);
+    expect(
+      (Sentry.captureMessage as ReturnType<typeof vi.fn>).mock.calls[0][1].tags
+        .network,
+    ).toBe("celo-mainnet");
+
+    await fetchNetworkData(MOCK_NETWORK_2, windows);
+    expect(Sentry.captureMessage).toHaveBeenCalledTimes(2);
+    expect(
+      (Sentry.captureMessage as ReturnType<typeof vi.fn>).mock.calls[1][1].tags
+        .network,
+    ).toBe("celo-sepolia");
+
+    // Re-running celo-mainnet should NOT re-emit — dedup by network.
+    await fetchNetworkData(MOCK_NETWORK, windows);
+    expect(Sentry.captureMessage).toHaveBeenCalledTimes(2);
   });
 
   it("on mid-loop failure, only flags the window whose coverage is actually incomplete", async () => {

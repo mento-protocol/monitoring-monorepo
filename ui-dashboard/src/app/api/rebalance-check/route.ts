@@ -119,7 +119,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 }
 
-function redactRpcUrl(err: unknown, rpcUrl: string): unknown {
+/** Exported for testing. See redact-rpc-url.test.ts. */
+export function redactRpcUrl(err: unknown, rpcUrl: string): unknown {
   if (!(err instanceof Error)) {
     if (typeof err === "string") return err.replaceAll(rpcUrl, "[RPC_URL]");
     return err;
@@ -138,7 +139,8 @@ function redactRpcUrl(err: unknown, rpcUrl: string): unknown {
   return copy;
 }
 
-function containsRpcUrl(err: Error, rpcUrl: string): boolean {
+/** Exported for testing. See redact-rpc-url.test.ts. */
+export function containsRpcUrl(err: Error, rpcUrl: string): boolean {
   if (err.message.includes(rpcUrl)) return true;
   if (err.stack?.includes(rpcUrl)) return true;
   if (err.cause instanceof Error) return containsRpcUrl(err.cause, rpcUrl);

@@ -175,8 +175,18 @@ const snapshotDedupKey = (s: PoolSnapshotWindow) =>
 
 // Tracks responseKeys that have already triggered a
 // "hasura-snapshot-cap-exhausted" warning so the 30s poll cycle doesn't
-// re-fire the same signal on every refresh.
-const warnedCapKeys = new Set<string>();
+// re-fire the same signal on every refresh. Exported for test-scope
+// `.clear()` so module state doesn't leak across tests.
+/** @internal */
+export const warnedCapKeys = new Set<string>();
+
+// Throttle partial-page failures (mid-pagination exceptions). Without this,
+// a persistently-flaky upstream page fires captureException every 30s poll
+// cycle per chain — quota burn and noise. Keyed by ${network}:${responseKey}
+// so distinct per-chain degradation still surfaces.
+const PARTIAL_PAGE_THROTTLE_MS = 60_000;
+/** @internal */
+export const partialPageLastCapturedAt = new Map<string, number>();
 
 async function fetchAllSnapshotPages(
   client: GraphQLClient,
@@ -237,16 +247,23 @@ async function fetchPaginatedSnapshotPages<K extends string>(
       if (rows.length === 0) throw err;
       // Otherwise preserve the pages we did fetch; surface error AND flag
       // truncation so consumers know the data is partial. Report to Sentry
-      // so partial-data degradation isn't silent.
-      Sentry.captureException(err, {
-        tags: {
-          source: "hasura",
-          responseKey,
-          network,
-          degraded: "partial-pages",
-        },
-        extra: { page, rowsFetched: rows.length, poolCount: poolIds.length },
-      });
+      // so partial-data degradation isn't silent — but throttle per
+      // network+responseKey so the 30s poll loop can't fan out a storm.
+      const partialKey = `${network}:${responseKey}`;
+      const now = Date.now();
+      const last = partialPageLastCapturedAt.get(partialKey) ?? 0;
+      if (now - last >= PARTIAL_PAGE_THROTTLE_MS) {
+        partialPageLastCapturedAt.set(partialKey, now);
+        Sentry.captureException(err, {
+          tags: {
+            source: "hasura",
+            responseKey,
+            network,
+            degraded: "partial-pages",
+          },
+          extra: { page, rowsFetched: rows.length, poolCount: poolIds.length },
+        });
+      }
       return {
         rows,
         truncated: true,

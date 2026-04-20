@@ -29,6 +29,9 @@ function redactUrlQueryAndAuth(input: string): string {
 
 // Scrub sensitive data before Sentry ships the event:
 // - Session cookies + auth headers on the request.
+// - URL credentials + query strings on `event.request.url` itself
+//   (OAuth callbacks carry `code`/`state` there; NextAuth logger.error
+//   captures include full URLs via the server request context).
 // - URL credentials + query strings in every exception `value` and every
 //   breadcrumb `message` / `data.url` field.
 // Shared across the error + transaction paths — both event shapes carry
@@ -42,6 +45,9 @@ export function stripAuthHeaders<T extends ErrorEvent | TransactionEvent>(
     delete event.request.headers.Cookie;
     delete event.request.headers.authorization;
     delete event.request.headers.Authorization;
+  }
+  if (typeof event.request?.url === "string") {
+    event.request.url = redactUrlQueryAndAuth(event.request.url);
   }
   if ("exception" in event && event.exception?.values) {
     for (const exc of event.exception.values) {
