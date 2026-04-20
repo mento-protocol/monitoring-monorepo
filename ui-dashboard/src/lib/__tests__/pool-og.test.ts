@@ -1,0 +1,314 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("@/lib/networks", () => {
+  const network = {
+    id: "celo-mainnet" as const,
+    label: "Celo",
+    chainId: 42220,
+    contractsNamespace: "mainnet" as string | null,
+    hasuraUrl: "https://hasura.example.com/v1/graphql",
+    hasuraSecret: "",
+    explorerBaseUrl: "https://celoscan.io",
+    tokenSymbols: {
+      "0xaaa0000000000000000000000000000000000001": "cUSD",
+      "0xaaa0000000000000000000000000000000000002": "USDm",
+    },
+    addressLabels: {},
+    local: false,
+    testnet: false,
+    hasVirtualPools: true,
+  };
+  return {
+    NETWORKS: { "celo-mainnet": network },
+    NETWORK_IDS: ["celo-mainnet"],
+    networkIdForChainId: (chainId: number) =>
+      chainId === 42220 ? "celo-mainnet" : null,
+    isCanonicalNetwork: () => true,
+    isNetworkId: () => true,
+    isConfiguredNetworkId: () => true,
+  };
+});
+
+vi.mock("graphql-request", () => {
+  const MockGraphQLClient = vi.fn();
+  MockGraphQLClient.prototype.request = vi.fn();
+  return { GraphQLClient: MockGraphQLClient };
+});
+
+import { GraphQLClient } from "graphql-request";
+import { fetchPoolOgDataUncached } from "../pool-og";
+
+const ADDR_CUSD = "0xaaa0000000000000000000000000000000000001";
+const ADDR_USDM = "0xaaa0000000000000000000000000000000000002";
+const POOL_ID = `42220-${ADDR_CUSD}`;
+
+function mockRequest(impl: (query: string) => unknown) {
+  (
+    GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+  ).mockImplementation(async (query: string) => impl(query));
+}
+
+function makeDetailPool(overrides: Record<string, unknown> = {}) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  return {
+    id: POOL_ID,
+    chainId: 42220,
+    token0: ADDR_USDM,
+    token1: ADDR_CUSD,
+    token0Decimals: 18,
+    token1Decimals: 18,
+    source: "FPMM",
+    createdAtBlock: "1",
+    createdAtTimestamp: "1000",
+    updatedAtBlock: "2",
+    updatedAtTimestamp: "2000",
+    oraclePrice: "1000000000000000000000000",
+    oracleOk: true,
+    oracleTimestamp: String(nowSec),
+    oracleExpiry: "300",
+    reserves0: "1000000000000000000000000",
+    reserves1: "1000000000000000000000000",
+    priceDifference: "0",
+    rebalanceThreshold: 10000,
+    limitStatus: "OK",
+    limitPressure0: "0",
+    limitPressure1: "0",
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("fetchPoolOgDataUncached", () => {
+  it("returns null for garbage or empty input", async () => {
+    expect(await fetchPoolOgDataUncached("garbage")).toBeNull();
+    expect(await fetchPoolOgDataUncached("")).toBeNull();
+  });
+
+  it("returns null for unknown chain prefix", async () => {
+    expect(await fetchPoolOgDataUncached(`9999-${ADDR_CUSD}`)).toBeNull();
+  });
+
+  it("returns null when the detail query yields no Pool row", async () => {
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [] };
+    });
+    expect(await fetchPoolOgDataUncached(POOL_ID)).toBeNull();
+  });
+
+  it("returns null only when the detail query fails", async () => {
+    // Every request rejects → no detail → null (pool unknowable).
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockRejectedValue(new Error("hasura down"));
+    expect(await fetchPoolOgDataUncached(POOL_ID)).toBeNull();
+  });
+
+  it("degrades gracefully when daily snapshots query fails", async () => {
+    const detailPool = makeDetailPool();
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) throw new Error("daily down");
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.name).toBe("cUSD/USDm");
+    expect(result!.chainLabel).toBe("Celo");
+    expect(result!.tvlUsd).toBeGreaterThan(0);
+    expect(result!.volume7dUsd).toBeNull();
+    expect(result!.tvlWoWPct).toBeNull();
+    expect(result!.tvlSeries).toEqual([]);
+  });
+
+  it("degrades gracefully when all-pools rate-map query fails", async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const detailPool = makeDetailPool();
+    mockRequest((q) => {
+      if (q.includes("AllPoolsWithHealth")) throw new Error("allpools down");
+      if (q.includes("PoolDailySnapshot")) {
+        return {
+          PoolDailySnapshot: [
+            {
+              poolId: POOL_ID,
+              timestamp: String(nowSec - 86_400),
+              reserves0: "900000000000000000000000",
+              reserves1: "900000000000000000000000",
+              swapVolume0: "10000000000000000000000",
+              swapVolume1: "10000000000000000000000",
+            },
+          ],
+        };
+      }
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    // USDm leg → poolTvlUSD / volume math don't need the rate map
+    expect(result!.name).toBe("cUSD/USDm");
+    expect(result!.tvlUsd).toBeGreaterThan(0);
+    expect(result!.volume7dUsd).toBeGreaterThan(0);
+  });
+
+  it("returns null WoW when the only baseline row is older than 14 days", async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const detailPool = makeDetailPool();
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) {
+        return {
+          PoolDailySnapshot: [
+            {
+              poolId: POOL_ID,
+              timestamp: String(nowSec - 86_400),
+              reserves0: "1000000000000000000000000",
+              reserves1: "1000000000000000000000000",
+              swapVolume0: "0",
+              swapVolume1: "0",
+            },
+            {
+              // 20 days ago — outside the [now-14d, now-7d] WoW window.
+              poolId: POOL_ID,
+              timestamp: String(nowSec - 20 * 86_400),
+              reserves0: "500000000000000000000000",
+              reserves1: "500000000000000000000000",
+              swapVolume0: "0",
+              swapVolume1: "0",
+            },
+          ],
+        };
+      }
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.tvlWoWPct).toBeNull();
+  });
+
+  it("rejects bare-address URLs — OG must not resolve differently from page", async () => {
+    // Bare 0x addresses would need cross-chain probing, but the pool page
+    // uses DEFAULT_NETWORK only. Accepting them here would produce OG
+    // previews for a chain the page can't load.
+    expect(await fetchPoolOgDataUncached(ADDR_CUSD)).toBeNull();
+  });
+
+  it("derives full payload for a USDm/cUSD pool", async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const detailPool = makeDetailPool();
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) {
+        return {
+          PoolDailySnapshot: [
+            {
+              poolId: POOL_ID,
+              timestamp: String(nowSec - 86_400),
+              reserves0: "900000000000000000000000",
+              reserves1: "900000000000000000000000",
+              swapVolume0: "100000000000000000000000",
+              swapVolume1: "100000000000000000000000",
+            },
+            {
+              poolId: POOL_ID,
+              timestamp: String(nowSec - 7 * 86_400 - 100),
+              reserves0: "800000000000000000000000",
+              reserves1: "800000000000000000000000",
+              swapVolume0: "50000000000000000000000",
+              swapVolume1: "50000000000000000000000",
+            },
+          ],
+        };
+      }
+      return { Pool: [detailPool] };
+    });
+
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.name).toBe("cUSD/USDm");
+    expect(result!.chainLabel).toBe("Celo");
+    expect(result!.tokenSymbols).toEqual(["USDm", "cUSD"]);
+    expect(result!.tvlUsd).toBeCloseTo(2_000_000, -2);
+    expect(result!.volume7dUsd).toBeCloseTo(100_000, -2);
+    expect(result!.tvlWoWPct).toBeCloseTo(25, 0);
+    expect(result!.health).toBe("OK");
+    // Sparkline: newest-first rows reversed → oldest→newest TVL values.
+    // Snapshot 2 (7d-ago) reserves 800K+800K = 1.6M, snapshot 1 (1d-ago) 900K+900K = 1.8M.
+    expect(result!.tvlSeries).toHaveLength(2);
+    expect(result!.tvlSeries[0]).toBeCloseTo(1_600_000, -2);
+    expect(result!.tvlSeries[1]).toBeCloseTo(1_800_000, -2);
+    expect(result!.oracleFresh).toBe(true);
+    expect(result!.oracleAgeSeconds).toBeGreaterThanOrEqual(0);
+    expect(result!.oracleAgeSeconds).toBeLessThan(60);
+  });
+
+  it("marks oracle stale when past the expiry window", async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const detailPool = makeDetailPool({
+      oracleTimestamp: String(nowSec - 3600),
+      oracleExpiry: "300",
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.oracleFresh).toBe(false);
+    expect(result!.oracleAgeSeconds).toBeGreaterThanOrEqual(3600);
+  });
+
+  it("surfaces limit-breach via effective health (oracle OK, limit CRITICAL)", async () => {
+    const detailPool = makeDetailPool({
+      limitStatus: "CRITICAL",
+      limitPressure0: "1.1",
+      limitPressure1: "0",
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    // `health` is effective-status (worst of oracle + limit), so a limit
+    // breach surfaces here. Label in UI reads "Health" (not "Rebalance") —
+    // see buildDescription/buildAlt/Tile label="Health".
+    expect(result!.health).toBe("CRITICAL");
+  });
+
+  it("suppresses TVL-derived fields for unpriceable FX/FX pool when rate map unavailable", async () => {
+    // FX/FX pool (no USDm leg) needs ALL_POOLS_WITH_HEALTH to build the
+    // rate map. If that query fails, poolTvlUSD silently returns 0 — we
+    // must not ship fake $0 TVL / flat sparkline / "TVL $0.00" alt text.
+    const ADDR_EURM = "0xbbb0000000000000000000000000000000000003";
+    const ADDR_GBPM = "0xbbb0000000000000000000000000000000000004";
+    const fxPool = makeDetailPool({
+      token0: ADDR_EURM,
+      token1: ADDR_GBPM,
+    });
+    mockRequest((q) => {
+      if (q.includes("AllPoolsWithHealth")) throw new Error("allpools down");
+      if (q.includes("PoolDailySnapshot")) {
+        const nowSec = Math.floor(Date.now() / 1000);
+        return {
+          PoolDailySnapshot: [
+            {
+              poolId: POOL_ID,
+              timestamp: String(nowSec - 86_400),
+              reserves0: "1000000000000000000000000",
+              reserves1: "1000000000000000000000000",
+              swapVolume0: "0",
+              swapVolume1: "0",
+            },
+          ],
+        };
+      }
+      return { Pool: [fxPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.tvlUsd).toBe(0);
+    expect(result!.volume7dUsd).toBeNull();
+    expect(result!.tvlWoWPct).toBeNull();
+    expect(result!.tvlSeries).toEqual([]);
+  });
+});
