@@ -121,19 +121,23 @@ export function weekOverWeekChange(
 type TokenSlice = { symbol: string; usd: number };
 
 /**
- * Sum per-token USD volume over a window (default: last 30 days).
- * Output sorted descending by USD. Empty tokens (0 USD) excluded.
+ * Sum per-token USD volume over a window (default: last 30 days). Pass
+ * `windowDays = null` for no window cutoff (all-time). Output sorted
+ * descending by USD. Empty tokens (0 USD) excluded.
  */
 export function buildTokenBreakdown(
   snapshots: ReadonlyArray<BridgeDailySnapshot>,
   rates: OracleRateMap,
-  windowDays = 30,
+  windowDays: number | null = 30,
   nowSeconds = Math.floor(Date.now() / 1000),
 ): TokenSlice[] {
-  const cutoff = toDayBucket(nowSeconds - windowDays * SECONDS_PER_DAY);
+  const cutoff =
+    windowDays === null
+      ? null
+      : toDayBucket(nowSeconds - windowDays * SECONDS_PER_DAY);
   const byToken = new Map<string, number>();
   for (const s of snapshots) {
-    if (Number(s.date) < cutoff) continue;
+    if (cutoff !== null && Number(s.date) < cutoff) continue;
     const usd = snapshotUsdValue(s, rates);
     if (usd === 0) continue;
     byToken.set(s.tokenSymbol, (byToken.get(s.tokenSymbol) ?? 0) + usd);

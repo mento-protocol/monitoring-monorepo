@@ -137,6 +137,53 @@ describe("sortTransfers — amountUsd branches", () => {
   });
 });
 
+describe("sortTransfers — duration branch", () => {
+  it("sorts by delivered - sent elapsed time", () => {
+    const fast = mk({
+      id: "fast",
+      sentTimestamp: "1000",
+      deliveredTimestamp: "1010",
+      status: "DELIVERED",
+    });
+    const slow = mk({
+      id: "slow",
+      sentTimestamp: "1000",
+      deliveredTimestamp: "2000",
+      status: "DELIVERED",
+    });
+    const desc = sortTransfers([fast, slow], "duration", "desc", noRates);
+    expect(desc.map((t) => t.id)).toEqual(["slow", "fast"]);
+  });
+
+  it("pending rows (no deliveredTimestamp) sink regardless of direction", () => {
+    const delivered = mk({
+      id: "d",
+      sentTimestamp: "1000",
+      deliveredTimestamp: "1100",
+      status: "DELIVERED",
+    });
+    const pending = mk({
+      id: "p",
+      sentTimestamp: "1000",
+      deliveredTimestamp: null,
+      status: "SENT",
+    });
+    const asc = sortTransfers([pending, delivered], "duration", "asc", noRates);
+    expect(asc[0].id).toBe("d");
+    // Null sinks on desc too — without this, a page of duration-desc
+    // sorted rows could start with a block of "pending" cells on top,
+    // which is the opposite of the "no-data rows sink" UX contract.
+    const desc = sortTransfers(
+      [delivered, pending],
+      "duration",
+      "desc",
+      noRates,
+    );
+    expect(desc[0].id).toBe("d");
+    expect(desc[1].id).toBe("p");
+  });
+});
+
 describe("sortTransfers — string branches sink empty values", () => {
   it("empty senders sink on ascending", () => {
     const named = mk({ id: "named", sender: "0xaaa" });

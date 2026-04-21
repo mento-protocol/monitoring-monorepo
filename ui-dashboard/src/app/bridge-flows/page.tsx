@@ -1,23 +1,36 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useBridgeGQL } from "@/lib/bridge-flows/use-bridge-gql";
 import {
   BRIDGE_TRANSFERS_WINDOW,
+  BRIDGE_TRANSFERS_COUNT,
   BRIDGE_DAILY_SNAPSHOT,
   BRIDGE_PENDING_IDS,
   BRIDGE_TOP_BRIDGERS,
 } from "@/lib/bridge-queries";
 import { TOP_BRIDGERS_EXPANDED } from "@/lib/bridge-flows/layout";
 import {
+  ALL_BRIDGE_STATUSES,
   deriveBridgeStatus,
   computeAvgDeliverTime,
   formatDurationShort,
+  transferDeliveryDurationSec,
 } from "@/lib/bridge-status";
 import { BridgeStatusBadge } from "@/components/bridge-status-badge";
+import { BridgeStatusFilter } from "@/components/bridge-status-filter";
 import { BridgeProviderBadge } from "@/components/bridge-provider-badge";
 import { ChainIcon } from "@/components/chain-icon";
 import { Tile, Skeleton, ErrorBox, EmptyBox } from "@/components/feedback";
+import { Pagination } from "@/components/pagination";
 import { BreakdownTile } from "@/components/breakdown-tile";
 import { BridgeVolumeChart } from "@/components/bridge-volume-chart";
 import { BridgeTopBridgersChart } from "@/components/bridge-top-bridgers-chart";
@@ -26,6 +39,7 @@ import { Table, Th } from "@/components/table";
 import { SortableTh } from "@/components/sortable-th";
 import { AddressLink } from "@/components/address-link";
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
+import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import {
   formatWei,
   formatUSD,
@@ -50,12 +64,11 @@ import type {
   BridgeBridger,
   BridgeDailySnapshot,
   BridgeProvider,
+  BridgeStatus,
   BridgeTransfer,
 } from "@/lib/types";
 
 const PAGE_LIMIT = 25;
-const THIRTY_DAYS_SECONDS = 30 * 24 * 60 * 60;
-const SECONDS_PER_DAY = 86_400;
 
 export default function BridgeFlowsPage() {
   return (
@@ -66,19 +79,105 @@ export default function BridgeFlowsPage() {
 }
 
 function BridgeFlowsContent() {
-  // Floor "now - 30d" to UTC day start — BridgeDailySnapshot.date is day-
-  // bucketed, so a non-aligned cutoff drops the snapshot straddling the
-  // boundary. Both the count tile and the transfers window use the same
-  // cutoff so tile + table agree on coverage.
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const afterDayBucket =
-    nowSeconds -
-    THIRTY_DAYS_SECONDS -
-    ((nowSeconds - THIRTY_DAYS_SECONDS) % SECONDS_PER_DAY);
+  // Page + status filter are URL-backed so users can refresh, share, or
+  // navigate back without losing their view. Pattern mirrors pools/page.tsx
+  // and pool/[poolId]/page.tsx. Resetting page to 1 on filter change keeps
+  // users out of empty trailing pages. The active `page` is clamped against
+  // `totalPages` below to guard against stale indices from count shrinkage.
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const rawPage = Math.max(
+    1,
+    parseInt(searchParams.get("page") ?? "1", 10) || 1,
+  );
+
+  const selectedStatuses = useMemo<BridgeStatus[]>(() => {
+    const param = searchParams.get("statuses");
+    // null  → param absent → show all (default)
+    // ""    → user deselected everything → empty selection (skip polling)
+    if (param === null) return ALL_BRIDGE_STATUSES.slice();
+    const validSet = new Set<string>(ALL_BRIDGE_STATUSES);
+    const parts = [
+      ...new Set(
+        param.split(",").filter((s): s is BridgeStatus => validSet.has(s)),
+      ),
+    ];
+    return parts;
+  }, [searchParams]);
+
+  const setPage = useCallback(
+    (p: number) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (p === 1) params.delete("page");
+      else params.set("page", String(p));
+      router.replace(`?${params.toString()}`, { scroll: false });
+    },
+    [router, searchParams],
+  );
+
+  const handleStatusChange = useCallback(
+    (next: BridgeStatus[]) => {
+      const params = new URLSearchParams(searchParams.toString());
+      const nextSet = new Set(next);
+      const isAll = ALL_BRIDGE_STATUSES.every((s) => nextSet.has(s));
+      if (isAll) params.delete("statuses");
+      else params.set("statuses", next.join(","));
+      params.delete("page"); // reset to page 1 on filter change
+      router.replace(`?${params.toString()}`, { scroll: false });
+    },
+    [router, searchParams],
+  );
+
+  // When the user toggles statuses to an empty set, SWR key is nulled and
+  // no fetch happens — the EmptyBox below handles the UI copy. Otherwise
+  // callers would poll a `status: _in: []` query on every refresh interval
+  // just to get back an empty array.
+  const hasSelectedStatuses = selectedStatuses.length > 0;
+
+  // Total row count for the pagination denominator. Shape matches
+  // POOL_SWAPS_COUNT: fetch up to ENVIO_MAX_ROWS IDs and count client-side,
+  // since hosted Hasura has no _aggregate support. Preserved-last-known
+  // pattern avoids the pager collapsing on a transient count error.
+  const countResult = useBridgeGQL<{ BridgeTransfer: Array<{ id: string }> }>(
+    hasSelectedStatuses ? BRIDGE_TRANSFERS_COUNT : null,
+    {
+      statusIn: selectedStatuses,
+      limit: ENVIO_MAX_ROWS,
+    },
+  );
+  const lastKnownTotalRef = useRef(0);
+  // Reset the preserved-last-known denominator whenever the filter changes —
+  // otherwise a transient count error on a new filter surfaces the previous
+  // filter's total (e.g. "91 total" for a narrower filter that really has 3
+  // matches). Stable-serialize the array so React's dependency comparison
+  // doesn't miss in-place mutations.
+  const statusKey = selectedStatuses.join("|");
+  useEffect(() => {
+    lastKnownTotalRef.current = 0;
+  }, [statusKey]);
+  const rawTotal = countResult.data?.BridgeTransfer.length ?? 0;
+  if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
+  // On count error, fall back to the preserved value but gate `totalCapped`
+  // on that same preserved value — otherwise a transient error with a stale
+  // ref of 0 could claim rawTotal < ENVIO_MAX_ROWS while the banner reads
+  // off whatever last-known count we held.
+  const total = countResult.error ? lastKnownTotalRef.current : rawTotal;
+  const totalCapped = !countResult.error && rawTotal >= ENVIO_MAX_ROWS;
+
+  // Clamp the active page against totalPages — guards against stale URL
+  // indices when the count shrinks (window roll, narrower filter on refresh).
+  // `handleStatusChange` resets via URL param delete for the common case.
+  const totalPages = total > 0 ? Math.ceil(total / PAGE_LIMIT) : 1;
+  const page = Math.max(1, Math.min(rawPage, totalPages));
 
   const transfersResult = useBridgeGQL<{ BridgeTransfer: BridgeTransfer[] }>(
-    BRIDGE_TRANSFERS_WINDOW,
-    { limit: PAGE_LIMIT, offset: 0, after: afterDayBucket },
+    hasSelectedStatuses ? BRIDGE_TRANSFERS_WINDOW : null,
+    {
+      limit: PAGE_LIMIT,
+      offset: (page - 1) * PAGE_LIMIT,
+      statusIn: selectedStatuses,
+    },
   );
 
   // All-time daily snapshots feed both the KPI row (24h/7d/30d sums) and the
@@ -173,6 +272,7 @@ function BridgeFlowsContent() {
           rates={rates}
           isLoading={snapshotsResult.isLoading && snapshots.length === 0}
           hasError={snapshotsError}
+          isCapped={snapshotsCapped}
         />
         <BridgeTopBridgersChart
           bridgers={topBridgers}
@@ -229,17 +329,49 @@ function BridgeFlowsContent() {
       </section>
 
       <section aria-label="Recent transfers">
-        <h2 className="text-lg font-semibold text-white mb-3">
-          Recent transfers
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <h2 className="text-lg font-semibold text-white">Recent transfers</h2>
+          <BridgeStatusFilter
+            options={ALL_BRIDGE_STATUSES}
+            selected={selectedStatuses}
+            onChange={handleStatusChange}
+          />
+        </div>
         {transfersResult.error ? (
           <EmptyBox message="Unable to load transfers — see error above." />
         ) : transfersResult.isLoading && transfers.length === 0 ? (
           <Skeleton rows={5} />
         ) : transfers.length === 0 ? (
-          <EmptyBox message="No bridge transfers yet." />
+          <EmptyBox
+            message={
+              selectedStatuses.length === 0
+                ? "No statuses selected — enable at least one filter to see transfers."
+                : selectedStatuses.length < ALL_BRIDGE_STATUSES.length
+                  ? "No bridge transfers match the selected statuses."
+                  : "No bridge transfers yet."
+            }
+          />
         ) : (
-          <TransfersTable transfers={transfers} rates={rates} />
+          <>
+            <TransfersTable transfers={transfers} rates={rates} />
+            <Pagination
+              page={page}
+              pageSize={PAGE_LIMIT}
+              total={total}
+              onPageChange={setPage}
+            />
+            {totalCapped && (
+              <p className="mt-1 text-xs text-slate-500">
+                Showing first {ENVIO_MAX_ROWS.toLocaleString()} transfers —
+                older entries may exist beyond this page range.
+              </p>
+            )}
+            {countResult.error && (
+              <p className="mt-1 text-xs text-slate-500">
+                Total count degraded — showing last known denominator.
+              </p>
+            )}
+          </>
         )}
       </section>
     </div>
@@ -350,6 +482,15 @@ function TransfersTable({
           >
             Time
           </SortableTh>
+          <SortableTh
+            sortKey="duration"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+            align="right"
+          >
+            Duration
+          </SortableTh>
         </tr>
       </thead>
       <tbody>
@@ -439,11 +580,49 @@ function TransfersTable({
                   ? relativeTime(t.sentTimestamp)
                   : relativeTime(t.firstSeenAt)}
               </td>
+              <DurationCell transfer={t} />
             </tr>
           );
         })}
       </tbody>
     </Table>
+  );
+}
+
+function DurationCell({ transfer }: { transfer: BridgeTransfer }) {
+  const durationSec = transferDeliveryDurationSec(transfer);
+  if (durationSec === null) {
+    // Mirror the STUCK overlay: any non-terminal-delivered status is
+    // "pending" from a duration perspective — including the client-side
+    // STUCK overlay, which should still show "pending" rather than em-dash
+    // (it's unfinished, not unknown). CANCELLED/FAILED are unreachable on
+    // the bridge page today (no indexer handler writes them) but the
+    // em-dash branch is kept for schema-level safety.
+    const derived = deriveBridgeStatus(transfer);
+    const pending =
+      derived !== "DELIVERED" &&
+      derived !== "CANCELLED" &&
+      derived !== "FAILED";
+    return (
+      <td
+        className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-500 font-mono text-right whitespace-nowrap"
+        title={
+          pending
+            ? "Not yet delivered"
+            : "Delivery timestamp unavailable for this transfer"
+        }
+      >
+        {pending ? "pending" : "\u2014"}
+      </td>
+    );
+  }
+  return (
+    <td
+      className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-400 font-mono text-right whitespace-nowrap"
+      title="Source-send to destination-delivery elapsed time"
+    >
+      {formatDurationShort(durationSec)}
+    </td>
   );
 }
 

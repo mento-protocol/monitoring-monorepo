@@ -6,19 +6,28 @@
  * specific query is loaded conditionally on the drill-down.
  */
 
-// Recent transfers — paginated, newest first.
+// All transfers — paginated, newest first, full history.
 //
-// Filter + sort on firstSeenAt (non-null) rather than sentTimestamp (nullable).
+// Sort on firstSeenAt (non-null) rather than sentTimestamp (nullable).
 // Under unordered_multichain_mode, a destination-first TransferRedeemed can
 // seed a BridgeTransfer row with sentTimestamp=null before the source events
 // arrive — Hasura's _gte on a null column returns UNKNOWN and drops the row,
 // so a filter on sentTimestamp would hide freshly-delivered transfers during
 // the race window (and permanently hide any transfer whose source chain is
 // not in the indexer's networks: list).
+//
+// `statusIn` accepts the full status allowlist the caller wants. Callers that
+// want "show all" pass every status — a null/empty-list variant is avoided to
+// keep the query server-filterable (and the total count honest under the
+// same filter) without branching on optional operators.
 export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
-  query BridgeTransfersWindow($limit: Int!, $offset: Int!, $after: numeric!) {
+  query BridgeTransfersWindow(
+    $limit: Int!
+    $offset: Int!
+    $statusIn: [String!]!
+  ) {
     BridgeTransfer(
-      where: { firstSeenAt: { _gte: $after } }
+      where: { status: { _in: $statusIn } }
       order_by: { firstSeenAt: desc, id: asc }
       limit: $limit
       offset: $offset
@@ -43,6 +52,25 @@ export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
       usdValueAtSend
       firstSeenAt
       lastUpdatedAt
+    }
+  }
+`;
+
+// Count paired with BRIDGE_TRANSFERS_WINDOW. Fetches IDs only (up to
+// `$limit` rows — callers pass `ENVIO_MAX_ROWS`) so the page indicator can
+// render "Page X of Y" without an `_aggregate` query (aggregates are
+// disabled on hosted Hasura). Applies the same `statusIn` filter the
+// visible window uses — otherwise the denominator would count hidden rows.
+// The $limit variable mirrors POOL_SWAPS_COUNT so the cap lives in a
+// single TS constant rather than being hardcoded in GraphQL.
+export const BRIDGE_TRANSFERS_COUNT = /* GraphQL */ `
+  query BridgeTransfersCount($statusIn: [String!]!, $limit: Int!) {
+    BridgeTransfer(
+      where: { status: { _in: $statusIn } }
+      order_by: { firstSeenAt: desc, id: asc }
+      limit: $limit
+    ) {
+      id
     }
   }
 `;

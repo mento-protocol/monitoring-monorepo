@@ -48,7 +48,16 @@ export function useBridgeGQL<T>(
         variables,
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       }),
-    { refreshInterval },
+    {
+      refreshInterval,
+      // The 10s polling loop already keeps bridge data fresh; piling
+      // focus + reconnect revalidations on top was fanning each tab-
+      // resume across every active bridge query and tripping Envio's
+      // GraphQL 429 rate limit. Scoped to this hook (the global SWR
+      // config leaves them on for one-shot reads elsewhere).
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+    },
   );
 
   if (!client) {

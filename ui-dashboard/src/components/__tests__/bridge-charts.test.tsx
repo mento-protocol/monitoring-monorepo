@@ -95,6 +95,36 @@ describe("BridgeTokenBreakdownChart smoke", () => {
     );
     expect(html).toContain("Unable to load token breakdown.");
   });
+
+  it("shows 'Partial — snapshot cap hit' on the 'all' tab when capped", () => {
+    const html = renderToStaticMarkup(
+      <BridgeTokenBreakdownChart
+        snapshots={[]}
+        rates={new Map()}
+        isLoading={false}
+        hasError={false}
+        isCapped
+        defaultRange="all"
+      />,
+    );
+    expect(html).toContain("Partial — snapshot cap hit");
+  });
+
+  it("hides the cap note on bounded ranges even when capped", () => {
+    // 7d/30d cutoffs are smaller than the cap horizon, so they're not
+    // truncated by the 1000-row ceiling — the note would be misleading.
+    const html = renderToStaticMarkup(
+      <BridgeTokenBreakdownChart
+        snapshots={[]}
+        rates={new Map()}
+        isLoading={false}
+        hasError={false}
+        isCapped
+        defaultRange="30d"
+      />,
+    );
+    expect(html).not.toContain("Partial — snapshot cap hit");
+  });
 });
 
 describe("BridgeTopBridgersChart smoke", () => {

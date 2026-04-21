@@ -1,4 +1,7 @@
-import { deriveBridgeStatus } from "@/lib/bridge-status";
+import {
+  deriveBridgeStatus,
+  transferDeliveryDurationSec,
+} from "@/lib/bridge-status";
 import type { OracleRateMap } from "@/lib/tokens";
 import type { SortDir } from "@/lib/table-sort";
 import type { BridgeTransfer } from "@/lib/types";
@@ -16,7 +19,8 @@ export type BridgeSortKey =
   | "amountUsd"
   | "sender"
   | "receiver"
-  | "time";
+  | "time"
+  | "duration";
 
 /**
  * Compare nullable values. Nulls always sink regardless of direction —
@@ -122,6 +126,17 @@ export function sortTransfers(
         return compareNullable(
           timestampSortValue(a),
           timestampSortValue(b),
+          (x, y) => x - y,
+          sortDir,
+        );
+      }
+      case "duration": {
+        // Pending rows (no deliveredTimestamp) sink to the bottom — same
+        // null-sink rule as amount/amountUsd so the user isn't staring at
+        // a block of "pending" rows when sorting by duration.
+        return compareNullable(
+          transferDeliveryDurationSec(a),
+          transferDeliveryDurationSec(b),
           (x, y) => x - y,
           sortDir,
         );

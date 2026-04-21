@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
+  ALL_BRIDGE_STATUSES,
   deriveBridgeStatus,
   computeAvgDeliverTime,
   formatDurationShort,
   bridgeStatusLabel,
+  transferDeliveryDurationSec,
 } from "../bridge-status";
 import type { BridgeTransfer } from "../types";
 
@@ -280,6 +282,77 @@ describe("formatDurationShort", () => {
   it("renders minutes and seconds when s > 0", () => {
     expect(formatDurationShort(95)).toBe("1m 35s");
   });
+
+  it("renders days + hours once >= 1 day", () => {
+    expect(formatDurationShort(86_400)).toBe("1d 0h");
+    expect(formatDurationShort(3 * 86_400 + 4 * 3600)).toBe("3d 4h");
+  });
+
+  it("renders the final second-below-a-day as hours+minutes (86_399 → 23h 59m)", () => {
+    // Boundary: one second under a full day stays in the h/m bucket; the
+    // day bucket only kicks in at >= 86_400s. This guards against a stray
+    // Math.ceil/floor swap in the bucketing code.
+    expect(formatDurationShort(86_399)).toBe("23h 59m");
+  });
+});
+
+describe("transferDeliveryDurationSec", () => {
+  it("returns null when sentTimestamp is missing", () => {
+    expect(
+      transferDeliveryDurationSec({
+        sentTimestamp: null,
+        deliveredTimestamp: "100",
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null when deliveredTimestamp is missing", () => {
+    expect(
+      transferDeliveryDurationSec({
+        sentTimestamp: "100",
+        deliveredTimestamp: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("returns the delta in seconds when both sides are present", () => {
+    expect(
+      transferDeliveryDurationSec({
+        sentTimestamp: "1000",
+        deliveredTimestamp: "1125",
+      }),
+    ).toBe(125);
+  });
+
+  it("clamps a negative delta (clock skew) to 0 instead of surfacing it", () => {
+    expect(
+      transferDeliveryDurationSec({
+        sentTimestamp: "1000",
+        deliveredTimestamp: "999",
+      }),
+    ).toBe(0);
+  });
+
+  it("treats '0' (epoch) as missing so pre-indexed/race rows return null", () => {
+    // An indexer writing a "0" string to sentTimestamp (before the real
+    // source event is seen) shouldn't produce a delivered-from-epoch delta
+    // on the order of 5+ decades — treat the epoch sentinel as missing.
+    expect(
+      transferDeliveryDurationSec({
+        sentTimestamp: "0",
+        deliveredTimestamp: "1000",
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null when a timestamp isn't a finite number (NaN guard)", () => {
+    expect(
+      transferDeliveryDurationSec({
+        sentTimestamp: "abc",
+        deliveredTimestamp: "1000",
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("bridgeStatusLabel", () => {
@@ -288,5 +361,25 @@ describe("bridgeStatusLabel", () => {
     expect(bridgeStatusLabel("QUEUED_INBOUND")).toBe("Queued");
     expect(bridgeStatusLabel("STUCK")).toBe("Stuck");
     expect(bridgeStatusLabel("PENDING")).toBe("Pending");
+  });
+});
+
+describe("ALL_BRIDGE_STATUSES", () => {
+  it("matches the indexer-supported subset exactly", () => {
+    // Hard-coded literal — the *whole point* is to force a conscious
+    // update when the indexer starts writing a new status. If this test
+    // fails, decide whether the filter UI should expose the new status
+    // (add it here + to BridgeStatusBadge coverage) or keep hiding it.
+    //
+    // CANCELLED and FAILED are schema-reserved but unwritten in v1 —
+    // see indexer-envio/src/wormhole/status.ts. Exposing them in the
+    // filter would let the user narrow to an always-empty set.
+    expect([...ALL_BRIDGE_STATUSES]).toEqual([
+      "PENDING",
+      "SENT",
+      "ATTESTED",
+      "QUEUED_INBOUND",
+      "DELIVERED",
+    ]);
   });
 });

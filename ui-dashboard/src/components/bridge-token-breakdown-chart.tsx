@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { formatUSD } from "@/lib/format";
 import {
   PLOTLY_BASE_LAYOUT,
@@ -9,6 +9,7 @@ import {
   ROW_CHART_HEIGHT_PX,
 } from "@/lib/plot";
 import { buildTokenBreakdown } from "@/lib/bridge-flows/snapshots";
+import { RANGES, rangeKeyToDays, type RangeKey } from "@/lib/time-series";
 import type { OracleRateMap } from "@/lib/tokens";
 import type { BridgeDailySnapshot } from "@/lib/types";
 
@@ -42,8 +43,14 @@ interface BridgeTokenBreakdownChartProps {
   rates: OracleRateMap;
   isLoading: boolean;
   hasError: boolean;
-  /** Rolling window in days; defaults to 30. */
-  windowDays?: number;
+  /**
+   * True when the snapshot query hit Hasura's 1000-row cap. Only affects
+   * the "All" tab subtitle — the 7d/30d tabs have their own fixed cutoff
+   * inside the cap horizon, so the cap doesn't truncate their window.
+   */
+  isCapped?: boolean;
+  /** Initial range tab; defaults to 30d to match the pre-toggle behavior. */
+  defaultRange?: RangeKey;
 }
 
 export function BridgeTokenBreakdownChart({
@@ -51,8 +58,16 @@ export function BridgeTokenBreakdownChart({
   rates,
   isLoading,
   hasError,
-  windowDays = 30,
+  isCapped = false,
+  defaultRange = "30d",
 }: BridgeTokenBreakdownChartProps) {
+  const [range, setRange] = useState<RangeKey>(defaultRange);
+  // Range independent from BridgeVolumeChart — the sibling card uses its own
+  // local state. The tile label underneath shows the active window for
+  // context; a shared `rangeKeyToDays(range)` keeps the tab widget and the
+  // data-layer window definition in lockstep.
+  const windowDays = rangeKeyToDays(range);
+
   const slices = useMemo(
     () => buildTokenBreakdown(snapshots, rates, windowDays),
     [snapshots, rates, windowDays],
@@ -92,13 +107,47 @@ export function BridgeTokenBreakdownChart({
     [],
   );
 
+  // Match the "partial data" copy used on BridgeVolumeChart (via
+  // TimeSeriesChartCard's `hasSnapshotError` branch). Only surface when the
+  // "all" window is active — the bounded ranges don't touch the cap.
+  const showCapNote = isCapped && range === "all";
+
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
-      <div className="mb-4 flex items-baseline justify-between">
-        <h3 className="text-sm text-slate-400">Volume by token</h3>
-        <span className="text-[10px] uppercase tracking-wider text-slate-500">
-          {windowDays}d
-        </span>
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-sm text-slate-400">Volume by token</h3>
+          {showCapNote && (
+            <p className="mt-0.5 text-xs text-slate-500">
+              Partial — snapshot cap hit
+            </p>
+          )}
+        </div>
+        <div
+          role="group"
+          aria-label="Volume by token time range"
+          className="flex gap-0.5 rounded-md bg-slate-800/50 p-0.5"
+        >
+          {RANGES.map((item) => {
+            const active = range === item.key;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setRange(item.key)}
+                className={
+                  "rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
+                  (active
+                    ? "bg-slate-700 text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200")
+                }
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
       {hasError ? (
         <p className="text-sm text-slate-500">
