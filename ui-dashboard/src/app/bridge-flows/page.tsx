@@ -28,6 +28,12 @@ import {
 import { BridgeStatusBadge } from "@/components/bridge-status-badge";
 import { BridgeStatusFilter } from "@/components/bridge-status-filter";
 import { BridgeProviderBadge } from "@/components/bridge-provider-badge";
+import {
+  BridgeRedeemPill,
+  ToastPortal,
+  type AddToast,
+  type ToastEntry,
+} from "@/components/bridge-redeem-cta";
 import { ChainIcon } from "@/components/chain-icon";
 import { Tile, Skeleton, ErrorBox, EmptyBox } from "@/components/feedback";
 import { Pagination } from "@/components/pagination";
@@ -59,6 +65,7 @@ import {
   usdPricedFromLiveRate,
 } from "@/lib/bridge-flows/pricing";
 import { windowTotals } from "@/lib/bridge-flows/snapshots";
+import { canManuallyRedeemTransfer } from "@/lib/bridge-flows/redeem";
 import { computeRouteAvgDeliverTimes } from "@/lib/bridge-flows/route-stats";
 import { wormholescanUrl } from "@/lib/wormhole/urls";
 import type {
@@ -243,8 +250,20 @@ function BridgeFlowsContent() {
   const snapshotsError = !!snapshotsResult.error;
   const topBridgersError = !!topBridgersResult.error;
 
+  const toastIdRef = useRef(0);
+  const [toasts, setToasts] = useState<ToastEntry[]>([]);
+  const addToast = useCallback<AddToast>((message, type, href) => {
+    const id = ++toastIdRef.current;
+    setToasts((t) => [...t, { id, message, type, href }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6_000);
+  }, []);
+
   return (
     <div className="space-y-8">
+      <ToastPortal
+        toasts={toasts}
+        onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))}
+      />
       <div>
         <h1 className="text-2xl font-bold text-white mb-1">Bridge Flows</h1>
         <p className="text-sm text-slate-400">
@@ -343,7 +362,11 @@ function BridgeFlowsContent() {
           />
         ) : (
           <>
-            <TransfersTable transfers={transfers} rates={rates} />
+            <TransfersTable
+              transfers={transfers}
+              rates={rates}
+              addToast={addToast}
+            />
             <Pagination
               page={page}
               pageSize={PAGE_LIMIT}
@@ -460,9 +483,11 @@ function TimeCell({ ts, whUrl }: { ts: string | null; whUrl: string | null }) {
 function TransfersTable({
   transfers,
   rates,
+  addToast,
 }: {
   transfers: BridgeTransfer[];
   rates: OracleRateMap;
+  addToast: AddToast;
 }) {
   const [sortKey, setSortKey] = useState<BridgeSortKey>("time");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -572,13 +597,17 @@ function TransfersTable({
             !!t.sender &&
             !!t.recipient &&
             t.sender.toLowerCase() === t.recipient.toLowerCase();
-          // Wormholescan URL is the row's "canonical" trace — if we have it,
-          // the transfer-level cells (provider, amount, amountUsd) all link
-          // to it so operators can jump into the trace from any of those
-          // columns instead of hunting for the `wh` pill at the end.
           const whUrl =
             t.provider === "WORMHOLE" && t.sentTxHash
               ? wormholescanUrl(t.sentTxHash)
+              : null;
+          const redeemProps =
+            status === "STUCK" && canManuallyRedeemTransfer(t)
+              ? {
+                  sentTxHash: t.sentTxHash!,
+                  destChainId: t.destChainId!,
+                  tokenSymbol: t.tokenSymbol,
+                }
               : null;
           return (
             <tr
@@ -642,6 +671,8 @@ function TransfersTable({
                   sourceChainId={t.sourceChainId}
                   deliveredTxHash={t.deliveredTxHash}
                   destChainId={t.destChainId}
+                  redeemProps={redeemProps}
+                  addToast={addToast}
                 />
               </td>
               <td className="px-2 sm:px-3 py-1.5 sm:py-2 text-xs font-mono text-right whitespace-nowrap">
@@ -769,12 +800,20 @@ function TxLinks({
   sourceChainId,
   deliveredTxHash,
   destChainId,
+  redeemProps,
+  addToast,
 }: {
   provider: BridgeProvider;
   sentTxHash: string | null;
   sourceChainId: number | null;
   deliveredTxHash: string | null;
   destChainId: number | null;
+  redeemProps: {
+    sentTxHash: string;
+    destChainId: number;
+    tokenSymbol: string;
+  } | null;
+  addToast: AddToast;
 }) {
   const src = networkForChainId(sourceChainId);
   const dst = networkForChainId(destChainId);
@@ -802,12 +841,15 @@ function TxLinks({
       title: "End-to-end trace on Wormholescan",
     });
   }
-  if (pills.length === 0) return <Dash />;
+  if (pills.length === 0 && !redeemProps) return <Dash />;
   return (
     <span className="inline-flex items-center gap-1">
       {pills.map((p) => (
         <TxPill key={p.label} {...p} />
       ))}
+      {redeemProps ? (
+        <BridgeRedeemPill {...redeemProps} addToast={addToast} />
+      ) : null}
     </span>
   );
 }
