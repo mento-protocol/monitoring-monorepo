@@ -28,8 +28,17 @@ describe("computeRouteAvgDeliverTimes", () => {
   it("returns empty array when all transfers are non-DELIVERED", () => {
     expect(
       computeRouteAvgDeliverTimes([
-        makeTransfer({ status: "SENT", sourceChainId: CELO, destChainId: MONAD, sentTimestamp: "1000" }),
-        makeTransfer({ status: "ATTESTED", sourceChainId: CELO, destChainId: MONAD }),
+        makeTransfer({
+          status: "SENT",
+          sourceChainId: CELO,
+          destChainId: MONAD,
+          sentTimestamp: "1000",
+        }),
+        makeTransfer({
+          status: "ATTESTED",
+          sourceChainId: CELO,
+          destChainId: MONAD,
+        }),
       ]),
     ).toEqual([]);
   });
@@ -54,8 +63,20 @@ describe("computeRouteAvgDeliverTimes", () => {
   it("excludes transfers with null sourceChainId or destChainId", () => {
     expect(
       computeRouteAvgDeliverTimes([
-        makeTransfer({ status: "DELIVERED", sourceChainId: null, destChainId: MONAD, sentTimestamp: "1000", deliveredTimestamp: "2000" }),
-        makeTransfer({ status: "DELIVERED", sourceChainId: CELO, destChainId: null, sentTimestamp: "1000", deliveredTimestamp: "2000" }),
+        makeTransfer({
+          status: "DELIVERED",
+          sourceChainId: null,
+          destChainId: MONAD,
+          sentTimestamp: "1000",
+          deliveredTimestamp: "2000",
+        }),
+        makeTransfer({
+          status: "DELIVERED",
+          sourceChainId: CELO,
+          destChainId: null,
+          sentTimestamp: "1000",
+          deliveredTimestamp: "2000",
+        }),
       ]),
     ).toEqual([]);
   });
@@ -63,7 +84,12 @@ describe("computeRouteAvgDeliverTimes", () => {
   it("returns empty array when all DELIVERED rows have null durations", () => {
     expect(
       computeRouteAvgDeliverTimes([
-        makeTransfer({ status: "DELIVERED", sourceChainId: CELO, destChainId: MONAD, sentTimestamp: null }),
+        makeTransfer({
+          status: "DELIVERED",
+          sourceChainId: CELO,
+          destChainId: MONAD,
+          sentTimestamp: null,
+        }),
       ]),
     ).toEqual([]);
   });
@@ -73,7 +99,12 @@ describe("computeRouteAvgDeliverTimes", () => {
       delivered(CELO, MONAD, "1000", "1100"),
     ]);
     expect(r).toHaveLength(1);
-    expect(r[0]).toEqual({ srcChainId: CELO, dstChainId: MONAD, avgSec: 100, count: 1 });
+    expect(r[0]).toEqual({
+      srcChainId: CELO,
+      dstChainId: MONAD,
+      avgSec: 100,
+      count: 1,
+    });
   });
 
   it("computes mean across multiple transfers on the same route", () => {
@@ -88,13 +119,23 @@ describe("computeRouteAvgDeliverTimes", () => {
 
   it("groups distinct routes separately and sorts fastest-first", () => {
     const r = computeRouteAvgDeliverTimes([
-      delivered(CELO, MONAD, "1000", "2800"),  // 1800s Celo→Monad
-      delivered(MONAD, CELO, "1000", "1010"),   // 10s   Monad→Celo
-      delivered(CELO, MONAD, "2000", "3800"),  // 1800s  Celo→Monad (second)
+      delivered(CELO, MONAD, "1000", "2800"), // 1800s Celo→Monad
+      delivered(MONAD, CELO, "1000", "1010"), // 10s   Monad→Celo
+      delivered(CELO, MONAD, "2000", "3800"), // 1800s  Celo→Monad (second)
     ]);
     expect(r).toHaveLength(2);
-    expect(r[0]).toEqual({ srcChainId: MONAD, dstChainId: CELO, avgSec: 10, count: 1 });
-    expect(r[1]).toEqual({ srcChainId: CELO, dstChainId: MONAD, avgSec: 1800, count: 2 });
+    expect(r[0]).toEqual({
+      srcChainId: MONAD,
+      dstChainId: CELO,
+      avgSec: 10,
+      count: 1,
+    });
+    expect(r[1]).toEqual({
+      srcChainId: CELO,
+      dstChainId: MONAD,
+      avgSec: 1800,
+      count: 2,
+    });
   });
 
   it("clamps negative duration (clock skew) to 0", () => {

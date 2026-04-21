@@ -6,42 +6,6 @@ import {
   bridgeStatusLabel,
   transferDeliveryDurationSec,
 } from "../bridge-status";
-import type { BridgeTransfer } from "../types";
-
-function mkTransfer(overrides: Partial<BridgeTransfer>): BridgeTransfer {
-  return {
-    id: "wormhole-0xabc",
-    provider: "WORMHOLE",
-    providerMessageId: "0xabc",
-    status: "PENDING",
-    tokenSymbol: "USDm",
-    tokenAddress: "0x0",
-    tokenDecimals: 18,
-    sourceChainId: null,
-    sourceContract: null,
-    destChainId: null,
-    destContract: null,
-    sender: null,
-    recipient: null,
-    amount: null,
-    sentBlock: null,
-    sentTimestamp: null,
-    sentTxHash: null,
-    attestationCount: 0,
-    firstAttestedTimestamp: null,
-    lastAttestedTimestamp: null,
-    deliveredBlock: null,
-    deliveredTimestamp: null,
-    deliveredTxHash: null,
-    cancelledTimestamp: null,
-    failedReason: null,
-    usdPriceAtSend: null,
-    usdValueAtSend: null,
-    firstSeenAt: "0",
-    lastUpdatedAt: "0",
-    ...overrides,
-  };
-}
 
 describe("deriveBridgeStatus", () => {
   it("passes through terminal statuses unchanged", () => {
@@ -196,7 +160,6 @@ describe("deriveBridgeStatus", () => {
     ).toBe("SENT");
   });
 });
-
 
 describe("formatDurationShort", () => {
   it("sub-minute", () => {

@@ -386,7 +386,10 @@ function RouteDeliveryTile({
       ) : isLoading ? (
         <div className="space-y-2">
           {[0, 1].map((i) => (
-            <div key={i} className="h-4 animate-pulse rounded bg-slate-800/50" />
+            <div
+              key={i}
+              className="h-4 animate-pulse rounded bg-slate-800/50"
+            />
           ))}
         </div>
       ) : routes.length === 0 ? (
@@ -415,13 +418,7 @@ function RouteDeliveryTile({
   );
 }
 
-function TimeCell({
-  ts,
-  whUrl,
-}: {
-  ts: string | null;
-  whUrl: string | null;
-}) {
+function TimeCell({ ts, whUrl }: { ts: string | null; whUrl: string | null }) {
   const relative = ts && ts !== "0" ? relativeTime(ts) : "—";
   const precise = ts && ts !== "0" ? formatTimestamp(ts) : undefined;
   if (whUrl) {
@@ -633,10 +630,7 @@ function TransfersTable({
                 />
               </td>
               <td className="px-2 sm:px-3 py-1.5 sm:py-2 text-xs font-mono text-right whitespace-nowrap">
-                <TimeCell
-                  ts={t.sentTimestamp ?? t.firstSeenAt}
-                  whUrl={whUrl}
-                />
+                <TimeCell ts={t.sentTimestamp ?? t.firstSeenAt} whUrl={whUrl} />
               </td>
               <DurationCell transfer={t} />
             </tr>

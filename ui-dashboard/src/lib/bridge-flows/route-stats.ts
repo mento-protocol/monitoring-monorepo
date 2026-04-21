@@ -24,7 +24,11 @@ export function computeRouteAvgDeliverTimes(
   transfers: ReadonlyArray<
     Pick<
       BridgeTransfer,
-      "status" | "sentTimestamp" | "deliveredTimestamp" | "sourceChainId" | "destChainId"
+      | "status"
+      | "sentTimestamp"
+      | "deliveredTimestamp"
+      | "sourceChainId"
+      | "destChainId"
     >
   >,
 ): RouteAvgTime[] {
@@ -35,7 +39,8 @@ export function computeRouteAvgDeliverTimes(
   for (const t of transfers) {
     if (t.status !== "DELIVERED") continue;
     const dur = transferDeliveryDurationSec(t);
-    if (dur === null || t.sourceChainId === null || t.destChainId === null) continue;
+    if (dur === null || t.sourceChainId === null || t.destChainId === null)
+      continue;
     const key = `${t.sourceChainId}-${t.destChainId}`;
     const existing = map.get(key);
     if (existing) {
