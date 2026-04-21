@@ -51,6 +51,7 @@ export function BridgeStatusFilter({
       aria-label="Filter transfers by status"
       className="flex flex-wrap items-center gap-1.5"
       onKeyDown={handleKeyDown}
+      tabIndex={-1}
     >
       <span className="text-xs text-slate-500 mr-1">Status:</span>
       <button
