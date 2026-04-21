@@ -42,7 +42,8 @@ export function BridgeStatusFilter({
         ? (idx + 1) % radios.length
         : (idx - 1 + radios.length) % radios.length;
     radios[next].focus();
-    onChange(next === 0 ? null : options[next - 1]);
+    const newValue = next === 0 ? null : options[next - 1];
+    if (newValue !== selected) onChange(newValue);
   }
 
   return (
