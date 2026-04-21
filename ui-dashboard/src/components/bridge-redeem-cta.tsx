@@ -168,7 +168,24 @@ export function ToastPortal({
   );
 }
 
-type RedeemPhase = "idle" | "fetching" | "sending" | "done";
+type TxReceipt = { status: `0x${string}` } | null;
+
+async function waitForTransaction(txHash: string): Promise<TxReceipt> {
+  const provider = window.ethereum;
+  if (!provider) return null;
+  // Poll up to 30 times × 3 s = 90 s before giving up.
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const receipt = (await provider.request({
+      method: "eth_getTransactionReceipt",
+      params: [txHash],
+    })) as TxReceipt;
+    if (receipt) return receipt;
+    await new Promise<void>((resolve) => setTimeout(resolve, 3_000));
+  }
+  return null;
+}
+
+type RedeemPhase = "idle" | "fetching" | "sending" | "mining" | "done";
 
 export function BridgeRedeemPill({
   sentTxHash,
@@ -211,10 +228,16 @@ export function BridgeRedeemPill({
       const calldata = buildReceiveMessageCalldata(body.vaaHex);
       const txHash = await sendRedeemTransaction(body, calldata);
 
+      setPhase("mining");
+      const receipt = await waitForTransaction(txHash);
+      if (!receipt) throw new Error("Transaction not confirmed after 90 s.");
+      if (receipt.status === "0x0")
+        throw new Error("Transaction reverted on-chain.");
+
       setPhase("done");
       const explorerUrl = getChainRedeemConfig(destChainId)?.explorerUrl;
       addToast(
-        `Redeem submitted: ${shortHash(txHash)}`,
+        `Redeem confirmed: ${shortHash(txHash)}`,
         "success",
         explorerUrl ? `${explorerUrl}/tx/${txHash}` : undefined,
       );
@@ -228,13 +251,19 @@ export function BridgeRedeemPill({
   const baseClass =
     "inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-mono";
 
-  if (phase === "fetching" || phase === "sending") {
+  if (phase === "fetching" || phase === "sending" || phase === "mining") {
+    const label =
+      phase === "fetching"
+        ? "fetching…"
+        : phase === "sending"
+          ? "sending…"
+          : "pending…";
     return (
       <span
         className={`${baseClass} bg-amber-900/40 text-amber-300 cursor-wait`}
       >
         <SpinnerIcon />
-        {phase === "fetching" ? "fetching…" : "sending…"}
+        {label}
       </span>
     );
   }
