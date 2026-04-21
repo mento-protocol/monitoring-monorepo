@@ -435,8 +435,8 @@ function RouteDeliveryTile({
 }
 
 function TimeCell({ ts, whUrl }: { ts: string | null; whUrl: string | null }) {
-  const relative = ts && ts !== "0" ? relativeTime(ts) : "—";
-  const precise = ts && ts !== "0" ? formatTimestamp(ts) : undefined;
+  const relative = ts ? relativeTime(ts) : "—";
+  const precise = ts ? formatTimestamp(ts) : undefined;
   if (whUrl) {
     return (
       <a

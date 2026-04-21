@@ -14,17 +14,43 @@ interface BridgeStatusFilterProps {
  * Radio-style status filter. Exactly one option is active at a time:
  * "All" (null) or a single status. Inactive pills are visually dimmed
  * but remain clickable — clicking any pill switches directly to it.
+ *
+ * Implements the WAI-ARIA radio button keyboard contract: arrow keys
+ * move focus + selection between options; Tab leaves the group.
  */
 export function BridgeStatusFilter({
   options,
   selected,
   onChange,
 }: BridgeStatusFilterProps) {
+  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (
+      e.key !== "ArrowDown" &&
+      e.key !== "ArrowRight" &&
+      e.key !== "ArrowUp" &&
+      e.key !== "ArrowLeft"
+    )
+      return;
+    e.preventDefault();
+    const radios = Array.from(
+      e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]'),
+    );
+    const idx = radios.indexOf(e.target as HTMLButtonElement);
+    if (idx === -1) return;
+    const next =
+      e.key === "ArrowDown" || e.key === "ArrowRight"
+        ? (idx + 1) % radios.length
+        : (idx - 1 + radios.length) % radios.length;
+    radios[next].focus();
+    onChange(next === 0 ? null : options[next - 1]);
+  }
+
   return (
     <div
       role="radiogroup"
       aria-label="Filter transfers by status"
       className="flex flex-wrap items-center gap-1.5"
+      onKeyDown={handleKeyDown}
     >
       <span className="text-xs text-slate-500 mr-1">Status:</span>
       <button

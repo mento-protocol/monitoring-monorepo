@@ -152,4 +152,42 @@ describe("BridgeStatusFilter", () => {
     // All + 5 status options = 6
     expect(radios).toHaveLength(6);
   });
+
+  it("ArrowRight from All moves to first status option", () => {
+    const onChange = vi.fn();
+    act(() => {
+      root.render(
+        <BridgeStatusFilter
+          options={OPTIONS}
+          selected={null}
+          onChange={onChange}
+        />,
+      );
+    });
+    act(() => {
+      pillByLabel(container, "All").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+      );
+    });
+    expect(onChange).toHaveBeenCalledWith("PENDING");
+  });
+
+  it("ArrowLeft from All wraps to last status option", () => {
+    const onChange = vi.fn();
+    act(() => {
+      root.render(
+        <BridgeStatusFilter
+          options={OPTIONS}
+          selected={null}
+          onChange={onChange}
+        />,
+      );
+    });
+    act(() => {
+      pillByLabel(container, "All").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }),
+      );
+    });
+    expect(onChange).toHaveBeenCalledWith("DELIVERED");
+  });
 });
