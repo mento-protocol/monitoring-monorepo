@@ -55,7 +55,6 @@ import {
 } from "@/lib/tokens";
 import { sortTransfers, type BridgeSortKey } from "@/lib/bridge-flows/sort";
 import {
-  transferAmountTokens,
   transferAmountUsd,
   usdPricedFromLiveRate,
 } from "@/lib/bridge-flows/pricing";
@@ -406,7 +405,7 @@ function RouteDeliveryTile({
           ))}
         </div>
       ) : routes.length === 0 ? (
-        <p className="text-sm text-slate-500">No delivered transfers in view</p>
+        <p className="text-sm text-slate-500">No delivered transfers yet</p>
       ) : (
         <div className="space-y-2">
           {routes.map((r) => (
@@ -565,7 +564,6 @@ function TransfersTable({
       <tbody>
         {sorted.map((t) => {
           const status = deriveBridgeStatus(t);
-          const amountTokens = transferAmountTokens(t);
           const usd = transferAmountUsd(t, rates);
           const usdFromLive = usd !== null && usdPricedFromLiveRate(t);
           const sameParties =
@@ -619,9 +617,9 @@ function TransfersTable({
                       ? "—"
                       : `${usdFromLive ? "~" : ""}${formatUSD(usd)}`}
                   </div>
-                  {amountTokens !== null && (
+                  {t.amount && (
                     <div className="text-xs text-slate-500">
-                      {formatWei(t.amount!, t.tokenDecimals ?? 18, 2)}
+                      {formatWei(t.amount, t.tokenDecimals ?? 18, 2)}
                     </div>
                   )}
                 </WormholescanLink>
