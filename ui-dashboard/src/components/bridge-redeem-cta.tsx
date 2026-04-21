@@ -180,19 +180,24 @@ async function waitForTransaction(
 ): Promise<TxReceipt> {
   for (let attempt = 0; attempt < 30; attempt++) {
     if (signal.aborted) return null;
-    const response = await fetch(rpcUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "eth_getTransactionReceipt",
-        params: [txHash],
-      }),
-      signal,
-    });
-    const json = (await response.json()) as { result: TxReceipt };
-    if (json.result) return json.result;
+    try {
+      const response = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "eth_getTransactionReceipt",
+          params: [txHash],
+        }),
+        signal,
+      });
+      const json = (await response.json()) as { result: TxReceipt };
+      if (json.result) return json.result;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") throw err;
+      // Transient network or JSON-parse error — retry on next iteration
+    }
     await new Promise((resolve) => setTimeout(resolve, 3_000));
   }
   return null;

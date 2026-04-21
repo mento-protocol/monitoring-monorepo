@@ -29,8 +29,9 @@ const CHAIN_CONFIGS: Record<number, ChainRedeemConfig> = {
   },
 };
 
-// Transceivers are deployed per-chain; key by (destChainId, tokenSymbol) so
-// we never call a Celo transceiver on the Monad chain or vice versa.
+// Keyed by (destChainId, tokenSymbol). Addresses sourced from
+// indexer-envio/config/nttAddresses.json — deterministic deployment means
+// the same proxy address is used on both Celo and Monad.
 const TRANSCEIVER_BY_CHAIN_AND_TOKEN: Record<
   number,
   Record<string, `0x${string}`>
@@ -40,7 +41,11 @@ const TRANSCEIVER_BY_CHAIN_AND_TOKEN: Record<
     EURm: "0x6467cfca82184657f32f1195f9a26b5578399479",
     GBPm: "0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f",
   },
-  // 143 (Monad) entries added once mainnet transceiver addresses are confirmed.
+  143: {
+    USDm: "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b",
+    EURm: "0x6467cfca82184657f32f1195f9a26b5578399479",
+    GBPm: "0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f",
+  },
 };
 
 export function getChainRedeemConfig(
