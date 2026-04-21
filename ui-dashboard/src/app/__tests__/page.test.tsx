@@ -501,13 +501,14 @@ describe("GlobalPage — TVL delta sub-KPIs", () => {
       reserves0: "200000000000000000000",
       reserves1: "100000000000000000000",
     });
-    // Chart's `hasSnapshotError` is wired to `anySnapshotsAllError` in page.tsx,
-    // so we trigger the partial-data badge via snapshotsAllError specifically.
+    // Chart's `hasSnapshotError` is wired to `anySnapshotsAllDailyError` in
+    // page.tsx, so we trigger the partial-data badge via
+    // snapshotsAllDailyError specifically.
     const html = render([
       makeNetworkData({
         network: TVL_NETWORK,
         pools: [pool],
-        snapshotsAllError: new Error("timeout"),
+        snapshotsAllDailyError: new Error("timeout"),
       }),
     ]);
     expect(html).toContain("· partial data");
@@ -686,23 +687,10 @@ describe("GlobalPage — Volume chart wiring", () => {
     expect(html).not.toContain("week-over-week");
   });
 
-  it("partial-badges only the TVL card when the hourly all-history fetch fails", () => {
-    // The TVL chart still reads the hourly `snapshotsAll` for its 7d hourly
-    // resolution; the Volume chart reads the daily rollup `snapshotsAllDaily`.
-    // A failure on the hourly path should NOT bleed into the Volume card.
-    const html = render([
-      makeNetworkData({
-        network: TVL_NETWORK,
-        snapshotsAllError: new Error("all-history hourly timeout"),
-      }),
-    ]);
-
-    expect(html.split("· partial data").length - 1).toBe(1);
-  });
-
-  it("partial-badges only the Volume card when the daily all-history fetch fails", () => {
-    // Mirror of the above: a daily-rollup failure only affects the Volume
-    // chart — the TVL chart keeps rendering from the hourly snapshotsAll.
+  it("partial-badges both the TVL and Volume card when the daily all-history fetch fails", () => {
+    // Both charts read from the shared `snapshotsAllDaily` fetch now that the
+    // hourly paginated fetch has been removed (to keep the homepage under the
+    // Envio tier quota). A daily-rollup failure therefore affects both cards.
     const html = render([
       makeNetworkData({
         network: TVL_NETWORK,
@@ -710,7 +698,7 @@ describe("GlobalPage — Volume chart wiring", () => {
       }),
     ]);
 
-    expect(html.split("· partial data").length - 1).toBe(1);
+    expect(html.split("· partial data").length - 1).toBe(2);
   });
 
   it("only partial-badges the TVL card when the 7d-only snapshot query fails", () => {

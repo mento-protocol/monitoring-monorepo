@@ -143,8 +143,6 @@ function makeNetworkData(
     snapshots: [],
     snapshots7d: [],
     snapshots30d: [],
-    snapshotsAll: [],
-    snapshotsAllTruncated: false,
     snapshotsAllDaily: [],
     snapshotsAllDailyTruncated: false,
     tradingLimits: [],
@@ -158,7 +156,6 @@ function makeNetworkData(
     snapshotsError: null,
     snapshots7dError: null,
     snapshots30dError: null,
-    snapshotsAllError: null,
     snapshotsAllDailyError: null,
     lpError: null,
   };

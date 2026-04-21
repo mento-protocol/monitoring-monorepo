@@ -163,7 +163,7 @@ networks:
   # Monad Mainnet (chain 143)
   # ---------------------------------------------------------------------------
   - id: 143 # Monad Mainnet — HyperSync: https://143.hypersync.xyz
-    start_block: ${ENVIO_START_BLOCK_MONAD:-60730000} # SortedOracles ~60733096, FPMMFactory ~60747398
+    start_block: ${ENVIO_START_BLOCK_MONAD:-60710000} # Covers ≥2026-03-10T18:00Z to catch early Wormhole NTT deliveries. SortedOracles ~60733096, FPMMFactory ~60747398
     contracts:
       - name: FPMMFactory
         address:

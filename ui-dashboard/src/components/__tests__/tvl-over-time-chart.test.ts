@@ -70,7 +70,7 @@ describe("buildDailySeries — empty / error short-circuits", () => {
     expect(out).toEqual({ series: [], nowTvl: 0 });
   });
 
-  it("still uses preserved rows when snapshotsAllError is set (fail-open path)", () => {
+  it("still uses preserved rows when snapshotsAllDailyError is set (fail-open path)", () => {
     // When the hook's paginator fails mid-loop after page 1, it preserves the
     // already-fetched recent rows + surfaces the error. The chart builder
     // should forward-fill from those preserved rows rather than blanking the
@@ -87,8 +87,8 @@ describe("buildDailySeries — empty / error short-circuits", () => {
       makeNetworkData({
         network: TVL_NETWORK,
         pools: [pool],
-        snapshotsAll: [snap],
-        snapshotsAllError: new Error("snapshots timeout"),
+        snapshotsAllDaily: [snap],
+        snapshotsAllDailyError: new Error("snapshots timeout"),
       }),
     ]);
     expect(out.series.length).toBeGreaterThan(0);
@@ -571,8 +571,8 @@ describe("TvlOverTimeChart render", () => {
   });
 
   it("renders 'Historical data partial' when hasSnapshotError and no rows survived", () => {
-    // First-page failure on the paginated all-history fetch: snapshotsAll
-    // comes back empty AND snapshotsAllError is set. Chart shows the
+    // First-page failure on the paginated all-history fetch: snapshotsAllDaily
+    // comes back empty AND snapshotsAllDailyError is set. Chart shows the
     // partial-history empty state (not a confident-but-blank plot).
     const pool = makeTvlPool({ reserves0: HUNDRED, reserves1: HUNDRED });
     const html = renderToStaticMarkup(
@@ -581,8 +581,8 @@ describe("TvlOverTimeChart render", () => {
           makeNetworkData({
             network: TVL_NETWORK,
             pools: [pool],
-            snapshotsAll: [],
-            snapshotsAllError: new Error("page-1 timeout"),
+            snapshotsAllDaily: [],
+            snapshotsAllDailyError: new Error("page-1 timeout"),
           }),
         ],
         totalTvl: 0,
