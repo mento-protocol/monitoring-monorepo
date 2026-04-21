@@ -31,7 +31,7 @@ export function BridgeStatusFilter({
         type="button"
         role="radio"
         aria-checked={selected === null}
-        onClick={() => onChange(null)}
+        onClick={() => selected !== null && onChange(null)}
         className={
           "rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-wider font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
           (selected === null
@@ -49,7 +49,7 @@ export function BridgeStatusFilter({
             type="button"
             role="radio"
             aria-checked={active}
-            onClick={() => onChange(status)}
+            onClick={() => !active && onChange(status)}
             className={
               "rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-wider font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
               (active

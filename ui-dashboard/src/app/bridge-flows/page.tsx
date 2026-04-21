@@ -407,27 +407,29 @@ function RouteDeliveryTile({
       ) : routes.length === 0 ? (
         <p className="text-sm text-slate-500">No delivered transfers yet</p>
       ) : (
-        <div className="space-y-2">
-          {routes.map((r) => (
-            <div
-              key={`${r.srcChainId}-${r.dstChainId}`}
-              className="flex items-center gap-3"
-            >
-              <RouteCell
-                sourceChainId={r.srcChainId}
-                destChainId={r.dstChainId}
-              />
-              <span className="font-mono text-sm font-semibold text-white">
-                {formatDurationShort(r.avgSec)}
-              </span>
-              <span className="text-xs text-slate-500">n={r.count}</span>
-            </div>
-          ))}
-        </div>
+        <>
+          <div className="space-y-2">
+            {routes.map((r) => (
+              <div
+                key={`${r.srcChainId}-${r.dstChainId}`}
+                className="flex items-center gap-3"
+              >
+                <RouteCell
+                  sourceChainId={r.srcChainId}
+                  destChainId={r.dstChainId}
+                />
+                <span className="font-mono text-sm font-semibold text-white">
+                  {formatDurationShort(r.avgSec)}
+                </span>
+                <span className="text-xs text-slate-500">n={r.count}</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            last {ROUTE_STATS_LIMIT} delivered
+          </p>
+        </>
       )}
-      <p className="mt-3 text-xs text-slate-500">
-        last {ROUTE_STATS_LIMIT} delivered
-      </p>
     </div>
   );
 }
