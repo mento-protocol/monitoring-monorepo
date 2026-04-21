@@ -262,7 +262,17 @@ export function BridgeRedeemPill({
       setPhase("mining");
       const receipt = await waitForTransaction(txHash, body.rpcUrl, ac.signal);
       if (ac.signal.aborted) return;
-      if (!receipt) throw new Error("Transaction not confirmed after 90 s.");
+      if (!receipt) {
+        // Tx submitted but not confirmed within 90 s — lock the pill as done
+        // so the user can't re-submit an already in-flight transaction.
+        setPhase("done");
+        addToast(
+          `Submitted: ${shortHash(txHash)} — not confirmed after 90 s, check explorer`,
+          "success",
+          body.explorerUrl ? `${body.explorerUrl}/tx/${txHash}` : undefined,
+        );
+        return;
+      }
       if (receipt.status !== "0x1")
         throw new Error("Transaction reverted on-chain.");
 

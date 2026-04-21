@@ -250,9 +250,10 @@ function BridgeFlowsContent() {
   const snapshotsError = !!snapshotsResult.error;
   const topBridgersError = !!topBridgersResult.error;
 
+  const toastIdRef = useRef(0);
   const [toasts, setToasts] = useState<ToastEntry[]>([]);
   const addToast = useCallback<AddToast>((message, type, href) => {
-    const id = Date.now();
+    const id = ++toastIdRef.current;
     setToasts((t) => [...t, { id, message, type, href }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6_000);
   }, []);
