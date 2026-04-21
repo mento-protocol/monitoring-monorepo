@@ -31,7 +31,7 @@ jobs:
       checks: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Detect bridge-related changes
         id: changes
         uses: dorny/paths-filter@v3
@@ -83,7 +83,7 @@ jobs:
       GCP_REGION: europe-west1
       AR_REPO: europe-west1-docker.pkg.dev/mento-monitoring/metrics-bridge
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
