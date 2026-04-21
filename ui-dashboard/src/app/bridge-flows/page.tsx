@@ -69,8 +69,6 @@ import type {
 } from "@/lib/types";
 
 const PAGE_LIMIT = 25;
-const THIRTY_DAYS_SECONDS = 30 * 24 * 60 * 60;
-const SECONDS_PER_DAY = 86_400;
 
 export default function BridgeFlowsPage() {
   return (
@@ -81,16 +79,6 @@ export default function BridgeFlowsPage() {
 }
 
 function BridgeFlowsContent() {
-  // Floor "now - 30d" to UTC day start — BridgeDailySnapshot.date is day-
-  // bucketed, so a non-aligned cutoff drops the snapshot straddling the
-  // boundary. Both the count tile and the transfers window use the same
-  // cutoff so tile + table agree on coverage.
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const afterDayBucket =
-    nowSeconds -
-    THIRTY_DAYS_SECONDS -
-    ((nowSeconds - THIRTY_DAYS_SECONDS) % SECONDS_PER_DAY);
-
   // Page + status filter are URL-backed so users can refresh, share, or
   // navigate back without losing their view. Pattern mirrors pools/page.tsx
   // and pool/[poolId]/page.tsx. Resetting page to 1 on filter change keeps
@@ -151,21 +139,20 @@ function BridgeFlowsContent() {
   const countResult = useBridgeGQL<{ BridgeTransfer: Array<{ id: string }> }>(
     hasSelectedStatuses ? BRIDGE_TRANSFERS_COUNT : null,
     {
-      after: afterDayBucket,
       statusIn: selectedStatuses,
       limit: ENVIO_MAX_ROWS,
     },
   );
   const lastKnownTotalRef = useRef(0);
-  // Reset the preserved-last-known denominator whenever the filter inputs
-  // change — otherwise a transient count error on a new filter surfaces
-  // the previous filter's total (e.g. "91 total" for a narrower filter
-  // that really has 3 matches). Stable-serialize the array so React's
-  // dependency comparison doesn't miss in-place mutations.
+  // Reset the preserved-last-known denominator whenever the filter changes —
+  // otherwise a transient count error on a new filter surfaces the previous
+  // filter's total (e.g. "91 total" for a narrower filter that really has 3
+  // matches). Stable-serialize the array so React's dependency comparison
+  // doesn't miss in-place mutations.
   const statusKey = selectedStatuses.join("|");
   useEffect(() => {
     lastKnownTotalRef.current = 0;
-  }, [statusKey, afterDayBucket]);
+  }, [statusKey]);
   const rawTotal = countResult.data?.BridgeTransfer.length ?? 0;
   if (rawTotal > 0) lastKnownTotalRef.current = rawTotal;
   // On count error, fall back to the preserved value but gate `totalCapped`
@@ -186,7 +173,6 @@ function BridgeFlowsContent() {
     {
       limit: PAGE_LIMIT,
       offset: (page - 1) * PAGE_LIMIT,
-      after: afterDayBucket,
       statusIn: selectedStatuses,
     },
   );
@@ -358,7 +344,7 @@ function BridgeFlowsContent() {
               selectedStatuses.length === 0
                 ? "No statuses selected — enable at least one filter to see transfers."
                 : selectedStatuses.length < ALL_BRIDGE_STATUSES.length
-                  ? "No transfers in the last 30 days match the selected statuses."
+                  ? "No bridge transfers match the selected statuses."
                   : "No bridge transfers yet."
             }
           />

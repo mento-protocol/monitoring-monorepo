@@ -6,9 +6,9 @@
  * specific query is loaded conditionally on the drill-down.
  */
 
-// Recent transfers — paginated, newest first.
+// All transfers — paginated, newest first, full history.
 //
-// Filter + sort on firstSeenAt (non-null) rather than sentTimestamp (nullable).
+// Sort on firstSeenAt (non-null) rather than sentTimestamp (nullable).
 // Under unordered_multichain_mode, a destination-first TransferRedeemed can
 // seed a BridgeTransfer row with sentTimestamp=null before the source events
 // arrive — Hasura's _gte on a null column returns UNKNOWN and drops the row,
@@ -24,11 +24,10 @@ export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
   query BridgeTransfersWindow(
     $limit: Int!
     $offset: Int!
-    $after: numeric!
     $statusIn: [String!]!
   ) {
     BridgeTransfer(
-      where: { firstSeenAt: { _gte: $after }, status: { _in: $statusIn } }
+      where: { status: { _in: $statusIn } }
       order_by: { firstSeenAt: desc, id: asc }
       limit: $limit
       offset: $offset
@@ -60,18 +59,14 @@ export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
 // Count paired with BRIDGE_TRANSFERS_WINDOW. Fetches IDs only (up to
 // `$limit` rows — callers pass `ENVIO_MAX_ROWS`) so the page indicator can
 // render "Page X of Y" without an `_aggregate` query (aggregates are
-// disabled on hosted Hasura). Applies the same `after` and `statusIn`
-// filters the visible window uses — otherwise the denominator would count
-// hidden rows. The $limit variable mirrors POOL_SWAPS_COUNT so the cap
-// lives in a single TS constant rather than being hardcoded in GraphQL.
+// disabled on hosted Hasura). Applies the same `statusIn` filter the
+// visible window uses — otherwise the denominator would count hidden rows.
+// The $limit variable mirrors POOL_SWAPS_COUNT so the cap lives in a
+// single TS constant rather than being hardcoded in GraphQL.
 export const BRIDGE_TRANSFERS_COUNT = /* GraphQL */ `
-  query BridgeTransfersCount(
-    $after: numeric!
-    $statusIn: [String!]!
-    $limit: Int!
-  ) {
+  query BridgeTransfersCount($statusIn: [String!]!, $limit: Int!) {
     BridgeTransfer(
-      where: { firstSeenAt: { _gte: $after }, status: { _in: $statusIn } }
+      where: { status: { _in: $statusIn } }
       order_by: { firstSeenAt: desc, id: asc }
       limit: $limit
     ) {
