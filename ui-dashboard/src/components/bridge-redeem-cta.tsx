@@ -247,6 +247,7 @@ export function BridgeRedeemPill({
 
       setPhase("mining");
       const receipt = await waitForTransaction(txHash, body.rpcUrl, ac.signal);
+      if (ac.signal.aborted) return;
       if (!receipt) throw new Error("Transaction not confirmed after 90 s.");
       if (receipt.status !== "0x1")
         throw new Error("Transaction reverted on-chain.");
