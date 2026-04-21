@@ -254,27 +254,17 @@ export function BridgeRedeemHelper({
 
       {payload && (
         <div className="space-y-4 border-t border-slate-800 pt-4">
-          <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-            <div>
-              <dt className="text-slate-500">Transceiver</dt>
-              <dd className="font-mono text-slate-200 break-all">
-                {payload.transceiver}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-slate-500">Write contract</dt>
-              <dd>
-                <a
-                  href={`${payload.explorerUrl}/address/${payload.transceiver}#writeContract`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-indigo-300 hover:text-indigo-200"
-                >
-                  Open on {payload.chainName} explorer
-                </a>
-              </dd>
-            </div>
-          </dl>
+          <div className="text-sm">
+            <p className="text-slate-500 mb-1">Transceiver</p>
+            <a
+              href={`${payload.explorerUrl}/address/${payload.transceiver}#writeContract`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-indigo-300 hover:text-indigo-200 break-all"
+            >
+              {payload.transceiver}
+            </a>
+          </div>
 
           {/* Function call — human-readable decoded view */}
           <div className="space-y-3">
