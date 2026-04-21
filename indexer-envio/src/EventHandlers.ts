@@ -43,6 +43,8 @@ export {
   _clearMockRateFeedIDs,
   _setMockReportExpiry,
   _clearMockReportExpiry,
+  _evictCacheForChain,
+  _getOracleCacheStats,
 } from "./rpc";
 
 // Fee token test mocks and helpers
