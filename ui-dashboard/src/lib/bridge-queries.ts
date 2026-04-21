@@ -106,7 +106,7 @@ export const BRIDGE_DELIVERED_RECENT = /* GraphQL */ `
   query BridgeDeliveredRecent($limit: Int!) {
     BridgeTransfer(
       where: { status: { _eq: "DELIVERED" } }
-      order_by: { firstSeenAt: desc, id: asc }
+      order_by: { deliveredTimestamp: desc, id: asc }
       limit: $limit
     ) {
       status
