@@ -233,7 +233,7 @@ export function BridgeRedeemPill({
       });
       const res = await fetch(`/api/bridge-redeem?${params.toString()}`, {
         cache: "no-store",
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.any([ac.signal, AbortSignal.timeout(15_000)]),
       });
       const raw = await res.text();
       let body: BridgeRedeemPayload | { error?: string };

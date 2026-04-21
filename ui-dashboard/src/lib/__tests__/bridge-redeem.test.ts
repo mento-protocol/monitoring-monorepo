@@ -50,12 +50,12 @@ describe("bridge redeem helpers", () => {
     ).toBe(false);
   });
 
-  it("flags in-flight Wormhole transfers to Monad as manually redeemable", () => {
+  it("rejects Celo→Monad transfers (no Monad transceiver configured yet)", () => {
     expect(
       canManuallyRedeemTransfer(
         makeTransfer({ sourceChainId: 42220, destChainId: 143 }),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("rejects transfers to unsupported destination chains", () => {

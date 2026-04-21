@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
   if (!chainConfig) {
     return badRequest(`Unsupported destination chain: ${destChainId}.`);
   }
-  const transceiver = getTransceiverForToken(tokenSymbol);
+  const transceiver = getTransceiverForToken(destChainId, tokenSymbol);
   if (!transceiver) {
     return badRequest(`Unknown token symbol: ${tokenSymbol}.`);
   }
@@ -65,7 +65,12 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const body = (await response.json()) as WormholeOperationResponse;
+  let body: WormholeOperationResponse;
+  try {
+    body = (await response.json()) as WormholeOperationResponse;
+  } catch {
+    return badRequest("Wormholescan returned an invalid response.", 502);
+  }
   const operations = body.operations ?? [];
 
   if (operations.length === 0) {

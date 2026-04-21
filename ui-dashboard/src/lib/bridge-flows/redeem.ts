@@ -29,10 +29,18 @@ const CHAIN_CONFIGS: Record<number, ChainRedeemConfig> = {
   },
 };
 
-const TRANSCEIVER_BY_TOKEN: Record<string, `0x${string}`> = {
-  USDm: "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b",
-  EURm: "0x6467cfca82184657f32f1195f9a26b5578399479",
-  GBPm: "0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f",
+// Transceivers are deployed per-chain; key by (destChainId, tokenSymbol) so
+// we never call a Celo transceiver on the Monad chain or vice versa.
+const TRANSCEIVER_BY_CHAIN_AND_TOKEN: Record<
+  number,
+  Record<string, `0x${string}`>
+> = {
+  42220: {
+    USDm: "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b",
+    EURm: "0x6467cfca82184657f32f1195f9a26b5578399479",
+    GBPm: "0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f",
+  },
+  // 143 (Monad) entries added once mainnet transceiver addresses are confirmed.
 };
 
 export function getChainRedeemConfig(
@@ -42,9 +50,10 @@ export function getChainRedeemConfig(
 }
 
 export function getTransceiverForToken(
+  chainId: number,
   tokenSymbol: string,
 ): `0x${string}` | null {
-  return TRANSCEIVER_BY_TOKEN[tokenSymbol] ?? null;
+  return TRANSCEIVER_BY_CHAIN_AND_TOKEN[chainId]?.[tokenSymbol] ?? null;
 }
 
 export function canManuallyRedeemTransfer(
@@ -57,7 +66,8 @@ export function canManuallyRedeemTransfer(
   if (!transfer.sentTxHash) return false;
   if (transfer.destChainId === null || !(transfer.destChainId in CHAIN_CONFIGS))
     return false;
-  if (!getTransceiverForToken(transfer.tokenSymbol)) return false;
+  if (!getTransceiverForToken(transfer.destChainId, transfer.tokenSymbol))
+    return false;
   return !["DELIVERED", "CANCELLED", "FAILED", "QUEUED_INBOUND"].includes(
     transfer.status,
   );
