@@ -21,7 +21,6 @@ import { TOP_BRIDGERS_EXPANDED } from "@/lib/bridge-flows/layout";
 import {
   ALL_BRIDGE_STATUSES,
   deriveBridgeStatus,
-  computeAvgDeliverTime,
   formatDurationShort,
   transferDeliveryDurationSec,
 } from "@/lib/bridge-status";
@@ -44,6 +43,7 @@ import {
   formatWei,
   formatUSD,
   relativeTime,
+  formatTimestamp,
   truncateAddress,
 } from "@/lib/format";
 import { networkForChainId, tokenAddressForSymbol } from "@/lib/networks";
@@ -59,6 +59,7 @@ import {
   usdPricedFromLiveRate,
 } from "@/lib/bridge-flows/pricing";
 import { windowTotals } from "@/lib/bridge-flows/snapshots";
+import { computeRouteAvgDeliverTimes } from "@/lib/bridge-flows/route-stats";
 import { wormholescanUrl } from "@/lib/wormhole/urls";
 import type {
   BridgeBridger,
@@ -228,12 +229,6 @@ function BridgeFlowsContent() {
     pendingRows === null ? null : pendingRows >= 1000 ? 1000 : pendingRows;
   const pendingCapped = pendingRows !== null && pendingRows >= 1000;
 
-  // Avg deliver time is scoped to the current 25-row table page — cross-
-  // window averages aren't supported on hosted Hasura; deferred with the
-  // scope explicit in the tile's subtitle.
-  const { avgSec: avgTimeToDeliverSec, sampleSize: avgSampleSize } =
-    computeAvgDeliverTime(transfers);
-
   // Aggregate only for the top-of-page ErrorBox banner — each KPI tile +
   // chart + table below gates on its own backing query's error so a partial
   // failure doesn't mask valid data from the other queries.
@@ -313,18 +308,10 @@ function BridgeFlowsContent() {
               : undefined
           }
         />
-        <Tile
-          label="Avg deliver time"
-          value={
-            transfersResult.error || avgTimeToDeliverSec === null
-              ? "—"
-              : formatDurationShort(avgTimeToDeliverSec)
-          }
-          subtitle={
-            transfersResult.error || avgTimeToDeliverSec === null
-              ? undefined
-              : `over ${avgSampleSize} recent transfers`
-          }
+        <RouteDeliveryTile
+          transfers={transfers}
+          isLoading={transfersResult.isLoading && transfers.length === 0}
+          hasError={!!transfersResult.error}
         />
       </section>
 
@@ -375,6 +362,85 @@ function BridgeFlowsContent() {
         )}
       </section>
     </div>
+  );
+}
+
+function RouteDeliveryTile({
+  transfers,
+  isLoading,
+  hasError,
+}: {
+  transfers: BridgeTransfer[];
+  isLoading: boolean;
+  hasError: boolean;
+}) {
+  const routes = useMemo(
+    () => computeRouteAvgDeliverTimes(transfers),
+    [transfers],
+  );
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 min-h-[88px]">
+      <p className="text-sm text-slate-400 mb-3">Avg deliver time by route</p>
+      {hasError ? (
+        <p className="text-2xl font-semibold text-white font-mono">—</p>
+      ) : isLoading ? (
+        <div className="space-y-2">
+          {[0, 1].map((i) => (
+            <div key={i} className="h-4 animate-pulse rounded bg-slate-800/50" />
+          ))}
+        </div>
+      ) : routes.length === 0 ? (
+        <p className="text-sm text-slate-500">No delivered transfers in view</p>
+      ) : (
+        <div className="space-y-2">
+          {routes.map((r) => (
+            <div
+              key={`${r.srcChainId}-${r.dstChainId}`}
+              className="flex items-center gap-3"
+            >
+              <RouteCell
+                sourceChainId={r.srcChainId}
+                destChainId={r.dstChainId}
+              />
+              <span className="font-mono text-sm font-semibold text-white">
+                {formatDurationShort(r.avgSec)}
+              </span>
+              <span className="text-xs text-slate-500">n={r.count}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="mt-3 text-xs text-slate-500">current page only</p>
+    </div>
+  );
+}
+
+function TimeCell({
+  ts,
+  whUrl,
+}: {
+  ts: string | null;
+  whUrl: string | null;
+}) {
+  const relative = ts && ts !== "0" ? relativeTime(ts) : "—";
+  const precise = ts && ts !== "0" ? formatTimestamp(ts) : undefined;
+  if (whUrl) {
+    return (
+      <a
+        href={whUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={precise}
+        className="text-slate-400 hover:text-indigo-300 transition-colors"
+      >
+        {relative}
+      </a>
+    );
+  }
+  return (
+    <span className="text-slate-400" title={precise}>
+      {relative}
+    </span>
   );
 }
 
@@ -445,15 +511,6 @@ function TransfersTable({
             onSort={handleSort}
             align="right"
           >
-            Amount (USD)
-          </SortableTh>
-          <SortableTh
-            sortKey="amount"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-            align="right"
-          >
             Amount
           </SortableTh>
           <SortableTh
@@ -516,57 +573,57 @@ function TransfersTable({
               key={t.id}
               className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors"
             >
-              <td className="px-2 sm:px-4 py-2 sm:py-3">
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2">
                 <WormholescanLink href={whUrl}>
                   <BridgeProviderBadge provider={t.provider} />
                 </WormholescanLink>
               </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3">
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2">
                 <RouteCell
                   sourceChainId={t.sourceChainId}
                   destChainId={t.destChainId}
                 />
               </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3">
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2">
                 <BridgeStatusBadge status={status} />
               </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm">
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2 text-sm">
                 <TokenCell
                   symbol={t.tokenSymbol}
                   chainId={t.sourceChainId ?? t.destChainId}
                 />
               </td>
-              <td
-                className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right"
-                title={
-                  usdFromLive
-                    ? "USD priced at render time from current oracle rate"
-                    : undefined
-                }
-              >
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2 font-mono text-right">
                 <WormholescanLink href={whUrl}>
-                  {usd === null
-                    ? "—"
-                    : `${usdFromLive ? "~" : ""}${formatUSD(usd)}`}
+                  <div
+                    className="text-sm text-slate-200"
+                    title={
+                      usdFromLive
+                        ? "USD priced at render time from current oracle rate"
+                        : undefined
+                    }
+                  >
+                    {usd === null
+                      ? "—"
+                      : `${usdFromLive ? "~" : ""}${formatUSD(usd)}`}
+                  </div>
+                  {amountTokens !== null && (
+                    <div className="text-xs text-slate-500">
+                      {formatWei(t.amount!, t.tokenDecimals ?? 18, 2)}
+                    </div>
+                  )}
                 </WormholescanLink>
               </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
-                <WormholescanLink href={whUrl}>
-                  {amountTokens !== null
-                    ? formatWei(t.amount!, t.tokenDecimals ?? 18, 2)
-                    : "—"}
-                </WormholescanLink>
-              </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm">
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2 text-sm">
                 <SenderCell sender={t.sender} chainId={t.sourceChainId} />
               </td>
               <td
-                className={`px-2 sm:px-4 py-2 sm:py-3 text-sm ${sameParties ? "opacity-50" : ""}`}
+                className={`px-2 sm:px-3 py-1.5 sm:py-2 text-sm ${sameParties ? "opacity-50" : ""}`}
                 title={sameParties ? "Same as sender" : undefined}
               >
                 <SenderCell sender={t.recipient} chainId={t.destChainId} />
               </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3">
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2">
                 <TxLinks
                   provider={t.provider}
                   sentTxHash={t.sentTxHash}
@@ -575,10 +632,11 @@ function TransfersTable({
                   destChainId={t.destChainId}
                 />
               </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-400 font-mono text-right whitespace-nowrap">
-                {t.sentTimestamp
-                  ? relativeTime(t.sentTimestamp)
-                  : relativeTime(t.firstSeenAt)}
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2 text-xs font-mono text-right whitespace-nowrap">
+                <TimeCell
+                  ts={t.sentTimestamp ?? t.firstSeenAt}
+                  whUrl={whUrl}
+                />
               </td>
               <DurationCell transfer={t} />
             </tr>
@@ -605,7 +663,7 @@ function DurationCell({ transfer }: { transfer: BridgeTransfer }) {
       derived !== "FAILED";
     return (
       <td
-        className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-500 font-mono text-right whitespace-nowrap"
+        className="px-2 sm:px-3 py-1.5 sm:py-2 text-xs text-slate-500 font-mono text-right whitespace-nowrap"
         title={
           pending
             ? "Not yet delivered"
@@ -618,7 +676,7 @@ function DurationCell({ transfer }: { transfer: BridgeTransfer }) {
   }
   return (
     <td
-      className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-400 font-mono text-right whitespace-nowrap"
+      className="px-2 sm:px-3 py-1.5 sm:py-2 text-xs text-slate-400 font-mono text-right whitespace-nowrap"
       title="Source-send to destination-delivery elapsed time"
     >
       {formatDurationShort(durationSec)}

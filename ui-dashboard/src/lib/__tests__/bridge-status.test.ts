@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   ALL_BRIDGE_STATUSES,
   deriveBridgeStatus,
-  computeAvgDeliverTime,
   formatDurationShort,
   bridgeStatusLabel,
   transferDeliveryDurationSec,
@@ -198,65 +197,6 @@ describe("deriveBridgeStatus", () => {
   });
 });
 
-describe("computeAvgDeliverTime", () => {
-  it("returns null with zero sample size when no deliveries exist", () => {
-    const r = computeAvgDeliverTime([
-      mkTransfer({ status: "SENT" }),
-      mkTransfer({ status: "ATTESTED" }),
-    ]);
-    expect(r.avgSec).toBeNull();
-    expect(r.sampleSize).toBe(0);
-  });
-
-  it("excludes delivered rows missing sentTimestamp from numerator AND denominator (codex fix)", () => {
-    // Dest-first race: row is DELIVERED but source info hasn't been indexed
-    // yet. Including it in the denominator under-reports latency.
-    const rows = [
-      mkTransfer({
-        status: "DELIVERED",
-        sentTimestamp: "1000",
-        deliveredTimestamp: "1100", // 100s delivery
-      }),
-      mkTransfer({
-        status: "DELIVERED",
-        sentTimestamp: null, // dest-first: excluded from avg
-        deliveredTimestamp: "1500",
-      }),
-    ];
-    const r = computeAvgDeliverTime(rows);
-    expect(r.sampleSize).toBe(1);
-    expect(r.avgSec).toBe(100);
-  });
-
-  it("computes the mean across usable rows", () => {
-    const rows = [
-      mkTransfer({
-        status: "DELIVERED",
-        sentTimestamp: "1000",
-        deliveredTimestamp: "1100", // 100s
-      }),
-      mkTransfer({
-        status: "DELIVERED",
-        sentTimestamp: "2000",
-        deliveredTimestamp: "2300", // 300s
-      }),
-    ];
-    const r = computeAvgDeliverTime(rows);
-    expect(r.sampleSize).toBe(2);
-    expect(r.avgSec).toBe(200);
-  });
-
-  it("clamps negative deltas to 0 (out-of-order timestamps)", () => {
-    const r = computeAvgDeliverTime([
-      mkTransfer({
-        status: "DELIVERED",
-        sentTimestamp: "2000",
-        deliveredTimestamp: "1000", // negative — shouldn't drag the mean
-      }),
-    ]);
-    expect(r.avgSec).toBe(0);
-  });
-});
 
 describe("formatDurationShort", () => {
   it("sub-minute", () => {
