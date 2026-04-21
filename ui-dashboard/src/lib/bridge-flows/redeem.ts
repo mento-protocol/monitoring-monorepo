@@ -51,29 +51,15 @@ export function getTransceiverForToken(
 export function canManuallyRedeemTransfer(
   transfer: Pick<
     BridgeTransfer,
-    "provider" | "status" | "destChainId" | "sentTxHash"
+    "provider" | "status" | "destChainId" | "sentTxHash" | "tokenSymbol"
   >,
 ): boolean {
   if (transfer.provider !== "WORMHOLE") return false;
   if (!transfer.sentTxHash) return false;
   if (transfer.destChainId === null) return false;
   if (!(transfer.destChainId in CHAIN_CONFIGS)) return false;
+  if (!getTransceiverForToken(transfer.tokenSymbol)) return false;
   return !["DELIVERED", "CANCELLED", "FAILED"].includes(transfer.status);
-}
-
-export function redeemHelperHref(
-  sentTxHash: string,
-  destChainId: number,
-  tokenSymbol: string,
-  statuses?: string,
-): string {
-  const params = new URLSearchParams({
-    txHash: sentTxHash,
-    destChainId: String(destChainId),
-    tokenSymbol,
-  });
-  if (statuses !== undefined) params.set("statuses", statuses);
-  return `/bridge-flows/redeem?${params.toString()}`;
 }
 
 const RECEIVE_MESSAGE_ABI = parseAbi(["function receiveMessage(bytes)"]);

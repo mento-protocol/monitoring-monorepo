@@ -28,7 +28,12 @@ import {
 import { BridgeStatusBadge } from "@/components/bridge-status-badge";
 import { BridgeStatusFilter } from "@/components/bridge-status-filter";
 import { BridgeProviderBadge } from "@/components/bridge-provider-badge";
-import { BridgeRedeemTableLink } from "@/components/bridge-redeem-cta";
+import {
+  BridgeRedeemPill,
+  ToastPortal,
+  type AddToast,
+  type ToastEntry,
+} from "@/components/bridge-redeem-cta";
 import { ChainIcon } from "@/components/chain-icon";
 import { Tile, Skeleton, ErrorBox, EmptyBox } from "@/components/feedback";
 import { Pagination } from "@/components/pagination";
@@ -60,10 +65,7 @@ import {
   usdPricedFromLiveRate,
 } from "@/lib/bridge-flows/pricing";
 import { windowTotals } from "@/lib/bridge-flows/snapshots";
-import {
-  canManuallyRedeemTransfer,
-  redeemHelperHref,
-} from "@/lib/bridge-flows/redeem";
+import { canManuallyRedeemTransfer } from "@/lib/bridge-flows/redeem";
 import { wormholescanUrl } from "@/lib/wormhole/urls";
 import type {
   BridgeBridger,
@@ -358,11 +360,7 @@ function BridgeFlowsContent() {
           />
         ) : (
           <>
-            <TransfersTable
-              transfers={transfers}
-              rates={rates}
-              statusesParam={searchParams.get("statuses")}
-            />
+            <TransfersTable transfers={transfers} rates={rates} />
             <Pagination
               page={page}
               pageSize={PAGE_LIMIT}
@@ -390,14 +388,23 @@ function BridgeFlowsContent() {
 function TransfersTable({
   transfers,
   rates,
-  statusesParam,
 }: {
   transfers: BridgeTransfer[];
   rates: OracleRateMap;
-  statusesParam: string | null;
 }) {
   const [sortKey, setSortKey] = useState<BridgeSortKey>("time");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  const toastCountRef = useRef(0);
+  const [toasts, setToasts] = useState<ToastEntry[]>([]);
+  const addToast = useCallback<AddToast>((message, type, href) => {
+    const id = ++toastCountRef.current;
+    setToasts((t) => [...t, { id, message, type, href }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6_000);
+  }, []);
+  const dismissToast = useCallback((id: number) => {
+    setToasts((t) => t.filter((x) => x.id !== id));
+  }, []);
 
   const handleSort = (key: BridgeSortKey) => {
     if (key === sortKey) {
@@ -414,202 +421,205 @@ function TransfersTable({
   );
 
   return (
-    <Table>
-      <thead>
-        <tr className="border-b border-slate-800 bg-slate-900/50">
-          <SortableTh
-            sortKey="provider"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-          >
-            Provider
-          </SortableTh>
-          <SortableTh
-            sortKey="route"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-          >
-            Route
-          </SortableTh>
-          <SortableTh
-            sortKey="status"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-          >
-            Status
-          </SortableTh>
-          <SortableTh
-            sortKey="token"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-          >
-            Token
-          </SortableTh>
-          <SortableTh
-            sortKey="amountUsd"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-            align="right"
-          >
-            Amount (USD)
-          </SortableTh>
-          <SortableTh
-            sortKey="amount"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-            align="right"
-          >
-            Amount
-          </SortableTh>
-          <SortableTh
-            sortKey="sender"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-          >
-            Sender
-          </SortableTh>
-          <SortableTh
-            sortKey="receiver"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-          >
-            Receiver
-          </SortableTh>
-          <Th>Txs</Th>
-          <SortableTh
-            sortKey="time"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-            align="right"
-          >
-            Time
-          </SortableTh>
-          <SortableTh
-            sortKey="duration"
-            activeSortKey={sortKey}
-            sortDir={sortDir}
-            onSort={handleSort}
-            align="right"
-          >
-            Duration
-          </SortableTh>
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.map((t) => {
-          const status = deriveBridgeStatus(t);
-          const amountTokens = transferAmountTokens(t);
-          const usd = transferAmountUsd(t, rates);
-          const usdFromLive = usd !== null && usdPricedFromLiveRate(t);
-          const sameParties =
-            !!t.sender &&
-            !!t.recipient &&
-            t.sender.toLowerCase() === t.recipient.toLowerCase();
-          // Wormholescan URL is the row's "canonical" trace — if we have it,
-          // the transfer-level cells (provider, amount, amountUsd) all link
-          // to it so operators can jump into the trace from any of those
-          // columns instead of hunting for the `wh` pill at the end.
-          const whUrl =
-            t.provider === "WORMHOLE" && t.sentTxHash
-              ? wormholescanUrl(t.sentTxHash)
-              : null;
-          const redeemHref =
-            canManuallyRedeemTransfer(t) &&
-            deriveBridgeStatus(t) === "STUCK" &&
-            t.sentTxHash &&
-            t.destChainId !== null
-              ? redeemHelperHref(
-                  t.sentTxHash,
-                  t.destChainId,
-                  t.tokenSymbol,
-                  statusesParam ?? undefined,
-                )
-              : null;
-          return (
-            <tr
-              key={t.id}
-              className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors"
+    <>
+      <ToastPortal toasts={toasts} onDismiss={dismissToast} />
+      <Table>
+        <thead>
+          <tr className="border-b border-slate-800 bg-slate-900/50">
+            <SortableTh
+              sortKey="provider"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
             >
-              <td className="px-2 sm:px-4 py-2 sm:py-3">
-                <WormholescanLink href={whUrl}>
-                  <BridgeProviderBadge provider={t.provider} />
-                </WormholescanLink>
-              </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3">
-                <RouteCell
-                  sourceChainId={t.sourceChainId}
-                  destChainId={t.destChainId}
-                />
-              </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3">
-                <BridgeStatusBadge status={status} />
-              </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm">
-                <TokenCell
-                  symbol={t.tokenSymbol}
-                  chainId={t.sourceChainId ?? t.destChainId}
-                />
-              </td>
-              <td
-                className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right"
-                title={
-                  usdFromLive
-                    ? "USD priced at render time from current oracle rate"
-                    : undefined
-                }
+              Provider
+            </SortableTh>
+            <SortableTh
+              sortKey="route"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+            >
+              Route
+            </SortableTh>
+            <SortableTh
+              sortKey="status"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+            >
+              Status
+            </SortableTh>
+            <SortableTh
+              sortKey="token"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+            >
+              Token
+            </SortableTh>
+            <SortableTh
+              sortKey="amountUsd"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              align="right"
+            >
+              Amount (USD)
+            </SortableTh>
+            <SortableTh
+              sortKey="amount"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              align="right"
+            >
+              Amount
+            </SortableTh>
+            <SortableTh
+              sortKey="sender"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+            >
+              Sender
+            </SortableTh>
+            <SortableTh
+              sortKey="receiver"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+            >
+              Receiver
+            </SortableTh>
+            <Th>Txs</Th>
+            <SortableTh
+              sortKey="time"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              align="right"
+            >
+              Time
+            </SortableTh>
+            <SortableTh
+              sortKey="duration"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              align="right"
+            >
+              Duration
+            </SortableTh>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((t) => {
+            const status = deriveBridgeStatus(t);
+            const amountTokens = transferAmountTokens(t);
+            const usd = transferAmountUsd(t, rates);
+            const usdFromLive = usd !== null && usdPricedFromLiveRate(t);
+            const sameParties =
+              !!t.sender &&
+              !!t.recipient &&
+              t.sender.toLowerCase() === t.recipient.toLowerCase();
+            // Wormholescan URL is the row's "canonical" trace — if we have it,
+            // the transfer-level cells (provider, amount, amountUsd) all link
+            // to it so operators can jump into the trace from any of those
+            // columns instead of hunting for the `wh` pill at the end.
+            const whUrl =
+              t.provider === "WORMHOLE" && t.sentTxHash
+                ? wormholescanUrl(t.sentTxHash)
+                : null;
+            const redeemProps =
+              status === "STUCK" &&
+              canManuallyRedeemTransfer(t) &&
+              t.sentTxHash !== null &&
+              t.destChainId !== null
+                ? {
+                    sentTxHash: t.sentTxHash,
+                    destChainId: t.destChainId,
+                    tokenSymbol: t.tokenSymbol,
+                  }
+                : null;
+            return (
+              <tr
+                key={t.id}
+                className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors"
               >
-                <WormholescanLink href={whUrl}>
-                  {usd === null
-                    ? "—"
-                    : `${usdFromLive ? "~" : ""}${formatUSD(usd)}`}
-                </WormholescanLink>
-              </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
-                <WormholescanLink href={whUrl}>
-                  {amountTokens !== null
-                    ? formatWei(t.amount!, t.tokenDecimals ?? 18, 2)
-                    : "—"}
-                </WormholescanLink>
-              </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm">
-                <SenderCell sender={t.sender} chainId={t.sourceChainId} />
-              </td>
-              <td
-                className={`px-2 sm:px-4 py-2 sm:py-3 text-sm ${sameParties ? "opacity-50" : ""}`}
-                title={sameParties ? "Same as sender" : undefined}
-              >
-                <SenderCell sender={t.recipient} chainId={t.destChainId} />
-              </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3">
-                <TxLinks
-                  provider={t.provider}
-                  sentTxHash={t.sentTxHash}
-                  sourceChainId={t.sourceChainId}
-                  deliveredTxHash={t.deliveredTxHash}
-                  destChainId={t.destChainId}
-                  redeemHref={redeemHref}
-                />
-              </td>
-              <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-400 font-mono text-right whitespace-nowrap">
-                {t.sentTimestamp
-                  ? relativeTime(t.sentTimestamp)
-                  : relativeTime(t.firstSeenAt)}
-              </td>
-              <DurationCell transfer={t} />
-            </tr>
-          );
-        })}
-      </tbody>
-    </Table>
+                <td className="px-2 sm:px-4 py-2 sm:py-3">
+                  <WormholescanLink href={whUrl}>
+                    <BridgeProviderBadge provider={t.provider} />
+                  </WormholescanLink>
+                </td>
+                <td className="px-2 sm:px-4 py-2 sm:py-3">
+                  <RouteCell
+                    sourceChainId={t.sourceChainId}
+                    destChainId={t.destChainId}
+                  />
+                </td>
+                <td className="px-2 sm:px-4 py-2 sm:py-3">
+                  <BridgeStatusBadge status={status} />
+                </td>
+                <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm">
+                  <TokenCell
+                    symbol={t.tokenSymbol}
+                    chainId={t.sourceChainId ?? t.destChainId}
+                  />
+                </td>
+                <td
+                  className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right"
+                  title={
+                    usdFromLive
+                      ? "USD priced at render time from current oracle rate"
+                      : undefined
+                  }
+                >
+                  <WormholescanLink href={whUrl}>
+                    {usd === null
+                      ? "—"
+                      : `${usdFromLive ? "~" : ""}${formatUSD(usd)}`}
+                  </WormholescanLink>
+                </td>
+                <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
+                  <WormholescanLink href={whUrl}>
+                    {amountTokens !== null
+                      ? formatWei(t.amount!, t.tokenDecimals ?? 18, 2)
+                      : "—"}
+                  </WormholescanLink>
+                </td>
+                <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm">
+                  <SenderCell sender={t.sender} chainId={t.sourceChainId} />
+                </td>
+                <td
+                  className={`px-2 sm:px-4 py-2 sm:py-3 text-sm ${sameParties ? "opacity-50" : ""}`}
+                  title={sameParties ? "Same as sender" : undefined}
+                >
+                  <SenderCell sender={t.recipient} chainId={t.destChainId} />
+                </td>
+                <td className="px-2 sm:px-4 py-2 sm:py-3">
+                  <TxLinks
+                    provider={t.provider}
+                    sentTxHash={t.sentTxHash}
+                    sourceChainId={t.sourceChainId}
+                    deliveredTxHash={t.deliveredTxHash}
+                    destChainId={t.destChainId}
+                    redeemProps={redeemProps}
+                    addToast={addToast}
+                  />
+                </td>
+                <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-400 font-mono text-right whitespace-nowrap">
+                  {t.sentTimestamp
+                    ? relativeTime(t.sentTimestamp)
+                    : relativeTime(t.firstSeenAt)}
+                </td>
+                <DurationCell transfer={t} />
+              </tr>
+            );
+          })}
+        </tbody>
+      </Table>
+    </>
   );
 }
 
@@ -726,14 +736,20 @@ function TxLinks({
   sourceChainId,
   deliveredTxHash,
   destChainId,
-  redeemHref,
+  redeemProps,
+  addToast,
 }: {
   provider: BridgeProvider;
   sentTxHash: string | null;
   sourceChainId: number | null;
   deliveredTxHash: string | null;
   destChainId: number | null;
-  redeemHref: string | null;
+  redeemProps: {
+    sentTxHash: string;
+    destChainId: number;
+    tokenSymbol: string;
+  } | null;
+  addToast: AddToast;
 }) {
   const src = networkForChainId(sourceChainId);
   const dst = networkForChainId(destChainId);
@@ -761,13 +777,15 @@ function TxLinks({
       title: "End-to-end trace on Wormholescan",
     });
   }
-  if (pills.length === 0) return <Dash />;
+  if (pills.length === 0 && !redeemProps) return <Dash />;
   return (
     <span className="inline-flex items-center gap-1">
       {pills.map((p) => (
         <TxPill key={p.label} {...p} />
       ))}
-      {redeemHref ? <BridgeRedeemTableLink href={redeemHref} /> : null}
+      {redeemProps ? (
+        <BridgeRedeemPill {...redeemProps} addToast={addToast} />
+      ) : null}
     </span>
   );
 }

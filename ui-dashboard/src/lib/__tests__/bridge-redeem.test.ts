@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildReceiveMessageCalldata,
   canManuallyRedeemTransfer,
-  redeemHelperHref,
   vaaBase64ToHex,
 } from "@/lib/bridge-flows/redeem";
 import type { BridgeTransfer } from "@/lib/types";
@@ -71,28 +70,10 @@ describe("bridge redeem helpers", () => {
     );
   });
 
-  it("builds a helper href with txHash, destChainId, and tokenSymbol", () => {
-    const href = redeemHelperHref(
-      "0xafcd83c3b46adf004aa602ac8cb8ef2b14a25eae5802c0cd2b4c42b75cb26799",
-      42220,
-      "USDm",
-    );
-    expect(href).toContain(
-      "txHash=0xafcd83c3b46adf004aa602ac8cb8ef2b14a25eae5802c0cd2b4c42b75cb26799",
-    );
-    expect(href).toContain("destChainId=42220");
-    expect(href).toContain("tokenSymbol=USDm");
-    expect(href).not.toContain("statuses=");
-  });
-
-  it("threads the statuses param through for back-navigation state preservation", () => {
-    const href = redeemHelperHref(
-      "0xafcd83c3b46adf004aa602ac8cb8ef2b14a25eae5802c0cd2b4c42b75cb26799",
-      42220,
-      "USDm",
-      "SENT,ATTESTED",
-    );
-    expect(href).toContain("statuses=SENT%2CATTESTED");
+  it("rejects transfers with an unknown token symbol", () => {
+    expect(
+      canManuallyRedeemTransfer(makeTransfer({ tokenSymbol: "UNKNOWN" })),
+    ).toBe(false);
   });
 
   it("decodes a base64 VAA into calldata for receiveMessage(bytes)", () => {

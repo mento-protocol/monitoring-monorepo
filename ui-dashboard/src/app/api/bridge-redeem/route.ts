@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
   const response = await fetch(url, {
     headers: { accept: "application/json" },
     cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) {
     return badRequest(
