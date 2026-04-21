@@ -200,24 +200,6 @@ export function BridgeRedeemHelper({
         </div>
       </dl>
 
-      {/* Primary: Wormholescan */}
-      <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 space-y-1.5">
-        <p className="text-xs text-slate-400">
-          Try the Wormholescan UI first — it has a built-in Redeem button when
-          the VAA is ready.
-        </p>
-        <a
-          href={wormholescanUrl(txHash)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600/80 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 transition-colors"
-        >
-          Open on Wormholescan
-          <span aria-hidden="true">{"↗"}</span>
-        </a>
-      </div>
-
-      {/* Secondary: wallet / calldata */}
       <div className="flex flex-wrap gap-3">
         <button
           type="button"
@@ -237,6 +219,17 @@ export function BridgeRedeemHelper({
         >
           Show calldata
         </button>
+        <a
+          href={wormholescanUrl(txHash)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 rounded-md border border-slate-700 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 transition-colors"
+        >
+          Trace on Wormholescan
+          <span aria-hidden="true" className="text-slate-500">
+            {"↗"}
+          </span>
+        </a>
       </div>
 
       {error && (
@@ -269,15 +262,15 @@ export function BridgeRedeemHelper({
               </dd>
             </div>
             <div>
-              <dt className="text-slate-500">Explorer</dt>
+              <dt className="text-slate-500">Write contract</dt>
               <dd>
                 <a
-                  href={`${payload.explorerUrl}/address/${payload.transceiver}`}
+                  href={`${payload.explorerUrl}/address/${payload.transceiver}#writeContract`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-indigo-300 hover:text-indigo-200"
                 >
-                  Open destination contract
+                  Open on {payload.chainName} explorer
                 </a>
               </dd>
             </div>
