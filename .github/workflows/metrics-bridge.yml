@@ -1,5 +1,11 @@
 name: Metrics Bridge
 
+# Deploy-only workflow. Quality checks (typecheck/lint/test) live in
+# .github/workflows/ci.yml under the `bridge` job and are gated by the
+# required `CI / ci` check on main. Trust-main pattern: anything reaching
+# main has already passed quality, so deploy has no `needs:` on a quality
+# job.
+
 on:
   workflow_dispatch:
   push:
@@ -13,8 +19,6 @@ on:
       - pnpm-lock.yaml
       - package.json
       - .github/workflows/metrics-bridge.yml
-  pull_request:
-    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,56 +27,8 @@ concurrency:
 permissions: read-all
 
 jobs:
-  quality:
-    name: Quality Checks (metrics-bridge)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 10
-    permissions:
-      checks: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v6
-      - name: Detect bridge-related changes
-        id: changes
-        uses: dorny/paths-filter@v4
-        with:
-          filters: |
-            bridge:
-              - metrics-bridge/**
-              - cloudbuild.yaml
-              - .gcloudignore
-              - .node-version
-              - pnpm-workspace.yaml
-              - pnpm-lock.yaml
-              - package.json
-              - .github/workflows/metrics-bridge.yml
-      - name: No bridge changes
-        if: steps.changes.outputs.bridge != 'true'
-        run: echo "No metrics-bridge changes; skipping."
-      - uses: pnpm/action-setup@v4
-        if: steps.changes.outputs.bridge == 'true'
-      - uses: actions/setup-node@v6
-        if: steps.changes.outputs.bridge == 'true'
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - name: Install dependencies
-        if: steps.changes.outputs.bridge == 'true'
-        run: pnpm install --frozen-lockfile
-      - name: Typecheck
-        if: steps.changes.outputs.bridge == 'true'
-        run: pnpm --filter @mento-protocol/metrics-bridge typecheck
-      - name: Lint
-        if: steps.changes.outputs.bridge == 'true'
-        run: pnpm --filter @mento-protocol/metrics-bridge lint
-      - name: Test
-        if: steps.changes.outputs.bridge == 'true'
-        run: pnpm --filter @mento-protocol/metrics-bridge test
-
   deploy:
     name: Build & Deploy (metrics-bridge)
-    needs: quality
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
