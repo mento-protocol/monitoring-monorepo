@@ -897,12 +897,17 @@ function SenderCell({
   chainId: number | null;
 }) {
   if (!sender) return <Dash />;
-  if (!chainId) {
-    return (
-      <span className="font-mono text-xs text-slate-400">
-        {truncateAddress(sender)}
-      </span>
-    );
-  }
-  return <AddressLink address={sender} chainId={chainId} />;
+  const net = networkForChainId(chainId);
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {net && <ChainIcon network={net} size={14} />}
+      {chainId ? (
+        <AddressLink address={sender} chainId={chainId} />
+      ) : (
+        <span className="font-mono text-xs text-slate-400">
+          {truncateAddress(sender)}
+        </span>
+      )}
+    </span>
+  );
 }
