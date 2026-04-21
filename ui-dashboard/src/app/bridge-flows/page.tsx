@@ -95,19 +95,17 @@ function BridgeFlowsContent() {
     parseInt(searchParams.get("page") ?? "1", 10) || 1,
   );
 
-  const selectedStatuses = useMemo<BridgeStatus[]>(() => {
-    const param = searchParams.get("statuses");
-    // null  → param absent → show all (default)
-    // ""    → user deselected everything → empty selection (skip polling)
-    if (param === null) return ALL_BRIDGE_STATUSES.slice();
+  // null = ALL (default); a specific status = radio-selected filter.
+  const selectedStatus = useMemo<BridgeStatus | null>(() => {
+    const param = searchParams.get("status");
+    if (param === null) return null;
     const validSet = new Set<string>(ALL_BRIDGE_STATUSES);
-    const parts = [
-      ...new Set(
-        param.split(",").filter((s): s is BridgeStatus => validSet.has(s)),
-      ),
-    ];
-    return parts;
+    return validSet.has(param) ? (param as BridgeStatus) : null;
   }, [searchParams]);
+
+  // Expand the single selection into the array the query expects.
+  const statusIn =
+    selectedStatus !== null ? [selectedStatus] : ALL_BRIDGE_STATUSES.slice();
 
   const setPage = useCallback(
     (p: number) => {
@@ -120,32 +118,24 @@ function BridgeFlowsContent() {
   );
 
   const handleStatusChange = useCallback(
-    (next: BridgeStatus[]) => {
+    (next: BridgeStatus | null) => {
       const params = new URLSearchParams(searchParams.toString());
-      const nextSet = new Set(next);
-      const isAll = ALL_BRIDGE_STATUSES.every((s) => nextSet.has(s));
-      if (isAll) params.delete("statuses");
-      else params.set("statuses", next.join(","));
+      if (next === null) params.delete("status");
+      else params.set("status", next);
       params.delete("page"); // reset to page 1 on filter change
       router.replace(`?${params.toString()}`, { scroll: false });
     },
     [router, searchParams],
   );
 
-  // When the user toggles statuses to an empty set, SWR key is nulled and
-  // no fetch happens — the EmptyBox below handles the UI copy. Otherwise
-  // callers would poll a `status: _in: []` query on every refresh interval
-  // just to get back an empty array.
-  const hasSelectedStatuses = selectedStatuses.length > 0;
-
   // Total row count for the pagination denominator. Shape matches
   // POOL_SWAPS_COUNT: fetch up to ENVIO_MAX_ROWS IDs and count client-side,
   // since hosted Hasura has no _aggregate support. Preserved-last-known
   // pattern avoids the pager collapsing on a transient count error.
   const countResult = useBridgeGQL<{ BridgeTransfer: Array<{ id: string }> }>(
-    hasSelectedStatuses ? BRIDGE_TRANSFERS_COUNT : null,
+    BRIDGE_TRANSFERS_COUNT,
     {
-      statusIn: selectedStatuses,
+      statusIn,
       limit: ENVIO_MAX_ROWS,
     },
   );
@@ -153,9 +143,8 @@ function BridgeFlowsContent() {
   // Reset the preserved-last-known denominator whenever the filter changes —
   // otherwise a transient count error on a new filter surfaces the previous
   // filter's total (e.g. "91 total" for a narrower filter that really has 3
-  // matches). Stable-serialize the array so React's dependency comparison
-  // doesn't miss in-place mutations.
-  const statusKey = selectedStatuses.join("|");
+  // matches).
+  const statusKey = selectedStatus ?? "all";
   useEffect(() => {
     lastKnownTotalRef.current = 0;
   }, [statusKey]);
@@ -175,11 +164,11 @@ function BridgeFlowsContent() {
   const page = Math.max(1, Math.min(rawPage, totalPages));
 
   const transfersResult = useBridgeGQL<{ BridgeTransfer: BridgeTransfer[] }>(
-    hasSelectedStatuses ? BRIDGE_TRANSFERS_WINDOW : null,
+    BRIDGE_TRANSFERS_WINDOW,
     {
       limit: PAGE_LIMIT,
       offset: (page - 1) * PAGE_LIMIT,
-      statusIn: selectedStatuses,
+      statusIn,
     },
   );
 
@@ -337,7 +326,7 @@ function BridgeFlowsContent() {
           <h2 className="text-lg font-semibold text-white">Recent transfers</h2>
           <BridgeStatusFilter
             options={ALL_BRIDGE_STATUSES}
-            selected={selectedStatuses}
+            selected={selectedStatus}
             onChange={handleStatusChange}
           />
         </div>
@@ -348,11 +337,9 @@ function BridgeFlowsContent() {
         ) : transfers.length === 0 ? (
           <EmptyBox
             message={
-              selectedStatuses.length === 0
-                ? "No statuses selected — enable at least one filter to see transfers."
-                : selectedStatuses.length < ALL_BRIDGE_STATUSES.length
-                  ? "No bridge transfers match the selected statuses."
-                  : "No bridge transfers yet."
+              selectedStatus !== null
+                ? "No bridge transfers match the selected status."
+                : "No bridge transfers yet."
             }
           />
         ) : (
