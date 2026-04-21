@@ -512,7 +512,8 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
 
   it("derives window arrays from snapshotsAllDaily by timestamp", async () => {
     const now = Math.floor(Date.now() / 1000);
-    // 3h ago → in 24h window. 2 days ago → in 7d/30d only. 10d ago → 30d only.
+    // 3h ago → in 24h window (after yesterday midnight). 2 days ago → before
+    // yesterday midnight → 7d/30d only. 10d ago → 30d only.
     const allSnapshots = [
       makeDaily(now - 3 * 3600),
       makeDaily(now - 2 * 86400),

@@ -40,11 +40,10 @@ export type NetworkData = {
   pools: Pool[];
   /**
    * Windowed snapshot arrays derived client-side by filtering
-   * `snapshotsAllDaily`. Since the source is the daily rollup (one row per
-   * pool per UTC day), the 24h window contains at most the current partial-
-   * day row — intra-day precision is intentionally sacrificed to keep the
-   * homepage fetch in one page per network. KPI tiles that used to show a
-   * rolling-hour total now show a UTC-day-aligned total.
+   * `snapshotsAllDaily` with day-aligned bounds (UTC midnight). The source
+   * is the daily rollup (one row per pool per UTC day), so the 24h window
+   * covers yesterday midnight → now (typically 1-2 daily rows per pool).
+   * Intra-day precision is sacrificed; KPI tiles show UTC-day-aligned totals.
    *
    * Per-window error fields below are only set when that window's coverage
    * is incomplete (i.e., we didn't paginate back far enough).
@@ -363,9 +362,30 @@ export async function fetchNetworkData(
       ? toError(snapshotsAllDailyResult.reason)
       : (snapshotsAllDailyResult.value.error ?? null);
 
-  const snapshots = filterSnapshotsToWindow(snapshotsAllDaily, windows.w24h);
-  const snapshots7d = filterSnapshotsToWindow(snapshotsAllDaily, windows.w7d);
-  const snapshots30d = filterSnapshotsToWindow(snapshotsAllDaily, windows.w30d);
+  // PoolDailySnapshot timestamps are UTC-midnight-aligned. Filtering with
+  // hour-aligned bounds (e.g. "yesterday 07:00") would exclude the previous
+  // day's snapshot (which is stamped at "yesterday 00:00"). Floor each
+  // window's `from` to its UTC-day boundary so the first relevant daily row
+  // is always included.
+  const SECS_PER_DAY = 86400;
+  const floorToDay = (ts: number) =>
+    Math.floor(ts / SECS_PER_DAY) * SECS_PER_DAY;
+  const dw24h: TimeRange = {
+    from: floorToDay(windows.w24h.from),
+    to: windows.w24h.to,
+  };
+  const dw7d: TimeRange = {
+    from: floorToDay(windows.w7d.from),
+    to: windows.w7d.to,
+  };
+  const dw30d: TimeRange = {
+    from: floorToDay(windows.w30d.from),
+    to: windows.w30d.to,
+  };
+
+  const snapshots = filterSnapshotsToWindow(snapshotsAllDaily, dw24h);
+  const snapshots7d = filterSnapshotsToWindow(snapshotsAllDaily, dw7d);
+  const snapshots30d = filterSnapshotsToWindow(snapshotsAllDaily, dw30d);
 
   // Per-window error detection. Pagination issues (error or truncation) only
   // affect a specific window if we didn't fetch far enough back to cover its
@@ -388,9 +408,9 @@ export async function fetchNetworkData(
     paginationIssue !== null && oldestFetchedTs > windowFrom
       ? paginationIssue
       : null;
-  const snapshotsError = windowError(windows.w24h.from);
-  const snapshots7dError = windowError(windows.w7d.from);
-  const snapshots30dError = windowError(windows.w30d.from);
+  const snapshotsError = windowError(dw24h.from);
+  const snapshots7dError = windowError(dw7d.from);
+  const snapshots30dError = windowError(dw30d.from);
 
   const uniqueLpAddresses =
     lpResult.status === "fulfilled"
