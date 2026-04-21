@@ -41,13 +41,34 @@ describe("BridgeStatusFilter", () => {
     container.remove();
   });
 
-  it("adds an unselected status on click", () => {
+  it("All pill is aria-checked when selected is null (default)", () => {
+    act(() => {
+      root.render(
+        <BridgeStatusFilter
+          options={OPTIONS}
+          selected={null}
+          onChange={vi.fn()}
+        />,
+      );
+    });
+    expect(pillByLabel(container, "All").getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(pillByLabel(container, "Sent").getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    expect(
+      pillByLabel(container, "Delivered").getAttribute("aria-checked"),
+    ).toBe("false");
+  });
+
+  it("clicking a status pill emits that status", () => {
     const onChange = vi.fn();
     act(() => {
       root.render(
         <BridgeStatusFilter
           options={OPTIONS}
-          selected={["DELIVERED"]}
+          selected={null}
           onChange={onChange}
         />,
       );
@@ -55,33 +76,16 @@ describe("BridgeStatusFilter", () => {
     act(() => {
       pillByLabel(container, "Sent").click();
     });
-    expect(onChange).toHaveBeenCalledWith(["DELIVERED", "SENT"]);
+    expect(onChange).toHaveBeenCalledWith("SENT");
   });
 
-  it("removes a selected status on click", () => {
+  it("clicking 'All' emits null", () => {
     const onChange = vi.fn();
     act(() => {
       root.render(
         <BridgeStatusFilter
           options={OPTIONS}
-          selected={["SENT", "DELIVERED"]}
-          onChange={onChange}
-        />,
-      );
-    });
-    act(() => {
-      pillByLabel(container, "Sent").click();
-    });
-    expect(onChange).toHaveBeenCalledWith(["DELIVERED"]);
-  });
-
-  it("'All' shortcut resets to the full options list", () => {
-    const onChange = vi.fn();
-    act(() => {
-      root.render(
-        <BridgeStatusFilter
-          options={OPTIONS}
-          selected={["SENT"]}
+          selected={"SENT"}
           onChange={onChange}
         />,
       );
@@ -89,73 +93,63 @@ describe("BridgeStatusFilter", () => {
     act(() => {
       pillByLabel(container, "All").click();
     });
-    expect(onChange).toHaveBeenCalledWith([...OPTIONS]);
+    expect(onChange).toHaveBeenCalledWith(null);
   });
 
-  it("aria-pressed reflects membership in `selected`", () => {
+  it("selected status pill is aria-checked, All and others are not", () => {
     act(() => {
       root.render(
         <BridgeStatusFilter
           options={OPTIONS}
-          selected={["SENT", "DELIVERED"]}
+          selected={"DELIVERED"}
           onChange={vi.fn()}
         />,
       );
     });
-    expect(pillByLabel(container, "Sent").getAttribute("aria-pressed")).toBe(
-      "true",
-    );
     expect(
-      pillByLabel(container, "Delivered").getAttribute("aria-pressed"),
+      pillByLabel(container, "Delivered").getAttribute("aria-checked"),
     ).toBe("true");
-    expect(pillByLabel(container, "Pending").getAttribute("aria-pressed")).toBe(
+    expect(pillByLabel(container, "All").getAttribute("aria-checked")).toBe(
       "false",
     );
-    // 'All' is only pressed when every option is selected.
-    expect(pillByLabel(container, "All").getAttribute("aria-pressed")).toBe(
+    expect(pillByLabel(container, "Sent").getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    expect(pillByLabel(container, "Pending").getAttribute("aria-checked")).toBe(
       "false",
     );
   });
 
-  it("clicking the last selected pill emits an empty array", () => {
+  it("clicking a different pill while one is active switches to the new one", () => {
     const onChange = vi.fn();
     act(() => {
       root.render(
         <BridgeStatusFilter
           options={OPTIONS}
-          selected={["DELIVERED"]}
+          selected={"DELIVERED"}
           onChange={onChange}
         />,
       );
     });
     act(() => {
-      pillByLabel(container, "Delivered").click();
+      pillByLabel(container, "Sent").click();
     });
-    expect(onChange).toHaveBeenCalledWith([]);
+    expect(onChange).toHaveBeenCalledWith("SENT");
   });
 
-  it("preserves orphan selected values when toggling (subset invariant violated)", () => {
-    // Regression guard: old `toggle` built the next array by filtering
-    // `options`, which dropped any selected value that wasn't in options.
-    // The fix operates on `selected` directly — toggle of a known option
-    // must still preserve unknown-to-options values the parent passed in.
-    const onChange = vi.fn();
-    const selectedWithOrphan = [
-      "SENT",
-      "CANCELLED",
-    ] as unknown as readonly BridgeStatus[];
+  it("uses role=radiogroup and role=radio on buttons", () => {
     act(() => {
       root.render(
         <BridgeStatusFilter
           options={OPTIONS}
-          selected={selectedWithOrphan}
-          onChange={onChange}
+          selected={null}
+          onChange={vi.fn()}
         />,
       );
     });
-    act(() => {
-      pillByLabel(container, "Delivered").click();
-    });
-    expect(onChange).toHaveBeenCalledWith(["SENT", "CANCELLED", "DELIVERED"]);
+    expect(container.querySelector('[role="radiogroup"]')).toBeTruthy();
+    const radios = container.querySelectorAll('[role="radio"]');
+    // All + 5 status options = 6
+    expect(radios).toHaveLength(6);
   });
 });
