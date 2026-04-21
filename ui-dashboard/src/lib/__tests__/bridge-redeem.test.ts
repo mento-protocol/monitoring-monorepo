@@ -64,6 +64,12 @@ describe("bridge redeem helpers", () => {
     );
   });
 
+  it("rejects transfers with a null destChainId", () => {
+    expect(canManuallyRedeemTransfer(makeTransfer({ destChainId: null }))).toBe(
+      false,
+    );
+  });
+
   it("rejects transfers without a sentTxHash", () => {
     expect(canManuallyRedeemTransfer(makeTransfer({ sentTxHash: null }))).toBe(
       false,
@@ -76,10 +82,32 @@ describe("bridge redeem helpers", () => {
     ).toBe(false);
   });
 
+  it("rejects CANCELLED transfers", () => {
+    expect(
+      canManuallyRedeemTransfer(makeTransfer({ status: "CANCELLED" })),
+    ).toBe(false);
+  });
+
+  it("rejects FAILED transfers", () => {
+    expect(canManuallyRedeemTransfer(makeTransfer({ status: "FAILED" }))).toBe(
+      false,
+    );
+  });
+
+  it("rejects QUEUED_INBOUND transfers (already received at transceiver)", () => {
+    expect(
+      canManuallyRedeemTransfer(makeTransfer({ status: "QUEUED_INBOUND" })),
+    ).toBe(false);
+  });
+
   it("decodes a base64 VAA into calldata for receiveMessage(bytes)", () => {
     const vaaHex = vaaBase64ToHex("AQID");
     expect(vaaHex).toBe("0x010203");
     const calldata = buildReceiveMessageCalldata(vaaHex);
-    expect(calldata.startsWith("0xf953cec7")).toBe(true);
+    expect(calldata.slice(0, 10)).toBe("0xf953cec7");
+  });
+
+  it("decodes an empty base64 string to an empty hex payload", () => {
+    expect(vaaBase64ToHex("")).toBe("0x");
   });
 });

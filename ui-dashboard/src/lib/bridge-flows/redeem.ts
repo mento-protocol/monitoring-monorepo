@@ -29,7 +29,6 @@ const CHAIN_CONFIGS: Record<number, ChainRedeemConfig> = {
   },
 };
 
-// Same address on both Celo and Monad (CREATE2 deterministic deployment).
 const TRANSCEIVER_BY_TOKEN: Record<string, `0x${string}`> = {
   USDm: "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b",
   EURm: "0x6467cfca82184657f32f1195f9a26b5578399479",
@@ -56,10 +55,12 @@ export function canManuallyRedeemTransfer(
 ): boolean {
   if (transfer.provider !== "WORMHOLE") return false;
   if (!transfer.sentTxHash) return false;
-  if (transfer.destChainId === null) return false;
-  if (!(transfer.destChainId in CHAIN_CONFIGS)) return false;
+  if (transfer.destChainId === null || !(transfer.destChainId in CHAIN_CONFIGS))
+    return false;
   if (!getTransceiverForToken(transfer.tokenSymbol)) return false;
-  return !["DELIVERED", "CANCELLED", "FAILED"].includes(transfer.status);
+  return !["DELIVERED", "CANCELLED", "FAILED", "QUEUED_INBOUND"].includes(
+    transfer.status,
+  );
 }
 
 const RECEIVE_MESSAGE_ABI = parseAbi(["function receiveMessage(bytes)"]);
@@ -83,12 +84,12 @@ export function buildReceiveMessageCalldata(
 }
 
 export type BridgeRedeemPayload = {
-  txHash: string;
   chainId: number;
   chainIdHex: string;
   chainName: string;
   rpcUrl: string;
   explorerUrl: string;
+  nativeCurrency: { name: string; symbol: string; decimals: number };
   transceiver: `0x${string}`;
   vaaHex: `0x${string}`;
 };

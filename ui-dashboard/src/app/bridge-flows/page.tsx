@@ -252,8 +252,19 @@ function BridgeFlowsContent() {
   const snapshotsError = !!snapshotsResult.error;
   const topBridgersError = !!topBridgersResult.error;
 
+  const [toasts, setToasts] = useState<ToastEntry[]>([]);
+  const addToast = useCallback<AddToast>((message, type, href) => {
+    const id = Date.now();
+    setToasts((t) => [...t, { id, message, type, href }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6_000);
+  }, []);
+
   return (
     <div className="space-y-8">
+      <ToastPortal
+        toasts={toasts}
+        onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))}
+      />
       <div>
         <h1 className="text-2xl font-bold text-white mb-1">Bridge Flows</h1>
         <p className="text-sm text-slate-400">
@@ -360,7 +371,11 @@ function BridgeFlowsContent() {
           />
         ) : (
           <>
-            <TransfersTable transfers={transfers} rates={rates} />
+            <TransfersTable
+              transfers={transfers}
+              rates={rates}
+              addToast={addToast}
+            />
             <Pagination
               page={page}
               pageSize={PAGE_LIMIT}
@@ -388,23 +403,14 @@ function BridgeFlowsContent() {
 function TransfersTable({
   transfers,
   rates,
+  addToast,
 }: {
   transfers: BridgeTransfer[];
   rates: OracleRateMap;
+  addToast: AddToast;
 }) {
   const [sortKey, setSortKey] = useState<BridgeSortKey>("time");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-
-  const toastCountRef = useRef(0);
-  const [toasts, setToasts] = useState<ToastEntry[]>([]);
-  const addToast = useCallback<AddToast>((message, type, href) => {
-    const id = ++toastCountRef.current;
-    setToasts((t) => [...t, { id, message, type, href }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6_000);
-  }, []);
-  const dismissToast = useCallback((id: number) => {
-    setToasts((t) => t.filter((x) => x.id !== id));
-  }, []);
 
   const handleSort = (key: BridgeSortKey) => {
     if (key === sortKey) {
@@ -422,7 +428,6 @@ function TransfersTable({
 
   return (
     <>
-      <ToastPortal toasts={toasts} onDismiss={dismissToast} />
       <Table>
         <thead>
           <tr className="border-b border-slate-800 bg-slate-900/50">
@@ -532,13 +537,10 @@ function TransfersTable({
                 ? wormholescanUrl(t.sentTxHash)
                 : null;
             const redeemProps =
-              status === "STUCK" &&
-              canManuallyRedeemTransfer(t) &&
-              t.sentTxHash !== null &&
-              t.destChainId !== null
+              status === "STUCK" && canManuallyRedeemTransfer(t)
                 ? {
-                    sentTxHash: t.sentTxHash,
-                    destChainId: t.destChainId,
+                    sentTxHash: t.sentTxHash!,
+                    destChainId: t.destChainId!,
                     tokenSymbol: t.tokenSymbol,
                   }
                 : null;

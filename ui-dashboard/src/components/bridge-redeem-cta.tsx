@@ -1,12 +1,10 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useState, useEffect, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import {
   buildReceiveMessageCalldata,
-  getChainRedeemConfig,
   type BridgeRedeemPayload,
-  type ChainRedeemConfig,
 } from "@/lib/bridge-flows/redeem";
 
 type EthereumProvider = {
@@ -28,12 +26,12 @@ function shortHash(value: string): string {
 
 async function ensureCorrectChain(
   provider: EthereumProvider,
-  config: ChainRedeemConfig,
+  payload: BridgeRedeemPayload,
 ) {
   try {
     await provider.request({
       method: "wallet_switchEthereumChain",
-      params: [{ chainId: config.chainIdHex }],
+      params: [{ chainId: payload.chainIdHex }],
     });
     return;
   } catch (error) {
@@ -48,13 +46,18 @@ async function ensureCorrectChain(
     method: "wallet_addEthereumChain",
     params: [
       {
-        chainId: config.chainIdHex,
-        chainName: config.chainName,
-        nativeCurrency: config.nativeCurrency,
-        rpcUrls: [config.rpcUrl],
-        blockExplorerUrls: [config.explorerUrl],
+        chainId: payload.chainIdHex,
+        chainName: payload.chainName,
+        nativeCurrency: payload.nativeCurrency,
+        rpcUrls: [payload.rpcUrl],
+        blockExplorerUrls: [payload.explorerUrl],
       },
     ],
+  });
+  // EIP-3085: wallet_addEthereumChain does not auto-switch; switch explicitly.
+  await provider.request({
+    method: "wallet_switchEthereumChain",
+    params: [{ chainId: payload.chainIdHex }],
   });
 }
 
@@ -69,10 +72,7 @@ async function sendRedeemTransaction(
     );
   }
 
-  const chainConfig = getChainRedeemConfig(payload.chainId);
-  if (!chainConfig) throw new Error(`Unknown chain: ${payload.chainId}`);
-
-  await ensureCorrectChain(provider, chainConfig);
+  await ensureCorrectChain(provider, payload);
   const accounts = (await provider.request({
     method: "eth_requestAccounts",
   })) as string[];
@@ -141,8 +141,6 @@ export function ToastItem({
   );
 }
 
-// `useSyncExternalStore` returns false on server / during hydration, true after
-// — avoids the setMounted-in-useEffect anti-pattern for SSR-safe portals.
 const subscribe = () => () => {};
 
 export function ToastPortal({
@@ -170,17 +168,27 @@ export function ToastPortal({
 
 type TxReceipt = { status: `0x${string}` } | null;
 
-async function waitForTransaction(txHash: string): Promise<TxReceipt> {
-  const provider = window.ethereum;
-  if (!provider) return null;
-  // Poll up to 30 times × 3 s = 90 s before giving up.
+async function waitForTransaction(
+  txHash: string,
+  rpcUrl: string,
+  signal: AbortSignal,
+): Promise<TxReceipt> {
   for (let attempt = 0; attempt < 30; attempt++) {
-    const receipt = (await provider.request({
-      method: "eth_getTransactionReceipt",
-      params: [txHash],
-    })) as TxReceipt;
-    if (receipt) return receipt;
-    await new Promise<void>((resolve) => setTimeout(resolve, 3_000));
+    if (signal.aborted) return null;
+    const response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "eth_getTransactionReceipt",
+        params: [txHash],
+      }),
+      signal,
+    });
+    const json = (await response.json()) as { result: TxReceipt };
+    if (json.result) return json.result;
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
   }
   return null;
 }
@@ -199,9 +207,18 @@ export function BridgeRedeemPill({
   addToast: AddToast;
 }) {
   const [phase, setPhase] = useState<RedeemPhase>("idle");
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   async function handleClick() {
     if (phase !== "idle") return;
+    const ac = new AbortController();
+    abortRef.current = ac;
     setPhase("fetching");
     try {
       const params = new URLSearchParams({
@@ -229,20 +246,19 @@ export function BridgeRedeemPill({
       const txHash = await sendRedeemTransaction(body, calldata);
 
       setPhase("mining");
-      const receipt = await waitForTransaction(txHash);
+      const receipt = await waitForTransaction(txHash, body.rpcUrl, ac.signal);
       if (!receipt) throw new Error("Transaction not confirmed after 90 s.");
-      if (receipt.status === "0x0")
+      if (receipt.status !== "0x1")
         throw new Error("Transaction reverted on-chain.");
 
       setPhase("done");
-      const explorerUrl = getChainRedeemConfig(destChainId)?.explorerUrl;
       addToast(
         `Redeem confirmed: ${shortHash(txHash)}`,
         "success",
-        explorerUrl ? `${explorerUrl}/tx/${txHash}` : undefined,
+        body.explorerUrl ? `${body.explorerUrl}/tx/${txHash}` : undefined,
       );
-      setTimeout(() => setPhase("idle"), 4_000);
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setPhase("idle");
       addToast(err instanceof Error ? err.message : "Redeem failed.", "error");
     }

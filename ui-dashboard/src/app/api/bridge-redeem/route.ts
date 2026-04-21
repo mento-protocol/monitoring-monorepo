@@ -6,12 +6,12 @@ import {
   type BridgeRedeemPayload,
 } from "@/lib/bridge-flows/redeem";
 
+type WormholeOperation = {
+  vaa?: { raw?: string };
+};
+
 type WormholeOperationResponse = {
-  operations?: Array<{
-    vaa?: {
-      raw?: string;
-    };
-  }>;
+  operations?: WormholeOperation[];
 };
 
 function badRequest(message: string, status = 400) {
@@ -47,11 +47,17 @@ export async function GET(request: NextRequest) {
   url.searchParams.set("sortOrder", "ASC");
   url.searchParams.set("txHash", txHash);
 
-  const response = await fetch(url, {
-    headers: { accept: "application/json" },
-    cache: "no-store",
-    signal: AbortSignal.timeout(10_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return badRequest("Wormholescan lookup timed out or failed.", 502);
+  }
+
   if (!response.ok) {
     return badRequest(
       `Wormholescan lookup failed with status ${response.status}.`,
@@ -60,8 +66,23 @@ export async function GET(request: NextRequest) {
   }
 
   const body = (await response.json()) as WormholeOperationResponse;
-  const vaaRaw = body.operations?.[0]?.vaa?.raw;
-  if (!vaaRaw) {
+  const operations = body.operations ?? [];
+
+  if (operations.length === 0) {
+    return badRequest(
+      "No Wormhole VAA found for this source transaction.",
+      404,
+    );
+  }
+  if (operations.length > 1) {
+    return badRequest(
+      "Multiple Wormhole messages found for this transaction; manual redemption is not supported for batch transfers.",
+      400,
+    );
+  }
+
+  const vaaRaw = operations[0].vaa?.raw;
+  if (!vaaRaw || vaaRaw.length === 0) {
     return badRequest(
       "No Wormhole VAA found for this source transaction.",
       404,
@@ -70,12 +91,12 @@ export async function GET(request: NextRequest) {
 
   const vaaHex = vaaBase64ToHex(vaaRaw);
   const payload: BridgeRedeemPayload = {
-    txHash,
     chainId: chainConfig.chainId,
     chainIdHex: chainConfig.chainIdHex,
     chainName: chainConfig.chainName,
     rpcUrl: chainConfig.rpcUrl,
     explorerUrl: chainConfig.explorerUrl,
+    nativeCurrency: chainConfig.nativeCurrency,
     transceiver,
     vaaHex,
   };
