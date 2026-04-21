@@ -295,7 +295,7 @@ function BridgeFlowsContent() {
           subtitle={snapshotsCapped ? "Partial — snapshot cap hit" : undefined}
         />
         <Tile
-          label="Pending"
+          label="In-Flight"
           value={
             pendingResult.error
               ? "—"
@@ -307,7 +307,7 @@ function BridgeFlowsContent() {
           }
           subtitle={
             !pendingResult.error && pendingCount !== null && pendingCount > 0
-              ? "In-flight or attested, awaiting delivery"
+              ? "Sent, attested, or queued — not yet delivered"
               : undefined
           }
         />
