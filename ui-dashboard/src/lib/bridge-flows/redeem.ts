@@ -1,29 +1,80 @@
 import { encodeFunctionData, parseAbi } from "viem";
 import type { BridgeTransfer } from "@/lib/types";
 
-export const CELO_MAINNET_CHAIN_ID = 42220;
-export const CELO_MAINNET_CHAIN_ID_HEX = "0xa4ec";
-export const CELO_MAINNET_RPC_URL = "https://forno.celo.org";
-export const CELO_MAINNET_EXPLORER_URL = "https://celoscan.io";
-export const WORMHOLE_CELO_TRANSCEIVER =
-  "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b" as const;
+export type ChainRedeemConfig = {
+  chainId: number;
+  chainIdHex: string;
+  chainName: string;
+  rpcUrl: string;
+  explorerUrl: string;
+  nativeCurrency: { name: string; symbol: string; decimals: number };
+};
 
-const RECEIVE_MESSAGE_ABI = parseAbi(["function receiveMessage(bytes)"]);
+const CHAIN_CONFIGS: Record<number, ChainRedeemConfig> = {
+  42220: {
+    chainId: 42220,
+    chainIdHex: "0xa4ec",
+    chainName: "Celo",
+    rpcUrl: "https://forno.celo.org",
+    explorerUrl: "https://celoscan.io",
+    nativeCurrency: { name: "CELO", symbol: "CELO", decimals: 18 },
+  },
+  143: {
+    chainId: 143,
+    chainIdHex: "0x8f",
+    chainName: "Monad",
+    rpcUrl: "https://rpc2.monad.xyz",
+    explorerUrl: "https://monadscan.com",
+    nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
+  },
+};
 
-export function canManuallyRedeemTransfer(transfer: BridgeTransfer): boolean {
+// Same address on both Celo and Monad (CREATE2 deterministic deployment).
+const TRANSCEIVER_BY_TOKEN: Record<string, `0x${string}`> = {
+  USDm: "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b",
+  EURm: "0x6467cfca82184657f32f1195f9a26b5578399479",
+  GBPm: "0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f",
+};
+
+export function getChainRedeemConfig(
+  chainId: number,
+): ChainRedeemConfig | null {
+  return CHAIN_CONFIGS[chainId] ?? null;
+}
+
+export function getTransceiverForToken(
+  tokenSymbol: string,
+): `0x${string}` | null {
+  return TRANSCEIVER_BY_TOKEN[tokenSymbol] ?? null;
+}
+
+export function canManuallyRedeemTransfer(
+  transfer: Pick<
+    BridgeTransfer,
+    "provider" | "status" | "destChainId" | "sentTxHash"
+  >,
+): boolean {
   if (transfer.provider !== "WORMHOLE") return false;
   if (!transfer.sentTxHash) return false;
-  if (transfer.destChainId !== CELO_MAINNET_CHAIN_ID) return false;
-  return ![
-    "DELIVERED",
-    "CANCELLED",
-    "FAILED",
-  ].includes(transfer.status);
+  if (transfer.destChainId === null) return false;
+  if (!(transfer.destChainId in CHAIN_CONFIGS)) return false;
+  return !["DELIVERED", "CANCELLED", "FAILED"].includes(transfer.status);
 }
 
-export function redeemHelperHref(sentTxHash: string): string {
-  return `/bridge-flows/redeem?txHash=${encodeURIComponent(sentTxHash)}`;
+export function redeemHelperHref(
+  sentTxHash: string,
+  destChainId: number,
+  tokenSymbol: string,
+): string {
+  const params = new URLSearchParams({
+    txHash: sentTxHash,
+    destChainId: String(destChainId),
+    tokenSymbol,
+  });
+  return `/bridge-flows/redeem?${params.toString()}`;
 }
+
+const RECEIVE_MESSAGE_ABI = parseAbi(["function receiveMessage(bytes)"]);
 
 export function vaaBase64ToHex(vaaBase64: string): `0x${string}` {
   const bytes =
@@ -33,7 +84,9 @@ export function vaaBase64ToHex(vaaBase64: string): `0x${string}` {
   return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
-export function buildReceiveMessageCalldata(vaaHex: `0x${string}`): `0x${string}` {
+export function buildReceiveMessageCalldata(
+  vaaHex: `0x${string}`,
+): `0x${string}` {
   return encodeFunctionData({
     abi: RECEIVE_MESSAGE_ABI,
     functionName: "receiveMessage",
@@ -48,7 +101,6 @@ export type BridgeRedeemPayload = {
   chainName: string;
   rpcUrl: string;
   explorerUrl: string;
-  transceiver: string;
+  transceiver: `0x${string}`;
   vaaHex: `0x${string}`;
-  calldata: `0x${string}`;
 };

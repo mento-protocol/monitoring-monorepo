@@ -3,15 +3,18 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  CELO_MAINNET_CHAIN_ID_HEX,
-  CELO_MAINNET_EXPLORER_URL,
-  CELO_MAINNET_RPC_URL,
-  redeemHelperHref,
+  buildReceiveMessageCalldata,
+  getChainRedeemConfig,
   type BridgeRedeemPayload,
+  type ChainRedeemConfig,
 } from "@/lib/bridge-flows/redeem";
+import { wormholescanUrl } from "@/lib/wormhole/urls";
 
 type EthereumProvider = {
-  request(args: { method: string; params?: unknown[] | object }): Promise<unknown>;
+  request(args: {
+    method: string;
+    params?: unknown[] | object;
+  }): Promise<unknown>;
 };
 
 declare global {
@@ -24,11 +27,14 @@ function shortHash(value: string): string {
   return `${value.slice(0, 10)}…${value.slice(-8)}`;
 }
 
-async function ensureCeloWallet(provider: EthereumProvider) {
+async function ensureCorrectChain(
+  provider: EthereumProvider,
+  config: ChainRedeemConfig,
+) {
   try {
     await provider.request({
       method: "wallet_switchEthereumChain",
-      params: [{ chainId: CELO_MAINNET_CHAIN_ID_HEX }],
+      params: [{ chainId: config.chainIdHex }],
     });
     return;
   } catch (error) {
@@ -43,27 +49,31 @@ async function ensureCeloWallet(provider: EthereumProvider) {
     method: "wallet_addEthereumChain",
     params: [
       {
-        chainId: CELO_MAINNET_CHAIN_ID_HEX,
-        chainName: "Celo",
-        nativeCurrency: {
-          name: "CELO",
-          symbol: "CELO",
-          decimals: 18,
-        },
-        rpcUrls: [CELO_MAINNET_RPC_URL],
-        blockExplorerUrls: [CELO_MAINNET_EXPLORER_URL],
+        chainId: config.chainIdHex,
+        chainName: config.chainName,
+        nativeCurrency: config.nativeCurrency,
+        rpcUrls: [config.rpcUrl],
+        blockExplorerUrls: [config.explorerUrl],
       },
     ],
   });
 }
 
-async function sendRedeemTransaction(payload: BridgeRedeemPayload) {
+async function sendRedeemTransaction(
+  payload: BridgeRedeemPayload,
+  calldata: `0x${string}`,
+) {
   const provider = window.ethereum;
   if (!provider) {
-    throw new Error("No injected wallet found. Open this page in a wallet-enabled browser.");
+    throw new Error(
+      "No injected wallet found. Open this page in a wallet-enabled browser.",
+    );
   }
 
-  await ensureCeloWallet(provider);
+  const chainConfig = getChainRedeemConfig(payload.chainId);
+  if (!chainConfig) throw new Error(`Unknown chain: ${payload.chainId}`);
+
+  await ensureCorrectChain(provider, chainConfig);
   const accounts = (await provider.request({
     method: "eth_requestAccounts",
   })) as string[];
@@ -74,36 +84,40 @@ async function sendRedeemTransaction(payload: BridgeRedeemPayload) {
 
   return (await provider.request({
     method: "eth_sendTransaction",
-    params: [
-      {
-        from,
-        to: payload.transceiver,
-        data: payload.calldata,
-      },
-    ],
+    params: [{ from, to: payload.transceiver, data: calldata }],
   })) as string;
 }
 
-export function BridgeRedeemTableLink({ txHash }: { txHash: string }) {
+export function BridgeRedeemTableLink({ href }: { href: string }) {
   return (
     <Link
-      href={redeemHelperHref(txHash)}
-      className="inline-flex items-center gap-1 rounded bg-amber-900/40 px-1.5 py-0.5 text-[10px] font-mono text-amber-300 hover:bg-amber-900/60 transition-colors"
+      href={href}
+      className="inline-flex items-center gap-0.5 rounded bg-amber-900/40 px-1.5 py-0.5 text-[10px] font-mono text-amber-300 hover:bg-amber-900/60 transition-colors"
       title="Open redeem helper"
     >
       redeem
       <span aria-hidden="true" className="text-amber-500">
-        {"\u2197"}
+        {"↗"}
       </span>
     </Link>
   );
 }
 
-export function BridgeRedeemHelper({ txHash }: { txHash: string }) {
+export function BridgeRedeemHelper({
+  txHash,
+  destChainId,
+  tokenSymbol,
+}: {
+  txHash: string;
+  destChainId: number;
+  tokenSymbol: string;
+}) {
   const [payload, setPayload] = useState<BridgeRedeemPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [txSent, setTxSent] = useState<string | null>(null);
+
+  const chainName = getChainRedeemConfig(destChainId)?.chainName ?? "Unknown";
 
   const castCommand = useMemo(() => {
     if (!payload) return null;
@@ -119,18 +133,22 @@ export function BridgeRedeemHelper({ txHash }: { txHash: string }) {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(
-        `/api/bridge-redeem?txHash=${encodeURIComponent(txHash)}`,
-        { cache: "no-store" },
-      );
+      const params = new URLSearchParams({
+        txHash,
+        destChainId: String(destChainId),
+        tokenSymbol,
+      });
+      const response = await fetch(`/api/bridge-redeem?${params.toString()}`, {
+        cache: "no-store",
+      });
       const body = (await response.json()) as
         | BridgeRedeemPayload
         | { error?: string };
-      if (!response.ok || !("calldata" in body)) {
+      if (!response.ok || !("vaaHex" in body)) {
         const message =
           "error" in body && typeof body.error === "string"
             ? body.error
-            : "Failed to prepare redeem transaction.";
+            : "Failed to fetch Wormhole VAA.";
         throw new Error(message);
       }
       setPayload(body);
@@ -139,7 +157,7 @@ export function BridgeRedeemHelper({ txHash }: { txHash: string }) {
       const message =
         caught instanceof Error
           ? caught.message
-          : "Failed to prepare redeem transaction.";
+          : "Failed to fetch Wormhole VAA.";
       setError(message);
       throw caught;
     } finally {
@@ -150,14 +168,13 @@ export function BridgeRedeemHelper({ txHash }: { txHash: string }) {
   async function handleSend() {
     try {
       const ready = payload ?? (await loadPayload());
-      const hash = await sendRedeemTransaction(ready);
+      const calldata = buildReceiveMessageCalldata(ready.vaaHex);
+      const hash = await sendRedeemTransaction(ready, calldata);
       setTxSent(hash);
       setError(null);
     } catch (caught) {
       const message =
-        caught instanceof Error
-          ? caught.message
-          : "Redeem transaction failed.";
+        caught instanceof Error ? caught.message : "Redeem transaction failed.";
       setError(message);
     }
   }
@@ -167,8 +184,8 @@ export function BridgeRedeemHelper({ txHash }: { txHash: string }) {
       <div className="space-y-1">
         <h2 className="text-lg font-semibold text-white">Redeem helper</h2>
         <p className="text-sm text-slate-400">
-          Prepares the Wormhole VAA and sends the Celo redeem transaction to the
-          destination transceiver.
+          Manually submit the signed Wormhole VAA to the{" "}
+          <span className="text-slate-300">{chainName}</span> transceiver.
         </p>
       </div>
 
@@ -179,10 +196,28 @@ export function BridgeRedeemHelper({ txHash }: { txHash: string }) {
         </div>
         <div>
           <dt className="text-slate-500">Destination chain</dt>
-          <dd className="text-slate-200">Celo</dd>
+          <dd className="text-slate-200">{chainName}</dd>
         </div>
       </dl>
 
+      {/* Primary: Wormholescan */}
+      <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-3 space-y-1.5">
+        <p className="text-xs text-slate-400">
+          Try the Wormholescan UI first — it has a built-in Redeem button when
+          the VAA is ready.
+        </p>
+        <a
+          href={wormholescanUrl(txHash)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600/80 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 transition-colors"
+        >
+          Open on Wormholescan
+          <span aria-hidden="true">{"↗"}</span>
+        </a>
+      </div>
+
+      {/* Secondary: wallet / calldata */}
       <div className="flex flex-wrap gap-3">
         <button
           type="button"
@@ -190,7 +225,7 @@ export function BridgeRedeemHelper({ txHash }: { txHash: string }) {
           disabled={loading}
           className="inline-flex items-center justify-center rounded-md bg-amber-500 px-3 py-2 text-sm font-medium text-slate-950 hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {loading ? "Preparing…" : "Send redeem tx"}
+          {loading ? "Fetching VAA…" : "Send redeem tx"}
         </button>
         <button
           type="button"
@@ -200,7 +235,7 @@ export function BridgeRedeemHelper({ txHash }: { txHash: string }) {
           disabled={loading}
           className="inline-flex items-center justify-center rounded-md border border-slate-700 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Prepare calldata only
+          Show calldata
         </button>
       </div>
 
@@ -214,7 +249,7 @@ export function BridgeRedeemHelper({ txHash }: { txHash: string }) {
         <p className="rounded-md border border-emerald-900/60 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-200">
           Transaction submitted:{" "}
           <a
-            href={`${CELO_MAINNET_EXPLORER_URL}/tx/${txSent}`}
+            href={`${payload?.explorerUrl ?? ""}/tx/${txSent}`}
             target="_blank"
             rel="noopener noreferrer"
             className="font-mono underline decoration-emerald-500/50 underline-offset-2"
@@ -248,28 +283,47 @@ export function BridgeRedeemHelper({ txHash }: { txHash: string }) {
             </div>
           </dl>
 
-          <div className="space-y-2">
-            <label className="block text-sm text-slate-400" htmlFor="redeem-calldata">
-              Calldata
-            </label>
-            <textarea
-              id="redeem-calldata"
-              readOnly
-              value={payload.calldata}
-              className="min-h-32 w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-200"
-            />
+          {/* Function call — human-readable decoded view */}
+          <div className="space-y-3">
+            <div>
+              <p className="mb-1 text-sm text-slate-400">Function call</p>
+              <p className="font-mono text-sm">
+                <span className="text-indigo-300">receiveMessage</span>
+                <span className="text-slate-500">(</span>
+                <span className="text-amber-300">bytes</span>{" "}
+                <span className="text-slate-200">vaa</span>
+                <span className="text-slate-500">)</span>
+              </p>
+            </div>
+            <div>
+              <label
+                className="block text-xs text-slate-500 mb-1"
+                htmlFor="redeem-vaa"
+              >
+                vaa
+              </label>
+              <textarea
+                id="redeem-vaa"
+                readOnly
+                value={payload.vaaHex}
+                className="min-h-24 w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-200"
+              />
+            </div>
           </div>
 
           {castCommand && (
-            <div className="space-y-2">
-              <label className="block text-sm text-slate-400" htmlFor="redeem-cast-command">
+            <div className="space-y-1">
+              <label
+                className="block text-sm text-slate-400"
+                htmlFor="redeem-cast-command"
+              >
                 Foundry fallback
               </label>
               <textarea
                 id="redeem-cast-command"
                 readOnly
                 value={castCommand}
-                className="min-h-32 w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-200"
+                className="min-h-28 w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-200"
               />
             </div>
           )}

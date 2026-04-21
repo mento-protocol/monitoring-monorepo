@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  buildReceiveMessageCalldata,
-  CELO_MAINNET_CHAIN_ID,
-  CELO_MAINNET_CHAIN_ID_HEX,
-  CELO_MAINNET_EXPLORER_URL,
-  CELO_MAINNET_RPC_URL,
+  getChainRedeemConfig,
+  getTransceiverForToken,
   vaaBase64ToHex,
-  WORMHOLE_CELO_TRANSCEIVER,
   type BridgeRedeemPayload,
 } from "@/lib/bridge-flows/redeem";
 
@@ -24,8 +20,25 @@ function badRequest(message: string, status = 400) {
 
 export async function GET(request: NextRequest) {
   const txHash = request.nextUrl.searchParams.get("txHash")?.trim() ?? "";
+  const destChainId = Number(
+    request.nextUrl.searchParams.get("destChainId") ?? "",
+  );
+  const tokenSymbol =
+    request.nextUrl.searchParams.get("tokenSymbol")?.trim() ?? "";
+
   if (!/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
     return badRequest("Expected a 32-byte hex txHash.");
+  }
+  if (!Number.isFinite(destChainId) || destChainId === 0) {
+    return badRequest("Expected a numeric destChainId.");
+  }
+  const chainConfig = getChainRedeemConfig(destChainId);
+  if (!chainConfig) {
+    return badRequest(`Unsupported destination chain: ${destChainId}.`);
+  }
+  const transceiver = getTransceiverForToken(tokenSymbol);
+  if (!transceiver) {
+    return badRequest(`Unknown token symbol: ${tokenSymbol}.`);
   }
 
   const url = new URL("https://api.wormholescan.io/api/v1/operations");
@@ -48,20 +61,22 @@ export async function GET(request: NextRequest) {
   const body = (await response.json()) as WormholeOperationResponse;
   const vaaRaw = body.operations?.[0]?.vaa?.raw;
   if (!vaaRaw) {
-    return badRequest("No Wormhole VAA found for this source transaction.", 404);
+    return badRequest(
+      "No Wormhole VAA found for this source transaction.",
+      404,
+    );
   }
 
   const vaaHex = vaaBase64ToHex(vaaRaw);
   const payload: BridgeRedeemPayload = {
     txHash,
-    chainId: CELO_MAINNET_CHAIN_ID,
-    chainIdHex: CELO_MAINNET_CHAIN_ID_HEX,
-    chainName: "Celo",
-    rpcUrl: CELO_MAINNET_RPC_URL,
-    explorerUrl: CELO_MAINNET_EXPLORER_URL,
-    transceiver: WORMHOLE_CELO_TRANSCEIVER,
+    chainId: chainConfig.chainId,
+    chainIdHex: chainConfig.chainIdHex,
+    chainName: chainConfig.chainName,
+    rpcUrl: chainConfig.rpcUrl,
+    explorerUrl: chainConfig.explorerUrl,
+    transceiver,
     vaaHex,
-    calldata: buildReceiveMessageCalldata(vaaHex),
   };
 
   return NextResponse.json(payload, {
