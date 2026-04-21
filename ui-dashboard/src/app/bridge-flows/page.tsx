@@ -87,7 +87,10 @@ function BridgeFlowsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const rawPage = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
+  const rawPage = Math.max(
+    1,
+    parseInt(searchParams.get("page") ?? "1", 10) || 1,
+  );
 
   const selectedStatuses = useMemo<BridgeStatus[]>(() => {
     const param = searchParams.get("statuses");
