@@ -82,6 +82,17 @@ describe("bridge redeem helpers", () => {
     );
     expect(href).toContain("destChainId=42220");
     expect(href).toContain("tokenSymbol=USDm");
+    expect(href).not.toContain("statuses=");
+  });
+
+  it("threads the statuses param through for back-navigation state preservation", () => {
+    const href = redeemHelperHref(
+      "0xafcd83c3b46adf004aa602ac8cb8ef2b14a25eae5802c0cd2b4c42b75cb26799",
+      42220,
+      "USDm",
+      "SENT,ATTESTED",
+    );
+    expect(href).toContain("statuses=SENT%2CATTESTED");
   });
 
   it("decodes a base64 VAA into calldata for receiveMessage(bytes)", () => {

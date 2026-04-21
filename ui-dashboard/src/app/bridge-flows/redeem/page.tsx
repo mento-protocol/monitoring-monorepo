@@ -12,12 +12,14 @@ export default async function BridgeRedeemPage({
     txHash?: string;
     destChainId?: string;
     tokenSymbol?: string;
+    statuses?: string;
   }>;
 }) {
   const params = await searchParams;
   const txHash = params.txHash?.trim() ?? "";
   const destChainId = Number(params.destChainId ?? "");
   const tokenSymbol = params.tokenSymbol?.trim() ?? "";
+  const statuses = params.statuses?.trim();
 
   const missingParam = !txHash
     ? "txHash"
@@ -46,7 +48,11 @@ export default async function BridgeRedeemPage({
     <div className="space-y-6">
       <div className="space-y-2">
         <Link
-          href="/bridge-flows"
+          href={
+            statuses
+              ? `/bridge-flows?statuses=${encodeURIComponent(statuses)}`
+              : "/bridge-flows"
+          }
           className="text-sm text-slate-400 hover:text-slate-200"
         >
           ← Back to bridge flows

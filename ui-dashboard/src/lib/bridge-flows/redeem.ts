@@ -65,12 +65,14 @@ export function redeemHelperHref(
   sentTxHash: string,
   destChainId: number,
   tokenSymbol: string,
+  statuses?: string,
 ): string {
   const params = new URLSearchParams({
     txHash: sentTxHash,
     destChainId: String(destChainId),
     tokenSymbol,
   });
+  if (statuses !== undefined) params.set("statuses", statuses);
   return `/bridge-flows/redeem?${params.toString()}`;
 }
 

@@ -358,7 +358,11 @@ function BridgeFlowsContent() {
           />
         ) : (
           <>
-            <TransfersTable transfers={transfers} rates={rates} />
+            <TransfersTable
+              transfers={transfers}
+              rates={rates}
+              statusesParam={searchParams.get("statuses")}
+            />
             <Pagination
               page={page}
               pageSize={PAGE_LIMIT}
@@ -386,9 +390,11 @@ function BridgeFlowsContent() {
 function TransfersTable({
   transfers,
   rates,
+  statusesParam,
 }: {
   transfers: BridgeTransfer[];
   rates: OracleRateMap;
+  statusesParam: string | null;
 }) {
   const [sortKey, setSortKey] = useState<BridgeSortKey>("time");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -521,7 +527,12 @@ function TransfersTable({
             deriveBridgeStatus(t) === "STUCK" &&
             t.sentTxHash &&
             t.destChainId !== null
-              ? redeemHelperHref(t.sentTxHash, t.destChainId, t.tokenSymbol)
+              ? redeemHelperHref(
+                  t.sentTxHash,
+                  t.destChainId,
+                  t.tokenSymbol,
+                  statusesParam ?? undefined,
+                )
               : null;
           return (
             <tr
