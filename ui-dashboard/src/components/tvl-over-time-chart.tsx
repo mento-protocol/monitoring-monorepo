@@ -15,8 +15,6 @@ import {
   type TimeSeriesPoint,
 } from "@/lib/time-series";
 
-const SECONDS_PER_HOUR = 3600;
-
 type SeriesPoint = { timestamp: number; tvlUSD: number };
 
 type PoolHistory = {
@@ -157,23 +155,12 @@ export function TvlOverTimeChart({
 }: TvlOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("30d");
 
-  // 1W range uses hour-level buckets for higher fidelity (168 points across
-  // the week); 1M and All stay daily so the longer views don't get sluggish.
-  const bucketSeconds = range === "7d" ? SECONDS_PER_HOUR : SECONDS_PER_DAY;
-
   const fullSeries = useMemo<TimeSeriesPoint[]>(() => {
-    // 1W hourly only needs the last ~168 buckets — clamping the build
-    // horizon avoids materializing full-history hourly buckets we'd
-    // immediately discard. 1M/All keep the default (full history).
-    const fromTimestamp =
-      range === "7d"
-        ? Math.floor(Date.now() / 1000) - 7 * SECONDS_PER_DAY
-        : undefined;
-    const { series: base, nowTvl } = buildDailySeries(
-      networkData,
-      bucketSeconds,
-      fromTimestamp,
-    );
+    // Always use UTC-day buckets. PoolDailySnapshot is a running aggregate
+    // updated throughout the day — forward-filling a midnight-stamped row into
+    // hourly sub-buckets would show today's current reserves for all past hours
+    // of the same day, distorting the intra-day trend.
+    const { series: base, nowTvl } = buildDailySeries(networkData);
     if (base.length === 0) return [];
 
     const nowSec = Math.floor(Date.now() / 1000);
@@ -184,7 +171,7 @@ export function TvlOverTimeChart({
       })),
       { timestamp: nowSec, value: nowTvl },
     ];
-  }, [networkData, bucketSeconds, range]);
+  }, [networkData]);
 
   // TVL is a stock — cutoff-based range filtering on UTC-day-stamped buckets
   // is fine: the headline shows current TVL (not a bar-sum), so no invariant
@@ -210,9 +197,7 @@ export function TvlOverTimeChart({
       onRangeChange={setRange}
       headline={headline}
       change={change7d}
-      hoverDateFormat={
-        bucketSeconds === SECONDS_PER_HOUR ? "%b %d, %H:00 UTC" : "%b %d, %Y"
-      }
+      hoverDateFormat="%b %d, %Y"
       isLoading={isLoading}
       hasError={hasError}
       hasSnapshotError={hasSnapshotError}
