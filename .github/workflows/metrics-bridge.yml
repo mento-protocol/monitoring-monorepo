@@ -29,6 +29,10 @@ permissions: read-all
 jobs:
   deploy:
     name: Build & Deploy (metrics-bridge)
+    # Guard against workflow_dispatch from non-main refs: deploy must only
+    # run from main so it inherits the trust-main quality gate enforced by
+    # the `CI / ci` required check on PRs merging to main.
+    if: github.ref == 'refs/heads/main'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
