@@ -3,9 +3,10 @@
 import { useMemo, useState } from "react";
 import { formatUSD } from "@/lib/format";
 import {
+  dayBucket,
   getSnapshotVolumeInUsd,
-  snapshotWindow7d,
-  snapshotWindow30d,
+  snapshotWindowDaily7d,
+  snapshotWindowDaily30d,
   type TimeRange,
 } from "@/lib/volume";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
@@ -29,12 +30,11 @@ type SeriesPoint = { timestamp: number; volumeUSD: number };
  * volume is the total for the full day.
  *
  * When `window` is provided only buckets whose timestamp falls strictly inside
- * the half-open window `[window.from, window.to)` are included. Because
- * `window.from` is an hour boundary (not midnight), the first UTC-day bucket
- * is included only when it starts at or after `window.from`, which means a
- * refresh at 10:00 UTC on day D shows the last 7 full days starting from day
- * D-7 (midnight). The chart's headline total therefore matches the exact
- * rolling-window period implied by the selected range tab.
+ * the half-open window `[window.from, window.to)` are included. Callers
+ * filtering the daily rollup should pass a day-aligned `window.from` (see
+ * `snapshotWindowDaily7d` / `snapshotWindowDaily30d`) so the oldest day's
+ * midnight row — which carries a timestamp earlier than any hour-aligned
+ * `from` — is preserved.
  */
 export function buildDailyVolumeSeries(
   networkData: NetworkData[],
@@ -154,14 +154,23 @@ export function VolumeOverTimeChart({
     // render time. The Summary tile's 7d/30d subtotals are derived from
     // those fetch-time windows; using a render-time window drifts by up
     // to the SWR refresh interval around hour boundaries.
+    //
+    // `snapshotWindows.w7d` / `w30d` are hour-aligned so TVL deltas land on a
+    // consistent reference hour, but daily-rollup filtering needs a day-aligned
+    // `from` to catch the oldest in-window midnight row (use-all-networks-data
+    // does the same snap before deriving `snapshots7d`/`30d`). Matching that
+    // here keeps the chart hero == Summary tile subtotal.
     const fetchWindows = networkData[0]?.snapshotWindows;
-    const window = fetchWindows
+    const fetchSrc = fetchWindows
       ? range === "7d"
         ? fetchWindows.w7d
         : fetchWindows.w30d
+      : null;
+    const window = fetchSrc
+      ? { from: dayBucket(fetchSrc.from), to: fetchSrc.to }
       : range === "7d"
-        ? snapshotWindow7d(Date.now())
-        : snapshotWindow30d(Date.now());
+        ? snapshotWindowDaily7d(Date.now())
+        : snapshotWindowDaily30d(Date.now());
     return buildDailyVolumeSeries(networkData, window).map((point) => ({
       timestamp: point.timestamp,
       value: point.volumeUSD,

@@ -539,6 +539,49 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
     expect(result.snapshots7d).toHaveLength(2); // 3h-ago + 2d-ago
     expect(result.snapshots30d).toHaveLength(3); // all three
   });
+
+  it("snaps 7d/30d `from` to dayBucket so the oldest midnight row isn't dropped", async () => {
+    // Regression: PoolDailySnapshot rows are stamped at UTC midnight. An
+    // hour-aligned `from` like 10:00 falls AFTER the oldest in-window
+    // midnight, so a naive `timestamp >= from` filter would return 6 full
+    // days of 7d rollups instead of 7. Pick an anchor deep inside a UTC day
+    // so the hour-aligned `from` is strictly greater than the day-aligned
+    // `from` by a known amount — a naive filter drops the 7d/30d edge row.
+    const DAY = 86_400;
+    // Anchor at 2026-04-21T10:00:00Z (10h past UTC midnight).
+    const nowSec = Math.floor(Date.UTC(2026, 3, 21, 10, 0, 0, 0) / 1000);
+    const hourAlignedFrom7d = nowSec - 7 * DAY; // 2026-04-14T10:00:00Z
+    const oldest7dMidnight = hourAlignedFrom7d - 10 * 3600; // 2026-04-14T00:00:00Z
+    const hourAlignedFrom30d = nowSec - 30 * DAY;
+    const oldest30dMidnight = hourAlignedFrom30d - 10 * 3600;
+
+    mockRequest((query) => {
+      if (query.includes("PoolDailySnapshot"))
+        return {
+          PoolDailySnapshot: [
+            makeDaily(oldest7dMidnight, "pool-edge"),
+            makeDaily(oldest30dMidnight, "pool-edge"),
+          ],
+        };
+      if (query.includes("ProtocolFeeTransfer"))
+        return { ProtocolFeeTransfer: [] };
+      if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
+      if (query.includes("Pool")) return { Pool: [makePool("pool-edge")] };
+      return {};
+    });
+
+    const result = await fetchNetworkData(MOCK_NETWORK, {
+      w24h: { from: nowSec - DAY, to: nowSec },
+      w7d: { from: hourAlignedFrom7d, to: nowSec },
+      w30d: { from: hourAlignedFrom30d, to: nowSec },
+    });
+
+    // Both edge rollups are strictly before the hour-aligned 7d `from`;
+    // only the day-aligned snap includes them.
+    expect(result.snapshots7d).toHaveLength(1); // oldest7dMidnight only
+    expect(result.snapshots7d[0].timestamp).toBe(String(oldest7dMidnight));
+    expect(result.snapshots30d).toHaveLength(2); // both edges fit in 30d
+  });
 });
 
 // fetchNetworkData — pools query failure

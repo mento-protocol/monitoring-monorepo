@@ -19,6 +19,7 @@ import {
 } from "@/lib/protocol-fees";
 import {
   buildSnapshotWindows,
+  dayBucket,
   filterSnapshotsToWindow,
   shouldQueryPoolSnapshots,
   SNAPSHOT_REFRESH_MS,
@@ -363,9 +364,26 @@ export async function fetchNetworkData(
       ? toError(snapshotsAllDailyResult.reason)
       : (snapshotsAllDailyResult.value.error ?? null);
 
+  // PoolDailySnapshot rows carry a midnight-UTC timestamp. `windows.w7d` and
+  // `windows.w30d` use an hour-aligned `from` (e.g. 10:00 UTC) from hourBucket,
+  // which falls AFTER the oldest in-window midnight — a `timestamp >= from`
+  // filter would drop that day and return one fewer daily row than the window
+  // name implies. Snap `from` down to the day boundary so the full N days of
+  // daily rollups are included. `w24h` stays hour-aligned: day-snapping would
+  // pull in yesterday's midnight rollup, doubling the 24h tile's row count.
+  const toDaily = (w: TimeRange): TimeRange => ({
+    from: dayBucket(w.from),
+    to: w.to,
+  });
   const snapshots = filterSnapshotsToWindow(snapshotsAllDaily, windows.w24h);
-  const snapshots7d = filterSnapshotsToWindow(snapshotsAllDaily, windows.w7d);
-  const snapshots30d = filterSnapshotsToWindow(snapshotsAllDaily, windows.w30d);
+  const snapshots7d = filterSnapshotsToWindow(
+    snapshotsAllDaily,
+    toDaily(windows.w7d),
+  );
+  const snapshots30d = filterSnapshotsToWindow(
+    snapshotsAllDaily,
+    toDaily(windows.w30d),
+  );
 
   // Per-window error detection. Pagination issues (error or truncation) only
   // affect a specific window if we didn't fetch far enough back to cover its

@@ -64,6 +64,10 @@ export function hourBucket(timestampSeconds: number): number {
   return Math.floor(timestampSeconds / SECONDS_PER_HOUR) * SECONDS_PER_HOUR;
 }
 
+export function dayBucket(timestampSeconds: number): number {
+  return Math.floor(timestampSeconds / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+}
+
 export function snapshotWindow24h(nowMs: number): TimeRange {
   const nowSeconds = Math.floor(nowMs / 1000);
   const to = hourBucket(nowSeconds);
@@ -87,6 +91,37 @@ export function snapshotWindow30d(nowMs: number): TimeRange {
   const to = hourBucket(nowSeconds);
   return {
     from: to - SECONDS_PER_30_DAYS,
+    to,
+  };
+}
+
+/**
+ * Daily-aligned variants of {@link snapshotWindow7d}/{@link snapshotWindow30d}.
+ *
+ * PoolDailySnapshot rows carry a midnight-UTC timestamp. A window whose `from`
+ * bound is hour-aligned (e.g. 10:00 UTC) falls AFTER the oldest in-window
+ * midnight, so a `timestamp >= from` filter silently drops that day — the 7d
+ * window would return 6 full UTC days of rollups plus today's partial row.
+ *
+ * These variants round `from` down to the UTC-day boundary so the oldest day's
+ * midnight rollup is preserved. `to` stays hour-aligned so today's in-progress
+ * daily row (which carries the same midnight timestamp as today's day bucket)
+ * is still included via the `timestamp < to` bound.
+ */
+export function snapshotWindowDaily7d(nowMs: number): TimeRange {
+  const nowSeconds = Math.floor(nowMs / 1000);
+  const to = hourBucket(nowSeconds);
+  return {
+    from: dayBucket(to - SECONDS_PER_WEEK),
+    to,
+  };
+}
+
+export function snapshotWindowDaily30d(nowMs: number): TimeRange {
+  const nowSeconds = Math.floor(nowMs / 1000);
+  const to = hourBucket(nowSeconds);
+  return {
+    from: dayBucket(to - SECONDS_PER_30_DAYS),
     to,
   };
 }

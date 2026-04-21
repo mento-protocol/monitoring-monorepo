@@ -4,6 +4,7 @@ import {
   buildPoolVolumeMapInWindow,
   buildSnapshotWindows,
   buildPoolVolumeMap,
+  dayBucket,
   filterSnapshotsToWindow,
   getSnapshotVolumeInUsd,
   poolTotalVolumeUSD,
@@ -12,6 +13,8 @@ import {
   snapshotWindow24h,
   snapshotWindow7d,
   snapshotWindow30d,
+  snapshotWindowDaily7d,
+  snapshotWindowDaily30d,
   snapshotWindowPrior7d,
   sumVolumeMap,
   sumFpmmSwaps,
@@ -55,6 +58,57 @@ describe("snapshotWindow30d", () => {
     expect(from).toBe(expectedHourStart - 30 * 24 * 3600);
     expect(to).toBe(expectedHourStart);
     expect(to - from).toBe(30 * 24 * 3600);
+  });
+});
+
+describe("dayBucket", () => {
+  it("rounds any within-day timestamp down to the UTC midnight boundary", () => {
+    const midnight = Date.UTC(2026, 2, 9, 0, 0, 0, 0) / 1000;
+    const midday = Date.UTC(2026, 2, 9, 12, 34, 56, 0) / 1000;
+    const endOfDay = Date.UTC(2026, 2, 9, 23, 59, 59, 0) / 1000;
+    expect(dayBucket(midnight)).toBe(midnight);
+    expect(dayBucket(midday)).toBe(midnight);
+    expect(dayBucket(endOfDay)).toBe(midnight);
+  });
+});
+
+describe("snapshotWindowDaily7d", () => {
+  // Regression guard: when filtering PoolDailySnapshot (midnight-UTC
+  // timestamps), an hour-aligned `from` bound silently drops the oldest day
+  // — its midnight row falls before `from` and fails the `timestamp >= from`
+  // filter. The daily variant snaps `from` down to the UTC-day boundary so
+  // that row is preserved.
+  it("rounds `from` down to the UTC-day boundary; `to` stays hour-aligned", () => {
+    const now = Date.UTC(2026, 2, 9, 21, 26, 45, 0); // 21:26:45 UTC
+    const { from, to } = snapshotWindowDaily7d(now);
+    const expectedHourStart = Date.UTC(2026, 2, 9, 21, 0, 0, 0) / 1000;
+    const expectedDayStart =
+      Date.UTC(2026, 2, 9 - 7, 0, 0, 0, 0) / 1000; // day D-7 midnight
+    expect(to).toBe(expectedHourStart);
+    expect(from).toBe(expectedDayStart);
+  });
+
+  it("includes the midnight rollup at the oldest day's start boundary", () => {
+    const now = Date.UTC(2026, 2, 9, 21, 26, 45, 0);
+    const window = snapshotWindowDaily7d(now);
+    // The daily rollup for day D-7 carries a timestamp exactly at the
+    // window's `from` bound — must be kept (inclusive lower bound).
+    expect(window.from).toBe(window.from); // sanity
+    const oldestMidnight = Date.UTC(2026, 2, 9 - 7, 0, 0, 0, 0) / 1000;
+    expect(oldestMidnight >= window.from).toBe(true);
+    expect(oldestMidnight < window.to).toBe(true);
+  });
+});
+
+describe("snapshotWindowDaily30d", () => {
+  it("rounds `from` down to the UTC-day boundary; `to` stays hour-aligned", () => {
+    const now = Date.UTC(2026, 2, 9, 21, 26, 45, 0);
+    const { from, to } = snapshotWindowDaily30d(now);
+    const expectedHourStart = Date.UTC(2026, 2, 9, 21, 0, 0, 0) / 1000;
+    const expectedDayStart =
+      Date.UTC(2026, 2, 9 - 30, 0, 0, 0, 0) / 1000; // day D-30 midnight
+    expect(to).toBe(expectedHourStart);
+    expect(from).toBe(expectedDayStart);
   });
 });
 
