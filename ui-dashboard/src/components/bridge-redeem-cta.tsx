@@ -157,7 +157,12 @@ export function ToastPortal({
   );
   if (!isClient || toasts.length === 0) return null;
   return createPortal(
-    <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"
+    >
       {toasts.map((t) => (
         <ToastItem key={t.id} entry={t} onDismiss={() => onDismiss(t.id)} />
       ))}
@@ -230,9 +235,13 @@ export function BridgeRedeemPill({
         cache: "no-store",
         signal: AbortSignal.timeout(15_000),
       });
-      const body = (await res.json()) as
-        | BridgeRedeemPayload
-        | { error?: string };
+      const raw = await res.text();
+      let body: BridgeRedeemPayload | { error?: string };
+      try {
+        body = JSON.parse(raw) as BridgeRedeemPayload | { error?: string };
+      } catch {
+        throw new Error("Failed to fetch Wormhole VAA.");
+      }
       if (!res.ok || !("vaaHex" in body)) {
         throw new Error(
           "error" in body && typeof body.error === "string"
