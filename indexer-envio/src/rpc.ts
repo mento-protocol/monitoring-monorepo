@@ -404,20 +404,64 @@ export type RebalancingState = {
 /** Returns SortedOracles address for chainId, throws if not in @mento-protocol/contracts. */
 const SORTED_ORACLES_ADDRESS = SortedOraclesContract.address;
 
-/** Cache numRates by block — numRates can't change within a single block.
- * Key: "chainId:feedId:blockNumber" */
+/** Per-chain block-scoped caches. Each cache holds entries for the most
+ * recently seen block on each chain — when a chain advances to a new block,
+ * its prior entries are evicted. Per-chain (rather than global) eviction is
+ * required because the multichain configs run with `unordered_multichain_mode:
+ * true`, so events from different chains can interleave at independent block
+ * heights. Cardinality is bounded by `chains × keys_per_block`.
+ *
+ * Per-block keying remains correct for historical backfills (e.g. across an
+ * oracle governance change): each fetch is keyed by its own blockNumber, so a
+ * cached value can never be returned for a different block. */
+
+/** Cache numRates: "chainId:feedId:blockNumber" → count. */
 const numReportersCache = new Map<string, number>();
+const numReportersCacheLastBlocks = new Map<number, bigint>();
 
-/** Cache report expiry per feed.
- * Key: "chainId:feedId:blockNumber" — including blockNumber ensures historical
- * backfills that span a governance change pick up the correct value. */
+/** Cache report expiry: "chainId:feedId:blockNumber" → expiry seconds. */
 const reportExpiryCache = new Map<string, bigint>();
+const reportExpiryCacheLastBlocks = new Map<number, bigint>();
 
-/** Cache getReserves() results by block — reserves are block-final.
- * Key: "chainId:poolAddress:blockNumber"
- * Evicted when a new blockNumber is seen (Envio processes blocks sequentially). */
+/** Cache getReserves(): "chainId:poolAddress:blockNumber" → reserves. */
 const reservesCache = new Map<string, { reserve0: bigint; reserve1: bigint }>();
-let reservesCacheLastBlock: bigint | undefined;
+const reservesCacheLastBlocks = new Map<number, bigint>();
+
+/** Evict any entries for the given chain whose block doesn't match `blockNumber`.
+ * Caller passes the cache and its per-chain lastBlocks tracker; we delete
+ * entries with the `${chainId}:` prefix when the chain has advanced.
+ * Exported under `_evictCacheForChain` for unit testing. */
+function evictCacheForChain<T>(
+  cache: Map<string, T>,
+  lastBlocks: Map<number, bigint>,
+  chainId: number,
+  blockNumber: bigint,
+): void {
+  if (lastBlocks.get(chainId) === blockNumber) return;
+  const prefix = `${chainId}:`;
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) cache.delete(key);
+  }
+  lastBlocks.set(chainId, blockNumber);
+}
+
+/** @internal Test-only: pure helper for unit-testing the eviction logic. */
+export const _evictCacheForChain = evictCacheForChain;
+
+/** @internal Test-only: snapshot block-scoped cache sizes for invariant
+ * assertions. Caches are bounded by chains × keys-per-block; tests can drive
+ * the fetchers across many blocks and assert the size never explodes. */
+export function _getOracleCacheStats(): {
+  numReporters: number;
+  reportExpiry: number;
+  reserves: number;
+} {
+  return {
+    numReporters: numReportersCache.size,
+    reportExpiry: reportExpiryCache.size,
+    reserves: reservesCache.size,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Block fallback helper
@@ -619,10 +663,13 @@ export async function fetchReserves(
     return mock === NULL_RESERVES ? null : (mock ?? null);
   }
 
-  // Block-scoped cache: evict stale entries when a new block is encountered.
-  if (blockNumber !== undefined && blockNumber !== reservesCacheLastBlock) {
-    reservesCache.clear();
-    reservesCacheLastBlock = blockNumber;
+  if (blockNumber !== undefined) {
+    evictCacheForChain(
+      reservesCache,
+      reservesCacheLastBlocks,
+      chainId,
+      blockNumber,
+    );
   }
   const cacheKey = `${chainId}:${poolAddress.toLowerCase()}:${blockNumber}`;
   const cached = reservesCache.get(cacheKey);
@@ -734,6 +781,12 @@ export async function fetchNumReporters(
     return null;
   }
 
+  evictCacheForChain(
+    numReportersCache,
+    numReportersCacheLastBlocks,
+    chainId,
+    blockNumber,
+  );
   const cacheKey = `${chainId}:${rateFeedID}:${blockNumber}`;
   const cached = numReportersCache.get(cacheKey);
   if (cached !== undefined) return cached;
@@ -779,6 +832,12 @@ export async function fetchReportExpiry(
     return null;
   }
 
+  evictCacheForChain(
+    reportExpiryCache,
+    reportExpiryCacheLastBlocks,
+    chainId,
+    blockNumber,
+  );
   const cacheKey = `${chainId}:${rateFeedID}:${blockNumber}`;
   const cached = reportExpiryCache.get(cacheKey);
   if (cached !== undefined) return cached;
