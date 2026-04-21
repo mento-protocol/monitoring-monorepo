@@ -103,13 +103,16 @@ function BridgeFlowsContent() {
 
   const selectedStatuses = useMemo<BridgeStatus[]>(() => {
     const param = searchParams.get("statuses");
-    if (!param) return ALL_BRIDGE_STATUSES.slice();
-    const parts = param
-      .split(",")
-      .filter((s): s is BridgeStatus =>
-        ([...ALL_BRIDGE_STATUSES] as string[]).includes(s),
-      );
-    return parts.length > 0 ? parts : ALL_BRIDGE_STATUSES.slice();
+    // null  → param absent → show all (default)
+    // ""    → user deselected everything → empty selection (skip polling)
+    if (param === null) return ALL_BRIDGE_STATUSES.slice();
+    const validSet = new Set<string>(ALL_BRIDGE_STATUSES);
+    const parts = [
+      ...new Set(
+        param.split(",").filter((s): s is BridgeStatus => validSet.has(s)),
+      ),
+    ];
+    return parts;
   }, [searchParams]);
 
   const setPage = useCallback(
@@ -125,7 +128,8 @@ function BridgeFlowsContent() {
   const handleStatusChange = useCallback(
     (next: BridgeStatus[]) => {
       const params = new URLSearchParams(searchParams.toString());
-      const isAll = next.length === ALL_BRIDGE_STATUSES.length;
+      const nextSet = new Set(next);
+      const isAll = ALL_BRIDGE_STATUSES.every((s) => nextSet.has(s));
       if (isAll) params.delete("statuses");
       else params.set("statuses", next.join(","));
       params.delete("page"); // reset to page 1 on filter change
