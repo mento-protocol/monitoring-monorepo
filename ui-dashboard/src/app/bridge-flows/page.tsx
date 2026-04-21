@@ -28,6 +28,7 @@ import {
 import { BridgeStatusBadge } from "@/components/bridge-status-badge";
 import { BridgeStatusFilter } from "@/components/bridge-status-filter";
 import { BridgeProviderBadge } from "@/components/bridge-provider-badge";
+import { BridgeRedeemTableLink } from "@/components/bridge-redeem-cta";
 import { ChainIcon } from "@/components/chain-icon";
 import { Tile, Skeleton, ErrorBox, EmptyBox } from "@/components/feedback";
 import { Pagination } from "@/components/pagination";
@@ -59,6 +60,7 @@ import {
   usdPricedFromLiveRate,
 } from "@/lib/bridge-flows/pricing";
 import { windowTotals } from "@/lib/bridge-flows/snapshots";
+import { canManuallyRedeemTransfer } from "@/lib/bridge-flows/redeem";
 import { wormholescanUrl } from "@/lib/wormhole/urls";
 import type {
   BridgeBridger,
@@ -511,6 +513,8 @@ function TransfersTable({
             t.provider === "WORMHOLE" && t.sentTxHash
               ? wormholescanUrl(t.sentTxHash)
               : null;
+          const showRedeemCta =
+            canManuallyRedeemTransfer(t) && deriveBridgeStatus(t) === "STUCK";
           return (
             <tr
               key={t.id}
@@ -573,6 +577,7 @@ function TransfersTable({
                   sourceChainId={t.sourceChainId}
                   deliveredTxHash={t.deliveredTxHash}
                   destChainId={t.destChainId}
+                  redeemTxHash={showRedeemCta ? t.sentTxHash : null}
                 />
               </td>
               <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-400 font-mono text-right whitespace-nowrap">
@@ -702,12 +707,14 @@ function TxLinks({
   sourceChainId,
   deliveredTxHash,
   destChainId,
+  redeemTxHash,
 }: {
   provider: BridgeProvider;
   sentTxHash: string | null;
   sourceChainId: number | null;
   deliveredTxHash: string | null;
   destChainId: number | null;
+  redeemTxHash: string | null;
 }) {
   const src = networkForChainId(sourceChainId);
   const dst = networkForChainId(destChainId);
@@ -741,6 +748,7 @@ function TxLinks({
       {pills.map((p) => (
         <TxPill key={p.label} {...p} />
       ))}
+      {redeemTxHash ? <BridgeRedeemTableLink txHash={redeemTxHash} /> : null}
     </span>
   );
 }
