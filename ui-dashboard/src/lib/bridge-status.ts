@@ -131,27 +131,3 @@ export function transferDeliveryDurationSec(
   if (sent === 0 || delivered === 0) return null;
   return Math.max(0, delivered - sent);
 }
-
-/**
- * Compute average delivery time (in seconds) across DELIVERED transfers,
- * excluding any row missing `sentTimestamp` (can happen when the
- * destination event arrives before the source has been indexed).
- *
- * Returns `{ avgSec: null, sampleSize: 0 }` if no usable rows.
- */
-export function computeAvgDeliverTime(
-  transfers: ReadonlyArray<
-    Pick<BridgeTransfer, "status" | "sentTimestamp" | "deliveredTimestamp">
-  >,
-): { avgSec: number | null; sampleSize: number } {
-  const usable = transfers.filter(
-    (t) => t.status === "DELIVERED" && t.deliveredTimestamp && t.sentTimestamp,
-  );
-  if (usable.length === 0) return { avgSec: null, sampleSize: 0 };
-  const total = usable.reduce((acc, t) => {
-    const sent = Number(t.sentTimestamp);
-    const delivered = Number(t.deliveredTimestamp);
-    return acc + Math.max(0, delivered - sent);
-  }, 0);
-  return { avgSec: total / usable.length, sampleSize: usable.length };
-}

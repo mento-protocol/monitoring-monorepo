@@ -99,6 +99,25 @@ export const BRIDGE_PENDING_IDS = /* GraphQL */ `
   }
 `;
 
+// Last N delivered transfers — minimal fields for per-route avg delivery time
+// tile. A dedicated query so the sample size is independent of the current
+// page and status filter in the table below.
+export const BRIDGE_DELIVERED_RECENT = /* GraphQL */ `
+  query BridgeDeliveredRecent($limit: Int!) {
+    BridgeTransfer(
+      where: { status: { _eq: "DELIVERED" } }
+      order_by: { deliveredTimestamp: desc, id: asc }
+      limit: $limit
+    ) {
+      status
+      sentTimestamp
+      deliveredTimestamp
+      sourceChainId
+      destChainId
+    }
+  }
+`;
+
 // Daily aggregates for KPI tiles + the volume-over-time chart. Deterministic
 // `date desc, id asc` ordering means that if the 1000-row cap is ever hit
 // the missing rows are the oldest days, not an arbitrary slice — charts stay

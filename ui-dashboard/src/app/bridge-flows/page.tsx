@@ -16,12 +16,12 @@ import {
   BRIDGE_DAILY_SNAPSHOT,
   BRIDGE_PENDING_IDS,
   BRIDGE_TOP_BRIDGERS,
+  BRIDGE_DELIVERED_RECENT,
 } from "@/lib/bridge-queries";
 import { TOP_BRIDGERS_EXPANDED } from "@/lib/bridge-flows/layout";
 import {
   ALL_BRIDGE_STATUSES,
   deriveBridgeStatus,
-  computeAvgDeliverTime,
   formatDurationShort,
   transferDeliveryDurationSec,
 } from "@/lib/bridge-status";
@@ -50,6 +50,7 @@ import {
   formatWei,
   formatUSD,
   relativeTime,
+  formatTimestamp,
   truncateAddress,
 } from "@/lib/format";
 import { networkForChainId, tokenAddressForSymbol } from "@/lib/networks";
@@ -60,12 +61,12 @@ import {
 } from "@/lib/tokens";
 import { sortTransfers, type BridgeSortKey } from "@/lib/bridge-flows/sort";
 import {
-  transferAmountTokens,
   transferAmountUsd,
   usdPricedFromLiveRate,
 } from "@/lib/bridge-flows/pricing";
 import { windowTotals } from "@/lib/bridge-flows/snapshots";
 import { canManuallyRedeemTransfer } from "@/lib/bridge-flows/redeem";
+import { computeRouteAvgDeliverTimes } from "@/lib/bridge-flows/route-stats";
 import { wormholescanUrl } from "@/lib/wormhole/urls";
 import type {
   BridgeBridger,
@@ -76,6 +77,7 @@ import type {
 } from "@/lib/types";
 
 const PAGE_LIMIT = 25;
+const ROUTE_STATS_LIMIT = 100;
 
 export default function BridgeFlowsPage() {
   return (
@@ -99,19 +101,17 @@ function BridgeFlowsContent() {
     parseInt(searchParams.get("page") ?? "1", 10) || 1,
   );
 
-  const selectedStatuses = useMemo<BridgeStatus[]>(() => {
-    const param = searchParams.get("statuses");
-    // null  → param absent → show all (default)
-    // ""    → user deselected everything → empty selection (skip polling)
-    if (param === null) return ALL_BRIDGE_STATUSES.slice();
+  // null = ALL (default); a specific status = radio-selected filter.
+  const selectedStatus = useMemo<BridgeStatus | null>(() => {
+    const param = searchParams.get("status");
+    if (param === null) return null;
     const validSet = new Set<string>(ALL_BRIDGE_STATUSES);
-    const parts = [
-      ...new Set(
-        param.split(",").filter((s): s is BridgeStatus => validSet.has(s)),
-      ),
-    ];
-    return parts;
+    return validSet.has(param) ? (param as BridgeStatus) : null;
   }, [searchParams]);
+
+  // Expand the single selection into the array the query expects.
+  const statusIn =
+    selectedStatus !== null ? [selectedStatus] : ALL_BRIDGE_STATUSES.slice();
 
   const setPage = useCallback(
     (p: number) => {
@@ -124,32 +124,24 @@ function BridgeFlowsContent() {
   );
 
   const handleStatusChange = useCallback(
-    (next: BridgeStatus[]) => {
+    (next: BridgeStatus | null) => {
       const params = new URLSearchParams(searchParams.toString());
-      const nextSet = new Set(next);
-      const isAll = ALL_BRIDGE_STATUSES.every((s) => nextSet.has(s));
-      if (isAll) params.delete("statuses");
-      else params.set("statuses", next.join(","));
+      if (next === null) params.delete("status");
+      else params.set("status", next);
       params.delete("page"); // reset to page 1 on filter change
       router.replace(`?${params.toString()}`, { scroll: false });
     },
     [router, searchParams],
   );
 
-  // When the user toggles statuses to an empty set, SWR key is nulled and
-  // no fetch happens — the EmptyBox below handles the UI copy. Otherwise
-  // callers would poll a `status: _in: []` query on every refresh interval
-  // just to get back an empty array.
-  const hasSelectedStatuses = selectedStatuses.length > 0;
-
   // Total row count for the pagination denominator. Shape matches
   // POOL_SWAPS_COUNT: fetch up to ENVIO_MAX_ROWS IDs and count client-side,
   // since hosted Hasura has no _aggregate support. Preserved-last-known
   // pattern avoids the pager collapsing on a transient count error.
   const countResult = useBridgeGQL<{ BridgeTransfer: Array<{ id: string }> }>(
-    hasSelectedStatuses ? BRIDGE_TRANSFERS_COUNT : null,
+    BRIDGE_TRANSFERS_COUNT,
     {
-      statusIn: selectedStatuses,
+      statusIn,
       limit: ENVIO_MAX_ROWS,
     },
   );
@@ -157,9 +149,8 @@ function BridgeFlowsContent() {
   // Reset the preserved-last-known denominator whenever the filter changes —
   // otherwise a transient count error on a new filter surfaces the previous
   // filter's total (e.g. "91 total" for a narrower filter that really has 3
-  // matches). Stable-serialize the array so React's dependency comparison
-  // doesn't miss in-place mutations.
-  const statusKey = selectedStatuses.join("|");
+  // matches).
+  const statusKey = selectedStatus ?? "all";
   useEffect(() => {
     lastKnownTotalRef.current = 0;
   }, [statusKey]);
@@ -179,11 +170,11 @@ function BridgeFlowsContent() {
   const page = Math.max(1, Math.min(rawPage, totalPages));
 
   const transfersResult = useBridgeGQL<{ BridgeTransfer: BridgeTransfer[] }>(
-    hasSelectedStatuses ? BRIDGE_TRANSFERS_WINDOW : null,
+    BRIDGE_TRANSFERS_WINDOW,
     {
       limit: PAGE_LIMIT,
       offset: (page - 1) * PAGE_LIMIT,
-      statusIn: selectedStatuses,
+      statusIn,
     },
   );
 
@@ -206,6 +197,19 @@ function BridgeFlowsContent() {
     BRIDGE_TOP_BRIDGERS,
     { limit: TOP_BRIDGERS_EXPANDED },
   );
+
+  // Last ROUTE_STATS_LIMIT delivered transfers for the per-route avg delivery
+  // time tile. Fetched independently so the tile's sample is not capped by the
+  // table's PAGE_LIMIT or the current status filter.
+  const deliveredRecentResult = useBridgeGQL<{
+    BridgeTransfer: Array<{
+      status: BridgeStatus;
+      sentTimestamp: string | null;
+      deliveredTimestamp: string | null;
+      sourceChainId: number | null;
+      destChainId: number | null;
+    }>;
+  }>(BRIDGE_DELIVERED_RECENT, { limit: ROUTE_STATS_LIMIT });
 
   // Oracle rate map for USD conversion. `useAllNetworksData` is cache-shared
   // with pools/revenue via SWR, so cross-page navigation reuses the fetch.
@@ -234,12 +238,6 @@ function BridgeFlowsContent() {
   const pendingCount =
     pendingRows === null ? null : pendingRows >= 1000 ? 1000 : pendingRows;
   const pendingCapped = pendingRows !== null && pendingRows >= 1000;
-
-  // Avg deliver time is scoped to the current 25-row table page — cross-
-  // window averages aren't supported on hosted Hasura; deferred with the
-  // scope explicit in the tile's subtitle.
-  const { avgSec: avgTimeToDeliverSec, sampleSize: avgSampleSize } =
-    computeAvgDeliverTime(transfers);
 
   // Aggregate only for the top-of-page ErrorBox banner — each KPI tile +
   // chart + table below gates on its own backing query's error so a partial
@@ -315,7 +313,7 @@ function BridgeFlowsContent() {
           subtitle={snapshotsCapped ? "Partial — snapshot cap hit" : undefined}
         />
         <Tile
-          label="Pending"
+          label="In-Flight"
           value={
             pendingResult.error
               ? "—"
@@ -327,22 +325,16 @@ function BridgeFlowsContent() {
           }
           subtitle={
             !pendingResult.error && pendingCount !== null && pendingCount > 0
-              ? "In-flight or attested, awaiting delivery"
+              ? "Sent, attested, or queued — not yet delivered"
               : undefined
           }
         />
-        <Tile
-          label="Avg deliver time"
-          value={
-            transfersResult.error || avgTimeToDeliverSec === null
-              ? "—"
-              : formatDurationShort(avgTimeToDeliverSec)
+        <RouteDeliveryTile
+          transfers={deliveredRecentResult.data?.BridgeTransfer ?? []}
+          isLoading={
+            deliveredRecentResult.isLoading && !deliveredRecentResult.data
           }
-          subtitle={
-            transfersResult.error || avgTimeToDeliverSec === null
-              ? undefined
-              : `over ${avgSampleSize} recent transfers`
-          }
+          hasError={!!deliveredRecentResult.error}
         />
       </section>
 
@@ -351,7 +343,7 @@ function BridgeFlowsContent() {
           <h2 className="text-lg font-semibold text-white">Recent transfers</h2>
           <BridgeStatusFilter
             options={ALL_BRIDGE_STATUSES}
-            selected={selectedStatuses}
+            selected={selectedStatus}
             onChange={handleStatusChange}
           />
         </div>
@@ -362,11 +354,9 @@ function BridgeFlowsContent() {
         ) : transfers.length === 0 ? (
           <EmptyBox
             message={
-              selectedStatuses.length === 0
-                ? "No statuses selected — enable at least one filter to see transfers."
-                : selectedStatuses.length < ALL_BRIDGE_STATUSES.length
-                  ? "No bridge transfers match the selected statuses."
-                  : "No bridge transfers yet."
+              selectedStatus !== null
+                ? "No bridge transfers match the selected status."
+                : "No bridge transfers yet."
             }
           />
         ) : (
@@ -400,6 +390,95 @@ function BridgeFlowsContent() {
   );
 }
 
+function RouteDeliveryTile({
+  transfers,
+  isLoading,
+  hasError,
+}: {
+  transfers: ReadonlyArray<
+    Pick<
+      BridgeTransfer,
+      | "status"
+      | "sentTimestamp"
+      | "deliveredTimestamp"
+      | "sourceChainId"
+      | "destChainId"
+    >
+  >;
+  isLoading: boolean;
+  hasError: boolean;
+}) {
+  const routes = useMemo(
+    () => computeRouteAvgDeliverTimes(transfers),
+    [transfers],
+  );
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 min-h-[88px]">
+      <p className="text-sm text-slate-400 mb-3">Avg Delivery Time by Route</p>
+      {hasError ? (
+        <p className="text-2xl font-semibold text-white font-mono">—</p>
+      ) : isLoading ? (
+        <div className="space-y-2">
+          {[0, 1].map((i) => (
+            <div
+              key={i}
+              className="h-4 animate-pulse rounded bg-slate-800/50"
+            />
+          ))}
+        </div>
+      ) : routes.length === 0 ? (
+        <p className="text-sm text-slate-500">No delivered transfers yet</p>
+      ) : (
+        <>
+          <div className="space-y-2">
+            {routes.map((r) => (
+              <div
+                key={`${r.srcChainId}-${r.dstChainId}`}
+                className="flex items-center gap-3"
+              >
+                <RouteCell
+                  sourceChainId={r.srcChainId}
+                  destChainId={r.dstChainId}
+                />
+                <span className="font-mono text-sm font-semibold text-white">
+                  {formatDurationShort(r.avgSec)}
+                </span>
+                <span className="text-xs text-slate-500">n={r.count}</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            last {ROUTE_STATS_LIMIT} delivered
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function TimeCell({ ts, whUrl }: { ts: string | null; whUrl: string | null }) {
+  const relative = ts ? relativeTime(ts) : "—";
+  const precise = ts ? formatTimestamp(ts) : undefined;
+  if (whUrl) {
+    return (
+      <a
+        href={whUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={precise}
+        className="text-slate-400 hover:text-indigo-300 transition-colors"
+      >
+        {relative}
+      </a>
+    );
+  }
+  return (
+    <span className="text-slate-400" title={precise}>
+      {relative}
+    </span>
+  );
+}
+
 function TransfersTable({
   transfers,
   rates,
@@ -427,201 +506,183 @@ function TransfersTable({
   );
 
   return (
-    <>
-      <Table>
-        <thead>
-          <tr className="border-b border-slate-800 bg-slate-900/50">
-            <SortableTh
-              sortKey="provider"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
+    <Table>
+      <thead>
+        <tr className="border-b border-slate-800 bg-slate-900/50">
+          <SortableTh
+            sortKey="provider"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+          >
+            Provider
+          </SortableTh>
+          <SortableTh
+            sortKey="route"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+          >
+            Route
+          </SortableTh>
+          <SortableTh
+            sortKey="status"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+          >
+            Status
+          </SortableTh>
+          <SortableTh
+            sortKey="token"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+          >
+            Token
+          </SortableTh>
+          <SortableTh
+            sortKey="amountUsd"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+            align="right"
+          >
+            Amount
+          </SortableTh>
+          <SortableTh
+            sortKey="sender"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+          >
+            Sender
+          </SortableTh>
+          <SortableTh
+            sortKey="receiver"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+          >
+            Receiver
+          </SortableTh>
+          <Th>Txs</Th>
+          <SortableTh
+            sortKey="time"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+            align="right"
+          >
+            Time
+          </SortableTh>
+          <SortableTh
+            sortKey="duration"
+            activeSortKey={sortKey}
+            sortDir={sortDir}
+            onSort={handleSort}
+            align="right"
+          >
+            Duration
+          </SortableTh>
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.map((t) => {
+          const status = deriveBridgeStatus(t);
+          const usd = transferAmountUsd(t, rates);
+          const usdFromLive = usd !== null && usdPricedFromLiveRate(t);
+          const sameParties =
+            !!t.sender &&
+            !!t.recipient &&
+            t.sender.toLowerCase() === t.recipient.toLowerCase();
+          const whUrl =
+            t.provider === "WORMHOLE" && t.sentTxHash
+              ? wormholescanUrl(t.sentTxHash)
+              : null;
+          const redeemProps =
+            status === "STUCK" && canManuallyRedeemTransfer(t)
+              ? {
+                  sentTxHash: t.sentTxHash!,
+                  destChainId: t.destChainId!,
+                  tokenSymbol: t.tokenSymbol,
+                }
+              : null;
+          return (
+            <tr
+              key={t.id}
+              className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors"
             >
-              Provider
-            </SortableTh>
-            <SortableTh
-              sortKey="route"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
-            >
-              Route
-            </SortableTh>
-            <SortableTh
-              sortKey="status"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
-            >
-              Status
-            </SortableTh>
-            <SortableTh
-              sortKey="token"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
-            >
-              Token
-            </SortableTh>
-            <SortableTh
-              sortKey="amountUsd"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
-              align="right"
-            >
-              Amount (USD)
-            </SortableTh>
-            <SortableTh
-              sortKey="amount"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
-              align="right"
-            >
-              Amount
-            </SortableTh>
-            <SortableTh
-              sortKey="sender"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
-            >
-              Sender
-            </SortableTh>
-            <SortableTh
-              sortKey="receiver"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
-            >
-              Receiver
-            </SortableTh>
-            <Th>Txs</Th>
-            <SortableTh
-              sortKey="time"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
-              align="right"
-            >
-              Time
-            </SortableTh>
-            <SortableTh
-              sortKey="duration"
-              activeSortKey={sortKey}
-              sortDir={sortDir}
-              onSort={handleSort}
-              align="right"
-            >
-              Duration
-            </SortableTh>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((t) => {
-            const status = deriveBridgeStatus(t);
-            const amountTokens = transferAmountTokens(t);
-            const usd = transferAmountUsd(t, rates);
-            const usdFromLive = usd !== null && usdPricedFromLiveRate(t);
-            const sameParties =
-              !!t.sender &&
-              !!t.recipient &&
-              t.sender.toLowerCase() === t.recipient.toLowerCase();
-            // Wormholescan URL is the row's "canonical" trace — if we have it,
-            // the transfer-level cells (provider, amount, amountUsd) all link
-            // to it so operators can jump into the trace from any of those
-            // columns instead of hunting for the `wh` pill at the end.
-            const whUrl =
-              t.provider === "WORMHOLE" && t.sentTxHash
-                ? wormholescanUrl(t.sentTxHash)
-                : null;
-            const redeemProps =
-              status === "STUCK" && canManuallyRedeemTransfer(t)
-                ? {
-                    sentTxHash: t.sentTxHash!,
-                    destChainId: t.destChainId!,
-                    tokenSymbol: t.tokenSymbol,
-                  }
-                : null;
-            return (
-              <tr
-                key={t.id}
-                className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors"
-              >
-                <td className="px-2 sm:px-4 py-2 sm:py-3">
-                  <WormholescanLink href={whUrl}>
-                    <BridgeProviderBadge provider={t.provider} />
-                  </WormholescanLink>
-                </td>
-                <td className="px-2 sm:px-4 py-2 sm:py-3">
-                  <RouteCell
-                    sourceChainId={t.sourceChainId}
-                    destChainId={t.destChainId}
-                  />
-                </td>
-                <td className="px-2 sm:px-4 py-2 sm:py-3">
-                  <BridgeStatusBadge status={status} />
-                </td>
-                <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm">
-                  <TokenCell
-                    symbol={t.tokenSymbol}
-                    chainId={t.sourceChainId ?? t.destChainId}
-                  />
-                </td>
-                <td
-                  className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right"
-                  title={
-                    usdFromLive
-                      ? "USD priced at render time from current oracle rate"
-                      : undefined
-                  }
-                >
-                  <WormholescanLink href={whUrl}>
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2">
+                <WormholescanLink href={whUrl}>
+                  <BridgeProviderBadge provider={t.provider} />
+                </WormholescanLink>
+              </td>
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2">
+                <RouteCell
+                  sourceChainId={t.sourceChainId}
+                  destChainId={t.destChainId}
+                />
+              </td>
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2">
+                <BridgeStatusBadge status={status} />
+              </td>
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2 text-sm">
+                <TokenCell
+                  symbol={t.tokenSymbol}
+                  chainId={t.sourceChainId ?? t.destChainId}
+                />
+              </td>
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2 font-mono text-right">
+                <WormholescanLink href={whUrl}>
+                  <div
+                    className="text-sm text-slate-200"
+                    title={
+                      usdFromLive
+                        ? "USD priced at render time from current oracle rate"
+                        : undefined
+                    }
+                  >
                     {usd === null
                       ? "—"
                       : `${usdFromLive ? "~" : ""}${formatUSD(usd)}`}
-                  </WormholescanLink>
-                </td>
-                <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
-                  <WormholescanLink href={whUrl}>
-                    {amountTokens !== null
-                      ? formatWei(t.amount!, t.tokenDecimals ?? 18, 2)
-                      : "—"}
-                  </WormholescanLink>
-                </td>
-                <td className="px-2 sm:px-4 py-2 sm:py-3 text-sm">
-                  <SenderCell sender={t.sender} chainId={t.sourceChainId} />
-                </td>
-                <td
-                  className={`px-2 sm:px-4 py-2 sm:py-3 text-sm ${sameParties ? "opacity-50" : ""}`}
-                  title={sameParties ? "Same as sender" : undefined}
-                >
-                  <SenderCell sender={t.recipient} chainId={t.destChainId} />
-                </td>
-                <td className="px-2 sm:px-4 py-2 sm:py-3">
-                  <TxLinks
-                    provider={t.provider}
-                    sentTxHash={t.sentTxHash}
-                    sourceChainId={t.sourceChainId}
-                    deliveredTxHash={t.deliveredTxHash}
-                    destChainId={t.destChainId}
-                    redeemProps={redeemProps}
-                    addToast={addToast}
-                  />
-                </td>
-                <td className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-400 font-mono text-right whitespace-nowrap">
-                  {t.sentTimestamp
-                    ? relativeTime(t.sentTimestamp)
-                    : relativeTime(t.firstSeenAt)}
-                </td>
-                <DurationCell transfer={t} />
-              </tr>
-            );
-          })}
-        </tbody>
-      </Table>
-    </>
+                  </div>
+                  {t.amount && (
+                    <div className="text-xs text-slate-500">
+                      {formatWei(t.amount, t.tokenDecimals ?? 18, 2)}
+                    </div>
+                  )}
+                </WormholescanLink>
+              </td>
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2 text-sm">
+                <SenderCell sender={t.sender} chainId={t.sourceChainId} />
+              </td>
+              <td
+                className={`px-2 sm:px-3 py-1.5 sm:py-2 text-sm ${sameParties ? "opacity-50" : ""}`}
+                title={sameParties ? "Same as sender" : undefined}
+              >
+                <SenderCell sender={t.recipient} chainId={t.destChainId} />
+              </td>
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2">
+                <TxLinks
+                  provider={t.provider}
+                  sentTxHash={t.sentTxHash}
+                  sourceChainId={t.sourceChainId}
+                  deliveredTxHash={t.deliveredTxHash}
+                  destChainId={t.destChainId}
+                  redeemProps={redeemProps}
+                  addToast={addToast}
+                />
+              </td>
+              <td className="px-2 sm:px-3 py-1.5 sm:py-2 text-xs font-mono text-right whitespace-nowrap">
+                <TimeCell ts={t.sentTimestamp ?? t.firstSeenAt} whUrl={whUrl} />
+              </td>
+              <DurationCell transfer={t} />
+            </tr>
+          );
+        })}
+      </tbody>
+    </Table>
   );
 }
 
@@ -641,7 +702,7 @@ function DurationCell({ transfer }: { transfer: BridgeTransfer }) {
       derived !== "FAILED";
     return (
       <td
-        className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-500 font-mono text-right whitespace-nowrap"
+        className="px-2 sm:px-3 py-1.5 sm:py-2 text-xs text-slate-500 font-mono text-right whitespace-nowrap"
         title={
           pending
             ? "Not yet delivered"
@@ -654,7 +715,7 @@ function DurationCell({ transfer }: { transfer: BridgeTransfer }) {
   }
   return (
     <td
-      className="px-2 sm:px-4 py-2 sm:py-3 text-xs text-slate-400 font-mono text-right whitespace-nowrap"
+      className="px-2 sm:px-3 py-1.5 sm:py-2 text-xs text-slate-400 font-mono text-right whitespace-nowrap"
       title="Source-send to destination-delivery elapsed time"
     >
       {formatDurationShort(durationSec)}
