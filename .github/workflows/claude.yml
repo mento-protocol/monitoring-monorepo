@@ -37,16 +37,26 @@ jobs:
       )
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # id-token: write is required by anthropics/claude-code-action itself — the
+    # action exchanges a GitHub OIDC token for a short-lived GitHub App token via
+    # Anthropic's /github-app-token-exchange endpoint (see src/github/token.ts in
+    # the pinned action SHA). It is not related to Bedrock/Vertex/Foundry OIDC
+    # (CLAUDE_CODE_OAUTH_TOKEN handles the Anthropic API auth). To drop this
+    # permission, pass an explicit github_token input to the action instead.
     permissions:
       contents: write
       pull-requests: write
       issues: write
-      id-token: write
       actions: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
+      # Third-party actions are pinned to an immutable commit SHA (not a tag)
+      # so upstream tag retargeting or a compromised release cannot silently run
+      # new code here. Update via Dependabot (see .github/dependabot.yml) or by
+      # running: gh api repos/<owner>/<repo>/git/ref/tags/<tag>
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 1
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@38ec876110f9fbf8b950c79f534430740c3ac009 # v1.0.101
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
