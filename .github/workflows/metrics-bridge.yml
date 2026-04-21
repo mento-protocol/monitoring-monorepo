@@ -51,7 +51,7 @@ jobs:
         run: echo "No metrics-bridge changes; skipping."
       - uses: pnpm/action-setup@v4
         if: steps.changes.outputs.bridge == 'true'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         if: steps.changes.outputs.bridge == 'true'
         with:
           node-version-file: .node-version
