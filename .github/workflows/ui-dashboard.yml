@@ -34,39 +34,40 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - name: Detect ui-dashboard changes
         id: changes
-        if: github.event_name == 'pull_request'
-        run: |
-          if git diff --name-only origin/${{ github.base_ref }}...HEAD \
-            | grep -qE '^(ui-dashboard/|shared-config/|pnpm-lock\.yaml|package\.json|pnpm-workspace\.yaml|\.node-version|\.github/workflows/ui-dashboard\.yml)'; then
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-          fi
-      - name: Skip — no ui-dashboard changes
-        if: github.event_name == 'pull_request' && steps.changes.outputs.has_changes == 'false'
-        run: echo "No ui-dashboard changes on this PR, skipping quality checks."
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ui:
+              - ui-dashboard/**
+              - shared-config/**
+              - pnpm-lock.yaml
+              - package.json
+              - pnpm-workspace.yaml
+              - .node-version
+              - .github/workflows/ui-dashboard.yml
+      - name: No ui-dashboard changes
+        if: steps.changes.outputs.ui != 'true'
+        run: echo "No ui-dashboard changes; skipping quality checks."
       - uses: pnpm/action-setup@v4
-        if: github.event_name != 'pull_request' || steps.changes.outputs.has_changes == 'true'
+        if: steps.changes.outputs.ui == 'true'
       - uses: actions/setup-node@v4
-        if: github.event_name != 'pull_request' || steps.changes.outputs.has_changes == 'true'
+        if: steps.changes.outputs.ui == 'true'
         with:
           node-version-file: .node-version
           cache: pnpm
       - name: Install dependencies
-        if: github.event_name != 'pull_request' || steps.changes.outputs.has_changes == 'true'
+        if: steps.changes.outputs.ui == 'true'
         run: pnpm install --frozen-lockfile
       - name: Typecheck
-        if: github.event_name != 'pull_request' || steps.changes.outputs.has_changes == 'true'
+        if: steps.changes.outputs.ui == 'true'
         run: pnpm --filter @mento-protocol/ui-dashboard typecheck
       - name: Test with coverage
-        if: github.event_name != 'pull_request' || steps.changes.outputs.has_changes == 'true'
+        if: steps.changes.outputs.ui == 'true'
         run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
       - uses: codecov/codecov-action@v5
-        if: github.event_name != 'pull_request' || steps.changes.outputs.has_changes == 'true'
+        if: steps.changes.outputs.ui == 'true'
         with:
           fail_ci_if_error: false
           flags: ui-dashboard
