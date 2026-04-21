@@ -16,6 +16,7 @@ import {
   BRIDGE_DAILY_SNAPSHOT,
   BRIDGE_PENDING_IDS,
   BRIDGE_TOP_BRIDGERS,
+  BRIDGE_DELIVERED_RECENT,
 } from "@/lib/bridge-queries";
 import { TOP_BRIDGERS_EXPANDED } from "@/lib/bridge-flows/layout";
 import {
@@ -70,6 +71,7 @@ import type {
 } from "@/lib/types";
 
 const PAGE_LIMIT = 25;
+const ROUTE_STATS_LIMIT = 100;
 
 export default function BridgeFlowsPage() {
   return (
@@ -201,6 +203,19 @@ function BridgeFlowsContent() {
     { limit: TOP_BRIDGERS_EXPANDED },
   );
 
+  // Last ROUTE_STATS_LIMIT delivered transfers for the per-route avg delivery
+  // time tile. Fetched independently so the tile's sample is not capped by the
+  // table's PAGE_LIMIT or the current status filter.
+  const deliveredRecentResult = useBridgeGQL<{
+    BridgeTransfer: Array<{
+      status: BridgeStatus;
+      sentTimestamp: string | null;
+      deliveredTimestamp: string | null;
+      sourceChainId: number | null;
+      destChainId: number | null;
+    }>;
+  }>(BRIDGE_DELIVERED_RECENT, { limit: ROUTE_STATS_LIMIT });
+
   // Oracle rate map for USD conversion. `useAllNetworksData` is cache-shared
   // with pools/revenue via SWR, so cross-page navigation reuses the fetch.
   const { networkData } = useAllNetworksData();
@@ -309,9 +324,11 @@ function BridgeFlowsContent() {
           }
         />
         <RouteDeliveryTile
-          transfers={transfers}
-          isLoading={transfersResult.isLoading && transfers.length === 0}
-          hasError={!!transfersResult.error}
+          transfers={deliveredRecentResult.data?.BridgeTransfer ?? []}
+          isLoading={
+            deliveredRecentResult.isLoading && !deliveredRecentResult.data
+          }
+          hasError={!!deliveredRecentResult.error}
         />
       </section>
 
@@ -370,7 +387,16 @@ function RouteDeliveryTile({
   isLoading,
   hasError,
 }: {
-  transfers: BridgeTransfer[];
+  transfers: ReadonlyArray<
+    Pick<
+      BridgeTransfer,
+      | "status"
+      | "sentTimestamp"
+      | "deliveredTimestamp"
+      | "sourceChainId"
+      | "destChainId"
+    >
+  >;
   isLoading: boolean;
   hasError: boolean;
 }) {
@@ -380,7 +406,7 @@ function RouteDeliveryTile({
   );
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 min-h-[88px]">
-      <p className="text-sm text-slate-400 mb-3">Avg deliver time by route</p>
+      <p className="text-sm text-slate-400 mb-3">Avg Delivery Time by Route</p>
       {hasError ? (
         <p className="text-2xl font-semibold text-white font-mono">—</p>
       ) : isLoading ? (
@@ -413,7 +439,9 @@ function RouteDeliveryTile({
           ))}
         </div>
       )}
-      <p className="mt-3 text-xs text-slate-500">current page only</p>
+      <p className="mt-3 text-xs text-slate-500">
+        last {ROUTE_STATS_LIMIT} delivered
+      </p>
     </div>
   );
 }
