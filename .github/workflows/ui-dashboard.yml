@@ -52,7 +52,7 @@ jobs:
         run: echo "No ui-dashboard changes; skipping quality checks."
       - uses: pnpm/action-setup@v4
         if: steps.changes.outputs.ui == 'true'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         if: steps.changes.outputs.ui == 'true'
         with:
           node-version-file: .node-version
