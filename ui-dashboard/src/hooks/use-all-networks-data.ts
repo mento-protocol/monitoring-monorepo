@@ -40,10 +40,11 @@ export type NetworkData = {
   pools: Pool[];
   /**
    * Windowed snapshot arrays derived client-side by filtering
-   * `snapshotsAllDaily` with day-aligned bounds (UTC midnight). The source
-   * is the daily rollup (one row per pool per UTC day), so the 24h window
-   * covers yesterday midnight → now (typically 1-2 daily rows per pool).
-   * Intra-day precision is sacrificed; KPI tiles show UTC-day-aligned totals.
+   * `snapshotsAllDaily` with UTC-midnight-anchored bounds. The source is the
+   * daily rollup (one row per pool per UTC day), so each window contains
+   * exactly 1/7/30 potential daily rows — no overcounting across UTC-day
+   * boundaries. Intra-day precision is sacrificed; KPI tiles show UTC-day-
+   * aligned totals.
    *
    * Per-window error fields below are only set when that window's coverage
    * is incomplete (i.e., we didn't paginate back far enough).
@@ -362,25 +363,26 @@ export async function fetchNetworkData(
       ? toError(snapshotsAllDailyResult.reason)
       : (snapshotsAllDailyResult.value.error ?? null);
 
-  // PoolDailySnapshot timestamps are UTC-midnight-aligned. Filtering with
-  // hour-aligned bounds (e.g. "yesterday 07:00") would exclude the previous
-  // day's snapshot (which is stamped at "yesterday 00:00"). Floor each
-  // window's `from` to its UTC-day boundary so the first relevant daily row
-  // is always included.
+  // PoolDailySnapshot rows are UTC-midnight-aligned incremental aggregates
+  // (one row per pool per UTC day). Anchoring on today's UTC midnight gives
+  // exactly 1/7/30 daily rows per KPI window without overcounting.
+  // `windows.w24h.to` is the caller's snapshot of "now", so deriving
+  // todayMidnight from it keeps all three windows consistent with the same
+  // clock tick rather than calling Date.now() again.
   const SECS_PER_DAY = 86400;
-  const floorToDay = (ts: number) =>
-    Math.floor(ts / SECS_PER_DAY) * SECS_PER_DAY;
+  const todayMidnight =
+    Math.floor(windows.w24h.to / SECS_PER_DAY) * SECS_PER_DAY;
   const dw24h: TimeRange = {
-    from: floorToDay(windows.w24h.from),
-    to: windows.w24h.to,
+    from: todayMidnight,
+    to: todayMidnight + SECS_PER_DAY,
   };
   const dw7d: TimeRange = {
-    from: floorToDay(windows.w7d.from),
-    to: windows.w7d.to,
+    from: todayMidnight - 6 * SECS_PER_DAY,
+    to: todayMidnight + SECS_PER_DAY,
   };
   const dw30d: TimeRange = {
-    from: floorToDay(windows.w30d.from),
-    to: windows.w30d.to,
+    from: todayMidnight - 29 * SECS_PER_DAY,
+    to: todayMidnight + SECS_PER_DAY,
   };
 
   const snapshots = filterSnapshotsToWindow(snapshotsAllDaily, dw24h);

@@ -512,12 +512,14 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
 
   it("derives window arrays from snapshotsAllDaily by timestamp", async () => {
     const now = Math.floor(Date.now() / 1000);
-    // 3h ago → in 24h window (after yesterday midnight). 2 days ago → before
-    // yesterday midnight → 7d/30d only. 10d ago → 30d only.
+    const todayMidnight = Math.floor(now / 86400) * 86400;
+    // UTC-midnight-aligned timestamps matching actual PoolDailySnapshot rows.
+    // todayMidnight → 24h/7d/30d. 2d ago midnight → 7d/30d only.
+    // 10d ago midnight → 30d only.
     const allSnapshots = [
-      makeDaily(now - 3 * 3600),
-      makeDaily(now - 2 * 86400),
-      makeDaily(now - 10 * 86400),
+      makeDaily(todayMidnight),
+      makeDaily(todayMidnight - 2 * 86400),
+      makeDaily(todayMidnight - 10 * 86400),
     ];
     mockRequest((query) => {
       if (query.includes("PoolDailySnapshot"))
@@ -536,8 +538,8 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
     });
 
     expect(result.snapshotsAllDaily).toHaveLength(3);
-    expect(result.snapshots).toHaveLength(1); // only 3h-ago fits in 24h
-    expect(result.snapshots7d).toHaveLength(2); // 3h-ago + 2d-ago
+    expect(result.snapshots).toHaveLength(1); // todayMidnight only
+    expect(result.snapshots7d).toHaveLength(2); // today + 2d ago
     expect(result.snapshots30d).toHaveLength(3); // all three
   });
 });
