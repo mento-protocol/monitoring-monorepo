@@ -6,9 +6,12 @@ import { useGQL } from "@/lib/graphql";
 import { POOL_BREACH_ROLLUP } from "@/lib/queries";
 import { DEVIATION_BREACH_GRACE_SECONDS } from "@/lib/health";
 import { tradingSecondsInRange } from "@/lib/weekend";
+import { isFxPool } from "@/lib/tokens";
+import { useNetwork } from "@/components/network-provider";
 
 const UPTIME_EXPLAINER =
-  "Share of tracked time the pool was healthy. Breaches of up to 1h still count as uptime; only longer ones cut into the score. FX weekends are excluded.";
+  "% of time the pool was healthy. Deviation threshold breaches of more than 1h qualify as unhealthy.";
+const UPTIME_FX_SUFFIX = " Weekends do not count into uptime on FX pools.";
 
 type BreachRollup = {
   cumulativeCriticalSeconds?: string;
@@ -90,11 +93,11 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   );
 }
 
-export function UptimeInfoIcon() {
-  return (
-    <InfoPopover
-      label={`About Uptime. ${UPTIME_EXPLAINER}`}
-      content={UPTIME_EXPLAINER}
-    />
-  );
+export function UptimeInfoIcon({ pool }: { pool: Pool }) {
+  const { network } = useNetwork();
+  const suffix = isFxPool(network, pool.token0, pool.token1)
+    ? UPTIME_FX_SUFFIX
+    : "";
+  const content = UPTIME_EXPLAINER + suffix;
+  return <InfoPopover label={`About Uptime. ${content}`} content={content} />;
 }

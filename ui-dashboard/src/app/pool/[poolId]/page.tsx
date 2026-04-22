@@ -669,7 +669,7 @@ function PoolHeader({
           label={
             <span className="inline-flex items-center gap-1">
               Uptime
-              <UptimeInfoIcon />
+              <UptimeInfoIcon pool={pool} />
             </span>
           }
           value={
