@@ -112,24 +112,46 @@ describe("computeThresholdLines", () => {
     it("returns correct bounds for 1000 bps threshold (T=0.1)", () => {
       const lines = computeThresholdLines(1000, 40000);
       expect(lines).not.toBeNull();
-      // (1+0.1)/(2+0.1) = 1.1/2.1 ≈ 52.38%
-      expect(lines!.threshold0Upper).toBeCloseTo(52.38, 1);
-      // (1-0.1)/(2-0.1) = 0.9/1.9 ≈ 47.37%
-      expect(lines!.threshold0Lower).toBeCloseTo(47.37, 1);
+      // 100/(2-0.1) = 100/1.9 ≈ 52.63% — token0 excess upper line
+      expect(lines!.threshold0Upper).toBeCloseTo(52.63, 1);
+      // 100/(2+0.1) = 100/2.1 ≈ 47.62% — token0 shortage lower line
+      expect(lines!.threshold0Lower).toBeCloseTo(47.62, 1);
       // tank1 complements
-      expect(lines!.threshold1Lower).toBeCloseTo(100 - 52.38, 1);
-      expect(lines!.threshold1Upper).toBeCloseTo(100 - 47.37, 1);
+      expect(lines!.threshold1Lower).toBeCloseTo(100 - 52.63, 1);
+      expect(lines!.threshold1Upper).toBeCloseTo(100 - 47.62, 1);
     });
 
     it("returns correct bounds for 5000 bps threshold (T=0.5)", () => {
+      // At T=0.5, critical reserves sit at r1/r0 = 1±T (oracle=1 for a
+      // stable/stable pair), so usd1/usd0 = 1±T and usd0 share = 1/(2±T).
+      // The formula used to read (1±T)/(2±T), which gave 33.3% / 60% —
+      // the visualization then drew dashed lines WIDER than the actual
+      // breach boundary (a 38% share reads inside the band but is
+      // actually past the 40% line).
       const lines = computeThresholdLines(5000, 40000);
       expect(lines).not.toBeNull();
-      // (1.5/2.5)*100 = 60%
-      expect(lines!.threshold0Upper).toBeCloseTo(60, 1);
-      // (0.5/1.5)*100 = 33.33%
-      expect(lines!.threshold0Lower).toBeCloseTo(33.33, 1);
-      expect(lines!.threshold1Lower).toBeCloseTo(40, 1);
-      expect(lines!.threshold1Upper).toBeCloseTo(66.67, 1);
+      // 100/(2-0.5) = 100/1.5 ≈ 66.67%
+      expect(lines!.threshold0Upper).toBeCloseTo(66.67, 1);
+      // 100/(2+0.5) = 100/2.5 = 40%
+      expect(lines!.threshold0Lower).toBeCloseTo(40, 1);
+      expect(lines!.threshold1Lower).toBeCloseTo(33.33, 1);
+      expect(lines!.threshold1Upper).toBeCloseTo(60, 1);
+    });
+
+    it("matches the indexer priceDifference formula at the boundary", () => {
+      // Sanity check against src/indexer-envio/src/priceDifference.ts:
+      // priceDifference = |r1/r0 / oracleRef − 1|. With oracleRef=1 and
+      // r1/r0 = 1+T, priceDifference = T (exactly at threshold). The bar
+      // fill for token0 at that point must match threshold0Lower.
+      const T = 0.5;
+      const r0 = 100;
+      const r1 = r0 * (1 + T); // boundary: r1/r0 = 1.5, priceDifference = 0.5 = T
+      const usd0 = r0; // oracle = 1 → usd_price = 1 for both tokens
+      const usd1 = r1;
+      const x0 = (usd0 / (usd0 + usd1)) * 100; // = 40%
+      const lines = computeThresholdLines(T * 10000, usd0 + usd1);
+      expect(lines).not.toBeNull();
+      expect(lines!.threshold0Lower).toBeCloseTo(x0, 2);
     });
 
     it("equilibrium (50%) is always inside the safe zone", () => {
@@ -176,20 +198,13 @@ describe("computeThresholdLines", () => {
       expect(computeThresholdLines(undefined, 10000)).toBeNull();
     });
 
-    it("returns null when T > 1 (threshold > 10000 bps)", () => {
-      // T > 1 gives (1-T) < 0, so threshold0Lower would go negative.
+    it("returns null when T >= 1 (threshold >= 10000 bps)", () => {
+      // At T=1, threshold0Upper = 100/(2-1) = 100% (edge of bar, not
+      // meaningful as a "line"). Past T=1 the upper formula exceeds 100%
+      // and has no valid rendering.
+      expect(computeThresholdLines(10000, 10000)).toBeNull();
       expect(computeThresholdLines(10001, 10000)).toBeNull();
       expect(computeThresholdLines(15000, 10000)).toBeNull();
-    });
-
-    it("accepts T = 1 exactly (10000 bps): lower=0%, upper=66.7%", () => {
-      // At T=1: (1-1)/(2-1)*100 = 0%, (1+1)/(2+1)*100 = 66.7% — valid and renderable.
-      const lines = computeThresholdLines(10000, 10000);
-      expect(lines).not.toBeNull();
-      expect(lines!.threshold0Lower).toBeCloseTo(0);
-      expect(lines!.threshold0Upper).toBeCloseTo(66.67, 1);
-      expect(lines!.threshold1Lower).toBeCloseTo(33.33, 1);
-      expect(lines!.threshold1Upper).toBeCloseTo(100);
     });
 
     it("accepts T just below 1 (9999 bps)", () => {
