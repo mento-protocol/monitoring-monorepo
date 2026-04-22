@@ -22,7 +22,9 @@ on:
 
 # Group by SHA (not ref) so two fast main-merges each get their own run
 # and the second never cancels the first mid-deploy. cancel-in-progress is
-# redundant with SHA-unique groups but explicit false documents the intent.
+# false so a manual re-dispatch on the same SHA (e.g. retrying after a
+# transient deploy failure) queues behind the in-flight run instead of
+# cancelling it — SHA-unique groups don't handle that edge case alone.
 concurrency:
   group: ${{ github.workflow }}-${{ github.sha }}
   cancel-in-progress: false

@@ -124,16 +124,17 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/pnpm-install
       # Envio codegen output is deterministic on (envio version, config*.yaml,
-      # schema.graphql, abis, event handlers). Cache the generated/ dir keyed
-      # on those inputs so PRs that don't touch indexer configs skip the 2-3
-      # minute codegen pass entirely. `pnpm install` still runs a second time
-      # below — it's needed regardless to create the `link:generated` symlink.
+      # schema.graphql, abis). Cache the generated/ dir keyed on those inputs
+      # so PRs that don't touch indexer configs skip the 2-3 minute codegen
+      # pass entirely. src/** is intentionally NOT in the key — handler code
+      # doesn't affect codegen output, and including it would invalidate the
+      # cache on every indexer PR (the common case), defeating the cache.
       - name: Cache Envio generated/
         id: cache-generated
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: indexer-envio/generated
-          key: envio-generated-${{ runner.os }}-${{ hashFiles('indexer-envio/config*.yaml', 'indexer-envio/schema.graphql', 'indexer-envio/package.json', 'indexer-envio/abis/**', 'indexer-envio/src/**') }}
+          key: envio-generated-${{ runner.os }}-${{ hashFiles('indexer-envio/config*.yaml', 'indexer-envio/schema.graphql', 'indexer-envio/package.json', 'indexer-envio/abis/**') }}
       - name: Validate all Envio configs (codegen)
         # Run codegen against every config file to catch schema/config drift early.
         # config.multichain.mainnet.yaml is run last — its output is used by
@@ -147,10 +148,12 @@ jobs:
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
       - name: Link generated package
-        # pnpm install ran before generated/ existed, so the workspace symlink
-        # for the optional `link:generated` dep is missing. Re-running install
-        # after codegen (or cache restore) creates the symlink so typecheck
-        # and tests resolve it.
+        # The composite action's pnpm install ran before generated/ existed,
+        # so the workspace symlink for the optional `link:generated` dep is
+        # missing. Re-running install after codegen (or cache restore)
+        # creates the symlink so typecheck and tests resolve it. Needed on
+        # BOTH cache hit and miss: node_modules isn't cached, so the first
+        # install always runs with generated/ absent.
         run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm --filter @mento-protocol/indexer-envio typecheck
