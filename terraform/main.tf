@@ -336,12 +336,14 @@ resource "google_artifact_registry_repository" "metrics_bridge" {
 # Polls Hasura for FPMM pool KPIs and exports Prometheus gauges.
 # Scraped by Grafana Agent (Aegis repo) → Grafana Cloud alert rules.
 #
-# Image is built and pushed by CI (GitHub Actions), not Terraform.
-# First deploy: run `pnpm bridge:deploy` to build the image, then
-# set metrics_bridge_image in terraform.tfvars and `pnpm infra:apply`.
+# Image is managed out-of-band: `pnpm bridge:deploy` (or the CI workflow)
+# runs `gcloud run services update metrics-bridge --image=<digest>` after
+# Cloud Build pushes a new revision. Terraform owns the *shape* of the
+# service (probes, env, scaling, memory) and ignores image drift via
+# `lifecycle.ignore_changes` so running `pnpm infra:apply` never reverts
+# the image back to the bootstrap placeholder.
 
 resource "google_cloud_run_v2_service" "metrics_bridge" {
-  count               = var.metrics_bridge_image != "" ? 1 : 0
   project             = google_project.monitoring.project_id
   name                = "metrics-bridge"
   location            = var.gcp_region
@@ -397,14 +399,21 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
       }
     }
   }
+
+  lifecycle {
+    # Image rollouts are triggered by `gcloud run services update` from the
+    # deploy path (scripts/deploy-bridge.sh and the GitHub workflow), not by
+    # terraform. Ignoring the attribute here means `pnpm infra:apply` won't
+    # revert a freshly-deployed image back to the bootstrap placeholder.
+    ignore_changes = [template[0].containers[0].image]
+  }
 }
 
 # Allow unauthenticated access so Grafana Agent can scrape /metrics.
 resource "google_cloud_run_v2_service_iam_member" "metrics_bridge_public" {
-  count    = var.metrics_bridge_image != "" ? 1 : 0
-  project  = google_cloud_run_v2_service.metrics_bridge[0].project
-  location = google_cloud_run_v2_service.metrics_bridge[0].location
-  name     = google_cloud_run_v2_service.metrics_bridge[0].name
+  project  = google_cloud_run_v2_service.metrics_bridge.project
+  location = google_cloud_run_v2_service.metrics_bridge.location
+  name     = google_cloud_run_v2_service.metrics_bridge.name
   role     = "roles/run.invoker"
   member   = "allUsers"
 }

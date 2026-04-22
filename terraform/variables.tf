@@ -121,9 +121,9 @@ variable "gcp_region" {
 }
 
 variable "metrics_bridge_image" {
-  description = "Full container image reference for the metrics bridge (e.g. europe-west1-docker.pkg.dev/mento-monitoring/metrics-bridge/metrics-bridge:abc123). Built and pushed by CI; leave empty until first deploy."
+  description = "Bootstrap image used only when the Cloud Run service is first created. After bootstrap, image rollouts happen out-of-band via `gcloud run services update` (see scripts/deploy-bridge.sh + the GitHub workflow) — terraform ignores image drift via `lifecycle.ignore_changes`."
   type        = string
-  default     = ""
+  default     = "gcr.io/cloudrun/hello:latest"
 }
 
 variable "gcp_dev_members" {
