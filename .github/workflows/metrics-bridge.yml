@@ -23,9 +23,9 @@ on:
 # Serialize all deploys: a workflow-name-only group (no SHA, no ref) means
 # every trigger (push, workflow_dispatch) queues behind the in-flight run.
 # cancel-in-progress: false ensures the new run waits instead of cancelling.
-# This prevents two close main-merges from racing on `terraform apply` and
-# the older deploy finishing last, stomping a newer image. Also handles
-# manual re-dispatch (retry after transient failure) correctly.
+# Prevents two close main-merges from racing on `gcloud run services update`,
+# where the older deploy could otherwise finish last and stomp the newer
+# image. Also handles manual re-dispatch (retry after transient failure).
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
@@ -90,12 +90,23 @@ jobs:
         # resource has `lifecycle.ignore_changes = [... image]`, so an
         # equivalent `terraform apply -var=metrics_bridge_image=...` would
         # be a no-op.
+        #
+        # Rollback: `gcloud run services update-traffic metrics-bridge \
+        #   --to-revisions=<prev-revision>=100 --region=europe-west1`.
+        # Previous revision listed below so incident responders have it.
         run: |
           gcloud run services update metrics-bridge \
             --project="$GCP_PROJECT" \
             --region="$GCP_REGION" \
-            --image="$IMAGE" \
-            --quiet
+            --image="$IMAGE"
+
+          echo "Recent revisions (for rollback reference):"
+          gcloud run revisions list \
+            --service=metrics-bridge \
+            --project="$GCP_PROJECT" \
+            --region="$GCP_REGION" \
+            --limit=3 \
+            --format='table(name, creationTimestamp.date(tz=UTC), active)'
 
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()

@@ -91,13 +91,24 @@ echo "Resolved: ${IMAGE_BY_DIGEST}"
 # This deliberately bypasses terraform — the service resource has
 # `lifecycle.ignore_changes = [template[0].containers[0].image]`, so
 # `terraform apply -var=metrics_bridge_image=...` would be a no-op.
+#
+# Rollback: gcloud run services update-traffic metrics-bridge \
+#   --to-revisions=<prev-revision>=100 --region="$REGION"
 echo ""
 echo "Rolling Cloud Run revision..."
 gcloud run services update metrics-bridge \
   --project="$PROJECT" \
   --region="$REGION" \
-  --image="$IMAGE_BY_DIGEST" \
-  --quiet
+  --image="$IMAGE_BY_DIGEST"
+
+echo ""
+echo "Recent revisions (for rollback reference):"
+gcloud run revisions list \
+  --service=metrics-bridge \
+  --project="$PROJECT" \
+  --region="$REGION" \
+  --limit=3 \
+  --format='table(name, creationTimestamp.date(tz=UTC), active)'
 
 echo ""
 echo "Done. Service URL:"
