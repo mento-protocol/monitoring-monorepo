@@ -1,0 +1,47 @@
+name: Supply Chain
+
+# Block merges when a high/critical npm advisory exists against a package in
+# the lockfile. Catches the common case — a known-vulnerable transitive dep
+# that a PR pulls in via a version bump — before it ships to prod.
+#
+# What this does NOT cover: sigstore attestations / SLSA provenance. pnpm 10
+# has no `audit signatures` equivalent, and `npm audit signatures` requires a
+# package-lock.json (we use pnpm-lock.yaml). If we ever want that layer,
+# socket.dev or snyk are the candidates — tracked separately.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - pnpm-lock.yaml
+      - package.json
+      - "**/package.json"
+      - .github/workflows/supply-chain.yml
+  schedule:
+    # Daily run so a newly-disclosed CVE against a pinned dep pages us even
+    # without a PR in flight.
+    - cron: 17 6 * * *
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  audit:
+    name: npm advisory audit
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      # `--ignore-registry-errors` so a transient npm registry 5xx doesn't
+      # block merges. A genuine advisory still fails the step.
+      - name: pnpm audit (high+ only)
+        run: pnpm audit --audit-level=high --ignore-registry-errors
