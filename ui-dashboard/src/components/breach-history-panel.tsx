@@ -1,5 +1,6 @@
 "use client";
 
+import React, { useCallback, useMemo, useState } from "react";
 import type {
   Pool,
   DeviationThresholdBreach,
@@ -7,7 +8,11 @@ import type {
 } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { useGQL } from "@/lib/graphql";
-import { POOL_DEVIATION_BREACHES } from "@/lib/queries";
+import {
+  POOL_DEVIATION_BREACHES_ALL,
+  POOL_DEVIATION_BREACHES_COUNT,
+  POOL_DEVIATION_BREACHES_PAGE,
+} from "@/lib/queries";
 import { formatTimestamp, relativeTime } from "@/lib/format";
 import { formatDurationShort } from "@/lib/bridge-status";
 import {
@@ -18,10 +23,24 @@ import { tradingSecondsInRange } from "@/lib/weekend";
 import { explorerTxUrl } from "@/lib/tokens";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { BreachHistoryChart } from "@/components/breach-history-chart";
+import { TableSearch } from "@/components/table-search";
+import { Pagination } from "@/components/pagination";
+import { SortableTh } from "@/components/sortable-th";
+import { EmptyBox, ErrorBox } from "@/components/feedback";
+import { buildOrderBy, type SortDir } from "@/lib/table-sort";
+import {
+  buildSearchBlob,
+  matchesSearch,
+  normalizeSearch,
+} from "@/lib/table-search";
+import { ENVIO_MAX_ROWS } from "@/lib/constants";
 
 interface Props {
   pool: Pool;
   network: Network;
+  limit: number;
+  search: string;
+  onSearchChange: (value: string) => void;
 }
 
 const END_REASON_LABELS: Record<BreachEventCategory, string> = {
@@ -43,37 +62,228 @@ const START_REASON_LABELS: Record<BreachEventCategory, string> = {
 };
 
 /**
- * Historical deviation-breach view: scatter chart (frequency × duration) +
- * table (newest first, 100-row cap). Mounted as a tab on the pool page.
- * Renders null for virtual pools.
+ * Duration-range filter presets. Each one compiles to a Hasura
+ * `_and`-able where clause. Buckets line up with how operators think
+ * about breach severity (in-grace = WARN-only, 1h–1d = moderately bad,
+ * >1d = really stuck).
  */
-export function BreachHistoryPanel({ pool, network }: Props) {
-  const { getName } = useAddressLabels();
-  const { data, isLoading, error } = useGQL<{
-    DeviationThresholdBreach: DeviationThresholdBreach[];
-  }>(pool.source.includes("virtual") ? null : POOL_DEVIATION_BREACHES, {
-    poolId: pool.id,
-  });
+type DurationBucket = "all" | "in_grace" | "short" | "long" | "ongoing";
+
+const ONE_HOUR = 3600;
+const ONE_DAY = 86400;
+
+const BUCKET_LABEL: Record<DurationBucket, string> = {
+  all: "All",
+  in_grace: "In grace (≤1h)",
+  short: "1h – 1d",
+  long: "Over 1d",
+  ongoing: "Ongoing",
+};
+
+function whereForBucket(bucket: DurationBucket): Record<string, unknown> {
+  switch (bucket) {
+    case "all":
+      return {};
+    case "in_grace":
+      // Closed breaches whose post-grace critical portion was zero.
+      return {
+        endedAt: { _is_null: false },
+        criticalDurationSeconds: { _eq: "0" },
+      };
+    case "short":
+      return {
+        endedAt: { _is_null: false },
+        durationSeconds: { _gt: String(ONE_HOUR), _lte: String(ONE_DAY) },
+      };
+    case "long":
+      return {
+        endedAt: { _is_null: false },
+        durationSeconds: { _gt: String(ONE_DAY) },
+      };
+    case "ongoing":
+      return { endedAt: { _is_null: true } };
+  }
+}
+
+/** Columns the user can sort on server-side. */
+type SortKey =
+  | "startedAt"
+  | "durationSeconds"
+  | "criticalDurationSeconds"
+  | "peakPriceDifference";
+
+export function BreachHistoryPanel({
+  pool,
+  network,
+  limit,
+  search,
+  onSearchChange,
+}: Props) {
+  const { getName, getTags } = useAddressLabels();
+  const query = normalizeSearch(search);
+  const [rawPage, setRawPage] = useState(1);
+  const [sortKey, setSortKey] = useState<SortKey>("startedAt");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [bucket, setBucket] = useState<DurationBucket>("all");
+
+  // Any control that changes the result set resets pagination. Without
+  // this, clicking "Over 1d" on page 3 of an unfiltered 400-row result
+  // would leave the user stranded on a now-empty page.
+  const handleSearchChange = useCallback(
+    (value: string) => {
+      onSearchChange(value);
+      setRawPage(1);
+    },
+    [onSearchChange],
+  );
+  const handleSort = useCallback((key: SortKey) => {
+    setSortKey((prev) => {
+      if (prev === key) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+        return prev;
+      }
+      // First click on a new column: descending default (biggest durations
+      // / peaks / most-recent starts at the top — usually what you want).
+      setSortDir("desc");
+      return key;
+    });
+    setRawPage(1);
+  }, []);
+  const handleBucket = useCallback((next: DurationBucket) => {
+    setBucket(next);
+    setRawPage(1);
+  }, []);
+
+  const where = useMemo(() => whereForBucket(bucket), [bucket]);
+
+  const orderBy = useMemo(
+    () => buildOrderBy(sortKey, sortDir, "startedAt"),
+    [sortKey, sortDir],
+  );
 
   if (pool.source.includes("virtual")) return null;
 
+  return (
+    <BreachHistoryPanelInner
+      pool={pool}
+      network={network}
+      limit={limit}
+      query={query}
+      search={search}
+      onSearchChange={handleSearchChange}
+      getName={getName}
+      getTags={getTags}
+      rawPage={rawPage}
+      setRawPage={setRawPage}
+      sortKey={sortKey}
+      sortDir={sortDir}
+      onSort={handleSort}
+      bucket={bucket}
+      onBucket={handleBucket}
+      where={where}
+      orderBy={orderBy}
+    />
+  );
+}
+
+function BreachHistoryPanelInner({
+  pool,
+  network,
+  limit,
+  query,
+  search,
+  onSearchChange,
+  getName,
+  getTags,
+  rawPage,
+  setRawPage,
+  sortKey,
+  sortDir,
+  onSort,
+  bucket,
+  onBucket,
+  where,
+  orderBy,
+}: {
+  pool: Pool;
+  network: Network;
+  limit: number;
+  query: string;
+  search: string;
+  onSearchChange: (v: string) => void;
+  getName: (addr: string | null, chainId?: number) => string;
+  getTags: (addr: string | null) => string[];
+  rawPage: number;
+  setRawPage: (n: number) => void;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  onSort: (key: SortKey) => void;
+  bucket: DurationBucket;
+  onBucket: (next: DurationBucket) => void;
+  where: Record<string, unknown>;
+  orderBy: ReturnType<typeof buildOrderBy>;
+}) {
+  // Count + paginated page run in parallel against the same $where so the
+  // pagination controls match what's rendered.
+  const { data: countData, error: countError } = useGQL<{
+    DeviationThresholdBreach: { id: string }[];
+  }>(POOL_DEVIATION_BREACHES_COUNT, {
+    poolId: pool.id,
+    where,
+    limit: ENVIO_MAX_ROWS,
+  });
+  const rawTotal = countData?.DeviationThresholdBreach?.length ?? 0;
+  const total = countError ? 0 : rawTotal;
+  const countCapped = rawTotal >= ENVIO_MAX_ROWS;
+  const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
+  const page = Math.max(1, Math.min(rawPage, totalPages));
+  const offset = (page - 1) * limit;
+
+  const { data, error, isLoading } = useGQL<{
+    DeviationThresholdBreach: DeviationThresholdBreach[];
+  }>(POOL_DEVIATION_BREACHES_PAGE, {
+    poolId: pool.id,
+    limit,
+    offset,
+    orderBy,
+    where,
+  });
+
+  const { data: chartData } = useGQL<{
+    DeviationThresholdBreach: DeviationThresholdBreach[];
+  }>(POOL_DEVIATION_BREACHES_ALL, { poolId: pool.id, where });
+
   const rows = data?.DeviationThresholdBreach ?? [];
-  if (isLoading && rows.length === 0) {
-    return (
-      <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
-        <h2 className="mb-4 text-sm text-slate-400">Breach History</h2>
-        <p className="text-sm text-slate-500">Loading…</p>
-      </section>
+  const chartRows = chartData?.DeviationThresholdBreach ?? [];
+
+  const filteredRows = useMemo(() => {
+    if (!query) return rows;
+    return rows.filter((b) =>
+      matchesSearch(
+        buildSearchBlob([
+          b.startedByEvent,
+          START_REASON_LABELS[b.startedByEvent],
+          b.endedByEvent,
+          b.endedByEvent ? END_REASON_LABELS[b.endedByEvent] : null,
+          b.startedByTxHash,
+          b.endedByTxHash,
+          b.endedByStrategy,
+          b.endedByStrategy ? getName(b.endedByStrategy, pool.chainId) : null,
+          b.endedByStrategy ? getTags(b.endedByStrategy).join(" ") : null,
+          b.rebalanceCountDuring,
+        ]),
+        query,
+      ),
     );
-  }
-  if (error) {
-    // The new DeviationThresholdBreach entity is only present post-resync;
-    // the hosted Hasura rejects the query with a schema-validation error
-    // (containing "type not found" / "not found in type") until the new
-    // indexer version syncs. That's a known-degraded state, not an
-    // incident — surface it in the neutral empty-state style rather than
-    // red, matching the UptimeValue tile's handling.
-    const message = error instanceof Error ? error.message : String(error);
+  }, [rows, query, getName, getTags, pool.chainId]);
+
+  // Error path collapses both count + page errors — the two share the
+  // same entity, so a schema-lag fail on one fails both.
+  if (error || countError) {
+    const message =
+      (error ?? countError) instanceof Error
+        ? (error ?? countError)!.message
+        : String(error ?? countError);
     const isSchemaLag =
       message.includes("not found in type") ||
       message.includes("type not found") ||
@@ -91,54 +301,164 @@ export function BreachHistoryPanel({ pool, network }: Props) {
       </section>
     );
   }
-  if (rows.length === 0) {
-    return (
-      <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
-        <h2 className="mb-4 text-sm text-slate-400">Breach History</h2>
-        <p className="text-sm text-slate-500">
-          No deviation-threshold breaches recorded for this pool.
-        </p>
-      </section>
-    );
-  }
 
   return (
     <div className="flex flex-col gap-4">
-      <BreachHistoryChart breaches={rows} pool={pool} />
+      <BreachHistoryChart breaches={chartRows} pool={pool} />
+
       <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm text-slate-400">Breach History</h2>
           <span className="text-xs text-slate-500">
-            {rows.length >= 100 ? "100+ breaches" : `${rows.length} breaches`}
+            {countCapped
+              ? `${ENVIO_MAX_ROWS.toLocaleString()}+ breaches`
+              : `${total.toLocaleString()} ${total === 1 ? "breach" : "breaches"}`}
           </span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-slate-500">
-                <th className="py-2 pr-4 font-normal">Started</th>
-                <th className="py-2 pr-4 font-normal">Duration</th>
-                <th className="py-2 pr-4 font-normal">Past grace</th>
-                <th className="py-2 pr-4 font-normal">Peak</th>
-                <th className="py-2 pr-4 font-normal">Trigger</th>
-                <th className="py-2 pr-4 font-normal">Ended by</th>
-                <th className="py-2 pr-4 font-normal">Rebalances</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((b) => (
-                <BreachRow
-                  key={b.id}
-                  breach={b}
-                  pool={pool}
-                  network={network}
-                  getName={getName}
-                />
-              ))}
-            </tbody>
-          </table>
+
+        <BucketFilter selected={bucket} onChange={onBucket} />
+
+        <div className="mt-3">
+          <TableSearch
+            value={search}
+            onChange={onSearchChange}
+            placeholder="Search breaches by tx hash, trigger, strategy name, tag…"
+            ariaLabel="Search breaches"
+          />
         </div>
+
+        {isLoading && rows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-slate-500">Loading…</p>
+        ) : total === 0 ? (
+          <EmptyBox
+            message={
+              bucket === "all"
+                ? "No deviation-threshold breaches recorded for this pool."
+                : "No breaches match this filter."
+            }
+          />
+        ) : filteredRows.length === 0 ? (
+          <EmptyBox message="No breaches on this page match your search. Try clearing it or navigating pages." />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-500">
+                  <SortableTh
+                    sortKey="startedAt"
+                    activeSortKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={onSort}
+                  >
+                    Started
+                  </SortableTh>
+                  <SortableTh
+                    sortKey="durationSeconds"
+                    activeSortKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={onSort}
+                  >
+                    Duration
+                  </SortableTh>
+                  <SortableTh
+                    sortKey="criticalDurationSeconds"
+                    activeSortKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={onSort}
+                  >
+                    Past grace
+                  </SortableTh>
+                  <SortableTh
+                    sortKey="peakPriceDifference"
+                    activeSortKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={onSort}
+                    align="right"
+                  >
+                    Peak
+                  </SortableTh>
+                  <th className="py-2 pr-4 font-normal">Trigger</th>
+                  <th className="py-2 pr-4 font-normal">Ended by</th>
+                  <th className="py-2 pr-4 font-normal text-right">
+                    Rebalances
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.map((b) => (
+                  <BreachRow
+                    key={b.id}
+                    breach={b}
+                    pool={pool}
+                    network={network}
+                    getName={getName}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <Pagination
+          page={page}
+          pageSize={limit}
+          total={total}
+          onPageChange={setRawPage}
+        />
+        {countCapped && (
+          <p className="px-1 pt-1 text-xs text-amber-400">
+            Showing first {ENVIO_MAX_ROWS.toLocaleString()} breaches — older
+            entries aren&apos;t visible.
+          </p>
+        )}
+        {countError && (
+          <ErrorBox message={`Count unavailable: ${countError.message}`} />
+        )}
       </section>
+    </div>
+  );
+}
+
+function BucketFilter({
+  selected,
+  onChange,
+}: {
+  selected: DurationBucket;
+  onChange: (next: DurationBucket) => void;
+}) {
+  const options: DurationBucket[] = [
+    "all",
+    "in_grace",
+    "short",
+    "long",
+    "ongoing",
+  ];
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Filter breaches by duration"
+      className="flex flex-wrap gap-1.5"
+    >
+      {options.map((b) => {
+        const active = b === selected;
+        return (
+          <button
+            key={b}
+            role="radio"
+            type="button"
+            aria-checked={active}
+            onClick={() => !active && onChange(b)}
+            className={
+              "rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-wider font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
+              (active
+                ? "bg-slate-700 text-slate-200"
+                : "bg-slate-800/60 text-slate-400 hover:text-slate-200")
+            }
+          >
+            {BUCKET_LABEL[b]}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -152,21 +472,18 @@ function BreachRow({
   breach: DeviationThresholdBreach;
   pool: Pool;
   network: Network;
-  getName: (addr: string, chainId?: number) => string;
+  getName: (addr: string | null, chainId?: number) => string;
 }) {
   const isOpen = breach.endedAt == null;
   const now = Math.floor(Date.now() / 1000);
-  // Elapsed duration uses wall-clock for the "Duration" column on open
-  // rows so the label moves in real time. Closed rows use the stored
-  // trading-second value the indexer computed at close.
   const wallDuration = isOpen
     ? now - Number(breach.startedAt)
     : Number(breach.durationSeconds);
-  // Past-grace ("critical") uses trading-seconds for open rows too, so
-  // the unit matches the stored `criticalDurationSeconds` on closed rows
-  // AND the uptime tile's live open-breach math. Without this, an open
-  // breach spanning an FX weekend would briefly show an inflated "past
-  // grace" that collapses once the indexer closes it.
+  // Past-grace uses trading-seconds on open rows so the unit matches the
+  // stored `criticalDurationSeconds` on closed rows and the uptime
+  // tile's live math. Without this, an open breach spanning an FX
+  // weekend would briefly show an inflated "past grace" that collapses
+  // once the indexer closes it.
   const graceEnd =
     Number(breach.startedAt) + Number(DEVIATION_BREACH_GRACE_SECONDS);
   const critDuration = isOpen
@@ -211,7 +528,7 @@ function BreachRow({
         {critDuration > 0 ? formatDurationShort(critDuration) : "—"}
       </td>
       <td
-        className="py-2 pr-4 whitespace-nowrap"
+        className="py-2 pr-4 whitespace-nowrap text-right"
         title={breach.peakPriceDifference}
       >
         {peakPct ?? "—"}
@@ -240,7 +557,7 @@ function BreachRow({
           <span className="text-slate-400">{endedLabel}</span>
         )}
       </td>
-      <td className="py-2 pr-4 whitespace-nowrap text-slate-400">
+      <td className="py-2 pr-4 whitespace-nowrap text-right text-slate-400">
         {breach.rebalanceCountDuring}
       </td>
     </tr>

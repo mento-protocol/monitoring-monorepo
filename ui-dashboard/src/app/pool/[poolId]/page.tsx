@@ -573,7 +573,13 @@ function PoolDetail() {
           />
         )}
         {tab === "breaches" && fpmmPool && pool && (
-          <BreachHistoryPanel pool={pool} network={network} />
+          <BreachHistoryPanel
+            pool={pool}
+            network={network}
+            limit={limit}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("breaches", value)}
+          />
         )}
         {tab === "ols" && (
           <OlsTab

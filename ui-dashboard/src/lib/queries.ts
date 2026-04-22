@@ -242,7 +242,7 @@ export const POOL_DETAIL_WITH_HEALTH = `
 // found". Keeping them in their own query means the pool page doesn't die
 // — only the uptime tile degrades to "N/A". Uptime is sourced from the
 // pool-level rollup (not the breach-row list) so the "% time critical"
-// SLO is accurate beyond the POOL_DEVIATION_BREACHES 100-row cap.
+// SLO stays accurate past Hasura's 1000-row cap on the breach list itself.
 export const POOL_BREACH_ROLLUP = `
   query PoolBreachRollup($id: String!, $chainId: Int!) {
     Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
@@ -255,20 +255,25 @@ export const POOL_BREACH_ROLLUP = `
   }
 `;
 
-// Recent breach history for a pool — newest first, capped at 100 rows so a
-// pool with a noisy breach history still fits inside Hasura's 1000-row cap
-// by a healthy margin. Open breach (endedAt: null) sorts first by convention
-// because descending `startedAt` on the active row wins against all closed
-// ones that ended earlier.
-//
-// Isolated from POOL_DETAIL_WITH_HEALTH for the same reason POOL_BREACH_ROLLUP
-// is — new entity type, resync window needs to land first.
-export const POOL_DEVIATION_BREACHES = `
-  query PoolDeviationBreaches($poolId: String!) {
+// Paginated + sortable breach history for the Breaches tab. `$orderBy`
+// and `$where` let the server do the heavy lifting so pagination stays
+// authoritative regardless of user-selected sort and duration filter.
+// Isolated from POOL_DETAIL_WITH_HEALTH for the same reason
+// POOL_BREACH_ROLLUP is — new entity type, resync window needs to land
+// first.
+export const POOL_DEVIATION_BREACHES_PAGE = `
+  query PoolDeviationBreachesPage(
+    $poolId: String!
+    $limit: Int!
+    $offset: Int!
+    $orderBy: [DeviationThresholdBreach_order_by!]
+    $where: DeviationThresholdBreach_bool_exp!
+  ) {
     DeviationThresholdBreach(
-      where: { poolId: { _eq: $poolId } }
-      order_by: [{ startedAt: desc }]
-      limit: 100
+      where: { _and: [{ poolId: { _eq: $poolId } }, $where] }
+      order_by: $orderBy
+      limit: $limit
+      offset: $offset
     ) {
       id chainId poolId
       startedAt startedAtBlock
@@ -279,6 +284,45 @@ export const POOL_DEVIATION_BREACHES = `
       startedByEvent startedByTxHash
       endedByEvent endedByTxHash endedByStrategy
       rebalanceCountDuring
+    }
+  }
+`;
+
+// Row-count for the Breaches-tab pagination. Hasura aggregates are
+// disabled on hosted, so we fetch id-only rows up to ENVIO_MAX_ROWS and
+// measure `.length` — same trick POOL_SWAPS_COUNT uses. Applies the
+// active filter so page count reflects it.
+export const POOL_DEVIATION_BREACHES_COUNT = `
+  query PoolDeviationBreachesCount(
+    $poolId: String!
+    $where: DeviationThresholdBreach_bool_exp!
+    $limit: Int!
+  ) {
+    DeviationThresholdBreach(
+      where: { _and: [{ poolId: { _eq: $poolId } }, $where] }
+      limit: $limit
+    ) {
+      id
+    }
+  }
+`;
+
+// Unpaginated feed for the scatter chart — chart shows FREQUENCY over
+// time, so a page-sized slice would misrepresent it. Kept at 1000
+// (Hasura's row cap) and reuses the same $where so the chart reflects
+// whatever filter the table has applied.
+export const POOL_DEVIATION_BREACHES_ALL = `
+  query PoolDeviationBreachesAll(
+    $poolId: String!
+    $where: DeviationThresholdBreach_bool_exp!
+  ) {
+    DeviationThresholdBreach(
+      where: { _and: [{ poolId: { _eq: $poolId } }, $where] }
+      order_by: [{ startedAt: desc }]
+      limit: 1000
+    ) {
+      id startedAt endedAt durationSeconds criticalDurationSeconds
+      peakPriceDifference
     }
   }
 `;
