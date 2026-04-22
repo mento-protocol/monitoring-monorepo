@@ -11,13 +11,13 @@ name: Supply Chain
 
 on:
   workflow_dispatch:
+  # Run on every PR (no `paths:` filter) so this can serve as a required
+  # branch-protection check. With a paths filter, PRs that don't touch deps
+  # never trigger the workflow at all, and the required check stays pending
+  # forever — blocking unrelated merges. `pnpm audit` is sub-second, so the
+  # wasted CI on non-dep PRs is just checkout + node setup (~20s).
   pull_request:
     branches: [main]
-    paths:
-      - pnpm-lock.yaml
-      - package.json
-      - "**/package.json"
-      - .github/workflows/supply-chain.yml
   schedule:
     # Daily run so a newly-disclosed CVE against a pinned dep pages us even
     # without a PR in flight.
@@ -41,7 +41,11 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
-      # `--ignore-registry-errors` so a transient npm registry 5xx doesn't
-      # block merges. A genuine advisory still fails the step.
+      # Fail closed: no `--ignore-registry-errors`. That flag exits 0 on any
+      # registry error — transient 5xx *and* persistent auth/network failures
+      # — so an npm outage or misconfig would silently let advisories through.
+      # Both registry errors and advisory findings share exit code 1 in pnpm,
+      # so a bash retry loop can't distinguish them without delaying real
+      # blocks. A rare transient blip → re-run the job manually.
       - name: pnpm audit (high+ only)
-        run: pnpm audit --audit-level=high --ignore-registry-errors
+        run: pnpm audit --audit-level=high
