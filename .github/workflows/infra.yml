@@ -13,8 +13,11 @@ on:
       - terraform/**
       - .github/workflows/infra.yml
 
+# See ci.yml for the concurrency rationale: PR runs cancel on new pushes
+# to the same PR ref; push/dispatch events use a SHA-unique group so they
+# never cancel each other.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
 
 permissions: read-all
@@ -26,6 +29,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      actions: read
     defaults:
       run:
         working-directory: terraform
@@ -40,3 +44,5 @@ jobs:
         run: terraform init -backend=false -input=false
       - name: Validate
         run: terraform validate -no-color
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()

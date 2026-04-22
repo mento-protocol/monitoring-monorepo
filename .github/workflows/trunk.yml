@@ -7,8 +7,11 @@ on:
   pull_request:
     branches: [main]
 
+# See ci.yml for the concurrency rationale: PR runs cancel on new pushes
+# to the same PR ref; push/dispatch events use a SHA-unique group so they
+# never cancel each other.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
 
 permissions: read-all
@@ -22,6 +25,7 @@ jobs:
       checks: write
       contents: read
       pull-requests: write
+      actions: read
     steps:
       - uses: actions/checkout@v6
         with:
@@ -30,3 +34,5 @@ jobs:
       - uses: trunk-io/trunk-action@v1
         with:
           arguments: --all
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()

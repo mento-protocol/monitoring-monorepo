@@ -20,9 +20,12 @@ on:
       - package.json
       - .github/workflows/metrics-bridge.yml
 
+# Group by SHA (not ref) so two fast main-merges each get their own run
+# and the second never cancels the first mid-deploy. cancel-in-progress is
+# redundant with SHA-unique groups but explicit false documents the intent.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
 
 permissions: read-all
 
@@ -33,11 +36,18 @@ jobs:
     # run from main so it inherits the trust-main quality gate enforced by
     # the `CI / ci` required check on PRs merging to main.
     if: github.ref == 'refs/heads/main'
+    # GitHub Environment gate: adds deployment history in the Environments
+    # tab, and lets us optionally add required-reviewer / wait-timer rules
+    # in the repo Environments settings without workflow changes.
+    environment:
+      name: production
+      url: https://console.cloud.google.com/run?project=mento-monitoring
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
+      actions: read
     env:
       GCP_PROJECT: mento-monitoring
       GCP_REGION: europe-west1
@@ -94,3 +104,6 @@ jobs:
           terraform -chdir=terraform apply -auto-approve -input=false \
             -target='google_cloud_run_v2_service.metrics_bridge[0]' \
             -target='google_cloud_run_v2_service_iam_member.metrics_bridge_public[0]'
+
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
