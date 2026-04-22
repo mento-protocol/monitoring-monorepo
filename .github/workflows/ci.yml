@@ -87,6 +87,8 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: Typecheck
         run: pnpm --filter @mento-protocol/ui-dashboard typecheck
+      - name: Lint
+        run: pnpm --filter @mento-protocol/ui-dashboard lint
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
       - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
