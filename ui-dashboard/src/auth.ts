@@ -2,7 +2,9 @@ import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import * as Sentry from "@sentry/nextjs";
 
-const ALLOWED_DOMAIN = "@mentolabs.xyz";
+// Exported so middleware.ts can enforce the same suffix — keeping two
+// independent literals would let the edge and the sign-in callback drift.
+export const ALLOWED_DOMAIN = "@mentolabs.xyz";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   // On preview deployments NEXTAUTH_URL is set to the production URL so that
@@ -34,6 +36,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // token every `updateAge`, extending exp to +maxAge — so active users stay
   // signed in, but idle accounts age out within the hour. A hard revocation
   // list would be even stronger; this is the low-cost first step.
+  // Note: an offboarded user whose JWT was just re-minted still has up to
+  // `updateAge` (10 min) of residual access until the next re-mint fails.
+  // That's the inherent cost of stateless JWTs without server-side revocation.
   session: {
     strategy: "jwt",
     maxAge: 60 * 60,

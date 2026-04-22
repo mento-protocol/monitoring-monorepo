@@ -10,6 +10,7 @@ type MiddlewareCallback = (req: AuthReq) => Response | undefined;
 let middlewareCallback: MiddlewareCallback;
 
 vi.mock("@/auth", () => ({
+  ALLOWED_DOMAIN: "@mentolabs.xyz",
   auth: vi.fn((cb: MiddlewareCallback) => {
     middlewareCallback = cb;
     return cb;
