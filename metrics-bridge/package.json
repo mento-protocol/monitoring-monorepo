@@ -9,7 +9,8 @@
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "graphql": "^16.13.1",
@@ -20,6 +21,7 @@
     "eslint": "^10.0.2",
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.19.13",
+    "@vitest/coverage-v8": "^4.0.18",
     "globals": "^17.4.0",
     "tsx": "^4.19.0",
     "typescript": "^5.9.3",
