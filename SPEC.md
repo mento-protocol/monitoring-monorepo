@@ -347,7 +347,7 @@ pnpm --filter @mento-protocol/ui-dashboard lint
 
 GitHub Actions (`.github/workflows/`):
 
-- `ci.yml` — aggregate quality check. `changes` job detects which packages are affected, then fans out to `ui` (typecheck + test + Codecov), `indexer` (codegen + typecheck + test), and `bridge` (typecheck + lint + test) gated on path changes. A final `ci` sentinel aggregates via `re-actors/alls-green` and is the single required check on `main`.
+- `ci.yml` — aggregate quality check. `changes` job detects which packages are affected, then fans out to `ui`, `indexer` (codegen + typecheck + test), and `bridge` gated on path changes. `ui` and `bridge` run typecheck + test with coverage uploaded to Codecov. Lint runs repo-wide via the separate `Code Quality` (Trunk) workflow, not duplicated here. A final `ci` sentinel aggregates via `re-actors/alls-green` and is the single required check on `main`.
 - `metrics-bridge.yml` — deploy-only (Cloud Run via Terraform) on `push` to `main` with paths filter. Quality is handled by `ci.yml`.
 - `infra.yml` — terraform validate, workflow-level path filter.
 - `trunk.yml` — repo-wide lint via Trunk; required separately as "Code Quality".

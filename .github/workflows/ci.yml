@@ -120,6 +120,13 @@ jobs:
       checks: write
       contents: read
       actions: read
+    # Job-level env so it's visible to both typecheck and tests. Tests import
+    # EventHandlers.ts, which triggers runStartupChecks() at module load — with
+    # strict=true, a start-block misconfiguration throws and fails CI before
+    # reaching deploy. Codegen doesn't import EventHandlers, so the var is
+    # inert there; scoping it to the job keeps the intent in one place.
+    env:
+      ENVIO_STRICT_START_BLOCK: "true"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/pnpm-install
@@ -136,14 +143,10 @@ jobs:
           path: indexer-envio/generated
           key: envio-generated-${{ runner.os }}-${{ hashFiles('indexer-envio/config*.yaml', 'indexer-envio/schema.graphql', 'indexer-envio/package.json', 'indexer-envio/abis/**') }}
       - name: Validate all Envio configs (codegen)
-        # Run codegen against every config file to catch schema/config drift early.
-        # config.multichain.mainnet.yaml is run last — its output is used by
-        # typecheck + tests below. ENVIO_STRICT_START_BLOCK=true ensures the
-        # startup guard throws (not warns) if start-block env vars are
-        # misconfigured, catching the issue before deploy.
+        # Run codegen against every config file to catch schema/config drift
+        # early. config.multichain.mainnet.yaml is run last — its output is
+        # used by typecheck + tests below.
         if: steps.cache-generated.outputs.cache-hit != 'true'
-        env:
-          ENVIO_STRICT_START_BLOCK: "true"
         run: |
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
