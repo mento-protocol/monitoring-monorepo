@@ -141,7 +141,7 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: indexer-envio/generated
-          key: envio-generated-${{ runner.os }}-${{ hashFiles('indexer-envio/config*.yaml', 'indexer-envio/schema.graphql', 'indexer-envio/package.json', 'indexer-envio/abis/**') }}
+          key: envio-generated-${{ runner.os }}-${{ hashFiles('indexer-envio/config*.yaml', 'indexer-envio/schema.graphql', 'indexer-envio/package.json', 'indexer-envio/abis/**', 'indexer-envio/scripts/**') }}
       - name: Validate all Envio configs (codegen)
         # Run codegen against every config file to catch schema/config drift
         # early. config.multichain.mainnet.yaml is run last — its output is

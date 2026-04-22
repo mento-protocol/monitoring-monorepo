@@ -20,13 +20,14 @@ on:
       - package.json
       - .github/workflows/metrics-bridge.yml
 
-# Group by SHA (not ref) so two fast main-merges each get their own run
-# and the second never cancels the first mid-deploy. cancel-in-progress is
-# false so a manual re-dispatch on the same SHA (e.g. retrying after a
-# transient deploy failure) queues behind the in-flight run instead of
-# cancelling it — SHA-unique groups don't handle that edge case alone.
+# Serialize all deploys: a workflow-name-only group (no SHA, no ref) means
+# every trigger (push, workflow_dispatch) queues behind the in-flight run.
+# cancel-in-progress: false ensures the new run waits instead of cancelling.
+# This prevents two close main-merges from racing on `terraform apply` and
+# the older deploy finishing last, stomping a newer image. Also handles
+# manual re-dispatch (retry after transient failure) correctly.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.sha }}
+  group: ${{ github.workflow }}
   cancel-in-progress: false
 
 permissions: read-all
