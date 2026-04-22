@@ -11,6 +11,7 @@ import {
   type OracleRateMap,
 } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
+import { InfoPopover } from "@/components/info-popover";
 
 interface ReservesPanelProps {
   pool: Pool;
@@ -122,6 +123,10 @@ export function ReservesPanel({
             >
               Rebalance threshold
             </span>
+            <InfoPopover
+              label="About the rebalance threshold lines"
+              content="Each tank shows the same two breach points from that token's point of view, so the dashed lines don't line up at the same height — drifting one token up moves the other token down by an unequal amount."
+            />
           </div>
         )}
       </div>
