@@ -897,12 +897,19 @@ function SenderCell({
   chainId: number | null;
 }) {
   if (!sender) return <Dash />;
-  if (!chainId) {
-    return (
-      <span className="font-mono text-xs text-slate-400">
-        {truncateAddress(sender)}
-      </span>
-    );
-  }
-  return <AddressLink address={sender} chainId={chainId} />;
+  const net = networkForChainId(chainId);
+  // `<div>` (not `<span>`) because AddressLink can render AddressLabelEditor,
+  // which mounts a `<dialog>` — phrasing content can't contain flow content.
+  return (
+    <div className="inline-flex items-center gap-1.5">
+      {net && <ChainIcon network={net} size={14} />}
+      {chainId ? (
+        <AddressLink address={sender} chainId={chainId} />
+      ) : (
+        <span className="font-mono text-xs text-slate-400">
+          {truncateAddress(sender)}
+        </span>
+      )}
+    </div>
+  );
 }

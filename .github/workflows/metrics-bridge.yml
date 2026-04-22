@@ -1,5 +1,11 @@
 name: Metrics Bridge
 
+# Deploy-only workflow. Quality checks (typecheck/lint/test) live in
+# .github/workflows/ci.yml under the `bridge` job and are gated by the
+# required `CI / ci` check on main. Trust-main pattern: anything reaching
+# main has already passed quality, so deploy has no `needs:` on a quality
+# job.
+
 on:
   workflow_dispatch:
   push:
@@ -13,86 +19,53 @@ on:
       - pnpm-lock.yaml
       - package.json
       - .github/workflows/metrics-bridge.yml
-  pull_request:
-    branches: [main]
 
+# Serialize all deploys: a workflow-name-only group (no SHA, no ref) means
+# every trigger (push, workflow_dispatch) queues behind the in-flight run.
+# cancel-in-progress: false ensures the new run waits instead of cancelling.
+# This prevents two close main-merges from racing on `terraform apply` and
+# the older deploy finishing last, stomping a newer image. Also handles
+# manual re-dispatch (retry after transient failure) correctly.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 permissions: read-all
 
 jobs:
-  quality:
-    name: Quality Checks (metrics-bridge)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 10
-    permissions:
-      checks: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v6
-      - name: Detect bridge-related changes
-        id: changes
-        uses: dorny/paths-filter@v4
-        with:
-          filters: |
-            bridge:
-              - metrics-bridge/**
-              - cloudbuild.yaml
-              - .gcloudignore
-              - .node-version
-              - pnpm-workspace.yaml
-              - pnpm-lock.yaml
-              - package.json
-              - .github/workflows/metrics-bridge.yml
-      - name: No bridge changes
-        if: steps.changes.outputs.bridge != 'true'
-        run: echo "No metrics-bridge changes; skipping."
-      - uses: pnpm/action-setup@v4
-        if: steps.changes.outputs.bridge == 'true'
-      - uses: actions/setup-node@v6
-        if: steps.changes.outputs.bridge == 'true'
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - name: Install dependencies
-        if: steps.changes.outputs.bridge == 'true'
-        run: pnpm install --frozen-lockfile
-      - name: Typecheck
-        if: steps.changes.outputs.bridge == 'true'
-        run: pnpm --filter @mento-protocol/metrics-bridge typecheck
-      - name: Lint
-        if: steps.changes.outputs.bridge == 'true'
-        run: pnpm --filter @mento-protocol/metrics-bridge lint
-      - name: Test
-        if: steps.changes.outputs.bridge == 'true'
-        run: pnpm --filter @mento-protocol/metrics-bridge test
-
   deploy:
     name: Build & Deploy (metrics-bridge)
-    needs: quality
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Guard against workflow_dispatch from non-main refs: deploy must only
+    # run from main so it inherits the trust-main quality gate enforced by
+    # the `CI / ci` required check on PRs merging to main.
+    if: github.ref == 'refs/heads/main'
+    # GitHub Environment gate: adds deployment history in the Environments
+    # tab, and lets us optionally add required-reviewer / wait-timer rules
+    # in the repo Environments settings without workflow changes.
+    environment:
+      name: production
+      url: https://console.cloud.google.com/run?project=mento-monitoring
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
+      actions: read
     env:
       GCP_PROJECT: mento-monitoring
       GCP_REGION: europe-west1
       AR_REPO: europe-west1-docker.pkg.dev/mento-monitoring/metrics-bridge
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v3
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2.2.1
 
       - name: Build and push image
         run: |
@@ -112,7 +85,7 @@ jobs:
           echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
 
       - name: Deploy to Cloud Run via Terraform
         env:
@@ -134,3 +107,6 @@ jobs:
           terraform -chdir=terraform apply -auto-approve -input=false \
             -target='google_cloud_run_v2_service.metrics_bridge[0]' \
             -target='google_cloud_run_v2_service_iam_member.metrics_bridge_public[0]'
+
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()

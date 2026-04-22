@@ -1,0 +1,216 @@
+name: CI
+
+# Aggregate workflow fanning out to package-scoped quality jobs gated on
+# path changes. The `ci` sentinel aggregates the results so branch
+# protection needs only one required check (`CI / ci`) instead of one per
+# package. A PR that only touches ui-dashboard/ runs only the `ui` job;
+# irrelevant jobs skip cleanly (GitHub hides them from the checks list).
+#
+# Third-party actions are pinned to commit SHAs per the policy in
+# .github/workflows/claude.yml — update via Dependabot
+# (.github/dependabot.yml).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Concurrency: on PRs, group by ref so new pushes to a PR cancel in-flight
+# runs. On push to main (or any non-PR event), group by SHA so each commit
+# gets its own run and main-branch runs never cancel each other. Prevents
+# a fast-follow merge from cancelling a still-running main CI — important
+# because main CI acts as the quality gate for the trust-main deploys.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      ui: ${{ steps.filter.outputs.ui }}
+      indexer: ${{ steps.filter.outputs.indexer }}
+      bridge: ${{ steps.filter.outputs.bridge }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - id: filter
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            ui:
+              - ui-dashboard/**
+              - shared-config/**
+              - pnpm-lock.yaml
+              - package.json
+              - pnpm-workspace.yaml
+              - .node-version
+              - .github/workflows/ci.yml
+              - .github/actions/pnpm-install/**
+            # shared-config/** is included in the indexer filter because
+            # indexer-envio/test/fx-calendar.test.ts and
+            # indexer-envio/test/deployment-namespaces.test.ts deep-equal
+            # the vendored copies in indexer-envio/config/*.json against the
+            # shared-config originals (the indexer builds outside the pnpm
+            # workspace — see indexer-envio/src/healthScore.ts). The indexer
+            # does NOT import shared-config at runtime.
+            indexer:
+              - indexer-envio/**
+              - shared-config/**
+              - pnpm-lock.yaml
+              - package.json
+              - pnpm-workspace.yaml
+              - .node-version
+              - .github/workflows/ci.yml
+              - .github/actions/pnpm-install/**
+            bridge:
+              - metrics-bridge/**
+              - cloudbuild.yaml
+              - .gcloudignore
+              - .node-version
+              - pnpm-workspace.yaml
+              - pnpm-lock.yaml
+              - package.json
+              - .github/workflows/ci.yml
+              - .github/actions/pnpm-install/**
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
+
+  ui:
+    name: Quality Checks (ui-dashboard)
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    permissions:
+      checks: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/pnpm-install
+      - name: Typecheck
+        run: pnpm --filter @mento-protocol/ui-dashboard typecheck
+      # ESLint runs in the `Code Quality` (Trunk) workflow — not duplicated here.
+      - name: Test with coverage
+        run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
+      - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        with:
+          fail_ci_if_error: false
+          flags: ui-dashboard
+          directory: ui-dashboard/coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
+
+  indexer:
+    name: Quality Checks (indexer-envio)
+    needs: changes
+    if: needs.changes.outputs.indexer == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
+    permissions:
+      checks: write
+      contents: read
+      actions: read
+    # Job-level env so it's visible to both typecheck and tests. Tests import
+    # EventHandlers.ts, which triggers runStartupChecks() at module load — with
+    # strict=true, a start-block misconfiguration throws and fails CI before
+    # reaching deploy. Codegen doesn't import EventHandlers, so the var is
+    # inert there; scoping it to the job keeps the intent in one place.
+    env:
+      ENVIO_STRICT_START_BLOCK: "true"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/pnpm-install
+      # Envio codegen output is deterministic on (envio version, config*.yaml,
+      # schema.graphql, abis). Cache the generated/ dir keyed on those inputs
+      # so PRs that don't touch indexer configs skip the 2-3 minute codegen
+      # pass entirely. src/** is intentionally NOT in the key — handler code
+      # doesn't affect codegen output, and including it would invalidate the
+      # cache on every indexer PR (the common case), defeating the cache.
+      - name: Cache Envio generated/
+        id: cache-generated
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: indexer-envio/generated
+          key: envio-generated-${{ runner.os }}-${{ hashFiles('indexer-envio/config*.yaml', 'indexer-envio/schema.graphql', 'indexer-envio/package.json', 'indexer-envio/abis/**', 'indexer-envio/scripts/**') }}
+      - name: Validate all Envio configs (codegen)
+        # Run codegen against every config file to catch schema/config drift
+        # early. config.multichain.mainnet.yaml is run last — its output is
+        # used by typecheck + tests below.
+        if: steps.cache-generated.outputs.cache-hit != 'true'
+        run: |
+          pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml
+          pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
+      - name: Link generated package
+        # The composite action's pnpm install ran before generated/ existed,
+        # so the workspace symlink for the optional `link:generated` dep is
+        # missing. Re-running install after codegen (or cache restore)
+        # creates the symlink so typecheck and tests resolve it. Needed on
+        # BOTH cache hit and miss: node_modules isn't cached, so the first
+        # install always runs with generated/ absent.
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm --filter @mento-protocol/indexer-envio typecheck
+      - name: Test with coverage
+        run: pnpm --filter @mento-protocol/indexer-envio test:coverage
+      - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        with:
+          fail_ci_if_error: false
+          flags: indexer-envio
+          directory: indexer-envio/coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
+
+  bridge:
+    name: Quality Checks (metrics-bridge)
+    needs: changes
+    if: needs.changes.outputs.bridge == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    permissions:
+      checks: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/pnpm-install
+      - name: Typecheck
+        run: pnpm --filter @mento-protocol/metrics-bridge typecheck
+      # ESLint runs in the `Code Quality` (Trunk) workflow — not duplicated here.
+      - name: Test with coverage
+        run: pnpm --filter @mento-protocol/metrics-bridge test:coverage
+      - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        with:
+          fail_ci_if_error: false
+          flags: metrics-bridge
+          directory: metrics-bridge/coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
+
+  ci:
+    name: ci
+    needs: [changes, ui, indexer, bridge]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}
+          allowed-skips: ui,indexer,bridge
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
