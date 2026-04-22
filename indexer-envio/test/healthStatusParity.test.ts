@@ -95,12 +95,43 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
     assert.equal(computeHealthStatus(pool, NOW), "WARN");
   });
 
+  it("stays 'WARN' one second before the grace boundary (3599s)", () => {
+    // Mirror of the UI boundary test: grace uses strict `<`, so 3599s is
+    // still in-grace on both packages. Pinned here to prevent a silent
+    // `<`/`<=` drift between indexer and dashboard.
+    const pool = makePool({
+      priceDifference: 8000n,
+      deviationBreachStartedAt: NOW - 3599n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "WARN");
+  });
+
+  it("flips to 'CRITICAL' at exactly the 1h grace boundary (3600s)", () => {
+    const pool = makePool({
+      priceDifference: 8000n,
+      deviationBreachStartedAt: NOW - 3600n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
+  });
+
   it("escalates to 'CRITICAL' once the breach outlasts the grace window", () => {
     const pool = makePool({
       priceDifference: 8000n,
       deviationBreachStartedAt: NOW - 2n * 3600n, // 2h ago
     });
     assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
+  });
+
+  it("returns 'WARN' when the breach anchor is 0n (indexer hasn't populated yet)", () => {
+    // Mirror of the UI's null-anchor test: when there's no anchor, both
+    // packages should stay at WARN instead of jumping straight to
+    // CRITICAL. The indexer stores 0n (not null) when the field is unset;
+    // this exercises that path.
+    const pool = makePool({
+      priceDifference: 8000n,
+      deviationBreachStartedAt: 0n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "WARN");
   });
 
   it("falls back to 10000 bps threshold when rebalanceThreshold is 0", () => {

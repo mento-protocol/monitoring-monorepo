@@ -137,11 +137,15 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 
 **Applies to:** FPMM pools only
 
-| Status   | Condition                                    |
-| -------- | -------------------------------------------- |
-| OK       | `priceDifference / rebalanceThreshold < 0.8` |
-| WARN     | ratio ≥ 0.8 sustained for > 15 min           |
-| CRITICAL | ratio ≥ 0.8 sustained for > 60 min           |
+| Status   | Condition                                                                      |
+| -------- | ------------------------------------------------------------------------------ |
+| OK       | `priceDifference / rebalanceThreshold ≤ 1.0`                                   |
+| WARN     | ratio > 1.0 (breach) within a 60-min grace window — rebalance is expected      |
+| CRITICAL | ratio > 1.0 sustained for > 60 min — breach no longer recoverable by rebalance |
+
+Near-threshold deviations (e.g. 80–100% of threshold) are OK: sitting close
+to but under the line is not actionable for the operator. The pool only
+escalates when it actually breaches.
 
 The `healthStatus` field on Pool encodes the current status: `"OK"` | `"WARN"` | `"CRITICAL"` | `"N/A"`.
 
