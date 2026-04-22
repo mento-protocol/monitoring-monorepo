@@ -17,6 +17,7 @@ import {
 import { tradingSecondsInRange } from "@/lib/weekend";
 import { explorerTxUrl } from "@/lib/tokens";
 import { useAddressLabels } from "@/components/address-labels-provider";
+import { BreachHistoryChart } from "@/components/breach-history-chart";
 
 interface Props {
   pool: Pool;
@@ -42,9 +43,9 @@ const START_REASON_LABELS: Record<BreachEventCategory, string> = {
 };
 
 /**
- * Historical deviation-breach ledger. One row per breach (newest first), up
- * to the query's 100-row cap. Open breach appears at top with "ongoing"
- * duration. Skipped entirely for virtual pools or pools with no breaches.
+ * Historical deviation-breach view: scatter chart (frequency × duration) +
+ * table (newest first, 100-row cap). Mounted as a tab on the pool page.
+ * Renders null for virtual pools.
  */
 export function BreachHistoryPanel({ pool, network }: Props) {
   const { getName } = useAddressLabels();
@@ -102,40 +103,43 @@ export function BreachHistoryPanel({ pool, network }: Props) {
   }
 
   return (
-    <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-sm text-slate-400">Breach History</h2>
-        <span className="text-xs text-slate-500">
-          {rows.length >= 100 ? "100+ breaches" : `${rows.length} breaches`}
-        </span>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-slate-500">
-              <th className="py-2 pr-4 font-normal">Started</th>
-              <th className="py-2 pr-4 font-normal">Duration</th>
-              <th className="py-2 pr-4 font-normal">Past grace</th>
-              <th className="py-2 pr-4 font-normal">Peak</th>
-              <th className="py-2 pr-4 font-normal">Trigger</th>
-              <th className="py-2 pr-4 font-normal">Ended by</th>
-              <th className="py-2 pr-4 font-normal">Rebalances</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((b) => (
-              <BreachRow
-                key={b.id}
-                breach={b}
-                pool={pool}
-                network={network}
-                getName={getName}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
+    <div className="flex flex-col gap-4">
+      <BreachHistoryChart breaches={rows} pool={pool} />
+      <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm text-slate-400">Breach History</h2>
+          <span className="text-xs text-slate-500">
+            {rows.length >= 100 ? "100+ breaches" : `${rows.length} breaches`}
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-slate-500">
+                <th className="py-2 pr-4 font-normal">Started</th>
+                <th className="py-2 pr-4 font-normal">Duration</th>
+                <th className="py-2 pr-4 font-normal">Past grace</th>
+                <th className="py-2 pr-4 font-normal">Peak</th>
+                <th className="py-2 pr-4 font-normal">Trigger</th>
+                <th className="py-2 pr-4 font-normal">Ended by</th>
+                <th className="py-2 pr-4 font-normal">Rebalances</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((b) => (
+                <BreachRow
+                  key={b.id}
+                  breach={b}
+                  pool={pool}
+                  network={network}
+                  getName={getName}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
   );
 }
 

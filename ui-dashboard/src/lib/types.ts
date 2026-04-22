@@ -45,9 +45,6 @@ export type Pool = {
   reserves0?: string;
   reserves1?: string;
   healthTotalSeconds?: string;
-  healthBinarySeconds?: string;
-  lastOracleSnapshotTimestamp?: string;
-  lastDeviationRatio?: string;
   hasHealthData?: boolean;
 };
 
@@ -109,7 +106,6 @@ export type OracleSnapshot = {
   blockNumber: string;
   txHash: string;
   deviationRatio?: string;
-  healthBinaryValue?: string;
   hasHealthData?: boolean;
 };
 

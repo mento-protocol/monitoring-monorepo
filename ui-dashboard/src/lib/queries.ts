@@ -40,9 +40,6 @@ export const ALL_POOLS_WITH_HEALTH = `
       reserves0
       reserves1
       healthTotalSeconds
-      healthBinarySeconds
-      lastOracleSnapshotTimestamp
-      lastDeviationRatio
       hasHealthData
     }
   }
@@ -234,9 +231,6 @@ export const POOL_DETAIL_WITH_HEALTH = `
       reserves0
       reserves1
       healthTotalSeconds
-      healthBinarySeconds
-      lastOracleSnapshotTimestamp
-      lastDeviationRatio
       hasHealthData
     }
   }
@@ -395,7 +389,6 @@ export const ORACLE_SNAPSHOTS = `
       blockNumber
       txHash
       deviationRatio
-      healthBinaryValue
       hasHealthData
     }
   }
@@ -423,7 +416,6 @@ export const ORACLE_SNAPSHOTS_CHART = `
       blockNumber
       txHash
       deviationRatio
-      healthBinaryValue
       hasHealthData
     }
   }
@@ -451,7 +443,6 @@ export const ORACLE_SNAPSHOTS_WINDOW = `
       blockNumber
       txHash
       deviationRatio
-      healthBinaryValue
       hasHealthData
     }
   }
@@ -479,7 +470,6 @@ export const ORACLE_SNAPSHOT_PREDECESSOR = `
       blockNumber
       txHash
       deviationRatio
-      healthBinaryValue
       hasHealthData
     }
   }
