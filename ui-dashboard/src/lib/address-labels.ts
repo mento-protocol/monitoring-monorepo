@@ -112,19 +112,12 @@ return count
 
 export async function getLabels(
   scope: Scope,
-  options?: { publicOnly?: boolean },
 ): Promise<Record<string, AddressEntry>> {
   const redis = getRedis();
   const raw = await redis.hgetall<Record<string, Record<string, unknown>>>(
     labelsKey(scope),
   );
-  const all = raw ? upgradeEntries(raw as Record<string, unknown>) : {};
-  if (options?.publicOnly) {
-    return Object.fromEntries(
-      Object.entries(all).filter(([, entry]) => entry.isPublic === true),
-    );
-  }
-  return all;
+  return raw ? upgradeEntries(raw as Record<string, unknown>) : {};
 }
 
 /**
