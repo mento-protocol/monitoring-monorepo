@@ -14,7 +14,7 @@ import {
   POOL_DEVIATION_BREACHES_PAGE,
 } from "@/lib/queries";
 import { formatTimestamp, relativeTime } from "@/lib/format";
-import { formatDurationShort } from "@/lib/bridge-status";
+import { formatDurationShort, parseDurationSeconds } from "@/lib/bridge-status";
 import {
   formatDeviationPct,
   DEVIATION_BREACH_GRACE_SECONDS,
@@ -105,6 +105,32 @@ function whereForBucket(bucket: DurationBucket): Record<string, unknown> {
   }
 }
 
+/**
+ * Compose the bucket clause with optional numeric min/max filters. The
+ * min/max values come from free-text inputs the user types (`1h`, `3
+ * days`, etc.); they compose with the bucket via `_and` so "Over 1d +
+ * min: 7d" narrows to breaches strictly over a week. Applied only when
+ * non-null so an empty input doesn't pin everything to "≥0s".
+ */
+function composeWhere(
+  bucket: DurationBucket,
+  minSeconds: number | null,
+  maxSeconds: number | null,
+): Record<string, unknown> {
+  const bucketClause = whereForBucket(bucket);
+  const rangeClauses: Record<string, unknown>[] = [];
+  if (minSeconds != null) {
+    rangeClauses.push({ durationSeconds: { _gte: String(minSeconds) } });
+  }
+  if (maxSeconds != null) {
+    rangeClauses.push({ durationSeconds: { _lte: String(maxSeconds) } });
+  }
+  if (rangeClauses.length === 0) return bucketClause;
+  // Hasura tolerates an empty object on one side of _and, so this is safe
+  // even when `bucket === "all"` (bucketClause === {}).
+  return { _and: [bucketClause, ...rangeClauses] };
+}
+
 /** Columns the user can sort on server-side. */
 type SortKey =
   | "startedAt"
@@ -125,6 +151,11 @@ export function BreachHistoryPanel({
   const [sortKey, setSortKey] = useState<SortKey>("startedAt");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [bucket, setBucket] = useState<DurationBucket>("all");
+  // Min/max are committed values (numeric seconds, or null when empty /
+  // invalid). The child controls their own draft text — we only see
+  // committed numbers here so re-renders don't fire on every keystroke.
+  const [minSeconds, setMinSeconds] = useState<number | null>(null);
+  const [maxSeconds, setMaxSeconds] = useState<number | null>(null);
 
   // Any control that changes the result set resets pagination. Without
   // this, clicking "Over 1d" on page 3 of an unfiltered 400-row result
@@ -153,8 +184,19 @@ export function BreachHistoryPanel({
     setBucket(next);
     setRawPage(1);
   }, []);
+  const handleMinCommit = useCallback((seconds: number | null) => {
+    setMinSeconds(seconds);
+    setRawPage(1);
+  }, []);
+  const handleMaxCommit = useCallback((seconds: number | null) => {
+    setMaxSeconds(seconds);
+    setRawPage(1);
+  }, []);
 
-  const where = useMemo(() => whereForBucket(bucket), [bucket]);
+  const where = useMemo(
+    () => composeWhere(bucket, minSeconds, maxSeconds),
+    [bucket, minSeconds, maxSeconds],
+  );
 
   const orderBy = useMemo(
     () => buildOrderBy(sortKey, sortDir, "startedAt"),
@@ -180,6 +222,10 @@ export function BreachHistoryPanel({
       onSort={handleSort}
       bucket={bucket}
       onBucket={handleBucket}
+      minSeconds={minSeconds}
+      onMinCommit={handleMinCommit}
+      maxSeconds={maxSeconds}
+      onMaxCommit={handleMaxCommit}
       where={where}
       orderBy={orderBy}
     />
@@ -202,6 +248,10 @@ function BreachHistoryPanelInner({
   onSort,
   bucket,
   onBucket,
+  minSeconds,
+  onMinCommit,
+  maxSeconds,
+  onMaxCommit,
   where,
   orderBy,
 }: {
@@ -220,6 +270,10 @@ function BreachHistoryPanelInner({
   onSort: (key: SortKey) => void;
   bucket: DurationBucket;
   onBucket: (next: DurationBucket) => void;
+  minSeconds: number | null;
+  onMinCommit: (seconds: number | null) => void;
+  maxSeconds: number | null;
+  onMaxCommit: (seconds: number | null) => void;
   where: Record<string, unknown>;
   orderBy: ReturnType<typeof buildOrderBy>;
 }) {
@@ -316,15 +370,24 @@ function BreachHistoryPanelInner({
           </span>
         </div>
 
-        <BucketFilter selected={bucket} onChange={onBucket} />
-
-        <div className="mt-3">
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <TableSearch
             value={search}
             onChange={onSearchChange}
-            placeholder="Search breaches by tx hash, trigger, strategy name, tag…"
+            placeholder="Search breaches by tx, trigger, strategy, tag…"
             ariaLabel="Search breaches"
+            containerClassName="lg:flex-1 lg:max-w-md"
+            inputClassName="w-full"
           />
+          <div className="flex flex-wrap items-center gap-3">
+            <BucketFilter selected={bucket} onChange={onBucket} />
+            <DurationRangeInputs
+              minSeconds={minSeconds}
+              maxSeconds={maxSeconds}
+              onMinCommit={onMinCommit}
+              onMaxCommit={onMaxCommit}
+            />
+          </div>
         </div>
 
         {isLoading && rows.length === 0 ? (
@@ -416,6 +479,109 @@ function BreachHistoryPanelInner({
         )}
       </section>
     </div>
+  );
+}
+
+function DurationRangeInputs({
+  minSeconds,
+  maxSeconds,
+  onMinCommit,
+  onMaxCommit,
+}: {
+  minSeconds: number | null;
+  maxSeconds: number | null;
+  onMinCommit: (seconds: number | null) => void;
+  onMaxCommit: (seconds: number | null) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <DurationField
+        ariaLabel="Minimum breach duration"
+        placeholder="Min."
+        committedSeconds={minSeconds}
+        onCommit={onMinCommit}
+      />
+      <span className="text-xs text-slate-600">–</span>
+      <DurationField
+        ariaLabel="Maximum breach duration"
+        placeholder="Max."
+        committedSeconds={maxSeconds}
+        onCommit={onMaxCommit}
+      />
+    </div>
+  );
+}
+
+/**
+ * Single duration input. Keeps its own draft text so the parent only
+ * re-renders (and re-fires the GraphQL query) on blur or Enter. An empty
+ * draft commits `null` — clears the filter instead of leaving it stale.
+ * A parse failure keeps the previous committed value and flags the input
+ * with a red ring until the user fixes it.
+ */
+function DurationField({
+  ariaLabel,
+  placeholder,
+  committedSeconds,
+  onCommit,
+}: {
+  ariaLabel: string;
+  placeholder: string;
+  committedSeconds: number | null;
+  onCommit: (seconds: number | null) => void;
+}) {
+  const [draft, setDraft] = useState(() =>
+    committedSeconds != null ? formatDurationShort(committedSeconds) : "",
+  );
+  const [invalid, setInvalid] = useState(false);
+  const commit = useCallback(() => {
+    const trimmed = draft.trim();
+    if (!trimmed) {
+      setInvalid(false);
+      onCommit(null);
+      return;
+    }
+    const parsed = parseDurationSeconds(trimmed);
+    if (parsed == null || parsed <= 0) {
+      setInvalid(true);
+      return;
+    }
+    setInvalid(false);
+    onCommit(parsed);
+  }, [draft, onCommit]);
+  return (
+    <input
+      type="text"
+      inputMode="text"
+      autoComplete="off"
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      value={draft}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        // Clear the error as soon as they start fixing it — no point
+        // yelling while they type.
+        if (invalid) setInvalid(false);
+      }}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        }
+      }}
+      className={
+        "w-20 rounded-lg border bg-slate-800 px-2 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 " +
+        (invalid
+          ? "border-red-500/70 focus:border-red-400 focus:ring-red-400"
+          : "border-slate-700 focus:border-indigo-500 focus:ring-indigo-500")
+      }
+      title={
+        invalid
+          ? 'Enter a duration like "1h", "30m", "3 days"'
+          : "Filter by duration. Supports 1h, 30m, 3d, 1h30m, 2 hours…"
+      }
+    />
   );
 }
 
