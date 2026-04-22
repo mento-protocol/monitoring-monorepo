@@ -6,6 +6,7 @@ import { SortedOracles, type Pool, type OracleSnapshot } from "generated";
 import { eventId, asAddress, asBigInt } from "../helpers";
 import { computePriceDifference } from "../priceDifference";
 import { computeHealthStatus, nextDeviationBreachStartedAt } from "../pool";
+import { recordBreachTransition } from "../deviationBreach";
 import { recordHealthSample } from "../healthScore";
 import {
   fetchReportExpiry,
@@ -69,6 +70,18 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
     const healthStatus = computeHealthStatus(withBreach, blockTimestamp);
     const finalPool = { ...withBreach, healthStatus };
 
+    const breachPoolUpdate = await recordBreachTransition(
+      context,
+      existing,
+      finalPool,
+      {
+        blockTimestamp,
+        blockNumber,
+        txHash: event.transaction.hash,
+        triggeringSource: "oracle_reported",
+      },
+    );
+
     // Health score: compute snapshot fields + update pool accumulators
     const { snapshotFields, poolUpdate } = recordHealthSample(
       finalPool,
@@ -76,7 +89,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       existing.rebalanceThreshold,
       blockTimestamp,
     );
-    context.Pool.set({ ...finalPool, ...poolUpdate });
+    context.Pool.set({ ...finalPool, ...poolUpdate, ...breachPoolUpdate });
 
     const snapshot: OracleSnapshot = {
       id:
@@ -148,6 +161,18 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
     const healthStatus = computeHealthStatus(withBreach, blockTimestamp);
     const finalPool = { ...withBreach, healthStatus };
 
+    const breachPoolUpdate = await recordBreachTransition(
+      context,
+      existing,
+      finalPool,
+      {
+        blockTimestamp,
+        blockNumber,
+        txHash: event.transaction.hash,
+        triggeringSource: "median_updated",
+      },
+    );
+
     // Health score: compute snapshot fields + update pool accumulators
     const { snapshotFields, poolUpdate } = recordHealthSample(
       finalPool,
@@ -158,6 +183,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
     context.Pool.set({
       ...finalPool,
       ...poolUpdate,
+      ...breachPoolUpdate,
     });
 
     const snapshot: OracleSnapshot = {

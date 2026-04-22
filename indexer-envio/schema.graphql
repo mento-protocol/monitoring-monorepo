@@ -46,6 +46,13 @@ type Pool {
   lastOracleSnapshotTimestamp: BigInt! # timestamp of most recent oracle snapshot
   lastDeviationRatio: String! # deviationRatio at most recent snapshot
   hasHealthData: Boolean! # true once first health snapshot recorded
+  # Breach accumulators — running totals over the pool's lifetime (trading-seconds,
+  # i.e. FX weekend closure is excluded). `cumulativeCriticalSeconds` is the
+  # "time in CRITICAL" SLO number; dividing by a denominator of total tracked
+  # trading-seconds in the window gives the uptime %. Summed at breach close.
+  cumulativeBreachSeconds: BigInt!
+  cumulativeCriticalSeconds: BigInt!
+  breachCount: Int!
   # Fee configuration (FPMM pools only; basis points, e.g. 15 = 0.15%)
   lpFee: Int!
   protocolFee: Int!
@@ -61,6 +68,36 @@ type Pool {
   createdAtTimestamp: BigInt!
   updatedAtBlock: BigInt!
   updatedAtTimestamp: BigInt!
+}
+
+type DeviationThresholdBreach @index(fields: ["poolId", "startedAt"]) {
+  id: ID! # "{poolId}-{startedAt}"
+  chainId: Int! @index
+  poolId: String! @index
+  startedAt: BigInt! @index # block time of the rising edge
+  startedAtBlock: BigInt!
+  endedAt: BigInt @index # null while active
+  endedAtBlock: BigInt
+  # Durations in trading-seconds (FX weekend closure excluded). Null while
+  # the breach is still open.
+  durationSeconds: BigInt
+  # Portion of the duration past the 1h grace window — equals the
+  # "time in CRITICAL" SLO number for this breach alone.
+  criticalDurationSeconds: BigInt
+  # Magnitude
+  entryPriceDifference: BigInt! # priceDifference at the rising edge
+  peakPriceDifference: BigInt! # max observed during the breach
+  peakAt: BigInt! # block time when peak was reached
+  peakAtBlock: BigInt!
+  # Causation
+  startedByEvent: String! # "swap" | "liquidity" | "oracle_update" | "rebalance" | "threshold_change" | "unknown"
+  startedByTxHash: String!
+  endedByEvent: String # null while active
+  endedByTxHash: String
+  endedByStrategy: String # rebalancer strategy address, when endedByEvent = "rebalance"
+  # Rebalance attempts observed while the breach was open (including the
+  # closing rebalance, if it closed via rebalance).
+  rebalanceCountDuring: Int!
 }
 
 type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {

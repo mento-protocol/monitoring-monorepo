@@ -2,7 +2,12 @@
 // Pool and PoolSnapshot upsert logic, health status computation
 // ---------------------------------------------------------------------------
 
-import type { Pool, PoolSnapshot, PoolDailySnapshot } from "generated";
+import type {
+  Pool,
+  PoolSnapshot,
+  PoolDailySnapshot,
+  DeviationThresholdBreach,
+} from "generated";
 import {
   hourBucket,
   dayBucket,
@@ -12,6 +17,7 @@ import {
 } from "./helpers";
 import { computePriceDifference } from "./priceDifference";
 import { fetchReferenceRateFeedID, fetchReportExpiry, fetchFees } from "./rpc";
+import { recordBreachTransition } from "./deviationBreach";
 
 // ---------------------------------------------------------------------------
 // Health status computation
@@ -119,6 +125,10 @@ export type PoolContext = {
     get: (id: string) => Promise<Pool | undefined>;
     set: (entity: Pool) => void;
   };
+  DeviationThresholdBreach: {
+    get: (id: string) => Promise<DeviationThresholdBreach | undefined>;
+    set: (entity: DeviationThresholdBreach) => void;
+  };
 };
 
 export type SnapshotContext = {
@@ -162,6 +172,10 @@ export const DEFAULT_ORACLE_FIELDS = {
   lastOracleSnapshotTimestamp: 0n,
   lastDeviationRatio: "-1",
   hasHealthData: false,
+  // Breach accumulators (see DeviationThresholdBreach entity)
+  cumulativeBreachSeconds: 0n,
+  cumulativeCriticalSeconds: 0n,
+  breachCount: 0,
 };
 
 const getOrCreatePool = async (
@@ -201,11 +215,13 @@ export const upsertPool = async ({
   source,
   blockNumber,
   blockTimestamp,
+  txHash,
   reservesDelta,
   swapDelta,
   rebalanceDelta,
   oracleDelta,
   tokenDecimals,
+  triggeringStrategy,
 }: {
   context: PoolContext;
   chainId: number;
@@ -215,11 +231,19 @@ export const upsertPool = async ({
   source: string;
   blockNumber: bigint;
   blockTimestamp: bigint;
+  /** Transaction hash of the event that drove this upsert. Used for breach-
+   * attribution (`startedByTxHash` / `endedByTxHash`). Empty for synthetic
+   * upserts (e.g. factory bootstrap where no rising edge is possible). */
+  txHash?: string;
   reservesDelta?: { reserve0: bigint; reserve1: bigint };
   swapDelta?: { volume0: bigint; volume1: bigint };
   rebalanceDelta?: boolean;
   oracleDelta?: Partial<typeof DEFAULT_ORACLE_FIELDS>;
   tokenDecimals?: { token0Decimals: number; token1Decimals: number };
+  /** Rebalancer strategy contract that fired the event. Used only when
+   * source === "fpmm_rebalanced" to populate `endedByStrategy` on a
+   * breach the rebalance closes. */
+  triggeringStrategy?: string;
 }): Promise<Pool> => {
   const existing = await getOrCreatePool(context, chainId, poolId, {
     token0,
@@ -312,7 +336,29 @@ export const upsertPool = async ({
   );
   const withBreach = { ...withDeviation, deviationBreachStartedAt };
   const healthStatus = computeHealthStatus(withBreach, blockTimestamp);
-  const final = { ...withBreach, healthStatus };
+
+  // Maintain the per-breach history entity + roll closed-breach durations
+  // into the Pool's cumulative counters. Runs against existing → withBreach
+  // so the transition detector sees pre/post states on the same basis as
+  // `nextDeviationBreachStartedAt`.
+  const breachPoolUpdate = await recordBreachTransition(
+    context,
+    existing.source === "" ? undefined : existing, // brand-new pool → no prev
+    { ...withBreach, healthStatus },
+    {
+      blockTimestamp,
+      blockNumber,
+      txHash: txHash ?? "",
+      triggeringSource: source,
+      triggeringStrategy,
+    },
+  );
+
+  const final: Pool = {
+    ...withBreach,
+    healthStatus,
+    ...breachPoolUpdate,
+  };
 
   context.Pool.set(final);
   return final;

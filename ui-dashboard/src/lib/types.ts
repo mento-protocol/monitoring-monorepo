@@ -52,6 +52,35 @@ export type Pool = {
   hasHealthData?: boolean;
 };
 
+/**
+ * One historical deviation-threshold breach for a pool. Emitted by the
+ * indexer on the rising edge, closed on the falling edge. Durations are
+ * trading-seconds (weekend-aware). See
+ * indexer-envio/schema.graphql → `DeviationThresholdBreach`.
+ */
+export type DeviationThresholdBreach = {
+  id: string;
+  chainId: number;
+  poolId: string;
+  startedAt: string;
+  startedAtBlock: string;
+  /** Null while the breach is still open. */
+  endedAt: string | null;
+  endedAtBlock: string | null;
+  durationSeconds: string | null;
+  criticalDurationSeconds: string | null;
+  entryPriceDifference: string;
+  peakPriceDifference: string;
+  peakAt: string;
+  peakAtBlock: string;
+  startedByEvent: string;
+  startedByTxHash: string;
+  endedByEvent: string | null;
+  endedByTxHash: string | null;
+  endedByStrategy: string | null;
+  rebalanceCountDuring: number;
+};
+
 export type OracleSnapshot = {
   id: string;
   chainId: number;

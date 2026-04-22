@@ -1,0 +1,480 @@
+/// <reference types="mocha" />
+import { assert } from "chai";
+import {
+  classifyBreachEvent,
+  openBreachId,
+  recordBreachTransition,
+} from "../src/deviationBreach";
+import {
+  DEFAULT_ORACLE_FIELDS,
+  DEVIATION_BREACH_GRACE_SECONDS,
+} from "../src/pool";
+import type { Pool, DeviationThresholdBreach } from "generated";
+
+// ---------------------------------------------------------------------------
+// In-memory mock context shaped like the Envio loader context used by
+// recordBreachTransition.
+// ---------------------------------------------------------------------------
+function makeMockContext() {
+  const store = new Map<string, DeviationThresholdBreach>();
+  return {
+    store,
+    context: {
+      DeviationThresholdBreach: {
+        get: async (id: string) => store.get(id),
+        set: (row: DeviationThresholdBreach) => {
+          store.set(row.id, row);
+        },
+      },
+    },
+  };
+}
+
+function makePool(overrides: Partial<Pool> = {}): Pool {
+  return {
+    id: "42220-0xtest",
+    chainId: 42220,
+    token0: "0xtok0",
+    token1: "0xtok1",
+    token0Decimals: 18,
+    token1Decimals: 18,
+    source: "fpmm_factory",
+    reserves0: 0n,
+    reserves1: 0n,
+    swapCount: 0,
+    notionalVolume0: 0n,
+    notionalVolume1: 0n,
+    rebalanceCount: 0,
+    ...DEFAULT_ORACLE_FIELDS,
+    oracleOk: true,
+    rebalanceThreshold: 5000,
+    createdAtBlock: 0n,
+    createdAtTimestamp: 0n,
+    updatedAtBlock: 0n,
+    updatedAtTimestamp: 0n,
+    ...overrides,
+  };
+}
+
+// Pick an "out-of-weekend" epoch second so tradingSecondsInRange == wall-clock
+// for the intervals we test. Monday 2024-01-08 00:00:00 UTC.
+const MON_NOON = 1_704_672_000n;
+
+describe("classifyBreachEvent", () => {
+  it("maps each known indexer source to a user-facing category", () => {
+    assert.equal(classifyBreachEvent("fpmm_rebalanced"), "rebalance");
+    assert.equal(classifyBreachEvent("fpmm_swap"), "swap");
+    assert.equal(classifyBreachEvent("fpmm_mint"), "liquidity");
+    assert.equal(classifyBreachEvent("fpmm_burn"), "liquidity");
+    assert.equal(classifyBreachEvent("fpmm_update_reserves"), "liquidity");
+    assert.equal(classifyBreachEvent("fpmm_factory"), "threshold_change");
+    assert.equal(classifyBreachEvent("oracle_reported"), "oracle_update");
+    assert.equal(classifyBreachEvent("median_updated"), "oracle_update");
+  });
+
+  it("returns 'unknown' for virtual pool sources and truly unknown strings", () => {
+    // Virtual pools never breach, but defend the mapping anyway.
+    assert.equal(classifyBreachEvent("virtual_pool_factory"), "unknown");
+    assert.equal(classifyBreachEvent("some_future_source"), "unknown");
+  });
+});
+
+describe("openBreachId", () => {
+  it("is deterministic on (poolId, startedAt)", () => {
+    assert.equal(openBreachId("42220-0xpool", 1000n), "42220-0xpool-1000");
+  });
+});
+
+describe("recordBreachTransition — rising edge", () => {
+  it("creates a new row with entry/peak/startedBy metadata", async () => {
+    const { store, context } = makeMockContext();
+    const prev = makePool({
+      priceDifference: 4000n,
+      rebalanceThreshold: 5000,
+      deviationBreachStartedAt: 0n,
+    }); // ratio 0.8 → OK
+    const next = makePool({
+      priceDifference: 7500n,
+      rebalanceThreshold: 5000,
+      deviationBreachStartedAt: MON_NOON,
+    }); // ratio 1.5 → breached
+    const poolUpdate = await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON,
+      blockNumber: 100n,
+      txHash: "0xabc",
+      triggeringSource: "fpmm_swap",
+    });
+
+    assert.deepEqual(poolUpdate, {}); // no cumulative change on rising edge
+    assert.equal(store.size, 1);
+    const row = store.get(openBreachId(next.id, MON_NOON))!;
+    assert.equal(row.startedAt, MON_NOON);
+    assert.equal(row.endedAt, undefined);
+    assert.equal(row.entryPriceDifference, 7500n);
+    assert.equal(row.peakPriceDifference, 7500n);
+    assert.equal(row.peakAt, MON_NOON);
+    assert.equal(row.startedByEvent, "swap");
+    assert.equal(row.startedByTxHash, "0xabc");
+    assert.equal(row.rebalanceCountDuring, 0);
+  });
+
+  it("treats a missing prev as a fresh breach when next is already breached", async () => {
+    const { store, context } = makeMockContext();
+    const next = makePool({
+      priceDifference: 8000n,
+      rebalanceThreshold: 5000,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    await recordBreachTransition(context, undefined, next, {
+      blockTimestamp: MON_NOON,
+      blockNumber: 100n,
+      txHash: "0xbootstrap",
+      triggeringSource: "oracle_reported",
+    });
+    assert.equal(store.size, 1);
+    const row = store.get(openBreachId(next.id, MON_NOON))!;
+    assert.equal(row.startedByEvent, "oracle_update");
+  });
+});
+
+describe("recordBreachTransition — continuing breach", () => {
+  it("bumps peakPriceDifference and peakAt when the current reading exceeds the prior peak", async () => {
+    const { store, context } = makeMockContext();
+    // Seed an open breach row with peak 6000.
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", MON_NOON),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: MON_NOON,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 6000n,
+      peakPriceDifference: 6000n,
+      peakAt: MON_NOON,
+      peakAtBlock: 100n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xabc",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+
+    const prev = makePool({
+      priceDifference: 6000n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    const next = makePool({
+      priceDifference: 9000n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON + 60n,
+      blockNumber: 110n,
+      txHash: "0xdef",
+      triggeringSource: "fpmm_swap",
+    });
+    const row = store.get(open.id)!;
+    assert.equal(row.peakPriceDifference, 9000n);
+    assert.equal(row.peakAt, MON_NOON + 60n);
+    assert.equal(row.peakAtBlock, 110n);
+  });
+
+  it("does not move peakAt when the current reading is lower than the existing peak", async () => {
+    const { store, context } = makeMockContext();
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", MON_NOON),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: MON_NOON,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 6000n,
+      peakPriceDifference: 9000n,
+      peakAt: MON_NOON + 30n,
+      peakAtBlock: 105n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xabc",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+    const prev = makePool({
+      priceDifference: 9000n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    const next = makePool({
+      priceDifference: 7000n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON + 60n,
+      blockNumber: 110n,
+      txHash: "0xzzz",
+      triggeringSource: "fpmm_swap",
+    });
+    const row = store.get(open.id)!;
+    assert.equal(row.peakPriceDifference, 9000n);
+    assert.equal(row.peakAt, MON_NOON + 30n);
+  });
+
+  it("increments rebalanceCountDuring when a rebalance fires mid-breach without closing it", async () => {
+    const { store, context } = makeMockContext();
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", MON_NOON),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: MON_NOON,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 8000n,
+      peakPriceDifference: 8000n,
+      peakAt: MON_NOON,
+      peakAtBlock: 100n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xabc",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+    const prev = makePool({
+      priceDifference: 8000n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    // A partial rebalance that drops priceDifference but stays above
+    // threshold — still an attempt observed during the breach.
+    const next = makePool({
+      priceDifference: 6000n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON + 120n,
+      blockNumber: 120n,
+      txHash: "0xrbl",
+      triggeringSource: "fpmm_rebalanced",
+      triggeringStrategy: "0xstrategy",
+    });
+    assert.equal(store.get(open.id)!.rebalanceCountDuring, 1);
+  });
+});
+
+describe("recordBreachTransition — falling edge", () => {
+  it("closes the open row, fills durations, and rolls cumulative counters", async () => {
+    const { store, context } = makeMockContext();
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", MON_NOON),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: MON_NOON,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 8000n,
+      peakPriceDifference: 9000n,
+      peakAt: MON_NOON + 60n,
+      peakAtBlock: 105n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xabc",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+
+    // Prev = still breached (anchor set). Next = recovered (anchor cleared).
+    const prev = makePool({
+      priceDifference: 9000n,
+      deviationBreachStartedAt: MON_NOON,
+      cumulativeBreachSeconds: 0n,
+      cumulativeCriticalSeconds: 0n,
+      breachCount: 0,
+    });
+    const breachEndedAt = MON_NOON + 2n * DEVIATION_BREACH_GRACE_SECONDS; // 2h
+    const next = makePool({
+      priceDifference: 4000n,
+      deviationBreachStartedAt: 0n,
+      cumulativeBreachSeconds: 0n,
+      cumulativeCriticalSeconds: 0n,
+      breachCount: 0,
+    });
+    const poolUpdate = await recordBreachTransition(context, prev, next, {
+      blockTimestamp: breachEndedAt,
+      blockNumber: 200n,
+      txHash: "0xclose",
+      triggeringSource: "fpmm_rebalanced",
+      triggeringStrategy: "0xstrategy",
+    });
+    const closed = store.get(open.id)!;
+    assert.equal(closed.endedAt, breachEndedAt);
+    // Duration = 7200s, grace = 3600s → critical portion = 3600s.
+    assert.equal(closed.durationSeconds, 7200n);
+    assert.equal(closed.criticalDurationSeconds, 3600n);
+    assert.equal(closed.endedByEvent, "rebalance");
+    assert.equal(closed.endedByTxHash, "0xclose");
+    assert.equal(closed.endedByStrategy, "0xstrategy");
+    assert.equal(closed.rebalanceCountDuring, 1);
+
+    // Cumulative counters rolled through on poolUpdate.
+    assert.equal(poolUpdate.cumulativeBreachSeconds, 7200n);
+    assert.equal(poolUpdate.cumulativeCriticalSeconds, 3600n);
+    assert.equal(poolUpdate.breachCount, 1);
+  });
+
+  it("criticalDurationSeconds is 0 when the breach closes within the grace window", async () => {
+    const { store, context } = makeMockContext();
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", MON_NOON),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: MON_NOON,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 6000n,
+      peakPriceDifference: 6500n,
+      peakAt: MON_NOON + 60n,
+      peakAtBlock: 105n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xabc",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+    const prev = makePool({
+      priceDifference: 6500n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    const next = makePool({
+      priceDifference: 4000n,
+      deviationBreachStartedAt: 0n,
+    });
+    const poolUpdate = await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON + 1800n, // 30min — within grace
+      blockNumber: 150n,
+      txHash: "0xsoon",
+      triggeringSource: "fpmm_rebalanced",
+      triggeringStrategy: "0xstrat",
+    });
+    const closed = store.get(open.id)!;
+    assert.equal(closed.durationSeconds, 1800n);
+    assert.equal(closed.criticalDurationSeconds, 0n);
+    assert.equal(poolUpdate.cumulativeCriticalSeconds, 0n);
+  });
+
+  it("measures durations in trading-seconds so a breach spanning a weekend excludes closure hours", async () => {
+    const { store, context } = makeMockContext();
+    // Breach starts Fri 2024-01-05 20:00:00 UTC (1 hour before FX close
+    // at Fri 21:00 UTC) and closes Mon 2024-01-08 00:00:00 UTC.
+    const fri20 = 1_704_484_800n;
+    const monMidnight = 1_704_672_000n;
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", fri20),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: fri20,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 6000n,
+      peakPriceDifference: 6000n,
+      peakAt: fri20,
+      peakAtBlock: 100n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xabc",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+
+    const prev = makePool({
+      priceDifference: 6000n,
+      deviationBreachStartedAt: fri20,
+    });
+    const next = makePool({
+      priceDifference: 4000n,
+      deviationBreachStartedAt: 0n,
+    });
+    await recordBreachTransition(context, prev, next, {
+      blockTimestamp: monMidnight,
+      blockNumber: 500n,
+      txHash: "0xmon",
+      triggeringSource: "oracle_reported",
+    });
+    // Wall-clock between Fri 20:00 and Mon 00:00 = 2d + 4h = 187_200s.
+    // FX closure Fri 21:00 UTC → Sun 23:00 UTC = 50h = 180_000s.
+    // Expected trading-seconds = 187_200 − 180_000 = 7_200s (the Fri 20-21
+    // hour before close + the Sun 23-Mon 00 hour after reopen).
+    const closed = store.get(open.id)!;
+    assert.equal(closed.durationSeconds, 7200n);
+    // Well over grace (3600s) once we subtract weekend, so critical = 3600s.
+    assert.equal(closed.criticalDurationSeconds, 3600n);
+  });
+
+  it("gracefully no-ops when the open row cannot be found (data inconsistency)", async () => {
+    const { store, context } = makeMockContext();
+    // No row in the store, but prev says we were breached.
+    const prev = makePool({
+      priceDifference: 8000n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    const next = makePool({
+      priceDifference: 3000n,
+      deviationBreachStartedAt: 0n,
+    });
+    const poolUpdate = await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON + 600n,
+      blockNumber: 150n,
+      txHash: "0xorphan",
+      triggeringSource: "oracle_reported",
+    });
+    assert.deepEqual(poolUpdate, {});
+    assert.equal(store.size, 0);
+  });
+});
+
+describe("recordBreachTransition — no transition", () => {
+  it("returns {} and writes nothing when the pool was never breached", async () => {
+    const { store, context } = makeMockContext();
+    const prev = makePool({
+      priceDifference: 3000n,
+      deviationBreachStartedAt: 0n,
+    });
+    const next = makePool({
+      priceDifference: 4500n,
+      deviationBreachStartedAt: 0n,
+    });
+    const poolUpdate = await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON,
+      blockNumber: 100n,
+      txHash: "0xhealthy",
+      triggeringSource: "fpmm_swap",
+    });
+    assert.deepEqual(poolUpdate, {});
+    assert.equal(store.size, 0);
+  });
+});

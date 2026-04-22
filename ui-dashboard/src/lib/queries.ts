@@ -244,6 +244,37 @@ export const POOL_DETAIL_WITH_HEALTH = `
   }
 `;
 
+// Recent breach history for a pool — newest first, capped at 100 rows so a
+// pool with a noisy breach history still fits inside Hasura's 1000-row cap
+// by a healthy margin. Open breach (endedAt: null) sorts first by convention
+// because descending `startedAt` on the active row wins against all closed
+// ones that ended earlier.
+//
+// Isolated from POOL_DETAIL_WITH_HEALTH on purpose: this entity is brand-new
+// on the indexer side, so during the deploy+resync window the hosted Hasura
+// will reject it with "type not found". Keeping it in its own query means
+// the whole pool page doesn't die — only the breach-history panel does,
+// and it degrades to a friendly "Couldn't load" message.
+export const POOL_DEVIATION_BREACHES = `
+  query PoolDeviationBreaches($poolId: String!) {
+    DeviationThresholdBreach(
+      where: { poolId: { _eq: $poolId } }
+      order_by: [{ startedAt: desc }]
+      limit: 100
+    ) {
+      id chainId poolId
+      startedAt startedAtBlock
+      endedAt endedAtBlock
+      durationSeconds criticalDurationSeconds
+      entryPriceDifference peakPriceDifference
+      peakAt peakAtBlock
+      startedByEvent startedByTxHash
+      endedByEvent endedByTxHash endedByStrategy
+      rebalanceCountDuring
+    }
+  }
+`;
+
 export const POOL_SNAPSHOTS_CHART = `
   query PoolSnapshotsChart($poolId: String!) {
     PoolSnapshot(
