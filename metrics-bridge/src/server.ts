@@ -40,7 +40,10 @@ export function handleRequest(
     return;
   }
 
-  if (path === "/healthz" && req.method === "GET") {
+  // `/health` (not `/healthz`): Cloud Run v2 reserves `/healthz` at its
+  // frontend — external requests to that path get a Google-branded 404 and
+  // never reach the container.
+  if (path === "/health" && req.method === "GET") {
     const healthy = isHealthy();
     res.writeHead(healthy ? 200 : 503);
     res.end(healthy ? "ok" : "unhealthy");
