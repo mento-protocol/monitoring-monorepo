@@ -74,7 +74,7 @@ const ONE_DAY = 86400;
 
 const BUCKET_LABEL: Record<DurationBucket, string> = {
   all: "All",
-  in_grace: "In grace (≤1h)",
+  in_grace: "≤1h",
   short: "1h – 1d",
   long: "Over 1d",
   ongoing: "Ongoing",
