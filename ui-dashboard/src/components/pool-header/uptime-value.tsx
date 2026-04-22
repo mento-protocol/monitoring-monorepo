@@ -8,7 +8,7 @@ import { DEVIATION_BREACH_GRACE_SECONDS } from "@/lib/health";
 import { tradingSecondsInRange } from "@/lib/weekend";
 
 const UPTIME_EXPLAINER =
-  "% of tracked time the pool was NOT in a critical state. A pool flips to critical only after staying above its rebalance threshold for more than one hour — so a short breach that gets rebalanced promptly counts as uptime. Weekends when FX oracles are paused are excluded from both numerator and denominator.";
+  "Share of tracked time the pool was healthy. Breaches of up to 1h still count as uptime; only longer ones cut into the score. FX weekends are excluded.";
 
 type BreachRollup = {
   cumulativeCriticalSeconds?: string;
