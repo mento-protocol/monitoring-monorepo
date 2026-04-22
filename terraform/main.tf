@@ -529,3 +529,15 @@ resource "google_storage_bucket_iam_member" "ci_deployer_tfstate" {
   role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
 }
+
+# The google provider in this module is configured with
+# `impersonate_service_account = var.terraform_service_account`, so whenever
+# the CI deployer runs `terraform apply` it mints an access token for
+# `org-terraform@mento-terraform-seed-ffac`. That STS exchange requires
+# `iam.serviceAccounts.getAccessToken`, which comes from tokenCreator on the
+# target SA (not from project-level serviceAccountUser).
+resource "google_service_account_iam_member" "ci_deployer_impersonate_org_terraform" {
+  service_account_id = "projects/-/serviceAccounts/${var.terraform_service_account}"
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
+}
