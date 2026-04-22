@@ -79,9 +79,22 @@ describe("Google provider checks config", () => {
 });
 
 describe("auth signIn callback", () => {
-  function callSignIn(email: string | undefined) {
+  type ProfileOverrides = {
+    email?: string;
+    hd?: string | undefined;
+    email_verified?: boolean | undefined;
+  };
+
+  // Default profile shape = a valid Mento Workspace login. Tests opt in to
+  // the failure cases by passing a subset override (e.g., `{ hd: undefined }`).
+  function callSignIn(overrides: ProfileOverrides = {}) {
     const account = { provider: "google" } as Account;
-    const profile = email ? ({ email } as Profile) : ({} as Profile);
+    const defaults = {
+      email: "alice@mentolabs.xyz",
+      hd: "mentolabs.xyz",
+      email_verified: true,
+    };
+    const profile = { ...defaults, ...overrides } as unknown as Profile;
     return capturedConfig.callbacks?.signIn?.({
       account,
       profile,
@@ -90,19 +103,49 @@ describe("auth signIn callback", () => {
     });
   }
 
-  it("accepts @mentolabs.xyz accounts", () => {
-    expect(callSignIn("alice@mentolabs.xyz")).toBe(true);
+  it("accepts a valid Mento Workspace login (hd + verified + domain)", () => {
+    expect(callSignIn()).toBe(true);
   });
 
-  it("rejects other domains", () => {
-    expect(callSignIn("alice@gmail.com")).toBe(false);
+  it("rejects other email domains", () => {
+    expect(callSignIn({ email: "alice@gmail.com", hd: undefined })).toBe(false);
   });
 
   it("accepts mixed-case @mentolabs.xyz emails", () => {
-    expect(callSignIn("Alice@MentoLabs.xyz")).toBe(true);
+    expect(callSignIn({ email: "Alice@MentoLabs.xyz" })).toBe(true);
   });
 
   it("rejects missing email", () => {
-    expect(callSignIn(undefined)).toBe(false);
+    expect(callSignIn({ email: undefined })).toBe(false);
+  });
+
+  it("rejects when hd claim is missing (e.g., personal Gmail)", () => {
+    // Personal Google accounts have no `hd` claim. Even if the display email
+    // ends in @mentolabs.xyz (it can't, but belt-and-braces), the absence of
+    // `hd: mentolabs.xyz` proves the account is not on our Workspace tenant.
+    expect(callSignIn({ hd: undefined })).toBe(false);
+  });
+
+  it("rejects when hd claim points to a different Workspace", () => {
+    // A Workspace that happens to have mentolabs.xyz as a secondary alias
+    // would carry its own `hd`, not ours.
+    expect(callSignIn({ hd: "other-workspace.com" })).toBe(false);
+  });
+
+  it("rejects when email_verified is false", () => {
+    expect(callSignIn({ email_verified: false })).toBe(false);
+  });
+
+  it("rejects when email_verified is missing", () => {
+    expect(callSignIn({ email_verified: undefined })).toBe(false);
+  });
+});
+
+describe("session config", () => {
+  it("uses a 1-hour JWT maxAge to bound stale-session risk", async () => {
+    await loadAuthWithEnv();
+    expect(capturedConfig.session?.strategy).toBe("jwt");
+    expect(capturedConfig.session?.maxAge).toBe(60 * 60);
+    expect(capturedConfig.session?.updateAge).toBe(10 * 60);
   });
 });

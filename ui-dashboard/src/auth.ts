@@ -29,10 +29,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
 
+  // Short session lifetime bounds how long a disabled-but-still-JWT-carrying
+  // ex-employee retains access. On an active request, NextAuth re-mints the
+  // token every `updateAge`, extending exp to +maxAge — so active users stay
+  // signed in, but idle accounts age out within the hour. A hard revocation
+  // list would be even stronger; this is the low-cost first step.
   session: {
     strategy: "jwt",
-    maxAge: 30 * 24 * 60 * 60,
-    updateAge: 24 * 60 * 60,
+    maxAge: 60 * 60,
+    updateAge: 10 * 60,
   },
 
   pages: {
@@ -50,10 +55,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
   callbacks: {
     signIn({ account, profile }) {
-      if (account?.provider === "google") {
-        return profile?.email?.toLowerCase().endsWith(ALLOWED_DOMAIN) ?? false;
-      }
-      return false;
+      if (account?.provider !== "google") return false;
+      // `hd` is Google's hosted-domain claim — set server-side based on the
+      // authenticated Workspace tenant, not the self-declared email string.
+      // A personal Gmail cannot produce `hd: "mentolabs.xyz"`, and a user on
+      // a different Workspace with `mentolabs.xyz` as a secondary alias
+      // carries that Workspace's `hd`, not ours.
+      const p = profile as
+        | { hd?: string; email_verified?: boolean }
+        | undefined;
+      if (p?.hd !== "mentolabs.xyz") return false;
+      if (p?.email_verified !== true) return false;
+      return profile?.email?.toLowerCase().endsWith(ALLOWED_DOMAIN) ?? false;
     },
     jwt({ token, profile }) {
       if (profile?.email) {
