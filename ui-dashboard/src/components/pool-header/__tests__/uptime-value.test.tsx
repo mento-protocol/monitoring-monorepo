@@ -6,6 +6,7 @@ type RollupRow = {
   cumulativeBreachSeconds?: string;
   cumulativeCriticalSeconds?: string;
   breachCount?: number;
+  deviationBreachStartedAt?: string;
 };
 
 type GqlResult = {
@@ -122,8 +123,10 @@ describe("UptimeValue", () => {
 
   it("adds the live post-grace portion of an active breach to the rollup total", () => {
     // Rollup is 0 (no closed breaches yet), but an active breach started
-    // 2h ago. One hour sits in grace, the second hour is critical → uptime
-    // should reflect that.
+    // 2h ago. One hour sits in grace, the second hour is critical →
+    // uptime reflects that. deviationBreachStartedAt is read from the
+    // rollup query itself so it snapshots together with the rolled
+    // scalars — not a stale prop.
     const nowSec = Math.floor(Date.now() / 1000);
     mockUseGQL.mockReturnValueOnce({
       data: {
@@ -131,6 +134,7 @@ describe("UptimeValue", () => {
           {
             cumulativeCriticalSeconds: "0",
             breachCount: 0,
+            deviationBreachStartedAt: String(nowSec - 2 * 3600),
           },
         ],
       },
@@ -138,24 +142,85 @@ describe("UptimeValue", () => {
     const pool: Pool = {
       ...BASE_POOL,
       healthTotalSeconds: String(30 * 86400),
-      deviationBreachStartedAt: String(nowSec - 2 * 3600),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
     expect(html).toContain("99.861%");
+    expect(html).toContain("1 ongoing breach");
   });
 
   it("does not credit an active breach that is still within the 1h grace window", () => {
     const nowSec = Math.floor(Date.now() / 1000);
     mockUseGQL.mockReturnValueOnce({
-      data: { Pool: [{ cumulativeCriticalSeconds: "0", breachCount: 0 }] },
+      data: {
+        Pool: [
+          {
+            cumulativeCriticalSeconds: "0",
+            breachCount: 0,
+            deviationBreachStartedAt: String(nowSec - 30 * 60),
+          },
+        ],
+      },
     });
     const pool: Pool = {
       ...BASE_POOL,
       healthTotalSeconds: String(30 * 86400),
-      deviationBreachStartedAt: String(nowSec - 30 * 60),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
     expect(html).toContain("100.000%");
+    expect(html).toContain("1 ongoing breach");
+  });
+
+  it("labels 'N past + 1 ongoing' when closed history AND an open breach coexist", () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    mockUseGQL.mockReturnValueOnce({
+      data: {
+        Pool: [
+          {
+            cumulativeCriticalSeconds: "3600",
+            breachCount: 2,
+            deviationBreachStartedAt: String(nowSec - 2 * 3600),
+          },
+        ],
+      },
+    });
+    const pool: Pool = {
+      ...BASE_POOL,
+      healthTotalSeconds: String(30 * 86400),
+    };
+    const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
+    expect(html).toContain("2 past + 1 ongoing");
+  });
+
+  it("snapshots openStart from the rollup query, not the Pool prop — no cache-stale double-count", () => {
+    // Guards the invariant the whole fix was for: the tile reads
+    // deviationBreachStartedAt from rollup.Pool[0], NOT from the pool
+    // prop. If a just-closed breach left a stale prop with a non-zero
+    // anchor, the rollup already has 0, so no phantom open-breach time
+    // is added. Here we simulate that mismatch: prop says "open", rollup
+    // says "closed".
+    const nowSec = Math.floor(Date.now() / 1000);
+    mockUseGQL.mockReturnValueOnce({
+      data: {
+        Pool: [
+          {
+            cumulativeCriticalSeconds: "3600", // the breach just closed
+            breachCount: 1,
+            deviationBreachStartedAt: "0", // rollup says closed
+          },
+        ],
+      },
+    });
+    const pool: Pool = {
+      ...BASE_POOL,
+      healthTotalSeconds: String(30 * 86400),
+      // Stale prop: still looks open. Must be ignored.
+      deviationBreachStartedAt: String(nowSec - 2 * 3600),
+    };
+    const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
+    // 3600 / (30 × 86400) ≈ 0.139% → 99.861% (NOT 99.722%, which would
+    // be the double-count).
+    expect(html).toContain("99.861%");
+    expect(html).toContain("1 breach"); // closed, not "1 ongoing"
   });
 
   it("scales accurately past the 100-row breach-history cap — rolls from scalar, not breach list", () => {

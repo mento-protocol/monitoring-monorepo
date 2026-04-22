@@ -12,17 +12,9 @@ const UPTIME_EXPLAINER =
 type BreachRollup = {
   cumulativeCriticalSeconds?: string;
   breachCount?: number;
+  deviationBreachStartedAt?: string;
 };
 
-/**
- * Uptime % = 1 − (cumulativeCriticalSeconds + open-breach live post-grace)
- *           / healthTotalSeconds
- *
- * Pulls the pool-level rollup via its own query so the number stays
- * accurate past the 100-row breach history cap. The live open-breach
- * portion is approximated against wall-clock — weekend subtraction
- * resolves exactly once the breach closes and the accumulator lands.
- */
 export function UptimeValue({ pool }: { pool: Pool }) {
   const { data, error } = useGQL<{ Pool: BreachRollup[] }>(
     pool.source?.includes("virtual") ? null : POOL_BREACH_ROLLUP,
@@ -33,45 +25,51 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   if (!Number.isFinite(total) || total <= 0) {
     return <span className="text-slate-500">N/A</span>;
   }
-  // During the indexer-resync window the hosted Hasura will reject the new
-  // columns. Surface N/A rather than "Query failed" — the SLO simply isn't
-  // tellable yet from the UI's point of view.
+  // During the indexer-resync window the hosted Hasura rejects the new
+  // columns. N/A is the honest answer for "can't tell yet" — surfacing
+  // "Query failed" would cry wolf.
   if (error) return <span className="text-slate-500">N/A</span>;
 
+  // Read rollup + open-breach anchor from the SAME query result so they're
+  // a consistent snapshot. Mixing with `pool.deviationBreachStartedAt`
+  // from POOL_DETAIL_WITH_HEALTH would double-count a just-closed breach
+  // during the brief window where the rollup refreshed first.
   const rollup = data?.Pool?.[0];
   const rolledCritical = Number(rollup?.cumulativeCriticalSeconds ?? "0");
-  const breachCount = rollup?.breachCount ?? 0;
+  const closedBreachCount = rollup?.breachCount ?? 0;
+  const openStart = Number(rollup?.deviationBreachStartedAt ?? "0");
+  const hasOpenBreach = openStart > 0;
 
-  // Open-breach live contribution: the indexer rolls criticalDurationSeconds
-  // into the scalar only on close, so an active breach that's already past
-  // the 1h grace is not yet in `rolledCritical`. Reach out via the
-  // still-indexed `deviationBreachStartedAt` on Pool itself (already in
-  // POOL_DETAIL_WITH_HEALTH) so the tile moves in real time.
-  const openStart = Number(pool.deviationBreachStartedAt ?? "0");
+  // Open breaches aren't in `rolledCritical` until they close — add the
+  // live past-grace portion so the tile moves in real time.
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const openCritical =
-    openStart > 0
-      ? Math.max(
-          0,
-          nowSeconds - openStart - Number(DEVIATION_BREACH_GRACE_SECONDS),
-        )
-      : 0;
+  const openCritical = hasOpenBreach
+    ? Math.max(
+        0,
+        nowSeconds - openStart - Number(DEVIATION_BREACH_GRACE_SECONDS),
+      )
+    : 0;
 
   const pct = Math.max(
     0,
     Math.min(100, (1 - (rolledCritical + openCritical) / total) * 100),
   );
+  const totalBreaches = closedBreachCount + (hasOpenBreach ? 1 : 0);
+  const subtitle =
+    totalBreaches === 0
+      ? "no breaches"
+      : hasOpenBreach && closedBreachCount === 0
+        ? "1 ongoing breach"
+        : hasOpenBreach
+          ? `${closedBreachCount} past + 1 ongoing`
+          : `${closedBreachCount} ${closedBreachCount === 1 ? "breach" : "breaches"}`;
   return (
     <span className="flex flex-col gap-0.5">
       <span className="font-medium text-white">
         {pct.toFixed(3)}%
         <span className="ml-1 text-xs text-slate-500">all-time</span>
       </span>
-      <span className="text-xs text-slate-500">
-        {breachCount === 0
-          ? "no breaches"
-          : `${breachCount} ${breachCount === 1 ? "breach" : "breaches"}`}
-      </span>
+      <span className="text-xs text-slate-500">{subtitle}</span>
     </span>
   );
 }

@@ -258,6 +258,7 @@ export const POOL_BREACH_ROLLUP = `
       cumulativeBreachSeconds
       cumulativeCriticalSeconds
       breachCount
+      deviationBreachStartedAt
     }
   }
 `;

@@ -118,6 +118,31 @@ describe("recordBreachTransition — rising edge", () => {
     assert.equal(row.rebalanceCountDuring, 0);
   });
 
+  it("sets rebalanceCountDuring=1 on a rising edge triggered by a rebalance event", async () => {
+    // Rare but possible: a rebalance that also causes the rising edge.
+    // The `isRebalance ? 1 : 0` branch must count the closing rebalance
+    // on creation so the "attempts observed" metric is honest.
+    const { store, context } = makeMockContext();
+    const prev = makePool({
+      priceDifference: 4000n,
+      deviationBreachStartedAt: 0n,
+    });
+    const next = makePool({
+      priceDifference: 7500n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON,
+      blockNumber: 100n,
+      txHash: "0xrbl-rise",
+      source: "fpmm_rebalanced",
+      strategy: "0xstrategy",
+    });
+    const row = store.get(openBreachId(next.id, MON_NOON))!;
+    assert.equal(row.rebalanceCountDuring, 1);
+    assert.equal(row.startedByEvent, "rebalance");
+  });
+
   it("treats a missing prev as a fresh breach when next is already breached", async () => {
     const { store, context } = makeMockContext();
     const next = makePool({
@@ -382,6 +407,106 @@ describe("recordBreachTransition — falling edge", () => {
     assert.equal(poolUpdate.cumulativeCriticalSeconds, 0n);
   });
 
+  it("criticalDurationSeconds is 0 when endedAt lands exactly on the grace boundary", async () => {
+    // Strict `endedAt > graceEnd` means endedAt === startedAt + 3600 stays
+    // at 0 critical. Guards against an off-by-one where `>=` would credit
+    // a boundary-close as having critical seconds.
+    const { store, context } = makeMockContext();
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", MON_NOON),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: MON_NOON,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 6000n,
+      peakPriceDifference: 6000n,
+      peakAt: MON_NOON,
+      peakAtBlock: 100n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xabc",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+    const prev = makePool({
+      priceDifference: 6000n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    const next = makePool({
+      priceDifference: 4000n,
+      deviationBreachStartedAt: 0n,
+    });
+    await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON + 3600n, // exactly at grace boundary
+      blockNumber: 150n,
+      txHash: "0xedge",
+      source: "fpmm_rebalanced",
+      strategy: "0xstrat",
+    });
+    const closed = store.get(open.id)!;
+    assert.equal(closed.durationSeconds, 3600n);
+    assert.equal(closed.criticalDurationSeconds, 0n);
+  });
+
+  it("bootstraps a row on the falling-edge self-heal path (rising-edge never tracked)", async () => {
+    // nextDeviationBreachStartedAt self-heals a partial-restore state:
+    // prev is breached but prev.deviationBreachStartedAt === 0n. No row
+    // was ever created, so we can't close one — roll the breach count
+    // but skip the duration math (startedAt unknown).
+    const { store, context } = makeMockContext();
+    const prev = makePool({
+      priceDifference: 8000n,
+      deviationBreachStartedAt: 0n, // self-heal anchor
+    });
+    const next = makePool({
+      priceDifference: 4000n,
+      deviationBreachStartedAt: 0n,
+      breachCount: 0,
+    });
+    const poolUpdate = await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON,
+      blockNumber: 200n,
+      txHash: "0xheal-close",
+      source: "oracle_reported",
+    });
+    assert.equal(store.size, 0); // no row to close
+    assert.equal(poolUpdate.breachCount, 1); // still counted
+    assert.equal(poolUpdate.cumulativeCriticalSeconds, undefined);
+  });
+
+  it("bootstraps a row on the continuing-breach self-heal path (first-observed post-startup)", async () => {
+    // nextDeviationBreachStartedAt self-heals to current block time when
+    // it sees an already-breached pool for the first time without an
+    // anchor. The continuing-breach path must create an entity row then
+    // so the eventual falling edge has something to close.
+    const { store, context } = makeMockContext();
+    const prev = makePool({
+      priceDifference: 8000n,
+      deviationBreachStartedAt: 0n, // self-heal anchor
+    });
+    const next = makePool({
+      priceDifference: 8500n,
+      deviationBreachStartedAt: MON_NOON, // self-healed to current block
+    });
+    await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON,
+      blockNumber: 200n,
+      txHash: "0xheal-continue",
+      source: "oracle_reported",
+    });
+    const row = store.get(openBreachId(next.id, MON_NOON))!;
+    assert.isDefined(row);
+    assert.equal(row.startedAt, MON_NOON);
+    assert.equal(row.startedByEvent, "unknown");
+    assert.equal(row.entryPriceDifference, 8500n);
+  });
+
   it("measures durations in trading-seconds so a breach spanning a weekend excludes closure hours", async () => {
     const { store, context } = makeMockContext();
     // Breach starts Fri 2024-01-05 20:00:00 UTC (1 hour before FX close
@@ -435,9 +560,14 @@ describe("recordBreachTransition — falling edge", () => {
     assert.equal(closed.criticalDurationSeconds, 3600n);
   });
 
-  it("gracefully no-ops when the open row cannot be found (data inconsistency)", async () => {
+  it("still rolls breachCount on the falling edge when the open row is missing (data loss)", async () => {
+    // Data loss covers two paths: (a) a self-heal from a partial restore
+    // — prev.deviationBreachStartedAt is 0n, (b) a store row was lost
+    // while the anchor on prev survived. Either way we can't reconstruct
+    // the duration, but we know a breach was in progress, so counting it
+    // in `breachCount` is the honest answer. Tested here with the data-
+    // loss shape; the self-heal shape has its own test above.
     const { store, context } = makeMockContext();
-    // No row in the store, but prev says we were breached.
     const prev = makePool({
       priceDifference: 8000n,
       deviationBreachStartedAt: MON_NOON,
@@ -445,6 +575,7 @@ describe("recordBreachTransition — falling edge", () => {
     const next = makePool({
       priceDifference: 3000n,
       deviationBreachStartedAt: 0n,
+      breachCount: 4,
     });
     const poolUpdate = await recordBreachTransition(context, prev, next, {
       blockTimestamp: MON_NOON + 600n,
@@ -452,7 +583,9 @@ describe("recordBreachTransition — falling edge", () => {
       txHash: "0xorphan",
       source: "oracle_reported",
     });
-    assert.deepEqual(poolUpdate, {});
+    assert.equal(poolUpdate.breachCount, 5);
+    assert.equal(poolUpdate.cumulativeBreachSeconds, undefined);
+    assert.equal(poolUpdate.cumulativeCriticalSeconds, undefined);
     assert.equal(store.size, 0);
   });
 });

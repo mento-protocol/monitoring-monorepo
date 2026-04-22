@@ -130,15 +130,18 @@ export async function recordBreachTransition(
 
   // Falling edge -----------------------------------------------------------
   if (wasBreached && !isBreached) {
-    // prev!.deviationBreachStartedAt was the anchor; the row's id is keyed
-    // on that exact value.
-    const openId = openBreachId(poolId, prev!.deviationBreachStartedAt);
+    if (!prev) return {};
+    // The row's id is keyed on the rising-edge anchor, which lives on
+    // `prev.deviationBreachStartedAt` by construction.
+    const openId = openBreachId(poolId, prev.deviationBreachStartedAt);
     const open = await context.DeviationThresholdBreach.get(openId);
     if (!open) {
-      // No row to close (data inconsistency, e.g. pool was breached in
-      // history but the breach row was lost). Skip gracefully rather than
-      // throw — one missing row shouldn't stall the handler.
-      return {};
+      // Self-heal case: `nextDeviationBreachStartedAt` adopted the anchor
+      // from a partial-restore state (prev was breached with 0n anchor).
+      // No rising-edge row was ever recorded, so we can't close one. Roll
+      // the cumulative count but skip the duration math — we don't know
+      // when the breach actually started.
+      return { breachCount: next.breachCount + 1 };
     }
     const endedAt = trigger.blockTimestamp;
     const durationSeconds = tradingSecondsInRange(open.startedAt, endedAt);
@@ -169,9 +172,38 @@ export async function recordBreachTransition(
 
   // Continuing breach ------------------------------------------------------
   // wasBreached && isBreached — maybe bump peak or rebalance count.
-  const openId = openBreachId(poolId, prev!.deviationBreachStartedAt);
+  if (!prev) return {};
+  const openId = openBreachId(poolId, prev.deviationBreachStartedAt);
   const open = await context.DeviationThresholdBreach.get(openId);
-  if (!open) return {};
+  if (!open) {
+    // Self-heal case: `nextDeviationBreachStartedAt` adopted the current
+    // block as the anchor for a breach that was already in progress
+    // before tracking began. Bootstrap an entity row now so the eventual
+    // falling edge has something to close. `startedByEvent` is marked
+    // "unknown" because the original trigger is lost.
+    context.DeviationThresholdBreach.set({
+      id: openBreachId(poolId, next.deviationBreachStartedAt),
+      chainId: next.chainId,
+      poolId,
+      startedAt: next.deviationBreachStartedAt,
+      startedAtBlock: trigger.blockNumber,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: next.priceDifference,
+      peakPriceDifference: next.priceDifference,
+      peakAt: trigger.blockTimestamp,
+      peakAtBlock: trigger.blockNumber,
+      startedByEvent: "unknown",
+      startedByTxHash: trigger.txHash,
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: isRebalance ? 1 : 0,
+    });
+    return {};
+  }
   const peakBumped = next.priceDifference > open.peakPriceDifference;
   if (!peakBumped && !isRebalance) return {};
   context.DeviationThresholdBreach.set({
