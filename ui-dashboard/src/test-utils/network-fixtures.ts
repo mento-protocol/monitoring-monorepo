@@ -20,9 +20,11 @@ export const BASE_NETWORK: Network = {
 
 export const NETWORK_2: Network = {
   ...BASE_NETWORK,
-  id: "celo-sepolia",
-  label: "Celo Sepolia",
+  id: "celo-sepolia-local",
+  label: "Celo Sepolia (local)",
   chainId: 11142220,
+  local: true,
+  testnet: true,
 };
 
 // USDm/KESm symbols paired with a 1e24 oracle price in makeTvlPool give both
@@ -37,9 +39,11 @@ export const TVL_NETWORK: Network = {
 
 export const TVL_NETWORK_2: Network = {
   ...TVL_NETWORK,
-  id: "celo-sepolia",
-  label: "Celo Sepolia",
+  id: "celo-sepolia-local",
+  label: "Celo Sepolia (local)",
   chainId: 11142220,
+  local: true,
+  testnet: true,
 };
 
 export function makeTvlPool(overrides: Partial<Pool> = {}): Pool {

@@ -109,8 +109,11 @@ export default function AddressBookPage({
             },
           ];
         }
-        const net = networkForChainId(r.scope);
-        if (!net) return [];
+        // Fall back to a synthetic network for legacy chain scopes (e.g. rows
+        // written against the now-retired hosted testnet networks). Keeps
+        // orphaned entries visible so users can delete them rather than
+        // having them silently disappear from the UI.
+        const net = networkForChainId(r.scope) ?? unknownChainNetwork(r.scope);
         return [
           {
             key: `custom:${r.scope}:${r.address}`,
@@ -434,6 +437,23 @@ export default function AddressBookPage({
 function networkForChainId(chainId: number): Network | null {
   const id = networkIdForChainId(chainId);
   return id ? NETWORKS[id] : null;
+}
+
+function unknownChainNetwork(chainId: number): Network {
+  return {
+    id: DEFAULT_NETWORK,
+    label: `Chain ${chainId}`,
+    chainId,
+    contractsNamespace: null,
+    hasuraUrl: "",
+    hasuraSecret: "",
+    explorerBaseUrl: "",
+    tokenSymbols: {},
+    addressLabels: {},
+    local: false,
+    testnet: false,
+    hasVirtualPools: false,
+  };
 }
 
 function contractInitial(address: string, chainId: number) {

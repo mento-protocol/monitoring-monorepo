@@ -98,8 +98,7 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
 | Variable                                 | Description                                                                                                |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_HASURA_URL_MULTICHAIN`      | Shared multichain GraphQL endpoint (Celo + Monad)                                                          |
-| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`    | Celo Sepolia endpoint                                                                                      |
+| `NEXT_PUBLIC_HASURA_URL`                 | Prod Envio GraphQL endpoint (shared by Celo + Monad mainnet, filtered by chainId)                          |
 | `HASURA_SECRET_DEVNET`                   | Optional server-only admin secret for `/api/hasura/devnet` proxy                                           |
 | `HASURA_SECRET_CELO_SEPOLIA_LOCAL`       | Optional server-only admin secret for `/api/hasura/celo-sepolia-local` proxy                               |
 | `HASURA_SECRET_CELO_MAINNET_LOCAL`       | Optional server-only admin secret for `/api/hasura/celo-mainnet-local` proxy                               |

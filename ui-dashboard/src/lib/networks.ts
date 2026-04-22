@@ -10,17 +10,14 @@ const NS = {
   "celo-mainnet": DEPLOYMENT_NAMESPACES["42220"],
   "celo-sepolia": DEPLOYMENT_NAMESPACES["11142220"],
   "monad-mainnet": DEPLOYMENT_NAMESPACES["143"],
-  "monad-testnet": DEPLOYMENT_NAMESPACES["10143"],
 } as const;
 
 export type IndexerNetworkId =
   | "devnet"
   | "celo-sepolia-local"
-  | "celo-sepolia"
   | "celo-mainnet-local"
   | "celo-mainnet"
-  | "monad-mainnet"
-  | "monad-testnet";
+  | "monad-mainnet";
 
 export type Network = {
   id: IndexerNetworkId;
@@ -176,22 +173,6 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_LOCAL ??
       "https://celo-sepolia.blockscout.com",
   }),
-  "celo-sepolia": makeNetwork({
-    id: "celo-sepolia",
-    label: "Celo Sepolia",
-    testnet: true,
-    hasVirtualPools: true,
-    chainId: 11142220,
-    contractsNamespace: NS["celo-sepolia"],
-    rpcUrl:
-      process.env.NEXT_PUBLIC_RPC_URL_CELO_SEPOLIA ??
-      "https://forno.celo-sepolia.celo-testnet.org",
-    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA ?? "",
-    hasuraSecret: "",
-    explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA ??
-      "https://celo-sepolia.blockscout.com",
-  }),
   "celo-mainnet-local": makeNetwork({
     id: "celo-mainnet-local",
     label: "Celo (local)",
@@ -216,7 +197,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     chainId: 42220,
     contractsNamespace: NS["celo-mainnet"],
     rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_CELO ?? "https://forno.celo.org",
-    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN?.trim() ?? "",
+    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL?.trim() ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET ??
@@ -232,24 +213,11 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     contractsNamespace: NS["monad-mainnet"],
     rpcUrl:
       process.env.NEXT_PUBLIC_RPC_URL_MONAD_MAINNET ?? "https://rpc2.monad.xyz",
-    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MULTICHAIN?.trim() ?? "",
+    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL?.trim() ?? "",
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_MAINNET ??
       "https://monadscan.com",
-  }),
-  "monad-testnet": makeNetwork({
-    id: "monad-testnet",
-    label: "Monad Testnet",
-    testnet: true,
-    chainId: 10143,
-    contractsNamespace: NS["monad-testnet"],
-    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL_MONAD_TESTNET,
-    hasuraUrl: process.env.NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET ?? "",
-    hasuraSecret: "",
-    explorerBaseUrl:
-      process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_TESTNET ??
-      "https://testnet.monadscan.com",
   }),
 };
 
@@ -260,9 +228,7 @@ export const DEFAULT_NETWORK: IndexerNetworkId = "celo-mainnet";
 // sharing a chainId can't silently reroute prod pool URLs.
 const PROD_NETWORK_BY_CHAIN_ID: Record<number, IndexerNetworkId> = {
   42220: "celo-mainnet",
-  11142220: "celo-sepolia",
   143: "monad-mainnet",
-  10143: "monad-testnet",
 };
 
 // Canonical network id for a chainId (used to derive the active network

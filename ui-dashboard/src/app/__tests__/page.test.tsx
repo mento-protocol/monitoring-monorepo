@@ -380,7 +380,7 @@ describe("GlobalPage — cross-chain key collision", () => {
     expect(capturedProps).not.toBeNull();
     const map = capturedProps!.volume24hByKey as Map<string, number | null>;
     expect(map.has("celo-mainnet:0xpool1")).toBe(true);
-    expect(map.has("celo-sepolia:0xpool1")).toBe(true);
+    expect(map.has("celo-sepolia-local:0xpool1")).toBe(true);
     expect(map.size).toBe(2);
   });
 

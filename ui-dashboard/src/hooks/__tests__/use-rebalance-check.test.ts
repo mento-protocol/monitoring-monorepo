@@ -90,7 +90,6 @@ describe("useRebalanceCheck RPC-availability gate", () => {
   it("skips fetching when the network has no rpcUrl (would 400 every refresh)", () => {
     const networkWithoutRpc: Network = {
       ...NETWORK_WITH_RPC,
-      id: "monad-testnet",
       rpcUrl: undefined,
     };
     expect(captureKey(CRITICAL_POOL, networkWithoutRpc)).toBeNull();

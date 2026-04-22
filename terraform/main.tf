@@ -85,31 +85,12 @@ resource "vercel_project" "dashboard" {
 }
 
 # ── Environment Variables ─────────────────────────────────────────────────────
-# Using individual resources so optional vars can use count without type-mixing.
 
-resource "vercel_project_environment_variable" "hasura_url_multichain" {
-  count      = var.hasura_url_multichain != "" ? 1 : 0
+resource "vercel_project_environment_variable" "hasura_url" {
   project_id = vercel_project.dashboard.id
   team_id    = var.vercel_team_id
-  key        = "NEXT_PUBLIC_HASURA_URL_MULTICHAIN"
-  value      = var.hasura_url_multichain
-  target     = ["production", "preview"]
-}
-
-resource "vercel_project_environment_variable" "hasura_url_celo_sepolia" {
-  project_id = vercel_project.dashboard.id
-  team_id    = var.vercel_team_id
-  key        = "NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA"
-  value      = var.hasura_url_celo_sepolia
-  target     = ["production", "preview"]
-}
-
-resource "vercel_project_environment_variable" "hasura_url_monad_testnet" {
-  count      = var.hasura_url_monad_testnet != "" ? 1 : 0
-  project_id = vercel_project.dashboard.id
-  team_id    = var.vercel_team_id
-  key        = "NEXT_PUBLIC_HASURA_URL_MONAD_TESTNET"
-  value      = var.hasura_url_monad_testnet
+  key        = "NEXT_PUBLIC_HASURA_URL"
+  value      = var.hasura_url
   target     = ["production", "preview"]
 }
 
@@ -344,7 +325,7 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
       }
       env {
         name  = "HASURA_URL"
-        value = var.hasura_url_multichain
+        value = var.hasura_url
       }
       env {
         name  = "POLL_INTERVAL_MS"
