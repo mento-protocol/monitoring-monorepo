@@ -9,7 +9,7 @@ The `metrics-bridge` package (Cloud Run) exports FPMM pool KPIs as Prometheus ga
 ### v3 Alert Rules
 
 - [ ] **Oracle liveness** — warn >0.8, crit ≥1 (oracle expired). FPMM pools only.
-- [ ] **Deviation ratio** — warn ≥0.8 sustained >15min, crit >60min. Indexer tracks `deviationBreachStartedAt`.
+- [ ] **Deviation ratio** — warn on breach (`priceDifference > rebalanceThreshold`), crit when breach lasts >60min. Indexer tracks `deviationBreachStartedAt` as the grace-window anchor.
 - [ ] **Trading limit pressure** — warn >0.8, crit ≥1.0 (limit hit). FPMM pools only.
 - [ ] **Rebalancer liveness** — crit if no rebalance in threshold window when deviation is high
 - [ ] **Stability Pool headroom** — crit ≤0 (undercollateralized). Blocked on Liquity v2 indexing.

@@ -90,7 +90,7 @@ The `metrics-bridge` package polls Hasura for FPMM pool KPIs and exports them as
 ### v3 KPIs to Alert On
 
 1. **Oracle liveness** (FPMM pools) — warn when liveness ratio >0.8, critical when oracle expired (≥1.0)
-2. **Deviation ratio** (FPMM pools) — warn when `deviationBreachStartedAt` sustained >15min, critical >60min
+2. **Deviation ratio** (FPMM pools) — warn as soon as `priceDifference > rebalanceThreshold` (breach entered); critical when the breach has lasted > 60min (`deviationBreachStartedAt` older than 1h)
 3. **Trading limit pressure** (FPMM pools) — warn when max pressure >0.8, critical when limit hit (≥1.0)
 4. **Rebalancer liveness** — critical if no rebalance within threshold window when needed
 5. **Stability Pool headroom** — critical if headroom ≤ 0 (requires Liquity v2 indexing)

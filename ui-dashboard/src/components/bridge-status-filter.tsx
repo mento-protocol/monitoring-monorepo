@@ -1,6 +1,6 @@
 "use client";
 
-import { bridgeStatusLabel } from "@/lib/bridge-status";
+import { bridgeStatusDetailLabel } from "@/lib/bridge-status";
 import type { BridgeStatus } from "@/lib/types";
 
 interface BridgeStatusFilterProps {
@@ -85,7 +85,7 @@ export function BridgeStatusFilter({
                 : "bg-slate-800/60 text-slate-400 hover:text-slate-200")
             }
           >
-            {bridgeStatusLabel(status)}
+            {bridgeStatusDetailLabel(status)}
           </button>
         );
       })}

@@ -54,9 +54,6 @@ export function AddressLink({ address, readOnly = false, chainId }: Props) {
           }`}
         >
           {label}
-          <span className="ml-1 text-slate-600" aria-hidden="true">
-            {"\u2197"}
-          </span>
         </a>
 
         {canEdit && (

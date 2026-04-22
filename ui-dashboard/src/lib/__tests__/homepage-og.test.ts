@@ -224,13 +224,17 @@ describe("fetchHomepageOgDataUncached", () => {
         limitPressure0: "1.1",
       },
     );
+    const nowSec = Math.floor(Date.now() / 1000);
     const warnPool = makePool(
       143,
       POOL_MONAD,
       ADDR_USDM_MONAD,
       ADDR_GBPM_MONAD,
       {
-        priceDifference: "8500", // devRatio 0.85 → WARN
+        // Fresh breach within the 1h grace window → WARN.
+        priceDifference: "15000",
+        rebalanceThreshold: 10000,
+        deviationBreachStartedAt: String(nowSec - 1800),
       },
     );
     routeByChain({
@@ -380,11 +384,16 @@ describe("fetchHomepageOgDataUncached", () => {
         t1,
         overrides,
       );
+    const nowSec = Math.floor(Date.now() / 1000);
     const CRIT = {
       limitStatus: "CRITICAL",
       limitPressure0: "1.1",
     };
-    const WARN = { priceDifference: "8500", rebalanceThreshold: 10000 };
+    const WARN = {
+      priceDifference: "15000",
+      rebalanceThreshold: 10000,
+      deviationBreachStartedAt: String(nowSec - 1800),
+    };
     routeByChain({
       42220: (doc) => {
         if (doc.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };

@@ -49,39 +49,70 @@ const BASE_POOL: Pool = {
 };
 
 describe("DeviationCell — bar color boundaries", () => {
-  it("renders an emerald bar when deviation is below the WARN threshold (ratio < 0.8)", () => {
+  it("renders an emerald bar when deviation is well below the threshold (ratio < 0.8)", () => {
     const pool: Pool = { ...BASE_POOL, priceDifference: "3000" }; // ratio = 0.6
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
     expect(html).toContain("bg-emerald-500");
+    expect(html).not.toContain("bg-yellow-500");
     expect(html).not.toContain("bg-amber-500");
     expect(html).not.toContain("bg-red-500");
   });
 
-  it("renders an amber bar when 0.8 <= ratio <= 1.0 (WARN band)", () => {
+  it("renders a yellow bar when 0.8 <= ratio <= 1.0 (healthy but close)", () => {
+    // Under the new rule the pool stays OK in this band, but the bar
+    // shifts to yellow as a "getting close" visual cue — no warning.
     const pool: Pool = { ...BASE_POOL, priceDifference: "4500" }; // ratio = 0.9
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("bg-amber-500");
+    expect(html).toContain("bg-yellow-500");
+    expect(html).not.toContain("bg-emerald-500");
+    expect(html).not.toContain("bg-amber-500");
     expect(html).not.toContain("bg-red-500");
   });
 
-  it("keeps the bar amber (not red) when deviation sits exactly at the threshold", () => {
-    // ratio = 1.0 — computeHealthStatus treats this as WARN, so the bar
-    // must match. Previously the bar used `>= 1.0` and went red here,
-    // contradicting the HealthBadge in the same cell.
+  it("flips to yellow at exactly ratio = 0.8 (boundary, inclusive)", () => {
+    // 4000/5000 = 0.8 — boundary for the yellow band. Code uses `>= 0.8`,
+    // so this must render yellow, not emerald.
+    const pool: Pool = { ...BASE_POOL, priceDifference: "4000" };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("bg-yellow-500");
+    expect(html).not.toContain("bg-emerald-500");
+  });
+
+  it("stays emerald just below the yellow boundary (ratio = 0.7998)", () => {
+    // 3999/5000 = 0.7998 — one bp below the yellow band stays emerald.
+    const pool: Pool = { ...BASE_POOL, priceDifference: "3999" };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("bg-emerald-500");
+    expect(html).not.toContain("bg-yellow-500");
+  });
+
+  it("keeps the bar yellow (not amber) when deviation sits exactly at the threshold", () => {
+    // At-threshold is healthy now — same yellow "close" treatment, not a
+    // warning-state amber.
     const pool: Pool = { ...BASE_POOL, priceDifference: "5000" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("bg-amber-500");
+    expect(html).toContain("bg-yellow-500");
+    expect(html).not.toContain("bg-amber-500");
     expect(html).not.toContain("bg-red-500");
   });
 
-  it("renders a red bar when deviation exceeds the threshold with no recent rebalance", () => {
-    const pool: Pool = { ...BASE_POOL, priceDifference: "8000" }; // ratio = 1.6
+  it("renders a red bar when a breach has outlived the 1h grace window", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const pool: Pool = {
+      ...BASE_POOL,
+      priceDifference: "8000",
+      deviationBreachStartedAt: String(now - 2 * 3600),
+    };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
@@ -155,29 +186,33 @@ describe("DeviationCell — bar color boundaries", () => {
     expect(html).not.toContain("At threshold");
   });
 
-  it("keeps the bar amber while a recent rebalance (within 1h) is still settling", () => {
-    // dev > 100% but rebalance landed 30m ago → health status stays WARN
-    // within the grace window, and the bar must stay amber to match.
+  it("renders an amber bar while the breach is within the 1h grace window", () => {
+    // dev > 100% but the breach started 30m ago → health status stays WARN,
+    // and the bar matches with amber (not red, not yellow).
     const now = Math.floor(Date.now() / 1000);
     const pool: Pool = {
       ...BASE_POOL,
       priceDifference: "8000",
-      lastRebalancedAt: String(now - 30 * 60),
+      deviationBreachStartedAt: String(now - 30 * 60),
     };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
     expect(html).toContain("bg-amber-500");
     expect(html).not.toContain("bg-red-500");
+    expect(html).not.toContain("bg-yellow-500");
   });
 });
 
 describe("DeviationCell — breach start indicator", () => {
-  it("renders 'Breach started' line in red when breached (CRITICAL) with accessible absolute timestamp", () => {
-    const breachStart = String(Math.floor(Date.now() / 1000) - 3600); // 1h ago
+  it("renders 'Breach started' line in red when breach has outlived the grace window (CRITICAL)", () => {
+    // 2h ago is past the 1h grace — status flips to CRITICAL and the
+    // subtext matches.
+    const now = Math.floor(Date.now() / 1000);
+    const breachStart = String(now - 2 * 3600);
     const pool: Pool = {
       ...BASE_POOL,
-      priceDifference: "6000", // above 5000 threshold → CRITICAL
+      priceDifference: "6000",
       deviationBreachStartedAt: breachStart,
     };
     const html = renderToStaticMarkup(
@@ -185,8 +220,6 @@ describe("DeviationCell — breach start indicator", () => {
     );
 
     expect(html).toContain("Breach started");
-    expect(html).toContain("1h ago");
-    // Color matches the CRITICAL badge/bar severity
     expect(html).toContain("text-red-400");
     // a11y: screen readers in browse mode read the absolute timestamp
     // alongside the relative label via a visually-hidden sr-only span
@@ -195,16 +228,13 @@ describe("DeviationCell — breach start indicator", () => {
     expect(html).toMatch(/<time[^>]*dateTime=/);
   });
 
-  it("renders 'Breach started' line in amber when breached but within the 1h rebalance grace (WARN)", () => {
-    // devRatio > 1 AND rebalance landed 30 min ago → computeHealthStatus
-    // keeps status at WARN. The subtext must match: amber, not red.
+  it("renders 'Breach started' line in amber when still within the 1h grace (WARN)", () => {
     const now = Math.floor(Date.now() / 1000);
     const breachStart = String(now - 1800); // 30 min ago
     const pool: Pool = {
       ...BASE_POOL,
       priceDifference: "6000",
       deviationBreachStartedAt: breachStart,
-      lastRebalancedAt: String(now - 30 * 60),
     };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,

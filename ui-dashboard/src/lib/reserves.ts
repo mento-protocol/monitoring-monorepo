@@ -39,20 +39,24 @@ export function computeReservePcts(
  * construction (both sides have equal USD value when the pool is balanced
  * at oracle price). At critical threshold T = rebalanceThreshold/10000:
  *
- *   threshold0Upper = (1+T)/(2+T) × 100   ← too much token0
- *   threshold0Lower = (1-T)/(2-T) × 100   ← too little token0
+ *   threshold0Upper = 100 / (2 − T)   ← too much token0  (x0 at usd1/usd0 = 1−T)
+ *   threshold0Lower = 100 / (2 + T)   ← too little token0 (x0 at usd1/usd0 = 1+T)
  *   threshold1Lower = 100 − threshold0Upper  (complements, since pct1 = 100−pct0)
  *   threshold1Upper = 100 − threshold0Lower
  *
- * Derivation: constant product pool at critical → r0/r1 = P_pool×(1±T).
- *   In USD terms: usd0/usd1 = 1±T → x_usd = (1±T)/(2±T). Oracle price cancels.
+ * Derivation: the indexer computes priceDifference from reserveRatio = r1/r0
+ * (see indexer-envio/src/priceDifference.ts). At critical:
+ *   r1/r0 / oracleRef = 1 ± T → usd1/usd0 = 1 ± T   (oracle cancels via the
+ *                                                   USD-price ratio)
+ *   x0 = 1 / (1 + usd1/usd0) = 1 / (2 ± T)
  *
  * Returns null when:
  * - usdTotal is null (no oracle → using raw count pct, formula doesn't apply)
  * - rebalanceThreshold is missing or zero
- * - T > 1 (threshold > 10000 bps): (1−T) becomes negative, lower bound goes below 0%.
- *   At T=1 (10000 bps) exactly: lower=0%, upper=66.7% — still renderable.
- *   At T=2: denominator (2−T)=0, undefined. Guard keeps T strictly below 2.
+ * - T ≥ 1 (threshold ≥ 10000 bps): threshold0Upper = 100/(2−T) hits 100% at
+ *   T=1 and blows past the bar above it. T > 1 is also semantically
+ *   nonsense — a pool that tolerates >100% price deviation has no
+ *   meaningful rebalance line to draw.
  */
 interface ThresholdLines {
   threshold0Lower: number;
@@ -70,10 +74,10 @@ export function computeThresholdLines(
     rebalanceThreshold != null && rebalanceThreshold > 0
       ? rebalanceThreshold / 10000
       : null;
-  if (T === null || T > 1) return null;
+  if (T === null || T >= 1) return null;
 
-  const threshold0Upper = ((1 + T) / (2 + T)) * 100;
-  const threshold0Lower = ((1 - T) / (2 - T)) * 100;
+  const threshold0Upper = 100 / (2 - T);
+  const threshold0Lower = 100 / (2 + T);
   return {
     threshold0Upper,
     threshold0Lower,

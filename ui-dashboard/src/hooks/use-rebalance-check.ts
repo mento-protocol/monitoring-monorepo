@@ -83,7 +83,7 @@ function shouldRunCheck(pool: Pool | null, chainId?: number): boolean {
   const diff = Number(pool.priceDifference ?? "0");
   const threshold =
     (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
-  if (diff < threshold) return false;
+  if (diff <= threshold) return false;
 
   return true;
 }

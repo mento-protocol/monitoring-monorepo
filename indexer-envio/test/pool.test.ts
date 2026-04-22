@@ -103,16 +103,16 @@ describe("nextDeviationBreachStartedAt", () => {
     assert.equal(nextDeviationBreachStartedAt(prev, next, TS), origStart);
   });
 
-  it("CRITICAL → WARN resets to 0n", () => {
+  it("breached → close-to-threshold (still under) resets to 0n", () => {
     const prev = makePool({
       priceDifference: 6000n,
       deviationBreachStartedAt: 1_600_000_000n,
     });
-    const next = makePool({ priceDifference: 4500n }); // d = 0.9 → WARN
+    const next = makePool({ priceDifference: 4500n }); // d = 0.9 → OK
     assert.equal(nextDeviationBreachStartedAt(prev, next, TS), 0n);
   });
 
-  it("CRITICAL → OK resets to 0n", () => {
+  it("breached → well under threshold resets to 0n", () => {
     const prev = makePool({
       priceDifference: 6000n,
       deviationBreachStartedAt: 1_600_000_000n,
@@ -121,9 +121,9 @@ describe("nextDeviationBreachStartedAt", () => {
     assert.equal(nextDeviationBreachStartedAt(prev, next, TS), 0n);
   });
 
-  it("WARN → CRITICAL sets (WARN is not a breach)", () => {
+  it("under-threshold → breached sets the anchor", () => {
     const prev = makePool({
-      priceDifference: 4500n, // d = 0.9 → WARN, not breached
+      priceDifference: 4500n,
       deviationBreachStartedAt: 0n,
     });
     const next = makePool({ priceDifference: 5100n }); // breached

@@ -135,7 +135,10 @@ describe("RebalanceStatusValue", () => {
     expect(html).toContain("text-emerald-400");
   });
 
-  it('renders "Near threshold" in amber when the pool is WARN but below rebalance threshold', () => {
+  it('still renders "Balanced" when the pool is near the threshold but not breached', () => {
+    // "Near threshold" used to flip the status to amber at 80%+ of the
+    // threshold. Now we only warn on an actual breach — a pool at 90% of
+    // the threshold is still healthy, so the rebalance status stays green.
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     const html = renderToStaticMarkup(
       <RebalanceStatusValue
@@ -144,26 +147,45 @@ describe("RebalanceStatusValue", () => {
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toContain("Near threshold");
-    expect(html).toContain("text-amber-400");
+    expect(html).toContain("Balanced");
+    expect(html).toContain("text-emerald-400");
+    expect(html).not.toContain("Near threshold");
+    expect(html).not.toContain("At threshold");
   });
 
-  it('uses the 10000 bps fallback for "At threshold" when rebalanceThreshold is 0', () => {
-    // Pools without a configured rebalanceThreshold fall back to 10000 bps
-    // in computeHealthStatus. The passive label must follow the same
-    // convention — otherwise diff=10000/threshold=0 renders "Near
-    // threshold" while the health pipeline says the pool is exactly at
-    // the (effective) boundary.
+  it('still renders "Balanced" when deviation sits exactly at the threshold', () => {
+    // Exactly-at-threshold is no longer a warning state.
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     const html = renderToStaticMarkup(
       <RebalanceStatusValue
-        pool={{ ...BASE_POOL, priceDifference: "10000", rebalanceThreshold: 0 }}
+        pool={{ ...BASE_POOL, priceDifference: "5000" }}
         network={NETWORK}
         strategyAddress={STRATEGY_ADDR}
       />,
     );
-    expect(html).toContain("At threshold");
-    expect(html).not.toContain("Near threshold");
+    expect(html).toContain("Balanced");
+    expect(html).toContain("text-emerald-400");
+    expect(html).not.toContain("At threshold");
+  });
+
+  it('renders "Rebalance required" in amber once deviation breaches the threshold (within grace)', () => {
+    // devRatio > 1 with a fresh breach anchor → WARN from
+    // computeHealthStatus → passive label "Rebalance required".
+    mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
+    const now = Math.floor(Date.now() / 1000);
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={{
+          ...BASE_POOL,
+          priceDifference: "6000",
+          deviationBreachStartedAt: String(now - 5 * 60),
+        }}
+        network={NETWORK}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    expect(html).toContain("Rebalance required");
+    expect(html).toContain("text-amber-400");
   });
 
   it('renders "Oracle stale" in red when health is CRITICAL but the check was skipped because deviation is still below threshold', () => {

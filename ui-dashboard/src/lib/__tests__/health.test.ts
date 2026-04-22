@@ -74,8 +74,9 @@ describe("computeHealthStatus", () => {
     ).toBe("OK");
   });
 
-  it('returns "WARN" when deviation is >= 80% of threshold', () => {
-    // priceDifference = 4000, threshold = 5000 → ratio = 0.8 → WARN
+  it('stays "OK" when deviation is at 80% of threshold — no longer warns near the line', () => {
+    // priceDifference = 4000, threshold = 5000 → ratio = 0.8. Under the new
+    // rule, "close to breach" is not actionable, so nothing to warn about.
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
@@ -84,25 +85,12 @@ describe("computeHealthStatus", () => {
         priceDifference: "4000",
         rebalanceThreshold: 5000,
       }),
-    ).toBe("WARN");
+    ).toBe("OK");
   });
 
-  it('returns "WARN" for ratio exactly 0.8', () => {
-    // ratio = 4000/5000 = 0.8 → WARN (>= 0.8)
-    expect(
-      computeHealthStatus({
-        source: "fpmm_update_reserves",
-        oracleOk: true,
-        oracleTimestamp: FRESH_TS,
-        priceDifference: "4000",
-        rebalanceThreshold: 5000,
-      }),
-    ).toBe("WARN");
-  });
-
-  it('returns "WARN" (not "CRITICAL") when deviation is exactly at threshold', () => {
-    // priceDifference = 5000, threshold = 5000 → ratio = 1.0. Sitting right
-    // at the rebalance line stays WARN — CRITICAL triggers only above it.
+  it('stays "OK" when deviation is exactly at the threshold', () => {
+    // priceDifference = 5000, threshold = 5000 → ratio = 1.0. At-threshold
+    // is still healthy; WARN only kicks in strictly above.
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
@@ -111,13 +99,12 @@ describe("computeHealthStatus", () => {
         priceDifference: "5000",
         rebalanceThreshold: 5000,
       }),
-    ).toBe("WARN");
+    ).toBe("OK");
   });
 
-  it('returns "CRITICAL" when deviation exceeds threshold', () => {
-    // priceDifference = 8000, threshold = 5000 → ratio = 1.6 → CRITICAL
-    // No lastRebalancedAt means we don't have a recent-rebalance anchor
-    // to justify staying at WARN.
+  it('returns "WARN" on a fresh breach without a breach-start anchor', () => {
+    // Indexer hasn't populated deviationBreachStartedAt yet — stay at WARN
+    // rather than spuriously jump to CRITICAL.
     expect(
       computeHealthStatus({
         source: "fpmm_rebalanced",
@@ -126,13 +113,10 @@ describe("computeHealthStatus", () => {
         priceDifference: "8000",
         rebalanceThreshold: 5000,
       }),
-    ).toBe("CRITICAL");
+    ).toBe("WARN");
   });
 
-  it("keeps a fresh breach at WARN when a rebalance landed within the grace window", () => {
-    // Cross-chain rebalances take time to land. If a rebalance settled
-    // within the last hour, assume another may be in flight and don't
-    // escalate yet.
+  it('returns "WARN" while the breach is within the 1h grace window', () => {
     const now = Math.floor(Date.now() / 1000);
     expect(
       computeHealthStatus(
@@ -141,7 +125,7 @@ describe("computeHealthStatus", () => {
           oracleTimestamp: FRESH_TS,
           priceDifference: "8000",
           rebalanceThreshold: 5000,
-          lastRebalancedAt: String(now - 30 * 60), // 30 minutes ago
+          deviationBreachStartedAt: String(now - 30 * 60), // 30 min ago
         },
         undefined,
         now,
@@ -158,7 +142,7 @@ describe("computeHealthStatus", () => {
           oracleTimestamp: FRESH_TS,
           priceDifference: "8000",
           rebalanceThreshold: 5000,
-          lastRebalancedAt: String(now - 2 * 3600), // 2h ago — past 1h grace
+          deviationBreachStartedAt: String(now - 2 * 3600), // 2h ago — past 1h
         },
         undefined,
         now,
@@ -166,22 +150,61 @@ describe("computeHealthStatus", () => {
     ).toBe("CRITICAL");
   });
 
-  it("treats null lastRebalancedAt like no rebalance ever → CRITICAL when breached", () => {
-    // Hasura emits null for absent nullable fields; the grace window has
-    // no anchor, so we fall straight to CRITICAL.
+  it("stays WARN one second before the 1h grace window expires", () => {
+    // breachAge = 3599s; code uses `< DEVIATION_BREACH_GRACE_SECONDS`
+    // (= 3600), so 3599 still counts as in-grace. Pin the boundary so
+    // silent drift (e.g. flipping to `<=`) doesn't shrink the window.
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "fpmm_factory",
+          oracleTimestamp: FRESH_TS,
+          priceDifference: "8000",
+          rebalanceThreshold: 5000,
+          deviationBreachStartedAt: String(now - 3599),
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("WARN");
+  });
+
+  it("flips to CRITICAL at exactly the 1h grace window boundary", () => {
+    // breachAge = 3600s; boundary is strict `<`, so 3600 is NOT in-grace.
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "fpmm_factory",
+          oracleTimestamp: FRESH_TS,
+          priceDifference: "8000",
+          rebalanceThreshold: 5000,
+          deviationBreachStartedAt: String(now - 3600),
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("CRITICAL");
+  });
+
+  it("treats null deviationBreachStartedAt as a fresh breach → WARN, not CRITICAL", () => {
+    // Hasura emits null for absent nullable fields. Without an anchor we
+    // can't know how long the breach has lasted — stay at WARN until the
+    // indexer catches up.
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
         oracleTimestamp: FRESH_TS,
         priceDifference: "8000",
         rebalanceThreshold: 5000,
-        lastRebalancedAt: null,
+        deviationBreachStartedAt: null,
       }),
-    ).toBe("CRITICAL");
+    ).toBe("WARN");
   });
 
   it("uses fallback threshold of 10000 when rebalanceThreshold is 0", () => {
-    // ratio = 9000/10000 = 0.9 → WARN (>= 0.8)
+    // ratio = 9000/10000 = 0.9 — still OK under the new rule.
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
@@ -190,7 +213,7 @@ describe("computeHealthStatus", () => {
         priceDifference: "9000",
         rebalanceThreshold: 0,
       }),
-    ).toBe("WARN");
+    ).toBe("OK");
   });
 
   it("handles missing fields gracefully (defaults to CRITICAL for stale oracle)", () => {
@@ -341,82 +364,71 @@ describe("computeRebalancerLiveness", () => {
   });
 
   it('returns "ACTIVE" when rebalanced within 24h', () => {
-    // 1h ago
     expect(
       computeRebalancerLiveness(
         {
           source: "fpmm_factory",
           lastRebalancedAt: String(NOW - 3600),
-          healthStatus: "CRITICAL",
+          priceDifference: "15000",
+          rebalanceThreshold: 10000,
         },
         NOW,
       ),
     ).toBe("ACTIVE");
   });
 
-  it('returns "STALE" when age > 86400 and healthStatus is not OK', () => {
-    // 25h ago, CRITICAL health
+  it('returns "STALE" when age > 24h and the pool is above threshold', () => {
     expect(
       computeRebalancerLiveness(
         {
           source: "fpmm_factory",
           lastRebalancedAt: String(NOW - 90000),
-          healthStatus: "CRITICAL",
+          priceDifference: "15000",
+          rebalanceThreshold: 10000,
         },
         NOW,
       ),
     ).toBe("STALE");
   });
 
-  it('returns "ACTIVE" when age > 86400 but healthStatus is OK', () => {
-    // 25h ago but health is OK
+  it('returns "ACTIVE" when age > 24h but the pool is under threshold (nothing to do)', () => {
     expect(
       computeRebalancerLiveness(
         {
           source: "fpmm_factory",
           lastRebalancedAt: String(NOW - 90000),
-          healthStatus: "OK",
+          priceDifference: "3000",
+          rebalanceThreshold: 10000,
         },
         NOW,
       ),
     ).toBe("ACTIVE");
   });
 
-  it('returns "STALE" when age > 86400 and healthStatus is WARN', () => {
+  it('returns "ACTIVE" when age > 24h and pool sits exactly at threshold', () => {
+    // diff === threshold — still under the "needs rebalance" line, so
+    // silence from the rebalancer is expected.
     expect(
       computeRebalancerLiveness(
         {
           source: "fpmm_factory",
           lastRebalancedAt: String(NOW - 90000),
-          healthStatus: "WARN",
+          priceDifference: "10000",
+          rebalanceThreshold: 10000,
         },
         NOW,
       ),
-    ).toBe("STALE");
+    ).toBe("ACTIVE");
   });
 
   it('returns "ACTIVE" for exactly 86400s age (boundary)', () => {
-    // exactly at boundary — age is NOT > 86400, so ACTIVE
     expect(
       computeRebalancerLiveness(
         {
           source: "fpmm_factory",
           lastRebalancedAt: String(NOW - 86400),
-          healthStatus: "CRITICAL",
-        },
-        NOW,
-      ),
-    ).toBe("ACTIVE");
-  });
-
-  it('returns "ACTIVE" when healthStatus is "WEEKEND" even if age > 86400', () => {
-    // WEEKEND = expected closure, rebalancer is not actually stale
-    expect(
-      computeRebalancerLiveness(
-        {
-          source: "fpmm_factory",
-          lastRebalancedAt: String(NOW - 90000),
-          healthStatus: "WEEKEND",
+          priceDifference: "15000",
+          rebalanceThreshold: 10000,
         },
         NOW,
       ),
@@ -451,14 +463,16 @@ describe("worstStatus", () => {
 
 describe("computeEffectiveStatus", () => {
   it("returns the oracle health when limit is better", () => {
-    // priceDifference = 6000, threshold = 5000 → ratio = 1.2 → CRITICAL
-    // (needs to be strictly above threshold, not merely equal to it)
+    // priceDifference = 6000, threshold = 5000 → ratio = 1.2 → CRITICAL once
+    // the breach outlives the 1h grace window.
+    const now = Math.floor(Date.now() / 1000);
     expect(
       computeEffectiveStatus({
         source: "fpmm_factory",
         oracleTimestamp: FRESH_TS,
         priceDifference: "6000",
         rebalanceThreshold: 5000,
+        deviationBreachStartedAt: String(now - 2 * 3600),
         limitPressure0: "0.1",
         limitPressure1: "0.1",
       }),

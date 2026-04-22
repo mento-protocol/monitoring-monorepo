@@ -25,6 +25,7 @@ export const ALL_POOLS_WITH_HEALTH = `
       oracleNumReporters
       oracleExpiry
       lastRebalancedAt
+      deviationBreachStartedAt
       lpFee
       protocolFee
       limitStatus

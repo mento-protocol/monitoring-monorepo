@@ -87,16 +87,19 @@ function DeviationBar({
   const threshold = rebalanceThreshold;
   const ratio = Math.min(diff / threshold, 1.5);
   const pct = Math.min(ratio * 100, 100);
-  // Source the bar color from computeHealthStatus instead of recomputing
-  // from the raw ratio, so the bar and the HealthBadge always agree on
-  // severity — including at the exact-threshold boundary (WARN, not
-  // CRITICAL) and during the 1h rebalance grace window.
+  // Breach states take their color from status so the bar and the
+  // HealthBadge agree (red for CRITICAL, amber for the 1h grace WARN). In
+  // the healthy band we still nudge to yellow once we pass 80% of the
+  // threshold — a "getting close" signal without turning the status itself
+  // into a warning.
   const color =
     status === "CRITICAL"
       ? "bg-red-500"
       : status === "WARN"
         ? "bg-amber-500"
-        : "bg-emerald-500";
+        : diff / threshold >= 0.8
+          ? "bg-yellow-500"
+          : "bg-emerald-500";
 
   // Raw deviation / threshold are stored in basis points (10000 bps = 100%),
   // but humans reason about this in percentages. Convert before rendering

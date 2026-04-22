@@ -63,73 +63,83 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
     assert.equal(computeHealthStatus(pool, NOW), "N/A");
   });
 
-  it("returns 'OK' when devRatio is below 0.8", () => {
+  it("returns 'OK' when devRatio is well below 1.0", () => {
     // 3000/5000 = 0.6
     const pool = makePool({ priceDifference: 3000n });
     assert.equal(computeHealthStatus(pool, NOW), "OK");
   });
 
-  it("returns 'WARN' when 0.8 <= devRatio < 1.0", () => {
-    // 4500/5000 = 0.9
+  it("stays 'OK' when the pool is close to but still under the threshold", () => {
+    // 4500/5000 = 0.9 — close is not actionable, so no warning.
     const pool = makePool({ priceDifference: 4500n });
-    assert.equal(computeHealthStatus(pool, NOW), "WARN");
-  });
-
-  it("returns 'WARN' at exactly the 0.8 WARN boundary", () => {
-    // 4000/5000 = 0.8 — inclusive lower bound of the WARN band.
-    const pool = makePool({ priceDifference: 4000n });
-    assert.equal(computeHealthStatus(pool, NOW), "WARN");
-  });
-
-  it("returns 'OK' just below the 0.8 WARN boundary", () => {
-    // 3999/5000 = 0.7998 — one bp under the band stays OK.
-    const pool = makePool({ priceDifference: 3999n });
     assert.equal(computeHealthStatus(pool, NOW), "OK");
   });
 
-  it("returns 'WARN' (not 'CRITICAL') when devRatio is exactly 1.0", () => {
-    // 5000/5000 = 1.0 — sitting right at the threshold stays WARN.
+  it("stays 'OK' when devRatio is exactly 1.0", () => {
+    // 5000/5000 = 1.0 — at-threshold is still healthy.
     const pool = makePool({ priceDifference: 5000n });
+    assert.equal(computeHealthStatus(pool, NOW), "OK");
+  });
+
+  it("returns 'WARN' on a fresh breach with no breach-start anchor yet", () => {
+    // 8000/5000 = 1.6, deviationBreachStartedAt not yet populated.
+    const pool = makePool({ priceDifference: 8000n });
     assert.equal(computeHealthStatus(pool, NOW), "WARN");
   });
 
-  it("returns 'CRITICAL' when devRatio > 1.0 and no recent rebalance", () => {
-    // 8000/5000 = 1.6, no lastRebalancedAt anchor.
-    const pool = makePool({ priceDifference: 8000n });
-    assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
-  });
-
-  it("stays 'WARN' during the 1h grace window after a rebalance", () => {
-    // Breach present, but a rebalance landed 30min ago.
+  it("stays 'WARN' while the breach is within the 1h grace window", () => {
     const pool = makePool({
       priceDifference: 8000n,
-      lastRebalancedAt: NOW - 1800n, // 30min ago
+      deviationBreachStartedAt: NOW - 1800n, // 30min ago
     });
     assert.equal(computeHealthStatus(pool, NOW), "WARN");
+  });
+
+  it("stays 'WARN' one second before the grace boundary (3599s)", () => {
+    // Mirror of the UI boundary test: grace uses strict `<`, so 3599s is
+    // still in-grace on both packages. Pinned here to prevent a silent
+    // `<`/`<=` drift between indexer and dashboard.
+    const pool = makePool({
+      priceDifference: 8000n,
+      deviationBreachStartedAt: NOW - 3599n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "WARN");
+  });
+
+  it("flips to 'CRITICAL' at exactly the 1h grace boundary (3600s)", () => {
+    const pool = makePool({
+      priceDifference: 8000n,
+      deviationBreachStartedAt: NOW - 3600n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
   });
 
   it("escalates to 'CRITICAL' once the breach outlasts the grace window", () => {
     const pool = makePool({
       priceDifference: 8000n,
-      lastRebalancedAt: NOW - 2n * 3600n, // 2h ago
+      deviationBreachStartedAt: NOW - 2n * 3600n, // 2h ago
     });
     assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
   });
 
-  it("treats lastRebalancedAt=0 like no rebalance ever (CRITICAL when breached)", () => {
+  it("returns 'WARN' when the breach anchor is 0n (indexer hasn't populated yet)", () => {
+    // Mirror of the UI's null-anchor test: when there's no anchor, both
+    // packages should stay at WARN instead of jumping straight to
+    // CRITICAL. The indexer stores 0n (not null) when the field is unset;
+    // this exercises that path.
     const pool = makePool({
       priceDifference: 8000n,
-      lastRebalancedAt: 0n,
+      deviationBreachStartedAt: 0n,
     });
-    assert.equal(computeHealthStatus(pool, NOW), "CRITICAL");
+    assert.equal(computeHealthStatus(pool, NOW), "WARN");
   });
 
   it("falls back to 10000 bps threshold when rebalanceThreshold is 0", () => {
-    // 9000/10000 = 0.9 → WARN
+    // 9000/10000 = 0.9 → still OK under the new rule.
     const pool = makePool({
       priceDifference: 9000n,
       rebalanceThreshold: 0,
     });
-    assert.equal(computeHealthStatus(pool, NOW), "WARN");
+    assert.equal(computeHealthStatus(pool, NOW), "OK");
   });
 });
