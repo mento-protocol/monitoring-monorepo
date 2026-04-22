@@ -30,24 +30,24 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("getLabels — publicOnly filter", () => {
-  it("returns all entries when publicOnly is not set", async () => {
+describe("getLabels", () => {
+  it("returns all entries for a chain scope", async () => {
     (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       {
         "0xaaa": {
-          name: "Public",
+          name: "One",
           tags: [],
           isPublic: true,
           updatedAt: "2026-01-01T00:00:00Z",
         },
         "0xbbb": {
-          name: "Private",
+          name: "Two",
           tags: [],
           isPublic: false,
           updatedAt: "2026-01-01T00:00:00Z",
         },
         "0xccc": {
-          name: "NoFlag",
+          name: "Three",
           tags: [],
           updatedAt: "2026-01-01T00:00:00Z",
         },
@@ -55,33 +55,6 @@ describe("getLabels — publicOnly filter", () => {
     );
     const result = await getLabels(42220);
     expect(Object.keys(result)).toHaveLength(3);
-  });
-
-  it("returns only isPublic===true entries when publicOnly is true", async () => {
-    (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      {
-        "0xaaa": {
-          name: "Public",
-          tags: [],
-          isPublic: true,
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
-        "0xbbb": {
-          name: "Private",
-          tags: [],
-          isPublic: false,
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
-        "0xccc": {
-          name: "NoFlag",
-          tags: [],
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
-      },
-    );
-    const result = await getLabels(42220, { publicOnly: true });
-    expect(Object.keys(result)).toHaveLength(1);
-    expect(result["0xaaa"].name).toBe("Public");
   });
 
   it("works for global scope", async () => {
@@ -99,18 +72,12 @@ describe("getLabels — publicOnly filter", () => {
     expect(result["0xaaa"].name).toBe("Cross-chain");
   });
 
-  it("treats missing isPublic as private when publicOnly is true", async () => {
+  it("returns empty object when hgetall returns null", async () => {
     (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      {
-        "0xaaa": {
-          name: "NoFlag",
-          tags: [],
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
-      },
+      null,
     );
-    const result = await getLabels(42220, { publicOnly: true });
-    expect(Object.keys(result)).toHaveLength(0);
+    const result = await getLabels(42220);
+    expect(result).toEqual({});
   });
 });
 

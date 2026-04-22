@@ -7,6 +7,7 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
+import { useSession } from "next-auth/react";
 import useSWR, { useSWRConfig } from "swr";
 import { useNetwork } from "@/components/network-provider";
 import { truncateAddress } from "@/lib/format";
@@ -116,12 +117,13 @@ function emptyState(): EntriesState {
 export function AddressLabelsProvider({ children }: { children: ReactNode }) {
   const { network } = useNetwork();
   const { mutate } = useSWRConfig();
+  const { status } = useSession();
 
-  // Fetch for all sessions — the API returns `isPublic: true` labels for
-  // anonymous requests and full labels for authenticated ones. Gating on the
-  // client would hide public labels from logged-out users.
+  // Labels are private — only fetch when the user is signed in. For
+  // unauthenticated views, the provider returns empty state and the UI falls
+  // back to truncated addresses / contract registry names.
   const { data, error, isLoading } = useSWR<EntriesState>(
-    SWR_KEY,
+    status === "authenticated" ? SWR_KEY : null,
     fetchAllLabels,
     {
       refreshInterval: 30_000,

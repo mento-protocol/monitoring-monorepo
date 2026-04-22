@@ -28,7 +28,7 @@ export const BRIDGE_TRANSFERS_WINDOW = /* GraphQL */ `
   ) {
     BridgeTransfer(
       where: { status: { _in: $statusIn } }
-      order_by: { firstSeenAt: desc, id: asc }
+      order_by: [{ firstSeenAt: desc }, { id: asc }]
       limit: $limit
       offset: $offset
     ) {
@@ -67,7 +67,7 @@ export const BRIDGE_TRANSFERS_COUNT = /* GraphQL */ `
   query BridgeTransfersCount($statusIn: [String!]!, $limit: Int!) {
     BridgeTransfer(
       where: { status: { _in: $statusIn } }
-      order_by: { firstSeenAt: desc, id: asc }
+      order_by: [{ firstSeenAt: desc }, { id: asc }]
       limit: $limit
     ) {
       id
@@ -91,7 +91,7 @@ export const BRIDGE_PENDING_IDS = /* GraphQL */ `
       where: {
         status: { _in: ["PENDING", "SENT", "ATTESTED", "QUEUED_INBOUND"] }
       }
-      order_by: { firstSeenAt: desc, id: asc }
+      order_by: [{ firstSeenAt: desc }, { id: asc }]
       limit: 1000
     ) {
       id
@@ -106,7 +106,7 @@ export const BRIDGE_DELIVERED_RECENT = /* GraphQL */ `
   query BridgeDeliveredRecent($limit: Int!) {
     BridgeTransfer(
       where: { status: { _eq: "DELIVERED" } }
-      order_by: { deliveredTimestamp: desc, id: asc }
+      order_by: [{ deliveredTimestamp: desc }, { id: asc }]
       limit: $limit
     ) {
       status
@@ -126,7 +126,7 @@ export const BRIDGE_DAILY_SNAPSHOT = /* GraphQL */ `
   query BridgeDailySnapshot($afterDate: numeric!) {
     BridgeDailySnapshot(
       where: { date: { _gte: $afterDate } }
-      order_by: { date: desc, id: asc }
+      order_by: [{ date: desc }, { id: asc }]
       limit: 1000
     ) {
       id
