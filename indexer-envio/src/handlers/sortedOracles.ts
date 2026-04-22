@@ -78,7 +78,7 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         blockTimestamp,
         blockNumber,
         txHash: event.transaction.hash,
-        triggeringSource: "oracle_reported",
+        source: "oracle_reported",
       },
     );
 
@@ -169,7 +169,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         blockTimestamp,
         blockNumber,
         txHash: event.transaction.hash,
-        triggeringSource: "median_updated",
+        source: "median_updated",
       },
     );
 

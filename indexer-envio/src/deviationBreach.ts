@@ -22,15 +22,27 @@ export type BreachContext = {
   };
 };
 
+/** User-facing categories stored on `DeviationThresholdBreach`. Narrower
+ * than the indexer's internal `source` vocabulary; `classifyBreachEvent`
+ * maps the latter into this set. Kept in sync with the label dictionaries
+ * in `ui-dashboard/src/components/breach-history-panel.tsx`. */
+export type BreachEventCategory =
+  | "rebalance"
+  | "swap"
+  | "liquidity"
+  | "oracle_update"
+  | "threshold_change"
+  | "unknown";
+
 /** Maps the indexer's internal `source` vocabulary (which tracks WHICH
  * handler fired, regardless of the Pool's sticky preferred-source) to the
- * user-facing event categories stored on `DeviationThresholdBreach`.
+ * user-facing categories.
  *
  * The `source` argument here is the raw triggering source of the CURRENT
  * event, NOT `pool.source` — the latter is priority-picked and sticky
  * (a factory-created pool stays "fpmm_factory" forever) and so is useless
  * for attributing which event caused a transition. */
-export function classifyBreachEvent(source: string): string {
+export function classifyBreachEvent(source: string): BreachEventCategory {
   if (source.includes("virtual")) return "unknown";
   if (source === "fpmm_rebalanced") return "rebalance";
   if (source === "fpmm_swap") return "swap";
@@ -42,15 +54,15 @@ export function classifyBreachEvent(source: string): string {
   return "unknown";
 }
 
-type TransitionMeta = {
+export type BreachTrigger = {
   blockTimestamp: bigint;
   blockNumber: bigint;
   txHash: string;
   /** Triggering event's raw source (see `classifyBreachEvent`). */
-  triggeringSource: string;
+  source: string;
   /** Strategy contract that fired the rebalance, if this transition was
    * caused by a RebalanceEvent. Ignored otherwise. */
-  triggeringStrategy?: string;
+  strategy?: string;
 };
 
 /** Deterministic id for the currently-open breach of a pool. Keyed on the
@@ -75,7 +87,7 @@ export async function recordBreachTransition(
   context: BreachContext,
   prev: Pool | undefined,
   next: Pool,
-  meta: TransitionMeta,
+  trigger: BreachTrigger,
 ): Promise<Partial<Pool>> {
   const wasBreached = prev ? isInDeviationBreach(prev) : false;
   const isBreached = isInDeviationBreach(next);
@@ -83,27 +95,27 @@ export async function recordBreachTransition(
   if (!wasBreached && !isBreached) return {};
 
   const poolId = next.id;
-  const startedByEvent = classifyBreachEvent(meta.triggeringSource);
-  const isRebalance = meta.triggeringSource === "fpmm_rebalanced";
+  const category = classifyBreachEvent(trigger.source);
+  const isRebalance = trigger.source === "fpmm_rebalanced";
 
   // Rising edge ------------------------------------------------------------
   if (!wasBreached && isBreached) {
     const row: DeviationThresholdBreach = {
-      id: openBreachId(poolId, meta.blockTimestamp),
+      id: openBreachId(poolId, trigger.blockTimestamp),
       chainId: next.chainId,
       poolId,
-      startedAt: meta.blockTimestamp,
-      startedAtBlock: meta.blockNumber,
+      startedAt: trigger.blockTimestamp,
+      startedAtBlock: trigger.blockNumber,
       endedAt: undefined,
       endedAtBlock: undefined,
       durationSeconds: undefined,
       criticalDurationSeconds: undefined,
       entryPriceDifference: next.priceDifference,
       peakPriceDifference: next.priceDifference,
-      peakAt: meta.blockTimestamp,
-      peakAtBlock: meta.blockNumber,
-      startedByEvent,
-      startedByTxHash: meta.txHash,
+      peakAt: trigger.blockTimestamp,
+      peakAtBlock: trigger.blockNumber,
+      startedByEvent: category,
+      startedByTxHash: trigger.txHash,
       endedByEvent: undefined,
       endedByTxHash: undefined,
       endedByStrategy: undefined,
@@ -128,7 +140,7 @@ export async function recordBreachTransition(
       // throw — one missing row shouldn't stall the handler.
       return {};
     }
-    const endedAt = meta.blockTimestamp;
+    const endedAt = trigger.blockTimestamp;
     const durationSeconds = tradingSecondsInRange(open.startedAt, endedAt);
     const graceEnd = open.startedAt + DEVIATION_BREACH_GRACE_SECONDS;
     const criticalDurationSeconds =
@@ -138,12 +150,12 @@ export async function recordBreachTransition(
     const closed: DeviationThresholdBreach = {
       ...open,
       endedAt,
-      endedAtBlock: meta.blockNumber,
+      endedAtBlock: trigger.blockNumber,
       durationSeconds,
       criticalDurationSeconds,
-      endedByEvent: classifyBreachEvent(meta.triggeringSource),
-      endedByTxHash: meta.txHash,
-      endedByStrategy: isRebalance ? meta.triggeringStrategy : undefined,
+      endedByEvent: category,
+      endedByTxHash: trigger.txHash,
+      endedByStrategy: isRebalance ? trigger.strategy : undefined,
       rebalanceCountDuring,
     };
     context.DeviationThresholdBreach.set(closed);
@@ -160,24 +172,18 @@ export async function recordBreachTransition(
   const openId = openBreachId(poolId, prev!.deviationBreachStartedAt);
   const open = await context.DeviationThresholdBreach.get(openId);
   if (!open) return {};
-  let dirty = false;
-  let updated: DeviationThresholdBreach = open;
-  if (next.priceDifference > open.peakPriceDifference) {
-    updated = {
-      ...updated,
+  const peakBumped = next.priceDifference > open.peakPriceDifference;
+  if (!peakBumped && !isRebalance) return {};
+  context.DeviationThresholdBreach.set({
+    ...open,
+    ...(peakBumped && {
       peakPriceDifference: next.priceDifference,
-      peakAt: meta.blockTimestamp,
-      peakAtBlock: meta.blockNumber,
-    };
-    dirty = true;
-  }
-  if (isRebalance) {
-    updated = {
-      ...updated,
-      rebalanceCountDuring: updated.rebalanceCountDuring + 1,
-    };
-    dirty = true;
-  }
-  if (dirty) context.DeviationThresholdBreach.set(updated);
+      peakAt: trigger.blockTimestamp,
+      peakAtBlock: trigger.blockNumber,
+    }),
+    rebalanceCountDuring: isRebalance
+      ? open.rebalanceCountDuring + 1
+      : open.rebalanceCountDuring,
+  });
   return {};
 }

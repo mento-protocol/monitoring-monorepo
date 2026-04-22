@@ -102,7 +102,7 @@ describe("recordBreachTransition — rising edge", () => {
       blockTimestamp: MON_NOON,
       blockNumber: 100n,
       txHash: "0xabc",
-      triggeringSource: "fpmm_swap",
+      source: "fpmm_swap",
     });
 
     assert.deepEqual(poolUpdate, {}); // no cumulative change on rising edge
@@ -129,7 +129,7 @@ describe("recordBreachTransition — rising edge", () => {
       blockTimestamp: MON_NOON,
       blockNumber: 100n,
       txHash: "0xbootstrap",
-      triggeringSource: "oracle_reported",
+      source: "oracle_reported",
     });
     assert.equal(store.size, 1);
     const row = store.get(openBreachId(next.id, MON_NOON))!;
@@ -176,7 +176,7 @@ describe("recordBreachTransition — continuing breach", () => {
       blockTimestamp: MON_NOON + 60n,
       blockNumber: 110n,
       txHash: "0xdef",
-      triggeringSource: "fpmm_swap",
+      source: "fpmm_swap",
     });
     const row = store.get(open.id)!;
     assert.equal(row.peakPriceDifference, 9000n);
@@ -220,7 +220,7 @@ describe("recordBreachTransition — continuing breach", () => {
       blockTimestamp: MON_NOON + 60n,
       blockNumber: 110n,
       txHash: "0xzzz",
-      triggeringSource: "fpmm_swap",
+      source: "fpmm_swap",
     });
     const row = store.get(open.id)!;
     assert.equal(row.peakPriceDifference, 9000n);
@@ -265,8 +265,8 @@ describe("recordBreachTransition — continuing breach", () => {
       blockTimestamp: MON_NOON + 120n,
       blockNumber: 120n,
       txHash: "0xrbl",
-      triggeringSource: "fpmm_rebalanced",
-      triggeringStrategy: "0xstrategy",
+      source: "fpmm_rebalanced",
+      strategy: "0xstrategy",
     });
     assert.equal(store.get(open.id)!.rebalanceCountDuring, 1);
   });
@@ -318,8 +318,8 @@ describe("recordBreachTransition — falling edge", () => {
       blockTimestamp: breachEndedAt,
       blockNumber: 200n,
       txHash: "0xclose",
-      triggeringSource: "fpmm_rebalanced",
-      triggeringStrategy: "0xstrategy",
+      source: "fpmm_rebalanced",
+      strategy: "0xstrategy",
     });
     const closed = store.get(open.id)!;
     assert.equal(closed.endedAt, breachEndedAt);
@@ -373,8 +373,8 @@ describe("recordBreachTransition — falling edge", () => {
       blockTimestamp: MON_NOON + 1800n, // 30min — within grace
       blockNumber: 150n,
       txHash: "0xsoon",
-      triggeringSource: "fpmm_rebalanced",
-      triggeringStrategy: "0xstrat",
+      source: "fpmm_rebalanced",
+      strategy: "0xstrat",
     });
     const closed = store.get(open.id)!;
     assert.equal(closed.durationSeconds, 1800n);
@@ -423,7 +423,7 @@ describe("recordBreachTransition — falling edge", () => {
       blockTimestamp: monMidnight,
       blockNumber: 500n,
       txHash: "0xmon",
-      triggeringSource: "oracle_reported",
+      source: "oracle_reported",
     });
     // Wall-clock between Fri 20:00 and Mon 00:00 = 2d + 4h = 187_200s.
     // FX closure Fri 21:00 UTC → Sun 23:00 UTC = 50h = 180_000s.
@@ -450,7 +450,7 @@ describe("recordBreachTransition — falling edge", () => {
       blockTimestamp: MON_NOON + 600n,
       blockNumber: 150n,
       txHash: "0xorphan",
-      triggeringSource: "oracle_reported",
+      source: "oracle_reported",
     });
     assert.deepEqual(poolUpdate, {});
     assert.equal(store.size, 0);
@@ -472,7 +472,7 @@ describe("recordBreachTransition — no transition", () => {
       blockTimestamp: MON_NOON,
       blockNumber: 100n,
       txHash: "0xhealthy",
-      triggeringSource: "fpmm_swap",
+      source: "fpmm_swap",
     });
     assert.deepEqual(poolUpdate, {});
     assert.equal(store.size, 0);

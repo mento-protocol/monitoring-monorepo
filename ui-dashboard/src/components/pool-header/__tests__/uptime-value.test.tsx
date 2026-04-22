@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { Pool, DeviationThresholdBreach } from "@/lib/types";
+import type { Pool } from "@/lib/types";
+
+type RollupRow = {
+  cumulativeBreachSeconds?: string;
+  cumulativeCriticalSeconds?: string;
+  breachCount?: number;
+};
 
 type GqlResult = {
-  data?: { DeviationThresholdBreach: DeviationThresholdBreach[] };
+  data?: { Pool: RollupRow[] };
   error?: Error;
   isLoading?: boolean;
 };
@@ -28,45 +34,18 @@ const BASE_POOL: Pool = {
   updatedAtTimestamp: "2000",
 };
 
-function breach(
-  overrides: Partial<DeviationThresholdBreach> = {},
-): DeviationThresholdBreach {
-  return {
-    id: "42220-0xpool-1000",
-    chainId: 42220,
-    poolId: "42220-0xpool",
-    startedAt: "1000",
-    startedAtBlock: "100",
-    endedAt: "5000",
-    endedAtBlock: "200",
-    durationSeconds: "4000",
-    criticalDurationSeconds: "400",
-    entryPriceDifference: "6000",
-    peakPriceDifference: "7000",
-    peakAt: "3000",
-    peakAtBlock: "150",
-    startedByEvent: "swap",
-    startedByTxHash: "0xstart",
-    endedByEvent: "rebalance",
-    endedByTxHash: "0xend",
-    endedByStrategy: "0xstrat",
-    rebalanceCountDuring: 1,
-    ...overrides,
-  };
-}
-
 describe("UptimeValue", () => {
   it("renders N/A when healthTotalSeconds is missing or zero", () => {
-    mockUseGQL.mockReturnValueOnce({ data: { DeviationThresholdBreach: [] } });
+    mockUseGQL.mockReturnValueOnce({ data: { Pool: [] } });
     const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
     expect(html).toContain("N/A");
   });
 
-  it("renders N/A (not 'Query failed') when the breach query errors out — indexer hasn't redeployed yet", () => {
-    // Graceful-degradation contract: the new entity type won't exist until
-    // the indexer deploy lands, so 'Query failed' would cry wolf. N/A is
-    // the honest answer for "can't tell yet."
-    mockUseGQL.mockReturnValueOnce({ error: new Error("type not found") });
+  it("renders N/A (not 'Query failed') when the rollup query errors out — indexer hasn't redeployed yet", () => {
+    // Graceful-degradation contract: the new fields won't exist until the
+    // indexer deploy lands, so 'Query failed' would cry wolf. N/A is the
+    // honest answer for "can't tell yet."
+    mockUseGQL.mockReturnValueOnce({ error: new Error("field not found") });
     const pool: Pool = {
       ...BASE_POOL,
       healthTotalSeconds: String(30 * 86400),
@@ -76,8 +55,18 @@ describe("UptimeValue", () => {
     expect(html).not.toContain("Query failed");
   });
 
-  it("renders 100.000% with 'no breaches' when the breach list is empty", () => {
-    mockUseGQL.mockReturnValueOnce({ data: { DeviationThresholdBreach: [] } });
+  it("renders 100.000% with 'no breaches' when the rollup says nothing critical has happened", () => {
+    mockUseGQL.mockReturnValueOnce({
+      data: {
+        Pool: [
+          {
+            cumulativeBreachSeconds: "0",
+            cumulativeCriticalSeconds: "0",
+            breachCount: 0,
+          },
+        ],
+      },
+    });
     const pool: Pool = {
       ...BASE_POOL,
       healthTotalSeconds: String(30 * 86400),
@@ -87,17 +76,18 @@ describe("UptimeValue", () => {
     expect(html).toContain("no breaches");
   });
 
-  it("sums criticalDurationSeconds across closed breaches at 3-decimal precision", () => {
-    // 3600s critical over 30d ≈ 99.861% uptime. Rounding to 3dp catches
-    // short outages that 1dp would smooth away.
+  it("formats the critical ratio with three decimals so short outages stay visible", () => {
+    // 3600s / (30 × 86400) ≈ 0.139% downtime → 99.861% uptime. Three
+    // decimals are deliberate: 1dp would smooth this into 99.9% and hide
+    // a real outage.
     mockUseGQL.mockReturnValueOnce({
       data: {
-        DeviationThresholdBreach: [
-          breach({ criticalDurationSeconds: "1800" }),
-          breach({
-            id: "42220-0xpool-2000",
-            criticalDurationSeconds: "1800",
-          }),
+        Pool: [
+          {
+            cumulativeBreachSeconds: "7200",
+            cumulativeCriticalSeconds: "3600",
+            breachCount: 2,
+          },
         ],
       },
     });
@@ -112,7 +102,14 @@ describe("UptimeValue", () => {
 
   it("pluralises the breach-count label correctly", () => {
     mockUseGQL.mockReturnValueOnce({
-      data: { DeviationThresholdBreach: [breach()] },
+      data: {
+        Pool: [
+          {
+            cumulativeCriticalSeconds: "100",
+            breachCount: 1,
+          },
+        ],
+      },
     });
     const pool: Pool = {
       ...BASE_POOL,
@@ -123,61 +120,71 @@ describe("UptimeValue", () => {
     expect(html).not.toContain("1 breaches");
   });
 
-  it("counts the post-grace portion of an open breach in the critical sum", () => {
-    // Breach started 2h ago, still open → 1h in grace, 1h past it → 3600s
-    // of critical-state contribution to the live uptime.
+  it("adds the live post-grace portion of an active breach to the rollup total", () => {
+    // Rollup is 0 (no closed breaches yet), but an active breach started
+    // 2h ago. One hour sits in grace, the second hour is critical → uptime
+    // should reflect that.
     const nowSec = Math.floor(Date.now() / 1000);
     mockUseGQL.mockReturnValueOnce({
       data: {
-        DeviationThresholdBreach: [
-          breach({
-            id: "42220-0xpool-open",
-            startedAt: String(nowSec - 2 * 3600),
-            endedAt: null,
-            endedAtBlock: null,
-            durationSeconds: null,
-            criticalDurationSeconds: null,
-          }),
+        Pool: [
+          {
+            cumulativeCriticalSeconds: "0",
+            breachCount: 0,
+          },
         ],
       },
     });
     const pool: Pool = {
       ...BASE_POOL,
       healthTotalSeconds: String(30 * 86400),
+      deviationBreachStartedAt: String(nowSec - 2 * 3600),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
-    // 3600s / (30*86400) ≈ 0.139% downtime → 99.861% uptime.
     expect(html).toContain("99.861%");
   });
 
-  it("does not count an open breach still inside the 1h grace window", () => {
+  it("does not credit an active breach that is still within the 1h grace window", () => {
     const nowSec = Math.floor(Date.now() / 1000);
     mockUseGQL.mockReturnValueOnce({
+      data: { Pool: [{ cumulativeCriticalSeconds: "0", breachCount: 0 }] },
+    });
+    const pool: Pool = {
+      ...BASE_POOL,
+      healthTotalSeconds: String(30 * 86400),
+      deviationBreachStartedAt: String(nowSec - 30 * 60),
+    };
+    const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
+    expect(html).toContain("100.000%");
+  });
+
+  it("scales accurately past the 100-row breach-history cap — rolls from scalar, not breach list", () => {
+    // A pool with 500 historical breaches. The rollup scalar captures all
+    // 500, so the tile reports the correct SLO even though the
+    // POOL_DEVIATION_BREACHES query (used by the history panel) would
+    // truncate at 100.
+    mockUseGQL.mockReturnValueOnce({
       data: {
-        DeviationThresholdBreach: [
-          breach({
-            id: "42220-0xpool-fresh",
-            startedAt: String(nowSec - 30 * 60),
-            endedAt: null,
-            endedAtBlock: null,
-            durationSeconds: null,
-            criticalDurationSeconds: null,
-          }),
+        Pool: [
+          {
+            cumulativeCriticalSeconds: String(500 * 3600),
+            breachCount: 500,
+          },
         ],
       },
     });
     const pool: Pool = {
       ...BASE_POOL,
-      healthTotalSeconds: String(30 * 86400),
+      // 10 years of tracked trading time to keep the pct humane.
+      healthTotalSeconds: String(10 * 365 * 86400),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
-    // Still within grace → no critical contribution → full 100%.
-    expect(html).toContain("100.000%");
+    // 500h / (10y × 365d × 86400s) ≈ 0.571% downtime → 99.429% uptime.
+    expect(html).toContain("99.429%");
+    expect(html).toContain("500 breaches");
   });
 
-  it("renders N/A immediately for virtual pools (query is never issued)", () => {
-    // Virtual pools never breach. The hook returns {data: undefined} by
-    // default because useGQL is passed a null document.
+  it("renders N/A on a virtual pool (rollup query skipped)", () => {
     mockUseGQL.mockReturnValueOnce({ data: undefined });
     const pool: Pool = {
       ...BASE_POOL,
@@ -185,8 +192,8 @@ describe("UptimeValue", () => {
       healthTotalSeconds: String(86400),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
-    // healthTotalSeconds > 0, so it goes to the breach-sum branch. With
-    // zero breaches → 100% uptime and "no breaches."
+    // data is undefined → rollup fields default to 0 → 100% uptime, but
+    // the rollup scalar is the authoritative "no breaches" signal.
     expect(html).toContain("100.000%");
     expect(html).toContain("no breaches");
   });

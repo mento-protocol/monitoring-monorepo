@@ -6,6 +6,10 @@ import { useGQL } from "@/lib/graphql";
 import { POOL_DEVIATION_BREACHES } from "@/lib/queries";
 import { formatTimestamp, relativeTime } from "@/lib/format";
 import { formatDurationShort } from "@/lib/bridge-status";
+import {
+  formatDeviationPct,
+  DEVIATION_BREACH_GRACE_SECONDS,
+} from "@/lib/health";
 import { explorerTxUrl } from "@/lib/tokens";
 import { useAddressLabels } from "@/components/address-labels-provider";
 
@@ -135,12 +139,15 @@ function BreachRow({
     ? now - Number(breach.startedAt)
     : Number(breach.durationSeconds);
   const critDuration = isOpen
-    ? Math.max(0, now - Number(breach.startedAt) - 3600)
+    ? Math.max(
+        0,
+        now - Number(breach.startedAt) - Number(DEVIATION_BREACH_GRACE_SECONDS),
+      )
     : Number(breach.criticalDurationSeconds);
-  const threshold = pool.rebalanceThreshold ?? 10000;
-  const peakPct = threshold
-    ? ((Number(breach.peakPriceDifference) / threshold) * 100).toFixed(1)
-    : "—";
+  const peakPct = formatDeviationPct(
+    breach.peakPriceDifference,
+    pool.rebalanceThreshold ?? 0,
+  );
 
   const endedLabel = isOpen
     ? "Ongoing"
@@ -178,7 +185,7 @@ function BreachRow({
         className="py-2 pr-4 whitespace-nowrap"
         title={breach.peakPriceDifference}
       >
-        {peakPct}%
+        {peakPct}
       </td>
       <td className="py-2 pr-4 whitespace-nowrap text-slate-400">
         {startedLabel}

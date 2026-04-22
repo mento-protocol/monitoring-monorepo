@@ -172,7 +172,6 @@ export const DEFAULT_ORACLE_FIELDS = {
   lastOracleSnapshotTimestamp: 0n,
   lastDeviationRatio: "-1",
   hasHealthData: false,
-  // Breach accumulators (see DeviationThresholdBreach entity)
   cumulativeBreachSeconds: 0n,
   cumulativeCriticalSeconds: 0n,
   breachCount: 0,
@@ -216,12 +215,12 @@ export const upsertPool = async ({
   blockNumber,
   blockTimestamp,
   txHash,
+  strategy,
   reservesDelta,
   swapDelta,
   rebalanceDelta,
   oracleDelta,
   tokenDecimals,
-  triggeringStrategy,
 }: {
   context: PoolContext;
   chainId: number;
@@ -231,19 +230,19 @@ export const upsertPool = async ({
   source: string;
   blockNumber: bigint;
   blockTimestamp: bigint;
-  /** Transaction hash of the event that drove this upsert. Used for breach-
-   * attribution (`startedByTxHash` / `endedByTxHash`). Empty for synthetic
-   * upserts (e.g. factory bootstrap where no rising edge is possible). */
-  txHash?: string;
+  /** Transaction hash of the event driving this upsert. Required —
+   * breach-transition rows store it as `startedByTxHash` / `endedByTxHash`.
+   * All handler callers have `event.transaction.hash` available. */
+  txHash: string;
+  /** Rebalancer strategy contract that fired the event. Only read when
+   * source === "fpmm_rebalanced" — populates `endedByStrategy` on a breach
+   * the rebalance closes. */
+  strategy?: string;
   reservesDelta?: { reserve0: bigint; reserve1: bigint };
   swapDelta?: { volume0: bigint; volume1: bigint };
   rebalanceDelta?: boolean;
   oracleDelta?: Partial<typeof DEFAULT_ORACLE_FIELDS>;
   tokenDecimals?: { token0Decimals: number; token1Decimals: number };
-  /** Rebalancer strategy contract that fired the event. Used only when
-   * source === "fpmm_rebalanced" to populate `endedByStrategy` on a
-   * breach the rebalance closes. */
-  triggeringStrategy?: string;
 }): Promise<Pool> => {
   const existing = await getOrCreatePool(context, chainId, poolId, {
     token0,
@@ -345,13 +344,7 @@ export const upsertPool = async ({
     context,
     existing.source === "" ? undefined : existing, // brand-new pool → no prev
     { ...withBreach, healthStatus },
-    {
-      blockTimestamp,
-      blockNumber,
-      txHash: txHash ?? "",
-      triggeringSource: source,
-      triggeringStrategy,
-    },
+    { blockTimestamp, blockNumber, txHash, source, strategy },
   );
 
   const final: Pool = {

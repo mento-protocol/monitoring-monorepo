@@ -699,9 +699,9 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     blockNumber,
     blockTimestamp,
     txHash: event.transaction.hash,
+    strategy: rebalancerAddress,
     rebalanceDelta: true,
     oracleDelta,
-    triggeringStrategy: rebalancerAddress,
   });
 
   if (rebalancingState) {
