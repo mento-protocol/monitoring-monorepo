@@ -10,13 +10,27 @@ import type { NextConfig } from "next";
 // - `vercel.live` is whitelisted so Vercel Live (preview comments toolbar)
 //   works on preview deployments; prod is unaffected since the toolbar only
 //   loads on Vercel previews.
+// - connect-src hosts: Hasura (indexer.hyperindex.xyz) for GraphQL queries,
+//   plus the RPC endpoints the bridge-redeem flow polls for tx receipts.
+//   Keep this list tight — any new external fetch needs a CSP update, and
+//   that friction is the feature.
+const CSP_CONNECT_SRC = [
+  "'self'",
+  "https://vercel.live",
+  "wss://ws-us3.pusher.com",
+  "https://indexer.hyperindex.xyz",
+  "https://forno.celo.org",
+  "https://forno.celo-sepolia.celo-testnet.org",
+  "https://rpc2.monad.xyz",
+].join(" ");
+
 const CSP_DIRECTIVES = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' https://vercel.live",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https://vercel.live https://assets.vercel.com",
-  "connect-src 'self' https://vercel.live wss://ws-us3.pusher.com",
+  `connect-src ${CSP_CONNECT_SRC}`,
   "frame-src 'self' https://vercel.live",
   "frame-ancestors 'none'",
   "base-uri 'self'",
