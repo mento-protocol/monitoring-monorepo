@@ -17,7 +17,7 @@ import {
 // Mirror of the private map in networks.ts — kept here so the drift-guard
 // test can assert every canonical chainId still resolves to a matching
 // NETWORKS entry. If the real map changes, update this too.
-const EXPECTED_PROD_CHAIN_IDS = [42220, 143];
+const EXPECTED_CANONICAL_CHAIN_IDS = [42220, 11142220, 143];
 import { MAINNET_CHAIN_IDS } from "../types";
 
 // Known Celo mainnet addresses from @mento-protocol/contracts (42220/mainnet).
@@ -298,13 +298,14 @@ describe("isCanonicalNetwork", () => {
     expect(isCanonicalNetwork("monad-mainnet")).toBe(true);
   });
 
-  it("returns false for local variants sharing a chainId with a canonical one", () => {
-    expect(isCanonicalNetwork("celo-mainnet-local")).toBe(false);
-    expect(isCanonicalNetwork("devnet")).toBe(false);
+  it("returns true for local-only network that is the canonical entry for its chainId", () => {
+    // Celo Sepolia has no hosted variant; the local proxy is canonical.
+    expect(isCanonicalNetwork("celo-sepolia-local")).toBe(true);
   });
 
-  it("returns false for local-only networks with no canonical variant", () => {
-    expect(isCanonicalNetwork("celo-sepolia-local")).toBe(false);
+  it("returns false for local variants sharing a chainId with a canonical prod one", () => {
+    expect(isCanonicalNetwork("celo-mainnet-local")).toBe(false);
+    expect(isCanonicalNetwork("devnet")).toBe(false);
   });
 });
 
@@ -314,8 +315,15 @@ describe("networkIdForChainId — pool-ID-driven network resolution", () => {
     expect(networkIdForChainId(143)).toBe("monad-mainnet");
   });
 
-  it("returns null for testnet chainIds (no hosted prod network)", () => {
-    expect(networkIdForChainId(11142220)).toBeNull();
+  it("maps Celo Sepolia chainId to the local proxy (no hosted variant exists)", () => {
+    // When `NEXT_PUBLIC_SHOW_LOCAL_NETWORKS=true` is set in dev,
+    // `isConfiguredNetworkId("celo-sepolia-local")` returns true and routing
+    // works. In prod the routing guard rejects the local-only network, so
+    // /pool/11142220-... falls through to DEFAULT_NETWORK as intended.
+    expect(networkIdForChainId(11142220)).toBe("celo-sepolia-local");
+  });
+
+  it("returns null for retired Monad Testnet chainId", () => {
     expect(networkIdForChainId(10143)).toBeNull();
   });
 
@@ -326,7 +334,7 @@ describe("networkIdForChainId — pool-ID-driven network resolution", () => {
   });
 
   it("resolves to a network whose chainId actually matches (drift guard)", () => {
-    for (const chainId of EXPECTED_PROD_CHAIN_IDS) {
+    for (const chainId of EXPECTED_CANONICAL_CHAIN_IDS) {
       const networkId = networkIdForChainId(chainId);
       expect(networkId).not.toBeNull();
       expect(NETWORKS[networkId!].chainId).toBe(chainId);

@@ -224,17 +224,22 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
 export const NETWORK_IDS = Object.keys(NETWORKS) as IndexerNetworkId[];
 export const DEFAULT_NETWORK: IndexerNetworkId = "celo-mainnet";
 
-// Explicit (not derived from NETWORKS) so a future local/staging variant
-// sharing a chainId can't silently reroute prod pool URLs.
-const PROD_NETWORK_BY_CHAIN_ID: Record<number, IndexerNetworkId> = {
+// Canonical id per chainId. Hand-rolled (not derived from NETWORKS) so a
+// future staging variant sharing a chainId with prod can't silently reroute
+// pool URLs. For chainIds with both a prod and a local variant, the prod id
+// wins here — `isConfiguredNetworkId` gates the local variants out in prod
+// where `NEXT_PUBLIC_SHOW_LOCAL_NETWORKS` is unset. For chainIds with no
+// prod network, the local id is the only reasonable canonical target.
+const CANONICAL_NETWORK_BY_CHAIN_ID: Record<number, IndexerNetworkId> = {
   42220: "celo-mainnet",
+  11142220: "celo-sepolia-local",
   143: "monad-mainnet",
 };
 
 // Canonical network id for a chainId (used to derive the active network
 // from a namespaced pool id without needing ?network=).
 export function networkIdForChainId(chainId: number): IndexerNetworkId | null {
-  return PROD_NETWORK_BY_CHAIN_ID[chainId] ?? null;
+  return CANONICAL_NETWORK_BY_CHAIN_ID[chainId] ?? null;
 }
 
 /** Canonical Network for a chainId, or null if the chain isn't configured. */

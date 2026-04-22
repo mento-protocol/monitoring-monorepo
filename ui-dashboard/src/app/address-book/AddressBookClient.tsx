@@ -388,7 +388,11 @@ export default function AddressBookPage({
                     isPublic={resolved?.entry.isPublic}
                     isCustom={row.isCustom}
                     canEdit={userCanEdit}
-                    explorerUrl={explorerAddressUrl(row.network, row.address)}
+                    explorerUrl={
+                      row.network.explorerBaseUrl
+                        ? explorerAddressUrl(row.network, row.address)
+                        : null
+                    }
                     onEdit={() =>
                       setEditTarget({
                         address: row.address,
@@ -441,12 +445,18 @@ function networkForChainId(chainId: number): Network | null {
 
 function unknownChainNetwork(chainId: number): Network {
   return {
+    // `id` must satisfy the `IndexerNetworkId` union so the Network type is
+    // valid. It's never read for unknown-chain rows (scope is the integer
+    // chainId; id-based routing never triggers for these), so DEFAULT_NETWORK
+    // is a safe placeholder.
     id: DEFAULT_NETWORK,
     label: `Chain ${chainId}`,
     chainId,
     contractsNamespace: null,
     hasuraUrl: "",
     hasuraSecret: "",
+    // Empty string triggers the "no explorer" render path in AddressTableRow
+    // — address renders as plain text instead of a broken relative link.
     explorerBaseUrl: "",
     tokenSymbols: {},
     addressLabels: {},
@@ -479,7 +489,7 @@ type AddressRowProps = {
   isPublic?: boolean;
   isCustom: boolean;
   canEdit: boolean;
-  explorerUrl: string;
+  explorerUrl: string | null;
   onEdit: () => void;
 };
 
@@ -513,18 +523,24 @@ function AddressTableRow({
         )}
       </td>
       <td className="px-4 py-3">
-        <a
-          href={explorerUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          title={address}
-          className="font-mono text-xs text-slate-300 hover:text-indigo-300 transition-colors"
-        >
-          {truncateAddress(address)}
-          <span className="ml-1 text-slate-600" aria-hidden="true">
-            ↗
+        {explorerUrl ? (
+          <a
+            href={explorerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={address}
+            className="font-mono text-xs text-slate-300 hover:text-indigo-300 transition-colors"
+          >
+            {truncateAddress(address)}
+            <span className="ml-1 text-slate-600" aria-hidden="true">
+              ↗
+            </span>
+          </a>
+        ) : (
+          <span title={address} className="font-mono text-xs text-slate-500">
+            {truncateAddress(address)}
           </span>
-        </a>
+        )}
       </td>
       <td className="px-4 py-3">
         <span
