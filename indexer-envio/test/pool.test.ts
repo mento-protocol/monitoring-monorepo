@@ -168,4 +168,45 @@ describe("nextDeviationBreachStartedAt", () => {
     });
     assert.equal(nextDeviationBreachStartedAt(prev, next, TS), 0n);
   });
+
+  it("holds the anchor on a falling edge when source is 'fpmm_update_reserves'", () => {
+    // FPMM emits ReservesUpdated inside swap/rebalance/mint/burn. If
+    // UpdateReserves was allowed to close the anchor, the semantic
+    // handler firing right after would see `prev.anchor = 0n` and skip
+    // — the breach row would be stuck with `endedByEvent = undefined`.
+    // Holding the anchor lets the next handler in the same tx close it
+    // with the correct attribution.
+    const origStart = 1_600_000_000n;
+    const prev = makePool({
+      priceDifference: 6000n,
+      deviationBreachStartedAt: origStart,
+    });
+    const next = makePool({
+      priceDifference: 2000n, // reserves rebalance pushed price below threshold
+    });
+    assert.equal(
+      nextDeviationBreachStartedAt(prev, next, TS, "fpmm_update_reserves"),
+      origStart,
+    );
+  });
+
+  it("still closes the anchor on a falling edge when source is anything else", () => {
+    // The deferral is scoped narrowly to UpdateReserves; a direct
+    // Rebalance / Swap / oracle close must flip the anchor as normal.
+    const prev = makePool({
+      priceDifference: 6000n,
+      deviationBreachStartedAt: 1_600_000_000n,
+    });
+    const next = makePool({ priceDifference: 2000n });
+    assert.equal(
+      nextDeviationBreachStartedAt(prev, next, TS, "fpmm_rebalanced"),
+      0n,
+    );
+    assert.equal(
+      nextDeviationBreachStartedAt(prev, next, TS, "oracle_reported"),
+      0n,
+    );
+    // Omitted source (legacy callers) must also close normally.
+    assert.equal(nextDeviationBreachStartedAt(prev, next, TS), 0n);
+  });
 });
