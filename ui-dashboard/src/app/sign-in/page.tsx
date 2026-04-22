@@ -1,8 +1,40 @@
 import { signIn } from "@/auth";
 
 export function sanitizeCallbackUrl(raw?: string): string {
-  if (raw?.startsWith("/") && !raw.startsWith("//")) return raw;
-  return "/address-book";
+  const DEFAULT = "/address-book";
+  if (!raw) return DEFAULT;
+
+  // Raw-level checks: things URL parsing would silently strip or normalize
+  // past us. Tab/CR/LF are quietly removed by WHATWG URL parsing, null bytes
+  // can masquerade as valid pathname chars, and leading whitespace evades
+  // the `startsWith("/")` gate below.
+  // eslint-disable-next-line no-control-regex -- blocking control-char smuggling is the whole point here
+  if (/[\x00-\x1f\x7f-\x9f]/.test(raw)) return DEFAULT;
+  if (!raw.startsWith("/")) return DEFAULT;
+  if (raw.startsWith("//")) return DEFAULT;
+
+  // Parse against a dummy origin and confirm the result stays same-origin.
+  // Backslash in a "special" scheme's path is normalized to `/`, so
+  // `/\evil.com` reparents onto evil.com — the origin check catches it.
+  try {
+    const parsed = new URL(raw, "https://sanitize.invalid");
+    if (parsed.origin !== "https://sanitize.invalid") return DEFAULT;
+    const { pathname } = parsed;
+    if (!pathname.startsWith("/") || pathname.startsWith("//")) return DEFAULT;
+    // Path-only checks. These vectors (backslash, user-info `@`, percent-
+    // encoded slash/backslash, and the same double-encoded) only matter in
+    // the pathname — routers may decode them into `/` there and produce
+    // `//evil.com`. Query strings legitimately carry these chars (email
+    // filters like `?owner=alice@mentolabs.xyz`, URL-shaped params), so
+    // restricting the check to pathname avoids breaking real same-origin
+    // callbacks.
+    if (/[\\@]/.test(pathname)) return DEFAULT;
+    if (/%(?:2[fF]|5[cC]|25(?:2[fF]|5[cC]))/.test(pathname)) return DEFAULT;
+  } catch {
+    return DEFAULT;
+  }
+
+  return raw;
 }
 
 type Props = {

@@ -18,3 +18,7 @@ WORK.md
 .playwright-mcp/
 # Screenshots from chrome-devtools/playwright MCP dev sessions
 /*.png
+# Red-team exercise artifacts (findings, threat models, probe scripts,
+# evidence logs) stay local. Committing a roadmap of unpatched findings to
+# a public repo is its own finding; keep this folder out of git.
+.redteam/
