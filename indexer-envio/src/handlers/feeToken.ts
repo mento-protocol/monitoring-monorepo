@@ -18,7 +18,7 @@ ERC20FeeToken.Transfer.handler(
     // split address from inflating the protocol fee KPIs.
     const sender = asAddress(event.params.from);
     const pool = await context.Pool.get(makePoolId(event.chainId, sender));
-    if (!pool || !pool.source?.includes("fpmm")) {
+    if (!pool || !pool.source.includes("fpmm")) {
       return; // Not from a known FPMM pool — skip
     }
 

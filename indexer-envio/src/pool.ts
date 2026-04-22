@@ -51,7 +51,7 @@ export const DEVIATION_BREACH_GRACE_SECONDS = 3600n;
  *    reclassifies them to WEEKEND when rendering.
  */
 export function computeHealthStatus(pool: Pool, nowSeconds: bigint): string {
-  if (pool.source?.includes("virtual")) return "N/A";
+  if (pool.source.includes("virtual")) return "N/A";
   if (!pool.oracleOk) return "CRITICAL";
   const threshold =
     pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
@@ -69,11 +69,11 @@ export function computeHealthStatus(pool: Pool, nowSeconds: bigint): string {
 }
 
 // Integer comparison avoids float pathology at the devRatio = 1.0 boundary.
-// Strict `>` matches `computeHealthStatus`: exactly-at-threshold stays WARN,
-// not CRITICAL, so it is NOT counted as a breach either. Oracle staleness
-// is intentionally NOT counted — this tracks price action only.
+// Strict `>` matches `computeHealthStatus`: exactly-at-threshold stays OK,
+// so it is NOT counted as a breach either. Oracle staleness is
+// intentionally NOT counted — this tracks price action only.
 export function isInDeviationBreach(pool: Pool): boolean {
-  if (pool.source?.includes("virtual")) return false;
+  if (pool.source.includes("virtual")) return false;
   const threshold =
     pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
   return pool.priceDifference > BigInt(threshold);
@@ -257,7 +257,7 @@ export const upsertPool = async ({
   if (
     existing.referenceRateFeedID === "" &&
     existing.source !== "" &&
-    !existing.source?.includes("virtual")
+    !existing.source.includes("virtual")
   ) {
     const rateFeedID = await fetchReferenceRateFeedID(chainId, poolAddr);
     if (rateFeedID) {
@@ -274,7 +274,7 @@ export const upsertPool = async ({
   if (
     (existing.lpFee < 0 || existing.protocolFee < 0) &&
     existing.source !== "" &&
-    !existing.source?.includes("virtual")
+    !existing.source.includes("virtual")
   ) {
     const fees = await fetchFees(chainId, poolAddr);
     if (fees) {
@@ -320,7 +320,7 @@ export const upsertPool = async ({
     oracleDelta.priceDifference !== undefined;
   const priceDifference = hasContractPriceDiff
     ? oracleDelta.priceDifference!
-    : !next.source?.includes("virtual") && next.oraclePrice > 0n
+    : !next.source.includes("virtual") && next.oraclePrice > 0n
       ? computePriceDifference(next)
       : next.priceDifference;
 

@@ -1,6 +1,10 @@
 "use client";
 
-import type { Pool, DeviationThresholdBreach } from "@/lib/types";
+import type {
+  Pool,
+  DeviationThresholdBreach,
+  BreachEventCategory,
+} from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { useGQL } from "@/lib/graphql";
 import { POOL_DEVIATION_BREACHES } from "@/lib/queries";
@@ -18,7 +22,7 @@ interface Props {
   network: Network;
 }
 
-const END_REASON_LABELS: Record<string, string> = {
+const END_REASON_LABELS: Record<BreachEventCategory, string> = {
   rebalance: "Rebalanced",
   swap: "Swap",
   liquidity: "Liquidity event",
@@ -27,11 +31,11 @@ const END_REASON_LABELS: Record<string, string> = {
   unknown: "Unknown",
 };
 
-const START_REASON_LABELS: Record<string, string> = {
+const START_REASON_LABELS: Record<BreachEventCategory, string> = {
+  rebalance: "Rebalance (reverse)",
   swap: "Swap",
   liquidity: "Liquidity event",
   oracle_update: "Oracle moved",
-  rebalance: "Rebalance (reverse)",
   threshold_change: "Threshold change",
   unknown: "Unknown",
 };
@@ -45,11 +49,11 @@ export function BreachHistoryPanel({ pool, network }: Props) {
   const { getName } = useAddressLabels();
   const { data, isLoading, error } = useGQL<{
     DeviationThresholdBreach: DeviationThresholdBreach[];
-  }>(pool.source?.includes("virtual") ? null : POOL_DEVIATION_BREACHES, {
+  }>(pool.source.includes("virtual") ? null : POOL_DEVIATION_BREACHES, {
     poolId: pool.id,
   });
 
-  if (pool.source?.includes("virtual")) return null;
+  if (pool.source.includes("virtual")) return null;
 
   const rows = data?.DeviationThresholdBreach ?? [];
   if (isLoading && rows.length === 0) {
@@ -151,9 +155,8 @@ function BreachRow({
 
   const endedLabel = isOpen
     ? "Ongoing"
-    : (END_REASON_LABELS[breach.endedByEvent ?? ""] ?? "—");
-  const startedLabel =
-    START_REASON_LABELS[breach.startedByEvent] ?? breach.startedByEvent;
+    : END_REASON_LABELS[breach.endedByEvent ?? "unknown"];
+  const startedLabel = START_REASON_LABELS[breach.startedByEvent];
 
   return (
     <tr className="border-t border-slate-800/60 text-slate-300">

@@ -17,7 +17,7 @@ type BreachRollup = {
 
 export function UptimeValue({ pool }: { pool: Pool }) {
   const { data, error } = useGQL<{ Pool: BreachRollup[] }>(
-    pool.source?.includes("virtual") ? null : POOL_BREACH_ROLLUP,
+    pool.source.includes("virtual") ? null : POOL_BREACH_ROLLUP,
     { id: pool.id, chainId: pool.chainId },
   );
 

@@ -36,7 +36,6 @@ export type Pool = {
   limitPressure0?: string;
   limitPressure1?: string;
   rebalancerAddress?: string;
-  rebalanceLivenessStatus?: string;
   token0Decimals?: number;
   token1Decimals?: number;
   swapCount?: number;
@@ -51,6 +50,21 @@ export type Pool = {
   lastDeviationRatio?: string;
   hasHealthData?: boolean;
 };
+
+/**
+ * User-facing categories for breach start/end causes. Kept in lockstep
+ * with `BreachEventCategory` in `indexer-envio/src/deviationBreach.ts` —
+ * indexer and UI can't share TS types directly (indexer codegen via
+ * rescript + shared-config is JSON), so this mirror is the source of
+ * truth for the UI side. A new category has to be added in both places.
+ */
+export type BreachEventCategory =
+  | "rebalance"
+  | "swap"
+  | "liquidity"
+  | "oracle_update"
+  | "threshold_change"
+  | "unknown";
 
 /**
  * One historical deviation-threshold breach for a pool. Emitted by the
@@ -73,9 +87,9 @@ export type DeviationThresholdBreach = {
   peakPriceDifference: string;
   peakAt: string;
   peakAtBlock: string;
-  startedByEvent: string;
+  startedByEvent: BreachEventCategory;
   startedByTxHash: string;
-  endedByEvent: string | null;
+  endedByEvent: BreachEventCategory | null;
   endedByTxHash: string | null;
   endedByStrategy: string | null;
   rebalanceCountDuring: number;

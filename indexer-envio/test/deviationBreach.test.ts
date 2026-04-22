@@ -5,11 +5,9 @@ import {
   openBreachId,
   recordBreachTransition,
 } from "../src/deviationBreach";
-import {
-  DEFAULT_ORACLE_FIELDS,
-  DEVIATION_BREACH_GRACE_SECONDS,
-} from "../src/pool";
-import type { Pool, DeviationThresholdBreach } from "generated";
+import { DEVIATION_BREACH_GRACE_SECONDS } from "../src/pool";
+import type { DeviationThresholdBreach } from "generated";
+import { makePool } from "./helpers/makePool";
 
 // ---------------------------------------------------------------------------
 // In-memory mock context shaped like the Envio loader context used by
@@ -27,32 +25,6 @@ function makeMockContext() {
         },
       },
     },
-  };
-}
-
-function makePool(overrides: Partial<Pool> = {}): Pool {
-  return {
-    id: "42220-0xtest",
-    chainId: 42220,
-    token0: "0xtok0",
-    token1: "0xtok1",
-    token0Decimals: 18,
-    token1Decimals: 18,
-    source: "fpmm_factory",
-    reserves0: 0n,
-    reserves1: 0n,
-    swapCount: 0,
-    notionalVolume0: 0n,
-    notionalVolume1: 0n,
-    rebalanceCount: 0,
-    ...DEFAULT_ORACLE_FIELDS,
-    oracleOk: true,
-    rebalanceThreshold: 5000,
-    createdAtBlock: 0n,
-    createdAtTimestamp: 0n,
-    updatedAtBlock: 0n,
-    updatedAtTimestamp: 0n,
-    ...overrides,
   };
 }
 

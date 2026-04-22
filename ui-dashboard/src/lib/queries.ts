@@ -32,7 +32,6 @@ export const ALL_POOLS_WITH_HEALTH = `
       limitPressure0
       limitPressure1
       rebalancerAddress
-      rebalanceLivenessStatus
       referenceRateFeedID
       swapCount
       rebalanceCount
@@ -232,7 +231,6 @@ export const POOL_DETAIL_WITH_HEALTH = `
       limitPressure0
       limitPressure1
       rebalancerAddress
-      rebalanceLivenessStatus
       reserves0
       reserves1
       healthTotalSeconds
