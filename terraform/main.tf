@@ -332,8 +332,10 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
         container_port = 8080
       }
       resources {
+        # Cloud Run requires ≥512Mi when cpu_idle = false (always-allocated
+        # CPU is unthrottled and won't run on smaller instances).
         limits = {
-          memory = "256Mi"
+          memory = "512Mi"
           cpu    = "1"
         }
         # CPU must stay allocated between requests for the background polling loop.
