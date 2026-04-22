@@ -37,3 +37,13 @@ output "metrics_bridge_url" {
   description = "Cloud Run URL for the metrics bridge — add as Grafana Agent scrape target."
   value       = length(google_cloud_run_v2_service.metrics_bridge) > 0 ? google_cloud_run_v2_service.metrics_bridge[0].uri : ""
 }
+
+output "ci_wif_provider" {
+  description = "Full resource name of the GitHub Actions WIF provider. Set as GH repo secret GCP_WORKLOAD_IDENTITY_PROVIDER."
+  value       = google_iam_workload_identity_pool_provider.github.name
+}
+
+output "ci_deployer_email" {
+  description = "CI deployer SA email — impersonated by the GitHub workflow. Set as GH repo secret GCP_SERVICE_ACCOUNT."
+  value       = google_service_account.metrics_bridge_deployer.email
+}

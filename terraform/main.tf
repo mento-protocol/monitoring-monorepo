@@ -292,6 +292,34 @@ resource "google_project_service" "cloudbuild" {
   depends_on = [google_project_iam_member.terraform_owner]
 }
 
+# Needed for Workload Identity Federation (GitHub Actions OIDC → impersonation).
+resource "google_project_service" "iam" {
+  project                    = google_project.monitoring.project_id
+  service                    = "iam.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+
+  depends_on = [google_project_iam_member.terraform_owner]
+}
+
+resource "google_project_service" "iamcredentials" {
+  project                    = google_project.monitoring.project_id
+  service                    = "iamcredentials.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+
+  depends_on = [google_project_iam_member.terraform_owner]
+}
+
+resource "google_project_service" "sts" {
+  project                    = google_project.monitoring.project_id
+  service                    = "sts.googleapis.com"
+  disable_on_destroy         = false
+  disable_dependent_services = false
+
+  depends_on = [google_project_iam_member.terraform_owner]
+}
+
 # ── Artifact Registry ────────────────────────────────────────────────────────
 
 resource "google_artifact_registry_repository" "metrics_bridge" {
@@ -411,4 +439,105 @@ resource "google_project_iam_member" "dev_cloudbuild_editor" {
   member   = each.value
 
   depends_on = [google_project_iam_member.terraform_owner]
+}
+
+# ── CI Deploy via Workload Identity Federation ───────────────────────────────
+# GitHub Actions workflows from mento-protocol/monitoring-monorepo impersonate
+# `metrics-bridge-deployer` via OIDC — no long-lived JSON keys required.
+#
+# After apply, set two GitHub repo secrets (run from repo root):
+#   gh secret set GCP_WORKLOAD_IDENTITY_PROVIDER \
+#     --body="$(terraform -chdir=terraform output -raw ci_wif_provider)"
+#   gh secret set GCP_SERVICE_ACCOUNT \
+#     --body="$(terraform -chdir=terraform output -raw ci_deployer_email)"
+
+resource "google_iam_workload_identity_pool" "github_actions" {
+  project                   = google_project.monitoring.project_id
+  workload_identity_pool_id = "github-actions"
+  display_name              = "GitHub Actions"
+  description               = "Federation pool for mento-protocol GitHub Actions workflows"
+
+  depends_on = [google_project_service.iam]
+}
+
+resource "google_iam_workload_identity_pool_provider" "github" {
+  project                            = google_project.monitoring.project_id
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github_actions.workload_identity_pool_id
+  workload_identity_pool_provider_id = "github"
+  display_name                       = "GitHub"
+
+  # Attribute condition gates which OIDC tokens are accepted. Restrict to the
+  # monitoring-monorepo repo so other mento-protocol repos can't use this pool
+  # to impersonate our deployer SA.
+  attribute_condition = "attribute.repository == \"mento-protocol/monitoring-monorepo\""
+
+  attribute_mapping = {
+    "google.subject"       = "assertion.sub"
+    "attribute.repository" = "assertion.repository"
+    "attribute.ref"        = "assertion.ref"
+  }
+
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
+}
+
+resource "google_service_account" "metrics_bridge_deployer" {
+  project      = google_project.monitoring.project_id
+  account_id   = "metrics-bridge-deployer"
+  display_name = "metrics-bridge CI deployer"
+  description  = "Impersonated by GitHub Actions via WIF to deploy the bridge"
+
+  depends_on = [google_project_service.iam]
+}
+
+# Any workflow in the repo can impersonate the deployer SA. Tighten later by
+# swapping principalSet → principal with a workflow-ref attribute mapping.
+resource "google_service_account_iam_member" "deployer_wif_binding" {
+  service_account_id = google_service_account.metrics_bridge_deployer.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_actions.name}/attribute.repository/mento-protocol/monitoring-monorepo"
+}
+
+# Project-level grants the CI SA needs for the full deploy flow:
+#   - cloudbuild.builds.editor → submit Cloud Build jobs
+#   - artifactregistry.writer  → push images to AR
+#   - run.admin                → update the Cloud Run service revision
+#   - iam.serviceAccountUser   → "act-as" the runtime SA used by Cloud Run
+locals {
+  ci_deployer_roles = [
+    "roles/cloudbuild.builds.editor",
+    "roles/artifactregistry.writer",
+    "roles/run.admin",
+    "roles/iam.serviceAccountUser",
+  ]
+}
+
+resource "google_project_iam_member" "ci_deployer" {
+  for_each = toset(local.ci_deployer_roles)
+  project  = google_project.monitoring.project_id
+  role     = each.value
+  member   = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
+
+  depends_on = [google_project_iam_member.terraform_owner]
+}
+
+# The CI workflow runs `terraform apply -target=...`, so the deployer needs
+# read/write on the Terraform state bucket (in a different project).
+resource "google_storage_bucket_iam_member" "ci_deployer_tfstate" {
+  bucket = "mento-terraform-tfstate-6ed6"
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
+}
+
+# The google provider in this module is configured with
+# `impersonate_service_account = var.terraform_service_account`, so whenever
+# the CI deployer runs `terraform apply` it mints an access token for
+# `org-terraform@mento-terraform-seed-ffac`. That STS exchange requires
+# `iam.serviceAccounts.getAccessToken`, which comes from tokenCreator on the
+# target SA (not from project-level serviceAccountUser).
+resource "google_service_account_iam_member" "ci_deployer_impersonate_org_terraform" {
+  service_account_id = "projects/-/serviceAccounts/${var.terraform_service_account}"
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
 }
