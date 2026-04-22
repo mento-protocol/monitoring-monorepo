@@ -17,10 +17,16 @@ type BreachRollup = {
 };
 
 export function UptimeValue({ pool }: { pool: Pool }) {
+  // Virtual pools have no oracle — page-level code already guards before
+  // rendering this tile, but guard here too so a direct caller can't get
+  // a misleading "100% — no breaches" on a pool that has no health data.
+  const isVirtual = pool.source.includes("virtual");
   const { data, error } = useGQL<{ Pool: BreachRollup[] }>(
-    pool.source.includes("virtual") ? null : POOL_BREACH_ROLLUP,
+    isVirtual ? null : POOL_BREACH_ROLLUP,
     { id: pool.id, chainId: pool.chainId },
   );
+
+  if (isVirtual) return <span className="text-slate-500">N/A</span>;
 
   const total = Number(pool.healthTotalSeconds ?? "0");
   if (!Number.isFinite(total) || total <= 0) {
@@ -31,14 +37,20 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   // "Query failed" would cry wolf.
   if (error) return <span className="text-slate-500">N/A</span>;
 
+  // Gate on the rollup row being present. SWR returns `data: undefined`
+  // during the initial fetch; without this guard the zero-defaults below
+  // would render "100.000% — no breaches" as a flash of misleadingly
+  // healthy content on every page load.
+  const rollup = data?.Pool?.[0];
+  if (!rollup) return <span className="text-slate-500">N/A</span>;
+
   // Read rollup + open-breach anchor from the SAME query result so they're
   // a consistent snapshot. Mixing with `pool.deviationBreachStartedAt`
   // from POOL_DETAIL_WITH_HEALTH would double-count a just-closed breach
   // during the brief window where the rollup refreshed first.
-  const rollup = data?.Pool?.[0];
-  const rolledCritical = Number(rollup?.cumulativeCriticalSeconds ?? "0");
-  const closedBreachCount = rollup?.breachCount ?? 0;
-  const openStart = Number(rollup?.deviationBreachStartedAt ?? "0");
+  const rolledCritical = Number(rollup.cumulativeCriticalSeconds ?? "0");
+  const closedBreachCount = rollup.breachCount ?? 0;
+  const openStart = Number(rollup.deviationBreachStartedAt ?? "0");
   const hasOpenBreach = openStart > 0;
 
   // Open breaches aren't in `rolledCritical` until they close — add the

@@ -283,7 +283,13 @@ describe("UptimeValue", () => {
     vi.useRealTimers();
   });
 
-  it("renders N/A on a virtual pool (rollup query skipped)", () => {
+  it("renders N/A on a virtual pool even when called directly (defensive guard)", () => {
+    // The parent page already wraps the tile in an isVirtual guard, but
+    // the component guards on its own so a test / other caller can't
+    // produce a misleading "100% — no breaches" rendering on a pool with
+    // no oracle. Also confirms the rollup query is skipped — mockUseGQL
+    // isn't asserted here because the component short-circuits before
+    // reading its return.
     mockUseGQL.mockReturnValueOnce({ data: undefined });
     const pool: Pool = {
       ...BASE_POOL,
@@ -291,9 +297,24 @@ describe("UptimeValue", () => {
       healthTotalSeconds: String(86400),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
-    // data is undefined → rollup fields default to 0 → 100% uptime, but
-    // the rollup scalar is the authoritative "no breaches" signal.
-    expect(html).toContain("100.000%");
-    expect(html).toContain("no breaches");
+    expect(html).toContain("N/A");
+    expect(html).not.toContain("100.000%");
+    expect(html).not.toContain("no breaches");
+  });
+
+  it("renders N/A while the rollup query is still loading (no 100% flash)", () => {
+    // SWR returns data=undefined before the query resolves. Without a
+    // gate, the zero-defaults below would render "100.000% — no
+    // breaches" for a blink on every page load — a misleading flash
+    // of healthy content for pools that might have real incidents.
+    mockUseGQL.mockReturnValueOnce({ data: undefined });
+    const pool: Pool = {
+      ...BASE_POOL,
+      healthTotalSeconds: String(30 * 86400),
+    };
+    const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
+    expect(html).toContain("N/A");
+    expect(html).not.toContain("100.000%");
+    expect(html).not.toContain("no breaches");
   });
 });

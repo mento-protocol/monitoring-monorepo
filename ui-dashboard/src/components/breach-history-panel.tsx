@@ -14,6 +14,7 @@ import {
   formatDeviationPct,
   DEVIATION_BREACH_GRACE_SECONDS,
 } from "@/lib/health";
+import { tradingSecondsInRange } from "@/lib/weekend";
 import { explorerTxUrl } from "@/lib/tokens";
 import { useAddressLabels } from "@/components/address-labels-provider";
 
@@ -150,23 +151,29 @@ function BreachRow({
   getName: (addr: string, chainId?: number) => string;
 }) {
   const isOpen = breach.endedAt == null;
-  // Open rows show the live "ongoing" duration against wall-clock, since the
-  // indexer hasn't closed + weekend-subtracted the interval yet. Closed rows
-  // use the stored trading-second duration.
   const now = Math.floor(Date.now() / 1000);
+  // Elapsed duration uses wall-clock for the "Duration" column on open
+  // rows so the label moves in real time. Closed rows use the stored
+  // trading-second value the indexer computed at close.
   const wallDuration = isOpen
     ? now - Number(breach.startedAt)
     : Number(breach.durationSeconds);
+  // Past-grace ("critical") uses trading-seconds for open rows too, so
+  // the unit matches the stored `criticalDurationSeconds` on closed rows
+  // AND the uptime tile's live open-breach math. Without this, an open
+  // breach spanning an FX weekend would briefly show an inflated "past
+  // grace" that collapses once the indexer closes it.
+  const graceEnd =
+    Number(breach.startedAt) + Number(DEVIATION_BREACH_GRACE_SECONDS);
   const critDuration = isOpen
-    ? Math.max(
-        0,
-        now - Number(breach.startedAt) - Number(DEVIATION_BREACH_GRACE_SECONDS),
-      )
+    ? now > graceEnd
+      ? tradingSecondsInRange(graceEnd, now)
+      : 0
     : Number(breach.criticalDurationSeconds);
-  const peakPct = formatDeviationPct(
-    breach.peakPriceDifference,
-    pool.rebalanceThreshold ?? 0,
-  );
+  const threshold = pool.rebalanceThreshold ?? 0;
+  const peakPct = threshold
+    ? formatDeviationPct(breach.peakPriceDifference, threshold)
+    : null;
 
   const endedLabel = isOpen
     ? "Ongoing"
@@ -203,7 +210,7 @@ function BreachRow({
         className="py-2 pr-4 whitespace-nowrap"
         title={breach.peakPriceDifference}
       >
-        {peakPct}
+        {peakPct ?? "—"}
       </td>
       <td className="py-2 pr-4 whitespace-nowrap text-slate-400">
         {startedLabel}
