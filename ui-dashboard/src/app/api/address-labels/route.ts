@@ -6,14 +6,18 @@ import {
   getAllLabels,
   upsertEntry,
   deleteLabel,
-  type AddressEntry,
   type Scope,
 } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const session = await getAuthSession();
-  const publicOnly = session === null;
+  if (!session) {
+    return NextResponse.json(
+      { error: "Authentication required" },
+      { status: 401 },
+    );
+  }
 
   const scopeParam = req.nextUrl.searchParams.get("scope");
   const chainIdParam = req.nextUrl.searchParams.get("chainId");
@@ -28,25 +32,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       );
     }
     try {
-      const labels = await getLabels(scope, { publicOnly });
+      const labels = await getLabels(scope);
       return NextResponse.json(labels);
     } catch (err) {
       return serverError(err, "read");
     }
   }
 
-  // Full read: { global, chains } with publicOnly filter applied to both.
+  // Full read: { global, chains }. Session-gated — no public filter.
   try {
-    const { global, chains } = await getAllLabels();
-    const filteredGlobal = publicOnly ? filterPublic(global) : global;
-    const filteredChains: Record<string, Record<string, AddressEntry>> = {};
-    for (const [chainId, entries] of Object.entries(chains)) {
-      filteredChains[chainId] = publicOnly ? filterPublic(entries) : entries;
-    }
-    return NextResponse.json({
-      global: filteredGlobal,
-      chains: filteredChains,
-    });
+    return NextResponse.json(await getAllLabels());
   } catch (err) {
     return serverError(err, "read");
   }
@@ -229,25 +224,13 @@ function parseScopeParam(
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
-function filterPublic(
-  entries: Record<string, AddressEntry>,
-): Record<string, AddressEntry> {
-  return Object.fromEntries(
-    Object.entries(entries).filter(([, entry]) => entry.isPublic === true),
-  );
-}
-
-// op distinguishes which handler failed (read/save/delete) so both the
-// client-facing message and the Sentry tag reflect the actual operation
-// instead of a blanket "read" for every 500 across GET/PUT/DELETE.
+// op distinguishes which handler failed (read/save/delete) so the Sentry
+// tag reflects the actual operation instead of a blanket "read" for every
+// 500 across GET/PUT/DELETE.
 function serverError(
   err: unknown,
   op: "read" | "save" | "delete",
 ): NextResponse {
-  // Full error + stack is captured in Sentry — return a generic string to
-  // the client. The GET path is partially public (unauthenticated callers
-  // get public-only labels), so Upstash / Blob error messages must not
-  // leak upstream details to them.
   Sentry.captureException(err, { tags: { route: "address-labels", op } });
   console.error("[address-labels]", op, err);
   return NextResponse.json(

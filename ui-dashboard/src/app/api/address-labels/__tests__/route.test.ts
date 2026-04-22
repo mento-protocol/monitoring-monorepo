@@ -21,17 +21,22 @@ beforeEach(() => {
 });
 
 describe("GET /api/address-labels", () => {
-  it("returns publicOnly labels when unauthenticated (chain-narrow)", async () => {
+  it("returns 401 when unauthenticated (chain-narrow)", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
-      "0xaaa": { name: "Public", tags: [], isPublic: true },
-    });
     const req = new NextRequest(
       "http://localhost/api/address-labels?chainId=42220",
     );
     const res = await GET(req);
-    expect(res.status).toBe(200);
-    expect(getLabels).toHaveBeenCalledWith(42220, { publicOnly: true });
+    expect(res.status).toBe(401);
+    expect(getLabels).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when unauthenticated (full read)", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    const req = new NextRequest("http://localhost/api/address-labels");
+    const res = await GET(req);
+    expect(res.status).toBe(401);
+    expect(getAllLabels).not.toHaveBeenCalled();
   });
 
   it("returns all labels when authenticated (chain-narrow)", async () => {
@@ -44,7 +49,7 @@ describe("GET /api/address-labels", () => {
     );
     const res = await GET(req);
     expect(res.status).toBe(200);
-    expect(getLabels).toHaveBeenCalledWith(42220, { publicOnly: false });
+    expect(getLabels).toHaveBeenCalledWith(42220);
   });
 
   it("?scope=global routes to getLabels('global')", async () => {
@@ -57,7 +62,7 @@ describe("GET /api/address-labels", () => {
     );
     const res = await GET(req);
     expect(res.status).toBe(200);
-    expect(getLabels).toHaveBeenCalledWith("global", { publicOnly: false });
+    expect(getLabels).toHaveBeenCalledWith("global");
   });
 
   it("returns { global, chains } when no params (authenticated)", async () => {
@@ -109,52 +114,8 @@ describe("GET /api/address-labels", () => {
     expect(body.global["0xggg"].name).toBe("Cross-chain");
     expect(Object.keys(body.chains).sort()).toEqual(["143", "42220"]);
     expect(body.chains["42220"]["0xaaa"].name).toBe("Public A");
+    expect(body.chains["42220"]["0xbbb"].name).toBe("Private B");
     expect(body.chains["143"]["0xccc"].name).toBe("Monad C");
-  });
-
-  it("filters to public-only across global + chains when unauthenticated", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
-      global: {
-        "0xggg-pub": {
-          name: "Global public",
-          tags: [],
-          isPublic: true,
-          updatedAt: "1",
-        },
-        "0xggg-pri": {
-          name: "Global private",
-          tags: [],
-          isPublic: false,
-          updatedAt: "1",
-        },
-      },
-      chains: {
-        "42220": {
-          "0xaaa": {
-            name: "Public",
-            tags: [],
-            isPublic: true,
-            updatedAt: "1",
-          },
-          "0xbbb": {
-            name: "Private",
-            tags: [],
-            isPublic: false,
-            updatedAt: "2",
-          },
-        },
-      },
-    });
-    const req = new NextRequest("http://localhost/api/address-labels");
-    const res = await GET(req);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      global: Record<string, unknown>;
-      chains: Record<string, Record<string, unknown>>;
-    };
-    expect(Object.keys(body.global)).toEqual(["0xggg-pub"]);
-    expect(Object.keys(body.chains["42220"])).toEqual(["0xaaa"]);
   });
 });
 
