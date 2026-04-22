@@ -253,6 +253,16 @@ resource "google_project" "monitoring" {
   }
 }
 
+# Creator of the project does not automatically inherit owner rights on it,
+# so grant the impersonated Terraform service account explicit ownership.
+# Without this, every resource Terraform tries to create inside the project
+# (Artifact Registry, Cloud Run, IAM bindings) fails with 403.
+resource "google_project_iam_member" "terraform_owner" {
+  project = google_project.monitoring.project_id
+  role    = "roles/owner"
+  member  = "serviceAccount:${var.terraform_service_account}"
+}
+
 # ── GCP APIs ─────────────────────────────────────────────────────────────────
 
 resource "google_project_service" "run" {
@@ -260,6 +270,8 @@ resource "google_project_service" "run" {
   service                    = "run.googleapis.com"
   disable_on_destroy         = false
   disable_dependent_services = false
+
+  depends_on = [google_project_iam_member.terraform_owner]
 }
 
 resource "google_project_service" "artifactregistry" {
@@ -267,6 +279,8 @@ resource "google_project_service" "artifactregistry" {
   service                    = "artifactregistry.googleapis.com"
   disable_on_destroy         = false
   disable_dependent_services = false
+
+  depends_on = [google_project_iam_member.terraform_owner]
 }
 
 resource "google_project_service" "cloudbuild" {
@@ -274,6 +288,8 @@ resource "google_project_service" "cloudbuild" {
   service                    = "cloudbuild.googleapis.com"
   disable_on_destroy         = false
   disable_dependent_services = false
+
+  depends_on = [google_project_iam_member.terraform_owner]
 }
 
 # ── Artifact Registry ────────────────────────────────────────────────────────
@@ -363,12 +379,16 @@ resource "google_cloud_run_v2_service_iam_member" "metrics_bridge_public" {
 
 # ── Dev Team IAM ─────────────────────────────────────────────────────────────
 # Gives devs the ability to deploy new revisions, push images, and submit builds.
+# All depend on `terraform_owner` so the impersonated SA has project-level
+# setIamPolicy rights before TF schedules these bindings on a cold bootstrap.
 
 resource "google_project_iam_member" "dev_run_admin" {
   for_each = toset(var.gcp_dev_members)
   project  = google_project.monitoring.project_id
   role     = "roles/run.admin"
   member   = each.value
+
+  depends_on = [google_project_iam_member.terraform_owner]
 }
 
 resource "google_project_iam_member" "dev_ar_writer" {
@@ -376,6 +396,8 @@ resource "google_project_iam_member" "dev_ar_writer" {
   project  = google_project.monitoring.project_id
   role     = "roles/artifactregistry.writer"
   member   = each.value
+
+  depends_on = [google_project_iam_member.terraform_owner]
 }
 
 resource "google_project_iam_member" "dev_cloudbuild_editor" {
@@ -383,4 +405,6 @@ resource "google_project_iam_member" "dev_cloudbuild_editor" {
   project  = google_project.monitoring.project_id
   role     = "roles/cloudbuild.builds.editor"
   member   = each.value
+
+  depends_on = [google_project_iam_member.terraform_owner]
 }
