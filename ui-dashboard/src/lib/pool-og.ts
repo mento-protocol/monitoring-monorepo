@@ -267,20 +267,16 @@ function computeHealthReasons(pool: Pool, chainId: number): string[] {
       (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
     const devRatio = diff / threshold;
     if (devRatio > 1.0) {
-      // Mirror computeHealthStatus: a fresh rebalance within the grace
-      // window keeps the *status* at WARN, so the *reason* shouldn't
-      // imply CRITICAL either — a rebalance is in flight.
-      const lastRebalancedAt = Number(pool.lastRebalancedAt ?? "0");
-      const rebalanceInFlight =
-        lastRebalancedAt > 0 &&
-        now - lastRebalancedAt < DEVIATION_BREACH_GRACE_SECONDS;
+      // Mirror computeHealthStatus: a breach within the grace window keeps
+      // the *status* at WARN, so the *reason* shouldn't imply CRITICAL.
+      const breachStart = Number(pool.deviationBreachStartedAt ?? "0");
+      const withinGrace =
+        breachStart <= 0 || now - breachStart < DEVIATION_BREACH_GRACE_SECONDS;
       items.push(
-        rebalanceInFlight
+        withinGrace
           ? { text: "rebalance in flight", severity: REASON_WARN }
           : { text: "price deviation breach", severity: REASON_CRITICAL },
       );
-    } else if (devRatio >= 0.8) {
-      items.push({ text: "price deviation rising", severity: REASON_WARN });
     }
   }
 

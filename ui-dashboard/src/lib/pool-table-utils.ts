@@ -21,8 +21,9 @@ function healthTooltip(status: string, p: Pool, chainId?: number): string {
   if (status === "CRITICAL" && isOracleStale)
     return "Oracle stale — last update expired";
   if (status === "CRITICAL")
-    return "Needs rebalance: price deviation ≥ threshold";
-  if (status === "WARN") return "Price deviation ≥ 80% of rebalance threshold";
+    return "Deviation above threshold for more than 1h — rebalance overdue";
+  if (status === "WARN")
+    return "Deviation above threshold — rebalance expected within 1h";
   return "Oracle healthy";
 }
 

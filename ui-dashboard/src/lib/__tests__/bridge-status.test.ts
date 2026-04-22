@@ -4,6 +4,7 @@ import {
   deriveBridgeStatus,
   formatDurationShort,
   bridgeStatusLabel,
+  bridgeStatusDetailLabel,
   transferDeliveryDurationSec,
 } from "../bridge-status";
 
@@ -259,11 +260,44 @@ describe("transferDeliveryDurationSec", () => {
 });
 
 describe("bridgeStatusLabel", () => {
-  it("has a label for every overlay status", () => {
+  it("collapses the three in-flight sub-states to 'In progress' — Wormholescan parity", () => {
+    // SENT / ATTESTED / QUEUED_INBOUND are indexer-internal distinctions;
+    // Wormholescan shows one "IN PROGRESS" label for the whole transit
+    // phase. The table cell follows the Wormhole labelling so users don't
+    // have to reconcile two vocabularies for the same lifecycle stage.
+    expect(bridgeStatusLabel("SENT")).toBe("In progress");
+    expect(bridgeStatusLabel("ATTESTED")).toBe("In progress");
+    expect(bridgeStatusLabel("QUEUED_INBOUND")).toBe("In progress");
+  });
+
+  it("has a label for every terminal / overlay status", () => {
     expect(bridgeStatusLabel("DELIVERED")).toBe("Delivered");
-    expect(bridgeStatusLabel("QUEUED_INBOUND")).toBe("Queued");
     expect(bridgeStatusLabel("STUCK")).toBe("Stuck");
     expect(bridgeStatusLabel("PENDING")).toBe("Pending");
+    expect(bridgeStatusLabel("CANCELLED")).toBe("Cancelled");
+    expect(bridgeStatusLabel("FAILED")).toBe("Failed");
+  });
+});
+
+describe("bridgeStatusDetailLabel", () => {
+  it("keeps granular labels for the filter pills", () => {
+    // The filter UI needs to distinguish the in-flight sub-states (so the
+    // user can scope to just SENT, or just QUEUED_INBOUND) — collapsing
+    // them would leave three "In progress" pills with no way to tell them
+    // apart.
+    expect(bridgeStatusDetailLabel("SENT")).toBe("Sent");
+    expect(bridgeStatusDetailLabel("ATTESTED")).toBe("Attested");
+    expect(bridgeStatusDetailLabel("QUEUED_INBOUND")).toBe("Queued");
+  });
+
+  it("has a distinct detail label for every terminal / overlay status", () => {
+    // Covers the statuses that aren't in the filter pill list but still
+    // round-trip through the function (table badges, blame tooltips, etc.).
+    expect(bridgeStatusDetailLabel("PENDING")).toBe("Pending");
+    expect(bridgeStatusDetailLabel("DELIVERED")).toBe("Delivered");
+    expect(bridgeStatusDetailLabel("CANCELLED")).toBe("Cancelled");
+    expect(bridgeStatusDetailLabel("FAILED")).toBe("Failed");
+    expect(bridgeStatusDetailLabel("STUCK")).toBe("Stuck");
   });
 });
 

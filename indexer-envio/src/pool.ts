@@ -18,11 +18,9 @@ import { fetchReferenceRateFeedID, fetchReportExpiry, fetchFees } from "./rpc";
 // ---------------------------------------------------------------------------
 
 /**
- * Grace window for a deviation breach before it escalates to CRITICAL.
- * Mirrors `DEVIATION_BREACH_GRACE_SECONDS` in
- * `ui-dashboard/src/lib/health.ts`. Cross-chain rebalances take minutes
- * to confirm; if a rebalance landed within this window, we stay at WARN
- * rather than flagging an incident.
+ * How long a pool may sit above the rebalance threshold before the status
+ * escalates from WARN to CRITICAL. Mirrors `DEVIATION_BREACH_GRACE_SECONDS`
+ * in `ui-dashboard/src/lib/health.ts`.
  */
 export const DEVIATION_BREACH_GRACE_SECONDS = 3600n;
 
@@ -30,9 +28,13 @@ export const DEVIATION_BREACH_GRACE_SECONDS = 3600n;
  * This indexer branch MUST stay in lockstep with the dashboard's deviation
  * + grace logic in `ui-dashboard/src/lib/health.ts`. Mirrored cases live in
  * `test/healthStatusParity.test.ts`:
- *  - `devRatio > 1.0` → CRITICAL (strict; exactly-at-threshold stays WARN)
- *  - Breach + rebalance within DEVIATION_BREACH_GRACE_SECONDS → WARN
- *  - `devRatio >= 0.8` → WARN; below → OK
+ *  - `devRatio <= 1.0` → OK (close-to-threshold is not actionable)
+ *  - `devRatio > 1.0` within DEVIATION_BREACH_GRACE_SECONDS → WARN
+ *  - `devRatio > 1.0` beyond the grace → CRITICAL
+ *
+ * Grace is anchored on `deviationBreachStartedAt`, which the caller updates
+ * BEFORE invoking this function so `pool.deviationBreachStartedAt` reflects
+ * the current row's breach start (not the previous one).
  *
  * Intentional divergences (NOT covered by the parity suite):
  *  - Oracle staleness: indexer reads the event-time `oracleOk` flag;
@@ -49,12 +51,14 @@ export function computeHealthStatus(pool: Pool, nowSeconds: bigint): string {
     pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
   const devRatio = Number(pool.priceDifference) / threshold;
   if (devRatio > 1.0) {
+    // Without a breach-start anchor (indexer hasn't populated it yet), stay
+    // at WARN rather than spuriously escalating to CRITICAL.
+    if (pool.deviationBreachStartedAt <= 0n) return "WARN";
     const withinGrace =
-      pool.lastRebalancedAt > 0n &&
-      nowSeconds - pool.lastRebalancedAt < DEVIATION_BREACH_GRACE_SECONDS;
+      nowSeconds - pool.deviationBreachStartedAt <
+      DEVIATION_BREACH_GRACE_SECONDS;
     return withinGrace ? "WARN" : "CRITICAL";
   }
-  if (devRatio >= 0.8) return "WARN";
   return "OK";
 }
 
@@ -298,13 +302,17 @@ export const upsertPool = async ({
       : next.priceDifference;
 
   const withDeviation = { ...next, priceDifference };
-  const healthStatus = computeHealthStatus(withDeviation, blockTimestamp);
+  // Compute breach-start BEFORE health, so computeHealthStatus reads the
+  // current row's anchor (grace window is keyed on it). Reversing the order
+  // would ask health about the stale (prior-event) breach start.
   const deviationBreachStartedAt = nextDeviationBreachStartedAt(
     existing,
     withDeviation,
     blockTimestamp,
   );
-  const final = { ...withDeviation, healthStatus, deviationBreachStartedAt };
+  const withBreach = { ...withDeviation, deviationBreachStartedAt };
+  const healthStatus = computeHealthStatus(withBreach, blockTimestamp);
+  const final = { ...withBreach, healthStatus };
 
   context.Pool.set(final);
   return final;

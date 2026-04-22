@@ -318,14 +318,14 @@ describe("fetchPoolOgDataUncached", () => {
   });
 
   it("uses 'rebalance in flight' (not 'breach') when grace window applies", async () => {
-    // A deviation breach that was very recently rebalanced is transient —
-    // computeHealthStatus softens the *status* to WARN, so the *reason*
-    // must match or the tile contradicts itself.
+    // A fresh deviation breach is transient — computeHealthStatus keeps the
+    // status at WARN for the 1h grace, so the reason must match or the
+    // tile contradicts itself.
     const nowSec = Math.floor(Date.now() / 1000);
     const detailPool = makeDetailPool({
       priceDifference: "15000", // 1.5x threshold → > 1.0
       rebalanceThreshold: 10000,
-      lastRebalancedAt: String(nowSec - 1800), // 30m ago → within 1h grace
+      deviationBreachStartedAt: String(nowSec - 1800), // 30m ago → within 1h
     });
     mockRequest((q) => {
       if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
@@ -339,13 +339,18 @@ describe("fetchPoolOgDataUncached", () => {
   });
 
   it("orders healthReasons by severity (worst first)", async () => {
-    // Limit CRITICAL + deviation WARN: the subline pulls reasons[0], so
-    // highest-severity reason must be first or it will misstate the pool.
+    // Two real reasons at different severities: limits breached (CRITICAL)
+    // and a fresh deviation breach within grace (WARN "rebalance in
+    // flight"). The subline pulls reasons[0], so the CRITICAL one must
+    // lead. If ordering regressed and the WARN reason leaked to the front
+    // the hero card would misstate the pool's worst problem.
+    const nowSec = Math.floor(Date.now() / 1000);
     const detailPool = makeDetailPool({
-      priceDifference: "8500", // 0.85x threshold → WARN
+      priceDifference: "15000",
       rebalanceThreshold: 10000,
+      deviationBreachStartedAt: String(nowSec - 600),
       limitStatus: "CRITICAL",
-      limitPressure0: "1.1", // ≥ 1.0 → CRITICAL
+      limitPressure0: "1.1",
     });
     mockRequest((q) => {
       if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
@@ -355,13 +360,12 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result).not.toBeNull();
     expect(result!.health).toBe("CRITICAL");
     expect(result!.healthReasons[0]).toBe("trading limits breached");
-    expect(result!.healthReasons).toContain("price deviation rising");
+    expect(result!.healthReasons).toContain("rebalance in flight");
   });
 
-  it("explains a WARN health as 'price deviation rising' when applicable", async () => {
-    // Oracle fresh, deviation at 85% of threshold — healthy oracle, rising
-    // price. computeHealthStatus → WARN; reason should surface via
-    // healthReasons so the card explains *why* attention is needed.
+  it("does not warn on a healthy-but-close deviation (no near-threshold reason)", async () => {
+    // Under the new rule, deviation at 85% of threshold is OK — the OG
+    // card must not surface a "price deviation rising" reason for it.
     const detailPool = makeDetailPool({
       priceDifference: "8500",
       rebalanceThreshold: 10000,
@@ -372,8 +376,8 @@ describe("fetchPoolOgDataUncached", () => {
     });
     const result = await fetchPoolOgDataUncached(POOL_ID);
     expect(result).not.toBeNull();
-    expect(result!.health).toBe("WARN");
-    expect(result!.healthReasons).toContain("price deviation rising");
+    expect(result!.health).toBe("OK");
+    expect(result!.healthReasons).not.toContain("price deviation rising");
   });
 
   it("suppresses TVL-derived fields for unpriceable FX/FX pool when rate map unavailable", async () => {

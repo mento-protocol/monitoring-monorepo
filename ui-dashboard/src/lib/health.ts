@@ -42,18 +42,18 @@ interface PoolHealthState {
   priceDifference?: string;
   rebalanceThreshold?: number;
   lastRebalancedAt?: string | null;
+  deviationBreachStartedAt?: string | null;
 }
 
 /**
- * Grace window for a deviation breach before it escalates to CRITICAL. Used
- * as a proxy for "is a rebalance in flight?" — cross-chain rebalances take
- * time to land, so a fresh breach where a rebalance happened recently stays
- * WARN. Beyond this window, the pool is treated as genuinely stuck.
+ * How long a pool may sit above the rebalance threshold before it escalates
+ * from WARN to CRITICAL. Below the threshold is always OK; a fresh breach is
+ * WARN for up to this window, then CRITICAL.
  *
- * A precise implementation would need an indexer-side `deviationBreachedAt`
- * field; using lastRebalancedAt as the anchor is an over-estimate of grace
- * (breach can start any time after the last rebalance, not at it) but it's
- * directionally correct with the data we have.
+ * Anchored on `deviationBreachStartedAt` (indexed at the block the pool first
+ * crossed the threshold). If that field is missing — rare, only when the
+ * indexer hasn't populated it yet — we stay at WARN rather than spuriously
+ * escalating.
  */
 export const DEVIATION_BREACH_GRACE_SECONDS = 3600;
 
@@ -88,25 +88,22 @@ export function isOracleFresh(
  *
  * - "N/A":       VirtualPools (source includes "virtual") — no oracle
  * - "CRITICAL":  Oracle is stale (age > expiry), OR deviation > threshold
- *                AND no rebalance within DEVIATION_BREACH_GRACE_SECONDS
- *                (proxy for "breach is no longer recoverable by an in-flight
- *                rebalance")
+ *                for more than DEVIATION_BREACH_GRACE_SECONDS
  * - "WEEKEND":   Oracle is stale because FX markets are closed (Fri 21:00 – Sun 23:00 UTC)
- * - "WARN":      Oracle is fresh and deviation >= 80% of threshold, OR
- *                deviation > threshold but a rebalance landed within the
- *                last DEVIATION_BREACH_GRACE_SECONDS seconds
- * - "OK":        Oracle is fresh and deviation is below 80% of threshold
+ * - "WARN":      Oracle is fresh and deviation > threshold but still within
+ *                the grace window
+ * - "OK":        Oracle is fresh and deviation is at or below threshold
  *
- * The `>` (rather than `>=`) on the CRITICAL boundary gives the exact-
- * threshold case a moment of wiggle room: sitting right at the rebalance
- * line stays WARN instead of flipping straight to CRITICAL.
+ * Being close to but still under the threshold is OK — there's nothing
+ * actionable in that state. The pool only flips to WARN when it actually
+ * breaches, giving operators a 1h window to land a rebalance before
+ * escalating to CRITICAL.
  *
  * Uses wall-clock time comparison rather than the indexed oracleOk flag,
- * which is only set at event time and never expires.
- *
- * The staleness threshold comes from the indexed oracleExpiry (fetched
- * per-feed from SortedOracles at index time), falling back to ORACLE_STALE_SECONDS
- * for pools that pre-date this field.
+ * which is only set at event time and never expires. The staleness threshold
+ * comes from the indexed oracleExpiry (fetched per-feed from SortedOracles
+ * at index time), falling back to ORACLE_STALE_SECONDS for pools that
+ * pre-date this field.
  */
 export function computeHealthStatus(
   pool: PoolHealthState,
@@ -125,16 +122,13 @@ export function computeHealthStatus(
     (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
   const devRatio = diff / threshold;
   if (devRatio > 1.0) {
-    // Cross-chain rebalances take time to land. If a rebalance completed
-    // within the grace window, assume another one may be in flight and
-    // stay at WARN; otherwise escalate.
-    const lastRebalancedAt = Number(pool.lastRebalancedAt ?? "0");
-    const rebalancedRecently =
-      lastRebalancedAt > 0 &&
-      nowSeconds - lastRebalancedAt < DEVIATION_BREACH_GRACE_SECONDS;
-    return rebalancedRecently ? "WARN" : "CRITICAL";
+    const breachStart = Number(pool.deviationBreachStartedAt ?? "0");
+    // No anchor (indexer hasn't populated the field yet): treat as a fresh
+    // breach and stay at WARN instead of jumping to CRITICAL without data.
+    if (breachStart <= 0) return "WARN";
+    const breachAge = nowSeconds - breachStart;
+    return breachAge < DEVIATION_BREACH_GRACE_SECONDS ? "WARN" : "CRITICAL";
   }
-  if (devRatio >= 0.8) return "WARN";
   return "OK";
 }
 
@@ -197,6 +191,8 @@ export function computeEffectiveStatus(
     oracleExpiry?: string;
     priceDifference?: string;
     rebalanceThreshold?: number;
+    deviationBreachStartedAt?: string | null;
+    lastRebalancedAt?: string | null;
     limitStatus?: string;
     limitPressure0?: string;
     limitPressure1?: string;
@@ -215,26 +211,33 @@ type RebalancerStatus = "ACTIVE" | "STALE" | "N/A" | "NO_DATA";
  *
  * - "N/A":     VirtualPools — rebalancer not applicable by design
  * - "NO_DATA": FPMM pool with no rebalance events recorded yet
- * - "STALE":   age > 86400s AND healthStatus is not "OK" or "WEEKEND"
- * - "ACTIVE":  within 24h OR healthStatus is "OK" or "WEEKEND" (expected closure)
+ * - "STALE":   age > 86400s AND pool is currently breached (deviation above
+ *              threshold) — a rebalancer that hasn't fired in 24h while the
+ *              pool is out of range is the actual concern
+ * - "ACTIVE":  within 24h OR pool is under threshold (no work to do,
+ *              silence is expected)
  */
 export function computeRebalancerLiveness(
   pool: {
     source?: string;
     lastRebalancedAt?: string;
-    healthStatus?: string;
+    priceDifference?: string;
+    rebalanceThreshold?: number;
   },
   nowSeconds: number,
 ): RebalancerStatus {
   if (pool.source?.includes("virtual")) return "N/A";
   if (!pool.lastRebalancedAt || pool.lastRebalancedAt === "0") return "NO_DATA";
   const age = nowSeconds - Number(pool.lastRebalancedAt);
-  // WEEKEND is expected — don't flag the rebalancer as STALE during FX market closure
-  const isStale =
-    age > 86400 &&
-    pool.healthStatus !== "OK" &&
-    pool.healthStatus !== "WEEKEND";
-  return isStale ? "STALE" : "ACTIVE";
+  if (age <= 86400) return "ACTIVE";
+  const diff = Number(pool.priceDifference ?? "0");
+  const threshold =
+    (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
+  // A rebalancer that hasn't fired in 24h is only actually stale if the
+  // pool needs rebalancing. Under-threshold means there's nothing to do,
+  // so absence of activity is expected.
+  const needsRebalance = diff > threshold;
+  return needsRebalance ? "STALE" : "ACTIVE";
 }
 
 /**

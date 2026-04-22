@@ -64,21 +64,41 @@ export function deriveBridgeStatus(
 
 const STATUS_CLASSES: Record<BridgeStatusOverlay, string> = {
   PENDING: "bg-slate-800 text-slate-400",
-  SENT: "bg-slate-800 text-slate-300",
+  // Wormholescan shades the three in-flight sub-states the same way — one
+  // "in progress" look so operators don't have to map indexer vocabulary
+  // (SENT / ATTESTED / QUEUED_INBOUND) onto Wormhole's single label.
+  SENT: "bg-indigo-900/40 text-indigo-300",
   ATTESTED: "bg-indigo-900/40 text-indigo-300",
+  QUEUED_INBOUND: "bg-indigo-900/40 text-indigo-300",
   DELIVERED: "bg-emerald-900/40 text-emerald-300",
-  QUEUED_INBOUND: "bg-amber-900/40 text-amber-300",
   CANCELLED: "bg-slate-800 text-slate-500",
   FAILED: "bg-red-900/60 text-red-200",
   STUCK: "bg-red-900/40 text-red-300",
 };
 
+// Display label in the transfers table. SENT / ATTESTED / QUEUED_INBOUND all
+// surface as "In progress" to match Wormholescan, which collapses the same
+// lifecycle into one label. Filter pills use `bridgeStatusDetailLabel` below
+// to keep their internal-state granularity.
 const STATUS_LABELS: Record<BridgeStatusOverlay, string> = {
+  PENDING: "Pending",
+  SENT: "In progress",
+  ATTESTED: "In progress",
+  QUEUED_INBOUND: "In progress",
+  DELIVERED: "Delivered",
+  CANCELLED: "Cancelled",
+  FAILED: "Failed",
+  STUCK: "Stuck",
+};
+
+// Granular label used by the status filter pills, where conflating the three
+// in-flight sub-states would leave the user unable to distinguish them.
+const STATUS_DETAIL_LABELS: Record<BridgeStatusOverlay, string> = {
   PENDING: "Pending",
   SENT: "Sent",
   ATTESTED: "Attested",
-  DELIVERED: "Delivered",
   QUEUED_INBOUND: "Queued",
+  DELIVERED: "Delivered",
   CANCELLED: "Cancelled",
   FAILED: "Failed",
   STUCK: "Stuck",
@@ -90,6 +110,10 @@ export function bridgeStatusClasses(status: BridgeStatusOverlay): string {
 
 export function bridgeStatusLabel(status: BridgeStatusOverlay): string {
   return STATUS_LABELS[status];
+}
+
+export function bridgeStatusDetailLabel(status: BridgeStatusOverlay): string {
+  return STATUS_DETAIL_LABELS[status];
 }
 
 /**

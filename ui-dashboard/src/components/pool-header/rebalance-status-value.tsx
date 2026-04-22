@@ -214,29 +214,16 @@ function getPassiveStatus(
   color: string;
 } {
   // Passive status is derived entirely from indexed pool data — no RPC
-  // required. Earlier versions gated this on `network.rpcUrl` and ended
-  // up wiping "Balanced" / "Near threshold" / etc. for every healthy pool
-  // on an RPC-less network. The rpcUrl gate lives only in the live-probe
-  // path (useRebalanceCheck) where it belongs.
+  // required. Earlier versions gated this on `network.rpcUrl` and ended up
+  // wiping "Balanced" for every healthy pool on an RPC-less network. The
+  // rpcUrl gate lives only in the live-probe path (useRebalanceCheck) where
+  // it belongs.
   const health = computeHealthStatus(pool, network.chainId);
   if (health === "OK") {
     return { text: "Balanced", color: "text-emerald-400" };
   }
   if (health === "WARN") {
-    // Distinguish exactly-at-threshold from the 80–99% warning band so the
-    // edge case reads as "At threshold" (not "Near threshold"), matching
-    // the CRITICAL rule that kicks in only strictly above it. Use the same
-    // 10000 bps fallback computeHealthStatus uses when rebalanceThreshold
-    // is 0 — otherwise a pool at diff=10000, threshold=0 would render
-    // "Near threshold" while the health pipeline treats it as the boundary.
-    const diff = Number(pool.priceDifference ?? "0");
-    const effectiveThreshold =
-      (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
-    const atThreshold = diff === effectiveThreshold;
-    return {
-      text: atThreshold ? "At threshold" : "Near threshold",
-      color: "text-amber-400",
-    };
+    return { text: "Rebalance required", color: "text-amber-400" };
   }
   if (health === "WEEKEND") {
     return { text: "Markets closed", color: "text-slate-400" };
@@ -249,7 +236,7 @@ function getPassiveStatus(
   const threshold =
     (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
 
-  if (diff < threshold) {
+  if (diff <= threshold) {
     return { text: "Oracle stale", color: "text-red-400" };
   }
 
