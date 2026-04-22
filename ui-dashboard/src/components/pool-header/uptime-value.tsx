@@ -5,6 +5,7 @@ import { InfoPopover } from "@/components/info-popover";
 import { useGQL } from "@/lib/graphql";
 import { POOL_BREACH_ROLLUP } from "@/lib/queries";
 import { DEVIATION_BREACH_GRACE_SECONDS } from "@/lib/health";
+import { tradingSecondsInRange } from "@/lib/weekend";
 
 const UPTIME_EXPLAINER =
   "% of tracked time the pool was NOT in a critical state. A pool flips to critical only after staying above its rebalance threshold for more than one hour — so a short breach that gets rebalanced promptly counts as uptime. Weekends when FX oracles are paused are excluded from both numerator and denominator.";
@@ -41,14 +42,17 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   const hasOpenBreach = openStart > 0;
 
   // Open breaches aren't in `rolledCritical` until they close — add the
-  // live past-grace portion so the tile moves in real time.
+  // live past-grace portion so the tile moves in real time. Uses
+  // `tradingSecondsInRange` (same weekend subtraction the indexer uses to
+  // compute `healthTotalSeconds`) so the numerator and denominator are on
+  // the same basis — a breach that spans a weekend doesn't get credited
+  // seconds the denominator never saw.
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const openCritical = hasOpenBreach
-    ? Math.max(
-        0,
-        nowSeconds - openStart - Number(DEVIATION_BREACH_GRACE_SECONDS),
-      )
-    : 0;
+  const graceEnd = openStart + Number(DEVIATION_BREACH_GRACE_SECONDS);
+  const openCritical =
+    hasOpenBreach && nowSeconds > graceEnd
+      ? tradingSecondsInRange(graceEnd, nowSeconds)
+      : 0;
 
   const pct = Math.max(
     0,

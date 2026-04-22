@@ -47,10 +47,16 @@ export function classifyBreachEvent(source: string): BreachEventCategory {
   if (source === "fpmm_rebalanced") return "rebalance";
   if (source === "fpmm_swap") return "swap";
   if (source === "fpmm_mint" || source === "fpmm_burn") return "liquidity";
-  if (source === "fpmm_update_reserves") return "liquidity";
   if (source === "fpmm_factory") return "threshold_change";
   if (source === "oracle_reported" || source === "median_updated")
     return "oracle_update";
+  // `fpmm_update_reserves` intentionally maps to "unknown": the FPMM
+  // contract emits ReservesUpdated inside swap/mint/burn, so the
+  // UpdateReserves handler often fires just before the semantic handler
+  // (Swap / Mint / Burn) in the same tx. If we categorised it as
+  // "liquidity" it would steal attribution from real swap-driven
+  // breaches. "unknown" is the honest answer — the next handler in the
+  // tx carries the real category if the breach still holds.
   return "unknown";
 }
 
@@ -205,13 +211,23 @@ export async function recordBreachTransition(
     return {};
   }
   const peakBumped = next.priceDifference > open.peakPriceDifference;
-  if (!peakBumped && !isRebalance) return {};
+  // Attribution upgrade: the FPMM contract emits `ReservesUpdated` inside
+  // the swap/mint/burn flow, so the UpdateReserves handler fires first and
+  // creates the row with "unknown". Let a subsequent semantic handler in
+  // the same tx rewrite the cause so the UI shows "Swap" instead.
+  const upgradeCause =
+    open.startedByEvent === "unknown" && category !== "unknown";
+  if (!peakBumped && !isRebalance && !upgradeCause) return {};
   context.DeviationThresholdBreach.set({
     ...open,
     ...(peakBumped && {
       peakPriceDifference: next.priceDifference,
       peakAt: trigger.blockTimestamp,
       peakAtBlock: trigger.blockNumber,
+    }),
+    ...(upgradeCause && {
+      startedByEvent: category,
+      startedByTxHash: trigger.txHash,
     }),
     rebalanceCountDuring: isRebalance
       ? open.rebalanceCountDuring + 1

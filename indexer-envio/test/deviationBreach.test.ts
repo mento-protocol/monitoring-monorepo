@@ -38,10 +38,18 @@ describe("classifyBreachEvent", () => {
     assert.equal(classifyBreachEvent("fpmm_swap"), "swap");
     assert.equal(classifyBreachEvent("fpmm_mint"), "liquidity");
     assert.equal(classifyBreachEvent("fpmm_burn"), "liquidity");
-    assert.equal(classifyBreachEvent("fpmm_update_reserves"), "liquidity");
     assert.equal(classifyBreachEvent("fpmm_factory"), "threshold_change");
     assert.equal(classifyBreachEvent("oracle_reported"), "oracle_update");
     assert.equal(classifyBreachEvent("median_updated"), "oracle_update");
+  });
+
+  it("classifies fpmm_update_reserves as 'unknown' so it can't steal swap/mint/burn attribution", () => {
+    // The FPMM contract emits ReservesUpdated inside swap/mint/burn flows,
+    // so the UpdateReserves handler fires before the semantic handler.
+    // Categorising it as "liquidity" would mislabel swap-driven breaches
+    // — keep it "unknown" and let the upgrade-on-continue path in
+    // recordBreachTransition rewrite the cause when the real handler runs.
+    assert.equal(classifyBreachEvent("fpmm_update_reserves"), "unknown");
   });
 
   it("returns 'unknown' for virtual pool sources and truly unknown strings", () => {
@@ -222,6 +230,102 @@ describe("recordBreachTransition — continuing breach", () => {
     const row = store.get(open.id)!;
     assert.equal(row.peakPriceDifference, 9000n);
     assert.equal(row.peakAt, MON_NOON + 30n);
+  });
+
+  it("upgrades startedByEvent from 'unknown' when a specific handler runs mid-breach (same-tx ReservesUpdated → Swap)", async () => {
+    // The exact scenario the "unknown" classifier enables: rising edge
+    // arrives via UpdateReserves inside a swap tx (row stored with
+    // "unknown"), then the Swap handler runs right after and upgrades
+    // the attribution to "swap" so the history reads correctly.
+    const { store, context } = makeMockContext();
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", MON_NOON),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: MON_NOON,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 7500n,
+      peakPriceDifference: 7500n,
+      peakAt: MON_NOON,
+      peakAtBlock: 100n,
+      startedByEvent: "unknown",
+      startedByTxHash: "0xreserves",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+
+    const prev = makePool({
+      priceDifference: 7500n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    const next = makePool({
+      priceDifference: 7500n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON,
+      blockNumber: 100n,
+      txHash: "0xswap",
+      source: "fpmm_swap",
+    });
+    const row = store.get(open.id)!;
+    assert.equal(row.startedByEvent, "swap");
+    assert.equal(row.startedByTxHash, "0xswap");
+    assert.equal(row.peakPriceDifference, 7500n); // unchanged
+  });
+
+  it("does not downgrade startedByEvent once a specific category is set", async () => {
+    // The upgrade is one-way: once "swap" is in place, a subsequent
+    // UpdateReserves (which now classifies as "unknown") must not
+    // rewrite it back.
+    const { store, context } = makeMockContext();
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", MON_NOON),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: MON_NOON,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 7500n,
+      peakPriceDifference: 7500n,
+      peakAt: MON_NOON,
+      peakAtBlock: 100n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xswap-original",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+
+    const prev = makePool({
+      priceDifference: 7500n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    const next = makePool({
+      priceDifference: 7500n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON + 60n,
+      blockNumber: 110n,
+      txHash: "0xreserves-later",
+      source: "fpmm_update_reserves",
+    });
+    const row = store.get(open.id)!;
+    assert.equal(row.startedByEvent, "swap");
+    assert.equal(row.startedByTxHash, "0xswap-original");
   });
 
   it("increments rebalanceCountDuring when a rebalance fires mid-breach without closing it", async () => {

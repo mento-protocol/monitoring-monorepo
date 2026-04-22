@@ -65,11 +65,26 @@ export function BreachHistoryPanel({ pool, network }: Props) {
     );
   }
   if (error) {
+    // The new DeviationThresholdBreach entity is only present post-resync;
+    // the hosted Hasura rejects the query with a schema-validation error
+    // (containing "type not found" / "not found in type") until the new
+    // indexer version syncs. That's a known-degraded state, not an
+    // incident — surface it in the neutral empty-state style rather than
+    // red, matching the UptimeValue tile's handling.
+    const message = error instanceof Error ? error.message : String(error);
+    const isSchemaLag =
+      message.includes("not found in type") ||
+      message.includes("type not found") ||
+      message.includes("field 'DeviationThresholdBreach'");
     return (
       <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
         <h2 className="mb-4 text-sm text-slate-400">Breach History</h2>
-        <p className="text-sm text-red-400">
-          Couldn't load breach history — try again later.
+        <p
+          className={`text-sm ${isSchemaLag ? "text-slate-500" : "text-red-400"}`}
+        >
+          {isSchemaLag
+            ? "Breach history not available yet — indexer rollout in progress."
+            : "Couldn't load breach history — try again later."}
         </p>
       </section>
     );

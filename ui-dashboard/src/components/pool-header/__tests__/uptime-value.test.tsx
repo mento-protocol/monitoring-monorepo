@@ -249,6 +249,40 @@ describe("UptimeValue", () => {
     expect(html).toContain("500 breaches");
   });
 
+  it("computes the live open-breach portion in trading-seconds, not wall-clock", () => {
+    // An open breach anchored Fri 20:00 UTC (1h before FX close), evaluated
+    // at Mon 00:00 UTC. Wall-clock elapsed = 52h. With the old wall-clock
+    // math, openCritical = 52h - 1h grace = 51h — wildly inflated. The
+    // trading-seconds path subtracts the 50h FX closure, leaving 2h of
+    // real trading-time after the grace ended (Fri 21:00 grace-end →
+    // coincides with weekend start → only Sun 23:00-Mon 00:00 counts =
+    // 1h critical).
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-08T00:00:00Z"));
+    const fri20Utc = Math.floor(
+      new Date("2024-01-05T20:00:00Z").getTime() / 1000,
+    );
+    mockUseGQL.mockReturnValueOnce({
+      data: {
+        Pool: [
+          {
+            cumulativeCriticalSeconds: "0",
+            breachCount: 0,
+            deviationBreachStartedAt: String(fri20Utc),
+          },
+        ],
+      },
+    });
+    const pool: Pool = {
+      ...BASE_POOL,
+      // 30d of tracked trading-time. 3600s / (30*86400) ≈ 0.139% → 99.861%.
+      healthTotalSeconds: String(30 * 86400),
+    };
+    const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
+    expect(html).toContain("99.861%");
+    vi.useRealTimers();
+  });
+
   it("renders N/A on a virtual pool (rollup query skipped)", () => {
     mockUseGQL.mockReturnValueOnce({ data: undefined });
     const pool: Pool = {
