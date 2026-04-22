@@ -349,10 +349,12 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
         name  = "POLL_INTERVAL_MS"
         value = "30000"
       }
-      # Restart container if /healthz returns 503 (stale poll data).
+      # Probes hit /health (NOT /healthz — Cloud Run v2 reserves /healthz at
+      # the frontend, so exposing it externally returns a Google-branded 404).
+      # Liveness restarts the container if /health returns 503 (stale poll).
       liveness_probe {
         http_get {
-          path = "/healthz"
+          path = "/health"
         }
         initial_delay_seconds = 10
         period_seconds        = 30
@@ -360,7 +362,7 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
       }
       startup_probe {
         http_get {
-          path = "/healthz"
+          path = "/health"
         }
         initial_delay_seconds = 5
         failure_threshold     = 3

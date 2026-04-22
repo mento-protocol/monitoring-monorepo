@@ -73,18 +73,18 @@ describe("handleRequest", () => {
     register.metrics = origMetrics;
   });
 
-  it("GET /healthz returns 200 after markHealthy", () => {
+  it("GET /health returns 200 after markHealthy", () => {
     markHealthy();
     const res = makeRes();
-    handleRequest({ url: "/healthz", method: "GET" }, res);
+    handleRequest({ url: "/health", method: "GET" }, res);
     expect(res.status).toBe(200);
     expect(res.body).toBe("ok");
   });
 
-  it("GET /healthz strips query params", () => {
+  it("GET /health strips query params", () => {
     markHealthy();
     const res = makeRes();
-    handleRequest({ url: "/healthz?ts=1", method: "GET" }, res);
+    handleRequest({ url: "/health?ts=1", method: "GET" }, res);
     expect(res.status).toBe(200);
   });
 
