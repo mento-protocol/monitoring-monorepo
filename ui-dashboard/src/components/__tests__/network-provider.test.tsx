@@ -65,12 +65,6 @@ describe("NetworkProvider — effective network resolution", () => {
     expect(captured?.chainId).toBe(143);
   });
 
-  it("derives celo-sepolia from chainId 11142220 in the pool ID", () => {
-    pathname = "/pool/11142220-0x0000000000000000000000000000000000000001";
-    render();
-    expect(captured?.networkId).toBe("celo-sepolia");
-  });
-
   it("falls through to DEFAULT_NETWORK when pathname has no namespaced pool", () => {
     pathname = "/address-book";
     render();

@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // NETWORKS mock — two mainnet chains sharing a Hasura URL (matches the
-// real multichain config where both Celo + Monad point at the same
-// NEXT_PUBLIC_HASURA_URL_MULTICHAIN).
+// real config where both Celo + Monad point at the same NEXT_PUBLIC_HASURA_URL).
 vi.mock("@/lib/networks", () => {
   const celo = {
     id: "celo-mainnet" as const,

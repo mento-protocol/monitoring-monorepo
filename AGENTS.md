@@ -143,7 +143,7 @@ monitoring-monorepo/
 ## Environment
 
 - Indexer needs Docker for local dev (Postgres + Hasura containers)
-- Dashboard needs `NEXT_PUBLIC_HASURA_URL_*` env vars for local dev; run `vercel env pull ui-dashboard/.env.local` to pull from the linked project
+- Dashboard needs `NEXT_PUBLIC_HASURA_URL` env var for local dev; run `vercel env pull ui-dashboard/.env.local` to pull from the linked project
 - Production env vars (including Upstash Redis + Blob credentials) are managed by Terraform — see `terraform/terraform.tfvars.example`
 - See root README.md for full env var documentation
 

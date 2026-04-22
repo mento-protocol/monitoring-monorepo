@@ -12,7 +12,6 @@ const CHAIN_ICONS: Record<number, ComponentType<BrandedIconProps>> = {
   42220: NetworkCelo,
   11142220: NetworkCelo,
   143: NetworkMonad,
-  10143: NetworkMonad,
   137: NetworkPolygon,
 };
 

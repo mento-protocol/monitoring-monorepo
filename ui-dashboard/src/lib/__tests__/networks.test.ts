@@ -17,7 +17,7 @@ import {
 // Mirror of the private map in networks.ts — kept here so the drift-guard
 // test can assert every canonical chainId still resolves to a matching
 // NETWORKS entry. If the real map changes, update this too.
-const EXPECTED_PROD_CHAIN_IDS = [42220, 11142220, 143, 10143];
+const EXPECTED_CANONICAL_CHAIN_IDS = [42220, 11142220, 143];
 import { MAINNET_CHAIN_IDS } from "../types";
 
 // Known Celo mainnet addresses from @mento-protocol/contracts (42220/mainnet).
@@ -148,8 +148,8 @@ describe("NETWORKS.devnet — real-world override retention", () => {
 });
 
 describe("NETWORKS — general map composition", () => {
-  it("celo-sepolia has tokenSymbols and addressLabels from Sepolia namespace", () => {
-    const sepolia = NETWORKS["celo-sepolia"];
+  it("celo-sepolia-local has tokenSymbols and addressLabels from Sepolia namespace", () => {
+    const sepolia = NETWORKS["celo-sepolia-local"];
     expect(Object.keys(sepolia.tokenSymbols).length).toBeGreaterThan(0);
     expect(Object.keys(sepolia.addressLabels).length).toBeGreaterThan(0);
   });
@@ -193,28 +193,25 @@ describe("NETWORKS — Monad networks", () => {
   const USDM_MONAD_MAINNET = "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115";
   const EURM_MONAD_MAINNET = "0x4d502d735b4c574b487ed641ae87ceae884731c7";
   const GBPM_MONAD_MAINNET = "0x39bb4e0a204412bb98e821d25e7d955e69d40fd1";
-  const USDM_MONAD_TESTNET = "0x5ecc03111ad2a78f981a108759bc73bae2ab31bc";
-  const EURM_MONAD_TESTNET = "0x666d0a83cdbf3ec62bdb624d9bfcd8f6345ba7d0";
-  const GBPM_MONAD_TESTNET = "0x04de554e875c9797dc4cebd834a9e99fa8fd5df9";
   // Implementation proxy published as type=token on Monad mainnet — should
   // be excluded from tokenSymbols so pool titles never use it.
   const STABLE_TOKEN_SPOKE_GBP_MAINNET =
     "0xddf082068caa5b941ed8c603adf0cecbdbb59f8e";
 
-  it("does not mark monad-mainnet configured when multichain URL is not set", async () => {
-    vi.stubEnv("NEXT_PUBLIC_HASURA_URL_MULTICHAIN", "");
+  it("does not mark monad-mainnet configured when HASURA_URL is not set", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "");
 
     const networks = await import("../networks");
     expect(networks.NETWORKS["monad-mainnet"].hasuraUrl).toBe("");
     expect(networks.isConfiguredNetworkId("monad-mainnet")).toBe(false);
   });
 
-  it("wires the multichain URL into both celo-mainnet and monad-mainnet, trimming whitespace", async () => {
-    // Positive-path: non-empty multichain URL → both production networks visible.
+  it("wires HASURA_URL into both celo-mainnet and monad-mainnet, trimming whitespace", async () => {
+    // Positive-path: non-empty HASURA_URL → both production networks visible.
     // Also verifies that leading/trailing whitespace is stripped (env var may
     // contain spaces in some CI setups).
     vi.stubEnv(
-      "NEXT_PUBLIC_HASURA_URL_MULTICHAIN",
+      "NEXT_PUBLIC_HASURA_URL",
       "  https://indexer.hyperindex.xyz/2f3dd15/v1/graphql  ",
     );
 
@@ -272,35 +269,17 @@ describe("NETWORKS — Monad networks", () => {
     expect(monad.addressLabels[STABLE_TOKEN_SPOKE_GBP_MAINNET]).toBeDefined();
   });
 
-  it("monad-testnet token symbols use canonical hub names", () => {
-    const testnet = NETWORKS["monad-testnet"];
-    expect(testnet.tokenSymbols[USDM_MONAD_TESTNET]).toBe("USDm");
-    expect(testnet.tokenSymbols[EURM_MONAD_TESTNET]).toBe("EURm");
-    expect(testnet.tokenSymbols[GBPM_MONAD_TESTNET]).toBe("GBPm");
-    expect(testnet.chainId).toBe(10143);
-    expect(testnet.local).toBe(false);
-    const values = Object.values(testnet.tokenSymbols);
-    expect(values.some((v) => v.includes("Spoke"))).toBe(false);
-  });
-
-  it("monad network visibility is gated on hasuraUrl being set", () => {
+  it("monad-mainnet visibility is gated on hasuraUrl being set", () => {
     // isConfiguredNetworkId() is the single source of truth for routing.
-    // Whether Monad is visible depends on env vars — both outcomes are valid here;
-    // the routing guard correctness is tested in isConfiguredNetworkId suite below.
-    const monadMainnet = NETWORKS["monad-mainnet"];
-    const monadTestnet = NETWORKS["monad-testnet"];
     // The contract: if hasuraUrl is empty, isConfiguredNetworkId must return false.
+    const monadMainnet = NETWORKS["monad-mainnet"];
     if (!monadMainnet.hasuraUrl) {
       expect(isConfiguredNetworkId("monad-mainnet")).toBe(false);
     }
-    if (!monadTestnet.hasuraUrl) {
-      expect(isConfiguredNetworkId("monad-testnet")).toBe(false);
-    }
   });
 
-  it("monad networks do not expose virtual pool UI", () => {
+  it("monad-mainnet does not expose virtual pool UI", () => {
     expect(NETWORKS["monad-mainnet"].hasVirtualPools).toBe(false);
-    expect(NETWORKS["monad-testnet"].hasVirtualPools).toBe(false);
   });
 });
 
@@ -308,7 +287,6 @@ describe("NETWORKS — virtual pool support", () => {
   it("enables virtual pools for all Celo networks, disables for Monad", () => {
     expect(NETWORKS.devnet.hasVirtualPools).toBe(true);
     expect(NETWORKS["celo-sepolia-local"].hasVirtualPools).toBe(true);
-    expect(NETWORKS["celo-sepolia"].hasVirtualPools).toBe(true);
     expect(NETWORKS["celo-mainnet-local"].hasVirtualPools).toBe(true);
     expect(NETWORKS["celo-mainnet"].hasVirtualPools).toBe(true);
   });
@@ -317,14 +295,16 @@ describe("NETWORKS — virtual pool support", () => {
 describe("isCanonicalNetwork", () => {
   it("returns true for canonical prod networks", () => {
     expect(isCanonicalNetwork("celo-mainnet")).toBe(true);
-    expect(isCanonicalNetwork("celo-sepolia")).toBe(true);
     expect(isCanonicalNetwork("monad-mainnet")).toBe(true);
-    expect(isCanonicalNetwork("monad-testnet")).toBe(true);
   });
 
-  it("returns false for local variants sharing a chainId with a canonical one", () => {
+  it("returns true for local-only network that is the canonical entry for its chainId", () => {
+    // Celo Sepolia has no hosted variant; the local proxy is canonical.
+    expect(isCanonicalNetwork("celo-sepolia-local")).toBe(true);
+  });
+
+  it("returns false for local variants sharing a chainId with a canonical prod one", () => {
     expect(isCanonicalNetwork("celo-mainnet-local")).toBe(false);
-    expect(isCanonicalNetwork("celo-sepolia-local")).toBe(false);
     expect(isCanonicalNetwork("devnet")).toBe(false);
   });
 });
@@ -332,9 +312,19 @@ describe("isCanonicalNetwork", () => {
 describe("networkIdForChainId — pool-ID-driven network resolution", () => {
   it("maps each prod chainId to its prod IndexerNetworkId", () => {
     expect(networkIdForChainId(42220)).toBe("celo-mainnet");
-    expect(networkIdForChainId(11142220)).toBe("celo-sepolia");
     expect(networkIdForChainId(143)).toBe("monad-mainnet");
-    expect(networkIdForChainId(10143)).toBe("monad-testnet");
+  });
+
+  it("maps Celo Sepolia chainId to the local proxy (no hosted variant exists)", () => {
+    // When `NEXT_PUBLIC_SHOW_LOCAL_NETWORKS=true` is set in dev,
+    // `isConfiguredNetworkId("celo-sepolia-local")` returns true and routing
+    // works. In prod the routing guard rejects the local-only network, so
+    // /pool/11142220-... falls through to DEFAULT_NETWORK as intended.
+    expect(networkIdForChainId(11142220)).toBe("celo-sepolia-local");
+  });
+
+  it("returns null for retired Monad Testnet chainId", () => {
+    expect(networkIdForChainId(10143)).toBeNull();
   });
 
   it("returns null for unknown chainIds", () => {
@@ -344,7 +334,7 @@ describe("networkIdForChainId — pool-ID-driven network resolution", () => {
   });
 
   it("resolves to a network whose chainId actually matches (drift guard)", () => {
-    for (const chainId of EXPECTED_PROD_CHAIN_IDS) {
+    for (const chainId of EXPECTED_CANONICAL_CHAIN_IDS) {
       const networkId = networkIdForChainId(chainId);
       expect(networkId).not.toBeNull();
       expect(NETWORKS[networkId!].chainId).toBe(chainId);
@@ -357,7 +347,6 @@ describe("isConfiguredNetworkId — URL routing guard", () => {
     // Correctness: the function must not throw for any defined network.
     expect(typeof isConfiguredNetworkId("celo-mainnet")).toBe("boolean");
     expect(typeof isConfiguredNetworkId("monad-mainnet")).toBe("boolean");
-    expect(typeof isConfiguredNetworkId("monad-testnet")).toBe("boolean");
   });
 
   it("returns false for unknown network id regardless of env", () => {

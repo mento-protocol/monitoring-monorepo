@@ -34,8 +34,8 @@ const MOCK_NETWORK: Network = {
 
 const MOCK_NETWORK_2: Network = {
   ...MOCK_NETWORK,
-  id: "celo-sepolia",
-  label: "Celo Sepolia",
+  id: "celo-sepolia-local",
+  label: "Celo Sepolia (local)",
   chainId: 11142220,
   hasuraUrl: "https://hasura-sepolia.example.com/v1/graphql",
 };
@@ -383,7 +383,7 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
   });
 
   it("emits captureMessage once per network when the cap is hit", async () => {
-    // Two networks (celo-mainnet, celo-sepolia) both hit the pagination cap.
+    // Two networks (celo-mainnet, celo-sepolia-local) both hit the pagination cap.
     // Dedup key is `${network}:${responseKey}`, so each network should emit
     // exactly one "hasura-snapshot-cap-exhausted" warning tagged with its
     // own network id. A third fetch against a network that already warned
@@ -423,7 +423,7 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
     expect(
       (Sentry.captureMessage as ReturnType<typeof vi.fn>).mock.calls[1][1].tags
         .network,
-    ).toBe("celo-sepolia");
+    ).toBe("celo-sepolia-local");
 
     // Re-running celo-mainnet should NOT re-emit — dedup by network.
     await fetchNetworkData(MOCK_NETWORK, windows);
@@ -731,7 +731,7 @@ describe("fetchNetworkData — cross-network isolation", () => {
     // Network 2: error, but still returns correct network metadata
     expect(result2.error).toBe(poolsErr);
     expect(result2.pools).toHaveLength(0);
-    expect(result2.network.id).toBe("celo-sepolia");
+    expect(result2.network.id).toBe("celo-sepolia-local");
   });
 
   it("network index maps correctly to network metadata on rejection", async () => {
@@ -816,7 +816,7 @@ vi.mock("@/lib/networks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/networks")>();
   return {
     ...actual,
-    NETWORK_IDS: ["celo-mainnet", "celo-sepolia"],
+    NETWORK_IDS: ["celo-mainnet", "monad-mainnet"],
     NETWORKS: {
       "celo-mainnet": {
         id: "celo-mainnet",
@@ -832,14 +832,14 @@ vi.mock("@/lib/networks", async (importOriginal) => {
         hasVirtualPools: false,
         testnet: false,
       },
-      "celo-sepolia": {
-        id: "celo-sepolia",
-        label: "Celo Sepolia",
-        chainId: 11142220,
+      "monad-mainnet": {
+        id: "monad-mainnet",
+        label: "Monad",
+        chainId: 143,
         contractsNamespace: null,
-        hasuraUrl: "https://sepolia.example.com/v1/graphql",
+        hasuraUrl: "https://network2.example.com/v1/graphql",
         hasuraSecret: "",
-        explorerBaseUrl: "https://celo-sepolia.blockscout.com",
+        explorerBaseUrl: "https://monadscan.com",
         tokenSymbols: {},
         addressLabels: {},
         local: false,
@@ -848,7 +848,7 @@ vi.mock("@/lib/networks", async (importOriginal) => {
       },
     },
     isConfiguredNetworkId: (id: string) =>
-      ["celo-mainnet", "celo-sepolia"].includes(id),
+      ["celo-mainnet", "monad-mainnet"].includes(id),
   };
 });
 
@@ -866,7 +866,7 @@ describe("fetchAllNetworks — orchestration", () => {
 
     expect(results).toHaveLength(2);
     expect(results[0].network.id).toBe("celo-mainnet");
-    expect(results[1].network.id).toBe("celo-sepolia");
+    expect(results[1].network.id).toBe("monad-mainnet");
   });
 
   it("fulfilled network has correct pools and no error", async () => {
@@ -891,15 +891,16 @@ describe("fetchAllNetworks — orchestration", () => {
   });
 
   it("rejected network maps error and preserves network metadata", async () => {
-    const err = new Error("sepolia down");
+    const err = new Error("network2 down");
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
     ).mockImplementation(() => {
-      // Fail only the sepolia URL
+      // Fail only the second mocked network's URL (matched on the hostname
+      // unique to its fixture, independent of which id the mock uses).
       const url = (GraphQLClient as ReturnType<typeof vi.fn>).mock.calls.at(
         -1,
       )?.[0];
-      if (url?.includes("sepolia")) return Promise.reject(err);
+      if (url?.includes("network2")) return Promise.reject(err);
       return Promise.resolve({
         Pool: [],
         ProtocolFeeTransfer: [],
@@ -908,29 +909,27 @@ describe("fetchAllNetworks — orchestration", () => {
     });
 
     const results = await fetchAllNetworks();
-    const sepolia = results.find((r) => r.network.id === "celo-sepolia")!;
+    const second = results.find((r) => r.network.id === "monad-mainnet")!;
 
-    expect(sepolia.network.id).toBe("celo-sepolia");
-    expect(sepolia.error).toBe(err);
-    expect(sepolia.pools).toHaveLength(0);
+    expect(second.network.id).toBe("monad-mainnet");
+    expect(second.error).toBe(err);
+    expect(second.pools).toHaveLength(0);
   });
 
   it("one network failing does not prevent others from succeeding", async () => {
     const pool = makePool("pool-ok");
-    // Track call count: mainnet gets calls 1-3 (pools/fees/snapshots),
-    // sepolia gets call 4 which we reject.
     let callCount = 0;
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
     ).mockImplementation((query: string) => {
       callCount++;
-      // Reject every request to the sepolia client (constructed second)
+      // Reject every request to the second client (network2 URL, constructed second)
       const constructedUrls = (
         GraphQLClient as ReturnType<typeof vi.fn>
       ).mock.calls.map((c: unknown[]) => c[0] as string);
       const lastUrl = constructedUrls[constructedUrls.length - 1] ?? "";
-      if (lastUrl.includes("sepolia"))
-        return Promise.reject(new Error("sepolia down"));
+      if (lastUrl.includes("network2"))
+        return Promise.reject(new Error("network2 down"));
       if (query.includes("PoolDailySnapshot"))
         return Promise.resolve({ PoolDailySnapshot: [] });
       if (query.includes("ProtocolFeeTransfer"))
@@ -940,10 +939,10 @@ describe("fetchAllNetworks — orchestration", () => {
 
     const results = await fetchAllNetworks();
     const mainnet = results.find((r) => r.network.id === "celo-mainnet")!;
-    const sepolia = results.find((r) => r.network.id === "celo-sepolia")!;
+    const second = results.find((r) => r.network.id === "monad-mainnet")!;
 
     expect(mainnet.error).toBeNull();
-    expect(sepolia.error).not.toBeNull();
+    expect(second.error).not.toBeNull();
     // callCount used to suppress unused-var lint
     expect(callCount).toBeGreaterThan(0);
   });

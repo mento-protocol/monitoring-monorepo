@@ -31,9 +31,10 @@ describe("ChainIcon", () => {
       <ChainIcon
         network={{
           ...BASE,
-          id: "celo-sepolia",
+          id: "celo-sepolia-local",
           chainId: 11142220,
           label: "Celo Sepolia",
+          local: true,
           testnet: true,
         }}
       />,
@@ -49,22 +50,6 @@ describe("ChainIcon", () => {
       />,
     );
     expect(html).toContain('aria-label="Monad"');
-    expect(html).toContain('fill="#836EF9"');
-  });
-
-  it("renders the same branded Monad icon for Monad Testnet (10143)", () => {
-    const html = renderToStaticMarkup(
-      <ChainIcon
-        network={{
-          ...BASE,
-          id: "monad-testnet",
-          chainId: 10143,
-          label: "Monad Testnet",
-          testnet: true,
-        }}
-      />,
-    );
-    expect(html).toContain('aria-label="Monad Testnet"');
     expect(html).toContain('fill="#836EF9"');
   });
 
