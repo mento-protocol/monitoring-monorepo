@@ -217,6 +217,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     source: "fpmm_factory",
     blockNumber,
     blockTimestamp,
+    txHash: event.transaction.hash,
     oracleDelta,
     tokenDecimals: { token0Decimals, token1Decimals },
   });
@@ -277,6 +278,7 @@ FPMM.Swap.handler(async ({ event, context }) => {
     source: "fpmm_swap",
     blockNumber,
     blockTimestamp,
+    txHash: event.transaction.hash,
     swapDelta: { volume0, volume1 },
   });
 
@@ -430,6 +432,7 @@ FPMM.Mint.handler(async ({ event, context }) => {
     source: "fpmm_mint",
     blockNumber,
     blockTimestamp,
+    txHash: event.transaction.hash,
   });
 
   await upsertSnapshot({
@@ -475,6 +478,7 @@ FPMM.Burn.handler(async ({ event, context }) => {
     source: "fpmm_burn",
     blockNumber,
     blockTimestamp,
+    txHash: event.transaction.hash,
   });
 
   await upsertSnapshot({
@@ -581,6 +585,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     source: "fpmm_update_reserves",
     blockNumber,
     blockTimestamp,
+    txHash: event.transaction.hash,
     reservesDelta: {
       reserve0: event.params.reserve0,
       reserve1: event.params.reserve1,
@@ -693,6 +698,8 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     source: "fpmm_rebalanced",
     blockNumber,
     blockTimestamp,
+    txHash: event.transaction.hash,
+    strategy: rebalancerAddress,
     rebalanceDelta: true,
     oracleDelta,
   });

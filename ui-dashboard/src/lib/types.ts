@@ -36,7 +36,6 @@ export type Pool = {
   limitPressure0?: string;
   limitPressure1?: string;
   rebalancerAddress?: string;
-  rebalanceLivenessStatus?: string;
   token0Decimals?: number;
   token1Decimals?: number;
   swapCount?: number;
@@ -50,6 +49,50 @@ export type Pool = {
   lastOracleSnapshotTimestamp?: string;
   lastDeviationRatio?: string;
   hasHealthData?: boolean;
+};
+
+/**
+ * User-facing categories for breach start/end causes. Kept in lockstep
+ * with `BreachEventCategory` in `indexer-envio/src/deviationBreach.ts` —
+ * indexer and UI can't share TS types directly (indexer codegen via
+ * rescript + shared-config is JSON), so this mirror is the source of
+ * truth for the UI side. A new category has to be added in both places.
+ */
+export type BreachEventCategory =
+  | "rebalance"
+  | "swap"
+  | "liquidity"
+  | "oracle_update"
+  | "threshold_change"
+  | "unknown";
+
+/**
+ * One historical deviation-threshold breach for a pool. Emitted by the
+ * indexer on the rising edge, closed on the falling edge. Durations are
+ * trading-seconds (weekend-aware). See
+ * indexer-envio/schema.graphql → `DeviationThresholdBreach`.
+ */
+export type DeviationThresholdBreach = {
+  id: string;
+  chainId: number;
+  poolId: string;
+  startedAt: string;
+  startedAtBlock: string;
+  /** Null while the breach is still open. */
+  endedAt: string | null;
+  endedAtBlock: string | null;
+  durationSeconds: string | null;
+  criticalDurationSeconds: string | null;
+  entryPriceDifference: string;
+  peakPriceDifference: string;
+  peakAt: string;
+  peakAtBlock: string;
+  startedByEvent: BreachEventCategory;
+  startedByTxHash: string;
+  endedByEvent: BreachEventCategory | null;
+  endedByTxHash: string | null;
+  endedByStrategy: string | null;
+  rebalanceCountDuring: number;
 };
 
 export type OracleSnapshot = {

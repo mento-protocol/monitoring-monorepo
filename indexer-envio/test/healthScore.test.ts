@@ -5,36 +5,7 @@ import {
   updateHealthAccumulators,
   recordHealthSample,
 } from "../src/healthScore";
-import type { Pool } from "generated";
-import { DEFAULT_ORACLE_FIELDS } from "../src/pool";
-
-// ---------------------------------------------------------------------------
-// Factory for minimal Pool entities used in accumulator tests
-// ---------------------------------------------------------------------------
-
-function makePool(overrides: Partial<Pool> = {}): Pool {
-  return {
-    id: "42220-0xtest",
-    chainId: 42220,
-    token0: "0xtok0",
-    token1: "0xtok1",
-    token0Decimals: 18,
-    token1Decimals: 18,
-    source: "fpmm_factory",
-    reserves0: 0n,
-    reserves1: 0n,
-    swapCount: 0,
-    notionalVolume0: 0n,
-    notionalVolume1: 0n,
-    rebalanceCount: 0,
-    ...DEFAULT_ORACLE_FIELDS,
-    createdAtBlock: 0n,
-    createdAtTimestamp: 0n,
-    updatedAtBlock: 0n,
-    updatedAtTimestamp: 0n,
-    ...overrides,
-  };
-}
+import { makePool } from "./helpers/makePool";
 
 // ---------------------------------------------------------------------------
 // computeHealthSnapshotFields

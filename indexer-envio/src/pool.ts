@@ -2,7 +2,12 @@
 // Pool and PoolSnapshot upsert logic, health status computation
 // ---------------------------------------------------------------------------
 
-import type { Pool, PoolSnapshot, PoolDailySnapshot } from "generated";
+import type {
+  Pool,
+  PoolSnapshot,
+  PoolDailySnapshot,
+  DeviationThresholdBreach,
+} from "generated";
 import {
   hourBucket,
   dayBucket,
@@ -12,6 +17,7 @@ import {
 } from "./helpers";
 import { computePriceDifference } from "./priceDifference";
 import { fetchReferenceRateFeedID, fetchReportExpiry, fetchFees } from "./rpc";
+import { recordBreachTransition } from "./deviationBreach";
 
 // ---------------------------------------------------------------------------
 // Health status computation
@@ -45,7 +51,7 @@ export const DEVIATION_BREACH_GRACE_SECONDS = 3600n;
  *    reclassifies them to WEEKEND when rendering.
  */
 export function computeHealthStatus(pool: Pool, nowSeconds: bigint): string {
-  if (pool.source?.includes("virtual")) return "N/A";
+  if (pool.source.includes("virtual")) return "N/A";
   if (!pool.oracleOk) return "CRITICAL";
   const threshold =
     pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
@@ -63,11 +69,11 @@ export function computeHealthStatus(pool: Pool, nowSeconds: bigint): string {
 }
 
 // Integer comparison avoids float pathology at the devRatio = 1.0 boundary.
-// Strict `>` matches `computeHealthStatus`: exactly-at-threshold stays WARN,
-// not CRITICAL, so it is NOT counted as a breach either. Oracle staleness
-// is intentionally NOT counted — this tracks price action only.
+// Strict `>` matches `computeHealthStatus`: exactly-at-threshold stays OK,
+// so it is NOT counted as a breach either. Oracle staleness is
+// intentionally NOT counted — this tracks price action only.
 export function isInDeviationBreach(pool: Pool): boolean {
-  if (pool.source?.includes("virtual")) return false;
+  if (pool.source.includes("virtual")) return false;
   const threshold =
     pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
   return pool.priceDifference > BigInt(threshold);
@@ -119,6 +125,10 @@ export type PoolContext = {
     get: (id: string) => Promise<Pool | undefined>;
     set: (entity: Pool) => void;
   };
+  DeviationThresholdBreach: {
+    get: (id: string) => Promise<DeviationThresholdBreach | undefined>;
+    set: (entity: DeviationThresholdBreach) => void;
+  };
 };
 
 export type SnapshotContext = {
@@ -162,6 +172,9 @@ export const DEFAULT_ORACLE_FIELDS = {
   lastOracleSnapshotTimestamp: 0n,
   lastDeviationRatio: "-1",
   hasHealthData: false,
+  cumulativeBreachSeconds: 0n,
+  cumulativeCriticalSeconds: 0n,
+  breachCount: 0,
 };
 
 const getOrCreatePool = async (
@@ -201,6 +214,8 @@ export const upsertPool = async ({
   source,
   blockNumber,
   blockTimestamp,
+  txHash,
+  strategy,
   reservesDelta,
   swapDelta,
   rebalanceDelta,
@@ -215,6 +230,14 @@ export const upsertPool = async ({
   source: string;
   blockNumber: bigint;
   blockTimestamp: bigint;
+  /** Transaction hash of the event driving this upsert. Required —
+   * breach-transition rows store it as `startedByTxHash` / `endedByTxHash`.
+   * All handler callers have `event.transaction.hash` available. */
+  txHash: string;
+  /** Rebalancer strategy contract that fired the event. Only read when
+   * source === "fpmm_rebalanced" — populates `endedByStrategy` on a breach
+   * the rebalance closes. */
+  strategy?: string;
   reservesDelta?: { reserve0: bigint; reserve1: bigint };
   swapDelta?: { volume0: bigint; volume1: bigint };
   rebalanceDelta?: boolean;
@@ -234,7 +257,7 @@ export const upsertPool = async ({
   if (
     existing.referenceRateFeedID === "" &&
     existing.source !== "" &&
-    !existing.source?.includes("virtual")
+    !existing.source.includes("virtual")
   ) {
     const rateFeedID = await fetchReferenceRateFeedID(chainId, poolAddr);
     if (rateFeedID) {
@@ -251,7 +274,7 @@ export const upsertPool = async ({
   if (
     (existing.lpFee < 0 || existing.protocolFee < 0) &&
     existing.source !== "" &&
-    !existing.source?.includes("virtual")
+    !existing.source.includes("virtual")
   ) {
     const fees = await fetchFees(chainId, poolAddr);
     if (fees) {
@@ -297,7 +320,7 @@ export const upsertPool = async ({
     oracleDelta.priceDifference !== undefined;
   const priceDifference = hasContractPriceDiff
     ? oracleDelta.priceDifference!
-    : !next.source?.includes("virtual") && next.oraclePrice > 0n
+    : !next.source.includes("virtual") && next.oraclePrice > 0n
       ? computePriceDifference(next)
       : next.priceDifference;
 
@@ -312,7 +335,23 @@ export const upsertPool = async ({
   );
   const withBreach = { ...withDeviation, deviationBreachStartedAt };
   const healthStatus = computeHealthStatus(withBreach, blockTimestamp);
-  const final = { ...withBreach, healthStatus };
+
+  // Maintain the per-breach history entity + roll closed-breach durations
+  // into the Pool's cumulative counters. Runs against existing → withBreach
+  // so the transition detector sees pre/post states on the same basis as
+  // `nextDeviationBreachStartedAt`.
+  const breachPoolUpdate = await recordBreachTransition(
+    context,
+    existing.source === "" ? undefined : existing, // brand-new pool → no prev
+    { ...withBreach, healthStatus },
+    { blockTimestamp, blockNumber, txHash, source, strategy },
+  );
+
+  const final: Pool = {
+    ...withBreach,
+    healthStatus,
+    ...breachPoolUpdate,
+  };
 
   context.Pool.set(final);
   return final;

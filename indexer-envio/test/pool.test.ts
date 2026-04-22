@@ -1,37 +1,7 @@
 /// <reference types="mocha" />
 import { assert } from "chai";
-import {
-  isInDeviationBreach,
-  nextDeviationBreachStartedAt,
-  DEFAULT_ORACLE_FIELDS,
-} from "../src/pool";
-import type { Pool } from "generated";
-
-function makePool(overrides: Partial<Pool> = {}): Pool {
-  return {
-    id: "42220-0xtest",
-    chainId: 42220,
-    token0: "0xtok0",
-    token1: "0xtok1",
-    token0Decimals: 18,
-    token1Decimals: 18,
-    source: "fpmm_factory",
-    reserves0: 0n,
-    reserves1: 0n,
-    swapCount: 0,
-    notionalVolume0: 0n,
-    notionalVolume1: 0n,
-    rebalanceCount: 0,
-    ...DEFAULT_ORACLE_FIELDS,
-    oracleOk: true,
-    rebalanceThreshold: 5000,
-    createdAtBlock: 0n,
-    createdAtTimestamp: 0n,
-    updatedAtBlock: 0n,
-    updatedAtTimestamp: 0n,
-    ...overrides,
-  };
-}
+import { isInDeviationBreach, nextDeviationBreachStartedAt } from "../src/pool";
+import { makePool } from "./helpers/makePool";
 
 describe("isInDeviationBreach", () => {
   it("false when priceDifference < threshold", () => {
@@ -42,7 +12,7 @@ describe("isInDeviationBreach", () => {
     );
   });
 
-  it("false at exact threshold (strict >; exactly-at-threshold stays WARN per computeHealthStatus)", () => {
+  it("false at exact threshold (strict >; exactly-at-threshold stays OK per computeHealthStatus)", () => {
     assert.isFalse(
       isInDeviationBreach(
         makePool({ priceDifference: 5000n, rebalanceThreshold: 5000 }),

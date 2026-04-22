@@ -1,7 +1,7 @@
 /// <reference types="mocha" />
 import { assert } from "chai";
-import type { Pool } from "generated";
-import { DEFAULT_ORACLE_FIELDS, computeHealthStatus } from "../src/pool";
+import { computeHealthStatus } from "../src/pool";
+import { makePool } from "./helpers/makePool";
 
 // ---------------------------------------------------------------------------
 // Cross-package parity for the DEVIATION + GRACE branch of
@@ -17,32 +17,6 @@ import { DEFAULT_ORACLE_FIELDS, computeHealthStatus } from "../src/pool";
 // silently. Adding a staleness / weekend / chain-fallback parity test
 // would require the indexer to actually mirror those branches first.
 // ---------------------------------------------------------------------------
-
-function makePool(overrides: Partial<Pool> = {}): Pool {
-  return {
-    id: "42220-0xtest",
-    chainId: 42220,
-    token0: "0xtok0",
-    token1: "0xtok1",
-    token0Decimals: 18,
-    token1Decimals: 18,
-    source: "fpmm_factory",
-    reserves0: 0n,
-    reserves1: 0n,
-    swapCount: 0,
-    notionalVolume0: 0n,
-    notionalVolume1: 0n,
-    rebalanceCount: 0,
-    ...DEFAULT_ORACLE_FIELDS,
-    oracleOk: true, // default to fresh so parity tests focus on the dev-ratio path
-    rebalanceThreshold: 5000,
-    createdAtBlock: 0n,
-    createdAtTimestamp: 0n,
-    updatedAtBlock: 0n,
-    updatedAtTimestamp: 0n,
-    ...overrides,
-  };
-}
 
 const NOW = 1_700_000_000n;
 

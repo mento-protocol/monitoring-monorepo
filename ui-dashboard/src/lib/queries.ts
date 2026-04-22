@@ -32,7 +32,6 @@ export const ALL_POOLS_WITH_HEALTH = `
       limitPressure0
       limitPressure1
       rebalancerAddress
-      rebalanceLivenessStatus
       referenceRateFeedID
       swapCount
       rebalanceCount
@@ -232,7 +231,6 @@ export const POOL_DETAIL_WITH_HEALTH = `
       limitPressure0
       limitPressure1
       rebalancerAddress
-      rebalanceLivenessStatus
       reserves0
       reserves1
       healthTotalSeconds
@@ -240,6 +238,53 @@ export const POOL_DETAIL_WITH_HEALTH = `
       lastOracleSnapshotTimestamp
       lastDeviationRatio
       hasHealthData
+    }
+  }
+`;
+
+// Uptime / breach-count rollups. Isolated from POOL_DETAIL_WITH_HEALTH on
+// purpose: these fields are brand-new on the indexer side, so during the
+// deploy+resync window the hosted Hasura will reject them with "field not
+// found". Keeping them in their own query means the pool page doesn't die
+// — only the uptime tile degrades to "N/A". Uptime is sourced from the
+// pool-level rollup (not the breach-row list) so the "% time critical"
+// SLO is accurate beyond the POOL_DEVIATION_BREACHES 100-row cap.
+export const POOL_BREACH_ROLLUP = `
+  query PoolBreachRollup($id: String!, $chainId: Int!) {
+    Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
+      id
+      cumulativeBreachSeconds
+      cumulativeCriticalSeconds
+      breachCount
+      deviationBreachStartedAt
+    }
+  }
+`;
+
+// Recent breach history for a pool — newest first, capped at 100 rows so a
+// pool with a noisy breach history still fits inside Hasura's 1000-row cap
+// by a healthy margin. Open breach (endedAt: null) sorts first by convention
+// because descending `startedAt` on the active row wins against all closed
+// ones that ended earlier.
+//
+// Isolated from POOL_DETAIL_WITH_HEALTH for the same reason POOL_BREACH_ROLLUP
+// is — new entity type, resync window needs to land first.
+export const POOL_DEVIATION_BREACHES = `
+  query PoolDeviationBreaches($poolId: String!) {
+    DeviationThresholdBreach(
+      where: { poolId: { _eq: $poolId } }
+      order_by: [{ startedAt: desc }]
+      limit: 100
+    ) {
+      id chainId poolId
+      startedAt startedAtBlock
+      endedAt endedAtBlock
+      durationSeconds criticalDurationSeconds
+      entryPriceDifference peakPriceDifference
+      peakAt peakAtBlock
+      startedByEvent startedByTxHash
+      endedByEvent endedByTxHash endedByStrategy
+      rebalanceCountDuring
     }
   }
 `;

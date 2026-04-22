@@ -43,6 +43,7 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
     source: "virtual_pool_factory",
     blockNumber: asBigInt(event.block.number),
     blockTimestamp: asBigInt(event.block.timestamp),
+    txHash: event.transaction.hash,
     oracleDelta: {
       ...DEFAULT_ORACLE_FIELDS,
       healthStatus: "N/A",
@@ -80,6 +81,7 @@ VirtualPoolFactory.PoolDeprecated.handler(async ({ event, context }) => {
     source: "virtual_pool_factory",
     blockNumber: asBigInt(event.block.number),
     blockTimestamp: asBigInt(event.block.timestamp),
+    txHash: event.transaction.hash,
   });
 
   const lifecycle: VirtualPoolLifecycle = {
@@ -126,6 +128,7 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
     source: "fpmm_swap", // reuse source key; VirtualPool inherits same priority
     blockNumber,
     blockTimestamp,
+    txHash: event.transaction.hash,
     swapDelta: { volume0, volume1 },
   });
 
@@ -172,6 +175,7 @@ VirtualPool.Mint.handler(async ({ event, context }) => {
     source: "fpmm_mint",
     blockNumber,
     blockTimestamp,
+    txHash: event.transaction.hash,
   });
 
   await upsertSnapshot({
@@ -217,6 +221,7 @@ VirtualPool.Burn.handler(async ({ event, context }) => {
     source: "fpmm_burn",
     blockNumber,
     blockTimestamp,
+    txHash: event.transaction.hash,
   });
 
   await upsertSnapshot({
@@ -262,6 +267,7 @@ VirtualPool.UpdateReserves.handler(async ({ event, context }) => {
     source: "fpmm_update_reserves",
     blockNumber,
     blockTimestamp,
+    txHash: event.transaction.hash,
     reservesDelta: {
       reserve0: event.params.reserve0,
       reserve1: event.params.reserve1,
@@ -310,6 +316,7 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
     source: "fpmm_rebalanced",
     blockNumber,
     blockTimestamp,
+    txHash: event.transaction.hash,
     rebalanceDelta: true,
   });
 

@@ -13,8 +13,13 @@ import { LimitStatusValue } from "@/components/pool-header/limit-status-value";
 import { OraclePriceValue } from "@/components/pool-header/oracle-price-value";
 import { OracleStatusValue } from "@/components/pool-header/oracle-status-value";
 import { RebalanceStatusValue } from "@/components/pool-header/rebalance-status-value";
+import {
+  UptimeInfoIcon,
+  UptimeValue,
+} from "@/components/pool-header/uptime-value";
 import { LimitSelect } from "@/components/controls";
 import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
+import { BreachHistoryPanel } from "@/components/breach-history-panel";
 import { HealthPanel } from "@/components/health-panel";
 import { LimitPanel } from "@/components/limit-panel";
 import { ReservesPanel } from "@/components/reserves-panel";
@@ -470,6 +475,7 @@ function PoolDetail() {
               ratesError={poolNeedsRates && ratesError}
             />
           </div>
+          {fpmmPool && <BreachHistoryPanel pool={pool} network={network} />}
         </>
       )}
 
@@ -670,6 +676,22 @@ function PoolHeader({
               <span className="text-slate-500">—</span>
             ) : (
               <HealthScoreValue pool={pool} />
+            )
+          }
+        />
+        <Stat
+          className="min-w-36"
+          label={
+            <span className="inline-flex items-center gap-1">
+              Uptime
+              <UptimeInfoIcon />
+            </span>
+          }
+          value={
+            isVirtual ? (
+              <span className="text-slate-500">—</span>
+            ) : (
+              <UptimeValue pool={pool} />
             )
           }
         />
