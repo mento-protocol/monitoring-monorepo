@@ -4,7 +4,7 @@ import type { Pool } from "@/lib/types";
 import { InfoPopover } from "@/components/info-popover";
 import { useGQL } from "@/lib/graphql";
 import { POOL_BREACH_ROLLUP } from "@/lib/queries";
-import { DEVIATION_BREACH_GRACE_SECONDS } from "@/lib/health";
+import { DEVIATION_BREACH_GRACE_SECONDS, uptimeColorClass } from "@/lib/health";
 import { tradingSecondsInRange } from "@/lib/weekend";
 import { isFxPool } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
@@ -84,8 +84,8 @@ export function UptimeValue({ pool }: { pool: Pool }) {
           : `${closedBreachCount} ${closedBreachCount === 1 ? "breach" : "breaches"}`;
   return (
     <span className="flex flex-col gap-0.5">
-      <span className="font-medium text-white">
-        {pct.toFixed(3)}%
+      <span className="font-medium">
+        <span className={uptimeColorClass(pct)}>{pct.toFixed(3)}%</span>
         <span className="ml-1 text-xs text-slate-500">all-time</span>
       </span>
       <span className="text-xs text-slate-500">{subtitle}</span>

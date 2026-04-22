@@ -41,6 +41,8 @@ export const ALL_POOLS_WITH_HEALTH = `
       reserves1
       healthTotalSeconds
       hasHealthData
+      cumulativeCriticalSeconds
+      breachCount
     }
   }
 `;

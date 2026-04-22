@@ -162,6 +162,53 @@ export function pressureColorClass(pressure: number): string {
 }
 
 /**
+ * Tailwind text-color class for an uptime percentage (0–100). Tier
+ * thresholds are intentionally coarse — we want "red = page someone"
+ * not "red = SLO budget touched". Adjust upward once breach attribution
+ * is solid and we have a real three-nines target.
+ *
+ *   >99%   → emerald
+ *   90-99% → yellow
+ *   70-90% → amber
+ *   <70%   → red
+ */
+export function uptimeColorClass(pct: number): string {
+  if (!Number.isFinite(pct)) return "text-slate-500";
+  if (pct > 99) return "text-emerald-400";
+  if (pct >= 90) return "text-yellow-400";
+  if (pct >= 70) return "text-amber-400";
+  return "text-red-400";
+}
+
+/**
+ * All-time uptime % for a pool, computed from the indexer rollup
+ * counters. Returns `null` when we don't have enough data to answer
+ * honestly (virtual pool, rollup not populated yet during reindex,
+ * zero observation window). Keep the math aligned with the
+ * UptimeValue tile — both callers read the SAME snapshot so the
+ * homepage column and the pool page never disagree.
+ *
+ * Note: does NOT account for an in-flight open breach. The tile on the
+ * pool page adds the live past-grace portion of an open breach for
+ * real-time accuracy; the homepage column skips that (open breaches on
+ * the aggregate list would flicker constantly and the drift is < 1h
+ * per pool). Callers that want the live view should extend this.
+ */
+export function computePoolUptimePct(pool: {
+  source: string;
+  healthTotalSeconds?: string;
+  cumulativeCriticalSeconds?: string;
+}): number | null {
+  if (pool.source.includes("virtual")) return null;
+  const total = Number(pool.healthTotalSeconds ?? "0");
+  if (!Number.isFinite(total) || total <= 0) return null;
+  if (pool.cumulativeCriticalSeconds == null) return null;
+  const critical = Number(pool.cumulativeCriticalSeconds);
+  if (!Number.isFinite(critical)) return null;
+  return Math.max(0, Math.min(100, (1 - critical / total) * 100));
+}
+
+/**
  * Severity rank used to pick the worst status across oracle health and limit health.
  * N/A is least severe; CRITICAL is most severe.
  */
