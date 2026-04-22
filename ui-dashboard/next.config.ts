@@ -27,6 +27,11 @@ const CSP_CONNECT_SRC = [
 const CSP_DIRECTIVES = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' https://vercel.live",
+  // Sentry's session-replay SDK spins up a Web Worker compiled from a
+  // blob: URL. Browsers fall back from missing worker-src to script-src,
+  // so without this directive the worker gets blocked. Narrower than
+  // adding `blob:` to script-src.
+  "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https://vercel.live https://assets.vercel.com",
