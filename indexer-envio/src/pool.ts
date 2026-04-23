@@ -251,26 +251,31 @@ const getOrCreatePool = async (
   defaults?: { token0?: string; token1?: string },
 ): Promise<Pool> => {
   const existing = await context.Pool.get(poolId);
-  if (existing) return existing;
-  return {
-    id: poolId,
-    chainId,
-    token0: defaults?.token0,
-    token1: defaults?.token1,
-    source: "",
-    reserves0: 0n,
-    reserves1: 0n,
-    swapCount: 0,
-    notionalVolume0: 0n,
-    notionalVolume1: 0n,
-    rebalanceCount: 0,
-    ...DEFAULT_ORACLE_FIELDS,
-    createdAtBlock: 0n,
-    createdAtTimestamp: 0n,
-    updatedAtBlock: 0n,
-    updatedAtTimestamp: 0n,
-  };
+  return existing ?? defaultPool(chainId, poolId, defaults);
 };
+
+const defaultPool = (
+  chainId: number,
+  poolId: string,
+  defaults?: { token0?: string; token1?: string },
+): Pool => ({
+  id: poolId,
+  chainId,
+  token0: defaults?.token0,
+  token1: defaults?.token1,
+  source: "",
+  reserves0: 0n,
+  reserves1: 0n,
+  swapCount: 0,
+  notionalVolume0: 0n,
+  notionalVolume1: 0n,
+  rebalanceCount: 0,
+  ...DEFAULT_ORACLE_FIELDS,
+  createdAtBlock: 0n,
+  createdAtTimestamp: 0n,
+  updatedAtBlock: 0n,
+  updatedAtTimestamp: 0n,
+});
 
 export const upsertPool = async ({
   context,
@@ -288,6 +293,7 @@ export const upsertPool = async ({
   rebalanceDelta,
   oracleDelta,
   tokenDecimals,
+  existing: existingOverride,
 }: {
   context: PoolContext;
   chainId: number;
@@ -310,11 +316,17 @@ export const upsertPool = async ({
   rebalanceDelta?: boolean;
   oracleDelta?: Partial<typeof DEFAULT_ORACLE_FIELDS>;
   tokenDecimals?: { token0Decimals: number; token1Decimals: number };
+  /** Caller-provided pool snapshot. Handlers that have already done
+   * `context.Pool.get(poolId)` (e.g. FPMM UR/Rebalanced, which fetch it
+   * concurrently with RPC) should pass the result here — wrapped as
+   * `{ pool: ... }` so `pool: undefined` (fresh pool) is distinguishable
+   * from "not passed". When `undefined`, upsertPool does its own lookup. */
+  existing?: { pool: Pool | undefined };
 }): Promise<Pool> => {
-  const existing = await getOrCreatePool(context, chainId, poolId, {
-    token0,
-    token1,
-  });
+  const existing = existingOverride
+    ? (existingOverride.pool ??
+      defaultPool(chainId, poolId, { token0, token1 }))
+    : await getOrCreatePool(context, chainId, poolId, { token0, token1 });
 
   // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
   // pool creation), retry now so oracle events can start flowing.

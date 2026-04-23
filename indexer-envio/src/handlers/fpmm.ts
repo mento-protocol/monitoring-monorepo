@@ -572,10 +572,10 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Fire the RPC call and the Pool.get concurrently — they're independent,
-  // and each round-trip would otherwise serialize. Envio's in-batch cache
-  // makes the .get cheap on warm hits but round-tripping is still the
-  // dominant cost under load.
+  // RPC and Pool.get are independent — fire in parallel to eliminate the
+  // serial RTT. `context.Pool.get` only matters on the rebalancingState
+  // success path (to read invertRateFeed), so the "waste" on the RPC-null
+  // path is tolerable and already cached by Envio's in-batch store.
   // Use raw srcAddress for RPC calls (not the namespaced poolId).
   const [rebalancingState, existing] = await Promise.all([
     fetchRebalancingState(
@@ -617,6 +617,9 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       reserve1: event.params.reserve1,
     },
     oracleDelta,
+    // Reuse the Pool read from the concurrent Promise.all above — avoids
+    // a second context.Pool.get inside getOrCreatePool.
+    existing: { pool: existing },
   });
 
   if (rebalancingState) {
@@ -736,6 +739,8 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     strategy: rebalancerAddress,
     rebalanceDelta: true,
     oracleDelta,
+    // Reuse the Pool read from the concurrent Promise.all above.
+    existing: { pool: existing },
   });
 
   if (rebalancingState) {

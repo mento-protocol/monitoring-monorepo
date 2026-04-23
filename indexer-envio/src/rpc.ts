@@ -224,6 +224,25 @@ export function _clearRpcClients(): void {
   fallbackRpcClients.clear();
 }
 
+/** @internal Test-only: inject a mock RPC client so tests can drive
+ * downstream helpers (e.g. `fetchRebalancingState`'s cache path) without
+ * hitting the network. Clients need a `readContract` method; any other
+ * viem surface is unused by the functions tested via this hook. */
+export function _setRpcClientForTests(
+  chainId: number,
+  client: { readContract: (args: unknown) => Promise<unknown> } | null,
+): void {
+  if (client === null) {
+    rpcClients.delete(chainId);
+    fallbackRpcClients.delete(chainId);
+  } else {
+    rpcClients.set(
+      chainId,
+      client as unknown as ReturnType<typeof createPublicClient>,
+    );
+  }
+}
+
 // Per-chain RPC config for contract reads (eth_call).
 // Defaults MUST be full-node RPCs — Envio HyperRPC does NOT support eth_call.
 // (Envio's own event syncing uses HyperSync, configured in the YAML files.)
@@ -613,13 +632,17 @@ function parseRebalancingState(result: unknown): RebalancingState {
   };
 }
 
-// Memoize `fetchRebalancingState` calls at a given `blockNumber`. FPMM
-// emits 2× UpdateReserves + 1× Rebalanced in the same rebalance tx;
-// without this cache each handler re-RPCs for the same block state. The
-// entry is keyed on (chainId, address, blockNumber) so a later block's
-// reading is not served from a stale cache. A bounded LRU keeps memory
-// flat during long syncs — most pools have at most a handful of handler
-// invocations per block, so 256 entries is plenty with room to spare.
+// Memoize `fetchRebalancingState` per (chainId, addr, blockNumber). FPMM
+// emits 2× UR + 1× Rebalanced in the same rebalance tx → without this
+// cache each handler re-RPCs for identical block state.
+//
+// Two important invariants (mirrors `fetchReserves` / `fetchReportExpiry`):
+// 1. Only cache `usedFallback=false` results. If the request fell back
+//    to `latest` (e.g. requested block not yet available), the response
+//    isn't actually scoped to the cache key's blockNumber, so caching
+//    it would serve stale-across-block data to later callers.
+// 2. Only cache non-null results. A null means the RPC failed; a retry
+//    next time is cheaper than serving the failure forever.
 const REBALANCING_STATE_CACHE_MAX = 256;
 const _rebalancingStateCache = new Map<
   string,
@@ -629,15 +652,19 @@ const _rebalancingStateCache = new Map<
 function rebalancingCacheKey(
   chainId: number,
   poolAddress: string,
-  blockNumber: bigint | undefined,
+  blockNumber: bigint,
 ): string {
-  return `${chainId}:${poolAddress.toLowerCase()}:${blockNumber ?? "latest"}`;
+  return `${chainId}:${poolAddress.toLowerCase()}:${blockNumber}`;
 }
 
 export async function fetchRebalancingState(
   chainId: number,
   poolAddress: string,
-  blockNumber?: bigint,
+  // `blockNumber` is required so the memoization key is always
+  // block-scoped. Previously optional — an undefined caller would have
+  // cached a `latest` response under a "latest" key, serving stale state
+  // across wall-clock time to later callers.
+  blockNumber: bigint,
 ): Promise<RebalancingState | null> {
   const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
   if (_testRebalancingStates.has(testKey)) {
@@ -647,16 +674,21 @@ export async function fetchRebalancingState(
   const cacheKey = rebalancingCacheKey(chainId, poolAddress, blockNumber);
   const cached = _rebalancingStateCache.get(cacheKey);
   if (cached !== undefined) {
-    // Re-insert to refresh LRU position.
+    // Refresh LRU position.
     _rebalancingStateCache.delete(cacheKey);
     _rebalancingStateCache.set(cacheKey, cached);
     return cached;
   }
 
+  // Capture usedFallback + null from inside the closure so the outer
+  // code can decide whether to cache. Storing the promise (not the
+  // resolved value) is critical — concurrent callers share the flight.
+  let cachedFallback = false;
+  let cachedNull = false;
   const promise = (async (): Promise<RebalancingState | null> => {
     try {
       const client = getRpcClient(chainId);
-      const { result } = await readContractWithBlockFallback(
+      const { result, usedFallback } = await readContractWithBlockFallback(
         client,
         {
           address: poolAddress as `0x${string}`,
@@ -666,6 +698,7 @@ export async function fetchRebalancingState(
         blockNumber,
         getFallbackRpcClient(chainId),
       );
+      if (usedFallback) cachedFallback = true;
       return parseRebalancingState(result);
     } catch (err) {
       logRpcFailure(
@@ -675,16 +708,24 @@ export async function fetchRebalancingState(
         err,
         blockNumber,
       );
+      cachedNull = true;
       return null;
     }
   })();
 
   _rebalancingStateCache.set(cacheKey, promise);
   if (_rebalancingStateCache.size > REBALANCING_STATE_CACHE_MAX) {
-    // Evict the oldest entry (Map preserves insertion order).
     const oldestKey = _rebalancingStateCache.keys().next().value;
     if (oldestKey !== undefined) _rebalancingStateCache.delete(oldestKey);
   }
+  // After the flight resolves, evict if the response is not a
+  // block-scoped hit. In-flight dedup still works (concurrent callers
+  // awaited the same promise); only LATER callers need a fresh attempt.
+  promise.finally(() => {
+    if (cachedFallback || cachedNull) {
+      _rebalancingStateCache.delete(cacheKey);
+    }
+  });
   return promise;
 }
 
@@ -860,6 +901,16 @@ export async function fetchNumReporters(
   }
 }
 
+// In-flight dedup for `fetchReportExpiry`. The value-level `reportExpiryCache`
+// is populated only AFTER the RPC resolves, so under `Promise.all` fan-out
+// (oracle handlers parallelize per pool — pools sharing a feed fire
+// identical requests concurrently) every caller misses and re-RPCs. This
+// Promise map collapses in-flight requests: concurrent callers share one
+// flight, the value cache then absorbs subsequent calls. Entries are
+// cleared on resolve (win + loss) so the value cache / retry path
+// takes over afterwards.
+const _reportExpiryInFlight = new Map<string, Promise<bigint | null>>();
+
 /** Returns the effective oracle report expiry (seconds) for the given rateFeedID.
  * Returns null on RPC/address error so callers can preserve the previous known-good value. */
 export async function fetchReportExpiry(
@@ -887,48 +938,64 @@ export async function fetchReportExpiry(
   const cached = reportExpiryCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  try {
-    const client = getRpcClient(chainId);
-    let usedAnyFallback = false;
-    const tokenExpiryRes = await readContractWithBlockFallback(
-      client,
-      {
-        address,
-        abi: SortedOraclesContract.abi,
-        functionName: "tokenReportExpirySeconds",
-        args: [rateFeedID as `0x${string}`],
-      },
-      blockNumber,
-      getFallbackRpcClient(chainId),
-    );
-    if (tokenExpiryRes.usedFallback) usedAnyFallback = true;
-    const tokenExpiry = tokenExpiryRes.result as bigint;
-    let expiry: bigint;
-    if (tokenExpiry > 0n) {
-      expiry = tokenExpiry;
-    } else {
-      const globalRes = await readContractWithBlockFallback(
+  const inFlight = _reportExpiryInFlight.get(cacheKey);
+  if (inFlight !== undefined) return inFlight;
+
+  const promise = (async (): Promise<bigint | null> => {
+    try {
+      const client = getRpcClient(chainId);
+      let usedAnyFallback = false;
+      const tokenExpiryRes = await readContractWithBlockFallback(
         client,
         {
           address,
           abi: SortedOraclesContract.abi,
-          functionName: "reportExpirySeconds",
+          functionName: "tokenReportExpirySeconds",
+          args: [rateFeedID as `0x${string}`],
         },
         blockNumber,
         getFallbackRpcClient(chainId),
       );
-      if (globalRes.usedFallback) usedAnyFallback = true;
-      expiry = globalRes.result as bigint;
+      if (tokenExpiryRes.usedFallback) usedAnyFallback = true;
+      const tokenExpiry = tokenExpiryRes.result as bigint;
+      let expiry: bigint;
+      if (tokenExpiry > 0n) {
+        expiry = tokenExpiry;
+      } else {
+        const globalRes = await readContractWithBlockFallback(
+          client,
+          {
+            address,
+            abi: SortedOraclesContract.abi,
+            functionName: "reportExpirySeconds",
+          },
+          blockNumber,
+          getFallbackRpcClient(chainId),
+        );
+        if (globalRes.usedFallback) usedAnyFallback = true;
+        expiry = globalRes.result as bigint;
+      }
+      if (expiry <= 0n) return null;
+      if (!usedAnyFallback) {
+        reportExpiryCache.set(cacheKey, expiry);
+      }
+      return expiry;
+    } catch (err) {
+      logRpcFailure(chainId, "reportExpiry", rateFeedID, err, blockNumber);
+      return null;
     }
-    if (expiry <= 0n) return null;
-    if (!usedAnyFallback) {
-      reportExpiryCache.set(cacheKey, expiry);
-    }
-    return expiry;
-  } catch (err) {
-    logRpcFailure(chainId, "reportExpiry", rateFeedID, err, blockNumber);
-    return null;
-  }
+  })();
+
+  _reportExpiryInFlight.set(cacheKey, promise);
+  promise.finally(() => {
+    _reportExpiryInFlight.delete(cacheKey);
+  });
+  return promise;
+}
+
+/** Test-only: clear the in-flight `fetchReportExpiry` map. */
+export function _resetReportExpiryInFlightForTests(): void {
+  _reportExpiryInFlight.clear();
 }
 
 /** Fetches decimals0() or decimals1() from an FPMM pool — returns the scaling
