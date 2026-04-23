@@ -24,15 +24,27 @@ permissions: read-all
 
 jobs:
   validate:
-    name: Terraform Validate
+    name: Terraform Validate (${{ matrix.module }})
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
       contents: read
       actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each Terraform root module is validated independently. The top-level
+        # `terraform/` owns Vercel + Cloud Run + WIF infra; `terraform/alerts/`
+        # owns Grafana alert rules + Slack contact points. Both run `fmt`,
+        # `init -backend=false` (no state access needed for validate), and
+        # `validate` — the same checks the single-module workflow ran before
+        # alerts/ was split out.
+        module:
+          - terraform
+          - terraform/alerts
     defaults:
       run:
-        working-directory: terraform
+        working-directory: ${{ matrix.module }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2

@@ -20,7 +20,10 @@
     "bridge:deploy": "./scripts/deploy-bridge.sh",
     "infra:apply": "terraform -chdir=terraform apply",
     "infra:init": "terraform -chdir=terraform init",
-    "infra:plan": "terraform -chdir=terraform plan"
+    "infra:plan": "terraform -chdir=terraform plan",
+    "alerts:init": "terraform -chdir=terraform/alerts init",
+    "alerts:plan": "terraform -chdir=terraform/alerts plan",
+    "alerts:apply": "terraform -chdir=terraform/alerts apply"
   },
   "pnpm": {
     "overrides": {

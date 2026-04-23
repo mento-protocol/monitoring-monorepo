@@ -43,6 +43,95 @@ All four values route to `#alerts-v3` via a single notification-policy regex mat
 
 ---
 
+## Next — Rebalance Effectiveness (KPI 4, second half)
+
+Post-launch spec §3 KPI 4 has two halves: **liveness** (does the rebalancer fire?) and **effectiveness** (does it actually fix the deviation?). PR #206 ships liveness (`Rebalancer Stale [fpmms]` — breach >30m + no rebalance >30m). This section defines the effectiveness half.
+
+### What the KPI measures
+
+Each rebalance trades with the pool to push its mid-price toward the oracle. The indexer already computes effectiveness per rebalance in `RebalanceEvent.effectivenessRatio`:
+
+```
+effectivenessRatio = (priceDifferenceBefore − priceDifferenceAfter) / priceDifferenceBefore
+```
+
+Range:
+
+- `1.0` → rebalance collapsed the deviation fully (pool ≈ oracle after)
+- `0.5` → halved the deviation
+- `0.0` → no reduction
+- `< 0` → rebalance moved price _further_ from oracle
+
+**Why "low effectiveness + active breach" is a distinct failure mode:** the rebalancer is alive (liveness OK → `Rebalancer Stale` stays quiet) but ineffective. Root causes include:
+
+- Rebalancer reads a stale oracle price (race vs. relayer)
+- Front-running / MEV truncates the intended trade
+- Rebalancer size calculation has a bug
+- Gas-price sniping splits the swap into smaller pieces
+- Pool state has changed between rebalancer's decision and execution
+
+Without this alert, the operator only sees the symptom (`Deviation Breach Critical` at 60 min) without the cause (rebalancer fired 6 times and each one did <10% of the work).
+
+### Implementation — indexer
+
+`effectivenessRatio` lives on `RebalanceEvent` (per-event); it is **not** currently on `Pool`. Roll it up:
+
+- [ ] **Add `lastEffectivenessRatio: String!` to `Pool` entity** — populated on each `RebalanceEvent`, mirroring the existing `lastDeviationRatio` pattern.
+- [ ] **Backfill on redeploy** — historical rebalance events replay via Envio, so the field will populate without manual intervention.
+- [ ] _(Optional — defer unless alert semantics need it)_ Add `effectivenessRatioAvg1h` using a rolling 1h aggregate; requires either a scheduled rollup handler or computing on-read in the bridge.
+
+### Implementation — metrics-bridge
+
+- [ ] **`metrics-bridge/src/graphql.ts`** — add `lastEffectivenessRatio` to the `BridgePools` query.
+- [ ] **`metrics-bridge/src/types.ts`** — add to `PoolRow`.
+- [ ] **`metrics-bridge/src/metrics.ts`** — new gauge `mento_pool_rebalance_effectiveness` (float, per pool). `parseFloat` of the indexer string.
+- [ ] **Optional new counter**: `mento_pool_rebalance_count_total` — expose `Pool.rebalanceCount` as a Prometheus counter so alerts can gate on `increase(…[1h]) > 0` (i.e. "only alert if the rebalancer actually ran recently").
+- [ ] **Unit tests** in `metrics-bridge/test/metrics.test.ts` cover the new gauge/counter mapping.
+
+### Alert design — two candidates
+
+**Approach A — Single low-effect rebalance (simple):**
+
+```promql
+mento_pool_rebalance_effectiveness < 0.2
+  and mento_pool_deviation_ratio >= 1
+```
+
+Fires every time a rebalance lands with effectiveness <0.2 while still in breach. Severity: warning. One unlucky trade (single MEV hit) fires a real alert — noisy if front-running is frequent.
+
+**Approach B — Sustained low effectiveness (preferred):**
+
+```promql
+avg_over_time(mento_pool_rebalance_effectiveness[1h]) < 0.2
+  and mento_pool_deviation_ratio >= 1
+  and increase(mento_pool_rebalance_count_total[1h]) > 0
+```
+
+Fires only when at least one rebalance ran in the last hour AND the rolling-hour average stayed below 0.2 AND the pool is still in breach. Severity: warning. `for = "15m"`. Captures persistent control-loop failure, ignores one-off bad luck. Requires the new `rebalance_count_total` counter to be exposed.
+
+Decision: ship Approach B as the default. Approach A is a debugging toggle we can enable if Approach B ever misses real incidents.
+
+### Open questions to resolve when picking this up
+
+1. **Effectiveness threshold.** Spec says qualitatively "low-effect". Propose `< 0.2` as first cut — tune after 2 weeks of production data.
+2. **Rolling window.** 1h feels right for the alert (catches an hour of bad rebalances before paging). Could narrow to 30m if the rebalancer fires more frequently than expected.
+3. **Severity.** Control-loop failure is serious but not acute (the user-facing failure — breach >60m — is already caught by `Deviation Breach Critical`). Warning is correct.
+4. **Per-pool tuning.** Does any specific pool (e.g. low-TVL FX pools) warrant a different threshold? Probably not yet — revisit only if production data shows a pool with systematically low effectiveness that is _acceptable_ (e.g. thin order book).
+
+### Acceptance criteria
+
+- `mento_pool_rebalance_effectiveness` gauge present in Grafana for all 11 FPMM pools, with values matching `RebalanceEvent.effectivenessRatio` from the indexer.
+- New rule deploys via `pnpm alerts:apply` without plan drift.
+- Smoke test: temporarily lower the threshold (e.g. `< 0.99`) → alert fires on a real pool that rebalanced recently → revert.
+- `docs/BACKLOG.md` KPI 4 second-half checkbox ticked (this section removed, replaced with a `- [x]` in the Done area).
+
+### Out of scope for the effectiveness PR
+
+- **Dashboard panel for effectiveness trend** — Grafana panel/Mento dashboard widget; useful but not required for the alert.
+- **Root-cause classifier** — distinguishing MEV from staleness from bug requires on-chain tx introspection and belongs in a separate tool, not an alert.
+
+---
+
 ## Backlog — Indexer Enhancements
 
 - [ ] **Liquity v2 CDP indexing**

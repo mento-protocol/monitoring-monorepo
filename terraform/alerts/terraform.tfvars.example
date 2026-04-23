@@ -1,0 +1,20 @@
+# Copy this file to terraform.tfvars and fill in the values.
+# terraform.tfvars is gitignored — never commit it.
+
+# ── Slack ─────────────────────────────────────────────────────────────────────
+# Bot User OAuth Token from the "Grafana Alerts" Slack app.
+# Create / manage at: https://api.slack.com/apps
+# Required scopes: chat:write, chat:write.public (chat:write.customize optional).
+# The bot must be invited to every channel it posts to: /invite @Grafana Alerts.
+slack_bot_token = "xoxb-REPLACE_ME"
+
+# ── Grafana ───────────────────────────────────────────────────────────────────
+# Service account token for the Grafana Cloud stack. Create at:
+#   Grafana Cloud → Administration → Service accounts → Add token.
+# Needs at least Admin role to create folders + alert rules.
+grafana_service_account_token = "glsa_REPLACE_ME"
+
+# Override the stack URL or channels only if they change:
+# grafana_url            = "https://clabsmento.grafana.net"
+# slack_channel_critical = "#alerts-critical"
+# slack_channel_warnings = "#alerts-warnings"
