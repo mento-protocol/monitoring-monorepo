@@ -1,5 +1,11 @@
 import { Gauge, Counter, Registry } from "prom-client";
-import { pairLabel } from "./config.js";
+import {
+  blockExplorerUrl,
+  chainName,
+  pairLabel,
+  poolAddress,
+  shortAddress,
+} from "./config.js";
 import type { PoolRow } from "./types.js";
 
 export function healthStatusToNumber(status: string): number {
@@ -19,7 +25,19 @@ const fp = (s: string) => parseFloat(s);
 
 export const register = new Registry();
 
-const poolLabels = ["pool_id", "chain_id", "pair"] as const;
+// Display-oriented labels are carried on every pool-scoped series so Slack
+// alert templates can render a readable title + deep-links to the block
+// explorer and dashboard without needing a PromQL join against an info metric.
+// Cardinality is bounded by the number of pools (each label is 1:1 with
+// pool_id), so adding them doesn't create new series — only widens them.
+const poolLabels = [
+  "pool_id",
+  "chain_id",
+  "chain_name",
+  "pair",
+  "pool_address_short",
+  "block_explorer_url",
+] as const;
 const pressureLabels = [...poolLabels, "token_index"] as const;
 
 export const gauges = {
@@ -93,10 +111,14 @@ export function updateMetrics(pools: PoolRow[]): void {
   }
 
   for (const pool of pools) {
+    const address = poolAddress(pool.id);
     const labels = {
       pool_id: pool.id,
       chain_id: String(pool.chainId),
+      chain_name: chainName(pool.chainId),
       pair: pairLabel(pool.id),
+      pool_address_short: shortAddress(address),
+      block_explorer_url: blockExplorerUrl(pool.chainId, address),
     };
 
     gauges.healthStatus.set(labels, healthStatusToNumber(pool.healthStatus));

@@ -16,15 +16,15 @@ resource "grafana_rule_group" "fpmms_oracle" {
   interval_seconds = 60
 
   rule {
-    name           = "Oracle Liveness [fpmms]"
+    name           = "Oracle Liveness"
     condition      = "threshold"
     for            = "2m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Oracle on `{{ $labels.pair }}` (`{{ $labels.chain_id }}`) nearing expiry — live-ratio {{ printf \"%.2f\" $values.A.Value }}."
-      description = "`(time() - oracle_timestamp) / oracle_expiry` crossed 0.8. Next oracle report is overdue; if it doesn't land the pool will flip to oracle-down."
+      summary     = "Live-ratio {{ printf \"%.2f\" $values.A.Value }} — next oracle report is overdue."
+      description = "`(time() - oracle_timestamp) / oracle_expiry` crossed 0.8. If the next report does not land the pool will flip to oracle-down."
     }
 
     labels = {
@@ -80,15 +80,15 @@ resource "grafana_rule_group" "fpmms_oracle" {
   # precise failure mode (and so one rule firing doesn't hide a lagging
   # second signal).
   rule {
-    name           = "Oracle Down [fpmms]"
+    name           = "Oracle Down"
     condition      = "threshold"
     for            = "1m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Oracle DOWN on `{{ $labels.pair }}` (`{{ $labels.chain_id }}`) — swaps will revert."
-      description = "`mento_pool_oracle_ok` is 0 — indexer flagged the oracle as not usable. Swaps on this pool revert until the relayer pushes a fresh report."
+      summary     = "Oracle is not usable — swaps will revert."
+      description = "`mento_pool_oracle_ok = 0` — indexer flagged the oracle as not usable. Swaps on this pool revert until the relayer pushes a fresh report."
     }
 
     labels = {
@@ -140,15 +140,15 @@ resource "grafana_rule_group" "fpmms_oracle" {
   }
 
   rule {
-    name           = "Oracle Expired [fpmms]"
+    name           = "Oracle Expired"
     condition      = "threshold"
     for            = "1m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Oracle EXPIRED on `{{ $labels.pair }}` (`{{ $labels.chain_id }}`) — liveness ratio {{ printf \"%.2f\" $values.A.Value }} ≥ 1."
-      description = "`(time() - oracle_timestamp) / oracle_expiry ≥ 1` — the last oracle report is older than its own expiry window. Swaps will revert. If this fires while `Oracle Down` stays quiet, the indexer's `oracleOk` derivation has drifted from the on-chain expiry check."
+      summary     = "Liveness ratio {{ printf \"%.2f\" $values.A.Value }} ≥ 1 — last oracle report past expiry."
+      description = "If this fires while `Oracle Down` stays quiet, the indexer's `oracleOk` derivation has drifted from the on-chain expiry check."
     }
 
     labels = {
@@ -209,15 +209,15 @@ resource "grafana_rule_group" "fpmms_deviation" {
   # KPI 2 warn: "≥ 1 for > 15 min" per spec §3. The 15m hold matches the spec
   # verbatim — shorter durations produce weekend-flicker noise on FX pools.
   rule {
-    name           = "Deviation Breach [fpmms]"
+    name           = "Deviation Breach"
     condition      = "threshold"
     for            = "15m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Pool `{{ $labels.pair }}` (`{{ $labels.chain_id }}`) deviating from oracle — ratio {{ printf \"%.2f\" $values.A.Value }}."
-      description = "`mento_pool_deviation_ratio ≥ 1` — pool's mid-price is outside the rebalance threshold. Rebalancer should act; if the breach persists past 60 min, the Deviation Breach Critical rule fires."
+      summary     = "Deviation ratio {{ printf \"%.2f\" $values.A.Value }} — mid-price out of rebalance band."
+      description = "Rebalancer should act. If the breach persists past 60 min, the Deviation Breach Critical rule fires."
     }
 
     labels = {
@@ -276,14 +276,14 @@ resource "grafana_rule_group" "fpmms_deviation" {
   # indexer-envio/src/deviationBreach.ts comment at L98-107), so this rule
   # exists to keep warning coverage continuous across ratio gaps.
   rule {
-    name           = "Deviation Breach (anchored, no ratio) [fpmms]"
+    name           = "Deviation Breach (anchored)"
     condition      = "threshold"
     for            = "15m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Pool `{{ $labels.pair }}` (`{{ $labels.chain_id }}`) breach anchored without ratio — {{ printf \"%.0f\" $values.A.Value }}s since anchor."
+      summary     = "Breach anchored for {{ humanizeDuration $values.A.Value }} — ratio gauge missing."
       description = "`mento_pool_deviation_breach_start > 0` but `mento_pool_deviation_ratio` is absent (bridge emitted the `-1` sentinel). The anchor is the indexer's authoritative breach signal, so the breach is real even when the ratio gauge is missing."
     }
 
@@ -336,15 +336,15 @@ resource "grafana_rule_group" "fpmms_deviation" {
   }
 
   rule {
-    name           = "Deviation Breach Critical [fpmms]"
+    name           = "Deviation Breach Critical"
     condition      = "threshold"
     for            = "0s"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Pool `{{ $labels.pair }}` (`{{ $labels.chain_id }}`) deviating >60min — rebalancer not resolving breach."
-      description = "`mento_pool_deviation_breach_start` is set and the breach has persisted longer than 3600s. Manual investigation required — check rebalancer liveness and oracle feed."
+      summary     = "Deviating for {{ humanizeDuration $values.A.Value }} — rebalancer not resolving breach."
+      description = "Breach has persisted longer than 60 min. Manual investigation required — check rebalancer liveness and oracle feed."
     }
 
     labels = {
@@ -406,15 +406,15 @@ resource "grafana_rule_group" "fpmms_trading_limit" {
   interval_seconds = 60
 
   rule {
-    name           = "Trading Limit Pressure [fpmms]"
+    name           = "Trading Limit Pressure"
     condition      = "threshold"
     for            = "5m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Pool `{{ $labels.pair }}` (`{{ $labels.chain_id }}`) token{{ $labels.token_index }} limit at {{ printf \"%.1f\" $values.A.Value }}x capacity."
-      description = "`mento_pool_limit_pressure > 0.8` on a token — trading limit is about to trip. Next swap at this size will revert."
+      summary     = "token{{ $labels.token_index }} limit at {{ printf \"%.0f\" (mul $values.A.Value 100.0) }}% — trip imminent."
+      description = "Trading limit is about to trip. Next swap at this size will revert."
     }
 
     labels = {
@@ -466,15 +466,15 @@ resource "grafana_rule_group" "fpmms_trading_limit" {
   }
 
   rule {
-    name           = "Trading Limit Tripped [fpmms]"
+    name           = "Trading Limit Tripped"
     condition      = "threshold"
     for            = "2m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Pool `{{ $labels.pair }}` (`{{ $labels.chain_id }}`) token{{ $labels.token_index }} limit at {{ printf \"%.1f\" $values.A.Value }}x — swaps reverting."
-      description = "`mento_pool_limit_pressure >= 1` — trading limit is exceeded. Swaps on this token of this pool revert until the limit window rolls."
+      summary     = "token{{ $labels.token_index }} limit at {{ printf \"%.0f\" (mul $values.A.Value 100.0) }}% — swaps reverting."
+      description = "Trading limit exceeded. Swaps on this token revert until the limit window rolls."
     }
 
     labels = {
@@ -533,15 +533,15 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
   interval_seconds = 60
 
   rule {
-    name           = "Rebalancer Stale [fpmms]"
+    name           = "Rebalancer Stale"
     condition      = "threshold"
     for            = "5m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Rebalancer stale on `{{ $labels.pair }}` (`{{ $labels.chain_id }}`) — {{ printf \"%.0f\" $values.A.Value }}s since last rebalance under 30m+ breach."
-      description = "Deviation has been breaching for more than 30 minutes AND the rebalancer hasn't acted in more than 30 minutes. Likely stuck bot, insufficient gas, or contract-level failure."
+      summary     = "Idle {{ humanizeDuration $values.A.Value }} during 1h+ breach — rebalancer has not acted."
+      description = "Deviation has been breaching for more than 60 minutes AND the rebalancer hasn't acted in more than 30 minutes. Likely stuck bot, insufficient gas, or contract-level failure."
     }
 
     labels = {
@@ -564,12 +564,12 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
         # NEVER been rebalanced while sitting in an active breach is the
         # strongest case of "rebalancer never acted" — exactly the KPI 4
         # critical we want to page on. The `breach_start > 0` + `breach >
-        # 30m` clauses already filter out healthy never-rebalanced pools,
+        # 1h` clauses already filter out healthy never-rebalanced pools,
         # so the raw `time() - 0` arithmetic can't false-fire on its own.
         expr = join(" and ", [
           "(time() - mento_pool_last_rebalanced_at)",
           "(mento_pool_deviation_breach_start > 0)",
-          "((time() - mento_pool_deviation_breach_start) > 1800)",
+          "((time() - mento_pool_deviation_breach_start) > 3600)",
           "((time() - mento_pool_last_rebalanced_at) > 1800)",
         ])
         instant = true

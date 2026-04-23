@@ -16,8 +16,8 @@ resource "grafana_rule_group" "metrics_bridge" {
     no_data_state  = "Alerting"
 
     annotations = {
-      summary     = "metrics-bridge last poll was {{ printf \"%.0f\" $values.A.Value }}s ago — pool metrics stale."
-      description = "`time() - mento_pool_bridge_last_poll > 90` (3x the 30s poll interval). Every fpmms alert that depends on fresh pool state is now blind. Check Cloud Run logs: `gcloud run services logs read metrics-bridge --project mento-monitoring`."
+      summary     = "Last poll was {{ humanizeDuration $values.A.Value }} ago — pool metrics stale."
+      description = "Every fpmms alert that depends on fresh pool state is now blind. Check Cloud Run logs: `gcloud run services logs read metrics-bridge --project mento-monitoring`."
     }
 
     labels = {
@@ -76,8 +76,8 @@ resource "grafana_rule_group" "metrics_bridge" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "metrics-bridge polling the indexer with errors — rate {{ printf \"%.3f\" $values.A.Value }}/s."
-      description = "`rate(mento_pool_bridge_poll_errors_total[5m]) > 0` — the bridge is hitting the Envio indexer but failing. Likely an Envio rate limit (429) or a schema drift. Stale gauge values remain, but the alert-on-change signal is degraded."
+      summary     = "Bridge polling indexer with errors — rate {{ printf \"%.3f\" $values.A.Value }}/s."
+      description = "Bridge is hitting the Envio indexer but failing. Likely an Envio rate limit (429) or a schema drift. Stale gauge values remain, but the alert-on-change signal is degraded."
     }
 
     labels = {

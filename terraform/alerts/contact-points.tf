@@ -13,21 +13,8 @@ resource "grafana_contact_point" "slack_critical" {
   slack {
     token     = var.slack_bot_token
     recipient = var.slack_channel_critical
-    title     = "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ end }} [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
-    text      = <<-EOT
-      {{ range .Alerts -}}
-      *Service:* `{{ .Labels.service }}`
-      {{ if .Labels.pool_id -}}
-      *Pool:* `{{ .Labels.pair }}` on `{{ .Labels.chain_id }}`
-      *Pool ID:* `{{ .Labels.pool_id }}`
-      {{ end -}}
-      *Severity:* {{ .Labels.severity }}
-      {{ if .Annotations.summary }}*Summary:* {{ .Annotations.summary }}{{ end }}
-      {{ if .Annotations.description }}{{ .Annotations.description }}{{ end }}
-      *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
-      {{ if .GeneratorURL }}<{{ .GeneratorURL }}|View in Grafana>{{ end }}
-      {{ end }}
-    EOT
+    title     = "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ end }} {{ .CommonLabels.alertname }}{{ if .CommonLabels.pair }} — {{ .CommonLabels.pair }}{{ end }}{{ if .CommonLabels.chain_name }} · {{ .CommonLabels.chain_name | title }}{{ end }}"
+    text      = local.slack_body_template
   }
 }
 
@@ -37,25 +24,38 @@ resource "grafana_contact_point" "slack_warnings" {
   slack {
     token     = var.slack_bot_token
     recipient = var.slack_channel_warnings
-    title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }} [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
-    text      = <<-EOT
-      {{ range .Alerts -}}
-      *Service:* `{{ .Labels.service }}`
-      {{ if .Labels.pool_id -}}
-      *Pool:* `{{ .Labels.pair }}` on `{{ .Labels.chain_id }}`
-      *Pool ID:* `{{ .Labels.pool_id }}`
-      {{ end -}}
-      *Severity:* {{ .Labels.severity }}
-      {{ if .Annotations.summary }}*Summary:* {{ .Annotations.summary }}{{ end }}
-      {{ if .Annotations.description }}{{ .Annotations.description }}{{ end }}
-      *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
-      {{ if .GeneratorURL }}<{{ .GeneratorURL }}|View in Grafana>{{ end }}
-      {{ end }}
-    EOT
+    title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }} {{ .CommonLabels.alertname }}{{ if .CommonLabels.pair }} — {{ .CommonLabels.pair }}{{ end }}{{ if .CommonLabels.chain_name }} · {{ .CommonLabels.chain_name | title }}{{ end }}"
+    text      = local.slack_body_template
   }
 }
 
 locals {
+  # Shared message body — both contact points (critical + warnings) render the
+  # same structure so operators can't mistake fields between channels.
+  #
+  # Title carries identity (alertname — pair · chain). Body is:
+  #   1. One-line headline from the rule's `summary` annotation.
+  #   2. Italicised `description` with likely causes, if present.
+  #   3. Metadata row: clickable pool address (→ block explorer) + start time.
+  #   4. Action row: dashboard link + Grafana alert link.
+  #
+  # For metrics-bridge alerts (no pool_id/pair/chain), the pool/dashboard
+  # blocks are suppressed via `{{ if .Labels.pool_id }}`.
+  slack_body_template = <<-EOT
+    {{ range .Alerts -}}
+    {{ if .Annotations.summary }}{{ .Annotations.summary }}
+    {{ end -}}
+    {{ if .Annotations.description }}_{{ .Annotations.description }}_
+    {{ end }}
+    {{ if .Labels.pool_id -}}
+    *Pool:* <{{ .Labels.block_explorer_url }}|`{{ .Labels.pool_address_short }}`>   *Started:* {{ .StartsAt.Format "15:04 UTC" }}
+    <https://monitoring.mento.org/pool/{{ .Labels.pool_id }}|Open pool>   ·   <{{ .GeneratorURL }}|View alert>
+    {{ else -}}
+    *Started:* {{ .StartsAt.Format "15:04 UTC" }}   ·   <{{ .GeneratorURL }}|View alert>
+    {{ end -}}
+    {{ end }}
+  EOT
+
   # Group/repeat timings applied via notification_settings on every v3 rule.
   # Aegis root policy uses 30s/5m/4h for catch-all; v3 shortens repeat to 1h so
   # unacknowledged pages don't go silent overnight.

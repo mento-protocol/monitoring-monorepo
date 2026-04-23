@@ -64,7 +64,11 @@ describe("poll", () => {
     const oracleBefore = await getGaugeValue(register, "mento_pool_oracle_ok", {
       pool_id: "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
       chain_id: "42220",
-      pair: "USDm/GBPm",
+      chain_name: "celo",
+      pair: "GBPm/USDm",
+      pool_address_short: "0x8c00…cb56",
+      block_explorer_url:
+        "https://celoscan.io/address/0x8c0014afe032e4574481d8934504100bf23fcb56",
     });
     expect(oracleBefore).toBeDefined();
 
@@ -74,7 +78,11 @@ describe("poll", () => {
     const oracleAfter = await getGaugeValue(register, "mento_pool_oracle_ok", {
       pool_id: "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
       chain_id: "42220",
-      pair: "USDm/GBPm",
+      chain_name: "celo",
+      pair: "GBPm/USDm",
+      pool_address_short: "0x8c00…cb56",
+      block_explorer_url:
+        "https://celoscan.io/address/0x8c0014afe032e4574481d8934504100bf23fcb56",
     });
     expect(oracleAfter).toBe(oracleBefore);
   });

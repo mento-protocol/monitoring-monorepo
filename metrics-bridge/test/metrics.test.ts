@@ -22,7 +22,11 @@ describe("updateMetrics", () => {
   const poolLabels = {
     pool_id: "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
     chain_id: "42220",
-    pair: "USDm/GBPm",
+    chain_name: "celo",
+    pair: "GBPm/USDm",
+    pool_address_short: "0x8c00…cb56",
+    block_explorer_url:
+      "https://celoscan.io/address/0x8c0014afe032e4574481d8934504100bf23fcb56",
   };
 
   beforeEach(() => {
@@ -144,14 +148,20 @@ describe("updateMetrics", () => {
     ).toBe(1713199000);
   });
 
-  it("falls back to pool id when pair is unknown", async () => {
-    const unknownPool = makePool({ id: "99999-0xunknown", chainId: 99999 });
+  it("falls back to pool id when pair/chain/explorer are unknown", async () => {
+    const unknownPool = makePool({
+      id: "99999-0x1234567890abcdef1234567890abcdef12345678",
+      chainId: 99999,
+    });
     updateMetrics([unknownPool]);
     expect(
       await getGaugeValue(register, "mento_pool_oracle_ok", {
-        pool_id: "99999-0xunknown",
+        pool_id: "99999-0x1234567890abcdef1234567890abcdef12345678",
         chain_id: "99999",
-        pair: "99999-0xunknown",
+        chain_name: "99999",
+        pair: "99999-0x1234567890abcdef1234567890abcdef12345678",
+        pool_address_short: "0x1234…5678",
+        block_explorer_url: "",
       }),
     ).toBe(1);
   });
@@ -171,7 +181,30 @@ describe("updateMetrics", () => {
       await getGaugeValue(register, "mento_pool_health_status", {
         pool_id: "42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
         chain_id: "42220",
-        pair: "USDm/USDC",
+        chain_name: "celo",
+        pair: "USDC/USDm",
+        pool_address_short: "0x462f…a19e",
+        block_explorer_url:
+          "https://celoscan.io/address/0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
+      }),
+    ).toBe(1);
+  });
+
+  it("attaches monad chain_name and monadscan explorer URL to Monad pools", async () => {
+    const monadPool = makePool({
+      id: "143-0x93e15a22fda39fefccce82d387a09ccf030ead61",
+      chainId: 143,
+    });
+    updateMetrics([monadPool]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_ok", {
+        pool_id: "143-0x93e15a22fda39fefccce82d387a09ccf030ead61",
+        chain_id: "143",
+        chain_name: "monad",
+        pair: "EURm/USDm",
+        pool_address_short: "0x93e1…ad61",
+        block_explorer_url:
+          "https://monadscan.com/address/0x93e15a22fda39fefccce82d387a09ccf030ead61",
       }),
     ).toBe(1);
   });
