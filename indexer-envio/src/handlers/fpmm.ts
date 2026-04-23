@@ -572,19 +572,25 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Use raw srcAddress for RPC calls (not the namespaced poolId)
-  const rebalancingState = await fetchRebalancingState(
-    event.chainId,
-    asAddress(event.srcAddress),
-    blockNumber,
-  );
+  // RPC and Pool.get are independent — fire in parallel to eliminate the
+  // serial RTT. `context.Pool.get` only matters on the rebalancingState
+  // success path (to read invertRateFeed), so the "waste" on the RPC-null
+  // path is tolerable and already cached by Envio's in-batch store.
+  // Use raw srcAddress for RPC calls (not the namespaced poolId).
+  const [rebalancingState, existing] = await Promise.all([
+    fetchRebalancingState(
+      event.chainId,
+      asAddress(event.srcAddress),
+      blockNumber,
+    ),
+    context.Pool.get(poolId),
+  ]);
 
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
   // Hoist oraclePrice outside the if-block so it's accessible for OracleSnapshot
   // construction without a non-null assertion on oracleDelta.oraclePrice.
   let updateReservesOraclePrice = 0n;
   if (rebalancingState) {
-    const existing = await context.Pool.get(poolId);
     const isInverted = existing?.invertRateFeed ?? false;
     updateReservesOraclePrice = isInverted
       ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
@@ -611,6 +617,9 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       reserve1: event.params.reserve1,
     },
     oracleDelta,
+    // Reuse the Pool read from the concurrent Promise.all above — avoids
+    // a second context.Pool.get inside getOrCreatePool.
+    existing: { pool: existing },
   });
 
   if (rebalancingState) {
@@ -682,12 +691,16 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Use raw srcAddress for RPC calls (not the namespaced poolId)
-  const rebalancingState = await fetchRebalancingState(
-    event.chainId,
-    asAddress(event.srcAddress),
-    blockNumber,
-  );
+  // Fire RPC + Pool.get concurrently (see UpdateReserves handler).
+  // Use raw srcAddress for RPC calls (not the namespaced poolId).
+  const [rebalancingState, existing] = await Promise.all([
+    fetchRebalancingState(
+      event.chainId,
+      asAddress(event.srcAddress),
+      blockNumber,
+    ),
+    context.Pool.get(poolId),
+  ]);
 
   const rebalancerAddress = asAddress(event.params.sender);
 
@@ -702,7 +715,6 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   // construction without a non-null assertion on oracleDelta.oraclePrice.
   let rebalancedOraclePrice = 0n;
   if (rebalancingState) {
-    const existing = await context.Pool.get(poolId);
     const isInverted = existing?.invertRateFeed ?? false;
     rebalancedOraclePrice = isInverted
       ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
@@ -727,6 +739,8 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     strategy: rebalancerAddress,
     rebalanceDelta: true,
     oracleDelta,
+    // Reuse the Pool read from the concurrent Promise.all above.
+    existing: { pool: existing },
   });
 
   if (rebalancingState) {
