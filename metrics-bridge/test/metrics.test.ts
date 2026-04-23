@@ -114,6 +114,20 @@ describe("updateMetrics", () => {
     ).toBeUndefined();
   });
 
+  it("publishes negative effectiveness (rebalance made deviation WORSE)", async () => {
+    // Legitimate signal — the indexer's helper returns "-1" as the no-data
+    // sentinel, so any other negative value is a real observation. Filtering
+    // those out would hide the worst failure mode from the alert.
+    updateMetrics([makePool({ lastEffectivenessRatio: "-0.3000" })]);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_rebalance_effectiveness",
+        poolLabels,
+      ),
+    ).toBe(-0.3);
+  });
+
   it("sets deviationBreachStart to 0 when no breach", async () => {
     updateMetrics([makePool()]);
     expect(

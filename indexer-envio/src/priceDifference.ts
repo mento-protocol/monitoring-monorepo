@@ -85,3 +85,30 @@ export function computePriceDifference(pool: {
       : oracleRef - reserveRatio;
   return (diff * 10000n) / oracleRef;
 }
+
+/**
+ * Rebalance effectiveness ratio: how much of the pre-rebalance deviation was
+ * closed by a single rebalance. Range:
+ *   `1.0`  → deviation fully collapsed (pool ≈ oracle after)
+ *   `0.5`  → halved
+ *   `0.0`  → no reduction
+ *   `< 0`  → rebalance moved price FURTHER from oracle (legitimate + alertable)
+ *
+ * Returns the `"-1"` no-data sentinel when `before <= 0n` — a rebalance with
+ * zero pre-deviation has no meaningful ratio and must NOT be conflated with a
+ * legitimate 0.0 (a real rebalance that did nothing useful). The sentinel
+ * matches the `DEFAULT_ORACLE_FIELDS.lastEffectivenessRatio` default so
+ * never-rebalanced pools and degenerate rebalances surface identically to
+ * downstream consumers (metrics-bridge skips the Prometheus publish on `"-1"`).
+ *
+ * Emitted string uses `toFixed(4)` to keep parity with the per-event
+ * `RebalanceEvent.effectivenessRatio` stringification.
+ */
+export function computeEffectivenessRatio(
+  priceDifferenceBefore: bigint,
+  priceDifferenceAfter: bigint,
+): string {
+  if (priceDifferenceBefore <= 0n) return "-1";
+  const improvement = priceDifferenceBefore - priceDifferenceAfter;
+  return (Number(improvement) / Number(priceDifferenceBefore)).toFixed(4);
+}

@@ -170,11 +170,16 @@ export function updateMetrics(pools: PoolRow[]): void {
       Number(pool.deviationBreachStartedAt),
     );
     gauges.lastRebalancedAt.set(labels, Number(pool.lastRebalancedAt));
-    // Skip the "-1" no-data sentinel that the indexer writes until the first
-    // RebalanceEvent for a pool. Same convention as lastDeviationRatio.
-    const effRatio = fp(pool.lastEffectivenessRatio);
-    if (effRatio >= 0) {
-      gauges.rebalanceEffectiveness.set(labels, effRatio);
+    // Skip only the explicit "-1" no-data sentinel the indexer writes before
+    // a pool has ever rebalanced (or for degenerate rebalances with zero
+    // pre-deviation). Negative non-sentinel values (rebalance moved price
+    // FURTHER from oracle) are legitimate observations and MUST publish — the
+    // `Rebalance Ineffective` alert explicitly treats `< 0` as worse-than-noop.
+    if (pool.lastEffectivenessRatio !== "-1") {
+      gauges.rebalanceEffectiveness.set(
+        labels,
+        fp(pool.lastEffectivenessRatio),
+      );
     }
     gauges.limitPressure.set(
       { ...labels, token_index: "0" },

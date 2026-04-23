@@ -1,6 +1,7 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
 import { computePriceDifference } from "../src/EventHandlers";
+import { computeEffectivenessRatio } from "../src/priceDifference";
 
 const SCALE = 10n ** 24n;
 
@@ -272,5 +273,36 @@ describe("computePriceDifference", () => {
       }),
     );
     assert.equal(pd, 0n);
+  });
+});
+
+describe("computeEffectivenessRatio", () => {
+  it("full correction: after = 0 yields 1.0000", () => {
+    assert.equal(computeEffectivenessRatio(1000n, 0n), "1.0000");
+  });
+
+  it("half correction yields 0.5000", () => {
+    assert.equal(computeEffectivenessRatio(1000n, 500n), "0.5000");
+  });
+
+  it("no reduction: before == after yields 0.0000 (legitimate 0%)", () => {
+    assert.equal(computeEffectivenessRatio(1000n, 1000n), "0.0000");
+  });
+
+  it("rebalance made it WORSE: after > before yields negative (alertable)", () => {
+    // Drop in effectiveness must publish — metrics-bridge sentinel-skip only
+    // filters the exact string "-1", so "-0.5000" reaches Prometheus.
+    assert.equal(computeEffectivenessRatio(1000n, 1500n), "-0.5000");
+  });
+
+  it("degenerate rebalance (before = 0) returns -1 sentinel, NOT 0.0000", () => {
+    // Prior behavior wrote "0.0000" which collides with a legitimate 0%
+    // rebalance and would (incorrectly) contribute to avg_over_time averages.
+    // The sentinel must match DEFAULT_ORACLE_FIELDS.lastEffectivenessRatio.
+    assert.equal(computeEffectivenessRatio(0n, 0n), "-1");
+  });
+
+  it("before < 0 (impossible in practice) also returns -1 sentinel", () => {
+    assert.equal(computeEffectivenessRatio(-100n, 50n), "-1");
   });
 });

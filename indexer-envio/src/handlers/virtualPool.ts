@@ -13,6 +13,7 @@ import {
 } from "generated";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
+import { computeEffectivenessRatio } from "../priceDifference";
 
 // ---------------------------------------------------------------------------
 // VirtualPoolFactory.VirtualPoolDeployed
@@ -314,10 +315,10 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
   const priceDifferenceBefore = event.params.priceDifferenceBefore;
   const priceDifferenceAfter = event.params.priceDifferenceAfter;
   const improvement = priceDifferenceBefore - priceDifferenceAfter;
-  const effectivenessRatio =
-    priceDifferenceBefore > 0n
-      ? (Number(improvement) / Number(priceDifferenceBefore)).toFixed(4)
-      : "0.0000";
+  const effectivenessRatio = computeEffectivenessRatio(
+    priceDifferenceBefore,
+    priceDifferenceAfter,
+  );
 
   const pool = await upsertPool({
     context,

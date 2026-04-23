@@ -25,6 +25,7 @@ import {
 import {
   scalingFactorToDecimals,
   ORACLE_ADAPTER_SCALE_FACTOR,
+  computeEffectivenessRatio,
 } from "../priceDifference";
 import {
   TRADING_LIMITS_INTERNAL_DECIMALS,
@@ -710,10 +711,10 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   const priceDifferenceBefore = event.params.priceDifferenceBefore;
   const priceDifferenceAfter = event.params.priceDifferenceAfter;
   const improvement = priceDifferenceBefore - priceDifferenceAfter;
-  const effectivenessRatio =
-    priceDifferenceBefore > 0n
-      ? (Number(improvement) / Number(priceDifferenceBefore)).toFixed(4)
-      : "0.0000";
+  const effectivenessRatio = computeEffectivenessRatio(
+    priceDifferenceBefore,
+    priceDifferenceAfter,
+  );
 
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {
     lastRebalancedAt: blockTimestamp,

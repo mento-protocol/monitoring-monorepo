@@ -645,11 +645,19 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
       severity = "warning"
     }
 
-    # A = 1h-average effectiveness ratio, gated to pools that are (a) still
-    # breaching, and (b) have rebalanced within the last hour. Without the
-    # recency gate, `avg_over_time` would keep returning the last-known
-    # effectiveness indefinitely (the bridge re-publishes every 30s), so the
-    # rule would fire forever on pools that simply haven't rebalanced recently.
+    # A = 1h-average effectiveness ratio, gated to pools that are:
+    #   1. in an ACTIVE breach — use `deviation_breach_start > 0` (the indexer's
+    #      authoritative breach anchor). Intentionally NOT `deviation_ratio >= 1`:
+    #      the indexer uses strict `>` for breach detection (pool.ts:79 —
+    #      exactly 1.0 stays OK), so `>= 1` is semantically wrong AND would also
+    #      let a low-effectiveness rebalance from a PREVIOUS breach contaminate
+    #      the gauge average into the next breach.
+    #   2. rebalanced DURING the current breach — `last_rebalanced_at >
+    #      deviation_breach_start` ensures the ineffectiveness we're averaging
+    #      actually belongs to this breach, not a prior one.
+    #   3. rebalanced recently (< 1h ago) — the bridge re-publishes the
+    #      effectiveness gauge every 30s, so a months-old value would otherwise
+    #      keep `avg_over_time` alive forever. The time-window gate caps staleness.
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -661,7 +669,8 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
         refId = "A"
         expr = join(" and ", [
           "avg_over_time(mento_pool_rebalance_effectiveness[1h])",
-          "(mento_pool_deviation_ratio >= 1)",
+          "(mento_pool_deviation_breach_start > 0)",
+          "(mento_pool_last_rebalanced_at > mento_pool_deviation_breach_start)",
           "((time() - mento_pool_last_rebalanced_at) < 3600)",
         ])
         instant = true
