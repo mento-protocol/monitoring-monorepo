@@ -613,6 +613,27 @@ function parseRebalancingState(result: unknown): RebalancingState {
   };
 }
 
+// Memoize `fetchRebalancingState` calls at a given `blockNumber`. FPMM
+// emits 2× UpdateReserves + 1× Rebalanced in the same rebalance tx;
+// without this cache each handler re-RPCs for the same block state. The
+// entry is keyed on (chainId, address, blockNumber) so a later block's
+// reading is not served from a stale cache. A bounded LRU keeps memory
+// flat during long syncs — most pools have at most a handful of handler
+// invocations per block, so 256 entries is plenty with room to spare.
+const REBALANCING_STATE_CACHE_MAX = 256;
+const _rebalancingStateCache = new Map<
+  string,
+  Promise<RebalancingState | null>
+>();
+
+function rebalancingCacheKey(
+  chainId: number,
+  poolAddress: string,
+  blockNumber: bigint | undefined,
+): string {
+  return `${chainId}:${poolAddress.toLowerCase()}:${blockNumber ?? "latest"}`;
+}
+
 export async function fetchRebalancingState(
   chainId: number,
   poolAddress: string,
@@ -623,29 +644,53 @@ export async function fetchRebalancingState(
     return _testRebalancingStates.get(testKey) ?? null;
   }
 
-  try {
-    const client = getRpcClient(chainId);
-    const { result } = await readContractWithBlockFallback(
-      client,
-      {
-        address: poolAddress as `0x${string}`,
-        abi: FPMM_MINIMAL_ABI,
-        functionName: "getRebalancingState",
-      },
-      blockNumber,
-      getFallbackRpcClient(chainId),
-    );
-    return parseRebalancingState(result);
-  } catch (err) {
-    logRpcFailure(
-      chainId,
-      "getRebalancingState",
-      poolAddress,
-      err,
-      blockNumber,
-    );
-    return null;
+  const cacheKey = rebalancingCacheKey(chainId, poolAddress, blockNumber);
+  const cached = _rebalancingStateCache.get(cacheKey);
+  if (cached !== undefined) {
+    // Re-insert to refresh LRU position.
+    _rebalancingStateCache.delete(cacheKey);
+    _rebalancingStateCache.set(cacheKey, cached);
+    return cached;
   }
+
+  const promise = (async (): Promise<RebalancingState | null> => {
+    try {
+      const client = getRpcClient(chainId);
+      const { result } = await readContractWithBlockFallback(
+        client,
+        {
+          address: poolAddress as `0x${string}`,
+          abi: FPMM_MINIMAL_ABI,
+          functionName: "getRebalancingState",
+        },
+        blockNumber,
+        getFallbackRpcClient(chainId),
+      );
+      return parseRebalancingState(result);
+    } catch (err) {
+      logRpcFailure(
+        chainId,
+        "getRebalancingState",
+        poolAddress,
+        err,
+        blockNumber,
+      );
+      return null;
+    }
+  })();
+
+  _rebalancingStateCache.set(cacheKey, promise);
+  if (_rebalancingStateCache.size > REBALANCING_STATE_CACHE_MAX) {
+    // Evict the oldest entry (Map preserves insertion order).
+    const oldestKey = _rebalancingStateCache.keys().next().value;
+    if (oldestKey !== undefined) _rebalancingStateCache.delete(oldestKey);
+  }
+  return promise;
+}
+
+/** Test-only cache reset — lets unit tests start from a clean slate. */
+export function _resetRebalancingStateCacheForTests(): void {
+  _rebalancingStateCache.clear();
 }
 
 /**

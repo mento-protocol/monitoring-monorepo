@@ -572,19 +572,25 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Use raw srcAddress for RPC calls (not the namespaced poolId)
-  const rebalancingState = await fetchRebalancingState(
-    event.chainId,
-    asAddress(event.srcAddress),
-    blockNumber,
-  );
+  // Fire the RPC call and the Pool.get concurrently — they're independent,
+  // and each round-trip would otherwise serialize. Envio's in-batch cache
+  // makes the .get cheap on warm hits but round-tripping is still the
+  // dominant cost under load.
+  // Use raw srcAddress for RPC calls (not the namespaced poolId).
+  const [rebalancingState, existing] = await Promise.all([
+    fetchRebalancingState(
+      event.chainId,
+      asAddress(event.srcAddress),
+      blockNumber,
+    ),
+    context.Pool.get(poolId),
+  ]);
 
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
   // Hoist oraclePrice outside the if-block so it's accessible for OracleSnapshot
   // construction without a non-null assertion on oracleDelta.oraclePrice.
   let updateReservesOraclePrice = 0n;
   if (rebalancingState) {
-    const existing = await context.Pool.get(poolId);
     const isInverted = existing?.invertRateFeed ?? false;
     updateReservesOraclePrice = isInverted
       ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
@@ -682,12 +688,16 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Use raw srcAddress for RPC calls (not the namespaced poolId)
-  const rebalancingState = await fetchRebalancingState(
-    event.chainId,
-    asAddress(event.srcAddress),
-    blockNumber,
-  );
+  // Fire RPC + Pool.get concurrently (see UpdateReserves handler).
+  // Use raw srcAddress for RPC calls (not the namespaced poolId).
+  const [rebalancingState, existing] = await Promise.all([
+    fetchRebalancingState(
+      event.chainId,
+      asAddress(event.srcAddress),
+      blockNumber,
+    ),
+    context.Pool.get(poolId),
+  ]);
 
   const rebalancerAddress = asAddress(event.params.sender);
 
@@ -702,7 +712,6 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   // construction without a non-null assertion on oracleDelta.oraclePrice.
   let rebalancedOraclePrice = 0n;
   if (rebalancingState) {
-    const existing = await context.Pool.get(poolId);
     const isInverted = existing?.invertRateFeed ?? false;
     rebalancedOraclePrice = isInverted
       ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
