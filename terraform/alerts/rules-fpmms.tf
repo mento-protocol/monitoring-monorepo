@@ -45,8 +45,9 @@ resource "grafana_rule_group" "fpmms_oracle" {
       })
     }
 
-    # Seconds since the last oracle report — used in the annotation so
-    # operators see age without deriving it from the ratio.
+    # `and (timestamp > 0)` drops series where the bridge hasn't received
+    # a report yet — otherwise `time() - 0` would render as "54 years" in
+    # Slack on never-reported pools.
     data {
       ref_id         = "OracleAge"
       datasource_uid = var.prometheus_datasource_uid
@@ -56,7 +57,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "OracleAge"
-        expr    = "time() - mento_pool_oracle_timestamp"
+        expr    = "(time() - mento_pool_oracle_timestamp) and (mento_pool_oracle_timestamp > 0)"
         instant = true
       })
     }
