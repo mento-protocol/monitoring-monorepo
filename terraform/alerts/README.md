@@ -4,8 +4,9 @@ Grafana Cloud alert rules and Slack contact points for Mento v3 monitoring.
 
 ## Scope
 
-- **In this module:** `grafana_rule_group` resources (5 groups, 9 rules total) for FPMM pool health + metrics-bridge liveness, plus two `grafana_contact_point` resources (`slack-alerts-critical`, `slack-alerts-warnings`).
+- **In this module:** `grafana_rule_group` resources (5 groups, 9 rules) for FPMM pool health + metrics-bridge liveness, organised into one Grafana folder per `service` label (`FPMMs`, `Metrics Bridge`), plus two `grafana_contact_point` resources (`slack-alerts-critical`, `slack-alerts-warnings`).
 - **Not in this module:** the root `grafana_notification_policy` — that's a singleton owned by [`aegis/terraform/grafana-alerts/notification-policies.tf`](../../../aegis/terraform/grafana-alerts/notification-policies.tf). Every rule here routes via its own `notification_settings` block, so we don't touch the policy tree.
+- **Folder convention:** one folder per `service` label (same pattern Aegis uses for `Oracle Relayers`, `Reserve`, `Trading Modes`, `Trading Limits`). `oracles` and `cdps` folders will be added when their first rule groups land.
 
 ## State
 

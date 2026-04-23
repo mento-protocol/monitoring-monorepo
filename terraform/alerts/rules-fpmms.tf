@@ -11,8 +11,8 @@
 
 # ── Oracle liveness ──────────────────────────────────────────────────────────
 resource "grafana_rule_group" "fpmms_oracle" {
-  name             = "FPMMs — Oracle Liveness"
-  folder_uid       = grafana_folder.v3_alerts.uid
+  name             = "Oracle Liveness"
+  folder_uid       = grafana_folder.fpmms.uid
   interval_seconds = 60
 
   rule {
@@ -138,8 +138,8 @@ resource "grafana_rule_group" "fpmms_oracle" {
 
 # ── Deviation breach ─────────────────────────────────────────────────────────
 resource "grafana_rule_group" "fpmms_deviation" {
-  name             = "FPMMs — Deviation Breach"
-  folder_uid       = grafana_folder.v3_alerts.uid
+  name             = "Deviation Breach"
+  folder_uid       = grafana_folder.fpmms.uid
   interval_seconds = 60
 
   rule {
@@ -268,8 +268,8 @@ resource "grafana_rule_group" "fpmms_deviation" {
 
 # ── Trading limit pressure ───────────────────────────────────────────────────
 resource "grafana_rule_group" "fpmms_trading_limit" {
-  name             = "FPMMs — Trading Limit Pressure"
-  folder_uid       = grafana_folder.v3_alerts.uid
+  name             = "Trading Limit Pressure"
+  folder_uid       = grafana_folder.fpmms.uid
   interval_seconds = 60
 
   rule {
@@ -395,8 +395,8 @@ resource "grafana_rule_group" "fpmms_trading_limit" {
 
 # ── Rebalancer liveness ──────────────────────────────────────────────────────
 resource "grafana_rule_group" "fpmms_rebalancer" {
-  name             = "FPMMs — Rebalancer Liveness"
-  folder_uid       = grafana_folder.v3_alerts.uid
+  name             = "Rebalancer Liveness"
+  folder_uid       = grafana_folder.fpmms.uid
   interval_seconds = 60
 
   rule {

@@ -4,8 +4,8 @@
 # absence of data is the signal, not noise.
 
 resource "grafana_rule_group" "metrics_bridge" {
-  name             = "Metrics Bridge — Health"
-  folder_uid       = grafana_folder.v3_alerts.uid
+  name             = "Health"
+  folder_uid       = grafana_folder.metrics_bridge.uid
   interval_seconds = 60
 
   rule {
