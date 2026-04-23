@@ -41,7 +41,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "(time() - mento_pool_oracle_timestamp) / mento_pool_oracle_expiry"
+        expr    = "(time() - mento_pool_oracle_timestamp) / (mento_pool_oracle_expiry > 0)"
         instant = true
       })
     }
@@ -165,7 +165,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "(time() - mento_pool_oracle_timestamp) / mento_pool_oracle_expiry"
+        expr    = "(time() - mento_pool_oracle_timestamp) / (mento_pool_oracle_expiry > 0)"
         instant = true
       })
     }
@@ -495,6 +495,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
         refId = "A"
         expr = join(" and ", [
           "(time() - mento_pool_last_rebalanced_at)",
+          "(mento_pool_last_rebalanced_at > 0)",
           "(mento_pool_deviation_breach_start > 0)",
           "((time() - mento_pool_deviation_breach_start) > 1800)",
           "((time() - mento_pool_last_rebalanced_at) > 1800)",

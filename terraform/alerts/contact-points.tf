@@ -16,8 +16,11 @@ resource "grafana_contact_point" "slack_critical" {
     title     = "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ end }} [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
     text      = <<-EOT
       {{ range .Alerts -}}
+      *Service:* `{{ .Labels.service }}`
+      {{ if .Labels.pool_id -}}
       *Pool:* `{{ .Labels.pair }}` on `{{ .Labels.chain_id }}`
       *Pool ID:* `{{ .Labels.pool_id }}`
+      {{ end -}}
       *Severity:* {{ .Labels.severity }}
       {{ if .Annotations.summary }}*Summary:* {{ .Annotations.summary }}{{ end }}
       {{ if .Annotations.description }}{{ .Annotations.description }}{{ end }}
@@ -37,8 +40,11 @@ resource "grafana_contact_point" "slack_warnings" {
     title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }} [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}"
     text      = <<-EOT
       {{ range .Alerts -}}
+      *Service:* `{{ .Labels.service }}`
+      {{ if .Labels.pool_id -}}
       *Pool:* `{{ .Labels.pair }}` on `{{ .Labels.chain_id }}`
       *Pool ID:* `{{ .Labels.pool_id }}`
+      {{ end -}}
       *Severity:* {{ .Labels.severity }}
       {{ if .Annotations.summary }}*Summary:* {{ .Annotations.summary }}{{ end }}
       {{ if .Annotations.description }}{{ .Annotations.description }}{{ end }}
