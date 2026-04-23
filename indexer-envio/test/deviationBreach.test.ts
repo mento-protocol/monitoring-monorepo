@@ -530,15 +530,17 @@ describe("recordBreachTransition — falling edge", () => {
     assert.equal(closed.criticalDurationSeconds, 0n);
   });
 
-  it("bootstraps a row on the falling-edge self-heal path (rising-edge never tracked)", async () => {
-    // nextDeviationBreachStartedAt self-heals a partial-restore state:
-    // prev is breached but prev.deviationBreachStartedAt === 0n. No row
-    // was ever created, so we can't close one — roll the breach count
-    // but skip the duration math (startedAt unknown).
+  it("no-ops when an anchorless partial-restore clears without ever being tracked", async () => {
+    // Partial-restore edge case: prev is breached by price but anchor was
+    // never set, next is also anchorless. `recordBreachTransition` trusts
+    // the anchor as the authoritative "is a breach in progress" signal —
+    // no anchor means we never observed this breach, so there's nothing
+    // to credit. Price-driven counting here would leak phantom breaches
+    // into the `breachCount` rollup.
     const { store, context } = makeMockContext();
     const prev = makePool({
       priceDifference: 8000n,
-      deviationBreachStartedAt: 0n, // self-heal anchor
+      deviationBreachStartedAt: 0n, // never anchored
     });
     const next = makePool({
       priceDifference: 4000n,
@@ -551,20 +553,22 @@ describe("recordBreachTransition — falling edge", () => {
       txHash: "0xheal-close",
       source: "oracle_reported",
     });
-    assert.equal(store.size, 0); // no row to close
-    assert.equal(poolUpdate.breachCount, 1); // still counted
-    assert.equal(poolUpdate.cumulativeCriticalSeconds, undefined);
+    assert.deepEqual(poolUpdate, {});
+    assert.equal(store.size, 0);
   });
 
-  it("bootstraps a row on the continuing-breach self-heal path (first-observed post-startup)", async () => {
+  it("treats a freshly-self-healed anchor as a rising edge and attributes startedByEvent to the observed source", async () => {
     // nextDeviationBreachStartedAt self-heals to current block time when
     // it sees an already-breached pool for the first time without an
-    // anchor. The continuing-breach path must create an entity row then
-    // so the eventual falling edge has something to close.
+    // anchor. From `recordBreachTransition`'s anchor-based perspective
+    // that IS a rising edge — the row is created with the real triggering
+    // source instead of the old "unknown" fallback. The attribution is
+    // honest: the first event we successfully tracked did cause the
+    // breach to become observable.
     const { store, context } = makeMockContext();
     const prev = makePool({
       priceDifference: 8000n,
-      deviationBreachStartedAt: 0n, // self-heal anchor
+      deviationBreachStartedAt: 0n, // not yet anchored
     });
     const next = makePool({
       priceDifference: 8500n,
@@ -579,7 +583,7 @@ describe("recordBreachTransition — falling edge", () => {
     const row = store.get(openBreachId(next.id, MON_NOON))!;
     assert.isDefined(row);
     assert.equal(row.startedAt, MON_NOON);
-    assert.equal(row.startedByEvent, "unknown");
+    assert.equal(row.startedByEvent, "oracle_update");
     assert.equal(row.entryPriceDifference, 8500n);
   });
 
@@ -663,6 +667,96 @@ describe("recordBreachTransition — falling edge", () => {
     assert.equal(poolUpdate.cumulativeBreachSeconds, undefined);
     assert.equal(poolUpdate.cumulativeCriticalSeconds, undefined);
     assert.equal(store.size, 0);
+  });
+});
+
+describe("recordBreachTransition — UpdateReserves followed by a semantic handler", () => {
+  it("defers the close under UpdateReserves so a subsequent Rebalance in the same tx gets attribution", async () => {
+    // End-to-end of the 'Unknown' bug that motivated anchor-based
+    // breach detection: the FPMM contract emits ReservesUpdated inside
+    // a Rebalance tx (the reserves flip BEFORE the semantic Rebalanced
+    // event). Pre-fix, UpdateReserves handler closed the row with
+    // `endedByEvent = "unknown"` and the later Rebalance handler had
+    // nothing to do. With anchor deferral + anchor-based transition
+    // detection, the Rebalance handler closes the row with "rebalance".
+    const { store, context } = makeMockContext();
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", MON_NOON),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: MON_NOON,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      entryPriceDifference: 8000n,
+      peakPriceDifference: 9000n,
+      peakAt: MON_NOON + 60n,
+      peakAtBlock: 105n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xrise",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+
+    // Step 1: UpdateReserves fires. `nextDeviationBreachStartedAt` with
+    // source="fpmm_update_reserves" held the anchor, so `next.anchor`
+    // still points at MON_NOON even though price dropped below threshold.
+    const prev = makePool({
+      priceDifference: 9000n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    const afterUpdateReserves = makePool({
+      priceDifference: 4000n, // reserves flipped, already healthy
+      deviationBreachStartedAt: MON_NOON, // held
+    });
+    const postUR = await recordBreachTransition(
+      context,
+      prev,
+      afterUpdateReserves,
+      {
+        blockTimestamp: MON_NOON + 60n,
+        blockNumber: 110n,
+        txHash: "0xur",
+        source: "fpmm_update_reserves",
+      },
+    );
+    assert.deepEqual(postUR, {}); // no close yet
+    assert.isUndefined(store.get(open.id)!.endedAt);
+
+    // Step 2: Rebalance fires next in the same tx. `prev` carries the
+    // held anchor; `next.anchor = 0n` because Rebalance is NOT a
+    // deferred source. Falling edge → closes with `endedByEvent="rebalance"`.
+    const afterRebalance = makePool({
+      priceDifference: 4000n,
+      deviationBreachStartedAt: 0n,
+      cumulativeBreachSeconds: 0n,
+      cumulativeCriticalSeconds: 0n,
+      breachCount: 0,
+    });
+    const postRebalance = await recordBreachTransition(
+      context,
+      afterUpdateReserves,
+      afterRebalance,
+      {
+        blockTimestamp: MON_NOON + 120n,
+        blockNumber: 110n,
+        txHash: "0xrbl",
+        source: "fpmm_rebalanced",
+        strategy: "0xstrategy",
+      },
+    );
+    const closed = store.get(open.id)!;
+    assert.equal(closed.endedAt, MON_NOON + 120n);
+    assert.equal(closed.endedByEvent, "rebalance");
+    assert.equal(closed.endedByTxHash, "0xrbl");
+    assert.equal(closed.endedByStrategy, "0xstrategy");
+    assert.equal(closed.rebalanceCountDuring, 1);
+    assert.equal(postRebalance.breachCount, 1);
   });
 });
 

@@ -2,9 +2,14 @@
 # Build and deploy the metrics-bridge container to Cloud Run.
 #
 # Handles both first-time bootstrap and subsequent deploys:
-#   1. Ensures GCP project + APIs + Artifact Registry exist (terraform apply)
-#   2. Builds and pushes the container image (gcloud builds submit)
-#   3. Deploys Cloud Run with the new image (terraform apply)
+#   1. Ensures GCP project + APIs + Artifact Registry + Cloud Run service
+#      exist (terraform apply). On first run the service boots with the
+#      bootstrap image from var.metrics_bridge_image (gcr.io/cloudrun/hello).
+#   2. Builds and pushes the container image (gcloud builds submit).
+#   3. Rolls a new revision via `gcloud run services update --image=<digest>`.
+#      Image rollouts are intentionally OUT OF terraform — the CR resource
+#      has `lifecycle.ignore_changes = [... image]` so `pnpm infra:apply`
+#      never reverts the image back to the bootstrap placeholder.
 #
 # Usage:
 #   pnpm bridge:deploy           → build + deploy (with confirmation)
@@ -48,8 +53,10 @@ if [ "$SKIP_CONFIRM" = false ]; then
   fi
 fi
 
-# Step 1: Ensure GCP infra + IAM exists (project, APIs, AR repo, dev permissions).
-# On subsequent runs this is a no-op.
+# Step 1: Ensure GCP infra + IAM + Cloud Run service shape exist. On
+# subsequent runs this is a no-op (terraform ignores image drift via
+# `lifecycle.ignore_changes`, so the current running image is preserved
+# even though `var.metrics_bridge_image` defaults to the bootstrap placeholder).
 echo "Ensuring GCP infrastructure..."
 terraform -chdir=terraform apply $TF_APPROVE \
   -target=google_project.monitoring \
@@ -59,7 +66,9 @@ terraform -chdir=terraform apply $TF_APPROVE \
   -target=google_artifact_registry_repository.metrics_bridge \
   -target=google_project_iam_member.dev_run_admin \
   -target=google_project_iam_member.dev_ar_writer \
-  -target=google_project_iam_member.dev_cloudbuild_editor
+  -target=google_project_iam_member.dev_cloudbuild_editor \
+  -target=google_cloud_run_v2_service.metrics_bridge \
+  -target=google_cloud_run_v2_service_iam_member.metrics_bridge_public
 
 # Step 2: Build and push the image.
 echo ""
@@ -78,11 +87,34 @@ DIGEST=$(gcloud artifacts docker images describe "$IMAGE" \
 IMAGE_BY_DIGEST="${AR_REPO}/metrics-bridge@${DIGEST}"
 echo "Resolved: ${IMAGE_BY_DIGEST}"
 
-# Step 3: Deploy Cloud Run with the new image.
+# Step 3: Roll a new Cloud Run revision with the new image.
+# This deliberately bypasses terraform — the service resource has
+# `lifecycle.ignore_changes = [template[0].containers[0].image]`, so
+# `terraform apply -var=metrics_bridge_image=...` would be a no-op.
+#
+# Rollback: gcloud run services update-traffic metrics-bridge \
+#   --to-revisions=<prev-revision>=100 --region="$REGION"
 echo ""
-echo "Deploying to Cloud Run..."
-terraform -chdir=terraform apply $TF_APPROVE \
-  -var="metrics_bridge_image=${IMAGE_BY_DIGEST}"
+echo "Rolling Cloud Run revision..."
+# Revision name format: <short-sha>-<epoch>. Epoch disambiguator avoids the
+# 409 "revision already exists" error when redeploying the same commit
+# (same pattern as the CI workflow, which uses $GITHUB_RUN_ID for the
+# equivalent role).
+REVISION_SUFFIX="${TAG}-$(date +%s)"
+gcloud run services update metrics-bridge \
+  --project="$PROJECT" \
+  --region="$REGION" \
+  --image="$IMAGE_BY_DIGEST" \
+  --revision-suffix="$REVISION_SUFFIX"
+
+echo ""
+echo "Recent revisions (for rollback reference):"
+gcloud run revisions list \
+  --service=metrics-bridge \
+  --project="$PROJECT" \
+  --region="$REGION" \
+  --limit=3 \
+  --format='table(name, creationTimestamp.date(tz=UTC), active)'
 
 echo ""
 echo "Done. Service URL:"

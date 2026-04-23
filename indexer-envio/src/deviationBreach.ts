@@ -12,7 +12,7 @@
 // ---------------------------------------------------------------------------
 
 import type { Pool, DeviationThresholdBreach } from "generated";
-import { isInDeviationBreach, DEVIATION_BREACH_GRACE_SECONDS } from "./pool";
+import { DEVIATION_BREACH_GRACE_SECONDS } from "./pool";
 import { tradingSecondsInRange } from "./healthScore";
 
 export type BreachContext = {
@@ -95,8 +95,18 @@ export async function recordBreachTransition(
   next: Pool,
   trigger: BreachTrigger,
 ): Promise<Partial<Pool>> {
-  const wasBreached = prev ? isInDeviationBreach(prev) : false;
-  const isBreached = isInDeviationBreach(next);
+  // Use the anchor (`deviationBreachStartedAt`) as the authoritative "is a
+  // breach in progress" signal, not `priceDifference > threshold`. Two
+  // reasons:
+  //   1. UpdateReserves DEFERS close by holding the anchor — if we trusted
+  //      price here, the subsequent Rebalance handler would see wasBreached
+  //      = false and skip the close entirely, leaving the row with
+  //      `endedByEvent = undefined` forever.
+  //   2. The anchor is set in `nextDeviationBreachStartedAt` with source
+  //      awareness, so it already encodes "should this be treated as a
+  //      continuing breach" more correctly than a raw price check.
+  const wasBreached = prev ? prev.deviationBreachStartedAt > 0n : false;
+  const isBreached = next.deviationBreachStartedAt > 0n;
 
   if (!wasBreached && !isBreached) return {};
 

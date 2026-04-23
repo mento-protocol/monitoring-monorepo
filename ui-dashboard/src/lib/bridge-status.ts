@@ -135,6 +135,63 @@ export function formatDurationShort(seconds: number): string {
 }
 
 /**
+ * Parse a human duration string into seconds. Accepts the shapes operators
+ * actually type when filtering tables: `1h`, `10m`, `3d`, `90s`, bare
+ * integers (treated as seconds), and multi-unit runs like `1h30m` or
+ * `1d 6h`. Also accepts singular/plural word forms: `3 days`, `2 hours`,
+ * `30 mins`, `1 week`. Returns `null` for empty strings or anything that
+ * doesn't cleanly parse — the caller renders an inline error.
+ *
+ * Intentionally does NOT handle months/years: breach durations top out in
+ * weeks and "1mo" is ambiguous (minutes? months?).
+ */
+export function parseDurationSeconds(input: string): number | null {
+  const trimmed = input.trim().toLowerCase();
+  if (!trimmed) return null;
+  if (/^\d+(\.\d+)?$/.test(trimmed)) return Math.round(Number(trimmed));
+  const unitSeconds: Record<string, number> = {
+    s: 1,
+    sec: 1,
+    secs: 1,
+    second: 1,
+    seconds: 1,
+    m: 60,
+    min: 60,
+    mins: 60,
+    minute: 60,
+    minutes: 60,
+    h: 3600,
+    hr: 3600,
+    hrs: 3600,
+    hour: 3600,
+    hours: 3600,
+    d: 86_400,
+    day: 86_400,
+    days: 86_400,
+    w: 604_800,
+    wk: 604_800,
+    wks: 604_800,
+    week: 604_800,
+    weeks: 604_800,
+  };
+  const pattern = /(\d+(?:\.\d+)?)\s*([a-z]+)/g;
+  let total = 0;
+  let matched = false;
+  for (const m of trimmed.matchAll(pattern)) {
+    const [, num, unit] = m;
+    const factor = unitSeconds[unit];
+    if (factor == null) return null;
+    total += Number(num) * factor;
+    matched = true;
+  }
+  if (!matched) return null;
+  // Reject trailing junk like "1h banana" or "1h 2x"
+  const stripped = trimmed.replace(pattern, "").replace(/[\s,]+/g, "");
+  if (stripped.length > 0) return null;
+  return Math.round(total);
+}
+
+/**
  * Duration between source-send and destination-delivery, in seconds, or
  * `null` when either side is missing (not yet delivered, race-window row
  * with no sentTimestamp, or a sentinel "0" that an indexer may have

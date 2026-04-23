@@ -32,47 +32,62 @@ export function retryAfterMs(err: unknown): number | null {
 }
 
 // Schedules `revalidate(opts)` after `delayMs`, but defers the timer until
-// the tab is visible AND the browser reports online. Hooks that disable
-// both `revalidateOnFocus` and `revalidateOnReconnect` (both `useGQL` and
-// `useBridgeGQL`) bypass SWR's "skip onErrorRetry while inactive" gate, so
-// without this guard errored hooks would keep retrying in hidden or
-// offline tabs — burning quota for no user benefit and growing
-// `retryCount` during outages so reconnects see multi-minute backoffs
-// before the next retry fires.
+// the tab is visible AND the browser reports online. Re-checks the same
+// conditions when the timer fires — the tab may have been backgrounded (or
+// the network dropped) during the delay, and firing anyway would reintroduce
+// the quota burn in hidden tabs. Hooks that disable both `revalidateOnFocus`
+// and `revalidateOnReconnect` (both `useGQL` and `useBridgeGQL`) bypass SWR's
+// "skip onErrorRetry while inactive" gate, so this helper is the only thing
+// protecting the quota during the retry window.
 function scheduleWhenActive(
   revalidate: (opts: { retryCount: number; dedupe: boolean }) => void,
   opts: { retryCount: number; dedupe: boolean },
   delayMs: number,
 ): void {
-  const run = () => revalidate(opts);
   const isHidden = () =>
     typeof document !== "undefined" && document.hidden === true;
   const isOffline = () =>
     typeof navigator !== "undefined" && navigator.onLine === false;
+  const canRun = () => !isHidden() && !isOffline();
 
-  if (!isHidden() && !isOffline()) {
-    setTimeout(run, delayMs);
-    return;
-  }
-
-  const check = () => {
-    if (isHidden() || isOffline()) return;
-    cleanup();
-    setTimeout(run, delayMs);
+  let attached = false;
+  const onStateChange = () => {
+    if (!canRun()) return;
+    detach();
+    setTimeout(fire, delayMs);
   };
-  const cleanup = () => {
+  const attach = () => {
+    if (attached) return;
+    attached = true;
     if (typeof document !== "undefined") {
-      document.removeEventListener("visibilitychange", check);
+      document.addEventListener("visibilitychange", onStateChange);
     }
     if (typeof window !== "undefined") {
-      window.removeEventListener("online", check);
+      window.addEventListener("online", onStateChange);
     }
   };
-  if (typeof document !== "undefined") {
-    document.addEventListener("visibilitychange", check);
-  }
-  if (typeof window !== "undefined") {
-    window.addEventListener("online", check);
+  const detach = () => {
+    if (!attached) return;
+    attached = false;
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", onStateChange);
+    }
+    if (typeof window !== "undefined") {
+      window.removeEventListener("online", onStateChange);
+    }
+  };
+  const fire = () => {
+    if (canRun()) {
+      revalidate(opts);
+      return;
+    }
+    attach();
+  };
+
+  if (canRun()) {
+    setTimeout(fire, delayMs);
+  } else {
+    attach();
   }
 }
 

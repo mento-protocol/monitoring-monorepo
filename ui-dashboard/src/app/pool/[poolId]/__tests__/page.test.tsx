@@ -363,7 +363,8 @@ describe("Pool detail LPs tab", () => {
     | "liquidity"
     | "oracle"
     | "providers"
-    | "ols";
+    | "ols"
+    | "breaches";
   const TAB_OPS: Record<TabWithQueries, readonly string[]> = {
     swaps: ["PoolSwapsCount", "PoolSwapsPage"],
     reserves: ["PoolReserves"],
@@ -376,6 +377,11 @@ describe("Pool detail LPs tab", () => {
     ],
     providers: ["PoolLpPositions"],
     ols: ["OlsLiquidityEventsCount", "OlsLiquidityEventsPage"],
+    breaches: [
+      "PoolDeviationBreachesPage",
+      "PoolDeviationBreachesCount",
+      "PoolDeviationBreachesAll",
+    ],
   };
 
   it("does not fire tab-scoped queries for inactive tabs (reserves)", () => {

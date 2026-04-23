@@ -33,6 +33,15 @@ export function useGQL<T>(
   query: string | null,
   variables?: Record<string, unknown>,
   refreshInterval: number = DEFAULT_REFRESH_MS,
+  /** Escape hatch for callers that need to override the defaults (e.g.
+   *  re-enable focus revalidation for a one-shot read). Focus/reconnect
+   *  revalidation is OFF by default for this hook — pool pages fan out
+   *  ~15–20 parallel useGQL calls and every alt-tab would otherwise fire
+   *  that many requests at once on top of the 30s polling cycle. */
+  swrOptions?: {
+    revalidateOnFocus?: boolean;
+    revalidateOnReconnect?: boolean;
+  },
 ): SWRResponse<T> {
   const { network } = useNetwork();
   const client = getClient(network);
@@ -42,16 +51,11 @@ export function useGQL<T>(
     () => client.request<T>(query!, variables),
     {
       refreshInterval,
-      // Pool pages fan out ~15–20 useGQL calls; alt-tabbing back would
-      // otherwise fire that many requests in a single burst on top of the
-      // 30s polling cycle — the exact fan-out pattern that trips the 429.
-      // SWR's `refreshWhenHidden: false` default already pauses polling
-      // while hidden; when the tab returns, the next scheduled tick
-      // refreshes naturally (worst case 30s of staleness, acceptable).
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       refreshWhenHidden: false,
       onErrorRetry: rateLimitAwareRetry,
+      ...swrOptions,
     },
   );
 

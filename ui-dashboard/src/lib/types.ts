@@ -45,10 +45,15 @@ export type Pool = {
   reserves0?: string;
   reserves1?: string;
   healthTotalSeconds?: string;
-  healthBinarySeconds?: string;
-  lastOracleSnapshotTimestamp?: string;
-  lastDeviationRatio?: string;
   hasHealthData?: boolean;
+  // Breach rollups (written by the indexer on every breach close). Used
+  // by the uptime tile + homepage uptime column without paginating the
+  // full DeviationThresholdBreach list. Optional because the indexer
+  // deploys them in a phased rollout; the UI falls back to "—" when
+  // absent rather than rendering a false 100%.
+  cumulativeBreachSeconds?: string;
+  cumulativeCriticalSeconds?: string;
+  breachCount?: number;
 };
 
 /**
@@ -109,7 +114,6 @@ export type OracleSnapshot = {
   blockNumber: string;
   txHash: string;
   deviationRatio?: string;
-  healthBinaryValue?: string;
   hasHealthData?: boolean;
 };
 

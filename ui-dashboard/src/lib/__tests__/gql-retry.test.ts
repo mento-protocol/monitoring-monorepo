@@ -261,6 +261,37 @@ describe("rateLimitAwareRetry", () => {
     expect(revalidate).not.toHaveBeenCalled();
   });
 
+  it("re-defers if the tab goes hidden between schedule and timer fire", () => {
+    // TOCTOU: a request can fail while the tab is active, then the user
+    // backgrounds the tab before the retry timer fires. The retry must NOT
+    // run in the background — otherwise the quota burn leaks back in during
+    // the gap between schedule time and fire time.
+    const { doc, win } = installFakeEnv({ hidden: false });
+    const revalidate = vi.fn();
+    rateLimitAwareRetry(
+      makeClientError(429, "60"),
+      "key",
+      baseConfig,
+      revalidate,
+      { retryCount: 0, dedupe: true },
+    );
+    // Tab backgrounds mid-delay.
+    doc.hidden = true;
+    doc._fireVisibilityChange();
+    // Timer expires while hidden — fire() must see the state and attach a
+    // listener instead of revalidating.
+    vi.advanceTimersByTime(60_000);
+    expect(revalidate).not.toHaveBeenCalled();
+    expect(doc._listeners).toHaveLength(1);
+    // User returns — the deferred timer arms again and fires.
+    doc.hidden = false;
+    doc._fireVisibilityChange();
+    vi.advanceTimersByTime(60_000);
+    expect(revalidate).toHaveBeenCalledWith({ retryCount: 0, dedupe: true });
+    expect(doc._listeners).toHaveLength(0);
+    expect(win._listeners).toHaveLength(0);
+  });
+
   it("resumes the retry timer after the online event fires", () => {
     const { nav, win } = installFakeEnv({ online: false });
     const revalidate = vi.fn();

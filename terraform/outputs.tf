@@ -35,7 +35,7 @@ output "artifact_registry_url" {
 
 output "metrics_bridge_url" {
   description = "Cloud Run URL for the metrics bridge — add as Grafana Agent scrape target."
-  value       = length(google_cloud_run_v2_service.metrics_bridge) > 0 ? google_cloud_run_v2_service.metrics_bridge[0].uri : ""
+  value       = google_cloud_run_v2_service.metrics_bridge.uri
 }
 
 output "ci_wif_provider" {
