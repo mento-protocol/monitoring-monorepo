@@ -69,3 +69,35 @@ Do **not** set the generic `ENVIO_RPC_URL` in multichain mode — it would route
 > **Note:** These RPC URLs are only used for contract reads (`eth_call`). Envio's event syncing uses HyperSync, configured in the YAML files.
 
 Mainnet (Celo + Monad): `pnpm indexer:codegen && pnpm indexer:dev`. Testnet (Celo Sepolia + Monad Testnet): `pnpm indexer:testnet:dev`.
+
+## Indexer patterns the bots keep catching
+
+These rules come from PRs #184 and #194 — Codex flagged both as P1.
+
+### Composite IDs MUST be collision-resistant
+
+- A composite ID built from `entityId + timestamp(seconds)` is **insufficient**. Two events in the same block (or adjacent blocks with identical timestamps) get the same ID; the second write silently overwrites the first
+- Always include enough block-level entropy: `chainId + blockNumber + logIndex` is the minimum, or `txHash + logIndex` if you need cross-chain uniqueness
+- Specifically: any "transition" entity (breach open/close, reserve update, status change) keyed solely on the parent entity + a coarse timestamp will lose history under bursts
+
+### Cumulative counters belong on the entity
+
+- Lifetime aggregates (cumulative critical seconds, total breach count, cumulative volume) MUST be incremented in handlers and stored on the entity, NOT computed client-side from a paginated list
+- The dashboard reads from hosted Hasura which silently caps every query at 1000 rows; client-side aggregation will drop history for any active pool
+- Pattern: when you add a new "incident" entity, also add a counter field on the parent entity and increment it in the close-path handler
+
+### Time units
+
+- FX-pool metrics use **trading-seconds** (weekend subtracted). Any duration field on a healthscore-related entity MUST be in trading-seconds
+- Never store wall-clock durations alongside trading-second durations on the same entity — readers will mix them and produce nonsense
+- The shared FX calendar lives in `shared-config/fx-calendar.json` so the indexer and UI stay in lockstep
+
+### Bounded RPC caches
+
+- Block-keyed RPC caches (oracle reads, etc.) MUST be size-bounded. PR #184 fixed an OOM where the indexer cached one entry per block forever
+- Use an LRU or evict on block height advance; never an unbounded `Map`
+
+### Cross-checks before opening a PR
+
+- Run the queries the dashboard depends on against your local Hasura with a representative pool (one with hundreds of events) to catch silent truncation
+- Verify any new entity ID under the same-block-write scenario before merging
