@@ -1,5 +1,8 @@
 import { Gauge, Counter, Registry } from "prom-client";
 import {
+  BLOCK_EXPLORER_BASE_URLS,
+  CHAIN_NAMES,
+  POOL_PAIR_LABELS,
   blockExplorerUrl,
   chainName,
   pairLabel,
@@ -7,6 +10,29 @@ import {
   shortAddress,
 } from "./config.js";
 import type { PoolRow } from "./types.js";
+
+// Pools we've already warned about — prevents log spam on the 30s poll loop.
+const warnedUnknownPools = new Set<string>();
+
+// Logs a one-shot warning if any of the display-label maps is missing an
+// entry for this pool. Silent fallbacks (`pairLabel` → pool_id, `chainName`
+// → String(chainId), `blockExplorerUrl` → "") would otherwise reproduce
+// the exact bug that motivated PR #209 — a new deploy that never makes it
+// into config.ts ships degraded Slack alerts indefinitely. See BACKLOG.md
+// entry "Shared pool + chain metadata helper" for the long-term fix.
+function warnIfUnknown(pool: PoolRow): void {
+  if (warnedUnknownPools.has(pool.id)) return;
+  const missing: string[] = [];
+  if (!(pool.id in POOL_PAIR_LABELS)) missing.push("pair");
+  if (!(pool.chainId in CHAIN_NAMES)) missing.push("chain_name");
+  if (!(pool.chainId in BLOCK_EXPLORER_BASE_URLS))
+    missing.push("block_explorer_url");
+  if (missing.length === 0) return;
+  warnedUnknownPools.add(pool.id);
+  console.warn(
+    `[metrics-bridge] pool ${pool.id} (chain ${pool.chainId}) missing ${missing.join(", ")} — falling back. Update metrics-bridge/src/config.ts.`,
+  );
+}
 
 export function healthStatusToNumber(status: string): number {
   switch (status) {
@@ -111,6 +137,7 @@ export function updateMetrics(pools: PoolRow[]): void {
   }
 
   for (const pool of pools) {
+    warnIfUnknown(pool);
     const address = poolAddress(pool.id);
     const labels = {
       pool_id: pool.id,

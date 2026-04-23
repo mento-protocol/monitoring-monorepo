@@ -31,7 +31,9 @@ resource "grafana_contact_point" "slack_warnings" {
 
 locals {
   # Shared message body — both contact points (critical + warnings) render the
-  # same structure so operators can't mistake fields between channels.
+  # same structure so operators can't mistake fields between channels. Split
+  # into `slack_body_critical` / `slack_body_warning` the first time the two
+  # layouts need to diverge (e.g. if critical grows an "ack" action row).
   #
   # Title carries identity (alertname — pair · chain). Body is:
   #   1. One-line headline from the rule's `summary` annotation.

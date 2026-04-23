@@ -155,6 +155,7 @@ Decision: ship Approach B as the default. Approach A is a debugging toggle we ca
 
 - [ ] Dashboard component test coverage (71 test files total, but many are lib/util — component tests sparse)
 - [ ] Revenue page placeholders ("CDP Borrowing Fees" and "Reserve Yield" marked "Soon")
+- [ ] **Shared pool + chain metadata helper** — `metrics-bridge/src/config.ts` keeps three hardcoded maps (`POOL_PAIR_LABELS`, `CHAIN_NAMES`, `BLOCK_EXPLORER_BASE_URLS`) that duplicate source-of-truth data already in the dashboard (`ui-dashboard/src/lib/tokens.ts::poolName` + `networks.ts::NETWORKS`) and `@mento-protocol/contracts`. Drift risk materialized once (the Monad label bug that triggered PR #209). Resolution: promote these to `shared-config/` or derive them dynamically from each pool's `token0`/`token1` + `@mento-protocol/contracts`. Until this ships, a startup warning in `metrics-bridge/src/metrics.ts::warnIfUnknown` logs any pool/chain missing from the maps so the failure mode is at least loud.
 
 ---
 

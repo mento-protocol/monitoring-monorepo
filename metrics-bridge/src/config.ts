@@ -33,16 +33,13 @@ export const POOL_PAIR_LABELS: Record<string, string> = {
   "143-0x0a59be741ad49c6c2e0a2d30a57ed8f5ffa5deb8": "USDT0/USDm",
 };
 
-// chainId → canonical name used in Slack titles and dashboard URLs.
-const CHAIN_NAMES: Record<number, string> = {
+export const CHAIN_NAMES: Record<number, string> = {
   42220: "celo",
   143: "monad",
   11142220: "celo-sepolia",
 };
 
-// chainId → block-explorer base URL. Matches the dashboard's network config
-// (ui-dashboard/src/lib/networks.ts).
-const BLOCK_EXPLORER_BASE_URLS: Record<number, string> = {
+export const BLOCK_EXPLORER_BASE_URLS: Record<number, string> = {
   42220: "https://celoscan.io",
   143: "https://monadscan.com",
   11142220: "https://celo-sepolia.blockscout.com",
