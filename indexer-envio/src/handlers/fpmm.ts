@@ -152,6 +152,12 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
   const poolAddr = asAddress(event.params.fpmmProxy); // raw address for RPC calls
   const poolId = makePoolId(event.chainId, poolAddr); // namespaced ID for DB entities
+  // See UpdateReserves handler — heavy RPC fan-out (6+ Promise.all reads)
+  // gets skipped during preload and runs only in processing.
+  if (context.isPreload) {
+    await context.Pool.get(poolId);
+    return;
+  }
   const token0 = asAddress(event.params.token0);
   const token1 = asAddress(event.params.token1);
   const blockNumber = asBigInt(event.block.number);
@@ -254,6 +260,11 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
 FPMM.Swap.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
   const poolId = makePoolId(event.chainId, event.srcAddress);
+  // See UpdateReserves handler.
+  if (context.isPreload) {
+    await context.Pool.get(poolId);
+    return;
+  }
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -422,6 +433,11 @@ FPMM.Swap.handler(async ({ event, context }) => {
 FPMM.Mint.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
   const poolId = makePoolId(event.chainId, event.srcAddress);
+  // See UpdateReserves handler.
+  if (context.isPreload) {
+    await context.Pool.get(poolId);
+    return;
+  }
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -468,6 +484,11 @@ FPMM.Mint.handler(async ({ event, context }) => {
 FPMM.Burn.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
   const poolId = makePoolId(event.chainId, event.srcAddress);
+  // See UpdateReserves handler.
+  if (context.isPreload) {
+    await context.Pool.get(poolId);
+    return;
+  }
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -549,6 +570,17 @@ FPMM.Transfer.handler(async ({ event, context }) => {
 FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
   const poolId = makePoolId(event.chainId, event.srcAddress);
+  // Preload phase: signal Pool entity dependency so Envio preloads it,
+  // then bail. All RPC + writes run only in the processing phase.
+  // Envio docs explicitly warn against direct `fetch` in preload — the
+  // calls run twice per event (stale-data risk), and empirically we've
+  // seen a handful of breach rows close with `endedByEvent = "unknown"`
+  // consistent with UR→Rebalanced in-batch state divergence caused by
+  // exactly this.
+  if (context.isPreload) {
+    await context.Pool.get(poolId);
+    return;
+  }
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -654,6 +686,15 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
 FPMM.Rebalanced.handler(async ({ event, context }) => {
   const id = eventId(event.chainId, event.block.number, event.logIndex);
   const poolId = makePoolId(event.chainId, event.srcAddress);
+  // See UpdateReserves handler — preload phase does only DB reads to seed
+  // the preload cache; RPC + writes run in the processing phase. Critical
+  // here because FPMM emits 2× UR + 1× Rebalanced in the same rebalance
+  // tx and we need sequential in-batch state visibility so Rebalanced
+  // sees the anchor UR held.
+  if (context.isPreload) {
+    await context.Pool.get(poolId);
+    return;
+  }
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 

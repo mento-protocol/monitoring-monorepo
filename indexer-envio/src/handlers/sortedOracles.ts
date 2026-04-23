@@ -21,13 +21,20 @@ import {
 
 SortedOracles.OracleReported.handler(async ({ event, context }) => {
   const rateFeedID = asAddress(event.params.token);
-  const blockNumber = asBigInt(event.block.number);
-  const blockTimestamp = asBigInt(event.block.timestamp);
 
   // Chain-scoped — getPoolsByFeed filters by chainId to prevent cross-chain
   // oracle bleed (same rateFeedID exists on both Celo and Monad). See rpc.ts.
   const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
   if (poolIds.length === 0) return;
+
+  // Preload phase: seed Pool lookups so Envio can batch them, then bail.
+  // Processing phase runs RPC + writes with consistent in-batch state.
+  if (context.isPreload) {
+    await Promise.all(poolIds.map((id) => context.Pool.get(id)));
+    return;
+  }
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
 
   const oracleTimestamp = event.params.timestamp;
 
@@ -118,11 +125,17 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
 
 SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   const rateFeedID = asAddress(event.params.token);
-  const blockNumber = asBigInt(event.block.number);
-  const blockTimestamp = asBigInt(event.block.timestamp);
 
   const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
   if (poolIds.length === 0) return;
+
+  // See OracleReported handler.
+  if (context.isPreload) {
+    await Promise.all(poolIds.map((id) => context.Pool.get(id)));
+    return;
+  }
+  const blockNumber = asBigInt(event.block.number);
+  const blockTimestamp = asBigInt(event.block.timestamp);
 
   for (const poolId of poolIds) {
     const existing = await context.Pool.get(poolId);
@@ -213,9 +226,14 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
 
 SortedOracles.TokenReportExpirySet.handler(async ({ event, context }) => {
   const rateFeedID = asAddress(event.params.token);
+  const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
+  // See OracleReported handler.
+  if (context.isPreload) {
+    await Promise.all(poolIds.map((id) => context.Pool.get(id)));
+    return;
+  }
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
-  const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
   const oracleExpiry = await fetchReportExpiry(
     event.chainId,
     rateFeedID,
@@ -236,9 +254,11 @@ SortedOracles.TokenReportExpirySet.handler(async ({ event, context }) => {
 // ---------------------------------------------------------------------------
 
 SortedOracles.ReportExpirySet.handler(async ({ event, context }) => {
+  const pools = await getPoolsWithReferenceFeed(context, event.chainId);
+  // See OracleReported handler.
+  if (context.isPreload) return;
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
-  const pools = await getPoolsWithReferenceFeed(context, event.chainId);
 
   for (const pool of pools) {
     const oracleExpiry = await fetchReportExpiry(
