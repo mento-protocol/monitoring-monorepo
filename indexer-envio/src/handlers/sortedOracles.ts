@@ -5,7 +5,11 @@
 import { SortedOracles, type Pool, type OracleSnapshot } from "generated";
 import { eventId, asAddress, asBigInt } from "../helpers";
 import { computePriceDifference } from "../priceDifference";
-import { computeHealthStatus, nextDeviationBreachStartedAt } from "../pool";
+import {
+  computeHealthStatus,
+  maybePreloadPool,
+  nextDeviationBreachStartedAt,
+} from "../pool";
 import { recordBreachTransition } from "../deviationBreach";
 import { recordHealthSample } from "../healthScore";
 import {
@@ -27,12 +31,10 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
   const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
   if (poolIds.length === 0) return;
 
-  // Preload phase: seed Pool lookups so Envio can batch them, then bail.
-  // Processing phase runs RPC + writes with consistent in-batch state.
-  if (context.isPreload) {
-    await Promise.all(poolIds.map((id) => context.Pool.get(id)));
-    return;
-  }
+  // Preload phase: seed Pool + open-breach-row lookups so Envio can
+  // batch them, then bail. Processing phase runs RPC + writes with
+  // consistent in-batch state. See `maybePreloadPool` in pool.ts.
+  if (await maybePreloadPool(context, poolIds)) return;
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -130,10 +132,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   if (poolIds.length === 0) return;
 
   // See OracleReported handler.
-  if (context.isPreload) {
-    await Promise.all(poolIds.map((id) => context.Pool.get(id)));
-    return;
-  }
+  if (await maybePreloadPool(context, poolIds)) return;
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -228,10 +227,7 @@ SortedOracles.TokenReportExpirySet.handler(async ({ event, context }) => {
   const rateFeedID = asAddress(event.params.token);
   const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
   // See OracleReported handler.
-  if (context.isPreload) {
-    await Promise.all(poolIds.map((id) => context.Pool.get(id)));
-    return;
-  }
+  if (await maybePreloadPool(context, poolIds)) return;
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
   const oracleExpiry = await fetchReportExpiry(
@@ -256,7 +252,13 @@ SortedOracles.TokenReportExpirySet.handler(async ({ event, context }) => {
 SortedOracles.ReportExpirySet.handler(async ({ event, context }) => {
   const pools = await getPoolsWithReferenceFeed(context, event.chainId);
   // See OracleReported handler.
-  if (context.isPreload) return;
+  if (
+    await maybePreloadPool(
+      context,
+      pools.map((p) => p.id),
+    )
+  )
+    return;
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 

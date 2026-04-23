@@ -83,7 +83,7 @@ export function nextDeviationBreachStartedAt(
   prev: Pool | undefined,
   next: Pool,
   blockTimestamp: bigint,
-  source?: string,
+  source?: PoolUpdateSource,
 ): bigint {
   const wasBreachedPrice = prev ? isInDeviationBreach(prev) : false;
   const wasBreachedAnchor = prev ? prev.deviationBreachStartedAt > 0n : false;
@@ -117,7 +117,7 @@ export function nextDeviationBreachStartedAt(
 // Pool upsert (with cumulative fields)
 // ---------------------------------------------------------------------------
 
-const SOURCE_PRIORITY: Record<string, number> = {
+const SOURCE_PRIORITY = {
   virtual_pool_factory: 100,
   fpmm_factory: 90,
   fpmm_rebalanced: 50,
@@ -125,17 +125,61 @@ const SOURCE_PRIORITY: Record<string, number> = {
   fpmm_swap: 30,
   fpmm_mint: 20,
   fpmm_burn: 20,
-};
+} as const;
+
+/** Values the indexer passes as `source` when calling upsertPool / the
+ *  breach helpers. Typing this as a union (rather than bare string) means
+ *  a typo like "fpmm_update_reseves" is a compile error instead of a
+ *  silently-unmatched deferral branch. */
+export type PoolUpdateSource = keyof typeof SOURCE_PRIORITY;
 
 const pickPreferredSource = (
   existingSource: string | undefined,
-  incomingSource: string,
+  incomingSource: PoolUpdateSource,
 ): string => {
   if (!existingSource) return incomingSource;
-  const existingPriority = SOURCE_PRIORITY[existingSource] ?? 0;
+  const existingPriority =
+    SOURCE_PRIORITY[existingSource as PoolUpdateSource] ?? 0;
   const incomingPriority = SOURCE_PRIORITY[incomingSource] ?? 0;
   return incomingPriority >= existingPriority ? incomingSource : existingSource;
 };
+
+/**
+ * Preload-phase helper used by every event handler that makes direct RPC
+ * calls. Returns `true` when we're in the preload pass and the caller
+ * should `return` early (after awaiting this). Returns `false` during
+ * the processing pass so the caller continues with its full body.
+ *
+ * Seeds BOTH the Pool entity cache AND the currently-open breach row
+ * (when one exists) during preload. Skipping the breach-row warm-up
+ * costs measurable extra sync time because `recordBreachTransition`
+ * hits `DeviationThresholdBreach.get` in the processing phase — that
+ * read goes cold otherwise.
+ */
+export async function maybePreloadPool(
+  context: {
+    isPreload: boolean;
+    Pool: { get: (id: string) => Promise<Pool | undefined> };
+    DeviationThresholdBreach: {
+      get: (id: string) => Promise<unknown>;
+    };
+  },
+  poolIds: string | readonly string[],
+): Promise<boolean> {
+  if (!context.isPreload) return false;
+  const ids = typeof poolIds === "string" ? [poolIds] : poolIds;
+  await Promise.all(
+    ids.map(async (id) => {
+      const pool = await context.Pool.get(id);
+      if (pool && pool.deviationBreachStartedAt > 0n) {
+        await context.DeviationThresholdBreach.get(
+          `${id}-${pool.deviationBreachStartedAt}`,
+        );
+      }
+    }),
+  );
+  return true;
+}
 
 export type PoolContext = {
   Pool: {
@@ -244,7 +288,7 @@ export const upsertPool = async ({
   poolId: string;
   token0?: string;
   token1?: string;
-  source: string;
+  source: PoolUpdateSource;
   blockNumber: bigint;
   blockTimestamp: bigint;
   /** Transaction hash of the event driving this upsert. Required —
