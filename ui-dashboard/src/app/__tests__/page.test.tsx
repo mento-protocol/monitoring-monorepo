@@ -41,7 +41,11 @@ vi.mock("@/components/global-pools-table", () => ({
 import { useAllNetworksData } from "@/hooks/use-all-networks-data";
 import * as volumeModule from "@/lib/volume";
 import { buildSnapshotWindows } from "@/lib/volume";
-import GlobalPage from "../page";
+// Import from page-client (not page.tsx): page.tsx is now an async Server
+// Component that awaits fetchAllNetworks() and hands the result through
+// SWRConfig's fallback. renderToStaticMarkup can't execute async components,
+// and the rendering logic we actually want to exercise lives in page-client.
+import GlobalPage from "../page-client";
 
 // Fixture helpers
 

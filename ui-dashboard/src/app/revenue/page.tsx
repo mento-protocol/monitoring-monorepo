@@ -2,7 +2,7 @@
 
 import { Suspense, useMemo } from "react";
 import { formatUSD } from "@/lib/format";
-import { useAllNetworksData } from "@/hooks/use-all-networks-data";
+import { useProtocolFees } from "@/hooks/use-protocol-fees";
 import { BreakdownTile } from "@/components/breakdown-tile";
 import { FeeOverTimeChart } from "@/components/fee-over-time-chart";
 import { ComingSoonSection } from "@/components/coming-soon-section";
@@ -16,7 +16,11 @@ export default function RevenuePage() {
 }
 
 function RevenueContent() {
-  const { networkData, isLoading } = useAllNetworksData();
+  // Slim fees-only fetch. `useAllNetworksData` would pull paginated daily
+  // snapshots, trading limits, OLS pools, LP addresses, and a breach rollup
+  // per chain — none of which this page consumes. `useProtocolFees` returns
+  // the same NetworkData shape with only the fees/rates slices populated.
+  const { networkData, isLoading } = useProtocolFees();
 
   const anyNetworkError = networkData.some((n) => n.error !== null);
   const anyFeesError = networkData.some(

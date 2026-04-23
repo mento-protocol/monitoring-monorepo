@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useMemo } from "react";
+import { SWRConfig } from "swr";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
@@ -10,7 +11,10 @@ import {
   poolTotalVolumeUSD,
   sumVolumeMap,
 } from "@/lib/volume";
-import { useAllNetworksData } from "@/hooks/use-all-networks-data";
+import {
+  useAllNetworksData,
+  type NetworkData,
+} from "@/hooks/use-all-networks-data";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import { GlobalPoolsTable } from "@/components/global-pools-table";
 import { buildGlobalPoolEntries } from "@/lib/global-pool-entries";
@@ -18,11 +22,25 @@ import { TvlOverTimeChart } from "@/components/tvl-over-time-chart";
 import { VolumeOverTimeChart } from "@/components/volume-over-time-chart";
 import { BreakdownTile } from "@/components/breakdown-tile";
 
-export default function GlobalPage() {
+export default function GlobalPage({
+  initialNetworkData,
+}: {
+  initialNetworkData?: NetworkData[];
+}) {
+  // Seed SWR's cache under the key `useAllNetworksData` reads from
+  // (`"all-networks-data"`) so first paint renders without a client-side
+  // fetch. SWR still revalidates on its own `refreshInterval`, so the
+  // hand-off is seamless — the server payload is just the 0-latency
+  // starting frame, not a ceiling on freshness.
+  const fallback = initialNetworkData
+    ? { "all-networks-data": initialNetworkData }
+    : {};
   return (
-    <Suspense>
-      <GlobalContent />
-    </Suspense>
+    <SWRConfig value={{ fallback }}>
+      <Suspense>
+        <GlobalContent />
+      </Suspense>
+    </SWRConfig>
   );
 }
 

@@ -44,7 +44,7 @@ import { BridgeTokenBreakdownChart } from "@/components/bridge-token-breakdown-c
 import { Table, Th } from "@/components/table";
 import { SortableTh } from "@/components/sortable-th";
 import { AddressLink } from "@/components/address-link";
-import { useAllNetworksData } from "@/hooks/use-all-networks-data";
+import { useOracleRates } from "@/hooks/use-oracle-rates";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import {
   formatWei,
@@ -211,18 +211,12 @@ function BridgeFlowsContent() {
     }>;
   }>(BRIDGE_DELIVERED_RECENT, { limit: ROUTE_STATS_LIMIT });
 
-  // Oracle rate map for USD conversion. `useAllNetworksData` is cache-shared
-  // with pools/revenue via SWR, so cross-page navigation reuses the fetch.
-  const { networkData } = useAllNetworksData();
-  const rates = useMemo<OracleRateMap>(() => {
-    const merged = new Map<string, number>();
-    for (const net of networkData) {
-      for (const [k, v] of net.rates.entries()) {
-        if (!merged.has(k)) merged.set(k, v);
-      }
-    }
-    return merged;
-  }, [networkData]);
+  // Oracle rate map for USD conversion. Uses the slim `useOracleRates` hook
+  // instead of `useAllNetworksData`: we only need ~5 fields per pool to build
+  // the rate map, not the full 44-field per-pool payload plus paginated
+  // snapshots / LPs / fees that the dashboard hook fetches. Saves ~6 queries
+  // per chain per bridge-page mount.
+  const { merged: rates } = useOracleRates();
 
   const transfers = transfersResult.data?.BridgeTransfer ?? [];
   const snapshots = snapshotsResult.data?.BridgeDailySnapshot ?? [];

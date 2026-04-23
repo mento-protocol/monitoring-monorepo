@@ -62,6 +62,26 @@ export const ALL_POOLS_BREACH_ROLLUP = `
   }
 `;
 
+// Slim query for building an oracle USD-rate map. Used by pages that only
+// need to convert token amounts to USD (bridge-flows, pool-detail FX pairs)
+// without loading the full 44-field pool payload. `buildOracleRateMap` reads
+// exactly these fields — matching the Pick<> in its signature keeps the two
+// in sync. Filtering on oracleOk lets the indexer short-circuit stale-oracle
+// pools that wouldn't contribute a rate anyway.
+export const ORACLE_RATES = `
+  query OracleRates($chainId: Int!) {
+    Pool(
+      where: { chainId: { _eq: $chainId }, oracleOk: { _eq: true } }
+    ) {
+      id
+      token0
+      token1
+      oraclePrice
+      oracleOk
+    }
+  }
+`;
+
 export const RECENT_SWAPS = `
   query RecentSwaps($limit: Int!) {
     SwapEvent(
