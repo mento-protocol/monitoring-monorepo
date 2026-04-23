@@ -66,12 +66,25 @@ export const ALL_POOLS_BREACH_ROLLUP = `
 // need to convert token amounts to USD (bridge-flows, pool-detail FX pairs)
 // without loading the full 44-field pool payload. `buildOracleRateMap` reads
 // exactly these fields — matching the Pick<> in its signature keeps the two
-// in sync. Filtering on oracleOk lets the indexer short-circuit stale-oracle
-// pools that wouldn't contribute a rate anyway.
+// in sync.
+//
+// The `oracleOk` filter matches `buildOracleRateMap`'s `if (pool.oracleOk
+// === false) continue` semantics — include pools where oracleOk is `true`
+// OR `null`. A plain `_eq: true` would exclude nulls (Hasura == SQL's
+// three-valued NULL semantics), and during an indexer schema rollout
+// pools with legacy rows can legitimately have `oracleOk: null` while
+// carrying a valid `oraclePrice`; narrowing here would silently drop their
+// rates from the map on affected chains.
 export const ORACLE_RATES = `
   query OracleRates($chainId: Int!) {
     Pool(
-      where: { chainId: { _eq: $chainId }, oracleOk: { _eq: true } }
+      where: {
+        chainId: { _eq: $chainId }
+        _or: [
+          { oracleOk: { _eq: true } }
+          { oracleOk: { _is_null: true } }
+        ]
+      }
     ) {
       token0
       token1
