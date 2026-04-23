@@ -147,6 +147,7 @@ function makeNetworkData(
     snapshotsAllDailyTruncated: false,
     tradingLimits: [],
     olsPoolIds: new Set(),
+    cdpPoolIds: new Set(),
     fees: null,
     feeTransfers: [],
     uniqueLpAddresses: null,

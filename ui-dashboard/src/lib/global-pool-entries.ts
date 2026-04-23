@@ -24,6 +24,8 @@ type DerivedEntries = {
   tradingLimitsByKey: Map<string, TradingLimit[]>;
   /** Set of globalPoolKeys that have an active OLS strategy. */
   olsPoolKeys: Set<string>;
+  /** Set of globalPoolKeys whose rebalancer is a CDPLiquidityStrategy. */
+  cdpPoolKeys: Set<string>;
 };
 
 function perPoolTvlWindow(
@@ -70,6 +72,7 @@ export function buildGlobalPoolEntries(
   const tvlChangeWoWByKey = new Map<string, number | null>();
   const tradingLimitsByKey = new Map<string, TradingLimit[]>();
   const olsPoolKeys = new Set<string>();
+  const cdpPoolKeys = new Set<string>();
 
   for (const netData of networkData) {
     if (netData.error !== null) continue;
@@ -117,6 +120,7 @@ export function buildGlobalPoolEntries(
       if (tls) tradingLimitsByKey.set(key, tls);
 
       if (netData.olsPoolIds.has(pool.id)) olsPoolKeys.add(key);
+      if (netData.cdpPoolIds.has(pool.id)) cdpPoolKeys.add(key);
     }
   }
 
@@ -127,5 +131,6 @@ export function buildGlobalPoolEntries(
     tvlChangeWoWByKey,
     tradingLimitsByKey,
     olsPoolKeys,
+    cdpPoolKeys,
   };
 }

@@ -21,6 +21,7 @@ import {
   aggregateProtocolFees,
   type ProtocolFeeSummary,
 } from "@/lib/protocol-fees";
+import { detectCdpPoolIds } from "@/lib/strategy-detection";
 import {
   buildSnapshotWindows,
   filterSnapshotsToWindow,
@@ -67,6 +68,13 @@ export type NetworkData = {
   snapshotsAllDailyTruncated: boolean;
   tradingLimits: TradingLimit[];
   olsPoolIds: Set<string>;
+  /**
+   * Set of pool IDs whose `rebalancerAddress` probes as a CDPLiquidityStrategy
+   * via `detectStrategyType`. Unlike OLS (indexer-tracked) CDP strategy type is
+   * not exposed through GraphQL, so we derive it from an RPC probe cached at
+   * module scope. See `lib/strategy-detection.ts`.
+   */
+  cdpPoolIds: Set<string>;
   fees: ProtocolFeeSummary | null;
   /** Raw fee transfer rows — kept for time-series bucketing on the revenue page. */
   feeTransfers: ProtocolFeeTransfer[];
@@ -127,6 +135,7 @@ export const blankNetworkData = (
   snapshotsAllDailyTruncated: false,
   tradingLimits: [],
   olsPoolIds: new Set(),
+  cdpPoolIds: new Set(),
   fees: null,
   feeTransfers: [],
   uniqueLpAddresses: null,
@@ -359,6 +368,7 @@ export async function fetchNetworkData(
     tradingLimitsResult,
     olsResult,
     breachRollupResult,
+    cdpPoolIdsResult,
   ] = await Promise.allSettled([
     timed<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
       PROTOCOL_FEE_TRANSFERS_ALL,
@@ -391,6 +401,10 @@ export async function fetchNetworkData(
         breachCount?: number;
       }[];
     }>(ALL_POOLS_BREACH_ROLLUP, { chainId: network.chainId }),
+    // RPC probe — no indexer entity for CDP strategy, so we detect by
+    // calling `getCDPConfig` on each unique rebalancer contract. Cached at
+    // module scope so the cost is ~1 call per deployed strategy per TTL.
+    detectCdpPoolIds(network, pools),
   ]);
 
   // Merge the rollup fields into the pool objects. On failure (including
@@ -516,6 +530,15 @@ export async function fetchNetworkData(
       ? new Set((olsResult.value.OlsPool ?? []).map((p) => p.poolId))
       : new Set<string>();
 
+  // `detectCdpPoolIds` already fails open (catches and Sentry-logs RPC
+  // errors itself), so a rejected Promise here would signal something the
+  // helper couldn't swallow — still degrade to empty rather than fail the
+  // whole network fetch.
+  const cdpPoolIds =
+    cdpPoolIdsResult.status === "fulfilled"
+      ? cdpPoolIdsResult.value
+      : new Set<string>();
+
   return {
     network,
     snapshotWindows: windows,
@@ -527,6 +550,7 @@ export async function fetchNetworkData(
     snapshotsAllDailyTruncated,
     tradingLimits,
     olsPoolIds,
+    cdpPoolIds,
     fees,
     feeTransfers:
       feesResult.status === "fulfilled"
