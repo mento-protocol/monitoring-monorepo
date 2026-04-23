@@ -70,11 +70,43 @@ describe("retryAfterMs", () => {
 });
 
 describe("rateLimitAwareRetry", () => {
+  type FakeDocument = {
+    hidden: boolean;
+    _listeners: Array<() => void>;
+    addEventListener: (type: string, handler: () => void) => void;
+    removeEventListener: (type: string, handler: () => void) => void;
+    _fireVisibilityChange: () => void;
+  };
+
+  const globalScope = globalThis as unknown as { document?: FakeDocument };
+
+  function installFakeDocument(hidden: boolean): FakeDocument {
+    const listeners: Array<() => void> = [];
+    const doc: FakeDocument = {
+      hidden,
+      _listeners: listeners,
+      addEventListener: (type, handler) => {
+        if (type === "visibilitychange") listeners.push(handler);
+      },
+      removeEventListener: (type, handler) => {
+        if (type !== "visibilitychange") return;
+        const idx = listeners.indexOf(handler);
+        if (idx !== -1) listeners.splice(idx, 1);
+      },
+      _fireVisibilityChange: () => {
+        for (const fn of [...listeners]) fn();
+      },
+    };
+    globalScope.document = doc;
+    return doc;
+  }
+
   beforeEach(() => {
     vi.useFakeTimers();
   });
   afterEach(() => {
     vi.useRealTimers();
+    delete globalScope.document;
   });
 
   const baseConfig = {
@@ -137,5 +169,44 @@ describe("rateLimitAwareRetry", () => {
     });
     vi.runAllTimers();
     expect(revalidate).not.toHaveBeenCalled();
+  });
+
+  it("defers scheduling the retry timer while the tab is hidden", () => {
+    // Both useGQL and useBridgeGQL disable revalidateOnFocus/Reconnect,
+    // which defeats SWR's "skip onErrorRetry while inactive" gate. Without
+    // this guard, 429 retries run in background tabs at the Retry-After
+    // cadence — the exact quota burn the PR is supposed to prevent.
+    installFakeDocument(true);
+    const revalidate = vi.fn();
+    rateLimitAwareRetry(
+      makeClientError(429, "120"),
+      "key",
+      baseConfig,
+      revalidate,
+      { retryCount: 0, dedupe: true },
+    );
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(revalidate).not.toHaveBeenCalled();
+  });
+
+  it("resumes the retry timer after visibilitychange returns the tab", () => {
+    const doc = installFakeDocument(true);
+    const revalidate = vi.fn();
+    rateLimitAwareRetry(
+      makeClientError(429, "120"),
+      "key",
+      baseConfig,
+      revalidate,
+      { retryCount: 0, dedupe: true },
+    );
+    doc.hidden = false;
+    doc._fireVisibilityChange();
+    // Now the setTimeout is armed; the full Retry-After delay still applies
+    // so we honor the server's instruction end-to-end.
+    expect(revalidate).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(120_000);
+    expect(revalidate).toHaveBeenCalledWith({ retryCount: 0, dedupe: true });
+    // Listener removed itself on the one-shot fire.
+    expect(doc._listeners).toHaveLength(0);
   });
 });

@@ -31,6 +31,35 @@ export function retryAfterMs(err: unknown): number | null {
   return RATE_LIMIT_BACKOFF_MS;
 }
 
+// Schedules `revalidate(opts)` after `delayMs`, but defers the timer until
+// the tab is visible. Hooks that disable both `revalidateOnFocus` and
+// `revalidateOnReconnect` (both `useGQL` and `useBridgeGQL`) bypass SWR's
+// "skip onErrorRetry while inactive" gate, so errored hooks would otherwise
+// keep retrying in background tabs — burning quota for no user benefit.
+// Waiting for visibility means a hidden-tab 429 stalls cleanly and retries
+// once when the user returns.
+function scheduleWhenVisible(
+  revalidate: (opts: { retryCount: number; dedupe: boolean }) => void,
+  opts: { retryCount: number; dedupe: boolean },
+  delayMs: number,
+): void {
+  const run = () => revalidate(opts);
+  if (typeof document === "undefined") {
+    setTimeout(run, delayMs);
+    return;
+  }
+  if (!document.hidden) {
+    setTimeout(run, delayMs);
+    return;
+  }
+  const onVisible = () => {
+    if (document.hidden) return;
+    document.removeEventListener("visibilitychange", onVisible);
+    setTimeout(run, delayMs);
+  };
+  document.addEventListener("visibilitychange", onVisible);
+}
+
 // Retries 429s using the server's Retry-After (clamped to 60s…5m). For every
 // other error class, falls back to SWR's built-in exponential backoff + jitter
 // with no retry cap — matching SWR's default so transient 5xx don't wedge the
@@ -44,7 +73,7 @@ export const rateLimitAwareRetry: NonNullable<
 > = (err, _key, config, revalidate, opts) => {
   const backoff = retryAfterMs(err);
   if (backoff !== null) {
-    setTimeout(revalidate, backoff, opts);
+    scheduleWhenVisible(revalidate, opts, backoff);
     return;
   }
   const maxRetryCount = config.errorRetryCount;
@@ -53,5 +82,5 @@ export const rateLimitAwareRetry: NonNullable<
   const timeout =
     ~~((Math.random() + 0.5) * (1 << exponent)) *
     (config.errorRetryInterval ?? 5_000);
-  setTimeout(revalidate, timeout, opts);
+  scheduleWhenVisible(revalidate, opts, timeout);
 };
