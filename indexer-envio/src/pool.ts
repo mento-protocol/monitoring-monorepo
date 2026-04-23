@@ -85,24 +85,26 @@ export function nextDeviationBreachStartedAt(
   blockTimestamp: bigint,
   source?: string,
 ): bigint {
-  const wasBreached = prev ? isInDeviationBreach(prev) : false;
+  const wasBreachedPrice = prev ? isInDeviationBreach(prev) : false;
+  const wasBreachedAnchor = prev ? prev.deviationBreachStartedAt > 0n : false;
   const isBreached = isInDeviationBreach(next);
   if (!isBreached) {
     // Defer the close when this transition is being driven by
     // UpdateReserves. The FPMM contract emits ReservesUpdated inside
-    // swap/rebalance/mint/burn, so UpdateReserves handler fires FIRST
-    // and would close the breach with `endedByEvent = "unknown"`. Then
-    // the real semantic handler (Rebalance etc.) fires next but sees
-    // `prev.deviationBreachStartedAt = 0n` and skips. Holding the anchor
-    // lets the semantic handler in the same tx close it with the right
-    // attribution. Safe because ReservesUpdated piggybacks on an actual
-    // state-changing FPMM op — a close always follows.
-    if (wasBreached && source === "fpmm_update_reserves" && prev) {
+    // swap/rebalance/mint/burn (often MULTIPLE times — pre- and post-
+    // state), so an initial UR can pull priceDifference to / below
+    // threshold before the semantic handler runs. Use the ANCHOR, not
+    // price, to decide "is there an open breach to hold" — price may
+    // already read healthy after UR#1, but the anchor is still set.
+    // Holding it keeps the falling-edge attribution with the eventual
+    // semantic handler (Rebalance → "rebalance", Swap → "swap", etc.)
+    // instead of the generic UR "unknown".
+    if (wasBreachedAnchor && source === "fpmm_update_reserves" && prev) {
       return prev.deviationBreachStartedAt;
     }
     return 0n;
   }
-  if (!wasBreached) return blockTimestamp;
+  if (!wasBreachedPrice) return blockTimestamp;
   // Self-heal: a breached row with a 0n sentinel (partial restore, pre-backfill
   // state, etc) would stay 0n forever. Adopt the current block time as a
   // best-effort start so the UI stops suppressing the indicator.

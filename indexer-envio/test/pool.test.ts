@@ -190,6 +190,29 @@ describe("nextDeviationBreachStartedAt", () => {
     );
   });
 
+  it("keeps holding the anchor across consecutive UpdateReserves in the same tx", () => {
+    // Real scenario: FPMM emits ReservesUpdated TWICE inside a single
+    // rebalance tx — once with the partial state, once with the final.
+    // UR#1 already pulled priceDifference to threshold, so UR#2 sees a
+    // prev where `isInDeviationBreach(prev)` is false. We must still
+    // hold the anchor (anchor-based check) or UR#2 would close the
+    // breach as "unknown" before the Rebalanced handler gets a chance.
+    const origStart = 1_600_000_000n;
+    const prev = makePool({
+      priceDifference: 3333n, // already at-threshold after UR#1
+      rebalanceThreshold: 3333,
+      deviationBreachStartedAt: origStart, // anchor still held by UR#1
+    });
+    const next = makePool({
+      priceDifference: 3333n, // no movement — UR#2 is just the post-state confirmation
+      rebalanceThreshold: 3333,
+    });
+    assert.equal(
+      nextDeviationBreachStartedAt(prev, next, TS, "fpmm_update_reserves"),
+      origStart,
+    );
+  });
+
   it("still closes the anchor on a falling edge when source is anything else", () => {
     // The deferral is scoped narrowly to UpdateReserves; a direct
     // Rebalance / Swap / oracle close must flip the anchor as normal.
