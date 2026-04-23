@@ -161,6 +161,12 @@ const emptyNetworkData = (
 const SNAPSHOT_PAGE_SIZE = 1000;
 const SNAPSHOT_MAX_PAGES = 100;
 
+// Per-request abort budget. Matches `homepage-og.ts` and `useBridgeGQL`. Without
+// this, a wedged upstream holds the Vercel serverless function open until the
+// platform timeout (10s/60s/300s) and delays TTFB on the SSR path. 5s is more
+// than the p99 of the slowest query measured against Envio's hosted Hasura.
+export const REQUEST_TIMEOUT_MS = 5000;
+
 export type SnapshotPageResult = {
   rows: PoolSnapshotWindow[];
   truncated: boolean;
@@ -216,14 +222,15 @@ async function fetchPaginatedSnapshotPages<K extends string>(
   for (let page = 0; page < SNAPSHOT_MAX_PAGES; page++) {
     let batch: PoolSnapshotWindow[];
     try {
-      const result = await client.request<Record<K, PoolSnapshotWindow[]>>(
-        query,
-        {
+      const result = await client.request<Record<K, PoolSnapshotWindow[]>>({
+        document: query,
+        variables: {
           poolIds,
           limit: SNAPSHOT_PAGE_SIZE,
           offset: page * SNAPSHOT_PAGE_SIZE,
         },
-      );
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
       batch = result[responseKey] ?? [];
     } catch (err) {
       // First-page failure is a hard error — nothing to degrade to.
@@ -292,12 +299,22 @@ export async function fetchNetworkData(
 ): Promise<NetworkData> {
   const client = new GraphQLClient(network.hasuraUrl);
 
+  // Helper to bind a per-request AbortSignal.timeout without repeating the
+  // object-form at every call site. Re-binds on every invocation so each
+  // request gets its own timer (a shared signal would abort the rest of
+  // the parallel batch when any single request exceeded the budget).
+  const timed = <T>(document: string, variables?: Record<string, unknown>) =>
+    client.request<T>({
+      document,
+      variables,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+
   let pools: Pool[];
   try {
-    const poolsRes = await client.request<{ Pool: Pool[] }>(
-      ALL_POOLS_WITH_HEALTH,
-      { chainId: network.chainId },
-    );
+    const poolsRes = await timed<{ Pool: Pool[] }>(ALL_POOLS_WITH_HEALTH, {
+      chainId: network.chainId,
+    });
     pools = poolsRes.Pool ?? [];
   } catch (err) {
     return emptyNetworkData(
@@ -324,7 +341,7 @@ export async function fetchNetworkData(
     olsResult,
     breachRollupResult,
   ] = await Promise.allSettled([
-    client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
+    timed<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
       PROTOCOL_FEE_TRANSFERS_ALL,
       { chainId: network.chainId },
     ),
@@ -332,22 +349,23 @@ export async function fetchNetworkData(
       ? fetchAllDailySnapshotPages(client, poolIds, network.id)
       : Promise.resolve(emptySnapshotPage),
     fpmmPoolIds.length > 0
-      ? client.request<{
-          LiquidityPosition: { address: string }[];
-        }>(UNIQUE_LP_ADDRESSES, { poolIds: fpmmPoolIds })
+      ? timed<{ LiquidityPosition: { address: string }[] }>(
+          UNIQUE_LP_ADDRESSES,
+          { poolIds: fpmmPoolIds },
+        )
       : Promise.resolve({
           LiquidityPosition: [] as { address: string }[],
         }),
-    client.request<{ TradingLimit: TradingLimit[] }>(ALL_TRADING_LIMITS, {
+    timed<{ TradingLimit: TradingLimit[] }>(ALL_TRADING_LIMITS, {
       chainId: network.chainId,
     }),
-    client.request<{ OlsPool: Pick<OlsPool, "poolId">[] }>(ALL_OLS_POOLS, {
+    timed<{ OlsPool: Pick<OlsPool, "poolId">[] }>(ALL_OLS_POOLS, {
       chainId: network.chainId,
     }),
     // Uptime rollup — isolated from ALL_POOLS_WITH_HEALTH so a schema-
     // lag fail degrades just the uptime column to "—", not the entire
     // pools page.
-    client.request<{
+    timed<{
       Pool: {
         id: string;
         cumulativeCriticalSeconds?: string;

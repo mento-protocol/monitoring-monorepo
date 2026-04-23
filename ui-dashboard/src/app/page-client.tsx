@@ -1,7 +1,7 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
-import { SWRConfig } from "swr";
+import { Suspense, useEffect, useMemo } from "react";
+import { SWRConfig, useSWRConfig } from "swr";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
@@ -28,12 +28,14 @@ export default function GlobalPage({
 }: {
   initialNetworkData?: NetworkData[];
 }) {
-  // Seed SWR's cache so first paint renders without a client-side fetch. When
-  // SSR data is present we also gate `revalidateOnMount` off — SWR would
-  // otherwise treat the hydrated payload as stale and fire the same 14-query
-  // fan-out the moment the component mounts, defeating the whole point of
-  // the pre-fetch. `refreshInterval` still refreshes on its cadence, so the
-  // hand-off is seamless.
+  // Seed SWR's cache with the SSR payload so first paint renders without a
+  // client-side fetch. `fallback` on its own covers the cold-cache case; for
+  // back-navigation (cache populated from a prior visit), SWR's `fallback`
+  // is ignored and the stale prior entry wins. `InitialDataHydrator` below
+  // calls `mutate` on every prop change so a fresh RSC re-render reliably
+  // overrides the cached value. `revalidateOnMount: false` +
+  // `revalidateIfStale: false` then let SWR's `refreshInterval` take over
+  // without firing a redundant mount-time fetch.
   const swrValue = useMemo(
     () =>
       initialNetworkData
@@ -47,11 +49,27 @@ export default function GlobalPage({
   );
   return (
     <SWRConfig value={swrValue}>
+      {initialNetworkData !== undefined && (
+        <InitialDataHydrator data={initialNetworkData} />
+      )}
       <Suspense>
         <GlobalContent />
       </Suspense>
     </SWRConfig>
   );
+}
+
+// Writes the server-rendered payload into the SWR cache whenever a fresh
+// RSC render produces a new `data` reference. Must live inside `SWRConfig`
+// so `useSWRConfig()` resolves to the homepage's provider, not a parent one.
+function InitialDataHydrator({ data }: { data: NetworkData[] }) {
+  const { mutate } = useSWRConfig();
+  useEffect(() => {
+    // `revalidate: false` — the data is authoritative for this render, we
+    // don't want a client refetch right after installing it.
+    mutate(SWR_KEY_ALL_NETWORKS_DATA, data, { revalidate: false });
+  }, [data, mutate]);
+  return null;
 }
 
 /**

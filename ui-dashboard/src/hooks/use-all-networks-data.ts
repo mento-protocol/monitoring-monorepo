@@ -2,8 +2,8 @@
 
 import useSWR from "swr";
 import { fetchAllNetworks, type NetworkData } from "@/lib/fetch-all-networks";
+import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
 import { SWR_KEY_ALL_NETWORKS_DATA } from "@/lib/swr-keys";
-import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 
 type AllNetworksResult = {
   networkData: NetworkData[];
@@ -33,7 +33,7 @@ export function useAllNetworksData(): AllNetworksResult {
   const { data, error, isLoading } = useSWR<NetworkData[]>(
     SWR_KEY_ALL_NETWORKS_DATA,
     fetchAllNetworks,
-    { refreshInterval: SNAPSHOT_REFRESH_MS },
+    SHARED_QUERY_SWR_CONFIG,
   );
 
   return {

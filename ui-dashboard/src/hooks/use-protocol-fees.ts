@@ -20,7 +20,11 @@ import {
   aggregateProtocolFees,
   type ProtocolFeeSummary,
 } from "@/lib/protocol-fees";
-import { blankNetworkData, type NetworkData } from "@/lib/fetch-all-networks";
+import {
+  blankNetworkData,
+  REQUEST_TIMEOUT_MS,
+  type NetworkData,
+} from "@/lib/fetch-all-networks";
 import { SWR_KEY_PROTOCOL_FEES } from "@/lib/swr-keys";
 import type { ProtocolFeeTransfer } from "@/lib/types";
 
@@ -53,13 +57,16 @@ async function fetchFeesForNetwork(
   // protocol fees in USD. `allSettled` so a rates failure doesn't blank
   // fees and vice versa.
   const [ratesResult, feesResult] = await Promise.allSettled([
-    client.request<{ Pool: OracleRatePool[] }>(ORACLE_RATES, {
-      chainId: network.chainId,
+    client.request<{ Pool: OracleRatePool[] }>({
+      document: ORACLE_RATES,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     }),
-    client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
-      PROTOCOL_FEE_TRANSFERS_ALL,
-      { chainId: network.chainId },
-    ),
+    client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>({
+      document: PROTOCOL_FEE_TRANSFERS_ALL,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    }),
   ]);
 
   const rates: OracleRateMap =
@@ -71,14 +78,25 @@ async function fetchFeesForNetwork(
     feesResult.status === "fulfilled"
       ? (feesResult.value.ProtocolFeeTransfer ?? [])
       : [];
-  const fees: ProtocolFeeSummary | null =
-    feesResult.status === "fulfilled"
-      ? aggregateProtocolFees(feeTransfers, rates)
-      : null;
   const toError = (reason: unknown) =>
     reason instanceof Error ? reason : new Error(String(reason));
+
+  // A rates-only failure would silently zero out every non-USD-pegged fee
+  // transfer (aggregateProtocolFees calls tokenToUSD, which returns null
+  // for unknown symbols and gets counted as "unresolved"). That understates
+  // the chain's fees without any error signal to the consumer. Promote the
+  // rates failure into `feesError` so the revenue page shows the partial-
+  // data banner instead of a confidently-wrong lower bound.
   const feesError =
-    feesResult.status === "rejected" ? toError(feesResult.reason) : null;
+    feesResult.status === "rejected"
+      ? toError(feesResult.reason)
+      : ratesResult.status === "rejected"
+        ? toError(ratesResult.reason)
+        : null;
+  const fees: ProtocolFeeSummary | null =
+    feesResult.status === "fulfilled" && ratesResult.status === "fulfilled"
+      ? aggregateProtocolFees(feeTransfers, rates)
+      : null;
 
   return blankNetworkData(network, windows, {
     rates,

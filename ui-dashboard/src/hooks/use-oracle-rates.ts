@@ -18,6 +18,7 @@ import {
   type OracleRatePool,
 } from "@/lib/tokens";
 import { SWR_KEY_ORACLE_RATES } from "@/lib/swr-keys";
+import { REQUEST_TIMEOUT_MS } from "@/lib/fetch-all-networks";
 
 type OracleRatesSlice = {
   network: Network;
@@ -48,8 +49,10 @@ async function fetchOneNetwork(network: Network): Promise<OracleRatesSlice> {
   }
   const client = new GraphQLClient(network.hasuraUrl);
   try {
-    const res = await client.request<{ Pool: OracleRatePool[] }>(ORACLE_RATES, {
-      chainId: network.chainId,
+    const res = await client.request<{ Pool: OracleRatePool[] }>({
+      document: ORACLE_RATES,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     return {
       network,
@@ -87,20 +90,22 @@ export function useOracleRates(): OracleRatesResult {
     SHARED_QUERY_SWR_CONFIG,
   );
 
-  const byNetwork = data ?? [];
-  // Memoize the merged map so consumers that destructure `{ merged }` keep a
-  // stable reference across unrelated parent renders — a new Map every render
-  // would fan out cache invalidations through downstream useMemos that depend
-  // on `rates`.
+  // Memoize on `data` directly — `data ?? []` produces a fresh array every
+  // render while loading (data === undefined), which would cache-bust the
+  // memo and allocate a new empty Map each pass. Depending on `data` means
+  // the merged Map is stable across renders in both loading and populated
+  // states, giving downstream `useMemo`s that read `rates` a stable input.
   const merged = useMemo<OracleRateMap>(() => {
     const out: OracleRateMap = new Map();
-    for (const slice of byNetwork) {
+    if (!data) return out;
+    for (const slice of data) {
       for (const [symbol, rate] of slice.rates.entries()) {
         if (!out.has(symbol)) out.set(symbol, rate);
       }
     }
     return out;
-  }, [byNetwork]);
+  }, [data]);
+  const byNetwork = data ?? [];
   const hasAnyError = byNetwork.some((s) => s.error !== null);
 
   return { byNetwork, merged, isLoading, hasAnyError };

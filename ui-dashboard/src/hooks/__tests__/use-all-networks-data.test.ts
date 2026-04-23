@@ -77,10 +77,33 @@ import { GraphQLClient } from "graphql-request";
  * without that key), we default to an empty page so the pagination loop exits
  * cleanly rather than silently routing the query to the Pool branch.
  */
+// Extracts the GraphQL document string from either the positional-arg form
+// (`client.request(query, variables)`) or the object form
+// (`client.request({ document, variables, signal })`). Production code now
+// uses the object form to attach AbortSignal timeouts; older tests and some
+// callers still use positional. Keep the mock agnostic.
+function extractQuery(arg: unknown): string {
+  if (typeof arg === "string") return arg;
+  if (arg && typeof arg === "object" && "document" in arg) {
+    const doc = (arg as { document: unknown }).document;
+    if (typeof doc === "string") return doc;
+  }
+  return "";
+}
+
+function extractVariables(arg: unknown, arg2: unknown): unknown {
+  if (typeof arg === "string") return arg2;
+  if (arg && typeof arg === "object" && "variables" in arg) {
+    return (arg as { variables: unknown }).variables;
+  }
+  return undefined;
+}
+
 function mockRequest(impl: (query: string) => unknown) {
   (
     GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
-  ).mockImplementation((query: string) => {
+  ).mockImplementation((...args: unknown[]) => {
+    const query = extractQuery(args[0]);
     if (query.includes("PoolDailySnapshot")) {
       const r = impl(query);
       if (r != null && typeof r === "object" && "PoolDailySnapshot" in r)
@@ -144,19 +167,21 @@ describe("fetchNetworkData — happy path", () => {
     const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
       .mock.calls;
     const byQuery = (needle: string) =>
-      calls.filter(([q]) => typeof q === "string" && q.includes(needle));
+      calls.filter((args) => extractQuery(args[0]).includes(needle));
+    const varsFor = (needle: string) =>
+      extractVariables(byQuery(needle)[0][0], byQuery(needle)[0][1]);
 
     // One pool query, one fees query, one LP query.
-    expect(byQuery("Pool(")[0][1]).toEqual({ chainId: 42220 });
-    expect(byQuery("ProtocolFeeTransfer")[0][1]).toEqual({ chainId: 42220 });
-    expect(byQuery("LiquidityPosition")[0][1]).toEqual({
+    expect(varsFor("Pool(")).toEqual({ chainId: 42220 });
+    expect(varsFor("ProtocolFeeTransfer")).toEqual({ chainId: 42220 });
+    expect(varsFor("LiquidityPosition")).toEqual({
       poolIds: ["pool-1"],
     });
     // PoolDailySnapshotsAll paginates: with an empty response, the loop exits
     // after the first page. Assert that page was requested with limit + offset=0.
     const snapshotCalls = byQuery("PoolDailySnapshot");
     expect(snapshotCalls).toHaveLength(1);
-    expect(snapshotCalls[0][1]).toEqual({
+    expect(extractVariables(snapshotCalls[0][0], snapshotCalls[0][1])).toEqual({
       poolIds: ["pool-1"],
       limit: 1000,
       offset: 0,
@@ -248,11 +273,11 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
 
     const calls = (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
       .mock.calls;
-    const snapshotCall = calls.find(
-      ([q]) => typeof q === "string" && q.includes("PoolDailySnapshotsAll"),
+    const snapshotCall = calls.find((args) =>
+      extractQuery(args[0]).includes("PoolDailySnapshotsAll"),
     );
     expect(snapshotCall).toBeDefined();
-    const queryText = String(snapshotCall![0]).replace(/\s+/g, " ");
+    const queryText = extractQuery(snapshotCall![0]).replace(/\s+/g, " ");
     expect(queryText).toMatch(/order_by:\s*\[.*timestamp.*id.*\]/);
   });
 
@@ -444,7 +469,8 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
     let snapshotCall = 0;
     (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
       .mockReset()
-      .mockImplementation((query: string) => {
+      .mockImplementation((...args: unknown[]) => {
+        const query = extractQuery(args[0]);
         if (query.includes("PoolDailySnapshot")) {
           snapshotCall++;
           if (snapshotCall === 1)
@@ -482,7 +508,8 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
     // explicit error state rather than a confident-but-empty dashboard.
     (GraphQLClient.prototype.request as ReturnType<typeof vi.fn>)
       .mockReset()
-      .mockImplementation((query: string) => {
+      .mockImplementation((...args: unknown[]) => {
+        const query = extractQuery(args[0]);
         if (query.includes("PoolDailySnapshot"))
           return Promise.reject(new Error("daily snapshot timeout"));
         if (query.includes("ProtocolFeeTransfer"))
@@ -577,7 +604,8 @@ describe("fetchNetworkData — fees query failure only", () => {
 
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
-    ).mockImplementation((query: string) => {
+    ).mockImplementation((...args: unknown[]) => {
+      const query = extractQuery(args[0]);
       if (query.includes("ProtocolFeeTransfer")) return Promise.reject(feesErr);
       if (query.includes("PoolDailySnapshot"))
         return Promise.resolve({ PoolDailySnapshot: [] });
@@ -608,7 +636,8 @@ describe("fetchNetworkData — snapshots query failure only", () => {
 
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
-    ).mockImplementation((query: string) => {
+    ).mockImplementation((...args: unknown[]) => {
+      const query = extractQuery(args[0]);
       if (query.includes("PoolDailySnapshot")) return Promise.reject(snapErr);
       if (query.includes("ProtocolFeeTransfer"))
         return Promise.resolve({ ProtocolFeeTransfer: [] });
@@ -659,7 +688,8 @@ describe("fetchNetworkData — LP query failure only", () => {
 
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
-    ).mockImplementation((query: string) => {
+    ).mockImplementation((...args: unknown[]) => {
+      const query = extractQuery(args[0]);
       if (query.includes("LiquidityPosition")) return Promise.reject(lpErr);
       if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
       if (query.includes("ProtocolFeeTransfer"))
@@ -695,7 +725,8 @@ describe("fetchNetworkData — cross-network isolation", () => {
     const result1 = await (async () => {
       (
         GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
-      ).mockImplementation((query: string) => {
+      ).mockImplementation((...args: unknown[]) => {
+        const query = extractQuery(args[0]);
         if (query.includes("PoolDailySnapshot"))
           return Promise.resolve({ PoolDailySnapshot: [] });
         if (query.includes("ProtocolFeeTransfer"))
@@ -757,7 +788,8 @@ describe("fetchNetworkData — cross-network isolation", () => {
 
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
-    ).mockImplementation((query: string) => {
+    ).mockImplementation((...args: unknown[]) => {
+      const query = extractQuery(args[0]);
       if (query.includes("ProtocolFeeTransfer")) return Promise.reject(feesErr);
       if (query.includes("PoolDailySnapshot"))
         return Promise.resolve({ PoolDailySnapshot: [] });
@@ -784,7 +816,8 @@ describe("fetchNetworkData — cross-network isolation", () => {
 
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
-    ).mockImplementation((query: string) => {
+    ).mockImplementation((...args: unknown[]) => {
+      const query = extractQuery(args[0]);
       if (query.includes("PoolDailySnapshot")) return Promise.reject(snapErr);
       if (query.includes("ProtocolFeeTransfer"))
         return Promise.resolve({ ProtocolFeeTransfer: [] });
@@ -873,7 +906,8 @@ describe("fetchAllNetworks — orchestration", () => {
     const pool = makePool("pool-main");
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
-    ).mockImplementation((query: string) => {
+    ).mockImplementation((...args: unknown[]) => {
+      const query = extractQuery(args[0]);
       if (query.includes("PoolDailySnapshot"))
         return Promise.resolve({ PoolDailySnapshot: [] });
       if (query.includes("ProtocolFeeTransfer"))
@@ -921,8 +955,9 @@ describe("fetchAllNetworks — orchestration", () => {
     let callCount = 0;
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
-    ).mockImplementation((query: string) => {
+    ).mockImplementation((...args: unknown[]) => {
       callCount++;
+      const query = extractQuery(args[0]);
       // Reject every request to the second client (network2 URL, constructed second)
       const constructedUrls = (
         GraphQLClient as ReturnType<typeof vi.fn>
