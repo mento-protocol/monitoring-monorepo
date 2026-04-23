@@ -77,28 +77,59 @@ describe("rateLimitAwareRetry", () => {
     removeEventListener: (type: string, handler: () => void) => void;
     _fireVisibilityChange: () => void;
   };
+  type FakeWindow = {
+    _listeners: Array<() => void>;
+    addEventListener: (type: string, handler: () => void) => void;
+    removeEventListener: (type: string, handler: () => void) => void;
+    _fireOnline: () => void;
+  };
+  type FakeNavigator = { onLine: boolean };
 
-  const globalScope = globalThis as unknown as { document?: FakeDocument };
+  const globalScope = globalThis as unknown as {
+    document?: FakeDocument;
+    window?: FakeWindow;
+    navigator?: FakeNavigator;
+  };
 
-  function installFakeDocument(hidden: boolean): FakeDocument {
-    const listeners: Array<() => void> = [];
+  function installFakeEnv(
+    initial: { hidden?: boolean; online?: boolean } = {},
+  ): { doc: FakeDocument; win: FakeWindow; nav: FakeNavigator } {
+    const docListeners: Array<() => void> = [];
     const doc: FakeDocument = {
-      hidden,
-      _listeners: listeners,
+      hidden: initial.hidden ?? false,
+      _listeners: docListeners,
       addEventListener: (type, handler) => {
-        if (type === "visibilitychange") listeners.push(handler);
+        if (type === "visibilitychange") docListeners.push(handler);
       },
       removeEventListener: (type, handler) => {
         if (type !== "visibilitychange") return;
-        const idx = listeners.indexOf(handler);
-        if (idx !== -1) listeners.splice(idx, 1);
+        const idx = docListeners.indexOf(handler);
+        if (idx !== -1) docListeners.splice(idx, 1);
       },
       _fireVisibilityChange: () => {
-        for (const fn of [...listeners]) fn();
+        for (const fn of [...docListeners]) fn();
       },
     };
+    const winListeners: Array<() => void> = [];
+    const win: FakeWindow = {
+      _listeners: winListeners,
+      addEventListener: (type, handler) => {
+        if (type === "online") winListeners.push(handler);
+      },
+      removeEventListener: (type, handler) => {
+        if (type !== "online") return;
+        const idx = winListeners.indexOf(handler);
+        if (idx !== -1) winListeners.splice(idx, 1);
+      },
+      _fireOnline: () => {
+        for (const fn of [...winListeners]) fn();
+      },
+    };
+    const nav: FakeNavigator = { onLine: initial.online ?? true };
     globalScope.document = doc;
-    return doc;
+    globalScope.window = win;
+    globalScope.navigator = nav;
+    return { doc, win, nav };
   }
 
   beforeEach(() => {
@@ -107,6 +138,8 @@ describe("rateLimitAwareRetry", () => {
   afterEach(() => {
     vi.useRealTimers();
     delete globalScope.document;
+    delete globalScope.window;
+    delete globalScope.navigator;
   });
 
   const baseConfig = {
@@ -176,7 +209,7 @@ describe("rateLimitAwareRetry", () => {
     // which defeats SWR's "skip onErrorRetry while inactive" gate. Without
     // this guard, 429 retries run in background tabs at the Retry-After
     // cadence — the exact quota burn the PR is supposed to prevent.
-    installFakeDocument(true);
+    installFakeEnv({ hidden: true });
     const revalidate = vi.fn();
     rateLimitAwareRetry(
       makeClientError(429, "120"),
@@ -190,7 +223,7 @@ describe("rateLimitAwareRetry", () => {
   });
 
   it("resumes the retry timer after visibilitychange returns the tab", () => {
-    const doc = installFakeDocument(true);
+    const { doc, win } = installFakeEnv({ hidden: true });
     const revalidate = vi.fn();
     rateLimitAwareRetry(
       makeClientError(429, "120"),
@@ -206,7 +239,42 @@ describe("rateLimitAwareRetry", () => {
     expect(revalidate).not.toHaveBeenCalled();
     vi.advanceTimersByTime(120_000);
     expect(revalidate).toHaveBeenCalledWith({ retryCount: 0, dedupe: true });
-    // Listener removed itself on the one-shot fire.
+    // Listeners removed themselves on the one-shot fire (both
+    // visibilitychange and online, since we listen to both).
     expect(doc._listeners).toHaveLength(0);
+    expect(win._listeners).toHaveLength(0);
+  });
+
+  it("defers scheduling the retry timer while the browser is offline", () => {
+    // Parallel to the hidden case: `revalidateOnReconnect: false` means the
+    // network-reconnect path can't recover errored hooks, so we have to do
+    // the gating ourselves. Offline retries would otherwise grow retryCount
+    // (and hence exponential backoff) during outages, so reconnect sees
+    // multi-minute delays before the next retry fires.
+    installFakeEnv({ online: false });
+    const revalidate = vi.fn();
+    rateLimitAwareRetry(new Error("boom"), "key", baseConfig, revalidate, {
+      retryCount: 1,
+      dedupe: true,
+    });
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(revalidate).not.toHaveBeenCalled();
+  });
+
+  it("resumes the retry timer after the online event fires", () => {
+    const { nav, win } = installFakeEnv({ online: false });
+    const revalidate = vi.fn();
+    rateLimitAwareRetry(
+      makeClientError(429, "60"),
+      "key",
+      baseConfig,
+      revalidate,
+      { retryCount: 0, dedupe: true },
+    );
+    nav.onLine = true;
+    win._fireOnline();
+    expect(revalidate).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(60_000);
+    expect(revalidate).toHaveBeenCalledWith({ retryCount: 0, dedupe: true });
   });
 });

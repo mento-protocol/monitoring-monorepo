@@ -32,32 +32,48 @@ export function retryAfterMs(err: unknown): number | null {
 }
 
 // Schedules `revalidate(opts)` after `delayMs`, but defers the timer until
-// the tab is visible. Hooks that disable both `revalidateOnFocus` and
-// `revalidateOnReconnect` (both `useGQL` and `useBridgeGQL`) bypass SWR's
-// "skip onErrorRetry while inactive" gate, so errored hooks would otherwise
-// keep retrying in background tabs — burning quota for no user benefit.
-// Waiting for visibility means a hidden-tab 429 stalls cleanly and retries
-// once when the user returns.
-function scheduleWhenVisible(
+// the tab is visible AND the browser reports online. Hooks that disable
+// both `revalidateOnFocus` and `revalidateOnReconnect` (both `useGQL` and
+// `useBridgeGQL`) bypass SWR's "skip onErrorRetry while inactive" gate, so
+// without this guard errored hooks would keep retrying in hidden or
+// offline tabs — burning quota for no user benefit and growing
+// `retryCount` during outages so reconnects see multi-minute backoffs
+// before the next retry fires.
+function scheduleWhenActive(
   revalidate: (opts: { retryCount: number; dedupe: boolean }) => void,
   opts: { retryCount: number; dedupe: boolean },
   delayMs: number,
 ): void {
   const run = () => revalidate(opts);
-  if (typeof document === "undefined") {
+  const isHidden = () =>
+    typeof document !== "undefined" && document.hidden === true;
+  const isOffline = () =>
+    typeof navigator !== "undefined" && navigator.onLine === false;
+
+  if (!isHidden() && !isOffline()) {
     setTimeout(run, delayMs);
     return;
   }
-  if (!document.hidden) {
-    setTimeout(run, delayMs);
-    return;
-  }
-  const onVisible = () => {
-    if (document.hidden) return;
-    document.removeEventListener("visibilitychange", onVisible);
+
+  const check = () => {
+    if (isHidden() || isOffline()) return;
+    cleanup();
     setTimeout(run, delayMs);
   };
-  document.addEventListener("visibilitychange", onVisible);
+  const cleanup = () => {
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", check);
+    }
+    if (typeof window !== "undefined") {
+      window.removeEventListener("online", check);
+    }
+  };
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", check);
+  }
+  if (typeof window !== "undefined") {
+    window.addEventListener("online", check);
+  }
 }
 
 // Retries 429s using the server's Retry-After (clamped to 60s…5m). For every
@@ -73,7 +89,7 @@ export const rateLimitAwareRetry: NonNullable<
 > = (err, _key, config, revalidate, opts) => {
   const backoff = retryAfterMs(err);
   if (backoff !== null) {
-    scheduleWhenVisible(revalidate, opts, backoff);
+    scheduleWhenActive(revalidate, opts, backoff);
     return;
   }
   const maxRetryCount = config.errorRetryCount;
@@ -82,5 +98,5 @@ export const rateLimitAwareRetry: NonNullable<
   const timeout =
     ~~((Math.random() + 0.5) * (1 << exponent)) *
     (config.errorRetryInterval ?? 5_000);
-  scheduleWhenVisible(revalidate, opts, timeout);
+  scheduleWhenActive(revalidate, opts, timeout);
 };
