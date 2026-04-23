@@ -6,7 +6,7 @@ variable "grafana_url" {
 
 variable "grafana_service_account_token" {
   type        = string
-  description = "Grafana Cloud service account token (glsa_...). Typically sourced from ~/.grafana-mento-token via `export TF_VAR_grafana_service_account_token=$(cat ~/.grafana-mento-token)`."
+  description = "Grafana Cloud service account token (glsa_...). Set in terraform.tfvars (gitignored). Rotate from Grafana Cloud → Administration → Service accounts."
   sensitive   = true
 }
 

@@ -22,8 +22,8 @@
     "infra:init": "terraform -chdir=terraform init",
     "infra:plan": "terraform -chdir=terraform plan",
     "alerts:init": "terraform -chdir=terraform/alerts init",
-    "alerts:plan": "TF_VAR_grafana_service_account_token=\"$(cat ~/.grafana-mento-token)\" terraform -chdir=terraform/alerts plan",
-    "alerts:apply": "TF_VAR_grafana_service_account_token=\"$(cat ~/.grafana-mento-token)\" terraform -chdir=terraform/alerts apply"
+    "alerts:plan": "terraform -chdir=terraform/alerts plan",
+    "alerts:apply": "terraform -chdir=terraform/alerts apply"
   },
   "pnpm": {
     "overrides": {

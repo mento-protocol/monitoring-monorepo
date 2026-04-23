@@ -9,13 +9,11 @@
 slack_bot_token = "xoxb-REPLACE_ME"
 
 # ── Grafana ───────────────────────────────────────────────────────────────────
-# The Grafana service account token is read from the env var
-# TF_VAR_grafana_service_account_token — not from this file — because it
-# rotates independently and we don't want it stashed in two places.
-#
-# Before running terraform:
-#   export TF_VAR_grafana_service_account_token=$(cat ~/.grafana-mento-token)
-#
+# Service account token for the Grafana Cloud stack. Create at:
+#   Grafana Cloud → Administration → Service accounts → Add token.
+# Needs at least Admin role to create folders + alert rules.
+grafana_service_account_token = "glsa_REPLACE_ME"
+
 # Override the stack URL or channels only if they change:
 # grafana_url            = "https://clabsmento.grafana.net"
 # slack_channel_critical = "#alerts-critical"

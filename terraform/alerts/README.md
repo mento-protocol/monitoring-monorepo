@@ -15,20 +15,20 @@ Separate from `terraform/` (Vercel + Cloud Run): `gs://mento-terraform-tfstate-6
 ## Prerequisites
 
 1. **Slack app with bot token.** The "Grafana Alerts" app needs `chat:write` + `chat:write.public` scopes and must be invited (`/invite @Grafana Alerts`) to `#alerts-critical` and `#alerts-warnings`.
-2. **Grafana service account token** at `~/.grafana-mento-token` (any SA with `Admin` role in the `clabsmento` stack).
+2. **Grafana Cloud service account token** with `Admin` role in the `clabsmento` stack (Grafana Cloud → Administration → Service accounts).
 
 ## Running
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
-# Paste the Slack bot token into terraform.tfvars.
+# Paste the Slack bot token and Grafana SA token into terraform.tfvars.
 
 pnpm alerts:init
 pnpm alerts:plan
 pnpm alerts:apply
 ```
 
-The `alerts:plan` / `alerts:apply` scripts read `GRAFANA_AUTH` from `~/.grafana-mento-token` at invocation — no need to `export` it.
+Both secrets live in `terraform/alerts/terraform.tfvars` (gitignored). Matches the pattern of `terraform/terraform.tfvars` — one file, one place, both secrets.
 
 ## Smoke test
 
