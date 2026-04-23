@@ -1,6 +1,11 @@
 /// <reference types="mocha" />
 import { assert } from "chai";
-import { isInDeviationBreach, nextDeviationBreachStartedAt } from "../src/pool";
+import type { Pool } from "generated";
+import {
+  isInDeviationBreach,
+  maybePreloadPool,
+  nextDeviationBreachStartedAt,
+} from "../src/pool";
 import { makePool } from "./helpers/makePool";
 
 describe("isInDeviationBreach", () => {
@@ -190,6 +195,34 @@ describe("nextDeviationBreachStartedAt", () => {
     );
   });
 
+  it("keeps holding the anchor across consecutive UpdateReserves in the same tx", () => {
+    // Real scenario: FPMM emits ReservesUpdated TWICE inside a single
+    // rebalance tx — once with the partial state, once with the final.
+    // UR#1 already pulled priceDifference BELOW threshold, so UR#2 sees
+    // a prev where `isInDeviationBreach(prev)` is false. The deferral
+    // MUST consult the anchor, not the price, or UR#2 would close the
+    // breach as "unknown" before the Rebalanced handler gets a chance.
+    //
+    // `prev.priceDifference` is deliberately UNDER threshold — makes
+    // `wasBreachedPrice = false`. Only `wasBreachedAnchor = true` keeps
+    // the deferral active. A regression that swaps the two variables
+    // (or re-introduces a price-based check) fails this test.
+    const origStart = 1_600_000_000n;
+    const prev = makePool({
+      priceDifference: 3000n, // well below threshold — UR#1 already healed price
+      rebalanceThreshold: 3333,
+      deviationBreachStartedAt: origStart, // anchor still held by UR#1
+    });
+    const next = makePool({
+      priceDifference: 3000n, // still below — UR#2 is post-state confirmation
+      rebalanceThreshold: 3333,
+    });
+    assert.equal(
+      nextDeviationBreachStartedAt(prev, next, TS, "fpmm_update_reserves"),
+      origStart,
+    );
+  });
+
   it("still closes the anchor on a falling edge when source is anything else", () => {
     // The deferral is scoped narrowly to UpdateReserves; a direct
     // Rebalance / Swap / oracle close must flip the anchor as normal.
@@ -208,5 +241,102 @@ describe("nextDeviationBreachStartedAt", () => {
     );
     // Omitted source (legacy callers) must also close normally.
     assert.equal(nextDeviationBreachStartedAt(prev, next, TS), 0n);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// maybePreloadPool — preload-phase entity-cache warm-up
+// ---------------------------------------------------------------------------
+
+type CtxCalls = {
+  poolGets: string[];
+  breachGets: string[];
+};
+
+function makeCtx(isPreload: boolean, pools: Record<string, Pool | undefined>) {
+  const calls: CtxCalls = { poolGets: [], breachGets: [] };
+  return {
+    calls,
+    context: {
+      isPreload,
+      Pool: {
+        get: async (id: string) => {
+          calls.poolGets.push(id);
+          return pools[id];
+        },
+      },
+      DeviationThresholdBreach: {
+        get: async (id: string) => {
+          calls.breachGets.push(id);
+          return undefined;
+        },
+      },
+    },
+  };
+}
+
+describe("maybePreloadPool", () => {
+  it("returns false and touches nothing when not in preload phase", async () => {
+    const { context, calls } = makeCtx(false, {});
+    const result = await maybePreloadPool(context, "42220-0xabc");
+    assert.isFalse(result);
+    assert.deepEqual(calls.poolGets, []);
+    assert.deepEqual(calls.breachGets, []);
+  });
+
+  it("preloads Pool only when pool is missing (no anchor to warm)", async () => {
+    const { context, calls } = makeCtx(true, { "42220-0xabc": undefined });
+    const result = await maybePreloadPool(context, "42220-0xabc");
+    assert.isTrue(result);
+    assert.deepEqual(calls.poolGets, ["42220-0xabc"]);
+    assert.deepEqual(calls.breachGets, []);
+  });
+
+  it("preloads Pool only when pool exists but has no open breach anchor", async () => {
+    const pool = makePool({ deviationBreachStartedAt: 0n });
+    const id = pool.id;
+    const { context, calls } = makeCtx(true, { [id]: pool });
+    const result = await maybePreloadPool(context, id);
+    assert.isTrue(result);
+    assert.deepEqual(calls.poolGets, [id]);
+    assert.deepEqual(calls.breachGets, []);
+  });
+
+  it("preloads both Pool AND the open breach row (correct `{poolId}-{anchor}` id) when an anchor is set", async () => {
+    const anchor = 1_700_000_000n;
+    const pool = makePool({ deviationBreachStartedAt: anchor });
+    const id = pool.id;
+    const { context, calls } = makeCtx(true, { [id]: pool });
+    const result = await maybePreloadPool(context, id);
+    assert.isTrue(result);
+    assert.deepEqual(calls.poolGets, [id]);
+    assert.deepEqual(calls.breachGets, [`${id}-${anchor}`]);
+  });
+
+  it("accepts an array of poolIds — oracle handlers preload many pools at once", async () => {
+    const poolA = makePool({ deviationBreachStartedAt: 1_700_000_000n });
+    const poolB = makePool({ deviationBreachStartedAt: 0n });
+    // Distinct poolIds so the preload warms each independently.
+    const aId = "42220-0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const bId = "42220-0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const { context, calls } = makeCtx(true, {
+      [aId]: { ...poolA, id: aId },
+      [bId]: { ...poolB, id: bId },
+    });
+    const result = await maybePreloadPool(context, [aId, bId]);
+    assert.isTrue(result);
+    assert.sameMembers(calls.poolGets, [aId, bId]);
+    // Only poolA has an open anchor → only its breach row is warmed.
+    assert.deepEqual(calls.breachGets, [
+      `${aId}-${poolA.deviationBreachStartedAt}`,
+    ]);
+  });
+
+  it("handles an empty array of poolIds cleanly (no-op in preload)", async () => {
+    const { context, calls } = makeCtx(true, {});
+    const result = await maybePreloadPool(context, []);
+    assert.isTrue(result);
+    assert.deepEqual(calls.poolGets, []);
+    assert.deepEqual(calls.breachGets, []);
   });
 });

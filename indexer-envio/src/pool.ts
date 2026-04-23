@@ -83,26 +83,28 @@ export function nextDeviationBreachStartedAt(
   prev: Pool | undefined,
   next: Pool,
   blockTimestamp: bigint,
-  source?: string,
+  source?: PoolUpdateSource,
 ): bigint {
-  const wasBreached = prev ? isInDeviationBreach(prev) : false;
+  const wasBreachedPrice = prev ? isInDeviationBreach(prev) : false;
+  const wasBreachedAnchor = prev ? prev.deviationBreachStartedAt > 0n : false;
   const isBreached = isInDeviationBreach(next);
   if (!isBreached) {
     // Defer the close when this transition is being driven by
     // UpdateReserves. The FPMM contract emits ReservesUpdated inside
-    // swap/rebalance/mint/burn, so UpdateReserves handler fires FIRST
-    // and would close the breach with `endedByEvent = "unknown"`. Then
-    // the real semantic handler (Rebalance etc.) fires next but sees
-    // `prev.deviationBreachStartedAt = 0n` and skips. Holding the anchor
-    // lets the semantic handler in the same tx close it with the right
-    // attribution. Safe because ReservesUpdated piggybacks on an actual
-    // state-changing FPMM op — a close always follows.
-    if (wasBreached && source === "fpmm_update_reserves" && prev) {
+    // swap/rebalance/mint/burn (often MULTIPLE times — pre- and post-
+    // state), so an initial UR can pull priceDifference to / below
+    // threshold before the semantic handler runs. Use the ANCHOR, not
+    // price, to decide "is there an open breach to hold" — price may
+    // already read healthy after UR#1, but the anchor is still set.
+    // Holding it keeps the falling-edge attribution with the eventual
+    // semantic handler (Rebalance → "rebalance", Swap → "swap", etc.)
+    // instead of the generic UR "unknown".
+    if (wasBreachedAnchor && source === "fpmm_update_reserves" && prev) {
       return prev.deviationBreachStartedAt;
     }
     return 0n;
   }
-  if (!wasBreached) return blockTimestamp;
+  if (!wasBreachedPrice) return blockTimestamp;
   // Self-heal: a breached row with a 0n sentinel (partial restore, pre-backfill
   // state, etc) would stay 0n forever. Adopt the current block time as a
   // best-effort start so the UI stops suppressing the indicator.
@@ -115,7 +117,7 @@ export function nextDeviationBreachStartedAt(
 // Pool upsert (with cumulative fields)
 // ---------------------------------------------------------------------------
 
-const SOURCE_PRIORITY: Record<string, number> = {
+const SOURCE_PRIORITY = {
   virtual_pool_factory: 100,
   fpmm_factory: 90,
   fpmm_rebalanced: 50,
@@ -123,17 +125,67 @@ const SOURCE_PRIORITY: Record<string, number> = {
   fpmm_swap: 30,
   fpmm_mint: 20,
   fpmm_burn: 20,
-};
+} as const;
+
+/** Values the indexer passes as `source` when calling upsertPool / the
+ *  breach helpers. Typing this as a union (rather than bare string) means
+ *  a typo like "fpmm_update_reseves" is a compile error instead of a
+ *  silently-unmatched deferral branch. */
+export type PoolUpdateSource = keyof typeof SOURCE_PRIORITY;
+
+// `existingSource` is typed as `string` because Pool.source is stored as
+// a plain string in the DB (potentially including legacy values not in
+// the current union). Use a safe lookup helper so unknown strings fall
+// through to priority 0 without an unchecked cast.
+const sourcePriority = (source: string): number =>
+  (SOURCE_PRIORITY as Record<string, number>)[source] ?? 0;
 
 const pickPreferredSource = (
   existingSource: string | undefined,
-  incomingSource: string,
+  incomingSource: PoolUpdateSource,
 ): string => {
   if (!existingSource) return incomingSource;
-  const existingPriority = SOURCE_PRIORITY[existingSource] ?? 0;
-  const incomingPriority = SOURCE_PRIORITY[incomingSource] ?? 0;
-  return incomingPriority >= existingPriority ? incomingSource : existingSource;
+  return sourcePriority(incomingSource) >= sourcePriority(existingSource)
+    ? incomingSource
+    : existingSource;
 };
+
+/**
+ * Preload-phase helper used by every event handler that makes direct RPC
+ * calls. Returns `true` when we're in the preload pass and the caller
+ * should `return` early (after awaiting this). Returns `false` during
+ * the processing pass so the caller continues with its full body.
+ *
+ * Seeds BOTH the Pool entity cache AND the currently-open breach row
+ * (when one exists) during preload. Skipping the breach-row warm-up
+ * costs measurable extra sync time because `recordBreachTransition`
+ * hits `DeviationThresholdBreach.get` in the processing phase — that
+ * read goes cold otherwise.
+ */
+export async function maybePreloadPool(
+  context: {
+    isPreload: boolean;
+    Pool: { get: (id: string) => Promise<Pool | undefined> };
+    DeviationThresholdBreach: {
+      get: (id: string) => Promise<unknown>;
+    };
+  },
+  poolIds: string | readonly string[],
+): Promise<boolean> {
+  if (!context.isPreload) return false;
+  const ids = typeof poolIds === "string" ? [poolIds] : poolIds;
+  await Promise.all(
+    ids.map(async (id) => {
+      const pool = await context.Pool.get(id);
+      if (pool && pool.deviationBreachStartedAt > 0n) {
+        await context.DeviationThresholdBreach.get(
+          `${id}-${pool.deviationBreachStartedAt}`,
+        );
+      }
+    }),
+  );
+  return true;
+}
 
 export type PoolContext = {
   Pool: {
@@ -242,7 +294,7 @@ export const upsertPool = async ({
   poolId: string;
   token0?: string;
   token1?: string;
-  source: string;
+  source: PoolUpdateSource;
   blockNumber: bigint;
   blockTimestamp: bigint;
   /** Transaction hash of the event driving this upsert. Required —
