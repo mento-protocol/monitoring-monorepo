@@ -94,21 +94,27 @@ export function computePriceDifference(pool: {
  *   `0.0`  → no reduction
  *   `< 0`  → rebalance moved price FURTHER from oracle (legitimate + alertable)
  *
- * Returns the `"-1"` no-data sentinel when `before <= 0n` — a rebalance with
- * zero pre-deviation has no meaningful ratio and must NOT be conflated with a
- * legitimate 0.0 (a real rebalance that did nothing useful). The sentinel
- * matches the `DEFAULT_ORACLE_FIELDS.lastEffectivenessRatio` default so
- * never-rebalanced pools and degenerate rebalances surface identically to
- * downstream consumers (metrics-bridge skips the Prometheus publish on `"-1"`).
+ * Returns `null` when `before <= 0n` (no meaningful ratio — zero pre-deviation).
+ * Callers decide the sentinel string based on their consumer contract:
  *
- * Emitted string uses `toFixed(4)` to keep parity with the per-event
- * `RebalanceEvent.effectivenessRatio` stringification.
+ *   - `Pool.lastEffectivenessRatio` uses `"-1"` to match
+ *     `DEFAULT_ORACLE_FIELDS.lastEffectivenessRatio` — metrics-bridge skips the
+ *     Prometheus publish on that exact string, keeping the alert's
+ *     `avg_over_time` window clean of no-data points.
+ *   - `RebalanceEvent.effectivenessRatio` uses `"0.0000"` to preserve the
+ *     historical numeric-only contract — dashboard consumers
+ *     (`EffectivenessChart`, rebalance history table) render via
+ *     `Number(x) * 100`, so emitting `"-1"` there would misreport degenerate
+ *     rebalances as `-100%` effective.
+ *
+ * Emitted string uses `toFixed(4)` to match `RebalanceEvent.effectivenessRatio`
+ * stringification.
  */
 export function computeEffectivenessRatio(
   priceDifferenceBefore: bigint,
   priceDifferenceAfter: bigint,
-): string {
-  if (priceDifferenceBefore <= 0n) return "-1";
+): string | null {
+  if (priceDifferenceBefore <= 0n) return null;
   const improvement = priceDifferenceBefore - priceDifferenceAfter;
   return (Number(improvement) / Number(priceDifferenceBefore)).toFixed(4);
 }

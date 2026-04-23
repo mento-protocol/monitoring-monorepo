@@ -295,14 +295,14 @@ describe("computeEffectivenessRatio", () => {
     assert.equal(computeEffectivenessRatio(1000n, 1500n), "-0.5000");
   });
 
-  it("degenerate rebalance (before = 0) returns -1 sentinel, NOT 0.0000", () => {
-    // Prior behavior wrote "0.0000" which collides with a legitimate 0%
-    // rebalance and would (incorrectly) contribute to avg_over_time averages.
-    // The sentinel must match DEFAULT_ORACLE_FIELDS.lastEffectivenessRatio.
-    assert.equal(computeEffectivenessRatio(0n, 0n), "-1");
+  it("degenerate rebalance (before = 0) returns null — callers pick sentinel", () => {
+    // Helper returns null so Pool row can use "-1" (gauge-skip) while the
+    // RebalanceEvent preserves the historical "0.0000" contract for dashboard
+    // consumers that render Number(x) * 100.
+    assert.equal(computeEffectivenessRatio(0n, 0n), null);
   });
 
-  it("before < 0 (impossible in practice) also returns -1 sentinel", () => {
-    assert.equal(computeEffectivenessRatio(-100n, 50n), "-1");
+  it("before < 0 (impossible in practice) also returns null", () => {
+    assert.equal(computeEffectivenessRatio(-100n, 50n), null);
   });
 });
