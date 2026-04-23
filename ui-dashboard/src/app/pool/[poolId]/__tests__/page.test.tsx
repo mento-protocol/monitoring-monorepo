@@ -337,6 +337,114 @@ describe("Pool detail LPs tab", () => {
     expect(html).toContain("0xd8da6bf2");
   });
 
+  // Extracts the GraphQL operation name (`query FooBar(...)` → "FooBar") from
+  // every useGQL call recorded by the mock. Matching on exact operation names
+  // avoids substring collisions — e.g. "OracleSnapshots" would otherwise match
+  // the header-hook query `OracleSnapshotsWindow` which is not tab-scoped.
+  function firedOperationNames(): string[] {
+    return mockUseGQL.mock.calls
+      .map((args) => args[0])
+      .filter((q): q is string => typeof q === "string")
+      .map((q) => {
+        const m = q.match(/\bquery\s+([A-Za-z_][A-Za-z0-9_]*)/);
+        return m ? m[1] : "";
+      })
+      .filter(Boolean);
+  }
+
+  // Operation names for each tab's tab-scoped queries. Header/panel queries
+  // that run regardless of active tab (e.g. use-health-score's
+  // OracleSnapshotsWindow) are deliberately excluded. The `limits` tab has no
+  // tab-local queries — it reads trading-limit data from the parent component.
+  type TabWithQueries =
+    | "swaps"
+    | "reserves"
+    | "rebalances"
+    | "liquidity"
+    | "oracle"
+    | "providers"
+    | "ols"
+    | "breaches";
+  const TAB_OPS: Record<TabWithQueries, readonly string[]> = {
+    swaps: ["PoolSwapsCount", "PoolSwapsPage"],
+    reserves: ["PoolReserves"],
+    rebalances: ["PoolRebalancesCount", "PoolRebalancesPage", "PoolRebalances"],
+    liquidity: ["PoolLiquidityCount", "PoolLiquidityPage"],
+    oracle: [
+      "OracleSnapshots",
+      "OracleSnapshotsChart",
+      "OracleSnapshotsCountPage",
+    ],
+    providers: ["PoolLpPositions"],
+    ols: ["OlsLiquidityEventsCount", "OlsLiquidityEventsPage"],
+    breaches: [
+      "PoolDeviationBreachesPage",
+      "PoolDeviationBreachesCount",
+      "PoolDeviationBreachesAll",
+    ],
+  };
+
+  it("does not fire tab-scoped queries for inactive tabs (reserves)", () => {
+    // Pins the lazy-mount contract: inactive tab panels must be unmounted so
+    // their useGQL hooks don't poll the hosted indexer. Refactoring the pool
+    // page to render all tab panels at once (e.g. CSS display:none) would
+    // silently regress the 429 mitigation — this test fails loud if that
+    // happens.
+    mockSearchParams.set("tab", "reserves");
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth"))
+        return gqlResult({ Pool: [BASE_POOL] });
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment"))
+        return gqlResult({ FactoryDeployment: [] });
+      return gqlResult(undefined);
+    });
+
+    renderToStaticMarkup(<PoolDetailPage />);
+
+    const fired = new Set(firedOperationNames());
+    for (const [tabName, ops] of Object.entries(TAB_OPS)) {
+      if (tabName === "reserves") continue;
+      for (const op of ops) {
+        expect(
+          fired.has(op),
+          `${op} (${tabName} tab) should not fire on tab=reserves`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it("does not fire tab-scoped queries for inactive tabs (oracle)", () => {
+    mockSearchParams.set("tab", "oracle");
+
+    mockUseGQL.mockImplementation((query: string | null) => {
+      if (!query) return gqlResult(undefined);
+      if (query.includes("PoolDetailWithHealth"))
+        return gqlResult({ Pool: [BASE_POOL] });
+      if (query.includes("TradingLimits"))
+        return gqlResult({ TradingLimit: [] });
+      if (query.includes("PoolDeployment"))
+        return gqlResult({ FactoryDeployment: [] });
+      return gqlResult(undefined);
+    });
+
+    renderToStaticMarkup(<PoolDetailPage />);
+
+    const fired = new Set(firedOperationNames());
+    for (const [tabName, ops] of Object.entries(TAB_OPS)) {
+      if (tabName === "oracle") continue;
+      for (const op of ops) {
+        expect(
+          fired.has(op),
+          `${op} (${tabName} tab) should not fire on tab=oracle`,
+        ).toBe(false);
+      }
+    }
+  });
+
   it("queries pool detail with both the namespaced id and active chainId", () => {
     // expect.assertions ensures the expects inside mockImplementation actually
     // run — without this the test would pass vacuously if the mock were never

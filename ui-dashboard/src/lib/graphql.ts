@@ -1,6 +1,7 @@
 import { GraphQLClient } from "graphql-request";
 import useSWR, { type SWRResponse } from "swr";
 import { useNetwork } from "@/components/network-provider";
+import { rateLimitAwareRetry } from "@/lib/gql-retry";
 import type { Network } from "@/lib/networks";
 
 // Cache clients per Hasura URL so we don't recreate on every render
@@ -14,6 +15,12 @@ function getClient(network: Network): GraphQLClient {
   return client;
 }
 
+// Pool-level data (oracle, reserves, health) doesn't move fast enough to
+// justify a shorter interval, and a single pool page fans out ~15–20 parallel
+// useGQL calls — at 10s we were burning the Envio "small" tier monthly quota
+// and hitting 429 "Tier Quota" errors mid-session.
+const DEFAULT_REFRESH_MS = 30_000;
+
 /**
  * Network-aware GraphQL hook.
  * Automatically switches Hasura endpoint based on the current network context.
@@ -25,15 +32,12 @@ function getClient(network: Network): GraphQLClient {
 export function useGQL<T>(
   query: string | null,
   variables?: Record<string, unknown>,
-  refreshInterval = 10_000,
-  /** Escape hatches for rate-limited endpoints. When a panel fires
-   *  multiple polling queries in parallel (breach history: count +
-   *  page + chart all against the same entity), leaving the global
-   *  focus/reconnect revalidation on means every alt-tab multiplies
-   *  burst load against Envio's Hasura. Callers in that shape should
-   *  pass `{ revalidateOnFocus: false, revalidateOnReconnect: false }`
-   *  — same pattern use-bridge-gql uses. Undefined here preserves the
-   *  SWR global (focus/reconnect ON). */
+  refreshInterval: number = DEFAULT_REFRESH_MS,
+  /** Escape hatch for callers that need to override the defaults (e.g.
+   *  re-enable focus revalidation for a one-shot read). Focus/reconnect
+   *  revalidation is OFF by default for this hook — pool pages fan out
+   *  ~15–20 parallel useGQL calls and every alt-tab would otherwise fire
+   *  that many requests at once on top of the 30s polling cycle. */
   swrOptions?: {
     revalidateOnFocus?: boolean;
     revalidateOnReconnect?: boolean;
@@ -45,7 +49,14 @@ export function useGQL<T>(
   const result = useSWR<T>(
     query && network.hasuraUrl ? [network.id, query, variables] : null,
     () => client.request<T>(query!, variables),
-    { refreshInterval, ...swrOptions },
+    {
+      refreshInterval,
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      refreshWhenHidden: false,
+      onErrorRetry: rateLimitAwareRetry,
+      ...swrOptions,
+    },
   );
 
   if (!network.hasuraUrl) {

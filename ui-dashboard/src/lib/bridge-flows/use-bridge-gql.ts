@@ -2,6 +2,7 @@
 
 import { GraphQLClient, type Variables } from "graphql-request";
 import useSWR, { type SWRResponse } from "swr";
+import { rateLimitAwareRetry } from "@/lib/gql-retry";
 
 /**
  * Bridge queries run outside the per-network SWR context: cache key is network-
@@ -11,10 +12,9 @@ import useSWR, { type SWRResponse } from "swr";
 
 const BRIDGE_HASURA_URL = (process.env.NEXT_PUBLIC_HASURA_URL ?? "").trim();
 
-// Cap each GraphQL request well below the 10s SWR refresh interval so a
-// wedged TCP connection can't compound into unbounded backpressure on the
-// polling fetcher. AbortSignal.timeout is propagated by graphql-request to
-// the underlying fetch.
+// Cap each GraphQL request well below the SWR refresh interval so a wedged
+// TCP connection can't compound into unbounded backpressure on the polling
+// fetcher.
 const REQUEST_TIMEOUT_MS = 8_000;
 
 let cachedClient: GraphQLClient | null = null;
@@ -27,7 +27,7 @@ function getClient(): GraphQLClient | null {
 export function useBridgeGQL<T>(
   query: string | null,
   variables?: Variables,
-  refreshInterval = 10_000,
+  refreshInterval = 30_000,
 ): SWRResponse<T> {
   const client = getClient();
 
@@ -41,13 +41,15 @@ export function useBridgeGQL<T>(
       }),
     {
       refreshInterval,
-      // The 10s polling loop already keeps bridge data fresh; piling
-      // focus + reconnect revalidations on top was fanning each tab-
-      // resume across every active bridge query and tripping Envio's
-      // GraphQL 429 rate limit. Scoped to this hook (the global SWR
-      // config leaves them on for one-shot reads elsewhere).
+      // Focus + reconnect revalidations were fanning each tab-resume across
+      // every active bridge query and tripping Envio's GraphQL 429. Scoped to
+      // this hook; the global SWR config leaves them on for one-shot reads.
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
+      // SWR pauses revalidation while the tab is hidden and resumes on the
+      // next scheduled tick when visible again — no timer teardown needed.
+      refreshWhenHidden: false,
+      onErrorRetry: rateLimitAwareRetry,
     },
   );
 
