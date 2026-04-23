@@ -268,6 +268,73 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
   }
 
+  # Fallback warning for the window where the indexer has anchored a breach
+  # (`deviationBreachStartedAt > 0`) but the bridge is NOT publishing
+  # `mento_pool_deviation_ratio` — this happens whenever `lastDeviationRatio`
+  # is the `-1` sentinel (see metrics-bridge/src/metrics.ts:110). The indexer
+  # treats the anchor as the authoritative breach signal (see
+  # indexer-envio/src/deviationBreach.ts comment at L98-107), so this rule
+  # exists to keep warning coverage continuous across ratio gaps.
+  rule {
+    name           = "Deviation Breach (anchored, no ratio) [fpmms]"
+    condition      = "threshold"
+    for            = "15m"
+    exec_err_state = "Error"
+    no_data_state  = "OK"
+
+    annotations = {
+      summary     = "Pool `{{ $labels.pair }}` (`{{ $labels.chain_id }}`) breach anchored without ratio — {{ printf \"%.0f\" $values.A.Value }}s since anchor."
+      description = "`mento_pool_deviation_breach_start > 0` but `mento_pool_deviation_ratio` is absent (bridge emitted the `-1` sentinel). The anchor is the indexer's authoritative breach signal, so the breach is real even when the ratio gauge is missing."
+    }
+
+    labels = {
+      service  = "fpmms"
+      severity = "warning"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        expr    = "(time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "threshold"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "threshold"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          evaluator = { params = [0], type = "gt" }
+          operator  = { type = "and" }
+          query     = { params = ["threshold"] }
+        }]
+        datasource = { type = "__expr__", uid = "__expr__" }
+      })
+    }
+
+    notification_settings {
+      contact_point   = local.notify_warning.contact_point
+      group_by        = local.notify_warning.group_by
+      group_wait      = local.notify_warning.group_wait
+      group_interval  = local.notify_warning.group_interval
+      repeat_interval = local.notify_warning.repeat_interval
+    }
+  }
+
   rule {
     name           = "Deviation Breach Critical [fpmms]"
     condition      = "threshold"
