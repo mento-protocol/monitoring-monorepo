@@ -95,10 +95,14 @@ jobs:
         #   --to-revisions=<prev-revision>=100 --region=europe-west1`.
         # Previous revision listed below so incident responders have it.
         run: |
+          # --revision-suffix ties the revision name to the commit SHA so
+          # `gcloud run revisions list` output doubles as a git-log view,
+          # and the rollback command becomes self-describing.
           gcloud run services update metrics-bridge \
             --project="$GCP_PROJECT" \
             --region="$GCP_REGION" \
-            --image="$IMAGE"
+            --image="$IMAGE" \
+            --revision-suffix="${GITHUB_SHA::7}"
 
           echo "Recent revisions (for rollback reference):"
           gcloud run revisions list \

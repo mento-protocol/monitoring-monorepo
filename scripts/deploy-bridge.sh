@@ -96,10 +96,13 @@ echo "Resolved: ${IMAGE_BY_DIGEST}"
 #   --to-revisions=<prev-revision>=100 --region="$REGION"
 echo ""
 echo "Rolling Cloud Run revision..."
+# --revision-suffix ties the revision name to the commit SHA (same pattern as
+# the CI workflow) so rollback lookups are self-describing.
 gcloud run services update metrics-bridge \
   --project="$PROJECT" \
   --region="$REGION" \
-  --image="$IMAGE_BY_DIGEST"
+  --image="$IMAGE_BY_DIGEST" \
+  --revision-suffix="$TAG"
 
 echo ""
 echo "Recent revisions (for rollback reference):"
