@@ -31,28 +31,20 @@ export function retryAfterMs(err: unknown): number | null {
   return RATE_LIMIT_BACKOFF_MS;
 }
 
-// Returns 0 (pause) when the tab is backgrounded, otherwise the caller's
-// configured interval. SWR v2 calls this on every polling tick, so visibility
-// transitions take effect at the next scheduled interval without needing a
-// re-render. `refreshWhenHidden: false` reinforces it.
-export function pausableRefreshInterval(ms: number): () => number {
-  return () => {
-    if (typeof document !== "undefined" && document.hidden) return 0;
-    return ms;
-  };
-}
-
 // Retries 429s using the server's Retry-After (clamped to 60s…5m). For every
 // other error class, falls back to SWR's built-in exponential backoff + jitter
 // with no retry cap — matching SWR's default so transient 5xx don't wedge the
 // hook. SWR's polling loop skips revalidation while the cache is errored, so
 // an early `return` here would leave the hook stuck until focus/reconnect.
+// `opts` is forwarded unchanged to `revalidate` so SWR's `dedupe: true` flag
+// (set internally when scheduling retries) survives the round-trip — dropping
+// it would fan duplicate retry requests across components sharing a key.
 export const rateLimitAwareRetry: NonNullable<
   SWRConfiguration["onErrorRetry"]
 > = (err, _key, config, revalidate, opts) => {
   const backoff = retryAfterMs(err);
   if (backoff !== null) {
-    setTimeout(() => revalidate({ retryCount: opts.retryCount }), backoff);
+    setTimeout(revalidate, backoff, opts);
     return;
   }
   const maxRetryCount = config.errorRetryCount;
@@ -61,5 +53,5 @@ export const rateLimitAwareRetry: NonNullable<
   const timeout =
     ~~((Math.random() + 0.5) * (1 << exponent)) *
     (config.errorRetryInterval ?? 5_000);
-  setTimeout(() => revalidate({ retryCount: opts.retryCount }), timeout);
+  setTimeout(revalidate, timeout, opts);
 };

@@ -1,8 +1,7 @@
 import { GraphQLClient } from "graphql-request";
-import { useMemo } from "react";
 import useSWR, { type SWRResponse } from "swr";
 import { useNetwork } from "@/components/network-provider";
-import { pausableRefreshInterval, rateLimitAwareRetry } from "@/lib/gql-retry";
+import { rateLimitAwareRetry } from "@/lib/gql-retry";
 import type { Network } from "@/lib/networks";
 
 // Cache clients per Hasura URL so we don't recreate on every render
@@ -38,18 +37,19 @@ export function useGQL<T>(
   const { network } = useNetwork();
   const client = getClient(network);
 
-  // Stabilize the refresh-interval resolver across renders so SWR doesn't
-  // tear down and re-arm its polling timer on every state update.
-  const resolveRefreshInterval = useMemo(
-    () => pausableRefreshInterval(refreshInterval),
-    [refreshInterval],
-  );
-
   const result = useSWR<T>(
     query && network.hasuraUrl ? [network.id, query, variables] : null,
     () => client.request<T>(query!, variables),
     {
-      refreshInterval: resolveRefreshInterval,
+      refreshInterval,
+      // Pool pages fan out ~15–20 useGQL calls; alt-tabbing back would
+      // otherwise fire that many requests in a single burst on top of the
+      // 30s polling cycle — the exact fan-out pattern that trips the 429.
+      // SWR's `refreshWhenHidden: false` default already pauses polling
+      // while hidden; when the tab returns, the next scheduled tick
+      // refreshes naturally (worst case 30s of staleness, acceptable).
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
       refreshWhenHidden: false,
       onErrorRetry: rateLimitAwareRetry,
     },

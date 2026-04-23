@@ -1,9 +1,8 @@
 "use client";
 
 import { GraphQLClient, type Variables } from "graphql-request";
-import { useMemo } from "react";
 import useSWR, { type SWRResponse } from "swr";
-import { pausableRefreshInterval, rateLimitAwareRetry } from "@/lib/gql-retry";
+import { rateLimitAwareRetry } from "@/lib/gql-retry";
 
 /**
  * Bridge queries run outside the per-network SWR context: cache key is network-
@@ -32,11 +31,6 @@ export function useBridgeGQL<T>(
 ): SWRResponse<T> {
   const client = getClient();
 
-  const resolveRefreshInterval = useMemo(
-    () => pausableRefreshInterval(refreshInterval),
-    [refreshInterval],
-  );
-
   const result = useSWR<T>(
     query && client ? ["bridge", query, variables] : null,
     () =>
@@ -46,13 +40,15 @@ export function useBridgeGQL<T>(
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       }),
     {
-      refreshInterval: resolveRefreshInterval,
-      refreshWhenHidden: false,
+      refreshInterval,
       // Focus + reconnect revalidations were fanning each tab-resume across
       // every active bridge query and tripping Envio's GraphQL 429. Scoped to
       // this hook; the global SWR config leaves them on for one-shot reads.
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
+      // SWR pauses revalidation while the tab is hidden and resumes on the
+      // next scheduled tick when visible again — no timer teardown needed.
+      refreshWhenHidden: false,
       onErrorRetry: rateLimitAwareRetry,
     },
   );

@@ -1,10 +1,6 @@
 import { ClientError } from "graphql-request";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  pausableRefreshInterval,
-  rateLimitAwareRetry,
-  retryAfterMs,
-} from "@/lib/gql-retry";
+import { rateLimitAwareRetry, retryAfterMs } from "@/lib/gql-retry";
 
 function makeClientError(status: number, retryAfter?: string): ClientError {
   const headers = new Headers();
@@ -73,28 +69,6 @@ describe("retryAfterMs", () => {
   });
 });
 
-describe("pausableRefreshInterval", () => {
-  const globalScope = globalThis as { document?: { hidden: boolean } };
-
-  afterEach(() => {
-    delete globalScope.document;
-  });
-
-  it("returns the configured interval when document is absent (SSR)", () => {
-    expect(pausableRefreshInterval(30_000)()).toBe(30_000);
-  });
-
-  it("returns the configured interval when the tab is visible", () => {
-    globalScope.document = { hidden: false };
-    expect(pausableRefreshInterval(30_000)()).toBe(30_000);
-  });
-
-  it("returns 0 when document.hidden is true", () => {
-    globalScope.document = { hidden: true };
-    expect(pausableRefreshInterval(30_000)()).toBe(0);
-  });
-});
-
 describe("rateLimitAwareRetry", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -121,10 +95,12 @@ describe("rateLimitAwareRetry", () => {
     vi.advanceTimersByTime(119_999);
     expect(revalidate).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
-    expect(revalidate).toHaveBeenCalledWith({ retryCount: 0 });
+    // Full opts forwarded so SWR's `dedupe: true` isn't lost — otherwise
+    // components sharing a key would fan duplicate retry requests.
+    expect(revalidate).toHaveBeenCalledWith({ retryCount: 0, dedupe: true });
   });
 
-  it("uses exponential backoff for non-429 errors", () => {
+  it("uses exponential backoff for non-429 errors and forwards opts", () => {
     const revalidate = vi.fn();
     rateLimitAwareRetry(new Error("boom"), "key", baseConfig, revalidate, {
       retryCount: 2,
@@ -133,7 +109,7 @@ describe("rateLimitAwareRetry", () => {
     // exponent=2 → multiplier = ~~((rand+0.5) * 4) ∈ [2, 5]; interval = 5s.
     // → timeout ∈ [10s, 25s]. Advance past upper bound.
     vi.advanceTimersByTime(30_000);
-    expect(revalidate).toHaveBeenCalledWith({ retryCount: 2 });
+    expect(revalidate).toHaveBeenCalledWith({ retryCount: 2, dedupe: true });
   });
 
   it("does not cap non-429 retries when errorRetryCount is undefined", () => {
