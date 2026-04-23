@@ -45,7 +45,7 @@ All four values route to `#alerts-v3` via a single notification-policy regex mat
 
 ## Next — Rebalance Effectiveness (KPI 4, second half)
 
-Post-launch spec §3 KPI 4 has two halves: **liveness** (does the rebalancer fire?) and **effectiveness** (does it actually fix the deviation?). PR #206 ships liveness (`Rebalancer Stale [fpmms]` — breach >30m + no rebalance >30m). This section defines the effectiveness half.
+Post-launch spec §3 KPI 4 has two halves: **liveness** (does the rebalancer fire?) and **effectiveness** (does it actually fix the deviation?). Liveness ships as the `Rebalancer Stale` critical rule (breach >1h + no rebalance >30m) — added in PR #206, threshold tightened in PR #209. This section defines the effectiveness half.
 
 ### What the KPI measures
 
