@@ -46,8 +46,8 @@ async function fetchOneNetwork(network: Network): Promise<OracleRatesSlice> {
       error: new Error(`Hasura URL not configured for "${network.label}"`),
     };
   }
-  const client = new GraphQLClient(network.hasuraUrl);
   try {
+    const client = new GraphQLClient(network.hasuraUrl);
     const res = await client.request<{ Pool: OracleRatePool[] }>({
       document: ORACLE_RATES,
       variables: { chainId: network.chainId },
