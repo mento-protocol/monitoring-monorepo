@@ -26,6 +26,18 @@ export function useGQL<T>(
   query: string | null,
   variables?: Record<string, unknown>,
   refreshInterval = 10_000,
+  /** Escape hatches for rate-limited endpoints. When a panel fires
+   *  multiple polling queries in parallel (breach history: count +
+   *  page + chart all against the same entity), leaving the global
+   *  focus/reconnect revalidation on means every alt-tab multiplies
+   *  burst load against Envio's Hasura. Callers in that shape should
+   *  pass `{ revalidateOnFocus: false, revalidateOnReconnect: false }`
+   *  — same pattern use-bridge-gql uses. Undefined here preserves the
+   *  SWR global (focus/reconnect ON). */
+  swrOptions?: {
+    revalidateOnFocus?: boolean;
+    revalidateOnReconnect?: boolean;
+  },
 ): SWRResponse<T> {
   const { network } = useNetwork();
   const client = getClient(network);
@@ -33,7 +45,7 @@ export function useGQL<T>(
   const result = useSWR<T>(
     query && network.hasuraUrl ? [network.id, query, variables] : null,
     () => client.request<T>(query!, variables),
-    { refreshInterval },
+    { refreshInterval, ...swrOptions },
   );
 
   if (!network.hasuraUrl) {

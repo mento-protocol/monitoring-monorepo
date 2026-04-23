@@ -5,6 +5,7 @@ import {
   formatDurationShort,
   bridgeStatusLabel,
   bridgeStatusDetailLabel,
+  parseDurationSeconds,
   transferDeliveryDurationSec,
 } from "../bridge-status";
 
@@ -197,6 +198,43 @@ describe("formatDurationShort", () => {
     // day bucket only kicks in at >= 86_400s. This guards against a stray
     // Math.ceil/floor swap in the bucketing code.
     expect(formatDurationShort(86_399)).toBe("23h 59m");
+  });
+});
+
+describe("parseDurationSeconds", () => {
+  it("parses single-unit short forms", () => {
+    expect(parseDurationSeconds("30s")).toBe(30);
+    expect(parseDurationSeconds("10m")).toBe(600);
+    expect(parseDurationSeconds("1h")).toBe(3600);
+    expect(parseDurationSeconds("3d")).toBe(259_200);
+    expect(parseDurationSeconds("2w")).toBe(1_209_600);
+  });
+
+  it("parses full-word units with arbitrary spacing and case", () => {
+    expect(parseDurationSeconds("3 days")).toBe(259_200);
+    expect(parseDurationSeconds("2 HOURS")).toBe(7200);
+    expect(parseDurationSeconds("1 week")).toBe(604_800);
+    expect(parseDurationSeconds("  30 mins  ")).toBe(1800);
+  });
+
+  it("composes multi-unit strings", () => {
+    expect(parseDurationSeconds("1h30m")).toBe(5400);
+    expect(parseDurationSeconds("1d 6h")).toBe(108_000);
+    expect(parseDurationSeconds("2h15m30s")).toBe(8130);
+  });
+
+  it("treats bare integers as seconds", () => {
+    expect(parseDurationSeconds("60")).toBe(60);
+    expect(parseDurationSeconds("3600")).toBe(3600);
+  });
+
+  it("returns null for empty or unparsable input", () => {
+    expect(parseDurationSeconds("")).toBeNull();
+    expect(parseDurationSeconds("   ")).toBeNull();
+    expect(parseDurationSeconds("banana")).toBeNull();
+    expect(parseDurationSeconds("1 month")).toBeNull(); // intentionally unsupported
+    expect(parseDurationSeconds("1h banana")).toBeNull(); // trailing junk
+    expect(parseDurationSeconds("1h 2x")).toBeNull();
   });
 });
 

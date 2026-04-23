@@ -5,10 +5,6 @@ import { useAddressLabels } from "@/components/address-labels-provider";
 import { KindBadge, SourceBadge } from "@/components/badges";
 import { ChainIcon } from "@/components/chain-icon";
 import { DeviationCell } from "@/components/pool-header/deviation-cell";
-import {
-  HealthScoreInfoIcon,
-  HealthScoreValue,
-} from "@/components/pool-header/health-score-value";
 import { LimitStatusValue } from "@/components/pool-header/limit-status-value";
 import { OraclePriceValue } from "@/components/pool-header/oracle-price-value";
 import { OracleStatusValue } from "@/components/pool-header/oracle-status-value";
@@ -129,6 +125,7 @@ const TABS = [
   "liquidity",
   "oracle",
   "limits",
+  "breaches",
   "ols",
 ] as const;
 type Tab = (typeof TABS)[number];
@@ -141,6 +138,7 @@ const SEARCH_PARAM_BY_TAB: Record<Tab, string> = {
   liquidity: "liquidityQ",
   oracle: "oracleQ",
   limits: "limitsQ",
+  breaches: "breachesQ",
   ols: "olsQ",
 };
 
@@ -163,6 +161,7 @@ function matchesRowSearch(
 function getTabLabel(tab: Tab) {
   if (tab === "providers") return "LPs";
   if (tab === "ols") return "OLS";
+  if (tab === "breaches") return "Breaches";
   return tab;
 }
 
@@ -376,7 +375,11 @@ function PoolDetail() {
   const hasOlsPool = selectActiveOlsPool(olsData?.OlsPool) !== null;
   // Keep OLS tab visible while loading so ?tab=ols deep links don't flicker
   const olsTabVisible = hasOlsPool || olsLoading;
-  const visibleTabs = TABS.filter((t) => t !== "ols" || olsTabVisible);
+  // Non-FPMM pools (virtual pools) have no deviation breach model — hide
+  // the tab rather than render an empty panel, same pattern as OLS.
+  const visibleTabs = TABS.filter(
+    (t) => (t !== "ols" || olsTabVisible) && (t !== "breaches" || fpmmPool),
+  );
   const tab = visibleTabs.includes(requestedTab)
     ? requestedTab
     : (visibleTabs[0] ?? "providers");
@@ -475,7 +478,6 @@ function PoolDetail() {
               ratesError={poolNeedsRates && ratesError}
             />
           </div>
-          {fpmmPool && <BreachHistoryPanel pool={pool} network={network} />}
         </>
       )}
 
@@ -574,6 +576,15 @@ function PoolDetail() {
             hasError={tradingLimitsError}
           />
         )}
+        {tab === "breaches" && fpmmPool && pool && (
+          <BreachHistoryPanel
+            pool={pool}
+            network={network}
+            limit={limit}
+            search={activeSearch}
+            onSearchChange={(value) => setTabSearch("breaches", value)}
+          />
+        )}
         {tab === "ols" && (
           <OlsTab
             poolId={normalizedPoolId}
@@ -667,24 +678,8 @@ function PoolHeader({
           className="min-w-36"
           label={
             <span className="inline-flex items-center gap-1">
-              Health Score
-              <HealthScoreInfoIcon pool={pool} />
-            </span>
-          }
-          value={
-            isVirtual ? (
-              <span className="text-slate-500">—</span>
-            ) : (
-              <HealthScoreValue pool={pool} />
-            )
-          }
-        />
-        <Stat
-          className="min-w-36"
-          label={
-            <span className="inline-flex items-center gap-1">
               Uptime
-              <UptimeInfoIcon />
+              <UptimeInfoIcon pool={pool} />
             </span>
           }
           value={

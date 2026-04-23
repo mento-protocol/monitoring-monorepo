@@ -223,11 +223,11 @@ describe("UptimeValue", () => {
     expect(html).toContain("1 breach"); // closed, not "1 ongoing"
   });
 
-  it("scales accurately past the 100-row breach-history cap — rolls from scalar, not breach list", () => {
+  it("scales accurately past the breach-history row cap — rolls from scalar, not breach list", () => {
     // A pool with 500 historical breaches. The rollup scalar captures all
-    // 500, so the tile reports the correct SLO even though the
-    // POOL_DEVIATION_BREACHES query (used by the history panel) would
-    // truncate at 100.
+    // 500, so the tile reports the correct SLO even though the breach-list
+    // queries used by the history panel are capped at ENVIO_MAX_ROWS (for
+    // the count) and 1000 (for the scatter feed).
     mockUseGQL.mockReturnValueOnce({
       data: {
         Pool: [

@@ -18,7 +18,9 @@ import { ChainIcon } from "@/components/chain-icon";
 import {
   computeHealthStatus,
   computeLimitStatus,
+  computePoolUptimePct,
   pressureColorClass,
+  uptimeColorClass,
   worstStatus,
 } from "@/lib/health";
 import { combinedTooltip } from "@/lib/pool-table-utils";
@@ -37,6 +39,7 @@ export type GlobalPoolEntry = {
 type GlobalSortKey =
   | "pool"
   | "health"
+  | "uptime"
   | "fee"
   | "tvl"
   | "tvlChangeWoW"
@@ -99,6 +102,16 @@ export function sortGlobalPools(
         );
         cmp = (HEALTH_ORDER[aH] ?? 99) - (HEALTH_ORDER[bH] ?? 99);
         break;
+      }
+      case "uptime": {
+        // Unknown uptime (virtual pool, rollup unpopulated) sinks to the
+        // bottom regardless of direction — same pattern as volume columns.
+        const aUptime = computePoolUptimePct(a.pool);
+        const bUptime = computePoolUptimePct(b.pool);
+        if (aUptime == null && bUptime == null) return 0;
+        if (aUptime == null) return 1;
+        if (bUptime == null) return -1;
+        return sortDir === "asc" ? aUptime - bUptime : bUptime - aUptime;
       }
       case "fee": {
         const aHas = hasFeeData(a.pool);
@@ -404,6 +417,16 @@ export function GlobalPoolsTable({
               Health
             </SortableTh>
             <SortableTh
+              sortKey="uptime"
+              activeSortKey={sortKey}
+              sortDir={sortDir}
+              onSort={handleSort}
+              align="right"
+              className="hidden sm:table-cell"
+            >
+              Uptime
+            </SortableTh>
+            <SortableTh
               sortKey="fee"
               activeSortKey={sortKey}
               sortDir={sortDir}
@@ -524,6 +547,21 @@ export function GlobalPoolsTable({
                   >
                     <HealthBadge status={effectiveStatus} />
                   </button>
+                </td>
+                <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm font-mono text-right">
+                  {(() => {
+                    const pct = computePoolUptimePct(p);
+                    if (pct == null)
+                      return <span className="text-slate-600">—</span>;
+                    return (
+                      <span
+                        className={uptimeColorClass(pct)}
+                        title={`${pct.toFixed(3)}% all-time · ${p.breachCount ?? 0} ${(p.breachCount ?? 0) === 1 ? "breach" : "breaches"}`}
+                      >
+                        {pct.toFixed(2)}%
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-sm text-slate-200 font-mono text-right">
                   {formatFee(p)}
