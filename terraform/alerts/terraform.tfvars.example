@@ -17,4 +17,4 @@ grafana_service_account_token = "glsa_REPLACE_ME"
 # Override the stack URL or channels only if they change:
 # grafana_url            = "https://clabsmento.grafana.net"
 # slack_channel_critical = "#alerts-critical"
-# slack_channel_warnings = "#alerts-warnings"
+# slack_channel_warnings = "#alerts-warning"
