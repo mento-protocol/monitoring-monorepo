@@ -560,9 +560,14 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
       }
       model = jsonencode({
         refId = "A"
+        # No `last_rebalanced_at > 0` guard on purpose: a pool that has
+        # NEVER been rebalanced while sitting in an active breach is the
+        # strongest case of "rebalancer never acted" — exactly the KPI 4
+        # critical we want to page on. The `breach_start > 0` + `breach >
+        # 30m` clauses already filter out healthy never-rebalanced pools,
+        # so the raw `time() - 0` arithmetic can't false-fire on its own.
         expr = join(" and ", [
           "(time() - mento_pool_last_rebalanced_at)",
-          "(mento_pool_last_rebalanced_at > 0)",
           "(mento_pool_deviation_breach_start > 0)",
           "((time() - mento_pool_deviation_breach_start) > 1800)",
           "((time() - mento_pool_last_rebalanced_at) > 1800)",
