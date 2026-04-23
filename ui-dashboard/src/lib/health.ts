@@ -5,7 +5,7 @@
 
 export type HealthStatus = "OK" | "WARN" | "WEEKEND" | "CRITICAL" | "N/A";
 
-import { isWeekend } from "./weekend";
+import { isWeekend, tradingSecondsInRange } from "./weekend";
 
 /**
  * Fallback oracle staleness threshold in seconds.
@@ -188,23 +188,37 @@ export function uptimeColorClass(pct: number): string {
  * UptimeValue tile — both callers read the SAME snapshot so the
  * homepage column and the pool page never disagree.
  *
- * Note: does NOT account for an in-flight open breach. The tile on the
- * pool page adds the live past-grace portion of an open breach for
- * real-time accuracy; the homepage column skips that (open breaches on
- * the aggregate list would flicker constantly and the drift is < 1h
- * per pool). Callers that want the live view should extend this.
+ * Includes the live past-grace portion of an in-flight open breach so
+ * the number matches the pool page's tile. An open breach can tank a
+ * pool's all-time % by tens of points (rolledCritical only counts
+ * CLOSED breaches), and excluding it on the homepage made "EURm/USDm
+ * 100%" render next to "1 ongoing breach · 4.241%" on the pool page.
  */
 export function computePoolUptimePct(pool: {
   source: string;
   healthTotalSeconds?: string;
   cumulativeCriticalSeconds?: string;
+  deviationBreachStartedAt?: string;
 }): number | null {
   if (pool.source.includes("virtual")) return null;
   const total = Number(pool.healthTotalSeconds ?? "0");
   if (!Number.isFinite(total) || total <= 0) return null;
   if (pool.cumulativeCriticalSeconds == null) return null;
-  const critical = Number(pool.cumulativeCriticalSeconds);
-  if (!Number.isFinite(critical)) return null;
+  const rolledCritical = Number(pool.cumulativeCriticalSeconds);
+  if (!Number.isFinite(rolledCritical)) return null;
+
+  // Open-breach live past-grace credit — same math as the tile.
+  // `tradingSecondsInRange` subtracts FX-weekend hours so the numerator
+  // stays on the same basis as `healthTotalSeconds` (the denominator).
+  const openStart = Number(pool.deviationBreachStartedAt ?? "0");
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const graceEnd = openStart + Number(DEVIATION_BREACH_GRACE_SECONDS);
+  const openCritical =
+    openStart > 0 && nowSeconds > graceEnd
+      ? tradingSecondsInRange(graceEnd, nowSeconds)
+      : 0;
+
+  const critical = rolledCritical + openCritical;
   return Math.max(0, Math.min(100, (1 - critical / total) * 100));
 }
 
