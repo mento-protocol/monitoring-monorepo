@@ -1,6 +1,6 @@
 # Mento v3 Monitoring — Technical Specification
 
-Last updated: 2026-04-16
+Last updated: 2026-04-23
 
 ---
 
@@ -27,59 +27,70 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 ## 2. Architecture
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                     Celo Chain (42220)                       │
-│  FPMMs · SortedOracles · BreakerBox · Broker · Reserve      │
-└────────────┬────────────────────────────┬───────────────────┘
-             │                            │
-   Events (HyperSync)            View calls (RPC, every 10-60s)
-             │                            │
-             ▼                            ▼
-  ┌─────────────────────┐     ┌─────────────────────┐
-  │  Envio HyperIndex   │     │  Aegis (NestJS)     │
-  │  (hosted)           │     │  (GCP App Engine)   │
-  └──────────┬──────────┘     └──────────┬──────────┘
-             │                           │
-        GraphQL API                 /metrics (Prometheus)
-             │                           │
-             ▼                           ▼
-  ┌─────────────────────┐     ┌─────────────────────┐
-  │  Hasura / Postgres  │     │  Grafana Agent      │
-  │  (managed by Envio) │     │  (GCP App Engine)   │
-  └──────────┬──────────┘     └──────────┬──────────┘
-             │                           │
-             ▼                           ▼
-  ┌─────────────────────┐     ┌─────────────────────┐
-  │  Next.js Dashboard  │     │  Grafana Cloud      │
-  │  (Vercel)           │     │  Dashboards + Alerts│
-  │  monitoring.mento.org│    │  Alert Rules (TF)   │
-  └─────────────────────┘     └──────────┬──────────┘
-                                         │
-                                    Notifications
-                                         │
-                              ┌──────────┴──────────┐
-                              │  Discord (8 channels)│
-                              │  Splunk On-Call      │
-                              └─────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│            Celo Mainnet (42220)  +  Monad Mainnet (143)                │
+│   FPMMs · SortedOracles · BreakerBox · Broker · Reserve                │
+└──────┬───────────────────────────────────────────┬────────────────────┘
+       │                                           │
+ Events (HyperSync)                         View calls (RPC, 10-60s)
+       │                                           │
+       ▼                                           ▼
+┌─────────────────────┐                ┌─────────────────────┐
+│  Envio HyperIndex   │                │  Aegis (NestJS)     │
+│  (hosted)           │                │  (GCP App Engine)   │
+└─────┬─────────┬─────┘                └──────────┬──────────┘
+      │         │                                 │
+ GraphQL API    │ GraphQL API               /metrics (Prometheus)
+      │         │                                 │
+      ▼         ▼                                 ▼
+┌───────────┐ ┌────────────────┐        ┌──────────────────────┐
+│ Next.js   │ │ metrics-bridge │        │  Grafana Agent       │
+│ Dashboard │ │ (Cloud Run,    │        │  (GCP App Engine,    │
+│ (Vercel)  │ │  mento-        │        │   aegis repo)        │
+│ monitoring│ │  monitoring    │        └──────────┬───────────┘
+│ .mento.org│ │  GCP project)  │                   │
+└───────────┘ └────────┬───────┘        remote_write (two scrape jobs)
+                       │                           │
+              /metrics (Prometheus gauges)         │
+                       │                           │
+                       └────────┬──────────────────┘
+                                ▼
+                  ┌─────────────────────────┐
+                  │  Grafana Cloud          │
+                  │  clabsmento.grafana.net │
+                  │  Dashboards + Alerts    │
+                  │  Alert Rules (TF)       │
+                  └──────────┬──────────────┘
+                             │
+                       Notifications
+                             │
+                ┌────────────┴─────────────┐
+                │ Discord (Aegis v2)       │
+                │ Splunk On-Call           │
+                │ Slack #alerts-v3 (v3)    │
+                └──────────────────────────┘
 ```
 
-**Two parallel data paths:**
+**Three data paths share a common Grafana Cloud + Grafana Agent stack:**
 
-1. **Dashboard path** (left): Envio indexes on-chain events → Hasura GraphQL → Next.js dashboard
-2. **Alerting path** (right): Aegis polls contract state via RPC → Prometheus metrics → Grafana Agent → Grafana Cloud → alert rules → Discord/Splunk notifications
+1. **Dashboard path**: Envio indexes on-chain events → Hasura GraphQL → Next.js dashboard
+2. **v2 alerting (Aegis)**: Aegis polls contract state via RPC → `/metrics` → Grafana Agent scrapes + remote-writes → alert rules → Discord + Splunk On-Call
+3. **v3 alerting (metrics-bridge)**: Envio indexes FPMM pool KPIs → bridge polls Hasura every 30s → `mento_pool_*` gauges → Grafana Agent scrapes → Slack `#alerts-v3` (rules pending in `terraform/alerts/`)
 
 ### Components
 
-| Component      | Technology            | Hosting       | Repo Path                               |
-| -------------- | --------------------- | ------------- | --------------------------------------- |
-| Indexer        | Envio HyperIndex      | Envio hosted  | `indexer-envio/`                        |
-| GraphQL API    | Hasura (auto-managed) | Envio hosted  | —                                       |
-| Dashboard      | Next.js 16 + Plotly   | Vercel        | `ui-dashboard/`                         |
-| Shared config  | TypeScript            | —             | `shared-config/`                        |
-| Aegis (v2)     | NestJS                | GCP App Eng   | `../aegis/`                             |
-| Grafana Agent  | Docker                | GCP App Eng   | `../aegis/grafana-agent/`               |
-| Alert rules    | Terraform (HCL)       | Grafana Cloud | `../aegis/terraform/grafana-alerts/`    |
-| Grafana dashbd | Terraform (HCL)       | Grafana Cloud | `../aegis/terraform/grafana-dashboard/` |
+| Component            | Technology             | Hosting                      | Repo Path                               |
+| -------------------- | ---------------------- | ---------------------------- | --------------------------------------- |
+| Indexer              | Envio HyperIndex       | Envio hosted                 | `indexer-envio/`                        |
+| GraphQL API          | Hasura (auto-managed)  | Envio hosted                 | —                                       |
+| Dashboard            | Next.js 16 + Plotly    | Vercel                       | `ui-dashboard/`                         |
+| Shared config        | TypeScript             | —                            | `shared-config/`                        |
+| Metrics bridge (v3)  | Node 22 + prom-client  | Cloud Run (mento-monitoring) | `metrics-bridge/`                       |
+| Aegis (v2)           | NestJS                 | App Engine (mento-prod)      | `../aegis/`                             |
+| Grafana Agent        | Docker (grafana/agent) | App Engine (mento-prod)      | `../aegis/grafana-agent/`               |
+| Aegis alert rules    | Terraform (HCL)        | Grafana Cloud                | `../aegis/terraform/grafana-alerts/`    |
+| Aegis dashboards     | Terraform (HCL)        | Grafana Cloud                | `../aegis/terraform/grafana-dashboard/` |
+| v3 alert rules (new) | Terraform (HCL)        | Grafana Cloud                | `terraform/alerts/` (TBD)               |
 
 ---
 
@@ -288,16 +299,16 @@ The dashboard is fully multichain — all chains are shown together (no network 
 
 ## 9. Known Limitations
 
-| Limitation                           | Details                                                                                                         |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| Endpoint hash changes on each deploy | Envio free tier generates new URL per deploy; requires Vercel env var update                                    |
-| Hasura 1000-row cap                  | Envio hosted Hasura silently caps all queries at 1000 rows; use `fetchAllSnapshotPages` or indexer-side rollups |
-| Cannot run two indexers locally      | Shared Hasura port 8080; use separate Docker projects                                                           |
-| SortedOracles on Sepolia             | Contracts return zero address; oracle indexing mainnet-only                                                     |
-| Gap-fill not yet implemented         | PoolSnapshot charts may show gaps for periods with no activity                                                  |
-| Monad pools pending                  | Pool contracts deployed; indexer config ready                                                                   |
-| No Liquity v2 indexing               | TroveManager / StabilityPool — needed for Stability Pool headroom alerts                                        |
-| v3 alerting not yet wired            | Aegis covers v2 KPIs; v3 FPMM-specific alerts are next                                                          |
+| Limitation                           | Details                                                                                                                             |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Endpoint hash changes on each deploy | Envio free tier generates new URL per deploy; requires Vercel env var update                                                        |
+| Hasura 1000-row cap                  | Envio hosted Hasura silently caps all queries at 1000 rows; use `fetchAllSnapshotPages` or indexer-side rollups                     |
+| Cannot run two indexers locally      | Shared Hasura port 8080; use separate Docker projects                                                                               |
+| SortedOracles on Sepolia             | Contracts return zero address; oracle indexing mainnet-only                                                                         |
+| Gap-fill not yet implemented         | PoolSnapshot charts may show gaps for periods with no activity                                                                      |
+| Monad pools pending                  | Pool contracts deployed; indexer config ready                                                                                       |
+| No Liquity v2 indexing               | TroveManager / StabilityPool — needed for Stability Pool headroom alerts                                                            |
+| v3 alert rules pending               | Metrics pipeline is live (metrics-bridge → Grafana Agent → Grafana Cloud); Terraform rules + Slack contact point are next — see §10 |
 
 ---
 
@@ -319,18 +330,46 @@ Aegis is live for Mento v2 alerts. It polls v2 contract state via RPC every 10-6
 
 ### Next — v3 FPMM Alerts
 
-Extend alerting to cover v3 FPMM pool KPIs (see §5 for thresholds). The `metrics-bridge` package (Cloud Run) exports pool KPIs as Prometheus gauges. Remaining work: Grafana alert rules in Terraform (Slack notifications).
+**Metrics pipeline is live.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls the Envio indexer every 30s and exports `mento_pool_*` Prometheus gauges. Grafana Agent (in the `aegis` repo) scrapes it and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). Verified: 11 FPMM pools across Celo + Monad mainnet reporting with <30s staleness.
+
+**Remaining work:**
+
+1. Create Slack `#alerts-v3` channel + incoming-webhook; stash URL as `TF_VAR_slack_webhook_alerts_v3`
+2. Build `terraform/alerts/` in this repo — Grafana provider + Slack contact point + notification policy + 5 rules (see §5 thresholds)
+3. Smoke-test by briefly lowering a threshold and confirming Slack fires
+
+**`service` label convention** (matches the existing Aegis pattern of `service = monitored-domain`, not producer):
+
+| `service`        | Covers                                                                   |
+| ---------------- | ------------------------------------------------------------------------ |
+| `fpmms`          | FPMM pool alerts (deviation, limits, rebalancer, oracle_ok) — initial PR |
+| `metrics-bridge` | Bridge self-monitoring (poll errors, stale polls) — initial PR           |
+| `oracles`        | Oracle report outliers (future; distinct from Aegis's `oracle-relayers`) |
+| `cdps`           | Stability-pool / CDP (future; blocked on Liquity v2 indexing)            |
+
+All four route to `#alerts-v3` via a single notification-policy regex match `service =~ "fpmms|oracles|cdps|metrics-bridge"`. Split later by severity or additional channels without changing series labels.
+
+**Pipeline topology** (v3 path, as distinct from the Aegis v2 path):
+
+```
+Envio Hasura ── (poll 30s) ── metrics-bridge ── /metrics ── Grafana Agent ── remote_write ── Grafana Cloud
+ (monitoring-monorepo)          (Cloud Run,            (aegis repo, App      (clabsmento.
+                                 mento-monitoring       Engine in             grafana.net)
+                                 GCP project)           mento-prod)
+```
+
+Image rollouts for the bridge go through `gcloud run services update` (CI uses WIF); Terraform owns service shape only (`lifecycle.ignore_changes` on the image field). Grafana Agent's Dockerfile required four separate fixes (#51–#54 in aegis) before the first successful deploy because the #47 security-hardening pass was never actually built.
 
 ## 11. Future Plans
 
 ### Next
 
-- v3 FPMM alerting (oracle liveness, deviation, trading limits, rebalancer, stability pool)
+- **v3 FPMM alert rules** (`terraform/alerts/` module) — oracle liveness, deviation warn/crit, trading limits, rebalancer stale, bridge not reporting. Pipeline already live (see §10).
 
 ### Backlog
 
-- Liquity v2 CDP indexing (TroveManager, StabilityPool)
-- Monad pool indexing (config ready, deployment pending)
+- Oracle report-outlier alerts (`service=oracles`) — indexer support for historical oracle prices pending
+- Liquity v2 CDP indexing (TroveManager, StabilityPool) — unblocks `service=cdps` stability-pool alerts
 - Gap-fill logic for snapshot charts
 - Streamlit sandbox
 - ClickHouse sink for heavy analytics

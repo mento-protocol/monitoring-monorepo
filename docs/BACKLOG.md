@@ -1,24 +1,45 @@
 # Monitoring Monorepo — Task Backlog
 
-Last updated: 2026-04-16
+Last updated: 2026-04-23
 
 ## Next — v3 Alerting
 
-The `metrics-bridge` package (Cloud Run) exports FPMM pool KPIs as Prometheus gauges. The remaining work is defining Grafana alert rules in Terraform (Slack notifications).
+Metrics pipeline is **live end-to-end**: `metrics-bridge` (Cloud Run in the `mento-monitoring` GCP project) → Grafana Agent (`mento-prod` App Engine) → Grafana Cloud Prometheus (`clabsmento.grafana.net`). 11 FPMM pools across Celo + Monad mainnet reporting every 30s, `mento_pool_bridge_last_poll` staying under ~30s stale. Remaining work is defining alert rules in Terraform and wiring the Slack contact point.
 
-### v3 Alert Rules
+### Blocking / coordination
 
-- [ ] **Oracle liveness** — warn >0.8, crit ≥1 (oracle expired). FPMM pools only.
-- [ ] **Deviation ratio** — warn on breach (`priceDifference > rebalanceThreshold`), crit when breach lasts >60min. Indexer tracks `deviationBreachStartedAt` as the grace-window anchor.
-- [ ] **Trading limit pressure** — warn >0.8, crit ≥1.0 (limit hit). FPMM pools only.
-- [ ] **Rebalancer liveness** — crit if no rebalance in threshold window when deviation is high
-- [ ] **Stability Pool headroom** — crit ≤0 (undercollateralized). Blocked on Liquity v2 indexing.
+- [ ] **Slack `#alerts-v3` channel + webhook** — create channel, add Grafana Cloud incoming webhook integration, stash the URL as `TF_VAR_slack_webhook_alerts_v3` (repo secret + local env). Naming is `#alerts-v3` (not `-pools`) so `oracles` / `cdps` / `metrics-bridge` alerts land in the same channel.
+
+### v3 Alert Rules — first-cut, to land in `terraform/alerts/`
+
+Each rule attaches a `service` label (drives notification-policy routing to Slack). Convention: `service` = monitored domain (matches the existing Aegis pattern of `oracle-relayers` / `trading-limits` / `reserve` — narrow, per alert category, not per producer):
+
+- [ ] `service=fpmms` — **Oracle liveness on pool** — warn on live-ratio >0.8 (`(time() - mento_pool_oracle_timestamp) / mento_pool_oracle_expiry`), critical on `mento_pool_oracle_ok == 0`.
+- [ ] `service=fpmms` — **Deviation breach** — warn on `mento_pool_deviation_ratio > 1` OR `mento_pool_deviation_breach_start > 0`. Critical when the breach has persisted >60min (`time() - mento_pool_deviation_breach_start > 3600`). Indexer anchors the grace-window timestamp.
+- [ ] `service=fpmms` — **Trading limit pressure** — warn on `max(mento_pool_limit_pressure) > 0.8`, critical on `>= 1`.
+- [ ] `service=fpmms` — **Rebalancer stale** — critical when deviation has been breaching for >30min AND `mento_pool_last_rebalanced_at` older than 30min (i.e. the on-chain rebalancer hasn't taken action under pressure).
+- [ ] `service=metrics-bridge` — **Bridge not reporting** — critical if `time() - mento_pool_bridge_last_poll > 90` (3x the 30s poll interval) OR `rate(mento_pool_bridge_poll_errors_total[5m]) > 0`.
+
+### Reserved `service` values (future work, not in first PR)
+
+- `service=oracles` — oracle report quality (large deltas, outlier detection). Distinct from Aegis's existing `oracle-relayers` which monitors relayer liveness, not report content.
+- `service=cdps` — CDP / stability-pool / liquidity alerts once the indexer tracks them (blocked on Liquity v2 indexing).
+
+All four values route to `#alerts-v3` via a single notification-policy regex match `service =~ "fpmms|oracles|cdps|metrics-bridge"`. Split later by severity or add per-domain channels without relabelling series.
 
 ### Infrastructure
 
-- [ ] **Grafana Agent scrape target** — add metrics-bridge URL to Aegis agent config
-- [ ] **Slack channel for v3 alerts** — create `#alerts-v3-pools` with webhook
-- [ ] **Terraform alert rules** — add to `terraform/alerts/` in this monorepo
+- [x] **GCP project `mento-monitoring`** — bootstrapped via terraform, org-level SA granted owner on new project (PRs #197 terraform-owner-bootstrap)
+- [x] **Cloud Run `metrics-bridge`** — 512Mi mem, `cpu_idle=false`, `/health` probe path (Cloud Run v2 reserves `/healthz` at the frontend)
+- [x] **Workload Identity Federation** for CI deploys — no long-lived keys (PR #200)
+- [x] **Image rollouts out of Terraform** — `lifecycle.ignore_changes` on image, `gcloud run services update` drives rollouts, `--revision-suffix=<sha>-<run-id>` makes rollbacks self-describing (PR #201)
+- [x] **Per-chain Hasura URL consolidation** — single `NEXT_PUBLIC_HASURA_URL`; dropped hosted testnet network entries (PR #195)
+- [x] **Grafana Agent scrape target** — `grafana-agent/agent.yaml.tmpl` polls `metrics-bridge-pxlhqhqvxq-ew.a.run.app/metrics` every 30s (aegis PR #48)
+- [x] **Grafana Agent container hardening chain** — four latent breakages from aegis #47 surfaced in order: Alpine→Debian commands (#51), UID/GID 1000 collision (#52), deprecated `server:` YAML block (#53), WAL-dir permissions under non-root user (#54)
+
+### Out of scope for first PR
+
+- [ ] **Stability Pool headroom alert** — blocked on Liquity v2 CDP indexing (see below)
 
 ---
 
