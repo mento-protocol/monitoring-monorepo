@@ -48,7 +48,7 @@ locals {
     {{ if .Annotations.description }}_{{ .Annotations.description }}_
     {{ end }}
     {{ if .Labels.pool_id -}}
-    *Pool:* <{{ .Labels.block_explorer_url }}|`{{ .Labels.pool_address_short }}`>   *Started:* {{ .StartsAt.Format "15:04 UTC" }}
+    *Pool:* {{ if .Labels.block_explorer_url }}<{{ .Labels.block_explorer_url }}|`{{ .Labels.pool_address_short }}`>{{ else }}`{{ .Labels.pool_address_short }}`{{ end }}   *Started:* {{ .StartsAt.Format "15:04 UTC" }}
     <https://monitoring.mento.org/pool/{{ .Labels.pool_id }}|Open pool>   ·   <{{ .GeneratorURL }}|View alert>
     {{ else -}}
     *Started:* {{ .StartsAt.Format "15:04 UTC" }}   ·   <{{ .GeneratorURL }}|View alert>

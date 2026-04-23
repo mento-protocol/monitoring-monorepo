@@ -540,7 +540,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     no_data_state  = "OK"
 
     annotations = {
-      description = "Deviation threshold has been breached for {{ humanizeDuration $values.A.Value }} and the rebalancer hasn't acted in more than 30 minutes. Likely stuck bot, insufficient gas, or contract-level failure."
+      description = "Deviation threshold has been breached for {{ humanizeDuration $values.BreachAge.Value }} and the rebalancer hasn't acted in more than 30 minutes. Likely stuck bot, insufficient gas, or contract-level failure."
     }
 
     labels = {
@@ -548,8 +548,16 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
       severity = "critical"
     }
 
-    # Fires only when: breach is active AND breach > 1h AND last rebalance > 30min ago.
-    # Returns seconds-since-last-rebalance so the annotation is informative.
+    # A = seconds since last rebalance, filtered to only the pools where all
+    # four fire conditions hold (breach active, breach > 1h, idle > 30m).
+    # This is the threshold driver — `gt 0` means "any series returned".
+    #
+    # No `last_rebalanced_at > 0` guard on purpose: a pool that has NEVER
+    # been rebalanced while sitting in an active breach is the strongest
+    # case of "rebalancer never acted" — exactly the KPI 4 critical we
+    # want to page on. The `breach_start > 0` + `breach > 1h` clauses
+    # already filter out healthy never-rebalanced pools, so the raw
+    # `time() - 0` arithmetic can't false-fire on its own.
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -559,18 +567,30 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
       }
       model = jsonencode({
         refId = "A"
-        # No `last_rebalanced_at > 0` guard on purpose: a pool that has
-        # NEVER been rebalanced while sitting in an active breach is the
-        # strongest case of "rebalancer never acted" — exactly the KPI 4
-        # critical we want to page on. The `breach_start > 0` + `breach >
-        # 1h` clauses already filter out healthy never-rebalanced pools,
-        # so the raw `time() - 0` arithmetic can't false-fire on its own.
         expr = join(" and ", [
           "(time() - mento_pool_last_rebalanced_at)",
           "(mento_pool_deviation_breach_start > 0)",
           "((time() - mento_pool_deviation_breach_start) > 3600)",
           "((time() - mento_pool_last_rebalanced_at) > 1800)",
         ])
+        instant = true
+      })
+    }
+
+    # BreachAge = seconds since breach started. Used in the annotation —
+    # "breached for X" reports *breach* duration, not idle duration (those
+    # can differ: a breach might be 2h old while the rebalancer tried
+    # 45m ago).
+    data {
+      ref_id         = "BreachAge"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "BreachAge"
+        expr    = "(time() - mento_pool_deviation_breach_start) and (mento_pool_deviation_breach_start > 0)"
         instant = true
       })
     }
