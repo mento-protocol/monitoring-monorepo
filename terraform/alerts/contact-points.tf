@@ -61,7 +61,7 @@ locals {
   # unacknowledged pages don't go silent overnight.
   notify_critical = {
     contact_point   = grafana_contact_point.slack_critical.name
-    group_by        = ["alertname", "chain_id", "pool_id"]
+    group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
     group_wait      = "30s"
     group_interval  = "5m"
     repeat_interval = "1h"
@@ -69,7 +69,7 @@ locals {
 
   notify_warning = {
     contact_point   = grafana_contact_point.slack_warnings.name
-    group_by        = ["alertname", "chain_id", "pool_id"]
+    group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
     group_wait      = "1m"
     group_interval  = "10m"
     repeat_interval = "4h"
