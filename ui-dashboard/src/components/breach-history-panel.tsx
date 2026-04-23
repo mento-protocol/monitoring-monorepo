@@ -304,7 +304,13 @@ function BreachHistoryPanelInner({
   const rawTotal = countData?.DeviationThresholdBreach?.length ?? 0;
   const countCapped = rawTotal >= ENVIO_MAX_ROWS;
   const totalPages = rawTotal > 0 ? Math.ceil(rawTotal / limit) : 1;
-  const page = Math.max(1, Math.min(rawPage, totalPages));
+  // Clamp `page` against `totalPages` ONLY when the count is known. With
+  // a degraded count, `totalPages` collapses to 1 and clamping would pin
+  // the user to the first page — operators need to keep paging through
+  // older incidents even when the count query is transiently failing.
+  const page = countError
+    ? Math.max(1, rawPage)
+    : Math.max(1, Math.min(rawPage, totalPages));
   const offset = (page - 1) * limit;
 
   const { data, error, isLoading } = useGQL<{
@@ -480,7 +486,19 @@ function BreachHistoryPanelInner({
         <Pagination
           page={page}
           pageSize={limit}
-          total={rawTotal}
+          // When the count query failed we can't know the total — infer
+          // "at least one more page" from the length of the returned
+          // slice. Full page → bump total so Next stays enabled; short
+          // page → total pins at current page so Next disables. Keeps
+          // operators able to drill into older breaches even when only
+          // pagination metadata is degraded.
+          total={
+            countError
+              ? rows.length === limit
+                ? (page + 1) * limit
+                : page * limit
+              : rawTotal
+          }
           onPageChange={setRawPage}
         />
         {countCapped && (
