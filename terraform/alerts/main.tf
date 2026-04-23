@@ -9,12 +9,12 @@ provider "grafana" {
 # do; empty folders aren't created preemptively.
 resource "grafana_folder" "fpmms" {
   title = "FPMMs"
-  uid   = "mento-fpmms"
+  uid   = "fpmms"
 }
 
 resource "grafana_folder" "metrics_bridge" {
   title = "Metrics Bridge"
-  uid   = "mento-metrics-bridge"
+  uid   = "metrics-bridge"
 }
 
 locals {
