@@ -23,9 +23,9 @@ on:
 # Serialize all deploys: a workflow-name-only group (no SHA, no ref) means
 # every trigger (push, workflow_dispatch) queues behind the in-flight run.
 # cancel-in-progress: false ensures the new run waits instead of cancelling.
-# This prevents two close main-merges from racing on `terraform apply` and
-# the older deploy finishing last, stomping a newer image. Also handles
-# manual re-dispatch (retry after transient failure) correctly.
+# Prevents two close main-merges from racing on `gcloud run services update`,
+# where the older deploy could otherwise finish last and stomp the newer
+# image. Also handles manual re-dispatch (retry after transient failure).
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
@@ -84,29 +84,35 @@ jobs:
           IMAGE="${AR_REPO}/metrics-bridge@${DIGEST}"
           echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
-
-      - name: Deploy to Cloud Run via Terraform
-        env:
-          # All required Terraform variables from GitHub secrets.
-          # GCP vars are provided by the auth step above.
-          TF_VAR_metrics_bridge_image: ${{ env.IMAGE }}
-          TF_VAR_vercel_token: ${{ secrets.VERCEL_TOKEN }}
-          TF_VAR_upstash_email: ${{ secrets.UPSTASH_EMAIL }}
-          TF_VAR_upstash_api_key: ${{ secrets.UPSTASH_API_KEY }}
-          TF_VAR_auth_google_id: ${{ secrets.AUTH_GOOGLE_ID }}
-          TF_VAR_auth_google_secret: ${{ secrets.AUTH_GOOGLE_SECRET }}
-          TF_VAR_auth_secret: ${{ secrets.AUTH_SECRET }}
-          TF_VAR_cron_secret: ${{ secrets.CRON_SECRET }}
-          TF_VAR_blob_read_write_token: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
-          TF_VAR_gcp_org_id: ${{ secrets.GCP_ORG_ID }}
-          TF_VAR_gcp_billing_account: ${{ secrets.GCP_BILLING_ACCOUNT }}
+      - name: Deploy to Cloud Run
+        # Terraform owns the service shape (probes, env, scaling); image
+        # rollouts happen via `gcloud run services update`. The Cloud Run
+        # resource has `lifecycle.ignore_changes = [... image]`, so an
+        # equivalent `terraform apply -var=metrics_bridge_image=...` would
+        # be a no-op.
+        #
+        # Rollback: `gcloud run services update-traffic metrics-bridge \
+        #   --to-revisions=<prev-revision>=100 --region=europe-west1`.
+        # Previous revision listed below so incident responders have it.
         run: |
-          terraform -chdir=terraform init -input=false
-          terraform -chdir=terraform apply -auto-approve -input=false \
-            -target='google_cloud_run_v2_service.metrics_bridge[0]' \
-            -target='google_cloud_run_v2_service_iam_member.metrics_bridge_public[0]'
+          # Revision name format: <short-sha>-<run-id>. The SHA doubles as a
+          # git-log pointer; the run-id disambiguates so re-running the same
+          # commit (workflow_dispatch, "re-run failed jobs") doesn't hit
+          # Cloud Run's 409 "revision already exists". GITHUB_RUN_ID is the
+          # globally-unique workflow invocation id.
+          gcloud run services update metrics-bridge \
+            --project="$GCP_PROJECT" \
+            --region="$GCP_REGION" \
+            --image="$IMAGE" \
+            --revision-suffix="${GITHUB_SHA::7}-${GITHUB_RUN_ID}"
+
+          echo "Recent revisions (for rollback reference):"
+          gcloud run revisions list \
+            --service=metrics-bridge \
+            --project="$GCP_PROJECT" \
+            --region="$GCP_REGION" \
+            --limit=3 \
+            --format='table(name, creationTimestamp.date(tz=UTC), active)'
 
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()

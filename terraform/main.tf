@@ -336,12 +336,14 @@ resource "google_artifact_registry_repository" "metrics_bridge" {
 # Polls Hasura for FPMM pool KPIs and exports Prometheus gauges.
 # Scraped by Grafana Agent (Aegis repo) → Grafana Cloud alert rules.
 #
-# Image is built and pushed by CI (GitHub Actions), not Terraform.
-# First deploy: run `pnpm bridge:deploy` to build the image, then
-# set metrics_bridge_image in terraform.tfvars and `pnpm infra:apply`.
+# Image is managed out-of-band: `pnpm bridge:deploy` (or the CI workflow)
+# runs `gcloud run services update metrics-bridge --image=<digest>` after
+# Cloud Build pushes a new revision. Terraform owns the *shape* of the
+# service (probes, env, scaling, memory) and ignores image drift via
+# `lifecycle.ignore_changes` so running `pnpm infra:apply` never reverts
+# the image back to the bootstrap placeholder.
 
 resource "google_cloud_run_v2_service" "metrics_bridge" {
-  count               = var.metrics_bridge_image != "" ? 1 : 0
   project             = google_project.monitoring.project_id
   name                = "metrics-bridge"
   location            = var.gcp_region
@@ -397,16 +399,38 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
       }
     }
   }
+
+  lifecycle {
+    # Image rollouts are triggered by `gcloud run services update` from the
+    # deploy path (scripts/deploy-bridge.sh and the GitHub workflow), not by
+    # terraform. Ignoring the attribute here means `pnpm infra:apply` won't
+    # revert a freshly-deployed image back to the bootstrap placeholder.
+    ignore_changes = [template[0].containers[0].image]
+  }
 }
 
 # Allow unauthenticated access so Grafana Agent can scrape /metrics.
 resource "google_cloud_run_v2_service_iam_member" "metrics_bridge_public" {
-  count    = var.metrics_bridge_image != "" ? 1 : 0
-  project  = google_cloud_run_v2_service.metrics_bridge[0].project
-  location = google_cloud_run_v2_service.metrics_bridge[0].location
-  name     = google_cloud_run_v2_service.metrics_bridge[0].name
+  project  = google_cloud_run_v2_service.metrics_bridge.project
+  location = google_cloud_run_v2_service.metrics_bridge.location
+  name     = google_cloud_run_v2_service.metrics_bridge.name
   role     = "roles/run.invoker"
   member   = "allUsers"
+}
+
+# State migration: these resources used to be `count`-gated behind
+# `var.metrics_bridge_image != ""`. Removing `count` changes the address from
+# `[0]` → unindexed; the `moved` blocks make the rename explicit so a fresh
+# state (DR, new env, co-maintainer pulling main without `terraform state mv`)
+# reproduces the migration cleanly instead of planning destroy+recreate.
+moved {
+  from = google_cloud_run_v2_service.metrics_bridge[0]
+  to   = google_cloud_run_v2_service.metrics_bridge
+}
+
+moved {
+  from = google_cloud_run_v2_service_iam_member.metrics_bridge_public[0]
+  to   = google_cloud_run_v2_service_iam_member.metrics_bridge_public
 }
 
 # ── Dev Team IAM ─────────────────────────────────────────────────────────────
@@ -520,24 +544,4 @@ resource "google_project_iam_member" "ci_deployer" {
   member   = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
 
   depends_on = [google_project_iam_member.terraform_owner]
-}
-
-# The CI workflow runs `terraform apply -target=...`, so the deployer needs
-# read/write on the Terraform state bucket (in a different project).
-resource "google_storage_bucket_iam_member" "ci_deployer_tfstate" {
-  bucket = "mento-terraform-tfstate-6ed6"
-  role   = "roles/storage.objectUser"
-  member = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
-}
-
-# The google provider in this module is configured with
-# `impersonate_service_account = var.terraform_service_account`, so whenever
-# the CI deployer runs `terraform apply` it mints an access token for
-# `org-terraform@mento-terraform-seed-ffac`. That STS exchange requires
-# `iam.serviceAccounts.getAccessToken`, which comes from tokenCreator on the
-# target SA (not from project-level serviceAccountUser).
-resource "google_service_account_iam_member" "ci_deployer_impersonate_org_terraform" {
-  service_account_id = "projects/-/serviceAccounts/${var.terraform_service_account}"
-  role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
 }
