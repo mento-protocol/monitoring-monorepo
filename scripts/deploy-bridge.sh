@@ -96,13 +96,16 @@ echo "Resolved: ${IMAGE_BY_DIGEST}"
 #   --to-revisions=<prev-revision>=100 --region="$REGION"
 echo ""
 echo "Rolling Cloud Run revision..."
-# --revision-suffix ties the revision name to the commit SHA (same pattern as
-# the CI workflow) so rollback lookups are self-describing.
+# Revision name format: <short-sha>-<epoch>. Epoch disambiguator avoids the
+# 409 "revision already exists" error when redeploying the same commit
+# (same pattern as the CI workflow, which uses $GITHUB_RUN_ID for the
+# equivalent role).
+REVISION_SUFFIX="${TAG}-$(date +%s)"
 gcloud run services update metrics-bridge \
   --project="$PROJECT" \
   --region="$REGION" \
   --image="$IMAGE_BY_DIGEST" \
-  --revision-suffix="$TAG"
+  --revision-suffix="$REVISION_SUFFIX"
 
 echo ""
 echo "Recent revisions (for rollback reference):"
