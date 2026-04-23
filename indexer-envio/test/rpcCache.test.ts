@@ -4,6 +4,7 @@ import {
   _resetRebalancingStateCacheForTests,
   _resetReportExpiryInFlightForTests,
   _setRpcClientForTests,
+  _testHooks,
   fetchRebalancingState,
   fetchReportExpiry,
 } from "../src/rpc";
@@ -25,6 +26,7 @@ describe("fetchRebalancingState — LRU cache", () => {
   let callCount = 0;
   let lastArgs: any;
   let mockImpl: (args: any) => Promise<unknown>;
+  let originalDelayFn: typeof _testHooks.delayFn;
 
   beforeEach(() => {
     callCount = 0;
@@ -38,11 +40,16 @@ describe("fetchRebalancingState — LRU cache", () => {
       readContract: (args: unknown) => mockImpl(args),
     });
     _resetRebalancingStateCacheForTests();
+    // Block-not-available retries sleep before falling back; no-op the
+    // delay so the fallback test completes quickly.
+    originalDelayFn = _testHooks.delayFn;
+    _testHooks.delayFn = async () => {};
   });
 
   afterEach(() => {
     _setRpcClientForTests(CHAIN, null);
     _resetRebalancingStateCacheForTests();
+    _testHooks.delayFn = originalDelayFn;
   });
 
   it("serves the second call from cache when (chain, addr, block) match", async () => {
@@ -81,6 +88,44 @@ describe("fetchRebalancingState — LRU cache", () => {
     assert.equal(callCount, 1);
     assert.deepEqual(a, b);
     assert.deepEqual(b, c);
+  });
+
+  it("does NOT cache a fallback response — a retry refires the RPC", async () => {
+    // Drive `readContractWithBlockFallback` into its block-not-available
+    // fallback branch: throw a matching error until all retries exhaust,
+    // then resolve. Per rpc.ts's matcher (BLOCK_NOT_AVAILABLE_RE), the
+    // error message must include "not available" or "out of range". The
+    // fallback call omits `blockNumber` — assert via the args we receive.
+    let firstSettled = false;
+    mockImpl = async (args: any) => {
+      callCount++;
+      if (!firstSettled) {
+        // 1 original + 3 retries = 4 rejected, then the 5th call is the
+        // fallback (no blockNumber). Reject 4 times then succeed.
+        if (callCount <= 4) {
+          throw new Error("block is out of range");
+        }
+        // Fallback call — no blockNumber in args.
+        if (args.blockNumber !== undefined) {
+          throw new Error("unexpected blockNumber on fallback call");
+        }
+        firstSettled = true;
+        return REBALANCING_TUPLE as unknown;
+      }
+      // Second fetchRebalancingState call: normal success with block.
+      return REBALANCING_TUPLE as unknown;
+    };
+    const first = await fetchRebalancingState(CHAIN, POOL, 400n);
+    assert.isNotNull(first);
+    const callsAfterFirst = callCount;
+    // Fallback happened; cache must NOT serve this on the next call.
+    const second = await fetchRebalancingState(CHAIN, POOL, 400n);
+    assert.isNotNull(second);
+    assert.isAbove(
+      callCount,
+      callsAfterFirst,
+      "fallback response must not be cached — second call should have hit RPC",
+    );
   });
 
   it("does NOT cache null results — a retry refires the RPC", async () => {
@@ -141,11 +186,12 @@ describe("fetchRebalancingState — LRU cache", () => {
   });
 });
 
-describe("fetchReportExpiry — in-flight dedup", () => {
+describe("fetchReportExpiry — in-flight dedup + cache hygiene", () => {
   const CHAIN = 42220;
   const FEED = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
   let callCount = 0;
   let mockImpl: (args: any) => Promise<unknown>;
+  let originalDelayFn: typeof _testHooks.delayFn;
 
   beforeEach(() => {
     callCount = 0;
@@ -157,11 +203,14 @@ describe("fetchReportExpiry — in-flight dedup", () => {
       readContract: (args: unknown) => mockImpl(args),
     });
     _resetReportExpiryInFlightForTests();
+    originalDelayFn = _testHooks.delayFn;
+    _testHooks.delayFn = async () => {};
   });
 
   afterEach(() => {
     _setRpcClientForTests(CHAIN, null);
     _resetReportExpiryInFlightForTests();
+    _testHooks.delayFn = originalDelayFn;
   });
 
   it("dedups concurrent in-flight calls for the same (chain, feedID, block)", async () => {
@@ -188,5 +237,57 @@ describe("fetchReportExpiry — in-flight dedup", () => {
     assert.equal(a, 3600n);
     assert.equal(b, 3600n);
     assert.equal(c, 3600n);
+  });
+
+  it("does NOT populate the value cache on a fallback response", async () => {
+    // Drive the block-not-available fallback path. The existing guard
+    // in fetchReportExpiry (!usedAnyFallback → reportExpiryCache.set)
+    // prevents the returned value from being cached when any of the
+    // underlying reads fell back to `latest`. A second call at the
+    // same key must refire RPC instead of reading a stale cached
+    // fallback response.
+    let firstSettled = false;
+    mockImpl = async (args: any) => {
+      callCount++;
+      if (!firstSettled) {
+        if (callCount <= 4) {
+          throw new Error("block is out of range");
+        }
+        if (args.blockNumber !== undefined) {
+          throw new Error("unexpected blockNumber on fallback call");
+        }
+        firstSettled = true;
+        return 3600n;
+      }
+      return 3600n;
+    };
+    const first = await fetchReportExpiry(CHAIN, FEED, 600n);
+    assert.equal(first, 3600n);
+    const callsAfterFirst = callCount;
+    const second = await fetchReportExpiry(CHAIN, FEED, 600n);
+    assert.equal(second, 3600n);
+    assert.isAbove(
+      callCount,
+      callsAfterFirst,
+      "fallback response must not be cached — second call should have hit RPC",
+    );
+  });
+
+  it("returns null on error and does NOT cache the failure", async () => {
+    let shouldThrow = true;
+    mockImpl = async () => {
+      callCount++;
+      if (shouldThrow) {
+        throw new Error("rpc broken");
+      }
+      return 3600n;
+    };
+    const first = await fetchReportExpiry(CHAIN, FEED, 700n);
+    assert.isNull(first);
+    // Let subsequent calls succeed — cache must not have pinned `null`.
+    shouldThrow = false;
+    const second = await fetchReportExpiry(CHAIN, FEED, 700n);
+    assert.equal(second, 3600n);
+    assert.isAbove(callCount, 1, "second call must have hit RPC after null");
   });
 });
