@@ -21,6 +21,14 @@ const USD_PEGGED_SYMBOLS = new Set([
 /** Maps token symbol → USD-per-1-token rate, derived from pool oracle prices. */
 export type OracleRateMap = Map<string, number>;
 
+/** Minimum `Pool` shape `buildOracleRateMap` needs. Exported so callers that
+ *  fetch a slim per-chain query (e.g. ORACLE_RATES) can type their result
+ *  without redeclaring the Pick locally. */
+export type OracleRatePool = Pick<
+  Pool,
+  "token0" | "token1" | "oraclePrice" | "oracleOk"
+>;
+
 /** Legacy symbol aliases (v2 → v3 rebrand). Historical indexed fee transfers
  * may still carry old symbols like "cEUR" instead of "EURm". */
 const LEGACY_ALIASES: ReadonlyArray<[string, string]> = [["cEUR", "EURm"]];
@@ -31,9 +39,7 @@ const LEGACY_ALIASES: ReadonlyArray<[string, string]> = [["cEUR", "EURm"]];
  * extracts the USD rate for the non-USDm token.
  */
 export function buildOracleRateMap(
-  pools: ReadonlyArray<
-    Pick<Pool, "token0" | "token1" | "oraclePrice" | "oracleOk">
-  >,
+  pools: ReadonlyArray<OracleRatePool>,
   network: Network,
 ): OracleRateMap {
   const rates: OracleRateMap = new Map();

@@ -10,7 +10,10 @@ import {
   poolTotalVolumeUSD,
   sumVolumeMap,
 } from "@/lib/volume";
-import { useAllNetworksData } from "@/hooks/use-all-networks-data";
+import {
+  useAllNetworksData,
+  type NetworkData,
+} from "@/hooks/use-all-networks-data";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import { GlobalPoolsTable } from "@/components/global-pools-table";
 import { buildGlobalPoolEntries } from "@/lib/global-pool-entries";
@@ -18,10 +21,20 @@ import { TvlOverTimeChart } from "@/components/tvl-over-time-chart";
 import { VolumeOverTimeChart } from "@/components/volume-over-time-chart";
 import { BreakdownTile } from "@/components/breakdown-tile";
 
-export default function GlobalPage() {
+export default function GlobalPage({
+  initialNetworkData,
+}: {
+  initialNetworkData?: NetworkData[];
+}) {
+  // First paint uses `initialNetworkData` via SWR's `fallbackData`; on
+  // back-navigation the populated SWR cache wins, which is the right call —
+  // cache may hold fresher data from another page's polling cycle (e.g.
+  // /pools also calls useAllNetworksData under the same key). If no other
+  // page has polled, the worst case is the cache matches the SSR payload
+  // anyway, and the next `refreshInterval` tick will refresh either way.
   return (
     <Suspense>
-      <GlobalContent />
+      <GlobalContent initialNetworkData={initialNetworkData} />
     </Suspense>
   );
 }
@@ -65,8 +78,12 @@ function perPoolTvlWindow(
   return result;
 }
 
-function GlobalContent() {
-  const { networkData, isLoading } = useAllNetworksData();
+function GlobalContent({
+  initialNetworkData,
+}: {
+  initialNetworkData?: NetworkData[];
+}) {
+  const { networkData, isLoading } = useAllNetworksData(initialNetworkData);
 
   // Whether any network has a top-level, fees, or snapshots failure.
   // Used to show N/A / "partial data" in KPI tiles rather than silently under-reporting.

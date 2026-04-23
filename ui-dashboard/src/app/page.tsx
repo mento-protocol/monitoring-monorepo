@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import GlobalPage from "./page-client";
 import { fetchHomepageOgData } from "@/lib/homepage-og";
+import { fetchAllNetworks } from "@/lib/fetch-all-networks";
 import { formatUSD } from "@/lib/format";
 
 // Dynamic OG metadata — scoped to the homepage so other routes (/pool/...,
@@ -71,6 +72,12 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default function HomePage() {
-  return <GlobalPage />;
+export default async function HomePage() {
+  // SSR the initial dashboard payload so first paint renders without a
+  // 14-fan-out GraphQL waterfall. `fetchAllNetworks` uses Promise.allSettled
+  // internally and returns per-network fallback on failure, so it won't
+  // throw — but guard anyway in case a truly unexpected error bubbles up;
+  // an undefined initial payload just reverts to the client-only code path.
+  const initialNetworkData = await fetchAllNetworks().catch(() => undefined);
+  return <GlobalPage initialNetworkData={initialNetworkData} />;
 }

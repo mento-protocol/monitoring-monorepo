@@ -54,7 +54,7 @@ import { buildOrderBy } from "@/lib/table-sort";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import { useGQL } from "@/lib/graphql";
 import {
-  ALL_POOLS_WITH_HEALTH,
+  ORACLE_RATES,
   ORACLE_SNAPSHOTS,
   ORACLE_SNAPSHOTS_CHART,
   ORACLE_SNAPSHOTS_COUNT_PAGE,
@@ -349,21 +349,27 @@ function PoolDetail() {
   // never kick off the request on first render. FX pairs serialize
   // briefly behind the pool query, which is fine because charts are
   // already gated behind `!pool` below.
+  //
+  // Uses ORACLE_RATES (slim ~5-field query) rather than ALL_POOLS_WITH_HEALTH
+  // (44 fields + non-oracleOk pools). `buildOracleRateMap`'s Pick<> matches
+  // what we request, and the map output is identical.
   const poolNeedsRates = pool ? !canPricePool(pool, network, new Map()) : false;
-  const { data: allPoolsData, error: allPoolsError } = useGQL<{ Pool: Pool[] }>(
-    poolNeedsRates ? ALL_POOLS_WITH_HEALTH : null,
+  const { data: ratePoolsData, error: allPoolsError } = useGQL<{
+    Pool: Array<Pick<Pool, "token0" | "token1" | "oraclePrice" | "oracleOk">>;
+  }>(
+    poolNeedsRates ? ORACLE_RATES : null,
     { chainId: network.chainId },
     SNAPSHOT_REFRESH_MS,
   );
-  const allPools = useMemo(() => allPoolsData?.Pool ?? [], [allPoolsData]);
+  const ratePools = useMemo(() => ratePoolsData?.Pool ?? [], [ratePoolsData]);
   const rates = useMemo(
-    () => buildOracleRateMap(allPools, network),
-    [allPools, network],
+    () => buildOracleRateMap(ratePools, network),
+    [ratePools, network],
   );
   // ratesLoading only fires for pools that actually need the fetch — a
   // USD-pegged pair with its query disabled shouldn't block chart render.
   const ratesLoading =
-    poolNeedsRates && allPoolsData === undefined && !allPoolsError;
+    poolNeedsRates && ratePoolsData === undefined && !allPoolsError;
   const ratesError = allPoolsError !== undefined;
 
   // Return null while redirect is pending to avoid a transient error flash
@@ -435,7 +441,7 @@ function PoolDetail() {
               // that actually need the rate map (non-USD-pegged pairs) and
               // that would render history if they could. USDm-leg pools
               // keep rendering from the pool's own row without regard to
-              // ALL_POOLS_WITH_HEALTH.
+              // the ORACLE_RATES cross-pool fetch.
               hasError={
                 fpmmPool &&
                 (dailySnapshotError !== undefined ||
@@ -462,7 +468,7 @@ function PoolDetail() {
               // that actually need the rate map (non-USD-pegged pairs) and
               // that would render history if they could. USDm-leg pools
               // keep rendering from the pool's own row without regard to
-              // ALL_POOLS_WITH_HEALTH.
+              // the ORACLE_RATES cross-pool fetch.
               hasError={
                 fpmmPool &&
                 (dailySnapshotError !== undefined ||
