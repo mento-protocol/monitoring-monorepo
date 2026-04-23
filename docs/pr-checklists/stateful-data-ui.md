@@ -97,6 +97,13 @@ If the PR touches a table with pagination, sort, filter, search, or linked chart
 - [ ] Do charts use dedicated queries instead of inheriting paginated/sorted table state?
 - [ ] If not, is that coupling intentional and documented?
 
+### Time units (FX-pool metrics)
+
+- [ ] Are all duration values on the entity in the same unit (trading-seconds, not wall-clock)?
+- [ ] Does the live "open" path use `tradingSecondsInRange(start, now)` (`ui-dashboard/src/lib/weekend.ts:110`) instead of `now - start`?
+- [ ] Do open and closed rows of the same column use the same unit?
+- [ ] Are threshold-derived metrics (peak severity %, etc.) computed from the per-event threshold captured at event time, NOT from the live `pool.rebalanceThreshold`?
+
 ### URL / local state
 
 - [ ] Is table state URL-backed or intentionally local?

@@ -28,6 +28,53 @@ then you are expected to run the dedicated PR checklist before opening or updati
 
 Do not rely on PR review to finish the design. Reviews should catch misses, not define the invariants for the first time.
 
+## Recurring PR-review patterns — fix locally, not in review
+
+Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-connector[bot]`) raised ~100 findings clustered into the categories below. Each rule is a hard must/never — if your change touches one of these areas, follow the linked checklist before opening the PR.
+
+### SWR + Hasura polling — `docs/pr-checklists/swr-polling-hasura.md`
+
+- Every SWR hook polling Hasura MUST set `revalidateOnFocus: false` AND `revalidateOnReconnect: false`. Fix the default at `useGQL` (`ui-dashboard/src/lib/graphql.ts`), not at every call site
+- Pair `AbortSignal.timeout(8_000)` with the 10s refresh interval so a wedged TCP connection can't backpressure the polling loop
+- Distinguish `isLoading` from "data resolved to zero" — never render "100% / no breaches" while `data === undefined`
+- Hasura silently caps queries at 1000 rows; any custom `limit:` in a UI query that feeds a lifetime-aggregate metric is a bug — use a pre-rolled snapshot/rollup entity or `fetchAllSnapshotPages`
+
+### Time-unit math — `docs/pr-checklists/stateful-data-ui.md`
+
+- FX-pool metrics use trading-seconds (FX weekend subtracted). Live "open breach" math MUST use the same unit as stored values — call `tradingSecondsInRange` (`ui-dashboard/src/lib/weekend.ts:110`), never `now - start` directly
+- Threshold-derived metrics (peak severity %, etc.) MUST be computed from the per-event threshold, not from the live mutable `pool.rebalanceThreshold`
+
+### Indexer entity IDs
+
+- Composite IDs MUST include enough entropy to be collision-resistant under same-block writes. `poolId + startedAt(seconds)` is **insufficient** — include `chainId`, `blockNumber`, and `logIndex` (or `txHash + logIndex`)
+- Cumulative counters belong on the entity (rolled up in handlers), not derived client-side from a paginated list
+
+### Terraform + Cloud Run — `docs/pr-checklists/terraform-cloudrun.md`
+
+- Removing `count` / renaming a resource requires a `moved` block; `deletion_protection = true` makes a missed `moved` block fatal to the apply
+- Cloud Run `--revision-suffix` MUST start with a lowercase letter (RFC 1035, ~62% of raw hex SHAs fail) AND MUST be unique per run (append `$GITHUB_RUN_ID` or epoch)
+- Probe paths use `/health`, never `/healthz` (Cloud Run v2 reserves `/healthz` at the frontend)
+- Bootstrap/default `image` MUST respond to the configured probe path; `gcr.io/cloudrun/hello:latest` does NOT serve `/health`
+- Deployer SAs need `roles/iam.serviceAccountTokenCreator` on the runtime SA they impersonate (WIF requirement)
+
+### CI workflow gates — `docs/pr-checklists/ci-workflow-gates.md`
+
+- Required-status workflows MUST NOT use `paths:` / `paths-ignore:` filters — skipped runs leave the check pending forever and silently block unrelated merges
+- Every deploy job MUST gate on `if: github.ref == 'refs/heads/main'`; `push.branches` alone doesn't constrain `workflow_dispatch`
+- Third-party actions in deploy paths MUST be SHA-pinned (`uses: org/action@<40-char-sha> # vX.Y.Z`)
+- Deploy workflows MUST set a workflow-name concurrency group with `cancel-in-progress: false`
+- Cache keys MUST include every input that affects the cached output (codegen scripts, configs, schema)
+
+### Security / CSP
+
+- CSP `connect-src` must include every Hasura + RPC endpoint the dashboard calls
+- CSP must allow `unsafe-eval` for Plotly (or migrate to a sandboxed renderer)
+- Auth/allowlist constants must be centralized — don't repeat domain literals across files
+
+### Migration discipline
+
+- Don't remove an env-var fallback in the same PR that introduces the new var. Keep dual-read for one release so mid-deploy state doesn't break
+
 ## Quick Commands
 
 ```bash
