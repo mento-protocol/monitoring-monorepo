@@ -37,7 +37,7 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 - Every SWR hook polling Hasura MUST set `revalidateOnFocus: false` AND `revalidateOnReconnect: false`. Fix the default at `useGQL` (`ui-dashboard/src/lib/graphql.ts`), not at every call site
 - Pair `AbortSignal.timeout(8_000)` with the 10s refresh interval so a wedged TCP connection can't backpressure the polling loop
 - Distinguish `isLoading` from "data resolved to zero" — never render "100% / no breaches" while `data === undefined`
-- Hasura silently caps queries at 1000 rows; any custom `limit:` in a UI query that feeds a lifetime-aggregate metric is a bug — use a pre-rolled snapshot/rollup entity or `fetchAllSnapshotPages`
+- Hasura silently caps queries at 1000 rows; any custom `limit:` in a UI query that feeds a lifetime-aggregate metric is a bug — use a pre-rolled snapshot/rollup entity, or model your fetch after the offset-pagination pattern in `ui-dashboard/src/hooks/use-all-networks-data.ts` (`fetchPaginatedSnapshotPages`)
 
 ### Time-unit math — `docs/pr-checklists/stateful-data-ui.md`
 
