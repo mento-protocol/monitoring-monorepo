@@ -1,6 +1,8 @@
 import { GraphQLClient } from "graphql-request";
+import { useMemo } from "react";
 import useSWR, { type SWRResponse } from "swr";
 import { useNetwork } from "@/components/network-provider";
+import { pausableRefreshInterval, rateLimitAwareRetry } from "@/lib/gql-retry";
 import type { Network } from "@/lib/networks";
 
 // Cache clients per Hasura URL so we don't recreate on every render
@@ -14,6 +16,12 @@ function getClient(network: Network): GraphQLClient {
   return client;
 }
 
+// Pool-level data (oracle, reserves, health) doesn't move fast enough to
+// justify a shorter interval, and a single pool page fans out ~15–20 parallel
+// useGQL calls — at 10s we were burning the Envio "small" tier monthly quota
+// and hitting 429 "Tier Quota" errors mid-session.
+const DEFAULT_REFRESH_MS = 30_000;
+
 /**
  * Network-aware GraphQL hook.
  * Automatically switches Hasura endpoint based on the current network context.
@@ -25,15 +33,26 @@ function getClient(network: Network): GraphQLClient {
 export function useGQL<T>(
   query: string | null,
   variables?: Record<string, unknown>,
-  refreshInterval = 10_000,
+  refreshInterval: number = DEFAULT_REFRESH_MS,
 ): SWRResponse<T> {
   const { network } = useNetwork();
   const client = getClient(network);
 
+  // Stabilize the refresh-interval resolver across renders so SWR doesn't
+  // tear down and re-arm its polling timer on every state update.
+  const resolveRefreshInterval = useMemo(
+    () => pausableRefreshInterval(refreshInterval),
+    [refreshInterval],
+  );
+
   const result = useSWR<T>(
     query && network.hasuraUrl ? [network.id, query, variables] : null,
     () => client.request<T>(query!, variables),
-    { refreshInterval },
+    {
+      refreshInterval: resolveRefreshInterval,
+      refreshWhenHidden: false,
+      onErrorRetry: rateLimitAwareRetry,
+    },
   );
 
   if (!network.hasuraUrl) {
