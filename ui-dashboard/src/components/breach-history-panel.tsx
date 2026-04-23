@@ -297,10 +297,13 @@ function BreachHistoryPanelInner({
     where,
     limit: ENVIO_MAX_ROWS,
   });
-  // `countReady` gates the empty state — without it, `total === 0`
-  // (defaulted from undefined) would flash a false "No breaches" card
-  // while the count query is still in flight behind the page query.
-  const countReady = countData !== undefined || countError != null;
+  // `countConfirmed` gates the empty state. Intentionally excludes the
+  // countError branch — a failed count leaves `rawTotal = 0` as a
+  // DEFAULT, not as a confirmed zero, and pairing that with an empty
+  // page slice (e.g. user overshot past the last real page) would
+  // falsely render "No breaches recorded" on a pool that clearly has
+  // them. Empty-state requires an affirmative "count resolved to zero".
+  const countConfirmed = countData !== undefined;
   const rawTotal = countData?.DeviationThresholdBreach?.length ?? 0;
   const countCapped = rawTotal >= ENVIO_MAX_ROWS;
   const totalPages = rawTotal > 0 ? Math.ceil(rawTotal / limit) : 1;
@@ -413,7 +416,7 @@ function BreachHistoryPanelInner({
 
         {isLoading && rows.length === 0 ? (
           <p className="py-6 text-center text-sm text-slate-500">Loading…</p>
-        ) : rows.length === 0 && countReady && rawTotal === 0 ? (
+        ) : rows.length === 0 && countConfirmed && rawTotal === 0 ? (
           <EmptyBox
             message={
               bucket === "all"
