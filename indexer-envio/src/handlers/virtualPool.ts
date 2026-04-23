@@ -309,6 +309,16 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
+  // Compute effectiveness ratio up-front so it flows into Pool.lastEffectivenessRatio
+  // via oracleDelta AND is reused by the RebalanceEvent construction below.
+  const priceDifferenceBefore = event.params.priceDifferenceBefore;
+  const priceDifferenceAfter = event.params.priceDifferenceAfter;
+  const improvement = priceDifferenceBefore - priceDifferenceAfter;
+  const effectivenessRatio =
+    priceDifferenceBefore > 0n
+      ? (Number(improvement) / Number(priceDifferenceBefore)).toFixed(4)
+      : "0.0000";
+
   const pool = await upsertPool({
     context,
     chainId: event.chainId,
@@ -318,6 +328,7 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
     blockTimestamp,
     txHash: event.transaction.hash,
     rebalanceDelta: true,
+    oracleDelta: { lastEffectivenessRatio: effectivenessRatio },
   });
 
   await upsertSnapshot({
@@ -327,14 +338,6 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
     blockNumber,
     rebalanceDelta: true,
   });
-
-  const priceDifferenceBefore = event.params.priceDifferenceBefore;
-  const priceDifferenceAfter = event.params.priceDifferenceAfter;
-  const improvement = priceDifferenceBefore - priceDifferenceAfter;
-  const effectivenessRatio =
-    priceDifferenceBefore > 0n
-      ? (Number(improvement) / Number(priceDifferenceBefore)).toFixed(4)
-      : "0.0000";
 
   const rebalanced: RebalanceEvent = {
     id,

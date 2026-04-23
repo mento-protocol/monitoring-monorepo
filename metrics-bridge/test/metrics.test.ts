@@ -92,6 +92,28 @@ describe("updateMetrics", () => {
     ).toBeUndefined();
   });
 
+  it("parses lastEffectivenessRatio from fixed-point string", async () => {
+    updateMetrics([makePool()]);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_rebalance_effectiveness",
+        poolLabels,
+      ),
+    ).toBe(0.5);
+  });
+
+  it("skips rebalanceEffectiveness when sentinel value -1", async () => {
+    updateMetrics([makePool({ lastEffectivenessRatio: "-1" })]);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_rebalance_effectiveness",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
   it("sets deviationBreachStart to 0 when no breach", async () => {
     updateMetrics([makePool()]);
     expect(

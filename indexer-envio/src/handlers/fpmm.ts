@@ -704,11 +704,23 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
 
   const rebalancerAddress = asAddress(event.params.sender);
 
+  // Compute effectiveness ratio up-front so it can ride along on oracleDelta
+  // into the Pool row (as `lastEffectivenessRatio`) AND be reused verbatim by
+  // the RebalanceEvent construction below.
+  const priceDifferenceBefore = event.params.priceDifferenceBefore;
+  const priceDifferenceAfter = event.params.priceDifferenceAfter;
+  const improvement = priceDifferenceBefore - priceDifferenceAfter;
+  const effectivenessRatio =
+    priceDifferenceBefore > 0n
+      ? (Number(improvement) / Number(priceDifferenceBefore)).toFixed(4)
+      : "0.0000";
+
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {
     lastRebalancedAt: blockTimestamp,
     rebalancerAddress,
     rebalanceLivenessStatus: "ACTIVE",
     priceDifference: event.params.priceDifferenceAfter,
+    lastEffectivenessRatio: effectivenessRatio,
   };
 
   // Hoist oraclePrice outside the if-block so it's accessible for OracleSnapshot
@@ -783,14 +795,6 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     blockNumber,
     rebalanceDelta: true,
   });
-
-  const priceDifferenceBefore = event.params.priceDifferenceBefore;
-  const priceDifferenceAfter = event.params.priceDifferenceAfter;
-  const improvement = priceDifferenceBefore - priceDifferenceAfter;
-  const effectivenessRatio =
-    priceDifferenceBefore > 0n
-      ? (Number(improvement) / Number(priceDifferenceBefore)).toFixed(4)
-      : "0.0000";
 
   const rebalanced: RebalanceEvent = {
     id,

@@ -623,4 +623,77 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
       repeat_interval = local.notify_critical.repeat_interval
     }
   }
+
+  # KPI 4 effectiveness half: rebalancer is ALIVE (so `Rebalancer Stale` stays
+  # quiet) but INEFFECTIVE. Without this rule, operators only learn about
+  # control-loop failure when `Deviation Breach Critical` fires at 60 min, with
+  # no visibility into why the rebalancer's corrections aren't landing.
+  rule {
+    name           = "Rebalance Ineffective"
+    condition      = "threshold"
+    for            = "15m"
+    exec_err_state = "Error"
+    no_data_state  = "OK"
+
+    annotations = {
+      summary     = "Rebalancer 1h-avg effectiveness {{ printf \"%.2f\" $values.A.Value }} — control loop underperforming while still in breach."
+      description = "Rebalances fired recently but collectively closed less than 20% of the deviation. Likely stale-oracle race, MEV truncation, or sizing bug. Liveness OK — this is the effectiveness half of KPI 4."
+    }
+
+    labels = {
+      service  = "fpmms"
+      severity = "warning"
+    }
+
+    # A = 1h-average effectiveness ratio, gated to pools that are (a) still
+    # breaching, and (b) have rebalanced within the last hour. Without the
+    # recency gate, `avg_over_time` would keep returning the last-known
+    # effectiveness indefinitely (the bridge re-publishes every 30s), so the
+    # rule would fire forever on pools that simply haven't rebalanced recently.
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId = "A"
+        expr = join(" and ", [
+          "avg_over_time(mento_pool_rebalance_effectiveness[1h])",
+          "(mento_pool_deviation_ratio >= 1)",
+          "((time() - mento_pool_last_rebalanced_at) < 3600)",
+        ])
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "threshold"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "threshold"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          evaluator = { params = [0.2], type = "lt" }
+          operator  = { type = "and" }
+          query     = { params = ["threshold"] }
+        }]
+        datasource = { type = "__expr__", uid = "__expr__" }
+      })
+    }
+
+    notification_settings {
+      contact_point   = local.notify_warning.contact_point
+      group_by        = local.notify_warning.group_by
+      group_wait      = local.notify_warning.group_wait
+      group_interval  = local.notify_warning.group_interval
+      repeat_interval = local.notify_warning.repeat_interval
+    }
+  }
 }

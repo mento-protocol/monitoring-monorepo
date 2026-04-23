@@ -14,6 +14,7 @@ export interface PoolRow {
   limitPressure0: string;
   limitPressure1: string;
   lastRebalancedAt: string;
+  lastEffectivenessRatio: string;
   rebalanceLivenessStatus: string;
   hasHealthData: boolean;
 }

@@ -109,6 +109,12 @@ export const gauges = {
     labelNames: poolLabels,
     registers: [register],
   }),
+  rebalanceEffectiveness: new Gauge({
+    name: "mento_pool_rebalance_effectiveness",
+    help: "Last observed rebalance effectiveness ratio ((priceDiff_before - priceDiff_after) / priceDiff_before). 1.0 = fully corrected, 0 = no reduction, <0 = worse. -1 indexer sentinel is skipped.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
   healthStatus: new Gauge({
     name: "mento_pool_health_status",
     help: "Pool health status at last on-chain event (0=OK, 1=WARN, 2=CRITICAL, 3=N/A). Event-time snapshot, not live.",
@@ -164,6 +170,12 @@ export function updateMetrics(pools: PoolRow[]): void {
       Number(pool.deviationBreachStartedAt),
     );
     gauges.lastRebalancedAt.set(labels, Number(pool.lastRebalancedAt));
+    // Skip the "-1" no-data sentinel that the indexer writes until the first
+    // RebalanceEvent for a pool. Same convention as lastDeviationRatio.
+    const effRatio = fp(pool.lastEffectivenessRatio);
+    if (effRatio >= 0) {
+      gauges.rebalanceEffectiveness.set(labels, effRatio);
+    }
     gauges.limitPressure.set(
       { ...labels, token_index: "0" },
       fp(pool.limitPressure0),

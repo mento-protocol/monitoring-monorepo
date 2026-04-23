@@ -22,6 +22,7 @@ const BRIDGE_POOLS_QUERY = gql`
       limitPressure0
       limitPressure1
       lastRebalancedAt
+      lastEffectivenessRatio
       rebalanceLivenessStatus
       hasHealthData
     }
