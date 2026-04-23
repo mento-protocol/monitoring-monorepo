@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo } from "react";
-import { SWRConfig, useSWRConfig } from "swr";
+import { mutate } from "swr";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
@@ -28,47 +28,28 @@ export default function GlobalPage({
 }: {
   initialNetworkData?: NetworkData[];
 }) {
-  // Seed SWR's cache with the SSR payload so first paint renders without a
-  // client-side fetch. `fallback` on its own covers the cold-cache case; for
-  // back-navigation (cache populated from a prior visit), SWR's `fallback`
-  // is ignored and the stale prior entry wins. `InitialDataHydrator` below
-  // calls `mutate` on every prop change so a fresh RSC re-render reliably
-  // overrides the cached value. `revalidateOnMount: false` +
-  // `revalidateIfStale: false` then let SWR's `refreshInterval` take over
-  // without firing a redundant mount-time fetch.
-  const swrValue = useMemo(
-    () =>
-      initialNetworkData
-        ? {
-            fallback: { [SWR_KEY_ALL_NETWORKS_DATA]: initialNetworkData },
-            revalidateOnMount: false,
-            revalidateIfStale: false,
-          }
-        : {},
-    [initialNetworkData],
-  );
   return (
-    <SWRConfig value={swrValue}>
+    <>
       {initialNetworkData !== undefined && (
         <InitialDataHydrator data={initialNetworkData} />
       )}
       <Suspense>
-        <GlobalContent />
+        <GlobalContent initialNetworkData={initialNetworkData} />
       </Suspense>
-    </SWRConfig>
+    </>
   );
 }
 
-// Writes the server-rendered payload into the SWR cache whenever a fresh
-// RSC render produces a new `data` reference. Must live inside `SWRConfig`
-// so `useSWRConfig()` resolves to the homepage's provider, not a parent one.
+// Writes the SSR payload into SWR's global cache whenever a fresh RSC render
+// produces a new `data` reference. `fallbackData` on `useSWR` only covers
+// the cold-cache case; back-navigation finds a populated cache entry that
+// would otherwise beat the fresh SSR payload, so we explicitly `mutate` it.
 function InitialDataHydrator({ data }: { data: NetworkData[] }) {
-  const { mutate } = useSWRConfig();
   useEffect(() => {
     // `revalidate: false` — the data is authoritative for this render, we
     // don't want a client refetch right after installing it.
     mutate(SWR_KEY_ALL_NETWORKS_DATA, data, { revalidate: false });
-  }, [data, mutate]);
+  }, [data]);
   return null;
 }
 
@@ -111,8 +92,12 @@ function perPoolTvlWindow(
   return result;
 }
 
-function GlobalContent() {
-  const { networkData, isLoading } = useAllNetworksData();
+function GlobalContent({
+  initialNetworkData,
+}: {
+  initialNetworkData?: NetworkData[];
+}) {
+  const { networkData, isLoading } = useAllNetworksData(initialNetworkData);
 
   // Whether any network has a top-level, fees, or snapshots failure.
   // Used to show N/A / "partial data" in KPI tiles rather than silently under-reporting.

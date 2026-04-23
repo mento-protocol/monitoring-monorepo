@@ -36,10 +36,13 @@ type ProtocolFeesResult = {
    * `blankNetworkData`'s zero defaults. The chart only reads `feeTransfers`,
    * `rates`, and `snapshotWindows`; revenue/page.tsx reads `error`,
    * `feesError`, `fees`, `feeTransfers`.
+   *
+   * Chain-level failures surface through `networkData[].error`, not a
+   * top-level error — `fetchAllProtocolFees` always resolves. That means
+   * there's no `error` field on this result type.
    */
   networkData: NetworkData[];
   isLoading: boolean;
-  error: Error | null;
 };
 
 async function fetchFeesForNetwork(
@@ -133,7 +136,7 @@ async function fetchAllProtocolFees(): Promise<NetworkData[]> {
  * from `blankNetworkData`.
  */
 export function useProtocolFees(): ProtocolFeesResult {
-  const { data, error, isLoading } = useSWR<NetworkData[]>(
+  const { data, isLoading } = useSWR<NetworkData[]>(
     SWR_KEY_PROTOCOL_FEES,
     fetchAllProtocolFees,
     SHARED_QUERY_SWR_CONFIG,
@@ -142,7 +145,6 @@ export function useProtocolFees(): ProtocolFeesResult {
   return {
     networkData: data ?? [],
     isLoading,
-    error: error instanceof Error ? error : null,
   };
 }
 

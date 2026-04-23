@@ -73,7 +73,6 @@ export const ORACLE_RATES = `
     Pool(
       where: { chainId: { _eq: $chainId }, oracleOk: { _eq: true } }
     ) {
-      id
       token0
       token1
       oraclePrice
