@@ -290,13 +290,28 @@ function BreachHistoryPanelInner({
 }) {
   // Count + paginated page run in parallel against the same $where so the
   // pagination controls match what's rendered.
+  //
+  // All three queries below (COUNT, PAGE, ALL) suppress focus + reconnect
+  // revalidation — firing three parallel reads against the same entity
+  // on every alt-tab would triple the burst load on Envio's rate-limited
+  // Hasura. Same pattern as use-bridge-gql. The 10s `refreshInterval`
+  // still keeps the data live.
+  const swrOptions = {
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+  };
   const { data: countData, error: countError } = useGQL<{
     DeviationThresholdBreach: { id: string }[];
-  }>(POOL_DEVIATION_BREACHES_COUNT, {
-    poolId: pool.id,
-    where,
-    limit: ENVIO_MAX_ROWS,
-  });
+  }>(
+    POOL_DEVIATION_BREACHES_COUNT,
+    {
+      poolId: pool.id,
+      where,
+      limit: ENVIO_MAX_ROWS,
+    },
+    undefined,
+    swrOptions,
+  );
   // `countConfirmed` gates the empty state. Intentionally excludes the
   // countError branch — a failed count leaves `rawTotal = 0` as a
   // DEFAULT, not as a confirmed zero, and pairing that with an empty
@@ -318,17 +333,27 @@ function BreachHistoryPanelInner({
 
   const { data, error, isLoading } = useGQL<{
     DeviationThresholdBreach: DeviationThresholdBreach[];
-  }>(POOL_DEVIATION_BREACHES_PAGE, {
-    poolId: pool.id,
-    limit,
-    offset,
-    orderBy,
-    where,
-  });
+  }>(
+    POOL_DEVIATION_BREACHES_PAGE,
+    {
+      poolId: pool.id,
+      limit,
+      offset,
+      orderBy,
+      where,
+    },
+    undefined,
+    swrOptions,
+  );
 
   const { data: chartData } = useGQL<{
     DeviationThresholdBreach: DeviationThresholdBreach[];
-  }>(POOL_DEVIATION_BREACHES_ALL, { poolId: pool.id, where });
+  }>(
+    POOL_DEVIATION_BREACHES_ALL,
+    { poolId: pool.id, where },
+    undefined,
+    swrOptions,
+  );
 
   const rows = data?.DeviationThresholdBreach ?? [];
   const chartRows = chartData?.DeviationThresholdBreach ?? [];
