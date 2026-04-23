@@ -75,6 +75,10 @@ resource "grafana_rule_group" "fpmms_oracle" {
     }
   }
 
+  # KPI 1 critical has two triggers in the spec: can-trade=false OR
+  # liveness-ratio ≥ 1. Split into two rules so Slack messages name the
+  # precise failure mode (and so one rule firing doesn't hide a lagging
+  # second signal).
   rule {
     name           = "Oracle Down [fpmms]"
     condition      = "threshold"
@@ -84,7 +88,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
 
     annotations = {
       summary     = "Oracle DOWN on `{{ $labels.pair }}` (`{{ $labels.chain_id }}`) — swaps will revert."
-      description = "`mento_pool_oracle_ok` is 0 — oracle report is stale past its expiry window. Swaps on this pool revert until the relayer pushes a fresh report."
+      description = "`mento_pool_oracle_ok` is 0 — indexer flagged the oracle as not usable. Swaps on this pool revert until the relayer pushes a fresh report."
     }
 
     labels = {
@@ -134,6 +138,66 @@ resource "grafana_rule_group" "fpmms_oracle" {
       repeat_interval = local.notify_critical.repeat_interval
     }
   }
+
+  rule {
+    name           = "Oracle Expired [fpmms]"
+    condition      = "threshold"
+    for            = "1m"
+    exec_err_state = "Error"
+    no_data_state  = "OK"
+
+    annotations = {
+      summary     = "Oracle EXPIRED on `{{ $labels.pair }}` (`{{ $labels.chain_id }}`) — liveness ratio {{ printf \"%.2f\" $values.A.Value }} ≥ 1."
+      description = "`(time() - oracle_timestamp) / oracle_expiry ≥ 1` — the last oracle report is older than its own expiry window. Swaps will revert. If this fires while `Oracle Down` stays quiet, the indexer's `oracleOk` derivation has drifted from the on-chain expiry check."
+    }
+
+    labels = {
+      service  = "fpmms"
+      severity = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        expr    = "(time() - mento_pool_oracle_timestamp) / mento_pool_oracle_expiry"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "threshold"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "threshold"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          evaluator = { params = [1.0], type = "gte" }
+          operator  = { type = "and" }
+          query     = { params = ["threshold"] }
+        }]
+        datasource = { type = "__expr__", uid = "__expr__" }
+      })
+    }
+
+    notification_settings {
+      contact_point   = local.notify_critical.contact_point
+      group_by        = local.notify_critical.group_by
+      group_wait      = local.notify_critical.group_wait
+      group_interval  = local.notify_critical.group_interval
+      repeat_interval = local.notify_critical.repeat_interval
+    }
+  }
 }
 
 # ── Deviation breach ─────────────────────────────────────────────────────────
@@ -142,16 +206,18 @@ resource "grafana_rule_group" "fpmms_deviation" {
   folder_uid       = grafana_folder.fpmms.uid
   interval_seconds = 60
 
+  # KPI 2 warn: "≥ 1 for > 15 min" per spec §3. The 15m hold matches the spec
+  # verbatim — shorter durations produce weekend-flicker noise on FX pools.
   rule {
     name           = "Deviation Breach [fpmms]"
     condition      = "threshold"
-    for            = "2m"
+    for            = "15m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
     annotations = {
       summary     = "Pool `{{ $labels.pair }}` (`{{ $labels.chain_id }}`) deviating from oracle — ratio {{ printf \"%.2f\" $values.A.Value }}."
-      description = "`mento_pool_deviation_ratio > 1` means the pool's mid-price is outside the rebalance threshold. Rebalancer should act; if it doesn't, the Deviation Breach Critical rule fires at 1h."
+      description = "`mento_pool_deviation_ratio ≥ 1` — pool's mid-price is outside the rebalance threshold. Rebalancer should act; if the breach persists past 60 min, the Deviation Breach Critical rule fires."
     }
 
     labels = {
@@ -185,7 +251,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
         type       = "threshold"
         expression = "A"
         conditions = [{
-          evaluator = { params = [1.0], type = "gt" }
+          evaluator = { params = [1.0], type = "gte" }
           operator  = { type = "and" }
           query     = { params = ["threshold"] }
         }]
