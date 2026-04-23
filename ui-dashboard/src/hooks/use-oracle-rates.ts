@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import useSWR from "swr";
 import { GraphQLClient } from "graphql-request";
 import {
@@ -9,11 +10,14 @@ import {
   type IndexerNetworkId,
   type Network,
 } from "@/lib/networks";
-import { rateLimitAwareRetry } from "@/lib/gql-retry";
+import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
 import { ORACLE_RATES } from "@/lib/queries";
-import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
-import { buildOracleRateMap, type OracleRateMap } from "@/lib/tokens";
-import type { Pool } from "@/lib/types";
+import {
+  buildOracleRateMap,
+  type OracleRateMap,
+  type OracleRatePool,
+} from "@/lib/tokens";
+import { SWR_KEY_ORACLE_RATES } from "@/lib/swr-keys";
 
 type OracleRatesSlice = {
   network: Network;
@@ -34,11 +38,6 @@ export type OracleRatesResult = {
   hasAnyError: boolean;
 };
 
-type OracleRatesPool = Pick<
-  Pool,
-  "token0" | "token1" | "oraclePrice" | "oracleOk"
->;
-
 async function fetchOneNetwork(network: Network): Promise<OracleRatesSlice> {
   if (!network.hasuraUrl) {
     return {
@@ -49,10 +48,9 @@ async function fetchOneNetwork(network: Network): Promise<OracleRatesSlice> {
   }
   const client = new GraphQLClient(network.hasuraUrl);
   try {
-    const res = await client.request<{ Pool: OracleRatesPool[] }>(
-      ORACLE_RATES,
-      { chainId: network.chainId },
-    );
+    const res = await client.request<{ Pool: OracleRatePool[] }>(ORACLE_RATES, {
+      chainId: network.chainId,
+    });
     return {
       network,
       rates: buildOracleRateMap(res.Pool ?? [], network),
@@ -83,28 +81,26 @@ async function fetchAllOracleRates(): Promise<OracleRatesSlice[]> {
  * on the same route-group reuse one fetch.
  */
 export function useOracleRates(): OracleRatesResult {
-  // Same polling-hardening as useGQL: no focus/reconnect revalidate, no
-  // hidden-tab refresh, and 429-aware retry backoff from PR #202. Rates
-  // move slowly so SNAPSHOT_REFRESH_MS (5 min) matches useAllNetworksData.
   const { data, isLoading } = useSWR<OracleRatesSlice[]>(
-    "oracle-rates-all-networks",
+    SWR_KEY_ORACLE_RATES,
     fetchAllOracleRates,
-    {
-      refreshInterval: SNAPSHOT_REFRESH_MS,
-      revalidateOnFocus: false,
-      revalidateOnReconnect: false,
-      refreshWhenHidden: false,
-      onErrorRetry: rateLimitAwareRetry,
-    },
+    SHARED_QUERY_SWR_CONFIG,
   );
 
   const byNetwork = data ?? [];
-  const merged: OracleRateMap = new Map();
-  for (const slice of byNetwork) {
-    for (const [symbol, rate] of slice.rates.entries()) {
-      if (!merged.has(symbol)) merged.set(symbol, rate);
+  // Memoize the merged map so consumers that destructure `{ merged }` keep a
+  // stable reference across unrelated parent renders — a new Map every render
+  // would fan out cache invalidations through downstream useMemos that depend
+  // on `rates`.
+  const merged = useMemo<OracleRateMap>(() => {
+    const out: OracleRateMap = new Map();
+    for (const slice of byNetwork) {
+      for (const [symbol, rate] of slice.rates.entries()) {
+        if (!out.has(symbol)) out.set(symbol, rate);
+      }
     }
-  }
+    return out;
+  }, [byNetwork]);
   const hasAnyError = byNetwork.some((s) => s.error !== null);
 
   return { byNetwork, merged, isLoading, hasAnyError };

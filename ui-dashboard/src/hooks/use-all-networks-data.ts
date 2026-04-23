@@ -2,6 +2,7 @@
 
 import useSWR from "swr";
 import { fetchAllNetworks, type NetworkData } from "@/lib/fetch-all-networks";
+import { SWR_KEY_ALL_NETWORKS_DATA } from "@/lib/swr-keys";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 
 type AllNetworksResult = {
@@ -30,7 +31,7 @@ export {
  */
 export function useAllNetworksData(): AllNetworksResult {
   const { data, error, isLoading } = useSWR<NetworkData[]>(
-    "all-networks-data",
+    SWR_KEY_ALL_NETWORKS_DATA,
     fetchAllNetworks,
     { refreshInterval: SNAPSHOT_REFRESH_MS },
   );

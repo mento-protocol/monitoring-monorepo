@@ -1,5 +1,6 @@
 import { ClientError } from "graphql-request";
 import type { SWRConfiguration } from "swr";
+import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 
 // Envio's "small" tier returns 429 "Tier Quota" without a Retry-After header
 // once the monthly allotment is burned. Back off long enough that we don't
@@ -114,4 +115,16 @@ export const rateLimitAwareRetry: NonNullable<
     ~~((Math.random() + 0.5) * (1 << exponent)) *
     (config.errorRetryInterval ?? 5_000);
   scheduleWhenActive(revalidate, opts, timeout);
+};
+
+// Shared SWR config for the cross-network GraphQL hooks. Disables the
+// focus/reconnect/hidden-tab revalidations (pool pages fan out 15–20 parallel
+// queries; an alt-tab would otherwise fire all of them at once) and wires the
+// 429-aware retry handler. One place to tune for every bulk-fetch hook.
+export const SHARED_QUERY_SWR_CONFIG: SWRConfiguration = {
+  refreshInterval: SNAPSHOT_REFRESH_MS,
+  revalidateOnFocus: false,
+  revalidateOnReconnect: false,
+  refreshWhenHidden: false,
+  onErrorRetry: rateLimitAwareRetry,
 };

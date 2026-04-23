@@ -8,80 +8,44 @@ import {
   isConfiguredNetworkId,
   type Network,
 } from "@/lib/networks";
-import { rateLimitAwareRetry } from "@/lib/gql-retry";
+import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
 import { ORACLE_RATES, PROTOCOL_FEE_TRANSFERS_ALL } from "@/lib/queries";
+import { buildSnapshotWindows, type SnapshotWindows } from "@/lib/volume";
 import {
-  buildSnapshotWindows,
-  SNAPSHOT_REFRESH_MS,
-  type SnapshotWindows,
-} from "@/lib/volume";
-import { buildOracleRateMap, type OracleRateMap } from "@/lib/tokens";
+  buildOracleRateMap,
+  type OracleRateMap,
+  type OracleRatePool,
+} from "@/lib/tokens";
 import {
   aggregateProtocolFees,
   type ProtocolFeeSummary,
 } from "@/lib/protocol-fees";
-import type { NetworkData } from "@/hooks/use-all-networks-data";
-import type { Pool, ProtocolFeeTransfer } from "@/lib/types";
-
-type OracleRatesPool = Pick<
-  Pool,
-  "token0" | "token1" | "oraclePrice" | "oracleOk"
->;
+import { blankNetworkData, type NetworkData } from "@/lib/fetch-all-networks";
+import { SWR_KEY_PROTOCOL_FEES } from "@/lib/swr-keys";
+import type { ProtocolFeeTransfer } from "@/lib/types";
 
 type ProtocolFeesResult = {
   /**
    * `NetworkData[]`-shaped payload so revenue/page.tsx and FeeOverTimeChart
    * keep their existing types. Only the fee/rate slices are populated —
-   * `pools`, `snapshots`, `tradingLimits`, `uniqueLpAddresses`, etc. are
-   * zero defaults. The chart only reads `feeTransfers`, `rates`, and
-   * `snapshotWindows`; the revenue page reads `error`, `feesError`, `fees`,
-   * `feeTransfers`. Anything else stays empty.
+   * `pools`, `snapshots`, `tradingLimits`, `uniqueLpAddresses`, etc. stay at
+   * `blankNetworkData`'s zero defaults. The chart only reads `feeTransfers`,
+   * `rates`, and `snapshotWindows`; revenue/page.tsx reads `error`,
+   * `feesError`, `fees`, `feeTransfers`.
    */
   networkData: NetworkData[];
   isLoading: boolean;
   error: Error | null;
 };
 
-function emptyFeesNetworkData(
-  network: Network,
-  windows: SnapshotWindows,
-  error: Error,
-): NetworkData {
-  return {
-    network,
-    snapshotWindows: windows,
-    pools: [],
-    snapshots: [],
-    snapshots7d: [],
-    snapshots30d: [],
-    snapshotsAllDaily: [],
-    snapshotsAllDailyTruncated: false,
-    tradingLimits: [],
-    olsPoolIds: new Set(),
-    fees: null,
-    feeTransfers: [],
-    uniqueLpAddresses: null,
-    rates: new Map(),
-    error,
-    feesError: null,
-    snapshotsError: null,
-    snapshots7dError: null,
-    snapshots30dError: null,
-    snapshotsAllDailyError: null,
-    lpError: null,
-  };
-}
-
 async function fetchFeesForNetwork(
   network: Network,
   windows: SnapshotWindows,
 ): Promise<NetworkData> {
   if (!network.hasuraUrl) {
-    return emptyFeesNetworkData(
-      network,
-      windows,
-      new Error(`Hasura URL not configured for "${network.label}"`),
-    );
+    return blankNetworkData(network, windows, {
+      error: new Error(`Hasura URL not configured for "${network.label}"`),
+    });
   }
   const client = new GraphQLClient(network.hasuraUrl);
 
@@ -89,7 +53,7 @@ async function fetchFeesForNetwork(
   // protocol fees in USD. `allSettled` so a rates failure doesn't blank
   // fees and vice versa.
   const [ratesResult, feesResult] = await Promise.allSettled([
-    client.request<{ Pool: OracleRatesPool[] }>(ORACLE_RATES, {
+    client.request<{ Pool: OracleRatePool[] }>(ORACLE_RATES, {
       chainId: network.chainId,
     }),
     client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
@@ -98,10 +62,10 @@ async function fetchFeesForNetwork(
     ),
   ]);
 
-  const rates =
+  const rates: OracleRateMap =
     ratesResult.status === "fulfilled"
       ? buildOracleRateMap(ratesResult.value.Pool ?? [], network)
-      : new Map<string, number>();
+      : new Map();
 
   const feeTransfers =
     feesResult.status === "fulfilled"
@@ -116,29 +80,12 @@ async function fetchFeesForNetwork(
   const feesError =
     feesResult.status === "rejected" ? toError(feesResult.reason) : null;
 
-  return {
-    network,
-    snapshotWindows: windows,
-    pools: [],
-    snapshots: [],
-    snapshots7d: [],
-    snapshots30d: [],
-    snapshotsAllDaily: [],
-    snapshotsAllDailyTruncated: false,
-    tradingLimits: [],
-    olsPoolIds: new Set(),
+  return blankNetworkData(network, windows, {
+    rates,
     fees,
     feeTransfers,
-    uniqueLpAddresses: null,
-    rates,
-    error: null,
     feesError,
-    snapshotsError: null,
-    snapshots7dError: null,
-    snapshots30dError: null,
-    snapshotsAllDailyError: null,
-    lpError: null,
-  };
+  });
 }
 
 async function fetchAllProtocolFees(): Promise<NetworkData[]> {
@@ -150,11 +97,10 @@ async function fetchAllProtocolFees(): Promise<NetworkData[]> {
   return results.map((r, i) =>
     r.status === "fulfilled"
       ? r.value
-      : emptyFeesNetworkData(
-          NETWORKS[ids[i]],
-          windows,
-          r.reason instanceof Error ? r.reason : new Error(String(r.reason)),
-        ),
+      : blankNetworkData(NETWORKS[ids[i]], windows, {
+          error:
+            r.reason instanceof Error ? r.reason : new Error(String(r.reason)),
+        }),
   );
 }
 
@@ -165,19 +111,14 @@ async function fetchAllProtocolFees(): Promise<NetworkData[]> {
  * the breach rollup. Saves ~6 queries per chain per mount.
  *
  * Returns a `NetworkData[]` shape so downstream consumers (revenue/page.tsx,
- * FeeOverTimeChart) don't need to change. Unused fields are zero defaults.
+ * FeeOverTimeChart) don't need to change. Unused fields are zero defaults
+ * from `blankNetworkData`.
  */
 export function useProtocolFees(): ProtocolFeesResult {
   const { data, error, isLoading } = useSWR<NetworkData[]>(
-    "protocol-fees-all-networks",
+    SWR_KEY_PROTOCOL_FEES,
     fetchAllProtocolFees,
-    {
-      refreshInterval: SNAPSHOT_REFRESH_MS,
-      revalidateOnFocus: false,
-      revalidateOnReconnect: false,
-      refreshWhenHidden: false,
-      onErrorRetry: rateLimitAwareRetry,
-    },
+    SHARED_QUERY_SWR_CONFIG,
   );
 
   return {

@@ -87,10 +87,16 @@ export type NetworkData = {
   lpError: Error | null;
 };
 
-const emptyNetworkData = (
+/**
+ * Zero-default `NetworkData` shell. Exported so slim hooks (e.g.
+ * `useProtocolFees`) can produce a `NetworkData[]`-shaped payload with
+ * only the fields they populate, rather than redeclaring the 20-field
+ * blank template. `overrides` lets a caller drop fees/rates/etc. in.
+ */
+export const blankNetworkData = (
   network: Network,
   snapshotWindows: SnapshotWindows,
-  error: Error,
+  overrides: Partial<NetworkData> = {},
 ): NetworkData => ({
   network,
   snapshotWindows,
@@ -106,14 +112,21 @@ const emptyNetworkData = (
   feeTransfers: [],
   uniqueLpAddresses: null,
   rates: new Map(),
-  error,
+  error: null,
   feesError: null,
   snapshotsError: null,
   snapshots7dError: null,
   snapshots30dError: null,
   snapshotsAllDailyError: null,
   lpError: null,
+  ...overrides,
 });
+
+const emptyNetworkData = (
+  network: Network,
+  snapshotWindows: SnapshotWindows,
+  error: Error,
+): NetworkData => blankNetworkData(network, snapshotWindows, { error });
 
 /**
  * Envio's hosted Hasura silently caps every query at 1000 rows regardless of

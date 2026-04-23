@@ -15,6 +15,7 @@ import {
   useAllNetworksData,
   type NetworkData,
 } from "@/hooks/use-all-networks-data";
+import { SWR_KEY_ALL_NETWORKS_DATA } from "@/lib/swr-keys";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import { GlobalPoolsTable } from "@/components/global-pools-table";
 import { buildGlobalPoolEntries } from "@/lib/global-pool-entries";
@@ -27,16 +28,25 @@ export default function GlobalPage({
 }: {
   initialNetworkData?: NetworkData[];
 }) {
-  // Seed SWR's cache under the key `useAllNetworksData` reads from
-  // (`"all-networks-data"`) so first paint renders without a client-side
-  // fetch. SWR still revalidates on its own `refreshInterval`, so the
-  // hand-off is seamless — the server payload is just the 0-latency
-  // starting frame, not a ceiling on freshness.
-  const fallback = initialNetworkData
-    ? { "all-networks-data": initialNetworkData }
-    : {};
+  // Seed SWR's cache so first paint renders without a client-side fetch. When
+  // SSR data is present we also gate `revalidateOnMount` off — SWR would
+  // otherwise treat the hydrated payload as stale and fire the same 14-query
+  // fan-out the moment the component mounts, defeating the whole point of
+  // the pre-fetch. `refreshInterval` still refreshes on its cadence, so the
+  // hand-off is seamless.
+  const swrValue = useMemo(
+    () =>
+      initialNetworkData
+        ? {
+            fallback: { [SWR_KEY_ALL_NETWORKS_DATA]: initialNetworkData },
+            revalidateOnMount: false,
+            revalidateIfStale: false,
+          }
+        : {},
+    [initialNetworkData],
+  );
   return (
-    <SWRConfig value={{ fallback }}>
+    <SWRConfig value={swrValue}>
       <Suspense>
         <GlobalContent />
       </Suspense>
