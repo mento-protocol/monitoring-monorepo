@@ -1,7 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo } from "react";
-import { mutate } from "swr";
+import { Suspense, useMemo } from "react";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
@@ -15,7 +14,6 @@ import {
   useAllNetworksData,
   type NetworkData,
 } from "@/hooks/use-all-networks-data";
-import { SWR_KEY_ALL_NETWORKS_DATA } from "@/lib/swr-keys";
 import { Skeleton, EmptyBox, ErrorBox, Tile } from "@/components/feedback";
 import { GlobalPoolsTable } from "@/components/global-pools-table";
 import { buildGlobalPoolEntries } from "@/lib/global-pool-entries";
@@ -28,29 +26,17 @@ export default function GlobalPage({
 }: {
   initialNetworkData?: NetworkData[];
 }) {
+  // First paint uses `initialNetworkData` via SWR's `fallbackData`; on
+  // back-navigation the populated SWR cache wins, which is the right call —
+  // cache may hold fresher data from another page's polling cycle (e.g.
+  // /pools also calls useAllNetworksData under the same key). If no other
+  // page has polled, the worst case is the cache matches the SSR payload
+  // anyway, and the next `refreshInterval` tick will refresh either way.
   return (
-    <>
-      {initialNetworkData !== undefined && (
-        <InitialDataHydrator data={initialNetworkData} />
-      )}
-      <Suspense>
-        <GlobalContent initialNetworkData={initialNetworkData} />
-      </Suspense>
-    </>
+    <Suspense>
+      <GlobalContent initialNetworkData={initialNetworkData} />
+    </Suspense>
   );
-}
-
-// Writes the SSR payload into SWR's global cache whenever a fresh RSC render
-// produces a new `data` reference. `fallbackData` on `useSWR` only covers
-// the cold-cache case; back-navigation finds a populated cache entry that
-// would otherwise beat the fresh SSR payload, so we explicitly `mutate` it.
-function InitialDataHydrator({ data }: { data: NetworkData[] }) {
-  useEffect(() => {
-    // `revalidate: false` — the data is authoritative for this render, we
-    // don't want a client refetch right after installing it.
-    mutate(SWR_KEY_ALL_NETWORKS_DATA, data, { revalidate: false });
-  }, [data]);
-  return null;
 }
 
 /**

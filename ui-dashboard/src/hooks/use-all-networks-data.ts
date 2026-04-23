@@ -1,7 +1,11 @@
 "use client";
 
 import useSWR from "swr";
-import { fetchAllNetworks, type NetworkData } from "@/lib/fetch-all-networks";
+import {
+  fetchAllNetworks,
+  isNetworkDataFullyHealthy,
+  type NetworkData,
+} from "@/lib/fetch-all-networks";
 import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
 import { SWR_KEY_ALL_NETWORKS_DATA } from "@/lib/swr-keys";
 
@@ -28,21 +32,20 @@ export {
  * LP counts for ALL configured networks in parallel.
  *
  * Optional `fallbackData` lets a Server Component pre-render the payload and
- * hand it off to this hook. When the SSR payload is all-healthy (no chain has
- * a top-level `error`), mount- and stale-revalidations are skipped so first
- * paint fires 0 client GraphQL requests. When any chain errored on the
- * server, revalidation is re-enabled so the client can recover immediately
- * instead of being stuck on the degraded state until the next poll —
- * important when a local/dev config has relative Hasura URLs that fail
- * server-side but work client-side. Options are applied at this hook's call
- * site rather than on an ancestor `SWRConfig` so they don't cascade to any
- * other `useSWR` in the tree.
+ * hand it off to this hook. When every chain in the SSR payload is fully
+ * healthy (top-level AND per-slice errors all null), mount- and stale-
+ * revalidations are skipped so first paint fires 0 client GraphQL requests.
+ * Any per-slice failure (fees, snapshots, LP) on the server re-enables
+ * revalidation so the client refetches on mount instead of getting stuck on
+ * partial `N/A` metrics until the next 5-min poll. Options are applied at
+ * this hook's call site rather than on an ancestor `SWRConfig` so they
+ * don't cascade to any other `useSWR` in the tree.
  */
 export function useAllNetworksData(
   fallbackData?: NetworkData[],
 ): AllNetworksResult {
   const allHealthy =
-    fallbackData !== undefined && fallbackData.every((n) => n.error === null);
+    fallbackData !== undefined && fallbackData.every(isNetworkDataFullyHealthy);
   const { data, error, isLoading } = useSWR<NetworkData[]>(
     SWR_KEY_ALL_NETWORKS_DATA,
     fetchAllNetworks,

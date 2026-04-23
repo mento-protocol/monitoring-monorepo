@@ -7,7 +7,6 @@ import {
   NETWORKS,
   NETWORK_IDS,
   isConfiguredNetworkId,
-  type IndexerNetworkId,
   type Network,
 } from "@/lib/networks";
 import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
@@ -109,14 +108,4 @@ export function useOracleRates(): OracleRatesResult {
   const hasAnyError = byNetwork.some((s) => s.error !== null);
 
   return { byNetwork, merged, isLoading, hasAnyError };
-}
-
-/** Pull a single network's rate map from the already-fetched slices. */
-export function ratesForNetwork(
-  result: OracleRatesResult,
-  networkId: IndexerNetworkId,
-): OracleRateMap {
-  return (
-    result.byNetwork.find((s) => s.network.id === networkId)?.rates ?? new Map()
-  );
 }
