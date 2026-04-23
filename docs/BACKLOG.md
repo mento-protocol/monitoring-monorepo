@@ -17,7 +17,7 @@ Each rule attaches a `service` label (drives notification-policy routing to Slac
 - [ ] `service=fpmms` — **Oracle liveness on pool** — warn on live-ratio >0.8 (`(time() - mento_pool_oracle_timestamp) / mento_pool_oracle_expiry`), critical on `mento_pool_oracle_ok == 0`.
 - [ ] `service=fpmms` — **Deviation breach** — warn on `mento_pool_deviation_ratio > 1` OR `mento_pool_deviation_breach_start > 0`. Critical when the breach has persisted >60min (`time() - mento_pool_deviation_breach_start > 3600`). Indexer anchors the grace-window timestamp.
 - [ ] `service=fpmms` — **Trading limit pressure** — warn on `max(mento_pool_limit_pressure) > 0.8`, critical on `>= 1`.
-- [ ] `service=fpmms` — **Rebalancer stale** — critical when deviation has been breaching for >30min AND `mento_pool_last_rebalanced_at` older than 30min (i.e. the on-chain rebalancer hasn't taken action under pressure).
+- [ ] `service=fpmms` — **Rebalancer stale** — critical when deviation has been breaching for >60min AND `mento_pool_last_rebalanced_at` older than 30min (i.e. the on-chain rebalancer hasn't taken action under pressure).
 - [ ] `service=metrics-bridge` — **Bridge not reporting** — critical if `time() - mento_pool_bridge_last_poll > 90` (3x the 30s poll interval) OR `rate(mento_pool_bridge_poll_errors_total[5m]) > 0`.
 
 ### Reserved `service` values (future work, not in first PR)
@@ -45,7 +45,7 @@ All four values route to `#alerts-v3` via a single notification-policy regex mat
 
 ## Next — Rebalance Effectiveness (KPI 4, second half)
 
-Post-launch spec §3 KPI 4 has two halves: **liveness** (does the rebalancer fire?) and **effectiveness** (does it actually fix the deviation?). PR #206 ships liveness (`Rebalancer Stale [fpmms]` — breach >30m + no rebalance >30m). This section defines the effectiveness half.
+Post-launch spec §3 KPI 4 has two halves: **liveness** (does the rebalancer fire?) and **effectiveness** (does it actually fix the deviation?). Liveness ships as the `Rebalancer Stale` critical rule (breach >1h + no rebalance >30m) — added in PR #206, threshold tightened in PR #209. This section defines the effectiveness half.
 
 ### What the KPI measures
 
@@ -155,6 +155,7 @@ Decision: ship Approach B as the default. Approach A is a debugging toggle we ca
 
 - [ ] Dashboard component test coverage (71 test files total, but many are lib/util — component tests sparse)
 - [ ] Revenue page placeholders ("CDP Borrowing Fees" and "Reserve Yield" marked "Soon")
+- [ ] **Shared pool + chain metadata helper** — `metrics-bridge/src/config.ts` keeps three hardcoded maps (`POOL_PAIR_LABELS`, `CHAIN_NAMES`, `BLOCK_EXPLORER_BASE_URLS`) that duplicate source-of-truth data already in the dashboard (`ui-dashboard/src/lib/tokens.ts::poolName` + `networks.ts::NETWORKS`) and `@mento-protocol/contracts`. Drift risk materialized once (the Monad label bug that triggered PR #209). Resolution: promote these to `shared-config/` or derive them dynamically from each pool's `token0`/`token1` + `@mento-protocol/contracts`. Until this ships, a startup warning in `metrics-bridge/src/metrics.ts::warnIfUnknown` logs any pool/chain missing from the maps so the failure mode is at least loud.
 
 ---
 

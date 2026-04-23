@@ -100,7 +100,7 @@ Rules all attach a narrow `service` label (matches the existing Aegis convention
 1. **Oracle liveness on pool** (`service=fpmms`) — warn when live-ratio `(time() - mento_pool_oracle_timestamp) / mento_pool_oracle_expiry` >0.8, critical on `mento_pool_oracle_ok == 0`
 2. **Deviation breach** (`service=fpmms`) — warn when `mento_pool_deviation_ratio > 1` or `mento_pool_deviation_breach_start > 0`; critical when the breach persists >60min (`time() - mento_pool_deviation_breach_start > 3600`)
 3. **Trading limit pressure** (`service=fpmms`) — warn on `max(mento_pool_limit_pressure) > 0.8`, critical on `>= 1`
-4. **Rebalancer stale** (`service=fpmms`) — critical if deviation has been breaching >30min AND the rebalancer hasn't acted (`time() - mento_pool_last_rebalanced_at > 1800`)
+4. **Rebalancer stale** (`service=fpmms`) — critical if deviation has been breaching >60min AND the rebalancer hasn't acted (`time() - mento_pool_last_rebalanced_at > 1800`)
 5. **Bridge not reporting** (`service=metrics-bridge`) — critical if `time() - mento_pool_bridge_last_poll > 90` OR `rate(mento_pool_bridge_poll_errors_total[5m]) > 0`
 
 ### Deferred
