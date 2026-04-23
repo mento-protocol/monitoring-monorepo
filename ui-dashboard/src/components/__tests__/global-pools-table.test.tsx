@@ -415,3 +415,67 @@ describe("sortGlobalPools — TVL descending (default)", () => {
     expect(result.map((e) => e.pool.id)).toEqual(["low", "high"]);
   });
 });
+
+// Strategy badge rendering
+
+describe("GlobalPoolsTable — Strategy badge", () => {
+  // Dashes in the pool id break split("-")[1] elsewhere but the table only
+  // renders the raw value, so a flat id keeps the assertions readable.
+  const POOL_ID = "pool-1";
+  const WITH_REBALANCER = { id: POOL_ID, rebalancerAddress: "0xreb" };
+  const NO_REBALANCER = { id: POOL_ID, rebalancerAddress: "" };
+
+  it("renders a Reserve badge when the pool has a rebalancer but is not in OLS or CDP sets", () => {
+    const entry = makeEntry(WITH_REBALANCER);
+    const html = renderToStaticMarkup(<GlobalPoolsTable entries={[entry]} />);
+    expect(html).toContain(">Reserve<");
+    expect(html).not.toContain(">CDP<");
+    expect(html).not.toContain(">Open<");
+  });
+
+  it("renders a CDP badge when the pool key is in cdpPoolKeys", () => {
+    const entry = makeEntry(WITH_REBALANCER);
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[entry]}
+        cdpPoolKeys={new Set([globalPoolKey(entry)])}
+      />,
+    );
+    expect(html).toContain(">CDP<");
+    expect(html).not.toContain(">Reserve<");
+  });
+
+  it("renders an Open badge when the pool key is in olsPoolKeys", () => {
+    const entry = makeEntry(WITH_REBALANCER);
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[entry]}
+        olsPoolKeys={new Set([globalPoolKey(entry)])}
+      />,
+    );
+    expect(html).toContain(">Open<");
+    expect(html).not.toContain(">Reserve<");
+  });
+
+  it("prefers Open over CDP when a pool is in both sets", () => {
+    const entry = makeEntry(WITH_REBALANCER);
+    const key = globalPoolKey(entry);
+    const html = renderToStaticMarkup(
+      <GlobalPoolsTable
+        entries={[entry]}
+        olsPoolKeys={new Set([key])}
+        cdpPoolKeys={new Set([key])}
+      />,
+    );
+    expect(html).toContain(">Open<");
+    expect(html).not.toContain(">CDP<");
+  });
+
+  it("renders no strategy badge when a pool has no rebalancer and is in no strategy set", () => {
+    const entry = makeEntry(NO_REBALANCER);
+    const html = renderToStaticMarkup(<GlobalPoolsTable entries={[entry]} />);
+    expect(html).not.toContain(">Reserve<");
+    expect(html).not.toContain(">CDP<");
+    expect(html).not.toContain(">Open<");
+  });
+});
