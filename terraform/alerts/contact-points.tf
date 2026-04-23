@@ -47,7 +47,8 @@ locals {
     {{ range .Alerts -}}
     {{ if .Annotations.summary }}{{ .Annotations.summary }}
     {{ end -}}
-    {{ if .Annotations.description }}_{{ .Annotations.description }}_
+    {{ if and .Annotations.description (eq .Labels.severity "critical") -}}
+    _{{ .Annotations.description }}_
     {{ end }}
     {{ if .Labels.pool_id -}}
     {{ $addr := or .Labels.pool_address_short .Labels.pool_id -}}
