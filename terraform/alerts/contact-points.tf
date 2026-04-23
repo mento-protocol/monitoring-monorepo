@@ -24,7 +24,7 @@ resource "grafana_contact_point" "slack_critical" {
       *Severity:* {{ .Labels.severity }}
       {{ if .Annotations.summary }}*Summary:* {{ .Annotations.summary }}{{ end }}
       {{ if .Annotations.description }}{{ .Annotations.description }}{{ end }}
-      *Started:* {{ .StartsAt }}
+      *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
       {{ if .GeneratorURL }}<{{ .GeneratorURL }}|View in Grafana>{{ end }}
       {{ end }}
     EOT
@@ -48,7 +48,7 @@ resource "grafana_contact_point" "slack_warnings" {
       *Severity:* {{ .Labels.severity }}
       {{ if .Annotations.summary }}*Summary:* {{ .Annotations.summary }}{{ end }}
       {{ if .Annotations.description }}{{ .Annotations.description }}{{ end }}
-      *Started:* {{ .StartsAt }}
+      *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
       {{ if .GeneratorURL }}<{{ .GeneratorURL }}|View in Grafana>{{ end }}
       {{ end }}
     EOT
