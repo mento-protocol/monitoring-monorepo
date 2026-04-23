@@ -802,6 +802,9 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
 
 FPMM.TradingLimitConfigured.handler(async ({ event, context }) => {
   const poolId = makePoolId(event.chainId, event.srcAddress);
+  // See UpdateReserves handler. `fetchTradingLimits` is a raw RPC call
+  // that must not run in preload for the same in-batch-state reasons.
+  if (await maybePreloadPool(context, poolId)) return;
   const token = asAddress(event.params.token);
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);

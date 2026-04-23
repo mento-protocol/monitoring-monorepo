@@ -133,15 +133,21 @@ const SOURCE_PRIORITY = {
  *  silently-unmatched deferral branch. */
 export type PoolUpdateSource = keyof typeof SOURCE_PRIORITY;
 
+// `existingSource` is typed as `string` because Pool.source is stored as
+// a plain string in the DB (potentially including legacy values not in
+// the current union). Use a safe lookup helper so unknown strings fall
+// through to priority 0 without an unchecked cast.
+const sourcePriority = (source: string): number =>
+  (SOURCE_PRIORITY as Record<string, number>)[source] ?? 0;
+
 const pickPreferredSource = (
   existingSource: string | undefined,
   incomingSource: PoolUpdateSource,
 ): string => {
   if (!existingSource) return incomingSource;
-  const existingPriority =
-    SOURCE_PRIORITY[existingSource as PoolUpdateSource] ?? 0;
-  const incomingPriority = SOURCE_PRIORITY[incomingSource] ?? 0;
-  return incomingPriority >= existingPriority ? incomingSource : existingSource;
+  return sourcePriority(incomingSource) >= sourcePriority(existingSource)
+    ? incomingSource
+    : existingSource;
 };
 
 /**
