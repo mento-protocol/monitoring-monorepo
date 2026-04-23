@@ -22,7 +22,7 @@ The canonical example is `terraform/main.tf:421-424` — the metrics-bridge `mov
 
 For every `google_cloud_run_v2_service`:
 
-- [ ] Probe paths use `/health`, NOT `/healthz`. Cloud Run v2 reserves `/healthz` at the frontend, so external `/healthz` returns a Google-branded 404 (memory: `reference_cloud_run_reserved_paths.md`)
+- [ ] Probe paths use `/health`, NOT `/healthz`. Cloud Run v2 reserves `/healthz` at the frontend, so external `/healthz` returns a Google-branded 404
 - [ ] Memory ≥ `512Mi` if `cpu_idle = false` (always-allocated CPU floor)
 - [ ] `lifecycle.ignore_changes = [template[0].containers[0].image]` if image rollouts happen out-of-band via `gcloud run services update` (otherwise `terraform apply` reverts the image to the bootstrap default)
 - [ ] Default/bootstrap `image` MUST respond to the configured probe path. `gcr.io/cloudrun/hello:latest` does NOT serve `/health` — using it as a default fails first-bootstrap because the service never becomes healthy

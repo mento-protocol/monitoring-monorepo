@@ -67,8 +67,8 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 
 ### Security / CSP
 
-- CSP `connect-src` must include every Hasura + RPC endpoint the dashboard calls
-- CSP must allow `unsafe-eval` for Plotly (or migrate to a sandboxed renderer)
+- CSP `connect-src` must include every Hasura + RPC endpoint the dashboard calls (source of truth: `ui-dashboard/next.config.ts`'s `CSP_CONNECT_SRC`)
+- Do NOT widen `script-src` with `unsafe-eval` without proof a library actually needs it — the current policy is deliberately tight and Plotly runs fine without it
 - Auth/allowlist constants must be centralized — don't repeat domain literals across files
 
 ### Migration discipline

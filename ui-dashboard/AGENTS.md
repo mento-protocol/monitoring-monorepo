@@ -107,4 +107,4 @@ These are the rules `cursor[bot]` and Codex have raised repeatedly across PRs #1
 - Lifetime-aggregate metrics (uptime %, total breach count, cumulative volume) MUST come from a pre-rolled snapshot/rollup entity — NOT from a paginated list
 - Hasura silently caps every query at 1000 rows; any `limit:` in a UI query also silently drops data. Curl-verify against hosted before shipping
 - `_aggregate` queries are disabled on hosted Hasura — don't ship them
-- Multi-field `order_by` MUST use array syntax `[{a: desc}, {b: asc}]`. Object syntax silently drops fields after the first (memory: `reference_hasura_order_by_syntax.md`)
+- Multi-field `order_by` MUST use array syntax `[{a: desc}, {b: asc}]`. Object syntax silently drops fields after the first

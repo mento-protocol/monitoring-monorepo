@@ -31,7 +31,7 @@ If you set BOTH `revalidateOnFocus: false` AND `revalidateOnReconnect: false`, t
 Hasura silently caps every query at **1000 rows** (Envio hosted Hasura config). On top of that, any custom `limit:` in the query (e.g. `limit: 100`) silently drops older data without a warning.
 
 - [ ] If the query feeds a metric that aggregates over the full lifetime (uptime %, breach count, cumulative volume), the data MUST come from a pre-rolled snapshot/rollup entity on the indexer — NOT from a paginated list
-- [ ] If pagination is genuinely needed, use `fetchAllSnapshotPages` (see memory: `reference_envio_hasura_cap.md`)
+- [ ] If pagination is genuinely needed, use `fetchAllSnapshotPages`
 - [ ] Never ship `_aggregate` queries to the dashboard against hosted Hasura — they're disabled
 - [ ] **Curl-verify** every new KPI query against the hosted endpoint with a representative pool (one with >1000 rows of history). Confirm the page count matches your local-dev assumption
 
