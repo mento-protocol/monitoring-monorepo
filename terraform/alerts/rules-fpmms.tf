@@ -413,7 +413,7 @@ resource "grafana_rule_group" "fpmms_trading_limit" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "token{{ $labels.token_index }} limit at {{ printf \"%.0f\" (mul $values.A.Value 100.0) }}% — trip imminent."
+      summary     = "token{{ $labels.token_index }} limit at {{ humanizePercentage $values.A.Value }} — trip imminent."
       description = "Trading limit is about to trip. Next swap at this size will revert."
     }
 
@@ -473,7 +473,7 @@ resource "grafana_rule_group" "fpmms_trading_limit" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "token{{ $labels.token_index }} limit at {{ printf \"%.0f\" (mul $values.A.Value 100.0) }}% — swaps reverting."
+      summary     = "token{{ $labels.token_index }} limit at {{ humanizePercentage $values.A.Value }} — swaps reverting."
       description = "Trading limit exceeded. Swaps on this token revert until the limit window rolls."
     }
 
@@ -540,8 +540,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Idle {{ humanizeDuration $values.A.Value }} during 1h+ breach — rebalancer has not acted."
-      description = "Deviation has been breaching for more than 60 minutes AND the rebalancer hasn't acted in more than 30 minutes. Likely stuck bot, insufficient gas, or contract-level failure."
+      description = "Deviation threshold has been breached for {{ humanizeDuration $values.A.Value }} and the rebalancer hasn't acted in more than 30 minutes. Likely stuck bot, insufficient gas, or contract-level failure."
     }
 
     labels = {
@@ -549,7 +548,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
       severity = "critical"
     }
 
-    # Fires only when: breach is active AND breach > 30min AND last rebalance > 30min ago.
+    # Fires only when: breach is active AND breach > 1h AND last rebalance > 30min ago.
     # Returns seconds-since-last-rebalance so the annotation is informative.
     data {
       ref_id         = "A"
