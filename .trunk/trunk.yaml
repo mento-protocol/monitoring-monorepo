@@ -38,6 +38,10 @@ lint:
         # this file holds only public proxy + token addresses generated from
         # @mento-protocol/contracts by scripts/generateNttAddresses.mjs.
         - indexer-envio/config/nttAddresses.json
+        # Regression fixture — public pool + token addresses used to verify
+        # `poolName(chainId, token0, token1)` matches the old hand-rolled
+        # POOL_PAIR_LABELS list. No secrets.
+        - shared-config/__tests__/fixtures/known-pools.json
   enabled:
     - checkov@3.2.506
     - eslint@10.0.2

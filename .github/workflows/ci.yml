@@ -36,6 +36,7 @@ jobs:
       contents: read
       actions: read
     outputs:
+      shared: ${{ steps.filter.outputs.shared }}
       ui: ${{ steps.filter.outputs.ui }}
       indexer: ${{ steps.filter.outputs.indexer }}
       bridge: ${{ steps.filter.outputs.bridge }}
@@ -45,6 +46,14 @@ jobs:
         uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         with:
           filters: |
+            shared:
+              - shared-config/**
+              - pnpm-lock.yaml
+              - package.json
+              - pnpm-workspace.yaml
+              - .node-version
+              - .github/workflows/ci.yml
+              - .github/actions/pnpm-install/**
             ui:
               - ui-dashboard/**
               - shared-config/**
@@ -72,6 +81,7 @@ jobs:
               - .github/actions/pnpm-install/**
             bridge:
               - metrics-bridge/**
+              - shared-config/**
               - cloudbuild.yaml
               - .gcloudignore
               - .node-version
@@ -80,6 +90,26 @@ jobs:
               - package.json
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
+      - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
+        if: always()
+
+  shared:
+    name: Quality Checks (shared-config)
+    needs: changes
+    if: needs.changes.outputs.shared == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      checks: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/pnpm-install
+      - name: Typecheck
+        run: pnpm --filter @mento-protocol/monitoring-config typecheck
+      - name: Test
+        run: pnpm --filter @mento-protocol/monitoring-config test
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 
@@ -200,7 +230,7 @@ jobs:
 
   ci:
     name: ci
-    needs: [changes, ui, indexer, bridge]
+    needs: [changes, shared, ui, indexer, bridge]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -211,6 +241,6 @@ jobs:
       - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: ui,indexer,bridge
+          allowed-skips: shared,ui,indexer,bridge
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()

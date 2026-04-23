@@ -2,9 +2,45 @@
   "name": "@mento-protocol/monitoring-config",
   "version": "0.0.0",
   "private": true,
-  "description": "Shared deployment configuration for the monitoring monorepo. The single source of truth for chain ID → active treb namespace mappings and the FX calendar constants consumed by both the indexer and the dashboard.",
+  "type": "module",
+  "description": "Shared deployment + chain metadata for the monitoring monorepo. Single source of truth for chain ID → treb namespace, chain slug/label, explorer URLs, and token symbol / pool pair label derivation from @mento-protocol/contracts.",
   "exports": {
     "./deployment-namespaces.json": "./deployment-namespaces.json",
-    "./fx-calendar.json": "./fx-calendar.json"
+    "./fx-calendar.json": "./fx-calendar.json",
+    "./chain-metadata.json": "./chain-metadata.json",
+    "./chains": {
+      "types": "./dist/chains.d.ts",
+      "default": "./dist/chains.js"
+    },
+    "./tokens": {
+      "types": "./dist/tokens.d.ts",
+      "default": "./dist/tokens.js"
+    },
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "default": "./dist/format.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@mento-protocol/contracts": "0.6.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.19.13",
+    "eslint": "^10.0.2",
+    "globals": "^17.4.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

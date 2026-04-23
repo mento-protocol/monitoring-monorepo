@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   register,
   gauges,
@@ -170,6 +170,9 @@ describe("updateMetrics", () => {
     const pool1 = makePool();
     const pool2 = makePool({
       id: "42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
+      // USDC/USDm pool
+      token0: "0x765de816845861e75a25fca122bb6898b8b1282a",
+      token1: "0xceba9300f2b948710d2653dd7b07f33a8b32118c",
       healthStatus: "WARN",
     });
     updateMetrics([pool1, pool2]);
@@ -194,6 +197,9 @@ describe("updateMetrics", () => {
     const monadPool = makePool({
       id: "143-0x93e15a22fda39fefccce82d387a09ccf030ead61",
       chainId: 143,
+      // EURmSpoke/USDmSpoke on Monad — canonicalizes to EURm/USDm.
+      token0: "0x4d502d735b4c574b487ed641ae87ceae884731c7",
+      token1: "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",
     });
     updateMetrics([monadPool]);
     expect(
@@ -207,6 +213,68 @@ describe("updateMetrics", () => {
           "https://monadscan.com/address/0x93e15a22fda39fefccce82d387a09ccf030ead61",
       }),
     ).toBe(1);
+  });
+
+  it("falls back to pool id for pair when tokens aren't in contracts.json but chain IS known (the real PR #209 scenario)", async () => {
+    const pool = makePool({
+      id: "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
+      chainId: 42220,
+      token0: "0xdeadbeef",
+      token1: "0xfeedface",
+    });
+    updateMetrics([pool]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_ok", {
+        pool_id: "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
+        chain_id: "42220",
+        chain_name: "celo",
+        pair: "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
+        pool_address_short: "0x8c00…cb56",
+        block_explorer_url:
+          "https://celoscan.io/address/0x8c0014afe032e4574481d8934504100bf23fcb56",
+      }),
+    ).toBe(1);
+  });
+
+  it("falls back to pool id when token0 or token1 is null (PoolRow nullable columns)", async () => {
+    const pool = makePool({
+      id: "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
+      token0: null,
+      token1: "0xccf663b1ff11028f0b19058d0f7b674004a40746",
+    });
+    updateMetrics([pool]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_ok", {
+        pool_id: "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
+        chain_id: "42220",
+        chain_name: "celo",
+        pair: "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
+        pool_address_short: "0x8c00…cb56",
+        block_explorer_url:
+          "https://celoscan.io/address/0x8c0014afe032e4574481d8934504100bf23fcb56",
+      }),
+    ).toBe(1);
+  });
+
+  it("warns once per pool when derivation falls back (warnedUnknownPools dedup)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const unknownChain = makePool({
+        id: "88888-0xabc0000000000000000000000000000000000001",
+        chainId: 88888,
+      });
+      updateMetrics([unknownChain]);
+      updateMetrics([unknownChain]);
+      updateMetrics([unknownChain]);
+      const callsForThisPool = warn.mock.calls.filter(
+        ([msg]) =>
+          typeof msg === "string" &&
+          msg.includes("88888-0xabc0000000000000000000000000000000000001"),
+      );
+      expect(callsForThisPool).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

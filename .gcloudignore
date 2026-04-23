@@ -11,9 +11,11 @@
 
 ui-dashboard/
 indexer-envio/
-shared-config/
 docs/
 terraform/
+
+# shared-config/ is a workspace dep of metrics-bridge (shared chain/token
+# metadata). Must be uploaded so Cloud Build can resolve it at `pnpm install`.
 
 **/node_modules/
 **/dist/

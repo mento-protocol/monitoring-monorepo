@@ -1,0 +1,79 @@
+[
+  {
+    "poolId": "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
+    "chainId": 42220,
+    "token0": "0x765de816845861e75a25fca122bb6898b8b1282a",
+    "token1": "0xccf663b1ff11028f0b19058d0f7b674004a40746",
+    "expectedLabel": "GBPm/USDm"
+  },
+  {
+    "poolId": "42220-0xb285d4c7133d6f27bfb29224fb0d22e7ec3ddd2d",
+    "chainId": 42220,
+    "token0": "0x765de816845861e75a25fca122bb6898b8b1282a",
+    "token1": "0xeb466342c4d449bc9f53a865d5cb90586f405215",
+    "expectedLabel": "axlUSDC/USDm"
+  },
+  {
+    "poolId": "42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e",
+    "chainId": 42220,
+    "token0": "0x765de816845861e75a25fca122bb6898b8b1282a",
+    "token1": "0xceba9300f2b948710d2653dd7b07f33a8b32118c",
+    "expectedLabel": "USDC/USDm"
+  },
+  {
+    "poolId": "42220-0x0feba760d93423d127de1b6abecdb60e5253228d",
+    "chainId": 42220,
+    "token0": "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e",
+    "token1": "0x765de816845861e75a25fca122bb6898b8b1282a",
+    "expectedLabel": "USDT/USDm"
+  },
+  {
+    "poolId": "42220-0x1ad2ea06502919f935d9c09028df73a462979e29",
+    "chainId": 42220,
+    "token0": "0x765de816845861e75a25fca122bb6898b8b1282a",
+    "token1": "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73",
+    "expectedLabel": "EURm/USDm"
+  },
+  {
+    "poolId": "42220-0x3aa7c431c06b10f7422e69d3e69b66807a6af696",
+    "chainId": 42220,
+    "token0": "0x061cc5a2c863e0c1cb404006d559db18a34c762d",
+    "token1": "0xd8763cba276a3738e6de85b4b3bf5fded6d6ca73",
+    "expectedLabel": "axlEUROC/EURm"
+  },
+  {
+    "poolId": "143-0x93e15a22fda39fefccce82d387a09ccf030ead61",
+    "chainId": 143,
+    "token0": "0x4d502d735b4c574b487ed641ae87ceae884731c7",
+    "token1": "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",
+    "expectedLabel": "EURm/USDm"
+  },
+  {
+    "poolId": "143-0xd0e9c1a718d2a693d41eacd4b2696180403ce081",
+    "chainId": 143,
+    "token0": "0x39bb4e0a204412bb98e821d25e7d955e69d40fd1",
+    "token1": "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",
+    "expectedLabel": "GBPm/USDm"
+  },
+  {
+    "poolId": "143-0xb0a0264ce6847f101b76ba36a4a3083ba489f501",
+    "chainId": 143,
+    "token0": "0x00000000efe302beaa2b3e6e1b18d08d69a9012a",
+    "token1": "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",
+    "expectedLabel": "AUSD/USDm"
+  },
+  {
+    "poolId": "143-0x463c0d1f04bcd99a1efcf94ac2a75bc19ea4a7e5",
+    "chainId": 143,
+    "token0": "0x754704bc059f8c67012fed69bc8a327a5aafb603",
+    "token1": "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",
+    "expectedLabel": "USDC/USDm"
+  },
+  {
+    "poolId": "143-0x0a59be741ad49c6c2e0a2d30a57ed8f5ffa5deb8",
+    "chainId": 143,
+    "token0": "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",
+    "token1": "0xe7cd86e13ac4309349f30b3435a9d337750fc82d",
+    "expectedLabel": "USDT0/USDm"
+  }
+]
