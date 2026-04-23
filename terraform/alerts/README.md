@@ -1,0 +1,38 @@
+# terraform/alerts
+
+Grafana Cloud alert rules and Slack contact points for Mento v3 monitoring.
+
+## Scope
+
+- **In this module:** `grafana_rule_group` resources (5 groups, 9 rules total) for FPMM pool health + metrics-bridge liveness, plus two `grafana_contact_point` resources (`slack-alerts-critical`, `slack-alerts-warnings`).
+- **Not in this module:** the root `grafana_notification_policy` — that's a singleton owned by [`aegis/terraform/grafana-alerts/notification-policies.tf`](../../../aegis/terraform/grafana-alerts/notification-policies.tf). Every rule here routes via its own `notification_settings` block, so we don't touch the policy tree.
+
+## State
+
+Separate from `terraform/` (Vercel + Cloud Run): `gs://mento-terraform-tfstate-6ed6/monitoring-monorepo-alerts`. Backend uses default ADC — same as the sibling module.
+
+## Prerequisites
+
+1. **Slack app with bot token.** The "Grafana Alerts" app needs `chat:write` + `chat:write.public` scopes and must be invited (`/invite @Grafana Alerts`) to `#alerts-critical` and `#alerts-warnings`.
+2. **Grafana service account token** at `~/.grafana-mento-token` (any SA with `Admin` role in the `clabsmento` stack).
+
+## Running
+
+```bash
+cp terraform.tfvars.example terraform.tfvars
+# Paste the Slack bot token into terraform.tfvars.
+
+pnpm alerts:init
+pnpm alerts:plan
+pnpm alerts:apply
+```
+
+The `alerts:plan` / `alerts:apply` scripts read `GRAFANA_AUTH` from `~/.grafana-mento-token` at invocation — no need to `export` it.
+
+## Smoke test
+
+After `apply`, temporarily drop one threshold (e.g. set `params = [0.0]` on the Deviation Breach rule) and `terraform apply` again. Within ~2m, `#alerts-warnings` should receive a fire, then a resolve after reverting the change.
+
+## Service label routing
+
+Each rule attaches `service = "fpmms"` or `service = "metrics-bridge"`. Future oracles / cdps rule groups will attach their own service label and stay in this module — no notification-tree churn required.
