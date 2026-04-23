@@ -6,6 +6,7 @@ import * as Sentry from "@sentry/nextjs";
 import { NETWORKS, NETWORK_IDS, isConfiguredNetworkId } from "@/lib/networks";
 import type { Network } from "@/lib/networks";
 import {
+  ALL_POOLS_BREACH_ROLLUP,
   ALL_POOLS_WITH_HEALTH,
   ALL_TRADING_LIMITS,
   ALL_OLS_POOLS,
@@ -312,6 +313,7 @@ export async function fetchNetworkData(
     lpResult,
     tradingLimitsResult,
     olsResult,
+    breachRollupResult,
   ] = await Promise.allSettled([
     client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
       PROTOCOL_FEE_TRANSFERS_ALL,
@@ -333,7 +335,36 @@ export async function fetchNetworkData(
     client.request<{ OlsPool: Pick<OlsPool, "poolId">[] }>(ALL_OLS_POOLS, {
       chainId: network.chainId,
     }),
+    // Uptime rollup — isolated from ALL_POOLS_WITH_HEALTH so a schema-
+    // lag fail degrades just the uptime column to "—", not the entire
+    // pools page.
+    client.request<{
+      Pool: {
+        id: string;
+        cumulativeCriticalSeconds?: string;
+        breachCount?: number;
+      }[];
+    }>(ALL_POOLS_BREACH_ROLLUP, { chainId: network.chainId }),
   ]);
+
+  // Merge the rollup fields into the pool objects. On failure (including
+  // the phased-rollout "field not found" window) we leave the fields
+  // undefined and the uptime column falls back to "—".
+  if (breachRollupResult.status === "fulfilled") {
+    const rollupById = new Map(
+      (breachRollupResult.value.Pool ?? []).map((r) => [r.id, r]),
+    );
+    pools = pools.map((p) => {
+      const r = rollupById.get(p.id);
+      return r == null
+        ? p
+        : {
+            ...p,
+            cumulativeCriticalSeconds: r.cumulativeCriticalSeconds,
+            breachCount: r.breachCount,
+          };
+    });
+  }
 
   const toError = (reason: unknown) =>
     reason instanceof Error ? reason : new Error(String(reason));

@@ -375,7 +375,11 @@ function PoolDetail() {
   const hasOlsPool = selectActiveOlsPool(olsData?.OlsPool) !== null;
   // Keep OLS tab visible while loading so ?tab=ols deep links don't flicker
   const olsTabVisible = hasOlsPool || olsLoading;
-  const visibleTabs = TABS.filter((t) => t !== "ols" || olsTabVisible);
+  // Non-FPMM pools (virtual pools) have no deviation breach model — hide
+  // the tab rather than render an empty panel, same pattern as OLS.
+  const visibleTabs = TABS.filter(
+    (t) => (t !== "ols" || olsTabVisible) && (t !== "breaches" || fpmmPool),
+  );
   const tab = visibleTabs.includes(requestedTab)
     ? requestedTab
     : (visibleTabs[0] ?? "providers");

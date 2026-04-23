@@ -177,14 +177,12 @@ export function parseDurationSeconds(input: string): number | null {
   const pattern = /(\d+(?:\.\d+)?)\s*([a-z]+)/g;
   let total = 0;
   let matched = false;
-  let consumed = 0;
   for (const m of trimmed.matchAll(pattern)) {
-    const [match, num, unit] = m;
+    const [, num, unit] = m;
     const factor = unitSeconds[unit];
     if (factor == null) return null;
     total += Number(num) * factor;
     matched = true;
-    consumed += match.length + (m.index ?? 0) - consumed;
   }
   if (!matched) return null;
   // Reject trailing junk like "1h banana" or "1h 2x"

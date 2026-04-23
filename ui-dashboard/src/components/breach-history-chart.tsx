@@ -153,7 +153,11 @@ export function BreachHistoryChart({ breaches, pool }: Props) {
               xref: "paper",
               yref: "y",
               x: 1,
-              y: grace,
+              // Plotly quirk: shapes auto-transform `y` to log coordinates
+              // when the axis is type: "log", but annotations don't —
+              // pass log10(value) explicitly, otherwise the label renders
+              // at 10^3600 (way off-chart).
+              y: Math.log10(grace),
               xanchor: "right",
               yanchor: "bottom",
               text: "1h grace",

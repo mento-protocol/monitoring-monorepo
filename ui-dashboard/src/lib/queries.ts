@@ -41,6 +41,21 @@ export const ALL_POOLS_WITH_HEALTH = `
       reserves1
       healthTotalSeconds
       hasHealthData
+    }
+  }
+`;
+
+// Per-pool breach rollup counters, scoped to a chain. Kept OFF the
+// shared ALL_POOLS_WITH_HEALTH query on purpose: these fields are
+// deployed in a phased indexer rollout, and a schema-lag fail would
+// blank every consumer of ALL_POOLS_WITH_HEALTH (the pool page, OG
+// generation, the full pools table). Isolating them lets a failure
+// degrade JUST the uptime column to "—" — same pattern as
+// POOL_BREACH_ROLLUP on the single-pool page.
+export const ALL_POOLS_BREACH_ROLLUP = `
+  query AllPoolsBreachRollup($chainId: Int!) {
+    Pool(where: { chainId: { _eq: $chainId } }) {
+      id
       cumulativeCriticalSeconds
       breachCount
     }
@@ -449,60 +464,6 @@ export const ORACLE_SNAPSHOTS_CHART = `
       where: { poolId: { _eq: $poolId } }
       order_by: { timestamp: desc }
       limit: $limit
-    ) {
-      id chainId
-      poolId
-      timestamp
-      oraclePrice
-      oracleOk
-      numReporters
-      priceDifference
-      rebalanceThreshold
-      source
-      blockNumber
-      txHash
-      deviationRatio
-      hasHealthData
-    }
-  }
-`;
-
-export const ORACLE_SNAPSHOTS_WINDOW = `
-  query OracleSnapshotsWindow($poolId: String!, $from: numeric!, $to: numeric!, $limit: Int!) {
-    OracleSnapshot(
-      where: {
-        poolId: { _eq: $poolId }
-        timestamp: { _gte: $from, _lte: $to }
-      }
-      order_by: [{ timestamp: desc }, { blockNumber: desc }, { id: desc }]
-      limit: $limit
-    ) {
-      id chainId
-      poolId
-      timestamp
-      oraclePrice
-      oracleOk
-      numReporters
-      priceDifference
-      rebalanceThreshold
-      source
-      blockNumber
-      txHash
-      deviationRatio
-      hasHealthData
-    }
-  }
-`;
-
-export const ORACLE_SNAPSHOT_PREDECESSOR = `
-  query OracleSnapshotPredecessor($poolId: String!, $before: numeric!) {
-    OracleSnapshot(
-      where: {
-        poolId: { _eq: $poolId }
-        timestamp: { _lt: $before }
-      }
-      order_by: [{ timestamp: desc }, { blockNumber: desc }, { id: desc }]
-      limit: 1
     ) {
       id chainId
       poolId

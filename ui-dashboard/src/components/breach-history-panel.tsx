@@ -111,6 +111,12 @@ function whereForBucket(bucket: DurationBucket): Record<string, unknown> {
  * days`, etc.); they compose with the bucket via `_and` so "Over 1d +
  * min: 7d" narrows to breaches strictly over a week. Applied only when
  * non-null so an empty input doesn't pin everything to "≥0s".
+ *
+ * Open breaches have NULL `durationSeconds` until they close, so a naive
+ * `durationSeconds >= min` predicate would drop every in-flight
+ * incident. We OR the range against `durationSeconds IS NULL` so
+ * ongoing rows stay visible regardless of the numeric filter — hiding
+ * an active incident behind a filter is the worst-case UX here.
  */
 function composeWhere(
   bucket: DurationBucket,
@@ -118,17 +124,22 @@ function composeWhere(
   maxSeconds: number | null,
 ): Record<string, unknown> {
   const bucketClause = whereForBucket(bucket);
-  const rangeClauses: Record<string, unknown>[] = [];
-  if (minSeconds != null) {
-    rangeClauses.push({ durationSeconds: { _gte: String(minSeconds) } });
-  }
-  if (maxSeconds != null) {
-    rangeClauses.push({ durationSeconds: { _lte: String(maxSeconds) } });
-  }
-  if (rangeClauses.length === 0) return bucketClause;
+  if (minSeconds == null && maxSeconds == null) return bucketClause;
+
+  const durationRange: Record<string, unknown> = {};
+  if (minSeconds != null) durationRange._gte = String(minSeconds);
+  if (maxSeconds != null) durationRange._lte = String(maxSeconds);
+
+  const durationOr = {
+    _or: [
+      { durationSeconds: durationRange },
+      { durationSeconds: { _is_null: true } },
+    ],
+  };
+
   // Hasura tolerates an empty object on one side of _and, so this is safe
   // even when `bucket === "all"` (bucketClause === {}).
-  return { _and: [bucketClause, ...rangeClauses] };
+  return { _and: [bucketClause, durationOr] };
 }
 
 /** Columns the user can sort on server-side. */
@@ -286,10 +297,13 @@ function BreachHistoryPanelInner({
     where,
     limit: ENVIO_MAX_ROWS,
   });
+  // `countReady` gates the empty state — without it, `total === 0`
+  // (defaulted from undefined) would flash a false "No breaches" card
+  // while the count query is still in flight behind the page query.
+  const countReady = countData !== undefined || countError != null;
   const rawTotal = countData?.DeviationThresholdBreach?.length ?? 0;
-  const total = countError ? 0 : rawTotal;
   const countCapped = rawTotal >= ENVIO_MAX_ROWS;
-  const totalPages = total > 0 ? Math.ceil(total / limit) : 1;
+  const totalPages = rawTotal > 0 ? Math.ceil(rawTotal / limit) : 1;
   const page = Math.max(1, Math.min(rawPage, totalPages));
   const offset = (page - 1) * limit;
 
@@ -331,13 +345,12 @@ function BreachHistoryPanelInner({
     );
   }, [rows, query, getName, getTags, pool.chainId]);
 
-  // Error path collapses both count + page errors — the two share the
-  // same entity, so a schema-lag fail on one fails both.
-  if (error || countError) {
-    const message =
-      (error ?? countError) instanceof Error
-        ? (error ?? countError)!.message
-        : String(error ?? countError);
+  // Full-panel error ONLY when the page query itself fails — a flaky
+  // count request shouldn't blank rows we already have. countError
+  // degrades to a small banner below the table (pagination metadata
+  // unavailable) instead of hiding the incident list.
+  if (error) {
+    const message = error instanceof Error ? error.message : String(error);
     const isSchemaLag =
       message.includes("not found in type") ||
       message.includes("type not found") ||
@@ -364,9 +377,11 @@ function BreachHistoryPanelInner({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm text-slate-400">Breach History</h2>
           <span className="text-xs text-slate-500">
-            {countCapped
-              ? `${ENVIO_MAX_ROWS.toLocaleString()}+ breaches`
-              : `${total.toLocaleString()} ${total === 1 ? "breach" : "breaches"}`}
+            {countError
+              ? `${rows.length.toLocaleString()}+ on this page`
+              : countCapped
+                ? `${ENVIO_MAX_ROWS.toLocaleString()}+ breaches`
+                : `${rawTotal.toLocaleString()} ${rawTotal === 1 ? "breach" : "breaches"}`}
           </span>
         </div>
 
@@ -392,7 +407,7 @@ function BreachHistoryPanelInner({
 
         {isLoading && rows.length === 0 ? (
           <p className="py-6 text-center text-sm text-slate-500">Loading…</p>
-        ) : total === 0 ? (
+        ) : rows.length === 0 && countReady && rawTotal === 0 ? (
           <EmptyBox
             message={
               bucket === "all"
@@ -465,7 +480,7 @@ function BreachHistoryPanelInner({
         <Pagination
           page={page}
           pageSize={limit}
-          total={total}
+          total={rawTotal}
           onPageChange={setRawPage}
         />
         {countCapped && (
@@ -475,7 +490,9 @@ function BreachHistoryPanelInner({
           </p>
         )}
         {countError && (
-          <ErrorBox message={`Count unavailable: ${countError.message}`} />
+          <ErrorBox
+            message={`Pagination unavailable (count query failed): ${countError.message}`}
+          />
         )}
       </section>
     </div>
