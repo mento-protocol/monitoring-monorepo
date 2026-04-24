@@ -36,6 +36,7 @@ import { TxHashCell } from "@/components/tx-hash-cell";
 import {
   formatBlock,
   formatBoundaryBps,
+  formatEffectivenessPercent,
   formatTimestamp,
   formatWei,
   getSwapDirection,
@@ -1273,8 +1274,18 @@ export function RebalancesTab({
     { poolId, limit: 200 },
   );
   const chartRows = useMemo(() => {
+    // Exclude degenerate rebalances: the indexer stamps `"0.0000"` when
+    // `computeEffectivenessRatio` returns null (threshold=0 sentinel, pool
+    // already in-band, or before=0). Plotting them under the new boundary-
+    // relative legend would surface red 0% bars that aren't real KPI-4
+    // failures — especially during the Envio re-sync window when old rows
+    // still carry pre-migration thresholds.
     const raw = (chartData?.RebalanceEvent ?? []).filter(
-      (r) => r.effectivenessRatio != null,
+      (r) =>
+        r.effectivenessRatio != null &&
+        r.effectivenessRatio !== "0.0000" &&
+        r.rebalanceThreshold != null &&
+        r.rebalanceThreshold > 0,
     );
     return [...raw].sort(
       (a, b) => Number(a.blockTimestamp) - Number(b.blockTimestamp),
@@ -1291,9 +1302,7 @@ export function RebalancesTab({
         Number(r.priceDifferenceBefore).toLocaleString(),
         Number(r.priceDifferenceAfter).toLocaleString(),
         formatBoundaryBps(r.rebalanceThreshold),
-        r.effectivenessRatio
-          ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
-          : null,
+        formatEffectivenessPercent(r.effectivenessRatio),
         r.blockNumber,
       ]);
     });
@@ -1377,9 +1386,7 @@ export function RebalancesTab({
                     {formatBoundaryBps(r.rebalanceThreshold) ?? "—"}
                   </Td>
                   <Td mono small align="right">
-                    {r.effectivenessRatio
-                      ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
-                      : "—"}
+                    {formatEffectivenessPercent(r.effectivenessRatio) ?? "—"}
                   </Td>
                   <Td mono small muted align="right">
                     {formatBlock(r.blockNumber)}

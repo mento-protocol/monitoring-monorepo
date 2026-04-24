@@ -41,11 +41,18 @@ locals {
   # a pair is FX iff at least one leg is NOT in the USD-pegged set. The regex
   # matches the USD-pegged set; apply with `!~` to select FX pairs. Keep in
   # sync with `USD_PEGGED_SYMBOLS` in tokens.ts and the `expectedLabel` pairs
-  # in shared-config/__tests__/fixtures/known-pools.json.
+  # in shared-config/__tests__/fixtures/known-pools.json. `USD₮` is the
+  # Tugrik-sign USDT variant some sources emit.
+  #
+  # The `pair=~".+/.+"` guard on the unless-arm in `fx_gated_liveness_ratio_promql`
+  # requires a well-formed `token0/token1` label before we silence anything.
+  # `metrics-bridge` falls back to `pair = pool.id` (e.g. "42220-0xabc…") when
+  # symbol derivation fails — without the guard, an unmapped pool would be
+  # treated as FX and have its liveness alerts muted every weekend.
   #
   # Window matches `indexer-envio/config/fx-calendar.json` — close Fri 21:00
   # UTC, reopen Sun 23:00 UTC. day_of_week(): 0=Sun, 5=Fri, 6=Sat.
-  usd_pegged_symbols_regex_part = "(USDm|USDC|USDT|USDT0|AUSD|cUSD|axlUSDC)"
+  usd_pegged_symbols_regex_part = "(USDm|USDC|USDT|USDT0|USD₮|AUSD|cUSD|axlUSDC)"
   usd_pegged_pair_regex = format(
     "^%s/%s$",
     local.usd_pegged_symbols_regex_part,
@@ -60,7 +67,7 @@ locals {
   # division twice per tick. Referenced by the warning + critical rules in
   # rules-fpmms.tf.
   fx_gated_liveness_ratio_promql = format(
-    "((time() - mento_pool_oracle_timestamp) / (mento_pool_oracle_expiry > 0)) unless (mento_pool_oracle_timestamp{pair!~\"%s\"} and on() %s)",
+    "((time() - mento_pool_oracle_timestamp) / (mento_pool_oracle_expiry > 0)) unless (mento_pool_oracle_timestamp{pair!~\"%s\",pair=~\".+/.+\"} and on() %s)",
     local.usd_pegged_pair_regex,
     local.fx_weekend_gate_promql,
   )

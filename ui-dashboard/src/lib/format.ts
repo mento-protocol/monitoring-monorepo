@@ -62,6 +62,18 @@ export function formatBoundaryBps(
   return bps.toLocaleString();
 }
 
+/** Formatted effectiveness ratio as a percent, or `null` when the rebalance
+ * was degenerate. The indexer stamps the raw string `"0.0000"` for events
+ * where `computeEffectivenessRatio` returned null (threshold=0 sentinel,
+ * pool already in-band, or before=0) — rendering those as "0.0%" would
+ * misread as a KPI-4 failure. */
+export function formatEffectivenessPercent(
+  ratio: string | null | undefined,
+): string | null {
+  if (ratio == null || ratio === "0.0000") return null;
+  return `${(Number(ratio) * 100).toFixed(1)}%`;
+}
+
 export { isValidAddress } from "@/lib/validators";
 
 // Pool ID utilities live in lib/pool-id.ts — re-exported here for backward compatibility.

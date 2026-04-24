@@ -7,6 +7,7 @@ import {
   relativeTime,
   formatBlock,
   formatBoundaryBps,
+  formatEffectivenessPercent,
   isNamespacedPoolId,
   isValidAddress,
   formatUSD,
@@ -355,5 +356,37 @@ describe("formatBoundaryBps", () => {
   it("formats positive bps with locale separators", () => {
     expect(formatBoundaryBps(50)).toBe("50");
     expect(formatBoundaryBps(3000)).toBe("3,000");
+  });
+});
+
+describe("formatEffectivenessPercent", () => {
+  it("returns null for null input", () => {
+    expect(formatEffectivenessPercent(null)).toBe(null);
+  });
+
+  it("returns null for undefined input", () => {
+    expect(formatEffectivenessPercent(undefined)).toBe(null);
+  });
+
+  it('returns null for the "0.0000" degenerate sentinel', () => {
+    expect(formatEffectivenessPercent("0.0000")).toBe(null);
+  });
+
+  it('renders "0" (a genuine 0% effective rebalance, not the sentinel) as "0.0%"', () => {
+    // "0" is distinct from "0.0000" — real 0% stringifies differently
+    // if it ever lands; covered for completeness.
+    expect(formatEffectivenessPercent("0")).toBe("0.0%");
+  });
+
+  it("renders 1.0000 as 100.0%", () => {
+    expect(formatEffectivenessPercent("1.0000")).toBe("100.0%");
+  });
+
+  it("renders overshoot > 1 correctly", () => {
+    expect(formatEffectivenessPercent("1.5000")).toBe("150.0%");
+  });
+
+  it("renders negative (made-worse) correctly", () => {
+    expect(formatEffectivenessPercent("-0.2500")).toBe("-25.0%");
   });
 });
