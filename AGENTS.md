@@ -4,9 +4,10 @@
 
 pnpm monorepo with three packages:
 
-- `shared-config/` — `@mento-protocol/monitoring-config`: shared deployment config (chain ID → treb namespace mapping)
+- `shared-config/` — `@mento-protocol/monitoring-config`: chain + token metadata (chain ID → treb namespace, chain slug/label, explorer URLs, token-symbol derivation)
 - `indexer-envio/` — Envio HyperIndex indexer for Celo v3 FPMM pools
 - `ui-dashboard/` — Next.js 16 + Plotly.js monitoring dashboard
+- `metrics-bridge/` — Hasura → Prometheus gauge exporter for v3 alert rules
 
 ## Operating Rule (read this before opening PRs)
 
@@ -101,9 +102,18 @@ pnpm infra:apply              # Apply infrastructure changes
 
 ### shared-config
 
-- **Package:** `@mento-protocol/monitoring-config` (private, no build step)
-- **Purpose:** Single source of truth for chain ID → active treb namespace. Edit `deployment-namespaces.json` when promoting a new deployment.
-- **Consumed by:** both `indexer-envio` and `ui-dashboard` via `workspace:*` dependency
+- **Package:** `@mento-protocol/monitoring-config` (private, built with `pnpm --filter @mento-protocol/monitoring-config build`)
+- **Purpose:** Single source of truth for chain + token metadata across the monorepo. Derives token symbols, pool pair labels, and explorer URLs from `@mento-protocol/contracts` + `shared-config/*.json` so every consumer stays on the same data.
+- **Consumed by:** `ui-dashboard` and `metrics-bridge` via `workspace:*` dependency. `indexer-envio` intentionally vendors `config/deployment-namespaces.json` + reimplements its token filter in `src/feeToken.ts` — Envio may build the indexer outside the pnpm workspace, so the workspace dep is unsafe there (see `indexer-envio/src/contractAddresses.ts:14-18`).
+- **Exports:**
+  - `./deployment-namespaces.json` — chain ID → active treb namespace (edit when promoting a new deployment)
+  - `./fx-calendar.json` — FX market close/reopen anchors for weekend-aware oracle math
+  - `./chain-metadata.json` — chain ID → `{ slug, label, explorerBaseUrl }` (new — edit when a new chain comes online)
+  - `./chains` — `chainSlug`, `chainLabel`, `explorerBaseUrl`, `explorerAddressUrl`, `explorerTxUrl`
+  - `./tokens` — `tokenSymbol`, `poolName`, `contractEntries`, `chainTokenSymbols`, `chainAddressLabels`
+  - `./format` — `poolIdAddress`, `shortAddress`
+
+**Rule:** Before hardcoding a chain slug, explorer URL, pool pair label, or token symbol, check whether `@mento-protocol/monitoring-config` already exposes it. Duplicating chain/token metadata caused PR #209 (Monad Slack alerts shipped raw `143-0x93e1…` pool ids).
 
 ### indexer-envio
 
@@ -124,7 +134,7 @@ pnpm infra:apply              # Apply infrastructure changes
 - **Data:** GraphQL queries to Hasura (via graphql-request + SWR)
 - **Styling:** Tailwind CSS 4
 - **Multi-chain:** Network selector switches between celo-mainnet, celo-sepolia, monad-mainnet, monad-testnet Hasura endpoints; all networks defined in `src/lib/networks.ts`
-- **Contract labels:** `src/lib/networks.ts` derives token symbols and address labels from `@mento-protocol/contracts` (no vendored JSON); the active namespace per chain comes from `shared-config`
+- **Contract labels:** token symbols and address labels come from `@mento-protocol/monitoring-config/tokens` (shared with metrics-bridge); `src/lib/networks.ts` layers per-network `addressLabels` overrides on top. Explorer base URLs default from `@mento-protocol/monitoring-config/chains`; each network keeps its env-var override (`NEXT_PUBLIC_EXPLORER_URL_*`) for local dev
 - **Address book:** `/address-book` page + inline editing; custom labels stored in Upstash Redis, backed up daily to Vercel Blob; custom labels override/extend the package-derived ones
 - **Deployment:** Vercel (`monitoring-dashboard` project); infra managed by Terraform in `terraform/`
 
@@ -146,9 +156,14 @@ monitoring-monorepo/
 │   ├── outputs.tf            # Outputs (project ID, Redis URL, etc.)
 │   ├── terraform.tfvars.example  # Template (copy to terraform.tfvars)
 │   └── .gitignore            # Ignores tfstate, tfvars, .terraform/
-├── shared-config/            # @mento-protocol/monitoring-config (private)
+├── shared-config/            # @mento-protocol/monitoring-config (private, built TS)
 │   ├── package.json
-│   └── deployment-namespaces.json  # ← edit this when promoting a new deployment
+│   ├── tsconfig.json
+│   ├── deployment-namespaces.json  # ← edit when promoting a new deployment
+│   ├── chain-metadata.json         # ← edit when a new chain comes online
+│   ├── fx-calendar.json            # FX market close/reopen anchors
+│   ├── src/                        # chains.ts, tokens.ts, format.ts
+│   └── __tests__/                  # vitest suites (includes known-pool regression fixture)
 ├── indexer-envio/
 │   ├── config.multichain.mainnet.yaml  # Mainnet indexer config (Celo + Monad) — DEFAULT
 │   ├── config.multichain.testnet.yaml  # Testnet multichain config
@@ -181,7 +196,7 @@ monitoring-monorepo/
     │   │   └── address-labels-provider.tsx  # Context: merges package + custom labels
     │   └── lib/
     │       ├── address-labels.ts  # Upstash Redis data access (server-side)
-    │       └── networks.ts        # Network defs; derives labels from @mento-protocol/contracts
+    │       └── networks.ts        # Network defs; delegates token/label derivation to @mento-protocol/monitoring-config
     ├── public/               # Static assets
     ├── vercel.json           # Vercel config + daily backup cron
     └── next.config.ts        # Next.js config

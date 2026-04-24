@@ -4,7 +4,26 @@
       "Bash(vim /Users/chapati/.claude/settings.json)",
       "WebFetch(domain:monitoring.mento.org)",
       "Bash(./tools/trunk fmt:*)",
-      "Bash(./tools/trunk check:*)"
+      "Bash(./tools/trunk check:*)",
+      "Bash(gcloud config set:*)",
+      "Bash(gcloud config get-value:*)",
+      "Bash(gcloud projects describe:*)",
+      "Bash(gcloud projects get-iam-policy:*)",
+      "Bash(gcloud run services describe:*)",
+      "Bash(gcloud run services logs read:*)",
+      "Bash(gcloud run revisions describe:*)",
+      "Bash(gcloud run revisions list:*)",
+      "Bash(gcloud logging read:*)",
+      "Bash(gcloud builds list:*)",
+      "Bash(gcloud builds describe:*)",
+      "Bash(gcloud builds log:*)",
+      "Bash(gcloud artifacts docker images describe:*)",
+      "Bash(gcloud iam workload-identity-pools describe:*)",
+      "Bash(gcloud iam service-accounts describe:*)",
+      "Bash(gcloud services list:*)",
+      "Bash(terraform -chdir=terraform output:*)",
+      "Bash(terraform -chdir=terraform plan:*)",
+      "Bash(terraform -chdir=terraform validate:*)"
     ]
   }
 }

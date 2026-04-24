@@ -3,6 +3,7 @@
   "private": true,
   "packageManager": "pnpm@10.30.3",
   "scripts": {
+    "postinstall": "pnpm --filter @mento-protocol/monitoring-config build",
     "dashboard:build": "pnpm --filter @mento-protocol/ui-dashboard build",
     "dashboard:dev": "pnpm --filter @mento-protocol/ui-dashboard dev",
     "deploy:dashboard": "./scripts/deploy-dashboard.sh",

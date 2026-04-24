@@ -55,9 +55,14 @@ export function _clearFeeTokenMetaCache(): void {
  * Relies on `decimals` fields in the contracts package (v0.4.0+).
  * Automatically covers all tokens across all indexed chains.
  *
- * Wormhole NTT hub/spoke split: Monad deployments are named "*Spoke" but the
- * on-chain ERC20 symbol() returns the canonical hub name. Keep name-stripping
- * in sync with ui-dashboard/src/lib/networks.ts buildNetworkMaps.
+ * Deliberate mirror of shared-config/src/tokens.ts (the filter + Spoke-strip
+ * rules live in that file). This file adds two indexer-specific extras that
+ * MUST stay here: (1) `Mock*` exclusion from the fee-token allowlist — it's
+ * a security invariant guarding `isKnownFeeToken` below — and (2) `decimals`
+ * required. Envio may build outside the pnpm workspace so we can't import
+ * the shared package (see src/contractAddresses.ts:14-18). Keep the Spoke
+ * + StableToken rules in sync with shared-config; don't weaken the Mock*
+ * exclusion here.
  */
 import type { ContractsJson } from "./contractAddresses";
 
@@ -85,7 +90,10 @@ function buildKnownTokenMeta(): Map<
   return meta;
 }
 
-const KNOWN_TOKEN_META = buildKnownTokenMeta();
+// Exported for drift-protection test in
+// indexer-envio/test/feeTokenSharedConfigSync.test.ts — not intended for
+// other consumers. Treat as read-only.
+export const KNOWN_TOKEN_META = buildKnownTokenMeta();
 
 /**
  * Test-only additions to the known-fee-token allowlist. Mirrors the pattern

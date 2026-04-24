@@ -13,6 +13,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@mento-protocol/monitoring-config": "workspace:*",
     "graphql": "^16.13.1",
     "graphql-request": "^7.4.0",
     "prom-client": "^15.1.3"
