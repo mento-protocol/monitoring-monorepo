@@ -13,7 +13,7 @@ resource "grafana_contact_point" "slack_critical" {
   slack {
     token     = var.slack_bot_token
     recipient = var.slack_channel_critical
-    title     = "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ end }} {{ .CommonLabels.alertname }}{{ if .CommonLabels.pair }} — {{ .CommonLabels.pair }}{{ end }}{{ if .CommonLabels.chain_name }} · {{ .CommonLabels.chain_name | title }}{{ end }}"
+    title     = "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ end }} {{ if .CommonLabels.alertname }}{{ .CommonLabels.alertname }}{{ else }}{{ len .Alerts }} alerts{{ end }}{{ if .CommonLabels.pair }} — {{ .CommonLabels.pair }}{{ end }}{{ if .CommonLabels.chain_name }} · {{ .CommonLabels.chain_name | title }}{{ end }}"
     text      = local.slack_body_template
   }
 }
@@ -24,7 +24,7 @@ resource "grafana_contact_point" "slack_warnings" {
   slack {
     token     = var.slack_bot_token
     recipient = var.slack_channel_warnings
-    title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }} {{ .CommonLabels.alertname }}{{ if .CommonLabels.pair }} — {{ .CommonLabels.pair }}{{ end }}{{ if .CommonLabels.chain_name }} · {{ .CommonLabels.chain_name | title }}{{ end }}"
+    title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }} {{ if .CommonLabels.alertname }}{{ .CommonLabels.alertname }}{{ else }}{{ len .Alerts }} alerts{{ end }}{{ if .CommonLabels.pair }} — {{ .CommonLabels.pair }}{{ end }}{{ if .CommonLabels.chain_name }} · {{ .CommonLabels.chain_name | title }}{{ end }}"
     text      = local.slack_body_template
   }
 }
@@ -67,6 +67,14 @@ locals {
   # Group/repeat timings applied via notification_settings on every v3 rule.
   # Aegis root policy uses 30s/5m/4h for catch-all; v3 shortens repeat to 1h so
   # unacknowledged pages don't go silent overnight.
+  #
+  # Two variants:
+  #   `notify_*_pool` omits `alertname` so co-firing KPI rules on the same
+  #     pool (e.g. Deviation Breach + Rebalancer Stale) collapse into one
+  #     Slack thread per (chain_id, pool_id). Used by fpmms pool-level rules.
+  #   `notify_*` keeps `alertname` (the pre-collapse grouping). Used by
+  #     service-scoped rules (metrics-bridge) that lack pool labels —
+  #     without alertname they would all merge into one folder-level group.
   notify_critical = {
     contact_point   = grafana_contact_point.slack_critical.name
     group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
@@ -78,6 +86,22 @@ locals {
   notify_warning = {
     contact_point   = grafana_contact_point.slack_warnings.name
     group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "1m"
+    group_interval  = "10m"
+    repeat_interval = "4h"
+  }
+
+  notify_critical_pool = {
+    contact_point   = grafana_contact_point.slack_critical.name
+    group_by        = ["grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "30s"
+    group_interval  = "5m"
+    repeat_interval = "1h"
+  }
+
+  notify_warning_pool = {
+    contact_point   = grafana_contact_point.slack_warnings.name
+    group_by        = ["grafana_folder", "chain_id", "pool_id"]
     group_wait      = "1m"
     group_interval  = "10m"
     repeat_interval = "4h"

@@ -25,7 +25,7 @@ import {
 import {
   scalingFactorToDecimals,
   ORACLE_ADAPTER_SCALE_FACTOR,
-  computeEffectivenessRatio,
+  buildRebalanceOutcome,
 } from "../priceDifference";
 import {
   TRADING_LIMITS_INTERNAL_DECIMALS,
@@ -705,25 +705,18 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
 
   const rebalancerAddress = asAddress(event.params.sender);
 
-  // Compute effectiveness ratio up-front so it can ride along on oracleDelta
-  // into the Pool row AND be reused by the RebalanceEvent construction below.
-  // The helper returns `null` for the degenerate `before == 0` case; each
-  // consumer picks its own sentinel (see computeEffectivenessRatio docblock).
+  // Prefer the RPC-read threshold (matches what the contract just used);
+  // fall back to the persisted Pool row if the RPC failed.
+  const rebalanceThresholdForEvent =
+    rebalancingState?.rebalanceThreshold ?? existing?.rebalanceThreshold ?? 0;
   const priceDifferenceBefore = event.params.priceDifferenceBefore;
   const priceDifferenceAfter = event.params.priceDifferenceAfter;
-  const improvement = priceDifferenceBefore - priceDifferenceAfter;
-  const rawEffectivenessRatio = computeEffectivenessRatio(
-    priceDifferenceBefore,
-    priceDifferenceAfter,
-  );
-  // `-1` sentinel matches DEFAULT_ORACLE_FIELDS; metrics-bridge skips the
-  // Prometheus publish on that exact string so the `Rebalance Ineffective`
-  // alert's avg_over_time window excludes degenerate rebalances.
-  const lastEffectivenessRatio = rawEffectivenessRatio ?? "-1";
-  // `0.0000` preserves the historical RebalanceEvent contract — dashboard
-  // charts / history tables render via Number(x) * 100, so `-1` would
-  // misreport as -100%.
-  const eventEffectivenessRatio = rawEffectivenessRatio ?? "0.0000";
+  const { improvement, lastEffectivenessRatio, eventEffectivenessRatio } =
+    buildRebalanceOutcome({
+      priceDifferenceBefore,
+      priceDifferenceAfter,
+      rebalanceThreshold: rebalanceThresholdForEvent,
+    });
 
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {
     lastRebalancedAt: blockTimestamp,
@@ -815,6 +808,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     priceDifferenceBefore,
     priceDifferenceAfter,
     improvement,
+    rebalanceThreshold: rebalanceThresholdForEvent,
     effectivenessRatio: eventEffectivenessRatio,
     txHash: event.transaction.hash,
     blockNumber,

@@ -112,7 +112,7 @@ export const gauges = {
   }),
   rebalanceEffectiveness: new Gauge({
     name: "mento_pool_rebalance_effectiveness",
-    help: "Last observed rebalance effectiveness ratio ((priceDiff_before - priceDiff_after) / priceDiff_before). 1.0 = fully corrected, 0 = no reduction, <0 = worse. -1 indexer sentinel is skipped.",
+    help: "Last observed rebalance effectiveness ratio: (priceDiff_before - priceDiff_after) / (priceDiff_before - rebalanceThreshold). 1.0 = rebalance landed exactly on the rebalance boundary (ideal); >1.0 = overshoot past the boundary (e.g. all the way to the oracle, which is over-correction); 0 = no reduction; <0 = rebalance made deviation WORSE. -1 indexer sentinel (degenerate case — zero pre-deviation, missing threshold, or pool was already in-band) is skipped.",
     labelNames: poolLabels,
     registers: [register],
   }),

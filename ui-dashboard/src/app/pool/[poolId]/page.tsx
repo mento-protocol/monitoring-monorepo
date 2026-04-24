@@ -35,6 +35,7 @@ import { TableSearch } from "@/components/table-search";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import {
   formatBlock,
+  formatBoundaryBps,
   formatTimestamp,
   formatWei,
   getSwapDirection,
@@ -1204,6 +1205,12 @@ function ReservesTab({
   );
 }
 
+const BOUNDARY_TOOLTIP =
+  "Rebalance boundary in bps — the pool's allowed deviation from the oracle price. Effectiveness is measured against this boundary, not the oracle midpoint.";
+
+const EFFECTIVENESS_TOOLTIP =
+  "100% = rebalance landed exactly on the boundary (ideal). >100% = overshoot past the boundary (e.g. all the way to the oracle — over-correction, wastes reserves). <100% = control loop under-correcting. Negative = rebalance made deviation worse.";
+
 export function RebalancesTab({
   poolId,
   limit,
@@ -1283,6 +1290,7 @@ export function RebalancesTab({
         ...addressSearchTerms(r.caller, getName, getTags),
         Number(r.priceDifferenceBefore).toLocaleString(),
         Number(r.priceDifferenceAfter).toLocaleString(),
+        formatBoundaryBps(r.rebalanceThreshold),
         r.effectivenessRatio
           ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
           : null,
@@ -1328,7 +1336,16 @@ export function RebalancesTab({
               </th>
               <Th align="right">Before (bps)</Th>
               <Th align="right">After (bps)</Th>
-              <Th align="right">Effectiveness</Th>
+              <Th align="right">
+                <span title={BOUNDARY_TOOLTIP} className="cursor-help">
+                  Boundary (bps)
+                </span>
+              </Th>
+              <Th align="right">
+                <span title={EFFECTIVENESS_TOOLTIP} className="cursor-help">
+                  Effectiveness
+                </span>
+              </Th>
               <Th align="right">Block</Th>
               <Th>Time</Th>
             </tr>
@@ -1355,6 +1372,9 @@ export function RebalancesTab({
                   </Td>
                   <Td mono small align="right">
                     {Number(r.priceDifferenceAfter).toLocaleString()}
+                  </Td>
+                  <Td mono small muted align="right">
+                    {formatBoundaryBps(r.rebalanceThreshold) ?? "—"}
                   </Td>
                   <Td mono small align="right">
                     {r.effectivenessRatio

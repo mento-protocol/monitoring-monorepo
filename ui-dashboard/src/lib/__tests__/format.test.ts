@@ -6,6 +6,7 @@ import {
   formatTimestamp,
   relativeTime,
   formatBlock,
+  formatBoundaryBps,
   isNamespacedPoolId,
   isValidAddress,
   formatUSD,
@@ -331,5 +332,28 @@ describe("isValidAddress", () => {
 
   it("rejects empty string", () => {
     expect(isValidAddress("")).toBe(false);
+  });
+});
+
+describe("formatBoundaryBps", () => {
+  it("returns null for null input (legacy rows without threshold)", () => {
+    expect(formatBoundaryBps(null)).toBe(null);
+  });
+
+  it("returns null for undefined input", () => {
+    expect(formatBoundaryBps(undefined)).toBe(null);
+  });
+
+  it("returns null for 0 (sentinel: indexer hadn't read on-chain value)", () => {
+    expect(formatBoundaryBps(0)).toBe(null);
+  });
+
+  it("returns null for negative bps (defensive)", () => {
+    expect(formatBoundaryBps(-1)).toBe(null);
+  });
+
+  it("formats positive bps with locale separators", () => {
+    expect(formatBoundaryBps(50)).toBe("50");
+    expect(formatBoundaryBps(3000)).toBe("3,000");
   });
 });

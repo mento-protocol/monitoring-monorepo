@@ -53,6 +53,15 @@ export function formatBlock(bn: string): string {
   return Number(bn).toLocaleString();
 }
 
+/** Rebalance boundary (bps) — returns `null` when no on-chain threshold was
+ * recorded for the event (indexed before the schema bump, or threshold=0). */
+export function formatBoundaryBps(
+  bps: number | null | undefined,
+): string | null {
+  if (bps == null || bps <= 0) return null;
+  return bps.toLocaleString();
+}
+
 export { isValidAddress } from "@/lib/validators";
 
 // Pool ID utilities live in lib/pool-id.ts — re-exported here for backward compatibility.

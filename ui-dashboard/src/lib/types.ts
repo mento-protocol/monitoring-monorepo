@@ -186,6 +186,11 @@ export type RebalanceEvent = {
   blockNumber: string;
   blockTimestamp: string;
   improvement?: string;
+  // `rebalanceThreshold` (bps) at the time of the rebalance. Used by the
+  // Rebalance tab to label the new boundary-relative effectiveness ratio.
+  // Optional because it's a schema addition — rows indexed before the schema
+  // bump surface as null until Envio reprocesses the backfill.
+  rebalanceThreshold?: number;
   effectivenessRatio?: string;
 };
 

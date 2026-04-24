@@ -3176,7 +3176,10 @@ describe("Health score handler integration", () => {
     const ORACLE_PRICE = 1_000_000_000_000_000_000_000_000n;
     const R0 = 50_000_000_000_000_000_000_000n;
     const R1 = 50_000_000_000_000_000_000_000n;
-    const REBALANCE_THRESHOLD = 5000;
+    // Threshold below the 3333 bps before-deviation so the rebalance is a
+    // real breach-closing operation (required for the boundary-relative
+    // effectiveness formula to return a meaningful ratio).
+    const REBALANCE_THRESHOLD = 3000;
     // After rebalancing, priceDifference is well within threshold → healthy
     const PRICE_DIFF_AFTER = 100n;
 
@@ -3281,8 +3284,14 @@ describe("Health score handler integration", () => {
 
     // KPI 4 effectiveness: Pool.lastEffectivenessRatio must mirror the
     // toFixed(4) computation used to populate RebalanceEvent.effectivenessRatio.
+    // New (2026-04-24) formula: improvement / (before - threshold) — how much
+    // of the over-boundary gap was closed. before=3333, after=100, threshold=3000.
+    // gap = 333, improvement = 3233 → 9.7087 (way over-corrected past the
+    // boundary all the way to the oracle — the old "100% effective" case that
+    // now correctly reports as overshoot).
     const expectedEff = (
-      Number(3333n - PRICE_DIFF_AFTER) / Number(3333n)
+      Number(3333n - PRICE_DIFF_AFTER) /
+      Number(3333n - BigInt(REBALANCE_THRESHOLD))
     ).toFixed(4);
     assert.equal(
       pool.lastEffectivenessRatio,

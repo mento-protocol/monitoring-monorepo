@@ -13,7 +13,7 @@ import {
 } from "generated";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
-import { computeEffectivenessRatio } from "../priceDifference";
+import { buildRebalanceOutcome } from "../priceDifference";
 
 // ---------------------------------------------------------------------------
 // VirtualPoolFactory.VirtualPoolDeployed
@@ -310,18 +310,20 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Compute effectiveness ratio up-front. Helper returns `null` for degenerate
-  // rebalances (`before == 0`); Pool row uses `-1` sentinel (gauge-skip path),
-  // RebalanceEvent uses `0.0000` for dashboard back-compat.
+  // VirtualPools don't make RPC reads here; threshold comes from the Pool
+  // row. Most VirtualPools have threshold=0 (no oracle band), which collapses
+  // effectiveness to null → skipped by metrics-bridge. The Pool fetch also
+  // feeds upsertPool below.
+  const existing = await context.Pool.get(poolId);
+  const rebalanceThresholdForEvent = existing?.rebalanceThreshold ?? 0;
   const priceDifferenceBefore = event.params.priceDifferenceBefore;
   const priceDifferenceAfter = event.params.priceDifferenceAfter;
-  const improvement = priceDifferenceBefore - priceDifferenceAfter;
-  const rawEffectivenessRatio = computeEffectivenessRatio(
-    priceDifferenceBefore,
-    priceDifferenceAfter,
-  );
-  const lastEffectivenessRatio = rawEffectivenessRatio ?? "-1";
-  const eventEffectivenessRatio = rawEffectivenessRatio ?? "0.0000";
+  const { improvement, lastEffectivenessRatio, eventEffectivenessRatio } =
+    buildRebalanceOutcome({
+      priceDifferenceBefore,
+      priceDifferenceAfter,
+      rebalanceThreshold: rebalanceThresholdForEvent,
+    });
 
   const pool = await upsertPool({
     context,
@@ -332,14 +334,11 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
     blockTimestamp,
     txHash: event.transaction.hash,
     rebalanceDelta: true,
-    // Match FPMM.Rebalanced symmetry: persist both the event-time rebalance
-    // anchor and the effectiveness ratio. `lastRebalancedAt` is inert today
-    // (metrics-bridge filters pools to `source LIKE '%fpmm%'` and VirtualPools
-    // resolve to `virtual_pool_factory` source), but setting it keeps the
-    // Pool row internally consistent — future code that surfaces VirtualPool
-    // rebalance metrics won't hit `lastRebalancedAt = 0` and fail the PromQL
-    // recency gate.
+    // `lastRebalancedAt` is inert today (metrics-bridge filters to fpmm
+    // sources) but kept symmetric with FPMM.Rebalanced so future VirtualPool
+    // metrics won't see a 0 anchor.
     oracleDelta: { lastRebalancedAt: blockTimestamp, lastEffectivenessRatio },
+    existing: { pool: existing },
   });
 
   await upsertSnapshot({
@@ -359,6 +358,7 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
     priceDifferenceBefore,
     priceDifferenceAfter,
     improvement,
+    rebalanceThreshold: rebalanceThresholdForEvent,
     effectivenessRatio: eventEffectivenessRatio,
     txHash: event.transaction.hash,
     blockNumber,

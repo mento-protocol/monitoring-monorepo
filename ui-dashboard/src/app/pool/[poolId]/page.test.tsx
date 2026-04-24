@@ -244,7 +244,11 @@ const rebalances: RebalanceEvent[] = [
     caller: "0xcaller0000000000000000000000000000000004",
     priceDifferenceBefore: "123",
     priceDifferenceAfter: "7",
-    effectivenessRatio: "0.943",
+    // Boundary-relative effectiveness: before=123, boundary=50, gap=73,
+    // improvement=116, 116/73 ≈ 1.5890 (legitimate overshoot). The old
+    // "0.943" value was `(123-7)/123` — toward-midpoint, now deprecated.
+    rebalanceThreshold: 50,
+    effectivenessRatio: "1.589",
     blockNumber: "3001",
     blockTimestamp: "1700000400",
   },

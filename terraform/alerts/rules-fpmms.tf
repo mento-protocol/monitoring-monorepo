@@ -23,7 +23,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary = "Live-ratio {{ printf \"%.2f\" $values.A.Value }} — oracle report overdue.{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary = "Live-ratio {{ printf \"%.2f\" $values.A.Value }} — oracle report overdue (> 1.2× expiry).{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
     }
 
     labels = {
@@ -31,6 +31,9 @@ resource "grafana_rule_group" "fpmms_oracle" {
       severity = "warning"
     }
 
+    # Liveness ratio `(now - last_report) / expiry` with FX weekend
+    # suppression. Threshold raised from the spec's 0.8 → 1.2 to cut noise
+    # from cleanly-recovering oracles. See main.tf for the gated expression.
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -40,7 +43,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "(time() - mento_pool_oracle_timestamp) / (mento_pool_oracle_expiry > 0)"
+        expr    = local.fx_gated_liveness_ratio_promql
         instant = true
       })
     }
@@ -93,7 +96,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
         type       = "threshold"
         expression = "A"
         conditions = [{
-          evaluator = { params = [0.8], type = "gt" }
+          evaluator = { params = [1.2], type = "gt" }
           operator  = { type = "and" }
           query     = { params = ["threshold"] }
         }]
@@ -102,18 +105,19 @@ resource "grafana_rule_group" "fpmms_oracle" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning.contact_point
-      group_by        = local.notify_warning.group_by
-      group_wait      = local.notify_warning.group_wait
-      group_interval  = local.notify_warning.group_interval
-      repeat_interval = local.notify_warning.repeat_interval
+      contact_point   = local.notify_warning_pool.contact_point
+      group_by        = local.notify_warning_pool.group_by
+      group_wait      = local.notify_warning_pool.group_wait
+      group_interval  = local.notify_warning_pool.group_interval
+      repeat_interval = local.notify_warning_pool.repeat_interval
     }
   }
 
-  # KPI 1 critical has two triggers in the spec: can-trade=false OR
-  # liveness-ratio ≥ 1. Split into two rules so Slack messages name the
-  # precise failure mode (and so one rule firing doesn't hide a lagging
-  # second signal).
+  # Two critical rules kept separate so Slack names the precise failure:
+  #   - `Oracle Down`: contract can-trade flag; stays 24/7 un-gated because a
+  #     broken FX feed (vs. merely paused) must still page on weekends.
+  #   - `Oracle Liveness Critical`: ratio > 3; FX-weekend gated like the
+  #     warning, since a paused FX oracle sails past 3× within hours.
   rule {
     name           = "Oracle Down"
     condition      = "threshold"
@@ -196,24 +200,24 @@ resource "grafana_rule_group" "fpmms_oracle" {
     }
 
     notification_settings {
-      contact_point   = local.notify_critical.contact_point
-      group_by        = local.notify_critical.group_by
-      group_wait      = local.notify_critical.group_wait
-      group_interval  = local.notify_critical.group_interval
-      repeat_interval = local.notify_critical.repeat_interval
+      contact_point   = local.notify_critical_pool.contact_point
+      group_by        = local.notify_critical_pool.group_by
+      group_wait      = local.notify_critical_pool.group_wait
+      group_interval  = local.notify_critical_pool.group_interval
+      repeat_interval = local.notify_critical_pool.repeat_interval
     }
   }
 
   rule {
-    name           = "Oracle Expired"
+    name           = "Oracle Liveness Critical"
     condition      = "threshold"
     for            = "1m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Liveness {{ printf \"%.2f\" $values.A.Value }} ≥ 1 — last report past expiry.{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
-      description = "If this fires while Oracle Down stays quiet, the indexer's oracleOk derivation has drifted from the on-chain expiry check."
+      summary     = "Liveness {{ printf \"%.2f\" $values.A.Value }} > 3 — report badly stale.{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      description = "Liveness ratio exceeds 3× the contract expiry. If Oracle Down stays quiet while this fires, the indexer's oracleOk derivation has drifted from the on-chain expiry check."
     }
 
     labels = {
@@ -221,6 +225,8 @@ resource "grafana_rule_group" "fpmms_oracle" {
       severity = "critical"
     }
 
+    # Same gated ratio as the warning rule, fired at 3× so only badly-broken
+    # oracles page the critical channel.
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -230,7 +236,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "(time() - mento_pool_oracle_timestamp) / (mento_pool_oracle_expiry > 0)"
+        expr    = local.fx_gated_liveness_ratio_promql
         instant = true
       })
     }
@@ -278,7 +284,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
         type       = "threshold"
         expression = "A"
         conditions = [{
-          evaluator = { params = [1.0], type = "gte" }
+          evaluator = { params = [3.0], type = "gt" }
           operator  = { type = "and" }
           query     = { params = ["threshold"] }
         }]
@@ -287,11 +293,11 @@ resource "grafana_rule_group" "fpmms_oracle" {
     }
 
     notification_settings {
-      contact_point   = local.notify_critical.contact_point
-      group_by        = local.notify_critical.group_by
-      group_wait      = local.notify_critical.group_wait
-      group_interval  = local.notify_critical.group_interval
-      repeat_interval = local.notify_critical.repeat_interval
+      contact_point   = local.notify_critical_pool.contact_point
+      group_by        = local.notify_critical_pool.group_by
+      group_wait      = local.notify_critical_pool.group_wait
+      group_interval  = local.notify_critical_pool.group_interval
+      repeat_interval = local.notify_critical_pool.repeat_interval
     }
   }
 }
@@ -355,11 +361,11 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning.contact_point
-      group_by        = local.notify_warning.group_by
-      group_wait      = local.notify_warning.group_wait
-      group_interval  = local.notify_warning.group_interval
-      repeat_interval = local.notify_warning.repeat_interval
+      contact_point   = local.notify_warning_pool.contact_point
+      group_by        = local.notify_warning_pool.group_by
+      group_wait      = local.notify_warning_pool.group_wait
+      group_interval  = local.notify_warning_pool.group_interval
+      repeat_interval = local.notify_warning_pool.repeat_interval
     }
   }
 
@@ -421,11 +427,11 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning.contact_point
-      group_by        = local.notify_warning.group_by
-      group_wait      = local.notify_warning.group_wait
-      group_interval  = local.notify_warning.group_interval
-      repeat_interval = local.notify_warning.repeat_interval
+      contact_point   = local.notify_warning_pool.contact_point
+      group_by        = local.notify_warning_pool.group_by
+      group_wait      = local.notify_warning_pool.group_wait
+      group_interval  = local.notify_warning_pool.group_interval
+      repeat_interval = local.notify_warning_pool.repeat_interval
     }
   }
 
@@ -484,11 +490,11 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
 
     notification_settings {
-      contact_point   = local.notify_critical.contact_point
-      group_by        = local.notify_critical.group_by
-      group_wait      = local.notify_critical.group_wait
-      group_interval  = local.notify_critical.group_interval
-      repeat_interval = local.notify_critical.repeat_interval
+      contact_point   = local.notify_critical_pool.contact_point
+      group_by        = local.notify_critical_pool.group_by
+      group_wait      = local.notify_critical_pool.group_wait
+      group_interval  = local.notify_critical_pool.group_interval
+      repeat_interval = local.notify_critical_pool.repeat_interval
     }
   }
 }
@@ -550,11 +556,11 @@ resource "grafana_rule_group" "fpmms_trading_limit" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning.contact_point
-      group_by        = local.notify_warning.group_by
-      group_wait      = local.notify_warning.group_wait
-      group_interval  = local.notify_warning.group_interval
-      repeat_interval = local.notify_warning.repeat_interval
+      contact_point   = local.notify_warning_pool.contact_point
+      group_by        = local.notify_warning_pool.group_by
+      group_wait      = local.notify_warning_pool.group_wait
+      group_interval  = local.notify_warning_pool.group_interval
+      repeat_interval = local.notify_warning_pool.repeat_interval
     }
   }
 
@@ -610,11 +616,11 @@ resource "grafana_rule_group" "fpmms_trading_limit" {
     }
 
     notification_settings {
-      contact_point   = local.notify_critical.contact_point
-      group_by        = local.notify_critical.group_by
-      group_wait      = local.notify_critical.group_wait
-      group_interval  = local.notify_critical.group_interval
-      repeat_interval = local.notify_critical.repeat_interval
+      contact_point   = local.notify_critical_pool.contact_point
+      group_by        = local.notify_critical_pool.group_by
+      group_wait      = local.notify_critical_pool.group_wait
+      group_interval  = local.notify_critical_pool.group_interval
+      repeat_interval = local.notify_critical_pool.repeat_interval
     }
   }
 }
@@ -729,11 +735,11 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     }
 
     notification_settings {
-      contact_point   = local.notify_critical.contact_point
-      group_by        = local.notify_critical.group_by
-      group_wait      = local.notify_critical.group_wait
-      group_interval  = local.notify_critical.group_interval
-      repeat_interval = local.notify_critical.repeat_interval
+      contact_point   = local.notify_critical_pool.contact_point
+      group_by        = local.notify_critical_pool.group_by
+      group_wait      = local.notify_critical_pool.group_wait
+      group_interval  = local.notify_critical_pool.group_interval
+      repeat_interval = local.notify_critical_pool.repeat_interval
     }
   }
 
@@ -750,7 +756,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
 
     annotations = {
       summary     = "Latest rebalance effectiveness {{ printf \"%.2f\" $values.A.Value }} — control loop underperforming while still in breach."
-      description = "Most recent in-breach rebalance closed less than 20% of the deviation AND no better rebalance has landed in the past 15 min. Likely stale-oracle race, MEV truncation, or sizing bug. Liveness OK — this is the effectiveness half of KPI 4."
+      description = "Most recent in-breach rebalance closed less than 50% of the gap to the rebalance boundary AND no better rebalance has landed in the past 15 min. Likely stale-oracle race, MEV truncation, or sizing bug. Liveness OK — this is the effectiveness half of KPI 4. NOTE: effectiveness is measured against the boundary (`rebalanceThreshold`), not the oracle midpoint — 1.0 means the rebalance landed exactly on the boundary (ideal); values > 1.0 = overshoot; < 1.0 = under-correction."
     }
 
     labels = {
@@ -810,6 +816,9 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
       })
     }
 
+    # Fires when the most recent in-breach rebalance closed less than half
+    # the gap to the boundary — the spec's "repeated low-effect rebalance"
+    # signal (§3, KPI 4). Revisit threshold once production data lands.
     data {
       ref_id         = "threshold"
       datasource_uid = "__expr__"
@@ -822,7 +831,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
         type       = "threshold"
         expression = "A"
         conditions = [{
-          evaluator = { params = [0.2], type = "lt" }
+          evaluator = { params = [0.5], type = "lt" }
           operator  = { type = "and" }
           query     = { params = ["threshold"] }
         }]
@@ -831,11 +840,11 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning.contact_point
-      group_by        = local.notify_warning.group_by
-      group_wait      = local.notify_warning.group_wait
-      group_interval  = local.notify_warning.group_interval
-      repeat_interval = local.notify_warning.repeat_interval
+      contact_point   = local.notify_warning_pool.contact_point
+      group_by        = local.notify_warning_pool.group_by
+      group_wait      = local.notify_warning_pool.group_wait
+      group_interval  = local.notify_warning_pool.group_interval
+      repeat_interval = local.notify_warning_pool.repeat_interval
     }
   }
 }

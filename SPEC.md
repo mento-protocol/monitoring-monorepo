@@ -191,7 +191,7 @@ The `healthStatus` field on Pool encodes the current status: `"OK"` | `"WARN"` |
 | ACTIVE | Rebalancer has rebalanced recently |
 | N/A    | Pool is a VirtualPool              |
 
-`effectivenessRatio` per RebalanceEvent = `(priceDifferenceBefore - priceDifferenceAfter) / priceDifferenceBefore` — how much of the deviation was corrected.
+`effectivenessRatio` per RebalanceEvent = `(priceDifferenceBefore - priceDifferenceAfter) / (priceDifferenceBefore - rebalanceThreshold)` — how much of the **gap to the rebalance boundary** was closed. `1.0` = rebalance landed exactly on the boundary (ideal); `> 1.0` = overshoot past the boundary (e.g. all the way to the oracle midpoint — over-correction that wastes reserves); `< 0` = rebalance made deviation worse.
 
 ### 5.5 Stability Pool Headroom (Phase 2)
 
