@@ -5,6 +5,7 @@ import { useAddressLabels } from "@/components/address-labels-provider";
 import { KindBadge, SourceBadge } from "@/components/badges";
 import { ChainIcon } from "@/components/chain-icon";
 import { DeviationCell } from "@/components/pool-header/deviation-cell";
+import { InfoPopover } from "@/components/info-popover";
 import { LimitStatusValue } from "@/components/pool-header/limit-status-value";
 import { OraclePriceValue } from "@/components/pool-header/oracle-price-value";
 import { OracleStatusValue } from "@/components/pool-header/oracle-status-value";
@@ -37,6 +38,8 @@ import { TableSearch } from "@/components/table-search";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import {
   formatBlock,
+  formatBoundaryBps,
+  formatEffectivenessPercent,
   formatTimestamp,
   formatWei,
   getSwapDirection,
@@ -1184,6 +1187,12 @@ function ReservesTab({
   );
 }
 
+const BOUNDARY_TOOLTIP =
+  "Rebalance boundary in bps — the pool's allowed deviation from the oracle price. Effectiveness is measured against this boundary, not the oracle midpoint.";
+
+const EFFECTIVENESS_TOOLTIP =
+  "100% = rebalance landed exactly on the boundary (ideal). >100% = overshoot past the boundary (e.g. all the way to the oracle — over-correction, wastes reserves). <100% = control loop under-correcting. Negative = rebalance made deviation worse.";
+
 export function RebalancesTab({
   poolId,
   limit,
@@ -1246,8 +1255,12 @@ export function RebalancesTab({
     { poolId, limit: 200 },
   );
   const chartRows = useMemo(() => {
+    // Exclude degenerate rebalances: the indexer stamps empty string when
+    // `computeEffectivenessRatio` returns null (threshold=0 sentinel, pool
+    // already in-band, or before=0). A real `"0.0000"` (before==after above
+    // threshold) is a legitimate KPI-4 miss and stays on the chart.
     const raw = (chartData?.RebalanceEvent ?? []).filter(
-      (r) => r.effectivenessRatio != null,
+      (r) => r.effectivenessRatio != null && r.effectivenessRatio !== "",
     );
     return [...raw].sort(
       (a, b) => Number(a.blockTimestamp) - Number(b.blockTimestamp),
@@ -1263,9 +1276,8 @@ export function RebalancesTab({
         ...addressSearchTerms(r.caller, getName, getTags),
         Number(r.priceDifferenceBefore).toLocaleString(),
         Number(r.priceDifferenceAfter).toLocaleString(),
-        r.effectivenessRatio
-          ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
-          : null,
+        formatBoundaryBps(r.rebalanceThreshold),
+        formatEffectivenessPercent(r.effectivenessRatio),
         r.blockNumber,
       ]);
     });
@@ -1308,7 +1320,24 @@ export function RebalancesTab({
               </th>
               <Th align="right">Before (bps)</Th>
               <Th align="right">After (bps)</Th>
-              <Th align="right">Effectiveness</Th>
+              <Th align="right">
+                <span className="inline-flex items-center gap-1">
+                  Boundary (bps)
+                  <InfoPopover
+                    label="About rebalance boundary"
+                    content={BOUNDARY_TOOLTIP}
+                  />
+                </span>
+              </Th>
+              <Th align="right">
+                <span className="inline-flex items-center gap-1">
+                  Effectiveness
+                  <InfoPopover
+                    label="About rebalance effectiveness"
+                    content={EFFECTIVENESS_TOOLTIP}
+                  />
+                </span>
+              </Th>
               <Th align="right">Block</Th>
               <Th>Time</Th>
             </tr>
@@ -1336,10 +1365,11 @@ export function RebalancesTab({
                   <Td mono small align="right">
                     {Number(r.priceDifferenceAfter).toLocaleString()}
                   </Td>
+                  <Td mono small muted align="right">
+                    {formatBoundaryBps(r.rebalanceThreshold) ?? "—"}
+                  </Td>
                   <Td mono small align="right">
-                    {r.effectivenessRatio
-                      ? `${(Number(r.effectivenessRatio) * 100).toFixed(1)}%`
-                      : "—"}
+                    {formatEffectivenessPercent(r.effectivenessRatio) ?? "—"}
                   </Td>
                   <Td mono small muted align="right">
                     {formatBlock(r.blockNumber)}

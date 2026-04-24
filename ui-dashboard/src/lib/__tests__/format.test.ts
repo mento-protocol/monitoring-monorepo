@@ -6,6 +6,8 @@ import {
   formatTimestamp,
   relativeTime,
   formatBlock,
+  formatBoundaryBps,
+  formatEffectivenessPercent,
   isNamespacedPoolId,
   isValidAddress,
   formatUSD,
@@ -331,5 +333,60 @@ describe("isValidAddress", () => {
 
   it("rejects empty string", () => {
     expect(isValidAddress("")).toBe(false);
+  });
+});
+
+describe("formatBoundaryBps", () => {
+  it("returns null for null input (legacy rows without threshold)", () => {
+    expect(formatBoundaryBps(null)).toBe(null);
+  });
+
+  it("returns null for undefined input", () => {
+    expect(formatBoundaryBps(undefined)).toBe(null);
+  });
+
+  it("returns null for 0 (sentinel: indexer hadn't read on-chain value)", () => {
+    expect(formatBoundaryBps(0)).toBe(null);
+  });
+
+  it("returns null for negative bps (defensive)", () => {
+    expect(formatBoundaryBps(-1)).toBe(null);
+  });
+
+  it("formats positive bps with locale separators", () => {
+    expect(formatBoundaryBps(50)).toBe("50");
+    expect(formatBoundaryBps(3000)).toBe("3,000");
+  });
+});
+
+describe("formatEffectivenessPercent", () => {
+  it("returns null for null input", () => {
+    expect(formatEffectivenessPercent(null)).toBe(null);
+  });
+
+  it("returns null for undefined input", () => {
+    expect(formatEffectivenessPercent(undefined)).toBe(null);
+  });
+
+  it("returns null for empty-string degenerate sentinel", () => {
+    expect(formatEffectivenessPercent("")).toBe(null);
+  });
+
+  it('renders a genuine "0.0000" (before == after above threshold) as "0.0%"', () => {
+    // A real 0% rebalance IS a KPI-4 miss and must surface — only the
+    // empty-string degenerate sentinel suppresses to `—`.
+    expect(formatEffectivenessPercent("0.0000")).toBe("0.0%");
+  });
+
+  it("renders 1.0000 as 100.0%", () => {
+    expect(formatEffectivenessPercent("1.0000")).toBe("100.0%");
+  });
+
+  it("renders overshoot > 1 correctly", () => {
+    expect(formatEffectivenessPercent("1.5000")).toBe("150.0%");
+  });
+
+  it("renders negative (made-worse) correctly", () => {
+    expect(formatEffectivenessPercent("-0.2500")).toBe("-25.0%");
   });
 });

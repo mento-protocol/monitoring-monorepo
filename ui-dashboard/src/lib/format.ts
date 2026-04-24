@@ -53,6 +53,28 @@ export function formatBlock(bn: string): string {
   return Number(bn).toLocaleString();
 }
 
+/** Rebalance boundary (bps) — returns `null` when no on-chain threshold was
+ * recorded for the event (indexed before the schema bump, or threshold=0). */
+export function formatBoundaryBps(
+  bps: number | null | undefined,
+): string | null {
+  if (bps == null || bps <= 0) return null;
+  return bps.toLocaleString();
+}
+
+/** Formatted effectiveness ratio as a percent, or `null` when the rebalance
+ * was degenerate. The indexer stamps empty string `""` on RebalanceEvents
+ * where `computeEffectivenessRatio` returned null (threshold=0 sentinel,
+ * pool already in-band, or before=0) — distinct from a real `"0.0000"`
+ * 0%-effective rebalance, which IS a legitimate control-loop miss and must
+ * still render as "0.0%" so operators see it. */
+export function formatEffectivenessPercent(
+  ratio: string | null | undefined,
+): string | null {
+  if (ratio == null || ratio === "") return null;
+  return `${(Number(ratio) * 100).toFixed(1)}%`;
+}
+
 export { isValidAddress } from "@/lib/validators";
 
 // Pool ID utilities live in lib/pool-id.ts — re-exported here for backward compatibility.

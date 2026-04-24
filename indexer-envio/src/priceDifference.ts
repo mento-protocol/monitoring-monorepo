@@ -87,37 +87,61 @@ export function computePriceDifference(pool: {
 }
 
 /**
- * Rebalance effectiveness ratio: how much of the pre-rebalance deviation was
- * closed by a single rebalance. Range:
- *   `1.0`  → deviation fully collapsed (pool ≈ oracle after)
- *   `0.5`  → halved
- *   `0.0`  → no reduction
- *   `< 0`  → rebalance moved price FURTHER from oracle (legitimate + alertable)
+ * Rebalance effectiveness: fraction of the pre-rebalance gap-to-boundary
+ * that a single rebalance closed. `1.0` = landed exactly on the boundary;
+ * `>1` = overshoot past the boundary; `<0` = made deviation worse; `0.0000`
+ * = genuinely zero-effective (before == after above threshold — a legit
+ * control-loop miss the dashboard must still surface).
  *
- * Returns `null` when `before <= 0n` (no meaningful ratio — zero pre-deviation).
- * Callers decide the sentinel string based on their consumer contract:
+ * `priceDifference` is an unsigned magnitude and the boundary is symmetric
+ * around the oracle, so min-side and max-side breaches are handled without
+ * sign tracking. `toFixed(4)` matches the `RebalanceEvent.effectivenessRatio`
+ * stringification contract.
  *
- *   - `Pool.lastEffectivenessRatio` uses `"-1"` to match
- *     `DEFAULT_ORACLE_FIELDS.lastEffectivenessRatio` — metrics-bridge skips the
- *     Prometheus publish on that exact string, keeping the alert's
- *     `avg_over_time` window clean of no-data points.
- *   - `RebalanceEvent.effectivenessRatio` uses `"0.0000"` to preserve the
- *     historical numeric-only contract — dashboard consumers
- *     (`EffectivenessChart`, rebalance history table) render via
- *     `Number(x) * 100`, so emitting `"-1"` there would misreport degenerate
- *     rebalances as `-100%` effective.
- *
- * Emitted string uses `toFixed(4)` to match `RebalanceEvent.effectivenessRatio`
- * stringification.
+ * Returns `null` when the rebalance isn't a meaningful breach-close — i.e.
+ * `before <= 0`, `threshold <= 0` (sentinel before the indexer has read the
+ * on-chain value), or `before <= threshold` (pool was already in-band).
+ * Callers pick the string sentinel:
+ *   - `Pool.lastEffectivenessRatio` → `"-1"` (metrics-bridge skips publish)
+ *   - `RebalanceEvent.effectivenessRatio` → `""` (empty string: falsy in
+ *     dashboard boolean checks, distinct from a real `"0.0000"` 0%-effective
+ *     rebalance so the UI can render `—` without hiding genuine misses)
  */
 export function computeEffectivenessRatio(
   priceDifferenceBefore: bigint,
   priceDifferenceAfter: bigint,
+  rebalanceThreshold: number,
 ): string | null {
   if (priceDifferenceBefore <= 0n) return null;
+  const thresholdBig = BigInt(rebalanceThreshold);
+  if (thresholdBig <= 0n) return null;
+  const gap = priceDifferenceBefore - thresholdBig;
+  if (gap <= 0n) return null;
   const improvement = priceDifferenceBefore - priceDifferenceAfter;
-  // `priceDifference` is stored in bps (0–~100000 in practice), well under
-  // Number.MAX_SAFE_INTEGER. The bigint→Number cast is a precision risk only
-  // for raw 18/24dp oracle values, which are NOT what this helper receives.
-  return (Number(improvement) / Number(priceDifferenceBefore)).toFixed(4);
+  return (Number(improvement) / Number(gap)).toFixed(4);
+}
+
+/**
+ * Bundles the effectiveness computation + both sentinel renderings for a
+ * rebalance event. Shared by FPMM.Rebalanced and VirtualPool.Rebalanced.
+ */
+export function buildRebalanceOutcome(input: {
+  priceDifferenceBefore: bigint;
+  priceDifferenceAfter: bigint;
+  rebalanceThreshold: number;
+}): {
+  improvement: bigint;
+  lastEffectivenessRatio: string;
+  eventEffectivenessRatio: string;
+} {
+  const raw = computeEffectivenessRatio(
+    input.priceDifferenceBefore,
+    input.priceDifferenceAfter,
+    input.rebalanceThreshold,
+  );
+  return {
+    improvement: input.priceDifferenceBefore - input.priceDifferenceAfter,
+    lastEffectivenessRatio: raw ?? "-1",
+    eventEffectivenessRatio: raw ?? "",
+  };
 }

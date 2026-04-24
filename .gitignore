@@ -13,6 +13,7 @@ dist/
 .vercel
 .env*.local
 .claude/worktrees
+.claude/scheduled_tasks.lock
 .reviews/
 WORK.md
 .playwright-mcp/

@@ -1,7 +1,10 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
 import { computePriceDifference } from "../src/EventHandlers";
-import { computeEffectivenessRatio } from "../src/priceDifference";
+import {
+  buildRebalanceOutcome,
+  computeEffectivenessRatio,
+} from "../src/priceDifference";
 
 const SCALE = 10n ** 24n;
 
@@ -277,32 +280,103 @@ describe("computePriceDifference", () => {
 });
 
 describe("computeEffectivenessRatio", () => {
-  it("full correction: after = 0 yields 1.0000", () => {
-    assert.equal(computeEffectivenessRatio(1000n, 0n), "1.0000");
+  // Boundary-relative definition (2026-04-24 redefinition):
+  //   effectiveness = (before - after) / (before - threshold)
+  // 1.0 = rebalance exactly landed on threshold
+  // >1.0 = overshoot past threshold (toward oracle or beyond)
+  // <0 = rebalance made deviation worse
+  // null = degenerate (before <= 0, threshold missing, or pool already in-band)
+
+  it("lands exactly on boundary: after = threshold yields 1.0000", () => {
+    // before=3333, threshold=3000, after=3000 → gap=333, improvement=333 → 1.0
+    assert.equal(computeEffectivenessRatio(3333n, 3000n, 3000), "1.0000");
   });
 
-  it("half correction yields 0.5000", () => {
-    assert.equal(computeEffectivenessRatio(1000n, 500n), "0.5000");
+  it("half correction toward boundary yields 0.5000", () => {
+    // before=3333, threshold=3000, after=3166.5 (~), improvement ~166.5
+    // gap=333 → 166.5/333 ≈ 0.5
+    // Use exact ints: before=1333, threshold=1000 → gap=333; after=1166 → imp=167
+    // 167/333 = 0.5015 → test with exact division: before=1200, threshold=1000,
+    // gap=200, improvement=100, after=1100 → 0.5000
+    assert.equal(computeEffectivenessRatio(1200n, 1100n, 1000), "0.5000");
   });
 
-  it("no reduction: before == after yields 0.0000 (legitimate 0%)", () => {
-    assert.equal(computeEffectivenessRatio(1000n, 1000n), "0.0000");
+  it("over-corrects to oracle midpoint (old '100%' case) now reports > 1", () => {
+    // before=3333, threshold=3000, after=0. Under OLD def this was 1.0.
+    // Under NEW def: improvement=3333, gap=333 → 10.0090 — overshoot.
+    const eff = computeEffectivenessRatio(3333n, 0n, 3000);
+    assert.ok(eff != null && Number(eff) > 1.5, `expected >> 1, got ${eff}`);
+  });
+
+  it("no reduction: before == after yields 0.0000", () => {
+    assert.equal(computeEffectivenessRatio(3333n, 3333n, 3000), "0.0000");
   });
 
   it("rebalance made it WORSE: after > before yields negative (alertable)", () => {
-    // Drop in effectiveness must publish — metrics-bridge sentinel-skip only
-    // filters the exact string "-1", so "-0.5000" reaches Prometheus.
-    assert.equal(computeEffectivenessRatio(1000n, 1500n), "-0.5000");
+    // before=3333, threshold=3000, after=3500 → improvement=-167, gap=333
+    // → -0.5015. Must publish — metrics-bridge sentinel-skip only filters
+    // the exact string "-1", so negative non-sentinel values reach Prometheus.
+    const eff = computeEffectivenessRatio(3333n, 3500n, 3000);
+    assert.ok(eff != null && Number(eff) < 0, `expected negative, got ${eff}`);
   });
 
-  it("degenerate rebalance (before = 0) returns null — callers pick sentinel", () => {
-    // Helper returns null so Pool row can use "-1" (gauge-skip) while the
-    // RebalanceEvent preserves the historical "0.0000" contract for dashboard
-    // consumers that render Number(x) * 100.
-    assert.equal(computeEffectivenessRatio(0n, 0n), null);
+  it("degenerate: before = 0 returns null", () => {
+    assert.equal(computeEffectivenessRatio(0n, 0n, 3000), null);
   });
 
-  it("before < 0 (impossible in practice) also returns null", () => {
-    assert.equal(computeEffectivenessRatio(-100n, 50n), null);
+  it("degenerate: before < 0 (impossible in practice) returns null", () => {
+    assert.equal(computeEffectivenessRatio(-100n, 50n, 3000), null);
+  });
+
+  it("degenerate: threshold = 0 sentinel returns null", () => {
+    // Indexer hasn't read the on-chain threshold yet — no meaningful boundary.
+    assert.equal(computeEffectivenessRatio(3333n, 100n, 0), null);
+  });
+
+  it("degenerate: before <= threshold (pool was already in-band) returns null", () => {
+    // Rebalancer fired for a pool that wasn't actually over threshold. There's
+    // no gap-to-boundary to close; effectiveness isn't defined here.
+    assert.equal(computeEffectivenessRatio(2500n, 2000n, 3000), null);
+  });
+
+  it("degenerate: before == threshold exactly returns null", () => {
+    // Zero gap → avoid division-by-zero.
+    assert.equal(computeEffectivenessRatio(3000n, 2900n, 3000), null);
+  });
+});
+
+describe("buildRebalanceOutcome — sentinel rendering", () => {
+  it("degenerate rebalance: `eventEffectivenessRatio` is empty string, not '0.0000'", () => {
+    // Pool already in-band (before <= threshold) — no meaningful "gap closed".
+    // The event sentinel MUST be distinct from a real 0% effective rebalance
+    // so the dashboard can render degenerate as `—` without hiding real misses.
+    const out = buildRebalanceOutcome({
+      priceDifferenceBefore: 2500n,
+      priceDifferenceAfter: 2200n,
+      rebalanceThreshold: 3000,
+    });
+    assert.equal(out.eventEffectivenessRatio, "");
+    assert.equal(out.lastEffectivenessRatio, "-1");
+  });
+
+  it("genuine 0% effective (before == after above threshold): '0.0000', NOT the sentinel", () => {
+    const out = buildRebalanceOutcome({
+      priceDifferenceBefore: 3333n,
+      priceDifferenceAfter: 3333n,
+      rebalanceThreshold: 3000,
+    });
+    assert.equal(out.eventEffectivenessRatio, "0.0000");
+    assert.equal(out.lastEffectivenessRatio, "0.0000");
+  });
+
+  it("real rebalance: sentinel paths not triggered", () => {
+    const out = buildRebalanceOutcome({
+      priceDifferenceBefore: 3333n,
+      priceDifferenceAfter: 3000n,
+      rebalanceThreshold: 3000,
+    });
+    assert.equal(out.eventEffectivenessRatio, "1.0000");
+    assert.equal(out.lastEffectivenessRatio, "1.0000");
+    assert.equal(out.improvement, 333n);
   });
 });

@@ -166,7 +166,7 @@ export const POOL_REBALANCES = `
     ) {
       id chainId sender caller priceDifferenceBefore priceDifferenceAfter
       txHash blockNumber blockTimestamp
-      improvement effectivenessRatio
+      improvement rebalanceThreshold effectivenessRatio
     }
   }
 `;
@@ -181,7 +181,7 @@ export const POOL_REBALANCES_PAGE = `
     ) {
       id chainId sender caller priceDifferenceBefore priceDifferenceAfter
       txHash blockNumber blockTimestamp
-      improvement effectivenessRatio
+      improvement rebalanceThreshold effectivenessRatio
     }
   }
 `;

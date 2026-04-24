@@ -7,12 +7,14 @@ import { truncateAddress, parseWei } from "./format";
 /** All entries here must also appear in USD_PEGGED_SYMBOLS below. */
 export const USDM_SYMBOLS = new Set(["USDm"]);
 
-/** Tokens treated as $1.00 for USD conversion. */
+/** Tokens treated as $1.00 for USD conversion. Keep in sync with
+ *  `usd_pegged_symbols_regex_part` in `terraform/alerts/main.tf`. */
 const USD_PEGGED_SYMBOLS = new Set([
   "cUSD",
   "USDC",
   "axlUSDC",
   "USDT",
+  "USDT0",
   "USD\u20AE",
   "USDm",
   "AUSD",

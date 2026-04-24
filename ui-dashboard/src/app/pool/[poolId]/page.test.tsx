@@ -244,7 +244,11 @@ const rebalances: RebalanceEvent[] = [
     caller: "0xcaller0000000000000000000000000000000004",
     priceDifferenceBefore: "123",
     priceDifferenceAfter: "7",
-    effectivenessRatio: "0.943",
+    // Boundary-relative effectiveness: before=123, boundary=50, gap=73,
+    // improvement=116, 116/73 ≈ 1.5890 (legitimate overshoot). The old
+    // "0.943" value was `(123-7)/123` — toward-midpoint, now deprecated.
+    rebalanceThreshold: 50,
+    effectivenessRatio: "1.589",
     blockNumber: "3001",
     blockTimestamp: "1700000400",
   },
@@ -819,5 +823,81 @@ describe("Pool detail tab search", () => {
     expect(lastCall).toContain("limit=50");
     expect(lastCall).toContain("swapsQ=0xabc");
     expect(document.activeElement).toBe(input);
+  });
+});
+
+describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering", () => {
+  // All three fixtures below exercise the `"" sentinel` contract introduced
+  // when the boundary-relative effectiveness formula landed: the indexer
+  // stamps empty string when `computeEffectivenessRatio` returns null, so
+  // the UI must render `—` (not `0.0%`) for those rows — otherwise pre-
+  // backfill / VirtualPool / already-in-band rebalances look like KPI-4
+  // failures.
+  const BOUNDARY_CELL_INDEX = 7;
+  const EFFECTIVENESS_CELL_INDEX = 8;
+
+  function overrideRebalances(rows: RebalanceEvent[]) {
+    useGQLMock.mockImplementation((query: unknown) => {
+      if (query === POOL_DETAIL_WITH_HEALTH)
+        return makeGqlResult({ Pool: [basePool] });
+      if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)
+        return makeGqlResult({ RebalanceEvent: rows });
+      if (query === POOL_REBALANCES_COUNT)
+        return makeGqlResult({
+          RebalanceEvent: rows.map((r) => ({ id: r.id })),
+        });
+      return makeGqlResult({});
+    });
+  }
+
+  function renderRebalanceCells(rows: RebalanceEvent[]) {
+    overrideRebalances(rows);
+    const html = renderWithParams({ tab: "rebalances" });
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return Array.from(doc.querySelectorAll("tbody tr td")).map(
+      (cell) => cell.textContent?.trim() ?? "",
+    );
+  }
+
+  it("renders em-dash when rebalanceThreshold is 0 (indexer sentinel)", () => {
+    const cells = renderRebalanceCells([
+      {
+        ...rebalances[0],
+        id: "rebalance-zero-threshold",
+        rebalanceThreshold: 0,
+        effectivenessRatio: "",
+      },
+    ]);
+    expect(cells[BOUNDARY_CELL_INDEX]).toBe("—");
+    expect(cells[EFFECTIVENESS_CELL_INDEX]).toBe("—");
+  });
+
+  it("renders em-dash when rebalanceThreshold is missing (pre-schema-bump row)", () => {
+    const cells = renderRebalanceCells([
+      {
+        ...rebalances[0],
+        id: "rebalance-null-threshold",
+        // rebalanceThreshold omitted (legacy row) — types.ts makes it optional
+        rebalanceThreshold: undefined as unknown as number,
+        effectivenessRatio: "",
+      },
+    ]);
+    expect(cells[BOUNDARY_CELL_INDEX]).toBe("—");
+    expect(cells[EFFECTIVENESS_CELL_INDEX]).toBe("—");
+  });
+
+  it("renders a genuine 0.0% rebalance (before == after above threshold) as real signal, not '—'", () => {
+    // A non-degenerate no-op rebalance IS a KPI-4 miss and must surface.
+    // Distinct from the empty-string degenerate sentinel.
+    const cells = renderRebalanceCells([
+      {
+        ...rebalances[0],
+        id: "rebalance-genuine-zero",
+        rebalanceThreshold: 50,
+        effectivenessRatio: "0.0000",
+      },
+    ]);
+    expect(cells[BOUNDARY_CELL_INDEX]).toBe("50");
+    expect(cells[EFFECTIVENESS_CELL_INDEX]).toBe("0.0%");
   });
 });

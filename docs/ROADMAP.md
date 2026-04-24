@@ -109,20 +109,21 @@ Metrics pipeline and first-cut alert rules are shipped end-to-end:
 - **Terraform module** `terraform/alerts/` — Grafana provider + Slack contact points + alert rules, separate state backend (`gs://mento-terraform-tfstate-6ed6/monitoring-monorepo-alerts`).
 - **Slack channels.** Severity-split: `#alerts-critical` (page-worthy) + `#alerts-warnings` (muted by default). Routing uses rule-level `notification_settings` to bypass the Aegis-owned singleton notification policy — no cross-repo coordination needed.
 
-**Live rule groups** (9 rules):
+**Live rule groups** (10 rules):
 
-| Service          | Rule                      | Severity | Threshold                                                              |
-| ---------------- | ------------------------- | -------- | ---------------------------------------------------------------------- |
-| `fpmms`          | Oracle Liveness           | warning  | `(time() - oracle_timestamp) / oracle_expiry > 0.8` for 2m             |
-| `fpmms`          | Oracle Down               | critical | `oracle_ok < 0.5` for 1m                                               |
-| `fpmms`          | Deviation Breach          | warning  | `deviation_ratio > 1` for 2m                                           |
-| `fpmms`          | Deviation Breach Critical | critical | breach active for >3600s                                               |
-| `fpmms`          | Trading Limit Pressure    | warning  | `limit_pressure > 0.8` for 5m                                          |
-| `fpmms`          | Trading Limit Tripped     | critical | `limit_pressure >= 1` for 2m                                           |
-| `fpmms`          | Rebalancer Stale          | critical | 30m+ breach AND 30m+ since last rebalance                              |
-| `fpmms`          | Rebalance Effectiveness   | warning  | `avg_over_time(effectiveness[1h]) < 0.2` AND active breach AND ran ≥1× |
-| `metrics-bridge` | Not Reporting             | critical | `time() - bridge_last_poll > 90` for 2m                                |
-| `metrics-bridge` | Poll Errors               | critical | `rate(poll_errors_total[5m]) > 0` for 3m                               |
+| Service          | Rule                      | Severity | Threshold                                                          |
+| ---------------- | ------------------------- | -------- | ------------------------------------------------------------------ |
+| `fpmms`          | Oracle Liveness           | warning  | liveness ratio `> 1.2` for 2m (FX-weekend gated)                   |
+| `fpmms`          | Oracle Down               | critical | `oracle_ok < 0.5` for 1m                                           |
+| `fpmms`          | Oracle Liveness Critical  | critical | liveness ratio `> 3` for 1m (FX-weekend gated)                     |
+| `fpmms`          | Deviation Breach          | warning  | `deviation_ratio > 1` for 2m                                       |
+| `fpmms`          | Deviation Breach Critical | critical | breach active for >3600s                                           |
+| `fpmms`          | Trading Limit Pressure    | warning  | `limit_pressure > 0.8` for 5m                                      |
+| `fpmms`          | Trading Limit Tripped     | critical | `limit_pressure >= 1` for 2m                                       |
+| `fpmms`          | Rebalancer Stale          | critical | 30m+ breach AND 30m+ since last rebalance                          |
+| `fpmms`          | Rebalance Effectiveness   | warning  | last in-breach rebalance closed <50% of gap-to-boundary, `for=15m` |
+| `metrics-bridge` | Not Reporting             | critical | `time() - bridge_last_poll > 90` for 2m                            |
+| `metrics-bridge` | Poll Errors               | critical | `rate(poll_errors_total[5m]) > 0` for 3m                           |
 
 ### Deferred
 

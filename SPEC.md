@@ -135,11 +135,13 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 
 **Applies to:** FPMM pools only (VirtualPools → N/A)
 
-| Status   | Condition                             |
-| -------- | ------------------------------------- |
-| OK       | `oracleOk == true`                    |
-| WARN     | liveness ratio > 0.8                  |
-| CRITICAL | liveness ratio ≥ 1.0 (oracle expired) |
+| Status   | Condition                                                                |
+| -------- | ------------------------------------------------------------------------ |
+| OK       | `oracleOk == true`                                                       |
+| WARN     | liveness ratio > 1.2                                                     |
+| CRITICAL | liveness ratio > 3 (badly stale) OR `oracleOk == false` (can-trade flag) |
+
+FX pools (EURm, GBPm, …) have the ratio-based thresholds muted Fri 21:00 UTC → Sun 23:00 UTC (markets closed); `oracleOk == false` still pages 24/7.
 
 ### 5.2 Deviation Ratio (Oracle Price vs Market)
 
@@ -192,9 +194,9 @@ The `healthStatus` field on Pool encodes the current status: `"OK"` | `"WARN"` |
 | ACTIVE | Rebalancer has rebalanced recently |
 | N/A    | Pool is a VirtualPool              |
 
-`effectivenessRatio` per RebalanceEvent = `(priceDifferenceBefore - priceDifferenceAfter) / priceDifferenceBefore` — how much of the deviation was corrected. Range: `1.0` = fully closed, `0.5` = halved, `0` = no effect, `< 0` = moved _away_ from oracle.
+`effectivenessRatio` per RebalanceEvent = `(priceDifferenceBefore - priceDifferenceAfter) / (priceDifferenceBefore - rebalanceThreshold)` — how much of the **gap to the rebalance boundary** was closed. `1.0` = rebalance landed exactly on the boundary (ideal); `> 1.0` = overshoot past the boundary (e.g. all the way to the oracle midpoint — over-correction that wastes reserves); `< 0` = rebalance made deviation worse.
 
-`Pool.lastEffectivenessRatio` mirrors the most recent event's ratio so the bridge can emit it as a single gauge without a subquery. Alert rule: rolling 1h avg <0.2 AND active breach AND ≥1 rebalance in window (catches persistent control-loop failure, ignores one-off MEV hits).
+`Pool.lastEffectivenessRatio` mirrors the most recent event's ratio so the bridge can emit it as a single gauge without a subquery. Alert rule: most recent in-breach rebalance closed <50% of the gap to the boundary AND active breach AND ≥1 rebalance in window (catches persistent control-loop failure, ignores one-off MEV hits).
 
 ### 5.5 Stability Pool Headroom (Phase 2)
 
@@ -346,12 +348,13 @@ Aegis polls v2 contract state via RPC every 10-60s and exposes Prometheus metric
 
 Domain-split (`#alerts-v3`) was the original plan but `critical` vs `warning` is the axis operators actually toggle on. Per-domain splits can be layered later without relabelling series.
 
-**Rules shipped** (9 rules across 2 services — see `terraform/alerts/rules-*.tf`):
+**Rules shipped** (10 rules across 2 services — see `terraform/alerts/rules-*.tf`):
 
 | Service          | Rule                      | Severity | Expression                                                                                                                               |
 | ---------------- | ------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `fpmms`          | Oracle Liveness           | warning  | `(time() - mento_pool_oracle_timestamp) / mento_pool_oracle_expiry > 0.8` for 2m                                                         |
+| `fpmms`          | Oracle Liveness           | warning  | `(time() - mento_pool_oracle_timestamp) / mento_pool_oracle_expiry > 1.2` for 2m (FX-weekend gated)                                      |
 | `fpmms`          | Oracle Down               | critical | `mento_pool_oracle_ok < 0.5` for 1m                                                                                                      |
+| `fpmms`          | Oracle Liveness Critical  | critical | liveness ratio > 3 for 1m (FX-weekend gated)                                                                                             |
 | `fpmms`          | Deviation Breach          | warning  | `mento_pool_deviation_ratio > 1` for 2m                                                                                                  |
 | `fpmms`          | Deviation Breach Critical | critical | breach active >3600s (indexer-anchored via `deviationBreachStartedAt`)                                                                   |
 | `fpmms`          | Trading Limit Pressure    | warning  | `max(mento_pool_limit_pressure) > 0.8` for 5m                                                                                            |
