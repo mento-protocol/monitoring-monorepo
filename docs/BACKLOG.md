@@ -1,151 +1,43 @@
 # Monitoring Monorepo — Task Backlog
 
-Last updated: 2026-04-23
+Last updated: 2026-04-24
 
-## Next — v3 Alerting
+## Next — Indexer: CDP strategy entity
 
-Metrics pipeline is **live end-to-end**: `metrics-bridge` (Cloud Run in the `mento-monitoring` GCP project) → Grafana Agent (`mento-prod` App Engine) → Grafana Cloud Prometheus (`clabsmento.grafana.net`). 11 FPMM pools across Celo + Monad mainnet reporting every 30s, `mento_pool_bridge_last_poll` staying under ~30s stale. Remaining work is defining alert rules in Terraform and wiring the Slack contact point.
+Dashboard currently detects CDP-backed FPMMs via a runtime RPC probe (`ui-dashboard/src/lib/strategy-detection.ts`, added in PR #214). The indexer has all the data — the strategy is set via `LiquidityStrategyUpdated` and the `CDPLiquidityStrategy` address is recoverable — so this belongs in the schema.
 
-### Blocking / coordination
+- [ ] **New `CdpPool` entity** — mirror the `OlsPool` pattern (one-per-pool-with-a-CDP-strategy), registered on `LiquidityStrategyUpdated` when the configured strategy resolves to a `CDPLiquidityStrategy`.
+- [ ] **Dashboard cutover** — replace `detectProbedStrategies()` with `ALL_CDP_POOLS` + `ALL_RESERVE_POOLS` GraphQL queries, delete the RPC probe module. See `TODO(cdp-indexer)` in the stopgap.
 
-- [ ] **Slack `#alerts-v3` channel + webhook** — create channel, add Grafana Cloud incoming webhook integration, stash the URL as `TF_VAR_slack_webhook_alerts_v3` (repo secret + local env). Naming is `#alerts-v3` (not `-pools`) so `oracles` / `cdps` / `metrics-bridge` alerts land in the same channel.
-
-### v3 Alert Rules — first-cut, to land in `terraform/alerts/`
-
-Each rule attaches a `service` label (drives notification-policy routing to Slack). Convention: `service` = monitored domain (matches the existing Aegis pattern of `oracle-relayers` / `trading-limits` / `reserve` — narrow, per alert category, not per producer):
-
-- [ ] `service=fpmms` — **Oracle liveness on pool** — warn on live-ratio >0.8 (`(time() - mento_pool_oracle_timestamp) / mento_pool_oracle_expiry`), critical on `mento_pool_oracle_ok == 0`.
-- [ ] `service=fpmms` — **Deviation breach** — warn on `mento_pool_deviation_ratio > 1` OR `mento_pool_deviation_breach_start > 0`. Critical when the breach has persisted >60min (`time() - mento_pool_deviation_breach_start > 3600`). Indexer anchors the grace-window timestamp.
-- [ ] `service=fpmms` — **Trading limit pressure** — warn on `max(mento_pool_limit_pressure) > 0.8`, critical on `>= 1`.
-- [ ] `service=fpmms` — **Rebalancer stale** — critical when deviation has been breaching for >60min AND `mento_pool_last_rebalanced_at` older than 30min (i.e. the on-chain rebalancer hasn't taken action under pressure).
-- [ ] `service=metrics-bridge` — **Bridge not reporting** — critical if `time() - mento_pool_bridge_last_poll > 90` (3x the 30s poll interval) OR `rate(mento_pool_bridge_poll_errors_total[5m]) > 0`.
-
-### Reserved `service` values (future work, not in first PR)
-
-- `service=oracles` — oracle report quality (large deltas, outlier detection). Distinct from Aegis's existing `oracle-relayers` which monitors relayer liveness, not report content.
-- `service=cdps` — CDP / stability-pool / liquidity alerts once the indexer tracks them (blocked on Liquity v2 indexing).
-
-All four values route to `#alerts-v3` via a single notification-policy regex match `service =~ "fpmms|oracles|cdps|metrics-bridge"`. Split later by severity or add per-domain channels without relabelling series.
-
-### Infrastructure
-
-- [x] **GCP project `mento-monitoring`** — bootstrapped via terraform, org-level SA granted owner on new project (PRs #197 terraform-owner-bootstrap)
-- [x] **Cloud Run `metrics-bridge`** — 512Mi mem, `cpu_idle=false`, `/health` probe path (Cloud Run v2 reserves `/healthz` at the frontend)
-- [x] **Workload Identity Federation** for CI deploys — no long-lived keys (PR #200)
-- [x] **Image rollouts out of Terraform** — `lifecycle.ignore_changes` on image, `gcloud run services update` drives rollouts, `--revision-suffix=<sha>-<run-id>` makes rollbacks self-describing (PR #201)
-- [x] **Per-chain Hasura URL consolidation** — single `NEXT_PUBLIC_HASURA_URL`; dropped hosted testnet network entries (PR #195)
-- [x] **Grafana Agent scrape target** — `grafana-agent/agent.yaml.tmpl` polls `metrics-bridge-pxlhqhqvxq-ew.a.run.app/metrics` every 30s (aegis PR #48)
-- [x] **Grafana Agent container hardening chain** — four latent breakages from aegis #47 surfaced in order: Alpine→Debian commands (#51), UID/GID 1000 collision (#52), deprecated `server:` YAML block (#53), WAL-dir permissions under non-root user (#54)
-
-### Out of scope for first PR
-
-- [ ] **Stability Pool headroom alert** — blocked on Liquity v2 CDP indexing (see below)
-
----
-
-## Next — Rebalance Effectiveness (KPI 4, second half)
-
-Post-launch spec §3 KPI 4 has two halves: **liveness** (does the rebalancer fire?) and **effectiveness** (does it actually fix the deviation?). Liveness ships as the `Rebalancer Stale` critical rule (breach >1h + no rebalance >30m) — added in PR #206, threshold tightened in PR #209. This section defines the effectiveness half.
-
-### What the KPI measures
-
-Each rebalance trades with the pool to push its mid-price toward the oracle. The indexer already computes effectiveness per rebalance in `RebalanceEvent.effectivenessRatio`:
-
-```
-effectivenessRatio = (priceDifferenceBefore − priceDifferenceAfter) / priceDifferenceBefore
-```
-
-Range:
-
-- `1.0` → rebalance collapsed the deviation fully (pool ≈ oracle after)
-- `0.5` → halved the deviation
-- `0.0` → no reduction
-- `< 0` → rebalance moved price _further_ from oracle
-
-**Why "low effectiveness + active breach" is a distinct failure mode:** the rebalancer is alive (liveness OK → `Rebalancer Stale` stays quiet) but ineffective. Root causes include:
-
-- Rebalancer reads a stale oracle price (race vs. relayer)
-- Front-running / MEV truncates the intended trade
-- Rebalancer size calculation has a bug
-- Gas-price sniping splits the swap into smaller pieces
-- Pool state has changed between rebalancer's decision and execution
-
-Without this alert, the operator only sees the symptom (`Deviation Breach Critical` at 60 min) without the cause (rebalancer fired 6 times and each one did <10% of the work).
-
-### Implementation — indexer
-
-`effectivenessRatio` lives on `RebalanceEvent` (per-event); it is **not** currently on `Pool`. Roll it up:
-
-- [ ] **Add `lastEffectivenessRatio: String!` to `Pool` entity** — populated on each `RebalanceEvent`, mirroring the existing `lastDeviationRatio` pattern.
-- [ ] **Backfill on redeploy** — historical rebalance events replay via Envio, so the field will populate without manual intervention.
-- [ ] _(Optional — defer unless alert semantics need it)_ Add `effectivenessRatioAvg1h` using a rolling 1h aggregate; requires either a scheduled rollup handler or computing on-read in the bridge.
-
-### Implementation — metrics-bridge
-
-- [ ] **`metrics-bridge/src/graphql.ts`** — add `lastEffectivenessRatio` to the `BridgePools` query.
-- [ ] **`metrics-bridge/src/types.ts`** — add to `PoolRow`.
-- [ ] **`metrics-bridge/src/metrics.ts`** — new gauge `mento_pool_rebalance_effectiveness` (float, per pool). `parseFloat` of the indexer string.
-- [ ] **Optional new counter**: `mento_pool_rebalance_count_total` — expose `Pool.rebalanceCount` as a Prometheus counter so alerts can gate on `increase(…[1h]) > 0` (i.e. "only alert if the rebalancer actually ran recently").
-- [ ] **Unit tests** in `metrics-bridge/test/metrics.test.ts` cover the new gauge/counter mapping.
-
-### Alert design — two candidates
-
-**Approach A — Single low-effect rebalance (simple):**
-
-```promql
-mento_pool_rebalance_effectiveness < 0.2
-  and mento_pool_deviation_ratio >= 1
-```
-
-Fires every time a rebalance lands with effectiveness <0.2 while still in breach. Severity: warning. One unlucky trade (single MEV hit) fires a real alert — noisy if front-running is frequent.
-
-**Approach B — Sustained low effectiveness (preferred):**
-
-```promql
-avg_over_time(mento_pool_rebalance_effectiveness[1h]) < 0.2
-  and mento_pool_deviation_ratio >= 1
-  and increase(mento_pool_rebalance_count_total[1h]) > 0
-```
-
-Fires only when at least one rebalance ran in the last hour AND the rolling-hour average stayed below 0.2 AND the pool is still in breach. Severity: warning. `for = "15m"`. Captures persistent control-loop failure, ignores one-off bad luck. Requires the new `rebalance_count_total` counter to be exposed.
-
-Decision: ship Approach B as the default. Approach A is a debugging toggle we can enable if Approach B ever misses real incidents.
-
-### Open questions to resolve when picking this up
-
-1. **Effectiveness threshold.** Spec says qualitatively "low-effect". Propose `< 0.2` as first cut — tune after 2 weeks of production data.
-2. **Rolling window.** 1h feels right for the alert (catches an hour of bad rebalances before paging). Could narrow to 30m if the rebalancer fires more frequently than expected.
-3. **Severity.** Control-loop failure is serious but not acute (the user-facing failure — breach >60m — is already caught by `Deviation Breach Critical`). Warning is correct.
-4. **Per-pool tuning.** Does any specific pool (e.g. low-TVL FX pools) warrant a different threshold? Probably not yet — revisit only if production data shows a pool with systematically low effectiveness that is _acceptable_ (e.g. thin order book).
-
-### Acceptance criteria
-
-- `mento_pool_rebalance_effectiveness` gauge present in Grafana for all 11 FPMM pools, with values matching `RebalanceEvent.effectivenessRatio` from the indexer.
-- New rule deploys via `pnpm alerts:apply` without plan drift.
-- Smoke test: temporarily lower the threshold (e.g. `< 0.99`) → alert fires on a real pool that rebalanced recently → revert.
-- `docs/BACKLOG.md` KPI 4 second-half checkbox ticked (this section removed, replaced with a `- [x]` in the Done area).
-
-### Out of scope for the effectiveness PR
-
-- **Dashboard panel for effectiveness trend** — Grafana panel/Mento dashboard widget; useful but not required for the alert.
-- **Root-cause classifier** — distinguishing MEV from staleness from bug requires on-chain tx introspection and belongs in a separate tool, not an alert.
+Touchpoints: `indexer-envio/schema.graphql`, handler in `indexer-envio/src/handlers/fpmm.ts:887`, dashboard replaces `strategy-detection.ts`.
 
 ---
 
 ## Backlog — Indexer Enhancements
 
-- [ ] **CDP strategy tracking entity** — mirror the `OlsPool` entity pattern with a new `CdpPool` (or equivalent) entity registered on `LiquidityStrategyUpdated` when the configured strategy is a `CDPLiquidityStrategy`. Lets the dashboard derive `cdpPoolIds` from a single GraphQL query (same as OLS) and removes the runtime RPC probe introduced in PR #214 (`ui-dashboard/src/lib/strategy-detection.ts`). Touchpoints: `indexer-envio/schema.graphql`, handler in `indexer-envio/src/handlers/fpmm.ts:887`, dashboard replaces `detectProbedStrategies()` with `ALL_CDP_POOLS` + `ALL_RESERVE_POOLS` queries. See `TODO(cdp-indexer)` in the stopgap module.
-- [ ] **Liquity v2 CDP indexing**
-  - TroveManager events: `TroveOpened`, `TroveClosed`, `TroveUpdated`, `LiquidationEvent`
-  - StabilityPool events: `UserDepositChanged`, `PoolBalanceUpdated`
+- [ ] **Liquity v2 CDP indexing** — unblocks `service=cdps` stability-pool alerts + the Liquity v2 dashboard instance (spec §4 "Liquity v2 instance")
+  - Events: TroveManager (`TroveOpened`, `TroveClosed`, `TroveUpdated`, `LiquidationEvent`), StabilityPool (`UserDepositChanged`, `PoolBalanceUpdated`)
   - Contracts: TroveManager `0xb38aEf2bF4e34B997330D626EBCd7629De3885C9`, StabilityPool `0x06346c0fAB682dBde9f245D2D84677592E8aaa15`
-  - New entities: `Trove`, `StabilityPoolSnapshot`
-- [ ] **Monad indexing** — config ready, contracts deployed
-- [ ] **ChainStat / GlobalStat** — protocol-level aggregate entity (total pools, total swaps, global TVL)
+  - New entities: `Trove` (per-CDP ICR snapshot + status), `StabilityPoolSnapshot`, `LiquityInstanceSnapshot` (one per instance, rolled hourly like `PoolSnapshot`)
+  - Required latest-value metrics (spec §2): `spDepositsGbpm`, `spCollUsdM`, `spMinBufferGbpm`, `spHeadroomGbpm` (= deposits − minimum buffer), `systemColl`, `systemDebt`, `tcr`, `redemptionRate`
+  - Required ICR distribution (spec §2): `icrP1`, `icrP5`, `icrP50`, `icrFracBelowMcr`. Not free from the event stream — needs a per-Trove scan at rollup time (or a sorted-insert index keyed by ICR so percentiles are O(1))
+  - Required cumulative-since-T0 (spec §2): `liqCountCum`, `liqVolumeCum`, `redemptionCountCum`, `redemptionVolumeCum`
+  - Minimum-buffer source: Liquity v2 config read — `spMinBufferGbpm` isn't event-sourced, needs periodic contract view call or a config snapshot entity
+- [ ] **`turnoverCum` per pool** — cumulative `notionalCum / time-weighted-avg(tvlUsdM)` since T0 (spec §2). We track `notionalVolume0/1` but never compute time-weighted TVL; needs a TWAP-style accumulator on `Pool` updated on every reserves change (∑ tvl·dt, ∑ dt)
+- [ ] **`timeInWarnCum` per pool** — cumulative seconds spent in warn (deviation breach inside grace window, pre-critical) since T0. Mirror the existing critical rollup (`Pool.cumulativeCriticalSeconds`, which already covers `timeInCriticalCum`); requires tracking warn-state transitions the same way `DeviationBreach` tracks critical
+- [ ] **ChainStat / GlobalStat** — protocol-level aggregate entity (total pools, total swaps, global TVL, `chainProtocolFeesCum` / `globalProtocolFeesCum` from spec §2)
+- [ ] **Oracle report history** — surface historical oracle prices on the indexer so `service=oracles` outlier alerts become expressible (consecutive-report deltas)
+- [ ] **`lastOracleUpdateTxHash` on `Pool`** — unblocks the oracle tx-link tech-debt item (see below)
 
 ## Backlog — Dashboard
 
 - [ ] **Gap-fill for snapshot charts** — forward-fill missing hourly buckets in dashboard layer
+- [ ] **Pool detail config snapshot panel** (spec §4 "Pool") — consolidated view of configured thresholds: `rebalanceThreshold`, oracle expiry / `oracleNumReporters`, trading-limit windows (`limit0/1`, L0/L1/LG timers), rebalancer address. Today these are scattered across status panels or only visible via Etherscan. A single "Config" panel on pool detail makes a pool's configured shape auditable at a glance.
+
+## Backlog — Infrastructure
+
+- [ ] **Migrate Aegis into the monorepo** — Aegis (v2 alerting NestJS service + Grafana alert rules + dashboards) lives in a sibling repo today (`../aegis/`). Merging it into `monitoring-monorepo` removes cross-repo coordination for scrape-config edits, unifies the Terraform state layout (Aegis TF already shares `clabsmento.grafana.net` with `terraform/alerts/`), and lets `shared-config/` be a first-class dependency rather than a published package. Plan: pull `aegis/` under `services/aegis/`, fold `aegis/terraform/grafana-alerts` + `grafana-dashboard` into this repo's `terraform/` module tree, keep `aegis/grafana-agent/` until the Alloy migration (see below), and retire the aegis repo once App Engine deploys run from monorepo CI.
+- [ ] **Grafana Agent → Grafana Alloy migration** — Grafana Agent reached EOL on 2025-11-01 and is already deprecated; Grafana Alloy is the OTel-collector-based successor. Today the Agent runs on App Engine in `mento-prod` (config at `../aegis/grafana-agent/agent.yaml.tmpl`) scraping both Aegis `/metrics` and metrics-bridge `/metrics`. Path: run `alloy convert` against `agent.yaml.tmpl`, swap the App Engine service image, verify both scrape jobs still remote-write to Grafana Cloud, then delete the agent config. Best sequenced _after_ the Aegis monorepo merge so the Alloy config lives alongside the services it scrapes. Refs: <https://grafana.com/blog/2024/04/09/grafana-agent-to-grafana-alloy-opentelemetry-collector-faq/>, <https://grafana.com/docs/alloy/latest/set-up/migrate/>
 
 ## Backlog — Future
 
@@ -156,8 +48,8 @@ Decision: ship Approach B as the default. Approach A is a debugging toggle we ca
 
 - [ ] Dashboard component test coverage (71 test files total, but many are lib/util — component tests sparse)
 - [ ] Revenue page placeholders ("CDP Borrowing Fees" and "Reserve Yield" marked "Soon")
-- [ ] **Shared pool + chain metadata helper** — `metrics-bridge/src/config.ts` keeps three hardcoded maps (`POOL_PAIR_LABELS`, `CHAIN_NAMES`, `BLOCK_EXPLORER_BASE_URLS`) that duplicate source-of-truth data already in the dashboard (`ui-dashboard/src/lib/tokens.ts::poolName` + `networks.ts::NETWORKS`) and `@mento-protocol/contracts`. Drift risk materialized once (the Monad label bug that triggered PR #209). Resolution: promote these to `shared-config/` or derive them dynamically from each pool's `token0`/`token1` + `@mento-protocol/contracts`. Until this ships, a startup warning in `metrics-bridge/src/metrics.ts::warnIfUnknown` logs any pool/chain missing from the maps so the failure mode is at least loud.
 - [ ] **Oracle update tx-hash label** — oracle alerts currently say `Last update: X ago` as plain text. Strictly better as a hyperlink to the exact on-chain `OracleReport` tx on the block explorer. Blocked on the indexer surfacing `lastOracleUpdateTxHash` (or equivalent) on the `Pool` entity — not currently tracked. Once added, the bridge exports it as a `last_oracle_update_url` label and the Slack template wraps "X ago" in `<url|text>`.
+- [ ] **Migrate Aegis v2 alerts to Slack** — Aegis still posts to Discord; v3 went Slack-native (`#alerts-critical` / `#alerts-warnings`). Unify once the v3 channel pair has a week+ of soak.
 
 ---
 
@@ -173,16 +65,22 @@ Decision: ship Approach B as the default. Approach A is a debugging toggle we ca
 - [x] OracleSnapshot entity — per-event oracle price + health timeline
 - [x] SortedOracles event indexing (mainnet only)
 - [x] TradingLimit entity (`limitStatus`, `limitPressure0/1`, `netflow0/1`, `limit0/1`)
-- [x] Rebalancer liveness (`rebalancerAddress`, `rebalanceLivenessStatus`, `effectivenessRatio`)
+- [x] Rebalancer liveness (`rebalancerAddress`, `rebalanceLivenessStatus`, `effectivenessRatio` per RebalanceEvent)
+- [x] **Rebalance effectiveness rollup** — `lastEffectivenessRatio` on `Pool` (KPI 4 effectiveness half, PR #212)
 - [x] PoolSnapshot pre-aggregation (volume, TVL, fees per pool per hour)
 - [x] PoolDailySnapshot rollup (daily aggregation)
 - [x] Pool cumulative fields (`swapCount`, `notionalVolume0/1`, `rebalanceCount`)
 - [x] Deviation breach tracking (`deviationBreachStartedAt` on Pool)
+- [x] **Deviation breach as first-class history entity** — per-breach entries with start/end for charting (PR #194)
+- [x] **Anchor-based breach deferral for multi-`ReservesUpdated` txs** — avoids double-counting (PR #205)
+- [x] **Indexer perf** — parallel oracle loops, concurrent RPC+`Pool.get`, memoised rebalancing state (PR #208)
+- [x] **Bounded oracle caches** — block-keyed caches capped to prevent OOM (PR #184)
+- [x] **Monad mainnet indexing live** — start block backfilled (PR #175), contracts fully indexed
+- [x] **ERC20 registration gated by Mento registry** — prevents malicious fee-token registration (PR #174)
 - [x] FX weekend exclusion from healthscore math
 - [x] FX calendar extracted to `shared-config` package
 - [x] Multichain config (`config.multichain.mainnet.yaml` — Celo + Monad)
 - [x] `txHash` on all events, `@index` directives for query performance
-- [x] Multichain config: `config.multichain.mainnet.yaml`, `config.multichain.testnet.yaml`
 - [x] Deploy branch strategy (`deploy/celo-mainnet`, `deploy/celo-sepolia`)
 - [x] Token addresses sourced from `@mento-protocol/contracts`
 - [x] Retry + fallback RPC on rate limit and block-out-of-range errors
@@ -191,30 +89,65 @@ Decision: ship Approach B as the default. Approach A is a debugging toggle we ca
 
 - [x] Live at monitoring.mento.org
 - [x] Global overview page (`/`) — metrics tiles, all pools table, activity ranking
+- [x] **SSR homepage + slim per-page GraphQL fetches** (PR #207)
 - [x] Pool detail page (`/pools/[poolId]`) — trades, reserve chart, analytics tab
+- [x] **Pool header v2** — Health Score retired; deviation breaches live in a dedicated tab with chart (PR #196)
 - [x] Oracle health: HealthBadge, HealthPanel, OracleChart (dual y-axis)
 - [x] Analytics tab with PoolSnapshot charts
 - [x] Fully multichain — network switcher dropped, chain icon prefix on pool IDs
 - [x] Token symbol mapping, `isFpmm()` in `tokens.ts`
 - [x] Shared `PoolsTable` component
+- [x] **CDP strategy badge** on global pools table (PR #214; stopgap RPC probe, see `Next` for indexer replacement)
 - [x] LimitBadge + LimitPanel (trading limit pressure per token)
 - [x] RebalancerBadge + RebalancerPanel (liveness status + diagnostics)
 - [x] TVL on global page — TVL-over-time chart + tiles with 24h/7d/30d change %
 - [x] TVL Δ WoW column on all pools table
 - [x] Protocol Revenue page (`/revenue`) — swap fee time-series
 - [x] Daily volume chart on pool detail
+- [x] **Bridge-flows page v2** — pagination, status filter, duration column, range tabs (PR #173), stuck-transfer redeem CTA (PR #185), tighter table + route delivery tile + time links (PR #186), array-syntax `order_by` + chain icons on sender/receiver (PR #187)
 - [x] Error boundaries + loading skeletons (route-level)
+- [x] **SWR backoff + 429 retry gating** — visibility/online-aware polling (PR #202)
 - [x] Google Auth (NextAuth.js — `@mentolabs.xyz` only)
+- [x] **Auth hardening** — `hd` + `email_verified` check, middleware-enforced allowlist, 1h JWT (PR #190)
+- [x] **Security headers** — full CSP + HSTS; removed unauthenticated GET on address labels (PR #189)
+- [x] **XSS hardening** — escape user-controlled labels before Plotly renders (PR #171)
+- [x] **Shared prod/preview auth posture** — documented + RSC label-leak regression guard + callback-URL sanitizer tests (PRs #172, #192)
+
+### Shared packages
+
+- [x] **`shared-config` chain + token metadata** — `POOL_PAIR_LABELS`, `CHAIN_NAMES`, `BLOCK_EXPLORER_BASE_URLS` extracted from `metrics-bridge/src/config.ts` and dashboard duplicates; single source of truth (PR #213)
+- [x] FX calendar in `shared-config/fx-calendar.json`
 
 ### Infrastructure (Done)
 
 - [x] Monorepo extraction from devnet repo
 - [x] CI: ESLint 10 + Vitest (71 test files) + typecheck + Codecov
+- [x] **Single aggregate CI workflow** — `ci.yml` fans out to `ui` / `indexer` / `bridge` via path filter; lint via Trunk is the only other required check (PR #188)
+- [x] **Path filters unified + skip-holes closed** across all workflows (PRs #176, #217)
+- [x] **CI pinned to commit SHAs** — `claude-code-action` + `checkout` (PR #177)
+- [x] **High/critical npm advisory block** on merge (PR #191)
 - [x] `pnpm deploy:indexer [network]` (prompts if no network passed)
 - [x] `pnpm update-endpoint:mainnet` — Vercel env var update after indexer redeploy
 - [x] Discord notification on deploy branch push (`notify-envio-deploy.yml`)
 - [x] Deployment docs (`docs/deployment.md`)
 - [x] Non-interactive deploy scripts (status, promote, logs)
+
+### v3 Alerting (shipped this week)
+
+- [x] **GCP project `mento-monitoring`** — bootstrapped via Terraform; org-level SA owner (PR #197)
+- [x] **Cloud Run `metrics-bridge`** — 512Mi mem (PR #198), `cpu_idle=false`, `/health` probe path (PR #199; Cloud Run v2 reserves `/healthz` at the frontend)
+- [x] **Cloud Run deploy IAM** — `serviceusage.serviceUsageConsumer` + logging writer on bridge deploy SA (PRs #216, #218)
+- [x] **Workload Identity Federation** for CI deploys — no long-lived keys (PR #200)
+- [x] **Image rollouts out of Terraform** — `lifecycle.ignore_changes` on image, `gcloud run services update` drives rollouts, `--revision-suffix=<sha>-<run-id>` for self-describing rollbacks (PR #201)
+- [x] **Per-chain Hasura URL consolidation** — single `NEXT_PUBLIC_HASURA_URL`; dropped hosted testnet entries (PR #195)
+- [x] **Bridge label alignment** — pool health rule simplified + labels match Wormholescan (PR #193)
+- [x] **Schema-lag fallback removed** — post-#212 deploy-order race mooted once Envio redeploy promoted (PR #219)
+- [x] **Grafana Agent scrape target** — polls `metrics-bridge` `/metrics` every 30s (aegis PR #48)
+- [x] **Grafana Agent container hardening chain** — Alpine→Debian (#51), UID/GID 1000 (#52), deprecated `server:` block (#53), WAL-dir perms under non-root (#54)
+- [x] **First v3 Slack alert rules** in `terraform/alerts/` — 5 groups / 9 rules across `service=fpmms` + `service=metrics-bridge` (PR #206)
+- [x] **Rebalance effectiveness alert** — `mento_pool_rebalance_effectiveness` gauge + Approach B (`avg_over_time < 0.2 AND deviation_ratio >= 1 AND increase(rebalance_count_total) > 0`, `for=15m`) (PR #212)
+- [x] **Slack UX** — pool pair labels populated (PR #209), tightened copy w/ oracle age (PR #211), channel name corrected to `#alerts-warnings` (PR #210)
+- [x] **Channel structure decision** — severity-split (`#alerts-critical` + `#alerts-warnings`) rather than domain-split (`#alerts-v3`); routing via rule-level `notification_settings` to bypass the Aegis-owned singleton notification policy
 
 ### Alerting (Aegis v2 — live)
 
