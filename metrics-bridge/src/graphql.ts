@@ -33,6 +33,7 @@ const BRIDGE_POOLS_QUERY = gql`
 // fallback when Hasura has not yet applied the indexer redeploy that adds
 // the field. Delete this (and the fallback branch in `fetchPools`) once all
 // Envio deployments are confirmed to have the new schema.
+// TODO(post-deploy): remove schema-lag fallback ~1 week after deploy.
 const BRIDGE_POOLS_QUERY_LEGACY = gql`
   query BridgePoolsLegacy {
     Pool(where: { source: { _like: "%fpmm%" } }) {

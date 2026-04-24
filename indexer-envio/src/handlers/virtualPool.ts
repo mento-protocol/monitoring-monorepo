@@ -332,7 +332,14 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
     blockTimestamp,
     txHash: event.transaction.hash,
     rebalanceDelta: true,
-    oracleDelta: { lastEffectivenessRatio },
+    // Match FPMM.Rebalanced symmetry: persist both the event-time rebalance
+    // anchor and the effectiveness ratio. `lastRebalancedAt` is inert today
+    // (metrics-bridge filters pools to `source LIKE '%fpmm%'` and VirtualPools
+    // resolve to `virtual_pool_factory` source), but setting it keeps the
+    // Pool row internally consistent — future code that surfaces VirtualPool
+    // rebalance metrics won't hit `lastRebalancedAt = 0` and fail the PromQL
+    // recency gate.
+    oracleDelta: { lastRebalancedAt: blockTimestamp, lastEffectivenessRatio },
   });
 
   await upsertSnapshot({

@@ -116,5 +116,8 @@ export function computeEffectivenessRatio(
 ): string | null {
   if (priceDifferenceBefore <= 0n) return null;
   const improvement = priceDifferenceBefore - priceDifferenceAfter;
+  // `priceDifference` is stored in bps (0–~100000 in practice), well under
+  // Number.MAX_SAFE_INTEGER. The bigint→Number cast is a precision risk only
+  // for raw 18/24dp oracle values, which are NOT what this helper receives.
   return (Number(improvement) / Number(priceDifferenceBefore)).toFixed(4);
 }

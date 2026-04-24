@@ -658,6 +658,15 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     #   3. rebalanced recently (< 1h ago) — the bridge re-publishes the
     #      effectiveness gauge every 30s, so a months-old value would otherwise
     #      keep `avg_over_time` alive forever. The time-window gate caps staleness.
+    #
+    # Note on `avg_over_time` semantics: `mento_pool_rebalance_effectiveness` is
+    # a last-write-wins gauge republished every bridge poll (~30s), so this is a
+    # time-weighted average of the MOST RECENT rebalance's effectiveness held
+    # across the window — NOT a per-rebalance mean across multiple events in the
+    # hour. If two rebalances fire in the same hour (one good, one bad), the
+    # gate reflects whichever was last, smoothed by sample count since. This is
+    # intentional: the signal we want is "is the current control loop working
+    # NOW", not "what was the average quality of rebalances this hour".
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
