@@ -134,6 +134,7 @@ Decision: ship Approach B as the default. Approach A is a debugging toggle we ca
 
 ## Backlog — Indexer Enhancements
 
+- [ ] **CDP strategy tracking entity** — mirror the `OlsPool` entity pattern with a new `CdpPool` (or equivalent) entity registered on `LiquidityStrategyUpdated` when the configured strategy is a `CDPLiquidityStrategy`. Lets the dashboard derive `cdpPoolIds` from a single GraphQL query (same as OLS) and removes the runtime RPC probe introduced in PR #214 (`ui-dashboard/src/lib/strategy-detection.ts`). Touchpoints: `indexer-envio/schema.graphql`, handler in `indexer-envio/src/handlers/fpmm.ts:887`, dashboard replaces `detectProbedStrategies()` with `ALL_CDP_POOLS` + `ALL_RESERVE_POOLS` queries. See `TODO(cdp-indexer)` in the stopgap module.
 - [ ] **Liquity v2 CDP indexing**
   - TroveManager events: `TroveOpened`, `TroveClosed`, `TroveUpdated`, `LiquidationEvent`
   - StabilityPool events: `UserDepositChanged`, `PoolBalanceUpdated`
