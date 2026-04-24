@@ -184,6 +184,95 @@ describe("updateMetrics", () => {
     ).toBe(1713199000);
   });
 
+  it("publishes swap_fee_bps as lpFee + protocolFee", async () => {
+    updateMetrics([makePool({ lpFee: 10, protocolFee: 5 })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_swap_fee_bps", poolLabels),
+    ).toBe(15);
+  });
+
+  it("skips swap_fee_bps when lpFee sentinel (-1)", async () => {
+    updateMetrics([makePool({ lpFee: -1, protocolFee: 5 })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_swap_fee_bps", poolLabels),
+    ).toBeUndefined();
+  });
+
+  it("skips swap_fee_bps when protocolFee sentinel (-1)", async () => {
+    updateMetrics([makePool({ lpFee: 5, protocolFee: -1 })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_swap_fee_bps", poolLabels),
+    ).toBeUndefined();
+  });
+
+  it("publishes swap_fee_bps = 0 for a legitimately zero-fee pool", async () => {
+    // A pool with lpFee = 0 AND protocolFee = 0 is a real configuration,
+    // NOT a sentinel. Any oracle jump is LP leakage by definition (there's
+    // no fee to offset it), so the alert rule uses `>= 0` to keep these
+    // pools eligible to fire. Regression test for the Codex/Cursor/Claude
+    // reviews on PR #223.
+    updateMetrics([makePool({ lpFee: 0, protocolFee: 0 })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_swap_fee_bps", poolLabels),
+    ).toBe(0);
+  });
+
+  // Codex flagged a concern that `parseFloat("3.3000")` = IEEE approx of 3.3
+  // (slightly below), so `jump * 10 >= fee * 11` would evaluate false at the
+  // 10%-over-fee boundary for a 3 bps fee and misroute critical → warning.
+  // IEEE-754 round-to-nearest actually rounds `3.3 * 10` back to 33.0
+  // exactly (33 is representable and closer than 33 − 2⁻⁴⁶), so both
+  // tiers partition correctly. This test locks the round-trip behaviour
+  // the terraform alert rules rely on — if a future bridge change swaps
+  // the gauge unit or parseFloat path, the boundary regression will trip.
+  it.each([
+    [3, "3.3000", true], // Codex's specific case — critical boundary
+    [3, "3.2999", false], // just below boundary → warning only
+    [3, "3.3001", true], // just above boundary → critical
+    [7, "7.7000", true], // non-multiple-of-5 fee, integer-bps boundary
+    [10, "11.0000", true], // user's stated case: 11 bps on a 10 bps fee
+    [10, "10.5000", false], // user's stated warning case
+  ])(
+    "oracle-jump boundary: fee=%s jump=%s routes to critical=%s",
+    (fee, jumpStr, shouldBeCritical) => {
+      const jump = parseFloat(jumpStr);
+      const critical = jump * 10 >= fee * 11;
+      const warning = jump > fee && jump * 10 < fee * 11;
+      expect(critical).toBe(shouldBeCritical);
+      // Mutual exclusion at every boundary.
+      expect(warning && critical).toBe(false);
+    },
+  );
+
+  it("parses oracle_jump_bps from fixed-point string", async () => {
+    updateMetrics([makePool({ lastOracleJumpBps: "10.5000" })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_jump_bps", poolLabels),
+    ).toBe(10.5);
+  });
+
+  it("sets oracle_jump_at from BigInt string", async () => {
+    updateMetrics([makePool({ lastOracleJumpAt: "1713200500" })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_jump_at", poolLabels),
+    ).toBe(1713200500);
+  });
+
+  it("publishes zero oracle_jump_bps before any jump recorded", async () => {
+    // Unlike deviationRatio, we DO publish 0 — it's a legitimate "no recent
+    // movement" signal, and the alert gates on `time() - oracle_jump_at` to
+    // avoid false-firing on these pools anyway.
+    updateMetrics([
+      makePool({ lastOracleJumpBps: "0.0000", lastOracleJumpAt: "0" }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_jump_bps", poolLabels),
+    ).toBe(0);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_jump_at", poolLabels),
+    ).toBe(0);
+  });
+
   it("falls back to pool id when pair/chain/explorer are unknown", async () => {
     const unknownPool = makePool({
       id: "99999-0x1234567890abcdef1234567890abcdef12345678",

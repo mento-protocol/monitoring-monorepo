@@ -12,6 +12,7 @@ import {
 } from "../pool";
 import { recordBreachTransition } from "../deviationBreach";
 import { recordHealthSample } from "../healthScore";
+import { computeOracleJumpBps } from "../oracleJump";
 import {
   fetchReportExpiry,
   getPoolsByFeed,
@@ -161,6 +162,22 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
 
       const oraclePrice = event.params.value;
 
+      // Median-to-median jump: `existing.lastMedianPrice` is the previous
+      // `MedianUpdated.value` (not `existing.oraclePrice`, which gets
+      // overwritten by OracleReported with per-reporter values between
+      // medians). Null means no prior median to compare against, or the new
+      // median is 0 (transient oracle outage — leave the jump fields
+      // untouched rather than record a spurious 100%-down crash).
+      const jumpBps = computeOracleJumpBps(
+        existing.lastMedianPrice,
+        oraclePrice,
+      );
+      const lastOracleJumpBps = jumpBps ?? existing.lastOracleJumpBps;
+      const lastOracleJumpAt =
+        jumpBps !== null ? blockTimestamp : existing.lastOracleJumpAt;
+      const lastMedianPrice =
+        oraclePrice > 0n ? oraclePrice : existing.lastMedianPrice;
+
       const updatedPool: Pool = {
         ...existing,
         oraclePrice,
@@ -169,6 +186,9 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         oracleOk: true,
         oracleExpiry,
         oracleNumReporters: existing.oracleNumReporters,
+        lastMedianPrice,
+        lastOracleJumpBps,
+        lastOracleJumpAt,
         updatedAtBlock: blockNumber,
         updatedAtTimestamp: blockTimestamp,
       };

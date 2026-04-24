@@ -17,6 +17,10 @@ export interface PoolRow {
   lastEffectivenessRatio: string;
   rebalanceLivenessStatus: string;
   hasHealthData: boolean;
+  lpFee: number;
+  protocolFee: number;
+  lastOracleJumpBps: string;
+  lastOracleJumpAt: string;
 }
 
 export interface BridgePoolsResponse {

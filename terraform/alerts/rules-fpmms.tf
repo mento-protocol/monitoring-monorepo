@@ -848,3 +848,217 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     }
   }
 }
+
+# ── Oracle price jump vs. swap fee ───────────────────────────────────────────
+#
+# When the oracle posts a new median that moves by more than the pool's swap
+# fee (lpFee + protocolFee), arbitrageurs can round-trip through the pool and
+# extract the excess as LP losses. The two tiers split on magnitude:
+#
+#   warning  — swap_fee < jump < swap_fee × 1.10   (up to 10% over the fee)
+#   critical — jump ≥ swap_fee × 1.10              (10%+ over the fee)
+#
+# Boundaries mirror the user-stated example: on a 10 bps fee, 10.5 bps fires
+# warning; 11 bps fires critical. Mutually exclusive — a single jump matches
+# exactly one rule.
+#
+# Common gates (applied via the same `and` chain as other KPI rules):
+#   1. `(time() - mento_pool_oracle_jump_at) < 600` — only fire within 10 min
+#      of the MedianUpdated event that produced the jump. Grafana eval is
+#      every 60s and the gauge is last-write-wins, so without this gate a
+#      single big jump would stay firing until the next median, which for a
+#      quiet feed can be hours. The 10-min window aligns with the 600s
+#      `instant_query_range_seconds` window already used repo-wide.
+#   2. `mento_pool_swap_fee_bps >= 0` — the metrics-bridge `-1` sentinel is
+#      never published, so every series present at alert-eval time
+#      corresponds to a pool with a real fee. A published 0 is a legitimate
+#      zero-fee pool and must remain eligible to alert.
+#
+# Not FX-weekend gated. A large FX jump on Monday open IS exactly the
+# LP-leakage event the alert is designed to catch; suppressing it would
+# hide the most expensive arbitrage window of the week. The existing
+# `Oracle Down` critical rule is un-suppressed for the same reason.
+resource "grafana_rule_group" "fpmms_oracle_jump" {
+  name             = "Oracle Price Jump"
+  folder_uid       = grafana_folder.fpmms.uid
+  interval_seconds = 60
+
+  rule {
+    name           = "Oracle Jump Exceeds Swap Fee"
+    condition      = "threshold"
+    for            = "0m"
+    exec_err_state = "Error"
+    no_data_state  = "OK"
+
+    annotations = {
+      summary     = "Oracle jumped {{ printf \"%.2f\" $values.A.Value }} bps — above the pool's {{ if $values.Fee }}{{ printf \"%.0f\" $values.Fee.Value }}{{ else }}?{{ end }} bps swap fee. LPs leaking per arb round-trip."
+      description = "Most recent MedianUpdated delta is above the pool's combined swap fee but still within 10% of it. Warning tier — a single large move isn't pageable, but repeated occurrences point to an oracle or sizing tune-up."
+    }
+
+    labels = {
+      service  = "fpmms"
+      severity = "warning"
+    }
+
+    # A = current jump bps filtered to the warning band.
+    # The `and` chain embeds the full alert condition; the threshold check
+    # below just confirms A is non-empty (value > 0). Matches the same
+    # pattern as `Rebalance Ineffective`.
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId = "A"
+        expr = join(" and ", [
+          "mento_pool_oracle_jump_bps",
+          "(mento_pool_oracle_jump_bps > mento_pool_swap_fee_bps)",
+          # Strict `<` upper bound: at exactly swap_fee × 1.10 the critical
+          # rule takes over. Written as `jump * 10 < fee * 11` instead of
+          # `jump < fee * 1.10` because `fee * 11` is integer-exact — the
+          # direct `* 1.10` form has IEEE-754 residue for fees that aren't
+          # multiples of 10, which can misroute an exact-boundary jump to
+          # the wrong severity (e.g. on a 3 bps fee a 3.3 bps jump would
+          # otherwise fall in the warning band).
+          "(mento_pool_oracle_jump_bps * 10 < mento_pool_swap_fee_bps * 11)",
+          "((time() - mento_pool_oracle_jump_at) < 600)",
+          # `>= 0` not `> 0`: the metrics-bridge `-1` sentinel is never
+          # published, so a zero here is always a legitimately zero-fee
+          # pool that should still alert on any jump.
+          "(mento_pool_swap_fee_bps >= 0)",
+        ])
+        instant = true
+      })
+    }
+
+    # Fee sample — used by the summary annotation, not by the threshold.
+    data {
+      ref_id         = "Fee"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "Fee"
+        expr    = "mento_pool_swap_fee_bps"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "threshold"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "threshold"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          evaluator = { params = [0], type = "gt" }
+          operator  = { type = "and" }
+          query     = { params = ["threshold"] }
+        }]
+        datasource = { type = "__expr__", uid = "__expr__" }
+      })
+    }
+
+    notification_settings {
+      contact_point   = local.notify_warning.contact_point
+      group_by        = local.notify_warning.group_by
+      group_wait      = local.notify_warning.group_wait
+      group_interval  = local.notify_warning.group_interval
+      repeat_interval = local.notify_warning.repeat_interval
+    }
+  }
+
+  rule {
+    name           = "Oracle Jump Far Above Swap Fee"
+    condition      = "threshold"
+    for            = "0m"
+    exec_err_state = "Error"
+    no_data_state  = "OK"
+
+    annotations = {
+      summary     = "Oracle jumped {{ printf \"%.2f\" $values.A.Value }} bps — ≥10% above the pool's {{ if $values.Fee }}{{ printf \"%.0f\" $values.Fee.Value }}{{ else }}?{{ end }} bps swap fee. LPs leaking per arb round-trip."
+      description = "Most recent MedianUpdated delta is at least 10% above the pool's combined swap fee. Arbitrageurs can round-trip through the pool faster than rebalancing can catch, and the leakage compounds with volume. Investigate the oracle feed (stuck reporter, bridge-delay reopen, reporter disagreement) and the rebalancer's next-cycle response."
+    }
+
+    labels = {
+      service  = "fpmms"
+      severity = "critical"
+    }
+
+    # Boundary: `>=` sends an exact 10%-above (e.g. 11 bps on a 10 bps fee)
+    # to critical, matching the user-stated cutoff. The warning rule's
+    # strict `<` upper bound preserves mutual exclusion. See the warning
+    # rule for why the boundary is expressed as `jump * 10 ⋈ fee * 11`
+    # rather than `jump ⋈ fee * 1.10`.
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId = "A"
+        expr = join(" and ", [
+          "mento_pool_oracle_jump_bps",
+          "(mento_pool_oracle_jump_bps * 10 >= mento_pool_swap_fee_bps * 11)",
+          "((time() - mento_pool_oracle_jump_at) < 600)",
+          "(mento_pool_swap_fee_bps >= 0)",
+        ])
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "Fee"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "Fee"
+        expr    = "mento_pool_swap_fee_bps"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "threshold"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "threshold"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          evaluator = { params = [0], type = "gt" }
+          operator  = { type = "and" }
+          query     = { params = ["threshold"] }
+        }]
+        datasource = { type = "__expr__", uid = "__expr__" }
+      })
+    }
+
+    notification_settings {
+      contact_point   = local.notify_critical.contact_point
+      group_by        = local.notify_critical.group_by
+      group_wait      = local.notify_critical.group_wait
+      group_interval  = local.notify_critical.group_interval
+      repeat_interval = local.notify_critical.repeat_interval
+    }
+  }
+}
