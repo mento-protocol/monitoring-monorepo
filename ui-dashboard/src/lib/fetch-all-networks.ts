@@ -21,6 +21,7 @@ import {
   aggregateProtocolFees,
   type ProtocolFeeSummary,
 } from "@/lib/protocol-fees";
+import { detectProbedStrategies } from "@/lib/strategy-detection";
 import {
   buildSnapshotWindows,
   filterSnapshotsToWindow,
@@ -67,6 +68,15 @@ export type NetworkData = {
   snapshotsAllDailyTruncated: boolean;
   tradingLimits: TradingLimit[];
   olsPoolIds: Set<string>;
+  /**
+   * Pool IDs whose `rebalancerAddress` was positively probed as a CDP or
+   * Reserve strategy (see `lib/strategy-detection.ts`). Pools whose probe
+   * errored/timed out appear in NEITHER set — consumers must not default
+   * absence to "Reserve", because doing so would surface a misleading
+   * confident badge on every transport outage.
+   */
+  cdpPoolIds: Set<string>;
+  reservePoolIds: Set<string>;
   fees: ProtocolFeeSummary | null;
   /** Raw fee transfer rows — kept for time-series bucketing on the revenue page. */
   feeTransfers: ProtocolFeeTransfer[];
@@ -127,6 +137,8 @@ export const blankNetworkData = (
   snapshotsAllDailyTruncated: false,
   tradingLimits: [],
   olsPoolIds: new Set(),
+  cdpPoolIds: new Set(),
+  reservePoolIds: new Set(),
   fees: null,
   feeTransfers: [],
   uniqueLpAddresses: null,
@@ -359,6 +371,7 @@ export async function fetchNetworkData(
     tradingLimitsResult,
     olsResult,
     breachRollupResult,
+    cdpPoolIdsResult,
   ] = await Promise.allSettled([
     timed<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
       PROTOCOL_FEE_TRANSFERS_ALL,
@@ -391,6 +404,10 @@ export async function fetchNetworkData(
         breachCount?: number;
       }[];
     }>(ALL_POOLS_BREACH_ROLLUP, { chainId: network.chainId }),
+    // RPC probe — no indexer entity for CDP strategy, so we detect by
+    // calling `getCDPConfig` on each unique rebalancer contract. Cached at
+    // module scope so the cost is ~1 call per deployed strategy per TTL.
+    detectProbedStrategies(network, pools),
   ]);
 
   // Merge the rollup fields into the pool objects. On failure (including
@@ -516,6 +533,16 @@ export async function fetchNetworkData(
       ? new Set((olsResult.value.OlsPool ?? []).map((p) => p.poolId))
       : new Set<string>();
 
+  // `detectProbedStrategies` already fails open (catches and Sentry-logs
+  // RPC errors itself), so a rejected Promise here would signal something
+  // the helper couldn't swallow — still degrade to empty so the fetch
+  // overall stays up. Consumers downstream treat "pool absent from both
+  // sets" as "detection unavailable" and avoid confident badges.
+  const { cdpPoolIds, reservePoolIds } =
+    cdpPoolIdsResult.status === "fulfilled"
+      ? cdpPoolIdsResult.value
+      : { cdpPoolIds: new Set<string>(), reservePoolIds: new Set<string>() };
+
   return {
     network,
     snapshotWindows: windows,
@@ -527,6 +554,8 @@ export async function fetchNetworkData(
     snapshotsAllDailyTruncated,
     tradingLimits,
     olsPoolIds,
+    cdpPoolIds,
+    reservePoolIds,
     fees,
     feeTransfers:
       feesResult.status === "fulfilled"

@@ -24,6 +24,16 @@ type DerivedEntries = {
   tradingLimitsByKey: Map<string, TradingLimit[]>;
   /** Set of globalPoolKeys that have an active OLS strategy. */
   olsPoolKeys: Set<string>;
+  /** Set of globalPoolKeys whose rebalancer positively probed as CDP. */
+  cdpPoolKeys: Set<string>;
+  /**
+   * Set of globalPoolKeys whose rebalancer positively probed as Reserve.
+   * Pools with a rebalancer that appear in none of {ols, cdp, reserve} had
+   * their probe fail (transport error, timeout, or uncategorised) — see
+   * `lib/strategy-detection.ts`. The pools page treats that absence as
+   * "strategy detection unavailable" rather than a confident Reserve.
+   */
+  reservePoolKeys: Set<string>;
 };
 
 function perPoolTvlWindow(
@@ -70,6 +80,8 @@ export function buildGlobalPoolEntries(
   const tvlChangeWoWByKey = new Map<string, number | null>();
   const tradingLimitsByKey = new Map<string, TradingLimit[]>();
   const olsPoolKeys = new Set<string>();
+  const cdpPoolKeys = new Set<string>();
+  const reservePoolKeys = new Set<string>();
 
   for (const netData of networkData) {
     if (netData.error !== null) continue;
@@ -117,6 +129,8 @@ export function buildGlobalPoolEntries(
       if (tls) tradingLimitsByKey.set(key, tls);
 
       if (netData.olsPoolIds.has(pool.id)) olsPoolKeys.add(key);
+      if (netData.cdpPoolIds.has(pool.id)) cdpPoolKeys.add(key);
+      if (netData.reservePoolIds.has(pool.id)) reservePoolKeys.add(key);
     }
   }
 
@@ -127,5 +141,7 @@ export function buildGlobalPoolEntries(
     tvlChangeWoWByKey,
     tradingLimitsByKey,
     olsPoolKeys,
+    cdpPoolKeys,
+    reservePoolKeys,
   };
 }

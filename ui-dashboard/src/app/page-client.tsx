@@ -119,6 +119,8 @@ function GlobalContent({
     tvlChangeWoWByKey,
     tradingLimitsByKey,
     olsPoolKeys,
+    cdpPoolKeys,
+    reservePoolKeys,
   } = useMemo(() => buildGlobalPoolEntries(networkData), [networkData]);
 
   // Aggregate KPIs across all chains for the summary tiles.
@@ -409,6 +411,8 @@ function GlobalContent({
             tvlChangeWoWByKey={tvlChangeWoWByKey}
             tradingLimitsByKey={tradingLimitsByKey}
             olsPoolKeys={olsPoolKeys}
+            cdpPoolKeys={cdpPoolKeys}
+            reservePoolKeys={reservePoolKeys}
           />
         )}
       </section>

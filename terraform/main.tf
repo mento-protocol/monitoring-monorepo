@@ -533,11 +533,17 @@ resource "google_service_account_iam_member" "deployer_wif_binding" {
 #                                 work because the probe is project-scoped.
 #                                 Root cause of every failed bridge deploy
 #                                 since PR #206 (misleading "bucket forbidden
-#                                 / serviceusage.services.use" error).
+#                                 / serviceusage.services.use" error —
+#                                 PR #216 tried the CLI's suggested role, it
+#                                 didn't work; this PR replaces it with the
+#                                 permissions actually exercised by the CLI).
 #   - logging.viewer            → stream Cloud Build logs back to the runner
 #                                 so `gcloud builds submit` blocks until the
 #                                 build finishes (otherwise it exits with
 #                                 "can only stream logs if you are Viewer").
+#                                 Pair with `options.logging: CLOUD_LOGGING_ONLY`
+#                                 in cloudbuild.yaml so logs land in Cloud
+#                                 Logging (not the default GCS log bucket).
 #   - artifactregistry.writer   → push images to AR
 #   - run.admin                 → update the Cloud Run service revision
 #   - iam.serviceAccountUser    → "act-as" the runtime SA used by Cloud Run

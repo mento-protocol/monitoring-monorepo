@@ -297,7 +297,7 @@ export async function checkRebalanceStatus(
 
 // Strategy type detection
 
-async function detectStrategyType(
+export async function detectStrategyType(
   client: PublicClient,
   strategy: `0x${string}`,
   pool: `0x${string}`,
