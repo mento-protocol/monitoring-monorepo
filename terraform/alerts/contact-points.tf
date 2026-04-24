@@ -53,7 +53,7 @@ locals {
     {{ end -}}
     {{ if and .Annotations.description (eq .Labels.severity "critical") -}}
     _{{ .Annotations.description }}_
-    {{ end }}
+    {{ end -}}
     {{ if .Labels.pool_id -}}
     {{ $addr := or .Labels.pool_address_short .Labels.pool_id -}}
     *Pool:* {{ if .Labels.block_explorer_url }}<{{ .Labels.block_explorer_url }}|`{{ $addr }}`>{{ else }}`{{ $addr }}`{{ end }}   *Started:* {{ .StartsAt.Format "15:04 UTC" }}

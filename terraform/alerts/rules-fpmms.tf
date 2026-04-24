@@ -23,7 +23,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary = "Live-ratio {{ printf \"%.2f\" $values.A.Value }} — oracle report overdue.{{ if lt $values.OracleAge.Value 31536000.0 }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary = "Live-ratio {{ printf \"%.2f\" $values.A.Value }} — oracle report overdue.{{ if and $values.OracleAge (lt $values.OracleAge.Value 31536000.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
     }
 
     labels = {
@@ -106,7 +106,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary = "Oracle not usable — swaps will revert.{{ if lt $values.OracleAge.Value 31536000.0 }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary = "Oracle not usable — swaps will revert.{{ if and $values.OracleAge (lt $values.OracleAge.Value 31536000.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
     }
 
     labels = {
@@ -179,7 +179,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Liveness {{ printf \"%.2f\" $values.A.Value }} ≥ 1 — last report past expiry.{{ if lt $values.OracleAge.Value 31536000.0 }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      summary     = "Liveness {{ printf \"%.2f\" $values.A.Value }} ≥ 1 — last report past expiry.{{ if and $values.OracleAge (lt $values.OracleAge.Value 31536000.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
       description = "If this fires while Oracle Down stays quiet, the indexer's oracleOk derivation has drifted from the on-chain expiry check."
     }
 
