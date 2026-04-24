@@ -825,3 +825,70 @@ describe("Pool detail tab search", () => {
     expect(document.activeElement).toBe(input);
   });
 });
+
+describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering", () => {
+  // All three fixtures below exercise the `"" sentinel` contract introduced
+  // when the boundary-relative effectiveness formula landed: the indexer
+  // stamps empty string when `computeEffectivenessRatio` returns null, so
+  // the UI must render `—` (not `0.0%`) for those rows — otherwise pre-
+  // backfill / VirtualPool / already-in-band rebalances look like KPI-4
+  // failures.
+  function overrideRebalances(rows: RebalanceEvent[]) {
+    useGQLMock.mockImplementation((query: unknown) => {
+      if (query === POOL_DETAIL_WITH_HEALTH)
+        return makeGqlResult({ Pool: [basePool] });
+      if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)
+        return makeGqlResult({ RebalanceEvent: rows });
+      if (query === POOL_REBALANCES_COUNT)
+        return makeGqlResult({
+          RebalanceEvent: rows.map((r) => ({ id: r.id })),
+        });
+      return makeGqlResult({});
+    });
+  }
+
+  it("renders em-dash when rebalanceThreshold is 0 (indexer sentinel)", () => {
+    overrideRebalances([
+      {
+        ...rebalances[0],
+        id: "rebalance-zero-threshold",
+        rebalanceThreshold: 0,
+        effectivenessRatio: "",
+      },
+    ]);
+    const html = renderWithParams({ tab: "rebalances" });
+    // Boundary column shows "—" when threshold is 0
+    expect(html).not.toContain("<td>0</td>"); // raw 0 should never surface
+    // Effectiveness cell shows "—" for empty sentinel (not "0.0%")
+    expect(html).not.toContain("0.0%");
+  });
+
+  it("renders em-dash when rebalanceThreshold is missing (pre-schema-bump row)", () => {
+    overrideRebalances([
+      {
+        ...rebalances[0],
+        id: "rebalance-null-threshold",
+        // rebalanceThreshold omitted (legacy row) — types.ts makes it optional
+        rebalanceThreshold: undefined as unknown as number,
+        effectivenessRatio: "",
+      },
+    ]);
+    const html = renderWithParams({ tab: "rebalances" });
+    expect(html).not.toContain("0.0%");
+  });
+
+  it("renders a genuine 0.0% rebalance (before == after above threshold) as real signal, not '—'", () => {
+    // A non-degenerate no-op rebalance IS a KPI-4 miss and must surface.
+    // Distinct from the empty-string degenerate sentinel.
+    overrideRebalances([
+      {
+        ...rebalances[0],
+        id: "rebalance-genuine-zero",
+        rebalanceThreshold: 50,
+        effectivenessRatio: "0.0000",
+      },
+    ]);
+    const html = renderWithParams({ tab: "rebalances" });
+    expect(html).toContain("0.0%");
+  });
+});
