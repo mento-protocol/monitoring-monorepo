@@ -68,6 +68,8 @@ function PoolsContent() {
     tvlChangeWoWByKey,
     tradingLimitsByKey,
     olsPoolKeys,
+    cdpPoolKeys,
+    reservePoolKeys,
   } = useMemo(() => buildGlobalPoolEntries(networkData), [networkData]);
 
   const poolsByNamespacedId = useMemo(() => {
@@ -180,6 +182,8 @@ function PoolsContent() {
             tvlChangeWoWByKey={tvlChangeWoWByKey}
             tradingLimitsByKey={tradingLimitsByKey}
             olsPoolKeys={olsPoolKeys}
+            cdpPoolKeys={cdpPoolKeys}
+            reservePoolKeys={reservePoolKeys}
           />
         )}
       </section>
