@@ -69,6 +69,7 @@ function PoolsContent() {
     tradingLimitsByKey,
     olsPoolKeys,
     cdpPoolKeys,
+    reservePoolKeys,
   } = useMemo(() => buildGlobalPoolEntries(networkData), [networkData]);
 
   const poolsByNamespacedId = useMemo(() => {
@@ -182,6 +183,7 @@ function PoolsContent() {
             tradingLimitsByKey={tradingLimitsByKey}
             olsPoolKeys={olsPoolKeys}
             cdpPoolKeys={cdpPoolKeys}
+            reservePoolKeys={reservePoolKeys}
           />
         )}
       </section>

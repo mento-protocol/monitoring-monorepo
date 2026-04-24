@@ -148,6 +148,7 @@ function makeNetworkData(
     tradingLimits: [],
     olsPoolIds: new Set(),
     cdpPoolIds: new Set(),
+    reservePoolIds: new Set(),
     fees: null,
     feeTransfers: [],
     uniqueLpAddresses: null,

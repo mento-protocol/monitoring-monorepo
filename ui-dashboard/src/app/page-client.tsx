@@ -120,6 +120,7 @@ function GlobalContent({
     tradingLimitsByKey,
     olsPoolKeys,
     cdpPoolKeys,
+    reservePoolKeys,
   } = useMemo(() => buildGlobalPoolEntries(networkData), [networkData]);
 
   // Aggregate KPIs across all chains for the summary tiles.
@@ -411,6 +412,7 @@ function GlobalContent({
             tradingLimitsByKey={tradingLimitsByKey}
             olsPoolKeys={olsPoolKeys}
             cdpPoolKeys={cdpPoolKeys}
+            reservePoolKeys={reservePoolKeys}
           />
         )}
       </section>
