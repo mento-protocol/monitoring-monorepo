@@ -37,7 +37,11 @@ locals {
   #
   # Title carries identity (alertname — pair · chain). Body is:
   #   1. One-line headline from the rule's `summary` annotation.
-  #   2. Italicised `description` with likely causes, if present.
+  #   2. Italicised `description` with likely causes — CRITICAL-severity
+  #      rules only. Warnings are summary-only: authors can still set a
+  #      `description` annotation (useful in the Grafana rule-detail view)
+  #      but it is intentionally suppressed in Slack to keep warning
+  #      messages at a glance-able 4 lines.
   #   3. Metadata row: clickable pool address (→ block explorer) + start time.
   #   4. Action row: dashboard link + Grafana alert link.
   #
@@ -47,8 +51,9 @@ locals {
     {{ range .Alerts -}}
     {{ if .Annotations.summary }}{{ .Annotations.summary }}
     {{ end -}}
-    {{ if .Annotations.description }}_{{ .Annotations.description }}_
-    {{ end }}
+    {{ if and .Annotations.description (eq .Labels.severity "critical") -}}
+    _{{ .Annotations.description }}_
+    {{ end -}}
     {{ if .Labels.pool_id -}}
     {{ $addr := or .Labels.pool_address_short .Labels.pool_id -}}
     *Pool:* {{ if .Labels.block_explorer_url }}<{{ .Labels.block_explorer_url }}|`{{ $addr }}`>{{ else }}`{{ $addr }}`{{ end }}   *Started:* {{ .StartsAt.Format "15:04 UTC" }}
