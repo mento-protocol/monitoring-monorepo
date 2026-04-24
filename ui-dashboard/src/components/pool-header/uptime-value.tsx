@@ -1,6 +1,6 @@
 "use client";
 
-import type { Pool } from "@/lib/types";
+import { isVirtualPool, type Pool } from "@/lib/types";
 import { InfoPopover } from "@/components/info-popover";
 import { useGQL } from "@/lib/graphql";
 import { POOL_BREACH_ROLLUP } from "@/lib/queries";
@@ -23,7 +23,7 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   // Virtual pools have no oracle — page-level code already guards before
   // rendering this tile, but guard here too so a direct caller can't get
   // a misleading "100% — no breaches" on a pool that has no health data.
-  const isVirtual = pool.source.includes("virtual");
+  const isVirtual = isVirtualPool(pool);
   const { data, error } = useGQL<{ Pool: BreachRollup[] }>(
     isVirtual ? null : POOL_BREACH_ROLLUP,
     { id: pool.id, chainId: pool.chainId },

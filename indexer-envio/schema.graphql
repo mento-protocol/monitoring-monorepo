@@ -54,9 +54,11 @@ type Pool {
   cumulativeBreachSeconds: BigInt!
   cumulativeCriticalSeconds: BigInt!
   breachCount: Int!
-  # Fee configuration (FPMM pools only; basis points, e.g. 15 = 0.15%)
+  # Fee configuration (FPMM pools only; basis points, e.g. 15 = 0.15%).
+  # `-1` sentinel means RPC read failed and the field has not yet healed.
   lpFee: Int!
   protocolFee: Int!
+  rebalanceReward: Int!
 
   # Trading limits (FPMM pools only; defaults to "N/A" for VirtualPools)
   limitStatus: String! # "OK" | "WARN" | "CRITICAL" | "N/A"

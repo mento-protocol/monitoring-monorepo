@@ -17,6 +17,7 @@ import {
 } from "./helpers";
 import { computePriceDifference } from "./priceDifference";
 import { fetchReferenceRateFeedID, fetchReportExpiry, fetchFees } from "./rpc";
+import { isVirtualPool } from "./helpers";
 import { recordBreachTransition } from "./deviationBreach";
 
 // ---------------------------------------------------------------------------
@@ -51,7 +52,7 @@ export const DEVIATION_BREACH_GRACE_SECONDS = 3600n;
  *    reclassifies them to WEEKEND when rendering.
  */
 export function computeHealthStatus(pool: Pool, nowSeconds: bigint): string {
-  if (pool.source.includes("virtual")) return "N/A";
+  if (isVirtualPool(pool)) return "N/A";
   if (!pool.oracleOk) return "CRITICAL";
   const threshold =
     pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
@@ -73,7 +74,7 @@ export function computeHealthStatus(pool: Pool, nowSeconds: bigint): string {
 // so it is NOT counted as a breach either. Oracle staleness is
 // intentionally NOT counted — this tracks price action only.
 export function isInDeviationBreach(pool: Pool): boolean {
-  if (pool.source.includes("virtual")) return false;
+  if (isVirtualPool(pool)) return false;
   const threshold =
     pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
   return pool.priceDifference > BigInt(threshold);
@@ -229,6 +230,7 @@ export const DEFAULT_ORACLE_FIELDS = {
   limitPressure1: "0.0000" as string,
   lpFee: -1,
   protocolFee: -1,
+  rebalanceReward: -1,
   rebalancerAddress: "" as string,
   rebalanceLivenessStatus: "N/A" as string,
   token0Decimals: 18,
@@ -337,7 +339,7 @@ export const upsertPool = async ({
   if (
     existing.referenceRateFeedID === "" &&
     existing.source !== "" &&
-    !existing.source.includes("virtual")
+    !isVirtualPool(existing)
   ) {
     const rateFeedID = await fetchReferenceRateFeedID(chainId, poolAddr);
     if (rateFeedID) {
@@ -347,14 +349,21 @@ export const upsertPool = async ({
     }
   }
 
-  // Self-heal: if fees are still at the -1 sentinel (deploy-time RPC read
-  // failed), retry now. Once we get a successful read — even if the real
-  // fees are 0 — we persist the result and stop retrying.
-  let healedFees: { lpFee: number; protocolFee: number } | undefined;
+  // Self-heal: if fees are still at the -1 "not yet attempted" sentinel,
+  // retry now. Once we get a successful read — even if the real fees are
+  // 0 — we persist the result and stop retrying. fetchFees also stamps
+  // -2 on any getter that rejects with "returned no data" (contract
+  // doesn't implement it), and -2 is excluded here so we don't thrash
+  // forever on older FPMM deployments missing rebalanceIncentive().
+  let healedFees:
+    | Partial<{ lpFee: number; protocolFee: number; rebalanceReward: number }>
+    | undefined;
   if (
-    (existing.lpFee < 0 || existing.protocolFee < 0) &&
+    (existing.lpFee === -1 ||
+      existing.protocolFee === -1 ||
+      existing.rebalanceReward === -1) &&
     existing.source !== "" &&
-    !existing.source.includes("virtual")
+    !isVirtualPool(existing)
   ) {
     const fees = await fetchFees(chainId, poolAddr);
     if (fees) {
@@ -400,7 +409,7 @@ export const upsertPool = async ({
     oracleDelta.priceDifference !== undefined;
   const priceDifference = hasContractPriceDiff
     ? oracleDelta.priceDifference!
-    : !next.source.includes("virtual") && next.oraclePrice > 0n
+    : !isVirtualPool(next) && next.oraclePrice > 0n
       ? computePriceDifference(next)
       : next.priceDifference;
 

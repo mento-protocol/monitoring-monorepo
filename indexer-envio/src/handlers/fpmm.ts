@@ -231,13 +231,11 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     tokenDecimals: { token0Decimals, token1Decimals },
   });
 
-  // Persist fee config read at pool creation
+  // Persist fee config read at pool creation. `fees` is Partial — only
+  // fields whose RPC call succeeded are present, so a partial failure
+  // leaves the others at the -1 sentinel for self-heal to retry.
   if (fees) {
-    context.Pool.set({
-      ...pool,
-      lpFee: fees.lpFee,
-      protocolFee: fees.protocolFee,
-    });
+    context.Pool.set({ ...pool, ...fees });
   }
 
   const deployment: FactoryDeployment = {
@@ -914,35 +912,52 @@ FPMM.LiquidityStrategyUpdated.handler(async ({ event, context }) => {
 });
 
 // ---------------------------------------------------------------------------
-// FPMM.LPFeeUpdated
+// Fee / incentive updates — three handlers share the same read-modify-write
+// shape against a single Pool field, so the body lives in this helper and
+// each handler is a one-liner that picks the target field + param name.
 // ---------------------------------------------------------------------------
 
-FPMM.LPFeeUpdated.handler(async ({ event, context }) => {
+type FeeFieldKey = "lpFee" | "protocolFee" | "rebalanceReward";
+
+async function updatePoolFeeField(
+  context: {
+    Pool: {
+      get: (id: string) => Promise<Pool | undefined>;
+      set: (entity: Pool) => void;
+    };
+  },
+  event: {
+    chainId: number;
+    srcAddress: string;
+    block: { number: number; timestamp: number };
+  },
+  field: FeeFieldKey,
+  newValue: bigint,
+): Promise<void> {
   const poolId = makePoolId(event.chainId, event.srcAddress);
   const pool = await context.Pool.get(poolId);
   if (!pool) return;
-
   context.Pool.set({
     ...pool,
-    lpFee: Number(event.params.newFee),
+    [field]: Number(newValue),
     updatedAtBlock: asBigInt(event.block.number),
     updatedAtTimestamp: asBigInt(event.block.timestamp),
   });
-});
+}
 
-// ---------------------------------------------------------------------------
-// FPMM.ProtocolFeeUpdated
-// ---------------------------------------------------------------------------
+FPMM.LPFeeUpdated.handler(async ({ event, context }) =>
+  updatePoolFeeField(context, event, "lpFee", event.params.newFee),
+);
 
-FPMM.ProtocolFeeUpdated.handler(async ({ event, context }) => {
-  const poolId = makePoolId(event.chainId, event.srcAddress);
-  const pool = await context.Pool.get(poolId);
-  if (!pool) return;
+FPMM.ProtocolFeeUpdated.handler(async ({ event, context }) =>
+  updatePoolFeeField(context, event, "protocolFee", event.params.newFee),
+);
 
-  context.Pool.set({
-    ...pool,
-    protocolFee: Number(event.params.newFee),
-    updatedAtBlock: asBigInt(event.block.number),
-    updatedAtTimestamp: asBigInt(event.block.timestamp),
-  });
-});
+FPMM.RebalanceIncentiveUpdated.handler(async ({ event, context }) =>
+  updatePoolFeeField(
+    context,
+    event,
+    "rebalanceReward",
+    event.params.newIncentive,
+  ),
+);

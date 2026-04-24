@@ -43,6 +43,8 @@ export {
   _clearMockRateFeedIDs,
   _setMockReportExpiry,
   _clearMockReportExpiry,
+  _setMockFees,
+  _clearMockFees,
   _evictCacheForChain,
   _getOracleCacheStats,
 } from "./rpc";

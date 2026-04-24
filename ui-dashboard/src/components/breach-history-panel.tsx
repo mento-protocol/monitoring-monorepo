@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useCallback, useMemo, useState } from "react";
-import type {
-  Pool,
-  DeviationThresholdBreach,
-  BreachEventCategory,
+import {
+  isVirtualPool,
+  type Pool,
+  type DeviationThresholdBreach,
+  type BreachEventCategory,
 } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { useGQL } from "@/lib/graphql";
@@ -214,7 +215,7 @@ export function BreachHistoryPanel({
     [sortKey, sortDir],
   );
 
-  if (pool.source.includes("virtual")) return null;
+  if (isVirtualPool(pool)) return null;
 
   return (
     <BreachHistoryPanelInner
