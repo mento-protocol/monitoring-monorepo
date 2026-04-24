@@ -57,6 +57,13 @@ export const FPMM_FEE_ABI = [
     outputs: [{ name: "", type: "uint256" }],
     stateMutability: "view",
   },
+  {
+    type: "function",
+    name: "rebalanceIncentive",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
 ] as const;
 
 export const FPMM_MINIMAL_ABI = [

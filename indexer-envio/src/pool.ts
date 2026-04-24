@@ -229,6 +229,7 @@ export const DEFAULT_ORACLE_FIELDS = {
   limitPressure1: "0.0000" as string,
   lpFee: -1,
   protocolFee: -1,
+  rebalanceReward: -1,
   rebalancerAddress: "" as string,
   rebalanceLivenessStatus: "N/A" as string,
   token0Decimals: 18,
@@ -349,10 +350,16 @@ export const upsertPool = async ({
 
   // Self-heal: if fees are still at the -1 sentinel (deploy-time RPC read
   // failed), retry now. Once we get a successful read — even if the real
-  // fees are 0 — we persist the result and stop retrying.
-  let healedFees: { lpFee: number; protocolFee: number } | undefined;
+  // fees are 0 — we persist the result and stop retrying. fetchFees returns
+  // only the fields that succeeded, so a partial failure doesn't clobber
+  // previously-healed fields.
+  let healedFees:
+    | Partial<{ lpFee: number; protocolFee: number; rebalanceReward: number }>
+    | undefined;
   if (
-    (existing.lpFee < 0 || existing.protocolFee < 0) &&
+    (existing.lpFee < 0 ||
+      existing.protocolFee < 0 ||
+      existing.rebalanceReward < 0) &&
     existing.source !== "" &&
     !existing.source.includes("virtual")
   ) {

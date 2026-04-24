@@ -1077,34 +1077,61 @@ export async function fetchTradingLimits(
   }
 }
 
-/** Fetch lpFee and protocolFee from the FPMM contract. Both are uint256
- * in basis points (e.g. 15 = 0.15%). Returns null on error. */
+/** Fetch lpFee, protocolFee, and rebalanceIncentive from the FPMM contract.
+ * All three are uint256 in basis points (e.g. 15 = 0.15%). Returns only the
+ * fields whose RPC call succeeded — callers spread the result, so a partial
+ * result won't overwrite already-populated fields. Returns null only when
+ * every call fails (no progress possible this touch; self-heal retries). */
 export async function fetchFees(
   chainId: number,
   poolAddress: string,
-): Promise<{ lpFee: number; protocolFee: number } | null> {
-  try {
-    const client = getRpcClient(chainId);
-    const [lpFee, protocolFee] = await Promise.all([
-      client.readContract({
-        address: poolAddress as `0x${string}`,
-        abi: FPMM_FEE_ABI,
-        functionName: "lpFee",
-      }),
-      client.readContract({
-        address: poolAddress as `0x${string}`,
-        abi: FPMM_FEE_ABI,
-        functionName: "protocolFee",
-      }),
-    ]);
-    return {
-      lpFee: Number(lpFee as bigint),
-      protocolFee: Number(protocolFee as bigint),
-    };
-  } catch (err) {
-    logRpcFailure(chainId, "fetchFees", poolAddress, err);
+): Promise<Partial<{
+  lpFee: number;
+  protocolFee: number;
+  rebalanceReward: number;
+}> | null> {
+  const client = getRpcClient(chainId);
+  const results = await Promise.allSettled([
+    client.readContract({
+      address: poolAddress as `0x${string}`,
+      abi: FPMM_FEE_ABI,
+      functionName: "lpFee",
+    }),
+    client.readContract({
+      address: poolAddress as `0x${string}`,
+      abi: FPMM_FEE_ABI,
+      functionName: "protocolFee",
+    }),
+    client.readContract({
+      address: poolAddress as `0x${string}`,
+      abi: FPMM_FEE_ABI,
+      functionName: "rebalanceIncentive",
+    }),
+  ]);
+  const [lpFeeR, protocolFeeR, rebalanceRewardR] = results;
+  if (
+    lpFeeR.status === "rejected" &&
+    protocolFeeR.status === "rejected" &&
+    rebalanceRewardR.status === "rejected"
+  ) {
+    logRpcFailure(chainId, "fetchFees", poolAddress, lpFeeR.reason);
     return null;
   }
+  const fees: Partial<{
+    lpFee: number;
+    protocolFee: number;
+    rebalanceReward: number;
+  }> = {};
+  if (lpFeeR.status === "fulfilled") {
+    fees.lpFee = Number(lpFeeR.value as bigint);
+  }
+  if (protocolFeeR.status === "fulfilled") {
+    fees.protocolFee = Number(protocolFeeR.value as bigint);
+  }
+  if (rebalanceRewardR.status === "fulfilled") {
+    fees.rebalanceReward = Number(rebalanceRewardR.value as bigint);
+  }
+  return fees;
 }
 
 // ---------------------------------------------------------------------------

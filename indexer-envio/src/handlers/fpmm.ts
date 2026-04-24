@@ -231,13 +231,11 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     tokenDecimals: { token0Decimals, token1Decimals },
   });
 
-  // Persist fee config read at pool creation
+  // Persist fee config read at pool creation. `fees` is Partial — only
+  // fields whose RPC call succeeded are present, so a partial failure
+  // leaves the others at the -1 sentinel for self-heal to retry.
   if (fees) {
-    context.Pool.set({
-      ...pool,
-      lpFee: fees.lpFee,
-      protocolFee: fees.protocolFee,
-    });
+    context.Pool.set({ ...pool, ...fees });
   }
 
   const deployment: FactoryDeployment = {
@@ -942,6 +940,23 @@ FPMM.ProtocolFeeUpdated.handler(async ({ event, context }) => {
   context.Pool.set({
     ...pool,
     protocolFee: Number(event.params.newFee),
+    updatedAtBlock: asBigInt(event.block.number),
+    updatedAtTimestamp: asBigInt(event.block.timestamp),
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FPMM.RebalanceIncentiveUpdated
+// ---------------------------------------------------------------------------
+
+FPMM.RebalanceIncentiveUpdated.handler(async ({ event, context }) => {
+  const poolId = makePoolId(event.chainId, event.srcAddress);
+  const pool = await context.Pool.get(poolId);
+  if (!pool) return;
+
+  context.Pool.set({
+    ...pool,
+    rebalanceReward: Number(event.params.newIncentive),
     updatedAtBlock: asBigInt(event.block.number),
     updatedAtTimestamp: asBigInt(event.block.timestamp),
   });

@@ -18,7 +18,9 @@ import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { BreachHistoryPanel } from "@/components/breach-history-panel";
 import { HealthPanel } from "@/components/health-panel";
 import { LimitPanel } from "@/components/limit-panel";
+import { PoolConfigPanel } from "@/components/pool-config-panel";
 import { ReservesPanel } from "@/components/reserves-panel";
+import { Stat } from "@/components/stat";
 import { useNetwork } from "@/components/network-provider";
 import { OracleChart } from "@/components/oracle-chart";
 import { EffectivenessChart } from "@/components/effectiveness-chart";
@@ -422,6 +424,7 @@ function PoolDetail() {
             tradingLimitsError={tradingLimitsError}
           />
           <HealthPanel pool={pool} />
+          <PoolConfigPanel pool={pool} />
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <PoolTvlOverTimeChart
               pool={pool}
@@ -746,29 +749,6 @@ function PoolHeader({
         />
         <DeviationCell pool={pool} network={network} />
       </dl>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  title,
-  mono,
-  className,
-}: {
-  label: React.ReactNode;
-  value: React.ReactNode;
-  title?: string;
-  mono?: boolean;
-  className?: string;
-}) {
-  return (
-    <div className={className}>
-      <dt className="text-slate-400">{label}</dt>
-      <dd className={`text-white ${mono ? "font-mono" : ""}`} title={title}>
-        {value}
-      </dd>
     </div>
   );
 }

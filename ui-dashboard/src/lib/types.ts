@@ -32,6 +32,7 @@ export type Pool = {
   deviationBreachStartedAt?: string;
   lpFee?: number;
   protocolFee?: number;
+  rebalanceReward?: number;
   limitStatus?: string;
   limitPressure0?: string;
   limitPressure1?: string;
