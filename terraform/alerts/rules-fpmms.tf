@@ -23,8 +23,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Live-ratio {{ printf \"%.2f\" $values.A.Value }} — next oracle report is overdue."
-      description = "`(time() - oracle_timestamp) / oracle_expiry` crossed 0.8. If the next report does not land the pool will flip to oracle-down."
+      summary = "Live-ratio {{ printf \"%.2f\" $values.A.Value }} — oracle report overdue.{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
     }
 
     labels = {
@@ -42,6 +41,42 @@ resource "grafana_rule_group" "fpmms_oracle" {
       model = jsonencode({
         refId   = "A"
         expr    = "(time() - mento_pool_oracle_timestamp) / (mento_pool_oracle_expiry > 0)"
+        instant = true
+      })
+    }
+
+    # Two queries, used together by the annotation template:
+    #   - OracleTs: raw timestamp. == 0 means the indexer never received a
+    #     report for this pool (default sentinel, see
+    #     indexer-envio/src/pool.ts:212+). The template branches on this
+    #     to render "Oracle has never reported" — keying off the explicit
+    #     zero, not an age heuristic, so legitimately stale-for-years
+    #     pools still render their actual age.
+    #   - OracleAge: seconds-since-report; only meaningful when OracleTs > 0.
+    data {
+      ref_id         = "OracleTs"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "OracleTs"
+        expr    = "mento_pool_oracle_timestamp"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "OracleAge"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "OracleAge"
+        expr    = "time() - mento_pool_oracle_timestamp"
         instant = true
       })
     }
@@ -87,8 +122,7 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Oracle is not usable — swaps will revert."
-      description = "`mento_pool_oracle_ok = 0` — indexer flagged the oracle as not usable. Swaps on this pool revert until the relayer pushes a fresh report."
+      summary = "Oracle not usable — swaps will revert.{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
     }
 
     labels = {
@@ -106,6 +140,37 @@ resource "grafana_rule_group" "fpmms_oracle" {
       model = jsonencode({
         refId   = "A"
         expr    = "mento_pool_oracle_ok"
+        instant = true
+      })
+    }
+
+    # See Oracle Liveness for the OracleTs / OracleAge rationale — same
+    # pair is used here so the annotation can detect the never-reported
+    # sentinel (oracle_timestamp == 0) instead of leaning on an age cutoff.
+    data {
+      ref_id         = "OracleTs"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "OracleTs"
+        expr    = "mento_pool_oracle_timestamp"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "OracleAge"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "OracleAge"
+        expr    = "time() - mento_pool_oracle_timestamp"
         instant = true
       })
     }
@@ -147,8 +212,8 @@ resource "grafana_rule_group" "fpmms_oracle" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Liveness ratio {{ printf \"%.2f\" $values.A.Value }} ≥ 1 — last oracle report past expiry."
-      description = "If this fires while `Oracle Down` stays quiet, the indexer's `oracleOk` derivation has drifted from the on-chain expiry check."
+      summary     = "Liveness {{ printf \"%.2f\" $values.A.Value }} ≥ 1 — last report past expiry.{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }} Last update: {{ humanizeDuration $values.OracleAge.Value }} ago.{{ else }} Oracle has never reported on this pool.{{ end }}"
+      description = "If this fires while Oracle Down stays quiet, the indexer's oracleOk derivation has drifted from the on-chain expiry check."
     }
 
     labels = {
@@ -166,6 +231,37 @@ resource "grafana_rule_group" "fpmms_oracle" {
       model = jsonencode({
         refId   = "A"
         expr    = "(time() - mento_pool_oracle_timestamp) / (mento_pool_oracle_expiry > 0)"
+        instant = true
+      })
+    }
+
+    # See Oracle Liveness for the OracleTs / OracleAge rationale — same
+    # pair is used here so the annotation can detect the never-reported
+    # sentinel (oracle_timestamp == 0) instead of leaning on an age cutoff.
+    data {
+      ref_id         = "OracleTs"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "OracleTs"
+        expr    = "mento_pool_oracle_timestamp"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "OracleAge"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "OracleAge"
+        expr    = "time() - mento_pool_oracle_timestamp"
         instant = true
       })
     }
@@ -216,8 +312,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Deviation ratio {{ printf \"%.2f\" $values.A.Value }} — mid-price out of rebalance band."
-      description = "Rebalancer should act. If the breach persists past 60 min, the Deviation Breach Critical rule fires."
+      summary = "Deviation ratio {{ printf \"%.2f\" $values.A.Value }} — pool out of rebalance band."
     }
 
     labels = {
@@ -283,8 +378,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Breach anchored for {{ humanizeDuration $values.A.Value }} — ratio gauge missing."
-      description = "`mento_pool_deviation_breach_start > 0` but `mento_pool_deviation_ratio` is absent (bridge emitted the `-1` sentinel). The anchor is the indexer's authoritative breach signal, so the breach is real even when the ratio gauge is missing."
+      summary = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing."
     }
 
     labels = {
@@ -343,8 +437,8 @@ resource "grafana_rule_group" "fpmms_deviation" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Deviating for {{ humanizeDuration $values.A.Value }} — rebalancer not resolving breach."
-      description = "Breach has persisted longer than 60 min. Manual investigation required — check rebalancer liveness and oracle feed."
+      summary     = "Deviating for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach."
+      description = "Check rebalancer liveness and oracle feed."
     }
 
     labels = {
@@ -413,8 +507,7 @@ resource "grafana_rule_group" "fpmms_trading_limit" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "token{{ $labels.token_index }} limit at {{ humanizePercentage $values.A.Value }} — trip imminent."
-      description = "Trading limit is about to trip. Next swap at this size will revert."
+      summary = "token{{ $labels.token_index }} limit at {{ humanizePercentage $values.A.Value }} — trip imminent."
     }
 
     labels = {
@@ -474,7 +567,7 @@ resource "grafana_rule_group" "fpmms_trading_limit" {
 
     annotations = {
       summary     = "token{{ $labels.token_index }} limit at {{ humanizePercentage $values.A.Value }} — swaps reverting."
-      description = "Trading limit exceeded. Swaps on this token revert until the limit window rolls."
+      description = "Window rolls on L0 (5m), L1 (24h), LG (lifetime). Check if counter-trades are expected."
     }
 
     labels = {
@@ -540,7 +633,8 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     no_data_state  = "OK"
 
     annotations = {
-      description = "Deviation threshold has been breached for {{ humanizeDuration $values.BreachAge.Value }} and the rebalancer hasn't acted in more than 30 minutes. Likely stuck bot, insufficient gas, or contract-level failure."
+      summary     = "{{ if and $values.LastRebalancedAt (gt $values.LastRebalancedAt.Value 0.0) }}Idle {{ humanizeDuration $values.A.Value }}{{ else }}Never rebalanced{{ end }} during {{ humanizeDuration $values.BreachAge.Value }} breach — rebalancer not acting."
+      description = "Likely stuck bot, insufficient gas, or contract-level failure."
     }
 
     labels = {
@@ -573,6 +667,25 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
           "((time() - mento_pool_deviation_breach_start) > 3600)",
           "((time() - mento_pool_last_rebalanced_at) > 1800)",
         ])
+        instant = true
+      })
+    }
+
+    # LastRebalancedAt = raw timestamp; the annotation template uses it to
+    # detect the never-rebalanced sentinel (== 0) and render "Never
+    # rebalanced" instead of humanizing the bogus age. Keying off the
+    # explicit 0 (not an age heuristic) keeps the copy correct for pools
+    # that were rebalanced once long ago and then went dormant.
+    data {
+      ref_id         = "LastRebalancedAt"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "LastRebalancedAt"
+        expr    = "mento_pool_last_rebalanced_at"
         instant = true
       })
     }
