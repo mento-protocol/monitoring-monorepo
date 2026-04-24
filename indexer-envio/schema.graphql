@@ -26,6 +26,21 @@ type Pool {
   oracleNumReporters: Int!
   referenceRateFeedID: String! @index
 
+  # Oracle median-jump detection (FPMM pools only). Tracks the delta between
+  # consecutive `MedianUpdated` prices — the signal consumed by the "Oracle
+  # Jump Exceeds Swap Fee" alert.
+  # Previous `MedianUpdated` value, stored separately from `oraclePrice`
+  # because `OracleReported` also overwrites `oraclePrice` with individual
+  # reporter values, so it can't be used as the "previous median".
+  lastMedianPrice: BigInt!
+  # |newMedian − prevMedian| / prevMedian × 10_000, as a 4dp fixed-point
+  # string (e.g. "10.5000" = 10.5 bps). "0.0000" before the second
+  # `MedianUpdated` on a feed.
+  lastOracleJumpBps: String!
+  # Block timestamp of the `MedianUpdated` event that produced
+  # `lastOracleJumpBps`. 0 before the first `MedianUpdated`.
+  lastOracleJumpAt: BigInt!
+
   # Deviation / rebalance state
   invertRateFeed: Boolean!
   priceDifference: BigInt!

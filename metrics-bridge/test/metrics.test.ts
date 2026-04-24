@@ -184,6 +184,56 @@ describe("updateMetrics", () => {
     ).toBe(1713199000);
   });
 
+  it("publishes swap_fee_bps as lpFee + protocolFee", async () => {
+    updateMetrics([makePool({ lpFee: 10, protocolFee: 5 })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_swap_fee_bps", poolLabels),
+    ).toBe(15);
+  });
+
+  it("skips swap_fee_bps when lpFee sentinel (-1)", async () => {
+    updateMetrics([makePool({ lpFee: -1, protocolFee: 5 })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_swap_fee_bps", poolLabels),
+    ).toBeUndefined();
+  });
+
+  it("skips swap_fee_bps when protocolFee sentinel (-1)", async () => {
+    updateMetrics([makePool({ lpFee: 5, protocolFee: -1 })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_swap_fee_bps", poolLabels),
+    ).toBeUndefined();
+  });
+
+  it("parses oracle_jump_bps from fixed-point string", async () => {
+    updateMetrics([makePool({ lastOracleJumpBps: "10.5000" })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_jump_bps", poolLabels),
+    ).toBe(10.5);
+  });
+
+  it("sets oracle_jump_at from BigInt string", async () => {
+    updateMetrics([makePool({ lastOracleJumpAt: "1713200500" })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_jump_at", poolLabels),
+    ).toBe(1713200500);
+  });
+
+  it("publishes zero oracle_jump_bps before any jump recorded", async () => {
+    // Unlike deviationRatio, we DO publish 0 — it's a legitimate "no recent
+    // movement" signal, and the alert gates on `time() - oracle_jump_at` to
+    // avoid false-firing on these pools anyway.
+    updateMetrics([
+      makePool({ lastOracleJumpBps: "0.0000", lastOracleJumpAt: "0" }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_jump_bps", poolLabels),
+    ).toBe(0);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_jump_at", poolLabels),
+    ).toBe(0);
+  });
+
   it("falls back to pool id when pair/chain/explorer are unknown", async () => {
     const unknownPool = makePool({
       id: "99999-0x1234567890abcdef1234567890abcdef12345678",

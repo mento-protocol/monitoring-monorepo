@@ -25,6 +25,10 @@ const BRIDGE_POOLS_QUERY = gql`
       lastEffectivenessRatio
       rebalanceLivenessStatus
       hasHealthData
+      lpFee
+      protocolFee
+      lastOracleJumpBps
+      lastOracleJumpAt
     }
   }
 `;

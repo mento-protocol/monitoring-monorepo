@@ -24,6 +24,10 @@ export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
     lastEffectivenessRatio: "0.5000",
     rebalanceLivenessStatus: "ACTIVE",
     hasHealthData: true,
+    lpFee: 5,
+    protocolFee: 5,
+    lastOracleJumpBps: "3.0000",
+    lastOracleJumpAt: "1713200000",
     ...overrides,
   };
 }

@@ -116,6 +116,24 @@ export const gauges = {
     labelNames: poolLabels,
     registers: [register],
   }),
+  swapFeeBps: new Gauge({
+    name: "mento_pool_swap_fee_bps",
+    help: "Combined swap fee (lpFee + protocolFee) in basis points. Used as the threshold for the Oracle Jump alert. Skipped when either fee is the -1 indexer sentinel (fetch failed at pool creation).",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
+  oracleJumpBps: new Gauge({
+    name: "mento_pool_oracle_jump_bps",
+    help: "|newMedian − prevMedian| / prevMedian × 10_000 for the most recent MedianUpdated event, in basis points (4dp fixed-point). 0 before the second median on a feed.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
+  oracleJumpAt: new Gauge({
+    name: "mento_pool_oracle_jump_at",
+    help: "Unix timestamp of the MedianUpdated event that produced oracle_jump_bps. 0 before the first median. Alerts gate on (time() - this) to avoid firing on stale samples.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
   healthStatus: new Gauge({
     name: "mento_pool_health_status",
     help: "Pool health status at last on-chain event (0=OK, 1=WARN, 2=CRITICAL, 3=N/A). Event-time snapshot, not live.",
@@ -183,6 +201,16 @@ export function updateMetrics(pools: PoolRow[]): void {
         fp(pool.lastEffectivenessRatio),
       );
     }
+    // Swap fee — skip the `-1` sentinel the indexer writes when the initial
+    // RPC fetch at pool creation failed (rpc.ts:fetchFees). Without this gate
+    // the `Oracle Jump` alert would see a "0 bps" threshold and fire on the
+    // first real oracle movement. `-1` on either side means we can't trust
+    // the sum.
+    if (pool.lpFee >= 0 && pool.protocolFee >= 0) {
+      gauges.swapFeeBps.set(labels, pool.lpFee + pool.protocolFee);
+    }
+    gauges.oracleJumpBps.set(labels, fp(pool.lastOracleJumpBps));
+    gauges.oracleJumpAt.set(labels, Number(pool.lastOracleJumpAt));
     gauges.limitPressure.set(
       { ...labels, token_index: "0" },
       fp(pool.limitPressure0),
