@@ -205,6 +205,18 @@ describe("updateMetrics", () => {
     ).toBeUndefined();
   });
 
+  it("publishes swap_fee_bps = 0 for a legitimately zero-fee pool", async () => {
+    // A pool with lpFee = 0 AND protocolFee = 0 is a real configuration,
+    // NOT a sentinel. Any oracle jump is LP leakage by definition (there's
+    // no fee to offset it), so the alert rule uses `>= 0` to keep these
+    // pools eligible to fire. Regression test for the Codex/Cursor/Claude
+    // reviews on PR #223.
+    updateMetrics([makePool({ lpFee: 0, protocolFee: 0 })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_swap_fee_bps", poolLabels),
+    ).toBe(0);
+  });
+
   it("parses oracle_jump_bps from fixed-point string", async () => {
     updateMetrics([makePool({ lastOracleJumpBps: "10.5000" })]);
     expect(

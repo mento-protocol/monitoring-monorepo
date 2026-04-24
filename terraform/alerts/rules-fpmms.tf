@@ -860,9 +860,10 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
 #      single big jump would stay firing until the next median, which for a
 #      quiet feed can be hours. The 10-min window aligns with the 600s
 #      `instant_query_range_seconds` window already used repo-wide.
-#   2. `mento_pool_swap_fee_bps > 0` — skip pools whose initial fee RPC
-#      failed (metrics-bridge already drops the -1 sentinel, but a
-#      belt-and-suspenders gate here keeps the PromQL self-contained).
+#   2. `mento_pool_swap_fee_bps >= 0` — the metrics-bridge `-1` sentinel is
+#      never published, so every series present at alert-eval time
+#      corresponds to a pool with a real fee. A published 0 is a legitimate
+#      zero-fee pool and must remain eligible to alert.
 #
 # Not FX-weekend gated. A large FX jump on Monday open IS exactly the
 # LP-leakage event the alert is designed to catch; suppressing it would
@@ -907,12 +908,18 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
           "mento_pool_oracle_jump_bps",
           "(mento_pool_oracle_jump_bps > mento_pool_swap_fee_bps)",
           # Strict `<` upper bound: at exactly swap_fee × 1.10 the critical
-          # rule takes over. Keeping this bound in the warning expression
-          # (instead of deferring to critical-wins-on-overlap) means both
-          # severities can safely route to different channels.
-          "(mento_pool_oracle_jump_bps < mento_pool_swap_fee_bps * 1.10)",
+          # rule takes over. Written as `jump * 10 < fee * 11` instead of
+          # `jump < fee * 1.10` because `fee * 11` is integer-exact — the
+          # direct `* 1.10` form has IEEE-754 residue for fees that aren't
+          # multiples of 10, which can misroute an exact-boundary jump to
+          # the wrong severity (e.g. on a 3 bps fee a 3.3 bps jump would
+          # otherwise fall in the warning band).
+          "(mento_pool_oracle_jump_bps * 10 < mento_pool_swap_fee_bps * 11)",
           "((time() - mento_pool_oracle_jump_at) < 600)",
-          "(mento_pool_swap_fee_bps > 0)",
+          # `>= 0` not `> 0`: the metrics-bridge `-1` sentinel is never
+          # published, so a zero here is always a legitimately zero-fee
+          # pool that should still alert on any jump.
+          "(mento_pool_swap_fee_bps >= 0)",
         ])
         instant = true
       })
@@ -981,7 +988,9 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
 
     # Boundary: `>=` sends an exact 10%-above (e.g. 11 bps on a 10 bps fee)
     # to critical, matching the user-stated cutoff. The warning rule's
-    # strict `<` upper bound preserves mutual exclusion.
+    # strict `<` upper bound preserves mutual exclusion. See the warning
+    # rule for why the boundary is expressed as `jump * 10 ⋈ fee * 11`
+    # rather than `jump ⋈ fee * 1.10`.
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -993,9 +1002,9 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
         refId = "A"
         expr = join(" and ", [
           "mento_pool_oracle_jump_bps",
-          "(mento_pool_oracle_jump_bps >= mento_pool_swap_fee_bps * 1.10)",
+          "(mento_pool_oracle_jump_bps * 10 >= mento_pool_swap_fee_bps * 11)",
           "((time() - mento_pool_oracle_jump_at) < 600)",
-          "(mento_pool_swap_fee_bps > 0)",
+          "(mento_pool_swap_fee_bps >= 0)",
         ])
         instant = true
       })
