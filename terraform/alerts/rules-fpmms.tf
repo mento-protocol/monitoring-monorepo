@@ -882,7 +882,7 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Oracle jumped {{ printf \"%.2f\" $values.A.Value }} bps — above the pool's {{ printf \"%.0f\" $values.Fee.Value }} bps swap fee. LPs leaking per arb round-trip."
+      summary     = "Oracle jumped {{ printf \"%.2f\" $values.A.Value }} bps — above the pool's {{ if $values.Fee }}{{ printf \"%.0f\" $values.Fee.Value }}{{ else }}?{{ end }} bps swap fee. LPs leaking per arb round-trip."
       description = "Most recent MedianUpdated delta is above the pool's combined swap fee but still within 10% of it. Warning tier — a single large move isn't pageable, but repeated occurrences point to an oracle or sizing tune-up."
     }
 
@@ -977,7 +977,7 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Oracle jumped {{ printf \"%.2f\" $values.A.Value }} bps — ≥10% above the pool's {{ printf \"%.0f\" $values.Fee.Value }} bps swap fee. LPs leaking per arb round-trip."
+      summary     = "Oracle jumped {{ printf \"%.2f\" $values.A.Value }} bps — ≥10% above the pool's {{ if $values.Fee }}{{ printf \"%.0f\" $values.Fee.Value }}{{ else }}?{{ end }} bps swap fee. LPs leaking per arb round-trip."
       description = "Most recent MedianUpdated delta is at least 10% above the pool's combined swap fee. Arbitrageurs can round-trip through the pool faster than rebalancing can catch, and the leakage compounds with volume. Investigate the oracle feed (stuck reporter, bridge-delay reopen, reporter disagreement) and the rebalancer's next-cycle response."
     }
 
