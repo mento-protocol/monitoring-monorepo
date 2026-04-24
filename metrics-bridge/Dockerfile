@@ -3,9 +3,9 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY metrics-bridge/package.json metrics-bridge/
-# shared-config is a workspace dep of metrics-bridge; its postinstall runs tsc
-# to produce dist/, so the whole package (incl. src/ + tsconfig.json) must be
-# present before `pnpm install`.
+# shared-config is a workspace dep of metrics-bridge. The ROOT `postinstall`
+# builds shared-config/dist via tsc, so the whole package (incl. src/ +
+# tsconfig.json) must be present before `pnpm install`.
 COPY shared-config/ shared-config/
 
 # The trailing `...` on the filter includes transitive workspace deps — without
