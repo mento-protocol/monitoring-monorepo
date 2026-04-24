@@ -465,6 +465,20 @@ resource "google_project_iam_member" "dev_cloudbuild_editor" {
   depends_on = [google_project_iam_member.terraform_owner]
 }
 
+# cloudbuild.yaml pins `options.logging: CLOUD_LOGGING_ONLY` so both CI and
+# `scripts/deploy-bridge.sh` stream logs from Cloud Logging (not the default
+# GCS log bucket). Devs need `logging.viewer` to read those streams — without
+# it, `pnpm bridge:deploy` runs the build but fails at log-stream time.
+# Mirrors the same role on `ci_deployer_roles`.
+resource "google_project_iam_member" "dev_logging_viewer" {
+  for_each = toset(var.gcp_dev_members)
+  project  = google_project.monitoring.project_id
+  role     = "roles/logging.viewer"
+  member   = each.value
+
+  depends_on = [google_project_iam_member.terraform_owner]
+}
+
 # ── CI Deploy via Workload Identity Federation ───────────────────────────────
 # GitHub Actions workflows from mento-protocol/monitoring-monorepo impersonate
 # `metrics-bridge-deployer` via OIDC — no long-lived JSON keys required.
@@ -524,23 +538,43 @@ resource "google_service_account_iam_member" "deployer_wif_binding" {
 }
 
 # Project-level grants the CI SA needs for the full deploy flow:
-#   - cloudbuild.builds.editor       → submit Cloud Build jobs
-#   - serviceusage.serviceUsageConsumer → access the project's default
-#                                      `<project>_cloudbuild` GCS bucket
-#                                      that `gcloud builds submit` uploads
-#                                      source to. Without it, the CLI fails
-#                                      with "The user is forbidden from
-#                                      accessing the bucket" before any
-#                                      build step runs (see bridge deploy
-#                                      runs on commits from PR #206 / #209
-#                                      / #213, all red on this exact error).
-#   - artifactregistry.writer        → push images to AR
-#   - run.admin                      → update the Cloud Run service revision
-#   - iam.serviceAccountUser         → "act-as" the runtime SA used by Cloud Run
+#   - cloudbuild.builds.editor  → submit Cloud Build jobs
+#   - storage.admin             → `gcloud builds submit` runs a project-wide
+#                                 `storage.buckets.list` probe before upload
+#                                 to resolve the default `<project>_cloudbuild`
+#                                 staging bucket. storage.admin grants list +
+#                                 object-write; scoping to one bucket doesn't
+#                                 work because the probe is project-scoped.
+#                                 Root cause of every failed bridge deploy
+#                                 since PR #206 (misleading "bucket forbidden
+#                                 / serviceusage.services.use" error —
+#                                 PR #216 tried the CLI's suggested role, it
+#                                 didn't work; this PR replaces it with the
+#                                 permissions actually exercised by the CLI).
+#                                 Broader than strictly needed — the CI SA
+#                                 could manage any GCS bucket in the project.
+#                                 Acceptable because `mento-monitoring` is a
+#                                 single-tenant project (only metrics-bridge
+#                                 lives here; Vercel + Upstash are off-project,
+#                                 Artifact Registry is covered by
+#                                 `artifactregistry.writer` separately).
+#                                 Tighten to a custom role if this project
+#                                 ever hosts sensitive GCS data.
+#   - logging.viewer            → stream Cloud Build logs back to the runner
+#                                 so `gcloud builds submit` blocks until the
+#                                 build finishes (otherwise it exits with
+#                                 "can only stream logs if you are Viewer").
+#                                 Pair with `options.logging: CLOUD_LOGGING_ONLY`
+#                                 in cloudbuild.yaml so logs land in Cloud
+#                                 Logging (not the default GCS log bucket).
+#   - artifactregistry.writer   → push images to AR
+#   - run.admin                 → update the Cloud Run service revision
+#   - iam.serviceAccountUser    → "act-as" the runtime SA used by Cloud Run
 locals {
   ci_deployer_roles = [
     "roles/cloudbuild.builds.editor",
-    "roles/serviceusage.serviceUsageConsumer",
+    "roles/storage.admin",
+    "roles/logging.viewer",
     "roles/artifactregistry.writer",
     "roles/run.admin",
     "roles/iam.serviceAccountUser",
@@ -555,3 +589,4 @@ resource "google_project_iam_member" "ci_deployer" {
 
   depends_on = [google_project_iam_member.terraform_owner]
 }
+

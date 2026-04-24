@@ -9,3 +9,9 @@ steps:
       - .
 images:
   - $_IMAGE
+options:
+  # Write logs ONLY to Cloud Logging (not the default GCS log bucket), so the
+  # deploy SA can stream them with `roles/logging.viewer` alone. The default
+  # GCS log bucket would require project Viewer/Owner, which we don't want
+  # to grant to the deploy SA.
+  logging: CLOUD_LOGGING_ONLY
