@@ -50,6 +50,14 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 - Composite IDs MUST include enough entropy to be collision-resistant under same-block writes. `poolId + startedAt(seconds)` is **insufficient** — include `chainId`, `blockNumber`, and `logIndex` (or `txHash + logIndex`)
 - Cumulative counters belong on the entity (rolled up in handlers), not derived client-side from a paginated list
 
+### Grafana alerts / PromQL — `docs/pr-checklists/grafana-alerts.md`
+
+- PromQL filters on the `pair` label MUST include `pair=~".+/.+"` structural guard — `metrics-bridge` falls back `pair = pool.id` for unmapped token symbols, which would otherwise slip through negated-regex filters and silently silence alerts (bit us on PR #221 FX weekend gate)
+- USD-pegged symbol set must stay in sync between `terraform/alerts/main.tf` (`usd_pegged_symbols_regex_part`) and `ui-dashboard/src/lib/tokens.ts` (`USD_PEGGED_SYMBOLS`); both sides carry cross-reference comments pointing at each other
+- Pool-scoped rules (have `chain_id`/`pool_id` labels) use `local.notify_*_pool` (drops `alertname` so co-firing KPI rules on the same pool collapse into one Slack thread); service-scoped rules (metrics-bridge) MUST use `local.notify_*` (keeps `alertname`) or they merge into one folder-level group
+- Slack title template MUST handle empty `{{ .CommonLabels.alertname }}` via `{{ if .CommonLabels.alertname }}...{{ else }}{{ len .Alerts }} alerts{{ end }}` for groups spanning distinct alertnames
+- Before gating a critical rule on a time window (FX weekend etc.), verify the "backup" rule transitions cleanly under real degraded conditions — `Pool.oracleOk` never flips to false today (tracked in `docs/BACKLOG.md`), so `Oracle Down` is NOT the safety net it looks like
+
 ### Terraform + Cloud Run — `docs/pr-checklists/terraform-cloudrun.md`
 
 - Removing `count` / renaming a resource requires a `moved` block; `deletion_protection = true` makes a missed `moved` block fatal to the apply
