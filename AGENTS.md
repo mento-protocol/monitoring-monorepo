@@ -39,6 +39,7 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 - Pair `AbortSignal.timeout(8_000)` with the 10s refresh interval so a wedged TCP connection can't backpressure the polling loop
 - Distinguish `isLoading` from "data resolved to zero" — never render "100% / no breaches" while `data === undefined`
 - Hasura silently caps queries at 1000 rows; any custom `limit:` in a UI query that feeds a lifetime-aggregate metric is a bug — use a pre-rolled snapshot/rollup entity, or model your fetch after the offset-pagination pattern in `ui-dashboard/src/hooks/use-all-networks-data.ts` (`fetchPaginatedSnapshotPages`)
+- New indexer schema fields ship in an **isolated query** (`POOL_BREACH_ROLLUP` / `POOL_CONFIG_EXT` pattern), never mixed into the page's primary pool query. Hosted Hasura rejects the unknown column with "field not found" during the deploy+resync window and would take the whole page down; isolation lets the affected tile degrade to `—` while the rest renders
 
 ### Time-unit math — `docs/pr-checklists/stateful-data-ui.md`
 
@@ -49,6 +50,11 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 
 - Composite IDs MUST include enough entropy to be collision-resistant under same-block writes. `poolId + startedAt(seconds)` is **insufficient** — include `chainId`, `blockNumber`, and `logIndex` (or `txHash + logIndex`)
 - Cumulative counters belong on the entity (rolled up in handlers), not derived client-side from a paginated list
+
+### Indexer RPC self-heal (`rpc.ts`)
+
+- Multi-getter RPC helpers (`fetchFees` etc.) use `Promise.allSettled` + distinct sentinels: `-1` = not yet attempted (retry), `-2` = viem "returned no data" signature = getter missing from bytecode (stop retrying). All-or-nothing `Promise.all` loses wins from fulfilled getters; a single sentinel creates forever-retry loops on older deployments lacking a getter (bit us on PR #222)
+- Every `rpc.ts` helper that calls `getRpcClient` wraps it in try/catch. `getRpcClient` throws synchronously on unknown chainIds + missing HyperRPC tokens; unwrapped throws escape into handlers and stall indexing. Regressed twice in PR #222 — if you touch fee/rebalancing RPC helpers, check the outer guard is still in place
 
 ### Terraform + Cloud Run — `docs/pr-checklists/terraform-cloudrun.md`
 
