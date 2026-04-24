@@ -29,6 +29,7 @@ vi.mock("@sentry/nextjs", () => ({
 import {
   detectProbedStrategies,
   clearStrategyTypeCache,
+  SENTRY_THROTTLE_MS,
 } from "@/lib/strategy-detection";
 import type { Network } from "@/lib/networks";
 import type { Pool } from "@/lib/types";
@@ -303,6 +304,23 @@ describe("detectProbedStrategies", () => {
         }),
       }),
     );
+  });
+
+  it("re-fires Sentry capture after the throttle window elapses", async () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-04-24T00:00:00Z");
+    vi.setSystemTime(now);
+
+    mockDetectStrategyType.mockRejectedValue(new Error("rpc down"));
+
+    await detectProbedStrategies(CELO, [makePool(POOL_A, REB_CDP)]);
+    expect(mockCaptureException).toHaveBeenCalledTimes(1);
+
+    // Advance past the throttle window so the next failure re-fires.
+    vi.setSystemTime(new Date(now.getTime() + SENTRY_THROTTLE_MS + 1));
+
+    await detectProbedStrategies(CELO, [makePool(POOL_A, REB_CDP)]);
+    expect(mockCaptureException).toHaveBeenCalledTimes(2);
   });
 
   it("times out a slow probe rather than blowing the outer request budget", async () => {

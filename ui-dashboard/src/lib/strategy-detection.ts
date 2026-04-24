@@ -54,7 +54,8 @@ const PROBE_TIMEOUT_MS = 3000;
 // networks would fan out to the same captureException on every cycle and
 // burn quota fast. Mirrors the per-request throttle already used for
 // partial-page snapshot failures in `fetch-all-networks.ts`.
-const SENTRY_THROTTLE_MS = 60_000;
+/** @internal Exported so tests can advance fake timers past the window. */
+export const SENTRY_THROTTLE_MS = 60_000;
 
 const strategyTypeCache = new Map<string, CacheEntry>();
 /** @internal Exported for test-scope `.clear()`. */
@@ -112,6 +113,13 @@ function captureProbeFailure(
   const now = Date.now();
   const last = sentryLastCapturedAt.get(key) ?? 0;
   if (now - last < SENTRY_THROTTLE_MS) return;
+  // Same soft-cap + insertion-order LRU as `strategyTypeCache`: a stream
+  // of distinct failing (network, rebalancer) keys would otherwise grow
+  // the map without bound in a long-lived process.
+  if (sentryLastCapturedAt.size >= MAX_CACHE_ENTRIES) {
+    const oldest = sentryLastCapturedAt.keys().next().value;
+    if (oldest !== undefined) sentryLastCapturedAt.delete(oldest);
+  }
   sentryLastCapturedAt.set(key, now);
   Sentry.captureException(err, {
     tags: {
@@ -136,10 +144,13 @@ export type ProbedStrategies = {
   reservePoolIds: Set<string>;
 };
 
-const EMPTY_STRATEGIES: ProbedStrategies = {
-  cdpPoolIds: new Set(),
-  reservePoolIds: new Set(),
-};
+// Frozen shared singleton for early-exit paths. Mutating the inner Sets
+// would leak state across callers; `Object.freeze` forbids reassignment
+// of the wrapper and documents the intent at zero runtime cost.
+const EMPTY_STRATEGIES: Readonly<ProbedStrategies> = Object.freeze({
+  cdpPoolIds: new Set<string>(),
+  reservePoolIds: new Set<string>(),
+});
 
 /**
  * Probe every unique rebalancer contract referenced by `pools` and return
@@ -150,7 +161,7 @@ const EMPTY_STRATEGIES: ProbedStrategies = {
 export async function detectProbedStrategies(
   network: Network,
   pools: Pool[],
-): Promise<ProbedStrategies> {
+): Promise<Readonly<ProbedStrategies>> {
   if (!network.rpcUrl) return EMPTY_STRATEGIES;
 
   const poolsByRebalancer = new Map<string, Pool[]>();
