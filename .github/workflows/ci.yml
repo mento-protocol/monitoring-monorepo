@@ -108,8 +108,14 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: Typecheck
         run: pnpm --filter @mento-protocol/monitoring-config typecheck
-      - name: Test
-        run: pnpm --filter @mento-protocol/monitoring-config test
+      - name: Test with coverage
+        run: pnpm --filter @mento-protocol/monitoring-config test:coverage
+      - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        with:
+          fail_ci_if_error: false
+          flags: monitoring-config
+          directory: shared-config/coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
       - uses: Kesin11/actions-timeline@44c9c178ffb2fb1d9859614a3ffa79ccfb77565e # v3.1.0
         if: always()
 

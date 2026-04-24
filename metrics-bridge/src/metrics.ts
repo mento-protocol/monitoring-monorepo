@@ -20,7 +20,13 @@ const warnedUnknownPools = new Set<string>();
 function warnIfUnknown(pool: PoolRow, pair: string | null): void {
   if (warnedUnknownPools.has(pool.id)) return;
   const missing: string[] = [];
-  if (pair === null) missing.push("pair");
+  if (pair === null) {
+    // Include token addresses so on-call can jump straight to @mento-protocol/contracts
+    // without looking up the pool row in Hasura first.
+    missing.push(
+      `pair (token0=${pool.token0 ?? "null"}, token1=${pool.token1 ?? "null"})`,
+    );
+  }
   if (!hasChain(pool.chainId)) missing.push("chain_name", "block_explorer_url");
   if (missing.length === 0) return;
   warnedUnknownPools.add(pool.id);

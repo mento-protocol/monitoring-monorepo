@@ -30,9 +30,10 @@ const CONTRACTS = contractsData as ContractsJson;
 
 // Monad NTT tokens are published as `USDmSpoke`, `EURmSpoke`, etc.; strip the
 // suffix on tokens only (implementation contracts like `StableTokenSpoke`
-// stay raw for the address book).
+// stay raw for the address book). Guard against `name === "Spoke"` so a
+// hypothetical malformed entry can't canonicalize to an empty symbol.
 function canonicalTokenSymbol(name: string): string {
-  return name.endsWith("Spoke") ? name.slice(0, -5) : name;
+  return name.length > 5 && name.endsWith("Spoke") ? name.slice(0, -5) : name;
 }
 
 // `StableToken*` are implementation contracts; they must not surface as

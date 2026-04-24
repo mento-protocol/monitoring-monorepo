@@ -69,6 +69,10 @@ describe("poolName", () => {
     expect(poolName(42220, null, USDM_CELO)).toBeNull();
     expect(poolName(42220, USDM_CELO, null)).toBeNull();
   });
+
+  it("renders USDm/USDm when both legs resolve to USDm (defensive; no real pool does this today)", () => {
+    expect(poolName(42220, USDM_CELO, USDM_CELO)).toBe("USDm/USDm");
+  });
 });
 
 describe("contractEntries", () => {
