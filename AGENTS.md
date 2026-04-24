@@ -96,7 +96,18 @@ pnpm dashboard:build          # Production build
 pnpm infra:init               # Init providers (first time or after changes)
 pnpm infra:plan               # Preview infrastructure changes
 pnpm infra:apply              # Apply infrastructure changes
+# Same shape for Grafana alert rules:
+pnpm alerts:init / alerts:plan / alerts:apply
 ```
+
+**Terraform from a worktree** (e.g. `.claude/worktrees/<name>/`): `pnpm infra:*` scripts don't pass `-var-file`, and `terraform.tfvars` only lives in the main checkout (gitignored). Either run the commands from the main checkout, or from inside the worktree's `terraform/`:
+
+```bash
+terraform init -reconfigure   # GCS backend needs reinit in a fresh worktree
+terraform plan  -var-file=/Users/chapati/code/mento/monitoring-monorepo/terraform/terraform.tfvars
+```
+
+Never `terraform apply` without explicit user approval — plan first, surface the diff, wait for go-ahead.
 
 ## Package Details
 
