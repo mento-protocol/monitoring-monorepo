@@ -465,6 +465,20 @@ resource "google_project_iam_member" "dev_cloudbuild_editor" {
   depends_on = [google_project_iam_member.terraform_owner]
 }
 
+# cloudbuild.yaml pins `options.logging: CLOUD_LOGGING_ONLY` so both CI and
+# `scripts/deploy-bridge.sh` stream logs from Cloud Logging (not the default
+# GCS log bucket). Devs need `logging.viewer` to read those streams — without
+# it, `pnpm bridge:deploy` runs the build but fails at log-stream time.
+# Mirrors the same role on `ci_deployer_roles`.
+resource "google_project_iam_member" "dev_logging_viewer" {
+  for_each = toset(var.gcp_dev_members)
+  project  = google_project.monitoring.project_id
+  role     = "roles/logging.viewer"
+  member   = each.value
+
+  depends_on = [google_project_iam_member.terraform_owner]
+}
+
 # ── CI Deploy via Workload Identity Federation ───────────────────────────────
 # GitHub Actions workflows from mento-protocol/monitoring-monorepo impersonate
 # `metrics-bridge-deployer` via OIDC — no long-lived JSON keys required.
@@ -537,6 +551,15 @@ resource "google_service_account_iam_member" "deployer_wif_binding" {
 #                                 PR #216 tried the CLI's suggested role, it
 #                                 didn't work; this PR replaces it with the
 #                                 permissions actually exercised by the CLI).
+#                                 Broader than strictly needed — the CI SA
+#                                 could manage any GCS bucket in the project.
+#                                 Acceptable because `mento-monitoring` is a
+#                                 single-tenant project (only metrics-bridge
+#                                 lives here; Vercel + Upstash are off-project,
+#                                 Artifact Registry is covered by
+#                                 `artifactregistry.writer` separately).
+#                                 Tighten to a custom role if this project
+#                                 ever hosts sensitive GCS data.
 #   - logging.viewer            → stream Cloud Build logs back to the runner
 #                                 so `gcloud builds submit` blocks until the
 #                                 build finishes (otherwise it exits with
