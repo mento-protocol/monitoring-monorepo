@@ -1,6 +1,6 @@
 # Mento v3 Monitoring — Technical Specification
 
-Last updated: 2026-04-23
+Last updated: 2026-04-24
 
 ---
 
@@ -64,33 +64,34 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
                              │
                        Notifications
                              │
-                ┌────────────┴─────────────┐
-                │ Discord (Aegis v2)       │
-                │ Splunk On-Call           │
-                │ Slack #alerts-v3 (v3)    │
-                └──────────────────────────┘
+                ┌────────────┴──────────────────┐
+                │ Discord (Aegis v2)            │
+                │ Splunk On-Call                │
+                │ Slack #alerts-critical (v3)   │
+                │ Slack #alerts-warnings (v3)   │
+                └───────────────────────────────┘
 ```
 
 **Three data paths share a common Grafana Cloud + Grafana Agent stack:**
 
 1. **Dashboard path**: Envio indexes on-chain events → Hasura GraphQL → Next.js dashboard
 2. **v2 alerting (Aegis)**: Aegis polls contract state via RPC → `/metrics` → Grafana Agent scrapes + remote-writes → alert rules → Discord + Splunk On-Call
-3. **v3 alerting (metrics-bridge)**: Envio indexes FPMM pool KPIs → bridge polls Hasura every 30s → `mento_pool_*` gauges → Grafana Agent scrapes → Slack `#alerts-v3` (rules pending in `terraform/alerts/`)
+3. **v3 alerting (metrics-bridge)**: Envio indexes FPMM pool KPIs → bridge polls Hasura every 30s → `mento_pool_*` gauges → Grafana Agent scrapes → Slack `#alerts-critical` + `#alerts-warnings` (rules in `terraform/alerts/`)
 
 ### Components
 
-| Component            | Technology             | Hosting                      | Repo Path                               |
-| -------------------- | ---------------------- | ---------------------------- | --------------------------------------- |
-| Indexer              | Envio HyperIndex       | Envio hosted                 | `indexer-envio/`                        |
-| GraphQL API          | Hasura (auto-managed)  | Envio hosted                 | —                                       |
-| Dashboard            | Next.js 16 + Plotly    | Vercel                       | `ui-dashboard/`                         |
-| Shared config        | TypeScript             | —                            | `shared-config/`                        |
-| Metrics bridge (v3)  | Node 22 + prom-client  | Cloud Run (mento-monitoring) | `metrics-bridge/`                       |
-| Aegis (v2)           | NestJS                 | App Engine (mento-prod)      | `../aegis/`                             |
-| Grafana Agent        | Docker (grafana/agent) | App Engine (mento-prod)      | `../aegis/grafana-agent/`               |
-| Aegis alert rules    | Terraform (HCL)        | Grafana Cloud                | `../aegis/terraform/grafana-alerts/`    |
-| Aegis dashboards     | Terraform (HCL)        | Grafana Cloud                | `../aegis/terraform/grafana-dashboard/` |
-| v3 alert rules (new) | Terraform (HCL)        | Grafana Cloud                | `terraform/alerts/` (TBD)               |
+| Component           | Technology             | Hosting                      | Repo Path                               |
+| ------------------- | ---------------------- | ---------------------------- | --------------------------------------- |
+| Indexer             | Envio HyperIndex       | Envio hosted                 | `indexer-envio/`                        |
+| GraphQL API         | Hasura (auto-managed)  | Envio hosted                 | —                                       |
+| Dashboard           | Next.js 16 + Plotly    | Vercel                       | `ui-dashboard/`                         |
+| Shared config       | TypeScript             | —                            | `shared-config/`                        |
+| Metrics bridge (v3) | Node 22 + prom-client  | Cloud Run (mento-monitoring) | `metrics-bridge/`                       |
+| Aegis (v2)          | NestJS                 | App Engine (mento-prod)      | `../aegis/`                             |
+| Grafana Agent       | Docker (grafana/agent) | App Engine (mento-prod)      | `../aegis/grafana-agent/`               |
+| Aegis alert rules   | Terraform (HCL)        | Grafana Cloud                | `../aegis/terraform/grafana-alerts/`    |
+| Aegis dashboards    | Terraform (HCL)        | Grafana Cloud                | `../aegis/terraform/grafana-dashboard/` |
+| v3 alert rules      | Terraform (HCL)        | Grafana Cloud                | `terraform/alerts/`                     |
 
 ---
 
@@ -100,7 +101,7 @@ The Mento v3 monitoring system provides real-time visibility into Mento's on-cha
 | ------------- | -------- | ------- | ----------- |
 | Celo Mainnet  | 42220    | ✅ Live | 60664513    |
 | Celo Sepolia  | 11142220 | ✅ Live | —           |
-| Monad Mainnet | 143      | ✅ Live | —           |
+| Monad Mainnet | 143      | ✅ Live | backfilled  |
 
 ---
 
@@ -178,11 +179,11 @@ The `healthStatus` field on Pool encodes the current status: `"OK"` | `"WARN"` |
 
 `limitPressure` = `|netflow| / limit` — stored as decimal string for precision.
 
-### 5.4 Rebalancer Liveness
+### 5.4 Rebalancer Liveness + Effectiveness
 
-**What:** Is the rebalancer bot actively rebalancing pools when needed?
+**What:** Two halves — does the rebalancer _fire_ when the pool is deviated (liveness), and when it fires does it actually _fix_ the deviation (effectiveness)?
 
-**Fields:** `rebalancerAddress`, `rebalanceLivenessStatus` on Pool; `effectivenessRatio` on RebalanceEvent
+**Fields:** `rebalancerAddress`, `rebalanceLivenessStatus`, `lastRebalancedAt`, `lastEffectivenessRatio` on Pool; `effectivenessRatio` on RebalanceEvent; `rebalanceCount` cumulative.
 
 **Applies to:** FPMM pools only
 
@@ -191,7 +192,9 @@ The `healthStatus` field on Pool encodes the current status: `"OK"` | `"WARN"` |
 | ACTIVE | Rebalancer has rebalanced recently |
 | N/A    | Pool is a VirtualPool              |
 
-`effectivenessRatio` per RebalanceEvent = `(priceDifferenceBefore - priceDifferenceAfter) / priceDifferenceBefore` — how much of the deviation was corrected.
+`effectivenessRatio` per RebalanceEvent = `(priceDifferenceBefore - priceDifferenceAfter) / priceDifferenceBefore` — how much of the deviation was corrected. Range: `1.0` = fully closed, `0.5` = halved, `0` = no effect, `< 0` = moved _away_ from oracle.
+
+`Pool.lastEffectivenessRatio` mirrors the most recent event's ratio so the bridge can emit it as a single gauge without a subquery. Alert rule: rolling 1h avg <0.2 AND active breach AND ≥1 rebalance in window (catches persistent control-loop failure, ignores one-off MEV hits).
 
 ### 5.5 Stability Pool Headroom (Phase 2)
 
@@ -212,7 +215,7 @@ The `healthStatus` field on Pool encodes the current status: `"OK"` | `"WARN"` |
 
 Source of truth: [`indexer-envio/schema.graphql`](./indexer-envio/schema.graphql)
 
-Key entities: `Pool` (mutable per-pool state), `PoolSnapshot` / `PoolDailySnapshot` (hourly/daily aggregates), `OracleSnapshot` (per-event health timeline), `TradingLimit` (per-pool per-token limit state), `RebalanceEvent` (per-rebalance effectiveness).
+Key entities: `Pool` (mutable per-pool state, incl. `lastEffectivenessRatio` + `deviationBreachStartedAt`), `PoolSnapshot` / `PoolDailySnapshot` (hourly/daily aggregates), `OracleSnapshot` (per-event health timeline), `TradingLimit` (per-pool per-token limit state), `RebalanceEvent` (per-rebalance effectiveness), `DeviationBreach` (first-class per-breach history with start/end).
 
 Pool IDs are namespaced as `{chainId}-{poolAddress}` for multichain support.
 
@@ -243,14 +246,15 @@ Protocol-wide metrics dashboard.
 
 #### Pool Detail (`/pools/[poolId]`)
 
-Per-pool deep-dive.
+Per-pool deep-dive. The pool header displays the current health/limit/rebalancer badges (the old numeric "Health Score" was retired — breaches now live on a dedicated tab).
 
 **Tabs:**
 
 1. **Overview** — reserve chart (Plotly), recent swaps table
 2. **Analytics** — PoolSnapshot charts (hourly volume bars + cumulative count), OracleChart (FPMM only), daily volume chart
-3. **Limits** — LimitPanel with trading limit pressure per token
-4. **Rebalancer** — RebalancerPanel with liveness status + diagnostics
+3. **Breaches** — per-breach history chart sourced from the `DeviationBreach` entity (FPMM only)
+4. **Limits** — LimitPanel with trading limit pressure per token
+5. **Rebalancer** — RebalancerPanel with liveness status + diagnostics
 
 #### Protocol Revenue (`/revenue`)
 
@@ -281,7 +285,9 @@ Swap fee time-series with 24h/7d/30d/all-time breakdowns. Placeholders for CDP B
 
 ### Authentication
 
-NextAuth.js with Google provider. Domain-restricted to `@mentolabs.xyz` accounts. JWT session strategy with 30-day max age. Custom sign-in page at `/sign-in`.
+NextAuth.js with Google provider. Domain-restricted to `@mentolabs.xyz` via `hd` + `email_verified` verification in the JWT callback and middleware-enforced allowlist. JWT session strategy with 1h max age. Custom sign-in page at `/sign-in`. Callback URLs sanitized server-side to block open-redirect; RSC label-leak guard covers the `/api/labels/*` and similar routes.
+
+Full CSP and HSTS (with preload) headers shipped; unauthenticated GET endpoints on address labels have been retired.
 
 ---
 
@@ -299,26 +305,23 @@ The dashboard is fully multichain — all chains are shown together (no network 
 
 ## 9. Known Limitations
 
-| Limitation                           | Details                                                                                                                             |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Endpoint hash changes on each deploy | Envio free tier generates new URL per deploy; requires Vercel env var update                                                        |
-| Hasura 1000-row cap                  | Envio hosted Hasura silently caps all queries at 1000 rows; use `fetchAllSnapshotPages` or indexer-side rollups                     |
-| Cannot run two indexers locally      | Shared Hasura port 8080; use separate Docker projects                                                                               |
-| SortedOracles on Sepolia             | Contracts return zero address; oracle indexing mainnet-only                                                                         |
-| Gap-fill not yet implemented         | PoolSnapshot charts may show gaps for periods with no activity                                                                      |
-| Monad pools pending                  | Pool contracts deployed; indexer config ready                                                                                       |
-| No Liquity v2 indexing               | TroveManager / StabilityPool — needed for Stability Pool headroom alerts                                                            |
-| v3 alert rules pending               | Metrics pipeline is live (metrics-bridge → Grafana Agent → Grafana Cloud); Terraform rules + Slack contact point are next — see §10 |
+| Limitation                             | Details                                                                                                                            |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Endpoint hash changes on each deploy   | Envio free tier generates new URL per deploy; requires Vercel env var update                                                       |
+| Hasura 1000-row cap                    | Envio hosted Hasura silently caps all queries at 1000 rows; use `fetchAllSnapshotPages` or indexer-side rollups                    |
+| Cannot run two indexers locally        | Shared Hasura port 8080; use separate Docker projects                                                                              |
+| SortedOracles on Sepolia               | Contracts return zero address; oracle indexing mainnet-only                                                                        |
+| Gap-fill not yet implemented           | PoolSnapshot charts may show gaps for periods with no activity                                                                     |
+| No Liquity v2 indexing                 | TroveManager / StabilityPool — needed for Stability Pool headroom alerts                                                           |
+| CDP strategy detection is an RPC probe | `ui-dashboard/src/lib/strategy-detection.ts` probes strategy addresses at runtime. Indexer `CdpPool` entity pending — see BACKLOG. |
 
 ---
 
 ## 10. Alerting
 
-### Current State (Aegis v2)
+### Aegis v2 (live)
 
-Aegis is live for Mento v2 alerts. It polls v2 contract state via RPC every 10-60s and exposes Prometheus metrics that Grafana Cloud ingests. All Grafana resources (dashboards, alert rules, contact points, notification policies) are Terraform-managed.
-
-**Live alert groups:**
+Aegis polls v2 contract state via RPC every 10-60s and exposes Prometheus metrics that Grafana Cloud ingests. All Grafana resources (dashboards, alert rules, contact points, notification policies) are Terraform-managed in the aegis repo.
 
 | Group            | Rules                               | Notification Channels              |
 | ---------------- | ----------------------------------- | ---------------------------------- |
@@ -328,28 +331,46 @@ Aegis is live for Mento v2 alerts. It polls v2 contract state via RPC every 10-6
 | Trading Limits   | L0/L1/LG utilization >90%           | Discord + Splunk On-Call (L1/LG)   |
 | Aegis Service    | RPC failures, data staleness        | Discord + Splunk On-Call           |
 
-### Next — v3 FPMM Alerts
+### v3 FPMM Alerts (live)
 
-**Metrics pipeline is live.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls the Envio indexer every 30s and exports `mento_pool_*` Prometheus gauges. Grafana Agent (in the `aegis` repo) scrapes it and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). Verified: 11 FPMM pools across Celo + Monad mainnet reporting with <30s staleness.
+**Pipeline.** `metrics-bridge` (Cloud Run, `mento-monitoring` GCP project) polls the Envio indexer every 30s and exports `mento_pool_*` Prometheus gauges. Grafana Agent (aegis repo, App Engine in `mento-prod`) scrapes and remote-writes to Grafana Cloud (`clabsmento.grafana.net`). 11 FPMM pools across Celo + Monad mainnet reporting with <30s staleness.
 
-**Remaining work:**
+**Terraform module** `terraform/alerts/` — Grafana provider, Slack contact points, and per-rule `notification_settings`. Separate state backend (`gs://mento-terraform-tfstate-6ed6/monitoring-monorepo-alerts`). Uses rule-level `notification_settings` rather than the Aegis-owned singleton notification policy, so no cross-repo coordination required.
 
-1. Create Slack `#alerts-v3` channel + incoming-webhook; stash URL as `TF_VAR_slack_webhook_alerts_v3`
-2. Build `terraform/alerts/` in this repo — Grafana provider + Slack contact point + notification policy + 5 rules (see §5 thresholds)
-3. Smoke-test by briefly lowering a threshold and confirming Slack fires
+**Slack channels.** Severity-split, not domain-split:
+
+| Channel            | Use                                                                                                  |
+| ------------------ | ---------------------------------------------------------------------------------------------------- |
+| `#alerts-critical` | Page-worthy — deviation-critical, oracle-down, limit-tripped, rebalancer-stale, bridge-not-reporting |
+| `#alerts-warnings` | Muted by default; opened when investigating                                                          |
+
+Domain-split (`#alerts-v3`) was the original plan but `critical` vs `warning` is the axis operators actually toggle on. Per-domain splits can be layered later without relabelling series.
+
+**Rules shipped** (9 rules across 2 services — see `terraform/alerts/rules-*.tf`):
+
+| Service          | Rule                      | Severity | Expression                                                                                                                               |
+| ---------------- | ------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `fpmms`          | Oracle Liveness           | warning  | `(time() - mento_pool_oracle_timestamp) / mento_pool_oracle_expiry > 0.8` for 2m                                                         |
+| `fpmms`          | Oracle Down               | critical | `mento_pool_oracle_ok < 0.5` for 1m                                                                                                      |
+| `fpmms`          | Deviation Breach          | warning  | `mento_pool_deviation_ratio > 1` for 2m                                                                                                  |
+| `fpmms`          | Deviation Breach Critical | critical | breach active >3600s (indexer-anchored via `deviationBreachStartedAt`)                                                                   |
+| `fpmms`          | Trading Limit Pressure    | warning  | `max(mento_pool_limit_pressure) > 0.8` for 5m                                                                                            |
+| `fpmms`          | Trading Limit Tripped     | critical | `max(mento_pool_limit_pressure) >= 1` for 2m                                                                                             |
+| `fpmms`          | Rebalancer Stale          | critical | 30m+ breach AND 30m+ since last rebalance                                                                                                |
+| `fpmms`          | Rebalance Effectiveness   | warning  | `avg_over_time(mento_pool_rebalance_effectiveness[1h]) < 0.2` AND breach active AND `increase(rebalance_count_total[1h]) > 0`, `for=15m` |
+| `metrics-bridge` | Not Reporting             | critical | `time() - mento_pool_bridge_last_poll > 90` for 2m                                                                                       |
+| `metrics-bridge` | Poll Errors               | critical | `rate(mento_pool_bridge_poll_errors_total[5m]) > 0` for 3m                                                                               |
 
 **`service` label convention** (matches the existing Aegis pattern of `service = monitored-domain`, not producer):
 
 | `service`        | Covers                                                                   |
 | ---------------- | ------------------------------------------------------------------------ |
-| `fpmms`          | FPMM pool alerts (deviation, limits, rebalancer, oracle_ok) — initial PR |
-| `metrics-bridge` | Bridge self-monitoring (poll errors, stale polls) — initial PR           |
-| `oracles`        | Oracle report outliers (future; distinct from Aegis's `oracle-relayers`) |
-| `cdps`           | Stability-pool / CDP (future; blocked on Liquity v2 indexing)            |
+| `fpmms`          | FPMM pool alerts — live                                                  |
+| `metrics-bridge` | Bridge self-monitoring — live                                            |
+| `oracles`        | Oracle report outliers (backlog; needs indexer historical oracle prices) |
+| `cdps`           | Stability-pool / CDP (backlog; blocked on Liquity v2 indexing)           |
 
-All four route to `#alerts-v3` via a single notification-policy regex match `service =~ "fpmms|oracles|cdps|metrics-bridge"`. Split later by severity or additional channels without changing series labels.
-
-**Pipeline topology** (v3 path, as distinct from the Aegis v2 path):
+**Pipeline topology** (v3 path, distinct from the Aegis v2 path):
 
 ```
 Envio Hasura ── (poll 30s) ── metrics-bridge ── /metrics ── Grafana Agent ── remote_write ── Grafana Cloud
@@ -358,19 +379,29 @@ Envio Hasura ── (poll 30s) ── metrics-bridge ── /metrics ── Graf
                                  GCP project)           mento-prod)
 ```
 
-Image rollouts for the bridge go through `gcloud run services update` (CI uses WIF); Terraform owns service shape only (`lifecycle.ignore_changes` on the image field). Grafana Agent's Dockerfile required four separate fixes (#51–#54 in aegis) before the first successful deploy because the #47 security-hardening pass was never actually built.
+**Operational notes.**
+
+- Bridge image rollouts: `gcloud run services update` via CI (WIF-auth, no long-lived keys). Terraform owns service shape only (`lifecycle.ignore_changes` on image). Rollbacks are self-describing — `--revision-suffix=<sha>-<run-id>`.
+- Bridge health probe lives at `/health` (Cloud Run v2 reserves `/healthz`).
+- Bridge deploy SA needs `serviceusage.serviceUsageConsumer` + `logging.logWriter`; the `mento-monitoring` bootstrap SA needs project owner.
+- Grafana Agent Dockerfile took four sequential fixes (aegis #51-#54) before the first healthy rollout.
 
 ## 11. Future Plans
 
 ### Next
 
-- **v3 FPMM alert rules** (`terraform/alerts/` module) — oracle liveness, deviation warn/crit, trading limits, rebalancer stale, bridge not reporting. Pipeline already live (see §10).
+- **Indexer `CdpPool` entity** — mirror `OlsPool`, registered on `LiquidityStrategyUpdated` when the strategy resolves to `CDPLiquidityStrategy`. Unblocks retiring the runtime RPC probe in `ui-dashboard/src/lib/strategy-detection.ts`.
 
 ### Backlog
 
 - Oracle report-outlier alerts (`service=oracles`) — indexer support for historical oracle prices pending
 - Liquity v2 CDP indexing (TroveManager, StabilityPool) — unblocks `service=cdps` stability-pool alerts
+- `lastOracleUpdateTxHash` on `Pool` — unblocks tx-link enrichment in Slack alerts
+- ChainStat / GlobalStat aggregate entities
 - Gap-fill logic for snapshot charts
+- Migrate Aegis v2 alerts onto the new Slack channel pair (currently Discord)
+- Merge Aegis into the monorepo — retire the sibling `../aegis/` repo, fold its Terraform into `terraform/`
+- Grafana Agent → Grafana Alloy — Agent reached EOL on 2025-11-01; Alloy is the OTel-collector successor
 - Streamlit sandbox
 - ClickHouse sink for heavy analytics
 
