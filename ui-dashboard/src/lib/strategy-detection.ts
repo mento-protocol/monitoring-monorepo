@@ -101,10 +101,10 @@ export async function detectCdpPoolIds(
   const poolsByRebalancer = new Map<string, Pool[]>();
   for (const pool of pools) {
     const rebalancer = pool.rebalancerAddress;
-    // `isAddress` rejects empty strings, non-hex, wrong-length, and the
-    // zero address (via checksum validation). Treat anything malformed as
-    // "no strategy attached" rather than letting garbage reach viem's RPC
-    // layer or the cache key.
+    // `isAddress` rejects empty strings, non-hex, and wrong-length input so
+    // garbage never reaches viem's RPC layer or the cache key. (Note: the
+    // zero address passes this check — it would fall through to the RPC
+    // probe and classify as "unknown" via revert, which is fine.)
     if (!rebalancer || !isAddress(rebalancer)) continue;
     const key = rebalancer.toLowerCase();
     const arr = poolsByRebalancer.get(key);
@@ -129,6 +129,10 @@ export async function detectCdpPoolIds(
       // takes the pool address purely as a CDP-specific ABI selector.
       const samplePoolAddress = group[0].id.split("-")[1];
       if (!samplePoolAddress || !isAddress(samplePoolAddress)) return;
+      // Track the timeout so we can cancel it if the probe wins the race.
+      // Without `clearTimeout` the timer keeps the event loop alive in a
+      // long-running Node process (e.g. dev server) on every cache-miss.
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
         const type = await Promise.race([
           detectStrategyType(
@@ -136,12 +140,12 @@ export async function detectCdpPoolIds(
             rebalancer as `0x${string}`,
             samplePoolAddress,
           ),
-          new Promise<never>((_, reject) =>
-            setTimeout(
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(
               () => reject(new Error("strategy-detection: probe timed out")),
               PROBE_TIMEOUT_MS,
-            ),
-          ),
+            );
+          }),
         ]);
         writeCached(network.chainId, rebalancer, type);
         typeByRebalancer.set(rebalancer, type);
@@ -166,6 +170,8 @@ export async function detectCdpPoolIds(
             rebalancer,
           },
         });
+      } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
       }
     }),
   );
