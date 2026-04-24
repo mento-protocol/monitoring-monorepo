@@ -25,6 +25,7 @@ import {
 import {
   scalingFactorToDecimals,
   ORACLE_ADAPTER_SCALE_FACTOR,
+  computeEffectivenessRatio,
 } from "../priceDifference";
 import {
   TRADING_LIMITS_INTERNAL_DECIMALS,
@@ -704,11 +705,32 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
 
   const rebalancerAddress = asAddress(event.params.sender);
 
+  // Compute effectiveness ratio up-front so it can ride along on oracleDelta
+  // into the Pool row AND be reused by the RebalanceEvent construction below.
+  // The helper returns `null` for the degenerate `before == 0` case; each
+  // consumer picks its own sentinel (see computeEffectivenessRatio docblock).
+  const priceDifferenceBefore = event.params.priceDifferenceBefore;
+  const priceDifferenceAfter = event.params.priceDifferenceAfter;
+  const improvement = priceDifferenceBefore - priceDifferenceAfter;
+  const rawEffectivenessRatio = computeEffectivenessRatio(
+    priceDifferenceBefore,
+    priceDifferenceAfter,
+  );
+  // `-1` sentinel matches DEFAULT_ORACLE_FIELDS; metrics-bridge skips the
+  // Prometheus publish on that exact string so the `Rebalance Ineffective`
+  // alert's avg_over_time window excludes degenerate rebalances.
+  const lastEffectivenessRatio = rawEffectivenessRatio ?? "-1";
+  // `0.0000` preserves the historical RebalanceEvent contract — dashboard
+  // charts / history tables render via Number(x) * 100, so `-1` would
+  // misreport as -100%.
+  const eventEffectivenessRatio = rawEffectivenessRatio ?? "0.0000";
+
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {
     lastRebalancedAt: blockTimestamp,
     rebalancerAddress,
     rebalanceLivenessStatus: "ACTIVE",
     priceDifference: event.params.priceDifferenceAfter,
+    lastEffectivenessRatio,
   };
 
   // Hoist oraclePrice outside the if-block so it's accessible for OracleSnapshot
@@ -784,14 +806,6 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     rebalanceDelta: true,
   });
 
-  const priceDifferenceBefore = event.params.priceDifferenceBefore;
-  const priceDifferenceAfter = event.params.priceDifferenceAfter;
-  const improvement = priceDifferenceBefore - priceDifferenceAfter;
-  const effectivenessRatio =
-    priceDifferenceBefore > 0n
-      ? (Number(improvement) / Number(priceDifferenceBefore)).toFixed(4)
-      : "0.0000";
-
   const rebalanced: RebalanceEvent = {
     id,
     chainId: event.chainId,
@@ -801,7 +815,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     priceDifferenceBefore,
     priceDifferenceAfter,
     improvement,
-    effectivenessRatio,
+    effectivenessRatio: eventEffectivenessRatio,
     txHash: event.transaction.hash,
     blockNumber,
     blockTimestamp,

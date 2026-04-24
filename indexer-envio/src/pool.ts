@@ -238,6 +238,7 @@ export const DEFAULT_ORACLE_FIELDS = {
   healthBinarySeconds: 0n,
   lastOracleSnapshotTimestamp: 0n,
   lastDeviationRatio: "-1",
+  lastEffectivenessRatio: "-1",
   hasHealthData: false,
   cumulativeBreachSeconds: 0n,
   cumulativeCriticalSeconds: 0n,

@@ -45,6 +45,7 @@ type Pool {
   healthBinarySeconds: BigInt! # seconds where deviationRatio ≤ 1.0
   lastOracleSnapshotTimestamp: BigInt! # timestamp of most recent oracle snapshot
   lastDeviationRatio: String! # deviationRatio at most recent snapshot
+  lastEffectivenessRatio: String! # effectivenessRatio of most recent RebalanceEvent ("-1" sentinel until first rebalance)
   hasHealthData: Boolean! # true once first health snapshot recorded
   # Breach accumulators — running totals over the pool's lifetime (trading-seconds,
   # i.e. FX weekend closure is excluded). `cumulativeCriticalSeconds` is the

@@ -85,3 +85,39 @@ export function computePriceDifference(pool: {
       : oracleRef - reserveRatio;
   return (diff * 10000n) / oracleRef;
 }
+
+/**
+ * Rebalance effectiveness ratio: how much of the pre-rebalance deviation was
+ * closed by a single rebalance. Range:
+ *   `1.0`  → deviation fully collapsed (pool ≈ oracle after)
+ *   `0.5`  → halved
+ *   `0.0`  → no reduction
+ *   `< 0`  → rebalance moved price FURTHER from oracle (legitimate + alertable)
+ *
+ * Returns `null` when `before <= 0n` (no meaningful ratio — zero pre-deviation).
+ * Callers decide the sentinel string based on their consumer contract:
+ *
+ *   - `Pool.lastEffectivenessRatio` uses `"-1"` to match
+ *     `DEFAULT_ORACLE_FIELDS.lastEffectivenessRatio` — metrics-bridge skips the
+ *     Prometheus publish on that exact string, keeping the alert's
+ *     `avg_over_time` window clean of no-data points.
+ *   - `RebalanceEvent.effectivenessRatio` uses `"0.0000"` to preserve the
+ *     historical numeric-only contract — dashboard consumers
+ *     (`EffectivenessChart`, rebalance history table) render via
+ *     `Number(x) * 100`, so emitting `"-1"` there would misreport degenerate
+ *     rebalances as `-100%` effective.
+ *
+ * Emitted string uses `toFixed(4)` to match `RebalanceEvent.effectivenessRatio`
+ * stringification.
+ */
+export function computeEffectivenessRatio(
+  priceDifferenceBefore: bigint,
+  priceDifferenceAfter: bigint,
+): string | null {
+  if (priceDifferenceBefore <= 0n) return null;
+  const improvement = priceDifferenceBefore - priceDifferenceAfter;
+  // `priceDifference` is stored in bps (0–~100000 in practice), well under
+  // Number.MAX_SAFE_INTEGER. The bigint→Number cast is a precision risk only
+  // for raw 18/24dp oracle values, which are NOT what this helper receives.
+  return (Number(improvement) / Number(priceDifferenceBefore)).toFixed(4);
+}

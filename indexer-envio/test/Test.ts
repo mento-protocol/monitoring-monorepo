@@ -3278,5 +3278,16 @@ describe("Health score handler integration", () => {
       "1.000000",
       "post-rebalance snapshot with small priceDifference must be healthy",
     );
+
+    // KPI 4 effectiveness: Pool.lastEffectivenessRatio must mirror the
+    // toFixed(4) computation used to populate RebalanceEvent.effectivenessRatio.
+    const expectedEff = (
+      Number(3333n - PRICE_DIFF_AFTER) / Number(3333n)
+    ).toFixed(4);
+    assert.equal(
+      pool.lastEffectivenessRatio,
+      expectedEff,
+      "Rebalanced path must write lastEffectivenessRatio matching the per-event effectivenessRatio formula",
+    );
   });
 });

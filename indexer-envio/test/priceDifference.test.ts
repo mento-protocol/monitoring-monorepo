@@ -1,6 +1,7 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
 import { computePriceDifference } from "../src/EventHandlers";
+import { computeEffectivenessRatio } from "../src/priceDifference";
 
 const SCALE = 10n ** 24n;
 
@@ -272,5 +273,36 @@ describe("computePriceDifference", () => {
       }),
     );
     assert.equal(pd, 0n);
+  });
+});
+
+describe("computeEffectivenessRatio", () => {
+  it("full correction: after = 0 yields 1.0000", () => {
+    assert.equal(computeEffectivenessRatio(1000n, 0n), "1.0000");
+  });
+
+  it("half correction yields 0.5000", () => {
+    assert.equal(computeEffectivenessRatio(1000n, 500n), "0.5000");
+  });
+
+  it("no reduction: before == after yields 0.0000 (legitimate 0%)", () => {
+    assert.equal(computeEffectivenessRatio(1000n, 1000n), "0.0000");
+  });
+
+  it("rebalance made it WORSE: after > before yields negative (alertable)", () => {
+    // Drop in effectiveness must publish — metrics-bridge sentinel-skip only
+    // filters the exact string "-1", so "-0.5000" reaches Prometheus.
+    assert.equal(computeEffectivenessRatio(1000n, 1500n), "-0.5000");
+  });
+
+  it("degenerate rebalance (before = 0) returns null — callers pick sentinel", () => {
+    // Helper returns null so Pool row can use "-1" (gauge-skip) while the
+    // RebalanceEvent preserves the historical "0.0000" contract for dashboard
+    // consumers that render Number(x) * 100.
+    assert.equal(computeEffectivenessRatio(0n, 0n), null);
+  });
+
+  it("before < 0 (impossible in practice) also returns null", () => {
+    assert.equal(computeEffectivenessRatio(-100n, 50n), null);
   });
 });
