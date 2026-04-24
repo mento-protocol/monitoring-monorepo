@@ -48,9 +48,18 @@ describe("computeOracleJumpBps", () => {
     assert.equal(computeOracleJumpBps(prev, next), "100.0000");
   });
 
-  it("handles the alert-boundary example (10.5 bps on a 10 bps fee)", () => {
+  it("handles the warning-tier example (10.5 bps on a 10 bps fee)", () => {
     // +0.105% = 10.5 bps = 105/100_000 of the reference price
     const next = ONE + (ONE * 105n) / 100_000n;
     assert.equal(computeOracleJumpBps(ONE, next), "10.5000");
+  });
+
+  it("handles the critical-tier boundary (exactly 11 bps = 10% above a 10 bps fee)", () => {
+    // +0.11% = 11 bps = 110/100_000 of the reference price.
+    // The terraform `Oracle Jump Far Above Swap Fee` rule uses `>= fee × 1.10`
+    // so 11 bps on a 10 bps fee must route to critical. This asserts the helper
+    // emits the exact boundary value the alert expression will compare against.
+    const next = ONE + (ONE * 110n) / 100_000n;
+    assert.equal(computeOracleJumpBps(ONE, next), "11.0000");
   });
 });
