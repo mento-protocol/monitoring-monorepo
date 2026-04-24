@@ -8,7 +8,11 @@ COPY metrics-bridge/package.json metrics-bridge/
 # present before `pnpm install`.
 COPY shared-config/ shared-config/
 
-RUN corepack enable && pnpm install --frozen-lockfile --filter @mento-protocol/metrics-bridge
+# The trailing `...` on the filter includes transitive workspace deps — without
+# it, pnpm symlinks shared-config but skips installing ITS own deps (notably
+# @mento-protocol/contracts), so shared-config's postinstall `tsc` fails with
+# "Cannot find module '@mento-protocol/contracts/contracts.json'".
+RUN corepack enable && pnpm install --frozen-lockfile --filter "@mento-protocol/metrics-bridge..."
 
 COPY metrics-bridge/ metrics-bridge/
 RUN pnpm --filter @mento-protocol/metrics-bridge build
@@ -24,10 +28,14 @@ COPY metrics-bridge/package.json metrics-bridge/
 # points at `./*.json` directly). Covers both the install step below AND the
 # runtime JSON resolution in the final image.
 COPY shared-config/*.json shared-config/
+# Trailing `...` on the filter pulls in shared-config's prod deps (most
+# importantly @mento-protocol/contracts, which `shared-config/dist/tokens.js`
+# requires at runtime). Without it, `node dist/main.js` crashes with
+# module-not-found on the first chain-metadata lookup.
 # --ignore-scripts skips the root `postinstall` (which runs `tsc` on shared-config)
 # because the dist is copied from the builder below and the prod install has no
-# devDeps. The workspace symlink still resolves at runtime.
-RUN corepack enable && pnpm install --prod --frozen-lockfile --ignore-scripts --filter @mento-protocol/metrics-bridge
+# devDeps for tsc to run with.
+RUN corepack enable && pnpm install --prod --frozen-lockfile --ignore-scripts --filter "@mento-protocol/metrics-bridge..."
 
 COPY --from=builder /app/metrics-bridge/dist ./metrics-bridge/dist
 COPY --from=builder /app/shared-config/dist ./shared-config/dist
