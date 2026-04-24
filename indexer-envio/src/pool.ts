@@ -349,18 +349,19 @@ export const upsertPool = async ({
     }
   }
 
-  // Self-heal: if fees are still at the -1 sentinel (deploy-time RPC read
-  // failed), retry now. Once we get a successful read — even if the real
-  // fees are 0 — we persist the result and stop retrying. fetchFees returns
-  // only the fields that succeeded, so a partial failure doesn't clobber
-  // previously-healed fields.
+  // Self-heal: if fees are still at the -1 "not yet attempted" sentinel,
+  // retry now. Once we get a successful read — even if the real fees are
+  // 0 — we persist the result and stop retrying. fetchFees also stamps
+  // -2 on any getter that rejects with "returned no data" (contract
+  // doesn't implement it), and -2 is excluded here so we don't thrash
+  // forever on older FPMM deployments missing rebalanceIncentive().
   let healedFees:
     | Partial<{ lpFee: number; protocolFee: number; rebalanceReward: number }>
     | undefined;
   if (
-    (existing.lpFee < 0 ||
-      existing.protocolFee < 0 ||
-      existing.rebalanceReward < 0) &&
+    (existing.lpFee === -1 ||
+      existing.protocolFee === -1 ||
+      existing.rebalanceReward === -1) &&
     existing.source !== "" &&
     !isVirtualPool(existing)
   ) {
