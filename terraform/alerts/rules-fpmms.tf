@@ -765,9 +765,11 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     #      exactly 1.0 stays OK), so `>= 1` is semantically wrong AND would also
     #      let a low-effectiveness rebalance from a PREVIOUS breach contaminate
     #      the gauge average into the next breach.
-    #   2. rebalanced DURING the current breach — `last_rebalanced_at >
+    #   2. rebalanced DURING the current breach — `last_rebalanced_at >=
     #      deviation_breach_start` ensures the ineffectiveness we're averaging
-    #      actually belongs to this breach, not a prior one.
+    #      actually belongs to this breach, not a prior one. `>=` (not `>`)
+    #      admits the same-block case where a failed rebalance tips the pool
+    #      into breach — see the inline note on the expression itself.
     #   3. rebalanced recently (< 1h ago) — the bridge re-publishes the
     #      effectiveness gauge every 30s, so a months-old value would otherwise
     #      keep `avg_over_time` alive forever. The time-window gate caps staleness.
