@@ -1,7 +1,10 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
 import { computePriceDifference } from "../src/EventHandlers";
-import { computeEffectivenessRatio } from "../src/priceDifference";
+import {
+  buildRebalanceOutcome,
+  computeEffectivenessRatio,
+} from "../src/priceDifference";
 
 const SCALE = 10n ** 24n;
 
@@ -339,5 +342,41 @@ describe("computeEffectivenessRatio", () => {
   it("degenerate: before == threshold exactly returns null", () => {
     // Zero gap → avoid division-by-zero.
     assert.equal(computeEffectivenessRatio(3000n, 2900n, 3000), null);
+  });
+});
+
+describe("buildRebalanceOutcome — sentinel rendering", () => {
+  it("degenerate rebalance: `eventEffectivenessRatio` is empty string, not '0.0000'", () => {
+    // Pool already in-band (before <= threshold) — no meaningful "gap closed".
+    // The event sentinel MUST be distinct from a real 0% effective rebalance
+    // so the dashboard can render degenerate as `—` without hiding real misses.
+    const out = buildRebalanceOutcome({
+      priceDifferenceBefore: 2500n,
+      priceDifferenceAfter: 2200n,
+      rebalanceThreshold: 3000,
+    });
+    assert.equal(out.eventEffectivenessRatio, "");
+    assert.equal(out.lastEffectivenessRatio, "-1");
+  });
+
+  it("genuine 0% effective (before == after above threshold): '0.0000', NOT the sentinel", () => {
+    const out = buildRebalanceOutcome({
+      priceDifferenceBefore: 3333n,
+      priceDifferenceAfter: 3333n,
+      rebalanceThreshold: 3000,
+    });
+    assert.equal(out.eventEffectivenessRatio, "0.0000");
+    assert.equal(out.lastEffectivenessRatio, "0.0000");
+  });
+
+  it("real rebalance: sentinel paths not triggered", () => {
+    const out = buildRebalanceOutcome({
+      priceDifferenceBefore: 3333n,
+      priceDifferenceAfter: 3000n,
+      rebalanceThreshold: 3000,
+    });
+    assert.equal(out.eventEffectivenessRatio, "1.0000");
+    assert.equal(out.lastEffectivenessRatio, "1.0000");
+    assert.equal(out.improvement, 333n);
   });
 });

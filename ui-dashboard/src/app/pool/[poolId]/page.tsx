@@ -5,6 +5,7 @@ import { useAddressLabels } from "@/components/address-labels-provider";
 import { KindBadge, SourceBadge } from "@/components/badges";
 import { ChainIcon } from "@/components/chain-icon";
 import { DeviationCell } from "@/components/pool-header/deviation-cell";
+import { InfoPopover } from "@/components/info-popover";
 import { LimitStatusValue } from "@/components/pool-header/limit-status-value";
 import { OraclePriceValue } from "@/components/pool-header/oracle-price-value";
 import { OracleStatusValue } from "@/components/pool-header/oracle-status-value";
@@ -1274,18 +1275,12 @@ export function RebalancesTab({
     { poolId, limit: 200 },
   );
   const chartRows = useMemo(() => {
-    // Exclude degenerate rebalances: the indexer stamps `"0.0000"` when
+    // Exclude degenerate rebalances: the indexer stamps empty string when
     // `computeEffectivenessRatio` returns null (threshold=0 sentinel, pool
-    // already in-band, or before=0). Plotting them under the new boundary-
-    // relative legend would surface red 0% bars that aren't real KPI-4
-    // failures — especially during the Envio re-sync window when old rows
-    // still carry pre-migration thresholds.
+    // already in-band, or before=0). A real `"0.0000"` (before==after above
+    // threshold) is a legitimate KPI-4 miss and stays on the chart.
     const raw = (chartData?.RebalanceEvent ?? []).filter(
-      (r) =>
-        r.effectivenessRatio != null &&
-        r.effectivenessRatio !== "0.0000" &&
-        r.rebalanceThreshold != null &&
-        r.rebalanceThreshold > 0,
+      (r) => r.effectivenessRatio != null && r.effectivenessRatio !== "",
     );
     return [...raw].sort(
       (a, b) => Number(a.blockTimestamp) - Number(b.blockTimestamp),
@@ -1346,13 +1341,21 @@ export function RebalancesTab({
               <Th align="right">Before (bps)</Th>
               <Th align="right">After (bps)</Th>
               <Th align="right">
-                <span title={BOUNDARY_TOOLTIP} className="cursor-help">
+                <span className="inline-flex items-center gap-1">
                   Boundary (bps)
+                  <InfoPopover
+                    label="About rebalance boundary"
+                    content={BOUNDARY_TOOLTIP}
+                  />
                 </span>
               </Th>
               <Th align="right">
-                <span title={EFFECTIVENESS_TOOLTIP} className="cursor-help">
+                <span className="inline-flex items-center gap-1">
                   Effectiveness
+                  <InfoPopover
+                    label="About rebalance effectiveness"
+                    content={EFFECTIVENESS_TOOLTIP}
+                  />
                 </span>
               </Th>
               <Th align="right">Block</Th>

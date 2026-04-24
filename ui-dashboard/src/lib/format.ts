@@ -63,14 +63,15 @@ export function formatBoundaryBps(
 }
 
 /** Formatted effectiveness ratio as a percent, or `null` when the rebalance
- * was degenerate. The indexer stamps the raw string `"0.0000"` for events
+ * was degenerate. The indexer stamps empty string `""` on RebalanceEvents
  * where `computeEffectivenessRatio` returned null (threshold=0 sentinel,
- * pool already in-band, or before=0) — rendering those as "0.0%" would
- * misread as a KPI-4 failure. */
+ * pool already in-band, or before=0) — distinct from a real `"0.0000"`
+ * 0%-effective rebalance, which IS a legitimate control-loop miss and must
+ * still render as "0.0%" so operators see it. */
 export function formatEffectivenessPercent(
   ratio: string | null | undefined,
 ): string | null {
-  if (ratio == null || ratio === "0.0000") return null;
+  if (ratio == null || ratio === "") return null;
   return `${(Number(ratio) * 100).toFixed(1)}%`;
 }
 

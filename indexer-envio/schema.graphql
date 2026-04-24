@@ -239,8 +239,10 @@ type RebalanceEvent @index(fields: ["poolId", "blockTimestamp"]) {
   improvement: BigInt! # priceDifferenceBefore - priceDifferenceAfter
   rebalanceThreshold: Int! # bps at event time; 0 = indexer hadn't read on-chain value
   # improvement / (before - threshold), stringified. 1.0000 = landed on
-  # boundary; >1 = overshoot; <0 = rebalance made it worse; "0.0000" =
-  # degenerate-rebalance sentinel.
+  # boundary; >1 = overshoot; 0.0000 = real 0%-effective miss; <0 = made
+  # deviation worse; "" (empty) = degenerate (threshold missing, pool
+  # already in-band, or before=0) — distinct from real 0% on purpose so
+  # the UI can render "—" without hiding control-loop misses.
   effectivenessRatio: String!
   txHash: String!
   blockNumber: BigInt!

@@ -89,7 +89,9 @@ export function computePriceDifference(pool: {
 /**
  * Rebalance effectiveness: fraction of the pre-rebalance gap-to-boundary
  * that a single rebalance closed. `1.0` = landed exactly on the boundary;
- * `>1` = overshoot past the boundary; `<0` = made deviation worse.
+ * `>1` = overshoot past the boundary; `<0` = made deviation worse; `0.0000`
+ * = genuinely zero-effective (before == after above threshold — a legit
+ * control-loop miss the dashboard must still surface).
  *
  * `priceDifference` is an unsigned magnitude and the boundary is symmetric
  * around the oracle, so min-side and max-side breaches are handled without
@@ -101,8 +103,9 @@ export function computePriceDifference(pool: {
  * on-chain value), or `before <= threshold` (pool was already in-band).
  * Callers pick the string sentinel:
  *   - `Pool.lastEffectivenessRatio` → `"-1"` (metrics-bridge skips publish)
- *   - `RebalanceEvent.effectivenessRatio` → `"0.0000"` (dashboard renders
- *     via `Number(x) * 100`, so `-1` would misreport as `-100%`)
+ *   - `RebalanceEvent.effectivenessRatio` → `""` (empty string: falsy in
+ *     dashboard boolean checks, distinct from a real `"0.0000"` 0%-effective
+ *     rebalance so the UI can render `—` without hiding genuine misses)
  */
 export function computeEffectivenessRatio(
   priceDifferenceBefore: bigint,
@@ -139,6 +142,6 @@ export function buildRebalanceOutcome(input: {
   return {
     improvement: input.priceDifferenceBefore - input.priceDifferenceAfter,
     lastEffectivenessRatio: raw ?? "-1",
-    eventEffectivenessRatio: raw ?? "0.0000",
+    eventEffectivenessRatio: raw ?? "",
   };
 }

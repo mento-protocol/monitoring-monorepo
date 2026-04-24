@@ -368,14 +368,14 @@ describe("formatEffectivenessPercent", () => {
     expect(formatEffectivenessPercent(undefined)).toBe(null);
   });
 
-  it('returns null for the "0.0000" degenerate sentinel', () => {
-    expect(formatEffectivenessPercent("0.0000")).toBe(null);
+  it("returns null for empty-string degenerate sentinel", () => {
+    expect(formatEffectivenessPercent("")).toBe(null);
   });
 
-  it('renders "0" (a genuine 0% effective rebalance, not the sentinel) as "0.0%"', () => {
-    // "0" is distinct from "0.0000" — real 0% stringifies differently
-    // if it ever lands; covered for completeness.
-    expect(formatEffectivenessPercent("0")).toBe("0.0%");
+  it('renders a genuine "0.0000" (before == after above threshold) as "0.0%"', () => {
+    // A real 0% rebalance IS a KPI-4 miss and must surface — only the
+    // empty-string degenerate sentinel suppresses to `—`.
+    expect(formatEffectivenessPercent("0.0000")).toBe("0.0%");
   });
 
   it("renders 1.0000 as 100.0%", () => {
