@@ -57,6 +57,8 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 - Probe paths use `/health`, never `/healthz` (Cloud Run v2 reserves `/healthz` at the frontend)
 - Bootstrap/default `image` MUST respond to the configured probe path; `gcr.io/cloudrun/hello:latest` does NOT serve `/health`
 - Deployer SAs need `roles/iam.serviceAccountTokenCreator` on the runtime SA they impersonate (WIF requirement)
+- Grafana alert annotations: every `$values.X.Value` reference MUST be wrapped in `{{ if $values.X }}...{{ else }}?{{ end }}` — auxiliary data blocks return nil during scrape gaps / bridge restarts and un-guarded refs template-panic (Cursor Bugbot learned rule; bit PR #223)
+- Grafana alert boundaries with a fractional multiplier (e.g. `fee * 1.10`) MUST be rewritten in integer form (`jump * 10 ⋈ fee * 11`) — IEEE-754 residue on `* 1.10` can misroute exact-boundary values between mutually-exclusive severity tiers (flagged on PR #223)
 
 ### CI workflow gates — `docs/pr-checklists/ci-workflow-gates.md`
 
@@ -244,6 +246,10 @@ All envio configs share the same Docker project name (`generated`, derived from 
 ### Postgres healthcheck is auto-patched after codegen
 
 The envio-generated `generated/docker-compose.yaml` does not include a healthcheck for the postgres service. Without one, Docker reports `Health:""` and the envio binary waits indefinitely. `scripts/run-envio-with-env.mjs` automatically patches the file to add a `pg_isready` healthcheck after every `pnpm codegen` run. If you regenerate the compose file manually, re-run codegen via the script (not directly via `envio codegen`) to re-apply the patch.
+
+### `SortedOracles.OracleReported` overwrites `Pool.oraclePrice` with reporter values
+
+`OracleReported` fires first for each reporter in a `report()` tx and writes `event.params.value` (the individual reporter's submission) into `Pool.oraclePrice`. `MedianUpdated` then fires in the same tx and overwrites with the aggregated median. If you need the **prior median** specifically (e.g. for median-to-median deltas), store it in a dedicated field on `Pool` — do NOT read back `oraclePrice`, which may be a per-reporter value from moments earlier. See `lastMedianPrice` on the `Pool` entity (introduced in PR #223) for the pattern.
 
 ## New Worktree / Clone Setup
 

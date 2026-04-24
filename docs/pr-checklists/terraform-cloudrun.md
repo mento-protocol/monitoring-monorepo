@@ -61,10 +61,19 @@ For variables that gate critical behavior:
 - [ ] If the plan touches `google_cloud_run_v2_service`, double-check that image drift is ignored and probe paths still match the deployed app
 - [ ] After apply, hit the public URL once and confirm a 200 from `/health` — Cloud Run can return 503s for ~30s while the new revision rolls
 
-## 7. Lessons already paid for
+## 7. Grafana alert rules
+
+For every `grafana_rule_group` that adds or modifies rule annotations and PromQL expressions:
+
+- [ ] **Every `$values.X.Value` reference in an annotation is wrapped in `{{ if $values.X }}...{{ else }}<fallback>{{ end }}`.** Auxiliary `data` blocks (anything beyond the `A` condition query) can return nil during scrape gaps, bridge restarts, or first-deploy windows. Accessing `.Value` on a nil `$values.X` template-panics the annotation renderer, which both silences the Slack message and logs an alertmanager error. Match the existing guards on `Oracle Liveness` (`{{ if and $values.OracleTs (gt $values.OracleTs.Value 0.0) }}`) and `Rebalancer Stale`.
+- [ ] **Tier boundaries with a fractional multiplier use integer form.** `fee * 1.10` is IEEE-754-inexact for any fee not a multiple of 10 (e.g. on a 3 bps fee `3 * 1.10 ≈ 3.3000000000000003`). For mutually-exclusive warning / critical tiers, this silently misroutes exact-boundary values to the wrong channel. Rewrite as integer math: `jump * 10 < fee * 11` / `jump * 10 >= fee * 11`. Verify the round-trip in a bridge unit test (parameterised across boundary values) so a future gauge-unit change trips the test, not production alerts.
+- [ ] **Mutually-exclusive tier pairs both use the same integer form and an explicit overlap check.** When shipping a warning-plus-critical pair, assert in a test that no tested (fee, jump) combination fires both — catches boundary drift where e.g. warning's `<` and critical's `>=` would overlap due to expression asymmetry.
+
+## 8. Lessons already paid for
 
 - PR #199 — `/healthz` returned a Google-branded 404 because Cloud Run v2 reserves the path; moved bridge health to `/health`
 - PR #197 — bootstrap IAM only gated API enablement, not the project-level grants the impersonated SA needed
 - PR #198 — Cloud Run rejected `256Mi` because `cpu_idle = false` requires `≥512Mi`
 - PR #200 — Workload Identity Federation deploy failed at `getAccessToken` because deployer SA lacked `roles/iam.serviceAccountTokenCreator` on the runtime SA
 - PR #201 — removing `count` without `moved` blocks would have planned destroy on a `deletion_protection = true` service; default `gcr.io/cloudrun/hello:latest` would have failed `/health` probes; revision suffixes derived from raw SHA can start with a digit and fail the deploy
+- PR #223 — Cursor Bugbot flagged `$values.Fee.Value` annotations without a nil-guard (template-panic on scrape gaps); Codex flagged `× 1.10` PromQL multipliers misrouting exact-10%-over-boundary jumps between warning and critical due to IEEE-754 residue on non-multiple-of-10 fees
