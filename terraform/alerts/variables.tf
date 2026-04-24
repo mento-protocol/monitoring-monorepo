@@ -31,5 +31,5 @@ variable "slack_channel_critical" {
 variable "slack_channel_warnings" {
   type        = string
   description = "Slack channel for lower-severity alerts."
-  default     = "#alerts-warnings"
+  default     = "#alerts-warning"
 }
