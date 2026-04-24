@@ -1089,48 +1089,56 @@ export async function fetchFees(
   protocolFee: number;
   rebalanceReward: number;
 }> | null> {
-  const client = getRpcClient(chainId);
-  const results = await Promise.allSettled([
-    client.readContract({
-      address: poolAddress as `0x${string}`,
-      abi: FPMM_FEE_ABI,
-      functionName: "lpFee",
-    }),
-    client.readContract({
-      address: poolAddress as `0x${string}`,
-      abi: FPMM_FEE_ABI,
-      functionName: "protocolFee",
-    }),
-    client.readContract({
-      address: poolAddress as `0x${string}`,
-      abi: FPMM_FEE_ABI,
-      functionName: "rebalanceIncentive",
-    }),
-  ]);
-  const [lpFeeR, protocolFeeR, rebalanceRewardR] = results;
-  if (
-    lpFeeR.status === "rejected" &&
-    protocolFeeR.status === "rejected" &&
-    rebalanceRewardR.status === "rejected"
-  ) {
-    logRpcFailure(chainId, "fetchFees", poolAddress, lpFeeR.reason);
+  // Outer try/catch covers getRpcClient, which throws on unknown chainIds
+  // or missing HyperRPC tokens — those must degrade to null, not escape
+  // into the handler and stall indexing for the rest of the event.
+  try {
+    const client = getRpcClient(chainId);
+    const results = await Promise.allSettled([
+      client.readContract({
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_FEE_ABI,
+        functionName: "lpFee",
+      }),
+      client.readContract({
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_FEE_ABI,
+        functionName: "protocolFee",
+      }),
+      client.readContract({
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_FEE_ABI,
+        functionName: "rebalanceIncentive",
+      }),
+    ]);
+    const [lpFeeR, protocolFeeR, rebalanceRewardR] = results;
+    if (
+      lpFeeR.status === "rejected" &&
+      protocolFeeR.status === "rejected" &&
+      rebalanceRewardR.status === "rejected"
+    ) {
+      logRpcFailure(chainId, "fetchFees", poolAddress, lpFeeR.reason);
+      return null;
+    }
+    const fees: Partial<{
+      lpFee: number;
+      protocolFee: number;
+      rebalanceReward: number;
+    }> = {};
+    if (lpFeeR.status === "fulfilled") {
+      fees.lpFee = Number(lpFeeR.value as bigint);
+    }
+    if (protocolFeeR.status === "fulfilled") {
+      fees.protocolFee = Number(protocolFeeR.value as bigint);
+    }
+    if (rebalanceRewardR.status === "fulfilled") {
+      fees.rebalanceReward = Number(rebalanceRewardR.value as bigint);
+    }
+    return fees;
+  } catch (err) {
+    logRpcFailure(chainId, "fetchFees", poolAddress, err);
     return null;
   }
-  const fees: Partial<{
-    lpFee: number;
-    protocolFee: number;
-    rebalanceReward: number;
-  }> = {};
-  if (lpFeeR.status === "fulfilled") {
-    fees.lpFee = Number(lpFeeR.value as bigint);
-  }
-  if (protocolFeeR.status === "fulfilled") {
-    fees.protocolFee = Number(protocolFeeR.value as bigint);
-  }
-  if (rebalanceRewardR.status === "fulfilled") {
-    fees.rebalanceReward = Number(rebalanceRewardR.value as bigint);
-  }
-  return fees;
 }
 
 // ---------------------------------------------------------------------------
