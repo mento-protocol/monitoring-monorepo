@@ -1,7 +1,11 @@
 // Network definitions — add new chains here
 
-import contractsData from "@mento-protocol/contracts/contracts.json";
 import DEPLOYMENT_NAMESPACES from "@mento-protocol/monitoring-config/deployment-namespaces.json";
+import { explorerBaseUrl as sharedExplorerBaseUrl } from "@mento-protocol/monitoring-config/chains";
+import {
+  chainTokenSymbols,
+  chainAddressLabels,
+} from "@mento-protocol/monitoring-config/tokens";
 
 // Semantic aliases over the shared chain ID → namespace map.
 // Defined once here so call sites stay readable; the actual namespace strings
@@ -44,63 +48,14 @@ export type Network = {
   rpcUrl?: string;
 };
 
-type ContractEntry = {
-  address: string;
-  type: "token" | "pool" | "contract";
-};
-
-type ContractsData = Record<
-  string,
-  Record<string, Record<string, ContractEntry>>
->;
-
-// Wormhole NTT hub/spoke split: on Monad chains, token entries are published
-// under names like "USDmSpoke" / "EURmSpoke" / "GBPmSpoke". Strip the suffix
-// for token entries only — implementation-contract rows like
-// "StableTokenSpoke" stay raw so the address book keeps precise names.
-// Keep in sync with indexer-envio/src/feeToken.ts buildKnownTokenMeta.
-function canonicalTokenSymbol(name: string): string {
-  return name.endsWith("Spoke") ? name.slice(0, -5) : name;
-}
-
-// Implementation contracts that should never surface as pool-token symbols.
-// Applied to tokenSymbols only — addressLabels keeps every named entry so the
-// address book still renders `StableTokenV3v300`, `StableTokenSpoke`, etc. as
-// contract rows. Narrower than the indexer's equivalent filter in
-// indexer-envio/src/feeToken.ts:buildKnownTokenMeta: we do NOT exclude Mock*
-// because Sepolia/Monad-testnet MockERC20* deployments ARE real pool tokens.
-function isInternalTokenName(name: string): boolean {
-  return name.startsWith("StableToken");
-}
-
+// Delegates to shared-config so metrics-bridge + dashboard can't drift
+// (see PR #209). Per-network overrides layer on top via `makeNetwork`.
 function buildNetworkMaps(
   chainId: number,
-  namespace: string | null,
 ): Pick<Network, "tokenSymbols" | "addressLabels"> {
-  const contracts =
-    (contractsData as ContractsData)[String(chainId)]?.[namespace ?? ""] ?? {};
-  const entries = Object.entries(contracts);
   return {
-    tokenSymbols: Object.fromEntries(
-      entries
-        .filter(
-          ([name, entry]) =>
-            entry.type === "token" && !isInternalTokenName(name),
-        )
-        .map(([name, entry]) => [
-          entry.address.toLowerCase(),
-          canonicalTokenSymbol(name),
-        ]),
-    ),
-    addressLabels: Object.fromEntries(
-      entries.map(([name, entry]) => [
-        entry.address.toLowerCase(),
-        // Canonicalize only the user-facing ERC20 token names (USDmSpoke →
-        // USDm). Leave contract labels like "StableTokenSpoke" raw so
-        // operators can identify the exact deployment in the address book.
-        entry.type === "token" ? canonicalTokenSymbol(name) : name,
-      ]),
-    ),
+    tokenSymbols: chainTokenSymbols(chainId),
+    addressLabels: chainAddressLabels(chainId),
   };
 }
 
@@ -126,7 +81,7 @@ export function makeNetwork(
       >
     >,
 ): Network {
-  const maps = buildNetworkMaps(config.chainId, config.contractsNamespace);
+  const maps = buildNetworkMaps(config.chainId);
   return {
     local: false,
     testnet: false,
@@ -150,6 +105,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     // stay server-only (`HASURA_SECRET_*`) and never enter browser bundles.
     hasuraUrl: "/api/hasura/devnet",
     hasuraSecret: "",
+    // Devnet has no hosted explorer; keep the local anvil URL unconditionally.
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_DEVNET ?? "http://localhost:5100",
     addressLabels: {
@@ -171,6 +127,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_SEPOLIA_LOCAL ??
+      sharedExplorerBaseUrl(11142220) ??
       "https://celo-sepolia.blockscout.com",
   }),
   "celo-mainnet-local": makeNetwork({
@@ -185,6 +142,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET_LOCAL ??
+      sharedExplorerBaseUrl(42220) ??
       "https://celoscan.io",
     addressLabels: {
       "0x0dd57f6f181d0469143fe9380762d8a112e96e4a": "Yield Split",
@@ -201,6 +159,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_CELO_MAINNET ??
+      sharedExplorerBaseUrl(42220) ??
       "https://celoscan.io",
     addressLabels: {
       "0x0dd57f6f181d0469143fe9380762d8a112e96e4a": "Yield Split",
@@ -217,6 +176,7 @@ export const NETWORKS: Record<IndexerNetworkId, Network> = {
     hasuraSecret: "",
     explorerBaseUrl:
       process.env.NEXT_PUBLIC_EXPLORER_URL_MONAD_MAINNET ??
+      sharedExplorerBaseUrl(143) ??
       "https://monadscan.com",
   }),
 };

@@ -1,0 +1,17 @@
+{
+  "42220": {
+    "slug": "celo",
+    "label": "Celo",
+    "explorerBaseUrl": "https://celoscan.io"
+  },
+  "143": {
+    "slug": "monad",
+    "label": "Monad",
+    "explorerBaseUrl": "https://monadscan.com"
+  },
+  "11142220": {
+    "slug": "celo-sepolia",
+    "label": "Celo Sepolia",
+    "explorerBaseUrl": "https://celo-sepolia.blockscout.com"
+  }
+}

@@ -16,7 +16,7 @@ This is mandatory for cross-layer/stateful UI work. The checklist exists because
 
 - `src/app/` — Next.js App Router pages and layouts
 - `src/lib/` — Data fetching utilities, GraphQL queries, address book
-- `src/lib/networks.ts` — All network definitions; derives token symbols and address labels from `@mento-protocol/contracts` using the active namespace from `shared-config`
+- `src/lib/networks.ts` — All network definitions; delegates token/address-label derivation to `@mento-protocol/monitoring-config/tokens` (shared with metrics-bridge) and explorer URL defaults to `@mento-protocol/monitoring-config/chains`. Per-network `addressLabels` overrides still merge on top
 - `next.config.ts` — Next.js configuration
 - `vercel.json` — Vercel deployment settings
 - `eslint.config.mjs` — ESLint flat config
@@ -52,13 +52,12 @@ The dashboard supports multiple network targets (all defined in `src/lib/network
 | `celo-mainnet`       | Celo Mainnet  | prod  |
 | `monad-mainnet`      | Monad Mainnet | prod  |
 
-Token symbols and address labels are derived automatically from `@mento-protocol/contracts` using the active treb namespace from `shared-config/deployment-namespaces.json`. Custom address labels (stored in Upstash Redis) merge on top and take precedence. Individual networks can also declare custom `addressLabels` overrides in `makeNetwork(...)`.
+Token symbols and address labels come from `@mento-protocol/monitoring-config/tokens` — the shared derivation also used by metrics-bridge. Custom address labels (stored in Upstash Redis) merge on top and take precedence. Individual networks can also declare custom `addressLabels` overrides in `makeNetwork(...)`.
 
-Prod networks share a single `NEXT_PUBLIC_HASURA_URL` (the multichain Envio endpoint) and filter by `chainId`. Explorer URLs are per-network (`NEXT_PUBLIC_EXPLORER_URL_<NETWORK>`).
+Prod networks share a single `NEXT_PUBLIC_HASURA_URL` (the multichain Envio endpoint) and filter by `chainId`. Explorer URL defaults come from `@mento-protocol/monitoring-config/chains` with per-network env overrides (`NEXT_PUBLIC_EXPLORER_URL_<NETWORK>`) for local dev.
 
 ## Notes
 
-- Contract addresses come from `@mento-protocol/contracts` — no vendored JSON
 - The dashboard is purely read-only — no transactions, no wallet connections
 - Charts auto-refresh via SWR polling
 

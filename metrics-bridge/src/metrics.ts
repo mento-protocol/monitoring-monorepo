@@ -1,36 +1,37 @@
 import { Gauge, Counter, Registry } from "prom-client";
 import {
-  BLOCK_EXPLORER_BASE_URLS,
-  CHAIN_NAMES,
-  POOL_PAIR_LABELS,
-  blockExplorerUrl,
-  chainName,
-  pairLabel,
-  poolAddress,
+  chainSlug,
+  explorerAddressUrl,
+  hasChain,
+} from "@mento-protocol/monitoring-config/chains";
+import { poolName } from "@mento-protocol/monitoring-config/tokens";
+import {
+  poolIdAddress,
   shortAddress,
-} from "./config.js";
+} from "@mento-protocol/monitoring-config/format";
 import type { PoolRow } from "./types.js";
 
 // Pools we've already warned about — prevents log spam on the 30s poll loop.
 const warnedUnknownPools = new Set<string>();
 
-// Logs a one-shot warning if any of the display-label maps is missing an
-// entry for this pool. Silent fallbacks (`pairLabel` → pool_id, `chainName`
-// → String(chainId), `blockExplorerUrl` → "") would otherwise reproduce
-// the exact bug that motivated PR #209 — a new deploy that never makes it
-// into config.ts ships degraded Slack alerts indefinitely. See BACKLOG.md
-// entry "Shared pool + chain metadata helper" for the long-term fix.
-function warnIfUnknown(pool: PoolRow): void {
+// PR #209 safety net — warn once per pool when any display label falls back,
+// so a missing chain/token in shared-config or @mento-protocol/contracts
+// doesn't silently ship degraded Slack alerts.
+function warnIfUnknown(pool: PoolRow, pair: string | null): void {
   if (warnedUnknownPools.has(pool.id)) return;
   const missing: string[] = [];
-  if (!(pool.id in POOL_PAIR_LABELS)) missing.push("pair");
-  if (!(pool.chainId in CHAIN_NAMES)) missing.push("chain_name");
-  if (!(pool.chainId in BLOCK_EXPLORER_BASE_URLS))
-    missing.push("block_explorer_url");
+  if (pair === null) {
+    // Include token addresses so on-call can jump straight to @mento-protocol/contracts
+    // without looking up the pool row in Hasura first.
+    missing.push(
+      `pair (token0=${pool.token0 ?? "null"}, token1=${pool.token1 ?? "null"})`,
+    );
+  }
+  if (!hasChain(pool.chainId)) missing.push("chain_name", "block_explorer_url");
   if (missing.length === 0) return;
   warnedUnknownPools.add(pool.id);
   console.warn(
-    `[metrics-bridge] pool ${pool.id} (chain ${pool.chainId}) missing ${missing.join(", ")} — falling back. Update metrics-bridge/src/config.ts.`,
+    `[metrics-bridge] pool ${pool.id} (chain ${pool.chainId}) missing ${missing.join(", ")} — falling back. Add the chain to shared-config/chain-metadata.json, or the token to @mento-protocol/contracts.`,
   );
 }
 
@@ -137,15 +138,16 @@ export function updateMetrics(pools: PoolRow[]): void {
   }
 
   for (const pool of pools) {
-    warnIfUnknown(pool);
-    const address = poolAddress(pool.id);
+    const address = poolIdAddress(pool.id);
+    const derivedPair = poolName(pool.chainId, pool.token0, pool.token1);
+    warnIfUnknown(pool, derivedPair);
     const labels = {
       pool_id: pool.id,
       chain_id: String(pool.chainId),
-      chain_name: chainName(pool.chainId),
-      pair: pairLabel(pool.id),
+      chain_name: chainSlug(pool.chainId),
+      pair: derivedPair ?? pool.id,
       pool_address_short: shortAddress(address),
-      block_explorer_url: blockExplorerUrl(pool.chainId, address),
+      block_explorer_url: explorerAddressUrl(pool.chainId, address) ?? "",
     };
 
     gauges.healthStatus.set(labels, healthStatusToNumber(pool.healthStatus));

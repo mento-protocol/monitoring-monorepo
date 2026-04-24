@@ -3,10 +3,13 @@ import type { PoolRow, BridgePoolsResponse } from "../src/types.js";
 
 export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
   return {
+    // Default pool: GBPm/USDm on Celo mainnet. token0/token1 are the real
+    // contract addresses so `poolName()` derives the same label
+    // ("GBPm/USDm") the old hand-rolled POOL_PAIR_LABELS map produced.
     id: "42220-0x8c0014afe032e4574481d8934504100bf23fcb56",
     chainId: 42220,
-    token0: "0xaaa",
-    token1: "0xbbb",
+    token0: "0x765de816845861e75a25fca122bb6898b8b1282a",
+    token1: "0xccf663b1ff11028f0b19058d0f7b674004a40746",
     source: "fpmm_factory",
     healthStatus: "OK",
     oracleOk: true,

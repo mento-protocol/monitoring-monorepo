@@ -12,6 +12,7 @@ on:
     branches: [main]
     paths:
       - metrics-bridge/**
+      - shared-config/**
       - cloudbuild.yaml
       - .gcloudignore
       - .node-version
