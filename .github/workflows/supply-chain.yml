@@ -40,7 +40,11 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
-          cache: pnpm
+          # `cache: pnpm` would require a warmed pnpm store, but this workflow
+          # never runs `pnpm install` — just `pnpm audit`. The post-step fails
+          # cache-path validation (##[error]Path Validation Error) and flips
+          # the job red. Audit is sub-second against the hosted advisory DB
+          # so the cache would save nothing useful anyway.
       # Fail closed: no `--ignore-registry-errors`. That flag exits 0 on any
       # registry error — transient 5xx *and* persistent auth/network failures
       # — so an npm outage or misconfig would silently let advisories through.
