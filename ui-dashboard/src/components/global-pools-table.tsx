@@ -266,13 +266,19 @@ function StrategyBadge({ label }: { label: string }) {
   );
 }
 
-function poolStrategies(pool: Pool, isOls: boolean): string[] {
-  const strategies: string[] = [];
-  if (isOls) strategies.push("Open");
-  if (pool.rebalancerAddress && pool.rebalancerAddress !== "" && !isOls) {
-    strategies.push("Reserve");
-  }
-  return strategies;
+function poolStrategies(
+  isOls: boolean,
+  isCdp: boolean,
+  isReserve: boolean,
+): string[] {
+  // Precedence: OLS (indexer-tracked) > CDP > Reserve. All three require a
+  // positive signal — pools with a rebalancer whose RPC probe failed
+  // deliberately render no badge rather than misclassifying as Reserve.
+  // See `lib/strategy-detection.ts` for probe semantics.
+  if (isOls) return ["Open"];
+  if (isCdp) return ["CDP"];
+  if (isReserve) return ["Reserve"];
+  return [];
 }
 
 // Fee display
@@ -304,6 +310,8 @@ interface GlobalPoolsTableProps {
   tvlChangeWoWByKey?: Map<string, number | null>;
   tradingLimitsByKey?: Map<string, TradingLimit[]>;
   olsPoolKeys?: Set<string>;
+  cdpPoolKeys?: Set<string>;
+  reservePoolKeys?: Set<string>;
 }
 
 export function GlobalPoolsTable({
@@ -317,6 +325,8 @@ export function GlobalPoolsTable({
   tvlChangeWoWByKey,
   tradingLimitsByKey,
   olsPoolKeys,
+  cdpPoolKeys,
+  reservePoolKeys,
 }: GlobalPoolsTableProps) {
   const [sortKey, setSortKey] = useState<GlobalSortKey>("tvl");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -510,7 +520,9 @@ export function GlobalPoolsTable({
             const poolHref = buildPoolDetailHref(p.id);
             const limits = tradingLimitsByKey?.get(key) ?? [];
             const isOls = olsPoolKeys?.has(key) ?? false;
-            const strategies = poolStrategies(p, isOls);
+            const isCdp = cdpPoolKeys?.has(key) ?? false;
+            const isReserve = reservePoolKeys?.has(key) ?? false;
+            const strategies = poolStrategies(isOls, isCdp, isReserve);
             const isVirtual = p.source?.includes("virtual");
             return (
               <Row key={key}>
