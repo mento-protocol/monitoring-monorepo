@@ -144,6 +144,23 @@ resource "grafana_rule_group" "fpmms_oracle" {
       })
     }
 
+    # See Oracle Liveness for the OracleTs / OracleAge rationale — same
+    # pair is used here so the annotation can detect the never-reported
+    # sentinel (oracle_timestamp == 0) instead of leaning on an age cutoff.
+    data {
+      ref_id         = "OracleTs"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "OracleTs"
+        expr    = "mento_pool_oracle_timestamp"
+        instant = true
+      })
+    }
+
     data {
       ref_id         = "OracleAge"
       datasource_uid = var.prometheus_datasource_uid
@@ -214,6 +231,23 @@ resource "grafana_rule_group" "fpmms_oracle" {
       model = jsonencode({
         refId   = "A"
         expr    = "(time() - mento_pool_oracle_timestamp) / (mento_pool_oracle_expiry > 0)"
+        instant = true
+      })
+    }
+
+    # See Oracle Liveness for the OracleTs / OracleAge rationale — same
+    # pair is used here so the annotation can detect the never-reported
+    # sentinel (oracle_timestamp == 0) instead of leaning on an age cutoff.
+    data {
+      ref_id         = "OracleTs"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "OracleTs"
+        expr    = "mento_pool_oracle_timestamp"
         instant = true
       })
     }
