@@ -524,13 +524,23 @@ resource "google_service_account_iam_member" "deployer_wif_binding" {
 }
 
 # Project-level grants the CI SA needs for the full deploy flow:
-#   - cloudbuild.builds.editor → submit Cloud Build jobs
-#   - artifactregistry.writer  → push images to AR
-#   - run.admin                → update the Cloud Run service revision
-#   - iam.serviceAccountUser   → "act-as" the runtime SA used by Cloud Run
+#   - cloudbuild.builds.editor       → submit Cloud Build jobs
+#   - serviceusage.serviceUsageConsumer → access the project's default
+#                                      `<project>_cloudbuild` GCS bucket
+#                                      that `gcloud builds submit` uploads
+#                                      source to. Without it, the CLI fails
+#                                      with "The user is forbidden from
+#                                      accessing the bucket" before any
+#                                      build step runs (see bridge deploy
+#                                      runs on commits from PR #206 / #209
+#                                      / #213, all red on this exact error).
+#   - artifactregistry.writer        → push images to AR
+#   - run.admin                      → update the Cloud Run service revision
+#   - iam.serviceAccountUser         → "act-as" the runtime SA used by Cloud Run
 locals {
   ci_deployer_roles = [
     "roles/cloudbuild.builds.editor",
+    "roles/serviceusage.serviceUsageConsumer",
     "roles/artifactregistry.writer",
     "roles/run.admin",
     "roles/iam.serviceAccountUser",
