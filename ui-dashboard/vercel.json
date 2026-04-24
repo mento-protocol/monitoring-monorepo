@@ -2,6 +2,7 @@
   "framework": "nextjs",
   "installCommand": "pnpm install",
   "buildCommand": "pnpm build",
+  "ignoreCommand": "git -C .. diff --quiet HEAD^ HEAD -- ui-dashboard shared-config pnpm-lock.yaml pnpm-workspace.yaml package.json",
   "crons": [
     {
       "path": "/api/address-labels/backup",
