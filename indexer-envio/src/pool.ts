@@ -17,6 +17,7 @@ import {
 } from "./helpers";
 import { computePriceDifference } from "./priceDifference";
 import { fetchReferenceRateFeedID, fetchReportExpiry, fetchFees } from "./rpc";
+import { isVirtualPool } from "./helpers";
 import { recordBreachTransition } from "./deviationBreach";
 
 // ---------------------------------------------------------------------------
@@ -51,7 +52,7 @@ export const DEVIATION_BREACH_GRACE_SECONDS = 3600n;
  *    reclassifies them to WEEKEND when rendering.
  */
 export function computeHealthStatus(pool: Pool, nowSeconds: bigint): string {
-  if (pool.source.includes("virtual")) return "N/A";
+  if (isVirtualPool(pool)) return "N/A";
   if (!pool.oracleOk) return "CRITICAL";
   const threshold =
     pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
@@ -73,7 +74,7 @@ export function computeHealthStatus(pool: Pool, nowSeconds: bigint): string {
 // so it is NOT counted as a breach either. Oracle staleness is
 // intentionally NOT counted — this tracks price action only.
 export function isInDeviationBreach(pool: Pool): boolean {
-  if (pool.source.includes("virtual")) return false;
+  if (isVirtualPool(pool)) return false;
   const threshold =
     pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
   return pool.priceDifference > BigInt(threshold);
@@ -338,7 +339,7 @@ export const upsertPool = async ({
   if (
     existing.referenceRateFeedID === "" &&
     existing.source !== "" &&
-    !existing.source.includes("virtual")
+    !isVirtualPool(existing)
   ) {
     const rateFeedID = await fetchReferenceRateFeedID(chainId, poolAddr);
     if (rateFeedID) {
@@ -361,7 +362,7 @@ export const upsertPool = async ({
       existing.protocolFee < 0 ||
       existing.rebalanceReward < 0) &&
     existing.source !== "" &&
-    !existing.source.includes("virtual")
+    !isVirtualPool(existing)
   ) {
     const fees = await fetchFees(chainId, poolAddr);
     if (fees) {
@@ -407,7 +408,7 @@ export const upsertPool = async ({
     oracleDelta.priceDifference !== undefined;
   const priceDifference = hasContractPriceDiff
     ? oracleDelta.priceDifference!
-    : !next.source.includes("virtual") && next.oraclePrice > 0n
+    : !isVirtualPool(next) && next.oraclePrice > 0n
       ? computePriceDifference(next)
       : next.priceDifference;
 

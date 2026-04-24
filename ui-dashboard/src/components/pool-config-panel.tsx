@@ -1,6 +1,6 @@
 "use client";
 
-import type { Pool } from "@/lib/types";
+import { isVirtualPool, type Pool } from "@/lib/types";
 import { InfoPopover } from "@/components/info-popover";
 import { Stat } from "@/components/stat";
 import { useGQL } from "@/lib/graphql";
@@ -14,30 +14,20 @@ type PoolConfigExtRow = {
   rebalanceReward?: number;
 };
 
-// `-1` is the indexer's "RPC read failed, not yet self-healed" sentinel
-// (see DEFAULT_ORACLE_FIELDS in indexer-envio/src/pool.ts). `undefined`
-// means the field hasn't propagated through the hosted Hasura yet
-// (phased schema rollout). Both render as em-dash so the user doesn't
-// see "-0.01%" or stale zeros.
+// `-1` is the indexer's "RPC read failed, not yet self-healed" sentinel;
+// `undefined` means the field hasn't reached hosted Hasura yet (phased
+// rollout). Both render as em-dash so stale zeros aren't surfaced.
 function formatBps(bps: number | null | undefined): string {
   if (bps == null || bps < 0) return "—";
   return `${(bps / 100).toFixed(2)}%`;
 }
 
-/**
- * Static pool parameters — fee split, rebalance threshold, and rebalance
- * reward. Lives between HealthPanel and the chart grid on the pool detail
- * page, matching the header metrics grid styling.
- *
- * Hidden entirely for virtual pools, which have no fees or rebalance
- * mechanics (mirrors `global-pools-table.tsx` virtual-pool filter).
- *
- * `rebalanceReward` ships in its own query (POOL_CONFIG_EXT) so the pool
- * page doesn't die during the indexer deploy+resync window — same pattern
- * as POOL_BREACH_ROLLUP. On error the reward tile falls back to "—".
- */
+/** Static pool parameters panel: fee split, rebalance threshold, and
+ *  rebalance reward. Hidden for virtual pools (no fees or rebalance
+ *  mechanics). `rebalanceReward` is fetched via POOL_CONFIG_EXT so the
+ *  page survives the indexer deploy+resync window. */
 export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
-  const isVirtual = pool.source?.includes("virtual");
+  const isVirtual = isVirtualPool(pool);
   const { data: configExt } = useGQL<{ Pool: PoolConfigExtRow[] }>(
     isVirtual ? null : POOL_CONFIG_EXT,
     { id: pool.id, chainId: pool.chainId },

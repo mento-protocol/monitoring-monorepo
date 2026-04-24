@@ -57,6 +57,14 @@ export const extractAddressFromPoolId = (poolId: string): string => {
 };
 export const asBigInt = (value: number): bigint => BigInt(value);
 
+/** True when the pool is a VirtualPool (no oracle, no fees, no rebalance
+ * mechanics). Matches by source-string substring so both "virtual" and
+ * "virtual_pool_factory" qualify. Use this predicate everywhere instead
+ * of inlining `source.includes("virtual")` — keeps the invariant in one
+ * place for future schema refinements. */
+export const isVirtualPool = (pool: { source: string }): boolean =>
+  pool.source.includes("virtual");
+
 export const SECONDS_PER_HOUR = 3600n;
 export const SECONDS_PER_DAY = 86400n;
 

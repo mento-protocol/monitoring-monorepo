@@ -287,11 +287,9 @@ export const POOL_DETAIL_WITH_HEALTH = `
   }
 `;
 
-// Rebalance reward (FPMM rebalanceIncentive). Isolated from
-// POOL_DETAIL_WITH_HEALTH for the same reason as POOL_BREACH_ROLLUP: new
-// indexer field, hosted Hasura rejects it during the deploy+resync window.
-// The Pool Config panel reads this separately so the pool page survives;
-// on error the reward tile falls back to "—".
+// Isolated from POOL_DETAIL_WITH_HEALTH (same rationale as POOL_BREACH_ROLLUP):
+// new indexer field, hosted Hasura rejects it during the deploy+resync window,
+// so the page survives and the reward tile degrades to "—".
 export const POOL_CONFIG_EXT = `
   query PoolConfigExt($id: String!, $chainId: Int!) {
     Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {

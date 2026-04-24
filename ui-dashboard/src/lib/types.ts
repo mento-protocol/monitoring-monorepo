@@ -7,6 +7,13 @@
  */
 export const MAINNET_CHAIN_IDS = [42220, 143] as const;
 
+/** True when the pool is a VirtualPool (no oracle, no fees, no rebalance
+ * mechanics). Mirrors `isVirtualPool` in `indexer-envio/src/helpers.ts`;
+ * keep both in lockstep. */
+export function isVirtualPool(pool: { source?: string }): boolean {
+  return pool.source?.includes("virtual") ?? false;
+}
+
 export type Pool = {
   id: string;
   chainId: number;

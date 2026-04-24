@@ -6,6 +6,7 @@
 export type HealthStatus = "OK" | "WARN" | "WEEKEND" | "CRITICAL" | "N/A";
 
 import { isWeekend, tradingSecondsInRange } from "./weekend";
+import { isVirtualPool } from "./types";
 
 /**
  * Fallback oracle staleness threshold in seconds.
@@ -200,7 +201,7 @@ export function computePoolUptimePct(pool: {
   cumulativeCriticalSeconds?: string;
   deviationBreachStartedAt?: string;
 }): number | null {
-  if (pool.source.includes("virtual")) return null;
+  if (isVirtualPool(pool)) return null;
   const total = Number(pool.healthTotalSeconds ?? "0");
   if (!Number.isFinite(total) || total <= 0) return null;
   if (pool.cumulativeCriticalSeconds == null) return null;

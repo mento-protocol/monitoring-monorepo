@@ -1077,11 +1077,10 @@ export async function fetchTradingLimits(
   }
 }
 
-/** Fetch lpFee, protocolFee, and rebalanceIncentive from the FPMM contract.
- * All three are uint256 in basis points (e.g. 15 = 0.15%). Returns only the
- * fields whose RPC call succeeded — callers spread the result, so a partial
- * result won't overwrite already-populated fields. Returns null only when
- * every call fails (no progress possible this touch; self-heal retries). */
+/** Fetch FPMM fee config (bps): lpFee, protocolFee, rebalanceIncentive.
+ * Returns only the fields whose RPC call succeeded so partial failure
+ * doesn't overwrite already-populated fields; returns null when every
+ * call fails so self-heal retries on the next touch. */
 export async function fetchFees(
   chainId: number,
   poolAddress: string,
