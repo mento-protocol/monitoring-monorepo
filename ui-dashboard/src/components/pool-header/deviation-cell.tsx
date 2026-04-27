@@ -61,6 +61,34 @@ function DeviationBar({
 }) {
   const diff = Number(priceDifference);
   if (!rebalanceThreshold || rebalanceThreshold === 0 || diff === 0) {
+    // No usable threshold/diff to draw a bar against — but `health.ts`
+    // falls back to a 10000-bps effective threshold, so an open breach
+    // CAN still exist on this pool. Render the breach line in red so
+    // the alarm survives the bar's no-data path.
+    if (breachStartedAt) {
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm text-slate-400">—</span>
+          <span
+            className={`text-xs ${
+              status === "CRITICAL" ? "text-red-400" : "text-amber-400"
+            }`}
+            title={formatTimestamp(breachStartedAt)}
+          >
+            breach{" "}
+            <time
+              dateTime={new Date(Number(breachStartedAt) * 1000).toISOString()}
+            >
+              {relativeTime(breachStartedAt)}
+            </time>
+            <span className="sr-only">
+              {" "}
+              (started at {formatTimestamp(breachStartedAt)})
+            </span>
+          </span>
+        </div>
+      );
+    }
     return <span className="text-sm text-slate-400">—</span>;
   }
   const threshold = rebalanceThreshold;

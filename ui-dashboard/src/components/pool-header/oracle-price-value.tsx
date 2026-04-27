@@ -79,10 +79,12 @@ export function OraclePriceValue({
             title={updatedTitle}
           >
             {updatedLabel}
+            {!fresh && " · stale"}
           </a>
         ) : (
           <span className={`text-xs ${subColor}`} title={updatedTitle}>
             {updatedLabel}
+            {!fresh && " · stale"}
           </span>
         ))}
     </span>

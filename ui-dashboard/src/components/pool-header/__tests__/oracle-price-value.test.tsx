@@ -140,6 +140,9 @@ describe("OraclePriceValue", () => {
     const redMatches = html.match(/text-red-400/g) ?? [];
     expect(redMatches.length).toBeGreaterThanOrEqual(2);
     expect(html).not.toContain("text-white");
+    // Visible textual marker so users who can't rely on color still get
+    // the staleness signal — color alone failed the a11y bar.
+    expect(html).toContain("· stale");
   });
 
   it("omits the 'Updated …' subline when oracleTimestamp is absent", () => {

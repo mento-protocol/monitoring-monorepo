@@ -294,6 +294,26 @@ describe("DeviationCell — breach start indicator", () => {
     expect(html).not.toContain("text-red-400");
   });
 
+  it("still renders the breach indicator when rebalanceThreshold is 0 (bar's no-data path)", () => {
+    // The bar early-returns when rebalanceThreshold is 0, but health.ts
+    // falls back to an effective 10000-bps threshold — so a breach can
+    // still be open. The alarm must survive the bar's no-data path.
+    const now = Math.floor(Date.now() / 1000);
+    const breachStart = String(now - 2 * 3600);
+    const pool: Pool = {
+      ...BASE_POOL,
+      priceDifference: "6000",
+      rebalanceThreshold: 0,
+      deviationBreachStartedAt: breachStart,
+    };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toMatch(/breach/);
+    expect(html).toMatch(/<time[^>]*dateTime=/);
+    expect(html).toMatch(/class="sr-only">\s*\(started at/);
+  });
+
   it("does not render breach text when deviationBreachStartedAt is '0' (not currently breached)", () => {
     const pool: Pool = {
       ...BASE_POOL,
