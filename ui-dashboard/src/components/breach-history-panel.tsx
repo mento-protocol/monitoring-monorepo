@@ -87,10 +87,14 @@ function whereForBucket(bucket: DurationBucket): Record<string, unknown> {
     case "all":
       return {};
     case "in_grace":
-      // Closed breaches whose post-grace critical portion was zero.
+      // Closed breaches that actually closed within the 1h grace window.
+      // Filter on duration, not `criticalDurationSeconds == 0`: under the
+      // tolerance refactor, `criticalDurationSeconds` is also zero for
+      // multi-hour breaches whose peak never crossed 1.05x — those are
+      // long WARN-only breaches and don't belong in the "≤1h" bucket.
       return {
         endedAt: { _is_null: false },
-        criticalDurationSeconds: { _eq: "0" },
+        durationSeconds: { _lte: String(ONE_HOUR) },
       };
     case "short":
       return {
@@ -735,10 +739,14 @@ function BreachRow({
       ? tradingSecondsInRange(graceEnd, now)
       : 0
     : Number(breach.criticalDurationSeconds);
-  const threshold = pool.rebalanceThreshold ?? 0;
-  const peakPct = threshold
-    ? formatDeviationPct(breach.peakPriceDifference, threshold)
-    : null;
+  // Peak % displayed in the row is scored against the SAME threshold the
+  // severity bucket uses (entry threshold) so the percentage and the
+  // critical-or-not verdict can't disagree across a mid-breach
+  // FPMMRebalanceThresholdUpdated.
+  const peakPct = formatDeviationPct(
+    breach.peakPriceDifference,
+    entryThreshold,
+  );
 
   const endedLabel = isOpen
     ? "Ongoing"

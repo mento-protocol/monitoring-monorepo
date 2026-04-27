@@ -389,7 +389,7 @@ export const POOL_DEVIATION_BREACHES_ALL = `
       limit: 1000
     ) {
       id startedAt endedAt durationSeconds criticalDurationSeconds
-      peakPriceDifference
+      peakPriceDifference entryRebalanceThreshold
     }
   }
 `;

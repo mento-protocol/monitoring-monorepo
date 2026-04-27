@@ -11,7 +11,10 @@ import {
   makeDateXAxis,
   RANGE_SELECTOR_BUTTONS_DAILY,
 } from "@/lib/plot";
-import { DEVIATION_BREACH_GRACE_SECONDS } from "@/lib/health";
+import {
+  DEVIATION_BREACH_GRACE_SECONDS,
+  DEVIATION_CRITICAL_RATIO,
+} from "@/lib/health";
 import { tradingSecondsInRange } from "@/lib/weekend";
 import { formatDurationShort } from "@/lib/bridge-status";
 
@@ -43,9 +46,13 @@ export function BreachHistoryChart({ breaches, pool }: Props) {
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const grace = Number(DEVIATION_BREACH_GRACE_SECONDS);
-  const threshold = pool.rebalanceThreshold ?? 0;
 
   // Split into three series so each gets its own colour + legend entry.
+  // Note: under the tolerance refactor, `closedInGrace` covers BOTH
+  // breaches that closed within 1h AND multi-hour breaches whose peak
+  // never crossed 1.05x — neither accrue `criticalDurationSeconds`. The
+  // amber "Within grace" colouring stays accurate ("not critical") even
+  // for the long-but-low ones.
   const closedCritical: Marker[] = [];
   const closedInGrace: Marker[] = [];
   const ongoing: Marker[] = [];
@@ -59,14 +66,27 @@ export function BreachHistoryChart({ breaches, pool }: Props) {
     const duration = isOpen
       ? tradingSecondsInRange(startedAt, nowSeconds)
       : Number(b.durationSeconds ?? "0");
+    // Score peak severity against the threshold the breach OPENED against
+    // (entry, not current pool threshold). Falls back to current pool
+    // threshold during the indexer-resync window before the column lands.
+    const entryThreshold =
+      (b.entryRebalanceThreshold ?? 0) > 0
+        ? b.entryRebalanceThreshold!
+        : (pool.rebalanceThreshold ?? 0) > 0
+          ? pool.rebalanceThreshold!
+          : 10000;
+    const peakAboveCritical =
+      Number(b.peakPriceDifference) / entryThreshold > DEVIATION_CRITICAL_RATIO;
+    // Open-row past-grace only counts as critical when peak crossed the
+    // 1.05x line — otherwise this is a long WARN-only breach (above
+    // tolerance, below critical magnitude), which the rest of the app
+    // does not score as critical seconds.
     const critical = isOpen
-      ? nowSeconds > startedAt + grace
+      ? peakAboveCritical && nowSeconds > startedAt + grace
         ? tradingSecondsInRange(startedAt + grace, nowSeconds)
         : 0
       : Number(b.criticalDurationSeconds ?? "0");
-    const peakPct = threshold
-      ? (Number(b.peakPriceDifference) / threshold) * 100
-      : 0;
+    const peakPct = (Number(b.peakPriceDifference) / entryThreshold) * 100;
     const marker: Marker = {
       x: new Date(startedAt * 1000).toISOString(),
       // Clamp minimum to 1s so a genuine 0-duration breach renders on the
