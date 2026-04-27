@@ -138,7 +138,10 @@ export function TimeSeriesChartCard({
     ];
 
     return {
-      traces: totalTrace ? [...breakdownTraces, totalTrace] : breakdownTraces,
+      // Total is drawn first (background) so the per-chain lines stay
+      // readable on top — its 2px line would otherwise clip whichever
+      // chain tracks closest to it (e.g. Celo riding the TVL envelope).
+      traces: totalTrace ? [totalTrace, ...breakdownTraces] : breakdownTraces,
       layout: {
         ...PLOTLY_BASE_LAYOUT,
         font: { ...PLOTLY_BASE_LAYOUT.font, size: 11 },
