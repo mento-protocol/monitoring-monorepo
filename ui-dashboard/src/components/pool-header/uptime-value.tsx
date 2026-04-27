@@ -3,7 +3,10 @@
 import { isVirtualPool, type Pool } from "@/lib/types";
 import { InfoPopover } from "@/components/info-popover";
 import { useGQL } from "@/lib/graphql";
-import { POOL_BREACH_ROLLUP } from "@/lib/queries";
+import {
+  POOL_BREACH_ROLLUP,
+  POOL_CRITICAL_SECONDS_RECENT,
+} from "@/lib/queries";
 import {
   DEVIATION_BREACH_GRACE_SECONDS,
   DEVIATION_CRITICAL_RATIO,
@@ -16,6 +19,7 @@ import { useNetwork } from "@/components/network-provider";
 const UPTIME_EXPLAINER =
   "% of time the pool was healthy. Deviation > 5% threshold sustained for more than 1h qualifies as unhealthy.";
 const UPTIME_FX_SUFFIX = " Weekends do not count into uptime on FX pools.";
+const SECONDS_IN_7D = 7 * 86_400;
 
 type BreachRollup = {
   cumulativeCriticalSeconds?: string;
@@ -23,6 +27,12 @@ type BreachRollup = {
   deviationBreachStartedAt?: string;
   currentOpenBreachPeak?: string;
   currentOpenBreachEntryThreshold?: number;
+};
+
+type RecentBreachRow = {
+  criticalDurationSeconds?: string | number;
+  startedAt?: string;
+  endedAt?: string;
 };
 
 export function UptimeValue({ pool }: { pool: Pool }) {
@@ -34,6 +44,17 @@ export function UptimeValue({ pool }: { pool: Pool }) {
     isVirtual ? null : POOL_BREACH_ROLLUP,
     { id: pool.id, chainId: pool.chainId },
   );
+  // Window for the "% last 7d" subtitle. Bucket the start to the nearest
+  // minute so the SWR cache key only changes once per minute — without
+  // this, every render produces a fresh `windowStart` (sub-second drift)
+  // that invalidates SWR's cache and re-fires the GraphQL request.
+  const windowStart = Math.floor(Date.now() / 60_000) * 60 - SECONDS_IN_7D;
+  const { data: recentData } = useGQL<{
+    DeviationThresholdBreach: RecentBreachRow[];
+  }>(isVirtual ? null : POOL_CRITICAL_SECONDS_RECENT, {
+    poolId: pool.id,
+    since: String(windowStart),
+  });
 
   if (isVirtual) return <span className="text-slate-500">N/A</span>;
 
@@ -58,7 +79,6 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   // from POOL_DETAIL_WITH_HEALTH would double-count a just-closed breach
   // during the brief window where the rollup refreshed first.
   const rolledCritical = Number(rollup.cumulativeCriticalSeconds ?? "0");
-  const closedBreachCount = rollup.breachCount ?? 0;
   const openStart = Number(rollup.deviationBreachStartedAt ?? "0");
   const hasOpenBreach = openStart > 0;
 
@@ -94,22 +114,45 @@ export function UptimeValue({ pool }: { pool: Pool }) {
     0,
     Math.min(100, (1 - (rolledCritical + openCritical) / total) * 100),
   );
-  const totalBreaches = closedBreachCount + (hasOpenBreach ? 1 : 0);
-  const subtitle =
-    totalBreaches === 0
-      ? "no breaches"
-      : hasOpenBreach && closedBreachCount === 0
-        ? "1 ongoing breach"
-        : hasOpenBreach
-          ? `${closedBreachCount} past + 1 ongoing`
-          : `${closedBreachCount} ${closedBreachCount === 1 ? "breach" : "breaches"}`;
+
+  // 7-day uptime numerator: sum of `criticalDurationSeconds` across closed
+  // breaches that ended within the window, plus the same live open-breach
+  // contribution clamped to the window. Closed-breach critical seconds are
+  // counted whole even when the breach started before the window — the
+  // overcount is bounded by one breach's worth and keeps the calculation
+  // simple. Denominator uses the same `tradingSecondsInRange` weekend
+  // subtraction as `total` for consistency with the all-time number.
+  const recentRows = recentData?.DeviationThresholdBreach;
+  const closedCritical7d =
+    recentRows?.reduce(
+      (sum, row) => sum + Number(row.criticalDurationSeconds ?? 0),
+      0,
+    ) ?? 0;
+  const openCritical7d =
+    hasOpenBreach && nowSeconds > graceEnd && peakAboveCritical
+      ? tradingSecondsInRange(Math.max(graceEnd, windowStart), nowSeconds)
+      : 0;
+  const trading7d = tradingSecondsInRange(windowStart, nowSeconds);
+  const have7d = recentRows !== undefined && trading7d > 0;
+  const pct7d = have7d
+    ? Math.max(
+        0,
+        Math.min(
+          100,
+          (1 - (closedCritical7d + openCritical7d) / trading7d) * 100,
+        ),
+      )
+    : null;
+
   return (
     <span className="flex flex-col gap-0.5">
       <span className="font-medium">
         <span className={uptimeColorClass(pct)}>{pct.toFixed(2)}%</span>
         <span className="ml-1 text-xs text-slate-500">all-time</span>
       </span>
-      <span className="text-xs text-slate-500">{subtitle}</span>
+      <span className="text-xs text-slate-500">
+        {pct7d != null ? `${pct7d.toFixed(2)}% last 7d` : "—"}
+      </span>
     </span>
   );
 }

@@ -322,6 +322,34 @@ export const POOL_BREACH_ROLLUP = `
   }
 `;
 
+// Closed-breach critical seconds in a recent window, for the Uptime tile's
+// "X.XX% last 7d" subtitle. Returns just `criticalDurationSeconds` so the
+// client can sum (Hasura aggregates are disabled). Open breaches are
+// excluded — their live contribution is computed from POOL_BREACH_ROLLUP's
+// `currentOpenBreachPeak/EntryThreshold/deviationBreachStartedAt` to avoid
+// double-counting. Hosted Hasura caps at 1000 rows; a single pool emitting
+// >1000 closed breaches in 7 days would mean the pool is fundamentally
+// unhealthy and the tile's coarse number is the least of the operator's
+// problems — well within the cap for any normal pool.
+export const POOL_CRITICAL_SECONDS_RECENT = `
+  query PoolCriticalSecondsRecent(
+    $poolId: String!
+    $since: numeric!
+  ) {
+    DeviationThresholdBreach(
+      where: {
+        poolId: { _eq: $poolId }
+        endedAt: { _gte: $since }
+      }
+      limit: 1000
+    ) {
+      criticalDurationSeconds
+      startedAt
+      endedAt
+    }
+  }
+`;
+
 // Paginated + sortable breach history for the Breaches tab. `$orderBy`
 // and `$where` let the server do the heavy lifting so pagination stays
 // authoritative regardless of user-selected sort and duration filter.
