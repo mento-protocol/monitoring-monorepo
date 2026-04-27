@@ -711,8 +711,14 @@ function BreachRow({
 }) {
   const isOpen = breach.endedAt == null;
   const now = Math.floor(Date.now() / 1000);
-  const wallDuration = isOpen
-    ? now - Number(breach.startedAt)
+  // Trading-seconds for both open and closed rows so the Duration column
+  // doesn't shrink discontinuously when an FX-weekend-spanning open
+  // breach closes (closed rows use the indexer's stored
+  // `durationSeconds`, which is also trading-seconds with weekend
+  // closure subtracted). Matches the unit used by the Past-grace column
+  // and the Uptime tile.
+  const duration = isOpen
+    ? tradingSecondsInRange(Number(breach.startedAt), now)
     : Number(breach.durationSeconds);
   // Past-grace uses trading-seconds on open rows so the unit matches the
   // stored `criticalDurationSeconds` on closed rows and the uptime
@@ -771,7 +777,7 @@ function BreachRow({
       <td
         className={`py-2 pr-4 whitespace-nowrap ${isOpen ? "text-amber-400" : ""}`}
       >
-        {formatDurationShort(wallDuration)}
+        {formatDurationShort(duration)}
         {isOpen && <span className="ml-1 text-xs text-slate-500">ongoing</span>}
       </td>
       <td
