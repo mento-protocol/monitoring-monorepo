@@ -163,17 +163,20 @@ export function nextOpenBreachPeak(prev: Pool | undefined, next: Pool): bigint {
  * the peak against the same threshold the persisted accrual uses (entry,
  * not current). Resets to 0 when no open breach; held across continuing
  * breach events so a mid-breach `FPMMRebalanceThresholdUpdated` can't
- * shift the live verdict. */
+ * shift the live verdict. Self-heals from the 0 sentinel: if the breach
+ * opened before RPC backfilled `rebalanceThreshold` and a real value
+ * arrives mid-breach, adopt it once and then hold. */
 export function nextOpenBreachEntryThreshold(
   prev: Pool | undefined,
   next: Pool,
 ): number {
   if (next.deviationBreachStartedAt === 0n) return 0;
   const prevAnchor = prev?.deviationBreachStartedAt ?? 0n;
-  // Rising edge: capture the threshold the breach is opening against.
-  if (prevAnchor === 0n) return next.rebalanceThreshold;
-  // Continuing: hold the entry value through threshold changes.
-  return prev?.currentOpenBreachEntryThreshold ?? next.rebalanceThreshold;
+  if (prevAnchor === 0n) return next.rebalanceThreshold; // rising edge
+  // Continuing: hold the previously-captured entry value, but heal when
+  // the captured value is the 0 RPC-pending sentinel and we now have one.
+  const stored = prev?.currentOpenBreachEntryThreshold ?? 0;
+  return stored > 0 ? stored : next.rebalanceThreshold;
 }
 
 // ---------------------------------------------------------------------------

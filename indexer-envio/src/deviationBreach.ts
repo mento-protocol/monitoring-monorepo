@@ -176,11 +176,19 @@ export async function recordBreachTransition(
     // RISING EDGE — not the current threshold. Otherwise an
     // FPMMRebalanceThresholdUpdated event mid-breach would retroactively
     // re-score severity, inflating or zeroing the accrual.
+    // Prefer the self-healed `prev.currentOpenBreachEntryThreshold` over
+    // the breach row's frozen `entryRebalanceThreshold`: if the breach
+    // opened before RPC backfilled the threshold (0 sentinel), the Pool
+    // field has the healed value while the row is stuck at 0.
     // Conservative bound: time-resolved magnitude isn't tracked, so a breach
     // that briefly hit 1.05+ then dropped will still credit post-grace seconds.
+    const healedEntryThreshold =
+      (prev?.currentOpenBreachEntryThreshold ?? 0) > 0
+        ? prev!.currentOpenBreachEntryThreshold
+        : open.entryRebalanceThreshold;
     const peakAboveCritical = isAboveCriticalMagnitude(
       open.peakPriceDifference,
-      effectiveThreshold({ rebalanceThreshold: open.entryRebalanceThreshold }),
+      effectiveThreshold({ rebalanceThreshold: healedEntryThreshold }),
     );
     const criticalDurationSeconds =
       peakAboveCritical && endedAt > graceEnd
@@ -250,7 +258,14 @@ export async function recordBreachTransition(
   // the same tx rewrite the cause so the UI shows "Swap" instead.
   const upgradeCause =
     open.startedByEvent === "unknown" && category !== "unknown";
-  if (!peakBumped && !isRebalance && !upgradeCause) return {};
+  // Self-heal entry threshold: the row was opened with the 0 sentinel
+  // before RPC backfilled `rebalanceThreshold`. Adopt the first real
+  // value once and then hold so the breach history UI shows the actual
+  // threshold this breach opened against.
+  const healEntryThreshold =
+    open.entryRebalanceThreshold === 0 && next.rebalanceThreshold > 0;
+  if (!peakBumped && !isRebalance && !upgradeCause && !healEntryThreshold)
+    return {};
   context.DeviationThresholdBreach.set({
     ...open,
     ...(peakBumped && {
@@ -261,6 +276,9 @@ export async function recordBreachTransition(
     ...(upgradeCause && {
       startedByEvent: category,
       startedByTxHash: trigger.txHash,
+    }),
+    ...(healEntryThreshold && {
+      entryRebalanceThreshold: next.rebalanceThreshold,
     }),
     rebalanceCountDuring: isRebalance
       ? open.rebalanceCountDuring + 1
