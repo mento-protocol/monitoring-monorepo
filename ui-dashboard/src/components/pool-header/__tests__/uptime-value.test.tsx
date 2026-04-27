@@ -7,7 +7,7 @@ type RollupRow = {
   cumulativeCriticalSeconds?: string;
   breachCount?: number;
   deviationBreachStartedAt?: string;
-  priceDifference?: string;
+  currentOpenBreachPeak?: string;
   rebalanceThreshold?: number;
 };
 
@@ -139,7 +139,7 @@ describe("UptimeValue", () => {
             cumulativeCriticalSeconds: "0",
             breachCount: 0,
             deviationBreachStartedAt: String(nowSec - 2 * 3600),
-            priceDifference: "8000", // 1.6x — well above critical magnitude
+            currentOpenBreachPeak: "8000", // 1.6x — well above critical magnitude
             rebalanceThreshold: 5000,
           },
         ],
@@ -275,8 +275,8 @@ describe("UptimeValue", () => {
             cumulativeCriticalSeconds: "0",
             breachCount: 0,
             deviationBreachStartedAt: String(fri20Utc),
-            // Currently above critical magnitude so the live credit gate fires.
-            priceDifference: "8000",
+            // Peak above critical magnitude so the live credit gate fires.
+            currentOpenBreachPeak: "8000",
             rebalanceThreshold: 5000,
           },
         ],

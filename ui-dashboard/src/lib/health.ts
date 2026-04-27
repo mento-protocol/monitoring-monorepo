@@ -206,7 +206,7 @@ export function computePoolUptimePct(pool: {
   healthTotalSeconds?: string;
   cumulativeCriticalSeconds?: string;
   deviationBreachStartedAt?: string;
-  priceDifference?: string;
+  currentOpenBreachPeak?: string;
   rebalanceThreshold?: number;
 }): number | null {
   if (isVirtualPool(pool)) return null;
@@ -216,20 +216,23 @@ export function computePoolUptimePct(pool: {
   const rolledCritical = Number(pool.cumulativeCriticalSeconds);
   if (!Number.isFinite(rolledCritical)) return null;
 
-  // Open-breach live past-grace credit — only count when the pool is
-  // CURRENTLY above the 5% critical-magnitude line, matching
-  // `computeHealthStatus`. A 1.012x breach older than 1h is still WARN, not
-  // CRITICAL, so it shouldn't tank uptime. `tradingSecondsInRange` subtracts
-  // FX-weekend hours so the numerator stays on the same basis as
+  // Open-breach live past-grace credit — only count when the breach's PEAK
+  // (so far) crossed the 5% critical-magnitude line, matching the indexer's
+  // closed-breach `criticalDurationSeconds` accrual. Gating on peak rather
+  // than current ratio keeps the live tile and the persisted SLO counter on
+  // the same basis: a breach that briefly hit 1.06 then dropped to 1.04
+  // still contributes critical time live, and the cumulative counter
+  // doesn't suddenly jump up when it closes. `tradingSecondsInRange`
+  // subtracts FX-weekend hours so the numerator stays on the same basis as
   // `healthTotalSeconds` (the denominator).
   const openStart = Number(pool.deviationBreachStartedAt ?? "0");
   const nowSeconds = Math.floor(Date.now() / 1000);
   const graceEnd = openStart + Number(DEVIATION_BREACH_GRACE_SECONDS);
-  const diff = Number(pool.priceDifference ?? "0");
-  const devRatio = diff / effectiveThreshold(pool);
-  const currentlyAboveCritical = devRatio > DEVIATION_CRITICAL_RATIO;
+  const peak = Number(pool.currentOpenBreachPeak ?? "0");
+  const peakAboveCritical =
+    peak / effectiveThreshold(pool) > DEVIATION_CRITICAL_RATIO;
   const openCritical =
-    openStart > 0 && nowSeconds > graceEnd && currentlyAboveCritical
+    openStart > 0 && nowSeconds > graceEnd && peakAboveCritical
       ? tradingSecondsInRange(graceEnd, nowSeconds)
       : 0;
 

@@ -37,6 +37,10 @@ export type Pool = {
   rebalanceThreshold?: number;
   lastRebalancedAt?: string;
   deviationBreachStartedAt?: string;
+  /** Max priceDifference observed during the currently-open breach, 0 when
+   * no open breach. Optional during the indexer-resync window before the
+   * new column is backfilled. */
+  currentOpenBreachPeak?: string;
   lpFee?: number;
   protocolFee?: number;
   rebalanceReward?: number;

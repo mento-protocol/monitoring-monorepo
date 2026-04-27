@@ -21,7 +21,7 @@ type BreachRollup = {
   cumulativeCriticalSeconds?: string;
   breachCount?: number;
   deviationBreachStartedAt?: string;
-  priceDifference?: string;
+  currentOpenBreachPeak?: string;
   rebalanceThreshold?: number;
 };
 
@@ -67,17 +67,19 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   // `tradingSecondsInRange` (same weekend subtraction the indexer uses to
   // compute `healthTotalSeconds`) so the numerator and denominator are on
   // the same basis — a breach that spans a weekend doesn't get credited
-  // seconds the denominator never saw. Mirror of `computePoolUptimePct`:
-  // only count the live segment when the pool is CURRENTLY above the 5%
-  // critical-magnitude line, matching `computeHealthStatus`.
+  // seconds the denominator never saw. Mirror of the indexer's closed-
+  // breach gate AND `computePoolUptimePct`: only count the live segment
+  // when the breach's PEAK crossed the 5% critical-magnitude line, so the
+  // tile and the persisted `cumulativeCriticalSeconds` use the same
+  // peak-based view of severity (no jump on close).
   const nowSeconds = Math.floor(Date.now() / 1000);
   const graceEnd = openStart + Number(DEVIATION_BREACH_GRACE_SECONDS);
-  const diff = Number(rollup.priceDifference ?? "0");
+  const peak = Number(rollup.currentOpenBreachPeak ?? "0");
   const thr =
     (rollup.rebalanceThreshold ?? 0) > 0 ? rollup.rebalanceThreshold! : 10000;
-  const currentlyAboveCritical = diff / thr > DEVIATION_CRITICAL_RATIO;
+  const peakAboveCritical = peak / thr > DEVIATION_CRITICAL_RATIO;
   const openCritical =
-    hasOpenBreach && nowSeconds > graceEnd && currentlyAboveCritical
+    hasOpenBreach && nowSeconds > graceEnd && peakAboveCritical
       ? tradingSecondsInRange(graceEnd, nowSeconds)
       : 0;
 

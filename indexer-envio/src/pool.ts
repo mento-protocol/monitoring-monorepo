@@ -147,6 +147,17 @@ export function nextDeviationBreachStartedAt(
     : blockTimestamp;
 }
 
+/** Maintain the open-breach peak denormalized on Pool. Mirrors the
+ * `peakPriceDifference` tracked on the open `DeviationThresholdBreach`
+ * row, but lives on Pool so the rollup query the live uptime tile uses
+ * doesn't need to join to the breach row. Resets to 0 when no open
+ * breach; otherwise carries `max(prev peak, current diff)`. */
+export function nextOpenBreachPeak(prev: Pool | undefined, next: Pool): bigint {
+  if (next.deviationBreachStartedAt === 0n) return 0n;
+  const prevPeak = prev?.currentOpenBreachPeak ?? 0n;
+  return prevPeak > next.priceDifference ? prevPeak : next.priceDifference;
+}
+
 // ---------------------------------------------------------------------------
 // Pool upsert (with cumulative fields)
 // ---------------------------------------------------------------------------
@@ -260,6 +271,7 @@ export const DEFAULT_ORACLE_FIELDS = {
   rebalanceThreshold: 0,
   lastRebalancedAt: 0n,
   deviationBreachStartedAt: 0n,
+  currentOpenBreachPeak: 0n,
   healthStatus: "N/A" as string,
   limitStatus: "N/A" as string,
   limitPressure0: "0.0000" as string,
@@ -459,7 +471,15 @@ export const upsertPool = async ({
     blockTimestamp,
     source,
   );
-  const withBreach = { ...withDeviation, deviationBreachStartedAt };
+  const currentOpenBreachPeak = nextOpenBreachPeak(existing, {
+    ...withDeviation,
+    deviationBreachStartedAt,
+  });
+  const withBreach = {
+    ...withDeviation,
+    deviationBreachStartedAt,
+    currentOpenBreachPeak,
+  };
   const healthStatus = computeHealthStatus(withBreach, blockTimestamp);
 
   // Maintain the per-breach history entity + roll closed-breach durations
