@@ -344,8 +344,8 @@ export const POOL_DEVIATION_BREACHES_PAGE = `
       startedAt startedAtBlock
       endedAt endedAtBlock
       durationSeconds criticalDurationSeconds
-      entryPriceDifference peakPriceDifference
-      peakAt peakAtBlock
+      entryPriceDifference entryRebalanceThreshold
+      peakPriceDifference peakAt peakAtBlock
       startedByEvent startedByTxHash
       endedByEvent endedByTxHash endedByStrategy
       rebalanceCountDuring
