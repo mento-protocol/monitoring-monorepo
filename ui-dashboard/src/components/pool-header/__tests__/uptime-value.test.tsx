@@ -58,7 +58,7 @@ describe("UptimeValue", () => {
     expect(html).not.toContain("Query failed");
   });
 
-  it("renders 100.000% with 'no breaches' when the rollup says nothing critical has happened", () => {
+  it("renders 100.00% with 'no breaches' when the rollup says nothing critical has happened", () => {
     mockUseGQL.mockReturnValueOnce({
       data: {
         Pool: [
@@ -75,12 +75,12 @@ describe("UptimeValue", () => {
       healthTotalSeconds: String(30 * 86400),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
-    expect(html).toContain("100.000%");
+    expect(html).toContain("100.00%");
     expect(html).toContain("no breaches");
   });
 
-  it("formats the critical ratio with three decimals so short outages stay visible", () => {
-    // 3600s / (30 × 86400) ≈ 0.139% downtime → 99.861% uptime. Three
+  it("formats the critical ratio with two decimals so short outages stay visible", () => {
+    // 3600s / (30 × 86400) ≈ 0.139% downtime → 99.86% uptime. Two
     // decimals are deliberate: 1dp would smooth this into 99.9% and hide
     // a real outage.
     mockUseGQL.mockReturnValueOnce({
@@ -99,7 +99,7 @@ describe("UptimeValue", () => {
       healthTotalSeconds: String(30 * 86400),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
-    expect(html).toContain("99.861%");
+    expect(html).toContain("99.86%");
     expect(html).toContain("2 breaches");
   });
 
@@ -150,7 +150,7 @@ describe("UptimeValue", () => {
       healthTotalSeconds: String(30 * 86400),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
-    expect(html).toContain("99.861%");
+    expect(html).toContain("99.86%");
     expect(html).toContain("1 ongoing breach");
   });
 
@@ -172,7 +172,7 @@ describe("UptimeValue", () => {
       healthTotalSeconds: String(30 * 86400),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
-    expect(html).toContain("100.000%");
+    expect(html).toContain("100.00%");
     expect(html).toContain("1 ongoing breach");
   });
 
@@ -223,9 +223,9 @@ describe("UptimeValue", () => {
       deviationBreachStartedAt: String(nowSec - 2 * 3600),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
-    // 3600 / (30 × 86400) ≈ 0.139% → 99.861% (NOT 99.722%, which would
+    // 3600 / (30 × 86400) ≈ 0.139% → 99.86% (NOT 99.722%, which would
     // be the double-count).
-    expect(html).toContain("99.861%");
+    expect(html).toContain("99.86%");
     expect(html).toContain("1 breach"); // closed, not "1 ongoing"
   });
 
@@ -250,8 +250,8 @@ describe("UptimeValue", () => {
       healthTotalSeconds: String(10 * 365 * 86400),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
-    // 500h / (10y × 365d × 86400s) ≈ 0.571% downtime → 99.429% uptime.
-    expect(html).toContain("99.429%");
+    // 500h / (10y × 365d × 86400s) ≈ 0.571% downtime → 99.43% uptime.
+    expect(html).toContain("99.43%");
     expect(html).toContain("500 breaches");
   });
 
@@ -284,11 +284,11 @@ describe("UptimeValue", () => {
     });
     const pool: Pool = {
       ...BASE_POOL,
-      // 30d of tracked trading-time. 3600s / (30*86400) ≈ 0.139% → 99.861%.
+      // 30d of tracked trading-time. 3600s / (30*86400) ≈ 0.139% → 99.86%.
       healthTotalSeconds: String(30 * 86400),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
-    expect(html).toContain("99.861%");
+    expect(html).toContain("99.86%");
     vi.useRealTimers();
   });
 
@@ -307,13 +307,13 @@ describe("UptimeValue", () => {
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
     expect(html).toContain("N/A");
-    expect(html).not.toContain("100.000%");
+    expect(html).not.toContain("100.00%");
     expect(html).not.toContain("no breaches");
   });
 
   it("renders N/A while the rollup query is still loading (no 100% flash)", () => {
     // SWR returns data=undefined before the query resolves. Without a
-    // gate, the zero-defaults below would render "100.000% — no
+    // gate, the zero-defaults below would render "100.00% — no
     // breaches" for a blink on every page load — a misleading flash
     // of healthy content for pools that might have real incidents.
     mockUseGQL.mockReturnValueOnce({ data: undefined });
@@ -323,7 +323,7 @@ describe("UptimeValue", () => {
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
     expect(html).toContain("N/A");
-    expect(html).not.toContain("100.000%");
+    expect(html).not.toContain("100.00%");
     expect(html).not.toContain("no breaches");
   });
 });

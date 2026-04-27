@@ -1,10 +1,14 @@
 "use client";
 
 import { isVirtualPool, type Pool } from "@/lib/types";
+import { AddressLink } from "@/components/address-link";
 import { InfoPopover } from "@/components/info-popover";
 import { Stat } from "@/components/stat";
 import { useGQL } from "@/lib/graphql";
 import { POOL_CONFIG_EXT } from "@/lib/queries";
+import { useNetwork } from "@/components/network-provider";
+import { getOracleStalenessThreshold } from "@/lib/health";
+import { chainlinkFeed, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 
 interface PoolConfigPanelProps {
   pool: Pool;
@@ -22,11 +26,12 @@ function formatBps(bps: number | null | undefined): string {
   return `${(bps / 100).toFixed(2)}%`;
 }
 
-/** Static pool parameters panel: fee split, rebalance threshold, and
- *  rebalance reward. Hidden for virtual pools (no fees or rebalance
- *  mechanics). `rebalanceReward` is fetched via POOL_CONFIG_EXT so the
- *  page survives the indexer deploy+resync window. */
+/** Static pool parameters panel: swap fee, oracle/strategy provenance,
+ *  and rebalance threshold/reward. Hidden for virtual pools (no fees or
+ *  rebalance mechanics). `rebalanceReward` is fetched via POOL_CONFIG_EXT
+ *  so the page survives the indexer deploy+resync window. */
 export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
+  const { network } = useNetwork();
   const isVirtual = isVirtualPool(pool);
   const { data: configExt } = useGQL<{ Pool: PoolConfigExtRow[] }>(
     isVirtual ? null : POOL_CONFIG_EXT,
@@ -37,46 +42,82 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
 
   const rebalanceReward = configExt?.Pool?.[0]?.rebalanceReward;
 
+  const lpFee = pool.lpFee;
+  const protocolFee = pool.protocolFee;
+  // Both legs must be valid before we sum: the indexer uses `-1` as the
+  // "RPC read failed, not yet self-healed" sentinel for either fee, and
+  // adding `-1` to a healed value would render a plausible-looking but
+  // wrong total (e.g. `-1 + 100 → 0.99%`). Fall back to "—" instead.
+  const swapFeeTotal =
+    lpFee != null && lpFee >= 0 && protocolFee != null && protocolFee >= 0
+      ? lpFee + protocolFee
+      : null;
+
+  // Prefer the non-USDm leg's feed and fall back to the USDm leg, so the
+  // link points at the specific pair being oracled (USDC/USD on a USDC
+  // pool, not generically USDm). Checking sym1 first picks the wrong leg
+  // when USDm happens to be token1.
+  const sym0 = tokenSymbol(network, pool.token0);
+  const sym1 = tokenSymbol(network, pool.token1);
+  const usdmIsToken0 = USDM_SYMBOLS.has(sym0);
+  const nonUsdmSym = usdmIsToken0 ? sym1 : sym0;
+  const usdmSym = usdmIsToken0 ? sym0 : sym1;
+  const feed =
+    chainlinkFeed(nonUsdmSym, network.chainId) ??
+    chainlinkFeed(usdmSym, network.chainId);
+
+  const expiryMinutes = Math.round(
+    getOracleStalenessThreshold(pool, network.chainId) / 60,
+  );
+
+  const strategyAddress = pool.rebalancerAddress ?? null;
+
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <h2 className="text-base font-semibold text-white mb-4">Pool Config</h2>
-      <dl className="flex flex-wrap gap-x-8 gap-y-4 text-sm">
+      <dl className="grid grid-cols-5 gap-x-4 gap-y-4 text-sm">
         <Stat
-          className="min-w-36"
           label={
             <span className="inline-flex items-center gap-1">
-              LP Fee
+              Swap Fee
               <InfoPopover
-                label="LP Fee"
-                content="Portion of each swap paid to liquidity providers, in basis points."
+                label="Swap Fee"
+                content={`Total fee charged on swaps, split between liquidity providers and the protocol fee recipient. LP: ${formatBps(lpFee)} · Protocol: ${formatBps(protocolFee)}.`}
               />
             </span>
           }
-          value={formatBps(pool.lpFee)}
+          value={formatBps(swapFeeTotal)}
           mono
         />
         <Stat
-          className="min-w-36"
-          label={
-            <span className="inline-flex items-center gap-1">
-              Protocol Fee
-              <InfoPopover
-                label="Protocol Fee"
-                content="Portion of each swap routed to the protocol fee recipient, in basis points."
-              />
+          label="Price Oracle"
+          value={
+            <span className="flex flex-col gap-0.5">
+              {feed ? (
+                <a
+                  href={feed.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-indigo-300 hover:text-indigo-400 transition-colors"
+                >
+                  Chainlink {feed.pair}
+                </a>
+              ) : (
+                <span>SortedOracles</span>
+              )}
+              <span className="text-xs text-slate-500">
+                Expiry: {expiryMinutes}m
+              </span>
             </span>
           }
-          value={formatBps(pool.protocolFee)}
-          mono
         />
         <Stat
-          className="min-w-36"
           label={
             <span className="inline-flex items-center gap-1">
               Rebalance Threshold
               <InfoPopover
                 label="Rebalance Threshold"
-                content="Price deviation (bps) that must be exceeded before a rebalance is permitted on this pool."
+                content="Internal pool price deviation from oracle price that must be exceeded before a rebalance is permitted on this pool."
               />
             </span>
           }
@@ -87,18 +128,27 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
           mono
         />
         <Stat
-          className="min-w-36"
           label={
             <span className="inline-flex items-center gap-1">
               Rebalance Reward
               <InfoPopover
                 label="Rebalance Reward"
-                content="Incentive (bps of swap notional) paid to the rebalancer that closes a deviation breach."
+                content="Incentive (% of notional swap value) paid to the rebalancer that closes a deviation breach."
               />
             </span>
           }
           value={formatBps(rebalanceReward)}
           mono
+        />
+        <Stat
+          label="Rebalance Strategy"
+          value={
+            strategyAddress ? (
+              <AddressLink address={strategyAddress} readOnly />
+            ) : (
+              <span className="text-slate-500">—</span>
+            )
+          }
         />
       </dl>
     </div>

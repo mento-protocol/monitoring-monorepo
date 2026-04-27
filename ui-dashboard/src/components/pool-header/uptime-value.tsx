@@ -106,7 +106,7 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   return (
     <span className="flex flex-col gap-0.5">
       <span className="font-medium">
-        <span className={uptimeColorClass(pct)}>{pct.toFixed(3)}%</span>
+        <span className={uptimeColorClass(pct)}>{pct.toFixed(2)}%</span>
         <span className="ml-1 text-xs text-slate-500">all-time</span>
       </span>
       <span className="text-xs text-slate-500">{subtitle}</span>

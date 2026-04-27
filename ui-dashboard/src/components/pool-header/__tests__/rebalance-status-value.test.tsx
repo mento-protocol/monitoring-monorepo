@@ -25,16 +25,10 @@ const mockUseGQL = vi.fn<
     data?: { RebalanceEvent: { txHash: string }[] };
   }
 >(() => ({}));
-const mockGetName = vi.fn((address: string | null) =>
-  address ? `name-for-${address.slice(-4)}` : "",
-);
 
 vi.mock("@/hooks/use-rebalance-check", () => ({
   useRebalanceCheck: (pool: Pool, network: Network) =>
     mockUseRebalanceCheck(pool, network),
-}));
-vi.mock("@/components/address-labels-provider", () => ({
-  useAddressLabels: () => ({ getName: mockGetName }),
 }));
 vi.mock("@/lib/graphql", () => ({
   useGQL: (query: string | null, variables?: Record<string, unknown>) =>
@@ -391,10 +385,10 @@ describe("RebalanceStatusValue", () => {
     expect(html).not.toContain("Rebalance blocked");
   });
 
-  it("renders 'last <relative>' on the headline line when pool.lastRebalancedAt is present", () => {
-    // The timestamp moved from the subtitle to the headline alongside the
-    // status label ("Balanced · last 2m ago"). The subtitle now carries
-    // only the strategy attribution.
+  it("renders 'last <relative>' on its own subtitle line when pool.lastRebalancedAt is present", () => {
+    // The timestamp now sits on its own row beneath the status label
+    // ("Rebalance blocked / last 2m ago") so the cell flows like the
+    // other header tiles. Strategy attribution moved to Pool Config.
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     mockUseGQL.mockReturnValueOnce({ data: undefined });
     const poolWithLast: Pool = {
@@ -409,8 +403,9 @@ describe("RebalanceStatusValue", () => {
       />,
     );
     expect(html).toMatch(/last [0-9]+[smhd] ago/);
-    // The "·" separator sits in its own aria-hidden span before the timestamp.
-    expect(html).toContain('aria-hidden="true">·');
+    // No more inline "·" separator — the dot used to sit between the
+    // status text and the timestamp on a single row.
+    expect(html).not.toContain('aria-hidden="true">·');
   });
 
   it("links 'last <relative>' to the latest rebalance tx on the explorer when available", () => {
@@ -437,8 +432,7 @@ describe("RebalanceStatusValue", () => {
 
   it("omits the rebalance-time segment entirely when pool.lastRebalancedAt is undefined", () => {
     // "never rebalanced" copy was dropped — absence of a recorded rebalance
-    // simply means no timestamp segment (and no "·" separator) is rendered
-    // on the headline. Subtitle remains just "via {strategy}".
+    // simply means no subtitle row is rendered.
     mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
     const poolWithoutLast: Pool = { ...BASE_POOL, lastRebalancedAt: undefined };
     const html = renderToStaticMarkup(
@@ -450,7 +444,6 @@ describe("RebalanceStatusValue", () => {
     );
     expect(html).not.toContain("never rebalanced");
     expect(html).not.toMatch(/last [0-9]+[smhd] ago/);
-    expect(html).not.toContain('aria-hidden="true">·');
   });
 
   it('omits the rebalance-time segment when pool.lastRebalancedAt is the sentinel "0"', () => {
@@ -486,21 +479,5 @@ describe("RebalanceStatusValue", () => {
     expect(html).not.toContain("never rebalanced");
     expect(html).not.toContain("last —");
     expect(html).not.toMatch(/last [0-9]+[smhd] ago/);
-  });
-
-  it("links the strategy name from useAddressLabels inside the 'via …' subtitle", () => {
-    mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
-    const html = renderToStaticMarkup(
-      <RebalanceStatusValue
-        pool={BASE_POOL}
-        network={NETWORK}
-        strategyAddress={STRATEGY_ADDR}
-      />,
-    );
-    expect(html).toContain(
-      `href="https://celoscan.io/address/${STRATEGY_ADDR}"`,
-    );
-    expect(html).toContain("name-for-aaaa");
-    expect(html).not.toContain("name-for-aaaa ↗");
   });
 });

@@ -254,9 +254,9 @@ describe("DeviationCell — bar color boundaries", () => {
 });
 
 describe("DeviationCell — breach start indicator", () => {
-  it("renders 'Breach started' line in red when breach has outlived the grace window (CRITICAL)", () => {
+  it("renders the merged 'breach' caption in red when breach has outlived the grace window (CRITICAL)", () => {
     // 2h ago is past the 1h grace — status flips to CRITICAL and the
-    // subtext matches.
+    // single-line caption ("X% above threshold · breach Xh ago") matches.
     const now = Math.floor(Date.now() / 1000);
     const breachStart = String(now - 2 * 3600);
     const pool: Pool = {
@@ -268,16 +268,16 @@ describe("DeviationCell — breach start indicator", () => {
       <DeviationCell pool={pool} network={NETWORK} />,
     );
 
-    expect(html).toContain("Breach started");
+    expect(html).toMatch(/breach/);
     expect(html).toContain("text-red-400");
     // a11y: screen readers in browse mode read the absolute timestamp
     // alongside the relative label via a visually-hidden sr-only span
-    expect(html).toMatch(/class="sr-only">\s*\(at/);
+    expect(html).toMatch(/class="sr-only">\s*\(started at/);
     // semantic <time> element with machine-readable dateTime
     expect(html).toMatch(/<time[^>]*dateTime=/);
   });
 
-  it("renders 'Breach started' line in amber when still within the 1h grace (WARN)", () => {
+  it("renders the merged 'breach' caption in amber when still within the 1h grace (WARN)", () => {
     const now = Math.floor(Date.now() / 1000);
     const breachStart = String(now - 1800); // 30 min ago
     const pool: Pool = {
@@ -289,12 +289,12 @@ describe("DeviationCell — breach start indicator", () => {
       <DeviationCell pool={pool} network={NETWORK} />,
     );
 
-    expect(html).toContain("Breach started");
+    expect(html).toMatch(/breach/);
     expect(html).toContain("text-amber-400");
     expect(html).not.toContain("text-red-400");
   });
 
-  it("does not render breach line when deviationBreachStartedAt is '0' (not currently breached)", () => {
+  it("does not render breach text when deviationBreachStartedAt is '0' (not currently breached)", () => {
     const pool: Pool = {
       ...BASE_POOL,
       priceDifference: "3000",
@@ -303,6 +303,12 @@ describe("DeviationCell — breach start indicator", () => {
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).not.toContain("Breach started");
+    // Both forms — the literal "breach" word and the sr-only "started at"
+    // — must be absent so a regression that re-introduces either form is
+    // caught. The compact `· breach` separator regex was a false friend
+    // because rendered HTML places `</span><span>` between the dot and
+    // the word.
+    expect(html).not.toMatch(/breach/);
+    expect(html).not.toMatch(/started at/);
   });
 });

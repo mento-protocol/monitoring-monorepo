@@ -28,43 +28,21 @@ export function DeviationCell({
   if (!oracleIsFresh && isWeekend()) return null;
 
   const status = computeHealthStatus(pool, network.chainId);
+  const breachStartedAt =
+    pool.deviationBreachStartedAt && pool.deviationBreachStartedAt !== "0"
+      ? pool.deviationBreachStartedAt
+      : null;
 
   return (
-    <div className="min-w-44">
+    <div>
       <dt className="text-slate-400">Deviation</dt>
       <dd>
         <DeviationBar
           priceDifference={pool.priceDifference ?? "0"}
           rebalanceThreshold={pool.rebalanceThreshold ?? 0}
           status={status}
+          breachStartedAt={breachStartedAt}
         />
-        {pool.deviationBreachStartedAt &&
-          pool.deviationBreachStartedAt !== "0" && (
-            // Match the subtext color to the bar so they don't disagree:
-            // amber for WARN, red only when the status is CRITICAL.
-            <div
-              className={`mt-1 text-xs ${
-                status === "CRITICAL" ? "text-red-400" : "text-amber-400"
-              }`}
-              title={formatTimestamp(pool.deviationBreachStartedAt)}
-            >
-              Breach started{" "}
-              <time
-                dateTime={new Date(
-                  Number(pool.deviationBreachStartedAt) * 1000,
-                ).toISOString()}
-              >
-                {relativeTime(pool.deviationBreachStartedAt)}
-              </time>
-              {/* sr-only so screen readers in browse mode read the exact
-                  time alongside the relative label, not only via the
-                  hover-only title. */}
-              <span className="sr-only">
-                {" "}
-                (at {formatTimestamp(pool.deviationBreachStartedAt)})
-              </span>
-            </div>
-          )}
       </dd>
     </div>
   );
@@ -74,10 +52,12 @@ function DeviationBar({
   priceDifference,
   rebalanceThreshold,
   status,
+  breachStartedAt,
 }: {
   priceDifference: string;
   rebalanceThreshold: number;
   status: HealthStatus;
+  breachStartedAt: string | null;
 }) {
   const diff = Number(priceDifference);
   if (!rebalanceThreshold || rebalanceThreshold === 0 || diff === 0) {
@@ -126,6 +106,14 @@ function DeviationBar({
       ? `${deltaPct.toFixed(1)}% above threshold`
       : `${deltaPct.toFixed(1)}% below threshold`;
 
+  // Keeps the tile at 3 rows like its peers instead of stacking a
+  // separate "Breach started …" sentence below the bar.
+  const captionColor = breachStartedAt
+    ? status === "CRITICAL"
+      ? "text-red-400"
+      : "text-amber-400"
+    : "text-slate-500";
+
   return (
     <div
       className="flex flex-col gap-0.5"
@@ -138,7 +126,7 @@ function DeviationBar({
           optical center of text-sm glyphs (text sits below the cap line, so
           a geometrically centered bar reads slightly high). */}
       <div className="flex h-5 items-center">
-        <div className="h-2 w-44 rounded-full bg-slate-700 mt-1">
+        <div className="h-2 w-full rounded-full bg-slate-700 mt-1">
           <div
             className={`h-2 rounded-full transition-all ${color}`}
             style={{ width: `${pct}%` }}
@@ -157,7 +145,33 @@ function DeviationBar({
           />
         </div>
       </div>
-      <span className="text-xs text-slate-500">{deltaLabel}</span>
+      <span
+        className={`text-xs ${captionColor}`}
+        title={breachStartedAt ? formatTimestamp(breachStartedAt) : undefined}
+      >
+        {deltaLabel}
+        {breachStartedAt && (
+          <>
+            <span className="text-slate-600 font-normal" aria-hidden="true">
+              {" · "}
+            </span>
+            <span>
+              breach{" "}
+              <time
+                dateTime={new Date(
+                  Number(breachStartedAt) * 1000,
+                ).toISOString()}
+              >
+                {relativeTime(breachStartedAt)}
+              </time>
+              <span className="sr-only">
+                {" "}
+                (started at {formatTimestamp(breachStartedAt)})
+              </span>
+            </span>
+          </>
+        )}
+      </span>
     </div>
   );
 }

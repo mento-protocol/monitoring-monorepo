@@ -3,8 +3,9 @@
 import React from "react";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
-import { formatOraclePrice } from "@/lib/format";
-import { chainlinkFeed, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
+import { formatOraclePrice, formatTimestamp, relativeTime } from "@/lib/format";
+import { isOracleFresh } from "@/lib/health";
+import { explorerTxUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 
 export function OraclePriceValue({
   pool,
@@ -34,15 +35,22 @@ export function OraclePriceValue({
       ? rawPrice.toFixed(12).replace(/0+$/, "").replace(/\.$/, "")
       : "";
 
-  // Prefer the non-USDm leg first (more specific feed), fall back to the
-  // USDm leg in the unusual case where both legs resolve to different pairs.
-  // The legs must be addressed via `usdmIsToken0` — checking sym1 first
-  // unconditionally picks the wrong leg when USDm happens to be token1.
-  const nonUsdmSym = usdmIsToken0 ? sym1 : sym0;
-  const usdmSym = usdmIsToken0 ? sym0 : sym1;
-  const feed =
-    chainlinkFeed(nonUsdmSym, network.chainId) ??
-    chainlinkFeed(usdmSym, network.chainId);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const fresh = isOracleFresh(pool, nowSeconds, network.chainId);
+  const priceColor = fresh ? "text-white" : "text-red-400";
+  const subColor = fresh ? "text-slate-500" : "text-red-400";
+
+  const hasTs = pool.oracleTimestamp != null && pool.oracleTimestamp !== "0";
+  const updatedLabel = hasTs
+    ? `Updated ${relativeTime(pool.oracleTimestamp!)}`
+    : null;
+  const updatedTitle = hasTs
+    ? formatTimestamp(pool.oracleTimestamp!)
+    : undefined;
+  const updatedHref =
+    hasTs && pool.oracleTxHash
+      ? explorerTxUrl(network, pool.oracleTxHash)
+      : null;
 
   return (
     <span className="flex flex-col gap-0.5">
@@ -51,9 +59,9 @@ export function OraclePriceValue({
           type="button"
           onClick={() => setInverted((v) => !v)}
           aria-pressed={inverted}
-          aria-label={`Showing 1 ${base} = ${displayPrice} ${quote}. Activate to invert direction.`}
+          aria-label={`Showing 1 ${base} = ${displayPrice} ${quote}.${fresh ? "" : " Oracle is stale."} Activate to invert direction.`}
           title={`1 ${base} = ${fullPrice} ${quote} · click to invert`}
-          className="font-mono text-white hover:text-indigo-300 transition-colors text-left cursor-pointer"
+          className={`font-mono ${priceColor} hover:text-indigo-300 transition-colors text-left cursor-pointer`}
         >
           1 {base} <span className="text-slate-500">⇄</span> {displayPrice}{" "}
           {quote}
@@ -61,21 +69,22 @@ export function OraclePriceValue({
       ) : (
         <span className="text-slate-500">—</span>
       )}
-      <span className="text-xs text-slate-500">
-        via{" "}
-        {feed ? (
+      {updatedLabel &&
+        (updatedHref ? (
           <a
-            href={feed.url}
+            href={updatedHref}
             target="_blank"
             rel="noopener noreferrer"
-            className="hover:text-indigo-400 transition-colors"
+            className={`text-xs ${subColor} hover:text-indigo-400 transition-colors`}
+            title={updatedTitle}
           >
-            Chainlink {feed.pair} oracle
+            {updatedLabel}
           </a>
         ) : (
-          "SortedOracles"
-        )}
-      </span>
+          <span className={`text-xs ${subColor}`} title={updatedTitle}>
+            {updatedLabel}
+          </span>
+        ))}
     </span>
   );
 }
