@@ -369,6 +369,43 @@ Domain-split (`#alerts-v3`) was the original plan but `critical` vs `warning` is
 | `metrics-bridge` | Not Reporting                        | critical | `time() - mento_pool_bridge_last_poll > 90` for 2m                                                                                       |
 | `metrics-bridge` | Poll Errors                          | critical | `rate(mento_pool_bridge_poll_errors_total[5m]) > 0` for 3m                                                                               |
 
+**Reading alert vs SLO state — peak vs current basis**
+
+The deviation gates that decide "is this critical?" use **different basis**
+in three places, and a single incident can live in different states across
+them. This is intentional but surprising the first time you see it.
+
+| Surface                                     | Gate                                   | What it answers                                      |
+| ------------------------------------------- | -------------------------------------- | ---------------------------------------------------- |
+| Live health badge (`computeHealthStatus`)   | `current devRatio > 1.05` AND age > 1h | Is the pool **right now** in critical state?         |
+| Live uptime tile (`computePoolUptimePct`)   | `peak / entry threshold > 1.05`        | Has this breach **ever** crossed critical magnitude? |
+| Persisted SLO (`cumulativeCriticalSeconds`) | Same as uptime tile (peak-based)       | All-time critical seconds (closed breaches only)     |
+| Grafana critical alert                      | `current ratio > 1.05` AND age > 1h    | Should we page on-call **right now**?                |
+
+A pool that **peaks at 1.06 then drops to 1.04** sits in a split state:
+
+- **Health badge:** WARN (current ratio dropped below 1.05).
+- **Uptime tile:** counts past-grace seconds as critical (peak hit 1.05).
+- **Grafana page:** silenced (current ratio dropped — on-call sees the
+  immediate problem cleared).
+- **`cumulativeCriticalSeconds`:** continues to credit critical time when
+  the breach eventually closes.
+
+**What this means in practice:**
+
+- The Grafana critical alert silencing **does NOT** mean uptime recovered.
+  The cumulative counter is the SLO source of truth; Grafana fires on live
+  state.
+- If the uptime tile drops without an active critical alert, look for a
+  recently-cleared past-grace breach.
+- "Currently critical, paged" → Grafana rule.
+  "How much demonstrable critical time, all-time" → `cumulativeCriticalSeconds`.
+
+The split is deliberate: paging is keyed to "is the immediate problem
+ongoing?" so on-call can clear and silence cleanly, while the SLO counter
+remembers severity-of-incident-when-it-was-active so resolved-but-bad
+breaches still register against the budget.
+
 **`service` label convention** (matches the existing Aegis pattern of `service = monitored-domain`, not producer):
 
 | `service`        | Covers                                                                   |
