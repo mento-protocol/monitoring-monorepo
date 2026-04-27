@@ -90,7 +90,7 @@ describe("computeHealthStatus", () => {
 
   it('stays "OK" when deviation is exactly at the threshold', () => {
     // priceDifference = 5000, threshold = 5000 → ratio = 1.0. At-threshold
-    // is still healthy; WARN only kicks in strictly above.
+    // is healthy and inside tolerance.
     expect(
       computeHealthStatus({
         source: "fpmm_factory",
@@ -102,7 +102,87 @@ describe("computeHealthStatus", () => {
     ).toBe("OK");
   });
 
-  it('returns "WARN" on a fresh breach without a breach-start anchor', () => {
+  it('stays "OK" inside the 1% tolerance dead zone (devRatio = 1.005)', () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "5025",
+        rebalanceThreshold: 5000,
+      }),
+    ).toBe("OK");
+  });
+
+  it('stays "OK" at exactly the tolerance line — strict `>` (devRatio = 1.01)', () => {
+    expect(
+      computeHealthStatus({
+        source: "fpmm_factory",
+        oracleOk: true,
+        oracleTimestamp: FRESH_TS,
+        priceDifference: "5050",
+        rebalanceThreshold: 5000,
+      }),
+    ).toBe("OK");
+  });
+
+  it('returns "WARN" just above tolerance regardless of duration (devRatio = 1.012)', () => {
+    // Long anchor (2h) must NOT escalate this — magnitude < 1.05 means
+    // duration is irrelevant for CRITICAL.
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "fpmm_factory",
+          oracleTimestamp: FRESH_TS,
+          priceDifference: "5060",
+          rebalanceThreshold: 5000,
+          deviationBreachStartedAt: String(now - 2 * 3600),
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("WARN");
+  });
+
+  it('stays "WARN" at exactly the critical-magnitude line — strict `>` (devRatio = 1.05)', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "fpmm_factory",
+          oracleTimestamp: FRESH_TS,
+          priceDifference: "5250",
+          rebalanceThreshold: 5000,
+          deviationBreachStartedAt: String(now - 2 * 3600),
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("WARN");
+  });
+
+  it('stays "WARN" at devRatio = 1.05 within the grace window (sub-grace boundary)', () => {
+    // Mirror of the past-grace 1.05 case above, this time with a 30m anchor.
+    // Pins the sub-grace boundary so a regression that moved the magnitude
+    // check inside the grace branch can't slip past parity.
+    const now = Math.floor(Date.now() / 1000);
+    expect(
+      computeHealthStatus(
+        {
+          source: "fpmm_factory",
+          oracleTimestamp: FRESH_TS,
+          priceDifference: "5250",
+          rebalanceThreshold: 5000,
+          deviationBreachStartedAt: String(now - 1800),
+        },
+        undefined,
+        now,
+      ),
+    ).toBe("WARN");
+  });
+
+  it('returns "WARN" on a fresh large breach without a breach-start anchor', () => {
     // Indexer hasn't populated deviationBreachStartedAt yet — stay at WARN
     // rather than spuriously jump to CRITICAL.
     expect(

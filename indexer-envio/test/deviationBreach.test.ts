@@ -483,6 +483,60 @@ describe("recordBreachTransition — falling edge", () => {
     assert.equal(poolUpdate.cumulativeCriticalSeconds, 0n);
   });
 
+  it("criticalDurationSeconds is 0 when peak never crossed the 5% critical-magnitude line, even past grace", async () => {
+    // Tolerance refactor invariant: critical seconds only accrue for breaches
+    // whose peak hit > 1.05x. A pool sitting at ~1.02x for 5h would otherwise
+    // inflate `cumulativeCriticalSeconds` and disagree with `computeHealthStatus`.
+    const { store, context } = makeMockContext();
+    const open: DeviationThresholdBreach = {
+      id: openBreachId("42220-0xtest", MON_NOON),
+      chainId: 42220,
+      poolId: "42220-0xtest",
+      startedAt: MON_NOON,
+      startedAtBlock: 100n,
+      endedAt: undefined,
+      endedAtBlock: undefined,
+      durationSeconds: undefined,
+      criticalDurationSeconds: undefined,
+      // Peak 5100/5000 = 1.02x — above tolerance, below critical magnitude.
+      entryPriceDifference: 5060n,
+      peakPriceDifference: 5100n,
+      peakAt: MON_NOON + 60n,
+      peakAtBlock: 105n,
+      startedByEvent: "swap",
+      startedByTxHash: "0xabc",
+      endedByEvent: undefined,
+      endedByTxHash: undefined,
+      endedByStrategy: undefined,
+      rebalanceCountDuring: 0,
+    };
+    store.set(open.id, open);
+    const prev = makePool({
+      priceDifference: 5100n,
+      deviationBreachStartedAt: MON_NOON,
+    });
+    // Falls below tolerance: 5025n / 5000 = 1.005 — closes the breach.
+    const next = makePool({
+      priceDifference: 5025n,
+      deviationBreachStartedAt: 0n,
+      cumulativeBreachSeconds: 0n,
+      cumulativeCriticalSeconds: 0n,
+      breachCount: 0,
+    });
+    const poolUpdate = await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON + 5n * 3600n, // 5h — well past 1h grace
+      blockNumber: 200n,
+      txHash: "0xclose-small",
+      source: "fpmm_swap",
+    });
+    const closed = store.get(open.id)!;
+    // Breach duration accrues normally; critical seconds must be 0 because
+    // peak never crossed 1.05x.
+    assert.equal(closed.durationSeconds, 5n * 3600n);
+    assert.equal(closed.criticalDurationSeconds, 0n);
+    assert.equal(poolUpdate.cumulativeCriticalSeconds, 0n);
+  });
+
   it("criticalDurationSeconds is 0 when endedAt lands exactly on the grace boundary", async () => {
     // Strict `endedAt > graceEnd` means endedAt === startedAt + 3600 stays
     // at 0 critical. Guards against an off-by-one where `>=` would credit
@@ -775,6 +829,30 @@ describe("recordBreachTransition — no transition", () => {
       blockTimestamp: MON_NOON,
       blockNumber: 100n,
       txHash: "0xhealthy",
+      source: "fpmm_swap",
+    });
+    assert.deepEqual(poolUpdate, {});
+    assert.equal(store.size, 0);
+  });
+
+  it("does not open a breach row for tiny overages within the 1% tolerance dead zone", async () => {
+    // 5025/5000 = 1.005 — above raw threshold but inside tolerance.
+    // Under the tolerance rule the indexer never anchors here, so the
+    // upstream nextDeviationBreachStartedAt would NOT pass MON_NOON in.
+    // Verify recordBreachTransition is a no-op when the anchor is 0n.
+    const { store, context } = makeMockContext();
+    const prev = makePool({
+      priceDifference: 4000n,
+      deviationBreachStartedAt: 0n,
+    });
+    const next = makePool({
+      priceDifference: 5025n,
+      deviationBreachStartedAt: 0n,
+    });
+    const poolUpdate = await recordBreachTransition(context, prev, next, {
+      blockTimestamp: MON_NOON,
+      blockNumber: 100n,
+      txHash: "0xtolerance",
       source: "fpmm_swap",
     });
     assert.deepEqual(poolUpdate, {});

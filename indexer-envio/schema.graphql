@@ -47,9 +47,9 @@ type Pool {
   rebalanceThreshold: Int!
   lastRebalancedAt: BigInt!
   # Rising-edge timestamp: block time when priceDifference crossed strictly
-  # above rebalanceThreshold (devRatio > 1.0). Exact-threshold pools stay
-  # WARN and do NOT start this timer. 0n when not currently breached. Does
-  # not track oracle staleness — this is price-action only.
+  # above the 1% tolerance line (devRatio > 1.01). Exact-tolerance pools
+  # stay OK and do NOT start this timer. 0n when not currently breached.
+  # Does not track oracle staleness — this is price-action only.
   deviationBreachStartedAt: BigInt!
 
   # Health
@@ -57,7 +57,7 @@ type Pool {
 
   # Health score accumulators (FPMM pools only)
   healthTotalSeconds: BigInt! # total tracked seconds with oracle coverage
-  healthBinarySeconds: BigInt! # seconds where deviationRatio ≤ 1.0
+  healthBinarySeconds: BigInt! # seconds where deviationRatio ≤ 1.01 (within tolerance)
   lastOracleSnapshotTimestamp: BigInt! # timestamp of most recent oracle snapshot
   lastDeviationRatio: String! # deviationRatio at most recent snapshot
   lastEffectivenessRatio: String! # effectivenessRatio of most recent RebalanceEvent ("-1" sentinel until first rebalance)

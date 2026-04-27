@@ -25,59 +25,92 @@ import { recordBreachTransition } from "./deviationBreach";
 // ---------------------------------------------------------------------------
 
 /**
- * How long a pool may sit above the rebalance threshold before the status
- * escalates from WARN to CRITICAL. Mirrors `DEVIATION_BREACH_GRACE_SECONDS`
- * in `ui-dashboard/src/lib/health.ts`.
+ * How long a pool may sit above the critical magnitude (5% over threshold)
+ * before the status escalates from WARN to CRITICAL. Mirrors
+ * `DEVIATION_BREACH_GRACE_SECONDS` in `ui-dashboard/src/lib/health.ts`.
  */
 export const DEVIATION_BREACH_GRACE_SECONDS = 3600n;
 
 /**
- * This indexer branch MUST stay in lockstep with the dashboard's deviation
- * + grace logic in `ui-dashboard/src/lib/health.ts`. Mirrored cases live in
- * `test/healthStatusParity.test.ts`:
- *  - `devRatio <= 1.0` → OK (close-to-threshold is not actionable)
- *  - `devRatio > 1.0` within DEVIATION_BREACH_GRACE_SECONDS → WARN
- *  - `devRatio > 1.0` beyond the grace → CRITICAL
- *
- * Grace is anchored on `deviationBreachStartedAt`, which the caller updates
- * BEFORE invoking this function so `pool.deviationBreachStartedAt` reflects
- * the current row's breach start (not the previous one).
- *
- * Intentional divergences (NOT covered by the parity suite):
- *  - Oracle staleness: indexer reads the event-time `oracleOk` flag;
- *    the UI reads `oracleTimestamp` + `oracleExpiry` against wall clock
- *    at render time with per-chain fallbacks.
- *  - Weekend reclassification: only the UI has `isWeekend()` at render
- *    time. Indexed weekend-stale pools surface as CRITICAL here; the UI
- *    reclassifies them to WEEKEND when rendering.
+ * Tolerance + critical-magnitude thresholds as `num/den` pairs over the
+ * rebalance threshold. Integer math avoids float pathology at the boundaries.
+ * Mirrored in `ui-dashboard/src/lib/health.ts`; parity is enforced by
+ * `test/healthStatusParity.test.ts`.
  */
-export function computeHealthStatus(pool: Pool, nowSeconds: bigint): string {
+export const DEVIATION_TOLERANCE_NUM = 101n;
+export const DEVIATION_TOLERANCE_DEN = 100n;
+export const DEVIATION_CRITICAL_NUM = 105n;
+export const DEVIATION_CRITICAL_DEN = 100n;
+
+/**
+ * Health-status union the indexer can emit. Narrower than the dashboard's
+ * `HealthStatus` (no "WEEKEND" — that's a render-time reclassification of
+ * stale-oracle CRITICAL).
+ */
+export type IndexerHealthStatus = "OK" | "WARN" | "CRITICAL" | "N/A";
+
+/** Resolve the effective threshold in bps. The schema-default of 0 means the
+ * indexer hasn't read the on-chain value yet — fall back to 10000 (100%) so
+ * pools don't trip the breach predicate while we wait for the RPC self-heal.
+ */
+export const effectiveThreshold = (
+  pool: Pick<Pool, "rebalanceThreshold">,
+): bigint =>
+  BigInt(pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000);
+
+/** True when `priceDifference` is strictly above the 5% critical-magnitude
+ * line, integer-safe. Used by both the live status branch (here) and the
+ * cumulative `criticalDurationSeconds` accrual in `deviationBreach.ts` to
+ * keep them in lockstep. */
+export const isAboveCriticalMagnitude = (
+  priceDifference: bigint,
+  threshold: bigint,
+): boolean =>
+  priceDifference * DEVIATION_CRITICAL_DEN > threshold * DEVIATION_CRITICAL_NUM;
+
+/**
+ * Mirror of `computeHealthStatus` in `ui-dashboard/src/lib/health.ts`; parity
+ * is enforced by `test/healthStatusParity.test.ts`. The breach anchor
+ * (`deviationBreachStartedAt`) is set at the 1.01x crossing in
+ * `isInDeviationBreach`, so the 1h grace counts from when the pool first
+ * exceeded tolerance.
+ *
+ * Intentional divergences NOT covered by the parity suite:
+ *  - Oracle staleness: indexer reads the event-time `oracleOk` flag; the UI
+ *    reads `oracleTimestamp + oracleExpiry` against wall clock at render time
+ *    with per-chain fallbacks.
+ *  - Weekend reclassification: only the UI has `isWeekend()` at render time.
+ *    Indexed weekend-stale pools surface as CRITICAL here; the UI
+ *    reclassifies them to WEEKEND.
+ */
+export function computeHealthStatus(
+  pool: Pool,
+  nowSeconds: bigint,
+): IndexerHealthStatus {
   if (isVirtualPool(pool)) return "N/A";
   if (!pool.oracleOk) return "CRITICAL";
-  const threshold =
-    pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
-  const devRatio = Number(pool.priceDifference) / threshold;
-  if (devRatio > 1.0) {
-    // Without a breach-start anchor (indexer hasn't populated it yet), stay
-    // at WARN rather than spuriously escalating to CRITICAL.
-    if (pool.deviationBreachStartedAt <= 0n) return "WARN";
-    const withinGrace =
-      nowSeconds - pool.deviationBreachStartedAt <
-      DEVIATION_BREACH_GRACE_SECONDS;
-    return withinGrace ? "WARN" : "CRITICAL";
-  }
-  return "OK";
+  const threshold = effectiveThreshold(pool);
+  const diff = pool.priceDifference;
+  const aboveTolerance =
+    diff * DEVIATION_TOLERANCE_DEN > threshold * DEVIATION_TOLERANCE_NUM;
+  if (!aboveTolerance) return "OK";
+  if (!isAboveCriticalMagnitude(diff, threshold)) return "WARN";
+  // Without a breach-start anchor (indexer hasn't populated it yet), stay
+  // at WARN rather than spuriously escalating to CRITICAL.
+  if (pool.deviationBreachStartedAt <= 0n) return "WARN";
+  const withinGrace =
+    nowSeconds - pool.deviationBreachStartedAt < DEVIATION_BREACH_GRACE_SECONDS;
+  return withinGrace ? "WARN" : "CRITICAL";
 }
 
-// Integer comparison avoids float pathology at the devRatio = 1.0 boundary.
-// Strict `>` matches `computeHealthStatus`: exactly-at-threshold stays OK,
-// so it is NOT counted as a breach either. Oracle staleness is
-// intentionally NOT counted — this tracks price action only.
+// Strict `>` at the tolerance line matches `computeHealthStatus`. Oracle
+// staleness is intentionally NOT counted — this tracks price action only.
 export function isInDeviationBreach(pool: Pool): boolean {
   if (isVirtualPool(pool)) return false;
-  const threshold =
-    pool.rebalanceThreshold > 0 ? pool.rebalanceThreshold : 10000;
-  return pool.priceDifference > BigInt(threshold);
+  return (
+    pool.priceDifference * DEVIATION_TOLERANCE_DEN >
+    effectiveThreshold(pool) * DEVIATION_TOLERANCE_NUM
+  );
 }
 
 export function nextDeviationBreachStartedAt(

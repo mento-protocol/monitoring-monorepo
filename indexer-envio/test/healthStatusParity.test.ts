@@ -4,7 +4,7 @@ import { computeHealthStatus } from "../src/pool";
 import { makePool } from "./helpers/makePool";
 
 // ---------------------------------------------------------------------------
-// Cross-package parity for the DEVIATION + GRACE branch of
+// Cross-package parity for the DEVIATION + TOLERANCE + GRACE branches of
 // computeHealthStatus only. The indexer and the UI diverge intentionally
 // on other branches (oracle-staleness via wall-clock vs. the indexed
 // `oracleOk` flag, weekend reclassification at render time, per-chain
@@ -12,10 +12,11 @@ import { makePool } from "./helpers/makePool";
 //
 // Cases in this file MUST match the corresponding assertions in
 // `ui-dashboard/src/lib/__tests__/health.test.ts`. If you change the
-// devRatio boundary or grace-window behaviour in either package, mirror
-// the change and update the case here so the shared invariant can't slip
-// silently. Adding a staleness / weekend / chain-fallback parity test
-// would require the indexer to actually mirror those branches first.
+// devRatio tolerance/critical boundaries or grace-window behaviour in either
+// package, mirror the change and update the case here so the shared
+// invariant can't slip silently. Adding a staleness / weekend / chain-
+// fallback parity test would require the indexer to actually mirror those
+// branches first.
 // ---------------------------------------------------------------------------
 
 const NOW = 1_700_000_000n;
@@ -50,18 +51,58 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
   });
 
   it("stays 'OK' when devRatio is exactly 1.0", () => {
-    // 5000/5000 = 1.0 — at-threshold is still healthy.
+    // 5000/5000 = 1.0 — at-threshold is healthy and inside tolerance.
     const pool = makePool({ priceDifference: 5000n });
     assert.equal(computeHealthStatus(pool, NOW), "OK");
   });
 
-  it("returns 'WARN' on a fresh breach with no breach-start anchor yet", () => {
+  it("stays 'OK' inside the 1% tolerance dead zone (devRatio = 1.005)", () => {
+    const pool = makePool({ priceDifference: 5025n });
+    assert.equal(computeHealthStatus(pool, NOW), "OK");
+  });
+
+  it("stays 'OK' at exactly the tolerance line — strict `>` (devRatio = 1.01)", () => {
+    const pool = makePool({ priceDifference: 5050n });
+    assert.equal(computeHealthStatus(pool, NOW), "OK");
+  });
+
+  it("returns 'WARN' just above tolerance regardless of duration (devRatio = 1.012)", () => {
+    // Long anchor (2h) must NOT escalate this — magnitude < 1.05 means
+    // duration is irrelevant for CRITICAL.
+    const pool = makePool({
+      priceDifference: 5060n,
+      deviationBreachStartedAt: NOW - 2n * 3600n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "WARN");
+  });
+
+  it("stays 'WARN' at exactly the critical-magnitude line — strict `>` (devRatio = 1.05)", () => {
+    const pool = makePool({
+      priceDifference: 5250n,
+      deviationBreachStartedAt: NOW - 2n * 3600n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "WARN");
+  });
+
+  it("stays 'WARN' at devRatio = 1.05 within the grace window (sub-grace boundary)", () => {
+    // Mirror of the past-grace 1.05 case above, this time with a 30m anchor.
+    // Both magnitude and duration gates must hold for CRITICAL — pin the
+    // sub-grace boundary so a regression that moved the magnitude check
+    // inside the grace branch can't slip past parity.
+    const pool = makePool({
+      priceDifference: 5250n,
+      deviationBreachStartedAt: NOW - 1800n,
+    });
+    assert.equal(computeHealthStatus(pool, NOW), "WARN");
+  });
+
+  it("returns 'WARN' on a fresh large breach with no breach-start anchor yet", () => {
     // 8000/5000 = 1.6, deviationBreachStartedAt not yet populated.
     const pool = makePool({ priceDifference: 8000n });
     assert.equal(computeHealthStatus(pool, NOW), "WARN");
   });
 
-  it("stays 'WARN' while the breach is within the 1h grace window", () => {
+  it("stays 'WARN' while a >5% breach is within the 1h grace window", () => {
     const pool = makePool({
       priceDifference: 8000n,
       deviationBreachStartedAt: NOW - 1800n, // 30min ago
@@ -109,7 +150,7 @@ describe("computeHealthStatus — parity with ui-dashboard", () => {
   });
 
   it("falls back to 10000 bps threshold when rebalanceThreshold is 0", () => {
-    // 9000/10000 = 0.9 → still OK under the new rule.
+    // 9000/10000 = 0.9 → still OK.
     const pool = makePool({
       priceDifference: 9000n,
       rebalanceThreshold: 0,

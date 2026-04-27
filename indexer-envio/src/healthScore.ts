@@ -206,11 +206,13 @@ export function updateHealthAccumulators(
   // Was the PREVIOUS interval healthy?
   // Use string comparison against sentinel to avoid float boundary issues.
   // lastDeviationRatio is "-1" for no-data, or a 6dp decimal string.
+  // Healthy band matches `computeHealthStatus`: `devRatio ≤ 1.01` (within 1%
+  // tolerance dead zone). Anything above is at-or-past breach in the new rule.
   const prevRatio = pool.lastDeviationRatio;
   const prevIsNoData = prevRatio === "-1" || prevRatio === "";
   const prevHealthy =
     !prevIsNoData &&
-    parseFloat(prevRatio) <= 1.0 &&
+    parseFloat(prevRatio) <= 1.01 &&
     !isNaN(parseFloat(prevRatio));
 
   // If previous interval was no-data, exclude this duration from the
