@@ -32,3 +32,10 @@ main,
     font-size: 10px !important;
   }
 }
+
+/* Plotly draws each hover spike as two stacked <line>s — a halo (spikethickness + 2)
+   plus the inner line. Both inherit `spikecolor`, so a 0.5px spike still reads as
+   2.5px. Hide the halo so the configured thickness is what renders. */
+.js-plotly-plot .hoverlayer line.spikeline:first-of-type {
+  stroke-opacity: 0;
+}

@@ -27,6 +27,7 @@ import {
 } from "@/components/volume-over-time-chart";
 import {
   TVL_NETWORK,
+  TVL_NETWORK_2,
   makeNetworkData,
   makeSnapshot,
   makeTvlPool,
@@ -75,7 +76,7 @@ describe("buildDailyVolumeSeries", () => {
     const day0 = today - 2 * SECONDS_PER_DAY;
     const day2 = today;
 
-    const series = buildDailyVolumeSeries(
+    const { series } = buildDailyVolumeSeries(
       makeVolumeNetworkData([
         { timestamp: day0, swapVolume0: "1000000000000000000" },
         { timestamp: day2, swapVolume0: "3000000000000000000" },
@@ -104,7 +105,7 @@ describe("buildDailyVolumeSeries", () => {
     const windowFrom = day0 + 6 * 3600; // window starts 6h into day 0 → day0 excluded
     const windowTo = day2; // upper bound lands on day 2's boundary → day2 excluded
 
-    const series = buildDailyVolumeSeries(
+    const { series } = buildDailyVolumeSeries(
       makeVolumeNetworkData([
         { timestamp: day0, swapVolume0: "1000000000000000000" }, // starts before window.from → excluded
         { timestamp: day1, swapVolume0: "2000000000000000000" }, // fully inside → $2
@@ -119,7 +120,7 @@ describe("buildDailyVolumeSeries", () => {
 
   it("returns empty when no snapshots fall inside the window", () => {
     const today = dayAlignedNow();
-    const series = buildDailyVolumeSeries(
+    const { series } = buildDailyVolumeSeries(
       makeVolumeNetworkData([
         {
           timestamp: today - 20 * SECONDS_PER_DAY,
@@ -139,7 +140,7 @@ describe("buildDailyVolumeSeries", () => {
     const today = dayAlignedNow();
     const from = today - 3 * SECONDS_PER_DAY;
     const to = today; // day-aligned upper bound
-    const series = buildDailyVolumeSeries(
+    const { series } = buildDailyVolumeSeries(
       makeVolumeNetworkData([
         { timestamp: from + 3600, swapVolume0: "1000000000000000000" },
         {
@@ -171,7 +172,7 @@ describe("buildDailyVolumeSeries", () => {
     const from = today - 2 * SECONDS_PER_DAY;
     const to = today + 6 * 3600; // window.to is 06:00 UTC today (non-midnight)
 
-    const series = buildDailyVolumeSeries(
+    const { series } = buildDailyVolumeSeries(
       makeVolumeNetworkData([
         { timestamp: from, swapVolume0: "1000000000000000000" }, // day-2: $1
         {
@@ -190,6 +191,99 @@ describe("buildDailyVolumeSeries", () => {
       today,
     ]);
     expect(series.reduce((s, p) => s + p.volumeUSD, 0)).toBe(6); // $1 + $2 + $3
+  });
+
+  it("partitions volume per chain via byChain, with sums equal to the total", () => {
+    // Chain A contributes $1 on day 0 and $3 on day 1.
+    // Chain B contributes $2 on day 0 and nothing on day 1.
+    // Total: day0=$3, day1=$3. byChain[A]=[$1,$3], byChain[B]=[$2,$0].
+    const today = dayAlignedNow();
+    const day0 = today - 2 * SECONDS_PER_DAY;
+    const day1 = today - 1 * SECONDS_PER_DAY;
+
+    const { series, byChain } = buildDailyVolumeSeries([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [makeTvlPool({ id: "pool-a" })],
+        snapshots30d: [
+          makeSnapshot({
+            poolId: "pool-a",
+            timestamp: day0,
+            swapVolume0: "1000000000000000000",
+          }),
+          makeSnapshot({
+            poolId: "pool-a",
+            timestamp: day1,
+            swapVolume0: "3000000000000000000",
+          }),
+        ],
+      }),
+      makeNetworkData({
+        network: TVL_NETWORK_2,
+        pools: [makeTvlPool({ id: "pool-b" })],
+        snapshots30d: [
+          makeSnapshot({
+            poolId: "pool-b",
+            timestamp: day0,
+            swapVolume0: "2000000000000000000",
+          }),
+        ],
+      }),
+    ]);
+
+    expect(byChain).toHaveLength(2);
+    const chainA = byChain.find((c) => c.network.id === TVL_NETWORK.id)!;
+    const chainB = byChain.find((c) => c.network.id === TVL_NETWORK_2.id)!;
+
+    // Per-bucket invariant: chainA + chainB = total for every bucket.
+    for (let i = 0; i < series.length; i++) {
+      expect(chainA.series[i].volumeUSD + chainB.series[i].volumeUSD).toBe(
+        series[i].volumeUSD,
+      );
+      expect(chainA.series[i].timestamp).toBe(series[i].timestamp);
+    }
+    // Zero-fill: chain B emits 0 on day 1 (rather than being omitted).
+    expect(chainB.series[1].volumeUSD).toBe(0);
+  });
+
+  it("omits chains whose snapshots are all out-of-window or null-priced", () => {
+    // Chain B has snapshots but they're all outside the active window
+    // → byChain should not include chain B at all (legend would otherwise
+    // show a flat-zero band that misrepresents reality).
+    const today = dayAlignedNow();
+    const day0 = today - 2 * SECONDS_PER_DAY;
+    const farPast = today - 100 * SECONDS_PER_DAY;
+
+    const { byChain } = buildDailyVolumeSeries(
+      [
+        makeNetworkData({
+          network: TVL_NETWORK,
+          pools: [makeTvlPool({ id: "pool-a" })],
+          snapshots30d: [
+            makeSnapshot({
+              poolId: "pool-a",
+              timestamp: day0,
+              swapVolume0: "1000000000000000000",
+            }),
+          ],
+        }),
+        makeNetworkData({
+          network: TVL_NETWORK_2,
+          pools: [makeTvlPool({ id: "pool-b" })],
+          snapshots30d: [
+            makeSnapshot({
+              poolId: "pool-b",
+              timestamp: farPast,
+              swapVolume0: "5000000000000000000",
+            }),
+          ],
+        }),
+      ],
+      { from: today - 5 * SECONDS_PER_DAY, to: today },
+    );
+
+    expect(byChain).toHaveLength(1);
+    expect(byChain[0].network.id).toBe(TVL_NETWORK.id);
   });
 });
 
@@ -313,8 +407,30 @@ describe("VolumeOverTimeChart render", () => {
     });
 
     expect(html).toContain("$3.00");
-    // At 30d default range we don't have two full 7d windows, so delta is null.
+    // Only 2 days of history < 15 buckets required for WoW comparison, so
+    // the delta is null. The 30d range itself does NOT suppress the pill —
+    // the WoW basis is always 7d-vs-7d, independent of visible range.
     expect(html).not.toContain("week-over-week");
+  });
+
+  it("shows the WoW delta pill at the default 30d range when ≥15 days of history exist", () => {
+    // The pill must be visible at every range tab — the comparison basis
+    // (last 7 completed UTC days vs prior 7) is independent of the visible
+    // range. Build 15 buckets with prior 7 sum < last 7 sum so WoW is +ve.
+    const today = dayAlignedNow();
+    const start = today - 14 * SECONDS_PER_DAY;
+    const snapshots = Array.from({ length: 15 }, (_, i) => ({
+      timestamp: start + i * SECONDS_PER_DAY,
+      // First 7 buckets contribute $1 each, next 7 contribute $2 each, today $0.
+      swapVolume0:
+        i < 7 ? "1000000000000000000" : i < 14 ? "2000000000000000000" : "0",
+    }));
+
+    const html = renderChart({
+      networkData: makeVolumeNetworkData(snapshots),
+    });
+
+    expect(html).toContain("week-over-week");
   });
 
   it("uses the fetch-anchored snapshotWindows rather than render-time Date.now()", () => {

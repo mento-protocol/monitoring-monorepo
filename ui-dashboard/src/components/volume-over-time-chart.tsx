@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { chainColor } from "@/lib/chain-colors";
 import { formatUSD } from "@/lib/format";
 import {
   getSnapshotVolumeInUsd,
@@ -9,7 +10,11 @@ import {
   type TimeRange,
 } from "@/lib/volume";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
-import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
+import type { Network } from "@/lib/networks";
+import {
+  TimeSeriesChartCard,
+  type BreakdownSeries,
+} from "@/components/time-series-chart-card";
 import {
   SECONDS_PER_DAY,
   type RangeKey,
@@ -17,6 +22,11 @@ import {
 } from "@/lib/time-series";
 
 type SeriesPoint = { timestamp: number; volumeUSD: number };
+
+export type ChainVolumeSeries = {
+  network: Network;
+  series: SeriesPoint[];
+};
 
 /**
  * Includes swap volume from every pool type (FPMM and virtual), matching the
@@ -39,8 +49,15 @@ type SeriesPoint = { timestamp: number; volumeUSD: number };
 export function buildDailyVolumeSeries(
   networkData: NetworkData[],
   window?: TimeRange,
-): SeriesPoint[] {
-  const bucketTotals = new Map<number, number>();
+): { series: SeriesPoint[]; byChain: ChainVolumeSeries[] } {
+  type PerChain = {
+    network: Network;
+    bucketTotals: Map<number, number>;
+  };
+  // Keyed by Network.id so distinct configured networks that share a chainId
+  // (e.g. celo-mainnet vs celo-mainnet-local) stay separate in the breakdown.
+  const perChain = new Map<string, PerChain>();
+  const totalBuckets = new Map<number, number>();
   let minSnapshotBucket = Infinity;
 
   for (const netData of networkData) {
@@ -65,11 +82,20 @@ export function buildDailyVolumeSeries(
       if (volume === null) continue;
       const bucket = Math.floor(timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
       minSnapshotBucket = Math.min(minSnapshotBucket, bucket);
-      bucketTotals.set(bucket, (bucketTotals.get(bucket) ?? 0) + volume);
+      totalBuckets.set(bucket, (totalBuckets.get(bucket) ?? 0) + volume);
+      let entry = perChain.get(netData.network.id);
+      if (!entry) {
+        entry = { network: netData.network, bucketTotals: new Map() };
+        perChain.set(netData.network.id, entry);
+      }
+      entry.bucketTotals.set(
+        bucket,
+        (entry.bucketTotals.get(bucket) ?? 0) + volume,
+      );
     }
   }
 
-  if (!Number.isFinite(minSnapshotBucket)) return [];
+  if (!Number.isFinite(minSnapshotBucket)) return { series: [], byChain: [] };
 
   // Use ceil so the emission range starts at the first full UTC day that begins
   // at or after window.from — prevents a synthetic zero bar for any partial day
@@ -89,14 +115,25 @@ export function buildDailyVolumeSeries(
     endRef > endBucket ? endBucket : endBucket - SECONDS_PER_DAY;
 
   const series: SeriesPoint[] = [];
+  const byChain: ChainVolumeSeries[] = Array.from(perChain.values()).map(
+    (entry) => ({ network: entry.network, series: [] }),
+  );
   for (
     let timestamp = startBucket;
     timestamp <= lastBucket;
     timestamp += SECONDS_PER_DAY
   ) {
-    series.push({ timestamp, volumeUSD: bucketTotals.get(timestamp) ?? 0 });
+    series.push({ timestamp, volumeUSD: totalBuckets.get(timestamp) ?? 0 });
+    let i = 0;
+    for (const entry of perChain.values()) {
+      byChain[i].series.push({
+        timestamp,
+        volumeUSD: entry.bucketTotals.get(timestamp) ?? 0,
+      });
+      i++;
+    }
   }
-  return series;
+  return { series, byChain };
 }
 
 /**
@@ -134,39 +171,58 @@ export function VolumeOverTimeChart({
 }: VolumeOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("30d");
 
-  // Full-history series kept for the WoW delta (which needs ≥15 UTC-day
-  // buckets). The chart's visible series for 7d/30d uses a different,
-  // rolling-window bucketing path so the range total matches the Summary
-  // tile's rolling-window subtotals exactly.
-  const fullSeries = useMemo<TimeSeriesPoint[]>(
-    () =>
-      buildDailyVolumeSeries(networkData).map((point) => ({
-        timestamp: point.timestamp,
-        value: point.volumeUSD,
-      })),
+  // Full-history pass kept for the WoW delta (≥15 UTC-day buckets) and for
+  // the "all" range tab.
+  const fullResult = useMemo(
+    () => buildDailyVolumeSeries(networkData),
     [networkData],
   );
 
-  const visibleSeries = useMemo<TimeSeriesPoint[]>(() => {
-    if (range === "all") return fullSeries;
-    // Use the fetch-anchored snapshot window (captured once by the hook
-    // during fetchAllNetworks) rather than a fresh `Date.now()` window at
-    // render time. The Summary tile's 7d/30d subtotals are derived from
-    // those fetch-time windows; using a render-time window drifts by up
-    // to the SWR refresh interval around hour boundaries.
+  const fullSeries = useMemo<TimeSeriesPoint[]>(
+    () =>
+      fullResult.series.map((p) => ({
+        timestamp: p.timestamp,
+        value: p.volumeUSD,
+      })),
+    [fullResult],
+  );
+
+  const activeWindow = useMemo<TimeRange | undefined>(() => {
+    if (range === "all") return undefined;
     const fetchWindows = networkData[0]?.snapshotWindows;
-    const window = fetchWindows
+    return fetchWindows
       ? range === "7d"
         ? fetchWindows.w7d
         : fetchWindows.w30d
       : range === "7d"
         ? snapshotWindow7d(Date.now())
         : snapshotWindow30d(Date.now());
-    return buildDailyVolumeSeries(networkData, window).map((point) => ({
-      timestamp: point.timestamp,
-      value: point.volumeUSD,
-    }));
-  }, [networkData, range, fullSeries]);
+  }, [networkData, range]);
+
+  // The "all" tab reuses `fullResult` since its window matches.
+  const { visibleSeries, visibleBreakdown } = useMemo<{
+    visibleSeries: TimeSeriesPoint[];
+    visibleBreakdown: BreakdownSeries[];
+  }>(() => {
+    const { series, byChain } =
+      range === "all"
+        ? fullResult
+        : buildDailyVolumeSeries(networkData, activeWindow);
+    return {
+      visibleSeries: series.map((p) => ({
+        timestamp: p.timestamp,
+        value: p.volumeUSD,
+      })),
+      visibleBreakdown: byChain.map((entry) => ({
+        name: entry.network.label,
+        color: chainColor(entry.network.chainId),
+        series: entry.series.map((p) => ({
+          timestamp: p.timestamp,
+          value: p.volumeUSD,
+        })),
+      })),
+    };
+  }, [networkData, range, activeWindow, fullResult]);
 
   // Hero = sum of visible bars. With rolling-window bucketing on 7d/30d this
   // exactly equals the Summary tile's subtotal for the same window.
@@ -184,10 +240,7 @@ export function VolumeOverTimeChart({
       ? "N/A"
       : formatUSD(rangeTotal);
 
-  // Only show a delta when the comparison basis matches the visible range.
-  // At 30d range we'd need 60d of data for a month-over-month comparison,
-  // which we don't have — suppress rather than mislabel.
-  const change = range === "7d" ? weekOverWeekChangePct(fullSeries) : null;
+  const change = weekOverWeekChangePct(fullSeries);
 
   const emptyMessage = hasError
     ? "Unable to load volume history"
@@ -200,6 +253,8 @@ export function VolumeOverTimeChart({
       title="Volume"
       rangeAriaLabel="Volume chart time range"
       series={visibleSeries}
+      breakdown={visibleBreakdown}
+      breakdownMode="stacked"
       range={range}
       onRangeChange={setRange}
       headline={headline}

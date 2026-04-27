@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useMemo } from "react";
 import {
+  escapePlotText,
   PLOTLY_BASE_LAYOUT,
   PLOTLY_CONFIG,
   ROW_CHART_HEIGHT_PX,
@@ -24,6 +25,15 @@ const Plot = dynamic(() => import("react-plotly.js"), {
   loading: PlotSkeleton,
 });
 
+export type BreakdownSeries = {
+  name: string;
+  color: string;
+  series: TimeSeriesPoint[];
+};
+
+/** `stacked` suppresses the dedicated total trace (top of stack = total). */
+export type BreakdownMode = "lines" | "stacked";
+
 interface TimeSeriesChartCardProps {
   title: string;
   rangeAriaLabel: string;
@@ -33,6 +43,9 @@ interface TimeSeriesChartCardProps {
    * the Volume chart uses a rolling-window rebucketing strategy instead).
    */
   series: TimeSeriesPoint[];
+  breakdown?: BreakdownSeries[];
+  /** How to render the breakdown — defaults to `lines`. */
+  breakdownMode?: BreakdownMode;
   range: RangeKey;
   onRangeChange: (range: RangeKey) => void;
   headline: string;
@@ -55,6 +68,8 @@ export function TimeSeriesChartCard({
   title,
   rangeAriaLabel,
   series,
+  breakdown,
+  breakdownMode = "lines",
   range,
   onRangeChange,
   headline,
@@ -66,31 +81,64 @@ export function TimeSeriesChartCard({
   hasSnapshotError,
   emptyMessage,
 }: TimeSeriesChartCardProps) {
+  const hasBreakdown = (breakdown?.length ?? 0) > 0;
+  const isStacked = hasBreakdown && breakdownMode === "stacked";
   const { traces, layout } = useMemo(() => {
     const xs = series.map((point) =>
       new Date(point.timestamp * 1000).toISOString(),
     );
     const ys = series.map((point) => point.value);
-    const trace = {
-      x: xs,
-      y: ys,
-      type: "scatter" as const,
-      mode: "lines" as const,
-      line: { color: "#6366f1", width: 2 },
-      fill: "tozeroy" as const,
-      fillcolor: "rgba(99,102,241,0.08)",
-      hovertemplate: `<b>$%{y:,.0f}</b><br>%{x|${hoverDateFormat}}<extra></extra>`,
-    };
-    const ymin = ys.length > 0 ? Math.min(...ys) : 0;
-    const ymax = ys.length > 0 ? Math.max(...ys) : 1;
+    const totalTrace = isStacked
+      ? null
+      : {
+          x: xs,
+          y: ys,
+          name: hasBreakdown ? "Total" : undefined,
+          type: "scatter" as const,
+          mode: "lines" as const,
+          line: { color: "#6366f1", width: 2 },
+          fill: "tozeroy" as const,
+          fillcolor: "rgba(99,102,241,0.08)",
+          hovertemplate: `<b>$%{y:,.0f}</b><br>%{x|${hoverDateFormat}}<extra></extra>`,
+        };
+    const breakdownTraces = (breakdown ?? []).map((b) => {
+      // Escape `name` before it reaches Plotly's `name` and `hovertemplate`
+      // slots — both are HTML sinks per `lib/plot.ts:escapePlotText`.
+      const safeName = escapePlotText(b.name);
+      return {
+        x: b.series.map((p) => new Date(p.timestamp * 1000).toISOString()),
+        y: b.series.map((p) => p.value),
+        name: safeName,
+        type: "scatter" as const,
+        mode: "lines" as const,
+        ...(isStacked
+          ? {
+              stackgroup: "total",
+              line: { color: b.color, width: 1.2 },
+              fillcolor: b.color + "cc",
+            }
+          : {
+              line: { color: b.color, width: 1 },
+            }),
+        hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>`,
+      };
+    });
+    // Pull y-min toward 0 when a breakdown is present so smaller chains
+    // don't get clipped off the bottom edge by the total-tight range.
+    const breakdownYs = (breakdown ?? []).flatMap((b) =>
+      b.series.map((p) => p.value),
+    );
+    const allYs = [...ys, ...breakdownYs];
+    const ymin = allYs.length > 0 ? Math.min(...allYs) : 0;
+    const ymax = allYs.length > 0 ? Math.max(...allYs) : 1;
     const span = Math.max(ymax - ymin, ymax * 0.02, 1);
     const yRange: [number, number] = [
-      Math.max(0, ymin - span * 0.1),
+      hasBreakdown ? 0 : Math.max(0, ymin - span * 0.1),
       ymax + span * 0.35,
     ];
 
     return {
-      traces: [trace],
+      traces: totalTrace ? [...breakdownTraces, totalTrace] : breakdownTraces,
       layout: {
         ...PLOTLY_BASE_LAYOUT,
         font: { ...PLOTLY_BASE_LAYOUT.font, size: 11 },
@@ -108,6 +156,20 @@ export function TimeSeriesChartCard({
           // to a dashed-looking fragment by the tight bottom margin.
           tickformat: "%b %d",
           fixedrange: true,
+          // Hairline spike on breakdown charts only — single-trace consumers
+          // (bridge / pool detail) keep Plotly's default-no-spike behavior.
+          // 0.5px SVG stroke ≈ 1 device pixel on retina; the wider halo line
+          // is suppressed in `globals.css` so this width isn't doubled.
+          ...(hasBreakdown
+            ? {
+                showspikes: true,
+                spikemode: "across" as const,
+                spikethickness: 0.5,
+                spikedash: "solid" as const,
+                spikecolor: "#ffffff",
+                spikesnap: "cursor" as const,
+              }
+            : {}),
         },
         yaxis: {
           showgrid: false,
@@ -117,11 +179,22 @@ export function TimeSeriesChartCard({
           range: yRange,
           fixedrange: true,
         },
-        showlegend: false,
-        margin: { t: 8, r: 8, b: 24, l: 8 },
+        showlegend: hasBreakdown,
+        legend: hasBreakdown
+          ? {
+              orientation: "h" as const,
+              y: -0.15,
+              x: 0,
+              font: { color: "#94a3b8", size: 11 },
+              bgcolor: "transparent",
+            }
+          : undefined,
+        margin: { t: 8, r: 8, b: hasBreakdown ? 48 : 24, l: 8 },
         autosize: true,
         dragmode: false as const,
-        hovermode: "x" as const,
+        // Unified hover only when there's a breakdown — single-trace charts
+        // keep the per-trace tooltip placement they had before this PR.
+        hovermode: hasBreakdown ? ("x unified" as const) : ("x" as const),
         hoverlabel: {
           bgcolor: "#0f172a",
           bordercolor: "#6366f1",
@@ -129,7 +202,7 @@ export function TimeSeriesChartCard({
         },
       },
     };
-  }, [series, hoverDateFormat]);
+  }, [series, breakdown, hasBreakdown, isStacked, hoverDateFormat]);
 
   const deltaPill =
     change === null || isLoading || hasError ? null : (
