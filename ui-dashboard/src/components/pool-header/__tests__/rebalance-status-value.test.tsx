@@ -71,6 +71,7 @@ const BASE_POOL: Pool = {
   oracleExpiry: "300",
   priceDifference: "0",
   rebalanceThreshold: 5000,
+  hasHealthData: true,
 };
 
 function rebalanceState(overrides: {
@@ -197,6 +198,25 @@ describe("RebalanceStatusValue", () => {
     );
     expect(html).toContain("Oracle stale");
     expect(html).toContain("text-red-400");
+  });
+
+  it("renders 'Health data not yet available' when the pool's hasHealthData flag is not true", () => {
+    // Mirror of DeviationCell / HealthPanel: zero-filled defaults make
+    // computeHealthStatus return CRITICAL → "Oracle stale" without this
+    // guard, which falsely cries wolf for pools the indexer hasn't
+    // reached yet.
+    mockUseRebalanceCheck.mockReturnValue(rebalanceState({ data: null }));
+    const html = renderToStaticMarkup(
+      <RebalanceStatusValue
+        pool={{ ...BASE_POOL, hasHealthData: false }}
+        network={NETWORK}
+        strategyAddress={STRATEGY_ADDR}
+      />,
+    );
+    expect(html).toContain("Health data not yet available");
+    expect(html).toContain("text-slate-400");
+    expect(html).not.toContain("Oracle stale");
+    expect(html).not.toContain("Diagnostics unavailable");
   });
 
   it("still renders the passive status (from indexed data) when rpcUrl is missing", () => {

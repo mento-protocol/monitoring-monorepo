@@ -47,10 +47,19 @@ export function RebalanceStatusValue({
     statusText = "Diagnostics unavailable";
     statusColor = "text-slate-400";
   } else if (rebalanceCheck === null) {
-    ({ text: statusText, color: statusColor } = getPassiveStatus(
-      pool,
-      network,
-    ));
+    // Mirror DeviationCell / HealthPanel: zero-filled defaults make
+    // computeHealthStatus return CRITICAL ("Oracle stale") for pools the
+    // indexer hasn't reached yet. Render the same "no data yet" copy
+    // HealthPanel uses instead of crying wolf.
+    if (pool.hasHealthData !== true) {
+      statusText = "Health data not yet available";
+      statusColor = "text-slate-400";
+    } else {
+      ({ text: statusText, color: statusColor } = getPassiveStatus(
+        pool,
+        network,
+      ));
+    }
   } else if (rebalanceCheck.canRebalance) {
     statusText = "Rebalance required";
     statusColor = "text-amber-400";
