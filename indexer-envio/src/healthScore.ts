@@ -6,7 +6,8 @@
 // and accumulates all-time health seconds on the Pool entity.
 //
 // deviationRatio = priceDifference / rebalanceThreshold
-// Binary: d ≤ 1.0 → healthy (1), d > 1.0 → unhealthy (0)
+// Binary: d ≤ 1.01 → healthy (1) (within 1% tolerance dead zone),
+//         d > 1.01 → unhealthy (0)
 //
 // Gap handling between oracle snapshots:
 //   - Gap ≤ freshnessLimit: carry last known state

@@ -34,7 +34,7 @@ describe("computeHealthSnapshotFields", () => {
     assert.isTrue(result.hasHealthData);
   });
 
-  it("returns unhealthy for d > 1.0", () => {
+  it("returns unhealthy for d well above tolerance (d = 1.2)", () => {
     // priceDifference=6000, threshold=5000 → d = 1.2
     const result = computeHealthSnapshotFields(6000n, 5000);
     assert.equal(result.deviationRatio, "1.200000");
