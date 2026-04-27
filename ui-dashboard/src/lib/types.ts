@@ -97,6 +97,11 @@ export type DeviationThresholdBreach = {
   durationSeconds: string | null;
   criticalDurationSeconds: string | null;
   entryPriceDifference: string;
+  /** rebalanceThreshold in bps captured at the rising edge. Used for breach
+   * severity scoring (peak vs 1.05x) so a mid-breach threshold change can't
+   * retroactively shift the magnitude verdict. Optional during the indexer
+   * resync window when the new column hasn't backfilled yet. */
+  entryRebalanceThreshold?: number;
   peakPriceDifference: string;
   peakAt: string;
   peakAtBlock: string;

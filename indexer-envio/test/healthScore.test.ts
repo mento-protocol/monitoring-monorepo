@@ -64,9 +64,19 @@ describe("computeHealthSnapshotFields", () => {
     assert.isFalse(result.hasHealthData);
   });
 
-  it("tiny over-threshold (d = 1.000001) is unhealthy", () => {
-    // priceDifference=5001, threshold=5000 → d = 1.0002
+  it("tiny over-threshold (d = 1.0002) stays healthy under the 1% tolerance dead zone", () => {
+    // priceDifference=5001, threshold=5000 → d = 1.0002 — within tolerance.
     const result = computeHealthSnapshotFields(5001n, 5000);
+    assert.equal(result.healthBinaryValue, "1.000000");
+  });
+
+  it("at exactly the tolerance line (d = 1.01) stays healthy (strict `>`)", () => {
+    const result = computeHealthSnapshotFields(5050n, 5000);
+    assert.equal(result.healthBinaryValue, "1.000000");
+  });
+
+  it("just above tolerance (d = 1.012) flips to unhealthy", () => {
+    const result = computeHealthSnapshotFields(5060n, 5000);
     assert.equal(result.healthBinaryValue, "0.000000");
   });
 });

@@ -112,15 +112,15 @@ export function computeHealthSnapshotFields(
     };
   }
 
-  // Use integer comparison for the binary threshold to avoid float precision
-  // issues at the d=1.0 boundary (e.g. priceDifference=5000, threshold=5000).
-  const isHealthy = priceDifference <= BigInt(rebalanceThreshold);
+  // Healthy band matches `computeHealthStatus`: `devRatio ≤ 1.01` (within
+  // the 1% tolerance dead zone). Integer-safe form: `diff*100 ≤ thr*101`.
+  const thr = BigInt(rebalanceThreshold);
+  const isHealthy = priceDifference * 100n <= thr * 101n;
   // Compute deviationRatio using bigint arithmetic to avoid Number() precision
   // loss for large priceDifference values (>2^53 would corrupt float conversion).
   // Scale numerator by 10^PRECISION before dividing, then format as fixed decimal.
   const SCALE = BigInt(10 ** PRECISION);
-  const threshold = BigInt(rebalanceThreshold);
-  const scaledRatio = (priceDifference * SCALE) / threshold;
+  const scaledRatio = (priceDifference * SCALE) / thr;
   const intPart = scaledRatio / SCALE;
   const fracPart = scaledRatio % SCALE;
   const deviationRatio = `${intPart}.${fracPart.toString().padStart(PRECISION, "0")}`;

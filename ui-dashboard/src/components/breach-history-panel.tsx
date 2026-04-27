@@ -711,13 +711,25 @@ function BreachRow({
     : Number(breach.durationSeconds);
   // Past-grace uses trading-seconds on open rows so the unit matches the
   // stored `criticalDurationSeconds` on closed rows and the uptime
-  // tile's live math. Without this, an open breach spanning an FX
-  // weekend would briefly show an inflated "past grace" that collapses
-  // once the indexer closes it.
+  // tile's live math. Mirror of the closed-breach indexer logic AND the
+  // uptime tile: only credit past-grace seconds when the breach's peak
+  // crossed the 5% critical-magnitude line, scored against the threshold
+  // captured at the rising edge.
   const graceEnd =
     Number(breach.startedAt) + Number(DEVIATION_BREACH_GRACE_SECONDS);
+  // Fallback to current pool threshold during the indexer resync window
+  // before `entryRebalanceThreshold` is backfilled. Once resync lands every
+  // breach row carries its own entry threshold.
+  const entryThreshold =
+    (breach.entryRebalanceThreshold ?? 0) > 0
+      ? breach.entryRebalanceThreshold!
+      : (pool.rebalanceThreshold ?? 0) > 0
+        ? pool.rebalanceThreshold!
+        : 10000;
+  const peakAboveCritical =
+    Number(breach.peakPriceDifference) / entryThreshold > 1.05;
   const critDuration = isOpen
-    ? now > graceEnd
+    ? peakAboveCritical && now > graceEnd
       ? tradingSecondsInRange(graceEnd, now)
       : 0
     : Number(breach.criticalDurationSeconds);

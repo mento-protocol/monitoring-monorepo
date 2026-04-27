@@ -314,6 +314,8 @@ export const POOL_BREACH_ROLLUP = `
       cumulativeCriticalSeconds
       breachCount
       deviationBreachStartedAt
+      priceDifference
+      rebalanceThreshold
     }
   }
 `;

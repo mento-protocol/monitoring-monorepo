@@ -7,6 +7,8 @@ type RollupRow = {
   cumulativeCriticalSeconds?: string;
   breachCount?: number;
   deviationBreachStartedAt?: string;
+  priceDifference?: string;
+  rebalanceThreshold?: number;
 };
 
 type GqlResult = {
@@ -126,7 +128,9 @@ describe("UptimeValue", () => {
     // 2h ago. One hour sits in grace, the second hour is critical →
     // uptime reflects that. deviationBreachStartedAt is read from the
     // rollup query itself so it snapshots together with the rolled
-    // scalars — not a stale prop.
+    // scalars — not a stale prop. priceDifference / rebalanceThreshold
+    // are also from the rollup so the magnitude gate (devRatio > 1.05)
+    // resolves to "currently critical".
     const nowSec = Math.floor(Date.now() / 1000);
     mockUseGQL.mockReturnValueOnce({
       data: {
@@ -135,6 +139,8 @@ describe("UptimeValue", () => {
             cumulativeCriticalSeconds: "0",
             breachCount: 0,
             deviationBreachStartedAt: String(nowSec - 2 * 3600),
+            priceDifference: "8000", // 1.6x — well above critical magnitude
+            rebalanceThreshold: 5000,
           },
         ],
       },
@@ -269,6 +275,9 @@ describe("UptimeValue", () => {
             cumulativeCriticalSeconds: "0",
             breachCount: 0,
             deviationBreachStartedAt: String(fri20Utc),
+            // Currently above critical magnitude so the live credit gate fires.
+            priceDifference: "8000",
+            rebalanceThreshold: 5000,
           },
         ],
       },

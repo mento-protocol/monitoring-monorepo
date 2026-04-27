@@ -104,6 +104,11 @@ type DeviationThresholdBreach @index(fields: ["poolId", "startedAt"]) {
   criticalDurationSeconds: BigInt
   # Magnitude
   entryPriceDifference: BigInt! # priceDifference at the rising edge
+  # rebalanceThreshold at the rising edge (bps). Captures the threshold the
+  # breach opened against so that critical-magnitude scoring (peak vs 1.05x)
+  # at falling edge isn't retroactively shifted by a mid-breach
+  # FPMMRebalanceThresholdUpdated event.
+  entryRebalanceThreshold: Int!
   peakPriceDifference: BigInt! # max observed during the breach
   peakAt: BigInt! # block time when peak was reached
   peakAtBlock: BigInt!
@@ -132,7 +137,7 @@ type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {
   blockNumber: BigInt!
   txHash: String!
   deviationRatio: String! # priceDifference / rebalanceThreshold, 6dp fixed
-  healthBinaryValue: String! # "1.000000" if d ≤ 1.0, "0.000000" otherwise
+  healthBinaryValue: String! # "1.000000" if d ≤ 1.01 (within tolerance), "0.000000" otherwise
   hasHealthData: Boolean! # false for legacy/no-data rows
 }
 

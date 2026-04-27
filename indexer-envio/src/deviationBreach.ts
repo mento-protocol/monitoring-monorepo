@@ -135,6 +135,7 @@ export async function recordBreachTransition(
       durationSeconds: undefined,
       criticalDurationSeconds: undefined,
       entryPriceDifference: next.priceDifference,
+      entryRebalanceThreshold: next.rebalanceThreshold,
       peakPriceDifference: next.priceDifference,
       peakAt: trigger.blockTimestamp,
       peakAtBlock: trigger.blockNumber,
@@ -171,14 +172,15 @@ export async function recordBreachTransition(
     const durationSeconds = tradingSecondsInRange(open.startedAt, endedAt);
     const graceEnd = open.startedAt + DEVIATION_BREACH_GRACE_SECONDS;
     // Critical seconds accrue only when the breach's peak crossed the 5%
-    // critical-magnitude line — small breaches that never escalated would
-    // otherwise inflate `cumulativeCriticalSeconds` and disagree with
-    // `computeHealthStatus` (which keeps them at WARN regardless of duration).
+    // critical-magnitude line, scored against the threshold captured at
+    // RISING EDGE — not the current threshold. Otherwise an
+    // FPMMRebalanceThresholdUpdated event mid-breach would retroactively
+    // re-score severity, inflating or zeroing the accrual.
     // Conservative bound: time-resolved magnitude isn't tracked, so a breach
     // that briefly hit 1.05+ then dropped will still credit post-grace seconds.
     const peakAboveCritical = isAboveCriticalMagnitude(
       open.peakPriceDifference,
-      effectiveThreshold(next),
+      effectiveThreshold({ rebalanceThreshold: open.entryRebalanceThreshold }),
     );
     const criticalDurationSeconds =
       peakAboveCritical && endedAt > graceEnd
@@ -228,6 +230,7 @@ export async function recordBreachTransition(
       durationSeconds: undefined,
       criticalDurationSeconds: undefined,
       entryPriceDifference: next.priceDifference,
+      entryRebalanceThreshold: next.rebalanceThreshold,
       peakPriceDifference: next.priceDifference,
       peakAt: trigger.blockTimestamp,
       peakAtBlock: trigger.blockNumber,
