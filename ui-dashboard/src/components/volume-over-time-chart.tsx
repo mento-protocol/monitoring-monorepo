@@ -189,6 +189,10 @@ export function VolumeOverTimeChart({
 
   const activeWindow = useMemo<TimeRange | undefined>(() => {
     if (range === "all") return undefined;
+    // All networks are fetched together by `fetchAllNetworks`, so their
+    // `snapshotWindows` are anchored at the same hour boundary — taking
+    // index 0 is representative. Falls back to a fresh `Date.now()` window
+    // only on cold-start before the first SWR fetch resolves.
     const fetchWindows = networkData[0]?.snapshotWindows;
     return fetchWindows
       ? range === "7d"

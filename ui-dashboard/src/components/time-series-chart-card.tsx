@@ -115,6 +115,8 @@ export function TimeSeriesChartCard({
           ? {
               stackgroup: "total",
               line: { color: b.color, width: 1.2 },
+              // 8-digit hex = 6-digit color + "cc" alpha (≈80% opacity).
+              // Assumes b.color is a 6-digit hex (the contract of chainColor()).
               fillcolor: b.color + "cc",
             }
           : {
@@ -128,9 +130,14 @@ export function TimeSeriesChartCard({
     const breakdownYs = (breakdown ?? []).flatMap((b) =>
       b.series.map((p) => p.value),
     );
+    // Use reduce rather than `Math.min(...arr)` — the spread form throws
+    // RangeError above ~100k elements, which becomes reachable if hourly
+    // bucketing or many chains land here later.
     const allYs = [...ys, ...breakdownYs];
-    const ymin = allYs.length > 0 ? Math.min(...allYs) : 0;
-    const ymax = allYs.length > 0 ? Math.max(...allYs) : 1;
+    const ymin =
+      allYs.length > 0 ? allYs.reduce((a, b) => Math.min(a, b), Infinity) : 0;
+    const ymax =
+      allYs.length > 0 ? allYs.reduce((a, b) => Math.max(a, b), -Infinity) : 1;
     const span = Math.max(ymax - ymin, ymax * 0.02, 1);
     const yRange: [number, number] = [
       hasBreakdown ? 0 : Math.max(0, ymin - span * 0.1),
