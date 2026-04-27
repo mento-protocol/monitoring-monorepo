@@ -48,7 +48,7 @@ const TWO_HUNDRED = "200000000000000000000"; // 200
 describe("buildDailySeries — empty / error short-circuits", () => {
   it("returns empty series and nowTvl=0 when networkData is empty", () => {
     const out = buildDailySeries([]);
-    expect(out).toEqual({ series: [], nowTvl: 0 });
+    expect(out).toEqual({ series: [], nowTvl: 0, byChain: [] });
   });
 
   it("skips networks with a top-level error and returns nothing", () => {
@@ -67,7 +67,7 @@ describe("buildDailySeries — empty / error short-circuits", () => {
         error: new Error("mainnet down"),
       }),
     ]);
-    expect(out).toEqual({ series: [], nowTvl: 0 });
+    expect(out).toEqual({ series: [], nowTvl: 0, byChain: [] });
   });
 
   it("still uses preserved rows when snapshotsAllDailyError is set (fail-open path)", () => {
@@ -119,7 +119,7 @@ describe("buildDailySeries — pool filtering", () => {
         snapshots30d: [snap],
       }),
     ]);
-    expect(out).toEqual({ series: [], nowTvl: 0 });
+    expect(out).toEqual({ series: [], nowTvl: 0, byChain: [] });
   });
 
   it("drops FPMM pools without snapshots (new-pool-inflation guard)", () => {
@@ -138,7 +138,7 @@ describe("buildDailySeries — pool filtering", () => {
         snapshots30d: [],
       }),
     ]);
-    expect(out).toEqual({ series: [], nowTvl: 0 });
+    expect(out).toEqual({ series: [], nowTvl: 0, byChain: [] });
   });
 });
 
@@ -456,7 +456,7 @@ describe("buildDailySeries — multi-chain aggregation", () => {
       reserves1: FIFTY,
     });
 
-    const { series, nowTvl } = buildDailySeries([
+    const { series, nowTvl, byChain } = buildDailySeries([
       makeNetworkData({
         network: TVL_NETWORK,
         pools: [poolA],
@@ -475,6 +475,110 @@ describe("buildDailySeries — multi-chain aggregation", () => {
     // today forward-fills both chains.
     expect(series[1].tvlUSD).toBeCloseTo(300, 6);
     expect(nowTvl).toBeCloseTo(60, 6);
+
+    // Per-chain decomposition: bucket sums equal the total, nowTvl sums equal
+    // the total, and chain ordering matches networkData (legend stability).
+    expect(byChain).toHaveLength(2);
+    expect(byChain[0].network.id).toBe(TVL_NETWORK.id);
+    expect(byChain[1].network.id).toBe(TVL_NETWORK_2.id);
+    expect(byChain[0].series).toHaveLength(2);
+    expect(byChain[1].series).toHaveLength(2);
+    expect(byChain[0].series[0].tvlUSD).toBeCloseTo(200, 6); // chain A day 0
+    expect(byChain[1].series[0].tvlUSD).toBeCloseTo(100, 6); // chain B day 0
+    expect(byChain[0].nowTvl).toBeCloseTo(20, 6);
+    expect(byChain[1].nowTvl).toBeCloseTo(40, 6);
+    for (let i = 0; i < series.length; i++) {
+      expect(
+        byChain[0].series[i].tvlUSD + byChain[1].series[i].tvlUSD,
+      ).toBeCloseTo(series[i].tvlUSD, 6);
+    }
+    expect(byChain[0].nowTvl + byChain[1].nowTvl).toBeCloseTo(nowTvl, 6);
+  });
+
+  it("includes chains with zero contribution in a bucket as 0, not omitted", () => {
+    // Chain A has snapshots on day 0 and day 2; chain B only on day 2.
+    // For day 0 + day 1 buckets, chain B should appear with tvlUSD=0
+    // (not undefined, not omitted) so legend traces stay aligned to the
+    // shared x-axis instead of starting mid-chart.
+    const today = dayAlignedNow();
+    const day0 = today - 2 * SECONDS_PER_DAY;
+    const day2 = today;
+    const poolA = makeTvlPool({ id: "pool-a", reserves0: TEN, reserves1: TEN });
+    const poolB = makeTvlPool({ id: "pool-b", reserves0: TEN, reserves1: TEN });
+
+    const { byChain } = buildDailySeries([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [poolA],
+        snapshots30d: [
+          makeSnapshot({
+            poolId: "pool-a",
+            timestamp: day0,
+            reserves0: HUNDRED,
+            reserves1: HUNDRED,
+          }),
+          makeSnapshot({
+            poolId: "pool-a",
+            timestamp: day2,
+            reserves0: HUNDRED,
+            reserves1: HUNDRED,
+          }),
+        ],
+      }),
+      makeNetworkData({
+        network: TVL_NETWORK_2,
+        pools: [poolB],
+        snapshots30d: [
+          makeSnapshot({
+            poolId: "pool-b",
+            timestamp: day2,
+            reserves0: FIFTY,
+            reserves1: FIFTY,
+          }),
+        ],
+      }),
+    ]);
+
+    expect(byChain).toHaveLength(2);
+    const chainB = byChain.find((c) => c.network.id === TVL_NETWORK_2.id)!;
+    // chain B contributes nothing on day 0 + day 1 → those buckets must
+    // emit 0, not be missing from chain B's series.
+    expect(chainB.series).toHaveLength(3);
+    expect(chainB.series[0].tvlUSD).toBe(0);
+    expect(chainB.series[1].tvlUSD).toBe(0);
+    expect(chainB.series[2].tvlUSD).toBeCloseTo(100, 6);
+  });
+
+  it("omits chains whose entire fetch failed (top-level error)", () => {
+    // A failed-fetch chain should disappear from the breakdown rather than
+    // appear as an all-zero series — otherwise the legend lies about which
+    // chains contributed.
+    const today = dayAlignedNow();
+    const poolA = makeTvlPool({ id: "pool-a", reserves0: TEN, reserves1: TEN });
+    const poolB = makeTvlPool({ id: "pool-b", reserves0: TEN, reserves1: TEN });
+    const snapA = makeSnapshot({
+      poolId: "pool-a",
+      timestamp: today,
+      reserves0: HUNDRED,
+      reserves1: HUNDRED,
+    });
+
+    const { byChain } = buildDailySeries([
+      makeNetworkData({
+        network: TVL_NETWORK,
+        pools: [poolA],
+        snapshots30d: [snapA],
+      }),
+      makeNetworkData({
+        network: TVL_NETWORK_2,
+        pools: [poolB],
+        snapshots30d: [],
+        error: new Error("chain B fetch failed"),
+      }),
+    ]);
+
+    expect(byChain).toHaveLength(1);
+    expect(byChain[0].network.id).toBe(TVL_NETWORK.id);
   });
 });
 

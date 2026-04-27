@@ -1,13 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { chainColor } from "@/lib/chain-colors";
 import { formatUSD } from "@/lib/format";
 import { isFpmm, poolTvlUSD } from "@/lib/tokens";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
 import type { Network } from "@/lib/networks";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
 import type { OracleRateMap } from "@/lib/tokens";
-import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
+import {
+  TimeSeriesChartCard,
+  type BreakdownSeries,
+} from "@/components/time-series-chart-card";
 import {
   SECONDS_PER_DAY,
   filterSeriesByRange,
@@ -24,6 +28,12 @@ type PoolHistory = {
   points: Array<{ ts: number; r0: string; r1: string }>;
 };
 
+export type ChainTvlSeries = {
+  network: Network;
+  series: SeriesPoint[];
+  nowTvl: number;
+};
+
 /**
  * Builds a forward-filled TVL time series. `bucketSeconds` selects the
  * granularity — default is UTC-day (SECONDS_PER_DAY). The 1W range passes
@@ -36,6 +46,11 @@ type PoolHistory = {
  * should pass this to avoid materializing buckets they'll immediately
  * discard. Forward-fill still works correctly: older snapshots are used to
  * seed each pool's cursor before the clamped window begins.
+ *
+ * Per-chain `byChain` is keyed by `Network.id` (not `chainId`) so distinct
+ * configured networks that share a chainId — e.g. `celo-mainnet` +
+ * `celo-mainnet-local` when local networks are toggled on — stay separate
+ * in the breakdown rather than silently collapsing.
  */
 export function buildDailySeries(
   networkData: NetworkData[],
@@ -44,6 +59,7 @@ export function buildDailySeries(
 ): {
   series: SeriesPoint[];
   nowTvl: number;
+  byChain: ChainTvlSeries[];
 } {
   const histories: PoolHistory[] = [];
   let earliestTs = Infinity;
@@ -81,7 +97,16 @@ export function buildDailySeries(
     }
   }
 
-  if (histories.length === 0) return { series: [], nowTvl: 0 };
+  if (histories.length === 0) return { series: [], nowTvl: 0, byChain: [] };
+
+  const chainsSeen: Network[] = [];
+  const chainsSeenIds = new Set<string>();
+  for (const h of histories) {
+    if (!chainsSeenIds.has(h.network.id)) {
+      chainsSeenIds.add(h.network.id);
+      chainsSeen.push(h.network);
+    }
+  }
 
   const nowSec = Math.floor(Date.now() / 1000);
   const dataStartBucket =
@@ -102,6 +127,8 @@ export function buildDailySeries(
 
   const cursors = new Array<number>(histories.length).fill(-1);
   const series: SeriesPoint[] = [];
+  const perChainSeries = new Map<string, SeriesPoint[]>();
+  for (const c of chainsSeen) perChainSeries.set(c.id, []);
 
   for (
     let timestamp = windowStartBucket;
@@ -109,6 +136,7 @@ export function buildDailySeries(
     timestamp += bucketSeconds
   ) {
     let tvl = 0;
+    const perChainTvl = new Map<string, number>();
     for (let i = 0; i < histories.length; i++) {
       const history = histories[i];
       while (
@@ -119,21 +147,40 @@ export function buildDailySeries(
       }
       if (cursors[i] < 0) continue;
       const point = history.points[cursors[i]];
-      tvl += poolTvlUSD(
+      const poolTvl = poolTvlUSD(
         { ...history.pool, reserves0: point.r0, reserves1: point.r1 },
         history.network,
         history.rates,
       );
+      tvl += poolTvl;
+      const id = history.network.id;
+      perChainTvl.set(id, (perChainTvl.get(id) ?? 0) + poolTvl);
     }
     series.push({ timestamp, tvlUSD: tvl });
+    for (const c of chainsSeen) {
+      perChainSeries.get(c.id)!.push({
+        timestamp,
+        tvlUSD: perChainTvl.get(c.id) ?? 0,
+      });
+    }
   }
 
   let nowTvl = 0;
+  const perChainNowTvl = new Map<string, number>();
   for (const history of histories) {
-    nowTvl += poolTvlUSD(history.pool, history.network, history.rates);
+    const poolTvl = poolTvlUSD(history.pool, history.network, history.rates);
+    nowTvl += poolTvl;
+    const id = history.network.id;
+    perChainNowTvl.set(id, (perChainNowTvl.get(id) ?? 0) + poolTvl);
   }
 
-  return { series, nowTvl };
+  const byChain: ChainTvlSeries[] = chainsSeen.map((network) => ({
+    network,
+    series: perChainSeries.get(network.id)!,
+    nowTvl: perChainNowTvl.get(network.id) ?? 0,
+  }));
+
+  return { series, nowTvl, byChain };
 }
 
 interface TvlOverTimeChartProps {
@@ -155,22 +202,39 @@ export function TvlOverTimeChart({
 }: TvlOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("30d");
 
-  const fullSeries = useMemo<TimeSeriesPoint[]>(() => {
+  const { fullSeries, fullBreakdown } = useMemo<{
+    fullSeries: TimeSeriesPoint[];
+    fullBreakdown: BreakdownSeries[];
+  }>(() => {
     // Always use UTC-day buckets. PoolDailySnapshot is a running aggregate
     // updated throughout the day — forward-filling a midnight-stamped row into
     // hourly sub-buckets would show today's current reserves for all past hours
     // of the same day, distorting the intra-day trend.
-    const { series: base, nowTvl } = buildDailySeries(networkData);
-    if (base.length === 0) return [];
+    const { series: base, nowTvl, byChain } = buildDailySeries(networkData);
+    if (base.length === 0) return { fullSeries: [], fullBreakdown: [] };
 
     const nowSec = Math.floor(Date.now() / 1000);
-    return [
+    const total = [
       ...base.map((point) => ({
         timestamp: point.timestamp,
         value: point.tvlUSD,
       })),
       { timestamp: nowSec, value: nowTvl },
     ];
+
+    const breakdown: BreakdownSeries[] = byChain.map((entry) => ({
+      name: entry.network.label,
+      color: chainColor(entry.network.chainId),
+      series: [
+        ...entry.series.map((p) => ({
+          timestamp: p.timestamp,
+          value: p.tvlUSD,
+        })),
+        { timestamp: nowSec, value: entry.nowTvl },
+      ],
+    }));
+
+    return { fullSeries: total, fullBreakdown: breakdown };
   }, [networkData]);
 
   // TVL is a stock — cutoff-based range filtering on UTC-day-stamped buckets
@@ -179,6 +243,14 @@ export function TvlOverTimeChart({
   const visibleSeries = useMemo(
     () => filterSeriesByRange(fullSeries, range),
     [fullSeries, range],
+  );
+  const visibleBreakdown = useMemo<BreakdownSeries[]>(
+    () =>
+      fullBreakdown.map((b) => ({
+        ...b,
+        series: filterSeriesByRange(b.series, range),
+      })),
+    [fullBreakdown, range],
   );
 
   const headline = isLoading ? "…" : formatUSD(totalTvl);
@@ -193,6 +265,7 @@ export function TvlOverTimeChart({
       title="Total Value Locked"
       rangeAriaLabel="TVL chart time range"
       series={visibleSeries}
+      breakdown={visibleBreakdown}
       range={range}
       onRangeChange={setRange}
       headline={headline}
