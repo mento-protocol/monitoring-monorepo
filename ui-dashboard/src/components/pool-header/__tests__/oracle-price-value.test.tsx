@@ -97,7 +97,7 @@ describe("OraclePriceValue", () => {
     expect(html).toMatch(/1 KESm = [0-9.]+ USDm/);
   });
 
-  it("renders 'Updated X ago' link to the explorer tx when oracle is fresh", () => {
+  it("renders 'last X ago / Nm expiry' link to the explorer tx when oracle is fresh", () => {
     const freshTs = String(Math.floor(Date.now() / 1000) - 60);
     const pool: Pool = {
       ...BASE_POOL,
@@ -110,7 +110,7 @@ describe("OraclePriceValue", () => {
     const html = renderToStaticMarkup(
       <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
     );
-    expect(html).toMatch(/Updated [^<]+ ago/);
+    expect(html).toMatch(/last [^<]+ ago \/ \d+m expiry/);
     expect(html).toContain(
       'href="https://celoscan.io/tx/0xcb81fe1d4ff72d75ce29bf7905ea852d7e8da98e1831f575c5b71687e9acc936"',
     );
@@ -145,7 +145,7 @@ describe("OraclePriceValue", () => {
     expect(html).toContain("· stale");
   });
 
-  it("omits the 'Updated …' subline when oracleTimestamp is absent", () => {
+  it("omits the 'last …' subline when oracleTimestamp is absent", () => {
     const pool: Pool = {
       ...BASE_POOL,
       oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
@@ -154,6 +154,6 @@ describe("OraclePriceValue", () => {
     const html = renderToStaticMarkup(
       <OraclePriceValue pool={pool} network={NETWORK_WITHOUT_CHAINLINK} />,
     );
-    expect(html).not.toMatch(/Updated/);
+    expect(html).not.toMatch(/expiry/);
   });
 });

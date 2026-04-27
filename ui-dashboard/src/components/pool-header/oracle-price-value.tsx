@@ -4,7 +4,7 @@ import React from "react";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { formatOraclePrice, formatTimestamp, relativeTime } from "@/lib/format";
-import { isOracleFresh } from "@/lib/health";
+import { getOracleStalenessThreshold, isOracleFresh } from "@/lib/health";
 import { explorerTxUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 
 export function OraclePriceValue({
@@ -41,8 +41,11 @@ export function OraclePriceValue({
   const subColor = fresh ? "text-slate-500" : "text-red-400";
 
   const hasTs = pool.oracleTimestamp != null && pool.oracleTimestamp !== "0";
+  const expiryMinutes = Math.round(
+    getOracleStalenessThreshold(pool, network.chainId) / 60,
+  );
   const updatedLabel = hasTs
-    ? `Updated ${relativeTime(pool.oracleTimestamp!)}`
+    ? `last ${relativeTime(pool.oracleTimestamp!)} / ${expiryMinutes}m expiry`
     : null;
   const updatedTitle = hasTs
     ? formatTimestamp(pool.oracleTimestamp!)

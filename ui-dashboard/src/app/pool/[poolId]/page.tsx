@@ -426,7 +426,6 @@ function PoolDetail() {
             tradingLimitsError={tradingLimitsError}
           />
           <HealthPanel pool={pool} />
-          <PoolConfigPanel pool={pool} />
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <PoolTvlOverTimeChart
               pool={pool}
@@ -736,6 +735,8 @@ function PoolHeader({
         />
         <DeviationCell pool={pool} network={network} />
       </dl>
+      <div className="my-5 h-px bg-slate-800" />
+      <PoolConfigPanel pool={pool} />
     </div>
   );
 }

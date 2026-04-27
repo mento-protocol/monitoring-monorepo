@@ -102,7 +102,7 @@ describe("PoolConfigPanel", () => {
     });
   });
 
-  describe("Price Oracle tile", () => {
+  describe("Oracle Source tile", () => {
     it("links to the Chainlink feed for the non-USDm leg when USDm is token0", () => {
       // BASE_POOL has token0=USDm, token1=USDC. Must pick USDC's feed.
       const html = renderToStaticMarkup(<PoolConfigPanel pool={BASE_POOL} />);
@@ -110,6 +110,7 @@ describe("PoolConfigPanel", () => {
         'href="https://data.chain.link/feeds/celo/mainnet/usdc-usd"',
       );
       expect(html).toContain("Chainlink USDC/USD");
+      expect(html).toContain("Oracle Source");
     });
 
     it("still picks the non-USDm leg when USDm is token1 (reversed pair)", () => {
@@ -133,10 +134,9 @@ describe("PoolConfigPanel", () => {
       expect(html).not.toContain("data.chain.link");
     });
 
-    it("renders the staleness expiry in minutes", () => {
+    it("does not render an Expiry sub-line (expiry moved to OraclePriceValue)", () => {
       const html = renderToStaticMarkup(<PoolConfigPanel pool={BASE_POOL} />);
-      // Default Celo expiry is 5m (300s) per `getOracleStalenessThreshold`
-      expect(html).toMatch(/Expiry: \d+m/);
+      expect(html).not.toMatch(/Expiry/);
     });
   });
 
