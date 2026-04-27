@@ -19,6 +19,7 @@ import { formatDurationShort, parseDurationSeconds } from "@/lib/bridge-status";
 import {
   formatDeviationPct,
   DEVIATION_BREACH_GRACE_SECONDS,
+  DEVIATION_CRITICAL_RATIO,
 } from "@/lib/health";
 import { tradingSecondsInRange } from "@/lib/weekend";
 import { explorerTxUrl } from "@/lib/tokens";
@@ -727,7 +728,8 @@ function BreachRow({
         ? pool.rebalanceThreshold!
         : 10000;
   const peakAboveCritical =
-    Number(breach.peakPriceDifference) / entryThreshold > 1.05;
+    Number(breach.peakPriceDifference) / entryThreshold >
+    DEVIATION_CRITICAL_RATIO;
   const critDuration = isOpen
     ? peakAboveCritical && now > graceEnd
       ? tradingSecondsInRange(graceEnd, now)
