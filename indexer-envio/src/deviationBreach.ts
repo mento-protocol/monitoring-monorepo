@@ -176,16 +176,19 @@ export async function recordBreachTransition(
     // RISING EDGE — not the current threshold. Otherwise an
     // FPMMRebalanceThresholdUpdated event mid-breach would retroactively
     // re-score severity, inflating or zeroing the accrual.
-    // Prefer the self-healed `prev.currentOpenBreachEntryThreshold` over
-    // the breach row's frozen `entryRebalanceThreshold`: if the breach
-    // opened before RPC backfilled the threshold (0 sentinel), the Pool
-    // field has the healed value while the row is stuck at 0.
+    // Fallback chain handles the RPC-pending 0 sentinel: prefer the
+    // self-healed Pool field, then the breach row, then the closing event's
+    // threshold (which may have healed if the breach opens AND closes
+    // before any continuing event), and finally `effectiveThreshold`'s
+    // 10000 default if no real value was ever observed.
     // Conservative bound: time-resolved magnitude isn't tracked, so a breach
     // that briefly hit 1.05+ then dropped will still credit post-grace seconds.
     const healedEntryThreshold =
       (prev?.currentOpenBreachEntryThreshold ?? 0) > 0
         ? prev!.currentOpenBreachEntryThreshold
-        : open.entryRebalanceThreshold;
+        : open.entryRebalanceThreshold > 0
+          ? open.entryRebalanceThreshold
+          : next.rebalanceThreshold;
     const peakAboveCritical = isAboveCriticalMagnitude(
       open.peakPriceDifference,
       effectiveThreshold({ rebalanceThreshold: healedEntryThreshold }),
