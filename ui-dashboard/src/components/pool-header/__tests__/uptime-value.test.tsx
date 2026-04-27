@@ -8,7 +8,7 @@ type RollupRow = {
   breachCount?: number;
   deviationBreachStartedAt?: string;
   currentOpenBreachPeak?: string;
-  rebalanceThreshold?: number;
+  currentOpenBreachEntryThreshold?: number;
 };
 
 type GqlResult = {
@@ -140,7 +140,7 @@ describe("UptimeValue", () => {
             breachCount: 0,
             deviationBreachStartedAt: String(nowSec - 2 * 3600),
             currentOpenBreachPeak: "8000", // 1.6x — well above critical magnitude
-            rebalanceThreshold: 5000,
+            currentOpenBreachEntryThreshold: 5000,
           },
         ],
       },
@@ -277,7 +277,7 @@ describe("UptimeValue", () => {
             deviationBreachStartedAt: String(fri20Utc),
             // Peak above critical magnitude so the live credit gate fires.
             currentOpenBreachPeak: "8000",
-            rebalanceThreshold: 5000,
+            currentOpenBreachEntryThreshold: 5000,
           },
         ],
       },

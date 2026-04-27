@@ -58,6 +58,8 @@ export const ALL_POOLS_BREACH_ROLLUP = `
       id
       cumulativeCriticalSeconds
       breachCount
+      currentOpenBreachPeak
+      currentOpenBreachEntryThreshold
     }
   }
 `;
@@ -315,7 +317,7 @@ export const POOL_BREACH_ROLLUP = `
       breachCount
       deviationBreachStartedAt
       currentOpenBreachPeak
-      rebalanceThreshold
+      currentOpenBreachEntryThreshold
     }
   }
 `;

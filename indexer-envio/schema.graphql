@@ -57,6 +57,12 @@ type Pool {
   # indexer's `cumulativeCriticalSeconds` accrual on close — without
   # joining to the breach row at render time.
   currentOpenBreachPeak: BigInt!
+  # `rebalanceThreshold` captured at the rising edge of the currently-open
+  # breach (0 when no open breach). Denormalized so the live-uptime gate
+  # scores peak against the SAME threshold the persisted accrual uses
+  # (entry-time, not current-time). Otherwise an
+  # `FPMMRebalanceThresholdUpdated` mid-breach could shift the live verdict.
+  currentOpenBreachEntryThreshold: Int!
 
   # Health
   healthStatus: String!

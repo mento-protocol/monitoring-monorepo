@@ -22,7 +22,7 @@ type BreachRollup = {
   breachCount?: number;
   deviationBreachStartedAt?: string;
   currentOpenBreachPeak?: string;
-  rebalanceThreshold?: number;
+  currentOpenBreachEntryThreshold?: number;
 };
 
 export function UptimeValue({ pool }: { pool: Pool }) {
@@ -75,8 +75,15 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const graceEnd = openStart + Number(DEVIATION_BREACH_GRACE_SECONDS);
   const peak = Number(rollup.currentOpenBreachPeak ?? "0");
+  // Prefer entry threshold (matches persisted accrual); fall back to the
+  // pool's current threshold during the resync window before the new
+  // column backfills.
   const thr =
-    (rollup.rebalanceThreshold ?? 0) > 0 ? rollup.rebalanceThreshold! : 10000;
+    (rollup.currentOpenBreachEntryThreshold ?? 0) > 0
+      ? rollup.currentOpenBreachEntryThreshold!
+      : (pool.rebalanceThreshold ?? 0) > 0
+        ? pool.rebalanceThreshold!
+        : 10000;
   const peakAboveCritical = peak / thr > DEVIATION_CRITICAL_RATIO;
   const openCritical =
     hasOpenBreach && nowSeconds > graceEnd && peakAboveCritical

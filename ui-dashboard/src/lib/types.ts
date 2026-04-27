@@ -41,6 +41,11 @@ export type Pool = {
    * no open breach. Optional during the indexer-resync window before the
    * new column is backfilled. */
   currentOpenBreachPeak?: string;
+  /** rebalanceThreshold captured at the rising edge of the currently-open
+   * breach, 0 when no open breach. Used by the live uptime gate so peak
+   * is scored against the entry-time threshold (matches persisted accrual)
+   * rather than a possibly-different current threshold. */
+  currentOpenBreachEntryThreshold?: number;
   lpFee?: number;
   protocolFee?: number;
   rebalanceReward?: number;

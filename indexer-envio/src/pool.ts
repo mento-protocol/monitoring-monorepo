@@ -158,6 +158,24 @@ export function nextOpenBreachPeak(prev: Pool | undefined, next: Pool): bigint {
   return prevPeak > next.priceDifference ? prevPeak : next.priceDifference;
 }
 
+/** Maintain the open-breach entry threshold denormalized on Pool. Captures
+ * `rebalanceThreshold` at the rising edge so the live-uptime gate scores
+ * the peak against the same threshold the persisted accrual uses (entry,
+ * not current). Resets to 0 when no open breach; held across continuing
+ * breach events so a mid-breach `FPMMRebalanceThresholdUpdated` can't
+ * shift the live verdict. */
+export function nextOpenBreachEntryThreshold(
+  prev: Pool | undefined,
+  next: Pool,
+): number {
+  if (next.deviationBreachStartedAt === 0n) return 0;
+  const prevAnchor = prev?.deviationBreachStartedAt ?? 0n;
+  // Rising edge: capture the threshold the breach is opening against.
+  if (prevAnchor === 0n) return next.rebalanceThreshold;
+  // Continuing: hold the entry value through threshold changes.
+  return prev?.currentOpenBreachEntryThreshold ?? next.rebalanceThreshold;
+}
+
 // ---------------------------------------------------------------------------
 // Pool upsert (with cumulative fields)
 // ---------------------------------------------------------------------------
@@ -272,6 +290,7 @@ export const DEFAULT_ORACLE_FIELDS = {
   lastRebalancedAt: 0n,
   deviationBreachStartedAt: 0n,
   currentOpenBreachPeak: 0n,
+  currentOpenBreachEntryThreshold: 0,
   healthStatus: "N/A" as string,
   limitStatus: "N/A" as string,
   limitPressure0: "0.0000" as string,
@@ -471,14 +490,16 @@ export const upsertPool = async ({
     blockTimestamp,
     source,
   );
-  const currentOpenBreachPeak = nextOpenBreachPeak(existing, {
-    ...withDeviation,
-    deviationBreachStartedAt,
-  });
+  const provisional = { ...withDeviation, deviationBreachStartedAt };
+  const currentOpenBreachPeak = nextOpenBreachPeak(existing, provisional);
+  const currentOpenBreachEntryThreshold = nextOpenBreachEntryThreshold(
+    existing,
+    provisional,
+  );
   const withBreach = {
-    ...withDeviation,
-    deviationBreachStartedAt,
+    ...provisional,
     currentOpenBreachPeak,
+    currentOpenBreachEntryThreshold,
   };
   const healthStatus = computeHealthStatus(withBreach, blockTimestamp);
 
