@@ -58,6 +58,8 @@ export const ALL_POOLS_BREACH_ROLLUP = `
       id
       cumulativeCriticalSeconds
       breachCount
+      currentOpenBreachPeak
+      currentOpenBreachEntryThreshold
     }
   }
 `;
@@ -314,6 +316,8 @@ export const POOL_BREACH_ROLLUP = `
       cumulativeCriticalSeconds
       breachCount
       deviationBreachStartedAt
+      currentOpenBreachPeak
+      currentOpenBreachEntryThreshold
     }
   }
 `;
@@ -342,8 +346,8 @@ export const POOL_DEVIATION_BREACHES_PAGE = `
       startedAt startedAtBlock
       endedAt endedAtBlock
       durationSeconds criticalDurationSeconds
-      entryPriceDifference peakPriceDifference
-      peakAt peakAtBlock
+      entryPriceDifference entryRebalanceThreshold
+      peakPriceDifference peakAt peakAtBlock
       startedByEvent startedByTxHash
       endedByEvent endedByTxHash endedByStrategy
       rebalanceCountDuring
@@ -385,7 +389,7 @@ export const POOL_DEVIATION_BREACHES_ALL = `
       limit: 1000
     ) {
       id startedAt endedAt durationSeconds criticalDurationSeconds
-      peakPriceDifference
+      peakPriceDifference entryRebalanceThreshold
     }
   }
 `;

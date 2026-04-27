@@ -19,6 +19,7 @@ import { formatDurationShort, parseDurationSeconds } from "@/lib/bridge-status";
 import {
   formatDeviationPct,
   DEVIATION_BREACH_GRACE_SECONDS,
+  DEVIATION_CRITICAL_RATIO,
 } from "@/lib/health";
 import { tradingSecondsInRange } from "@/lib/weekend";
 import { explorerTxUrl } from "@/lib/tokens";
@@ -86,10 +87,14 @@ function whereForBucket(bucket: DurationBucket): Record<string, unknown> {
     case "all":
       return {};
     case "in_grace":
-      // Closed breaches whose post-grace critical portion was zero.
+      // Closed breaches that actually closed within the 1h grace window.
+      // Filter on duration, not `criticalDurationSeconds == 0`: under the
+      // tolerance refactor, `criticalDurationSeconds` is also zero for
+      // multi-hour breaches whose peak never crossed 1.05x — those are
+      // long WARN-only breaches and don't belong in the "≤1h" bucket.
       return {
         endedAt: { _is_null: false },
-        criticalDurationSeconds: { _eq: "0" },
+        durationSeconds: { _lte: String(ONE_HOUR) },
       };
     case "short":
       return {
@@ -711,20 +716,37 @@ function BreachRow({
     : Number(breach.durationSeconds);
   // Past-grace uses trading-seconds on open rows so the unit matches the
   // stored `criticalDurationSeconds` on closed rows and the uptime
-  // tile's live math. Without this, an open breach spanning an FX
-  // weekend would briefly show an inflated "past grace" that collapses
-  // once the indexer closes it.
+  // tile's live math. Mirror of the closed-breach indexer logic AND the
+  // uptime tile: only credit past-grace seconds when the breach's peak
+  // crossed the 5% critical-magnitude line, scored against the threshold
+  // captured at the rising edge.
   const graceEnd =
     Number(breach.startedAt) + Number(DEVIATION_BREACH_GRACE_SECONDS);
+  // Fallback to current pool threshold during the indexer resync window
+  // before `entryRebalanceThreshold` is backfilled. Once resync lands every
+  // breach row carries its own entry threshold.
+  const entryThreshold =
+    (breach.entryRebalanceThreshold ?? 0) > 0
+      ? breach.entryRebalanceThreshold!
+      : (pool.rebalanceThreshold ?? 0) > 0
+        ? pool.rebalanceThreshold!
+        : 10000;
+  const peakAboveCritical =
+    Number(breach.peakPriceDifference) / entryThreshold >
+    DEVIATION_CRITICAL_RATIO;
   const critDuration = isOpen
-    ? now > graceEnd
+    ? peakAboveCritical && now > graceEnd
       ? tradingSecondsInRange(graceEnd, now)
       : 0
     : Number(breach.criticalDurationSeconds);
-  const threshold = pool.rebalanceThreshold ?? 0;
-  const peakPct = threshold
-    ? formatDeviationPct(breach.peakPriceDifference, threshold)
-    : null;
+  // Peak % displayed in the row is scored against the SAME threshold the
+  // severity bucket uses (entry threshold) so the percentage and the
+  // critical-or-not verdict can't disagree across a mid-breach
+  // FPMMRebalanceThresholdUpdated.
+  const peakPct = formatDeviationPct(
+    breach.peakPriceDifference,
+    entryThreshold,
+  );
 
   const endedLabel = isOpen
     ? "Ongoing"

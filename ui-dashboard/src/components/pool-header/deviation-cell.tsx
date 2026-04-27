@@ -40,9 +40,8 @@ export function DeviationCell({
         />
         {pool.deviationBreachStartedAt &&
           pool.deviationBreachStartedAt !== "0" && (
-            // Match the subtext color to the badge/bar severity: during the
-            // 1h rebalance grace window the status stays WARN even though
-            // devRatio > 1.0, so red would contradict the amber bar.
+            // Match the subtext color to the bar so they don't disagree:
+            // amber for WARN, red only when the status is CRITICAL.
             <div
               className={`mt-1 text-xs ${
                 status === "CRITICAL" ? "text-red-400" : "text-amber-400"
@@ -88,10 +87,11 @@ function DeviationBar({
   const ratio = Math.min(diff / threshold, 1.5);
   const pct = Math.min(ratio * 100, 100);
   // Breach states take their color from status so the bar and the
-  // HealthBadge agree (red for CRITICAL, amber for the 1h grace WARN). In
-  // the healthy band we still nudge to yellow once we pass 80% of the
-  // threshold — a "getting close" signal without turning the status itself
-  // into a warning.
+  // HealthBadge agree (red for CRITICAL, amber for WARN). In the healthy
+  // band (status OK, devRatio ≤ 1.01) we nudge to yellow once we pass 80%
+  // of the threshold — a "getting close" signal that also covers the
+  // 1.0–1.01x tolerance dead zone where we're technically above threshold
+  // but still in healthy state.
   const color =
     status === "CRITICAL"
       ? "bg-red-500"

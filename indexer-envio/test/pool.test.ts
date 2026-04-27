@@ -9,7 +9,7 @@ import {
 import { makePool } from "./helpers/makePool";
 
 describe("isInDeviationBreach", () => {
-  it("false when priceDifference < threshold", () => {
+  it("false when priceDifference is well below threshold", () => {
     assert.isFalse(
       isInDeviationBreach(
         makePool({ priceDifference: 4999n, rebalanceThreshold: 5000 }),
@@ -17,7 +17,7 @@ describe("isInDeviationBreach", () => {
     );
   });
 
-  it("false at exact threshold (strict >; exactly-at-threshold stays OK per computeHealthStatus)", () => {
+  it("false at exact threshold (devRatio = 1.0, inside tolerance)", () => {
     assert.isFalse(
       isInDeviationBreach(
         makePool({ priceDifference: 5000n, rebalanceThreshold: 5000 }),
@@ -25,7 +25,31 @@ describe("isInDeviationBreach", () => {
     );
   });
 
-  it("true when priceDifference > threshold", () => {
+  it("false inside the 1% tolerance dead zone (devRatio = 1.005)", () => {
+    assert.isFalse(
+      isInDeviationBreach(
+        makePool({ priceDifference: 5025n, rebalanceThreshold: 5000 }),
+      ),
+    );
+  });
+
+  it("false at exactly the tolerance line — strict `>` (devRatio = 1.01)", () => {
+    assert.isFalse(
+      isInDeviationBreach(
+        makePool({ priceDifference: 5050n, rebalanceThreshold: 5000 }),
+      ),
+    );
+  });
+
+  it("true just above the tolerance line (devRatio = 1.012)", () => {
+    assert.isTrue(
+      isInDeviationBreach(
+        makePool({ priceDifference: 5060n, rebalanceThreshold: 5000 }),
+      ),
+    );
+  });
+
+  it("true on a large breach (devRatio = 1.5)", () => {
     assert.isTrue(
       isInDeviationBreach(
         makePool({ priceDifference: 7500n, rebalanceThreshold: 5000 }),
@@ -45,15 +69,22 @@ describe("isInDeviationBreach", () => {
     );
   });
 
-  it("falls back to threshold=10000 when rebalanceThreshold === 0", () => {
+  it("falls back to threshold=10000 when rebalanceThreshold === 0; tolerance applies on top", () => {
+    // 10_100 = at tolerance boundary (1.01x of 10_000 fallback) — not a breach.
+    // 10_101 = just above tolerance (1.0101x of 10_000 fallback) — a breach.
     assert.isFalse(
       isInDeviationBreach(
         makePool({ priceDifference: 10_000n, rebalanceThreshold: 0 }),
       ),
     );
+    assert.isFalse(
+      isInDeviationBreach(
+        makePool({ priceDifference: 10_100n, rebalanceThreshold: 0 }),
+      ),
+    );
     assert.isTrue(
       isInDeviationBreach(
-        makePool({ priceDifference: 10_001n, rebalanceThreshold: 0 }),
+        makePool({ priceDifference: 10_101n, rebalanceThreshold: 0 }),
       ),
     );
   });

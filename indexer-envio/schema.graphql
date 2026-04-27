@@ -47,17 +47,29 @@ type Pool {
   rebalanceThreshold: Int!
   lastRebalancedAt: BigInt!
   # Rising-edge timestamp: block time when priceDifference crossed strictly
-  # above rebalanceThreshold (devRatio > 1.0). Exact-threshold pools stay
-  # WARN and do NOT start this timer. 0n when not currently breached. Does
-  # not track oracle staleness — this is price-action only.
+  # above the 1% tolerance line (devRatio > 1.01). Exact-tolerance pools
+  # stay OK and do NOT start this timer. 0n when not currently breached.
+  # Does not track oracle staleness — this is price-action only.
   deviationBreachStartedAt: BigInt!
+  # Max `priceDifference` observed during the currently-open breach (0 when
+  # no open breach). Denormalized from the open `DeviationThresholdBreach`
+  # row so the live-uptime tile can gate on peak — same basis as the
+  # indexer's `cumulativeCriticalSeconds` accrual on close — without
+  # joining to the breach row at render time.
+  currentOpenBreachPeak: BigInt!
+  # `rebalanceThreshold` captured at the rising edge of the currently-open
+  # breach (0 when no open breach). Denormalized so the live-uptime gate
+  # scores peak against the SAME threshold the persisted accrual uses
+  # (entry-time, not current-time). Otherwise an
+  # `FPMMRebalanceThresholdUpdated` mid-breach could shift the live verdict.
+  currentOpenBreachEntryThreshold: Int!
 
   # Health
   healthStatus: String!
 
   # Health score accumulators (FPMM pools only)
   healthTotalSeconds: BigInt! # total tracked seconds with oracle coverage
-  healthBinarySeconds: BigInt! # seconds where deviationRatio ≤ 1.0
+  healthBinarySeconds: BigInt! # seconds where deviationRatio ≤ 1.01 (within tolerance)
   lastOracleSnapshotTimestamp: BigInt! # timestamp of most recent oracle snapshot
   lastDeviationRatio: String! # deviationRatio at most recent snapshot
   lastEffectivenessRatio: String! # effectivenessRatio of most recent RebalanceEvent ("-1" sentinel until first rebalance)
@@ -104,6 +116,11 @@ type DeviationThresholdBreach @index(fields: ["poolId", "startedAt"]) {
   criticalDurationSeconds: BigInt
   # Magnitude
   entryPriceDifference: BigInt! # priceDifference at the rising edge
+  # rebalanceThreshold at the rising edge (bps). Captures the threshold the
+  # breach opened against so that critical-magnitude scoring (peak vs 1.05x)
+  # at falling edge isn't retroactively shifted by a mid-breach
+  # FPMMRebalanceThresholdUpdated event.
+  entryRebalanceThreshold: Int!
   peakPriceDifference: BigInt! # max observed during the breach
   peakAt: BigInt! # block time when peak was reached
   peakAtBlock: BigInt!
@@ -132,7 +149,7 @@ type OracleSnapshot @index(fields: ["poolId", "timestamp"]) {
   blockNumber: BigInt!
   txHash: String!
   deviationRatio: String! # priceDifference / rebalanceThreshold, 6dp fixed
-  healthBinaryValue: String! # "1.000000" if d ≤ 1.0, "0.000000" otherwise
+  healthBinaryValue: String! # "1.000000" if d ≤ 1.01 (within tolerance), "0.000000" otherwise
   hasHealthData: Boolean! # false for legacy/no-data rows
 }
 

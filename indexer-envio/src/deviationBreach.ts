@@ -1,18 +1,26 @@
 // ---------------------------------------------------------------------------
 // DeviationThresholdBreach lifecycle
 //
-// Per-breach history rows. Created on the rising edge (pool crosses
-// priceDifference > rebalanceThreshold), updated while open (peak price,
-// rebalance attempts), closed on the falling edge with durations measured
-// in trading-seconds (FX weekends excluded).
+// Per-breach history rows. Created on the rising edge (pool crosses strictly
+// above the 1% tolerance line: priceDifference * 100 > rebalanceThreshold *
+// 101), updated while open (peak price, rebalance attempts), closed on the
+// falling edge with durations measured in trading-seconds (FX weekends
+// excluded).
 //
 // Also rolls the closed-breach durations into two cumulative counters on
 // the Pool itself (`cumulativeBreachSeconds`, `cumulativeCriticalSeconds`)
 // so the UI can compute all-time uptime % without paginating history.
+// `cumulativeCriticalSeconds` only credits breaches whose peak crossed the
+// 5% critical-magnitude line — small breaches that never escalated are
+// counted toward `cumulativeBreachSeconds` only.
 // ---------------------------------------------------------------------------
 
 import type { Pool, DeviationThresholdBreach } from "generated";
-import { DEVIATION_BREACH_GRACE_SECONDS } from "./pool";
+import {
+  DEVIATION_BREACH_GRACE_SECONDS,
+  effectiveThreshold,
+  isAboveCriticalMagnitude,
+} from "./pool";
 import { tradingSecondsInRange } from "./healthScore";
 
 export type BreachContext = {
@@ -96,8 +104,8 @@ export async function recordBreachTransition(
   trigger: BreachTrigger,
 ): Promise<Partial<Pool>> {
   // Use the anchor (`deviationBreachStartedAt`) as the authoritative "is a
-  // breach in progress" signal, not `priceDifference > threshold`. Two
-  // reasons:
+  // breach in progress" signal, not the price predicate (`isInDeviationBreach`
+  // → above the 1% tolerance line). Two reasons:
   //   1. UpdateReserves DEFERS close by holding the anchor — if we trusted
   //      price here, the subsequent Rebalance handler would see wasBreached
   //      = false and skip the close entirely, leaving the row with
@@ -127,6 +135,7 @@ export async function recordBreachTransition(
       durationSeconds: undefined,
       criticalDurationSeconds: undefined,
       entryPriceDifference: next.priceDifference,
+      entryRebalanceThreshold: next.rebalanceThreshold,
       peakPriceDifference: next.priceDifference,
       peakAt: trigger.blockTimestamp,
       peakAtBlock: trigger.blockNumber,
@@ -162,8 +171,32 @@ export async function recordBreachTransition(
     const endedAt = trigger.blockTimestamp;
     const durationSeconds = tradingSecondsInRange(open.startedAt, endedAt);
     const graceEnd = open.startedAt + DEVIATION_BREACH_GRACE_SECONDS;
+    // Critical seconds accrue only when the breach's peak crossed the 5%
+    // critical-magnitude line, scored against the threshold captured at
+    // RISING EDGE — not the current threshold. Otherwise an
+    // FPMMRebalanceThresholdUpdated event mid-breach would retroactively
+    // re-score severity, inflating or zeroing the accrual.
+    // Fallback chain handles the RPC-pending 0 sentinel: prefer the
+    // self-healed Pool field, then the breach row, then the closing event's
+    // threshold (which may have healed if the breach opens AND closes
+    // before any continuing event), and finally `effectiveThreshold`'s
+    // 10000 default if no real value was ever observed.
+    // Conservative bound: time-resolved magnitude isn't tracked, so a breach
+    // that briefly hit 1.05+ then dropped will still credit post-grace seconds.
+    const healedEntryThreshold =
+      (prev?.currentOpenBreachEntryThreshold ?? 0) > 0
+        ? prev!.currentOpenBreachEntryThreshold
+        : open.entryRebalanceThreshold > 0
+          ? open.entryRebalanceThreshold
+          : next.rebalanceThreshold;
+    const peakAboveCritical = isAboveCriticalMagnitude(
+      open.peakPriceDifference,
+      effectiveThreshold({ rebalanceThreshold: healedEntryThreshold }),
+    );
     const criticalDurationSeconds =
-      endedAt > graceEnd ? tradingSecondsInRange(graceEnd, endedAt) : 0n;
+      peakAboveCritical && endedAt > graceEnd
+        ? tradingSecondsInRange(graceEnd, endedAt)
+        : 0n;
     const rebalanceCountDuring =
       open.rebalanceCountDuring + (isRebalance ? 1 : 0);
     const closed: DeviationThresholdBreach = {
@@ -208,6 +241,7 @@ export async function recordBreachTransition(
       durationSeconds: undefined,
       criticalDurationSeconds: undefined,
       entryPriceDifference: next.priceDifference,
+      entryRebalanceThreshold: next.rebalanceThreshold,
       peakPriceDifference: next.priceDifference,
       peakAt: trigger.blockTimestamp,
       peakAtBlock: trigger.blockNumber,
@@ -227,7 +261,14 @@ export async function recordBreachTransition(
   // the same tx rewrite the cause so the UI shows "Swap" instead.
   const upgradeCause =
     open.startedByEvent === "unknown" && category !== "unknown";
-  if (!peakBumped && !isRebalance && !upgradeCause) return {};
+  // Self-heal entry threshold: the row was opened with the 0 sentinel
+  // before RPC backfilled `rebalanceThreshold`. Adopt the first real
+  // value once and then hold so the breach history UI shows the actual
+  // threshold this breach opened against.
+  const healEntryThreshold =
+    open.entryRebalanceThreshold === 0 && next.rebalanceThreshold > 0;
+  if (!peakBumped && !isRebalance && !upgradeCause && !healEntryThreshold)
+    return {};
   context.DeviationThresholdBreach.set({
     ...open,
     ...(peakBumped && {
@@ -238,6 +279,9 @@ export async function recordBreachTransition(
     ...(upgradeCause && {
       startedByEvent: category,
       startedByTxHash: trigger.txHash,
+    }),
+    ...(healEntryThreshold && {
+      entryRebalanceThreshold: next.rebalanceThreshold,
     }),
     rebalanceCountDuring: isRebalance
       ? open.rebalanceCountDuring + 1

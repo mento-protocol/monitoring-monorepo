@@ -363,6 +363,66 @@ describe("fetchPoolOgDataUncached", () => {
     expect(result!.healthReasons).toContain("rebalance in flight");
   });
 
+  it("uses 'price deviation breach' when devRatio > 1.05 has outlived the 1h grace (CRITICAL)", async () => {
+    // After the tolerance refactor, only sustained > 5% breaches escalate to
+    // CRITICAL. Confirms pool-og's WARN/CRITICAL branch agrees with the
+    // status-and-reason contract enforced elsewhere.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const detailPool = makeDetailPool({
+      priceDifference: "15000", // 1.5x threshold — above 1.05x
+      rebalanceThreshold: 10000,
+      deviationBreachStartedAt: String(nowSec - 2 * 3600), // 2h ago — past grace
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.health).toBe("CRITICAL");
+    expect(result!.healthReasons).toContain("price deviation breach");
+    expect(result!.healthReasons).not.toContain("rebalance in flight");
+  });
+
+  it("stays WARN with 'rebalance in flight' when magnitude is between tolerance and critical (1.012x, 2h)", async () => {
+    // 1.012x threshold for 2h: above the 1% tolerance line but below the
+    // 5% critical-magnitude line — duration must NOT escalate this to
+    // CRITICAL. The reason text stays "rebalance in flight".
+    const nowSec = Math.floor(Date.now() / 1000);
+    const detailPool = makeDetailPool({
+      priceDifference: "10120",
+      rebalanceThreshold: 10000,
+      deviationBreachStartedAt: String(nowSec - 2 * 3600),
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.health).toBe("WARN");
+    expect(result!.healthReasons).toContain("rebalance in flight");
+    expect(result!.healthReasons).not.toContain("price deviation breach");
+  });
+
+  it("emits no deviation reason when a pool sits inside the 1% tolerance dead zone (1.005x)", async () => {
+    // 10050/10000 = 1.005 — within the tolerance dead zone. Health is OK and
+    // there must be no deviation-related reason text to contradict the badge.
+    const detailPool = makeDetailPool({
+      priceDifference: "10050",
+      rebalanceThreshold: 10000,
+    });
+    mockRequest((q) => {
+      if (q.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
+      return { Pool: [detailPool] };
+    });
+    const result = await fetchPoolOgDataUncached(POOL_ID);
+    expect(result).not.toBeNull();
+    expect(result!.health).toBe("OK");
+    expect(result!.healthReasons).not.toContain("rebalance in flight");
+    expect(result!.healthReasons).not.toContain("price deviation breach");
+  });
+
   it("does not warn on a healthy-but-close deviation (no near-threshold reason)", async () => {
     // Under the new rule, deviation at 85% of threshold is OK — the OG
     // card must not surface a "price deviation rising" reason for it.

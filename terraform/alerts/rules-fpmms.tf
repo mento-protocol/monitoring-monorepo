@@ -308,8 +308,9 @@ resource "grafana_rule_group" "fpmms_deviation" {
   folder_uid       = grafana_folder.fpmms.uid
   interval_seconds = 60
 
-  # KPI 2 warn: "≥ 1 for > 15 min" per spec §3. The 15m hold matches the spec
-  # verbatim — shorter durations produce weekend-flicker noise on FX pools.
+  # KPI 2 warn: above 1% tolerance, sustained for > 15 min. The 15m hold
+  # smooths weekend flicker on FX pools (spec §3 was originally "≥ 1 for >
+  # 15 min"; the tolerance dead zone replaces the 1.0 boundary).
   rule {
     name           = "Deviation Breach"
     condition      = "threshold"
@@ -318,7 +319,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     no_data_state  = "OK"
 
     annotations = {
-      summary = "Deviation ratio {{ printf \"%.2f\" $values.A.Value }} — pool out of rebalance band."
+      summary = "Deviation ratio {{ printf \"%.2f\" $values.A.Value }} — pool above 1% tolerance."
     }
 
     labels = {
@@ -352,7 +353,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
         type       = "threshold"
         expression = "A"
         conditions = [{
-          evaluator = { params = [1.0], type = "gte" }
+          evaluator = { params = [1.01], type = "gt" }
           operator  = { type = "and" }
           query     = { params = ["threshold"] }
         }]
@@ -443,7 +444,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Deviating for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach."
+      summary     = "Pool above 5% threshold for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach."
       description = "Check rebalancer liveness and oracle feed."
     }
 
@@ -452,9 +453,11 @@ resource "grafana_rule_group" "fpmms_deviation" {
       severity = "critical"
     }
 
-    # The Prometheus expression: seconds since breach started, but only where a
-    # breach is actually active (breach_start > 0). When there is no breach,
-    # the series is dropped — threshold below never sees it.
+    # The Prometheus expression: seconds since breach started, gated on BOTH
+    # an active breach (breach_start > 0) AND current magnitude above 1.05
+    # (5% over threshold). Only sustained large breaches escalate to critical;
+    # smaller-but-prolonged breaches stay at warning. When either gate is
+    # false, the series is dropped — threshold below never sees it.
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -464,7 +467,74 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = "(time() - mento_pool_deviation_breach_start) and (mento_pool_deviation_breach_start > 0)"
+        expr    = "(time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > 1.05) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0)"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "threshold"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "threshold"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          evaluator = { params = [3600], type = "gt" }
+          operator  = { type = "and" }
+          query     = { params = ["threshold"] }
+        }]
+        datasource = { type = "__expr__", uid = "__expr__" }
+      })
+    }
+
+    notification_settings {
+      contact_point   = local.notify_critical_pool.contact_point
+      group_by        = local.notify_critical_pool.group_by
+      group_wait      = local.notify_critical_pool.group_wait
+      group_interval  = local.notify_critical_pool.group_interval
+      repeat_interval = local.notify_critical_pool.repeat_interval
+    }
+  }
+
+  # Critical fallback for the data-gap window where the indexer has anchored
+  # a breach for >1h but the bridge isn't publishing `mento_pool_deviation_ratio`
+  # (the `-1` sentinel from metrics-bridge). Without this rule, the magnitude-
+  # gated critical above silently drops alerts during ratio-gauge outages —
+  # the anchored warning rule still fires, but at warning severity. Mirror of
+  # the warning anchored rule, escalated to critical once the breach has
+  # outlived the 1h grace.
+  rule {
+    name           = "Deviation Breach Critical (anchored)"
+    condition      = "threshold"
+    for            = "0s"
+    exec_err_state = "Error"
+    no_data_state  = "OK"
+
+    annotations = {
+      summary     = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing, can't confirm magnitude."
+      description = "Check rebalancer liveness, oracle feed, and metrics-bridge."
+    }
+
+    labels = {
+      service  = "fpmms"
+      severity = "critical"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        expr    = "(time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio"
         instant = true
       })
     }
@@ -767,9 +837,11 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     # A = effectiveness ratio of the MOST RECENT rebalance, gated to pools that
     # are:
     #   1. in an ACTIVE breach — use `deviation_breach_start > 0` (the indexer's
-    #      authoritative breach anchor). Intentionally NOT `deviation_ratio >= 1`:
-    #      the indexer uses strict `>` for breach detection (pool.ts:79 —
-    #      exactly 1.0 stays OK), so `>= 1` is semantically wrong.
+    #      authoritative breach anchor, set when devRatio crosses strictly above
+    #      the 1% tolerance line). Intentionally NOT `deviation_ratio >= 1` or
+    #      `> 1.01`: the anchor encodes both the strict-`>` semantics and the
+    #      tolerance threshold in one signal, and stays consistent during ratio-
+    #      gauge data gaps.
     #   2. rebalanced DURING the current breach — `last_rebalanced_at >=
     #      deviation_breach_start` ensures the ineffectiveness we're measuring
     #      actually belongs to this breach, not a prior one. `>=` (not `>`)

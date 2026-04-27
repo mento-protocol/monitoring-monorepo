@@ -37,6 +37,15 @@ export type Pool = {
   rebalanceThreshold?: number;
   lastRebalancedAt?: string;
   deviationBreachStartedAt?: string;
+  /** Max priceDifference observed during the currently-open breach, 0 when
+   * no open breach. Optional during the indexer-resync window before the
+   * new column is backfilled. */
+  currentOpenBreachPeak?: string;
+  /** rebalanceThreshold captured at the rising edge of the currently-open
+   * breach, 0 when no open breach. Used by the live uptime gate so peak
+   * is scored against the entry-time threshold (matches persisted accrual)
+   * rather than a possibly-different current threshold. */
+  currentOpenBreachEntryThreshold?: number;
   lpFee?: number;
   protocolFee?: number;
   rebalanceReward?: number;
@@ -97,6 +106,11 @@ export type DeviationThresholdBreach = {
   durationSeconds: string | null;
   criticalDurationSeconds: string | null;
   entryPriceDifference: string;
+  /** rebalanceThreshold in bps captured at the rising edge. Used for breach
+   * severity scoring (peak vs 1.05x) so a mid-breach threshold change can't
+   * retroactively shift the magnitude verdict. Optional during the indexer
+   * resync window when the new column hasn't backfilled yet. */
+  entryRebalanceThreshold?: number;
   peakPriceDifference: string;
   peakAt: string;
   peakAtBlock: string;

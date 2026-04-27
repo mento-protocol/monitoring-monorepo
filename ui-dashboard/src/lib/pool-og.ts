@@ -14,7 +14,7 @@ import {
 } from "@/lib/tokens";
 import {
   computeEffectiveStatus,
-  DEVIATION_BREACH_GRACE_SECONDS,
+  computeHealthStatus,
   isOracleFresh,
   type HealthStatus,
 } from "@/lib/health";
@@ -262,22 +262,15 @@ function computeHealthReasons(pool: Pool, chainId: number): string[] {
       items.push({ text: "oracle stale", severity: REASON_CRITICAL });
     }
   } else {
-    const diff = Number(pool.priceDifference ?? "0");
-    const threshold =
-      (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
-    const devRatio = diff / threshold;
-    if (devRatio > 1.0) {
-      // Mirror computeHealthStatus: a breach within the grace window keeps
-      // the *status* at WARN, so the *reason* shouldn't imply CRITICAL.
-      const breachStart = Number(pool.deviationBreachStartedAt ?? "0");
-      const withinGrace =
-        breachStart <= 0 || now - breachStart < DEVIATION_BREACH_GRACE_SECONDS;
-      items.push(
-        withinGrace
-          ? { text: "rebalance in flight", severity: REASON_WARN }
-          : { text: "price deviation breach", severity: REASON_CRITICAL },
-      );
-    }
+    // Delegate the deviation tier branching to the same function the rest of
+    // the app uses, so OG cards can never disagree with the on-page badge.
+    // Oracle is fresh in this branch, so computeHealthStatus only returns
+    // OK / WARN / CRITICAL based on the tolerance + critical-magnitude gates.
+    const status = computeHealthStatus(pool, chainId, now);
+    if (status === "WARN")
+      items.push({ text: "rebalance in flight", severity: REASON_WARN });
+    else if (status === "CRITICAL")
+      items.push({ text: "price deviation breach", severity: REASON_CRITICAL });
   }
 
   const p0 = Number(pool.limitPressure0 ?? "0");

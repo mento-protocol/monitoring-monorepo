@@ -4,19 +4,25 @@ import { isVirtualPool, type Pool } from "@/lib/types";
 import { InfoPopover } from "@/components/info-popover";
 import { useGQL } from "@/lib/graphql";
 import { POOL_BREACH_ROLLUP } from "@/lib/queries";
-import { DEVIATION_BREACH_GRACE_SECONDS, uptimeColorClass } from "@/lib/health";
+import {
+  DEVIATION_BREACH_GRACE_SECONDS,
+  DEVIATION_CRITICAL_RATIO,
+  uptimeColorClass,
+} from "@/lib/health";
 import { tradingSecondsInRange } from "@/lib/weekend";
 import { isFxPool } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 
 const UPTIME_EXPLAINER =
-  "% of time the pool was healthy. Deviation threshold breaches of more than 1h qualify as unhealthy.";
+  "% of time the pool was healthy. Deviation > 5% threshold sustained for more than 1h qualifies as unhealthy.";
 const UPTIME_FX_SUFFIX = " Weekends do not count into uptime on FX pools.";
 
 type BreachRollup = {
   cumulativeCriticalSeconds?: string;
   breachCount?: number;
   deviationBreachStartedAt?: string;
+  currentOpenBreachPeak?: string;
+  currentOpenBreachEntryThreshold?: number;
 };
 
 export function UptimeValue({ pool }: { pool: Pool }) {
@@ -61,11 +67,26 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   // `tradingSecondsInRange` (same weekend subtraction the indexer uses to
   // compute `healthTotalSeconds`) so the numerator and denominator are on
   // the same basis — a breach that spans a weekend doesn't get credited
-  // seconds the denominator never saw.
+  // seconds the denominator never saw. Mirror of the indexer's closed-
+  // breach gate AND `computePoolUptimePct`: only count the live segment
+  // when the breach's PEAK crossed the 5% critical-magnitude line, so the
+  // tile and the persisted `cumulativeCriticalSeconds` use the same
+  // peak-based view of severity (no jump on close).
   const nowSeconds = Math.floor(Date.now() / 1000);
   const graceEnd = openStart + Number(DEVIATION_BREACH_GRACE_SECONDS);
+  const peak = Number(rollup.currentOpenBreachPeak ?? "0");
+  // Prefer entry threshold (matches persisted accrual); fall back to the
+  // pool's current threshold during the resync window before the new
+  // column backfills.
+  const thr =
+    (rollup.currentOpenBreachEntryThreshold ?? 0) > 0
+      ? rollup.currentOpenBreachEntryThreshold!
+      : (pool.rebalanceThreshold ?? 0) > 0
+        ? pool.rebalanceThreshold!
+        : 10000;
+  const peakAboveCritical = peak / thr > DEVIATION_CRITICAL_RATIO;
   const openCritical =
-    hasOpenBreach && nowSeconds > graceEnd
+    hasOpenBreach && nowSeconds > graceEnd && peakAboveCritical
       ? tradingSecondsInRange(graceEnd, nowSeconds)
       : 0;
 

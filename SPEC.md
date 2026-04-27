@@ -151,15 +151,18 @@ FX pools (EURm, GBPm, …) have the ratio-based thresholds muted Fri 21:00 UTC �
 
 **Applies to:** FPMM pools only
 
-| Status   | Condition                                                                      |
-| -------- | ------------------------------------------------------------------------------ |
-| OK       | `priceDifference / rebalanceThreshold ≤ 1.0`                                   |
-| WARN     | ratio > 1.0 (breach) within a 60-min grace window — rebalance is expected      |
-| CRITICAL | ratio > 1.0 sustained for > 60 min — breach no longer recoverable by rebalance |
+| Status   | Condition                                                                                    |
+| -------- | -------------------------------------------------------------------------------------------- |
+| OK       | `priceDifference / rebalanceThreshold ≤ 1.01` (within 1% tolerance dead zone)                |
+| WARN     | `1.01 < ratio ≤ 1.05` — above tolerance but below critical magnitude, regardless of duration |
+| WARN     | `ratio > 1.05` within a 60-min grace window — rebalance is expected                          |
+| CRITICAL | `ratio > 1.05` sustained for > 60 min — large breach no longer recoverable by rebalance      |
 
-Near-threshold deviations (e.g. 80–100% of threshold) are OK: sitting close
-to but under the line is not actionable for the operator. The pool only
-escalates when it actually breaches.
+A 1% tolerance dead zone above the threshold absorbs noise from tiny
+overages that aren't user-impacting; the 5% magnitude requirement keeps
+duration-driven CRITICAL escalation reserved for genuinely large breaches.
+The breach anchor (`deviationBreachStartedAt`) fires at the 1.01x crossing
+so the 1h grace counts from when the pool first exceeded tolerance.
 
 The `healthStatus` field on Pool encodes the current status: `"OK"` | `"WARN"` | `"CRITICAL"` | `"N/A"`.
 
@@ -350,19 +353,21 @@ Domain-split (`#alerts-v3`) was the original plan but `critical` vs `warning` is
 
 **Rules shipped** (10 rules across 2 services — see `terraform/alerts/rules-*.tf`):
 
-| Service          | Rule                      | Severity | Expression                                                                                                                               |
-| ---------------- | ------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `fpmms`          | Oracle Liveness           | warning  | `(time() - mento_pool_oracle_timestamp) / mento_pool_oracle_expiry > 1.2` for 2m (FX-weekend gated)                                      |
-| `fpmms`          | Oracle Down               | critical | `mento_pool_oracle_ok < 0.5` for 1m                                                                                                      |
-| `fpmms`          | Oracle Liveness Critical  | critical | liveness ratio > 3 for 1m (FX-weekend gated)                                                                                             |
-| `fpmms`          | Deviation Breach          | warning  | `mento_pool_deviation_ratio > 1` for 2m                                                                                                  |
-| `fpmms`          | Deviation Breach Critical | critical | breach active >3600s (indexer-anchored via `deviationBreachStartedAt`)                                                                   |
-| `fpmms`          | Trading Limit Pressure    | warning  | `max(mento_pool_limit_pressure) > 0.8` for 5m                                                                                            |
-| `fpmms`          | Trading Limit Tripped     | critical | `max(mento_pool_limit_pressure) >= 1` for 2m                                                                                             |
-| `fpmms`          | Rebalancer Stale          | critical | 30m+ breach AND 30m+ since last rebalance                                                                                                |
-| `fpmms`          | Rebalance Effectiveness   | warning  | `avg_over_time(mento_pool_rebalance_effectiveness[1h]) < 0.2` AND breach active AND `increase(rebalance_count_total[1h]) > 0`, `for=15m` |
-| `metrics-bridge` | Not Reporting             | critical | `time() - mento_pool_bridge_last_poll > 90` for 2m                                                                                       |
-| `metrics-bridge` | Poll Errors               | critical | `rate(mento_pool_bridge_poll_errors_total[5m]) > 0` for 3m                                                                               |
+| Service          | Rule                                 | Severity | Expression                                                                                                                               |
+| ---------------- | ------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `fpmms`          | Oracle Liveness                      | warning  | `(time() - mento_pool_oracle_timestamp) / mento_pool_oracle_expiry > 1.2` for 2m (FX-weekend gated)                                      |
+| `fpmms`          | Oracle Down                          | critical | `mento_pool_oracle_ok < 0.5` for 1m                                                                                                      |
+| `fpmms`          | Oracle Liveness Critical             | critical | liveness ratio > 3 for 1m (FX-weekend gated)                                                                                             |
+| `fpmms`          | Deviation Breach                     | warning  | `mento_pool_deviation_ratio > 1.01` for 15m (above 1% tolerance)                                                                         |
+| `fpmms`          | Deviation Breach (anchored)          | warning  | breach anchored AND ratio gauge missing (`-1` sentinel) for 15m                                                                          |
+| `fpmms`          | Deviation Breach Critical            | critical | breach active >3600s AND `mento_pool_deviation_ratio > 1.05` (5% over) — both magnitude and duration gates required                      |
+| `fpmms`          | Deviation Breach Critical (anchored) | critical | breach active >3600s AND ratio gauge missing — fallback for the metrics-bridge data-gap window                                           |
+| `fpmms`          | Trading Limit Pressure               | warning  | `max(mento_pool_limit_pressure) > 0.8` for 5m                                                                                            |
+| `fpmms`          | Trading Limit Tripped                | critical | `max(mento_pool_limit_pressure) >= 1` for 2m                                                                                             |
+| `fpmms`          | Rebalancer Stale                     | critical | 30m+ breach AND 30m+ since last rebalance                                                                                                |
+| `fpmms`          | Rebalance Effectiveness              | warning  | `avg_over_time(mento_pool_rebalance_effectiveness[1h]) < 0.2` AND breach active AND `increase(rebalance_count_total[1h]) > 0`, `for=15m` |
+| `metrics-bridge` | Not Reporting                        | critical | `time() - mento_pool_bridge_last_poll > 90` for 2m                                                                                       |
+| `metrics-bridge` | Poll Errors                          | critical | `rate(mento_pool_bridge_poll_errors_total[5m]) > 0` for 3m                                                                               |
 
 **`service` label convention** (matches the existing Aegis pattern of `service = monitored-domain`, not producer):
 

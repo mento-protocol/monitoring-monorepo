@@ -47,16 +47,32 @@ interface PoolHealthState {
 }
 
 /**
- * How long a pool may sit above the rebalance threshold before it escalates
- * from WARN to CRITICAL. Below the threshold is always OK; a fresh breach is
- * WARN for up to this window, then CRITICAL.
+ * How long a pool may sit above the critical magnitude (5% over threshold)
+ * before it escalates from WARN to CRITICAL. Within tolerance is always OK;
+ * above tolerance but below critical magnitude stays WARN regardless of
+ * duration; only sustained large breaches escalate.
  *
  * Anchored on `deviationBreachStartedAt` (indexed at the block the pool first
- * crossed the threshold). If that field is missing — rare, only when the
- * indexer hasn't populated it yet — we stay at WARN rather than spuriously
- * escalating.
+ * crossed the 1.01x tolerance line). If that field is missing — rare, only
+ * when the indexer hasn't populated it yet — we stay at WARN rather than
+ * spuriously escalating.
  */
 export const DEVIATION_BREACH_GRACE_SECONDS = 3600;
+
+/**
+ * Tolerance + critical-magnitude multipliers over the rebalance threshold.
+ * Mirror of the indexer constants in `indexer-envio/src/pool.ts`; parity is
+ * enforced by the indexer's `test/healthStatusParity.test.ts`.
+ */
+export const DEVIATION_TOLERANCE_RATIO = 1.01;
+export const DEVIATION_CRITICAL_RATIO = 1.05;
+
+/** Resolve the effective threshold in bps. The schema-default of 0 means the
+ * indexer hasn't read the on-chain value yet — fall back to 10000 (100%) so
+ * pools don't trip the breach predicate while we wait for the RPC self-heal.
+ */
+const effectiveThreshold = (pool: { rebalanceThreshold?: number }): number =>
+  (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
 
 export function getOracleStalenessThreshold(
   pool: { oracleExpiry?: string },
@@ -85,26 +101,19 @@ export function isOracleFresh(
 }
 
 /**
- * Compute the health status for a pool based on its oracle state.
+ * Compute the health status for a pool. Returns:
+ *  - "N/A" for VirtualPools (no oracle)
+ *  - "WEEKEND" when the oracle is stale during FX market closure
+ *  - "CRITICAL" when the oracle is stale (real incident) OR devRatio > 1.05
+ *    sustained past `DEVIATION_BREACH_GRACE_SECONDS`
+ *  - "WARN" when devRatio is above tolerance but either below the critical
+ *    magnitude or still within the grace window
+ *  - "OK" otherwise
  *
- * - "N/A":       VirtualPools (source includes "virtual") — no oracle
- * - "CRITICAL":  Oracle is stale (age > expiry), OR deviation > threshold
- *                for more than DEVIATION_BREACH_GRACE_SECONDS
- * - "WEEKEND":   Oracle is stale because FX markets are closed (Fri 21:00 – Sun 23:00 UTC)
- * - "WARN":      Oracle is fresh and deviation > threshold but still within
- *                the grace window
- * - "OK":        Oracle is fresh and deviation is at or below threshold
- *
- * Being close to but still under the threshold is OK — there's nothing
- * actionable in that state. The pool only flips to WARN when it actually
- * breaches, giving operators a 1h window to land a rebalance before
- * escalating to CRITICAL.
- *
- * Uses wall-clock time comparison rather than the indexed oracleOk flag,
- * which is only set at event time and never expires. The staleness threshold
- * comes from the indexed oracleExpiry (fetched per-feed from SortedOracles
- * at index time), falling back to ORACLE_STALE_SECONDS for pools that
- * pre-date this field.
+ * Staleness uses wall-clock + indexed `oracleExpiry` (per-feed) with a
+ * `ORACLE_STALE_SECONDS` fallback for pools that pre-date the field. The
+ * deviation tier mirrors the indexer's `computeHealthStatus` (parity test
+ * lives in `indexer-envio/test/healthStatusParity.test.ts`).
  */
 export function computeHealthStatus(
   pool: PoolHealthState,
@@ -119,18 +128,15 @@ export function computeHealthStatus(
     return "CRITICAL";
   }
   const diff = Number(pool.priceDifference ?? "0");
-  const threshold =
-    (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
-  const devRatio = diff / threshold;
-  if (devRatio > 1.0) {
-    const breachStart = Number(pool.deviationBreachStartedAt ?? "0");
-    // No anchor (indexer hasn't populated the field yet): treat as a fresh
-    // breach and stay at WARN instead of jumping to CRITICAL without data.
-    if (breachStart <= 0) return "WARN";
-    const breachAge = nowSeconds - breachStart;
-    return breachAge < DEVIATION_BREACH_GRACE_SECONDS ? "WARN" : "CRITICAL";
-  }
-  return "OK";
+  const devRatio = diff / effectiveThreshold(pool);
+  if (devRatio <= DEVIATION_TOLERANCE_RATIO) return "OK";
+  if (devRatio <= DEVIATION_CRITICAL_RATIO) return "WARN";
+  const breachStart = Number(pool.deviationBreachStartedAt ?? "0");
+  // No anchor (indexer hasn't populated the field yet): treat as a fresh
+  // breach and stay at WARN instead of jumping to CRITICAL without data.
+  if (breachStart <= 0) return "WARN";
+  const breachAge = nowSeconds - breachStart;
+  return breachAge < DEVIATION_BREACH_GRACE_SECONDS ? "WARN" : "CRITICAL";
 }
 
 /**
@@ -200,6 +206,9 @@ export function computePoolUptimePct(pool: {
   healthTotalSeconds?: string;
   cumulativeCriticalSeconds?: string;
   deviationBreachStartedAt?: string;
+  currentOpenBreachPeak?: string;
+  currentOpenBreachEntryThreshold?: number;
+  rebalanceThreshold?: number;
 }): number | null {
   if (isVirtualPool(pool)) return null;
   const total = Number(pool.healthTotalSeconds ?? "0");
@@ -208,14 +217,29 @@ export function computePoolUptimePct(pool: {
   const rolledCritical = Number(pool.cumulativeCriticalSeconds);
   if (!Number.isFinite(rolledCritical)) return null;
 
-  // Open-breach live past-grace credit — same math as the tile.
+  // Open-breach live past-grace credit — only count when the breach's PEAK
+  // (so far) crossed the 5% critical-magnitude line, scored against the
+  // ENTRY threshold. Matches the indexer's closed-breach
+  // `criticalDurationSeconds` accrual on every axis: peak (not current),
+  // entry-time threshold (not current), so the live tile and the persisted
+  // SLO counter agree. A 1.06→1.04 breach still contributes critical time
+  // live, an `FPMMRebalanceThresholdUpdated` mid-breach can't shift the
+  // verdict, and the cumulative counter doesn't suddenly jump on close.
   // `tradingSecondsInRange` subtracts FX-weekend hours so the numerator
   // stays on the same basis as `healthTotalSeconds` (the denominator).
   const openStart = Number(pool.deviationBreachStartedAt ?? "0");
   const nowSeconds = Math.floor(Date.now() / 1000);
   const graceEnd = openStart + Number(DEVIATION_BREACH_GRACE_SECONDS);
+  const peak = Number(pool.currentOpenBreachPeak ?? "0");
+  // Prefer entry threshold; fall back to current during the resync window
+  // before the column backfills.
+  const gateThreshold =
+    (pool.currentOpenBreachEntryThreshold ?? 0) > 0
+      ? pool.currentOpenBreachEntryThreshold!
+      : effectiveThreshold(pool);
+  const peakAboveCritical = peak / gateThreshold > DEVIATION_CRITICAL_RATIO;
   const openCritical =
-    openStart > 0 && nowSeconds > graceEnd
+    openStart > 0 && nowSeconds > graceEnd && peakAboveCritical
       ? tradingSecondsInRange(graceEnd, nowSeconds)
       : 0;
 
@@ -227,7 +251,7 @@ export function computePoolUptimePct(pool: {
  * Severity rank used to pick the worst status across oracle health and limit health.
  * N/A is least severe; CRITICAL is most severe.
  */
-const STATUS_RANK: Record<string, number> = {
+const STATUS_RANK: Record<HealthStatus, number> = {
   "N/A": 0,
   OK: 1,
   WARN: 2,
@@ -235,10 +259,23 @@ const STATUS_RANK: Record<string, number> = {
   CRITICAL: 4,
 };
 
-export function worstStatus(a: string, b: string): HealthStatus {
+export function worstStatus(a: HealthStatus, b: HealthStatus): HealthStatus {
+  return STATUS_RANK[a] >= STATUS_RANK[b] ? a : b;
+}
+
+/** Resolve a pool's effective limit status. Reads the indexer-stored
+ * `limitStatus` string when present (cast to `HealthStatus` — the indexer
+ * only ever writes one of the four values), falling back to the live
+ * `computeLimitStatus` for older pools that pre-date the indexed field. */
+export function resolveLimitStatus(pool: {
+  source?: string;
+  limitStatus?: string;
+  limitPressure0?: string;
+  limitPressure1?: string;
+}): HealthStatus {
   return (
-    (STATUS_RANK[a] ?? 0) >= (STATUS_RANK[b] ?? 0) ? a : b
-  ) as HealthStatus;
+    (pool.limitStatus as HealthStatus | undefined) ?? computeLimitStatus(pool)
+  );
 }
 
 /**
@@ -262,8 +299,7 @@ export function computeEffectiveStatus(
   chainId?: number,
 ): HealthStatus {
   const health = computeHealthStatus(pool, chainId);
-  const limit: string = pool.limitStatus ?? computeLimitStatus(pool);
-  return worstStatus(health, limit);
+  return worstStatus(health, resolveLimitStatus(pool));
 }
 
 type RebalancerStatus = "ACTIVE" | "STALE" | "N/A" | "NO_DATA";
@@ -293,12 +329,12 @@ export function computeRebalancerLiveness(
   const age = nowSeconds - Number(pool.lastRebalancedAt);
   if (age <= 86400) return "ACTIVE";
   const diff = Number(pool.priceDifference ?? "0");
-  const threshold =
-    (pool.rebalanceThreshold ?? 0) > 0 ? pool.rebalanceThreshold! : 10000;
   // A rebalancer that hasn't fired in 24h is only actually stale if the
-  // pool needs rebalancing. Under-threshold means there's nothing to do,
-  // so absence of activity is expected.
-  const needsRebalance = diff > threshold;
+  // pool genuinely needs rebalancing — i.e. above the 1% tolerance line, in
+  // lockstep with `isInDeviationBreach` and `computeHealthStatus`. Within
+  // tolerance, silence is expected.
+  const needsRebalance =
+    diff > effectiveThreshold(pool) * DEVIATION_TOLERANCE_RATIO;
   return needsRebalance ? "STALE" : "ACTIVE";
 }
 

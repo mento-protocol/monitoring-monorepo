@@ -6,7 +6,8 @@
 // and accumulates all-time health seconds on the Pool entity.
 //
 // deviationRatio = priceDifference / rebalanceThreshold
-// Binary: d ≤ 1.0 → healthy (1), d > 1.0 → unhealthy (0)
+// Binary: d ≤ 1.01 → healthy (1) (within 1% tolerance dead zone),
+//         d > 1.01 → unhealthy (0)
 //
 // Gap handling between oracle snapshots:
 //   - Gap ≤ freshnessLimit: carry last known state
@@ -112,15 +113,15 @@ export function computeHealthSnapshotFields(
     };
   }
 
-  // Use integer comparison for the binary threshold to avoid float precision
-  // issues at the d=1.0 boundary (e.g. priceDifference=5000, threshold=5000).
-  const isHealthy = priceDifference <= BigInt(rebalanceThreshold);
+  // Healthy band matches `computeHealthStatus`: `devRatio ≤ 1.01` (within
+  // the 1% tolerance dead zone). Integer-safe form: `diff*100 ≤ thr*101`.
+  const thr = BigInt(rebalanceThreshold);
+  const isHealthy = priceDifference * 100n <= thr * 101n;
   // Compute deviationRatio using bigint arithmetic to avoid Number() precision
   // loss for large priceDifference values (>2^53 would corrupt float conversion).
   // Scale numerator by 10^PRECISION before dividing, then format as fixed decimal.
   const SCALE = BigInt(10 ** PRECISION);
-  const threshold = BigInt(rebalanceThreshold);
-  const scaledRatio = (priceDifference * SCALE) / threshold;
+  const scaledRatio = (priceDifference * SCALE) / thr;
   const intPart = scaledRatio / SCALE;
   const fracPart = scaledRatio % SCALE;
   const deviationRatio = `${intPart}.${fracPart.toString().padStart(PRECISION, "0")}`;
@@ -206,11 +207,13 @@ export function updateHealthAccumulators(
   // Was the PREVIOUS interval healthy?
   // Use string comparison against sentinel to avoid float boundary issues.
   // lastDeviationRatio is "-1" for no-data, or a 6dp decimal string.
+  // Healthy band matches `computeHealthStatus`: `devRatio ≤ 1.01` (within 1%
+  // tolerance dead zone). Anything above is at-or-past breach in the new rule.
   const prevRatio = pool.lastDeviationRatio;
   const prevIsNoData = prevRatio === "-1" || prevRatio === "";
   const prevHealthy =
     !prevIsNoData &&
-    parseFloat(prevRatio) <= 1.0 &&
+    parseFloat(prevRatio) <= 1.01 &&
     !isNaN(parseFloat(prevRatio));
 
   // If previous interval was no-data, exclude this duration from the

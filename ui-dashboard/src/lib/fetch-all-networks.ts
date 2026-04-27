@@ -402,6 +402,8 @@ export async function fetchNetworkData(
         id: string;
         cumulativeCriticalSeconds?: string;
         breachCount?: number;
+        currentOpenBreachPeak?: string;
+        currentOpenBreachEntryThreshold?: number;
       }[];
     }>(ALL_POOLS_BREACH_ROLLUP, { chainId: network.chainId }),
     // RPC probe — no indexer entity for CDP strategy, so we detect by
@@ -425,6 +427,8 @@ export async function fetchNetworkData(
             ...p,
             cumulativeCriticalSeconds: r.cumulativeCriticalSeconds,
             breachCount: r.breachCount,
+            currentOpenBreachPeak: r.currentOpenBreachPeak,
+            currentOpenBreachEntryThreshold: r.currentOpenBreachEntryThreshold,
           };
     });
   }

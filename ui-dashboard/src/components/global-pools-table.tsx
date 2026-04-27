@@ -16,10 +16,11 @@ import { SortableTh } from "@/components/sortable-th";
 import { SourceBadge, HealthBadge } from "@/components/badges";
 import { ChainIcon } from "@/components/chain-icon";
 import {
+  computeEffectiveStatus,
   computeHealthStatus,
-  computeLimitStatus,
   computePoolUptimePct,
   pressureColorClass,
+  resolveLimitStatus,
   uptimeColorClass,
   worstStatus,
 } from "@/lib/health";
@@ -92,14 +93,8 @@ export function sortGlobalPools(
         );
         break;
       case "health": {
-        const aH = worstStatus(
-          computeHealthStatus(a.pool, a.network.chainId),
-          a.pool.limitStatus ?? computeLimitStatus(a.pool),
-        );
-        const bH = worstStatus(
-          computeHealthStatus(b.pool, b.network.chainId),
-          b.pool.limitStatus ?? computeLimitStatus(b.pool),
-        );
+        const aH = computeEffectiveStatus(a.pool, a.network.chainId);
+        const bH = computeEffectiveStatus(b.pool, b.network.chainId);
         cmp = (HEALTH_ORDER[aH] ?? 99) - (HEALTH_ORDER[bH] ?? 99);
         break;
       }
@@ -500,7 +495,7 @@ export function GlobalPoolsTable({
             const { pool: p, network } = e;
             const key = globalPoolKey(e);
             const healthStatus = computeHealthStatus(p, network.chainId);
-            const limitStatus = p.limitStatus ?? computeLimitStatus(p);
+            const limitStatus = resolveLimitStatus(p);
             const effectiveStatus = worstStatus(healthStatus, limitStatus);
             const tvl = tvlByKey.get(key) ?? 0;
             const vol24h = volume24hByKey?.get(key);

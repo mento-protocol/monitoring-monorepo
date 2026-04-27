@@ -106,6 +106,55 @@ describe("DeviationCell — bar color boundaries", () => {
     expect(html).not.toContain("bg-red-500");
   });
 
+  it("stays yellow inside the 1% tolerance dead zone (ratio = 1.005)", () => {
+    const pool: Pool = { ...BASE_POOL, priceDifference: "5025" };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("bg-yellow-500");
+    expect(html).not.toContain("bg-amber-500");
+    expect(html).not.toContain("bg-red-500");
+  });
+
+  it("flips to amber once deviation exceeds the 1% tolerance line (ratio = 1.012)", () => {
+    const pool: Pool = { ...BASE_POOL, priceDifference: "5060" };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("bg-amber-500");
+    expect(html).not.toContain("bg-yellow-500");
+    expect(html).not.toContain("bg-red-500");
+  });
+
+  it("stays amber (not red) when above 5% magnitude but the breach is fresh (30m anchor)", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const pool: Pool = {
+      ...BASE_POOL,
+      priceDifference: "5300",
+      deviationBreachStartedAt: String(now - 30 * 60),
+    };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("bg-amber-500");
+    expect(html).not.toContain("bg-red-500");
+  });
+
+  it("stays amber regardless of duration when magnitude is between 1% and 5% (ratio = 1.04, 2h anchor)", () => {
+    // Duration must NOT push WARN→CRITICAL when magnitude is below 1.05.
+    const now = Math.floor(Date.now() / 1000);
+    const pool: Pool = {
+      ...BASE_POOL,
+      priceDifference: "5200",
+      deviationBreachStartedAt: String(now - 2 * 3600),
+    };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("bg-amber-500");
+    expect(html).not.toContain("bg-red-500");
+  });
+
   it("renders a red bar when a breach has outlived the 1h grace window", () => {
     const now = Math.floor(Date.now() / 1000);
     const pool: Pool = {
