@@ -3,7 +3,6 @@
 import { useMemo } from "react";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
-import { useAddressLabels } from "@/components/address-labels-provider";
 import { InfoPopover } from "@/components/info-popover";
 import { useRebalanceCheck } from "@/hooks/use-rebalance-check";
 import { computeHealthStatus } from "@/lib/health";
@@ -26,7 +25,6 @@ export function RebalanceStatusValue({
   network: Network;
   strategyAddress: string;
 }) {
-  const { getName } = useAddressLabels();
   const {
     data: rebalanceCheck,
     isLoading,
@@ -49,10 +47,19 @@ export function RebalanceStatusValue({
     statusText = "Diagnostics unavailable";
     statusColor = "text-slate-400";
   } else if (rebalanceCheck === null) {
-    ({ text: statusText, color: statusColor } = getPassiveStatus(
-      pool,
-      network,
-    ));
+    // Mirror DeviationCell / HealthPanel: zero-filled defaults make
+    // computeHealthStatus return CRITICAL ("Oracle stale") for pools the
+    // indexer hasn't reached yet. Render the same "no data yet" copy
+    // HealthPanel uses instead of crying wolf.
+    if (pool.hasHealthData !== true) {
+      statusText = "Health data not yet available";
+      statusColor = "text-slate-400";
+    } else {
+      ({ text: statusText, color: statusColor } = getPassiveStatus(
+        pool,
+        network,
+      ));
+    }
   } else if (rebalanceCheck.canRebalance) {
     statusText = "Rebalance required";
     statusColor = "text-amber-400";
@@ -75,8 +82,6 @@ export function RebalanceStatusValue({
     statusTitle = buildBlockedTitle(rebalanceCheck);
   }
 
-  const strategyName = getName(strategyAddress);
-  const strategyHref = `${network.explorerBaseUrl}/address/${strategyAddress}`;
   // `!= null` catches both undefined AND null — the Pool type says
   // `string | undefined` but Hasura returns null for absent nullable
   // fields, and `null !== undefined` would otherwise slip past the gate,
@@ -121,14 +126,14 @@ export function RebalanceStatusValue({
         href={explorerTxUrl(network, lastRebalanceTxHash)}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-xs text-slate-600 font-normal hover:text-indigo-400 transition-colors"
+        className="text-xs text-slate-500 hover:text-indigo-400 transition-colors"
         title={formatTimestamp(pool.lastRebalancedAt!)}
       >
         {lastRebalanceLabel}
       </a>
     ) : (
       <span
-        className="text-xs text-slate-600 font-normal"
+        className="text-xs text-slate-500"
         title={formatTimestamp(pool.lastRebalancedAt!)}
       >
         {lastRebalanceLabel}
@@ -154,30 +159,8 @@ export function RebalanceStatusValue({
         {statusTitle && !statusHref && (
           <RebalanceDiagnosticsInfoIcon title={statusTitle} />
         )}
-        {lastRebalanceNode && (
-          <>
-            <span
-              className="text-xs text-slate-600 font-normal"
-              aria-hidden="true"
-            >
-              ·
-            </span>
-            {lastRebalanceNode}
-          </>
-        )}
       </span>
-      <span className="text-xs text-slate-500">
-        via{" "}
-        <a
-          href={strategyHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:text-indigo-400 transition-colors"
-          title={strategyAddress}
-        >
-          {strategyName}
-        </a>
-      </span>
+      {lastRebalanceNode}
     </span>
   );
 }

@@ -3,7 +3,10 @@
 import { isVirtualPool, type Pool } from "@/lib/types";
 import { InfoPopover } from "@/components/info-popover";
 import { useGQL } from "@/lib/graphql";
-import { POOL_BREACH_ROLLUP } from "@/lib/queries";
+import {
+  POOL_BREACH_ROLLUP,
+  POOL_CRITICAL_SECONDS_RECENT,
+} from "@/lib/queries";
 import {
   DEVIATION_BREACH_GRACE_SECONDS,
   DEVIATION_CRITICAL_RATIO,
@@ -14,8 +17,9 @@ import { isFxPool } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 
 const UPTIME_EXPLAINER =
-  "% of time the pool was healthy. Deviation > 5% threshold sustained for more than 1h qualifies as unhealthy.";
-const UPTIME_FX_SUFFIX = " Weekends do not count into uptime on FX pools.";
+  "% of time the pool was healthy.\nUnhealthy is when deviation is 5% above threshold for more than 1h.";
+const UPTIME_FX_SUFFIX = "\nWeekends don't count into FX pool uptime.";
+const SECONDS_IN_7D = 7 * 86_400;
 
 type BreachRollup = {
   cumulativeCriticalSeconds?: string;
@@ -23,6 +27,12 @@ type BreachRollup = {
   deviationBreachStartedAt?: string;
   currentOpenBreachPeak?: string;
   currentOpenBreachEntryThreshold?: number;
+};
+
+type RecentBreachRow = {
+  criticalDurationSeconds?: string | number;
+  startedAt?: string;
+  endedAt?: string;
 };
 
 export function UptimeValue({ pool }: { pool: Pool }) {
@@ -34,6 +44,22 @@ export function UptimeValue({ pool }: { pool: Pool }) {
     isVirtual ? null : POOL_BREACH_ROLLUP,
     { id: pool.id, chainId: pool.chainId },
   );
+  // Window for the "% last 7d" subtitle. Bucket the start to the nearest
+  // minute so the SWR cache key only changes once per minute — without
+  // this, every render produces a fresh `windowStart` (sub-second drift)
+  // that invalidates SWR's cache and re-fires the GraphQL request.
+  // Clamp to `pool.createdAtTimestamp` so a 1-day-old pool isn't scored
+  // against a 7d window it never lived through.
+  const windowStartRaw = Math.floor(Date.now() / 60_000) * 60 - SECONDS_IN_7D;
+  const poolStart = Number(pool.createdAtTimestamp ?? "0");
+  const windowStart =
+    poolStart > 0 ? Math.max(windowStartRaw, poolStart) : windowStartRaw;
+  const { data: recentData } = useGQL<{
+    DeviationThresholdBreach: RecentBreachRow[];
+  }>(isVirtual ? null : POOL_CRITICAL_SECONDS_RECENT, {
+    poolId: pool.id,
+    since: String(windowStart),
+  });
 
   if (isVirtual) return <span className="text-slate-500">N/A</span>;
 
@@ -58,7 +84,6 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   // from POOL_DETAIL_WITH_HEALTH would double-count a just-closed breach
   // during the brief window where the rollup refreshed first.
   const rolledCritical = Number(rollup.cumulativeCriticalSeconds ?? "0");
-  const closedBreachCount = rollup.breachCount ?? 0;
   const openStart = Number(rollup.deviationBreachStartedAt ?? "0");
   const hasOpenBreach = openStart > 0;
 
@@ -94,22 +119,90 @@ export function UptimeValue({ pool }: { pool: Pool }) {
     0,
     Math.min(100, (1 - (rolledCritical + openCritical) / total) * 100),
   );
-  const totalBreaches = closedBreachCount + (hasOpenBreach ? 1 : 0);
-  const subtitle =
-    totalBreaches === 0
-      ? "no breaches"
-      : hasOpenBreach && closedBreachCount === 0
-        ? "1 ongoing breach"
-        : hasOpenBreach
-          ? `${closedBreachCount} past + 1 ongoing`
-          : `${closedBreachCount} ${closedBreachCount === 1 ? "breach" : "breaches"}`;
+
+  // Closed-breach contribution to the 7d numerator. Prorate
+  // `criticalDurationSeconds` by the *trading-seconds* overlap with the
+  // window — not wall-clock — because the indexer accumulates critical
+  // seconds via `tradingSecondsInRange` (FX weekends subtracted) and
+  // only after the 1h grace expires. The denominator must therefore be
+  // post-grace trading-seconds too: a 2h breach with `criticalDuration
+  // = 1h` should attribute critical time only to the 1h post-grace
+  // segment, not smear across the full 2h.
+  const GRACE = Number(DEVIATION_BREACH_GRACE_SECONDS);
+  const recentRows = recentData?.DeviationThresholdBreach;
+  const closedCritical7d =
+    recentRows?.reduce((sum, row) => {
+      const critical = Number(row.criticalDurationSeconds ?? 0);
+      const breachStart = Number(row.startedAt ?? "0");
+      const breachEnd = Number(row.endedAt ?? "0");
+      if (!Number.isFinite(critical) || critical <= 0) return sum;
+      const breachGraceEnd = breachStart + GRACE;
+      const tradingTotal = tradingSecondsInRange(breachGraceEnd, breachEnd);
+      if (tradingTotal <= 0) return sum;
+      const clipStart = Math.max(breachGraceEnd, windowStart);
+      const clipEnd = Math.min(breachEnd, nowSeconds);
+      if (clipEnd <= clipStart) return sum;
+      const tradingClip = tradingSecondsInRange(clipStart, clipEnd);
+      return sum + critical * (tradingClip / tradingTotal);
+    }, 0) ?? 0;
+  const openCritical7d =
+    hasOpenBreach && nowSeconds > graceEnd && peakAboveCritical
+      ? tradingSecondsInRange(Math.max(graceEnd, windowStart), nowSeconds)
+      : 0;
+  const trading7d = tradingSecondsInRange(windowStart, nowSeconds);
+  const have7d = recentRows !== undefined && trading7d > 0;
+  const pct7d = have7d
+    ? Math.max(
+        0,
+        Math.min(
+          100,
+          (1 - (closedCritical7d + openCritical7d) / trading7d) * 100,
+        ),
+      )
+    : null;
+
+  // Trend arrow vs all-time. Gate on the .toFixed(2) values being
+  // visibly different — anything finer than 0.01% would render an arrow
+  // for noise the user can't see in the rounded numbers.
+  const trend: "up" | "down" | null =
+    pct7d == null || pct.toFixed(2) === pct7d.toFixed(2)
+      ? null
+      : pct7d > pct
+        ? "up"
+        : "down";
+
   return (
     <span className="flex flex-col gap-0.5">
       <span className="font-medium">
-        <span className={uptimeColorClass(pct)}>{pct.toFixed(3)}%</span>
+        <span className={uptimeColorClass(pct)}>{pct.toFixed(2)}%</span>
         <span className="ml-1 text-xs text-slate-500">all-time</span>
       </span>
-      <span className="text-xs text-slate-500">{subtitle}</span>
+      <span className="text-xs text-slate-500">
+        {pct7d != null ? (
+          <>
+            {trend === "up" && (
+              <span
+                className="text-emerald-400"
+                aria-label="trending up vs all-time"
+              >
+                ↑
+              </span>
+            )}
+            {trend === "down" && (
+              <span
+                className="text-red-400"
+                aria-label="trending down vs all-time"
+              >
+                ↓
+              </span>
+            )}
+            {trend && " "}
+            {pct7d.toFixed(2)}% last 7d
+          </>
+        ) : (
+          "—"
+        )}
+      </span>
     </span>
   );
 }
@@ -120,5 +213,9 @@ export function UptimeInfoIcon({ pool }: { pool: Pool }) {
     ? UPTIME_FX_SUFFIX
     : "";
   const content = UPTIME_EXPLAINER + suffix;
-  return <InfoPopover label={`About Uptime. ${content}`} content={content} />;
+  // aria-label has no notion of line breaks — collapse \n to a space so
+  // screen readers read a single coherent sentence instead of a halting
+  // pause some readers insert at literal newlines.
+  const ariaLabel = `About Uptime. ${content.replace(/\n/g, " ")}`;
+  return <InfoPopover label={ariaLabel} content={content} />;
 }

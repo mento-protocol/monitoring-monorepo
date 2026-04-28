@@ -97,56 +97,82 @@ describe("OraclePriceValue", () => {
     expect(html).toMatch(/1 KESm = [0-9.]+ USDm/);
   });
 
-  it("renders 'via {PAIR} oracle' with a Chainlink link when a known symbol is mapped", () => {
-    // USDC symbol is mapped to celo-mainnet/usdc-usd.
-    const pool: Pool = {
-      ...BASE_POOL,
-      token0: USDM_ADDR,
-      token1: USDC_ADDR,
-      oraclePrice: String(BigInt(1) * BigInt(10) ** BigInt(24)),
-    };
-    const html = renderToStaticMarkup(
-      <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
-    );
-    expect(html).toContain(
-      'href="https://data.chain.link/feeds/celo/mainnet/usdc-usd"',
-    );
-    // Slug "usdc-usd" formats to "USDC/USD" in the label.
-    expect(html).toContain("Chainlink USDC/USD oracle");
-    // No ↗ on non-primary subtitles — indigo-hover signals clickability.
-    expect(html).not.toContain("↗");
-  });
-
-  it("prefers the non-USDm leg even when USDm is token1 (reversed pair)", () => {
-    // Mirror of the "Chainlink link" test with token0/token1 swapped.
-    // With `usdmIsToken0=false`, sym0=USDC is the non-USDm leg and must win
-    // feed selection over sym1=USDm. Checking sym1 first would pick USDm
-    // (which has no Chainlink feed here) and fall through to no link.
-    const pool: Pool = {
-      ...BASE_POOL,
-      token0: USDC_ADDR,
-      token1: USDM_ADDR,
-      oraclePrice: String(BigInt(1) * BigInt(10) ** BigInt(24)),
-    };
-    const html = renderToStaticMarkup(
-      <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
-    );
-    expect(html).toContain(
-      'href="https://data.chain.link/feeds/celo/mainnet/usdc-usd"',
-    );
-    expect(html).toContain("Chainlink USDC/USD oracle");
-  });
-
-  it("renders plain 'via SortedOracles' when no Chainlink mapping exists", () => {
+  it("links only the 'last X ago' portion to the explorer tx, leaving '/ Nm expiry' as plain text", () => {
+    const freshTs = String(Math.floor(Date.now() / 1000) - 60);
     const pool: Pool = {
       ...BASE_POOL,
       oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
+      oracleTimestamp: freshTs,
+      oracleExpiry: "300",
+      oracleTxHash:
+        "0xcb81fe1d4ff72d75ce29bf7905ea852d7e8da98e1831f575c5b71687e9acc936",
+    };
+    const html = renderToStaticMarkup(
+      <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
+    );
+    expect(html).toContain(
+      'href="https://celoscan.io/tx/0xcb81fe1d4ff72d75ce29bf7905ea852d7e8da98e1831f575c5b71687e9acc936"',
+    );
+    // Anchor wraps "last … ago" but NOT the "/ Nm expiry" suffix.
+    expect(html).toMatch(/<a [^>]*>last [^<]+ ago<\/a>/);
+    expect(html).toMatch(/<\/a>\s*\/ \d+m expiry/);
+    expect(html).not.toMatch(/<a[^>]*>[^<]*expiry/);
+    // Fresh oracle → white price, slate subline, no red anywhere.
+    expect(html).toContain("text-white");
+    expect(html).not.toContain("text-red-400");
+  });
+
+  it("turns BOTH the price text and the 'Updated …' subline red when the oracle has gone stale", () => {
+    // Timestamp 1h old with a 5m expiry → past expiry, isOracleFresh=false.
+    // Both the headline price button AND the timestamp subline must turn
+    // red so the staleness signal is bidirectional — a regression that
+    // reddened only one of the two would otherwise slip through.
+    const staleTs = String(Math.floor(Date.now() / 1000) - 3600);
+    const pool: Pool = {
+      ...BASE_POOL,
+      oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
+      oracleTimestamp: staleTs,
+      oracleExpiry: "300",
+    };
+    const html = renderToStaticMarkup(
+      <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
+    );
+    // Two distinct elements should carry text-red-400 — count occurrences
+    // so a half-red regression fails this test instead of passing on the
+    // first match.
+    const redMatches = html.match(/text-red-400/g) ?? [];
+    expect(redMatches.length).toBeGreaterThanOrEqual(2);
+    expect(html).not.toContain("text-white");
+    // Visible textual marker so users who can't rely on color still get
+    // the staleness signal — color alone failed the a11y bar.
+    expect(html).toContain("· stale");
+  });
+
+  it("omits the 'last …' subline when oracleTimestamp is absent", () => {
+    const pool: Pool = {
+      ...BASE_POOL,
+      oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
+      // no oracleTimestamp
     };
     const html = renderToStaticMarkup(
       <OraclePriceValue pool={pool} network={NETWORK_WITHOUT_CHAINLINK} />,
     );
-    expect(html).toContain("via SortedOracles");
-    expect(html).not.toContain("oracle"); // no "X/Y oracle" link
-    expect(html).not.toContain("data.chain.link");
+    expect(html).not.toMatch(/expiry/);
+  });
+
+  it("treats the '0' oracleTimestamp sentinel like a missing timestamp", () => {
+    // Hasura returns "0" as the default for unset numeric fields; the
+    // component must skip the 'last …' subline (don't render "last 56y ago"
+    // pointing at the Unix epoch).
+    const pool: Pool = {
+      ...BASE_POOL,
+      oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
+      oracleTimestamp: "0",
+    };
+    const html = renderToStaticMarkup(
+      <OraclePriceValue pool={pool} network={NETWORK_WITHOUT_CHAINLINK} />,
+    );
+    expect(html).not.toMatch(/expiry/);
+    expect(html).not.toMatch(/last [^<]*ago/);
   });
 });

@@ -55,6 +55,7 @@ const CRITICAL_POOL: Pool = {
   rebalancerAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   priceDifference: "9716",
   rebalanceThreshold: 5000,
+  hasHealthData: true,
 };
 
 const NETWORK_WITH_RPC: Network = {

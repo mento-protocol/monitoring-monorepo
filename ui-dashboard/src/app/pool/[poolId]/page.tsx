@@ -8,7 +8,6 @@ import { DeviationCell } from "@/components/pool-header/deviation-cell";
 import { InfoPopover } from "@/components/info-popover";
 import { LimitStatusValue } from "@/components/pool-header/limit-status-value";
 import { OraclePriceValue } from "@/components/pool-header/oracle-price-value";
-import { OracleStatusValue } from "@/components/pool-header/oracle-status-value";
 import { RebalanceStatusValue } from "@/components/pool-header/rebalance-status-value";
 import {
   UptimeInfoIcon,
@@ -427,7 +426,6 @@ function PoolDetail() {
             tradingLimitsError={tradingLimitsError}
           />
           <HealthPanel pool={pool} />
-          <PoolConfigPanel pool={pool} />
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <PoolTvlOverTimeChart
               pool={pool}
@@ -685,9 +683,8 @@ function PoolHeader({
           </span>
         )}
       </div>
-      <dl className="flex flex-wrap justify-between gap-x-6 gap-y-4 text-sm">
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
         <Stat
-          className="min-w-36"
           label={
             <span className="inline-flex items-center gap-1">
               Uptime
@@ -703,7 +700,6 @@ function PoolHeader({
           }
         />
         <Stat
-          className="min-w-36"
           label="Oracle Price"
           value={
             isVirtual ? (
@@ -714,18 +710,6 @@ function PoolHeader({
           }
         />
         <Stat
-          className="min-w-36"
-          label="Oracle Status"
-          value={
-            isVirtual ? (
-              <span className="text-slate-500">—</span>
-            ) : (
-              <OracleStatusValue pool={pool} network={network} />
-            )
-          }
-        />
-        <Stat
-          className="min-w-52"
           label="Trading Limits"
           value={
             <LimitStatusValue
@@ -736,7 +720,6 @@ function PoolHeader({
           }
         />
         <Stat
-          className="min-w-36"
           label="Rebalance Status"
           value={
             isVirtual || !pool.rebalancerAddress ? (
@@ -752,6 +735,12 @@ function PoolHeader({
         />
         <DeviationCell pool={pool} network={network} />
       </dl>
+      {!isVirtual && (
+        <>
+          <div className="my-5 h-px bg-slate-800" />
+          <PoolConfigPanel pool={pool} />
+        </>
+      )}
     </div>
   );
 }

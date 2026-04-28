@@ -72,6 +72,11 @@ function shouldRunCheck(pool: Pool | null, chainId?: number): boolean {
   if (!pool) return false;
   if (pool.source?.includes("virtual")) return false;
   if (!pool.rebalancerAddress) return false;
+  // Match DeviationCell / HealthPanel: when the indexer hasn't backfilled
+  // health columns yet, zero-filled defaults make `computeHealthStatus`
+  // return CRITICAL (oracle "stale"), which would trigger a pointless RPC
+  // probe. Skip the check until real health data is available.
+  if (pool.hasHealthData !== true) return false;
 
   // Pass chainId so chain-aware staleness thresholds are used (e.g. Monad = 360s)
   const health = computeHealthStatus(pool, chainId);
