@@ -254,16 +254,25 @@ BreakerBox.TradingModeUpdated.handler(async ({ event, context }) => {
   const blockTimestamp = asBigInt(event.block.timestamp);
 
   // Multi-row update — fan-out across all this feed's configs on this chain.
+  // We bump `lastStatusUpdatedAt` here, so we MUST also recompute
+  // `cooldownEndsAt` (the pre-rolled `lastStatusUpdatedAt + cooldownTime`)
+  // — otherwise the dashboard's countdown would render against the
+  // previous trip/reset's timestamp and immediately show as expired.
   const configs =
     await context.BreakerConfig.getWhere.rateFeedID.eq(rateFeedID);
   for (const cfg of configs) {
     if (cfg.chainId !== event.chainId) continue;
     if (cfg.tradingMode === tradingMode) continue;
+    const breaker = await context.Breaker.get(cfg.breaker_id);
+    const cooldown = breaker
+      ? effectiveCooldown(breaker, cfg.cooldownTime)
+      : cfg.cooldownTime;
     context.BreakerConfig.set({
       ...cfg,
       tradingMode,
       status: tradingMode === 0 ? "OK" : "TRIPPED",
       lastStatusUpdatedAt: blockTimestamp,
+      cooldownEndsAt: computeCooldownEndsAt(blockTimestamp, cooldown),
     });
   }
 });

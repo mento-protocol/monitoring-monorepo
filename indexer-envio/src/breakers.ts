@@ -79,7 +79,12 @@ export async function ensureBreaker(
   const existing = await context.Breaker.get(id);
   if (existing) return existing;
 
+  // fetchBreakerKind returns null on transient RPC failure so we don't
+  // poison the kind (e.g. persisting MARKET_HOURS for a real MedianDelta
+  // breaker just because a single probe call timed out). Bail and let the
+  // next event retry.
   const kind = await fetchBreakerKind(chainId, breakerAddress);
+  if (!kind) return null;
   const defaults = await fetchBreakerDefaults(
     chainId,
     breakerAddress,
@@ -181,10 +186,16 @@ export async function bootstrapFeedBreakerConfigs(
 ): Promise<void> {
   const cacheKey = `${chainId}:${rateFeedID.toLowerCase()}`;
   if (_bootstrapAttempted.has(cacheKey)) return;
-  _bootstrapAttempted.add(cacheKey);
 
+  // Only mark as attempted AFTER a successful BreakerBox.getBreakers() call.
+  // A transient RPC failure here would otherwise permanently poison the
+  // cache for the rest of the process — and for feeds whose breaker setup
+  // happened before `start_block`, this is the only hydration path, so a
+  // brief network blip would leave breaker state missing until restart.
   const breakerAddresses = await fetchBreakerList(chainId, blockNumber);
-  if (!breakerAddresses || breakerAddresses.length === 0) return;
+  if (!breakerAddresses) return; // RPC failed — let the next event retry.
+  _bootstrapAttempted.add(cacheKey);
+  if (breakerAddresses.length === 0) return;
 
   for (const breakerAddress of breakerAddresses) {
     const breaker = await ensureBreaker(

@@ -1430,7 +1430,7 @@ async function probeFunction(
   abi: readonly unknown[],
   functionName: string,
   args: readonly unknown[] = [],
-): Promise<boolean> {
+): Promise<"present" | "missing" | "rpc_error"> {
   try {
     const client = getRpcClient(chainId);
     await client.readContract({
@@ -1439,9 +1439,21 @@ async function probeFunction(
       functionName,
       args: args as never,
     });
-    return true;
-  } catch {
-    return false;
+    return "present";
+  } catch (err) {
+    // Distinguish "function not in bytecode" (selector miss / revert with
+    // no data) from a transient RPC/network failure. viem signals the
+    // former via `ContractFunctionZeroDataError`, which surfaces as an
+    // error message containing "returned no data" or "0x". Any other
+    // error is RPC infrastructure and must NOT be interpreted as a
+    // selector miss — that would corrupt breaker classification (e.g.
+    // a transient timeout would persist a MD breaker as MARKET_HOURS).
+    const msg = err instanceof Error ? err.message : String(err ?? "");
+    const isSelectorMiss =
+      msg.includes("returned no data") ||
+      msg.includes("0x") ||
+      msg.includes("execution reverted");
+    return isSelectorMiss ? "missing" : "rpc_error";
   }
 }
 
@@ -1449,37 +1461,37 @@ async function probeFunction(
  * neither `medianRatesEMA` nor `referenceValues`, so we check MD-specific
  * first, then VD-specific, then default to MARKET_HOURS. The probe address
  * (`0x000…0001`) is a valid input that won't have any state — we only care
- * whether the function exists in the bytecode. */
+ * whether the function exists in the bytecode. Returns null on transient
+ * RPC failure so the caller can retry rather than poisoning the kind. */
 export async function fetchBreakerKind(
   chainId: number,
   breakerAddress: string,
-): Promise<BreakerKindRpc> {
+): Promise<BreakerKindRpc | null> {
   const mock = _testBreakerKinds.get(breakerKindKey(chainId, breakerAddress));
   if (mock !== undefined) return mock ?? "MARKET_HOURS";
 
   const probeAddr = "0x0000000000000000000000000000000000000001";
-  if (
-    await probeFunction(
-      chainId,
-      breakerAddress,
-      MEDIAN_DELTA_BREAKER_ABI,
-      "medianRatesEMA",
-      [probeAddr],
-    )
-  ) {
-    return "MEDIAN_DELTA";
-  }
-  if (
-    await probeFunction(
-      chainId,
-      breakerAddress,
-      VALUE_DELTA_BREAKER_ABI,
-      "referenceValues",
-      [probeAddr],
-    )
-  ) {
-    return "VALUE_DELTA";
-  }
+  const mdProbe = await probeFunction(
+    chainId,
+    breakerAddress,
+    MEDIAN_DELTA_BREAKER_ABI,
+    "medianRatesEMA",
+    [probeAddr],
+  );
+  if (mdProbe === "rpc_error") return null;
+  if (mdProbe === "present") return "MEDIAN_DELTA";
+
+  const vdProbe = await probeFunction(
+    chainId,
+    breakerAddress,
+    VALUE_DELTA_BREAKER_ABI,
+    "referenceValues",
+    [probeAddr],
+  );
+  if (vdProbe === "rpc_error") return null;
+  if (vdProbe === "present") return "VALUE_DELTA";
+
+  // Both selectors confirmed missing — this is a MarketHours-style breaker.
   return "MARKET_HOURS";
 }
 

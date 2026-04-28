@@ -117,6 +117,9 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
     "FX pools close on weekends from Fri 21:00 UTC to Sun 23:00 UTC, " +
     "plus major holidays, because they track real-world forex rates.";
 
+  // Screen readers don't reliably announce `title=`; an `sr-only` span
+  // inside the pill exposes the explanation to assistive tech without
+  // changing the visual.
   if (!open) {
     // Closed — countdown to next open.
     return (
@@ -129,6 +132,7 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
         <span className="font-mono text-slate-300">
           {formatHoursMinutes(secondsUntilTransition)} until open
         </span>
+        <span className="sr-only"> — {tooltip}</span>
       </span>
     );
   }
@@ -145,6 +149,7 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
         <span className="font-mono text-amber-200">
           {formatHoursMinutes(secondsUntilTransition)} until close
         </span>
+        <span className="sr-only"> — {tooltip}</span>
       </span>
     );
   }
@@ -158,6 +163,7 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
       <span className="text-emerald-300 font-medium">Market Open</span>
       <span className="text-slate-500">·</span>
       <span className="mono text-slate-300">{scheduleString()}</span>
+      <span className="sr-only"> — {tooltip}</span>
     </span>
   );
 }

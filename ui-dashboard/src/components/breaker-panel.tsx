@@ -34,13 +34,15 @@ function formatFixidityPct(
   raw: string | null | undefined,
   precision: number,
 ): string | null {
-  if (!raw) return null;
+  if (raw === null || raw === undefined) return null;
   // Convert Fixidity (1e24=100%) to percent. Avoid Number for big values —
-  // do it in BigInt with a /1e22 trick to preserve precision.
+  // do it in BigInt with a /1e22 trick to preserve precision. Treats 0 as a
+  // legitimate value (median exactly equals reference) — renders "0.00%",
+  // not the missing-data dash.
   const value = BigInt(raw);
-  if (value <= BigInt(0)) return null;
+  if (value < BigInt(0)) return null;
   const scale = BigInt(10) ** BigInt(22 - precision);
-  const scaled = value / scale; // integer with `precision` decimals worth of percent
+  const scaled = value / scale;
   const whole = scaled / BigInt(10) ** BigInt(precision);
   const frac = scaled % BigInt(10) ** BigInt(precision);
   return `${whole}.${frac.toString().padStart(precision, "0")}%`;
@@ -187,12 +189,16 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
     kind === "MEDIAN_DELTA"
       ? formatFixidityValue(cfg.medianRatesEMA)
       : formatFixidityValue(cfg.referenceValue);
-  const formattedLiveDelta = liveDelta
-    ? (formatFixidityPct(liveDelta.toString(), precision) ?? "—")
-    : "—";
-  const liveBar = liveDelta
-    ? deltaBarStyle(liveDelta, threshold)
-    : { pct: 0, color: "bg-slate-600" };
+  // `liveDelta != null` (instead of truthy) — `0n` is a legitimate value
+  // (median exactly matches reference), not "missing data".
+  const formattedLiveDelta =
+    liveDelta != null
+      ? (formatFixidityPct(liveDelta.toString(), precision) ?? "—")
+      : "—";
+  const liveBar =
+    liveDelta != null
+      ? deltaBarStyle(liveDelta, threshold)
+      : { pct: 0, color: "bg-slate-600" };
 
   const todayMidnightSec = Math.floor(now / 86400) * 86400; // UTC midnight
   // Filter by THIS breaker's address — the query is feed-scoped, but a
@@ -282,10 +288,13 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
             <span
               className={`text-xs ${tripped ? "text-red-300" : "text-slate-500"}`}
             >
-              {liveDelta
+              {liveDelta != null
                 ? `${formattedLiveDelta} of ${formattedThreshold}`
                 : "—"}
-              {tripped && liveDelta && liveDelta >= threshold && " (over)"}
+              {tripped &&
+                liveDelta != null &&
+                liveDelta >= threshold &&
+                " (over)"}
             </span>
           </dd>
         </div>
@@ -356,7 +365,7 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
                 rateInBand ? "text-emerald-300" : "text-red-300"
               }`}
             >
-              {liveDelta
+              {liveDelta != null
                 ? `${formattedLiveDelta} ${rateInBand ? "<" : ">"} ${formattedThreshold}`
                 : "—"}
             </span>
