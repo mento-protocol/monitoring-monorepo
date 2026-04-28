@@ -140,7 +140,7 @@ locals {
       {{- if and $rm $rc -}}
         {{- $rm -}}
         {{- if and $values.Bal $values.Need -}}
-          . Current balance: {{ printf "%.2f" $values.Bal.Value }} {{ $values.Bal.Labels.token_symbol }} / Needed for rebalancing: {{ printf "%.2f" $values.Need.Value }} {{ $values.Bal.Labels.token_symbol -}}
+          . Current balance: {{ printf "%.2f" $values.Bal.Value }} {{ $values.Bal.Labels.token_symbol }} / Needed for rebalancing: {{ printf "%.2f" $values.Need.Value }} {{ $values.Need.Labels.token_symbol -}}
         {{- else -}}
           {{ " — [" }}{{- $rc -}}{{ "]" }}
         {{- end -}}
