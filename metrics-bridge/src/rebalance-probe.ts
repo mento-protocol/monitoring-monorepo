@@ -38,6 +38,18 @@ import type { PoolRow } from "./types.js";
 // and create zombie label sets. Skip-on-busy preserves the in-flight cycle
 // rather than queueing — the next poll will probe again anyway.
 let probeInProgress = false;
+// Warn-once-per-busy-window: a wedged in-flight cycle could attract many
+// repeated overlap attempts; we only need ONE log per stuck window to surface
+// the issue, not one per skipped call (which would bury more useful per-pool
+// `[REBALANCE_PROBE_FAILED]` lines). Cleared each time the mutex is released.
+let reentryWarnedThisWindow = false;
+
+/** @internal Test-only: reset the re-entrancy mutex so a leaked flag from a
+ * failing test can't silently short-circuit unrelated cases in the same file. */
+export function _resetProbeInProgressForTests(): void {
+  probeInProgress = false;
+  reentryWarnedThisWindow = false;
+}
 
 /**
  * Returns pools eligible for the rebalance-reason probe — same gating as the
@@ -140,10 +152,15 @@ export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
   // Re-entrancy guard: if a previous cycle is still running, drop this one.
   // The `finally` below ensures we always release the flag — including on
   // probe throws — so a transient error can't permanently disable the probe.
+  // Warn ONCE per busy window: a stuck in-flight cycle could attract dozens
+  // of repeated skips, and we only need one log line to surface the wedge.
   if (probeInProgress) {
-    console.warn(
-      "[REBALANCE_PROBE_REENTRY] cycle skipped — previous cycle still running",
-    );
+    if (!reentryWarnedThisWindow) {
+      reentryWarnedThisWindow = true;
+      console.warn(
+        "[REBALANCE_PROBE_REENTRY] cycle skipped — previous cycle still running",
+      );
+    }
     return;
   }
   probeInProgress = true;
@@ -221,5 +238,9 @@ export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
     gauges.rebalanceProbeLastRun.set(Math.floor(Date.now() / 1000));
   } finally {
     probeInProgress = false;
+    // Reset the warn-once latch: the next overlap window starts fresh, so a
+    // future re-entry will surface a single new log line instead of staying
+    // silent forever.
+    reentryWarnedThisWindow = false;
   }
 }

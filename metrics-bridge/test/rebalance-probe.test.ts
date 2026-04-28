@@ -25,6 +25,7 @@ import {
   eligibleForProbe,
   runRebalanceProbes,
   runWithConcurrency,
+  _resetProbeInProgressForTests,
 } from "../src/rebalance-probe.js";
 import { probeRebalance } from "../src/rebalance-check.js";
 import { getRpcClient } from "../src/rpc.js";
@@ -178,6 +179,7 @@ describe("runRebalanceProbes — timeout race", () => {
   beforeEach(() => {
     register.resetMetrics();
     vi.clearAllMocks();
+    _resetProbeInProgressForTests();
     mockGetRpcClient.mockReturnValue({
       call: vi.fn(),
     } as unknown as ReturnType<typeof getRpcClient>);
@@ -229,11 +231,11 @@ describe("runRebalanceProbes — re-entrancy guard for overlapping cycles", () =
   // that could reorder completion, or a parallel timer caller. When a
   // second cycle starts while cycle N-1 is still in flight, the guard
   // makes cycle N a no-op: it returns immediately, no probes run, no
-  // gauge state is touched, and a single warn-once log surfaces the
-  // skip. Tracked in BACKLOG.md (now resolved).
+  // gauge state is touched, and a single warn surfaces the skip.
   beforeEach(() => {
     register.resetMetrics();
     vi.clearAllMocks();
+    _resetProbeInProgressForTests();
     mockGetRpcClient.mockReturnValue({
       call: vi.fn(),
     } as unknown as ReturnType<typeof getRpcClient>);
@@ -323,12 +325,130 @@ describe("runRebalanceProbes — re-entrancy guard for overlapping cycles", () =
 
     warn.mockRestore();
   });
+
+  it("warns once per busy window even when many cycles overlap, and re-arms after release", async () => {
+    // A wedged in-flight cycle could attract dozens of repeated skips. The
+    // contract is one warn per "stuck" window — not one per skipped call —
+    // so the log doesn't bury more useful per-pool diagnostic lines. After
+    // the in-flight cycle resolves, the latch re-arms so a future overlap
+    // surfaces a fresh log line.
+    const pool = makePool({
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.50",
+    });
+
+    // Cycle 1 stays pending so the next two calls re-enter.
+    let resolveCycle1: (v: {
+      kind: "blocked";
+      reasonCode: string;
+      reasonMessage: string;
+    }) => void = () => {};
+    const cycle1Probe = new Promise<{
+      kind: "blocked";
+      reasonCode: string;
+      reasonMessage: string;
+    }>((r) => {
+      resolveCycle1 = r;
+    });
+    mockProbe.mockReturnValueOnce(
+      cycle1Probe as unknown as ReturnType<typeof probeRebalance>,
+    );
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const cycle1Run = runRebalanceProbes([pool]);
+    // Cycles 2 and 3 both re-enter while cycle 1 is in flight.
+    await runRebalanceProbes([pool]);
+    await runRebalanceProbes([pool]);
+
+    // Only one re-entry warn for the busy window — not two.
+    const reentryWarns = warn.mock.calls.filter((c) =>
+      String(c[0]).includes("[REBALANCE_PROBE_REENTRY]"),
+    );
+    expect(reentryWarns).toHaveLength(1);
+
+    // Resolve cycle 1 to release the latch.
+    resolveCycle1({
+      kind: "blocked",
+      reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
+      reasonMessage: "Reserve has insufficient collateral to rebalance",
+    });
+    await cycle1Run;
+
+    // A NEW busy window: cycle 4 stays pending, cycle 5 re-enters. The latch
+    // must have re-armed so this surfaces a fresh log line.
+    let resolveCycle4: (v: {
+      kind: "blocked";
+      reasonCode: string;
+      reasonMessage: string;
+    }) => void = () => {};
+    const cycle4Probe = new Promise<{
+      kind: "blocked";
+      reasonCode: string;
+      reasonMessage: string;
+    }>((r) => {
+      resolveCycle4 = r;
+    });
+    mockProbe.mockReturnValueOnce(
+      cycle4Probe as unknown as ReturnType<typeof probeRebalance>,
+    );
+    const cycle4Run = runRebalanceProbes([pool]);
+    await runRebalanceProbes([pool]);
+
+    const reentryWarnsAfter = warn.mock.calls.filter((c) =>
+      String(c[0]).includes("[REBALANCE_PROBE_REENTRY]"),
+    );
+    expect(reentryWarnsAfter).toHaveLength(2);
+
+    resolveCycle4({
+      kind: "blocked",
+      reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
+      reasonMessage: "Reserve has insufficient collateral to rebalance",
+    });
+    await cycle4Run;
+
+    warn.mockRestore();
+  });
+
+  it("releases the mutex when a probe throws so the next cycle can run", async () => {
+    // The `try { ... } finally { probeInProgress = false }` contract is the
+    // load-bearing piece of the guard: if a probe rejection left the flag
+    // stuck `true`, the probe would be permanently disabled until the
+    // process restarted. Pin it.
+    const pool = makePool({
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.50",
+    });
+    mockProbe.mockRejectedValueOnce(new Error("boom"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Cycle 1 must reject (the worker pool surfaces the throw).
+    await expect(runRebalanceProbes([pool])).rejects.toThrow(/boom/);
+
+    // Cycle 2 must run a fresh probe — the mutex was released by `finally`.
+    mockProbe.mockResolvedValueOnce({
+      kind: "blocked",
+      reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
+      reasonMessage: "Reserve has insufficient collateral to rebalance",
+    });
+    await runRebalanceProbes([pool]);
+
+    expect(mockProbe).toHaveBeenCalledTimes(2);
+    const value = await getGaugeValue(
+      register,
+      "mento_pool_rebalance_blocked",
+      { reason_code: "RLS_RESERVE_OUT_OF_COLLATERAL" },
+    );
+    expect(value).toBe(1);
+    warn.mockRestore();
+  });
 });
 
 describe("runRebalanceProbes — gauge writes", () => {
   beforeEach(() => {
     register.resetMetrics();
     vi.clearAllMocks();
+    _resetProbeInProgressForTests();
     // Default: every chain has a configured RPC client.
     mockGetRpcClient.mockReturnValue({
       call: vi.fn(),
@@ -636,6 +756,7 @@ describe("runRebalanceProbes — reserve-collateral enrichment gauges", () => {
   beforeEach(() => {
     register.resetMetrics();
     vi.clearAllMocks();
+    _resetProbeInProgressForTests();
     mockGetRpcClient.mockReturnValue({
       call: vi.fn(),
     } as unknown as ReturnType<typeof getRpcClient>);
