@@ -115,4 +115,41 @@ locals {
   deviation_critical_current_deviation_annotation = "{{ if $values.Dev }}{{ printf \"%.0f%%\" $values.Dev.Value }} above threshold{{ end }}"
   deviation_critical_current_reserves_annotation  = "{{ if and $values.R0 $values.R1 }}{{ humanizePercentage $values.R0.Value }} {{ $values.R0.Labels.token_symbol }} / {{ humanizePercentage $values.R1.Value }} {{ $values.R1.Labels.token_symbol }}{{ end }}"
   deviation_critical_rebalance_reason_annotation  = "{{ if $values.B }}{{ $rm := index $values.B.Labels \"reason_message\" }}{{ $rc := index $values.B.Labels \"reason_code\" }}{{ if and $rm $rc }}{{ $rm }}{{ if and $values.Bal $values.Need }}. Current balance: {{ printf \"%.2f\" $values.Bal.Value }} {{ $values.Bal.Labels.token_symbol }} / Needed for rebalancing: {{ printf \"%.2f\" $values.Need.Value }} {{ $values.Bal.Labels.token_symbol }}{{ else }} — [{{ $rc }}]{{ end }}{{ end }}{{ end }}"
+
+  # ── Deviation Breach Critical annotation-only data sources ───────────────
+  # Both critical rules (magnitude-gated + anchored) wire the same six
+  # instant queries into `$values.{Dev,R0,R1,B,Bal,Need}` so the annotation
+  # locals above can render. Authored once here and consumed by `dynamic`
+  # blocks in `rules-fpmms.tf` so a query-shape change (new annotation,
+  # different time range) lands in one place. Keeping the list ordered:
+  # condition gauges first (Dev/R0/R1, used by current_deviation +
+  # current_reserves), then enrichment gauges (B/Bal/Need, used by
+  # rebalance_reason). The threshold node is rule-specific (warning has a
+  # different bound than critical), so it stays inline in each rule.
+  deviation_critical_annotation_queries = [
+    {
+      ref_id = "Dev"
+      expr   = "(mento_pool_deviation_ratio - 1) * 100"
+    },
+    {
+      ref_id = "R0"
+      expr   = "mento_pool_reserve_share_token0"
+    },
+    {
+      ref_id = "R1"
+      expr   = "mento_pool_reserve_share_token1"
+    },
+    {
+      ref_id = "B"
+      expr   = "mento_pool_rebalance_blocked > 0"
+    },
+    {
+      ref_id = "Bal"
+      expr   = "mento_pool_rebalance_collateral_balance"
+    },
+    {
+      ref_id = "Need"
+      expr   = "mento_pool_rebalance_collateral_needed"
+    },
+  ]
 }
