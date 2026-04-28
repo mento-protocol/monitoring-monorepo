@@ -157,56 +157,64 @@ describe("DeviationCell — bar fill colors track health status", () => {
   });
 });
 
-describe("DeviationCell — caption framing", () => {
-  it("frames the primary label as 'X% over' when deviation is above the limit (no 'above threshold' suffix)", () => {
-    // 7610/5000 = 1.522 → 52.2% over. Reads as a direct overage; the bar
-    // already conveys "above threshold" via color so the suffix is dropped.
+describe("DeviationCell — caption shows raw deviation %", () => {
+  it("shows the raw deviation pct (not the delta from threshold) when above the limit", () => {
+    // 7610 bps → 76.10% raw deviation. The bar fill clamps at 100% to
+    // show "above threshold", but the caption reports the actual drift.
     const pool: Pool = { ...BASE_POOL, priceDifference: "7610" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("52.2% over");
-    expect(html).not.toContain("above threshold");
+    expect(html).toContain("76.10%");
+    // Word-boundary checks so the popover's "hover:" class text doesn't
+    // accidentally satisfy a `not.toContain("over")` assertion.
+    expect(html).not.toMatch(/% over/);
+    expect(html).not.toMatch(/above threshold/);
   });
 
-  it("stays compact even at 4-digit overage magnitudes — the wrap problem the suffix-drop targets", () => {
-    // 132954/5000 → 2559.1% over. With the old "above threshold" suffix
-    // this would wrap on a 226px tile; the compact form fits.
+  it("stays compact even at 4-digit deviation magnitudes (no wrap on a 226px tile)", () => {
+    // 132954 bps → 1329.54% raw deviation. With the old "X% over" or
+    // "X% above threshold" suffix this would wrap; the compact form fits.
     const pool: Pool = { ...BASE_POOL, priceDifference: "132954" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("2559.1% over");
-    expect(html).not.toContain("above threshold");
+    expect(html).toContain("1329.54%");
+    expect(html).not.toMatch(/% over/);
+    expect(html).not.toMatch(/above threshold/);
   });
 
-  it("frames the primary label as 'X% below' when deviation is under the limit", () => {
-    // 3000/5000 = 0.6 → 40.0% below.
+  it("shows the raw deviation pct when below the limit (no 'below threshold' suffix)", () => {
+    // 3000 bps → 30.00% raw deviation. Bar color (emerald) conveys
+    // "below threshold"; the caption is just the number.
     const pool: Pool = { ...BASE_POOL, priceDifference: "3000" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("40.0% below");
-    expect(html).not.toContain("over");
+    expect(html).toContain("30.00%");
+    expect(html).not.toMatch(/% below/);
   });
 
-  it("says 'At threshold' when deviation is exactly at the limit", () => {
+  it("shows the raw deviation pct exactly at the threshold (no 'At threshold' synthetic copy)", () => {
+    // 5000 bps → 50.00% raw deviation, threshold also 50%. No synthetic
+    // "At threshold" framing — the number and the bar color (yellow)
+    // tell the same story.
     const pool: Pool = { ...BASE_POOL, priceDifference: "5000" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("At threshold");
-    expect(html).not.toContain("0.0% below");
-    expect(html).not.toContain("0.0% over");
+    expect(html).toContain("50.00%");
+    expect(html).not.toContain("At threshold");
   });
 
-  it("says 'At threshold' when deviation is within 1% below the limit", () => {
-    const pool: Pool = { ...BASE_POOL, priceDifference: "4975" };
+  it("renders an info popover next to the 'Deviation' label", () => {
+    const pool: Pool = { ...BASE_POOL, priceDifference: "3000" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("At threshold");
-    expect(html).not.toMatch(/% below/);
+    expect(html).toMatch(
+      /aria-label="About Deviation\. Live drift between the pool/,
+    );
   });
 });
 
@@ -293,7 +301,10 @@ describe("DeviationCell — breach line", () => {
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).not.toMatch(/breach/);
-    expect(html).not.toMatch(/started at/);
+    // The popover content includes the word "breach" — assert against the
+    // structural form ("breach <relative>") that only the live indicator
+    // produces, plus the absence of the sr-only "started at" timestamp.
+    expect(html).not.toMatch(/breach \d/);
+    expect(html).not.toMatch(/started at \d/);
   });
 });

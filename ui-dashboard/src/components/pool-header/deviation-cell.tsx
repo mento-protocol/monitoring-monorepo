@@ -7,8 +7,12 @@ import { computeHealthStatus, isOracleFresh } from "@/lib/health";
 import { isWeekend } from "@/lib/weekend";
 import { relativeTime, formatTimestamp } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
+import { InfoPopover } from "@/components/info-popover";
 import { POOL_OPEN_BREACH_TX } from "@/lib/queries";
 import { explorerTxUrl } from "@/lib/tokens";
+
+const DEVIATION_EXPLAINER =
+  "Live drift between the pool's internal price (implied by its current token reserves) and the oracle reference rate. The pool enters a rebalance breach when this deviation exceeds the Rebalance Threshold (see Pool Config).";
 
 export function DeviationCell({
   pool,
@@ -51,7 +55,15 @@ export function DeviationCell({
 
   return (
     <div>
-      <dt className="text-slate-400">Deviation</dt>
+      <dt className="text-slate-400">
+        <span className="inline-flex items-center gap-1">
+          Deviation
+          <InfoPopover
+            label={`About Deviation. ${DEVIATION_EXPLAINER}`}
+            content={DEVIATION_EXPLAINER}
+          />
+        </span>
+      </dt>
       <dd>
         <DeviationBar
           priceDifference={pool.priceDifference ?? "0"}
@@ -134,26 +146,6 @@ function DeviationBar({
   const diffPct = (diff / 100).toFixed(2);
   const thresholdPct = (threshold / 100).toFixed(2);
 
-  // Frame the primary number as a signed delta from the threshold so the
-  // alarm direction reads directly: "52.1% over" instead of "152.1% of
-  // threshold" (which requires mental math to extract the overage).
-  // Within 1% below the limit reads as "At threshold" — users read
-  // "0.3% below" as if the pool is safely under when it's actually on
-  // the verge. Drop the redundant "above/below threshold" suffix — the
-  // colored bar already conveys direction, and short captions don't wrap
-  // even at 4-digit overage magnitudes ("2559.1% over · breach 21h ago"
-  // fits in a 226px tile).
-  const deltaPct = (Math.abs(diff - threshold) / threshold) * 100;
-  const AT_THRESHOLD_TOLERANCE_PCT = 1;
-  const atThreshold =
-    diff === threshold ||
-    (diff < threshold && deltaPct <= AT_THRESHOLD_TOLERANCE_PCT);
-  const deltaLabel = atThreshold
-    ? "At threshold"
-    : diff > threshold
-      ? `${deltaPct.toFixed(1)}% over`
-      : `${deltaPct.toFixed(1)}% below`;
-
   // Caption color tracks breach status when active so the row visually
   // ties to the bar, slate-500 in the healthy/getting-close states.
   const captionColor = breachStartedAt
@@ -188,7 +180,7 @@ function DeviationBar({
             aria-valuenow={Math.round(pct)}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-valuetext={`${deltaLabel} (${diffPct}% of ${thresholdPct}% threshold)`}
+            aria-valuetext={`${diffPct}% deviation, ${thresholdPct}% rebalance threshold`}
           />
         </div>
       </div>
@@ -196,7 +188,7 @@ function DeviationBar({
         className={`text-xs ${captionColor}`}
         title={breachStartedAt ? formatTimestamp(breachStartedAt) : undefined}
       >
-        {deltaLabel}
+        {diffPct}%
         {breachStartedAt && (
           <>
             <span className="text-slate-600 font-normal" aria-hidden="true">
