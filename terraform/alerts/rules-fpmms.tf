@@ -8,6 +8,14 @@
 #
 # `no_data_state = "OK"` on every rule: absence of data shouldn't fire here,
 # that's what the separate metrics-bridge rule group is for.
+#
+# DEVIATION THRESHOLDS — the bare `1.01` (warn) and `1.05` (critical) literals
+# below mirror the TS canonical source at `shared-config/src/thresholds.ts`
+# (`DEVIATION_TOLERANCE_RATIO` / `DEVIATION_CRITICAL_RATIO`). HCL can't import
+# TS, so any threshold change is a coordinated edit across packages: bump the
+# TS constants, then mirror them here. The dashboard, metrics-bridge probe,
+# and the indexer's bigint num/den pairs all derive from the same canonical
+# values.
 
 # ── Oracle liveness ──────────────────────────────────────────────────────────
 resource "grafana_rule_group" "fpmms_oracle" {
@@ -462,6 +470,22 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # back to literal "token0" / "token1" (matches the existing `pair`
       # fallback semantics).
       current_reserves = local.deviation_critical_current_reserves_annotation
+      # Rebalance reason annotation, sourced from the metrics-bridge probe
+      # (`mento_pool_rebalance_blocked`). The probe runs every Nth Hasura
+      # poll for pools matching this rule's gate, so the label set ALWAYS
+      # already carries the same `chain_id`/`pool_id`/`pair` identity as
+      # the alert. Rendered in the Slack body via
+      # `{{ if .Annotations.rebalance_reason }}` — see contact-points.tf.
+      # When the probe hasn't run yet or the RPC failed, the gauge is
+      # absent and this annotation expands to an empty string, which the
+      # template suppresses.
+      #
+      # `$labels` in a Grafana alert annotation only exposes labels from
+      # the firing series (query A — the breach gauge). Query B's labels
+      # (`reason_code` / `reason_message`) live on its own series and are
+      # accessible via `$values.B.Labels.*`. Reading `$labels.reason_*`
+      # would always be empty.
+      rebalance_reason = "{{ if $values.B }}{{ $rm := index $values.B.Labels \"reason_message\" }}{{ $rc := index $values.B.Labels \"reason_code\" }}{{ if and $rm $rc }}{{ $rm }} — [{{ $rc }}]{{ end }}{{ end }}"
     }
 
     labels = {
@@ -555,6 +579,30 @@ resource "grafana_rule_group" "fpmms_deviation" {
       })
     }
 
+    # B = rebalance-blocked annotation source. NOT part of the threshold
+    # condition — the alert MUST still fire if the probe hasn't run yet
+    # or the RPC failed (operators need to know about the breach
+    # regardless of whether we have a reason). Grafana evaluates query
+    # B independently; the annotation template reads its label set via
+    # `$values.B.Labels.*` (NOT `$labels`, which exposes only the
+    # condition query's labels). The expression is
+    # `mento_pool_rebalance_blocked > 0` so the series is empty when the
+    # probe couldn't determine a reason — the template's `{{ if … }}`
+    # guard then collapses the annotation to an empty string.
+    data {
+      ref_id         = "B"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "B"
+        expr    = "mento_pool_rebalance_blocked > 0"
+        instant = true
+      })
+    }
+
     data {
       ref_id         = "threshold"
       datasource_uid = "__expr__"
@@ -613,6 +661,15 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # typically renders. See the magnitude-gated rule for the no-sprig
       # rationale.
       current_reserves = local.deviation_critical_current_reserves_annotation
+      # Same rebalance-reason annotation as the magnitude-gated critical
+      # rule. The metrics-bridge probe gates on `lastDeviationRatio > 1.05`
+      # (which is the `-1` sentinel during data gaps, so eligible pools
+      # in this state typically slip past) — but if a probe DID run before
+      # the ratio gauge dropped, the most-recent reason annotation would
+      # still be present here. Reads `$values.B.Labels.*` because `$labels`
+      # exposes only the condition query's labels. When neither label is
+      # set, the `{{ if … }}` guard collapses the annotation cleanly.
+      rebalance_reason = "{{ if $values.B }}{{ $rm := index $values.B.Labels \"reason_message\" }}{{ $rc := index $values.B.Labels \"reason_code\" }}{{ if and $rm $rc }}{{ $rm }} — [{{ $rc }}]{{ end }}{{ end }}"
     }
 
     labels = {
@@ -679,6 +736,22 @@ resource "grafana_rule_group" "fpmms_deviation" {
       model = jsonencode({
         refId   = "R1"
         expr    = "mento_pool_reserve_share_token1"
+        instant = true
+      })
+    }
+
+    # See the magnitude-gated critical rule for the rationale on why the
+    # rebalance-blocked query is independent of the threshold condition.
+    data {
+      ref_id         = "B"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "B"
+        expr    = "mento_pool_rebalance_blocked > 0"
         instant = true
       })
     }

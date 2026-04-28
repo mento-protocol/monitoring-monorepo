@@ -76,6 +76,22 @@ const pressureLabels = [...poolLabels, "token_index"] as const;
 // `humanizePercentage` are. Label access via `$values.X.Labels.Y` is a Go
 // template builtin, so this is safe).
 const reserveShareLabels = [...poolLabels, "token_symbol"] as const;
+// `reason_code` and `reason_message` are bounded by the ERROR_MESSAGES enum
+// (~30 codes) and one-to-one with each other — carrying both as labels
+// lets the Slack alert template render the human-readable explanation
+// without a sprig lookup table that has to stay in sync with the strategy
+// ABI. The annotation cross-references this gauge's labels via
+// `$values.B.Labels.reason_message`: Grafana's `$labels` exposes only the
+// firing-query labels (the breach gauge), so the alert template walks
+// query B's series through the `$values` map. `decodeBlockedRevert`
+// guarantees both labels stay inside the bounded enum even on
+// `Error(string)` / `Panic(uint256)` reverts (raw payload goes to the
+// `diagnostic` log channel) so cardinality stays bounded.
+const rebalanceBlockedLabels = [
+  ...poolLabels,
+  "reason_code",
+  "reason_message",
+] as const;
 
 export const gauges = {
   oracleOk: new Gauge({
@@ -178,6 +194,17 @@ export const gauges = {
     help: "Unix timestamp of the last successful poll",
     registers: [register],
   }),
+  rebalanceBlocked: new Gauge({
+    name: "mento_pool_rebalance_blocked",
+    help: "1 when a critical-breach pool's `rebalance(pool)` simulation reverts (i.e. the rebalancer can't close the breach right now). Labels carry the Solidity error code (`reason_code`) and a human-readable explanation (`reason_message`). Reset before each probe cycle, so transport failures and pools currently below the probe threshold simply leave the series absent.",
+    labelNames: rebalanceBlockedLabels,
+    registers: [register],
+  }),
+  rebalanceProbeLastRun: new Gauge({
+    name: "mento_pool_rebalance_probe_last_run",
+    help: "Unix timestamp of the last completed rebalance-reason probe cycle. 0 before the first cycle.",
+    registers: [register],
+  }),
 };
 
 export const counters = {
@@ -188,10 +215,26 @@ export const counters = {
   }),
 };
 
+/**
+ * Gauges that are NOT reset on each Hasura poll. Their lifecycles are owned
+ * elsewhere:
+ *   - `bridgeLastPoll` and `rebalanceProbeLastRun` are scalar self-monitoring
+ *     gauges with no label set to evict.
+ *   - `rebalanceBlocked` is reset by the rebalance probe cycle (not the poll
+ *     cycle), so its labels survive between probes — wiping it on every
+ *     30s poll would leave the alert annotation flickering off most of the
+ *     time, since probes only run every Nth poll.
+ */
+const POLL_PRESERVED_GAUGES = new Set<Gauge>([
+  gauges.bridgeLastPoll,
+  gauges.rebalanceProbeLastRun,
+  gauges.rebalanceBlocked,
+]);
+
 export function updateMetrics(pools: PoolRow[]): void {
-  // Reset pool-level gauges to evict stale label sets from removed pools
+  // Reset pool-level gauges to evict stale label sets from removed pools.
   for (const g of Object.values(gauges)) {
-    if (g !== gauges.bridgeLastPoll) g.reset();
+    if (!POLL_PRESERVED_GAUGES.has(g)) g.reset();
   }
 
   for (const pool of pools) {
@@ -295,4 +338,31 @@ export function updateMetrics(pools: PoolRow[]): void {
       );
     }
   }
+}
+
+/**
+ * Build the shared pool-display label set used across all pool-scoped
+ * gauges. Exposed so the rebalance probe can attach the same labels
+ * (chain_name, pair, block_explorer_url, …) without re-deriving them.
+ */
+export type PoolDisplayLabels = {
+  pool_id: string;
+  chain_id: string;
+  chain_name: string;
+  pair: string;
+  pool_address_short: string;
+  block_explorer_url: string;
+};
+
+export function poolDisplayLabels(pool: PoolRow): PoolDisplayLabels {
+  const address = poolIdAddress(pool.id);
+  const derivedPair = poolName(pool.chainId, pool.token0, pool.token1);
+  return {
+    pool_id: pool.id,
+    chain_id: String(pool.chainId),
+    chain_name: chainSlug(pool.chainId),
+    pair: derivedPair ?? pool.id,
+    pool_address_short: shortAddress(address),
+    block_explorer_url: explorerAddressUrl(pool.chainId, address) ?? "",
+  };
 }

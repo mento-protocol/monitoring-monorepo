@@ -7,6 +7,10 @@ export type HealthStatus = "OK" | "WARN" | "WEEKEND" | "CRITICAL" | "N/A";
 
 import { isWeekend, tradingSecondsInRange } from "./weekend";
 import { isVirtualPool } from "./types";
+import {
+  DEVIATION_TOLERANCE_RATIO,
+  DEVIATION_CRITICAL_RATIO,
+} from "@mento-protocol/monitoring-config/thresholds";
 
 /**
  * Fallback oracle staleness threshold in seconds.
@@ -61,11 +65,15 @@ export const DEVIATION_BREACH_GRACE_SECONDS = 3600;
 
 /**
  * Tolerance + critical-magnitude multipliers over the rebalance threshold.
- * Mirror of the indexer constants in `indexer-envio/src/pool.ts`; parity is
- * enforced by the indexer's `test/healthStatusParity.test.ts`.
+ * Re-exported from `@mento-protocol/monitoring-config/thresholds` so the
+ * dashboard, the metrics-bridge probe, and the indexer all read the same
+ * numbers. Parity with the indexer's `pool.ts` is enforced by
+ * `indexer-envio/test/healthStatusParity.test.ts`.
  */
-export const DEVIATION_TOLERANCE_RATIO = 1.01;
-export const DEVIATION_CRITICAL_RATIO = 1.05;
+export {
+  DEVIATION_TOLERANCE_RATIO,
+  DEVIATION_CRITICAL_RATIO,
+} from "@mento-protocol/monitoring-config/thresholds";
 
 /** Resolve the effective threshold in bps. The schema-default of 0 means the
  * indexer hasn't read the on-chain value yet — fall back to 10000 (100%) so

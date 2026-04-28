@@ -25,6 +25,12 @@ export interface PoolRow {
   reserves1: string;
   token0Decimals: number;
   token1Decimals: number;
+  // Liquidity strategy address — needed by the metrics-bridge rebalance probe
+  // to simulate `rebalance(pool)` and decode the revert reason. The
+  // `Pool.rebalancerAddress` column is `String!` in the indexer schema
+  // (`indexer-envio/schema.graphql:95`), so this field is always populated
+  // in the GraphQL response.
+  rebalancerAddress: string;
 }
 
 export interface BridgePoolsResponse {

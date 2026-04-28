@@ -34,6 +34,10 @@ export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
     reserves1: "1000000000000000000",
     token0Decimals: 18,
     token1Decimals: 18,
+    // Test default — real strategy address from FPMM Reserve liquidity
+    // strategy on Celo mainnet. Probes hitting RPC are mocked at the
+    // viem-client layer in dedicated tests.
+    rebalancerAddress: "0x0000000000000000000000000000000000000beef",
     ...overrides,
   };
 }

@@ -53,11 +53,20 @@ locals {
   #      annotation (useful in the Grafana rule-detail view) but it is
   #      intentionally suppressed in Slack to keep warning messages at a
   #      glance-able 4 lines.
-  #   4. Optional KPI lines from rule-specific annotations (current_deviation,
-  #      current_reserves, …). Each guarded by `{{ if .Annotations.X }}` so
-  #      rules that don't set the annotation render nothing — no empty
-  #      "*Foo:*" placeholder. Add new lines here when introducing rule-
-  #      specific context fields; rules that don't set them are unaffected.
+  #   4. Optional KPI lines from rule-specific annotations (rebalance_reason,
+  #      current_deviation, current_reserves, …). Each guarded by
+  #      `{{ if .Annotations.X }}` so rules that don't set the annotation
+  #      render nothing — no empty "*Foo:*" placeholder. Add new lines here
+  #      when introducing rule-specific context fields; rules that don't set
+  #      them are unaffected.
+  #
+  #      The *Rebalance Blocked* row is sourced from the metrics-bridge
+  #      `mento_pool_rebalance_blocked` gauge (currently set on
+  #      `Deviation Breach Critical` and its anchored sibling) so the
+  #      operator sees the exact Solidity revert (e.g. "Reserve has
+  #      insufficient collateral to rebalance — [RLS_RESERVE_OUT_OF_COLLATERAL]")
+  #      inline with the breach. Suppressed cleanly when the probe hasn't
+  #      run yet or the RPC failed — the breach alert keeps its normal shape.
   #   5. Metadata row: start time + Grafana alert link. The per-row
   #      `View alert` link is required because `notify_*_pool` collapses
   #      multiple alertnames per (chain_id, pool_id) into one Slack thread,
@@ -82,6 +91,9 @@ locals {
     {{ end -}}
     {{ if and .Annotations.description (eq .Labels.severity "critical") -}}
     _{{ .Annotations.description }}_
+    {{ end -}}
+    {{ if .Annotations.rebalance_reason -}}
+    *Rebalance Blocked:* {{ .Annotations.rebalance_reason }}
     {{ end -}}
     {{ if .Annotations.current_deviation -}}
     *Current Deviation:* {{ .Annotations.current_deviation }}

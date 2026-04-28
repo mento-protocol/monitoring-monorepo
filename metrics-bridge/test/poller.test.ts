@@ -10,17 +10,24 @@ vi.mock("../src/server.js", () => ({
   markHealthy: vi.fn(),
 }));
 
-import { poll } from "../src/poller.js";
+vi.mock("../src/rebalance-probe.js", () => ({
+  runRebalanceProbes: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { poll, _resetPollCycleForTests } from "../src/poller.js";
 import { fetchPools } from "../src/graphql.js";
 import { markHealthy } from "../src/server.js";
+import { runRebalanceProbes } from "../src/rebalance-probe.js";
 
 const mockFetchPools = vi.mocked(fetchPools);
 const mockMarkHealthy = vi.mocked(markHealthy);
+const mockRunRebalanceProbes = vi.mocked(runRebalanceProbes);
 
 describe("poll", () => {
   beforeEach(() => {
     register.resetMetrics();
     vi.clearAllMocks();
+    _resetPollCycleForTests();
   });
 
   it("updates bridgeLastPoll on success", async () => {
@@ -85,5 +92,50 @@ describe("poll", () => {
         "https://celoscan.io/address/0x8c0014afe032e4574481d8934504100bf23fcb56",
     });
     expect(oracleAfter).toBe(oracleBefore);
+  });
+
+  it("runs the rebalance probe on the FIRST successful poll (not delayed by N polls)", async () => {
+    // Otherwise an operator restarting the bridge mid-breach would wait up
+    // to N×30s = 2.5 min for the reason annotation to attach.
+    mockFetchPools.mockResolvedValueOnce(makePoolResponse());
+    await poll();
+    expect(mockRunRebalanceProbes).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs the rebalance probe every Nth poll (default N=5)", async () => {
+    // Default REBALANCE_PROBE_EVERY_N_POLLS is 5; probe fires when
+    // (cycle % 5) === 1 → cycles 1 and 6.
+    for (let i = 0; i < 6; i++) {
+      mockFetchPools.mockResolvedValueOnce(makePoolResponse());
+      await poll();
+    }
+    expect(mockRunRebalanceProbes).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not advance the cycle counter on a failed poll", async () => {
+    // A failed Hasura fetch shouldn't slide the probe out of cadence — the
+    // probe should still attach to the next SUCCESSFUL cycle.
+    mockFetchPools.mockRejectedValueOnce(new Error("network"));
+    await poll();
+    expect(mockRunRebalanceProbes).not.toHaveBeenCalled();
+
+    mockFetchPools.mockResolvedValueOnce(makePoolResponse());
+    await poll();
+    expect(mockRunRebalanceProbes).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not crash the poll when the rebalance probe throws", async () => {
+    mockFetchPools.mockResolvedValueOnce(makePoolResponse());
+    mockRunRebalanceProbes.mockRejectedValueOnce(new Error("probe boom"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await poll();
+
+    expect(mockMarkHealthy).toHaveBeenCalledOnce();
+    expect(errorSpy).toHaveBeenCalledWith(
+      "Rebalance probe failed:",
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
   });
 });

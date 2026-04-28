@@ -4,6 +4,11 @@
  * Simulates a rebalance call on the pool's liquidity strategy via eth_call,
  * decodes any revert, and optionally enriches with strategy-specific state
  * (e.g. stability pool balance, reserve collateral).
+ *
+ * Canonical ABI + error map live in
+ * `@mento-protocol/monitoring-config/rebalance-abi` — both this probe and
+ * the metrics-bridge alert probe import the same data so a revert decoded
+ * by one always decodes by the other.
  */
 
 import {
@@ -13,72 +18,17 @@ import {
   encodeFunctionData,
   parseAbi,
 } from "viem";
+import {
+  STRATEGY_ABI_SOURCES,
+  ERROR_MESSAGES,
+  HEALTHY_NO_OP_ERRORS,
+} from "@mento-protocol/monitoring-config/rebalance-abi";
 import { getViemClient, ERC20_ABI } from "./rpc-client";
 
 // ABI fragments
 
 /** Both ReserveLiquidityStrategy and CDPLiquidityStrategy share this */
-const STRATEGY_ABI = parseAbi([
-  // Shared
-  "function rebalance(address pool) external",
-  "function determineAction(address pool) external view returns ((address pool, uint256 reserveNumerator, uint256 reserveDenominator, uint256 oraclePriceNumerator, uint256 oraclePriceDenominator, bool reservePriceAboveOraclePrice, uint16 rebalanceThreshold, address token0, address token1, uint8 decimals0, uint8 decimals1, bool isToken0Debt, uint64 liquiditySourceIncentiveExpansion, uint64 protocolIncentiveExpansion, uint64 liquiditySourceIncentiveContraction, uint64 protocolIncentiveContraction) ctx, (uint8 direction, uint256 amount0Out, uint256 amount1Out, uint256 amountOwedToPool) action)",
-  "function poolConfigs(address pool) external view returns (bool isToken0Debt, uint32 lastRebalance, uint32 rebalanceCooldown, address protocolFeeRecipient, uint64 liquiditySourceIncentiveExpansion, uint64 protocolIncentiveExpansion, uint64 liquiditySourceIncentiveContraction, uint64 protocolIncentiveContraction)",
-  // CDPLiquidityStrategy-specific
-  "function getCDPConfig(address pool) external view returns ((address stabilityPool, address collateralRegistry, uint256 stabilityPoolPercentage, uint256 maxIterations))",
-  // ReserveLiquidityStrategy-specific
-  "function reserve() external view returns (address)",
-  // OpenLiquidityStrategy-specific — used only for strategy-type detection.
-  // getPools() is zero-arg so the probe is cheap and OLS-exclusive.
-  "function getPools() external view returns (address[])",
-  // Errors — shared (LS_*)
-  "error LS_BAD_INCENTIVE()",
-  "error LS_CAN_ONLY_REBALANCE_ONCE(address pool)",
-  "error LS_COOLDOWN_ACTIVE()",
-  "error LS_DEBT_TOKEN_NOT_IN_POOL()",
-  "error LS_HOOK_NOT_CALLED()",
-  "error LS_INCENTIVE_TOO_HIGH()",
-  "error LS_INVALID_DECIMAL()",
-  "error LS_INVALID_OWNER()",
-  "error LS_INVALID_PRICES()",
-  "error LS_INVALID_SENDER()",
-  "error LS_INVALID_THRESHOLD()",
-  "error LS_POOL_ALREADY_EXISTS()",
-  "error LS_POOL_MUST_BE_SET()",
-  "error LS_POOL_NOT_FOUND()",
-  "error LS_POOL_NOT_REBALANCEABLE()",
-  "error LS_PROTOCOL_FEE_RECIPIENT_REQUIRED()",
-  "error LS_STRATEGY_EXECUTION_FAILED()",
-  "error LS_ZERO_DECIMAL()",
-  // CDPLiquidityStrategy errors
-  "error CDPLS_COLLATERAL_REGISTRY_IS_ZERO()",
-  "error CDPLS_INVALID_STABILITY_POOL_PERCENTAGE()",
-  "error CDPLS_OUT_OF_FUNDS_FOR_REDEMPTION_SUBSIDY()",
-  "error CDPLS_REDEMPTION_FEE_TOO_LARGE()",
-  "error CDPLS_REDEMPTION_SHORTFALL_TOO_LARGE(uint256 shortfall)",
-  "error CDPLS_STABILITY_POOL_BALANCE_TOO_LOW()",
-  "error CDPLS_STABILITY_POOL_IS_ZERO()",
-  // ReserveLiquidityStrategy errors
-  "error RLS_COLLATERAL_TO_POOL_FAILED()",
-  "error RLS_INVALID_RESERVE()",
-  "error RLS_RESERVE_OUT_OF_COLLATERAL()",
-  "error RLS_TOKEN_IN_NOT_SUPPORTED()",
-  "error RLS_TOKEN_OUT_NOT_SUPPORTED()",
-  // OpenLiquidityStrategy errors
-  "error OLS_OUT_OF_COLLATERAL()",
-  "error OLS_OUT_OF_DEBT()",
-  // FPMM pool-side errors (can bubble through strategy.rebalance → pool.rebalance)
-  "error NotLiquidityStrategy()",
-  "error PriceDifferenceTooSmall()",
-  "error PriceDifferenceNotImproved()",
-  "error PriceDifferenceMovedInWrongDirection()",
-  "error PriceDifferenceMovedTooFarFromThresholds()",
-  "error RebalanceDirectionInvalid()",
-  "error RebalanceThresholdTooHigh()",
-  "error RebalanceIncentiveTooHigh()",
-  "error ReferenceRateNotSet()",
-  "error ReserveValueDecreased()",
-  "error ReservesEmpty()",
-]);
+const STRATEGY_ABI = parseAbi(STRATEGY_ABI_SOURCES);
 
 const STABILITY_POOL_ABI = parseAbi([
   "function getTotalBoldDeposits() external view returns (uint256)",
@@ -87,69 +37,6 @@ const STABILITY_POOL_ABI = parseAbi([
 
 // Note: ReserveV2 does not expose a collateral balance getter — we use
 // ERC20 balanceOf on the collateral token with the reserve address instead.
-
-// Error → human-readable message mapping
-
-const ERROR_MESSAGES: Record<string, string> = {
-  // CDP strategy
-  CDPLS_STABILITY_POOL_BALANCE_TOO_LOW:
-    "Stability pool has insufficient liquidity to fully rebalance",
-  CDPLS_STABILITY_POOL_IS_ZERO:
-    "No stability pool configured for this strategy",
-  CDPLS_COLLATERAL_REGISTRY_IS_ZERO: "Collateral registry not configured",
-  CDPLS_OUT_OF_FUNDS_FOR_REDEMPTION_SUBSIDY:
-    "Insufficient funds to cover redemption subsidy",
-  CDPLS_REDEMPTION_FEE_TOO_LARGE: "Redemption fee exceeds tolerance",
-  CDPLS_REDEMPTION_SHORTFALL_TOO_LARGE:
-    "Redemption shortfall exceeds tolerance",
-  CDPLS_INVALID_STABILITY_POOL_PERCENTAGE:
-    "Invalid stability pool percentage configuration",
-  // Reserve strategy
-  RLS_RESERVE_OUT_OF_COLLATERAL:
-    "Reserve has insufficient collateral to rebalance",
-  RLS_INVALID_RESERVE: "Reserve contract not configured",
-  RLS_COLLATERAL_TO_POOL_FAILED: "Collateral transfer to pool failed",
-  RLS_TOKEN_IN_NOT_SUPPORTED: "Collateral token not supported by reserve",
-  RLS_TOKEN_OUT_NOT_SUPPORTED: "Debt token not supported by reserve",
-  // Open liquidity strategy
-  OLS_OUT_OF_COLLATERAL:
-    "Strategy has no collateral liquidity available to rebalance",
-  OLS_OUT_OF_DEBT: "Strategy has no debt liquidity available to rebalance",
-  // Shared
-  LS_COOLDOWN_ACTIVE: "Rebalance cooldown is active — retry shortly",
-  LS_POOL_NOT_REBALANCEABLE: "Pool deviation is below the rebalance threshold",
-  LS_INVALID_PRICES: "Oracle price data is invalid or stale",
-  LS_CAN_ONLY_REBALANCE_ONCE: "Pool was already rebalanced this block",
-  LS_POOL_NOT_FOUND: "Pool is not registered with this strategy",
-  LS_STRATEGY_EXECUTION_FAILED: "Strategy execution failed internally",
-  LS_HOOK_NOT_CALLED:
-    "Pool hook was not invoked — possible contract misconfiguration",
-  LS_BAD_INCENTIVE: "Incentive configuration is invalid",
-  LS_INCENTIVE_TOO_HIGH: "Rebalance incentive exceeds allowed maximum",
-  LS_DEBT_TOKEN_NOT_IN_POOL: "Debt token not found in pool pair",
-  LS_INVALID_DECIMAL: "Token decimal configuration is invalid",
-  LS_INVALID_OWNER: "Unauthorized — only owner can call this",
-  LS_INVALID_SENDER: "Unauthorized caller",
-  LS_INVALID_THRESHOLD: "Rebalance threshold is out of valid range",
-  LS_POOL_ALREADY_EXISTS: "Pool is already registered",
-  LS_POOL_MUST_BE_SET: "Pool address cannot be zero",
-  LS_PROTOCOL_FEE_RECIPIENT_REQUIRED: "Protocol fee recipient must be set",
-  LS_ZERO_DECIMAL: "Token has zero decimals",
-  // FPMM pool-side errors
-  NotLiquidityStrategy: "Caller is not a registered liquidity strategy",
-  PriceDifferenceTooSmall: "Pool deviation is below the rebalance threshold",
-  PriceDifferenceNotImproved: "Rebalance did not improve the price deviation",
-  PriceDifferenceMovedInWrongDirection:
-    "Rebalance moved the price in the wrong direction",
-  PriceDifferenceMovedTooFarFromThresholds:
-    "Rebalance moved the price too far past the threshold",
-  RebalanceDirectionInvalid: "Invalid rebalance direction",
-  RebalanceThresholdTooHigh: "Rebalance threshold exceeds allowed maximum",
-  RebalanceIncentiveTooHigh: "Rebalance incentive exceeds allowed maximum",
-  ReferenceRateNotSet: "Oracle reference rate is not configured",
-  ReserveValueDecreased: "Pool reserve value decreased after rebalance",
-  ReservesEmpty: "Pool reserves are empty",
-};
 
 // Types
 
@@ -187,23 +74,9 @@ export type StrategyEnrichment =
       collateralTokenDecimals: number;
     };
 
-// Healthy no-op detection
-
-/**
- * Revert codes where the strategy refuses to rebalance BECAUSE the pool
- * is healthy — not because anything is wrong. Callers should treat these
- * as passive "no action needed" states rather than rendering a red
- * "Rebalance blocked" alarm.
- *
- * Both the strategy-side (`LS_POOL_NOT_REBALANCEABLE`) and pool-side
- * (`PriceDifferenceTooSmall`) codes map to "deviation is below the
- * rebalance threshold" — the expected healthy outcome, especially at
- * exactly-threshold deviation under the `> threshold` CRITICAL semantics.
- */
-const HEALTHY_NO_OP_ERRORS: ReadonlySet<string> = new Set([
-  "LS_POOL_NOT_REBALANCEABLE",
-  "PriceDifferenceTooSmall",
-]);
+// Healthy no-op detection — the bare-set lookup happens against
+// `HEALTHY_NO_OP_ERRORS` from `shared-config/rebalance-abi`, where the
+// rationale comment lives.
 
 export function isHealthyNoOp(rawError: string | null | undefined): boolean {
   return rawError != null && HEALTHY_NO_OP_ERRORS.has(rawError);
