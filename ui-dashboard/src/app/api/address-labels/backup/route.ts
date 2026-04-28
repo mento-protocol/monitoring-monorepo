@@ -4,7 +4,9 @@ import { put } from "@vercel/blob";
 import { getAllLabels, type AddressLabelsSnapshot } from "@/lib/address-labels";
 import { requireCronOrSession } from "@/lib/cron-auth";
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
+// Vercel cron jobs invoke with GET, not POST. Read-only handler taking no
+// body — GET is the right verb. (Cursor + Codex flagged this on PR #236.)
+export async function GET(req: NextRequest): Promise<NextResponse> {
   const authBail = await requireCronOrSession(req, "backup");
   if (authBail) return authBail;
 

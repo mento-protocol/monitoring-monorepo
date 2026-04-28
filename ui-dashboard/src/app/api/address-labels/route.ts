@@ -128,12 +128,17 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // Deduplicate tags: case-insensitive, preserve first-occurrence casing (#6)
+  // Deduplicate tags: case-insensitive, preserve first-occurrence casing (#6).
+  // Strip the reserved "arkham" provenance tag — it's the bit that marks an
+  // entry as "safe for the nightly refresh cron to overwrite". Letting users
+  // set it via the label editor would let a manually-curated entry get
+  // clobbered on the next /api/arkham/enrich monthly run.
   const seenTags = new Set<string>();
   const deduplicatedTags = parsedTags
     .map((t) => t.trim())
     .filter((t) => {
       const key = t.toLowerCase();
+      if (key === "arkham") return false;
       if (seenTags.has(key)) return false;
       seenTags.add(key);
       return true;

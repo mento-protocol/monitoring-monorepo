@@ -72,7 +72,10 @@ function parseLimit(raw: string | null): number {
  * - `mode=dryRun` — fetch from Arkham but skip the Redis write.
  * - `limit=N` — hard cap on addresses processed (default 10000).
  */
-export async function POST(req: NextRequest): Promise<NextResponse> {
+// Vercel cron jobs invoke the configured path with a GET request, not POST.
+// Exporting POST instead would 405 every scheduled run. The handler accepts
+// no body — `mode` and `limit` are query params — so GET is the right verb.
+export async function GET(req: NextRequest): Promise<NextResponse> {
   const authBail = await requireCronOrSession(req, "arkham/enrich");
   if (authBail) return authBail;
 

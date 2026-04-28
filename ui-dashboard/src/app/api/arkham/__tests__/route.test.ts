@@ -31,7 +31,7 @@ vi.mock("@sentry/nextjs", () => ({
   captureMessage: vi.fn(),
 }));
 
-import { POST } from "../enrich/route";
+import { GET } from "../enrich/route";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 import { getAuthSession } from "@/auth";
 import { getAllLabels, importLabels } from "@/lib/address-labels";
@@ -80,17 +80,17 @@ function makeReq(
     url.searchParams.set(k, v);
   }
   return new NextRequest(url, {
-    method: "POST",
+    method: "GET",
     headers: opts.bearer
       ? { authorization: `Bearer ${opts.bearer}` }
       : undefined,
   });
 }
 
-describe("POST /api/arkham/enrich — auth", () => {
+describe("GET /api/arkham/enrich — auth", () => {
   it("401s when no auth and no session", async () => {
     mockGetAuthSession.mockResolvedValue(null);
-    const res = await POST(makeReq());
+    const res = await GET(makeReq());
     expect(res.status).toBe(401);
   });
 
@@ -99,13 +99,13 @@ describe("POST /api/arkham/enrich — auth", () => {
     mockGetAllLabels.mockResolvedValue(emptyLabels());
     mockEnrichBatch.mockResolvedValue([]);
 
-    const res = await POST(makeReq({ bearer: "cron-secret" }));
+    const res = await GET(makeReq({ bearer: "cron-secret" }));
     expect(res.status).toBe(200);
   });
 
   it("rejects wrong Bearer", async () => {
     mockGetAuthSession.mockResolvedValue(null);
-    const res = await POST(makeReq({ bearer: "wrong" }));
+    const res = await GET(makeReq({ bearer: "wrong" }));
     expect(res.status).toBe(401);
   });
 
@@ -117,21 +117,21 @@ describe("POST /api/arkham/enrich — auth", () => {
     mockDiscover.mockResolvedValue({ addresses: [], perEntity: [] });
     mockGetAllLabels.mockResolvedValue(emptyLabels());
     mockEnrichBatch.mockResolvedValue([]);
-    const res = await POST(makeReq());
+    const res = await GET(makeReq());
     expect(res.status).toBe(200);
   });
 
   it("500s when CRON_SECRET is unset", async () => {
     vi.stubEnv("CRON_SECRET", "");
-    const res = await POST(makeReq({ bearer: "anything" }));
+    const res = await GET(makeReq({ bearer: "anything" }));
     expect(res.status).toBe(500);
   });
 });
 
-describe("POST /api/arkham/enrich — config", () => {
+describe("GET /api/arkham/enrich — config", () => {
   it("500s when ARKHAM_API_KEY is missing", async () => {
     vi.stubEnv("ARKHAM_API_KEY", "");
-    const res = await POST(makeReq({ bearer: "cron-secret" }));
+    const res = await GET(makeReq({ bearer: "cron-secret" }));
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: string };
     expect(body.error).toMatch(/ARKHAM_API_KEY/);
@@ -139,7 +139,7 @@ describe("POST /api/arkham/enrich — config", () => {
 
   it("500s when NEXT_PUBLIC_HASURA_URL is missing", async () => {
     vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "");
-    const res = await POST(makeReq({ bearer: "cron-secret" }));
+    const res = await GET(makeReq({ bearer: "cron-secret" }));
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: string };
     expect(body.error).toMatch(/HASURA/);
@@ -149,12 +149,12 @@ describe("POST /api/arkham/enrich — config", () => {
     mockFetchHealth.mockRejectedValueOnce(new ArkhamAuthError());
     mockDiscover.mockResolvedValue({ addresses: [], perEntity: [] });
     mockGetAllLabels.mockResolvedValue(emptyLabels());
-    const res = await POST(makeReq({ bearer: "cron-secret" }));
+    const res = await GET(makeReq({ bearer: "cron-secret" }));
     expect(res.status).toBe(502);
   });
 });
 
-describe("POST /api/arkham/enrich — pipeline", () => {
+describe("GET /api/arkham/enrich — pipeline", () => {
   it("filters candidates against existing manual labels", async () => {
     mockDiscover.mockResolvedValue({
       addresses: ["0xnew", "0xmanual", "0xark"],
@@ -185,7 +185,7 @@ describe("POST /api/arkham/enrich — pipeline", () => {
       },
     ]);
 
-    const res = await POST(makeReq({ bearer: "cron-secret" }));
+    const res = await GET(makeReq({ bearer: "cron-secret" }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.discovered).toBe(3);
@@ -231,7 +231,7 @@ describe("POST /api/arkham/enrich — pipeline", () => {
       },
     ]);
 
-    const res = await POST(
+    const res = await GET(
       makeReq({ bearer: "cron-secret", searchParams: { mode: "refresh" } }),
     );
     expect(res.status).toBe(200);
@@ -268,7 +268,7 @@ describe("POST /api/arkham/enrich — pipeline", () => {
       },
     ]);
 
-    const res = await POST(
+    const res = await GET(
       makeReq({ bearer: "cron-secret", searchParams: { mode: "dryRun" } }),
     );
     expect(res.status).toBe(200);
@@ -286,9 +286,7 @@ describe("POST /api/arkham/enrich — pipeline", () => {
     mockGetAllLabels.mockResolvedValue(emptyLabels());
     mockEnrichBatch.mockResolvedValue([]);
 
-    await POST(
-      makeReq({ bearer: "cron-secret", searchParams: { limit: "2" } }),
-    );
+    await GET(makeReq({ bearer: "cron-secret", searchParams: { limit: "2" } }));
     expect(mockEnrichBatch).toHaveBeenCalledWith(
       ["0xa", "0xb"],
       expect.anything(),
@@ -316,7 +314,7 @@ describe("POST /api/arkham/enrich — pipeline", () => {
     });
     mockEnrichBatch.mockResolvedValue([]);
 
-    await POST(makeReq({ bearer: "cron-secret" }));
+    await GET(makeReq({ bearer: "cron-secret" }));
     expect(mockEnrichBatch).toHaveBeenCalledWith([], expect.anything());
     expect(mockImportLabels).not.toHaveBeenCalled();
   });
@@ -329,9 +327,7 @@ describe("POST /api/arkham/enrich — pipeline", () => {
     mockGetAllLabels.mockResolvedValue(emptyLabels());
     mockEnrichBatch.mockResolvedValue([]);
 
-    await POST(
-      makeReq({ bearer: "cron-secret", searchParams: { limit: "0" } }),
-    );
+    await GET(makeReq({ bearer: "cron-secret", searchParams: { limit: "0" } }));
     // All 3 addresses passed through, not zero — `?limit=0` must not silently
     // skip enrichment.
     expect(mockEnrichBatch).toHaveBeenCalledWith(
@@ -358,7 +354,7 @@ describe("POST /api/arkham/enrich — pipeline", () => {
       },
     ]);
 
-    const res = await POST(makeReq({ bearer: "cron-secret" }));
+    const res = await GET(makeReq({ bearer: "cron-secret" }));
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.errors).toBe(1);
