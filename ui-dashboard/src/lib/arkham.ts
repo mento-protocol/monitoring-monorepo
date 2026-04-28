@@ -85,26 +85,35 @@ export class ArkhamAuthError extends Error {
 }
 
 /**
- * Fetch enriched intelligence for one address on one chain.
+ * Multi-chain Arkham response shape — `/intelligence/address_enriched/{addr}/all`.
+ * Keys are chain slugs (`ethereum`, `polygon`, …); values are per-chain
+ * enriched data. Chains where Arkham has no data return an entry with
+ * `arkhamEntity` and `arkhamLabel` both null.
  *
- * Returns `null` when Arkham has no data (HTTP 404) — that's the common case
- * for unlabeled addresses. Throws on auth/rate-limit/5xx so the caller can
- * stop the batch rather than silently swallow a misconfiguration.
+ * Note: Arkham does NOT support Celo or Monad as of 2026-04. EVM addresses
+ * are chain-agnostic so attribution from any covered chain (Ethereum, BSC,
+ * Polygon, Arbitrum, Optimism, Base, Avalanche, Flare, HyperEVM) carries
+ * over to the same address on Celo.
+ */
+type ArkhamMultiChainResponse = Record<string, ArkhamEnrichedAddress>;
+
+/**
+ * Fetch enriched intelligence for one address across every chain Arkham
+ * covers. Returns the multi-chain map verbatim; `null` only on HTTP 404
+ * (unknown to Arkham across all chains).
  */
 export async function fetchEnrichedAddress(
   address: string,
-  chain: string,
   apiKey: string,
   fetchImpl: typeof fetch = fetch,
-): Promise<ArkhamEnrichedAddress | null> {
+): Promise<ArkhamMultiChainResponse | null> {
   const url = new URL(
-    `/intelligence/address_enriched/${address.toLowerCase()}`,
+    `/intelligence/address_enriched/${address.toLowerCase()}/all`,
     ARKHAM_BASE,
   );
-  url.searchParams.set("chain", chain);
   url.searchParams.set("includeTags", "true");
   url.searchParams.set("includeEntityPredictions", "true");
-  // Cluster IDs are bulky and almost always Bitcoin-only — skip on Celo.
+  // Cluster IDs are bulky and almost always Bitcoin-only — skip.
   url.searchParams.set("includeClusters", "false");
 
   const res = await fetchImpl(url.toString(), {
@@ -118,7 +127,7 @@ export async function fetchEnrichedAddress(
   if (!res.ok) {
     throw new Error(`arkham_http_${res.status}`);
   }
-  return (await res.json()) as ArkhamEnrichedAddress;
+  return (await res.json()) as ArkhamMultiChainResponse;
 }
 
 /**
@@ -138,18 +147,23 @@ export async function fetchHealth(
 }
 
 /**
- * Decide whether an Arkham response carries a useful label.
+ * Decide whether any per-chain Arkham response carries a useful label.
  *
- * Skip persistence when Arkham has no curated entity, no curated label, AND
- * no high-confidence ML prediction. Persisting empty entries clutters the
+ * Skip persistence when no chain has a curated entity, a curated label, OR
+ * a high-confidence ML prediction. Persisting empty entries clutters the
  * address book and burns Redis storage.
  */
-export function hasUsableLabel(data: ArkhamEnrichedAddress): boolean {
-  if (data.arkhamLabel?.name) return true;
-  if (data.arkhamEntity?.name) return true;
-  return Boolean(
-    data.entityPredictions?.some((p) => p.confidence >= HIGH_CONFIDENCE),
-  );
+export function hasUsableLabel(data: ArkhamMultiChainResponse): boolean {
+  for (const perChain of Object.values(data)) {
+    if (perChain.arkhamLabel?.name) return true;
+    if (perChain.arkhamEntity?.name) return true;
+    if (
+      perChain.entityPredictions?.some((p) => p.confidence >= HIGH_CONFIDENCE)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -161,27 +175,38 @@ export function hasUsableLabel(data: ArkhamEnrichedAddress): boolean {
  * "manual" from "auto-enriched".
  */
 export function toAddressEntry(
-  data: ArkhamEnrichedAddress,
+  data: ArkhamMultiChainResponse,
 ): AddressEntry | null {
   if (!hasUsableLabel(data)) return null;
 
-  const label = data.arkhamLabel?.name?.trim();
-  const entity = data.arkhamEntity;
-  const topPrediction = data.entityPredictions
-    ?.filter((p) => p.confidence >= HIGH_CONFIDENCE)
-    .sort((a, b) => b.confidence - a.confidence)[0];
+  // EVM addresses are chain-agnostic, so the same `arkhamEntity`/`arkhamLabel`
+  // typically appears on every covered chain. Pick the strongest signal once;
+  // union tags across all chains.
+  let label: string | undefined;
+  let entity: ArkhamEntity | null = null;
+  let topPrediction: ArkhamEntityPrediction | undefined;
+  const tagSet = new Set<string>([ARKHAM_TAG]);
+
+  for (const perChain of Object.values(data)) {
+    const trimmed = perChain.arkhamLabel?.name?.trim();
+    if (!label && trimmed) label = trimmed;
+    if (!entity && perChain.arkhamEntity?.name) entity = perChain.arkhamEntity;
+    if (entity?.type) tagSet.add(entity.type);
+    for (const t of perChain.tags ?? []) {
+      if (t.slug) tagSet.add(t.slug);
+    }
+    for (const p of perChain.entityPredictions ?? []) {
+      if (p.confidence < HIGH_CONFIDENCE) continue;
+      if (!topPrediction || p.confidence > topPrediction.confidence) {
+        topPrediction = p;
+      }
+    }
+  }
 
   // Prefer the curated label, then entity name, then the predicted entity ID.
-  // Use `||` (truthy-aware) so an empty/whitespace `arkhamLabel.name` (which
-  // `?.trim()` collapses to "") falls through to entity. `??` would keep "".
+  // Use `||` (truthy-aware) so an empty/whitespace string falls through.
   const name = label || entity?.name || topPrediction?.entityId || "";
   if (!name) return null;
-
-  const tagSet = new Set<string>([ARKHAM_TAG]);
-  if (entity?.type) tagSet.add(entity.type);
-  for (const t of data.tags ?? []) {
-    if (t.slug) tagSet.add(t.slug);
-  }
 
   // Notes only when the label rests on an ML prediction — flags lower
   // certainty so a human reviewing the address book can spot it.
@@ -216,7 +241,6 @@ export type EnrichmentResult = {
 
 type EnrichBatchOptions = {
   apiKey: string;
-  chain: string;
   /** Test-only: override fetch + sleeper to avoid real network and timers. */
   fetchImpl?: typeof fetch;
   sleeper?: (ms: number) => Promise<void>;
@@ -230,11 +254,10 @@ const defaultSleeper = (ms: number) =>
 
 async function tryEnrich(
   address: string,
-  chain: string,
   apiKey: string,
   fetchImpl: typeof fetch,
 ): Promise<EnrichmentResult> {
-  const raw = await fetchEnrichedAddress(address, chain, apiKey, fetchImpl);
+  const raw = await fetchEnrichedAddress(address, apiKey, fetchImpl);
   return { address, entry: raw ? toAddressEntry(raw) : null };
 }
 
@@ -242,13 +265,13 @@ export async function enrichBatch(
   addresses: string[],
   opts: EnrichBatchOptions,
 ): Promise<EnrichmentResult[]> {
-  const { apiKey, chain, fetchImpl = fetch, sleeper = defaultSleeper } = opts;
+  const { apiKey, fetchImpl = fetch, sleeper = defaultSleeper } = opts;
   const results: EnrichmentResult[] = [];
 
   for (let i = 0; i < addresses.length; i += 1) {
     const address = addresses[i]!;
     try {
-      results.push(await tryEnrich(address, chain, apiKey, fetchImpl));
+      results.push(await tryEnrich(address, apiKey, fetchImpl));
     } catch (err) {
       // Auth errors are fatal: the rest of the batch will all 401 too.
       if (err instanceof ArkhamAuthError) throw err;
@@ -257,7 +280,7 @@ export async function enrichBatch(
         // (e.g. key rotated mid-batch); other errors record + continue.
         await sleeper(RATE_LIMIT_BACKOFF_MS);
         try {
-          results.push(await tryEnrich(address, chain, apiKey, fetchImpl));
+          results.push(await tryEnrich(address, apiKey, fetchImpl));
         } catch (retryErr) {
           if (retryErr instanceof ArkhamAuthError) throw retryErr;
           results.push({

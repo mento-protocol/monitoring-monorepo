@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
-import { chainSlug } from "@mento-protocol/monitoring-config/chains";
 import { getAllLabels, importLabels } from "@/lib/address-labels";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 import {
@@ -22,8 +21,11 @@ import { NETWORKS } from "@/lib/networks";
 export const runtime = "nodejs";
 export const maxDuration = 800;
 
+// Discovery scans Celo (the chain Mento runs on); enrichment hits Arkham's
+// `/all` endpoint which returns every chain Arkham covers. EVM addresses are
+// chain-agnostic, so a Binance hot-wallet seen on Celo via a bridge inflow
+// gets the same Binance entity attribution Arkham assigns it on Ethereum/BSC.
 const CELO_CHAIN_ID = NETWORKS["celo-mainnet"].chainId;
-const ARKHAM_CHAIN = chainSlug(CELO_CHAIN_ID);
 const DEFAULT_MAX_ADDRESSES = 10_000;
 
 type EnrichMode = "new" | "refresh" | "dryRun";
@@ -142,10 +144,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
         candidates = candidates.slice(0, maxAddresses);
 
-        const results = await enrichBatch(candidates, {
-          apiKey,
-          chain: ARKHAM_CHAIN,
-        });
+        const results = await enrichBatch(candidates, { apiKey });
 
         const toWrite: Record<
           string,

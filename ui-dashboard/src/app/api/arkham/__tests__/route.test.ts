@@ -194,7 +194,7 @@ describe("POST /api/arkham/enrich — pipeline", () => {
 
     expect(mockEnrichBatch).toHaveBeenCalledWith(
       ["0xnew"],
-      expect.objectContaining({ chain: "celo" }),
+      expect.objectContaining({ apiKey: "ak-test" }),
     );
     expect(mockImportLabels).toHaveBeenCalledWith(
       42220,

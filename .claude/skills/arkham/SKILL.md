@@ -36,12 +36,19 @@ headroom for clock drift.
 
 ## Supported chains (relevant to Mento)
 
-- ✅ **`celo`** — supported. Use this for Celo-mainnet (chainId 42220) addresses.
-- ❌ **Monad** — NOT in the Arkham chain enum. Skip Monad-only addresses.
-- Other supported: `ethereum`, `polygon`, `bsc`, `arbitrum_one`, `optimism`,
-  `base`, `avalanche`, `bitcoin`, `solana`, `tron`, `ton`, `gnosis`,
-  `fantom`, `zksync_era`, `linea`, `flare`, `dogecoin`. Call `GET /chains`
-  for the live list before assuming.
+**As of 2026-04, `GET /chains` returns:** `ethereum, polygon, bsc, optimism,
+avalanche, arbitrum_one, base, bitcoin, tron, flare, solana, ton, dogecoin,
+zcash, hyperevm`.
+
+- ❌ **Celo NOT supported.** `?chain=celo` returns `400 {"message":"invalid chain"}`.
+- ❌ **Monad NOT supported.**
+- ✅ **EVM addresses are chain-agnostic.** A Binance hot-wallet on Celo (seen
+  via a bridge inflow in `BridgeTransfer.sender`) is the same `0x` string
+  Arkham labels on Ethereum/BSC. Use `/intelligence/address_enriched/{addr}/all`
+  to pull cross-chain attribution that still applies on Celo.
+- Always call `GET /chains` at startup to validate the live list — Arkham
+  adds/removes coverage over time. The earlier (2025) doc snapshot listed
+  Celo + Gnosis + zkSync; live API now drops them.
 
 ## Core data model
 
@@ -66,16 +73,15 @@ headroom for clock drift.
 When the goal is "given an address, get a high-quality label":
 
 ```bash
-# Single chain — fastest, returns curated entity + label only
-GET /intelligence/address/{address}?chain=celo
-
-# All chains in one call — useful for the global label scope
-GET /intelligence/address/{address}/all
-
-# Adds tags, ML entity predictions, cluster IDs
-GET /intelligence/address_enriched/{address}?chain=celo
+# Multi-chain enrichment — the right shape for Mento (Celo isn't supported,
+# so we union attribution across every chain Arkham covers).
 GET /intelligence/address_enriched/{address}/all
   ?includeTags=true&includeEntityPredictions=true&includeClusters=false
+
+# Per-chain variants — useful only for chains Arkham actually covers.
+# `?chain=celo` returns 400 invalid chain.
+GET /intelligence/address/{address}?chain=ethereum
+GET /intelligence/address_enriched/{address}?chain=ethereum
 ```
 
 Quality filter — only treat the response as a "high-confidence" label when

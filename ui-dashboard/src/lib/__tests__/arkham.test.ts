@@ -15,12 +15,12 @@ import {
 } from "@/lib/arkham";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 
-function makeArkhamResponse(
+function makePerChain(
   overrides: Partial<ArkhamEnrichedAddress> = {},
 ): ArkhamEnrichedAddress {
   return {
     address: "0xabc",
-    chain: "celo",
+    chain: "ethereum",
     depositServiceID: null,
     arkhamEntity: null,
     arkhamLabel: null,
@@ -30,6 +30,22 @@ function makeArkhamResponse(
     entityPredictions: [],
     ...overrides,
   };
+}
+
+/**
+ * Build a multi-chain response. Defaults to the same per-chain content
+ * across `ethereum` + `bsc` (mirroring how Arkham labels EVM addresses
+ * consistently across chains it covers).
+ */
+function makeArkhamResponse(
+  overrides: Partial<ArkhamEnrichedAddress> = {},
+  chains: string[] = ["ethereum", "bsc"],
+): Record<string, ArkhamEnrichedAddress> {
+  const out: Record<string, ArkhamEnrichedAddress> = {};
+  for (const c of chains) {
+    out[c] = makePerChain({ chain: c, ...overrides });
+  }
+  return out;
 }
 
 type MockFetchEntry =
@@ -240,21 +256,21 @@ describe("toAddressEntry", () => {
 describe("fetchEnrichedAddress", () => {
   it("returns null on 404", async () => {
     const f = mockFetch([{ status: 404 }]);
-    const r = await fetchEnrichedAddress("0xabc", "celo", "key", f);
+    const r = await fetchEnrichedAddress("0xabc", "key", f);
     expect(r).toBeNull();
   });
 
   it("throws ArkhamAuthError on 401", async () => {
     const f = mockFetch([{ status: 401 }]);
     await expect(
-      fetchEnrichedAddress("0xabc", "celo", "key", f),
+      fetchEnrichedAddress("0xabc", "key", f),
     ).rejects.toBeInstanceOf(ArkhamAuthError);
   });
 
   it("throws ArkhamRateLimitedError on 429", async () => {
     const f = mockFetch([{ status: 429 }]);
     await expect(
-      fetchEnrichedAddress("0xabc", "celo", "key", f),
+      fetchEnrichedAddress("0xabc", "key", f),
     ).rejects.toBeInstanceOf(ArkhamRateLimitedError);
   });
 
@@ -268,9 +284,11 @@ describe("fetchEnrichedAddress", () => {
         }) as Response & { ok: boolean };
       },
     ]);
-    await fetchEnrichedAddress("0xABCdef", "celo", "key", f);
-    expect(captured[0]).toContain("/0xabcdef");
+    await fetchEnrichedAddress("0xABCdef", "key", f);
+    expect(captured[0]).toContain("/0xabcdef/all");
     expect(captured[0]).not.toContain("ABCdef");
+    // Multi-chain endpoint — no ?chain= param.
+    expect(captured[0]).not.toContain("chain=");
   });
 
   it("sends API-Key header", async () => {
@@ -284,7 +302,7 @@ describe("fetchEnrichedAddress", () => {
         }) as Response & { ok: boolean };
       },
     ]);
-    await fetchEnrichedAddress("0xabc", "celo", "secret-key", f);
+    await fetchEnrichedAddress("0xabc", "secret-key", f);
     expect(headerSeen).toBe("secret-key");
   });
 });
@@ -352,7 +370,6 @@ describe("enrichBatch", () => {
     ]);
     await enrichBatch(["0x1", "0x2", "0x3"], {
       apiKey: "k",
-      chain: "celo",
       fetchImpl: f,
       sleeper,
     });
@@ -373,7 +390,6 @@ describe("enrichBatch", () => {
     ]);
     const results = await enrichBatch(["0x1"], {
       apiKey: "k",
-      chain: "celo",
       fetchImpl: f,
       sleeper,
     });
@@ -389,7 +405,6 @@ describe("enrichBatch", () => {
     ]);
     const results = await enrichBatch(["0x1", "0x2"], {
       apiKey: "k",
-      chain: "celo",
       fetchImpl: f,
       sleeper,
     });
@@ -404,7 +419,6 @@ describe("enrichBatch", () => {
     await expect(
       enrichBatch(["0x1", "0x2"], {
         apiKey: "k",
-        chain: "celo",
         fetchImpl: f,
         sleeper,
       }),
@@ -420,7 +434,6 @@ describe("enrichBatch", () => {
     await expect(
       enrichBatch(["0x1"], {
         apiKey: "k",
-        chain: "celo",
         fetchImpl: f,
         sleeper,
       }),
