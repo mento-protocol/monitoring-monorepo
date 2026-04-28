@@ -557,6 +557,63 @@ describe("runRebalanceProbes — gauge writes", () => {
     );
     expect(value).toBe(1);
   });
+
+  it("preserves the rebalanceCollateral{Balance,Needed} gauges across the regular Hasura poll reset", async () => {
+    // Regression guard: same as rebalanceBlocked above, but for the two
+    // reserve-collateral enrichment gauges. They share the "preserve across
+    // regular Hasura polls, reset only on probe cycles" lifecycle. A
+    // regression in `POLL_PRESERVED_GAUGES` would silently degrade the
+    // Slack annotation (the `Current balance: ... / Needed for rebalancing:
+    // ...` line would flicker off most of the time, since probes run every
+    // Nth poll).
+    const pool = makePool(breachOverrides);
+    mockProbe.mockResolvedValueOnce({
+      kind: "blocked",
+      reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
+      reasonMessage: "Reserve has insufficient axlUSDC",
+      reserveCollateral: {
+        balance: 0,
+        needed: 12_500,
+        tokenSymbol: "axlUSDC",
+      },
+    });
+    await runRebalanceProbes([pool]);
+
+    // Now run a regular updateMetrics() — simulating a Hasura poll between probes.
+    const { updateMetrics } = await import("../src/metrics.js");
+    updateMetrics([pool]);
+
+    const balance = await getGaugeValue(
+      register,
+      "mento_pool_rebalance_collateral_balance",
+      {
+        pool_id: pool.id,
+        chain_id: "42220",
+        chain_name: "celo",
+        pair: "GBPm/USDm",
+        pool_address_short: "0x8c00…cb56",
+        block_explorer_url:
+          "https://celoscan.io/address/0x8c0014afe032e4574481d8934504100bf23fcb56",
+        token_symbol: "axlUSDC",
+      },
+    );
+    const needed = await getGaugeValue(
+      register,
+      "mento_pool_rebalance_collateral_needed",
+      {
+        pool_id: pool.id,
+        chain_id: "42220",
+        chain_name: "celo",
+        pair: "GBPm/USDm",
+        pool_address_short: "0x8c00…cb56",
+        block_explorer_url:
+          "https://celoscan.io/address/0x8c0014afe032e4574481d8934504100bf23fcb56",
+        token_symbol: "axlUSDC",
+      },
+    );
+    expect(balance).toBe(0);
+    expect(needed).toBe(12_500);
+  });
 });
 
 describe("runRebalanceProbes — reserve-collateral enrichment gauges", () => {
