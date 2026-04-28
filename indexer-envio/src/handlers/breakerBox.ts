@@ -253,15 +253,20 @@ BreakerBox.TradingModeUpdated.handler(async ({ event, context }) => {
   const tradingMode = Number(event.params.tradingMode);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Multi-row update — fan-out across all this feed's configs on this chain.
-  // We bump `lastStatusUpdatedAt` here, so we MUST also recompute
-  // `cooldownEndsAt` (the pre-rolled `lastStatusUpdatedAt + cooldownTime`)
-  // — otherwise the dashboard's countdown would render against the
-  // previous trip/reset's timestamp and immediately show as expired.
+  // Multi-row update — fan-out across this feed's ENABLED configs on this
+  // chain. Disabled configs are skipped: a governance-disabled breaker is
+  // not authoritative for trading-mode decisions, and writing TRIPPED to a
+  // disabled row corrupts per-breaker state for downstream UI reads (and any
+  // future feed with multiple breakers). We bump `lastStatusUpdatedAt` here,
+  // so we MUST also recompute `cooldownEndsAt` (the pre-rolled
+  // `lastStatusUpdatedAt + cooldownTime`) — otherwise the dashboard's
+  // countdown would render against the previous trip/reset's timestamp and
+  // immediately show as expired.
   const configs =
     await context.BreakerConfig.getWhere.rateFeedID.eq(rateFeedID);
   for (const cfg of configs) {
     if (cfg.chainId !== event.chainId) continue;
+    if (!cfg.enabled) continue;
     if (cfg.tradingMode === tradingMode) continue;
     const breaker = await context.Breaker.get(cfg.breaker_id);
     const cooldown = breaker

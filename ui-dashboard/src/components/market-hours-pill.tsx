@@ -80,11 +80,17 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
     { chainId: pool.chainId, rateFeedID },
   );
 
-  // FX-ness: the rateFeedID has a MARKET_HOURS BreakerConfig registered.
+  // FX-ness: the rateFeedID has an ENABLED MARKET_HOURS BreakerConfig.
   // Stablecoin pools (USDC/USDm, USDT/USDm, axlUSDC/USDm) won't have one.
+  // We require `c.enabled === true` so a governance toggle that disables
+  // the market-hours breaker for a feed (`BreakerStatusUpdated(..., false)`)
+  // also hides the pill — otherwise operators would see a "Market Open/Closed"
+  // countdown that no longer reflects the on-chain trading gate.
   const enabled =
     !isVirtual &&
-    !!data?.BreakerConfig?.some((c) => c.breaker.kind === "MARKET_HOURS");
+    !!data?.BreakerConfig?.some(
+      (c) => c.breaker.kind === "MARKET_HOURS" && c.enabled,
+    );
 
   const [now, setNow] = useState(() => new Date());
 

@@ -467,6 +467,78 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     assert.equal(cfg!.lastStatusUpdatedAt, 1_700_001_500n);
   });
 
+  it("TradingModeUpdated leaves disabled BreakerConfigs untouched", async () => {
+    let mockDb = MockDb.createMockDb();
+    // Seed an ENABLED config, then immediately disable it.
+    const seed = BreakerBox.BreakerStatusUpdated.createMockEvent({
+      breaker: MD_BREAKER,
+      rateFeedID: FEED,
+      status: true,
+      mockEventData: {
+        chainId: CHAIN_ID,
+        logIndex: 0,
+        srcAddress: BREAKER_BOX_ADDR,
+        block: { number: 100, timestamp: 1_700_000_500 },
+      },
+    });
+    mockDb = await BreakerBox.BreakerStatusUpdated.processEvent({
+      event: seed,
+      mockDb,
+    });
+    const disable = BreakerBox.BreakerStatusUpdated.createMockEvent({
+      breaker: MD_BREAKER,
+      rateFeedID: FEED,
+      status: false,
+      mockEventData: {
+        chainId: CHAIN_ID,
+        logIndex: 1,
+        srcAddress: BREAKER_BOX_ADDR,
+        block: { number: 110, timestamp: 1_700_000_600 },
+      },
+    });
+    mockDb = await BreakerBox.BreakerStatusUpdated.processEvent({
+      event: disable,
+      mockDb,
+    });
+
+    // Owner-override fires for this feed.
+    const override = BreakerBox.TradingModeUpdated.createMockEvent({
+      rateFeedID: FEED,
+      tradingMode: 3n,
+      mockEventData: {
+        chainId: CHAIN_ID,
+        logIndex: 2,
+        srcAddress: BREAKER_BOX_ADDR,
+        block: { number: 250, timestamp: 1_700_001_500 },
+      },
+    });
+    mockDb = await BreakerBox.TradingModeUpdated.processEvent({
+      event: override,
+      mockDb,
+    });
+
+    // The disabled row must NOT have been flipped to TRIPPED — trading mode
+    // stays 0, status stays OK, and lastStatusUpdatedAt is unchanged from the
+    // RPC-self-heal seed (1_700_000_000n in the mock). If the handler had
+    // touched the disabled row, the override block timestamp 1_700_001_500n
+    // would have bled through.
+    const cfg = mockDb.entities.BreakerConfig.get(
+      makeBreakerConfigId(CHAIN_ID, MD_BREAKER, FEED),
+    ) as
+      | {
+          enabled: boolean;
+          tradingMode: number;
+          status: string;
+          lastStatusUpdatedAt: bigint;
+        }
+      | undefined;
+    assert.ok(cfg);
+    assert.equal(cfg!.enabled, false);
+    assert.equal(cfg!.tradingMode, 0);
+    assert.equal(cfg!.status, "OK");
+    assert.notEqual(cfg!.lastStatusUpdatedAt, 1_700_001_500n);
+  });
+
   it("SortedOracles.MedianUpdated mirrors EMA + lastMedianRate for enabled MedianDelta configs", async () => {
     let mockDb = MockDb.createMockDb();
     const seed = BreakerBox.BreakerStatusUpdated.createMockEvent({

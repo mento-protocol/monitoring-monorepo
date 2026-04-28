@@ -78,10 +78,26 @@ describe("MarketHoursPill", () => {
     expect(html).toBe("");
   });
 
+  it("renders nothing when the MARKET_HOURS BreakerConfig is disabled", () => {
+    // Governance can disable the market-hours breaker for a feed via
+    // BreakerStatusUpdated(..., false). The pill must hide in that case so
+    // the dashboard doesn't show a "Market Open/Closed" gate that no longer
+    // reflects the on-chain trading mode.
+    mockUseGQL.mockReturnValue({
+      data: {
+        BreakerConfig: [{ enabled: false, breaker: { kind: "MARKET_HOURS" } }],
+        BreakerTripEvent: [],
+      },
+    });
+    freezeNow("2026-04-29T12:00:00Z");
+    const html = renderToStaticMarkup(<MarketHoursPill pool={fxPool()} />);
+    expect(html).toBe("");
+  });
+
   it("renders schedule mode when market is open and >6h until close (Wed noon)", () => {
     mockUseGQL.mockReturnValue({
       data: {
-        BreakerConfig: [{ breaker: { kind: "MARKET_HOURS" } }],
+        BreakerConfig: [{ enabled: true, breaker: { kind: "MARKET_HOURS" } }],
         BreakerTripEvent: [],
       },
     });
@@ -98,7 +114,7 @@ describe("MarketHoursPill", () => {
   it("renders amber countdown mode when <6h until close (Fri 17:00)", () => {
     mockUseGQL.mockReturnValue({
       data: {
-        BreakerConfig: [{ breaker: { kind: "MARKET_HOURS" } }],
+        BreakerConfig: [{ enabled: true, breaker: { kind: "MARKET_HOURS" } }],
         BreakerTripEvent: [],
       },
     });
@@ -113,7 +129,7 @@ describe("MarketHoursPill", () => {
   it("renders Market Closed countdown to reopen on Saturday", () => {
     mockUseGQL.mockReturnValue({
       data: {
-        BreakerConfig: [{ breaker: { kind: "MARKET_HOURS" } }],
+        BreakerConfig: [{ enabled: true, breaker: { kind: "MARKET_HOURS" } }],
         BreakerTripEvent: [],
       },
     });
