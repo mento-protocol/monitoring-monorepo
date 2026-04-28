@@ -133,10 +133,7 @@ function DeviationBar({
   const thresholdPct = (threshold / 100).toFixed(2);
 
   return (
-    <div
-      className="flex flex-col gap-0.5"
-      title={`Deviation ${diffPct}% of ${thresholdPct}% threshold`}
-    >
+    <div className="flex flex-col gap-0.5">
       {/* Wrap the 8px bar in a 20px row that matches the text-sm line-height
           of other cells' middle values (e.g. "Fresh", "Balanced") so the
           bottom-row subtitle sits on the same baseline across the header. */}
