@@ -53,7 +53,7 @@ export function InfoPopover({
       {open && (
         <span
           role="tooltip"
-          className="absolute z-20 left-0 top-full mt-1 w-72 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-normal leading-relaxed text-slate-200 shadow-lg"
+          className="absolute z-20 left-0 top-full mt-1 w-72 whitespace-pre-line rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-normal leading-relaxed text-slate-200 shadow-lg"
         >
           {content}
         </span>

@@ -17,8 +17,8 @@ import { isFxPool } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 
 const UPTIME_EXPLAINER =
-  "% of time the pool was healthy. Deviation > 5% threshold sustained for more than 1h qualifies as unhealthy.";
-const UPTIME_FX_SUFFIX = " Weekends do not count into uptime on FX pools.";
+  "% of time the pool was healthy.\nUnhealthy is defined as Deviation > 5% threshold sustained for more than 1h.";
+const UPTIME_FX_SUFFIX = "\nWeekends do not count into uptime on FX pools.";
 const SECONDS_IN_7D = 7 * 86_400;
 
 type BreachRollup = {
