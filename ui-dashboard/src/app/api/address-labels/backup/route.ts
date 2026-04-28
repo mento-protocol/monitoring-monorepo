@@ -1,34 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { put } from "@vercel/blob";
-import { getAuthSession } from "@/auth";
 import { getAllLabels, type AddressLabelsSnapshot } from "@/lib/address-labels";
+import { requireCronOrSession } from "@/lib/cron-auth";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const cronSecret = process.env.CRON_SECRET;
-  const isDev = process.env.NODE_ENV === "development";
-
-  if (!isDev) {
-    if (!cronSecret) {
-      console.error(
-        "[backup] CRON_SECRET is not set. Refusing backup request.",
-      );
-      return NextResponse.json(
-        { error: "Server misconfiguration: CRON_SECRET required" },
-        { status: 500 },
-      );
-    }
-
-    const authHeader = req.headers.get("authorization");
-    const isCronAuth = authHeader === `Bearer ${cronSecret}`;
-
-    if (!isCronAuth) {
-      const session = await getAuthSession();
-      if (!session) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
-    }
-  }
+  const authBail = await requireCronOrSession(req, "backup");
+  if (authBail) return authBail;
 
   // withMonitor reports an in_progress check-in on entry and an ok/error
   // check-in on exit. Missed runs (vs. the declared schedule) fire a Sentry

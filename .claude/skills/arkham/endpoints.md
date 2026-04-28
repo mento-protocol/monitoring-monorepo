@@ -57,9 +57,15 @@ the address has data.
 
 ```json
 {
-  "ethereum": { /* Address object */ },
-  "polygon":  { /* Address object */ },
-  "arbitrum_one": { /* Address object */ }
+  "ethereum": {
+    /* Address object */
+  },
+  "polygon": {
+    /* Address object */
+  },
+  "arbitrum_one": {
+    /* Address object */
+  }
 }
 ```
 
@@ -190,13 +196,13 @@ chains over time.
 
 ## Error taxonomy
 
-| Status | Meaning | Action |
-| --- | --- | --- |
-| `400` | Malformed input (often: mixed-case EVM address, wrong chain, conflicting `timeLast` + `timeGte`) | Fix input; don't retry |
-| `401` | Missing/invalid `API-Key` | Check env var; rotate if compromised |
-| `404` | Address/entity/cluster has no Arkham data | Skip, don't escalate |
-| `429` | Rate-limited (`{"error":"too many requests"}`) | Back off ≥ 1 s; lower concurrency |
-| `5xx` | Arkham server problem | Retry with exponential backoff (max 3 attempts) |
+| Status | Meaning                                                                                          | Action                                          |
+| ------ | ------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| `400`  | Malformed input (often: mixed-case EVM address, wrong chain, conflicting `timeLast` + `timeGte`) | Fix input; don't retry                          |
+| `401`  | Missing/invalid `API-Key`                                                                        | Check env var; rotate if compromised            |
+| `404`  | Address/entity/cluster has no Arkham data                                                        | Skip, don't escalate                            |
+| `429`  | Rate-limited (`{"error":"too many requests"}`)                                                   | Back off ≥ 1 s; lower concurrency               |
+| `5xx`  | Arkham server problem                                                                            | Retry with exponential backoff (max 3 attempts) |
 
 ## Address shape (returned everywhere)
 
@@ -205,12 +211,12 @@ The same `Address` object appears in `/intelligence`, `/counterparties`,
 
 ```typescript
 type Address = {
-  address: string;             // lowercase EVM, base58 BTC, etc.
-  chain: string;               // chain enum, e.g. "celo"
+  address: string; // lowercase EVM, base58 BTC, etc.
+  chain: string; // chain enum, e.g. "celo"
   depositServiceID: string | null;
   arkhamEntity: ArkhamEntity | null;
   arkhamLabel: ArkhamLabel | null;
-  isUserAddress: boolean | null;  // true if the API key's user owns it
+  isUserAddress: boolean | null; // true if the API key's user owns it
   contract: boolean | null;
 };
 ```

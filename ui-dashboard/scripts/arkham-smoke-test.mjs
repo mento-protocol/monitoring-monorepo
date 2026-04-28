@@ -59,10 +59,7 @@ async function main() {
 
   // 3) Address enrichment
   console.log(`→ GET /intelligence/address_enriched/${address}?chain=${CHAIN}`);
-  const url = new URL(
-    `/intelligence/address_enriched/${address}`,
-    ARKHAM_BASE,
-  );
+  const url = new URL(`/intelligence/address_enriched/${address}`, ARKHAM_BASE);
   url.searchParams.set("chain", CHAIN);
   url.searchParams.set("includeTags", "true");
   url.searchParams.set("includeEntityPredictions", "true");

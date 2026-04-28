@@ -13,6 +13,8 @@
  */
 
 import { GraphQLClient } from "graphql-request";
+import * as Sentry from "@sentry/nextjs";
+import { isValidAddress } from "@/lib/validators";
 
 // Arkham only supports Celo, not Monad — tag every consumer with this so the
 // chain-id assumption is greppable.
@@ -55,8 +57,9 @@ async function fetchDistinctAddresses(
   chainId: number,
 ): Promise<string[]> {
   const all = new Set<string>();
+  let page = 0;
 
-  for (let page = 0; page < HARD_PAGE_CAP; page += 1) {
+  for (; page < HARD_PAGE_CAP; page += 1) {
     const offset = page * PAGE_SIZE;
     const query = `
       query Distinct_${table}_${field}($chainId: Int!, $limit: Int!, $offset: Int!) {
@@ -79,9 +82,17 @@ async function fetchDistinctAddresses(
     const rows = data.rows ?? [];
     if (rows.length === 0) break;
     for (const r of rows) {
-      if (r.address) all.add(r.address.toLowerCase());
+      const lower = r.address?.toLowerCase();
+      if (lower && isValidAddress(lower)) all.add(lower);
     }
     if (rows.length < PAGE_SIZE) break;
+  }
+
+  if (page === HARD_PAGE_CAP) {
+    Sentry.captureMessage(
+      `[arkham-discovery] HARD_PAGE_CAP hit on ${table}.${field}`,
+      { tags: { table, field }, level: "warning" },
+    );
   }
 
   return Array.from(all);
@@ -102,7 +113,6 @@ export type DiscoveryResult = {
 export async function discoverMentoAddresses(
   hasuraUrl: string,
   chainId: number,
-  fetchImpl?: typeof fetch,
 ): Promise<DiscoveryResult> {
   if (!ARKHAM_SUPPORTED_CHAIN_IDS.has(chainId)) {
     throw new Error(
@@ -110,28 +120,26 @@ export async function discoverMentoAddresses(
     );
   }
 
-  // graphql-request doesn't expose a plain `fetch` injection point on every
-  // version — pass through `fetch` if provided, otherwise use the default.
-  const client = new GraphQLClient(
-    hasuraUrl,
-    fetchImpl ? { fetch: fetchImpl } : undefined,
+  const client = new GraphQLClient(hasuraUrl);
+
+  // (entity, field) pairs are independent — fan out concurrently. Pagination
+  // *within* one pair stays sequential (offset depends on the previous page).
+  const tasks = MENTO_ENTITIES.flatMap((entity) =>
+    entity.fields.map((field) => ({ table: entity.table, field })),
+  );
+  const found = await Promise.all(
+    tasks.map(({ table, field }) =>
+      fetchDistinctAddresses(client, table, field, chainId),
+    ),
   );
 
   const all = new Set<string>();
-  const perEntity: DiscoveryResult["perEntity"] = [];
-
-  for (const entity of MENTO_ENTITIES) {
-    for (const field of entity.fields) {
-      const found = await fetchDistinctAddresses(
-        client,
-        entity.table,
-        field,
-        chainId,
-      );
-      perEntity.push({ table: entity.table, field, count: found.length });
-      for (const a of found) all.add(a);
-    }
-  }
+  const perEntity: DiscoveryResult["perEntity"] = tasks.map(
+    ({ table, field }, i) => {
+      for (const a of found[i]!) all.add(a);
+      return { table, field, count: found[i]!.length };
+    },
+  );
 
   return {
     addresses: Array.from(all).sort(),

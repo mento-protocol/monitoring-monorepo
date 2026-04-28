@@ -9,7 +9,7 @@
  * NEVER import from a client component. The API key is server-only.
  */
 
-import type { AddressEntry } from "@/lib/address-labels-shared";
+import { sanitizeEntry, type AddressEntry } from "@/lib/address-labels-shared";
 
 const ARKHAM_BASE = "https://api.arkm.com";
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -171,37 +171,30 @@ export function toAddressEntry(
     ?.filter((p) => p.confidence >= HIGH_CONFIDENCE)
     .sort((a, b) => b.confidence - a.confidence)[0];
 
-  // Prefer Arkham's curated label name, then the entity's display name, then
-  // the predicted entity ID. Anything beyond 200 chars truncates per the
-  // shared schema's MAX_NAME_LENGTH.
-  const name = (
-    label ??
-    entity?.name ??
-    topPrediction?.entityId ??
-    ""
-  ).slice(0, 200);
+  // Prefer the curated label, then the entity's display name, then the
+  // predicted entity ID. Length/dedup/tag-cap is delegated to sanitizeEntry.
+  const name = label ?? entity?.name ?? topPrediction?.entityId ?? "";
 
   const tagSet = new Set<string>([ARKHAM_TAG]);
   if (entity?.type) tagSet.add(entity.type);
   for (const t of data.tags ?? []) {
     if (t.slug) tagSet.add(t.slug);
   }
-  // MAX_TAGS_COUNT = 20 in shared-schema; reserve room for the `arkham` marker.
-  const tags = Array.from(tagSet).slice(0, 20);
 
   // Notes only when the label rests on an ML prediction — flags lower
   // certainty so a human reviewing the address book can spot it.
-  const note = !label && !entity && topPrediction
-    ? `Arkham prediction (${Math.round(topPrediction.confidence * 100)}% confidence)`
-    : undefined;
+  const note =
+    !label && !entity && topPrediction
+      ? `Arkham prediction (${Math.round(topPrediction.confidence * 100)}% confidence)`
+      : undefined;
 
-  return {
+  return sanitizeEntry({
     name,
-    tags,
+    tags: Array.from(tagSet),
     notes: note,
     isPublic: false,
     updatedAt: new Date().toISOString(),
-  };
+  });
 }
 
 /**
@@ -216,7 +209,6 @@ export function toAddressEntry(
 export type EnrichmentResult = {
   address: string;
   entry: AddressEntry | null;
-  raw: ArkhamEnrichedAddress | null;
   error?: string;
 };
 
@@ -229,15 +221,23 @@ export type EnrichBatchOptions = {
   fetchImpl?: typeof fetch;
   /** Optional sleeper override for tests (default: setTimeout). */
   sleeper?: (ms: number) => Promise<void>;
-  /**
-   * Hard cap on the batch — protects against runaway costs if the upstream
-   * address-discovery query returns more than expected. Defaults to 10_000.
-   */
-  maxAddresses?: number;
 };
+
+/** 1.5s back-off on 429 — duplicated in tests as a constant to keep them in sync. */
+export const RATE_LIMIT_BACKOFF_MS = 1500;
 
 const defaultSleeper = (ms: number) =>
   new Promise<void>((r) => setTimeout(r, ms));
+
+async function tryEnrich(
+  address: string,
+  chain: string,
+  apiKey: string,
+  fetchImpl: typeof fetch,
+): Promise<EnrichmentResult> {
+  const raw = await fetchEnrichedAddress(address, chain, apiKey, fetchImpl);
+  return { address, entry: raw ? toAddressEntry(raw) : null };
+}
 
 export async function enrichBatch(
   addresses: string[],
@@ -249,38 +249,27 @@ export async function enrichBatch(
     spacingMs = REQ_SPACING_MS,
     fetchImpl = fetch,
     sleeper = defaultSleeper,
-    maxAddresses = 10_000,
   } = opts;
 
-  const targets = addresses.slice(0, maxAddresses);
   const results: EnrichmentResult[] = [];
 
-  for (const address of targets) {
+  for (let i = 0; i < addresses.length; i += 1) {
+    const address = addresses[i]!;
     try {
-      const raw = await fetchEnrichedAddress(address, chain, apiKey, fetchImpl);
-      const entry = raw ? toAddressEntry(raw) : null;
-      results.push({ address, entry, raw });
+      results.push(await tryEnrich(address, chain, apiKey, fetchImpl));
     } catch (err) {
       // Auth errors are fatal: the rest of the batch will all 401 too.
       if (err instanceof ArkhamAuthError) throw err;
-      // Rate-limited: back off 1.5s and retry once. If it 429s twice in a
-      // row, surface the error and let the caller decide.
       if (err instanceof ArkhamRateLimitedError) {
-        await sleeper(1500);
+        // Back off and retry once. If it 429s twice in a row, surface the
+        // error and let the caller decide.
+        await sleeper(RATE_LIMIT_BACKOFF_MS);
         try {
-          const raw = await fetchEnrichedAddress(
-            address,
-            chain,
-            apiKey,
-            fetchImpl,
-          );
-          const entry = raw ? toAddressEntry(raw) : null;
-          results.push({ address, entry, raw });
+          results.push(await tryEnrich(address, chain, apiKey, fetchImpl));
         } catch (retryErr) {
           results.push({
             address,
             entry: null,
-            raw: null,
             error:
               retryErr instanceof Error ? retryErr.message : String(retryErr),
           });
@@ -289,12 +278,11 @@ export async function enrichBatch(
         results.push({
           address,
           entry: null,
-          raw: null,
           error: err instanceof Error ? err.message : String(err),
         });
       }
     }
-    await sleeper(spacingMs);
+    if (i < addresses.length - 1) await sleeper(spacingMs);
   }
 
   return results;

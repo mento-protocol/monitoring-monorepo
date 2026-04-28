@@ -42,6 +42,13 @@ import {
 } from "@/lib/arkham";
 import { discoverMentoAddresses } from "@/lib/arkham-discovery";
 
+const mockGetAuthSession = vi.mocked(getAuthSession);
+const mockGetLabels = vi.mocked(getLabels);
+const mockImportLabels = vi.mocked(importLabels);
+const mockFetchHealth = vi.mocked(fetchHealth);
+const mockEnrichBatch = vi.mocked(enrichBatch);
+const mockDiscover = vi.mocked(discoverMentoAddresses);
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
@@ -49,12 +56,17 @@ beforeEach(() => {
   vi.stubEnv("ARKHAM_API_KEY", "ak-test");
   vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.test/graphql");
   vi.stubEnv("NODE_ENV", "production");
+  // Default to a healthy reachability probe; tests that need to fail it
+  // override per-case.
+  mockFetchHealth.mockResolvedValue(true);
 });
 
-function makeReq(opts: {
-  bearer?: string;
-  searchParams?: Record<string, string>;
-} = {}): NextRequest {
+function makeReq(
+  opts: {
+    bearer?: string;
+    searchParams?: Record<string, string>;
+  } = {},
+): NextRequest {
   const url = new URL("http://localhost/api/arkham/enrich");
   for (const [k, v] of Object.entries(opts.searchParams ?? {})) {
     url.searchParams.set(k, v);
@@ -69,39 +81,34 @@ function makeReq(opts: {
 
 describe("POST /api/arkham/enrich — auth", () => {
   it("401s when no auth and no session", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    mockGetAuthSession.mockResolvedValue(null);
     const res = await POST(makeReq());
     expect(res.status).toBe(401);
   });
 
   it("accepts Bearer CRON_SECRET", async () => {
-    (discoverMentoAddresses as ReturnType<typeof vi.fn>).mockResolvedValue({
-      addresses: [],
-      perEntity: [],
-    });
-    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
-    (enrichBatch as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    mockDiscover.mockResolvedValue({ addresses: [], perEntity: [] });
+    mockGetLabels.mockResolvedValue({});
+    mockEnrichBatch.mockResolvedValue([]);
 
     const res = await POST(makeReq({ bearer: "cron-secret" }));
     expect(res.status).toBe(200);
   });
 
   it("rejects wrong Bearer", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    mockGetAuthSession.mockResolvedValue(null);
     const res = await POST(makeReq({ bearer: "wrong" }));
     expect(res.status).toBe(401);
   });
 
   it("accepts authenticated session as fallback", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+    mockGetAuthSession.mockResolvedValue({
       user: { email: "alice@mentolabs.xyz" },
+      expires: "2099-01-01T00:00:00Z",
     });
-    (discoverMentoAddresses as ReturnType<typeof vi.fn>).mockResolvedValue({
-      addresses: [],
-      perEntity: [],
-    });
-    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
-    (enrichBatch as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    mockDiscover.mockResolvedValue({ addresses: [], perEntity: [] });
+    mockGetLabels.mockResolvedValue({});
+    mockEnrichBatch.mockResolvedValue([]);
     const res = await POST(makeReq());
     expect(res.status).toBe(200);
   });
@@ -131,9 +138,9 @@ describe("POST /api/arkham/enrich — config", () => {
   });
 
   it("502s on auth error from Arkham", async () => {
-    (fetchHealth as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new ArkhamAuthError(),
-    );
+    mockFetchHealth.mockRejectedValueOnce(new ArkhamAuthError());
+    mockDiscover.mockResolvedValue({ addresses: [], perEntity: [] });
+    mockGetLabels.mockResolvedValue({});
     const res = await POST(makeReq({ bearer: "cron-secret" }));
     expect(res.status).toBe(502);
   });
@@ -141,11 +148,11 @@ describe("POST /api/arkham/enrich — config", () => {
 
 describe("POST /api/arkham/enrich — pipeline", () => {
   it("filters candidates against existing manual labels", async () => {
-    (discoverMentoAddresses as ReturnType<typeof vi.fn>).mockResolvedValue({
+    mockDiscover.mockResolvedValue({
       addresses: ["0xnew", "0xmanual", "0xark"],
       perEntity: [{ table: "SwapEvent", field: "sender", count: 3 }],
     });
-    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+    mockGetLabels.mockResolvedValue({
       "0xmanual": {
         name: "Treasury",
         tags: ["mento"],
@@ -157,7 +164,7 @@ describe("POST /api/arkham/enrich — pipeline", () => {
         updatedAt: "2026-04-01T00:00:00Z",
       },
     });
-    (enrichBatch as ReturnType<typeof vi.fn>).mockResolvedValue([
+    mockEnrichBatch.mockResolvedValue([
       {
         address: "0xnew",
         entry: {
@@ -165,7 +172,6 @@ describe("POST /api/arkham/enrich — pipeline", () => {
           tags: [ARKHAM_TAG, "exchange"],
           updatedAt: "2026-04-28T00:00:00Z",
         },
-        raw: {},
       },
     ]);
 
@@ -176,13 +182,11 @@ describe("POST /api/arkham/enrich — pipeline", () => {
     expect(body.candidates).toBe(1); // only 0xnew passes the filter
     expect(body.enriched).toBe(1);
 
-    // enrichBatch should only see the unlabeled address
-    expect(enrichBatch).toHaveBeenCalledWith(
+    expect(mockEnrichBatch).toHaveBeenCalledWith(
       ["0xnew"],
       expect.objectContaining({ chain: "celo" }),
     );
-    // importLabels should write only the new entry
-    expect(importLabels).toHaveBeenCalledWith(
+    expect(mockImportLabels).toHaveBeenCalledWith(
       42220,
       expect.objectContaining({
         "0xnew": expect.objectContaining({ name: "Coinbase" }),
@@ -191,36 +195,33 @@ describe("POST /api/arkham/enrich — pipeline", () => {
   });
 
   it("refresh mode re-enriches arkham-tagged entries", async () => {
-    (discoverMentoAddresses as ReturnType<typeof vi.fn>).mockResolvedValue({
+    mockDiscover.mockResolvedValue({
       addresses: ["0xark"],
       perEntity: [],
     });
-    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+    mockGetLabels.mockResolvedValue({
       "0xark": {
         name: "Binance",
         tags: [ARKHAM_TAG],
         updatedAt: "2026-01-01T00:00:00Z",
       },
     });
-    (enrichBatch as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    mockEnrichBatch.mockResolvedValue([]);
 
     const res = await POST(
       makeReq({ bearer: "cron-secret", searchParams: { mode: "refresh" } }),
     );
     expect(res.status).toBe(200);
-    expect(enrichBatch).toHaveBeenCalledWith(
-      ["0xark"],
-      expect.anything(),
-    );
+    expect(mockEnrichBatch).toHaveBeenCalledWith(["0xark"], expect.anything());
   });
 
   it("dryRun mode skips Redis writes", async () => {
-    (discoverMentoAddresses as ReturnType<typeof vi.fn>).mockResolvedValue({
+    mockDiscover.mockResolvedValue({
       addresses: ["0xnew"],
       perEntity: [],
     });
-    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
-    (enrichBatch as ReturnType<typeof vi.fn>).mockResolvedValue([
+    mockGetLabels.mockResolvedValue({});
+    mockEnrichBatch.mockResolvedValue([
       {
         address: "0xnew",
         entry: {
@@ -228,7 +229,6 @@ describe("POST /api/arkham/enrich — pipeline", () => {
           tags: [ARKHAM_TAG],
           updatedAt: "2026-04-28T00:00:00Z",
         },
-        raw: {},
       },
     ]);
 
@@ -236,37 +236,37 @@ describe("POST /api/arkham/enrich — pipeline", () => {
       makeReq({ bearer: "cron-secret", searchParams: { mode: "dryRun" } }),
     );
     expect(res.status).toBe(200);
-    expect(importLabels).not.toHaveBeenCalled();
+    expect(mockImportLabels).not.toHaveBeenCalled();
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.mode).toBe("dryRun");
     expect(body.enriched).toBe(1);
   });
 
   it("respects the limit query param", async () => {
-    (discoverMentoAddresses as ReturnType<typeof vi.fn>).mockResolvedValue({
+    mockDiscover.mockResolvedValue({
       addresses: ["0xa", "0xb", "0xc", "0xd"],
       perEntity: [],
     });
-    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
-    (enrichBatch as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    mockGetLabels.mockResolvedValue({});
+    mockEnrichBatch.mockResolvedValue([]);
 
     await POST(
       makeReq({ bearer: "cron-secret", searchParams: { limit: "2" } }),
     );
-    expect(enrichBatch).toHaveBeenCalledWith(
+    expect(mockEnrichBatch).toHaveBeenCalledWith(
       ["0xa", "0xb"],
       expect.anything(),
     );
   });
 
   it("captures partial errors without failing the run", async () => {
-    (discoverMentoAddresses as ReturnType<typeof vi.fn>).mockResolvedValue({
+    mockDiscover.mockResolvedValue({
       addresses: ["0xa", "0xb"],
       perEntity: [],
     });
-    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
-    (enrichBatch as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { address: "0xa", entry: null, raw: null, error: "5xx" },
+    mockGetLabels.mockResolvedValue({});
+    mockEnrichBatch.mockResolvedValue([
+      { address: "0xa", entry: null, error: "5xx" },
       {
         address: "0xb",
         entry: {
@@ -274,7 +274,6 @@ describe("POST /api/arkham/enrich — pipeline", () => {
           tags: [ARKHAM_TAG],
           updatedAt: "2026-04-28T00:00:00Z",
         },
-        raw: {},
       },
     ]);
 

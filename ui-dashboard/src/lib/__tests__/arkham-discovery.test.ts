@@ -21,19 +21,22 @@ describe("discoverMentoAddresses", () => {
     ).rejects.toThrow(/not supported by Arkham/);
   });
 
+  // 40-hex shape so isValidAddress accepts it.
+  const A = (n: number) => `0x${n.toString(16).padStart(40, "0")}`;
+
   it("aggregates addresses across every entity + field", async () => {
     // 10 (entity, field) pairs total; one query per pair with dedup overlap.
     const responses = [
-      ["0xaaa"], // SwapEvent.sender
-      ["0xbbb"], // SwapEvent.recipient
-      ["0xaaa"], // LiquidityEvent.sender (dedup)
-      ["0xccc"], // LiquidityEvent.recipient
-      ["0xddd"], // RebalanceEvent.sender
-      ["0xeee"], // RebalanceEvent.caller
-      ["0xfff"], // LiquidityPosition.address
-      ["0x111"], // OlsLiquidityEvent.caller
-      ["0x222"], // BridgeTransfer.sender
-      ["0x333"], // BridgeTransfer.recipient
+      [A(0xaaa)], // SwapEvent.sender
+      [A(0xbbb)], // SwapEvent.recipient
+      [A(0xaaa)], // LiquidityEvent.sender (dedup)
+      [A(0xccc)], // LiquidityEvent.recipient
+      [A(0xddd)], // RebalanceEvent.sender
+      [A(0xeee)], // RebalanceEvent.caller
+      [A(0xfff)], // LiquidityPosition.address
+      [A(0x111)], // OlsLiquidityEvent.caller
+      [A(0x222)], // BridgeTransfer.sender
+      [A(0x333)], // BridgeTransfer.recipient
     ];
     let i = 0;
     requestMock.mockImplementation(async () => {
@@ -41,12 +44,39 @@ describe("discoverMentoAddresses", () => {
       return { rows: addresses.map((address) => ({ address })) };
     });
 
-    const result = await discoverMentoAddresses("https://hasura/graphql", 42220);
-    // 9 unique addresses (0xaaa duplicated).
+    const result = await discoverMentoAddresses(
+      "https://hasura/graphql",
+      42220,
+    );
+    // 9 unique addresses (A(0xaaa) duplicated).
     expect(result.addresses).toHaveLength(9);
-    expect(result.addresses).toContain("0xaaa");
-    expect(result.addresses).toContain("0x333");
+    expect(result.addresses).toContain(A(0xaaa));
+    expect(result.addresses).toContain(A(0x333));
     expect(result.perEntity.length).toBeGreaterThan(0);
+  });
+
+  it("filters out malformed addresses", async () => {
+    let i = 0;
+    requestMock.mockImplementation(async () => {
+      i += 1;
+      if (i === 1) {
+        return {
+          rows: [
+            { address: A(0x1) }, // valid
+            { address: "" }, // empty
+            { address: "0xnotanaddress" }, // wrong length
+            { address: A(0x2) }, // valid
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+
+    const result = await discoverMentoAddresses(
+      "https://hasura/graphql",
+      42220,
+    );
+    expect(result.addresses).toEqual([A(0x1), A(0x2)]);
   });
 
   it("paginates past the 1000-row Hasura cap", async () => {
@@ -73,16 +103,16 @@ describe("discoverMentoAddresses", () => {
   });
 
   it("lowercases addresses and dedups", async () => {
+    const upper = "0x" + "A".repeat(40);
+    const lower = upper.toLowerCase();
     requestMock.mockImplementation(async () => ({
-      rows: [{ address: "0xABC" }, { address: "0xabc" }, { address: "0xABCdef" }],
+      rows: [{ address: upper }, { address: lower }],
     }));
     const result = await discoverMentoAddresses(
       "https://hasura/graphql",
       42220,
     );
-    expect(result.addresses).toContain("0xabc");
-    expect(result.addresses).toContain("0xabcdef");
-    // Should NOT contain mixed-case duplicates.
-    expect(result.addresses.filter((a) => a === "0xabc")).toHaveLength(1);
+    // Mixed-case duplicates collapse to a single lowercase entry.
+    expect(result.addresses.filter((a) => a === lower)).toHaveLength(1);
   });
 });

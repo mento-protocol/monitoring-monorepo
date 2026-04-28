@@ -23,12 +23,12 @@ beyond the address-labeling core covered here.
 
 ## Rate limits
 
-| Bucket | Limit | When |
-| --- | --- | --- |
-| Standard | **20 req/sec** | Most endpoints (intelligence, balances, history, portfolio, labels, tokens) |
-| Heavy | **1 req/sec** | `/transfers`, `/swaps`, `/transfers/histogram`, `/counterparties/*`, `/token/top_flow/*`, `/token/volume/*` |
-| 429 body | `{"error":"too many requests"}` | Always back off, never retry tighter than the limit |
-| WebSocket | 10k transfers/hr, 1M/month | `wss://api.arkm.com/ws/transfers` |
+| Bucket    | Limit                           | When                                                                                                        |
+| --------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Standard  | **20 req/sec**                  | Most endpoints (intelligence, balances, history, portfolio, labels, tokens)                                 |
+| Heavy     | **1 req/sec**                   | `/transfers`, `/swaps`, `/transfers/histogram`, `/counterparties/*`, `/token/top_flow/*`, `/token/volume/*` |
+| 429 body  | `{"error":"too many requests"}` | Always back off, never retry tighter than the limit                                                         |
+| WebSocket | 10k transfers/hr, 1M/month      | `wss://api.arkm.com/ws/transfers`                                                                           |
 
 For batch jobs against the standard bucket, pace requests at ~50ms apart
 (20/sec) with a small jitter. For heavy endpoints, 1.1s spacing leaves
@@ -127,8 +127,17 @@ type ArkhamEntity = {
   twitter: string | null;
 };
 type ArkhamLabel = { name: string; address: string; chainType: string };
-type EntityPrediction = { entityId: string; confidence: number; reason: string };
-type ArkhamTag = { id: string; name: string; slug: string; description: string };
+type EntityPrediction = {
+  entityId: string;
+  confidence: number;
+  reason: string;
+};
+type ArkhamTag = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+};
 
 type EnrichedAddress = {
   address: string;
@@ -221,17 +230,17 @@ previous automated write).
 
 ## When to use which endpoint
 
-| Goal | Endpoint | Bucket |
-| --- | --- | --- |
-| Tag a single address (label only) | `/intelligence/address/{a}?chain=…` | Standard |
-| Tag with full enrichment | `/intelligence/address_enriched/{a}?chain=…` | Standard |
-| Tag across all EVM chains | `/intelligence/address_enriched/{a}/all` | Standard |
-| Lookup an entity by slug | `/intelligence/entity/{slug}` | Standard |
-| Find addresses Mento interacts with most | `/counterparties/address/{mentoPool}` | **Heavy (1/s)** |
-| Stream new whale-tier transfers | `wss://api.arkm.com/ws/transfers` | WebSocket quotas |
-| Manage personal labels | `/user/labels` (GET/POST/PUT/DELETE) | Standard |
-| Verify chain support | `/chains` | Standard |
-| Health check | `/health` | Standard |
+| Goal                                     | Endpoint                                     | Bucket           |
+| ---------------------------------------- | -------------------------------------------- | ---------------- |
+| Tag a single address (label only)        | `/intelligence/address/{a}?chain=…`          | Standard         |
+| Tag with full enrichment                 | `/intelligence/address_enriched/{a}?chain=…` | Standard         |
+| Tag across all EVM chains                | `/intelligence/address_enriched/{a}/all`     | Standard         |
+| Lookup an entity by slug                 | `/intelligence/entity/{slug}`                | Standard         |
+| Find addresses Mento interacts with most | `/counterparties/address/{mentoPool}`        | **Heavy (1/s)**  |
+| Stream new whale-tier transfers          | `wss://api.arkm.com/ws/transfers`            | WebSocket quotas |
+| Manage personal labels                   | `/user/labels` (GET/POST/PUT/DELETE)         | Standard         |
+| Verify chain support                     | `/chains`                                    | Standard         |
+| Health check                             | `/health`                                    | Standard         |
 
 ## See also
 

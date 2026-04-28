@@ -3,6 +3,7 @@ import {
   ARKHAM_TAG,
   ArkhamAuthError,
   ArkhamRateLimitedError,
+  RATE_LIMIT_BACKOFF_MS,
   enrichBatch,
   fetchEnrichedAddress,
   fetchHealth,
@@ -42,10 +43,10 @@ function mockFetch(responses: MockFetchEntry[]): typeof fetch {
     if (typeof r === "function") {
       return r(String(url), init ?? {});
     }
-    return new Response(
-      r.body !== undefined ? JSON.stringify(r.body) : null,
-      { status: r.status, headers: { "content-type": "application/json" } },
-    );
+    return new Response(r.body !== undefined ? JSON.stringify(r.body) : null, {
+      status: r.status,
+      headers: { "content-type": "application/json" },
+    });
   }) as unknown as typeof fetch;
 }
 
@@ -54,7 +55,11 @@ describe("hasUsableLabel", () => {
     expect(
       hasUsableLabel(
         makeArkhamResponse({
-          arkhamLabel: { name: "Hot Wallet", address: "0xabc", chainType: "evm" },
+          arkhamLabel: {
+            name: "Hot Wallet",
+            address: "0xabc",
+            chainType: "evm",
+          },
         }),
       ),
     ).toBe(true);
@@ -214,9 +219,9 @@ describe("fetchEnrichedAddress", () => {
 
   it("throws ArkhamAuthError on 401", async () => {
     const f = mockFetch([{ status: 401 }]);
-    await expect(fetchEnrichedAddress("0xabc", "celo", "key", f)).rejects.toBeInstanceOf(
-      ArkhamAuthError,
-    );
+    await expect(
+      fetchEnrichedAddress("0xabc", "celo", "key", f),
+    ).rejects.toBeInstanceOf(ArkhamAuthError);
   });
 
   it("throws ArkhamRateLimitedError on 429", async () => {
@@ -306,26 +311,25 @@ describe("filterCandidates", () => {
   });
 
   it("lowercases candidate addresses", () => {
-    expect(
-      filterCandidates(["0xABC"], {}, "new"),
-    ).toEqual(["0xabc"]);
+    expect(filterCandidates(["0xABC"], {}, "new")).toEqual(["0xabc"]);
   });
 });
 
 describe("enrichBatch", () => {
-  it("paces requests using the provided sleeper", async () => {
+  it("paces requests using the provided sleeper, skipping after the last", async () => {
     const sleeper = vi.fn().mockResolvedValue(undefined);
     const f = mockFetch([
       { status: 200, body: makeArkhamResponse() },
       { status: 200, body: makeArkhamResponse() },
+      { status: 200, body: makeArkhamResponse() },
     ]);
-    await enrichBatch(["0x1", "0x2"], {
+    await enrichBatch(["0x1", "0x2", "0x3"], {
       apiKey: "k",
       chain: "celo",
       fetchImpl: f,
       sleeper,
     });
-    // Sleeper called once per address.
+    // Spacing applied between iterations only (n - 1 sleeps).
     expect(sleeper).toHaveBeenCalledTimes(2);
   });
 
@@ -347,8 +351,7 @@ describe("enrichBatch", () => {
       sleeper,
     });
     expect(results[0]?.entry?.name).toBe("X");
-    // 1.5s back-off + 60ms spacing.
-    expect(sleeper).toHaveBeenCalledWith(1500);
+    expect(sleeper).toHaveBeenCalledWith(RATE_LIMIT_BACKOFF_MS);
   });
 
   it("captures errors without aborting the batch", async () => {
@@ -379,18 +382,5 @@ describe("enrichBatch", () => {
         sleeper,
       }),
     ).rejects.toBeInstanceOf(ArkhamAuthError);
-  });
-
-  it("respects maxAddresses cap", async () => {
-    const sleeper = vi.fn().mockResolvedValue(undefined);
-    const f = mockFetch([{ status: 200, body: makeArkhamResponse() }]);
-    const results = await enrichBatch(["0x1", "0x2", "0x3"], {
-      apiKey: "k",
-      chain: "celo",
-      fetchImpl: f,
-      sleeper,
-      maxAddresses: 1,
-    });
-    expect(results).toHaveLength(1);
   });
 });

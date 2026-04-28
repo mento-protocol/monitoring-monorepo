@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
-import { getAuthSession } from "@/auth";
+import { chainSlug } from "@mento-protocol/monitoring-config/chains";
 import { getLabels, importLabels } from "@/lib/address-labels";
 import {
-  ARKHAM_TAG,
   ArkhamAuthError,
   enrichBatch,
   filterCandidates,
@@ -11,6 +10,8 @@ import {
   type EnrichmentResult,
 } from "@/lib/arkham";
 import { discoverMentoAddresses } from "@/lib/arkham-discovery";
+import { requireCronOrSession } from "@/lib/cron-auth";
+import { NETWORKS } from "@/lib/networks";
 
 // Vercel hobby/pro hard caps the per-invocation duration on `serverless` —
 // a 5k-address run at 60ms spacing is ~5 minutes which fits in the 800s
@@ -19,7 +20,11 @@ import { discoverMentoAddresses } from "@/lib/arkham-discovery";
 export const runtime = "nodejs";
 export const maxDuration = 800;
 
-const CELO_MAINNET_CHAIN_ID = 42220;
+const CELO_CHAIN_ID = NETWORKS["celo-mainnet"].chainId;
+const ARKHAM_CHAIN = chainSlug(CELO_CHAIN_ID);
+const DEFAULT_MAX_ADDRESSES = 10_000;
+
+type EnrichMode = "new" | "refresh" | "dryRun";
 
 type EnrichResponse = {
   ok: boolean;
@@ -30,60 +35,47 @@ type EnrichResponse = {
   skipped: number;
   errors: number;
   durationMs: number;
-  /** Summary of which Hasura entity contributed how many addresses. */
   perEntity?: Array<{ table: string; field: string; count: number }>;
   /** First few errors for debugging — full list goes to Sentry. */
   sampleErrors?: string[];
-  mode: "new" | "refresh" | "dryRun";
+  mode: EnrichMode;
 };
+
+function parseMode(raw: string | null): EnrichMode {
+  if (raw === "refresh" || raw === "dryRun") return raw;
+  return "new";
+}
+
+function parseLimit(raw: string | null): number {
+  if (!raw || !/^\d+$/.test(raw)) return DEFAULT_MAX_ADDRESSES;
+  return Math.min(Number(raw), DEFAULT_MAX_ADDRESSES);
+}
 
 /**
  * Cron-triggered enrichment of Mento counterparty addresses with Arkham data.
  *
  * Auth: Bearer CRON_SECRET (cron path) OR an authenticated session
- * (manual trigger by an admin). Mirrors the existing
- * `/api/address-labels/backup` pattern.
+ * (manual trigger by an admin).
  *
  * Query params:
  * - `mode=new` (default) — only enrich addresses not yet labelled.
  * - `mode=refresh` — re-enrich addresses already tagged `arkham`. Use this
  *   monthly to pick up newly-attributed entities.
- * - `mode=dryRun` — fetch from Arkham but skip the Redis write. Useful for
- *   smoke-testing the pipeline without committing labels.
+ * - `mode=dryRun` — fetch from Arkham but skip the Redis write.
  * - `limit=N` — hard cap on addresses processed (default 10000).
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const cronSecret = process.env.CRON_SECRET;
+  const authBail = await requireCronOrSession(req, "arkham/enrich");
+  if (authBail) return authBail;
+
   const apiKey = process.env.ARKHAM_API_KEY;
-  const hasuraUrl = process.env.NEXT_PUBLIC_HASURA_URL;
-  const isDev = process.env.NODE_ENV === "development";
-
-  // ── Auth ────────────────────────────────────────────────────────────────
-  if (!isDev) {
-    if (!cronSecret) {
-      console.error("[arkham/enrich] CRON_SECRET is not set");
-      return NextResponse.json(
-        { error: "Server misconfiguration: CRON_SECRET required" },
-        { status: 500 },
-      );
-    }
-    const authHeader = req.headers.get("authorization");
-    const isCronAuth = authHeader === `Bearer ${cronSecret}`;
-    if (!isCronAuth) {
-      const session = await getAuthSession();
-      if (!session) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
-    }
-  }
-
-  // ── Config ──────────────────────────────────────────────────────────────
   if (!apiKey) {
     return NextResponse.json(
       { error: "ARKHAM_API_KEY is not configured" },
       { status: 500 },
     );
   }
+  const hasuraUrl = process.env.NEXT_PUBLIC_HASURA_URL;
   if (!hasuraUrl) {
     return NextResponse.json(
       { error: "NEXT_PUBLIC_HASURA_URL is not configured" },
@@ -91,41 +83,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const modeParam = req.nextUrl.searchParams.get("mode");
-  const mode: "new" | "refresh" | "dryRun" =
-    modeParam === "refresh"
-      ? "refresh"
-      : modeParam === "dryRun"
-        ? "dryRun"
-        : "new";
-
-  const limitParam = req.nextUrl.searchParams.get("limit");
-  const maxAddresses = limitParam && /^\d+$/.test(limitParam)
-    ? Math.min(Number(limitParam), 10_000)
-    : 10_000;
-
+  const mode = parseMode(req.nextUrl.searchParams.get("mode"));
+  const maxAddresses = parseLimit(req.nextUrl.searchParams.get("limit"));
   const startedAt = Date.now();
 
   try {
     return await Sentry.withMonitor(
       "arkham-enrich",
       async () => {
-        // Cheap key + reachability check before kicking off the batch — fails
-        // fast on misconfiguration rather than 401-ing every address in the
-        // candidate set.
-        const healthy = await fetchHealth(apiKey);
+        // Pre-flight: health check, address discovery, and existing-label
+        // read have no data dependency on each other — run concurrently so
+        // we don't pay 3× the round-trip latency before Arkham work begins.
+        const [healthy, discovery, existing] = await Promise.all([
+          fetchHealth(apiKey),
+          discoverMentoAddresses(hasuraUrl, CELO_CHAIN_ID),
+          getLabels(CELO_CHAIN_ID),
+        ]);
+
         if (!healthy) {
           throw new Error("arkham_health_check_failed");
         }
 
-        // ── Discover candidate addresses ────────────────────────────────
-        const { addresses, perEntity } = await discoverMentoAddresses(
-          hasuraUrl,
-          CELO_MAINNET_CHAIN_ID,
-        );
-
-        // ── Filter against existing labels ──────────────────────────────
-        const existing = await getLabels(CELO_MAINNET_CHAIN_ID);
+        const { addresses, perEntity } = discovery;
         const filterMode = mode === "dryRun" ? "new" : mode;
         const candidates = filterCandidates(
           addresses,
@@ -133,15 +112,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           filterMode,
         ).slice(0, maxAddresses);
 
-        // ── Hit Arkham, paced for the standard rate limit ───────────────
         const results = await enrichBatch(candidates, {
           apiKey,
-          chain: "celo",
-          maxAddresses,
+          chain: ARKHAM_CHAIN,
         });
 
-        // ── Persist successful enrichments ──────────────────────────────
-        const toWrite: Record<string, EnrichmentResult["entry"]> = {};
+        const toWrite: Record<
+          string,
+          NonNullable<EnrichmentResult["entry"]>
+        > = {};
         const errors: string[] = [];
         for (const r of results) {
           if (r.error) errors.push(`${r.address}: ${r.error}`);
@@ -149,13 +128,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
 
         if (mode !== "dryRun" && Object.keys(toWrite).length > 0) {
-          // `importLabels` runs the same atomic Lua script as `upsertEntry`,
-          // so it preserves the strict either/or invariant across scopes.
-          // Cast keeps TS happy — `toWrite` filters out null entries above.
-          await importLabels(
-            CELO_MAINNET_CHAIN_ID,
-            toWrite as Record<string, NonNullable<EnrichmentResult["entry"]>>,
-          );
+          await importLabels(CELO_CHAIN_ID, toWrite);
         }
 
         const enrichedCount = Object.keys(toWrite).length;
@@ -176,7 +149,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         const body: EnrichResponse = {
           ok: true,
-          chainId: CELO_MAINNET_CHAIN_ID,
+          chainId: CELO_CHAIN_ID,
           discovered: addresses.length,
           candidates: candidates.length,
           enriched: enrichedCount,
@@ -207,9 +180,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { status: 502 },
       );
     }
-    return NextResponse.json(
-      { error: "Enrichment failed" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "Enrichment failed" }, { status: 500 });
   }
 }
