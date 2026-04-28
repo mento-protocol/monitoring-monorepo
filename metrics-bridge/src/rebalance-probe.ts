@@ -30,6 +30,15 @@ import {
 import { getRpcClient } from "./rpc.js";
 import type { PoolRow } from "./types.js";
 
+// Module-scope re-entrancy guard. The production poller awaits each
+// `runRebalanceProbes()` call before scheduling the next loop, so cycles can't
+// overlap today — but if a future caller invokes the runner from a parallel
+// timer (or if AbortController fast-cancel semantics reorder completion),
+// concurrent cycles would race against the gauge reset at the top of the body
+// and create zombie label sets. Skip-on-busy preserves the in-flight cycle
+// rather than queueing — the next poll will probe again anyway.
+let probeInProgress = false;
+
 /**
  * Returns pools eligible for the rebalance-reason probe — same gating as the
  * `Deviation Breach Critical` rule (`terraform/alerts/rules-fpmms.tf:470`)
@@ -128,75 +137,89 @@ export async function runWithConcurrency<T, R>(
  *     once — better than a misleading "blocked" annotation.
  */
 export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
-  // Reset every cycle so a recovered pool (deviation dropped below
-  // threshold, or the rebalancer caught up) drops out of all three
-  // series immediately rather than carrying stale labels forward.
-  gauges.rebalanceBlocked.reset();
-  gauges.rebalanceCollateralBalance.reset();
-  gauges.rebalanceCollateralNeeded.reset();
-  const eligible = eligibleForProbe(allPools);
-  if (eligible.length === 0) {
-    gauges.rebalanceProbeLastRun.set(Math.floor(Date.now() / 1000));
+  // Re-entrancy guard: if a previous cycle is still running, drop this one.
+  // The `finally` below ensures we always release the flag — including on
+  // probe throws — so a transient error can't permanently disable the probe.
+  if (probeInProgress) {
+    console.warn(
+      "[REBALANCE_PROBE_REENTRY] cycle skipped — previous cycle still running",
+    );
     return;
   }
-
-  const results = await runWithConcurrency(
-    eligible,
-    REBALANCE_PROBE_CONCURRENCY,
-    probeOne,
-  );
-
-  for (let i = 0; i < eligible.length; i++) {
-    const pool = eligible[i];
-    const result = results[i];
-    if (!result) continue;
-
-    if (result.kind === "blocked") {
-      const poolLabels = poolDisplayLabels(pool);
-      const labels = {
-        ...poolLabels,
-        reason_code: result.reasonCode,
-        reason_message: result.reasonMessage,
-      };
-      gauges.rebalanceBlocked.set(labels, 1);
-      // Skipping when `reserveCollateral` is undefined (non-reserve
-      // strategy, failed enrichment) lets the alert annotation fall
-      // back to the bounded reason_message line cleanly.
-      if (result.reserveCollateral) {
-        const collateralLabels = {
-          ...poolLabels,
-          token_symbol: result.reserveCollateral.tokenSymbol,
-        };
-        gauges.rebalanceCollateralBalance.set(
-          collateralLabels,
-          result.reserveCollateral.balance,
-        );
-        gauges.rebalanceCollateralNeeded.set(
-          collateralLabels,
-          result.reserveCollateral.needed,
-        );
-      }
-      // Surface the unbounded diagnostic detail (raw revert string, panic
-      // code, unrecognised hex selector) to Cloud Run logs only — the
-      // metric label is intentionally bounded to the ERROR_MESSAGES enum
-      // for cardinality + Slack-injection-safety reasons (see
-      // `rebalance-check.ts:decodeBlockedRevert`).
-      if (result.diagnostic) {
-        console.warn(
-          `[REBALANCE_PROBE_DIAGNOSTIC] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} reason_code=${result.reasonCode} detail=${result.diagnostic}`,
-        );
-      }
-    } else if (result.kind === "transport_error") {
-      console.warn(
-        `[REBALANCE_PROBE_FAILED] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} error=${result.error}`,
-      );
-    } else if (result.kind === "skip") {
-      console.warn(
-        `[REBALANCE_PROBE_SKIPPED] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} reason=${result.reason}`,
-      );
+  probeInProgress = true;
+  try {
+    // Reset every cycle so a recovered pool (deviation dropped below
+    // threshold, or the rebalancer caught up) drops out of all three
+    // series immediately rather than carrying stale labels forward.
+    gauges.rebalanceBlocked.reset();
+    gauges.rebalanceCollateralBalance.reset();
+    gauges.rebalanceCollateralNeeded.reset();
+    const eligible = eligibleForProbe(allPools);
+    if (eligible.length === 0) {
+      gauges.rebalanceProbeLastRun.set(Math.floor(Date.now() / 1000));
+      return;
     }
-    // `ok` — pool can rebalance, leave the metric absent for this label set.
-  }
 
-  gauges.rebalanceProbeLastRun.set(Math.floor(Date.now() / 1000));
+    const results = await runWithConcurrency(
+      eligible,
+      REBALANCE_PROBE_CONCURRENCY,
+      probeOne,
+    );
+
+    for (let i = 0; i < eligible.length; i++) {
+      const pool = eligible[i];
+      const result = results[i];
+      if (!result) continue;
+
+      if (result.kind === "blocked") {
+        const poolLabels = poolDisplayLabels(pool);
+        const labels = {
+          ...poolLabels,
+          reason_code: result.reasonCode,
+          reason_message: result.reasonMessage,
+        };
+        gauges.rebalanceBlocked.set(labels, 1);
+        // Skipping when `reserveCollateral` is undefined (non-reserve
+        // strategy, failed enrichment) lets the alert annotation fall
+        // back to the bounded reason_message line cleanly.
+        if (result.reserveCollateral) {
+          const collateralLabels = {
+            ...poolLabels,
+            token_symbol: result.reserveCollateral.tokenSymbol,
+          };
+          gauges.rebalanceCollateralBalance.set(
+            collateralLabels,
+            result.reserveCollateral.balance,
+          );
+          gauges.rebalanceCollateralNeeded.set(
+            collateralLabels,
+            result.reserveCollateral.needed,
+          );
+        }
+        // Surface the unbounded diagnostic detail (raw revert string, panic
+        // code, unrecognised hex selector) to Cloud Run logs only — the
+        // metric label is intentionally bounded to the ERROR_MESSAGES enum
+        // for cardinality + Slack-injection-safety reasons (see
+        // `rebalance-check.ts:decodeBlockedRevert`).
+        if (result.diagnostic) {
+          console.warn(
+            `[REBALANCE_PROBE_DIAGNOSTIC] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} reason_code=${result.reasonCode} detail=${result.diagnostic}`,
+          );
+        }
+      } else if (result.kind === "transport_error") {
+        console.warn(
+          `[REBALANCE_PROBE_FAILED] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} error=${result.error}`,
+        );
+      } else if (result.kind === "skip") {
+        console.warn(
+          `[REBALANCE_PROBE_SKIPPED] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} reason=${result.reason}`,
+        );
+      }
+      // `ok` — pool can rebalance, leave the metric absent for this label set.
+    }
+
+    gauges.rebalanceProbeLastRun.set(Math.floor(Date.now() / 1000));
+  } finally {
+    probeInProgress = false;
+  }
 }

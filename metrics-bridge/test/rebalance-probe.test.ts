@@ -221,22 +221,16 @@ describe("runRebalanceProbes — timeout race", () => {
   });
 });
 
-describe("runRebalanceProbes — re-entrancy / overlapping cycles", () => {
-  // Documented behaviour: `runRebalanceProbes` is NOT mutex-protected.
-  // The poller schedules cycles at fixed intervals; if a probe call
-  // outlives the next interval (e.g. a stuck endpoint that the timeout
-  // hasn't cancelled because of the AbortController gap tracked in
-  // BACKLOG.md "Rebalance probe: AbortController for timed-out RPC
-  // calls"), cycles can overlap. The runner resets the gauge at the
-  // start of every cycle, so a late `set(...)` from cycle N-1 can land
-  // AFTER cycle N has reset the gauge but BEFORE cycle N has written
-  // its own results — leaving the alert annotation showing stale
-  // labels for the duration of cycle N.
-  //
-  // This test EXPOSES the limitation rather than asserting correct
-  // behaviour: fixing it requires either a per-cycle epoch tag on the
-  // gauge writes or wrapping the runner in a mutex, both of which need
-  // a design discussion before shipping. Tracked in BACKLOG.md.
+describe("runRebalanceProbes — re-entrancy guard for overlapping cycles", () => {
+  // The runner is gated by a module-scope `probeInProgress` mutex.
+  // Production today serialises cycles (the poller awaits each call
+  // before scheduling the next), so this guard is a safety rail for
+  // future restructures — e.g. an AbortController fast-cancel path
+  // that could reorder completion, or a parallel timer caller. When a
+  // second cycle starts while cycle N-1 is still in flight, the guard
+  // makes cycle N a no-op: it returns immediately, no probes run, no
+  // gauge state is touched, and a single warn-once log surfaces the
+  // skip. Tracked in BACKLOG.md (now resolved).
   beforeEach(() => {
     register.resetMetrics();
     vi.clearAllMocks();
@@ -245,14 +239,15 @@ describe("runRebalanceProbes — re-entrancy / overlapping cycles", () => {
     } as unknown as ReturnType<typeof getRpcClient>);
   });
 
-  it("documents the known limitation: late cycle-N-1 results stomp cycle-N gauge state", async () => {
+  it("skips overlapping cycles and preserves the in-flight cycle's state", async () => {
     const pool = makePool({
       deviationBreachStartedAt: "1713200000",
       lastDeviationRatio: "1.50",
     });
 
-    // Cycle N-1: probe resolves with stale data (kept pending until we
-    // explicitly resolve below to simulate "outlived its cycle").
+    // Cycle N-1: probe stays pending until we explicitly resolve below
+    // to simulate "outlived its cycle" — i.e. cycle N starts while
+    // cycle N-1's probe hasn't returned.
     let resolveCycle1: (v: {
       kind: "blocked";
       reasonCode: string;
@@ -269,29 +264,37 @@ describe("runRebalanceProbes — re-entrancy / overlapping cycles", () => {
       cycle1Probe as unknown as ReturnType<typeof probeRebalance>,
     );
 
-    // Cycle N: probe resolves immediately with a different reason.
-    mockProbe.mockResolvedValueOnce({
-      kind: "blocked",
-      reasonCode: "LS_INVALID_PRICES",
-      reasonMessage: "Oracle price data is invalid or stale",
-    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    // Kick off both cycles without awaiting cycle 1.
+    // Kick off cycle 1 without awaiting — leaves it pinned in the
+    // pending-promise state with `probeInProgress === true`.
     const cycle1Run = runRebalanceProbes([pool]);
-    // Cycle 2 starts before cycle 1 resolves, resets the gauge, awaits
-    // its own probe (which resolves immediately), and writes its
-    // labels.
+
+    // Cycle 2 fires while cycle 1 is mid-flight. The mutex guard MUST
+    // make this a no-op — no probe call, no gauge mutation, just the
+    // warn-once log. We give the runner a microtask to schedule the
+    // probe call before we assert.
     await runRebalanceProbes([pool]);
 
-    // At this point cycle 2's labels are present.
-    let value = await getGaugeValue(register, "mento_pool_rebalance_blocked", {
-      reason_code: "LS_INVALID_PRICES",
-    });
-    expect(value).toBe(1);
+    // Only cycle 1 enqueued a probe; cycle 2 short-circuited.
+    expect(mockProbe).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("[REBALANCE_PROBE_REENTRY]"),
+    );
 
-    // Cycle 1 finally resolves — ITS late write lands on top of cycle
-    // 2's gauge state, restoring the stale label set. This is the
-    // limitation documented above.
+    // Gauge state must still be empty: cycle 1 hasn't written yet
+    // (probe still pending), and cycle 2 was a no-op — no reset, no
+    // writes, nothing for cycle 1 to land on top of.
+    let metrics = await register.getMetricsAsJSON();
+    let blocked = metrics.find(
+      (m) => m.name === "mento_pool_rebalance_blocked",
+    );
+    if (blocked && "values" in blocked) {
+      expect((blocked as { values: unknown[] }).values).toEqual([]);
+    }
+
+    // Resolve cycle 1's probe and let it finish writing its labels.
     resolveCycle1({
       kind: "blocked",
       reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
@@ -299,13 +302,26 @@ describe("runRebalanceProbes — re-entrancy / overlapping cycles", () => {
     });
     await cycle1Run;
 
-    value = await getGaugeValue(register, "mento_pool_rebalance_blocked", {
-      reason_code: "RLS_RESERVE_OUT_OF_COLLATERAL",
-    });
-    // The stale cycle-1 result has stomped cycle-2's gauge — locked here
-    // as a known issue so the test breaks (forcing a design decision)
-    // when someone adds AbortController + cycle-epoch protection.
+    // Cycle 1's result is now reflected in the gauge — exactly once,
+    // with no double-execution from cycle 2.
+    expect(mockProbe).toHaveBeenCalledTimes(1);
+    const value = await getGaugeValue(
+      register,
+      "mento_pool_rebalance_blocked",
+      { reason_code: "RLS_RESERVE_OUT_OF_COLLATERAL" },
+    );
     expect(value).toBe(1);
+
+    // The gauge holds cycle 1's labels — never any others.
+    metrics = await register.getMetricsAsJSON();
+    blocked = metrics.find((m) => m.name === "mento_pool_rebalance_blocked");
+    expect(
+      (blocked as { values: { labels: { reason_code: string } }[] }).values.map(
+        (v) => v.labels.reason_code,
+      ),
+    ).toEqual(["RLS_RESERVE_OUT_OF_COLLATERAL"]);
+
+    warn.mockRestore();
   });
 });
 
