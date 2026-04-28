@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { chainSlug } from "@mento-protocol/monitoring-config/chains";
-import { getLabels, importLabels } from "@/lib/address-labels";
+import { getAllLabels, importLabels } from "@/lib/address-labels";
+import type { AddressEntry } from "@/lib/address-labels-shared";
 import {
   ArkhamAuthError,
   enrichBatch,
-  filterCandidates,
   fetchHealth,
+  filterCandidates,
+  mergeRefreshEntry,
   type EnrichmentResult,
 } from "@/lib/arkham";
 import { discoverMentoAddresses } from "@/lib/arkham-discovery";
@@ -48,7 +50,11 @@ function parseMode(raw: string | null): EnrichMode {
 
 function parseLimit(raw: string | null): number {
   if (!raw || !/^\d+$/.test(raw)) return DEFAULT_MAX_ADDRESSES;
-  return Math.min(Number(raw), DEFAULT_MAX_ADDRESSES);
+  const n = Number(raw);
+  // 0 is technically valid input but means "do all the discovery + Hasura
+  // work for zero enrichments". Treat as default rather than no-op-spend.
+  if (n === 0) return DEFAULT_MAX_ADDRESSES;
+  return Math.min(n, DEFAULT_MAX_ADDRESSES);
 }
 
 /**
@@ -94,10 +100,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // Pre-flight: health check, address discovery, and existing-label
         // read have no data dependency on each other — run concurrently so
         // we don't pay 3× the round-trip latency before Arkham work begins.
-        const [healthy, discovery, existing] = await Promise.all([
+        // `getAllLabels` reads BOTH global and chain scopes: importLabels'
+        // Lua script HDELs the address from every other `labels:*` scope, so
+        // a write to chain 42220 deletes the address from `labels:global` if
+        // it lived there. Filtering against the global scope too prevents
+        // silent loss of cross-chain manual labels.
+        const [healthy, discovery, allLabels] = await Promise.all([
           fetchHealth(apiKey),
           discoverMentoAddresses(hasuraUrl, CELO_CHAIN_ID),
-          getLabels(CELO_CHAIN_ID),
+          getAllLabels(),
         ]);
 
         if (!healthy) {
@@ -105,6 +116,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
 
         const { addresses, perEntity } = discovery;
+        // Flatten global + Celo-chain labels into a single map for filtering.
+        // The strict either/or invariant (an address lives in exactly one
+        // scope) means there are no key collisions.
+        const chainExisting = allLabels.chains[String(CELO_CHAIN_ID)] ?? {};
+        const existing: Record<string, AddressEntry> = {
+          ...allLabels.global,
+          ...chainExisting,
+        };
         const filterMode = mode === "dryRun" ? "new" : mode;
         const candidates = filterCandidates(
           addresses,
@@ -124,7 +143,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const errors: string[] = [];
         for (const r of results) {
           if (r.error) errors.push(`${r.address}: ${r.error}`);
-          if (r.entry) toWrite[r.address] = r.entry;
+          if (!r.entry) continue;
+          // In refresh mode, preserve user-edited notes/isPublic + any tags
+          // they added on top of a previous arkham write.
+          toWrite[r.address] =
+            mode === "refresh"
+              ? mergeRefreshEntry(chainExisting[r.address], r.entry)
+              : r.entry;
         }
 
         if (mode !== "dryRun" && Object.keys(toWrite).length > 0) {

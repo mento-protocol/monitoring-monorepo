@@ -9,6 +9,7 @@ import {
   fetchHealth,
   filterCandidates,
   hasUsableLabel,
+  mergeRefreshEntry,
   toAddressEntry,
   type ArkhamEnrichedAddress,
 } from "@/lib/arkham";
@@ -208,6 +209,32 @@ describe("toAddressEntry", () => {
     );
     expect(entry?.notes).toBeUndefined();
   });
+
+  it("returns null when arkhamLabel is whitespace and no fallback exists", () => {
+    // The pre-fix bug: `?? `chained on label.trim()` (which returns "") kept
+    // the empty string, persisting an empty-named entry.
+    const entry = toAddressEntry(
+      makeArkhamResponse({
+        arkhamLabel: { name: "   ", address: "0xabc", chainType: "evm" },
+      }),
+    );
+    expect(entry).toBeNull();
+  });
+
+  it("falls through whitespace-only label to entity name", () => {
+    const entry = toAddressEntry(
+      makeArkhamResponse({
+        arkhamLabel: { name: "   ", address: "0xabc", chainType: "evm" },
+        arkhamEntity: {
+          id: "binance",
+          name: "Binance",
+          type: "exchange",
+          service: null,
+        },
+      }),
+    );
+    expect(entry?.name).toBe("Binance");
+  });
 });
 
 describe("fetchEnrichedAddress", () => {
@@ -382,5 +409,75 @@ describe("enrichBatch", () => {
         sleeper,
       }),
     ).rejects.toBeInstanceOf(ArkhamAuthError);
+  });
+
+  it("re-throws ArkhamAuthError surfaced during 429 retry", async () => {
+    // Key rotated mid-batch: first call 429s, retry returns 401. Auth errors
+    // are always fatal — must abort the whole batch, not be recorded as a
+    // per-address error.
+    const sleeper = vi.fn().mockResolvedValue(undefined);
+    const f = mockFetch([{ status: 429 }, { status: 401 }]);
+    await expect(
+      enrichBatch(["0x1"], {
+        apiKey: "k",
+        chain: "celo",
+        fetchImpl: f,
+        sleeper,
+      }),
+    ).rejects.toBeInstanceOf(ArkhamAuthError);
+  });
+});
+
+describe("mergeRefreshEntry", () => {
+  const fresh: AddressEntry = {
+    name: "Binance Hot Wallet 14",
+    tags: [ARKHAM_TAG, "exchange"],
+    isPublic: false,
+    updatedAt: "2026-04-28T00:00:00Z",
+  };
+
+  it("returns fresh unchanged when no existing entry", () => {
+    expect(mergeRefreshEntry(undefined, fresh)).toEqual(fresh);
+  });
+
+  it("returns fresh unchanged when existing has no arkham tag", () => {
+    const manual: AddressEntry = {
+      name: "Treasury",
+      tags: ["mento"],
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    expect(mergeRefreshEntry(manual, fresh)).toEqual(fresh);
+  });
+
+  it("preserves user-edited notes and isPublic across refresh", () => {
+    const existing: AddressEntry = {
+      name: "Binance",
+      tags: [ARKHAM_TAG, "exchange", "user-curated"],
+      notes: "this address routes the bridge fees",
+      isPublic: true,
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const merged = mergeRefreshEntry(existing, fresh);
+    expect(merged.name).toBe("Binance Hot Wallet 14"); // Arkham wins on name
+    expect(merged.notes).toBe("this address routes the bridge fees");
+    expect(merged.isPublic).toBe(true);
+    expect(merged.tags).toContain("user-curated");
+    expect(merged.tags).toContain("exchange");
+    expect(merged.tags).toContain(ARKHAM_TAG);
+  });
+
+  it("replaces auto-generated prediction notes with the new prediction", () => {
+    const existing: AddressEntry = {
+      name: "binance",
+      tags: [ARKHAM_TAG],
+      notes: "Arkham prediction (87% confidence)",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const freshWithNote: AddressEntry = {
+      ...fresh,
+      notes: "Arkham prediction (94% confidence)",
+    };
+    const merged = mergeRefreshEntry(existing, freshWithNote);
+    expect(merged.notes).toBe("Arkham prediction (94% confidence)");
   });
 });

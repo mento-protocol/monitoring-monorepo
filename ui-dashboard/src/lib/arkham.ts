@@ -19,7 +19,7 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const REQ_SPACING_MS = 60;
 
 // Confidence floor for ML-attributed addresses. Below this, treat predictions
-// as advisory and don't persist them as labels — see Arkham docs §8.4.
+// as advisory and don't persist them as labels.
 const HIGH_CONFIDENCE = 0.85;
 
 type ArkhamEntity = {
@@ -171,9 +171,11 @@ export function toAddressEntry(
     ?.filter((p) => p.confidence >= HIGH_CONFIDENCE)
     .sort((a, b) => b.confidence - a.confidence)[0];
 
-  // Prefer the curated label, then the entity's display name, then the
-  // predicted entity ID. Length/dedup/tag-cap is delegated to sanitizeEntry.
-  const name = label ?? entity?.name ?? topPrediction?.entityId ?? "";
+  // Prefer the curated label, then entity name, then the predicted entity ID.
+  // Use `||` (truthy-aware) so an empty/whitespace `arkhamLabel.name` (which
+  // `?.trim()` collapses to "") falls through to entity. `??` would keep "".
+  const name = label || entity?.name || topPrediction?.entityId || "";
+  if (!name) return null;
 
   const tagSet = new Set<string>([ARKHAM_TAG]);
   if (entity?.type) tagSet.add(entity.type);
@@ -215,11 +217,8 @@ export type EnrichmentResult = {
 type EnrichBatchOptions = {
   apiKey: string;
   chain: string;
-  /** Optional pacer override for tests. Default: 60ms between calls. */
-  spacingMs?: number;
-  /** Optional fetch override for tests. */
+  /** Test-only: override fetch + sleeper to avoid real network and timers. */
   fetchImpl?: typeof fetch;
-  /** Optional sleeper override for tests (default: setTimeout). */
   sleeper?: (ms: number) => Promise<void>;
 };
 
@@ -243,14 +242,7 @@ export async function enrichBatch(
   addresses: string[],
   opts: EnrichBatchOptions,
 ): Promise<EnrichmentResult[]> {
-  const {
-    apiKey,
-    chain,
-    spacingMs = REQ_SPACING_MS,
-    fetchImpl = fetch,
-    sleeper = defaultSleeper,
-  } = opts;
-
+  const { apiKey, chain, fetchImpl = fetch, sleeper = defaultSleeper } = opts;
   const results: EnrichmentResult[] = [];
 
   for (let i = 0; i < addresses.length; i += 1) {
@@ -261,12 +253,13 @@ export async function enrichBatch(
       // Auth errors are fatal: the rest of the batch will all 401 too.
       if (err instanceof ArkhamAuthError) throw err;
       if (err instanceof ArkhamRateLimitedError) {
-        // Back off and retry once. If it 429s twice in a row, surface the
-        // error and let the caller decide.
+        // Back off and retry once. Auth errors during retry are still fatal
+        // (e.g. key rotated mid-batch); other errors record + continue.
         await sleeper(RATE_LIMIT_BACKOFF_MS);
         try {
           results.push(await tryEnrich(address, chain, apiKey, fetchImpl));
         } catch (retryErr) {
+          if (retryErr instanceof ArkhamAuthError) throw retryErr;
           results.push({
             address,
             entry: null,
@@ -282,10 +275,36 @@ export async function enrichBatch(
         });
       }
     }
-    if (i < addresses.length - 1) await sleeper(spacingMs);
+    if (i < addresses.length - 1) await sleeper(REQ_SPACING_MS);
   }
 
   return results;
+}
+
+/**
+ * In refresh mode, merge a fresh Arkham result into an existing arkham-tagged
+ * entry. Lets Arkham update `name` and add new tags, but preserves user-edited
+ * `notes` (unless they're our auto-generated prediction note) and `isPublic`.
+ *
+ * If `existing` is undefined or doesn't carry the arkham tag, returns `fresh`
+ * unchanged — the caller hasn't classified it as a refresh target.
+ */
+export function mergeRefreshEntry(
+  existing: AddressEntry | undefined,
+  fresh: AddressEntry,
+): AddressEntry {
+  if (!existing?.tags?.includes(ARKHAM_TAG)) return fresh;
+
+  const isAutoNote = existing.notes?.startsWith("Arkham prediction (");
+  const tags = Array.from(new Set([...fresh.tags, ...existing.tags]));
+
+  return sanitizeEntry({
+    name: fresh.name,
+    tags,
+    notes: isAutoNote ? fresh.notes : (existing.notes ?? fresh.notes),
+    isPublic: existing.isPublic ?? fresh.isPublic,
+    updatedAt: fresh.updatedAt,
+  });
 }
 
 /**

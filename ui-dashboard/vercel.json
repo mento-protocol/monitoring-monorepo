@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/arkham/enrich?mode=refresh",
-      "schedule": "0 4 1 * *"
+      "schedule": "30 4 1 * *"
     }
   ]
 }
