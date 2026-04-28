@@ -446,6 +446,22 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary     = "Pool above 5% threshold for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach."
       description = "Check rebalancer liveness and oracle feed."
+      # Pre-rendered "8.2% above threshold". `Dev` query pre-computes
+      # `mento_pool_deviation_ratio - 1` in PromQL so the annotation
+      # only needs `humanizePercentage` (a Prometheus annotation builtin).
+      # Sprig `mul`/`sub` are NOT in scope for Grafana annotation
+      # templates (see local definition for refs). The `{{ if $values.Dev }}`
+      # guard handles the indexer's `-1` sentinel path, where the bridge
+      # gates the gauge and `Dev` returns no series.
+      current_deviation = local.deviation_critical_current_deviation_annotation
+      # Pre-rendered "17% axlUSDC / 83% USDm". Reads `humanizePercentage`
+      # of each gauge value (already in [0, 1]) and the per-series
+      # `token_symbol` label written by metrics-bridge. No sprig — map
+      # access via `.Labels.token_symbol` is a Go-template builtin.
+      # When metrics-bridge can't resolve a contract address it falls
+      # back to literal "token0" / "token1" (matches the existing `pair`
+      # fallback semantics).
+      current_reserves = local.deviation_critical_current_reserves_annotation
     }
 
     labels = {
@@ -468,6 +484,73 @@ resource "grafana_rule_group" "fpmms_deviation" {
       model = jsonencode({
         refId   = "A"
         expr    = "(time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > 1.05) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0)"
+        instant = true
+      })
+    }
+
+    # Dev/R0/R1 — annotation-only queries. Not referenced by the threshold
+    # node; they populate `$values.Dev` / `$values.R0` / `$values.R1` so
+    # the annotations can render the current deviation magnitude and
+    # reserve split alongside the breach duration. When the underlying
+    # gauge has no series for this pool (e.g. ratio sentinel, both reserves
+    # zero), the value is empty and the `{{ if }}` guards in the annotation
+    # strings drop the line.
+    #
+    # Pre-computing `ratio - 1` in PromQL (rather than at annotation time)
+    # is required because sprig math (`sub`) is unavailable in Grafana
+    # annotation templates — only Prometheus helpers (`humanizePercentage`,
+    # `humanizeDuration`, `printf`) and Go-template builtins are.
+    data {
+      ref_id         = "Dev"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "Dev"
+        expr    = "(mento_pool_deviation_ratio - 1)"
+        instant = true
+      })
+    }
+
+    # R0 / R1 query the per-token reserve-share gauges — split into two
+    # flat metrics (no `token_index` label) so the annotation per-instance
+    # match against query A's labels (`pool_id, chain_id, pair`) actually
+    # binds. A previous version queried `mento_pool_reserve_share{token_index}`,
+    # whose extra label caused a fingerprint mismatch and silently dropped
+    # `$values.R0` / `$values.R1` — the `current_reserves` annotation never
+    # rendered. PR #234 review (Codex). Regression-tested in
+    # metrics-bridge/test/metrics.test.ts ("label-shape parity"). The
+    # `token_symbol` label IS present on these gauges and is consumed via
+    # `$values.R0.Labels.token_symbol` in the annotation — that doesn't
+    # break the per-instance match because Grafana matches on the firing
+    # alert's fingerprint subset, and `token_symbol` is 1:1 with `pool_id`
+    # so it never widens the cardinality.
+    data {
+      ref_id         = "R0"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "R0"
+        expr    = "mento_pool_reserve_share_token0"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "R1"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "R1"
+        expr    = "mento_pool_reserve_share_token1"
         instant = true
       })
     }
@@ -518,6 +601,18 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary     = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing, can't confirm magnitude."
       description = "Check rebalancer liveness, oracle feed, and metrics-bridge."
+      # By construction the anchored rule fires when the deviation ratio
+      # gauge is absent — so `$values.Dev` will almost always be empty and
+      # this annotation will drop. Kept for symmetry with the magnitude-
+      # gated rule: if the bridge starts publishing again mid-breach, the
+      # next eval re-derives a value and the line appears automatically.
+      current_deviation = local.deviation_critical_current_deviation_annotation
+      # Reserve share is independent of the deviation ratio gauge — even
+      # when the ratio is in its `-1` sentinel state, the indexer is still
+      # writing reserves on every Swap / ReserveUpdate, so this line
+      # typically renders. See the magnitude-gated rule for the no-sprig
+      # rationale.
+      current_reserves = local.deviation_critical_current_reserves_annotation
     }
 
     labels = {
@@ -535,6 +630,55 @@ resource "grafana_rule_group" "fpmms_deviation" {
       model = jsonencode({
         refId   = "A"
         expr    = "(time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio"
+        instant = true
+      })
+    }
+
+    # Annotation-only queries (Dev/R0/R1) — see the magnitude-gated rule
+    # for the rationale. They populate $values.{Dev,R0,R1} without
+    # participating in the threshold condition.
+    data {
+      ref_id         = "Dev"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "Dev"
+        expr    = "(mento_pool_deviation_ratio - 1)"
+        instant = true
+      })
+    }
+
+    # See the magnitude-gated rule for the rationale on the flat
+    # token0 / token1 split — the same per-instance label match applies
+    # here, and a `token_index` label on these queries would silently
+    # drop the `current_reserves` annotation.
+    data {
+      ref_id         = "R0"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "R0"
+        expr    = "mento_pool_reserve_share_token0"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "R1"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "R1"
+        expr    = "mento_pool_reserve_share_token1"
         instant = true
       })
     }

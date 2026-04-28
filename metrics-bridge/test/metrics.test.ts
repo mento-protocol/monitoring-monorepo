@@ -166,6 +166,216 @@ describe("updateMetrics", () => {
     ).toBeCloseTo(0.005);
   });
 
+  it("computes reserve share for balanced 50/50 pool", async () => {
+    updateMetrics([makePool()]);
+    // Default fixture is GBPm/USDm on Celo — see fixtures.ts. token0 is
+    // USDm (0x765de8…1282a), token1 is GBPm (0xccf663b1…0746); `pair`
+    // reorders so USDm is last, but the gauge labels track on-chain
+    // token0/token1 order. The reserve-share gauges carry an extra
+    // `token_symbol` label (consumed by the deviation-breach Slack alert
+    // via `$values.R0.Labels.token_symbol`).
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share_token0", {
+        ...poolLabels,
+        token_symbol: "USDm",
+      }),
+    ).toBeCloseTo(0.5);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share_token1", {
+        ...poolLabels,
+        token_symbol: "GBPm",
+      }),
+    ).toBeCloseTo(0.5);
+  });
+
+  it("normalizes mismatched decimals before computing reserve share (USDC 6dp / USDm 18dp)", async () => {
+    // Both legs equal 1.0 after normalization (1 USDC at 6dp = 10^6;
+    // 1 USDm at 18dp = 10^18). Expected share is 50/50. Without decimal
+    // normalization, the raw ratio would be ~1e6 / ~(1e6 + 1e18) ≈ 1e-12
+    // — `toBeCloseTo(0.5, 4)` would clearly fail. The earlier 17/83
+    // fixture passed with or without normalization for small numerators
+    // and was a weak guard.
+    updateMetrics([
+      makePool({
+        reserves0: "1000000",
+        reserves1: "1000000000000000000",
+        token0Decimals: 6,
+        token1Decimals: 18,
+      }),
+    ]);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token0",
+        poolLabels,
+      ),
+    ).toBeCloseTo(0.5, 4);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token1",
+        poolLabels,
+      ),
+    ).toBeCloseTo(0.5, 4);
+  });
+
+  it("emits 1.0/0.0 for one-sided pool (single reserve zero) — diagnostic signal", async () => {
+    // A pool drained of one side IS exactly the imbalance the alert wants
+    // to render ("100% USDT / 0% USDm"), so we keep the series.
+    updateMetrics([
+      makePool({
+        reserves0: "1000000000000000000",
+        reserves1: "0",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token0",
+        poolLabels,
+      ),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token1",
+        poolLabels,
+      ),
+    ).toBe(0);
+  });
+
+  it("emits 0.0/1.0 for one-sided pool drained on token0 (mirror direction)", async () => {
+    // Mirror of the previous test — covers `reserves0 = 0`, `reserves1 > 0`.
+    updateMetrics([
+      makePool({
+        reserves0: "0",
+        reserves1: "1000000000000000000",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token0",
+        poolLabels,
+      ),
+    ).toBe(0);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token1",
+        poolLabels,
+      ),
+    ).toBe(1);
+  });
+
+  it("skips reserve share when both reserves are zero (share undefined)", async () => {
+    updateMetrics([
+      makePool({
+        reserves0: "0",
+        reserves1: "0",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token0",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token1",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
+  // PR #234 review (Codex / Cursor): the reserve-share annotation queries
+  // (data blocks R0 and R1 on `Deviation Breach Critical`) are matched
+  // per-instance against the firing alert's label fingerprint. If the
+  // gauge's pool-fingerprint label subset diverges from
+  // `mento_pool_deviation_ratio`'s, Grafana silently returns nil for
+  // `$values.R0` / `$values.R1` and the `current_reserves` annotation
+  // never renders.
+  //
+  // The reserve-share gauges intentionally carry one EXTRA label
+  // (`token_symbol`) beyond the deviation-ratio gauge's set — consumed
+  // via `$values.R0.Labels.token_symbol` in the alert annotation. That's
+  // safe because `token_symbol` is 1:1 with `pool_id` (each pool has one
+  // token0 and one token1), so it doesn't widen the firing series'
+  // cardinality or the per-instance match. This test locks the invariant
+  // that the reserve-share gauges' labels are a STRICT SUPERSET of the
+  // deviation-ratio gauge's, with `token_symbol` as the only extension.
+  it("label-shape parity: reserve-share gauges expose deviation-ratio labels plus token_symbol", async () => {
+    updateMetrics([makePool()]);
+    const json = await register.getMetricsAsJSON();
+    type MetricEntry = {
+      name: string;
+      values?: Array<{ labels: Record<string, string> }>;
+    };
+    const labelKeysFor = (name: string): string[] | undefined => {
+      const m = json.find((x) => (x as MetricEntry).name === name) as
+        | MetricEntry
+        | undefined;
+      const sample = m?.values?.[0]?.labels;
+      return sample ? Object.keys(sample).sort() : undefined;
+    };
+    const devKeys = labelKeysFor("mento_pool_deviation_ratio");
+    const r0Keys = labelKeysFor("mento_pool_reserve_share_token0");
+    const r1Keys = labelKeysFor("mento_pool_reserve_share_token1");
+    expect(devKeys).toBeDefined();
+    // Reserve-share gauges = deviation-ratio labels + `token_symbol`.
+    expect(r0Keys).toEqual([...(devKeys ?? []), "token_symbol"].sort());
+    expect(r1Keys).toEqual([...(devKeys ?? []), "token_symbol"].sort());
+  });
+
+  it("token_symbol label resolves known token addresses on a real Celo pool (axlUSDC + USDm)", async () => {
+    // 0x765de8…1282a is USDm on Celo (42220) per @mento-protocol/contracts.
+    // 0xeb466342…5215 is axlUSDC. Confirms the gauge correctly carries the
+    // resolved symbols, which the alert annotation consumes via
+    // `$values.R0.Labels.token_symbol`.
+    updateMetrics([
+      makePool({
+        id: "42220-0xb285d4c7133d6f27bfb29224fb0d22e7ec3ddd2d",
+        token0: "0x765de816845861e75a25fca122bb6898b8b1282a",
+        token1: "0xeb466342c4d449bc9f53a865d5cb90586f405215",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share_token0", {
+        token_symbol: "USDm",
+      }),
+    ).toBeCloseTo(0.5);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share_token1", {
+        token_symbol: "axlUSDC",
+      }),
+    ).toBeCloseTo(0.5);
+  });
+
+  it("falls back to literal token0/token1 when contract address is unknown", async () => {
+    // Mirrors the existing `pair` fallback semantics: when a contract
+    // address isn't in @mento-protocol/contracts, the alert renders with
+    // generic "token0" / "token1" rather than crashing or carrying nil.
+    updateMetrics([
+      makePool({
+        token0: "0xdeadbeef00000000000000000000000000000000",
+        token1: "0xfeedface00000000000000000000000000000000",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share_token0", {
+        token_symbol: "token0",
+      }),
+    ).toBeCloseTo(0.5);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share_token1", {
+        token_symbol: "token1",
+      }),
+    ).toBeCloseTo(0.5);
+  });
+
   it("sets health_status from string enum", async () => {
     updateMetrics([makePool({ healthStatus: "CRITICAL" })]);
     expect(

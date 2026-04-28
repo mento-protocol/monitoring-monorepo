@@ -29,6 +29,10 @@ const BRIDGE_POOLS_QUERY = gql`
       protocolFee
       lastOracleJumpBps
       lastOracleJumpAt
+      reserves0
+      reserves1
+      token0Decimals
+      token1Decimals
     }
   }
 `;

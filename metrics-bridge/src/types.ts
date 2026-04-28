@@ -21,6 +21,10 @@ export interface PoolRow {
   protocolFee: number;
   lastOracleJumpBps: string;
   lastOracleJumpAt: string;
+  reserves0: string;
+  reserves1: string;
+  token0Decimals: number;
+  token1Decimals: number;
 }
 
 export interface BridgePoolsResponse {
