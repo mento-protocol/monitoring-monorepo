@@ -13,6 +13,25 @@ vi.mock("@/lib/weekend", () => ({
   FX_REOPEN_HOUR_UTC: 23,
 }));
 
+// `useGQL` fires once per render in this component, fetching the trip tx
+// hash for the open breach. Default to no row so tests that don't care
+// about the link see a plain `<span>` breach indicator. The "links to the
+// trip tx" tests override per-call.
+let nextTripTx: { startedByTxHash?: string }[] = [];
+vi.mock("@/lib/graphql", () => ({
+  useGQL: () => ({
+    data: { DeviationThresholdBreach: nextTripTx },
+  }),
+}));
+function setTripTx(rows: { startedByTxHash?: string }[]) {
+  nextTripTx = rows;
+}
+
+import { beforeEach } from "vitest";
+beforeEach(() => {
+  nextTripTx = [];
+});
+
 import { DeviationCell } from "@/components/pool-header/deviation-cell";
 
 const NETWORK: Network = {
@@ -48,62 +67,55 @@ const BASE_POOL: Pool = {
   rebalanceThreshold: 5000,
 };
 
-describe("DeviationCell — bar color boundaries", () => {
-  it("renders an emerald bar when deviation is well below the threshold (ratio < 0.8)", () => {
+describe("DeviationCell — bar fill colors track health status", () => {
+  it("renders an emerald fill when deviation is well below the threshold (ratio < 0.8)", () => {
     const pool: Pool = { ...BASE_POOL, priceDifference: "3000" }; // ratio = 0.6
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("bg-emerald-500");
-    expect(html).not.toContain("bg-yellow-500");
-    expect(html).not.toContain("bg-amber-500");
-    expect(html).not.toContain("bg-red-500");
+    expect(html).toContain("bg-emerald-500/70");
+    expect(html).not.toContain("bg-yellow-500/70");
+    expect(html).not.toContain("bg-amber-500/70");
+    expect(html).not.toContain("bg-red-500/70");
   });
 
-  it("renders a yellow bar when 0.8 <= ratio <= 1.0 (healthy but close)", () => {
-    // Under the new rule the pool stays OK in this band, but the bar
-    // shifts to yellow as a "getting close" visual cue — no warning.
+  it("renders a yellow fill when 0.8 <= ratio <= 1.0 (healthy but close)", () => {
     const pool: Pool = { ...BASE_POOL, priceDifference: "4500" }; // ratio = 0.9
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("bg-yellow-500");
-    expect(html).not.toContain("bg-emerald-500");
-    expect(html).not.toContain("bg-amber-500");
-    expect(html).not.toContain("bg-red-500");
+    expect(html).toContain("bg-yellow-500/70");
+    expect(html).not.toContain("bg-emerald-500/70");
+    expect(html).not.toContain("bg-amber-500/70");
+    expect(html).not.toContain("bg-red-500/70");
   });
 
   it("flips to yellow at exactly ratio = 0.8 (boundary, inclusive)", () => {
-    // 4000/5000 = 0.8 — boundary for the yellow band. Code uses `>= 0.8`,
-    // so this must render yellow, not emerald.
     const pool: Pool = { ...BASE_POOL, priceDifference: "4000" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("bg-yellow-500");
-    expect(html).not.toContain("bg-emerald-500");
+    expect(html).toContain("bg-yellow-500/70");
+    expect(html).not.toContain("bg-emerald-500/70");
   });
 
   it("stays emerald just below the yellow boundary (ratio = 0.7998)", () => {
-    // 3999/5000 = 0.7998 — one bp below the yellow band stays emerald.
     const pool: Pool = { ...BASE_POOL, priceDifference: "3999" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("bg-emerald-500");
-    expect(html).not.toContain("bg-yellow-500");
+    expect(html).toContain("bg-emerald-500/70");
+    expect(html).not.toContain("bg-yellow-500/70");
   });
 
-  it("keeps the bar yellow (not amber) when deviation sits exactly at the threshold", () => {
-    // At-threshold is healthy now — same yellow "close" treatment, not a
-    // warning-state amber.
+  it("keeps the fill yellow (not amber) when deviation sits exactly at the threshold", () => {
     const pool: Pool = { ...BASE_POOL, priceDifference: "5000" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("bg-yellow-500");
-    expect(html).not.toContain("bg-amber-500");
-    expect(html).not.toContain("bg-red-500");
+    expect(html).toContain("bg-yellow-500/70");
+    expect(html).not.toContain("bg-amber-500/70");
+    expect(html).not.toContain("bg-red-500/70");
   });
 
   it("stays yellow inside the 1% tolerance dead zone (ratio = 1.005)", () => {
@@ -111,9 +123,9 @@ describe("DeviationCell — bar color boundaries", () => {
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("bg-yellow-500");
-    expect(html).not.toContain("bg-amber-500");
-    expect(html).not.toContain("bg-red-500");
+    expect(html).toContain("bg-yellow-500/70");
+    expect(html).not.toContain("bg-amber-500/70");
+    expect(html).not.toContain("bg-red-500/70");
   });
 
   it("flips to amber once deviation exceeds the 1% tolerance line (ratio = 1.012)", () => {
@@ -121,9 +133,9 @@ describe("DeviationCell — bar color boundaries", () => {
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("bg-amber-500");
-    expect(html).not.toContain("bg-yellow-500");
-    expect(html).not.toContain("bg-red-500");
+    expect(html).toContain("bg-amber-500/70");
+    expect(html).not.toContain("bg-yellow-500/70");
+    expect(html).not.toContain("bg-red-500/70");
   });
 
   it("stays amber (not red) when above 5% magnitude but the breach is fresh (30m anchor)", () => {
@@ -136,12 +148,11 @@ describe("DeviationCell — bar color boundaries", () => {
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("bg-amber-500");
-    expect(html).not.toContain("bg-red-500");
+    expect(html).toContain("bg-amber-500/70");
+    expect(html).not.toContain("bg-red-500/70");
   });
 
   it("stays amber regardless of duration when magnitude is between 1% and 5% (ratio = 1.04, 2h anchor)", () => {
-    // Duration must NOT push WARN→CRITICAL when magnitude is below 1.05.
     const now = Math.floor(Date.now() / 1000);
     const pool: Pool = {
       ...BASE_POOL,
@@ -151,11 +162,11 @@ describe("DeviationCell — bar color boundaries", () => {
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("bg-amber-500");
-    expect(html).not.toContain("bg-red-500");
+    expect(html).toContain("bg-amber-500/70");
+    expect(html).not.toContain("bg-red-500/70");
   });
 
-  it("renders a red bar when a breach has outlived the 1h grace window", () => {
+  it("renders a red fill when a breach has outlived the 1h grace window", () => {
     const now = Math.floor(Date.now() / 1000);
     const pool: Pool = {
       ...BASE_POOL,
@@ -165,79 +176,10 @@ describe("DeviationCell — bar color boundaries", () => {
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("bg-red-500");
+    expect(html).toContain("bg-red-500/70");
   });
 
-  it("frames the primary label as '% above threshold' when deviation is above the limit", () => {
-    // 7610/5000 = 1.522 → (7610-5000)/5000 = 52.2% above. Reads as a
-    // direct overage instead of the "152.2% of threshold" ratio form.
-    const pool: Pool = { ...BASE_POOL, priceDifference: "7610" };
-    const html = renderToStaticMarkup(
-      <DeviationCell pool={pool} network={NETWORK} />,
-    );
-    expect(html).toContain("52.2% above threshold");
-    expect(html).not.toContain("% of threshold");
-  });
-
-  it("frames the primary label as '% below threshold' when deviation is under the limit", () => {
-    // 3000/5000 = 0.6 → 40% below threshold.
-    const pool: Pool = { ...BASE_POOL, priceDifference: "3000" };
-    const html = renderToStaticMarkup(
-      <DeviationCell pool={pool} network={NETWORK} />,
-    );
-    expect(html).toContain("40.0% below threshold");
-    expect(html).not.toContain("above threshold");
-  });
-
-  it("says 'At threshold' (not '0.0% below') when deviation is exactly at the limit", () => {
-    // diff === threshold — the exact-boundary case. Matches the "At
-    // threshold" copy the Rebalance Status cell uses for the same state.
-    const pool: Pool = { ...BASE_POOL, priceDifference: "5000" };
-    const html = renderToStaticMarkup(
-      <DeviationCell pool={pool} network={NETWORK} />,
-    );
-    expect(html).toContain("At threshold");
-    expect(html).not.toContain("0.0% below threshold");
-    expect(html).not.toContain("0.0% above threshold");
-  });
-
-  it("says 'At threshold' when deviation is within 1% below the limit", () => {
-    // 4975/5000 = 0.995 → 0.5% below. Would otherwise read as "0.5%
-    // below threshold", which understates how close the pool is to
-    // breach. Treat the 1% band as "At threshold".
-    const pool: Pool = { ...BASE_POOL, priceDifference: "4975" };
-    const html = renderToStaticMarkup(
-      <DeviationCell pool={pool} network={NETWORK} />,
-    );
-    expect(html).toContain("At threshold");
-    expect(html).not.toMatch(/% below threshold/);
-  });
-
-  it("still says '% below threshold' once the gap exceeds the 1% tolerance", () => {
-    // 4900/5000 = 0.98 → 2.0% below. Outside the "At threshold" band,
-    // so the explicit delta shows.
-    const pool: Pool = { ...BASE_POOL, priceDifference: "4900" };
-    const html = renderToStaticMarkup(
-      <DeviationCell pool={pool} network={NETWORK} />,
-    );
-    expect(html).toContain("2.0% below threshold");
-    expect(html).not.toContain("At threshold");
-  });
-
-  it("does NOT widen the 'At threshold' band on the above side", () => {
-    // 5050/5000 = 1.01 → 1.0% above. Breach direction always shows the
-    // explicit overage, no matter how small.
-    const pool: Pool = { ...BASE_POOL, priceDifference: "5050" };
-    const html = renderToStaticMarkup(
-      <DeviationCell pool={pool} network={NETWORK} />,
-    );
-    expect(html).toContain("1.0% above threshold");
-    expect(html).not.toContain("At threshold");
-  });
-
-  it("renders an amber bar while the breach is within the 1h grace window", () => {
-    // dev > 100% but the breach started 30m ago → health status stays WARN,
-    // and the bar matches with amber (not red, not yellow).
+  it("renders an amber fill while the breach is within the 1h grace window", () => {
     const now = Math.floor(Date.now() / 1000);
     const pool: Pool = {
       ...BASE_POOL,
@@ -247,57 +189,90 @@ describe("DeviationCell — bar color boundaries", () => {
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("bg-amber-500");
-    expect(html).not.toContain("bg-red-500");
-    expect(html).not.toContain("bg-yellow-500");
+    expect(html).toContain("bg-amber-500/70");
+    expect(html).not.toContain("bg-red-500/70");
+    expect(html).not.toContain("bg-yellow-500/70");
   });
 });
 
-describe("DeviationCell — breach start indicator", () => {
-  it("renders the merged 'breach' caption in red when breach has outlived the grace window (CRITICAL)", () => {
-    // 2h ago is past the 1h grace — status flips to CRITICAL and the
-    // single-line caption ("X% above threshold · breach Xh ago") matches.
-    const now = Math.floor(Date.now() / 1000);
-    const breachStart = String(now - 2 * 3600);
-    const pool: Pool = {
-      ...BASE_POOL,
-      priceDifference: "6000",
-      deviationBreachStartedAt: breachStart,
-    };
+describe("DeviationCell — inline current/threshold values", () => {
+  it("renders `<diffPct>%` and `/ <thresholdPct>%` inside the bar", () => {
+    // 7610 / 5000 → diffPct=76.10, thresholdPct=50.00
+    const pool: Pool = { ...BASE_POOL, priceDifference: "7610" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-
-    expect(html).toMatch(/breach/);
-    expect(html).toContain("text-red-400");
-    // a11y: screen readers in browse mode read the absolute timestamp
-    // alongside the relative label via a visually-hidden sr-only span
-    expect(html).toMatch(/class="sr-only">\s*\(started at/);
-    // semantic <time> element with machine-readable dateTime
-    expect(html).toMatch(/<time[^>]*dateTime=/);
+    expect(html).toContain("76.10%");
+    expect(html).toContain("/ 50.00%");
   });
 
-  it("renders the merged 'breach' caption in amber when still within the 1h grace (WARN)", () => {
+  it("displays the exact diff/threshold pair regardless of magnitude (no clamping of the inline label)", () => {
+    // 132954 / 5000 → diffPct=1329.54, thresholdPct=50.00. The bar fill
+    // clamps at 100%, but the textual label stays exact.
+    const pool: Pool = { ...BASE_POOL, priceDifference: "132954" };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("1329.54%");
+    expect(html).toContain("/ 50.00%");
+  });
+});
+
+describe("DeviationCell — breach line", () => {
+  it("renders a plain span when there's no trip tx hash to link to", () => {
+    setTripTx([]);
     const now = Math.floor(Date.now() / 1000);
-    const breachStart = String(now - 1800); // 30 min ago
     const pool: Pool = {
       ...BASE_POOL,
       priceDifference: "6000",
-      deviationBreachStartedAt: breachStart,
+      deviationBreachStartedAt: String(now - 2 * 3600),
     };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
+    expect(html).toMatch(/breach/);
+    expect(html).toContain("text-red-400");
+    expect(html).toMatch(/<time[^>]*dateTime=/);
+    expect(html).toMatch(/class="sr-only">\s*\(started at/);
+    // No anchor wrapping the breach line when no tx hash is available.
+    expect(html).not.toMatch(/<a[^>]*>[^<]*<time[^>]*>[^<]*<\/time>/);
+  });
 
+  it("links the breach line to the explorer trip transaction when the tx hash is known", () => {
+    setTripTx([{ startedByTxHash: "0xdeadbeefcafe" }]);
+    const now = Math.floor(Date.now() / 1000);
+    const pool: Pool = {
+      ...BASE_POOL,
+      priceDifference: "6000",
+      deviationBreachStartedAt: String(now - 2 * 3600),
+    };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain('href="https://celoscan.io/tx/0xdeadbeefcafe"');
+    // The breach text lives inside the anchor — confirm via aria-label
+    // pattern that doesn't depend on time-relative formatting.
+    expect(html).toMatch(/aria-label="breach[^"]*— open trip transaction/);
+  });
+
+  it("colors the breach line amber when still within the 1h grace (WARN)", () => {
+    setTripTx([]);
+    const now = Math.floor(Date.now() / 1000);
+    const pool: Pool = {
+      ...BASE_POOL,
+      priceDifference: "6000",
+      deviationBreachStartedAt: String(now - 1800), // 30 min ago
+    };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
     expect(html).toMatch(/breach/);
     expect(html).toContain("text-amber-400");
     expect(html).not.toContain("text-red-400");
   });
 
   it("still renders the breach indicator when rebalanceThreshold is 0 (bar's no-data path)", () => {
-    // The bar early-returns when rebalanceThreshold is 0, but health.ts
-    // falls back to an effective 10000-bps threshold — so a breach can
-    // still be open. The alarm must survive the bar's no-data path.
+    setTripTx([]);
     const now = Math.floor(Date.now() / 1000);
     const breachStart = String(now - 2 * 3600);
     const pool: Pool = {
@@ -315,6 +290,7 @@ describe("DeviationCell — breach start indicator", () => {
   });
 
   it("does not render breach text when deviationBreachStartedAt is '0' (not currently breached)", () => {
+    setTripTx([]);
     const pool: Pool = {
       ...BASE_POOL,
       priceDifference: "3000",
@@ -323,11 +299,6 @@ describe("DeviationCell — breach start indicator", () => {
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    // Both forms — the literal "breach" word and the sr-only "started at"
-    // — must be absent so a regression that re-introduces either form is
-    // caught. The compact `· breach` separator regex was a false friend
-    // because rendered HTML places `</span><span>` between the dot and
-    // the word.
     expect(html).not.toMatch(/breach/);
     expect(html).not.toMatch(/started at/);
   });

@@ -322,6 +322,28 @@ export const POOL_BREACH_ROLLUP = `
   }
 `;
 
+// Single-row lookup of the *open* breach for a pool, keyed off the
+// `pool.deviationBreachStartedAt` anchor. Returns just the trip tx hash so
+// the DeviationCell can link "breach Xh ago" to the explorer. We can't fold
+// this into POOL_BREACH_ROLLUP because the rollup is on the Pool entity
+// (scalars only) — the tx hash lives on the DeviationThresholdBreach row.
+export const POOL_OPEN_BREACH_TX = `
+  query PoolOpenBreachTx(
+    $poolId: String!
+    $startedAt: numeric!
+  ) {
+    DeviationThresholdBreach(
+      where: {
+        poolId: { _eq: $poolId }
+        startedAt: { _eq: $startedAt }
+      }
+      limit: 1
+    ) {
+      startedByTxHash
+    }
+  }
+`;
+
 // Closed-breach critical seconds in a recent window, for the Uptime tile's
 // "X.XX% last 7d" subtitle. Returns just `criticalDurationSeconds` so the
 // client can sum (Hasura aggregates are disabled). Open breaches are
