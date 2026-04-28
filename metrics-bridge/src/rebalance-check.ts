@@ -40,7 +40,10 @@ import {
   ERC20_ABI_SOURCES,
   POOL_PAIR_ABI_SOURCES,
 } from "@mento-protocol/monitoring-config/erc20-abi";
-import { tokenSymbol } from "@mento-protocol/monitoring-config/tokens";
+import {
+  tokenDecimals,
+  tokenSymbol,
+} from "@mento-protocol/monitoring-config/tokens";
 import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
 
 // Re-export so existing callers (and the dashboard's mirror, prior to its
@@ -463,6 +466,50 @@ function truncateHex(hex: Hex, max = 18): string {
 }
 
 /**
+ * Process-lifetime decimals cache for tokens whose `decimals()` we had to
+ * read on-chain (i.e. addresses missing from `@mento-protocol/contracts`).
+ * Decimals are immutable per contract, so once we know them they can never
+ * change — the cache lives until the bridge process restarts.
+ *
+ * For canonical Mento tokens (~10 stablecoin / FX symbols) the cache is
+ * never even consulted: `tokenDecimals(chainId, addr)` resolves from the
+ * contracts manifest first, no RPC at all. Exposed for unit testing.
+ */
+const decimalsCache = new Map<string, number>();
+
+/** Visible-for-testing: clear the on-chain decimals cache. */
+export function _clearDecimalsCache(): void {
+  decimalsCache.clear();
+}
+
+/**
+ * Resolve ERC20 decimals for `(chainId, address)`. Tries the canonical
+ * `@mento-protocol/contracts` manifest first (zero RPC cost), then the
+ * process-lifetime cache, then falls back to a single on-chain
+ * `decimals()` read. Throws if the RPC call fails — callers that want
+ * graceful degradation should wrap in a try/catch.
+ */
+async function resolveDecimals(
+  client: PublicClient,
+  chainId: number,
+  address: `0x${string}`,
+): Promise<number> {
+  const canonical = tokenDecimals(chainId, address);
+  if (canonical !== null) return canonical;
+  const key = `${chainId}:${address.toLowerCase()}`;
+  const cached = decimalsCache.get(key);
+  if (cached !== undefined) return cached;
+  const decimals = (await client.readContract({
+    address,
+    abi: ERC20_BALANCE_ABI,
+    functionName: "decimals",
+  })) as number;
+  const decimalsNum = Number(decimals);
+  decimalsCache.set(key, decimalsNum);
+  return decimalsNum;
+}
+
+/**
  * Reserve-strategy enrichment fetch — mirrors the dashboard's
  * `fetchReserveEnrichment` but pulls the "needed" amount straight off
  * `determineAction(pool).action.amountOwedToPool` (the strategy's required
@@ -520,24 +567,20 @@ async function fetchReserveEnrichment(
     // 2. The collateral token is the non-debt leg of the pool.
     const collateralToken = ctx.isToken0Debt ? token1 : token0;
 
-    // 3. balanceOf + decimals on the collateral token — both depend on
-    //    `collateralToken` but are independent of each other, so issue in
-    //    parallel.
-    const [balance, decimals] = await Promise.all([
+    // 3. balanceOf + decimals on the collateral token. Decimals come from
+    //    the canonical manifest (zero RPC) or the process-lifetime cache
+    //    when available; only an unknown contract will fall through to an
+    //    on-chain read. balanceOf is always read fresh.
+    const [balance, decimalsNum] = await Promise.all([
       client.readContract({
         address: collateralToken,
         abi: ERC20_BALANCE_ABI,
         functionName: "balanceOf",
         args: [reserveAddr],
       }),
-      client.readContract({
-        address: collateralToken,
-        abi: ERC20_BALANCE_ABI,
-        functionName: "decimals",
-      }),
+      resolveDecimals(client, chainId, collateralToken),
     ]);
 
-    const decimalsNum = Number(decimals);
     return {
       balance: toHumanUnits(balance as bigint, decimalsNum),
       needed: toHumanUnits(action.amountOwedToPool, decimalsNum),

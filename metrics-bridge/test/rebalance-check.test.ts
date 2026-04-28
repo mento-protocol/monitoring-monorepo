@@ -23,6 +23,7 @@ import {
   detectStrategyType,
   scrubUrls,
   ERROR_MESSAGES,
+  _clearDecimalsCache,
 } from "../src/rebalance-check.js";
 
 const POOL: `0x${string}` = "0x0000000000000000000000000000000000001234";
@@ -823,5 +824,95 @@ describe("probeRebalance — Reserve enrichment for RLS_RESERVE_OUT_OF_COLLATERA
     // Sanity: enrichment still landed, so this isn't a vacuous pass.
     expect(result.reserveCollateral?.tokenSymbol).toBe("axlUSDC");
     expect(reserveCalls).toBe(1);
+  });
+
+  it("skips on-chain decimals() entirely for canonical tokens (manifest hit)", async () => {
+    // axlUSDC is in `@mento-protocol/contracts` with `decimals: 6`, so
+    // the enrichment path MUST resolve from the manifest without ever
+    // dispatching a `decimals()` readContract. A regression here would
+    // double the RPC cost on every blocked Reserve probe.
+    _clearDecimalsCache();
+    let decimalsRpcCalls = 0;
+    const data = encodeRevert("RLS_RESERVE_OUT_OF_COLLATERAL");
+    const err = makeRevertError("execution reverted", data);
+    const client = {
+      call: () => Promise.reject(err),
+      readContract: ({ functionName }: { functionName: string }) => {
+        if (functionName === "decimals") {
+          decimalsRpcCalls++;
+          return Promise.resolve(6);
+        }
+        if (functionName === "getCDPConfig")
+          return Promise.reject(functionNotFoundError());
+        if (functionName === "reserve") return Promise.resolve(RESERVE_ADDR);
+        if (functionName === "getPools")
+          return Promise.reject(functionNotFoundError());
+        if (functionName === "determineAction") {
+          return Promise.resolve([
+            { isToken0Debt: true },
+            { amountOwedToPool: 100n },
+          ]);
+        }
+        if (functionName === "token0") return Promise.resolve(TOKEN_USDM);
+        if (functionName === "token1") return Promise.resolve(TOKEN_AXLUSDC);
+        if (functionName === "balanceOf") return Promise.resolve(0n);
+        return Promise.reject(
+          new Error(`unexpected functionName: ${functionName}`),
+        );
+      },
+    } as unknown as PublicClient;
+    const result = await probeRebalance(
+      client,
+      POOL_USDM_AXLUSDC,
+      STRATEGY,
+      CELO_CHAIN_ID,
+    );
+    expect(result.kind).toBe("blocked");
+    expect(decimalsRpcCalls).toBe(0);
+  });
+
+  it("memoizes decimals() across probes for unknown-token addresses (process-lifetime cache)", async () => {
+    // Tokens missing from the canonical manifest (new deployment, mock
+    // contract, etc.) fall through to an on-chain `decimals()` read, then
+    // the result is cached for the lifetime of the bridge process. The
+    // SECOND probe against the same `(chain, token)` pair MUST NOT issue
+    // another decimals() read.
+    _clearDecimalsCache();
+    const UNKNOWN_TOKEN = "0x000000000000000000000000000000000000dead";
+    let decimalsRpcCalls = 0;
+    const data = encodeRevert("RLS_RESERVE_OUT_OF_COLLATERAL");
+    const err = makeRevertError("execution reverted", data);
+    const buildClient = (): PublicClient =>
+      ({
+        call: () => Promise.reject(err),
+        readContract: ({ functionName }: { functionName: string }) => {
+          if (functionName === "decimals") {
+            decimalsRpcCalls++;
+            return Promise.resolve(8);
+          }
+          if (functionName === "getCDPConfig")
+            return Promise.reject(functionNotFoundError());
+          if (functionName === "reserve") return Promise.resolve(RESERVE_ADDR);
+          if (functionName === "getPools")
+            return Promise.reject(functionNotFoundError());
+          if (functionName === "determineAction") {
+            // isToken0Debt:true → collateral = token1 = UNKNOWN_TOKEN, which
+            // forces the on-chain decimals() path (manifest miss).
+            return Promise.resolve([
+              { isToken0Debt: true },
+              { amountOwedToPool: 100n },
+            ]);
+          }
+          if (functionName === "token0") return Promise.resolve(TOKEN_USDM);
+          if (functionName === "token1") return Promise.resolve(UNKNOWN_TOKEN);
+          if (functionName === "balanceOf") return Promise.resolve(0n);
+          return Promise.reject(
+            new Error(`unexpected functionName: ${functionName}`),
+          );
+        },
+      }) as unknown as PublicClient;
+    await probeRebalance(buildClient(), POOL, STRATEGY, CELO_CHAIN_ID);
+    await probeRebalance(buildClient(), POOL, STRATEGY, CELO_CHAIN_ID);
+    expect(decimalsRpcCalls).toBe(1);
   });
 });
