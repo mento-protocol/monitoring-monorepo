@@ -259,10 +259,11 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
       | undefined;
     assert.ok(tripRow, "BreakerTripEvent should be written");
     assert.equal(tripRow!.rateFeedID, FEED);
-    // thresholdAtTrip is the per-feed threshold (sentinel 0 in this seed,
-    // which we should NOT translate to default — the schema column captures
-    // the as-stored value verbatim so the dashboard can compare).
-    assert.equal(tripRow!.thresholdAtTrip, 0n);
+    // thresholdAtTrip resolves the sentinel-0 inheritance to the EFFECTIVE
+    // threshold so historical trip data captures the value that actually
+    // caused the trip (not the inherit-marker). Per-feed override here is
+    // 0 → falls back to breaker default (THRESHOLD = 4%).
+    assert.equal(tripRow!.thresholdAtTrip, THRESHOLD);
     // referenceAtTrip = the EMA snapshot we mirrored at bootstrap time.
     assert.equal(tripRow!.referenceAtTrip, 1_171_560_280_196_965_000_000_000n);
   });

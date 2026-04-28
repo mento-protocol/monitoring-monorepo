@@ -24,6 +24,7 @@ import { eventId, asAddress, asBigInt } from "../helpers";
 import {
   computeCooldownEndsAt,
   effectiveCooldown,
+  effectiveThreshold,
   ensureBreaker,
   ensureBreakerConfig,
   makeBreakerId,
@@ -172,7 +173,10 @@ BreakerBox.BreakerTripped.handler(async ({ event, context }) => {
     logIndex: event.logIndex,
     medianRateAtTrip: cfg.lastMedianRate ?? 0n,
     referenceAtTrip,
-    thresholdAtTrip: cfg.rateChangeThreshold,
+    // Resolve sentinel `0` to the breaker default so historical trip data
+    // captures the threshold that ACTUALLY caused the trip (not the
+    // inherit-marker). Mirrors the effectiveCooldown call two lines above.
+    thresholdAtTrip: effectiveThreshold(breaker, cfg.rateChangeThreshold),
   };
   context.BreakerTripEvent.set(tripEvent);
 
@@ -240,6 +244,11 @@ BreakerBox.ResetSuccessful.handler(async ({ event, context }) => {
 // ---------------------------------------------------------------------------
 
 BreakerBox.TradingModeUpdated.handler(async ({ event, context }) => {
+  // Feed-scoped event — there is no single breaker-id to preload, so just
+  // bail during the preload phase. Mirrors the explicit `if (isPreload) return;`
+  // guard the other BreakerBox handlers get for free via maybePreloadBreaker.
+  if (context.isPreload) return;
+
   const rateFeedID = asAddress(event.params.rateFeedID);
   const tradingMode = Number(event.params.tradingMode);
   const blockTimestamp = asBigInt(event.block.timestamp);

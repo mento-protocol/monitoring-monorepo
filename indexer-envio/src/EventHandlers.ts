@@ -53,8 +53,11 @@ export {
   _setMockBreakerKind,
   _setMockBreakerDefaults,
   _setMockBreakerFeedState,
+  _setMockBreakerList,
   _clearBreakerMocks,
 } from "./rpc";
+
+export { _clearBootstrapAttempted } from "./breakers";
 
 // Fee token test mocks and helpers
 export {

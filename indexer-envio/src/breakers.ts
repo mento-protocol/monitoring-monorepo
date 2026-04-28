@@ -15,6 +15,7 @@ import {
   fetchBreakerDefaults,
   fetchBreakerFeedState,
   fetchBreakerKind,
+  fetchBreakerList,
   type BreakerKindRpc,
 } from "./rpc";
 
@@ -154,6 +155,54 @@ export async function ensureBreakerConfig(
   };
   context.BreakerConfig.set(cfg);
   return cfg;
+}
+
+/** Eager bootstrap path: many feeds had their breaker config set BEFORE our
+ * `start_block`, so no event ever fires post-start to trigger lazy hydration.
+ * On the first MedianUpdated for a feed with zero BreakerConfig rows, enumerate
+ * the BreakerBox's registered breakers via RPC and bootstrap a config row for
+ * each one. Bounded by an in-memory Set so we attempt only once per
+ * (chainId, rateFeedID) per process — the cost is one extra
+ * `BreakerBox.getBreakers()` call + a handful of `ensureBreakerConfig` calls
+ * per feed, paid exactly once. */
+const _bootstrapAttempted = new Set<string>();
+
+/** @internal Test-only: clear the bootstrap-attempted cache between tests. */
+export function _clearBootstrapAttempted(): void {
+  _bootstrapAttempted.clear();
+}
+
+export async function bootstrapFeedBreakerConfigs(
+  context: HandlerContext,
+  chainId: number,
+  rateFeedID: string,
+  blockNumber: bigint,
+  blockTimestamp: bigint,
+): Promise<void> {
+  const cacheKey = `${chainId}:${rateFeedID.toLowerCase()}`;
+  if (_bootstrapAttempted.has(cacheKey)) return;
+  _bootstrapAttempted.add(cacheKey);
+
+  const breakerAddresses = await fetchBreakerList(chainId, blockNumber);
+  if (!breakerAddresses || breakerAddresses.length === 0) return;
+
+  for (const breakerAddress of breakerAddresses) {
+    const breaker = await ensureBreaker(
+      context,
+      chainId,
+      breakerAddress,
+      blockNumber,
+      blockTimestamp,
+    );
+    if (!breaker) continue;
+    await ensureBreakerConfig(
+      context,
+      chainId,
+      breaker,
+      rateFeedID,
+      blockNumber,
+    );
+  }
 }
 
 /** Per-feed cooldown overrides the breaker default; sentinel 0 = inherit. */
@@ -348,7 +397,14 @@ export async function handleRateFeedCooldownTimeUpdated({
 
   const newCooldown = event.params.newCooldownTime;
   if (cfg.cooldownTime === newCooldown) return;
-  await refreshCooldownEndsAt(context, { ...cfg, cooldownTime: newCooldown });
+  // Persist the cooldownTime field DIRECTLY here. `refreshCooldownEndsAt`
+  // skips writes when the *effective* cooldown is unchanged (e.g. switching
+  // between sentinel-0 and the breaker default), but the per-feed override
+  // value must still round-trip to the schema regardless. Then refresh the
+  // pre-rolled cooldownEndsAt to reflect the new override.
+  const updated = { ...cfg, cooldownTime: newCooldown };
+  context.BreakerConfig.set(updated);
+  await refreshCooldownEndsAt(context, updated);
 }
 
 export async function handleRateChangeThresholdUpdated({

@@ -1285,6 +1285,66 @@ export async function getPoolsWithReferenceFeed(
 
 export type BreakerKindRpc = "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
 
+const _testBreakerList = new Map<number, string[] | null>();
+
+/** @internal Test-only: pre-set the BreakerBox.getBreakers() result. */
+export function _setMockBreakerList(
+  chainId: number,
+  breakers: string[] | null,
+): void {
+  _testBreakerList.set(chainId, breakers);
+}
+
+/** Returns all breaker addresses registered with BreakerBox at `blockNumber`,
+ * or null if RPC fails / BreakerBox is not deployed on this chain. Used by
+ * the eager bootstrap path: when a feed has no BreakerConfig rows but is
+ * receiving MedianUpdated events, enumerate breakers and seed configs. */
+export async function fetchBreakerList(
+  chainId: number,
+  blockNumber: bigint,
+): Promise<string[] | null> {
+  if (_testBreakerList.has(chainId)) return _testBreakerList.get(chainId)!;
+
+  let breakerBoxAddress: `0x${string}`;
+  try {
+    breakerBoxAddress = requireContractAddress(chainId, "BreakerBox");
+  } catch {
+    return null;
+  }
+
+  try {
+    const client = getRpcClient(chainId);
+    const { result } = await readContractWithBlockFallback(
+      client,
+      {
+        address: breakerBoxAddress,
+        abi: [
+          {
+            type: "function",
+            name: "getBreakers",
+            inputs: [],
+            outputs: [{ name: "", type: "address[]" }],
+            stateMutability: "view",
+          },
+        ],
+        functionName: "getBreakers",
+      },
+      blockNumber,
+      getFallbackRpcClient(chainId),
+    );
+    return (result as readonly string[]).map((a) => a.toLowerCase());
+  } catch (err) {
+    logRpcFailure(
+      chainId,
+      "fetchBreakerList",
+      breakerBoxAddress,
+      err,
+      blockNumber,
+    );
+    return null;
+  }
+}
+
 export type BreakerDefaults = {
   activatesTradingMode: number;
   defaultCooldownTime: bigint;
@@ -1357,6 +1417,7 @@ export function _clearBreakerMocks(): void {
   _testBreakerKinds.clear();
   _testBreakerDefaults.clear();
   _testBreakerFeedState.clear();
+  _testBreakerList.clear();
 }
 
 // ---- Probes & fetchers ----

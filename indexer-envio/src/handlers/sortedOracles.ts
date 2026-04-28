@@ -20,7 +20,7 @@ import {
   getPoolsWithReferenceFeed,
   getBreakerConfigsByFeed,
 } from "../rpc";
-import { nextMedianEMA } from "../breakers";
+import { bootstrapFeedBreakerConfigs, nextMedianEMA } from "../breakers";
 
 // ---------------------------------------------------------------------------
 // SortedOracles.OracleReported
@@ -280,37 +280,60 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   // BreakerBox.sol:336-342). For each MedianDelta config, compute the new
   // EMA per the contract's Fixidity formula. ValueDelta keeps the same
   // referenceValue but still gets `lastMedianRate` / `lastUpdatedAt`.
-  if (oraclePrice > 0n && breakerConfigs.length > 0) {
-    await Promise.all(
-      breakerConfigs.map(async (cfg) => {
-        if (!cfg.enabled) return;
-        const breaker = await context.Breaker.get(cfg.breaker_id);
-        if (!breaker) return;
-        const nextEMA =
-          breaker.kind === "MEDIAN_DELTA"
-            ? nextMedianEMA(
-                oraclePrice,
-                cfg.medianRatesEMA ?? 0n,
-                cfg.smoothingFactor ?? 0n,
-              )
-            : cfg.medianRatesEMA;
-        // Skip the write when nothing changed — Envio still pays a row-write
-        // cost for no-op `set()` calls, and MedianUpdated is one of the
-        // hottest event paths.
-        if (
-          cfg.lastMedianRate === oraclePrice &&
-          cfg.medianRatesEMA === nextEMA
-        ) {
-          return;
-        }
-        context.BreakerConfig.set({
-          ...cfg,
-          lastMedianRate: oraclePrice,
-          lastUpdatedAt: blockTimestamp,
-          medianRatesEMA: nextEMA,
-        });
-      }),
-    );
+  if (oraclePrice > 0n) {
+    let configsForMirror = breakerConfigs;
+    // Eager bootstrap: for v3 feeds whose breaker config was set entirely
+    // before our `start_block`, no later event triggers lazy hydration. On
+    // the first MedianUpdated for a feed with zero rows AND at least one
+    // indexed pool referencing it, enumerate BreakerBox.getBreakers() and
+    // seed the configs. The bootstrap is in-memory-cached per feed so the
+    // cost is paid exactly once.
+    if (configsForMirror.length === 0 && poolIds.length > 0) {
+      await bootstrapFeedBreakerConfigs(
+        context,
+        event.chainId,
+        rateFeedID,
+        blockNumber,
+        blockTimestamp,
+      );
+      configsForMirror = await getBreakerConfigsByFeed(
+        context,
+        event.chainId,
+        rateFeedID,
+      );
+    }
+    if (configsForMirror.length > 0) {
+      await Promise.all(
+        configsForMirror.map(async (cfg) => {
+          if (!cfg.enabled) return;
+          const breaker = await context.Breaker.get(cfg.breaker_id);
+          if (!breaker) return;
+          const nextEMA =
+            breaker.kind === "MEDIAN_DELTA"
+              ? nextMedianEMA(
+                  oraclePrice,
+                  cfg.medianRatesEMA ?? 0n,
+                  cfg.smoothingFactor ?? 0n,
+                )
+              : cfg.medianRatesEMA;
+          // Skip the write when nothing changed — Envio still pays a row-write
+          // cost for no-op `set()` calls, and MedianUpdated is one of the
+          // hottest event paths.
+          if (
+            cfg.lastMedianRate === oraclePrice &&
+            cfg.medianRatesEMA === nextEMA
+          ) {
+            return;
+          }
+          context.BreakerConfig.set({
+            ...cfg,
+            lastMedianRate: oraclePrice,
+            lastUpdatedAt: blockTimestamp,
+            medianRatesEMA: nextEMA,
+          });
+        }),
+      );
+    }
   }
 });
 

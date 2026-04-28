@@ -195,8 +195,14 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
     : { pct: 0, color: "bg-slate-600" };
 
   const todayMidnightSec = Math.floor(now / 86400) * 86400; // UTC midnight
+  // Filter by THIS breaker's address — the query is feed-scoped, but a
+  // single feed could surface multiple breakers' trips (only one trip-able
+  // breaker today, but MarketHours-style additions later would drift the
+  // count from cfg.tripCountLifetime if we didn't scope it).
   const tripsToday = trips.filter(
-    (t) => Number(t.blockTimestamp) >= todayMidnightSec,
+    (t) =>
+      Number(t.blockTimestamp) >= todayMidnightSec &&
+      t.breaker.address === cfg.breaker.address,
   ).length;
   const lifetimeCount = cfg.tripCountLifetime;
   const lastTripTs = cfg.lastTripAt;
