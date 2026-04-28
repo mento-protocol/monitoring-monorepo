@@ -19,6 +19,10 @@
     "./format": {
       "types": "./dist/format.d.ts",
       "default": "./dist/format.js"
+    },
+    "./rebalance-abi": {
+      "types": "./dist/rebalance-abi.d.ts",
+      "default": "./dist/rebalance-abi.js"
     }
   },
   "scripts": {

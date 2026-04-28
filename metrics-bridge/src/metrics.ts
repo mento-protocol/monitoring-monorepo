@@ -78,8 +78,15 @@ const pressureLabels = [...poolLabels, "token_index"] as const;
 const reserveShareLabels = [...poolLabels, "token_symbol"] as const;
 // `reason_code` and `reason_message` are bounded by the ERROR_MESSAGES enum
 // (~30 codes) and one-to-one with each other — carrying both as labels
-// lets the Slack template read `$labels.reason_message` directly without
-// keeping a sprig lookup table in sync with the indexer ABI.
+// lets the Slack alert template render the human-readable explanation
+// without a sprig lookup table that has to stay in sync with the strategy
+// ABI. The annotation cross-references this gauge's labels via
+// `$values.B.Labels.reason_message`: Grafana's `$labels` exposes only the
+// firing-query labels (the breach gauge), so the alert template walks
+// query B's series through the `$values` map. `decodeBlockedRevert`
+// guarantees both labels stay inside the bounded enum even on
+// `Error(string)` / `Panic(uint256)` reverts (raw payload goes to the
+// `diagnostic` log channel) so cardinality stays bounded.
 const rebalanceBlockedLabels = [
   ...poolLabels,
   "reason_code",

@@ -5,8 +5,11 @@
  * `deviationBreachStartedAt > 0`), simulate `rebalance(pool)` against the
  * pool's liquidity strategy and emit a `mento_pool_rebalance_blocked`
  * gauge with the decoded reason on each `(reason_code, reason_message)`
- * pair. The Slack alert template reads `$labels.reason_message` to
- * annotate the existing `Deviation Breach Critical` alert.
+ * pair. The Slack alert template cross-references this gauge's labels via
+ * `$values.B.Labels.reason_message` (Grafana's `$labels` exposes only the
+ * firing query's labels, so the annotation reads query B's labels through
+ * the `$values` map) to annotate the existing `Deviation Breach Critical`
+ * alert.
  *
  * Run cadence is controlled by `REBALANCE_PROBE_EVERY_N_POLLS` — see
  * `poller.ts`. The gauge is RESET at the start of each cycle so a pool
@@ -80,8 +83,12 @@ async function probeOne(pool: PoolRow): Promise<RebalanceProbeResult> {
  * stuck RPC endpoint can't fan out unbounded tasks against the next Hasura
  * cycle. At Mento's scale 0–3 pools are typically eligible per cycle, so
  * the concurrency cap is mostly a safety rail.
+ *
+ * Exported for unit testing (the runner config defaults to 5, so we can't
+ * exercise lower concurrency caps via `runRebalanceProbes` without
+ * monkey-patching the config module).
  */
-async function runWithConcurrency<T, R>(
+export async function runWithConcurrency<T, R>(
   items: T[],
   concurrency: number,
   fn: (item: T) => Promise<R>,
@@ -142,6 +149,16 @@ export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
         reason_message: result.reasonMessage,
       };
       gauges.rebalanceBlocked.set(labels, 1);
+      // Surface the unbounded diagnostic detail (raw revert string, panic
+      // code, unrecognised hex selector) to Cloud Run logs only — the
+      // metric label is intentionally bounded to the ERROR_MESSAGES enum
+      // for cardinality + Slack-injection-safety reasons (see
+      // `rebalance-check.ts:decodeBlockedRevert`).
+      if (result.diagnostic) {
+        console.warn(
+          `[REBALANCE_PROBE_DIAGNOSTIC] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} reason_code=${result.reasonCode} detail=${result.diagnostic}`,
+        );
+      }
     } else if (result.kind === "transport_error") {
       console.warn(
         `[REBALANCE_PROBE_FAILED] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} error=${result.error}`,

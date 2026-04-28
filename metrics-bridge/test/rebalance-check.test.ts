@@ -13,14 +13,15 @@
 import { describe, it, expect } from "vitest";
 import {
   encodeErrorResult,
-  encodeFunctionData,
   parseAbi,
+  toFunctionSelector,
   type Hex,
   type PublicClient,
 } from "viem";
 import {
   probeRebalance,
   detectStrategyType,
+  scrubUrls,
   ERROR_MESSAGES,
 } from "../src/rebalance-check.js";
 
@@ -58,6 +59,7 @@ function encodeRevert(errorName: string, args: readonly unknown[] = []): Hex {
     "error PriceDifferenceMovedInWrongDirection()",
     "error CDPLS_REDEMPTION_SHORTFALL_TOO_LARGE(uint256 shortfall)",
     "error OLS_OUT_OF_COLLATERAL()",
+    "error OLS_OUT_OF_DEBT()",
   ]);
   return encodeErrorResult({ abi, errorName, args });
 }
@@ -140,6 +142,8 @@ describe("probeRebalance — known revert codes", () => {
     "CDPLS_STABILITY_POOL_BALANCE_TOO_LOW",
     "RLS_RESERVE_OUT_OF_COLLATERAL",
     "PriceDifferenceMovedInWrongDirection",
+    "OLS_OUT_OF_COLLATERAL",
+    "OLS_OUT_OF_DEBT",
   ] as const;
 
   it.each(codes)(
@@ -216,9 +220,15 @@ describe("probeRebalance — unknown / unrecognised reverts", () => {
     expect(result.kind).toBe("blocked");
     if (result.kind !== "blocked") return;
     expect(result.reasonCode).toBe("unknown");
-    expect(result.reasonMessage).toMatch(/unrecognized revert/i);
-    // Truncated payload is included so operators can grep for the selector.
-    expect(result.reasonMessage).toContain("0xdeadbeef");
+    // reason_message MUST stay inside the bounded enum (~30 fixed strings)
+    // — embedding the raw selector here would explode label cardinality
+    // and hand a Slack-injection vector to a non-canonical strategy
+    // contract. The raw payload lives on the `diagnostic` channel for
+    // operator log spelunking.
+    expect(result.reasonMessage).toBe("Unknown revert");
+    expect(result.reasonMessage).not.toContain("0xdeadbeef");
+    expect(result.diagnostic).toBeDefined();
+    expect(result.diagnostic).toContain("0xdeadbeef");
   });
 
   it("emits reason_code='unknown' when the contract revert carries no data", async () => {
@@ -234,6 +244,99 @@ describe("probeRebalance — unknown / unrecognised reverts", () => {
     expect(result.kind).toBe("blocked");
     if (result.kind !== "blocked") return;
     expect(result.reasonCode).toBe("unknown");
+  });
+});
+
+describe("probeRebalance — built-in Solidity reverts (Error / Panic)", () => {
+  // Both branches feed `reason_message` from a fixed string set so the
+  // alert label stays inside the bounded enum. The unbounded payload
+  // (the contract-supplied string / panic code) goes to `diagnostic`.
+  // Important: a non-canonical strategy contract MUST NOT be able to
+  // inject Slack mrkdwn (`*bold*`, `<url|text>`, newlines) into the
+  // alert body via `Error("...")`.
+  it("Error(string) decodes to fixed reasonMessage, raw string only on diagnostic", async () => {
+    const errorAbi = parseAbi(["error Error(string reason)"]);
+    const data = encodeErrorResult({
+      abi: errorAbi,
+      errorName: "Error",
+      args: ["*pwned* <https://evil.example/|click>"],
+    });
+    const err = makeRevertError("execution reverted", data);
+    const result = await probeRebalance(
+      mockRevertingClient(err),
+      POOL,
+      STRATEGY,
+    );
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") return;
+    expect(result.reasonCode).toBe("Error");
+    expect(result.reasonMessage).toBe("Reverted with revert string");
+    // Slack-injection-safety: the contract-supplied string MUST NOT leak
+    // into the user-visible reasonMessage (no mrkdwn passthrough).
+    expect(result.reasonMessage).not.toContain("*pwned*");
+    expect(result.reasonMessage).not.toContain("evil.example");
+    // Operator detail is preserved on the diagnostic channel for log
+    // spelunking but never enters the metric label set.
+    expect(result.diagnostic).toBeDefined();
+    expect(result.diagnostic).toContain("*pwned*");
+  });
+
+  it("Panic(uint256) decodes to fixed reasonMessage, panic code only on diagnostic", async () => {
+    const panicAbi = parseAbi(["error Panic(uint256 code)"]);
+    // Panic 0x11: arithmetic overflow.
+    const data = encodeErrorResult({
+      abi: panicAbi,
+      errorName: "Panic",
+      args: [0x11n],
+    });
+    const err = makeRevertError("execution reverted", data);
+    const result = await probeRebalance(
+      mockRevertingClient(err),
+      POOL,
+      STRATEGY,
+    );
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") return;
+    expect(result.reasonCode).toBe("Panic");
+    expect(result.reasonMessage).toBe("Solidity panic");
+    expect(result.reasonMessage).not.toContain("0x11");
+    expect(result.diagnostic).toBeDefined();
+    expect(result.diagnostic).toContain("0x11");
+  });
+});
+
+describe("scrubUrls — RPC API key leak prevention", () => {
+  // The diagnostic / transport_error channels are written to Cloud Run
+  // logs verbatim. viem error messages routinely embed the failing URL,
+  // which on Alchemy / Infura / any path-based-auth endpoint IS the API
+  // credential. Operator-facing logs MUST NOT carry it.
+  it("redacts an Alchemy URL with embedded API key", () => {
+    const raw =
+      "HTTP request failed. URL: https://eth-mainnet.g.alchemy.com/v2/REDACTED_API_KEY/some/path";
+    const scrubbed = scrubUrls(raw);
+    expect(scrubbed).toContain("<rpc-url-redacted>");
+    expect(scrubbed).not.toContain("alchemy.com");
+    expect(scrubbed).not.toContain("REDACTED_API_KEY");
+  });
+
+  it("redacts an http:// URL too", () => {
+    const raw = "fetch failed. URL: http://internal.rpc.local:8545/path";
+    const scrubbed = scrubUrls(raw);
+    expect(scrubbed).toContain("<rpc-url-redacted>");
+    expect(scrubbed).not.toContain("internal.rpc.local");
+  });
+
+  it("leaves plain text untouched", () => {
+    expect(scrubUrls("ECONNREFUSED")).toBe("ECONNREFUSED");
+    expect(scrubUrls("execution reverted")).toBe("execution reverted");
+  });
+
+  it("redacts URL but preserves surrounding error context", () => {
+    const raw =
+      "Request failed: HTTP request failed. URL: https://api.example.com/v2/KEY";
+    const scrubbed = scrubUrls(raw);
+    expect(scrubbed).toMatch(/^Request failed: HTTP request failed\. URL: /);
+    expect(scrubbed).toContain("<rpc-url-redacted>");
   });
 });
 
@@ -376,16 +479,14 @@ describe("probeRebalance — strategy-type branching", () => {
     if (result.kind !== "blocked") return;
     expect(result.reasonCode).toBe("OLS_OUT_OF_COLLATERAL");
     // Regression guard: confirm the call() data carries determineAction's
-    // selector, NOT rebalance's. If the OLS branch is ever broken, the
-    // probe will revert from address(0) inside ERC20 instead of returning
-    // a clean OLS_* code.
-    const rebalanceSelector = encodeFunctionData({
-      abi: parseAbi(["function rebalance(address pool) external"]),
-      functionName: "rebalance",
-      args: [POOL],
-    }).slice(0, 10);
+    // selector exactly. A negation against rebalance's selector would
+    // pass for any selector that isn't `rebalance` — including typos —
+    // so we anchor on the positive identity of the function we expect.
+    const determineActionSelector = toFunctionSelector(
+      "function determineAction(address pool)",
+    );
     expect(calledData).toBeDefined();
-    expect(calledData?.slice(0, 10)).not.toBe(rebalanceSelector);
+    expect(calledData?.slice(0, 10)).toBe(determineActionSelector);
   });
 
   it("Unknown strategy: returns 'skip' without emitting a probe call", async () => {

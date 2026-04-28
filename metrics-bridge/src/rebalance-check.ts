@@ -1,14 +1,11 @@
 /**
- * Rebalance feasibility probe — vendored, slimmed-down port of
+ * Rebalance feasibility probe — slimmed-down counterpart to
  * `ui-dashboard/src/lib/rebalance-check.ts`.
  *
- * The dashboard runs a richer probe with strategy-type detection and
- * collateral/balance enrichment for the pool-detail page tooltip. The
- * Slack alert annotation only needs the error code + human-readable
- * message, so this module drops:
- *
- * - Enrichment (stability pool balance, reserve collateral) — operators
- *   click through to the dashboard for that.
+ * The dashboard runs a richer probe with collateral/balance enrichment for
+ * the pool-detail page tooltip. The Slack alert annotation only needs the
+ * error code + bounded human-readable message, so this module drops the
+ * enrichment fetches (operators click through to the dashboard for that).
  *
  * Strategy-type detection IS retained — OLS pools route `rebalance` through
  * ERC20 transfers from `msg.sender`, so simulating from `address(0)`
@@ -16,9 +13,9 @@
  * branches on the detected type and uses `determineAction(pool)` (a view-
  * only function that handles the zero-sender path explicitly) for OLS.
  *
- * If a third consumer ever needs the probe, extract this + the dashboard's
- * `rebalance-check.ts` into a `shared-config/rebalance-check` module
- * instead of vendoring a third copy.
+ * Canonical ABI + error map live in `@mento-protocol/monitoring-config/rebalance-abi`
+ * — both this probe and the dashboard's import the same data so a revert
+ * decoded by one always decodes by the other.
  */
 
 import {
@@ -28,160 +25,28 @@ import {
   encodeFunctionData,
   parseAbi,
 } from "viem";
+import {
+  STRATEGY_ABI_SOURCES,
+  ERROR_MESSAGES,
+  HEALTHY_NO_OP_ERRORS,
+} from "@mento-protocol/monitoring-config/rebalance-abi";
+
+// Re-export for backwards compatibility — existing callers still import
+// `ERROR_MESSAGES` from this module.
+export { ERROR_MESSAGES };
 
 /**
- * Solidity custom errors emitted by the FPMM rebalance pipeline + the
- * detection-only getters needed to identify the strategy type. Mirror of
- * the dashboard ABI in `ui-dashboard/src/lib/rebalance-check.ts:21-81`
- * minus the enrichment getters (`poolConfigs`) which the alert annotation
- * doesn't need.
- *
- * Keep the error list in sync with the dashboard ABI — drift would mean the
- * alert annotation reports `unknown` for codes the dashboard handles.
+ * Strongly-typed strategy ABI. The string sources live in `shared-config/`
+ * (single source of truth shared with the dashboard); we hydrate them
+ * with viem's `parseAbi` here so the typing flows through.
  */
-const STRATEGY_ABI = parseAbi([
-  "function rebalance(address pool) external",
-  // OLS-specific probe: view-only, handles the zero-sender path explicitly,
-  // so it's the right substitute for `rebalance` simulation on OLS pools.
-  "function determineAction(address pool) external view returns ((address pool, uint256 reserveNumerator, uint256 reserveDenominator, uint256 oraclePriceNumerator, uint256 oraclePriceDenominator, bool reservePriceAboveOraclePrice, uint16 rebalanceThreshold, address token0, address token1, uint8 decimals0, uint8 decimals1, bool isToken0Debt, uint64 liquiditySourceIncentiveExpansion, uint64 protocolIncentiveExpansion, uint64 liquiditySourceIncentiveContraction, uint64 protocolIncentiveContraction) ctx, (uint8 direction, uint256 amount0Out, uint256 amount1Out, uint256 amountOwedToPool) action)",
-  // Strategy-type detection probes (zero-arg getters, cheap).
-  "function getCDPConfig(address pool) external view returns ((address stabilityPool, address collateralRegistry, uint256 stabilityPoolPercentage, uint256 maxIterations))",
-  "function reserve() external view returns (address)",
-  "function getPools() external view returns (address[])",
-  // Shared LS_*
-  "error LS_BAD_INCENTIVE()",
-  "error LS_CAN_ONLY_REBALANCE_ONCE(address pool)",
-  "error LS_COOLDOWN_ACTIVE()",
-  "error LS_DEBT_TOKEN_NOT_IN_POOL()",
-  "error LS_HOOK_NOT_CALLED()",
-  "error LS_INCENTIVE_TOO_HIGH()",
-  "error LS_INVALID_DECIMAL()",
-  "error LS_INVALID_OWNER()",
-  "error LS_INVALID_PRICES()",
-  "error LS_INVALID_SENDER()",
-  "error LS_INVALID_THRESHOLD()",
-  "error LS_POOL_ALREADY_EXISTS()",
-  "error LS_POOL_MUST_BE_SET()",
-  "error LS_POOL_NOT_FOUND()",
-  "error LS_POOL_NOT_REBALANCEABLE()",
-  "error LS_PROTOCOL_FEE_RECIPIENT_REQUIRED()",
-  "error LS_STRATEGY_EXECUTION_FAILED()",
-  "error LS_ZERO_DECIMAL()",
-  // CDP strategy
-  "error CDPLS_COLLATERAL_REGISTRY_IS_ZERO()",
-  "error CDPLS_INVALID_STABILITY_POOL_PERCENTAGE()",
-  "error CDPLS_OUT_OF_FUNDS_FOR_REDEMPTION_SUBSIDY()",
-  "error CDPLS_REDEMPTION_FEE_TOO_LARGE()",
-  "error CDPLS_REDEMPTION_SHORTFALL_TOO_LARGE(uint256 shortfall)",
-  "error CDPLS_STABILITY_POOL_BALANCE_TOO_LOW()",
-  "error CDPLS_STABILITY_POOL_IS_ZERO()",
-  // Reserve strategy
-  "error RLS_COLLATERAL_TO_POOL_FAILED()",
-  "error RLS_INVALID_RESERVE()",
-  "error RLS_RESERVE_OUT_OF_COLLATERAL()",
-  "error RLS_TOKEN_IN_NOT_SUPPORTED()",
-  "error RLS_TOKEN_OUT_NOT_SUPPORTED()",
-  // OLS strategy
-  "error OLS_OUT_OF_COLLATERAL()",
-  "error OLS_OUT_OF_DEBT()",
-  // FPMM pool-side errors
-  "error NotLiquidityStrategy()",
-  "error PriceDifferenceTooSmall()",
-  "error PriceDifferenceNotImproved()",
-  "error PriceDifferenceMovedInWrongDirection()",
-  "error PriceDifferenceMovedTooFarFromThresholds()",
-  "error RebalanceDirectionInvalid()",
-  "error RebalanceThresholdTooHigh()",
-  "error RebalanceIncentiveTooHigh()",
-  "error ReferenceRateNotSet()",
-  "error ReserveValueDecreased()",
-  "error ReservesEmpty()",
-]);
-
-/**
- * Error code → human-readable explanation. Vendored from the dashboard's
- * `ERROR_MESSAGES` map (`ui-dashboard/src/lib/rebalance-check.ts:93-152`).
- * Keep wording aligned — Slack operators and dashboard tooltips share the
- * same vocabulary.
- */
-export const ERROR_MESSAGES: Record<string, string> = {
-  // CDP strategy
-  CDPLS_STABILITY_POOL_BALANCE_TOO_LOW:
-    "Stability pool has insufficient liquidity to fully rebalance",
-  CDPLS_STABILITY_POOL_IS_ZERO:
-    "No stability pool configured for this strategy",
-  CDPLS_COLLATERAL_REGISTRY_IS_ZERO: "Collateral registry not configured",
-  CDPLS_OUT_OF_FUNDS_FOR_REDEMPTION_SUBSIDY:
-    "Insufficient funds to cover redemption subsidy",
-  CDPLS_REDEMPTION_FEE_TOO_LARGE: "Redemption fee exceeds tolerance",
-  CDPLS_REDEMPTION_SHORTFALL_TOO_LARGE:
-    "Redemption shortfall exceeds tolerance",
-  CDPLS_INVALID_STABILITY_POOL_PERCENTAGE:
-    "Invalid stability pool percentage configuration",
-  // Reserve strategy
-  RLS_RESERVE_OUT_OF_COLLATERAL:
-    "Reserve has insufficient collateral to rebalance",
-  RLS_INVALID_RESERVE: "Reserve contract not configured",
-  RLS_COLLATERAL_TO_POOL_FAILED: "Collateral transfer to pool failed",
-  RLS_TOKEN_IN_NOT_SUPPORTED: "Collateral token not supported by reserve",
-  RLS_TOKEN_OUT_NOT_SUPPORTED: "Debt token not supported by reserve",
-  // Open liquidity strategy
-  OLS_OUT_OF_COLLATERAL:
-    "Strategy has no collateral liquidity available to rebalance",
-  OLS_OUT_OF_DEBT: "Strategy has no debt liquidity available to rebalance",
-  // Shared
-  LS_COOLDOWN_ACTIVE: "Rebalance cooldown is active — retry shortly",
-  LS_POOL_NOT_REBALANCEABLE: "Pool deviation is below the rebalance threshold",
-  LS_INVALID_PRICES: "Oracle price data is invalid or stale",
-  LS_CAN_ONLY_REBALANCE_ONCE: "Pool was already rebalanced this block",
-  LS_POOL_NOT_FOUND: "Pool is not registered with this strategy",
-  LS_STRATEGY_EXECUTION_FAILED: "Strategy execution failed internally",
-  LS_HOOK_NOT_CALLED:
-    "Pool hook was not invoked — possible contract misconfiguration",
-  LS_BAD_INCENTIVE: "Incentive configuration is invalid",
-  LS_INCENTIVE_TOO_HIGH: "Rebalance incentive exceeds allowed maximum",
-  LS_DEBT_TOKEN_NOT_IN_POOL: "Debt token not found in pool pair",
-  LS_INVALID_DECIMAL: "Token decimal configuration is invalid",
-  LS_INVALID_OWNER: "Unauthorized — only owner can call this",
-  LS_INVALID_SENDER: "Unauthorized caller",
-  LS_INVALID_THRESHOLD: "Rebalance threshold is out of valid range",
-  LS_POOL_ALREADY_EXISTS: "Pool is already registered",
-  LS_POOL_MUST_BE_SET: "Pool address cannot be zero",
-  LS_PROTOCOL_FEE_RECIPIENT_REQUIRED: "Protocol fee recipient must be set",
-  LS_ZERO_DECIMAL: "Token has zero decimals",
-  // FPMM pool-side errors
-  NotLiquidityStrategy: "Caller is not a registered liquidity strategy",
-  PriceDifferenceTooSmall: "Pool deviation is below the rebalance threshold",
-  PriceDifferenceNotImproved: "Rebalance did not improve the price deviation",
-  PriceDifferenceMovedInWrongDirection:
-    "Rebalance moved the price in the wrong direction",
-  PriceDifferenceMovedTooFarFromThresholds:
-    "Rebalance moved the price too far past the threshold",
-  RebalanceDirectionInvalid: "Invalid rebalance direction",
-  RebalanceThresholdTooHigh: "Rebalance threshold exceeds allowed maximum",
-  RebalanceIncentiveTooHigh: "Rebalance incentive exceeds allowed maximum",
-  ReferenceRateNotSet: "Oracle reference rate is not configured",
-  ReserveValueDecreased: "Pool reserve value decreased after rebalance",
-  ReservesEmpty: "Pool reserves are empty",
-};
-
-/**
- * Codes that mean "the pool is healthy enough that the strategy refused to
- * rebalance" — surfacing these as a "blocked" annotation would be misleading.
- * The probe-cycle gating in `poller.ts` should already exclude pools below
- * threshold, but if one slips through (eval-race) we treat it as not-blocked
- * rather than emit a false "blocked" annotation.
- */
-const HEALTHY_NO_OP_ERRORS: ReadonlySet<string> = new Set([
-  "LS_POOL_NOT_REBALANCEABLE",
-  "PriceDifferenceTooSmall",
-]);
+const STRATEGY_ABI = parseAbi(STRATEGY_ABI_SOURCES);
 
 export type StrategyType = "cdp" | "reserve" | "ols" | "unknown";
 
 export type RebalanceProbeResult =
   | { kind: "ok" } // Probe succeeded — pool is rebalanceable.
-  | { kind: "blocked"; reasonCode: string; reasonMessage: string }
+  | RebalanceProbeBlocked
   | { kind: "transport_error"; error: string } // RPC down / 401 / timeout.
   | { kind: "skip"; reason: string }; // Detection failed — no metric, no log spam.
 
@@ -317,6 +182,33 @@ export async function probeRebalance(
   }
 }
 
+/**
+ * Diagnostic detail extracted from a decoded revert that's useful for
+ * operator log spelunking but MUST NOT enter the Prometheus label set.
+ *
+ * Why this is a separate channel from `reason_message`:
+ *   - Cardinality: `reason_message` is bounded to the `ERROR_MESSAGES` enum
+ *     (~30 values) so Prometheus series count stays bounded across revert
+ *     types. Embedding contract-supplied strings / panic codes / raw hex
+ *     would let an attacker (or a buggy strategy) explode the label space.
+ *   - Slack injection: the `reason_message` label is rendered into the
+ *     Slack alert body as mrkdwn. A non-canonical strategy contract could
+ *     return an `Error(string)` revert containing `*bold*` / `<url|text>` /
+ *     newlines and pollute the alert. Operators see only enum-derived
+ *     strings; the raw payload lives in Cloud Run logs.
+ *
+ * Caller contract: pass `diagnostic` to `console.warn` keyed on the pool
+ * + chain so the on-call operator can correlate the bounded label with
+ * the unbounded payload when investigating.
+ */
+export type RebalanceProbeBlocked = {
+  kind: "blocked";
+  reasonCode: string;
+  reasonMessage: string;
+  /** Unbounded operator detail — log-only, never label. */
+  diagnostic?: string;
+};
+
 function decodeBlockedRevert(err: unknown): RebalanceProbeResult {
   const revertData = extractRevertData(err);
   if (!revertData) {
@@ -334,10 +226,14 @@ function decodeBlockedRevert(err: unknown): RebalanceProbeResult {
     errorName = decoded.errorName;
     errorArgs = decoded.args;
   } catch {
+    // Don't embed the raw hex in `reason_message` — that's an unbounded
+    // label-cardinality explosion AND a Slack injection vector. The
+    // truncated payload is logged via `diagnostic` for operator spelunking.
     return {
       kind: "blocked",
       reasonCode: "unknown",
-      reasonMessage: `Unrecognized revert (${truncateHex(revertData)})`,
+      reasonMessage: "Unknown revert",
+      diagnostic: `unrecognised revert payload ${truncateHex(revertData)}`,
     };
   }
 
@@ -348,19 +244,27 @@ function decodeBlockedRevert(err: unknown): RebalanceProbeResult {
   }
 
   // Built-in Solidity reverts (Error / Panic) don't carry meaningful names.
-  // Surface the embedded message / panic code instead.
+  // We DO NOT embed the contract-supplied string (Error) or the panic code
+  // (Panic) into `reason_message`:
+  //   - Cardinality: would defeat the bounded-enum promise (~30 values).
+  //   - Slack injection: a non-canonical strategy could return
+  //     `Error("*pwned* <https://evil/|click>")` and pollute the alert body.
+  // The raw payload is logged via `diagnostic` so operators investigating
+  // a "Reverted with revert string" alert can find it in Cloud Run logs.
   if (errorName === "Error" && typeof errorArgs?.[0] === "string") {
     return {
       kind: "blocked",
       reasonCode: "Error",
-      reasonMessage: `Reverted: ${truncateString(errorArgs[0])}`,
+      reasonMessage: "Reverted with revert string",
+      diagnostic: `Error(string) payload: ${truncateString(errorArgs[0])}`,
     };
   }
   if (errorName === "Panic" && typeof errorArgs?.[0] === "bigint") {
     return {
       kind: "blocked",
       reasonCode: "Panic",
-      reasonMessage: `Panicked (code 0x${errorArgs[0].toString(16)})`,
+      reasonMessage: "Solidity panic",
+      diagnostic: `Panic code 0x${errorArgs[0].toString(16)}`,
     };
   }
 
@@ -413,11 +317,27 @@ function extractRevertData(err: unknown): Hex | null {
 }
 
 function extractRawMessage(err: unknown): string | null {
-  if (err instanceof Error) return err.message.slice(0, 200);
-  return String(err).slice(0, 200);
+  const raw = err instanceof Error ? err.message : String(err);
+  // viem transport errors routinely embed the failing URL ("HTTP request
+  // failed. URL: https://eth-mainnet.g.alchemy.com/v2/<APIKEY>..."), so
+  // operators on Alchemy / Infura / any path-based-auth RPC would have
+  // their API keys leaked into Cloud Run logs on every transport failure.
+  // The chain id is logged separately by the caller, so swapping the URL
+  // for a marker is no loss of operator signal.
+  return scrubUrls(raw).slice(0, 200);
 }
 
-/** Slack alert label values are user-visible — keep them concise. */
+/**
+ * Replace any http(s) URL substring with `<rpc-url-redacted>`. Used to
+ * sanitise error messages before logging — viem error messages routinely
+ * embed the failing RPC URL, which on path-based-auth endpoints (Alchemy,
+ * Infura, etc.) is itself the API credential. Exported for unit tests.
+ */
+export function scrubUrls(s: string): string {
+  return s.replace(/https?:\/\/[^\s)]+/gi, "<rpc-url-redacted>");
+}
+
+/** Cap diagnostic-channel strings before they hit Cloud Run logs. */
 function truncateString(s: string, max = 120): string {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
