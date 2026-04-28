@@ -101,10 +101,14 @@ function DeviationBar({
   rebalanceThreshold: number;
   status: HealthStatus;
 }) {
-  const diff = Number(priceDifference);
-  if (!rebalanceThreshold || rebalanceThreshold === 0 || diff === 0) {
+  // Only the missing-threshold case renders an em-dash — that's a real
+  // "no data" condition (indexer sentinel-0). diff === 0 is the perfect
+  // case (pool exactly on the oracle); render a 0%-filled bar + caption
+  // so the tile still tells a positive story.
+  if (!rebalanceThreshold || rebalanceThreshold === 0) {
     return <span className="text-sm text-slate-400">—</span>;
   }
+  const diff = Number(priceDifference);
   const threshold = rebalanceThreshold;
   const ratio = Math.min(diff / threshold, 1.5);
   const pct = Math.min(ratio * 100, 100);

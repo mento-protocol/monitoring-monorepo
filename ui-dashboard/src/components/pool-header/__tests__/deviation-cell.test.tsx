@@ -158,6 +158,19 @@ describe("DeviationCell — bar fill colors track health status", () => {
 });
 
 describe("DeviationCell — caption shows current/threshold pair", () => {
+  it("renders a 0%-filled bar and '0.00% of Y% threshold' for the perfect-balance case", () => {
+    // diff === 0 used to early-return "—" alongside the missing-threshold
+    // case — but a perfectly balanced pool should render proudly, not
+    // show a no-data dash. Bar at 0% width, caption shows the threshold.
+    const pool: Pool = { ...BASE_POOL, priceDifference: "0" };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toContain("0.00% of 50.00% threshold");
+    expect(html).toContain("bg-emerald-500");
+    expect(html).not.toMatch(/<dd><span[^>]*>—<\/span><\/dd>/);
+  });
+
   it("renders 'X% of Y% threshold' below the bar", () => {
     // 7610 bps / 5000 bps → "76.10% of 50.00% threshold"
     const pool: Pool = { ...BASE_POOL, priceDifference: "7610" };
