@@ -24,6 +24,7 @@ import {
 } from "./config.js";
 import { gauges, poolDisplayLabels } from "./metrics.js";
 import {
+  isAbortError,
   probeRebalance,
   type RebalanceProbeResult,
 } from "./rebalance-check.js";
@@ -76,6 +77,16 @@ export function eligibleForProbe(pools: PoolRow[]): PoolRow[] {
  * stuck RPC from blocking the next Hasura poll. Returns either the probe
  * result, a transport_error wrapping the timeout, or a transport_error
  * carrying "no rpc client" when the chain isn't configured.
+ *
+ * Cancellation: the timeout fires `controller.abort(...)` rather than just
+ * resolving an unrelated branch of `Promise.race`, so the in-flight
+ * `client.call` / `client.readContract` chain inside `probeRebalance` is
+ * actually cut loose (each RPC awaits an `abortable(...)` wrapper that
+ * rejects immediately when the signal fires). On the success path the
+ * timer handle is cleared so we don't leak a setTimeout per probe — at
+ * `REBALANCE_PROBE_CONCURRENCY=5` against a stuck endpoint that previously
+ * accumulated dropped-but-still-pending eth_calls AND timer handles every
+ * cycle. Tracked in `docs/BACKLOG.md` (since removed).
  */
 async function probeOne(pool: PoolRow): Promise<RebalanceProbeResult> {
   const client = getRpcClient(pool.chainId);
@@ -85,25 +96,45 @@ async function probeOne(pool: PoolRow): Promise<RebalanceProbeResult> {
   const poolAddress = poolIdAddress(pool.id) as `0x${string}`;
   const strategyAddress = pool.rebalancerAddress as `0x${string}`;
 
-  // chainId is forwarded so the probe can resolve token symbols via
-  // `@mento-protocol/monitoring-config/tokens` during reserve enrichment.
-  const probe = probeRebalance(
-    client,
-    poolAddress,
-    strategyAddress,
-    pool.chainId,
+  const controller = new AbortController();
+  const timeoutMessage = `probe timed out after ${REBALANCE_PROBE_TIMEOUT_MS}ms`;
+  // Custom abort reason so downstream `abortReason(signal)` re-throws an
+  // Error with a useful message (Node's default is a DOMException with
+  // "This operation was aborted", which we'd lose in the transport_error
+  // branch's logging).
+  const timeoutErr = new Error(timeoutMessage);
+  timeoutErr.name = "AbortError";
+  const timeoutHandle = setTimeout(
+    () => controller.abort(timeoutErr),
+    REBALANCE_PROBE_TIMEOUT_MS,
   );
-  const timeout = new Promise<RebalanceProbeResult>((resolve) => {
-    setTimeout(
-      () =>
-        resolve({
-          kind: "transport_error",
-          error: `probe timed out after ${REBALANCE_PROBE_TIMEOUT_MS}ms`,
-        }),
-      REBALANCE_PROBE_TIMEOUT_MS,
+
+  try {
+    // chainId is forwarded so the probe can resolve token symbols via
+    // `@mento-protocol/monitoring-config/tokens` during reserve enrichment.
+    return await probeRebalance(
+      client,
+      poolAddress,
+      strategyAddress,
+      pool.chainId,
+      controller.signal,
     );
-  });
-  return Promise.race([probe, timeout]);
+  } catch (err) {
+    if (isAbortError(err)) {
+      return { kind: "transport_error", error: timeoutMessage };
+    }
+    // Any other error escaping the probe is unexpected — surface it as a
+    // transport_error with the (URL-scrubbed) message rather than crashing
+    // the runner. `probeRebalance` already classifies its own transport
+    // errors, so this branch is effectively dead-code defense.
+    const message = err instanceof Error ? err.message : String(err);
+    return { kind: "transport_error", error: message.slice(0, 200) };
+  } finally {
+    // Always clear the timer so we don't leak a setTimeout per probe — at
+    // `REBALANCE_PROBE_CONCURRENCY=5` and a 30s poll cadence, leaking a
+    // handle per probe accumulates fast under steady-state probing.
+    clearTimeout(timeoutHandle);
+  }
 }
 
 /**

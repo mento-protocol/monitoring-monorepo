@@ -105,43 +105,61 @@ export type RebalanceProbeResult =
  * Only swallows contract-shape reverts ("function not found" on wrong ABI).
  * Transport errors propagate so the caller can log + skip without
  * mistaking an RPC outage for an unidentified strategy.
+ *
+ * The optional `signal` is forwarded by `probeOne`'s per-probe
+ * AbortController so a stuck endpoint can't keep this detection chain
+ * alive after the wall-clock timeout has fired — see
+ * `metrics-bridge/src/rebalance-probe.ts:probeOne`.
  */
 export async function detectStrategyType(
   client: PublicClient,
   strategy: `0x${string}`,
   pool: `0x${string}`,
+  signal?: AbortSignal,
 ): Promise<DetectedStrategy> {
   try {
-    await client.readContract({
-      address: strategy,
-      abi: STRATEGY_ABI,
-      functionName: "getCDPConfig",
-      args: [pool],
-    });
+    await abortable(
+      client.readContract({
+        address: strategy,
+        abi: STRATEGY_ABI,
+        functionName: "getCDPConfig",
+        args: [pool],
+      }),
+      signal,
+    );
     return { type: "cdp" };
   } catch (err) {
+    if (isAbortError(err)) throw err;
     if (!isContractRevert(err)) throw err;
   }
 
   try {
-    const reserveAddr = (await client.readContract({
-      address: strategy,
-      abi: STRATEGY_ABI,
-      functionName: "reserve",
-    })) as `0x${string}`;
+    const reserveAddr = (await abortable(
+      client.readContract({
+        address: strategy,
+        abi: STRATEGY_ABI,
+        functionName: "reserve",
+      }),
+      signal,
+    )) as `0x${string}`;
     return { type: "reserve", reserveAddr };
   } catch (err) {
+    if (isAbortError(err)) throw err;
     if (!isContractRevert(err)) throw err;
   }
 
   try {
-    await client.readContract({
-      address: strategy,
-      abi: STRATEGY_ABI,
-      functionName: "getPools",
-    });
+    await abortable(
+      client.readContract({
+        address: strategy,
+        abi: STRATEGY_ABI,
+        functionName: "getPools",
+      }),
+      signal,
+    );
     return { type: "ols" };
   } catch (err) {
+    if (isAbortError(err)) throw err;
     if (!isContractRevert(err)) throw err;
   }
 
@@ -182,11 +200,25 @@ export async function probeRebalance(
    * chain and falls back to "collateral".
    */
   chainId: number,
+  /**
+   * Optional abort signal threaded by the runner (`probeOne` →
+   * `runRebalanceProbes`). When the signal aborts, in-flight RPC reads
+   * reject with an `AbortError` so the runner can short-circuit the
+   * detection / simulation / enrichment chain instead of holding stale
+   * eth_calls past the wall-clock timeout.
+   */
+  signal?: AbortSignal,
 ): Promise<RebalanceProbeResult> {
   let detected: DetectedStrategy;
   try {
-    detected = await detectStrategyType(client, strategyAddress, poolAddress);
+    detected = await detectStrategyType(
+      client,
+      strategyAddress,
+      poolAddress,
+      signal,
+    );
   } catch (err: unknown) {
+    if (isAbortError(err)) throw err;
     return {
       kind: "transport_error",
       error: extractRawMessage(err) ?? "transport error",
@@ -207,16 +239,20 @@ export async function probeRebalance(
   const probeFn = detected.type === "ols" ? "determineAction" : "rebalance";
 
   try {
-    await client.call({
-      to: strategyAddress,
-      data: encodeFunctionData({
-        abi: STRATEGY_ABI,
-        functionName: probeFn,
-        args: [poolAddress],
+    await abortable(
+      client.call({
+        to: strategyAddress,
+        data: encodeFunctionData({
+          abi: STRATEGY_ABI,
+          functionName: probeFn,
+          args: [poolAddress],
+        }),
       }),
-    });
+      signal,
+    );
     return { kind: "ok" };
   } catch (err: unknown) {
+    if (isAbortError(err)) throw err;
     if (!isContractRevert(err)) {
       return {
         kind: "transport_error",
@@ -230,6 +266,7 @@ export async function probeRebalance(
       poolAddress,
       strategyAddress,
       chainId,
+      signal,
     });
   }
 }
@@ -254,6 +291,7 @@ async function maybeEnrichDecodedResult(
     poolAddress: `0x${string}`;
     strategyAddress: `0x${string}`;
     chainId: number;
+    signal?: AbortSignal;
   },
 ): Promise<RebalanceProbeResult> {
   if (
@@ -267,6 +305,7 @@ async function maybeEnrichDecodedResult(
       ctx.poolAddress,
       ctx.chainId,
       ctx.detected.reserveAddr,
+      ctx.signal,
     );
     if (enrichment) {
       return {
@@ -424,6 +463,68 @@ function decodeBlockedRevert(err: unknown): RebalanceProbeResult {
 }
 
 /**
+ * Race a viem RPC promise against an abort signal. When the signal fires,
+ * the wrapper rejects with the signal's `reason` (an `AbortError`-shaped
+ * `Error` we construct in `probeOne`) so the awaiter can short-circuit
+ * the detection / simulation / enrichment chain instead of holding stale
+ * eth_calls past the wall-clock timeout.
+ *
+ * Note: viem 2.47.0 doesn't accept a per-call `signal` on `client.call` /
+ * `client.readContract` (the http transport accepts `fetchOptions.signal`
+ * only at transport-creation time, not per call). The orphaned fetch
+ * itself can't be cancelled mid-flight, but the JS-visible promise
+ * rejects immediately so the runner stops awaiting it. Once viem adds
+ * native per-call signal support this wrapper can be retired in favour
+ * of plumbing `signal` directly into the action options.
+ */
+export function abortable<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reject(abortReason(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
+function abortReason(signal: AbortSignal): Error {
+  const reason = signal.reason;
+  if (reason instanceof Error) return reason;
+  const err = new Error(
+    typeof reason === "string" ? reason : "operation was aborted",
+  );
+  err.name = "AbortError";
+  return err;
+}
+
+/**
+ * Detect an abort-error thrown by `abortable` (or by Node's built-in
+ * abort plumbing). Used in `detectStrategyType` / `probeRebalance` so
+ * abort signals propagate cleanly past the contract-revert classifier
+ * (which would otherwise misinterpret them as transport errors).
+ */
+export function isAbortError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { name?: string; code?: string };
+  return e.name === "AbortError" || e.code === "ABORT_ERR";
+}
+
+/**
  * Heuristic: contract reverts contain revert data or "execution reverted" /
  * "returned no data" in the message. Transport errors (fetch failures, 401,
  * timeouts) do not match either branch.
@@ -544,17 +645,21 @@ async function resolveDecimals(
   client: PublicClient,
   chainId: number,
   address: `0x${string}`,
+  signal?: AbortSignal,
 ): Promise<number> {
   const canonical = tokenDecimals(chainId, address);
   if (canonical !== null) return canonical;
   const key = `${chainId}:${address.toLowerCase()}`;
   const cached = decimalsCache.get(key);
   if (cached !== undefined) return cached;
-  const decimals = (await client.readContract({
-    address,
-    abi: ERC20_BALANCE_ABI,
-    functionName: "decimals",
-  })) as number;
+  const decimals = (await abortable(
+    client.readContract({
+      address,
+      abi: ERC20_BALANCE_ABI,
+      functionName: "decimals",
+    }),
+    signal,
+  )) as number;
   const decimalsNum = Number(decimals);
   // Evict the oldest entry when full. Iteration order on Map is insertion
   // order, so the first key is effectively the coldest write (FIFO).
@@ -587,52 +692,67 @@ export function _resolveDecimalsForTest(
  */
 function makeEnrichmentRpc(client: PublicClient): EnrichmentRpc {
   return {
-    async readDetermineAction({ strategy, pool }) {
-      const [ctx, action] = (await client.readContract({
-        address: strategy,
-        abi: STRATEGY_ABI,
-        functionName: "determineAction",
-        args: [pool],
-      })) as readonly [{ isToken0Debt: boolean }, { amountOwedToPool: bigint }];
+    async readDetermineAction({ strategy, pool, signal }) {
+      const [ctx, action] = (await abortable(
+        client.readContract({
+          address: strategy,
+          abi: STRATEGY_ABI,
+          functionName: "determineAction",
+          args: [pool],
+        }),
+        signal,
+      )) as readonly [{ isToken0Debt: boolean }, { amountOwedToPool: bigint }];
       return {
         isToken0Debt: ctx.isToken0Debt,
         amountOwedToPool: action.amountOwedToPool,
       };
     },
-    async readPoolConfigs({ strategy, pool }) {
-      const cfg = (await client.readContract({
-        address: strategy,
-        abi: STRATEGY_ABI,
-        functionName: "poolConfigs",
-        args: [pool],
-      })) as readonly [boolean, ...unknown[]];
+    async readPoolConfigs({ strategy, pool, signal }) {
+      const cfg = (await abortable(
+        client.readContract({
+          address: strategy,
+          abi: STRATEGY_ABI,
+          functionName: "poolConfigs",
+          args: [pool],
+        }),
+        signal,
+      )) as readonly [boolean, ...unknown[]];
       return { isToken0Debt: cfg[0] };
     },
-    async readPoolTokens(pool) {
+    async readPoolTokens(pool, signal) {
       const [token0, token1] = await Promise.all([
-        client.readContract({
-          address: pool,
-          abi: POOL_TOKEN_ABI,
-          functionName: "token0",
-        }),
-        client.readContract({
-          address: pool,
-          abi: POOL_TOKEN_ABI,
-          functionName: "token1",
-        }),
+        abortable(
+          client.readContract({
+            address: pool,
+            abi: POOL_TOKEN_ABI,
+            functionName: "token0",
+          }),
+          signal,
+        ),
+        abortable(
+          client.readContract({
+            address: pool,
+            abi: POOL_TOKEN_ABI,
+            functionName: "token1",
+          }),
+          signal,
+        ),
       ]);
       return {
         token0: token0 as `0x${string}`,
         token1: token1 as `0x${string}`,
       };
     },
-    async readBalanceOf({ token, holder }) {
-      return (await client.readContract({
-        address: token,
-        abi: ERC20_BALANCE_ABI,
-        functionName: "balanceOf",
-        args: [holder],
-      })) as bigint;
+    async readBalanceOf({ token, holder, signal }) {
+      return (await abortable(
+        client.readContract({
+          address: token,
+          abi: ERC20_BALANCE_ABI,
+          functionName: "balanceOf",
+          args: [holder],
+        }),
+        signal,
+      )) as bigint;
     },
   };
 }
@@ -658,6 +778,7 @@ async function fetchReserveEnrichment(
   pool: `0x${string}`,
   chainId: number,
   reserveAddr: `0x${string}`,
+  signal?: AbortSignal,
 ): Promise<{ balance: number; needed: number; tokenSymbol: string } | null> {
   const result = await fetchReserveEnrichmentShared(
     makeEnrichmentRpc(client),
@@ -668,7 +789,9 @@ async function fetchReserveEnrichment(
       reserveAddr,
       mode: "needed",
       resolveSymbol: (cId, addr) => tokenSymbol(cId, addr),
-      resolveDecimals: (cId, addr) => resolveDecimals(client, cId, addr),
+      resolveDecimals: (cId, addr, sig) =>
+        resolveDecimals(client, cId, addr, sig),
+      signal,
     },
   );
   if (result === null || result.needed === undefined) return null;

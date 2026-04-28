@@ -437,6 +437,12 @@ async function fetchCDPEnrichment(
 const POOL_PAIR_ABI = parseAbi(POOL_PAIR_ABI_SOURCES);
 
 function makeEnrichmentRpc(client: PublicClient): EnrichmentRpc {
+  // Dashboard's tooltip is user-initiated and tolerates the natural HTTP
+  // timeout — there's no caller wiring an AbortSignal in. The args
+  // accept the optional `signal` to match the shared interface, but the
+  // dashboard doesn't propagate it (no per-call cancellation, no leak
+  // surface). The metrics-bridge probe does plumb it through to its
+  // wall-clock-timed runner; see `metrics-bridge/src/rebalance-check.ts`.
   return {
     async readDetermineAction({ strategy, pool }) {
       // Dashboard never uses needed-mode (calls `fetchReserveEnrichment` in

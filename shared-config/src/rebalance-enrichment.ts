@@ -38,26 +38,38 @@ export { ERC20_ABI_SOURCES, POOL_PAIR_ABI_SOURCES, STRATEGY_ABI_SOURCES };
  * name / args / return type) so consumers can adapt their viem client with
  * a single thin wrapper. See `metrics-bridge/src/rebalance-check.ts` and
  * `ui-dashboard/src/lib/rebalance-check.ts` for the call shape.
+ *
+ * Each dispatcher accepts an optional `signal: AbortSignal`. When present
+ * and aborted, the dispatcher MUST reject promptly so the caller's await
+ * unblocks (the underlying viem `client.readContract` doesn't natively
+ * accept a per-call signal in viem 2.47.0, so consumers wrap each call in
+ * a `Promise.race`-style abort guard — see metrics-bridge's `abortable`
+ * helper). This lets the metrics-bridge probe runner cancel an outlived
+ * cycle's enrichment fetches without leaking RPC calls.
  */
 export interface EnrichmentRpc {
   /** Read `determineAction(pool)` — used in `mode: "needed"`. */
   readDetermineAction(args: {
     strategy: `0x${string}`;
     pool: `0x${string}`;
+    signal?: AbortSignal;
   }): Promise<{ isToken0Debt: boolean; amountOwedToPool: bigint }>;
   /** Read `poolConfigs(pool)` — used in `mode: "balance-only"`. */
   readPoolConfigs(args: {
     strategy: `0x${string}`;
     pool: `0x${string}`;
+    signal?: AbortSignal;
   }): Promise<{ isToken0Debt: boolean }>;
   /** Read pool's `token0()` and `token1()` in parallel. */
   readPoolTokens(
     pool: `0x${string}`,
+    signal?: AbortSignal,
   ): Promise<{ token0: `0x${string}`; token1: `0x${string}` }>;
   /** Read `balanceOf(holder)` against an ERC20. */
   readBalanceOf(args: {
     token: `0x${string}`;
     holder: `0x${string}`;
+    signal?: AbortSignal;
   }): Promise<bigint>;
 }
 
@@ -91,8 +103,25 @@ export interface EnrichmentOptions {
    * decimals. Both consumers prefer the canonical manifest first (zero
    * RPC) and fall back to an on-chain read; the difference is in the
    * caching strategy. Throw on unrecoverable RPC failure.
+   *
+   * The optional `signal` is forwarded by the bridge probe so a timed-out
+   * cycle can short-circuit on-chain decimal lookups too — dashboards
+   * that don't aim a signal at this resolver simply omit the argument.
    */
-  resolveDecimals(chainId: number, address: `0x${string}`): Promise<number>;
+  resolveDecimals(
+    chainId: number,
+    address: `0x${string}`,
+    signal?: AbortSignal,
+  ): Promise<number>;
+  /**
+   * Optional abort signal threaded through every RPC call this enrichment
+   * fetch issues. When the signal aborts, all in-flight reads MUST reject
+   * promptly so the caller can stop holding stale state. The metrics-bridge
+   * probe sets this to its per-probe AbortController; the dashboard tooltip
+   * leaves it undefined (no cancellation requirement on user-initiated
+   * tooltip fetches).
+   */
+  signal?: AbortSignal;
 }
 
 export interface EnrichmentResult {
@@ -126,11 +155,12 @@ export async function fetchReserveEnrichment(
     //    debt-leg read goes first so consumers with sequential / order-
     //    sensitive mocks (vitest `mockResolvedValueOnce` chains) can stay
     //    deterministic without overhauling their fixtures.
+    const { signal } = options;
     const [debtInfo, { token0, token1 }] = await Promise.all([
       options.mode === "needed"
-        ? rpc.readDetermineAction({ strategy, pool })
-        : rpc.readPoolConfigs({ strategy, pool }),
-      rpc.readPoolTokens(pool),
+        ? rpc.readDetermineAction({ strategy, pool, signal })
+        : rpc.readPoolConfigs({ strategy, pool, signal }),
+      rpc.readPoolTokens(pool, signal),
     ]);
 
     // 2. Collateral is the non-debt leg.
@@ -145,9 +175,10 @@ export async function fetchReserveEnrichment(
       rpc.readBalanceOf({
         token: collateralToken,
         holder: options.reserveAddr,
+        signal,
       }),
       options.resolveSymbol(options.chainId, collateralToken),
-      options.resolveDecimals(options.chainId, collateralToken),
+      options.resolveDecimals(options.chainId, collateralToken, signal),
     ]);
 
     const result: EnrichmentResult = {
