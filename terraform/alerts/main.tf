@@ -114,7 +114,39 @@ locals {
   #     "<reason_message> — [<reason_code>]".
   deviation_critical_current_deviation_annotation = "{{ if $values.Dev }}{{ printf \"%.0f%%\" $values.Dev.Value }} above threshold{{ end }}"
   deviation_critical_current_reserves_annotation  = "{{ if and $values.R0 $values.R1 }}{{ humanizePercentage $values.R0.Value }} {{ $values.R0.Labels.token_symbol }} / {{ humanizePercentage $values.R1.Value }} {{ $values.R1.Labels.token_symbol }}{{ end }}"
-  deviation_critical_rebalance_reason_annotation  = "{{ if $values.B }}{{ $rm := index $values.B.Labels \"reason_message\" }}{{ $rc := index $values.B.Labels \"reason_code\" }}{{ if and $rm $rc }}{{ $rm }}{{ if and $values.Bal $values.Need }}. Current balance: {{ printf \"%.2f\" $values.Bal.Value }} {{ $values.Bal.Labels.token_symbol }} / Needed for rebalancing: {{ printf \"%.2f\" $values.Need.Value }} {{ $values.Bal.Labels.token_symbol }}{{ else }} — [{{ $rc }}]{{ end }}{{ end }}{{ end }}"
+  # Three-level nested guard — single-string form was 600+ chars and hard
+  # to audit visually. HEREDOC preserves the byte-identical rendered output
+  # via `{{-`/`-}}` whitespace trim markers (they strip ALL surrounding
+  # whitespace including the newline), so the output collapses to one line
+  # at render time exactly as before. The leading `{{- end }}` line of the
+  # heredoc is trimmed away by the template engine, leaving no trailing
+  # newline.
+  #
+  # Branches:
+  #   - outer `{{ if $values.B }}` — guards on the rebalance-blocked gauge
+  #     producing a series at all (probe didn't run / RPC down → no
+  #     annotation line).
+  #   - middle `{{ if and $rm $rc }}` — both labels are 1:1 with the gauge
+  #     by construction; the nil-and-emptystring guard is defensive against
+  #     a misconfigured probe writing only one half.
+  #   - inner `{{ if and $values.Bal $values.Need }}` — Reserve enrichment
+  #     present (RLS_RESERVE_OUT_OF_COLLATERAL only) → render symbol + balance.
+  #     Else branch falls through to "[reason_code]" tag for non-reserve
+  #     reasons, preserving the historical shape.
+  deviation_critical_rebalance_reason_annotation = <<-EOT
+    {{- if $values.B -}}
+      {{- $rm := index $values.B.Labels "reason_message" -}}
+      {{- $rc := index $values.B.Labels "reason_code" -}}
+      {{- if and $rm $rc -}}
+        {{- $rm -}}
+        {{- if and $values.Bal $values.Need -}}
+          . Current balance: {{ printf "%.2f" $values.Bal.Value }} {{ $values.Bal.Labels.token_symbol }} / Needed for rebalancing: {{ printf "%.2f" $values.Need.Value }} {{ $values.Bal.Labels.token_symbol -}}
+        {{- else -}}
+          {{ " — [" }}{{- $rc -}}{{ "]" }}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  EOT
 
   # ── Deviation Breach Critical annotation-only data sources ───────────────
   # Both critical rules (magnitude-gated + anchored) wire the same six
