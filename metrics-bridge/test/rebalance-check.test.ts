@@ -516,3 +516,234 @@ describe("probeRebalance — strategy-type branching", () => {
     expect(result.error).toContain("ECONNREFUSED");
   });
 });
+
+describe("probeRebalance — Reserve enrichment for RLS_RESERVE_OUT_OF_COLLATERAL", () => {
+  // The dashboard's reserve-enrichment path reads `reserve()` then chases
+  // through `determineAction(pool)` (for the debt-leg flag + amountOwedToPool)
+  // and `balanceOf` on the collateral token. The metrics-bridge probe
+  // mirrors that path so the Slack alert can render "Reserve has insufficient
+  // axlUSDC. Current balance: 0.00 axlUSDC / Needed for rebalancing:
+  // 12,500.00 axlUSDC". Tests exercise the full enrichment chain end-to-end.
+
+  // Real Celo addresses so `tokenSymbol(42220, ...)` resolves to the canonical
+  // symbol via @mento-protocol/contracts. The pool address is the
+  // axlUSDC/USDm Celo pool from known-pools.json; collateral is axlUSDC
+  // (the non-debt leg, picked when isToken0Debt=false).
+  const CELO_CHAIN_ID = 42220;
+  const POOL_USDM_AXLUSDC: `0x${string}` =
+    "0xb285d4c7133d6f27bfb29224fb0d22e7ec3ddd2d";
+  const TOKEN_USDM = "0x765de816845861e75a25fca122bb6898b8b1282a";
+  const TOKEN_AXLUSDC = "0xeb466342c4d449bc9f53a865d5cb90586f405215";
+  const RESERVE_ADDR: `0x${string}` =
+    "0x0000000000000000000000000000000000000abc";
+
+  /**
+   * Build a reserve-strategy client whose enrichment path responds with the
+   * configured fixture. The probe fires:
+   *   1. `reserve()` → reserveAddr
+   *   2. `determineAction(pool)` → [ctx{isToken0Debt}, action{amountOwedToPool}]
+   *   3. `token0()` / `token1()` on the pool
+   *   4. `balanceOf(reserveAddr)` + `decimals()` on the collateral token
+   * `enrichmentOverride` lets a test inject failures to exercise the
+   * graceful-degradation branch.
+   */
+  function mockReserveClient(opts: {
+    isToken0Debt: boolean;
+    amountOwedToPool: bigint;
+    balance: bigint;
+    decimals: number;
+    enrichmentReject?: string;
+  }): PublicClient {
+    const data = encodeRevert("RLS_RESERVE_OUT_OF_COLLATERAL");
+    const err = makeRevertError("execution reverted", data);
+    return {
+      call: () => Promise.reject(err),
+      readContract: ({
+        address,
+        functionName,
+      }: {
+        address: string;
+        functionName: string;
+      }) => {
+        if (opts.enrichmentReject !== undefined && functionName !== "reserve") {
+          // First call (reserve()) succeeds for detection; later calls fail
+          // to simulate transport errors during enrichment.
+          // Note: detectStrategyType also calls reserve() — that always
+          // resolves so detection lands on "reserve".
+        }
+        // Detection probes — only `reserve()` succeeds, others fall through.
+        if (functionName === "getCDPConfig")
+          return Promise.reject(functionNotFoundError());
+        if (functionName === "reserve") return Promise.resolve(RESERVE_ADDR);
+        if (functionName === "getPools")
+          return Promise.reject(functionNotFoundError());
+
+        if (opts.enrichmentReject !== undefined) {
+          return Promise.reject(new Error(opts.enrichmentReject));
+        }
+
+        if (functionName === "determineAction") {
+          return Promise.resolve([
+            {
+              pool: POOL_USDM_AXLUSDC,
+              isToken0Debt: opts.isToken0Debt,
+            },
+            { amountOwedToPool: opts.amountOwedToPool },
+          ]);
+        }
+        if (functionName === "token0") {
+          return Promise.resolve(TOKEN_USDM);
+        }
+        if (functionName === "token1") {
+          return Promise.resolve(TOKEN_AXLUSDC);
+        }
+        if (functionName === "balanceOf") {
+          if (address.toLowerCase() === TOKEN_AXLUSDC.toLowerCase()) {
+            return Promise.resolve(opts.balance);
+          }
+          return Promise.resolve(0n);
+        }
+        if (functionName === "decimals") {
+          return Promise.resolve(opts.decimals);
+        }
+        return Promise.reject(
+          new Error(`unexpected functionName: ${functionName}`),
+        );
+      },
+    } as unknown as PublicClient;
+  }
+
+  it("decodes RLS_RESERVE_OUT_OF_COLLATERAL with enrichment: reasonMessage names the symbol, balance + needed populated", async () => {
+    const client = mockReserveClient({
+      isToken0Debt: true, // USDm (token0) is debt; axlUSDC (token1) is collateral.
+      amountOwedToPool: 12_500_000_000n, // 12,500 axlUSDC (6dp).
+      balance: 0n, // Reserve has zero collateral — exact failure mode.
+      decimals: 6,
+    });
+    const result = await probeRebalance(
+      client,
+      POOL_USDM_AXLUSDC,
+      STRATEGY,
+      CELO_CHAIN_ID,
+    );
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") return;
+    expect(result.reasonCode).toBe("RLS_RESERVE_OUT_OF_COLLATERAL");
+    // Symbol-specific message replaces the bounded-enum default — cardinality
+    // stays bounded by the @mento-protocol/contracts token list.
+    expect(result.reasonMessage).toBe("Reserve has insufficient axlUSDC");
+    expect(result.reserveCollateral).toEqual({
+      balance: 0,
+      needed: 12_500,
+      tokenSymbol: "axlUSDC",
+    });
+  });
+
+  it("falls through to generic reason_message when enrichment fetch fails", async () => {
+    // Transport error inside the enrichment chain (after reserve() resolves
+    // — so detection still pins strategyType=reserve). The probe MUST NOT
+    // fail loudly; the breach alert keeps firing with the bounded enum
+    // message.
+    const client = mockReserveClient({
+      isToken0Debt: true,
+      amountOwedToPool: 0n,
+      balance: 0n,
+      decimals: 6,
+      enrichmentReject: "fetch failed",
+    });
+    const result = await probeRebalance(
+      client,
+      POOL_USDM_AXLUSDC,
+      STRATEGY,
+      CELO_CHAIN_ID,
+    );
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") return;
+    expect(result.reasonCode).toBe("RLS_RESERVE_OUT_OF_COLLATERAL");
+    // Bounded enum default — no symbol substitution because enrichment failed.
+    expect(result.reasonMessage).toBe(
+      ERROR_MESSAGES.RLS_RESERVE_OUT_OF_COLLATERAL,
+    );
+    expect(result.reserveCollateral).toBeUndefined();
+  });
+
+  it('falls back to "collateral" when token symbol is unresolvable', async () => {
+    // Mock client that returns an unmapped token address as the collateral
+    // leg. The probe should emit `reasonMessage: "Reserve has insufficient
+    // collateral"` instead of crashing.
+    const UNKNOWN_TOKEN = "0x000000000000000000000000000000000000dead";
+    const client = {
+      call: () => {
+        const data = encodeRevert("RLS_RESERVE_OUT_OF_COLLATERAL");
+        return Promise.reject(makeRevertError("execution reverted", data));
+      },
+      readContract: ({ functionName }: { functionName: string }) => {
+        if (functionName === "getCDPConfig")
+          return Promise.reject(functionNotFoundError());
+        if (functionName === "reserve") return Promise.resolve(RESERVE_ADDR);
+        if (functionName === "getPools")
+          return Promise.reject(functionNotFoundError());
+        if (functionName === "determineAction") {
+          return Promise.resolve([
+            { isToken0Debt: false }, // token1 is debt, token0 is collateral.
+            { amountOwedToPool: 100n },
+          ]);
+        }
+        if (functionName === "token0") return Promise.resolve(UNKNOWN_TOKEN);
+        if (functionName === "token1") return Promise.resolve(TOKEN_USDM);
+        if (functionName === "balanceOf") return Promise.resolve(50n);
+        if (functionName === "decimals") return Promise.resolve(6);
+        return Promise.reject(
+          new Error(`unexpected functionName: ${functionName}`),
+        );
+      },
+    } as unknown as PublicClient;
+    const result = await probeRebalance(
+      client,
+      POOL_USDM_AXLUSDC,
+      STRATEGY,
+      CELO_CHAIN_ID,
+    );
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") return;
+    expect(result.reasonMessage).toBe("Reserve has insufficient collateral");
+    expect(result.reserveCollateral?.tokenSymbol).toBe("collateral");
+  });
+
+  it("CDP strategy: no enrichment attached even when reasonCode would map (different strategy type)", async () => {
+    // Sanity: a CDPLS_STABILITY_POOL_BALANCE_TOO_LOW (the CDP analogue) does
+    // NOT trigger reserve enrichment — the alert would render the bounded
+    // reason_message line instead. Locks the strategy-type gate.
+    const data = encodeRevert("CDPLS_STABILITY_POOL_BALANCE_TOO_LOW");
+    const err = makeRevertError("execution reverted", data);
+    const client = mockClient({
+      strategyKind: "cdp",
+      call: () => Promise.reject(err),
+    });
+    const result = await probeRebalance(client, POOL, STRATEGY, CELO_CHAIN_ID);
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") return;
+    expect(result.reasonCode).toBe("CDPLS_STABILITY_POOL_BALANCE_TOO_LOW");
+    expect(result.reserveCollateral).toBeUndefined();
+  });
+
+  it("OLS strategy: no enrichment attached for OLS_OUT_OF_COLLATERAL", async () => {
+    // OLS strategies don't have a reserve() path — even though the literal
+    // word "collateral" appears in OLS_OUT_OF_COLLATERAL, the probe MUST
+    // gate on strategyType=reserve, not on reason text.
+    const data = encodeRevert("OLS_OUT_OF_COLLATERAL");
+    const err = makeRevertError("execution reverted", data);
+    const client = {
+      readContract: ({ functionName }: { functionName: string }) => {
+        if (functionName === "getPools") return Promise.resolve([]);
+        return Promise.reject(functionNotFoundError());
+      },
+      call: () => Promise.reject(err),
+    } as unknown as PublicClient;
+    const result = await probeRebalance(client, POOL, STRATEGY, CELO_CHAIN_ID);
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") return;
+    expect(result.reasonCode).toBe("OLS_OUT_OF_COLLATERAL");
+    expect(result.reserveCollateral).toBeUndefined();
+  });
+});

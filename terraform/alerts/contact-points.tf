@@ -64,22 +64,30 @@ locals {
   #      `mento_pool_rebalance_blocked` gauge (currently set on
   #      `Deviation Breach Critical` and its anchored sibling) so the
   #      operator sees the exact Solidity revert (e.g. "Reserve has
-  #      insufficient collateral to rebalance — [RLS_RESERVE_OUT_OF_COLLATERAL]")
-  #      inline with the breach. Suppressed cleanly when the probe hasn't
-  #      run yet or the RPC failed — the breach alert keeps its normal shape.
-  #   5. Metadata row: start time + Grafana alert link. The per-row
-  #      `View alert` link is required because `notify_*_pool` collapses
-  #      multiple alertnames per (chain_id, pool_id) into one Slack thread,
-  #      so the linked title alone can't disambiguate which rule fired.
-  #      The pool address used to live here but was removed — the pair name
-  #      is already in the linked title and the raw address rarely helps
-  #      responders.
+  #      insufficient axlUSDC. Current balance: 0.00 axlUSDC / Needed for
+  #      rebalancing: 12,500.00 axlUSDC") inline with the breach. Suppressed
+  #      cleanly when the probe hasn't run yet or the RPC failed — the
+  #      breach alert keeps its normal shape.
+  #
+  #      *Deviation* and *Reserves* render on a single line separated by
+  #      a `·` so the alert stays compact. Both annotations are independently
+  #      optional: when only one is present the separator drops with it,
+  #      avoiding a stray leading/trailing `·`.
+  #   5. Metadata row: start time only. The per-row `View alert` link was
+  #      removed — Grafana's attachment title still links to grafana.com via
+  #      the (unconfigurable) `title_link`, so operators retain that path
+  #      without per-row chrome. `notify_*_pool` collapses multiple
+  #      alertnames per (chain_id, pool_id), but the linked title (point 1)
+  #      already names the firing alert.
+  #
+  #      The timestamp uses Go format `"Jan 02 15:04 UTC"` so multi-day-old
+  #      breaches read e.g. "Apr 28 15:04 UTC" instead of just "15:04 UTC"
+  #      — the latter is misleading once a breach lives longer than a day.
   #
   # Layout (service-scoped, e.g. metrics-bridge — no pool_id/pair/chain):
   #   1. Plain bold alertname (no link target — there is no pool details page).
   #   2. Summary / description as above.
-  #   3. Metadata row with start time + Grafana alert link so operators can
-  #      still jump straight to the rule detail view.
+  #   3. Metadata row with start time so operators can scan when it began.
   slack_body_template = <<-EOT
     {{ range .Alerts -}}
     {{ if .Labels.pool_id -}}
@@ -95,13 +103,14 @@ locals {
     {{ if .Annotations.rebalance_reason -}}
     *Rebalance Blocked:* {{ .Annotations.rebalance_reason }}
     {{ end -}}
-    {{ if .Annotations.current_deviation -}}
-    *Current Deviation:* {{ .Annotations.current_deviation }}
+    {{ if and .Annotations.current_deviation .Annotations.current_reserves -}}
+    *Deviation:* {{ .Annotations.current_deviation }}   ·   *Reserves:* {{ .Annotations.current_reserves }}
+    {{ else if .Annotations.current_deviation -}}
+    *Deviation:* {{ .Annotations.current_deviation }}
+    {{ else if .Annotations.current_reserves -}}
+    *Reserves:* {{ .Annotations.current_reserves }}
     {{ end -}}
-    {{ if .Annotations.current_reserves -}}
-    *Current Reserves:* {{ .Annotations.current_reserves }}
-    {{ end -}}
-    *Started:* {{ .StartsAt.Format "15:04 UTC" }}   ·   <{{ .GeneratorURL }}|View alert>
+    *Started:* {{ .StartsAt.Format "Jan 02 15:04 UTC" }}
     {{ end }}
   EOT
 

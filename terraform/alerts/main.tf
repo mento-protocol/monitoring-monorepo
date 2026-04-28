@@ -87,16 +87,32 @@ locals {
   #
   # Strategy:
   #   - `current_deviation` reads `$values.Dev.Value` from a query that
-  #     pre-computes `mento_pool_deviation_ratio - 1` in PromQL. Then
-  #     `humanizePercentage` (e.g. `0.082` → "8.2%") gives the rendered
-  #     line without any sprig math.
+  #     pre-computes `(mento_pool_deviation_ratio - 1) * 100` in PromQL.
+  #     `printf "%.0f%%"` renders the integer percent (e.g. `12.19` → "12%").
+  #     We avoid `humanizePercentage` here because its `%.4g` format flips
+  #     to scientific notation above 1e4 — a 122x breach (deviation ratio
+  #     123.19) would render "1.219e+04% above threshold" instead of
+  #     "12190% above threshold". The smallest meaningful breach magnitude
+  #     gated by this alert is 5%, so `%.0f` is plenty of resolution.
   #   - `current_reserves` reads `$values.R0.Value` / `$values.R1.Value`
   #     (already in [0, 1]) plus `.Labels.token_symbol` from each series
   #     to render "axlUSDC / USDm". Map access is a Go template builtin.
   #   - `humanizePercentage` on values like `0.5` renders "50%". For
   #     values < 0.005 (rounding to "0%") this still passes the diagnostic
   #     "100% USDT / 0% USDm" intent — small-share legs are functionally
-  #     drained.
-  deviation_critical_current_deviation_annotation = "{{ if $values.Dev }}{{ humanizePercentage $values.Dev.Value }} above threshold{{ end }}"
+  #     drained. (Reserves are by-construction in [0, 1] so the scientific-
+  #     notation path that bit `current_deviation` doesn't apply here.)
+  #   - `rebalance_reason` reads `$values.B.Labels.{reason_message,reason_code}`
+  #     for the bounded Solidity-error explanation, then OPTIONALLY appends
+  #     `". Current balance: X token / Needed for rebalancing: Y token"`
+  #     when the reserve-collateral enrichment is present (RLS reverts only,
+  #     emitted by the metrics-bridge probe). `printf "%.2f"` keeps the
+  #     output deterministic across magnitudes; `Bal.Labels.token_symbol`
+  #     names the collateral. When the reserve-enrichment gauges are absent
+  #     (every other reason code, transport errors, non-reserve strategies)
+  #     the inner guard collapses and the line keeps the historical shape:
+  #     "<reason_message> — [<reason_code>]".
+  deviation_critical_current_deviation_annotation = "{{ if $values.Dev }}{{ printf \"%.0f%%\" $values.Dev.Value }} above threshold{{ end }}"
   deviation_critical_current_reserves_annotation  = "{{ if and $values.R0 $values.R1 }}{{ humanizePercentage $values.R0.Value }} {{ $values.R0.Labels.token_symbol }} / {{ humanizePercentage $values.R1.Value }} {{ $values.R1.Labels.token_symbol }}{{ end }}"
+  deviation_critical_rebalance_reason_annotation  = "{{ if $values.B }}{{ $rm := index $values.B.Labels \"reason_message\" }}{{ $rc := index $values.B.Labels \"reason_code\" }}{{ if and $rm $rc }}{{ $rm }}{{ if and $values.Bal $values.Need }}. Current balance: {{ printf \"%.2f\" $values.Bal.Value }} {{ $values.Bal.Labels.token_symbol }} / Needed for rebalancing: {{ printf \"%.2f\" $values.Need.Value }} {{ $values.Bal.Labels.token_symbol }}{{ else }} — [{{ $rc }}]{{ end }}{{ end }}{{ end }}"
 }

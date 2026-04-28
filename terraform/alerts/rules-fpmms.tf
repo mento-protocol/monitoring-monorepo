@@ -454,13 +454,16 @@ resource "grafana_rule_group" "fpmms_deviation" {
     annotations = {
       summary     = "Pool above 5% threshold for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach."
       description = "Check rebalancer liveness and oracle feed."
-      # Pre-rendered "8.2% above threshold". `Dev` query pre-computes
-      # `mento_pool_deviation_ratio - 1` in PromQL so the annotation
-      # only needs `humanizePercentage` (a Prometheus annotation builtin).
-      # Sprig `mul`/`sub` are NOT in scope for Grafana annotation
-      # templates (see local definition for refs). The `{{ if $values.Dev }}`
-      # guard handles the indexer's `-1` sentinel path, where the bridge
-      # gates the gauge and `Dev` returns no series.
+      # Pre-rendered "8% above threshold". `Dev` query pre-computes
+      # `(mento_pool_deviation_ratio - 1) * 100` in PromQL so the annotation
+      # can use `printf "%.0f%%"` directly. We avoid `humanizePercentage`
+      # because its `%.4g` format flips to scientific notation past 1e4
+      # (a 122x breach would render "1.219e+04% above threshold" — see
+      # local definition). Sprig `mul`/`sub` are NOT in scope for Grafana
+      # annotation templates so the multiplication has to live in PromQL.
+      # The `{{ if $values.Dev }}` guard handles the indexer's `-1`
+      # sentinel path, where the bridge gates the gauge and `Dev` returns
+      # no series.
       current_deviation = local.deviation_critical_current_deviation_annotation
       # Pre-rendered "17% axlUSDC / 83% USDm". Reads `humanizePercentage`
       # of each gauge value (already in [0, 1]) and the per-series
@@ -485,7 +488,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # (`reason_code` / `reason_message`) live on its own series and are
       # accessible via `$values.B.Labels.*`. Reading `$labels.reason_*`
       # would always be empty.
-      rebalance_reason = "{{ if $values.B }}{{ $rm := index $values.B.Labels \"reason_message\" }}{{ $rc := index $values.B.Labels \"reason_code\" }}{{ if and $rm $rc }}{{ $rm }} — [{{ $rc }}]{{ end }}{{ end }}"
+      rebalance_reason = local.deviation_critical_rebalance_reason_annotation
     }
 
     labels = {
@@ -520,10 +523,13 @@ resource "grafana_rule_group" "fpmms_deviation" {
     # zero), the value is empty and the `{{ if }}` guards in the annotation
     # strings drop the line.
     #
-    # Pre-computing `ratio - 1` in PromQL (rather than at annotation time)
-    # is required because sprig math (`sub`) is unavailable in Grafana
-    # annotation templates — only Prometheus helpers (`humanizePercentage`,
-    # `humanizeDuration`, `printf`) and Go-template builtins are.
+    # Pre-computing `(ratio - 1) * 100` in PromQL (rather than at annotation
+    # time) is required because sprig math (`sub`/`mul`) is unavailable in
+    # Grafana annotation templates — only Prometheus helpers (`humanize`,
+    # `humanizePercentage`, `humanizeDuration`, `printf`) and Go-template
+    # builtins are. The `* 100` keeps the rendered value out of scientific
+    # notation by using integer percent + `printf "%.0f%%"` instead of
+    # humanizePercentage on a fractional input.
     data {
       ref_id         = "Dev"
       datasource_uid = var.prometheus_datasource_uid
@@ -533,7 +539,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "Dev"
-        expr    = "(mento_pool_deviation_ratio - 1)"
+        expr    = "(mento_pool_deviation_ratio - 1) * 100"
         instant = true
       })
     }
@@ -599,6 +605,40 @@ resource "grafana_rule_group" "fpmms_deviation" {
       model = jsonencode({
         refId   = "B"
         expr    = "mento_pool_rebalance_blocked > 0"
+        instant = true
+      })
+    }
+
+    # Bal / Need — annotation-only sources for the reserve-collateral
+    # enrichment. The metrics-bridge probe sets these gauges only on
+    # `RLS_RESERVE_OUT_OF_COLLATERAL`; absent for non-reserve strategies and
+    # for transport errors during enrichment. The annotation template guards
+    # both before rendering, so the alert keeps firing without the balance
+    # line on every other reason code.
+    data {
+      ref_id         = "Bal"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "Bal"
+        expr    = "mento_pool_rebalance_collateral_balance"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "Need"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "Need"
+        expr    = "mento_pool_rebalance_collateral_needed"
         instant = true
       })
     }
@@ -669,7 +709,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # still be present here. Reads `$values.B.Labels.*` because `$labels`
       # exposes only the condition query's labels. When neither label is
       # set, the `{{ if … }}` guard collapses the annotation cleanly.
-      rebalance_reason = "{{ if $values.B }}{{ $rm := index $values.B.Labels \"reason_message\" }}{{ $rc := index $values.B.Labels \"reason_code\" }}{{ if and $rm $rc }}{{ $rm }} — [{{ $rc }}]{{ end }}{{ end }}"
+      rebalance_reason = local.deviation_critical_rebalance_reason_annotation
     }
 
     labels = {
@@ -703,7 +743,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "Dev"
-        expr    = "(mento_pool_deviation_ratio - 1)"
+        expr    = "(mento_pool_deviation_ratio - 1) * 100"
         instant = true
       })
     }
@@ -752,6 +792,37 @@ resource "grafana_rule_group" "fpmms_deviation" {
       model = jsonencode({
         refId   = "B"
         expr    = "mento_pool_rebalance_blocked > 0"
+        instant = true
+      })
+    }
+
+    # See the magnitude-gated critical rule for the Bal / Need rationale —
+    # both gauges are absent except on RLS_RESERVE_OUT_OF_COLLATERAL, and
+    # the annotation template guards them before rendering the balance line.
+    data {
+      ref_id         = "Bal"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "Bal"
+        expr    = "mento_pool_rebalance_collateral_balance"
+        instant = true
+      })
+    }
+
+    data {
+      ref_id         = "Need"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "Need"
+        expr    = "mento_pool_rebalance_collateral_needed"
         instant = true
       })
     }

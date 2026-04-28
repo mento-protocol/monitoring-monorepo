@@ -64,7 +64,14 @@ async function probeOne(pool: PoolRow): Promise<RebalanceProbeResult> {
   const poolAddress = poolIdAddress(pool.id) as `0x${string}`;
   const strategyAddress = pool.rebalancerAddress as `0x${string}`;
 
-  const probe = probeRebalance(client, poolAddress, strategyAddress);
+  // chainId is forwarded so the probe can resolve token symbols via
+  // `@mento-protocol/monitoring-config/tokens` during reserve enrichment.
+  const probe = probeRebalance(
+    client,
+    poolAddress,
+    strategyAddress,
+    pool.chainId,
+  );
   const timeout = new Promise<RebalanceProbeResult>((resolve) => {
     setTimeout(
       () =>
@@ -121,10 +128,13 @@ export async function runWithConcurrency<T, R>(
  *     once — better than a misleading "blocked" annotation.
  */
 export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
-  // Reset the gauge first so a pool that recovered between probes
+  // Reset both the blocked gauge AND the reserve-collateral enrichment
+  // gauges before each cycle so a pool that recovered between probes
   // (deviation dropped below threshold, or the rebalancer caught up)
-  // immediately drops out of the metric.
+  // immediately drops out of every series.
   gauges.rebalanceBlocked.reset();
+  gauges.rebalanceCollateralBalance.reset();
+  gauges.rebalanceCollateralNeeded.reset();
   const eligible = eligibleForProbe(allPools);
   if (eligible.length === 0) {
     gauges.rebalanceProbeLastRun.set(Math.floor(Date.now() / 1000));
@@ -143,12 +153,32 @@ export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
     if (!result) continue;
 
     if (result.kind === "blocked") {
+      const poolLabels = poolDisplayLabels(pool);
       const labels = {
-        ...poolDisplayLabels(pool),
+        ...poolLabels,
         reason_code: result.reasonCode,
         reason_message: result.reasonMessage,
       };
       gauges.rebalanceBlocked.set(labels, 1);
+      // Reserve-collateral enrichment: only set on
+      // `RLS_RESERVE_OUT_OF_COLLATERAL` (probe attaches `reserveCollateral`
+      // there). Skipping for non-reserve strategies / failed enrichment
+      // keeps the alert annotation falling back to the bounded
+      // reason_message line cleanly.
+      if (result.reserveCollateral) {
+        const collateralLabels = {
+          ...poolLabels,
+          token_symbol: result.reserveCollateral.tokenSymbol,
+        };
+        gauges.rebalanceCollateralBalance.set(
+          collateralLabels,
+          result.reserveCollateral.balance,
+        );
+        gauges.rebalanceCollateralNeeded.set(
+          collateralLabels,
+          result.reserveCollateral.needed,
+        );
+      }
       // Surface the unbounded diagnostic detail (raw revert string, panic
       // code, unrecognised hex selector) to Cloud Run logs only — the
       // metric label is intentionally bounded to the ERROR_MESSAGES enum
