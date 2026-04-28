@@ -147,6 +147,49 @@ describe("UptimeValue", () => {
     expect(html).toContain("99.86%");
   });
 
+  it("pro-rates a closed breach that mostly happened before the 7d window — does not over-count", () => {
+    // Scenario from a real Monad pool: a 5-day breach that ended 9 days
+    // ago has `criticalDurationSeconds` larger than the 7d window's
+    // trading-seconds. Counting it whole pushed the 7d numerator past
+    // the denominator and clamped the tile to 0% on a pool that's
+    // currently fine. The clip prorates the contribution by how much of
+    // the breach's wall-clock duration overlapped the window.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_TUE_NOON_UTC));
+    const nowSec = Math.floor(Date.now() / 1000);
+    const breachEnd = nowSec - 9 * 86400; // ended 9d ago — ENTIRELY outside the 7d window
+    const breachStart = breachEnd - 5 * 86400;
+    setRollup({
+      data: {
+        Pool: [
+          {
+            cumulativeCriticalSeconds: String(5 * 86400),
+            breachCount: 1,
+          },
+        ],
+      },
+    });
+    setRecent({
+      data: {
+        DeviationThresholdBreach: [
+          {
+            criticalDurationSeconds: String(5 * 86400),
+            startedAt: String(breachStart),
+            endedAt: String(breachEnd),
+          },
+        ],
+      },
+    });
+    const pool: Pool = {
+      ...BASE_POOL,
+      healthTotalSeconds: String(15 * 86400),
+    };
+    const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
+    // Breach ended 9d ago, window starts 7d ago → overlap=0 → 100% last 7d.
+    expect(html).toMatch(/100\.00% last 7d/);
+    vi.useRealTimers();
+  });
+
   it("subtracts closed-breach critical seconds from the 7d window (FX-weekend math)", () => {
     // 1h critical / 424,800 trading seconds ≈ 0.847% → 99.15%
     vi.useFakeTimers();

@@ -115,19 +115,31 @@ export function UptimeValue({ pool }: { pool: Pool }) {
     Math.min(100, (1 - (rolledCritical + openCritical) / total) * 100),
   );
 
-  // 7-day uptime numerator: sum of `criticalDurationSeconds` across closed
-  // breaches that ended within the window, plus the same live open-breach
-  // contribution clamped to the window. Closed-breach critical seconds are
-  // counted whole even when the breach started before the window — the
-  // overcount is bounded by one breach's worth and keeps the calculation
-  // simple. Denominator uses the same `tradingSecondsInRange` weekend
-  // subtraction as `total` for consistency with the all-time number.
+  // 7-day uptime numerator: each closed breach's `criticalDurationSeconds`
+  // is pro-rated by how much of the breach's wall-clock duration overlaps
+  // the 7d window. Without the clip, a 5-day breach that ended just inside
+  // the window would dump its full 5 days of critical seconds into a 7d
+  // window where only a fraction of that breach actually fell — which can
+  // push the numerator past the denominator and clamp the tile to 0% on
+  // pools that are currently fine. Distribution-uniformity assumption is
+  // imperfect (critical seconds aren't always evenly spread within a
+  // breach) but bounds the error to that single breach. Open-breach
+  // contribution is computed live, clamped to `windowStart`.
   const recentRows = recentData?.DeviationThresholdBreach;
   const closedCritical7d =
-    recentRows?.reduce(
-      (sum, row) => sum + Number(row.criticalDurationSeconds ?? 0),
-      0,
-    ) ?? 0;
+    recentRows?.reduce((sum, row) => {
+      const critical = Number(row.criticalDurationSeconds ?? 0);
+      const breachStart = Number(row.startedAt ?? "0");
+      const breachEnd = Number(row.endedAt ?? "0");
+      const totalDuration = breachEnd - breachStart;
+      if (!Number.isFinite(critical) || critical <= 0 || totalDuration <= 0) {
+        return sum;
+      }
+      const clipStart = Math.max(breachStart, windowStart);
+      const clipEnd = Math.min(breachEnd, nowSeconds);
+      const overlap = Math.max(0, clipEnd - clipStart);
+      return sum + critical * (overlap / totalDuration);
+    }, 0) ?? 0;
   const openCritical7d =
     hasOpenBreach && nowSeconds > graceEnd && peakAboveCritical
       ? tradingSecondsInRange(Math.max(graceEnd, windowStart), nowSeconds)
