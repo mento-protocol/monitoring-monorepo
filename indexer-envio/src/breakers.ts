@@ -166,10 +166,13 @@ export async function ensureBreakerConfig(
  * `start_block`, so no event ever fires post-start to trigger lazy hydration.
  * On the first MedianUpdated for a feed with zero BreakerConfig rows, enumerate
  * the BreakerBox's registered breakers via RPC and bootstrap a config row for
- * each one. Bounded by an in-memory Set so we attempt only once per
+ * each one. Bounded by an in-memory cache so we attempt only once per
  * (chainId, rateFeedID) per process — the cost is one extra
  * `BreakerBox.getBreakers()` call + a handful of `ensureBreakerConfig` calls
- * per feed, paid exactly once. */
+ * per feed, paid exactly once. Soft-capped with FIFO eviction so the cache
+ * can't grow without bound if a hostile feed registers many distinct
+ * rateFeedIDs (mirrors the `REBALANCING_STATE_CACHE_MAX` pattern in rpc.ts). */
+const BOOTSTRAP_ATTEMPTED_MAX = 1024;
 const _bootstrapAttempted = new Set<string>();
 
 /** @internal Test-only: clear the bootstrap-attempted cache between tests. */
@@ -194,6 +197,13 @@ export async function bootstrapFeedBreakerConfigs(
   // brief network blip would leave breaker state missing until restart.
   const breakerAddresses = await fetchBreakerList(chainId, blockNumber);
   if (!breakerAddresses) return; // RPC failed — let the next event retry.
+  // FIFO eviction when over cap. Sets preserve insertion order so we drop
+  // the oldest entry; that feed's next event simply re-bootstraps (the
+  // BreakerConfig rows already written persist, so the work is cheap).
+  if (_bootstrapAttempted.size >= BOOTSTRAP_ATTEMPTED_MAX) {
+    const oldest = _bootstrapAttempted.values().next().value;
+    if (oldest !== undefined) _bootstrapAttempted.delete(oldest);
+  }
   _bootstrapAttempted.add(cacheKey);
   if (breakerAddresses.length === 0) return;
 
