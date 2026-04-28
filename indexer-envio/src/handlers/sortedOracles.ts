@@ -316,12 +316,17 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
                   cfg.smoothingFactor ?? 0n,
                 )
               : cfg.medianRatesEMA;
-          // Skip the write when nothing changed — Envio still pays a row-write
-          // cost for no-op `set()` calls, and MedianUpdated is one of the
-          // hottest event paths.
+          // Skip the write only when ALL three fields would be unchanged — same
+          // median, same EMA, AND same `lastUpdatedAt`. Distinct MedianUpdated
+          // events always carry distinct block timestamps, so the optimization
+          // here only kicks in for same-block event replay during preload. We
+          // must include `lastUpdatedAt` in the comparison so that a repeated
+          // median value (oracle reports that round to the same rate) still
+          // refreshes the "last seen" timestamp.
           if (
             cfg.lastMedianRate === oraclePrice &&
-            cfg.medianRatesEMA === nextEMA
+            cfg.medianRatesEMA === nextEMA &&
+            cfg.lastUpdatedAt === blockTimestamp
           ) {
             return;
           }

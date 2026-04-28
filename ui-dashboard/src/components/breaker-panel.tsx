@@ -83,18 +83,24 @@ function effectiveCooldown(cfg: BreakerConfig): bigint {
 }
 
 /** |median - reference| / reference, returned as a Fixidity ratio (1e24 = 100%).
- * Returns null if either value is missing. */
+ * Returns null if either input is missing OR is the on-chain `0` sentinel:
+ * SortedOracles returns rate `0` when all oracle reports have expired,
+ * `medianRatesEMA = 0` is the contract's "uninitialized" marker (until the
+ * first MedianUpdated seeds it), and a `referenceValue` of `0` would be a
+ * mis-set peg (also produces a divide-by-zero). In all three cases the live
+ * Δ is meaningless, so render the missing-data dash. */
 function computeLiveDelta(cfg: BreakerConfig): bigint | null {
-  const median = cfg.lastMedianRate ? BigInt(cfg.lastMedianRate) : null;
+  const median = cfg.lastMedianRate != null ? BigInt(cfg.lastMedianRate) : null;
   const reference =
     cfg.breaker.kind === "MEDIAN_DELTA"
-      ? cfg.medianRatesEMA
+      ? cfg.medianRatesEMA != null
         ? BigInt(cfg.medianRatesEMA)
         : null
-      : cfg.referenceValue
+      : cfg.referenceValue != null
         ? BigInt(cfg.referenceValue)
         : null;
-  if (!median || !reference || reference === BigInt(0)) return null;
+  if (median == null || median === BigInt(0)) return null;
+  if (reference == null || reference === BigInt(0)) return null;
   const diff = median > reference ? median - reference : reference - median;
   return (diff * FIXED_1) / reference;
 }
