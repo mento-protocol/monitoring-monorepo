@@ -25,6 +25,10 @@ import {
   REASON_CODES,
 } from "@mento-protocol/monitoring-config/rebalance-abi";
 import { POOL_PAIR_ABI_SOURCES } from "@mento-protocol/monitoring-config/erc20-abi";
+import {
+  fetchReserveEnrichment as fetchReserveEnrichmentShared,
+  type EnrichmentRpc,
+} from "@mento-protocol/monitoring-config/rebalance-enrichment";
 import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
 import { getViemClient, ERC20_ABI } from "./rpc-client";
 
@@ -423,79 +427,123 @@ async function fetchCDPEnrichment(
   }
 }
 
+/**
+ * Adapter from a viem `PublicClient` to the `EnrichmentRpc` shape consumed
+ * by `@mento-protocol/monitoring-config/rebalance-enrichment`. Each method
+ * is a thin viem wrapper — shared-config stays viem-free, the orchestration
+ * (parallel pool-token reads, debt-leg pick, balance/decimals fetch) lives
+ * in shared-config.
+ */
+const POOL_PAIR_ABI = parseAbi(POOL_PAIR_ABI_SOURCES);
+
+function makeEnrichmentRpc(client: PublicClient): EnrichmentRpc {
+  return {
+    async readDetermineAction({ strategy, pool }) {
+      // Dashboard never uses needed-mode (calls `fetchReserveEnrichment` in
+      // balance-only mode), but the EnrichmentRpc surface requires both.
+      // Stub kept so a future tooltip variant can switch modes.
+      const [ctx, action] = (await client.readContract({
+        address: strategy,
+        abi: STRATEGY_ABI,
+        functionName: "determineAction",
+        args: [pool],
+      })) as readonly [{ isToken0Debt: boolean }, { amountOwedToPool: bigint }];
+      return {
+        isToken0Debt: ctx.isToken0Debt,
+        amountOwedToPool: action.amountOwedToPool,
+      };
+    },
+    async readPoolConfigs({ strategy, pool }) {
+      const cfg = (await client.readContract({
+        address: strategy,
+        abi: STRATEGY_ABI,
+        functionName: "poolConfigs",
+        args: [pool],
+      })) as readonly [boolean, ...unknown[]];
+      return { isToken0Debt: cfg[0] };
+    },
+    async readPoolTokens(pool) {
+      const [token0, token1] = await Promise.all([
+        client.readContract({
+          address: pool,
+          abi: POOL_PAIR_ABI,
+          functionName: "token0",
+        }),
+        client.readContract({
+          address: pool,
+          abi: POOL_PAIR_ABI,
+          functionName: "token1",
+        }),
+      ]);
+      return {
+        token0: token0 as `0x${string}`,
+        token1: token1 as `0x${string}`,
+      };
+    },
+    async readBalanceOf({ token, holder }) {
+      return (await client.readContract({
+        address: token,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [holder],
+      })) as bigint;
+    },
+  };
+}
+
 async function fetchReserveEnrichment(
   client: PublicClient,
   strategy: `0x${string}`,
   pool: `0x${string}`,
 ): Promise<StrategyEnrichment | null> {
+  // Resolve `reserve()` first — needed by the shared helper as a parameter,
+  // and the dashboard doesn't carry it through from detection (unlike the
+  // metrics-bridge probe, which threads it through to save one RPC).
+  let reserveAddr: `0x${string}`;
   try {
-    const reserveAddr = (await client.readContract({
+    reserveAddr = (await client.readContract({
       address: strategy,
       abi: STRATEGY_ABI,
       functionName: "reserve",
     })) as `0x${string}`;
-
-    // Determine the collateral token — it's the non-debt token.
-    // Read pool config to know which token is debt.
-    const poolConfig = await client.readContract({
-      address: strategy,
-      abi: STRATEGY_ABI,
-      functionName: "poolConfigs",
-      args: [pool],
-    });
-
-    const isToken0Debt = poolConfig[0] as boolean;
-
-    // Read pool tokens — source list lives in shared-config alongside the
-    // metrics-bridge probe so a future ABI tweak doesn't drift between them.
-    const poolAbi = parseAbi(POOL_PAIR_ABI_SOURCES);
-    const [token0, token1] = await Promise.all([
-      client.readContract({
-        address: pool,
-        abi: poolAbi,
-        functionName: "token0",
-      }),
-      client.readContract({
-        address: pool,
-        abi: poolAbi,
-        functionName: "token1",
-      }),
-    ]);
-
-    const collateralToken = (isToken0Debt ? token1 : token0) as `0x${string}`;
-
-    // ERC20_ABI is shared with the metrics-bridge probe via
-    // `@mento-protocol/monitoring-config/erc20-abi` and already covers
-    // balanceOf / symbol / decimals — no need for a per-call subset.
-    const [balance, symbol, decimals] = await Promise.all([
-      client.readContract({
-        address: collateralToken,
-        abi: ERC20_ABI,
-        functionName: "balanceOf",
-        args: [reserveAddr],
-      }),
-      client.readContract({
-        address: collateralToken,
-        abi: ERC20_ABI,
-        functionName: "symbol",
-      }),
-      client.readContract({
-        address: collateralToken,
-        abi: ERC20_ABI,
-        functionName: "decimals",
-      }),
-    ]);
-
-    return {
-      type: "reserve",
-      reserveCollateralBalance: toHumanUnits(
-        balance as bigint,
-        Number(decimals),
-      ),
-      collateralTokenSymbol: symbol as string,
-      collateralTokenDecimals: Number(decimals),
-    };
   } catch {
     return null;
   }
+
+  const result = await fetchReserveEnrichmentShared(
+    makeEnrichmentRpc(client),
+    strategy,
+    pool,
+    {
+      chainId: 0, // Dashboard doesn't pre-resolve via manifest; symbol/decimals come from on-chain reads via the resolvers below.
+      reserveAddr,
+      mode: "balance-only",
+      resolveSymbol: async (_chainId, addr) => {
+        try {
+          return (await client.readContract({
+            address: addr,
+            abi: ERC20_ABI,
+            functionName: "symbol",
+          })) as string;
+        } catch {
+          return null;
+        }
+      },
+      resolveDecimals: async (_chainId, addr) => {
+        const decimals = (await client.readContract({
+          address: addr,
+          abi: ERC20_ABI,
+          functionName: "decimals",
+        })) as number;
+        return Number(decimals);
+      },
+    },
+  );
+  if (result === null || result.tokenSymbol === null) return null;
+  return {
+    type: "reserve",
+    reserveCollateralBalance: result.balance,
+    collateralTokenSymbol: result.tokenSymbol,
+    collateralTokenDecimals: result.decimals,
+  };
 }

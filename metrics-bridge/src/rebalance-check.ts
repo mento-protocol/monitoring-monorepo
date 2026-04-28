@@ -41,6 +41,10 @@ import {
   POOL_PAIR_ABI_SOURCES,
 } from "@mento-protocol/monitoring-config/erc20-abi";
 import {
+  fetchReserveEnrichment as fetchReserveEnrichmentShared,
+  type EnrichmentRpc,
+} from "@mento-protocol/monitoring-config/rebalance-enrichment";
+import {
   tokenDecimals,
   tokenSymbol,
 } from "@mento-protocol/monitoring-config/tokens";
@@ -510,23 +514,78 @@ async function resolveDecimals(
 }
 
 /**
- * Reserve-strategy enrichment fetch — mirrors the dashboard's
- * `fetchReserveEnrichment` but pulls the "needed" amount straight off
- * `determineAction(pool).action.amountOwedToPool` (the strategy's required
- * transfer to close the breach). Returns `null` on any RPC failure so the
- * caller can fall back to the generic reason message without the gauges
- * landing in Prometheus.
+ * Adapt a viem `PublicClient` to the shared-config `EnrichmentRpc` shape.
+ * Each method here is a one-line wrapper around `client.readContract` —
+ * shared-config stays viem-free; the orchestration logic
+ * (parallel-with-token-reads, debt-leg pick, balance + decimals fetch)
+ * lives in `@mento-protocol/monitoring-config/rebalance-enrichment`.
+ */
+function makeEnrichmentRpc(client: PublicClient): EnrichmentRpc {
+  return {
+    async readDetermineAction({ strategy, pool }) {
+      const [ctx, action] = (await client.readContract({
+        address: strategy,
+        abi: STRATEGY_ABI,
+        functionName: "determineAction",
+        args: [pool],
+      })) as readonly [{ isToken0Debt: boolean }, { amountOwedToPool: bigint }];
+      return {
+        isToken0Debt: ctx.isToken0Debt,
+        amountOwedToPool: action.amountOwedToPool,
+      };
+    },
+    async readPoolConfigs({ strategy, pool }) {
+      const cfg = (await client.readContract({
+        address: strategy,
+        abi: STRATEGY_ABI,
+        functionName: "poolConfigs",
+        args: [pool],
+      })) as readonly [boolean, ...unknown[]];
+      return { isToken0Debt: cfg[0] };
+    },
+    async readPoolTokens(pool) {
+      const [token0, token1] = await Promise.all([
+        client.readContract({
+          address: pool,
+          abi: POOL_TOKEN_ABI,
+          functionName: "token0",
+        }),
+        client.readContract({
+          address: pool,
+          abi: POOL_TOKEN_ABI,
+          functionName: "token1",
+        }),
+      ]);
+      return {
+        token0: token0 as `0x${string}`,
+        token1: token1 as `0x${string}`,
+      };
+    },
+    async readBalanceOf({ token, holder }) {
+      return (await client.readContract({
+        address: token,
+        abi: ERC20_BALANCE_ABI,
+        functionName: "balanceOf",
+        args: [holder],
+      })) as bigint;
+    },
+  };
+}
+
+/**
+ * Reserve-strategy enrichment fetch. Thin wrapper over
+ * `@mento-protocol/monitoring-config/rebalance-enrichment` — same data
+ * path the dashboard's pool-detail tooltip uses, so a future ABI tweak
+ * doesn't drift between the Slack alert and the dashboard.
  *
- * The reserve address is threaded in from the upstream `detectStrategyType`
- * call (Reserve detection itself reads `reserve()`, and the address is
- * stable for a given strategy proxy), saving one RPC round-trip per probe.
- *
- * Token symbol resolution flows through `tokenSymbol` from
- * `@mento-protocol/monitoring-config/tokens` — same source as the existing
- * `reserve_share_token0/1` `token_symbol` labels, so the alert annotation
- * stays consistent across surfaces. Falls back to "collateral" when the
- * contract address isn't in `@mento-protocol/contracts` (matches the
- * existing fallback semantics for unknown tokens).
+ * Bridge-specific shape:
+ *   - `mode: "needed"` — pulls `amountOwedToPool` from `determineAction(pool)`
+ *     so the alert can render "Needed for rebalancing: 12,500 axlUSDC".
+ *   - Symbol resolver = `tokenSymbol(chainId, addr)` from the canonical
+ *     manifest (matches the existing reserve-share label semantics).
+ *     Falls back to literal "collateral" when the contract isn't manifested.
+ *   - Decimals resolver = manifest-then-cache-then-RPC (see `resolveDecimals`
+ *     above) so canonical tokens skip the on-chain read entirely.
  */
 async function fetchReserveEnrichment(
   client: PublicClient,
@@ -535,58 +594,22 @@ async function fetchReserveEnrichment(
   chainId: number,
   reserveAddr: `0x${string}`,
 ): Promise<{ balance: number; needed: number; tokenSymbol: string } | null> {
-  try {
-    // 1. determineAction(pool) — gives us the action's `amountOwedToPool`
-    //    (the required transfer to close the breach) plus the ctx, which
-    //    tells us which leg of the pool is the debt token. Issued in
-    //    parallel with the pool's token0/token1 reads since neither
-    //    dependency-graphs into the other.
-    const [[ctx, action], token0, token1] = (await Promise.all([
-      client.readContract({
-        address: strategy,
-        abi: STRATEGY_ABI,
-        functionName: "determineAction",
-        args: [pool],
-      }),
-      client.readContract({
-        address: pool,
-        abi: POOL_TOKEN_ABI,
-        functionName: "token0",
-      }),
-      client.readContract({
-        address: pool,
-        abi: POOL_TOKEN_ABI,
-        functionName: "token1",
-      }),
-    ])) as [
-      readonly [{ isToken0Debt: boolean }, { amountOwedToPool: bigint }],
-      `0x${string}`,
-      `0x${string}`,
-    ];
-
-    // 2. The collateral token is the non-debt leg of the pool.
-    const collateralToken = ctx.isToken0Debt ? token1 : token0;
-
-    // 3. balanceOf + decimals on the collateral token. Decimals come from
-    //    the canonical manifest (zero RPC) or the process-lifetime cache
-    //    when available; only an unknown contract will fall through to an
-    //    on-chain read. balanceOf is always read fresh.
-    const [balance, decimalsNum] = await Promise.all([
-      client.readContract({
-        address: collateralToken,
-        abi: ERC20_BALANCE_ABI,
-        functionName: "balanceOf",
-        args: [reserveAddr],
-      }),
-      resolveDecimals(client, chainId, collateralToken),
-    ]);
-
-    return {
-      balance: toHumanUnits(balance as bigint, decimalsNum),
-      needed: toHumanUnits(action.amountOwedToPool, decimalsNum),
-      tokenSymbol: tokenSymbol(chainId, collateralToken) ?? "collateral",
-    };
-  } catch {
-    return null;
-  }
+  const result = await fetchReserveEnrichmentShared(
+    makeEnrichmentRpc(client),
+    strategy,
+    pool,
+    {
+      chainId,
+      reserveAddr,
+      mode: "needed",
+      resolveSymbol: (cId, addr) => tokenSymbol(cId, addr),
+      resolveDecimals: (cId, addr) => resolveDecimals(client, cId, addr),
+    },
+  );
+  if (result === null || result.needed === undefined) return null;
+  return {
+    balance: result.balance,
+    needed: result.needed,
+    tokenSymbol: result.tokenSymbol ?? "collateral",
+  };
 }
