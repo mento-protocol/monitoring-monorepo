@@ -286,12 +286,15 @@ describe("UptimeValue", () => {
       },
     });
     const breachEnd = Math.floor(Date.now() / 1000) - 1 * 86400;
+    // 2h breach: 1h grace + 1h critical = 1h critical. Indexer-faithful
+    // shape — `criticalDurationSeconds` only accrues post-grace, so a
+    // breach with 1h critical must be at least 2h long total.
     setRecent({
       data: {
         DeviationThresholdBreach: [
           {
             criticalDurationSeconds: "3600",
-            startedAt: String(breachEnd - 3600),
+            startedAt: String(breachEnd - 7200),
             endedAt: String(breachEnd),
           },
         ],

@@ -48,7 +48,12 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   // minute so the SWR cache key only changes once per minute — without
   // this, every render produces a fresh `windowStart` (sub-second drift)
   // that invalidates SWR's cache and re-fires the GraphQL request.
-  const windowStart = Math.floor(Date.now() / 60_000) * 60 - SECONDS_IN_7D;
+  // Clamp to `pool.createdAtTimestamp` so a 1-day-old pool isn't scored
+  // against a 7d window it never lived through.
+  const windowStartRaw = Math.floor(Date.now() / 60_000) * 60 - SECONDS_IN_7D;
+  const poolStart = Number(pool.createdAtTimestamp ?? "0");
+  const windowStart =
+    poolStart > 0 ? Math.max(windowStartRaw, poolStart) : windowStartRaw;
   const { data: recentData } = useGQL<{
     DeviationThresholdBreach: RecentBreachRow[];
   }>(isVirtual ? null : POOL_CRITICAL_SECONDS_RECENT, {
@@ -118,10 +123,12 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   // Closed-breach contribution to the 7d numerator. Prorate
   // `criticalDurationSeconds` by the *trading-seconds* overlap with the
   // window — not wall-clock — because the indexer accumulates critical
-  // seconds via `tradingSecondsInRange` (FX weekends subtracted), so a
-  // breach spanning a weekend has its critical time concentrated in the
-  // weekday segments. Wall-clock proration would smear them uniformly
-  // and miscount the boundary.
+  // seconds via `tradingSecondsInRange` (FX weekends subtracted) and
+  // only after the 1h grace expires. The denominator must therefore be
+  // post-grace trading-seconds too: a 2h breach with `criticalDuration
+  // = 1h` should attribute critical time only to the 1h post-grace
+  // segment, not smear across the full 2h.
+  const GRACE = Number(DEVIATION_BREACH_GRACE_SECONDS);
   const recentRows = recentData?.DeviationThresholdBreach;
   const closedCritical7d =
     recentRows?.reduce((sum, row) => {
@@ -129,10 +136,12 @@ export function UptimeValue({ pool }: { pool: Pool }) {
       const breachStart = Number(row.startedAt ?? "0");
       const breachEnd = Number(row.endedAt ?? "0");
       if (!Number.isFinite(critical) || critical <= 0) return sum;
-      const tradingTotal = tradingSecondsInRange(breachStart, breachEnd);
+      const breachGraceEnd = breachStart + GRACE;
+      const tradingTotal = tradingSecondsInRange(breachGraceEnd, breachEnd);
       if (tradingTotal <= 0) return sum;
-      const clipStart = Math.max(breachStart, windowStart);
+      const clipStart = Math.max(breachGraceEnd, windowStart);
       const clipEnd = Math.min(breachEnd, nowSeconds);
+      if (clipEnd <= clipStart) return sum;
       const tradingClip = tradingSecondsInRange(clipStart, clipEnd);
       return sum + critical * (tradingClip / tradingTotal);
     }, 0) ?? 0;
