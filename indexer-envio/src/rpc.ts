@@ -4,14 +4,18 @@
 
 import { createPublicClient, http } from "viem";
 import type { HandlerContext } from "generated/src/Types";
-import type { Pool } from "generated";
+import type { Pool, BreakerConfig } from "generated";
 import {
   SortedOraclesContract,
   FPMM_MINIMAL_ABI,
   FPMM_FEE_ABI,
   FPMM_TRADING_LIMITS_ABI,
   ERC20_DECIMALS_ABI,
+  BREAKER_BOX_ABI,
+  MEDIAN_DELTA_BREAKER_ABI,
+  VALUE_DELTA_BREAKER_ABI,
 } from "./abis";
+import { requireContractAddress } from "./contractAddresses";
 import type { TradingLimitData } from "./tradingLimits";
 
 // ---------------------------------------------------------------------------
@@ -1275,4 +1279,438 @@ export async function getPoolsWithReferenceFeed(
 ): Promise<Pool[]> {
   const pools = await context.Pool.getWhere.referenceRateFeedID.gt("");
   return pools.filter((p) => p.chainId === chainId);
+}
+
+// Breaker RPC self-heal + bootstrap. See breakers.ts header for the why.
+
+export type BreakerKindRpc = "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
+
+export type BreakerDefaults = {
+  activatesTradingMode: number;
+  defaultCooldownTime: bigint;
+  defaultRateChangeThreshold: bigint;
+};
+
+export type BreakerFeedState = {
+  enabled: boolean;
+  tradingMode: number;
+  lastStatusUpdatedAt: bigint;
+  cooldownTime: bigint;
+  rateChangeThreshold: bigint;
+  // MD-only — null on VD / MARKET_HOURS.
+  smoothingFactor: bigint | null;
+  medianRatesEMA: bigint | null;
+  // VD-only — null on MD / MARKET_HOURS.
+  referenceValue: bigint | null;
+};
+
+// ---- Test mock hooks ----
+
+const _testBreakerKinds = new Map<string, BreakerKindRpc | null>();
+const _testBreakerDefaults = new Map<string, BreakerDefaults | null>();
+const _testBreakerFeedState = new Map<string, BreakerFeedState | null>();
+
+function breakerKindKey(chainId: number, breakerAddress: string): string {
+  return `${chainId}:${breakerAddress.toLowerCase()}`;
+}
+function breakerFeedStateKey(
+  chainId: number,
+  breakerAddress: string,
+  rateFeedID: string,
+): string {
+  return `${chainId}:${breakerAddress.toLowerCase()}:${rateFeedID.toLowerCase()}`;
+}
+
+/** @internal Test-only: pre-set a BreakerKind probe result. */
+export function _setMockBreakerKind(
+  chainId: number,
+  breakerAddress: string,
+  kind: BreakerKindRpc | null,
+): void {
+  _testBreakerKinds.set(breakerKindKey(chainId, breakerAddress), kind);
+}
+
+/** @internal Test-only: pre-set Breaker defaults (activatesTradingMode / cooldown / threshold). */
+export function _setMockBreakerDefaults(
+  chainId: number,
+  breakerAddress: string,
+  defaults: BreakerDefaults | null,
+): void {
+  _testBreakerDefaults.set(breakerKindKey(chainId, breakerAddress), defaults);
+}
+
+/** @internal Test-only: pre-set BreakerConfig per-feed RPC state. */
+export function _setMockBreakerFeedState(
+  chainId: number,
+  breakerAddress: string,
+  rateFeedID: string,
+  state: BreakerFeedState | null,
+): void {
+  _testBreakerFeedState.set(
+    breakerFeedStateKey(chainId, breakerAddress, rateFeedID),
+    state,
+  );
+}
+
+/** @internal Test-only: clear all breaker mocks. */
+export function _clearBreakerMocks(): void {
+  _testBreakerKinds.clear();
+  _testBreakerDefaults.clear();
+  _testBreakerFeedState.clear();
+}
+
+// ---- Probes & fetchers ----
+
+/** Probe whether a breaker contract responds to a function. Returns true if
+ * the call succeeds (even with zero result), false on revert. */
+async function probeFunction(
+  chainId: number,
+  address: string,
+  abi: readonly unknown[],
+  functionName: string,
+  args: readonly unknown[] = [],
+): Promise<boolean> {
+  try {
+    const client = getRpcClient(chainId);
+    await client.readContract({
+      address: address as `0x${string}`,
+      abi: abi as never,
+      functionName,
+      args: args as never,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Classify a breaker by selector probe. Order matters: MarketHours has
+ * neither `medianRatesEMA` nor `referenceValues`, so we check MD-specific
+ * first, then VD-specific, then default to MARKET_HOURS. The probe address
+ * (`0x000…0001`) is a valid input that won't have any state — we only care
+ * whether the function exists in the bytecode. */
+export async function fetchBreakerKind(
+  chainId: number,
+  breakerAddress: string,
+): Promise<BreakerKindRpc> {
+  const mock = _testBreakerKinds.get(breakerKindKey(chainId, breakerAddress));
+  if (mock !== undefined) return mock ?? "MARKET_HOURS";
+
+  const probeAddr = "0x0000000000000000000000000000000000000001";
+  if (
+    await probeFunction(
+      chainId,
+      breakerAddress,
+      MEDIAN_DELTA_BREAKER_ABI,
+      "medianRatesEMA",
+      [probeAddr],
+    )
+  ) {
+    return "MEDIAN_DELTA";
+  }
+  if (
+    await probeFunction(
+      chainId,
+      breakerAddress,
+      VALUE_DELTA_BREAKER_ABI,
+      "referenceValues",
+      [probeAddr],
+    )
+  ) {
+    return "VALUE_DELTA";
+  }
+  return "MARKET_HOURS";
+}
+
+/** Fetch breaker defaults from RPC. `activatesTradingMode` comes from
+ * `BreakerBox.breakerTradingMode(breaker)`; `defaultCooldownTime` /
+ * `defaultRateChangeThreshold` come from the breaker contract itself
+ * (revert-safe — MarketHours has neither and falls back to 0). */
+export async function fetchBreakerDefaults(
+  chainId: number,
+  breakerAddress: string,
+  kind: BreakerKindRpc,
+  blockNumber: bigint,
+): Promise<BreakerDefaults | null> {
+  const cached = _testBreakerDefaults.get(
+    breakerKindKey(chainId, breakerAddress),
+  );
+  if (cached !== undefined) return cached;
+
+  let breakerBoxAddress: `0x${string}`;
+  try {
+    breakerBoxAddress = requireContractAddress(chainId, "BreakerBox");
+  } catch {
+    return null;
+  }
+
+  try {
+    const client = getRpcClient(chainId);
+    const fallback = getFallbackRpcClient(chainId);
+    const tradingModeP = readContractWithBlockFallback(
+      client,
+      {
+        address: breakerBoxAddress,
+        abi: BREAKER_BOX_ABI,
+        functionName: "breakerTradingMode",
+        args: [breakerAddress as `0x${string}`],
+      },
+      blockNumber,
+      fallback,
+    );
+
+    if (kind === "MARKET_HOURS") {
+      const tm = await tradingModeP;
+      return {
+        activatesTradingMode: Number(tm.result as number),
+        defaultCooldownTime: 0n,
+        defaultRateChangeThreshold: 0n,
+      };
+    }
+
+    const breakerAbi =
+      kind === "MEDIAN_DELTA"
+        ? MEDIAN_DELTA_BREAKER_ABI
+        : VALUE_DELTA_BREAKER_ABI;
+    const [tmRes, cdRes, thrRes] = await Promise.all([
+      tradingModeP,
+      readContractWithBlockFallback(
+        client,
+        {
+          address: breakerAddress as `0x${string}`,
+          abi: breakerAbi,
+          functionName: "defaultCooldownTime",
+        },
+        blockNumber,
+        fallback,
+      ),
+      readContractWithBlockFallback(
+        client,
+        {
+          address: breakerAddress as `0x${string}`,
+          abi: breakerAbi,
+          functionName: "defaultRateChangeThreshold",
+        },
+        blockNumber,
+        fallback,
+      ),
+    ]);
+    return {
+      activatesTradingMode: Number(tmRes.result as number),
+      defaultCooldownTime: cdRes.result as bigint,
+      defaultRateChangeThreshold: thrRes.result as bigint,
+    };
+  } catch (err) {
+    logRpcFailure(
+      chainId,
+      "fetchBreakerDefaults",
+      breakerAddress,
+      err,
+      blockNumber,
+    );
+    return null;
+  }
+}
+
+/** Fetch full per-feed breaker state from RPC. Bundles
+ * `BreakerBox.rateFeedBreakerStatus` + per-feed config + (kind-specific)
+ * `medianRatesEMA` / `smoothingFactors` / `referenceValues`. Returns null if
+ * any required call fails — caller decides whether to fall back to defaults
+ * (sentinel 0) or skip. */
+export async function fetchBreakerFeedState(
+  chainId: number,
+  breakerAddress: string,
+  kind: BreakerKindRpc,
+  rateFeedID: string,
+  blockNumber: bigint,
+): Promise<BreakerFeedState | null> {
+  const mock = _testBreakerFeedState.get(
+    breakerFeedStateKey(chainId, breakerAddress, rateFeedID),
+  );
+  if (mock !== undefined) return mock;
+
+  let breakerBoxAddress: `0x${string}`;
+  try {
+    breakerBoxAddress = requireContractAddress(chainId, "BreakerBox");
+  } catch {
+    return null;
+  }
+
+  try {
+    const client = getRpcClient(chainId);
+    const fallback = getFallbackRpcClient(chainId);
+    const statusP = readContractWithBlockFallback(
+      client,
+      {
+        address: breakerBoxAddress,
+        abi: BREAKER_BOX_ABI,
+        functionName: "rateFeedBreakerStatus",
+        args: [rateFeedID as `0x${string}`, breakerAddress as `0x${string}`],
+      },
+      blockNumber,
+      fallback,
+    );
+
+    if (kind === "MARKET_HOURS") {
+      const s = await statusP;
+      const status = parseRateFeedBreakerStatus(s.result);
+      return {
+        enabled: status.enabled,
+        tradingMode: status.tradingMode,
+        lastStatusUpdatedAt: status.lastUpdatedTime,
+        cooldownTime: 0n,
+        rateChangeThreshold: 0n,
+        smoothingFactor: null,
+        medianRatesEMA: null,
+        referenceValue: null,
+      };
+    }
+
+    const breakerAbi =
+      kind === "MEDIAN_DELTA"
+        ? MEDIAN_DELTA_BREAKER_ABI
+        : VALUE_DELTA_BREAKER_ABI;
+
+    const [statusRes, cdRes, thrRes, kindSpecific] = await Promise.all([
+      statusP,
+      readContractWithBlockFallback(
+        client,
+        {
+          address: breakerAddress as `0x${string}`,
+          abi: breakerAbi,
+          functionName: "rateFeedCooldownTime",
+          args: [rateFeedID as `0x${string}`],
+        },
+        blockNumber,
+        fallback,
+      ),
+      readContractWithBlockFallback(
+        client,
+        {
+          address: breakerAddress as `0x${string}`,
+          abi: breakerAbi,
+          functionName: "rateChangeThreshold",
+          args: [rateFeedID as `0x${string}`],
+        },
+        blockNumber,
+        fallback,
+      ),
+      kind === "MEDIAN_DELTA"
+        ? Promise.all([
+            readContractWithBlockFallback(
+              client,
+              {
+                address: breakerAddress as `0x${string}`,
+                abi: MEDIAN_DELTA_BREAKER_ABI,
+                functionName: "smoothingFactors",
+                args: [rateFeedID as `0x${string}`],
+              },
+              blockNumber,
+              fallback,
+            ),
+            readContractWithBlockFallback(
+              client,
+              {
+                address: breakerAddress as `0x${string}`,
+                abi: MEDIAN_DELTA_BREAKER_ABI,
+                functionName: "medianRatesEMA",
+                args: [rateFeedID as `0x${string}`],
+              },
+              blockNumber,
+              fallback,
+            ),
+          ])
+        : readContractWithBlockFallback(
+            client,
+            {
+              address: breakerAddress as `0x${string}`,
+              abi: VALUE_DELTA_BREAKER_ABI,
+              functionName: "referenceValues",
+              args: [rateFeedID as `0x${string}`],
+            },
+            blockNumber,
+            fallback,
+          ),
+    ]);
+
+    const status = parseRateFeedBreakerStatus(statusRes.result);
+    if (kind === "MEDIAN_DELTA") {
+      const [sfRes, emaRes] = kindSpecific as [
+        BlockFallbackResult,
+        BlockFallbackResult,
+      ];
+      return {
+        enabled: status.enabled,
+        tradingMode: status.tradingMode,
+        lastStatusUpdatedAt: status.lastUpdatedTime,
+        cooldownTime: cdRes.result as bigint,
+        rateChangeThreshold: thrRes.result as bigint,
+        smoothingFactor: sfRes.result as bigint,
+        medianRatesEMA: emaRes.result as bigint,
+        referenceValue: null,
+      };
+    }
+    const refRes = kindSpecific as BlockFallbackResult;
+    return {
+      enabled: status.enabled,
+      tradingMode: status.tradingMode,
+      lastStatusUpdatedAt: status.lastUpdatedTime,
+      cooldownTime: cdRes.result as bigint,
+      rateChangeThreshold: thrRes.result as bigint,
+      smoothingFactor: null,
+      medianRatesEMA: null,
+      referenceValue: refRes.result as bigint,
+    };
+  } catch (err) {
+    logRpcFailure(
+      chainId,
+      "fetchBreakerFeedState",
+      `${breakerAddress}:${rateFeedID}`,
+      err,
+      blockNumber,
+    );
+    return null;
+  }
+}
+
+/** viem decodes named struct outputs as objects, anonymous outputs as tuples.
+ * `rateFeedBreakerStatus` has named outputs so this should always be the
+ * object form, but we support tuple form defensively. */
+function parseRateFeedBreakerStatus(raw: unknown): {
+  tradingMode: number;
+  lastUpdatedTime: bigint;
+  enabled: boolean;
+} {
+  if (Array.isArray(raw)) {
+    return {
+      tradingMode: Number(raw[0]),
+      lastUpdatedTime: BigInt(raw[1] as bigint | number),
+      enabled: Boolean(raw[2]),
+    };
+  }
+  const obj = raw as {
+    tradingMode: number | bigint;
+    lastUpdatedTime: number | bigint;
+    enabled: boolean;
+  };
+  return {
+    tradingMode: Number(obj.tradingMode),
+    lastUpdatedTime: BigInt(obj.lastUpdatedTime),
+    enabled: Boolean(obj.enabled),
+  };
+}
+
+// ---- DB query helper ----
+
+/** Returns all BreakerConfig rows on the given chain for the given rateFeedID.
+ * Same in-memory chainId filter rationale as getPoolsByFeed — Envio's
+ * single-field getWhere doesn't support compound queries. Result set is
+ * always small (≤ 1 trip-able config per feed in production today). */
+export async function getBreakerConfigsByFeed(
+  context: HandlerContext,
+  chainId: number,
+  rateFeedID: string,
+): Promise<BreakerConfig[]> {
+  const rows = await context.BreakerConfig.getWhere.rateFeedID.eq(rateFeedID);
+  return rows.filter((r) => r.chainId === chainId);
 }

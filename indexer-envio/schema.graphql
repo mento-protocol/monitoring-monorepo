@@ -395,6 +395,107 @@ type OlsLifecycleEvent {
 }
 
 # ============================================================================
+# Circuit Breakers (BreakerBox + MedianDeltaBreaker + ValueDeltaBreaker)
+#
+# Per-feed breaker config + live state. Every v3 indexed pool with a
+# `referenceRateFeedID` has at most ONE trip-able BreakerConfig row
+# (MedianDelta on FX, ValueDelta on stablecoin). MarketHoursBreaker is
+# represented as a Breaker row for completeness — its events fire through
+# BreakerBox — but no BreakerConfig is populated for it (no per-feed state).
+#
+# IDs:
+#   Breaker.id        = "{chainId}-{breakerAddress}"
+#   BreakerConfig.id  = "{chainId}-{breakerAddress}-{rateFeedID}"
+#   BreakerTripEvent.id = eventId(chainId, blockNumber, logIndex)
+#
+# All addresses + feed IDs are lowercased.
+# ============================================================================
+
+enum BreakerKind {
+  MEDIAN_DELTA
+  VALUE_DELTA
+  MARKET_HOURS
+}
+
+enum BreakerStatus {
+  OK
+  TRIPPED
+}
+
+type Breaker @index(fields: ["chainId", "address"]) {
+  id: ID! # "{chainId}-{lowercaseAddress}"
+  chainId: Int! @index
+  address: String! @index # lowercased
+  kind: BreakerKind!
+  # Trading mode this breaker OR's into rateFeedTradingMode when tripped.
+  # Production: 3 (halt) for all three breakers on Celo + Monad.
+  activatesTradingMode: Int!
+  # Defaults — used when per-feed override is sentinel 0.
+  defaultCooldownTime: BigInt! # seconds
+  defaultRateChangeThreshold: BigInt! # Fixidity 1e24=100%
+  registeredAtBlock: BigInt!
+  registeredAtTimestamp: BigInt!
+  removed: Boolean!
+}
+
+type BreakerConfig @index(fields: ["chainId", "rateFeedID"]) {
+  id: ID! # "{chainId}-{breakerAddress}-{rateFeedID}"
+  chainId: Int! @index
+  breaker: Breaker!
+  # Denormalized for query convenience (avoid joining for filter-by-address).
+  breakerAddress: String! @index
+  rateFeedID: String! @index # lowercased
+  enabled: Boolean!
+  # Per-feed config (sentinel 0 = inherit Breaker default).
+  cooldownTime: BigInt!
+  rateChangeThreshold: BigInt!
+  # MedianDelta-only (null on VALUE_DELTA / MARKET_HOURS).
+  smoothingFactor: BigInt # Fixidity
+  # `0n` = uninitialized. Treat as "not yet seeded" in UI; the next
+  # `MedianUpdated` will seed EMA = currentMedian (mirrors contract behavior
+  # in MedianDeltaBreaker.shouldTrigger when previousEMA == 0).
+  medianRatesEMA: BigInt
+  # ValueDelta-only.
+  referenceValue: BigInt
+  # Live state mirrored from MedianUpdated (NOT OracleReported — the
+  # contract only invokes shouldTrigger when the median changes).
+  lastMedianRate: BigInt
+  lastUpdatedAt: BigInt
+  # Current status mirroring on-chain BreakerStatus struct.
+  status: BreakerStatus!
+  # 0 if OK; activatesTradingMode if TRIPPED.
+  tradingMode: Int!
+  # = on-chain BreakerStatus.lastUpdatedTime; drives cooldown timing.
+  lastStatusUpdatedAt: BigInt!
+  # Pre-rolled = lastStatusUpdatedAt + cooldownTime. Refreshed on every trip
+  # / reset / cooldown config change so the dashboard can render
+  # `cooldownEndsAt - now` without RPC.
+  cooldownEndsAt: BigInt!
+  lastTripAt: BigInt
+  lastTripTxHash: String
+  lastResetAt: BigInt
+  tripCountLifetime: Int!
+}
+
+type BreakerTripEvent @index(fields: ["rateFeedID", "blockTimestamp"]) {
+  id: ID! # eventId(chainId, blockNumber, logIndex)
+  chainId: Int! @index
+  breaker: Breaker!
+  breakerAddress: String! @index
+  rateFeedID: String! @index
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
+  txHash: String!
+  logIndex: Int!
+  # Snapshots at trip time so the UI can render
+  # "tripped at 4.53% (threshold 4.00%)" without RPC.
+  medianRateAtTrip: BigInt!
+  # Nullable: EMA at trip time for MedianDelta; referenceValue for ValueDelta.
+  referenceAtTrip: BigInt
+  thresholdAtTrip: BigInt!
+}
+
+# ============================================================================
 # Bridge Flows — generic (provider-agnostic) core
 #
 # Any bridge provider (Wormhole NTT today; LayerZero / Axelar / CCTP later)

@@ -4,6 +4,7 @@ import {
   FX_CLOSE_HOUR_UTC,
   FX_REOPEN_HOUR_UTC,
   ANCHOR_FRI_2100,
+  nextMarketHoursTransition,
   tradingSecondsInRange,
   weekendOverlapSeconds,
 } from "../weekend";
@@ -216,5 +217,38 @@ describe("weekendOverlapSeconds", () => {
     const start = sec(utc(4, 0)); // Thursday
     const end = start + 5 * 86400;
     expect(weekendOverlapSeconds(start, end)).toBe(180000);
+  });
+});
+
+describe("nextMarketHoursTransition", () => {
+  it("returns next CLOSE when called during open hours", () => {
+    const wed = utc(3, 12); // Wednesday noon
+    const out = nextMarketHoursTransition(wed);
+    expect(out.kind).toBe("CLOSE");
+    expect(out.at.getUTCDay()).toBe(5); // Friday
+    expect(out.at.getUTCHours()).toBe(FX_CLOSE_HOUR_UTC);
+  });
+
+  it("returns next OPEN when called during the weekend", () => {
+    const sat = utc(6, 6); // Saturday 06:00
+    const out = nextMarketHoursTransition(sat);
+    expect(out.kind).toBe("OPEN");
+    expect(out.at.getUTCDay()).toBe(0); // Sunday
+    expect(out.at.getUTCHours()).toBe(FX_REOPEN_HOUR_UTC);
+  });
+
+  it("returns OPEN at exactly the close boundary (Fri close hour, inclusive)", () => {
+    const fri = utc(5, FX_CLOSE_HOUR_UTC);
+    const out = nextMarketHoursTransition(fri);
+    expect(out.kind).toBe("OPEN");
+  });
+
+  it("returns CLOSE at exactly the reopen boundary (Sun reopen hour, exclusive)", () => {
+    // At Sun 23:00 we're already back to OPEN, so the next transition is the
+    // following Friday's CLOSE.
+    const sun = utc(0, FX_REOPEN_HOUR_UTC);
+    const out = nextMarketHoursTransition(sun);
+    expect(out.kind).toBe("CLOSE");
+    expect(out.at.getUTCDay()).toBe(5);
   });
 });

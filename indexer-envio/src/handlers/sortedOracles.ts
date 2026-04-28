@@ -18,7 +18,9 @@ import {
   getPoolsByFeed,
   updatePoolsOracleExpiry,
   getPoolsWithReferenceFeed,
+  getBreakerConfigsByFeed,
 } from "../rpc";
+import { nextMedianEMA } from "../breakers";
 
 // ---------------------------------------------------------------------------
 // SortedOracles.OracleReported
@@ -136,15 +138,35 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
 
 SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   const rateFeedID = asAddress(event.params.token);
+  const oraclePrice = event.params.value;
 
-  const poolIds = await getPoolsByFeed(context, event.chainId, rateFeedID);
-  if (poolIds.length === 0) return;
+  // Two parallel concerns share this event: pool-side oracle/breach state
+  // (existing) and breaker-side EMA / lastMedianRate mirror (new). Look up
+  // both up front so neither's emptiness suppresses the other, and so a
+  // single preload-phase pass warms both entity caches.
+  const [poolIds, breakerConfigs] = await Promise.all([
+    getPoolsByFeed(context, event.chainId, rateFeedID),
+    getBreakerConfigsByFeed(context, event.chainId, rateFeedID),
+  ]);
 
-  // See OracleReported handler.
-  if (await maybePreloadPool(context, poolIds)) return;
+  if (poolIds.length === 0 && breakerConfigs.length === 0) return;
+
+  // Preload phase: warm pool + breaker entities, no writes. Mirrors
+  // `maybePreloadPool` semantics — return without proceeding to writes.
+  if (context.isPreload) {
+    await Promise.all([
+      maybePreloadPool(context, poolIds),
+      ...breakerConfigs.map(async (cfg) => {
+        await context.Breaker.get(cfg.breaker_id);
+      }),
+    ]);
+    return;
+  }
+
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
+  // ----- Pool fan-out (existing logic, unchanged) -----------------------
   // See OracleReported handler — parallel fan-out across distinct pools.
   await Promise.all(
     poolIds.map(async (poolId) => {
@@ -159,8 +181,6 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
               rateFeedID,
               blockNumber,
             )) ?? existing.oracleExpiry);
-
-      const oraclePrice = event.params.value;
 
       // Median-to-median jump: `existing.lastMedianPrice` is the previous
       // `MedianUpdated.value` (not `existing.oraclePrice`, which gets
@@ -251,6 +271,47 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       context.OracleSnapshot.set(snapshot);
     }),
   );
+
+  // ----- Breaker EMA + lastMedianRate mirror ----------------------------
+  // BreakerBox._checkAndSetBreakers fires from SortedOracles only on median
+  // change (this event), so this is the correct hook for EMA mutation —
+  // not OracleReported, which fires per-reporter without recomputing EMA.
+  // Skip configs that are not enabled (the contract skips them too — see
+  // BreakerBox.sol:336-342). For each MedianDelta config, compute the new
+  // EMA per the contract's Fixidity formula. ValueDelta keeps the same
+  // referenceValue but still gets `lastMedianRate` / `lastUpdatedAt`.
+  if (oraclePrice > 0n && breakerConfigs.length > 0) {
+    await Promise.all(
+      breakerConfigs.map(async (cfg) => {
+        if (!cfg.enabled) return;
+        const breaker = await context.Breaker.get(cfg.breaker_id);
+        if (!breaker) return;
+        const nextEMA =
+          breaker.kind === "MEDIAN_DELTA"
+            ? nextMedianEMA(
+                oraclePrice,
+                cfg.medianRatesEMA ?? 0n,
+                cfg.smoothingFactor ?? 0n,
+              )
+            : cfg.medianRatesEMA;
+        // Skip the write when nothing changed — Envio still pays a row-write
+        // cost for no-op `set()` calls, and MedianUpdated is one of the
+        // hottest event paths.
+        if (
+          cfg.lastMedianRate === oraclePrice &&
+          cfg.medianRatesEMA === nextEMA
+        ) {
+          return;
+        }
+        context.BreakerConfig.set({
+          ...cfg,
+          lastMedianRate: oraclePrice,
+          lastUpdatedAt: blockTimestamp,
+          medianRatesEMA: nextEMA,
+        });
+      }),
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
