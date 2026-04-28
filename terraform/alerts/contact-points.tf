@@ -13,8 +13,14 @@ resource "grafana_contact_point" "slack_critical" {
   slack {
     token     = var.slack_bot_token
     recipient = var.slack_channel_critical
-    title     = "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ end }} {{ if .CommonLabels.alertname }}{{ .CommonLabels.alertname }}{{ else }}{{ len .Alerts }} alerts{{ end }}{{ if .CommonLabels.pair }} — {{ .CommonLabels.pair }}{{ end }}{{ if .CommonLabels.chain_name }} · {{ .CommonLabels.chain_name | title }}{{ end }}"
-    text      = local.slack_body_template
+    # Minimal title: Grafana hardcodes attachment.title_link to the alert detail
+    # URL on grafana.com, and the terraform provider does not expose title_link
+    # as a configurable field. Demoting the title to a single status emoji
+    # keeps Slack's push/preview text small and unobtrusive; the prominent
+    # human-readable title is rendered as the first line of the body, where
+    # mrkdwn links are honoured (see local.slack_body_template).
+    title = "{{ if eq .Status \"firing\" }}🔴{{ else }}✅{{ end }}"
+    text  = local.slack_body_template
   }
 }
 
@@ -24,8 +30,9 @@ resource "grafana_contact_point" "slack_warnings" {
   slack {
     token     = var.slack_bot_token
     recipient = var.slack_channel_warnings
-    title     = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }} {{ if .CommonLabels.alertname }}{{ .CommonLabels.alertname }}{{ else }}{{ len .Alerts }} alerts{{ end }}{{ if .CommonLabels.pair }} — {{ .CommonLabels.pair }}{{ end }}{{ if .CommonLabels.chain_name }} · {{ .CommonLabels.chain_name | title }}{{ end }}"
-    text      = local.slack_body_template
+    # See note on slack_critical above — same title-link constraint applies.
+    title = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
+    text  = local.slack_body_template
   }
 }
 
@@ -35,25 +42,42 @@ locals {
   # into `slack_body_critical` / `slack_body_warning` the first time the two
   # layouts need to diverge (e.g. if critical grows an "ack" action row).
   #
-  # Title carries identity (alertname — pair · chain). Body is:
-  #   1. One-line headline from the rule's `summary` annotation.
-  #   2. Italicised `description` with likely causes — CRITICAL-severity
-  #      rules only. Warnings are summary-only: authors can still set a
-  #      `description` annotation (useful in the Grafana rule-detail view)
-  #      but it is intentionally suppressed in Slack to keep warning
-  #      messages at a glance-able 4 lines.
-  #   3. Optional KPI lines from rule-specific annotations (current_deviation,
+  # Layout (pool-scoped, e.g. fpmms rules):
+  #   1. Bold linked title: `*<pool details URL|alertname — pair · chain>*`.
+  #      Acts as the prominent visual title because Grafana's attachment.title
+  #      links to grafana.com and that link target is not configurable from
+  #      the terraform provider.
+  #   2. One-line headline from the rule's `summary` annotation.
+  #   3. Italicised `description` with likely causes — CRITICAL-severity rules
+  #      only. Warnings are summary-only: authors can still set a `description`
+  #      annotation (useful in the Grafana rule-detail view) but it is
+  #      intentionally suppressed in Slack to keep warning messages at a
+  #      glance-able 4 lines.
+  #   4. Optional KPI lines from rule-specific annotations (current_deviation,
   #      current_reserves, …). Each guarded by `{{ if .Annotations.X }}` so
   #      rules that don't set the annotation render nothing — no empty
   #      "*Foo:*" placeholder. Add new lines here when introducing rule-
   #      specific context fields; rules that don't set them are unaffected.
-  #   4. Metadata row: clickable pool address (→ block explorer) + start time.
-  #   5. Action row: dashboard link + Grafana alert link.
+  #   5. Metadata row: start time + Grafana alert link. The per-row
+  #      `View alert` link is required because `notify_*_pool` collapses
+  #      multiple alertnames per (chain_id, pool_id) into one Slack thread,
+  #      so the linked title alone can't disambiguate which rule fired.
+  #      The pool address used to live here but was removed — the pair name
+  #      is already in the linked title and the raw address rarely helps
+  #      responders.
   #
-  # For metrics-bridge alerts (no pool_id/pair/chain), the pool/dashboard
-  # blocks are suppressed via `{{ if .Labels.pool_id }}`.
+  # Layout (service-scoped, e.g. metrics-bridge — no pool_id/pair/chain):
+  #   1. Plain bold alertname (no link target — there is no pool details page).
+  #   2. Summary / description as above.
+  #   3. Metadata row with start time + Grafana alert link so operators can
+  #      still jump straight to the rule detail view.
   slack_body_template = <<-EOT
     {{ range .Alerts -}}
+    {{ if .Labels.pool_id -}}
+    *<https://monitoring.mento.org/pool/{{ .Labels.pool_id }}|{{ .Labels.alertname }}{{ if .Labels.pair }} — {{ .Labels.pair }}{{ end }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}>*
+    {{ else -}}
+    *{{ .Labels.alertname }}*
+    {{ end -}}
     {{ if .Annotations.summary }}{{ .Annotations.summary }}
     {{ end -}}
     {{ if and .Annotations.description (eq .Labels.severity "critical") -}}
@@ -65,13 +89,7 @@ locals {
     {{ if .Annotations.current_reserves -}}
     *Current Reserves:* {{ .Annotations.current_reserves }}
     {{ end -}}
-    {{ if .Labels.pool_id -}}
-    {{ $addr := or .Labels.pool_address_short .Labels.pool_id -}}
-    *Pool:* {{ if .Labels.block_explorer_url }}<{{ .Labels.block_explorer_url }}|`{{ $addr }}`>{{ else }}`{{ $addr }}`{{ end }}   *Started:* {{ .StartsAt.Format "15:04 UTC" }}
-    <https://monitoring.mento.org/pool/{{ .Labels.pool_id }}|Open pool>   ·   <{{ .GeneratorURL }}|View alert>
-    {{ else -}}
     *Started:* {{ .StartsAt.Format "15:04 UTC" }}   ·   <{{ .GeneratorURL }}|View alert>
-    {{ end -}}
     {{ end }}
   EOT
 
