@@ -53,6 +53,8 @@ Touchpoints: `indexer-envio/schema.graphql`, handler in `indexer-envio/src/handl
 - [ ] Revenue page placeholders ("CDP Borrowing Fees" and "Reserve Yield" marked "Soon")
 - [ ] **Oracle update tx-hash label** — oracle alerts currently say `Last update: X ago` as plain text. Strictly better as a hyperlink to the exact on-chain `OracleReport` tx on the block explorer. Blocked on the indexer surfacing `lastOracleUpdateTxHash` (or equivalent) on the `Pool` entity — not currently tracked. Once added, the bridge exports it as a `last_oracle_update_url` label and the Slack template wraps "X ago" in `<url|text>`.
 - [ ] **Migrate Aegis v2 alerts to Slack** — Aegis still posts to Discord; v3 went Slack-native (`#alerts-critical` / `#alerts-warnings`). Unify once the v3 channel pair has a week+ of soak.
+- [ ] **Rebalance probe: AbortController for timed-out RPC calls** — `metrics-bridge/src/rebalance-probe.ts:64-75` uses `Promise.race` to cap each probe's wall-clock, but the underlying viem `client.call` keeps running on the dropped branch. With concurrency=5 and a stuck endpoint that's a small but real resource pin. Fix needs an `AbortController` threaded through to viem's transport so the probe is actually cancelled. Codex P2 on PR #235.
+- [ ] **Rebalance probe: handle `REBALANCE_PROBE_EVERY_N_POLLS=1`** — `poller.ts:21` predicate is `pollCycle % N !== 1`; with `N=1`, `pollCycle % 1` is always `0`, so EVERY_N=1 silently disables the probe. Default is 5 in shipped config so this is a future-config foot-gun, not a current bug. Fix is one line — use `(pollCycle % N) === 1 % N` or pre-increment + `=== 0` predicate. Cursor + Codex on PR #235.
 
 ---
 
