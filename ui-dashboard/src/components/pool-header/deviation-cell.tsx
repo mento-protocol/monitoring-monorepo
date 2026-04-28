@@ -12,7 +12,7 @@ import { POOL_OPEN_BREACH_TX } from "@/lib/queries";
 import { explorerTxUrl } from "@/lib/tokens";
 
 const DEVIATION_EXPLAINER_BASE =
-  "Live drift between the pool's internal price (implied by its current token reserves) and the oracle reference rate. The pool enters a rebalance breach when this deviation exceeds the Rebalance Threshold";
+  "Difference between the oracle rate and the pool's internal price (implied by its current token reserves). A breach occurs when this deviation exceeds the rebalance threshold";
 
 export function DeviationCell({
   pool,
@@ -58,7 +58,7 @@ export function DeviationCell({
   // indexer hasn't backfilled the threshold yet (sentinel 0).
   const thresholdSuffix =
     pool.rebalanceThreshold && pool.rebalanceThreshold > 0
-      ? ` (${(pool.rebalanceThreshold / 100).toFixed(2)}%)`
+      ? ` of ${(pool.rebalanceThreshold / 100).toFixed(2)}%`
       : "";
   const explainer = `${DEVIATION_EXPLAINER_BASE}${thresholdSuffix}.`;
 

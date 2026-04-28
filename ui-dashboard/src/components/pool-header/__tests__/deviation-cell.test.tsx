@@ -215,7 +215,7 @@ describe("DeviationCell — info popover", () => {
       <DeviationCell pool={pool} network={NETWORK} />,
     );
     expect(html).toMatch(
-      /aria-label="About Deviation\. Live drift between the pool/,
+      /aria-label="About Deviation\. Difference between the oracle rate/,
     );
   });
 
@@ -226,7 +226,7 @@ describe("DeviationCell — info popover", () => {
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toMatch(/Rebalance Threshold \(50\.00%\)/);
+    expect(html).toMatch(/rebalance threshold of 50\.00%/);
     expect(html).not.toMatch(/see Pool Config/);
   });
 
@@ -239,10 +239,10 @@ describe("DeviationCell — info popover", () => {
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    // No threshold suffix when the indexer's sentinel-0 is in play; the
+    // No "of X%" suffix when the indexer's sentinel-0 is in play; the
     // popover still explains the concept.
-    expect(html).toMatch(/Rebalance Threshold\./);
-    expect(html).not.toMatch(/Rebalance Threshold \(/);
+    expect(html).toMatch(/rebalance threshold\./);
+    expect(html).not.toMatch(/rebalance threshold of/);
   });
 });
 
