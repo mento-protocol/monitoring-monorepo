@@ -462,6 +462,16 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # back to literal "token0" / "token1" (matches the existing `pair`
       # fallback semantics).
       current_reserves = local.deviation_critical_current_reserves_annotation
+      # Rebalance reason annotation, sourced from the metrics-bridge probe
+      # (`mento_pool_rebalance_blocked`). The probe runs every Nth Hasura
+      # poll for pools matching this rule's gate, so the label set ALWAYS
+      # already carries the same `chain_id`/`pool_id`/`pair` identity as
+      # the alert. Rendered in the Slack body via
+      # `{{ if .Annotations.rebalance_reason }}` — see contact-points.tf.
+      # When the probe hasn't run yet or the RPC failed, the gauge is
+      # absent and this annotation expands to an empty string, which the
+      # template suppresses.
+      rebalance_reason = "{{ if and $labels.reason_message $labels.reason_code }}{{ $labels.reason_message }} — [{{ $labels.reason_code }}]{{ end }}"
     }
 
     labels = {
@@ -555,6 +565,29 @@ resource "grafana_rule_group" "fpmms_deviation" {
       })
     }
 
+    # B = rebalance-blocked annotation source. NOT part of the threshold
+    # condition — the alert MUST still fire if the probe hasn't run yet
+    # or the RPC failed (operators need to know about the breach
+    # regardless of whether we have a reason). Grafana evaluates query
+    # B independently and exposes its label set on `$labels` for the
+    # `rebalance_reason` annotation template above. The expression is
+    # `mento_pool_rebalance_blocked > 0` so the series is empty when the
+    # probe couldn't determine a reason — the template's `{{ if … }}`
+    # guard then collapses the annotation to an empty string.
+    data {
+      ref_id         = "B"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "B"
+        expr    = "mento_pool_rebalance_blocked > 0"
+        instant = true
+      })
+    }
+
     data {
       ref_id         = "threshold"
       datasource_uid = "__expr__"
@@ -613,6 +646,14 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # typically renders. See the magnitude-gated rule for the no-sprig
       # rationale.
       current_reserves = local.deviation_critical_current_reserves_annotation
+      # Same rebalance-reason annotation as the magnitude-gated critical
+      # rule. The metrics-bridge probe gates on `lastDeviationRatio > 1.05`
+      # (which is the `-1` sentinel during data gaps, so eligible pools
+      # in this state typically slip past) — but if a probe DID run before
+      # the ratio gauge dropped, the most-recent reason annotation would
+      # still be present here. When neither label is set, the
+      # `{{ if … }}` guard collapses the annotation cleanly.
+      rebalance_reason = "{{ if and $labels.reason_message $labels.reason_code }}{{ $labels.reason_message }} — [{{ $labels.reason_code }}]{{ end }}"
     }
 
     labels = {
@@ -679,6 +720,22 @@ resource "grafana_rule_group" "fpmms_deviation" {
       model = jsonencode({
         refId   = "R1"
         expr    = "mento_pool_reserve_share_token1"
+        instant = true
+      })
+    }
+
+    # See the magnitude-gated critical rule for the rationale on why the
+    # rebalance-blocked query is independent of the threshold condition.
+    data {
+      ref_id         = "B"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "B"
+        expr    = "mento_pool_rebalance_blocked > 0"
         instant = true
       })
     }

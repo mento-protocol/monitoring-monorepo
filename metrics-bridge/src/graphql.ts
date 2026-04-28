@@ -33,6 +33,7 @@ const BRIDGE_POOLS_QUERY = gql`
       reserves1
       token0Decimals
       token1Decimals
+      rebalancerAddress
     }
   }
 `;
