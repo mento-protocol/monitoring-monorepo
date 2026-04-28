@@ -71,4 +71,32 @@ locals {
     local.usd_pegged_pair_regex,
     local.fx_weekend_gate_promql,
   )
+
+  # ── Deviation Breach Critical annotations ────────────────────────────────
+  # Both critical deviation-breach rules (magnitude-gated and anchored)
+  # render the same Slack diagnostic lines, so we author them once here.
+  #
+  # IMPORTANT — Grafana annotation templates expose Go text/template
+  # builtins (`if`, `and`, `index`, `eq`, `len`, …) plus a small set of
+  # Prometheus helpers (`humanize`, `humanizePercentage`, `humanizeDuration`,
+  # `printf`). Sprig (`mul`, `sub`, `splitList`, etc.) is NOT in scope —
+  # it's only available in `grafana_contact_point` notification templates.
+  # See `pkg/services/ngalert/state/template/funcs.go` upstream. PR #211
+  # commit `50acbd3` removed `mul` from a different annotation for exactly
+  # this reason.
+  #
+  # Strategy:
+  #   - `current_deviation` reads `$values.Dev.Value` from a query that
+  #     pre-computes `mento_pool_deviation_ratio - 1` in PromQL. Then
+  #     `humanizePercentage` (e.g. `0.082` → "8.2%") gives the rendered
+  #     line without any sprig math.
+  #   - `current_reserves` reads `$values.R0.Value` / `$values.R1.Value`
+  #     (already in [0, 1]) plus `.Labels.token_symbol` from each series
+  #     to render "axlUSDC / USDm". Map access is a Go template builtin.
+  #   - `humanizePercentage` on values like `0.5` renders "50%". For
+  #     values < 0.005 (rounding to "0%") this still passes the diagnostic
+  #     "100% USDT / 0% USDm" intent — small-share legs are functionally
+  #     drained.
+  deviation_critical_current_deviation_annotation = "{{ if $values.Dev }}{{ humanizePercentage $values.Dev.Value }} above threshold{{ end }}"
+  deviation_critical_current_reserves_annotation  = "{{ if and $values.R0 $values.R1 }}{{ humanizePercentage $values.R0.Value }} {{ $values.R0.Labels.token_symbol }} / {{ humanizePercentage $values.R1.Value }} {{ $values.R1.Labels.token_symbol }}{{ end }}"
 }

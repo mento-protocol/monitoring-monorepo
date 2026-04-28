@@ -4,7 +4,10 @@ import {
   explorerAddressUrl,
   hasChain,
 } from "@mento-protocol/monitoring-config/chains";
-import { poolName } from "@mento-protocol/monitoring-config/tokens";
+import {
+  poolName,
+  tokenSymbol,
+} from "@mento-protocol/monitoring-config/tokens";
 import {
   poolIdAddress,
   shortAddress,
@@ -66,6 +69,13 @@ const poolLabels = [
   "block_explorer_url",
 ] as const;
 const pressureLabels = [...poolLabels, "token_index"] as const;
+// Reserve-share gauges carry an additional `token_symbol` label so the Slack
+// alert annotation can render "17% USDT / 83% USDm" without parsing the `pair`
+// label (sprig `splitList` is NOT in scope for Grafana annotation templates —
+// only Go text/template builtins + Prometheus helpers like
+// `humanizePercentage` are. Label access via `$values.X.Labels.Y` is a Go
+// template builtin, so this is safe).
+const reserveShareLabels = [...poolLabels, "token_symbol"] as const;
 
 export const gauges = {
   oracleOk: new Gauge({
@@ -106,22 +116,25 @@ export const gauges = {
   }),
   // Flat per-token reserve-share gauges. Split from a single
   // `mento_pool_reserve_share{token_index}` (PR #234 review) because
-  // Grafana per-instance label match (`$values.C` / `$values.D` against
+  // Grafana per-instance label match (`$values.R0` / `$values.R1` against
   // a firing alert keyed on `pool_id, chain_id, pair`) silently fails
-  // when the annotation query carries an extra `token_index` dimension.
-  // The label set MUST match the deviation-ratio gauge's exactly so the
-  // `current_reserves` annotation actually renders. See the
-  // annotation-binding regression test in metrics.test.ts.
+  // when the annotation query carries an extra dimension that's not in
+  // the firing fingerprint. The pool-fingerprint subset of labels MUST
+  // match the deviation-ratio gauge's exactly so the `current_reserves`
+  // annotation actually renders. The `token_symbol` extension carries
+  // axlUSDC / USDm into the Slack alert without forcing the annotation
+  // template to parse the `pair` label (which would require sprig
+  // `splitList`, NOT in scope for Grafana annotation templates).
   reserveShareToken0: new Gauge({
     name: "mento_pool_reserve_share_token0",
-    help: "Share of normalized reserves held in token0 (decimal-adjusted, no oracle conversion). r0_normalized / (r0_normalized + r1_normalized) ∈ [0, 1]. Skipped when both reserves are zero (share undefined); emits 1.0 / 0.0 for one-sided pools to preserve the diagnostic '100% USDT / 0% USDm' signal. Used by deviation-breach Slack alerts to render imbalance alongside the magnitude.",
-    labelNames: poolLabels,
+    help: "Share of normalized reserves held in token0 (decimal-adjusted, no oracle conversion). r0_normalized / (r0_normalized + r1_normalized) ∈ [0, 1]. Skipped when both reserves are zero (share undefined); emits 1.0 / 0.0 for one-sided pools to preserve the diagnostic '100% USDT / 0% USDm' signal. Carries a `token_symbol` label (axlUSDC, USDm, …) so Slack alerts can name the imbalance without parsing the `pair` label.",
+    labelNames: reserveShareLabels,
     registers: [register],
   }),
   reserveShareToken1: new Gauge({
     name: "mento_pool_reserve_share_token1",
-    help: "Share of normalized reserves held in token1 (decimal-adjusted, no oracle conversion). r1_normalized / (r0_normalized + r1_normalized) ∈ [0, 1]. Skipped when both reserves are zero; emits 1.0 / 0.0 for one-sided pools (mirror of reserve_share_token0). See reserve_share_token0 for the rationale on splitting from a single token_index gauge.",
-    labelNames: poolLabels,
+    help: "Share of normalized reserves held in token1 (decimal-adjusted, no oracle conversion). r1_normalized / (r0_normalized + r1_normalized) ∈ [0, 1]. Skipped when both reserves are zero; emits 1.0 / 0.0 for one-sided pools (mirror of reserve_share_token0). Carries a `token_symbol` label.",
+    labelNames: reserveShareLabels,
     registers: [register],
   }),
   lastRebalancedAt: new Gauge({
@@ -260,14 +273,26 @@ export function updateMetrics(pools: PoolRow[]): void {
     // Two flat gauges (token0 / token1) instead of a single gauge with a
     // `token_index` label so the annotation queries on the deviation-
     // breach critical alert match the firing alert's label set exactly.
-    // See the gauge declarations and the annotation-binding regression
-    // test for the full rationale.
+    // The `token_symbol` label carries the resolved symbol so the
+    // annotation template can render "axlUSDC / USDm" without parsing
+    // `pair` (sprig `splitList` is unavailable in Grafana annotation
+    // templates). Falls back to literal "token0" / "token1" when the
+    // contract address isn't in @mento-protocol/contracts — matches the
+    // existing fallback semantics for `pair`.
     const r0 = Number(pool.reserves0) / 10 ** pool.token0Decimals;
     const r1 = Number(pool.reserves1) / 10 ** pool.token1Decimals;
     const total = r0 + r1;
     if (Number.isFinite(total) && total > 0) {
-      gauges.reserveShareToken0.set(labels, r0 / total);
-      gauges.reserveShareToken1.set(labels, r1 / total);
+      const token0Symbol = tokenSymbol(pool.chainId, pool.token0) ?? "token0";
+      const token1Symbol = tokenSymbol(pool.chainId, pool.token1) ?? "token1";
+      gauges.reserveShareToken0.set(
+        { ...labels, token_symbol: token0Symbol },
+        r0 / total,
+      );
+      gauges.reserveShareToken1.set(
+        { ...labels, token_symbol: token1Symbol },
+        r1 / total,
+      );
     }
   }
 }
