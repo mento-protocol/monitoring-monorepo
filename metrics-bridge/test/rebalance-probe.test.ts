@@ -157,6 +157,33 @@ describe("runRebalanceProbes — gauge writes", () => {
     warn.mockRestore();
   });
 
+  it("emits no metric and logs on a 'skip' (unknown strategy)", async () => {
+    // OLS guard: when the strategy can't be identified, we must NOT emit
+    // a misleading "blocked" annotation in Slack. Instead the probe is
+    // skipped and a one-off log line surfaces the unidentified strategy
+    // so an operator can investigate.
+    const pool = makePool(breachOverrides);
+    mockProbe.mockResolvedValueOnce({
+      kind: "skip",
+      reason: "Unable to identify the liquidity strategy type",
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await runRebalanceProbes([pool]);
+
+    const metrics = await register.getMetricsAsJSON();
+    const blocked = metrics.find(
+      (m) => m.name === "mento_pool_rebalance_blocked",
+    );
+    if (blocked && "values" in blocked) {
+      expect((blocked as { values: unknown[] }).values).toEqual([]);
+    }
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("[REBALANCE_PROBE_SKIPPED]"),
+    );
+    warn.mockRestore();
+  });
+
   it("emits no metric when the chain has no RPC client configured", async () => {
     const pool = makePool({
       ...breachOverrides,

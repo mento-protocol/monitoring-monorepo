@@ -11,8 +11,18 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { encodeErrorResult, parseAbi, type Hex, type PublicClient } from "viem";
-import { probeRebalance, ERROR_MESSAGES } from "../src/rebalance-check.js";
+import {
+  encodeErrorResult,
+  encodeFunctionData,
+  parseAbi,
+  type Hex,
+  type PublicClient,
+} from "viem";
+import {
+  probeRebalance,
+  detectStrategyType,
+  ERROR_MESSAGES,
+} from "../src/rebalance-check.js";
 
 const POOL: `0x${string}` = "0x0000000000000000000000000000000000001234";
 const STRATEGY: `0x${string}` = "0x0000000000000000000000000000000000005678";
@@ -47,21 +57,72 @@ function encodeRevert(errorName: string, args: readonly unknown[] = []): Hex {
     "error PriceDifferenceTooSmall()",
     "error PriceDifferenceMovedInWrongDirection()",
     "error CDPLS_REDEMPTION_SHORTFALL_TOO_LARGE(uint256 shortfall)",
+    "error OLS_OUT_OF_COLLATERAL()",
   ]);
   return encodeErrorResult({ abi, errorName, args });
 }
 
-/** Mock a viem PublicClient whose `call` rejects with the given error. */
-function mockRevertingClient(err: Error): PublicClient {
+/**
+ * Mock a viem PublicClient whose strategy detection resolves to the
+ * specified type — `getCDPConfig`/`reserve`/`getPools` succeed for the
+ * matching type and revert with a contract-shape "function not found"
+ * error otherwise. `call` is delegated to a per-test stub.
+ */
+type StrategyKind = "cdp" | "reserve" | "ols";
+
+function functionNotFoundError(): Error {
+  // viem-shape contract revert ("returned no data" → ContractFunctionZeroDataError).
+  return makeRevertError(
+    'The contract function "x" returned no data ("0x").',
+    null,
+  );
+}
+
+function mockClient(args: {
+  strategyKind: StrategyKind;
+  call: () => Promise<unknown>;
+}): PublicClient {
   return {
-    call: () => Promise.reject(err),
+    call: args.call,
+    readContract: ({ functionName }: { functionName: string }) => {
+      if (functionName === "getCDPConfig") {
+        if (args.strategyKind === "cdp") return Promise.resolve({});
+        return Promise.reject(functionNotFoundError());
+      }
+      if (functionName === "reserve") {
+        if (args.strategyKind === "reserve")
+          return Promise.resolve("0x0000000000000000000000000000000000000abc");
+        return Promise.reject(functionNotFoundError());
+      }
+      if (functionName === "getPools") {
+        if (args.strategyKind === "ols") return Promise.resolve([]);
+        return Promise.reject(functionNotFoundError());
+      }
+      return Promise.reject(
+        new Error(`unexpected functionName: ${functionName}`),
+      );
+    },
   } as unknown as PublicClient;
 }
 
-function mockSucceedingClient(): PublicClient {
-  return {
+/** Mock a viem PublicClient whose `call` rejects with the given error. */
+function mockRevertingClient(
+  err: Error,
+  strategyKind: StrategyKind = "reserve",
+): PublicClient {
+  return mockClient({
+    strategyKind,
+    call: () => Promise.reject(err),
+  });
+}
+
+function mockSucceedingClient(
+  strategyKind: StrategyKind = "reserve",
+): PublicClient {
+  return mockClient({
+    strategyKind,
     call: () => Promise.resolve({}),
-  } as unknown as PublicClient;
+  });
 }
 
 describe("probeRebalance — happy path", () => {
@@ -214,5 +275,143 @@ describe("probeRebalance — transport errors propagate as transport_error", () 
       STRATEGY,
     );
     expect(result.kind).toBe("blocked");
+  });
+});
+
+describe("detectStrategyType", () => {
+  it("returns 'cdp' when getCDPConfig succeeds", async () => {
+    const client = mockClient({
+      strategyKind: "cdp",
+      call: () => Promise.resolve({}),
+    });
+    const t = await detectStrategyType(client, STRATEGY, POOL);
+    expect(t).toBe("cdp");
+  });
+
+  it("returns 'reserve' when reserve() succeeds", async () => {
+    const client = mockClient({
+      strategyKind: "reserve",
+      call: () => Promise.resolve({}),
+    });
+    const t = await detectStrategyType(client, STRATEGY, POOL);
+    expect(t).toBe("reserve");
+  });
+
+  it("returns 'ols' when getPools() succeeds", async () => {
+    const client = mockClient({
+      strategyKind: "ols",
+      call: () => Promise.resolve({}),
+    });
+    const t = await detectStrategyType(client, STRATEGY, POOL);
+    expect(t).toBe("ols");
+  });
+
+  it("returns 'unknown' when none of the detection probes succeed", async () => {
+    // Every getter reverts with "function not found" — typical for an EOA
+    // or a strategy proxy with the wrong implementation. Caller must skip
+    // the probe instead of emitting a misleading "blocked" annotation.
+    const client = {
+      readContract: () => Promise.reject(functionNotFoundError()),
+    } as unknown as PublicClient;
+    const t = await detectStrategyType(client, STRATEGY, POOL);
+    expect(t).toBe("unknown");
+  });
+
+  it("propagates transport errors (network down) — never silently maps to 'unknown'", async () => {
+    // If the RPC is down, every detection probe will fail with a transport
+    // error. We must surface that to the caller (which converts it to
+    // transport_error → no metric) rather than treating it as "unknown",
+    // which would silently disable probes during outages.
+    const client = {
+      readContract: () => Promise.reject(new Error("fetch failed")),
+    } as unknown as PublicClient;
+    await expect(detectStrategyType(client, STRATEGY, POOL)).rejects.toThrow(
+      /fetch failed/,
+    );
+  });
+});
+
+describe("probeRebalance — strategy-type branching", () => {
+  it("CDP strategy: probes rebalance() and returns ok on success", async () => {
+    const client = mockClient({
+      strategyKind: "cdp",
+      call: () => Promise.resolve({}),
+    });
+    const result = await probeRebalance(client, POOL, STRATEGY);
+    expect(result).toEqual({ kind: "ok" });
+  });
+
+  it("Reserve strategy: probes rebalance() and decodes RLS_RESERVE_OUT_OF_COLLATERAL", async () => {
+    const data = encodeRevert("RLS_RESERVE_OUT_OF_COLLATERAL");
+    const err = makeRevertError("execution reverted", data);
+    const client = mockClient({
+      strategyKind: "reserve",
+      call: () => Promise.reject(err),
+    });
+    const result = await probeRebalance(client, POOL, STRATEGY);
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") return;
+    expect(result.reasonCode).toBe("RLS_RESERVE_OUT_OF_COLLATERAL");
+  });
+
+  it("OLS strategy: probes determineAction() instead of rebalance() and decodes OLS_OUT_OF_COLLATERAL", async () => {
+    // OLS rebalance() reverts inside ERC20 from address(0); the probe must
+    // route to determineAction (view-only) to surface a meaningful revert.
+    const data = encodeRevert("OLS_OUT_OF_COLLATERAL");
+    const err = makeRevertError("execution reverted", data);
+    let calledData: string | undefined;
+    const callSpy = (args: { data: string }): Promise<unknown> => {
+      calledData = args.data;
+      return Promise.reject(err);
+    };
+    const client = {
+      readContract: ({ functionName }: { functionName: string }) => {
+        if (functionName === "getPools") return Promise.resolve([]);
+        return Promise.reject(functionNotFoundError());
+      },
+      call: callSpy,
+    } as unknown as PublicClient;
+    const result = await probeRebalance(client, POOL, STRATEGY);
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") return;
+    expect(result.reasonCode).toBe("OLS_OUT_OF_COLLATERAL");
+    // Regression guard: confirm the call() data carries determineAction's
+    // selector, NOT rebalance's. If the OLS branch is ever broken, the
+    // probe will revert from address(0) inside ERC20 instead of returning
+    // a clean OLS_* code.
+    const rebalanceSelector = encodeFunctionData({
+      abi: parseAbi(["function rebalance(address pool) external"]),
+      functionName: "rebalance",
+      args: [POOL],
+    }).slice(0, 10);
+    expect(calledData).toBeDefined();
+    expect(calledData?.slice(0, 10)).not.toBe(rebalanceSelector);
+  });
+
+  it("Unknown strategy: returns 'skip' without emitting a probe call", async () => {
+    let callMade = false;
+    const client = {
+      readContract: () => Promise.reject(functionNotFoundError()),
+      call: () => {
+        callMade = true;
+        return Promise.resolve({});
+      },
+    } as unknown as PublicClient;
+    const result = await probeRebalance(client, POOL, STRATEGY);
+    expect(result.kind).toBe("skip");
+    if (result.kind !== "skip") return;
+    expect(result.reason).toMatch(/strategy/i);
+    expect(callMade).toBe(false);
+  });
+
+  it("transport error during detection → transport_error result (no probe attempted)", async () => {
+    const client = {
+      readContract: () => Promise.reject(new Error("ECONNREFUSED")),
+      call: () => Promise.resolve({}),
+    } as unknown as PublicClient;
+    const result = await probeRebalance(client, POOL, STRATEGY);
+    expect(result.kind).toBe("transport_error");
+    if (result.kind !== "transport_error") return;
+    expect(result.error).toContain("ECONNREFUSED");
   });
 });

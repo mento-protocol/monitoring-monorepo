@@ -471,7 +471,13 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # When the probe hasn't run yet or the RPC failed, the gauge is
       # absent and this annotation expands to an empty string, which the
       # template suppresses.
-      rebalance_reason = "{{ if and $labels.reason_message $labels.reason_code }}{{ $labels.reason_message }} — [{{ $labels.reason_code }}]{{ end }}"
+      #
+      # `$labels` in a Grafana alert annotation only exposes labels from
+      # the firing series (query A — the breach gauge). Query B's labels
+      # (`reason_code` / `reason_message`) live on its own series and are
+      # accessible via `$values.B.Labels.*`. Reading `$labels.reason_*`
+      # would always be empty.
+      rebalance_reason = "{{ if $values.B }}{{ $rm := index $values.B.Labels \"reason_message\" }}{{ $rc := index $values.B.Labels \"reason_code\" }}{{ if and $rm $rc }}{{ $rm }} — [{{ $rc }}]{{ end }}{{ end }}"
     }
 
     labels = {
@@ -569,8 +575,9 @@ resource "grafana_rule_group" "fpmms_deviation" {
     # condition — the alert MUST still fire if the probe hasn't run yet
     # or the RPC failed (operators need to know about the breach
     # regardless of whether we have a reason). Grafana evaluates query
-    # B independently and exposes its label set on `$labels` for the
-    # `rebalance_reason` annotation template above. The expression is
+    # B independently; the annotation template reads its label set via
+    # `$values.B.Labels.*` (NOT `$labels`, which exposes only the
+    # condition query's labels). The expression is
     # `mento_pool_rebalance_blocked > 0` so the series is empty when the
     # probe couldn't determine a reason — the template's `{{ if … }}`
     # guard then collapses the annotation to an empty string.
@@ -651,9 +658,10 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # (which is the `-1` sentinel during data gaps, so eligible pools
       # in this state typically slip past) — but if a probe DID run before
       # the ratio gauge dropped, the most-recent reason annotation would
-      # still be present here. When neither label is set, the
-      # `{{ if … }}` guard collapses the annotation cleanly.
-      rebalance_reason = "{{ if and $labels.reason_message $labels.reason_code }}{{ $labels.reason_message }} — [{{ $labels.reason_code }}]{{ end }}"
+      # still be present here. Reads `$values.B.Labels.*` because `$labels`
+      # exposes only the condition query's labels. When neither label is
+      # set, the `{{ if … }}` guard collapses the annotation cleanly.
+      rebalance_reason = "{{ if $values.B }}{{ $rm := index $values.B.Labels \"reason_message\" }}{{ $rc := index $values.B.Labels \"reason_code\" }}{{ if and $rm $rc }}{{ $rm }} — [{{ $rc }}]{{ end }}{{ end }}"
     }
 
     labels = {

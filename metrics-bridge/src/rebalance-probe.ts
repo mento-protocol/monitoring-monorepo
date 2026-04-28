@@ -110,6 +110,8 @@ async function runWithConcurrency<T, R>(
  *   - `blocked` results emit `1` with `(reason_code, reason_message)` labels.
  *   - `transport_error` emits nothing and logs once per pool — the
  *     underlying critical breach alert keeps firing without an annotation.
+ *   - `skip` (strategy type couldn't be identified) emits nothing and logs
+ *     once — better than a misleading "blocked" annotation.
  */
 export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
   // Reset the gauge first so a pool that recovered between probes
@@ -143,6 +145,10 @@ export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
     } else if (result.kind === "transport_error") {
       console.warn(
         `[REBALANCE_PROBE_FAILED] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} error=${result.error}`,
+      );
+    } else if (result.kind === "skip") {
+      console.warn(
+        `[REBALANCE_PROBE_SKIPPED] pool=${pool.id} chainId=${pool.chainId} strategy=${pool.rebalancerAddress} reason=${result.reason}`,
       );
     }
     // `ok` — pool can rebalance, leave the metric absent for this label set.

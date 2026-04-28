@@ -7,10 +7,14 @@
  * Slack alert annotation only needs the error code + human-readable
  * message, so this module drops:
  *
- * - Strategy-type detection (CDP / Reserve / OLS) — `rebalance(pool)`
- *   alone is enough to produce the revert we care about.
  * - Enrichment (stability pool balance, reserve collateral) — operators
  *   click through to the dashboard for that.
+ *
+ * Strategy-type detection IS retained — OLS pools route `rebalance` through
+ * ERC20 transfers from `msg.sender`, so simulating from `address(0)`
+ * reverts inside ERC20 with a meaningless error every time. The dashboard
+ * branches on the detected type and uses `determineAction(pool)` (a view-
+ * only function that handles the zero-sender path explicitly) for OLS.
  *
  * If a third consumer ever needs the probe, extract this + the dashboard's
  * `rebalance-check.ts` into a `shared-config/rebalance-check` module
@@ -26,16 +30,24 @@ import {
 } from "viem";
 
 /**
- * Solidity custom errors emitted by the FPMM rebalance pipeline. Mirror of the
- * dashboard ABI in `ui-dashboard/src/lib/rebalance-check.ts:33-81` minus the
- * detection-only getters (`getCDPConfig`, `reserve`, `getPools`,
- * `determineAction`, `poolConfigs`) which the alert annotation doesn't need.
+ * Solidity custom errors emitted by the FPMM rebalance pipeline + the
+ * detection-only getters needed to identify the strategy type. Mirror of
+ * the dashboard ABI in `ui-dashboard/src/lib/rebalance-check.ts:21-81`
+ * minus the enrichment getters (`poolConfigs`) which the alert annotation
+ * doesn't need.
  *
  * Keep the error list in sync with the dashboard ABI — drift would mean the
  * alert annotation reports `unknown` for codes the dashboard handles.
  */
 const STRATEGY_ABI = parseAbi([
   "function rebalance(address pool) external",
+  // OLS-specific probe: view-only, handles the zero-sender path explicitly,
+  // so it's the right substitute for `rebalance` simulation on OLS pools.
+  "function determineAction(address pool) external view returns ((address pool, uint256 reserveNumerator, uint256 reserveDenominator, uint256 oraclePriceNumerator, uint256 oraclePriceDenominator, bool reservePriceAboveOraclePrice, uint16 rebalanceThreshold, address token0, address token1, uint8 decimals0, uint8 decimals1, bool isToken0Debt, uint64 liquiditySourceIncentiveExpansion, uint64 protocolIncentiveExpansion, uint64 liquiditySourceIncentiveContraction, uint64 protocolIncentiveContraction) ctx, (uint8 direction, uint256 amount0Out, uint256 amount1Out, uint256 amountOwedToPool) action)",
+  // Strategy-type detection probes (zero-arg getters, cheap).
+  "function getCDPConfig(address pool) external view returns ((address stabilityPool, address collateralRegistry, uint256 stabilityPoolPercentage, uint256 maxIterations))",
+  "function reserve() external view returns (address)",
+  "function getPools() external view returns (address[])",
   // Shared LS_*
   "error LS_BAD_INCENTIVE()",
   "error LS_CAN_ONLY_REBALANCE_ONCE(address pool)",
@@ -165,18 +177,89 @@ const HEALTHY_NO_OP_ERRORS: ReadonlySet<string> = new Set([
   "PriceDifferenceTooSmall",
 ]);
 
+export type StrategyType = "cdp" | "reserve" | "ols" | "unknown";
+
 export type RebalanceProbeResult =
   | { kind: "ok" } // Probe succeeded — pool is rebalanceable.
   | { kind: "blocked"; reasonCode: string; reasonMessage: string }
-  | { kind: "transport_error"; error: string }; // RPC down / 401 / timeout.
+  | { kind: "transport_error"; error: string } // RPC down / 401 / timeout.
+  | { kind: "skip"; reason: string }; // Detection failed — no metric, no log spam.
 
 /**
- * Simulate `rebalance(pool)` against the strategy contract and decode the
- * revert. Returns:
+ * Detect the liquidity strategy type by probing strategy-specific getters.
+ * Mirror of `detectStrategyType` in
+ * `ui-dashboard/src/lib/rebalance-check.ts:300`.
+ *
+ *   1. `getCDPConfig(pool)` → CDP
+ *   2. `reserve()` → Reserve
+ *   3. `getPools()` → OLS
+ *   4. otherwise → unknown (caller skips, no metric emitted)
+ *
+ * Only swallows contract-shape reverts ("function not found" on wrong ABI).
+ * Transport errors propagate so the caller can log + skip without
+ * mistaking an RPC outage for an unidentified strategy.
+ */
+export async function detectStrategyType(
+  client: PublicClient,
+  strategy: `0x${string}`,
+  pool: `0x${string}`,
+): Promise<StrategyType> {
+  try {
+    await client.readContract({
+      address: strategy,
+      abi: STRATEGY_ABI,
+      functionName: "getCDPConfig",
+      args: [pool],
+    });
+    return "cdp";
+  } catch (err) {
+    if (!isContractRevert(err)) throw err;
+  }
+
+  try {
+    await client.readContract({
+      address: strategy,
+      abi: STRATEGY_ABI,
+      functionName: "reserve",
+    });
+    return "reserve";
+  } catch (err) {
+    if (!isContractRevert(err)) throw err;
+  }
+
+  try {
+    await client.readContract({
+      address: strategy,
+      abi: STRATEGY_ABI,
+      functionName: "getPools",
+    });
+    return "ols";
+  } catch (err) {
+    if (!isContractRevert(err)) throw err;
+  }
+
+  return "unknown";
+}
+
+/**
+ * Simulate the appropriate probe function against the strategy contract and
+ * decode the revert. Returns:
  *   - `ok`         — the probe succeeded (no revert). Caller emits no metric.
  *   - `blocked`    — the probe reverted with a known/decodable error.
  *   - `transport_error` — RPC / network failure. Caller emits no metric and
  *                         logs the failure for operator awareness.
+ *   - `skip`       — strategy type couldn't be identified (EOA, wrong proxy,
+ *                    new strategy class). Caller emits no metric.
+ *
+ * Probe selection by strategy type:
+ *   - CDP / Reserve: simulate `rebalance(pool)` from `address(0)` — these
+ *     strategies source tokens from the strategy contract itself, so the
+ *     zero-sender simulation is valid.
+ *   - OLS: simulate `determineAction(pool)` instead — OLS `rebalance` routes
+ *     ERC20 transfers from `msg.sender`, which always reverts inside ERC20
+ *     when called with `address(0)`.
+ *   - unknown: skip without emitting a metric — better than a misleading
+ *     "blocked" annotation in the Slack alert.
  *
  * Healthy no-op codes (pool below threshold) collapse to `ok` so the alert
  * doesn't render "blocked" for a pool that's mid-recovery.
@@ -186,12 +269,39 @@ export async function probeRebalance(
   poolAddress: `0x${string}`,
   strategyAddress: `0x${string}`,
 ): Promise<RebalanceProbeResult> {
+  let strategyType: StrategyType;
+  try {
+    strategyType = await detectStrategyType(
+      client,
+      strategyAddress,
+      poolAddress,
+    );
+  } catch (err: unknown) {
+    return {
+      kind: "transport_error",
+      error: extractRawMessage(err) ?? "transport error",
+    };
+  }
+
+  if (strategyType === "unknown") {
+    return {
+      kind: "skip",
+      reason: "Unable to identify the liquidity strategy type",
+    };
+  }
+
+  // OLS rebalance() transfers tokens to/from msg.sender, so simulating from
+  // address(0) always reverts inside ERC20 — meaningless. Use determineAction
+  // (view-only) instead for OLS. CDP/Reserve source tokens from the strategy
+  // contract itself, so the rebalance() simulation from address(0) is valid.
+  const probeFn = strategyType === "ols" ? "determineAction" : "rebalance";
+
   try {
     await client.call({
       to: strategyAddress,
       data: encodeFunctionData({
         abi: STRATEGY_ABI,
-        functionName: "rebalance",
+        functionName: probeFn,
         args: [poolAddress],
       }),
     });
