@@ -13,6 +13,10 @@ const ARKHAM_SUPPORTED_CHAIN_IDS = new Set<number>([42220]);
 
 const PAGE_SIZE = 1000;
 const HARD_PAGE_CAP = 50; // 50_000 rows per entity — sentinel against runaway loops
+// Per-request timeout for the Hasura `distinct_on` calls. A hung query would
+// otherwise block the cron route up to its 800s `maxDuration` cap with no
+// progress signal. Mirrors `api/hasura/[networkId]/route.ts`.
+const HASURA_REQUEST_TIMEOUT_MS = 10_000;
 
 type DistinctRow = { address: string };
 type DistinctQueryShape = Record<string, DistinctRow[]>;
@@ -68,10 +72,10 @@ async function fetchDistinctAddresses(
         }
       }
     `;
-    const data = await client.request<DistinctQueryShape>(query, {
-      chainId,
-      limit: PAGE_SIZE,
-      offset,
+    const data = await client.request<DistinctQueryShape>({
+      document: query,
+      variables: { chainId, limit: PAGE_SIZE, offset },
+      signal: AbortSignal.timeout(HASURA_REQUEST_TIMEOUT_MS),
     });
     const rows = data.rows ?? [];
     if (rows.length === 0) break;

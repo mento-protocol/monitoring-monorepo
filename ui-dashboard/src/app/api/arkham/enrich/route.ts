@@ -125,11 +125,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           ...chainExisting,
         };
         const filterMode = mode === "dryRun" ? "new" : mode;
-        const candidates = filterCandidates(
-          addresses,
-          existing,
-          filterMode,
-        ).slice(0, maxAddresses);
+        let candidates = filterCandidates(addresses, existing, filterMode);
+
+        // Refresh-mode rotation: if the arkham-tagged set ever exceeds
+        // `maxAddresses`, a deterministic alphabetical slice would re-process
+        // the same prefix every month and never revisit the tail. Sort by
+        // `updatedAt` ascending so the staler entries refresh first; the
+        // post-write `updatedAt` rolls them to the end of the queue, giving
+        // round-robin coverage across runs.
+        if (mode === "refresh") {
+          candidates = candidates.sort((a, b) => {
+            const ua = chainExisting[a]?.updatedAt ?? "";
+            const ub = chainExisting[b]?.updatedAt ?? "";
+            return ua.localeCompare(ub);
+          });
+        }
+        candidates = candidates.slice(0, maxAddresses);
 
         const results = await enrichBatch(candidates, {
           apiKey,
