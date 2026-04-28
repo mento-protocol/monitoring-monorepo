@@ -643,3 +643,47 @@ describe("self-monitoring gauges", () => {
     expect(value).toBe(1);
   });
 });
+
+// Contract-with-terraform — drift between metric labels and the alert
+// templates that read them via `$values.X.Labels.Y` is silent: a missing
+// label collapses to the empty string and the annotation line drops without
+// any metric or log signal. These tests pin the labels the alert templates
+// depend on so a future label rename / drop fails CI before reaching prod.
+//
+// Cross-references:
+//   - `terraform/alerts/main.tf` (`deviation_critical_*_annotation` locals)
+//     reads `$values.B.Labels.{reason_code,reason_message}`,
+//     `$values.Bal.Labels.token_symbol`, `$values.R0.Labels.token_symbol`,
+//     `$values.R1.Labels.token_symbol`.
+//   - `terraform/alerts/rules-fpmms.tf:454` (Deviation Breach Critical, magnitude-gated)
+//     and `:683` (Deviation Breach Critical, anchored) consume the locals.
+describe("label-shape contract: alert template ↔ metric labels", () => {
+  // Use a typed cast: prom-client's Gauge typings hide `labelNames` as
+  // private, but the runtime carries the array on every instance.
+  function labelNamesOf(g: {
+    labelNames?: readonly string[];
+  }): readonly string[] {
+    return g.labelNames ?? [];
+  }
+
+  it("rebalanceBlocked labels include reason_code + reason_message (referenced by $values.B.Labels.* in main.tf)", () => {
+    const labels = labelNamesOf(gauges.rebalanceBlocked);
+    expect(labels).toContain("reason_code");
+    expect(labels).toContain("reason_message");
+  });
+
+  it("rebalanceCollateralBalance labels include token_symbol (referenced by $values.Bal.Labels.token_symbol in main.tf)", () => {
+    const labels = labelNamesOf(gauges.rebalanceCollateralBalance);
+    expect(labels).toContain("token_symbol");
+  });
+
+  it("rebalanceCollateralNeeded labels include token_symbol (the annotation reads token_symbol off Bal but Need shares the label set)", () => {
+    const labels = labelNamesOf(gauges.rebalanceCollateralNeeded);
+    expect(labels).toContain("token_symbol");
+  });
+
+  it("reserveShareToken0 / reserveShareToken1 labels include token_symbol (referenced by $values.R0.Labels.token_symbol / $values.R1.Labels.token_symbol)", () => {
+    expect(labelNamesOf(gauges.reserveShareToken0)).toContain("token_symbol");
+    expect(labelNamesOf(gauges.reserveShareToken1)).toContain("token_symbol");
+  });
+});
