@@ -159,4 +159,20 @@ describe("OraclePriceValue", () => {
     );
     expect(html).not.toMatch(/expiry/);
   });
+
+  it("treats the '0' oracleTimestamp sentinel like a missing timestamp", () => {
+    // Hasura returns "0" as the default for unset numeric fields; the
+    // component must skip the 'last …' subline (don't render "last 56y ago"
+    // pointing at the Unix epoch).
+    const pool: Pool = {
+      ...BASE_POOL,
+      oraclePrice: String(BigInt(75) * BigInt(10) ** BigInt(20)),
+      oracleTimestamp: "0",
+    };
+    const html = renderToStaticMarkup(
+      <OraclePriceValue pool={pool} network={NETWORK_WITHOUT_CHAINLINK} />,
+    );
+    expect(html).not.toMatch(/expiry/);
+    expect(html).not.toMatch(/last [^<]*ago/);
+  });
 });

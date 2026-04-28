@@ -279,10 +279,11 @@ describe("DeviationCell — breach line", () => {
     );
     expect(html).toContain('href="https://celoscan.io/tx/0xdeadbeefcafe"');
     // Only the "breach Xh ago" portion is wrapped in the anchor — the
-    // primary "X% over" delta stays plain text. Confirm via aria-label.
+    // primary "X% of Y% threshold" caption stays plain text. Confirm via
+    // aria-label and a structural check that the caption is NOT inside
+    // any anchor.
     expect(html).toMatch(/aria-label="breach[^"]*— open trip transaction/);
-    // The "X% over" should NOT be inside the anchor.
-    expect(html).not.toMatch(/<a[^>]*>[^<]*% over/);
+    expect(html).not.toMatch(/<a[^>]*>[^<]*% of [^<]*% threshold/);
   });
 
   it("colors the breach line amber when still within the 1h grace (WARN)", () => {

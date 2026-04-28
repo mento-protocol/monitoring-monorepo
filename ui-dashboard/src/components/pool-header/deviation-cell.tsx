@@ -36,11 +36,14 @@ export function DeviationCell({
       : null;
 
   // Look up the trip transaction so the "breach Xh ago" badge can link to
-  // the explorer. Skip the query when there's no open breach to avoid a
-  // wasted round-trip on healthy pools.
+  // the explorer. Gate on the same conditions that the early-return
+  // guards check below — virtual / no-health-data / weekend-stale cells
+  // render null, so firing the query for them would be a wasted round-trip.
+  const willRender =
+    !isVirtual && hasHealthData && !(!oracleIsFresh && isWeekend());
   const { data: tripTxData } = useGQL<{
     DeviationThresholdBreach: { startedByTxHash?: string }[];
-  }>(breachStartedAt ? POOL_OPEN_BREACH_TX : null, {
+  }>(breachStartedAt && willRender ? POOL_OPEN_BREACH_TX : null, {
     poolId: pool.id,
     startedAt: breachStartedAt ?? "0",
   });

@@ -683,7 +683,7 @@ function PoolHeader({
           </span>
         )}
       </div>
-      <dl className="grid grid-cols-5 gap-x-4 gap-y-4 text-sm">
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
         <Stat
           label={
             <span className="inline-flex items-center gap-1">
@@ -735,8 +735,12 @@ function PoolHeader({
         />
         <DeviationCell pool={pool} network={network} />
       </dl>
-      <div className="my-5 h-px bg-slate-800" />
-      <PoolConfigPanel pool={pool} />
+      {!isVirtual && (
+        <>
+          <div className="my-5 h-px bg-slate-800" />
+          <PoolConfigPanel pool={pool} />
+        </>
+      )}
     </div>
   );
 }

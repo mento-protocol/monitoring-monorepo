@@ -363,6 +363,7 @@ export const POOL_CRITICAL_SECONDS_RECENT = `
         poolId: { _eq: $poolId }
         endedAt: { _gte: $since }
       }
+      order_by: [{ endedAt: desc }]
       limit: 1000
     ) {
       criticalDurationSeconds

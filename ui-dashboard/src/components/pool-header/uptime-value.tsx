@@ -115,30 +115,26 @@ export function UptimeValue({ pool }: { pool: Pool }) {
     Math.min(100, (1 - (rolledCritical + openCritical) / total) * 100),
   );
 
-  // 7-day uptime numerator: each closed breach's `criticalDurationSeconds`
-  // is pro-rated by how much of the breach's wall-clock duration overlaps
-  // the 7d window. Without the clip, a 5-day breach that ended just inside
-  // the window would dump its full 5 days of critical seconds into a 7d
-  // window where only a fraction of that breach actually fell — which can
-  // push the numerator past the denominator and clamp the tile to 0% on
-  // pools that are currently fine. Distribution-uniformity assumption is
-  // imperfect (critical seconds aren't always evenly spread within a
-  // breach) but bounds the error to that single breach. Open-breach
-  // contribution is computed live, clamped to `windowStart`.
+  // Closed-breach contribution to the 7d numerator. Prorate
+  // `criticalDurationSeconds` by the *trading-seconds* overlap with the
+  // window — not wall-clock — because the indexer accumulates critical
+  // seconds via `tradingSecondsInRange` (FX weekends subtracted), so a
+  // breach spanning a weekend has its critical time concentrated in the
+  // weekday segments. Wall-clock proration would smear them uniformly
+  // and miscount the boundary.
   const recentRows = recentData?.DeviationThresholdBreach;
   const closedCritical7d =
     recentRows?.reduce((sum, row) => {
       const critical = Number(row.criticalDurationSeconds ?? 0);
       const breachStart = Number(row.startedAt ?? "0");
       const breachEnd = Number(row.endedAt ?? "0");
-      const totalDuration = breachEnd - breachStart;
-      if (!Number.isFinite(critical) || critical <= 0 || totalDuration <= 0) {
-        return sum;
-      }
+      if (!Number.isFinite(critical) || critical <= 0) return sum;
+      const tradingTotal = tradingSecondsInRange(breachStart, breachEnd);
+      if (tradingTotal <= 0) return sum;
       const clipStart = Math.max(breachStart, windowStart);
       const clipEnd = Math.min(breachEnd, nowSeconds);
-      const overlap = Math.max(0, clipEnd - clipStart);
-      return sum + critical * (overlap / totalDuration);
+      const tradingClip = tradingSecondsInRange(clipStart, clipEnd);
+      return sum + critical * (tradingClip / tradingTotal);
     }, 0) ?? 0;
   const openCritical7d =
     hasOpenBreach && nowSeconds > graceEnd && peakAboveCritical
@@ -208,5 +204,9 @@ export function UptimeInfoIcon({ pool }: { pool: Pool }) {
     ? UPTIME_FX_SUFFIX
     : "";
   const content = UPTIME_EXPLAINER + suffix;
-  return <InfoPopover label={`About Uptime. ${content}`} content={content} />;
+  // aria-label has no notion of line breaks — collapse \n to a space so
+  // screen readers read a single coherent sentence instead of a halting
+  // pause some readers insert at literal newlines.
+  const ariaLabel = `About Uptime. ${content.replace(/\n/g, " ")}`;
+  return <InfoPopover label={ariaLabel} content={content} />;
 }

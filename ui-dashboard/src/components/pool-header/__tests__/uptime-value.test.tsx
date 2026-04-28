@@ -51,7 +51,6 @@ vi.mock("@/lib/graphql", () => ({
 //   trading_7d = 7×86400 − 50×3600 = 424,800 seconds
 //   1 hour critical → 1 − 3600/424800 = 99.15% uptime
 const FIXED_TUE_NOON_UTC = "2024-01-09T12:00:00Z";
-const TRADING_SECONDS_7D = 424_800;
 
 import { UptimeValue } from "@/components/pool-header/uptime-value";
 
@@ -213,7 +212,9 @@ describe("UptimeValue", () => {
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
     expect(html).toContain("↑");
     expect(html).toContain("text-emerald-400");
+    expect(html).toContain('aria-label="trending up vs all-time"');
     expect(html).not.toContain("↓");
+    vi.useRealTimers();
   });
 
   it("renders a red ↓ arrow when 7d uptime is worse than all-time", () => {
@@ -243,6 +244,7 @@ describe("UptimeValue", () => {
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
     expect(html).toContain("↓");
     expect(html).toContain("text-red-400");
+    expect(html).toContain('aria-label="trending down vs all-time"');
     expect(html).not.toContain("↑");
     vi.useRealTimers();
   });
@@ -301,7 +303,6 @@ describe("UptimeValue", () => {
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
     expect(html).toMatch(/99\.15% last 7d/);
-    expect(html).toContain(`${TRADING_SECONDS_7D}`.slice(0, 0)); // assert constant referenced
     vi.useRealTimers();
   });
 

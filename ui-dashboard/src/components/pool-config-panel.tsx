@@ -70,7 +70,7 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
   const strategyAddress = pool.rebalancerAddress ?? null;
 
   return (
-    <dl className="grid grid-cols-5 gap-x-4 gap-y-4 text-sm">
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
       <Stat
         label={
           <span className="inline-flex items-center gap-1">
