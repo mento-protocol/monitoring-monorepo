@@ -156,6 +156,16 @@ export function UptimeValue({ pool }: { pool: Pool }) {
       )
     : null;
 
+  // Trend arrow vs all-time. Gate on the .toFixed(2) values being
+  // visibly different — anything finer than 0.01% would render an arrow
+  // for noise the user can't see in the rounded numbers.
+  const trend: "up" | "down" | null =
+    pct7d == null || pct.toFixed(2) === pct7d.toFixed(2)
+      ? null
+      : pct7d > pct
+        ? "up"
+        : "down";
+
   return (
     <span className="flex flex-col gap-0.5">
       <span className="font-medium">
@@ -163,7 +173,30 @@ export function UptimeValue({ pool }: { pool: Pool }) {
         <span className="ml-1 text-xs text-slate-500">all-time</span>
       </span>
       <span className="text-xs text-slate-500">
-        {pct7d != null ? `${pct7d.toFixed(2)}% last 7d` : "—"}
+        {pct7d != null ? (
+          <>
+            {trend === "up" && (
+              <span
+                className="text-emerald-400"
+                aria-label="trending up vs all-time"
+              >
+                ↑
+              </span>
+            )}
+            {trend === "down" && (
+              <span
+                className="text-red-400"
+                aria-label="trending down vs all-time"
+              >
+                ↓
+              </span>
+            )}
+            {trend && " "}
+            {pct7d.toFixed(2)}% last 7d
+          </>
+        ) : (
+          "—"
+        )}
       </span>
     </span>
   );

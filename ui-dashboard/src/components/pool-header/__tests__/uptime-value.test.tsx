@@ -190,6 +190,85 @@ describe("UptimeValue", () => {
     vi.useRealTimers();
   });
 
+  it("renders an emerald ↑ arrow when 7d uptime is better than all-time", () => {
+    // Lots of historical critical seconds → low all-time uptime; clean
+    // 7d window → 100% last 7d. Trend should read "up" in emerald.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_TUE_NOON_UTC));
+    setRollup({
+      data: {
+        Pool: [
+          {
+            cumulativeCriticalSeconds: String(10 * 3600),
+            breachCount: 5,
+          },
+        ],
+      },
+    });
+    setRecent({ data: { DeviationThresholdBreach: [] } });
+    const pool: Pool = {
+      ...BASE_POOL,
+      healthTotalSeconds: String(30 * 86400),
+    };
+    const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
+    expect(html).toContain("↑");
+    expect(html).toContain("text-emerald-400");
+    expect(html).not.toContain("↓");
+  });
+
+  it("renders a red ↓ arrow when 7d uptime is worse than all-time", () => {
+    // Open breach in the 7d window pushes recent uptime below the
+    // pristine all-time number. Trend should read "down" in red.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_TUE_NOON_UTC));
+    const nowSec = Math.floor(Date.now() / 1000);
+    setRollup({
+      data: {
+        Pool: [
+          {
+            cumulativeCriticalSeconds: "0",
+            breachCount: 0,
+            deviationBreachStartedAt: String(nowSec - 2 * 3600),
+            currentOpenBreachPeak: "8000",
+            currentOpenBreachEntryThreshold: 5000,
+          },
+        ],
+      },
+    });
+    setRecent({ data: { DeviationThresholdBreach: [] } });
+    const pool: Pool = {
+      ...BASE_POOL,
+      healthTotalSeconds: String(30 * 86400),
+    };
+    const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
+    expect(html).toContain("↓");
+    expect(html).toContain("text-red-400");
+    expect(html).not.toContain("↑");
+    vi.useRealTimers();
+  });
+
+  it("suppresses the arrow when all-time and 7d round to the same 2-decimal value", () => {
+    // Identical uptime in both windows → no trend signal worth showing.
+    setRollup({
+      data: {
+        Pool: [
+          {
+            cumulativeCriticalSeconds: "0",
+            breachCount: 0,
+          },
+        ],
+      },
+    });
+    setRecent({ data: { DeviationThresholdBreach: [] } });
+    const pool: Pool = {
+      ...BASE_POOL,
+      healthTotalSeconds: String(30 * 86400),
+    };
+    const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
+    expect(html).not.toContain("↑");
+    expect(html).not.toContain("↓");
+  });
+
   it("subtracts closed-breach critical seconds from the 7d window (FX-weekend math)", () => {
     // 1h critical / 424,800 trading seconds ≈ 0.847% → 99.15%
     vi.useFakeTimers();
