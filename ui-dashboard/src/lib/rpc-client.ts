@@ -7,6 +7,7 @@
  */
 
 import { createPublicClient, http, parseAbi, type PublicClient } from "viem";
+import { ERC20_ABI_SOURCES } from "@mento-protocol/monitoring-config/erc20-abi";
 
 // Client cache — keyed by RPC URL (typically 1-2 entries per network)
 
@@ -20,9 +21,10 @@ export function getViemClient(rpcUrl: string): PublicClient {
   return client;
 }
 
-// Shared ERC20 ABI fragments
-
-export const ERC20_ABI = parseAbi([
-  "function symbol() external view returns (string)",
-  "function decimals() external view returns (uint8)",
-]);
+/**
+ * Shared ERC20 ABI — source list lives in
+ * `@mento-protocol/monitoring-config/erc20-abi` (shared with the
+ * metrics-bridge probe). Re-exported as a parsed (viem-typed) ABI so
+ * existing dashboard call sites keep importing from one place.
+ */
+export const ERC20_ABI = parseAbi(ERC20_ABI_SOURCES);

@@ -23,6 +23,7 @@ import {
   ERROR_MESSAGES,
   HEALTHY_NO_OP_ERRORS,
 } from "@mento-protocol/monitoring-config/rebalance-abi";
+import { POOL_PAIR_ABI_SOURCES } from "@mento-protocol/monitoring-config/erc20-abi";
 import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
 import { getViemClient, ERC20_ABI } from "./rpc-client";
 
@@ -439,11 +440,9 @@ async function fetchReserveEnrichment(
 
     const isToken0Debt = poolConfig[0] as boolean;
 
-    // Read pool tokens
-    const poolAbi = parseAbi([
-      "function token0() external view returns (address)",
-      "function token1() external view returns (address)",
-    ]);
+    // Read pool tokens — source list lives in shared-config alongside the
+    // metrics-bridge probe so a future ABI tweak doesn't drift between them.
+    const poolAbi = parseAbi(POOL_PAIR_ABI_SOURCES);
     const [token0, token1] = await Promise.all([
       client.readContract({
         address: pool,
@@ -459,14 +458,13 @@ async function fetchReserveEnrichment(
 
     const collateralToken = (isToken0Debt ? token1 : token0) as `0x${string}`;
 
-    const balanceOfAbi = parseAbi([
-      "function balanceOf(address account) external view returns (uint256)",
-    ]);
-
+    // ERC20_ABI is shared with the metrics-bridge probe via
+    // `@mento-protocol/monitoring-config/erc20-abi` and already covers
+    // balanceOf / symbol / decimals — no need for a per-call subset.
     const [balance, symbol, decimals] = await Promise.all([
       client.readContract({
         address: collateralToken,
-        abi: balanceOfAbi,
+        abi: ERC20_ABI,
         functionName: "balanceOf",
         args: [reserveAddr],
       }),

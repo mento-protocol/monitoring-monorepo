@@ -33,6 +33,10 @@ import {
   ERROR_MESSAGES,
   HEALTHY_NO_OP_ERRORS,
 } from "@mento-protocol/monitoring-config/rebalance-abi";
+import {
+  ERC20_ABI_SOURCES,
+  POOL_PAIR_ABI_SOURCES,
+} from "@mento-protocol/monitoring-config/erc20-abi";
 import { tokenSymbol } from "@mento-protocol/monitoring-config/tokens";
 import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
 
@@ -45,19 +49,13 @@ export { toHumanUnits };
 export { ERROR_MESSAGES };
 
 /**
- * ERC20 + pool getters used by the reserve-enrichment fetch. Kept inline
- * (not in `shared-config/`) because they're standard interfaces that don't
- * need cross-package coordination — the strategy ABI is the only thing
- * with a real drift risk and lives there.
+ * ERC20 + pool getters used by the reserve-enrichment fetch. Sources live
+ * in `@mento-protocol/monitoring-config/erc20-abi` (shared with the
+ * dashboard's pool-detail probe) so a future ABI tweak doesn't have to
+ * be made in two places.
  */
-const ERC20_BALANCE_ABI = parseAbi([
-  "function balanceOf(address account) external view returns (uint256)",
-  "function decimals() external view returns (uint8)",
-]);
-const POOL_TOKEN_ABI = parseAbi([
-  "function token0() external view returns (address)",
-  "function token1() external view returns (address)",
-]);
+const ERC20_BALANCE_ABI = parseAbi(ERC20_ABI_SOURCES);
+const POOL_TOKEN_ABI = parseAbi(POOL_PAIR_ABI_SOURCES);
 
 /**
  * Strongly-typed strategy ABI. The string sources live in `shared-config/`
