@@ -29,6 +29,10 @@ const RUNTIME_IMPORT_ALLOWLIST = new Set<string>([
   "src/app/api/address-labels/backup/route.ts",
   "src/app/api/address-labels/export/route.ts",
   "src/app/api/address-labels/import/route.ts",
+  // CRON_SECRET-gated cron endpoint that writes Arkham-sourced labels.
+  // Same posture as backup: never serialises labels into HTML/RSC, only
+  // reads to diff against existing entries before writing new ones.
+  "src/app/api/arkham/enrich/route.ts",
   // Self-references / tests.
   "src/lib/address-labels.ts",
 ]);

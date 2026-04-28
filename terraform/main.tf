@@ -198,6 +198,20 @@ resource "vercel_project_environment_variable" "cron_secret" {
   sensitive = true
 }
 
+# Arkham Intelligence API key for the nightly enrichment cron. Production-only
+# so a compromised preview build can't burn the rate-limit budget. `count`
+# guard skips creation when the key isn't yet provisioned — the dashboard
+# still deploys cleanly without it (the cron route returns 500 on missing key).
+resource "vercel_project_environment_variable" "arkham_api_key" {
+  count      = var.arkham_api_key == "" ? 0 : 1
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "ARKHAM_API_KEY"
+  value      = var.arkham_api_key
+  target     = ["production"]
+  sensitive  = true
+}
+
 # Preview auth proxy — routes Google OAuth through the prod domain (already
 # whitelisted in GCP), then forwards the session back to the preview URL.
 resource "vercel_project_environment_variable" "auth_redirect_proxy_url" {

@@ -7,6 +7,14 @@
     {
       "path": "/api/address-labels/backup",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/arkham/enrich",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/arkham/enrich?mode=refresh",
+      "schedule": "0 4 1 * *"
     }
   ]
 }

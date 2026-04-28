@@ -76,6 +76,23 @@ variable "cron_secret" {
   sensitive   = true
 }
 
+# ── Arkham Intelligence ───────────────────────────────────────────────────────
+
+variable "arkham_api_key" {
+  description = <<-EOT
+    Arkham Intelligence API key, used by the nightly /api/arkham/enrich
+    cron to attach curated labels/entity attribution to Mento counterparty
+    addresses. Apply for access at https://intel.arkm.com/api (gated).
+    Server-side only — never exposed to the browser.
+  EOT
+  type        = string
+  sensitive   = true
+  # Default empty so `terraform apply` doesn't hard-fail before the team
+  # has obtained a key. The Vercel env var resource below skips creation
+  # when this is empty so the dashboard still deploys cleanly.
+  default = ""
+}
+
 # ── Vercel Blob ───────────────────────────────────────────────────────────────
 
 variable "blob_read_write_token" {
