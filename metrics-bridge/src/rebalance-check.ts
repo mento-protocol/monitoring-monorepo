@@ -224,45 +224,69 @@ export async function probeRebalance(
       };
     }
     const decoded = decodeBlockedRevert(err);
-
-    // Reserve-strategy enrichment: when the breach is "reserve out of
-    // collateral", fetch the on-chain balance + needed amount so the Slack
-    // alert can render "Reserve has insufficient axlUSDC. Current balance:
-    // 0 axlUSDC / Needed for rebalancing: 12,500 axlUSDC". Skipped for any
-    // other strategy or reason code so the alert annotation falls through
-    // to the bounded `reason_message` enum unchanged.
-    if (
-      decoded.kind === "blocked" &&
-      detected.type === "reserve" &&
-      decoded.reasonCode === REASON_CODES.RLS_RESERVE_OUT_OF_COLLATERAL
-    ) {
-      const enrichment = await fetchReserveEnrichment(
-        client,
-        strategyAddress,
-        poolAddress,
-        chainId,
-        detected.reserveAddr,
-      );
-      if (enrichment) {
-        return {
-          ...decoded,
-          // Override the bounded enum's "Reserve has insufficient collateral
-          // to rebalance" with the symbol-specific variant. Cardinality
-          // stays bounded by the token list (~10 symbols across the index)
-          // and the Slack-injection invariant holds because `tokenSymbol`
-          // returns canonicalised names from `@mento-protocol/contracts` —
-          // never user/contract input.
-          reasonMessage: `Reserve has insufficient ${enrichment.tokenSymbol}`,
-          reserveCollateral: enrichment,
-        };
-      }
-      // Enrichment fetch failed (transport error inside balanceOf / decimals
-      // / etc.). Fall through to the generic decoded result so the alert
-      // still gets the bounded reason message and the breach itself isn't
-      // suppressed.
-    }
-    return decoded;
+    return maybeEnrichDecodedResult(decoded, {
+      client,
+      detected,
+      poolAddress,
+      strategyAddress,
+      chainId,
+    });
   }
+}
+
+/**
+ * Strategy-type-specific enrichment dispatcher. Currently only the Reserve
+ * strategy gets enriched on `RLS_RESERVE_OUT_OF_COLLATERAL` (gives the
+ * Slack alert the symbol-specific reason message + balance / needed gauges).
+ * CDP / OLS / unknown branches fall through unchanged — operators click
+ * through to the dashboard for those.
+ *
+ * Extracted from `probeRebalance` so the orchestrator stays a thin
+ * detect → probe → decode → maybeEnrich → return pipeline. Future CDP /
+ * OLS enrichment branches add `else if` arms here; the simulator above
+ * stays unchanged.
+ */
+async function maybeEnrichDecodedResult(
+  decoded: RebalanceProbeResult,
+  ctx: {
+    client: PublicClient;
+    detected: DetectedStrategy;
+    poolAddress: `0x${string}`;
+    strategyAddress: `0x${string}`;
+    chainId: number;
+  },
+): Promise<RebalanceProbeResult> {
+  if (
+    decoded.kind === "blocked" &&
+    ctx.detected.type === "reserve" &&
+    decoded.reasonCode === REASON_CODES.RLS_RESERVE_OUT_OF_COLLATERAL
+  ) {
+    const enrichment = await fetchReserveEnrichment(
+      ctx.client,
+      ctx.strategyAddress,
+      ctx.poolAddress,
+      ctx.chainId,
+      ctx.detected.reserveAddr,
+    );
+    if (enrichment) {
+      return {
+        ...decoded,
+        // Override the bounded enum's "Reserve has insufficient collateral
+        // to rebalance" with the symbol-specific variant. Cardinality
+        // stays bounded by the token list (~10 symbols across the index)
+        // and the Slack-injection invariant holds because `tokenSymbol`
+        // returns canonicalised names from `@mento-protocol/contracts` —
+        // never user/contract input.
+        reasonMessage: `Reserve has insufficient ${enrichment.tokenSymbol}`,
+        reserveCollateral: enrichment,
+      };
+    }
+    // Enrichment fetch failed (transport error inside balanceOf / decimals
+    // / etc.). Fall through to the generic decoded result so the alert
+    // still gets the bounded reason message and the breach itself isn't
+    // suppressed.
+  }
+  return decoded;
 }
 
 /**
