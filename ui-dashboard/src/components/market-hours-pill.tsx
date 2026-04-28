@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import {
+  FX_CLOSE_DAY,
   FX_CLOSE_HOUR_UTC,
+  FX_REOPEN_DAY,
   FX_REOPEN_HOUR_UTC,
   isWeekend,
   nextMarketHoursTransition,
@@ -41,13 +43,11 @@ function pad2(n: number): string {
 
 /** Render the static schedule string `Sun 23:00 → Fri 21:00 UTC` from
  * shared-config so the pill stays in lockstep with the on-chain MarketHours
- * window. Reads only the hour-of-day; days-of-week are derived from
- * weekday labels. */
+ * window. Day-of-week labels are derived from FX_CALENDAR rather than
+ * hardcoded so a calendar update flows through automatically. */
 function scheduleString(): string {
-  // The FX calendar's reopen-day (Sun) → close-day (Fri).
-  // Reopen day from constant 0 (Sun); close day from constant 5 (Fri).
-  const open = `${WEEKDAY_LABEL[0]} ${pad2(FX_REOPEN_HOUR_UTC)}:00`;
-  const close = `${WEEKDAY_LABEL[5]} ${pad2(FX_CLOSE_HOUR_UTC)}:00`;
+  const open = `${WEEKDAY_LABEL[FX_REOPEN_DAY]} ${pad2(FX_REOPEN_HOUR_UTC)}:00`;
+  const close = `${WEEKDAY_LABEL[FX_CLOSE_DAY]} ${pad2(FX_CLOSE_HOUR_UTC)}:00`;
   return `${open} → ${close} UTC`;
 }
 

@@ -57,6 +57,23 @@ type EMAResetArgs = {
   mockEventData: MockEventData;
 };
 
+type RemovedArgs = {
+  breaker: string;
+  mockEventData: MockEventData;
+};
+
+type TradingModeArgs = {
+  rateFeedID: string;
+  tradingMode: bigint;
+  mockEventData: MockEventData;
+};
+
+type MedianUpdatedArgs = {
+  token: string;
+  value: bigint;
+  mockEventData: MockEventData;
+};
+
 type GeneratedModule = {
   TestHelpers: {
     MockDb: { createMockDb: () => MockDb };
@@ -64,15 +81,20 @@ type GeneratedModule = {
       BreakerStatusUpdated: EventProcessor<StatusArgs>;
       BreakerTripped: EventProcessor<TrippedArgs>;
       ResetSuccessful: EventProcessor<ResetArgs>;
+      BreakerRemoved: EventProcessor<RemovedArgs>;
+      TradingModeUpdated: EventProcessor<TradingModeArgs>;
     };
     MedianDeltaBreaker: {
       MedianRateEMAReset: EventProcessor<EMAResetArgs>;
+    };
+    SortedOracles: {
+      MedianUpdated: EventProcessor<MedianUpdatedArgs>;
     };
   };
 };
 
 const { TestHelpers } = generated as unknown as GeneratedModule;
-const { MockDb, BreakerBox, MedianDeltaBreaker } = TestHelpers;
+const { MockDb, BreakerBox, MedianDeltaBreaker, SortedOracles } = TestHelpers;
 
 const CHAIN_ID = 42220;
 // Match the real Celo addresses so any future test that hits
@@ -351,5 +373,157 @@ describe("BreakerBox handlers — bootstrap + state transitions", () => {
     ) as { medianRatesEMA: bigint } | undefined;
     assert.ok(cfg);
     assert.equal(cfg!.medianRatesEMA, 0n);
+  });
+
+  it("BreakerRemoved marks the Breaker removed and disables all child configs on the same chain", async () => {
+    let mockDb = MockDb.createMockDb();
+    // Seed the Breaker + a config with enabled=true.
+    const seed = BreakerBox.BreakerStatusUpdated.createMockEvent({
+      breaker: MD_BREAKER,
+      rateFeedID: FEED,
+      status: true,
+      mockEventData: {
+        chainId: CHAIN_ID,
+        logIndex: 0,
+        srcAddress: BREAKER_BOX_ADDR,
+        block: { number: 100, timestamp: 1_700_000_500 },
+      },
+    });
+    mockDb = await BreakerBox.BreakerStatusUpdated.processEvent({
+      event: seed,
+      mockDb,
+    });
+
+    const removed = BreakerBox.BreakerRemoved.createMockEvent({
+      breaker: MD_BREAKER,
+      mockEventData: {
+        chainId: CHAIN_ID,
+        logIndex: 1,
+        srcAddress: BREAKER_BOX_ADDR,
+        block: { number: 200, timestamp: 1_700_001_000 },
+      },
+    });
+    mockDb = await BreakerBox.BreakerRemoved.processEvent({
+      event: removed,
+      mockDb,
+    });
+
+    const breaker = mockDb.entities.Breaker.get(
+      makeBreakerId(CHAIN_ID, MD_BREAKER),
+    ) as { removed: boolean } | undefined;
+    assert.ok(breaker);
+    assert.equal(breaker!.removed, true);
+
+    const cfg = mockDb.entities.BreakerConfig.get(
+      makeBreakerConfigId(CHAIN_ID, MD_BREAKER, FEED),
+    ) as { enabled: boolean } | undefined;
+    assert.ok(cfg);
+    assert.equal(cfg!.enabled, false);
+  });
+
+  it("TradingModeUpdated overrides BreakerConfig.tradingMode for matching feed", async () => {
+    let mockDb = MockDb.createMockDb();
+    const seed = BreakerBox.BreakerStatusUpdated.createMockEvent({
+      breaker: MD_BREAKER,
+      rateFeedID: FEED,
+      status: true,
+      mockEventData: {
+        chainId: CHAIN_ID,
+        logIndex: 0,
+        srcAddress: BREAKER_BOX_ADDR,
+        block: { number: 100, timestamp: 1_700_000_500 },
+      },
+    });
+    mockDb = await BreakerBox.BreakerStatusUpdated.processEvent({
+      event: seed,
+      mockDb,
+    });
+
+    // Owner manually halts via setRateFeedTradingMode → mode 3.
+    const override = BreakerBox.TradingModeUpdated.createMockEvent({
+      rateFeedID: FEED,
+      tradingMode: 3n,
+      mockEventData: {
+        chainId: CHAIN_ID,
+        logIndex: 2,
+        srcAddress: BREAKER_BOX_ADDR,
+        block: { number: 250, timestamp: 1_700_001_500 },
+      },
+    });
+    mockDb = await BreakerBox.TradingModeUpdated.processEvent({
+      event: override,
+      mockDb,
+    });
+
+    const cfg = mockDb.entities.BreakerConfig.get(
+      makeBreakerConfigId(CHAIN_ID, MD_BREAKER, FEED),
+    ) as
+      | { tradingMode: number; status: string; lastStatusUpdatedAt: bigint }
+      | undefined;
+    assert.ok(cfg);
+    assert.equal(cfg!.tradingMode, 3);
+    assert.equal(cfg!.status, "TRIPPED");
+    assert.equal(cfg!.lastStatusUpdatedAt, 1_700_001_500n);
+  });
+
+  it("SortedOracles.MedianUpdated mirrors EMA + lastMedianRate for enabled MedianDelta configs", async () => {
+    let mockDb = MockDb.createMockDb();
+    const seed = BreakerBox.BreakerStatusUpdated.createMockEvent({
+      breaker: MD_BREAKER,
+      rateFeedID: FEED,
+      status: true,
+      mockEventData: {
+        chainId: CHAIN_ID,
+        logIndex: 0,
+        srcAddress: BREAKER_BOX_ADDR,
+        block: { number: 100, timestamp: 1_700_000_500 },
+      },
+    });
+    mockDb = await BreakerBox.BreakerStatusUpdated.processEvent({
+      event: seed,
+      mockDb,
+    });
+
+    // Send a MedianUpdated event with a new median rate. The EMA should
+    // recompute via Fixidity arithmetic; lastMedianRate should equal value.
+    const newMedian = 1_180_000_000_000_000_000_000_000n; // 1.180
+    const updated = SortedOracles.MedianUpdated.createMockEvent({
+      token: FEED,
+      value: newMedian,
+      mockEventData: {
+        chainId: CHAIN_ID,
+        logIndex: 5,
+        srcAddress: "0xefb84935239dacdecf7c5ba76d8de40b077b7b33",
+        block: { number: 300, timestamp: 1_700_002_000 },
+      },
+    });
+    mockDb = await SortedOracles.MedianUpdated.processEvent({
+      event: updated,
+      mockDb,
+    });
+
+    const cfg = mockDb.entities.BreakerConfig.get(
+      makeBreakerConfigId(CHAIN_ID, MD_BREAKER, FEED),
+    ) as
+      | {
+          lastMedianRate: bigint;
+          lastUpdatedAt: bigint;
+          medianRatesEMA: bigint;
+        }
+      | undefined;
+    assert.ok(cfg);
+    assert.equal(cfg!.lastMedianRate, newMedian);
+    assert.equal(cfg!.lastUpdatedAt, 1_700_002_000n);
+    // EMA blends 0.5% of new median with 99.5% of prior EMA. With prior
+    // EMA = 1_171_560_280_196_965_000_000_000n and new = 1.180e24:
+    //   newEMA = (1.180e24 * 5e21 + 1_171_560…e24 * (FIXED_1 - 5e21)) / FIXED_1
+    // The result must be > prior EMA (drifting up toward new median) and
+    // < new median (still mostly weighted to history). That's the
+    // contract semantic the dashboard depends on.
+    const FIXED_1 = 10n ** 24n;
+    const sf = 5n * 10n ** 21n;
+    const prior = 1_171_560_280_196_965_000_000_000n;
+    const expected = (newMedian * sf + prior * (FIXED_1 - sf)) / FIXED_1;
+    assert.equal(cfg!.medianRatesEMA, expected);
   });
 });
