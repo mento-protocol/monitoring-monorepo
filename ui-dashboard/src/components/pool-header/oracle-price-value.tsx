@@ -44,9 +44,6 @@ export function OraclePriceValue({
   const expiryMinutes = Math.round(
     getOracleStalenessThreshold(pool, network.chainId) / 60,
   );
-  const updatedLabel = hasTs
-    ? `last ${relativeTime(pool.oracleTimestamp!)} / ${expiryMinutes}m expiry`
-    : null;
   const updatedTitle = hasTs
     ? formatTimestamp(pool.oracleTimestamp!)
     : undefined;
@@ -54,6 +51,9 @@ export function OraclePriceValue({
     hasTs && pool.oracleTxHash
       ? explorerTxUrl(network, pool.oracleTxHash)
       : null;
+  const lastLabel = hasTs
+    ? `last ${relativeTime(pool.oracleTimestamp!)}`
+    : null;
 
   return (
     <span className="flex flex-col gap-0.5">
@@ -72,24 +72,24 @@ export function OraclePriceValue({
       ) : (
         <span className="text-slate-500">—</span>
       )}
-      {updatedLabel &&
-        (updatedHref ? (
-          <a
-            href={updatedHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`text-xs ${subColor} hover:text-indigo-400 transition-colors`}
-            title={updatedTitle}
-          >
-            {updatedLabel}
-            {!fresh && " · stale"}
-          </a>
-        ) : (
-          <span className={`text-xs ${subColor}`} title={updatedTitle}>
-            {updatedLabel}
-            {!fresh && " · stale"}
-          </span>
-        ))}
+      {lastLabel && (
+        <span className={`text-xs ${subColor}`} title={updatedTitle}>
+          {updatedHref ? (
+            <a
+              href={updatedHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-indigo-400 transition-colors"
+            >
+              {lastLabel}
+            </a>
+          ) : (
+            lastLabel
+          )}
+          {` / ${expiryMinutes}m expiry`}
+          {!fresh && " · stale"}
+        </span>
+      )}
     </span>
   );
 }

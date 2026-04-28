@@ -97,7 +97,7 @@ describe("OraclePriceValue", () => {
     expect(html).toMatch(/1 KESm = [0-9.]+ USDm/);
   });
 
-  it("renders 'last X ago / Nm expiry' link to the explorer tx when oracle is fresh", () => {
+  it("links only the 'last X ago' portion to the explorer tx, leaving '/ Nm expiry' as plain text", () => {
     const freshTs = String(Math.floor(Date.now() / 1000) - 60);
     const pool: Pool = {
       ...BASE_POOL,
@@ -110,10 +110,13 @@ describe("OraclePriceValue", () => {
     const html = renderToStaticMarkup(
       <OraclePriceValue pool={pool} network={NETWORK_WITH_CHAINLINK} />,
     );
-    expect(html).toMatch(/last [^<]+ ago \/ \d+m expiry/);
     expect(html).toContain(
       'href="https://celoscan.io/tx/0xcb81fe1d4ff72d75ce29bf7905ea852d7e8da98e1831f575c5b71687e9acc936"',
     );
+    // Anchor wraps "last … ago" but NOT the "/ Nm expiry" suffix.
+    expect(html).toMatch(/<a [^>]*>last [^<]+ ago<\/a>/);
+    expect(html).toMatch(/<\/a>\s*\/ \d+m expiry/);
+    expect(html).not.toMatch(/<a[^>]*>[^<]*expiry/);
     // Fresh oracle → white price, slate subline, no red anywhere.
     expect(html).toContain("text-white");
     expect(html).not.toContain("text-red-400");
