@@ -73,18 +73,19 @@ export function OraclePriceValue({
         <span className="text-slate-500">—</span>
       )}
       {lastLabel && (
-        <span className={`text-xs ${subColor}`} title={updatedTitle}>
+        <span className={`text-xs ${subColor}`}>
           {updatedHref ? (
             <a
               href={updatedHref}
               target="_blank"
               rel="noopener noreferrer"
+              title={updatedTitle}
               className="hover:text-indigo-400 transition-colors"
             >
               {lastLabel}
             </a>
           ) : (
-            lastLabel
+            <span title={updatedTitle}>{lastLabel}</span>
           )}
           {` / ${expiryMinutes}m expiry`}
           {!fresh && " · stale"}
