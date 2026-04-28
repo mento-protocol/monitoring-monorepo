@@ -58,9 +58,13 @@ locals {
   #      rules that don't set the annotation render nothing — no empty
   #      "*Foo:*" placeholder. Add new lines here when introducing rule-
   #      specific context fields; rules that don't set them are unaffected.
-  #   5. Metadata row: start time. The pool address used to live here but was
-  #      removed — the pair name is already in the linked title and the raw
-  #      address rarely helps responders.
+  #   5. Metadata row: start time + Grafana alert link. The per-row
+  #      `View alert` link is required because `notify_*_pool` collapses
+  #      multiple alertnames per (chain_id, pool_id) into one Slack thread,
+  #      so the linked title alone can't disambiguate which rule fired.
+  #      The pool address used to live here but was removed — the pair name
+  #      is already in the linked title and the raw address rarely helps
+  #      responders.
   #
   # Layout (service-scoped, e.g. metrics-bridge — no pool_id/pair/chain):
   #   1. Plain bold alertname (no link target — there is no pool details page).
@@ -85,11 +89,7 @@ locals {
     {{ if .Annotations.current_reserves -}}
     *Current Reserves:* {{ .Annotations.current_reserves }}
     {{ end -}}
-    {{ if .Labels.pool_id -}}
-    *Started:* {{ .StartsAt.Format "15:04 UTC" }}
-    {{ else -}}
     *Started:* {{ .StartsAt.Format "15:04 UTC" }}   ·   <{{ .GeneratorURL }}|View alert>
-    {{ end -}}
     {{ end }}
   EOT
 
