@@ -11,8 +11,8 @@ import { InfoPopover } from "@/components/info-popover";
 import { POOL_OPEN_BREACH_TX } from "@/lib/queries";
 import { explorerTxUrl } from "@/lib/tokens";
 
-const DEVIATION_EXPLAINER =
-  "Live drift between the pool's internal price (implied by its current token reserves) and the oracle reference rate. The pool enters a rebalance breach when this deviation exceeds the Rebalance Threshold (see Pool Config).";
+const DEVIATION_EXPLAINER_BASE =
+  "Live drift between the pool's internal price (implied by its current token reserves) and the oracle reference rate. The pool enters a rebalance breach when this deviation exceeds the Rebalance Threshold";
 
 export function DeviationCell({
   pool,
@@ -35,9 +35,9 @@ export function DeviationCell({
       ? pool.deviationBreachStartedAt
       : null;
 
-  // Look up the trip transaction so the "breach Xh ago" portion of the
-  // caption can link to the explorer. Skip the query when there's no open
-  // breach to avoid a wasted round-trip on healthy pools.
+  // Look up the trip transaction so the "breach Xh ago" badge can link to
+  // the explorer. Skip the query when there's no open breach to avoid a
+  // wasted round-trip on healthy pools.
   const { data: tripTxData } = useGQL<{
     DeviationThresholdBreach: { startedByTxHash?: string }[];
   }>(breachStartedAt ? POOL_OPEN_BREACH_TX : null, {
@@ -53,25 +53,39 @@ export function DeviationCell({
 
   const status = computeHealthStatus(pool, network.chainId);
 
+  // Surface the actual threshold inside the popover so operators don't
+  // have to hop to Pool Config. Falls back to a generic note when the
+  // indexer hasn't backfilled the threshold yet (sentinel 0).
+  const thresholdSuffix =
+    pool.rebalanceThreshold && pool.rebalanceThreshold > 0
+      ? ` (${(pool.rebalanceThreshold / 100).toFixed(2)}%)`
+      : "";
+  const explainer = `${DEVIATION_EXPLAINER_BASE}${thresholdSuffix}.`;
+
   return (
     <div>
-      <dt className="text-slate-400">
+      <dt className="text-slate-400 flex items-center justify-between gap-1">
         <span className="inline-flex items-center gap-1">
           Deviation
           <InfoPopover
-            label={`About Deviation. ${DEVIATION_EXPLAINER}`}
-            content={DEVIATION_EXPLAINER}
+            label={`About Deviation. ${explainer}`}
+            content={explainer}
           />
         </span>
+        {breachStartedAt && (
+          <BreachAge
+            breachStartedAt={breachStartedAt}
+            trippedByTxHash={trippedByTxHash}
+            network={network}
+            status={status}
+          />
+        )}
       </dt>
       <dd>
         <DeviationBar
           priceDifference={pool.priceDifference ?? "0"}
           rebalanceThreshold={pool.rebalanceThreshold ?? 0}
           status={status}
-          breachStartedAt={breachStartedAt}
-          trippedByTxHash={trippedByTxHash}
-          network={network}
         />
       </dd>
     </div>
@@ -82,43 +96,13 @@ function DeviationBar({
   priceDifference,
   rebalanceThreshold,
   status,
-  breachStartedAt,
-  trippedByTxHash,
-  network,
 }: {
   priceDifference: string;
   rebalanceThreshold: number;
   status: HealthStatus;
-  breachStartedAt: string | null;
-  trippedByTxHash: string | null;
-  network: Network;
 }) {
   const diff = Number(priceDifference);
   if (!rebalanceThreshold || rebalanceThreshold === 0 || diff === 0) {
-    // No usable threshold/diff to draw a bar against — but `health.ts`
-    // falls back to a 10000-bps effective threshold, so an open breach
-    // CAN still exist on this pool. Render the breach line so the alarm
-    // survives the bar's no-data path.
-    if (breachStartedAt) {
-      return (
-        <div className="flex flex-col gap-0.5">
-          <span className="text-sm text-slate-400">—</span>
-          <span
-            className={`text-xs ${
-              status === "CRITICAL" ? "text-red-400" : "text-amber-400"
-            }`}
-            title={formatTimestamp(breachStartedAt)}
-          >
-            <BreachAge
-              breachStartedAt={breachStartedAt}
-              trippedByTxHash={trippedByTxHash}
-              network={network}
-              status={status}
-            />
-          </span>
-        </div>
-      );
-    }
     return <span className="text-sm text-slate-400">—</span>;
   }
   const threshold = rebalanceThreshold;
@@ -140,19 +124,9 @@ function DeviationBar({
           : "bg-emerald-500";
 
   // Raw deviation / threshold are stored in basis points (10000 bps = 100%),
-  // but humans reason about this in percentages. Convert before rendering
-  // so the parenthetical reads `(49.97% / 50.00%)` instead of the opaque
-  // `(4997 / 5000 bps)` that the indexer emits.
+  // but humans reason about this in percentages.
   const diffPct = (diff / 100).toFixed(2);
   const thresholdPct = (threshold / 100).toFixed(2);
-
-  // Caption color tracks breach status when active so the row visually
-  // ties to the bar, slate-500 in the healthy/getting-close states.
-  const captionColor = breachStartedAt
-    ? status === "CRITICAL"
-      ? "text-red-400"
-      : "text-amber-400"
-    : "text-slate-500";
 
   return (
     <div
@@ -161,10 +135,7 @@ function DeviationBar({
     >
       {/* Wrap the 8px bar in a 20px row that matches the text-sm line-height
           of other cells' middle values (e.g. "Fresh", "Balanced") so the
-          bottom-row subtitle sits on the same baseline across the header.
-          `mt-0.5` nudges the bar ~2px below geometric center to match the
-          optical center of text-sm glyphs (text sits below the cap line, so
-          a geometrically centered bar reads slightly high). */}
+          bottom-row subtitle sits on the same baseline across the header. */}
       <div className="flex h-5 items-center">
         <div className="h-2 w-full rounded-full bg-slate-700 mt-1">
           <div
@@ -184,24 +155,8 @@ function DeviationBar({
           />
         </div>
       </div>
-      <span
-        className={`text-xs ${captionColor}`}
-        title={breachStartedAt ? formatTimestamp(breachStartedAt) : undefined}
-      >
-        {diffPct}%
-        {breachStartedAt && (
-          <>
-            <span className="text-slate-600 font-normal" aria-hidden="true">
-              {" · "}
-            </span>
-            <BreachAge
-              breachStartedAt={breachStartedAt}
-              trippedByTxHash={trippedByTxHash}
-              network={network}
-              status={status}
-            />
-          </>
-        )}
+      <span className="text-xs text-slate-500">
+        {diffPct}% of {thresholdPct}% threshold
       </span>
     </div>
   );
@@ -218,6 +173,7 @@ function BreachAge({
   network: Network;
   status: HealthStatus;
 }) {
+  const color = status === "CRITICAL" ? "text-red-400" : "text-amber-400";
   const dateTime = new Date(Number(breachStartedAt) * 1000).toISOString();
   const inner = (
     <>
@@ -234,14 +190,20 @@ function BreachAge({
         href={explorerTxUrl(network, trippedByTxHash)}
         target="_blank"
         rel="noopener noreferrer"
+        title={formatTimestamp(breachStartedAt)}
         aria-label={`breach ${relativeTime(breachStartedAt)} — open trip transaction on the explorer`}
-        className={`hover:text-indigo-400 transition-colors ${
-          status === "CRITICAL" ? "text-red-400" : "text-amber-400"
-        }`}
+        className={`text-xs font-normal hover:text-indigo-400 transition-colors ${color}`}
       >
         {inner}
       </a>
     );
   }
-  return <span>{inner}</span>;
+  return (
+    <span
+      className={`text-xs font-normal ${color}`}
+      title={formatTimestamp(breachStartedAt)}
+    >
+      {inner}
+    </span>
+  );
 }

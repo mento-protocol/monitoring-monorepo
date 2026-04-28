@@ -157,57 +157,46 @@ describe("DeviationCell — bar fill colors track health status", () => {
   });
 });
 
-describe("DeviationCell — caption shows raw deviation %", () => {
-  it("shows the raw deviation pct (not the delta from threshold) when above the limit", () => {
-    // 7610 bps → 76.10% raw deviation. The bar fill clamps at 100% to
-    // show "above threshold", but the caption reports the actual drift.
+describe("DeviationCell — caption shows current/threshold pair", () => {
+  it("renders 'X% of Y% threshold' below the bar", () => {
+    // 7610 bps / 5000 bps → "76.10% of 50.00% threshold"
     const pool: Pool = { ...BASE_POOL, priceDifference: "7610" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("76.10%");
-    // Word-boundary checks so the popover's "hover:" class text doesn't
-    // accidentally satisfy a `not.toContain("over")` assertion.
-    expect(html).not.toMatch(/% over/);
-    expect(html).not.toMatch(/above threshold/);
+    expect(html).toContain("76.10% of 50.00% threshold");
   });
 
-  it("stays compact even at 4-digit deviation magnitudes (no wrap on a 226px tile)", () => {
-    // 132954 bps → 1329.54% raw deviation. With the old "X% over" or
-    // "X% above threshold" suffix this would wrap; the compact form fits.
+  it("stays compact at 4-digit deviation magnitudes (no wrap on a 226px tile)", () => {
     const pool: Pool = { ...BASE_POOL, priceDifference: "132954" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("1329.54%");
-    expect(html).not.toMatch(/% over/);
-    expect(html).not.toMatch(/above threshold/);
+    expect(html).toContain("1329.54% of 50.00% threshold");
   });
 
-  it("shows the raw deviation pct when below the limit (no 'below threshold' suffix)", () => {
-    // 3000 bps → 30.00% raw deviation. Bar color (emerald) conveys
-    // "below threshold"; the caption is just the number.
+  it("renders the same caption shape when below the threshold", () => {
     const pool: Pool = { ...BASE_POOL, priceDifference: "3000" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("30.00%");
+    expect(html).toContain("30.00% of 50.00% threshold");
     expect(html).not.toMatch(/% below/);
+    expect(html).not.toMatch(/% above/);
   });
 
-  it("shows the raw deviation pct exactly at the threshold (no 'At threshold' synthetic copy)", () => {
-    // 5000 bps → 50.00% raw deviation, threshold also 50%. No synthetic
-    // "At threshold" framing — the number and the bar color (yellow)
-    // tell the same story.
+  it("does not synthesise 'At threshold' copy when deviation == threshold", () => {
     const pool: Pool = { ...BASE_POOL, priceDifference: "5000" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toContain("50.00%");
+    expect(html).toContain("50.00% of 50.00% threshold");
     expect(html).not.toContain("At threshold");
   });
+});
 
-  it("renders an info popover next to the 'Deviation' label", () => {
+describe("DeviationCell — info popover", () => {
+  it("renders the popover next to the 'Deviation' label", () => {
     const pool: Pool = { ...BASE_POOL, priceDifference: "3000" };
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
@@ -215,6 +204,32 @@ describe("DeviationCell — caption shows raw deviation %", () => {
     expect(html).toMatch(
       /aria-label="About Deviation\. Live drift between the pool/,
     );
+  });
+
+  it("includes the actual rebalance threshold % inside the popover content", () => {
+    // BASE_POOL has rebalanceThreshold=5000 (50.00%). The popover should
+    // surface that number rather than punting to "see Pool Config".
+    const pool: Pool = { ...BASE_POOL, priceDifference: "3000" };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    expect(html).toMatch(/Rebalance Threshold \(50\.00%\)/);
+    expect(html).not.toMatch(/see Pool Config/);
+  });
+
+  it("falls back gracefully when the indexer hasn't backfilled the threshold yet", () => {
+    const pool: Pool = {
+      ...BASE_POOL,
+      rebalanceThreshold: 0,
+      priceDifference: "3000",
+    };
+    const html = renderToStaticMarkup(
+      <DeviationCell pool={pool} network={NETWORK} />,
+    );
+    // No threshold suffix when the indexer's sentinel-0 is in play; the
+    // popover still explains the concept.
+    expect(html).toMatch(/Rebalance Threshold\./);
+    expect(html).not.toMatch(/Rebalance Threshold \(/);
   });
 });
 
@@ -273,7 +288,10 @@ describe("DeviationCell — breach line", () => {
     expect(html).not.toContain("text-red-400");
   });
 
-  it("still renders the breach indicator when rebalanceThreshold is 0 (bar's no-data path)", () => {
+  it("still renders the breach indicator when rebalanceThreshold is 0 (badge lives in the dt row)", () => {
+    // The breach badge moved from the dd caption to the dt row, so it
+    // survives the bar's no-data path (rebalanceThreshold = 0) without
+    // any special-case rendering inside the bar.
     setTripTx([]);
     const now = Math.floor(Date.now() / 1000);
     const breachStart = String(now - 2 * 3600);
@@ -286,7 +304,9 @@ describe("DeviationCell — breach line", () => {
     const html = renderToStaticMarkup(
       <DeviationCell pool={pool} network={NETWORK} />,
     );
-    expect(html).toMatch(/breach/);
+    // Match the badge shape — "breach <time>…</time>" — instead of the
+    // popover's "rebalance breach" prose.
+    expect(html).toMatch(/breach <time/);
     expect(html).toMatch(/<time[^>]*dateTime=/);
     expect(html).toMatch(/class="sr-only">\s*\(started at/);
   });
@@ -302,9 +322,9 @@ describe("DeviationCell — breach line", () => {
       <DeviationCell pool={pool} network={NETWORK} />,
     );
     // The popover content includes the word "breach" — assert against the
-    // structural form ("breach <relative>") that only the live indicator
-    // produces, plus the absence of the sr-only "started at" timestamp.
-    expect(html).not.toMatch(/breach \d/);
+    // badge's structural form ("breach <time>…</time>") that only the
+    // live indicator produces, plus the absence of the sr-only timestamp.
+    expect(html).not.toMatch(/breach <time/);
     expect(html).not.toMatch(/started at \d/);
   });
 });
