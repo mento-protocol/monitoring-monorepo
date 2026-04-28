@@ -77,7 +77,7 @@ export function PoolConfigPanel({ pool }: PoolConfigPanelProps) {
             Swap Fee
             <InfoPopover
               label="Swap Fee"
-              content={`Total fee charged on swaps, split between liquidity providers and the protocol fee recipient. LP: ${formatBps(lpFee)} · Protocol: ${formatBps(protocolFee)}.`}
+              content={`Total fee charged per swap\nSplit between LP fee (${formatBps(lpFee)}) and protocol fee (${formatBps(protocolFee)}).`}
             />
           </span>
         }
