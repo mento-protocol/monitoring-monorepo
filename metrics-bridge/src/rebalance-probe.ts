@@ -79,14 +79,15 @@ export function eligibleForProbe(pools: PoolRow[]): PoolRow[] {
  * carrying "no rpc client" when the chain isn't configured.
  *
  * Cancellation: the timeout fires `controller.abort(...)` rather than just
- * resolving an unrelated branch of `Promise.race`, so the in-flight
- * `client.call` / `client.readContract` chain inside `probeRebalance` is
- * actually cut loose (each RPC awaits an `abortable(...)` wrapper that
- * rejects immediately when the signal fires). On the success path the
- * timer handle is cleared so we don't leak a setTimeout per probe — at
- * `REBALANCE_PROBE_CONCURRENCY=5` against a stuck endpoint that previously
- * accumulated dropped-but-still-pending eth_calls AND timer handles every
- * cycle. Tracked in `docs/BACKLOG.md` (since removed).
+ * resolving an unrelated branch of `Promise.race`, so the runner stops
+ * awaiting the in-flight `client.call` / `client.readContract` chain
+ * inside `probeRebalance` (each RPC awaits an `abortable(...)` wrapper
+ * that rejects immediately when the signal fires). The underlying fetch
+ * itself can't be cancelled mid-flight in viem 2.47.0, but downstream
+ * detection / simulation / enrichment calls are short-circuited so a
+ * stuck endpoint can't keep expanding the orphaned-call set every cycle.
+ * On the success path the timer handle is cleared so we don't leak a
+ * setTimeout per probe.
  */
 async function probeOne(pool: PoolRow): Promise<RebalanceProbeResult> {
   const client = getRpcClient(pool.chainId);

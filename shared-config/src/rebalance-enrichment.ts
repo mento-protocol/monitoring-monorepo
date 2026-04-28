@@ -195,7 +195,20 @@ export async function fetchReserveEnrichment(
       result.needed = toHumanUnits(debtInfo.amountOwedToPool, decimals);
     }
     return result;
-  } catch {
+  } catch (err) {
+    // Re-throw aborts so the caller's wall-clock timeout actually short-
+    // circuits — otherwise an AbortError mid-enrichment gets swallowed and
+    // the probe returns the un-enriched blocked result instead of a
+    // transport_error, defeating the abort guarantee for any pool whose
+    // signal happens to fire during reserve enrichment.
+    if (
+      err &&
+      typeof err === "object" &&
+      ((err as { name?: string }).name === "AbortError" ||
+        (err as { code?: string }).code === "ABORT_ERR")
+    ) {
+      throw err;
+    }
     return null;
   }
 }

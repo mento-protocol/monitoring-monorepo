@@ -197,7 +197,7 @@ describe("runRebalanceProbes — timeout race", () => {
     vi.useRealTimers();
   });
 
-  it("aborts the in-flight probe via AbortController on wall-clock timeout and surfaces transport_error", async () => {
+  it("signals abort on wall-clock timeout so the runner stops awaiting and surfaces transport_error", async () => {
     // Fake timers let us drive the setTimeout in `probeOne` past
     // `REBALANCE_PROBE_TIMEOUT_MS` without burning real wall time.
     vi.useFakeTimers();
@@ -205,10 +205,12 @@ describe("runRebalanceProbes — timeout race", () => {
       deviationBreachStartedAt: "1713200000",
       lastDeviationRatio: "1.50",
     });
-    // Probe observes the signal and rejects on abort — the new
-    // AbortController-based path replaces the old `Promise.race` which
-    // left the underlying RPC running orphaned. This mock simulates a
-    // well-behaved probe that bails immediately when its signal fires.
+    // Probe observes the signal and rejects on abort. This is what the
+    // signal-aware `abortable()` wrappers buy us: the runner short-circuits
+    // detection / simulation / enrichment instead of awaiting orphaned
+    // promises. (Note: viem 2.47.0 doesn't accept a per-call signal so the
+    // underlying HTTP fetch keeps running until the transport timeout — the
+    // JS-visible promise rejection is the load-bearing change here.)
     let observedSignal: AbortSignal | undefined;
     mockProbe.mockImplementationOnce(
       (_client, _pool, _strategy, _chainId, signal) => {
@@ -238,9 +240,8 @@ describe("runRebalanceProbes — timeout race", () => {
 
     // The runner threaded an AbortSignal into the probe and that signal
     // is now aborted (the wall-clock timeout fired controller.abort()).
-    // This is the no-orphan-RPC invariant: probes plumbed signal-aware
-    // observe the abort and bail; the legacy `Promise.race` left the
-    // viem call running indefinitely.
+    // The legacy `Promise.race` left the runner blocked on the viem call;
+    // this assertion proves the runner now stops awaiting on timeout.
     expect(observedSignal).toBeDefined();
     expect(observedSignal?.aborted).toBe(true);
 
