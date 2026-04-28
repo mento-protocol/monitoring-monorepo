@@ -28,6 +28,12 @@ export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
     protocolFee: 5,
     lastOracleJumpBps: "3.0000",
     lastOracleJumpAt: "1713200000",
+    // Default: balanced 50/50 18dp pool. Tests overriding decimals MUST
+    // also override reserves to keep the share comparison meaningful.
+    reserves0: "1000000000000000000",
+    reserves1: "1000000000000000000",
+    token0Decimals: 18,
+    token1Decimals: 18,
     ...overrides,
   };
 }

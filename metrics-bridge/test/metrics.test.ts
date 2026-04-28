@@ -166,6 +166,94 @@ describe("updateMetrics", () => {
     ).toBeCloseTo(0.005);
   });
 
+  it("computes reserve share for balanced 50/50 pool", async () => {
+    updateMetrics([makePool()]);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share", {
+        ...poolLabels,
+        token_index: "0",
+      }),
+    ).toBeCloseTo(0.5);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share", {
+        ...poolLabels,
+        token_index: "1",
+      }),
+    ).toBeCloseTo(0.5);
+  });
+
+  it("normalizes mismatched decimals before computing reserve share (USDC 6dp / USDm 18dp)", async () => {
+    // 17% USDC (6dp) / 83% USDm (18dp). Without decimal normalization the
+    // raw BigInt ratio would be wildly wrong (USDC reserves look 10^12×
+    // smaller than USDm). Normalized: 170 USDC / 830 USDm = 17% / 83%.
+    updateMetrics([
+      makePool({
+        // 170 USDC at 6dp = 170_000_000
+        reserves0: "170000000",
+        // 830 USDm at 18dp = 830 * 10^18
+        reserves1: "830000000000000000000",
+        token0Decimals: 6,
+        token1Decimals: 18,
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share", {
+        ...poolLabels,
+        token_index: "0",
+      }),
+    ).toBeCloseTo(0.17, 4);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share", {
+        ...poolLabels,
+        token_index: "1",
+      }),
+    ).toBeCloseTo(0.83, 4);
+  });
+
+  it("emits 1.0/0.0 for one-sided pool (single reserve zero) — diagnostic signal", async () => {
+    // A pool drained of one side IS exactly the imbalance the alert wants
+    // to render ("100% USDT / 0% USDm"), so we keep the series.
+    updateMetrics([
+      makePool({
+        reserves0: "1000000000000000000",
+        reserves1: "0",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share", {
+        ...poolLabels,
+        token_index: "0",
+      }),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share", {
+        ...poolLabels,
+        token_index: "1",
+      }),
+    ).toBe(0);
+  });
+
+  it("skips reserve share when both reserves are zero (share undefined)", async () => {
+    updateMetrics([
+      makePool({
+        reserves0: "0",
+        reserves1: "0",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share", {
+        ...poolLabels,
+        token_index: "0",
+      }),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share", {
+        ...poolLabels,
+        token_index: "1",
+      }),
+    ).toBeUndefined();
+  });
+
   it("sets health_status from string enum", async () => {
     updateMetrics([makePool({ healthStatus: "CRITICAL" })]);
     expect(

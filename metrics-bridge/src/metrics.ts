@@ -104,6 +104,12 @@ export const gauges = {
     labelNames: pressureLabels,
     registers: [register],
   }),
+  reserveShare: new Gauge({
+    name: "mento_pool_reserve_share",
+    help: "Per-token share of pool reserves in face-value (decimal-adjusted, no oracle conversion). reserves_i_normalized / sum_normalized ∈ [0, 1]. Skipped when both reserves are zero (share undefined). Used by deviation-breach Slack alerts to render the imbalance side-by-side with the deviation magnitude.",
+    labelNames: pressureLabels,
+    registers: [register],
+  }),
   lastRebalancedAt: new Gauge({
     name: "mento_pool_last_rebalanced_at",
     help: "Unix timestamp of the last rebalance",
@@ -219,5 +225,29 @@ export function updateMetrics(pools: PoolRow[]): void {
       { ...labels, token_index: "1" },
       fp(pool.limitPressure1),
     );
+
+    // Reserve share — face-value % of each token in the pool, decimal-
+    // adjusted so 6dp / 18dp pairs (e.g. USDC / USDm) compute correctly.
+    // Used by the deviation-breach Slack alert to render "17% USDT / 83%
+    // USDm" alongside the magnitude. Both legs in USD-pegged FPMMs makes
+    // this a meaningful imbalance indicator; on FX pools it's a decent
+    // proxy.
+    //
+    // Casting BigInt-string reserves to Number is fine for a *ratio*: we
+    // divide two values of similar magnitude and IEEE-754 float precision
+    // (~15 decimal digits) is far more than needed for a percentage
+    // rendered to one decimal place.
+    //
+    // Empty pool (both reserves zero) → skip emit; the share is undefined
+    // and we don't want a misleading 0/0 series. One-sided dead pool
+    // (single reserve zero) → emit 0.0/1.0 so the alert renders "100%
+    // USDT / 0% USDm", which IS the diagnostic signal.
+    const r0 = Number(pool.reserves0) / 10 ** pool.token0Decimals;
+    const r1 = Number(pool.reserves1) / 10 ** pool.token1Decimals;
+    const total = r0 + r1;
+    if (Number.isFinite(total) && total > 0) {
+      gauges.reserveShare.set({ ...labels, token_index: "0" }, r0 / total);
+      gauges.reserveShare.set({ ...labels, token_index: "1" }, r1 / total);
+    }
   }
 }

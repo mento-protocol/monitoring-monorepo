@@ -42,8 +42,13 @@ locals {
   #      `description` annotation (useful in the Grafana rule-detail view)
   #      but it is intentionally suppressed in Slack to keep warning
   #      messages at a glance-able 4 lines.
-  #   3. Metadata row: clickable pool address (→ block explorer) + start time.
-  #   4. Action row: dashboard link + Grafana alert link.
+  #   3. Optional KPI lines from rule-specific annotations (current_deviation,
+  #      current_reserves, …). Each guarded by `{{ if .Annotations.X }}` so
+  #      rules that don't set the annotation render nothing — no empty
+  #      "*Foo:*" placeholder. Add new lines here when introducing rule-
+  #      specific context fields; rules that don't set them are unaffected.
+  #   4. Metadata row: clickable pool address (→ block explorer) + start time.
+  #   5. Action row: dashboard link + Grafana alert link.
   #
   # For metrics-bridge alerts (no pool_id/pair/chain), the pool/dashboard
   # blocks are suppressed via `{{ if .Labels.pool_id }}`.
@@ -53,6 +58,12 @@ locals {
     {{ end -}}
     {{ if and .Annotations.description (eq .Labels.severity "critical") -}}
     _{{ .Annotations.description }}_
+    {{ end -}}
+    {{ if .Annotations.current_deviation -}}
+    *Current Deviation:* {{ .Annotations.current_deviation }}
+    {{ end -}}
+    {{ if .Annotations.current_reserves -}}
+    *Current Reserves:* {{ .Annotations.current_reserves }}
     {{ end -}}
     {{ if .Labels.pool_id -}}
     {{ $addr := or .Labels.pool_address_short .Labels.pool_id -}}
