@@ -32,6 +32,9 @@ import {
   STRATEGY_ABI_SOURCES,
   ERROR_MESSAGES,
   HEALTHY_NO_OP_ERRORS,
+  REASON_CODES,
+  type ReasonCode,
+  type SyntheticReasonCode,
 } from "@mento-protocol/monitoring-config/rebalance-abi";
 import {
   ERC20_ABI_SOURCES,
@@ -224,7 +227,7 @@ export async function probeRebalance(
     if (
       decoded.kind === "blocked" &&
       detected.type === "reserve" &&
-      decoded.reasonCode === "RLS_RESERVE_OUT_OF_COLLATERAL"
+      decoded.reasonCode === REASON_CODES.RLS_RESERVE_OUT_OF_COLLATERAL
     ) {
       const enrichment = await fetchReserveEnrichment(
         client,
@@ -276,7 +279,14 @@ export async function probeRebalance(
  */
 export type RebalanceProbeBlocked = {
   kind: "blocked";
-  reasonCode: string;
+  /**
+   * Either a canonical Solidity-error name from `ERROR_MESSAGES`
+   * (`ReasonCode`) or one of the synthetic kinds emitted for built-in
+   * Solidity reverts and unrecognised payloads (`Error` / `Panic` /
+   * `unknown`). The discriminated union prevents typos in downstream
+   * comparisons — see `REASON_CODES.*` for callable references.
+   */
+  reasonCode: ReasonCode | SyntheticReasonCode;
   reasonMessage: string;
   /** Unbounded operator detail — log-only, never label. */
   diagnostic?: string;
@@ -360,11 +370,25 @@ function decodeBlockedRevert(err: unknown): RebalanceProbeResult {
     };
   }
 
+  // Canonical strategy ABI errors land here. `errorName` came out of
+  // `decodeErrorResult({ abi: STRATEGY_ABI })`, so any name viem accepted
+  // is one we authored in `STRATEGY_ABI_SOURCES` — those names are exactly
+  // the keys of `ERROR_MESSAGES`. The cast surfaces that invariant to the
+  // type system; the lookup-or-fallback covers the unlikely diff between
+  // ABI list and message map.
+  if (errorName in ERROR_MESSAGES) {
+    const code = errorName as ReasonCode;
+    return {
+      kind: "blocked",
+      reasonCode: code,
+      reasonMessage: ERROR_MESSAGES[code],
+    };
+  }
   return {
     kind: "blocked",
-    reasonCode: errorName,
-    reasonMessage:
-      ERROR_MESSAGES[errorName] ?? `Rebalance reverted: ${errorName}`,
+    reasonCode: "unknown",
+    reasonMessage: `Rebalance reverted: ${errorName}`,
+    diagnostic: `unmapped error name ${truncateString(errorName, 60)}`,
   };
 }
 

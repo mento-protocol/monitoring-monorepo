@@ -22,6 +22,7 @@ import {
   STRATEGY_ABI_SOURCES,
   ERROR_MESSAGES,
   HEALTHY_NO_OP_ERRORS,
+  REASON_CODES,
 } from "@mento-protocol/monitoring-config/rebalance-abi";
 import { POOL_PAIR_ABI_SOURCES } from "@mento-protocol/monitoring-config/erc20-abi";
 import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
@@ -274,21 +275,26 @@ async function handleRevert(
     humanMessage = `Rebalance reverted: ${errorArgs[0]}`;
   } else if (errorName === "Panic" && typeof errorArgs?.[0] === "bigint") {
     humanMessage = `Rebalance panicked (code 0x${errorArgs[0].toString(16)})`;
+  } else if (errorName in ERROR_MESSAGES) {
+    humanMessage = ERROR_MESSAGES[errorName as keyof typeof ERROR_MESSAGES];
   } else {
-    humanMessage =
-      ERROR_MESSAGES[errorName] ?? `Rebalance reverted: ${errorName}`;
+    humanMessage = `Rebalance reverted: ${errorName}`;
   }
 
-  // Fetch enrichment data for specific errors
+  // Fetch enrichment data for specific errors. Compares against
+  // `REASON_CODES.*` rather than bare string literals so a typo here would
+  // be a compile error — the same error-code constants flow through the
+  // metrics-bridge probe, keeping enrichment selection in lockstep across
+  // the dashboard and the Slack alert.
   let enrichment: StrategyEnrichment | null = null;
   if (
     strategyType === "cdp" &&
-    errorName === "CDPLS_STABILITY_POOL_BALANCE_TOO_LOW"
+    errorName === REASON_CODES.CDPLS_STABILITY_POOL_BALANCE_TOO_LOW
   ) {
     enrichment = await fetchCDPEnrichment(client, strategy, pool);
   } else if (
     strategyType === "reserve" &&
-    errorName === "RLS_RESERVE_OUT_OF_COLLATERAL"
+    errorName === REASON_CODES.RLS_RESERVE_OUT_OF_COLLATERAL
   ) {
     enrichment = await fetchReserveEnrichment(client, strategy, pool);
   }

@@ -113,7 +113,7 @@ export const STRATEGY_ABI_SOURCES = [
  * cardinality stays bounded and a non-canonical strategy can't inject
  * Slack mrkdwn through the alert body.
  */
-export const ERROR_MESSAGES: Record<string, string> = {
+export const ERROR_MESSAGES = {
   // CDP strategy
   CDPLS_STABILITY_POOL_BALANCE_TOO_LOW:
     "Stability pool has insufficient liquidity to fully rebalance",
@@ -172,7 +172,42 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ReferenceRateNotSet: "Oracle reference rate is not configured",
   ReserveValueDecreased: "Pool reserve value decreased after rebalance",
   ReservesEmpty: "Pool reserves are empty",
-};
+} as const satisfies Record<string, string>;
+
+/**
+ * Canonical Solidity-error names — the keys of `ERROR_MESSAGES` exposed as a
+ * string-literal union. Use `ReasonCode` whenever you compare against a code
+ * (e.g. `code === REASON_CODES.RLS_RESERVE_OUT_OF_COLLATERAL`); a typo on a
+ * string literal silently disables the comparison, which would in turn skip
+ * enrichment fetches and ship a degraded alert annotation. The `as const`
+ * map + `satisfies` annotation force compile-time validation.
+ */
+export type ReasonCode = keyof typeof ERROR_MESSAGES;
+
+/**
+ * Built-in Solidity revert kinds — `Error(string)` and `Panic(uint256)` —
+ * plus a catch-all `unknown` for unrecognised payloads. Both consumers
+ * (`metrics-bridge` probe + `ui-dashboard` probe) collapse these to a fixed
+ * `reasonMessage` to keep the Prometheus label space bounded and the Slack
+ * alert body free of strategy-supplied mrkdwn.
+ *
+ * `SyntheticReasonCode | ReasonCode` is the full set of values that can land
+ * on a `RebalanceProbeBlocked.reasonCode` — the discriminated union the
+ * dashboard tooltip + Slack annotation render against.
+ */
+export type SyntheticReasonCode = "Error" | "Panic" | "unknown";
+
+/**
+ * Const-object mirror of `ReasonCode` so consumers can write
+ * `REASON_CODES.RLS_RESERVE_OUT_OF_COLLATERAL` instead of a bare string
+ * literal. Catches typos at the call site (the bare-string form would
+ * silently disable enrichment if mistyped).
+ */
+export const REASON_CODES = Object.freeze(
+  Object.fromEntries(Object.keys(ERROR_MESSAGES).map((k) => [k, k])) as {
+    [K in ReasonCode]: K;
+  },
+);
 
 /**
  * Revert codes where the strategy refuses to rebalance BECAUSE the pool is
