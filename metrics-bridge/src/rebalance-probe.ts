@@ -128,10 +128,9 @@ export async function runWithConcurrency<T, R>(
  *     once — better than a misleading "blocked" annotation.
  */
 export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
-  // Reset both the blocked gauge AND the reserve-collateral enrichment
-  // gauges before each cycle so a pool that recovered between probes
-  // (deviation dropped below threshold, or the rebalancer caught up)
-  // immediately drops out of every series.
+  // Reset every cycle so a recovered pool (deviation dropped below
+  // threshold, or the rebalancer caught up) drops out of all three
+  // series immediately rather than carrying stale labels forward.
   gauges.rebalanceBlocked.reset();
   gauges.rebalanceCollateralBalance.reset();
   gauges.rebalanceCollateralNeeded.reset();
@@ -160,11 +159,9 @@ export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
         reason_message: result.reasonMessage,
       };
       gauges.rebalanceBlocked.set(labels, 1);
-      // Reserve-collateral enrichment: only set on
-      // `RLS_RESERVE_OUT_OF_COLLATERAL` (probe attaches `reserveCollateral`
-      // there). Skipping for non-reserve strategies / failed enrichment
-      // keeps the alert annotation falling back to the bounded
-      // reason_message line cleanly.
+      // Skipping when `reserveCollateral` is undefined (non-reserve
+      // strategy, failed enrichment) lets the alert annotation fall
+      // back to the bounded reason_message line cleanly.
       if (result.reserveCollateral) {
         const collateralLabels = {
           ...poolLabels,

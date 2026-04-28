@@ -34,6 +34,11 @@ import {
   HEALTHY_NO_OP_ERRORS,
 } from "@mento-protocol/monitoring-config/rebalance-abi";
 import { tokenSymbol } from "@mento-protocol/monitoring-config/tokens";
+import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
+
+// Re-export so existing callers (and the dashboard's mirror, prior to its
+// own migration) keep importing from one canonical location.
+export { toHumanUnits };
 
 // Re-export for backwards compatibility — existing callers still import
 // `ERROR_MESSAGES` from this module.
@@ -61,7 +66,17 @@ const POOL_TOKEN_ABI = parseAbi([
  */
 const STRATEGY_ABI = parseAbi(STRATEGY_ABI_SOURCES);
 
-export type StrategyType = "cdp" | "reserve" | "ols" | "unknown";
+/**
+ * Detection result. The `reserve` variant carries the resolved reserve
+ * address so downstream enrichment can skip a redundant `reserve()` call —
+ * we already paid for it during detection, the address is part of the
+ * Reserve strategy's identity, and it doesn't change between blocks.
+ */
+export type DetectedStrategy =
+  | { type: "cdp" }
+  | { type: "reserve"; reserveAddr: `0x${string}` }
+  | { type: "ols" }
+  | { type: "unknown" };
 
 export type RebalanceProbeResult =
   | { kind: "ok" } // Probe succeeded — pool is rebalanceable.
@@ -75,7 +90,7 @@ export type RebalanceProbeResult =
  * `ui-dashboard/src/lib/rebalance-check.ts:300`.
  *
  *   1. `getCDPConfig(pool)` → CDP
- *   2. `reserve()` → Reserve
+ *   2. `reserve()` → Reserve (returns the reserve address along with the type)
  *   3. `getPools()` → OLS
  *   4. otherwise → unknown (caller skips, no metric emitted)
  *
@@ -87,7 +102,7 @@ export async function detectStrategyType(
   client: PublicClient,
   strategy: `0x${string}`,
   pool: `0x${string}`,
-): Promise<StrategyType> {
+): Promise<DetectedStrategy> {
   try {
     await client.readContract({
       address: strategy,
@@ -95,18 +110,18 @@ export async function detectStrategyType(
       functionName: "getCDPConfig",
       args: [pool],
     });
-    return "cdp";
+    return { type: "cdp" };
   } catch (err) {
     if (!isContractRevert(err)) throw err;
   }
 
   try {
-    await client.readContract({
+    const reserveAddr = (await client.readContract({
       address: strategy,
       abi: STRATEGY_ABI,
       functionName: "reserve",
-    });
-    return "reserve";
+    })) as `0x${string}`;
+    return { type: "reserve", reserveAddr };
   } catch (err) {
     if (!isContractRevert(err)) throw err;
   }
@@ -117,12 +132,12 @@ export async function detectStrategyType(
       abi: STRATEGY_ABI,
       functionName: "getPools",
     });
-    return "ols";
+    return { type: "ols" };
   } catch (err) {
     if (!isContractRevert(err)) throw err;
   }
 
-  return "unknown";
+  return { type: "unknown" };
 }
 
 /**
@@ -153,21 +168,16 @@ export async function probeRebalance(
   poolAddress: `0x${string}`,
   strategyAddress: `0x${string}`,
   /**
-   * Chain id is only used for token-symbol resolution during reserve
-   * enrichment (`RLS_RESERVE_OUT_OF_COLLATERAL`). Optional so existing
-   * tests that don't exercise the enrichment branch keep working — the
-   * enrichment call paths through `tokenSymbol(chainId, address)` which
-   * tolerates the fallback to "collateral" when no chain is provided.
+   * Chain id forwarded to `tokenSymbol(chainId, address)` during reserve
+   * enrichment (`RLS_RESERVE_OUT_OF_COLLATERAL`). Tests that don't exercise
+   * the enrichment branch can pass `0` — `tokenSymbol` tolerates an unknown
+   * chain and falls back to "collateral".
    */
-  chainId?: number,
+  chainId: number,
 ): Promise<RebalanceProbeResult> {
-  let strategyType: StrategyType;
+  let detected: DetectedStrategy;
   try {
-    strategyType = await detectStrategyType(
-      client,
-      strategyAddress,
-      poolAddress,
-    );
+    detected = await detectStrategyType(client, strategyAddress, poolAddress);
   } catch (err: unknown) {
     return {
       kind: "transport_error",
@@ -175,7 +185,7 @@ export async function probeRebalance(
     };
   }
 
-  if (strategyType === "unknown") {
+  if (detected.type === "unknown") {
     return {
       kind: "skip",
       reason: "Unable to identify the liquidity strategy type",
@@ -186,7 +196,7 @@ export async function probeRebalance(
   // address(0) always reverts inside ERC20 — meaningless. Use determineAction
   // (view-only) instead for OLS. CDP/Reserve source tokens from the strategy
   // contract itself, so the rebalance() simulation from address(0) is valid.
-  const probeFn = strategyType === "ols" ? "determineAction" : "rebalance";
+  const probeFn = detected.type === "ols" ? "determineAction" : "rebalance";
 
   try {
     await client.call({
@@ -215,14 +225,15 @@ export async function probeRebalance(
     // to the bounded `reason_message` enum unchanged.
     if (
       decoded.kind === "blocked" &&
-      strategyType === "reserve" &&
+      detected.type === "reserve" &&
       decoded.reasonCode === "RLS_RESERVE_OUT_OF_COLLATERAL"
     ) {
       const enrichment = await fetchReserveEnrichment(
         client,
         strategyAddress,
         poolAddress,
-        chainId ?? 0,
+        chainId,
+        detected.reserveAddr,
       );
       if (enrichment) {
         return {
@@ -237,8 +248,8 @@ export async function probeRebalance(
           reserveCollateral: enrichment,
         };
       }
-      // Enrichment fetch failed (transport error inside reserve()/balanceOf
-      // /etc.). Fall through to the generic decoded result so the alert
+      // Enrichment fetch failed (transport error inside balanceOf / decimals
+      // / etc.). Fall through to the generic decoded result so the alert
       // still gets the bounded reason message and the breach itself isn't
       // suppressed.
     }
@@ -430,28 +441,16 @@ function truncateHex(hex: Hex, max = 18): string {
 }
 
 /**
- * Convert a raw on-chain uint256 balance to a human-units number without
- * losing precision when the raw value exceeds 2^53. Mirror of
- * `ui-dashboard/src/lib/rebalance-check.ts:toHumanUnits` — keeps the two
- * probes' enrichment math identical so a balance reported by the alert
- * annotation matches what the dashboard tooltip shows.
- */
-export function toHumanUnits(raw: bigint, decimals: number): number {
-  if (decimals <= 0) return Number(raw);
-  const divisor = BigInt(10) ** BigInt(decimals);
-  const whole = raw / divisor;
-  const fractionScale = BigInt(1_000_000);
-  const fraction = ((raw % divisor) * fractionScale) / divisor;
-  return Number(whole) + Number(fraction) / Number(fractionScale);
-}
-
-/**
  * Reserve-strategy enrichment fetch — mirrors the dashboard's
  * `fetchReserveEnrichment` but pulls the "needed" amount straight off
  * `determineAction(pool).action.amountOwedToPool` (the strategy's required
  * transfer to close the breach). Returns `null` on any RPC failure so the
  * caller can fall back to the generic reason message without the gauges
  * landing in Prometheus.
+ *
+ * The reserve address is threaded in from the upstream `detectStrategyType`
+ * call (Reserve detection itself reads `reserve()`, and the address is
+ * stable for a given strategy proxy), saving one RPC round-trip per probe.
  *
  * Token symbol resolution flows through `tokenSymbol` from
  * `@mento-protocol/monitoring-config/tokens` — same source as the existing
@@ -465,27 +464,21 @@ async function fetchReserveEnrichment(
   strategy: `0x${string}`,
   pool: `0x${string}`,
   chainId: number,
+  reserveAddr: `0x${string}`,
 ): Promise<{ balance: number; needed: number; tokenSymbol: string } | null> {
   try {
-    // 1. reserve() — the address holding the collateral.
-    const reserveAddr = (await client.readContract({
-      address: strategy,
-      abi: STRATEGY_ABI,
-      functionName: "reserve",
-    })) as `0x${string}`;
-
-    // 2. determineAction(pool) — gives us the action's `amountOwedToPool`
+    // 1. determineAction(pool) — gives us the action's `amountOwedToPool`
     //    (the required transfer to close the breach) plus the ctx, which
-    //    tells us which leg of the pool is the debt token.
-    const [ctx, action] = (await client.readContract({
-      address: strategy,
-      abi: STRATEGY_ABI,
-      functionName: "determineAction",
-      args: [pool],
-    })) as readonly [{ isToken0Debt: boolean }, { amountOwedToPool: bigint }];
-
-    // 3. The collateral token is the non-debt leg of the pool.
-    const [token0, token1] = await Promise.all([
+    //    tells us which leg of the pool is the debt token. Issued in
+    //    parallel with the pool's token0/token1 reads since neither
+    //    dependency-graphs into the other.
+    const [[ctx, action], token0, token1] = (await Promise.all([
+      client.readContract({
+        address: strategy,
+        abi: STRATEGY_ABI,
+        functionName: "determineAction",
+        args: [pool],
+      }),
       client.readContract({
         address: pool,
         abi: POOL_TOKEN_ABI,
@@ -496,12 +489,18 @@ async function fetchReserveEnrichment(
         abi: POOL_TOKEN_ABI,
         functionName: "token1",
       }),
-    ]);
-    const collateralToken = (
-      ctx.isToken0Debt ? token1 : token0
-    ) as `0x${string}`;
+    ])) as [
+      readonly [{ isToken0Debt: boolean }, { amountOwedToPool: bigint }],
+      `0x${string}`,
+      `0x${string}`,
+    ];
 
-    // 4. balanceOf + decimals on the collateral token.
+    // 2. The collateral token is the non-debt leg of the pool.
+    const collateralToken = ctx.isToken0Debt ? token1 : token0;
+
+    // 3. balanceOf + decimals on the collateral token — both depend on
+    //    `collateralToken` but are independent of each other, so issue in
+    //    parallel.
     const [balance, decimals] = await Promise.all([
       client.readContract({
         address: collateralToken,

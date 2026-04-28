@@ -27,6 +27,10 @@
     "./thresholds": {
       "types": "./dist/thresholds.d.ts",
       "default": "./dist/thresholds.js"
+    },
+    "./units": {
+      "types": "./dist/units.d.ts",
+      "default": "./dist/units.js"
     }
   },
   "scripts": {

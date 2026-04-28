@@ -129,7 +129,12 @@ function mockSucceedingClient(
 
 describe("probeRebalance — happy path", () => {
   it("returns ok when call succeeds (no revert)", async () => {
-    const result = await probeRebalance(mockSucceedingClient(), POOL, STRATEGY);
+    const result = await probeRebalance(
+      mockSucceedingClient(),
+      POOL,
+      STRATEGY,
+      0,
+    );
     expect(result).toEqual({ kind: "ok" });
   });
 });
@@ -155,6 +160,7 @@ describe("probeRebalance — known revert codes", () => {
         mockRevertingClient(err),
         POOL,
         STRATEGY,
+        0,
       );
       expect(result.kind).toBe("blocked");
       if (result.kind !== "blocked") return;
@@ -171,6 +177,7 @@ describe("probeRebalance — known revert codes", () => {
       mockRevertingClient(err),
       POOL,
       STRATEGY,
+      0,
     );
     expect(result.kind).toBe("blocked");
     if (result.kind !== "blocked") return;
@@ -192,6 +199,7 @@ describe("probeRebalance — healthy no-op codes collapse to ok", () => {
       mockRevertingClient(err),
       POOL,
       STRATEGY,
+      0,
     );
     expect(result).toEqual({ kind: "ok" });
   });
@@ -203,6 +211,7 @@ describe("probeRebalance — healthy no-op codes collapse to ok", () => {
       mockRevertingClient(err),
       POOL,
       STRATEGY,
+      0,
     );
     expect(result).toEqual({ kind: "ok" });
   });
@@ -216,6 +225,7 @@ describe("probeRebalance — unknown / unrecognised reverts", () => {
       mockRevertingClient(err),
       POOL,
       STRATEGY,
+      0,
     );
     expect(result.kind).toBe("blocked");
     if (result.kind !== "blocked") return;
@@ -240,6 +250,7 @@ describe("probeRebalance — unknown / unrecognised reverts", () => {
       mockRevertingClient(err),
       POOL,
       STRATEGY,
+      0,
     );
     expect(result.kind).toBe("blocked");
     if (result.kind !== "blocked") return;
@@ -266,6 +277,7 @@ describe("probeRebalance — built-in Solidity reverts (Error / Panic)", () => {
       mockRevertingClient(err),
       POOL,
       STRATEGY,
+      0,
     );
     expect(result.kind).toBe("blocked");
     if (result.kind !== "blocked") return;
@@ -294,6 +306,7 @@ describe("probeRebalance — built-in Solidity reverts (Error / Panic)", () => {
       mockRevertingClient(err),
       POOL,
       STRATEGY,
+      0,
     );
     expect(result.kind).toBe("blocked");
     if (result.kind !== "blocked") return;
@@ -348,6 +361,7 @@ describe("probeRebalance — transport errors propagate as transport_error", () 
       mockRevertingClient(err),
       POOL,
       STRATEGY,
+      0,
     );
     expect(result.kind).toBe("transport_error");
     if (result.kind !== "transport_error") return;
@@ -360,6 +374,7 @@ describe("probeRebalance — transport errors propagate as transport_error", () 
       mockRevertingClient(err),
       POOL,
       STRATEGY,
+      0,
     );
     expect(result.kind).toBe("transport_error");
   });
@@ -376,40 +391,47 @@ describe("probeRebalance — transport errors propagate as transport_error", () 
       mockRevertingClient(err),
       POOL,
       STRATEGY,
+      0,
     );
     expect(result.kind).toBe("blocked");
   });
 });
 
 describe("detectStrategyType", () => {
-  it("returns 'cdp' when getCDPConfig succeeds", async () => {
+  it("returns { type: 'cdp' } when getCDPConfig succeeds", async () => {
     const client = mockClient({
       strategyKind: "cdp",
       call: () => Promise.resolve({}),
     });
     const t = await detectStrategyType(client, STRATEGY, POOL);
-    expect(t).toBe("cdp");
+    expect(t).toEqual({ type: "cdp" });
   });
 
-  it("returns 'reserve' when reserve() succeeds", async () => {
+  it("returns { type: 'reserve', reserveAddr } when reserve() succeeds", async () => {
+    // The reserve address travels with the detection result so downstream
+    // enrichment can skip a second `reserve()` call. Pinned here so the
+    // contract between detection and enrichment doesn't drift silently.
     const client = mockClient({
       strategyKind: "reserve",
       call: () => Promise.resolve({}),
     });
     const t = await detectStrategyType(client, STRATEGY, POOL);
-    expect(t).toBe("reserve");
+    expect(t).toEqual({
+      type: "reserve",
+      reserveAddr: "0x0000000000000000000000000000000000000abc",
+    });
   });
 
-  it("returns 'ols' when getPools() succeeds", async () => {
+  it("returns { type: 'ols' } when getPools() succeeds", async () => {
     const client = mockClient({
       strategyKind: "ols",
       call: () => Promise.resolve({}),
     });
     const t = await detectStrategyType(client, STRATEGY, POOL);
-    expect(t).toBe("ols");
+    expect(t).toEqual({ type: "ols" });
   });
 
-  it("returns 'unknown' when none of the detection probes succeed", async () => {
+  it("returns { type: 'unknown' } when none of the detection probes succeed", async () => {
     // Every getter reverts with "function not found" — typical for an EOA
     // or a strategy proxy with the wrong implementation. Caller must skip
     // the probe instead of emitting a misleading "blocked" annotation.
@@ -417,7 +439,7 @@ describe("detectStrategyType", () => {
       readContract: () => Promise.reject(functionNotFoundError()),
     } as unknown as PublicClient;
     const t = await detectStrategyType(client, STRATEGY, POOL);
-    expect(t).toBe("unknown");
+    expect(t).toEqual({ type: "unknown" });
   });
 
   it("propagates transport errors (network down) — never silently maps to 'unknown'", async () => {
@@ -440,7 +462,7 @@ describe("probeRebalance — strategy-type branching", () => {
       strategyKind: "cdp",
       call: () => Promise.resolve({}),
     });
-    const result = await probeRebalance(client, POOL, STRATEGY);
+    const result = await probeRebalance(client, POOL, STRATEGY, 0);
     expect(result).toEqual({ kind: "ok" });
   });
 
@@ -451,7 +473,7 @@ describe("probeRebalance — strategy-type branching", () => {
       strategyKind: "reserve",
       call: () => Promise.reject(err),
     });
-    const result = await probeRebalance(client, POOL, STRATEGY);
+    const result = await probeRebalance(client, POOL, STRATEGY, 0);
     expect(result.kind).toBe("blocked");
     if (result.kind !== "blocked") return;
     expect(result.reasonCode).toBe("RLS_RESERVE_OUT_OF_COLLATERAL");
@@ -474,7 +496,7 @@ describe("probeRebalance — strategy-type branching", () => {
       },
       call: callSpy,
     } as unknown as PublicClient;
-    const result = await probeRebalance(client, POOL, STRATEGY);
+    const result = await probeRebalance(client, POOL, STRATEGY, 0);
     expect(result.kind).toBe("blocked");
     if (result.kind !== "blocked") return;
     expect(result.reasonCode).toBe("OLS_OUT_OF_COLLATERAL");
@@ -498,7 +520,7 @@ describe("probeRebalance — strategy-type branching", () => {
         return Promise.resolve({});
       },
     } as unknown as PublicClient;
-    const result = await probeRebalance(client, POOL, STRATEGY);
+    const result = await probeRebalance(client, POOL, STRATEGY, 0);
     expect(result.kind).toBe("skip");
     if (result.kind !== "skip") return;
     expect(result.reason).toMatch(/strategy/i);
@@ -510,7 +532,7 @@ describe("probeRebalance — strategy-type branching", () => {
       readContract: () => Promise.reject(new Error("ECONNREFUSED")),
       call: () => Promise.resolve({}),
     } as unknown as PublicClient;
-    const result = await probeRebalance(client, POOL, STRATEGY);
+    const result = await probeRebalance(client, POOL, STRATEGY, 0);
     expect(result.kind).toBe("transport_error");
     if (result.kind !== "transport_error") return;
     expect(result.error).toContain("ECONNREFUSED");
@@ -518,12 +540,14 @@ describe("probeRebalance — strategy-type branching", () => {
 });
 
 describe("probeRebalance — Reserve enrichment for RLS_RESERVE_OUT_OF_COLLATERAL", () => {
-  // The dashboard's reserve-enrichment path reads `reserve()` then chases
-  // through `determineAction(pool)` (for the debt-leg flag + amountOwedToPool)
-  // and `balanceOf` on the collateral token. The metrics-bridge probe
-  // mirrors that path so the Slack alert can render "Reserve has insufficient
-  // axlUSDC. Current balance: 0.00 axlUSDC / Needed for rebalancing:
-  // 12,500.00 axlUSDC". Tests exercise the full enrichment chain end-to-end.
+  // The probe reads `reserve()` ONCE during detection (the resolved address
+  // is threaded through to enrichment so we don't pay for a second
+  // round-trip), then chases `determineAction(pool)` for the debt-leg
+  // flag + amountOwedToPool, the pool's token0/token1, and finally
+  // `balanceOf` + `decimals` on the collateral token. The Slack alert
+  // renders "Reserve has insufficient axlUSDC. Current balance: 0.00
+  // axlUSDC / Needed for rebalancing: 12,500.00 axlUSDC". Tests exercise
+  // the full enrichment chain end-to-end.
 
   // Real Celo addresses so `tokenSymbol(42220, ...)` resolves to the canonical
   // symbol via @mento-protocol/contracts. The pool address is the
@@ -540,12 +564,14 @@ describe("probeRebalance — Reserve enrichment for RLS_RESERVE_OUT_OF_COLLATERA
   /**
    * Build a reserve-strategy client whose enrichment path responds with the
    * configured fixture. The probe fires:
-   *   1. `reserve()` → reserveAddr
+   *   1. `reserve()` → reserveAddr (detection ONLY — value flows through to
+   *      enrichment without a second call).
    *   2. `determineAction(pool)` → [ctx{isToken0Debt}, action{amountOwedToPool}]
    *   3. `token0()` / `token1()` on the pool
    *   4. `balanceOf(reserveAddr)` + `decimals()` on the collateral token
-   * `enrichmentOverride` lets a test inject failures to exercise the
-   * graceful-degradation branch.
+   * `enrichmentReject` lets a test inject failures to exercise the
+   * graceful-degradation branch — `reserve()` still resolves so detection
+   * lands on "reserve" before the simulated transport failure.
    */
   function mockReserveClient(opts: {
     isToken0Debt: boolean;
@@ -565,12 +591,6 @@ describe("probeRebalance — Reserve enrichment for RLS_RESERVE_OUT_OF_COLLATERA
         address: string;
         functionName: string;
       }) => {
-        if (opts.enrichmentReject !== undefined && functionName !== "reserve") {
-          // First call (reserve()) succeeds for detection; later calls fail
-          // to simulate transport errors during enrichment.
-          // Note: detectStrategyType also calls reserve() — that always
-          // resolves so detection lands on "reserve".
-        }
         // Detection probes — only `reserve()` succeeds, others fall through.
         if (functionName === "getCDPConfig")
           return Promise.reject(functionNotFoundError());
@@ -745,5 +765,63 @@ describe("probeRebalance — Reserve enrichment for RLS_RESERVE_OUT_OF_COLLATERA
     if (result.kind !== "blocked") return;
     expect(result.reasonCode).toBe("OLS_OUT_OF_COLLATERAL");
     expect(result.reserveCollateral).toBeUndefined();
+  });
+
+  it("calls reserve() exactly once per probe (detection threads address into enrichment)", async () => {
+    // The reserve address is part of the strategy proxy's identity and
+    // doesn't change between blocks, so we read it once during detection
+    // and reuse it for the enrichment fetch. A regression that re-reads
+    // would silently double the RPC bill on every blocked Reserve probe.
+    let reserveCalls = 0;
+    const data = encodeRevert("RLS_RESERVE_OUT_OF_COLLATERAL");
+    const err = makeRevertError("execution reverted", data);
+    const client = {
+      call: () => Promise.reject(err),
+      readContract: ({
+        address,
+        functionName,
+      }: {
+        address: string;
+        functionName: string;
+      }) => {
+        if (functionName === "getCDPConfig")
+          return Promise.reject(functionNotFoundError());
+        if (functionName === "reserve") {
+          reserveCalls++;
+          return Promise.resolve(RESERVE_ADDR);
+        }
+        if (functionName === "getPools")
+          return Promise.reject(functionNotFoundError());
+        if (functionName === "determineAction") {
+          return Promise.resolve([
+            { isToken0Debt: true },
+            { amountOwedToPool: 100n },
+          ]);
+        }
+        if (functionName === "token0") return Promise.resolve(TOKEN_USDM);
+        if (functionName === "token1") return Promise.resolve(TOKEN_AXLUSDC);
+        if (functionName === "balanceOf") {
+          if (address.toLowerCase() === TOKEN_AXLUSDC.toLowerCase())
+            return Promise.resolve(0n);
+          return Promise.resolve(0n);
+        }
+        if (functionName === "decimals") return Promise.resolve(6);
+        return Promise.reject(
+          new Error(`unexpected functionName: ${functionName}`),
+        );
+      },
+    } as unknown as PublicClient;
+
+    const result = await probeRebalance(
+      client,
+      POOL_USDM_AXLUSDC,
+      STRATEGY,
+      CELO_CHAIN_ID,
+    );
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") return;
+    // Sanity: enrichment still landed, so this isn't a vacuous pass.
+    expect(result.reserveCollateral?.tokenSymbol).toBe("axlUSDC");
+    expect(reserveCalls).toBe(1);
   });
 });
