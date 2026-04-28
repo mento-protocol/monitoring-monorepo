@@ -1441,19 +1441,17 @@ async function probeFunction(
     });
     return "present";
   } catch (err) {
-    // Distinguish "function not in bytecode" (selector miss / revert with
-    // no data) from a transient RPC/network failure. viem signals the
-    // former via `ContractFunctionZeroDataError`, which surfaces as an
-    // error message containing "returned no data" or "0x". Any other
-    // error is RPC infrastructure and must NOT be interpreted as a
-    // selector miss — that would corrupt breaker classification (e.g.
-    // a transient timeout would persist a MD breaker as MARKET_HOURS).
+    // Distinguish "function not in bytecode" (selector miss) from a
+    // transient RPC failure. viem's `ContractFunctionZeroDataError` is the
+    // unambiguous signal — its `shortMessage` always contains the exact
+    // phrase `returned no data ("0x")`. Matching just `"0x"` (which appears
+    // in addresses, calldata, and many provider error payloads) or
+    // `"execution reverted"` (which fires when the function EXISTS but
+    // throws — e.g. a require() failure on the probe address) would
+    // misclassify legitimate RPC/contract errors as selector misses and
+    // permanently persist the wrong BreakerKind.
     const msg = err instanceof Error ? err.message : String(err ?? "");
-    const isSelectorMiss =
-      msg.includes("returned no data") ||
-      msg.includes("0x") ||
-      msg.includes("execution reverted");
-    return isSelectorMiss ? "missing" : "rpc_error";
+    return msg.includes("returned no data") ? "missing" : "rpc_error";
   }
 }
 
