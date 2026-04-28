@@ -503,6 +503,14 @@ resource "grafana_rule_group" "fpmms_deviation" {
       })
     }
 
+    # C and D query the per-token reserve-share gauges — split into two
+    # flat metrics (no `token_index` label) so the annotation per-instance
+    # match against query A's labels (`pool_id, chain_id, pair`) actually
+    # binds. A previous version queried `mento_pool_reserve_share{token_index}`,
+    # whose extra label caused a fingerprint mismatch and silently dropped
+    # `$values.C` / `$values.D` — the `current_reserves` annotation never
+    # rendered. PR #234 review (Codex). Regression-tested in
+    # metrics-bridge/test/metrics.test.ts ("annotation-binding regression").
     data {
       ref_id         = "C"
       datasource_uid = var.prometheus_datasource_uid
@@ -512,7 +520,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "C"
-        expr    = "mento_pool_reserve_share{token_index=\"0\"}"
+        expr    = "mento_pool_reserve_share_token0"
         instant = true
       })
     }
@@ -526,7 +534,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "D"
-        expr    = "mento_pool_reserve_share{token_index=\"1\"}"
+        expr    = "mento_pool_reserve_share_token1"
         instant = true
       })
     }
@@ -627,6 +635,10 @@ resource "grafana_rule_group" "fpmms_deviation" {
       })
     }
 
+    # See the magnitude-gated rule for the rationale on the flat
+    # token0 / token1 split — the same per-instance label match applies
+    # here, and a `token_index` label on these queries would silently
+    # drop the `current_reserves` annotation.
     data {
       ref_id         = "C"
       datasource_uid = var.prometheus_datasource_uid
@@ -636,7 +648,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "C"
-        expr    = "mento_pool_reserve_share{token_index=\"0\"}"
+        expr    = "mento_pool_reserve_share_token0"
         instant = true
       })
     }
@@ -650,7 +662,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "D"
-        expr    = "mento_pool_reserve_share{token_index=\"1\"}"
+        expr    = "mento_pool_reserve_share_token1"
         instant = true
       })
     }

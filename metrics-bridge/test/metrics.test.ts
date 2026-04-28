@@ -169,16 +169,18 @@ describe("updateMetrics", () => {
   it("computes reserve share for balanced 50/50 pool", async () => {
     updateMetrics([makePool()]);
     expect(
-      await getGaugeValue(register, "mento_pool_reserve_share", {
-        ...poolLabels,
-        token_index: "0",
-      }),
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token0",
+        poolLabels,
+      ),
     ).toBeCloseTo(0.5);
     expect(
-      await getGaugeValue(register, "mento_pool_reserve_share", {
-        ...poolLabels,
-        token_index: "1",
-      }),
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token1",
+        poolLabels,
+      ),
     ).toBeCloseTo(0.5);
   });
 
@@ -197,16 +199,18 @@ describe("updateMetrics", () => {
       }),
     ]);
     expect(
-      await getGaugeValue(register, "mento_pool_reserve_share", {
-        ...poolLabels,
-        token_index: "0",
-      }),
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token0",
+        poolLabels,
+      ),
     ).toBeCloseTo(0.17, 4);
     expect(
-      await getGaugeValue(register, "mento_pool_reserve_share", {
-        ...poolLabels,
-        token_index: "1",
-      }),
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token1",
+        poolLabels,
+      ),
     ).toBeCloseTo(0.83, 4);
   });
 
@@ -220,16 +224,18 @@ describe("updateMetrics", () => {
       }),
     ]);
     expect(
-      await getGaugeValue(register, "mento_pool_reserve_share", {
-        ...poolLabels,
-        token_index: "0",
-      }),
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token0",
+        poolLabels,
+      ),
     ).toBe(1);
     expect(
-      await getGaugeValue(register, "mento_pool_reserve_share", {
-        ...poolLabels,
-        token_index: "1",
-      }),
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token1",
+        poolLabels,
+      ),
     ).toBe(0);
   });
 
@@ -241,17 +247,70 @@ describe("updateMetrics", () => {
       }),
     ]);
     expect(
-      await getGaugeValue(register, "mento_pool_reserve_share", {
-        ...poolLabels,
-        token_index: "0",
-      }),
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token0",
+        poolLabels,
+      ),
     ).toBeUndefined();
     expect(
-      await getGaugeValue(register, "mento_pool_reserve_share", {
-        ...poolLabels,
-        token_index: "1",
-      }),
+      await getGaugeValue(
+        register,
+        "mento_pool_reserve_share_token1",
+        poolLabels,
+      ),
     ).toBeUndefined();
+  });
+
+  // PR #234 review (Codex / Cursor): the reserve-share annotation queries
+  // (data blocks C and D on `Deviation Breach Critical`) are matched per-
+  // instance against the firing alert's label fingerprint. If the gauge
+  // labels diverge from `mento_pool_deviation_ratio`'s, Grafana silently
+  // returns nil for `$values.C` / `$values.D` and the `current_reserves`
+  // annotation never renders. This regression test locks the invariant:
+  // `mento_pool_reserve_share_token0`, `mento_pool_reserve_share_token1`,
+  // and `mento_pool_deviation_ratio` MUST expose the same label set for a
+  // given pool. Note: a pure JS test cannot render Grafana templates
+  // directly (Go text/template + sprig + Grafana helpers, no JS runner),
+  // so the invariant we enforce is the upstream label-shape match — if
+  // the labels match, the per-instance binding works; if they diverge,
+  // this test catches it before the annotation silently breaks.
+  it("annotation-binding regression: reserve-share gauges expose the same label set as deviation-ratio", async () => {
+    updateMetrics([makePool()]);
+    const json = await register.getMetricsAsJSON();
+    type MetricEntry = {
+      name: string;
+      values?: Array<{ labels: Record<string, string> }>;
+    };
+    const labelKeysFor = (name: string): string[] | undefined => {
+      const m = json.find((x) => (x as MetricEntry).name === name) as
+        | MetricEntry
+        | undefined;
+      const sample = m?.values?.[0]?.labels;
+      return sample ? Object.keys(sample).sort() : undefined;
+    };
+    const devKeys = labelKeysFor("mento_pool_deviation_ratio");
+    const r0Keys = labelKeysFor("mento_pool_reserve_share_token0");
+    const r1Keys = labelKeysFor("mento_pool_reserve_share_token1");
+    expect(devKeys).toBeDefined();
+    expect(r0Keys).toEqual(devKeys);
+    expect(r1Keys).toEqual(devKeys);
+    // Defensive: the explicit label set we expect today (poolLabels). If
+    // anyone widens the firing series later, the test above still holds —
+    // but this anchors the intent so a future PR that ALSO widens the
+    // reserve-share gauges (re-introducing the bug) would still drift the
+    // annotation away from the new firing key set and trip a CI failure
+    // worth investigating.
+    expect(devKeys).toEqual(
+      [
+        "block_explorer_url",
+        "chain_id",
+        "chain_name",
+        "pair",
+        "pool_address_short",
+        "pool_id",
+      ].sort(),
+    );
   });
 
   it("sets health_status from string enum", async () => {

@@ -104,10 +104,24 @@ export const gauges = {
     labelNames: pressureLabels,
     registers: [register],
   }),
-  reserveShare: new Gauge({
-    name: "mento_pool_reserve_share",
-    help: "Per-token share of pool reserves in face-value (decimal-adjusted, no oracle conversion). reserves_i_normalized / sum_normalized ∈ [0, 1]. Skipped when both reserves are zero (share undefined). Used by deviation-breach Slack alerts to render the imbalance side-by-side with the deviation magnitude.",
-    labelNames: pressureLabels,
+  // Flat per-token reserve-share gauges. Split from a single
+  // `mento_pool_reserve_share{token_index}` (PR #234 review) because
+  // Grafana per-instance label match (`$values.C` / `$values.D` against
+  // a firing alert keyed on `pool_id, chain_id, pair`) silently fails
+  // when the annotation query carries an extra `token_index` dimension.
+  // The label set MUST match the deviation-ratio gauge's exactly so the
+  // `current_reserves` annotation actually renders. See the
+  // annotation-binding regression test in metrics.test.ts.
+  reserveShareToken0: new Gauge({
+    name: "mento_pool_reserve_share_token0",
+    help: "Share of normalized reserves held in token0 (decimal-adjusted, no oracle conversion). r0_normalized / (r0_normalized + r1_normalized) ∈ [0, 1]. Skipped when both reserves are zero (share undefined); emits 1.0 / 0.0 for one-sided pools to preserve the diagnostic '100% USDT / 0% USDm' signal. Used by deviation-breach Slack alerts to render imbalance alongside the magnitude.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
+  reserveShareToken1: new Gauge({
+    name: "mento_pool_reserve_share_token1",
+    help: "Share of normalized reserves held in token1 (decimal-adjusted, no oracle conversion). r1_normalized / (r0_normalized + r1_normalized) ∈ [0, 1]. Skipped when both reserves are zero; emits 1.0 / 0.0 for one-sided pools (mirror of reserve_share_token0). See reserve_share_token0 for the rationale on splitting from a single token_index gauge.",
+    labelNames: poolLabels,
     registers: [register],
   }),
   lastRebalancedAt: new Gauge({
@@ -242,12 +256,18 @@ export function updateMetrics(pools: PoolRow[]): void {
     // and we don't want a misleading 0/0 series. One-sided dead pool
     // (single reserve zero) → emit 0.0/1.0 so the alert renders "100%
     // USDT / 0% USDm", which IS the diagnostic signal.
+    //
+    // Two flat gauges (token0 / token1) instead of a single gauge with a
+    // `token_index` label so the annotation queries on the deviation-
+    // breach critical alert match the firing alert's label set exactly.
+    // See the gauge declarations and the annotation-binding regression
+    // test for the full rationale.
     const r0 = Number(pool.reserves0) / 10 ** pool.token0Decimals;
     const r1 = Number(pool.reserves1) / 10 ** pool.token1Decimals;
     const total = r0 + r1;
     if (Number.isFinite(total) && total > 0) {
-      gauges.reserveShare.set({ ...labels, token_index: "0" }, r0 / total);
-      gauges.reserveShare.set({ ...labels, token_index: "1" }, r1 / total);
+      gauges.reserveShareToken0.set(labels, r0 / total);
+      gauges.reserveShareToken1.set(labels, r1 / total);
     }
   }
 }
