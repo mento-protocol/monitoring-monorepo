@@ -18,7 +18,7 @@ import { isValidAddress } from "@/lib/validators";
 
 // Arkham only supports Celo, not Monad — tag every consumer with this so the
 // chain-id assumption is greppable.
-export const ARKHAM_SUPPORTED_CHAIN_IDS = new Set<number>([42220]);
+const ARKHAM_SUPPORTED_CHAIN_IDS = new Set<number>([42220]);
 
 const PAGE_SIZE = 1000;
 const HARD_PAGE_CAP = 50; // 50_000 rows per entity — sentinel against runaway loops
@@ -98,7 +98,7 @@ async function fetchDistinctAddresses(
   return Array.from(all);
 }
 
-export type DiscoveryResult = {
+type DiscoveryResult = {
   /** All discovered addresses (lowercased, deduped). */
   addresses: string[];
   /** Per-entity counts for observability. */

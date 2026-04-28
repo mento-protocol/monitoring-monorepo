@@ -22,7 +22,7 @@ const REQ_SPACING_MS = 60;
 // as advisory and don't persist them as labels — see Arkham docs §8.4.
 const HIGH_CONFIDENCE = 0.85;
 
-export type ArkhamEntity = {
+type ArkhamEntity = {
   id: string;
   name: string;
   note?: string;
@@ -34,13 +34,13 @@ export type ArkhamEntity = {
   linkedin?: string | null;
 };
 
-export type ArkhamLabel = {
+type ArkhamLabel = {
   name: string;
   address: string;
   chainType: string;
 };
 
-export type ArkhamTag = {
+type ArkhamTag = {
   id: string;
   name: string;
   slug: string;
@@ -48,7 +48,7 @@ export type ArkhamTag = {
   description?: string;
 };
 
-export type ArkhamEntityPrediction = {
+type ArkhamEntityPrediction = {
   entityId: string;
   confidence: number;
   reason: string;
@@ -212,7 +212,7 @@ export type EnrichmentResult = {
   error?: string;
 };
 
-export type EnrichBatchOptions = {
+type EnrichBatchOptions = {
   apiKey: string;
   chain: string;
   /** Optional pacer override for tests. Default: 60ms between calls. */
