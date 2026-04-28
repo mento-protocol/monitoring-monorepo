@@ -81,10 +81,14 @@ for (const e of ALL_ENTRIES) {
 }
 
 const TOKEN_SYMBOL_INDEX: Map<string, string> = new Map();
+const TOKEN_DECIMALS_INDEX: Map<string, number> = new Map();
 for (const e of ALL_ENTRIES) {
   if (e.type !== "token") continue;
   if (isInternalTokenName(e.rawName)) continue;
   TOKEN_SYMBOL_INDEX.set(`${e.chainId}:${e.address}`, e.canonicalName);
+  if (typeof e.decimals === "number") {
+    TOKEN_DECIMALS_INDEX.set(`${e.chainId}:${e.address}`, e.decimals);
+  }
 }
 
 export function contractEntries(chainId?: number): ContractEntry[] {
@@ -98,6 +102,27 @@ export function tokenSymbol(
 ): string | null {
   if (!address) return null;
   return TOKEN_SYMBOL_INDEX.get(`${chainId}:${address.toLowerCase()}`) ?? null;
+}
+
+/**
+ * Canonical ERC20 decimals lookup. Sourced from `@mento-protocol/contracts`,
+ * same data as the address book — for the ~10 stablecoin / FX-token contracts
+ * we ship pools against, this avoids a per-probe `decimals()` RPC. Returns
+ * `null` only when the contract address isn't in the deployment manifest;
+ * callers should fall back to an on-chain read in that case.
+ *
+ * Mirrors `tokenSymbol` semantics — same key shape (`chainId:address.toLowerCase()`),
+ * same gate (`type === "token"`, `StableToken*` excluded). Decimals are
+ * immutable per contract, so cache invalidation is moot.
+ */
+export function tokenDecimals(
+  chainId: number,
+  address: string | null,
+): number | null {
+  if (!address) return null;
+  return (
+    TOKEN_DECIMALS_INDEX.get(`${chainId}:${address.toLowerCase()}`) ?? null
+  );
 }
 
 const USDM_SYMBOL = "USDm";

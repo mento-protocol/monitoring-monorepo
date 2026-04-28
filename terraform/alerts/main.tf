@@ -87,16 +87,101 @@ locals {
   #
   # Strategy:
   #   - `current_deviation` reads `$values.Dev.Value` from a query that
-  #     pre-computes `mento_pool_deviation_ratio - 1` in PromQL. Then
-  #     `humanizePercentage` (e.g. `0.082` → "8.2%") gives the rendered
-  #     line without any sprig math.
+  #     pre-computes `(mento_pool_deviation_ratio - 1) * 100` in PromQL.
+  #     `printf "%.0f%%"` renders the integer percent (e.g. `12.19` → "12%").
+  #     We avoid `humanizePercentage` here because its `%.4g` format flips
+  #     to scientific notation above 1e4 — a 122x breach (deviation ratio
+  #     123.19) would render "1.219e+04% above threshold" instead of
+  #     "12190% above threshold". The smallest meaningful breach magnitude
+  #     gated by this alert is 5%, so `%.0f` is plenty of resolution.
   #   - `current_reserves` reads `$values.R0.Value` / `$values.R1.Value`
   #     (already in [0, 1]) plus `.Labels.token_symbol` from each series
   #     to render "axlUSDC / USDm". Map access is a Go template builtin.
   #   - `humanizePercentage` on values like `0.5` renders "50%". For
   #     values < 0.005 (rounding to "0%") this still passes the diagnostic
   #     "100% USDT / 0% USDm" intent — small-share legs are functionally
-  #     drained.
-  deviation_critical_current_deviation_annotation = "{{ if $values.Dev }}{{ humanizePercentage $values.Dev.Value }} above threshold{{ end }}"
+  #     drained. (Reserves are by-construction in [0, 1] so the scientific-
+  #     notation path that bit `current_deviation` doesn't apply here.)
+  #   - `rebalance_reason` reads `$values.B.Labels.{reason_message,reason_code}`
+  #     for the bounded Solidity-error explanation, then OPTIONALLY appends
+  #     `". Current balance: X token / Needed for rebalancing: Y token"`
+  #     when the reserve-collateral enrichment is present (RLS reverts only,
+  #     emitted by the metrics-bridge probe). `printf "%.2f"` keeps the
+  #     output deterministic across magnitudes; `Bal.Labels.token_symbol`
+  #     names the collateral. When the reserve-enrichment gauges are absent
+  #     (every other reason code, transport errors, non-reserve strategies)
+  #     the inner guard collapses and the line keeps the historical shape:
+  #     "<reason_message> — [<reason_code>]".
+  deviation_critical_current_deviation_annotation = "{{ if $values.Dev }}{{ printf \"%.0f%%\" $values.Dev.Value }} above threshold{{ end }}"
   deviation_critical_current_reserves_annotation  = "{{ if and $values.R0 $values.R1 }}{{ humanizePercentage $values.R0.Value }} {{ $values.R0.Labels.token_symbol }} / {{ humanizePercentage $values.R1.Value }} {{ $values.R1.Labels.token_symbol }}{{ end }}"
+  # Three-level nested guard — single-string form was 600+ chars and hard
+  # to audit visually. HEREDOC preserves the byte-identical rendered output
+  # via `{{-`/`-}}` whitespace trim markers (they strip ALL surrounding
+  # whitespace including the newline), so the output collapses to one line
+  # at render time exactly as before. The leading `{{- end }}` line of the
+  # heredoc is trimmed away by the template engine, leaving no trailing
+  # newline.
+  #
+  # Branches:
+  #   - outer `{{ if $values.B }}` — guards on the rebalance-blocked gauge
+  #     producing a series at all (probe didn't run / RPC down → no
+  #     annotation line).
+  #   - middle `{{ if and $rm $rc }}` — both labels are 1:1 with the gauge
+  #     by construction; the nil-and-emptystring guard is defensive against
+  #     a misconfigured probe writing only one half.
+  #   - inner `{{ if and $values.Bal $values.Need }}` — Reserve enrichment
+  #     present (RLS_RESERVE_OUT_OF_COLLATERAL only) → render symbol + balance.
+  #     Else branch falls through to "[reason_code]" tag for non-reserve
+  #     reasons, preserving the historical shape.
+  deviation_critical_rebalance_reason_annotation = <<-EOT
+    {{- if $values.B -}}
+      {{- $rm := index $values.B.Labels "reason_message" -}}
+      {{- $rc := index $values.B.Labels "reason_code" -}}
+      {{- if and $rm $rc -}}
+        {{- $rm -}}
+        {{- if and $values.Bal $values.Need -}}
+          . Current balance: {{ printf "%.2f" $values.Bal.Value }} {{ $values.Bal.Labels.token_symbol }} / Needed for rebalancing: {{ printf "%.2f" $values.Need.Value }} {{ $values.Need.Labels.token_symbol -}}
+        {{- else -}}
+          {{ " — [" }}{{- $rc -}}{{ "]" }}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  EOT
+
+  # ── Deviation Breach Critical annotation-only data sources ───────────────
+  # Both critical rules (magnitude-gated + anchored) wire the same six
+  # instant queries into `$values.{Dev,R0,R1,B,Bal,Need}` so the annotation
+  # locals above can render. Authored once here and consumed by `dynamic`
+  # blocks in `rules-fpmms.tf` so a query-shape change (new annotation,
+  # different time range) lands in one place. Keeping the list ordered:
+  # condition gauges first (Dev/R0/R1, used by current_deviation +
+  # current_reserves), then enrichment gauges (B/Bal/Need, used by
+  # rebalance_reason). The threshold node is rule-specific (warning has a
+  # different bound than critical), so it stays inline in each rule.
+  deviation_critical_annotation_queries = [
+    {
+      ref_id = "Dev"
+      expr   = "(mento_pool_deviation_ratio - 1) * 100"
+    },
+    {
+      ref_id = "R0"
+      expr   = "mento_pool_reserve_share_token0"
+    },
+    {
+      ref_id = "R1"
+      expr   = "mento_pool_reserve_share_token1"
+    },
+    {
+      ref_id = "B"
+      expr   = "mento_pool_rebalance_blocked > 0"
+    },
+    {
+      ref_id = "Bal"
+      expr   = "mento_pool_rebalance_collateral_balance"
+    },
+    {
+      ref_id = "Need"
+      expr   = "mento_pool_rebalance_collateral_needed"
+    },
+  ]
 }

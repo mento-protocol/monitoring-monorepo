@@ -557,4 +557,209 @@ describe("runRebalanceProbes — gauge writes", () => {
     );
     expect(value).toBe(1);
   });
+
+  it("preserves the rebalanceCollateral{Balance,Needed} gauges across the regular Hasura poll reset", async () => {
+    // Regression guard: same as rebalanceBlocked above, but for the two
+    // reserve-collateral enrichment gauges. They share the "preserve across
+    // regular Hasura polls, reset only on probe cycles" lifecycle. A
+    // regression in `POLL_PRESERVED_GAUGES` would silently degrade the
+    // Slack annotation (the `Current balance: ... / Needed for rebalancing:
+    // ...` line would flicker off most of the time, since probes run every
+    // Nth poll).
+    const pool = makePool(breachOverrides);
+    mockProbe.mockResolvedValueOnce({
+      kind: "blocked",
+      reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
+      reasonMessage: "Reserve has insufficient axlUSDC",
+      reserveCollateral: {
+        balance: 0,
+        needed: 12_500,
+        tokenSymbol: "axlUSDC",
+      },
+    });
+    await runRebalanceProbes([pool]);
+
+    // Now run a regular updateMetrics() — simulating a Hasura poll between probes.
+    const { updateMetrics } = await import("../src/metrics.js");
+    updateMetrics([pool]);
+
+    const balance = await getGaugeValue(
+      register,
+      "mento_pool_rebalance_collateral_balance",
+      {
+        pool_id: pool.id,
+        chain_id: "42220",
+        chain_name: "celo",
+        pair: "GBPm/USDm",
+        pool_address_short: "0x8c00…cb56",
+        block_explorer_url:
+          "https://celoscan.io/address/0x8c0014afe032e4574481d8934504100bf23fcb56",
+        token_symbol: "axlUSDC",
+      },
+    );
+    const needed = await getGaugeValue(
+      register,
+      "mento_pool_rebalance_collateral_needed",
+      {
+        pool_id: pool.id,
+        chain_id: "42220",
+        chain_name: "celo",
+        pair: "GBPm/USDm",
+        pool_address_short: "0x8c00…cb56",
+        block_explorer_url:
+          "https://celoscan.io/address/0x8c0014afe032e4574481d8934504100bf23fcb56",
+        token_symbol: "axlUSDC",
+      },
+    );
+    expect(balance).toBe(0);
+    expect(needed).toBe(12_500);
+  });
+});
+
+describe("runRebalanceProbes — reserve-collateral enrichment gauges", () => {
+  beforeEach(() => {
+    register.resetMetrics();
+    vi.clearAllMocks();
+    mockGetRpcClient.mockReturnValue({
+      call: vi.fn(),
+    } as unknown as ReturnType<typeof getRpcClient>);
+  });
+
+  const breachOverrides = {
+    deviationBreachStartedAt: "1713200000",
+    lastDeviationRatio: "1.50",
+  };
+
+  it("emits collateral_balance + collateral_needed with token_symbol on RLS_RESERVE_OUT_OF_COLLATERAL", async () => {
+    // The Slack annotation reads `$values.Bal` / `$values.Need` plus
+    // `$values.Bal.Labels.token_symbol`. Both gauges MUST land with the
+    // pool fingerprint AND a populated token_symbol so the annotation
+    // template renders.
+    const pool = makePool(breachOverrides);
+    mockProbe.mockResolvedValueOnce({
+      kind: "blocked",
+      reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
+      reasonMessage: "Reserve has insufficient axlUSDC",
+      reserveCollateral: {
+        balance: 0,
+        needed: 12_500,
+        tokenSymbol: "axlUSDC",
+      },
+    });
+
+    await runRebalanceProbes([pool]);
+
+    const balance = await getGaugeValue(
+      register,
+      "mento_pool_rebalance_collateral_balance",
+      {
+        pool_id: pool.id,
+        chain_id: "42220",
+        chain_name: "celo",
+        pair: "GBPm/USDm",
+        pool_address_short: "0x8c00…cb56",
+        block_explorer_url:
+          "https://celoscan.io/address/0x8c0014afe032e4574481d8934504100bf23fcb56",
+        token_symbol: "axlUSDC",
+      },
+    );
+    expect(balance).toBe(0);
+
+    const needed = await getGaugeValue(
+      register,
+      "mento_pool_rebalance_collateral_needed",
+      {
+        pool_id: pool.id,
+        chain_id: "42220",
+        chain_name: "celo",
+        pair: "GBPm/USDm",
+        pool_address_short: "0x8c00…cb56",
+        block_explorer_url:
+          "https://celoscan.io/address/0x8c0014afe032e4574481d8934504100bf23fcb56",
+        token_symbol: "axlUSDC",
+      },
+    );
+    expect(needed).toBe(12_500);
+  });
+
+  it("does NOT emit enrichment gauges for non-reserve strategy reasons (CDP)", async () => {
+    // Probe attaches `reserveCollateral` only for RLS_RESERVE_OUT_OF_COLLATERAL
+    // — CDP / OLS / unknown reasons must leave both gauges absent so the
+    // Slack annotation falls back to the generic reason_message line.
+    const pool = makePool(breachOverrides);
+    mockProbe.mockResolvedValueOnce({
+      kind: "blocked",
+      reasonCode: "CDPLS_STABILITY_POOL_BALANCE_TOO_LOW",
+      reasonMessage:
+        "Stability pool has insufficient liquidity to fully rebalance",
+    });
+
+    await runRebalanceProbes([pool]);
+
+    const metrics = await register.getMetricsAsJSON();
+    const balanceMetric = metrics.find(
+      (m) => m.name === "mento_pool_rebalance_collateral_balance",
+    );
+    const neededMetric = metrics.find(
+      (m) => m.name === "mento_pool_rebalance_collateral_needed",
+    );
+    if (balanceMetric && "values" in balanceMetric) {
+      expect((balanceMetric as { values: unknown[] }).values).toEqual([]);
+    }
+    if (neededMetric && "values" in neededMetric) {
+      expect((neededMetric as { values: unknown[] }).values).toEqual([]);
+    }
+  });
+
+  it("does NOT emit enrichment gauges on OLS_OUT_OF_COLLATERAL (different strategy type)", async () => {
+    const pool = makePool(breachOverrides);
+    mockProbe.mockResolvedValueOnce({
+      kind: "blocked",
+      reasonCode: "OLS_OUT_OF_COLLATERAL",
+      reasonMessage:
+        "Strategy has no collateral liquidity available to rebalance",
+    });
+
+    await runRebalanceProbes([pool]);
+
+    const metrics = await register.getMetricsAsJSON();
+    const balanceMetric = metrics.find(
+      (m) => m.name === "mento_pool_rebalance_collateral_balance",
+    );
+    if (balanceMetric && "values" in balanceMetric) {
+      expect((balanceMetric as { values: unknown[] }).values).toEqual([]);
+    }
+  });
+
+  it("clears stale enrichment labels each cycle (recovered pools drop out immediately)", async () => {
+    const pool = makePool(breachOverrides);
+    mockProbe.mockResolvedValueOnce({
+      kind: "blocked",
+      reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
+      reasonMessage: "Reserve has insufficient axlUSDC",
+      reserveCollateral: {
+        balance: 0,
+        needed: 12_500,
+        tokenSymbol: "axlUSDC",
+      },
+    });
+
+    await runRebalanceProbes([pool]);
+    let metrics = await register.getMetricsAsJSON();
+    let balance = metrics.find(
+      (m) => m.name === "mento_pool_rebalance_collateral_balance",
+    );
+    expect((balance as { values: unknown[] }).values).not.toEqual([]);
+
+    // Pool recovered (`ok`); both enrichment gauges MUST drop.
+    mockProbe.mockResolvedValueOnce({ kind: "ok" });
+    await runRebalanceProbes([pool]);
+    metrics = await register.getMetricsAsJSON();
+    balance = metrics.find(
+      (m) => m.name === "mento_pool_rebalance_collateral_balance",
+    );
+    if (balance && "values" in balance) {
+      expect((balance as { values: unknown[] }).values).toEqual([]);
+    }
+  });
 });
