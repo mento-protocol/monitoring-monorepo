@@ -24,6 +24,9 @@ import {
   scrubUrls,
   ERROR_MESSAGES,
   _clearDecimalsCache,
+  _decimalsCacheHas,
+  _decimalsCacheSize,
+  _resolveDecimalsForTest,
 } from "../src/rebalance-check.js";
 
 const POOL: `0x${string}` = "0x0000000000000000000000000000000000001234";
@@ -914,5 +917,78 @@ describe("probeRebalance — Reserve enrichment for RLS_RESERVE_OUT_OF_COLLATERA
     await probeRebalance(buildClient(), POOL, STRATEGY, CELO_CHAIN_ID);
     await probeRebalance(buildClient(), POOL, STRATEGY, CELO_CHAIN_ID);
     expect(decimalsRpcCalls).toBe(1);
+  });
+
+  it("caps decimalsCache at 256 entries with FIFO eviction (PR #214 pattern)", async () => {
+    // Without a soft cap, an attacker (or buggy indexer) emitting thousands
+    // of distinct fake token addresses on token0()/token1() reads would
+    // grow the module-scope Map without bound for the bridge process
+    // lifetime. Mirrors the eviction pattern locked in by PR #214 for
+    // `strategyTypeCache` and `sentryLastCapturedAt`.
+    _clearDecimalsCache();
+    // Mock client whose decimals() always succeeds with a deterministic
+    // value derived from the address so we can sanity-check return values.
+    const client = {
+      readContract: ({
+        address,
+        functionName,
+      }: {
+        address: string;
+        functionName: string;
+      }) => {
+        if (functionName === "decimals") {
+          // Return last byte mod 19 — uniquely shaped per address but
+          // bounded to a plausible decimals range.
+          const tail = parseInt(address.slice(-2), 16);
+          return Promise.resolve(tail % 19);
+        }
+        return Promise.reject(
+          new Error(`unexpected functionName: ${functionName}`),
+        );
+      },
+    } as unknown as PublicClient;
+    const NON_CANONICAL_CHAIN = 999_999; // No tokens registered for this chain.
+    // Build 257 distinct unknown-token addresses.
+    const addrs: `0x${string}`[] = Array.from({ length: 257 }, (_, i) => {
+      const hex = i.toString(16).padStart(40, "0");
+      return `0x${hex}` as `0x${string}`;
+    });
+    // Insert all 257 — the 257th MUST evict the oldest (addrs[0]).
+    for (const addr of addrs) {
+      await _resolveDecimalsForTest(client, NON_CANONICAL_CHAIN, addr);
+    }
+    // Soft cap holds: size never exceeds the bound.
+    expect(_decimalsCacheSize()).toBe(256);
+    // Oldest entry is evicted (FIFO).
+    expect(_decimalsCacheHas(NON_CANONICAL_CHAIN, addrs[0])).toBe(false);
+    // Most recent entry survives.
+    expect(_decimalsCacheHas(NON_CANONICAL_CHAIN, addrs[256])).toBe(true);
+    // Second-oldest survives — eviction is exactly one entry per overflow,
+    // not a wholesale flush.
+    expect(_decimalsCacheHas(NON_CANONICAL_CHAIN, addrs[1])).toBe(true);
+
+    // Canonical-token resolution still works AND remains zero-RPC even
+    // after the cache has churned through the full bound. axlUSDC is in
+    // `@mento-protocol/contracts` with `decimals: 6`, so the manifest
+    // hit short-circuits before the cache is ever consulted.
+    let canonicalRpcCalls = 0;
+    const canonicalClient = {
+      readContract: ({ functionName }: { functionName: string }) => {
+        if (functionName === "decimals") {
+          canonicalRpcCalls++;
+          return Promise.resolve(6);
+        }
+        return Promise.reject(
+          new Error(`unexpected functionName: ${functionName}`),
+        );
+      },
+    } as unknown as PublicClient;
+    const decimals = await _resolveDecimalsForTest(
+      canonicalClient,
+      42220, // Celo
+      "0xeb466342c4d449bc9f53a865d5cb90586f405215", // axlUSDC
+    );
+    expect(decimals).toBe(6);
+    expect(canonicalRpcCalls).toBe(0);
   });
 });

@@ -505,9 +505,32 @@ function truncateHex(hex: Hex, max = 18): string {
  */
 const decimalsCache = new Map<string, number>();
 
+// Soft cap so a malformed indexer response (or an attacker poisoning the
+// reserve-pair pool with thousands of distinct fake token addresses) can't
+// grow the Map without bound across the bridge process lifetime. Mirrors
+// the convention established by `strategyTypeCache` /
+// `sentryLastCapturedAt` in `ui-dashboard/src/lib/strategy-detection.ts`.
+// Scale in practice is ~20 unknown-token addresses per chain across all
+// supported chains — 256 leaves ample headroom while keeping the
+// per-process footprint tiny.
+const MAX_DECIMALS_CACHE_ENTRIES = 256;
+
 /** Visible-for-testing: clear the on-chain decimals cache. */
 export function _clearDecimalsCache(): void {
   decimalsCache.clear();
+}
+
+/** Visible-for-testing: inspect the current on-chain decimals cache size. */
+export function _decimalsCacheSize(): number {
+  return decimalsCache.size;
+}
+
+/** Visible-for-testing: check whether `(chainId, address)` is cached. */
+export function _decimalsCacheHas(
+  chainId: number,
+  address: `0x${string}`,
+): boolean {
+  return decimalsCache.has(`${chainId}:${address.toLowerCase()}`);
 }
 
 /**
@@ -533,8 +556,26 @@ async function resolveDecimals(
     functionName: "decimals",
   })) as number;
   const decimalsNum = Number(decimals);
+  // Evict the oldest entry when full. Iteration order on Map is insertion
+  // order, so the first key is effectively the coldest write (FIFO).
+  if (decimalsCache.size >= MAX_DECIMALS_CACHE_ENTRIES) {
+    const oldest = decimalsCache.keys().next().value;
+    if (oldest !== undefined) decimalsCache.delete(oldest);
+  }
   decimalsCache.set(key, decimalsNum);
   return decimalsNum;
+}
+
+/** Visible-for-testing: drive `resolveDecimals` directly without needing
+ *  to wire up a full `probeRebalance` enrichment fixture. Used by the
+ *  decimals-cache eviction test, which inserts hundreds of entries to
+ *  exercise the FIFO bound. */
+export function _resolveDecimalsForTest(
+  client: PublicClient,
+  chainId: number,
+  address: `0x${string}`,
+): Promise<number> {
+  return resolveDecimals(client, chainId, address);
 }
 
 /**
