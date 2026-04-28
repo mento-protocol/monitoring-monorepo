@@ -245,6 +245,12 @@ export function BreakerPanel({ pool }: Props): React.ReactElement | null {
               trading mode {cfg.tradingMode}
               {tripped && " · halted"}
             </span>
+            {/* `title=` is a tooltip for sighted users; mirror its text into
+                an `sr-only` span so screen readers also surface the breaker
+                kind + address. Mirrors the MarketHoursPill pattern. */}
+            <span className="sr-only">
+              {cfg.breaker.kind} breaker at address {cfg.breaker.address}
+            </span>
           </dd>
         </div>
         <div>
