@@ -34,8 +34,92 @@ Touchpoints: `indexer-envio/schema.graphql`, handler in `indexer-envio/src/handl
 
 ## Backlog — Dashboard
 
-- [ ] **Gap-fill for snapshot charts** — forward-fill missing hourly buckets in dashboard layer
+- [ ] **Gap-fill for snapshot charts** — unify per-chart fill logic behind a shared helper so missing buckets render correctly (forward-fill for stocks, zero-fill for flows). Detailed plan below.
 - [ ] **Pool detail config snapshot panel** (spec §4 "Pool") — consolidated view of configured thresholds: `rebalanceThreshold`, oracle expiry / `oracleNumReporters`, trading-limit windows (`limit0/1`, L0/L1/LG timers), rebalancer address. Today these are scattered across status panels or only visible via Etherscan. A single "Config" panel on pool detail makes a pool's configured shape auditable at a glance.
+
+### Plan — Snapshot chart gap-fill
+
+**Goal.** Every snapshot-driven chart in the dashboard renders missing buckets correctly (forward-fill for stocks, zero-fill for flows) via a single shared helper, so sparse-activity pools — especially FX pools that close on weekends — stop showing misleading visuals.
+
+**Why now.** Today four of six snapshot-driven charts have _no_ gap-fill at all and the two that do each rolled their own implementation:
+
+- `ui-dashboard/src/components/snapshot-chart.tsx:24-131` (Daily Swap Volume bars + Cumulative Swaps line) — sorts and maps raw rows; missing days simply disappear, so a Mon-Wed-Fri pool reads as three back-to-back days with the cumulative line auto-bridging (Plotly's default `connectgaps=true` behavior on `lines+markers`).
+- `ui-dashboard/src/components/pool-tvl-over-time-chart.tsx:59-131` — sparse points only; the line auto-bridges across multi-day reserve gaps, masking that the indexer never observed an update.
+- `ui-dashboard/src/components/liquidity-chart.tsx:24-155` — stacked reserve composition; same auto-bridge issue as Pool TVL.
+- `ui-dashboard/src/components/snapshot-chart.tsx` cumulative line — same as above, line bridges gaps.
+- `ui-dashboard/src/components/pool-volume-over-time-chart.tsx:72-95` — _has_ day-bucketed zero-fill, but reimplemented inline.
+- `ui-dashboard/src/components/tvl-over-time-chart.tsx:55-184` — _has_ cursor-based forward-fill inside `buildDailySeries` (cursor walk at 142-148), but reimplemented inline. **Note:** an earlier explore pass tagged the homepage volume chart as having no gap-fill — that's wrong. `ui-dashboard/src/components/volume-over-time-chart.tsx:49-137` already zero-fills via `totalBuckets.get(timestamp) ?? 0` at line 126. The pattern is just inlined and has no shared abstraction.
+
+Two stale knock-on effects: (a) the four non-filled charts publish line series with `connectgaps` defaulting to `true` in Plotly, so visual gaps are _invisible_ to the viewer; (b) the two inlined fillers can't be unit-tested in isolation, so we have zero direct test coverage of the bucket-alignment / cursor-walk logic that the dashboard's headline numbers depend on.
+
+**FX weekend semantics — DECIDED 2026-04-29: option (b) + faint gray weekend band on FX pool charts.**
+
+Filled charts render honest zeros (flow) / forward-fills (stock) regardless of weekend. The Fri 21:00 → Sun 23:00 UTC FX closure shows up as zero-bars (flow) or a flat segment (stock). On FX pool charts only, overlay a faint gray vertical band across each weekend window so viewers see at a glance "this gap is expected, markets are closed" rather than mistaking it for broken data.
+
+- Helper stays dumb — no weekend awareness in `chart-gap-fill.ts`. Just buckets + range.
+- Weekend band is a separate concern: a thin chart wrapper (or shared Plotly `shapes` config) consumed only by FX pool charts. Detect FX via `isFpmm()` / pool pair in `tokens.ts`; compute weekend windows for the visible range via `weekend.ts:tradingSecondsInRange` / `weekendOverlapSeconds`.
+- Non-FX pool charts are unaffected — no detection, no band, no extra props.
+- Stock-field charts (TVL, liquidity composition) get the band too, even though the line forward-fills smoothly across the weekend — the band still communicates "this segment is closed-market state, not active trading."
+- Considered and rejected: option (a) (suppress weekend buckets entirely). Aligns better with the `project_fx_pool_weekends` preference to acknowledge rather than hide weekends, and avoids pushing FX awareness into the gap-fill helper API.
+
+**Shared utility shape — `ui-dashboard/src/lib/chart-gap-fill.ts`.** Two functions, deliberately small surface:
+
+```ts
+type Point = { timestamp: number; value: number };
+type Range = { from: number; to: number; bucketSeconds: number };
+
+// Stock: every emitted bucket carries the most-recent observed value, or
+// `undefined` for buckets before the first observation.
+forwardFillSeries(points: readonly Point[], range: Range): Point[];
+
+// Flow: every emitted bucket carries the observed value, or 0 for missing
+// buckets in `[range.from, range.to)`.
+zeroFillSeries(points: readonly Point[], range: Range): Point[];
+```
+
+Both functions emit one bucket per `bucketSeconds` step, aligned to bucket boundaries (`floor(ts / bucketSeconds) * bucketSeconds`). Both treat `range` as the half-open interval `[from, to)` matching the existing convention in `volume-over-time-chart.tsx`. Pre-bucket-aggregation (multiple input points landing in the same bucket) is the caller's responsibility for flows (sum) and stocks (last-write-wins by timestamp) — keeping that out of the helper avoids baking in a flow/stock-specific reduction.
+
+**Per-chart migration plan.**
+
+| Chart file                               | Current behavior                                        | Target behavior                                                                                                                                      | Fields involved                                                          | Stock or Flow                                                   |
+| ---------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| `snapshot-chart.tsx:24-131`              | None                                                    | `zeroFillSeries` for volume bars, `forwardFillSeries` for cumulative-swaps line                                                                      | `swapVolume0`, `swapVolume1` (flow); `cumulativeSwapCount` (stock)       | mixed — two helpers                                             |
+| `pool-tvl-over-time-chart.tsx:59-131`    | None (sparse points + appended `now`)                   | `forwardFillSeries`; keep the appended `now` synthetic point                                                                                         | `reserves0`, `reserves1` (stock, via `poolTvlUSD`)                       | stock                                                           |
+| `liquidity-chart.tsx:24-155`             | None                                                    | `forwardFillSeries` per token reserve                                                                                                                | `reserves0`, `reserves1` (stock)                                         | stock                                                           |
+| `pool-volume-over-time-chart.tsx:31-131` | Inlined day-bucketed zero-fill (lines 72-95)            | Replace inline `byBucket`/loop with `zeroFillSeries` call                                                                                            | `swapVolume0`, `swapVolume1` (flow, summed via `getSnapshotVolumeInUsd`) | flow                                                            |
+| `tvl-over-time-chart.tsx:55-281`         | Inlined cursor-based forward-fill in `buildDailySeries` | Keep `buildDailySeries` (it does multi-pool aggregation), but rewrite its inner cursor loop in terms of per-pool `forwardFillSeries` then bucket-sum | `reserves0`, `reserves1` per FPMM pool → `poolTvlUSD`                    | stock — must per-pool fill BEFORE bucket-sum (see Tricky cases) |
+| `volume-over-time-chart.tsx:49-273`      | Inlined zero-fill via `?? 0` (line 126)                 | Replace inline aggregation+`?? 0` with `zeroFillSeries` call after per-pool bucket-aggregate                                                         | `swapVolume0`, `swapVolume1` per pool → `getSnapshotVolumeInUsd`         | flow                                                            |
+
+**`PoolSnapshot` / `PoolDailySnapshot` field categorization.** Verified against `indexer-envio/schema.graphql:156-208`:
+
+- **Stock (forward-fill on gaps):** `reserves0`, `reserves1`, `cumulativeSwapCount`, `cumulativeVolume0`, `cumulativeVolume1`. Cumulative fields are stocks even though the underlying swap activity is a flow — they're monotonic and the _current_ value is meaningful at any point in time.
+- **Flow (zero-fill on gaps):** `swapCount`, `swapVolume0`, `swapVolume1`, `rebalanceCount`, `mintCount`, `burnCount`. Each is scoped to its bucket period (per-hour for `PoolSnapshot`, per-day for `PoolDailySnapshot`); a missing bucket means "no activity in that window", which is a _zero_, not "we don't know".
+- **Forward-looking note.** Spec §2 lists fee-derived series (`cumulativeFees`, `protocolFees`, `chainProtocolFeesCum`) that aren't yet in the schema. When they land they'll follow the same rule: cumulative variants are stocks, period-scoped variants are flows.
+
+**Tricky cases.**
+
+1. **Multi-pool aggregation must per-pool fill BEFORE bucket-sum.** Both the homepage TVL and homepage volume charts aggregate across all FPMM pools. If you bucket-sum first and then fill, a bucket where pool A reported but pool B didn't will (a) double-count the gap on TVL (pool B's last reserves are zeroed-out instead of forward-filled, dragging the total) or (b) miss zero-bar buckets when _no_ pool reported (because the bucket simply doesn't exist in the input). The existing `buildDailySeries` cursor walk at `tvl-over-time-chart.tsx:142-148` already does this correctly per-pool. The migration must preserve that ordering: fill each pool's series, then sum-by-bucket.
+2. **Plotly `connectgaps` default.** On `scatter` traces with `mode: "lines"` Plotly defaults to `connectgaps=true`, which silently bridges `null` Y-values. This is why the four no-fill charts look "fine" today — Plotly is hiding the gaps for us. After migration, line traces with stock-fill will keep visual continuity for free; line traces with flow-fill will plant explicit `0` markers and won't bridge. The migration _should not_ set `connectgaps=false` blindly — that would expose bridging gaps that are now explicitly filled, defeating the point.
+3. **Cumulative fields look like flow but are stock.** `cumulativeSwapCount` rises with `swapCount`, but a missing bucket should _not_ be zero — it should hold the last observed value. The Daily Swap Volume chart's cumulative line is the most visible example today; its current dropped-points behavior makes the line jump backward across a sparse week.
+4. **Pool TVL chart appends a synthetic `now` point.** `pool-tvl-over-time-chart.tsx:83-85` appends a `{ timestamp: nowSec, value: currentTvl }` point after the snapshot history. Forward-fill must respect this — the current behavior already implies "the line should reach now", so the migrated path has to either include `now` as the right-hand bucket or append the same synthetic point post-fill. Recommend the latter; the helper should not know about the live-state injection.
+5. **Hourly vs daily bucket choice.** `tvl-over-time-chart.tsx:213` deliberately uses UTC-day buckets even when its `RANGE_DAYS["7d"]` window could fit hourly granularity, because `PoolDailySnapshot` is a _running_ aggregate updated mid-day; forward-filling a midnight-stamped row into hourly sub-buckets falsely shows today's current reserves for all past hours of the same day. The shared helper's `bucketSeconds` parameter has to be set by the caller; don't try to auto-detect.
+6. **Existing comment in `pool-volume-over-time-chart.tsx:67-71` is the load-bearing rationale.** The "explicit $0 bars rather than dropped points, so Plotly doesn't bridge a line across inactive days and the headline total is the honest sum over the window" sentence is the design intent for the whole effort — preserve a near-verbatim version of it as the JSDoc on `zeroFillSeries`.
+7. **FX weekend band overlay (separable scope).** On FX pool charts, every Fri 21:00 → Sun 23:00 UTC window in the visible range gets a faint gray vertical band so viewers read "expected closure" instead of "broken data". Implementation: a small helper `fxWeekendBands(range): PlotlyShape[]` in `ui-dashboard/src/lib/weekend.ts` (or a sibling `weekend-bands.ts`) that emits Plotly `shapes` entries with `type: "rect"`, `xref: "x"`, `yref: "paper"`, `y0: 0`, `y1: 1`, `fillcolor` at low opacity, `line.width: 0`. Charts on FX pools detect via `isFpmm()` + pool pair lookup in `tokens.ts` and spread the bands into their layout `shapes` array. Non-FX pool charts pass `[]`. Homepage aggregate charts (`tvl-over-time-chart.tsx`, `volume-over-time-chart.tsx`) sum across both FX and non-FX pools, so the band would be misleading there — _do not_ apply on aggregates. The band can ship as a follow-up PR after the gap-fill helper lands; the helper has no dependency on it.
+
+**Test plan.**
+
+- **Unit tests on `chart-gap-fill.ts`** (the hard part): gap at start of range, gap at end of range, gap in middle, single-point series, empty series, bucket-boundary alignment (input `ts` exactly at boundary vs mid-bucket), input out of order, input duplicate timestamps, range `from === to`, range with no input observations at all. Plus stock-specific: forward-fill before first observation returns `undefined` (not `0`); flow-specific: zero-fill returns `0` for buckets after the last observation.
+- **Smoke tests on migrated components**: render with empty snapshot list (no crash), render with single snapshot (no crash, sensible display), render with sparse snapshots (correct number of buckets emitted). _Not_ a full migration regression suite — see BACKLOG tech-debt note about sparse component test coverage; chasing parity tests for these specific charts isn't worth the effort vs. unit-testing the helper hard.
+- **Visual spot-check** in browser (chrome-devtools MCP): for each migrated chart, navigate to a pool with known sparse history (FX weekends, low-activity pool), confirm the chart no longer auto-bridges across known gaps.
+
+**Estimated effort: M.** The helper itself is ~50 lines + a thorough unit suite. Six chart components touch — but four are mechanical (delete `null` filtering, wrap in helper call) and two need the careful-but-bounded multi-pool-per-bucket rework. The FX weekend band overlay is an optional follow-up (~30 lines + a small test). Risk is bounded to dashboard rendering; no indexer changes, no schema changes, no alert math. Plan ~2 days of focused work for gap-fill, half-day for the band overlay.
+
+**Touchpoints.**
+
+- New: `ui-dashboard/src/lib/chart-gap-fill.ts` + `ui-dashboard/src/lib/chart-gap-fill.test.ts`
+- New (band overlay, follow-up PR): `fxWeekendBands()` helper in `ui-dashboard/src/lib/weekend.ts` (or sibling file) + unit test
+- Edited: `ui-dashboard/src/components/snapshot-chart.tsx`, `ui-dashboard/src/components/pool-tvl-over-time-chart.tsx`, `ui-dashboard/src/components/liquidity-chart.tsx`, `ui-dashboard/src/components/pool-volume-over-time-chart.tsx`, `ui-dashboard/src/components/tvl-over-time-chart.tsx`, `ui-dashboard/src/components/volume-over-time-chart.tsx`
+- Edited (band overlay only, FX pool charts): `pool-tvl-over-time-chart.tsx`, `liquidity-chart.tsx`, `pool-volume-over-time-chart.tsx`, `snapshot-chart.tsx` — homepage aggregate charts excluded (mixed FX/non-FX pools)
 
 ## Backlog — Infrastructure
 
