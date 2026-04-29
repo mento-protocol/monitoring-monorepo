@@ -11,9 +11,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (authBail) return authBail;
 
   // No Sentry cron monitor here: the team plan covers one cron slot, which
-  // goes to arkham-enrich (the more time-sensitive job). Failures still hit
-  // Sentry via captureException, and missed runs are detectable by listing
-  // the Blob store for a missing date file.
+  // goes to arkham-enrich (the more time-sensitive job). In-body failures
+  // still hit Sentry via captureException. Missed runs are NOT actively
+  // monitored — recovery is by spot-checking the Blob store for a missing
+  // date file.
   try {
     const { global, chains } = await getAllLabels();
     const now = new Date();
