@@ -130,12 +130,14 @@ locals {
   #     by construction; the nil-and-emptystring guard is defensive against
   #     a misconfigured probe writing only one half. Renders the standard
   #     "<reason_message> — [<reason_code>]" tag.
-  #   - inner Aegis dispatch — the firing series's `pair` label decides
-  #     which Aegis reserve-balance series we render. Per-instance label
+  #   - inner Aegis dispatch — the firing series's `chain_name` AND `pair`
+  #     labels decide which Aegis reserve-balance series to render. The
+  #     chain guard prevents a Monad breach with the same pair name (e.g.
+  #     "USDC/USDm") from rendering Celo reserve data. Per-instance label
   #     joining doesn't bind across the `mento_pool_*` ↔ `${TOKEN}_balanceOf`
   #     boundary (Aegis labels are different), so the ResUSDC/ResUSDT/
   #     ResAxlUSDC queries return ALL Reserve balances; this template
-  #     selects the right one by `pair`. New stable pairs need both an
+  #     selects by both chain_name and pair. New stable pairs need both an
   #     Aegis Treb source and a new branch here.
   deviation_critical_rebalance_reason_annotation = <<-EOT
     {{- if $values.B -}}
@@ -144,11 +146,12 @@ locals {
       {{- if and $rm $rc -}}
         {{- $rm }} — [{{ $rc }}]
         {{- $pair := index $labels "pair" -}}
-        {{- if and (eq $pair "USDC/USDm") $values.ResUSDC -}}
+        {{- $chain := index $labels "chain_name" -}}
+        {{- if and (eq $chain "celo") (eq $pair "USDC/USDm") $values.ResUSDC -}}
           {{ " · Reserve balance: " }}{{ printf "%.2f" $values.ResUSDC.Value }} USDC (via Aegis)
-        {{- else if and (eq $pair "USDT/USDm") $values.ResUSDT -}}
+        {{- else if and (eq $chain "celo") (eq $pair "USDT/USDm") $values.ResUSDT -}}
           {{ " · Reserve balance: " }}{{ printf "%.2f" $values.ResUSDT.Value }} USDT (via Aegis)
-        {{- else if and (eq $pair "axlUSDC/USDm") $values.ResAxlUSDC -}}
+        {{- else if and (eq $chain "celo") (eq $pair "axlUSDC/USDm") $values.ResAxlUSDC -}}
           {{ " · Reserve balance: " }}{{ printf "%.2f" $values.ResAxlUSDC.Value }} axlUSDC (via Aegis)
         {{- end -}}
       {{- end -}}
