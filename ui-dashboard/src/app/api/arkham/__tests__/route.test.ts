@@ -195,7 +195,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
       expect.objectContaining({ apiKey: "ak-test" }),
     );
     expect(mockImportLabels).toHaveBeenCalledWith(
-      42220,
+      "global",
       expect.objectContaining({
         "0xnew": expect.objectContaining({
           name: "Coinbase",
@@ -244,7 +244,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     // mergeRefreshEntry: name takes Arkham's update; user notes + isPublic
     // survive; sentinel tag stripped; source upgraded.
     expect(mockImportLabels).toHaveBeenCalledWith(
-      42220,
+      "global",
       expect.objectContaining({
         "0xark": expect.objectContaining({
           name: "Binance Hot Wallet 14",
@@ -289,7 +289,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     expect(res.status).toBe(200);
     expect(mockEnrichBatch).toHaveBeenCalledWith(["0xark"], expect.anything());
     expect(mockImportLabels).toHaveBeenCalledWith(
-      42220,
+      "global",
       expect.objectContaining({
         "0xark": expect.objectContaining({
           name: "Binance Hot Wallet 14",

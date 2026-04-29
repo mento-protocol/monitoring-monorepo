@@ -16,6 +16,12 @@ export type AddressEntry = {
    * input paths (PUT, import) MUST strip this field — see route handlers.
    */
   source?: string;
+  /**
+   * ISO timestamp of first write. Set by `upsertEntry` when no prior entry
+   * exists; preserved across edits and refreshes. Optional because pre-
+   * migration entries didn't carry it — readers fall back to `updatedAt`.
+   */
+  createdAt?: string;
   updatedAt: string;
 };
 
@@ -98,6 +104,10 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
 
   const source =
     typeof entry.source === "string" && entry.source ? entry.source : undefined;
+  const createdAt =
+    typeof entry.createdAt === "string" && entry.createdAt
+      ? entry.createdAt
+      : undefined;
 
   // Already in v2 format — unless the name is blank and we can recover a
   // valid legacy label from mixed/partially-corrupted data.
@@ -109,6 +119,7 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
         notes: typeof entry.notes === "string" ? entry.notes : undefined,
         isPublic: entry.isPublic === true ? true : undefined,
         ...(source ? { source } : {}),
+        ...(createdAt ? { createdAt } : {}),
         updatedAt:
           typeof entry.updatedAt === "string"
             ? entry.updatedAt
@@ -133,6 +144,7 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
       notes: typeof entry.notes === "string" ? entry.notes : undefined,
       isPublic: entry.isPublic === true ? true : undefined,
       ...(source ? { source } : {}),
+      ...(createdAt ? { createdAt } : {}),
       updatedAt:
         typeof entry.updatedAt === "string"
           ? entry.updatedAt
@@ -147,6 +159,7 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
     notes: typeof entry.notes === "string" ? entry.notes : undefined,
     isPublic: entry.isPublic === true ? true : undefined,
     ...(source ? { source } : {}),
+    ...(createdAt ? { createdAt } : {}),
     updatedAt:
       typeof entry.updatedAt === "string"
         ? entry.updatedAt

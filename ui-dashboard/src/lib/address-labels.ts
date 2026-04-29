@@ -136,9 +136,15 @@ export async function upsertEntry(
   entry: Omit<AddressEntry, "updatedAt">,
 ): Promise<void> {
   const redis = getRedis();
+  const now = new Date().toISOString();
   const value: AddressEntry = {
     ...entry,
-    updatedAt: new Date().toISOString(),
+    // Preserve caller-supplied createdAt (read from prior entry); fall back
+    // to `now` for first-time writes. Callers that want history preserved
+    // must read the prior entry and forward its createdAt — the route
+    // helpers in `route.ts` and `arkham/enrich/route.ts` already do this.
+    createdAt: entry.createdAt ?? now,
+    updatedAt: now,
   };
   const lower = address.toLowerCase();
   const targetKey = labelsKey(scope);
@@ -211,11 +217,13 @@ export async function importLabels(
   const targetKey = labelsKey(scope);
 
   const args: string[] = [String(entries.length)];
+  const now = new Date().toISOString();
   for (const [addr, entry] of entries) {
     const normalized: AddressEntry = {
       ...entry,
       isPublic: entry.isPublic === true,
-      updatedAt: entry.updatedAt ?? new Date().toISOString(),
+      createdAt: entry.createdAt ?? now,
+      updatedAt: entry.updatedAt ?? now,
     };
     args.push(addr.toLowerCase(), JSON.stringify(normalized));
   }
