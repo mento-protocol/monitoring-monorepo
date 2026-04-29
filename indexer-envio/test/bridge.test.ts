@@ -29,6 +29,8 @@ import {
 } from "../src/wormhole/chainIds";
 import { findByNttManager } from "../src/wormhole/nttAddresses";
 import nttAddresses from "../config/nttAddresses.json";
+import { readFileSync } from "fs";
+import { resolve } from "path";
 
 const manifestEntries = nttAddresses.entries;
 
@@ -366,4 +368,84 @@ describe("wormhole/nttAddresses — manifest lookup", () => {
       null,
     );
   });
+});
+
+// Cross-layer invariant: the WormholeNttManager + WormholeTransceiver address
+// lists in each multichain YAML must contain every manager/transceiver in the
+// generated manifest for the same chain. Drift (e.g. a contracts bump that
+// regenerates nttAddresses.json without updating the YAML) would silently drop
+// indexer coverage for the new bridged token. This catches that at test time.
+describe("wormhole/nttAddresses — Envio YAML sync", () => {
+  function extractAddresses(
+    yaml: string,
+    chainId: number,
+    contractName: string,
+  ): string[] {
+    // Find `- id: <chainId>` (must be a YAML list item, not a comment) then the
+    // first matching `- name: <contractName>` block under it. Stop at the next
+    // `- id:` to keep the search scoped to one chain.
+    const lines = yaml.split("\n");
+    let inChain = false;
+    let inContract = false;
+    const out: string[] = [];
+    for (const line of lines) {
+      if (/^\s{2}- id:\s*\d+/.test(line)) {
+        const m = line.match(/- id:\s*(\d+)/);
+        inChain = !!m && Number(m[1]) === chainId;
+        inContract = false;
+        continue;
+      }
+      if (!inChain) continue;
+      if (/^\s+- name:\s*\w+/.test(line)) {
+        const m = line.match(/- name:\s*(\w+)/);
+        inContract = !!m && m[1] === contractName;
+        continue;
+      }
+      if (!inContract) continue;
+      const m = line.match(/-\s*(0x[a-fA-F0-9]{40})/);
+      if (m) out.push(m[1].toLowerCase());
+    }
+    return out;
+  }
+
+  const yamlPaths = [
+    resolve(__dirname, "../config.multichain.mainnet.yaml"),
+    resolve(__dirname, "../config.multichain.bridge-only.yaml"),
+  ];
+  const yamls = yamlPaths.map((p) => ({
+    path: p,
+    content: readFileSync(p, "utf8"),
+  }));
+
+  for (const { path, content } of yamls) {
+    const label = path.split("/").pop()!;
+    for (const chainId of [42220, 143]) {
+      const expected = manifestEntries.filter((e) => e.chainId === chainId);
+      if (expected.length === 0) continue;
+
+      it(`${label} chain ${chainId} lists every manifest WormholeNttManager`, () => {
+        const got = new Set(
+          extractAddresses(content, chainId, "WormholeNttManager"),
+        );
+        for (const e of expected) {
+          assert.ok(
+            got.has(e.nttManagerProxy.toLowerCase()),
+            `${label} missing manager ${e.nttManagerProxy} (${e.tokenSymbol}) on chain ${chainId}`,
+          );
+        }
+      });
+
+      it(`${label} chain ${chainId} lists every manifest WormholeTransceiver`, () => {
+        const got = new Set(
+          extractAddresses(content, chainId, "WormholeTransceiver"),
+        );
+        for (const e of expected) {
+          assert.ok(
+            got.has(e.transceiverProxy.toLowerCase()),
+            `${label} missing transceiver ${e.transceiverProxy} (${e.tokenSymbol}) on chain ${chainId}`,
+          );
+        }
+      });
+    }
+  }
 });
