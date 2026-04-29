@@ -192,7 +192,8 @@ export function toAddressEntry(
   for (const perChain of Object.values(data)) {
     const trimmed = perChain.arkhamLabel?.name?.trim();
     if (!label && trimmed) label = trimmed;
-    if (!entity && perChain.arkhamEntity?.name) entity = perChain.arkhamEntity;
+    if (!entity && perChain.arkhamEntity?.name?.trim())
+      entity = perChain.arkhamEntity;
     if (entity?.type) tagSet.add(entity.type);
     for (const t of perChain.tags ?? []) {
       if (t.slug) tagSet.add(t.slug);
@@ -206,8 +207,7 @@ export function toAddressEntry(
   }
 
   // Prefer the curated label, then entity name, then the predicted entity ID.
-  // Use `||` (truthy-aware) so an empty/whitespace string falls through.
-  const name = label || entity?.name || topPrediction?.entityId || "";
+  const name = label || entity?.name?.trim() || topPrediction?.entityId || "";
   if (!name) return null;
 
   // Notes only when the label rests on an ML prediction — flags lower
