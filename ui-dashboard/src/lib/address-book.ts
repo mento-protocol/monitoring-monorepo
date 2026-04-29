@@ -21,6 +21,8 @@ export type AddressBookRow = {
   name: string;
   tags: string[];
   isCustom: boolean;
+  /** Provenance — `"arkham"` for cron-enriched entries, undefined for manual. */
+  source?: string;
   /** "global" for cross-chain customs, chainId for per-chain customs + contracts. */
   scope: Scope;
   /**

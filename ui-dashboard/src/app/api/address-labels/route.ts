@@ -6,6 +6,7 @@ import {
   getAllLabels,
   upsertEntry,
   deleteLabel,
+  isArkhamSourced,
   type Scope,
 } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
@@ -145,11 +146,38 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     });
 
   try {
+    // Preserve server-controlled provenance across edits. A user editing
+    // notes/tags on an Arkham-sourced row must NOT silently demote it to
+    // `custom` — that would drop it out of future refresh cron runs and
+    // lose the entity attribution. The user-supplied body never gets to
+    // SET source (no `source` in the destructure above); it's read here
+    // from the prior entry only.
+    //
+    // Cross-scope lookup: strict either/or means the address lives in
+    // exactly one scope at a time; if the user is also changing scope
+    // (global ↔ chain), the prior row is in the OLD scope, not the new
+    // one. Search both so provenance survives the move. (Codex P2 catch.)
+    const all = await getAllLabels();
+    const addrLower = address.toLowerCase();
+    const prior =
+      all.global[addrLower] ??
+      Object.values(all.chains).find((c) => c[addrLower] !== undefined)?.[
+        addrLower
+      ];
+    // Dual-check: legacy entries (the 27 pre-migration rows) carry the
+    // `arkham` tag but no `source` field, and the user's submitted tags
+    // never include the sentinel (PUT strips it at line 141). Without the
+    // dual-check, editing a legacy row would leave it with neither marker
+    // — and `isArkhamSourced` would stop recognising it.
+    const preservedSource =
+      prior && isArkhamSourced(prior) ? "arkham" : undefined;
+
     await upsertEntry(scope, address, {
       name: trimmedName,
       tags: deduplicatedTags,
       notes: trimmedNotes,
       isPublic: isPublic === true,
+      ...(preservedSource ? { source: preservedSource } : {}),
     });
     return NextResponse.json({ ok: true });
   } catch (err) {

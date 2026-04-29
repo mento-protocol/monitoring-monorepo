@@ -6,11 +6,30 @@ import {
   getAllLabels,
   upgradeEntries,
   sanitizeEntry,
+  ARKHAM_TAG,
   type AddressEntry,
   type AddressLabelsSnapshot,
   type Scope,
 } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
+
+/**
+ * User-controlled imports must never claim Arkham provenance — neither via
+ * the new `source` field nor via the legacy `ARKHAM_TAG` tag sentinel that
+ * `isArkhamSourced` still honours for backward compat. Without stripping
+ * the tag, an authenticated user could import `tags: ["arkham"]` and have
+ * the next refresh cron clobber their entry as a re-enrichment target.
+ *
+ * Re-importing an Arkham-enriched backup snapshot also resets provenance —
+ * only the enrichment cron is allowed to set `source: "arkham"`.
+ */
+function stripArkhamProvenance(entry: AddressEntry): AddressEntry {
+  return {
+    ...entry,
+    source: undefined,
+    tags: entry.tags.filter((t) => t !== ARKHAM_TAG),
+  };
+}
 
 /**
  * Build a `lowercase address → existing entry` lookup across every scope.
@@ -219,13 +238,15 @@ async function handleGnosisSafe(
     const normalizedAddress = address.toLowerCase();
     const prev = crossScope[normalizedAddress];
     if (!byChain.has(chainId)) byChain.set(chainId, {});
-    byChain.get(chainId)![normalizedAddress] = sanitizeEntry({
-      // Preserve existing metadata; only overwrite name and timestamp.
-      ...prev,
-      name,
-      tags: prev?.tags ?? [],
-      updatedAt: new Date().toISOString(),
-    });
+    byChain.get(chainId)![normalizedAddress] = sanitizeEntry(
+      stripArkhamProvenance({
+        // Preserve existing metadata; only overwrite name and timestamp.
+        ...prev,
+        name,
+        tags: prev?.tags ?? [],
+        updatedAt: new Date().toISOString(),
+      }),
+    );
   }
 
   try {
@@ -335,16 +356,18 @@ function mergeWithCrossScope(
   const out: Record<string, AddressEntry> = {};
   for (const [addr, entry] of Object.entries(incoming)) {
     const prev = crossScope[addr.toLowerCase()];
-    out[addr] = prev
-      ? {
-          ...prev,
-          ...entry,
-          // The import's tags are authoritative when the format supports
-          // tags; otherwise (simple + snapshot) incoming `entry.tags`
-          // already reflects the caller's intent (they may be empty).
-          tags: entry.tags,
-        }
-      : entry;
+    out[addr] = stripArkhamProvenance(
+      prev
+        ? {
+            ...prev,
+            ...entry,
+            // The import's tags are authoritative when the format supports
+            // tags; otherwise (simple + snapshot) incoming `entry.tags`
+            // already reflects the caller's intent (they may be empty).
+            tags: entry.tags,
+          }
+        : entry,
+    );
   }
   return out;
 }
@@ -550,13 +573,15 @@ async function handleCsvText(text: string): Promise<NextResponse> {
     const merged: Record<string, AddressEntry> = {};
     for (const [addr, entry] of Object.entries(labels)) {
       const prev = crossScope[addr];
-      merged[addr] = sanitizeEntry({
-        ...prev,
-        ...entry,
-        // When CSV has no tags column, preserve existing tags instead of
-        // overwriting with [] (#1)
-        tags: hasTagsColumn ? entry.tags : (prev?.tags ?? []),
-      });
+      merged[addr] = sanitizeEntry(
+        stripArkhamProvenance({
+          ...prev,
+          ...entry,
+          // When CSV has no tags column, preserve existing tags instead of
+          // overwriting with [] (#1)
+          tags: hasTagsColumn ? entry.tags : (prev?.tags ?? []),
+        }),
+      );
     }
     mergedByScope.set(scope, merged);
   }

@@ -176,7 +176,8 @@ describe("GET /api/arkham/enrich — pipeline", () => {
         address: "0xnew",
         entry: {
           name: "Coinbase",
-          tags: [ARKHAM_TAG, "exchange"],
+          tags: ["exchange"],
+          source: "arkham",
           updatedAt: "2026-04-28T00:00:00Z",
         },
       },
@@ -196,12 +197,17 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     expect(mockImportLabels).toHaveBeenCalledWith(
       42220,
       expect.objectContaining({
-        "0xnew": expect.objectContaining({ name: "Coinbase" }),
+        "0xnew": expect.objectContaining({
+          name: "Coinbase",
+          source: "arkham",
+        }),
       }),
     );
   });
 
-  it("refresh mode re-enriches arkham-tagged entries", async () => {
+  it("refresh mode re-enriches legacy ARKHAM_TAG entries", async () => {
+    // Backward-compat: pre-source-field entries carry provenance via the
+    // sentinel tag. Filter must still pick them up; merge upgrades them.
     mockDiscover.mockResolvedValue({
       addresses: ["0xark"],
       perEntity: [],
@@ -222,7 +228,8 @@ describe("GET /api/arkham/enrich — pipeline", () => {
         address: "0xark",
         entry: {
           name: "Binance Hot Wallet 14",
-          tags: [ARKHAM_TAG, "exchange"],
+          tags: ["exchange"],
+          source: "arkham",
           updatedAt: "2026-04-28T00:00:00Z",
         },
       },
@@ -235,7 +242,7 @@ describe("GET /api/arkham/enrich — pipeline", () => {
     expect(mockEnrichBatch).toHaveBeenCalledWith(["0xark"], expect.anything());
 
     // mergeRefreshEntry: name takes Arkham's update; user notes + isPublic
-    // survive; tags union.
+    // survive; sentinel tag stripped; source upgraded.
     expect(mockImportLabels).toHaveBeenCalledWith(
       42220,
       expect.objectContaining({
@@ -243,6 +250,50 @@ describe("GET /api/arkham/enrich — pipeline", () => {
           name: "Binance Hot Wallet 14",
           notes: "user note about this address",
           isPublic: true,
+          source: "arkham",
+        }),
+      }),
+    );
+  });
+
+  it("refresh mode re-enriches source-tagged entries", async () => {
+    mockDiscover.mockResolvedValue({
+      addresses: ["0xark"],
+      perEntity: [],
+    });
+    mockGetAllLabels.mockResolvedValue(
+      celoLabels({
+        "0xark": {
+          name: "Binance",
+          tags: ["exchange"],
+          source: "arkham",
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
+    mockEnrichBatch.mockResolvedValue([
+      {
+        address: "0xark",
+        entry: {
+          name: "Binance Hot Wallet 14",
+          tags: ["exchange"],
+          source: "arkham",
+          updatedAt: "2026-04-28T00:00:00Z",
+        },
+      },
+    ]);
+
+    const res = await GET(
+      makeReq({ bearer: "cron-secret", searchParams: { mode: "refresh" } }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockEnrichBatch).toHaveBeenCalledWith(["0xark"], expect.anything());
+    expect(mockImportLabels).toHaveBeenCalledWith(
+      42220,
+      expect.objectContaining({
+        "0xark": expect.objectContaining({
+          name: "Binance Hot Wallet 14",
+          source: "arkham",
         }),
       }),
     );
@@ -259,7 +310,8 @@ describe("GET /api/arkham/enrich — pipeline", () => {
         address: "0xnew",
         entry: {
           name: "X",
-          tags: [ARKHAM_TAG],
+          tags: [],
+          source: "arkham",
           updatedAt: "2026-04-28T00:00:00Z",
         },
       },
@@ -345,7 +397,8 @@ describe("GET /api/arkham/enrich — pipeline", () => {
         address: "0xb",
         entry: {
           name: "X",
-          tags: [ARKHAM_TAG],
+          tags: [],
+          source: "arkham",
           updatedAt: "2026-04-28T00:00:00Z",
         },
       },

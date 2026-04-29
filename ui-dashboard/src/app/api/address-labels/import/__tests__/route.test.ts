@@ -93,6 +93,7 @@ vi.mock("@/lib/address-labels", () => ({
     };
   }),
   sanitizeEntry: vi.fn((entry: Record<string, unknown>) => entry),
+  ARKHAM_TAG: "arkham",
 }));
 
 import { getAuthSession } from "@/auth";
@@ -184,6 +185,48 @@ describe("POST /api/address-labels/import", () => {
         }),
       }),
     );
+  });
+
+  it("strips user-supplied source on simple-format import", async () => {
+    // An attacker (or someone re-importing an Arkham-enriched backup) cannot
+    // claim Arkham provenance via the import route — `stripArkhamProvenance`
+    // resets it before the entry is persisted.
+    const labels = {
+      [validAddress]: {
+        name: "Spoofed",
+        tags: ["exchange"],
+        source: "arkham",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    };
+    const res = await POST(jsonReq({ chainId: 42220, labels }));
+    expect(res.status).toBe(200);
+    expect(importLabels).toHaveBeenCalledWith(
+      42220,
+      expect.objectContaining({
+        [validAddress]: expect.not.objectContaining({
+          source: expect.anything(),
+        }),
+      }),
+    );
+  });
+
+  it("strips legacy ARKHAM_TAG from user-supplied tags on import", async () => {
+    // The `arkham` tag is the legacy provenance sentinel — `isArkhamSourced`
+    // still honours it for backward compat with pre-migration entries. A user
+    // submitting it via import would otherwise have their entry clobbered by
+    // the next refresh cron run.
+    const labels = {
+      [validAddress]: {
+        name: "Spoofed",
+        tags: ["arkham", "exchange"],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    };
+    const res = await POST(jsonReq({ chainId: 42220, labels }));
+    expect(res.status).toBe(200);
+    const call = (importLabels as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[1][validAddress].tags).toEqual(["exchange"]);
   });
 
   it("deduplicates mixed-case duplicate addresses in simple JSON imports", async () => {

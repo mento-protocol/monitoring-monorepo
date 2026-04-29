@@ -9,7 +9,12 @@
  * NEVER import from a client component. The API key is server-only.
  */
 
-import { sanitizeEntry, type AddressEntry } from "@/lib/address-labels-shared";
+import {
+  ARKHAM_TAG,
+  isArkhamSourced,
+  sanitizeEntry,
+  type AddressEntry,
+} from "@/lib/address-labels-shared";
 
 const ARKHAM_BASE = "https://api.arkm.com";
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -67,8 +72,10 @@ export type ArkhamEnrichedAddress = {
   clusterIds?: string[];
 };
 
-/** Provenance marker. Manual labels never carry this tag. */
-export const ARKHAM_TAG = "arkham";
+// Re-export so existing `from "@/lib/arkham"` import sites keep working.
+// The canonical home is `address-labels-shared.ts` because client components
+// (e.g. AddressBookClient) need these and this module is server-only.
+export { ARKHAM_TAG, isArkhamSourced };
 
 export class ArkhamRateLimitedError extends Error {
   constructor() {
@@ -172,9 +179,9 @@ export function hasUsableLabel(data: ArkhamMultiChainResponse): boolean {
  * Map an Arkham response onto our `AddressEntry` schema.
  *
  * Returns `null` when nothing is worth persisting (caller should skip the
- * Redis write). The `arkham` tag is the provenance marker — code paths that
- * write manual labels MUST NOT include it, so a future refresh can tell
- * "manual" from "auto-enriched".
+ * Redis write). Provenance is recorded as `source: "arkham"`; manual labels
+ * never carry that source, so a future refresh can tell "manual" from
+ * "auto-enriched".
  */
 export function toAddressEntry(
   data: ArkhamMultiChainResponse,
@@ -187,7 +194,7 @@ export function toAddressEntry(
   let label: string | undefined;
   let entity: ArkhamEntity | null = null;
   let topPrediction: ArkhamEntityPrediction | undefined;
-  const tagSet = new Set<string>([ARKHAM_TAG]);
+  const tagSet = new Set<string>();
 
   for (const perChain of Object.values(data)) {
     const trimmed = perChain.arkhamLabel?.name?.trim();
@@ -222,6 +229,7 @@ export function toAddressEntry(
     tags: Array.from(tagSet),
     notes: note,
     isPublic: false,
+    source: "arkham",
     updatedAt: new Date().toISOString(),
   });
 }
@@ -307,27 +315,33 @@ export async function enrichBatch(
 }
 
 /**
- * In refresh mode, merge a fresh Arkham result into an existing arkham-tagged
+ * In refresh mode, merge a fresh Arkham result into an existing Arkham-sourced
  * entry. Lets Arkham update `name` and add new tags, but preserves user-edited
  * `notes` (unless they're our auto-generated prediction note) and `isPublic`.
  *
- * If `existing` is undefined or doesn't carry the arkham tag, returns `fresh`
- * unchanged — the caller hasn't classified it as a refresh target.
+ * Recognises both new entries (`source === "arkham"`) and legacy entries
+ * (`tags` contains `ARKHAM_TAG`). The legacy sentinel is filtered out of the
+ * merged tag set — provenance now lives in `source`.
+ *
+ * Returns `fresh` unchanged when the existing entry isn't Arkham-sourced.
  */
 export function mergeRefreshEntry(
   existing: AddressEntry | undefined,
   fresh: AddressEntry,
 ): AddressEntry {
-  if (!existing?.tags?.includes(ARKHAM_TAG)) return fresh;
+  if (!existing || !isArkhamSourced(existing)) return fresh;
 
   const isAutoNote = existing.notes?.startsWith("Arkham prediction (");
-  const tags = Array.from(new Set([...fresh.tags, ...existing.tags]));
+  const tags = Array.from(new Set([...fresh.tags, ...existing.tags])).filter(
+    (t) => t !== ARKHAM_TAG,
+  );
 
   return sanitizeEntry({
     name: fresh.name,
     tags,
     notes: isAutoNote ? fresh.notes : (existing.notes ?? fresh.notes),
     isPublic: existing.isPublic ?? fresh.isPublic,
+    source: "arkham",
     updatedAt: fresh.updatedAt,
   });
 }
@@ -336,9 +350,11 @@ export function mergeRefreshEntry(
  * Filter candidate addresses against existing labels.
  *
  * Returns the subset of `candidates` we should actually call Arkham for:
- * - Addresses with an existing manual label (no `arkham` tag) are NEVER
+ * - Addresses with an existing manual label (not Arkham-sourced) are NEVER
  *   touched — manual labels win.
- * - In refresh mode, addresses with the `arkham` tag are re-enriched.
+ * - In refresh mode, only Arkham-sourced addresses are re-enriched.
+ *   Detection accepts both new entries (`source === "arkham"`) and legacy
+ *   pre-source-field entries that still carry the `ARKHAM_TAG` sentinel.
  * - In default mode, only unlabeled addresses are enriched (one-shot
  *   backfill semantics).
  */
@@ -351,9 +367,8 @@ export function filterCandidates(
     .map((a) => a.toLowerCase())
     .filter((address) => {
       const current = existing[address];
-      if (!current) return true; // unlabeled — always enrich
-      const isArkhamSourced = current.tags?.includes(ARKHAM_TAG) === true;
-      if (isArkhamSourced) return mode === "refresh";
+      if (!current) return mode !== "refresh"; // unlabeled: enrich in new mode only
+      if (isArkhamSourced(current)) return mode === "refresh";
       return false; // manual label — skip
     });
 }

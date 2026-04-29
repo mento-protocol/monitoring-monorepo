@@ -13,6 +13,8 @@ import { useNetwork } from "@/components/network-provider";
 import { truncateAddress } from "@/lib/format";
 import { NETWORKS, networkIdForChainId, type Network } from "@/lib/networks";
 import {
+  isArkhamSourced,
+  normalizeArkhamLegacy,
   upgradeEntries,
   type AddressEntry,
   type Scope,
@@ -134,13 +136,17 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
   const state: EntriesState = data ?? emptyState();
 
   const customEntries: AddressEntryRow[] = useMemo(() => {
+    // Normalise legacy entries here so every UI consumer (table, editor
+    // pre-fill, autocomplete) sees clean tags + a populated `source` field
+    // for pre-migration rows. Read-only — server-side write paths still go
+    // through `stripArkhamProvenance` to avoid auto-promoting user input.
     const rows: AddressEntryRow[] = [];
     for (const [address, entry] of Object.entries(state.global)) {
-      rows.push({ address, scope: "global", ...entry });
+      rows.push({ address, scope: "global", ...normalizeArkhamLegacy(entry) });
     }
     for (const [chainId, chainEntries] of state.chains) {
       for (const [address, entry] of Object.entries(chainEntries)) {
-        rows.push({ address, scope: chainId, ...entry });
+        rows.push({ address, scope: chainId, ...normalizeArkhamLegacy(entry) });
       }
     }
     rows.sort((a, b) => a.name.localeCompare(b.name));
@@ -216,10 +222,14 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
       if (!address) return undefined;
       const lower = address.toLowerCase();
       const cid = chainId ?? defaultChainId;
+      // Normalise so legacy tag-only rows feed the editor pre-fill with
+      // clean tags + populated source, matching what `customEntries` yields.
       const chainEntry = state.chains.get(cid)?.[lower];
-      if (chainEntry) return { entry: chainEntry, scope: cid };
+      if (chainEntry)
+        return { entry: normalizeArkhamLegacy(chainEntry), scope: cid };
       const globalEntry = state.global[lower];
-      if (globalEntry) return { entry: globalEntry, scope: "global" };
+      if (globalEntry)
+        return { entry: normalizeArkhamLegacy(globalEntry), scope: "global" };
       return undefined;
     },
     [state, defaultChainId],
@@ -292,12 +302,29 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
       scope: Scope,
     ): Promise<void> => {
       const lower = address.toLowerCase();
-      const optimistic: AddressEntry = {
-        name: entry.name,
-        tags: entry.tags,
-        notes: entry.notes,
-        isPublic: entry.isPublic,
-        updatedAt: new Date().toISOString(),
+      // Carry server-side provenance into the optimistic write so the
+      // SOURCE badge doesn't flash from "arkham" to "custom" between the
+      // optimistic update and the SWR refetch. Mirrors the PUT handler's
+      // cross-scope `isArkhamSourced(prior)` check.
+      const buildOptimistic = (current: EntriesState): AddressEntry => {
+        const prior =
+          current.global[lower] ??
+          (() => {
+            for (const [, chainEntries] of current.chains) {
+              if (chainEntries[lower]) return chainEntries[lower];
+            }
+            return undefined;
+          })();
+        const preservedSource =
+          prior && isArkhamSourced(prior) ? "arkham" : undefined;
+        return {
+          name: entry.name,
+          tags: entry.tags,
+          notes: entry.notes,
+          isPublic: entry.isPublic,
+          ...(preservedSource ? { source: preservedSource } : {}),
+          updatedAt: new Date().toISOString(),
+        };
       };
 
       await mutate(
@@ -319,11 +346,16 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
             const body = (await res.json()) as { error?: string };
             throw new Error(body.error ?? "Failed to save entry");
           }
-          return applyOptimistic(current, scope, lower, optimistic);
+          return applyOptimistic(
+            current,
+            scope,
+            lower,
+            buildOptimistic(current),
+          );
         },
         {
           optimisticData: (current: EntriesState = emptyState()) =>
-            applyOptimistic(current, scope, lower, optimistic),
+            applyOptimistic(current, scope, lower, buildOptimistic(current)),
           rollbackOnError: true,
         },
       );

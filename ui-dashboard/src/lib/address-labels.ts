@@ -9,6 +9,8 @@ export {
   type AddressEntryRecord,
   type AddressLabelsSnapshot,
   type Scope,
+  ARKHAM_TAG,
+  isArkhamSourced,
   upgradeEntry,
   upgradeEntries,
   sanitizeEntry,

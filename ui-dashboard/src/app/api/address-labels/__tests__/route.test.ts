@@ -11,6 +11,8 @@ vi.mock("@/lib/address-labels", () => ({
   getAllLabels: vi.fn().mockResolvedValue({ global: {}, chains: {} }),
   upsertEntry: vi.fn().mockResolvedValue(undefined),
   deleteLabel: vi.fn().mockResolvedValue(undefined),
+  isArkhamSourced: (entry: { source?: string; tags?: string[] }) =>
+    entry.source === "arkham" || entry.tags?.includes("arkham") === true,
 }));
 
 import { getAuthSession } from "@/auth";
@@ -281,6 +283,154 @@ describe("PUT /api/address-labels", () => {
     });
     const res = await PUT(req);
     expect(res.status).toBe(200);
+  });
+
+  it("ignores attacker-supplied source on a previously-unlabelled row", async () => {
+    // Prior state: no entry for this address. User submits `source: "arkham"`
+    // in the body. The route never destructures `source` from the body, so it
+    // can't promote the new entry to Arkham-sourced.
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    const address = "0x" + "a".repeat(40);
+    const req = new NextRequest("http://localhost/api/address-labels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: "global",
+        address,
+        name: "Spoofed",
+        tags: ["foo"],
+        source: "arkham", // ignored — route never destructures `source`
+      }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(200);
+    expect(upsertEntry).toHaveBeenCalledWith(
+      "global",
+      address,
+      expect.not.objectContaining({ source: expect.anything() }),
+    );
+  });
+
+  it("preserves existing Arkham source on edit (notes/tags update)", async () => {
+    // Prior state: an Arkham-enriched entry. User edits notes/tags via the
+    // dashboard — the body has no `source`, but the existing provenance must
+    // survive so the entry stays in the refresh cron's candidate set.
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+    const address = "0x" + "a".repeat(40);
+    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      global: {
+        [address.toLowerCase()]: {
+          name: "Binance Hot Wallet 14",
+          tags: ["exchange"],
+          source: "arkham",
+          updatedAt: "2026-04-01T00:00:00Z",
+        },
+      },
+      chains: {},
+    });
+    const req = new NextRequest("http://localhost/api/address-labels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: "global",
+        address,
+        name: "Binance Hot Wallet 14",
+        tags: ["exchange", "user-curated"],
+        notes: "routes the bridge fees",
+      }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(200);
+    expect(upsertEntry).toHaveBeenCalledWith(
+      "global",
+      address,
+      expect.objectContaining({ source: "arkham" }),
+    );
+  });
+
+  it("preserves Arkham source on edit of a LEGACY entry (tag-only shape)", async () => {
+    // Pre-migration entries carry `tags: ["arkham", ...]` but no `source`
+    // field. Without the dual-check `isArkhamSourced`, editing such a row
+    // would leave it with neither marker — invisible to the refresh cron
+    // and indistinguishable from a manual entry. (Bugbot + Claude bot.)
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+    const address = "0x" + "a".repeat(40);
+    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      global: {
+        [address.toLowerCase()]: {
+          name: "Binance",
+          tags: ["arkham", "exchange"], // legacy shape
+          updatedAt: "2026-04-01T00:00:00Z",
+        },
+      },
+      chains: {},
+    });
+    const req = new NextRequest("http://localhost/api/address-labels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: "global",
+        address,
+        name: "Binance",
+        tags: ["exchange"], // sentinel stripped client-side already
+        notes: "edited",
+      }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(200);
+    expect(upsertEntry).toHaveBeenCalledWith(
+      "global",
+      address,
+      expect.objectContaining({ source: "arkham" }),
+    );
+  });
+
+  it("preserves Arkham source when changing scope (chain → global)", async () => {
+    // The user moves an Arkham-sourced row from chain 42220 to global. The
+    // strict either/or semantics mean the entry currently lives ONLY in the
+    // chain scope; looking up the target scope alone would miss it. The
+    // cross-scope lookup must find it. (Codex P2 catch.)
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+    const address = "0x" + "a".repeat(40);
+    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      global: {},
+      chains: {
+        "42220": {
+          [address.toLowerCase()]: {
+            name: "Binance",
+            tags: ["exchange"],
+            source: "arkham",
+            updatedAt: "2026-04-01T00:00:00Z",
+          },
+        },
+      },
+    });
+    const req = new NextRequest("http://localhost/api/address-labels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: "global",
+        address,
+        name: "Binance",
+        tags: ["exchange"],
+      }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(200);
+    expect(upsertEntry).toHaveBeenCalledWith(
+      "global",
+      address,
+      expect.objectContaining({ source: "arkham" }),
+    );
   });
 
   it("rejects when both name and tags are empty", async () => {

@@ -10,6 +10,12 @@ export type AddressEntry = {
   tags: string[];
   notes?: string;
   isPublic?: boolean;
+  /**
+   * Provenance marker. Set by server-side enrichment pipelines
+   * (currently `"arkham"`); omitted for user-curated entries. User-controlled
+   * input paths (PUT, import) MUST strip this field — see route handlers.
+   */
+  source?: string;
   updatedAt: string;
 };
 
@@ -35,6 +41,48 @@ export type AddressLabelsSnapshot = {
   chains: Record<string, Record<string, AddressEntry>>;
 };
 
+/**
+ * Legacy provenance tag. Pre-source-field entries persisted `"arkham"`
+ * inside `tags`. New writes carry provenance in `AddressEntry.source`
+ * instead and exclude the tag entirely; this constant is retained so
+ * `isArkhamSourced` still recognises pre-migration entries until they get
+ * re-enriched.
+ */
+export const ARKHAM_TAG = "arkham";
+
+/**
+ * True when an existing entry was written by the Arkham enrichment cron.
+ * Accepts both the new shape (`source === "arkham"`) and legacy entries
+ * predating the source field (`tags` includes the sentinel).
+ */
+export function isArkhamSourced(entry: {
+  source?: string;
+  tags?: string[];
+}): boolean {
+  return entry.source === "arkham" || entry.tags?.includes(ARKHAM_TAG) === true;
+}
+
+/**
+ * Normalise a legacy-shaped entry (`tags` carries the `ARKHAM_TAG` sentinel,
+ * no `source` field) into the new shape (`source: "arkham"`, sentinel removed
+ * from tags). New-shape entries pass through untouched.
+ *
+ * Apply this at READ-direction UI boundaries so editor pre-fill, autocomplete
+ * suggestions, and the table all see the same clean tag list. Do NOT apply
+ * at server-side import paths — that would auto-promote a user-imported
+ * `tags: ["arkham"]` to Arkham-sourced (see `stripArkhamProvenance` instead).
+ */
+export function normalizeArkhamLegacy(entry: AddressEntry): AddressEntry {
+  if (entry.source === "arkham" || !entry.tags?.includes(ARKHAM_TAG)) {
+    return entry;
+  }
+  return {
+    ...entry,
+    source: "arkham",
+    tags: entry.tags.filter((t) => t !== ARKHAM_TAG),
+  };
+}
+
 // Backward-compat: auto-upgrade legacy entries on read
 
 /**
@@ -48,6 +96,9 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
     ? entry.tags.filter((t): t is string => typeof t === "string")
     : [];
 
+  const source =
+    typeof entry.source === "string" && entry.source ? entry.source : undefined;
+
   // Already in v2 format — unless the name is blank and we can recover a
   // valid legacy label from mixed/partially-corrupted data.
   if (typeof entry.name === "string") {
@@ -57,6 +108,7 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
         tags: normalizedTags,
         notes: typeof entry.notes === "string" ? entry.notes : undefined,
         isPublic: entry.isPublic === true ? true : undefined,
+        ...(source ? { source } : {}),
         updatedAt:
           typeof entry.updatedAt === "string"
             ? entry.updatedAt
@@ -80,6 +132,7 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
       tags,
       notes: typeof entry.notes === "string" ? entry.notes : undefined,
       isPublic: entry.isPublic === true ? true : undefined,
+      ...(source ? { source } : {}),
       updatedAt:
         typeof entry.updatedAt === "string"
           ? entry.updatedAt
@@ -93,6 +146,7 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
     tags: [],
     notes: typeof entry.notes === "string" ? entry.notes : undefined,
     isPublic: entry.isPublic === true ? true : undefined,
+    ...(source ? { source } : {}),
     updatedAt:
       typeof entry.updatedAt === "string"
         ? entry.updatedAt
