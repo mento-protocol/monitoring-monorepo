@@ -376,6 +376,10 @@ describe("wormhole/nttAddresses — manifest lookup", () => {
 // regenerates nttAddresses.json without updating the YAML) would silently drop
 // indexer coverage for the new bridged token. This catches that at test time.
 describe("wormhole/nttAddresses — Envio YAML sync", () => {
+  // Bespoke line-by-line YAML scanner — assumes the trunk-formatted shape
+  // (chain blocks at `  - id:`, contract blocks at `    - name:` under them).
+  // Fragile to YAML restructuring; if the formatter ever changes its indent or
+  // these tests start dropping addresses, replace with a real YAML parser.
   function extractAddresses(
     yaml: string,
     chainId: number,
