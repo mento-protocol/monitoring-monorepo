@@ -25,6 +25,8 @@ export type AddressBookRow = {
   source?: string;
   /** ISO timestamp of first write; undefined for static contract rows. */
   createdAt?: string;
+  /** ISO timestamp of most recent write; undefined for static contract rows. */
+  updatedAt?: string;
   /** "global" for cross-chain customs, chainId for per-chain customs + contracts. */
   scope: Scope;
   /**

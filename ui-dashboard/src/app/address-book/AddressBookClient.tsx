@@ -120,6 +120,7 @@ export default function AddressBookPage({
               isCustom: true,
               source: r.source,
               createdAt: r.createdAt,
+              updatedAt: r.updatedAt,
               scope: "global" as Scope,
               network: globalDisplayNetwork,
             },
@@ -139,6 +140,7 @@ export default function AddressBookPage({
             isCustom: true,
             source: r.source,
             createdAt: r.createdAt,
+            updatedAt: r.updatedAt,
             scope: r.scope,
             network: net,
           },
@@ -398,6 +400,9 @@ export default function AddressBookPage({
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Created at
                 </th>
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Updated at
+                </th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 w-20">
                   Actions
                 </th>
@@ -421,6 +426,7 @@ export default function AddressBookPage({
                     isCustom={row.isCustom}
                     source={row.source}
                     createdAt={row.createdAt ?? resolved?.entry.createdAt}
+                    updatedAt={row.updatedAt ?? resolved?.entry.updatedAt}
                     canEdit={userCanEdit}
                     explorerUrl={
                       row.network.explorerBaseUrl
@@ -524,6 +530,7 @@ type AddressRowProps = {
   isCustom: boolean;
   source?: string;
   createdAt?: string;
+  updatedAt?: string;
   canEdit: boolean;
   explorerUrl: string | null;
   onEdit: () => void;
@@ -540,6 +547,7 @@ function AddressTableRow({
   isCustom,
   source,
   createdAt,
+  updatedAt,
   canEdit,
   explorerUrl,
   onEdit,
@@ -630,6 +638,22 @@ function AddressTableRow({
         {createdAt ? (
           <time dateTime={createdAt} title={createdAt}>
             {formatCreatedAt(createdAt)}
+          </time>
+        ) : (
+          <span className="text-slate-600">—</span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-xs whitespace-nowrap">
+        {updatedAt && createdAt && updatedAt !== createdAt ? (
+          // Highlight only when the row has actually been edited since
+          // creation; otherwise show an em-dash so the column doesn't just
+          // duplicate "Created at" for every untouched row.
+          <time
+            dateTime={updatedAt}
+            title={updatedAt}
+            className="rounded bg-amber-950/60 px-1.5 py-0.5 font-medium text-amber-300 ring-1 ring-inset ring-amber-900/60"
+          >
+            {formatCreatedAt(updatedAt)}
           </time>
         ) : (
           <span className="text-slate-600">—</span>
