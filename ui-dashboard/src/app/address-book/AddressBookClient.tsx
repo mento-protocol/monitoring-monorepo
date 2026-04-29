@@ -145,8 +145,10 @@ export default function AddressBookPage({
         // Match the rendered SOURCE badge text so users can search by it
         // (e.g. "arkham" no longer lives in tags after the source-field
         // migration; without this, the search box can't surface those rows).
+        // Use the same `isArkhamSourced` dual-check the badge renderer uses
+        // — it handles both new-shape (source) and legacy (tag-only) rows.
         const sourceText = row.isCustom
-          ? row.source === "arkham"
+          ? isArkhamSourced({ source: row.source, tags: row.tags })
             ? "arkham"
             : "custom"
           : "contract";
