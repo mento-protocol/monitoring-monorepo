@@ -198,9 +198,16 @@ async function paced<T>(items: T[], fn: (t: T) => Promise<unknown>) {
 Map an Arkham response to an `AddressEntry` (see
 `ui-dashboard/src/lib/address-labels-shared.ts`):
 
+| Arkham field                                               | `AddressEntry` field   |
+| ---------------------------------------------------------- | ---------------------- |
+| `arkhamLabel.name` / `entity.name` / `prediction.entityId` | `name`                 |
+| Provenance ("this came from Arkham")                       | `source: "arkham"`     |
+| `entity.type` + `tags[].slug`                              | `tags` (real metadata) |
+| ML prediction confidence note                              | `notes`                |
+
 ```typescript
 function toAddressEntry(data: EnrichedAddress): AddressEntry | null {
-  const label = data.arkhamLabel?.name;
+  const label = data.arkhamLabel?.name?.trim();
   const entity = data.arkhamEntity;
   const highConfidencePred = data.entityPredictions?.find(
     (p) => p.confidence >= 0.85,
@@ -209,9 +216,11 @@ function toAddressEntry(data: EnrichedAddress): AddressEntry | null {
   // Quality gate — drop unlabeled addresses entirely
   if (!label && !entity && !highConfidencePred) return null;
 
-  const name = label ?? entity?.name ?? highConfidencePred?.entityId ?? "";
+  const name =
+    label || entity?.name?.trim() || highConfidencePred?.entityId || "";
+  // Tags carry real Arkham metadata only — entity type + behavioural slugs.
+  // Provenance lives in `source` now (used to be the "arkham" sentinel tag).
   const tags = [
-    "arkham", // provenance marker — never overwrite manual labels
     ...(entity?.type ? [entity.type] : []),
     ...(data.tags?.map((t) => t.slug) ?? []),
   ].slice(0, 20); // shared-schema cap
@@ -225,14 +234,18 @@ function toAddressEntry(data: EnrichedAddress): AddressEntry | null {
     tags,
     notes: note,
     isPublic: false,
+    source: "arkham",
     updatedAt: new Date().toISOString(),
   };
 }
 ```
 
 Always preserve manual labels: before writing, check that the existing
-entry doesn't already exist OR is itself tagged `arkham` (i.e. was a
-previous automated write).
+entry doesn't already exist OR has `source === "arkham"` (i.e. was a
+previous automated write). The `ARKHAM_TAG = "arkham"` constant is
+retained as a backward-compat fallback for entries written before the
+`source` field was introduced — `filterCandidates` and
+`mergeRefreshEntry` accept either form.
 
 ## When to use which endpoint
 

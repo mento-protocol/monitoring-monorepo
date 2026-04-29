@@ -10,6 +10,12 @@ export type AddressEntry = {
   tags: string[];
   notes?: string;
   isPublic?: boolean;
+  /**
+   * Provenance marker. Set by server-side enrichment pipelines
+   * (currently `"arkham"`); omitted for user-curated entries. User-controlled
+   * input paths (PUT, import) MUST strip this field — see route handlers.
+   */
+  source?: string;
   updatedAt: string;
 };
 
@@ -48,6 +54,9 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
     ? entry.tags.filter((t): t is string => typeof t === "string")
     : [];
 
+  const source =
+    typeof entry.source === "string" && entry.source ? entry.source : undefined;
+
   // Already in v2 format — unless the name is blank and we can recover a
   // valid legacy label from mixed/partially-corrupted data.
   if (typeof entry.name === "string") {
@@ -57,6 +66,7 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
         tags: normalizedTags,
         notes: typeof entry.notes === "string" ? entry.notes : undefined,
         isPublic: entry.isPublic === true ? true : undefined,
+        ...(source ? { source } : {}),
         updatedAt:
           typeof entry.updatedAt === "string"
             ? entry.updatedAt
@@ -80,6 +90,7 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
       tags,
       notes: typeof entry.notes === "string" ? entry.notes : undefined,
       isPublic: entry.isPublic === true ? true : undefined,
+      ...(source ? { source } : {}),
       updatedAt:
         typeof entry.updatedAt === "string"
           ? entry.updatedAt
@@ -93,6 +104,7 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
     tags: [],
     notes: typeof entry.notes === "string" ? entry.notes : undefined,
     isPublic: entry.isPublic === true ? true : undefined,
+    ...(source ? { source } : {}),
     updatedAt:
       typeof entry.updatedAt === "string"
         ? entry.updatedAt

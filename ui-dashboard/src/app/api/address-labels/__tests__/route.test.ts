@@ -283,6 +283,33 @@ describe("PUT /api/address-labels", () => {
     expect(res.status).toBe(200);
   });
 
+  it("ignores user-supplied source field (server-controlled only)", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+    const address = "0x" + "a".repeat(40);
+    const req = new NextRequest("http://localhost/api/address-labels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: "global",
+        address,
+        name: "Spoofed",
+        tags: ["foo"],
+        source: "arkham", // attacker tries to claim Arkham provenance
+      }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(200);
+    // The route never propagates `source` into upsertEntry — security is at
+    // the destructure boundary. Lock this in as a regression test.
+    expect(upsertEntry).toHaveBeenCalledWith(
+      "global",
+      address,
+      expect.not.objectContaining({ source: expect.anything() }),
+    );
+  });
+
   it("rejects when both name and tags are empty", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
       user: { email: "alice@mentolabs.xyz" },

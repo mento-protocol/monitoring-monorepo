@@ -104,6 +104,7 @@ export default function AddressBookPage({
               name: r.name,
               tags: r.tags,
               isCustom: true,
+              source: r.source,
               scope: "global" as Scope,
               network: globalDisplayNetwork,
             },
@@ -121,6 +122,7 @@ export default function AddressBookPage({
             name: r.name,
             tags: r.tags,
             isCustom: true,
+            source: r.source,
             scope: r.scope,
             network: net,
           },
@@ -387,6 +389,7 @@ export default function AddressBookPage({
                     notes={resolved?.entry.notes}
                     isPublic={resolved?.entry.isPublic}
                     isCustom={row.isCustom}
+                    source={row.source}
                     canEdit={userCanEdit}
                     explorerUrl={
                       row.network.explorerBaseUrl
@@ -488,6 +491,7 @@ type AddressRowProps = {
   notes?: string;
   isPublic?: boolean;
   isCustom: boolean;
+  source?: string;
   canEdit: boolean;
   explorerUrl: string | null;
   onEdit: () => void;
@@ -502,10 +506,18 @@ function AddressTableRow({
   notes,
   isPublic,
   isCustom,
+  source,
   canEdit,
   explorerUrl,
   onEdit,
 }: AddressRowProps) {
+  // Pre-source-field entries carried provenance in `tags`; honour the
+  // legacy marker until those rows get re-enriched. New entries set
+  // `source: "arkham"` and exclude the tag entirely.
+  const isArkhamSourced = source === "arkham" || tags.includes("arkham");
+  // Hide the legacy provenance sentinel from the tags display so the
+  // column shows real metadata only.
+  const displayTags = tags.filter((t) => t !== "arkham");
   return (
     <tr className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
       <td className="px-4 py-3">
@@ -550,8 +562,8 @@ function AddressTableRow({
         </span>
       </td>
       <td className="px-4 py-3">
-        {tags.length > 0 ? (
-          <TagPills tags={tags} />
+        {displayTags.length > 0 ? (
+          <TagPills tags={displayTags} />
         ) : (
           <span className="text-xs text-slate-600">—</span>
         )}
@@ -560,7 +572,11 @@ function AddressTableRow({
         {notes ?? <span className="text-slate-600">—</span>}
       </td>
       <td className="px-4 py-3">
-        {isCustom ? (
+        {isCustom && isArkhamSourced ? (
+          <span className="inline-flex items-center rounded-full bg-teal-950 px-2 py-0.5 text-xs font-medium text-teal-300 ring-1 ring-inset ring-teal-800">
+            arkham
+          </span>
+        ) : isCustom ? (
           <span className="inline-flex items-center rounded-full bg-indigo-950 px-2 py-0.5 text-xs font-medium text-indigo-300 ring-1 ring-inset ring-indigo-800">
             custom
           </span>

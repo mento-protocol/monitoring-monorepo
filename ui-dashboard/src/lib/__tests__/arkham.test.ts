@@ -174,7 +174,7 @@ describe("toAddressEntry", () => {
     expect(entry?.name).toBe("Binance");
   });
 
-  it("attaches arkham + entity type + tag slugs", () => {
+  it("sets source: 'arkham' and tags carry entity type + slugs only", () => {
     const entry = toAddressEntry(
       makeArkhamResponse({
         arkhamEntity: {
@@ -189,7 +189,9 @@ describe("toAddressEntry", () => {
         ],
       }),
     );
-    expect(entry?.tags).toContain(ARKHAM_TAG);
+    expect(entry?.source).toBe("arkham");
+    // Provenance lives in `source` now — sentinel must NOT leak into tags.
+    expect(entry?.tags).not.toContain(ARKHAM_TAG);
     expect(entry?.tags).toContain("exchange");
     expect(entry?.tags).toContain("cex");
     expect(entry?.tags).toContain("whale");
@@ -335,16 +337,30 @@ describe("filterCandidates", () => {
     tags: ["mento", "core"],
     updatedAt: "2026-01-01T00:00:00Z",
   };
+  // New-format entry: provenance lives in `source`, no ARKHAM_TAG in tags.
   const arkhamEntry: AddressEntry = {
+    name: "Binance",
+    tags: ["exchange"],
+    source: "arkham",
+    updatedAt: "2026-04-01T00:00:00Z",
+  };
+  // Legacy-format entry: pre-source-field, provenance carried by tag sentinel.
+  const legacyArkhamEntry: AddressEntry = {
     name: "Binance",
     tags: [ARKHAM_TAG, "exchange"],
     updatedAt: "2026-04-01T00:00:00Z",
   };
 
-  it("returns unlabeled addresses", () => {
+  it("returns unlabeled addresses in new mode", () => {
     expect(
       filterCandidates(["0xnew"], { "0xother": manualEntry }, "new"),
     ).toEqual(["0xnew"]);
+  });
+
+  it("excludes unlabeled addresses in refresh mode", () => {
+    expect(
+      filterCandidates(["0xnew"], { "0xother": manualEntry }, "refresh"),
+    ).toEqual([]);
   });
 
   it("never overwrites manual labels", () => {
@@ -356,13 +372,24 @@ describe("filterCandidates", () => {
     ).toEqual([]);
   });
 
-  it("re-enriches arkham-tagged entries only in refresh mode", () => {
+  it("re-enriches source-tagged entries only in refresh mode", () => {
     expect(
       filterCandidates(["0xark"], { "0xark": arkhamEntry }, "new"),
     ).toEqual([]);
     expect(
       filterCandidates(["0xark"], { "0xark": arkhamEntry }, "refresh"),
     ).toEqual(["0xark"]);
+  });
+
+  it("re-enriches legacy ARKHAM_TAG entries only in refresh mode", () => {
+    // Backward-compat: pre-migration entries without `source` but with the
+    // sentinel still in `tags` must remain refresh-eligible.
+    expect(
+      filterCandidates(["0xleg"], { "0xleg": legacyArkhamEntry }, "new"),
+    ).toEqual([]);
+    expect(
+      filterCandidates(["0xleg"], { "0xleg": legacyArkhamEntry }, "refresh"),
+    ).toEqual(["0xleg"]);
   });
 
   it("lowercases candidate addresses", () => {
@@ -452,10 +479,12 @@ describe("enrichBatch", () => {
 });
 
 describe("mergeRefreshEntry", () => {
+  // Fresh entry: new shape — `source: "arkham"`, no sentinel in tags.
   const fresh: AddressEntry = {
     name: "Binance Hot Wallet 14",
-    tags: [ARKHAM_TAG, "exchange"],
+    tags: ["exchange"],
     isPublic: false,
+    source: "arkham",
     updatedAt: "2026-04-28T00:00:00Z",
   };
 
@@ -463,7 +492,7 @@ describe("mergeRefreshEntry", () => {
     expect(mergeRefreshEntry(undefined, fresh)).toEqual(fresh);
   });
 
-  it("returns fresh unchanged when existing has no arkham tag", () => {
+  it("returns fresh unchanged when existing is not Arkham-sourced", () => {
     const manual: AddressEntry = {
       name: "Treasury",
       tags: ["mento"],
@@ -472,28 +501,50 @@ describe("mergeRefreshEntry", () => {
     expect(mergeRefreshEntry(manual, fresh)).toEqual(fresh);
   });
 
-  it("preserves user-edited notes and isPublic across refresh", () => {
+  it("preserves user-edited notes and isPublic across refresh (new shape)", () => {
     const existing: AddressEntry = {
       name: "Binance",
-      tags: [ARKHAM_TAG, "exchange", "user-curated"],
+      tags: ["exchange", "user-curated"],
       notes: "this address routes the bridge fees",
       isPublic: true,
+      source: "arkham",
       updatedAt: "2026-01-01T00:00:00Z",
     };
     const merged = mergeRefreshEntry(existing, fresh);
     expect(merged.name).toBe("Binance Hot Wallet 14"); // Arkham wins on name
     expect(merged.notes).toBe("this address routes the bridge fees");
     expect(merged.isPublic).toBe(true);
+    expect(merged.source).toBe("arkham");
     expect(merged.tags).toContain("user-curated");
     expect(merged.tags).toContain("exchange");
-    expect(merged.tags).toContain(ARKHAM_TAG);
+    expect(merged.tags).not.toContain(ARKHAM_TAG);
+  });
+
+  it("upgrades a legacy ARKHAM_TAG entry to source on merge", () => {
+    // Pre-migration row: provenance carried by tag sentinel, no `source`.
+    // Merge must still treat it as Arkham-sourced AND strip the sentinel.
+    const legacy: AddressEntry = {
+      name: "Binance",
+      tags: [ARKHAM_TAG, "exchange", "user-curated"],
+      notes: "user note",
+      isPublic: true,
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const merged = mergeRefreshEntry(legacy, fresh);
+    expect(merged.source).toBe("arkham");
+    expect(merged.tags).not.toContain(ARKHAM_TAG);
+    expect(merged.tags).toContain("user-curated");
+    expect(merged.tags).toContain("exchange");
+    expect(merged.notes).toBe("user note");
+    expect(merged.isPublic).toBe(true);
   });
 
   it("replaces auto-generated prediction notes with the new prediction", () => {
     const existing: AddressEntry = {
       name: "binance",
-      tags: [ARKHAM_TAG],
+      tags: [],
       notes: "Arkham prediction (87% confidence)",
+      source: "arkham",
       updatedAt: "2026-01-01T00:00:00Z",
     };
     const freshWithNote: AddressEntry = {

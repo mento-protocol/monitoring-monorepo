@@ -224,6 +224,10 @@ async function handleGnosisSafe(
       ...prev,
       name,
       tags: prev?.tags ?? [],
+      // User-controlled imports must never assume Arkham provenance — even
+      // re-importing an Arkham-enriched backup snapshot resets it. Only the
+      // enrichment cron is allowed to set `source: "arkham"`.
+      source: undefined,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -335,16 +339,21 @@ function mergeWithCrossScope(
   const out: Record<string, AddressEntry> = {};
   for (const [addr, entry] of Object.entries(incoming)) {
     const prev = crossScope[addr.toLowerCase()];
-    out[addr] = prev
-      ? {
-          ...prev,
-          ...entry,
-          // The import's tags are authoritative when the format supports
-          // tags; otherwise (simple + snapshot) incoming `entry.tags`
-          // already reflects the caller's intent (they may be empty).
-          tags: entry.tags,
-        }
-      : entry;
+    if (prev) {
+      out[addr] = {
+        ...prev,
+        ...entry,
+        // The import's tags are authoritative when the format supports
+        // tags; otherwise (simple + snapshot) incoming `entry.tags`
+        // already reflects the caller's intent (they may be empty).
+        tags: entry.tags,
+        // User-controlled imports must never assume Arkham provenance —
+        // see route handlers above.
+        source: undefined,
+      };
+    } else {
+      out[addr] = { ...entry, source: undefined };
+    }
   }
   return out;
 }
@@ -556,6 +565,8 @@ async function handleCsvText(text: string): Promise<NextResponse> {
         // When CSV has no tags column, preserve existing tags instead of
         // overwriting with [] (#1)
         tags: hasTagsColumn ? entry.tags : (prev?.tags ?? []),
+        // User-controlled imports must never assume Arkham provenance.
+        source: undefined,
       });
     }
     mergedByScope.set(scope, merged);
