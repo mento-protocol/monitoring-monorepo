@@ -1,6 +1,5 @@
 import { encodeFunctionData, getContractAddress, parseAbi } from "viem";
-import contractsJson from "@mento-protocol/contracts/contracts.json";
-import deploymentNamespaces from "@mento-protocol/monitoring-config/deployment-namespaces.json";
+import { contractEntries } from "@mento-protocol/monitoring-config/tokens";
 import type { BridgeTransfer } from "@/lib/types";
 
 export type ChainRedeemConfig = {
@@ -31,38 +30,28 @@ const CHAIN_CONFIGS: Record<number, ChainRedeemConfig> = {
   },
 };
 
-// Derive (chainId, tokenSymbol) → WormholeTransceiver proxy from
-// @mento-protocol/contracts. NttDeployHelper deploys proxies sequentially
-// from a fresh account, so CREATE(helper, nonce=4) is deterministic and
-// matches the proxy at runtime. Mirrors
-// `indexer-envio/scripts/generateNttAddresses.mjs` so a contracts bump
-// auto-extends manual-redeem support to any new bridged token without
-// touching this file.
-type ContractsJson = Record<
-  string,
-  Record<string, Record<string, { address: string; type?: string }>>
->;
+// NttDeployHelper deploys its NttManager + WormholeTransceiver proxies
+// sequentially from a fresh account, so CREATE(helper, nonce=4) is
+// deterministic and matches the proxy at runtime. See
+// indexer-envio/scripts/generateNttAddresses.mjs for the full nonce table.
+// Deriving from contracts.json means a contracts bump auto-extends
+// manual-redeem support to any new bridged token.
 const HELPER_PREFIX = "NttDeployHelper";
-const NAMESPACES = deploymentNamespaces as Record<string, string>;
-const CONTRACTS = contractsJson as ContractsJson;
 
 function buildTransceiverIndex(): Record<
   number,
   Record<string, `0x${string}`>
 > {
   const out: Record<number, Record<string, `0x${string}`>> = {};
-  for (const [chainIdStr, ns] of Object.entries(NAMESPACES)) {
+  for (const chainIdStr of Object.keys(CHAIN_CONFIGS)) {
     const chainId = Number(chainIdStr);
-    if (!(chainId in CHAIN_CONFIGS)) continue;
-    const entries = CONTRACTS[chainIdStr]?.[ns];
-    if (!entries) continue;
     const perToken: Record<string, `0x${string}`> = {};
-    for (const [name, info] of Object.entries(entries)) {
-      if (!name.startsWith(HELPER_PREFIX)) continue;
-      if (info.type !== "contract" || !info.address) continue;
-      const symbol = name.slice(HELPER_PREFIX.length);
+    for (const entry of contractEntries(chainId)) {
+      if (entry.type !== "contract") continue;
+      if (!entry.rawName.startsWith(HELPER_PREFIX)) continue;
+      const symbol = entry.rawName.slice(HELPER_PREFIX.length);
       const transceiver = getContractAddress({
-        from: info.address as `0x${string}`,
+        from: entry.address as `0x${string}`,
         nonce: BigInt(4),
       });
       perToken[symbol] = transceiver.toLowerCase() as `0x${string}`;
