@@ -11,9 +11,9 @@
 
 import FX_CALENDAR from "@mento-protocol/monitoring-config/fx-calendar.json";
 
-const FX_CLOSE_DAY = FX_CALENDAR.fxCloseDay;
+export const FX_CLOSE_DAY = FX_CALENDAR.fxCloseDay;
 export const FX_CLOSE_HOUR_UTC = FX_CALENDAR.fxCloseHourUtc;
-const FX_REOPEN_DAY = FX_CALENDAR.fxReopenDay;
+export const FX_REOPEN_DAY = FX_CALENDAR.fxReopenDay;
 export const FX_REOPEN_HOUR_UTC = FX_CALENDAR.fxReopenHourUtc;
 
 /**
@@ -110,4 +110,40 @@ export function weekendOverlapSeconds(startTs: number, endTs: number): number {
 export function tradingSecondsInRange(startTs: number, endTs: number): number {
   if (endTs <= startTs) return 0;
   return endTs - startTs - weekendOverlapSeconds(startTs, endTs);
+}
+
+/**
+ * Returns the next FX market open/close boundary relative to `now`. Used by
+ * the title-row Market Hours pill to render countdowns. Closed-form: walks
+ * the same ANCHOR_FRI_2100 weekly cycle as `weekendOverlapSeconds`.
+ *
+ * Holidays (Christmas Eve from 22:00 UTC, Christmas, NYE from 22:00, New
+ * Year) — recognised by the on-chain MarketHoursBreaker but NOT by the
+ * shared FX calendar — are NOT reflected here, mirroring the existing
+ * `isWeekend()` gate used across the dashboard.
+ */
+export function nextMarketHoursTransition(now = new Date()): {
+  kind: "CLOSE" | "OPEN";
+  at: Date;
+} {
+  const nowTs = Math.floor(now.getTime() / 1000);
+  const offset = nowTs - ANCHOR_FRI_2100;
+  let k = Math.floor(offset / WEEK_SECONDS);
+  // Walk forward at most a couple of cycles — boundary is always within one week.
+  for (let i = 0; i < 2; i++) {
+    const wStart = ANCHOR_FRI_2100 + k * WEEK_SECONDS;
+    const wEnd = wStart + WEEKEND_DURATION_SECONDS;
+    if (nowTs < wStart) {
+      return { kind: "CLOSE", at: new Date(wStart * 1000) };
+    }
+    if (nowTs < wEnd) {
+      return { kind: "OPEN", at: new Date(wEnd * 1000) };
+    }
+    k += 1;
+  }
+  // Unreachable in practice — fall through to next-weekend close.
+  return {
+    kind: "CLOSE",
+    at: new Date((ANCHOR_FRI_2100 + (k + 1) * WEEK_SECONDS) * 1000),
+  };
 }

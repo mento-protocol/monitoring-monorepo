@@ -80,6 +80,45 @@ contracts:
     events:
       - event: Transfer
 
+  # Circuit Breakers — see config.multichain.mainnet.yaml for the full
+  # rationale + event list. Mirrored here so testnet codegen + handler
+  # bindings stay aligned with mainnet (the breaker handlers in
+  # src/handlers/* always import from `generated`, regardless of which
+  # config is active).
+  - name: BreakerBox
+    abi_file_path: abis/BreakerBox.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: BreakerAdded
+      - event: BreakerRemoved
+      - event: BreakerStatusUpdated
+      - event: RateFeedAdded
+      - event: RateFeedRemoved
+      - event: BreakerTripped
+      - event: ResetSuccessful
+      - event: TradingModeUpdated
+
+  - name: MedianDeltaBreaker
+    abi_file_path: abis/MedianDeltaBreaker.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: DefaultCooldownTimeUpdated
+      - event: RateFeedCooldownTimeUpdated
+      - event: DefaultRateChangeThresholdUpdated
+      - event: RateChangeThresholdUpdated
+      - event: SmoothingFactorSet
+      - event: MedianRateEMAReset
+
+  - name: ValueDeltaBreaker
+    abi_file_path: abis/ValueDeltaBreaker.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: DefaultCooldownTimeUpdated
+      - event: RateFeedCooldownTimeUpdated
+      - event: DefaultRateChangeThresholdUpdated
+      - event: RateChangeThresholdUpdated
+      - event: ReferenceValueUpdated
+
 networks:
   # ---------------------------------------------------------------------------
   # Celo Sepolia (chain 11142220)
@@ -119,6 +158,15 @@ networks:
         address: [] # Not yet deployed on Celo Sepolia — add address when available
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
+      - name: BreakerBox
+        address:
+          - 0x578bD46003B9D3fd4c3C3f47c98B329562a6a1dE
+      - name: MedianDeltaBreaker
+        address:
+          - 0xd29B4e743F7B84D63fBF9149B6D983DF2eF5C952
+      - name: ValueDeltaBreaker
+        address:
+          - 0x03CDf2966185Eb0b980f2481Ad386B8aFdAB4534
 
   # ---------------------------------------------------------------------------
   # Monad Testnet (chain 10143)
@@ -146,6 +194,12 @@ networks:
       - name: OpenLiquidityStrategy
         address:
           - 0xCCd2aD0603a08EBc14D223a983171ef18192e8c9
+      - name: BreakerBox
+        address: [] # Not yet deployed on Monad Testnet — add address when available
+      - name: MedianDeltaBreaker
+        address: [] # Not yet deployed on Monad Testnet — add address when available
+      - name: ValueDeltaBreaker
+        address: [] # Not yet deployed on Monad Testnet — add address when available
 
 unordered_multichain_mode: true
 preload_handlers: true

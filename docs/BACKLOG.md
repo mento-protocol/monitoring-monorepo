@@ -1,6 +1,6 @@
 # Monitoring Monorepo — Task Backlog
 
-Last updated: 2026-04-24
+Last updated: 2026-04-28
 
 ## Next — Indexer: CDP strategy entity
 
@@ -54,8 +54,7 @@ Touchpoints: `indexer-envio/schema.graphql`, handler in `indexer-envio/src/handl
 - [ ] **Oracle update tx-hash label** — oracle alerts currently say `Last update: X ago` as plain text. Strictly better as a hyperlink to the exact on-chain `OracleReport` tx on the block explorer. Blocked on the indexer surfacing `lastOracleUpdateTxHash` (or equivalent) on the `Pool` entity — not currently tracked. Once added, the bridge exports it as a `last_oracle_update_url` label and the Slack template wraps "X ago" in `<url|text>`.
 - [ ] **Migrate Aegis v2 alerts to Slack** — Aegis still posts to Discord; v3 went Slack-native (`#alerts-critical` / `#alerts-warnings`). Unify once the v3 channel pair has a week+ of soak.
 - [ ] **Rebalance probe: AbortController for timed-out RPC calls** — `metrics-bridge/src/rebalance-probe.ts:64-75` uses `Promise.race` to cap each probe's wall-clock, but the underlying viem `client.call` keeps running on the dropped branch. With concurrency=5 and a stuck endpoint that's a small but real resource pin. Fix needs an `AbortController` threaded through to viem's transport so the probe is actually cancelled. Codex P2 on PR #235.
-- [ ] **Rebalance probe: handle `REBALANCE_PROBE_EVERY_N_POLLS=1`** — `poller.ts:21` predicate is `pollCycle % N !== 1`; with `N=1`, `pollCycle % 1` is always `0`, so EVERY_N=1 silently disables the probe. Default is 5 in shipped config so this is a future-config foot-gun, not a current bug. Fix is one line — use `(pollCycle % N) === 1 % N` or pre-increment + `=== 0` predicate. Cursor + Codex on PR #235.
-- [ ] **Rebalance probe: re-entrancy guard for overlapping cycles** — `metrics-bridge/src/rebalance-probe.ts:runRebalanceProbes` resets the gauge at the start of each cycle and writes results at the end, but is NOT mutex-protected. If a probe outlives its scheduled interval (the AbortController gap above), late `set(...)` calls from cycle N-1 land after cycle N has reset the gauge — restoring stale labels for the duration of cycle N. Test in `metrics-bridge/test/rebalance-probe.test.ts` ("documents the known limitation") locks the current behaviour so a future fix breaks the test loudly. Fix needs either (a) wrapping the runner in a per-process mutex (drops cycle N if N-1 still in flight), (b) tagging gauge writes with a cycle epoch and ignoring stale-epoch writes, or (c) the AbortController fix above (cancels in-flight cycle N-1 work before cycle N starts). Codex/specialist on PR #235.
+- [ ] **`pnpm generate:abis` to stop vendoring ABIs** — `indexer-envio/abis/{FPMM,SortedOracles,BreakerBox,...}.json` are hand-vendored copies of files that already ship in `@mento-protocol/contracts/abis/`. Envio's config YAML reads `abi_file_path` as a literal filesystem path at codegen time (so the package import path can't be used directly), and the `.pnpm/...` hoisted location is non-portable. Add a `pnpm generate:abis` script (mirror `pnpm generate:ntt-addresses` at `indexer-envio/src/wormhole/nttAddresses.ts`) that copies `node_modules/@mento-protocol/contracts/abis/*.json` into `indexer-envio/abis/` at install/preinstall time, gitignore the destination. Removes silent drift between vendored copies and `@mento-protocol/contracts` version bumps.
 
 ---
 
@@ -154,6 +153,7 @@ Touchpoints: `indexer-envio/schema.graphql`, handler in `indexer-envio/src/handl
 - [x] **Rebalance effectiveness alert** — `mento_pool_rebalance_effectiveness` gauge + Approach B (`avg_over_time < 0.2 AND deviation_ratio >= 1 AND increase(rebalance_count_total) > 0`, `for=15m`) (PR #212)
 - [x] **Slack UX** — pool pair labels populated (PR #209), tightened copy w/ oracle age (PR #211), channel name corrected to `#alerts-warnings` (PR #210)
 - [x] **Channel structure decision** — severity-split (`#alerts-critical` + `#alerts-warnings`) rather than domain-split (`#alerts-v3`); routing via rule-level `notification_settings` to bypass the Aegis-owned singleton notification policy
+- [x] **Rebalance probe: handle `REBALANCE_PROBE_EVERY_N_POLLS=1`** — flipped to 0-indexed cycle counter (increment AFTER probe check) + `(cycle % N) === 0` predicate. With the previous `=== 1` predicate, `cycle % 1` was always 0 so EVERY_N=1 silently disabled the probe. Cold-start invariant preserved (cycle 0 always fires). Cursor + Codex on PR #235
 
 ### Alerting (Aegis v2 — live)
 

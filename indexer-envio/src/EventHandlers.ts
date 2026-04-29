@@ -22,6 +22,9 @@ import "./handlers/sortedOracles";
 import "./handlers/virtualPool";
 import "./handlers/feeToken";
 import "./handlers/openLiquidityStrategy";
+import "./handlers/breakerBox";
+import "./handlers/medianDeltaBreaker";
+import "./handlers/valueDeltaBreaker";
 import "./handlers/wormhole/nttManager";
 import "./handlers/wormhole/wormholeTransceiver";
 
@@ -47,7 +50,14 @@ export {
   _clearMockFees,
   _evictCacheForChain,
   _getOracleCacheStats,
+  _setMockBreakerKind,
+  _setMockBreakerDefaults,
+  _setMockBreakerFeedState,
+  _setMockBreakerList,
+  _clearBreakerMocks,
 } from "./rpc";
+
+export { _clearBootstrapAttempted } from "./breakers";
 
 // Fee token test mocks and helpers
 export {

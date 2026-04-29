@@ -95,6 +95,43 @@ contracts:
     events:
       - event: Transfer
 
+  # Circuit Breakers (BreakerBox + MedianDelta + ValueDelta).
+  # MarketHoursBreaker is registered on-chain but emits no events; we
+  # represent it as a Breaker row (kind=MARKET_HOURS) seeded by BreakerAdded.
+  - name: BreakerBox
+    abi_file_path: abis/BreakerBox.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: BreakerAdded
+      - event: BreakerRemoved
+      - event: BreakerStatusUpdated
+      - event: RateFeedAdded
+      - event: RateFeedRemoved
+      - event: BreakerTripped
+      - event: ResetSuccessful
+      - event: TradingModeUpdated
+
+  - name: MedianDeltaBreaker
+    abi_file_path: abis/MedianDeltaBreaker.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: DefaultCooldownTimeUpdated
+      - event: RateFeedCooldownTimeUpdated
+      - event: DefaultRateChangeThresholdUpdated
+      - event: RateChangeThresholdUpdated
+      - event: SmoothingFactorSet
+      - event: MedianRateEMAReset
+
+  - name: ValueDeltaBreaker
+    abi_file_path: abis/ValueDeltaBreaker.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: DefaultCooldownTimeUpdated
+      - event: RateFeedCooldownTimeUpdated
+      - event: DefaultRateChangeThresholdUpdated
+      - event: RateChangeThresholdUpdated
+      - event: ReferenceValueUpdated
+
   # Bridge Flows — Wormhole NTT
   # Manager + Transceiver proxy addresses are derived from NttDeployHelper
   # addresses via CREATE nonce derivation. See scripts/generateNttAddresses.mjs
@@ -149,6 +186,15 @@ networks:
           - 0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f
       - name: ERC20FeeToken
         address: [] # Dynamically registered from FPMMDeployed events
+      - name: BreakerBox
+        address:
+          - 0x303ED1df62Fa067659B586EbEe8De0EcE824Ab39
+      - name: MedianDeltaBreaker
+        address:
+          - 0x49349F92D2B17d491e42C8fdB02D19f072F9B5D9
+      - name: ValueDeltaBreaker
+        address:
+          - 0x4DBC33B3abA78475A5AA4BC7A5B11445d387BF68
       - name: WormholeNttManager
         address:
           - 0xa4096343485a44c0f8d05ae6da311c18d63e38bc # USDm
@@ -185,6 +231,15 @@ networks:
           # CREATE2 deterministic — same address as Celo.
           # Verified deployed on Monad mainnet (eth_getCode returned bytecode).
           - 0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f
+      - name: BreakerBox
+        address:
+          - 0x9fc1E0d10fb38954Da385B8B25aB2BbaF3241722
+      - name: MedianDeltaBreaker
+        address:
+          - 0xca2e7563dfC30bc94687F3deAcF682E1dBAffA13
+      - name: ValueDeltaBreaker
+        address:
+          - 0x3E4F2Bca4f7192Be4C3c5E5bD4840F2E90a8Ba84
       - name: WormholeNttManager
         # Same proxy addresses as Celo — helpers are CREATE3 across chains and
         # the proxies are derived by CREATE(helper, nonce) which is also

@@ -14,6 +14,10 @@ vi.mock("../src/rebalance-probe.js", () => ({
   runRebalanceProbes: vi.fn().mockResolvedValue(undefined),
 }));
 
+// `REBALANCE_PROBE_EVERY_N_POLLS` is read once at import time from process.env
+// (see src/config.ts), so cadence-specific tests use vi.doMock + dynamic
+// import to get a fresh module with the env-overridden constant. The default
+// (N=5) tests use the top-level static import.
 import { poll, _resetPollCycleForTests } from "../src/poller.js";
 import { fetchPools } from "../src/graphql.js";
 import { markHealthy } from "../src/server.js";
@@ -96,7 +100,8 @@ describe("poll", () => {
 
   it("runs the rebalance probe on the FIRST successful poll (not delayed by N polls)", async () => {
     // Otherwise an operator restarting the bridge mid-breach would wait up
-    // to N×30s = 2.5 min for the reason annotation to attach.
+    // to N×30s = 2.5 min for the reason annotation to attach. Cycle 0 is
+    // the cold-start invariant — must always fire regardless of N.
     mockFetchPools.mockResolvedValueOnce(makePoolResponse());
     await poll();
     expect(mockRunRebalanceProbes).toHaveBeenCalledTimes(1);
@@ -104,7 +109,7 @@ describe("poll", () => {
 
   it("runs the rebalance probe every Nth poll (default N=5)", async () => {
     // Default REBALANCE_PROBE_EVERY_N_POLLS is 5; probe fires when
-    // (cycle % 5) === 1 → cycles 1 and 6.
+    // (cycle % 5) === 0 → cycles 0 and 5 across 6 polls.
     for (let i = 0; i < 6; i++) {
       mockFetchPools.mockResolvedValueOnce(makePoolResponse());
       await poll();
@@ -137,5 +142,96 @@ describe("poll", () => {
       expect.any(Error),
     );
     errorSpy.mockRestore();
+  });
+});
+
+/**
+ * Cadence regression tests.
+ *
+ * `REBALANCE_PROBE_EVERY_N_POLLS` is captured as a const at module-load time
+ * from `process.env`, so each cadence value needs a fresh module graph
+ * (env stub → resetModules → dynamic import). Locks the fix for the
+ * `EVERY_N=1` foot-gun (BACKLOG `Rebalance probe: handle EVERY_N=1`):
+ * with the previous `(cycle % N) === 1` predicate, `cycle % 1` is always 0
+ * so `=== 1` was never true and the probe silently never ran.
+ */
+describe("rebalance probe cadence", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    register.resetMetrics();
+    vi.clearAllMocks();
+  });
+
+  async function importIsolatedPoll(): Promise<{
+    poll: () => Promise<void>;
+    runRebalanceProbes: ReturnType<typeof vi.fn>;
+  }> {
+    // Re-apply mocks against the fresh module graph that `resetModules` will
+    // hand back; without this the dynamic `import("../src/poller.js")` below
+    // would resolve the real graphql + rebalance-probe modules.
+    vi.doMock("../src/graphql.js", () => ({ fetchPools: vi.fn() }));
+    vi.doMock("../src/server.js", () => ({ markHealthy: vi.fn() }));
+    vi.doMock("../src/rebalance-probe.js", () => ({
+      runRebalanceProbes: vi.fn().mockResolvedValue(undefined),
+    }));
+    const pollerMod = await import("../src/poller.js");
+    const graphqlMod = await import("../src/graphql.js");
+    const probeMod = await import("../src/rebalance-probe.js");
+    const isolatedFetchPools = vi.mocked(graphqlMod.fetchPools);
+    const isolatedRunProbes = vi.mocked(probeMod.runRebalanceProbes);
+    return {
+      poll: async () => {
+        isolatedFetchPools.mockResolvedValueOnce(makePoolResponse());
+        await pollerMod.poll();
+      },
+      runRebalanceProbes: isolatedRunProbes,
+    };
+  }
+
+  it("EVERY_N=1: probe runs on every successful poll (foot-gun regression)", async () => {
+    // Locks the BACKLOG foot-gun fix. Pre-fix, the predicate was
+    // `(cycle % N) !== 1` and `cycle % 1` is always 0, so the early-return
+    // ALWAYS triggered and the probe NEVER ran with EVERY_N=1.
+    vi.stubEnv("REBALANCE_PROBE_EVERY_N_POLLS", "1");
+    const { poll: isolatedPoll, runRebalanceProbes: probes } =
+      await importIsolatedPoll();
+
+    for (let i = 0; i < 5; i++) await isolatedPoll();
+    expect(probes).toHaveBeenCalledTimes(5);
+  });
+
+  it("EVERY_N=2: probe runs on cycles 0, 2, 4 (every 2nd poll)", async () => {
+    vi.stubEnv("REBALANCE_PROBE_EVERY_N_POLLS", "2");
+    const { poll: isolatedPoll, runRebalanceProbes: probes } =
+      await importIsolatedPoll();
+
+    // 6 polls → cycles 0..5 → fires on 0, 2, 4 = 3 calls.
+    for (let i = 0; i < 6; i++) await isolatedPoll();
+    expect(probes).toHaveBeenCalledTimes(3);
+  });
+
+  it("EVERY_N=5 (default): probe runs on cycles 0 and 5 across 6 polls", async () => {
+    vi.stubEnv("REBALANCE_PROBE_EVERY_N_POLLS", "5");
+    const { poll: isolatedPoll, runRebalanceProbes: probes } =
+      await importIsolatedPoll();
+
+    for (let i = 0; i < 6; i++) await isolatedPoll();
+    expect(probes).toHaveBeenCalledTimes(2);
+  });
+
+  it("EVERY_N=0 is rejected by config validation and falls back to default 5", async () => {
+    // Boundary check on the config parser: `>= 1` rejects 0/-1/0.5, so an
+    // operator typo (`EVERY_N=0`) does NOT silently disable the probe.
+    vi.stubEnv("REBALANCE_PROBE_EVERY_N_POLLS", "0");
+    const configMod = await import("../src/config.js");
+    expect(configMod.REBALANCE_PROBE_EVERY_N_POLLS).toBe(5);
+
+    // And the cadence behaves as N=5 in practice — cold-start fires once
+    // across 4 polls.
+    const { poll: isolatedPoll, runRebalanceProbes: probes } =
+      await importIsolatedPoll();
+    for (let i = 0; i < 4; i++) await isolatedPoll();
+    expect(probes).toHaveBeenCalledTimes(1);
   });
 });
