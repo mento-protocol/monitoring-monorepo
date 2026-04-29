@@ -701,29 +701,38 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   // FPMM.rebalance() (separate code path), and the 2× UpdateReserves
   // handlers in the same tx have already overwritten the entity by the
   // time we run — RPC at the previous block is the cleanest source.
-  const [rebalancingState, existing, preReserves, blockScopedIncentive] =
+  // We sequence the Pool.get first (cheap local lookup, no RPC) so we can
+  // skip `fetchRebalanceIncentiveAtBlock` for pools whose `rebalanceIncentive()`
+  // getter is already known missing (-2 sentinel from PR #222) — otherwise
+  // every rebalance on an old FPMM would trigger an RPC that's guaranteed
+  // to fail with `isUnsupportedGetterError`.
+  const existing = await context.Pool.get(poolId);
+  const incentiveGetterMissing = existing?.rebalanceReward === -2;
+  const [rebalancingState, preReserves, blockScopedIncentive] =
     await Promise.all([
       fetchRebalancingState(
         event.chainId,
         asAddress(event.srcAddress),
         blockNumber,
       ),
-      context.Pool.get(poolId),
       fetchReserves(
         event.chainId,
         asAddress(event.srcAddress),
         blockNumber - 1n,
       ),
-      // Read at the event block — `Pool.rebalanceReward` may carry
-      // today's value during full resync (fetchFees self-heals from
-      // `latest`), and we want the bps that was actually in force when
-      // this rebalance executed. Falls back to `pool.rebalanceReward`
-      // below on RPC failure or block-fallback.
-      fetchRebalanceIncentiveAtBlock(
-        event.chainId,
-        asAddress(event.srcAddress),
-        blockNumber,
-      ),
+      // Read at the event block — `Pool.rebalanceReward` may carry today's
+      // value during full resync (fetchFees self-heals from `latest`), and
+      // we want the bps that was actually in force when this rebalance
+      // executed. Falls back to `pool.rebalanceReward` below on RPC failure
+      // or block-fallback. Skipped for `-2` sentinel pools per the comment
+      // above — propagate the sentinel so `normalizeRewardBps` sees it.
+      incentiveGetterMissing
+        ? Promise.resolve(-2)
+        : fetchRebalanceIncentiveAtBlock(
+            event.chainId,
+            asAddress(event.srcAddress),
+            blockNumber,
+          ),
     ]);
 
   const rebalancerAddress = asAddress(event.params.sender);

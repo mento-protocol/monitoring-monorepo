@@ -541,7 +541,18 @@ const BLOCK_NOT_AVAILABLE_RE =
 
 export type BlockFallbackResult = {
   result: unknown;
+  /** True when the result came from anywhere other than the primary client at
+   *  the requested block — i.e. either the secondary RPC client (rate-limit
+   *  fallback) OR the `latest`-block fallback. Use this to skip block-scoped
+   *  cache writes that could serve stale-across-fallbacks data. */
   usedFallback: boolean;
+  /** True ONLY when the function fell back to reading `latest` instead of the
+   *  requested block. The result is NOT scoped to `blockNumber`. Callers that
+   *  need historical accuracy (rebalance delta computation, block-scoped event
+   *  snapshots) must reject these results. False when `blockNumber` was not
+   *  passed (caller didn't request a specific block) or when the fallback was
+   *  to the secondary RPC client at the same requested block. */
+  usedLatestFallback: boolean;
 };
 
 /** Maximum number of retries with the original blockNumber before falling back
@@ -583,7 +594,7 @@ export async function readContractWithBlockFallback(
 
   try {
     const result = await callWithBlock();
-    return { result, usedFallback: false };
+    return { result, usedFallback: false, usedLatestFallback: false };
   } catch (err) {
     // --- Rate limit handling: retry then fall back to secondary RPC ---
     if (isRateLimitError(err)) {
@@ -595,19 +606,21 @@ export async function readContractWithBlockFallback(
         await _testHooks.delayFn(delay);
         try {
           const result = await callWithBlock();
-          return { result, usedFallback: false };
+          return { result, usedFallback: false, usedLatestFallback: false };
         } catch (retryErr) {
           if (!isRateLimitError(retryErr)) throw retryErr;
         }
       }
       // Retries exhausted — try fallback client if available.
+      // Note: fallback client still queries the same `blockNumber`, so the
+      // result IS block-scoped. usedLatestFallback stays false.
       if (fallbackClient) {
         console.warn(
           `[RPC_RATE_LIMIT_FALLBACK] fn=${fn} target=${target} — primary rate-limited, using fallback RPC`,
         );
         try {
           const result = await makeCall(fallbackClient, blockNumber);
-          return { result, usedFallback: true };
+          return { result, usedFallback: true, usedLatestFallback: false };
         } catch (fallbackErr) {
           // Fallback also failed — throw the original rate limit error.
           throw err;
@@ -632,7 +645,7 @@ export async function readContractWithBlockFallback(
         await _testHooks.delayFn(delay);
         try {
           const result = await callWithBlock();
-          return { result, usedFallback: false };
+          return { result, usedFallback: false, usedLatestFallback: false };
         } catch (retryErr) {
           if (
             !(retryErr instanceof Error) ||
@@ -648,7 +661,7 @@ export async function readContractWithBlockFallback(
         `[RPC_BLOCK_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — retries exhausted, reading latest instead`,
       );
       const result = await makeCall(client, undefined);
-      return { result, usedFallback: true };
+      return { result, usedFallback: true, usedLatestFallback: true };
     }
     throw err;
   }
@@ -815,17 +828,21 @@ export async function fetchReserves(
 
   try {
     const client = getRpcClient(chainId);
-    const { result, usedFallback } = await readContractWithBlockFallback(
-      client,
-      {
-        address: poolAddress as `0x${string}`,
-        abi: FPMM_MINIMAL_ABI,
-        functionName: "getReserves",
-      },
-      blockNumber,
-      getFallbackRpcClient(chainId),
-    );
-    if (usedFallback && blockNumber !== undefined) {
+    const { result, usedFallback, usedLatestFallback } =
+      await readContractWithBlockFallback(
+        client,
+        {
+          address: poolAddress as `0x${string}`,
+          abi: FPMM_MINIMAL_ABI,
+          functionName: "getReserves",
+        },
+        blockNumber,
+        getFallbackRpcClient(chainId),
+      );
+    // Only the `latest`-block fallback breaks the historical-accuracy
+    // guarantee callers rely on. Secondary-RPC fallback still queries
+    // the requested block, so its result is fine to return.
+    if (usedLatestFallback) {
       return null;
     }
     const r = result as readonly [bigint, bigint, bigint];
@@ -1171,8 +1188,11 @@ async function readFeeGetter(
  * (which can carry today's value during full resync — `fetchFees` self-
  * heals from `latest`, not block-scoped). On RPC failure or fallback
  * to `latest`, returns null and the caller falls back to the persisted
- * Pool value. -2 sentinel ("returned no data") propagates so older FPMM
- * pools without the getter stop retrying. */
+ * Pool value. The `-2` return value mirrors the `fetchFees` "getter
+ * missing on this contract" sentinel — `Pool.rebalanceReward` uses it
+ * to halt the upsertPool self-heal retry loop on older FPMM pools, and
+ * propagating it here lets the Rebalanced handler short-circuit on
+ * subsequent events for the same pool. */
 export async function fetchRebalanceIncentiveAtBlock(
   chainId: number,
   poolAddress: string,
@@ -1180,7 +1200,7 @@ export async function fetchRebalanceIncentiveAtBlock(
 ): Promise<number | null> {
   try {
     const client = getRpcClient(chainId);
-    const { result, usedFallback } = await readContractWithBlockFallback(
+    const { result, usedLatestFallback } = await readContractWithBlockFallback(
       client,
       {
         address: poolAddress as `0x${string}`,
@@ -1190,7 +1210,9 @@ export async function fetchRebalanceIncentiveAtBlock(
       blockNumber,
       getFallbackRpcClient(chainId),
     );
-    if (usedFallback) return null;
+    // Only `latest`-block fallback breaks block-scoping; secondary-RPC
+    // fallback still queries the requested block, so its result is fine.
+    if (usedLatestFallback) return null;
     return Number(result as bigint);
   } catch (err) {
     if (isUnsupportedGetterError(err)) return -2;

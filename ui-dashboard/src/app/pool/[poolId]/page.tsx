@@ -1301,9 +1301,7 @@ export function RebalancesTab({
         Number(r.priceDifferenceAfter).toLocaleString(),
         formatBoundaryBps(r.rebalanceThreshold),
         formatEffectivenessPercent(r.effectivenessRatio),
-        r.rewardUsd && r.rewardUsd !== ""
-          ? formatUSD(Number(r.rewardUsd))
-          : null,
+        r.rewardUsd ? formatUSD(Number(r.rewardUsd)) : null,
         r.blockNumber,
       ]);
     });
@@ -1407,9 +1405,7 @@ export function RebalancesTab({
                     {formatEffectivenessPercent(r.effectivenessRatio) ?? "—"}
                   </Td>
                   <Td mono small align="right">
-                    {r.rewardUsd && r.rewardUsd !== ""
-                      ? formatUSD(Number(r.rewardUsd))
-                      : "—"}
+                    {r.rewardUsd ? formatUSD(Number(r.rewardUsd)) : "—"}
                   </Td>
                   <Td mono small muted align="right">
                     {formatBlock(r.blockNumber)}

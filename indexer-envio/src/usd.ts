@@ -3,7 +3,7 @@ import { KNOWN_TOKEN_META } from "./feeToken";
 /**
  * Tokens treated as $1.00 for USD conversion. Mirrors
  * `ui-dashboard/src/lib/tokens.ts:USD_PEGGED_SYMBOLS` — keep in sync. The
- * drift-protection test in `test/usdPeggedSymbols.test.ts` enforces this.
+ * drift-protection test in `test/usd.test.ts` enforces this.
  */
 export const USD_PEGGED_SYMBOLS = new Set<string>([
   "cUSD",
