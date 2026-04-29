@@ -130,15 +130,11 @@ locals {
   #     by construction; the nil-and-emptystring guard is defensive against
   #     a misconfigured probe writing only one half. Renders the standard
   #     "<reason_message> — [<reason_code>]" tag.
-  #   - inner Aegis dispatch — the firing series's `chain_name` AND `pair`
-  #     labels decide which Aegis reserve-balance series to render. The
-  #     chain guard prevents a Monad breach with the same pair name (e.g.
-  #     "USDC/USDm") from rendering Celo reserve data. Per-instance label
-  #     joining doesn't bind across the `mento_pool_*` ↔ `${TOKEN}_balanceOf`
-  #     boundary (Aegis labels are different), so the ResUSDC/ResUSDT/
-  #     ResAxlUSDC queries return ALL Reserve balances; this template
-  #     selects by both chain_name and pair. New stable pairs need both an
-  #     Aegis Treb source and a new branch here.
+  #   - inner Aegis dispatch — each ResX query is already pair-scoped via
+  #     the cross-join (pair="USDC/USDm" etc.), so only the matching pool
+  #     instance sees a non-nil $values.ResX. The chain/pair guards here
+  #     are defensive but harmless. New stable pairs need both an Aegis
+  #     Treb source and a new branch here + a new cross-join query.
   deviation_critical_rebalance_reason_annotation = <<-EOT
     {{- if $values.B -}}
       {{- $rm := index $values.B.Labels "reason_message" -}}
@@ -176,10 +172,14 @@ locals {
   #   - USDC / USDT / axlUSDC all expose 6dp on chain; `/ 1e6` normalises
   #     to human units so the template's `printf "%.2f"` renders in the
   #     same scale as the dashboard tooltip.
-  #   - Per-instance label match against query A's firing fingerprint
-  #     CANNOT bind here (Aegis emits different label sets), so each
-  #     query returns ALL Reserve balances. The `rebalance_reason`
-  #     template dispatches by the firing series's `pair` label.
+  #   - Aegis emits labels {chain="celo", job="aegis-metrics", owner=
+  #     "Reserve", ownerValue=...} — no pool_id / pair — so a bare query
+  #     returns no match against the per-pool alert instances. Fix: cross-
+  #     join via `label_replace(…) * on(chain_name) group_left(pool_id,
+  #     pair, …) (mento_pool_deviation_ratio{pair=X} * 0 + 1)`.
+  #     label_replace renames "chain" → "chain_name" for the join key;
+  #     the `* 0 + 1` scalar ensures the multiplier is 1 (not the deviation
+  #     value); pair filter scopes each ResX var to its own alert instance.
   deviation_critical_annotation_queries = [
     {
       ref_id = "Dev"
@@ -199,15 +199,15 @@ locals {
     },
     {
       ref_id = "ResUSDC"
-      expr   = "USDC_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6"
+      expr   = "label_replace(USDC_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"celo\", pair=\"USDC/USDm\"} * 0 + 1)"
     },
     {
       ref_id = "ResUSDT"
-      expr   = "USDT_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6"
+      expr   = "label_replace(USDT_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"celo\", pair=\"USDT/USDm\"} * 0 + 1)"
     },
     {
       ref_id = "ResAxlUSDC"
-      expr   = "axlUSDC_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6"
+      expr   = "label_replace(axlUSDC_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"celo\", pair=\"axlUSDC/USDm\"} * 0 + 1)"
     },
   ]
 }
