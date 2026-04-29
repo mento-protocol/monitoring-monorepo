@@ -1,4 +1,6 @@
-import { encodeFunctionData, parseAbi } from "viem";
+import { encodeFunctionData, getContractAddress, parseAbi } from "viem";
+import contractsJson from "@mento-protocol/contracts/contracts.json";
+import deploymentNamespaces from "@mento-protocol/monitoring-config/deployment-namespaces.json";
 import type { BridgeTransfer } from "@/lib/types";
 
 export type ChainRedeemConfig = {
@@ -29,24 +31,48 @@ const CHAIN_CONFIGS: Record<number, ChainRedeemConfig> = {
   },
 };
 
-// Keyed by (destChainId, tokenSymbol). Addresses sourced from
-// indexer-envio/config/nttAddresses.json — deterministic deployment means
-// the same proxy address is used on both Celo and Monad.
-const TRANSCEIVER_BY_CHAIN_AND_TOKEN: Record<
+// Derive (chainId, tokenSymbol) → WormholeTransceiver proxy from
+// @mento-protocol/contracts. NttDeployHelper deploys proxies sequentially
+// from a fresh account, so CREATE(helper, nonce=4) is deterministic and
+// matches the proxy at runtime. Mirrors
+// `indexer-envio/scripts/generateNttAddresses.mjs` so a contracts bump
+// auto-extends manual-redeem support to any new bridged token without
+// touching this file.
+type ContractsJson = Record<
+  string,
+  Record<string, Record<string, { address: string; type?: string }>>
+>;
+const HELPER_PREFIX = "NttDeployHelper";
+const NAMESPACES = deploymentNamespaces as Record<string, string>;
+const CONTRACTS = contractsJson as ContractsJson;
+
+function buildTransceiverIndex(): Record<
   number,
   Record<string, `0x${string}`>
-> = {
-  42220: {
-    USDm: "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b",
-    EURm: "0x6467cfca82184657f32f1195f9a26b5578399479",
-    GBPm: "0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f",
-  },
-  143: {
-    USDm: "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b",
-    EURm: "0x6467cfca82184657f32f1195f9a26b5578399479",
-    GBPm: "0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f",
-  },
-};
+> {
+  const out: Record<number, Record<string, `0x${string}`>> = {};
+  for (const [chainIdStr, ns] of Object.entries(NAMESPACES)) {
+    const chainId = Number(chainIdStr);
+    if (!(chainId in CHAIN_CONFIGS)) continue;
+    const entries = CONTRACTS[chainIdStr]?.[ns];
+    if (!entries) continue;
+    const perToken: Record<string, `0x${string}`> = {};
+    for (const [name, info] of Object.entries(entries)) {
+      if (!name.startsWith(HELPER_PREFIX)) continue;
+      if (info.type !== "contract" || !info.address) continue;
+      const symbol = name.slice(HELPER_PREFIX.length);
+      const transceiver = getContractAddress({
+        from: info.address as `0x${string}`,
+        nonce: BigInt(4),
+      });
+      perToken[symbol] = transceiver.toLowerCase() as `0x${string}`;
+    }
+    out[chainId] = perToken;
+  }
+  return out;
+}
+
+const TRANSCEIVER_BY_CHAIN_AND_TOKEN = buildTransceiverIndex();
 
 export function getChainRedeemConfig(
   chainId: number,

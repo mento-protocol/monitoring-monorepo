@@ -55,11 +55,15 @@ networks:
           - 0xa4096343485a44c0f8d05ae6da311c18d63e38bc # USDm
           - 0x7895d03ffdeb14a57ef79c21c3ea14dadf2a7c3f # GBPm
           - 0x5f8a1e50f83f53951b89fc73ead80b27045c67fd # EURm
+          - 0xbbfbe2791722e93f27c5ce80e3725c8dd8d09697 # CHFm
+          - 0x7431419fe761e7da37587245c55a35e5a356c91b # JPYm
       - name: WormholeTransceiver
         address:
           - 0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b # USDm
           - 0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f # GBPm
           - 0x6467cfca82184657f32f1195f9a26b5578399479 # EURm
+          - 0x0d05cf3f8d39dc988e69cc1bf37f972eadbdc093 # CHFm
+          - 0x01c9d280150f932d4a2fe11f40b0d72bffbcd339 # JPYm
 
   # Monad Mainnet — same proxy addresses (CREATE3 across chains).
   - id: 143
@@ -70,11 +74,15 @@ networks:
           - 0xa4096343485a44c0f8d05ae6da311c18d63e38bc # USDm
           - 0x7895d03ffdeb14a57ef79c21c3ea14dadf2a7c3f # GBPm
           - 0x5f8a1e50f83f53951b89fc73ead80b27045c67fd # EURm
+          - 0xbbfbe2791722e93f27c5ce80e3725c8dd8d09697 # CHFm
+          - 0x7431419fe761e7da37587245c55a35e5a356c91b # JPYm
       - name: WormholeTransceiver
         address:
           - 0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b # USDm
           - 0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f # GBPm
           - 0x6467cfca82184657f32f1195f9a26b5578399479 # EURm
+          - 0x0d05cf3f8d39dc988e69cc1bf37f972eadbdc093 # CHFm
+          - 0x01c9d280150f932d4a2fe11f40b0d72bffbcd339 # JPYm
 
 unordered_multichain_mode: true
 preload_handlers: true
