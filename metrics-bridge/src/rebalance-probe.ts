@@ -26,6 +26,7 @@ import { gauges, poolDisplayLabels } from "./metrics.js";
 import {
   isAbortError,
   probeRebalance,
+  scrubUrls,
   type RebalanceProbeResult,
 } from "./rebalance-check.js";
 import { getRpcClient } from "./rpc.js";
@@ -125,11 +126,11 @@ async function probeOne(pool: PoolRow): Promise<RebalanceProbeResult> {
       return { kind: "transport_error", error: timeoutMessage };
     }
     // Any other error escaping the probe is unexpected — surface it as a
-    // transport_error with the (URL-scrubbed) message rather than crashing
-    // the runner. `probeRebalance` already classifies its own transport
-    // errors, so this branch is effectively dead-code defense.
-    const message = err instanceof Error ? err.message : String(err);
-    return { kind: "transport_error", error: message.slice(0, 200) };
+    // transport_error with a URL-scrubbed message rather than crashing the
+    // runner. `probeRebalance` already classifies its own transport errors,
+    // so this branch is effectively dead-code defense.
+    const raw = err instanceof Error ? err.message : String(err);
+    return { kind: "transport_error", error: scrubUrls(raw).slice(0, 200) };
   } finally {
     // Always clear the timer so we don't leak a setTimeout per probe — at
     // `REBALANCE_PROBE_CONCURRENCY=5` and a 30s poll cadence, leaking a

@@ -23,6 +23,9 @@ vi.mock("../src/rebalance-check.js", () => ({
     const e = err as { name?: string; code?: string };
     return e.name === "AbortError" || e.code === "ABORT_ERR";
   },
+  // `probeOne` calls `scrubUrls` on the fallback error message path.
+  scrubUrls: (s: string) =>
+    s.replace(/https?:\/\/[^\s)]+/gi, "<rpc-url-redacted>"),
   ERROR_MESSAGES: {},
 }));
 vi.mock("../src/rpc.js", () => ({
@@ -290,6 +293,39 @@ describe("runRebalanceProbes — timeout race", () => {
     // Belt-and-braces: advance well past the timeout — should be a no-op.
     await vi.advanceTimersByTimeAsync(REBALANCE_PROBE_TIMEOUT_MS * 2);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("scrubs RPC URLs from the error message in the unexpected-error fallback", async () => {
+    // Regression guard for the fallback catch in `probeOne`: any non-abort
+    // error that escapes `probeRebalance` must have its message URL-scrubbed
+    // before appearing in `[REBALANCE_PROBE_FAILED]` logs. Without this,
+    // viem transport errors containing path-based API keys (e.g.
+    // "https://eth-mainnet.g.alchemy.com/v2/SECRET_KEY") would leak
+    // credentials into Cloud Run logs.
+    const pool = makePool({
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.50",
+    });
+    const urlInError = new Error(
+      "HTTP request failed. URL: https://eth-mainnet.g.alchemy.com/v2/SECRET_API_KEY_12345",
+    );
+    // Throw a plain (non-abort) Error so the fallback catch branch is hit.
+    mockProbe.mockRejectedValueOnce(urlInError);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await runRebalanceProbes([pool]);
+
+    // The raw URL must never appear in the log line.
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("[REBALANCE_PROBE_FAILED]"),
+    );
+    const logged = warn.mock.calls
+      .filter((args) => String(args[0]).includes("[REBALANCE_PROBE_FAILED]"))
+      .map((args) => String(args[0]))
+      .join("\n");
+    expect(logged).not.toContain("SECRET_API_KEY_12345");
+    expect(logged).toContain("<rpc-url-redacted>");
+    warn.mockRestore();
   });
 
   it("does not throw an AbortError downstream when the probe completes successfully", async () => {
