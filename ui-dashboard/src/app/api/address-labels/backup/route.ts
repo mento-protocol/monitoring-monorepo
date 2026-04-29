@@ -16,13 +16,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // the Blob store for a missing date file.
   try {
     const { global, chains } = await getAllLabels();
+    const now = new Date();
     const snapshot: AddressLabelsSnapshot = {
-      exportedAt: new Date().toISOString(),
+      exportedAt: now.toISOString(),
       global,
       chains,
     };
 
-    const date = new Date().toISOString().slice(0, 10);
+    const date = now.toISOString().slice(0, 10);
     const filename = `address-labels-backup-${date}.json`;
 
     const blob = await put(filename, JSON.stringify(snapshot, null, 2), {
