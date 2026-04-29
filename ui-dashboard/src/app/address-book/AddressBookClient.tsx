@@ -8,7 +8,11 @@ import { TagPills } from "@/components/tag-pills";
 import { ChainIcon } from "@/components/chain-icon";
 import { explorerAddressUrl } from "@/lib/tokens";
 import { truncateAddress } from "@/lib/format";
-import type { Scope } from "@/lib/address-labels-shared";
+import {
+  ARKHAM_TAG,
+  isArkhamSourced,
+  type Scope,
+} from "@/lib/address-labels-shared";
 import {
   NETWORKS,
   NETWORK_IDS,
@@ -18,7 +22,6 @@ import {
   type Network,
 } from "@/lib/networks";
 import { buildAddressBookRows, type AddressBookRow } from "@/lib/address-book";
-import { ARKHAM_TAG, isArkhamSourced } from "@/lib/arkham";
 
 type AddressRow = AddressBookRow;
 
@@ -513,8 +516,6 @@ function AddressTableRow({
   onEdit,
 }: AddressRowProps) {
   const arkhamSourced = isArkhamSourced({ source, tags });
-  // Hide the legacy provenance sentinel from the tags display so the
-  // column shows real metadata only.
   const displayTags = tags.filter((t) => t !== ARKHAM_TAG);
   return (
     <tr className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">

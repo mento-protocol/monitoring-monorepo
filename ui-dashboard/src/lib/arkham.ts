@@ -194,8 +194,6 @@ export function toAddressEntry(
   let label: string | undefined;
   let entity: ArkhamEntity | null = null;
   let topPrediction: ArkhamEntityPrediction | undefined;
-  // Tags carry real Arkham metadata only (entity type, behavioural slugs).
-  // Provenance lives in `AddressEntry.source` now.
   const tagSet = new Set<string>();
 
   for (const perChain of Object.values(data)) {

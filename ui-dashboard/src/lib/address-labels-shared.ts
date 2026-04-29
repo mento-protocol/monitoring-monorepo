@@ -41,8 +41,6 @@ export type AddressLabelsSnapshot = {
   chains: Record<string, Record<string, AddressEntry>>;
 };
 
-// Provenance helpers — Arkham is currently the only automated source
-
 /**
  * Legacy provenance tag. Pre-source-field entries persisted `"arkham"`
  * inside `tags`. New writes carry provenance in `AddressEntry.source`
