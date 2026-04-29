@@ -13,6 +13,7 @@ ENVIO_ORG="mento-protocol"
 ENVIO_INDEXER="mento"
 
 COMMIT="${1:-}"
+shift 2>/dev/null || true
 
 if [[ -z "$COMMIT" ]]; then
   # Auto-detect latest deployment
@@ -30,7 +31,7 @@ if [[ -z "$COMMIT" ]]; then
 fi
 
 echo "🚀 Promoting deployment $COMMIT to production..."
-npx -q envio-cloud deployment promote "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG"
+npx -q envio-cloud deployment promote "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "$@"
 echo ""
 echo "✅ Deployment $COMMIT is now production."
 echo "   Verify: https://monitoring.mento.org"
