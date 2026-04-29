@@ -6,6 +6,7 @@ import {
   getAllLabels,
   upgradeEntries,
   sanitizeEntry,
+  ARKHAM_TAG,
   type AddressEntry,
   type AddressLabelsSnapshot,
   type Scope,
@@ -23,12 +24,21 @@ import { isValidAddress } from "@/lib/format";
  * lived in.
  */
 /**
- * User-controlled imports must never assume Arkham provenance — even
- * re-importing an Arkham-enriched backup snapshot resets it. Only the
- * enrichment cron is allowed to set `source: "arkham"`.
+ * User-controlled imports must never claim Arkham provenance — neither via
+ * the new `source` field nor via the legacy `ARKHAM_TAG` tag sentinel that
+ * `isArkhamSourced` still honours for backward compat. Without stripping
+ * the tag, an authenticated user could import `tags: ["arkham"]` and have
+ * the next refresh cron clobber their entry as a re-enrichment target.
+ *
+ * Re-importing an Arkham-enriched backup snapshot also resets provenance —
+ * only the enrichment cron is allowed to set `source: "arkham"`.
  */
 function stripArkhamProvenance(entry: AddressEntry): AddressEntry {
-  return { ...entry, source: undefined };
+  return {
+    ...entry,
+    source: undefined,
+    tags: entry.tags.filter((t) => t !== ARKHAM_TAG),
+  };
 }
 
 async function buildCrossScopeExisting(): Promise<
