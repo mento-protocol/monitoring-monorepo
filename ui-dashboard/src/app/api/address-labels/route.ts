@@ -151,8 +151,18 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     // lose the entity attribution. The user-supplied body never gets to
     // SET source (no `source` in the destructure above); it's read here
     // from the prior entry only.
-    const priorScope = await getLabels(scope);
-    const prior = priorScope[address.toLowerCase()];
+    //
+    // Cross-scope lookup: strict either/or means the address lives in
+    // exactly one scope at a time; if the user is also changing scope
+    // (global ↔ chain), the prior row is in the OLD scope, not the new
+    // one. Search both so provenance survives the move. (Codex P2 catch.)
+    const all = await getAllLabels();
+    const addrLower = address.toLowerCase();
+    const prior =
+      all.global[addrLower] ??
+      Object.values(all.chains).find((c) => c[addrLower] !== undefined)?.[
+        addrLower
+      ];
     const preservedSource = prior?.source === "arkham" ? "arkham" : undefined;
 
     await upsertEntry(scope, address, {

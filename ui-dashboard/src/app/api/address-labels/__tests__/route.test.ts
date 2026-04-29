@@ -320,13 +320,16 @@ describe("PUT /api/address-labels", () => {
       user: { email: "alice@mentolabs.xyz" },
     });
     const address = "0x" + "a".repeat(40);
-    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
-      [address.toLowerCase()]: {
-        name: "Binance Hot Wallet 14",
-        tags: ["exchange"],
-        source: "arkham",
-        updatedAt: "2026-04-01T00:00:00Z",
+    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      global: {
+        [address.toLowerCase()]: {
+          name: "Binance Hot Wallet 14",
+          tags: ["exchange"],
+          source: "arkham",
+          updatedAt: "2026-04-01T00:00:00Z",
+        },
       },
+      chains: {},
     });
     const req = new NextRequest("http://localhost/api/address-labels", {
       method: "PUT",
@@ -337,6 +340,47 @@ describe("PUT /api/address-labels", () => {
         name: "Binance Hot Wallet 14",
         tags: ["exchange", "user-curated"],
         notes: "routes the bridge fees",
+      }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(200);
+    expect(upsertEntry).toHaveBeenCalledWith(
+      "global",
+      address,
+      expect.objectContaining({ source: "arkham" }),
+    );
+  });
+
+  it("preserves Arkham source when changing scope (chain → global)", async () => {
+    // The user moves an Arkham-sourced row from chain 42220 to global. The
+    // strict either/or semantics mean the entry currently lives ONLY in the
+    // chain scope; looking up the target scope alone would miss it. The
+    // cross-scope lookup must find it. (Codex P2 catch.)
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+    const address = "0x" + "a".repeat(40);
+    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      global: {},
+      chains: {
+        "42220": {
+          [address.toLowerCase()]: {
+            name: "Binance",
+            tags: ["exchange"],
+            source: "arkham",
+            updatedAt: "2026-04-01T00:00:00Z",
+          },
+        },
+      },
+    });
+    const req = new NextRequest("http://localhost/api/address-labels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: "global",
+        address,
+        name: "Binance",
+        tags: ["exchange"],
       }),
     });
     const res = await PUT(req);
