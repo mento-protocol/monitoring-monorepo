@@ -94,7 +94,10 @@ describe("computeRebalanceUsd", () => {
     assert.equal(result.rewardUsd, "");
   });
 
-  it("both tokens USD-pegged (e.g. USDm/USDC) → '' sentinel (ambiguous side)", () => {
+  it("both tokens USD-pegged (USDm/USDC): picks the side with larger USD notional", () => {
+    // USDm side: |delta0|/1e18 = 1000.0000 USD
+    // USDC side: |delta1|/1e6  = 1000.0001 USD (slightly larger after fees)
+    // Should use USDC side (larger).
     const result = computeRebalanceUsd({
       chainId: CHAIN_CELO,
       token0: USDM,
@@ -102,11 +105,26 @@ describe("computeRebalanceUsd", () => {
       token0Decimals: 18,
       token1Decimals: 6,
       amount0Delta: -1_000n * 10n ** 18n,
-      amount1Delta: 1_000_000_000n,
+      amount1Delta: 1_000_000_100n, // 1000.0001 USDC
       rewardBps: 25,
     });
-    assert.equal(result.notionalUsd, "");
-    assert.equal(result.rewardUsd, "");
+    assert.equal(result.notionalUsd, "1000.0001");
+    assert.equal(result.rewardUsd, "2.5000");
+  });
+
+  it("both tokens USD-pegged: picks token0 when its delta is larger", () => {
+    const result = computeRebalanceUsd({
+      chainId: CHAIN_CELO,
+      token0: USDM,
+      token1: USDC,
+      token0Decimals: 18,
+      token1Decimals: 6,
+      amount0Delta: -1_000n * 10n ** 18n, // 1000 USDM
+      amount1Delta: 999_500_000n, // 999.5 USDC
+      rewardBps: 100,
+    });
+    assert.equal(result.notionalUsd, "1000.0000");
+    assert.equal(result.rewardUsd, "10.0000");
   });
 
   it("neither token USD-pegged or unknown → '' sentinel", () => {

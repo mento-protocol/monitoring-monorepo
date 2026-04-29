@@ -836,9 +836,12 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   // recognizes as the uncomputable case → "" sentinel for both USD fields.
   const amount0Delta = preReserves ? pool.reserves0 - preReserves.reserve0 : 0n;
   const amount1Delta = preReserves ? pool.reserves1 - preReserves.reserve1 : 0n;
-  const rewardBps = normalizeRewardBps(
-    blockScopedIncentive ?? pool.rebalanceReward,
-  );
+  // No fallback to `pool.rebalanceReward` here: that field can be `latest`-
+  // seeded by upsertPool's self-heal (`fetchFees` is not block-scoped),
+  // which would re-introduce the historical-drift bug the block-scoped read
+  // was added to prevent. When the block-scoped read fails (RPC failure or
+  // `latest`-block fallback), we stamp 0 → "" sentinel reward in the UI.
+  const rewardBps = normalizeRewardBps(blockScopedIncentive ?? 0);
   const { notionalUsd, rewardUsd } = computeRebalanceUsd({
     chainId: event.chainId,
     token0: pool.token0,

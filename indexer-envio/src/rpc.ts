@@ -1182,6 +1182,26 @@ async function readFeeGetter(
   }) as Promise<bigint>;
 }
 
+/** Test-only sentinel: `null` represents an RPC failure mock, distinct
+ * from "no mock set" (which falls through to real RPC). */
+const _testIncentiveAtBlock = new Map<string, number | null>();
+
+/** @internal Test-only: pre-set a mock for `fetchRebalanceIncentiveAtBlock`.
+ *  Pass a number (incl. -2) to return that bps; pass `null` to simulate
+ *  RPC failure. Call `_clearMockRebalanceIncentivesAtBlock()` to reset. */
+export function _setMockRebalanceIncentiveAtBlock(
+  chainId: number,
+  poolAddress: string,
+  bps: number | null,
+): void {
+  _testIncentiveAtBlock.set(`${chainId}:${poolAddress.toLowerCase()}`, bps);
+}
+
+/** @internal Test-only: clear all `fetchRebalanceIncentiveAtBlock` mocks. */
+export function _clearMockRebalanceIncentivesAtBlock(): void {
+  _testIncentiveAtBlock.clear();
+}
+
 /** Read `rebalanceIncentive()` (bps) at a specific block. Used by the
  * Rebalanced handler to stamp the incentive that was actually in force
  * at the rebalance block, instead of inheriting `Pool.rebalanceReward`
@@ -1198,6 +1218,10 @@ export async function fetchRebalanceIncentiveAtBlock(
   poolAddress: string,
   blockNumber: bigint,
 ): Promise<number | null> {
+  const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
+  if (_testIncentiveAtBlock.has(testKey)) {
+    return _testIncentiveAtBlock.get(testKey) ?? null;
+  }
   try {
     const client = getRpcClient(chainId);
     const { result, usedLatestFallback } = await readContractWithBlockFallback(

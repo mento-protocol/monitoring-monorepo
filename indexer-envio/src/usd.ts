@@ -66,12 +66,14 @@ export interface RebalanceUsd {
 
 /**
  * Compute the USD notional + caller-incentive reward of a rebalance from the
- * reserve deltas. Uses the USD-pegged side's |delta| as the notional —
- * rebalances are roughly-symmetric swaps, so the non-pegged side × oracle
- * price would yield the same number within rounding (not enforced here).
+ * reserve deltas. Uses a USD-pegged side's |delta| as the notional —
+ * rebalances are roughly-symmetric swaps, so either pegged side gives the
+ * same number within rounding. For stable/stable pools (both legs pegged,
+ * e.g. USDC/USDm), picks whichever side has the larger USD notional after
+ * decimal normalization to be robust against asymmetric fees/rounding.
  *
- * Returns `{ "", "" }` when token addresses are missing, neither (or both)
- * tokens are USD-pegged, or both deltas are zero (RPC fallback path).
+ * Returns `{ "", "" }` only when token addresses are missing, neither token
+ * is USD-pegged, or both deltas are zero (RPC fallback path).
  */
 export function computeRebalanceUsd(input: RebalanceUsdInput): RebalanceUsd {
   const {
@@ -98,12 +100,21 @@ export function computeRebalanceUsd(input: RebalanceUsdInput): RebalanceUsd {
   const peg0 = sym0 !== undefined && USD_PEGGED_SYMBOLS.has(sym0);
   const peg1 = sym1 !== undefined && USD_PEGGED_SYMBOLS.has(sym1);
 
-  if (peg0 === peg1) {
+  if (!peg0 && !peg1) {
     return { notionalUsd: "", rewardUsd: "" };
   }
 
-  const absDelta = bAbs(peg0 ? amount0Delta : amount1Delta);
-  const decimals = peg0 ? token0Decimals : token1Decimals;
+  // Pick the pegged side. If both pegged, prefer the one with the larger
+  // USD notional after decimal scaling — cross-multiply to compare without
+  // dividing: a/10^da >= b/10^db ⇔ a × 10^db >= b × 10^da.
+  const a0 = bAbs(amount0Delta);
+  const a1 = bAbs(amount1Delta);
+  const useToken0 =
+    peg0 &&
+    (!peg1 ||
+      a0 * 10n ** BigInt(token1Decimals) >= a1 * 10n ** BigInt(token0Decimals));
+  const absDelta = useToken0 ? a0 : a1;
+  const decimals = useToken0 ? token0Decimals : token1Decimals;
 
   const notionalUsd = formatFixed4(absDelta, decimals);
   const rewardUsd = formatFixed4(
