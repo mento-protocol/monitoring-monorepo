@@ -186,6 +186,30 @@ describe("POST /api/address-labels/import", () => {
     );
   });
 
+  it("strips user-supplied source on simple-format import", async () => {
+    // An attacker (or someone re-importing an Arkham-enriched backup) cannot
+    // claim Arkham provenance via the import route — `stripArkhamProvenance`
+    // resets it before the entry is persisted.
+    const labels = {
+      [validAddress]: {
+        name: "Spoofed",
+        tags: ["exchange"],
+        source: "arkham",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    };
+    const res = await POST(jsonReq({ chainId: 42220, labels }));
+    expect(res.status).toBe(200);
+    expect(importLabels).toHaveBeenCalledWith(
+      42220,
+      expect.objectContaining({
+        [validAddress]: expect.not.objectContaining({
+          source: expect.anything(),
+        }),
+      }),
+    );
+  });
+
   it("deduplicates mixed-case duplicate addresses in simple JSON imports", async () => {
     const upper = validAddress.toUpperCase().replace(/^0X/, "0x");
     const labels = {

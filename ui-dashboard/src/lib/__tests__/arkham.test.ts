@@ -13,6 +13,7 @@ import {
   toAddressEntry,
   type ArkhamEnrichedAddress,
 } from "@/lib/arkham";
+import { isArkhamSourced } from "@/lib/address-labels-shared";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 
 function makePerChain(
@@ -328,6 +329,38 @@ describe("fetchHealth", () => {
   it("throws on 401", async () => {
     const f = mockFetch([{ status: 401 }]);
     await expect(fetchHealth("k", f)).rejects.toBeInstanceOf(ArkhamAuthError);
+  });
+});
+
+describe("isArkhamSourced", () => {
+  it("recognises new shape (source field)", () => {
+    expect(isArkhamSourced({ source: "arkham", tags: [] })).toBe(true);
+  });
+
+  it("recognises legacy shape (sentinel tag)", () => {
+    expect(isArkhamSourced({ tags: [ARKHAM_TAG, "exchange"] })).toBe(true);
+  });
+
+  it("returns false for manual entries", () => {
+    expect(isArkhamSourced({ tags: ["mento", "core"] })).toBe(false);
+  });
+
+  it("returns false on empty entry", () => {
+    expect(isArkhamSourced({})).toBe(false);
+  });
+
+  it("returns false when tags is undefined", () => {
+    expect(isArkhamSourced({ source: undefined })).toBe(false);
+  });
+
+  it("returns false when source is empty string", () => {
+    expect(isArkhamSourced({ source: "", tags: ["exchange"] })).toBe(false);
+  });
+
+  it("is case-sensitive on the legacy sentinel", () => {
+    // A user-supplied tag "Arkham" or "ARKHAM" must NOT count as Arkham-sourced.
+    expect(isArkhamSourced({ tags: ["Arkham"] })).toBe(false);
+    expect(isArkhamSourced({ tags: ["ARKHAM"] })).toBe(false);
   });
 });
 
