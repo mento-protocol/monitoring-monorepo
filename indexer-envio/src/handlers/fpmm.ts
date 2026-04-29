@@ -840,9 +840,12 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   // seeded by upsertPool's self-heal (`fetchFees` is not block-scoped),
   // which would re-introduce the historical-drift bug the block-scoped read
   // was added to prevent. When the block-scoped read fails (RPC failure or
-  // `latest`-block fallback), we stamp 0 → "" sentinel reward in the UI.
+  // `latest`-block fallback), `rewardBps` falls to 0 for arithmetic, but
+  // `rewardUsd` is forced to "" below so a real zero-incentive rebalance
+  // ("$0.00") stays distinguishable from "incentive unknown" ("—").
+  const incentiveUnknown = blockScopedIncentive === null;
   const rewardBps = normalizeRewardBps(blockScopedIncentive ?? 0);
-  const { notionalUsd, rewardUsd } = computeRebalanceUsd({
+  const { notionalUsd, rewardUsd: computedRewardUsd } = computeRebalanceUsd({
     chainId: event.chainId,
     token0: pool.token0,
     token1: pool.token1,
@@ -852,6 +855,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     amount1Delta,
     rewardBps,
   });
+  const rewardUsd = incentiveUnknown ? "" : computedRewardUsd;
 
   const rebalanced: RebalanceEvent = {
     id,

@@ -226,7 +226,7 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
     assert.equal(rebalance.notionalUsd, "1000.0000");
   });
 
-  it("stamps reward = '0.0000' when block-scoped incentive RPC fails (no fallback to Pool.rebalanceReward)", async function () {
+  it("stamps rewardUsd = '' when block-scoped incentive RPC fails (preserves notional, no fallback)", async function () {
     this.timeout(10_000);
     let mockDb = MockDb.createMockDb();
     mockDb = await seedRebalanceablePool(mockDb, {
@@ -238,9 +238,11 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
       reserve0: 100_000n * 10n ** 18n,
       reserve1: 50_000n * 10n ** 18n,
     });
-    // Simulate block-scoped RPC failure → null. Falling back to
-    // Pool.rebalanceReward (50) would yield rewardUsd = "5.0000"; the fix
-    // stamps 0 instead because that field can be `latest`-seeded.
+    // Simulate block-scoped RPC failure → null. We must NOT (a) fall back to
+    // Pool.rebalanceReward (`latest`-seeded by upsertPool's self-heal) nor
+    // (b) coerce to 0 (would render as "$0.00", indistinguishable from a
+    // real zero-incentive rebalance). Instead, stamp "" so the UI shows "—".
+    // Notional is reserves-derived and stays valid.
     _setMockRebalanceIncentiveAtBlock(CHAIN_CELO, POOL, null);
 
     const event = FPMM.Rebalanced.createMockEvent({
@@ -253,13 +255,22 @@ describe("FPMM.Rebalanced handler — USD profit fields", () => {
 
     const rebalance = mockDb.entities.RebalanceEvent.get(
       `${CHAIN_CELO}_603_5`,
-    ) as { rewardBps: number; rewardUsd: string };
+    ) as { rewardBps: number; rewardUsd: string; notionalUsd: string };
     assert.equal(
       rebalance.rewardBps,
       0,
-      "RPC failure must stamp 0, not fall back to potentially-stale Pool.rebalanceReward",
+      "RPC failure must NOT fall back to potentially-stale Pool.rebalanceReward",
     );
-    assert.equal(rebalance.rewardUsd, "0.0000");
+    assert.equal(
+      rebalance.rewardUsd,
+      "",
+      "RPC failure must produce '' sentinel (unknown), not '0.0000' (real zero)",
+    );
+    assert.equal(
+      rebalance.notionalUsd,
+      "1000.0000",
+      "Notional is reserves-derived and stays valid even when incentive RPC fails",
+    );
   });
 
   it("zero deltas (RPC fallback for pre-reserves) → '' sentinel for both USD fields", async function () {
