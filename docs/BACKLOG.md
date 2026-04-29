@@ -1,6 +1,6 @@
 # Monitoring Monorepo — Task Backlog
 
-Last updated: 2026-04-28
+Last updated: 2026-04-29
 
 ## Next — Indexer: CDP strategy entity
 
@@ -54,7 +54,6 @@ Touchpoints: `indexer-envio/schema.graphql`, handler in `indexer-envio/src/handl
 - [ ] Revenue page placeholders ("CDP Borrowing Fees" and "Reserve Yield" marked "Soon")
 - [ ] **Oracle update tx-hash label** — oracle alerts currently say `Last update: X ago` as plain text. Strictly better as a hyperlink to the exact on-chain `OracleReport` tx on the block explorer. Blocked on the indexer surfacing `lastOracleUpdateTxHash` (or equivalent) on the `Pool` entity — not currently tracked. Once added, the bridge exports it as a `last_oracle_update_url` label and the Slack template wraps "X ago" in `<url|text>`.
 - [ ] **Migrate Aegis v2 alerts to Slack** — Aegis still posts to Discord; v3 went Slack-native (`#alerts-critical` / `#alerts-warnings`). Unify once the v3 channel pair has a week+ of soak.
-- [ ] **`pnpm generate:abis` to stop vendoring ABIs** — `indexer-envio/abis/{FPMM,SortedOracles,BreakerBox,...}.json` are hand-vendored copies of files that already ship in `@mento-protocol/contracts/abis/`. Envio's config YAML reads `abi_file_path` as a literal filesystem path at codegen time (so the package import path can't be used directly), and the `.pnpm/...` hoisted location is non-portable. Add a `pnpm generate:abis` script (mirror `pnpm generate:ntt-addresses` at `indexer-envio/src/wormhole/nttAddresses.ts`) that copies `node_modules/@mento-protocol/contracts/abis/*.json` into `indexer-envio/abis/` at install/preinstall time, gitignore the destination. Removes silent drift between vendored copies and `@mento-protocol/contracts` version bumps.
 
 ---
 
@@ -89,6 +88,7 @@ Touchpoints: `indexer-envio/schema.graphql`, handler in `indexer-envio/src/handl
 - [x] Deploy branch strategy (`deploy/celo-mainnet`, `deploy/celo-sepolia`)
 - [x] Token addresses sourced from `@mento-protocol/contracts`
 - [x] Retry + fallback RPC on rate limit and block-out-of-range errors
+- [x] **`pnpm generate:abis`** — refresh vendored Mento ABIs from `@mento-protocol/contracts/abis/`. Scoped to upstream-shipped ABIs (8 files); minimal hand-curated `ERC20.json` + `wormhole/*.json` stay vendored. Output committed (mirrors `nttAddresses.json`) so Envio Cloud builds don't depend on `node_modules`
 
 ### Dashboard
 

@@ -21,7 +21,7 @@ This is mandatory for cross-layer/stateful data work. Do not assume the UI/query
 - `src/contractAddresses.ts` — Contract address resolution from `@mento-protocol/contracts`; also exports `CONTRACT_NAMESPACE_BY_CHAIN` (backed by `config/deployment-namespaces.json`)
 - `config/deployment-namespaces.json` — Vendored copy of the chain ID → active namespace map used by Envio hosted builds
 - `scripts/run-envio-with-env.mjs` — Wrapper that loads .env before running envio CLI
-- `abis/` — Contract ABIs (FPMMFactory, FPMM, VirtualPoolFactory); SortedOracles + token ABIs come from `@mento-protocol/contracts`
+- `abis/` — Vendored ABIs, refreshed from `@mento-protocol/contracts` via `pnpm generate:abis`. ERC20 stub + Wormhole NTT minimal subsets are hand-vendored (excluded from the script — see `scripts/generateAbis.mjs` header).
 
 ## Commands
 
