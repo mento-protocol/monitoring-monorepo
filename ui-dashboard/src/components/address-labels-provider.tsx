@@ -13,6 +13,7 @@ import { useNetwork } from "@/components/network-provider";
 import { truncateAddress } from "@/lib/format";
 import { NETWORKS, networkIdForChainId, type Network } from "@/lib/networks";
 import {
+  normalizeArkhamLegacy,
   upgradeEntries,
   type AddressEntry,
   type Scope,
@@ -134,13 +135,17 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
   const state: EntriesState = data ?? emptyState();
 
   const customEntries: AddressEntryRow[] = useMemo(() => {
+    // Normalise legacy entries here so every UI consumer (table, editor
+    // pre-fill, autocomplete) sees clean tags + a populated `source` field
+    // for pre-migration rows. Read-only — server-side write paths still go
+    // through `stripArkhamProvenance` to avoid auto-promoting user input.
     const rows: AddressEntryRow[] = [];
     for (const [address, entry] of Object.entries(state.global)) {
-      rows.push({ address, scope: "global", ...entry });
+      rows.push({ address, scope: "global", ...normalizeArkhamLegacy(entry) });
     }
     for (const [chainId, chainEntries] of state.chains) {
       for (const [address, entry] of Object.entries(chainEntries)) {
-        rows.push({ address, scope: chainId, ...entry });
+        rows.push({ address, scope: chainId, ...normalizeArkhamLegacy(entry) });
       }
     }
     rows.sort((a, b) => a.name.localeCompare(b.name));

@@ -145,11 +145,22 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     });
 
   try {
+    // Preserve server-controlled provenance across edits. A user editing
+    // notes/tags on an Arkham-sourced row must NOT silently demote it to
+    // `custom` — that would drop it out of future refresh cron runs and
+    // lose the entity attribution. The user-supplied body never gets to
+    // SET source (no `source` in the destructure above); it's read here
+    // from the prior entry only.
+    const priorScope = await getLabels(scope);
+    const prior = priorScope[address.toLowerCase()];
+    const preservedSource = prior?.source === "arkham" ? "arkham" : undefined;
+
     await upsertEntry(scope, address, {
       name: trimmedName,
       tags: deduplicatedTags,
       notes: trimmedNotes,
       isPublic: isPublic === true,
+      ...(preservedSource ? { source: preservedSource } : {}),
     });
     return NextResponse.json({ ok: true });
   } catch (err) {

@@ -62,6 +62,27 @@ export function isArkhamSourced(entry: {
   return entry.source === "arkham" || entry.tags?.includes(ARKHAM_TAG) === true;
 }
 
+/**
+ * Normalise a legacy-shaped entry (`tags` carries the `ARKHAM_TAG` sentinel,
+ * no `source` field) into the new shape (`source: "arkham"`, sentinel removed
+ * from tags). New-shape entries pass through untouched.
+ *
+ * Apply this at READ-direction UI boundaries so editor pre-fill, autocomplete
+ * suggestions, and the table all see the same clean tag list. Do NOT apply
+ * at server-side import paths — that would auto-promote a user-imported
+ * `tags: ["arkham"]` to Arkham-sourced (see `stripArkhamProvenance` instead).
+ */
+export function normalizeArkhamLegacy(entry: AddressEntry): AddressEntry {
+  if (entry.source === "arkham" || !entry.tags?.includes(ARKHAM_TAG)) {
+    return entry;
+  }
+  return {
+    ...entry,
+    source: "arkham",
+    tags: entry.tags.filter((t) => t !== ARKHAM_TAG),
+  };
+}
+
 // Backward-compat: auto-upgrade legacy entries on read
 
 /**

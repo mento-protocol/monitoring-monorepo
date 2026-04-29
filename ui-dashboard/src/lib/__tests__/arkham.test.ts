@@ -13,7 +13,10 @@ import {
   toAddressEntry,
   type ArkhamEnrichedAddress,
 } from "@/lib/arkham";
-import { isArkhamSourced } from "@/lib/address-labels-shared";
+import {
+  isArkhamSourced,
+  normalizeArkhamLegacy,
+} from "@/lib/address-labels-shared";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 
 function makePerChain(
@@ -361,6 +364,38 @@ describe("isArkhamSourced", () => {
     // A user-supplied tag "Arkham" or "ARKHAM" must NOT count as Arkham-sourced.
     expect(isArkhamSourced({ tags: ["Arkham"] })).toBe(false);
     expect(isArkhamSourced({ tags: ["ARKHAM"] })).toBe(false);
+  });
+});
+
+describe("normalizeArkhamLegacy", () => {
+  it("upgrades legacy entry: strips sentinel + sets source", () => {
+    const entry: AddressEntry = {
+      name: "Binance",
+      tags: [ARKHAM_TAG, "exchange"],
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    const normalized = normalizeArkhamLegacy(entry);
+    expect(normalized.source).toBe("arkham");
+    expect(normalized.tags).toEqual(["exchange"]);
+  });
+
+  it("leaves new-shape entries untouched", () => {
+    const entry: AddressEntry = {
+      name: "Binance",
+      tags: ["exchange"],
+      source: "arkham",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    expect(normalizeArkhamLegacy(entry)).toBe(entry);
+  });
+
+  it("leaves manual entries untouched", () => {
+    const entry: AddressEntry = {
+      name: "Treasury",
+      tags: ["mento", "core"],
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    expect(normalizeArkhamLegacy(entry)).toBe(entry);
   });
 });
 

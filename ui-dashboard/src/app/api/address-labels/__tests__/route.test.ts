@@ -283,10 +283,14 @@ describe("PUT /api/address-labels", () => {
     expect(res.status).toBe(200);
   });
 
-  it("ignores user-supplied source field (server-controlled only)", async () => {
+  it("ignores attacker-supplied source on a previously-unlabelled row", async () => {
+    // Prior state: no entry for this address. User submits `source: "arkham"`
+    // in the body. The route never destructures `source` from the body, so it
+    // can't promote the new entry to Arkham-sourced.
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
       user: { email: "alice@mentolabs.xyz" },
     });
+    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
     const address = "0x" + "a".repeat(40);
     const req = new NextRequest("http://localhost/api/address-labels", {
       method: "PUT",
@@ -296,17 +300,51 @@ describe("PUT /api/address-labels", () => {
         address,
         name: "Spoofed",
         tags: ["foo"],
-        source: "arkham", // attacker tries to claim Arkham provenance
+        source: "arkham", // ignored — route never destructures `source`
       }),
     });
     const res = await PUT(req);
     expect(res.status).toBe(200);
-    // The route never propagates `source` into upsertEntry — security is at
-    // the destructure boundary. Lock this in as a regression test.
     expect(upsertEntry).toHaveBeenCalledWith(
       "global",
       address,
       expect.not.objectContaining({ source: expect.anything() }),
+    );
+  });
+
+  it("preserves existing Arkham source on edit (notes/tags update)", async () => {
+    // Prior state: an Arkham-enriched entry. User edits notes/tags via the
+    // dashboard — the body has no `source`, but the existing provenance must
+    // survive so the entry stays in the refresh cron's candidate set.
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+    const address = "0x" + "a".repeat(40);
+    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      [address.toLowerCase()]: {
+        name: "Binance Hot Wallet 14",
+        tags: ["exchange"],
+        source: "arkham",
+        updatedAt: "2026-04-01T00:00:00Z",
+      },
+    });
+    const req = new NextRequest("http://localhost/api/address-labels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: "global",
+        address,
+        name: "Binance Hot Wallet 14",
+        tags: ["exchange", "user-curated"],
+        notes: "routes the bridge fees",
+      }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(200);
+    expect(upsertEntry).toHaveBeenCalledWith(
+      "global",
+      address,
+      expect.objectContaining({ source: "arkham" }),
     );
   });
 
