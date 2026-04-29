@@ -14,16 +14,6 @@ import {
 import { isValidAddress } from "@/lib/format";
 
 /**
- * Build a `lowercase address → existing entry` lookup across every scope.
- *
- * When an import moves an address from one scope to another, the server's
- * strict either/or invariant HDELs the source scope. Merging only against
- * the target scope's entries would drop the user's notes/isPublic from the
- * source. This helper flattens every scope into one map so the merge step
- * can pull metadata forward regardless of which scope the prior entry
- * lived in.
- */
-/**
  * User-controlled imports must never claim Arkham provenance — neither via
  * the new `source` field nor via the legacy `ARKHAM_TAG` tag sentinel that
  * `isArkhamSourced` still honours for backward compat. Without stripping
@@ -41,6 +31,16 @@ function stripArkhamProvenance(entry: AddressEntry): AddressEntry {
   };
 }
 
+/**
+ * Build a `lowercase address → existing entry` lookup across every scope.
+ *
+ * When an import moves an address from one scope to another, the server's
+ * strict either/or invariant HDELs the source scope. Merging only against
+ * the target scope's entries would drop the user's notes/isPublic from the
+ * source. This helper flattens every scope into one map so the merge step
+ * can pull metadata forward regardless of which scope the prior entry
+ * lived in.
+ */
 async function buildCrossScopeExisting(): Promise<
   Record<string, AddressEntry>
 > {
