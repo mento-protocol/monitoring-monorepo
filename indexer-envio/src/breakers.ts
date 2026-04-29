@@ -197,16 +197,19 @@ export async function bootstrapFeedBreakerConfigs(
   // brief network blip would leave breaker state missing until restart.
   const breakerAddresses = await fetchBreakerList(chainId, blockNumber);
   if (!breakerAddresses) return; // RPC failed — let the next event retry.
-  // FIFO eviction when over cap. Sets preserve insertion order so we drop
-  // the oldest entry; that feed's next event simply re-bootstraps (the
-  // BreakerConfig rows already written persist, so the work is cheap).
-  if (_bootstrapAttempted.size >= BOOTSTRAP_ATTEMPTED_MAX) {
-    const oldest = _bootstrapAttempted.values().next().value;
-    if (oldest !== undefined) _bootstrapAttempted.delete(oldest);
+  if (breakerAddresses.length === 0) {
+    // Empty list is itself authoritative (no breakers registered for this
+    // BreakerBox at this block) — safe to cache so we don't refetch.
+    markBootstrapAttempted(cacheKey);
+    return;
   }
-  _bootstrapAttempted.add(cacheKey);
-  if (breakerAddresses.length === 0) return;
 
+  // Track whether every per-breaker hydration call succeeded. A null return
+  // from `ensureBreaker` or `ensureBreakerConfig` means the underlying RPC
+  // call failed mid-bootstrap — we MUST NOT cache the feed in that case, or
+  // the failed breaker stays unhydrated until process restart. The next
+  // event re-runs bootstrap; rows already written are idempotent.
+  let allSucceeded = true;
   for (const breakerAddress of breakerAddresses) {
     const breaker = await ensureBreaker(
       context,
@@ -215,15 +218,32 @@ export async function bootstrapFeedBreakerConfigs(
       blockNumber,
       blockTimestamp,
     );
-    if (!breaker) continue;
-    await ensureBreakerConfig(
+    if (!breaker) {
+      allSucceeded = false;
+      continue;
+    }
+    const cfg = await ensureBreakerConfig(
       context,
       chainId,
       breaker,
       rateFeedID,
       blockNumber,
     );
+    if (!cfg) allSucceeded = false;
   }
+
+  if (allSucceeded) markBootstrapAttempted(cacheKey);
+}
+
+/** Add a feed to the bootstrap-attempted cache, applying FIFO eviction when
+ * we're at the soft cap. Sets preserve insertion order so we drop the oldest
+ * entry; the evicted feed's next event simply re-bootstraps (idempotent). */
+function markBootstrapAttempted(cacheKey: string): void {
+  if (_bootstrapAttempted.size >= BOOTSTRAP_ATTEMPTED_MAX) {
+    const oldest = _bootstrapAttempted.values().next().value;
+    if (oldest !== undefined) _bootstrapAttempted.delete(oldest);
+  }
+  _bootstrapAttempted.add(cacheKey);
 }
 
 /** Per-feed cooldown overrides the breaker default; sentinel 0 = inherit. */

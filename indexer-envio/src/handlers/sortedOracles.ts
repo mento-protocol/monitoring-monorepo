@@ -280,7 +280,16 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   // BreakerBox.sol:336-342). For each MedianDelta config, compute the new
   // EMA per the contract's Fixidity formula. ValueDelta keeps the same
   // referenceValue but still gets `lastMedianRate` / `lastUpdatedAt`.
-  if (oraclePrice > 0n) {
+  //
+  // We DO mirror zero medians (oracle outage / all reports expired). The
+  // dashboard's `computeLiveDelta` treats `lastMedianRate === 0` as "no
+  // valid data" and renders the missing-data dash; if we skipped the mirror
+  // here, the panel would keep showing the pre-outage value as if it were
+  // still live, misleading reset-path triage. The contract itself does not
+  // recompute EMA on zero medians (BreakerBox.sol:336-342 only fires on
+  // non-zero), so we skip the EMA branch but still write the zero into
+  // `lastMedianRate` + bump `lastUpdatedAt`.
+  {
     let configsForMirror = breakerConfigs;
     // Eager bootstrap: for v3 feeds whose breaker config was set entirely
     // before our `start_block`, no later event triggers lazy hydration. On
@@ -308,8 +317,12 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
           if (!cfg.enabled) return;
           const breaker = await context.Breaker.get(cfg.breaker_id);
           if (!breaker) return;
+          // EMA only recomputes on a positive median (the contract skips
+          // zero medians too — BreakerBox.sol:336-342). On a zero median,
+          // preserve the existing EMA but still mirror the zero into
+          // `lastMedianRate` so the panel renders the missing-data dash.
           const nextEMA =
-            breaker.kind === "MEDIAN_DELTA"
+            breaker.kind === "MEDIAN_DELTA" && oraclePrice > 0n
               ? nextMedianEMA(
                   oraclePrice,
                   cfg.medianRatesEMA ?? 0n,

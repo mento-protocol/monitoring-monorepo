@@ -168,7 +168,7 @@ export function MarketHoursPill({ pool }: Props): React.ReactElement | null {
     >
       <span className="text-emerald-300 font-medium">Market Open</span>
       <span className="text-slate-500">·</span>
-      <span className="mono text-slate-300">{scheduleString()}</span>
+      <span className="font-mono text-slate-300">{scheduleString()}</span>
       <span className="sr-only"> — {tooltip}</span>
     </span>
   );
