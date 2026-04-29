@@ -13,6 +13,7 @@ import { useNetwork } from "@/components/network-provider";
 import { truncateAddress } from "@/lib/format";
 import { NETWORKS, networkIdForChainId, type Network } from "@/lib/networks";
 import {
+  isArkhamSourced,
   normalizeArkhamLegacy,
   upgradeEntries,
   type AddressEntry,
@@ -301,12 +302,29 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
       scope: Scope,
     ): Promise<void> => {
       const lower = address.toLowerCase();
-      const optimistic: AddressEntry = {
-        name: entry.name,
-        tags: entry.tags,
-        notes: entry.notes,
-        isPublic: entry.isPublic,
-        updatedAt: new Date().toISOString(),
+      // Carry server-side provenance into the optimistic write so the
+      // SOURCE badge doesn't flash from "arkham" to "custom" between the
+      // optimistic update and the SWR refetch. Mirrors the PUT handler's
+      // cross-scope `isArkhamSourced(prior)` check.
+      const buildOptimistic = (current: EntriesState): AddressEntry => {
+        const prior =
+          current.global[lower] ??
+          (() => {
+            for (const [, chainEntries] of current.chains) {
+              if (chainEntries[lower]) return chainEntries[lower];
+            }
+            return undefined;
+          })();
+        const preservedSource =
+          prior && isArkhamSourced(prior) ? "arkham" : undefined;
+        return {
+          name: entry.name,
+          tags: entry.tags,
+          notes: entry.notes,
+          isPublic: entry.isPublic,
+          ...(preservedSource ? { source: preservedSource } : {}),
+          updatedAt: new Date().toISOString(),
+        };
       };
 
       await mutate(
@@ -328,11 +346,16 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
             const body = (await res.json()) as { error?: string };
             throw new Error(body.error ?? "Failed to save entry");
           }
-          return applyOptimistic(current, scope, lower, optimistic);
+          return applyOptimistic(
+            current,
+            scope,
+            lower,
+            buildOptimistic(current),
+          );
         },
         {
           optimisticData: (current: EntriesState = emptyState()) =>
-            applyOptimistic(current, scope, lower, optimistic),
+            applyOptimistic(current, scope, lower, buildOptimistic(current)),
           rollbackOnError: true,
         },
       );
