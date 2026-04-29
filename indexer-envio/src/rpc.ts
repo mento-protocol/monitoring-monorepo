@@ -781,6 +781,14 @@ export function _resetRebalancingStateCacheForTests(): void {
 /**
  * Fetch current on-chain reserves for a pool via getReserves().
  * Returns null on RPC failure so callers preserve stale reserves.
+ *
+ * When `blockNumber` is provided and the archive node falls back to
+ * `latest` (retries exhausted on the historical block), this returns
+ * null rather than the latest reserves — historical-scoped callers
+ * (e.g. rebalance delta computation) need to detect the failure
+ * instead of being silently fed `latest` data masquerading as the
+ * requested block. Callers that want best-effort latest can omit
+ * `blockNumber`.
  */
 export async function fetchReserves(
   chainId: number,
@@ -817,6 +825,9 @@ export async function fetchReserves(
       blockNumber,
       getFallbackRpcClient(chainId),
     );
+    if (usedFallback && blockNumber !== undefined) {
+      return null;
+    }
     const r = result as readonly [bigint, bigint, bigint];
     const reserves = { reserve0: r[0], reserve1: r[1] };
     if (!usedFallback) {
@@ -1152,6 +1163,40 @@ async function readFeeGetter(
     abi: FPMM_FEE_ABI,
     functionName,
   }) as Promise<bigint>;
+}
+
+/** Read `rebalanceIncentive()` (bps) at a specific block. Used by the
+ * Rebalanced handler to stamp the incentive that was actually in force
+ * at the rebalance block, instead of inheriting `Pool.rebalanceReward`
+ * (which can carry today's value during full resync — `fetchFees` self-
+ * heals from `latest`, not block-scoped). On RPC failure or fallback
+ * to `latest`, returns null and the caller falls back to the persisted
+ * Pool value. -2 sentinel ("returned no data") propagates so older FPMM
+ * pools without the getter stop retrying. */
+export async function fetchRebalanceIncentiveAtBlock(
+  chainId: number,
+  poolAddress: string,
+  blockNumber: bigint,
+): Promise<number | null> {
+  try {
+    const client = getRpcClient(chainId);
+    const { result, usedFallback } = await readContractWithBlockFallback(
+      client,
+      {
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_FEE_ABI,
+        functionName: "rebalanceIncentive",
+      },
+      blockNumber,
+      getFallbackRpcClient(chainId),
+    );
+    if (usedFallback) return null;
+    return Number(result as bigint);
+  } catch (err) {
+    if (isUnsupportedGetterError(err)) return -2;
+    logRpcFailure(chainId, "rebalanceIncentive", poolAddress, err, blockNumber);
+    return null;
+  }
 }
 
 /** Fetch FPMM fee config (bps): lpFee, protocolFee, rebalanceIncentive.

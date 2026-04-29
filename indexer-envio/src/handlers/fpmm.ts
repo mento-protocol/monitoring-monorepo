@@ -43,6 +43,7 @@ import {
   fetchTradingLimits,
   fetchFees,
   fetchReserves,
+  fetchRebalanceIncentiveAtBlock,
 } from "../rpc";
 import { computeRebalanceUsd, normalizeRewardBps } from "../usd";
 import {
@@ -700,15 +701,30 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   // FPMM.rebalance() (separate code path), and the 2× UpdateReserves
   // handlers in the same tx have already overwritten the entity by the
   // time we run — RPC at the previous block is the cleanest source.
-  const [rebalancingState, existing, preReserves] = await Promise.all([
-    fetchRebalancingState(
-      event.chainId,
-      asAddress(event.srcAddress),
-      blockNumber,
-    ),
-    context.Pool.get(poolId),
-    fetchReserves(event.chainId, asAddress(event.srcAddress), blockNumber - 1n),
-  ]);
+  const [rebalancingState, existing, preReserves, blockScopedIncentive] =
+    await Promise.all([
+      fetchRebalancingState(
+        event.chainId,
+        asAddress(event.srcAddress),
+        blockNumber,
+      ),
+      context.Pool.get(poolId),
+      fetchReserves(
+        event.chainId,
+        asAddress(event.srcAddress),
+        blockNumber - 1n,
+      ),
+      // Read at the event block — `Pool.rebalanceReward` may carry
+      // today's value during full resync (fetchFees self-heals from
+      // `latest`), and we want the bps that was actually in force when
+      // this rebalance executed. Falls back to `pool.rebalanceReward`
+      // below on RPC failure or block-fallback.
+      fetchRebalanceIncentiveAtBlock(
+        event.chainId,
+        asAddress(event.srcAddress),
+        blockNumber,
+      ),
+    ]);
 
   const rebalancerAddress = asAddress(event.params.sender);
 
@@ -811,7 +827,9 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   // recognizes as the uncomputable case → "" sentinel for both USD fields.
   const amount0Delta = preReserves ? pool.reserves0 - preReserves.reserve0 : 0n;
   const amount1Delta = preReserves ? pool.reserves1 - preReserves.reserve1 : 0n;
-  const rewardBps = normalizeRewardBps(pool.rebalanceReward);
+  const rewardBps = normalizeRewardBps(
+    blockScopedIncentive ?? pool.rebalanceReward,
+  );
   const { notionalUsd, rewardUsd } = computeRebalanceUsd({
     chainId: event.chainId,
     token0: pool.token0,

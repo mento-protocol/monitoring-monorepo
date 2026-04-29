@@ -184,7 +184,19 @@ export const POOL_REBALANCES_PAGE = `
       id chainId sender caller priceDifferenceBefore priceDifferenceAfter
       txHash blockNumber blockTimestamp
       improvement rebalanceThreshold effectivenessRatio
-      amount0Delta amount1Delta rewardBps notionalUsd rewardUsd
+    }
+  }
+`;
+
+// Isolated from POOL_REBALANCES_PAGE (same rationale as POOL_CONFIG_EXT):
+// new indexer fields, hosted Hasura rejects them during the deploy+resync
+// window, so the Rebalances tab survives and the Reward column degrades
+// to "—" instead of the whole tab erroring. Looked up by row id so the
+// shape mirrors whatever page the main query returned.
+export const POOL_REBALANCES_USD_EXT = `
+  query PoolRebalancesUsdExt($ids: [String!]!) {
+    RebalanceEvent(where: { id: { _in: $ids } }) {
+      id amount0Delta amount1Delta rewardBps notionalUsd rewardUsd
     }
   }
 `;

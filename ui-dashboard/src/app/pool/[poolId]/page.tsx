@@ -77,6 +77,7 @@ import {
   POOL_REBALANCES,
   POOL_REBALANCES_COUNT,
   POOL_REBALANCES_PAGE,
+  POOL_REBALANCES_USD_EXT,
   POOL_RESERVES,
   POOL_SWAPS_COUNT,
   POOL_SWAPS_PAGE,
@@ -1244,7 +1245,32 @@ export function RebalancesTab({
     offset: fetchOffset,
     orderBy,
   });
-  const rows = data?.RebalanceEvent ?? [];
+  const baseRows = data?.RebalanceEvent ?? [];
+
+  // EXT query for the new USD profit fields. Isolated so a Hasura
+  // schema-lag during deploy degrades the Reward column to "—" instead
+  // of breaking the whole tab. Fetch by row id from the main page so
+  // the result mirrors whatever the main query returned.
+  const rebalanceIds = useMemo(() => baseRows.map((r) => r.id), [baseRows]);
+  const { data: usdData } = useGQL<{
+    RebalanceEvent: Pick<
+      RebalanceEvent,
+      | "id"
+      | "amount0Delta"
+      | "amount1Delta"
+      | "rewardBps"
+      | "notionalUsd"
+      | "rewardUsd"
+    >[];
+  }>(rebalanceIds.length > 0 ? POOL_REBALANCES_USD_EXT : null, {
+    ids: rebalanceIds,
+  });
+  const rows = useMemo(() => {
+    const usdById = new Map(
+      (usdData?.RebalanceEvent ?? []).map((r) => [r.id, r]),
+    );
+    return baseRows.map((r) => ({ ...r, ...(usdById.get(r.id) ?? {}) }));
+  }, [baseRows, usdData]);
 
   // Separate chart query — fetch up to 200 events for the trend chart
   const { data: chartData } = useGQL<{ RebalanceEvent: RebalanceEvent[] }>(
