@@ -42,7 +42,10 @@ import {
   fetchNumReporters,
   fetchTradingLimits,
   fetchFees,
+  fetchReserves,
+  fetchRebalanceIncentiveAtBlock,
 } from "../rpc";
+import { computeRebalanceUsd, normalizeRewardBps } from "../usd";
 import {
   DEFAULT_ORACLE_FIELDS,
   maybePreloadPool,
@@ -692,14 +695,45 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
 
   // Fire RPC + Pool.get concurrently (see UpdateReserves handler).
   // Use raw srcAddress for RPC calls (not the namespaced poolId).
-  const [rebalancingState, existing] = await Promise.all([
-    fetchRebalancingState(
-      event.chainId,
-      asAddress(event.srcAddress),
-      blockNumber,
-    ),
-    context.Pool.get(poolId),
-  ]);
+  // `preReserves` is sampled at `blockNumber - 1` so that subtracting from
+  // the post-rebalance reserves on `pool` (after `upsertPool` below) gives
+  // the rebalance's swap notional. Sibling Swap events are not emitted by
+  // FPMM.rebalance() (separate code path), and the 2× UpdateReserves
+  // handlers in the same tx have already overwritten the entity by the
+  // time we run — RPC at the previous block is the cleanest source.
+  // We sequence the Pool.get first (cheap local lookup, no RPC) so we can
+  // skip `fetchRebalanceIncentiveAtBlock` for pools whose `rebalanceIncentive()`
+  // getter is already known missing (-2 sentinel from PR #222) — otherwise
+  // every rebalance on an old FPMM would trigger an RPC that's guaranteed
+  // to fail with `isUnsupportedGetterError`.
+  const existing = await context.Pool.get(poolId);
+  const incentiveGetterMissing = existing?.rebalanceReward === -2;
+  const [rebalancingState, preReserves, blockScopedIncentive] =
+    await Promise.all([
+      fetchRebalancingState(
+        event.chainId,
+        asAddress(event.srcAddress),
+        blockNumber,
+      ),
+      fetchReserves(
+        event.chainId,
+        asAddress(event.srcAddress),
+        blockNumber - 1n,
+      ),
+      // Read at the event block — `Pool.rebalanceReward` may carry today's
+      // value during full resync (fetchFees self-heals from `latest`), and
+      // we want the bps that was actually in force when this rebalance
+      // executed. Falls back to `pool.rebalanceReward` below on RPC failure
+      // or block-fallback. Skipped for `-2` sentinel pools per the comment
+      // above — propagate the sentinel so `normalizeRewardBps` sees it.
+      incentiveGetterMissing
+        ? Promise.resolve(-2)
+        : fetchRebalanceIncentiveAtBlock(
+            event.chainId,
+            asAddress(event.srcAddress),
+            blockNumber,
+          ),
+    ]);
 
   const rebalancerAddress = asAddress(event.params.sender);
 
@@ -797,6 +831,32 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     rebalanceDelta: true,
   });
 
+  // Reserve deltas (post − pre). On RPC failure of `fetchReserves` at
+  // `blockNumber - 1`, both deltas stay 0, which `computeRebalanceUsd`
+  // recognizes as the uncomputable case → "" sentinel for both USD fields.
+  const amount0Delta = preReserves ? pool.reserves0 - preReserves.reserve0 : 0n;
+  const amount1Delta = preReserves ? pool.reserves1 - preReserves.reserve1 : 0n;
+  // No fallback to `pool.rebalanceReward` here: that field can be `latest`-
+  // seeded by upsertPool's self-heal (`fetchFees` is not block-scoped),
+  // which would re-introduce the historical-drift bug the block-scoped read
+  // was added to prevent. When the block-scoped read fails (RPC failure or
+  // `latest`-block fallback), `rewardBps` falls to 0 for arithmetic, but
+  // `rewardUsd` is forced to "" below so a real zero-incentive rebalance
+  // ("$0.00") stays distinguishable from "incentive unknown" ("—").
+  const incentiveUnknown = blockScopedIncentive === null;
+  const rewardBps = normalizeRewardBps(blockScopedIncentive ?? 0);
+  const { notionalUsd, rewardUsd: computedRewardUsd } = computeRebalanceUsd({
+    chainId: event.chainId,
+    token0: pool.token0,
+    token1: pool.token1,
+    token0Decimals: pool.token0Decimals,
+    token1Decimals: pool.token1Decimals,
+    amount0Delta,
+    amount1Delta,
+    rewardBps,
+  });
+  const rewardUsd = incentiveUnknown ? "" : computedRewardUsd;
+
   const rebalanced: RebalanceEvent = {
     id,
     chainId: event.chainId,
@@ -808,6 +868,11 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     improvement,
     rebalanceThreshold: rebalanceThresholdForEvent,
     effectivenessRatio: eventEffectivenessRatio,
+    amount0Delta,
+    amount1Delta,
+    rewardBps,
+    notionalUsd,
+    rewardUsd,
     txHash: event.transaction.hash,
     blockNumber,
     blockTimestamp,

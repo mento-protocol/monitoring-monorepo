@@ -278,6 +278,29 @@ type RebalanceEvent @index(fields: ["poolId", "blockTimestamp"]) {
   # already in-band, or before=0) — distinct from real 0% on purpose so
   # the UI can render "—" without hiding control-loop misses.
   effectivenessRatio: String!
+  # Token deltas across the rebalance: `reserves_post - reserves_pre`. Signed
+  # wei: positive means the pool received that token. Pre-rebalance reserves
+  # come from `getReserves()` at `blockNumber - 1`; on RPC failure both deltas
+  # are 0 and `notionalUsd`/`rewardUsd` are "" (sentinel — see below).
+  # Known limitation: `blockNumber - 1` is the previous block's end state,
+  # not the in-tx pre-rebalance state. If an earlier swap/mint/burn lands
+  # in the same block as the rebalance, its delta is folded in. Triggers
+  # on <5% of mainnet rebalances; revisit if the impact shows up in data
+  # (the architectural fix needs txHash-aware pre-UR tracking on Pool).
+  amount0Delta: BigInt!
+  amount1Delta: BigInt!
+  # `Pool.rebalanceReward` snapshot at event time (bps). -2 sentinel ("getter
+  # missing on this contract"; see PR #222) is normalized to 0 here so the
+  # reward arithmetic is well-defined.
+  rewardBps: Int!
+  # Notional USD value of the rebalance: |delta| of the USD-pegged side
+  # (USD_PEGGED_SYMBOLS in src/usd.ts) scaled by its decimals, fixed-point
+  # 4dp, e.g. "12345.6789". "" (empty) sentinel when the pool has no
+  # USD-pegged side or the pre-reserves RPC failed — distinct from "0.0000".
+  notionalUsd: String!
+  # `notionalUsd × rewardBps / 10000`, fixed-point 4dp. Mirrors the empty
+  # sentinel of `notionalUsd`. The UI renders "—" when empty.
+  rewardUsd: String!
   txHash: String!
   blockNumber: BigInt!
   blockTimestamp: BigInt! @index

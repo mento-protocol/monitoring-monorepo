@@ -541,7 +541,18 @@ const BLOCK_NOT_AVAILABLE_RE =
 
 export type BlockFallbackResult = {
   result: unknown;
+  /** True when the result came from anywhere other than the primary client at
+   *  the requested block — i.e. either the secondary RPC client (rate-limit
+   *  fallback) OR the `latest`-block fallback. Use this to skip block-scoped
+   *  cache writes that could serve stale-across-fallbacks data. */
   usedFallback: boolean;
+  /** True ONLY when the function fell back to reading `latest` instead of the
+   *  requested block. The result is NOT scoped to `blockNumber`. Callers that
+   *  need historical accuracy (rebalance delta computation, block-scoped event
+   *  snapshots) must reject these results. False when `blockNumber` was not
+   *  passed (caller didn't request a specific block) or when the fallback was
+   *  to the secondary RPC client at the same requested block. */
+  usedLatestFallback: boolean;
 };
 
 /** Maximum number of retries with the original blockNumber before falling back
@@ -583,7 +594,7 @@ export async function readContractWithBlockFallback(
 
   try {
     const result = await callWithBlock();
-    return { result, usedFallback: false };
+    return { result, usedFallback: false, usedLatestFallback: false };
   } catch (err) {
     // --- Rate limit handling: retry then fall back to secondary RPC ---
     if (isRateLimitError(err)) {
@@ -595,22 +606,28 @@ export async function readContractWithBlockFallback(
         await _testHooks.delayFn(delay);
         try {
           const result = await callWithBlock();
-          return { result, usedFallback: false };
+          return { result, usedFallback: false, usedLatestFallback: false };
         } catch (retryErr) {
           if (!isRateLimitError(retryErr)) throw retryErr;
         }
       }
       // Retries exhausted — try fallback client if available.
+      // Note: fallback client still queries the same `blockNumber`, so the
+      // result IS block-scoped. usedLatestFallback stays false.
       if (fallbackClient) {
         console.warn(
           `[RPC_RATE_LIMIT_FALLBACK] fn=${fn} target=${target} — primary rate-limited, using fallback RPC`,
         );
         try {
           const result = await makeCall(fallbackClient, blockNumber);
-          return { result, usedFallback: true };
+          return { result, usedFallback: true, usedLatestFallback: false };
         } catch (fallbackErr) {
-          // Fallback also failed — throw the original rate limit error.
-          throw err;
+          // Throw the fallback error (not the primary rate-limit error) so
+          // the caller can classify it — e.g. fetchRebalanceIncentiveAtBlock
+          // needs to see "returned no data" to stamp the -2 sentinel for
+          // older pools without the getter. The rate-limit context is
+          // already in the [RPC_RATE_LIMIT_FALLBACK] warning above.
+          throw fallbackErr;
         }
       }
       throw err;
@@ -632,7 +649,7 @@ export async function readContractWithBlockFallback(
         await _testHooks.delayFn(delay);
         try {
           const result = await callWithBlock();
-          return { result, usedFallback: false };
+          return { result, usedFallback: false, usedLatestFallback: false };
         } catch (retryErr) {
           if (
             !(retryErr instanceof Error) ||
@@ -648,7 +665,7 @@ export async function readContractWithBlockFallback(
         `[RPC_BLOCK_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — retries exhausted, reading latest instead`,
       );
       const result = await makeCall(client, undefined);
-      return { result, usedFallback: true };
+      return { result, usedFallback: true, usedLatestFallback: true };
     }
     throw err;
   }
@@ -781,6 +798,14 @@ export function _resetRebalancingStateCacheForTests(): void {
 /**
  * Fetch current on-chain reserves for a pool via getReserves().
  * Returns null on RPC failure so callers preserve stale reserves.
+ *
+ * When `blockNumber` is provided and the archive node falls back to
+ * `latest` (retries exhausted on the historical block), this returns
+ * null rather than the latest reserves — historical-scoped callers
+ * (e.g. rebalance delta computation) need to detect the failure
+ * instead of being silently fed `latest` data masquerading as the
+ * requested block. Callers that want best-effort latest can omit
+ * `blockNumber`.
  */
 export async function fetchReserves(
   chainId: number,
@@ -807,16 +832,23 @@ export async function fetchReserves(
 
   try {
     const client = getRpcClient(chainId);
-    const { result, usedFallback } = await readContractWithBlockFallback(
-      client,
-      {
-        address: poolAddress as `0x${string}`,
-        abi: FPMM_MINIMAL_ABI,
-        functionName: "getReserves",
-      },
-      blockNumber,
-      getFallbackRpcClient(chainId),
-    );
+    const { result, usedFallback, usedLatestFallback } =
+      await readContractWithBlockFallback(
+        client,
+        {
+          address: poolAddress as `0x${string}`,
+          abi: FPMM_MINIMAL_ABI,
+          functionName: "getReserves",
+        },
+        blockNumber,
+        getFallbackRpcClient(chainId),
+      );
+    // Only the `latest`-block fallback breaks the historical-accuracy
+    // guarantee callers rely on. Secondary-RPC fallback still queries
+    // the requested block, so its result is fine to return.
+    if (usedLatestFallback) {
+      return null;
+    }
     const r = result as readonly [bigint, bigint, bigint];
     const reserves = { reserve0: r[0], reserve1: r[1] };
     if (!usedFallback) {
@@ -1152,6 +1184,69 @@ async function readFeeGetter(
     abi: FPMM_FEE_ABI,
     functionName,
   }) as Promise<bigint>;
+}
+
+/** Test-only sentinel: `null` represents an RPC failure mock, distinct
+ * from "no mock set" (which falls through to real RPC). */
+const _testIncentiveAtBlock = new Map<string, number | null>();
+
+/** @internal Test-only: pre-set a mock for `fetchRebalanceIncentiveAtBlock`.
+ *  Pass a number (incl. -2) to return that bps; pass `null` to simulate
+ *  RPC failure. Call `_clearMockRebalanceIncentivesAtBlock()` to reset. */
+export function _setMockRebalanceIncentiveAtBlock(
+  chainId: number,
+  poolAddress: string,
+  bps: number | null,
+): void {
+  _testIncentiveAtBlock.set(`${chainId}:${poolAddress.toLowerCase()}`, bps);
+}
+
+/** @internal Test-only: clear all `fetchRebalanceIncentiveAtBlock` mocks. */
+export function _clearMockRebalanceIncentivesAtBlock(): void {
+  _testIncentiveAtBlock.clear();
+}
+
+/** Read `rebalanceIncentive()` (bps) at a specific block. Used by the
+ * Rebalanced handler to stamp the incentive that was actually in force
+ * at the rebalance block, instead of inheriting `Pool.rebalanceReward`
+ * (which can carry today's value during full resync — `fetchFees` self-
+ * heals from `latest`, not block-scoped). On RPC failure or fallback
+ * to `latest`, returns null and the caller falls back to the persisted
+ * Pool value. The `-2` return value mirrors the `fetchFees` "getter
+ * missing on this contract" sentinel — `Pool.rebalanceReward` uses it
+ * to halt the upsertPool self-heal retry loop on older FPMM pools, and
+ * propagating it here lets the Rebalanced handler short-circuit on
+ * subsequent events for the same pool. */
+export async function fetchRebalanceIncentiveAtBlock(
+  chainId: number,
+  poolAddress: string,
+  blockNumber: bigint,
+): Promise<number | null> {
+  const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
+  if (_testIncentiveAtBlock.has(testKey)) {
+    return _testIncentiveAtBlock.get(testKey) ?? null;
+  }
+  try {
+    const client = getRpcClient(chainId);
+    const { result, usedLatestFallback } = await readContractWithBlockFallback(
+      client,
+      {
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_FEE_ABI,
+        functionName: "rebalanceIncentive",
+      },
+      blockNumber,
+      getFallbackRpcClient(chainId),
+    );
+    // Only `latest`-block fallback breaks block-scoping; secondary-RPC
+    // fallback still queries the requested block, so its result is fine.
+    if (usedLatestFallback) return null;
+    return Number(result as bigint);
+  } catch (err) {
+    if (isUnsupportedGetterError(err)) return -2;
+    logRpcFailure(chainId, "rebalanceIncentive", poolAddress, err, blockNumber);
+    return null;
+  }
 }
 
 /** Fetch FPMM fee config (bps): lpFee, protocolFee, rebalanceIncentive.

@@ -349,6 +349,9 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
     rebalanceDelta: true,
   });
 
+  // VirtualPools don't fund rebalance incentives the way FPMMs do (no oracle
+  // band → no protocol-paid caller reward), so the USD profit fields stay
+  // empty here. metrics-bridge already filters VirtualPool rebalances out.
   const rebalanced: RebalanceEvent = {
     id,
     chainId: event.chainId,
@@ -360,6 +363,11 @@ VirtualPool.Rebalanced.handler(async ({ event, context }) => {
     improvement,
     rebalanceThreshold: rebalanceThresholdForEvent,
     effectivenessRatio: eventEffectivenessRatio,
+    amount0Delta: 0n,
+    amount1Delta: 0n,
+    rewardBps: 0,
+    notionalUsd: "",
+    rewardUsd: "",
     txHash: event.transaction.hash,
     blockNumber,
     blockTimestamp,
