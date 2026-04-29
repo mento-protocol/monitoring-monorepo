@@ -92,15 +92,6 @@ const rebalanceBlockedLabels = [
   "reason_code",
   "reason_message",
 ] as const;
-// Reserve-collateral enrichment gauges (balance + needed) carry a
-// `token_symbol` label so the Slack annotation can render "Current balance:
-// 0.00 axlUSDC / Needed for rebalancing: 12,500.00 axlUSDC" without parsing
-// `pair`. Bounded by the @mento-protocol/contracts token list (~10 symbols)
-// plus the literal "collateral" fallback when symbol resolution fails.
-// Emitted only on `RLS_RESERVE_OUT_OF_COLLATERAL`; transport errors during
-// enrichment leave the series absent and the alert template falls back to
-// the generic reason_message line.
-const rebalanceCollateralLabels = [...poolLabels, "token_symbol"] as const;
 
 export const gauges = {
   oracleOk: new Gauge({
@@ -209,24 +200,6 @@ export const gauges = {
     labelNames: rebalanceBlockedLabels,
     registers: [register],
   }),
-  // Reserve-collateral enrichment gauges. Set during the rebalance probe
-  // cycle when the strategy is Reserve AND the revert is
-  // `RLS_RESERVE_OUT_OF_COLLATERAL`. The Slack alert template reads them
-  // via `$values.Bal` / `$values.Need` to render the imbalance in
-  // human-readable token units. Reset alongside `rebalanceBlocked` at the
-  // start of each probe cycle (see `rebalance-probe.ts`).
-  rebalanceCollateralBalance: new Gauge({
-    name: "mento_pool_rebalance_collateral_balance",
-    help: "Current ERC20 balance of the collateral token held by the reserve, in human (decimal-adjusted) units. Set only on `RLS_RESERVE_OUT_OF_COLLATERAL`; absent for non-reserve strategies and when on-chain enrichment fetches fail (alert annotation falls through to the bounded reason_message in either case).",
-    labelNames: rebalanceCollateralLabels,
-    registers: [register],
-  }),
-  rebalanceCollateralNeeded: new Gauge({
-    name: "mento_pool_rebalance_collateral_needed",
-    help: "Strategy's required collateral transfer to close the breach, in human (decimal-adjusted) units. Sourced from `determineAction(pool).action.amountOwedToPool`. Set only on `RLS_RESERVE_OUT_OF_COLLATERAL`; absent otherwise — see `rebalance_collateral_balance` for the same gating semantics.",
-    labelNames: rebalanceCollateralLabels,
-    registers: [register],
-  }),
   rebalanceProbeLastRun: new Gauge({
     name: "mento_pool_rebalance_probe_last_run",
     help: "Unix timestamp of the last completed rebalance-reason probe cycle. 0 before the first cycle.",
@@ -247,18 +220,15 @@ export const counters = {
  * elsewhere:
  *   - `bridgeLastPoll` and `rebalanceProbeLastRun` are scalar self-monitoring
  *     gauges with no label set to evict.
- *   - `rebalanceBlocked` and `rebalanceCollateral*` are reset by the
- *     rebalance probe cycle (not the poll cycle), so their labels survive
- *     between probes — wiping them on every 30s poll would leave the
- *     alert annotation flickering off most of the time, since probes only
- *     run every Nth poll.
+ *   - `rebalanceBlocked` is reset by the rebalance probe cycle (not the
+ *     poll cycle), so its labels survive between probes — wiping them on
+ *     every 30s poll would leave the alert annotation flickering off most
+ *     of the time, since probes only run every Nth poll.
  */
 const POLL_PRESERVED_GAUGES = new Set<Gauge>([
   gauges.bridgeLastPoll,
   gauges.rebalanceProbeLastRun,
   gauges.rebalanceBlocked,
-  gauges.rebalanceCollateralBalance,
-  gauges.rebalanceCollateralNeeded,
 ]);
 
 export function updateMetrics(pools: PoolRow[]): void {

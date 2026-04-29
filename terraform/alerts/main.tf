@@ -104,23 +104,23 @@ locals {
   #     notation path that bit `current_deviation` doesn't apply here.)
   #   - `rebalance_reason` reads `$values.B.Labels.{reason_message,reason_code}`
   #     for the bounded Solidity-error explanation, then OPTIONALLY appends
-  #     `". Current balance: X token / Needed for rebalancing: Y token"`
-  #     when the reserve-collateral enrichment is present (RLS reverts only,
-  #     emitted by the metrics-bridge probe). `printf "%.2f"` keeps the
-  #     output deterministic across magnitudes; `Bal.Labels.token_symbol`
-  #     names the collateral. When the reserve-enrichment gauges are absent
-  #     (every other reason code, transport errors, non-reserve strategies)
-  #     the inner guard collapses and the line keeps the historical shape:
-  #     "<reason_message> — [<reason_code>]".
+  #     `· Reserve balance: X.XX <token> (via Aegis)` when the firing
+  #     pool's `pair` matches a USD-pegged stable we have Aegis coverage
+  #     for (USDC / USDT / axlUSDC, all on Celo). The balance value is
+  #     read from Aegis's existing per-token `${TOKEN}_balanceOf{owner=
+  #     "Reserve", chain="celo"}` series — production-stable for years and
+  #     refreshed every 10s — rather than a metrics-bridge probe (the
+  #     in-bridge enrichment shipped in PR #237 failed in production with
+  #     `[REBALANCE_PROBE_FAILED]: Missing or invalid parameters`, leaving
+  #     the gauges absent, which propagated NoData through this rule and
+  #     stuck the critical alerts in Normal for ~9h on 2026-04-28).
+  #     Monad reserves aren't in Aegis yet — see the Aegis Monad coverage
+  #     entry in BACKLOG.md.
   deviation_critical_current_deviation_annotation = "{{ if $values.Dev }}{{ printf \"%.0f%%\" $values.Dev.Value }} above threshold{{ end }}"
   deviation_critical_current_reserves_annotation  = "{{ if and $values.R0 $values.R1 }}{{ humanizePercentage $values.R0.Value }} {{ $values.R0.Labels.token_symbol }} / {{ humanizePercentage $values.R1.Value }} {{ $values.R1.Labels.token_symbol }}{{ end }}"
-  # Three-level nested guard — single-string form was 600+ chars and hard
-  # to audit visually. HEREDOC preserves the byte-identical rendered output
-  # via `{{-`/`-}}` whitespace trim markers (they strip ALL surrounding
-  # whitespace including the newline), so the output collapses to one line
-  # at render time exactly as before. The leading `{{- end }}` line of the
-  # heredoc is trimmed away by the template engine, leaving no trailing
-  # newline.
+  # HEREDOC keeps the multi-branch template legible — `{{-`/`-}}` whitespace
+  # trim markers strip ALL surrounding whitespace (including newlines), so
+  # the output collapses to a single line at render time.
   #
   # Branches:
   #   - outer `{{ if $values.B }}` — guards on the rebalance-blocked gauge
@@ -128,36 +128,55 @@ locals {
   #     annotation line).
   #   - middle `{{ if and $rm $rc }}` — both labels are 1:1 with the gauge
   #     by construction; the nil-and-emptystring guard is defensive against
-  #     a misconfigured probe writing only one half.
-  #   - inner `{{ if and $values.Bal $values.Need }}` — Reserve enrichment
-  #     present (RLS_RESERVE_OUT_OF_COLLATERAL only) → render symbol + balance.
-  #     Else branch falls through to "[reason_code]" tag for non-reserve
-  #     reasons, preserving the historical shape.
+  #     a misconfigured probe writing only one half. Renders the standard
+  #     "<reason_message> — [<reason_code>]" tag.
+  #   - inner Aegis dispatch — the firing series's `pair` label decides
+  #     which Aegis reserve-balance series we render. Per-instance label
+  #     joining doesn't bind across the `mento_pool_*` ↔ `${TOKEN}_balanceOf`
+  #     boundary (Aegis labels are different), so the ResUSDC/ResUSDT/
+  #     ResAxlUSDC queries return ALL Reserve balances; this template
+  #     selects the right one by `pair`. New stable pairs need both an
+  #     Aegis Treb source and a new branch here.
   deviation_critical_rebalance_reason_annotation = <<-EOT
     {{- if $values.B -}}
       {{- $rm := index $values.B.Labels "reason_message" -}}
       {{- $rc := index $values.B.Labels "reason_code" -}}
       {{- if and $rm $rc -}}
-        {{- $rm -}}
-        {{- if and $values.Bal $values.Need -}}
-          . Current balance: {{ printf "%.2f" $values.Bal.Value }} {{ $values.Bal.Labels.token_symbol }} / Needed for rebalancing: {{ printf "%.2f" $values.Need.Value }} {{ $values.Need.Labels.token_symbol -}}
-        {{- else -}}
-          {{ " — [" }}{{- $rc -}}{{ "]" }}
+        {{- $rm }} — [{{ $rc }}]
+        {{- $pair := index $labels "pair" -}}
+        {{- if and (eq $pair "USDC/USDm") $values.ResUSDC -}}
+          {{ " · Reserve balance: " }}{{ printf "%.2f" $values.ResUSDC.Value }} USDC (via Aegis)
+        {{- else if and (eq $pair "USDT/USDm") $values.ResUSDT -}}
+          {{ " · Reserve balance: " }}{{ printf "%.2f" $values.ResUSDT.Value }} USDT (via Aegis)
+        {{- else if and (eq $pair "axlUSDC/USDm") $values.ResAxlUSDC -}}
+          {{ " · Reserve balance: " }}{{ printf "%.2f" $values.ResAxlUSDC.Value }} axlUSDC (via Aegis)
         {{- end -}}
       {{- end -}}
     {{- end -}}
   EOT
 
   # ── Deviation Breach Critical annotation-only data sources ───────────────
-  # Both critical rules (magnitude-gated + anchored) wire the same six
-  # instant queries into `$values.{Dev,R0,R1,B,Bal,Need}` so the annotation
-  # locals above can render. Authored once here and consumed by `dynamic`
-  # blocks in `rules-fpmms.tf` so a query-shape change (new annotation,
-  # different time range) lands in one place. Keeping the list ordered:
-  # condition gauges first (Dev/R0/R1, used by current_deviation +
-  # current_reserves), then enrichment gauges (B/Bal/Need, used by
-  # rebalance_reason). The threshold node is rule-specific (warning has a
+  # Both critical rules (magnitude-gated + anchored) wire the same instant
+  # queries into `$values.*` so the annotation locals above can render.
+  # Authored once here and consumed by `dynamic` blocks in `rules-fpmms.tf`
+  # so a query-shape change (new annotation, different time range) lands
+  # in one place. The threshold node is rule-specific (warning has a
   # different bound than critical), so it stays inline in each rule.
+  #
+  # Aegis-sourced reserve balances (ResUSDC / ResUSDT / ResAxlUSDC):
+  #   - Read Aegis's existing `${TOKEN}_balanceOf{owner="Reserve",chain=
+  #     "celo"}` series (production-stable for years; refreshed every 10s
+  #     via Treb-driven RPC reads in the Aegis NestJS service).
+  #   - Celo-only — Monad reserves aren't tracked in Aegis yet; future
+  #     Monad-reserve breach annotations will lack the balance line until
+  #     Aegis grows Monad coverage. Tracked in BACKLOG.md.
+  #   - USDC / USDT / axlUSDC all expose 6dp on chain; `/ 1e6` normalises
+  #     to human units so the template's `printf "%.2f"` renders in the
+  #     same scale as the dashboard tooltip.
+  #   - Per-instance label match against query A's firing fingerprint
+  #     CANNOT bind here (Aegis emits different label sets), so each
+  #     query returns ALL Reserve balances. The `rebalance_reason`
+  #     template dispatches by the firing series's `pair` label.
   deviation_critical_annotation_queries = [
     {
       ref_id = "Dev"
@@ -176,12 +195,16 @@ locals {
       expr   = "mento_pool_rebalance_blocked > 0"
     },
     {
-      ref_id = "Bal"
-      expr   = "mento_pool_rebalance_collateral_balance"
+      ref_id = "ResUSDC"
+      expr   = "USDC_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6"
     },
     {
-      ref_id = "Need"
-      expr   = "mento_pool_rebalance_collateral_needed"
+      ref_id = "ResUSDT"
+      expr   = "USDT_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6"
+    },
+    {
+      ref_id = "ResAxlUSDC"
+      expr   = "axlUSDC_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6"
     },
   ]
 }

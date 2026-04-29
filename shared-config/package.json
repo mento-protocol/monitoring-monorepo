@@ -28,10 +28,6 @@
       "types": "./dist/erc20-abi.d.ts",
       "default": "./dist/erc20-abi.js"
     },
-    "./rebalance-enrichment": {
-      "types": "./dist/rebalance-enrichment.d.ts",
-      "default": "./dist/rebalance-enrichment.js"
-    },
     "./thresholds": {
       "types": "./dist/thresholds.d.ts",
       "default": "./dist/thresholds.js"

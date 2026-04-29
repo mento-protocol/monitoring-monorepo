@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   tokenSymbol,
-  tokenDecimals,
   poolName,
   contractEntries,
   chainTokenSymbols,
@@ -44,32 +43,6 @@ describe("tokenSymbol", () => {
   it("returns null for null/empty address", () => {
     expect(tokenSymbol(42220, null)).toBeNull();
     expect(tokenSymbol(42220, "")).toBeNull();
-  });
-});
-
-describe("tokenDecimals", () => {
-  it("returns the canonical decimals for known token addresses", () => {
-    // Decimals are immutable per contract — the canonical lookup means
-    // the metrics-bridge enrichment skips the per-probe `decimals()` RPC
-    // for ~10 stablecoin / FX symbols.
-    // USDm on Celo is an 18-decimal stable; USDC is 6dp.
-    expect(tokenDecimals(42220, USDM_CELO)).toBe(18);
-    expect(tokenDecimals(42220, USDC_CELO)).toBe(6);
-  });
-
-  it("strips Spoke suffix matching tokenSymbol (Monad addresses too)", () => {
-    expect(tokenDecimals(143, USDMSPOKE_MONAD)).toBe(18);
-  });
-
-  it("is case-insensitive on the address", () => {
-    expect(tokenDecimals(42220, USDM_CELO.toUpperCase())).toBe(18);
-  });
-
-  it("returns null for unknown addresses, chains, or empty input", () => {
-    expect(tokenDecimals(42220, "0xdeadbeef")).toBeNull();
-    expect(tokenDecimals(99999, USDM_CELO)).toBeNull();
-    expect(tokenDecimals(42220, null)).toBeNull();
-    expect(tokenDecimals(42220, "")).toBeNull();
   });
 });
 
