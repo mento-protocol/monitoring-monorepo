@@ -30,6 +30,9 @@
     "viem": "2.47.0"
   },
   "knip": {
+    "ignore": [
+      "scripts/arkham-smoke-test.mjs"
+    ],
     "ignoreDependencies": [
       "plotly.js-basic-dist-min",
       "postcss"

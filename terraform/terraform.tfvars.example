@@ -25,6 +25,13 @@ upstash_api_key = "..."
 # Provision the store once (see README), then paste the token here.
 # blob_read_write_token = "vercel_blob_rw_..."
 
+# ── Arkham Intelligence ───────────────────────────────────────────────────────
+# API key for the nightly /api/arkham/enrich cron that tags Mento counterparties.
+# Apply for access at https://intel.arkm.com/api — gated, no self-serve signup.
+# Leave empty until provisioned; the env var resource is `count`-gated so
+# `terraform apply` succeeds without it.
+# arkham_api_key = "..."
+
 # ── Google Cloud (metrics-bridge) ─────────────────────────────────────────────
 # Find with: gcloud organizations list
 gcp_org_id = "..."

@@ -161,6 +161,34 @@ describe("PUT /api/address-labels", () => {
     });
   });
 
+  it("strips the reserved 'arkham' provenance tag from user input", async () => {
+    // The arkham/enrich monthly refresh treats `tags.includes("arkham")` as
+    // "safe to overwrite". A user typing "arkham" via the label editor must
+    // not get their entry classified as arkham-sourced.
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+    const address = "0x" + "a".repeat(40);
+    const req = new NextRequest("http://localhost/api/address-labels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chainId: 42220,
+        address,
+        name: "My exchange",
+        tags: ["arkham", "Arkham", "ARKHAM", "exchange"],
+      }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(200);
+    expect(upsertEntry).toHaveBeenCalledWith(42220, address, {
+      name: "My exchange",
+      tags: ["exchange"], // arkham (any case) stripped
+      notes: undefined,
+      isPublic: false,
+    });
+  });
+
   it("accepts scope: <chainId>", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
       user: { email: "alice@mentolabs.xyz" },
