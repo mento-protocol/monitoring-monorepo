@@ -215,24 +215,22 @@ describe("runRebalanceProbes — timeout race", () => {
     // underlying HTTP fetch keeps running until the transport timeout — the
     // JS-visible promise rejection is the load-bearing change here.)
     let observedSignal: AbortSignal | undefined;
-    mockProbe.mockImplementationOnce(
-      (_client, _pool, _strategy, _chainId, signal) => {
-        observedSignal = signal;
-        return new Promise((_resolve, reject) => {
-          if (signal?.aborted) {
+    mockProbe.mockImplementationOnce((_client, _pool, _strategy, signal) => {
+      observedSignal = signal;
+      return new Promise((_resolve, reject) => {
+        if (signal?.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal?.addEventListener(
+          "abort",
+          () => {
             reject(signal.reason);
-            return;
-          }
-          signal?.addEventListener(
-            "abort",
-            () => {
-              reject(signal.reason);
-            },
-            { once: true },
-          );
-        });
-      },
-    );
+          },
+          { once: true },
+        );
+      });
+    });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const probePromise = runRebalanceProbes([pool]);
