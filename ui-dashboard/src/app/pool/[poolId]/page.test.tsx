@@ -27,6 +27,7 @@ import {
   POOL_REBALANCES,
   POOL_REBALANCES_COUNT,
   POOL_REBALANCES_PAGE,
+  POOL_REBALANCES_USD_EXT,
   POOL_RESERVES,
   POOL_SNAPSHOTS_CHART,
   POOL_SWAPS,
@@ -899,5 +900,96 @@ describe("Pool detail Rebalances tab — degraded rebalanceThreshold rendering",
     ]);
     expect(cells[BOUNDARY_CELL_INDEX]).toBe("50");
     expect(cells[EFFECTIVENESS_CELL_INDEX]).toBe("0.0%");
+  });
+
+  // POOL_REBALANCES_USD_EXT runs as a separate query keyed by row id (see
+  // queries.ts). On Hasura schema lag during deploy the EXT query errors
+  // and the Reward column degrades to "—" without breaking the tab.
+  const REWARD_CELL_INDEX = 9;
+
+  function overrideRebalancesWithUsdExt(
+    rows: RebalanceEvent[],
+    extResult: "match" | "empty" | "error",
+  ) {
+    useGQLMock.mockImplementation((query: unknown) => {
+      if (query === POOL_DETAIL_WITH_HEALTH)
+        return makeGqlResult({ Pool: [basePool] });
+      if (query === POOL_REBALANCES || query === POOL_REBALANCES_PAGE)
+        return makeGqlResult({ RebalanceEvent: rows });
+      if (query === POOL_REBALANCES_COUNT)
+        return makeGqlResult({
+          RebalanceEvent: rows.map((r) => ({ id: r.id })),
+        });
+      if (query === POOL_REBALANCES_USD_EXT) {
+        if (extResult === "error")
+          return {
+            data: null,
+            error: new Error("field 'rewardUsd' not found in type"),
+            isLoading: false,
+          };
+        return makeGqlResult({
+          RebalanceEvent: extResult === "match" ? rows : [],
+        });
+      }
+      return makeGqlResult({});
+    });
+  }
+
+  it("renders formatted USD when POOL_REBALANCES_USD_EXT succeeds", () => {
+    overrideRebalancesWithUsdExt(
+      [
+        {
+          ...rebalances[0],
+          id: "rebalance-with-reward",
+          amount0Delta: "1000000000000000000000",
+          amount1Delta: "-500000000000000000000",
+          rewardBps: 25,
+          notionalUsd: "1000.0000",
+          rewardUsd: "2.5000",
+        },
+      ],
+      "match",
+    );
+    const html = renderWithParams({ tab: "rebalances" });
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const cells = Array.from(doc.querySelectorAll("tbody tr td")).map(
+      (cell) => cell.textContent?.trim() ?? "",
+    );
+    expect(cells[REWARD_CELL_INDEX]).toBe("$2.50");
+  });
+
+  it("renders em-dash when EXT query errors (Hasura schema lag)", () => {
+    overrideRebalancesWithUsdExt(
+      [{ ...rebalances[0], id: "rebalance-ext-failed" }],
+      "error",
+    );
+    const html = renderWithParams({ tab: "rebalances" });
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const cells = Array.from(doc.querySelectorAll("tbody tr td")).map(
+      (cell) => cell.textContent?.trim() ?? "",
+    );
+    // Tab still renders (main query succeeded); only Reward degrades.
+    expect(cells.length).toBeGreaterThan(REWARD_CELL_INDEX);
+    expect(cells[REWARD_CELL_INDEX]).toBe("—");
+  });
+
+  it("renders em-dash when rewardUsd is empty sentinel ('' = uncomputable)", () => {
+    overrideRebalancesWithUsdExt(
+      [
+        {
+          ...rebalances[0],
+          id: "rebalance-empty-reward",
+          rewardUsd: "",
+          notionalUsd: "",
+        },
+      ],
+      "match",
+    );
+    const html = renderWithParams({ tab: "rebalances" });
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const cells = Array.from(doc.querySelectorAll("tbody tr td")).map(
+      (cell) => cell.textContent?.trim() ?? "",
+    );
+    expect(cells[REWARD_CELL_INDEX]).toBe("—");
   });
 });
