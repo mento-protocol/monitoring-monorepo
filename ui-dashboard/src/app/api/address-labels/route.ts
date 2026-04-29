@@ -178,6 +178,9 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
       notes: trimmedNotes,
       isPublic: isPublic === true,
       ...(preservedSource ? { source: preservedSource } : {}),
+      // Preserve first-write timestamp across edits + scope-change moves;
+      // upsertEntry defaults to `now` when this is undefined (new row).
+      createdAt: prior?.createdAt,
     });
     return NextResponse.json({ ok: true });
   } catch (err) {

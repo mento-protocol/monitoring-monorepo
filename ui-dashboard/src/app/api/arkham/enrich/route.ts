@@ -32,7 +32,12 @@ type EnrichMode = "new" | "refresh" | "dryRun";
 
 type EnrichResponse = {
   ok: boolean;
-  chainId: number;
+  /** Scope written to. Defaults to "global" since EVM addresses are
+   *  chain-agnostic — a Binance hot-wallet labelled by Arkham applies to
+   *  every chain it appears on. */
+  scope: "global";
+  /** Chain we discovered candidate addresses on (always Celo). */
+  discoveryChainId: number;
   discovered: number;
   candidates: number;
   enriched: number;
@@ -121,14 +126,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         }
 
         const { addresses, perEntity } = discovery;
-        // Flatten global + Celo-chain labels into a single map for filtering.
-        // The strict either/or invariant (an address lives in exactly one
-        // scope) means there are no key collisions.
-        const chainExisting = allLabels.chains[String(CELO_CHAIN_ID)] ?? {};
-        const existing: Record<string, AddressEntry> = {
-          ...allLabels.global,
-          ...chainExisting,
-        };
+        // Flatten every scope into one map for filtering. The strict
+        // either/or invariant (an address lives in exactly one scope) means
+        // there are no key collisions. We write to "global" but legacy rows
+        // may still live in chain scopes — the importLabels Lua HDELs them
+        // from those scopes when the global write happens, so they migrate
+        // naturally on next refresh.
+        const existing: Record<string, AddressEntry> = { ...allLabels.global };
+        for (const chainEntries of Object.values(allLabels.chains)) {
+          Object.assign(existing, chainEntries);
+        }
         const filterMode = mode === "dryRun" ? "new" : mode;
         let candidates = filterCandidates(addresses, existing, filterMode);
 
@@ -169,7 +176,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         }
 
         if (mode !== "dryRun" && Object.keys(toWrite).length > 0) {
-          await importLabels(CELO_CHAIN_ID, toWrite);
+          // Write to global scope — Arkham's attribution is inherently
+          // cross-chain (EVM addresses are chain-agnostic). The strict
+          // either/or Lua script HDELs these addresses from chain scopes
+          // if they were previously chain-scoped, migrating legacy rows
+          // automatically.
+          await importLabels("global", toWrite);
         }
 
         const enrichedCount = Object.keys(toWrite).length;
@@ -190,7 +202,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
         const body: EnrichResponse = {
           ok: true,
-          chainId: CELO_CHAIN_ID,
+          scope: "global",
+          discoveryChainId: CELO_CHAIN_ID,
           discovered: addresses.length,
           candidates: candidates.length,
           enriched: enrichedCount,

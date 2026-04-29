@@ -342,6 +342,7 @@ export function mergeRefreshEntry(
     notes: isAutoNote ? fresh.notes : (existing.notes ?? fresh.notes),
     isPublic: existing.isPublic ?? fresh.isPublic,
     source: "arkham",
+    createdAt: existing.createdAt ?? fresh.updatedAt,
     updatedAt: fresh.updatedAt,
   });
 }

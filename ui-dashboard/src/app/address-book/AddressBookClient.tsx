@@ -32,6 +32,16 @@ type ImportedCounts = {
   chains: Record<string, number>;
 };
 
+// Short, locale-aware "yyyy-mm-dd hh:mm" for the Created at column. Full ISO
+// timestamp lives on the <time> dateTime + title attrs for hover/screen
+// readers. Falls back to the raw string if the timestamp is unparsable.
+function formatCreatedAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function formatImportCounts(counts?: ImportedCounts): string {
   if (!counts) return "Imported 0 labels.";
   const parts: string[] = [];
@@ -109,6 +119,7 @@ export default function AddressBookPage({
               tags: r.tags,
               isCustom: true,
               source: r.source,
+              createdAt: r.createdAt,
               scope: "global" as Scope,
               network: globalDisplayNetwork,
             },
@@ -127,6 +138,7 @@ export default function AddressBookPage({
             tags: r.tags,
             isCustom: true,
             source: r.source,
+            createdAt: r.createdAt,
             scope: r.scope,
             network: net,
           },
@@ -383,6 +395,9 @@ export default function AddressBookPage({
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Visibility
                 </th>
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Created at
+                </th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 w-20">
                   Actions
                 </th>
@@ -405,6 +420,7 @@ export default function AddressBookPage({
                     isPublic={resolved?.entry.isPublic}
                     isCustom={row.isCustom}
                     source={row.source}
+                    createdAt={row.createdAt ?? resolved?.entry.createdAt}
                     canEdit={userCanEdit}
                     explorerUrl={
                       row.network.explorerBaseUrl
@@ -507,6 +523,7 @@ type AddressRowProps = {
   isPublic?: boolean;
   isCustom: boolean;
   source?: string;
+  createdAt?: string;
   canEdit: boolean;
   explorerUrl: string | null;
   onEdit: () => void;
@@ -522,6 +539,7 @@ function AddressTableRow({
   isPublic,
   isCustom,
   source,
+  createdAt,
   canEdit,
   explorerUrl,
   onEdit,
@@ -607,6 +625,15 @@ function AddressTableRow({
               private
             </span>
           ))}
+      </td>
+      <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">
+        {createdAt ? (
+          <time dateTime={createdAt} title={createdAt}>
+            {formatCreatedAt(createdAt)}
+          </time>
+        ) : (
+          <span className="text-slate-600">—</span>
+        )}
       </td>
       <td className="px-4 py-3">
         {!canEdit ? null : isCustom ? (
