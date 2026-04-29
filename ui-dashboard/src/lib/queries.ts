@@ -686,6 +686,74 @@ export const ALL_OLS_POOLS = `
   }
 `;
 
+// Per-pool breaker config + recent trip history. Keyed by rateFeedID (NOT
+// pool ID) because a single feed underpins multiple pools (e.g.
+// USDC/USDm + axlUSDC/USDm both use feed 0xa1a8…), so denormalising onto
+// Pool would write-amplify on every breaker event. The dashboard fetches
+// this in parallel with POOL_DETAIL_WITH_HEALTH and renders <BreakerPanel />
+// only when the response is non-empty.
+//
+// Returns an array because, in principle, a feed could have multiple
+// trip-able breakers; in production today every v3 feed has exactly one
+// MedianDelta or ValueDelta plus the always-present MarketHours row (the
+// latter has no per-feed config and is filtered client-side via
+// `breaker.kind === "MARKET_HOURS"` to drive the title-row pill).
+export const POOL_BREAKER_CONFIG = `
+  query PoolBreakerConfig($chainId: Int!, $rateFeedID: String!) {
+    BreakerConfig(
+      where: {
+        chainId: { _eq: $chainId }
+        rateFeedID: { _eq: $rateFeedID }
+      }
+    ) {
+      id
+      enabled
+      cooldownTime
+      rateChangeThreshold
+      smoothingFactor
+      medianRatesEMA
+      referenceValue
+      lastMedianRate
+      lastUpdatedAt
+      status
+      tradingMode
+      lastStatusUpdatedAt
+      cooldownEndsAt
+      lastTripAt
+      lastTripTxHash
+      lastResetAt
+      tripCountLifetime
+      breaker {
+        id
+        address
+        kind
+        activatesTradingMode
+        defaultCooldownTime
+        defaultRateChangeThreshold
+      }
+    }
+    BreakerTripEvent(
+      where: {
+        chainId: { _eq: $chainId }
+        rateFeedID: { _eq: $rateFeedID }
+      }
+      order_by: [{ blockTimestamp: desc }]
+      limit: 50
+    ) {
+      id
+      blockTimestamp
+      txHash
+      medianRateAtTrip
+      referenceAtTrip
+      thresholdAtTrip
+      breaker {
+        address
+        kind
+      }
+    }
+  }
+`;
+
 /**
  * Fetch all protocol fee transfers for client-side USD aggregation.
  *

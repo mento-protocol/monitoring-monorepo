@@ -19,6 +19,8 @@ import { BreachHistoryPanel } from "@/components/breach-history-panel";
 import { HealthPanel } from "@/components/health-panel";
 import { LimitPanel } from "@/components/limit-panel";
 import { PoolConfigPanel } from "@/components/pool-config-panel";
+import { BreakerPanel } from "@/components/breaker-panel";
+import { MarketHoursPill } from "@/components/market-hours-pill";
 import { ReservesPanel } from "@/components/reserves-panel";
 import { Stat } from "@/components/stat";
 import { useNetwork } from "@/components/network-provider";
@@ -663,10 +665,11 @@ function PoolHeader({
           {titleSymbol(secondSym, secondAddr)}
         </h1>
         <ChainIcon network={network} size={20} />
-        <SourceBadge source={pool.source} />
         <span className="text-sm">
           <AddressLink address={poolContractAddress} readOnly />
         </span>
+        <SourceBadge source={pool.source} />
+        <MarketHoursPill pool={pool} />
         {deployTxHash ? (
           <a
             href={`${network.explorerBaseUrl}/tx/${deployTxHash}`}
@@ -739,6 +742,7 @@ function PoolHeader({
         <>
           <div className="my-5 h-px bg-slate-800" />
           <PoolConfigPanel pool={pool} />
+          <BreakerPanel pool={pool} />
         </>
       )}
     </div>

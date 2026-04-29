@@ -137,6 +137,129 @@ export const FPMM_MINIMAL_ABI = [
   },
 ] as const;
 
+// ---------------------------------------------------------------------------
+// Breakers — minimal inline ABIs for RPC self-heal and bootstrap reads.
+// Event indexing uses the full vendored ABIs at indexer-envio/abis/.
+// ---------------------------------------------------------------------------
+
+/** BreakerBox getters used by RPC self-heal. */
+export const BREAKER_BOX_ABI = [
+  {
+    type: "function",
+    name: "breakerTradingMode",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "", type: "uint8" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "rateFeedBreakerStatus",
+    inputs: [
+      { name: "", type: "address" },
+      { name: "", type: "address" },
+    ],
+    outputs: [
+      { name: "tradingMode", type: "uint8" },
+      { name: "lastUpdatedTime", type: "uint64" },
+      { name: "enabled", type: "bool" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "rateFeedTradingMode",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "", type: "uint8" }],
+    stateMutability: "view",
+  },
+] as const;
+
+/** MedianDeltaBreaker getters used by RPC self-heal. `value`-named outputs are
+ * Fixidity-wrapped uint256 (1e24 = 100%) — viem decodes as plain bigint. */
+export const MEDIAN_DELTA_BREAKER_ABI = [
+  {
+    type: "function",
+    name: "defaultCooldownTime",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "defaultRateChangeThreshold",
+    inputs: [],
+    outputs: [{ name: "value", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "rateFeedCooldownTime",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "rateChangeThreshold",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "value", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "smoothingFactors",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "value", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "medianRatesEMA",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
+
+/** ValueDeltaBreaker getters used by RPC self-heal. */
+export const VALUE_DELTA_BREAKER_ABI = [
+  {
+    type: "function",
+    name: "defaultCooldownTime",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "defaultRateChangeThreshold",
+    inputs: [],
+    outputs: [{ name: "value", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "rateFeedCooldownTime",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "rateChangeThreshold",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "value", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "referenceValues",
+    inputs: [{ name: "", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
+
 export const ERC20_DECIMALS_ABI = [
   {
     type: "function",

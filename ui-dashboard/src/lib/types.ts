@@ -358,6 +358,72 @@ export type BridgeBridger = {
   lastSeenAt: string;
 };
 
+// =============================================================================
+// Circuit breakers — see indexer-envio/schema.graphql for the source of truth.
+// =============================================================================
+
+export type BreakerKind = "MEDIAN_DELTA" | "VALUE_DELTA" | "MARKET_HOURS";
+export type BreakerStatus = "OK" | "TRIPPED";
+
+/** One row per (chainId, breakerAddress). */
+export type Breaker = {
+  id: string;
+  address: string;
+  kind: BreakerKind;
+  /** Trading mode this breaker OR's into rateFeedTradingMode when tripped
+   * (production: 3 = halt). */
+  activatesTradingMode: number;
+  defaultCooldownTime: string; // BigInt → string (seconds)
+  defaultRateChangeThreshold: string; // BigInt → string (Fixidity 1e24=100%)
+};
+
+/** One row per (chainId, breakerAddress, rateFeedID). Per-feed config + live
+ * state. The dashboard reads this for the `<BreakerPanel />` strip. */
+export type BreakerConfig = {
+  id: string;
+  enabled: boolean;
+  /** Per-feed cooldown override; sentinel "0" inherits Breaker.defaultCooldownTime. */
+  cooldownTime: string;
+  /** Per-feed threshold override; sentinel "0" inherits Breaker.defaultRateChangeThreshold. */
+  rateChangeThreshold: string;
+  /** MedianDelta-only — null on VALUE_DELTA / MARKET_HOURS. */
+  smoothingFactor: string | null;
+  /** MedianDelta-only. "0" = uninitialized; the next MedianUpdated will seed. */
+  medianRatesEMA: string | null;
+  /** ValueDelta-only — fixed peg target. */
+  referenceValue: string | null;
+  /** Last oracle median we mirrored from MedianUpdated. */
+  lastMedianRate: string | null;
+  lastUpdatedAt: string | null;
+  status: BreakerStatus;
+  /** Effective trading mode contributed by THIS breaker (0 if OK, else
+   * Breaker.activatesTradingMode). The pool's effective tradingMode is the
+   * OR of all enabled BreakerConfig.tradingMode rows for its rateFeedID. */
+  tradingMode: number;
+  /** = on-chain BreakerStatus.lastUpdatedTime; drives cooldown timing. */
+  lastStatusUpdatedAt: string;
+  /** Pre-rolled `lastStatusUpdatedAt + cooldownTime`. */
+  cooldownEndsAt: string;
+  lastTripAt: string | null;
+  lastTripTxHash: string | null;
+  lastResetAt: string | null;
+  tripCountLifetime: number;
+  breaker: Breaker;
+};
+
+/** One row per BreakerTripped event — snapshot of trip-time values. */
+export type BreakerTripEvent = {
+  id: string;
+  blockTimestamp: string;
+  txHash: string;
+  medianRateAtTrip: string;
+  /** EMA at trip time for MedianDelta; referenceValue for ValueDelta;
+   * null on MARKET_HOURS (which doesn't trip via this path). */
+  referenceAtTrip: string | null;
+  thresholdAtTrip: string;
+  breaker: Pick<Breaker, "address" | "kind">;
+};
+
 export type BridgeDailySnapshot = {
   id: string;
   date: string;
