@@ -4,6 +4,16 @@
     {
       "chainId": 143,
       "wormholeChainId": 48,
+      "tokenSymbol": "CHFm",
+      "tokenAddress": "0xf64e91ffef7ef43aa314f0bc2ac39f770797990c",
+      "tokenDecimals": 18,
+      "helper": "0x6862ecb81abe08311c2978e518d083bda5c00bdf",
+      "nttManagerProxy": "0xbbfbe2791722e93f27c5ce80e3725c8dd8d09697",
+      "transceiverProxy": "0x0d05cf3f8d39dc988e69cc1bf37f972eadbdc093"
+    },
+    {
+      "chainId": 143,
+      "wormholeChainId": 48,
       "tokenSymbol": "EURm",
       "tokenAddress": "0x4d502d735b4c574b487ed641ae87ceae884731c7",
       "tokenDecimals": 18,
@@ -24,12 +34,32 @@
     {
       "chainId": 143,
       "wormholeChainId": 48,
+      "tokenSymbol": "JPYm",
+      "tokenAddress": "0x22f6a6752800eab67b84748fefc3cc658384af72",
+      "tokenDecimals": 18,
+      "helper": "0x05c73b2507eebff0c0c6e95f335d0910a227dbc9",
+      "nttManagerProxy": "0x7431419fe761e7da37587245c55a35e5a356c91b",
+      "transceiverProxy": "0x01c9d280150f932d4a2fe11f40b0d72bffbcd339"
+    },
+    {
+      "chainId": 143,
+      "wormholeChainId": 48,
       "tokenSymbol": "USDm",
       "tokenAddress": "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",
       "tokenDecimals": 18,
       "helper": "0x37316334108c816f9862bab52347a0aab7551127",
       "nttManagerProxy": "0xa4096343485a44c0f8d05ae6da311c18d63e38bc",
       "transceiverProxy": "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b"
+    },
+    {
+      "chainId": 42220,
+      "wormholeChainId": 14,
+      "tokenSymbol": "CHFm",
+      "tokenAddress": "0xb55a79f398e759e43c95b979163f30ec87ee131d",
+      "tokenDecimals": 18,
+      "helper": "0x6862ecb81abe08311c2978e518d083bda5c00bdf",
+      "nttManagerProxy": "0xbbfbe2791722e93f27c5ce80e3725c8dd8d09697",
+      "transceiverProxy": "0x0d05cf3f8d39dc988e69cc1bf37f972eadbdc093"
     },
     {
       "chainId": 42220,
@@ -50,6 +80,16 @@
       "helper": "0xf3797e9d818a47a3a604bf2346e4ff50b56ad5c4",
       "nttManagerProxy": "0x7895d03ffdeb14a57ef79c21c3ea14dadf2a7c3f",
       "transceiverProxy": "0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f"
+    },
+    {
+      "chainId": 42220,
+      "wormholeChainId": 14,
+      "tokenSymbol": "JPYm",
+      "tokenAddress": "0xc45ecf20f3cd864b32d9794d6f76814ae8892e20",
+      "tokenDecimals": 18,
+      "helper": "0x05c73b2507eebff0c0c6e95f335d0910a227dbc9",
+      "nttManagerProxy": "0x7431419fe761e7da37587245c55a35e5a356c91b",
+      "transceiverProxy": "0x01c9d280150f932d4a2fe11f40b0d72bffbcd339"
     },
     {
       "chainId": 42220,

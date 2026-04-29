@@ -1,4 +1,5 @@
-import { encodeFunctionData, parseAbi } from "viem";
+import { encodeFunctionData, getContractAddress, parseAbi } from "viem";
+import { contractEntries } from "@mento-protocol/monitoring-config/tokens";
 import type { BridgeTransfer } from "@/lib/types";
 
 export type ChainRedeemConfig = {
@@ -29,24 +30,38 @@ const CHAIN_CONFIGS: Record<number, ChainRedeemConfig> = {
   },
 };
 
-// Keyed by (destChainId, tokenSymbol). Addresses sourced from
-// indexer-envio/config/nttAddresses.json — deterministic deployment means
-// the same proxy address is used on both Celo and Monad.
-const TRANSCEIVER_BY_CHAIN_AND_TOKEN: Record<
+// NttDeployHelper deploys its NttManager + WormholeTransceiver proxies
+// sequentially from a fresh account, so CREATE(helper, nonce=4) is
+// deterministic and matches the proxy at runtime. See
+// indexer-envio/scripts/generateNttAddresses.mjs for the full nonce table.
+// Deriving from contracts.json means a contracts bump auto-extends
+// manual-redeem support to any new bridged token.
+const HELPER_PREFIX = "NttDeployHelper";
+
+function buildTransceiverIndex(): Record<
   number,
   Record<string, `0x${string}`>
-> = {
-  42220: {
-    USDm: "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b",
-    EURm: "0x6467cfca82184657f32f1195f9a26b5578399479",
-    GBPm: "0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f",
-  },
-  143: {
-    USDm: "0x40f8650acd6ca771a822b6d8da71b46b0bde4c1b",
-    EURm: "0x6467cfca82184657f32f1195f9a26b5578399479",
-    GBPm: "0xcb55fe41c5437ad6449c2978b061958c1ec1ab5f",
-  },
-};
+> {
+  const out: Record<number, Record<string, `0x${string}`>> = {};
+  for (const chainIdStr of Object.keys(CHAIN_CONFIGS)) {
+    const chainId = Number(chainIdStr);
+    const perToken: Record<string, `0x${string}`> = {};
+    for (const entry of contractEntries(chainId)) {
+      if (entry.type !== "contract") continue;
+      if (!entry.rawName.startsWith(HELPER_PREFIX)) continue;
+      const symbol = entry.rawName.slice(HELPER_PREFIX.length);
+      const transceiver = getContractAddress({
+        from: entry.address as `0x${string}`,
+        nonce: BigInt(4),
+      });
+      perToken[symbol] = transceiver.toLowerCase() as `0x${string}`;
+    }
+    out[chainId] = perToken;
+  }
+  return out;
+}
+
+const TRANSCEIVER_BY_CHAIN_AND_TOKEN = buildTransceiverIndex();
 
 export function getChainRedeemConfig(
   chainId: number,

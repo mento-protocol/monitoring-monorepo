@@ -12,7 +12,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@mento-protocol/contracts": "0.6.0",
+    "@mento-protocol/contracts": "0.8.0",
     "@mento-protocol/monitoring-config": "workspace:*",
     "@sentry/nextjs": "^10.49.0",
     "@upstash/redis": "^1.36.3",

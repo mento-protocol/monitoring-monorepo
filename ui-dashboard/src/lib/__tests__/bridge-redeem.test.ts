@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildReceiveMessageCalldata,
   canManuallyRedeemTransfer,
+  getTransceiverForToken,
   vaaBase64ToHex,
 } from "@/lib/bridge-flows/redeem";
 import type { BridgeTransfer } from "@/lib/types";
+import nttManifest from "../../../../indexer-envio/config/nttAddresses.json";
 
 function makeTransfer(overrides: Partial<BridgeTransfer> = {}): BridgeTransfer {
   return {
@@ -110,4 +112,35 @@ describe("bridge redeem helpers", () => {
   it("decodes an empty base64 string to an empty hex payload", () => {
     expect(vaaBase64ToHex("")).toBe("0x");
   });
+});
+
+// Cross-layer invariant: dashboard's contracts.json-derived transceiver
+// addresses must match the indexer's generated nttAddresses.json manifest
+// for every (chainId, tokenSymbol). Drift here means the manual-redeem
+// button submits transactions to the wrong transceiver address.
+describe("getTransceiverForToken — manifest sync", () => {
+  for (const entry of nttManifest.entries) {
+    it(`matches manifest for ${entry.tokenSymbol} on chain ${entry.chainId}`, () => {
+      expect(getTransceiverForToken(entry.chainId, entry.tokenSymbol)).toBe(
+        entry.transceiverProxy.toLowerCase(),
+      );
+    });
+  }
+});
+
+describe("canManuallyRedeemTransfer — coverage for every bridged token", () => {
+  for (const entry of nttManifest.entries) {
+    it(`accepts in-flight ${entry.tokenSymbol} transfer to chain ${entry.chainId}`, () => {
+      const sourceChainId = entry.chainId === 42220 ? 143 : 42220;
+      expect(
+        canManuallyRedeemTransfer(
+          makeTransfer({
+            tokenSymbol: entry.tokenSymbol,
+            sourceChainId,
+            destChainId: entry.chainId,
+          }),
+        ),
+      ).toBe(true);
+    });
+  }
 });
