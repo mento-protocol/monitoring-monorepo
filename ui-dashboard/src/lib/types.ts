@@ -214,6 +214,16 @@ export type RebalanceEvent = {
   // bump surface as null until Envio reprocesses the backfill.
   rebalanceThreshold?: number;
   effectivenessRatio?: string;
+  // Token deltas across the rebalance (signed wei strings; positive = pool
+  // received). Optional during indexer resync — pre-existing rows lack them.
+  amount0Delta?: string;
+  amount1Delta?: string;
+  // `Pool.rebalanceReward` snapshot at event time (bps). Optional during resync.
+  rewardBps?: number;
+  // Pre-computed USD values, fixed-point 4dp strings (e.g. "1234.5678"). Empty
+  // string sentinel when uncomputable (no USD-pegged side / RPC failure).
+  notionalUsd?: string;
+  rewardUsd?: string;
 };
 
 export type PoolSnapshotWindow = {

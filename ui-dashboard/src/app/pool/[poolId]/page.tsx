@@ -42,6 +42,7 @@ import {
   formatBoundaryBps,
   formatEffectivenessPercent,
   formatTimestamp,
+  formatUSD,
   formatWei,
   getSwapDirection,
   normalizePoolIdForChain,
@@ -1186,6 +1187,9 @@ const BOUNDARY_TOOLTIP =
 const EFFECTIVENESS_TOOLTIP =
   "100% = rebalance landed exactly on the boundary (ideal). >100% = overshoot past the boundary (e.g. all the way to the oracle — over-correction, wastes reserves). <100% = control loop under-correcting. Negative = rebalance made deviation worse.";
 
+const REWARD_TOOLTIP =
+  "Caller incentive paid for triggering this rebalance, in USD. Computed indexer-side as: |notional swap volume on the USD-pegged side| × Pool.rebalanceReward bps / 10000. Shows '—' when the pool has no USD-pegged side or the pre-rebalance reserve RPC failed.";
+
 export function RebalancesTab({
   poolId,
   limit,
@@ -1271,6 +1275,9 @@ export function RebalancesTab({
         Number(r.priceDifferenceAfter).toLocaleString(),
         formatBoundaryBps(r.rebalanceThreshold),
         formatEffectivenessPercent(r.effectivenessRatio),
+        r.rewardUsd && r.rewardUsd !== ""
+          ? formatUSD(Number(r.rewardUsd))
+          : null,
         r.blockNumber,
       ]);
     });
@@ -1331,6 +1338,15 @@ export function RebalancesTab({
                   />
                 </span>
               </Th>
+              <Th align="right">
+                <span className="inline-flex items-center gap-1">
+                  Reward
+                  <InfoPopover
+                    label="About rebalance reward"
+                    content={REWARD_TOOLTIP}
+                  />
+                </span>
+              </Th>
               <Th align="right">Block</Th>
               <Th>Time</Th>
             </tr>
@@ -1363,6 +1379,11 @@ export function RebalancesTab({
                   </Td>
                   <Td mono small align="right">
                     {formatEffectivenessPercent(r.effectivenessRatio) ?? "—"}
+                  </Td>
+                  <Td mono small align="right">
+                    {r.rewardUsd && r.rewardUsd !== ""
+                      ? formatUSD(Number(r.rewardUsd))
+                      : "—"}
                   </Td>
                   <Td mono small muted align="right">
                     {formatBlock(r.blockNumber)}

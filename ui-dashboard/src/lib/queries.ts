@@ -184,6 +184,7 @@ export const POOL_REBALANCES_PAGE = `
       id chainId sender caller priceDifferenceBefore priceDifferenceAfter
       txHash blockNumber blockTimestamp
       improvement rebalanceThreshold effectivenessRatio
+      amount0Delta amount1Delta rewardBps notionalUsd rewardUsd
     }
   }
 `;

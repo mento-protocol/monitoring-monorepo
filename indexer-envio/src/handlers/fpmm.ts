@@ -42,7 +42,9 @@ import {
   fetchNumReporters,
   fetchTradingLimits,
   fetchFees,
+  fetchReserves,
 } from "../rpc";
+import { computeRebalanceUsd } from "../usd";
 import {
   DEFAULT_ORACLE_FIELDS,
   maybePreloadPool,
@@ -692,13 +694,20 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
 
   // Fire RPC + Pool.get concurrently (see UpdateReserves handler).
   // Use raw srcAddress for RPC calls (not the namespaced poolId).
-  const [rebalancingState, existing] = await Promise.all([
+  // `preReserves` is sampled at `blockNumber - 1` so that subtracting from
+  // the post-rebalance reserves on `pool` (after `upsertPool` below) gives
+  // the rebalance's swap notional. Sibling Swap events are not emitted by
+  // FPMM.rebalance() (separate code path), and the 2× UpdateReserves
+  // handlers in the same tx have already overwritten the entity by the
+  // time we run — RPC at the previous block is the cleanest source.
+  const [rebalancingState, existing, preReserves] = await Promise.all([
     fetchRebalancingState(
       event.chainId,
       asAddress(event.srcAddress),
       blockNumber,
     ),
     context.Pool.get(poolId),
+    fetchReserves(event.chainId, asAddress(event.srcAddress), blockNumber - 1n),
   ]);
 
   const rebalancerAddress = asAddress(event.params.sender);
@@ -797,6 +806,28 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     rebalanceDelta: true,
   });
 
+  // Reserve deltas (post − pre). On RPC failure of `fetchReserves` at
+  // `blockNumber - 1`, both deltas stay 0, which `computeRebalanceUsd`
+  // recognizes as the uncomputable case → "" sentinel for both USD fields.
+  const amount0Delta = preReserves ? pool.reserves0 - preReserves.reserve0 : 0n;
+  const amount1Delta = preReserves ? pool.reserves1 - preReserves.reserve1 : 0n;
+  // -1 (RPC not yet read) and -2 (getter missing — see PR #222) sentinels
+  // both normalize to 0 inside computeRebalanceUsd, yielding "0.0000".
+  const rewardBps = pool.rebalanceReward;
+  const { notionalUsd, rewardUsd } =
+    pool.token0 && pool.token1
+      ? computeRebalanceUsd({
+          chainId: event.chainId,
+          token0: pool.token0,
+          token1: pool.token1,
+          token0Decimals: pool.token0Decimals,
+          token1Decimals: pool.token1Decimals,
+          amount0Delta,
+          amount1Delta,
+          rewardBps,
+        })
+      : { notionalUsd: "", rewardUsd: "" };
+
   const rebalanced: RebalanceEvent = {
     id,
     chainId: event.chainId,
@@ -808,6 +839,11 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     improvement,
     rebalanceThreshold: rebalanceThresholdForEvent,
     effectivenessRatio: eventEffectivenessRatio,
+    amount0Delta,
+    amount1Delta,
+    rewardBps: rewardBps < 0 ? 0 : rewardBps,
+    notionalUsd,
+    rewardUsd,
     txHash: event.transaction.hash,
     blockNumber,
     blockTimestamp,
