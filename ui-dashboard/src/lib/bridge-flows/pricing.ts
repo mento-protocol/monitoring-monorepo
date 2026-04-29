@@ -17,10 +17,7 @@ export function transferAmountUsd(
 ): number | null {
   if (t.usdValueAtSend) {
     const n = Number(t.usdValueAtSend);
-    // Same `n > 0` guard as `snapshotUsdValue` — legacy rows pinned "0.00"
-    // and we want those to fall through to the live-rate path, not show
-    // as a deceptively confident $0.00. Drop after the next full reindex.
-    if (Number.isFinite(n) && n > 0) return n;
+    if (Number.isFinite(n)) return n;
   }
   const amt = transferAmountTokens(t);
   if (amt === null) return null;
@@ -28,12 +25,11 @@ export function transferAmountUsd(
 }
 
 /** True when USD was computed client-side from current oracle, not indexer-pinned.
- * Must match `transferAmountUsd`'s guard exactly — otherwise a legacy "0.00"
+ * Must match `transferAmountUsd`'s guard exactly — otherwise a non-finite
  * row would price via live rate but render without the `~` prefix, looking
- * deceptively authoritative. Drop the numeric guard alongside the matching
- * TODO(post-reindex) in `transferAmountUsd` once legacy sentinels are gone. */
+ * deceptively authoritative. */
 export function usdPricedFromLiveRate(t: BridgeTransfer): boolean {
   if (!t.usdValueAtSend) return true;
   const n = Number(t.usdValueAtSend);
-  return !(Number.isFinite(n) && n > 0);
+  return !Number.isFinite(n);
 }

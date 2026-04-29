@@ -82,10 +82,11 @@ describe("usdPricedFromLiveRate", () => {
     expect(usdPricedFromLiveRate(mk({ usdValueAtSend: "42.00" }))).toBe(false);
   });
 
-  it("true when usdValueAtSend is the legacy '0.00' sentinel", () => {
-    // Must match transferAmountUsd's `n > 0` guard — otherwise a "0.00" row
-    // would price via live rate but render without the `~` prefix.
-    expect(usdPricedFromLiveRate(mk({ usdValueAtSend: "0.00" }))).toBe(true);
+  it("false when usdValueAtSend is '0.00' — indexer-pinned $0 is authoritative", () => {
+    // Legacy sentinel guard removed — any finite indexed value (including 0)
+    // is treated as authoritative now that the indexer writes `undefined`
+    // on missing prices instead of "0.00".
+    expect(usdPricedFromLiveRate(mk({ usdValueAtSend: "0.00" }))).toBe(false);
   });
 
   it("true when usdValueAtSend is non-numeric", () => {

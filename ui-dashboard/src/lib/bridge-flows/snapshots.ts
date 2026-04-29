@@ -11,14 +11,8 @@ const DEFAULT_TOKEN_DECIMALS = 18;
 
 /**
  * USD value of a single snapshot row. Prefers `sentUsdValue` when the
- * indexer has populated a real positive number; otherwise falls back to
+ * indexer has populated a finite number; otherwise falls back to
  * `sentVolume × live oracle rate`.
- *
- * TODO(post-reindex): drop the `n > 0` guard below. It's a safety net for
- * legacy rows written by indexer deployments that predate the nullable
- * schema and emitted "0.00" on every row. Current `defaultSnapshot` writes
- * `undefined`, so after the next full reindex this branch never fires —
- * the guard becomes dead code and can be removed.
  */
 export function snapshotUsdValue(
   snapshot: Pick<
@@ -29,7 +23,7 @@ export function snapshotUsdValue(
 ): number {
   if (snapshot.sentUsdValue) {
     const n = Number(snapshot.sentUsdValue);
-    if (Number.isFinite(n) && n > 0) return n;
+    if (Number.isFinite(n)) return n;
   }
   const tokens = parseWei(snapshot.sentVolume, DEFAULT_TOKEN_DECIMALS);
   if (tokens === 0) return 0;

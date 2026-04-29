@@ -76,9 +76,10 @@ describe("snapshotUsdValue", () => {
     ).toBe(1);
   });
 
-  it("treats the legacy '0.00' sentinel as null (falls back to live rate)", () => {
-    // Pre-nullable-schema indexer deployments wrote "0.00" on every row;
-    // accepting that as a real USD reading would flatten KPIs to $0.
+  it("trusts an indexed '0.00' as a real $0 reading (no legacy sentinel guard)", () => {
+    // The legacy "0.00" sentinel guard was removed — current indexer writes
+    // `undefined` when USD pricing is unavailable, so any finite indexed
+    // value (including 0) is authoritative.
     expect(
       snapshotUsdValue(
         {
@@ -88,7 +89,7 @@ describe("snapshotUsdValue", () => {
         },
         emptyRates,
       ),
-    ).toBe(3);
+    ).toBe(0);
   });
 });
 
