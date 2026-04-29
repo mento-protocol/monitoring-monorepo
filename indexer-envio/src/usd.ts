@@ -16,12 +16,13 @@ export const USD_PEGGED_SYMBOLS = new Set<string>([
   "AUSD",
 ]);
 
-/**
- * 4dp fixed-point sentinel for "uncomputable USD value" — mirrors the empty
- * convention used by `RebalanceEvent.effectivenessRatio`. Distinct from
- * `"0.0000"` (a real zero notional).
- */
-export const USD_UNCOMPUTABLE = "" as const;
+/** `Pool.rebalanceReward` sentinels: `-1` (RPC not yet read) and `-2` (getter
+ *  missing — see PR #222) collapse to 0 so reward arithmetic is well-defined. */
+export function normalizeRewardBps(bps: number): number {
+  return bps < 0 ? 0 : bps;
+}
+
+const bAbs = (n: bigint): bigint => (n < 0n ? -n : n);
 
 /**
  * Convert a wei-scaled amount to a 4dp fixed-point string. Truncates (not
@@ -30,29 +31,26 @@ export const USD_UNCOMPUTABLE = "" as const;
  * Example: `formatFixed4(1234567890n, 6)` → `"1234.5678"` (USDC, 6 decimals).
  */
 function formatFixed4(value: bigint, decimals: number): string {
-  if (value < 0n) value = -value;
+  const abs = bAbs(value);
   const SCALE = 10_000n; // 10^4
-  let int4dp: bigint;
-  if (decimals >= 4) {
-    int4dp = (value * SCALE) / 10n ** BigInt(decimals);
-  } else {
-    int4dp = value * 10n ** BigInt(4 - decimals);
-  }
-  const intPart = int4dp / SCALE;
-  const fracPart = int4dp % SCALE;
-  return `${intPart}.${String(fracPart).padStart(4, "0")}`;
+  const int4dp =
+    decimals >= 4
+      ? (abs * SCALE) / 10n ** BigInt(decimals)
+      : abs * 10n ** BigInt(4 - decimals);
+  return `${int4dp / SCALE}.${String(int4dp % SCALE).padStart(4, "0")}`;
 }
 
 export interface RebalanceUsdInput {
   chainId: number;
-  token0: string;
-  token1: string;
+  /** Pool.token0 / token1. Optional — VirtualPools can lack token addresses,
+   *  in which case USD is uncomputable and the function returns `""`. */
+  token0: string | undefined;
+  token1: string | undefined;
   token0Decimals: number;
   token1Decimals: number;
   amount0Delta: bigint;
   amount1Delta: bigint;
-  /** Pool.rebalanceReward bps. `-1` (RPC-not-yet-read) and `-2` (getter
-   *  missing — see PR #222) sentinels normalize to 0. */
+  /** Already passed through `normalizeRewardBps` by the caller. */
   rewardBps: number;
 }
 
@@ -72,8 +70,8 @@ export interface RebalanceUsd {
  * rebalances are roughly-symmetric swaps, so the non-pegged side × oracle
  * price would yield the same number within rounding (not enforced here).
  *
- * Returns `{ "", "" }` when neither (or both) tokens are USD-pegged or when
- * both deltas are zero (RPC fallback path).
+ * Returns `{ "", "" }` when token addresses are missing, neither (or both)
+ * tokens are USD-pegged, or both deltas are zero (RPC fallback path).
  */
 export function computeRebalanceUsd(input: RebalanceUsdInput): RebalanceUsd {
   const {
@@ -87,8 +85,8 @@ export function computeRebalanceUsd(input: RebalanceUsdInput): RebalanceUsd {
     rewardBps,
   } = input;
 
-  if (amount0Delta === 0n && amount1Delta === 0n) {
-    return { notionalUsd: USD_UNCOMPUTABLE, rewardUsd: USD_UNCOMPUTABLE };
+  if (!token0 || !token1 || (amount0Delta === 0n && amount1Delta === 0n)) {
+    return { notionalUsd: "", rewardUsd: "" };
   }
 
   const sym0 = KNOWN_TOKEN_META.get(
@@ -101,22 +99,17 @@ export function computeRebalanceUsd(input: RebalanceUsdInput): RebalanceUsd {
   const peg1 = sym1 !== undefined && USD_PEGGED_SYMBOLS.has(sym1);
 
   if (peg0 === peg1) {
-    return { notionalUsd: USD_UNCOMPUTABLE, rewardUsd: USD_UNCOMPUTABLE };
+    return { notionalUsd: "", rewardUsd: "" };
   }
 
-  const absDelta = peg0
-    ? amount0Delta < 0n
-      ? -amount0Delta
-      : amount0Delta
-    : amount1Delta < 0n
-      ? -amount1Delta
-      : amount1Delta;
+  const absDelta = bAbs(peg0 ? amount0Delta : amount1Delta);
   const decimals = peg0 ? token0Decimals : token1Decimals;
 
   const notionalUsd = formatFixed4(absDelta, decimals);
-  const bps = rewardBps < 0 ? 0 : rewardBps;
-  const rewardWei = (absDelta * BigInt(bps)) / 10_000n;
-  const rewardUsd = formatFixed4(rewardWei, decimals);
+  const rewardUsd = formatFixed4(
+    (absDelta * BigInt(rewardBps)) / 10_000n,
+    decimals,
+  );
 
   return { notionalUsd, rewardUsd };
 }

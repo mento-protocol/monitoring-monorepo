@@ -1,6 +1,10 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
-import { computeRebalanceUsd, USD_PEGGED_SYMBOLS } from "../src/usd";
+import {
+  computeRebalanceUsd,
+  normalizeRewardBps,
+  USD_PEGGED_SYMBOLS,
+} from "../src/usd";
 
 // Real Celo mainnet addresses — resolvable through KNOWN_TOKEN_META
 // (`feeToken.ts` builds it from `@mento-protocol/contracts/contracts.json`).
@@ -60,7 +64,7 @@ describe("computeRebalanceUsd", () => {
     assert.equal(result.rewardUsd, "12.3456");
   });
 
-  it("rewardBps = -2 (getter-missing sentinel) normalizes to 0 → '0.0000' reward", () => {
+  it("rewardBps = 0 → '0.0000' reward (caller normalizes -1/-2 sentinels first)", () => {
     const result = computeRebalanceUsd({
       chainId: CHAIN_CELO,
       token0: USDM,
@@ -69,24 +73,9 @@ describe("computeRebalanceUsd", () => {
       token1Decimals: 18,
       amount0Delta: -1_000n * 10n ** 18n,
       amount1Delta: 1_500n * 10n ** 18n,
-      rewardBps: -2,
+      rewardBps: 0,
     });
     assert.equal(result.notionalUsd, "1000.0000");
-    assert.equal(result.rewardUsd, "0.0000");
-  });
-
-  it("rewardBps = -1 (RPC-not-yet-read sentinel) also normalizes to 0", () => {
-    const result = computeRebalanceUsd({
-      chainId: CHAIN_CELO,
-      token0: USDM,
-      token1: CELO,
-      token0Decimals: 18,
-      token1Decimals: 18,
-      amount0Delta: -100n * 10n ** 18n,
-      amount1Delta: 0n,
-      rewardBps: -1,
-    });
-    assert.equal(result.notionalUsd, "100.0000");
     assert.equal(result.rewardUsd, "0.0000");
   });
 
@@ -175,5 +164,23 @@ describe("USD_PEGGED_SYMBOLS — drift protection vs ui-dashboard/src/lib/tokens
       [...EXPECTED].sort(),
       "indexer USD_PEGGED_SYMBOLS drifted from ui-dashboard/src/lib/tokens.ts:12-21 — update both in lockstep",
     );
+  });
+});
+
+describe("normalizeRewardBps", () => {
+  it("clamps -2 sentinel (getter missing — see PR #222) to 0", () => {
+    assert.equal(normalizeRewardBps(-2), 0);
+  });
+
+  it("clamps -1 sentinel (RPC not yet read) to 0", () => {
+    assert.equal(normalizeRewardBps(-1), 0);
+  });
+
+  it("passes 0 through", () => {
+    assert.equal(normalizeRewardBps(0), 0);
+  });
+
+  it("passes positive bps through", () => {
+    assert.equal(normalizeRewardBps(25), 25);
   });
 });
