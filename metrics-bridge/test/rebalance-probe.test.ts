@@ -434,6 +434,10 @@ describe("runRebalanceProbes — re-entrancy guard for overlapping cycles", () =
     await runRebalanceProbes([pool]);
 
     expect(mockProbe).toHaveBeenCalledTimes(2);
+    const reentryWarns = warn.mock.calls.filter((c) =>
+      String(c[0]).includes("[REBALANCE_PROBE_REENTRY]"),
+    );
+    expect(reentryWarns).toHaveLength(0);
     const value = await getGaugeValue(
       register,
       "mento_pool_rebalance_blocked",
