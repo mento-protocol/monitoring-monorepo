@@ -112,13 +112,10 @@ async function probeOne(pool: PoolRow): Promise<RebalanceProbeResult> {
   );
 
   try {
-    // chainId is forwarded so the probe can resolve token symbols via
-    // `@mento-protocol/monitoring-config/tokens` during reserve enrichment.
     return await probeRebalance(
       client,
       poolAddress,
       strategyAddress,
-      pool.chainId,
       controller.signal,
     );
   } catch (err) {
@@ -199,11 +196,9 @@ export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
   probeInProgress = true;
   try {
     // Reset every cycle so a recovered pool (deviation dropped below
-    // threshold, or the rebalancer caught up) drops out of all three
-    // series immediately rather than carrying stale labels forward.
+    // threshold, or the rebalancer caught up) drops out of the gauge
+    // immediately rather than carrying stale labels forward.
     gauges.rebalanceBlocked.reset();
-    gauges.rebalanceCollateralBalance.reset();
-    gauges.rebalanceCollateralNeeded.reset();
     const eligible = eligibleForProbe(allPools);
     if (eligible.length === 0) {
       gauges.rebalanceProbeLastRun.set(Math.floor(Date.now() / 1000));
@@ -222,30 +217,12 @@ export async function runRebalanceProbes(allPools: PoolRow[]): Promise<void> {
       if (!result) continue;
 
       if (result.kind === "blocked") {
-        const poolLabels = poolDisplayLabels(pool);
         const labels = {
-          ...poolLabels,
+          ...poolDisplayLabels(pool),
           reason_code: result.reasonCode,
           reason_message: result.reasonMessage,
         };
         gauges.rebalanceBlocked.set(labels, 1);
-        // Skipping when `reserveCollateral` is undefined (non-reserve
-        // strategy, failed enrichment) lets the alert annotation fall
-        // back to the bounded reason_message line cleanly.
-        if (result.reserveCollateral) {
-          const collateralLabels = {
-            ...poolLabels,
-            token_symbol: result.reserveCollateral.tokenSymbol,
-          };
-          gauges.rebalanceCollateralBalance.set(
-            collateralLabels,
-            result.reserveCollateral.balance,
-          );
-          gauges.rebalanceCollateralNeeded.set(
-            collateralLabels,
-            result.reserveCollateral.needed,
-          );
-        }
         // Surface the unbounded diagnostic detail (raw revert string, panic
         // code, unrecognised hex selector) to Cloud Run logs only — the
         // metric label is intentionally bounded to the ERROR_MESSAGES enum

@@ -444,10 +444,18 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
   }
 
+  # `for = "1m"`: the threshold is already "breach age > 1h", so this does
+  # NOT add a duration requirement to whether the breach itself counts as
+  # critical. It just smooths transient NoData blips from the Mimir ruler:
+  # after the 2026-04-28 incident where a missing series in the annotation
+  # query set propagated NoData and reset alert state to Normal between
+  # eval cycles (despite manual `/api/v1/eval` returning Alerting), a 1m
+  # grace prevents single-eval glitches from undoing an otherwise stable
+  # firing state. Same rationale on the anchored rule below.
   rule {
     name           = "Deviation Breach Critical"
     condition      = "threshold"
-    for            = "0s"
+    for            = "1m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
@@ -474,20 +482,24 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # fallback semantics).
       current_reserves = local.deviation_critical_current_reserves_annotation
       # Rebalance reason annotation, sourced from the metrics-bridge probe
-      # (`mento_pool_rebalance_blocked`). The probe runs every Nth Hasura
-      # poll for pools matching this rule's gate, so the label set ALWAYS
-      # already carries the same `chain_id`/`pool_id`/`pair` identity as
-      # the alert. Rendered in the Slack body via
+      # (`mento_pool_rebalance_blocked`) for the bounded Solidity-error
+      # reason and from Aegis (USDC/USDT/axlUSDC `_balanceOf`) for the
+      # live reserve balance. The probe runs every Nth Hasura poll for
+      # pools matching this rule's gate, so the rebalance_blocked label
+      # set carries the same `chain_id`/`pool_id`/`pair` identity as the
+      # alert. Rendered in the Slack body via
       # `{{ if .Annotations.rebalance_reason }}` — see contact-points.tf.
-      # When the probe hasn't run yet or the RPC failed, the gauge is
-      # absent and this annotation expands to an empty string, which the
-      # template suppresses.
+      # When the probe hasn't run yet or the RPC failed, the rebalance_
+      # blocked gauge is absent and this annotation expands to empty
+      # string, which the template suppresses.
       #
       # `$labels` in a Grafana alert annotation only exposes labels from
       # the firing series (query A — the breach gauge). Query B's labels
       # (`reason_code` / `reason_message`) live on its own series and are
-      # accessible via `$values.B.Labels.*`. Reading `$labels.reason_*`
-      # would always be empty.
+      # accessible via `$values.B.Labels.*`. The Aegis reserve-balance
+      # queries return ALL series (Aegis label set differs from
+      # `mento_pool_*`, so per-instance binding doesn't apply); the
+      # template dispatches by `$labels.pair`.
       rebalance_reason = local.deviation_critical_rebalance_reason_annotation
     }
 
@@ -515,12 +527,13 @@ resource "grafana_rule_group" "fpmms_deviation" {
       })
     }
 
-    # Annotation-only queries (Dev / R0 / R1 / B / Bal / Need) — populate
-    # `$values.{Dev,R0,R1,B,Bal,Need}` for the annotation locals in main.tf.
-    # NOT part of the threshold condition: a missing series for any one of
-    # these (probe hasn't run, ratio sentinel, both reserves zero, non-reserve
-    # strategy, etc.) leaves `$values.X` empty and the `{{ if }}` guards in
-    # each annotation drop the line cleanly. Authored once in
+    # Annotation-only queries (Dev / R0 / R1 / B / ResUSDC / ResUSDT /
+    # ResAxlUSDC) — populate `$values.*` for the annotation locals in
+    # main.tf. NOT part of the threshold condition: a missing series for
+    # any one of these (e.g. probe hasn't run yet, ratio sentinel, both
+    # reserves zero, non-stable pool with no Aegis coverage) leaves
+    # `$values.X` empty and the `{{ if }}` guards in each annotation drop
+    # the line cleanly. Authored once in
     # `local.deviation_critical_annotation_queries` and consumed here +
     # by the anchored rule below — a query-shape change lands in one place.
     #
@@ -540,9 +553,9 @@ resource "grafana_rule_group" "fpmms_deviation" {
     #     when the probe couldn't determine a reason; the annotation
     #     template reads `$values.B.Labels.*` (NOT `$labels`, which exposes
     #     only the condition query A's labels).
-    #   - Bal/Need are present only on `RLS_RESERVE_OUT_OF_COLLATERAL`;
-    #     absent otherwise so the rebalance_reason annotation falls through
-    #     to the bounded reason_message line.
+    #   - ResUSDC / ResUSDT / ResAxlUSDC source from Aegis (Celo only); see
+    #     main.tf for the rationale on why the dispatch happens in the
+    #     `rebalance_reason` template instead of via per-instance label match.
     dynamic "data" {
       for_each = local.deviation_critical_annotation_queries
       content {
@@ -597,9 +610,14 @@ resource "grafana_rule_group" "fpmms_deviation" {
   # the warning anchored rule, escalated to critical once the breach has
   # outlived the 1h grace.
   rule {
-    name           = "Deviation Breach Critical (anchored)"
-    condition      = "threshold"
-    for            = "0s"
+    name      = "Deviation Breach Critical (anchored)"
+    condition = "threshold"
+    # `for = "1m"`: same NoData-blip smoothing as the magnitude-gated rule
+    # above. The anchored rule fires only when the deviation-ratio gauge
+    # is absent, so the annotation query set is even sparser — without
+    # the 1m grace a single Mimir-ruler glitch in either Aegis reserve-
+    # balance query would reset the firing state.
+    for            = "1m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
@@ -623,9 +641,12 @@ resource "grafana_rule_group" "fpmms_deviation" {
       # (which is the `-1` sentinel during data gaps, so eligible pools
       # in this state typically slip past) — but if a probe DID run before
       # the ratio gauge dropped, the most-recent reason annotation would
-      # still be present here. Reads `$values.B.Labels.*` because `$labels`
-      # exposes only the condition query's labels. When neither label is
-      # set, the `{{ if … }}` guard collapses the annotation cleanly.
+      # still be present here. Reads `$values.B.Labels.*` for the bounded
+      # reason enum (NOT `$labels`, which exposes only the firing query's
+      # labels), and dispatches to the matching Aegis reserve-balance
+      # series via `$labels.pair`. When neither the reason labels nor the
+      # Aegis series are present, the `{{ if … }}` guards collapse the
+      # annotation cleanly.
       rebalance_reason = local.deviation_critical_rebalance_reason_annotation
     }
 
@@ -648,11 +669,11 @@ resource "grafana_rule_group" "fpmms_deviation" {
       })
     }
 
-    # Annotation-only queries (Dev / R0 / R1 / B / Bal / Need) — see the
-    # magnitude-gated rule above for the rationale on each query and why
-    # they sit outside the threshold condition. Authored once in
-    # `local.deviation_critical_annotation_queries` so the magnitude-gated
-    # and anchored rules can never drift in shape.
+    # Annotation-only queries (Dev / R0 / R1 / B / ResUSDC / ResUSDT /
+    # ResAxlUSDC) — see the magnitude-gated rule above for the rationale
+    # on each query and why they sit outside the threshold condition.
+    # Authored once in `local.deviation_critical_annotation_queries` so
+    # the magnitude-gated and anchored rules can never drift in shape.
     dynamic "data" {
       for_each = local.deviation_critical_annotation_queries
       content {

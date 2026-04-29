@@ -2,13 +2,18 @@
  * Rebalance feasibility probe — slimmed-down counterpart to
  * `ui-dashboard/src/lib/rebalance-check.ts`.
  *
- * Behaviour mirrors the dashboard's probe with one exception: only the
- * Reserve-strategy enrichment is fetched (collateral balance + amount
- * needed). The Slack alert renders that pair inline as
- * "Reserve has insufficient axlUSDC. Current balance: X / Needed: Y" so
- * operators don't have to click through for the most-common diagnostic.
- * CDP / OLS / unknown branches stay annotation-light — operators click
- * through to the dashboard for those.
+ * Behaviour: simulate the strategy's `rebalance(pool)` (or `determineAction`
+ * for OLS) from `address(0)` and decode the revert into a bounded
+ * `(reason_code, reason_message)` pair the alert annotation can render.
+ *
+ * Reserve-collateral enrichment was removed in PR #238 — the dashboard's
+ * pool-detail tooltip still does its own enrichment via direct on-chain
+ * reads, but the Slack alert path reads reserve balances out of Aegis's
+ * existing `${TOKEN}_balanceOf{owner="Reserve",chain="celo"}` series
+ * instead. The in-bridge enrichment that lived here previously was
+ * failing in production with `Missing or invalid parameters`, leaving
+ * the gauges absent and propagating NoData through the critical
+ * deviation-breach rule.
  *
  * Strategy-type detection IS retained — OLS pools route `rebalance` through
  * ERC20 transfers from `msg.sender`, so simulating from `address(0)`
@@ -32,40 +37,13 @@ import {
   STRATEGY_ABI_SOURCES,
   ERROR_MESSAGES,
   HEALTHY_NO_OP_ERRORS,
-  REASON_CODES,
   type ReasonCode,
   type SyntheticReasonCode,
 } from "@mento-protocol/monitoring-config/rebalance-abi";
-import {
-  ERC20_ABI_SOURCES,
-  POOL_PAIR_ABI_SOURCES,
-} from "@mento-protocol/monitoring-config/erc20-abi";
-import {
-  fetchReserveEnrichment as fetchReserveEnrichmentShared,
-  type EnrichmentRpc,
-} from "@mento-protocol/monitoring-config/rebalance-enrichment";
-import {
-  tokenDecimals,
-  tokenSymbol,
-} from "@mento-protocol/monitoring-config/tokens";
-import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
-
-// Re-export so existing callers (and the dashboard's mirror, prior to its
-// own migration) keep importing from one canonical location.
-export { toHumanUnits };
 
 // Re-export for backwards compatibility — existing callers still import
 // `ERROR_MESSAGES` from this module.
 export { ERROR_MESSAGES };
-
-/**
- * ERC20 + pool getters used by the reserve-enrichment fetch. Sources live
- * in `@mento-protocol/monitoring-config/erc20-abi` (shared with the
- * dashboard's pool-detail probe) so a future ABI tweak doesn't have to
- * be made in two places.
- */
-const ERC20_BALANCE_ABI = parseAbi(ERC20_ABI_SOURCES);
-const POOL_TOKEN_ABI = parseAbi(POOL_PAIR_ABI_SOURCES);
 
 /**
  * Strongly-typed strategy ABI. The string sources live in `shared-config/`
@@ -75,10 +53,10 @@ const POOL_TOKEN_ABI = parseAbi(POOL_PAIR_ABI_SOURCES);
 const STRATEGY_ABI = parseAbi(STRATEGY_ABI_SOURCES);
 
 /**
- * Detection result. The `reserve` variant carries the resolved reserve
- * address so downstream enrichment can skip a redundant `reserve()` call —
- * we already paid for it during detection, the address is part of the
- * Reserve strategy's identity, and it doesn't change between blocks.
+ * Detection result. Reserve detection still resolves the reserve address
+ * (it's a free side-effect of the `reserve()` probe) so the type carries
+ * it for any future enrichment branch — currently unused by the probe
+ * itself, but documenting the strategy proxy's identity is cheap.
  */
 export type DetectedStrategy =
   | { type: "cdp" }
@@ -194,17 +172,10 @@ export async function probeRebalance(
   poolAddress: `0x${string}`,
   strategyAddress: `0x${string}`,
   /**
-   * Chain id forwarded to `tokenSymbol(chainId, address)` during reserve
-   * enrichment (`RLS_RESERVE_OUT_OF_COLLATERAL`). Tests that don't exercise
-   * the enrichment branch can pass `0` — `tokenSymbol` tolerates an unknown
-   * chain and falls back to "collateral".
-   */
-  chainId: number,
-  /**
    * Optional abort signal threaded by the runner (`probeOne` →
    * `runRebalanceProbes`). When the signal aborts, in-flight RPC reads
    * reject with an `AbortError` so the runner can short-circuit the
-   * detection / simulation / enrichment chain instead of holding stale
+   * detection / simulation chain instead of holding stale
    * eth_calls past the wall-clock timeout.
    */
   signal?: AbortSignal,
@@ -259,73 +230,8 @@ export async function probeRebalance(
         error: extractRawMessage(err) ?? "transport error",
       };
     }
-    const decoded = decodeBlockedRevert(err);
-    return maybeEnrichDecodedResult(decoded, {
-      client,
-      detected,
-      poolAddress,
-      strategyAddress,
-      chainId,
-      signal,
-    });
+    return decodeBlockedRevert(err);
   }
-}
-
-/**
- * Strategy-type-specific enrichment dispatcher. Currently only the Reserve
- * strategy gets enriched on `RLS_RESERVE_OUT_OF_COLLATERAL` (gives the
- * Slack alert the symbol-specific reason message + balance / needed gauges).
- * CDP / OLS / unknown branches fall through unchanged — operators click
- * through to the dashboard for those.
- *
- * Extracted from `probeRebalance` so the orchestrator stays a thin
- * detect → probe → decode → maybeEnrich → return pipeline. Future CDP /
- * OLS enrichment branches add `else if` arms here; the simulator above
- * stays unchanged.
- */
-async function maybeEnrichDecodedResult(
-  decoded: RebalanceProbeResult,
-  ctx: {
-    client: PublicClient;
-    detected: DetectedStrategy;
-    poolAddress: `0x${string}`;
-    strategyAddress: `0x${string}`;
-    chainId: number;
-    signal?: AbortSignal;
-  },
-): Promise<RebalanceProbeResult> {
-  if (
-    decoded.kind === "blocked" &&
-    ctx.detected.type === "reserve" &&
-    decoded.reasonCode === REASON_CODES.RLS_RESERVE_OUT_OF_COLLATERAL
-  ) {
-    const enrichment = await fetchReserveEnrichment(
-      ctx.client,
-      ctx.strategyAddress,
-      ctx.poolAddress,
-      ctx.chainId,
-      ctx.detected.reserveAddr,
-      ctx.signal,
-    );
-    if (enrichment) {
-      return {
-        ...decoded,
-        // Override the bounded enum's "Reserve has insufficient collateral
-        // to rebalance" with the symbol-specific variant. Cardinality
-        // stays bounded by the token list (~10 symbols across the index)
-        // and the Slack-injection invariant holds because `tokenSymbol`
-        // returns canonicalised names from `@mento-protocol/contracts` —
-        // never user/contract input.
-        reasonMessage: `Reserve has insufficient ${enrichment.tokenSymbol}`,
-        reserveCollateral: enrichment,
-      };
-    }
-    // Enrichment fetch failed (transport error inside balanceOf / decimals
-    // / etc.). Fall through to the generic decoded result so the alert
-    // still gets the bounded reason message and the breach itself isn't
-    // suppressed.
-  }
-  return decoded;
 }
 
 /**
@@ -360,25 +266,6 @@ export type RebalanceProbeBlocked = {
   reasonMessage: string;
   /** Unbounded operator detail — log-only, never label. */
   diagnostic?: string;
-  /**
-   * Reserve-strategy enrichment: current collateral balance held by the
-   * reserve and the amount required to close the breach. Populated only
-   * when `reasonCode === "RLS_RESERVE_OUT_OF_COLLATERAL"` AND the on-chain
-   * fetches succeed. Drives the two `mento_pool_rebalance_collateral_*`
-   * gauges (and through them the Slack alert annotation).
-   *
-   * Skipped (left undefined) for non-reserve strategies and for transport
-   * errors during enrichment — the alert annotation falls through to the
-   * generic `reason_message` in either case.
-   */
-  reserveCollateral?: {
-    /** Reserve's current ERC20 balance of the collateral token (human units). */
-    balance: number;
-    /** Strategy's required transfer to close the breach (human units). */
-    needed: number;
-    /** Token symbol for the alert annotation. Falls back to "collateral". */
-    tokenSymbol: string;
-  };
 };
 
 function decodeBlockedRevert(err: unknown): RebalanceProbeResult {
@@ -592,212 +479,4 @@ function truncateString(s: string, max = 120): string {
 
 function truncateHex(hex: Hex, max = 18): string {
   return hex.length > max ? `${hex.slice(0, max - 1)}…` : hex;
-}
-
-/**
- * Process-lifetime decimals cache for tokens whose `decimals()` we had to
- * read on-chain (i.e. addresses missing from `@mento-protocol/contracts`).
- * Decimals are immutable per contract, so once we know them they can never
- * change — the cache lives until the bridge process restarts.
- *
- * For canonical Mento tokens (~10 stablecoin / FX symbols) the cache is
- * never even consulted: `tokenDecimals(chainId, addr)` resolves from the
- * contracts manifest first, no RPC at all. Exposed for unit testing.
- */
-const decimalsCache = new Map<string, number>();
-
-// Soft cap so a malformed indexer response (or an attacker poisoning the
-// reserve-pair pool with thousands of distinct fake token addresses) can't
-// grow the Map without bound across the bridge process lifetime. Mirrors
-// the convention established by `strategyTypeCache` /
-// `sentryLastCapturedAt` in `ui-dashboard/src/lib/strategy-detection.ts`.
-// Scale in practice is ~20 unknown-token addresses per chain across all
-// supported chains — 256 leaves ample headroom while keeping the
-// per-process footprint tiny.
-const MAX_DECIMALS_CACHE_ENTRIES = 256;
-
-/** Visible-for-testing: clear the on-chain decimals cache. */
-export function _clearDecimalsCache(): void {
-  decimalsCache.clear();
-}
-
-/** Visible-for-testing: inspect the current on-chain decimals cache size. */
-export function _decimalsCacheSize(): number {
-  return decimalsCache.size;
-}
-
-/** Visible-for-testing: check whether `(chainId, address)` is cached. */
-export function _decimalsCacheHas(
-  chainId: number,
-  address: `0x${string}`,
-): boolean {
-  return decimalsCache.has(`${chainId}:${address.toLowerCase()}`);
-}
-
-/**
- * Resolve ERC20 decimals for `(chainId, address)`. Tries the canonical
- * `@mento-protocol/contracts` manifest first (zero RPC cost), then the
- * process-lifetime cache, then falls back to a single on-chain
- * `decimals()` read. Throws if the RPC call fails — callers that want
- * graceful degradation should wrap in a try/catch.
- */
-async function resolveDecimals(
-  client: PublicClient,
-  chainId: number,
-  address: `0x${string}`,
-  signal?: AbortSignal,
-): Promise<number> {
-  const canonical = tokenDecimals(chainId, address);
-  if (canonical !== null) return canonical;
-  const key = `${chainId}:${address.toLowerCase()}`;
-  const cached = decimalsCache.get(key);
-  if (cached !== undefined) return cached;
-  const decimals = (await abortable(
-    client.readContract({
-      address,
-      abi: ERC20_BALANCE_ABI,
-      functionName: "decimals",
-    }),
-    signal,
-  )) as number;
-  const decimalsNum = Number(decimals);
-  // Evict the oldest entry when full. Iteration order on Map is insertion
-  // order, so the first key is effectively the coldest write (FIFO).
-  if (decimalsCache.size >= MAX_DECIMALS_CACHE_ENTRIES) {
-    const oldest = decimalsCache.keys().next().value;
-    if (oldest !== undefined) decimalsCache.delete(oldest);
-  }
-  decimalsCache.set(key, decimalsNum);
-  return decimalsNum;
-}
-
-/** Visible-for-testing: drive `resolveDecimals` directly without needing
- *  to wire up a full `probeRebalance` enrichment fixture. Used by the
- *  decimals-cache eviction test, which inserts hundreds of entries to
- *  exercise the FIFO bound. */
-export function _resolveDecimalsForTest(
-  client: PublicClient,
-  chainId: number,
-  address: `0x${string}`,
-): Promise<number> {
-  return resolveDecimals(client, chainId, address);
-}
-
-/**
- * Adapt a viem `PublicClient` to the shared-config `EnrichmentRpc` shape.
- * Each method here is a one-line wrapper around `client.readContract` —
- * shared-config stays viem-free; the orchestration logic
- * (parallel-with-token-reads, debt-leg pick, balance + decimals fetch)
- * lives in `@mento-protocol/monitoring-config/rebalance-enrichment`.
- */
-function makeEnrichmentRpc(client: PublicClient): EnrichmentRpc {
-  return {
-    async readDetermineAction({ strategy, pool, signal }) {
-      const [ctx, action] = (await abortable(
-        client.readContract({
-          address: strategy,
-          abi: STRATEGY_ABI,
-          functionName: "determineAction",
-          args: [pool],
-        }),
-        signal,
-      )) as readonly [{ isToken0Debt: boolean }, { amountOwedToPool: bigint }];
-      return {
-        isToken0Debt: ctx.isToken0Debt,
-        amountOwedToPool: action.amountOwedToPool,
-      };
-    },
-    async readPoolConfigs({ strategy, pool, signal }) {
-      const cfg = (await abortable(
-        client.readContract({
-          address: strategy,
-          abi: STRATEGY_ABI,
-          functionName: "poolConfigs",
-          args: [pool],
-        }),
-        signal,
-      )) as readonly [boolean, ...unknown[]];
-      return { isToken0Debt: cfg[0] };
-    },
-    async readPoolTokens(pool, signal) {
-      const [token0, token1] = await Promise.all([
-        abortable(
-          client.readContract({
-            address: pool,
-            abi: POOL_TOKEN_ABI,
-            functionName: "token0",
-          }),
-          signal,
-        ),
-        abortable(
-          client.readContract({
-            address: pool,
-            abi: POOL_TOKEN_ABI,
-            functionName: "token1",
-          }),
-          signal,
-        ),
-      ]);
-      return {
-        token0: token0 as `0x${string}`,
-        token1: token1 as `0x${string}`,
-      };
-    },
-    async readBalanceOf({ token, holder, signal }) {
-      return (await abortable(
-        client.readContract({
-          address: token,
-          abi: ERC20_BALANCE_ABI,
-          functionName: "balanceOf",
-          args: [holder],
-        }),
-        signal,
-      )) as bigint;
-    },
-  };
-}
-
-/**
- * Reserve-strategy enrichment fetch. Thin wrapper over
- * `@mento-protocol/monitoring-config/rebalance-enrichment` — same data
- * path the dashboard's pool-detail tooltip uses, so a future ABI tweak
- * doesn't drift between the Slack alert and the dashboard.
- *
- * Bridge-specific shape:
- *   - `mode: "needed"` — pulls `amountOwedToPool` from `determineAction(pool)`
- *     so the alert can render "Needed for rebalancing: 12,500 axlUSDC".
- *   - Symbol resolver = `tokenSymbol(chainId, addr)` from the canonical
- *     manifest (matches the existing reserve-share label semantics).
- *     Falls back to literal "collateral" when the contract isn't manifested.
- *   - Decimals resolver = manifest-then-cache-then-RPC (see `resolveDecimals`
- *     above) so canonical tokens skip the on-chain read entirely.
- */
-async function fetchReserveEnrichment(
-  client: PublicClient,
-  strategy: `0x${string}`,
-  pool: `0x${string}`,
-  chainId: number,
-  reserveAddr: `0x${string}`,
-  signal?: AbortSignal,
-): Promise<{ balance: number; needed: number; tokenSymbol: string } | null> {
-  const result = await fetchReserveEnrichmentShared(
-    makeEnrichmentRpc(client),
-    strategy,
-    pool,
-    {
-      chainId,
-      reserveAddr,
-      mode: "needed",
-      resolveSymbol: (cId, addr) => tokenSymbol(cId, addr),
-      resolveDecimals: (cId, addr, sig) =>
-        resolveDecimals(client, cId, addr, sig),
-      signal,
-    },
-  );
-  if (result === null || result.needed === undefined) return null;
-  return {
-    balance: result.balance,
-    needed: result.needed,
-    tokenSymbol: result.tokenSymbol ?? "collateral",
-  };
 }

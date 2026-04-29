@@ -9,6 +9,14 @@
  * `@mento-protocol/monitoring-config/rebalance-abi` — both this probe and
  * the metrics-bridge alert probe import the same data so a revert decoded
  * by one always decodes by the other.
+ *
+ * Reserve-enrichment lives inline here (was briefly lifted to shared-config
+ * in PR #237 alongside a metrics-bridge alert probe; that probe was removed
+ * in PR #238 in favour of Aegis's pre-existing reserve-balance series, and
+ * the lifted helper went with it). The dashboard's tooltip still wants
+ * symbol/decimals from on-chain reads (no manifest pre-resolution) so the
+ * code stayed local from the start of #237 — this just collapses the
+ * one-call indirection through the shared package.
  */
 
 import {
@@ -25,10 +33,6 @@ import {
   REASON_CODES,
 } from "@mento-protocol/monitoring-config/rebalance-abi";
 import { POOL_PAIR_ABI_SOURCES } from "@mento-protocol/monitoring-config/erc20-abi";
-import {
-  fetchReserveEnrichment as fetchReserveEnrichmentShared,
-  type EnrichmentRpc,
-} from "@mento-protocol/monitoring-config/rebalance-enrichment";
 import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
 import { getViemClient, ERC20_ABI } from "./rpc-client";
 
@@ -46,6 +50,8 @@ const STABILITY_POOL_ABI = parseAbi([
   "function getTotalBoldDeposits() external view returns (uint256)",
   "function boldToken() external view returns (address)",
 ]);
+
+const POOL_PAIR_ABI = parseAbi(POOL_PAIR_ABI_SOURCES);
 
 // Note: ReserveV2 does not expose a collateral balance getter — we use
 // ERC20 balanceOf on the collateral token with the reserve address instead.
@@ -427,129 +433,74 @@ async function fetchCDPEnrichment(
   }
 }
 
-/**
- * Adapter from a viem `PublicClient` to the `EnrichmentRpc` shape consumed
- * by `@mento-protocol/monitoring-config/rebalance-enrichment`. Each method
- * is a thin viem wrapper — shared-config stays viem-free, the orchestration
- * (parallel pool-token reads, debt-leg pick, balance/decimals fetch) lives
- * in shared-config.
- */
-const POOL_PAIR_ABI = parseAbi(POOL_PAIR_ABI_SOURCES);
-
-function makeEnrichmentRpc(client: PublicClient): EnrichmentRpc {
-  // Dashboard's tooltip is user-initiated and tolerates the natural HTTP
-  // timeout — there's no caller wiring an AbortSignal in. The args
-  // accept the optional `signal` to match the shared interface, but the
-  // dashboard doesn't propagate it (no per-call cancellation, no leak
-  // surface). The metrics-bridge probe does plumb it through to its
-  // wall-clock-timed runner; see `metrics-bridge/src/rebalance-check.ts`.
-  return {
-    async readDetermineAction({ strategy, pool }) {
-      // Dashboard never uses needed-mode (calls `fetchReserveEnrichment` in
-      // balance-only mode), but the EnrichmentRpc surface requires both.
-      // Stub kept so a future tooltip variant can switch modes.
-      const [ctx, action] = (await client.readContract({
-        address: strategy,
-        abi: STRATEGY_ABI,
-        functionName: "determineAction",
-        args: [pool],
-      })) as readonly [{ isToken0Debt: boolean }, { amountOwedToPool: bigint }];
-      return {
-        isToken0Debt: ctx.isToken0Debt,
-        amountOwedToPool: action.amountOwedToPool,
-      };
-    },
-    async readPoolConfigs({ strategy, pool }) {
-      const cfg = (await client.readContract({
-        address: strategy,
-        abi: STRATEGY_ABI,
-        functionName: "poolConfigs",
-        args: [pool],
-      })) as readonly [boolean, ...unknown[]];
-      return { isToken0Debt: cfg[0] };
-    },
-    async readPoolTokens(pool) {
-      const [token0, token1] = await Promise.all([
-        client.readContract({
-          address: pool,
-          abi: POOL_PAIR_ABI,
-          functionName: "token0",
-        }),
-        client.readContract({
-          address: pool,
-          abi: POOL_PAIR_ABI,
-          functionName: "token1",
-        }),
-      ]);
-      return {
-        token0: token0 as `0x${string}`,
-        token1: token1 as `0x${string}`,
-      };
-    },
-    async readBalanceOf({ token, holder }) {
-      return (await client.readContract({
-        address: token,
-        abi: ERC20_ABI,
-        functionName: "balanceOf",
-        args: [holder],
-      })) as bigint;
-    },
-  };
-}
-
 async function fetchReserveEnrichment(
   client: PublicClient,
   strategy: `0x${string}`,
   pool: `0x${string}`,
 ): Promise<StrategyEnrichment | null> {
-  // Resolve `reserve()` first — needed by the shared helper as a parameter,
-  // and the dashboard doesn't carry it through from detection (unlike the
-  // metrics-bridge probe, which threads it through to save one RPC).
-  let reserveAddr: `0x${string}`;
   try {
-    reserveAddr = (await client.readContract({
+    const reserveAddr = (await client.readContract({
       address: strategy,
       abi: STRATEGY_ABI,
       functionName: "reserve",
     })) as `0x${string}`;
+
+    // Determine the collateral token — it's the non-debt token.
+    // Read pool config to know which token is debt.
+    const poolConfig = await client.readContract({
+      address: strategy,
+      abi: STRATEGY_ABI,
+      functionName: "poolConfigs",
+      args: [pool],
+    });
+
+    const isToken0Debt = poolConfig[0] as boolean;
+
+    // Read pool tokens
+    const [token0, token1] = await Promise.all([
+      client.readContract({
+        address: pool,
+        abi: POOL_PAIR_ABI,
+        functionName: "token0",
+      }),
+      client.readContract({
+        address: pool,
+        abi: POOL_PAIR_ABI,
+        functionName: "token1",
+      }),
+    ]);
+
+    const collateralToken = (isToken0Debt ? token1 : token0) as `0x${string}`;
+
+    const [balance, symbol, decimals] = await Promise.all([
+      client.readContract({
+        address: collateralToken,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [reserveAddr],
+      }),
+      client.readContract({
+        address: collateralToken,
+        abi: ERC20_ABI,
+        functionName: "symbol",
+      }),
+      client.readContract({
+        address: collateralToken,
+        abi: ERC20_ABI,
+        functionName: "decimals",
+      }),
+    ]);
+
+    return {
+      type: "reserve",
+      reserveCollateralBalance: toHumanUnits(
+        balance as bigint,
+        Number(decimals),
+      ),
+      collateralTokenSymbol: symbol as string,
+      collateralTokenDecimals: Number(decimals),
+    };
   } catch {
     return null;
   }
-
-  const result = await fetchReserveEnrichmentShared(
-    makeEnrichmentRpc(client),
-    strategy,
-    pool,
-    {
-      chainId: 0, // Dashboard doesn't pre-resolve via manifest; symbol/decimals come from on-chain reads via the resolvers below.
-      reserveAddr,
-      mode: "balance-only",
-      resolveSymbol: async (_chainId, addr) => {
-        try {
-          return (await client.readContract({
-            address: addr,
-            abi: ERC20_ABI,
-            functionName: "symbol",
-          })) as string;
-        } catch {
-          return null;
-        }
-      },
-      resolveDecimals: async (_chainId, addr) => {
-        const decimals = (await client.readContract({
-          address: addr,
-          abi: ERC20_ABI,
-          functionName: "decimals",
-        })) as number;
-        return Number(decimals);
-      },
-    },
-  );
-  if (result === null || result.tokenSymbol === null) return null;
-  return {
-    type: "reserve",
-    reserveCollateralBalance: result.balance,
-    collateralTokenSymbol: result.tokenSymbol,
-    collateralTokenDecimals: result.decimals,
-  };
 }
