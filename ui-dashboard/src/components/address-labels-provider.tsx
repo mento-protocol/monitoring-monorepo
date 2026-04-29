@@ -221,10 +221,14 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
       if (!address) return undefined;
       const lower = address.toLowerCase();
       const cid = chainId ?? defaultChainId;
+      // Normalise so legacy tag-only rows feed the editor pre-fill with
+      // clean tags + populated source, matching what `customEntries` yields.
       const chainEntry = state.chains.get(cid)?.[lower];
-      if (chainEntry) return { entry: chainEntry, scope: cid };
+      if (chainEntry)
+        return { entry: normalizeArkhamLegacy(chainEntry), scope: cid };
       const globalEntry = state.global[lower];
-      if (globalEntry) return { entry: globalEntry, scope: "global" };
+      if (globalEntry)
+        return { entry: normalizeArkhamLegacy(globalEntry), scope: "global" };
       return undefined;
     },
     [state, defaultChainId],
