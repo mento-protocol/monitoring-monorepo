@@ -644,17 +644,32 @@ function AddressTableRow({
         )}
       </td>
       <td className="px-4 py-3 text-xs whitespace-nowrap">
-        {updatedAt && createdAt && updatedAt !== createdAt ? (
-          // Highlight only when the row has actually been edited since
-          // creation; otherwise show an em-dash so the column doesn't just
-          // duplicate "Created at" for every untouched row.
-          <time
-            dateTime={updatedAt}
-            title={updatedAt}
-            className="rounded bg-amber-950/60 px-1.5 py-0.5 font-medium text-amber-300 ring-1 ring-inset ring-amber-900/60"
-          >
-            {formatCreatedAt(updatedAt)}
-          </time>
+        {updatedAt ? (
+          // Highlight when we can confirm the row has been edited since
+          // creation; render plain when `createdAt` is absent (legacy rows
+          // where we can't compute the diff but still want to surface the
+          // last-write timestamp). Em-dash only when there's no timestamp
+          // at all (contract rows). Sky palette is distinct from the amber
+          // "private" visibility badge to avoid semantic collision.
+          createdAt && updatedAt !== createdAt ? (
+            <time
+              dateTime={updatedAt}
+              title={updatedAt}
+              className="rounded bg-sky-950/60 px-1.5 py-0.5 font-medium text-sky-300 ring-1 ring-inset ring-sky-900/60"
+            >
+              {formatCreatedAt(updatedAt)}
+            </time>
+          ) : createdAt && updatedAt === createdAt ? (
+            <span className="text-slate-600">—</span>
+          ) : (
+            <time
+              dateTime={updatedAt}
+              title={updatedAt}
+              className="text-slate-400"
+            >
+              {formatCreatedAt(updatedAt)}
+            </time>
+          )
         ) : (
           <span className="text-slate-600">—</span>
         )}
