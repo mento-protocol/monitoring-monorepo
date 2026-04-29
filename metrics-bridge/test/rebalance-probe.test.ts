@@ -15,6 +15,17 @@ import { makePool, getGaugeValue } from "./fixtures.js";
 
 vi.mock("../src/rebalance-check.js", () => ({
   probeRebalance: vi.fn(),
+  // `probeOne` calls `isAbortError` to detect a timeout-driven abort vs.
+  // an unexpected throw — duplicate the implementation here so the mock
+  // exports the same shape.
+  isAbortError: (err: unknown) => {
+    if (!err || typeof err !== "object") return false;
+    const e = err as { name?: string; code?: string };
+    return e.name === "AbortError" || e.code === "ABORT_ERR";
+  },
+  // `probeOne` calls `scrubUrls` on the fallback error message path.
+  scrubUrls: (s: string) =>
+    s.replace(/https?:\/\/[^\s)]+/gi, "<rpc-url-redacted>"),
   ERROR_MESSAGES: {},
 }));
 vi.mock("../src/rpc.js", () => ({
@@ -189,7 +200,7 @@ describe("runRebalanceProbes — timeout race", () => {
     vi.useRealTimers();
   });
 
-  it("races a never-resolving probe against the wall-clock timeout and surfaces transport_error", async () => {
+  it("signals abort on wall-clock timeout so the runner stops awaiting and surfaces transport_error", async () => {
     // Fake timers let us drive the setTimeout in `probeOne` past
     // `REBALANCE_PROBE_TIMEOUT_MS` without burning real wall time.
     vi.useFakeTimers();
@@ -197,8 +208,31 @@ describe("runRebalanceProbes — timeout race", () => {
       deviationBreachStartedAt: "1713200000",
       lastDeviationRatio: "1.50",
     });
-    // Probe never resolves — only the timeout branch can win the race.
-    mockProbe.mockImplementationOnce(() => new Promise(() => {}));
+    // Probe observes the signal and rejects on abort. This is what the
+    // signal-aware `abortable()` wrappers buy us: the runner short-circuits
+    // detection / simulation / enrichment instead of awaiting orphaned
+    // promises. (Note: viem 2.47.0 doesn't accept a per-call signal so the
+    // underlying HTTP fetch keeps running until the transport timeout — the
+    // JS-visible promise rejection is the load-bearing change here.)
+    let observedSignal: AbortSignal | undefined;
+    mockProbe.mockImplementationOnce(
+      (_client, _pool, _strategy, _chainId, signal) => {
+        observedSignal = signal;
+        return new Promise((_resolve, reject) => {
+          if (signal?.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal?.addEventListener(
+            "abort",
+            () => {
+              reject(signal.reason);
+            },
+            { once: true },
+          );
+        });
+      },
+    );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const probePromise = runRebalanceProbes([pool]);
@@ -206,6 +240,13 @@ describe("runRebalanceProbes — timeout race", () => {
     // callback in probeOne fires, then let any chained microtasks settle.
     await vi.advanceTimersByTimeAsync(REBALANCE_PROBE_TIMEOUT_MS + 1);
     await probePromise;
+
+    // The runner threaded an AbortSignal into the probe and that signal
+    // is now aborted (the wall-clock timeout fired controller.abort()).
+    // The legacy `Promise.race` left the runner blocked on the viem call;
+    // this assertion proves the runner now stops awaiting on timeout.
+    expect(observedSignal).toBeDefined();
+    expect(observedSignal?.aborted).toBe(true);
 
     // No metric written — transport_error never sets the gauge.
     const metrics = await register.getMetricsAsJSON();
@@ -219,6 +260,103 @@ describe("runRebalanceProbes — timeout race", () => {
       expect.stringContaining("[REBALANCE_PROBE_FAILED]"),
     );
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("timed out"));
+    warn.mockRestore();
+  });
+
+  it("clears the timeout handle when the probe completes successfully (no leaked timers)", async () => {
+    // Run N successful probes back-to-back and assert that each cycle's
+    // timeout handles are released. Without `clearTimeout` in the success
+    // branch, every probe leaks a setTimeout that fires later (no-op,
+    // but pinned event-loop work and a Node `process._getActiveHandles`
+    // entry per probe). At REBALANCE_PROBE_CONCURRENCY=5 against a
+    // healthy endpoint the leak rate would be ≈10 handles/min/probe-pool
+    // — small but real.
+    vi.useFakeTimers();
+    const pools = Array.from({ length: 5 }, (_, i) =>
+      makePool({
+        id: `42220-0xabc000000000000000000000000000000000000${i}`,
+        deviationBreachStartedAt: "1713200000",
+        lastDeviationRatio: "1.50",
+      }),
+    );
+    // Every probe resolves immediately with `ok` — the success branch
+    // must clear its timeout handle in `finally`.
+    mockProbe.mockResolvedValue({ kind: "ok" });
+
+    await runRebalanceProbes(pools);
+
+    // After the runner returns, advancing the clock past the configured
+    // timeout MUST NOT trigger any pending callbacks — proves all
+    // setTimeout handles were cleared on the success path.
+    expect(vi.getTimerCount()).toBe(0);
+
+    // Belt-and-braces: advance well past the timeout — should be a no-op.
+    await vi.advanceTimersByTimeAsync(REBALANCE_PROBE_TIMEOUT_MS * 2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("scrubs RPC URLs from the error message in the unexpected-error fallback", async () => {
+    // Regression guard for the fallback catch in `probeOne`: any non-abort
+    // error that escapes `probeRebalance` must have its message URL-scrubbed
+    // before appearing in `[REBALANCE_PROBE_FAILED]` logs. Without this,
+    // viem transport errors containing path-based API keys (e.g.
+    // "https://eth-mainnet.g.alchemy.com/v2/SECRET_KEY") would leak
+    // credentials into Cloud Run logs.
+    const pool = makePool({
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.50",
+    });
+    const urlInError = new Error(
+      "HTTP request failed. URL: https://eth-mainnet.g.alchemy.com/v2/SECRET_API_KEY_12345",
+    );
+    // Throw a plain (non-abort) Error so the fallback catch branch is hit.
+    mockProbe.mockRejectedValueOnce(urlInError);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await runRebalanceProbes([pool]);
+
+    // The raw URL must never appear in the log line.
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("[REBALANCE_PROBE_FAILED]"),
+    );
+    const logged = warn.mock.calls
+      .filter((args) => String(args[0]).includes("[REBALANCE_PROBE_FAILED]"))
+      .map((args) => String(args[0]))
+      .join("\n");
+    expect(logged).not.toContain("SECRET_API_KEY_12345");
+    expect(logged).toContain("<rpc-url-redacted>");
+    warn.mockRestore();
+  });
+
+  it("does not throw an AbortError downstream when the probe completes successfully", async () => {
+    // Regression guard: a probe that finishes BEFORE the timeout fires
+    // must surface its result cleanly. Even if the abort eventually
+    // happens (e.g. between micro-task ticks), it lands on a controller
+    // nobody's awaiting, so it can't pollute the result.
+    const pool = makePool({
+      deviationBreachStartedAt: "1713200000",
+      lastDeviationRatio: "1.50",
+    });
+    mockProbe.mockResolvedValueOnce({
+      kind: "blocked",
+      reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
+      reasonMessage: "Reserve has insufficient collateral to rebalance",
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(runRebalanceProbes([pool])).resolves.toBeUndefined();
+
+    // The blocked label set landed; no transport_error was logged.
+    const value = await getGaugeValue(
+      register,
+      "mento_pool_rebalance_blocked",
+      { reason_code: "RLS_RESERVE_OUT_OF_COLLATERAL" },
+    );
+    expect(value).toBe(1);
+    const failedCalls = warn.mock.calls.filter((args) =>
+      String(args[0]).includes("[REBALANCE_PROBE_FAILED]"),
+    );
+    expect(failedCalls).toHaveLength(0);
     warn.mockRestore();
   });
 });
@@ -415,6 +553,10 @@ describe("runRebalanceProbes — re-entrancy guard for overlapping cycles", () =
     // load-bearing piece of the guard: if a probe rejection left the flag
     // stuck `true`, the probe would be permanently disabled until the
     // process restarted. Pin it.
+    //
+    // Since PR #241 `probeOne` wraps unexpected throws in a `transport_error`
+    // result rather than re-throwing, so `runRebalanceProbes` resolves (not
+    // rejects) and logs a `[REBALANCE_PROBE_FAILED]` line with the message.
     const pool = makePool({
       deviationBreachStartedAt: "1713200000",
       lastDeviationRatio: "1.50",
@@ -422,8 +564,11 @@ describe("runRebalanceProbes — re-entrancy guard for overlapping cycles", () =
     mockProbe.mockRejectedValueOnce(new Error("boom"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    // Cycle 1 must reject (the worker pool surfaces the throw).
-    await expect(runRebalanceProbes([pool])).rejects.toThrow(/boom/);
+    // Cycle 1 surfaces the throw as transport_error — resolves, not rejects.
+    await runRebalanceProbes([pool]);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("[REBALANCE_PROBE_FAILED]"),
+    );
 
     // Cycle 2 must run a fresh probe — the mutex was released by `finally`.
     mockProbe.mockResolvedValueOnce({

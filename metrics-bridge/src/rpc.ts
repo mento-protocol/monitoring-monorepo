@@ -17,6 +17,7 @@
  */
 
 import { createPublicClient, http, type PublicClient } from "viem";
+import { REBALANCE_PROBE_TIMEOUT_MS } from "./config.js";
 
 type RpcConfig = { default?: string; envVar: string };
 
@@ -90,7 +91,16 @@ export function getRpcClient(chainId: number): PublicClient | null {
     }
     return null;
   }
-  const client = createPublicClient({ transport: http(url) });
+  // Cap the http transport timeout at the probe wall-clock so an orphaned
+  // request (the JS-visible promise gets aborted by `abortable(...)`, but
+  // viem 2.47.0 doesn't accept a per-call signal — see
+  // `rebalance-check.ts:abortable`) can't out-live the probe by more than
+  // the transport's own ceiling. Viem's default is 10s; the probe timeout
+  // is intentionally tighter, so without this cap the orphan window is
+  // (transport_timeout − probe_timeout) per stuck call.
+  const client = createPublicClient({
+    transport: http(url, { timeout: REBALANCE_PROBE_TIMEOUT_MS }),
+  });
   clientCache.set(chainId, client);
   return client;
 }

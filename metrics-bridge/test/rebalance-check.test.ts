@@ -734,6 +734,47 @@ describe("probeRebalance — Reserve enrichment for RLS_RESERVE_OUT_OF_COLLATERA
     expect(result.reserveCollateral?.tokenSymbol).toBe("collateral");
   });
 
+  it("propagates AbortError when the signal fires during reserve enrichment", async () => {
+    // Regression: a probe that successfully decoded RLS_RESERVE_OUT_OF_COLLATERAL
+    // can still hit a wall-clock timeout while the enrichment chain is in
+    // flight (`determineAction` / pool tokens / balanceOf / decimals). The
+    // shared-config catch-all used to swallow the AbortError and return
+    // `null`, which made the probe surface a normal `blocked` result and
+    // write stale labels. The fix re-throws aborts so `probeOne` lands in
+    // its `transport_error` branch.
+    const controller = new AbortController();
+    const data = encodeRevert("RLS_RESERVE_OUT_OF_COLLATERAL");
+    const err = makeRevertError("execution reverted", data);
+    const client = {
+      call: () => Promise.reject(err),
+      readContract: ({ functionName }: { functionName: string }) => {
+        if (functionName === "getCDPConfig")
+          return Promise.reject(functionNotFoundError());
+        if (functionName === "reserve") return Promise.resolve(RESERVE_ADDR);
+        if (functionName === "getPools")
+          return Promise.reject(functionNotFoundError());
+        // Enrichment calls hang forever — abort is the only way out.
+        return new Promise(() => {});
+      },
+    } as unknown as PublicClient;
+
+    const probePromise = probeRebalance(
+      client,
+      POOL_USDM_AXLUSDC,
+      STRATEGY,
+      CELO_CHAIN_ID,
+      controller.signal,
+    );
+    // Fire abort once detection has resolved + enrichment is pending.
+    setTimeout(() => {
+      const e = new Error("probe timed out");
+      e.name = "AbortError";
+      controller.abort(e);
+    }, 0);
+
+    await expect(probePromise).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("CDP strategy: no enrichment attached even when reasonCode would map (different strategy type)", async () => {
     // Sanity: a CDPLS_STABILITY_POOL_BALANCE_TOO_LOW (the CDP analogue) does
     // NOT trigger reserve enrichment — the alert would render the bounded
