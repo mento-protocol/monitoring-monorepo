@@ -41,6 +41,29 @@ export type AddressLabelsSnapshot = {
   chains: Record<string, Record<string, AddressEntry>>;
 };
 
+// Provenance helpers — Arkham is currently the only automated source
+
+/**
+ * Legacy provenance tag. Pre-source-field entries persisted `"arkham"`
+ * inside `tags`. New writes carry provenance in `AddressEntry.source`
+ * instead and exclude the tag entirely; this constant is retained so
+ * `isArkhamSourced` still recognises pre-migration entries until they get
+ * re-enriched.
+ */
+export const ARKHAM_TAG = "arkham";
+
+/**
+ * True when an existing entry was written by the Arkham enrichment cron.
+ * Accepts both the new shape (`source === "arkham"`) and legacy entries
+ * predating the source field (`tags` includes the sentinel).
+ */
+export function isArkhamSourced(entry: {
+  source?: string;
+  tags?: string[];
+}): boolean {
+  return entry.source === "arkham" || entry.tags?.includes(ARKHAM_TAG) === true;
+}
+
 // Backward-compat: auto-upgrade legacy entries on read
 
 /**

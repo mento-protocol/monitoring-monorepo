@@ -18,6 +18,7 @@ import {
   type Network,
 } from "@/lib/networks";
 import { buildAddressBookRows, type AddressBookRow } from "@/lib/address-book";
+import { ARKHAM_TAG, isArkhamSourced } from "@/lib/arkham";
 
 type AddressRow = AddressBookRow;
 
@@ -511,13 +512,10 @@ function AddressTableRow({
   explorerUrl,
   onEdit,
 }: AddressRowProps) {
-  // Pre-source-field entries carried provenance in `tags`; honour the
-  // legacy marker until those rows get re-enriched. New entries set
-  // `source: "arkham"` and exclude the tag entirely.
-  const isArkhamSourced = source === "arkham" || tags.includes("arkham");
+  const arkhamSourced = isArkhamSourced({ source, tags });
   // Hide the legacy provenance sentinel from the tags display so the
   // column shows real metadata only.
-  const displayTags = tags.filter((t) => t !== "arkham");
+  const displayTags = tags.filter((t) => t !== ARKHAM_TAG);
   return (
     <tr className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
       <td className="px-4 py-3">
@@ -572,7 +570,7 @@ function AddressTableRow({
         {notes ?? <span className="text-slate-600">—</span>}
       </td>
       <td className="px-4 py-3">
-        {isCustom && isArkhamSourced ? (
+        {isCustom && arkhamSourced ? (
           <span className="inline-flex items-center rounded-full bg-teal-950 px-2 py-0.5 text-xs font-medium text-teal-300 ring-1 ring-inset ring-teal-800">
             arkham
           </span>

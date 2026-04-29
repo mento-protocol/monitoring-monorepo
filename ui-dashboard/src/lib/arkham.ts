@@ -9,7 +9,12 @@
  * NEVER import from a client component. The API key is server-only.
  */
 
-import { sanitizeEntry, type AddressEntry } from "@/lib/address-labels-shared";
+import {
+  ARKHAM_TAG,
+  isArkhamSourced,
+  sanitizeEntry,
+  type AddressEntry,
+} from "@/lib/address-labels-shared";
 
 const ARKHAM_BASE = "https://api.arkm.com";
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -67,14 +72,10 @@ export type ArkhamEnrichedAddress = {
   clusterIds?: string[];
 };
 
-/**
- * Legacy provenance tag. Pre-source-field entries persisted `"arkham"` inside
- * `tags`. New writes carry provenance in `AddressEntry.source` instead and
- * exclude the tag entirely; this constant is retained so `filterCandidates`
- * and `mergeRefreshEntry` still recognise pre-migration entries until they
- * get re-enriched.
- */
-export const ARKHAM_TAG = "arkham";
+// Re-export so existing `from "@/lib/arkham"` import sites keep working.
+// The canonical home is `address-labels-shared.ts` because client components
+// (e.g. AddressBookClient) need these and this module is server-only.
+export { ARKHAM_TAG, isArkhamSourced };
 
 export class ArkhamRateLimitedError extends Error {
   constructor() {
@@ -178,9 +179,9 @@ export function hasUsableLabel(data: ArkhamMultiChainResponse): boolean {
  * Map an Arkham response onto our `AddressEntry` schema.
  *
  * Returns `null` when nothing is worth persisting (caller should skip the
- * Redis write). The `arkham` tag is the provenance marker — code paths that
- * write manual labels MUST NOT include it, so a future refresh can tell
- * "manual" from "auto-enriched".
+ * Redis write). Provenance is recorded as `source: "arkham"`; manual labels
+ * never carry that source, so a future refresh can tell "manual" from
+ * "auto-enriched".
  */
 export function toAddressEntry(
   data: ArkhamMultiChainResponse,
@@ -330,10 +331,7 @@ export function mergeRefreshEntry(
   existing: AddressEntry | undefined,
   fresh: AddressEntry,
 ): AddressEntry {
-  const isArkhamSourced =
-    existing?.source === "arkham" ||
-    existing?.tags?.includes(ARKHAM_TAG) === true;
-  if (!existing || !isArkhamSourced) return fresh;
+  if (!existing || !isArkhamSourced(existing)) return fresh;
 
   const isAutoNote = existing.notes?.startsWith("Arkham prediction (");
   const tags = Array.from(new Set([...fresh.tags, ...existing.tags])).filter(
@@ -372,10 +370,7 @@ export function filterCandidates(
     .filter((address) => {
       const current = existing[address];
       if (!current) return mode !== "refresh"; // unlabeled: enrich in new mode only
-      const isArkhamSourced =
-        current.source === "arkham" ||
-        current.tags?.includes(ARKHAM_TAG) === true;
-      if (isArkhamSourced) return mode === "refresh";
+      if (isArkhamSourced(current)) return mode === "refresh";
       return false; // manual label — skip
     });
 }
