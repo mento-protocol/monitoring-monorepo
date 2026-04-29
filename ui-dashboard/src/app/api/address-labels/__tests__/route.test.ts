@@ -11,6 +11,8 @@ vi.mock("@/lib/address-labels", () => ({
   getAllLabels: vi.fn().mockResolvedValue({ global: {}, chains: {} }),
   upsertEntry: vi.fn().mockResolvedValue(undefined),
   deleteLabel: vi.fn().mockResolvedValue(undefined),
+  isArkhamSourced: (entry: { source?: string; tags?: string[] }) =>
+    entry.source === "arkham" || entry.tags?.includes("arkham") === true,
 }));
 
 import { getAuthSession } from "@/auth";
@@ -340,6 +342,45 @@ describe("PUT /api/address-labels", () => {
         name: "Binance Hot Wallet 14",
         tags: ["exchange", "user-curated"],
         notes: "routes the bridge fees",
+      }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(200);
+    expect(upsertEntry).toHaveBeenCalledWith(
+      "global",
+      address,
+      expect.objectContaining({ source: "arkham" }),
+    );
+  });
+
+  it("preserves Arkham source on edit of a LEGACY entry (tag-only shape)", async () => {
+    // Pre-migration entries carry `tags: ["arkham", ...]` but no `source`
+    // field. Without the dual-check `isArkhamSourced`, editing such a row
+    // would leave it with neither marker — invisible to the refresh cron
+    // and indistinguishable from a manual entry. (Bugbot + Claude bot.)
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+    const address = "0x" + "a".repeat(40);
+    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      global: {
+        [address.toLowerCase()]: {
+          name: "Binance",
+          tags: ["arkham", "exchange"], // legacy shape
+          updatedAt: "2026-04-01T00:00:00Z",
+        },
+      },
+      chains: {},
+    });
+    const req = new NextRequest("http://localhost/api/address-labels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: "global",
+        address,
+        name: "Binance",
+        tags: ["exchange"], // sentinel stripped client-side already
+        notes: "edited",
       }),
     });
     const res = await PUT(req);
