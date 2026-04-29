@@ -553,6 +553,10 @@ describe("runRebalanceProbes — re-entrancy guard for overlapping cycles", () =
     // load-bearing piece of the guard: if a probe rejection left the flag
     // stuck `true`, the probe would be permanently disabled until the
     // process restarted. Pin it.
+    //
+    // Since PR #241 `probeOne` wraps unexpected throws in a `transport_error`
+    // result rather than re-throwing, so `runRebalanceProbes` resolves (not
+    // rejects) and logs a `[REBALANCE_PROBE_FAILED]` line with the message.
     const pool = makePool({
       deviationBreachStartedAt: "1713200000",
       lastDeviationRatio: "1.50",
@@ -560,8 +564,11 @@ describe("runRebalanceProbes — re-entrancy guard for overlapping cycles", () =
     mockProbe.mockRejectedValueOnce(new Error("boom"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    // Cycle 1 must reject (the worker pool surfaces the throw).
-    await expect(runRebalanceProbes([pool])).rejects.toThrow(/boom/);
+    // Cycle 1 surfaces the throw as transport_error — resolves, not rejects.
+    await runRebalanceProbes([pool]);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("[REBALANCE_PROBE_FAILED]"),
+    );
 
     // Cycle 2 must run a fresh probe — the mutex was released by `finally`.
     mockProbe.mockResolvedValueOnce({
