@@ -1,22 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthSession } from "@/auth";
 
 /**
- * Cron-or-session auth gate.
+ * Bearer-only auth gate for cron-triggered GET routes.
  *
- * Cron routes accept either a `Bearer ${CRON_SECRET}` header (the Vercel
- * cron caller) or an authenticated session (a human admin manually
- * triggering the route). In `NODE_ENV=development` both gates are
- * bypassed so a developer can hit the endpoint without secrets.
+ * Vercel cron jobs invoke handlers via HTTP GET, which is unsafe to gate on
+ * session auth alone — a logged-in user could be tricked into a cross-site
+ * top-level GET navigation that sends session cookies and triggers the
+ * cron's expensive side effects (CSRF). Requiring `Bearer ${CRON_SECRET}`
+ * ensures only the Vercel cron caller (or an explicit `curl -H Authorization`)
+ * can invoke these routes; browser navigations are rejected with 401.
  *
- * Returns `null` on success — the caller proceeds. Returns a `NextResponse`
- * to bail with on failure (500 if `CRON_SECRET` is unset in non-dev,
- * 401 if neither auth method satisfied).
+ * In `NODE_ENV=development` the gate is bypassed so a developer can hit the
+ * endpoint without secrets.
+ *
+ * Returns `null` on success. Returns a `NextResponse` on failure (500 if
+ * `CRON_SECRET` is unset in non-dev, 401 if the bearer doesn't match).
  *
  * `routeTag` is included in the dev-only console error so misconfiguration
  * messages still identify the offending route.
  */
-export async function requireCronOrSession(
+export async function requireCronAuth(
   req: NextRequest,
   routeTag: string,
 ): Promise<NextResponse | null> {
@@ -34,9 +37,6 @@ export async function requireCronOrSession(
   if (req.headers.get("authorization") === `Bearer ${cronSecret}`) {
     return null;
   }
-
-  const session = await getAuthSession();
-  if (session) return null;
 
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }

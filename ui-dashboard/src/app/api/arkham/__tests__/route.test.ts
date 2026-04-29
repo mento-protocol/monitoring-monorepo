@@ -109,16 +109,13 @@ describe("GET /api/arkham/enrich — auth", () => {
     expect(res.status).toBe(401);
   });
 
-  it("accepts authenticated session as fallback", async () => {
+  it("401s on session-only auth — bearer required for cron GET (CSRF defence)", async () => {
     mockGetAuthSession.mockResolvedValue({
       user: { email: "alice@mentolabs.xyz" },
       expires: "2099-01-01T00:00:00Z",
     });
-    mockDiscover.mockResolvedValue({ addresses: [], perEntity: [] });
-    mockGetAllLabels.mockResolvedValue(emptyLabels());
-    mockEnrichBatch.mockResolvedValue([]);
     const res = await GET(makeReq());
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
   });
 
   it("500s when CRON_SECRET is unset", async () => {

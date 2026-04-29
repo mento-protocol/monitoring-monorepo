@@ -124,6 +124,16 @@ describe("hasUsableLabel", () => {
   it("returns false when nothing is present", () => {
     expect(hasUsableLabel(makeArkhamResponse())).toBe(false);
   });
+
+  it("returns false on whitespace-only label across all chains", () => {
+    expect(
+      hasUsableLabel(
+        makeArkhamResponse({
+          arkhamLabel: { name: "   ", address: "0xabc", chainType: "evm" },
+        }),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("toAddressEntry", () => {

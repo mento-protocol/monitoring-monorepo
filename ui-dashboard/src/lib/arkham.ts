@@ -155,8 +155,10 @@ export async function fetchHealth(
  */
 export function hasUsableLabel(data: ArkhamMultiChainResponse): boolean {
   for (const perChain of Object.values(data)) {
-    if (perChain.arkhamLabel?.name) return true;
-    if (perChain.arkhamEntity?.name) return true;
+    // Trim before checking — `"   "` is JS-truthy but not a usable label.
+    // Aligns with `toAddressEntry`'s post-trim falsy-check downstream.
+    if (perChain.arkhamLabel?.name?.trim()) return true;
+    if (perChain.arkhamEntity?.name?.trim()) return true;
     if (
       perChain.entityPredictions?.some((p) => p.confidence >= HIGH_CONFIDENCE)
     ) {

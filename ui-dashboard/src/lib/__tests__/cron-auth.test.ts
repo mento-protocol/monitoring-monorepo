@@ -1,14 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-vi.mock("@/auth", () => ({
-  getAuthSession: vi.fn(),
-}));
-
-import { requireCronOrSession } from "@/lib/cron-auth";
-import { getAuthSession } from "@/auth";
-
-const mockGetAuthSession = vi.mocked(getAuthSession);
+import { requireCronAuth } from "@/lib/cron-auth";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -17,23 +10,22 @@ beforeEach(() => {
 
 function makeReq(authHeader?: string): NextRequest {
   return new NextRequest("http://localhost/route", {
-    method: "POST",
+    method: "GET",
     headers: authHeader ? { authorization: authHeader } : undefined,
   });
 }
 
-describe("requireCronOrSession", () => {
+describe("requireCronAuth", () => {
   it("returns null in development without checking anything else", async () => {
     vi.stubEnv("NODE_ENV", "development");
-    const res = await requireCronOrSession(makeReq(), "test");
+    const res = await requireCronAuth(makeReq(), "test");
     expect(res).toBeNull();
-    expect(mockGetAuthSession).not.toHaveBeenCalled();
   });
 
   it("500s when CRON_SECRET is unset in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("CRON_SECRET", "");
-    const res = await requireCronOrSession(makeReq("Bearer anything"), "test");
+    const res = await requireCronAuth(makeReq("Bearer anything"), "test");
     expect(res?.status).toBe(500);
     const body = (await res!.json()) as { error: string };
     expect(body.error).toMatch(/CRON_SECRET/);
@@ -42,39 +34,24 @@ describe("requireCronOrSession", () => {
   it("returns null on Bearer match", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("CRON_SECRET", "secret");
-    const res = await requireCronOrSession(makeReq("Bearer secret"), "test");
-    expect(res).toBeNull();
-    // Bearer match short-circuits the session check.
-    expect(mockGetAuthSession).not.toHaveBeenCalled();
-  });
-
-  it("falls back to session when Bearer doesn't match", async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("CRON_SECRET", "secret");
-    mockGetAuthSession.mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-      expires: "2099-01-01T00:00:00Z",
-    });
-    const res = await requireCronOrSession(makeReq("Bearer wrong"), "test");
+    const res = await requireCronAuth(makeReq("Bearer secret"), "test");
     expect(res).toBeNull();
   });
 
-  it("falls back to session when no Authorization header is present", async () => {
+  it("401s when bearer doesn't match — no session fallback", async () => {
+    // CSRF defence: a logged-in user navigating cross-site to the GET cron
+    // path would otherwise sign-in with their cookie and trigger Redis writes
+    // / blob uploads. Bearer-only.
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("CRON_SECRET", "secret");
-    mockGetAuthSession.mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-      expires: "2099-01-01T00:00:00Z",
-    });
-    const res = await requireCronOrSession(makeReq(), "test");
-    expect(res).toBeNull();
+    const res = await requireCronAuth(makeReq("Bearer wrong"), "test");
+    expect(res?.status).toBe(401);
   });
 
-  it("401s when neither Bearer nor session validates", async () => {
+  it("401s when no Authorization header is present", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("CRON_SECRET", "secret");
-    mockGetAuthSession.mockResolvedValue(null);
-    const res = await requireCronOrSession(makeReq("Bearer wrong"), "test");
+    const res = await requireCronAuth(makeReq(), "test");
     expect(res?.status).toBe(401);
   });
 });

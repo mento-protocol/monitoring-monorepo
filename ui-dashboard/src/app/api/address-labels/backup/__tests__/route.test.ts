@@ -53,7 +53,7 @@ describe("GET /api/address-labels/backup", () => {
     expect(getAuthSession).not.toHaveBeenCalled();
   });
 
-  it("accepts requests from authenticated @mentolabs.xyz users", async () => {
+  it("401s on session-only auth — bearer required for cron GET (CSRF defence)", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
       user: { email: "alice@mentolabs.xyz" },
     });
@@ -61,7 +61,7 @@ describe("GET /api/address-labels/backup", () => {
       method: "GET",
     });
     const res = await GET(req);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
   });
 
   it("returns 401 when neither cron token nor session is provided", async () => {

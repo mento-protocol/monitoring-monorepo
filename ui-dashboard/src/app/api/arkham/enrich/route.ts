@@ -11,7 +11,7 @@ import {
   type EnrichmentResult,
 } from "@/lib/arkham";
 import { discoverMentoAddresses } from "@/lib/arkham-discovery";
-import { requireCronOrSession } from "@/lib/cron-auth";
+import { requireCronAuth } from "@/lib/cron-auth";
 import { NETWORKS } from "@/lib/networks";
 
 // Vercel hobby/pro hard caps the per-invocation duration on `serverless` —
@@ -76,7 +76,7 @@ function parseLimit(raw: string | null): number {
 // Exporting POST instead would 405 every scheduled run. The handler accepts
 // no body — `mode` and `limit` are query params — so GET is the right verb.
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const authBail = await requireCronOrSession(req, "arkham/enrich");
+  const authBail = await requireCronAuth(req, "arkham/enrich");
   if (authBail) return authBail;
 
   const apiKey = process.env.ARKHAM_API_KEY;
@@ -139,9 +139,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         // post-write `updatedAt` rolls them to the end of the queue, giving
         // round-robin coverage across runs.
         if (mode === "refresh") {
+          // Sort against `existing` (merged global + chain) so the rotation
+          // matches the filter's view; using chain-only would mis-order if a
+          // candidate happened to live in global scope.
           candidates = candidates.sort((a, b) => {
-            const ua = chainExisting[a]?.updatedAt ?? "";
-            const ub = chainExisting[b]?.updatedAt ?? "";
+            const ua = existing[a]?.updatedAt ?? "";
+            const ub = existing[b]?.updatedAt ?? "";
             return ua.localeCompare(ub);
           });
         }
@@ -161,7 +164,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           // they added on top of a previous arkham write.
           toWrite[r.address] =
             mode === "refresh"
-              ? mergeRefreshEntry(chainExisting[r.address], r.entry)
+              ? mergeRefreshEntry(existing[r.address], r.entry)
               : r.entry;
         }
 
