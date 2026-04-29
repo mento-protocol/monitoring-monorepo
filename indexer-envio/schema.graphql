@@ -282,6 +282,11 @@ type RebalanceEvent @index(fields: ["poolId", "blockTimestamp"]) {
   # wei: positive means the pool received that token. Pre-rebalance reserves
   # come from `getReserves()` at `blockNumber - 1`; on RPC failure both deltas
   # are 0 and `notionalUsd`/`rewardUsd` are "" (sentinel — see below).
+  # Known limitation: `blockNumber - 1` is the previous block's end state,
+  # not the in-tx pre-rebalance state. If an earlier swap/mint/burn lands
+  # in the same block as the rebalance, its delta is folded in. Triggers
+  # on <5% of mainnet rebalances; revisit if the impact shows up in data
+  # (the architectural fix needs txHash-aware pre-UR tracking on Pool).
   amount0Delta: BigInt!
   amount1Delta: BigInt!
   # `Pool.rebalanceReward` snapshot at event time (bps). -2 sentinel ("getter
