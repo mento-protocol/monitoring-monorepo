@@ -622,8 +622,12 @@ export async function readContractWithBlockFallback(
           const result = await makeCall(fallbackClient, blockNumber);
           return { result, usedFallback: true, usedLatestFallback: false };
         } catch (fallbackErr) {
-          // Fallback also failed — throw the original rate limit error.
-          throw err;
+          // Throw the fallback error (not the primary rate-limit error) so
+          // the caller can classify it — e.g. fetchRebalanceIncentiveAtBlock
+          // needs to see "returned no data" to stamp the -2 sentinel for
+          // older pools without the getter. The rate-limit context is
+          // already in the [RPC_RATE_LIMIT_FALLBACK] warning above.
+          throw fallbackErr;
         }
       }
       throw err;
