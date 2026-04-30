@@ -445,8 +445,8 @@ describe("PUT /api/address-labels", () => {
     (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
       global: {
         [address.toLowerCase()]: {
-          name: "MiniPay user",
-          tags: ["minipay"],
+          name: "",
+          tags: ["MiniPay User"],
           source: "minipay",
           updatedAt: "2026-04-30T00:00:00Z",
         },

@@ -164,10 +164,13 @@ describe("cursor helpers", () => {
 });
 
 describe("toMiniPayEntry", () => {
-  it("emits canonical AddressEntry shape with source=minipay", () => {
+  it("emits canonical AddressEntry shape: empty name + Title Case tag + minipay source", () => {
     const entry = toMiniPayEntry();
-    expect(entry.name).toBe("MiniPay user");
-    expect(entry.tags).toEqual(["minipay"]);
+    // Empty name — the address itself is the row's identity.
+    expect(entry.name).toBe("");
+    // Human-readable Title Case so it reads as a label, not as the
+    // (lowercase) source-marker token.
+    expect(entry.tags).toEqual(["MiniPay User"]);
     expect(entry.source).toBe("minipay");
     expect(entry.isPublic).toBe(false);
     expect(entry.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
