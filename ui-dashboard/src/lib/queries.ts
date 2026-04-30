@@ -40,7 +40,6 @@ export const ALL_POOLS_WITH_HEALTH = `
       reserves0
       reserves1
       healthTotalSeconds
-      healthBinarySeconds
       hasHealthData
     }
   }
@@ -57,10 +56,7 @@ export const ALL_POOLS_BREACH_ROLLUP = `
   query AllPoolsBreachRollup($chainId: Int!) {
     Pool(where: { chainId: { _eq: $chainId } }) {
       id
-      cumulativeCriticalSeconds
       breachCount
-      currentOpenBreachPeak
-      currentOpenBreachEntryThreshold
       healthBinarySeconds
     }
   }
@@ -315,7 +311,6 @@ export const POOL_DETAIL_WITH_HEALTH = `
       reserves0
       reserves1
       healthTotalSeconds
-      healthBinarySeconds
       hasHealthData
     }
   }
@@ -344,12 +339,7 @@ export const POOL_BREACH_ROLLUP = `
   query PoolBreachRollup($id: String!, $chainId: Int!) {
     Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
       id
-      cumulativeBreachSeconds
-      cumulativeCriticalSeconds
       breachCount
-      deviationBreachStartedAt
-      currentOpenBreachPeak
-      currentOpenBreachEntryThreshold
       healthBinarySeconds
     }
   }

@@ -107,11 +107,7 @@ describe("UptimeValue", () => {
       healthTotalSeconds: String(30 * 86400),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
-    // Number("undefined" → "0" via ?? "0") → 0 → 0.00%, not N/A. So this
-    // currently renders 0% — which is the honest answer when the field
-    // isn't there. (If a future change wants N/A here instead, gate on
-    // `rollup.healthBinarySeconds == null`.)
-    expect(html).toMatch(/0\.00%/);
+    expect(html).toContain("N/A");
   });
 
   it("renders N/A on a virtual pool even when called directly (defensive guard)", () => {

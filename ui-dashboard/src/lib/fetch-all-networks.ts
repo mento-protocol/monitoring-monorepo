@@ -400,10 +400,7 @@ export async function fetchNetworkData(
     timed<{
       Pool: {
         id: string;
-        cumulativeCriticalSeconds?: string;
         breachCount?: number;
-        currentOpenBreachPeak?: string;
-        currentOpenBreachEntryThreshold?: number;
         healthBinarySeconds?: string;
       }[];
     }>(ALL_POOLS_BREACH_ROLLUP, { chainId: network.chainId }),
@@ -426,10 +423,7 @@ export async function fetchNetworkData(
         ? p
         : {
             ...p,
-            cumulativeCriticalSeconds: r.cumulativeCriticalSeconds,
             breachCount: r.breachCount,
-            currentOpenBreachPeak: r.currentOpenBreachPeak,
-            currentOpenBreachEntryThreshold: r.currentOpenBreachEntryThreshold,
             healthBinarySeconds: r.healthBinarySeconds,
           };
     });
