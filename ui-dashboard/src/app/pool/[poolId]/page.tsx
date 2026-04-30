@@ -74,6 +74,7 @@ import {
   POOL_LIQUIDITY_COUNT,
   POOL_LIQUIDITY_PAGE,
   POOL_LP_POSITIONS,
+  POOL_REBALANCE_REWARDS,
   POOL_REBALANCES,
   POOL_REBALANCES_COUNT,
   POOL_REBALANCES_PAGE,
@@ -1191,6 +1192,80 @@ const EFFECTIVENESS_TOOLTIP =
 const REWARD_TOOLTIP =
   "Caller incentive paid for triggering this rebalance, in USD. Computed indexer-side as: |notional swap volume on the USD-pegged side| × Pool.rebalanceReward bps / 10000. Shows '—' when the pool has no USD-pegged side or the pre-rebalance reserve RPC failed.";
 
+// Below this many positive samples, p90/p95 are noise — skip highlighting.
+const MIN_REWARD_SAMPLE_SIZE = 20;
+
+// Ordered highest-tier-first so the renderer picks the strongest match.
+// Tooltips say "recent rebalances" because POOL_REBALANCE_REWARDS is
+// capped at ENVIO_MAX_ROWS (1000) — pools with longer history sample
+// from the recent window only.
+const REWARD_OUTLIER_TIERS = [
+  {
+    quantile: 0.95,
+    className: "text-amber-300 font-semibold",
+    title: "Top 5% reward across this pool's recent rebalances",
+  },
+  {
+    quantile: 0.9,
+    className: "text-amber-400",
+    title: "Top 10% reward across this pool's recent rebalances",
+  },
+] as const;
+
+type RewardThresholds = readonly {
+  tier: (typeof REWARD_OUTLIER_TIERS)[number];
+  min: number;
+}[];
+
+// 5min refresh: distribution shifts <1% per new event, so the default 30s
+// poll burns ~10x request volume on essentially-static data.
+const REWARD_HIST_REFRESH_MS = 5 * 60_000;
+
+export function computeRewardThresholds(
+  rawRewards: readonly (string | null | undefined)[],
+): RewardThresholds | null {
+  // Filter to positives: zero-reward rebalances aren't outlier candidates
+  // and including them would skew thresholds downward on pools that had a
+  // 0-bps reward phase.
+  const values = rawRewards
+    .map((r) => (r ? Number(r) : Number.NaN))
+    .filter((v) => Number.isFinite(v) && v > 0)
+    .sort((a, b) => a - b);
+  if (values.length < MIN_REWARD_SAMPLE_SIZE) return null;
+  // 1-based nearest-rank: ceil(n*q) gives the rank of the q-quantile, so
+  // ceil(n*q)-1 is the 0-based index of the largest value at-or-below it.
+  // Paired with strict `>` in the renderer this gives the top (n - ceil(n*q))
+  // rows. floor(n*q) under-counted by one — at exactly N=20 it resolved
+  // p95 to the max value so no row could ever fire the tier.
+  const at = (q: number) =>
+    values[Math.max(0, Math.ceil(values.length * q) - 1)];
+  return REWARD_OUTLIER_TIERS.map((tier) => ({ tier, min: at(tier.quantile) }));
+}
+
+export function renderRewardCell(
+  rewardUsd: string | null | undefined,
+  thresholds: RewardThresholds | null,
+): React.ReactNode {
+  if (!rewardUsd) return "—";
+  const value = Number(rewardUsd);
+  const formatted = formatUSD(value);
+  if (!thresholds || !Number.isFinite(value)) return formatted;
+  // Strict >: ties at the cutoff are NOT highlighted. With heavy clustering
+  // (e.g. a long stretch of identical-reward rebalances) this is the
+  // fail-safe: if the cutoff isn't strictly above lower values, no row gets
+  // the tier rather than every tied row getting it.
+  const match = thresholds.find((t) => value > t.min);
+  if (!match) return formatted;
+  return (
+    <span className={match.tier.className} title={match.tier.title}>
+      {formatted}
+      {/* Visible-on-hover via title; sr-only span gives screen readers
+          the tier context they'd otherwise miss. */}
+      <span className="sr-only"> — {match.tier.title}</span>
+    </span>
+  );
+}
+
 export function RebalancesTab({
   poolId,
   limit,
@@ -1271,6 +1346,23 @@ export function RebalancesTab({
     );
     return baseRows.map((r) => ({ ...r, ...(usdById.get(r.id) ?? {}) }));
   }, [baseRows, usdData]);
+
+  // Full-pool-history reward distribution for outlier highlighting. Fetched
+  // separately so paginating the table doesn't refetch the distribution.
+  const { data: rewardHistData } = useGQL<{
+    RebalanceEvent: { rewardUsd: string | null }[];
+  }>(
+    POOL_REBALANCE_REWARDS,
+    { poolId, limit: ENVIO_MAX_ROWS },
+    REWARD_HIST_REFRESH_MS,
+  );
+  const rewardThresholds = useMemo(
+    () =>
+      computeRewardThresholds(
+        (rewardHistData?.RebalanceEvent ?? []).map((r) => r.rewardUsd),
+      ),
+    [rewardHistData],
+  );
 
   // Separate chart query — fetch up to 200 events for the trend chart
   const { data: chartData } = useGQL<{ RebalanceEvent: RebalanceEvent[] }>(
@@ -1405,7 +1497,7 @@ export function RebalancesTab({
                     {formatEffectivenessPercent(r.effectivenessRatio) ?? "—"}
                   </Td>
                   <Td mono small align="right">
-                    {r.rewardUsd ? formatUSD(Number(r.rewardUsd)) : "—"}
+                    {renderRewardCell(r.rewardUsd, rewardThresholds)}
                   </Td>
                   <Td mono small muted align="right">
                     {formatBlock(r.blockNumber)}
