@@ -220,6 +220,39 @@ export function computePoolUptimePct(pool: {
 }
 
 /**
+ * Windowed uptime % from two snapshots of the indexer's binary-health
+ * accumulator. Differencing today's `Pool.healthBinarySeconds` against a
+ * `PoolDailySnapshot` captured at-or-before the window start gives the
+ * binary uptime % over the window. Returns `null` when either side is
+ * missing or the window has no measurable seconds (pool too young, or
+ * the anchor row hasn't landed yet).
+ */
+export function computeWindowUptimePct(
+  now: { healthBinarySeconds?: string; healthTotalSeconds?: string },
+  anchor: {
+    cumulativeHealthBinarySeconds?: string;
+    cumulativeHealthTotalSeconds?: string;
+  } | null,
+): number | null {
+  if (!anchor) return null;
+  const nowBinary = Number(now.healthBinarySeconds ?? "0");
+  const nowTotal = Number(now.healthTotalSeconds ?? "0");
+  const anchorBinary = Number(anchor.cumulativeHealthBinarySeconds ?? "0");
+  const anchorTotal = Number(anchor.cumulativeHealthTotalSeconds ?? "0");
+  if (
+    !Number.isFinite(nowBinary) ||
+    !Number.isFinite(nowTotal) ||
+    !Number.isFinite(anchorBinary) ||
+    !Number.isFinite(anchorTotal)
+  )
+    return null;
+  const total = nowTotal - anchorTotal;
+  if (total <= 0) return null;
+  const binary = nowBinary - anchorBinary;
+  return Math.max(0, Math.min(100, (binary / total) * 100));
+}
+
+/**
  * Severity rank used to pick the worst status across oracle health and limit health.
  * N/A is least severe; CRITICAL is most severe.
  */

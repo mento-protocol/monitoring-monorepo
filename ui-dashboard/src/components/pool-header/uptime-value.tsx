@@ -4,33 +4,47 @@ import { isVirtualPool, type Pool } from "@/lib/types";
 import { InfoPopover } from "@/components/info-popover";
 import { useGQL } from "@/lib/graphql";
 import { POOL_BREACH_ROLLUP } from "@/lib/queries";
-import { computePoolUptimePct, uptimeColorClass } from "@/lib/health";
+import {
+  computePoolUptimePct,
+  computeWindowUptimePct,
+  uptimeColorClass,
+} from "@/lib/health";
 import { isFxPool } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
 
 const UPTIME_EXPLAINER =
-  "% of time the oracle was fresh AND price was within 1% of the rebalance threshold.\nStale oracle (no report past expiry) and price-deviation breaches both count as unhealthy.";
+  "% of time the oracle was fresh AND the pool's price stayed within the 1.01× tolerance of the rebalance threshold.\nStale oracle (no report past expiry) and price-deviation breaches both count as unhealthy.\n\n7d shows the same metric over the last 7 days, with a trend arrow vs all-time.";
 const UPTIME_FX_SUFFIX = "\nWeekends don't count into FX pool uptime.";
 
 const NA = <span className="text-slate-500">N/A</span>;
+const SECONDS_IN_7D = 7 * 86_400;
 
-type BreachRollup = {
+type RollupRow = {
   healthBinarySeconds?: string;
   healthTotalSeconds?: string;
+};
+type DailyAnchorRow = {
+  timestamp?: string;
+  cumulativeHealthBinarySeconds?: string;
+  cumulativeHealthTotalSeconds?: string;
 };
 
 export function UptimeValue({ pool }: { pool: Pool }) {
   const isVirtual = isVirtualPool(pool);
-  // Isolated rollup query so a hosted-Hasura schema lag during the
-  // healthBinarySeconds rollout degrades just this tile to N/A instead
-  // of breaking the whole pool page. Read BOTH fields from the same
-  // response so the numerator/denominator are a consistent snapshot —
-  // mixing with `pool.healthTotalSeconds` from POOL_DETAIL_WITH_HEALTH
-  // could pair counters captured at different polling cycles.
-  const { data, error } = useGQL<{ Pool: BreachRollup[] }>(
-    isVirtual ? null : POOL_BREACH_ROLLUP,
-    { id: pool.id, chainId: pool.chainId },
-  );
+  // Bucket the 7d-anchor cutoff to UTC-day boundaries so the SWR cache
+  // key only changes once per day — without this, every render produces
+  // a fresh `sevenDaysAgo` (sub-second drift) that invalidates the cache.
+  const todayStart = Math.floor(Date.now() / 1000 / 86_400) * 86_400;
+  const sevenDaysAgo = todayStart - SECONDS_IN_7D;
+
+  const { data, error } = useGQL<{
+    Pool: RollupRow[];
+    PoolDailySnapshot: DailyAnchorRow[];
+  }>(isVirtual ? null : POOL_BREACH_ROLLUP, {
+    id: pool.id,
+    chainId: pool.chainId,
+    sevenDaysAgo,
+  });
 
   if (isVirtual || error) return NA;
   const rollup = data?.Pool?.[0];
@@ -43,9 +57,57 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   });
   if (pct == null) return NA;
 
+  const anchor = data?.PoolDailySnapshot?.[0] ?? null;
+  const pct7d = computeWindowUptimePct(
+    {
+      healthBinarySeconds: rollup.healthBinarySeconds,
+      healthTotalSeconds: rollup.healthTotalSeconds,
+    },
+    anchor,
+  );
+
+  // Trend arrow vs all-time. Gate on the .toFixed(2) values being
+  // visibly different — anything finer would render an arrow for noise
+  // the user can't see in the rounded numbers.
+  const trend: "up" | "down" | null =
+    pct7d == null || pct.toFixed(2) === pct7d.toFixed(2)
+      ? null
+      : pct7d > pct
+        ? "up"
+        : "down";
+
   return (
-    <span className={`font-medium ${uptimeColorClass(pct)}`}>
-      {pct.toFixed(2)}%
+    <span className="flex flex-col gap-0.5">
+      <span className="font-medium">
+        <span className={uptimeColorClass(pct)}>{pct.toFixed(2)}%</span>
+        <span className="ml-1 text-xs text-slate-500">all-time</span>
+      </span>
+      <span className="text-xs text-slate-500">
+        {pct7d != null ? (
+          <>
+            {trend === "up" && (
+              <span
+                className="text-emerald-400"
+                aria-label="trending up vs all-time"
+              >
+                ↑
+              </span>
+            )}
+            {trend === "down" && (
+              <span
+                className="text-red-400"
+                aria-label="trending down vs all-time"
+              >
+                ↓
+              </span>
+            )}
+            {trend && " "}
+            {pct7d.toFixed(2)}% last 7d
+          </>
+        ) : (
+          "—"
+        )}
+      </span>
     </span>
   );
 }

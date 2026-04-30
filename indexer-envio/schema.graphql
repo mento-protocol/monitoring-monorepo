@@ -214,6 +214,11 @@ type PoolDailySnapshot @index(fields: ["poolId", "timestamp"]) {
   cumulativeSwapCount: Int!
   cumulativeVolume0: BigInt!
   cumulativeVolume1: BigInt!
+  # Health accumulators frozen at this day's last event. Differencing two
+  # daily rows gives the binary uptime % over the window between them —
+  # consumed by the UI's "X.XX% last 7d" subtitle on the Uptime tile.
+  cumulativeHealthBinarySeconds: BigInt!
+  cumulativeHealthTotalSeconds: BigInt!
 
   blockNumber: BigInt!
 }

@@ -418,6 +418,15 @@ the dashboard doesn't undercount drift. The indexer also maintains
 `cumulativeCriticalSeconds` (peak-based, closed breaches only) for SLO
 back-testing, but no UI surface reads it today.
 
+**7d subtitle on the Uptime tile:** `PoolDailySnapshot` freezes
+`cumulativeHealthBinarySeconds` and `cumulativeHealthTotalSeconds` once per
+UTC day. The tile differences today's `Pool.healthBinarySeconds` against
+the latest snapshot row at-or-before `now − 7d` to derive a windowed
+uptime % over the trailing week. A `↑` / `↓` arrow appears when the 7d
+number disagrees with all-time at 2-decimal precision; arrow is suppressed
+when both round equal. New pools render `—` for the subtitle until a
+≥7d-old snapshot row exists.
+
 **`service` label convention** (matches the existing Aegis pattern of `service = monitored-domain`, not producer):
 
 | `service`        | Covers                                                                   |

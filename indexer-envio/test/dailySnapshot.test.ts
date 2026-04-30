@@ -59,6 +59,8 @@ type SnapshotLike = {
   burnCount: number;
   cumulativeSwapCount: number;
   cumulativeVolume0: bigint;
+  cumulativeHealthBinarySeconds: bigint;
+  cumulativeHealthTotalSeconds: bigint;
 };
 
 const deployPool = async (

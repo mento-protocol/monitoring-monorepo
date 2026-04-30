@@ -337,12 +337,21 @@ export const POOL_CONFIG_EXT = `
 // pool-level rollup (not the breach-row list) so the "% time critical"
 // SLO stays accurate past Hasura's 1000-row cap on the breach list itself.
 export const POOL_BREACH_ROLLUP = `
-  query PoolBreachRollup($id: String!, $chainId: Int!) {
+  query PoolBreachRollup($id: String!, $chainId: Int!, $sevenDaysAgo: numeric!) {
     Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
       id
       breachCount
       healthBinarySeconds
       healthTotalSeconds
+    }
+    PoolDailySnapshot(
+      where: { poolId: { _eq: $id }, timestamp: { _lte: $sevenDaysAgo } }
+      order_by: [{ timestamp: desc }]
+      limit: 1
+    ) {
+      timestamp
+      cumulativeHealthBinarySeconds
+      cumulativeHealthTotalSeconds
     }
   }
 `;
