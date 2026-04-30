@@ -43,13 +43,6 @@ function describeHealth(status: PoolOgData["health"]): HealthView {
   }
 }
 
-function formatOracleAge(seconds: number): string {
-  if (seconds < 60) return `${Math.max(seconds, 0)}s ago`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86_400)}d ago`;
-}
-
 function buildAlt(data: PoolOgData | null): string {
   if (!data) return "Mento pool analytics preview";
   const parts: string[] = [`${data.name} pool on ${data.chainLabel}`];
@@ -68,8 +61,8 @@ function buildAlt(data: PoolOgData | null): string {
 
 function Sparkline({ series, color }: { series: number[]; color: string }) {
   if (series.length < 2) return null;
-  const w = 280;
-  const h = 44;
+  const w = 420;
+  const h = 52;
   const pad = 2;
   const min = Math.min(...series);
   const max = Math.max(...series);
@@ -125,10 +118,10 @@ function Tile({
         justifyContent: "space-between",
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <span
           style={{
-            fontSize: 20,
+            fontSize: 22,
             letterSpacing: 2,
             textTransform: "uppercase",
             color: MUTED,
@@ -136,41 +129,54 @@ function Tile({
         >
           {label}
         </span>
-        <span
+        <div
           style={{
-            fontSize: 52,
-            fontWeight: 700,
-            color: valueColor ?? TEXT,
-            lineHeight: 1,
+            display: "flex",
+            alignItems: "baseline",
+            gap: 16,
           }}
         >
-          {value}
-        </span>
-        {subline ? (
           <span
             style={{
-              fontSize: 22,
-              fontWeight: 600,
-              color: sublineColor ?? MUTED,
+              fontSize: 68,
+              fontWeight: 700,
+              color: valueColor ?? TEXT,
+              lineHeight: 1,
             }}
           >
-            {subline}
+            {value}
           </span>
-        ) : null}
+          {subline ? (
+            <span
+              style={{
+                fontSize: 26,
+                fontWeight: 600,
+                color: sublineColor ?? MUTED,
+              }}
+            >
+              {subline}
+            </span>
+          ) : null}
+        </div>
       </div>
-      {chart}
+      {chart ? (
+        <div style={{ display: "flex", marginTop: 12 }}>{chart}</div>
+      ) : null}
     </div>
   );
 }
 
-function OracleFooter({ data }: { data: PoolOgData }) {
-  if (data.oracleAgeSeconds == null) return null;
-  const color = data.oracleFresh ? TONE_COLOR.ok.fg : TONE_COLOR.warn.fg;
-  const label = data.oracleFresh ? "Oracle" : "Oracle stale";
+function StatusIndicator({
+  color,
+  children,
+}: {
+  color: string;
+  children: React.ReactNode;
+}) {
   return (
     <span
       style={{
-        fontSize: 26,
+        fontSize: 28,
         color: MUTED,
         display: "flex",
         gap: 12,
@@ -185,8 +191,20 @@ function OracleFooter({ data }: { data: PoolOgData }) {
           background: color,
         }}
       />
-      {label} · {formatOracleAge(data.oracleAgeSeconds)}
+      {children}
     </span>
+  );
+}
+
+function HealthBadge({ data }: { data: PoolOgData }) {
+  const health = describeHealth(data.health);
+  const color = TONE_COLOR[health.tone].fg;
+  const reason = data.health !== "OK" ? data.healthReasons[0] : undefined;
+  return (
+    <StatusIndicator color={color}>
+      {health.label}
+      {reason ? ` · ${reason}` : ""}
+    </StatusIndicator>
   );
 }
 
@@ -209,9 +227,6 @@ function Card({ data }: { data: PoolOgData | null }) {
   const volWow =
     data?.volume7dWoWPct != null ? formatWoW(data.volume7dWoWPct) : null;
   const sparkColor = tvlWow?.color ?? TONE_COLOR.neutral.fg;
-
-  const health = describeHealth(data?.health ?? "N/A");
-  const healthColor = TONE_COLOR[health.tone];
 
   return (
     <div
@@ -244,7 +259,7 @@ function Card({ data }: { data: PoolOgData | null }) {
           />
           <span
             style={{
-              fontSize: 28,
+              fontSize: 32,
               fontWeight: 700,
               letterSpacing: 0.5,
               color: TEXT,
@@ -253,12 +268,12 @@ function Card({ data }: { data: PoolOgData | null }) {
             Mento Analytics
           </span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          {data ? <OracleFooter data={data} /> : null}
+        <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+          {data ? <HealthBadge data={data} /> : null}
           {data ? (
             <span
               style={{
-                fontSize: 26,
+                fontSize: 28,
                 padding: "12px 26px",
                 borderRadius: 999,
                 background: TILE_BG,
@@ -282,7 +297,7 @@ function Card({ data }: { data: PoolOgData | null }) {
       >
         <span
           style={{
-            fontSize: name.length > 14 ? 112 : 140,
+            fontSize: name.length > 14 ? 96 : 120,
             fontWeight: 800,
             letterSpacing: -2,
             color: TEXT,
@@ -293,7 +308,7 @@ function Card({ data }: { data: PoolOgData | null }) {
         </span>
       </div>
 
-      <div style={{ display: "flex", gap: 20 }}>
+      <div style={{ display: "flex", gap: 24 }}>
         <Tile
           label="TVL"
           value={tvl}
@@ -315,13 +330,6 @@ function Card({ data }: { data: PoolOgData | null }) {
               <Sparkline series={data.volumeSeries} color={ACCENT} />
             ) : null
           }
-        />
-        <Tile
-          label="Health"
-          value={health.label}
-          valueColor={healthColor.fg}
-          subline={data?.healthReasons[0]}
-          sublineColor={healthColor.fg}
         />
       </div>
     </div>
