@@ -359,6 +359,7 @@ export const POOL_HEALTH_7D_ANCHOR = `
       order_by: [{ timestamp: desc }]
       limit: 1
     ) {
+      timestamp
       cumulativeHealthBinarySeconds
       cumulativeHealthTotalSeconds
     }

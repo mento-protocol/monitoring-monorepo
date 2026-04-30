@@ -7,6 +7,7 @@ type RollupRow = {
   healthTotalSeconds?: string;
 };
 type DailyAnchorRow = {
+  timestamp?: string;
   cumulativeHealthBinarySeconds?: string;
   cumulativeHealthTotalSeconds?: string;
 };
@@ -190,6 +191,43 @@ describe("UptimeValue", () => {
     expect(html).toContain("↓");
     expect(html).toContain("text-red-400");
     expect(html).not.toContain("↑");
+  });
+
+  it("falls back to '—' when the daily-snapshot anchor is older than ~8 days (silent pool)", () => {
+    // A pool that's been totally inactive for 30+ days has no recent
+    // PoolDailySnapshot rows. The query picks up an ancient one, but
+    // labelling that "% last 7d" would lie about the actual window. The
+    // freshness gate in computeWindowUptimePct rejects anchors >8d old.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-15T12:00:00Z"));
+    const nowSec = Math.floor(Date.now() / 1000);
+    const total = 30 * 86400;
+    nextRollup = {
+      data: {
+        Pool: [
+          {
+            healthBinarySeconds: String(total),
+            healthTotalSeconds: String(total),
+          },
+        ],
+      },
+    };
+    nextAnchor = {
+      data: {
+        PoolDailySnapshot: [
+          {
+            timestamp: String(nowSec - 30 * 86400),
+            cumulativeHealthBinarySeconds: String(total - 7 * 86400),
+            cumulativeHealthTotalSeconds: String(total - 7 * 86400),
+          },
+        ],
+      },
+    };
+    const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
+    expect(html).toContain("100.00%");
+    expect(html).toContain("—");
+    expect(html).not.toMatch(/last 7d/);
+    vi.useRealTimers();
   });
 
   it("falls back to '—' for the 7d subtitle when no daily-snapshot anchor exists (pool too young)", () => {
