@@ -214,9 +214,13 @@ locals {
     # in Grafana templates) or string manipulation (unavailable in PromQL).
     # Both rounded to integers in PromQL via `floor` so the template's
     # `%03.0f` doesn't accidentally render a fractional remainder as 4
-    # digits ("9,1000%") on values like 9999.5. Outside the 1000–9999
-    # window the template ignores these and uses the integer or humanize
-    # branch instead.
+    # digits ("9,1000%") on values like 9999.5. Side effect: the comma
+    # branch FLOORS (1234.7 → "1,234") whereas the < 1000 branch ROUNDS
+    # via `printf "%.0f"` (999.5 → "1000"). The 1-unit discrepancy in
+    # the comma window is unobservable — these are 4-digit %s on a 5%
+    # threshold, integer fidelity is fine. Outside the 1000–9999 window
+    # the template ignores these and uses the integer or humanize branch
+    # instead.
     {
       ref_id = "DevQ"
       expr   = "floor(((mento_pool_deviation_ratio - 1) * 100) / 1000)"

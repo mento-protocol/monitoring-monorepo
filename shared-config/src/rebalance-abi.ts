@@ -112,6 +112,13 @@ export const STRATEGY_ABI_SOURCES = [
  * `metrics-bridge/src/rebalance-check.ts`) so the Prometheus label
  * cardinality stays bounded and a non-canonical strategy can't inject
  * Slack mrkdwn through the alert body.
+ *
+ * INVARIANT — entries MUST be bare phrases (no trailing punctuation): the
+ * Slack alert template at `terraform/alerts/main.tf` appends a "." when
+ * rendering ("Rebalance Blocked: <reason_message>."). Trailing "." / "!" /
+ * "—" here would render as double punctuation. The dashboard tooltip
+ * (`ui-dashboard/src/components/pool-header/rebalance-status-value.tsx`)
+ * concatenates with " — " so it's also happiest with bare phrases.
  */
 export const ERROR_MESSAGES = {
   // CDP strategy
