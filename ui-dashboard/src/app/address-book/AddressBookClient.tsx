@@ -565,15 +565,15 @@ function AddressTableRow({
   );
   return (
     <tr className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
-      <td className="px-4 py-3">
+      <td className="px-4 py-3 whitespace-nowrap">
         {scope === "global" ? (
-          <span className="inline-flex items-center rounded-full bg-purple-950 px-2 py-0.5 text-xs font-medium text-purple-300 ring-1 ring-inset ring-purple-800">
+          <span className="inline-flex items-center rounded-full bg-purple-950 px-2 py-0.5 text-xs font-medium text-purple-300 ring-1 ring-inset ring-purple-800 whitespace-nowrap">
             All chains
           </span>
         ) : (
           <div className="flex items-center gap-2">
             <ChainIcon network={network} />
-            <span className="text-xs text-slate-400">
+            <span className="text-xs text-slate-400 whitespace-nowrap">
               {network.label.replace(/ \(.*\)$/, "")}
             </span>
           </div>
@@ -599,11 +599,12 @@ function AddressTableRow({
           </span>
         )}
       </td>
-      <td className="px-4 py-3">
+      <td className="px-4 py-3 max-w-xs">
         <span
-          className={`text-sm ${isCustom ? "font-medium text-indigo-400" : "text-slate-300"}`}
+          title={name}
+          className={`block truncate text-sm ${isCustom ? "font-medium text-indigo-400" : "text-slate-300"}`}
         >
-          {name}
+          {name || <span className="text-slate-600">—</span>}
         </span>
       </td>
       <td className="px-4 py-3">
