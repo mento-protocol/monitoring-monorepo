@@ -116,7 +116,7 @@ export const STRATEGY_ABI_SOURCES = [
 export const ERROR_MESSAGES = {
   // CDP strategy
   CDPLS_STABILITY_POOL_BALANCE_TOO_LOW:
-    "Stability pool has insufficient liquidity to fully rebalance",
+    "Stability pool has insufficient liquidity",
   CDPLS_STABILITY_POOL_IS_ZERO:
     "No stability pool configured for this strategy",
   CDPLS_COLLATERAL_REGISTRY_IS_ZERO: "Collateral registry not configured",
@@ -128,16 +128,14 @@ export const ERROR_MESSAGES = {
   CDPLS_INVALID_STABILITY_POOL_PERCENTAGE:
     "Invalid stability pool percentage configuration",
   // Reserve strategy
-  RLS_RESERVE_OUT_OF_COLLATERAL:
-    "Reserve has insufficient collateral to rebalance",
+  RLS_RESERVE_OUT_OF_COLLATERAL: "Reserve has insufficient collateral",
   RLS_INVALID_RESERVE: "Reserve contract not configured",
   RLS_COLLATERAL_TO_POOL_FAILED: "Collateral transfer to pool failed",
   RLS_TOKEN_IN_NOT_SUPPORTED: "Collateral token not supported by reserve",
   RLS_TOKEN_OUT_NOT_SUPPORTED: "Debt token not supported by reserve",
   // Open liquidity strategy
-  OLS_OUT_OF_COLLATERAL:
-    "Strategy has no collateral liquidity available to rebalance",
-  OLS_OUT_OF_DEBT: "Strategy has no debt liquidity available to rebalance",
+  OLS_OUT_OF_COLLATERAL: "Strategy has no collateral liquidity available",
+  OLS_OUT_OF_DEBT: "Strategy has no debt liquidity available",
   // Shared
   LS_COOLDOWN_ACTIVE: "Rebalance cooldown is active — retry shortly",
   LS_POOL_NOT_REBALANCEABLE: "Pool deviation is below the rebalance threshold",

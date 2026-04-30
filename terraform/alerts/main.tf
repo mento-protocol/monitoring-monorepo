@@ -88,12 +88,19 @@ locals {
   # Strategy:
   #   - `current_deviation` reads `$values.Dev.Value` from a query that
   #     pre-computes `(mento_pool_deviation_ratio - 1) * 100` in PromQL.
-  #     `printf "%.0f%%"` renders the integer percent (e.g. `12.19` → "12%").
-  #     We avoid `humanizePercentage` here because its `%.4g` format flips
-  #     to scientific notation above 1e4 — a 122x breach (deviation ratio
-  #     123.19) would render "1.219e+04% above threshold" instead of
-  #     "12190% above threshold". The smallest meaningful breach magnitude
-  #     gated by this alert is 5%, so `%.0f` is plenty of resolution.
+  #     Rendering branches by magnitude so the line stays scannable across
+  #     four orders of magnitude (5% → 44M%):
+  #       - < 1000:   integer percent ("44%")
+  #       - 1000–9999: thousand-separated ("1,234%") — Go templates have
+  #         no native %`,d formatter and Grafana's template engine doesn't
+  #         expose sprig math, so the integer-quotient and remainder are
+  #         pre-computed in PromQL (`DevQ`/`DevR`) and stitched back
+  #         together with `printf "%.0f,%03.0f"`.
+  #       - ≥ 10000:  Prometheus `humanize` ("10.23k%", "44.08M%") to
+  #         keep the line short. Same reason we avoid `humanizePercentage`
+  #         on the < 1000 branch — its `%.4g` format flips to scientific
+  #         notation above 1e4, which is the regime we explicitly want
+  #         humanize for instead.
   #   - `current_reserves` reads `$values.R0.Value` / `$values.R1.Value`
   #     (already in [0, 1]) plus `.Labels.token_symbol` from each series
   #     to render "axlUSDC / USDm". Map access is a Go template builtin.
@@ -102,21 +109,38 @@ locals {
   #     "100% USDT / 0% USDm" intent — small-share legs are functionally
   #     drained. (Reserves are by-construction in [0, 1] so the scientific-
   #     notation path that bit `current_deviation` doesn't apply here.)
-  #   - `rebalance_reason` reads `$values.B.Labels.{reason_message,reason_code}`
-  #     for the bounded Solidity-error explanation, then OPTIONALLY appends
-  #     `· Reserve balance: X.XX <token> (via Aegis)` when the firing
-  #     pool's `pair` matches a USD-pegged stable we have Aegis coverage
-  #     for (USDC / USDT / axlUSDC, all on Celo). The balance value is
-  #     read from Aegis's existing per-token `${TOKEN}_balanceOf{owner=
-  #     "Reserve", chain="celo"}` series — production-stable for years and
-  #     refreshed every 10s — rather than a metrics-bridge probe (the
-  #     in-bridge enrichment shipped in PR #237 failed in production with
+  #   - `rebalance_reason` reads `$values.B.Labels.reason_message` for the
+  #     bounded Solidity-error explanation (terminated with a period in the
+  #     template since the messages themselves are bare phrases — keeps
+  #     ERROR_MESSAGES uncluttered for the dashboard tooltip's
+  #     em-dash-joined render path), then OPTIONALLY appends
+  #     ` Reserve Balance: X.XX <token>` when the firing pool's `pair`
+  #     matches a USD-pegged stable we have Aegis coverage for (USDC /
+  #     USDT / axlUSDC, all on Celo). The balance value is read from
+  #     Aegis's existing per-token `${TOKEN}_balanceOf{owner="Reserve",
+  #     chain="celo"}` series — production-stable for years and refreshed
+  #     every 10s — rather than a metrics-bridge probe (the in-bridge
+  #     enrichment shipped in PR #237 failed in production with
   #     `[REBALANCE_PROBE_FAILED]: Missing or invalid parameters`, leaving
   #     the gauges absent, which propagated NoData through this rule and
   #     stuck the critical alerts in Normal for ~9h on 2026-04-28).
-  #     Monad reserves aren't in Aegis yet — see the Aegis Monad coverage
-  #     entry in BACKLOG.md.
-  deviation_critical_current_deviation_annotation = "{{ if $values.Dev }}{{ printf \"%.0f%%\" $values.Dev.Value }} above threshold{{ end }}"
+  #     The all-caps `reason_code` is intentionally NOT rendered: it
+  #     duplicated the human message without adding actionable info and
+  #     muddied the message visually. The label is still emitted on the
+  #     gauge for log/diagnostic spelunking. Monad reserves aren't in
+  #     Aegis yet — see the Aegis Monad coverage entry in BACKLOG.md.
+  deviation_critical_current_deviation_annotation = <<-EOT
+    {{- if $values.Dev -}}
+      {{- $dev := $values.Dev.Value -}}
+      {{- if lt $dev 1000.0 -}}
+        {{ printf "%.0f%%" $dev }} above threshold
+      {{- else if and (lt $dev 10000.0) $values.DevQ $values.DevR -}}
+        {{ printf "%.0f,%03.0f%%" $values.DevQ.Value $values.DevR.Value }} above threshold
+      {{- else -}}
+        {{ humanize $dev }}% above threshold
+      {{- end -}}
+    {{- end -}}
+  EOT
   deviation_critical_current_reserves_annotation  = "{{ if and $values.R0 $values.R1 }}{{ humanizePercentage $values.R0.Value }} {{ $values.R0.Labels.token_symbol }} / {{ humanizePercentage $values.R1.Value }} {{ $values.R1.Labels.token_symbol }}{{ end }}"
   # HEREDOC keeps the multi-branch template legible — `{{-`/`-}}` whitespace
   # trim markers strip ALL surrounding whitespace (including newlines), so
@@ -126,10 +150,10 @@ locals {
   #   - outer `{{ if $values.B }}` — guards on the rebalance-blocked gauge
   #     producing a series at all (probe didn't run / RPC down → no
   #     annotation line).
-  #   - middle `{{ if and $rm $rc }}` — both labels are 1:1 with the gauge
-  #     by construction; the nil-and-emptystring guard is defensive against
-  #     a misconfigured probe writing only one half. Renders the standard
-  #     "<reason_message> — [<reason_code>]" tag.
+  #   - `{{ if $rm }}` — `reason_message` is 1:1 with the gauge by
+  #     construction; the nil-and-emptystring guard is defensive against
+  #     a misconfigured probe writing the gauge without the label.
+  #     Renders the bounded message followed by a period.
   #   - inner Aegis dispatch — each ResX query is already pair-scoped via
   #     the cross-join (pair="USDC/USDm" etc.), so only the matching pool
   #     instance sees a non-nil $values.ResX. The chain/pair guards here
@@ -138,17 +162,16 @@ locals {
   deviation_critical_rebalance_reason_annotation = <<-EOT
     {{- if $values.B -}}
       {{- $rm := index $values.B.Labels "reason_message" -}}
-      {{- $rc := index $values.B.Labels "reason_code" -}}
-      {{- if and $rm $rc -}}
-        {{- $rm }} — [{{ $rc }}]
+      {{- if $rm -}}
+        {{- $rm }}.
         {{- $pair := index $labels "pair" -}}
         {{- $chain := index $labels "chain_name" -}}
         {{- if and (eq $chain "celo") (eq $pair "USDC/USDm") $values.ResUSDC -}}
-          {{ " · Reserve balance: " }}{{ printf "%.2f" $values.ResUSDC.Value }} USDC (via Aegis)
+          {{ " Reserve Balance: " }}{{ printf "%.2f" $values.ResUSDC.Value }} USDC
         {{- else if and (eq $chain "celo") (eq $pair "USDT/USDm") $values.ResUSDT -}}
-          {{ " · Reserve balance: " }}{{ printf "%.2f" $values.ResUSDT.Value }} USDT (via Aegis)
+          {{ " Reserve Balance: " }}{{ printf "%.2f" $values.ResUSDT.Value }} USDT
         {{- else if and (eq $chain "celo") (eq $pair "axlUSDC/USDm") $values.ResAxlUSDC -}}
-          {{ " · Reserve balance: " }}{{ printf "%.2f" $values.ResAxlUSDC.Value }} axlUSDC (via Aegis)
+          {{ " Reserve Balance: " }}{{ printf "%.2f" $values.ResAxlUSDC.Value }} axlUSDC
         {{- end -}}
       {{- end -}}
     {{- end -}}
@@ -184,6 +207,23 @@ locals {
     {
       ref_id = "Dev"
       expr   = "(mento_pool_deviation_ratio - 1) * 100"
+    },
+    # DevQ / DevR pre-compute the thousand-quotient and remainder of `Dev`
+    # so the annotation template can stitch a thousand-separated number
+    # ("1,234%") for the 1000–9999 range without sprig math (unavailable
+    # in Grafana templates) or string manipulation (unavailable in PromQL).
+    # Both rounded to integers in PromQL via `floor` so the template's
+    # `%03.0f` doesn't accidentally render a fractional remainder as 4
+    # digits ("9,1000%") on values like 9999.5. Outside the 1000–9999
+    # window the template ignores these and uses the integer or humanize
+    # branch instead.
+    {
+      ref_id = "DevQ"
+      expr   = "floor(((mento_pool_deviation_ratio - 1) * 100) / 1000)"
+    },
+    {
+      ref_id = "DevR"
+      expr   = "floor((mento_pool_deviation_ratio - 1) * 100) % 1000"
     },
     {
       ref_id = "R0"

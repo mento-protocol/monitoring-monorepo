@@ -460,8 +460,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Pool above 5% threshold for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach."
-      description = "Check rebalancer liveness and oracle feed."
+      summary = "Pool above 5% threshold for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach."
       # Pre-rendered "8% above threshold". `Dev` query pre-computes
       # `(mento_pool_deviation_ratio - 1) * 100` in PromQL so the annotation
       # can use `printf "%.0f%%"` directly. We avoid `humanizePercentage`
@@ -622,8 +621,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
     no_data_state  = "OK"
 
     annotations = {
-      summary     = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing, can't confirm magnitude."
-      description = "Check rebalancer liveness, oracle feed, and metrics-bridge."
+      summary = "Breach active for {{ humanizeDuration $values.A.Value }} — ratio gauge missing, can't confirm magnitude."
       # By construction the anchored rule fires when the deviation ratio
       # gauge is absent — so `$values.Dev` will almost always be empty and
       # this annotation will drop. Kept for symmetry with the magnitude-
