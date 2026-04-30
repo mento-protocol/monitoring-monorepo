@@ -23,6 +23,12 @@ export function OlsTab({
   onSearchChange: (value: string) => void;
 }) {
   const { network } = useNetwork();
+  // Re-fetches OLS_POOL even though `PoolDetail` already calls it for the
+  // tab-visibility check. This is intentional: keeping the tab self-contained
+  // means it has its own error/loading branches and doesn't need olsData
+  // prop-drilled through the orchestrator. SWR dedupes on the (network.id,
+  // query, vars) key, so only one network request actually fires while both
+  // are mounted.
   const {
     data: olsData,
     error: olsErr,

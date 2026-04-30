@@ -185,6 +185,12 @@ describe("useGQL call shape across pool detail tabs", () => {
     (tab) => {
       mockSearchParams.set("tab", tab);
 
+      // Returning an active OlsPool row is what keeps the OLS tab visible
+      // (visibleTabs filters out "ols" unless `selectActiveOlsPool` returns
+      // a row OR the OLS_POOL query is still loading). Without this, the
+      // tab=ols case falls back to "providers" and `OlsTab`/`OlsLiquidityEvents`
+      // are never mounted — the test would silently miss any
+      // `refreshInterval: 0` or call-shape regression in the OLS subtree.
       mockUseGQL.mockImplementation((query: string | null) => {
         if (!query) return gqlResult(undefined);
         if (query.includes("PoolDetailWithHealth"))
@@ -193,6 +199,28 @@ describe("useGQL call shape across pool detail tabs", () => {
           return gqlResult({ TradingLimit: [] });
         if (query.includes("PoolDeployment"))
           return gqlResult({ FactoryDeployment: [] });
+        if (query.includes("OlsPool")) {
+          return gqlResult({
+            OlsPool: [
+              {
+                id: "ols-1",
+                poolId: "42220-0xpool",
+                olsAddress: "0xols",
+                debtToken: "0xt0",
+                isActive: true,
+                lastRebalance: "0",
+                rebalanceCooldown: "0",
+                olsRebalanceCount: "0",
+                liquiditySourceIncentiveExpansion: "0",
+                liquiditySourceIncentiveContraction: "0",
+                protocolIncentiveExpansion: "0",
+                protocolIncentiveContraction: "0",
+                protocolFeeRecipient: null,
+                updatedAtTimestamp: "1",
+              },
+            ],
+          });
+        }
         return gqlResult(undefined);
       });
 

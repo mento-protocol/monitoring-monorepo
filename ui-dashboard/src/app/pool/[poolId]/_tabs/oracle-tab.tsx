@@ -76,7 +76,6 @@ export function OracleTab({
   // index never leaves the user stranded past the last page.
   const totalPages = total > 0 ? Math.ceil(total / DEFAULT_PAGE_SIZE) : 1;
   const page = Math.max(1, Math.min(rawPage, totalPages));
-  const setPage = React.useCallback((p: number) => setRawPage(p), []);
 
   // When search is active: fetch from offset 0 so filtering spans a large
   // bounded window rather than just the current page. Bootstrap before count
@@ -338,7 +337,7 @@ export function OracleTab({
               page={page}
               pageSize={DEFAULT_PAGE_SIZE}
               total={total}
-              onPageChange={setPage}
+              onPageChange={setRawPage}
             />
           )}
           {countCapped && !isSearching && (

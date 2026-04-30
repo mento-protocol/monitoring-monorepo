@@ -91,6 +91,9 @@ export function LiquidityTab({
   const rows = data?.LiquidityEvent ?? [];
 
   const fpmmPool = pool ? isFpmm(pool) : false;
+  // Same POOL_DAILY_SNAPSHOTS_CHART query that PoolDetail and SwapsTab issue.
+  // SWR dedupes on (network.id, query, vars) so only one network request
+  // fires; the local hook gives this tab its own loading/error branches.
   const { data: snapshotData, error: snapshotError } = useGQL<{
     PoolDailySnapshot: PoolSnapshot[];
   }>(
