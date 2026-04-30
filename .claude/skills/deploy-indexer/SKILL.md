@@ -50,7 +50,7 @@ In parallel:
 - `git rev-list --left-right --count @{upstream}...HEAD` — both counts MUST be `0`. The right count (ahead) catches local commits that would silently ship via `envio` without ever landing on the tracked branch; the left count (behind) catches a stale local checkout that would deploy an outdated commit. If either is non-zero, surface the divergence and stop — the user must `git pull --rebase` (behind) or `git push` (ahead) first.
 - Parse `$ARGUMENTS` for the boolean flags `--no-promote` and `--no-verify`; capture as `NO_PROMOTE` and `NO_VERIFY`. Any non-flag token (e.g. a stray SHA) is an error — surface and stop, since the underlying script doesn't accept one.
 - `git rev-parse --short HEAD` — capture as `TARGET_COMMIT`. The deploy always uses `HEAD`; to deploy a different commit, the user must check it out first.
-- If `BRANCH != main`: surface the branch name + commit short sha clearly, and confirm the user wants a pre-merge deploy. Skip the prompt only if `NO_PROMOTE` is set or the user's request explicitly mentions pre-merge / feature branch / pre-loading.
+- If `BRANCH != main`: **default `NO_PROMOTE=true`** (fail-closed), and surface the branch name + commit short sha clearly. Override the default only when the user's request explicitly says "promote" / "go live" / similar — never on a bare `/deploy-indexer` from a feature branch. The reasoning: pre-merge deploys exist precisely because the dashboard codebase doesn't yet query the new schema; promoting before merge is almost always wrong, so make it explicit-opt-in instead of confirm-to-skip.
 
 If preflight fails, surface the specific cause and stop. Do not push.
 
@@ -132,12 +132,28 @@ makes the rollback story muddier.
 
 ## Phase 3 — Promote
 
+Before promoting, capture the **current** prod commit so the final summary
+can print a paste-ready rollback command:
+
 ```bash
-npx envio-cloud deployment promote mento <TARGET_COMMIT> mento-protocol -y
+PREVIOUS_PROD_COMMIT=$(npx envio-cloud indexer get mento mento-protocol -o json \
+  | jq -r '.data.deployments[] | select(.prod_status=="prod") | .commit_hash' \
+  | head -c 7)
 ```
 
-The `pnpm deploy:indexer:promote` wrapper requires interactive confirmation
-and doesn't pass `--yes` through cleanly — call `envio-cloud` directly.
+If no prior prod commit exists (first-ever promote), `PREVIOUS_PROD_COMMIT`
+is empty — the rollback line in the final summary then reads "(none — first
+prod deploy, no rollback target)".
+
+Then promote:
+
+```bash
+pnpm deploy:indexer:promote <TARGET_COMMIT> -y
+```
+
+The wrapper passes `"$@"` through to `npx envio-cloud deployment promote`
+(see `scripts/deploy-indexer-promote.sh`), so `-y` reaches the underlying
+CLI cleanly. Using the wrapper keeps org/indexer defaults centralized.
 
 Confirm the response line `Deployment '<commit>' of indexer 'mento' promoted to production successfully.` Then verify with:
 
@@ -195,10 +211,10 @@ stop — do not ask the user to verify manually.
 
 - **Deployed commit:** `<TARGET_COMMIT>`
 - **Build + sync:** time-to-caught-up (mm:ss), per-chain final blocks
-- **Promote:** ✅ / ❌ (and the previous prod commit, for rollback reference)
+- **Promote:** ✅ / ❌ (and `PREVIOUS_PROD_COMMIT` captured in Phase 3, for rollback reference)
 - **DNS wait:** 5 min completed
 - **UI verify:** pages checked + console errors found (✅ if none)
-- **Rollback command (paste-ready):** `npx envio-cloud deployment promote mento <previous-prod-commit> mento-protocol -y`
+- **Rollback command (paste-ready):** `pnpm deploy:indexer:promote <PREVIOUS_PROD_COMMIT> -y` — or "(none — first prod deploy)" if `PREVIOUS_PROD_COMMIT` was empty.
 
 ## Failure handling
 
@@ -229,8 +245,8 @@ short-circuit; the verification is the value on a re-run.
 1. You're working on a feature branch with both indexer changes (new schema entity, new event coverage, new field) and dashboard changes that consume them.
 2. Before opening the PR (or while it's in review), run `/deploy-indexer --no-promote` from the feature branch checkout — pushes the branch tip to `envio`, builds, syncs to caught-up. ~30–60 min.
 3. The PR review proceeds normally. The new deployment exists in `envio-cloud` but isn't `prod` yet, so the live dashboard keeps querying the old indexer.
-4. PR merges to `main`. Now run `/deploy-indexer` (without `--no-promote`) from `main` — preflight passes, push is fast (or a no-op if main HEAD == feature tip), babysit returns immediately ("already synced"), promote flips `prod`, DNS waits 5 min, verify passes. The new schema goes live without the usual 30–60 min indexer-lag window.
-5. If the feature branch tip and main HEAD differ (e.g. squash-merge changed the SHA), repeat step 2's push from main; the build cache may invalidate and you eat another sync. To avoid: prefer a merge commit over squash for branches that were pre-deployed, OR pre-deploy from the merge-base just before merging.
+4. PR merges to `main`. Now run `/deploy-indexer` (without `--no-promote`) from `main` — preflight passes, push is fast (or a no-op if `envio` is already at the commit you're about to push, i.e. SHA-identical to step 2's tip), babysit returns immediately ("already promoted"), promote flips `prod`, DNS waits 5 min, verify passes. The new schema goes live without the usual 30–60 min indexer-lag window.
+5. The fast path in step 4 only holds when the commit you push from `main` is byte-identical to what was already on `envio`. Squash-merge produces a new SHA, so the prior `envio` tip becomes irrelevant and you eat a fresh build + sync. To preserve commit identity through merge: use a merge commit or rebase-merge for branches that were pre-deployed, OR pre-deploy from the merge-base just before merging so the eventual `main` tip matches.
 
 ## Rules
 
