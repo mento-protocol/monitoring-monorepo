@@ -483,6 +483,93 @@ describe("updateMetrics", () => {
     ).toBe(0);
   });
 
+  it("decimal-adjusts oracle median prices from FixidityLib 1e24 scale", async () => {
+    updateMetrics([makePool()]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_price", poolLabels),
+    ).toBeCloseTo(1.15, 6);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_prev_price", poolLabels),
+    ).toBeCloseTo(1.12, 6);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_oracle_prev_price_at",
+        poolLabels,
+      ),
+    ).toBe(1713199580);
+  });
+
+  it("skips oracle price gauges on the 0 sentinel (no median yet)", async () => {
+    updateMetrics([
+      makePool({
+        lastMedianPrice: "0",
+        prevMedianPrice: "0",
+        prevMedianAt: "0",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_price", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_prev_price", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_oracle_prev_price_at",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("skips prev gauges when only one of the (price, at) pair is non-zero", async () => {
+    // Migration corner case: the indexer column for `prevMedianAt` was added
+    // with default 0, so the first post-migration MedianUpdated will have
+    // prevMedianPrice carried from the old row but prevMedianAt = 0.
+    // Without pair-gating the bridge would publish a 1970 timestamp.
+    updateMetrics([
+      makePool({
+        prevMedianPrice: "1120000000000000000000000",
+        prevMedianAt: "0",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_prev_price", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_oracle_prev_price_at",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("publishes current oracle price before a second median (prev still 0)", async () => {
+    // First-ever-median path: only the prev pair is suppressed; the alert
+    // summary still needs `oracle_price` to quote a current value.
+    updateMetrics([
+      makePool({
+        prevMedianPrice: "0",
+        prevMedianAt: "0",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_price", poolLabels),
+    ).toBeCloseTo(1.15, 6);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_prev_price", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_oracle_prev_price_at",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
   it("falls back to pool id when pair/chain/explorer are unknown", async () => {
     const unknownPool = makePool({
       id: "99999-0x1234567890abcdef1234567890abcdef12345678",

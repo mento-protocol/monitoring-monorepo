@@ -1106,14 +1106,31 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
   interval_seconds = 60
 
   rule {
-    name           = "Oracle Jump Exceeds Swap Fee"
-    condition      = "threshold"
-    for            = "0m"
+    name      = "Oracle Jump Exceeds Swap Fee"
+    condition = "threshold"
+    # `for = "1m"` smooths transient NoData blips from the Mimir ruler. The
+    # threshold is "any in-band jump within the last 10m", so this does NOT
+    # add a meaningful duration requirement — same rationale as the
+    # `Deviation Breach Critical` rule (see the 2026-04-28 incident note
+    # above). A single-eval glitch in any annotation query would otherwise
+    # reset alert state to Normal between eval cycles.
+    for            = "1m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
+    # `JumpPct` / `FeePct` divide bps by 100 in PromQL so the summary can
+    # render the same `%.4g %%` format as the critical rule. Sprig math is
+    # NOT in scope for Grafana annotation templates (see the deviation-
+    # breach `Dev` query for the canonical rationale), so the math has to
+    # live in the query.
+    #
+    # Both `JumpPct` and `FeePct` are nil-guarded with a `?` fallback. The
+    # bridge gates `mento_pool_swap_fee_bps` on the `-1` sentinel and
+    # `mento_pool_oracle_jump_bps` on series presence — either could be
+    # absent for a single eval cycle (bridge restart, Hasura blip), which
+    # would nil-panic an unguarded `printf $values.X.Value`.
     annotations = {
-      summary     = "Oracle jumped {{ printf \"%.2f\" $values.A.Value }} bps — above the pool's {{ if $values.Fee }}{{ printf \"%.0f\" $values.Fee.Value }}{{ else }}?{{ end }} bps swap fee. LPs leaking per arb round-trip."
+      summary     = "Oracle price jumped {{ if $values.JumpPct }}{{ printf \"%.4g\" $values.JumpPct.Value }}{{ else }}?{{ end }}% — above the pool's {{ if $values.FeePct }}{{ printf \"%.4g\" $values.FeePct.Value }}{{ else }}?{{ end }}% swap fee. LPs leaking per arb round-trip."
       description = "Most recent MedianUpdated delta is above the pool's combined swap fee but still within 10% of it. Warning tier — a single large move isn't pageable, but repeated occurrences point to an oracle or sizing tune-up."
     }
 
@@ -1156,19 +1173,26 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
       })
     }
 
-    # Fee sample — used by the summary annotation, not by the threshold.
-    data {
-      ref_id         = "Fee"
-      datasource_uid = var.prometheus_datasource_uid
-      relative_time_range {
-        from = local.instant_query_range_seconds
-        to   = 0
+    # JumpPct / FeePct — annotation-only, pre-rendered in PromQL because
+    # sprig math isn't available in Grafana annotation templates. Same
+    # pattern as the critical rule (see `oracle_jump_critical_annotation_queries`
+    # in main.tf — kept inline here because the warning needs only the
+    # pct pair, not the price/age set).
+    dynamic "data" {
+      for_each = local.oracle_jump_warning_annotation_queries
+      content {
+        ref_id         = data.value.ref_id
+        datasource_uid = var.prometheus_datasource_uid
+        relative_time_range {
+          from = local.instant_query_range_seconds
+          to   = 0
+        }
+        model = jsonencode({
+          refId   = data.value.ref_id
+          expr    = data.value.expr
+          instant = true
+        })
       }
-      model = jsonencode({
-        refId   = "Fee"
-        expr    = "mento_pool_swap_fee_bps"
-        instant = true
-      })
     }
 
     data {
@@ -1201,15 +1225,40 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
   }
 
   rule {
-    name           = "Oracle Jump Far Above Swap Fee"
-    condition      = "threshold"
-    for            = "0m"
+    name      = "Oracle Jump Far Above Swap Fee"
+    condition = "threshold"
+    # `for = "1m"` smooths transient NoData blips from the Mimir ruler —
+    # same rationale as the warning tier and the deviation-breach critical
+    # rule (see the 2026-04-28 incident note earlier in this file). Without
+    # it, a single-eval glitch on any annotation-only query (e.g. the new
+    # oracle-price gauges during a bridge restart) would propagate NoData
+    # and reset alert state to Normal between cycles.
+    for            = "1m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
+    # `JumpPct` / `FeePct` divide bps by 100 in PromQL because sprig math
+    # (`mul`/`div`) is NOT in scope for Grafana annotation templates — same
+    # rationale that pre-renders `Dev` for the deviation-breach alert. The
+    # `%.4g` format keeps trailing zeros off both whole-number fees ("0.1"
+    # not "0.1000") and sub-bps jumps ("0.1727" not "0.17270").
+    #
+    # `current_oracle_price` / `previous_oracle_price` source from the
+    # bridge's `mento_pool_oracle_price` and `_prev_price` gauges. Both skip
+    # the 0 sentinel, so the `{{ if … }}` guards collapse the annotation
+    # cleanly when the indexer hasn't seen a second non-zero MedianUpdated
+    # yet — matches the pattern used by `current_reserves` for one-sided
+    # pools.
+    #
+    # `AgeNow` reuses `mento_pool_oracle_jump_at` rather than a separate
+    # `oracle_price_at` series — at alert-fire time both equal `lastMedianAt`
+    # (the handler updates them together when `jumpBps != null`). Skipping
+    # the extra metric keeps cardinality flat without losing fidelity.
     annotations = {
-      summary     = "Oracle jumped {{ printf \"%.2f\" $values.A.Value }} bps — ≥10% above the pool's {{ if $values.Fee }}{{ printf \"%.0f\" $values.Fee.Value }}{{ else }}?{{ end }} bps swap fee. LPs leaking per arb round-trip."
-      description = "Most recent MedianUpdated delta is at least 10% above the pool's combined swap fee. Arbitrageurs can round-trip through the pool faster than rebalancing can catch, and the leakage compounds with volume. Investigate the oracle feed (stuck reporter, bridge-delay reopen, reporter disagreement) and the rebalancer's next-cycle response."
+      summary               = "Oracle price jumped {{ if $values.JumpPct }}{{ printf \"%.4g\" $values.JumpPct.Value }}{{ else }}?{{ end }}% — significantly above the pool's {{ if $values.FeePct }}{{ printf \"%.4g\" $values.FeePct.Value }}{{ else }}?{{ end }}% swap fee. LPs are at risk."
+      description           = "Most recent MedianUpdated delta is at least 10% above the pool's combined swap fee. Arbitrageurs can round-trip through the pool faster than rebalancing can catch, and the leakage compounds with volume. Investigate the oracle feed and the rebalancer's next-cycle response."
+      current_oracle_price  = "{{ if and $values.OraclePrice $values.AgeNow }}{{ printf \"%.4g\" $values.OraclePrice.Value }} ({{ humanizeDuration $values.AgeNow.Value }} ago){{ end }}"
+      previous_oracle_price = "{{ if and $values.OraclePrev $values.PrevAge }}{{ printf \"%.4g\" $values.OraclePrev.Value }} ({{ humanizeDuration $values.PrevAge.Value }} ago){{ end }}"
     }
 
     labels = {
@@ -1241,18 +1290,27 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
       })
     }
 
-    data {
-      ref_id         = "Fee"
-      datasource_uid = var.prometheus_datasource_uid
-      relative_time_range {
-        from = local.instant_query_range_seconds
-        to   = 0
+    # Annotation-only queries — populate `$values.*` for the templates above.
+    # NOT part of the threshold condition: a missing series for any one of
+    # these (e.g. indexer hasn't seen a second median yet, bridge restart
+    # mid-eval) leaves `$values.X` empty and the `{{ if }}` guards drop the
+    # corresponding line. JumpPct / FeePct are derived (bps → %) in PromQL
+    # because sprig math is unavailable in annotation templates.
+    dynamic "data" {
+      for_each = local.oracle_jump_critical_annotation_queries
+      content {
+        ref_id         = data.value.ref_id
+        datasource_uid = var.prometheus_datasource_uid
+        relative_time_range {
+          from = local.instant_query_range_seconds
+          to   = 0
+        }
+        model = jsonencode({
+          refId   = data.value.ref_id
+          expr    = data.value.expr
+          instant = true
+        })
       }
-      model = jsonencode({
-        refId   = "Fee"
-        expr    = "mento_pool_swap_fee_bps"
-        instant = true
-      })
     }
 
     data {

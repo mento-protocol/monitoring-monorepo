@@ -19,6 +19,9 @@ export interface PoolRow {
   hasHealthData: boolean;
   lpFee: number;
   protocolFee: number;
+  lastMedianPrice: string;
+  prevMedianPrice: string;
+  prevMedianAt: string;
   lastOracleJumpBps: string;
   lastOracleJumpAt: string;
   reserves0: string;

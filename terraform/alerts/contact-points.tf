@@ -54,11 +54,11 @@ locals {
   #      intentionally suppressed in Slack to keep warning messages at a
   #      glance-able 4 lines.
   #   4. Optional KPI lines from rule-specific annotations (rebalance_reason,
-  #      current_deviation, current_reserves, …). Each guarded by
-  #      `{{ if .Annotations.X }}` so rules that don't set the annotation
-  #      render nothing — no empty "*Foo:*" placeholder. Add new lines here
-  #      when introducing rule-specific context fields; rules that don't set
-  #      them are unaffected.
+  #      current_deviation, current_reserves, current_oracle_price,
+  #      previous_oracle_price, …). Each guarded by `{{ if .Annotations.X }}`
+  #      so rules that don't set the annotation render nothing — no empty
+  #      "*Foo:*" placeholder. Add new lines here when introducing rule-
+  #      specific context fields; rules that don't set them are unaffected.
   #
   #      The *Rebalance Blocked* row is sourced from the metrics-bridge
   #      `mento_pool_rebalance_blocked` gauge (currently set on
@@ -114,6 +114,12 @@ locals {
     *Reserves:* {{ .Annotations.current_reserves }}
     {{ else if .Annotations.current_deviation -}}
     *Deviation:* {{ .Annotations.current_deviation }}
+    {{ end -}}
+    {{ if .Annotations.current_oracle_price -}}
+    *Current Oracle Price:* {{ .Annotations.current_oracle_price }}
+    {{ end -}}
+    {{ if .Annotations.previous_oracle_price -}}
+    *Previous Oracle Price:* {{ .Annotations.previous_oracle_price }}
     {{ end -}}
     *Started:* {{ .StartsAt.Format "Jan 02 15:04 UTC" }}
     {{ end }}

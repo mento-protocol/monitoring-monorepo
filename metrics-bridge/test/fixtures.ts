@@ -26,6 +26,9 @@ export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
     hasHealthData: true,
     lpFee: 5,
     protocolFee: 5,
+    lastMedianPrice: "1150000000000000000000000",
+    prevMedianPrice: "1120000000000000000000000",
+    prevMedianAt: "1713199580",
     lastOracleJumpBps: "3.0000",
     lastOracleJumpAt: "1713200000",
     // Default: balanced 50/50 18dp pool. Tests overriding decimals MUST

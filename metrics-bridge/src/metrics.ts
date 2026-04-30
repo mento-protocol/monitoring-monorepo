@@ -12,7 +12,16 @@ import {
   poolIdAddress,
   shortAddress,
 } from "@mento-protocol/monitoring-config/format";
+import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
 import type { PoolRow } from "./types.js";
+
+// SortedOracles fixed-point scale — keep in sync with
+// `indexer-envio/src/priceDifference.ts:SORTED_ORACLES_DECIMALS` and the
+// dashboard's `ui-dashboard/src/lib/format.ts`. The contract reports rates
+// in FixidityLib units, so the bridge gauge has to divide by 10^24 before
+// it leaves the bridge for the alert template / dashboard tooltip to read
+// directly.
+const SORTED_ORACLES_DECIMALS = 24;
 
 // Pools we've already warned about — prevents log spam on the 30s poll loop.
 const warnedUnknownPools = new Set<string>();
@@ -183,6 +192,24 @@ export const gauges = {
     labelNames: poolLabels,
     registers: [register],
   }),
+  oraclePrice: new Gauge({
+    name: "mento_pool_oracle_price",
+    help: "Most recent non-zero MedianUpdated price, decimal-adjusted (raw / 1e24) from SortedOracles' FixidityLib scale. Feed direction (1 feedToken = X quoteToken). Used by the Oracle Jump alert summary.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
+  oraclePrevPrice: new Gauge({
+    name: "mento_pool_oracle_prev_price",
+    help: "MedianUpdated price immediately before mento_pool_oracle_price, same scale and direction. Skipped until a second non-zero median has landed on the feed.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
+  oraclePrevPriceAt: new Gauge({
+    name: "mento_pool_oracle_prev_price_at",
+    help: "Unix timestamp of the MedianUpdated event that produced oracle_prev_price. Paired with the gauge so the Oracle Jump alert can render `humanizeDuration` of (time() - this) as the previous-price age.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
   healthStatus: new Gauge({
     name: "mento_pool_health_status",
     help: "Pool health status at last on-chain event (0=OK, 1=WARN, 2=CRITICAL, 3=N/A). Event-time snapshot, not live.",
@@ -287,6 +314,25 @@ export function updateMetrics(pools: PoolRow[]): void {
     }
     gauges.oracleJumpBps.set(labels, fp(pool.lastOracleJumpBps));
     gauges.oracleJumpAt.set(labels, Number(pool.lastOracleJumpAt));
+    // Skip the 0 sentinel: the alert annotation gates on series presence so
+    // a missing prev cleanly drops the line instead of rendering "0".
+    if (pool.lastMedianPrice !== "0") {
+      gauges.oraclePrice.set(
+        labels,
+        toHumanUnits(BigInt(pool.lastMedianPrice), SORTED_ORACLES_DECIMALS),
+      );
+    }
+    // Pair-gate the prev fields. Post-migration the first MedianUpdated has
+    // prevMedianPrice > 0 (carried from the old row) but prevMedianAt = 0
+    // (new column default), so a price-only check would render a 1970
+    // timestamp on the first jump after deploy.
+    if (pool.prevMedianPrice !== "0" && pool.prevMedianAt !== "0") {
+      gauges.oraclePrevPrice.set(
+        labels,
+        toHumanUnits(BigInt(pool.prevMedianPrice), SORTED_ORACLES_DECIMALS),
+      );
+      gauges.oraclePrevPriceAt.set(labels, Number(pool.prevMedianAt));
+    }
     gauges.limitPressure.set(
       { ...labels, token_index: "0" },
       fp(pool.limitPressure0),
