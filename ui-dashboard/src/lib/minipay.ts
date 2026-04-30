@@ -24,10 +24,12 @@ import { isValidAddress } from "@/lib/validators";
 const DUNE_BASE = "https://api.dune.com";
 const DUNE_QUERY_ID = 7404332;
 
-// Dune execution polling — total budget caps at ~5 min so a stuck Dune query
-// surfaces as a cron error rather than tying up the whole 800s maxDuration.
-const POLL_INTERVAL_MS = 3_000;
-const POLL_MAX_ATTEMPTS = 100;
+// Dune execution polling — first-run cold-cache (full FederatedAttestation
+// history scan) can take several minutes; incremental runs are typically a
+// few seconds. 600s budget leaves ~200s of the 800s maxDuration for results
+// pagination + chunked SADD into Upstash.
+const POLL_INTERVAL_MS = 5_000;
+const POLL_MAX_ATTEMPTS = 120;
 
 // Per-request timeout. POLL_MAX_ATTEMPTS only bounds successful poll iterations;
 // a single fetch wedged at TLS/socket level needs an explicit AbortSignal or
@@ -40,7 +42,23 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const SADD_CHUNK = 1000;
 const SMISMEMBER_CHUNK = 1000;
 
-const USERS_KEY = "minipay:users";
+// Upstash imposes a per-record 100 MB cap (Pay-as-you-go tier). The full
+// MiniPay attestation set is ~16M addresses ≈ 1 GB worth of SET bytes, so
+// a single `minipay:users` SET hits the limit at ~1.7M members. Shard over
+// the first nibble of the lowercased address (`0x[0-9a-f]…`) — addresses
+// are EOA-derived randomness so the 16 buckets stay near-uniform (~1M each
+// at full ingest, well under 100 MB). Bumping to 256 shards (2 nibbles)
+// would take ~63k each but adds round-trip overhead with no real benefit
+// at our cardinality.
+const SHARD_NIBBLES = "0123456789abcdef";
+const USERS_KEY_PREFIX = "minipay:users:";
+function shardKey(address: string): string {
+  // Address is `0x` + 40 hex chars; the first hex char (idx 2) is the shard.
+  return USERS_KEY_PREFIX + address[2];
+}
+function allShardKeys(): string[] {
+  return SHARD_NIBBLES.split("").map((n) => USERS_KEY_PREFIX + n);
+}
 const LAST_BLOCK_KEY = "minipay:lastBlock";
 
 // Redis client — same lazy-init pattern as `address-labels.ts:46-55`.
@@ -259,39 +277,60 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-/** SADD addresses to `minipay:users` in chunks. Returns the cumulative
- *  number of *newly added* members (Redis SADD return value summed). */
+/** Group addresses by shard key (first hex nibble after `0x`). */
+function bucketByShard(addresses: string[]): Map<string, string[]> {
+  const buckets = new Map<string, string[]>();
+  for (const a of addresses) {
+    const k = shardKey(a);
+    let list = buckets.get(k);
+    if (!list) {
+      list = [];
+      buckets.set(k, list);
+    }
+    list.push(a);
+  }
+  return buckets;
+}
+
+/** SADD addresses to the sharded MiniPay set. Returns the cumulative number
+ *  of *newly added* members (sum of SADD return values across all shards). */
 export async function addToMiniPaySet(addresses: string[]): Promise<number> {
   if (addresses.length === 0) return 0;
   const redis = getRedis();
   let added = 0;
-  for (const batch of chunk(addresses, SADD_CHUNK)) {
-    // SADD signature requires `(key, member, ...members)` — split the chunk
-    // so the first member is positional. Chunks are guaranteed non-empty
-    // (the outer `addresses.length === 0` early-return covers that).
-    const [head, ...tail] = batch;
-    added += await redis.sadd(USERS_KEY, head!, ...tail);
+  for (const [key, members] of bucketByShard(addresses)) {
+    for (const batch of chunk(members, SADD_CHUNK)) {
+      // SADD signature requires `(key, member, ...members)` — split the chunk
+      // so the first member is positional. Chunks are guaranteed non-empty.
+      const [head, ...tail] = batch;
+      added += await redis.sadd(key, head!, ...tail);
+    }
   }
   return added;
 }
 
-/** SCARD of the MiniPay set. Used for sanity logging + parity assertions. */
+/** Cumulative SCARD across all shards. */
 export async function getMiniPaySetSize(): Promise<number> {
-  return await getRedis().scard(USERS_KEY);
+  const redis = getRedis();
+  const sizes = await Promise.all(allShardKeys().map((k) => redis.scard(k)));
+  return sizes.reduce((a, b) => a + b, 0);
 }
 
 /**
- * Return the subset of `addresses` that are members of `minipay:users`.
- * Uses SMISMEMBER in chunks of `SMISMEMBER_CHUNK` for round-trip economy.
+ * Return the subset of `addresses` that are members of the MiniPay set.
+ * Bucketed by shard so each SMISMEMBER hits exactly one shard's bytes;
+ * shards are queried in parallel.
  */
 export async function intersectMiniPay(addresses: string[]): Promise<string[]> {
   if (addresses.length === 0) return [];
   const redis = getRedis();
   const matches: string[] = [];
-  for (const batch of chunk(addresses, SMISMEMBER_CHUNK)) {
-    const flags = (await redis.smismember(USERS_KEY, batch)) as number[];
-    for (let i = 0; i < batch.length; i += 1) {
-      if (flags[i] === 1) matches.push(batch[i]!);
+  for (const [key, members] of bucketByShard(addresses)) {
+    for (const batch of chunk(members, SMISMEMBER_CHUNK)) {
+      const flags = (await redis.smismember(key, batch)) as number[];
+      for (let i = 0; i < batch.length; i += 1) {
+        if (flags[i] === 1) matches.push(batch[i]!);
+      }
     }
   }
   return matches;
