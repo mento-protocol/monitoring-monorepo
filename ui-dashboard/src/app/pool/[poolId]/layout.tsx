@@ -11,7 +11,7 @@ const FALLBACK_DESCRIPTION = "Mento protocol pool analytics";
 function healthLabel(status: PoolOgData["health"]): string {
   switch (status) {
     case "OK":
-      return "healthy";
+      return "OK";
     case "WARN":
       return "warn";
     case "CRITICAL":
