@@ -365,10 +365,15 @@ describe("Pool detail LPs tab", () => {
     | "providers"
     | "ols"
     | "breaches";
+  // Tab-EXCLUSIVE GraphQL operation names — ops listed here only fire when
+  // their tab is mounted. Shared ops (e.g. PoolRebalances, fired by both
+  // SwapsTab for chart annotations AND RebalancesTab) are deliberately
+  // excluded so the lazy-mount loop doesn't false-positive on tabs that
+  // legitimately re-use a query.
   const TAB_OPS: Record<TabWithQueries, readonly string[]> = {
     swaps: ["PoolSwapsCount", "PoolSwapsPage"],
     reserves: ["PoolReserves"],
-    rebalances: ["PoolRebalancesCount", "PoolRebalancesPage", "PoolRebalances"],
+    rebalances: ["PoolRebalancesCount", "PoolRebalancesPage"],
     liquidity: ["PoolLiquidityCount", "PoolLiquidityPage"],
     oracle: [
       "OracleSnapshots",
@@ -444,6 +449,69 @@ describe("Pool detail LPs tab", () => {
       }
     }
   });
+
+  // Characterization test added before tab-extraction refactor: extend the
+  // lazy-mount contract assertion to ALL eight tab-scoped tabs (the existing
+  // two `it()` cases above already cover `reserves` and `oracle`; this loop
+  // covers the remaining six and re-asserts those two for completeness).
+  // Ensures that switching to tab N never mounts tab M's data hooks. The
+  // `limits` tab has no tab-local queries and is therefore not in TAB_OPS.
+  //
+  // The OlsPool mock returns one active row so the OLS tab stays visible —
+  // without it, the page filters "ols" out of visibleTabs and falls back to
+  // "providers", spuriously mounting LpsTab.
+  it.each(Object.keys(TAB_OPS) as (keyof typeof TAB_OPS)[])(
+    "lazy-mount: tab=%s does not fire any other tab's queries",
+    (activeTab) => {
+      mockSearchParams.set("tab", activeTab);
+
+      mockUseGQL.mockImplementation((query: string | null) => {
+        if (!query) return gqlResult(undefined);
+        if (query.includes("PoolDetailWithHealth"))
+          return gqlResult({ Pool: [BASE_POOL] });
+        if (query.includes("TradingLimits"))
+          return gqlResult({ TradingLimit: [] });
+        if (query.includes("PoolDeployment"))
+          return gqlResult({ FactoryDeployment: [] });
+        if (query.includes("OlsPool")) {
+          return gqlResult({
+            OlsPool: [
+              {
+                id: "ols-1",
+                poolId: "42220-0xpool",
+                olsAddress: "0xols",
+                debtToken: "0xt0",
+                isActive: true,
+                lastRebalance: "0",
+                rebalanceCooldown: "0",
+                olsRebalanceCount: "0",
+                liquiditySourceIncentiveExpansion: "0",
+                liquiditySourceIncentiveContraction: "0",
+                protocolIncentiveExpansion: "0",
+                protocolIncentiveContraction: "0",
+                protocolFeeRecipient: null,
+                updatedAtTimestamp: "1",
+              },
+            ],
+          });
+        }
+        return gqlResult(undefined);
+      });
+
+      renderToStaticMarkup(<PoolDetailPage />);
+
+      const fired = new Set(firedOperationNames());
+      for (const [tabName, ops] of Object.entries(TAB_OPS)) {
+        if (tabName === activeTab) continue;
+        for (const op of ops) {
+          expect(
+            fired.has(op),
+            `${op} (${tabName} tab) should not fire on tab=${activeTab}`,
+          ).toBe(false);
+        }
+      }
+    },
+  );
 
   it("queries pool detail with both the namespaced id and active chainId", () => {
     // expect.assertions ensures the expects inside mockImplementation actually
