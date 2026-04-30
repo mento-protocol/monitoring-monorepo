@@ -11,41 +11,29 @@ function markup(node: React.ReactNode): string {
   return renderToStaticMarkup(<>{node}</>);
 }
 
-// Median-absolute-deviation reference helper — identical to the one used
-// inside computeRewardThresholds, but inlined here so tests can exercise
-// the math directly without re-exporting an internal.
-function expectedCutoffs(values: number[]): { strong: number; mild: number } {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const med =
-    sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-  const dev = sorted.map((v) => Math.abs(v - med)).sort((a, b) => a - b);
-  const dmid = Math.floor(dev.length / 2);
-  const mad =
-    dev.length % 2 === 0 ? (dev[dmid - 1] + dev[dmid]) / 2 : dev[dmid];
-  return { strong: med + 5 * mad, mild: med + 3 * mad };
-}
-
 describe("computeRewardThresholds", () => {
   it("returns null below the minimum sample size (N<5)", () => {
     expect(computeRewardThresholds(["1", "2", "3", "4"])).toBeNull();
   });
 
-  it("returns thresholds at exactly the minimum sample size", () => {
-    const thresholds = computeRewardThresholds(["1", "2", "3", "4", "5"]);
+  it("computes cutoff at exactly N=5 (odd-N median path)", () => {
+    // [1,2,3,4,5] → median=3 (odd-N picks middle), deviations [2,1,0,1,2]
+    // sorted [0,1,1,2,2] → MAD=1. Mild=6, strong=8.
+    const thresholds = computeRewardThresholds(["1", "2", "3", "4", "5"])!;
     expect(thresholds).not.toBeNull();
+    expect(thresholds[0].cutoff).toBeCloseTo(8, 6);
+    expect(thresholds[1].cutoff).toBeCloseTo(6, 6);
   });
 
   it("returns null when MAD is zero (every sample identical)", () => {
-    // Half-or-more identical samples force MAD to 0; without a meaningful
-    // spread there's no defensible cutoff, so we skip highlighting rather
-    // than tier on noise.
     const tied = Array.from({ length: 30 }, () => "7.63");
     expect(computeRewardThresholds(tied)).toBeNull();
   });
 
   it("ignores null/empty/zero/non-numeric and uses positives only", () => {
-    const rewards = [
+    // [1,2,3,4,10] → median=3, |v-3|=[2,1,0,1,7] sorted [0,1,1,2,7] →
+    // MAD=1. Mild=6, strong=8. Hardcoded oracle (not derived from impl).
+    const thresholds = computeRewardThresholds([
       "1",
       "2",
       "3",
@@ -57,18 +45,14 @@ describe("computeRewardThresholds", () => {
       "0",
       "-5",
       "abc",
-    ];
-    const thresholds = computeRewardThresholds(rewards);
-    expect(thresholds).not.toBeNull();
-    // Verify that the negative/zero/non-numeric rows didn't change the
-    // computed cutoffs (they should match the cutoff for positives only).
-    const expected = expectedCutoffs([1, 2, 3, 4, 10]);
-    expect(thresholds![0].cutoff).toBeCloseTo(expected.strong, 6);
-    expect(thresholds![1].cutoff).toBeCloseTo(expected.mild, 6);
+    ])!;
+    expect(thresholds[0].cutoff).toBeCloseTo(8, 6);
+    expect(thresholds[1].cutoff).toBeCloseTo(6, 6);
   });
 
-  it("computes cutoff = median + k·MAD for the configured tiers", () => {
-    // 1..30 → median = 15.5, MAD = 7.5 → mild = 38, strong = 53.
+  it("computes cutoff = median + k·MAD for even-N inputs", () => {
+    // 1..30 (even N) → median=(15+16)/2=15.5, |v-15.5| sorted=[0.5×2,
+    // 1.5×2, ..., 14.5×2] → MAD=(7.5+7.5)/2=7.5. Mild=38, strong=53.
     const thresholds = computeRewardThresholds(
       Array.from({ length: 30 }, (_, i) => String(i + 1)),
     )!;
@@ -85,6 +69,21 @@ describe("computeRewardThresholds", () => {
     )!;
     expect(thresholds[0].tier.kMad).toBeGreaterThan(thresholds[1].tier.kMad);
     expect(thresholds[0].cutoff).toBeGreaterThan(thresholds[1].cutoff);
+  });
+
+  it("highlights tail outliers on sub-cent pools (regression: codex P2)", () => {
+    // formatUSD reports "$0.00" for any value < $0.005, so an earlier
+    // version of this code rounded sub-cent values to 0 *before* MAD,
+    // forcing MAD=0 on pools where most rewards are sub-cent. The $50
+    // outlier in this fixture would then be silently suppressed. MAD must
+    // run on raw values; only the comparison rounds.
+    const subCent = Array.from({ length: 30 }, (_, i) =>
+      String(0.001 + i * 0.0001),
+    );
+    const thresholds = computeRewardThresholds([...subCent, "50"]);
+    expect(thresholds).not.toBeNull();
+    const out = markup(renderRewardCell("50", thresholds));
+    expect(out).toContain("text-amber-300");
   });
 });
 

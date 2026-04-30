@@ -1193,17 +1193,11 @@ const REWARD_TOOLTIP =
   "Caller incentive paid for triggering this rebalance, in USD. Computed indexer-side as: |notional swap volume on the USD-pegged side| × Pool.rebalanceReward bps / 10000. Shows '—' when the pool has no USD-pegged side or the pre-rebalance reserve RPC failed.";
 
 // Below this many positive samples, MAD is too noisy — skip highlighting.
-// We picked 5 (down from the original 20 for percentiles) because MAD is
-// robust to small N: at N=5 a clear outlier already pulls clean of the
-// median+3·MAD cutoff, while percentiles need ~20+ samples for the cutoff
-// rank to mean anything.
 const MIN_REWARD_SAMPLE_SIZE = 5;
 
 // Ordered strongest-tier-first so the renderer picks the bigger match.
 // `kMad` = how many MADs above the median a reward must clear to fire the
-// tier. 3·MAD ≈ z=2 for a normal distribution; 5·MAD ≈ z=3.4 — the
-// Iglewicz-Hoaglin "outlier" rule sits at ~3.5, so 5·MAD is a clean
-// "strong outlier" line.
+// tier. 5·MAD ≈ z=3.4, near the Iglewicz-Hoaglin "outlier" cutoff of 3.5.
 const REWARD_OUTLIER_TIERS = [
   {
     kMad: 5,
@@ -1262,31 +1256,25 @@ function median(sorted: readonly number[]): number {
 export function computeRewardThresholds(
   rawRewards: readonly (string | null | undefined)[],
 ): RewardThresholds | null {
-  // Filter to positives: zero-reward rebalances aren't outlier candidates
-  // and including them would skew the median downward on pools that had a
-  // 0-bps reward phase. Round to display precision so two cells rendering
-  // as the same string always fold into the same data point — keeps the
-  // tier consistent with what users actually see.
+  // Compute on raw values (NOT toDisplayPrecision). Rounding here would
+  // collapse sub-cent pools to a vector of zeros — formatUSD reports
+  // "$0.00" for any value < $0.005, so e.g. a pool with rewards in the
+  // 0.001–0.004 range plus a single $50 outlier ends up with 30 zeros
+  // and one 50, MAD=0, and *no* highlighting on the obvious outlier.
+  // Visual-equality across display-precision is preserved at the cell
+  // render site by `rounded > cutoff` (renderRewardCell), which quantises
+  // both cells to the same bin regardless of where cutoff lands.
   const values = rawRewards
     .map((r) => (r ? Number(r) : Number.NaN))
     .filter((v) => Number.isFinite(v) && v > 0)
-    .map(toDisplayPrecision)
     .sort((a, b) => a - b);
   if (values.length < MIN_REWARD_SAMPLE_SIZE) return null;
   const med = median(values);
-  // MAD = median of absolute deviations from the median. Replaces the
-  // earlier p90/p95 nearest-rank because percentile cutoffs land *inside*
-  // tail clusters on bimodal pools (e.g. a long stretch of identical
-  // ~$9.85 rebalances would put the cutoff at $9.85 itself, then strict
-  // `>` suppresses every row in the cluster — the exact bug seen on pool
-  // 143-0xd0e9…ce081). MAD measures spread relative to the bulk and so
-  // the cutoff sits *off* the cluster instead of in it.
   const mad = median(
     values.map((v) => Math.abs(v - med)).sort((a, b) => a - b),
   );
-  // MAD = 0 means >half the samples are exactly identical: there is no
-  // meaningful "typical" scale, so highlighting becomes arbitrary. Skip
-  // rather than fall back to a fragile mean-deviation surrogate.
+  // MAD = 0 means majority of samples are exactly equal. No meaningful
+  // spread → skip highlighting rather than tier on noise.
   if (mad === 0) return null;
   return REWARD_OUTLIER_TIERS.map((tier) => ({
     tier,
@@ -1303,10 +1291,8 @@ export function renderRewardCell(
   const formatted = formatUSD(value);
   if (!thresholds || !Number.isFinite(value)) return formatted;
   // Compare at display precision so visually-identical cells always share
-  // a tier — strict `>` against a cutoff that lies between two raw values
-  // rendering identically would otherwise split them. (Practically rare
-  // with MAD because the cutoff sits well above the cluster, but a fixed
-  // cost defense.)
+  // a tier (e.g. raw 9.8493 and 9.8511 both render "$9.85" → both quantise
+  // to 9.85 here, regardless of where cutoff lands between them).
   const rounded = toDisplayPrecision(value);
   const match = thresholds.find((t) => rounded > t.cutoff);
   if (!match) return formatted;
