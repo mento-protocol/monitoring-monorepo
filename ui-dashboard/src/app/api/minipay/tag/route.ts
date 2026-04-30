@@ -93,13 +93,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return await Sentry.withMonitor(
       "minipay-tag",
       async () => {
-        const [discovery, allLabels, minipaySetSize] = await Promise.all([
-          discoverMentoAddresses(hasuraUrl, CELO_CHAIN_ID),
-          getAllLabels(),
-          getMiniPaySetSize(),
-        ]);
-
-        const { addresses, perEntity } = discovery;
+        // SCARD is a single Redis call; check it first before paying for the
+        // Hasura paginated walk + getAllLabels SCAN, which are only useful
+        // when the set is populated.
+        const minipaySetSize = await getMiniPaySetSize();
 
         if (minipaySetSize === 0) {
           // Sync cron hasn't populated the set yet (or it was wiped). Return
@@ -108,16 +105,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           const body: TagResponse = {
             ok: true,
             mode,
-            discovered: addresses.length,
+            discovered: 0,
             candidates: 0,
             minipaySetSize: 0,
             matched: 0,
             written: 0,
             durationMs: Date.now() - startedAt,
-            perEntity,
           };
           return NextResponse.json(body);
         }
+
+        const [discovery, allLabels] = await Promise.all([
+          discoverMentoAddresses(hasuraUrl, CELO_CHAIN_ID),
+          getAllLabels(),
+        ]);
+
+        const { addresses, perEntity } = discovery;
 
         // Flatten every scope into one map for filtering. Same rationale as
         // arkham/enrich/route.ts:135-138 — strict either/or invariant means

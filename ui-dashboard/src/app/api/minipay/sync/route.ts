@@ -36,9 +36,15 @@ type SyncResponse = {
  * Auth: Bearer `CRON_SECRET`.
  *
  * Cursor semantics: persisted block (`minipay:lastBlock`) is the
- * **inclusive lower bound** for the next run's Dune query. Advancement only
- * happens after every page is SADD'd successfully — partial failure leaves
- * the cursor untouched so the next run re-pulls the missing rows.
+ * **exclusive lower bound** for the next run — Dune query 7404332 filters
+ * `WHERE block_number > {{lastBlock}}`, so a row at exactly `lastBlock` is
+ * not re-fetched. After a successful run we persist `maxBlock` (the highest
+ * block we saw); the next run queries `block_number > maxBlock`, which
+ * correctly skips the rows we already wrote without missing anything.
+ *
+ * Cursor advancement only happens after every page is SADD'd successfully —
+ * partial failure leaves the cursor untouched so the next run re-pulls the
+ * missing rows (SADD is idempotent on retry).
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const authBail = await requireCronAuth(req, "minipay/sync");

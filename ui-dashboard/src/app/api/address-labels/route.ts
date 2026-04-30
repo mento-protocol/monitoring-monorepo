@@ -131,16 +131,19 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
   }
 
   // Deduplicate tags: case-insensitive, preserve first-occurrence casing (#6).
-  // Strip the reserved "arkham" provenance tag — it's the bit that marks an
-  // entry as "safe for the nightly refresh cron to overwrite". Letting users
-  // set it via the label editor would let a manually-curated entry get
-  // clobbered on the next /api/arkham/enrich monthly run.
+  // Strip reserved server-provenance tags ("arkham", "minipay") — these
+  // mark an entry as written by a server-side cron. Letting users set them
+  // via the label editor would either clobber manually-curated entries on
+  // the next cron run (arkham) or cause UI confusion where the badge says
+  // "custom" but the Tags column shows "minipay" (minipay). Provenance is
+  // authoritative through `source`, not tags.
+  const RESERVED_SOURCE_TAGS = new Set(["arkham", "minipay"]);
   const seenTags = new Set<string>();
   const deduplicatedTags = parsedTags
     .map((t) => t.trim())
     .filter((t) => {
       const key = t.toLowerCase();
-      if (key === "arkham") return false;
+      if (RESERVED_SOURCE_TAGS.has(key)) return false;
       if (seenTags.has(key)) return false;
       seenTags.add(key);
       return true;

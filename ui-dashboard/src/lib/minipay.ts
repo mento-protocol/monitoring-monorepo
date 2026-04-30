@@ -176,9 +176,11 @@ async function pollUntilComplete(
 }
 
 // Dune's `/execution/{id}/results` paginates by `limit` + `offset`. Without
-// an explicit `limit`, large result sets return a 4xx; cap at the docs'
-// recommended max of 1000 rows per page.
-const DUNE_RESULTS_LIMIT = 1000;
+// an explicit `limit`, large result sets return a 4xx. The API caps at
+// 32k/page; 10k is a comfortable middle ground that cuts round-trips by 10×
+// vs. the previous 1k while staying well below memory or response-size
+// limits (10k addresses × ~50 B ≈ 500 KB JSON).
+const DUNE_RESULTS_LIMIT = 10_000;
 
 async function fetchResultsPage(
   apiKey: string,

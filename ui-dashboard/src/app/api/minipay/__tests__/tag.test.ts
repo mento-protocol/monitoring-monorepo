@@ -145,13 +145,8 @@ describe("GET /api/minipay/tag — filtering", () => {
     expect(body.wouldWrite).toBeUndefined();
   });
 
-  it("returns clean no-op when MiniPay set is empty (sync hasn't populated yet)", async () => {
+  it("returns clean no-op when MiniPay set is empty AND skips expensive upstream fetches", async () => {
     mockSetSize.mockResolvedValue(0);
-    mockDiscover.mockResolvedValue({
-      addresses: ["0xa", "0xb"],
-      perEntity: [],
-    });
-    mockGetAllLabels.mockResolvedValue({ global: {}, chains: {} });
 
     const res = await GET(makeReq({ bearer: "cron-secret" }));
     expect(res.status).toBe(200);
@@ -159,10 +154,16 @@ describe("GET /api/minipay/tag — filtering", () => {
       matched: number;
       written: number;
       minipaySetSize: number;
+      discovered: number;
     };
     expect(body.matched).toBe(0);
     expect(body.written).toBe(0);
     expect(body.minipaySetSize).toBe(0);
+    expect(body.discovered).toBe(0);
+    // Hot path: skip Hasura + Redis SCAN + intersect when the set is empty.
+    expect(mockDiscover).not.toHaveBeenCalled();
+    expect(mockGetAllLabels).not.toHaveBeenCalled();
+    expect(mockIntersect).not.toHaveBeenCalled();
     expect(mockImportLabels).not.toHaveBeenCalled();
   });
 });
