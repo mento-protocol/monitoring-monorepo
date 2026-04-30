@@ -249,4 +249,19 @@ locals {
       expr   = "time() - mento_pool_oracle_prev_price_at"
     },
   ]
+
+  # Warning-tier subset — same JumpPct / FeePct, no price-history annotations.
+  # Defined separately rather than slicing the critical list so a future
+  # warning-only annotation (e.g. "X-th jump in last hour") has a place to
+  # land without touching the critical query set.
+  oracle_jump_warning_annotation_queries = [
+    {
+      ref_id = "JumpPct"
+      expr   = "mento_pool_oracle_jump_bps / 100"
+    },
+    {
+      ref_id = "FeePct"
+      expr   = "mento_pool_swap_fee_bps / 100"
+    },
+  ]
 }

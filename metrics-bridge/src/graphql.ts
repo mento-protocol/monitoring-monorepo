@@ -46,10 +46,10 @@ const BRIDGE_POOLS_QUERY = gql`
 `;
 
 // Optional companion query for the Oracle Jump alert annotations. Same row
-// set as `BRIDGE_POOLS_QUERY`, just the median-lineage columns added in
-// PR #X. Isolated so a schema/deploy-order mismatch (bridge ships ahead of
-// indexer re-sync) degrades to "no current/prev oracle price annotation"
-// instead of "every pool metric stale".
+// set as `BRIDGE_POOLS_QUERY`, just the median-lineage columns. Isolated
+// so a schema/deploy-order mismatch (bridge ships ahead of indexer re-sync)
+// degrades to "no current/prev oracle price annotation" instead of "every
+// pool metric stale".
 const BRIDGE_POOLS_ORACLE_LINEAGE_QUERY = gql`
   query BridgePoolsOracleLineage {
     Pool(where: { source: { _like: "%fpmm%" } }) {

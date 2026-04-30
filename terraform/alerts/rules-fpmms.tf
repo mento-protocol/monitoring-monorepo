@@ -1114,8 +1114,13 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
     exec_err_state = "Error"
     no_data_state  = "OK"
 
+    # `JumpPct` / `FeePct` divide bps by 100 in PromQL so the summary can
+    # render the same `%.4g %%` format as the critical rule. Sprig math is
+    # NOT in scope for Grafana annotation templates (see the deviation-
+    # breach `Dev` query for the canonical rationale), so the math has to
+    # live in the query.
     annotations = {
-      summary     = "Oracle jumped {{ printf \"%.2f\" $values.A.Value }} bps — above the pool's {{ if $values.Fee }}{{ printf \"%.0f\" $values.Fee.Value }}{{ else }}?{{ end }} bps swap fee. LPs leaking per arb round-trip."
+      summary     = "Oracle price jumped {{ printf \"%.4g\" $values.JumpPct.Value }}% — above the pool's {{ if $values.FeePct }}{{ printf \"%.4g\" $values.FeePct.Value }}{{ else }}?{{ end }}% swap fee. LPs leaking per arb round-trip."
       description = "Most recent MedianUpdated delta is above the pool's combined swap fee but still within 10% of it. Warning tier — a single large move isn't pageable, but repeated occurrences point to an oracle or sizing tune-up."
     }
 
@@ -1158,19 +1163,26 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
       })
     }
 
-    # Fee sample — used by the summary annotation, not by the threshold.
-    data {
-      ref_id         = "Fee"
-      datasource_uid = var.prometheus_datasource_uid
-      relative_time_range {
-        from = local.instant_query_range_seconds
-        to   = 0
+    # JumpPct / FeePct — annotation-only, pre-rendered in PromQL because
+    # sprig math isn't available in Grafana annotation templates. Same
+    # pattern as the critical rule (see `oracle_jump_critical_annotation_queries`
+    # in main.tf — kept inline here because the warning needs only the
+    # pct pair, not the price/age set).
+    dynamic "data" {
+      for_each = local.oracle_jump_warning_annotation_queries
+      content {
+        ref_id         = data.value.ref_id
+        datasource_uid = var.prometheus_datasource_uid
+        relative_time_range {
+          from = local.instant_query_range_seconds
+          to   = 0
+        }
+        model = jsonencode({
+          refId   = data.value.ref_id
+          expr    = data.value.expr
+          instant = true
+        })
       }
-      model = jsonencode({
-        refId   = "Fee"
-        expr    = "mento_pool_swap_fee_bps"
-        instant = true
-      })
     }
 
     data {
