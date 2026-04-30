@@ -68,7 +68,7 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   });
   const { data: anchorData } = useGQL<{ PoolDailySnapshot: DailyAnchorRow[] }>(
     isVirtual ? null : POOL_HEALTH_7D_ANCHOR,
-    { id: pool.id, sevenDaysAgo },
+    { id: pool.id, chainId: pool.chainId, sevenDaysAgo },
   );
 
   if (isVirtual || rollupError) return NA;

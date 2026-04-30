@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Pool } from "@/lib/types";
+import { SECONDS_PER_DAY } from "@/lib/time-series";
 
 type RollupRow = {
   healthBinarySeconds?: string;
@@ -23,12 +24,21 @@ type AnchorResult = {
 
 let nextRollup: RollupResult = { data: undefined };
 let nextAnchor: AnchorResult = { data: { PoolDailySnapshot: [] } };
+let anchorVars:
+  | { id?: string; chainId?: number; sevenDaysAgo?: number }
+  | undefined;
 
 vi.mock("@/lib/graphql", () => ({
-  useGQL: (query: string | null) => {
+  useGQL: (
+    query: string | null,
+    variables?: { id?: string; chainId?: number; sevenDaysAgo?: number },
+  ) => {
     if (query == null) return { data: undefined };
     if (query.includes("PoolBreachRollup")) return nextRollup;
-    if (query.includes("PoolHealth7dAnchor")) return nextAnchor;
+    if (query.includes("PoolHealth7dAnchor")) {
+      anchorVars = variables;
+      return nextAnchor;
+    }
     return { data: undefined };
   },
 }));
@@ -52,6 +62,7 @@ const noAnchor: AnchorResult = { data: { PoolDailySnapshot: [] } };
 beforeEach(() => {
   nextRollup = { data: undefined };
   nextAnchor = noAnchor;
+  anchorVars = undefined;
 });
 
 describe("UptimeValue", () => {
@@ -245,6 +256,33 @@ describe("UptimeValue", () => {
     expect(html).toContain("100.00%");
     expect(html).toContain("—");
     expect(html).not.toMatch(/last 7d/);
+  });
+
+  it("scopes the 7d anchor query by chainId and the day-bucketed cutoff", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-30T21:01:00Z"));
+    nextRollup = {
+      data: {
+        Pool: [
+          {
+            healthBinarySeconds: String(86400),
+            healthTotalSeconds: String(86400),
+          },
+        ],
+      },
+    };
+
+    renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
+
+    const todayStart =
+      Math.floor(Date.parse("2026-04-30T21:01:00Z") / 1000 / SECONDS_PER_DAY) *
+      SECONDS_PER_DAY;
+    expect(anchorVars).toEqual({
+      id: BASE_POOL.id,
+      chainId: BASE_POOL.chainId,
+      sevenDaysAgo: todayStart - 7 * SECONDS_PER_DAY,
+    });
+    vi.useRealTimers();
   });
 
   it("keeps the all-time line rendered when ONLY the 7d-anchor query fails (schema-lag isolation)", () => {
