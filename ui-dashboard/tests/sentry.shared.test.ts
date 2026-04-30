@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stripAuthHeaders } from "../sentry.shared";
+import { shouldEnableSentry, stripAuthHeaders } from "../sentry.shared";
 
 // Minimal test harness: stripAuthHeaders takes an ErrorEvent | TransactionEvent
 // and mutates/returns it. For unit-test purposes we can cast a loose object to
@@ -112,6 +112,28 @@ describe("stripAuthHeaders — exception value redaction", () => {
     };
     const scrubbed = scrub(event);
     expect(scrubbed.exception.values[0].value).toBe("plain message");
+  });
+});
+
+describe("shouldEnableSentry", () => {
+  it("returns false when VERCEL_ENV is undefined (localhost)", () => {
+    expect(shouldEnableSentry(undefined)).toBe(false);
+  });
+
+  it("returns false when VERCEL_ENV is empty string", () => {
+    expect(shouldEnableSentry("")).toBe(false);
+  });
+
+  it("returns true on Vercel production", () => {
+    expect(shouldEnableSentry("production")).toBe(true);
+  });
+
+  it("returns true on Vercel preview", () => {
+    expect(shouldEnableSentry("preview")).toBe(true);
+  });
+
+  it("returns true on Vercel development (vercel dev)", () => {
+    expect(shouldEnableSentry("development")).toBe(true);
   });
 });
 

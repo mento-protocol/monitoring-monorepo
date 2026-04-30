@@ -43,51 +43,91 @@ import {
   REWARD_TOOLTIP,
 } from "../_lib/tooltips";
 
-// Ordered highest-tier-first so the renderer picks the strongest match.
-// Tooltips say "recent rebalances" because POOL_REBALANCE_REWARDS is
-// capped at ENVIO_MAX_ROWS (1000) — pools with longer history sample
-// from the recent window only.
+// Ordered strongest-tier-first so the renderer picks the bigger match.
+// `kMad` = how many MADs above the median a reward must clear to fire the
+// tier. 5·MAD ≈ z=3.4, near the Iglewicz-Hoaglin "outlier" cutoff of 3.5.
 const REWARD_OUTLIER_TIERS = [
   {
-    quantile: 0.95,
+    kMad: 5,
     className: "text-amber-300 font-semibold",
-    title: "Top 5% reward across this pool's recent rebalances",
+    title: "Strong reward outlier — far above typical for this pool",
   },
   {
-    quantile: 0.9,
+    kMad: 3,
     className: "text-amber-400",
-    title: "Top 10% reward across this pool's recent rebalances",
+    title: "Reward outlier — above typical for this pool",
   },
 ] as const;
 
 type RewardThresholds = readonly {
   tier: (typeof REWARD_OUTLIER_TIERS)[number];
-  min: number;
+  cutoff: number;
 }[];
 
 // 5min refresh: distribution shifts <1% per new event, so the default 30s
 // poll burns ~10x request volume on essentially-static data.
 const REWARD_HIST_REFRESH_MS = 5 * 60_000;
 
+// Round to formatUSD's display precision so two values rendering as the
+// same string (e.g. 9.8493 and 9.8511 both → "$9.85") compare equal at the
+// percentile cutoff. Round-trips through formatUSD itself rather than
+// re-implementing the tier arithmetic — `.toFixed(1)`'s IEEE-754
+// round-half-to-even disagrees with `Math.round`'s round-half-away-from-zero
+// at $X50 boundaries (e.g. formatUSD(1150)="$1.1K" but Math.round(1150/100)
+// would give 1200 → "$1.2K"), reintroducing the same visual-split bug this
+// helper is supposed to fix. Parsing the formatted string keeps the two in
+// lockstep automatically as formatUSD's tiers evolve.
+//
+// Invariant we actually depend on: formatUSD(a) === formatUSD(b) implies
+// toDisplayPrecision(a) === toDisplayPrecision(b) — i.e. cells that look
+// identical never split across a tier. The reverse is not guaranteed: at
+// the [999.995, 1000) boundary formatUSD takes the sub-$1K branch (".$X.XX"
+// rounds up to "$1000.00") but parsing yields 1000, which re-formats via
+// the K-branch as "$1K". That's fine — both still round to the same
+// threshold value, so two such cells stay tier-consistent.
+export function toDisplayPrecision(value: number): number {
+  if (!Number.isFinite(value)) return value;
+  const formatted = formatUSD(value);
+  const m = formatted.match(/^\$(-?\d+(?:\.\d+)?)([KM]?)$/);
+  if (!m) return value;
+  const scale = m[2] === "M" ? 1_000_000 : m[2] === "K" ? 1_000 : 1;
+  return Number(m[1]) * scale;
+}
+
+function median(sorted: readonly number[]): number {
+  const n = sorted.length;
+  if (n === 0) return Number.NaN;
+  const mid = Math.floor(n / 2);
+  return n % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
 export function computeRewardThresholds(
   rawRewards: readonly (string | null | undefined)[],
 ): RewardThresholds | null {
-  // Filter to positives: zero-reward rebalances aren't outlier candidates
-  // and including them would skew thresholds downward on pools that had a
-  // 0-bps reward phase.
+  // Compute on raw values (NOT toDisplayPrecision). Rounding here would
+  // collapse sub-cent pools to a vector of zeros — formatUSD reports
+  // "$0.00" for any value < $0.005, so e.g. a pool with rewards in the
+  // 0.001–0.004 range plus a single $50 outlier ends up with 30 zeros
+  // and one 50, MAD=0, and *no* highlighting on the obvious outlier.
+  // Visual-equality across display-precision is preserved at the cell
+  // render site by `rounded > cutoff` (renderRewardCell), which quantises
+  // both cells to the same bin regardless of where cutoff lands.
   const values = rawRewards
     .map((r) => (r ? Number(r) : Number.NaN))
     .filter((v) => Number.isFinite(v) && v > 0)
     .sort((a, b) => a - b);
   if (values.length < MIN_REWARD_SAMPLE_SIZE) return null;
-  // 1-based nearest-rank: ceil(n*q) gives the rank of the q-quantile, so
-  // ceil(n*q)-1 is the 0-based index of the largest value at-or-below it.
-  // Paired with strict `>` in the renderer this gives the top (n - ceil(n*q))
-  // rows. floor(n*q) under-counted by one — at exactly N=20 it resolved
-  // p95 to the max value so no row could ever fire the tier.
-  const at = (q: number) =>
-    values[Math.max(0, Math.ceil(values.length * q) - 1)];
-  return REWARD_OUTLIER_TIERS.map((tier) => ({ tier, min: at(tier.quantile) }));
+  const med = median(values);
+  const mad = median(
+    values.map((v) => Math.abs(v - med)).sort((a, b) => a - b),
+  );
+  // MAD = 0 means majority of samples are exactly equal. No meaningful
+  // spread → skip highlighting rather than tier on noise.
+  if (mad === 0) return null;
+  return REWARD_OUTLIER_TIERS.map((tier) => ({
+    tier,
+    cutoff: med + tier.kMad * mad,
+  }));
 }
 
 export function renderRewardCell(
@@ -98,11 +138,11 @@ export function renderRewardCell(
   const value = Number(rewardUsd);
   const formatted = formatUSD(value);
   if (!thresholds || !Number.isFinite(value)) return formatted;
-  // Strict >: ties at the cutoff are NOT highlighted. With heavy clustering
-  // (e.g. a long stretch of identical-reward rebalances) this is the
-  // fail-safe: if the cutoff isn't strictly above lower values, no row gets
-  // the tier rather than every tied row getting it.
-  const match = thresholds.find((t) => value > t.min);
+  // Compare at display precision so visually-identical cells always share
+  // a tier (e.g. raw 9.8493 and 9.8511 both render "$9.85" → both quantise
+  // to 9.85 here, regardless of where cutoff lands between them).
+  const rounded = toDisplayPrecision(value);
+  const match = thresholds.find((t) => rounded > t.cutoff);
   if (!match) return formatted;
   return (
     <span className={match.tier.className} title={match.tier.title}>

@@ -50,8 +50,9 @@ describe("addToMiniPaySet", () => {
     expect(saddMock).not.toHaveBeenCalled();
   });
 
-  it("chunks SADD calls in batches of 1000", async () => {
+  it("chunks SADD calls in batches of 1000 within a single shard", async () => {
     saddMock.mockResolvedValue(500); // each batch reports half-new
+    // All addresses have first nibble `0`, so they bucket into shard `0`.
     const addrs = Array.from(
       { length: 2_500 },
       (_, i) => `0x${i.toString(16).padStart(40, "0")}`,
@@ -60,22 +61,45 @@ describe("addToMiniPaySet", () => {
 
     expect(saddMock).toHaveBeenCalledTimes(3);
     expect(added).toBe(1500);
-    // First call should have exactly 1000 args after the key
     const firstArgs = saddMock.mock.calls[0]!;
-    expect(firstArgs[0]).toBe("minipay:users");
+    expect(firstArgs[0]).toBe("minipay:users:0");
     expect(firstArgs.length).toBe(1 + 1000);
-    // Last call should have the remainder (500)
     const lastArgs = saddMock.mock.calls[2]!;
+    expect(lastArgs[0]).toBe("minipay:users:0");
     expect(lastArgs.length).toBe(1 + 500);
+  });
+
+  it("buckets addresses across multiple shards", async () => {
+    saddMock.mockResolvedValue(1);
+    // Three addresses with distinct first nibbles → three SADD calls,
+    // one per shard.
+    const addrs = [
+      "0x" + "1".repeat(40),
+      "0x" + "a".repeat(40),
+      "0x" + "f".repeat(40),
+    ];
+    await addToMiniPaySet(addrs);
+
+    expect(saddMock).toHaveBeenCalledTimes(3);
+    const keys = saddMock.mock.calls.map((c) => c[0]).sort();
+    expect(keys).toEqual([
+      "minipay:users:1",
+      "minipay:users:a",
+      "minipay:users:f",
+    ]);
   });
 });
 
 describe("getMiniPaySetSize", () => {
-  it("returns SCARD result", async () => {
-    scardMock.mockResolvedValue(4_823_119);
+  it("sums SCARD across all 16 shards", async () => {
+    scardMock.mockResolvedValue(100);
     const size = await getMiniPaySetSize();
-    expect(size).toBe(4_823_119);
-    expect(scardMock).toHaveBeenCalledWith("minipay:users");
+    expect(scardMock).toHaveBeenCalledTimes(16);
+    expect(size).toBe(16 * 100);
+    // Spot-check that we hit the right shard keys
+    const keys = new Set(scardMock.mock.calls.map((c) => c[0]));
+    expect(keys.has("minipay:users:0")).toBe(true);
+    expect(keys.has("minipay:users:f")).toBe(true);
   });
 });
 
@@ -86,20 +110,25 @@ describe("intersectMiniPay", () => {
     expect(smismemberMock).not.toHaveBeenCalled();
   });
 
-  it("returns only the addresses with flag=1", async () => {
-    const addrs = ["0xa", "0xb", "0xc", "0xd"];
+  it("returns only the addresses with flag=1 within a shard", async () => {
+    // Same first nibble (`0`) → single shard, single SMISMEMBER call.
+    const addrs = [
+      "0x" + "0".repeat(40),
+      "0x0" + "1".repeat(39),
+      "0x0" + "2".repeat(39),
+      "0x0" + "3".repeat(39),
+    ];
     smismemberMock.mockResolvedValueOnce([1, 0, 1, 0]);
     const result = await intersectMiniPay(addrs);
-    expect(result).toEqual(["0xa", "0xc"]);
+    expect(smismemberMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([addrs[0], addrs[2]]);
   });
 
-  it("chunks SMISMEMBER calls and stitches positives across batches", async () => {
+  it("chunks SMISMEMBER calls within a shard and stitches positives", async () => {
     const addrs = Array.from(
       { length: 1_500 },
       (_, i) => `0x${i.toString(16).padStart(40, "0")}`,
     );
-    // First batch (1000): only index 0 is a member.
-    // Second batch (500): only index 0 is a member.
     smismemberMock.mockResolvedValueOnce([1, ...new Array(999).fill(0)]);
     smismemberMock.mockResolvedValueOnce([1, ...new Array(499).fill(0)]);
 
@@ -135,10 +164,13 @@ describe("cursor helpers", () => {
 });
 
 describe("toMiniPayEntry", () => {
-  it("emits canonical AddressEntry shape with source=minipay", () => {
+  it("emits canonical AddressEntry shape: empty name + Title Case tag + minipay source", () => {
     const entry = toMiniPayEntry();
-    expect(entry.name).toBe("MiniPay user");
-    expect(entry.tags).toEqual(["minipay"]);
+    // Empty name — the address itself is the row's identity.
+    expect(entry.name).toBe("");
+    // Human-readable Title Case so it reads as a label, not as the
+    // (lowercase) source-marker token.
+    expect(entry.tags).toEqual(["MiniPay User"]);
     expect(entry.source).toBe("minipay");
     expect(entry.isPublic).toBe(false);
     expect(entry.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);

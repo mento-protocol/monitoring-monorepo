@@ -644,6 +644,20 @@ describe("POST /api/address-labels/import", () => {
       expect(json.error).toMatch(/chainId/i);
     });
 
+    it("rejects CSV rows with chainIds not in NETWORKS", async () => {
+      // Same NETWORKS guard as the JSON import paths — see
+      // ALL_LABEL_SCOPE_KEYS in address-labels.ts. chainId 1 (Ethereum
+      // mainnet) isn't in NETWORKS, so the static cross-scope HDEL list
+      // wouldn't cover a `labels:1` write.
+      const csv = `address,name,chainId\n${validAddress},Mainnet Safe,1`;
+      const res = await csvReq(csv);
+      const body = await POST(res);
+      expect(body.status).toBe(400);
+      const json = (await body.json()) as { error: string };
+      expect(json.error).toMatch(/unsupported chainId/i);
+      expect(importLabels).not.toHaveBeenCalled();
+    });
+
     it("rejects CSV when same address appears in two different scopes", async () => {
       // Strict either/or: without this check, the later importLabels call
       // HDELs the address from the earlier scope and the first row is
@@ -952,14 +966,14 @@ describe("POST /api/address-labels/import", () => {
       const addr2 = "0x" + "b".repeat(40);
       const gnosisSafe = [
         { address: validAddress, chainId: "42220", name: "Celo Safe" },
-        { address: addr2, chainId: "1", name: "Mainnet Safe" },
+        { address: addr2, chainId: "143", name: "Monad Safe" },
       ];
       const res = await POST(jsonReq(gnosisSafe));
       expect(res.status).toBe(200);
       expect(importLabels).toHaveBeenCalledTimes(2);
       const counts = await getImported(res);
       expect(totalImported(counts)).toBe(2);
-      expect(counts.chains).toEqual({ "42220": 1, "1": 1 });
+      expect(counts.chains).toEqual({ "42220": 1, "143": 1 });
     });
 
     it("rejects Gnosis Safe when same address appears on multiple chains", async () => {
@@ -969,12 +983,27 @@ describe("POST /api/address-labels/import", () => {
       // but the last chain's entry.
       const gnosisSafe = [
         { address: validAddress, chainId: "42220", name: "Celo Safe" },
+        { address: validAddress, chainId: "143", name: "Monad Safe" },
+      ];
+      const res = await POST(jsonReq(gnosisSafe));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toMatch(/appears in both chain 42220 and chain 143/i);
+      expect(importLabels).not.toHaveBeenCalled();
+    });
+
+    it("rejects Gnosis Safe entries with chainIds not in NETWORKS", async () => {
+      // chainId 1 (Ethereum mainnet) isn't in our NETWORKS, so the static
+      // ALL_LABEL_SCOPE_KEYS list wouldn't cover it for cross-scope HDEL.
+      // Reject at the boundary; users who genuinely need a new chain
+      // should add it to NETWORKS first.
+      const gnosisSafe = [
         { address: validAddress, chainId: "1", name: "Mainnet Safe" },
       ];
       const res = await POST(jsonReq(gnosisSafe));
       expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.error).toMatch(/appears in both chain 42220 and chain 1/i);
+      expect(body.error).toMatch(/unsupported chainId/i);
       expect(importLabels).not.toHaveBeenCalled();
     });
 

@@ -14,8 +14,8 @@ vi.mock("@/lib/minipay", () => ({
   intersectMiniPay: vi.fn(),
   getMiniPaySetSize: vi.fn(),
   toMiniPayEntry: vi.fn(() => ({
-    name: "MiniPay user",
-    tags: ["minipay"],
+    name: "",
+    tags: ["MiniPay User"],
     source: "minipay",
     isPublic: false,
     updatedAt: "2026-04-30T00:00:00.000Z",

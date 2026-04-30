@@ -1,57 +1,89 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { computeRewardThresholds, renderRewardCell } from "../page";
+import {
+  computeRewardThresholds,
+  renderRewardCell,
+  toDisplayPrecision,
+} from "../page";
+import { formatUSD } from "@/lib/format";
 
 function markup(node: React.ReactNode): string {
   return renderToStaticMarkup(<>{node}</>);
 }
 
 describe("computeRewardThresholds", () => {
-  it("returns null below the minimum sample size", () => {
-    const rewards = Array.from({ length: 19 }, (_, i) => String(i + 1));
-    expect(computeRewardThresholds(rewards)).toBeNull();
+  it("returns null below the minimum sample size (N<5)", () => {
+    expect(computeRewardThresholds(["1", "2", "3", "4"])).toBeNull();
+  });
+
+  it("computes cutoff at exactly N=5 (odd-N median path)", () => {
+    // [1,2,3,4,5] → median=3 (odd-N picks middle), deviations [2,1,0,1,2]
+    // sorted [0,1,1,2,2] → MAD=1. Mild=6, strong=8.
+    const thresholds = computeRewardThresholds(["1", "2", "3", "4", "5"])!;
+    expect(thresholds).not.toBeNull();
+    expect(thresholds[0].cutoff).toBeCloseTo(8, 6);
+    expect(thresholds[1].cutoff).toBeCloseTo(6, 6);
+  });
+
+  it("returns null when MAD is zero (every sample identical)", () => {
+    const tied = Array.from({ length: 30 }, () => "7.63");
+    expect(computeRewardThresholds(tied)).toBeNull();
   });
 
   it("ignores null/empty/zero/non-numeric and uses positives only", () => {
-    const rewards = [
-      ...Array.from({ length: 30 }, (_, i) => String(i + 1)),
+    // [1,2,3,4,10] → median=3, |v-3|=[2,1,0,1,7] sorted [0,1,1,2,7] →
+    // MAD=1. Mild=6, strong=8. Hardcoded oracle (not derived from impl).
+    const thresholds = computeRewardThresholds([
+      "1",
+      "2",
+      "3",
+      "4",
+      "10",
       null,
       undefined,
       "",
       "0",
+      "-5",
       "abc",
-    ];
-    const thresholds = computeRewardThresholds(rewards);
-    expect(thresholds).not.toBeNull();
-    // 30 values 1..30 sorted; 1-based nearest-rank:
-    // p95 = values[ceil(30*0.95)-1] = values[28] = 29
-    // p90 = values[ceil(30*0.9)-1]  = values[26] = 27
-    const [p95, p90] = thresholds!;
-    expect(p95.tier.quantile).toBe(0.95);
-    expect(p95.min).toBe(29);
-    expect(p90.tier.quantile).toBe(0.9);
-    expect(p90.min).toBe(27);
+    ])!;
+    expect(thresholds[0].cutoff).toBeCloseTo(8, 6);
+    expect(thresholds[1].cutoff).toBeCloseTo(6, 6);
   });
 
-  it("p95 tier fires at exactly the minimum sample size (regression)", () => {
-    // floor(20*0.95) = 19 made p95 the max value, so strict '>' could
-    // never fire. ceil(20*0.95)-1 = 18 keeps the cutoff one rank below
-    // the max so a top-row outlier still triggers the tier.
-    const rewards = Array.from({ length: 20 }, (_, i) => String(i + 1));
-    const thresholds = computeRewardThresholds(rewards)!;
-    const [p95] = thresholds;
-    expect(p95.min).toBe(19);
-    const out = markup(renderRewardCell("20", thresholds));
-    expect(out).toContain("text-amber-300");
-    expect(out).toContain("Top 5%");
+  it("computes cutoff = median + k·MAD for even-N inputs", () => {
+    // 1..30 (even N) → median=(15+16)/2=15.5, |v-15.5| sorted=[0.5×2,
+    // 1.5×2, ..., 14.5×2] → MAD=(7.5+7.5)/2=7.5. Mild=38, strong=53.
+    const thresholds = computeRewardThresholds(
+      Array.from({ length: 30 }, (_, i) => String(i + 1)),
+    )!;
+    const [strong, mild] = thresholds;
+    expect(strong.tier.kMad).toBe(5);
+    expect(strong.cutoff).toBeCloseTo(53, 6);
+    expect(mild.tier.kMad).toBe(3);
+    expect(mild.cutoff).toBeCloseTo(38, 6);
   });
 
-  it("returns thresholds in highest-tier-first order", () => {
-    const rewards = Array.from({ length: 100 }, (_, i) => String(i + 1));
-    const thresholds = computeRewardThresholds(rewards)!;
-    expect(thresholds[0].tier.quantile).toBeGreaterThan(
-      thresholds[1].tier.quantile,
+  it("returns thresholds in strongest-tier-first order", () => {
+    const thresholds = computeRewardThresholds(
+      Array.from({ length: 100 }, (_, i) => String(i + 1)),
+    )!;
+    expect(thresholds[0].tier.kMad).toBeGreaterThan(thresholds[1].tier.kMad);
+    expect(thresholds[0].cutoff).toBeGreaterThan(thresholds[1].cutoff);
+  });
+
+  it("highlights tail outliers on sub-cent pools (regression: codex P2)", () => {
+    // formatUSD reports "$0.00" for any value < $0.005, so an earlier
+    // version of this code rounded sub-cent values to 0 *before* MAD,
+    // forcing MAD=0 on pools where most rewards are sub-cent. The $50
+    // outlier in this fixture would then be silently suppressed. MAD must
+    // run on raw values; only the comparison rounds.
+    const subCent = Array.from({ length: 30 }, (_, i) =>
+      String(0.001 + i * 0.0001),
     );
+    const thresholds = computeRewardThresholds([...subCent, "50"]);
+    expect(thresholds).not.toBeNull();
+    const out = markup(renderRewardCell("50", thresholds));
+    expect(out).toContain("text-amber-300");
   });
 });
 
@@ -72,35 +104,80 @@ describe("renderRewardCell", () => {
     expect(out).toContain("$12.34");
   });
 
-  it("highlights p95 outliers with the bright amber tier", () => {
-    // p95 = 95 for [1..100]; strictly > 95 fires the tier
-    const out = markup(renderRewardCell("99", thresholds));
+  it("highlights strong outliers with the bright amber tier", () => {
+    // 1..100 → median=50.5, MAD=25 → strong cutoff = 50.5 + 5·25 = 175.5
+    const out = markup(renderRewardCell("200", thresholds));
     expect(out).toContain("text-amber-300");
     expect(out).toContain("font-semibold");
-    expect(out).toContain("Top 5%");
+    expect(out).toContain("Strong reward outlier");
   });
 
-  it("highlights p90 outliers with the muted amber tier", () => {
-    // p90 = 90; value 92 is above p90 but at-or-below p95 (95) so falls into p90
-    const out = markup(renderRewardCell("92", thresholds));
+  it("highlights mild outliers with the muted amber tier", () => {
+    // mild cutoff = 50.5 + 3·25 = 125.5; strong = 175.5; 150 is between
+    const out = markup(renderRewardCell("150", thresholds));
     expect(out).toContain("text-amber-400");
-    expect(out).toContain("Top 10%");
+    expect(out).not.toContain("font-semibold");
+    expect(out).toContain("Reward outlier");
   });
 
   it("does not highlight values below all tiers", () => {
-    const out = markup(renderRewardCell("50", thresholds));
+    const out = markup(renderRewardCell("80", thresholds));
     expect(out).not.toContain("text-amber");
   });
 
-  it("does NOT highlight values that exactly tie the cutoff (regression)", () => {
-    // With many tied values at the p95 cutoff, '>=' would mislabel them all
-    // as outliers. Strict '>' suppresses ties and keeps the tier meaningful.
-    const tiedRewards = Array.from({ length: 30 }, () => "7.63");
-    const tiedThresholds = computeRewardThresholds(tiedRewards);
-    // All 30 positive samples are identical, so no value is strictly greater
-    // than the cutoff and nothing should be highlighted.
-    const out = markup(renderRewardCell("7.63", tiedThresholds));
-    expect(out).not.toContain("text-amber");
-    expect(out).toContain("$7.63");
+  it("highlights every member of a tail cluster (regression: pool 143-0xd0e9…ce081)", () => {
+    // Real bug from the percentile-based predecessor: on a bimodal pool
+    // with ~30 small rewards and a tight cluster at $9.85, the percentile
+    // cutoff fell inside the cluster and strict `>` suppressed every
+    // member. MAD's cutoff sits well above the bulk so the cluster fires
+    // cleanly as one tier.
+    const baseline = Array.from({ length: 30 }, (_, i) =>
+      String(0.01 + i * 0.01),
+    );
+    const cluster = ["9.8493", "9.8496", "9.8511", "9.8518"];
+    const ts = computeRewardThresholds([...baseline, ...cluster])!;
+    const tiers = cluster.map((v) => {
+      const out = markup(renderRewardCell(v, ts));
+      if (out.includes("text-amber-300")) return "strong";
+      if (out.includes("text-amber-400")) return "mild";
+      return "plain";
+    });
+    expect(new Set(tiers).size).toBe(1);
+    expect(tiers[0]).not.toBe("plain");
+  });
+
+  it("paints visually identical cells with the same tier (regression)", () => {
+    // Cells that render to the same string must always share a tier —
+    // sub-cent raw differences cannot split them. toDisplayPrecision rounds
+    // before the comparison so this invariant holds even if the cutoff
+    // happens to land between two display-equal raw values.
+    const baseline = Array.from({ length: 30 }, (_, i) =>
+      String(0.01 + i * 0.01),
+    );
+    const cluster = ["9.8493", "9.8496", "9.8511", "9.8518"];
+    const ts = computeRewardThresholds([...baseline, ...cluster])!;
+    cluster.forEach((v) => {
+      expect(markup(renderRewardCell(v, ts))).toContain("$9.85");
+    });
+  });
+
+  it("rounds in lockstep with formatUSD across $X50 boundaries (regression)", () => {
+    // formatUSD's `.toFixed(1)` rounds half-to-even-ish per IEEE-754, while
+    // a naive `Math.round(value / 100) * 100` rounds half-away-from-zero.
+    // toDisplayPrecision parses formatUSD's own output to keep the two in
+    // sync, so two values rendering as the same string always round to the
+    // same threshold value.
+    const pairs: [number, number][] = [
+      [9.8493, 9.8518],
+      [1051, 1149],
+      [1451, 1549],
+      [1551, 1649],
+      [1951, 2049],
+      [1_234_400, 1_234_499],
+    ];
+    for (const [a, b] of pairs) {
+      expect(formatUSD(a)).toBe(formatUSD(b));
+      expect(toDisplayPrecision(a)).toBe(toDisplayPrecision(b));
+    }
   });
 });

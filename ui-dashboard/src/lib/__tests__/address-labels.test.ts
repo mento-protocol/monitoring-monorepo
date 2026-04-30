@@ -81,8 +81,9 @@ describe("getLabels", () => {
   });
 });
 
-// Helpers for the atomic Lua-script path. The script takes the target key
-// via KEYS[1] and a flat [count, addr1, value1, addr2, value2, …] ARGV tuple.
+// Helpers for the atomic Lua-script path. The script takes the target
+// scope as KEYS[1], the static list of every other scope key as KEYS[2..],
+// and a flat [count, addr1, value1, addr2, value2, …] ARGV tuple.
 function evalCall(call: unknown[]): {
   script: string;
   keys: string[];
@@ -113,7 +114,11 @@ describe("upsertEntry — persists isPublic and enforces strict either/or", () =
     });
     expect(evalMock).toHaveBeenCalledTimes(1);
     const { keys, args } = evalCall(evalMock.mock.calls[0]);
-    expect(keys).toEqual(["labels:42220"]);
+    expect(keys[0]).toBe("labels:42220");
+    // Script no longer runs `KEYS 'labels:*'` itself; it iterates the
+    // explicit KEYS[2..] list passed by the caller.
+    expect(keys.slice(1).length).toBeGreaterThan(0);
+    expect(keys.slice(1)).toContain("labels:global");
     const [{ addr, value }] = evalEntries(args);
     expect(addr).toBe("0xabc");
     expect((value as { isPublic: boolean }).isPublic).toBe(true);
@@ -122,27 +127,33 @@ describe("upsertEntry — persists isPublic and enforces strict either/or", () =
   it("writes to labels:global when scope is 'global'", async () => {
     await upsertEntry("global", "0xABC", { name: "Test", tags: [] });
     const { keys } = evalCall(evalMock.mock.calls[0]);
-    expect(keys).toEqual(["labels:global"]);
+    expect(keys[0]).toBe("labels:global");
+    // Other scopes pass through as KEYS[2..]; chain-scope keys must be
+    // included so the script can HDEL them.
+    expect(keys.slice(1)).toContain("labels:42220");
   });
 
-  it("passes the Lua script that HDELs the address from every other scope", async () => {
+  it("passes the static scope-key list via KEYS[2..] (race-safe + bounded)", async () => {
     await upsertEntry(42220, "0xABC", { name: "Celo", tags: [] });
-    const { script, keys, args } = evalCall(evalMock.mock.calls[0]);
-    // The script itself performs the cross-scope HDEL atomically on the
-    // Redis server — we can't observe intermediate pipeline calls, but we
-    // can assert the script's cross-scope cleanup is part of the payload.
-    expect(script).toContain("'labels:*'");
+    const { script, keys } = evalCall(evalMock.mock.calls[0]);
+    // The script no longer runs the `KEYS 'labels:*'` keyspace scan — it
+    // iterates the explicit KEYS[2..] array. Static derivation keeps the
+    // race window closed (every concurrent writer derives the same list
+    // deterministically from NETWORKS) AND keeps the script bounded.
+    expect(script).not.toContain("'labels:*'");
+    expect(script).not.toContain("redis.call('KEYS'");
+    expect(script).toContain("for i = 2, #KEYS");
     expect(script).toContain("HDEL");
     expect(script).toContain("HSET");
-    expect(keys).toEqual(["labels:42220"]);
-    const [{ addr }] = evalEntries(args);
-    expect(addr).toBe("0xabc");
+    // KEYS[1] target, KEYS[2..] every other potential scope.
+    expect(keys[0]).toBe("labels:42220");
+    expect(keys.slice(1)).toContain("labels:global");
   });
 
   it("upsert at global writes via the same atomic script path", async () => {
     await upsertEntry("global", "0xABC", { name: "Cross-chain", tags: [] });
     const { keys, args } = evalCall(evalMock.mock.calls[0]);
-    expect(keys).toEqual(["labels:global"]);
+    expect(keys[0]).toBe("labels:global");
     const [{ addr, value }] = evalEntries(args);
     expect(addr).toBe("0xabc");
     expect((value as { name: string }).name).toBe("Cross-chain");
@@ -195,10 +206,27 @@ describe("importLabels — isPublic coercion and invariant", () => {
 
     expect(evalMock).toHaveBeenCalledTimes(1);
     const { keys, args } = evalCall(evalMock.mock.calls[0]);
-    expect(keys).toEqual(["labels:global"]);
+    expect(keys[0]).toBe("labels:global");
+    // Script iterates the static scope list passed via KEYS[2..]; chain
+    // scopes must be present so the script can HDEL across all of them.
+    expect(keys.slice(1)).toContain("labels:42220");
     expect(Number(args[0])).toBe(2);
     const addrs = evalEntries(args).map((e) => e.addr);
     expect(addrs).toEqual(["0xaaa", "0xbbb"]);
+  });
+
+  it("passes the same static scope-key list as upsertEntry (race-safe)", async () => {
+    await importLabels(42220, {
+      "0xaaa": {
+        name: "Test",
+        tags: [],
+        updatedAt: "2026-04-30T00:00:00Z",
+      },
+    });
+    const { script, keys } = evalCall(evalMock.mock.calls[0]);
+    expect(script).not.toContain("'labels:*'");
+    expect(keys[0]).toBe("labels:42220");
+    expect(keys.slice(1)).toContain("labels:global");
   });
 
   it("is a no-op when the batch is empty (no EVAL call)", async () => {

@@ -31,6 +31,6 @@ export const SEARCH_PARAM_BY_TAB: Record<Tab, string> = {
 
 export const MAX_TAB_LIMIT = 200;
 
-// Below this many positive reward samples, p90/p95 are statistical noise —
-// skip outlier highlighting on the rebalances table.
-export const MIN_REWARD_SAMPLE_SIZE = 20;
+// Below this many positive reward samples, MAD is too noisy — skip
+// outlier highlighting on the rebalances table.
+export const MIN_REWARD_SAMPLE_SIZE = 5;

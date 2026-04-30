@@ -1,4 +1,5 @@
 import { Redis } from "@upstash/redis";
+import { NETWORKS } from "@/lib/networks";
 
 // Re-export all isomorphic types and utilities from the shared module.
 // This keeps backward-compat for existing imports from "@/lib/address-labels"
@@ -31,6 +32,28 @@ const GLOBAL_KEY = "labels:global";
 function labelsKey(scope: Scope): string {
   return scope === "global" ? GLOBAL_KEY : `labels:${scope}`;
 }
+
+// Static list of every scope key we may ever write to. Derived from the
+// NETWORKS config (each chain → `labels:{chainId}`) plus the cross-chain
+// global scope. Used by the strict-either-or Lua script as KEYS[2..] so
+// the script can iterate a tiny, deterministic key list instead of running
+// `redis.call('KEYS', 'labels:*')` over the full Redis keyspace — that
+// scan is O(total-keys-in-db), and after PR #258's `minipay:users:*`
+// sharding the keyspace contains 16M+ entries, pushing the in-script scan
+// past Upstash's 250 ms per-script Lua timeout.
+//
+// Static derivation (vs. a client-side SCAN snapshot before the EVAL)
+// keeps the cross-scope HDEL race-free: every concurrent writer derives
+// the same key list deterministically, the script remains atomic, and
+// Redis serializes Lua executions, so last-writer-wins preserves the
+// strict either/or invariant even under concurrent writes of the same
+// address to different scopes.
+const ALL_LABEL_SCOPE_KEYS: readonly string[] = Object.freeze([
+  GLOBAL_KEY,
+  ...Array.from(
+    new Set(Object.values(NETWORKS).map((n) => `labels:${n.chainId}`)),
+  ),
+]);
 
 function parseScopeFromKey(key: string): Scope | null {
   if (key === GLOBAL_KEY) return "global";
@@ -73,15 +96,31 @@ async function listAllScopeKeys(redis: Redis): Promise<string[]> {
 
 // Lua script that atomically writes a batch of (address, value) pairs to a
 // target scope and HDELs the same addresses from every other `labels:*`
-// scope. The enumeration of "other" scopes happens inside the script's
-// atomic window, closing the race window that a separate SCAN → MULTI
-// opens: two concurrent writers creating first-time entries for the same
-// address on different chain scopes cannot both miss each other's new key.
+// scope.
 //
 // Contract:
 //   KEYS[1]    = target scope key (`labels:global` or `labels:{chainId}`)
+//   KEYS[2..]  = every OTHER potentially-existent scope key (caller passes
+//                the full `ALL_LABEL_SCOPE_KEYS` list verbatim — the script
+//                filters out KEYS[1] itself, so `HDEL` on the target is a
+//                no-op the script doesn't perform)
 //   ARGV[1]    = decimal count N of (address, value) pairs
 //   ARGV[2..]  = address, JSON-value, address, JSON-value, … (2N strings)
+//
+// We pass the scope key list via KEYS instead of running
+// `redis.call('KEYS', 'labels:*')` inside the script. The `KEYS` command
+// is O(total-keys-in-db); after PR #258's `minipay:users:*` sharding the
+// keyspace contains 16M+ entries, pushing the in-script scan past
+// Upstash's 250 ms per-script Lua timeout. Static derivation from
+// `NETWORKS` keeps the iteration bounded to the (small) set of chain
+// scopes we actually support.
+//
+// Race-safety: deriving from a static config (every concurrent writer
+// computes the same list deterministically) is what closes the race
+// window that a client-side SCAN snapshot would open. The script itself
+// remains atomic and Redis serializes Lua executions, so two concurrent
+// writes of the same address to different scopes resolve as
+// last-writer-wins with the strict either/or invariant intact.
 //
 // Returns the number of pairs written (for assertions/logging).
 const STRICT_EITHER_OR_SCRIPT = `
@@ -100,10 +139,8 @@ for i = 0, count - 1 do
 end
 redis.call('HSET', unpack(hsetArgs))
 
--- KEYS 'labels:*' is O(total-keys-in-db); labels keyspace is tiny (one per
--- scope) so this is acceptable and avoids Lua-side SCAN pagination.
-local otherKeys = redis.call('KEYS', 'labels:*')
-for _, k in ipairs(otherKeys) do
+for i = 2, #KEYS do
+  local k = KEYS[i]
   if k ~= targetKey then
     redis.call('HDEL', k, unpack(addrs))
   end
@@ -153,7 +190,7 @@ export async function upsertEntry(
 
   await redis.eval(
     STRICT_EITHER_OR_SCRIPT,
-    [targetKey],
+    [targetKey, ...ALL_LABEL_SCOPE_KEYS],
     ["1", lower, JSON.stringify(value)],
   );
 }
@@ -207,7 +244,7 @@ export async function getAllLabels(): Promise<{
  *
  * Uses the same atomic Lua script as `upsertEntry` so a batch write +
  * cross-scope HDEL completes with strict either/or guarantees even under
- * concurrent writers.
+ * concurrent writers (Redis serializes Lua executions).
  */
 export async function importLabels(
   scope: Scope,
@@ -230,5 +267,9 @@ export async function importLabels(
     args.push(addr.toLowerCase(), JSON.stringify(normalized));
   }
 
-  await redis.eval(STRICT_EITHER_OR_SCRIPT, [targetKey], args);
+  await redis.eval(
+    STRICT_EITHER_OR_SCRIPT,
+    [targetKey, ...ALL_LABEL_SCOPE_KEYS],
+    args,
+  );
 }

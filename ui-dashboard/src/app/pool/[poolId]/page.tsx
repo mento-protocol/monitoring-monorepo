@@ -52,6 +52,7 @@ import {
   computeRewardThresholds,
   RebalancesTab,
   renderRewardCell,
+  toDisplayPrecision,
 } from "./_tabs/rebalances-tab";
 import { ReservesTab } from "./_tabs/reserves-tab";
 import { SwapsTab } from "./_tabs/swaps-tab";
@@ -68,6 +69,7 @@ export {
   parseTabLimit,
   renderRewardCell,
   selectActiveOlsPool,
+  toDisplayPrecision,
 };
 
 export default function PoolDetailPage() {

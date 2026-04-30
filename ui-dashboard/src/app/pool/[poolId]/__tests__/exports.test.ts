@@ -18,6 +18,9 @@ describe("pool/[poolId]/page public exports (refactor stability pin)", () => {
     ["selectActiveOlsPool", "function"],
     ["OlsStatusPanel", "function"],
     ["OlsLiquidityTable", "function"],
+    ["computeRewardThresholds", "function"],
+    ["renderRewardCell", "function"],
+    ["toDisplayPrecision", "function"],
   ] as const)("re-exports %s as a %s", (name, kind) => {
     const value = (PageModule as Record<string, unknown>)[name];
     expect(
