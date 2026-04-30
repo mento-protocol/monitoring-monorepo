@@ -2,7 +2,7 @@
 name: deploy-indexer
 description: End-to-end Envio indexer deploy orchestrator. Pushes the current branch HEAD (typically `main`, but any branch is supported for pre-merge deploys) to the `envio` branch, babysits the build + sync via `babysit-indexer-deploy`, optionally promotes to prod, waits for DNS switchover, and runs `verify-ui` against monitoring.mento.org. Use `--no-promote` to pre-load a feature branch's indexer changes ahead of merging. Triggers on "deploy indexer", "ship indexer", "push to envio", "pre-deploy indexer", or `/deploy-indexer`. Do NOT use for code-only PR ships — use `/ship` for that.
 allowed-tools: Bash, Read, Skill
-argument-hint: [<commit-sha>]
+argument-hint: [--no-promote] [--no-verify]
 ---
 
 # Deploy Indexer (end-to-end)
@@ -10,7 +10,10 @@ argument-hint: [<commit-sha>]
 Push a commit to the `envio` branch, watch the build + re-index, promote to
 prod, wait for the static URL to flip, then verify the dashboard.
 
-Target commit: `$ARGUMENTS` (default: current `main` HEAD in the main checkout)
+Target commit: `HEAD` of the current working directory. `$ARGUMENTS` may contain
+the boolean flags `--no-promote` and/or `--no-verify` (see below); it does NOT
+take a commit SHA — the underlying `pnpm deploy:indexer` script always pushes
+`HEAD`, so to deploy a different commit, check it out first.
 
 ## Why pre-merge deploys exist
 
@@ -33,19 +36,20 @@ to stop after sync; promote separately once the PR merges.
 
 ## Phase 0 — Preflight
 
-Run from the **main checkout** (`/Users/chapati/code/mento/monitoring-monorepo`)
-or whatever local checkout is on the branch you want to deploy. The
-`pnpm deploy:indexer` script reads `HEAD` of the current working directory and
-pushes that commit to `envio`. If you're in a worktree on the feature branch,
-deploy from there directly — no need to switch to the main checkout.
+Run from the **main checkout** or whatever local checkout is on the branch
+you want to deploy. The `pnpm deploy:indexer` script reads `HEAD` of the
+current working directory and pushes that commit to `envio`. If you're in a
+worktree on the feature branch, deploy from there directly — no need to
+switch to the main checkout.
 
 In parallel:
 
 - `git fetch origin` and `git rev-parse --abbrev-ref HEAD` — capture as `BRANCH`. Any branch is allowed; `main` is the common case but feature branches are fine for pre-merge deploys.
 - `git status --porcelain` — must be empty. A dirty tree means uncommitted work; deploying it would ship a commit that doesn't exist on origin. Surface and stop.
 - `git log @{upstream}..HEAD --oneline` (if branch tracks an upstream) — must be empty (i.e. all local commits are pushed). Refuse if local is ahead of remote — those commits would silently ship via `envio` without ever landing on `main`/the feature branch.
-- `git rev-parse --short HEAD` — capture as `TARGET_COMMIT` if `$ARGUMENTS` is empty; else use `$ARGUMENTS` verbatim and verify it's reachable from `HEAD`.
-- If `BRANCH != main`: surface the branch name + commit short sha clearly, and confirm the user wants a pre-merge deploy. Skip the prompt only if `$ARGUMENTS` already contains `--no-promote` or the user's request explicitly mentions pre-merge / feature branch / pre-loading.
+- Parse `$ARGUMENTS` for the boolean flags `--no-promote` and `--no-verify`; capture as `NO_PROMOTE` and `NO_VERIFY`. Any non-flag token (e.g. a stray SHA) is an error — surface and stop, since the underlying script doesn't accept one.
+- `git rev-parse --short HEAD` — capture as `TARGET_COMMIT`. The deploy always uses `HEAD`; to deploy a different commit, the user must check it out first.
+- If `BRANCH != main`: surface the branch name + commit short sha clearly, and confirm the user wants a pre-merge deploy. Skip the prompt only if `NO_PROMOTE` is set or the user's request explicitly mentions pre-merge / feature branch / pre-loading.
 
 If preflight fails, surface the specific cause and stop. Do not push.
 
@@ -53,15 +57,17 @@ If preflight fails, surface the specific cause and stop. Do not push.
 
 The `$ARGUMENTS` string MAY contain (in any order, space-separated):
 
-- `<commit-sha>` — explicit short SHA to deploy. Default: `HEAD`.
 - `--no-promote` — push + sync, but skip Phase 3 (promote) and everything after. Use for pre-merge deploys where the new schema isn't live in the codebase yet. Promote separately with `npx envio-cloud deployment promote mento <commit> mento-protocol -y` once the PR merges.
 - `--no-verify` — skip Phase 5. Use when you want the deploy + DNS wait to complete unattended.
+
+The deployed commit is always the current `HEAD` — there's no SHA argument. To
+deploy a specific older commit, `git checkout <sha>` first, then run the skill.
 
 Examples:
 
 - `/deploy-indexer` — deploy current `HEAD` (most often `main`), full pipeline through verify.
 - `/deploy-indexer --no-promote` — deploy current branch, sync, stop. The default for most pre-merge feature-branch deploys.
-- `/deploy-indexer abc1234` — deploy a specific commit, full pipeline.
+- `/deploy-indexer --no-promote --no-verify` — pre-merge deploy that runs unattended (e.g. you're stepping away during the build).
 
 ## Phase 1 — Push to `envio`
 
@@ -138,12 +144,20 @@ The static GraphQL endpoint (e.g. `https://indexer.hyperindex.xyz/60ff18c/v1/gra
 takes ~30 s – a few minutes to flip to the newly promoted deployment. During
 that window the dashboard may transiently query the old schema.
 
-Wait **5 minutes wall-clock**, then proceed. Use `Bash` with `run_in_background:
-true` to fire a single non-polling sleep:
+Wait **5 minutes wall-clock**, then proceed. Start a one-shot sleep with
+`run_in_background: true` and **wait for the system completion notification
+before continuing to Phase 5**:
 
 ```bash
 sleep 300 && echo "dns-window-elapsed"
 ```
+
+The Bash tool returns immediately with a shell ID; the harness fires a
+notification when the sleep exits. Until that notification arrives, do NOT
+start `verify-ui`, do NOT check on the shell, and do NOT poll the static URL
+— just wait. A backgrounded sleep that you don't wait on silently skips the
+DNS-flip window and produces flaky verify results, which is exactly the
+failure mode the wait exists to prevent.
 
 Don't poll the static URL with introspection — Envio's edge cache flips
 opaquely; absence of an introspectable schema change just means our PR didn't
