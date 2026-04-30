@@ -188,46 +188,52 @@ async function fetchResultsPage(
   return (await res.json()) as DuneResultsResponse;
 }
 
-type FetchResult = {
+export type FetchPage = {
   addresses: string[];
-  /** Highest `max_block` seen across the result set. `0n` if no rows. */
+  /** Highest `max_block` seen on this page (not cumulative). */
   maxBlock: bigint;
-  /** Total rows returned (post-validation, post-dedup within one fetch). */
-  count: number;
 };
 
 /**
- * Run the MiniPay attestation query on Dune with `lastBlock` as the
- * incremental cursor. Returns the deduped lowercase address list and the
- * highest block number seen — caller advances the persistent cursor only
- * after all addresses have been written.
+ * Stream MiniPay attestation rows from Dune one page at a time. Yields each
+ * page's deduped lowercase addresses + per-page max block; the caller is
+ * responsible for SADD'ing each page and tracking the cumulative maxBlock.
+ *
+ * Per-page yielding means the first-run backfill (millions of rows) doesn't
+ * accumulate the entire result set in heap, and any cross-page failure
+ * leaves prior pages persisted in Redis (SADD is idempotent on retry).
+ *
+ * Cross-page dedup is unnecessary by query construction: the Dune query
+ * groups by account, so each address appears in exactly one row across the
+ * full result set.
  */
-export async function fetchMiniPayUsers(opts: {
+export async function* fetchMiniPayUsers(opts: {
   apiKey: string;
   lastBlock: bigint;
-}): Promise<FetchResult> {
+}): AsyncGenerator<FetchPage> {
   const executionId = await executeQuery(opts.apiKey, opts.lastBlock);
   await pollUntilComplete(opts.apiKey, executionId);
 
-  const addresses = new Set<string>();
-  let maxBlock = BigInt(0);
   let offset = 0;
   for (;;) {
     const page = await fetchResultsPage(opts.apiKey, executionId, offset);
     const rows = page.result?.rows ?? [];
+    const seen = new Set<string>();
+    let maxBlock = BigInt(0);
     for (const row of rows) {
       const account = String(row.account ?? "").toLowerCase();
       if (!isValidAddress(account)) continue;
-      addresses.add(account);
+      seen.add(account);
       const block = BigInt(String(row.max_block ?? "0"));
       if (block > maxBlock) maxBlock = block;
+    }
+    if (seen.size > 0) {
+      yield { addresses: Array.from(seen), maxBlock };
     }
     const nextOffset = page.result?.metadata?.next_offset ?? page.next_offset;
     if (typeof nextOffset !== "number" || nextOffset <= offset) break;
     offset = nextOffset;
   }
-
-  return { addresses: Array.from(addresses), maxBlock, count: addresses.size };
 }
 
 // ── Redis SET helpers ────────────────────────────────────────────────────────

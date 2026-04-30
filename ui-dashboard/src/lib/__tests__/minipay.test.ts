@@ -159,9 +159,8 @@ describe("fetchMiniPayUsers (Dune client)", () => {
         }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    await expect(
-      fetchMiniPayUsers({ apiKey: "bad", lastBlock: BigInt(0) }),
-    ).rejects.toBeInstanceOf(DuneAuthError);
+    const gen = fetchMiniPayUsers({ apiKey: "bad", lastBlock: BigInt(0) });
+    await expect(gen.next()).rejects.toBeInstanceOf(DuneAuthError);
   });
 
   it("posts lastBlock as a string parameter to /execute", async () => {
@@ -195,15 +194,18 @@ describe("fetchMiniPayUsers (Dune client)", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await fetchMiniPayUsers({
+    const pages = [];
+    for await (const page of fetchMiniPayUsers({
       apiKey: "ok",
       lastBlock: BigInt(12345),
-    });
-    expect(result.count).toBe(0);
-    expect(result.maxBlock).toBe(BigInt(0));
+    })) {
+      pages.push(page);
+    }
+    // Empty result yields no pages (generator skips zero-row pages).
+    expect(pages).toHaveLength(0);
   });
 
-  it("dedupes across pages and tracks the highest block", async () => {
+  it("yields per page with maxBlock advancing across pages", async () => {
     let call = 0;
     const fetchMock = vi.fn(async (url: string) => {
       if (url.endsWith("/execute")) {
@@ -269,19 +271,28 @@ describe("fetchMiniPayUsers (Dune client)", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await fetchMiniPayUsers({
+    const pages = [];
+    for await (const page of fetchMiniPayUsers({
       apiKey: "ok",
       lastBlock: BigInt(0),
-    });
-    expect(result.count).toBe(3);
-    expect(result.addresses).toEqual(
-      expect.arrayContaining([
-        "0xaaaa000000000000000000000000000000000000",
-        "0xbbbb000000000000000000000000000000000000",
-        "0xcccc000000000000000000000000000000000000",
-      ]),
-    );
-    expect(result.maxBlock).toBe(BigInt(300));
+    })) {
+      pages.push(page);
+    }
+
+    // Two pages yielded — generator does not dedup across pages (the Dune
+    // query groups by account, so cross-page duplicates can't happen by
+    // construction; SADD idempotency covers any pathological case).
+    expect(pages).toHaveLength(2);
+    expect(pages[0]!.addresses).toEqual([
+      "0xaaaa000000000000000000000000000000000000",
+      "0xbbbb000000000000000000000000000000000000",
+    ]);
+    expect(pages[0]!.maxBlock).toBe(BigInt(200));
+    expect(pages[1]!.addresses).toEqual([
+      "0xaaaa000000000000000000000000000000000000",
+      "0xcccc000000000000000000000000000000000000",
+    ]);
+    expect(pages[1]!.maxBlock).toBe(BigInt(300));
   });
 
   it("throws DuneExecutionError on FAILED state", async () => {
@@ -301,8 +312,7 @@ describe("fetchMiniPayUsers (Dune client)", () => {
       );
     });
     vi.stubGlobal("fetch", fetchMock);
-    await expect(
-      fetchMiniPayUsers({ apiKey: "ok", lastBlock: BigInt(0) }),
-    ).rejects.toBeInstanceOf(DuneExecutionError);
+    const gen = fetchMiniPayUsers({ apiKey: "ok", lastBlock: BigInt(0) });
+    await expect(gen.next()).rejects.toBeInstanceOf(DuneExecutionError);
   });
 });

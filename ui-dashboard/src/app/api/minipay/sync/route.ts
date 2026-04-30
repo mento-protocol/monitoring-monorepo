@@ -60,14 +60,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       async () => {
         const fromBlock = await getLastSyncedBlock();
 
-        const { addresses, maxBlock, count } = await fetchMiniPayUsers({
+        // Stream Dune pages → SADD per page → advance cursor on success.
+        // SADD is idempotent, so a mid-run failure leaves earlier pages
+        // persisted in Redis; the cursor only advances after every page
+        // is written, so the next run will re-pull from `fromBlock` and
+        // SADD-no-op the already-stored pages before catching up.
+        let fetched = 0;
+        let added = 0;
+        let maxBlock = fromBlock;
+        for await (const page of fetchMiniPayUsers({
           apiKey,
           lastBlock: fromBlock,
-        });
-
-        // SADD is idempotent — partial failure leaves the cursor untouched
-        // so the next run re-pulls the missing rows.
-        const added = await addToMiniPaySet(addresses);
+        })) {
+          fetched += page.addresses.length;
+          added += await addToMiniPaySet(page.addresses);
+          if (page.maxBlock > maxBlock) maxBlock = page.maxBlock;
+        }
 
         if (maxBlock > fromBlock) {
           await setLastSyncedBlock(maxBlock);
@@ -76,7 +84,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         const total = await getMiniPaySetSize();
         const body: SyncResponse = {
           ok: true,
-          fetched: count,
+          fetched,
           added,
           total,
           maxBlock: maxBlock.toString(),

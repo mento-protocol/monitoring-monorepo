@@ -69,14 +69,22 @@ describe("GET /api/minipay/sync — auth", () => {
   });
 });
 
+// Helper: build an async generator from an array of pages (or a thrown error).
+async function* yieldPages(
+  pages: Array<{ addresses: string[]; maxBlock: bigint } | Error>,
+) {
+  for (const p of pages) {
+    if (p instanceof Error) throw p;
+    yield p;
+  }
+}
+
 describe("GET /api/minipay/sync — happy path", () => {
   it("advances cursor only after addToMiniPaySet succeeds", async () => {
     mockGetCursor.mockResolvedValue(BigInt(100));
-    mockFetch.mockResolvedValue({
-      addresses: ["0xa", "0xb"],
-      maxBlock: BigInt(500),
-      count: 2,
-    });
+    mockFetch.mockReturnValue(
+      yieldPages([{ addresses: ["0xa", "0xb"], maxBlock: BigInt(500) }]),
+    );
     mockAdd.mockResolvedValue(2);
     mockSize.mockResolvedValue(2);
 
@@ -93,11 +101,9 @@ describe("GET /api/minipay/sync — happy path", () => {
 
   it("does NOT advance cursor when SADD throws (regression: data loss)", async () => {
     mockGetCursor.mockResolvedValue(BigInt(100));
-    mockFetch.mockResolvedValue({
-      addresses: ["0xa"],
-      maxBlock: BigInt(500),
-      count: 1,
-    });
+    mockFetch.mockReturnValue(
+      yieldPages([{ addresses: ["0xa"], maxBlock: BigInt(500) }]),
+    );
     mockAdd.mockRejectedValue(new Error("redis-down"));
 
     const res = await GET(makeReq("cron-secret"));
@@ -107,11 +113,7 @@ describe("GET /api/minipay/sync — happy path", () => {
 
   it("does NOT advance cursor when Dune returns no rows past cursor", async () => {
     mockGetCursor.mockResolvedValue(BigInt(500));
-    mockFetch.mockResolvedValue({
-      addresses: [],
-      maxBlock: BigInt(0),
-      count: 0,
-    });
+    mockFetch.mockReturnValue(yieldPages([])); // generator yields no pages
     mockAdd.mockResolvedValue(0);
     mockSize.mockResolvedValue(123);
 
@@ -120,9 +122,54 @@ describe("GET /api/minipay/sync — happy path", () => {
     expect(mockSetCursor).not.toHaveBeenCalled();
   });
 
+  it("SADDs each page incrementally (memory-bounded streaming)", async () => {
+    mockGetCursor.mockResolvedValue(BigInt(0));
+    mockFetch.mockReturnValue(
+      yieldPages([
+        { addresses: ["0xa", "0xb"], maxBlock: BigInt(100) },
+        { addresses: ["0xc"], maxBlock: BigInt(200) },
+        { addresses: ["0xd", "0xe"], maxBlock: BigInt(300) },
+      ]),
+    );
+    mockAdd
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(2);
+    mockSize.mockResolvedValue(5);
+
+    const res = await GET(makeReq("cron-secret"));
+    expect(res.status).toBe(200);
+    // SADD called once per yielded page, not once at the end.
+    expect(mockAdd).toHaveBeenCalledTimes(3);
+    expect(mockAdd).toHaveBeenNthCalledWith(1, ["0xa", "0xb"]);
+    expect(mockAdd).toHaveBeenNthCalledWith(2, ["0xc"]);
+    expect(mockAdd).toHaveBeenNthCalledWith(3, ["0xd", "0xe"]);
+    // Cursor advances to the highest maxBlock seen across all pages.
+    expect(mockSetCursor).toHaveBeenCalledWith(BigInt(300));
+  });
+
+  it("preserves earlier-page SADDs when a later page throws — cursor unchanged", async () => {
+    mockGetCursor.mockResolvedValue(BigInt(0));
+    mockFetch.mockReturnValue(
+      yieldPages([
+        { addresses: ["0xa"], maxBlock: BigInt(100) },
+        new Error("dune-page-2-failed"),
+      ]),
+    );
+    mockAdd.mockResolvedValue(1);
+
+    const res = await GET(makeReq("cron-secret"));
+    expect(res.status).toBe(500);
+    // Page 1's SADD ran (rows now in Redis); cursor stayed put so next run
+    // re-pulls page 1 (idempotent SADD) and retries page 2.
+    expect(mockAdd).toHaveBeenCalledTimes(1);
+    expect(mockAdd).toHaveBeenCalledWith(["0xa"]);
+    expect(mockSetCursor).not.toHaveBeenCalled();
+  });
+
   it("returns DuneAuthError as 502", async () => {
     mockGetCursor.mockResolvedValue(BigInt(0));
-    mockFetch.mockRejectedValue(new DuneAuthError("rejected"));
+    mockFetch.mockReturnValue(yieldPages([new DuneAuthError("rejected")]));
 
     const res = await GET(makeReq("cron-secret"));
     expect(res.status).toBe(502);
