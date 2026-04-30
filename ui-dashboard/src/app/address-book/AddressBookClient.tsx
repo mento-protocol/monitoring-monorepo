@@ -10,7 +10,9 @@ import { explorerAddressUrl } from "@/lib/tokens";
 import { truncateAddress } from "@/lib/format";
 import {
   ARKHAM_TAG,
+  MINIPAY_SOURCE,
   isArkhamSourced,
+  isMiniPaySourced,
   type Scope,
 } from "@/lib/address-labels-shared";
 import {
@@ -164,7 +166,9 @@ export default function AddressBookPage({
         const sourceText = row.isCustom
           ? isArkhamSourced({ source: row.source, tags: row.tags })
             ? "arkham"
-            : "custom"
+            : isMiniPaySourced({ source: row.source })
+              ? "minipay"
+              : "custom"
           : "contract";
         return (
           row.address.toLowerCase().includes(q) ||
@@ -553,7 +557,12 @@ function AddressTableRow({
   onEdit,
 }: AddressRowProps) {
   const arkhamSourced = isArkhamSourced({ source, tags });
-  const displayTags = tags.filter((t) => t !== ARKHAM_TAG);
+  const minipaySourced = isMiniPaySourced({ source });
+  // Strip server-provenance tags from the displayed list — the SOURCE badge
+  // already conveys this, so showing them as pills duplicates the signal.
+  const displayTags = tags.filter(
+    (t) => t !== ARKHAM_TAG && t !== MINIPAY_SOURCE,
+  );
   return (
     <tr className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
       <td className="px-4 py-3">
@@ -611,6 +620,10 @@ function AddressTableRow({
         {isCustom && arkhamSourced ? (
           <span className="inline-flex items-center rounded-full bg-teal-950 px-2 py-0.5 text-xs font-medium text-teal-300 ring-1 ring-inset ring-teal-800">
             arkham
+          </span>
+        ) : isCustom && minipaySourced ? (
+          <span className="inline-flex items-center rounded-full bg-fuchsia-950 px-2 py-0.5 text-xs font-medium text-fuchsia-300 ring-1 ring-inset ring-fuchsia-800">
+            minipay
           </span>
         ) : isCustom ? (
           <span className="inline-flex items-center rounded-full bg-indigo-950 px-2 py-0.5 text-xs font-medium text-indigo-300 ring-1 ring-inset ring-indigo-800">

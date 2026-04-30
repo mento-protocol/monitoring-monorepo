@@ -93,6 +93,22 @@ variable "arkham_api_key" {
   default = ""
 }
 
+# ── Dune Analytics ────────────────────────────────────────────────────────────
+
+variable "dune_api_key" {
+  description = <<-EOT
+    Dune Analytics API key, used by the nightly /api/minipay/sync cron to
+    pull MiniPay attestations (Celo FederatedAttestations contract,
+    issuer 0x7888...7fbc) into the `minipay:users` Redis SET. The tagging
+    cron then intersects this set with Mento-interacting addresses and
+    writes `source: minipay` labels. Generate at api.dune.com → Settings.
+    Server-side only — never exposed to the browser.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # ── Vercel Blob ───────────────────────────────────────────────────────────────
 
 variable "blob_read_write_token" {
