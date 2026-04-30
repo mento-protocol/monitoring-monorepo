@@ -191,9 +191,11 @@ function PoolDetail() {
   // useless network round trip.
   const fpmmPool = pool ? isFpmm(pool) : false;
 
-  // Lifted from SwapsTab so the sub-hero TVL chart can render independently of
-  // which tab is active. useGQL is SWR-based and dedupes by key + vars, so
-  // SwapsTab's identical query shares this response.
+  // Hoisted out of `_tabs/swaps-tab.tsx` so the sub-hero TVL/volume charts
+  // can render independently of which tab is active. useGQL is SWR-based and
+  // dedupes by key + vars, so SwapsTab/LiquidityTab's identical
+  // POOL_DAILY_SNAPSHOTS_CHART queries share this response — DO NOT remove
+  // as "redundant" without also removing the tab-local copies.
   const {
     data: dailySnapshotData,
     error: dailySnapshotError,
