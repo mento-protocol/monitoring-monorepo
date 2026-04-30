@@ -107,13 +107,13 @@ describe("GET /api/minipay/tag — filtering", () => {
     });
   });
 
-  it("dryRun returns the would-write payload without persisting", async () => {
+  it("dryRun returns the would-write addresses without persisting", async () => {
     mockDiscover.mockResolvedValue({
-      addresses: ["0xa"],
+      addresses: ["0xa", "0xb", "0xc"],
       perEntity: [],
     });
     mockGetAllLabels.mockResolvedValue({ global: {}, chains: {} });
-    mockIntersect.mockResolvedValue(["0xa"]);
+    mockIntersect.mockResolvedValue(["0xa", "0xc"]);
 
     const res = await GET(
       makeReq({ bearer: "cron-secret", searchParams: { mode: "dryRun" } }),
@@ -123,11 +123,26 @@ describe("GET /api/minipay/tag — filtering", () => {
       mode: string;
       matched: number;
       written: number;
+      wouldWrite?: string[];
     };
     expect(body.mode).toBe("dryRun");
-    expect(body.matched).toBe(1);
+    expect(body.matched).toBe(2);
     expect(body.written).toBe(0);
+    // Documented spot-check flow: dryRun must surface the actual address
+    // list so reviewers can verify a few against Celoscan.
+    expect(body.wouldWrite).toEqual(["0xa", "0xc"]);
     expect(mockImportLabels).not.toHaveBeenCalled();
+  });
+
+  it("non-dryRun does not include wouldWrite (keeps payload small)", async () => {
+    mockDiscover.mockResolvedValue({ addresses: ["0xa"], perEntity: [] });
+    mockGetAllLabels.mockResolvedValue({ global: {}, chains: {} });
+    mockIntersect.mockResolvedValue(["0xa"]);
+
+    const res = await GET(makeReq({ bearer: "cron-secret" }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { wouldWrite?: string[] };
+    expect(body.wouldWrite).toBeUndefined();
   });
 
   it("returns clean no-op when MiniPay set is empty (sync hasn't populated yet)", async () => {

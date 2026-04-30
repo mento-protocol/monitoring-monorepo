@@ -29,6 +29,12 @@ const DUNE_QUERY_ID = 7404332;
 const POLL_INTERVAL_MS = 3_000;
 const POLL_MAX_ATTEMPTS = 100;
 
+// Per-request timeout. POLL_MAX_ATTEMPTS only bounds successful poll iterations;
+// a single fetch wedged at TLS/socket level needs an explicit AbortSignal or
+// the cron just sits until Vercel kills the invocation. Mirrors the pattern
+// used by `arkham-discovery.ts` for Hasura calls.
+const REQUEST_TIMEOUT_MS = 30_000;
+
 // Upstash command-size cap is 1 MB; a SADD of 1000 lowercase 0x-addresses
 // (~42 B each) is comfortably under that.
 const SADD_CHUNK = 1000;
@@ -100,6 +106,7 @@ async function duneFetch(
 ): Promise<Response> {
   const res = await fetch(`${DUNE_BASE}${path}`, {
     ...init,
+    signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     headers: {
       "X-Dune-API-Key": apiKey,
       "Content-Type": "application/json",
@@ -168,16 +175,22 @@ async function pollUntilComplete(
   );
 }
 
+// Dune's `/execution/{id}/results` paginates by `limit` + `offset`. Without
+// an explicit `limit`, large result sets return a 4xx; cap at the docs'
+// recommended max of 1000 rows per page.
+const DUNE_RESULTS_LIMIT = 1000;
+
 async function fetchResultsPage(
   apiKey: string,
   executionId: string,
   offset: number,
 ): Promise<DuneResultsResponse> {
-  const params = new URLSearchParams();
-  if (offset > 0) params.set("offset", String(offset));
-  const qs = params.toString();
+  const params = new URLSearchParams({
+    limit: String(DUNE_RESULTS_LIMIT),
+    ...(offset > 0 ? { offset: String(offset) } : {}),
+  });
   const res = await duneFetch(
-    `/api/v1/execution/${executionId}/results${qs ? `?${qs}` : ""}`,
+    `/api/v1/execution/${executionId}/results?${params.toString()}`,
     apiKey,
   );
   if (!res.ok) {

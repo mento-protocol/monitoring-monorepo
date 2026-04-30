@@ -14,6 +14,7 @@ import { truncateAddress } from "@/lib/format";
 import { NETWORKS, networkIdForChainId, type Network } from "@/lib/networks";
 import {
   isArkhamSourced,
+  isMiniPaySourced,
   normalizeArkhamLegacy,
   upgradeEntries,
   type AddressEntry,
@@ -303,9 +304,10 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
     ): Promise<void> => {
       const lower = address.toLowerCase();
       // Carry server-side provenance into the optimistic write so the
-      // SOURCE badge doesn't flash from "arkham" to "custom" between the
-      // optimistic update and the SWR refetch. Mirrors the PUT handler's
-      // cross-scope `isArkhamSourced(prior)` check.
+      // SOURCE badge doesn't flash to "custom" between the optimistic
+      // update and the SWR refetch. Mirrors the PUT handler's cross-scope
+      // source-preservation check — must cover every server-controlled
+      // source (arkham + minipay), not just arkham.
       const buildOptimistic = (current: EntriesState): AddressEntry => {
         const prior =
           current.global[lower] ??
@@ -315,8 +317,13 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
             }
             return undefined;
           })();
-        const preservedSource =
-          prior && isArkhamSourced(prior) ? "arkham" : undefined;
+        const preservedSource = !prior
+          ? undefined
+          : isArkhamSourced(prior)
+            ? "arkham"
+            : isMiniPaySourced(prior)
+              ? "minipay"
+              : undefined;
         return {
           name: entry.name,
           tags: entry.tags,

@@ -36,6 +36,9 @@ type TagResponse = {
   matched: number;
   /** Rows actually written (0 in dryRun). */
   written: number;
+  /** In `dryRun` mode, the addresses we would have written. Omitted in `new`
+   *  mode to keep production cron payloads small. */
+  wouldWrite?: string[];
   durationMs: number;
   perEntity?: Array<{ table: string; field: string; count: number }>;
 };
@@ -159,6 +162,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           minipaySetSize,
           matched: matches.length,
           written: mode === "dryRun" ? 0 : Object.keys(toWrite).length,
+          ...(mode === "dryRun" ? { wouldWrite: matches } : {}),
           durationMs: Date.now() - startedAt,
           perEntity,
         };
