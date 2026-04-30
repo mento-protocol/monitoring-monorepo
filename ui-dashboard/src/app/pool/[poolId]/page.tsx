@@ -1230,6 +1230,14 @@ const REWARD_HIST_REFRESH_MS = 5 * 60_000;
 // would give 1200 → "$1.2K"), reintroducing the same visual-split bug this
 // helper is supposed to fix. Parsing the formatted string keeps the two in
 // lockstep automatically as formatUSD's tiers evolve.
+//
+// Invariant we actually depend on: formatUSD(a) === formatUSD(b) implies
+// toDisplayPrecision(a) === toDisplayPrecision(b) — i.e. cells that look
+// identical never split across a tier. The reverse is not guaranteed: at
+// the [999.995, 1000) boundary formatUSD takes the sub-$1K branch (".$X.XX"
+// rounds up to "$1000.00") but parsing yields 1000, which re-formats via
+// the K-branch as "$1K". That's fine — both still round to the same
+// threshold value, so two such cells stay tier-consistent.
 export function toDisplayPrecision(value: number): number {
   if (!Number.isFinite(value)) return value;
   const formatted = formatUSD(value);

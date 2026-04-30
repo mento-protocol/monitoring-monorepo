@@ -115,12 +115,24 @@ describe("renderRewardCell", () => {
     // They disagree at 1150, 1450, 1650, 1950 (and same family in $M
     // tier) — exactly the visual-split bug this helper is meant to prevent.
     // Parsing formatUSD's own output keeps the two in sync.
-    const samples = [
-      0.01, 9.85, 9.8493, 9.8511, 999.99, 1000, 1050, 1150, 1450, 1650, 1950,
-      999_949, 999_950, 1_234_567, 12_345_000,
+    //
+    // We assert the invariant tier comparison actually depends on: any two
+    // values that render to the same string round to the same threshold
+    // value. (Note: round-trip identity formatUSD(toDisplayPrecision(v)) ===
+    // formatUSD(v) does NOT hold at [999.995, 1000) where formatUSD's
+    // sub-$1K branch produces "$1000.00" — that's a cosmetic gap, not a
+    // tier-consistency one, since both values still round to 1000.)
+    const pairs: [number, number][] = [
+      [9.8493, 9.8518], // both "$9.85"
+      [1051, 1149], // both "$1.1K"
+      [1451, 1549], // both "$1.5K"
+      [1551, 1649], // both "$1.6K"
+      [1951, 2049], // both "$2K"
+      [1_234_400, 1_234_499], // both "$1.23M"
     ];
-    for (const v of samples) {
-      expect(formatUSD(toDisplayPrecision(v))).toBe(formatUSD(v));
+    for (const [a, b] of pairs) {
+      expect(formatUSD(a)).toBe(formatUSD(b));
+      expect(toDisplayPrecision(a)).toBe(toDisplayPrecision(b));
     }
   });
 
