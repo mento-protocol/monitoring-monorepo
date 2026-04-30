@@ -426,11 +426,11 @@ export async function fetchNetworkData(
             ...p,
             breachCount: r.breachCount,
             healthBinarySeconds: r.healthBinarySeconds,
-            // Fallback to ALL_POOLS_WITH_HEALTH's value only when the
-            // rollup query is missing it (schema-rollout window) — in
-            // steady state both come from the rollup so the
-            // numerator/denominator pair stays a same-query snapshot.
-            healthTotalSeconds: r.healthTotalSeconds ?? p.healthTotalSeconds,
+            // BOTH fields come from the rollup so the numerator/denominator
+            // pair is a same-query snapshot — no falling back to
+            // ALL_POOLS_WITH_HEALTH's `healthTotalSeconds`, which would
+            // pair counters captured at different polling cycles.
+            healthTotalSeconds: r.healthTotalSeconds,
           };
     });
   }

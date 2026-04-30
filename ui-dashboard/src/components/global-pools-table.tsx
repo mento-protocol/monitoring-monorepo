@@ -563,7 +563,7 @@ export function GlobalPoolsTable({
                     return (
                       <span
                         className={uptimeColorClass(pct)}
-                        title={`${pct.toFixed(3)}% all-time · ${p.breachCount ?? 0} ${(p.breachCount ?? 0) === 1 ? "breach" : "breaches"}`}
+                        title={`${pct.toFixed(3)}% uptime (oracle freshness + price within tolerance) · ${p.breachCount ?? 0} lifetime price-deviation ${(p.breachCount ?? 0) === 1 ? "breach" : "breaches"}`}
                       >
                         {pct.toFixed(2)}%
                       </span>

@@ -376,11 +376,11 @@ The "is this critical right now?" gate (health badge, Grafana page) and the
 different rules. A single incident can live in different states across
 them — surprising the first time you see it.
 
-| Surface                                   | Gate                                       | What it answers                              |
-| ----------------------------------------- | ------------------------------------------ | -------------------------------------------- |
-| Live health badge (`computeHealthStatus`) | `current devRatio > 1.05` AND age > 1h     | Is the pool **right now** in critical state? |
-| Live uptime tile (`computePoolUptimePct`) | `healthBinarySeconds / healthTotalSeconds` | All-time fraction of seconds in OK state     |
-| Grafana critical alert                    | `current ratio > 1.05` AND age > 1h        | Should we page on-call **right now**?        |
+| Surface                                   | Gate                                                             | What it answers                              |
+| ----------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------- |
+| Live health badge (`computeHealthStatus`) | oracle stale OR (`current devRatio > 1.05` AND breach age > 1h)  | Is the pool **right now** in critical state? |
+| Live uptime tile (`computePoolUptimePct`) | `healthBinarySeconds / healthTotalSeconds`                       | All-time fraction of seconds in OK state     |
+| Grafana critical alert                    | oracle-down rules + (`current ratio > 1.05` AND breach age > 1h) | Should we page on-call **right now**?        |
 
 The uptime tile reads the indexer's binary-health accumulator, which credits
 a second to `healthBinarySeconds` only when **all** of these hold for the
