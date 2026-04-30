@@ -7,7 +7,6 @@ type RollupRow = {
   healthTotalSeconds?: string;
 };
 type DailyAnchorRow = {
-  timestamp?: string;
   cumulativeHealthBinarySeconds?: string;
   cumulativeHealthTotalSeconds?: string;
 };
@@ -77,7 +76,6 @@ describe("UptimeValue", () => {
         ],
         PoolDailySnapshot: [
           {
-            timestamp: String(total - 7 * 86400),
             cumulativeHealthBinarySeconds: String(total - 7 * 86400),
             cumulativeHealthTotalSeconds: String(total - 7 * 86400),
           },
@@ -131,7 +129,6 @@ describe("UptimeValue", () => {
     // 7d window: 0h unhealthy → 100.00% → ↑ vs all-time.
     const totalAll = 30 * 86400;
     const binaryAll = totalAll - 100 * 3600;
-    const anchorTs = totalAll - 7 * 86400;
     next = {
       data: {
         Pool: [
@@ -142,7 +139,6 @@ describe("UptimeValue", () => {
         ],
         PoolDailySnapshot: [
           {
-            timestamp: String(anchorTs),
             // 7d ago: same gap as today — i.e. the unhealthy time happened
             // BEFORE the anchor. The 7d window has zero unhealthy seconds.
             cumulativeHealthBinarySeconds: String(binaryAll - 7 * 86400),
@@ -177,7 +173,6 @@ describe("UptimeValue", () => {
         ],
         PoolDailySnapshot: [
           {
-            timestamp: String(anchorTotal),
             cumulativeHealthBinarySeconds: String(anchorBinary),
             cumulativeHealthTotalSeconds: String(anchorTotal),
           },
@@ -220,7 +215,6 @@ describe("UptimeValue", () => {
         ],
         PoolDailySnapshot: [
           {
-            timestamp: String(total - 7 * 86400),
             cumulativeHealthBinarySeconds: String(total - 7 * 86400),
             cumulativeHealthTotalSeconds: String(total - 7 * 86400),
           },

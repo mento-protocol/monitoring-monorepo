@@ -349,7 +349,6 @@ export const POOL_BREACH_ROLLUP = `
       order_by: [{ timestamp: desc }]
       limit: 1
     ) {
-      timestamp
       cumulativeHealthBinarySeconds
       cumulativeHealthTotalSeconds
     }

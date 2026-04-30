@@ -11,31 +11,44 @@ import {
 } from "@/lib/health";
 import { isFxPool } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
+import { SECONDS_PER_DAY } from "@/lib/time-series";
 
 const UPTIME_EXPLAINER =
   "% of time the oracle was fresh AND the pool's price stayed within the 1.01× tolerance of the rebalance threshold.\nStale oracle (no report past expiry) and price-deviation breaches both count as unhealthy.\n\n7d shows the same metric over the last 7 days, with a trend arrow vs all-time.";
 const UPTIME_FX_SUFFIX = "\nWeekends don't count into FX pool uptime.";
 
 const NA = <span className="text-slate-500">N/A</span>;
-const SECONDS_IN_7D = 7 * 86_400;
+
+const ARROW = {
+  up: {
+    glyph: "↑",
+    className: "text-emerald-400",
+    aria: "trending up vs all-time",
+  },
+  down: {
+    glyph: "↓",
+    className: "text-red-400",
+    aria: "trending down vs all-time",
+  },
+} as const;
 
 type RollupRow = {
   healthBinarySeconds?: string;
   healthTotalSeconds?: string;
 };
 type DailyAnchorRow = {
-  timestamp?: string;
   cumulativeHealthBinarySeconds?: string;
   cumulativeHealthTotalSeconds?: string;
 };
 
 export function UptimeValue({ pool }: { pool: Pool }) {
   const isVirtual = isVirtualPool(pool);
-  // Bucket the 7d-anchor cutoff to UTC-day boundaries so the SWR cache
-  // key only changes once per day — without this, every render produces
-  // a fresh `sevenDaysAgo` (sub-second drift) that invalidates the cache.
-  const todayStart = Math.floor(Date.now() / 1000 / 86_400) * 86_400;
-  const sevenDaysAgo = todayStart - SECONDS_IN_7D;
+  // Bucket the cutoff to UTC midnight so the SWR cache key only changes
+  // once per day — sub-second drift would otherwise invalidate the cache
+  // on every render.
+  const todayStart =
+    Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  const sevenDaysAgo = todayStart - 7 * SECONDS_PER_DAY;
 
   const { data, error } = useGQL<{
     Pool: RollupRow[];
@@ -57,24 +70,18 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   });
   if (pct == null) return NA;
 
-  const anchor = data?.PoolDailySnapshot?.[0] ?? null;
   const pct7d = computeWindowUptimePct(
-    {
-      healthBinarySeconds: rollup.healthBinarySeconds,
-      healthTotalSeconds: rollup.healthTotalSeconds,
-    },
-    anchor,
+    rollup,
+    data?.PoolDailySnapshot?.[0] ?? null,
   );
 
-  // Trend arrow vs all-time. Gate on the .toFixed(2) values being
-  // visibly different — anything finer would render an arrow for noise
-  // the user can't see in the rounded numbers.
-  const trend: "up" | "down" | null =
-    pct7d == null || pct.toFixed(2) === pct7d.toFixed(2)
-      ? null
-      : pct7d > pct
-        ? "up"
-        : "down";
+  // Suppress the arrow when both values round to the same 2-decimal
+  // string — anything finer would surface noise the user can't see.
+  let trend: keyof typeof ARROW | null = null;
+  if (pct7d != null && pct.toFixed(2) !== pct7d.toFixed(2)) {
+    trend = pct7d > pct ? "up" : "down";
+  }
+  const arrow = trend ? ARROW[trend] : null;
 
   return (
     <span className="flex flex-col gap-0.5">
@@ -85,23 +92,12 @@ export function UptimeValue({ pool }: { pool: Pool }) {
       <span className="text-xs text-slate-500">
         {pct7d != null ? (
           <>
-            {trend === "up" && (
-              <span
-                className="text-emerald-400"
-                aria-label="trending up vs all-time"
-              >
-                ↑
+            {arrow && (
+              <span className={arrow.className} aria-label={arrow.aria}>
+                {arrow.glyph}
               </span>
             )}
-            {trend === "down" && (
-              <span
-                className="text-red-400"
-                aria-label="trending down vs all-time"
-              >
-                ↓
-              </span>
-            )}
-            {trend && " "}
+            {arrow && " "}
             {pct7d.toFixed(2)}% last 7d
           </>
         ) : (

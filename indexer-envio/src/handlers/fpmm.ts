@@ -606,7 +606,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     };
   }
 
-  const pool = await upsertPool({
+  let pool = await upsertPool({
     context,
     chainId: event.chainId,
     poolId,
@@ -637,7 +637,10 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       pool.rebalanceThreshold,
       blockTimestamp,
     );
-    context.Pool.set({ ...pool, ...poolUpdate });
+    // Reassign so the daily-snapshot upsert below freezes the just-updated
+    // health counters, not the pre-recordHealthSample values.
+    pool = { ...pool, ...poolUpdate };
+    context.Pool.set(pool);
     const snapshot: OracleSnapshot = {
       id: eventId(event.chainId, event.block.number, event.logIndex),
       chainId: event.chainId,
@@ -775,7 +778,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     };
   }
 
-  const pool = await upsertPool({
+  let pool = await upsertPool({
     context,
     chainId: event.chainId,
     poolId,
@@ -803,7 +806,10 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
       pool.rebalanceThreshold,
       blockTimestamp,
     );
-    context.Pool.set({ ...pool, ...poolUpdate });
+    // Reassign so the daily-snapshot upsert below freezes the just-updated
+    // health counters, not the pre-recordHealthSample values.
+    pool = { ...pool, ...poolUpdate };
+    context.Pool.set(pool);
 
     const snapshot: OracleSnapshot = {
       id: eventId(event.chainId, event.block.number, event.logIndex),
