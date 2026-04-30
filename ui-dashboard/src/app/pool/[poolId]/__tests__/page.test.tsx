@@ -369,7 +369,7 @@ describe("Pool detail LPs tab", () => {
   // their tab is mounted. Shared ops (e.g. PoolRebalances, fired by both
   // SwapsTab for chart annotations AND RebalancesTab) are deliberately
   // excluded so the lazy-mount loop doesn't false-positive on tabs that
-  // legitimately re-use a query.
+  // legitimately reuse a query.
   const TAB_OPS: Record<TabWithQueries, readonly string[]> = {
     swaps: ["PoolSwapsCount", "PoolSwapsPage"],
     reserves: ["PoolReserves"],

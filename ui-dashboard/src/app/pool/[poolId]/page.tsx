@@ -1,151 +1,49 @@
 "use client";
 
 import { AddressLink } from "@/components/address-link";
-import { useAddressLabels } from "@/components/address-labels-provider";
-import { KindBadge, SourceBadge } from "@/components/badges";
-import { ChainIcon } from "@/components/chain-icon";
-import { DeviationCell } from "@/components/pool-header/deviation-cell";
-import { InfoPopover } from "@/components/info-popover";
-import { LimitStatusValue } from "@/components/pool-header/limit-status-value";
-import { OraclePriceValue } from "@/components/pool-header/oracle-price-value";
-import { RebalanceStatusValue } from "@/components/pool-header/rebalance-status-value";
-import {
-  UptimeInfoIcon,
-  UptimeValue,
-} from "@/components/pool-header/uptime-value";
-import { LimitSelect } from "@/components/controls";
-import { EmptyBox, ErrorBox, Skeleton } from "@/components/feedback";
 import { BreachHistoryPanel } from "@/components/breach-history-panel";
+import { LimitSelect } from "@/components/controls";
+import { ErrorBox, Skeleton } from "@/components/feedback";
 import { HealthPanel } from "@/components/health-panel";
 import { LimitPanel } from "@/components/limit-panel";
-import { PoolConfigPanel } from "@/components/pool-config-panel";
-import { BreakerPanel } from "@/components/breaker-panel";
-import { MarketHoursPill } from "@/components/market-hours-pill";
-import { ReservesPanel } from "@/components/reserves-panel";
-import { Stat } from "@/components/stat";
 import { useNetwork } from "@/components/network-provider";
-import { OracleChart } from "@/components/oracle-chart";
-import { EffectivenessChart } from "@/components/effectiveness-chart";
-import { ReserveChart } from "@/components/reserve-chart";
-import { SenderCell } from "@/components/sender-cell";
-import { TagsCell } from "@/components/tags-cell";
-import { LiquidityChart } from "@/components/liquidity-chart";
-import { LpConcentrationChart } from "@/components/lp-concentration-chart";
 import { PoolTvlOverTimeChart } from "@/components/pool-tvl-over-time-chart";
 import { PoolVolumeOverTimeChart } from "@/components/pool-volume-over-time-chart";
-import { SnapshotChart } from "@/components/snapshot-chart";
-import { Row, Table, Td, Th } from "@/components/table";
-import { TableSearch } from "@/components/table-search";
-import { TxHashCell } from "@/components/tx-hash-cell";
-import {
-  formatBlock,
-  formatBoundaryBps,
-  formatEffectivenessPercent,
-  formatTimestamp,
-  formatUSD,
-  formatWei,
-  getSwapDirection,
-  normalizePoolIdForChain,
-  parseWei,
-  parseOraclePriceToNumber,
-  relativeTime,
-  toPercent,
-} from "@/lib/format";
-import {
-  DEFAULT_PAGE_SIZE,
-  ENVIO_MAX_ROWS,
-  SEARCH_BOOTSTRAP_LIMIT,
-  SEARCH_MAX_LIMIT,
-} from "@/lib/constants";
-import { buildOrderBy } from "@/lib/table-sort";
-import { stripChainIdFromPoolId } from "@/lib/pool-id";
+import { ReservesPanel } from "@/components/reserves-panel";
+import { normalizePoolIdForChain } from "@/lib/format";
 import { useGQL } from "@/lib/graphql";
+import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import {
-  ORACLE_RATES,
-  ORACLE_SNAPSHOTS,
-  ORACLE_SNAPSHOTS_CHART,
-  ORACLE_SNAPSHOTS_COUNT_PAGE,
-  OLS_LIQUIDITY_EVENTS_COUNT,
-  OLS_LIQUIDITY_EVENTS_PAGE,
   OLS_POOL,
+  ORACLE_RATES,
   POOL_DAILY_SNAPSHOTS_CHART,
   POOL_DEPLOYMENT,
   POOL_DETAIL_WITH_HEALTH,
-  POOL_LIQUIDITY_COUNT,
-  POOL_LIQUIDITY_PAGE,
-  POOL_LP_POSITIONS,
-  POOL_REBALANCE_REWARDS,
-  POOL_REBALANCES,
-  POOL_REBALANCES_COUNT,
-  POOL_REBALANCES_PAGE,
-  POOL_REBALANCES_USD_EXT,
-  POOL_RESERVES,
-  POOL_SWAPS_COUNT,
-  POOL_SWAPS_PAGE,
   TRADING_LIMITS,
 } from "@/lib/queries";
-import { Pagination } from "@/components/pagination";
+import { buildPoolDetailUrl, POOL_NOT_FOUND_DEST } from "@/lib/routing";
 import {
   buildOracleRateMap,
   canPricePool,
-  explorerAddressUrl,
   isFpmm,
   poolName,
-  tokenSymbol,
-  USDM_SYMBOLS,
 } from "@/lib/tokens";
+import type { OlsPool, Pool, PoolSnapshot, TradingLimit } from "@/lib/types";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
-import { normalizeSearch } from "@/lib/table-search";
-import type {
-  LiquidityEvent,
-  LiquidityPosition,
-  OlsLiquidityEvent,
-  OlsPool,
-  OracleSnapshot,
-  Pool,
-  PoolSnapshot,
-  RebalanceEvent,
-  ReserveUpdate,
-  SwapEvent,
-  TradingLimit,
-} from "@/lib/types";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import React, { Suspense, useCallback, useEffect, useMemo } from "react";
-import { buildPoolDetailUrl, POOL_NOT_FOUND_DEST } from "@/lib/routing";
-
-export default function PoolDetailPage() {
-  return (
-    <Suspense>
-      <PoolDetail />
-    </Suspense>
-  );
-}
-
-import {
-  MIN_REWARD_SAMPLE_SIZE,
-  SEARCH_PARAM_BY_TAB,
-  TABS,
-  type Tab,
-} from "./_lib/constants";
-import {
-  addressSearchTerms,
-  decodePoolId,
-  getDebtTokenSideLabel,
-  getTabLabel,
-  matchesRowSearch,
-  parseTabLimit,
-  selectActiveOlsPool,
-} from "./_lib/helpers";
-import {
-  BOUNDARY_TOOLTIP,
-  EFFECTIVENESS_TOOLTIP,
-  REWARD_TOOLTIP,
-} from "./_lib/tooltips";
-import type { OracleSortCol } from "./_lib/types";
+import { Suspense, useCallback, useEffect, useMemo } from "react";
 import { OlsLiquidityTable } from "./_components/ols-liquidity-table";
 import { OlsStatusPanel } from "./_components/ols-status-panel";
 import { PoolHeader } from "./_components/pool-header";
+import { SEARCH_PARAM_BY_TAB, TABS, type Tab } from "./_lib/constants";
+import {
+  decodePoolId,
+  getDebtTokenSideLabel,
+  getTabLabel,
+  parseTabLimit,
+  selectActiveOlsPool,
+} from "./_lib/helpers";
 import { LiquidityTab } from "./_tabs/liquidity-tab";
 import { LpsTab } from "./_tabs/lps-tab";
 import { OlsTab } from "./_tabs/ols-tab";
@@ -171,6 +69,14 @@ export {
   renderRewardCell,
   selectActiveOlsPool,
 };
+
+export default function PoolDetailPage() {
+  return (
+    <Suspense>
+      <PoolDetail />
+    </Suspense>
+  );
+}
 
 function PoolDetail() {
   const { network } = useNetwork();
