@@ -201,6 +201,22 @@ export const POOL_REBALANCES_USD_EXT = `
   }
 `;
 
+// Lightweight full-history fetch of rewardUsd values for percentile-based
+// outlier highlighting in the Rebalances table. Isolated like
+// POOL_REBALANCES_USD_EXT so a Hasura schema-lag during deploy degrades to
+// "no highlighting" instead of breaking the tab.
+export const POOL_REBALANCE_REWARDS = `
+  query PoolRebalanceRewards($poolId: String!, $limit: Int!) {
+    RebalanceEvent(
+      where: { poolId: { _eq: $poolId } }
+      limit: $limit
+      order_by: { blockNumber: desc }
+    ) {
+      id rewardUsd
+    }
+  }
+`;
+
 export const POOL_REBALANCES_COUNT = `
   query PoolRebalancesCount($poolId: String!, $limit: Int!, $offset: Int!) {
     RebalanceEvent(where: { poolId: { _eq: $poolId } }, limit: $limit, offset: $offset) {

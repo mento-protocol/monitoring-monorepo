@@ -74,6 +74,7 @@ import {
   POOL_LIQUIDITY_COUNT,
   POOL_LIQUIDITY_PAGE,
   POOL_LP_POSITIONS,
+  POOL_REBALANCE_REWARDS,
   POOL_REBALANCES,
   POOL_REBALANCES_COUNT,
   POOL_REBALANCES_PAGE,
@@ -1272,6 +1273,25 @@ export function RebalancesTab({
     return baseRows.map((r) => ({ ...r, ...(usdById.get(r.id) ?? {}) }));
   }, [baseRows, usdData]);
 
+  // Full-pool-history reward distribution for p90/p95 outlier highlighting.
+  // Fetched separately so paginating the table doesn't refetch the
+  // distribution, and so a Hasura schema-lag degrades to "no highlighting"
+  // (graceful — query returns null/error → thresholds null → plain rendering).
+  const { data: rewardHistData } = useGQL<{
+    RebalanceEvent: { id: string; rewardUsd: string | null }[];
+  }>(POOL_REBALANCE_REWARDS, { poolId, limit: ENVIO_MAX_ROWS });
+  const rewardThresholds = useMemo(() => {
+    const values = (rewardHistData?.RebalanceEvent ?? [])
+      .map((r) => (r.rewardUsd ? Number(r.rewardUsd) : Number.NaN))
+      .filter((v) => Number.isFinite(v) && v > 0)
+      .sort((a, b) => a - b);
+    // Need a meaningful sample: with <20 positive rewards p90/p95 are noise.
+    if (values.length < 20) return null;
+    const at = (q: number) =>
+      values[Math.min(values.length - 1, Math.floor(values.length * q))];
+    return { p90: at(0.9), p95: at(0.95) };
+  }, [rewardHistData]);
+
   // Separate chart query — fetch up to 200 events for the trend chart
   const { data: chartData } = useGQL<{ RebalanceEvent: RebalanceEvent[] }>(
     POOL_REBALANCES,
@@ -1405,7 +1425,32 @@ export function RebalancesTab({
                     {formatEffectivenessPercent(r.effectivenessRatio) ?? "—"}
                   </Td>
                   <Td mono small align="right">
-                    {r.rewardUsd ? formatUSD(Number(r.rewardUsd)) : "—"}
+                    {(() => {
+                      if (!r.rewardUsd) return "—";
+                      const value = Number(r.rewardUsd);
+                      const formatted = formatUSD(value);
+                      if (!rewardThresholds || !Number.isFinite(value))
+                        return formatted;
+                      if (value >= rewardThresholds.p95)
+                        return (
+                          <span
+                            className="text-amber-300 font-semibold"
+                            title="Top 5% reward for this pool"
+                          >
+                            {formatted}
+                          </span>
+                        );
+                      if (value >= rewardThresholds.p90)
+                        return (
+                          <span
+                            className="text-amber-400"
+                            title="Top 10% reward for this pool"
+                          >
+                            {formatted}
+                          </span>
+                        );
+                      return formatted;
+                    })()}
                   </Td>
                   <Td mono small muted align="right">
                     {formatBlock(r.blockNumber)}
