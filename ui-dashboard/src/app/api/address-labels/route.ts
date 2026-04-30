@@ -11,6 +11,7 @@ import {
   type Scope,
 } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
+import { NETWORKS } from "@/lib/networks";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const session = await getAuthSession();
@@ -244,13 +245,28 @@ function isPositiveInt(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v > 0;
 }
 
+// The strict-either-or Lua script in `address-labels.ts` iterates a STATIC
+// list of scope keys derived from `NETWORKS` (KEYS[2..]). If a write here
+// lets through a chainId that isn't in NETWORKS, that scope's
+// `labels:{chainId}` key would never participate in the cross-scope HDEL,
+// silently breaking the strict either/or invariant for any future move
+// involving it. Validate at the boundary instead: any chainId we accept
+// MUST be present in `NETWORKS` so the script's static list covers it.
+const SUPPORTED_CHAIN_IDS: ReadonlySet<number> = new Set(
+  Object.values(NETWORKS).map((n) => n.chainId),
+);
+
 // Accepts { scope } or legacy { chainId } alias; returns null on invalid.
 function parseScope(scopeValue: unknown, chainIdValue: unknown): Scope | null {
   if (scopeValue === "global") return "global";
-  if (isPositiveInt(scopeValue)) return scopeValue;
+  if (isPositiveInt(scopeValue)) {
+    return SUPPORTED_CHAIN_IDS.has(scopeValue) ? scopeValue : null;
+  }
   if (scopeValue !== undefined) return null;
   // Legacy fallback: { chainId: number } (remove in a follow-up)
-  if (isPositiveInt(chainIdValue)) return chainIdValue;
+  if (isPositiveInt(chainIdValue)) {
+    return SUPPORTED_CHAIN_IDS.has(chainIdValue) ? chainIdValue : null;
+  }
   return null;
 }
 
@@ -266,7 +282,9 @@ function parseScopeParam(
   if (chainIdParam === null) return null;
   if (!/^\d+$/.test(chainIdParam)) return null;
   const n = Number(chainIdParam);
-  return Number.isInteger(n) && n > 0 ? n : null;
+  if (!Number.isInteger(n) || n <= 0) return null;
+  // Same NETWORKS guard as parseScope above — keep the surfaces aligned.
+  return SUPPORTED_CHAIN_IDS.has(n) ? n : null;
 }
 
 // op distinguishes which handler failed (read/save/delete) so the Sentry

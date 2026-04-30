@@ -358,14 +358,24 @@ export async function setLastSyncedBlock(block: bigint): Promise<void> {
 // ── Entry shape ──────────────────────────────────────────────────────────────
 
 /**
- * Build the canonical AddressEntry written by the tagging cron. `name` is
- * generic — humans editing the row in the address book can override it; the
- * `source` marker is the durable provenance signal.
+ * Build the canonical AddressEntry written by the tagging cron.
+ *
+ * Empty `name` so the address book row's identity is the address itself —
+ * unlike Arkham, MiniPay has no per-user names to surface, and stamping
+ * "MiniPay user" on every row was visual noise. Provenance is conveyed
+ * twice on purpose: `source: "minipay"` powers the fuchsia SOURCE badge
+ * (and `mode=new` filtering); `tags: ["MiniPay User"]` is the
+ * human-readable Title Case pill that renders in the TAGS column. The
+ * casing distinction (lowercase badge vs. Title Case tag) keeps both
+ * readable without looking duplicative.
+ *
+ * Humans editing the row can override `name`/`tags` via the address-book
+ * editor — the PUT route preserves `source` so provenance survives edits.
  */
 export function toMiniPayEntry(): AddressEntry {
   return sanitizeEntry({
-    name: "MiniPay user",
-    tags: ["minipay"],
+    name: "",
+    tags: ["MiniPay User"],
     source: MINIPAY_SOURCE,
     isPublic: false,
     updatedAt: new Date().toISOString(),
