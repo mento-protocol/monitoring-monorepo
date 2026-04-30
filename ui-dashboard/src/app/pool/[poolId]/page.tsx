@@ -1196,16 +1196,19 @@ const REWARD_TOOLTIP =
 const MIN_REWARD_SAMPLE_SIZE = 20;
 
 // Ordered highest-tier-first so the renderer picks the strongest match.
+// Tooltips say "recent rebalances" because POOL_REBALANCE_REWARDS is
+// capped at ENVIO_MAX_ROWS (1000) — pools with longer history sample
+// from the recent window only.
 const REWARD_OUTLIER_TIERS = [
   {
     quantile: 0.95,
     className: "text-amber-300 font-semibold",
-    title: "Top 5% reward for this pool",
+    title: "Top 5% reward across this pool's recent rebalances",
   },
   {
     quantile: 0.9,
     className: "text-amber-400",
-    title: "Top 10% reward for this pool",
+    title: "Top 10% reward across this pool's recent rebalances",
   },
 ] as const;
 
@@ -1218,7 +1221,23 @@ type RewardThresholds = readonly {
 // poll burns ~10x request volume on essentially-static data.
 const REWARD_HIST_REFRESH_MS = 5 * 60_000;
 
-function renderRewardCell(
+export function computeRewardThresholds(
+  rawRewards: readonly (string | null | undefined)[],
+): RewardThresholds | null {
+  // Filter to positives: zero-reward rebalances aren't outlier candidates
+  // and including them would skew thresholds downward on pools that had a
+  // 0-bps reward phase.
+  const values = rawRewards
+    .map((r) => (r ? Number(r) : Number.NaN))
+    .filter((v) => Number.isFinite(v) && v > 0)
+    .sort((a, b) => a - b);
+  if (values.length < MIN_REWARD_SAMPLE_SIZE) return null;
+  const at = (q: number) =>
+    values[Math.min(values.length - 1, Math.floor(values.length * q))];
+  return REWARD_OUTLIER_TIERS.map((tier) => ({ tier, min: at(tier.quantile) }));
+}
+
+export function renderRewardCell(
   rewardUsd: string | null | undefined,
   thresholds: RewardThresholds | null,
 ): React.ReactNode {
@@ -1226,7 +1245,11 @@ function renderRewardCell(
   const value = Number(rewardUsd);
   const formatted = formatUSD(value);
   if (!thresholds || !Number.isFinite(value)) return formatted;
-  const match = thresholds.find((t) => value >= t.min);
+  // Strict >: ties at the cutoff are NOT highlighted. With heavy clustering
+  // (e.g. a long stretch of identical-reward rebalances) this is the
+  // fail-safe: if the cutoff isn't strictly above lower values, no row gets
+  // the tier rather than every tied row getting it.
+  const match = thresholds.find((t) => value > t.min);
   if (!match) return formatted;
   return (
     <span className={match.tier.className} title={match.tier.title}>
@@ -1325,22 +1348,13 @@ export function RebalancesTab({
     { poolId, limit: ENVIO_MAX_ROWS },
     REWARD_HIST_REFRESH_MS,
   );
-  const rewardThresholds = useMemo<RewardThresholds | null>(() => {
-    // Filter to positives: zero-reward rebalances aren't outlier candidates
-    // and including them would skew thresholds downward on pools that had a
-    // 0-bps reward phase.
-    const values = (rewardHistData?.RebalanceEvent ?? [])
-      .map((r) => (r.rewardUsd ? Number(r.rewardUsd) : Number.NaN))
-      .filter((v) => Number.isFinite(v) && v > 0)
-      .sort((a, b) => a - b);
-    if (values.length < MIN_REWARD_SAMPLE_SIZE) return null;
-    const at = (q: number) =>
-      values[Math.min(values.length - 1, Math.floor(values.length * q))];
-    return REWARD_OUTLIER_TIERS.map((tier) => ({
-      tier,
-      min: at(tier.quantile),
-    }));
-  }, [rewardHistData]);
+  const rewardThresholds = useMemo(
+    () =>
+      computeRewardThresholds(
+        (rewardHistData?.RebalanceEvent ?? []).map((r) => r.rewardUsd),
+      ),
+    [rewardHistData],
+  );
 
   // Separate chart query — fetch up to 200 events for the trend chart
   const { data: chartData } = useGQL<{ RebalanceEvent: RebalanceEvent[] }>(
