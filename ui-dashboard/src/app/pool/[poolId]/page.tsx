@@ -1192,29 +1192,34 @@ const EFFECTIVENESS_TOOLTIP =
 const REWARD_TOOLTIP =
   "Caller incentive paid for triggering this rebalance, in USD. Computed indexer-side as: |notional swap volume on the USD-pegged side| × Pool.rebalanceReward bps / 10000. Shows '—' when the pool has no USD-pegged side or the pre-rebalance reserve RPC failed.";
 
-// Below this many positive samples, p90/p95 are noise — skip highlighting.
-const MIN_REWARD_SAMPLE_SIZE = 20;
+// Below this many positive samples, MAD is too noisy — skip highlighting.
+// We picked 5 (down from the original 20 for percentiles) because MAD is
+// robust to small N: at N=5 a clear outlier already pulls clean of the
+// median+3·MAD cutoff, while percentiles need ~20+ samples for the cutoff
+// rank to mean anything.
+const MIN_REWARD_SAMPLE_SIZE = 5;
 
-// Ordered highest-tier-first so the renderer picks the strongest match.
-// Tooltips say "recent rebalances" because POOL_REBALANCE_REWARDS is
-// capped at ENVIO_MAX_ROWS (1000) — pools with longer history sample
-// from the recent window only.
+// Ordered strongest-tier-first so the renderer picks the bigger match.
+// `kMad` = how many MADs above the median a reward must clear to fire the
+// tier. 3·MAD ≈ z=2 for a normal distribution; 5·MAD ≈ z=3.4 — the
+// Iglewicz-Hoaglin "outlier" rule sits at ~3.5, so 5·MAD is a clean
+// "strong outlier" line.
 const REWARD_OUTLIER_TIERS = [
   {
-    quantile: 0.95,
+    kMad: 5,
     className: "text-amber-300 font-semibold",
-    title: "Top 5% reward across this pool's recent rebalances",
+    title: "Strong reward outlier — far above typical for this pool",
   },
   {
-    quantile: 0.9,
+    kMad: 3,
     className: "text-amber-400",
-    title: "Top 10% reward across this pool's recent rebalances",
+    title: "Reward outlier — above typical for this pool",
   },
 ] as const;
 
 type RewardThresholds = readonly {
   tier: (typeof REWARD_OUTLIER_TIERS)[number];
-  min: number;
+  cutoff: number;
 }[];
 
 // 5min refresh: distribution shifts <1% per new event, so the default 30s
@@ -1247,27 +1252,46 @@ export function toDisplayPrecision(value: number): number {
   return Number(m[1]) * scale;
 }
 
+function median(sorted: readonly number[]): number {
+  const n = sorted.length;
+  if (n === 0) return Number.NaN;
+  const mid = Math.floor(n / 2);
+  return n % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
 export function computeRewardThresholds(
   rawRewards: readonly (string | null | undefined)[],
 ): RewardThresholds | null {
   // Filter to positives: zero-reward rebalances aren't outlier candidates
-  // and including them would skew thresholds downward on pools that had a
-  // 0-bps reward phase. Round to display precision before sorting so the
-  // cutoff matches what users actually see in the cell.
+  // and including them would skew the median downward on pools that had a
+  // 0-bps reward phase. Round to display precision so two cells rendering
+  // as the same string always fold into the same data point — keeps the
+  // tier consistent with what users actually see.
   const values = rawRewards
     .map((r) => (r ? Number(r) : Number.NaN))
     .filter((v) => Number.isFinite(v) && v > 0)
     .map(toDisplayPrecision)
     .sort((a, b) => a - b);
   if (values.length < MIN_REWARD_SAMPLE_SIZE) return null;
-  // 1-based nearest-rank: ceil(n*q) gives the rank of the q-quantile, so
-  // ceil(n*q)-1 is the 0-based index of the largest value at-or-below it.
-  // Paired with strict `>` in the renderer this gives the top (n - ceil(n*q))
-  // rows. floor(n*q) under-counted by one — at exactly N=20 it resolved
-  // p95 to the max value so no row could ever fire the tier.
-  const at = (q: number) =>
-    values[Math.max(0, Math.ceil(values.length * q) - 1)];
-  return REWARD_OUTLIER_TIERS.map((tier) => ({ tier, min: at(tier.quantile) }));
+  const med = median(values);
+  // MAD = median of absolute deviations from the median. Replaces the
+  // earlier p90/p95 nearest-rank because percentile cutoffs land *inside*
+  // tail clusters on bimodal pools (e.g. a long stretch of identical
+  // ~$9.85 rebalances would put the cutoff at $9.85 itself, then strict
+  // `>` suppresses every row in the cluster — the exact bug seen on pool
+  // 143-0xd0e9…ce081). MAD measures spread relative to the bulk and so
+  // the cutoff sits *off* the cluster instead of in it.
+  const mad = median(
+    values.map((v) => Math.abs(v - med)).sort((a, b) => a - b),
+  );
+  // MAD = 0 means >half the samples are exactly identical: there is no
+  // meaningful "typical" scale, so highlighting becomes arbitrary. Skip
+  // rather than fall back to a fragile mean-deviation surrogate.
+  if (mad === 0) return null;
+  return REWARD_OUTLIER_TIERS.map((tier) => ({
+    tier,
+    cutoff: med + tier.kMad * mad,
+  }));
 }
 
 export function renderRewardCell(
@@ -1278,12 +1302,13 @@ export function renderRewardCell(
   const value = Number(rewardUsd);
   const formatted = formatUSD(value);
   if (!thresholds || !Number.isFinite(value)) return formatted;
-  // Compare at display precision so visually-identical cells always share a
-  // tier. Strict >: ties at the cutoff are NOT highlighted — with heavy
-  // clustering this keeps the tier meaningful instead of flagging every
-  // tied row.
+  // Compare at display precision so visually-identical cells always share
+  // a tier — strict `>` against a cutoff that lies between two raw values
+  // rendering identically would otherwise split them. (Practically rare
+  // with MAD because the cutoff sits well above the cluster, but a fixed
+  // cost defense.)
   const rounded = toDisplayPrecision(value);
-  const match = thresholds.find((t) => rounded > t.min);
+  const match = thresholds.find((t) => rounded > t.cutoff);
   if (!match) return formatted;
   return (
     <span className={match.tier.className} title={match.tier.title}>
