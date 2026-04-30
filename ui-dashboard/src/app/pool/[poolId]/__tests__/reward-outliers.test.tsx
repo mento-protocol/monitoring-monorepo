@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { computeRewardThresholds, renderRewardCell } from "../page";
+import {
+  computeRewardThresholds,
+  renderRewardCell,
+  toDisplayPrecision,
+} from "../page";
+import { formatUSD } from "@/lib/format";
 
 function markup(node: React.ReactNode): string {
   return renderToStaticMarkup(<>{node}</>);
@@ -102,6 +107,21 @@ describe("renderRewardCell", () => {
     const out = markup(renderRewardCell("7.63", tiedThresholds));
     expect(out).not.toContain("text-amber");
     expect(out).toContain("$7.63");
+  });
+
+  it("rounds in lockstep with formatUSD across $X50 boundaries (regression)", () => {
+    // formatUSD's `.toFixed(1)` rounds half-to-even-ish per IEEE-754, while
+    // a naive `Math.round(value / 100) * 100` rounds half-away-from-zero.
+    // They disagree at 1150, 1450, 1650, 1950 (and same family in $M
+    // tier) — exactly the visual-split bug this helper is meant to prevent.
+    // Parsing formatUSD's own output keeps the two in sync.
+    const samples = [
+      0.01, 9.85, 9.8493, 9.8511, 999.99, 1000, 1050, 1150, 1450, 1650, 1950,
+      999_949, 999_950, 1_234_567, 12_345_000,
+    ];
+    for (const v of samples) {
+      expect(formatUSD(toDisplayPrecision(v))).toBe(formatUSD(v));
+    }
   });
 
   it("paints visually identical cells with the same tier (regression)", () => {

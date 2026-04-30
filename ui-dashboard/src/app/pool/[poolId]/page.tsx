@@ -1223,15 +1223,20 @@ const REWARD_HIST_REFRESH_MS = 5 * 60_000;
 
 // Round to formatUSD's display precision so two values rendering as the
 // same string (e.g. 9.8493 and 9.8511 both → "$9.85") compare equal at the
-// percentile cutoff. Without this, a sub-cent difference can put visually
-// identical cells on different sides of the threshold, painting some
-// "$9.85" rows amber and leaving others plain. Tiers mirror formatUSD:
-// cents below $1K, $100 in $1K–$1M, $10K above.
+// percentile cutoff. Round-trips through formatUSD itself rather than
+// re-implementing the tier arithmetic — `.toFixed(1)`'s IEEE-754
+// round-half-to-even disagrees with `Math.round`'s round-half-away-from-zero
+// at $X50 boundaries (e.g. formatUSD(1150)="$1.1K" but Math.round(1150/100)
+// would give 1200 → "$1.2K"), reintroducing the same visual-split bug this
+// helper is supposed to fix. Parsing the formatted string keeps the two in
+// lockstep automatically as formatUSD's tiers evolve.
 export function toDisplayPrecision(value: number): number {
   if (!Number.isFinite(value)) return value;
-  if (value >= 999_950) return Math.round(value / 10_000) * 10_000;
-  if (value >= 1_000) return Math.round(value / 100) * 100;
-  return Math.round(value * 100) / 100;
+  const formatted = formatUSD(value);
+  const m = formatted.match(/^\$(-?\d+(?:\.\d+)?)([KM]?)$/);
+  if (!m) return value;
+  const scale = m[2] === "M" ? 1_000_000 : m[2] === "K" ? 1_000 : 1;
+  return Number(m[1]) * scale;
 }
 
 export function computeRewardThresholds(
