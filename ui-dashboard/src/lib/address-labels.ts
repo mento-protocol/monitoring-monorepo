@@ -80,8 +80,18 @@ async function listAllScopeKeys(redis: Redis): Promise<string[]> {
 //
 // Contract:
 //   KEYS[1]    = target scope key (`labels:global` or `labels:{chainId}`)
+//   KEYS[2..]  = OTHER scope keys to HDEL the addresses from
 //   ARGV[1]    = decimal count N of (address, value) pairs
 //   ARGV[2..]  = address, JSON-value, address, JSON-value, … (2N strings)
+//
+// We pass the "other scope keys" explicitly via KEYS instead of running
+// `redis.call('KEYS', 'labels:*')` inside the script. The `KEYS` command is
+// O(total-keys-in-db); after sharding `minipay:users` into 16 keys with
+// 16M+ SET members, Upstash's per-script Lua timeout (250 ms) trips on the
+// post-HSET KEYS scan even though the labels keyspace itself is tiny
+// (~3 keys). Surfacing the list to the caller (which already enumerated it
+// via getAllLabels for filtering) keeps the script bounded to constant work
+// per (HSET + HDEL) batch.
 //
 // Returns the number of pairs written (for assertions/logging).
 const STRICT_EITHER_OR_SCRIPT = `
@@ -100,10 +110,8 @@ for i = 0, count - 1 do
 end
 redis.call('HSET', unpack(hsetArgs))
 
--- KEYS 'labels:*' is O(total-keys-in-db); labels keyspace is tiny (one per
--- scope) so this is acceptable and avoids Lua-side SCAN pagination.
-local otherKeys = redis.call('KEYS', 'labels:*')
-for _, k in ipairs(otherKeys) do
+for i = 2, #KEYS do
+  local k = KEYS[i]
   if k ~= targetKey then
     redis.call('HDEL', k, unpack(addrs))
   end
@@ -151,9 +159,15 @@ export async function upsertEntry(
   const lower = address.toLowerCase();
   const targetKey = labelsKey(scope);
 
+  // Enumerate the existing labels keyspace ourselves so the Lua script
+  // doesn't have to. See STRICT_EITHER_OR_SCRIPT for why.
+  const otherKeys = (await listAllScopeKeys(redis)).filter(
+    (k) => k !== targetKey,
+  );
+
   await redis.eval(
     STRICT_EITHER_OR_SCRIPT,
-    [targetKey],
+    [targetKey, ...otherKeys],
     ["1", lower, JSON.stringify(value)],
   );
 }
@@ -230,5 +244,11 @@ export async function importLabels(
     args.push(addr.toLowerCase(), JSON.stringify(normalized));
   }
 
-  await redis.eval(STRICT_EITHER_OR_SCRIPT, [targetKey], args);
+  // Enumerate the existing labels keyspace ourselves so the Lua script
+  // doesn't have to. See STRICT_EITHER_OR_SCRIPT for why.
+  const otherKeys = (await listAllScopeKeys(redis)).filter(
+    (k) => k !== targetKey,
+  );
+
+  await redis.eval(STRICT_EITHER_OR_SCRIPT, [targetKey, ...otherKeys], args);
 }

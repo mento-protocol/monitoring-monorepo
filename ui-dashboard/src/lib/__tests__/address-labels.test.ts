@@ -28,6 +28,13 @@ const evalMock = Redis.prototype.eval as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default SCAN to a single empty page so importLabels/upsertEntry can
+  // enumerate the labels keyspace cleanly. Tests that need to exercise the
+  // multi-key cross-scope HDEL override this per-test.
+  (Redis.prototype.scan as ReturnType<typeof vi.fn>).mockResolvedValue([
+    "0",
+    [],
+  ]);
 });
 
 describe("getLabels", () => {
@@ -113,7 +120,7 @@ describe("upsertEntry — persists isPublic and enforces strict either/or", () =
     });
     expect(evalMock).toHaveBeenCalledTimes(1);
     const { keys, args } = evalCall(evalMock.mock.calls[0]);
-    expect(keys).toEqual(["labels:42220"]);
+    expect(keys[0]).toBe("labels:42220");
     const [{ addr, value }] = evalEntries(args);
     expect(addr).toBe("0xabc");
     expect((value as { isPublic: boolean }).isPublic).toBe(true);
@@ -122,19 +129,30 @@ describe("upsertEntry — persists isPublic and enforces strict either/or", () =
   it("writes to labels:global when scope is 'global'", async () => {
     await upsertEntry("global", "0xABC", { name: "Test", tags: [] });
     const { keys } = evalCall(evalMock.mock.calls[0]);
-    expect(keys).toEqual(["labels:global"]);
+    expect(keys[0]).toBe("labels:global");
   });
 
-  it("passes the Lua script that HDELs the address from every other scope", async () => {
-    await upsertEntry(42220, "0xABC", { name: "Celo", tags: [] });
+  it("passes other scope keys via KEYS[2..] for cross-scope HDEL", async () => {
+    // Caller-supplied SCAN returns a chain scope alongside the target's
+    // global scope; the eval call must include both via KEYS so the Lua
+    // script can HDEL from the chain scope without running KEYS itself.
+    (Redis.prototype.scan as ReturnType<typeof vi.fn>)
+      .mockReset()
+      .mockResolvedValueOnce(["0", ["labels:global", "labels:42220"]]);
+
+    await upsertEntry("global", "0xABC", { name: "Cross-chain", tags: [] });
+
     const { script, keys, args } = evalCall(evalMock.mock.calls[0]);
-    // The script itself performs the cross-scope HDEL atomically on the
-    // Redis server — we can't observe intermediate pipeline calls, but we
-    // can assert the script's cross-scope cleanup is part of the payload.
-    expect(script).toContain("'labels:*'");
-    expect(script).toContain("HDEL");
+    // Script no longer references the `labels:*` glob pattern; it iterates
+    // the explicit KEYS array. HSET/HDEL still present.
+    expect(script).not.toContain("'labels:*'");
+    expect(script).not.toContain("redis.call('KEYS'");
     expect(script).toContain("HSET");
-    expect(keys).toEqual(["labels:42220"]);
+    expect(script).toContain("HDEL");
+    // KEYS[1] is the target scope; KEYS[2..] are the OTHER scopes the script
+    // will HDEL from (target itself is filtered by k != targetKey in Lua).
+    expect(keys[0]).toBe("labels:global");
+    expect(keys.slice(1).sort()).toEqual(["labels:42220"]);
     const [{ addr }] = evalEntries(args);
     expect(addr).toBe("0xabc");
   });
@@ -142,7 +160,7 @@ describe("upsertEntry — persists isPublic and enforces strict either/or", () =
   it("upsert at global writes via the same atomic script path", async () => {
     await upsertEntry("global", "0xABC", { name: "Cross-chain", tags: [] });
     const { keys, args } = evalCall(evalMock.mock.calls[0]);
-    expect(keys).toEqual(["labels:global"]);
+    expect(keys[0]).toBe("labels:global");
     const [{ addr, value }] = evalEntries(args);
     expect(addr).toBe("0xabc");
     expect((value as { name: string }).name).toBe("Cross-chain");
@@ -195,7 +213,7 @@ describe("importLabels — isPublic coercion and invariant", () => {
 
     expect(evalMock).toHaveBeenCalledTimes(1);
     const { keys, args } = evalCall(evalMock.mock.calls[0]);
-    expect(keys).toEqual(["labels:global"]);
+    expect(keys[0]).toBe("labels:global");
     expect(Number(args[0])).toBe(2);
     const addrs = evalEntries(args).map((e) => e.addr);
     expect(addrs).toEqual(["0xaaa", "0xbbb"]);
