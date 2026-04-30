@@ -101,14 +101,10 @@ describe("GET /api/minipay/tag — filtering", () => {
     // intersect should be called with only 0xc — others were filtered out
     expect(mockIntersect).toHaveBeenCalledWith(["0xc"]);
 
-    // import should write only 0xc, with source=minipay; crossScopeHdel
-    // is opted out because the candidate filter already established that
-    // 0xc has no entry in any scope.
-    expect(mockImportLabels).toHaveBeenCalledWith(
-      "global",
-      { "0xc": expect.objectContaining({ source: "minipay" }) },
-      { crossScopeHdel: false },
-    );
+    // import should write only 0xc, with source=minipay
+    expect(mockImportLabels).toHaveBeenCalledWith("global", {
+      "0xc": expect.objectContaining({ source: "minipay" }),
+    });
   });
 
   it("dryRun returns the would-write addresses without persisting", async () => {
