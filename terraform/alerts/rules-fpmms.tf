@@ -1216,12 +1216,11 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
     # not "0.1000") and sub-bps jumps ("0.1727" not "0.17270").
     #
     # `current_oracle_price` / `previous_oracle_price` source from the
-    # bridge's `mento_pool_oracle_price` and `_prev_price` gauges (decimal-
-    # adjusted from FixidityLib 1e24 in metrics.ts:updateMetrics). Both
-    # gauges skip the 0n sentinel, so the `{{ if … }}` guards collapse the
-    # annotation cleanly when the indexer hasn't seen a second non-zero
-    # MedianUpdated yet — matches the pattern used by `current_reserves`
-    # for one-sided pools.
+    # bridge's `mento_pool_oracle_price` and `_prev_price` gauges. Both skip
+    # the 0 sentinel, so the `{{ if … }}` guards collapse the annotation
+    # cleanly when the indexer hasn't seen a second non-zero MedianUpdated
+    # yet — matches the pattern used by `current_reserves` for one-sided
+    # pools.
     #
     # `AgeNow` reuses `mento_pool_oracle_jump_at` rather than a separate
     # `oracle_price_at` series — at alert-fire time both equal `lastMedianAt`

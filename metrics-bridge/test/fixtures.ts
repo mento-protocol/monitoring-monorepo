@@ -27,7 +27,6 @@ export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
     lpFee: 5,
     protocolFee: 5,
     lastMedianPrice: "1150000000000000000000000",
-    lastMedianAt: "1713200000",
     prevMedianPrice: "1120000000000000000000000",
     prevMedianAt: "1713199580",
     lastOracleJumpBps: "3.0000",

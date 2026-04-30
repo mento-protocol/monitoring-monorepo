@@ -28,7 +28,6 @@ const BRIDGE_POOLS_QUERY = gql`
       lpFee
       protocolFee
       lastMedianPrice
-      lastMedianAt
       prevMedianPrice
       prevMedianAt
       lastOracleJumpBps

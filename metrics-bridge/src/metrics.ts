@@ -12,7 +12,16 @@ import {
   poolIdAddress,
   shortAddress,
 } from "@mento-protocol/monitoring-config/format";
+import { toHumanUnits } from "@mento-protocol/monitoring-config/units";
 import type { PoolRow } from "./types.js";
+
+// SortedOracles fixed-point scale — keep in sync with
+// `indexer-envio/src/priceDifference.ts:SORTED_ORACLES_DECIMALS` and the
+// dashboard's `ui-dashboard/src/lib/format.ts`. The contract reports rates
+// in FixidityLib units, so the bridge gauge has to divide by 10^24 before
+// it leaves the bridge for the alert template / dashboard tooltip to read
+// directly.
+const SORTED_ORACLES_DECIMALS = 24;
 
 // Pools we've already warned about — prevents log spam on the 30s poll loop.
 const warnedUnknownPools = new Set<string>();
@@ -183,13 +192,6 @@ export const gauges = {
     labelNames: poolLabels,
     registers: [register],
   }),
-  // Oracle median price + previous median price, decimal-adjusted from
-  // SortedOracles' 1e24 (FixidityLib) fixed-point. Used by the Oracle Jump
-  // alert to render "Current Oracle Price: 1.15 (7m ago) / Previous Oracle
-  // Price: 1.12 (Xm ago)" alongside the magnitude. Skipped when the indexer
-  // hasn't seen a non-zero median yet (raw value 0n) — the alert annotation
-  // gates on the value's presence so missing prev/current cleanly drop the
-  // line instead of rendering "0".
   oraclePrice: new Gauge({
     name: "mento_pool_oracle_price",
     help: "Most recent non-zero MedianUpdated price, decimal-adjusted (raw / 1e24) from SortedOracles' FixidityLib scale. Feed direction (1 feedToken = X quoteToken). Used by the Oracle Jump alert summary.",
@@ -312,17 +314,19 @@ export function updateMetrics(pools: PoolRow[]): void {
     }
     gauges.oracleJumpBps.set(labels, fp(pool.lastOracleJumpBps));
     gauges.oracleJumpAt.set(labels, Number(pool.lastOracleJumpAt));
-    // Oracle median price (current + previous), decimal-adjusted from 1e24
-    // FixidityLib scale. Skip 0 sentinels: the alert annotation gates on
-    // series presence, so a missing prev cleanly drops the "Previous Oracle
-    // Price" line instead of rendering 0. `Number()` of a 1e24-scale BigInt
-    // saturates to a float — fine for display since prices live in [1e-3,
-    // 1e3]; precision past ~15 sig figs is irrelevant for a humanised value.
-    if (BigInt(pool.lastMedianPrice) > 0n) {
-      gauges.oraclePrice.set(labels, Number(pool.lastMedianPrice) / 1e24);
+    // Skip the 0 sentinel: the alert annotation gates on series presence so
+    // a missing prev cleanly drops the line instead of rendering "0".
+    if (pool.lastMedianPrice !== "0") {
+      gauges.oraclePrice.set(
+        labels,
+        toHumanUnits(BigInt(pool.lastMedianPrice), SORTED_ORACLES_DECIMALS),
+      );
     }
-    if (BigInt(pool.prevMedianPrice) > 0n) {
-      gauges.oraclePrevPrice.set(labels, Number(pool.prevMedianPrice) / 1e24);
+    if (pool.prevMedianPrice !== "0") {
+      gauges.oraclePrevPrice.set(
+        labels,
+        toHumanUnits(BigInt(pool.prevMedianPrice), SORTED_ORACLES_DECIMALS),
+      );
       gauges.oraclePrevPriceAt.set(labels, Number(pool.prevMedianAt));
     }
     gauges.limitPressure.set(

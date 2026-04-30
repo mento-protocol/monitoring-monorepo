@@ -484,10 +484,6 @@ describe("updateMetrics", () => {
   });
 
   it("decimal-adjusts oracle median prices from FixidityLib 1e24 scale", async () => {
-    // 1.15 * 1e24 / 1e24 = 1.15. Default fixture uses GBPm/USDm-shaped values
-    // (1.15 current, 1.12 previous) so the alert annotation can render the
-    // canonical "Current Oracle Price: 1.15 / Previous Oracle Price: 1.12"
-    // example end-to-end without per-test overrides.
     updateMetrics([makePool()]);
     expect(
       await getGaugeValue(register, "mento_pool_oracle_price", poolLabels),
@@ -504,11 +500,7 @@ describe("updateMetrics", () => {
     ).toBe(1713199580);
   });
 
-  it("skips oracle price gauges when indexer hasn't seen a non-zero median", async () => {
-    // Matches the indexer's 0n sentinel (DEFAULT_ORACLE_FIELDS in pool.ts).
-    // Skipping mirrors deviationRatio's `-1` skip — the alert annotation
-    // gates on series presence so the line cleanly drops instead of
-    // rendering 0.
+  it("skips oracle price gauges on the 0 sentinel (no median yet)", async () => {
     updateMetrics([
       makePool({
         lastMedianPrice: "0",
@@ -531,11 +523,9 @@ describe("updateMetrics", () => {
     ).toBeUndefined();
   });
 
-  it("publishes current oracle price even before a second median (no prev yet)", async () => {
-    // First-ever-median path: indexer wrote `lastMedianPrice` but
-    // `prevMedianPrice` is still the 0 default. The current gauge must
-    // still emit so the alert summary can quote a price; only the prev
-    // pair is skipped.
+  it("publishes current oracle price before a second median (prev still 0)", async () => {
+    // First-ever-median path: only the prev pair is suppressed; the alert
+    // summary still needs `oracle_price` to quote a current value.
     updateMetrics([
       makePool({
         prevMedianPrice: "0",

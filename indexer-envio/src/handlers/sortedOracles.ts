@@ -186,31 +186,34 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       // `MedianUpdated.value` (not `existing.oraclePrice`, which gets
       // overwritten by OracleReported with per-reporter values between
       // medians). Null means no prior median to compare against, or the new
-      // median is 0 (transient oracle outage — leave the jump fields
-      // untouched rather than record a spurious 100%-down crash).
+      // median is 0 (transient oracle outage — leave jump/prev fields
+      // untouched rather than record a spurious 100%-down crash, so the
+      // alert annotation stays anchored to the last real prior median).
       const jumpBps = computeOracleJumpBps(
         existing.lastMedianPrice,
         oraclePrice,
       );
+      const isTransition = jumpBps !== null;
+      const isLiveMedian = oraclePrice > 0n;
       const lastOracleJumpBps = jumpBps ?? existing.lastOracleJumpBps;
-      const lastOracleJumpAt =
-        jumpBps !== null ? blockTimestamp : existing.lastOracleJumpAt;
-      // prev fields capture the now-superseded median BEFORE we overwrite
-      // lastMedian* below. Only update them when a real transition happened
-      // (jumpBps non-null): a transient outage (oraclePrice == 0) leaves
-      // both pairs untouched so the alert annotation stays anchored to the
-      // last real prior median.
-      const prevMedianPrice =
-        jumpBps !== null ? existing.lastMedianPrice : existing.prevMedianPrice;
-      const prevMedianAt =
-        jumpBps !== null ? existing.lastMedianAt : existing.prevMedianAt;
-      const lastMedianPrice =
-        oraclePrice > 0n ? oraclePrice : existing.lastMedianPrice;
-      // Track median timestamps independently of the jump fields so the alert
-      // can render "Current Oracle Price (Xm ago)" even on the first-ever
-      // median (when lastOracleJumpAt is still 0).
-      const lastMedianAt =
-        oraclePrice > 0n ? blockTimestamp : existing.lastMedianAt;
+      const lastOracleJumpAt = isTransition
+        ? blockTimestamp
+        : existing.lastOracleJumpAt;
+      const prevMedianPrice = isTransition
+        ? existing.lastMedianPrice
+        : existing.prevMedianPrice;
+      const prevMedianAt = isTransition
+        ? existing.lastMedianAt
+        : existing.prevMedianAt;
+      // `lastMedianAt` advances on every non-zero median (not just transitions)
+      // so the first-ever median also gets a timestamp — gives the next
+      // MedianUpdated a real `prevMedianAt` to capture instead of 0.
+      const lastMedianPrice = isLiveMedian
+        ? oraclePrice
+        : existing.lastMedianPrice;
+      const lastMedianAt = isLiveMedian
+        ? blockTimestamp
+        : existing.lastMedianAt;
 
       const updatedPool: Pool = {
         ...existing,

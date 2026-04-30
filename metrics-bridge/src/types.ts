@@ -20,7 +20,6 @@ export interface PoolRow {
   lpFee: number;
   protocolFee: number;
   lastMedianPrice: string;
-  lastMedianAt: string;
   prevMedianPrice: string;
   prevMedianAt: string;
   lastOracleJumpBps: string;
