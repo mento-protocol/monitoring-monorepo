@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { computeRewardThresholds, renderRewardCell } from "../page";
+import {
+  computeRewardThresholds,
+  renderRewardCell,
+  toDisplayPrecision,
+} from "../page";
+import { formatUSD } from "@/lib/format";
 
 function markup(node: React.ReactNode): string {
   return renderToStaticMarkup(<>{node}</>);
@@ -102,5 +107,57 @@ describe("renderRewardCell", () => {
     const out = markup(renderRewardCell("7.63", tiedThresholds));
     expect(out).not.toContain("text-amber");
     expect(out).toContain("$7.63");
+  });
+
+  it("rounds in lockstep with formatUSD across $X50 boundaries (regression)", () => {
+    // formatUSD's `.toFixed(1)` rounds half-to-even-ish per IEEE-754, while
+    // a naive `Math.round(value / 100) * 100` rounds half-away-from-zero.
+    // They disagree at 1150, 1450, 1650, 1950 (and same family in $M
+    // tier) — exactly the visual-split bug this helper is meant to prevent.
+    // Parsing formatUSD's own output keeps the two in sync.
+    //
+    // We assert the invariant tier comparison actually depends on: any two
+    // values that render to the same string round to the same threshold
+    // value. (Note: round-trip identity formatUSD(toDisplayPrecision(v)) ===
+    // formatUSD(v) does NOT hold at [999.995, 1000) where formatUSD's
+    // sub-$1K branch produces "$1000.00" — that's a cosmetic gap, not a
+    // tier-consistency one, since both values still round to 1000.)
+    const pairs: [number, number][] = [
+      [9.8493, 9.8518], // both "$9.85"
+      [1051, 1149], // both "$1.1K"
+      [1451, 1549], // both "$1.5K"
+      [1551, 1649], // both "$1.6K"
+      [1951, 2049], // both "$2K"
+      [1_234_400, 1_234_499], // both "$1.23M"
+    ];
+    for (const [a, b] of pairs) {
+      expect(formatUSD(a)).toBe(formatUSD(b));
+      expect(toDisplayPrecision(a)).toBe(toDisplayPrecision(b));
+    }
+  });
+
+  it("paints visually identical cells with the same tier (regression)", () => {
+    // Real bug on pool 143-0xd0e9…ce081: four rebalances rendered as $9.85
+    // (raw 9.8493/9.8496/9.8511/9.8518) but the raw-float comparison split
+    // them across the p95 cutoff, leaving three amber and one plain. The
+    // user can't see sub-cent differences, so two cells displaying "$9.85"
+    // must always share a tier.
+    const baseline = Array.from({ length: 25 }, (_, i) =>
+      String(0.1 + i * 0.1),
+    );
+    const cluster = ["9.8493", "9.8496", "9.8511", "9.8518"];
+    const thresholds = computeRewardThresholds([...baseline, ...cluster])!;
+    const tiers = cluster.map((v) => {
+      const out = markup(renderRewardCell(v, thresholds));
+      if (out.includes("text-amber-300")) return "p95";
+      if (out.includes("text-amber-400")) return "p90";
+      return "plain";
+    });
+    expect(new Set(tiers).size).toBe(1);
+    // And every cell formats identically — guards against future format
+    // changes silently splitting the cluster again.
+    cluster.forEach((v) => {
+      expect(markup(renderRewardCell(v, thresholds))).toContain("$9.85");
+    });
   });
 });
