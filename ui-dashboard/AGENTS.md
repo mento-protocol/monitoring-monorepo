@@ -101,6 +101,11 @@ These are the rules `cursor[bot]` and Codex have raised repeatedly across PRs #1
 - Per-event metrics that depend on a pool config value (e.g. peak severity % uses `rebalanceThreshold`) MUST capture the threshold at event time, NOT read the live `pool.rebalanceThreshold`
 - Re-scoring history with the current threshold means a config change retroactively rewrites past severity — bad for incident review
 
+### File-size budget
+
+- Soft cap: 600 lines/file (split in the same PR before crossing). Hard cap: 1,000 lines, enforced by `max-lines` in `eslint.config.mjs`. See `/AGENTS.md` for full rule + rationale.
+- Tab/route pages especially: if a file approaches 600 lines, extract per-tab modules under `_lib/` / `_components/` / `_tabs/` (Next.js App Router excludes underscore-prefixed dirs from routing). Reference: `src/app/pool/[poolId]/` for the pattern from PR #263.
+
 ### Hasura query hygiene
 
 - Lifetime-aggregate metrics (uptime %, total breach count, cumulative volume) MUST come from a pre-rolled snapshot/rollup entity — NOT from a paginated list

@@ -15,5 +15,19 @@ export default tseslint.config(
       parserOptions: { tsconfigRootDir: __dirname },
     },
   },
+  // File-size budget — see /AGENTS.md §"File-size budget".
+  {
+    files: ["src/**/*.ts"],
+    rules: {
+      "max-lines": [
+        "error",
+        { max: 1000, skipBlankLines: true, skipComments: true },
+      ],
+    },
+  },
+  {
+    files: ["__tests__/**", "**/*.test.ts"],
+    rules: { "max-lines": "off" },
+  },
   { ignores: ["**/node_modules/**", "dist/**"] },
 );

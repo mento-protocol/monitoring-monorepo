@@ -37,6 +37,28 @@ export default tseslint.config(
       globals: { ...globals.browser, ...globals.node, React: "readonly" },
     },
   },
+  // File-size budget — see AGENTS.md §"File-size budget" for rationale.
+  // Hard cap blocks merge; the 600-line soft cap is advisory in AGENTS.md.
+  // Per-file escape: `// eslint-disable-next-line max-lines` with a comment
+  // explaining why the file genuinely needs to stay big.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: {
+      "max-lines": [
+        "error",
+        { max: 1000, skipBlankLines: true, skipComments: true },
+      ],
+    },
+  },
+  {
+    files: [
+      "**/__tests__/**",
+      "**/*.test.{ts,tsx}",
+      "src/lib/queries.ts",
+      "src/lib/types.ts",
+    ],
+    rules: { "max-lines": "off" },
+  },
   {
     ignores: [
       "**/node_modules/**",

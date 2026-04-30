@@ -98,6 +98,13 @@ These rules come from PRs #184 and #194 — Codex flagged both as P1.
 - Block-keyed RPC caches (oracle reads, etc.) MUST be size-bounded. PR #184 fixed an OOM where the indexer cached one entry per block forever
 - Use an LRU or evict on block height advance; never an unbounded `Map`
 
+### File-size budget
+
+- Soft cap: 600 lines/file (advisory). Hard cap: 1,000 lines.
+- This package is exempt from ESLint (`.trunk/trunk.yaml` ignores `indexer-envio/**` for the `eslint` linter) — there's no mechanical enforcement here, so the rule is purely norms-based. Apply it anyway: `src/rpc.ts` (~1,900 lines) and `src/handlers/fpmm.ts` (~1,000 lines) are already over the cap and on the BACKLOG.md refactor list.
+- Suggested seams when splitting: per-method handlers in `rpc.ts` (one helper per RPC family); per-event handlers under `src/handlers/<entity>/` for big handler files.
+- Rationale + monthly drift detector: see `/AGENTS.md` §"File-size budget".
+
 ### Cross-checks before opening a PR
 
 - Run the queries the dashboard depends on against your local Hasura with a representative pool (one with hundreds of events) to catch silent truncation
