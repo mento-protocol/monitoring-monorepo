@@ -44,9 +44,8 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   if (pct == null) return NA;
 
   return (
-    <span className="font-medium">
-      <span className={uptimeColorClass(pct)}>{pct.toFixed(2)}%</span>
-      <span className="ml-1 text-xs text-slate-500">all-time</span>
+    <span className={`font-medium ${uptimeColorClass(pct)}`}>
+      {pct.toFixed(2)}%
     </span>
   );
 }

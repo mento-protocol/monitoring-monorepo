@@ -48,6 +48,16 @@ describe("UptimeValue", () => {
     expect(html).toContain("N/A");
   });
 
+  it("renders N/A when healthTotalSeconds is explicitly zero in the rollup row", () => {
+    nextRollup = {
+      data: {
+        Pool: [{ healthBinarySeconds: "0", healthTotalSeconds: "0" }],
+      },
+    };
+    const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
+    expect(html).toContain("N/A");
+  });
+
   it("renders N/A (not 'Query failed') when the rollup query errors out — indexer hasn't redeployed yet", () => {
     nextRollup = { error: new Error("field not found") };
     const pool: Pool = {
