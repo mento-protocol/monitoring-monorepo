@@ -44,6 +44,7 @@ const BASE_POOL = {
   hasHealthData: true,
   lpFee: 5,
   protocolFee: 5,
+  lastMedianPrice: "1150000000000000000000000",
   lastOracleJumpBps: "3.0000",
   lastOracleJumpAt: "1713200000",
   reserves0: "1",
@@ -86,7 +87,6 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           Pool: [
             {
               id: BASE_POOL.id,
-              lastMedianPrice: "1150000000000000000000000",
               prevMedianPrice: "1120000000000000000000000",
               prevMedianAt: "1713199580",
             },
@@ -106,10 +106,11 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
     });
   });
 
-  it("falls back to '0' lineage when Hasura reports an unknown field", async () => {
+  it("falls back to '0' prev-only lineage when Hasura reports an unknown field", async () => {
     // Simulates the deploy-window race where the bridge ships ahead of the
-    // indexer's schema migration. The base query keeps returning every
-    // pool's gauges; only the new annotation values are dropped.
+    // indexer's schema migration. `lastMedianPrice` rides on the base
+    // query (pre-existing column), so the current-price gauge keeps
+    // publishing — only `prevMedianPrice` / `prevMedianAt` degrade to "0".
     requestSpy.mockImplementation(({ document }: { document: unknown }) => {
       const doc = String(document);
       if (doc.includes("BridgePoolsOracleLineage")) {
@@ -122,10 +123,11 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
     expect(res.Pool).toHaveLength(1);
     expect(res.Pool[0]).toMatchObject({
       id: BASE_POOL.id,
-      lastMedianPrice: "0",
+      // Pre-existing column rides the base query — current-price gauge
+      // keeps working in degraded mode.
+      lastMedianPrice: "1150000000000000000000000",
       prevMedianPrice: "0",
       prevMedianAt: "0",
-      // Base fields untouched.
       lastOracleJumpBps: "3.0000",
     });
   });
@@ -142,7 +144,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
     await expect(fetchPools()).rejects.toThrow("network down");
   });
 
-  it("leaves lineage at '0' when the lineage query returns rows for other pools only", async () => {
+  it("leaves prev fields at '0' when the lineage query returns rows for other pools only", async () => {
     requestSpy.mockImplementation(({ document }: { document: unknown }) => {
       const doc = String(document);
       if (doc.includes("BridgePoolsOracleLineage")) {
@@ -150,7 +152,6 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
           Pool: [
             {
               id: "different-pool-id",
-              lastMedianPrice: "1",
               prevMedianPrice: "1",
               prevMedianAt: "1",
             },
@@ -163,7 +164,7 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
     const res = await fetchPools();
     expect(res.Pool[0]).toMatchObject({
       id: BASE_POOL.id,
-      lastMedianPrice: "0",
+      lastMedianPrice: "1150000000000000000000000",
       prevMedianPrice: "0",
       prevMedianAt: "0",
     });

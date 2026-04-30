@@ -1110,7 +1110,13 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
   rule {
     name           = "Oracle Jump Exceeds Swap Fee"
     condition      = "threshold"
-    for            = "0m"
+    # `for = "1m"` smooths transient NoData blips from the Mimir ruler. The
+    # threshold is "any in-band jump within the last 10m", so this does NOT
+    # add a meaningful duration requirement — same rationale as the
+    # `Deviation Breach Critical` rule (see the 2026-04-28 incident note
+    # above). A single-eval glitch in any annotation query would otherwise
+    # reset alert state to Normal between eval cycles.
+    for            = "1m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
@@ -1119,8 +1125,14 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
     # NOT in scope for Grafana annotation templates (see the deviation-
     # breach `Dev` query for the canonical rationale), so the math has to
     # live in the query.
+    #
+    # Both `JumpPct` and `FeePct` are nil-guarded with a `?` fallback. The
+    # bridge gates `mento_pool_swap_fee_bps` on the `-1` sentinel and
+    # `mento_pool_oracle_jump_bps` on series presence — either could be
+    # absent for a single eval cycle (bridge restart, Hasura blip), which
+    # would nil-panic an unguarded `printf $values.X.Value`.
     annotations = {
-      summary     = "Oracle price jumped {{ printf \"%.4g\" $values.JumpPct.Value }}% — above the pool's {{ if $values.FeePct }}{{ printf \"%.4g\" $values.FeePct.Value }}{{ else }}?{{ end }}% swap fee. LPs leaking per arb round-trip."
+      summary     = "Oracle price jumped {{ if $values.JumpPct }}{{ printf \"%.4g\" $values.JumpPct.Value }}{{ else }}?{{ end }}% — above the pool's {{ if $values.FeePct }}{{ printf \"%.4g\" $values.FeePct.Value }}{{ else }}?{{ end }}% swap fee. LPs leaking per arb round-trip."
       description = "Most recent MedianUpdated delta is above the pool's combined swap fee but still within 10% of it. Warning tier — a single large move isn't pageable, but repeated occurrences point to an oracle or sizing tune-up."
     }
 
@@ -1217,7 +1229,13 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
   rule {
     name           = "Oracle Jump Far Above Swap Fee"
     condition      = "threshold"
-    for            = "0m"
+    # `for = "1m"` smooths transient NoData blips from the Mimir ruler —
+    # same rationale as the warning tier and the deviation-breach critical
+    # rule (see the 2026-04-28 incident note earlier in this file). Without
+    # it, a single-eval glitch on any annotation-only query (e.g. the new
+    # oracle-price gauges during a bridge restart) would propagate NoData
+    # and reset alert state to Normal between cycles.
+    for            = "1m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
@@ -1239,7 +1257,7 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
     # (the handler updates them together when `jumpBps != null`). Skipping
     # the extra metric keeps cardinality flat without losing fidelity.
     annotations = {
-      summary               = "Oracle price jumped {{ printf \"%.4g\" $values.JumpPct.Value }}% — significantly above the pool's {{ if $values.FeePct }}{{ printf \"%.4g\" $values.FeePct.Value }}{{ else }}?{{ end }}% swap fee. LPs are at risk."
+      summary               = "Oracle price jumped {{ if $values.JumpPct }}{{ printf \"%.4g\" $values.JumpPct.Value }}{{ else }}?{{ end }}% — significantly above the pool's {{ if $values.FeePct }}{{ printf \"%.4g\" $values.FeePct.Value }}{{ else }}?{{ end }}% swap fee. LPs are at risk."
       description           = "Most recent MedianUpdated delta is at least 10% above the pool's combined swap fee. Arbitrageurs can round-trip through the pool faster than rebalancing can catch, and the leakage compounds with volume. Investigate the oracle feed and the rebalancer's next-cycle response."
       current_oracle_price  = "{{ if and $values.OraclePrice $values.AgeNow }}{{ printf \"%.4g\" $values.OraclePrice.Value }} ({{ humanizeDuration $values.AgeNow.Value }} ago){{ end }}"
       previous_oracle_price = "{{ if and $values.OraclePrev $values.PrevAge }}{{ printf \"%.4g\" $values.OraclePrev.Value }} ({{ humanizeDuration $values.PrevAge.Value }} ago){{ end }}"

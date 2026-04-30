@@ -6,11 +6,14 @@ const REQUEST_TIMEOUT_MS = 15_000;
 
 // `BRIDGE_POOLS_QUERY` is the load-bearing one — base pool state for every
 // FPMM gauge. Schema-stable: every field on it has been live in production
-// for >1 release. New indexer columns MUST land in
+// for >1 release. NEW indexer columns MUST land in
 // `BRIDGE_POOLS_ORACLE_LINEAGE_QUERY` (or a sibling) so a deploy-window
 // schema mismatch only loses the new annotation, not every pool gauge —
 // `fetchPools` falls back to base values when the lineage query fails with
-// an unknown-field error.
+// an unknown-field error. `lastMedianPrice` is on the BASE query because
+// it predates this PR (used by the indexer's jump computation since the
+// initial Oracle Jump alert), so degraded mode keeps publishing the
+// current-price gauge — only the previous-price pair drops out.
 const BRIDGE_POOLS_QUERY = gql`
   query BridgePools {
     Pool(where: { source: { _like: "%fpmm%" } }) {
@@ -34,6 +37,7 @@ const BRIDGE_POOLS_QUERY = gql`
       hasHealthData
       lpFee
       protocolFee
+      lastMedianPrice
       lastOracleJumpBps
       lastOracleJumpAt
       reserves0
@@ -45,16 +49,14 @@ const BRIDGE_POOLS_QUERY = gql`
   }
 `;
 
-// Optional companion query for the Oracle Jump alert annotations. Same row
-// set as `BRIDGE_POOLS_QUERY`, just the median-lineage columns. Isolated
-// so a schema/deploy-order mismatch (bridge ships ahead of indexer re-sync)
-// degrades to "no current/prev oracle price annotation" instead of "every
+// Optional companion query — only the truly new columns this PR introduced.
+// Isolated so a schema/deploy-order mismatch (bridge ships ahead of indexer
+// re-sync) degrades to "no previous-price annotation" instead of "every
 // pool metric stale".
 const BRIDGE_POOLS_ORACLE_LINEAGE_QUERY = gql`
   query BridgePoolsOracleLineage {
     Pool(where: { source: { _like: "%fpmm%" } }) {
       id
-      lastMedianPrice
       prevMedianPrice
       prevMedianAt
     }
@@ -63,17 +65,16 @@ const BRIDGE_POOLS_ORACLE_LINEAGE_QUERY = gql`
 
 type OracleLineageRow = Pick<
   PoolRow,
-  "id" | "lastMedianPrice" | "prevMedianPrice" | "prevMedianAt"
+  "id" | "prevMedianPrice" | "prevMedianAt"
 >;
 
 type BridgePoolsBaseResponse = {
-  Pool: Omit<PoolRow, "lastMedianPrice" | "prevMedianPrice" | "prevMedianAt">[];
+  Pool: Omit<PoolRow, "prevMedianPrice" | "prevMedianAt">[];
 };
 
 type BridgePoolsOracleLineageResponse = { Pool: OracleLineageRow[] };
 
 const LINEAGE_DEFAULTS = {
-  lastMedianPrice: "0",
   prevMedianPrice: "0",
   prevMedianAt: "0",
 } as const;
@@ -114,7 +115,7 @@ export async function fetchPools(): Promise<BridgePoolsResponse> {
         if (!unknownFieldWarned) {
           unknownFieldWarned = true;
           console.warn(
-            "[metrics-bridge] Hasura schema missing oracle-lineage fields; Oracle Jump current/previous price annotations disabled until indexer catches up.",
+            "[metrics-bridge] Hasura schema missing oracle-lineage fields; Oracle Jump previous-price annotation disabled until indexer catches up.",
           );
         }
         return { Pool: [] as OracleLineageRow[] };
