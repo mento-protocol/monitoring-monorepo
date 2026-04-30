@@ -13,6 +13,7 @@ vi.mock("@/lib/address-labels", () => ({
   deleteLabel: vi.fn().mockResolvedValue(undefined),
   isArkhamSourced: (entry: { source?: string; tags?: string[] }) =>
     entry.source === "arkham" || entry.tags?.includes("arkham") === true,
+  isMiniPaySourced: (entry: { source?: string }) => entry.source === "minipay",
 }));
 
 import { getAuthSession } from "@/auth";
@@ -430,6 +431,44 @@ describe("PUT /api/address-labels", () => {
       "global",
       address,
       expect.objectContaining({ source: "arkham" }),
+    );
+  });
+
+  it("preserves MiniPay source across user edits (regression: codex finding)", async () => {
+    // The MiniPay tagging cron writes `source: "minipay"`. Without explicit
+    // preservation, editing a MiniPay-tagged row would demote it to a custom
+    // entry and break the address-book badge classification.
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+    const address = "0x" + "b".repeat(40);
+    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      global: {
+        [address.toLowerCase()]: {
+          name: "MiniPay user",
+          tags: ["minipay"],
+          source: "minipay",
+          updatedAt: "2026-04-30T00:00:00Z",
+        },
+      },
+      chains: {},
+    });
+    const req = new NextRequest("http://localhost/api/address-labels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: "global",
+        address,
+        name: "Alice's MiniPay wallet", // user added a personal note via edit
+        tags: ["minipay", "friend"],
+      }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(200);
+    expect(upsertEntry).toHaveBeenCalledWith(
+      "global",
+      address,
+      expect.objectContaining({ source: "minipay" }),
     );
   });
 

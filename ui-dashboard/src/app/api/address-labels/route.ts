@@ -7,6 +7,7 @@ import {
   upsertEntry,
   deleteLabel,
   isArkhamSourced,
+  isMiniPaySourced,
   type Scope,
 } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
@@ -164,13 +165,18 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
       Object.values(all.chains).find((c) => c[addrLower] !== undefined)?.[
         addrLower
       ];
-    // Dual-check: legacy entries (the 27 pre-migration rows) carry the
-    // `arkham` tag but no `source` field, and the user's submitted tags
-    // never include the sentinel (PUT strips it at line 141). Without the
-    // dual-check, editing a legacy row would leave it with neither marker
-    // — and `isArkhamSourced` would stop recognising it.
-    const preservedSource =
-      prior && isArkhamSourced(prior) ? "arkham" : undefined;
+    // Preserve server-controlled provenance across user edits. PUT strips
+    // any user-supplied `source` (line 141), so any source we see on the
+    // prior entry was written by a server cron and must survive the edit.
+    // Dual-check on `isArkhamSourced` catches legacy pre-migration rows
+    // that carry the `arkham` tag but no `source` field.
+    const preservedSource = !prior
+      ? undefined
+      : isArkhamSourced(prior)
+        ? "arkham"
+        : isMiniPaySourced(prior)
+          ? "minipay"
+          : undefined;
 
     await upsertEntry(scope, address, {
       name: trimmedName,

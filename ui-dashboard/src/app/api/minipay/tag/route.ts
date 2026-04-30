@@ -129,10 +129,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         // to fresh addresses to avoid stomping Arkham/manual labels.
         const candidates = addresses
           .map((a) => a.toLowerCase())
-          .filter((a) => !existing[a])
-          .slice(0, maxAddresses);
+          .filter((a) => !existing[a]);
 
-        const matches = await intersectMiniPay(candidates);
+        // Intersect before slicing: `discoverMentoAddresses` returns
+        // alphabetically-sorted addresses, so a `.slice(0, maxAddresses)`
+        // applied to candidates would silently hide MiniPay users with
+        // higher-prefix addresses if the universe ever exceeds the cap.
+        // SMISMEMBER is the cheap step (chunked, ~10 round-trips per 10k).
+        const allMatches = await intersectMiniPay(candidates);
+        const matches = allMatches.slice(0, maxAddresses);
 
         const toWrite: Record<string, AddressEntry> = {};
         for (const addr of matches) {
