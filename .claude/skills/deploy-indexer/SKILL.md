@@ -44,10 +44,10 @@ switch to the main checkout.
 
 In parallel:
 
-- `git fetch origin` and `git rev-parse --abbrev-ref HEAD` — capture as `BRANCH`. Any branch is allowed; `main` is the common case but feature branches are fine for pre-merge deploys.
+- `git fetch origin` and `git rev-parse --abbrev-ref HEAD` — capture as `BRANCH`. If `BRANCH == "HEAD"` the working tree is detached (the documented `git checkout <sha>` flow); skip the upstream/divergence checks below and instead verify the SHA is reachable from `origin`: `git merge-base --is-ancestor HEAD origin/main || git for-each-ref --contains HEAD refs/remotes/origin/ | grep -q .`. If that fails, the commit was never pushed — surface and stop. If `BRANCH` is a regular branch, run the upstream/divergence checks below; `main` is the common case but feature branches are fine for pre-merge deploys.
 - `git status --porcelain` — must be empty. A dirty tree means uncommitted work; deploying it would ship a commit that doesn't exist on origin. Surface and stop.
-- Verify the branch tracks an upstream: `git rev-parse --abbrev-ref --symbolic-full-name @{upstream}` must succeed (and `git ls-remote --exit-code origin "$BRANCH"` must find the remote ref). A local-only branch with no upstream is not a valid deploy source — its `HEAD` was never pushed to `origin`, so the deploy would ship unreproducible code. Surface and stop; tell the user to `git push -u origin <branch>` first.
-- `git rev-list --left-right --count @{upstream}...HEAD` — both counts MUST be `0`. The right count (ahead) catches local commits that would silently ship via `envio` without ever landing on the tracked branch; the left count (behind) catches a stale local checkout that would deploy an outdated commit. If either is non-zero, surface the divergence and stop — the user must `git pull --rebase` (behind) or `git push` (ahead) first.
+- (Branch-mode only) Verify the branch tracks an upstream: `git rev-parse --abbrev-ref --symbolic-full-name @{upstream}` must succeed (and `git ls-remote --exit-code origin "$BRANCH"` must find the remote ref). A local-only branch with no upstream is not a valid deploy source — its `HEAD` was never pushed to `origin`, so the deploy would ship unreproducible code. Surface and stop; tell the user to `git push -u origin <branch>` first.
+- (Branch-mode only) `git rev-list --left-right --count @{upstream}...HEAD` — both counts MUST be `0`. The right count (ahead) catches local commits that would silently ship via `envio` without ever landing on the tracked branch; the left count (behind) catches a stale local checkout that would deploy an outdated commit. If either is non-zero, surface the divergence and stop — the user must `git pull --rebase` (behind) or `git push` (ahead) first.
 - Parse `$ARGUMENTS` for the boolean flags `--no-promote` and `--no-verify`; capture as `NO_PROMOTE` and `NO_VERIFY`. Any non-flag token (e.g. a stray SHA) is an error — surface and stop, since the underlying script doesn't accept one.
 - `git rev-parse --short HEAD` — capture as `TARGET_COMMIT`. The deploy always uses `HEAD`; to deploy a different commit, the user must check it out first.
 - If `BRANCH != main`: **default `NO_PROMOTE=true`** (fail-closed), and surface the branch name + commit short sha clearly. Override the default only when the user's request explicitly says "promote" / "go live" / similar — never on a bare `/deploy-indexer` from a feature branch. The reasoning: pre-merge deploys exist precisely because the dashboard codebase doesn't yet query the new schema; promoting before merge is almost always wrong, so make it explicit-opt-in instead of confirm-to-skip.
@@ -137,13 +137,23 @@ can print a paste-ready rollback command:
 
 ```bash
 PREVIOUS_PROD_COMMIT=$(npx envio-cloud indexer get mento mento-protocol -o json \
-  | jq -r '.data.deployments[] | select(.prod_status=="prod") | .commit_hash' \
+  | jq -r --arg target "<TARGET_COMMIT>" \
+      '.data.deployments[] | select(.prod_status=="prod") | select((.commit_hash | startswith($target)) | not) | .commit_hash' \
+  | head -n1 \
   | head -c 7)
 ```
 
-If no prior prod commit exists (first-ever promote), `PREVIOUS_PROD_COMMIT`
-is empty — the rollback line in the final summary then reads "(none — first
-prod deploy, no rollback target)".
+The `select(... | not)` clause excludes `TARGET_COMMIT` itself, which matters
+on the idempotent re-run path: if you re-run `/deploy-indexer` for a commit
+that's already `prod_status=prod`, the unfiltered query would return the
+same SHA and the final summary's "rollback command" would point at the
+commit just deployed — useless during an incident. Excluding the target
+gives you the previous prod commit, which is what rollback actually needs.
+
+If no prior prod commit exists (first-ever promote, or only the current
+target is in prod), `PREVIOUS_PROD_COMMIT` is empty — the rollback line in
+the final summary then reads "(none — no prior prod deploy, no rollback
+target)".
 
 Then promote:
 
