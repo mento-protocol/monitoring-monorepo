@@ -1192,6 +1192,49 @@ const EFFECTIVENESS_TOOLTIP =
 const REWARD_TOOLTIP =
   "Caller incentive paid for triggering this rebalance, in USD. Computed indexer-side as: |notional swap volume on the USD-pegged side| × Pool.rebalanceReward bps / 10000. Shows '—' when the pool has no USD-pegged side or the pre-rebalance reserve RPC failed.";
 
+// Below this many positive samples, p90/p95 are noise — skip highlighting.
+const MIN_REWARD_SAMPLE_SIZE = 20;
+
+// Ordered highest-tier-first so the renderer picks the strongest match.
+const REWARD_OUTLIER_TIERS = [
+  {
+    quantile: 0.95,
+    className: "text-amber-300 font-semibold",
+    title: "Top 5% reward for this pool",
+  },
+  {
+    quantile: 0.9,
+    className: "text-amber-400",
+    title: "Top 10% reward for this pool",
+  },
+] as const;
+
+type RewardThresholds = readonly {
+  tier: (typeof REWARD_OUTLIER_TIERS)[number];
+  min: number;
+}[];
+
+// 5min refresh: distribution shifts <1% per new event, so the default 30s
+// poll burns ~10x request volume on essentially-static data.
+const REWARD_HIST_REFRESH_MS = 5 * 60_000;
+
+function renderRewardCell(
+  rewardUsd: string | null | undefined,
+  thresholds: RewardThresholds | null,
+): React.ReactNode {
+  if (!rewardUsd) return "—";
+  const value = Number(rewardUsd);
+  const formatted = formatUSD(value);
+  if (!thresholds || !Number.isFinite(value)) return formatted;
+  const match = thresholds.find((t) => value >= t.min);
+  if (!match) return formatted;
+  return (
+    <span className={match.tier.className} title={match.tier.title}>
+      {formatted}
+    </span>
+  );
+}
+
 export function RebalancesTab({
   poolId,
   limit,
@@ -1273,23 +1316,30 @@ export function RebalancesTab({
     return baseRows.map((r) => ({ ...r, ...(usdById.get(r.id) ?? {}) }));
   }, [baseRows, usdData]);
 
-  // Full-pool-history reward distribution for p90/p95 outlier highlighting.
-  // Fetched separately so paginating the table doesn't refetch the
-  // distribution, and so a Hasura schema-lag degrades to "no highlighting"
-  // (graceful — query returns null/error → thresholds null → plain rendering).
+  // Full-pool-history reward distribution for outlier highlighting. Fetched
+  // separately so paginating the table doesn't refetch the distribution.
   const { data: rewardHistData } = useGQL<{
     RebalanceEvent: { id: string; rewardUsd: string | null }[];
-  }>(POOL_REBALANCE_REWARDS, { poolId, limit: ENVIO_MAX_ROWS });
-  const rewardThresholds = useMemo(() => {
+  }>(
+    POOL_REBALANCE_REWARDS,
+    { poolId, limit: ENVIO_MAX_ROWS },
+    REWARD_HIST_REFRESH_MS,
+  );
+  const rewardThresholds = useMemo<RewardThresholds | null>(() => {
+    // Filter to positives: zero-reward rebalances aren't outlier candidates
+    // and including them would skew thresholds downward on pools that had a
+    // 0-bps reward phase.
     const values = (rewardHistData?.RebalanceEvent ?? [])
       .map((r) => (r.rewardUsd ? Number(r.rewardUsd) : Number.NaN))
       .filter((v) => Number.isFinite(v) && v > 0)
       .sort((a, b) => a - b);
-    // Need a meaningful sample: with <20 positive rewards p90/p95 are noise.
-    if (values.length < 20) return null;
+    if (values.length < MIN_REWARD_SAMPLE_SIZE) return null;
     const at = (q: number) =>
       values[Math.min(values.length - 1, Math.floor(values.length * q))];
-    return { p90: at(0.9), p95: at(0.95) };
+    return REWARD_OUTLIER_TIERS.map((tier) => ({
+      tier,
+      min: at(tier.quantile),
+    }));
   }, [rewardHistData]);
 
   // Separate chart query — fetch up to 200 events for the trend chart
@@ -1425,32 +1475,7 @@ export function RebalancesTab({
                     {formatEffectivenessPercent(r.effectivenessRatio) ?? "—"}
                   </Td>
                   <Td mono small align="right">
-                    {(() => {
-                      if (!r.rewardUsd) return "—";
-                      const value = Number(r.rewardUsd);
-                      const formatted = formatUSD(value);
-                      if (!rewardThresholds || !Number.isFinite(value))
-                        return formatted;
-                      if (value >= rewardThresholds.p95)
-                        return (
-                          <span
-                            className="text-amber-300 font-semibold"
-                            title="Top 5% reward for this pool"
-                          >
-                            {formatted}
-                          </span>
-                        );
-                      if (value >= rewardThresholds.p90)
-                        return (
-                          <span
-                            className="text-amber-400"
-                            title="Top 10% reward for this pool"
-                          >
-                            {formatted}
-                          </span>
-                        );
-                      return formatted;
-                    })()}
+                    {renderRewardCell(r.rewardUsd, rewardThresholds)}
                   </Td>
                   <Td mono small muted align="right">
                     {formatBlock(r.blockNumber)}
