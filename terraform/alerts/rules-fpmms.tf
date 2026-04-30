@@ -1108,8 +1108,8 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
   interval_seconds = 60
 
   rule {
-    name           = "Oracle Jump Exceeds Swap Fee"
-    condition      = "threshold"
+    name      = "Oracle Jump Exceeds Swap Fee"
+    condition = "threshold"
     # `for = "1m"` smooths transient NoData blips from the Mimir ruler. The
     # threshold is "any in-band jump within the last 10m", so this does NOT
     # add a meaningful duration requirement — same rationale as the
@@ -1227,8 +1227,8 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
   }
 
   rule {
-    name           = "Oracle Jump Far Above Swap Fee"
-    condition      = "threshold"
+    name      = "Oracle Jump Far Above Swap Fee"
+    condition = "threshold"
     # `for = "1m"` smooths transient NoData blips from the Mimir ruler —
     # same rationale as the warning tier and the deviation-breach critical
     # rule (see the 2026-04-28 incident note earlier in this file). Without
