@@ -72,48 +72,60 @@ async function listAllScopeKeys(redis: Redis): Promise<string[]> {
 }
 
 // Lua script that atomically writes a batch of (address, value) pairs to a
-// target scope and HDELs the same addresses from every other `labels:*`
-// scope. The enumeration of "other" scopes happens inside the script's
-// atomic window, closing the race window that a separate SCAN → MULTI
-// opens: two concurrent writers creating first-time entries for the same
-// address on different chain scopes cannot both miss each other's new key.
+// target scope and (optionally) HDELs the same addresses from every other
+// `labels:*` scope.
+//
+// The enumeration of "other" scopes happens INSIDE the script's atomic
+// window — a separate client-side SCAN → EVAL would re-open the race
+// window where two concurrent writers each compute their `otherKeys` list
+// before either commits, miss each other's new scope, and leave the same
+// address in two scopes (violating the strict either/or invariant).
 //
 // Contract:
 //   KEYS[1]    = target scope key (`labels:global` or `labels:{chainId}`)
-//   KEYS[2..]  = OTHER scope keys to HDEL the addresses from
 //   ARGV[1]    = decimal count N of (address, value) pairs
-//   ARGV[2..]  = address, JSON-value, address, JSON-value, … (2N strings)
+//   ARGV[2]    = "1" (run cross-scope HDEL) | "0" (skip — caller asserts
+//                addresses are fresh in every scope)
+//   ARGV[3..]  = address, JSON-value, address, JSON-value, … (2N strings)
 //
-// We pass the "other scope keys" explicitly via KEYS instead of running
-// `redis.call('KEYS', 'labels:*')` inside the script. The `KEYS` command is
-// O(total-keys-in-db); after sharding `minipay:users` into 16 keys with
-// 16M+ SET members, Upstash's per-script Lua timeout (250 ms) trips on the
-// post-HSET KEYS scan even though the labels keyspace itself is tiny
-// (~3 keys). Surfacing the list to the caller (which already enumerated it
-// via getAllLabels for filtering) keeps the script bounded to constant work
-// per (HSET + HDEL) batch.
+// The `crossScopeHdel: false` path exists because `KEYS 'labels:*'` is
+// O(total-keys-in-db). After PR #258 sharded `minipay:users` into 16 SETs
+// with ~1M members each (16M+ Redis members), the post-HSET KEYS scan
+// pushes script execution past Upstash's 250 ms per-script Lua timeout —
+// even though the labels keyspace itself is still tiny (~3 keys).
+//
+// Cron-driven writes (`/api/minipay/tag?mode=new`, `/api/arkham/enrich`)
+// already filter out any address present in any scope before writing,
+// making the cross-scope HDEL provably a no-op. They opt out via "0".
+// User-driven writes (PUT, mode=refresh) keep the default "1" because
+// users *do* move entries between scopes via the editor.
 //
 // Returns the number of pairs written (for assertions/logging).
 const STRICT_EITHER_OR_SCRIPT = `
 local targetKey = KEYS[1]
 local count = tonumber(ARGV[1])
 if count == nil or count <= 0 then return 0 end
+local crossScopeHdel = ARGV[2] == '1'
 
 local addrs = {}
 local hsetArgs = { targetKey }
 for i = 0, count - 1 do
-  local addr = ARGV[2 + i * 2]
-  local value = ARGV[3 + i * 2]
+  local addr = ARGV[3 + i * 2]
+  local value = ARGV[4 + i * 2]
   addrs[#addrs + 1] = addr
   hsetArgs[#hsetArgs + 1] = addr
   hsetArgs[#hsetArgs + 1] = value
 end
 redis.call('HSET', unpack(hsetArgs))
 
-for i = 2, #KEYS do
-  local k = KEYS[i]
-  if k ~= targetKey then
-    redis.call('HDEL', k, unpack(addrs))
+if crossScopeHdel then
+  -- KEYS 'labels:*' is O(total-keys-in-db). Acceptable for low-frequency
+  -- user-driven writes; cron callers opt out via crossScopeHdel = '0'.
+  local otherKeys = redis.call('KEYS', 'labels:*')
+  for _, k in ipairs(otherKeys) do
+    if k ~= targetKey then
+      redis.call('HDEL', k, unpack(addrs))
+    end
   end
 end
 
@@ -159,16 +171,12 @@ export async function upsertEntry(
   const lower = address.toLowerCase();
   const targetKey = labelsKey(scope);
 
-  // Enumerate the existing labels keyspace ourselves so the Lua script
-  // doesn't have to. See STRICT_EITHER_OR_SCRIPT for why.
-  const otherKeys = (await listAllScopeKeys(redis)).filter(
-    (k) => k !== targetKey,
-  );
-
+  // User-driven write: cross-scope HDEL must run inside the script for
+  // race-free semantics (the user may be moving an entry between scopes).
   await redis.eval(
     STRICT_EITHER_OR_SCRIPT,
-    [targetKey, ...otherKeys],
-    ["1", lower, JSON.stringify(value)],
+    [targetKey],
+    ["1", "1", lower, JSON.stringify(value)],
   );
 }
 
@@ -219,20 +227,28 @@ export async function getAllLabels(): Promise<{
 /**
  * Import a batch of labels into a single scope.
  *
- * Uses the same atomic Lua script as `upsertEntry` so a batch write +
- * cross-scope HDEL completes with strict either/or guarantees even under
- * concurrent writers.
+ * Uses the same atomic Lua script as `upsertEntry`. Set
+ * `crossScopeHdel: false` when the caller has independently established
+ * that none of the addresses live in any other scope (e.g. cron writes
+ * that already filter against `getAllLabels()`). Skipping the in-script
+ * `KEYS 'labels:*'` scan avoids tripping Upstash's per-script Lua timeout
+ * once the database keyspace grows large — see STRICT_EITHER_OR_SCRIPT.
+ *
+ * Default `true` preserves the strict either/or invariant for callers
+ * (e.g. user-driven `import`) that may move addresses between scopes.
  */
 export async function importLabels(
   scope: Scope,
   labels: Record<string, AddressEntry>,
+  options: { crossScopeHdel?: boolean } = {},
 ): Promise<void> {
   const entries = Object.entries(labels);
   if (entries.length === 0) return;
   const redis = getRedis();
   const targetKey = labelsKey(scope);
 
-  const args: string[] = [String(entries.length)];
+  const crossScopeHdel = options.crossScopeHdel === false ? "0" : "1";
+  const args: string[] = [String(entries.length), crossScopeHdel];
   const now = new Date().toISOString();
   for (const [addr, entry] of entries) {
     const normalized: AddressEntry = {
@@ -244,11 +260,5 @@ export async function importLabels(
     args.push(addr.toLowerCase(), JSON.stringify(normalized));
   }
 
-  // Enumerate the existing labels keyspace ourselves so the Lua script
-  // doesn't have to. See STRICT_EITHER_OR_SCRIPT for why.
-  const otherKeys = (await listAllScopeKeys(redis)).filter(
-    (k) => k !== targetKey,
-  );
-
-  await redis.eval(STRICT_EITHER_OR_SCRIPT, [targetKey, ...otherKeys], args);
+  await redis.eval(STRICT_EITHER_OR_SCRIPT, [targetKey], args);
 }

@@ -155,7 +155,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       // Write to global scope — MiniPay attestations are issued on Celo
       // but the EOA itself is chain-agnostic. Mirrors the Arkham scope
       // choice (arkham/enrich/route.ts:178-185).
-      await importLabels("global", toWrite);
+      //
+      // crossScopeHdel: false — the candidate filter above guarantees
+      // none of these addresses live in any scope, so the script's
+      // KEYS scan + per-scope HDEL would be wasted work. Skipping it
+      // keeps the script under Upstash's 250 ms Lua timeout once the
+      // sharded `minipay:users:*` keyspace is populated (~16M members).
+      await importLabels("global", toWrite, { crossScopeHdel: false });
     }
 
     const body: TagResponse = {
