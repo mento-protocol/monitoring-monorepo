@@ -95,11 +95,7 @@ import {
   USDM_SYMBOLS,
 } from "@/lib/tokens";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
-import {
-  buildSearchBlob,
-  matchesSearch,
-  normalizeSearch,
-} from "@/lib/table-search";
+import { normalizeSearch } from "@/lib/table-search";
 import type {
   LiquidityEvent,
   LiquidityPosition,
@@ -126,102 +122,36 @@ export default function PoolDetailPage() {
   );
 }
 
-const TABS = [
-  "providers",
-  "swaps",
-  "reserves",
-  "rebalances",
-  "liquidity",
-  "oracle",
-  "limits",
-  "breaches",
-  "ols",
-] as const;
-type Tab = (typeof TABS)[number];
+import {
+  MIN_REWARD_SAMPLE_SIZE,
+  SEARCH_PARAM_BY_TAB,
+  TABS,
+  type Tab,
+} from "./_lib/constants";
+import {
+  addressSearchTerms,
+  decodePoolId,
+  getDebtTokenSideLabel,
+  getTabLabel,
+  matchesRowSearch,
+  parseTabLimit,
+  selectActiveOlsPool,
+} from "./_lib/helpers";
+import {
+  BOUNDARY_TOOLTIP,
+  EFFECTIVENESS_TOOLTIP,
+  REWARD_TOOLTIP,
+} from "./_lib/tooltips";
+import type { OracleSortCol } from "./_lib/types";
 
-const SEARCH_PARAM_BY_TAB: Record<Tab, string> = {
-  providers: "providersQ",
-  swaps: "swapsQ",
-  reserves: "reservesQ",
-  rebalances: "rebalancesQ",
-  liquidity: "liquidityQ",
-  oracle: "oracleQ",
-  limits: "limitsQ",
-  breaches: "breachesQ",
-  ols: "olsQ",
+// Re-export public helpers — `__tests__/ols.test.ts` and `page.test.tsx`
+// import these directly from "../page". Keep the import paths stable.
+export {
+  decodePoolId,
+  getDebtTokenSideLabel,
+  parseTabLimit,
+  selectActiveOlsPool,
 };
-
-function addressSearchTerms(
-  address: string | null | undefined,
-  getName: (address: string | null) => string,
-  getTags: (address: string | null) => string[],
-): Array<string | null | undefined> {
-  if (!address) return [];
-  return [address, getName(address), ...getTags(address)];
-}
-
-function matchesRowSearch(
-  query: string,
-  parts: Array<string | number | null | undefined>,
-): boolean {
-  return matchesSearch(buildSearchBlob(parts), query);
-}
-
-function getTabLabel(tab: Tab) {
-  if (tab === "providers") return "LPs";
-  if (tab === "ols") return "OLS";
-  if (tab === "breaches") return "Breaches";
-  return tab;
-}
-
-export function getDebtTokenSideLabel(
-  pool: Pool | null,
-  debtToken: string,
-): "token0" | "token1" | "unknown" {
-  if (!pool?.token0 || !pool?.token1 || !debtToken) return "unknown";
-  const normalizedDebtToken = debtToken.toLowerCase();
-  if (pool.token0.toLowerCase() === normalizedDebtToken) return "token0";
-  if (pool.token1.toLowerCase() === normalizedDebtToken) return "token1";
-  return "unknown";
-}
-
-/**
- * Defensive selector for the current OLS row shown in the pool detail view.
- *
- * The GraphQL query already filters `isActive = true`, but this helper makes the
- * UI robust against stale/misconfigured query changes and gives us a focused
- * regression test for multi-registration pools.
- */
-export function selectActiveOlsPool(
-  rows: OlsPool[] | null | undefined,
-): OlsPool | null {
-  if (!rows || rows.length === 0) return null;
-
-  const activeRows = rows.filter((row) => row.isActive);
-  if (activeRows.length === 0) return null;
-
-  return (
-    [...activeRows].sort(
-      (a, b) => Number(b.updatedAtTimestamp) - Number(a.updatedAtTimestamp),
-    )[0] ?? null
-  );
-}
-
-export function decodePoolId(rawPoolId: string): string {
-  try {
-    return decodeURIComponent(rawPoolId);
-  } catch {
-    return rawPoolId;
-  }
-}
-
-const MAX_TAB_LIMIT = 200;
-
-export function parseTabLimit(rawLimit: string | null): number {
-  const parsed = Number(rawLimit ?? "25");
-  if (!Number.isInteger(parsed) || parsed <= 0) return 25;
-  return Math.min(parsed, MAX_TAB_LIMIT);
-}
 
 function PoolDetail() {
   const { network } = useNetwork();
@@ -1183,17 +1113,8 @@ function ReservesTab({
   );
 }
 
-const BOUNDARY_TOOLTIP =
-  "Rebalance boundary in bps — the pool's allowed deviation from the oracle price. Effectiveness is measured against this boundary, not the oracle midpoint.";
-
-const EFFECTIVENESS_TOOLTIP =
-  "100% = rebalance landed exactly on the boundary (ideal). >100% = overshoot past the boundary (e.g. all the way to the oracle — over-correction, wastes reserves). <100% = control loop under-correcting. Negative = rebalance made deviation worse.";
-
-const REWARD_TOOLTIP =
-  "Caller incentive paid for triggering this rebalance, in USD. Computed indexer-side as: |notional swap volume on the USD-pegged side| × Pool.rebalanceReward bps / 10000. Shows '—' when the pool has no USD-pegged side or the pre-rebalance reserve RPC failed.";
-
-// Below this many positive samples, p90/p95 are noise — skip highlighting.
-const MIN_REWARD_SAMPLE_SIZE = 20;
+// Tooltips and the reward-sample-size constant moved to ./_lib so per-tab
+// component files can import them without re-extracting from the page module.
 
 // Ordered highest-tier-first so the renderer picks the strongest match.
 // Tooltips say "recent rebalances" because POOL_REBALANCE_REWARDS is
@@ -2038,12 +1959,6 @@ function LpsTab({
     </>
   );
 }
-
-type OracleSortCol =
-  | "timestamp"
-  | "oracleOk"
-  | "oraclePrice"
-  | "priceDifference";
 
 function OracleTab({
   poolId,
