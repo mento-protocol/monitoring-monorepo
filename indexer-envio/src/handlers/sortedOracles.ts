@@ -9,6 +9,7 @@ import {
   computeHealthStatus,
   maybePreloadPool,
   nextDeviationBreachStartedAt,
+  upsertDailySnapshot,
 } from "../pool";
 import { recordBreachTransition } from "../deviationBreach";
 import { recordHealthSample } from "../healthScore";
@@ -108,7 +109,12 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         existing.rebalanceThreshold,
         blockTimestamp,
       );
-      context.Pool.set({ ...finalPool, ...poolUpdate, ...breachPoolUpdate });
+      const persistedPool: Pool = {
+        ...finalPool,
+        ...poolUpdate,
+        ...breachPoolUpdate,
+      };
+      context.Pool.set(persistedPool);
 
       const snapshot: OracleSnapshot = {
         id:
@@ -128,6 +134,19 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
         ...snapshotFields,
       };
       context.OracleSnapshot.set(snapshot);
+
+      // Refresh the daily snapshot's frozen health counters even though no
+      // pool-side activity (swap/rebalance/mint/burn/UR) fired. Without
+      // this, a quiet pool whose only updates are oracle reports has no
+      // PoolDailySnapshot rows after the last activity event, and the 7d
+      // tile's "latest row <= sevenDaysAgo" anchor silently broadens past
+      // 7 days instead of degrading to "—".
+      await upsertDailySnapshot({
+        context,
+        pool: persistedPool,
+        blockTimestamp,
+        blockNumber,
+      });
     }),
   );
 });
@@ -233,11 +252,12 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         existing.rebalanceThreshold,
         blockTimestamp,
       );
-      context.Pool.set({
+      const persistedPool: Pool = {
         ...finalPool,
         ...poolUpdate,
         ...breachPoolUpdate,
-      });
+      };
+      context.Pool.set(persistedPool);
 
       const snapshot: OracleSnapshot = {
         id:
@@ -257,6 +277,15 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         ...snapshotFields,
       };
       context.OracleSnapshot.set(snapshot);
+
+      // Refresh the daily snapshot's frozen health counters even when no
+      // pool-side activity fires — see the OracleReported handler for why.
+      await upsertDailySnapshot({
+        context,
+        pool: persistedPool,
+        blockTimestamp,
+        blockNumber,
+      });
     }),
   );
 

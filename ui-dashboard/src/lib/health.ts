@@ -195,6 +195,14 @@ export function uptimeColorClass(pct: number): string {
   return "text-red-400";
 }
 
+/** Clamp `binary / total` to a percentage, returning `null` when the
+ * window is empty or either input isn't a finite non-negative number. */
+function clampedPct(binary: number, total: number): number | null {
+  if (!Number.isFinite(binary) || !Number.isFinite(total) || total <= 0)
+    return null;
+  return Math.max(0, Math.min(100, (binary / total) * 100));
+}
+
 /**
  * All-time uptime % for a pool. Reads the indexer's binary-health
  * accumulator (`healthBinarySeconds / healthTotalSeconds`), which counts
@@ -211,12 +219,56 @@ export function computePoolUptimePct(pool: {
   healthBinarySeconds?: string;
 }): number | null {
   if (isVirtualPool(pool)) return null;
-  const total = Number(pool.healthTotalSeconds ?? "0");
-  if (!Number.isFinite(total) || total <= 0) return null;
   if (pool.healthBinarySeconds == null) return null;
-  const binary = Number(pool.healthBinarySeconds);
-  if (!Number.isFinite(binary)) return null;
-  return Math.max(0, Math.min(100, (binary / total) * 100));
+  return clampedPct(
+    Number(pool.healthBinarySeconds),
+    Number(pool.healthTotalSeconds ?? "0"),
+  );
+}
+
+/** How old the daily-snapshot anchor is allowed to be before
+ * `computeWindowUptimePct` falls back to "—". The "last 7d" subtitle
+ * cutoff is bucketed to UTC midnight, so the picked anchor row is at most
+ * ~24h older than the cutoff under normal conditions. Anything past this
+ * threshold means the pool was inactive long enough that no snapshot was
+ * written close to the window start, and the window the math actually
+ * computes is wider than the label promises. */
+const ANCHOR_FRESHNESS_LIMIT_SECONDS = 8 * 86_400;
+
+/**
+ * Windowed uptime % from two snapshots of the indexer's binary-health
+ * accumulator. Differencing today's `Pool.healthBinarySeconds` against a
+ * `PoolDailySnapshot` captured at-or-before the window start gives the
+ * binary uptime % over the window. Returns `null` when either side is
+ * missing, the window has no measurable seconds, or the anchor row is so
+ * old that the math would silently widen the window past the "last 7d"
+ * label.
+ *
+ * The `anchorTotal === 0` short-circuit defends against the indexer
+ * resync window: a snapshot row written under the previous schema gets
+ * `0` defaults for the new `cumulativeHealth*` fields, which would
+ * otherwise make `(now - 0) / (total - 0) = all-time` and silently
+ * masquerade as a 7d number.
+ */
+export function computeWindowUptimePct(
+  now: { healthBinarySeconds?: string; healthTotalSeconds?: string },
+  anchor: {
+    timestamp?: string;
+    cumulativeHealthBinarySeconds?: string;
+    cumulativeHealthTotalSeconds?: string;
+  } | null,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): number | null {
+  if (!anchor) return null;
+  const anchorTs = Number(anchor.timestamp ?? "0");
+  if (anchorTs > 0 && nowSeconds - anchorTs > ANCHOR_FRESHNESS_LIMIT_SECONDS)
+    return null;
+  const anchorTotal = Number(anchor.cumulativeHealthTotalSeconds ?? "0");
+  if (anchorTotal <= 0) return null;
+  const anchorBinary = Number(anchor.cumulativeHealthBinarySeconds ?? "0");
+  const nowBinary = Number(now.healthBinarySeconds ?? "0");
+  const nowTotal = Number(now.healthTotalSeconds ?? "0");
+  return clampedPct(nowBinary - anchorBinary, nowTotal - anchorTotal);
 }
 
 /**

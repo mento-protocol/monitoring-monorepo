@@ -59,6 +59,8 @@ type SnapshotLike = {
   burnCount: number;
   cumulativeSwapCount: number;
   cumulativeVolume0: bigint;
+  cumulativeHealthBinarySeconds: bigint;
+  cumulativeHealthTotalSeconds: bigint;
 };
 
 const deployPool = async (
@@ -221,6 +223,24 @@ describe("PoolDailySnapshot rollup", () => {
       "swapVolume1 = 2e18 + 5e18",
     );
     assert.equal(daily!.cumulativeSwapCount, 2, "running total after 2 swaps");
+    // The daily snapshot must mirror the Pool's health accumulators
+    // exactly — if the fpmm handlers ever regress to passing the
+    // pre-recordHealthSample pool reference into upsertSnapshot, the
+    // snapshot will lag the Pool by one event and this assertion fails.
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
+      | { healthBinarySeconds: bigint; healthTotalSeconds: bigint }
+      | undefined;
+    assert.ok(pool, "Pool must exist after swaps");
+    assert.equal(
+      daily!.cumulativeHealthBinarySeconds,
+      pool!.healthBinarySeconds,
+      "snapshot mirrors Pool.healthBinarySeconds (no lag)",
+    );
+    assert.equal(
+      daily!.cumulativeHealthTotalSeconds,
+      pool!.healthTotalSeconds,
+      "snapshot mirrors Pool.healthTotalSeconds (no lag)",
+    );
   });
 
   it("creates separate PoolDailySnapshot rows across a UTC day boundary", async () => {

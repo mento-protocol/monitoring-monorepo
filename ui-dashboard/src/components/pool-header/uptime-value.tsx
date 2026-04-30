@@ -3,37 +3,70 @@
 import { isVirtualPool, type Pool } from "@/lib/types";
 import { InfoPopover } from "@/components/info-popover";
 import { useGQL } from "@/lib/graphql";
-import { POOL_BREACH_ROLLUP } from "@/lib/queries";
-import { computePoolUptimePct, uptimeColorClass } from "@/lib/health";
+import { POOL_BREACH_ROLLUP, POOL_HEALTH_7D_ANCHOR } from "@/lib/queries";
+import {
+  computePoolUptimePct,
+  computeWindowUptimePct,
+  uptimeColorClass,
+} from "@/lib/health";
 import { isFxPool } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
+import { SECONDS_PER_DAY } from "@/lib/time-series";
 
 const UPTIME_EXPLAINER =
-  "% of time the oracle was fresh AND price was within 1% of the rebalance threshold.\nStale oracle (no report past expiry) and price-deviation breaches both count as unhealthy.";
+  "% of time the oracle was fresh AND the pool's price stayed within the 1.01× tolerance of the rebalance threshold.\nStale oracle (no report past expiry) and price-deviation breaches both count as unhealthy.\n\n7d shows the same metric over the last 7 days, with a trend arrow vs all-time.";
 const UPTIME_FX_SUFFIX = "\nWeekends don't count into FX pool uptime.";
 
 const NA = <span className="text-slate-500">N/A</span>;
 
-type BreachRollup = {
+const ARROW = {
+  up: {
+    glyph: "↑",
+    className: "text-emerald-400",
+    aria: "trending up vs all-time",
+  },
+  down: {
+    glyph: "↓",
+    className: "text-red-400",
+    aria: "trending down vs all-time",
+  },
+} as const;
+
+type RollupRow = {
   healthBinarySeconds?: string;
   healthTotalSeconds?: string;
+};
+type DailyAnchorRow = {
+  cumulativeHealthBinarySeconds?: string;
+  cumulativeHealthTotalSeconds?: string;
 };
 
 export function UptimeValue({ pool }: { pool: Pool }) {
   const isVirtual = isVirtualPool(pool);
-  // Isolated rollup query so a hosted-Hasura schema lag during the
-  // healthBinarySeconds rollout degrades just this tile to N/A instead
-  // of breaking the whole pool page. Read BOTH fields from the same
-  // response so the numerator/denominator are a consistent snapshot —
-  // mixing with `pool.healthTotalSeconds` from POOL_DETAIL_WITH_HEALTH
-  // could pair counters captured at different polling cycles.
-  const { data, error } = useGQL<{ Pool: BreachRollup[] }>(
-    isVirtual ? null : POOL_BREACH_ROLLUP,
-    { id: pool.id, chainId: pool.chainId },
+  // Bucket the cutoff to UTC midnight so the SWR cache key only changes
+  // once per day — sub-second drift would otherwise invalidate the cache
+  // on every render.
+  const todayStart =
+    Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  const sevenDaysAgo = todayStart - 7 * SECONDS_PER_DAY;
+
+  // Fire the rollup (all-time) and the 7d-anchor as TWO separate queries.
+  // If hosted Hasura rejects the new `cumulativeHealth*` fields during the
+  // schema-rollout window, only the 7d subtitle degrades to "—"; the
+  // all-time line stays rendered.
+  const { data: rollupData, error: rollupError } = useGQL<{
+    Pool: RollupRow[];
+  }>(isVirtual ? null : POOL_BREACH_ROLLUP, {
+    id: pool.id,
+    chainId: pool.chainId,
+  });
+  const { data: anchorData } = useGQL<{ PoolDailySnapshot: DailyAnchorRow[] }>(
+    isVirtual ? null : POOL_HEALTH_7D_ANCHOR,
+    { id: pool.id, sevenDaysAgo },
   );
 
-  if (isVirtual || error) return NA;
-  const rollup = data?.Pool?.[0];
+  if (isVirtual || rollupError) return NA;
+  const rollup = rollupData?.Pool?.[0];
   if (!rollup) return NA;
 
   const pct = computePoolUptimePct({
@@ -43,9 +76,40 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   });
   if (pct == null) return NA;
 
+  const pct7d = computeWindowUptimePct(
+    rollup,
+    anchorData?.PoolDailySnapshot?.[0] ?? null,
+  );
+
+  // Suppress the arrow when both values round to the same 2-decimal
+  // string — anything finer would surface noise the user can't see.
+  let trend: keyof typeof ARROW | null = null;
+  if (pct7d != null && pct.toFixed(2) !== pct7d.toFixed(2)) {
+    trend = pct7d > pct ? "up" : "down";
+  }
+  const arrow = trend ? ARROW[trend] : null;
+
   return (
-    <span className={`font-medium ${uptimeColorClass(pct)}`}>
-      {pct.toFixed(2)}%
+    <span className="flex flex-col gap-0.5">
+      <span className="font-medium">
+        <span className={uptimeColorClass(pct)}>{pct.toFixed(2)}%</span>
+        <span className="ml-1 text-xs text-slate-500">all-time</span>
+      </span>
+      <span className="text-xs text-slate-500">
+        {pct7d != null ? (
+          <>
+            {arrow && (
+              <span className={arrow.className} aria-label={arrow.aria}>
+                {arrow.glyph}
+              </span>
+            )}
+            {arrow && " "}
+            {pct7d.toFixed(2)}% last 7d
+          </>
+        ) : (
+          "—"
+        )}
+      </span>
     </span>
   );
 }

@@ -347,6 +347,25 @@ export const POOL_BREACH_ROLLUP = `
   }
 `;
 
+// 7d-window anchor for the Uptime tile's "X.XX% last 7d" subtitle. Isolated
+// from POOL_BREACH_ROLLUP so a hosted-Hasura schema lag on the new
+// `cumulativeHealth*` fields degrades JUST the 7d subtitle to "—" — the
+// all-time line stays rendered. Same isolation pattern as POOL_BREACH_ROLLUP
+// itself uses against POOL_DETAIL_WITH_HEALTH.
+export const POOL_HEALTH_7D_ANCHOR = `
+  query PoolHealth7dAnchor($id: String!, $sevenDaysAgo: numeric!) {
+    PoolDailySnapshot(
+      where: { poolId: { _eq: $id }, timestamp: { _lte: $sevenDaysAgo } }
+      order_by: [{ timestamp: desc }]
+      limit: 1
+    ) {
+      timestamp
+      cumulativeHealthBinarySeconds
+      cumulativeHealthTotalSeconds
+    }
+  }
+`;
+
 // Single-row lookup of the *open* breach for a pool, keyed off the
 // `pool.deviationBreachStartedAt` anchor. Returns just the trip tx hash so
 // the DeviationCell can link "breach Xh ago" to the explorer. We can't fold

@@ -655,6 +655,8 @@ export const upsertDailySnapshot = async ({
         cumulativeSwapCount: pool.swapCount,
         cumulativeVolume0: pool.notionalVolume0,
         cumulativeVolume1: pool.notionalVolume1,
+        cumulativeHealthBinarySeconds: pool.healthBinarySeconds,
+        cumulativeHealthTotalSeconds: pool.healthTotalSeconds,
         blockNumber,
       }
     : {
@@ -673,6 +675,8 @@ export const upsertDailySnapshot = async ({
         cumulativeSwapCount: pool.swapCount,
         cumulativeVolume0: pool.notionalVolume0,
         cumulativeVolume1: pool.notionalVolume1,
+        cumulativeHealthBinarySeconds: pool.healthBinarySeconds,
+        cumulativeHealthTotalSeconds: pool.healthTotalSeconds,
         blockNumber,
       };
 
