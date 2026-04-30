@@ -58,6 +58,7 @@ export const ALL_POOLS_BREACH_ROLLUP = `
       id
       breachCount
       healthBinarySeconds
+      healthTotalSeconds
     }
   }
 `;
@@ -341,6 +342,7 @@ export const POOL_BREACH_ROLLUP = `
       id
       breachCount
       healthBinarySeconds
+      healthTotalSeconds
     }
   }
 `;

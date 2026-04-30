@@ -14,13 +14,19 @@ const UPTIME_FX_SUFFIX = "\nWeekends don't count into FX pool uptime.";
 
 const NA = <span className="text-slate-500">N/A</span>;
 
-type BreachRollup = { healthBinarySeconds?: string };
+type BreachRollup = {
+  healthBinarySeconds?: string;
+  healthTotalSeconds?: string;
+};
 
 export function UptimeValue({ pool }: { pool: Pool }) {
   const isVirtual = isVirtualPool(pool);
   // Isolated rollup query so a hosted-Hasura schema lag during the
   // healthBinarySeconds rollout degrades just this tile to N/A instead
-  // of breaking the whole pool page.
+  // of breaking the whole pool page. Read BOTH fields from the same
+  // response so the numerator/denominator are a consistent snapshot —
+  // mixing with `pool.healthTotalSeconds` from POOL_DETAIL_WITH_HEALTH
+  // could pair counters captured at different polling cycles.
   const { data, error } = useGQL<{ Pool: BreachRollup[] }>(
     isVirtual ? null : POOL_BREACH_ROLLUP,
     { id: pool.id, chainId: pool.chainId },
@@ -31,8 +37,9 @@ export function UptimeValue({ pool }: { pool: Pool }) {
   if (!rollup) return NA;
 
   const pct = computePoolUptimePct({
-    ...pool,
+    source: pool.source,
     healthBinarySeconds: rollup.healthBinarySeconds,
+    healthTotalSeconds: rollup.healthTotalSeconds,
   });
   if (pct == null) return NA;
 

@@ -4,6 +4,7 @@ import type { Pool } from "@/lib/types";
 
 type RollupRow = {
   healthBinarySeconds?: string;
+  healthTotalSeconds?: string;
 };
 
 type RollupResult = {
@@ -61,13 +62,16 @@ describe("UptimeValue", () => {
   it("renders 100.00% when the indexer's binary counter matches total observation seconds", () => {
     const total = 30 * 86400;
     nextRollup = {
-      data: { Pool: [{ healthBinarySeconds: String(total) }] },
+      data: {
+        Pool: [
+          {
+            healthBinarySeconds: String(total),
+            healthTotalSeconds: String(total),
+          },
+        ],
+      },
     };
-    const pool: Pool = {
-      ...BASE_POOL,
-      healthTotalSeconds: String(total),
-    };
-    const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
+    const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
     expect(html).toContain("100.00%");
   });
 
@@ -77,27 +81,59 @@ describe("UptimeValue", () => {
     const total = 30 * 86400;
     const binary = total - 3600;
     nextRollup = {
-      data: { Pool: [{ healthBinarySeconds: String(binary) }] },
+      data: {
+        Pool: [
+          {
+            healthBinarySeconds: String(binary),
+            healthTotalSeconds: String(total),
+          },
+        ],
+      },
     };
-    const pool: Pool = {
-      ...BASE_POOL,
-      healthTotalSeconds: String(total),
-    };
-    const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
+    const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
     expect(html).toContain("99.86%");
   });
 
   it("clamps to [0, 100] when binary > total (defensive — shouldn't happen, but rounding could push it)", () => {
     const total = 86400;
     nextRollup = {
-      data: { Pool: [{ healthBinarySeconds: String(total + 1) }] },
+      data: {
+        Pool: [
+          {
+            healthBinarySeconds: String(total + 1),
+            healthTotalSeconds: String(total),
+          },
+        ],
+      },
+    };
+    const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
+    expect(html).toContain("100.00%");
+  });
+
+  it("reads healthTotalSeconds from the rollup, not the pool prop, so the numerator/denominator pair is a same-query snapshot", () => {
+    // Stale pool prop says "30d of trading time"; rollup row says "60d".
+    // The pair must come from the rollup so a torn read across two
+    // queries can't briefly push pct over 100% (or under it).
+    const rollupTotal = 60 * 86400;
+    const rollupBinary = rollupTotal - 3600;
+    nextRollup = {
+      data: {
+        Pool: [
+          {
+            healthBinarySeconds: String(rollupBinary),
+            healthTotalSeconds: String(rollupTotal),
+          },
+        ],
+      },
     };
     const pool: Pool = {
       ...BASE_POOL,
-      healthTotalSeconds: String(total),
+      healthTotalSeconds: String(30 * 86400),
     };
     const html = renderToStaticMarkup(<UptimeValue pool={pool} />);
-    expect(html).toContain("100.00%");
+    // 1h unhealthy in 60d → 99.93%, NOT 99.86% (which is what the
+    // stale 30d pool prop would have produced).
+    expect(html).toContain("99.93%");
   });
 
   it("renders N/A when the rollup row is missing healthBinarySeconds (resync window — field not yet populated)", () => {

@@ -402,6 +402,7 @@ export async function fetchNetworkData(
         id: string;
         breachCount?: number;
         healthBinarySeconds?: string;
+        healthTotalSeconds?: string;
       }[];
     }>(ALL_POOLS_BREACH_ROLLUP, { chainId: network.chainId }),
     // RPC probe — no indexer entity for CDP strategy, so we detect by
@@ -425,6 +426,7 @@ export async function fetchNetworkData(
             ...p,
             breachCount: r.breachCount,
             healthBinarySeconds: r.healthBinarySeconds,
+            healthTotalSeconds: r.healthTotalSeconds ?? p.healthTotalSeconds,
           };
     });
   }
