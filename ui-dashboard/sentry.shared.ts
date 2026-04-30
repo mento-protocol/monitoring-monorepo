@@ -81,6 +81,17 @@ export function resolveTracesSampleRate(vercelEnv: string | undefined): number {
   return vercelEnv === "production" ? 0.2 : 1.0;
 }
 
+// Sentry recommends skipping `Sentry.init` entirely outside production-like
+// environments rather than relying on `enabled: false` (which still loads
+// instrumentation) or an undefined DSN (same caveat). VERCEL_ENV is set on
+// every Vercel deployment (production / preview / development) and unset on
+// localhost, so it's the natural gate.
+export function shouldEnableSentry(
+  vercelEnv: string | undefined = process.env.VERCEL_ENV,
+): boolean {
+  return Boolean(vercelEnv);
+}
+
 export function getServerSentryOptions(): Options {
   return {
     dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
