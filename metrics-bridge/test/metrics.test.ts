@@ -523,6 +523,29 @@ describe("updateMetrics", () => {
     ).toBeUndefined();
   });
 
+  it("skips prev gauges when only one of the (price, at) pair is non-zero", async () => {
+    // Migration corner case: the indexer column for `prevMedianAt` was added
+    // with default 0, so the first post-migration MedianUpdated will have
+    // prevMedianPrice carried from the old row but prevMedianAt = 0.
+    // Without pair-gating the bridge would publish a 1970 timestamp.
+    updateMetrics([
+      makePool({
+        prevMedianPrice: "1120000000000000000000000",
+        prevMedianAt: "0",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_prev_price", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_oracle_prev_price_at",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
   it("publishes current oracle price before a second median (prev still 0)", async () => {
     // First-ever-median path: only the prev pair is suppressed; the alert
     // summary still needs `oracle_price` to quote a current value.

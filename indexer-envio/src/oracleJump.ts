@@ -7,6 +7,51 @@ const JUMP_BPS_SCALE = 10n ** BigInt(JUMP_BPS_PRECISION);
 // the divide to keep `JUMP_BPS_PRECISION` decimals.
 const JUMP_BPS_NUMERATOR_SCALE = 10_000n * JUMP_BPS_SCALE;
 
+/** Lineage state the SortedOracles MedianUpdated handler reads from
+ * `existing` and writes back as the `Pool` row's median-lineage half. */
+export interface MedianLineageState {
+  lastMedianPrice: bigint;
+  lastMedianAt: bigint;
+  prevMedianPrice: bigint;
+  prevMedianAt: bigint;
+  lastOracleJumpBps: string;
+  lastOracleJumpAt: bigint;
+}
+
+/**
+ * Compute the next median-lineage state for a `MedianUpdated` event.
+ *
+ * Three cases the handler cares about:
+ *   - Zero new median (transient outage) → freeze every field; the alert
+ *     stays anchored to the last real prior median.
+ *   - First real median (no prior) → advance `lastMedian*` only;
+ *     `prev*` and `lastOracleJump*` stay 0 because no jump can be computed.
+ *   - Subsequent real median → capture `existing.lastMedian*` into
+ *     `prev*` BEFORE overwriting, and record the jump.
+ *
+ * Pure function so the handler stays a thin event glue layer and the
+ * three-case lineage invariant can be tested without the mockDb stack.
+ */
+export function computeMedianLineageNext(
+  existing: MedianLineageState,
+  oraclePrice: bigint,
+  blockTimestamp: bigint,
+): MedianLineageState {
+  const jumpBps = computeOracleJumpBps(existing.lastMedianPrice, oraclePrice);
+  const isTransition = jumpBps !== null;
+  const isLiveMedian = oraclePrice > 0n;
+  return {
+    lastMedianPrice: isLiveMedian ? oraclePrice : existing.lastMedianPrice,
+    lastMedianAt: isLiveMedian ? blockTimestamp : existing.lastMedianAt,
+    prevMedianPrice: isTransition
+      ? existing.lastMedianPrice
+      : existing.prevMedianPrice,
+    prevMedianAt: isTransition ? existing.lastMedianAt : existing.prevMedianAt,
+    lastOracleJumpBps: jumpBps ?? existing.lastOracleJumpBps,
+    lastOracleJumpAt: isTransition ? blockTimestamp : existing.lastOracleJumpAt,
+  };
+}
+
 /**
  * Compute the absolute % delta between two `MedianUpdated` prices and format
  * it as a bps string with 4 decimal places.

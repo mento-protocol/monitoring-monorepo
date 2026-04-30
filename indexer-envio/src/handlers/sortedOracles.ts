@@ -12,7 +12,7 @@ import {
 } from "../pool";
 import { recordBreachTransition } from "../deviationBreach";
 import { recordHealthSample } from "../healthScore";
-import { computeOracleJumpBps } from "../oracleJump";
+import { computeMedianLineageNext } from "../oracleJump";
 import {
   fetchReportExpiry,
   getPoolsByFeed,
@@ -182,38 +182,11 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
               blockNumber,
             )) ?? existing.oracleExpiry);
 
-      // Median-to-median jump: `existing.lastMedianPrice` is the previous
-      // `MedianUpdated.value` (not `existing.oraclePrice`, which gets
-      // overwritten by OracleReported with per-reporter values between
-      // medians). Null means no prior median to compare against, or the new
-      // median is 0 (transient oracle outage — leave jump/prev fields
-      // untouched rather than record a spurious 100%-down crash, so the
-      // alert annotation stays anchored to the last real prior median).
-      const jumpBps = computeOracleJumpBps(
-        existing.lastMedianPrice,
+      const lineage = computeMedianLineageNext(
+        existing,
         oraclePrice,
+        blockTimestamp,
       );
-      const isTransition = jumpBps !== null;
-      const isLiveMedian = oraclePrice > 0n;
-      const lastOracleJumpBps = jumpBps ?? existing.lastOracleJumpBps;
-      const lastOracleJumpAt = isTransition
-        ? blockTimestamp
-        : existing.lastOracleJumpAt;
-      const prevMedianPrice = isTransition
-        ? existing.lastMedianPrice
-        : existing.prevMedianPrice;
-      const prevMedianAt = isTransition
-        ? existing.lastMedianAt
-        : existing.prevMedianAt;
-      // `lastMedianAt` advances on every non-zero median (not just transitions)
-      // so the first-ever median also gets a timestamp — gives the next
-      // MedianUpdated a real `prevMedianAt` to capture instead of 0.
-      const lastMedianPrice = isLiveMedian
-        ? oraclePrice
-        : existing.lastMedianPrice;
-      const lastMedianAt = isLiveMedian
-        ? blockTimestamp
-        : existing.lastMedianAt;
 
       const updatedPool: Pool = {
         ...existing,
@@ -223,12 +196,7 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         oracleOk: true,
         oracleExpiry,
         oracleNumReporters: existing.oracleNumReporters,
-        lastMedianPrice,
-        lastMedianAt,
-        prevMedianPrice,
-        prevMedianAt,
-        lastOracleJumpBps,
-        lastOracleJumpAt,
+        ...lineage,
         updatedAtBlock: blockNumber,
         updatedAtTimestamp: blockTimestamp,
       };

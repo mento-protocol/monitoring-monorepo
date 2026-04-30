@@ -322,7 +322,11 @@ export function updateMetrics(pools: PoolRow[]): void {
         toHumanUnits(BigInt(pool.lastMedianPrice), SORTED_ORACLES_DECIMALS),
       );
     }
-    if (pool.prevMedianPrice !== "0") {
+    // Pair-gate the prev fields. Post-migration the first MedianUpdated has
+    // prevMedianPrice > 0 (carried from the old row) but prevMedianAt = 0
+    // (new column default), so a price-only check would render a 1970
+    // timestamp on the first jump after deploy.
+    if (pool.prevMedianPrice !== "0" && pool.prevMedianAt !== "0") {
       gauges.oraclePrevPrice.set(
         labels,
         toHumanUnits(BigInt(pool.prevMedianPrice), SORTED_ORACLES_DECIMALS),
