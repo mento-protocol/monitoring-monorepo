@@ -32,6 +32,13 @@ upstash_api_key = "..."
 # `terraform apply` succeeds without it.
 # arkham_api_key = "..."
 
+# ── Dune Analytics ────────────────────────────────────────────────────────────
+# API key for the nightly /api/minipay/sync cron that pulls MiniPay
+# attestations from Dune query 7404332 into the `minipay:users` Redis SET.
+# Generate at api.dune.com → Settings → API. Same `count`-gated pattern as
+# arkham_api_key — leave empty until provisioned.
+# dune_api_key = "..."
+
 # ── Google Cloud (metrics-bridge) ─────────────────────────────────────────────
 # Find with: gcloud organizations list
 gcp_org_id = "..."

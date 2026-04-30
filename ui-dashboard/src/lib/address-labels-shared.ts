@@ -56,6 +56,9 @@ export type AddressLabelsSnapshot = {
  */
 export const ARKHAM_TAG = "arkham";
 
+/** Provenance marker for the MiniPay tagging cron. */
+export const MINIPAY_SOURCE = "minipay";
+
 /**
  * True when an existing entry was written by the Arkham enrichment cron.
  * Accepts both the new shape (`source === "arkham"`) and legacy entries
@@ -66,6 +69,11 @@ export function isArkhamSourced(entry: {
   tags?: string[];
 }): boolean {
   return entry.source === "arkham" || entry.tags?.includes(ARKHAM_TAG) === true;
+}
+
+/** True when an existing entry was written by the MiniPay tagging cron. */
+export function isMiniPaySourced(entry: { source?: string }): boolean {
+  return entry.source === MINIPAY_SOURCE;
 }
 
 /**
