@@ -579,7 +579,7 @@ function AddressTableRow({
           </div>
         )}
       </td>
-      <td className="px-4 py-3">
+      <td className="px-4 py-3 whitespace-nowrap">
         {explorerUrl ? (
           <a
             href={explorerUrl}
@@ -599,7 +599,7 @@ function AddressTableRow({
           </span>
         )}
       </td>
-      <td className="px-4 py-3 max-w-xs">
+      <td className="px-4 py-3 max-w-[180px]">
         <span
           title={name}
           className={`block truncate text-sm ${isCustom ? "font-medium text-indigo-400" : "text-slate-300"}`}
@@ -614,7 +614,7 @@ function AddressTableRow({
           <span className="text-xs text-slate-600">—</span>
         )}
       </td>
-      <td className="px-4 py-3 text-xs text-slate-400 max-w-xs truncate">
+      <td className="px-4 py-3 text-xs text-slate-400 max-w-[180px] truncate">
         {notes ?? <span className="text-slate-600">—</span>}
       </td>
       <td className="px-4 py-3">
