@@ -33,6 +33,10 @@ const RUNTIME_IMPORT_ALLOWLIST = new Set<string>([
   // Same posture as backup: never serialises labels into HTML/RSC, only
   // reads to diff against existing entries before writing new ones.
   "src/app/api/arkham/enrich/route.ts",
+  // CRON_SECRET-gated cron endpoint that writes MiniPay-sourced labels.
+  // Same posture as arkham/enrich — reads existing labels to filter
+  // candidates, then writes only previously-unlabelled addresses.
+  "src/app/api/minipay/tag/route.ts",
   // Self-references / tests.
   "src/lib/address-labels.ts",
 ]);
