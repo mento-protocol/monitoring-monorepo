@@ -337,13 +337,23 @@ export const POOL_CONFIG_EXT = `
 // pool-level rollup (not the breach-row list) so the "% time critical"
 // SLO stays accurate past Hasura's 1000-row cap on the breach list itself.
 export const POOL_BREACH_ROLLUP = `
-  query PoolBreachRollup($id: String!, $chainId: Int!, $sevenDaysAgo: numeric!) {
+  query PoolBreachRollup($id: String!, $chainId: Int!) {
     Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
       id
       breachCount
       healthBinarySeconds
       healthTotalSeconds
     }
+  }
+`;
+
+// 7d-window anchor for the Uptime tile's "X.XX% last 7d" subtitle. Isolated
+// from POOL_BREACH_ROLLUP so a hosted-Hasura schema lag on the new
+// `cumulativeHealth*` fields degrades JUST the 7d subtitle to "—" — the
+// all-time line stays rendered. Same isolation pattern as POOL_BREACH_ROLLUP
+// itself uses against POOL_DETAIL_WITH_HEALTH.
+export const POOL_HEALTH_7D_ANCHOR = `
+  query PoolHealth7dAnchor($id: String!, $sevenDaysAgo: numeric!) {
     PoolDailySnapshot(
       where: { poolId: { _eq: $id }, timestamp: { _lte: $sevenDaysAgo } }
       order_by: [{ timestamp: desc }]

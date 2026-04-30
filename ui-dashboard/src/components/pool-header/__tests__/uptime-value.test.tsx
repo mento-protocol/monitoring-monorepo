@@ -11,18 +11,23 @@ type DailyAnchorRow = {
   cumulativeHealthTotalSeconds?: string;
 };
 
-type Result = {
-  data?: { Pool: RollupRow[]; PoolDailySnapshot: DailyAnchorRow[] };
+type RollupResult = {
+  data?: { Pool: RollupRow[] };
   error?: Error;
-  isLoading?: boolean;
+};
+type AnchorResult = {
+  data?: { PoolDailySnapshot: DailyAnchorRow[] };
+  error?: Error;
 };
 
-let next: Result = { data: undefined };
+let nextRollup: RollupResult = { data: undefined };
+let nextAnchor: AnchorResult = { data: { PoolDailySnapshot: [] } };
 
 vi.mock("@/lib/graphql", () => ({
   useGQL: (query: string | null) => {
     if (query == null) return { data: undefined };
-    if (query.includes("PoolBreachRollup")) return next;
+    if (query.includes("PoolBreachRollup")) return nextRollup;
+    if (query.includes("PoolHealth7dAnchor")) return nextAnchor;
     return { data: undefined };
   },
 }));
@@ -41,24 +46,22 @@ const BASE_POOL: Pool = {
   updatedAtTimestamp: "2000",
 };
 
+const noAnchor: AnchorResult = { data: { PoolDailySnapshot: [] } };
+
 beforeEach(() => {
-  next = { data: undefined };
+  nextRollup = { data: undefined };
+  nextAnchor = noAnchor;
 });
 
 describe("UptimeValue", () => {
   it("renders N/A when healthTotalSeconds is missing or zero", () => {
-    next = {
-      data: {
-        Pool: [{ healthBinarySeconds: "0" }],
-        PoolDailySnapshot: [],
-      },
-    };
+    nextRollup = { data: { Pool: [{ healthBinarySeconds: "0" }] } };
     const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
     expect(html).toContain("N/A");
   });
 
   it("renders N/A (not 'Query failed') when the rollup query errors out — indexer hasn't redeployed yet", () => {
-    next = { error: new Error("field not found") };
+    nextRollup = { error: new Error("field not found") };
     const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
     expect(html).toContain("N/A");
     expect(html).not.toContain("Query failed");
@@ -66,7 +69,7 @@ describe("UptimeValue", () => {
 
   it("renders 100.00% all-time / 100.00% last 7d when nothing has been unhealthy", () => {
     const total = 30 * 86400;
-    next = {
+    nextRollup = {
       data: {
         Pool: [
           {
@@ -74,6 +77,10 @@ describe("UptimeValue", () => {
             healthTotalSeconds: String(total),
           },
         ],
+      },
+    };
+    nextAnchor = {
+      data: {
         PoolDailySnapshot: [
           {
             cumulativeHealthBinarySeconds: String(total - 7 * 86400),
@@ -92,7 +99,7 @@ describe("UptimeValue", () => {
     // would smooth this into 99.9% and hide a real outage.
     const total = 30 * 86400;
     const binary = total - 3600;
-    next = {
+    nextRollup = {
       data: {
         Pool: [
           {
@@ -100,7 +107,6 @@ describe("UptimeValue", () => {
             healthTotalSeconds: String(total),
           },
         ],
-        PoolDailySnapshot: [],
       },
     };
     const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
@@ -109,7 +115,7 @@ describe("UptimeValue", () => {
 
   it("clamps to [0, 100] when binary > total (defensive — shouldn't happen, but rounding could push it)", () => {
     const total = 86400;
-    next = {
+    nextRollup = {
       data: {
         Pool: [
           {
@@ -117,7 +123,6 @@ describe("UptimeValue", () => {
             healthTotalSeconds: String(total),
           },
         ],
-        PoolDailySnapshot: [],
       },
     };
     const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
@@ -129,7 +134,7 @@ describe("UptimeValue", () => {
     // 7d window: 0h unhealthy → 100.00% → ↑ vs all-time.
     const totalAll = 30 * 86400;
     const binaryAll = totalAll - 100 * 3600;
-    next = {
+    nextRollup = {
       data: {
         Pool: [
           {
@@ -137,10 +142,12 @@ describe("UptimeValue", () => {
             healthTotalSeconds: String(totalAll),
           },
         ],
+      },
+    };
+    nextAnchor = {
+      data: {
         PoolDailySnapshot: [
           {
-            // 7d ago: same gap as today — i.e. the unhealthy time happened
-            // BEFORE the anchor. The 7d window has zero unhealthy seconds.
             cumulativeHealthBinarySeconds: String(binaryAll - 7 * 86400),
             cumulativeHealthTotalSeconds: String(totalAll - 7 * 86400),
           },
@@ -155,15 +162,11 @@ describe("UptimeValue", () => {
   });
 
   it("shows '↓' in red when 7d < all-time (recent regression)", () => {
-    // All-time: clean → 100.00%.
-    // 7d window: 1h unhealthy in 7d trading-seconds → ~99.40%.
     const totalAll = 30 * 86400;
     const binaryAll = totalAll;
     const anchorTotal = totalAll - 7 * 86400;
-    const anchorBinary = anchorTotal; // clean before window
-    // Inject 1h of unhealthy time inside the 7d window — i.e. binary
-    // grows by less than total since the anchor.
-    next = {
+    const anchorBinary = anchorTotal;
+    nextRollup = {
       data: {
         Pool: [
           {
@@ -171,6 +174,10 @@ describe("UptimeValue", () => {
             healthTotalSeconds: String(totalAll),
           },
         ],
+      },
+    };
+    nextAnchor = {
+      data: {
         PoolDailySnapshot: [
           {
             cumulativeHealthBinarySeconds: String(anchorBinary),
@@ -186,7 +193,7 @@ describe("UptimeValue", () => {
   });
 
   it("falls back to '—' for the 7d subtitle when no daily-snapshot anchor exists (pool too young)", () => {
-    next = {
+    nextRollup = {
       data: {
         Pool: [
           {
@@ -194,7 +201,6 @@ describe("UptimeValue", () => {
             healthTotalSeconds: String(86400),
           },
         ],
-        PoolDailySnapshot: [],
       },
     };
     const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
@@ -203,9 +209,32 @@ describe("UptimeValue", () => {
     expect(html).not.toMatch(/last 7d/);
   });
 
+  it("keeps the all-time line rendered when ONLY the 7d-anchor query fails (schema-lag isolation)", () => {
+    // The anchor query targets the new `cumulativeHealth*` fields, which
+    // the schema-rollout window can reject with "field not found". The
+    // all-time rollup must keep rendering — only the subtitle degrades.
+    const total = 30 * 86400;
+    const binary = total - 3600;
+    nextRollup = {
+      data: {
+        Pool: [
+          {
+            healthBinarySeconds: String(binary),
+            healthTotalSeconds: String(total),
+          },
+        ],
+      },
+    };
+    nextAnchor = { error: new Error("field not found") };
+    const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
+    expect(html).toContain("99.86%");
+    expect(html).toContain("—");
+    expect(html).not.toMatch(/last 7d/);
+  });
+
   it("suppresses the trend arrow when all-time and 7d round to the same 2-decimal value", () => {
     const total = 30 * 86400;
-    next = {
+    nextRollup = {
       data: {
         Pool: [
           {
@@ -213,6 +242,10 @@ describe("UptimeValue", () => {
             healthTotalSeconds: String(total),
           },
         ],
+      },
+    };
+    nextAnchor = {
+      data: {
         PoolDailySnapshot: [
           {
             cumulativeHealthBinarySeconds: String(total - 7 * 86400),
@@ -238,7 +271,7 @@ describe("UptimeValue", () => {
   });
 
   it("renders N/A while the rollup query is still loading (no 100% flash)", () => {
-    next = { data: undefined };
+    nextRollup = { data: undefined };
     const html = renderToStaticMarkup(<UptimeValue pool={BASE_POOL} />);
     expect(html).toContain("N/A");
     expect(html).not.toContain("100.00%");

@@ -3,7 +3,7 @@
 import { isVirtualPool, type Pool } from "@/lib/types";
 import { InfoPopover } from "@/components/info-popover";
 import { useGQL } from "@/lib/graphql";
-import { POOL_BREACH_ROLLUP } from "@/lib/queries";
+import { POOL_BREACH_ROLLUP, POOL_HEALTH_7D_ANCHOR } from "@/lib/queries";
 import {
   computePoolUptimePct,
   computeWindowUptimePct,
@@ -50,17 +50,23 @@ export function UptimeValue({ pool }: { pool: Pool }) {
     Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
   const sevenDaysAgo = todayStart - 7 * SECONDS_PER_DAY;
 
-  const { data, error } = useGQL<{
+  // Fire the rollup (all-time) and the 7d-anchor as TWO separate queries.
+  // If hosted Hasura rejects the new `cumulativeHealth*` fields during the
+  // schema-rollout window, only the 7d subtitle degrades to "—"; the
+  // all-time line stays rendered.
+  const { data: rollupData, error: rollupError } = useGQL<{
     Pool: RollupRow[];
-    PoolDailySnapshot: DailyAnchorRow[];
   }>(isVirtual ? null : POOL_BREACH_ROLLUP, {
     id: pool.id,
     chainId: pool.chainId,
-    sevenDaysAgo,
   });
+  const { data: anchorData } = useGQL<{ PoolDailySnapshot: DailyAnchorRow[] }>(
+    isVirtual ? null : POOL_HEALTH_7D_ANCHOR,
+    { id: pool.id, sevenDaysAgo },
+  );
 
-  if (isVirtual || error) return NA;
-  const rollup = data?.Pool?.[0];
+  if (isVirtual || rollupError) return NA;
+  const rollup = rollupData?.Pool?.[0];
   if (!rollup) return NA;
 
   const pct = computePoolUptimePct({
@@ -72,7 +78,7 @@ export function UptimeValue({ pool }: { pool: Pool }) {
 
   const pct7d = computeWindowUptimePct(
     rollup,
-    data?.PoolDailySnapshot?.[0] ?? null,
+    anchorData?.PoolDailySnapshot?.[0] ?? null,
   );
 
   // Suppress the arrow when both values round to the same 2-decimal
