@@ -122,9 +122,9 @@ describe("cursor helpers", () => {
     expect(await getLastSyncedBlock()).toBe(BigInt(1234567890));
   });
 
-  it("getLastSyncedBlock returns BigInt(0) on garbage input (defensive)", async () => {
+  it("getLastSyncedBlock throws on garbage input — surface, don't silently reset", async () => {
     getMock.mockResolvedValue("not-a-number");
-    expect(await getLastSyncedBlock()).toBe(BigInt(0));
+    await expect(getLastSyncedBlock()).rejects.toThrow();
   });
 
   it("setLastSyncedBlock writes BigInt as decimal string", async () => {

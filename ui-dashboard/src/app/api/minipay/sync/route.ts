@@ -10,10 +10,8 @@ import {
   setLastSyncedBlock,
 } from "@/lib/minipay";
 
-// Vercel hobby/pro hard-caps the per-invocation duration on `serverless`. A
-// full Dune backfill (~5M rows paginated) plus chunked SADD into Upstash
-// fits comfortably under 800s on the first run; incremental runs are
-// seconds-long. `nodejs` runtime needed for fetch + setTimeout pacing.
+// `nodejs` runtime needed for fetch + setTimeout pacing in the Dune client.
+// 800s budget covers the first-run full backfill; incremental runs are seconds.
 export const runtime = "nodejs";
 export const maxDuration = 800;
 
@@ -67,14 +65,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           lastBlock: fromBlock,
         });
 
-        // SADD before cursor advancement. If SADD throws partway, the
-        // cursor stays at fromBlock so the next run re-pulls from there —
-        // SADD is idempotent on existing members.
+        // SADD is idempotent — partial failure leaves the cursor untouched
+        // so the next run re-pulls the missing rows.
         const added = await addToMiniPaySet(addresses);
 
-        // Cursor only advances when we actually saw rows. An empty result
-        // set leaves it where it was so a transient Dune blank doesn't
-        // strand us on a stale block.
         if (maxBlock > fromBlock) {
           await setLastSyncedBlock(maxBlock);
         }

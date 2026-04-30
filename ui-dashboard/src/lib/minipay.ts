@@ -88,7 +88,6 @@ type DuneResultsResponse = {
     rows: Array<Record<string, unknown>>;
     metadata?: {
       next_offset?: number;
-      total_row_count?: number;
     };
   };
   next_offset?: number;
@@ -189,7 +188,7 @@ async function fetchResultsPage(
   return (await res.json()) as DuneResultsResponse;
 }
 
-export type FetchResult = {
+type FetchResult = {
   addresses: string[];
   /** Highest `max_block` seen across the result set. `0n` if no rows. */
   maxBlock: bigint;
@@ -282,11 +281,10 @@ export async function intersectMiniPay(addresses: string[]): Promise<string[]> {
 export async function getLastSyncedBlock(): Promise<bigint> {
   const raw = await getRedis().get<string | number>(LAST_BLOCK_KEY);
   if (raw === null || raw === undefined) return BigInt(0);
-  try {
-    return BigInt(String(raw));
-  } catch {
-    return BigInt(0);
-  }
+  // Parse failure here means Redis was corrupted or written by something
+  // outside `setLastSyncedBlock` — surface to Sentry rather than silently
+  // resetting the cursor (which would force a full re-pull from Dune).
+  return BigInt(String(raw));
 }
 
 export async function setLastSyncedBlock(block: bigint): Promise<void> {

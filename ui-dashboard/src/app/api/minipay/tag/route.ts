@@ -96,14 +96,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           getMiniPaySetSize(),
         ]);
 
-        if (minipaySetSize === 0) {
-          // The sync cron hasn't populated the set yet (or it was wiped).
-          // Surface as a no-op success rather than tagging zero addresses
-          // and burning the discovery work.
-          throw new Error("minipay_set_empty");
-        }
-
         const { addresses, perEntity } = discovery;
+
+        if (minipaySetSize === 0) {
+          // Sync cron hasn't populated the set yet (or it was wiped). Return
+          // a clean no-op so the cron still checks-in to Sentry; throwing
+          // would page on a recoverable state (next sync run repopulates).
+          const body: TagResponse = {
+            ok: true,
+            mode,
+            discovered: addresses.length,
+            candidates: 0,
+            minipaySetSize: 0,
+            matched: 0,
+            written: 0,
+            durationMs: Date.now() - startedAt,
+            perEntity,
+          };
+          return NextResponse.json(body);
+        }
 
         // Flatten every scope into one map for filtering. Same rationale as
         // arkham/enrich/route.ts:135-138 — strict either/or invariant means

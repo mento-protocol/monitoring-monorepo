@@ -130,12 +130,24 @@ describe("GET /api/minipay/tag — filtering", () => {
     expect(mockImportLabels).not.toHaveBeenCalled();
   });
 
-  it("500s when MiniPay set is empty (sync hasn't populated it yet)", async () => {
+  it("returns clean no-op when MiniPay set is empty (sync hasn't populated yet)", async () => {
     mockSetSize.mockResolvedValue(0);
-    mockDiscover.mockResolvedValue({ addresses: [], perEntity: [] });
+    mockDiscover.mockResolvedValue({
+      addresses: ["0xa", "0xb"],
+      perEntity: [],
+    });
     mockGetAllLabels.mockResolvedValue({ global: {}, chains: {} });
 
     const res = await GET(makeReq({ bearer: "cron-secret" }));
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      matched: number;
+      written: number;
+      minipaySetSize: number;
+    };
+    expect(body.matched).toBe(0);
+    expect(body.written).toBe(0);
+    expect(body.minipaySetSize).toBe(0);
+    expect(mockImportLabels).not.toHaveBeenCalled();
   });
 });
