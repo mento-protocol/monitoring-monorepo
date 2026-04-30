@@ -46,7 +46,7 @@ In parallel:
 
 - `git fetch origin` and `git rev-parse --abbrev-ref HEAD` — capture as `BRANCH`. Any branch is allowed; `main` is the common case but feature branches are fine for pre-merge deploys.
 - `git status --porcelain` — must be empty. A dirty tree means uncommitted work; deploying it would ship a commit that doesn't exist on origin. Surface and stop.
-- `git log @{upstream}..HEAD --oneline` (if branch tracks an upstream) — must be empty (i.e. all local commits are pushed). Refuse if local is ahead of remote — those commits would silently ship via `envio` without ever landing on `main`/the feature branch.
+- `git rev-list --left-right --count @{upstream}...HEAD` (if branch tracks an upstream) — both counts MUST be `0`. The right count (ahead) catches local commits that would silently ship via `envio` without ever landing on the tracked branch; the left count (behind) catches a stale local checkout that would deploy an outdated commit. If either is non-zero, surface the divergence and stop — the user must `git pull --rebase` (behind) or `git push` (ahead) first.
 - Parse `$ARGUMENTS` for the boolean flags `--no-promote` and `--no-verify`; capture as `NO_PROMOTE` and `NO_VERIFY`. Any non-flag token (e.g. a stray SHA) is an error — surface and stop, since the underlying script doesn't accept one.
 - `git rev-parse --short HEAD` — capture as `TARGET_COMMIT`. The deploy always uses `HEAD`; to deploy a different commit, the user must check it out first.
 - If `BRANCH != main`: surface the branch name + commit short sha clearly, and confirm the user wants a pre-merge deploy. Skip the prompt only if `NO_PROMOTE` is set or the user's request explicitly mentions pre-merge / feature branch / pre-loading.
@@ -230,7 +230,7 @@ short-circuit; the verification is the value on a re-run.
 
 ## Rules
 
-- **Never force-push** — neither to `envio` nor to `main`.
+- **Never manually force-push** to `main` or any tracked branch. The `pnpm deploy:indexer` script's `--force-with-lease` push to `envio` is the one sanctioned exception (and `envio` is a deploy-trigger ref, not a tracking branch); any other force-push is off-limits.
 - **Never auto-rollback.** Promote-to-prior is the user's call.
 - **Never bypass the babysit phase** — don't promote based on a single status snapshot.
 - **Always wait the full 5 min** for DNS switchover before verifying — bypassing produces flaky verify results.
