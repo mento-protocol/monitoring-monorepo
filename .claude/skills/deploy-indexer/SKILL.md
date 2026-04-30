@@ -46,7 +46,8 @@ In parallel:
 
 - `git fetch origin` and `git rev-parse --abbrev-ref HEAD` — capture as `BRANCH`. Any branch is allowed; `main` is the common case but feature branches are fine for pre-merge deploys.
 - `git status --porcelain` — must be empty. A dirty tree means uncommitted work; deploying it would ship a commit that doesn't exist on origin. Surface and stop.
-- `git rev-list --left-right --count @{upstream}...HEAD` (if branch tracks an upstream) — both counts MUST be `0`. The right count (ahead) catches local commits that would silently ship via `envio` without ever landing on the tracked branch; the left count (behind) catches a stale local checkout that would deploy an outdated commit. If either is non-zero, surface the divergence and stop — the user must `git pull --rebase` (behind) or `git push` (ahead) first.
+- Verify the branch tracks an upstream: `git rev-parse --abbrev-ref --symbolic-full-name @{upstream}` must succeed (and `git ls-remote --exit-code origin "$BRANCH"` must find the remote ref). A local-only branch with no upstream is not a valid deploy source — its `HEAD` was never pushed to `origin`, so the deploy would ship unreproducible code. Surface and stop; tell the user to `git push -u origin <branch>` first.
+- `git rev-list --left-right --count @{upstream}...HEAD` — both counts MUST be `0`. The right count (ahead) catches local commits that would silently ship via `envio` without ever landing on the tracked branch; the left count (behind) catches a stale local checkout that would deploy an outdated commit. If either is non-zero, surface the divergence and stop — the user must `git pull --rebase` (behind) or `git push` (ahead) first.
 - Parse `$ARGUMENTS` for the boolean flags `--no-promote` and `--no-verify`; capture as `NO_PROMOTE` and `NO_VERIFY`. Any non-flag token (e.g. a stray SHA) is an error — surface and stop, since the underlying script doesn't accept one.
 - `git rev-parse --short HEAD` — capture as `TARGET_COMMIT`. The deploy always uses `HEAD`; to deploy a different commit, the user must check it out first.
 - If `BRANCH != main`: surface the branch name + commit short sha clearly, and confirm the user wants a pre-merge deploy. Skip the prompt only if `NO_PROMOTE` is set or the user's request explicitly mentions pre-merge / feature branch / pre-loading.
@@ -79,9 +80,12 @@ The script pushes `HEAD` to the `envio` branch via `git push
 --force-with-lease`, which the Envio GitHub App auto-builds. The push is
 unconditional — `envio` is treated as a deploy trigger ref, not a tracking
 branch, so a feature branch tip can replace whatever was on `envio`
-previously. Confirm the push succeeded by checking the script exit code (0)
-and a `HEAD -> envio` line in the output. The line may be a fast-forward
-(`<old>..<new>`) or a forced update (`+ <old>...<new>`); both are success.
+previously. Confirm the push succeeded by checking the script exit code is
+`0`. The push output is one of:
+
+- A ref-update line `<old>..<new>  HEAD -> envio` (fast-forward) or `+ <old>...<new>  HEAD -> envio` (forced update) — a real deploy was scheduled.
+- `Everything up-to-date` with no ref-update line — `envio` already at `HEAD`, the re-run / idempotency case. Still success; the prior deployment in `envio-cloud` is what we're babysitting.
+
 If the push was rejected (non-zero exit, "rejected", "stale info", "would
 clobber existing tag"), do NOT retry with `--force` — surface and stop.
 
