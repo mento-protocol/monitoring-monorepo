@@ -56,10 +56,9 @@ export const ALL_POOLS_BREACH_ROLLUP = `
   query AllPoolsBreachRollup($chainId: Int!) {
     Pool(where: { chainId: { _eq: $chainId } }) {
       id
-      cumulativeCriticalSeconds
       breachCount
-      currentOpenBreachPeak
-      currentOpenBreachEntryThreshold
+      healthBinarySeconds
+      healthTotalSeconds
     }
   }
 `;
@@ -341,12 +340,9 @@ export const POOL_BREACH_ROLLUP = `
   query PoolBreachRollup($id: String!, $chainId: Int!) {
     Pool(where: { id: { _eq: $id }, chainId: { _eq: $chainId } }) {
       id
-      cumulativeBreachSeconds
-      cumulativeCriticalSeconds
       breachCount
-      deviationBreachStartedAt
-      currentOpenBreachPeak
-      currentOpenBreachEntryThreshold
+      healthBinarySeconds
+      healthTotalSeconds
     }
   }
 `;
@@ -369,35 +365,6 @@ export const POOL_OPEN_BREACH_TX = `
       limit: 1
     ) {
       startedByTxHash
-    }
-  }
-`;
-
-// Closed-breach critical seconds in a recent window, for the Uptime tile's
-// "X.XX% last 7d" subtitle. Returns just `criticalDurationSeconds` so the
-// client can sum (Hasura aggregates are disabled). Open breaches are
-// excluded — their live contribution is computed from POOL_BREACH_ROLLUP's
-// `currentOpenBreachPeak/EntryThreshold/deviationBreachStartedAt` to avoid
-// double-counting. Hosted Hasura caps at 1000 rows; a single pool emitting
-// >1000 closed breaches in 7 days would mean the pool is fundamentally
-// unhealthy and the tile's coarse number is the least of the operator's
-// problems — well within the cap for any normal pool.
-export const POOL_CRITICAL_SECONDS_RECENT = `
-  query PoolCriticalSecondsRecent(
-    $poolId: String!
-    $since: numeric!
-  ) {
-    DeviationThresholdBreach(
-      where: {
-        poolId: { _eq: $poolId }
-        endedAt: { _gte: $since }
-      }
-      order_by: [{ endedAt: desc }]
-      limit: 1000
-    ) {
-      criticalDurationSeconds
-      startedAt
-      endedAt
     }
   }
 `;

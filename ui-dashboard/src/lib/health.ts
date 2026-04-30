@@ -5,7 +5,7 @@
 
 export type HealthStatus = "OK" | "WARN" | "WEEKEND" | "CRITICAL" | "N/A";
 
-import { isWeekend, tradingSecondsInRange } from "./weekend";
+import { isWeekend } from "./weekend";
 import { isVirtualPool } from "./types";
 import {
   DEVIATION_TOLERANCE_RATIO,
@@ -196,63 +196,27 @@ export function uptimeColorClass(pct: number): string {
 }
 
 /**
- * All-time uptime % for a pool, computed from the indexer rollup
- * counters. Returns `null` when we don't have enough data to answer
- * honestly (virtual pool, rollup not populated yet during reindex,
- * zero observation window). Keep the math aligned with the
- * UptimeValue tile — both callers read the SAME snapshot so the
- * homepage column and the pool page never disagree.
+ * All-time uptime % for a pool. Reads the indexer's binary-health
+ * accumulator (`healthBinarySeconds / healthTotalSeconds`), which counts
+ * BOTH oracle staleness (post-freshness gaps) AND price-deviation breaches
+ * as unhealthy time. Weekend hours are excluded from both numerator and
+ * denominator inside the indexer, so FX pools aren't penalised for closure.
  *
- * Includes the live past-grace portion of an in-flight open breach so
- * the number matches the pool page's tile. An open breach can tank a
- * pool's all-time % by tens of points (rolledCritical only counts
- * CLOSED breaches), and excluding it on the homepage made "EURm/USDm
- * 100%" render next to "1 ongoing breach · 4.241%" on the pool page.
+ * Returns `null` for virtual pools, missing rollups (resync window), and
+ * zero observation windows.
  */
 export function computePoolUptimePct(pool: {
   source: string;
   healthTotalSeconds?: string;
-  cumulativeCriticalSeconds?: string;
-  deviationBreachStartedAt?: string;
-  currentOpenBreachPeak?: string;
-  currentOpenBreachEntryThreshold?: number;
-  rebalanceThreshold?: number;
+  healthBinarySeconds?: string;
 }): number | null {
   if (isVirtualPool(pool)) return null;
   const total = Number(pool.healthTotalSeconds ?? "0");
   if (!Number.isFinite(total) || total <= 0) return null;
-  if (pool.cumulativeCriticalSeconds == null) return null;
-  const rolledCritical = Number(pool.cumulativeCriticalSeconds);
-  if (!Number.isFinite(rolledCritical)) return null;
-
-  // Open-breach live past-grace credit — only count when the breach's PEAK
-  // (so far) crossed the 5% critical-magnitude line, scored against the
-  // ENTRY threshold. Matches the indexer's closed-breach
-  // `criticalDurationSeconds` accrual on every axis: peak (not current),
-  // entry-time threshold (not current), so the live tile and the persisted
-  // SLO counter agree. A 1.06→1.04 breach still contributes critical time
-  // live, an `FPMMRebalanceThresholdUpdated` mid-breach can't shift the
-  // verdict, and the cumulative counter doesn't suddenly jump on close.
-  // `tradingSecondsInRange` subtracts FX-weekend hours so the numerator
-  // stays on the same basis as `healthTotalSeconds` (the denominator).
-  const openStart = Number(pool.deviationBreachStartedAt ?? "0");
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const graceEnd = openStart + Number(DEVIATION_BREACH_GRACE_SECONDS);
-  const peak = Number(pool.currentOpenBreachPeak ?? "0");
-  // Prefer entry threshold; fall back to current during the resync window
-  // before the column backfills.
-  const gateThreshold =
-    (pool.currentOpenBreachEntryThreshold ?? 0) > 0
-      ? pool.currentOpenBreachEntryThreshold!
-      : effectiveThreshold(pool);
-  const peakAboveCritical = peak / gateThreshold > DEVIATION_CRITICAL_RATIO;
-  const openCritical =
-    openStart > 0 && nowSeconds > graceEnd && peakAboveCritical
-      ? tradingSecondsInRange(graceEnd, nowSeconds)
-      : 0;
-
-  const critical = rolledCritical + openCritical;
-  return Math.max(0, Math.min(100, (1 - critical / total) * 100));
+  if (pool.healthBinarySeconds == null) return null;
+  const binary = Number(pool.healthBinarySeconds);
+  if (!Number.isFinite(binary)) return null;
+  return Math.max(0, Math.min(100, (binary / total) * 100));
 }
 
 /**

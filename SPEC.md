@@ -369,42 +369,54 @@ Domain-split (`#alerts-v3`) was the original plan but `critical` vs `warning` is
 | `metrics-bridge` | Not Reporting                        | critical | `time() - mento_pool_bridge_last_poll > 90` for 2m                                                                                       |
 | `metrics-bridge` | Poll Errors                          | critical | `rate(mento_pool_bridge_poll_errors_total[5m]) > 0` for 3m                                                                               |
 
-**Reading alert vs SLO state — peak vs current basis**
+**Reading alert vs SLO state — paging gate vs uptime accrual**
 
-The deviation gates that decide "is this critical?" use **different basis**
-in three places, and a single incident can live in different states across
-them. This is intentional but surprising the first time you see it.
+The "is this critical right now?" gate (health badge, Grafana page) and the
+"how much demonstrable downtime" gate (uptime tile) deliberately use
+different rules. A single incident can live in different states across
+them — surprising the first time you see it.
 
-| Surface                                     | Gate                                   | What it answers                                      |
-| ------------------------------------------- | -------------------------------------- | ---------------------------------------------------- |
-| Live health badge (`computeHealthStatus`)   | `current devRatio > 1.05` AND age > 1h | Is the pool **right now** in critical state?         |
-| Live uptime tile (`computePoolUptimePct`)   | `peak / entry threshold > 1.05`        | Has this breach **ever** crossed critical magnitude? |
-| Persisted SLO (`cumulativeCriticalSeconds`) | Same as uptime tile (peak-based)       | All-time critical seconds (closed breaches only)     |
-| Grafana critical alert                      | `current ratio > 1.05` AND age > 1h    | Should we page on-call **right now**?                |
+| Surface                                   | Gate                                                             | What it answers                              |
+| ----------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------- |
+| Live health badge (`computeHealthStatus`) | oracle stale OR (`current devRatio > 1.05` AND breach age > 1h)  | Is the pool **right now** in critical state? |
+| Live uptime tile (`computePoolUptimePct`) | `healthBinarySeconds / healthTotalSeconds`                       | All-time fraction of seconds in OK state     |
+| Grafana critical alert                    | oracle-down rules + (`current ratio > 1.05` AND breach age > 1h) | Should we page on-call **right now**?        |
 
-A pool that **peaks at 1.06 then drops to 1.04** sits in a split state:
+The uptime tile reads the indexer's binary-health accumulator, which credits
+a second to `healthBinarySeconds` only when **all** of these hold for the
+interval since the last oracle snapshot: `devRatio ≤ 1.01` (within
+tolerance), the oracle is fresh (within `oracleExpiry`), and the interval
+isn't FX-weekend closure (which is excluded from both numerator and
+denominator). Stale-oracle seconds and any-magnitude breach seconds both
+count as unhealthy.
 
-- **Health badge:** WARN (current ratio dropped below 1.05).
-- **Uptime tile:** counts past-grace seconds as critical (peak hit 1.05).
-- **Grafana page:** silenced (current ratio dropped — on-call sees the
-  immediate problem cleared).
-- **`cumulativeCriticalSeconds`:** continues to credit critical time when
-  the breach eventually closes.
+A pool that **peaks at 1.06 then drops to 1.04** (still above the 1.01
+tolerance line):
+
+- **Health badge:** WARN (current ratio < 1.05 → not critical, but > 1.01
+  → not OK either).
+- **Uptime tile:** continues accruing unhealthy seconds at 1.04 (any
+  `devRatio > 1.01` is unhealthy in the binary accumulator).
+- **Grafana page:** silenced (current ratio dropped below 1.05 — on-call
+  sees the immediate problem cleared).
 
 **What this means in practice:**
 
 - The Grafana critical alert silencing **does NOT** mean uptime recovered.
-  The cumulative counter is the SLO source of truth; Grafana fires on live
-  state.
+  The binary accumulator keeps ticking until the pool returns to within
+  tolerance AND the oracle is fresh.
 - If the uptime tile drops without an active critical alert, look for a
-  recently-cleared past-grace breach.
+  WARN-tier breach (1.01 < ratio ≤ 1.05) or a recent stale-oracle window.
 - "Currently critical, paged" → Grafana rule.
-  "How much demonstrable critical time, all-time" → `cumulativeCriticalSeconds`.
+  "How much demonstrable downtime, all-time" → `healthBinarySeconds /
+healthTotalSeconds` (UI tile) — sourced from the indexer rollup.
 
 The split is deliberate: paging is keyed to "is the immediate problem
-ongoing?" so on-call can clear and silence cleanly, while the SLO counter
-remembers severity-of-incident-when-it-was-active so resolved-but-bad
-breaches still register against the budget.
+ongoing AND severe?" so on-call can clear and silence cleanly, while the
+uptime tile is a strict binary SLO that punishes every unhealthy second so
+the dashboard doesn't undercount drift. The indexer also maintains
+`cumulativeCriticalSeconds` (peak-based, closed breaches only) for SLO
+back-testing, but no UI surface reads it today.
 
 **`service` label convention** (matches the existing Aegis pattern of `service = monitored-domain`, not producer):
 

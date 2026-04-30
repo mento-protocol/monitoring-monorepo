@@ -37,15 +37,6 @@ export type Pool = {
   rebalanceThreshold?: number;
   lastRebalancedAt?: string;
   deviationBreachStartedAt?: string;
-  /** Max priceDifference observed during the currently-open breach, 0 when
-   * no open breach. Optional during the indexer-resync window before the
-   * new column is backfilled. */
-  currentOpenBreachPeak?: string;
-  /** rebalanceThreshold captured at the rising edge of the currently-open
-   * breach, 0 when no open breach. Used by the live uptime gate so peak
-   * is scored against the entry-time threshold (matches persisted accrual)
-   * rather than a possibly-different current threshold. */
-  currentOpenBreachEntryThreshold?: number;
   lpFee?: number;
   protocolFee?: number;
   rebalanceReward?: number;
@@ -62,14 +53,8 @@ export type Pool = {
   reserves0?: string;
   reserves1?: string;
   healthTotalSeconds?: string;
+  healthBinarySeconds?: string;
   hasHealthData?: boolean;
-  // Breach rollups (written by the indexer on every breach close). Used
-  // by the uptime tile + homepage uptime column without paginating the
-  // full DeviationThresholdBreach list. Optional because the indexer
-  // deploys them in a phased rollout; the UI falls back to "—" when
-  // absent rather than rendering a false 100%.
-  cumulativeBreachSeconds?: string;
-  cumulativeCriticalSeconds?: string;
   breachCount?: number;
 };
 

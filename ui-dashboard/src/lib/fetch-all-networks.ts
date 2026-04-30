@@ -400,10 +400,9 @@ export async function fetchNetworkData(
     timed<{
       Pool: {
         id: string;
-        cumulativeCriticalSeconds?: string;
         breachCount?: number;
-        currentOpenBreachPeak?: string;
-        currentOpenBreachEntryThreshold?: number;
+        healthBinarySeconds?: string;
+        healthTotalSeconds?: string;
       }[];
     }>(ALL_POOLS_BREACH_ROLLUP, { chainId: network.chainId }),
     // RPC probe — no indexer entity for CDP strategy, so we detect by
@@ -425,10 +424,13 @@ export async function fetchNetworkData(
         ? p
         : {
             ...p,
-            cumulativeCriticalSeconds: r.cumulativeCriticalSeconds,
             breachCount: r.breachCount,
-            currentOpenBreachPeak: r.currentOpenBreachPeak,
-            currentOpenBreachEntryThreshold: r.currentOpenBreachEntryThreshold,
+            healthBinarySeconds: r.healthBinarySeconds,
+            // BOTH fields come from the rollup so the numerator/denominator
+            // pair is a same-query snapshot — no falling back to
+            // ALL_POOLS_WITH_HEALTH's `healthTotalSeconds`, which would
+            // pair counters captured at different polling cycles.
+            healthTotalSeconds: r.healthTotalSeconds,
           };
     });
   }
