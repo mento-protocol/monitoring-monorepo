@@ -210,4 +210,43 @@ locals {
       expr   = "label_replace(axlUSDC_balanceOf{owner=\"Reserve\", chain=\"celo\"} / 1e6, \"chain_name\", \"$1\", \"chain\", \"(.*)\") * on(chain_name) group_left(chain_id, pool_id, pair, pool_address_short, block_explorer_url, job, instance) (mento_pool_deviation_ratio{chain_name=\"celo\", pair=\"axlUSDC/USDm\"} * 0 + 1)"
     },
   ]
+
+  # ── Oracle Jump Critical annotation-only data sources ─────────────────────
+  # Annotation queries for the `Oracle Jump Far Above Swap Fee` rule, fed
+  # into the rule's `dynamic "data"` block. Same pattern as
+  # `deviation_critical_annotation_queries` above — kept out of the threshold
+  # condition so a missing series leaves the matching annotation guard
+  # empty instead of suppressing the alert.
+  #
+  # JumpPct / FeePct pre-divide bps by 100 in PromQL because sprig math
+  # (`mul`/`div`) isn't in scope for Grafana annotation templates. AgeNow
+  # reuses `mento_pool_oracle_jump_at` (== `lastMedianAt` at fire time, the
+  # handler updates them together when `jumpBps != null`) so we don't need
+  # a separate `oracle_price_at` metric.
+  oracle_jump_critical_annotation_queries = [
+    {
+      ref_id = "JumpPct"
+      expr   = "mento_pool_oracle_jump_bps / 100"
+    },
+    {
+      ref_id = "FeePct"
+      expr   = "mento_pool_swap_fee_bps / 100"
+    },
+    {
+      ref_id = "OraclePrice"
+      expr   = "mento_pool_oracle_price"
+    },
+    {
+      ref_id = "OraclePrev"
+      expr   = "mento_pool_oracle_prev_price"
+    },
+    {
+      ref_id = "AgeNow"
+      expr   = "time() - mento_pool_oracle_jump_at"
+    },
+    {
+      ref_id = "PrevAge"
+      expr   = "time() - mento_pool_oracle_prev_price_at"
+    },
+  ]
 }

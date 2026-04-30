@@ -483,6 +483,80 @@ describe("updateMetrics", () => {
     ).toBe(0);
   });
 
+  it("decimal-adjusts oracle median prices from FixidityLib 1e24 scale", async () => {
+    // 1.15 * 1e24 / 1e24 = 1.15. Default fixture uses GBPm/USDm-shaped values
+    // (1.15 current, 1.12 previous) so the alert annotation can render the
+    // canonical "Current Oracle Price: 1.15 / Previous Oracle Price: 1.12"
+    // example end-to-end without per-test overrides.
+    updateMetrics([makePool()]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_price", poolLabels),
+    ).toBeCloseTo(1.15, 6);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_prev_price", poolLabels),
+    ).toBeCloseTo(1.12, 6);
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_oracle_prev_price_at",
+        poolLabels,
+      ),
+    ).toBe(1713199580);
+  });
+
+  it("skips oracle price gauges when indexer hasn't seen a non-zero median", async () => {
+    // Matches the indexer's 0n sentinel (DEFAULT_ORACLE_FIELDS in pool.ts).
+    // Skipping mirrors deviationRatio's `-1` skip — the alert annotation
+    // gates on series presence so the line cleanly drops instead of
+    // rendering 0.
+    updateMetrics([
+      makePool({
+        lastMedianPrice: "0",
+        prevMedianPrice: "0",
+        prevMedianAt: "0",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_price", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_prev_price", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_oracle_prev_price_at",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("publishes current oracle price even before a second median (no prev yet)", async () => {
+    // First-ever-median path: indexer wrote `lastMedianPrice` but
+    // `prevMedianPrice` is still the 0 default. The current gauge must
+    // still emit so the alert summary can quote a price; only the prev
+    // pair is skipped.
+    updateMetrics([
+      makePool({
+        prevMedianPrice: "0",
+        prevMedianAt: "0",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_price", poolLabels),
+    ).toBeCloseTo(1.15, 6);
+    expect(
+      await getGaugeValue(register, "mento_pool_oracle_prev_price", poolLabels),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(
+        register,
+        "mento_pool_oracle_prev_price_at",
+        poolLabels,
+      ),
+    ).toBeUndefined();
+  });
+
   it("falls back to pool id when pair/chain/explorer are unknown", async () => {
     const unknownPool = makePool({
       id: "99999-0x1234567890abcdef1234567890abcdef12345678",

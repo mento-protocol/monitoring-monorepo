@@ -195,8 +195,22 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       const lastOracleJumpBps = jumpBps ?? existing.lastOracleJumpBps;
       const lastOracleJumpAt =
         jumpBps !== null ? blockTimestamp : existing.lastOracleJumpAt;
+      // prev fields capture the now-superseded median BEFORE we overwrite
+      // lastMedian* below. Only update them when a real transition happened
+      // (jumpBps non-null): a transient outage (oraclePrice == 0) leaves
+      // both pairs untouched so the alert annotation stays anchored to the
+      // last real prior median.
+      const prevMedianPrice =
+        jumpBps !== null ? existing.lastMedianPrice : existing.prevMedianPrice;
+      const prevMedianAt =
+        jumpBps !== null ? existing.lastMedianAt : existing.prevMedianAt;
       const lastMedianPrice =
         oraclePrice > 0n ? oraclePrice : existing.lastMedianPrice;
+      // Track median timestamps independently of the jump fields so the alert
+      // can render "Current Oracle Price (Xm ago)" even on the first-ever
+      // median (when lastOracleJumpAt is still 0).
+      const lastMedianAt =
+        oraclePrice > 0n ? blockTimestamp : existing.lastMedianAt;
 
       const updatedPool: Pool = {
         ...existing,
@@ -207,6 +221,9 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
         oracleExpiry,
         oracleNumReporters: existing.oracleNumReporters,
         lastMedianPrice,
+        lastMedianAt,
+        prevMedianPrice,
+        prevMedianAt,
         lastOracleJumpBps,
         lastOracleJumpAt,
         updatedAtBlock: blockNumber,

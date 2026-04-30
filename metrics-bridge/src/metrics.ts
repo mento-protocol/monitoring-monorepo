@@ -183,6 +183,31 @@ export const gauges = {
     labelNames: poolLabels,
     registers: [register],
   }),
+  // Oracle median price + previous median price, decimal-adjusted from
+  // SortedOracles' 1e24 (FixidityLib) fixed-point. Used by the Oracle Jump
+  // alert to render "Current Oracle Price: 1.15 (7m ago) / Previous Oracle
+  // Price: 1.12 (Xm ago)" alongside the magnitude. Skipped when the indexer
+  // hasn't seen a non-zero median yet (raw value 0n) — the alert annotation
+  // gates on the value's presence so missing prev/current cleanly drop the
+  // line instead of rendering "0".
+  oraclePrice: new Gauge({
+    name: "mento_pool_oracle_price",
+    help: "Most recent non-zero MedianUpdated price, decimal-adjusted (raw / 1e24) from SortedOracles' FixidityLib scale. Feed direction (1 feedToken = X quoteToken). Used by the Oracle Jump alert summary.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
+  oraclePrevPrice: new Gauge({
+    name: "mento_pool_oracle_prev_price",
+    help: "MedianUpdated price immediately before mento_pool_oracle_price, same scale and direction. Skipped until a second non-zero median has landed on the feed.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
+  oraclePrevPriceAt: new Gauge({
+    name: "mento_pool_oracle_prev_price_at",
+    help: "Unix timestamp of the MedianUpdated event that produced oracle_prev_price. Paired with the gauge so the Oracle Jump alert can render `humanizeDuration` of (time() - this) as the previous-price age.",
+    labelNames: poolLabels,
+    registers: [register],
+  }),
   healthStatus: new Gauge({
     name: "mento_pool_health_status",
     help: "Pool health status at last on-chain event (0=OK, 1=WARN, 2=CRITICAL, 3=N/A). Event-time snapshot, not live.",
@@ -287,6 +312,19 @@ export function updateMetrics(pools: PoolRow[]): void {
     }
     gauges.oracleJumpBps.set(labels, fp(pool.lastOracleJumpBps));
     gauges.oracleJumpAt.set(labels, Number(pool.lastOracleJumpAt));
+    // Oracle median price (current + previous), decimal-adjusted from 1e24
+    // FixidityLib scale. Skip 0 sentinels: the alert annotation gates on
+    // series presence, so a missing prev cleanly drops the "Previous Oracle
+    // Price" line instead of rendering 0. `Number()` of a 1e24-scale BigInt
+    // saturates to a float — fine for display since prices live in [1e-3,
+    // 1e3]; precision past ~15 sig figs is irrelevant for a humanised value.
+    if (BigInt(pool.lastMedianPrice) > 0n) {
+      gauges.oraclePrice.set(labels, Number(pool.lastMedianPrice) / 1e24);
+    }
+    if (BigInt(pool.prevMedianPrice) > 0n) {
+      gauges.oraclePrevPrice.set(labels, Number(pool.prevMedianPrice) / 1e24);
+      gauges.oraclePrevPriceAt.set(labels, Number(pool.prevMedianAt));
+    }
     gauges.limitPressure.set(
       { ...labels, token_index: "0" },
       fp(pool.limitPressure0),

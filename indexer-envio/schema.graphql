@@ -33,6 +33,20 @@ type Pool {
   # because `OracleReported` also overwrites `oraclePrice` with individual
   # reporter values, so it can't be used as the "previous median".
   lastMedianPrice: BigInt!
+  # Block timestamp of the most recent `MedianUpdated` event with a non-zero
+  # value. Distinct from `oracleTimestamp` (touched by every OracleReported
+  # too) and `lastOracleJumpAt` (only set once a jump can be computed, so 0
+  # for the first-ever median). Used by the Oracle Jump alert to render
+  # "Current Oracle Price (Xm ago)" and as the `prevMedianAt` capture point
+  # on the next MedianUpdated.
+  lastMedianAt: BigInt!
+  # `lastMedianPrice` from the MedianUpdated immediately before the current
+  # one. Captured before overwrite so the Oracle Jump alert can render
+  # "Previous Oracle Price". 0 until the second non-zero MedianUpdated.
+  prevMedianPrice: BigInt!
+  # `lastMedianAt` of the previous MedianUpdated. Same semantics as
+  # `prevMedianPrice` — paired so the alert can render a relative timestamp.
+  prevMedianAt: BigInt!
   # |newMedian − prevMedian| / prevMedian × 10_000, as a 4dp fixed-point
   # string (e.g. "10.5000" = 10.5 bps). "0.0000" before the second
   # `MedianUpdated` on a feed.

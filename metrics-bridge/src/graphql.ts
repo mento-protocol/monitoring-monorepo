@@ -27,6 +27,10 @@ const BRIDGE_POOLS_QUERY = gql`
       hasHealthData
       lpFee
       protocolFee
+      lastMedianPrice
+      lastMedianAt
+      prevMedianPrice
+      prevMedianAt
       lastOracleJumpBps
       lastOracleJumpAt
       reserves0
