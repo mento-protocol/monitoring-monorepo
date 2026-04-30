@@ -217,6 +217,31 @@ describe("PUT /api/address-labels", () => {
     });
   });
 
+  it("rejects scope: <unsupported chainId> (not in NETWORKS)", async () => {
+    // The strict-either-or Lua script's HDEL only covers chains in
+    // NETWORKS via the static ALL_LABEL_SCOPE_KEYS list. Letting an
+    // unsupported chainId through here would create a `labels:99999` key
+    // that no future cross-scope HDEL would ever reach, silently breaking
+    // strict either/or for any later move involving the same address.
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+    const address = "0x" + "a".repeat(40);
+    const req = new NextRequest("http://localhost/api/address-labels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scope: 99999,
+        address,
+        name: "Unknown chain",
+        tags: [],
+      }),
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(400);
+    expect(upsertEntry).not.toHaveBeenCalled();
+  });
+
   it("accepts legacy { chainId } alias", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
       user: { email: "alice@mentolabs.xyz" },

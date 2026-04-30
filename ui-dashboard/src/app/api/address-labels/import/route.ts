@@ -12,6 +12,11 @@ import {
   type Scope,
 } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
+import { NETWORKS } from "@/lib/networks";
+
+const SUPPORTED_CHAIN_IDS: ReadonlySet<number> = new Set(
+  Object.values(NETWORKS).map((n) => n.chainId),
+);
 
 /**
  * User-controlled imports must never claim Arkham provenance — neither via
@@ -184,6 +189,15 @@ async function handleGnosisSafe(
         { status: 400 },
       );
     }
+    // Reject chainIds we don't index — see address-labels.ts comment on
+    // ALL_LABEL_SCOPE_KEYS for why the strict-either-or HDEL only covers
+    // chains in NETWORKS.
+    if (!SUPPORTED_CHAIN_IDS.has(chainId)) {
+      return NextResponse.json(
+        { error: `Unsupported chainId: ${entry.chainId}` },
+        { status: 400 },
+      );
+    }
     if (!isValidAddress(entry.address)) {
       return NextResponse.json(
         { error: `Invalid address: ${entry.address}` },
@@ -273,6 +287,12 @@ async function handleSnapshot(
     if (!Number.isInteger(n) || n <= 0) {
       return NextResponse.json(
         { error: `Invalid chainId key: ${key}` },
+        { status: 400 },
+      );
+    }
+    if (!SUPPORTED_CHAIN_IDS.has(n)) {
+      return NextResponse.json(
+        { error: `Unsupported chainId: ${key}` },
         { status: 400 },
       );
     }
@@ -380,6 +400,12 @@ async function handleSimpleFormat(body: unknown): Promise<NextResponse> {
     chainId <= 0
   ) {
     return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });
+  }
+  if (!SUPPORTED_CHAIN_IDS.has(chainId)) {
+    return NextResponse.json(
+      { error: `Unsupported chainId: ${chainId}` },
+      { status: 400 },
+    );
   }
   if (!isEntriesMap(labels)) {
     return NextResponse.json(
