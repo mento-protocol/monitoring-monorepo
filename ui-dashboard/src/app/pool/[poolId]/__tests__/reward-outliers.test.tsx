@@ -103,4 +103,29 @@ describe("renderRewardCell", () => {
     expect(out).not.toContain("text-amber");
     expect(out).toContain("$7.63");
   });
+
+  it("paints visually identical cells with the same tier (regression)", () => {
+    // Real bug on pool 143-0xd0e9…ce081: four rebalances rendered as $9.85
+    // (raw 9.8493/9.8496/9.8511/9.8518) but the raw-float comparison split
+    // them across the p95 cutoff, leaving three amber and one plain. The
+    // user can't see sub-cent differences, so two cells displaying "$9.85"
+    // must always share a tier.
+    const baseline = Array.from({ length: 25 }, (_, i) =>
+      String(0.1 + i * 0.1),
+    );
+    const cluster = ["9.8493", "9.8496", "9.8511", "9.8518"];
+    const thresholds = computeRewardThresholds([...baseline, ...cluster])!;
+    const tiers = cluster.map((v) => {
+      const out = markup(renderRewardCell(v, thresholds));
+      if (out.includes("text-amber-300")) return "p95";
+      if (out.includes("text-amber-400")) return "p90";
+      return "plain";
+    });
+    expect(new Set(tiers).size).toBe(1);
+    // And every cell formats identically — guards against future format
+    // changes silently splitting the cluster again.
+    cluster.forEach((v) => {
+      expect(markup(renderRewardCell(v, thresholds))).toContain("$9.85");
+    });
+  });
 });

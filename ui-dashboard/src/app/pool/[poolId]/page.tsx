@@ -1221,15 +1221,30 @@ type RewardThresholds = readonly {
 // poll burns ~10x request volume on essentially-static data.
 const REWARD_HIST_REFRESH_MS = 5 * 60_000;
 
+// Round to formatUSD's display precision so two values rendering as the
+// same string (e.g. 9.8493 and 9.8511 both → "$9.85") compare equal at the
+// percentile cutoff. Without this, a sub-cent difference can put visually
+// identical cells on different sides of the threshold, painting some
+// "$9.85" rows amber and leaving others plain. Tiers mirror formatUSD:
+// cents below $1K, $100 in $1K–$1M, $10K above.
+export function toDisplayPrecision(value: number): number {
+  if (!Number.isFinite(value)) return value;
+  if (value >= 999_950) return Math.round(value / 10_000) * 10_000;
+  if (value >= 1_000) return Math.round(value / 100) * 100;
+  return Math.round(value * 100) / 100;
+}
+
 export function computeRewardThresholds(
   rawRewards: readonly (string | null | undefined)[],
 ): RewardThresholds | null {
   // Filter to positives: zero-reward rebalances aren't outlier candidates
   // and including them would skew thresholds downward on pools that had a
-  // 0-bps reward phase.
+  // 0-bps reward phase. Round to display precision before sorting so the
+  // cutoff matches what users actually see in the cell.
   const values = rawRewards
     .map((r) => (r ? Number(r) : Number.NaN))
     .filter((v) => Number.isFinite(v) && v > 0)
+    .map(toDisplayPrecision)
     .sort((a, b) => a - b);
   if (values.length < MIN_REWARD_SAMPLE_SIZE) return null;
   // 1-based nearest-rank: ceil(n*q) gives the rank of the q-quantile, so
@@ -1250,11 +1265,12 @@ export function renderRewardCell(
   const value = Number(rewardUsd);
   const formatted = formatUSD(value);
   if (!thresholds || !Number.isFinite(value)) return formatted;
-  // Strict >: ties at the cutoff are NOT highlighted. With heavy clustering
-  // (e.g. a long stretch of identical-reward rebalances) this is the
-  // fail-safe: if the cutoff isn't strictly above lower values, no row gets
-  // the tier rather than every tied row getting it.
-  const match = thresholds.find((t) => value > t.min);
+  // Compare at display precision so visually-identical cells always share a
+  // tier. Strict >: ties at the cutoff are NOT highlighted — with heavy
+  // clustering this keeps the tier meaningful instead of flagging every
+  // tied row.
+  const rounded = toDisplayPrecision(value);
+  const match = thresholds.find((t) => rounded > t.min);
   if (!match) return formatted;
   return (
     <span className={match.tier.className} title={match.tier.title}>
