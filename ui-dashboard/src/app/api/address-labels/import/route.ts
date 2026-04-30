@@ -738,6 +738,15 @@ function parseCsv(text: string): CsvParseResult {
           error: `Invalid chainId "${chainIdRaw}" on line ${i + 1}`,
         };
       }
+      // Same NETWORKS guard as the JSON import paths — see the comment on
+      // ALL_LABEL_SCOPE_KEYS in address-labels.ts. A chainId outside
+      // NETWORKS would write a `labels:{chainId}` key that the static
+      // cross-scope HDEL list doesn't cover.
+      if (!SUPPORTED_CHAIN_IDS.has(chainId)) {
+        return {
+          error: `Unsupported chainId "${chainIdRaw}" on line ${i + 1}`,
+        };
+      }
       scope = chainId;
     }
 
