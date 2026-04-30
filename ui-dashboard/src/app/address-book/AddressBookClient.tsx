@@ -10,6 +10,7 @@ import { explorerAddressUrl } from "@/lib/tokens";
 import { truncateAddress } from "@/lib/format";
 import {
   ARKHAM_TAG,
+  MINIPAY_SOURCE,
   isArkhamSourced,
   isMiniPaySourced,
   type Scope,
@@ -557,7 +558,11 @@ function AddressTableRow({
 }: AddressRowProps) {
   const arkhamSourced = isArkhamSourced({ source, tags });
   const minipaySourced = isMiniPaySourced({ source });
-  const displayTags = tags.filter((t) => t !== ARKHAM_TAG);
+  // Strip server-provenance tags from the displayed list — the SOURCE badge
+  // already conveys this, so showing them as pills duplicates the signal.
+  const displayTags = tags.filter(
+    (t) => t !== ARKHAM_TAG && t !== MINIPAY_SOURCE,
+  );
   return (
     <tr className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
       <td className="px-4 py-3">
