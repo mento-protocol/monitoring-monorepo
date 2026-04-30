@@ -143,10 +143,10 @@ import {
   REWARD_TOOLTIP,
 } from "./_lib/tooltips";
 import type { OracleSortCol } from "./_lib/types";
-import { OlsLiquidityEvents } from "./_components/ols-liquidity-events";
 import { OlsLiquidityTable } from "./_components/ols-liquidity-table";
 import { OlsStatusPanel } from "./_components/ols-status-panel";
 import { PoolHeader } from "./_components/pool-header";
+import { OlsTab } from "./_tabs/ols-tab";
 
 // Re-export public symbols — `__tests__/ols.test.ts` and `page.test.tsx`
 // import these directly from "../page". Keep the import paths stable.
@@ -2164,49 +2164,5 @@ function OracleTab({
         </>
       )}
     </>
-  );
-}
-
-// OLS Tab
-
-function OlsTab({
-  poolId,
-  limit,
-  pool,
-  search,
-  onSearchChange,
-}: {
-  poolId: string;
-  limit: number;
-  pool: Pool | null;
-  search: string;
-  onSearchChange: (value: string) => void;
-}) {
-  const { network } = useNetwork();
-  const {
-    data: olsData,
-    error: olsErr,
-    isLoading: olsLoading,
-  } = useGQL<{
-    OlsPool: OlsPool[];
-  }>(OLS_POOL, { poolId });
-  const olsPool = selectActiveOlsPool(olsData?.OlsPool);
-
-  if (olsErr) return <ErrorBox message={olsErr.message} />;
-  if (olsLoading) return <Skeleton rows={3} />;
-
-  return (
-    <div className="space-y-6">
-      <OlsStatusPanel olsPool={olsPool} pool={pool} network={network} />
-      <OlsLiquidityEvents
-        poolId={poolId}
-        olsAddress={olsPool?.olsAddress ?? null}
-        limit={limit}
-        pool={pool}
-        network={network}
-        search={search}
-        onSearchChange={onSearchChange}
-      />
-    </div>
   );
 }
