@@ -75,12 +75,15 @@ Examples:
 pnpm deploy:indexer --yes
 ```
 
-The script pushes `HEAD` to the `envio` branch, which the Envio GitHub App
-auto-builds. The push is unconditional — `envio` is treated as a deploy
-trigger ref, not a tracking branch, so a feature branch tip can replace
-whatever was on `envio` previously. Confirm the push line
-`<old-sha>..<TARGET_COMMIT>  HEAD -> envio` appeared. If the push was
-rejected, do NOT force-push — surface and stop.
+The script pushes `HEAD` to the `envio` branch via `git push
+--force-with-lease`, which the Envio GitHub App auto-builds. The push is
+unconditional — `envio` is treated as a deploy trigger ref, not a tracking
+branch, so a feature branch tip can replace whatever was on `envio`
+previously. Confirm the push succeeded by checking the script exit code (0)
+and a `HEAD -> envio` line in the output. The line may be a fast-forward
+(`<old>..<new>`) or a forced update (`+ <old>...<new>`); both are success.
+If the push was rejected (non-zero exit, "rejected", "stale info", "would
+clobber existing tag"), do NOT retry with `--force` — surface and stop.
 
 When the previous `envio` tip was a different branch's commit (e.g. you're
 overwriting a still-syncing prior deploy), the prior deployment continues
@@ -102,8 +105,11 @@ returns when:
 Do NOT poll status yourself in parallel — the skill is the single source of
 truth for sync state. Wait for it to return before continuing.
 
-If the babysit returns anything other than "ready to promote", stop here and
-surface the failure. **Never promote a non-synced deployment.**
+Babysit returns one of:
+
+- **"ready to promote"** — the new deployment is synced; continue to Phase 3.
+- **"already promoted"** — `TARGET_COMMIT` is already `prod_status=prod` (re-run case); continue to Phase 3, which will be a no-op, then through DNS wait + verify per the idempotency contract.
+- Anything else (build failed, sync stalled, user cancelled) — stop and surface the failure. **Never promote a non-synced deployment.**
 
 **If `--no-promote` was passed, stop here.** Print a summary listing the
 synced commit and the paste-ready promote command for the user to run later
