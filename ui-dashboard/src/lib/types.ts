@@ -62,6 +62,7 @@ export type Pool = {
   reserves0?: string;
   reserves1?: string;
   healthTotalSeconds?: string;
+  healthBinarySeconds?: string;
   hasHealthData?: boolean;
   // Breach rollups (written by the indexer on every breach close). Used
   // by the uptime tile + homepage uptime column without paginating the
