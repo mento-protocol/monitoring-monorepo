@@ -63,16 +63,21 @@ locals {
   #      The *Rebalance Blocked* row is sourced from the metrics-bridge
   #      `mento_pool_rebalance_blocked` gauge (currently set on
   #      `Deviation Breach Critical` and its anchored sibling) so the
-  #      operator sees the exact Solidity revert (e.g. "Reserve has
-  #      insufficient axlUSDC. Current balance: 0.00 axlUSDC / Needed for
-  #      rebalancing: 12,500.00 axlUSDC") inline with the breach. Suppressed
-  #      cleanly when the probe hasn't run yet or the RPC failed — the
-  #      breach alert keeps its normal shape.
+  #      operator sees the bounded Solidity-error explanation (e.g.
+  #      "Reserve has insufficient collateral") inline with the breach.
+  #      For Celo USDC/USDT/axlUSDC pools the row also appends the
+  #      Reserve's live ERC20 balance from Aegis ("Reserve Balance:
+  #      0.05 USDT") so operators can see at a glance how short the
+  #      reserve is. Suppressed cleanly when the probe hasn't run yet or
+  #      the RPC failed — the breach alert keeps its normal shape.
   #
-  #      *Deviation* and *Reserves* render on a single line separated by
-  #      a `·` so the alert stays compact. Both annotations are independently
-  #      optional: when only one is present the separator drops with it,
-  #      avoiding a stray leading/trailing `·`.
+  #      *Reserves* and *Deviation* render on a single line separated by
+  #      a `·` so the alert stays compact. *Reserves* leads because the
+  #      pair-share split is the more useful diagnostic (which leg is
+  #      drained); the deviation magnitude is a secondary read. Both
+  #      annotations are independently optional: when only one is
+  #      present the separator drops with it, avoiding a stray
+  #      leading/trailing `·`.
   #   5. Metadata row: start time only. The per-row `View alert` link was
   #      removed — Grafana's attachment title still links to grafana.com via
   #      the (unconfigurable) `title_link`, so operators retain that path
@@ -103,12 +108,12 @@ locals {
     {{ if .Annotations.rebalance_reason -}}
     *Rebalance Blocked:* {{ .Annotations.rebalance_reason }}
     {{ end -}}
-    {{ if and .Annotations.current_deviation .Annotations.current_reserves -}}
-    *Deviation:* {{ .Annotations.current_deviation }}   ·   *Reserves:* {{ .Annotations.current_reserves }}
-    {{ else if .Annotations.current_deviation -}}
-    *Deviation:* {{ .Annotations.current_deviation }}
+    {{ if and .Annotations.current_reserves .Annotations.current_deviation -}}
+    *Reserves:* {{ .Annotations.current_reserves }}   ·   *Deviation:* {{ .Annotations.current_deviation }}
     {{ else if .Annotations.current_reserves -}}
     *Reserves:* {{ .Annotations.current_reserves }}
+    {{ else if .Annotations.current_deviation -}}
+    *Deviation:* {{ .Annotations.current_deviation }}
     {{ end -}}
     *Started:* {{ .StartsAt.Format "Jan 02 15:04 UTC" }}
     {{ end }}

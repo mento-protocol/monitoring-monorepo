@@ -338,7 +338,7 @@ describe("runRebalanceProbes — timeout race", () => {
     mockProbe.mockResolvedValueOnce({
       kind: "blocked",
       reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
-      reasonMessage: "Reserve has insufficient collateral to rebalance",
+      reasonMessage: "Reserve has insufficient collateral",
     });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -436,7 +436,7 @@ describe("runRebalanceProbes — re-entrancy guard for overlapping cycles", () =
     resolveCycle1({
       kind: "blocked",
       reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
-      reasonMessage: "Reserve has insufficient collateral to rebalance",
+      reasonMessage: "Reserve has insufficient collateral",
     });
     await cycle1Run;
 
@@ -507,7 +507,7 @@ describe("runRebalanceProbes — re-entrancy guard for overlapping cycles", () =
     resolveCycle1({
       kind: "blocked",
       reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
-      reasonMessage: "Reserve has insufficient collateral to rebalance",
+      reasonMessage: "Reserve has insufficient collateral",
     });
     await cycle1Run;
 
@@ -539,7 +539,7 @@ describe("runRebalanceProbes — re-entrancy guard for overlapping cycles", () =
     resolveCycle4({
       kind: "blocked",
       reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
-      reasonMessage: "Reserve has insufficient collateral to rebalance",
+      reasonMessage: "Reserve has insufficient collateral",
     });
     await cycle4Run;
 
@@ -572,7 +572,7 @@ describe("runRebalanceProbes — re-entrancy guard for overlapping cycles", () =
     mockProbe.mockResolvedValueOnce({
       kind: "blocked",
       reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
-      reasonMessage: "Reserve has insufficient collateral to rebalance",
+      reasonMessage: "Reserve has insufficient collateral",
     });
     await runRebalanceProbes([pool]);
 
@@ -612,7 +612,7 @@ describe("runRebalanceProbes — gauge writes", () => {
     mockProbe.mockResolvedValueOnce({
       kind: "blocked",
       reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
-      reasonMessage: "Reserve has insufficient collateral to rebalance",
+      reasonMessage: "Reserve has insufficient collateral",
     });
 
     await runRebalanceProbes([pool]);
@@ -629,7 +629,7 @@ describe("runRebalanceProbes — gauge writes", () => {
         block_explorer_url:
           "https://celoscan.io/address/0x8c0014afe032e4574481d8934504100bf23fcb56",
         reason_code: "RLS_RESERVE_OUT_OF_COLLATERAL",
-        reason_message: "Reserve has insufficient collateral to rebalance",
+        reason_message: "Reserve has insufficient collateral",
       },
     );
     expect(value).toBe(1);
@@ -724,7 +724,7 @@ describe("runRebalanceProbes — gauge writes", () => {
     mockProbe.mockResolvedValueOnce({
       kind: "blocked",
       reasonCode: "RLS_RESERVE_OUT_OF_COLLATERAL",
-      reasonMessage: "Reserve has insufficient collateral to rebalance",
+      reasonMessage: "Reserve has insufficient collateral",
     });
 
     // First probe: pool is blocked, gauge gets written.

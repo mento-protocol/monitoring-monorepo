@@ -1,5 +1,12 @@
 # Rebalance Failure Reason in Deviation Breach Alerts — Feasibility
 
+> **As-shipped note (refreshed 2026-04-30):** the design proposed below shipped in PR #233+ with two later refinements:
+>
+> 1. The `reason_code` label is no longer rendered to Slack — the line reads "Rebalance Blocked: \<reason_message\>." with the all-caps code dropped (the label is still emitted on the gauge for log/diagnostic spelunking). See PR #269.
+> 2. The trailing " to rebalance" / " to fully rebalance" suffix on four `ERROR_MESSAGES` entries was trimmed — under the "Rebalance Blocked:" prefix the suffix was filler. The example below ("Reserve has insufficient collateral to rebalance") is the pre-trim form. See PR #269.
+>
+> The original feasibility analysis follows unchanged.
+
 **Question:** Can we surface the rebalance failure reason (e.g. "RLS_RESERVE_OUT_OF_COLLATERAL — Reserve has insufficient collateral to rebalance") in the v3 `Deviation Breach Critical` Slack alert?
 
 **Conclusion:** Yes — the cheapest viable path is to vendor the existing `checkRebalanceStatus` probe into `metrics-bridge`, run it on a slower cadence for pools currently in critical breach, and emit a `mento_pool_rebalance_blocked{..., reason_code, reason_message}` gauge that the Slack template renders as a one-line annotation. Scope is contained (~300–400 LOC, all additive); no schema changes; no new RPC providers.
