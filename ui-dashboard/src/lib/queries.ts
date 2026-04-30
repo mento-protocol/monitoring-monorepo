@@ -210,9 +210,9 @@ export const POOL_REBALANCE_REWARDS = `
     RebalanceEvent(
       where: { poolId: { _eq: $poolId } }
       limit: $limit
-      order_by: { blockNumber: desc }
+      order_by: [{ blockNumber: desc }, { id: asc }]
     ) {
-      id rewardUsd
+      rewardUsd
     }
   }
 `;

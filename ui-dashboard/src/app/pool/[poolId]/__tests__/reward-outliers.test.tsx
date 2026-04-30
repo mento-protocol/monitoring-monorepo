@@ -23,12 +23,27 @@ describe("computeRewardThresholds", () => {
     ];
     const thresholds = computeRewardThresholds(rewards);
     expect(thresholds).not.toBeNull();
-    // 30 values 1..30 sorted; nearest-rank floor(30*0.95)=28 → 29; floor(30*0.9)=27 → 28
+    // 30 values 1..30 sorted; 1-based nearest-rank:
+    // p95 = values[ceil(30*0.95)-1] = values[28] = 29
+    // p90 = values[ceil(30*0.9)-1]  = values[26] = 27
     const [p95, p90] = thresholds!;
     expect(p95.tier.quantile).toBe(0.95);
     expect(p95.min).toBe(29);
     expect(p90.tier.quantile).toBe(0.9);
-    expect(p90.min).toBe(28);
+    expect(p90.min).toBe(27);
+  });
+
+  it("p95 tier fires at exactly the minimum sample size (regression)", () => {
+    // floor(20*0.95) = 19 made p95 the max value, so strict '>' could
+    // never fire. ceil(20*0.95)-1 = 18 keeps the cutoff one rank below
+    // the max so a top-row outlier still triggers the tier.
+    const rewards = Array.from({ length: 20 }, (_, i) => String(i + 1));
+    const thresholds = computeRewardThresholds(rewards)!;
+    const [p95] = thresholds;
+    expect(p95.min).toBe(19);
+    const out = markup(renderRewardCell("20", thresholds));
+    expect(out).toContain("text-amber-300");
+    expect(out).toContain("Top 5%");
   });
 
   it("returns thresholds in highest-tier-first order", () => {

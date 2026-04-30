@@ -1232,8 +1232,13 @@ export function computeRewardThresholds(
     .filter((v) => Number.isFinite(v) && v > 0)
     .sort((a, b) => a - b);
   if (values.length < MIN_REWARD_SAMPLE_SIZE) return null;
+  // 1-based nearest-rank: ceil(n*q) gives the rank of the q-quantile, so
+  // ceil(n*q)-1 is the 0-based index of the largest value at-or-below it.
+  // Paired with strict `>` in the renderer this gives the top (n - ceil(n*q))
+  // rows. floor(n*q) under-counted by one — at exactly N=20 it resolved
+  // p95 to the max value so no row could ever fire the tier.
   const at = (q: number) =>
-    values[Math.min(values.length - 1, Math.floor(values.length * q))];
+    values[Math.max(0, Math.ceil(values.length * q) - 1)];
   return REWARD_OUTLIER_TIERS.map((tier) => ({ tier, min: at(tier.quantile) }));
 }
 
@@ -1254,6 +1259,9 @@ export function renderRewardCell(
   return (
     <span className={match.tier.className} title={match.tier.title}>
       {formatted}
+      {/* Visible-on-hover via title; sr-only span gives screen readers
+          the tier context they'd otherwise miss. */}
+      <span className="sr-only"> — {match.tier.title}</span>
     </span>
   );
 }
@@ -1342,7 +1350,7 @@ export function RebalancesTab({
   // Full-pool-history reward distribution for outlier highlighting. Fetched
   // separately so paginating the table doesn't refetch the distribution.
   const { data: rewardHistData } = useGQL<{
-    RebalanceEvent: { id: string; rewardUsd: string | null }[];
+    RebalanceEvent: { rewardUsd: string | null }[];
   }>(
     POOL_REBALANCE_REWARDS,
     { poolId, limit: ENVIO_MAX_ROWS },
