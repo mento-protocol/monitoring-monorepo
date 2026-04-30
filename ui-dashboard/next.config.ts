@@ -47,7 +47,11 @@ const nextConfig: NextConfig = {
   // Drop the `x-powered-by: Next.js` fingerprint header.
   poweredByHeader: false,
   env: {
-    NEXT_PUBLIC_VERCEL_ENV: process.env.VERCEL_ENV || "development",
+    // Mirror VERCEL_ENV verbatim — empty on localhost, set to
+    // production/preview/development on Vercel deployments. The
+    // localhost-empty case is load-bearing for `shouldEnableSentry`
+    // in instrumentation-client.ts; do not add a fallback here.
+    NEXT_PUBLIC_VERCEL_ENV: process.env.VERCEL_ENV ?? "",
   },
   async headers() {
     return [
