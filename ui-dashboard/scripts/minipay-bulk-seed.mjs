@@ -55,9 +55,14 @@ function isValidAddress(value) {
   return typeof value === "string" && /^0x[0-9a-f]{40}$/i.test(value);
 }
 
+// Per-request deadlines mirror `src/lib/minipay.ts`. Without these, a
+// TLS-stalled fetch could hang the script indefinitely.
+const REQUEST_TIMEOUT_MS = 60_000;
+
 async function dune(path, init = {}) {
   const res = await fetch(`${DUNE_BASE}${path}`, {
     ...init,
+    signal: init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     headers: {
       "X-Dune-API-Key": apiKey,
       "Content-Type": "application/json",
@@ -67,6 +72,21 @@ async function dune(path, init = {}) {
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`Dune ${path} → ${res.status}: ${body.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+async function upstashFetch(path, init = {}) {
+  const res = await fetch(`${redisUrl}${path}`, {
+    ...init,
+    signal: init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    headers: {
+      Authorization: `Bearer ${redisToken}`,
+      ...(init.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Upstash ${path} → ${res.status}: ${await res.text()}`);
   }
   return res.json();
 }
@@ -114,6 +134,33 @@ async function fetchPage(executionId, offset) {
   return dune(`/api/v1/execution/${executionId}/results?${params}`);
 }
 
+// Upstash REST pipeline can return HTTP 200 with per-command `{ error: ... }`
+// entries (e.g. when a single SADD trips the 100 MB record limit). Surface
+// those so we don't silently lose writes.
+function checkPipelineResults(results, commands) {
+  const failed = [];
+  for (let i = 0; i < results.length; i += 1) {
+    if (results[i]?.error) {
+      const cmd = commands[i]?.[0] ?? "?";
+      const key = commands[i]?.[1] ?? "?";
+      failed.push(`${cmd} ${key}: ${results[i].error}`);
+    }
+  }
+  if (failed.length > 0) {
+    throw new Error(`Upstash pipeline errors:\n  ${failed.join("\n  ")}`);
+  }
+}
+
+async function pipeline(commands) {
+  const results = await upstashFetch(`/pipeline`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(commands),
+  });
+  checkPipelineResults(results, commands);
+  return results;
+}
+
 async function sadd(addresses) {
   if (addresses.length === 0) return 0;
   // Bucket by shard (first hex nibble), chunk each shard, pipeline together.
@@ -133,28 +180,12 @@ async function sadd(addresses) {
       commands.push(["SADD", key, ...members.slice(i, i + SADD_CHUNK)]);
     }
   }
-  const res = await fetch(`${redisUrl}/pipeline`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${redisToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(commands),
-  });
-  if (!res.ok) {
-    throw new Error(`Upstash pipeline → ${res.status}: ${await res.text()}`);
-  }
-  const results = await res.json();
+  const results = await pipeline(commands);
   return results.reduce((sum, r) => sum + (Number(r.result) || 0), 0);
 }
 
 async function setLastBlock(block) {
-  const res = await fetch(`${redisUrl}/set/${LAST_BLOCK_KEY}/${block}`, {
-    headers: { Authorization: `Bearer ${redisToken}` },
-  });
-  if (!res.ok) {
-    throw new Error(`Upstash SET → ${res.status}: ${await res.text()}`);
-  }
+  await upstashFetch(`/set/${LAST_BLOCK_KEY}/${block}`);
 }
 
 async function scard() {
@@ -162,20 +193,7 @@ async function scard() {
     "SCARD",
     USERS_KEY_PREFIX + n,
   ]);
-  const res = await fetch(`${redisUrl}/pipeline`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${redisToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(commands),
-  });
-  if (!res.ok) {
-    throw new Error(
-      `Upstash SCARD pipeline → ${res.status}: ${await res.text()}`,
-    );
-  }
-  const results = await res.json();
+  const results = await pipeline(commands);
   return results.reduce((sum, r) => sum + (Number(r.result) || 0), 0);
 }
 

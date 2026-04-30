@@ -319,21 +319,25 @@ export async function getMiniPaySetSize(): Promise<number> {
 /**
  * Return the subset of `addresses` that are members of the MiniPay set.
  * Bucketed by shard so each SMISMEMBER hits exactly one shard's bytes;
- * shards are queried in parallel.
+ * shards are queried in parallel (chunks within a shard stay sequential
+ * because they share state).
  */
 export async function intersectMiniPay(addresses: string[]): Promise<string[]> {
   if (addresses.length === 0) return [];
   const redis = getRedis();
-  const matches: string[] = [];
-  for (const [key, members] of bucketByShard(addresses)) {
-    for (const batch of chunk(members, SMISMEMBER_CHUNK)) {
-      const flags = (await redis.smismember(key, batch)) as number[];
-      for (let i = 0; i < batch.length; i += 1) {
-        if (flags[i] === 1) matches.push(batch[i]!);
+  const perShard = await Promise.all(
+    Array.from(bucketByShard(addresses), async ([key, members]) => {
+      const matches: string[] = [];
+      for (const batch of chunk(members, SMISMEMBER_CHUNK)) {
+        const flags = (await redis.smismember(key, batch)) as number[];
+        for (let i = 0; i < batch.length; i += 1) {
+          if (flags[i] === 1) matches.push(batch[i]!);
+        }
       }
-    }
-  }
-  return matches;
+      return matches;
+    }),
+  );
+  return perShard.flat();
 }
 
 // ── Cursor helpers ───────────────────────────────────────────────────────────
