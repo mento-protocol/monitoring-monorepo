@@ -137,11 +137,19 @@ can print a paste-ready rollback command:
 
 ```bash
 PREVIOUS_PROD_COMMIT=$(npx envio-cloud indexer get mento mento-protocol -o json \
-  | jq -r --arg target "<TARGET_COMMIT>" \
-      '.data.deployments[] | select(.prod_status=="prod") | select((.commit_hash | startswith($target)) | not) | .commit_hash' \
-  | head -n1 \
+  | jq -r --arg target "<TARGET_COMMIT>" '
+      [.data.deployments[]
+       | select(.prod_status=="prod")
+       | select((.commit_hash | startswith($target)) | not)]
+      | sort_by(.created_time) | reverse | .[0].commit_hash // empty' \
   | head -c 7)
 ```
+
+The `sort_by(.created_time) | reverse` step is load-bearing: the
+`envio-cloud` API doesn't guarantee deployment order, so an unsorted
+`head -n1` could pick an older prod entry from a long-ago deploy instead
+of the immediately-prior one. Mirroring what `scripts/deploy-indexer-promote.sh`
+does for "auto-detect latest deployment".
 
 The `select(... | not)` clause excludes `TARGET_COMMIT` itself, which matters
 on the idempotent re-run path: if you re-run `/deploy-indexer` for a commit
