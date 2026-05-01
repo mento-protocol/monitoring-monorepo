@@ -89,6 +89,9 @@ export const ORACLE_SNAPSHOTS_COUNT_PAGE = `
   }
 `;
 
+// `limit: 1` because a pool has exactly one creation tx; `FactoryDeployment`
+// is append-only and indexed once per FPMM, so any extra rows would be
+// duplicates worth surfacing as a bug, not paginating through.
 export const POOL_DEPLOYMENT = `
   query PoolDeployment($poolId: String!) {
     FactoryDeployment(
