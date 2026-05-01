@@ -38,15 +38,15 @@ Pre-existing behavior carried over verbatim from the monolithic pool page; flagg
 
 _Last updated: 2026-05-01 by file-size-budget-drift-detector. Soft cap 600 lines / hard cap 1,000. See `/AGENTS.md` §"File-size budget"._
 
-| Lines | File | Δ since last report |
-|---:|---|---:|
-| 3302 | ./indexer-envio/test/Test.ts | (new) |
-| 1882 | ./indexer-envio/src/rpc.ts | (new) |
-| 1028 | ./indexer-envio/src/handlers/fpmm.ts | (new) |
-| 909 | ./ui-dashboard/src/app/bridge-flows/page.tsx | (new) |
-| 823 | ./ui-dashboard/src/components/breach-history-panel.tsx | (new) |
-| 808 | ./ui-dashboard/src/app/api/address-labels/import/route.ts | (new) |
-| 713 | ./ui-dashboard/src/app/address-book/AddressBookClient.tsx | (new) |
-| 684 | ./indexer-envio/src/pool.ts | (new) |
-| 638 | ./ui-dashboard/src/components/global-pools-table.tsx | (new) |
-| 612 | ./ui-dashboard/src/lib/fetch-all-networks.ts | (new) |
+| Lines | File                                                      | Δ since last report |
+| ----: | --------------------------------------------------------- | ------------------: |
+|  3302 | ./indexer-envio/test/Test.ts                              |               (new) |
+|  1882 | ./indexer-envio/src/rpc.ts                                |               (new) |
+|  1028 | ./indexer-envio/src/handlers/fpmm.ts                      |               (new) |
+|   909 | ./ui-dashboard/src/app/bridge-flows/page.tsx              |               (new) |
+|   823 | ./ui-dashboard/src/components/breach-history-panel.tsx    |               (new) |
+|   808 | ./ui-dashboard/src/app/api/address-labels/import/route.ts |               (new) |
+|   713 | ./ui-dashboard/src/app/address-book/AddressBookClient.tsx |               (new) |
+|   684 | ./indexer-envio/src/pool.ts                               |               (new) |
+|   638 | ./ui-dashboard/src/components/global-pools-table.tsx      |               (new) |
+|   612 | ./ui-dashboard/src/lib/fetch-all-networks.ts              |               (new) |
