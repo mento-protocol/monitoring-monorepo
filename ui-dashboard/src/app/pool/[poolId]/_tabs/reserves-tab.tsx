@@ -45,7 +45,8 @@ export function ReservesTab({
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
-  // Query returns newest-first; chart needs chronological (asc) for plotting.
+  // Query is desc so the 25-row limit captures recent updates (not the
+  // pool's first day); chart needs chronological order for plotting.
   const chartRows = useMemo(() => [...rows].reverse(), [rows]);
 
   const feedVal =
