@@ -17,7 +17,7 @@ PR #263 split `ui-dashboard/src/app/pool/[poolId]/page.tsx` from 2,831 → 470 l
 
 ### Tier B — lib/utility splits (low-risk, no UI)
 
-- [ ] **`ui-dashboard/src/lib/queries.ts` — 810 lines.** GraphQL constants only. Split by domain (pools / events / breaches / snapshots / config). Zero behavior risk; biggest win is grep-ability.
+- [ ] **`ui-dashboard/src/lib/queries.ts` — split by domain (pools / events / breaches / snapshots / config).** PR #277 (in-flight) extracted pool/event/snapshot queries → `lib/queries/pools.ts`; remaining work is `lib/queries/config.ts` (trading-limits, oracle-snapshots, breaker config) and `lib/queries/protocol.ts` (OLS, protocol fees), then drop the `queries.ts` `max-lines` exemption.
 - [ ] **`ui-dashboard/src/app/api/address-labels/import/route.ts` — 808 lines.** Split CSV parser, JSON parser, validators, batching out of the handler.
 - [ ] **`ui-dashboard/src/lib/fetch-all-networks.ts` — 610 lines.** Already covered by hook tests; pagination + error gating + Sentry throttling are reusable.
 

@@ -76,7 +76,7 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 
 - Source files MUST stay under **600 lines** (soft cap, advisory). If your change would push a file over 600 lines, split it in the same PR — extract sub-components, helpers, or per-domain modules. Don't append "just one more thing" to a file that's already drifting up.
 - Hard cap is **1,000 lines**, enforced by `max-lines` in each package's `eslint.config.mjs`. CI blocks merges past this. Per-file escape via `// eslint-disable-next-line max-lines` with a comment explaining why the file genuinely needs to stay big.
-- Exemptions (rule disabled): `**/__tests__/**`, `**/*.test.{ts,tsx}`, `**/src/lib/queries.ts` (pure GraphQL constants), `**/src/lib/types.ts` (pure type definitions).
+- Exemptions (rule disabled): `**/__tests__/**`, `**/*.test.{ts,tsx}`, `**/src/lib/queries.ts` + `**/src/lib/queries/*.ts` (pure GraphQL constants), `**/src/lib/types.ts` (pure type definitions).
 - A monthly drift detector runs on cron and opens a PR appending newly-over-budget files to `BACKLOG.md` so growth doesn't slip past unnoticed.
 - Why this exists: PR #263 split `ui-dashboard/src/app/pool/[poolId]/page.tsx` from 2,831 → 470 lines after a year of unchecked growth. The refactor was a 4-day project; appending one more tab inline was a 30-minute task. Each individual decision was rational; the cumulative drift was not.
 
