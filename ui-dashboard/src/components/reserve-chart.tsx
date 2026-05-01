@@ -61,7 +61,7 @@ export function ReserveChart({
     return usdmIsToken0 ? amount * feedVal : amount;
   };
 
-  // rows come in asc order from the query
+  // rows arrive in chronological (asc) order — see reserves-tab.tsx
   const timestamps = rows.map((r) =>
     new Date(Number(r.blockTimestamp) * 1000).toISOString(),
   );
