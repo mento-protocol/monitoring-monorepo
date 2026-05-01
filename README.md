@@ -140,17 +140,17 @@ Sourced from the published [`@mento-protocol/contracts`](https://www.npmjs.com/p
 
 ## Key Files
 
-| What                      | Where                                          |
-| ------------------------- | ---------------------------------------------- |
-| Indexer schema            | `indexer-envio/schema.graphql`                 |
-| Event handlers            | `indexer-envio/src/EventHandlers.ts`           |
-| Pool ID helpers           | `indexer-envio/src/helpers.ts`                 |
-| Multichain config         | `indexer-envio/config.multichain.mainnet.yaml` |
-| Indexer status + endpoint | `indexer-envio/STATUS.md`                      |
-| Dashboard app             | `ui-dashboard/src/app/`                        |
-| Network defs              | `ui-dashboard/src/lib/networks.ts`             |
-| GraphQL queries           | `ui-dashboard/src/lib/queries.ts`              |
-| Terraform infrastructure  | `terraform/`                                   |
+| What                      | Where                                                                            |
+| ------------------------- | -------------------------------------------------------------------------------- |
+| Indexer schema            | `indexer-envio/schema.graphql`                                                   |
+| Event handlers            | `indexer-envio/src/EventHandlers.ts`                                             |
+| Pool ID helpers           | `indexer-envio/src/helpers.ts`                                                   |
+| Multichain config         | `indexer-envio/config.multichain.mainnet.yaml`                                   |
+| Indexer status + endpoint | `indexer-envio/STATUS.md`                                                        |
+| Dashboard app             | `ui-dashboard/src/app/`                                                          |
+| Network defs              | `ui-dashboard/src/lib/networks.ts`                                               |
+| GraphQL queries           | `ui-dashboard/src/lib/queries.ts` (barrel) + `ui-dashboard/src/lib/queries/*.ts` |
+| Terraform infrastructure  | `terraform/`                                                                     |
 
 ## Documentation
 
