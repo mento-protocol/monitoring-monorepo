@@ -1,3 +1,7 @@
+// Pool list + per-pool event/snapshot/breach queries. The barrel re-export
+// lives in `../queries.ts` so existing `from "@/lib/queries"` imports stay
+// stable; consumers can also import directly from this module.
+
 export const ALL_POOLS_WITH_HEALTH = `
   query AllPoolsWithHealth($chainId: Int!) {
     Pool(

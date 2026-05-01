@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`@/lib/queries — full module snapshot (locks every query string verbatim) > matches the module-wide snapshot 1`] = `
+exports[`@/lib/queries — full module snapshot (locks every query's structure + field selection, whitespace-normalized) > matches the module-wide snapshot 1`] = `
 {
   "ALL_OLS_POOLS": "query AllOlsPools($chainId: Int!) { OlsPool( where: { isActive: { _eq: true }, chainId: { _eq: $chainId } } limit: 1000 ) { poolId } }",
   "ALL_POOLS_BREACH_ROLLUP": "query AllPoolsBreachRollup($chainId: Int!) { Pool(where: { chainId: { _eq: $chainId } }) { id breachCount healthBinarySeconds healthTotalSeconds } }",

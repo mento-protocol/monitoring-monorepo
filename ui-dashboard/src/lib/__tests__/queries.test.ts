@@ -315,7 +315,7 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
   });
 });
 
-describe("@/lib/queries — full module snapshot (locks every query string verbatim)", () => {
+describe("@/lib/queries — full module snapshot (locks every query's structure + field selection, whitespace-normalized)", () => {
   it("matches the module-wide snapshot", () => {
     const sorted = Object.fromEntries(
       Object.entries(queries)
