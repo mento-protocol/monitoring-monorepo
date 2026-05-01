@@ -45,8 +45,8 @@ export function ReservesTab({
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
 
-  // Reverse once to get newest-first order, then filter
-  const orderedRows = useMemo(() => [...rows].reverse(), [rows]);
+  // Query returns newest-first; chart needs chronological (asc) for plotting.
+  const chartRows = useMemo(() => [...rows].reverse(), [rows]);
 
   const feedVal =
     pool?.oraclePrice && pool.oraclePrice !== "0"
@@ -58,8 +58,8 @@ export function ReservesTab({
   const showUsd = feedVal !== null && hasUsdmSide;
 
   const filteredRows = useMemo(() => {
-    if (!query) return orderedRows;
-    return orderedRows.filter((r) => {
+    if (!query) return rows;
+    return rows.filter((r) => {
       const raw0 = parseWei(r.reserve0, pool?.token0Decimals ?? 18);
       const raw1 = parseWei(r.reserve1, pool?.token1Decimals ?? 18);
       const usd0 = feedVal && !usdmIsToken0 ? raw0 * feedVal : raw0;
@@ -81,7 +81,7 @@ export function ReservesTab({
         r.blockNumber,
       ]);
     });
-  }, [orderedRows, query, sym0, sym1, pool, feedVal, usdmIsToken0, showUsd]);
+  }, [rows, query, sym0, sym1, pool, feedVal, usdmIsToken0, showUsd]);
 
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <Skeleton rows={5} />;
@@ -91,7 +91,7 @@ export function ReservesTab({
   return (
     <>
       <ReserveChart
-        rows={rows}
+        rows={chartRows}
         token0={pool?.token0 ?? null}
         token1={pool?.token1 ?? null}
         pool={pool}

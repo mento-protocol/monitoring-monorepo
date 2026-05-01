@@ -149,7 +149,7 @@ export const POOL_RESERVES = `
   query PoolReserves($poolId: String!, $limit: Int!) {
     ReserveUpdate(
       where: { poolId: { _eq: $poolId } }
-      order_by: { blockNumber: asc }
+      order_by: { blockNumber: desc }
       limit: $limit
     ) {
       id chainId reserve0 reserve1
