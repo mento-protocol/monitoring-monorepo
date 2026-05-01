@@ -8,6 +8,8 @@ import {
   _clearMockRateFeedIDs,
   _setMockReportExpiry,
   _clearMockReportExpiry,
+  _setMockBreakerList,
+  _clearBreakerMocks,
 } from "../src/EventHandlers.ts";
 import { dayBucket, dailySnapshotId, makePoolId } from "../src/helpers.ts";
 
@@ -2866,6 +2868,7 @@ describe("Envio Celo indexer handlers", () => {
 describe("Health score handler integration", () => {
   afterEach(() => {
     _clearMockRebalancingStates();
+    _clearBreakerMocks();
   });
 
   // -------------------------------------------------------------------------
@@ -2971,6 +2974,10 @@ describe("Health score handler integration", () => {
     const FEED_ID = "0x000000000000000000000000000000000000ff12";
     const ORACLE_PRICE = 1_000_000_000_000_000_000_000_000n;
     const dayStart = dayBucket(1_700_000_600n);
+
+    // Short-circuit BreakerBox.getBreakers RPC bootstrap on MedianUpdated;
+    // without this the handler fans out to forno.celo.org.
+    _setMockBreakerList(42220, []);
 
     let mockDb = MockDb.createMockDb();
     mockDb = await seedPoolWithFeed(mockDb, {
