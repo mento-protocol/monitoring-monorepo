@@ -37,6 +37,12 @@ type RollupRow = {
   healthTotalSeconds?: string;
 };
 type DailyAnchorRow = {
+  // Read by computeWindowUptimePct's freshness gate (rejects anchors >8d
+  // old). If this field is ever dropped from POOL_HEALTH_7D_ANCHOR or
+  // this type, the gate silently disables (anchorTs defaults to 0 →
+  // "no freshness check") and stale anchors quietly broaden the window
+  // past the "last 7d" label. Keep both in lockstep with the helper.
+  timestamp?: string;
   cumulativeHealthBinarySeconds?: string;
   cumulativeHealthTotalSeconds?: string;
 };
