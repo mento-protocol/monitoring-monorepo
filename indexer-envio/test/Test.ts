@@ -3033,6 +3033,7 @@ describe("Health score handler integration", () => {
       oracleDailyId,
     ) as
       | {
+          chainId: number;
           blockNumber: bigint;
           cumulativeHealthBinarySeconds: bigint;
           cumulativeHealthTotalSeconds: bigint;
@@ -3041,6 +3042,11 @@ describe("Health score handler integration", () => {
     assert.ok(
       dailyAfterOracle,
       "OracleReported should refresh PoolDailySnapshot for quiet pools",
+    );
+    assert.equal(
+      dailyAfterOracle!.chainId,
+      42220,
+      "daily snapshot must carry chainId so the dashboard's chain-scoped anchor query matches it",
     );
     assert.equal(
       dailyAfterOracle!.blockNumber,

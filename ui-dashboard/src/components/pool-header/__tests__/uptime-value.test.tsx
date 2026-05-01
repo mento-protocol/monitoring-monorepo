@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Pool } from "@/lib/types";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
@@ -63,6 +63,12 @@ beforeEach(() => {
   nextRollup = { data: undefined };
   nextAnchor = noAnchor;
   anchorVars = undefined;
+});
+
+// Restore real timers unconditionally so a failed assertion inside a
+// useFakeTimers() block doesn't leak frozen time into subsequent tests.
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("UptimeValue", () => {
@@ -238,7 +244,6 @@ describe("UptimeValue", () => {
     expect(html).toContain("100.00%");
     expect(html).toContain("—");
     expect(html).not.toMatch(/last 7d/);
-    vi.useRealTimers();
   });
 
   it("falls back to '—' for the 7d subtitle when no daily-snapshot anchor exists (pool too young)", () => {
@@ -282,7 +287,6 @@ describe("UptimeValue", () => {
       chainId: BASE_POOL.chainId,
       sevenDaysAgo: todayStart - 7 * SECONDS_PER_DAY,
     });
-    vi.useRealTimers();
   });
 
   it("keeps the all-time line rendered when ONLY the 7d-anchor query fails (schema-lag isolation)", () => {
