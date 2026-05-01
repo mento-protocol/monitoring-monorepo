@@ -534,7 +534,11 @@ export async function handleCsvText(text: string): Promise<NextResponse> {
   for (const [scope, labels] of byScope.entries()) {
     const merged: Record<string, AddressEntry> = {};
     for (const [addr, entry] of Object.entries(labels)) {
-      const prev = crossScope[addr];
+      // Defensive .toLowerCase() — `addr` is already lowercased upstream and
+      // writers always normalise before HSET, but matching mergeWithCrossScope's
+      // pattern stays robust against any historical mixed-case row that pre-dates
+      // the writer normalisation.
+      const prev = crossScope[addr.toLowerCase()];
       merged[addr] = sanitizeEntry(
         stripArkhamProvenance({
           ...prev,

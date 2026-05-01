@@ -254,6 +254,10 @@ describe("P1-05 — RSC label-leak regression guard", () => {
         "alias type-only re-export",
         'export type { X } from "@/lib/address-labels";',
       ],
+      [
+        "alias submodule type-only import",
+        'import type { X } from "@/lib/address-labels/import";',
+      ],
       ["unrelated bare module", 'import React from "react";'],
       ["unrelated alias", 'import { y } from "@/lib/address-labels-shared";'],
       ["unrelated relative", 'import { y } from "../lib/other-module";'],
