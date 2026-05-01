@@ -37,6 +37,10 @@ const RUNTIME_IMPORT_ALLOWLIST = new Set<string>([
   // Same posture as arkham/enrich — reads existing labels to filter
   // candidates, then writes only previously-unlabelled addresses.
   "src/app/api/minipay/tag/route.ts",
+  // Server-only library used exclusively by the import API route — same
+  // posture as a route handler (no RSC payload, no HTML serialization);
+  // extracted purely so the route stays a thin HTTP wrapper.
+  "src/lib/address-labels/import.ts",
   // Self-references / tests.
   "src/lib/address-labels.ts",
 ]);
