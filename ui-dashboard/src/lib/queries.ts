@@ -1,6 +1,7 @@
-// Pool list + per-pool event/snapshot/breach queries are extracted to ./queries/pools
-// so this barrel can grow without breaking the per-domain organisation downstream.
-// Re-exported here to keep existing `from "@/lib/queries"` imports stable.
+// Per-domain query modules live in ./queries/* — pool list + events/snapshots/breaches
+// in pools.ts, trading-limit + oracle-snapshot + breaker config in config.ts. Re-exported
+// here so existing `from "@/lib/queries"` imports stay stable; consumers may also import
+// directly from the per-domain files.
 export * from "./queries/pools";
 export * from "./queries/config";
 
