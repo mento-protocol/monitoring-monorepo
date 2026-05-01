@@ -353,9 +353,13 @@ export const POOL_BREACH_ROLLUP = `
 // all-time line stays rendered. Same isolation pattern as POOL_BREACH_ROLLUP
 // itself uses against POOL_DETAIL_WITH_HEALTH.
 export const POOL_HEALTH_7D_ANCHOR = `
-  query PoolHealth7dAnchor($id: String!, $sevenDaysAgo: numeric!) {
+  query PoolHealth7dAnchor($id: String!, $chainId: Int!, $sevenDaysAgo: numeric!) {
     PoolDailySnapshot(
-      where: { poolId: { _eq: $id }, timestamp: { _lte: $sevenDaysAgo } }
+      where: {
+        poolId: { _eq: $id }
+        chainId: { _eq: $chainId }
+        timestamp: { _lte: $sevenDaysAgo }
+      }
       order_by: [{ timestamp: desc }]
       limit: 1
     ) {

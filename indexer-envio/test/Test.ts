@@ -8,8 +8,10 @@ import {
   _clearMockRateFeedIDs,
   _setMockReportExpiry,
   _clearMockReportExpiry,
+  _setMockBreakerList,
+  _clearBreakerMocks,
 } from "../src/EventHandlers.ts";
-import { makePoolId } from "../src/helpers.ts";
+import { dayBucket, dailySnapshotId, makePoolId } from "../src/helpers.ts";
 
 /** Shorthand: create a namespaced pool ID for chainId 42220 (used in all tests). */
 const pid = (addr: string): string => makePoolId(42220, addr);
@@ -18,6 +20,10 @@ type MockDb = {
   entities: {
     FactoryDeployment: { get: (id: string) => unknown };
     Pool: {
+      get: (id: string) => unknown;
+      set: (entity: unknown) => MockDb;
+    };
+    PoolDailySnapshot: {
       get: (id: string) => unknown;
       set: (entity: unknown) => MockDb;
     };
@@ -405,6 +411,16 @@ type OracleSnapshotEntity = {
   deviationRatio: string;
   healthBinaryValue: string;
   hasHealthData: boolean;
+};
+
+type PoolDailySnapshotEntity = {
+  id: string;
+  poolId: string;
+  chainId: number;
+  timestamp: bigint;
+  cumulativeHealthBinarySeconds: bigint;
+  cumulativeHealthTotalSeconds: bigint;
+  blockNumber: bigint;
 };
 
 type LiquidityPositionEntity = {
@@ -2852,6 +2868,7 @@ describe("Envio Celo indexer handlers", () => {
 describe("Health score handler integration", () => {
   afterEach(() => {
     _clearMockRebalancingStates();
+    _clearBreakerMocks();
   });
 
   // -------------------------------------------------------------------------
@@ -2949,6 +2966,153 @@ describe("Health score handler integration", () => {
     assert.isTrue(
       Number.isFinite(ratio) && ratio >= 0,
       `deviationRatio must be a valid non-negative ratio, got: ${snapshot.deviationRatio}`,
+    );
+  });
+
+  it("oracle-only events refresh PoolDailySnapshot for quiet pools", async () => {
+    const POOL_ADDR = "0x000000000000000000000000000000000000ff11";
+    const FEED_ID = "0x000000000000000000000000000000000000ff12";
+    const ORACLE_PRICE = 1_000_000_000_000_000_000_000_000n;
+    const dayStart = dayBucket(1_700_000_600n);
+
+    // Short-circuit BreakerBox.getBreakers RPC bootstrap on MedianUpdated;
+    // without this the handler fans out to forno.celo.org.
+    _setMockBreakerList(42220, []);
+
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedPoolWithFeed(mockDb, {
+      poolAddress: POOL_ADDR,
+      feedId: FEED_ID,
+      oracleExpiry: 600n,
+    });
+
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: 50_000_000_000_000_000_000_000n,
+      reserves1: 50_000_000_000_000_000_000_000n,
+      oraclePrice: ORACLE_PRICE,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      source: "fpmm_update_reserves",
+      rebalanceThreshold: 5000,
+      lastOracleSnapshotTimestamp: 1_700_000_000n,
+      lastDeviationRatio: "0.000000",
+      healthTotalSeconds: 0n,
+      healthBinarySeconds: 0n,
+      hasHealthData: true,
+    });
+
+    const oracleEvent = SortedOracles.OracleReported.createMockEvent({
+      token: FEED_ID,
+      oracle: "0x0000000000000000000000000000000000000099",
+      timestamp: 1_700_000_600n,
+      value: ORACLE_PRICE,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 21,
+        srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+        block: { number: 1100, timestamp: 1_700_000_600 },
+      },
+    });
+    mockDb = await SortedOracles.OracleReported.processEvent({
+      event: oracleEvent,
+      mockDb,
+    });
+
+    const poolAfterOracle = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
+      | (PoolEntity & {
+          healthBinarySeconds: bigint;
+          healthTotalSeconds: bigint;
+        })
+      | undefined;
+    assert.ok(poolAfterOracle, "Pool must exist after OracleReported");
+    const oracleDailyId = dailySnapshotId(pid(POOL_ADDR), dayStart);
+    const dailyAfterOracle = mockDb.entities.PoolDailySnapshot.get(
+      oracleDailyId,
+    ) as
+      | {
+          chainId: number;
+          blockNumber: bigint;
+          cumulativeHealthBinarySeconds: bigint;
+          cumulativeHealthTotalSeconds: bigint;
+        }
+      | undefined;
+    assert.ok(
+      dailyAfterOracle,
+      "OracleReported should refresh PoolDailySnapshot for quiet pools",
+    );
+    assert.equal(
+      dailyAfterOracle!.chainId,
+      42220,
+      "daily snapshot must carry chainId so the dashboard's chain-scoped anchor query matches it",
+    );
+    assert.equal(
+      dailyAfterOracle!.blockNumber,
+      1100n,
+      "daily snapshot block should advance on oracle-only writes",
+    );
+    assert.equal(
+      dailyAfterOracle!.cumulativeHealthBinarySeconds,
+      poolAfterOracle!.healthBinarySeconds,
+      "daily snapshot should mirror post-OracleReported binary accumulator",
+    );
+    assert.equal(
+      dailyAfterOracle!.cumulativeHealthTotalSeconds,
+      poolAfterOracle!.healthTotalSeconds,
+      "daily snapshot should mirror post-OracleReported total accumulator",
+    );
+
+    const medianEvent = SortedOracles.MedianUpdated.createMockEvent({
+      token: FEED_ID,
+      value: ORACLE_PRICE,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 22,
+        srcAddress: "0xefb84935239dadecf7c5ba76d8de40b077b7b33",
+        block: { number: 1101, timestamp: 1_700_000_900 },
+      },
+    });
+    mockDb = await SortedOracles.MedianUpdated.processEvent({
+      event: medianEvent,
+      mockDb,
+    });
+
+    const poolAfterMedian = mockDb.entities.Pool.get(pid(POOL_ADDR)) as
+      | (PoolEntity & {
+          healthBinarySeconds: bigint;
+          healthTotalSeconds: bigint;
+        })
+      | undefined;
+    assert.ok(poolAfterMedian, "Pool must exist after MedianUpdated");
+    const dailyAfterMedian = mockDb.entities.PoolDailySnapshot.get(
+      oracleDailyId,
+    ) as
+      | {
+          blockNumber: bigint;
+          cumulativeHealthBinarySeconds: bigint;
+          cumulativeHealthTotalSeconds: bigint;
+        }
+      | undefined;
+    assert.ok(
+      dailyAfterMedian,
+      "MedianUpdated should also refresh PoolDailySnapshot for quiet pools",
+    );
+    assert.equal(
+      dailyAfterMedian!.blockNumber,
+      1101n,
+      "daily snapshot block should advance on median-only writes",
+    );
+    assert.equal(
+      dailyAfterMedian!.cumulativeHealthBinarySeconds,
+      poolAfterMedian!.healthBinarySeconds,
+      "daily snapshot should mirror post-MedianUpdated binary accumulator",
+    );
+    assert.equal(
+      dailyAfterMedian!.cumulativeHealthTotalSeconds,
+      poolAfterMedian!.healthTotalSeconds,
+      "daily snapshot should mirror post-MedianUpdated total accumulator",
     );
   });
 
