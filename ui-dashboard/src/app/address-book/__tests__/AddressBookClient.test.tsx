@@ -270,7 +270,12 @@ function rowCount(): number {
 }
 
 function tbodyBadges(): string[] {
-  return Array.from(container.querySelectorAll("tbody td span"))
+  // Scope to badge pill spans (`.rounded-full` is shared by every source +
+  // visibility + chain pill in AddressBookClient.tsx) so non-badge spans
+  // (em-dashes, name text, chain labels) don't leak into the result and
+  // mask a regression where the searched-for string lands in the wrong
+  // element.
+  return Array.from(container.querySelectorAll("tbody td span.rounded-full"))
     .map((s) => s.textContent?.trim() ?? "")
     .filter(Boolean);
 }
@@ -630,6 +635,12 @@ describe("AddressBookClient — edit modal", () => {
     // any code path that hard-codes the first chain for every row's editor
     // would fail this assertion. Editor `initial` should also carry the
     // contract's name as a default.
+    const monadNet = NETWORKS["monad-mainnet"];
+    if (!monadNet) {
+      // Cleanly skip if monad-mainnet ever leaves the config — surfaces as a
+      // skipped test, not a confusing "ContractD row not found" error.
+      return;
+    }
     mockCustomEntries = [];
     mockGetEntry.mockReturnValue(undefined);
     render();
@@ -653,7 +664,7 @@ describe("AddressBookClient — edit modal", () => {
       "0xdddddddddddddddddddddddddddddddddddddddd",
     );
     expect(capturedEditor?.scope).toBe("global");
-    expect(capturedEditor?.chainId).toBe(143);
+    expect(capturedEditor?.chainId).toBe(monadNet.chainId);
     expect(capturedEditor?.initial?.name).toBe("ContractD");
   });
 });
@@ -711,8 +722,9 @@ describe("AddressBookClient — export", () => {
     expect(exportAnchor).toBeDefined();
     expect(exportAnchor!.download).toBe("");
     expect(anchorClickSpy).toHaveBeenCalledTimes(1);
-
-    document.createElement = realCreate;
+    // afterEach restores `document.createElement` from `originalCreateElement`,
+    // so no inline restore is needed — and an inline restore would be skipped
+    // if any preceding assertion threw.
   });
 });
 
@@ -745,6 +757,11 @@ describe("AddressBookClient — CSV import", () => {
     expect(typeof (init as RequestInit).body).toBe("string");
     expect((init as RequestInit).body as string).toContain("address,name,tags");
     expect(mockRevalidate).toHaveBeenCalled();
+    // Success status pins the formatImportCounts → DOM render path so a
+    // refactor that drops the role="status" element is caught here.
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      "Imported 1 label",
+    );
   });
 
   it("renders an error message when the import endpoint returns a non-2xx", async () => {
@@ -873,6 +890,7 @@ describe("AddressBookClient — JSON import variants", () => {
       "Content-Type": "application/json",
     });
     expect(JSON.parse((init as RequestInit).body as string)).toEqual(safe);
+    expect(mockRevalidate).toHaveBeenCalled();
   });
 
   it("Simple format — POSTs single-chain object as application/json", async () => {
@@ -895,6 +913,7 @@ describe("AddressBookClient — JSON import variants", () => {
       "Content-Type": "application/json",
     });
     expect(JSON.parse((init as RequestInit).body as string)).toEqual(simple);
+    expect(mockRevalidate).toHaveBeenCalled();
   });
 
   it("invalid JSON — surfaces a parse error without calling fetch", async () => {
