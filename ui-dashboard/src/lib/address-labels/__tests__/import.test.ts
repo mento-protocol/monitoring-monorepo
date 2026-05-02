@@ -451,6 +451,21 @@ describe("sanitizeAndFilter", () => {
     });
     expect(result[ADDR_A]?.name).toBe("spaced");
   });
+
+  it("end-to-end: tag-only JSON survives upgradeEntries → sanitizeAndFilter", async () => {
+    // Regression for the silent-drop bug Codex caught on this PR: tag-only
+    // JSON imports satisfy `isEntriesMap` but used to round-trip to
+    // `{ name: "", tags: [] }` because `upgradeEntry`'s fallback dropped
+    // `normalizedTags`, so `sanitizeAndFilter` then filtered the entry out
+    // and the import returned 200 with 0 persisted. With the fallback fix in
+    // place, the same input must persist `{ name: "", tags: ["Whale"] }`.
+    const { upgradeEntries } = await import("@/lib/address-labels-shared");
+    const upgraded = upgradeEntries({
+      [ADDR_A]: { tags: ["Whale"], updatedAt: "2026-01-01" },
+    });
+    const filtered = sanitizeAndFilter(upgraded);
+    expect(filtered[ADDR_A]).toMatchObject({ name: "", tags: ["Whale"] });
+  });
 });
 
 describe("isGnosisSafeFormat", () => {
@@ -536,6 +551,10 @@ describe("isEntriesMap", () => {
   });
 
   it("returns true for a tag-only entry (no name, but non-empty tags)", () => {
+    // Tag-only entries flow through the full pipeline as `{ name: "", tags: [...] }`
+    // — the downstream `sanitizeAndFilter` keeps them because tags.length > 0 satisfies
+    // the "has signal" gate. Pinned end-to-end by the upgradeEntry fallback test in
+    // `address-labels-shared.test.ts` and a sanitizeAndFilter test below.
     expect(
       isEntriesMap({
         [ADDR_A]: { tags: ["Whale"], updatedAt: "2026-01-01" },
@@ -613,8 +632,7 @@ describe("emptyCounts + addCount", () => {
   it("addCount keys chain buckets by the stringified chainId", () => {
     const counts = emptyCounts();
     addCount(counts, 42220, 1);
-    expect(counts.chains).toHaveProperty("42220");
-    expect(counts.chains).not.toHaveProperty(String(42220).slice(0, 4));
+    expect(counts.chains).toEqual({ "42220": 1 });
   });
 });
 
