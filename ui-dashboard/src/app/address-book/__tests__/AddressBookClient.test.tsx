@@ -803,6 +803,31 @@ describe("AddressBookClient — CSV import", () => {
     expect(mockRevalidate).not.toHaveBeenCalled();
   });
 
+  it("renders a stale-data error when revalidate throws after a successful import", async () => {
+    // Pinned because the post-import revalidate path was caught by codex
+    // review on PR #291; the dedicated copy ("table couldn't refresh") must
+    // stay distinct from the generic "Import failed" path so a confused
+    // user does not re-import and create duplicates.
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ imported: { global: 1, chains: {} } }), {
+        status: 200,
+      }),
+    );
+    mockRevalidate.mockRejectedValueOnce(new Error("SWR error"));
+    render();
+    await dispatchFile(
+      getFileInput(),
+      "address,name\n0xabc,X\n",
+      "text/csv",
+      "f.csv",
+    );
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      "couldn't refresh",
+    );
+    expect(container.querySelector('[role="status"]')).toBeNull();
+  });
+
   it("handles a CSV success response with a malformed body without crashing the page", async () => {
     // Server returns 2xx but a body shape `handleFileChange` doesn't
     // recognise (no `imported` key). The component should still render

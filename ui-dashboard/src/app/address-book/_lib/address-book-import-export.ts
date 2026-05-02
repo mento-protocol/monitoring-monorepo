@@ -51,13 +51,20 @@ export async function importFile(
     file.type === "text/csv" ||
     (file.type === "text/plain" && file.name.toLowerCase().endsWith(".csv"));
 
+  let text: string;
+  try {
+    text = await file.text();
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Import failed." };
+  }
+
   let result: { success?: string; error?: string };
   if (isCsv) {
-    result = await postImport("text/csv", await file.text());
+    result = await postImport("text/csv", text);
   } else {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(await file.text());
+      parsed = JSON.parse(text);
     } catch {
       return {
         error:
@@ -68,13 +75,16 @@ export async function importFile(
   }
 
   if (result.success) {
-    // Catch here so a refetch failure on a successful import surfaces as
-    // an error to the caller — the data did land server-side, but the
-    // user needs to know the table is stale until they reload.
+    // Distinguish "import landed server-side but the SWR refetch threw" from
+    // a real import failure — without the dedicated message a confused user
+    // re-imports and creates duplicates.
     try {
       await revalidate();
-    } catch (err) {
-      return { error: err instanceof Error ? err.message : "Import failed." };
+    } catch {
+      return {
+        error:
+          "Import succeeded, but the table couldn't refresh — reload the page to see your changes.",
+      };
     }
   }
   return result;
