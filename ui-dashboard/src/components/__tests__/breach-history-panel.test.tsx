@@ -730,6 +730,45 @@ describe("DurationField parse + commit", () => {
     commitOnBlur(minInput);
     expect(minInput.className).toContain("border-red-500");
   });
+
+  it("renders a shared visible format hint and wires both inputs to it", () => {
+    const { container } = renderInteractive();
+    const hint = container.querySelector(
+      "#breach-duration-format-hint",
+    ) as HTMLParagraphElement | null;
+    const minInput = container.querySelector(
+      'input[aria-label="Minimum breach duration"]',
+    ) as HTMLInputElement;
+    const maxInput = container.querySelector(
+      'input[aria-label="Maximum breach duration"]',
+    ) as HTMLInputElement;
+
+    expect(hint).toBeTruthy();
+    expect(hint?.textContent).toContain("Accepts:");
+    expect(hint?.textContent).toContain("1h 30m");
+    expect(minInput.getAttribute("aria-describedby")).toBe(
+      "breach-duration-format-hint",
+    );
+    expect(maxInput.getAttribute("aria-describedby")).toBe(
+      "breach-duration-format-hint",
+    );
+  });
+
+  it("sets aria-invalid only while the draft is invalid", () => {
+    const { container } = renderInteractive();
+    const minInput = container.querySelector(
+      'input[aria-label="Minimum breach duration"]',
+    ) as HTMLInputElement;
+
+    expect(minInput.getAttribute("aria-invalid")).toBeNull();
+    setInputValue(minInput, "abc");
+    commitOnBlur(minInput);
+    expect(minInput.getAttribute("aria-invalid")).toBe("true");
+
+    setInputValue(minInput, "1h");
+    commitOnBlur(minInput);
+    expect(minInput.getAttribute("aria-invalid")).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -829,6 +868,43 @@ describe("BucketFilter", () => {
     expect(
       findButton(container, (t) => t === "All").getAttribute("aria-checked"),
     ).toBe("false");
+  });
+
+  it("ArrowRight from All selects the next bucket", () => {
+    const { container } = renderInteractive();
+    const allBtn = findButton(container, (t) => t === "All");
+
+    act(() => {
+      allBtn.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+      );
+    });
+
+    expect(
+      findButton(container, (t) => t === "≤1h").getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(allBtn.getAttribute("aria-checked")).toBe("false");
+    expect(document.activeElement).toBe(
+      findButton(container, (t) => t === "≤1h"),
+    );
+  });
+
+  it("ArrowLeft from All wraps to the last bucket", () => {
+    const { container } = renderInteractive();
+    const allBtn = findButton(container, (t) => t === "All");
+
+    act(() => {
+      allBtn.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }),
+      );
+    });
+
+    expect(
+      findButton(container, (t) => t === "Ongoing").getAttribute(
+        "aria-checked",
+      ),
+    ).toBe("true");
+    expect(allBtn.getAttribute("aria-checked")).toBe("false");
   });
 
   it("changing bucket resets pagination to page 1", () => {
