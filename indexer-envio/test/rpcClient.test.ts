@@ -225,6 +225,7 @@ describe("logRpcFailure", () => {
       new Error("transient"),
     );
     assert.equal(cap.warn.length, 11);
+    assert.match(cap.warn[9], /\[RPC_FAILURE\]/);
     assert.match(cap.warn[10], /\[RPC_FAILURE_BURST\]/);
     assert.match(cap.warn[10], /failureCount=10/);
 
