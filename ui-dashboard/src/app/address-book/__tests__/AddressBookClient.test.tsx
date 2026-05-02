@@ -1,16 +1,25 @@
 /** @vitest-environment jsdom */
 
+// Tell React 19 we're in an act-compatible test environment so legitimate
+// state-update warnings stay visible (and so the harness stops printing
+// "The current testing environment is not configured to support act(...)"
+// to stderr on every render in this suite).
+//
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
 /**
  * Characterization tests for `AddressBookClient` — pinned BEFORE the planned
  * row + import-dialog extractions so a mechanical refactor can be verified by
  * keeping every assertion green.
  *
  * Strategy:
- * - Stub `useAddressLabels`, `useNetwork`, `AddressLabelEditor`, fetch, and
- *   `URL.createObjectURL` so the page renders deterministically with no
- *   network or DOM-API surprises.
+ * - Stub `useAddressLabels`, `useNetwork`, `AddressLabelEditor`, and fetch so
+ *   the page renders deterministically with no network surprises.
  * - Treat `NETWORKS` as configured in this environment so contract rows
  *   surface — `isConfiguredNetworkId` defaults to `false` without env vars.
+ *   Clear every network's addressLabels and seed two synthetic contracts so
+ *   real devnet/testnet labels can't bleed into search-count assertions.
  * - Tests rely on the ACTUAL `buildAddressBookRows` helper (used by
  *   `row-composition.test.ts`), so dedupe/order invariants stay shared.
  */
@@ -70,16 +79,19 @@ vi.mock("@/components/network-provider", async () => {
 vi.mock("@/lib/networks", async () => {
   const actual =
     await vi.importActual<typeof import("@/lib/networks")>("@/lib/networks");
-  // Inject a couple of synthetic addressLabels so contract rows surface in
-  // tests without hard-coding a real protocol address. Mutating the shared
-  // NETWORKS map is fine here — vitest worker isolation keeps it scoped.
-  const CELO = actual.NETWORKS["celo-mainnet"];
-  const MONAD = actual.NETWORKS["monad-mainnet"];
-  CELO.addressLabels = {
+  // Hermetic test fixture: clear addressLabels on every network (devnet /
+  // local / testnets carry real labels in production config and would bleed
+  // into search-count assertions otherwise), then seed the two synthetic
+  // contracts the suite asserts against. Mutation is safe because vitest
+  // worker isolation keeps it scoped.
+  for (const id of Object.keys(actual.NETWORKS) as IndexerNetworkId[]) {
+    actual.NETWORKS[id].addressLabels = {};
+  }
+  actual.NETWORKS["celo-mainnet"].addressLabels = {
     "0xcccccccccccccccccccccccccccccccccccccccc": "ContractC",
   };
-  if (MONAD) {
-    MONAD.addressLabels = {
+  if (actual.NETWORKS["monad-mainnet"]) {
+    actual.NETWORKS["monad-mainnet"].addressLabels = {
       "0xdddddddddddddddddddddddddddddddddddddddd": "ContractD",
     };
   }
@@ -149,9 +161,8 @@ import { NETWORKS } from "@/lib/networks";
 let container: HTMLDivElement;
 let root: Root;
 let fetchMock: Mock;
-let createObjectURLMock: Mock;
-let revokeObjectURLMock: Mock;
 let anchorClicks: HTMLAnchorElement[];
+let anchorClickSpy: Mock;
 let originalCreateElement: typeof document.createElement;
 
 function render(canEdit = true) {
@@ -177,19 +188,11 @@ beforeEach(() => {
   // — only intercept anchors generated *after* render, so React's own DOM
   // construction is untouched.
   anchorClicks = [];
+  anchorClickSpy = vi.fn();
   originalCreateElement = document.createElement.bind(document);
 
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
-
-  createObjectURLMock = vi.fn(() => "blob:mock-url");
-  revokeObjectURLMock = vi.fn();
-  // jsdom doesn't define these by default.
-  vi.stubGlobal("URL", {
-    ...URL,
-    createObjectURL: createObjectURLMock,
-    revokeObjectURL: revokeObjectURLMock,
-  });
 });
 
 afterEach(() => {
@@ -529,6 +532,39 @@ describe("AddressBookClient — edit modal", () => {
     expect(capturedEditor).not.toBeNull();
     expect(capturedEditor?.scope).toBe("global");
   });
+
+  it("contract row's '+ Tag' targets the row's own chain (not the page's first chain)", () => {
+    // Regression for a refactor that lost the per-row chain context: targets
+    // the Monad ContractD row (chainId 143), not the Celo ContractC row, so
+    // any code path that hard-codes the first chain for every row's editor
+    // would fail this assertion. Editor `initial` should also carry the
+    // contract's name as a default.
+    mockCustomEntries = [];
+    mockGetEntry.mockReturnValue(undefined);
+    render();
+    // Find the +Tag button on the row whose address cell carries ContractD.
+    const rows = Array.from(container.querySelectorAll("tbody tr"));
+    const monadRow = rows.find((tr) => tr.textContent?.includes("ContractD"));
+    if (!monadRow) {
+      throw new Error("ContractD row not found among rendered tbody rows");
+    }
+    const tagBtn = Array.from(monadRow.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "+ Tag",
+    );
+    if (!tagBtn) {
+      throw new Error("'+ Tag' button missing on Monad ContractD row");
+    }
+    act(() => {
+      tagBtn.click();
+    });
+    expect(capturedEditor).not.toBeNull();
+    expect(capturedEditor?.address).toBe(
+      "0xdddddddddddddddddddddddddddddddddddddddd",
+    );
+    expect(capturedEditor?.scope).toBe("global");
+    expect(capturedEditor?.chainId).toBe(143);
+    expect(capturedEditor?.initial?.name).toBe("ContractD");
+  });
 });
 
 // ---- 4. Add new modal ------------------------------------------------------
@@ -559,12 +595,17 @@ describe("AddressBookClient — add-new flow", () => {
 
 describe("AddressBookClient — export", () => {
   it("'Export JSON' click creates an anchor with the export URL and clicks it", () => {
-    // Wrap createElement so we can intercept the synthesized <a>.
+    // Wrap createElement so we can intercept the synthesized <a>, and stub
+    // its `.click()` so we can assert the download was actually triggered
+    // (not just the URL written). Without the click() assertion the test
+    // would pass even if `handleExport` stopped invoking it.
     const realCreate = document.createElement.bind(document);
     document.createElement = ((tag: string) => {
       const el = realCreate(tag);
       if (tag === "a") {
-        anchorClicks.push(el as HTMLAnchorElement);
+        const anchor = el as HTMLAnchorElement;
+        anchor.click = anchorClickSpy;
+        anchorClicks.push(anchor);
       }
       return el;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -578,6 +619,7 @@ describe("AddressBookClient — export", () => {
     );
     expect(exportAnchor).toBeDefined();
     expect(exportAnchor!.download).toBe("");
+    expect(anchorClickSpy).toHaveBeenCalledTimes(1);
 
     document.createElement = realCreate;
   });
