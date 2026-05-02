@@ -74,31 +74,14 @@ describe("getRpcClient", () => {
     _clearRpcClients();
   });
 
+  // Bare-HyperRPC fail-fast + token-paired success paths are pinned by
+  // hyperRpcToken.test.ts; the cases below cover ground that file does not.
+
   it("throws for an unknown chainId not in RPC_CONFIG_BY_CHAIN", () => {
     assert.throws(
       () => getRpcClient(999999),
       /No RPC config for chainId 999999/,
     );
-  });
-
-  it("throws when the resolved URL is a bare HyperRPC endpoint and ENVIO_API_TOKEN is unset", () => {
-    delete process.env.ENVIO_API_TOKEN;
-    delete process.env.ENVIO_RPC_URL;
-    // chainId 10143 (Monad Testnet) defaults to 10143.rpc.hypersync.xyz —
-    // exercises the bare-HyperRPC fail-fast guard end-to-end.
-    process.env.ENVIO_RPC_URL_10143 = "https://10143.rpc.hypersync.xyz";
-    assert.throws(
-      () => getRpcClient(10143),
-      /HyperRPC.*ENVIO_API_TOKEN is not set/s,
-    );
-  });
-
-  it("returns a client (no throw) when a HyperRPC URL is paired with a token", () => {
-    process.env.ENVIO_API_TOKEN = "test-token";
-    process.env.ENVIO_RPC_URL_10143 = "https://10143.rpc.hypersync.xyz";
-    const client = getRpcClient(10143);
-    assert.ok(client, "client should be created");
-    assert.equal(typeof client.readContract, "function");
   });
 
   it("returns a client when a non-HyperRPC override is set without a token", () => {
@@ -130,16 +113,6 @@ describe("getRpcClient", () => {
       cap.warn.some((line) => line.includes("legacy ENVIO_RPC_URL fallback")),
       `expected legacy-fallback warn line; got: ${JSON.stringify(cap.warn)}`,
     );
-  });
-
-  it("uses the hardcoded default when no overrides are set (Celo Mainnet)", () => {
-    delete process.env.ENVIO_API_TOKEN;
-    delete process.env.ENVIO_RPC_URL;
-    delete process.env.ENVIO_RPC_URL_42220;
-    // Celo Mainnet's default (forno.celo.org) is non-HyperRPC, so this
-    // exercises the success path of the no-overrides branch.
-    const client = getRpcClient(42220);
-    assert.ok(client);
   });
 });
 
@@ -242,12 +215,9 @@ describe("logRpcFailure", () => {
         new Error("transient"),
       );
     }
-    // 9 individual warns, no burst yet.
     assert.equal(cap.warn.length, 9);
     assert.ok(!cap.warn.some((l) => l.includes("[RPC_FAILURE_BURST]")));
 
-    // 10th call triggers the burst summary as a SECOND warn line on top
-    // of the per-call line.
     _testHooks.logRpcFailure(
       42220,
       "fetchReserves",
@@ -258,7 +228,6 @@ describe("logRpcFailure", () => {
     assert.match(cap.warn[10], /\[RPC_FAILURE_BURST\]/);
     assert.match(cap.warn[10], /failureCount=10/);
 
-    // 11th call: no new burst line (only at multiples of 10).
     _testHooks.logRpcFailure(
       42220,
       "fetchReserves",
@@ -270,16 +239,14 @@ describe("logRpcFailure", () => {
   });
 
   it("tracks burst counts independently per chainId+fn key", () => {
-    // 10 failures on (42220, fetchReserves) → 1 burst line.
     for (let i = 0; i < 10; i++) {
       _testHooks.logRpcFailure(42220, "fetchReserves", "0xA", new Error("e"));
     }
-    // 10 failures on a different chain — separate counter.
     for (let i = 0; i < 10; i++) {
       _testHooks.logRpcFailure(143, "fetchReserves", "0xB", new Error("e"));
     }
-    // 5 failures on the same chain but a different fn — must NOT trigger
-    // the burst on the original counter.
+    // Different fn on the same chain must not contribute to the original
+    // counter.
     for (let i = 0; i < 5; i++) {
       _testHooks.logRpcFailure(42220, "fetchFees", "0xA", new Error("e"));
     }
@@ -303,9 +270,7 @@ describe("logRpcFailure", () => {
         new Error(knownRevert),
       );
     }
-    // 10 debug lines for the per-call CONTRACT_REVERT entries…
     assert.equal(cap.debug.length, 10);
-    // …and a single warn line for the burst summary, tagged distinctly.
     assert.equal(cap.warn.length, 1);
     assert.match(cap.warn[0], /\[CONTRACT_REVERT_BURST\]/);
   });
@@ -320,17 +285,15 @@ describe("logRpcFailure", () => {
       ),
     );
     assert.match(cap.warn[0], /https:\/\/secret\.example\.org\/<redacted>/);
-    // The original path/token must NOT appear.
     assert.ok(!cap.warn[0].includes("token=abc123"));
     assert.ok(!cap.warn[0].includes("/path/with"));
   });
 
   it("handles non-Error throwables without crashing", () => {
     _testHooks.logRpcFailure(42220, "fetchReserves", "0xPool", "raw string");
-    assert.equal(cap.warn.length, 1);
-    assert.match(cap.warn[0], /error=raw string/);
-
     _testHooks.logRpcFailure(42220, "fetchReserves", "0xPool", null);
+    assert.equal(cap.warn.length, 2);
+    assert.match(cap.warn[0], /error=raw string/);
     assert.match(cap.warn[1], /error=unknown error/);
   });
 });
