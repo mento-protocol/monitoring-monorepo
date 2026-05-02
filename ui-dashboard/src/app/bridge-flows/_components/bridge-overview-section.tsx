@@ -1,14 +1,5 @@
 "use client";
 
-/**
- * Charts + KPI overview block for the bridge-flows page. Renders the three
- * chart components (VolumeChart, TokenBreakdownChart, TopBridgersChart) and the
- * three KPI tiles (Total Bridge Transfers, In-Flight, Avg Delivery Time) from
- * data already fetched by `BridgeFlowsContent`. Extracted here so the parent
- * page file stays under 300 lines — all data wiring lives in page.tsx, all
- * presentation lives here.
- */
-
 import { Tile } from "@/components/feedback";
 import { BreakdownTile } from "@/components/breakdown-tile";
 import { BridgeVolumeChart } from "@/components/bridge-volume-chart";
@@ -20,14 +11,8 @@ import type {
   BridgeDailySnapshot,
   BridgeTransfer,
 } from "@/lib/types";
+import type { WindowTotals } from "@/lib/bridge-flows/snapshots";
 import { RouteDeliveryTile } from "./route-delivery-tile";
-
-type TransferTotals = {
-  total: number | null;
-  sub24h: number;
-  sub7d: number;
-  sub30d: number;
-};
 
 export function BridgeOverviewSection({
   snapshots,
@@ -54,7 +39,7 @@ export function BridgeOverviewSection({
   topBridgers: BridgeBridger[];
   topBridgersIsLoading: boolean;
   topBridgersHasError: boolean;
-  transferTotals: TransferTotals;
+  transferTotals: WindowTotals;
   pendingHasError: boolean;
   pendingCount: number | null;
   pendingCapped: boolean;

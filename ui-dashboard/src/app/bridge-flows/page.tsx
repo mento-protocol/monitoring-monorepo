@@ -252,7 +252,8 @@ function BridgeFlowsContent() {
         pendingCapped={pendingCapped}
         deliveredTransfers={deliveredRecentResult.data?.BridgeTransfer ?? []}
         deliveredIsLoading={
-          deliveredRecentResult.isLoading && !deliveredRecentResult.data
+          deliveredRecentResult.isLoading &&
+          (deliveredRecentResult.data?.BridgeTransfer ?? []).length === 0
         }
         deliveredHasError={deliveredError}
       />
