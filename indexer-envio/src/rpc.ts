@@ -559,10 +559,24 @@ export type BlockFallbackResult = {
  * to reading "latest". Each retry uses an increasing delay. */
 const BLOCK_RETRY_DELAYS_MS = [500, 1000, 2000];
 
-/** @internal Test-only hooks for overriding the delay function. */
+/** @internal Test-only hooks for overriding the delay function and exposing
+ *  internal helpers (rate-limit classifier, structured failure logger, and
+ *  the burst-counter map) so unit tests can pin their behaviour without
+ *  re-publishing them as part of the module's public API. */
 export const _testHooks = {
   delayFn: (ms: number): Promise<void> =>
     new Promise((resolve) => setTimeout(resolve, ms)),
+  isRateLimitError: (err: unknown): boolean => isRateLimitError(err),
+  logRpcFailure: (
+    chainId: number,
+    fn: string,
+    target: string,
+    err: unknown,
+    block?: bigint,
+  ): void => logRpcFailure(chainId, fn, target, err, block),
+  resetRpcFailureCounts: (): void => {
+    _rpcFailureCounts.clear();
+  },
 };
 
 /**
