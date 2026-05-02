@@ -110,10 +110,10 @@ import { ANCHOR_FRI_2100 } from "@/lib/weekend";
 // Fixtures
 // ---------------------------------------------------------------------------
 
-// Production pool IDs are `chainId-token0token1` — keep the fixture honest so
-// any future production-side parsing (e.g. address validation) doesn't pass
-// spuriously on a placeholder shape.
-const POOL_ID = "42220-0xt00xt1";
+// Production pool IDs are `chainId-0x<token0addr><token1addr>` — both token
+// addresses concatenated as 20-byte hex. Use a properly-shaped fixture so
+// any future address-validation in the SUT doesn't pass spuriously.
+const POOL_ID = `42220-0x${"a".repeat(40)}${"b".repeat(40)}`;
 const STRATEGY_ADDR = "0xa0fb8b16ce6af3634ff9f3f4f40e49e1c1ae4f0b";
 
 const NETWORK: Network = {
@@ -294,6 +294,17 @@ function countVarsFromCalls(): Record<string, unknown> | null {
   return null;
 }
 
+function allVarsFromCalls(): Record<string, unknown> | null {
+  for (let i = mockUseGQL.mock.calls.length - 1; i >= 0; i--) {
+    const call = mockUseGQL.mock.calls[i];
+    const q = String(call[0] ?? "").trim();
+    if (q.startsWith("query PoolDeviationBreachesAll")) {
+      return (call[1] as Record<string, unknown>) ?? null;
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Test harness for interactive tests (clicks / typing)
 // ---------------------------------------------------------------------------
@@ -412,6 +423,29 @@ describe("Initial render", () => {
     expect(html).toBe("");
     // Virtual-pool guard runs BEFORE the inner panel mounts → no useGQL.
     expect(mockUseGQL).not.toHaveBeenCalled();
+  });
+
+  it("scopes all three queries (PAGE, COUNT, ALL) to the pool's id", () => {
+    // Locks the pool-scope invariant so A6's chart-section / table extractions
+    // can't silently desync the chart query (ALL) from the table queries
+    // (PAGE/COUNT) — both must filter on the same pool.
+    setupGQL({
+      count: { data: { DeviationThresholdBreach: [] } },
+      page: { data: { DeviationThresholdBreach: [] } },
+      all: { data: { DeviationThresholdBreach: [] } },
+    });
+    renderToStaticMarkup(
+      <BreachHistoryPanel
+        pool={BASE_POOL}
+        network={NETWORK}
+        limit={25}
+        search=""
+        onSearchChange={() => {}}
+      />,
+    );
+    expect(pageVarsFromCalls()?.poolId).toBe(BASE_POOL.id);
+    expect(countVarsFromCalls()?.poolId).toBe(BASE_POOL.id);
+    expect(allVarsFromCalls()?.poolId).toBe(BASE_POOL.id);
   });
 
   it("shows the empty state when count=0 and page=[]", () => {
@@ -810,6 +844,36 @@ describe("BucketFilter", () => {
     });
     pageVars = pageVarsFromCalls()!;
     expect(pageVars.offset).toBe(0);
+  });
+
+  it("committing a duration filter resets pagination to page 1", () => {
+    // Same regression class as the bucket-reset test but for the
+    // DurationField: A5's filter-component extraction must keep "filter
+    // change clears the offset" wired through, otherwise a user who
+    // navigated to page 2 and then narrowed the filter would land on a
+    // sliced page that no longer exists for the new filter.
+    const ids = Array.from({ length: 60 }, (_, i) => ({ id: `b-${i}` }));
+    setupGQL({
+      count: { data: { DeviationThresholdBreach: ids } },
+      page: { data: { DeviationThresholdBreach: ALL_ROWS } },
+      all: { data: { DeviationThresholdBreach: ALL_ROWS } },
+    });
+    const { container } = renderInteractive();
+    const nextBtn = findButton(
+      container,
+      (_t, b) => b.getAttribute("aria-label") === "Next page",
+    );
+    act(() => {
+      nextBtn.click();
+    });
+    expect(pageVarsFromCalls()!.offset).toBe(25);
+
+    const minInput = container.querySelector(
+      'input[aria-label="Minimum breach duration"]',
+    ) as HTMLInputElement;
+    setInputValue(minInput, "1h");
+    commitOnBlur(minInput);
+    expect(pageVarsFromCalls()!.offset).toBe(0);
   });
 });
 
