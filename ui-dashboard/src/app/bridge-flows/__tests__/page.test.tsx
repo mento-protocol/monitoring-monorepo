@@ -20,7 +20,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { renderToStaticMarkup } from "react-dom/server";
 import {
   BRIDGE_DAILY_SNAPSHOT,
   BRIDGE_DELIVERED_RECENT,
@@ -519,18 +518,38 @@ describe("BridgeFlowsPage — TransfersTable sort state", () => {
 // ---------------------------------------------------------------------------
 
 describe("BridgeFlowsPage — pagination clamping", () => {
-  it("when URL says page=99 but total fits one page, page clamps to 1 (no blank list)", () => {
+  it("when URL says page=99 but total fits one page, the page sends offset=0 (clamped)", () => {
     const transfers = ALL_THREE_TRANSFERS;
     mockSearchParams = new URLSearchParams("page=99");
+    // Capture the offset the page actually sends to the indexer. Without
+    // this assertion the test would pass even if the page forwarded
+    // offset=2450 (page 99 × 25), defeating the whole point of the
+    // characterization.
+    let observedOffset: number | null = null;
     mockUseBridgeGQL.mockImplementation(
-      bridgeImpl({
-        transfers: ok({ BridgeTransfer: transfers }),
-        count: ok({
-          BridgeTransfer: transfers.map((t) => ({ id: t.id })),
-        }),
-      }),
+      (query: string | null, vars?: { offset?: number }) => {
+        if (query === BRIDGE_TRANSFERS_WINDOW) {
+          observedOffset = vars?.offset ?? 0;
+          return ok({
+            BridgeTransfer: transfers.slice(
+              observedOffset,
+              observedOffset + 25,
+            ),
+          });
+        }
+        if (query === BRIDGE_TRANSFERS_COUNT)
+          return ok({ BridgeTransfer: transfers.map((t) => ({ id: t.id })) });
+        if (query === BRIDGE_PENDING_IDS) return ok({ BridgeTransfer: [] });
+        if (query === BRIDGE_DAILY_SNAPSHOT)
+          return ok({ BridgeDailySnapshot: [] });
+        if (query === BRIDGE_TOP_BRIDGERS) return ok({ BridgeBridger: [] });
+        if (query === BRIDGE_DELIVERED_RECENT)
+          return ok({ BridgeTransfer: [] });
+        return ok({});
+      },
     );
     renderJsdom();
+    expect(observedOffset).toBe(0);
     // List is non-empty.
     expect(container.querySelectorAll("tbody tr")).toHaveLength(3);
     // Pager shows "3 total" (single page → no "page X of Y" suffix).
@@ -761,12 +780,11 @@ describe("BridgeFlowsPage — toast lifecycle (smoke)", () => {
     vi.useRealTimers();
   });
 
-  it("ToastPortal is mounted on the page (empty by default)", () => {
-    renderJsdom();
-    const portal = container.querySelector('[data-testid="toast-portal"]');
-    expect(portal).toBeTruthy();
-    expect(container.querySelectorAll('[data-testid="toast"]')).toHaveLength(0);
-  });
+  // Note: a previous "ToastPortal is mounted on the page" test was dropped
+  // because it asserted on a stub-only wrapper — the real `ToastPortal`
+  // returns `null` when toasts.length === 0, so the assertion would have
+  // pinned stub behavior, not production. The captured-addToast suite below
+  // exercises the real mount/dismiss flow.
 
   it("toasts stay empty until addToast fires (not auto-popping a phantom toast)", () => {
     renderJsdom();
@@ -1082,28 +1100,9 @@ describe("BridgeFlowsPage — Hasura-not-configured error path", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Smoke tests for the static (server) render path — exercises the same
-// component without jsdom, covering the renderToStaticMarkup contract that
-// PR-A2/A3 will need to keep working for SSR.
-// ---------------------------------------------------------------------------
-
-describe("BridgeFlowsPage — server render smoke", () => {
-  it("renderToStaticMarkup completes for the empty default state", () => {
-    expect(() => renderToStaticMarkup(<BridgeFlowsPage />)).not.toThrow();
-  });
-
-  it("renderToStaticMarkup completes when transfers are present", () => {
-    mockUseBridgeGQL.mockImplementation(
-      bridgeImpl({
-        transfers: ok({ BridgeTransfer: ALL_THREE_TRANSFERS }),
-        count: ok({
-          BridgeTransfer: ALL_THREE_TRANSFERS.map((t) => ({ id: t.id })),
-        }),
-      }),
-    );
-    const html = renderToStaticMarkup(<BridgeFlowsPage />);
-    expect(html).toContain("Bridge Flows");
-    expect(html).toContain("3 total");
-  });
-});
+// Note: a previous "server render smoke" describe was dropped — it called
+// `renderToStaticMarkup` from inside the jsdom-environment file, so
+// `window`/`document` were available and the tests didn't exercise the
+// real SSR path they claimed to cover. If PR-A2/A3 wants SSR coverage, it
+// should land as a sibling `page.ssr.test.tsx` with `@vitest-environment
+// node` so window-touching code in render actually fails the test.
