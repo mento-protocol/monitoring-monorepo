@@ -4,28 +4,18 @@ import { useRef, useState, useCallback, useMemo } from "react";
 import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
-import { TagPills } from "@/components/tag-pills";
-import { ChainIcon } from "@/components/chain-icon";
 import { explorerAddressUrl } from "@/lib/tokens";
-import { truncateAddress } from "@/lib/format";
+import { NETWORKS, DEFAULT_NETWORK, networkIdForChainId } from "@/lib/networks";
+import { type Scope } from "@/lib/address-labels-shared";
+import { buildAddressBookRows } from "@/lib/address-book";
+import { AddressTableRow } from "./_components/address-table-row";
 import {
-  ARKHAM_TAG,
-  MINIPAY_SOURCE,
-  isArkhamSourced,
-  isMiniPaySourced,
-  type Scope,
-} from "@/lib/address-labels-shared";
-import {
-  NETWORKS,
-  NETWORK_IDS,
-  DEFAULT_NETWORK,
-  isConfiguredNetworkId,
-  networkIdForChainId,
-  type Network,
-} from "@/lib/networks";
-import { buildAddressBookRows, type AddressBookRow } from "@/lib/address-book";
-
-type AddressRow = AddressBookRow;
+  buildContractRows,
+  buildCustomRows,
+  filterRows,
+  networkForChainId,
+  type AddressRow,
+} from "./_lib/address-book-rows";
 
 type EditTarget = { address: string; scope: Scope; chainId: number };
 
@@ -33,16 +23,6 @@ type ImportedCounts = {
   global: number;
   chains: Record<string, number>;
 };
-
-// Short, locale-aware "yyyy-mm-dd hh:mm" for the Created at column. Full ISO
-// timestamp lives on the <time> dateTime + title attrs for hover/screen
-// readers. Falls back to the raw string if the timestamp is unparsable.
-function formatCreatedAt(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 function formatImportCounts(counts?: ImportedCounts): string {
   if (!counts) return "Imported 0 labels.";
@@ -84,100 +64,19 @@ export default function AddressBookPage({
   const globalDisplayNetwork = NETWORKS[DEFAULT_NETWORK];
 
   // Contract labels from every configured network — one row per (chainId, address).
-  const contractRows = useMemo<AddressRow[]>(() => {
-    const rows: AddressRow[] = [];
-    const seen = new Set<string>();
-    for (const id of NETWORK_IDS.filter(isConfiguredNetworkId)) {
-      const net = NETWORKS[id];
-      for (const [address, name] of Object.entries(net.addressLabels)) {
-        const key = `${net.chainId}:${address.toLowerCase()}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        rows.push({
-          key: `${id}:${address}`,
-          address,
-          name,
-          tags: [],
-          isCustom: false,
-          scope: net.chainId,
-          network: net,
-        });
-      }
-    }
-    return rows;
-  }, []);
+  // Empty dep array is correct: buildContractRows reads only module-level
+  // constants (NETWORKS, NETWORK_IDS) that never change at runtime.
+  const contractRows = useMemo<AddressRow[]>(() => buildContractRows(), []);
 
   // Custom rows: global entries render as a single "All chains" row;
   // per-chain entries render as one row per chain.
   const customRows = useMemo<AddressRow[]>(
-    () =>
-      customEntries.flatMap((r) => {
-        if (r.scope === "global") {
-          return [
-            {
-              key: `custom:global:${r.address}`,
-              address: r.address,
-              name: r.name,
-              tags: r.tags,
-              isCustom: true,
-              source: r.source,
-              createdAt: r.createdAt,
-              updatedAt: r.updatedAt,
-              scope: "global" as Scope,
-              network: globalDisplayNetwork,
-            },
-          ];
-        }
-        // Fall back to a synthetic network for legacy chain scopes (e.g. rows
-        // written against the now-retired hosted testnet networks). Keeps
-        // orphaned entries visible so users can delete them rather than
-        // having them silently disappear from the UI.
-        const net = networkForChainId(r.scope) ?? unknownChainNetwork(r.scope);
-        return [
-          {
-            key: `custom:${r.scope}:${r.address}`,
-            address: r.address,
-            name: r.name,
-            tags: r.tags,
-            isCustom: true,
-            source: r.source,
-            createdAt: r.createdAt,
-            updatedAt: r.updatedAt,
-            scope: r.scope,
-            network: net,
-          },
-        ];
-      }),
+    () => buildCustomRows(customEntries, globalDisplayNetwork),
     [customEntries, globalDisplayNetwork],
   );
 
   const allRows = useMemo<AddressRow[]>(
-    () =>
-      buildAddressBookRows(contractRows, customRows).filter((row) => {
-        if (!search) return true;
-        const q = search.toLowerCase();
-        const chainText =
-          row.scope === "global" ? "all chains" : row.network.label;
-        // Match the rendered SOURCE badge text so users can search by it
-        // (e.g. "arkham" no longer lives in tags after the source-field
-        // migration; without this, the search box can't surface those rows).
-        // Use the same `isArkhamSourced` dual-check the badge renderer uses
-        // — it handles both new-shape (source) and legacy (tag-only) rows.
-        const sourceText = row.isCustom
-          ? isArkhamSourced({ source: row.source, tags: row.tags })
-            ? "arkham"
-            : isMiniPaySourced({ source: row.source })
-              ? "minipay"
-              : "custom"
-          : "contract";
-        return (
-          row.address.toLowerCase().includes(q) ||
-          row.name.toLowerCase().includes(q) ||
-          chainText.toLowerCase().includes(q) ||
-          row.tags.some((t) => t.toLowerCase().includes(q)) ||
-          sourceText.includes(q)
-        );
-      }),
+    () => filterRows(buildAddressBookRows(contractRows, customRows), search),
     [customRows, contractRows, search],
   );
 
@@ -482,34 +381,6 @@ export default function AddressBookPage({
   );
 }
 
-function networkForChainId(chainId: number): Network | null {
-  const id = networkIdForChainId(chainId);
-  return id ? NETWORKS[id] : null;
-}
-
-function unknownChainNetwork(chainId: number): Network {
-  return {
-    // `id` must satisfy the `IndexerNetworkId` union so the Network type is
-    // valid. It's never read for unknown-chain rows (scope is the integer
-    // chainId; id-based routing never triggers for these), so DEFAULT_NETWORK
-    // is a safe placeholder.
-    id: DEFAULT_NETWORK,
-    label: `Chain ${chainId}`,
-    chainId,
-    contractsNamespace: null,
-    hasuraUrl: "",
-    hasuraSecret: "",
-    // Empty string triggers the "no explorer" render path in AddressTableRow
-    // — address renders as plain text instead of a broken relative link.
-    explorerBaseUrl: "",
-    tokenSymbols: {},
-    addressLabels: {},
-    local: false,
-    testnet: false,
-    hasVirtualPools: false,
-  };
-}
-
 function contractInitial(address: string, chainId: number) {
   const net = networkForChainId(chainId);
   const name = net?.addressLabels[address];
@@ -519,195 +390,4 @@ function contractInitial(address: string, chainId: number) {
     tags: [],
     updatedAt: new Date().toISOString(),
   };
-}
-
-// Row component
-
-type AddressRowProps = {
-  address: string;
-  name: string;
-  tags: string[];
-  scope: Scope;
-  network: Network;
-  notes?: string;
-  isPublic?: boolean;
-  isCustom: boolean;
-  source?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  canEdit: boolean;
-  explorerUrl: string | null;
-  onEdit: () => void;
-};
-
-function AddressTableRow({
-  address,
-  name,
-  tags,
-  scope,
-  network,
-  notes,
-  isPublic,
-  isCustom,
-  source,
-  createdAt,
-  updatedAt,
-  canEdit,
-  explorerUrl,
-  onEdit,
-}: AddressRowProps) {
-  const arkhamSourced = isArkhamSourced({ source, tags });
-  const minipaySourced = isMiniPaySourced({ source });
-  // Strip server-provenance tags from the displayed list — the SOURCE badge
-  // already conveys this, so showing them as pills duplicates the signal.
-  const displayTags = tags.filter(
-    (t) => t !== ARKHAM_TAG && t !== MINIPAY_SOURCE,
-  );
-  return (
-    <tr className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
-      <td className="px-4 py-3 whitespace-nowrap">
-        {scope === "global" ? (
-          <span className="inline-flex items-center rounded-full bg-purple-950 px-2 py-0.5 text-xs font-medium text-purple-300 ring-1 ring-inset ring-purple-800 whitespace-nowrap">
-            All chains
-          </span>
-        ) : (
-          <div className="flex items-center gap-2">
-            <ChainIcon network={network} />
-            <span className="text-xs text-slate-400 whitespace-nowrap">
-              {network.label.replace(/ \(.*\)$/, "")}
-            </span>
-          </div>
-        )}
-      </td>
-      <td className="px-4 py-3 whitespace-nowrap">
-        {explorerUrl ? (
-          <a
-            href={explorerUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={address}
-            className="font-mono text-xs text-slate-300 hover:text-indigo-300 transition-colors"
-          >
-            {truncateAddress(address)}
-            <span className="ml-1 text-slate-600" aria-hidden="true">
-              ↗
-            </span>
-          </a>
-        ) : (
-          <span title={address} className="font-mono text-xs text-slate-500">
-            {truncateAddress(address)}
-          </span>
-        )}
-      </td>
-      <td className="px-4 py-3 max-w-[180px]">
-        <span
-          title={name}
-          className={`block truncate text-sm ${isCustom ? "font-medium text-indigo-400" : "text-slate-300"}`}
-        >
-          {name || <span className="text-slate-600">—</span>}
-        </span>
-      </td>
-      <td className="px-4 py-3">
-        {displayTags.length > 0 ? (
-          <TagPills tags={displayTags} />
-        ) : (
-          <span className="text-xs text-slate-600">—</span>
-        )}
-      </td>
-      <td className="px-4 py-3 text-xs text-slate-400 max-w-[180px] truncate">
-        {notes ?? <span className="text-slate-600">—</span>}
-      </td>
-      <td className="px-4 py-3">
-        {isCustom && arkhamSourced ? (
-          <span className="inline-flex items-center rounded-full bg-teal-950 px-2 py-0.5 text-xs font-medium text-teal-300 ring-1 ring-inset ring-teal-800">
-            arkham
-          </span>
-        ) : isCustom && minipaySourced ? (
-          <span className="inline-flex items-center rounded-full bg-fuchsia-950 px-2 py-0.5 text-xs font-medium text-fuchsia-300 ring-1 ring-inset ring-fuchsia-800">
-            minipay
-          </span>
-        ) : isCustom ? (
-          <span className="inline-flex items-center rounded-full bg-indigo-950 px-2 py-0.5 text-xs font-medium text-indigo-300 ring-1 ring-inset ring-indigo-800">
-            custom
-          </span>
-        ) : (
-          <span className="inline-flex items-center rounded-full bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-400 ring-1 ring-inset ring-slate-700">
-            contract
-          </span>
-        )}
-      </td>
-      <td className="px-4 py-3">
-        {isCustom &&
-          (isPublic === true ? (
-            <span className="inline-flex items-center rounded-full bg-emerald-950 px-2 py-0.5 text-xs font-medium text-emerald-300 ring-1 ring-inset ring-emerald-800">
-              public
-            </span>
-          ) : (
-            <span className="inline-flex items-center rounded-full bg-amber-950 px-2 py-0.5 text-xs font-medium text-amber-300 ring-1 ring-inset ring-amber-800">
-              private
-            </span>
-          ))}
-      </td>
-      <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">
-        {createdAt ? (
-          <time dateTime={createdAt} title={createdAt}>
-            {formatCreatedAt(createdAt)}
-          </time>
-        ) : (
-          <span className="text-slate-600">—</span>
-        )}
-      </td>
-      <td className="px-4 py-3 text-xs whitespace-nowrap">
-        {updatedAt ? (
-          // Highlight when we can confirm the row has been edited since
-          // creation; render plain when `createdAt` is absent (legacy rows
-          // where we can't compute the diff but still want to surface the
-          // last-write timestamp). Em-dash only when there's no timestamp
-          // at all (contract rows). Sky palette is distinct from the amber
-          // "private" visibility badge to avoid semantic collision.
-          createdAt && updatedAt !== createdAt ? (
-            <time
-              dateTime={updatedAt}
-              title={updatedAt}
-              className="rounded bg-sky-950/60 px-1.5 py-0.5 font-medium text-sky-300 ring-1 ring-inset ring-sky-900/60"
-            >
-              {formatCreatedAt(updatedAt)}
-            </time>
-          ) : createdAt && updatedAt === createdAt ? (
-            <span className="text-slate-600">—</span>
-          ) : (
-            <time
-              dateTime={updatedAt}
-              title={updatedAt}
-              className="text-slate-400"
-            >
-              {formatCreatedAt(updatedAt)}
-            </time>
-          )
-        ) : (
-          <span className="text-slate-600">—</span>
-        )}
-      </td>
-      <td className="px-4 py-3">
-        {!canEdit ? null : isCustom ? (
-          <button
-            type="button"
-            onClick={onEdit}
-            className="text-xs text-slate-400 hover:text-indigo-300 transition-colors"
-          >
-            Edit
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={onEdit}
-            title="Add tags or notes to this contract"
-            className="text-xs text-slate-600 hover:text-indigo-300 transition-colors"
-          >
-            + Tag
-          </button>
-        )}
-      </td>
-    </tr>
-  );
 }
