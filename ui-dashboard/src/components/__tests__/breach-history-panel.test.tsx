@@ -1603,6 +1603,10 @@ describe("Edge cases", () => {
         onSearchChange={() => {}}
       />,
     );
+    // Bugbot caught: `toContain("1 breach")` alone is a substring of "1
+    // breaches" — passes even if the ternary regresses to always-plural.
+    // Pair with the negative assertion to actually guard the singular form.
     expect(html).toContain("1 breach");
+    expect(html).not.toContain("1 breaches");
   });
 });
