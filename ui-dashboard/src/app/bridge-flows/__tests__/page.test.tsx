@@ -120,14 +120,29 @@ function TopBridgersChartStub({ isLoading }: { isLoading?: boolean }) {
     />
   );
 }
-function RedeemPillStub() {
+type AddToastFn = (
+  message: string,
+  type: "success" | "error",
+  href?: string,
+) => void;
+
+type BridgeRedeemPillProps = {
+  sentTxHash: string;
+  destChainId: number;
+  tokenSymbol: string;
+  addToast: AddToastFn;
+};
+
+type ToastPortalProps = {
+  toasts: Array<{ id: number; message: string }>;
+  onDismiss?: (id: number) => void;
+};
+
+function RedeemPillStub(props: BridgeRedeemPillProps) {
+  void props;
   return <span data-testid="redeem-pill">redeem</span>;
 }
-function ToastPortalStub({
-  toasts,
-}: {
-  toasts: Array<{ id: number; message: string }>;
-}) {
+function ToastPortalStub({ toasts }: ToastPortalProps) {
   return (
     <div data-testid="toast-portal">
       {toasts.map((t) => (
@@ -145,6 +160,17 @@ function ChainIconStub() {
   return <span data-testid="chain-icon" />;
 }
 
+let currentBridgeRedeemPill = RedeemPillStub;
+let currentToastPortal = ToastPortalStub;
+
+function MockBridgeRedeemPill(props: BridgeRedeemPillProps) {
+  return currentBridgeRedeemPill(props);
+}
+
+function MockToastPortal(props: ToastPortalProps) {
+  return currentToastPortal(props);
+}
+
 // Charts mount Plotly via `next/dynamic`; in the node/jsdom environments we
 // can't run that pipeline. Stub them out with markers we can assert against.
 vi.mock("@/components/bridge-volume-chart", () => ({
@@ -160,8 +186,8 @@ vi.mock("@/components/bridge-top-bridgers-chart", () => ({
 // `BridgeRedeemPill` mounts a `<dialog>` and uses `useSyncExternalStore`;
 // the bare ToastPortal is fine to render once stubbed minimally.
 vi.mock("@/components/bridge-redeem-cta", () => ({
-  BridgeRedeemPill: RedeemPillStub,
-  ToastPortal: ToastPortalStub,
+  BridgeRedeemPill: MockBridgeRedeemPill,
+  ToastPortal: MockToastPortal,
 }));
 
 vi.mock("@/components/address-link", () => ({
@@ -1282,20 +1308,12 @@ const capturedAddToastHolder: {
     | null;
 } = { fn: null };
 
-function CapturingRedeemPill({
-  addToast,
-}: {
-  addToast: (message: string, type: "success" | "error", href?: string) => void;
-}) {
+function CapturingRedeemPill({ addToast }: BridgeRedeemPillProps) {
   capturedAddToastHolder.fn = addToast;
   return <span data-testid="redeem-pill">redeem</span>;
 }
 
-function CapturingToastPortal({
-  toasts,
-}: {
-  toasts: Array<{ id: number; message: string }>;
-}) {
+function CapturingToastPortal({ toasts }: ToastPortalProps) {
   return (
     <div data-testid="toast-portal">
       {toasts.map((t) => (
@@ -1313,19 +1331,14 @@ describe("BridgeFlowsPage — toast lifecycle (via captured addToast)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     capturedAddToastHolder.fn = null;
-    // Re-mock the redeem CTA module to capture addToast on each render.
-    vi.doMock("@/components/bridge-redeem-cta", () => ({
-      BridgeRedeemPill: CapturingRedeemPill,
-      ToastPortal: CapturingToastPortal,
-    }));
+    currentBridgeRedeemPill = CapturingRedeemPill;
+    currentToastPortal = CapturingToastPortal;
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.doUnmock("@/components/bridge-redeem-cta");
-    // Belt-and-braces: the next test's `await import("../page")` could
-    // otherwise pick up a module compiled against this test's `doMock`.
-    vi.resetModules();
+    currentBridgeRedeemPill = RedeemPillStub;
+    currentToastPortal = ToastPortalStub;
   });
 
   it("two addToast calls show two toasts; both auto-dismiss after 6 000 ms each", async () => {
@@ -1353,11 +1366,7 @@ describe("BridgeFlowsPage — toast lifecycle (via captured addToast)", () => {
       }),
     );
 
-    vi.resetModules();
-    const Page = (await import("../page")).default;
-    act(() => {
-      root.render(<Page />);
-    });
+    renderJsdom();
     expect(capturedAddToastHolder.fn).not.toBeNull();
     act(() => {
       capturedAddToastHolder.fn!("First", "success");
@@ -1399,11 +1408,8 @@ describe("BridgeFlowsPage — toast lifecycle (via captured addToast)", () => {
         count: ok({ BridgeTransfer: [{ id: stuck.id }] }),
       }),
     );
-    vi.resetModules();
-    const Page = (await import("../page")).default;
-    act(() => {
-      root.render(<Page />);
-    });
+    renderJsdom();
+    expect(capturedAddToastHolder.fn).not.toBeNull();
     act(() => {
       capturedAddToastHolder.fn!("Same message", "success");
       capturedAddToastHolder.fn!("Same message", "success");
@@ -1443,14 +1449,7 @@ describe("BridgeFlowsPage — toast lifecycle (via captured addToast)", () => {
       }),
     );
 
-    // Re-import the module inside the doMock-scoped block so the new mock
-    // is picked up.
-    vi.resetModules();
-    const Page = (await import("../page")).default;
-
-    act(() => {
-      root.render(<Page />);
-    });
+    renderJsdom();
 
     // The redeem pill rendered → captured addToast.
     expect(capturedAddToastHolder.fn).not.toBeNull();
