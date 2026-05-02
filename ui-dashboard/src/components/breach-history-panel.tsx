@@ -36,13 +36,12 @@ import {
   normalizeSearch,
 } from "@/lib/table-search";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
-import { DurationRangeInputs } from "@/components/_components/duration-filter";
+import { SECONDS_PER_HOUR, SECONDS_PER_DAY } from "@/lib/time-series";
+import { DurationRangeInputs } from "@/components/breach-history/duration-filter";
 import {
   BucketFilter,
   type DurationBucket,
-  ONE_HOUR,
-  ONE_DAY,
-} from "@/components/_components/bucket-filter";
+} from "@/components/breach-history/bucket-filter";
 
 interface Props {
   pool: Pool;
@@ -82,17 +81,20 @@ function whereForBucket(bucket: DurationBucket): Record<string, unknown> {
       // long WARN-only breaches and don't belong in the "≤1h" bucket.
       return {
         endedAt: { _is_null: false },
-        durationSeconds: { _lte: String(ONE_HOUR) },
+        durationSeconds: { _lte: String(SECONDS_PER_HOUR) },
       };
     case "short":
       return {
         endedAt: { _is_null: false },
-        durationSeconds: { _gt: String(ONE_HOUR), _lte: String(ONE_DAY) },
+        durationSeconds: {
+          _gt: String(SECONDS_PER_HOUR),
+          _lte: String(SECONDS_PER_DAY),
+        },
       };
     case "long":
       return {
         endedAt: { _is_null: false },
-        durationSeconds: { _gt: String(ONE_DAY) },
+        durationSeconds: { _gt: String(SECONDS_PER_DAY) },
       };
     case "ongoing":
       return { endedAt: { _is_null: true } };

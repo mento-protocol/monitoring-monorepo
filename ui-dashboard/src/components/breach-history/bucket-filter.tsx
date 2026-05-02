@@ -1,18 +1,18 @@
 "use client";
 
 /**
- * BucketFilter sub-component for the BreachHistoryPanel. Extracted from
- * breach-history-panel.tsx (PR-A5). Renders a radiogroup of five duration
- * presets (All, ≤1h, 1h–1d, Over 1d, Ongoing) and exports the
- * `DurationBucket` type, `BUCKET_LABEL` map, and the numeric constants
- * `ONE_HOUR` / `ONE_DAY` that the parent's `whereForBucket` / `composeWhere`
- * helpers rely on (those helpers move in PR-A6).
+ * BucketFilter sub-component for the BreachHistoryPanel. Renders a
+ * radiogroup of five duration presets (All, ≤1h, 1h–1d, Over 1d, Ongoing).
+ * The parent's `whereForBucket` / `composeWhere` helpers (still in the
+ * panel; move in PR-A6) reference `SECONDS_PER_HOUR` / `SECONDS_PER_DAY`
+ * directly from `@/lib/time-series` to share constants with the rest of
+ * the codebase.
  */
 
 import React from "react";
 
 // ---------------------------------------------------------------------------
-// Types + constants
+// Types
 // ---------------------------------------------------------------------------
 
 /**
@@ -22,9 +22,6 @@ import React from "react";
  * >1d = really stuck).
  */
 export type DurationBucket = "all" | "in_grace" | "short" | "long" | "ongoing";
-
-export const ONE_HOUR = 3600;
-export const ONE_DAY = 86400;
 
 export const BUCKET_LABEL: Record<DurationBucket, string> = {
   all: "All",

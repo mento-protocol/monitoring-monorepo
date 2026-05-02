@@ -58,7 +58,7 @@ export function DurationRangeInputs({
  * A parse failure keeps the previous committed value and flags the input
  * with a red ring until the user fixes it.
  */
-export function DurationField({
+function DurationField({
   ariaLabel,
   placeholder,
   committedSeconds,
