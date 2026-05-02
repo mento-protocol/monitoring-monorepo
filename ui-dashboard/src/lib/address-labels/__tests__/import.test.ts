@@ -566,6 +566,19 @@ describe("isEntriesMap", () => {
     expect(isEntriesMap({})).toBe(true);
   });
 
+  it("returns true for { name: '', tags: [] } — structural gate, not content filter", () => {
+    // `isEntriesMap` is a shape gate: an object with a string `name` (even
+    // empty) satisfies the `hasName` branch. The downstream
+    // `sanitizeAndFilter` is what rejects empty-name + empty-tags entries.
+    // Pinning so a future tightening doesn't accidentally collapse the two
+    // layers' contracts together.
+    expect(
+      isEntriesMap({
+        [ADDR_A]: { name: "", tags: [], updatedAt: "2026-01-01" },
+      }),
+    ).toBe(true);
+  });
+
   it("returns false when a key is not a valid 0x address", () => {
     expect(
       isEntriesMap({ "not-an-address": { name: "Alice", tags: [] } }),

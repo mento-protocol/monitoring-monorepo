@@ -6,95 +6,26 @@ vi.mock("@/auth", () => ({
   getAuthSession: vi.fn(),
 }));
 
-vi.mock("@/lib/address-labels", () => ({
-  importLabels: vi.fn().mockResolvedValue(undefined),
-  getLabels: vi.fn().mockResolvedValue({}),
-  getAllLabels: vi.fn().mockResolvedValue({ global: {}, chains: {} }),
-  upgradeEntries: vi.fn((raw: Record<string, unknown>) => {
-    const result: Record<string, unknown> = {};
-    for (const [address, entry] of Object.entries(raw)) {
-      if (typeof entry !== "object" || entry === null) continue;
-      const e = entry as Record<string, unknown>;
-      if (typeof e.name === "string") {
-        result[address] = {
-          name: e.name,
-          tags: Array.isArray(e.tags) ? e.tags : [],
-          notes: typeof e.notes === "string" ? e.notes : undefined,
-          isPublic: e.isPublic === true ? true : undefined,
-          updatedAt:
-            typeof e.updatedAt === "string"
-              ? e.updatedAt
-              : new Date().toISOString(),
-        };
-      } else if (typeof e.label === "string") {
-        const tags: string[] = [];
-        if (typeof e.category === "string" && e.category.trim())
-          tags.push(e.category.trim());
-        result[address] = {
-          name: e.label,
-          tags,
-          notes: typeof e.notes === "string" ? e.notes : undefined,
-          isPublic: e.isPublic === true ? true : undefined,
-          updatedAt:
-            typeof e.updatedAt === "string"
-              ? e.updatedAt
-              : new Date().toISOString(),
-        };
-      } else {
-        result[address] = {
-          name: "",
-          tags: [],
-          updatedAt:
-            typeof e.updatedAt === "string"
-              ? e.updatedAt
-              : new Date().toISOString(),
-        };
-      }
-    }
-    return result;
-  }),
-  upgradeEntry: vi.fn((raw: Record<string, unknown>) => {
-    // Minimal real upgradeEntry for tests
-    if (typeof raw.name === "string") {
-      return {
-        name: raw.name,
-        tags: Array.isArray(raw.tags) ? raw.tags : [],
-        notes: typeof raw.notes === "string" ? raw.notes : undefined,
-        isPublic: raw.isPublic === true ? true : undefined,
-        updatedAt:
-          typeof raw.updatedAt === "string"
-            ? raw.updatedAt
-            : new Date().toISOString(),
-      };
-    }
-    if (typeof raw.label === "string") {
-      const tags: string[] = [];
-      if (typeof raw.category === "string" && raw.category.trim()) {
-        tags.push(raw.category.trim());
-      }
-      return {
-        name: raw.label,
-        tags,
-        notes: typeof raw.notes === "string" ? raw.notes : undefined,
-        isPublic: raw.isPublic === true ? true : undefined,
-        updatedAt:
-          typeof raw.updatedAt === "string"
-            ? raw.updatedAt
-            : new Date().toISOString(),
-      };
-    }
-    return {
-      name: "",
-      tags: [],
-      updatedAt:
-        typeof raw.updatedAt === "string"
-          ? raw.updatedAt
-          : new Date().toISOString(),
-    };
-  }),
-  sanitizeEntry: vi.fn((entry: Record<string, unknown>) => entry),
-  ARKHAM_TAG: "arkham",
-}));
+// Stub Redis-backed entry-points (`importLabels` / `getLabels` /
+// `getAllLabels`); pull the real `upgradeEntry` / `upgradeEntries` /
+// `sanitizeEntry` / `ARKHAM_TAG` from `address-labels-shared` so this
+// suite observes the production upgrade contract — including the tag-only
+// fallback fix in `address-labels-shared.ts`. Same pattern as
+// `lib/address-labels/__tests__/import.test.ts`.
+vi.mock("@/lib/address-labels", async () => {
+  const shared = await vi.importActual<
+    typeof import("@/lib/address-labels-shared")
+  >("@/lib/address-labels-shared");
+  return {
+    importLabels: vi.fn().mockResolvedValue(undefined),
+    getLabels: vi.fn().mockResolvedValue({}),
+    getAllLabels: vi.fn().mockResolvedValue({ global: {}, chains: {} }),
+    upgradeEntries: shared.upgradeEntries,
+    upgradeEntry: shared.upgradeEntry,
+    sanitizeEntry: shared.sanitizeEntry,
+    ARKHAM_TAG: shared.ARKHAM_TAG,
+  };
+});
 
 import { getAuthSession } from "@/auth";
 import { importLabels, getLabels, getAllLabels } from "@/lib/address-labels";
@@ -206,6 +137,36 @@ describe("POST /api/address-labels/import", () => {
       expect.objectContaining({
         [validAddress]: expect.not.objectContaining({
           source: expect.anything(),
+        }),
+      }),
+    );
+  });
+
+  it("persists tag-only simple-format entries (no name, no label)", async () => {
+    // Regression for the upgradeEntry tag-only silent-drop bug fixed in this
+    // PR: the tag-only shape `{ tags: ["Whale"] }` is one of the three shapes
+    // `isEntriesMap` accepts. Before the fix, `upgradeEntry`'s fallback
+    // returned `tags: []`, `sanitizeAndFilter` then dropped the entry, and the
+    // route returned 200 with imported: 0. With the fix, the tags are
+    // preserved and the entry persists as `{ name: "", tags: ["Whale"] }`.
+    // Pinning at the route boundary so a future regression in upgradeEntry
+    // can't hide behind the new helper-level coverage.
+    const labels = {
+      [validAddress]: {
+        tags: ["Whale"],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    };
+    const res = await POST(jsonReq({ chainId: 42220, labels }));
+    expect(res.status).toBe(200);
+    const counts = await getImported(res);
+    expect(totalImported(counts)).toBe(1);
+    expect(importLabels).toHaveBeenCalledWith(
+      42220,
+      expect.objectContaining({
+        [validAddress]: expect.objectContaining({
+          name: "",
+          tags: ["Whale"],
         }),
       }),
     );
