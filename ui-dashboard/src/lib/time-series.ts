@@ -1,3 +1,4 @@
+export const SECONDS_PER_HOUR = 3_600;
 export const SECONDS_PER_DAY = 86_400;
 
 export type RangeKey = "7d" | "30d" | "all";
