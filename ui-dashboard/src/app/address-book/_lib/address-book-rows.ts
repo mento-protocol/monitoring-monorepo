@@ -1,15 +1,3 @@
-/**
- * Row-composition helpers for the address-book page.
- *
- * Extracted from AddressBookClient.tsx (useMemo callbacks at lines 87-182
- * pre-extraction). Each function is pure so it can be wrapped in `useMemo`
- * by the caller without dragging in hook plumbing.
- *
- * The existing `buildAddressBookRows` helper in `@/lib/address-book` (covered
- * by row-composition.test.ts) is intentionally left in its current location
- * and is called here via the caller's `allRows` memo.
- */
-
 import {
   NETWORKS,
   NETWORK_IDS,
@@ -27,11 +15,6 @@ import type { AddressBookRow } from "@/lib/address-book";
 import type { AddressEntryRow } from "@/components/address-labels-provider";
 
 export type AddressRow = AddressBookRow;
-
-// `networkForChainId` is the canonical lookup from `@/lib/networks`; this
-// module is its caller for legacy-chain fallback. The caller (`AddressBookClient`)
-// imports `networkForChainId` directly from `@/lib/networks` rather than via
-// this module so the address-book code shares one source of truth.
 
 // Fall back to a synthetic network for legacy chain scopes (e.g. rows written
 // against the now-retired hosted testnet networks). Keeps orphaned entries
@@ -102,31 +85,10 @@ export function buildCustomRows(
   customEntries: AddressEntryRow[],
   globalDisplayNetwork: Network,
 ): AddressRow[] {
-  return customEntries.flatMap((r) => {
+  return customEntries.map((r) => {
     if (r.scope === "global") {
-      return [
-        {
-          key: `custom:global:${r.address}`,
-          address: r.address,
-          name: r.name,
-          tags: r.tags,
-          isCustom: true,
-          source: r.source,
-          createdAt: r.createdAt,
-          updatedAt: r.updatedAt,
-          scope: "global" as Scope,
-          network: globalDisplayNetwork,
-        },
-      ];
-    }
-    // Fall back to a synthetic network for legacy chain scopes (e.g. rows
-    // written against the now-retired hosted testnet networks). Keeps
-    // orphaned entries visible so users can delete them rather than
-    // having them silently disappear from the UI.
-    const net = networkForChainId(r.scope) ?? unknownChainNetwork(r.scope);
-    return [
-      {
-        key: `custom:${r.scope}:${r.address}`,
+      return {
+        key: `custom:global:${r.address}`,
         address: r.address,
         name: r.name,
         tags: r.tags,
@@ -134,10 +96,27 @@ export function buildCustomRows(
         source: r.source,
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
-        scope: r.scope,
-        network: net,
-      },
-    ];
+        scope: "global" as Scope,
+        network: globalDisplayNetwork,
+      };
+    }
+    // Fall back to a synthetic network for legacy chain scopes (e.g. rows
+    // written against the now-retired hosted testnet networks). Keeps
+    // orphaned entries visible so users can delete them rather than
+    // having them silently disappear from the UI.
+    const net = networkForChainId(r.scope) ?? unknownChainNetwork(r.scope);
+    return {
+      key: `custom:${r.scope}:${r.address}`,
+      address: r.address,
+      name: r.name,
+      tags: r.tags,
+      isCustom: true,
+      source: r.source,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+      scope: r.scope,
+      network: net,
+    };
   });
 }
 

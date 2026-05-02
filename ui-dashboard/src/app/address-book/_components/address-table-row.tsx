@@ -1,14 +1,5 @@
 "use client";
 
-/**
- * AddressTableRow — renders one row in the address-book table.
- *
- * Extracted from AddressBookClient.tsx (lines 524-713 pre-extraction). Takes
- * `entry`/`canEdit`/`onEdit`/`network` props and renders source/visibility
- * badges, chain icon, explorer link, tags pills, created/updated timestamps,
- * and the Edit / "+ Tag" action button.
- */
-
 import { TagPills } from "@/components/tag-pills";
 import { ChainIcon } from "@/components/chain-icon";
 import { truncateAddress } from "@/lib/format";
