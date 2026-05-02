@@ -207,6 +207,8 @@ function BridgeFlowsContent() {
     null;
   const snapshotsError = !!snapshotsResult.error;
   const topBridgersError = !!topBridgersResult.error;
+  const pendingError = !!pendingResult.error;
+  const deliveredError = !!deliveredRecentResult.error;
 
   const toastIdRef = useRef(0);
   const [toasts, setToasts] = useState<ToastEntry[]>([]);
@@ -243,14 +245,14 @@ function BridgeFlowsContent() {
         }
         topBridgersHasError={topBridgersError}
         transferTotals={transferTotals}
-        pendingHasError={!!pendingResult.error}
+        pendingHasError={pendingError}
         pendingCount={pendingCount}
         pendingCapped={pendingCapped}
         deliveredTransfers={deliveredRecentResult.data?.BridgeTransfer ?? []}
         deliveredIsLoading={
           deliveredRecentResult.isLoading && !deliveredRecentResult.data
         }
-        deliveredHasError={!!deliveredRecentResult.error}
+        deliveredHasError={deliveredError}
       />
 
       <section aria-label="Recent transfers">
