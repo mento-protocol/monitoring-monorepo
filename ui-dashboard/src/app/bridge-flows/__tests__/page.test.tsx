@@ -181,6 +181,17 @@ const MONAD = 143;
  * tokenSymbol, sender, route — sorting on any of those keys yields a unique,
  * easy-to-assert order.
  */
+// Per-row sender/recipient/txhash fixtures use distinct hex shapes so any
+// future production-side hex validation (length / charset) doesn't silently
+// pass on these tests. Each tier (new/mid/old) gets a single hex digit so
+// substring assertions like `.toContain("0xaaaa")` remain self-explanatory.
+const NEW_SENDER = "0x" + "a".repeat(40);
+const NEW_RECIPIENT = "0xa2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2";
+const MID_SENDER = "0x" + "b".repeat(40);
+const MID_RECIPIENT = "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2";
+const OLD_SENDER = "0x" + "c".repeat(40);
+const OLD_RECIPIENT = "0xc2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2";
+
 const T_NEW: BridgeTransfer = makeTransfer({
   id: "wormhole-NEW",
   providerMessageId: "NEW",
@@ -188,13 +199,13 @@ const T_NEW: BridgeTransfer = makeTransfer({
   tokenSymbol: "USDm",
   sourceChainId: CELO,
   destChainId: MONAD,
-  sender: "0xnewsender0000000000000000000000000000000",
-  recipient: "0xnewrecipient0000000000000000000000000000",
+  sender: NEW_SENDER,
+  recipient: NEW_RECIPIENT,
   amount: "3000000000000000000",
   sentTimestamp: "3000",
   deliveredTimestamp: "3060",
-  sentTxHash: "0xnewsenttx",
-  deliveredTxHash: "0xnewdelivtx",
+  sentTxHash: "0x" + "a".repeat(64),
+  deliveredTxHash: "0xa1" + "a".repeat(62),
   firstSeenAt: "3000",
 });
 const T_MID: BridgeTransfer = makeTransfer({
@@ -204,13 +215,13 @@ const T_MID: BridgeTransfer = makeTransfer({
   tokenSymbol: "EURm",
   sourceChainId: MONAD,
   destChainId: CELO,
-  sender: "0xmidsender0000000000000000000000000000000",
-  recipient: "0xmidrecipient0000000000000000000000000000",
+  sender: MID_SENDER,
+  recipient: MID_RECIPIENT,
   amount: "2000000000000000000",
   sentTimestamp: "2000",
   deliveredTimestamp: "2120",
-  sentTxHash: "0xmidsenttx",
-  deliveredTxHash: "0xmiddelivtx",
+  sentTxHash: "0x" + "b".repeat(64),
+  deliveredTxHash: "0xb1" + "b".repeat(62),
   firstSeenAt: "2000",
 });
 const T_OLD: BridgeTransfer = makeTransfer({
@@ -220,11 +231,11 @@ const T_OLD: BridgeTransfer = makeTransfer({
   tokenSymbol: "GBPm",
   sourceChainId: CELO,
   destChainId: MONAD,
-  sender: "0xoldsender0000000000000000000000000000000",
-  recipient: "0xoldrecipient0000000000000000000000000000",
+  sender: OLD_SENDER,
+  recipient: OLD_RECIPIENT,
   amount: "1000000000000000000",
   sentTimestamp: "1000",
-  sentTxHash: "0xoldsenttx",
+  sentTxHash: "0x" + "c".repeat(64),
   firstSeenAt: "1000",
 });
 
@@ -279,11 +290,11 @@ function makeBulkTransfers(n: number): BridgeTransfer[] {
       tokenSymbol: "USDm",
       sourceChainId: CELO,
       destChainId: MONAD,
-      sender: `0xsender${String(i).padStart(36, "0")}`,
-      recipient: `0xrecip${String(i).padStart(38, "0")}`,
+      sender: `0x${i.toString(16).padStart(40, "1")}`,
+      recipient: `0x${i.toString(16).padStart(40, "2")}`,
       amount: String(BigInt(i + 1) * BigInt(10) ** BigInt(18)),
       sentTimestamp: String(10_000 - i),
-      sentTxHash: `0xtx${i}`,
+      sentTxHash: `0x${i.toString(16).padStart(64, "0")}`,
       firstSeenAt: String(10_000 - i),
     }),
   );
@@ -435,9 +446,9 @@ describe("BridgeFlowsPage — TransfersTable sort state", () => {
     renderJsdom();
     const order = rowOrder();
     // Newest sentTimestamp first.
-    expect(order[0]).toContain("0xnewsender");
-    expect(order[1]).toContain("0xmidsender");
-    expect(order[2]).toContain("0xoldsender");
+    expect(order[0]).toContain(NEW_SENDER);
+    expect(order[1]).toContain(MID_SENDER);
+    expect(order[2]).toContain(OLD_SENDER);
     // Time header is aria-sort=descending.
     const timeBtn = findHeaderButton("Time");
     expect(timeBtn.closest("th")?.getAttribute("aria-sort")).toBe("descending");
@@ -451,9 +462,9 @@ describe("BridgeFlowsPage — TransfersTable sort state", () => {
       timeBtn.click();
     });
     const order = rowOrder();
-    expect(order[0]).toContain("0xoldsender");
-    expect(order[1]).toContain("0xmidsender");
-    expect(order[2]).toContain("0xnewsender");
+    expect(order[0]).toContain(OLD_SENDER);
+    expect(order[1]).toContain(MID_SENDER);
+    expect(order[2]).toContain(NEW_SENDER);
     expect(timeBtn.closest("th")?.getAttribute("aria-sort")).toBe("ascending");
   });
 
@@ -476,9 +487,9 @@ describe("BridgeFlowsPage — TransfersTable sort state", () => {
     // Token DESC: USDm > GBPm > EURm? — string descending compare:
     // Sender of T_NEW=USDm, T_OLD=GBPm, T_MID=EURm.
     const order = rowOrder();
-    expect(order[0]).toContain("0xnewsender"); // USDm
-    expect(order[1]).toContain("0xoldsender"); // GBPm
-    expect(order[2]).toContain("0xmidsender"); // EURm
+    expect(order[0]).toContain(NEW_SENDER); // USDm
+    expect(order[1]).toContain(OLD_SENDER); // GBPm
+    expect(order[2]).toContain(MID_SENDER); // EURm
     expect(tokenBtn.closest("th")?.getAttribute("aria-sort")).toBe(
       "descending",
     );
@@ -496,10 +507,10 @@ describe("BridgeFlowsPage — TransfersTable sort state", () => {
     });
     const order = rowOrder();
     // sender DESC by lowercase localeCompare:
-    //   0xoldsender > 0xnewsender > 0xmidsender
-    expect(order[0]).toContain("0xoldsender");
-    expect(order[1]).toContain("0xnewsender");
-    expect(order[2]).toContain("0xmidsender");
+    //   OLD_SENDER (0xc…) > MID_SENDER (0xb…) > NEW_SENDER (0xa…)
+    expect(order[0]).toContain(OLD_SENDER);
+    expect(order[1]).toContain(MID_SENDER);
+    expect(order[2]).toContain(NEW_SENDER);
   });
 });
 
@@ -563,18 +574,11 @@ describe("BridgeFlowsPage — pagination clamping", () => {
   });
 
   it("falls back to last-known total on count error (preserves the denominator)", () => {
-    // Three-render dance characterizes the live behavior:
-    //
-    //   1. Mount with count=50. After commit, the `useEffect` keyed on
-    //      statusKey fires once (initial-mount semantics) and resets the
-    //      preserved-total ref to 0.
-    //   2. Re-render with count=50 again. Body re-writes the ref (50). The
-    //      effect doesn't re-fire (deps unchanged).
-    //   3. Re-render with count erroring. Body keeps the ref. Tile and
-    //      pager read the preserved 50.
-    //
-    // Real users hit this via SWR's revalidation cadence (poll → success
-    // → poll → transient error). The ref pattern guards the denominator.
+    // Three renders: success → success → error. The page preserves the
+    // last-successful total when the count query errors transiently. Real
+    // users hit this via SWR's revalidation cadence (poll → success →
+    // poll → transient error). Two prefacing successes are required to
+    // populate state past initial-mount reset semantics.
     const bulk = makeBulkTransfers(50);
 
     function happyImpl(query: string | null) {
@@ -822,6 +826,9 @@ describe("BridgeFlowsPage — toast lifecycle (via captured addToast)", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.doUnmock("@/components/bridge-redeem-cta");
+    // Belt-and-braces: the next test's `await import("../page")` could
+    // otherwise pick up a module compiled against this test's `doMock`.
+    vi.resetModules();
   });
 
   it("two addToast calls show two toasts; both auto-dismiss after 6 000 ms each", async () => {
@@ -834,8 +841,8 @@ describe("BridgeFlowsPage — toast lifecycle (via captured addToast)", () => {
       tokenSymbol: "USDm",
       sourceChainId: CELO,
       destChainId: MONAD,
-      sender: "0xstucksender22000000000000000000000000000",
-      recipient: "0xstuckrecip22000000000000000000000000000",
+      sender: "0xd2" + "2".repeat(38),
+      recipient: "0xd2" + "3".repeat(38),
       amount: "1000000000000000000",
       sentTimestamp: String(nowSec - 2 * SECONDS_PER_DAY),
       sentTxHash:
@@ -881,8 +888,8 @@ describe("BridgeFlowsPage — toast lifecycle (via captured addToast)", () => {
       tokenSymbol: "USDm",
       sourceChainId: CELO,
       destChainId: MONAD,
-      sender: "0xstucksender33000000000000000000000000000",
-      recipient: "0xstuckrecip33000000000000000000000000000",
+      sender: "0xd3" + "3".repeat(38),
+      recipient: "0xd3" + "4".repeat(38),
       amount: "1000000000000000000",
       sentTimestamp: String(nowSec - 2 * SECONDS_PER_DAY),
       sentTxHash:
@@ -923,8 +930,8 @@ describe("BridgeFlowsPage — toast lifecycle (via captured addToast)", () => {
       tokenSymbol: "USDm",
       sourceChainId: CELO,
       destChainId: MONAD,
-      sender: "0xstucksender000000000000000000000000000000",
-      recipient: "0xstuckrecip0000000000000000000000000000000",
+      sender: "0xd0" + "0".repeat(38),
+      recipient: "0xd0" + "1".repeat(38),
       amount: "1000000000000000000",
       sentTimestamp: String(nowSec - 2 * SECONDS_PER_DAY),
       sentTxHash:
