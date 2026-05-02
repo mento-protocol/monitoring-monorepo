@@ -9,6 +9,7 @@ export {
   type AddressEntry,
   type AddressEntryRecord,
   type AddressLabelsSnapshot,
+  type ImportedCounts,
   type Scope,
   ARKHAM_TAG,
   MINIPAY_SOURCE,
