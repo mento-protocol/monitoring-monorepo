@@ -27,7 +27,7 @@ import type { BridgeTransfer } from "@/lib/types";
 import {
   DurationCell,
   RouteCell,
-  SenderCell,
+  TransferSenderCell,
   TimeCell,
   TokenCell,
   TxLinks,
@@ -210,13 +210,19 @@ export function TransfersTable({
                 </WormholescanLink>
               </td>
               <td className="px-2 sm:px-3 py-1.5 sm:py-2 text-sm">
-                <SenderCell sender={t.sender} chainId={t.sourceChainId} />
+                <TransferSenderCell
+                  sender={t.sender}
+                  chainId={t.sourceChainId}
+                />
               </td>
               <td
                 className={`px-2 sm:px-3 py-1.5 sm:py-2 text-sm ${sameParties ? "opacity-50" : ""}`}
                 title={sameParties ? "Same as sender" : undefined}
               >
-                <SenderCell sender={t.recipient} chainId={t.destChainId} />
+                <TransferSenderCell
+                  sender={t.recipient}
+                  chainId={t.destChainId}
+                />
               </td>
               <td className="px-2 sm:px-3 py-1.5 sm:py-2">
                 <TxLinks

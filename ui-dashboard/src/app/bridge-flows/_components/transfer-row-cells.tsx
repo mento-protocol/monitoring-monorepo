@@ -1,9 +1,14 @@
+"use client";
+
 /**
- * Row-level cell sub-components extracted verbatim from `bridge-flows/page.tsx`
- * (refactor/bridge-flows-transfers-table). These are purely presentational: no
- * query calls, no sort state. They receive typed props and return JSX. The
- * `RouteCell` and `Dash` helpers are also consumed by `RouteDeliveryTile` in
- * page.tsx, so both are exported from this module.
+ * Row-level cell sub-components for the bridge-flows transfers table. Purely
+ * presentational: no query calls, no sort state. They receive typed props
+ * and return JSX. `RouteCell` and `Dash` are also consumed by
+ * `RouteDeliveryTile` in `page.tsx`, so both are exported from this module.
+ *
+ * `"use client"` is explicit because `AddressLink` mounts the
+ * `AddressLabelEditor` dialog (`useState`/`useEffect`) and `BridgeRedeemPill`
+ * is a click-driven CTA — running this module on the server would throw.
  */
 
 import { ChainIcon } from "@/components/chain-icon";
@@ -185,7 +190,7 @@ export function TokenCell({
   );
 }
 
-export function SenderCell({
+export function TransferSenderCell({
   sender,
   chainId,
 }: {
