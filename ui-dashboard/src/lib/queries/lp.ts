@@ -15,6 +15,17 @@ export const POOL_LP_POSITIONS = `
   }
 `;
 
+/**
+ * Distinct LP addresses across the given pools, used to size the homepage
+ * "unique LPs" tile. Nominally capped at 10 000.
+ *
+ * **Caveat:** hosted Hasura silently caps every UI query at 1 000 rows
+ * regardless of the literal limit (see `AGENTS.md` §"Recurring patterns").
+ * Once any chain crosses 1 000 active LP positions, the global LP count
+ * will silently undercount. Tracked for follow-up: paginate with the
+ * `fetchAllSnapshotPages` pattern or switch to a pre-rolled `LpRollup`
+ * entity on the indexer side.
+ */
 export const UNIQUE_LP_ADDRESSES = `
   query UniqueLpAddresses($poolIds: [String!]!) {
     LiquidityPosition(
