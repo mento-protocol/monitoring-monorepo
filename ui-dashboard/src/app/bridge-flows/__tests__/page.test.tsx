@@ -688,12 +688,13 @@ describe("BridgeFlowsPage — TransfersTable sort state", () => {
   //                 bottom regardless of asc/desc.
 
   it("clicking Route header sorts numerically on (sourceChainId, destChainId), not lexically", () => {
-    // Mix of MONAD->CELO (143->42220) and CELO->MONAD (42220->143). Lexical
-    // ASC would put CELO->MONAD first (since "42220-143" lex-precedes
-    // "143-42220"? actually no — "1" < "4" lex, so MONAD->CELO would lex-win
-    // in ASC). Specifically: lexical ASC = MONAD->CELO; numeric ASC =
-    // MONAD->CELO too (143 < 42220). Use a different shape that distinguishes
-    // them: tiebreak via destChainId — three rows where the source ties.
+    // Three sources whose numeric and lexical orderings diverge: 143, 8453,
+    // and 42220. Numeric ASC = 143 < 8453 < 42220. Lexical ASC of the same
+    // strings = "143" < "42220" < "8453" (because "4" precedes "8"). A
+    // regression that swapped `compareRoute`'s numeric subtraction for
+    // string compare would put 8453 LAST in ASC (where the test asserts it
+    // should be middle), so this fixture catches the bug class Codex
+    // flagged.
     const r1 = makeTransfer({
       id: "r1",
       sender: NEW_SENDER,
@@ -706,29 +707,42 @@ describe("BridgeFlowsPage — TransfersTable sort state", () => {
       sourceChainId: 42220, // CELO
       destChainId: 143, // -> MONAD
     });
+    const r3 = makeTransfer({
+      id: "r3",
+      sender: OLD_SENDER,
+      sourceChainId: 8453, // BASE — distinguishes numeric vs lexical
+      destChainId: 42220, // -> CELO
+    });
     mockUseBridgeGQL.mockImplementation(
       bridgeImpl({
-        transfers: ok({ BridgeTransfer: [r2, r1] }),
-        count: ok({ BridgeTransfer: [{ id: r1.id }, { id: r2.id }] }),
+        transfers: ok({ BridgeTransfer: [r2, r1, r3] }),
+        count: ok({
+          BridgeTransfer: [{ id: r1.id }, { id: r2.id }, { id: r3.id }],
+        }),
       }),
     );
     renderJsdom();
     const routeBtn = findHeaderButton("Route");
-    // First click after default = "Route" + DESC. DESC numerically -> 42220
-    // (CELO src) first, then 143 (MONAD src).
+    // First click after default = "Route" + DESC. Numeric DESC: 42220, 8453,
+    // 143. Lexical DESC would put 8453 first (because "8" > "4"), so the
+    // first-row assertion below catches the regression.
     act(() => {
       routeBtn.click();
     });
     let order = rowOrder();
     expect(order[0]).toContain(MID_SENDER); // sourceChainId=42220
-    expect(order[1]).toContain(NEW_SENDER); // sourceChainId=143
-    // Click again -> ASC.
+    expect(order[1]).toContain(OLD_SENDER); // sourceChainId=8453
+    expect(order[2]).toContain(NEW_SENDER); // sourceChainId=143
+    // Click again -> ASC. Numeric ASC: 143, 8453, 42220. Lexical ASC would
+    // put 8453 LAST (because "8" > "4"), so the middle-row assertion below
+    // catches the regression.
     act(() => {
       routeBtn.click();
     });
     order = rowOrder();
     expect(order[0]).toContain(NEW_SENDER); // sourceChainId=143
-    expect(order[1]).toContain(MID_SENDER); // sourceChainId=42220
+    expect(order[1]).toContain(OLD_SENDER); // sourceChainId=8453
+    expect(order[2]).toContain(MID_SENDER); // sourceChainId=42220
   });
 
   it("Amount column sort: null amountUsd rows sink to the bottom on ASC and DESC", () => {
