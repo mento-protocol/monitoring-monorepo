@@ -257,6 +257,10 @@ describe("logRpcFailure", () => {
     assert.equal(burstLines.length, 2);
     assert.ok(burstLines.some((l) => l.includes("chainId=42220")));
     assert.ok(burstLines.some((l) => l.includes("chainId=143")));
+    assert.ok(
+      !burstLines.some((l) => l.includes("fn=fetchFees")),
+      "fetchFees counter at 5 must not have triggered a burst",
+    );
   });
 
   it("uses the [CONTRACT_REVERT_BURST] tag when the burst is composed of known reverts", () => {
