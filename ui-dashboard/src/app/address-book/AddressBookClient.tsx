@@ -5,7 +5,12 @@ import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
 import { explorerAddressUrl } from "@/lib/tokens";
-import { NETWORKS, DEFAULT_NETWORK, networkIdForChainId } from "@/lib/networks";
+import {
+  NETWORKS,
+  DEFAULT_NETWORK,
+  networkForChainId,
+  networkIdForChainId,
+} from "@/lib/networks";
 import { type Scope } from "@/lib/address-labels-shared";
 import { buildAddressBookRows } from "@/lib/address-book";
 import { AddressTableRow } from "./_components/address-table-row";
@@ -13,7 +18,6 @@ import {
   buildContractRows,
   buildCustomRows,
   filterRows,
-  networkForChainId,
   type AddressRow,
 } from "./_lib/address-book-rows";
 

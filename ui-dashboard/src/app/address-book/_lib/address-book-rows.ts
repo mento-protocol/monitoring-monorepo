@@ -15,7 +15,7 @@ import {
   NETWORK_IDS,
   DEFAULT_NETWORK,
   isConfiguredNetworkId,
-  networkIdForChainId,
+  networkForChainId,
   type Network,
 } from "@/lib/networks";
 import {
@@ -26,17 +26,12 @@ import {
 import type { AddressBookRow } from "@/lib/address-book";
 import type { AddressEntryRow } from "@/components/address-labels-provider";
 
-// Re-export so the page can import them from one place.
 export type AddressRow = AddressBookRow;
 
-// ---------------------------------------------------------------------------
-// Network utilities (used by row builders; stay here to avoid import cycles)
-// ---------------------------------------------------------------------------
-
-export function networkForChainId(chainId: number): Network | null {
-  const id = networkIdForChainId(chainId);
-  return id ? NETWORKS[id] : null;
-}
+// `networkForChainId` is the canonical lookup from `@/lib/networks`; this
+// module is its caller for legacy-chain fallback. The caller (`AddressBookClient`)
+// imports `networkForChainId` directly from `@/lib/networks` rather than via
+// this module so the address-book code shares one source of truth.
 
 // Fall back to a synthetic network for legacy chain scopes (e.g. rows written
 // against the now-retired hosted testnet networks). Keeps orphaned entries
