@@ -3,10 +3,10 @@
 /**
  * BucketFilter sub-component for the BreachHistoryPanel. Renders a
  * radiogroup of five duration presets (All, ≤1h, 1h–1d, Over 1d, Ongoing).
- * The parent's `whereForBucket` / `composeWhere` helpers (still in the
- * panel; next step: move alongside BreachTable/BreachRow) reference
- * `SECONDS_PER_HOUR` / `SECONDS_PER_DAY` directly from `@/lib/time-series`
- * to share constants with the rest of the codebase.
+ * `whereForBucket` / `composeWhere` helpers live in `./filters.ts` alongside
+ * BreachTable and BreachRow; they reference `SECONDS_PER_HOUR` /
+ * `SECONDS_PER_DAY` from `@/lib/time-series` to share constants with the
+ * rest of the codebase.
  *
  * Implements the WAI-ARIA radio button keyboard contract: arrow keys move
  * focus + selection between options; Tab leaves the group.

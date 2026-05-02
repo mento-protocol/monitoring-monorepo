@@ -5,7 +5,6 @@ import {
   isVirtualPool,
   type Pool,
   type DeviationThresholdBreach,
-  type BreachEventCategory,
 } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import { useGQL } from "@/lib/graphql";
@@ -14,20 +13,10 @@ import {
   POOL_DEVIATION_BREACHES_COUNT,
   POOL_DEVIATION_BREACHES_PAGE,
 } from "@/lib/queries";
-import { formatTimestamp, relativeTime } from "@/lib/format";
-import { formatDurationShort } from "@/lib/bridge-status";
-import {
-  formatDeviationPct,
-  DEVIATION_BREACH_GRACE_SECONDS,
-  DEVIATION_CRITICAL_RATIO,
-} from "@/lib/health";
-import { tradingSecondsInRange } from "@/lib/weekend";
-import { explorerTxUrl } from "@/lib/tokens";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { BreachHistoryChart } from "@/components/breach-history-chart";
 import { TableSearch } from "@/components/table-search";
 import { Pagination } from "@/components/pagination";
-import { SortableTh } from "@/components/sortable-th";
 import { EmptyBox, ErrorBox } from "@/components/feedback";
 import { buildOrderBy, type SortDir } from "@/lib/table-sort";
 import {
@@ -36,7 +25,6 @@ import {
   normalizeSearch,
 } from "@/lib/table-search";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
-import { SECONDS_PER_HOUR, SECONDS_PER_DAY } from "@/lib/time-series";
 import {
   DurationRangeInputs,
   DurationFormatHint,
@@ -45,6 +33,15 @@ import {
   BucketFilter,
   type DurationBucket,
 } from "@/components/breach-history/bucket-filter";
+import {
+  composeWhere,
+  START_REASON_LABELS,
+  END_REASON_LABELS,
+} from "@/components/breach-history/filters";
+import {
+  BreachTable,
+  type SortKey,
+} from "@/components/breach-history/breach-table";
 
 interface Props {
   pool: Pool;
@@ -53,100 +50,6 @@ interface Props {
   search: string;
   onSearchChange: (value: string) => void;
 }
-
-const END_REASON_LABELS: Record<BreachEventCategory, string> = {
-  rebalance: "Rebalanced",
-  swap: "Swap",
-  liquidity: "Liquidity event",
-  oracle_update: "Oracle moved",
-  threshold_change: "Threshold changed",
-  unknown: "Unknown",
-};
-
-const START_REASON_LABELS: Record<BreachEventCategory, string> = {
-  rebalance: "Rebalance (reverse)",
-  swap: "Swap",
-  liquidity: "Liquidity event",
-  oracle_update: "Oracle moved",
-  threshold_change: "Threshold change",
-  unknown: "Unknown",
-};
-
-function whereForBucket(bucket: DurationBucket): Record<string, unknown> {
-  switch (bucket) {
-    case "all":
-      return {};
-    case "in_grace":
-      // Closed breaches that actually closed within the 1h grace window.
-      // Filter on duration, not `criticalDurationSeconds == 0`: under the
-      // tolerance refactor, `criticalDurationSeconds` is also zero for
-      // multi-hour breaches whose peak never crossed 1.05x — those are
-      // long WARN-only breaches and don't belong in the "≤1h" bucket.
-      return {
-        endedAt: { _is_null: false },
-        durationSeconds: { _lte: String(SECONDS_PER_HOUR) },
-      };
-    case "short":
-      return {
-        endedAt: { _is_null: false },
-        durationSeconds: {
-          _gt: String(SECONDS_PER_HOUR),
-          _lte: String(SECONDS_PER_DAY),
-        },
-      };
-    case "long":
-      return {
-        endedAt: { _is_null: false },
-        durationSeconds: { _gt: String(SECONDS_PER_DAY) },
-      };
-    case "ongoing":
-      return { endedAt: { _is_null: true } };
-  }
-}
-
-/**
- * Compose the bucket clause with optional numeric min/max filters. The
- * min/max values come from free-text inputs the user types (`1h`, `3
- * days`, etc.); they compose with the bucket via `_and` so "Over 1d +
- * min: 7d" narrows to breaches strictly over a week. Applied only when
- * non-null so an empty input doesn't pin everything to "≥0s".
- *
- * Open breaches have NULL `durationSeconds` until they close, so a naive
- * `durationSeconds >= min` predicate would drop every in-flight
- * incident. We OR the range against `durationSeconds IS NULL` so
- * ongoing rows stay visible regardless of the numeric filter — hiding
- * an active incident behind a filter is the worst-case UX here.
- */
-function composeWhere(
-  bucket: DurationBucket,
-  minSeconds: number | null,
-  maxSeconds: number | null,
-): Record<string, unknown> {
-  const bucketClause = whereForBucket(bucket);
-  if (minSeconds == null && maxSeconds == null) return bucketClause;
-
-  const durationRange: Record<string, unknown> = {};
-  if (minSeconds != null) durationRange._gte = String(minSeconds);
-  if (maxSeconds != null) durationRange._lte = String(maxSeconds);
-
-  const durationOr = {
-    _or: [
-      { durationSeconds: durationRange },
-      { durationSeconds: { _is_null: true } },
-    ],
-  };
-
-  // Hasura tolerates an empty object on one side of _and, so this is safe
-  // even when `bucket === "all"` (bucketClause === {}).
-  return { _and: [bucketClause, durationOr] };
-}
-
-/** Columns the user can sort on server-side. */
-type SortKey =
-  | "startedAt"
-  | "durationSeconds"
-  | "criticalDurationSeconds"
-  | "peakPriceDifference";
 
 export function BreachHistoryPanel({
   pool,
@@ -454,63 +357,15 @@ function BreachHistoryPanelInner({
         ) : filteredRows.length === 0 ? (
           <EmptyBox message="No breaches on this page match your search. Try clearing it or navigating pages." />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-slate-500">
-                  <SortableTh
-                    sortKey="startedAt"
-                    activeSortKey={sortKey}
-                    sortDir={sortDir}
-                    onSort={onSort}
-                  >
-                    Started
-                  </SortableTh>
-                  <SortableTh
-                    sortKey="durationSeconds"
-                    activeSortKey={sortKey}
-                    sortDir={sortDir}
-                    onSort={onSort}
-                  >
-                    Duration
-                  </SortableTh>
-                  <SortableTh
-                    sortKey="criticalDurationSeconds"
-                    activeSortKey={sortKey}
-                    sortDir={sortDir}
-                    onSort={onSort}
-                  >
-                    Past grace
-                  </SortableTh>
-                  <SortableTh
-                    sortKey="peakPriceDifference"
-                    activeSortKey={sortKey}
-                    sortDir={sortDir}
-                    onSort={onSort}
-                    align="right"
-                  >
-                    Peak
-                  </SortableTh>
-                  <th className="py-2 pr-4 font-normal">Trigger</th>
-                  <th className="py-2 pr-4 font-normal">Ended by</th>
-                  <th className="py-2 pr-4 font-normal text-right">
-                    Rebalances
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.map((b) => (
-                  <BreachRow
-                    key={b.id}
-                    breach={b}
-                    pool={pool}
-                    network={network}
-                    getName={getName}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <BreachTable
+            rows={filteredRows}
+            pool={pool}
+            network={network}
+            getName={getName}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            onSort={onSort}
+          />
         )}
 
         <Pagination
@@ -544,129 +399,5 @@ function BreachHistoryPanelInner({
         )}
       </section>
     </div>
-  );
-}
-
-function BreachRow({
-  breach,
-  pool,
-  network,
-  getName,
-}: {
-  breach: DeviationThresholdBreach;
-  pool: Pool;
-  network: Network;
-  getName: (addr: string | null, chainId?: number) => string;
-}) {
-  const isOpen = breach.endedAt == null;
-  const now = Math.floor(Date.now() / 1000);
-  // Trading-seconds for both open and closed rows so the Duration column
-  // doesn't shrink discontinuously when an FX-weekend-spanning open
-  // breach closes (closed rows use the indexer's stored
-  // `durationSeconds`, which is also trading-seconds with weekend
-  // closure subtracted). Matches the unit used by the Past-grace column
-  // and the Uptime tile.
-  const duration = isOpen
-    ? tradingSecondsInRange(Number(breach.startedAt), now)
-    : Number(breach.durationSeconds);
-  // Past-grace uses trading-seconds on open rows so the unit matches the
-  // stored `criticalDurationSeconds` on closed rows and the uptime
-  // tile's live math. Mirror of the closed-breach indexer logic AND the
-  // uptime tile: only credit past-grace seconds when the breach's peak
-  // crossed the 5% critical-magnitude line, scored against the threshold
-  // captured at the rising edge.
-  const graceEnd =
-    Number(breach.startedAt) + Number(DEVIATION_BREACH_GRACE_SECONDS);
-  // Fallback to current pool threshold during the indexer resync window
-  // before `entryRebalanceThreshold` is backfilled. Once resync lands every
-  // breach row carries its own entry threshold.
-  const entryThreshold =
-    (breach.entryRebalanceThreshold ?? 0) > 0
-      ? breach.entryRebalanceThreshold!
-      : (pool.rebalanceThreshold ?? 0) > 0
-        ? pool.rebalanceThreshold!
-        : 10000;
-  const peakAboveCritical =
-    Number(breach.peakPriceDifference) / entryThreshold >
-    DEVIATION_CRITICAL_RATIO;
-  const critDuration = isOpen
-    ? peakAboveCritical && now > graceEnd
-      ? tradingSecondsInRange(graceEnd, now)
-      : 0
-    : Number(breach.criticalDurationSeconds);
-  // Peak % displayed in the row is scored against the SAME threshold the
-  // severity bucket uses (entry threshold) so the percentage and the
-  // critical-or-not verdict can't disagree across a mid-breach
-  // FPMMRebalanceThresholdUpdated.
-  const peakPct = formatDeviationPct(
-    breach.peakPriceDifference,
-    entryThreshold,
-  );
-
-  const endedLabel = isOpen
-    ? "Ongoing"
-    : END_REASON_LABELS[breach.endedByEvent ?? "unknown"];
-  const startedLabel = START_REASON_LABELS[breach.startedByEvent];
-
-  return (
-    <tr className="border-t border-slate-800/60 text-slate-300">
-      <td
-        className="py-2 pr-4 whitespace-nowrap"
-        title={formatTimestamp(breach.startedAt)}
-      >
-        <a
-          href={explorerTxUrl(network, breach.startedByTxHash)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hover:text-indigo-400 transition-colors"
-        >
-          {relativeTime(breach.startedAt)}
-        </a>
-      </td>
-      <td
-        className={`py-2 pr-4 whitespace-nowrap ${isOpen ? "text-amber-400" : ""}`}
-      >
-        {formatDurationShort(duration)}
-        {isOpen && <span className="ml-1 text-xs text-slate-500">ongoing</span>}
-      </td>
-      <td
-        className={`py-2 pr-4 whitespace-nowrap ${critDuration > 0 ? "text-red-400" : "text-slate-500"}`}
-      >
-        {critDuration > 0 ? formatDurationShort(critDuration) : "—"}
-      </td>
-      <td
-        className="py-2 pr-4 whitespace-nowrap text-right"
-        title={breach.peakPriceDifference}
-      >
-        {peakPct ?? "—"}
-      </td>
-      <td className="py-2 pr-4 whitespace-nowrap text-slate-400">
-        {startedLabel}
-      </td>
-      <td className="py-2 pr-4 whitespace-nowrap">
-        {isOpen ? (
-          <span className="text-slate-500">—</span>
-        ) : breach.endedByTxHash ? (
-          <a
-            href={explorerTxUrl(network, breach.endedByTxHash)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-indigo-400 transition-colors"
-            title={
-              breach.endedByStrategy
-                ? `via ${getName(breach.endedByStrategy, network.chainId)}`
-                : undefined
-            }
-          >
-            {endedLabel}
-          </a>
-        ) : (
-          <span className="text-slate-400">{endedLabel}</span>
-        )}
-      </td>
-      <td className="py-2 pr-4 whitespace-nowrap text-right text-slate-400">
-        {breach.rebalanceCountDuring}
-      </td>
-    </tr>
   );
 }
