@@ -5,46 +5,20 @@ import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
 import { explorerAddressUrl } from "@/lib/tokens";
-import {
-  NETWORKS,
-  DEFAULT_NETWORK,
-  networkForChainId,
-  networkIdForChainId,
-} from "@/lib/networks";
+import { NETWORKS, DEFAULT_NETWORK, networkForChainId } from "@/lib/networks";
 import { type Scope } from "@/lib/address-labels-shared";
 import { buildAddressBookRows } from "@/lib/address-book";
 import { AddressTableRow } from "./_components/address-table-row";
+import { ImportDialog } from "./_components/import-dialog";
 import {
   buildContractRows,
   buildCustomRows,
   filterRows,
   type AddressRow,
 } from "./_lib/address-book-rows";
+import { importFile, exportLabels } from "./_lib/address-book-import-export";
 
 type EditTarget = { address: string; scope: Scope; chainId: number };
-
-type ImportedCounts = {
-  global: number;
-  chains: Record<string, number>;
-};
-
-function formatImportCounts(counts?: ImportedCounts): string {
-  if (!counts) return "Imported 0 labels.";
-  const parts: string[] = [];
-  if (counts.global > 0) {
-    parts.push(`${counts.global} global`);
-  }
-  for (const [chainId, n] of Object.entries(counts.chains)) {
-    if (n === 0) continue;
-    const id = networkIdForChainId(Number(chainId));
-    const label = id ? NETWORKS[id].label : `Chain ${chainId}`;
-    parts.push(`${n} ${label}-only`);
-  }
-  const total =
-    counts.global + Object.values(counts.chains).reduce((a, b) => a + b, 0);
-  if (parts.length === 0) return "Imported 0 labels.";
-  return `Imported ${total} label${total !== 1 ? "s" : ""}: ${parts.join(", ")}.`;
-}
 
 export default function AddressBookPage({
   canEdit: userCanEdit = false,
@@ -85,10 +59,7 @@ export default function AddressBookPage({
   );
 
   const handleExport = useCallback(() => {
-    const a = document.createElement("a");
-    a.href = `/api/address-labels/export`;
-    a.download = "";
-    a.click();
+    exportLabels();
   }, []);
 
   const handleImportClick = () => {
@@ -102,63 +73,11 @@ export default function AddressBookPage({
       const file = e.target.files?.[0];
       if (!file) return;
       e.target.value = "";
-
-      const isCsv =
-        file.name.toLowerCase().endsWith(".csv") ||
-        file.type === "text/csv" ||
-        (file.type === "text/plain" &&
-          file.name.toLowerCase().endsWith(".csv"));
-
-      if (isCsv) {
-        try {
-          const text = await file.text();
-          const res = await fetch("/api/address-labels/import", {
-            method: "POST",
-            headers: { "Content-Type": "text/csv" },
-            body: text,
-          });
-          if (!res.ok) {
-            const body = (await res.json()) as { error?: string };
-            setImportError(body.error ?? "Import failed.");
-            return;
-          }
-          const body = (await res.json()) as { imported?: ImportedCounts };
-          setImportSuccess(formatImportCounts(body.imported));
-          // Force an immediate SWR refetch so the table reflects the new
-          // entries without waiting for the 30 s polling interval.
-          await revalidate();
-        } catch (err) {
-          setImportError(err instanceof Error ? err.message : "Import failed.");
-        }
-        return;
-      }
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(await file.text());
-      } catch {
-        setImportError(
-          "Invalid file. Expected JSON or CSV (address,name,tags,chainId).",
-        );
-        return;
-      }
-
-      try {
-        const res = await fetch("/api/address-labels/import", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(parsed),
-        });
-        if (!res.ok) {
-          const body = (await res.json()) as { error?: string };
-          setImportError(body.error ?? "Import failed.");
-          return;
-        }
-        const body = (await res.json()) as { imported?: ImportedCounts };
-        setImportSuccess(formatImportCounts(body.imported));
-        await revalidate();
-      } catch (err) {
-        setImportError(err instanceof Error ? err.message : "Import failed.");
+      const result = await importFile(file, revalidate);
+      if (result.error) {
+        setImportError(result.error);
+      } else if (result.success) {
+        setImportSuccess(result.success);
       }
     },
     [revalidate],
@@ -182,49 +101,10 @@ export default function AddressBookPage({
             >
               Export JSON
             </button>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={handleImportClick}
-                className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
-              >
-                Import
-              </button>
-              <details className="relative">
-                <summary
-                  aria-label="Supported import formats"
-                  title="Supported import formats"
-                  className="cursor-pointer list-none rounded-full p-1 text-slate-500 hover:text-slate-300 transition-colors"
-                >
-                  <span aria-hidden="true">&#9432;</span>
-                </summary>
-                <div className="absolute right-0 top-8 z-10 w-80 rounded-lg border border-slate-700 bg-slate-900 p-3 text-xs text-slate-400 shadow-xl">
-                  <p className="mb-2 font-semibold text-slate-300">
-                    Supported import formats:
-                  </p>
-                  <p className="mb-1 font-medium text-slate-400">
-                    Mento export:
-                  </p>
-                  <pre className="mb-2 overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`{ "exportedAt": "...",\n  "chains": { "42220": {\n    "0x...": { "name": "...",\n      "tags": ["..."],\n      "notes": "..." } } } }`}</pre>
-                  <p className="mb-1 font-medium text-slate-400">
-                    Gnosis Safe address book:
-                  </p>
-                  <pre className="mb-2 overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`[{ "address": "0x...",\n   "chainId": "1",\n   "name": "My Label" }]`}</pre>
-                  <p className="mb-1 font-medium text-slate-400">
-                    CSV (address,name,tags,chainId) — chainId blank =
-                    cross-chain:
-                  </p>
-                  <pre className="overflow-x-auto rounded bg-slate-800 p-2 text-slate-400 text-[10px] leading-relaxed">{`address,name,tags,chainId\n0x...,My Label,"Whale",\n0x...,Celo Rebalancer,,42220`}</pre>
-                </div>
-              </details>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json,.csv,application/json,text/csv,text/plain"
-              onChange={handleFileChange}
-              className="hidden"
-              aria-label="Import address labels (JSON or CSV)"
+            <ImportDialog
+              fileInputRef={fileInputRef}
+              onImportClick={handleImportClick}
+              onFileChange={handleFileChange}
             />
             <button
               type="button"
