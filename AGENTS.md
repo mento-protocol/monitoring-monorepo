@@ -220,8 +220,9 @@ monitoring-monorepo/
     │   │   ├── address-label-editor.tsx   # Inline edit dialog
     │   │   └── address-labels-provider.tsx  # Context: merges package + custom labels
     │   └── lib/
-    │       ├── address-labels.ts  # Upstash Redis data access (server-side)
-    │       └── networks.ts        # Network defs; delegates token/label derivation to @mento-protocol/monitoring-config
+    │       ├── address-labels.ts        # Upstash Redis data access (server-side)
+    │       ├── address-labels/import.ts # Import handlers (CSV/JSON/Snapshot/Gnosis Safe) for /api/address-labels/import
+    │       └── networks.ts              # Network defs; delegates token/label derivation to @mento-protocol/monitoring-config
     ├── public/               # Static assets
     ├── vercel.json           # Vercel config + daily backup cron
     └── next.config.ts        # Next.js config

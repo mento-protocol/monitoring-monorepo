@@ -37,6 +37,10 @@ const RUNTIME_IMPORT_ALLOWLIST = new Set<string>([
   // Same posture as arkham/enrich — reads existing labels to filter
   // candidates, then writes only previously-unlabelled addresses.
   "src/app/api/minipay/tag/route.ts",
+  // Server-only library used exclusively by the import API route — same
+  // posture as a route handler (no RSC payload, no HTML serialization);
+  // extracted purely so the route stays a thin HTTP wrapper.
+  "src/lib/address-labels/import.ts",
   // Self-references / tests.
   "src/lib/address-labels.ts",
 ]);
@@ -69,23 +73,35 @@ function rel(p: string): string {
 
 // Canonical absolute path of the Redis-backed label module (no extension).
 // Any runtime import that resolves here — via the `@/` alias, a relative
-// specifier, or `import()` — must be treated the same way.
+// specifier, or `import()` — must be treated the same way. Submodules under
+// `lib/address-labels/` (e.g. `lib/address-labels/import.ts`) are also
+// guarded: they reach the same Redis client and have the same leak risk if
+// imported from a non-API context.
 const TARGET_MODULE_ABS = join(SRC_ROOT, "lib", "address-labels");
+const TARGET_MODULE_PREFIX = `${TARGET_MODULE_ABS}/`;
 
 // Returns true if `specifier`, interpreted from `importerDir`, resolves to
-// the label module. Matches:
+// the label module OR any submodule under it. Matches:
 //   - the `@/lib/address-labels` alias form (with or without `.ts`/`.tsx`)
-//   - relative specifiers like `../../lib/address-labels` that resolve to
-//     the same absolute path
+//   - the subpath alias form `@/lib/address-labels/<x>`
+//   - relative specifiers like `../../lib/address-labels` (and subpaths)
+//     that resolve to the same absolute path or anything under it
 // Bare specifiers pointing at other packages are ignored.
 function refersToLabelModule(specifier: string, importerDir: string): boolean {
   const stripExt = (p: string) => p.replace(/\.(ts|tsx)$/, "");
   if (specifier.startsWith("@/")) {
-    return stripExt(specifier) === "@/lib/address-labels";
+    const stripped = stripExt(specifier);
+    return (
+      stripped === "@/lib/address-labels" ||
+      stripped.startsWith("@/lib/address-labels/")
+    );
   }
   if (specifier.startsWith("./") || specifier.startsWith("../")) {
     const absolute = stripExt(resolve(importerDir, specifier));
-    return absolute === TARGET_MODULE_ABS;
+    return (
+      absolute === TARGET_MODULE_ABS ||
+      absolute.startsWith(TARGET_MODULE_PREFIX)
+    );
   }
   return false;
 }
@@ -209,6 +225,22 @@ describe("P1-05 — RSC label-leak regression guard", () => {
       ],
       ["relative named", 'import { x } from "../lib/address-labels";'],
       ["relative dynamic", 'const m = await import("../lib/address-labels");'],
+      [
+        "alias submodule named",
+        'import { x } from "@/lib/address-labels/import";',
+      ],
+      [
+        "alias submodule with .ts extension",
+        'import { x } from "@/lib/address-labels/import.ts";',
+      ],
+      [
+        "alias submodule dynamic",
+        'const m = await import("@/lib/address-labels/import");',
+      ],
+      [
+        "relative submodule named",
+        'import { x } from "../lib/address-labels/import";',
+      ],
     ])("detects %s", (_label, src) => {
       expect(countRuntimeRefs(src, fakeFile)).toBe(1);
     });
@@ -221,6 +253,10 @@ describe("P1-05 — RSC label-leak regression guard", () => {
       [
         "alias type-only re-export",
         'export type { X } from "@/lib/address-labels";',
+      ],
+      [
+        "alias submodule type-only import",
+        'import type { X } from "@/lib/address-labels/import";',
       ],
       ["unrelated bare module", 'import React from "react";'],
       ["unrelated alias", 'import { y } from "@/lib/address-labels-shared";'],
