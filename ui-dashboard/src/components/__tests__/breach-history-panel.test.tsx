@@ -105,6 +105,7 @@ vi.mock("@/components/table-search", () => ({
 
 import { BreachHistoryPanel } from "@/components/breach-history-panel";
 import { ANCHOR_FRI_2100 } from "@/lib/weekend";
+import { ENVIO_MAX_ROWS } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -303,6 +304,26 @@ function allVarsFromCalls(): Record<string, unknown> | null {
     }
   }
   return null;
+}
+
+/**
+ * The panel's stronger invariant is that every state change threads the
+ * SAME `where` clause through COUNT (badge), PAGE (table), and ALL
+ * (chart). Asserting fanout on COUNT alone leaves the chart/table free
+ * to silently desync after A6's extraction. Pin all three to one JSON
+ * shape so the relationship survives the refactor.
+ */
+function expectWhereFanout(): string {
+  const countWhere = countVarsFromCalls()?.where;
+  const pageWhere = pageVarsFromCalls()?.where;
+  const allWhere = allVarsFromCalls()?.where;
+  expect(countWhere).toBeDefined();
+  expect(pageWhere).toBeDefined();
+  expect(allWhere).toBeDefined();
+  const countJson = JSON.stringify(countWhere);
+  expect(JSON.stringify(pageWhere)).toBe(countJson);
+  expect(JSON.stringify(allWhere)).toBe(countJson);
+  return countJson;
 }
 
 // ---------------------------------------------------------------------------
@@ -619,6 +640,23 @@ describe("DurationField parse + commit", () => {
     expect(json).toContain("5400");
   });
 
+  it("duration commit fans the SAME where clause to COUNT, PAGE, and ALL", () => {
+    // Pin the cross-query invariant for a duration commit: the badge
+    // (COUNT), table (PAGE), and chart (ALL) must all see the same
+    // evolving `where` after a duration filter, otherwise the chart can
+    // drift from the table during A6's extraction without any of the
+    // `countVarsFromCalls`-only assertions catching it.
+    const { container } = renderInteractive();
+    const minInput = container.querySelector(
+      'input[aria-label="Minimum breach duration"]',
+    ) as HTMLInputElement;
+    setInputValue(minInput, "1h 30m");
+    commitOnBlur(minInput);
+
+    const where = expectWhereFanout();
+    expect(where).toContain("5400");
+  });
+
   it("flags a malformed duration without committing (where stays empty)", () => {
     const { container } = renderInteractive();
 
@@ -763,6 +801,20 @@ describe("BucketFilter", () => {
     const json = JSON.stringify(where);
     expect(json).toContain("durationSeconds");
     expect(json).toContain('"_gt":"86400"');
+  });
+
+  it("bucket change fans the SAME where clause to COUNT, PAGE, and ALL", () => {
+    // Pin the cross-query invariant for a bucket change. Without this,
+    // an A6 refactor could drop the bucket clause from PAGE or ALL while
+    // the badge (COUNT) stays correct — the table/chart would silently
+    // diverge from the badge and every existing assertion stays green.
+    const { container } = renderInteractive();
+    act(() => {
+      findButton(container, (t) => t === "Over 1d").click();
+    });
+
+    const where = expectWhereFanout();
+    expect(where).toContain('"_gt":"86400"');
   });
 
   it("selecting '1h - 1d' adds both _gt:3600 and _lte:86400", () => {
@@ -1156,6 +1208,61 @@ describe("Sort + Pagination", () => {
     expect(orderBy[0]).toEqual({ peakPriceDifference: "desc" });
   });
 
+  it("aria-sort on each sortable header reflects the active sort state", () => {
+    // The query-side orderBy is already pinned by the tests above, but
+    // `aria-sort` is the screen-reader-visible state and there are no
+    // other `aria-sort` assertions in the dashboard test suite. A6's
+    // table extraction could swap the markup and silently drop the
+    // attribute while keeping `orderBy` correct — pin the SR contract
+    // for every sortable column so that regression fails loudly here.
+    const { container } = renderInteractive();
+
+    // Resolve the parent <th> for a SortableTh button. SortableTh wraps
+    // the click target in `<th><button>label</button></th>`, so walk up
+    // from the matched button.
+    const thFor = (predicate: (t: string) => boolean): HTMLTableCellElement => {
+      const btn = findButton(container, predicate);
+      const th = btn.closest("th");
+      if (!th) throw new Error("Sortable button has no parent <th>");
+      return th as HTMLTableCellElement;
+    };
+    const sortFor = (predicate: (t: string) => boolean): string | null =>
+      thFor(predicate).getAttribute("aria-sort");
+
+    // Default: Started is the active sort (desc). Others are "none".
+    expect(sortFor((t) => t.startsWith("Started"))).toBe("descending");
+    expect(sortFor((t) => t.startsWith("Duration"))).toBe("none");
+    expect(sortFor((t) => t.startsWith("Past grace"))).toBe("none");
+    expect(sortFor((t) => t.startsWith("Peak"))).toBe("none");
+
+    // Click Duration → flips to descending; Started becomes "none".
+    act(() => {
+      findButton(container, (t) => t.startsWith("Duration")).click();
+    });
+    expect(sortFor((t) => t.startsWith("Duration"))).toBe("descending");
+    expect(sortFor((t) => t.startsWith("Started"))).toBe("none");
+
+    // Click Duration again → toggles to ascending.
+    act(() => {
+      findButton(container, (t) => t.startsWith("Duration")).click();
+    });
+    expect(sortFor((t) => t.startsWith("Duration"))).toBe("ascending");
+
+    // Click Past grace → that becomes the active descending sort.
+    act(() => {
+      findButton(container, (t) => t.startsWith("Past grace")).click();
+    });
+    expect(sortFor((t) => t.startsWith("Past grace"))).toBe("descending");
+    expect(sortFor((t) => t.startsWith("Duration"))).toBe("none");
+
+    // Click Peak → same dance, with Past grace going back to "none".
+    act(() => {
+      findButton(container, (t) => t.startsWith("Peak")).click();
+    });
+    expect(sortFor((t) => t.startsWith("Peak"))).toBe("descending");
+    expect(sortFor((t) => t.startsWith("Past grace"))).toBe("none");
+  });
+
   it("Next button advances offset by limit", () => {
     const { container } = renderInteractive({ limit: 25 });
     expect(pageVarsFromCalls()!.offset).toBe(0);
@@ -1345,6 +1452,38 @@ describe("Search + filter composition", () => {
     });
     expect(onSearchChange).toHaveBeenCalledWith("rebalance");
   });
+
+  it("search input change resets pagination to page 1", () => {
+    // Same regression class as the bucket / duration / sort reset tests
+    // but for the search box. Without this, an A6 extraction can drop
+    // `setRawPage(1)` from `handleSearchChange` and the user typing into
+    // the search box on page 2 lands on a stale offset slice for the new
+    // (narrowed) row set. Build a 60-row count so Pagination renders Next.
+    const ids = Array.from({ length: 60 }, (_, i) => ({ id: `b-${i}` }));
+    setupGQL({
+      count: { data: { DeviationThresholdBreach: ids } },
+      page: { data: { DeviationThresholdBreach: ALL_ROWS } },
+      all: { data: { DeviationThresholdBreach: ALL_ROWS } },
+    });
+    const { container } = renderInteractive({ limit: 25 });
+
+    // Land on page 2.
+    const nextBtn = findButton(
+      container,
+      (_t, b) => b.getAttribute("aria-label") === "Next page",
+    );
+    act(() => {
+      nextBtn.click();
+    });
+    expect(pageVarsFromCalls()!.offset).toBe(25);
+
+    // Type into the search input → page must reset to 0.
+    const search = container.querySelector(
+      '[data-testid="table-search"]',
+    ) as HTMLInputElement;
+    setInputValue(search, "rebalance");
+    expect(pageVarsFromCalls()!.offset).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1443,7 +1582,11 @@ describe("Edge cases", () => {
         onSearchChange={() => {}}
       />,
     );
-    expect(html).toContain("1,000+ breaches");
+    // Use the same formatter the component uses so this stays
+    // locale-agnostic — `toLocaleString()` returns "1,000" in en-US but
+    // "1.000" / "1 000" elsewhere; hard-coding the comma form would
+    // make this test flake under non-en-US Vitest workers.
+    expect(html).toContain(`${ENVIO_MAX_ROWS.toLocaleString()}+ breaches`);
     expect(html).toContain("t visible");
   });
 
