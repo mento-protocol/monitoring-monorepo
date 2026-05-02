@@ -160,10 +160,13 @@ export function upgradeEntry(raw: Record<string, unknown>): AddressEntry {
     };
   }
 
-  // Fallback: unknown shape — return minimal valid entry
+  // Fallback: no name/label — preserve any tags so tag-only entries
+  // (the third shape `isEntriesMap` accepts) survive the upgrade pipeline
+  // instead of getting silently dropped by the downstream `name !== "" ||
+  // tags.length > 0` filter in `sanitizeAndFilter`.
   return {
     name: "",
-    tags: [],
+    tags: normalizedTags,
     notes: typeof entry.notes === "string" ? entry.notes : undefined,
     isPublic: entry.isPublic === true ? true : undefined,
     ...(source ? { source } : {}),

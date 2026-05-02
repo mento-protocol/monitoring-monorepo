@@ -33,4 +33,21 @@ describe("upgradeEntry", () => {
       updatedAt: "2026-01-01T00:00:00Z",
     });
   });
+
+  it("preserves tags on tag-only entries (no name, no label)", () => {
+    // Regression: previously the fallback branch returned `tags: []`, silently
+    // dropping the tag-only shape that `isEntriesMap` explicitly accepts. The
+    // downstream `sanitizeAndFilter` then filtered the empty entry out and
+    // the import returned 200 with 0 persisted.
+    const entry = upgradeEntry({
+      tags: ["Whale"],
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+
+    expect(entry).toMatchObject({
+      name: "",
+      tags: ["Whale"],
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+  });
 });
