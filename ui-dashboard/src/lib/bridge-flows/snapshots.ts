@@ -52,7 +52,7 @@ export function buildVolumeUsdSeries(
     .map(([timestamp, value]) => ({ timestamp, value }));
 }
 
-type WindowTotals = {
+export type WindowTotals = {
   total: number | null;
   sub24h: number;
   sub7d: number;
