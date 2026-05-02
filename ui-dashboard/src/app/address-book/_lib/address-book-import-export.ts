@@ -1,7 +1,7 @@
 import { NETWORKS, networkIdForChainId } from "@/lib/networks";
 import type { ImportedCounts } from "@/lib/address-labels-shared";
 
-export function formatImportCounts(counts?: ImportedCounts): string {
+function formatImportCounts(counts?: ImportedCounts): string {
   if (!counts) return "Imported 0 labels.";
   const parts: string[] = [];
   if (counts.global > 0) {
@@ -67,7 +67,16 @@ export async function importFile(
     result = await postImport("application/json", JSON.stringify(parsed));
   }
 
-  if (result.success) await revalidate();
+  if (result.success) {
+    // Catch here so a refetch failure on a successful import surfaces as
+    // an error to the caller — the data did land server-side, but the
+    // user needs to know the table is stale until they reload.
+    try {
+      await revalidate();
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Import failed." };
+    }
+  }
   return result;
 }
 
