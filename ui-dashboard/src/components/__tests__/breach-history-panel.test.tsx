@@ -66,16 +66,17 @@ vi.mock("@/components/network-provider", () => ({
 }));
 
 // The chart import pulls plotly via `next/dynamic`; mock it out so tests don't
-// need to load the bundle. We also assert on the `breaches` prop later to
-// confirm the panel passes through the chart query rows.
+// need to load the bundle. Capture the full props so A6's chart-section
+// extraction can't silently lose any prop on its way to the chart.
 let capturedChartBreaches: DeviationThresholdBreach[] | null = null;
+let capturedChartPool: unknown = null;
 vi.mock("@/components/breach-history-chart", () => ({
-  BreachHistoryChart: ({
-    breaches,
-  }: {
+  BreachHistoryChart: (props: {
     breaches: DeviationThresholdBreach[];
+    pool?: unknown;
   }) => {
-    capturedChartBreaches = breaches;
+    capturedChartBreaches = props.breaches;
+    capturedChartPool = props.pool ?? null;
     return <div data-testid="breach-chart" />;
   },
 }));
@@ -109,7 +110,10 @@ import { ANCHOR_FRI_2100 } from "@/lib/weekend";
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const POOL_ID = "42220-0xpool";
+// Production pool IDs are `chainId-token0token1` — keep the fixture honest so
+// any future production-side parsing (e.g. address validation) doesn't pass
+// spuriously on a placeholder shape.
+const POOL_ID = "42220-0xt00xt1";
 const STRATEGY_ADDR = "0xa0fb8b16ce6af3634ff9f3f4f40e49e1c1ae4f0b";
 
 const NETWORK: Network = {
@@ -338,6 +342,43 @@ function findButton(
   return match;
 }
 
+/**
+ * Drive a controlled input the way React 19 expects: bypass the runtime's
+ * cached descriptor by writing through the prototype setter, then dispatch a
+ * bubbling `input` event so the React change handler fires synchronously.
+ */
+function setInputValue(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    "value",
+  )!.set!;
+  act(() => {
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+/**
+ * Commit a draft input via the same delegated event React 19 listens for.
+ * `blur` is intentionally NOT used — React 19 attaches its `onBlur` listener
+ * to `focusout` (the bubbling counterpart), so a `blur` event would silently
+ * not trigger the commit handler under jsdom.
+ */
+function commitOnBlur(input: HTMLInputElement): void {
+  act(() => {
+    input.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+  });
+}
+
+/** Commit via Enter — same effect as blur in this panel's DurationField. */
+function commitOnEnter(input: HTMLInputElement): void {
+  act(() => {
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -345,6 +386,7 @@ function findButton(
 beforeEach(() => {
   mockUseGQL.mockReset();
   capturedChartBreaches = null;
+  capturedChartPool = null;
 });
 
 afterEach(() => {
@@ -500,6 +542,9 @@ describe("Initial render", () => {
     expect(capturedChartBreaches!.map((r) => r.id)).toEqual(
       ALL_ROWS.map((r) => r.id),
     );
+    // Pool prop forwards through to the chart so A6's chart-section
+    // extraction can't silently drop it.
+    expect(capturedChartPool).toMatchObject({ id: BASE_POOL.id });
   });
 });
 
@@ -525,18 +570,8 @@ describe("DurationField parse + commit", () => {
     expect(minInput).toBeTruthy();
     expect(minInput.value).toBe("");
 
-    act(() => {
-      // Synthesize the same event React listens for.
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        "value",
-      )!.set!;
-      setter.call(minInput, "1h 30m");
-      minInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    act(() => {
-      minInput.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    });
+    setInputValue(minInput, "1h 30m");
+    commitOnBlur(minInput);
 
     // Should NOT have applied the red-ring "invalid" class
     expect(minInput.className).not.toContain("border-red-500");
@@ -557,17 +592,8 @@ describe("DurationField parse + commit", () => {
       'input[aria-label="Minimum breach duration"]',
     ) as HTMLInputElement;
 
-    act(() => {
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        "value",
-      )!.set!;
-      setter.call(minInput, "abc");
-      minInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    act(() => {
-      minInput.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    });
+    setInputValue(minInput, "abc");
+    commitOnBlur(minInput);
 
     expect(minInput.className).toContain("border-red-500");
     // No numeric duration filter should appear in `where`.
@@ -582,19 +608,8 @@ describe("DurationField parse + commit", () => {
       'input[aria-label="Maximum breach duration"]',
     ) as HTMLInputElement;
 
-    act(() => {
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        "value",
-      )!.set!;
-      setter.call(maxInput, "2h");
-      maxInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    act(() => {
-      maxInput.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-      );
-    });
+    setInputValue(maxInput, "2h");
+    commitOnEnter(maxInput);
 
     expect(maxInput.className).not.toContain("border-red-500");
     const json = JSON.stringify(countVarsFromCalls()!.where);
@@ -952,8 +967,11 @@ describe("BreachRow critical-ratio scoring", () => {
   });
 
   it("renders past-grace duration in red when peak crossed the 1.05x critical ratio (closed row)", () => {
-    // peak/threshold = 200/100 = 2.0 > 1.05 critical ratio
-    // criticalDurationSeconds = 60 → "1m"
+    // peak/entryRebalanceThreshold = 200/100 = 2.0 > 1.05 critical → red.
+    // pool.rebalanceThreshold deliberately set to 400 (peak/pool = 0.5,
+    // sub-critical) so a regression that scored against the live mutable
+    // pool threshold instead of the per-event entry threshold would render
+    // grey em-dash and fail this test.
     const critBreach = makeBreach({
       id: "b-crit",
       durationSeconds: "3600",
@@ -968,7 +986,7 @@ describe("BreachRow critical-ratio scoring", () => {
     });
     const html = renderToStaticMarkup(
       <BreachHistoryPanel
-        pool={BASE_POOL}
+        pool={{ ...BASE_POOL, rebalanceThreshold: 400 }}
         network={NETWORK}
         limit={25}
         search=""
@@ -981,7 +999,11 @@ describe("BreachRow critical-ratio scoring", () => {
   });
 
   it("renders em-dash + grey when peak stayed under 1.05x (closed row)", () => {
-    // peak/threshold = 100/100 = 1.0 ≤ 1.05 critical ratio
+    // peak/entryRebalanceThreshold = 100/100 = 1.0 ≤ 1.05 critical → grey.
+    // pool.rebalanceThreshold deliberately set to 50 (peak/pool = 2.0,
+    // super-critical) so a regression that scored against the live mutable
+    // pool threshold instead of the per-event entry threshold would render
+    // red and fail this test.
     const subCritBreach = makeBreach({
       id: "b-sub-crit",
       durationSeconds: "7200",
@@ -996,7 +1018,7 @@ describe("BreachRow critical-ratio scoring", () => {
     });
     const html = renderToStaticMarkup(
       <BreachHistoryPanel
-        pool={BASE_POOL}
+        pool={{ ...BASE_POOL, rebalanceThreshold: 50 }}
         network={NETWORK}
         limit={25}
         search=""
