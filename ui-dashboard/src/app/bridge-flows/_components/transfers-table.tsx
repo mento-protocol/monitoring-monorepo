@@ -1,11 +1,11 @@
-/**
- * TransfersTable sub-component extracted verbatim from `bridge-flows/page.tsx`
- * (refactor/bridge-flows-transfers-table). Owns the sort state, header-click
- * handling, sortable-header rendering, and table-body rendering. Delegates
- * each row's individual cells to the co-located `transfer-row-cells` module.
- */
-
 "use client";
+
+/**
+ * TransfersTable sub-component extracted verbatim from `bridge-flows/page.tsx`.
+ * Owns the sort state, header-click handling, sortable-header rendering, and
+ * table-body rendering. Delegates each row's individual cells to the
+ * co-located `transfer-row-cells` module.
+ */
 
 import { useState, useMemo } from "react";
 import { BridgeStatusBadge } from "@/components/bridge-status-badge";
