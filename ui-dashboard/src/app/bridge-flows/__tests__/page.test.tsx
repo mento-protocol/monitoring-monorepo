@@ -359,14 +359,26 @@ afterEach(() => {
 describe("BridgeFlowsPage — initial render", () => {
   it("mounts without crashing on the empty default state", () => {
     expect(() => renderJsdom()).not.toThrow();
-    expect(container.textContent).toContain("Bridge Flows");
+    // Tighten to the page <h1> so a tooltip / error banner that happens to
+    // contain "Bridge Flows" can't satisfy the assertion alone.
+    expect(container.querySelector("h1")?.textContent).toContain(
+      "Bridge Flows",
+    );
   });
 
   it("renders the page subtitle and key sections", () => {
     renderJsdom();
-    expect(container.textContent).toContain(
-      "Wormhole NTT transfers of Mento stable tokens",
-    );
+    // Subtitle lives in a <p> immediately under the heading; scope to that
+    // rather than `container.textContent` so the assertion fails loudly if
+    // the subtitle is removed or moved into a different element.
+    const paragraphs = Array.from(container.querySelectorAll("p"));
+    expect(
+      paragraphs.some((p) =>
+        p.textContent?.includes(
+          "Wormhole NTT transfers of Mento stable tokens",
+        ),
+      ),
+    ).toBe(true);
     // Key sections exist in markup.
     expect(container.querySelector('[aria-label="Charts"]')).toBeTruthy();
     expect(container.querySelector('[aria-label="Key metrics"]')).toBeTruthy();
@@ -559,15 +571,22 @@ describe("BridgeFlowsPage — TransfersTable sort state", () => {
   }
 
   function rowOrder(): string[] {
-    // Read the data row anchor we know is unique-per-row: the source senderTx
-    // hash on the destination tx pill column. Easier: map by id-bearing
-    // address-link nodes' first sender address. Use the `redeem-pill` /
-    // sender substring attached to each row.
+    // Resolve the Sender column index by header text rather than positional
+    // index. If A2 reorders columns, the test stays correct (it always reads
+    // the column whose header is "Sender"). If "Sender" is removed entirely
+    // we fail loudly here, instead of silently returning data from whatever
+    // first AddressLink the row happens to expose.
+    const headers = Array.from(container.querySelectorAll("thead th"));
+    const senderColIdx = headers.findIndex((th) =>
+      th.textContent?.includes("Sender"),
+    );
+    if (senderColIdx < 0) {
+      throw new Error("rowOrder: 'Sender' header not found in thead");
+    }
     return Array.from(container.querySelectorAll("tbody tr")).map((tr) => {
-      const senderMarker = tr.querySelectorAll(
-        '[data-testid="address-link"]',
-      )[0];
-      return senderMarker?.textContent ?? "";
+      const cell = tr.querySelectorAll("td")[senderColIdx];
+      const link = cell?.querySelector('[data-testid="address-link"]');
+      return link?.textContent ?? cell?.textContent ?? "";
     });
   }
 
@@ -838,7 +857,7 @@ describe("BridgeFlowsPage — TransfersTable sort state", () => {
 // 3. Pagination clamping
 // ---------------------------------------------------------------------------
 
-describe("BridgeFlowsPage — pagination clamping", () => {
+describe("BridgeFlowsPage — pagination and count state", () => {
   it("when URL says page=99 but total fits one page, the page sends offset=0 (clamped)", () => {
     const transfers = ALL_THREE_TRANSFERS;
     mockSearchParams = new URLSearchParams("page=99");
@@ -1200,7 +1219,7 @@ describe("BridgeFlowsPage — status filter", () => {
     expect(lastUrl).not.toContain("page=");
   });
 
-  it("'In progress' empty state appears when filter yields zero rows", () => {
+  it("renders the 'no matches' empty state when the filter yields zero rows", () => {
     mockSearchParams = new URLSearchParams("status=DELIVERED");
     mockUseBridgeGQL.mockImplementation(
       bridgeImpl({ transfers: ok({ BridgeTransfer: [] }) }),
