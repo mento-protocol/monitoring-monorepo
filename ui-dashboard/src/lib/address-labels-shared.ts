@@ -47,6 +47,12 @@ export type AddressLabelsSnapshot = {
   chains: Record<string, Record<string, AddressEntry>>;
 };
 
+/** Per-scope tally of newly-imported labels returned by the import API. */
+export type ImportedCounts = {
+  global: number;
+  chains: Record<string, number>;
+};
+
 /**
  * Legacy provenance tag. Pre-source-field entries persisted `"arkham"`
  * inside `tags`. New writes carry provenance in `AddressEntry.source`

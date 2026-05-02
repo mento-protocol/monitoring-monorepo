@@ -1,14 +1,5 @@
 "use client";
 
-/**
- * Import controls for the Address Book toolbar. Renders the Import button, the
- * info-icon `<details>` dropdown that lists the three supported file formats
- * (Mento snapshot, Gnosis Safe, CSV), and the hidden file `<input>` that
- * opens the OS file-picker. Error/success feedback is rendered by the parent
- * (`AddressBookClient`) so it can appear outside the header flex row. All
- * file-parsing and network I/O live in `../_lib/address-book-import-export.ts`.
- */
-
 import type { RefObject } from "react";
 
 type ImportDialogProps = {

@@ -23,6 +23,7 @@ import {
   ARKHAM_TAG,
   type AddressEntry,
   type AddressLabelsSnapshot,
+  type ImportedCounts,
   type Scope,
 } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
@@ -77,11 +78,6 @@ export async function buildCrossScopeExisting(): Promise<
   }
   return out;
 }
-
-export type ImportedCounts = {
-  global: number;
-  chains: Record<string, number>;
-};
 
 export function emptyCounts(): ImportedCounts {
   return { global: 0, chains: {} };
