@@ -160,12 +160,6 @@ function render(canEdit = true) {
   });
 }
 
-function rerender(canEdit = true) {
-  act(() => {
-    root.render(<AddressBookClient canEdit={canEdit} />);
-  });
-}
-
 beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -255,6 +249,44 @@ function rowAddresses(): string[] {
 
 function rowCount(): number {
   return container.querySelectorAll("tbody tr").length;
+}
+
+function tbodyBadges(): string[] {
+  return Array.from(container.querySelectorAll("tbody td span"))
+    .map((s) => s.textContent?.trim() ?? "")
+    .filter(Boolean);
+}
+
+async function dispatchFile(
+  fileInput: HTMLInputElement,
+  content: string,
+  type: string,
+  filename: string,
+): Promise<void> {
+  const file = new File([content], filename, { type });
+  // jsdom doesn't expose a writable .files setter; patch the descriptor and
+  // dispatch the change event so the React handler picks up the file.
+  Object.defineProperty(fileInput, "files", {
+    value: [file],
+    configurable: true,
+  });
+  await act(async () => {
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  // Drain microtasks so any chained promises in the handler complete before
+  // the assertion. Three resolves covers FileReader → fetch → revalidate.
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+function getFileInput(): HTMLInputElement {
+  const fileInput =
+    container.querySelector<HTMLInputElement>('input[type="file"]');
+  if (!fileInput) throw new Error("file input not found");
+  return fileInput;
 }
 
 function setSearch(value: string) {
@@ -561,33 +593,12 @@ describe("AddressBookClient — CSV import", () => {
       }),
     );
     render();
-
-    const fileInput =
-      container.querySelector<HTMLInputElement>('input[type="file"]');
-    if (!fileInput) throw new Error("file input not found");
-
-    const csv = new File(
-      ["address,name,tags,chainId\n0xabc,Whale,,42220\n"],
+    await dispatchFile(
+      getFileInput(),
+      "address,name,tags,chainId\n0xabc,Whale,,42220\n",
+      "text/csv",
       "labels.csv",
-      { type: "text/csv" },
     );
-
-    // Simulate a file selection. jsdom doesn't allow assigning .files
-    // directly via the standard setter; we patch the descriptor for one
-    // dispatch then restore it afterwards.
-    Object.defineProperty(fileInput, "files", {
-      value: [csv],
-      configurable: true,
-    });
-
-    await act(async () => {
-      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    // Allow the async handler to complete.
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
@@ -608,26 +619,12 @@ describe("AddressBookClient — CSV import", () => {
       new Response(JSON.stringify({ error: "Bad CSV" }), { status: 400 }),
     );
     render();
-
-    const fileInput =
-      container.querySelector<HTMLInputElement>('input[type="file"]');
-    if (!fileInput) throw new Error("file input not found");
-    Object.defineProperty(fileInput, "files", {
-      value: [
-        new File(["address,name\n0xabc,Whale\n"], "broken.csv", {
-          type: "text/csv",
-        }),
-      ],
-      configurable: true,
-    });
-
-    await act(async () => {
-      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await dispatchFile(
+      getFileInput(),
+      "address,name\n0xabc,Whale\n",
+      "text/csv",
+      "broken.csv",
+    );
 
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       "Bad CSV",
@@ -647,27 +644,12 @@ describe("AddressBookClient — JSON import variants", () => {
       ),
     );
     render();
-
-    const fileInput =
-      container.querySelector<HTMLInputElement>('input[type="file"]');
-    if (!fileInput) throw new Error("file input not found");
-
-    const file = new File([JSON.stringify(payload)], filename, {
-      type: "application/json",
-    });
-    Object.defineProperty(fileInput, "files", {
-      value: [file],
-      configurable: true,
-    });
-
-    await act(async () => {
-      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await dispatchFile(
+      getFileInput(),
+      JSON.stringify(payload),
+      "application/json",
+      filename,
+    );
   }
 
   it("Snapshot format — POSTs application/json with the snapshot body", async () => {
@@ -736,24 +718,12 @@ describe("AddressBookClient — JSON import variants", () => {
 
   it("invalid JSON — surfaces a parse error without calling fetch", async () => {
     render();
-    const fileInput =
-      container.querySelector<HTMLInputElement>('input[type="file"]');
-    if (!fileInput) throw new Error("file input not found");
-    const file = new File(["{not json"], "broken.json", {
-      type: "application/json",
-    });
-    Object.defineProperty(fileInput, "files", {
-      value: [file],
-      configurable: true,
-    });
-
-    await act(async () => {
-      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await dispatchFile(
+      getFileInput(),
+      "{not json",
+      "application/json",
+      "broken.json",
+    );
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
@@ -768,10 +738,7 @@ describe("AddressBookClient — badges", () => {
   it("renders the 'contract' badge for static contract rows", () => {
     mockCustomEntries = [];
     render();
-    const badges = Array.from(container.querySelectorAll("tbody td span"))
-      .map((s) => s.textContent?.trim())
-      .filter(Boolean);
-    expect(badges).toContain("contract");
+    expect(tbodyBadges()).toContain("contract");
   });
 
   it("renders the 'custom' source badge for user-created rows without provenance", () => {
@@ -787,10 +754,7 @@ describe("AddressBookClient — badges", () => {
       scope: "global",
     });
     render();
-    const badges = Array.from(container.querySelectorAll("tbody td span"))
-      .map((s) => s.textContent?.trim())
-      .filter(Boolean);
-    expect(badges).toContain("custom");
+    expect(tbodyBadges()).toContain("custom");
   });
 
   it("renders the 'arkham' source badge for arkham-sourced rows", () => {
@@ -811,10 +775,7 @@ describe("AddressBookClient — badges", () => {
       scope: "global",
     });
     render();
-    const badges = Array.from(container.querySelectorAll("tbody td span"))
-      .map((s) => s.textContent?.trim())
-      .filter(Boolean);
-    expect(badges).toContain("arkham");
+    expect(tbodyBadges()).toContain("arkham");
   });
 
   it("renders the 'All chains' chain pill for global custom rows", () => {
@@ -825,10 +786,7 @@ describe("AddressBookClient — badges", () => {
       }),
     ];
     render();
-    const badges = Array.from(container.querySelectorAll("tbody td span"))
-      .map((s) => s.textContent?.trim())
-      .filter(Boolean);
-    expect(badges).toContain("All chains");
+    expect(tbodyBadges()).toContain("All chains");
   });
 
   it("renders 'public' / 'private' visibility for custom rows based on isPublic", () => {
@@ -848,10 +806,7 @@ describe("AddressBookClient — badges", () => {
       scope: "global",
     });
     render();
-    const badges = Array.from(container.querySelectorAll("tbody td span"))
-      .map((s) => s.textContent?.trim())
-      .filter(Boolean);
-    expect(badges).toContain("public");
+    expect(tbodyBadges()).toContain("public");
 
     // Re-render with isPublic=false → 'private'.
     mockGetEntry.mockReturnValue({
@@ -863,10 +818,7 @@ describe("AddressBookClient — badges", () => {
       },
       scope: "global",
     });
-    rerender();
-    const badges2 = Array.from(container.querySelectorAll("tbody td span"))
-      .map((s) => s.textContent?.trim())
-      .filter(Boolean);
-    expect(badges2).toContain("private");
+    render();
+    expect(tbodyBadges()).toContain("private");
   });
 });
