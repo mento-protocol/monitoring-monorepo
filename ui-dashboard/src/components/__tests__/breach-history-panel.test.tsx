@@ -693,26 +693,14 @@ describe("DurationField parse + commit", () => {
     const minInput = container.querySelector(
       'input[aria-label="Minimum breach duration"]',
     ) as HTMLInputElement;
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      "value",
-    )!.set!;
 
     // Type junk and blur → invalid
-    act(() => {
-      setter.call(minInput, "blah");
-      minInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    act(() => {
-      minInput.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    });
+    setInputValue(minInput, "blah");
+    commitOnBlur(minInput);
     expect(minInput.className).toContain("border-red-500");
 
     // Continue typing → marker clears immediately, no blur required
-    act(() => {
-      setter.call(minInput, "blahb");
-      minInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    setInputValue(minInput, "blahb");
     expect(minInput.className).not.toContain("border-red-500");
   });
 
@@ -721,29 +709,13 @@ describe("DurationField parse + commit", () => {
     const minInput = container.querySelector(
       'input[aria-label="Minimum breach duration"]',
     ) as HTMLInputElement;
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      "value",
-    )!.set!;
 
-    // Commit a real value first.
-    act(() => {
-      setter.call(minInput, "30m");
-      minInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    act(() => {
-      minInput.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    });
+    setInputValue(minInput, "30m");
+    commitOnBlur(minInput);
     expect(JSON.stringify(countVarsFromCalls()!.where)).toContain("1800");
 
-    // Clear it.
-    act(() => {
-      setter.call(minInput, "");
-      minInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    act(() => {
-      minInput.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    });
+    setInputValue(minInput, "");
+    commitOnBlur(minInput);
     // Latest call no longer references the seconds value.
     const lastWhere = JSON.stringify(countVarsFromCalls()!.where);
     expect(lastWhere).not.toContain("1800");
@@ -754,17 +726,8 @@ describe("DurationField parse + commit", () => {
     const minInput = container.querySelector(
       'input[aria-label="Minimum breach duration"]',
     ) as HTMLInputElement;
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      "value",
-    )!.set!;
-    act(() => {
-      setter.call(minInput, "0");
-      minInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    act(() => {
-      minInput.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    });
+    setInputValue(minInput, "0");
+    commitOnBlur(minInput);
     expect(minInput.className).toContain("border-red-500");
   });
 });
@@ -1304,6 +1267,28 @@ describe("Sort + Pagination", () => {
     expect(pageVarsFromCalls()!.offset).toBe(0);
   });
 
+  it("Previous button steps back one page from the current offset", () => {
+    const { container } = renderInteractive({ limit: 25 });
+    // Land on page 3 first (offset 50) so "Previous" has somewhere to go.
+    const lastBtn = findButton(
+      container,
+      (_t, b) => b.getAttribute("aria-label") === "Last page",
+    );
+    act(() => {
+      lastBtn.click();
+    });
+    expect(pageVarsFromCalls()!.offset).toBe(50);
+
+    const prevBtn = findButton(
+      container,
+      (_t, b) => b.getAttribute("aria-label") === "Previous page",
+    );
+    act(() => {
+      prevBtn.click();
+    });
+    expect(pageVarsFromCalls()!.offset).toBe(25);
+  });
+
   it("clicking a sort header resets pagination to page 1", () => {
     const { container } = renderInteractive({ limit: 25 });
     const nextBtn = findButton(
@@ -1405,17 +1390,8 @@ describe("Search + filter composition", () => {
     const minInput = container.querySelector(
       'input[aria-label="Minimum breach duration"]',
     ) as HTMLInputElement;
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      "value",
-    )!.set!;
-    act(() => {
-      setter.call(minInput, "7d");
-      minInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    act(() => {
-      minInput.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    });
+    setInputValue(minInput, "7d");
+    commitOnBlur(minInput);
 
     const where = countVarsFromCalls()!.where as Record<string, unknown>;
     const json = JSON.stringify(where);
@@ -1441,15 +1417,7 @@ describe("Search + filter composition", () => {
       '[data-testid="table-search"]',
     ) as HTMLInputElement;
     expect(search).toBeTruthy();
-
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      "value",
-    )!.set!;
-    act(() => {
-      setter.call(search, "rebalance");
-      search.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    setInputValue(search, "rebalance");
     expect(onSearchChange).toHaveBeenCalledWith("rebalance");
   });
 
@@ -1586,8 +1554,12 @@ describe("Edge cases", () => {
     // locale-agnostic — `toLocaleString()` returns "1,000" in en-US but
     // "1.000" / "1 000" elsewhere; hard-coding the comma form would
     // make this test flake under non-en-US Vitest workers.
-    expect(html).toContain(`${ENVIO_MAX_ROWS.toLocaleString()}+ breaches`);
-    expect(html).toContain("t visible");
+    //
+    // Match the meaningful banner fragments instead of the 9-char "t visible"
+    // (which would silently match "isn't visible", "aren't visible", etc.,
+    // defeating the characterization point) — pin the prefix and suffix.
+    expect(html).toContain(`Showing first ${ENVIO_MAX_ROWS.toLocaleString()}`);
+    expect(html).toContain("older entries aren");
   });
 
   it("count failure does NOT blank rows; pagination errBox renders", () => {
@@ -1612,19 +1584,9 @@ describe("Edge cases", () => {
     expect(html).toContain("on this page");
   });
 
-  it("virtual pool guard runs before any GQL fetch", () => {
-    setupGQL({});
-    renderToStaticMarkup(
-      <BreachHistoryPanel
-        pool={{ ...BASE_POOL, source: "virtual_pool_factory" }}
-        network={NETWORK}
-        limit={25}
-        search=""
-        onSearchChange={() => {}}
-      />,
-    );
-    expect(mockUseGQL).toHaveBeenCalledTimes(0);
-  });
+  // (Virtual-pool guard "no-fetch" assertion is covered in the dedicated
+  // "Virtual-pool guard" describe above — removed from here per claude[bot]'s
+  // dedup note.)
 
   it("singular 'breach' (not 'breaches') for n=1", () => {
     setupGQL({
