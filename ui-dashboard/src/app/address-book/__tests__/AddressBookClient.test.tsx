@@ -49,14 +49,19 @@ const mockRevalidate = vi.fn(async () => {
   /* no-op */
 });
 
+// `mockUseAddressLabels` is a `vi.fn()` so individual tests can override
+// the returned shape (e.g. `isLoading: true` or `error: new Error(...)`)
+// via `.mockReturnValueOnce(...)` without the suite-wide defaults below.
+const mockUseAddressLabels = vi.fn(() => ({
+  customEntries: mockCustomEntries,
+  getEntry: mockGetEntry,
+  revalidate: mockRevalidate,
+  isLoading: false as boolean,
+  error: undefined as Error | undefined,
+}));
+
 vi.mock("@/components/address-labels-provider", () => ({
-  useAddressLabels: () => ({
-    customEntries: mockCustomEntries,
-    getEntry: mockGetEntry,
-    revalidate: mockRevalidate,
-    isLoading: false,
-    error: undefined,
-  }),
+  useAddressLabels: () => mockUseAddressLabels(),
 }));
 
 // AddressBookClient calls `useNetwork()` to compute the chain context for the
@@ -180,6 +185,16 @@ beforeEach(() => {
   mockGetEntry.mockReset();
   mockGetEntry.mockReturnValue(undefined);
   mockRevalidate.mockClear();
+  // Reset `useAddressLabels` to its default (loaded, no error) shape so
+  // per-test overrides (loading/error branches) don't bleed across tests.
+  mockUseAddressLabels.mockReset();
+  mockUseAddressLabels.mockImplementation(() => ({
+    customEntries: mockCustomEntries,
+    getEntry: mockGetEntry,
+    revalidate: mockRevalidate,
+    isLoading: false as boolean,
+    error: undefined as Error | undefined,
+  }));
 
   capturedEditor = null;
 
@@ -362,6 +377,40 @@ describe("AddressBookClient — initial render", () => {
     expect(container.textContent).not.toContain("Export JSON");
     expect(container.textContent).not.toContain("Import");
   });
+
+  it("renders the 'Loading labels…' indicator when useAddressLabels is loading", () => {
+    // Per-test override of the suite-wide hook mock — flips `isLoading` so
+    // the loading branch in AddressBookClient (the one that prints
+    // "Loading labels…") gets exercised. The empty-state copy should be
+    // suppressed while loading.
+    mockUseAddressLabels.mockReturnValueOnce({
+      customEntries: [],
+      getEntry: mockGetEntry,
+      revalidate: mockRevalidate,
+      isLoading: true,
+      error: undefined,
+    });
+    render();
+    expect(container.textContent).toContain("Loading labels…");
+    expect(container.textContent).not.toContain("No labels yet. Add one!");
+  });
+
+  it("renders the load-error message when useAddressLabels surfaces an error", () => {
+    // Drive the `error` branch — should render a `role="alert"` with the
+    // error message embedded. Loading + empty-state copy must NOT show.
+    mockUseAddressLabels.mockReturnValueOnce({
+      customEntries: [],
+      getEntry: mockGetEntry,
+      revalidate: mockRevalidate,
+      isLoading: false,
+      error: new Error("hasura is down"),
+    });
+    render();
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain("Error loading custom labels");
+    expect(alert?.textContent).toContain("hasura is down");
+    expect(container.textContent).not.toContain("Loading labels…");
+  });
 });
 
 // ---- 2. Search filter ------------------------------------------------------
@@ -442,6 +491,48 @@ describe("AddressBookClient — search filter", () => {
     expect(rowAddresses()).toContain(
       "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
     );
+  });
+
+  it("matches by source badge text ('custom') for user-created rows without provenance", () => {
+    // The default branch of `sourceText` (in AddressBookClient: not
+    // arkham, not minipay → "custom"). A regression that collapses this
+    // branch into a contract-only path would silently drop these rows
+    // from the search result.
+    mockCustomEntries = [
+      customEntry({
+        address: "0xfffffffffffffffffffffffffffffffffffffff1",
+        name: "Plain Custom",
+        source: undefined,
+        tags: [],
+      }),
+    ];
+    render();
+    setSearch("custom");
+    const matches = rowAddresses();
+    expect(matches).toContain("0xfffffffffffffffffffffffffffffffffffffff1");
+    // Contract rows must NOT match "custom" — their sourceText is "contract".
+    expect(matches).not.toContain("0xcccccccccccccccccccccccccccccccccccccccc");
+  });
+
+  it("matches by source badge text ('minipay')", () => {
+    // Dedicated minipay branch in `sourceText`. If a refactor folds
+    // MiniPay back into the generic `custom` branch the row would still
+    // show, but searching for "minipay" specifically would silently miss
+    // it — this test pins that.
+    mockCustomEntries = [
+      customEntry({
+        address: "0xfffffffffffffffffffffffffffffffffffffff2",
+        name: "MiniPay Entry",
+        source: "minipay",
+        tags: [],
+      }),
+    ];
+    render();
+    setSearch("minipay");
+    const matches = rowAddresses();
+    expect(matches).toContain("0xfffffffffffffffffffffffffffffffffffffff2");
+    // Plain custom rows must NOT match "minipay" — sourceText differs.
+    expect(matches).not.toContain("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   });
 
   it("shows 'No labels match your search.' when search yields zero rows", () => {
@@ -673,6 +764,54 @@ describe("AddressBookClient — CSV import", () => {
     );
     expect(mockRevalidate).not.toHaveBeenCalled();
   });
+
+  it("renders an error message when the CSV import fetch throws (network failure)", async () => {
+    // The `try/catch` in `handleFileChange` for CSV catches thrown fetch
+    // errors and renders the error's message via `setImportError`. A
+    // characterization regression that swallows the error or routes it
+    // through a different branch (e.g. logs only) would fail this assertion.
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+    render();
+    await dispatchFile(
+      getFileInput(),
+      "address,name,tags,chainId\n0xabc,Whale,,42220\n",
+      "text/csv",
+      "labels.csv",
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+      "network down",
+    );
+    expect(mockRevalidate).not.toHaveBeenCalled();
+  });
+
+  it("handles a CSV success response with a malformed body without crashing the page", async () => {
+    // Server returns 2xx but a body shape `handleFileChange` doesn't
+    // recognise (no `imported` key). The component should still render
+    // the success status (formatted as "Imported 0 labels.") and call
+    // `revalidate` — i.e. the optimistic refetch must not be gated on
+    // body validity. Pinning this prevents a refactor from swallowing
+    // the body.imported branch entirely.
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ unexpected: "shape" }), { status: 200 }),
+    );
+    render();
+    await dispatchFile(
+      getFileInput(),
+      "address,name,tags,chainId\n0xabc,Whale,,42220\n",
+      "text/csv",
+      "ok.csv",
+    );
+
+    // No error alert should be rendered for a 2xx response.
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    // Success status (role="status") should appear with the empty-counts copy.
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(
+      "Imported 0 labels.",
+    );
+    expect(mockRevalidate).toHaveBeenCalled();
+  });
 });
 
 // ---- 7. Import: JSON variants ---------------------------------------------
@@ -818,6 +957,36 @@ describe("AddressBookClient — badges", () => {
     });
     render();
     expect(tbodyBadges()).toContain("arkham");
+  });
+
+  it("renders the dedicated 'minipay' source badge for minipay-sourced rows", () => {
+    // The component has a dedicated minipay badge branch (between the
+    // arkham and custom branches in the source-cell ternary). A refactor
+    // that collapses MiniPay rows back to the generic `custom` badge
+    // would leave this assertion failing — so it pins the distinct
+    // visual treatment.
+    mockCustomEntries = [
+      customEntry({
+        address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        source: "minipay",
+        tags: [],
+      }),
+    ];
+    mockGetEntry.mockReturnValue({
+      entry: {
+        name: "X",
+        tags: [],
+        source: "minipay",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+      scope: "global",
+    });
+    render();
+    const badges = tbodyBadges();
+    expect(badges).toContain("minipay");
+    // Must NOT also render "custom" for the same row — the branches are
+    // mutually exclusive in the component.
+    expect(badges).not.toContain("custom");
   });
 
   it("renders the 'All chains' chain pill for global custom rows", () => {
