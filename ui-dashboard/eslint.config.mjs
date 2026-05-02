@@ -51,12 +51,7 @@ export default tseslint.config(
     },
   },
   {
-    files: [
-      "**/__tests__/**",
-      "**/*.test.{ts,tsx}",
-      "src/lib/queries.ts",
-      "src/lib/types.ts",
-    ],
+    files: ["**/__tests__/**", "**/*.test.{ts,tsx}", "src/lib/types.ts"],
     rules: { "max-lines": "off" },
   },
   {
