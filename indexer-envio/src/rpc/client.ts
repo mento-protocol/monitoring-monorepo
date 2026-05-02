@@ -17,7 +17,12 @@ import { createPublicClient, http } from "viem";
 const RPC_BURST_INTERVAL = 10;
 
 /** Monotonically increasing failure count per `chainId:fn` key. */
-export const _rpcFailureCounts = new Map<string, number>();
+const _rpcFailureCounts = new Map<string, number>();
+
+/** @internal Test-only: reset the burst-counter map between tests. */
+export function _resetRpcFailureCounts(): void {
+  _rpcFailureCounts.clear();
+}
 
 function sanitizeErrorMessage(msg: string): string {
   return msg.replace(/https?:\/\/[^\s,)""]*/g, (url) => {

@@ -20,14 +20,11 @@ import { requireContractAddress } from "./contractAddresses";
 import type { TradingLimitData } from "./tradingLimits";
 import {
   RATE_LIMIT_RETRY_DELAYS_MS,
-  _rpcFailureCounts,
+  _resetRpcFailureCounts,
   getFallbackRpcClient,
   getRpcClient,
   isRateLimitError,
   logRpcFailure,
-  withHyperRpcToken,
-  _clearRpcClients,
-  _setRpcClientForTests,
 } from "./rpc/client";
 
 // Re-export the client/log/rate-limit primitives so existing callers
@@ -38,7 +35,7 @@ export {
   withHyperRpcToken,
   _clearRpcClients,
   _setRpcClientForTests,
-};
+} from "./rpc/client";
 
 // ---------------------------------------------------------------------------
 // Test hooks — only used in unit tests to inject mock RPC responses.
@@ -307,7 +304,7 @@ export const _testHooks = {
     block?: bigint,
   ): void => logRpcFailure(chainId, fn, target, err, block),
   resetRpcFailureCounts: (): void => {
-    _rpcFailureCounts.clear();
+    _resetRpcFailureCounts();
   },
 };
 
