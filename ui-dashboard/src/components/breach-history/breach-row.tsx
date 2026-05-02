@@ -1,14 +1,8 @@
 "use client";
 
-/**
- * BreachRow renders a single row in the breach-history table. It owns the
- * row's domain math: trading-seconds via `tradingSecondsInRange` (so open
- * rows don't inflate on FX-pool weekends), grace-period end calculation, and
- * critical-ratio scoring. The peak% and past-grace duration are ALWAYS scored
- * against the row's `entryRebalanceThreshold` — the threshold captured at the
- * rising edge — never against the live mutable `pool.rebalanceThreshold`. This
- * invariant is pinned by the characterization test suite and must not change.
- */
+// Peak% and past-grace are ALWAYS scored against `entryRebalanceThreshold`
+// (captured at the rising edge), never against live `pool.rebalanceThreshold`
+// — pinned by the characterization tests; do not change.
 
 import React from "react";
 import type { DeviationThresholdBreach, Pool } from "@/lib/types";
@@ -37,21 +31,15 @@ export function BreachRow({
 }) {
   const isOpen = breach.endedAt == null;
   const now = Math.floor(Date.now() / 1000);
-  // Trading-seconds for both open and closed rows so the Duration column
-  // doesn't shrink discontinuously when an FX-weekend-spanning open
-  // breach closes (closed rows use the indexer's stored
-  // `durationSeconds`, which is also trading-seconds with weekend
-  // closure subtracted). Matches the unit used by the Past-grace column
-  // and the Uptime tile.
+  // Trading-seconds on open rows (closed rows already had weekend closure
+  // subtracted) so the Duration column doesn't shrink when an FX-weekend
+  // open breach closes.
   const duration = isOpen
     ? tradingSecondsInRange(Number(breach.startedAt), now)
     : Number(breach.durationSeconds);
-  // Past-grace uses trading-seconds on open rows so the unit matches the
-  // stored `criticalDurationSeconds` on closed rows and the uptime
-  // tile's live math. Mirror of the closed-breach indexer logic AND the
-  // uptime tile: only credit past-grace seconds when the breach's peak
-  // crossed the 5% critical-magnitude line, scored against the threshold
-  // captured at the rising edge.
+  // Only credit past-grace seconds once the peak crossed the 5% critical
+  // line, scored against the entry threshold — mirrors the indexer's
+  // closed-breach logic and the uptime tile.
   const graceEnd =
     Number(breach.startedAt) + Number(DEVIATION_BREACH_GRACE_SECONDS);
   // Fallback to current pool threshold during the indexer resync window

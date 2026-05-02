@@ -1,13 +1,4 @@
-/**
- * Pure filter helpers and label maps for the BreachHistoryPanel. Contains
- * `whereForBucket` (translates a DurationBucket preset into a Hasura where
- * clause), `composeWhere` (composes the bucket clause with optional min/max
- * numeric-seconds filters from the free-text inputs), and the
- * `START_REASON_LABELS` / `END_REASON_LABELS` display maps used to label
- * breach rows and populate the client-side search blob. No React imports;
- * this module is pure data and can be imported from both server and client
- * components.
- */
+// No React imports — pure data, safe to import from server and client.
 
 import type { BreachEventCategory } from "@/lib/types";
 import { SECONDS_PER_HOUR, SECONDS_PER_DAY } from "@/lib/time-series";

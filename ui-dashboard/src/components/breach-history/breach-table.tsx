@@ -1,14 +1,6 @@
 "use client";
 
-/**
- * BreachTable renders the sortable thead and the tbody loop for the
- * breach-history panel. It wires four SortableTh column headers (Started,
- * Duration, Past grace, Peak) and maps each row in `rows` to a BreachRow.
- * Sort state (sortKey / sortDir) and the onSort callback are owned by the
- * parent BreachHistoryPanelInner so that sort changes can also reset
- * pagination — the table receives them as props and forwards them to
- * SortableTh without duplicating the state.
- */
+// Sort state lives in the parent so a sort change can also reset pagination.
 
 import React from "react";
 import type { DeviationThresholdBreach, Pool } from "@/lib/types";
