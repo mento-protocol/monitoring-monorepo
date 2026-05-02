@@ -19,25 +19,21 @@ import {
   BRIDGE_DELIVERED_RECENT,
 } from "@/lib/bridge-queries";
 import { TOP_BRIDGERS_EXPANDED } from "@/lib/bridge-flows/layout";
-import { ALL_BRIDGE_STATUSES, formatDurationShort } from "@/lib/bridge-status";
+import { ALL_BRIDGE_STATUSES } from "@/lib/bridge-status";
 import { BridgeStatusFilter } from "@/components/bridge-status-filter";
 import {
   ToastPortal,
   type AddToast,
   type ToastEntry,
 } from "@/components/bridge-redeem-cta";
-import { Tile, Skeleton, ErrorBox, EmptyBox } from "@/components/feedback";
+import { Skeleton, ErrorBox, EmptyBox } from "@/components/feedback";
 import { Pagination } from "@/components/pagination";
-import { BreakdownTile } from "@/components/breakdown-tile";
-import { BridgeVolumeChart } from "@/components/bridge-volume-chart";
-import { BridgeTopBridgersChart } from "@/components/bridge-top-bridgers-chart";
-import { BridgeTokenBreakdownChart } from "@/components/bridge-token-breakdown-chart";
 import { useOracleRates } from "@/hooks/use-oracle-rates";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { windowTotals } from "@/lib/bridge-flows/snapshots";
-import { computeRouteAvgDeliverTimes } from "@/lib/bridge-flows/route-stats";
 import { TransfersTable } from "./_components/transfers-table";
-import { RouteCell } from "./_components/transfer-row-cells";
+import { BridgeOverviewSection } from "./_components/bridge-overview-section";
+import { ROUTE_STATS_LIMIT } from "./_components/route-delivery-tile";
 import type {
   BridgeBridger,
   BridgeDailySnapshot,
@@ -46,7 +42,6 @@ import type {
 } from "@/lib/types";
 
 const PAGE_LIMIT = 25;
-const ROUTE_STATS_LIMIT = 100;
 
 export default function BridgeFlowsPage() {
   return (
@@ -236,71 +231,27 @@ function BridgeFlowsContent() {
 
       {error && <ErrorBox message={error} />}
 
-      <section
-        aria-label="Charts"
-        className="grid grid-cols-1 lg:grid-cols-3 gap-6"
-      >
-        <BridgeVolumeChart
-          snapshots={snapshots}
-          rates={rates}
-          isLoading={snapshotsResult.isLoading && snapshots.length === 0}
-          hasError={snapshotsError}
-          isCapped={snapshotsCapped}
-        />
-        <BridgeTokenBreakdownChart
-          snapshots={snapshots}
-          rates={rates}
-          isLoading={snapshotsResult.isLoading && snapshots.length === 0}
-          hasError={snapshotsError}
-          isCapped={snapshotsCapped}
-        />
-        <BridgeTopBridgersChart
-          bridgers={topBridgers}
-          isLoading={topBridgersResult.isLoading && topBridgers.length === 0}
-          hasError={topBridgersError}
-        />
-      </section>
-
-      <section
-        aria-label="Key metrics"
-        className="grid grid-cols-1 sm:grid-cols-3 gap-4"
-      >
-        <BreakdownTile
-          label="Total Bridge Transfers"
-          total={snapshotsResult.error ? null : transferTotals.total}
-          sub24h={transferTotals.sub24h}
-          sub7d={transferTotals.sub7d}
-          sub30d={transferTotals.sub30d}
-          isLoading={snapshotsResult.isLoading && snapshots.length === 0}
-          hasError={!!snapshotsResult.error}
-          format={(n) => n.toLocaleString()}
-          subtitle={snapshotsCapped ? "Partial — snapshot cap hit" : undefined}
-        />
-        <Tile
-          label="In-Flight"
-          value={
-            pendingResult.error
-              ? "—"
-              : pendingCount === null
-                ? "…"
-                : pendingCapped
-                  ? "1,000+"
-                  : pendingCount.toLocaleString()
-          }
-          subtitle={
-            !pendingResult.error && pendingCount !== null && pendingCount > 0
-              ? "Sent, attested, or queued — not yet delivered"
-              : undefined
-          }
-        />
-        <RouteDeliveryTile
-          transfers={deliveredRecentResult.data?.BridgeTransfer ?? []}
-          isLoading={
-            deliveredRecentResult.isLoading && !deliveredRecentResult.data
-          }
-          hasError={!!deliveredRecentResult.error}
-        />
-      </section>
+      <BridgeOverviewSection
+        snapshots={snapshots}
+        rates={rates}
+        snapshotsIsLoading={snapshotsResult.isLoading && snapshots.length === 0}
+        snapshotsHasError={snapshotsError}
+        snapshotsCapped={snapshotsCapped}
+        topBridgers={topBridgers}
+        topBridgersIsLoading={
+          topBridgersResult.isLoading && topBridgers.length === 0
+        }
+        topBridgersHasError={topBridgersError}
+        transferTotals={transferTotals}
+        pendingHasError={!!pendingResult.error}
+        pendingCount={pendingCount}
+        pendingCapped={pendingCapped}
+        deliveredTransfers={deliveredRecentResult.data?.BridgeTransfer ?? []}
+        deliveredIsLoading={
+          deliveredRecentResult.isLoading && !deliveredRecentResult.data
+        }
+        deliveredHasError={!!deliveredRecentResult.error}
+      />
 
       <section aria-label="Recent transfers">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
@@ -350,72 +301,6 @@ function BridgeFlowsContent() {
           </>
         )}
       </section>
-    </div>
-  );
-}
-
-function RouteDeliveryTile({
-  transfers,
-  isLoading,
-  hasError,
-}: {
-  transfers: ReadonlyArray<
-    Pick<
-      BridgeTransfer,
-      | "status"
-      | "sentTimestamp"
-      | "deliveredTimestamp"
-      | "sourceChainId"
-      | "destChainId"
-    >
-  >;
-  isLoading: boolean;
-  hasError: boolean;
-}) {
-  const routes = useMemo(
-    () => computeRouteAvgDeliverTimes(transfers),
-    [transfers],
-  );
-  return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 min-h-[88px]">
-      <p className="text-sm text-slate-400 mb-3">Avg Delivery Time by Route</p>
-      {hasError ? (
-        <p className="text-2xl font-semibold text-white font-mono">—</p>
-      ) : isLoading ? (
-        <div className="space-y-2">
-          {[0, 1].map((i) => (
-            <div
-              key={i}
-              className="h-4 animate-pulse rounded bg-slate-800/50"
-            />
-          ))}
-        </div>
-      ) : routes.length === 0 ? (
-        <p className="text-sm text-slate-500">No delivered transfers yet</p>
-      ) : (
-        <>
-          <div className="space-y-2">
-            {routes.map((r) => (
-              <div
-                key={`${r.srcChainId}-${r.dstChainId}`}
-                className="flex items-center gap-3"
-              >
-                <RouteCell
-                  sourceChainId={r.srcChainId}
-                  destChainId={r.dstChainId}
-                />
-                <span className="font-mono text-sm font-semibold text-white">
-                  {formatDurationShort(r.avgSec)}
-                </span>
-                <span className="text-xs text-slate-500">n={r.count}</span>
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 text-xs text-slate-500">
-            last {ROUTE_STATS_LIMIT} delivered
-          </p>
-        </>
-      )}
     </div>
   );
 }
