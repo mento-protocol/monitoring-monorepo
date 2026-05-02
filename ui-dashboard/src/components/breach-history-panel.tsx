@@ -37,7 +37,10 @@ import {
 } from "@/lib/table-search";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { SECONDS_PER_HOUR, SECONDS_PER_DAY } from "@/lib/time-series";
-import { DurationRangeInputs } from "@/components/breach-history/duration-filter";
+import {
+  DurationRangeInputs,
+  DurationFormatHint,
+} from "@/components/breach-history/duration-filter";
 import {
   BucketFilter,
   type DurationBucket,
@@ -426,12 +429,15 @@ function BreachHistoryPanelInner({
           />
           <div className="flex flex-wrap items-center gap-3">
             <BucketFilter selected={bucket} onChange={onBucket} />
-            <DurationRangeInputs
-              minSeconds={minSeconds}
-              maxSeconds={maxSeconds}
-              onMinCommit={onMinCommit}
-              onMaxCommit={onMaxCommit}
-            />
+            <div className="flex flex-col gap-0.5">
+              <DurationRangeInputs
+                minSeconds={minSeconds}
+                maxSeconds={maxSeconds}
+                onMinCommit={onMinCommit}
+                onMaxCommit={onMaxCommit}
+              />
+              <DurationFormatHint />
+            </div>
           </div>
         </div>
 

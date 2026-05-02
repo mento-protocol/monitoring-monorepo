@@ -2,15 +2,15 @@
 
 /**
  * Duration-range filter inputs for the BreachHistoryPanel. Extracted from
- * breach-history-panel.tsx (PR-A5). Contains `DurationField` (a single
- * controlled text input that parses human-readable durations like "1h 30m"
- * and commits them as numeric seconds on blur or Enter) and
- * `DurationRangeInputs` (a min/max pair of DurationFields). Neither
- * component owns state beyond the local draft text; committed values are
- * lifted to the parent via `onCommit` / `onMinCommit` / `onMaxCommit`.
+ * breach-history-panel.tsx. Contains `DurationField` (a single controlled
+ * text input that parses human-readable durations like "1h 30m" and commits
+ * them as numeric seconds on blur or Enter) and `DurationRangeInputs` (a
+ * min/max pair of DurationFields). Neither component owns state beyond the
+ * local draft text; committed values are lifted to the parent via `onCommit`
+ * / `onMinCommit` / `onMaxCommit`.
  */
 
-import React, { useCallback, useState } from "react";
+import { useCallback, useState } from "react";
 import { formatDurationShort, parseDurationSeconds } from "@/lib/bridge-status";
 
 // ---------------------------------------------------------------------------
@@ -31,6 +31,7 @@ export function DurationRangeInputs({
   return (
     <div className="flex items-center gap-2">
       <DurationField
+        id="breach-duration-min"
         ariaLabel="Minimum breach duration"
         placeholder="Min."
         committedSeconds={minSeconds}
@@ -38,6 +39,7 @@ export function DurationRangeInputs({
       />
       <span className="text-xs text-slate-600">–</span>
       <DurationField
+        id="breach-duration-max"
         ariaLabel="Maximum breach duration"
         placeholder="Max."
         committedSeconds={maxSeconds}
@@ -51,19 +53,28 @@ export function DurationRangeInputs({
 // DurationField
 // ---------------------------------------------------------------------------
 
+const DURATION_FORMAT_HINT_ID = "breach-duration-format-hint";
+const DURATION_FORMAT_HINT = "Accepts: 1h, 30m, 3d, 1h 30m, 2 hours, etc.";
+
 /**
  * Single duration input. Keeps its own draft text so the parent only
  * re-renders (and re-fires the GraphQL query) on blur or Enter. An empty
  * draft commits `null` — clears the filter instead of leaving it stale.
  * A parse failure keeps the previous committed value and flags the input
  * with a red ring until the user fixes it.
+ *
+ * Format guidance is rendered as a visible hint below the inputs and
+ * referenced via `aria-describedby` so it's always accessible — not only
+ * on hover.
  */
 function DurationField({
+  id,
   ariaLabel,
   placeholder,
   committedSeconds,
   onCommit,
 }: {
+  id: string;
   ariaLabel: string;
   placeholder: string;
   committedSeconds: number | null;
@@ -90,11 +101,14 @@ function DurationField({
   }, [draft, onCommit]);
   return (
     <input
+      id={id}
       type="text"
       inputMode="text"
       autoComplete="off"
       placeholder={placeholder}
       aria-label={ariaLabel}
+      aria-describedby={DURATION_FORMAT_HINT_ID}
+      aria-invalid={invalid || undefined}
       value={draft}
       onChange={(e) => {
         setDraft(e.target.value);
@@ -115,11 +129,19 @@ function DurationField({
           ? "border-red-500/70 focus:border-red-400 focus:ring-red-400"
           : "border-slate-700 focus:border-indigo-500 focus:ring-indigo-500")
       }
-      title={
-        invalid
-          ? 'Enter a duration like "1h", "30m", "3 days"'
-          : "Filter by duration. Supports 1h, 30m, 3d, 1h30m, 2 hours…"
-      }
     />
+  );
+}
+
+/**
+ * Visible + screen-reader-accessible format hint shared by both duration
+ * fields. Rendered once below the min/max pair; referenced via
+ * `aria-describedby` on each input.
+ */
+export function DurationFormatHint() {
+  return (
+    <p id={DURATION_FORMAT_HINT_ID} className="text-[10px] text-slate-500">
+      {DURATION_FORMAT_HINT}
+    </p>
   );
 }

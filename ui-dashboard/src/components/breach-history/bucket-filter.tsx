@@ -4,12 +4,15 @@
  * BucketFilter sub-component for the BreachHistoryPanel. Renders a
  * radiogroup of five duration presets (All, ≤1h, 1h–1d, Over 1d, Ongoing).
  * The parent's `whereForBucket` / `composeWhere` helpers (still in the
- * panel; move in PR-A6) reference `SECONDS_PER_HOUR` / `SECONDS_PER_DAY`
- * directly from `@/lib/time-series` to share constants with the rest of
- * the codebase.
+ * panel; next step: move alongside BreachTable/BreachRow) reference
+ * `SECONDS_PER_HOUR` / `SECONDS_PER_DAY` directly from `@/lib/time-series`
+ * to share constants with the rest of the codebase.
+ *
+ * Implements the WAI-ARIA radio button keyboard contract: arrow keys move
+ * focus + selection between options; Tab leaves the group.
  */
 
-import React from "react";
+import type React from "react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,6 +34,15 @@ export const BUCKET_LABEL: Record<DurationBucket, string> = {
   ongoing: "Ongoing",
 };
 
+/** Static options array — hoisted to module scope to avoid per-render allocation. */
+const BUCKET_OPTIONS: DurationBucket[] = [
+  "all",
+  "in_grace",
+  "short",
+  "long",
+  "ongoing",
+];
+
 // ---------------------------------------------------------------------------
 // BucketFilter
 // ---------------------------------------------------------------------------
@@ -42,20 +54,38 @@ export function BucketFilter({
   selected: DurationBucket;
   onChange: (next: DurationBucket) => void;
 }) {
-  const options: DurationBucket[] = [
-    "all",
-    "in_grace",
-    "short",
-    "long",
-    "ongoing",
-  ];
+  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (
+      e.key !== "ArrowDown" &&
+      e.key !== "ArrowRight" &&
+      e.key !== "ArrowUp" &&
+      e.key !== "ArrowLeft"
+    )
+      return;
+    e.preventDefault();
+    const radios = Array.from(
+      e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]'),
+    );
+    const idx = radios.indexOf(e.target as HTMLButtonElement);
+    if (idx === -1) return;
+    const next =
+      e.key === "ArrowDown" || e.key === "ArrowRight"
+        ? (idx + 1) % radios.length
+        : (idx - 1 + radios.length) % radios.length;
+    radios[next].focus();
+    const newBucket = BUCKET_OPTIONS[next];
+    if (newBucket !== selected) onChange(newBucket);
+  }
+
   return (
     <div
       role="radiogroup"
       aria-label="Filter breaches by duration"
       className="flex flex-wrap gap-1.5"
+      onKeyDown={handleKeyDown}
+      tabIndex={-1}
     >
-      {options.map((b) => {
+      {BUCKET_OPTIONS.map((b) => {
         const active = b === selected;
         return (
           <button
