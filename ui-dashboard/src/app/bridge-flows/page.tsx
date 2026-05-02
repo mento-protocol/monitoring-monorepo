@@ -18,7 +18,10 @@ import {
   BRIDGE_TOP_BRIDGERS,
   BRIDGE_DELIVERED_RECENT,
 } from "@/lib/bridge-queries";
-import { TOP_BRIDGERS_EXPANDED } from "@/lib/bridge-flows/layout";
+import {
+  TOP_BRIDGERS_EXPANDED,
+  ROUTE_STATS_LIMIT,
+} from "@/lib/bridge-flows/layout";
 import { ALL_BRIDGE_STATUSES } from "@/lib/bridge-status";
 import { BridgeStatusFilter } from "@/components/bridge-status-filter";
 import {
@@ -33,7 +36,6 @@ import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { windowTotals } from "@/lib/bridge-flows/snapshots";
 import { TransfersTable } from "./_components/transfers-table";
 import { BridgeOverviewSection } from "./_components/bridge-overview-section";
-import { ROUTE_STATS_LIMIT } from "./_components/route-delivery-tile";
 import type {
   BridgeBridger,
   BridgeDailySnapshot,

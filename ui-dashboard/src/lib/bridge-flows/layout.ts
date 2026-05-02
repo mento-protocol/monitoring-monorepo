@@ -8,3 +8,8 @@
  *  visual size matches the adjacent chart cards in the same row. */
 export const TOP_BRIDGERS_DEFAULT = 5;
 export const TOP_BRIDGERS_EXPANDED = 25;
+
+/** Sample window for the per-route avg delivery time tile. Drives both the
+ *  `BRIDGE_DELIVERED_RECENT` query limit in page.tsx and the "last N delivered"
+ *  label inside RouteDeliveryTile. */
+export const ROUTE_STATS_LIMIT = 100;

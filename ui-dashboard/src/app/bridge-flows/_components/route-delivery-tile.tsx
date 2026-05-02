@@ -5,18 +5,14 @@
  * Computes avg delivery seconds per route from the last N delivered transfers,
  * then renders one row per route with a chain-pair icon, duration, and sample
  * count. Isolated in its own file so the parent page stays under 300 lines.
- *
- * `ROUTE_STATS_LIMIT` is exported so `page.tsx` can use the same constant when
- * setting the query limit for `BRIDGE_DELIVERED_RECENT`.
  */
 
 import { useMemo } from "react";
 import { computeRouteAvgDeliverTimes } from "@/lib/bridge-flows/route-stats";
 import { formatDurationShort } from "@/lib/bridge-status";
 import type { BridgeTransfer } from "@/lib/types";
+import { ROUTE_STATS_LIMIT } from "@/lib/bridge-flows/layout";
 import { RouteCell } from "./transfer-row-cells";
-
-export const ROUTE_STATS_LIMIT = 100;
 
 export function RouteDeliveryTile({
   transfers,
