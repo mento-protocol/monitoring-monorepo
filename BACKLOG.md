@@ -11,9 +11,9 @@ PR #263 split `ui-dashboard/src/app/pool/[poolId]/page.tsx` from 2,831 → 470 l
 
 ### Tier A — UI page refactors (need characterization tests first)
 
-- [ ] **`ui-dashboard/src/app/bridge-flows/page.tsx` — 909 lines.** Blocker: no page-level test. Write lazy-mount + table-render pins first.
-- [ ] **`ui-dashboard/src/components/breach-history-panel.tsx` — 823 lines.** Blocker: no test. Filter composition + duration parser are clean seams.
-- [ ] **`ui-dashboard/src/app/address-book/AddressBookClient.tsx` — 713 lines.** Stub test only. Extract CSV/JSON import logic + `<AddressTableRow/>` (189 lines inline).
+- [x] ~~**`ui-dashboard/src/app/bridge-flows/page.tsx` — 909 lines.**~~ Done in PRs #284 (characterization tests), #287 (TransfersTable + row cells), #289 (RouteDeliveryTile + BridgeOverviewSection). Now 311 lines.
+- [x] ~~**`ui-dashboard/src/components/breach-history-panel.tsx` — 823 lines.**~~ Done in PRs #285 (characterization tests), #286 (DurationFilter + BucketFilter), #290 (BreachTable + BreachRow + filter helpers). Now 403 lines.
+- [x] ~~**`ui-dashboard/src/app/address-book/AddressBookClient.tsx` — 713 lines.**~~ Done in PRs #283 (characterization tests), #288 (AddressTableRow + row helpers), #291 (ImportDialog + import/export lib). Now 277 lines.
 
 ### Tier B — lib/utility splits (low-risk, no UI)
 
