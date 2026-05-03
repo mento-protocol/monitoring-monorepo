@@ -20,6 +20,7 @@ runStartupChecks();
 import "./handlers/fpmm";
 import "./handlers/fpmm/factory";
 import "./handlers/fpmm/liquidity";
+import "./handlers/fpmm/state-sync";
 import "./handlers/sortedOracles";
 import "./handlers/virtualPool";
 import "./handlers/feeToken";
