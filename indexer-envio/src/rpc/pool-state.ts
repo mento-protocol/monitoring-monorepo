@@ -1,5 +1,4 @@
 // Pool/reserves/decimals/fees fetchers + caches + test mocks.
-// Extracted from rpc.ts in PR-S8; pinned by rpc.test.ts + pool.test.ts.
 // Deps flow: pool-state → client, block-fallback, abis, contractAddresses, tradingLimits.
 
 import {
@@ -11,10 +10,7 @@ import {
 } from "../abis";
 import type { TradingLimitData } from "../tradingLimits";
 import { getFallbackRpcClient, getRpcClient, logRpcFailure } from "./client";
-import {
-  readContractWithBlockFallback,
-  type BlockFallbackResult,
-} from "./block-fallback";
+import { readContractWithBlockFallback } from "./block-fallback";
 
 // ---------------------------------------------------------------------------
 // Test hooks — only used in unit tests to inject mock RPC responses.
