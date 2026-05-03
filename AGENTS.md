@@ -145,7 +145,7 @@ Never `terraform apply` without explicit user approval — plan first, surface t
 - **Runtime:** Envio HyperIndex (envio@2.32.3)
 - **Schema:** `schema.graphql` defines indexed entities (FPMM, Swap, Mint, Burn, etc.)
 - **Configs:** `config.multichain.mainnet.yaml` (default), `config.multichain.testnet.yaml`
-- **Handlers:** `src/EventHandlers.ts` is the Envio entry point (all `config.*.yaml` files reference it). It imports handler modules from `src/handlers/` and re-exports test utilities. Handler logic lives in `src/handlers/fpmm.ts`, `src/handlers/sortedOracles.ts`, `src/handlers/virtualPool.ts`, `src/handlers/feeToken.ts`. Shared logic: `src/rpc.ts` (RPC + caches), `src/pool.ts` (upsert), `src/priceDifference.ts`, `src/tradingLimits.ts`, `src/feeToken.ts`, `src/abis.ts`, `src/helpers.ts`.
+- **Handlers:** `src/EventHandlers.ts` is the Envio entry point (all `config.*.yaml` files reference it). It imports handler modules from `src/handlers/` and re-exports test utilities. Handler logic lives in `src/handlers/fpmm.ts`, `src/handlers/sortedOracles.ts`, `src/handlers/virtualPool.ts`, `src/handlers/feeToken.ts`. Shared logic: `src/rpc.ts` (fetch functions + caches; client/retry primitives in `src/rpc/`), `src/pool.ts` (upsert), `src/priceDifference.ts`, `src/tradingLimits.ts`, `src/feeToken.ts`, `src/abis.ts`, `src/helpers.ts`.
 - **Contract addresses:** `src/contractAddresses.ts` — resolves addresses from `@mento-protocol/contracts` using the namespace map from `shared-config`
 - **ABIs:** `abis/` — vendored ABIs, refreshed from `@mento-protocol/contracts` via `pnpm --filter @mento-protocol/indexer-envio generate:abis`. ERC20 stub + Wormhole NTT minimal subsets are hand-vendored (excluded from the script — see `indexer-envio/scripts/generateAbis.mjs` header).
 - **Scripts:** `scripts/run-envio-with-env.mjs` — loads .env and runs envio CLI
@@ -200,7 +200,10 @@ monitoring-monorepo/
 │   │   │   ├── sortedOracles.ts  # SortedOracles handlers
 │   │   │   ├── virtualPool.ts    # VirtualPool handlers
 │   │   │   └── feeToken.ts       # ERC20FeeToken.Transfer handler
-│   │   ├── rpc.ts            # RPC client, fetch functions, caches, test mocks
+│   │   ├── rpc.ts            # Fetch functions, caches, test mocks (re-exports rpc/* primitives)
+│   │   ├── rpc/              # RPC sub-modules (extracted from rpc.ts in PR-S6/S7)
+│   │   │   ├── client.ts     # RPC client management, failure logging, rate-limit detection
+│   │   │   └── block-fallback.ts  # readContractWithBlockFallback retry/fallback primitive
 │   │   ├── pool.ts           # Pool/PoolSnapshot upsert, health status
 │   │   ├── priceDifference.ts # Price math (computePriceDifference, normalizeTo18)
 │   │   ├── tradingLimits.ts  # Trading limit types and computation
