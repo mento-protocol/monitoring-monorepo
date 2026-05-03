@@ -1,6 +1,9 @@
 // ---------------------------------------------------------------------------
-// Pool/oracle/breaker fetchers + caches + test mocks. Client management,
-// structured failure logging, and rate-limit detection live in `./rpc/client`.
+// Barrel re-exports + Oracle DB query helpers + Breaker RPC self-heal.
+// Pool-state fetchers/caches/mocks live in `./rpc/pool-state`. Client
+// management + structured failure logging live in `./rpc/client`. The
+// `readContractWithBlockFallback` retry/fallback primitive lives in
+// `./rpc/block-fallback`.
 // ---------------------------------------------------------------------------
 
 import type { HandlerContext } from "generated/src/Types";

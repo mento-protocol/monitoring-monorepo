@@ -256,11 +256,16 @@ function parseRebalancingState(result: unknown): RebalancingState {
 // emits 2× UR + 1× Rebalanced in the same rebalance tx → without this
 // cache each handler re-RPCs for identical block state.
 //
-// Two important invariants (mirrors `fetchReserves` / `fetchReportExpiry`):
+// Two important invariants:
 // 1. Only cache `usedFallback=false` results. If the request fell back
 //    to `latest` (e.g. requested block not yet available), the response
 //    isn't actually scoped to the cache key's blockNumber, so caching
 //    it would serve stale-across-block data to later callers.
+//    NOTE: this caching invariant differs slightly from `fetchReserves`,
+//    which uses the stricter `usedLatestFallback` distinction to also
+//    return null on `latest` fallback (rebalance-delta callers need
+//    historical exactness). Event-dedup callers here only need the
+//    current state, so eviction-on-any-fallback is sufficient.
 // 2. Only cache non-null results. A null means the RPC failed; a retry
 //    next time is cheaper than serving the failure forever.
 const REBALANCING_STATE_CACHE_MAX = 256;
@@ -472,7 +477,8 @@ export async function fetchReferenceRateFeedID(
   poolAddress: string,
 ): Promise<string | null> {
   const mockKey = `${chainId}:${poolAddress.toLowerCase()}`;
-  if (_testRateFeedIDs.has(mockKey)) return _testRateFeedIDs.get(mockKey)!;
+  if (_testRateFeedIDs.has(mockKey))
+    return _testRateFeedIDs.get(mockKey) ?? null;
 
   try {
     const client = getRpcClient(chainId);
@@ -554,7 +560,8 @@ export async function fetchReportExpiry(
   blockNumber: bigint,
 ): Promise<bigint | null> {
   const mockKey = `${chainId}:${rateFeedID.toLowerCase()}`;
-  if (_testReportExpiry.has(mockKey)) return _testReportExpiry.get(mockKey)!;
+  if (_testReportExpiry.has(mockKey))
+    return _testReportExpiry.get(mockKey) ?? null;
 
   let address: `0x${string}`;
   try {
