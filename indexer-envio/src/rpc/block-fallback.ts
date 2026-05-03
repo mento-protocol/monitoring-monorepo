@@ -1,9 +1,8 @@
 // `readContractWithBlockFallback` — the shared retry/fallback primitive every
-// fetcher in rpc.ts wraps `client.readContract` in. Extracted from rpc.ts in
-// PR-S7; pinned by blockFallback.test.ts. Two transient-failure modes are
-// handled here so individual fetchers don't have to: rate-limit retries
-// (with secondary-RPC fallback) and "block not yet on this node" retries
-// (with `latest` fallback).
+// fetcher in rpc.ts wraps `client.readContract` in. Two transient-failure
+// modes are handled here so individual fetchers don't have to: rate-limit
+// retries (with secondary-RPC fallback) and "block not yet on this node"
+// retries (with `latest` fallback).
 
 import type { createPublicClient } from "viem";
 import {

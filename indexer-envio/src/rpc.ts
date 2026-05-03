@@ -25,7 +25,6 @@ import {
 } from "./rpc/client";
 import {
   readContractWithBlockFallback,
-  _testHooks,
   type BlockFallbackResult,
 } from "./rpc/block-fallback";
 
