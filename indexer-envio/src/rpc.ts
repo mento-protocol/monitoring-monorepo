@@ -3,7 +3,6 @@
 // structured failure logging, and rate-limit detection live in `./rpc/client`.
 // ---------------------------------------------------------------------------
 
-import { createPublicClient } from "viem";
 import type { HandlerContext } from "generated/src/Types";
 import type { Pool, BreakerConfig } from "generated";
 import {
