@@ -18,6 +18,7 @@ runStartupChecks();
 
 // Handler registrations (side-effect imports)
 import "./handlers/fpmm";
+import "./handlers/fpmm/factory";
 import "./handlers/sortedOracles";
 import "./handlers/virtualPool";
 import "./handlers/feeToken";
