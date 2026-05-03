@@ -70,8 +70,10 @@ export const _testHooks = {
  * 2. **Block not available** — retries the original block with backoff, then
  *    falls back to reading "latest".
  *
- * Returns `{ result, usedFallback }` so callers can skip block-scoped cache
- * writes when fallback was used.
+ * Returns `{ result, usedFallback, usedLatestFallback }`. Callers should skip
+ * block-scoped cache writes when `usedFallback` is true, and additionally
+ * reject the result for historical accuracy when `usedLatestFallback` is true
+ * (the read returned `latest` instead of the requested block).
  */
 export async function readContractWithBlockFallback(
   client: ReturnType<typeof createPublicClient>,
