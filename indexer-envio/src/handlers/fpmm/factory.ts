@@ -246,6 +246,11 @@ FPMM.Transfer.handler(async ({ event, context }) => {
   const to = asAddress(event.params.to);
   const value = event.params.value;
 
+  // Self-transfers are no-ops for LP accounting: net liquidity is unchanged.
+  // Also guards the Promise.all below: ensures the two writes always target
+  // distinct LiquidityPosition records, preventing a concurrent get/set race.
+  if (from === to) return;
+
   // LiquidityPosition tracks actual LP token ownership. For burns, the owner is
   // only observable via LP token Transfer events (owner -> pool, then pool -> 0x0),
   // not the Burn event's `to` beneficiary. The two delta writes target distinct
