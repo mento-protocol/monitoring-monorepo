@@ -1,9 +1,9 @@
 // RPC client management, structured failure logging, and rate-limit
 // detection. Extracted from rpc.ts in PR-S6; pinned by rpcClient.test.ts +
 // hyperRpcToken.test.ts. The internal helpers (`isRateLimitError`,
-// `logRpcFailure`, `_rpcFailureCounts`, `RATE_LIMIT_RETRY_DELAYS_MS`) are
-// re-exported back through rpc.ts so the remaining fetchers + the
-// `_testHooks` proxy continue to work without touching every caller.
+// `logRpcFailure`, `_resetRpcFailureCounts`, `RATE_LIMIT_RETRY_DELAYS_MS`)
+// are imported by rpc.ts for use by its remaining fetchers and the
+// `_testHooks` proxy.
 
 import { createPublicClient, http } from "viem";
 
@@ -248,6 +248,10 @@ export function getRpcClient(
 }
 
 /**
+ * @internal Exported only so rpc.ts's fetchers can wire it into
+ * `readContractWithBlockFallback` calls. Not part of the stable public API
+ * — was a private function in the pre-PR-S6 rpc.ts.
+ *
  * Returns a fallback viem public client for the given chainId.
  * Uses the hardcoded default RPC (public endpoint) — only created when the
  * primary client is a different URL (env-var override). Returns null if the
