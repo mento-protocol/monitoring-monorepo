@@ -27,6 +27,11 @@ PR #263 split `ui-dashboard/src/app/pool/[poolId]/page.tsx` from 2,831 → 470 l
 - `ui-dashboard/src/components/global-pools-table.tsx` (638) — has 511 lines of tests; low-risk to split, but cognitive load isn't bad
 - `lib/rebalance-check.ts` (506), `lib/homepage-og.ts` (494), `breakers.ts` (486) — under the threshold; defer
 
+## Lint hygiene
+
+- [ ] **Add an ESLint config to `indexer-envio/`.** The package currently has no `eslint.config.mjs` (unlike `ui-dashboard`, `metrics-bridge`, `shared-config`), so `trunk check` doesn't lint it and the `max-lines: ["error", 1000]` hard cap from AGENTS.md is unenforced — `rpc.ts` and `handlers/fpmm.ts` only escaped the cap because there's nothing to enforce it. Wire a config that mirrors the other packages' rules + apply the file-size budget. Best landed AFTER the rpc.ts / fpmm.ts splits (PR-S8/S9 + PR-S1–S4) drop both files below 1000 lines, so the new config doesn't immediately fail.
+- [ ] **Add an `unused-imports` lint rule across all packages.** PR #294 surfaced a stale `_testHooks` import in `indexer-envio/src/rpc.ts` that the existing `tsc --noEmit` step does not catch (TypeScript's `noUnusedLocals` ignores re-exported names; many configs omit the option entirely). Wire `eslint-plugin-unused-imports` (or the built-in `@typescript-eslint/no-unused-vars` with `args: "after-used"`) into the shared `eslint.config.mjs`s for `ui-dashboard`, `metrics-bridge`, `shared-config`, and the new `indexer-envio` config above so refactor PRs that move blocks between modules can't leave dead imports behind. Treat as `error` so CI fails; `--fix` removes them mechanically.
+
 ## Follow-ups deferred from PR #288 (address-book extract)
 
 - [ ] `_lib/address-book-rows.test.ts` — `buildContractRows`, `buildCustomRows`, `filterRows`, and `unknownChainNetwork` are currently covered only through the 38 characterization tests in `AddressBookClient.test.tsx`. A dedicated unit-test file for the lib module (especially `unknownChainNetwork`'s fallback sentinel values) would tighten the safety net independently of the UI.
