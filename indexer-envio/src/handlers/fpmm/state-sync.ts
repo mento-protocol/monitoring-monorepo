@@ -114,7 +114,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     pool = { ...pool, ...poolUpdate };
     context.Pool.set(pool);
     const snapshot: OracleSnapshot = {
-      id: eventId(event.chainId, event.block.number, event.logIndex),
+      id,
       chainId: event.chainId,
       poolId,
       timestamp: blockTimestamp,
@@ -284,7 +284,7 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     context.Pool.set(pool);
 
     const snapshot: OracleSnapshot = {
-      id: eventId(event.chainId, event.block.number, event.logIndex),
+      id,
       chainId: event.chainId,
       poolId,
       timestamp: blockTimestamp,
