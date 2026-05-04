@@ -260,10 +260,10 @@ function VersionBadge({ version }: { version: Version }): ReactNode {
     <span
       aria-hidden="true"
       style={{ backgroundColor: pillBg, color: pillFg }}
-      // `translate-y-[-3px]` nudges the cap-height-based pill up onto the
-      // baseline of the surrounding text-3xl/4xl digits — without it the
-      // pill sits noticeably below the dollar value's midline.
-      className="ml-1.5 inline-flex translate-y-[-3px] items-center rounded px-1.5 py-px font-mono text-[10px] font-medium uppercase tracking-wide sm:text-xs"
+      // `align-text-top` parks the pill at the top of the surrounding text's
+      // font height — superscript-style alongside the text-3xl/4xl digits
+      // rather than sitting on their baseline.
+      className="ml-1.5 inline-flex items-center rounded px-1.5 py-px align-text-top font-mono text-[10px] font-medium uppercase tracking-wide sm:text-xs"
     >
       {label}
     </span>
@@ -308,6 +308,10 @@ function computeHeadline(
       <span aria-hidden="true">
         {formatUSD(v3Total)}
         <VersionBadge version="v3" />
+      </span>
+      {/* Visual-only separator; the screen-reader reading is on the parent. */}
+      <span aria-hidden="true" className="text-slate-600">
+        ·
       </span>
       <span aria-hidden="true">
         {v2Display}
