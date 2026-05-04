@@ -10,6 +10,7 @@ import {
   selectStaleTransfers,
   backfilledTokens,
 } from "../feeToken";
+import { upsertPoolDailyFeeSnapshot } from "../protocolFeeSnapshot";
 
 ERC20FeeToken.Transfer.handler(
   async ({ event, context }) => {
@@ -32,6 +33,15 @@ ERC20FeeToken.Transfer.handler(
     const id = eventId(chainId, event.block.number, event.logIndex);
     const normalizedToken = asAddress(tokenAddress);
 
+    // Replay/reorg dedup: ProtocolFeeTransfer is event-id-keyed (same id =
+    // overwrite, idempotent), but the snapshot rollup is additive. If we've
+    // already indexed this event, branch:
+    //   - prior was UNKNOWN, symbol now resolved → snapshot heal-only path
+    //     (repair metadata + reprice the prior amount; don't double-count it)
+    //   - otherwise → replay no-op for the snapshot; the raw transfer row
+    //     still gets `set` below so the self-heal backfill still propagates.
+    const existingTransfer = await context.ProtocolFeeTransfer.get(id);
+
     const transfer: ProtocolFeeTransfer = {
       id,
       chainId,
@@ -47,19 +57,94 @@ ERC20FeeToken.Transfer.handler(
 
     context.ProtocolFeeTransfer.set(transfer);
 
+    // Upsert the per-pool daily fee snapshot in the right mode.
+    if (!existingTransfer) {
+      await upsertPoolDailyFeeSnapshot({
+        context,
+        chainId,
+        pool,
+        blockTimestamp: BigInt(event.block.timestamp),
+        blockNumber: BigInt(event.block.number),
+        token: normalizedToken,
+        tokenSymbol: symbol,
+        tokenDecimals: decimals,
+        amount: event.params.value,
+        mode: "add",
+      });
+    } else if (
+      existingTransfer.tokenSymbol === "UNKNOWN" &&
+      symbol !== "UNKNOWN"
+    ) {
+      await upsertPoolDailyFeeSnapshot({
+        context,
+        chainId,
+        pool,
+        blockTimestamp: BigInt(event.block.timestamp),
+        blockNumber: BigInt(event.block.number),
+        token: normalizedToken,
+        tokenSymbol: symbol,
+        tokenDecimals: decimals,
+        amount: event.params.value,
+        mode: "heal",
+      });
+    }
+    // else: identical replay — snapshot already counted this event; no-op.
+
     // Backfill: if RPC succeeded and we now know the real symbol, fix any
-    // previously stored UNKNOWN records for this token.
+    // previously stored UNKNOWN records for this token AND heal the
+    // corresponding `PoolDailyFeeSnapshot` rows for those past days. The
+    // raw-row backfill alone leaves the daily rollup permanently understated
+    // when an UNKNOWN token resolves on a later day, which would make the
+    // dashboard's leaderboard wrong once it switches off the raw-transfer
+    // path. `mergeFeeSnapshot` heal-mode is idempotent on a slot-by-slot
+    // basis, so iterating per stale transfer is safe — repeated heals for
+    // the same (pool, day, token) tuple are no-ops after the first.
     const backfillKey = `${chainId}:${normalizedToken}`;
     if (symbol !== "UNKNOWN" && !backfilledTokens.has(backfillKey)) {
       try {
         const unknownRecords =
           await context.ProtocolFeeTransfer.getWhere.token.eq(normalizedToken);
-        for (const stale of selectStaleTransfers(unknownRecords, chainId)) {
+        const stale = selectStaleTransfers(unknownRecords, chainId);
+        // Cache pool fetches across the loop — many stale transfers share a
+        // pool, especially on busy chains.
+        const poolCache = new Map<
+          string,
+          Awaited<ReturnType<typeof context.Pool.get>>
+        >();
+        for (const s of stale) {
           context.ProtocolFeeTransfer.set({
-            ...stale,
+            ...s,
             tokenSymbol: symbol,
             tokenDecimals: decimals,
           });
+
+          // Heal the original day's snapshot.
+          const stalePoolId = makePoolId(chainId, s.from);
+          // `.has()` (not `.get() === undefined`) so a cached negative
+          // lookup (`undefined` value) doesn't re-query on every iteration.
+          let stalePool: Awaited<ReturnType<typeof context.Pool.get>>;
+          if (poolCache.has(stalePoolId)) {
+            stalePool = poolCache.get(stalePoolId);
+          } else {
+            stalePool = await context.Pool.get(stalePoolId);
+            poolCache.set(stalePoolId, stalePool);
+          }
+          if (stalePool) {
+            const sBlockTs = BigInt(s.blockTimestamp);
+            const sBlockNum = BigInt(s.blockNumber);
+            await upsertPoolDailyFeeSnapshot({
+              context,
+              chainId,
+              pool: stalePool,
+              blockTimestamp: sBlockTs,
+              blockNumber: sBlockNum,
+              token: s.token,
+              tokenSymbol: symbol,
+              tokenDecimals: decimals,
+              amount: s.amount,
+              mode: "heal",
+            });
+          }
         }
         backfilledTokens.add(backfillKey);
       } catch (err) {

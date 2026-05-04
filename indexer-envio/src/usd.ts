@@ -228,6 +228,26 @@ export function computeSwapUsdWei(input: SwapUsdInput): bigint {
   return scaleToUsdWei(picked.peggedAmount, picked.peggedDecimals);
 }
 
+/**
+ * Compute the USD-wei equivalent of a protocol fee transfer.
+ *
+ * Pegged-only: returns 0n for non-pegged tokens (dashboard prices those
+ * via oracle rate map). Pegged tokens get scaled to USD-wei (18 dp),
+ * matching `TraderDailySnapshot.feesPaidUsdWei` and `RebalanceEvent.notionalUsd`.
+ */
+export function computeFeeUsdWei({
+  tokenSymbol,
+  tokenDecimals,
+  amount,
+}: {
+  tokenSymbol: string;
+  tokenDecimals: number;
+  amount: bigint;
+}): bigint {
+  if (!USD_PEGGED_SYMBOLS.has(tokenSymbol)) return 0n;
+  return scaleToUsdWei(amount, tokenDecimals);
+}
+
 /** Multiply USD-wei by a fee bps and return the fee in USD-wei.
  *  `feeBps` is integer bps (e.g., 30 = 0.30%). */
 export function applyFeeBps(volumeUsdWei: bigint, feeBps: number): bigint {
