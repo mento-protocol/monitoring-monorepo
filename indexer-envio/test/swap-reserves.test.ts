@@ -2,7 +2,6 @@
 import { assert } from "chai";
 import generated from "generated";
 import {
-  _setMockReserves,
   _clearMockReserves,
   _setMockERC20Decimals,
   _clearMockERC20Decimals,

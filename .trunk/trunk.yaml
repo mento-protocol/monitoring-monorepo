@@ -23,9 +23,6 @@ lint:
         - "**/coverage/**"
         - "**/generated/**"
         - "**/.envio/**"
-    - linters: [eslint]
-      paths:
-        - indexer-envio/**
     - linters: [osv-scanner]
       paths:
         - indexer-envio/pnpm-lock.yaml

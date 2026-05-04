@@ -3,6 +3,7 @@ import tseslint from "typescript-eslint";
 import reactPlugin from "@eslint-react/eslint-plugin";
 import nextPlugin from "@next/eslint-plugin-next";
 import jsxA11y from "eslint-plugin-jsx-a11y";
+import unusedImports from "eslint-plugin-unused-imports";
 import globals from "globals";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -31,6 +32,12 @@ export default tseslint.config(
   {
     plugins: { "jsx-a11y": jsxA11y },
     rules: jsxA11y.flatConfigs.recommended.rules,
+  },
+  {
+    plugins: { "unused-imports": unusedImports },
+    rules: {
+      "unused-imports/no-unused-imports": "error",
+    },
   },
   {
     languageOptions: {
