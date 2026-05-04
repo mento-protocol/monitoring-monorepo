@@ -30,6 +30,7 @@ import {
   type NetworkData,
   type PoolLabel,
 } from "@/lib/fetch-all-networks";
+import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import { SWR_KEY_PROTOCOL_FEES } from "@/lib/swr-keys";
 import type { ProtocolFeeTransfer } from "@/lib/types";
 
@@ -61,14 +62,9 @@ async function fetchFeesForNetwork(
   }
   const client = new GraphQLClient(network.hasuraUrl);
 
-  // Fetch rates + fees + pool labels in parallel per chain — rates and fees
-  // are both needed to aggregate protocol fees in USD; labels resolve the
-  // `from` (pool address) on each transfer back to a `token0/token1` pair
-  // for the per-pool revenue leaderboard. `allSettled` so any single failure
-  // doesn't blank the others. A labels-only failure is non-fatal: the
-  // leaderboard renders rows with truncated-address fallback (handled by
-  // `tokenSymbol()` in `lib/tokens.ts`), so we don't promote it into
-  // `feesError`.
+  // `allSettled` so any single failure doesn't blank the others. A labels-only
+  // failure is non-fatal — the leaderboard falls back to truncated-address
+  // labels, so it stays out of `feesError`.
   const [ratesResult, feesResult, labelsResult] = await Promise.allSettled([
     client.request<{ Pool: OracleRatePool[] }>({
       document: ORACLE_RATES,
@@ -80,7 +76,7 @@ async function fetchFeesForNetwork(
       variables: { chainId: network.chainId },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     }),
-    client.request<{ Pool: Array<PoolLabel & { id: string }> }>({
+    client.request<{ Pool: PoolLabel[] }>({
       document: POOL_LABELS_ALL,
       variables: { chainId: network.chainId },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -100,17 +96,7 @@ async function fetchFeesForNetwork(
   const poolLabels = new Map<string, PoolLabel>();
   if (labelsResult.status === "fulfilled") {
     for (const p of labelsResult.value.Pool ?? []) {
-      // Pool.id is `${chainId}-${lowercaseAddress}`; key the per-network map
-      // by the bare address so callers don't need to repeat the chain prefix.
-      const addr = p.id.includes("-")
-        ? p.id.slice(p.id.indexOf("-") + 1)
-        : p.id;
-      poolLabels.set(addr.toLowerCase(), {
-        id: p.id,
-        token0: p.token0,
-        token1: p.token1,
-        source: p.source,
-      });
+      poolLabels.set(stripChainIdFromPoolId(p.id).toLowerCase(), p);
     }
   }
   const toError = (reason: unknown) =>

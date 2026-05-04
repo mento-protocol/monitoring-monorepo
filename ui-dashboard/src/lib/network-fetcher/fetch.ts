@@ -504,8 +504,6 @@ export async function fetchNetworkData(
       feesResult.status === "fulfilled"
         ? (feesResult.value.ProtocolFeeTransfer ?? [])
         : [],
-    // Heavy hook leaves poolLabels empty — consumers derive labels from the
-    // full `pools` payload above. Slim `useProtocolFees` populates it instead.
     poolLabels: new Map(),
     uniqueLpAddresses,
     rates,

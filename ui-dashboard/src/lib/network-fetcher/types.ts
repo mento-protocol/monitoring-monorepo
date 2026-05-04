@@ -62,14 +62,9 @@ export type NetworkData = {
   /** Raw fee transfer rows — kept for time-series bucketing on the revenue page. */
   feeTransfers: ProtocolFeeTransfer[];
   /**
-   * Slim per-pool label map populated by `useProtocolFees` so the per-pool
-   * revenue leaderboard can resolve a `from`-address back to a token pair
-   * without depending on the heavyweight `pools` array. Keyed by lowercase
-   * pool address (no chain prefix — already scoped to this network).
-   *
-   * Empty map by default. Hooks that already fetch the full `Pool` payload
-   * (`useAllNetworksData`) leave this empty and let consumers derive labels
-   * from `pools` directly.
+   * Lowercase-address → token-pair map for slim hooks that don't fetch the
+   * full `pools` payload. Empty by default; consumers with a populated
+   * `pools` array should derive labels from that instead.
    */
   poolLabels: Map<string, PoolLabel>;
   uniqueLpAddresses: string[] | null;
@@ -89,13 +84,7 @@ export type NetworkData = {
   lpError: Error | null;
 };
 
-export type PoolLabel = {
-  /** Multichain pool id (`${chainId}-${lowercaseAddress}`) for routing. */
-  id: string;
-  token0: string;
-  token1: string;
-  source: string;
-};
+export type PoolLabel = Pick<Pool, "id" | "token0" | "token1" | "source">;
 
 export type SnapshotPageResult = {
   rows: PoolSnapshotWindow[];

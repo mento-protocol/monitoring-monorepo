@@ -6,6 +6,7 @@
  */
 
 import { parseWei } from "./format";
+import { normalizePoolIdForChain } from "./pool-id";
 import { tokenToUSD, type OracleRateMap } from "./tokens";
 import type { ProtocolFeeTransfer } from "./types";
 
@@ -111,34 +112,24 @@ export function aggregateProtocolFees(
 }
 
 export type PoolFeeEntry = {
-  /** `${chainId}-${lowercasePoolAddress}` — matches Pool.id from the indexer. */
   poolId: string;
   chainId: number;
-  /** Lowercased pool address (the `from` field on ProtocolFeeTransfer). */
   poolAddress: string;
   totalFeesUSD: number;
   fees24hUSD: number;
   fees7dUSD: number;
   fees30dUSD: number;
   /**
-   * True if any transfer attributed to this pool was unpriced (unknown symbol
-   * or symbol without an oracle rate). The pool's totals are then a lower
-   * bound — the UI should prefix values with `≈`.
+   * Any transfer for this pool used an unknown or unpriced symbol — totals
+   * are a lower bound and the UI should prefix values with `≈`.
    */
   unpriced: boolean;
 };
 
 /**
- * Per-pool variant of `aggregateProtocolFees`.
- *
- * Groups transfers by `${chainId}-${from.toLowerCase()}` (matching the
- * indexer's `Pool.id` convention from `indexer-envio/src/helpers.ts`) and
- * computes the same 24h / 7d / 30d / all-time USD totals for each pool.
- *
- * Inherits the same 1000-row Hasura cap caveat as the chain aggregator: rows
- * are returned newest-first by `PROTOCOL_FEE_TRANSFERS_ALL`, so 24h / 7d / 30d
- * windows are accurate while the all-time column may undercount on busy
- * chains. Surface that via the parent `ProtocolFeeSummary.isTruncated`.
+ * Per-pool variant of `aggregateProtocolFees`. Inherits the same 1000-row
+ * Hasura cap caveat: 24h / 7d / 30d windows are accurate (rows return
+ * newest-first), but all-time may undercount on busy chains.
  */
 export function aggregateProtocolFeesByPool(
   transfers: ProtocolFeeTransfer[],
@@ -153,7 +144,7 @@ export function aggregateProtocolFeesByPool(
   for (const t of transfers) {
     if (!t.from) continue;
     const poolAddress = t.from.toLowerCase();
-    const poolId = `${t.chainId}-${poolAddress}`;
+    const poolId = normalizePoolIdForChain(poolAddress, t.chainId);
     let entry = byPool.get(poolId);
     if (!entry) {
       entry = {
