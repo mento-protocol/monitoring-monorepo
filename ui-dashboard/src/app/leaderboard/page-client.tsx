@@ -364,7 +364,7 @@ export function LeaderboardClient() {
           Top traders ({rangeLabel(range)})
         </h2>
         <LeaderboardTable
-          range={range}
+          cutoff={cutoff}
           traders={aggregated}
           pools={poolMeta}
           isLoading={isLoading}

@@ -11,9 +11,7 @@ import { formatUSD, relativeTime } from "@/lib/format";
 import {
   aggregateTraderPoolsByWindow,
   computeFlow,
-  rangeCutoffSeconds,
   weiToUsd,
-  type LeaderboardRangeKey,
   type TraderPoolDailyRow,
   type TraderPoolWindowRow,
   type TraderWindowRow,
@@ -31,13 +29,16 @@ const VALID_KEYS = new Set<SortKey>(SORT_KEYS);
 const PAGE_LIMIT = 50;
 
 export function LeaderboardTable({
-  range,
+  cutoff,
   traders,
   pools,
   isLoading,
   hasError,
 }: {
-  range: LeaderboardRangeKey;
+  /** Same cutoff timestamp the parent query uses. Passed in (rather than
+   * recomputed in `TraderRow`) so per-row breakdown queries flush their
+   * SWR cache key when the parent's UTC-day rollover ticker fires. */
+  cutoff: number;
   traders: readonly TraderWindowRow[];
   pools: ReadonlyMap<string, { token0: string | null; token1: string | null }>;
   isLoading: boolean;
@@ -162,7 +163,7 @@ export function LeaderboardTable({
             key={`${trader.chainId}-${trader.trader}`}
             rank={idx + 1}
             trader={trader}
-            range={range}
+            cutoff={cutoff}
             pools={pools}
           />
         ))}
@@ -174,20 +175,19 @@ export function LeaderboardTable({
 function TraderRow({
   rank,
   trader,
-  range,
+  cutoff,
   pools,
 }: {
   rank: number;
   trader: TraderWindowRow;
-  range: LeaderboardRangeKey;
+  /** Cutoff timestamp from the parent — already accounts for UTC-day
+   * rollover, so the breakdown SWR cache key flips at midnight too
+   * (codex 3184420044, cursor 3184433460). */
+  cutoff: number;
   pools: ReadonlyMap<string, { token0: string | null; token1: string | null }>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const network = networkForChainId(trader.chainId);
-  // Memoize on `range` alone — `rangeCutoffSeconds` reads `Date.now()` and
-  // would otherwise tick forward each render, churning SWR's cache key for
-  // the breakdown query and re-fetching on every parent re-render.
-  const cutoff = useMemo(() => rangeCutoffSeconds(range), [range]);
   // Only fetch the pool breakdown after the user opens the row — paying for
   // 50 sub-queries upfront would defeat the point of paginated fetches.
   const breakdown = useGQL<{
