@@ -46,16 +46,17 @@ import type {
 } from "./types";
 
 /**
- * True iff every error channel on `n` is null — top-level, fees,
- * fee-snapshot leaderboard, per-window snapshots, all-history daily, and LP.
- * Used to decide whether an SSR-seeded payload is fresh enough to skip
- * client-side revalidation; any per-slice failure on the server would
- * otherwise trap the user on partial `N/A` metrics until the next poll.
+ * True iff every error channel on `n` is null — top-level, fees, rates,
+ * fee snapshots, per-window snapshots, all-history daily, and LP. Used to
+ * decide whether an SSR-seeded payload is fresh enough to skip client-side
+ * revalidation; any per-slice failure on the server would otherwise trap
+ * the user on partial `N/A` metrics until the next poll.
  */
 export function isNetworkDataFullyHealthy(n: NetworkData): boolean {
   return (
     n.error === null &&
     n.feesError === null &&
+    n.ratesError === null &&
     n.feeSnapshotsError === null &&
     n.snapshotsError === null &&
     n.snapshots7dError === null &&
@@ -92,6 +93,7 @@ export const blankNetworkData = (
   feeTransfers: [],
   feeSnapshots: [],
   feeSnapshotsError: null,
+  ratesError: null,
   poolLabels: new Map(),
   uniqueLpAddresses: null,
   rates: new Map(),
@@ -540,6 +542,11 @@ export async function fetchNetworkData(
     // /revenue. Default `[]` keeps `NetworkData` shape uniform.
     feeSnapshots: [],
     feeSnapshotsError: null,
+    // Rates failure is folded into `feesError` for the homepage path
+    // because there is no separate consumer to differentiate. The
+    // protocol-fees hook splits `ratesError` out so the leaderboard can
+    // skip on it without dragging raw-transfer-only failures along.
+    ratesError: null,
     poolLabels: new Map(),
     uniqueLpAddresses,
     rates,

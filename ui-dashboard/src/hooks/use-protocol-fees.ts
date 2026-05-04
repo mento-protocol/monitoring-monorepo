@@ -111,22 +111,24 @@ async function fetchFeesForNetwork(
   const toError = (reason: unknown) =>
     reason instanceof Error ? reason : new Error(String(reason));
 
-  // A rates-only failure would silently zero out every non-USD-pegged fee
-  // transfer (aggregateProtocolFees calls tokenToUSD, which returns null
-  // for unknown symbols and gets counted as "unresolved"). That understates
-  // the chain's fees without any error signal to the consumer. Promote the
-  // rates failure into `feesError` so the revenue page shows the partial-
-  // data banner instead of a confidently-wrong lower bound.
+  // Three independent error channels so each consumer can fail closed only
+  // on the sub-failure that genuinely affects it:
+  //
+  //   feesError         — `ProtocolFeeTransfer` query rejected. Affects the
+  //                       chain-level Swap Fees tile + FeeOverTimeChart.
+  //   ratesError        — oracle rates query rejected. Empty rate map ⇒
+  //                       FX-token slots silently mis-price. Affects ALL
+  //                       USD aggregation: tile, chart, AND leaderboard.
+  //   feeSnapshotsError — `PoolDailyFeeSnapshot` paginated fetch rejected
+  //                       OR surfaced a mid-pagination error. Affects only
+  //                       the leaderboard.
+  //
+  // Folding any two into one hides degraded states from one consumer or
+  // blanks the wrong one — see PR #317 review for the cascade history.
   const feesError =
-    feesResult.status === "rejected"
-      ? toError(feesResult.reason)
-      : ratesResult.status === "rejected"
-        ? toError(ratesResult.reason)
-        : null;
-  // Snapshot failures land on a separate channel so the chain-level Swap
-  // Fees tile + FeeOverTimeChart — neither of which read snapshots — stay
-  // live when only the leaderboard's snapshot path is degraded. The
-  // leaderboard reads `feeSnapshotsError` and gates its own rendering.
+    feesResult.status === "rejected" ? toError(feesResult.reason) : null;
+  const ratesError =
+    ratesResult.status === "rejected" ? toError(ratesResult.reason) : null;
   const feeSnapshotsError =
     snapshotsResult.status === "rejected"
       ? toError(snapshotsResult.reason)
@@ -146,6 +148,7 @@ async function fetchFeesForNetwork(
     feeSnapshotsError,
     poolLabels,
     feesError,
+    ratesError,
   });
 }
 

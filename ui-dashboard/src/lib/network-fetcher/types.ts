@@ -86,7 +86,19 @@ export type NetworkData = {
   uniqueLpAddresses: string[] | null;
   rates: OracleRateMap;
   error: Error | null;
+  /**
+   * Failure of the raw `ProtocolFeeTransfer` query for this network.
+   * Affects chart + chain-level KPI tile; does NOT affect the per-pool
+   * leaderboard, which reads `feeSnapshots` instead.
+   */
   feesError: Error | null;
+  /**
+   * Failure of the oracle rates query for this network. With no rates,
+   * any non-USD-pegged token (FX) silently mis-prices to "unpriced", so
+   * BOTH the raw-transfer chart/tile AND the snapshot leaderboard must
+   * gate on this.
+   */
+  ratesError: Error | null;
   /**
    * Per-window snapshot errors. A window only gets an error when the
    * pagination failure / truncation actually affects that window — i.e.,

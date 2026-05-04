@@ -122,6 +122,7 @@ export function makeNetworkData(
     feeTransfers: [],
     feeSnapshots: [],
     feeSnapshotsError: null,
+    ratesError: null,
     poolLabels: new Map(),
     uniqueLpAddresses: [],
     rates: new Map(),

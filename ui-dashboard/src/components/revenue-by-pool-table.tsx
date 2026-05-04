@@ -79,14 +79,16 @@ const FEE_COLUMNS: ReadonlyArray<FeeColumn> = [
 function buildRows(networkData: NetworkData[]): PoolFeeRow[] {
   const rows: PoolFeeRow[] = [];
   for (const n of networkData) {
-    // Skip top-level transport errors, `feesError` (rates rejection ⇒ empty
-    // `rates` map ⇒ FX slots would mis-price as unpriced and produce
-    // misleading $0 rows), and `feeSnapshotsError` (snapshot fetch failed,
-    // so the leaderboard row data itself is gone). The chain-level KPI
-    // tile + FeeOverTimeChart ignore `feeSnapshotsError` and stay live.
+    // Skip top-level transport errors, `ratesError` (empty `rates` map ⇒
+    // FX slots would mis-price as unpriced and produce misleading $0 rows),
+    // and `feeSnapshotsError` (the snapshot fetch itself failed, so the
+    // leaderboard row data is gone). Note: `feesError` is intentionally
+    // NOT checked here — it covers the raw `ProtocolFeeTransfer` query
+    // which the leaderboard does not read. A transfer-only outage keeps
+    // the leaderboard live as long as snapshots and rates succeeded.
     if (
       n.error !== null ||
-      n.feesError !== null ||
+      n.ratesError !== null ||
       n.feeSnapshotsError !== null
     )
       continue;

@@ -153,6 +153,7 @@ function makeNetworkData(
     feeTransfers: [],
     feeSnapshots: [],
     feeSnapshotsError: null,
+    ratesError: null,
     poolLabels: new Map(),
     uniqueLpAddresses: null,
     rates: new Map(),

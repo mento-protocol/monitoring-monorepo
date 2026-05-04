@@ -115,6 +115,7 @@ function networkData(snapshots: PoolDailyFeeSnapshot[]): NetworkData {
     feeTransfers: [],
     feeSnapshots: snapshots,
     feeSnapshotsError: null,
+    ratesError: null,
     poolLabels: new Map(),
     uniqueLpAddresses: null,
     rates: new Map([
@@ -249,9 +250,27 @@ describe("RevenueByPoolTable — snapshot path", () => {
     expect(html).toContain("No swap-fee transfers indexed yet");
   });
 
-  it("skips chains with feesError so a partial outage doesn't render misleading $0 rows", () => {
+  it("KEEPS rendering rows when only raw-transfer feesError is set (snapshots + rates are intact)", () => {
+    // codex P1: leaderboard reads snapshots, not raw transfers — a
+    // ProtocolFeeTransfer-only outage should not blank the leaderboard.
     const n = networkData([feeSnapshot()]);
-    n.feesError = new Error("boom");
+    n.feesError = new Error("transfer query timed out");
+    expect(n.ratesError).toBeNull();
+    expect(n.feeSnapshotsError).toBeNull();
+    const html = renderToStaticMarkup(
+      <RevenueByPoolTable
+        networkData={[n]}
+        isLoading={false}
+        hasError={false}
+      />,
+    );
+    // Row IS rendered because the leaderboard's data path is intact.
+    expect(html).toContain(POOL_ADDR);
+  });
+
+  it("SKIPS chains with ratesError so FX slots don't mis-price as unpriced", () => {
+    const n = networkData([feeSnapshot()]);
+    n.ratesError = new Error("oracle rates timed out");
     const html = renderToStaticMarkup(
       <RevenueByPoolTable
         networkData={[n]}
@@ -259,8 +278,6 @@ describe("RevenueByPoolTable — snapshot path", () => {
         hasError={true}
       />,
     );
-    // No tbody rows — the chain was skipped despite having a snapshot, and the
-    // empty shell renders the partial-outage copy gated on hasError.
     expect(html).toMatch(/load per-pool revenue/);
     expect(html).not.toContain(POOL_ADDR);
   });

@@ -279,7 +279,7 @@ describe("useProtocolFees — all queries succeed", () => {
 // ---------------------------------------------------------------------------
 
 describe("useProtocolFees — fees query rejects", () => {
-  it("sets feesError to the rejection, feeTransfers to [], fees to null; poolLabels still populated", async () => {
+  it("sets feesError to the rejection, feeTransfers to [], fees to null; poolLabels and ratesError still populated independently", async () => {
     const feesErr = new Error("fees transfer timeout");
 
     (
@@ -291,6 +291,8 @@ describe("useProtocolFees — fees query rejects", () => {
         return Promise.resolve({ Pool: [ORACLE_POOL] });
       if (query.includes("PoolLabelsAll"))
         return Promise.resolve({ Pool: [POOL_LABEL] });
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.resolve({ PoolDailyFeeSnapshot: [FEE_SNAPSHOT] });
       return Promise.resolve({});
     });
 
@@ -300,6 +302,13 @@ describe("useProtocolFees — fees query rejects", () => {
     expect(celo.feesError).toBe(feesErr);
     expect(celo.feeTransfers).toHaveLength(0);
     expect(celo.fees).toBeNull();
+    // ratesError stays null on its own channel — the leaderboard relies on
+    // it (and on feeSnapshotsError) to stay live across raw-transfer-only
+    // outages.
+    expect(celo.ratesError).toBeNull();
+    // Snapshot data unaffected — leaderboard can still render.
+    expect(celo.feeSnapshotsError).toBeNull();
+    expect(celo.feeSnapshots).toHaveLength(1);
     // Labels are independent — non-fatal; leaderboard still gets labels.
     expect(celo.poolLabels.size).toBeGreaterThan(0);
     expect(celo.error).toBeNull();
@@ -311,7 +320,7 @@ describe("useProtocolFees — fees query rejects", () => {
 // ---------------------------------------------------------------------------
 
 describe("useProtocolFees — rates query rejects (load-bearing invariant)", () => {
-  it("promotes feesError to the rates rejection; fees null; feeTransfers preserved; poolLabels populated", async () => {
+  it("populates ratesError with the rejection; fees null; feeTransfers preserved; poolLabels populated", async () => {
     const ratesErr = new Error("oracle rates unavailable");
 
     (
@@ -329,10 +338,11 @@ describe("useProtocolFees — rates query rejects (load-bearing invariant)", () 
     const results = await runFetcher();
 
     const celo = results.find((r) => r.network.id === "celo-mainnet")!;
-    // The rates failure MUST be promoted to feesError — without rates,
-    // aggregateProtocolFees silently zeros non-USD-pegged fees, producing
-    // a confidently-wrong lower bound.
-    expect(celo.feesError).toBe(ratesErr);
+    // The rates failure lives on its own channel — without rates,
+    // aggregateProtocolFees silently zeros non-USD-pegged fees AND the
+    // leaderboard's FX slots mis-price. Both consumers gate on this.
+    expect(celo.ratesError).toBe(ratesErr);
+    expect(celo.feesError).toBeNull();
     expect(celo.fees).toBeNull();
     // Raw transfers are preserved so callers can still time-bucket them.
     expect(celo.feeTransfers).toHaveLength(1);
@@ -341,11 +351,9 @@ describe("useProtocolFees — rates query rejects (load-bearing invariant)", () 
     expect(celo.error).toBeNull();
   });
 
-  it("fees failure takes precedence over rates failure in feesError", async () => {
-    // When both fees and rates reject, feesError should be the fees error
-    // (first branch in the ternary: feesResult.status === "rejected" wins).
-    const feesErr = new Error("fees rejected first");
-    const ratesErr = new Error("rates also rejected");
+  it("rates and fees rejections populate independent channels (no precedence)", async () => {
+    const feesErr = new Error("fees rejected");
+    const ratesErr = new Error("rates rejected");
 
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
@@ -360,9 +368,8 @@ describe("useProtocolFees — rates query rejects (load-bearing invariant)", () 
     const results = await runFetcher();
 
     const celo = results.find((r) => r.network.id === "celo-mainnet")!;
-    // Fees rejection wins by precedence in the hook's ternary.
     expect(celo.feesError).toBe(feesErr);
-    expect(celo.feesError).not.toBe(ratesErr);
+    expect(celo.ratesError).toBe(ratesErr);
   });
 });
 
@@ -404,10 +411,11 @@ describe("useProtocolFees — labels query rejects (non-fatal)", () => {
 // ---------------------------------------------------------------------------
 
 describe("useProtocolFees — all three queries reject", () => {
-  it("feesError is the fees rejection (precedence), fees null, feeTransfers empty, poolLabels empty", async () => {
+  it("each error lands on its own channel: feesError, ratesError, feeSnapshotsError populate independently", async () => {
     const feesErr = new Error("fees gone");
     const ratesErr = new Error("rates gone");
     const labelsErr = new Error("labels gone");
+    const snapshotErr = new Error("snapshot gone");
 
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
@@ -416,16 +424,20 @@ describe("useProtocolFees — all three queries reject", () => {
       if (query.includes("OracleRates")) return Promise.reject(ratesErr);
       if (query.includes("ProtocolFeeTransfer")) return Promise.reject(feesErr);
       if (query.includes("PoolLabelsAll")) return Promise.reject(labelsErr);
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.reject(snapshotErr);
       return Promise.resolve({});
     });
 
     const results = await runFetcher();
 
     const celo = results.find((r) => r.network.id === "celo-mainnet")!;
-    // Fees rejection takes precedence in the hook's ternary.
     expect(celo.feesError).toBe(feesErr);
+    expect(celo.ratesError).toBe(ratesErr);
+    expect(celo.feeSnapshotsError).toBe(snapshotErr);
     expect(celo.fees).toBeNull();
     expect(celo.feeTransfers).toHaveLength(0);
+    expect(celo.feeSnapshots).toHaveLength(0);
     expect(celo.poolLabels.size).toBe(0);
     expect(celo.error).toBeNull();
   });
@@ -655,9 +667,9 @@ describe("useProtocolFees — per-chain isolation", () => {
     expect(monad.network.id).toBe("monad-mainnet");
   });
 
-  it("per-chain feesError does not bleed across networks", async () => {
-    // Celo: rates query rejects → feesError promoted.
-    // Monad: all queries succeed → feesError null.
+  it("per-chain ratesError does not bleed across networks", async () => {
+    // Celo: rates query rejects → `ratesError` populated.
+    // Monad: all queries succeed → both error channels null.
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
     ).mockImplementation((...args: unknown[]) => {
@@ -691,10 +703,12 @@ describe("useProtocolFees — per-chain isolation", () => {
     const celo = results.find((r) => r.network.id === "celo-mainnet")!;
     const monad = results.find((r) => r.network.id === "monad-mainnet")!;
 
-    expect(celo.feesError).not.toBeNull();
+    expect(celo.ratesError).not.toBeNull();
+    expect(celo.feesError).toBeNull(); // rates rejection lives on its own channel
     expect(celo.fees).toBeNull();
 
-    // Monad's feesError must remain null — errors are strictly per-network.
+    // Monad's error channels must remain null — errors are strictly per-network.
+    expect(monad.ratesError).toBeNull();
     expect(monad.feesError).toBeNull();
     expect(monad.fees).not.toBeNull();
   });
