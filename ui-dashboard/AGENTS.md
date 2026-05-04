@@ -90,6 +90,11 @@ These are the rules `cursor[bot]` and Codex have raised repeatedly across PRs #1
 - Toasts and any dynamically-changing status text MUST live inside an element with `role="status"` (polite) or `role="alert"` (assertive)
 - Sortable table headers expose `aria-sort` (already enforced by the stateful-data-ui checklist)
 
+### URL state in client-only tables / filters
+
+- Do **NOT** use `router.replace` for URL-as-state writes that don't need server involvement (sort key/dir, in-page filters, pagination, tabs). In the App Router it triggers an RSC payload refetch on the current segment (`?_rsc=...`) — measured ~700ms on the homepage in PR #314, which was the entire sort-click lag (~1.8s). Use `window.history.replaceState` instead, lazy-initialized from `useSearchParams` and synced via a `popstate` listener for browser back/forward. Canonical example: `src/lib/use-table-sort.ts`
+- When mixing `replaceState`-based and `router.replace`-based URL writers on the **same page**, read sibling-written params from `window.location.search` (NOT from the closed-over `useSearchParams` snapshot) — `replaceState` doesn't notify Next's router, so `useSearchParams` lags. Concrete failure caught by Cursor + Codex on PR #314: `/pools` `setURL` was rebuilding URLs from the stale snapshot and silently dropping `poolsSort`/`poolsDir` on the next filter change. Pattern fix: `src/app/pools/page.tsx` `setURL`
+
 ### Time-unit math (FX-pool weekend)
 
 - FX pools close Fri 21:00 UTC → Sun 23:00 UTC. All uptime / breach math uses **trading-seconds** (weekend subtracted)
