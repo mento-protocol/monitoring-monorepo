@@ -8,6 +8,7 @@ import { AddressLabelsProvider } from "@/components/address-labels-provider";
 import { NavLinks } from "@/components/nav-links";
 import { AuthStatus } from "@/components/auth-status";
 import { SwrProvider } from "@/components/swr-provider";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -65,6 +66,7 @@ export default async function RootLayout({
             </Suspense>
           </SwrProvider>
         </SessionProvider>
+        <Analytics />
       </body>
     </html>
   );
