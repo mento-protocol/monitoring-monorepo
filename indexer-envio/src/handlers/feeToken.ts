@@ -10,6 +10,7 @@ import {
   selectStaleTransfers,
   backfilledTokens,
 } from "../feeToken";
+import { upsertPoolDailyFeeSnapshot } from "../protocolFeeSnapshot";
 
 ERC20FeeToken.Transfer.handler(
   async ({ event, context }) => {
@@ -46,6 +47,22 @@ ERC20FeeToken.Transfer.handler(
     };
 
     context.ProtocolFeeTransfer.set(transfer);
+
+    // Upsert the per-pool daily fee snapshot. The backfill loop below only
+    // fixes ProtocolFeeTransfer rows; snapshot tokenSymbols[] are NOT
+    // backfilled in this version — old UNKNOWN entries persist until the
+    // next deploy resync. See src/protocolFeeSnapshot.ts for rationale.
+    await upsertPoolDailyFeeSnapshot({
+      context,
+      chainId,
+      pool,
+      blockTimestamp: BigInt(event.block.timestamp),
+      blockNumber: BigInt(event.block.number),
+      token: normalizedToken,
+      tokenSymbol: symbol,
+      tokenDecimals: decimals,
+      amount: event.params.value,
+    });
 
     // Backfill: if RPC succeeded and we now know the real symbol, fix any
     // previously stored UNKNOWN records for this token.

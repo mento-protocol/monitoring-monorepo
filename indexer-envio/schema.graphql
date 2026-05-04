@@ -383,6 +383,38 @@ type ProtocolFeeTransfer {
   blockTimestamp: BigInt! @index
 }
 
+# Daily rollup of ProtocolFeeTransfer rows, bucketed per UTC day per pool.
+# Lets the per-pool revenue leaderboard query a small fixed-cardinality
+# table (~1 row/pool/day) instead of one row per raw transfer, so all-time
+# totals fit within Hasura's 1000-row page limit when paginated.
+type PoolDailyFeeSnapshot @index(fields: ["chainId", "poolId", "timestamp"]) {
+  id: ID! # "{chainId}-{poolAddress}-{dayTs}"
+  chainId: Int! @index
+  poolId: String! @index # FK to Pool.id; namespaced "{chainId}-{poolAddress}"
+  poolAddress: String! @index # Lowercased raw address (matches ProtocolFeeTransfer.from)
+  timestamp: BigInt! @index # UTC day bucket: (ts / 86400) * 86400
+  # Per-day deltas. Parallel arrays aligned by index. A pool can carry
+  # transfers in multiple tokens within a day (FPMM takes its swap fee in
+  # the input token), so we store the full set rather than two columns.
+  tokens: [String!]! # lowercased token contract addresses
+  tokenSymbols: [String!]! # symbols at upsert time (or "UNKNOWN")
+  tokenDecimals: [Int!]! # decimals per index
+  amounts: [BigInt!]! @config(precision: 78) # raw token-native, summed
+  # USD-pegged subset only — non-pegged FX is dashboard-priced from the
+  # parallel arrays above using the live oracle rate map. Stored as
+  # 18-dp USD-wei BigInt to match TraderDailySnapshot.feesPaidUsdWei.
+  feesUsdWei: BigInt! @config(precision: 78)
+  # True iff every transfer in this day's bucket was a USD-pegged token.
+  allPegged: Boolean!
+  # Number of token symbols that resolved to "UNKNOWN" at upsert time and
+  # therefore did NOT contribute to feesUsdWei.
+  unresolvedCount: Int!
+
+  transferCount: Int!
+  blockNumber: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
 # ─── Open Liquidity Strategy ───────────────────────────────────
 
 # Registered OLS pool config. One record per (pool, OLS contract).
