@@ -11,7 +11,7 @@ import {
 } from "../src/EventHandlers.ts";
 import { makePoolId, dayBucket, dailySnapshotId } from "../src/helpers.ts";
 import { mergeFeeSnapshot } from "../src/protocolFeeSnapshot.ts";
-import { USD_WEI_DECIMALS } from "../src/usd.ts";
+import { USD_WEI_DECIMALS, computeFeeUsdWei } from "../src/usd.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -561,6 +561,100 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
     const poolSnap = getSnapshot(mockDb, POOL_ADDRESS, dayTs);
     assert.equal(poolSnap, undefined, "pool snapshot also untouched");
   });
+
+  // -------------------------------------------------------------------------
+  // Replay idempotency: re-processing the same event must not double-count.
+  // -------------------------------------------------------------------------
+  it("replay: re-processing the same event leaves snapshot unchanged", async function () {
+    this.timeout(15_000);
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedFpmmPool(mockDb, POOL_ADDRESS);
+
+    const ev = createTransferEvent({
+      blockTimestamp: TS_DAY1_MORNING,
+      blockNumber: 700,
+      logIndex: 1,
+    });
+    mockDb = await ERC20FeeToken.Transfer.processEvent({ event: ev, mockDb });
+
+    const dayTs = dayBucket(BigInt(TS_DAY1_MORNING));
+    const after1 = getSnapshot(mockDb, POOL_ADDRESS, dayTs)!;
+    assert.equal(after1.transferCount, 1);
+    assert.equal(after1.amounts[0], AMOUNT_1E6);
+
+    // Reorg / restart: same event re-fires.
+    mockDb = await ERC20FeeToken.Transfer.processEvent({ event: ev, mockDb });
+    const after2 = getSnapshot(mockDb, POOL_ADDRESS, dayTs)!;
+
+    // No double-count.
+    assert.equal(
+      after2.transferCount,
+      1,
+      "transferCount must NOT increment on replay",
+    );
+    assert.equal(
+      after2.amounts[0],
+      AMOUNT_1E6,
+      "amount must NOT double on replay",
+    );
+    assert.equal(
+      after2.feesUsdWei,
+      after1.feesUsdWei,
+      "USD must NOT double on replay",
+    );
+  });
+
+  it("replay with newly-resolved symbol: heals snapshot without double-counting", async function () {
+    this.timeout(15_000);
+    let mockDb = MockDb.createMockDb();
+    mockDb = await seedFpmmPool(mockDb, POOL_ADDRESS);
+
+    // First indexing: token resolution failed → UNKNOWN.
+    const stalledTokenAddress = "0x000000000000000000000000000000000000feed";
+    _addMockAllowedFeeToken(CELO_CHAIN, stalledTokenAddress);
+    // Don't register meta — resolveFeeTokenMeta returns UNKNOWN/18.
+    const ev = createTransferEvent({
+      srcAddress: stalledTokenAddress,
+      blockTimestamp: TS_DAY1_MORNING,
+      blockNumber: 800,
+      logIndex: 2,
+    });
+    mockDb = await ERC20FeeToken.Transfer.processEvent({ event: ev, mockDb });
+
+    const dayTs = dayBucket(BigInt(TS_DAY1_MORNING));
+    const before = getSnapshot(mockDb, POOL_ADDRESS, dayTs)!;
+    assert.equal(before.tokenSymbols[0], "UNKNOWN");
+    assert.equal(before.feesUsdWei, 0n, "UNKNOWN contributes 0 USD");
+    assert.equal(before.unresolvedCount, 1);
+    assert.equal(before.transferCount, 1);
+
+    // Cache populates (e.g. another swap happened, FPMMDeployed, etc.) and
+    // the same event re-fires (replay).
+    _setMockFeeTokenMeta(CELO_CHAIN, stalledTokenAddress, {
+      symbol: "USDC",
+      decimals: USDC_DECIMALS,
+    });
+    mockDb = await ERC20FeeToken.Transfer.processEvent({ event: ev, mockDb });
+
+    const after = getSnapshot(mockDb, POOL_ADDRESS, dayTs)!;
+    // Metadata repaired.
+    assert.equal(after.tokenSymbols[0], "USDC");
+    assert.equal(after.tokenDecimals[0], USDC_DECIMALS);
+    // USD repriced for the prior amount, not double-counted.
+    assert.equal(after.amounts[0], AMOUNT_1E6, "amount unchanged");
+    assert.equal(
+      after.feesUsdWei,
+      computeFeeUsdWei({
+        tokenSymbol: "USDC",
+        tokenDecimals: USDC_DECIMALS,
+        amount: AMOUNT_1E6,
+      }),
+      "USD covers the prior accumulated amount, not 2x",
+    );
+    assert.equal(after.unresolvedCount, 0, "slot now resolved");
+    assert.equal(after.allPegged, true);
+    assert.equal(after.transferCount, 1, "transferCount unchanged on replay");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -731,9 +825,10 @@ describe("mergeFeeSnapshot pure function", () => {
   });
 
   // -------------------------------------------------------------------------
-  // unresolvedCount increments
+  // unresolvedCount = number of UNKNOWN slots in tokens[] (NOT transfer count)
   // -------------------------------------------------------------------------
-  it("unresolvedCount increments for UNKNOWN symbols", () => {
+  it("unresolvedCount counts UNKNOWN slots, not UNKNOWN transfers", () => {
+    // First UNKNOWN transfer for UNKNOWN_TOKEN: 1 unresolved slot.
     const first = mergeFeeSnapshot(
       undefined,
       makeInput({
@@ -741,9 +836,14 @@ describe("mergeFeeSnapshot pure function", () => {
         token: UNKNOWN_TOKEN,
       }),
     );
-    assert.equal(first.unresolvedCount, 1);
-    assert.equal(first.feesUsdWei, 0n);
+    assert.equal(first!.unresolvedCount, 1);
+    assert.equal(first!.feesUsdWei, 0n);
+    assert.equal(first!.tokens.length, 1);
 
+    // Second UNKNOWN transfer for the SAME token: still 1 unresolved slot.
+    // The slot already exists; we sum amounts but don't double-count the
+    // unresolved state. This matches the dashboard's "is this row
+    // approximate?" signal — it doesn't care about transfer count.
     const second = mergeFeeSnapshot(
       first,
       makeInput({
@@ -751,14 +851,240 @@ describe("mergeFeeSnapshot pure function", () => {
         token: UNKNOWN_TOKEN,
       }),
     );
-    assert.equal(second.unresolvedCount, 2);
+    assert.equal(
+      second!.unresolvedCount,
+      1,
+      "same UNKNOWN slot doesn't double-count",
+    );
+    assert.equal(second!.tokens.length, 1, "still one slot");
 
-    // A resolved transfer does NOT increment
+    // A resolved transfer for a DIFFERENT token: appends a new slot but
+    // doesn't change the unresolved count.
     const third = mergeFeeSnapshot(second, makeInput({}));
     assert.equal(
-      third.unresolvedCount,
+      third!.unresolvedCount,
+      1,
+      "resolved transfer for different token doesn't increment",
+    );
+    assert.equal(third!.tokens.length, 2, "two slots now");
+  });
+
+  it("unresolvedCount increments per distinct UNKNOWN token slot", () => {
+    const first = mergeFeeSnapshot(
+      undefined,
+      makeInput({ tokenSymbol: "UNKNOWN", token: UNKNOWN_TOKEN }),
+    );
+    const second = mergeFeeSnapshot(
+      first,
+      makeInput({
+        tokenSymbol: "UNKNOWN",
+        token: "0x000000000000000000000000000000000000ab12",
+      }),
+    );
+    assert.equal(
+      second!.unresolvedCount,
       2,
-      "resolved transfer does not increment",
+      "two distinct UNKNOWN token slots = count 2",
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // Self-heal: same-day UNKNOWN → resolved
+  // -------------------------------------------------------------------------
+  it("self-heals when a same-day re-write resolves a previously UNKNOWN slot", () => {
+    // Day-1: first transfer for token X arrives as UNKNOWN, amount 100.
+    const unknownAmount = 100n * 10n ** BigInt(USDC_DECIMALS);
+    const first = mergeFeeSnapshot(
+      undefined,
+      makeInput({
+        token: USDC_ADDRESS,
+        tokenSymbol: "UNKNOWN",
+        tokenDecimals: USDC_DECIMALS,
+        amount: unknownAmount,
+      }),
+    );
+    assert.equal(first!.unresolvedCount, 1);
+    assert.equal(first!.feesUsdWei, 0n, "UNKNOWN contributes 0 USD");
+    assert.equal(first!.allPegged, false, "UNKNOWN flips allPegged");
+
+    // Same day, second transfer for the SAME token, but symbol now resolves.
+    const resolvedAmount = 50n * 10n ** BigInt(USDC_DECIMALS);
+    const second = mergeFeeSnapshot(
+      first,
+      makeInput({
+        token: USDC_ADDRESS,
+        tokenSymbol: "USDC",
+        tokenDecimals: USDC_DECIMALS,
+        amount: resolvedAmount,
+      }),
+    );
+
+    // Slot metadata repaired.
+    assert.equal(second!.tokenSymbols[0], "USDC");
+    assert.equal(second!.tokenDecimals[0], USDC_DECIMALS);
+    // Both prior + new amount accumulated.
+    assert.equal(
+      second!.amounts[0],
+      unknownAmount + resolvedAmount,
+      "amounts accumulate across the heal",
+    );
+    // USD = repaired prior amount + new contribution. Both are USDC (pegged).
+    const expectedUsd = computeFeeUsdWei({
+      tokenSymbol: "USDC",
+      tokenDecimals: USDC_DECIMALS,
+      amount: unknownAmount + resolvedAmount,
+    });
+    assert.equal(
+      second!.feesUsdWei,
+      expectedUsd,
+      "feesUsdWei reprices the FULL accumulated amount",
+    );
+    assert.equal(second!.unresolvedCount, 0, "slot now resolved");
+    assert.equal(second!.allPegged, true, "all slots resolved + pegged");
+    assert.equal(second!.transferCount, 2, "transferCount tracks both");
+  });
+
+  it("self-heal in 'add' mode also adds the new transfer's amount", () => {
+    const priorAmount = 100n * 10n ** BigInt(USDC_DECIMALS);
+    const first = mergeFeeSnapshot(
+      undefined,
+      makeInput({
+        token: USDC_ADDRESS,
+        tokenSymbol: "UNKNOWN",
+        tokenDecimals: USDC_DECIMALS,
+        amount: priorAmount,
+      }),
+    );
+    const newAmount = 7n * 10n ** BigInt(USDC_DECIMALS);
+    const healed = mergeFeeSnapshot(
+      first,
+      makeInput({
+        token: USDC_ADDRESS,
+        tokenSymbol: "USDC",
+        tokenDecimals: USDC_DECIMALS,
+        amount: newAmount,
+      }),
+    );
+    assert.equal(healed!.amounts[0], priorAmount + newAmount);
+    // Total USD covers both.
+    assert.equal(
+      healed!.feesUsdWei,
+      computeFeeUsdWei({
+        tokenSymbol: "USDC",
+        tokenDecimals: USDC_DECIMALS,
+        amount: priorAmount + newAmount,
+      }),
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // Heal mode (replay): repair metadata only; don't add amount
+  // -------------------------------------------------------------------------
+  it("heal mode repairs metadata + reprices prior amount without adding", () => {
+    // Original add: UNKNOWN, amount 200.
+    const priorAmount = 200n * 10n ** BigInt(USDC_DECIMALS);
+    const original = mergeFeeSnapshot(
+      undefined,
+      makeInput({
+        token: USDC_ADDRESS,
+        tokenSymbol: "UNKNOWN",
+        tokenDecimals: USDC_DECIMALS,
+        amount: priorAmount,
+      }),
+    );
+
+    // Replay of the same event with newly resolved symbol — heal mode.
+    const healed = mergeFeeSnapshot(
+      original,
+      makeInput({
+        token: USDC_ADDRESS,
+        tokenSymbol: "USDC",
+        tokenDecimals: USDC_DECIMALS,
+        amount: priorAmount, // same amount; the prior call already counted it
+      }),
+      "heal",
+    );
+
+    // Slot metadata repaired.
+    assert.equal(healed!.tokenSymbols[0], "USDC");
+    assert.equal(healed!.tokenDecimals[0], USDC_DECIMALS);
+    // Amount UNCHANGED — heal mode doesn't add.
+    assert.equal(
+      healed!.amounts[0],
+      priorAmount,
+      "heal must NOT add amount (the original handler call already did)",
+    );
+    // USD repriced for the prior amount.
+    assert.equal(
+      healed!.feesUsdWei,
+      computeFeeUsdWei({
+        tokenSymbol: "USDC",
+        tokenDecimals: USDC_DECIMALS,
+        amount: priorAmount,
+      }),
+    );
+    assert.equal(healed!.unresolvedCount, 0);
+    assert.equal(healed!.allPegged, true);
+    // transferCount UNCHANGED — heal doesn't double-count.
+    assert.equal(
+      healed!.transferCount,
+      original!.transferCount,
+      "heal must NOT bump transferCount",
+    );
+  });
+
+  it("heal mode no-op returns null when snapshot doesn't exist", () => {
+    const result = mergeFeeSnapshot(undefined, makeInput({}), "heal");
+    assert.equal(result, null);
+  });
+
+  it("heal mode no-op returns existing unchanged when slot doesn't exist", () => {
+    const original = mergeFeeSnapshot(undefined, makeInput({}));
+    const result = mergeFeeSnapshot(
+      original,
+      makeInput({
+        token: "0x00000000000000000000000000000000000000ff",
+        tokenSymbol: "USDC",
+      }),
+      "heal",
+    );
+    assert.deepEqual(result, original);
+  });
+
+  it("self-heal preserves allPegged=false when other slots remain unresolved", () => {
+    // Slot 0: UNKNOWN. Slot 1 (different token): also UNKNOWN.
+    const first = mergeFeeSnapshot(
+      undefined,
+      makeInput({
+        token: USDC_ADDRESS,
+        tokenSymbol: "UNKNOWN",
+        tokenDecimals: USDC_DECIMALS,
+      }),
+    );
+    const second = mergeFeeSnapshot(
+      first,
+      makeInput({
+        token: UNKNOWN_TOKEN,
+        tokenSymbol: "UNKNOWN",
+        tokenDecimals: 18,
+      }),
+    );
+    assert.equal(second!.unresolvedCount, 2);
+
+    // Heal slot 0 (USDC). Slot 1 still UNKNOWN.
+    const partiallyHealed = mergeFeeSnapshot(
+      second,
+      makeInput({
+        token: USDC_ADDRESS,
+        tokenSymbol: "USDC",
+        tokenDecimals: USDC_DECIMALS,
+      }),
+    );
+    assert.equal(partiallyHealed!.unresolvedCount, 1);
+    assert.equal(
+      partiallyHealed!.allPegged,
+      false,
+      "allPegged stays false while ANY slot is unresolved",
     );
   });
 

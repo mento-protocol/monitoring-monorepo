@@ -33,6 +33,15 @@ ERC20FeeToken.Transfer.handler(
     const id = eventId(chainId, event.block.number, event.logIndex);
     const normalizedToken = asAddress(tokenAddress);
 
+    // Replay/reorg dedup: ProtocolFeeTransfer is event-id-keyed (same id =
+    // overwrite, idempotent), but the snapshot rollup is additive. If we've
+    // already indexed this event, branch:
+    //   - prior was UNKNOWN, symbol now resolved → snapshot heal-only path
+    //     (repair metadata + reprice the prior amount; don't double-count it)
+    //   - otherwise → replay no-op for the snapshot; the raw transfer row
+    //     still gets `set` below so the self-heal backfill still propagates.
+    const existingTransfer = await context.ProtocolFeeTransfer.get(id);
+
     const transfer: ProtocolFeeTransfer = {
       id,
       chainId,
@@ -48,21 +57,38 @@ ERC20FeeToken.Transfer.handler(
 
     context.ProtocolFeeTransfer.set(transfer);
 
-    // Upsert the per-pool daily fee snapshot. The backfill loop below only
-    // fixes ProtocolFeeTransfer rows; snapshot tokenSymbols[] are NOT
-    // backfilled in this version — old UNKNOWN entries persist until the
-    // next deploy resync. See src/protocolFeeSnapshot.ts for rationale.
-    await upsertPoolDailyFeeSnapshot({
-      context,
-      chainId,
-      pool,
-      blockTimestamp: BigInt(event.block.timestamp),
-      blockNumber: BigInt(event.block.number),
-      token: normalizedToken,
-      tokenSymbol: symbol,
-      tokenDecimals: decimals,
-      amount: event.params.value,
-    });
+    // Upsert the per-pool daily fee snapshot in the right mode.
+    if (!existingTransfer) {
+      await upsertPoolDailyFeeSnapshot({
+        context,
+        chainId,
+        pool,
+        blockTimestamp: BigInt(event.block.timestamp),
+        blockNumber: BigInt(event.block.number),
+        token: normalizedToken,
+        tokenSymbol: symbol,
+        tokenDecimals: decimals,
+        amount: event.params.value,
+        mode: "add",
+      });
+    } else if (
+      existingTransfer.tokenSymbol === "UNKNOWN" &&
+      symbol !== "UNKNOWN"
+    ) {
+      await upsertPoolDailyFeeSnapshot({
+        context,
+        chainId,
+        pool,
+        blockTimestamp: BigInt(event.block.timestamp),
+        blockNumber: BigInt(event.block.number),
+        token: normalizedToken,
+        tokenSymbol: symbol,
+        tokenDecimals: decimals,
+        amount: event.params.value,
+        mode: "heal",
+      });
+    }
+    // else: identical replay — snapshot already counted this event; no-op.
 
     // Backfill: if RPC succeeded and we now know the real symbol, fix any
     // previously stored UNKNOWN records for this token.
