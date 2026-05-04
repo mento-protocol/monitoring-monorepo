@@ -40,13 +40,26 @@ const MOCK_NETWORK_2: Network = {
   hasuraUrl: "https://hasura-sepolia.example.com/v1/graphql",
 };
 
+/**
+ * `token0` / `token1` carry symbol-shaped strings (not real addresses) — the
+ * mock network has empty `tokenSymbols` and `addressLabels`, so
+ * `tokenSymbol()` falls through to `truncateAddress()` which returns
+ * non-hex strings verbatim. That's enough for `buildOracleRateMap` to
+ * recognise the USDm leg and emit a rate for the FX leg, mirroring the
+ * fixture in `use-protocol-fees.test.ts`. Without the oracle rate the SSR
+ * path's empty-rates guard would set `ratesError` and null `fees` — fine
+ * production-side, but it means the happy-path test fixtures must include
+ * at least one oracle-eligible pool.
+ */
 function makePool(id: string): Pool {
   return {
     id,
     chainId: 42220,
-    token0: null,
-    token1: null,
+    token0: "USDm",
+    token1: "EURm",
     source: "FPMM",
+    oraclePrice: "1140000000000000000000000",
+    oracleOk: true,
     createdAtBlock: "1",
     createdAtTimestamp: "1000",
     updatedAtBlock: "2",

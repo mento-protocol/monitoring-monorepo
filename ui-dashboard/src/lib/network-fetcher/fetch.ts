@@ -477,9 +477,27 @@ export async function fetchNetworkData(
   const feeSnapshotsTruncated =
     feeSnapshotsResult.status === "fulfilled" &&
     feeSnapshotsResult.value.truncated;
+  // Rates failure on the homepage SSR path: rates are derived from `pools`
+  // (no separate query), so a query-level rates failure already early-
+  // returned via the `pools` catch above. The remaining failure mode is
+  // `buildOracleRateMap` returning an empty map even when `pools` has
+  // rows — i.e., every oracle pool has `oracleOk: false` or no oracle
+  // pools exist on this chain. That silently mis-prices FX-token slots
+  // in `aggregateProtocolFees` since `tokenToUSD` returns null for
+  // unknown symbols and only USD-pegged tokens contribute. Match the
+  // hook's fail-loud invariant: if we expected rates and got none, set
+  // `ratesError` so consumers blank the tile rather than render a
+  // confidently-wrong (understated) total.
+  const ssrRatesError =
+    pools.length > 0 && rates.size === 0
+      ? new Error(
+          `Oracle rates unavailable for ${network.label} — FX-token fees can't be priced`,
+        )
+      : null;
   const fees =
     feeSnapshotsResult.status === "fulfilled" &&
-    feeSnapshotsResult.value.error === null
+    feeSnapshotsResult.value.error === null &&
+    ssrRatesError === null
       ? aggregateProtocolFees(feeSnapshots, rates)
       : null;
 
@@ -621,11 +639,7 @@ export async function fetchNetworkData(
     feeSnapshots,
     feeSnapshotsError,
     feeSnapshotsTruncated,
-    // Homepage SSR path doesn't fetch oracle rates separately — rates come
-    // from `pools` query above which is gated by the early-return error
-    // path, so a rates "failure" surfaces as the top-level `error`. Leave
-    // `ratesError` null here.
-    ratesError: null,
+    ratesError: ssrRatesError,
     poolLabels: new Map(),
     uniqueLpAddresses,
     rates,
