@@ -65,6 +65,7 @@ function renderChart(
     isLoading: false,
     hasError: false,
     hasSnapshotError: false,
+    hasBrokerSnapshotError: false,
     ...overrides,
   };
 
@@ -519,6 +520,78 @@ describe("VolumeOverTimeChart render", () => {
     // the delta is null. The 30d range itself does NOT suppress the pill —
     // the WoW basis is always 7d-vs-7d, independent of visible range.
     expect(html).not.toContain("week-over-week");
+  });
+
+  it("renders `— v2` (not $0.00 v2) when the broker rollup errored", () => {
+    // hasBrokerSnapshotError must be a distinct unavailable state from the
+    // legitimate "$0 swaps today" case — otherwise a Broker query failure
+    // poisons the v2 number while the v3 side continues to render confidently.
+    const today = dayAlignedNow();
+    const html = renderChart({
+      networkData: makeVolumeNetworkData([
+        {
+          timestamp: today - SECONDS_PER_DAY,
+          swapVolume0: "1000000000000000000",
+        },
+      ]),
+      hasBrokerSnapshotError: true,
+    });
+
+    expect(html).toContain("$1.00 v3 · — v2");
+    expect(html).not.toContain("$0.00 v2");
+  });
+
+  it("includes per-day v3+v2 sum in the chart card's series prop so stacked y-axis ceiling fits", () => {
+    // The chart card derives the y-axis range from `max([...series.value,
+    // ...breakdownYs])`. In stacked mode the rendered top is v3+v2 per day,
+    // so `series` MUST carry the summed value or large v2 days clip past
+    // the ceiling.
+    const today = dayAlignedNow();
+    const day0 = today - 2 * SECONDS_PER_DAY;
+    const day1 = today - 1 * SECONDS_PER_DAY;
+    capturedPlotProps = {};
+    renderChart({
+      networkData: [
+        makeNetworkData({
+          network: TVL_NETWORK,
+          pools: [makeTvlPool({ id: "pool-a" })],
+          snapshots30d: [
+            // v3 = $3 on day0, $5 on day1
+            makeSnapshot({
+              poolId: "pool-a",
+              timestamp: day0,
+              swapVolume0: "3000000000000000000",
+            }),
+            makeSnapshot({
+              poolId: "pool-a",
+              timestamp: day1,
+              swapVolume0: "5000000000000000000",
+            }),
+          ],
+          // v2 = $4 on day0, $0 on day1
+          brokerSnapshotsAllDaily: [
+            {
+              id: `42220-bipool-direct-${day0}`,
+              timestamp: String(day0),
+              volumeUsdWei: "4000000000000000000",
+              swapCount: 1,
+            },
+          ],
+        }),
+      ],
+    });
+
+    // The chart card derives `yaxis.range` from `max([...series.value,
+    // ...breakdownYs])`. In stacked mode the breakdown traces don't carry
+    // the cumulative top — only the summed-`series` prop does. So the
+    // y-axis ceiling MUST be at or above the actual stacked top of $7
+    // (v3 $3 + v2 $4 on day0). Pre-fix it was max($5 v3 day1, $4 v2 day0) =
+    // $5, so day0's stack ($7) clipped past the ceiling.
+    const yRange = (
+      capturedPlotProps.layout?.yaxis as { range?: [number, number] }
+    )?.range;
+    expect(yRange).toBeDefined();
+    expect(yRange![1]).toBeGreaterThanOrEqual(7);
   });
 
   it("shows the WoW delta pill labeled 'v3 week-over-week' at the default range when ≥15 days of v3 history exist", () => {

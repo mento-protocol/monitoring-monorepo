@@ -271,8 +271,9 @@ function GlobalContent({
           isLoading={isLoading}
           hasError={anyNetworkError}
           hasSnapshotError={
-            anySnapshotsAllDailyError ||
-            anySnapshotsAllDailyTruncated ||
+            anySnapshotsAllDailyError || anySnapshotsAllDailyTruncated
+          }
+          hasBrokerSnapshotError={
             anyBrokerSnapshotsAllDailyError ||
             anyBrokerSnapshotsAllDailyTruncated
           }

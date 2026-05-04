@@ -2,8 +2,8 @@
 import { assert } from "chai";
 import generated from "generated";
 import {
-  _setMockERC20Decimals,
-  _clearMockERC20Decimals,
+  _setMockFeeTokenMeta,
+  _clearMockFeeTokenMeta,
 } from "../src/EventHandlers.ts";
 import { dayBucket } from "../src/helpers.ts";
 import { getContractAddress } from "../src/contractAddresses.ts";
@@ -91,14 +91,19 @@ const fireSwap = async (
 };
 
 describe("Broker.Swap handler", () => {
+  // The handler resolves token metadata via `resolveFeeTokenMeta`, which uses
+  // the fee-token mock map (`_setMockFeeTokenMeta`), not the ERC20-decimals
+  // map. Mocking through the wrong helper would silently rely on
+  // KNOWN_TOKEN_META static fallback for cUSD/USDC and provide false coverage
+  // the moment a test introduces a non-standard token.
   beforeEach(() => {
-    _clearMockERC20Decimals();
-    _setMockERC20Decimals(CHAIN_CELO, CUSD, 18);
-    _setMockERC20Decimals(CHAIN_CELO, USDC, 6);
+    _clearMockFeeTokenMeta();
+    _setMockFeeTokenMeta(CHAIN_CELO, CUSD, { symbol: "cUSD", decimals: 18 });
+    _setMockFeeTokenMeta(CHAIN_CELO, USDC, { symbol: "USDC", decimals: 6 });
   });
 
   afterEach(() => {
-    _clearMockERC20Decimals();
+    _clearMockFeeTokenMeta();
   });
 
   it("persists a BrokerSwapEvent row with lowercased addresses and 18-dp USD notional", async () => {

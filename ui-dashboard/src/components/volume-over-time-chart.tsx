@@ -228,10 +228,17 @@ export function weekOverWeekChangePct(
 // Show "N/A" only on explicit failure. An empty series without errors
 // legitimately sums to $0 (no volume yet) — flagging it N/A would conflate
 // "no activity" with "data missing".
+//
+// `hasBrokerSnapshotError` is split out from the combined `hasSnapshotError`
+// so a Broker query failure / pagination cap renders v2 as "—" (data
+// unavailable) without poisoning the v3 number, which is fetched from a
+// different rollup. Otherwise a confident "$X v3 · $0 v2" misleads on every
+// Broker outage even when v3 is fully synced.
 function computeHeadline(
   isLoading: boolean,
   hasError: boolean,
   hasSnapshotError: boolean,
+  hasBrokerSnapshotError: boolean,
   v3Points: SeriesPoint[],
   v2Points: SeriesPoint[],
   v3Total: number,
@@ -241,7 +248,8 @@ function computeHeadline(
   if (hasError) return "N/A";
   if (hasSnapshotError && v3Points.length === 0 && v2Points.length === 0)
     return "N/A";
-  return `${formatUSD(v3Total)} v3 · ${formatUSD(v2Total)} v2`;
+  const v2Cell = hasBrokerSnapshotError ? "— v2" : `${formatUSD(v2Total)} v2`;
+  return `${formatUSD(v3Total)} v3 · ${v2Cell}`;
 }
 
 interface VolumeOverTimeChartProps {
@@ -249,6 +257,12 @@ interface VolumeOverTimeChartProps {
   isLoading: boolean;
   hasError: boolean;
   hasSnapshotError: boolean;
+  /**
+   * True when the Broker rollup query failed or its pagination truncated
+   * before reaching the visible window. Renders "— v2" so a Broker outage
+   * doesn't masquerade as a confident `$0 v2` when v3 loaded normally.
+   */
+  hasBrokerSnapshotError: boolean;
 }
 
 export function VolumeOverTimeChart({
@@ -256,6 +270,7 @@ export function VolumeOverTimeChart({
   isLoading,
   hasError,
   hasSnapshotError,
+  hasBrokerSnapshotError,
 }: VolumeOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("30d");
 
@@ -344,28 +359,30 @@ export function VolumeOverTimeChart({
     [visibleV2Points],
   );
 
-  // The chart card reads `series` for the x-axis timestamps and the
-  // empty-state gate (`!isLoading && series.length === 0`). The y-axis range
-  // in stacked mode comes from the breakdown traces, so the `value` field
-  // here is intentionally unused — do NOT "fix" it by summing v2+v3, the
-  // stack would render that sum as a hidden third series and double-paint.
-  // We pick the longer side so that on the "all" tab where the Broker may
-  // have synced earlier days than v3 (or vice versa) the x-axis still
-  // covers every bucket; Plotly aligns by timestamp value not index, so
-  // missing days on the shorter series render correctly as zero.
-  const visibleSeriesForCard = useMemo<TimeSeriesPoint[]>(
-    () =>
-      (visibleV3Points.length >= visibleV2Points.length
-        ? visibleV3Points
-        : visibleV2Points
-      ).map((p) => ({ timestamp: p.timestamp, value: p.volumeUSD })),
-    [visibleV3Points, visibleV2Points],
-  );
+  // Stacked-total series for the chart card. Required because the card's
+  // y-axis ceiling is derived from `max([...series.value, ...breakdownYs])`,
+  // and Plotly's `stackgroup: "total"` renders cumulative heights — so the
+  // ceiling must reflect the per-day v3+v2 sum, not just whichever
+  // individual trace happens to be largest. Without this, on any day where
+  // v2 ≥ ~35% of v3 the stacked top exceeds y-max and Plotly clips the
+  // upper bars. Day buckets are aligned (both helpers floor to UTC-day),
+  // so summing by timestamp is exact.
+  const visibleSeriesForCard = useMemo<TimeSeriesPoint[]>(() => {
+    const byTs = new Map<number, number>();
+    for (const p of visibleV3Points)
+      byTs.set(p.timestamp, (byTs.get(p.timestamp) ?? 0) + p.volumeUSD);
+    for (const p of visibleV2Points)
+      byTs.set(p.timestamp, (byTs.get(p.timestamp) ?? 0) + p.volumeUSD);
+    return Array.from(byTs)
+      .sort((a, b) => a[0] - b[0])
+      .map(([timestamp, value]) => ({ timestamp, value }));
+  }, [visibleV3Points, visibleV2Points]);
 
   const headline = computeHeadline(
     isLoading,
     hasError,
     hasSnapshotError,
+    hasBrokerSnapshotError,
     visibleV3Points,
     visibleV2Points,
     v3RangeTotal,
