@@ -401,6 +401,46 @@ describe("useTableSort — handleSort honors defaultDir on new-key reset", () =>
   });
 });
 
+describe("useTableSort — popstate (browser back/forward) syncs state from URL", () => {
+  it("updates state when popstate fires after the URL changed externally", () => {
+    setup(new URLSearchParams("Sort=pool&Dir=asc"));
+    const ref: ResultRef = { current: null };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { resultRef: ref }));
+    });
+    expect(ref.current?.sortKey).toBe("pool");
+    expect(ref.current?.sortDir).toBe("asc");
+
+    // Simulate the browser back button: URL changes, then `popstate` fires.
+    // We update `window.location` via `replaceState` first (without listener)
+    // then dispatch `popstate` separately.
+    window.history.replaceState(
+      window.history.state,
+      "",
+      "/?Sort=volume24h&Dir=desc",
+    );
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(ref.current?.sortKey).toBe("volume24h");
+    expect(ref.current?.sortDir).toBe("desc");
+  });
+
+  it("falls back to defaults when popstate fires with empty params", () => {
+    setup(new URLSearchParams("Sort=pool&Dir=asc"));
+    const ref: ResultRef = { current: null };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { resultRef: ref }));
+    });
+    window.history.replaceState(window.history.state, "", "/");
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(ref.current?.sortKey).toBe("tvl");
+    expect(ref.current?.sortDir).toBe("desc");
+  });
+});
+
 describe("useTableSort — rapid toggles compose without dropping intent", () => {
   it("two consecutive toggles on the active key produce the expected final state", () => {
     setup(); // default tvl/desc — same key, same closure across both clicks

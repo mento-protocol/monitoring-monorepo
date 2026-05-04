@@ -153,6 +153,32 @@ export function useTableSort<K extends string>({
     // bounce the URL when the user clicks a header before the effect resolves.
   }, []);
 
+  // Sync local state from URL when the browser back/forward buttons fire
+  // popstate. We can't rely on `useSearchParams` here: our own writes go
+  // through `history.replaceState` which doesn't notify Next.js's router,
+  // so `searchParams` stays stale across our writes. `popstate`, however,
+  // only fires for genuine navigation (back/forward) — never for our own
+  // `replaceState` calls — which makes it the right signal to listen for.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const next = readSortFromParams(
+        params,
+        sortParam,
+        dirParam,
+        validKeys,
+        defaultKey,
+        defaultDir,
+      );
+      setState((prev) =>
+        prev.key === next.key && prev.dir === next.dir ? prev : next,
+      );
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [sortParam, dirParam, validKeys, defaultKey, defaultDir]);
+
   const handleSort = useCallback(
     (key: K) => {
       setState((prev) => {
