@@ -11,6 +11,7 @@ import {
 } from "../tradingLimits";
 import { fetchTradingLimits } from "../rpc";
 import { maybePreloadPool, upsertPool, upsertSnapshot } from "../pool";
+import { buildSwapTraderFields } from "../swap";
 
 // ---------------------------------------------------------------------------
 // FPMM.Swap
@@ -169,6 +170,7 @@ FPMM.Swap.handler(async ({ event, context }) => {
     poolId,
     sender: asAddress(event.params.sender),
     recipient: asAddress(event.params.to),
+    ...buildSwapTraderFields(event, pool),
     amount0In: event.params.amount0In,
     amount1In: event.params.amount1In,
     amount0Out: event.params.amount0Out,

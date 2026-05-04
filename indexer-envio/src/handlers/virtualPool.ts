@@ -13,7 +13,12 @@ import {
 } from "generated";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
-import { buildRebalanceOutcome } from "../priceDifference";
+import { buildSwapTraderFields } from "../swap";
+import { fetchTokenDecimalsScaling } from "../rpc";
+import {
+  buildRebalanceOutcome,
+  scalingFactorToDecimals,
+} from "../priceDifference";
 
 // ---------------------------------------------------------------------------
 // VirtualPoolFactory.VirtualPoolDeployed
@@ -34,6 +39,22 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
   const poolId = makePoolId(event.chainId, event.params.pool);
   const token0 = asAddress(event.params.token0);
   const token1 = asAddress(event.params.token1);
+  const poolAddr = asAddress(event.params.pool);
+
+  // Fetch token decimals so `Pool.token{0,1}Decimals` are correct from the
+  // start instead of inheriting the 18/18 default. Mirrors the FPMM factory
+  // pattern (handlers/fpmm/factory.ts). Required for `volumeUsdWei` to scale
+  // correctly when a USD-pegged non-18dp token (e.g. USDC, 6dp) is on a leg.
+  const [dec0Raw, dec1Raw] = await Promise.all([
+    fetchTokenDecimalsScaling(event.chainId, poolAddr, "decimals0", token0),
+    fetchTokenDecimalsScaling(event.chainId, poolAddr, "decimals1", token1),
+  ]);
+  const token0Decimals = dec0Raw
+    ? (scalingFactorToDecimals(dec0Raw) ?? 18)
+    : 18;
+  const token1Decimals = dec1Raw
+    ? (scalingFactorToDecimals(dec1Raw) ?? 18)
+    : 18;
 
   await upsertPool({
     context,
@@ -45,6 +66,7 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
     blockNumber: asBigInt(event.block.number),
     blockTimestamp: asBigInt(event.block.timestamp),
     txHash: event.transaction.hash,
+    tokenDecimals: { token0Decimals, token1Decimals },
     oracleDelta: {
       ...DEFAULT_ORACLE_FIELDS,
       healthStatus: "N/A",
@@ -147,6 +169,7 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
     poolId,
     sender: asAddress(event.params.sender),
     recipient: asAddress(event.params.to),
+    ...buildSwapTraderFields(event, pool),
     amount0In: event.params.amount0In,
     amount1In: event.params.amount1In,
     amount0Out: event.params.amount0Out,

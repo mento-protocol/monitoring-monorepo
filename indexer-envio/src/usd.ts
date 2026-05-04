@@ -40,6 +40,45 @@ function formatFixed4(value: bigint, decimals: number): string {
   return `${int4dp / SCALE}.${String(int4dp % SCALE).padStart(4, "0")}`;
 }
 
+/**
+ * Pick the USD-pegged side from two absolute token amounts. If both sides are
+ * pegged (stable/stable), prefers the side with the larger USD notional after
+ * decimal normalization to be robust against asymmetric fees/rounding. Cross-
+ * multiplies to compare without dividing: a/10^da ≥ b/10^db ⇔ a × 10^db ≥ b × 10^da.
+ *
+ * Returns `null` when token addresses are missing, both abs amounts are zero,
+ * or neither side is in `USD_PEGGED_SYMBOLS`.
+ */
+function pickPeggedSide(
+  chainId: number,
+  token0: string | undefined,
+  token1: string | undefined,
+  abs0: bigint,
+  abs1: bigint,
+  decimals0: number,
+  decimals1: number,
+): { peggedAmount: bigint; peggedDecimals: number } | null {
+  if (!token0 || !token1 || (abs0 === 0n && abs1 === 0n)) return null;
+
+  const sym0 = KNOWN_TOKEN_META.get(
+    `${chainId}:${token0.toLowerCase()}`,
+  )?.symbol;
+  const sym1 = KNOWN_TOKEN_META.get(
+    `${chainId}:${token1.toLowerCase()}`,
+  )?.symbol;
+  const peg0 = sym0 !== undefined && USD_PEGGED_SYMBOLS.has(sym0);
+  const peg1 = sym1 !== undefined && USD_PEGGED_SYMBOLS.has(sym1);
+  if (!peg0 && !peg1) return null;
+
+  const useToken0 =
+    peg0 &&
+    (!peg1 ||
+      abs0 * 10n ** BigInt(decimals1) >= abs1 * 10n ** BigInt(decimals0));
+  return useToken0
+    ? { peggedAmount: abs0, peggedDecimals: decimals0 }
+    : { peggedAmount: abs1, peggedDecimals: decimals1 };
+}
+
 export interface RebalanceUsdInput {
   chainId: number;
   /** Pool.token0 / token1. Optional — VirtualPools can lack token addresses,
@@ -87,40 +126,111 @@ export function computeRebalanceUsd(input: RebalanceUsdInput): RebalanceUsd {
     rewardBps,
   } = input;
 
-  if (!token0 || !token1 || (amount0Delta === 0n && amount1Delta === 0n)) {
-    return { notionalUsd: "", rewardUsd: "" };
-  }
-
-  const sym0 = KNOWN_TOKEN_META.get(
-    `${chainId}:${token0.toLowerCase()}`,
-  )?.symbol;
-  const sym1 = KNOWN_TOKEN_META.get(
-    `${chainId}:${token1.toLowerCase()}`,
-  )?.symbol;
-  const peg0 = sym0 !== undefined && USD_PEGGED_SYMBOLS.has(sym0);
-  const peg1 = sym1 !== undefined && USD_PEGGED_SYMBOLS.has(sym1);
-
-  if (!peg0 && !peg1) {
-    return { notionalUsd: "", rewardUsd: "" };
-  }
-
-  // Pick the pegged side. If both pegged, prefer the one with the larger
-  // USD notional after decimal scaling — cross-multiply to compare without
-  // dividing: a/10^da >= b/10^db ⇔ a × 10^db >= b × 10^da.
-  const a0 = bAbs(amount0Delta);
-  const a1 = bAbs(amount1Delta);
-  const useToken0 =
-    peg0 &&
-    (!peg1 ||
-      a0 * 10n ** BigInt(token1Decimals) >= a1 * 10n ** BigInt(token0Decimals));
-  const absDelta = useToken0 ? a0 : a1;
-  const decimals = useToken0 ? token0Decimals : token1Decimals;
-
-  const notionalUsd = formatFixed4(absDelta, decimals);
-  const rewardUsd = formatFixed4(
-    (absDelta * BigInt(rewardBps)) / 10_000n,
-    decimals,
+  const picked = pickPeggedSide(
+    chainId,
+    token0,
+    token1,
+    bAbs(amount0Delta),
+    bAbs(amount1Delta),
+    token0Decimals,
+    token1Decimals,
   );
+  if (picked === null) return { notionalUsd: "", rewardUsd: "" };
 
+  const { peggedAmount, peggedDecimals } = picked;
+  const notionalUsd = formatFixed4(peggedAmount, peggedDecimals);
+  const rewardUsd = formatFixed4(
+    applyFeeBps(peggedAmount, rewardBps),
+    peggedDecimals,
+  );
   return { notionalUsd, rewardUsd };
+}
+
+// ---------------------------------------------------------------------------
+// Swap USD valuation
+// ---------------------------------------------------------------------------
+
+/** Common scale for aggregated USD fields in trader/aggregator snapshots.
+ *  18 decimals (matches ETH-wei convention) — chosen so a single BigInt cell
+ *  comfortably holds total volume across years without precision loss, and
+ *  arithmetic is plain BigInt addition. */
+export const USD_WEI_DECIMALS = 18;
+
+/** Scale a token-native amount to 18-decimal USD-wei.
+ *  Assumes the input token is USD-pegged (1 token = $1).
+ *  Truncates (not rounds) when `tokenDecimals > 18`. No USD-pegged token
+ *  exceeds 18 decimals today; revisit if that ever changes. */
+function scaleToUsdWei(amount: bigint, tokenDecimals: number): bigint {
+  if (tokenDecimals === USD_WEI_DECIMALS) return amount;
+  if (tokenDecimals < USD_WEI_DECIMALS) {
+    return amount * 10n ** BigInt(USD_WEI_DECIMALS - tokenDecimals);
+  }
+  return amount / 10n ** BigInt(tokenDecimals - USD_WEI_DECIMALS);
+}
+
+export interface SwapUsdInput {
+  chainId: number;
+  token0: string | undefined;
+  token1: string | undefined;
+  token0Decimals: number;
+  token1Decimals: number;
+  amount0In: bigint;
+  amount0Out: bigint;
+  amount1In: bigint;
+  amount1Out: bigint;
+}
+
+/**
+ * Compute the USD notional of a swap as 18-decimal USD-wei.
+ *
+ * Picks the USD-pegged side (per `USD_PEGGED_SYMBOLS`) and uses
+ * `|amountIn - amountOut|` of that side as the notional — exactly one of in/out
+ * is non-zero per side in a normal swap, so the absolute difference equals the
+ * traded amount. If both sides are pegged (stable/stable), prefers the side
+ * with the larger USD notional after decimal normalization (defensive against
+ * fee/rounding asymmetry).
+ *
+ * Returns `0n` when neither token address is provided or neither side is
+ * pegged. Callers should distinguish "uncomputable" from "zero-volume swap"
+ * by also checking the raw amounts.
+ */
+export function computeSwapUsdWei(input: SwapUsdInput): bigint {
+  const {
+    chainId,
+    token0,
+    token1,
+    token0Decimals,
+    token1Decimals,
+    amount0In,
+    amount0Out,
+    amount1In,
+    amount1Out,
+  } = input;
+
+  // Match the gross-leg convention used by `Pool.notionalVolume0/1` upserts
+  // (handlers/fpmm.ts, handlers/virtualPool.ts): notional per side is the
+  // larger of (in, out). For standard Uniswap-V2-style swaps exactly one is
+  // non-zero so this equals |in − out|; for callback/flash-style flows where
+  // both are non-zero, gross is the correct accounting choice.
+  const a0 = amount0In > amount0Out ? amount0In : amount0Out;
+  const a1 = amount1In > amount1Out ? amount1In : amount1Out;
+
+  const picked = pickPeggedSide(
+    chainId,
+    token0,
+    token1,
+    a0,
+    a1,
+    token0Decimals,
+    token1Decimals,
+  );
+  if (picked === null) return 0n;
+  return scaleToUsdWei(picked.peggedAmount, picked.peggedDecimals);
+}
+
+/** Multiply USD-wei by a fee bps and return the fee in USD-wei.
+ *  `feeBps` is integer bps (e.g., 30 = 0.30%). */
+export function applyFeeBps(volumeUsdWei: bigint, feeBps: number): bigint {
+  if (feeBps <= 0) return 0n;
+  return (volumeUsdWei * BigInt(feeBps)) / 10_000n;
 }

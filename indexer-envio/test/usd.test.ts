@@ -1,9 +1,12 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
 import {
+  applyFeeBps,
   computeRebalanceUsd,
+  computeSwapUsdWei,
   normalizeRewardBps,
   USD_PEGGED_SYMBOLS,
+  USD_WEI_DECIMALS,
 } from "../src/usd";
 
 // Real Celo mainnet addresses — resolvable through KNOWN_TOKEN_META
@@ -182,6 +185,140 @@ describe("USD_PEGGED_SYMBOLS — drift protection vs ui-dashboard/src/lib/tokens
       [...EXPECTED].sort(),
       "indexer USD_PEGGED_SYMBOLS drifted from ui-dashboard/src/lib/tokens.ts:12-21 — update both in lockstep",
     );
+  });
+});
+
+describe("computeSwapUsdWei", () => {
+  // Helper: build USD-wei from a USD figure expressed in dollars.
+  const usd = (n: bigint | number): bigint =>
+    typeof n === "bigint"
+      ? n * 10n ** BigInt(USD_WEI_DECIMALS)
+      : BigInt(n) * 10n ** BigInt(USD_WEI_DECIMALS);
+
+  it("USDm/CELO swap selling 1000 USDm → 1000 USD-wei", () => {
+    // amount0In = 1000 USDm (18dp), amount1Out = received CELO
+    // Pegged side is token0 → notional = 1000 USD.
+    const result = computeSwapUsdWei({
+      chainId: CHAIN_CELO,
+      token0: USDM,
+      token1: CELO,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      amount0In: 1_000n * 10n ** 18n,
+      amount0Out: 0n,
+      amount1In: 0n,
+      amount1Out: 1_500n * 10n ** 18n,
+    });
+    assert.equal(result, usd(1000));
+  });
+
+  it("USDm side as token1, buying USDm → reads from amount1Out", () => {
+    const result = computeSwapUsdWei({
+      chainId: CHAIN_CELO,
+      token0: CELO,
+      token1: USDM,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      amount0In: 1_500n * 10n ** 18n,
+      amount0Out: 0n,
+      amount1In: 0n,
+      amount1Out: 1_000n * 10n ** 18n,
+    });
+    assert.equal(result, usd(1000));
+  });
+
+  it("USDC (6dp) swap → scales up to 18-decimal USD-wei", () => {
+    // 1234.567890 USDC = 1_234_567_890 wei (6dp). USD-wei = 1234.567890 × 10^18
+    const result = computeSwapUsdWei({
+      chainId: CHAIN_CELO,
+      token0: USDC,
+      token1: CELO,
+      token0Decimals: 6,
+      token1Decimals: 18,
+      amount0In: 1_234_567_890n,
+      amount0Out: 0n,
+      amount1In: 0n,
+      amount1Out: 1_000n * 10n ** 18n,
+    });
+    // 1_234_567_890 × 10^12 = 1234567890000000000000 wei = 1234.567890 USD
+    assert.equal(result, 1_234_567_890n * 10n ** 12n);
+  });
+
+  it("non-pegged token + unknown token → 0", () => {
+    const result = computeSwapUsdWei({
+      chainId: CHAIN_CELO,
+      token0: UNKNOWN_TOKEN,
+      token1: CELO,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      amount0In: 1_000n * 10n ** 18n,
+      amount0Out: 0n,
+      amount1In: 0n,
+      amount1Out: 1_500n * 10n ** 18n,
+    });
+    assert.equal(result, 0n);
+  });
+
+  it("missing token addresses → 0", () => {
+    const result = computeSwapUsdWei({
+      chainId: CHAIN_CELO,
+      token0: undefined,
+      token1: undefined,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      amount0In: 1_000n * 10n ** 18n,
+      amount0Out: 0n,
+      amount1In: 0n,
+      amount1Out: 1_500n * 10n ** 18n,
+    });
+    assert.equal(result, 0n);
+  });
+
+  it("both sides USD-pegged (USDm/USDC): picks side with larger USD notional", () => {
+    // USDm side: |amount0In - amount0Out| = 1000.0 USDm
+    // USDC side: |amount1In - amount1Out| = 1000.0001 USDC (slightly larger)
+    // Should use the USDC side.
+    const result = computeSwapUsdWei({
+      chainId: CHAIN_CELO,
+      token0: USDM,
+      token1: USDC,
+      token0Decimals: 18,
+      token1Decimals: 6,
+      amount0In: 1_000n * 10n ** 18n,
+      amount0Out: 0n,
+      amount1In: 0n,
+      amount1Out: 1_000_000_100n,
+    });
+    // 1_000_000_100 × 10^12 = 1000.0001 × 10^18
+    assert.equal(result, 1_000_000_100n * 10n ** 12n);
+  });
+
+  it("zero amounts → 0 USD-wei (degenerate, but well-defined)", () => {
+    const result = computeSwapUsdWei({
+      chainId: CHAIN_CELO,
+      token0: USDM,
+      token1: CELO,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      amount0In: 0n,
+      amount0Out: 0n,
+      amount1In: 0n,
+      amount1Out: 0n,
+    });
+    assert.equal(result, 0n);
+  });
+});
+
+describe("applyFeeBps", () => {
+  const oneUsd = 10n ** 18n;
+  it("30 bps on 1000 USD = 3.0 USD", () => {
+    assert.equal(applyFeeBps(1000n * oneUsd, 30), 3n * oneUsd);
+  });
+  it("0 bps → 0", () => {
+    assert.equal(applyFeeBps(1000n * oneUsd, 0), 0n);
+  });
+  it("negative bps → 0 (defensive against -1/-2 sentinels)", () => {
+    assert.equal(applyFeeBps(1000n * oneUsd, -1), 0n);
   });
 });
 
