@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import Link from "next/link";
 import { formatUSD, truncateAddress } from "@/lib/format";
 import { poolName } from "@/lib/tokens";
@@ -15,6 +15,7 @@ import { buildPoolDetailHref } from "@/lib/routing";
 import type { NetworkData, PoolLabel } from "@/lib/fetch-all-networks";
 import type { Network } from "@/lib/networks";
 import type { SortDir } from "@/lib/table-sort";
+import { useTableSort } from "@/lib/use-table-sort";
 
 type PoolFeeRow = PoolFeeEntry & {
   network: Network;
@@ -22,6 +23,15 @@ type PoolFeeRow = PoolFeeEntry & {
 };
 
 type SortKey = "pool" | "chain" | "fees24h" | "fees7d" | "fees30d" | "feesAll";
+
+const SORT_KEYS: ReadonlySet<SortKey> = new Set([
+  "pool",
+  "chain",
+  "fees24h",
+  "fees7d",
+  "fees30d",
+  "feesAll",
+]);
 
 interface RevenueByPoolTableProps {
   networkData: NetworkData[];
@@ -168,17 +178,12 @@ export function RevenueByPoolTable({
   hasError,
 }: RevenueByPoolTableProps) {
   const rows = useMemo(() => buildRows(networkData), [networkData]);
-  const [sortKey, setSortKey] = useState<SortKey>("fees7d");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
-
-  const handleSort = (key: SortKey) => {
-    if (key === sortKey) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("desc");
-    }
-  };
+  const { sortKey, sortDir, handleSort } = useTableSort<SortKey>({
+    defaultKey: "fees7d",
+    defaultDir: "desc",
+    validKeys: SORT_KEYS,
+    paramPrefix: "leaderboard",
+  });
 
   const sorted = useMemo(
     () => sortRows(rows, sortKey, sortDir),

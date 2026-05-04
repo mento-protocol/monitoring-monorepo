@@ -4,6 +4,12 @@ import type { ReactNode } from "react";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ replace: vi.fn() }),
+  usePathname: () => "/pools",
+}));
+
 // Mock weekend detection so tests are deterministic.
 vi.mock("@/lib/weekend", () => ({
   isWeekend: vi.fn(() => false),
