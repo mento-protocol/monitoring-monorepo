@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { chainColor } from "@/lib/chain-colors";
 import { formatUSD } from "@/lib/format";
 import {
   getSnapshotVolumeInUsd,
@@ -27,6 +26,18 @@ export type ChainVolumeSeries = {
   network: Network;
   series: SeriesPoint[];
 };
+
+// Mento-protocol indigo for v3 (Router-driven) and a teal contrast for v2
+// (legacy Broker → BiPoolManager). v3 dominates today, so it sits at the
+// bottom of the stack and uses the brand color; v2 stacks on top in a
+// distinct teal so the gap reads at a glance even when small.
+const V3_COLOR = "#6366f1"; // indigo-500
+const V2_COLOR = "#14b8a6"; // teal-500
+
+// 1e16 — divide BigInt USD-wei by this to land in "cent" units that fit in
+// Number safely above MAX_SAFE_INTEGER. Hoisted out of `buildBrokerDailyV2Series`
+// so it's not recomputed per row. ES2017 target prevents BigInt literals.
+const USD_WEI_PER_CENT = BigInt(10) ** BigInt(16);
 
 /**
  * Includes swap volume from every pool type (FPMM and virtual), matching the
@@ -137,6 +148,64 @@ export function buildDailyVolumeSeries(
 }
 
 /**
+ * Aggregate per-chain `brokerSnapshotsAllDaily` rows into a single daily
+ * USD-volume series for legacy v2 traffic (Broker → BiPoolManager). Rows are
+ * already filtered server-side to `routedViaV3Router=false`, so summing them
+ * directly gives the v2 number without re-checking the v3-Router siblings.
+ *
+ * Same windowing semantics as `buildDailyVolumeSeries`: a `window` filters
+ * rows to `[window.from, window.to)` and the emitted series zero-fills any
+ * empty UTC-day bucket inside the window so the stack alignment with the v3
+ * series stays correct.
+ */
+export function buildBrokerDailyV2Series(
+  networkData: NetworkData[],
+  window?: TimeRange,
+): SeriesPoint[] {
+  const totalBuckets = new Map<number, number>();
+  let minBucket = Infinity;
+  for (const netData of networkData) {
+    if (netData.error !== null) continue;
+    for (const row of netData.brokerSnapshotsAllDaily) {
+      const timestamp = Number(row.timestamp);
+      if (window && (timestamp < window.from || timestamp >= window.to))
+        continue;
+      // 18-decimal "USD-wei" → JS number USD, with cent-precision preserved.
+      // `Number(BigInt(volumeUsdWei))` overflows MAX_SAFE_INTEGER (~9e15) for
+      // any daily v2 volume above ~$10K, silently losing precision. Divide in
+      // BigInt down to "cents" first so the result fits in Number, then scale
+      // back to USD. Sub-cent precision is sacrificed (fine for $K/$M chart).
+      const usd = Number(BigInt(row.volumeUsdWei) / USD_WEI_PER_CENT) / 100;
+      // The indexer's `dayBucket()` already rounds `BrokerDailySnapshot.timestamp`
+      // to UTC midnight, so this floor is a no-op in practice — kept defensive
+      // so an upstream timestamp shift can't desync v2 / v3 stack alignment.
+      const bucket = Math.floor(timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+      minBucket = Math.min(minBucket, bucket);
+      totalBuckets.set(bucket, (totalBuckets.get(bucket) ?? 0) + usd);
+    }
+  }
+  if (!Number.isFinite(minBucket)) return [];
+
+  const startBucket = window
+    ? Math.ceil(window.from / SECONDS_PER_DAY) * SECONDS_PER_DAY
+    : minBucket;
+  const endRef = window?.to ?? Math.floor(Date.now() / 1000);
+  const endBucket = Math.floor(endRef / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  const lastBucket =
+    endRef > endBucket ? endBucket : endBucket - SECONDS_PER_DAY;
+
+  const series: SeriesPoint[] = [];
+  for (
+    let timestamp = startBucket;
+    timestamp <= lastBucket;
+    timestamp += SECONDS_PER_DAY
+  ) {
+    series.push({ timestamp, volumeUSD: totalBuckets.get(timestamp) ?? 0 });
+  }
+  return series;
+}
+
+/**
  * Week-over-week % change: sum of the last 7 completed UTC days vs the 7 days
  * before that. The final bucket in `fullSeries` is usually the partial current
  * UTC day (still filling up), so the comparison excludes it and uses the
@@ -156,11 +225,44 @@ export function weekOverWeekChangePct(
   return ((sum(last7) - prior) / prior) * 100;
 }
 
+// Show "N/A" only on explicit failure. An empty series without errors
+// legitimately sums to $0 (no volume yet) — flagging it N/A would conflate
+// "no activity" with "data missing".
+//
+// `hasBrokerSnapshotError` is split out from the combined `hasSnapshotError`
+// so a Broker query failure / pagination cap renders v2 as "—" (data
+// unavailable) without poisoning the v3 number, which is fetched from a
+// different rollup. Otherwise a confident "$X v3 · $0 v2" misleads on every
+// Broker outage even when v3 is fully synced.
+function computeHeadline(
+  isLoading: boolean,
+  hasError: boolean,
+  hasSnapshotError: boolean,
+  hasBrokerSnapshotError: boolean,
+  v3Points: SeriesPoint[],
+  v2Points: SeriesPoint[],
+  v3Total: number,
+  v2Total: number,
+): string {
+  if (isLoading) return "…";
+  if (hasError) return "N/A";
+  if (hasSnapshotError && v3Points.length === 0 && v2Points.length === 0)
+    return "N/A";
+  const v2Cell = hasBrokerSnapshotError ? "— v2" : `${formatUSD(v2Total)} v2`;
+  return `${formatUSD(v3Total)} v3 · ${v2Cell}`;
+}
+
 interface VolumeOverTimeChartProps {
   networkData: NetworkData[];
   isLoading: boolean;
   hasError: boolean;
   hasSnapshotError: boolean;
+  /**
+   * True when the Broker rollup query failed or its pagination truncated
+   * before reaching the visible window. Renders "— v2" so a Broker outage
+   * doesn't masquerade as a confident `$0 v2` when v3 loaded normally.
+   */
+  hasBrokerSnapshotError: boolean;
 }
 
 export function VolumeOverTimeChart({
@@ -168,23 +270,28 @@ export function VolumeOverTimeChart({
   isLoading,
   hasError,
   hasSnapshotError,
+  hasBrokerSnapshotError,
 }: VolumeOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("30d");
 
-  // Full-history pass kept for the WoW delta (≥15 UTC-day buckets) and for
-  // the "all" range tab.
-  const fullResult = useMemo(
+  // Full-history v3 pass kept for the WoW delta (≥15 UTC-day buckets) and the
+  // "all" range tab. v3 = Router-driven volume, sourced from PoolDailySnapshot
+  // (FPMM + VirtualPool, summed since both are downstream of the v3 Router).
+  const fullV3Result = useMemo(
     () => buildDailyVolumeSeries(networkData),
     [networkData],
   );
 
-  const fullSeries = useMemo<TimeSeriesPoint[]>(
+  // v3 WoW pill — v2 has a separate trajectory but is much smaller today, so
+  // tracking the dominant-side delta keeps the headline meaningful. v2 WoW
+  // can be added once v2 volumes are large enough to read at chart scale.
+  const fullV3Series = useMemo<TimeSeriesPoint[]>(
     () =>
-      fullResult.series.map((p) => ({
+      fullV3Result.series.map((p) => ({
         timestamp: p.timestamp,
         value: p.volumeUSD,
       })),
-    [fullResult],
+    [fullV3Result],
   );
 
   const activeWindow = useMemo<TimeRange | undefined>(() => {
@@ -203,48 +310,86 @@ export function VolumeOverTimeChart({
         : snapshotWindow30d(Date.now());
   }, [networkData, range]);
 
-  // The "all" tab reuses `fullResult` since its window matches.
-  const { visibleSeries, visibleBreakdown } = useMemo<{
-    visibleSeries: TimeSeriesPoint[];
-    visibleBreakdown: BreakdownSeries[];
-  }>(() => {
-    const { series, byChain } =
+  // v3 series for the active window — reuses fullV3Result on the "all" tab
+  // since the window matches.
+  const visibleV3Points = useMemo<SeriesPoint[]>(
+    () =>
       range === "all"
-        ? fullResult
-        : buildDailyVolumeSeries(networkData, activeWindow);
-    return {
-      visibleSeries: series.map((p) => ({
-        timestamp: p.timestamp,
-        value: p.volumeUSD,
-      })),
-      visibleBreakdown: byChain.map((entry) => ({
-        name: entry.network.label,
-        color: chainColor(entry.network.chainId),
-        series: entry.series.map((p) => ({
-          timestamp: p.timestamp,
-          value: p.volumeUSD,
-        })),
-      })),
-    };
-  }, [networkData, range, activeWindow, fullResult]);
-
-  // Hero = sum of visible bars. With rolling-window bucketing on 7d/30d this
-  // exactly equals the Summary tile's subtotal for the same window.
-  const rangeTotal = useMemo(
-    () => visibleSeries.reduce((sum, point) => sum + point.value, 0),
-    [visibleSeries],
+        ? fullV3Result.series
+        : buildDailyVolumeSeries(networkData, activeWindow).series,
+    [networkData, range, activeWindow, fullV3Result],
   );
 
-  // Show "N/A" only on explicit failure. An empty series without errors
-  // legitimately sums to $0 (no volume yet) — flagging that as N/A would
-  // incorrectly conflate "no activity" with "data missing".
-  const headline = isLoading
-    ? "…"
-    : hasError || (hasSnapshotError && fullSeries.length === 0)
-      ? "N/A"
-      : formatUSD(rangeTotal);
+  // v2 series for the active window — sourced from BrokerDailySnapshot
+  // (already filtered to routedViaV3Router=false server-side). Empty until
+  // the indexer's Broker handler is deployed and resyncs.
+  const visibleV2Points = useMemo<SeriesPoint[]>(
+    () => buildBrokerDailyV2Series(networkData, activeWindow),
+    [networkData, activeWindow],
+  );
 
-  const change = weekOverWeekChangePct(fullSeries);
+  // Stack v3 (bottom) + v2 (top). Distinct, named legend entries; the chart
+  // card suppresses its own total trace in `stacked` mode so the breakdown
+  // areas read directly.
+  const visibleBreakdown = useMemo<BreakdownSeries[]>(() => {
+    const toPoints = (xs: SeriesPoint[]) =>
+      xs.map((p) => ({ timestamp: p.timestamp, value: p.volumeUSD }));
+    return [
+      {
+        name: "v3 (Router)",
+        color: V3_COLOR,
+        series: toPoints(visibleV3Points),
+      },
+      {
+        name: "v2 (Legacy)",
+        color: V2_COLOR,
+        series: toPoints(visibleV2Points),
+      },
+    ];
+  }, [visibleV3Points, visibleV2Points]);
+
+  // Per-version range totals — rolling-window bucketing means each side's
+  // sum equals that version's volume for the visible range.
+  const v3RangeTotal = useMemo(
+    () => visibleV3Points.reduce((sum, p) => sum + p.volumeUSD, 0),
+    [visibleV3Points],
+  );
+  const v2RangeTotal = useMemo(
+    () => visibleV2Points.reduce((sum, p) => sum + p.volumeUSD, 0),
+    [visibleV2Points],
+  );
+
+  // Stacked-total series for the chart card. Required because the card's
+  // y-axis ceiling is derived from `max([...series.value, ...breakdownYs])`,
+  // and Plotly's `stackgroup: "total"` renders cumulative heights — so the
+  // ceiling must reflect the per-day v3+v2 sum, not just whichever
+  // individual trace happens to be largest. Without this, on any day where
+  // v2 ≥ ~35% of v3 the stacked top exceeds y-max and Plotly clips the
+  // upper bars. Day buckets are aligned (both helpers floor to UTC-day),
+  // so summing by timestamp is exact.
+  const visibleSeriesForCard = useMemo<TimeSeriesPoint[]>(() => {
+    const byTs = new Map<number, number>();
+    for (const p of visibleV3Points)
+      byTs.set(p.timestamp, (byTs.get(p.timestamp) ?? 0) + p.volumeUSD);
+    for (const p of visibleV2Points)
+      byTs.set(p.timestamp, (byTs.get(p.timestamp) ?? 0) + p.volumeUSD);
+    return Array.from(byTs)
+      .sort((a, b) => a[0] - b[0])
+      .map(([timestamp, value]) => ({ timestamp, value }));
+  }, [visibleV3Points, visibleV2Points]);
+
+  const headline = computeHeadline(
+    isLoading,
+    hasError,
+    hasSnapshotError,
+    hasBrokerSnapshotError,
+    visibleV3Points,
+    visibleV2Points,
+    v3RangeTotal,
+    v2RangeTotal,
+  );
+
+  const change = weekOverWeekChangePct(fullV3Series);
 
   const emptyMessage = hasError
     ? "Unable to load volume history"
@@ -256,13 +401,14 @@ export function VolumeOverTimeChart({
     <TimeSeriesChartCard
       title="Volume"
       rangeAriaLabel="Volume chart time range"
-      series={visibleSeries}
+      series={visibleSeriesForCard}
       breakdown={visibleBreakdown}
       breakdownMode="stacked"
       range={range}
       onRangeChange={setRange}
       headline={headline}
       change={change}
+      changeLabel="v3 week-over-week"
       isLoading={isLoading}
       hasError={hasError}
       hasSnapshotError={hasSnapshotError}

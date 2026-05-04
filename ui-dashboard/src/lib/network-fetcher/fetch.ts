@@ -16,6 +16,7 @@ import {
   ALL_POOLS_WITH_HEALTH,
   ALL_TRADING_LIMITS,
   ALL_OLS_POOLS,
+  BROKER_DAILY_SNAPSHOTS_ALL,
   POOL_DAILY_FEE_SNAPSHOTS_PAGE,
   POOL_DAILY_SNAPSHOTS_ALL,
   PROTOCOL_FEE_TRANSFERS_ALL,
@@ -40,6 +41,7 @@ import type {
 } from "@/lib/types";
 import { isFpmm, buildOracleRateMap } from "@/lib/tokens";
 import type {
+  BrokerDailySnapshotRow,
   NetworkData,
   PaginatedPageResult,
   SnapshotPageResult,
@@ -62,6 +64,7 @@ export function isNetworkDataFullyHealthy(n: NetworkData): boolean {
     n.snapshots7dError === null &&
     n.snapshots30dError === null &&
     n.snapshotsAllDailyError === null &&
+    n.brokerSnapshotsAllDailyError === null &&
     n.lpError === null
   );
 }
@@ -85,6 +88,8 @@ export const blankNetworkData = (
   snapshots30d: [],
   snapshotsAllDaily: [],
   snapshotsAllDailyTruncated: false,
+  brokerSnapshotsAllDaily: [],
+  brokerSnapshotsAllDailyTruncated: false,
   tradingLimits: [],
   olsPoolIds: new Set(),
   cdpPoolIds: new Set(),
@@ -103,6 +108,7 @@ export const blankNetworkData = (
   snapshots7dError: null,
   snapshots30dError: null,
   snapshotsAllDailyError: null,
+  brokerSnapshotsAllDailyError: null,
   lpError: null,
   ...overrides,
 });
@@ -168,79 +174,42 @@ const PARTIAL_PAGE_THROTTLE_MS = 60_000;
 export const partialPageLastCapturedAt = new Map<string, number>();
 
 /**
- * Daily rollup pagination — ~365 rows/pool/year, so for typical history a
- * few pages cover everything. Uses the fail-open semantics documented on
- * `SNAPSHOT_PAGE_SIZE`.
+ * Generic paginated fetcher with the Hasura fail-open contract documented on
+ * `SNAPSHOT_PAGE_SIZE`: hard-fail on page 0, preserve and flag truncated on
+ * mid-loop failure, log cap exhaustion once per (network, responseKey).
+ *
+ * Callers parameterize: variables shape per page, response key, and a dedup
+ * key extractor — offset pagination over an append-only table is unstable
+ * under concurrent inserts, so dedup is required to keep windowed totals
+ * accurate even when a refresh hits mid-write.
  */
-async function fetchAllDailySnapshotPages(
-  client: GraphQLClient,
-  poolIds: string[],
-  network: string,
-): Promise<SnapshotPageResult> {
-  return fetchPaginatedRows<PoolSnapshotWindow, "PoolDailySnapshot">(
-    client,
-    POOL_DAILY_SNAPSHOTS_ALL,
-    "PoolDailySnapshot",
-    { poolIds },
-    network,
-    (s) => `${s.poolId}-${s.timestamp}`,
-  );
-}
-
-/**
- * Per-pool fee-snapshot pagination — pool×day cardinality (~30 pools × ~430
- * days) easily exceeds the 1000-row cap, so we paginate. Same fail-open
- * semantics as the daily snapshot path. Dedup keyed off `id` since
- * `PoolDailyFeeSnapshot.id = "{chainId}-{poolAddress}-{dayTs}"` is unique by
- * construction. Exported because the slim `useProtocolFees` hook fetches its
- * own snapshots — the homepage path in `fetchNetworkData` doesn't render the
- * leaderboard so it leaves `feeSnapshots` empty.
- */
-export async function fetchAllFeeSnapshotPages(
-  client: GraphQLClient,
-  chainId: number,
-  network: string,
-): Promise<PaginatedPageResult<PoolDailyFeeSnapshot>> {
-  return fetchPaginatedRows<PoolDailyFeeSnapshot, "PoolDailyFeeSnapshot">(
-    client,
-    POOL_DAILY_FEE_SNAPSHOTS_PAGE,
-    "PoolDailyFeeSnapshot",
-    { chainId },
-    network,
-    (s) => s.id,
-  );
-}
-
-async function fetchPaginatedRows<T, K extends string>(
-  client: GraphQLClient,
-  query: string,
-  responseKey: K,
-  baseVars: Record<string, unknown>,
-  network: string,
-  dedupKey: (row: T) => string,
-): Promise<PaginatedPageResult<T>> {
+async function fetchPaginatedRows<TRow, TVars>(args: {
+  client: GraphQLClient;
+  query: string;
+  responseKey: string;
+  network: string;
+  variablesFor: (page: number) => TVars;
+  dedupKey: (row: TRow) => string;
+  /** Extra payload merged into the Sentry capture for this responseKey. */
+  extra?: Record<string, unknown>;
+}): Promise<PaginatedPageResult<TRow>> {
+  const { client, query, responseKey, network, variablesFor, dedupKey, extra } =
+    args;
   const seen = new Set<string>();
-  const rows: T[] = [];
+  const rows: TRow[] = [];
   for (let page = 0; page < SNAPSHOT_MAX_PAGES; page++) {
-    let batch: T[];
+    let batch: TRow[];
     try {
-      const result = await client.request<Record<K, T[]>>({
+      const result = await client.request<Record<string, TRow[]>>({
         document: query,
-        variables: {
-          ...baseVars,
-          limit: SNAPSHOT_PAGE_SIZE,
-          offset: page * SNAPSHOT_PAGE_SIZE,
-        },
+        variables: variablesFor(page) as Record<string, unknown>,
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       batch = result[responseKey] ?? [];
     } catch (err) {
-      // First-page failure is a hard error — nothing to degrade to.
       if (rows.length === 0) throw err;
-      // Otherwise preserve the pages we did fetch; surface error AND flag
-      // truncation so consumers know the data is partial. Report to Sentry
-      // so partial-data degradation isn't silent — but throttle per
-      // network+responseKey so the 30s poll loop can't fan out a storm.
+      // Mid-loop failure → preserve fetched pages, flag truncated, throttle
+      // Sentry per (network, responseKey) so the 30s poll can't fan out a storm.
       const partialKey = `${network}:${responseKey}`;
       const now = Date.now();
       const last = partialPageLastCapturedAt.get(partialKey) ?? 0;
@@ -253,7 +222,7 @@ async function fetchPaginatedRows<T, K extends string>(
             network,
             degraded: "partial-pages",
           },
-          extra: { page, rowsFetched: rows.length },
+          extra: { page, rowsFetched: rows.length, ...extra },
         });
       }
       return {
@@ -272,11 +241,8 @@ async function fetchPaginatedRows<T, K extends string>(
       return { rows, truncated: false, error: null };
     }
   }
-  // Safety-cap exhaustion: we fetched SNAPSHOT_MAX_PAGES × SNAPSHOT_PAGE_SIZE
-  // rows without running out. Data is genuinely incomplete — flag as a warning
-  // so we can tell when the cap needs raising (or when indexer rollups need
-  // replacing a paginated fetch). Dedup key is `${network}:${responseKey}` so
-  // each chain surfaces its own cap event once (not once total across chains).
+  // Cap exhaustion: data is genuinely incomplete. One Sentry message per
+  // (network, responseKey) pair — each chain surfaces its own cap event once.
   const capKey = `${network}:${responseKey}`;
   if (!warnedCapKeys.has(capKey)) {
     warnedCapKeys.add(capKey);
@@ -287,10 +253,91 @@ async function fetchPaginatedRows<T, K extends string>(
         rowsFetched: rows.length,
         maxPages: SNAPSHOT_MAX_PAGES,
         pageSize: SNAPSHOT_PAGE_SIZE,
+        ...extra,
       },
     });
   }
   return { rows, truncated: true, error: null };
+}
+
+/**
+ * Daily rollup pagination — ~365 rows/pool/year, so for typical history a
+ * few pages cover everything.
+ */
+async function fetchAllDailySnapshotPages(
+  client: GraphQLClient,
+  poolIds: string[],
+  network: string,
+): Promise<SnapshotPageResult> {
+  return fetchPaginatedRows<PoolSnapshotWindow, unknown>({
+    client,
+    query: POOL_DAILY_SNAPSHOTS_ALL,
+    responseKey: "PoolDailySnapshot",
+    network,
+    variablesFor: (page) => ({
+      poolIds,
+      limit: SNAPSHOT_PAGE_SIZE,
+      offset: page * SNAPSHOT_PAGE_SIZE,
+    }),
+    dedupKey: (s) => `${s.poolId}-${s.timestamp}`,
+    extra: { poolCount: poolIds.length },
+  });
+}
+
+/**
+ * Paginate `BrokerDailySnapshot` rows for a chain — already filtered to
+ * `routedViaV3Router=false` server-side. Row count grows as
+ * `(daily_distinct_providers × days)`, so a single chain stays under the
+ * 1000-row Hasura cap for years; pagination is here for safety.
+ */
+async function fetchAllBrokerDailySnapshotPages(
+  client: GraphQLClient,
+  chainId: number,
+  network: string,
+): Promise<PaginatedPageResult<BrokerDailySnapshotRow>> {
+  return fetchPaginatedRows<BrokerDailySnapshotRow, unknown>({
+    client,
+    query: BROKER_DAILY_SNAPSHOTS_ALL,
+    responseKey: "BrokerDailySnapshot",
+    network,
+    variablesFor: (page) => ({
+      chainId,
+      limit: SNAPSHOT_PAGE_SIZE,
+      offset: page * SNAPSHOT_PAGE_SIZE,
+    }),
+    // The schema id `{chainId}-{provider}-{router|direct}-{day}` is the
+    // canonical row key — required because two providers can share the same
+    // (timestamp, volumeUsdWei, swapCount) tuple at low traffic.
+    dedupKey: (row) => row.id,
+  });
+}
+
+/**
+ * Per-pool fee-snapshot pagination — pool×day cardinality (~30 pools × ~430
+ * days) easily exceeds the 1000-row cap, so we paginate. Same fail-open
+ * semantics as the daily snapshot path. Dedup keyed off `id` since
+ * `PoolDailyFeeSnapshot.id = "{chainId}-{poolAddress}-{dayTs}"` is unique by
+ * construction. Exported because the slim `useProtocolFees` hook fetches its
+ * own snapshots — the homepage path in `fetchNetworkData` doesn't render the
+ * leaderboard so it leaves `feeSnapshots` empty.
+ */
+export async function fetchAllFeeSnapshotPages(
+  client: GraphQLClient,
+  chainId: number,
+  network: string,
+): Promise<PaginatedPageResult<PoolDailyFeeSnapshot>> {
+  return fetchPaginatedRows<PoolDailyFeeSnapshot, unknown>({
+    client,
+    query: POOL_DAILY_FEE_SNAPSHOTS_PAGE,
+    responseKey: "PoolDailyFeeSnapshot",
+    network,
+    variablesFor: (page) => ({
+      chainId,
+      limit: SNAPSHOT_PAGE_SIZE,
+      offset: page * SNAPSHOT_PAGE_SIZE,
+    }),
+    dedupKey: (s) => s.id,
+  });
 }
 
 /** @internal Exported for testing only. */
@@ -337,6 +384,7 @@ export async function fetchNetworkData(
   const [
     feesResult,
     snapshotsAllDailyResult,
+    brokerSnapshotsAllDailyResult,
     lpResult,
     tradingLimitsResult,
     olsResult,
@@ -350,6 +398,10 @@ export async function fetchNetworkData(
     shouldQuery
       ? fetchAllDailySnapshotPages(client, poolIds, network.id)
       : Promise.resolve(emptySnapshotPage),
+    // Legacy v2 daily volume rollup (Broker.Swap with `routedViaV3Router=false`).
+    // Filtered server-side by chainId — only Celo has a Broker today, but
+    // querying on every chain is harmless (Monad simply returns 0 rows).
+    fetchAllBrokerDailySnapshotPages(client, network.chainId, network.id),
     fpmmPoolIds.length > 0
       ? timed<{ LiquidityPosition: { address: string }[] }>(
           UNIQUE_LP_ADDRESSES,
@@ -432,6 +484,21 @@ export async function fetchNetworkData(
     snapshotsAllDailyResult.status === "rejected"
       ? toError(snapshotsAllDailyResult.reason)
       : (snapshotsAllDailyResult.value.error ?? null);
+
+  // Legacy v2 daily volume — already filtered to `routedViaV3Router=false`
+  // server-side, so no client-side disambiguation is needed.
+  const brokerSnapshotsAllDaily =
+    brokerSnapshotsAllDailyResult.status === "fulfilled"
+      ? brokerSnapshotsAllDailyResult.value.rows
+      : [];
+  const brokerSnapshotsAllDailyTruncated =
+    brokerSnapshotsAllDailyResult.status === "fulfilled"
+      ? brokerSnapshotsAllDailyResult.value.truncated
+      : false;
+  const brokerSnapshotsAllDailyError =
+    brokerSnapshotsAllDailyResult.status === "rejected"
+      ? toError(brokerSnapshotsAllDailyResult.reason)
+      : (brokerSnapshotsAllDailyResult.value.error ?? null);
 
   // PoolDailySnapshot rows are UTC-midnight-aligned incremental aggregates
   // (one row per pool per UTC day). Anchoring on today's UTC midnight gives
@@ -528,6 +595,8 @@ export async function fetchNetworkData(
     snapshots30d,
     snapshotsAllDaily,
     snapshotsAllDailyTruncated,
+    brokerSnapshotsAllDaily,
+    brokerSnapshotsAllDailyTruncated,
     tradingLimits,
     olsPoolIds,
     cdpPoolIds,
@@ -559,6 +628,7 @@ export async function fetchNetworkData(
     snapshots7dError,
     snapshots30dError,
     snapshotsAllDailyError,
+    brokerSnapshotsAllDailyError,
     lpError: lpResult.status === "rejected" ? toError(lpResult.reason) : null,
   };
 }

@@ -6,11 +6,6 @@ import { isFpmm, poolTvlUSD, type OracleRateMap } from "@/lib/tokens";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import {
-  buildPoolVolumeMap,
-  poolTotalVolumeUSD,
-  sumVolumeMap,
-} from "@/lib/volume";
-import {
   useAllNetworksData,
   type NetworkData,
 } from "@/hooks/use-all-networks-data";
@@ -91,14 +86,8 @@ function GlobalContent({
   const anyFeesError = networkData.some(
     (netData) => netData.feesError !== null && netData.error === null,
   );
-  const anySnapshotsError = networkData.some(
-    (netData) => netData.snapshotsError !== null && netData.error === null,
-  );
   const anySnapshots7dError = networkData.some(
     (netData) => netData.snapshots7dError !== null && netData.error === null,
-  );
-  const anySnapshots30dError = networkData.some(
-    (netData) => netData.snapshots30dError !== null && netData.error === null,
   );
   const anySnapshotsAllDailyError = networkData.some(
     (netData) =>
@@ -106,6 +95,14 @@ function GlobalContent({
   );
   const anySnapshotsAllDailyTruncated = networkData.some(
     (netData) => netData.snapshotsAllDailyTruncated && netData.error === null,
+  );
+  const anyBrokerSnapshotsAllDailyError = networkData.some(
+    (netData) =>
+      netData.brokerSnapshotsAllDailyError !== null && netData.error === null,
+  );
+  const anyBrokerSnapshotsAllDailyTruncated = networkData.some(
+    (netData) =>
+      netData.brokerSnapshotsAllDailyTruncated && netData.error === null,
   );
   const anyLpError = networkData.some(
     (netData) => netData.lpError !== null && netData.error === null,
@@ -134,13 +131,6 @@ function GlobalContent({
     let tvlNow7d = 0;
     let tvlAgo7d = 0;
     let hasTvlSnapshots7d = false;
-    let totalVolumeAllTime: number | null = anyNetworkError ? null : 0;
-    let totalVolume24h: number | null =
-      anySnapshotsError || anyNetworkError ? null : 0;
-    let totalVolume7d: number | null =
-      anySnapshots7dError || anyNetworkError ? null : 0;
-    let totalVolume30d: number | null =
-      anySnapshots30dError || anyNetworkError ? null : 0;
     let totalSwapsAllTime: number | null = anyNetworkError ? null : 0;
     let totalFeesAllTime: number | null =
       anyFeesError || anyNetworkError ? null : 0;
@@ -158,15 +148,7 @@ function GlobalContent({
     for (const netData of networkData) {
       if (netData.error !== null) continue;
 
-      const {
-        network,
-        pools,
-        snapshots,
-        snapshots7d,
-        snapshots30d,
-        fees,
-        rates,
-      } = netData;
+      const { network, pools, snapshots7d, fees, rates } = netData;
       const fpmmPools = pools.filter(isFpmm);
       totalPools += pools.length;
       totalFpmmPools += fpmmPools.length;
@@ -191,43 +173,11 @@ function GlobalContent({
         hasTvlSnapshots7d = true;
       }
 
-      // All-time volume & swaps from pool-level counters
-      if (totalVolumeAllTime !== null) {
-        for (const pool of pools) {
-          const v = poolTotalVolumeUSD(pool, network, netData.rates);
-          if (typeof v === "number") totalVolumeAllTime += v;
-        }
-      }
       if (totalSwapsAllTime !== null) {
         totalSwapsAllTime += pools.reduce(
           (sum, p) => sum + (p.swapCount ?? 0),
           0,
         );
-      }
-
-      // Windowed volume from snapshots — used only for KPI totals here.
-      // Per-pool volume maps are built by buildGlobalPoolEntries above.
-      const vol24hMap =
-        netData.snapshotsError === null
-          ? buildPoolVolumeMap(snapshots, pools, network, netData.rates)
-          : null;
-      const vol7dMap =
-        netData.snapshots7dError === null
-          ? buildPoolVolumeMap(snapshots7d, pools, network, netData.rates)
-          : null;
-      const vol30dMap =
-        netData.snapshots30dError === null
-          ? buildPoolVolumeMap(snapshots30d, pools, network, netData.rates)
-          : null;
-
-      if (vol24hMap && totalVolume24h !== null) {
-        totalVolume24h += sumVolumeMap(vol24hMap);
-      }
-      if (vol7dMap && totalVolume7d !== null) {
-        totalVolume7d += sumVolumeMap(vol7dMap);
-      }
-      if (vol30dMap && totalVolume30d !== null) {
-        totalVolume30d += sumVolumeMap(vol30dMap);
       }
 
       // Fees
@@ -264,10 +214,6 @@ function GlobalContent({
       totalPools,
       totalFpmmPools,
       totalTvl,
-      totalVolumeAllTime,
-      totalVolume24h,
-      totalVolume7d,
-      totalVolume30d,
       totalSwapsAllTime,
       totalFeesAllTime,
       totalFees24h,
@@ -285,9 +231,7 @@ function GlobalContent({
   }, [
     networkData,
     anyNetworkError,
-    anySnapshotsError,
     anySnapshots7dError,
-    anySnapshots30dError,
     anyFeesError,
     anyLpError,
   ]);
@@ -328,6 +272,10 @@ function GlobalContent({
           hasError={anyNetworkError}
           hasSnapshotError={
             anySnapshotsAllDailyError || anySnapshotsAllDailyTruncated
+          }
+          hasBrokerSnapshotError={
+            anyBrokerSnapshotsAllDailyError ||
+            anyBrokerSnapshotsAllDailyTruncated
           }
         />
       </div>

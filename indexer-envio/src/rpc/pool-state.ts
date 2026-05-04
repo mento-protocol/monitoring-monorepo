@@ -79,6 +79,38 @@ export function _clearMockERC20Decimals(): void {
   _testERC20Decimals.clear();
 }
 
+/**
+ * Fetch a token's `decimals()` value as an integer (e.g., 18 for cUSD, 6 for
+ * USDC). Production-safe: consults the test-only mock map first, then RPC.
+ * Result is NOT cached at this layer — callers that fire on every event
+ * (e.g., `Broker.Swap`) must add their own per-process cache.
+ *
+ * Returns `null` on RPC failure or implausible decimals (>36) — callers
+ * should default to 18 in that case rather than block on the read.
+ */
+export async function fetchErc20Decimals(
+  chainId: number,
+  tokenAddress: string,
+): Promise<number | null> {
+  const key = `${chainId}:${tokenAddress.toLowerCase()}`;
+  const mocked = _testERC20Decimals.get(key);
+  if (mocked !== undefined) return mocked;
+  try {
+    const client = getRpcClient(chainId);
+    const raw = await client.readContract({
+      address: tokenAddress as `0x${string}`,
+      abi: ERC20_DECIMALS_ABI,
+      functionName: "decimals",
+    });
+    const d = Number(raw);
+    if (d < 0 || d > 36) return null;
+    return d;
+  } catch (err) {
+    logRpcFailure(chainId, "erc20Decimals", tokenAddress, err);
+    return null;
+  }
+}
+
 /** Per-getter mock behavior for fetchFees. */
 export type FeeGetterMock =
   | { fulfilled: bigint }
@@ -661,25 +693,8 @@ export async function fetchTokenDecimalsScaling(
   } catch (err) {
     logRpcFailure(chainId, fn, poolAddress, err);
     if (!fallbackTokenAddress) return null;
-    const erc20Key = `${chainId}:${fallbackTokenAddress.toLowerCase()}`;
-    if (_testERC20Decimals.has(erc20Key)) {
-      const d = _testERC20Decimals.get(erc20Key)!;
-      return 10n ** BigInt(d);
-    }
-    try {
-      const client = getRpcClient(chainId);
-      const d = await client.readContract({
-        address: fallbackTokenAddress as `0x${string}`,
-        abi: ERC20_DECIMALS_ABI,
-        functionName: "decimals",
-      });
-      const decimals = Number(d);
-      if (decimals < 0 || decimals > 36) return null;
-      return 10n ** BigInt(decimals);
-    } catch (err) {
-      logRpcFailure(chainId, "erc20Decimals", fallbackTokenAddress, err);
-      return null;
-    }
+    const decimals = await fetchErc20Decimals(chainId, fallbackTokenAddress);
+    return decimals == null ? null : 10n ** BigInt(decimals);
   }
 }
 

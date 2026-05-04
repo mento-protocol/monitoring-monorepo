@@ -52,6 +52,8 @@ function networkData(
     snapshots30d: [],
     snapshotsAllDaily: [],
     snapshotsAllDailyTruncated: false,
+    brokerSnapshotsAllDaily: [],
+    brokerSnapshotsAllDailyTruncated: false,
     tradingLimits: [],
     olsPoolIds: new Set(),
     cdpPoolIds: new Set(),
@@ -70,6 +72,7 @@ function networkData(
     snapshots7dError: null,
     snapshots30dError: null,
     snapshotsAllDailyError: null,
+    brokerSnapshotsAllDailyError: null,
     lpError: null,
     ...overrides,
   };

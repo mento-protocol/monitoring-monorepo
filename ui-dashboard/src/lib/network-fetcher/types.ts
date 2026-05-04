@@ -48,6 +48,14 @@ export type NetworkData = {
   snapshotsAllDaily: PoolSnapshotWindow[];
   /** True when the daily pagination loop hit its safety cap. */
   snapshotsAllDailyTruncated: boolean;
+  /**
+   * Full-history daily rollup of legacy v2 (Broker → BiPoolManager) volume,
+   * filtered to `routedViaV3Router=false` so VirtualPool sibling rows aren't
+   * double-counted against v3. Empty on chains without a Broker (Monad).
+   */
+  brokerSnapshotsAllDaily: BrokerDailySnapshotRow[];
+  /** True when the broker pagination loop hit its safety cap. */
+  brokerSnapshotsAllDailyTruncated: boolean;
   tradingLimits: TradingLimit[];
   olsPoolIds: Set<string>;
   /**
@@ -109,7 +117,25 @@ export type NetworkData = {
   snapshots30dError: Error | null;
   /** Error on the paginated all-history daily fetch. */
   snapshotsAllDailyError: Error | null;
+  /** Error on the paginated all-history daily Broker rollup fetch. */
+  brokerSnapshotsAllDailyError: Error | null;
   lpError: Error | null;
+};
+
+/**
+ * Legacy v2 volume row from `BrokerDailySnapshot`. Already filtered server-
+ * side to `routedViaV3Router=false` — the rows in this array are pure v2
+ * (Broker-direct or v2 MentoRouter), no router-driven sibling double-count.
+ */
+export type BrokerDailySnapshotRow = {
+  /** Canonical row key — used by the paginated fetcher's dedup set. Schema
+   *  format is `{chainId}-{provider}-{router|direct}-{day}`. */
+  id: string;
+  /** UTC-day bucket as a unix-seconds string. */
+  timestamp: string;
+  /** 18-decimal "USD-wei" — divide by 1e18 to get USD. */
+  volumeUsdWei: string;
+  swapCount: number;
 };
 
 export type PoolLabel = Pick<Pool, "id" | "token0" | "token1" | "source">;

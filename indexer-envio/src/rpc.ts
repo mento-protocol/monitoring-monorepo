@@ -52,6 +52,7 @@ export {
   fetchReportExpiry,
   _resetReportExpiryInFlightForTests,
   fetchTokenDecimalsScaling,
+  fetchErc20Decimals,
   fetchTradingLimits,
   _setMockRebalanceIncentiveAtBlock,
   _clearMockRebalanceIncentivesAtBlock,

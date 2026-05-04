@@ -223,6 +223,70 @@ type PoolDailySnapshot @index(fields: ["poolId", "timestamp"]) {
   blockNumber: BigInt!
 }
 
+# ============================================================================
+# Mento Broker — legacy v2 swap path
+#
+# The Broker (`0x777A8255cA72412f0d706dc03C9D1987306B4CaD` on Celo) is the
+# settlement layer for v2 legacy swaps that route through `IExchangeProvider`s
+# such as the BiPoolManager. The v3 Router (`0x4861840C...`) does NOT bypass
+# the Broker entirely: a Router → VirtualPool wrapper swap also fires
+# `Broker.Swap` transitively, in addition to the wrapper's own `Swap` event.
+# `routedViaV3Router` flags those router-driven sibling rows so the dashboard
+# can exclude them from the v2 series and avoid double-counting against v3.
+#
+# Per-day rollup keyed by (chainId, exchangeProvider, routedViaV3Router, day)
+# so the dashboard's `routedViaV3Router=false` filter reads from a single
+# index without scanning the per-event table.
+# ============================================================================
+
+type BrokerSwapEvent
+  @index(fields: ["chainId", "exchangeProvider", "blockTimestamp"]) {
+  id: ID! # eventId(chainId, blockNumber, logIndex)
+  chainId: Int! @index
+  # Lowercased; classifies the swap path (BiPoolManager → v2 legacy).
+  exchangeProvider: String! @index
+  exchangeId: String! @index # bytes32 hex; identifies the exchange row inside the provider
+  trader: String! @index # tx-level signer (not just the Broker caller)
+  tokenIn: String! @index
+  tokenOut: String!
+  amountIn: BigInt!
+  amountOut: BigInt!
+  # 18-decimal "USD-wei". 0 when neither token is USD-pegged (see
+  # USD_PEGGED_SYMBOLS in src/usd.ts).
+  volumeUsdWei: BigInt!
+  # tx.to lowercased — the contract the user's transaction was directed to.
+  # Used by the dashboard to disambiguate router-driven swaps (where the
+  # Broker is invoked transitively via the v3 Router → VirtualPool wrapper)
+  # from broker-direct swaps (legacy v2 path).
+  txTo: String! @index
+  # True iff `txTo == V3 Router (0x4861840C...)`. Denormalized so the chart
+  # can sum daily volume without re-checking the router address per row.
+  # When true, this Broker.Swap is a sibling of a VirtualPool.Swap fired in
+  # the same tx (the v3 Router → VirtualPool wrapper → Broker path), so
+  # the v2 volume series MUST exclude these rows to avoid double-counting
+  # against v3.
+  routedViaV3Router: Boolean! @index
+  txHash: String!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt! @index
+}
+
+type BrokerDailySnapshot
+  @index(fields: ["chainId", "exchangeProvider", "timestamp"]) {
+  # `{chainId}-{exchangeProvider}-{router|direct}-{day}` (handler stringifies
+  # `routedViaV3Router` to "router" / "direct"). Bucketing by routing key
+  # lets the chart's v2 filter `routedViaV3Router=false` read a single row
+  # set without scanning the per-event table.
+  id: ID!
+  chainId: Int! @index
+  exchangeProvider: String! @index
+  routedViaV3Router: Boolean! @index
+  timestamp: BigInt! @index # UTC day bucket (ts / 86400 * 86400)
+  swapCount: Int!
+  volumeUsdWei: BigInt!
+  blockNumber: BigInt!
+}
+
 type FactoryDeployment {
   id: ID!
   chainId: Int! @index

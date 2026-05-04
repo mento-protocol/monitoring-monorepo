@@ -32,6 +32,17 @@ description: Mento v3 multichain mainnet indexer — Celo (42220) + Monad (143)
 # Network-level entries below reference these by name and specify addresses.
 # ---------------------------------------------------------------------------
 contracts:
+  # Mento Broker — settles legacy v2 swaps (Broker → IExchangeProvider →
+  # BiPoolManager). v3 swaps bypass this contract entirely (the v3 Router
+  # calls FPMM/VirtualPool pools directly), so Broker.Swap is the single
+  # source of truth for v2 volume on the dashboard. No address on Monad —
+  # only Celo has a Broker today.
+  - name: Broker
+    abi_file_path: abis/Broker.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: Swap
+
   - name: FPMMFactory
     abi_file_path: abis/FPMMFactory.json
     handler: src/EventHandlers.ts
@@ -168,6 +179,9 @@ networks:
   - id: 42220
     start_block: ${ENVIO_START_BLOCK_CELO:-60664500}
     contracts:
+      - name: Broker
+        address:
+          - 0x777A8255cA72412f0d706dc03C9D1987306B4CaD # Proxy:Broker
       - name: FPMMFactory
         address:
           - 0xa849b475FE5a4B5C9C3280152c7a1945b907613b # proxy
@@ -216,6 +230,8 @@ networks:
   - id: 143 # Monad Mainnet — HyperSync: https://143.hypersync.xyz
     start_block: ${ENVIO_START_BLOCK_MONAD:-60710000} # Covers ≥2026-03-10T18:00Z to catch early Wormhole NTT deliveries. SortedOracles ~60733096, FPMMFactory ~60747398
     contracts:
+      - name: Broker
+        address: [] # No Broker on Monad — Mento V2 / BiPoolManager is Celo-only
       - name: FPMMFactory
         address:
           - 0xa849b475FE5a4B5C9C3280152c7a1945b907613b # TransparentUpgradeableProxy:FPMMFactory

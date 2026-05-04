@@ -107,6 +107,8 @@ function networkData(snapshots: PoolDailyFeeSnapshot[]): NetworkData {
     snapshots30d: [],
     snapshotsAllDaily: [],
     snapshotsAllDailyTruncated: false,
+    brokerSnapshotsAllDaily: [],
+    brokerSnapshotsAllDailyTruncated: false,
     tradingLimits: [],
     olsPoolIds: new Set(),
     cdpPoolIds: new Set(),
@@ -128,6 +130,7 @@ function networkData(snapshots: PoolDailyFeeSnapshot[]): NetworkData {
     snapshots7dError: null,
     snapshots30dError: null,
     snapshotsAllDailyError: null,
+    brokerSnapshotsAllDailyError: null,
     lpError: null,
   };
 }
