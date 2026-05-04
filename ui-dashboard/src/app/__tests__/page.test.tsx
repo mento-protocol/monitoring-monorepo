@@ -116,7 +116,6 @@ describe("GlobalPage — all networks succeed", () => {
           unpricedSymbols24h: [],
           unresolvedCount: 0,
           unresolvedCount24h: 0,
-          isTruncated: false,
         },
       }),
     ]);
@@ -151,7 +150,7 @@ describe("GlobalPage — network-level failure", () => {
 describe("GlobalPage — fees-only failure", () => {
   it("shows N/A on fee-tile failure but leaves other tiles alone", () => {
     const html = render([
-      makeNetworkData({ feesError: new Error("fees timeout") }),
+      makeNetworkData({ ratesError: new Error("rates timeout") }),
     ]);
     expect(html).toContain("N/A");
     // LPs/Swaps tiles still render their headers.
@@ -162,7 +161,7 @@ describe("GlobalPage — fees-only failure", () => {
 
   it("shows 'Some chains failed to load' subtitle for fee tiles", () => {
     const html = render([
-      makeNetworkData({ feesError: new Error("fees timeout") }),
+      makeNetworkData({ ratesError: new Error("rates timeout") }),
     ]);
     expect(html).toContain("Some chains failed to load");
   });
@@ -255,7 +254,6 @@ describe("GlobalPage — snapshots-only failure", () => {
           unpricedSymbols24h: [],
           unresolvedCount: 0,
           unresolvedCount24h: 0,
-          isTruncated: false,
         },
       }),
     ]);
@@ -279,7 +277,6 @@ describe("GlobalPage — unpriced symbols behavior", () => {
           unpricedSymbols24h: [],
           unresolvedCount: 0,
           unresolvedCount24h: 0,
-          isTruncated: false,
         },
       }),
     ]);
@@ -300,7 +297,6 @@ describe("GlobalPage — unpriced symbols behavior", () => {
           unpricedSymbols24h: [],
           unresolvedCount: 0,
           unresolvedCount24h: 0,
-          isTruncated: false,
         },
       }),
     ]);
@@ -321,7 +317,6 @@ describe("GlobalPage — unpriced symbols behavior", () => {
           unpricedSymbols24h: [],
           unresolvedCount: 1,
           unresolvedCount24h: 1, // UNKNOWN transfer was in last 24h
-          isTruncated: false,
         },
       }),
     ]);
@@ -341,7 +336,6 @@ describe("GlobalPage — unpriced symbols behavior", () => {
           unpricedSymbols24h: [],
           unresolvedCount: 3,
           unresolvedCount24h: 0,
-          isTruncated: false,
         },
       }),
     ]);
@@ -363,7 +357,6 @@ describe("GlobalPage — unpriced symbols behavior", () => {
           unpricedSymbols24h: [],
           unresolvedCount: 0,
           unresolvedCount24h: 0,
-          isTruncated: false,
         },
       }),
     ]);

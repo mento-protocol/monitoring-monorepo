@@ -79,13 +79,11 @@ const FEE_COLUMNS: ReadonlyArray<FeeColumn> = [
 function buildRows(networkData: NetworkData[]): PoolFeeRow[] {
   const rows: PoolFeeRow[] = [];
   for (const n of networkData) {
-    // Skip top-level transport errors, `ratesError` (empty `rates` map ⇒
-    // FX slots would mis-price as unpriced and produce misleading $0 rows),
-    // and `feeSnapshotsError` (the snapshot fetch itself failed, so the
-    // leaderboard row data is gone). Note: `feesError` is intentionally
-    // NOT checked here — it covers the raw `ProtocolFeeTransfer` query
-    // which the leaderboard does not read. A transfer-only outage keeps
-    // the leaderboard live as long as snapshots and rates succeeded.
+    // Skip top-level transport errors, `ratesError` (empty rates map ⇒ FX
+    // slots mis-price as unpriced and produce misleading $0 rows), and
+    // `feeSnapshotsError` (the snapshot fetch itself failed, no row data).
+    // All fee surfaces now read from the same snapshot data and gate on
+    // the same two channels — see PR-snapshot-3.
     if (
       n.error !== null ||
       n.ratesError !== null ||

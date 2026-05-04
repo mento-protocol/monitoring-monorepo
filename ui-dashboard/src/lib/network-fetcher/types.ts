@@ -13,7 +13,6 @@ import type {
   Pool,
   PoolDailyFeeSnapshot,
   PoolSnapshotWindow,
-  ProtocolFeeTransfer,
   TradingLimit,
 } from "@/lib/types";
 import type { SnapshotWindows } from "@/lib/volume";
@@ -68,23 +67,24 @@ export type NetworkData = {
   cdpPoolIds: Set<string>;
   reservePoolIds: Set<string>;
   fees: ProtocolFeeSummary | null;
-  /** Raw fee transfer rows — kept for time-series bucketing on the revenue page. */
-  feeTransfers: ProtocolFeeTransfer[];
   /**
    * Daily-rollup fee snapshots, paginated to all-time history. Source of truth
-   * for the per-pool revenue leaderboard. Empty `[]` when only the chart's raw
-   * transfers were fetched (e.g. homepage SSR path that doesn't render the
-   * leaderboard).
+   * for ALL fee surfaces on /revenue: KPI tile, chart, leaderboard.
    */
   feeSnapshots: PoolDailyFeeSnapshot[];
   /**
-   * Snapshot-only failures (paginated `PoolDailyFeeSnapshot` fetch rejected
-   * or surfaced a mid-pagination error). Kept SEPARATE from `feesError` so
-   * the chain-level Swap Fees KPI tile and `FeeOverTimeChart` — both fed by
-   * raw `feeTransfers` and unaffected by snapshot health — stay live when
-   * only the leaderboard's snapshot path is degraded.
+   * Snapshot fetch failures (paginated `PoolDailyFeeSnapshot` rejected or
+   * surfaced a mid-pagination error). Blanks all fee surfaces (tile, chart,
+   * leaderboard) since they all read from snapshots.
    */
   feeSnapshotsError: Error | null;
+  /**
+   * True when paginated snapshot fetch hit `SNAPSHOT_MAX_PAGES` without
+   * exhausting the result set — `feeSnapshots` carries the most-recent rows
+   * we did fetch, but oldest history was dropped. All-time totals are a
+   * lower bound; UI marks them approximate.
+   */
+  feeSnapshotsTruncated: boolean;
   /**
    * Lowercase-address → token-pair map for slim hooks that don't fetch the
    * full `pools` payload. Empty by default; consumers with a populated
@@ -95,16 +95,9 @@ export type NetworkData = {
   rates: OracleRateMap;
   error: Error | null;
   /**
-   * Failure of the raw `ProtocolFeeTransfer` query for this network.
-   * Affects chart + chain-level KPI tile; does NOT affect the per-pool
-   * leaderboard, which reads `feeSnapshots` instead.
-   */
-  feesError: Error | null;
-  /**
    * Failure of the oracle rates query for this network. With no rates,
    * any non-USD-pegged token (FX) silently mis-prices to "unpriced", so
-   * BOTH the raw-transfer chart/tile AND the snapshot leaderboard must
-   * gate on this.
+   * every fee surface — KPI tile, chart, leaderboard — must gate on this.
    */
   ratesError: Error | null;
   /**

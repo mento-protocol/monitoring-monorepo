@@ -186,7 +186,17 @@ This prevents reviews from repeatedly rediscovering scope boundaries.
 
 ---
 
-## 7. Repo-specific lessons already paid for
+## 7. Per-window state collapses
+
+If a refactor removes per-window state (e.g. `unpriced{24h,7d,30d}` collapsed into a single `unpriced` flag), prove no consumer reads the window-scoped values BEFORE shipping.
+
+- [ ] Grep every consumer of the entry type for the per-window field names. A single cell that reads `entry.unpriced24h` is enough to break the collapse — old data outside the recent window will then incorrectly mark the recent column.
+- [ ] If the producer emits per-day or per-event timestamps, the window flags are derivable: scope `markUnpriced(entry, in24h, in7d, in30d)` to only set the flags whose cutoffs include the row's timestamp. Don't drop precision the renderer needs.
+- [ ] Add at least two test cases: (a) a recent unpriced entry inside all windows flags every column; (b) an OLD unpriced entry outside the recent windows flags ONLY all-time and leaves 24h/7d/30d exact.
+
+PR #306 added the per-window precision specifically to avoid stale-data pollution; PR #317 dropped it as "simplification" and reintroduced the regression. cursor + claude both caught it.
+
+## 8. Repo-specific lessons already paid for
 
 These are not theoretical.
 
@@ -196,10 +206,12 @@ These are not theoretical.
 - Search behavior must be bounded and disclosed when not truly global.
 - Charts and tables should usually be decoupled.
 - Cross-layer features need both indexer and UI regression coverage.
+- Approximate-data badges on rolled-up rows must derive from the data's actual coverage (e.g. the chain's oldest returned transfer's timestamp vs each window's lower bound), not just a global `isTruncated` flag — otherwise busy chains that cross the cap inside a recent window render as exact (PR #306).
+- URL-backed stateful UI controls that write via async `router.replace` (Next.js App Router) must dedupe rapid successive interactions via a ref-tracked intent — reading state from the `useCallback` closure on a fast double-click reads the stale pre-navigation URL and silently drops the second toggle (PR #307).
 
 ---
 
-## 8. Final pre-PR questions
+## 9. Final pre-PR questions
 
 If you answer “no” to any of these, do not open yet.
 

@@ -1,17 +1,19 @@
 /**
- * Fee time-series bucketing for the Revenue page.
+ * Daily fee time-series bucketing for the Revenue page.
  *
- * Converts raw ProtocolFeeTransfer rows into daily UTC buckets with USD
- * values, following the same bucketing pattern as buildDailyVolumeSeries.
+ * Reads `PoolDailyFeeSnapshot` rows (already day-bucketed by the indexer).
+ * Hybrid USD pricing: pegged subtotal from `feesUsdWei`, FX from the
+ * parallel `tokens[]` arrays via the live oracle rate map. Missing days
+ * between the first and last bucket are gap-filled with zeros.
  *
- * Protocol fees come from indexed ERC20 transfers to the yield split address.
  * LP fees are derived from protocol fees × (pool.lpFee / pool.protocolFee)
- * once the Pool entity carries those rate fields — until then lpFeesUSD is 0.
+ * once the Pool entity carries those rate fields — until then `lpFeesUSD`
+ * stays 0.
  */
 
 import { parseWei } from "./format";
 import { UNRESOLVED_SYMBOLS } from "./protocol-fees";
-import { tokenToUSD } from "./tokens";
+import { isUsdPegged, tokenToUSD } from "./tokens";
 import type { NetworkData } from "@/hooks/use-all-networks-data";
 import type { TimeRange } from "./volume";
 
@@ -26,12 +28,10 @@ type FeeSeriesPoint = {
 /**
  * Build a daily-bucketed fee time series across all networks.
  *
- * Each ProtocolFeeTransfer is converted to USD and placed in a UTC-day
- * bucket. Missing days between the first and last transfer are gap-filled
- * with zeros.
- *
- * When `window` is provided, only transfers whose timestamp falls inside
- * the half-open `[window.from, window.to)` range are included.
+ * Each `PoolDailyFeeSnapshot` is keyed by UTC midnight already; we just
+ * sum across pools per day. When `window` is provided, only buckets whose
+ * `timestamp` falls inside the half-open `[window.from, window.to)` range
+ * are included.
  */
 export function buildDailyFeeSeries(
   networkData: NetworkData[],
@@ -43,31 +43,62 @@ export function buildDailyFeeSeries(
   >();
   let minBucket = Infinity;
 
+  // Snapshot timestamps are UTC-midnight buckets, but the input
+  // `snapshotWindow7d/30d` carries hour-aligned bounds (`now - N*86400`).
+  // Naively flooring `window.from` to midnight produces N+1 daily buckets
+  // because half a day spills back across the day boundary — chart would
+  // show 8 buckets while the KPI tile uses `dayStart - 6*86400` (7 buckets).
+  // Match the tile's math: anchor on `dayStart(window.to) - (N-1)*86400`
+  // so the chart and headline cover the same N daily buckets exactly.
+  const dayAlignedWindow = window
+    ? (() => {
+        const days = Math.round((window.to - window.from) / SECONDS_PER_DAY);
+        // The window is half-open `[from, to)`, so the last bucket in
+        // range is `floor((to - 1) / 86400) * 86400` — using `to`
+        // directly would land on the NEXT midnight when `to` is at or
+        // past a day boundary (e.g. `now = TODAY + 86400 + 1`).
+        const lastBucketDayStart =
+          Math.floor((window.to - 1) / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+        return {
+          from: lastBucketDayStart - (days - 1) * SECONDS_PER_DAY,
+          to: window.to,
+        };
+      })()
+    : undefined;
+
   for (const netData of networkData) {
-    // Skip transport errors, `feesError` (raw transfer query rejected → no
-    // rows to bucket), and `ratesError` (empty rate map silently drops
-    // non-USD-pegged transfers while USD-pegged ones still price, making
-    // the chart traces subtly wrong).
+    // Skip transport errors, `ratesError` (empty rate map silently drops
+    // FX-token slots while pegged ones still price → trace would be subtly
+    // wrong), and `feeSnapshotsError` (no row data to bucket).
     if (
       netData.error !== null ||
-      netData.feesError !== null ||
-      netData.ratesError !== null
+      netData.ratesError !== null ||
+      netData.feeSnapshotsError !== null
     )
       continue;
 
-    for (const transfer of netData.feeTransfers) {
-      if (UNRESOLVED_SYMBOLS.has(transfer.tokenSymbol)) continue;
+    for (const s of netData.feeSnapshots) {
+      const ts = Number(s.timestamp);
+      if (dayAlignedWindow) {
+        if (ts < dayAlignedWindow.from || ts >= dayAlignedWindow.to) continue;
+      }
+      const bucket = Math.floor(ts / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+      let usd = Number(s.feesUsdWei) / 1e18;
 
-      const ts = Number(transfer.blockTimestamp);
-      if (window) {
-        if (ts < window.from || ts >= window.to) continue;
+      // FX side: price each non-pegged slot via the oracle rate map. Skip
+      // pegged symbols (already counted in `feesUsdWei`) and indexer
+      // placeholders.
+      for (let i = 0; i < s.tokenSymbols.length; i++) {
+        const sym = s.tokenSymbols[i];
+        if (UNRESOLVED_SYMBOLS.has(sym)) continue;
+        if (isUsdPegged(sym)) continue;
+        const amount = parseWei(s.amounts[i], s.tokenDecimals[i]);
+        const priced = tokenToUSD(sym, amount, netData.rates);
+        if (priced === null) continue;
+        usd += priced;
       }
 
-      const amount = parseWei(transfer.amount, transfer.tokenDecimals);
-      const usd = tokenToUSD(transfer.tokenSymbol, amount, netData.rates);
-      if (usd === null) continue;
-
-      const bucket = Math.floor(ts / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+      if (usd <= 0) continue;
       minBucket = Math.min(minBucket, bucket);
 
       const existing = buckets.get(bucket) ?? {
@@ -87,13 +118,11 @@ export function buildDailyFeeSeries(
   if (!Number.isFinite(minBucket)) return [];
 
   // Emit range: from the earliest bucket that has data (floor, not ceil) to
-  // today. Using floor ensures a transfer at 12:00 on day D when window.from
-  // is 10:00 on day D still appears — the bucket for day D contains only
-  // in-window transfers because the filter above already excluded anything
-  // before window.from.
-  const startBucket = window
-    ? Math.floor(window.from / SECONDS_PER_DAY) * SECONDS_PER_DAY
-    : minBucket;
+  // today. Using floor ensures a snapshot at 00:00 on day D when window.from
+  // is inside D still appears — the bucket for day D contains only in-window
+  // snapshots because the filter above already excluded anything before
+  // window.from.
+  const startBucket = dayAlignedWindow ? dayAlignedWindow.from : minBucket;
   const endRef = window?.to ?? Math.floor(Date.now() / 1000);
   const endBucket = Math.floor(endRef / SECONDS_PER_DAY) * SECONDS_PER_DAY;
   const lastBucket =
