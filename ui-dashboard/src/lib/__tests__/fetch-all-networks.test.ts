@@ -10,6 +10,7 @@ import * as fetchAllNetworks from "@/lib/fetch-all-networks";
 const EXPECTED_EXPORT_NAMES = [
   "REQUEST_TIMEOUT_MS",
   "blankNetworkData",
+  "fetchAllFeeSnapshotPages",
   "fetchAllNetworks",
   "fetchNetworkData",
   "isNetworkDataFullyHealthy",

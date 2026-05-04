@@ -120,6 +120,7 @@ export function makeNetworkData(
     reservePoolIds: new Set(),
     fees: null,
     feeTransfers: [],
+    feeSnapshots: [],
     poolLabels: new Map(),
     uniqueLpAddresses: [],
     rates: new Map(),

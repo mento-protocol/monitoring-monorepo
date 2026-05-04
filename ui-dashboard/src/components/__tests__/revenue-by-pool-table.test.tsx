@@ -1,17 +1,16 @@
 /**
- * Tests for the per-chain truncation badge on `RevenueByPoolTable`.
- * Truncation is now per-window: a window is flagged when the chain hit the
- * row cap AND the oldest returned transfer's timestamp is younger than the
- * window's lower bound (i.e. the cap clipped data inside the window).
+ * Tests for `RevenueByPoolTable` against the snapshot-based aggregator.
+ * Per-window truncation badges (PR #306) were retired in PR-snapshot-2 once
+ * the leaderboard switched off raw transfers — snapshot pagination covers
+ * all-time history, so the only remaining `≈` flag is genuine pricing gaps
+ * (UNKNOWN tokens or missing FX rates).
  */
 
 import { describe, it, expect, vi } from "vitest";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { NetworkData } from "@/lib/fetch-all-networks";
-import type { ProtocolFeeTransfer } from "@/lib/types";
-import type { ProtocolFeeSummary } from "@/lib/protocol-fees";
-import { PROTOCOL_FEE_QUERY_LIMIT } from "@/lib/protocol-fees";
+import type { PoolDailyFeeSnapshot } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Module-level mocks — must be hoisted before SUT import.
@@ -55,46 +54,43 @@ import { RevenueByPoolTable } from "@/components/revenue-by-pool-table";
 // ---------------------------------------------------------------------------
 
 const POOL_ADDR = "0xaaaa000000000000000000000000000000000001";
+const CHAIN = 42220;
+const SECS_PER_DAY = 86_400;
+const NOW_S = Math.floor(Date.now() / 1000);
+const TODAY_BUCKET = String(Math.floor(NOW_S / SECS_PER_DAY) * SECS_PER_DAY);
 
-/** Build a minimal ProtocolFeeTransfer. */
-function transfer(
-  overrides: Partial<ProtocolFeeTransfer> = {},
-): ProtocolFeeTransfer {
+/** Build a minimal PoolDailyFeeSnapshot. Defaults to today's bucket, USDm pegged. */
+function feeSnapshot(
+  overrides: Partial<PoolDailyFeeSnapshot> = {},
+): PoolDailyFeeSnapshot {
+  const dayTs = overrides.timestamp ?? TODAY_BUCKET;
+  const poolAddress = overrides.poolAddress ?? POOL_ADDR;
   return {
-    chainId: 42220,
-    tokenSymbol: "USDm",
-    tokenDecimals: 18,
-    amount: "1000000000000000000", // 1 USDm
-    blockTimestamp: "100", // old — outside all windows
-    from: POOL_ADDR,
+    id: `${CHAIN}-${poolAddress}-${dayTs}`,
+    chainId: CHAIN,
+    poolId: `${CHAIN}-${poolAddress}`,
+    poolAddress,
+    timestamp: dayTs,
+    tokens: ["0xusd"],
+    tokenSymbols: ["USDm"],
+    tokenDecimals: [18],
+    amounts: ["1000000000000000000"], // 1 USDm
+    feesUsdWei: "1000000000000000000", // 1 USD
+    allPegged: true,
+    unresolvedCount: 0,
+    transferCount: 1,
+    blockNumber: "0",
+    updatedAtTimestamp: dayTs,
     ...overrides,
   };
 }
 
-/** Build a minimal ProtocolFeeSummary — only `isTruncated` is load-bearing. */
-function feeSummary(isTruncated: boolean): ProtocolFeeSummary {
-  return {
-    totalFeesUSD: 1,
-    fees24hUSD: 0,
-    fees7dUSD: 0,
-    fees30dUSD: 0,
-    unpricedSymbols: [],
-    unpricedSymbols24h: [],
-    unresolvedCount: 0,
-    unresolvedCount24h: 0,
-    isTruncated,
-  };
-}
-
 /** Build a minimal NetworkData stub. */
-function networkData(
-  transfers: ProtocolFeeTransfer[],
-  fees: ProtocolFeeSummary | null = null,
-): NetworkData {
+function networkData(snapshots: PoolDailyFeeSnapshot[]): NetworkData {
   return {
     network: {
       id: "celo-mainnet",
-      chainId: 42220,
+      chainId: CHAIN,
       label: "Celo",
       contractsNamespace: null,
       hasuraUrl: "",
@@ -121,11 +117,15 @@ function networkData(
     olsPoolIds: new Set(),
     cdpPoolIds: new Set(),
     reservePoolIds: new Set(),
-    fees,
-    feeTransfers: transfers,
+    fees: null,
+    feeTransfers: [],
+    feeSnapshots: snapshots,
     poolLabels: new Map(),
     uniqueLpAddresses: null,
-    rates: new Map([["USDm", 1]]),
+    rates: new Map([
+      ["USDm", 1],
+      ["GBPm", 1.3263],
+    ]),
     error: null,
     feesError: null,
     snapshotsError: null,
@@ -166,154 +166,91 @@ function renderFeeCells(networks: NetworkData[]): CellRecord {
   };
 }
 
-// ---------------------------------------------------------------------------
-// approxAnnotation — four combinations via rendered output
-// ---------------------------------------------------------------------------
-
-describe("RevenueByPoolTable — per-chain truncation badge", () => {
-  it("(truncated + unpriced): All-time shows ≈ with unpriced tooltip (unpriced wins)", () => {
-    // Transfer with an unpriced symbol so the row has unpriced=true, and
-    // isTruncated=true on the chain summary.
-    const transfers = [
-      transfer({ tokenSymbol: "MYSTERY" }), // unpriced (all-time window)
-    ];
-    const cells = renderFeeCells([networkData(transfers, feeSummary(true))]);
-
-    expect(cells.feesAll).toContain("≈");
-    expect(cells.feesAll).toContain("unpriced/unknown tokens");
-    // Recent windows are not marked (old timestamp, outside all windows)
-    expect(cells.fees24h).not.toContain("≈");
-    expect(cells.fees7d).not.toContain("≈");
-    expect(cells.fees30d).not.toContain("≈");
-  });
-
-  it("(truncated + not unpriced): All-time shows ≈ with truncation tooltip", () => {
-    const transfers = [
-      transfer(), // USDm — priced; old timestamp
-    ];
-    const cells = renderFeeCells([networkData(transfers, feeSummary(true))]);
-
-    expect(cells.feesAll).toContain("≈");
-    expect(cells.feesAll).toContain("query cap");
-    expect(cells.fees24h).not.toContain("≈");
-    expect(cells.fees7d).not.toContain("≈");
-    expect(cells.fees30d).not.toContain("≈");
-  });
-
-  it("(not truncated + unpriced): All-time shows ≈ with unpriced tooltip", () => {
-    const transfers = [
-      transfer({ tokenSymbol: "MYSTERY" }), // unpriced all-time
-    ];
-    const cells = renderFeeCells([networkData(transfers, feeSummary(false))]);
-
-    expect(cells.feesAll).toContain("≈");
-    expect(cells.feesAll).toContain("unpriced/unknown tokens");
-    expect(cells.fees24h).not.toContain("≈");
-    expect(cells.fees7d).not.toContain("≈");
-    expect(cells.fees30d).not.toContain("≈");
-  });
-
-  it("(not truncated + not unpriced): no ≈ on any column", () => {
-    const transfers = [
-      transfer(), // USDm — priced; old timestamp
-    ];
-    const cells = renderFeeCells([networkData(transfers, feeSummary(false))]);
-
+describe("RevenueByPoolTable — snapshot path", () => {
+  it("renders priced row with no ≈ on any column", () => {
+    const cells = renderFeeCells([networkData([feeSnapshot()])]);
     expect(cells.fees24h).not.toContain("≈");
     expect(cells.fees7d).not.toContain("≈");
     expect(cells.fees30d).not.toContain("≈");
     expect(cells.feesAll).not.toContain("≈");
   });
 
-  // -----------------------------------------------------------------------
-  // Per-window truncation — the badge is driven by whether the oldest
-  // returned transfer predates each window boundary.
-  // -----------------------------------------------------------------------
-
-  const NOW_S = Math.floor(Date.now() / 1000);
-
-  it("capped chain whose oldest returned transfer predates 30d → only All-time is truncated", () => {
-    // Newest transfer is recent; oldest is well outside 30d. Chain is capped
-    // (more transfers exist beyond the oldest returned one), but the cap did
-    // NOT clip data inside any of the 24h/7d/30d windows because we already
-    // see history older than 30d.
-    const transfers = [
-      transfer({ blockTimestamp: String(NOW_S - 60) }), // newest, inside 24h
-      transfer({ blockTimestamp: String(NOW_S - 60 * 86400) }), // oldest, > 30d
+  it("UNKNOWN slot in snapshot flips ≈ across all columns (single per-row flag)", () => {
+    const snapshots = [
+      feeSnapshot({
+        tokens: ["0xusd", "0x???"],
+        tokenSymbols: ["USDm", "UNKNOWN"],
+        tokenDecimals: [18, 18],
+        amounts: ["1000000000000000000", "1000000000000000000"],
+        feesUsdWei: "1000000000000000000",
+        allPegged: false,
+        unresolvedCount: 1,
+      }),
     ];
-    const cells = renderFeeCells([networkData(transfers, feeSummary(true))]);
-
-    expect(cells.feesAll).toContain("≈");
-    expect(cells.feesAll).toContain("query cap");
-    expect(cells.fees30d).not.toContain("≈");
-    expect(cells.fees7d).not.toContain("≈");
-    expect(cells.fees24h).not.toContain("≈");
-  });
-
-  it("capped chain whose oldest returned transfer is inside 30d → 30d + All-time truncated, 24h/7d clean", () => {
-    // Oldest returned is 14 days ago — outside 7d/24h, inside 30d. Cap
-    // clipped data older than 14 days, so 30d total is a lower bound; 7d
-    // and 24h are unaffected.
-    const transfers = [
-      transfer({ blockTimestamp: String(NOW_S - 60) }), // newest, inside 24h
-      transfer({ blockTimestamp: String(NOW_S - 14 * 86400) }), // oldest, in 30d
-    ];
-    const cells = renderFeeCells([networkData(transfers, feeSummary(true))]);
-
-    expect(cells.fees30d).toContain("≈");
-    expect(cells.fees30d).toContain("query cap");
-    expect(cells.feesAll).toContain("≈");
-    expect(cells.fees24h).not.toContain("≈");
-    expect(cells.fees7d).not.toContain("≈");
-  });
-
-  it("capped chain whose oldest returned transfer is inside 7d → 7d + 30d + All-time truncated, 24h clean", () => {
-    const transfers = [
-      transfer({ blockTimestamp: String(NOW_S - 60) }), // newest, inside 24h
-      transfer({ blockTimestamp: String(NOW_S - 3 * 86400) }), // oldest, in 7d
-    ];
-    const cells = renderFeeCells([networkData(transfers, feeSummary(true))]);
-
-    expect(cells.fees7d).toContain("≈");
-    expect(cells.fees30d).toContain("≈");
-    expect(cells.feesAll).toContain("≈");
-    expect(cells.fees24h).not.toContain("≈");
-  });
-
-  it("capped chain whose oldest returned transfer is inside 24h → every window truncated", () => {
-    // Extreme case: chain is doing >1000 transfers/day. Cap clipped data
-    // inside every window we display.
-    const transfers = [
-      transfer({ blockTimestamp: String(NOW_S - 60) }), // newest
-      transfer({ blockTimestamp: String(NOW_S - 3600) }), // oldest, 1h ago
-    ];
-    const cells = renderFeeCells([networkData(transfers, feeSummary(true))]);
-
+    const cells = renderFeeCells([networkData(snapshots)]);
     expect(cells.fees24h).toContain("≈");
     expect(cells.fees7d).toContain("≈");
     expect(cells.fees30d).toContain("≈");
     expect(cells.feesAll).toContain("≈");
+    expect(cells.feesAll).toContain("unknown tokens");
   });
 
-  it("not-capped chain ignores oldest-timestamp regardless of how recent it is", () => {
-    // Even if all returned transfers are inside 24h, when the chain's
-    // ProtocolFeeSummary.isTruncated is false we trust the full history is
-    // present; no truncation badge anywhere.
-    const transfers = [
-      transfer({ blockTimestamp: String(NOW_S - 60) }),
-      transfer({ blockTimestamp: String(NOW_S - 600) }),
+  it("missing FX oracle rate flips ≈; pegged total still flows through", () => {
+    const snapshots = [
+      feeSnapshot({
+        // BRLm is in TEST symbol set in aggregator tests but NOT in this
+        // component's networkData rates map (only USDm/GBPm), so this slot
+        // can't be priced.
+        tokens: ["0xusd", "0xbrl"],
+        tokenSymbols: ["USDm", "BRLm"],
+        tokenDecimals: [18, 18],
+        amounts: ["3000000000000000000", "100000000000000000000"],
+        feesUsdWei: "3000000000000000000",
+        allPegged: false,
+      }),
     ];
-    const cells = renderFeeCells([networkData(transfers, feeSummary(false))]);
-
-    expect(cells.fees24h).not.toContain("≈");
-    expect(cells.fees7d).not.toContain("≈");
-    expect(cells.fees30d).not.toContain("≈");
-    expect(cells.feesAll).not.toContain("≈");
+    const cells = renderFeeCells([networkData(snapshots)]);
+    expect(cells.feesAll).toContain("≈");
+    // 3 USD pegged should still appear (the BRL slot just gets dropped
+    // with `unpriced=true`).
+    expect(cells.feesAll).toContain("$3.00");
   });
 
-  it("tooltip cap number tracks PROTOCOL_FEE_QUERY_LIMIT", () => {
-    const transfers = [transfer()];
-    const cells = renderFeeCells([networkData(transfers, feeSummary(true))]);
-    expect(cells.feesAll).toContain(PROTOCOL_FEE_QUERY_LIMIT.toLocaleString());
+  it("renders empty state when no chains have snapshots", () => {
+    const html = renderToStaticMarkup(
+      <RevenueByPoolTable
+        networkData={[networkData([])]}
+        isLoading={false}
+        hasError={false}
+      />,
+    );
+    expect(html).toContain("No swap-fee transfers indexed yet");
+  });
+
+  it("skips chains with feesError so a partial outage doesn't render misleading $0 rows", () => {
+    const n = networkData([feeSnapshot()]);
+    n.feesError = new Error("boom");
+    const html = renderToStaticMarkup(
+      <RevenueByPoolTable
+        networkData={[n]}
+        isLoading={false}
+        hasError={true}
+      />,
+    );
+    // No tbody rows — the chain was skipped despite having a snapshot, and the
+    // empty shell renders the partial-outage copy gated on hasError.
+    expect(html).toContain("Couldn&#x27;t load per-pool revenue");
+    expect(html).not.toContain(POOL_ADDR);
+  });
+
+  it("renders pool detail link based on poolId", () => {
+    const html = renderToStaticMarkup(
+      <RevenueByPoolTable
+        networkData={[networkData([feeSnapshot()])]}
+        isLoading={false}
+        hasError={false}
+      />,
+    );
+    expect(html).toContain(`/pool/${CHAIN}-${POOL_ADDR}`);
   });
 });

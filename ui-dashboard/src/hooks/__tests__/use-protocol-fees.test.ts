@@ -185,13 +185,36 @@ const ORACLE_POOL = {
   oracleOk: true,
 };
 
-/** Happy-path mock: all three queries return non-empty data. */
+// Pre-rolled fee snapshot — one row per chain × day. The hybrid pricing field
+// `feesUsdWei` carries the USD-pegged subtotal; FX tokens (none here) would
+// fan out across the parallel `tokens[]` arrays.
+const FEE_SNAPSHOT = {
+  id: "42220-0xpool-1700000000",
+  chainId: 42220,
+  poolId: "42220-0xpool",
+  poolAddress: "0xpool",
+  timestamp: "1700000000",
+  tokens: ["0xtok"],
+  tokenSymbols: ["USDm"],
+  tokenDecimals: [18],
+  amounts: ["1000000000000000000"],
+  feesUsdWei: "1000000000000000000",
+  allPegged: true,
+  unresolvedCount: 0,
+  transferCount: 1,
+  blockNumber: "1",
+  updatedAtTimestamp: "1700000000",
+};
+
+/** Happy-path mock: all four queries return non-empty data. */
 function setupSuccessfulMock() {
   mockRequest((query) => {
     if (query.includes("OracleRates")) return { Pool: [ORACLE_POOL] };
     if (query.includes("ProtocolFeeTransfer"))
       return { ProtocolFeeTransfer: [USDC_TRANSFER] };
     if (query.includes("PoolLabelsAll")) return { Pool: [POOL_LABEL] };
+    if (query.includes("PoolDailyFeeSnapshotsPage"))
+      return { PoolDailyFeeSnapshot: [FEE_SNAPSHOT] };
     return {};
   });
 }
@@ -218,8 +241,8 @@ beforeEach(() => {
 // Case 1: All three queries succeed
 // ---------------------------------------------------------------------------
 
-describe("useProtocolFees — all three queries succeed", () => {
-  it("populates fees, feeTransfers, poolLabels and leaves feesError null", async () => {
+describe("useProtocolFees — all queries succeed", () => {
+  it("populates fees, feeTransfers, feeSnapshots, poolLabels and leaves feesError null", async () => {
     setupSuccessfulMock();
 
     const results = await runFetcher();
@@ -230,6 +253,8 @@ describe("useProtocolFees — all three queries succeed", () => {
     // aggregateProtocolFees always returns a summary (never null) on success.
     expect(celo.fees).not.toBeNull();
     expect(celo.feeTransfers).toHaveLength(1);
+    expect(celo.feeSnapshots).toHaveLength(1);
+    expect(celo.feeSnapshots[0]).toMatchObject({ tokenSymbols: ["USDm"] });
     expect(celo.poolLabels.size).toBeGreaterThan(0);
   });
 
@@ -473,6 +498,69 @@ describe("useProtocolFees — hasura URL guard", () => {
     expect((GraphQLClient as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(
       DEFAULT_CELO.hasuraUrl,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Case 6.5: Snapshot branch failures — promoted into feesError
+// ---------------------------------------------------------------------------
+
+describe("useProtocolFees — snapshot branch", () => {
+  it("snapshot first-page failure promotes into feesError; fees still aggregated from raw transfers", async () => {
+    const snapshotErr = new Error("snapshot 502");
+
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((...args: unknown[]) => {
+      const query = extractQuery(args[0]);
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.reject(snapshotErr);
+      if (query.includes("OracleRates"))
+        return Promise.resolve({ Pool: [ORACLE_POOL] });
+      if (query.includes("ProtocolFeeTransfer"))
+        return Promise.resolve({ ProtocolFeeTransfer: [USDC_TRANSFER] });
+      if (query.includes("PoolLabelsAll"))
+        return Promise.resolve({ Pool: [POOL_LABEL] });
+      return Promise.resolve({});
+    });
+
+    const results = await runFetcher();
+
+    const celo = results.find((r) => r.network.id === "celo-mainnet")!;
+    // Snapshot rejection is the only thing left to fall through to in the
+    // feesError ternary — fees + rates both succeeded.
+    expect(celo.feesError).toBe(snapshotErr);
+    // The chart's chain-level summary still wires up — it reads raw transfers,
+    // not snapshots.
+    expect(celo.fees).not.toBeNull();
+    expect(celo.feeTransfers).toHaveLength(1);
+    // Snapshot rows are empty after a first-page failure.
+    expect(celo.feeSnapshots).toHaveLength(0);
+  });
+
+  it("fees rejection takes precedence over snapshot rejection in feesError", async () => {
+    const feesErr = new Error("fees rejected first");
+    const snapshotErr = new Error("snapshot also down");
+
+    (
+      GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
+    ).mockImplementation((...args: unknown[]) => {
+      const query = extractQuery(args[0]);
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.reject(snapshotErr);
+      if (query.includes("ProtocolFeeTransfer")) return Promise.reject(feesErr);
+      if (query.includes("OracleRates"))
+        return Promise.resolve({ Pool: [ORACLE_POOL] });
+      if (query.includes("PoolLabelsAll")) return Promise.resolve({ Pool: [] });
+      return Promise.resolve({});
+    });
+
+    const results = await runFetcher();
+
+    const celo = results.find((r) => r.network.id === "celo-mainnet")!;
+    // Fees rejection wins by precedence in the hook's ternary.
+    expect(celo.feesError).toBe(feesErr);
+    expect(celo.feesError).not.toBe(snapshotErr);
   });
 });
 

@@ -128,13 +128,21 @@ export type PoolFeeEntry = {
   fees30dUSD: number;
   /**
    * Any transfer for this pool used an unknown or unpriced symbol — the
-   * all-time total is a lower bound. Window-scoped flags below let the UI
-   * apply `≈` per column so an OLD unpriced transfer doesn't pollute the
-   * 24h/7d/30d cells (mirrors `unpricedSymbols24h` on `ProtocolFeeSummary`).
+   * total is a lower bound.
    */
   unpriced: boolean;
+  /**
+   * @deprecated Window-scoped unpriced flags only made sense when paired
+   * with the per-window truncation flags from the raw-transfer aggregator.
+   * The snapshot-based aggregator (`aggregateFeeSnapshotsByPool`) doesn't
+   * track per-window unpriced state — it mirrors `unpriced` across windows.
+   * The /revenue leaderboard reads only `unpriced`. Remove once
+   * `aggregateProtocolFeesByPool` is retired in PR-snapshot-3.
+   */
   unpriced24h: boolean;
+  /** @deprecated See `unpriced24h`. */
   unpriced7d: boolean;
+  /** @deprecated See `unpriced24h`. */
   unpriced30d: boolean;
 };
 
@@ -160,6 +168,12 @@ function markUnpricedForTs(
  * caveat: 24h / 7d / 30d windows are accurate (rows return newest-first),
  * but all-time may undercount on busy chains once `PROTOCOL_FEE_QUERY_LIMIT`
  * is hit.
+ *
+ * @deprecated Replaced by `aggregateFeeSnapshotsByPool` (in
+ * `protocol-fee-snapshots.ts`) which reads paginated `PoolDailyFeeSnapshot`
+ * rows. The /revenue leaderboard already migrated; this remains exported only
+ * because the old test file still exercises it. Delete once
+ * `__tests__/protocol-fees.test.ts` is updated in PR-snapshot-3.
  */
 export function aggregateProtocolFeesByPool(
   transfers: ProtocolFeeTransfer[],

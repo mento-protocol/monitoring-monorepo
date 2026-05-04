@@ -11,6 +11,7 @@ import type { ProtocolFeeSummary } from "@/lib/protocol-fees";
 import type { OracleRateMap } from "@/lib/tokens";
 import type {
   Pool,
+  PoolDailyFeeSnapshot,
   PoolSnapshotWindow,
   ProtocolFeeTransfer,
   TradingLimit,
@@ -62,6 +63,13 @@ export type NetworkData = {
   /** Raw fee transfer rows — kept for time-series bucketing on the revenue page. */
   feeTransfers: ProtocolFeeTransfer[];
   /**
+   * Daily-rollup fee snapshots, paginated to all-time history. Source of truth
+   * for the per-pool revenue leaderboard. Empty `[]` when only the chart's raw
+   * transfers were fetched (e.g. homepage SSR path that doesn't render the
+   * leaderboard).
+   */
+  feeSnapshots: PoolDailyFeeSnapshot[];
+  /**
    * Lowercase-address → token-pair map for slim hooks that don't fetch the
    * full `pools` payload. Empty by default; consumers with a populated
    * `pools` array should derive labels from that instead.
@@ -86,8 +94,10 @@ export type NetworkData = {
 
 export type PoolLabel = Pick<Pool, "id" | "token0" | "token1" | "source">;
 
-export type SnapshotPageResult = {
-  rows: PoolSnapshotWindow[];
+export type PaginatedPageResult<T> = {
+  rows: T[];
   truncated: boolean;
   error: Error | null;
 };
+
+export type SnapshotPageResult = PaginatedPageResult<PoolSnapshotWindow>;

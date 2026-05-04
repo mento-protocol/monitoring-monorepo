@@ -81,6 +81,13 @@ export function tokenToUSD(
   return null;
 }
 
+/** True for tokens treated as $1.00 (cUSD, USDC, USDT, USDm, …). The set is
+ *  module-private to keep the canonical list in one place; consumers compose
+ *  this helper instead of re-importing it. */
+export function isUsdPegged(symbol: string): boolean {
+  return USD_PEGGED_SYMBOLS.has(symbol);
+}
+
 export function tokenSymbol(network: Network, address: string | null): string {
   if (!address) return "?";
   const lower = address.toLowerCase();

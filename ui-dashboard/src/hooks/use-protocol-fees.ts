@@ -26,6 +26,7 @@ import {
 } from "@/lib/protocol-fees";
 import {
   blankNetworkData,
+  fetchAllFeeSnapshotPages,
   REQUEST_TIMEOUT_MS,
   type NetworkData,
   type PoolLabel,
@@ -65,23 +66,31 @@ async function fetchFeesForNetwork(
   // `allSettled` so any single failure doesn't blank the others. A labels-only
   // failure is non-fatal — the leaderboard falls back to truncated-address
   // labels, so it stays out of `feesError`.
-  const [ratesResult, feesResult, labelsResult] = await Promise.allSettled([
-    client.request<{ Pool: OracleRatePool[] }>({
-      document: ORACLE_RATES,
-      variables: { chainId: network.chainId },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    }),
-    client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>({
-      document: PROTOCOL_FEE_TRANSFERS_ALL,
-      variables: { chainId: network.chainId },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    }),
-    client.request<{ Pool: PoolLabel[] }>({
-      document: POOL_LABELS_ALL,
-      variables: { chainId: network.chainId },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    }),
-  ]);
+  const [ratesResult, feesResult, labelsResult, snapshotsResult] =
+    await Promise.allSettled([
+      client.request<{ Pool: OracleRatePool[] }>({
+        document: ORACLE_RATES,
+        variables: { chainId: network.chainId },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
+      client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>({
+        document: PROTOCOL_FEE_TRANSFERS_ALL,
+        variables: { chainId: network.chainId },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
+      client.request<{ Pool: PoolLabel[] }>({
+        document: POOL_LABELS_ALL,
+        variables: { chainId: network.chainId },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      }),
+      // Pool×day-bounded snapshot rollup; paginated in the helper because the
+      // hosted Hasura silently caps at 1000 rows. Replaces raw transfer
+      // aggregation for the per-pool leaderboard. Mid-page failures fail open
+      // (return what we fetched + flag truncation/error inside the result),
+      // so the helper itself never rejects from a partial outage — the only
+      // path to rejection is a first-page failure or a network/abort error.
+      fetchAllFeeSnapshotPages(client, network.chainId, network.id),
+    ]);
 
   const rates: OracleRateMap =
     ratesResult.status === "fulfilled"
@@ -107,22 +116,33 @@ async function fetchFeesForNetwork(
   // for unknown symbols and gets counted as "unresolved"). That understates
   // the chain's fees without any error signal to the consumer. Promote the
   // rates failure into `feesError` so the revenue page shows the partial-
-  // data banner instead of a confidently-wrong lower bound.
+  // data banner instead of a confidently-wrong lower bound. Snapshot
+  // failures (used by the leaderboard) follow the same fail-loud model: a
+  // hard rejection or a partial-page error inside the helper both flow into
+  // `feesError` so the leaderboard shows the partial-data banner instead of
+  // silently undercounted rows.
+  const snapshotInnerError =
+    snapshotsResult.status === "fulfilled" ? snapshotsResult.value.error : null;
   const feesError =
     feesResult.status === "rejected"
       ? toError(feesResult.reason)
       : ratesResult.status === "rejected"
         ? toError(ratesResult.reason)
-        : null;
+        : snapshotsResult.status === "rejected"
+          ? toError(snapshotsResult.reason)
+          : (snapshotInnerError ?? null);
   const fees: ProtocolFeeSummary | null =
     feesResult.status === "fulfilled" && ratesResult.status === "fulfilled"
       ? aggregateProtocolFees(feeTransfers, rates)
       : null;
+  const feeSnapshots =
+    snapshotsResult.status === "fulfilled" ? snapshotsResult.value.rows : [];
 
   return blankNetworkData(network, windows, {
     rates,
     fees,
     feeTransfers,
+    feeSnapshots,
     poolLabels,
     feesError,
   });

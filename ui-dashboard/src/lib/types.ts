@@ -258,6 +258,40 @@ export type ProtocolFeeTransfer = {
   from: string;
 };
 
+/**
+ * Daily rollup of `ProtocolFeeTransfer`, one row per (chainId, poolAddress, UTC day).
+ * Source of truth for the per-pool revenue leaderboard — pool×day cardinality stays
+ * within a few thousand rows even at all-time scale, so we paginate the full history
+ * cleanly. See `indexer-envio/schema.graphql` → `PoolDailyFeeSnapshot`.
+ *
+ * Hybrid USD pricing: `feesUsdWei` carries USD-pegged tokens converted indexer-side
+ * (18-dp USD-wei BigInt). Non-pegged FX tokens are dashboard-priced from the parallel
+ * `tokens[]` / `tokenSymbols[]` / `tokenDecimals[]` / `amounts[]` arrays via the live
+ * oracle rate map.
+ */
+export type PoolDailyFeeSnapshot = {
+  id: string;
+  chainId: number;
+  poolId: string;
+  poolAddress: string;
+  /** UTC day bucket, in seconds (`(ts / 86400) * 86400`). BigInt as decimal string. */
+  timestamp: string;
+  tokens: string[];
+  tokenSymbols: string[];
+  tokenDecimals: number[];
+  /** Raw token-native amounts, summed per day per token. BigInt as decimal string. */
+  amounts: string[];
+  /** USD-pegged subset only, 18-dp USD-wei BigInt as decimal string. */
+  feesUsdWei: string;
+  /** True iff every transfer in this day's bucket was a USD-pegged token. */
+  allPegged: boolean;
+  /** Number of token symbols that resolved to "UNKNOWN" at upsert time. */
+  unresolvedCount: number;
+  transferCount: number;
+  blockNumber: string;
+  updatedAtTimestamp: string;
+};
+
 export type OlsPool = {
   id: string;
   chainId: number;

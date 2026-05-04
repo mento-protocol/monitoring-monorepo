@@ -16,6 +16,7 @@ import {
   ALL_POOLS_WITH_HEALTH,
   ALL_TRADING_LIMITS,
   ALL_OLS_POOLS,
+  POOL_DAILY_FEE_SNAPSHOTS_PAGE,
   POOL_DAILY_SNAPSHOTS_ALL,
   PROTOCOL_FEE_TRANSFERS_ALL,
   UNIQUE_LP_ADDRESSES,
@@ -31,13 +32,18 @@ import {
 } from "@/lib/volume";
 import type {
   Pool,
+  PoolDailyFeeSnapshot,
   PoolSnapshotWindow,
   ProtocolFeeTransfer,
   TradingLimit,
   OlsPool,
 } from "@/lib/types";
 import { isFpmm, buildOracleRateMap } from "@/lib/tokens";
-import type { NetworkData, SnapshotPageResult } from "./types";
+import type {
+  NetworkData,
+  PaginatedPageResult,
+  SnapshotPageResult,
+} from "./types";
 
 /**
  * True iff every error channel on `n` is null — top-level, fees,
@@ -83,6 +89,7 @@ export const blankNetworkData = (
   reservePoolIds: new Set(),
   fees: null,
   feeTransfers: [],
+  feeSnapshots: [],
   poolLabels: new Map(),
   uniqueLpAddresses: null,
   rates: new Map(),
@@ -141,9 +148,6 @@ const SNAPSHOT_MAX_PAGES = 100;
 // than the p99 of the slowest query measured against Envio's hosted Hasura.
 export const REQUEST_TIMEOUT_MS = 5000;
 
-const snapshotDedupKey = (s: PoolSnapshotWindow) =>
-  `${s.poolId}-${s.timestamp}`;
-
 // Tracks responseKeys that have already triggered a
 // "hasura-snapshot-cap-exhausted" warning so the 30s poll cycle doesn't
 // re-fire the same signal on every refresh. Exported for test-scope
@@ -169,31 +173,57 @@ async function fetchAllDailySnapshotPages(
   poolIds: string[],
   network: string,
 ): Promise<SnapshotPageResult> {
-  return fetchPaginatedSnapshotPages(
+  return fetchPaginatedRows<PoolSnapshotWindow, "PoolDailySnapshot">(
     client,
-    poolIds,
     POOL_DAILY_SNAPSHOTS_ALL,
     "PoolDailySnapshot",
+    { poolIds },
     network,
+    (s) => `${s.poolId}-${s.timestamp}`,
   );
 }
 
-async function fetchPaginatedSnapshotPages<K extends string>(
+/**
+ * Per-pool fee-snapshot pagination — pool×day cardinality (~30 pools × ~430
+ * days) easily exceeds the 1000-row cap, so we paginate. Same fail-open
+ * semantics as the daily snapshot path. Dedup keyed off `id` since
+ * `PoolDailyFeeSnapshot.id = "{chainId}-{poolAddress}-{dayTs}"` is unique by
+ * construction. Exported because the slim `useProtocolFees` hook fetches its
+ * own snapshots — the homepage path in `fetchNetworkData` doesn't render the
+ * leaderboard so it leaves `feeSnapshots` empty.
+ */
+export async function fetchAllFeeSnapshotPages(
   client: GraphQLClient,
-  poolIds: string[],
+  chainId: number,
+  network: string,
+): Promise<PaginatedPageResult<PoolDailyFeeSnapshot>> {
+  return fetchPaginatedRows<PoolDailyFeeSnapshot, "PoolDailyFeeSnapshot">(
+    client,
+    POOL_DAILY_FEE_SNAPSHOTS_PAGE,
+    "PoolDailyFeeSnapshot",
+    { chainId },
+    network,
+    (s) => s.id,
+  );
+}
+
+async function fetchPaginatedRows<T, K extends string>(
+  client: GraphQLClient,
   query: string,
   responseKey: K,
+  baseVars: Record<string, unknown>,
   network: string,
-): Promise<SnapshotPageResult> {
+  dedupKey: (row: T) => string,
+): Promise<PaginatedPageResult<T>> {
   const seen = new Set<string>();
-  const rows: PoolSnapshotWindow[] = [];
+  const rows: T[] = [];
   for (let page = 0; page < SNAPSHOT_MAX_PAGES; page++) {
-    let batch: PoolSnapshotWindow[];
+    let batch: T[];
     try {
-      const result = await client.request<Record<K, PoolSnapshotWindow[]>>({
+      const result = await client.request<Record<K, T[]>>({
         document: query,
         variables: {
-          poolIds,
+          ...baseVars,
           limit: SNAPSHOT_PAGE_SIZE,
           offset: page * SNAPSHOT_PAGE_SIZE,
         },
@@ -219,7 +249,7 @@ async function fetchPaginatedSnapshotPages<K extends string>(
             network,
             degraded: "partial-pages",
           },
-          extra: { page, rowsFetched: rows.length, poolCount: poolIds.length },
+          extra: { page, rowsFetched: rows.length },
         });
       }
       return {
@@ -229,7 +259,7 @@ async function fetchPaginatedSnapshotPages<K extends string>(
       };
     }
     for (const row of batch) {
-      const key = snapshotDedupKey(row);
+      const key = dedupKey(row);
       if (seen.has(key)) continue;
       seen.add(key);
       rows.push(row);
@@ -251,7 +281,6 @@ async function fetchPaginatedSnapshotPages<K extends string>(
       tags: { source: "hasura", responseKey, network },
       extra: {
         rowsFetched: rows.length,
-        poolCount: poolIds.length,
         maxPages: SNAPSHOT_MAX_PAGES,
         pageSize: SNAPSHOT_PAGE_SIZE,
       },
@@ -504,6 +533,10 @@ export async function fetchNetworkData(
       feesResult.status === "fulfilled"
         ? (feesResult.value.ProtocolFeeTransfer ?? [])
         : [],
+    // Homepage SSR path doesn't render the per-pool leaderboard, so fee
+    // snapshots aren't fetched here. `useProtocolFees` populates them on
+    // /revenue. Default `[]` keeps `NetworkData` shape uniform.
+    feeSnapshots: [],
     poolLabels: new Map(),
     uniqueLpAddresses,
     rates,

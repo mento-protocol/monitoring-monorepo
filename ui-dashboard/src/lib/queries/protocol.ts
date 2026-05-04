@@ -30,3 +30,37 @@ export const PROTOCOL_FEE_TRANSFERS_ALL = `
     }
   }
 `;
+
+/**
+ * Paginated fetch of `PoolDailyFeeSnapshot` rows for one chain. Pool×day
+ * cardinality (≈30 pools × 430 days at start of 2026 worst case) easily exceeds
+ * the silent 1000-row Hasura cap, so consumers MUST loop with offset until a
+ * page returns short. Tiebreaker `id: desc` gives deterministic ordering for
+ * rows that share a `timestamp` (different pools on the same day).
+ */
+export const POOL_DAILY_FEE_SNAPSHOTS_PAGE = `
+  query PoolDailyFeeSnapshotsPage($chainId: Int!, $limit: Int!, $offset: Int!) {
+    PoolDailyFeeSnapshot(
+      where: { chainId: { _eq: $chainId } }
+      order_by: [{ timestamp: desc }, { id: desc }]
+      limit: $limit
+      offset: $offset
+    ) {
+      id
+      chainId
+      poolId
+      poolAddress
+      timestamp
+      tokens
+      tokenSymbols
+      tokenDecimals
+      amounts
+      feesUsdWei
+      allPegged
+      unresolvedCount
+      transferCount
+      blockNumber
+      updatedAtTimestamp
+    }
+  }
+`;
