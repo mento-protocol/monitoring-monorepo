@@ -521,6 +521,10 @@ describe("VolumeOverTimeChart render", () => {
     // both badges must be present.
     expect(html).toMatch(/\$3\.00.*?<[^>]*>v3</);
     expect(html).toMatch(/\$0\.00.*?<[^>]*>v2</);
+    // Screen-reader text must restore the separators the visual layout drops:
+    // gap-x-3 between cells reads as `$3.00v3$0.00v2` to assistive tech
+    // without the explicit aria-label.
+    expect(html).toContain('aria-label="$3.00 v3 · $0.00 v2"');
     // Only 2 days of history < 15 buckets required for WoW comparison, so
     // the delta is null. The 30d range itself does NOT suppress the pill —
     // the WoW basis is always 7d-vs-7d, independent of visible range.
@@ -548,6 +552,8 @@ describe("VolumeOverTimeChart render", () => {
     // The dollar amount must NOT appear next to the v2 badge — that's the
     // pre-fix bug where Broker outage masqueraded as confident $0.
     expect(html).not.toMatch(/\$0\.00.*?<[^>]*>v2</);
+    // Accessible label must reflect the data-unavailable state, not "$0.00".
+    expect(html).toContain('aria-label="$1.00 v3 · — v2"');
   });
 
   it("includes per-day v3+v2 sum in the chart card's series prop so stacked y-axis ceiling fits", () => {

@@ -32,11 +32,25 @@ export type ChainVolumeSeries = {
 // bottom of the stack and uses the brand color; v2 stacks on top in a
 // distinct teal so the gap reads at a glance even when small.
 //
-// `bg` = same hex with `59` appended = 35% alpha — used for the headline
-// pill background so it reads as the same series as its matching trace.
+// Pill foreground/background pair: the chart trace uses `color` directly
+// (saturated, on slate-900). The headline pill uses the lighter `pillFg`
+// (Tailwind indigo-200 / teal-200) on the matching `pillBg` (same hue at
+// 35% alpha — `59` appended = 0x59/0xff ≈ 0.35). The lighter foreground is
+// what keeps WCAG AA contrast against the tinted background — `color` on
+// `${color}59` over slate-900 lands at ~2.6:1, below 4.5:1 for small text.
 const VERSION_STYLE = {
-  v3: { label: "v3", color: "#6366f1", bg: "#6366f159" },
-  v2: { label: "v2", color: "#14b8a6", bg: "#14b8a659" },
+  v3: {
+    label: "v3",
+    color: "#6366f1", // indigo-500 — saturated for the trace fill
+    pillFg: "#c7d2fe", // indigo-200 — readable on the tinted pill bg
+    pillBg: "#6366f159", // indigo-500 @ 35% alpha
+  },
+  v2: {
+    label: "v2",
+    color: "#14b8a6", // teal-500
+    pillFg: "#99f6e4", // teal-200
+    pillBg: "#14b8a659", // teal-500 @ 35% alpha
+  },
 } as const;
 type Version = keyof typeof VERSION_STYLE;
 const V3_COLOR = VERSION_STYLE.v3.color;
@@ -235,13 +249,17 @@ export function weekOverWeekChangePct(
 
 // Tiny pill rendered after each $-value in the headline so "v3" / "v2" labels
 // don't compete typographically with the dollar amount the user is reading.
-// Caller picks the version; color + bg + label come from `VERSION_STYLE` so
-// the pill can't drift out of sync with its matching breakdown trace.
+// Caller picks the version; foreground/background/label come from
+// `VERSION_STYLE` so the pill can't drift out of sync with its matching
+// breakdown trace. `aria-hidden` because the parent headline span carries
+// the human-readable `aria-label` for assistive tech (the pill is decorative
+// alongside the dollar value).
 function VersionBadge({ version }: { version: Version }): ReactNode {
-  const { label, color, bg } = VERSION_STYLE[version];
+  const { label, pillFg, pillBg } = VERSION_STYLE[version];
   return (
     <span
-      style={{ backgroundColor: bg, color }}
+      aria-hidden="true"
+      style={{ backgroundColor: pillBg, color: pillFg }}
       // `translate-y-[-3px]` nudges the cap-height-based pill up onto the
       // baseline of the surrounding text-3xl/4xl digits — without it the
       // pill sits noticeably below the dollar value's midline.
@@ -275,14 +293,24 @@ function computeHeadline(
   if (hasError) return "N/A";
   if (hasSnapshotError && v3Points.length === 0 && v2Points.length === 0)
     return "N/A";
+  // Visual layout has no whitespace/punctuation between values and pill
+  // badges, and gap-x-3 between the v3 and v2 cells is rendering-only.
+  // Without an explicit `aria-label`, screen readers read the headline as
+  // "$3.00v3$0.00v2"; the explicit label restores the original
+  // "$X v3 · $Y v2" reading.
+  const v2Display = hasBrokerSnapshotError ? "—" : formatUSD(v2Total);
+  const ariaLabel = `${formatUSD(v3Total)} v3 · ${v2Display} v2`;
   return (
-    <span className="inline-flex flex-wrap items-baseline gap-x-3">
-      <span>
+    <span
+      aria-label={ariaLabel}
+      className="inline-flex flex-wrap items-baseline gap-x-3"
+    >
+      <span aria-hidden="true">
         {formatUSD(v3Total)}
         <VersionBadge version="v3" />
       </span>
-      <span>
-        {hasBrokerSnapshotError ? "—" : formatUSD(v2Total)}
+      <span aria-hidden="true">
+        {v2Display}
         <VersionBadge version="v2" />
       </span>
     </span>
