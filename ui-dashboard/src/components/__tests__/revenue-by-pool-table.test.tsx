@@ -68,7 +68,6 @@ function feeSnapshot(
   return {
     id: `${CHAIN}-${poolAddress}-${dayTs}`,
     chainId: CHAIN,
-    poolId: `${CHAIN}-${poolAddress}`,
     poolAddress,
     timestamp: dayTs,
     tokens: ["0xusd"],
@@ -76,11 +75,6 @@ function feeSnapshot(
     tokenDecimals: [18],
     amounts: ["1000000000000000000"], // 1 USDm
     feesUsdWei: "1000000000000000000", // 1 USD
-    allPegged: true,
-    unresolvedCount: 0,
-    transferCount: 1,
-    blockNumber: "0",
-    updatedAtTimestamp: dayTs,
     ...overrides,
   };
 }
@@ -183,8 +177,6 @@ describe("RevenueByPoolTable — snapshot path", () => {
         tokenDecimals: [18, 18],
         amounts: ["1000000000000000000", "1000000000000000000"],
         feesUsdWei: "1000000000000000000",
-        allPegged: false,
-        unresolvedCount: 1,
       }),
     ];
     const cells = renderFeeCells([networkData(snapshots)]);
@@ -206,7 +198,6 @@ describe("RevenueByPoolTable — snapshot path", () => {
         tokenDecimals: [18, 18],
         amounts: ["3000000000000000000", "100000000000000000000"],
         feesUsdWei: "3000000000000000000",
-        allPegged: false,
       }),
     ];
     const cells = renderFeeCells([networkData(snapshots)]);

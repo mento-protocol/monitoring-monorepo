@@ -53,7 +53,6 @@ function feeSnapshot(): PoolDailyFeeSnapshot {
   return {
     id: `${CHAIN}-${POOL_ADDR}-${TODAY_BUCKET}`,
     chainId: CHAIN,
-    poolId: `${CHAIN}-${POOL_ADDR}`,
     poolAddress: POOL_ADDR,
     timestamp: TODAY_BUCKET,
     tokens: ["0xusd"],
@@ -61,11 +60,6 @@ function feeSnapshot(): PoolDailyFeeSnapshot {
     tokenDecimals: [18],
     amounts: ["1000000000000000000"],
     feesUsdWei: "1000000000000000000",
-    allPegged: true,
-    unresolvedCount: 0,
-    transferCount: 1,
-    blockNumber: "0",
-    updatedAtTimestamp: TODAY_BUCKET,
   };
 }
 

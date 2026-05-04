@@ -272,7 +272,6 @@ export type ProtocolFeeTransfer = {
 export type PoolDailyFeeSnapshot = {
   id: string;
   chainId: number;
-  poolId: string;
   poolAddress: string;
   /** UTC day bucket, in seconds (`(ts / 86400) * 86400`). BigInt as decimal string. */
   timestamp: string;
@@ -283,13 +282,10 @@ export type PoolDailyFeeSnapshot = {
   amounts: string[];
   /** USD-pegged subset only, 18-dp USD-wei BigInt as decimal string. */
   feesUsdWei: string;
-  /** True iff every transfer in this day's bucket was a USD-pegged token. */
-  allPegged: boolean;
-  /** Number of token symbols that resolved to "UNKNOWN" at upsert time. */
-  unresolvedCount: number;
-  transferCount: number;
-  blockNumber: string;
-  updatedAtTimestamp: string;
+  // Other entity fields (`poolId`, `allPegged`, `unresolvedCount`, `transferCount`,
+  // `blockNumber`, `updatedAtTimestamp`) exist in `schema.graphql` but the dashboard
+  // does not read them, so they are intentionally omitted from
+  // `POOL_DAILY_FEE_SNAPSHOTS_PAGE` to shrink the paginated payload.
 };
 
 export type OlsPool = {

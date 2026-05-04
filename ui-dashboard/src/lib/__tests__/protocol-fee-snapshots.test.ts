@@ -29,7 +29,6 @@ function snapshot(
   return {
     id: `${CHAIN}-${poolAddress}-${dayTs}`,
     chainId: CHAIN,
-    poolId: `${CHAIN}-${poolAddress}`,
     poolAddress,
     timestamp: dayTs,
     tokens: [],
@@ -37,11 +36,6 @@ function snapshot(
     tokenDecimals: [],
     amounts: [],
     feesUsdWei: "0",
-    allPegged: true,
-    unresolvedCount: 0,
-    transferCount: 0,
-    blockNumber: "0",
-    updatedAtTimestamp: dayTs,
     ...overrides,
   };
 }
@@ -63,7 +57,6 @@ describe("aggregateFeeSnapshotsByPool", () => {
         tokenDecimals: [18],
         amounts: ["1500000000000000000"],
         feesUsdWei: "1500000000000000000",
-        allPegged: true,
       }),
     ];
     const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
@@ -89,7 +82,6 @@ describe("aggregateFeeSnapshotsByPool", () => {
         // 100 GBPm
         amounts: ["100000000000000000000"],
         feesUsdWei: "0",
-        allPegged: false,
       }),
     ];
     const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
@@ -110,7 +102,6 @@ describe("aggregateFeeSnapshotsByPool", () => {
         // feesUsdWei carries ONLY the pegged side (5 USD) per the indexer's
         // hybrid pricing contract.
         feesUsdWei: "5000000000000000000",
-        allPegged: false,
       }),
     ];
     const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
@@ -126,25 +117,21 @@ describe("aggregateFeeSnapshotsByPool", () => {
       snapshot({
         timestamp: DAY(0, now),
         feesUsdWei: "1000000000000000000",
-        allPegged: true,
       }),
       // 5 days ago: 2 USDm
       snapshot({
         timestamp: DAY(5, now),
         feesUsdWei: "2000000000000000000",
-        allPegged: true,
       }),
       // 20 days ago: 4 USDm
       snapshot({
         timestamp: DAY(20, now),
         feesUsdWei: "4000000000000000000",
-        allPegged: true,
       }),
       // 100 days ago: 8 USDm (outside 30d window)
       snapshot({
         timestamp: DAY(100, now),
         feesUsdWei: "8000000000000000000",
-        allPegged: true,
       }),
     ];
     const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
@@ -166,8 +153,6 @@ describe("aggregateFeeSnapshotsByPool", () => {
         tokenDecimals: [18, 18],
         amounts: ["3000000000000000000", "1000000000000000000"],
         feesUsdWei: "3000000000000000000", // pegged side only
-        allPegged: false,
-        unresolvedCount: 1,
       }),
     ];
     const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
@@ -186,7 +171,6 @@ describe("aggregateFeeSnapshotsByPool", () => {
         tokenDecimals: [18, 18],
         amounts: ["3000000000000000000", "100000000000000000000"],
         feesUsdWei: "3000000000000000000",
-        allPegged: false,
       }),
     ];
     const entries = aggregateFeeSnapshotsByPool(
@@ -212,7 +196,6 @@ describe("aggregateFeeSnapshotsByPool", () => {
           Math.floor((now - SECS_PER_DAY - 1) / SECS_PER_DAY) * SECS_PER_DAY,
         ),
         feesUsdWei: "5000000000000000000",
-        allPegged: true,
       }),
     ];
     const entries = aggregateFeeSnapshotsByPool(

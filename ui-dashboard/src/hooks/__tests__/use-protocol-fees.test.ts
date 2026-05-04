@@ -191,7 +191,6 @@ const ORACLE_POOL = {
 const FEE_SNAPSHOT = {
   id: "42220-0xpool-1700000000",
   chainId: 42220,
-  poolId: "42220-0xpool",
   poolAddress: "0xpool",
   timestamp: "1700000000",
   tokens: ["0xtok"],
@@ -199,11 +198,6 @@ const FEE_SNAPSHOT = {
   tokenDecimals: [18],
   amounts: ["1000000000000000000"],
   feesUsdWei: "1000000000000000000",
-  allPegged: true,
-  unresolvedCount: 0,
-  transferCount: 1,
-  blockNumber: "1",
-  updatedAtTimestamp: "1700000000",
 };
 
 /** Happy-path mock: all four queries return non-empty data. */

@@ -19,7 +19,7 @@ import { parseWei } from "./format";
 import { normalizePoolIdForChain } from "./pool-id";
 import { isUsdPegged, tokenToUSD, type OracleRateMap } from "./tokens";
 import type { PoolDailyFeeSnapshot } from "./types";
-import type { PoolFeeEntry } from "./protocol-fees";
+import { UNRESOLVED_SYMBOLS, type PoolFeeEntry } from "./protocol-fees";
 
 const SECS_PER_DAY = 86_400;
 
@@ -39,6 +39,9 @@ export function aggregateFeeSnapshotsByPool(
     const poolId = normalizePoolIdForChain(poolAddress, chainId);
     let entry = byPool.get(poolId);
     if (!entry) {
+      // Per-window `unpriced{24h,7d,30d}` flags on `PoolFeeEntry` are
+      // `@deprecated` — the snapshot path doesn't track per-window pricing
+      // gaps. Initialized to `false`; nothing reads them post-migration.
       entry = {
         poolId,
         chainId,
@@ -48,10 +51,6 @@ export function aggregateFeeSnapshotsByPool(
         fees7dUSD: 0,
         fees30dUSD: 0,
         unpriced: false,
-        // Per-window unpriced flags retained on the type for backwards
-        // compatibility with `aggregateProtocolFeesByPool`. The new
-        // leaderboard only reads `unpriced`; we mirror it across windows so
-        // legacy callers don't see a stale `false`.
         unpriced24h: false,
         unpriced7d: false,
         unpriced30d: false,
@@ -76,10 +75,11 @@ export function aggregateFeeSnapshotsByPool(
     }
 
     // FX side: price each non-pegged slot via the oracle rate map. Skip
-    // pegged symbols (already counted in `feesUsdWei`) and UNKNOWN slots.
+    // pegged symbols (already counted in `feesUsdWei`) and indexer
+    // placeholders (UNRESOLVED_SYMBOLS).
     for (let i = 0; i < s.tokens.length; i++) {
       const sym = s.tokenSymbols[i];
-      if (sym === "UNKNOWN") {
+      if (UNRESOLVED_SYMBOLS.has(sym)) {
         entry.unpriced = true;
         continue;
       }
@@ -94,17 +94,6 @@ export function aggregateFeeSnapshotsByPool(
       if (in24h) entry.fees24hUSD += usd;
       if (in7d) entry.fees7dUSD += usd;
       if (in30d) entry.fees30dUSD += usd;
-    }
-  }
-
-  // Mirror `unpriced` across the deprecated per-window flags so any legacy
-  // reader stays consistent. The leaderboard component itself only reads
-  // `unpriced`.
-  for (const entry of byPool.values()) {
-    if (entry.unpriced) {
-      entry.unpriced24h = true;
-      entry.unpriced7d = true;
-      entry.unpriced30d = true;
     }
   }
 
