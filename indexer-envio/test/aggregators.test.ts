@@ -90,7 +90,7 @@ describe("classifyAggregator", () => {
 });
 
 describe("_aggregatorAddressesForChain", () => {
-  it("Celo has 4 verified aggregators + 4 cluster-7dc08ec2 contracts", () => {
+  it("Celo has 4 verified aggregators + 4 cluster-7dc08ec28f299c06 contracts", () => {
     const map = _aggregatorAddressesForChain(CHAIN_CELO);
     assert.equal(map.size, 8);
     assert.equal(map.get(SQUID_CELO), "squid");
@@ -104,7 +104,7 @@ describe("_aggregatorAddressesForChain", () => {
 });
 
 describe("cluster classification", () => {
-  // The 4 contracts in cluster-7dc08ec2 (deployer 0x7dc08ec2…df8f022).
+  // The 4 contracts in cluster-7dc08ec28f299c06 (deployer 0x7dc08ec2…df8f022).
   // Source: celoscan creator field on each contract, verified 2026-05-04.
   const CLUSTER_CONTRACTS = [
     "0xef6956414006e161fca5f048331d91e472077e9b",
@@ -117,8 +117,8 @@ describe("cluster classification", () => {
     for (const addr of CLUSTER_CONTRACTS) {
       assert.equal(
         classifyAggregator(CHAIN_CELO, addr),
-        "cluster-7dc08ec2",
-        `expected cluster-7dc08ec2 for ${addr}`,
+        "cluster-7dc08ec28f299c06",
+        `expected cluster-7dc08ec28f299c06 for ${addr}`,
       );
     }
   });
@@ -133,8 +133,8 @@ describe("cluster classification", () => {
   });
 
   it("getClusterMetadata returns deployer + explorer for known clusters", () => {
-    const meta = getClusterMetadata("cluster-7dc08ec2");
-    assert.ok(meta, "cluster-7dc08ec2 metadata should exist");
+    const meta = getClusterMetadata("cluster-7dc08ec28f299c06");
+    assert.ok(meta, "cluster-7dc08ec28f299c06 metadata should exist");
     assert.equal(meta.chainId, 42220);
     assert.equal(meta.deployer, "0x7dc08ec28f299c062d2941de1f9cfb741df8f022");
     assert.ok(
@@ -152,14 +152,38 @@ describe("cluster classification", () => {
 
   it("_allClusterNames lists every cluster currently labeled", () => {
     const names = _allClusterNames();
-    assert.ok(names.includes("cluster-7dc08ec2"));
-    // Sanity: all returned names follow the cluster-<8hex> convention.
+    assert.ok(names.includes("cluster-7dc08ec28f299c06"));
+    // Sanity: all returned names follow the cluster-<16hex> convention.
+    // 16 hex = 64 bits — collision-free in practice for the foreseeable
+    // cluster count, vs ~1-in-4-billion for the 8-hex prefix that an
+    // earlier version of this PR used.
     for (const name of names) {
       assert.match(
         name,
-        /^cluster-[0-9a-f]{8}$/,
-        `cluster name "${name}" should match cluster-<8 hex chars>`,
+        /^cluster-[0-9a-f]{16}$/,
+        `cluster name "${name}" should match cluster-<16 hex chars>`,
       );
+    }
+  });
+
+  it("every cluster-* name in per-chain entries has a matching $clusters block entry", () => {
+    // Catches typos like `cluster-7dc08ec28f299c07` (off-by-one) in
+    // aggregators.json — without this test, classifyAggregator would happily
+    // return the bad name and the leaderboard's PR-3 tooltip would silently
+    // break (getClusterMetadata returns undefined).
+    const knownClusters = new Set(_allClusterNames());
+    // Iterate every chain that has aggregator entries (mainnet + testnet).
+    const chainsWithAggregators = [CHAIN_CELO, CHAIN_MONAD, 11142220, 10143];
+    for (const chainId of chainsWithAggregators) {
+      const map = _aggregatorAddressesForChain(chainId);
+      for (const [addr, name] of map) {
+        if (name.startsWith("cluster-")) {
+          assert.ok(
+            knownClusters.has(name),
+            `${addr} on chain ${chainId} uses cluster name "${name}" but no matching $clusters entry exists in aggregators.json`,
+          );
+        }
+      }
     }
   });
 });

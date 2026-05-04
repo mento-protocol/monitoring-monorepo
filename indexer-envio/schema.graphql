@@ -813,7 +813,7 @@ type AggregatorDailySnapshot
   id: ID! # "{chainId}-{aggregator}-{day}"
   chainId: Int!
   # Canonical name from classifyAggregator(). Values currently produced:
-  # "squid" | "lifi" | "0x" | "openocean" | "cluster-<deployer-prefix>" |
+  # "squid" | "lifi" | "0x" | "openocean" | "cluster-<first-16-hex-of-deployer-EOA>" |
   # "direct" | "system" | "unknown".
   # "direct" = txTo is the Mento Broker / Router (user used Mento UI/SDK)
   # or the swap went directly to the pool with no router mediation.

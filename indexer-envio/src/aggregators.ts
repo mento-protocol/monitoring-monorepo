@@ -46,7 +46,11 @@ const AGGREGATOR_BY_CHAIN: Map<number, Map<string, string>> = (() => {
   return out;
 })();
 
-/** cluster name (e.g. `cluster-7dc08ec2`) → {deployer, explorerUrl, ...}. */
+/** cluster name (e.g. `cluster-7dc08ec28f299c06`) → {deployer, explorerUrl, ...}.
+ *  Validated at module load: every entry must have non-empty string `deployer`
+ *  + `explorerUrl`. A typo or missing field fails the indexer at startup
+ *  rather than letting the UI receive an undefined-field metadata object at
+ *  render time. */
 const CLUSTERS_BY_NAME: Map<string, ClusterMetadata> = (() => {
   const out = new Map<string, ClusterMetadata>();
   const block = (aggregatorsRaw as { $clusters?: ClustersBlock }).$clusters;
@@ -54,7 +58,19 @@ const CLUSTERS_BY_NAME: Map<string, ClusterMetadata> = (() => {
   for (const [name, value] of Object.entries(block)) {
     if (name.startsWith("$")) continue; // skip nested $comment
     if (typeof value !== "object" || value === null) continue;
-    out.set(name, value as ClusterMetadata);
+    const meta = value as ClusterMetadata;
+    if (
+      typeof meta.deployer !== "string" ||
+      meta.deployer.length === 0 ||
+      typeof meta.explorerUrl !== "string" ||
+      meta.explorerUrl.length === 0
+    ) {
+      throw new Error(
+        `[aggregators.json] $clusters.${name} is missing required string fields ` +
+          `(deployer, explorerUrl). Got: ${JSON.stringify(value)}`,
+      );
+    }
+    out.set(name, meta);
   }
   return out;
 })();
