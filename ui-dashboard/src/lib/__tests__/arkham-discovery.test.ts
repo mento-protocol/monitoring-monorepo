@@ -25,10 +25,12 @@ describe("discoverMentoAddresses", () => {
   const A = (n: number) => `0x${n.toString(16).padStart(40, "0")}`;
 
   it("aggregates addresses across every entity + field", async () => {
-    // 10 (entity, field) pairs total; one query per pair with dedup overlap.
+    // 12 (entity, field) pairs total; one query per pair with dedup overlap.
     const responses = [
       [A(0xaaa)], // SwapEvent.sender
       [A(0xbbb)], // SwapEvent.recipient
+      [A(0x444)], // SwapEvent.caller
+      [A(0x555)], // SwapEvent.txTo
       [A(0xaaa)], // LiquidityEvent.sender (dedup)
       [A(0xccc)], // LiquidityEvent.recipient
       [A(0xddd)], // RebalanceEvent.sender
@@ -48,11 +50,13 @@ describe("discoverMentoAddresses", () => {
       "https://hasura/graphql",
       42220,
     );
-    // 9 unique addresses (A(0xaaa) duplicated).
-    expect(result.addresses).toHaveLength(9);
+    // 11 unique addresses (A(0xaaa) duplicated).
+    expect(result.addresses).toHaveLength(11);
     expect(result.addresses).toContain(A(0xaaa));
     expect(result.addresses).toContain(A(0x333));
-    expect(result.perEntity.length).toBeGreaterThan(0);
+    expect(result.addresses).toContain(A(0x444));
+    expect(result.addresses).toContain(A(0x555));
+    expect(result.perEntity).toHaveLength(12);
   });
 
   it("filters out malformed addresses", async () => {
@@ -96,10 +100,10 @@ describe("discoverMentoAddresses", () => {
     });
 
     await discoverMentoAddresses("https://hasura/graphql", 42220);
-    // 10 (entity, field) pairs total. Without pagination we'd see exactly
-    // 10 calls; the first pair returning a full page forces an extra call,
-    // so > 10 confirms the pager kicked in.
-    expect(calls).toBeGreaterThan(10);
+    // 12 (entity, field) pairs total. Without pagination we'd see exactly
+    // 12 calls; the first pair returning a full page forces an extra call,
+    // so > 12 confirms the pager kicked in.
+    expect(calls).toBeGreaterThan(12);
   });
 
   it("lowercases addresses and dedups", async () => {
