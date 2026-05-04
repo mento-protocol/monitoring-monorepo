@@ -143,27 +143,84 @@ describe("aggregateFeeSnapshotsByPool", () => {
     expect(a.totalFeesUSD).toBeCloseTo(15, 4); // all four
   });
 
-  it("UNKNOWN slot flips unpriced=true; pegged total still preserved", () => {
+  it("recent UNKNOWN slot flips unpriced + per-window flags within scope", () => {
     const now = Math.floor(Date.now() / 1000);
     const snapshots = [
       snapshot({
-        timestamp: DAY(0, now),
+        timestamp: DAY(0, now), // today — inside 24h, 7d, 30d
         tokens: ["0xusd", "0x???"],
         tokenSymbols: ["USDm", "UNKNOWN"],
         tokenDecimals: [18, 18],
         amounts: ["3000000000000000000", "1000000000000000000"],
-        feesUsdWei: "3000000000000000000", // pegged side only
+        feesUsdWei: "3000000000000000000",
       }),
     ];
     const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
-    expect(entries[0].unpriced).toBe(true);
-    expect(entries[0].totalFeesUSD).toBeCloseTo(3, 4);
+    const a = entries[0];
+    expect(a.unpriced).toBe(true);
+    expect(a.unpriced24h).toBe(true);
+    expect(a.unpriced7d).toBe(true);
+    expect(a.unpriced30d).toBe(true);
+    expect(a.totalFeesUSD).toBeCloseTo(3, 4);
   });
 
-  it("missing FX rate flips unpriced=true; pegged side preserved", () => {
+  it("OLD UNKNOWN snapshot does NOT pollute recent-window unpriced flags", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const snapshots = [
+      // 6 months ago — outside every recent window
+      snapshot({
+        timestamp: DAY(180, now),
+        tokens: ["0x???"],
+        tokenSymbols: ["UNKNOWN"],
+        tokenDecimals: [18],
+        amounts: ["1000000000000000000"],
+        feesUsdWei: "0",
+      }),
+      // Today — fully priced
+      snapshot({
+        timestamp: DAY(0, now),
+        tokens: ["0xusd"],
+        tokenSymbols: ["USDm"],
+        tokenDecimals: [18],
+        amounts: ["1000000000000000000"],
+        feesUsdWei: "1000000000000000000",
+      }),
+    ];
+    const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
+    const a = entries[0];
+    expect(a.unpriced).toBe(true); // all-time hits the old unpriced day
+    expect(a.unpriced24h).toBe(false); // recent windows are clean
+    expect(a.unpriced7d).toBe(false);
+    expect(a.unpriced30d).toBe(false);
+    expect(a.totalFeesUSD).toBeCloseTo(1, 4);
+  });
+
+  it("MID-windows UNKNOWN snapshot marks 7d/30d but not 24h", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const snapshots = [
+      // 3 days ago — inside 7d and 30d, outside 24h
+      snapshot({
+        timestamp: DAY(3, now),
+        tokens: ["0x???"],
+        tokenSymbols: ["UNKNOWN"],
+        tokenDecimals: [18],
+        amounts: ["1000000000000000000"],
+        feesUsdWei: "0",
+      }),
+    ];
+    const entries = aggregateFeeSnapshotsByPool(snapshots, TEST_RATES, CHAIN);
+    const a = entries[0];
+    expect(a.unpriced).toBe(true);
+    expect(a.unpriced24h).toBe(false);
+    expect(a.unpriced7d).toBe(true);
+    expect(a.unpriced30d).toBe(true);
+  });
+
+  it("missing FX rate flips per-window unpriced flags scoped to the snapshot day", () => {
     const now = Math.floor(Date.now() / 1000);
     const ratesWithoutGBP: OracleRateMap = new Map([["EURm", 1.1455]]);
     const snapshots = [
+      // Today: GBPm slot can't be priced
       snapshot({
         timestamp: DAY(0, now),
         tokens: ["0xusd", "0xgbp"],
@@ -178,9 +235,13 @@ describe("aggregateFeeSnapshotsByPool", () => {
       ratesWithoutGBP,
       CHAIN,
     );
-    expect(entries[0].unpriced).toBe(true);
+    const a = entries[0];
+    expect(a.unpriced).toBe(true);
+    expect(a.unpriced24h).toBe(true);
+    expect(a.unpriced7d).toBe(true);
+    expect(a.unpriced30d).toBe(true);
     // 3 USD pegged still flowed through — GBPm slot dropped because no rate.
-    expect(entries[0].totalFeesUSD).toBeCloseTo(3, 4);
+    expect(a.totalFeesUSD).toBeCloseTo(3, 4);
   });
 
   it("window cutoff edge: snapshot at now-24h-1 falls outside 24h, inside 7d", () => {

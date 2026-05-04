@@ -39,9 +39,6 @@ export function aggregateFeeSnapshotsByPool(
     const poolId = normalizePoolIdForChain(poolAddress, chainId);
     let entry = byPool.get(poolId);
     if (!entry) {
-      // Per-window `unpriced{24h,7d,30d}` flags on `PoolFeeEntry` are
-      // `@deprecated` — the snapshot path doesn't track per-window pricing
-      // gaps. Initialized to `false`; nothing reads them post-migration.
       entry = {
         poolId,
         chainId,
@@ -77,18 +74,21 @@ export function aggregateFeeSnapshotsByPool(
     // FX side: price each non-pegged slot via the oracle rate map. Skip
     // pegged symbols (already counted in `feesUsdWei`) and indexer
     // placeholders (UNRESOLVED_SYMBOLS). Bound on `tokenSymbols` since
-    // that's what the body reads first.
+    // that's what the body reads first. When a slot is unpriced, mark
+    // `unpriced` for the all-time column AND scope the per-window flags to
+    // the windows whose cutoffs include this snapshot's day — so an old
+    // unpriced day doesn't pollute the recent 24h/7d/30d cells.
     for (let i = 0; i < s.tokenSymbols.length; i++) {
       const sym = s.tokenSymbols[i];
       if (UNRESOLVED_SYMBOLS.has(sym)) {
-        entry.unpriced = true;
+        markUnpriced(entry, in24h, in7d, in30d);
         continue;
       }
       if (isUsdPegged(sym)) continue;
       const amount = parseWei(s.amounts[i], s.tokenDecimals[i]);
       const usd = tokenToUSD(sym, amount, rates);
       if (usd === null) {
-        entry.unpriced = true;
+        markUnpriced(entry, in24h, in7d, in30d);
         continue;
       }
       entry.totalFeesUSD += usd;
@@ -99,4 +99,16 @@ export function aggregateFeeSnapshotsByPool(
   }
 
   return Array.from(byPool.values());
+}
+
+function markUnpriced(
+  entry: PoolFeeEntry,
+  in24h: boolean,
+  in7d: boolean,
+  in30d: boolean,
+): void {
+  entry.unpriced = true;
+  if (in24h) entry.unpriced24h = true;
+  if (in7d) entry.unpriced7d = true;
+  if (in30d) entry.unpriced30d = true;
 }

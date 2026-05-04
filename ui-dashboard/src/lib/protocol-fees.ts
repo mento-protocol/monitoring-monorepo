@@ -128,21 +128,13 @@ export type PoolFeeEntry = {
   fees30dUSD: number;
   /**
    * Any transfer for this pool used an unknown or unpriced symbol — the
-   * total is a lower bound.
+   * all-time total is a lower bound. Window-scoped flags below let the UI
+   * apply `≈` per column so an OLD unpriced snapshot doesn't pollute the
+   * recent 24h/7d/30d cells.
    */
   unpriced: boolean;
-  /**
-   * @deprecated Window-scoped unpriced flags only made sense when paired
-   * with the per-window truncation flags from the raw-transfer aggregator.
-   * The snapshot-based aggregator (`aggregateFeeSnapshotsByPool`) doesn't
-   * track per-window unpriced state — it mirrors `unpriced` across windows.
-   * The /revenue leaderboard reads only `unpriced`. Remove once
-   * `aggregateProtocolFeesByPool` is retired in PR-snapshot-3.
-   */
   unpriced24h: boolean;
-  /** @deprecated See `unpriced24h`. */
   unpriced7d: boolean;
-  /** @deprecated See `unpriced24h`. */
   unpriced30d: boolean;
 };
 

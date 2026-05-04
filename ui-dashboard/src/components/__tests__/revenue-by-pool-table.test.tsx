@@ -170,7 +170,7 @@ describe("RevenueByPoolTable — snapshot path", () => {
     expect(cells.feesAll).not.toContain("≈");
   });
 
-  it("UNKNOWN slot in snapshot flips ≈ across all columns (single per-row flag)", () => {
+  it("recent UNKNOWN slot puts ≈ on every column (today's snapshot is in 24h/7d/30d)", () => {
     const snapshots = [
       feeSnapshot({
         tokens: ["0xusd", "0x???"],
@@ -186,6 +186,36 @@ describe("RevenueByPoolTable — snapshot path", () => {
     expect(cells.fees30d).toContain("≈");
     expect(cells.feesAll).toContain("≈");
     expect(cells.feesAll).toContain("unknown tokens");
+  });
+
+  it("OLD UNKNOWN snapshot only flags All-time — recent-window cells stay exact", () => {
+    const oldDay = String(
+      Math.floor((NOW_S - 180 * SECS_PER_DAY) / SECS_PER_DAY) * SECS_PER_DAY,
+    );
+    const snapshots = [
+      // 6 months ago — outside 24h/7d/30d windows
+      feeSnapshot({
+        timestamp: oldDay,
+        tokens: ["0x???"],
+        tokenSymbols: ["UNKNOWN"],
+        tokenDecimals: [18],
+        amounts: ["1000000000000000000"],
+        feesUsdWei: "0",
+      }),
+      // Today — fully priced
+      feeSnapshot({
+        tokens: ["0xusd"],
+        tokenSymbols: ["USDm"],
+        tokenDecimals: [18],
+        amounts: ["1000000000000000000"],
+        feesUsdWei: "1000000000000000000",
+      }),
+    ];
+    const cells = renderFeeCells([networkData(snapshots)]);
+    expect(cells.fees24h).not.toContain("≈");
+    expect(cells.fees7d).not.toContain("≈");
+    expect(cells.fees30d).not.toContain("≈");
+    expect(cells.feesAll).toContain("≈");
   });
 
   it("missing FX oracle rate flips ≈; pegged total still flows through", () => {
