@@ -72,9 +72,13 @@ function buildNextSearch<K extends string>(
  * is what the user sees as sort lag. The native call has no React/Next
  * involvement, so the click → re-render is synchronous.
  *
- * Caller contract: `defaultKey`, `defaultDir`, and `paramPrefix` must be
- * render-stable (literal constants in practice). Mount-time canonicalization
- * captures them in an empty-deps effect and won't re-run if they change.
+ * Caller contract: `defaultKey`, `defaultDir`, `paramPrefix`, and `validKeys`
+ * must be render-stable. Defaults and prefix should be literal constants;
+ * `validKeys` should be a module-level `Set` (or `useMemo`-stable). Mount-time
+ * canonicalization captures the scalars in an empty-deps effect, and the
+ * `popstate` listener depends on `validKeys` identity — passing a fresh set
+ * inline (`new Set([...])`) tears down and re-registers the listener every
+ * render.
  *
  * @example
  * const { sortKey, sortDir, handleSort } = useTableSort({
@@ -181,6 +185,13 @@ export function useTableSort<K extends string>({
 
   const handleSort = useCallback(
     (key: K) => {
+      // The DOM side effect inside the updater violates React's purity rule
+      // for state updaters, but is intentional: rapid clicks must compose
+      // against the latest committed state, which only the functional updater
+      // exposes via `prev`. Hoisting `replaceUrlForState` outside would force
+      // recomputing `next` from `state` (closed over), losing composition.
+      // Strict Mode runs the updater twice in dev — `replaceState` is
+      // idempotent for the same `next` so the duplicate call is harmless.
       setState((prev) => {
         const nextDir: SortDir =
           key === prev.key ? (prev.dir === "asc" ? "desc" : "asc") : defaultDir;
