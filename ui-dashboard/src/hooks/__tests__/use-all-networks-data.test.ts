@@ -130,7 +130,7 @@ describe("fetchNetworkData — happy path", () => {
     mockRequest((query) => {
       // IMPORTANT: PoolDailySnapshot must be checked before Pool (substring match)
       if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
-      if (query.includes("ProtocolFeeTransfer"))
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
         return { ProtocolFeeTransfer: [] };
       if (query.includes("LiquidityPosition"))
         return {
@@ -153,7 +153,7 @@ describe("fetchNetworkData — happy path", () => {
     });
 
     expect(result.error).toBeNull();
-    expect(result.feesError).toBeNull();
+    expect(result.feeSnapshotsError).toBeNull();
     expect(result.snapshotsError).toBeNull();
     expect(result.snapshots30dError).toBeNull();
     expect(result.pools).toHaveLength(1);
@@ -171,9 +171,13 @@ describe("fetchNetworkData — happy path", () => {
     const varsFor = (needle: string) =>
       extractVariables(byQuery(needle)[0][0], byQuery(needle)[0][1]);
 
-    // One pool query, one fees query, one LP query.
+    // One pool query, one fee-snapshot pagination call, one LP query.
     expect(varsFor("Pool(")).toEqual({ chainId: 42220 });
-    expect(varsFor("ProtocolFeeTransfer")).toEqual({ chainId: 42220 });
+    expect(varsFor("PoolDailyFeeSnapshotsPage")).toEqual({
+      chainId: 42220,
+      limit: 1000,
+      offset: 0,
+    });
     expect(varsFor("LiquidityPosition")).toEqual({
       poolIds: ["pool-1"],
     });
@@ -192,7 +196,7 @@ describe("fetchNetworkData — happy path", () => {
     const pool = makePool("pool-dedup");
     mockRequest((query) => {
       if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
-      if (query.includes("ProtocolFeeTransfer"))
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
         return { ProtocolFeeTransfer: [] };
       if (query.includes("LiquidityPosition"))
         return {
@@ -258,7 +262,7 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
     // duplicates/skips rows at page boundaries.
     mockRequest((query) => {
       if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
-      if (query.includes("ProtocolFeeTransfer"))
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
         return { ProtocolFeeTransfer: [] };
       if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
       if (query.includes("Pool")) return { Pool: [makePool("pool-sort")] };
@@ -286,7 +290,7 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
     mockRequest((query) => {
       if (query.includes("PoolDailySnapshot"))
         return { PoolDailySnapshot: [makeDaily(now - 86400)] };
-      if (query.includes("ProtocolFeeTransfer"))
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
         return { ProtocolFeeTransfer: [] };
       if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
       if (query.includes("Pool")) return { Pool: [makePool("pool-daily")] };
@@ -316,7 +320,7 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
         snapshotCall++;
         return { PoolDailySnapshot: snapshotCall === 1 ? page1 : page2 };
       }
-      if (query.includes("ProtocolFeeTransfer"))
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
         return { ProtocolFeeTransfer: [] };
       if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
       if (query.includes("Pool")) return { Pool: [makePool("pool-daily")] };
@@ -350,7 +354,7 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
         if (call === 2) return { PoolDailySnapshot: page2 };
         return { PoolDailySnapshot: [] };
       }
-      if (query.includes("ProtocolFeeTransfer"))
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
         return { ProtocolFeeTransfer: [] };
       if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
       if (query.includes("Pool")) return { Pool: [makePool("pool-daily")] };
@@ -386,7 +390,7 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
         });
         return { PoolDailySnapshot: batch };
       }
-      if (query.includes("ProtocolFeeTransfer"))
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
         return { ProtocolFeeTransfer: [] };
       if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
       if (query.includes("Pool"))
@@ -422,7 +426,7 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
         );
         return { PoolDailySnapshot: batch };
       }
-      if (query.includes("ProtocolFeeTransfer"))
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
         return { ProtocolFeeTransfer: [] };
       if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
       if (query.includes("Pool")) return { Pool: [makePool("pool-cap")] };
@@ -477,8 +481,8 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
             return Promise.resolve({ PoolDailySnapshot: page1 });
           return Promise.reject(new Error("upstream timeout on page 2"));
         }
-        if (query.includes("ProtocolFeeTransfer"))
-          return Promise.resolve({ ProtocolFeeTransfer: [] });
+        if (query.includes("PoolDailyFeeSnapshotsPage"))
+          return Promise.resolve({ PoolDailyFeeSnapshot: [] });
         if (query.includes("LiquidityPosition"))
           return Promise.resolve({ LiquidityPosition: [] });
         if (query.includes("Pool"))
@@ -512,8 +516,8 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
         const query = extractQuery(args[0]);
         if (query.includes("PoolDailySnapshot"))
           return Promise.reject(new Error("daily snapshot timeout"));
-        if (query.includes("ProtocolFeeTransfer"))
-          return Promise.resolve({ ProtocolFeeTransfer: [] });
+        if (query.includes("PoolDailyFeeSnapshotsPage"))
+          return Promise.resolve({ PoolDailyFeeSnapshot: [] });
         if (query.includes("LiquidityPosition"))
           return Promise.resolve({ LiquidityPosition: [] });
         if (query.includes("Pool"))
@@ -551,7 +555,7 @@ describe("fetchNetworkData — daily snapshot pagination", () => {
     mockRequest((query) => {
       if (query.includes("PoolDailySnapshot"))
         return { PoolDailySnapshot: allSnapshots };
-      if (query.includes("ProtocolFeeTransfer"))
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
         return { ProtocolFeeTransfer: [] };
       if (query.includes("LiquidityPosition")) return { LiquidityPosition: [] };
       if (query.includes("Pool")) return { Pool: [makePool("pool-window")] };
@@ -590,7 +594,7 @@ describe("fetchNetworkData — pools query failure", () => {
     expect(result.pools).toHaveLength(0);
     expect(result.snapshots).toHaveLength(0);
     expect(result.fees).toBeNull();
-    expect(result.feesError).toBeNull();
+    expect(result.feeSnapshotsError).toBeNull();
     expect(result.snapshotsError).toBeNull();
   });
 });
@@ -606,7 +610,8 @@ describe("fetchNetworkData — fees query failure only", () => {
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
     ).mockImplementation((...args: unknown[]) => {
       const query = extractQuery(args[0]);
-      if (query.includes("ProtocolFeeTransfer")) return Promise.reject(feesErr);
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.reject(feesErr);
       if (query.includes("PoolDailySnapshot"))
         return Promise.resolve({ PoolDailySnapshot: [] });
       if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
@@ -620,7 +625,7 @@ describe("fetchNetworkData — fees query failure only", () => {
     });
 
     expect(result.error).toBeNull();
-    expect(result.feesError).toBe(feesErr);
+    expect(result.feeSnapshotsError).toBe(feesErr);
     expect(result.snapshotsError).toBeNull();
     expect(result.pools).toHaveLength(1);
     expect(result.fees).toBeNull();
@@ -639,8 +644,8 @@ describe("fetchNetworkData — snapshots query failure only", () => {
     ).mockImplementation((...args: unknown[]) => {
       const query = extractQuery(args[0]);
       if (query.includes("PoolDailySnapshot")) return Promise.reject(snapErr);
-      if (query.includes("ProtocolFeeTransfer"))
-        return Promise.resolve({ ProtocolFeeTransfer: [] });
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.resolve({ PoolDailyFeeSnapshot: [] });
       if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
       return Promise.resolve({});
     });
@@ -653,7 +658,7 @@ describe("fetchNetworkData — snapshots query failure only", () => {
 
     expect(result.error).toBeNull();
     expect(result.snapshotsError).toBe(snapErr);
-    expect(result.feesError).toBeNull();
+    expect(result.feeSnapshotsError).toBeNull();
     expect(result.pools).toHaveLength(1);
     expect(result.snapshots).toHaveLength(0);
     expect(result.fees).not.toBeNull();
@@ -692,7 +697,7 @@ describe("fetchNetworkData — LP query failure only", () => {
       const query = extractQuery(args[0]);
       if (query.includes("LiquidityPosition")) return Promise.reject(lpErr);
       if (query.includes("PoolDailySnapshot")) return { PoolDailySnapshot: [] };
-      if (query.includes("ProtocolFeeTransfer"))
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
         return { ProtocolFeeTransfer: [] };
       if (query.includes("Pool")) return { Pool: [pool] };
       return {};
@@ -729,8 +734,8 @@ describe("fetchNetworkData — cross-network isolation", () => {
         const query = extractQuery(args[0]);
         if (query.includes("PoolDailySnapshot"))
           return Promise.resolve({ PoolDailySnapshot: [] });
-        if (query.includes("ProtocolFeeTransfer"))
-          return Promise.resolve({ ProtocolFeeTransfer: [] });
+        if (query.includes("PoolDailyFeeSnapshotsPage"))
+          return Promise.resolve({ PoolDailyFeeSnapshot: [] });
         if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
         return Promise.resolve({});
       });
@@ -790,7 +795,8 @@ describe("fetchNetworkData — cross-network isolation", () => {
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
     ).mockImplementation((...args: unknown[]) => {
       const query = extractQuery(args[0]);
-      if (query.includes("ProtocolFeeTransfer")) return Promise.reject(feesErr);
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.reject(feesErr);
       if (query.includes("PoolDailySnapshot"))
         return Promise.resolve({ PoolDailySnapshot: [] });
       if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
@@ -805,7 +811,7 @@ describe("fetchNetworkData — cross-network isolation", () => {
 
     expect(result.error).toBeNull();
     expect(result.pools).toHaveLength(1);
-    expect(result.feesError).toBe(feesErr);
+    expect(result.feeSnapshotsError).toBe(feesErr);
     expect(result.snapshotsError).toBeNull();
     expect(result.fees).toBeNull();
   });
@@ -819,8 +825,8 @@ describe("fetchNetworkData — cross-network isolation", () => {
     ).mockImplementation((...args: unknown[]) => {
       const query = extractQuery(args[0]);
       if (query.includes("PoolDailySnapshot")) return Promise.reject(snapErr);
-      if (query.includes("ProtocolFeeTransfer"))
-        return Promise.resolve({ ProtocolFeeTransfer: [] });
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.resolve({ PoolDailyFeeSnapshot: [] });
       if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
       return Promise.resolve({});
     });
@@ -834,7 +840,7 @@ describe("fetchNetworkData — cross-network isolation", () => {
     expect(result.error).toBeNull();
     expect(result.pools).toHaveLength(1);
     expect(result.snapshotsError).toBe(snapErr);
-    expect(result.feesError).toBeNull();
+    expect(result.feeSnapshotsError).toBeNull();
     expect(result.snapshots).toHaveLength(0);
     expect(result.fees).not.toBeNull();
   });
@@ -910,8 +916,8 @@ describe("fetchAllNetworks — orchestration", () => {
       const query = extractQuery(args[0]);
       if (query.includes("PoolDailySnapshot"))
         return Promise.resolve({ PoolDailySnapshot: [] });
-      if (query.includes("ProtocolFeeTransfer"))
-        return Promise.resolve({ ProtocolFeeTransfer: [] });
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.resolve({ PoolDailyFeeSnapshot: [] });
       if (query.includes("Pool")) return Promise.resolve({ Pool: [pool] });
       return Promise.resolve({});
     });
@@ -967,8 +973,8 @@ describe("fetchAllNetworks — orchestration", () => {
         return Promise.reject(new Error("network2 down"));
       if (query.includes("PoolDailySnapshot"))
         return Promise.resolve({ PoolDailySnapshot: [] });
-      if (query.includes("ProtocolFeeTransfer"))
-        return Promise.resolve({ ProtocolFeeTransfer: [] });
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return Promise.resolve({ PoolDailyFeeSnapshot: [] });
       return Promise.resolve({ Pool: [pool] });
     });
 

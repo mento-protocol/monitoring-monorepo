@@ -19,7 +19,6 @@ import {
   BROKER_DAILY_SNAPSHOTS_ALL,
   POOL_DAILY_FEE_SNAPSHOTS_PAGE,
   POOL_DAILY_SNAPSHOTS_ALL,
-  PROTOCOL_FEE_TRANSFERS_ALL,
   UNIQUE_LP_ADDRESSES,
 } from "@/lib/queries";
 import { aggregateProtocolFees } from "@/lib/protocol-fees";
@@ -35,7 +34,6 @@ import type {
   Pool,
   PoolDailyFeeSnapshot,
   PoolSnapshotWindow,
-  ProtocolFeeTransfer,
   TradingLimit,
   OlsPool,
 } from "@/lib/types";
@@ -48,16 +46,16 @@ import type {
 } from "./types";
 
 /**
- * True iff every error channel on `n` is null — top-level, fees, rates,
- * fee snapshots, per-window snapshots, all-history daily, and LP. Used to
- * decide whether an SSR-seeded payload is fresh enough to skip client-side
- * revalidation; any per-slice failure on the server would otherwise trap
- * the user on partial `N/A` metrics until the next poll.
+ * True iff every error channel on `n` is null — top-level, rates,
+ * fee snapshots, per-window snapshots, all-history daily, broker daily,
+ * and LP. Used to decide whether an SSR-seeded payload is fresh enough
+ * to skip client-side revalidation; any per-slice failure on the server
+ * would otherwise trap the user on partial `N/A` metrics until the next
+ * poll.
  */
 export function isNetworkDataFullyHealthy(n: NetworkData): boolean {
   return (
     n.error === null &&
-    n.feesError === null &&
     n.ratesError === null &&
     n.feeSnapshotsError === null &&
     n.snapshotsError === null &&
@@ -95,7 +93,6 @@ export const blankNetworkData = (
   cdpPoolIds: new Set(),
   reservePoolIds: new Set(),
   fees: null,
-  feeTransfers: [],
   feeSnapshots: [],
   feeSnapshotsError: null,
   ratesError: null,
@@ -103,7 +100,6 @@ export const blankNetworkData = (
   uniqueLpAddresses: null,
   rates: new Map(),
   error: null,
-  feesError: null,
   snapshotsError: null,
   snapshots7dError: null,
   snapshots30dError: null,
@@ -382,7 +378,7 @@ export async function fetchNetworkData(
     error: null,
   };
   const [
-    feesResult,
+    feeSnapshotsResult,
     snapshotsAllDailyResult,
     brokerSnapshotsAllDailyResult,
     lpResult,
@@ -391,10 +387,7 @@ export async function fetchNetworkData(
     breachRollupResult,
     cdpPoolIdsResult,
   ] = await Promise.allSettled([
-    timed<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>(
-      PROTOCOL_FEE_TRANSFERS_ALL,
-      { chainId: network.chainId },
-    ),
+    fetchAllFeeSnapshotPages(client, network.chainId, network.id),
     shouldQuery
       ? fetchAllDailySnapshotPages(client, poolIds, network.id)
       : Promise.resolve(emptySnapshotPage),
@@ -462,9 +455,18 @@ export async function fetchNetworkData(
 
   const rates = buildOracleRateMap(pools, network);
 
+  const feeSnapshots =
+    feeSnapshotsResult.status === "fulfilled"
+      ? feeSnapshotsResult.value.rows
+      : [];
+  const feeSnapshotsError =
+    feeSnapshotsResult.status === "rejected"
+      ? toError(feeSnapshotsResult.reason)
+      : (feeSnapshotsResult.value.error ?? null);
   const fees =
-    feesResult.status === "fulfilled"
-      ? aggregateProtocolFees(feesResult.value.ProtocolFeeTransfer ?? [], rates)
+    feeSnapshotsResult.status === "fulfilled" &&
+    feeSnapshotsResult.value.error === null
+      ? aggregateProtocolFees(feeSnapshots, rates)
       : null;
 
   // Single source of truth: the paginated daily-rollup fetch. Window-specific
@@ -602,26 +604,17 @@ export async function fetchNetworkData(
     cdpPoolIds,
     reservePoolIds,
     fees,
-    feeTransfers:
-      feesResult.status === "fulfilled"
-        ? (feesResult.value.ProtocolFeeTransfer ?? [])
-        : [],
-    // Homepage SSR path doesn't render the per-pool leaderboard, so fee
-    // snapshots aren't fetched here. `useProtocolFees` populates them on
-    // /revenue. Default `[]` keeps `NetworkData` shape uniform.
-    feeSnapshots: [],
-    feeSnapshotsError: null,
-    // Rates failure is folded into `feesError` for the homepage path
-    // because there is no separate consumer to differentiate. The
-    // protocol-fees hook splits `ratesError` out so the leaderboard can
-    // skip on it without dragging raw-transfer-only failures along.
+    feeSnapshots,
+    feeSnapshotsError,
+    // Homepage SSR path doesn't fetch oracle rates separately — rates come
+    // from `pools` query above which is gated by the early-return error
+    // path, so a rates "failure" surfaces as the top-level `error`. Leave
+    // `ratesError` null here.
     ratesError: null,
     poolLabels: new Map(),
     uniqueLpAddresses,
     rates,
     error: null,
-    feesError:
-      feesResult.status === "rejected" ? toError(feesResult.reason) : null,
     // Per-window errors — only set when the specific window is incomplete.
     // See the `windowError` helper above.
     snapshotsError,

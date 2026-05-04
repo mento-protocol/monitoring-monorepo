@@ -24,15 +24,9 @@ function RevenueContent() {
   const { networkData, isLoading } = useProtocolFees();
 
   const anyNetworkError = networkData.some((n) => n.error !== null);
-  // Tile + chart depend on raw transfers AND rates. Either failure should
-  // null the tile and degrade the chart trace.
+  // Tile + chart + leaderboard all read from snapshots since PR-snapshot-3.
+  // Either rates or snapshot fetch failure blanks the fee surfaces.
   const anyFeesError = networkData.some(
-    (n) => (n.feesError !== null || n.ratesError !== null) && n.error === null,
-  );
-  // Leaderboard depends on snapshots AND rates — but NOT raw transfers.
-  // A raw-transfer-only outage keeps it live; only `ratesError` (FX
-  // mis-pricing) or `feeSnapshotsError` (no row data) should warn.
-  const anyLeaderboardError = networkData.some(
     (n) =>
       (n.ratesError !== null || n.feeSnapshotsError !== null) &&
       n.error === null,
@@ -47,7 +41,6 @@ function RevenueContent() {
     let totalFees30d: number | null =
       anyFeesError || anyNetworkError ? null : 0;
     const unpricedSymbolSet = new Set<string>();
-    let isTruncated = false;
     let totalUnresolvedCount = 0;
 
     for (const netData of networkData) {
@@ -60,7 +53,6 @@ function RevenueContent() {
       if (totalFees7d !== null) totalFees7d += fees.fees7dUSD;
       if (totalFees30d !== null) totalFees30d += fees.fees30dUSD;
       for (const sym of fees.unpricedSymbols) unpricedSymbolSet.add(sym);
-      if (fees.isTruncated) isTruncated = true;
       totalUnresolvedCount += fees.unresolvedCount;
     }
 
@@ -70,14 +62,12 @@ function RevenueContent() {
       totalFees7d,
       totalFees30d,
       unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
-      isTruncated,
       totalUnresolvedCount,
     };
   }, [networkData, anyNetworkError, anyFeesError]);
 
   const feesApprox =
     aggregated.unpricedSymbols.length > 0 ||
-    aggregated.isTruncated ||
     aggregated.totalUnresolvedCount > 0;
 
   return (
@@ -103,13 +93,11 @@ function RevenueContent() {
             totalPrefix={feesApprox ? "≈ " : ""}
             href="https://debank.com/profile/0x0dd57f6f181d0469143fe9380762d8a112e96e4a"
             subtitle={
-              aggregated.isTruncated
-                ? "Lower bound — data exceeds query limit"
-                : aggregated.unpricedSymbols.length > 0
-                  ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
-                  : aggregated.totalUnresolvedCount > 0
-                    ? "Approximate — some tokens unresolved"
-                    : "Protocol fee transfers to yield split address"
+              aggregated.unpricedSymbols.length > 0
+                ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
+                : aggregated.totalUnresolvedCount > 0
+                  ? "Approximate — some tokens unresolved"
+                  : "Protocol fee transfers to yield split address"
             }
           />
 
@@ -160,7 +148,7 @@ function RevenueContent() {
       <RevenueByPoolTable
         networkData={networkData}
         isLoading={isLoading}
-        hasError={anyNetworkError || anyLeaderboardError}
+        hasError={anyNetworkError || anyFeesError}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

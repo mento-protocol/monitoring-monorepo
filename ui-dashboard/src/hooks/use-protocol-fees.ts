@@ -9,11 +9,7 @@ import {
   type Network,
 } from "@/lib/networks";
 import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
-import {
-  ORACLE_RATES,
-  POOL_LABELS_ALL,
-  PROTOCOL_FEE_TRANSFERS_ALL,
-} from "@/lib/queries";
+import { ORACLE_RATES, POOL_LABELS_ALL } from "@/lib/queries";
 import { buildSnapshotWindows, type SnapshotWindows } from "@/lib/volume";
 import {
   buildOracleRateMap,
@@ -33,20 +29,17 @@ import {
 } from "@/lib/fetch-all-networks";
 import { stripChainIdFromPoolId } from "@/lib/pool-id";
 import { SWR_KEY_PROTOCOL_FEES } from "@/lib/swr-keys";
-import type { ProtocolFeeTransfer } from "@/lib/types";
 
 type ProtocolFeesResult = {
   /**
-   * `NetworkData[]`-shaped payload so revenue/page.tsx and FeeOverTimeChart
-   * keep their existing types. Only the fee/rate slices are populated —
-   * `pools`, `snapshots`, `tradingLimits`, `uniqueLpAddresses`, etc. stay at
-   * `blankNetworkData`'s zero defaults. The chart only reads `feeTransfers`,
-   * `rates`, and `snapshotWindows`; revenue/page.tsx reads `error`,
-   * `feesError`, `fees`, `feeTransfers`.
+   * `NetworkData[]`-shaped payload so revenue/page.tsx, FeeOverTimeChart,
+   * and the per-pool leaderboard keep their existing types. Only the fees
+   * / rate / labels slices are populated — `pools`, `snapshots`,
+   * `tradingLimits`, `uniqueLpAddresses`, etc. stay at `blankNetworkData`'s
+   * zero defaults.
    *
-   * Chain-level failures surface through `networkData[].error`, not a
-   * top-level error — `fetchAllProtocolFees` always resolves. That means
-   * there's no `error` field on this result type.
+   * Chain-level transport failures surface through `networkData[].error`,
+   * not a top-level error — `fetchAllProtocolFees` always resolves.
    */
   networkData: NetworkData[];
   isLoading: boolean;
@@ -65,16 +58,11 @@ async function fetchFeesForNetwork(
 
   // `allSettled` so any single failure doesn't blank the others. A labels-only
   // failure is non-fatal — the leaderboard falls back to truncated-address
-  // labels, so it stays out of `feesError`.
-  const [ratesResult, feesResult, labelsResult, snapshotsResult] =
-    await Promise.allSettled([
+  // labels, so it stays out of the error channels.
+  const [ratesResult, labelsResult, snapshotsResult] = await Promise.allSettled(
+    [
       client.request<{ Pool: OracleRatePool[] }>({
         document: ORACLE_RATES,
-        variables: { chainId: network.chainId },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      }),
-      client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>({
-        document: PROTOCOL_FEE_TRANSFERS_ALL,
         variables: { chainId: network.chainId },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       }),
@@ -83,24 +71,19 @@ async function fetchFeesForNetwork(
         variables: { chainId: network.chainId },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       }),
-      // Pool×day-bounded snapshot rollup; paginated in the helper because the
-      // hosted Hasura silently caps at 1000 rows. Replaces raw transfer
-      // aggregation for the per-pool leaderboard. Mid-page failures fail open
-      // (return what we fetched + flag truncation/error inside the result),
-      // so the helper itself never rejects from a partial outage — the only
+      // Pool×day-bounded snapshot rollup; paginated in the helper because
+      // hosted Hasura silently caps at 1000 rows. Mid-page failures fail
+      // open (return what we fetched + flag error inside the result), so
+      // the helper itself never rejects from a partial outage — the only
       // path to rejection is a first-page failure or a network/abort error.
       fetchAllFeeSnapshotPages(client, network.chainId, network.id),
-    ]);
+    ],
+  );
 
   const rates: OracleRateMap =
     ratesResult.status === "fulfilled"
       ? buildOracleRateMap(ratesResult.value.Pool ?? [], network)
       : new Map();
-
-  const feeTransfers =
-    feesResult.status === "fulfilled"
-      ? (feesResult.value.ProtocolFeeTransfer ?? [])
-      : [];
 
   const poolLabels = new Map<string, PoolLabel>();
   if (labelsResult.status === "fulfilled") {
@@ -111,43 +94,39 @@ async function fetchFeesForNetwork(
   const toError = (reason: unknown) =>
     reason instanceof Error ? reason : new Error(String(reason));
 
-  // Three independent error channels so each consumer can fail closed only
-  // on the sub-failure that genuinely affects it:
+  // Two independent error channels so each consumer fails closed only on
+  // the sub-failure that genuinely affects it:
   //
-  //   feesError         — `ProtocolFeeTransfer` query rejected. Affects the
-  //                       chain-level Swap Fees tile + FeeOverTimeChart.
   //   ratesError        — oracle rates query rejected. Empty rate map ⇒
   //                       FX-token slots silently mis-price. Affects ALL
   //                       USD aggregation: tile, chart, AND leaderboard.
   //   feeSnapshotsError — `PoolDailyFeeSnapshot` paginated fetch rejected
-  //                       OR surfaced a mid-pagination error. Affects only
-  //                       the leaderboard.
+  //                       OR surfaced a mid-pagination error. Affects all
+  //                       three consumers — fees come from snapshots now.
   //
-  // Folding any two into one hides degraded states from one consumer or
-  // blanks the wrong one — see PR #317 review for the cascade history.
-  const feesError =
-    feesResult.status === "rejected" ? toError(feesResult.reason) : null;
+  // (Pre-PR-snapshot-3 there was a third `feesError` channel for the
+  // raw-transfer query; that query is gone, so the channel is gone too.)
   const ratesError =
     ratesResult.status === "rejected" ? toError(ratesResult.reason) : null;
   const feeSnapshotsError =
     snapshotsResult.status === "rejected"
       ? toError(snapshotsResult.reason)
       : (snapshotsResult.value.error ?? null);
-  const fees: ProtocolFeeSummary | null =
-    feesResult.status === "fulfilled" && ratesResult.status === "fulfilled"
-      ? aggregateProtocolFees(feeTransfers, rates)
-      : null;
   const feeSnapshots =
     snapshotsResult.status === "fulfilled" ? snapshotsResult.value.rows : [];
+  const fees: ProtocolFeeSummary | null =
+    ratesResult.status === "fulfilled" &&
+    snapshotsResult.status === "fulfilled" &&
+    snapshotsResult.value.error === null
+      ? aggregateProtocolFees(feeSnapshots, rates)
+      : null;
 
   return blankNetworkData(network, windows, {
     rates,
     fees,
-    feeTransfers,
     feeSnapshots,
     feeSnapshotsError,
     poolLabels,
-    feesError,
     ratesError,
   });
 }
@@ -169,14 +148,11 @@ async function fetchAllProtocolFees(): Promise<NetworkData[]> {
 }
 
 /**
- * Lightweight protocol-fees hook. Fetches only the fees + rate data needed
- * by /revenue — instead of `useAllNetworksData` which additionally pulls
- * paginated daily snapshots, trading limits, OLS pools, LP addresses, and
- * the breach rollup. Saves ~6 queries per chain per mount.
- *
- * Returns a `NetworkData[]` shape so downstream consumers (revenue/page.tsx,
- * FeeOverTimeChart) don't need to change. Unused fields are zero defaults
- * from `blankNetworkData`.
+ * Lightweight protocol-fees hook. Fetches only the data /revenue needs —
+ * snapshot rollups (chain summary + chart + leaderboard), oracle rates,
+ * and pool labels — instead of `useAllNetworksData` which also pulls
+ * paginated daily volume snapshots, trading limits, OLS pools, LP
+ * addresses, and the breach rollup. Saves ~6 queries per chain per mount.
  */
 export function useProtocolFees(): ProtocolFeesResult {
   const { data, isLoading } = useSWR<NetworkData[]>(

@@ -47,7 +47,6 @@ const EXPECTED_EXPORT_NAMES = [
   "ALL_OLS_POOLS",
   "POOL_BREAKER_CONFIG",
   "POOL_LABELS_ALL",
-  "PROTOCOL_FEE_TRANSFERS_ALL",
 ] as const;
 
 const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
@@ -311,10 +310,6 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     expect(queries.POOL_BREAKER_CONFIG).toContain(
       "rateFeedID: { _eq: $rateFeedID }",
     );
-  });
-
-  it("PROTOCOL_FEE_TRANSFERS_ALL caps at Hasura's silent 1000-row cap", () => {
-    expect(queries.PROTOCOL_FEE_TRANSFERS_ALL).toMatch(/limit:\s*1000\b/);
   });
 
   it("POOL_DAILY_FEE_SNAPSHOTS_PAGE paginates by [timestamp desc, id desc] scoped to chainId", () => {

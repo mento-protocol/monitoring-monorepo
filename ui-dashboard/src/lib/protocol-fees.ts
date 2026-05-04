@@ -1,32 +1,25 @@
 /**
- * Protocol fee aggregation from indexed ProtocolFeeTransfer entities.
+ * Protocol fee aggregation from indexed `PoolDailyFeeSnapshot` entities.
  *
- * The Envio indexer stores every ERC20 Transfer to the yield split address.
- * This module converts those transfers to USD and aggregates total + 24h fees.
+ * Source of truth: each snapshot is one row per (chainId, pool, UTC day),
+ * pre-rolled by the indexer. Hybrid USD pricing: USD-pegged tokens land in
+ * `feesUsdWei` indexer-side; FX tokens are dashboard-priced from the
+ * parallel `tokens[]`/`tokenSymbols[]`/`tokenDecimals[]`/`amounts[]` arrays
+ * via the live oracle rate map.
  */
 
 import { parseWei } from "./format";
-import { normalizePoolIdForChain } from "./pool-id";
-import { tokenToUSD, type OracleRateMap } from "./tokens";
-import type { ProtocolFeeTransfer } from "./types";
+import { isUsdPegged, tokenToUSD, type OracleRateMap } from "./tokens";
+import type { PoolDailyFeeSnapshot } from "./types";
 
 /**
  * Token symbols the indexer emits when it cannot resolve the on-chain symbol.
- * Silently skipped rather than flagging the summary as approximate.
+ * Excluded from USD totals; tracked via `unresolvedCount` so the UI can flag
+ * the summary as approximate.
  */
 export const UNRESOLVED_SYMBOLS = new Set(["UNKNOWN"]);
 
-// Public API
-
-/**
- * Effective row cap for the PROTOCOL_FEE_TRANSFERS_ALL query.
- *
- * Hosted Envio Hasura silently caps every UI query at 1 000 rows regardless
- * of any larger literal `limit`, so this is the real ceiling. Once a chain
- * crosses 1 000 lifetime fee-transfer rows, `isTruncated` flips and the UI
- * surfaces a lower-bound badge.
- */
-export const PROTOCOL_FEE_QUERY_LIMIT = 1_000;
+const SECS_PER_DAY = 86_400;
 
 export type ProtocolFeeSummary = {
   totalFeesUSD: number;
@@ -34,44 +27,40 @@ export type ProtocolFeeSummary = {
   fees7dUSD: number;
   fees30dUSD: number;
   /**
-   * Symbols that appeared in all-time transfers but have no USD conversion.
+   * Symbols that appeared in all-time snapshots but have no USD conversion.
    * Empty array = all tokens priced. Non-empty = all-time total is approximate.
    */
   unpricedSymbols: string[];
   /**
-   * Symbols that appeared in 24h transfers but have no USD conversion.
-   * Separate from unpricedSymbols so the 24h tile is not marked approximate
+   * Symbols that appeared in 24h snapshots but have no USD conversion.
+   * Separate from `unpricedSymbols` so the 24h tile is not marked approximate
    * when an unpriced token only appears in older history.
    */
   unpricedSymbols24h: string[];
   /**
-   * Number of transfers where the indexer could not resolve the token symbol
-   * (stored as "UNKNOWN" placeholder). These are excluded from USD totals —
-   * if this is non-zero the all-time total may be understated even though
-   * unpricedSymbols is empty. Surfaced so the UI can flag approximate totals.
+   * Number of UNKNOWN-symbol slots across all-time snapshots — excluded
+   * from USD totals. Non-zero ⇒ all-time total may be understated.
    */
   unresolvedCount: number;
-  /**
-   * Like unresolvedCount but scoped to the last 24h window.
-   * Non-zero means fees24hUSD is understated and the 24h tile should show ≈.
-   */
+  /** Like `unresolvedCount` but scoped to the 24h window. */
   unresolvedCount24h: number;
-  /** True when the query hit the row limit — all-time total is a lower bound. */
-  isTruncated: boolean;
 };
 
 /**
- * Aggregates indexed ProtocolFeeTransfer rows into USD totals.
- * Splits by a 24h timestamp cutoff for the daily metric.
+ * Aggregates `PoolDailyFeeSnapshot` rows into chain-level USD totals across
+ * 24h / 7d / 30d / all-time. Window inclusion is full-day
+ * (`s.timestamp >= now - windowSeconds`) — matches the leaderboard and chart
+ * conventions.
  */
 export function aggregateProtocolFees(
-  transfers: ProtocolFeeTransfer[],
+  snapshots: ReadonlyArray<PoolDailyFeeSnapshot>,
   rates: OracleRateMap,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
 ): ProtocolFeeSummary {
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const cutoff24h = nowSeconds - 86400;
-  const cutoff7d = nowSeconds - 7 * 86400;
-  const cutoff30d = nowSeconds - 30 * 86400;
+  const cutoff24h = nowSeconds - SECS_PER_DAY;
+  const cutoff7d = nowSeconds - 7 * SECS_PER_DAY;
+  const cutoff30d = nowSeconds - 30 * SECS_PER_DAY;
+
   let totalFeesUSD = 0;
   let fees24hUSD = 0;
   let fees7dUSD = 0;
@@ -81,28 +70,42 @@ export function aggregateProtocolFees(
   let unresolvedCount = 0;
   let unresolvedCount24h = 0;
 
-  for (const t of transfers) {
-    const ts = Number(t.blockTimestamp);
+  for (const s of snapshots) {
+    const dayTs = Number(s.timestamp);
+    const in24h = dayTs >= cutoff24h;
+    const in7d = dayTs >= cutoff7d;
+    const in30d = dayTs >= cutoff30d;
 
-    // Count indexer placeholder symbols — excluded from USD totals but tracked
-    // so the UI can signal the total may be understated if resolution keeps
-    // failing (persistent RPC issue, non-standard token).
-    if (UNRESOLVED_SYMBOLS.has(t.tokenSymbol)) {
-      unresolvedCount++;
-      if (ts >= cutoff24h) unresolvedCount24h++;
-      continue;
+    // Pegged side: indexer pre-summed into `feesUsdWei` (18-dp USD-wei).
+    const peggedUsd = Number(s.feesUsdWei) / 1e18;
+    if (peggedUsd > 0) {
+      totalFeesUSD += peggedUsd;
+      if (in24h) fees24hUSD += peggedUsd;
+      if (in7d) fees7dUSD += peggedUsd;
+      if (in30d) fees30dUSD += peggedUsd;
     }
-    const amount = parseWei(t.amount, t.tokenDecimals);
-    const usd = tokenToUSD(t.tokenSymbol, amount, rates);
-    if (usd === null) {
-      unpricedSymbolSet.add(t.tokenSymbol);
-      if (ts >= cutoff24h) unpricedSymbols24hSet.add(t.tokenSymbol);
-      continue;
+
+    // FX side: price each non-pegged slot via the oracle rate map.
+    for (let i = 0; i < s.tokenSymbols.length; i++) {
+      const sym = s.tokenSymbols[i];
+      if (UNRESOLVED_SYMBOLS.has(sym)) {
+        unresolvedCount++;
+        if (in24h) unresolvedCount24h++;
+        continue;
+      }
+      if (isUsdPegged(sym)) continue;
+      const amount = parseWei(s.amounts[i], s.tokenDecimals[i]);
+      const usd = tokenToUSD(sym, amount, rates);
+      if (usd === null) {
+        unpricedSymbolSet.add(sym);
+        if (in24h) unpricedSymbols24hSet.add(sym);
+        continue;
+      }
+      totalFeesUSD += usd;
+      if (in24h) fees24hUSD += usd;
+      if (in7d) fees7dUSD += usd;
+      if (in30d) fees30dUSD += usd;
     }
-    totalFeesUSD += usd;
-    if (ts >= cutoff24h) fees24hUSD += usd;
-    if (ts >= cutoff7d) fees7dUSD += usd;
-    if (ts >= cutoff30d) fees30dUSD += usd;
   }
 
   return {
@@ -114,7 +117,6 @@ export function aggregateProtocolFees(
     unpricedSymbols24h: Array.from(unpricedSymbols24hSet).sort(),
     unresolvedCount,
     unresolvedCount24h,
-    isTruncated: transfers.length >= PROTOCOL_FEE_QUERY_LIMIT,
   };
 }
 
@@ -137,87 +139,3 @@ export type PoolFeeEntry = {
   unpriced7d: boolean;
   unpriced30d: boolean;
 };
-
-type WindowCutoffs = {
-  cutoff24h: number;
-  cutoff7d: number;
-  cutoff30d: number;
-};
-
-function markUnpricedForTs(
-  entry: PoolFeeEntry,
-  ts: number,
-  c: WindowCutoffs,
-): void {
-  entry.unpriced = true;
-  if (ts >= c.cutoff30d) entry.unpriced30d = true;
-  if (ts >= c.cutoff7d) entry.unpriced7d = true;
-  if (ts >= c.cutoff24h) entry.unpriced24h = true;
-}
-
-/**
- * Per-pool variant of `aggregateProtocolFees`. Inherits the same row-cap
- * caveat: 24h / 7d / 30d windows are accurate (rows return newest-first),
- * but all-time may undercount on busy chains once `PROTOCOL_FEE_QUERY_LIMIT`
- * is hit.
- *
- * @deprecated Replaced by `aggregateFeeSnapshotsByPool` (in
- * `protocol-fee-snapshots.ts`) which reads paginated `PoolDailyFeeSnapshot`
- * rows. The /revenue leaderboard already migrated; this remains exported only
- * because the old test file still exercises it. Delete once
- * `__tests__/protocol-fees.test.ts` is updated in PR-snapshot-3.
- */
-export function aggregateProtocolFeesByPool(
-  transfers: ProtocolFeeTransfer[],
-  rates: OracleRateMap,
-): PoolFeeEntry[] {
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const cutoffs: WindowCutoffs = {
-    cutoff24h: nowSeconds - 86400,
-    cutoff7d: nowSeconds - 7 * 86400,
-    cutoff30d: nowSeconds - 30 * 86400,
-  };
-  const byPool = new Map<string, PoolFeeEntry>();
-
-  for (const t of transfers) {
-    if (!t.from) continue;
-    const poolAddress = t.from.toLowerCase();
-    const poolId = normalizePoolIdForChain(poolAddress, t.chainId);
-    let entry = byPool.get(poolId);
-    if (!entry) {
-      entry = {
-        poolId,
-        chainId: t.chainId,
-        poolAddress,
-        totalFeesUSD: 0,
-        fees24hUSD: 0,
-        fees7dUSD: 0,
-        fees30dUSD: 0,
-        unpriced: false,
-        unpriced24h: false,
-        unpriced7d: false,
-        unpriced30d: false,
-      };
-      byPool.set(poolId, entry);
-    }
-
-    const ts = Number(t.blockTimestamp);
-
-    if (UNRESOLVED_SYMBOLS.has(t.tokenSymbol)) {
-      markUnpricedForTs(entry, ts, cutoffs);
-      continue;
-    }
-    const amount = parseWei(t.amount, t.tokenDecimals);
-    const usd = tokenToUSD(t.tokenSymbol, amount, rates);
-    if (usd === null) {
-      markUnpricedForTs(entry, ts, cutoffs);
-      continue;
-    }
-    entry.totalFeesUSD += usd;
-    if (ts >= cutoffs.cutoff24h) entry.fees24hUSD += usd;
-    if (ts >= cutoffs.cutoff7d) entry.fees7dUSD += usd;
-    if (ts >= cutoffs.cutoff30d) entry.fees30dUSD += usd;
-  }
-
-  return Array.from(byPool.values());
-}

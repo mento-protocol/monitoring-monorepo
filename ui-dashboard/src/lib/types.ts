@@ -248,16 +248,6 @@ export type LiquidityPosition = {
   lastUpdatedTimestamp: string;
 };
 
-export type ProtocolFeeTransfer = {
-  chainId: number;
-  tokenSymbol: string;
-  tokenDecimals: number;
-  amount: string;
-  blockTimestamp: string;
-  /** Source pool address (lowercased on-chain in indexer); join key for per-pool revenue. */
-  from: string;
-};
-
 /**
  * Daily rollup of `ProtocolFeeTransfer`, one row per (chainId, poolAddress, UTC day).
  * Source of truth for the per-pool revenue leaderboard — pool×day cardinality stays

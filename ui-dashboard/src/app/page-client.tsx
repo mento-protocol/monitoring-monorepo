@@ -80,11 +80,17 @@ function GlobalContent({
 }) {
   const { networkData, isLoading } = useAllNetworksData(initialNetworkData);
 
-  // Whether any network has a top-level, fees, or snapshots failure.
-  // Used to show N/A / "partial data" in KPI tiles rather than silently under-reporting.
+  // Whether any network has a top-level, rates, snapshot, or pagination
+  // failure. Used to show N/A / "partial data" in KPI tiles rather than
+  // silently under-reporting. Fee data flows from `PoolDailyFeeSnapshot`
+  // since PR-snapshot-3, so any failure that affects the snapshot path
+  // (rates rejection ⇒ FX mis-pricing; snapshot pagination rejection ⇒
+  // no data) blanks the chain-level Swap Fees tile.
   const anyNetworkError = networkData.some((netData) => netData.error !== null);
   const anyFeesError = networkData.some(
-    (netData) => netData.feesError !== null && netData.error === null,
+    (netData) =>
+      (netData.ratesError !== null || netData.feeSnapshotsError !== null) &&
+      netData.error === null,
   );
   const anySnapshots7dError = networkData.some(
     (netData) => netData.snapshots7dError !== null && netData.error === null,
@@ -142,7 +148,6 @@ function GlobalContent({
     const uniqueLpSet = new Set<string>();
     let hasSuccessfulLpResult = false;
     const unpricedSymbolSet = new Set<string>();
-    let isTruncated = false;
     let totalUnresolvedCount = 0;
 
     for (const netData of networkData) {
@@ -180,15 +185,15 @@ function GlobalContent({
         );
       }
 
-      // Fees
-      if (netData.feesError === null && fees !== null) {
+      // Fees — `fees` is null when ratesError or feeSnapshotsError fired
+      // for this network, so the null check is sufficient to gate the add.
+      if (fees !== null) {
         if (totalFeesAllTime !== null) totalFeesAllTime += fees.totalFeesUSD;
         if (totalFees24h !== null) totalFees24h += fees.fees24hUSD;
         if (totalFees7d !== null) totalFees7d += fees.fees7dUSD;
         if (totalFees30d !== null) totalFees30d += fees.fees30dUSD;
         fees.unpricedSymbols.forEach((s) => unpricedSymbolSet.add(s));
         totalUnresolvedCount += fees.unresolvedCount;
-        if (fees.isTruncated) isTruncated = true;
       }
 
       // LP addresses — union across successful chains so an address that
@@ -226,7 +231,6 @@ function GlobalContent({
           : null,
       unpricedSymbols: Array.from(unpricedSymbolSet).sort(),
       totalUnresolvedCount,
-      isTruncated,
     };
   }, [
     networkData,
@@ -241,7 +245,6 @@ function GlobalContent({
 
   const feesApprox =
     aggregated.unpricedSymbols.length > 0 ||
-    aggregated.isTruncated ||
     aggregated.totalUnresolvedCount > 0;
 
   return (
@@ -294,13 +297,11 @@ function GlobalContent({
             totalPrefix={feesApprox ? "≈ " : ""}
             href="https://debank.com/profile/0x0dd57f6f181d0469143fe9380762d8a112e96e4a"
             subtitle={
-              aggregated.isTruncated
-                ? "Lower bound — data exceeds query limit"
-                : aggregated.unpricedSymbols.length > 0
-                  ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
-                  : aggregated.totalUnresolvedCount > 0
-                    ? "Approximate — some tokens unresolved"
-                    : undefined
+              aggregated.unpricedSymbols.length > 0
+                ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
+                : aggregated.totalUnresolvedCount > 0
+                  ? "Approximate — some tokens unresolved"
+                  : undefined
             }
           />
 

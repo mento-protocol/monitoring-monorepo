@@ -114,7 +114,6 @@ function networkData(snapshots: PoolDailyFeeSnapshot[]): NetworkData {
     cdpPoolIds: new Set(),
     reservePoolIds: new Set(),
     fees: null,
-    feeTransfers: [],
     feeSnapshots: snapshots,
     feeSnapshotsError: null,
     ratesError: null,
@@ -125,7 +124,6 @@ function networkData(snapshots: PoolDailyFeeSnapshot[]): NetworkData {
       ["GBPm", 1.3263],
     ]),
     error: null,
-    feesError: null,
     snapshotsError: null,
     snapshots7dError: null,
     snapshots30dError: null,
@@ -253,24 +251,6 @@ describe("RevenueByPoolTable — snapshot path", () => {
     expect(html).toContain("No swap-fee transfers indexed yet");
   });
 
-  it("KEEPS rendering rows when only raw-transfer feesError is set (snapshots + rates are intact)", () => {
-    // codex P1: leaderboard reads snapshots, not raw transfers — a
-    // ProtocolFeeTransfer-only outage should not blank the leaderboard.
-    const n = networkData([feeSnapshot()]);
-    n.feesError = new Error("transfer query timed out");
-    expect(n.ratesError).toBeNull();
-    expect(n.feeSnapshotsError).toBeNull();
-    const html = renderToStaticMarkup(
-      <RevenueByPoolTable
-        networkData={[n]}
-        isLoading={false}
-        hasError={false}
-      />,
-    );
-    // Row IS rendered because the leaderboard's data path is intact.
-    expect(html).toContain(POOL_ADDR);
-  });
-
   it("SKIPS chains with ratesError so FX slots don't mis-price as unpriced", () => {
     const n = networkData([feeSnapshot()]);
     n.ratesError = new Error("oracle rates timed out");
@@ -285,11 +265,9 @@ describe("RevenueByPoolTable — snapshot path", () => {
     expect(html).not.toContain(POOL_ADDR);
   });
 
-  it("skips chains with feeSnapshotsError (snapshot fetch failed) without affecting raw-transfer KPIs", () => {
+  it("skips chains with feeSnapshotsError (snapshot fetch failed)", () => {
     const n = networkData([feeSnapshot()]);
     n.feeSnapshotsError = new Error("snapshot timeout");
-    // Note: `feesError` stays null — only the leaderboard loses its row.
-    expect(n.feesError).toBeNull();
     const html = renderToStaticMarkup(
       <RevenueByPoolTable
         networkData={[n]}
