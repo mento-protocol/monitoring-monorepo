@@ -34,7 +34,7 @@ const POLL_MAX_ATTEMPTS = 120;
 // Per-request timeout. POLL_MAX_ATTEMPTS only bounds successful poll iterations;
 // a single fetch wedged at TLS/socket level needs an explicit AbortSignal or
 // the cron just sits until Vercel kills the invocation. Mirrors the pattern
-// used by `arkham-discovery.ts` for Hasura calls.
+// used by `mento-address-discovery.ts` for Hasura calls.
 const REQUEST_TIMEOUT_MS = 30_000;
 
 // Upstash command-size cap is 1 MB; a SADD of 1000 lowercase 0x-addresses

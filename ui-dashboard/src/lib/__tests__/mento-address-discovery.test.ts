@@ -8,19 +8,13 @@ vi.mock("graphql-request", () => ({
   },
 }));
 
-import { discoverMentoAddresses } from "@/lib/arkham-discovery";
+import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
 describe("discoverMentoAddresses", () => {
-  it("rejects unsupported chain ids", async () => {
-    await expect(
-      discoverMentoAddresses("https://hasura/graphql", 143),
-    ).rejects.toThrow(/not supported by Arkham/);
-  });
-
   // 40-hex shape so isValidAddress accepts it.
   const A = (n: number) => `0x${n.toString(16).padStart(40, "0")}`;
 

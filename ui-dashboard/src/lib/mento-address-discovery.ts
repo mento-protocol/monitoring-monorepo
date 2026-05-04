@@ -1,15 +1,19 @@
 /**
- * Server-side discovery of unique addresses interacting with Mento on Celo.
+ * Server-side discovery of unique addresses interacting with Mento via the
+ * indexer. Used by the Arkham enrichment cron (label as much as possible)
+ * and the MiniPay tagging cron (intersect against the attestation set).
+ *
  * Hasura caps at 1000 rows per query — we use `distinct_on` + offset
  * pagination per (entity, field, chainId-column) tuple to walk past the cap.
+ *
+ * Chain selection is the caller's responsibility — each consumer has its
+ * own provider-specific reason for the chain it queries (Arkham doesn't
+ * index Monad; MiniPay's `FederatedAttestations` issuer is Celo-only).
  */
 
 import { GraphQLClient } from "graphql-request";
 import * as Sentry from "@sentry/nextjs";
 import { isValidAddress } from "@/lib/validators";
-
-// Arkham only supports Celo (42220), not Monad. Discovery is gated on this.
-const ARKHAM_SUPPORTED_CHAIN_IDS = new Set<number>([42220]);
 
 const PAGE_SIZE = 1000;
 const HARD_PAGE_CAP = 50; // 50_000 rows per entity — sentinel against runaway loops
@@ -93,7 +97,7 @@ async function fetchDistinctAddresses(
 
   if (page === HARD_PAGE_CAP) {
     Sentry.captureMessage(
-      `[arkham-discovery] HARD_PAGE_CAP hit on ${table}.${field}`,
+      `[mento-address-discovery] HARD_PAGE_CAP hit on ${table}.${field}`,
       { tags: { table, field }, level: "warning" },
     );
   }
@@ -110,12 +114,6 @@ export async function discoverMentoAddresses(
   hasuraUrl: string,
   chainId: number,
 ): Promise<DiscoveryResult> {
-  if (!ARKHAM_SUPPORTED_CHAIN_IDS.has(chainId)) {
-    throw new Error(
-      `chainId ${chainId} is not supported by Arkham (only Celo / 42220 today)`,
-    );
-  }
-
   const client = new GraphQLClient(hasuraUrl);
 
   // (entity, field) pairs are independent — fan out concurrently. Pagination
