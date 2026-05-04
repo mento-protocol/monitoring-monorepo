@@ -98,6 +98,9 @@ export type NetworkData = {
  * (Broker-direct or v2 MentoRouter), no router-driven sibling double-count.
  */
 export type BrokerDailySnapshotRow = {
+  /** Canonical row key — used by the paginated fetcher's dedup set. Schema
+   *  format is `{chainId}-{provider}-{router|direct}-{day}`. */
+  id: string;
   /** UTC-day bucket as a unix-seconds string. */
   timestamp: string;
   /** 18-decimal "USD-wei" — divide by 1e18 to get USD. */

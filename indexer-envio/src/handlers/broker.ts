@@ -1,54 +1,26 @@
-// ---------------------------------------------------------------------------
-// Mento Broker Swap handler
-//
-// The Broker is the settlement layer for v2 legacy swaps that route through
-// `IExchangeProvider`s such as the BiPoolManager. The v3 Router calls FPMM
-// pool contracts directly and never touches the Broker, so Broker.Swap events
-// give us a clean, mutually-exclusive view of v2 volume.
-//
-// We persist per-event `BrokerSwapEvent` rows for trader-level analytics, and
-// pre-roll them into `BrokerDailySnapshot` rows keyed by
-// (chainId, exchangeProvider, dayBucket) so the dashboard can render a v2
-// volume series filtered to BiPoolManager swaps without scanning the full
-// per-event table.
-// ---------------------------------------------------------------------------
+// Mento Broker Swap handler. v3 swaps that route through VirtualPool wrappers
+// also fire Broker.Swap (the wrapper transitively invokes the Broker), so we
+// flag `routedViaV3Router` from `tx.to` to let the dashboard exclude those
+// router-driven sibling rows from the v2 series and avoid double-count.
 
 import { Broker, type BrokerSwapEvent } from "generated";
 import { eventId, asAddress, asBigInt, dayBucket } from "../helpers";
 import { computeSwapUsdWei } from "../usd";
-import { fetchErc20Decimals } from "../rpc";
+import { resolveFeeTokenMeta } from "../feeToken";
+import { getContractAddress } from "../contractAddresses";
 
-// Mento v3 Router (Router:v3.0.0). Deployed to the same address on Celo
-// mainnet and Monad mainnet via deterministic deploy — see
-// `mento-protocol/deployments-v2/.treb/registry.json`. The v3 Router calls
-// VirtualPool wrappers, which internally route through the Broker → BiPoolManager.
-// The Broker.Swap that fires inside those router-driven txs is therefore a
-// sibling of a VirtualPool.Swap event in the same tx; the dashboard already
-// counts the VirtualPool side as v3 volume, so we flag the Broker.Swap rows
-// here so the v2 series can exclude them and avoid double-counting.
-const V3_ROUTER_ADDRESS = "0x4861840c2efb2b98312b0ae34d86fd73e8f9b6f6";
-
-// Cache decimals per (chainId, tokenAddress). Broker.Swap fires on every
-// legacy swap, so an uncached RPC call per swap would dwarf indexer throughput.
-// In-memory only — token decimals are immutable, so the cache is safe across
-// the lifetime of the handler process.
-const _decimalsCache = new Map<string, number>();
-
-async function getTokenDecimals(
-  chainId: number,
-  tokenAddress: string,
-): Promise<number> {
-  const key = `${chainId}:${tokenAddress.toLowerCase()}`;
-  const cached = _decimalsCache.get(key);
+// Per-chain cache of the v3 Router address. JSON lookup once per chain is
+// cheap, but a Map is cheaper still and Broker.Swap fires per swap event.
+// `null` is cached too — chains without a registered Router (testnets that
+// haven't been wired) skip the lookup permanently.
+const routerByChain = new Map<number, string | null>();
+function v3RouterAddress(chainId: number): string | null {
+  const cached = routerByChain.get(chainId);
   if (cached !== undefined) return cached;
-  // `fetchErc20Decimals` consults the test mock map first, then RPC. On
-  // failure we default to 18 so the rollup keeps moving instead of stalling
-  // on a single misbehaving token; the cache stores the fallback so we
-  // don't re-RPC every event.
-  const fetched = await fetchErc20Decimals(chainId, tokenAddress);
-  const safe = fetched ?? 18;
-  _decimalsCache.set(key, safe);
-  return safe;
+  const addr = getContractAddress(chainId, "Routerv300");
+  const value = addr ? addr.toLowerCase() : null;
+  routerByChain.set(chainId, value);
+  return value;
 }
 
 Broker.Swap.handler(async ({ event, context }) => {
@@ -59,30 +31,28 @@ Broker.Swap.handler(async ({ event, context }) => {
   const tokenIn = asAddress(event.params.tokenIn);
   const tokenOut = asAddress(event.params.tokenOut);
   const txTo = asAddress(event.transaction.to ?? "");
-  // Empty-string fallback above means `txTo == ""` could collide with the
-  // router address comparison only if the router were the zero address —
-  // it isn't. EVM contract-creation txs with `to == null` don't emit
-  // Broker.Swap (no Broker entrypoint to call), so this branch shouldn't
-  // fire in practice; it exists only to satisfy Envio's looser typing.
-  const routedViaV3Router = txTo === V3_ROUTER_ADDRESS;
+  const router = v3RouterAddress(event.chainId);
+  const routedViaV3Router = router !== null && txTo === router;
 
-  // Decimals fetched in parallel — lookup is cached after first call per token.
-  const [tokenInDecimals, tokenOutDecimals] = await Promise.all([
-    getTokenDecimals(event.chainId, tokenIn),
-    getTokenDecimals(event.chainId, tokenOut),
+  // Reuses the ERC20FeeToken handler's cache + KNOWN_TOKEN_META static
+  // fallback, so per-token first-hit RPC for known Mento stablecoins is free
+  // and tokens already touched by an earlier ProtocolFeeTransfer don't pay
+  // a second-hit RPC here either.
+  const [tokenInMeta, tokenOutMeta] = await Promise.all([
+    resolveFeeTokenMeta(event.chainId, tokenIn),
+    resolveFeeTokenMeta(event.chainId, tokenOut),
   ]);
 
-  // computeSwapUsdWei is built around the FPMM `(token0, token1, amount{0,1}{In,Out})`
-  // shape. Map the Broker's tokenIn/tokenOut into that shape: tokenIn = token0
-  // with amount0In set, tokenOut = token1 with amount1Out set. The function
-  // picks whichever side is USD-pegged (per USD_PEGGED_SYMBOLS) and scales it
-  // to 18-decimal USD-wei, identical to the FPMM/VirtualPool path.
+  // computeSwapUsdWei is built around the FPMM `(token0, token1,
+  // amount{0,1}{In,Out})` shape. Map the Broker's tokenIn/tokenOut into that
+  // shape and reuse the same USD-pegged-side picker the FPMM/VirtualPool
+  // handlers use.
   const volumeUsdWei = computeSwapUsdWei({
     chainId: event.chainId,
     token0: tokenIn,
     token1: tokenOut,
-    token0Decimals: tokenInDecimals,
-    token1Decimals: tokenOutDecimals,
+    token0Decimals: tokenInMeta.decimals,
+    token1Decimals: tokenOutMeta.decimals,
     amount0In: event.params.amountIn,
     amount0Out: 0n,
     amount1In: 0n,
@@ -108,11 +78,9 @@ Broker.Swap.handler(async ({ event, context }) => {
   };
   context.BrokerSwapEvent.set(swap);
 
-  // Pre-rolled day bucket — the dashboard reads BrokerDailySnapshot directly,
-  // so the v2 volume chart stays under the Hasura 1000-row cap even with
-  // years of history. Bucketed by `routedViaV3Router` so the chart's filter
-  // `routedViaV3Router=false AND exchangeProvider=BiPoolManager` reads from
-  // a single index without scanning the per-event table.
+  // Daily rollup keyed by `(chainId, exchangeProvider, routedViaV3Router, day)`
+  // so the dashboard's `routedViaV3Router=false` filter reads from a single
+  // index without scanning the per-event table.
   const dayTs = dayBucket(blockTimestamp);
   const routedKey = routedViaV3Router ? "router" : "direct";
   const snapshotId = `${event.chainId}-${exchangeProvider}-${routedKey}-${dayTs}`;

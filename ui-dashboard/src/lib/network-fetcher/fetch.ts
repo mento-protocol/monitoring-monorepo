@@ -168,149 +168,42 @@ const PARTIAL_PAGE_THROTTLE_MS = 60_000;
 export const partialPageLastCapturedAt = new Map<string, number>();
 
 /**
- * Daily rollup pagination — ~365 rows/pool/year, so for typical history a
- * few pages cover everything. Uses the fail-open semantics documented on
- * `SNAPSHOT_PAGE_SIZE`.
+ * Generic paginated fetcher with the Hasura fail-open contract documented on
+ * `SNAPSHOT_PAGE_SIZE`: hard-fail on page 0, preserve and flag truncated on
+ * mid-loop failure, log cap exhaustion once per (network, responseKey).
+ *
+ * Callers parameterize: variables shape per page, response key, and a dedup
+ * key extractor — offset pagination over an append-only table is unstable
+ * under concurrent inserts, so dedup is required to keep windowed totals
+ * accurate even when a refresh hits mid-write.
  */
-async function fetchAllDailySnapshotPages(
-  client: GraphQLClient,
-  poolIds: string[],
-  network: string,
-): Promise<SnapshotPageResult> {
-  return fetchPaginatedSnapshotPages(
-    client,
-    poolIds,
-    POOL_DAILY_SNAPSHOTS_ALL,
-    "PoolDailySnapshot",
-    network,
-  );
-}
-
-/**
- * Per-day Broker rollup result — analogous to `SnapshotPageResult` but for
- * `BrokerDailySnapshot`. Held in this file rather than `./types` because no
- * external module needs the shape.
- */
-type BrokerSnapshotPageResult = {
-  rows: BrokerDailySnapshotRow[];
-  truncated: boolean;
-  error: Error | null;
-};
-
-const brokerSnapshotDedupKey = (s: BrokerDailySnapshotRow) =>
-  // BrokerDailySnapshot.id is `{chainId}-{provider}-{router|direct}-{day}`; the
-  // server-side filter pins `routedViaV3Router=false` and chainId, so within
-  // one fetch the (provider, day) tuple uniquely identifies a row.
-  `${s.timestamp}-${s.volumeUsdWei}-${s.swapCount}`;
-
-/**
- * Paginate `BrokerDailySnapshot` rows for a chain (already filtered to
- * `routedViaV3Router=false`). Mirrors `fetchAllDailySnapshotPages` semantics:
- * fail-open after page 1, hard-fail if page 0 throws. Row count grows as
- * `(daily_distinct_providers × days)`, so a single chain stays under the
- * 1000-row Hasura cap for years; pagination is here for safety.
- */
-async function fetchAllBrokerDailySnapshotPages(
-  client: GraphQLClient,
-  chainId: number,
-  network: string,
-): Promise<BrokerSnapshotPageResult> {
+async function fetchPaginatedRows<TRow, TVars>(args: {
+  client: GraphQLClient;
+  query: string;
+  responseKey: string;
+  network: string;
+  variablesFor: (page: number) => TVars;
+  dedupKey: (row: TRow) => string;
+  /** Extra payload merged into the Sentry capture for this responseKey. */
+  extra?: Record<string, unknown>;
+}): Promise<{ rows: TRow[]; truncated: boolean; error: Error | null }> {
+  const { client, query, responseKey, network, variablesFor, dedupKey, extra } =
+    args;
   const seen = new Set<string>();
-  const rows: BrokerDailySnapshotRow[] = [];
+  const rows: TRow[] = [];
   for (let page = 0; page < SNAPSHOT_MAX_PAGES; page++) {
-    let batch: BrokerDailySnapshotRow[];
+    let batch: TRow[];
     try {
-      const result = await client.request<{
-        BrokerDailySnapshot: BrokerDailySnapshotRow[];
-      }>({
-        document: BROKER_DAILY_SNAPSHOTS_ALL,
-        variables: {
-          chainId,
-          limit: SNAPSHOT_PAGE_SIZE,
-          offset: page * SNAPSHOT_PAGE_SIZE,
-        },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-      batch = result.BrokerDailySnapshot ?? [];
-    } catch (err) {
-      // Page 0 failure → no data to salvage; let the caller surface it.
-      if (rows.length === 0) throw err;
-      const partialKey = `${network}:BrokerDailySnapshot`;
-      const now = Date.now();
-      const last = partialPageLastCapturedAt.get(partialKey) ?? 0;
-      if (now - last >= PARTIAL_PAGE_THROTTLE_MS) {
-        partialPageLastCapturedAt.set(partialKey, now);
-        Sentry.captureException(err, {
-          tags: {
-            source: "hasura",
-            responseKey: "BrokerDailySnapshot",
-            network,
-            degraded: "partial-pages",
-          },
-          extra: { page, rowsFetched: rows.length },
-        });
-      }
-      return {
-        rows,
-        truncated: true,
-        error: err instanceof Error ? err : new Error(String(err)),
-      };
-    }
-    for (const row of batch) {
-      const key = brokerSnapshotDedupKey(row);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      rows.push(row);
-    }
-    if (batch.length < SNAPSHOT_PAGE_SIZE) {
-      return { rows, truncated: false, error: null };
-    }
-  }
-  const capKey = `${network}:BrokerDailySnapshot`;
-  if (!warnedCapKeys.has(capKey)) {
-    warnedCapKeys.add(capKey);
-    Sentry.captureMessage("hasura-snapshot-cap-exhausted", {
-      level: "warning",
-      tags: {
-        source: "hasura",
-        responseKey: "BrokerDailySnapshot",
-        network,
-      },
-      extra: { rowsFetched: rows.length },
-    });
-  }
-  return { rows, truncated: true, error: null };
-}
-
-async function fetchPaginatedSnapshotPages<K extends string>(
-  client: GraphQLClient,
-  poolIds: string[],
-  query: string,
-  responseKey: K,
-  network: string,
-): Promise<SnapshotPageResult> {
-  const seen = new Set<string>();
-  const rows: PoolSnapshotWindow[] = [];
-  for (let page = 0; page < SNAPSHOT_MAX_PAGES; page++) {
-    let batch: PoolSnapshotWindow[];
-    try {
-      const result = await client.request<Record<K, PoolSnapshotWindow[]>>({
+      const result = await client.request<Record<string, TRow[]>>({
         document: query,
-        variables: {
-          poolIds,
-          limit: SNAPSHOT_PAGE_SIZE,
-          offset: page * SNAPSHOT_PAGE_SIZE,
-        },
+        variables: variablesFor(page) as Record<string, unknown>,
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       batch = result[responseKey] ?? [];
     } catch (err) {
-      // First-page failure is a hard error — nothing to degrade to.
       if (rows.length === 0) throw err;
-      // Otherwise preserve the pages we did fetch; surface error AND flag
-      // truncation so consumers know the data is partial. Report to Sentry
-      // so partial-data degradation isn't silent — but throttle per
-      // network+responseKey so the 30s poll loop can't fan out a storm.
+      // Mid-loop failure → preserve fetched pages, flag truncated, throttle
+      // Sentry per (network, responseKey) so the 30s poll can't fan out a storm.
       const partialKey = `${network}:${responseKey}`;
       const now = Date.now();
       const last = partialPageLastCapturedAt.get(partialKey) ?? 0;
@@ -323,7 +216,7 @@ async function fetchPaginatedSnapshotPages<K extends string>(
             network,
             degraded: "partial-pages",
           },
-          extra: { page, rowsFetched: rows.length, poolCount: poolIds.length },
+          extra: { page, rowsFetched: rows.length, ...extra },
         });
       }
       return {
@@ -333,7 +226,7 @@ async function fetchPaginatedSnapshotPages<K extends string>(
       };
     }
     for (const row of batch) {
-      const key = snapshotDedupKey(row);
+      const key = dedupKey(row);
       if (seen.has(key)) continue;
       seen.add(key);
       rows.push(row);
@@ -342,11 +235,8 @@ async function fetchPaginatedSnapshotPages<K extends string>(
       return { rows, truncated: false, error: null };
     }
   }
-  // Safety-cap exhaustion: we fetched SNAPSHOT_MAX_PAGES × SNAPSHOT_PAGE_SIZE
-  // rows without running out. Data is genuinely incomplete — flag as a warning
-  // so we can tell when the cap needs raising (or when indexer rollups need
-  // replacing a paginated fetch). Dedup key is `${network}:${responseKey}` so
-  // each chain surfaces its own cap event once (not once total across chains).
+  // Cap exhaustion: data is genuinely incomplete. One Sentry message per
+  // (network, responseKey) pair — each chain surfaces its own cap event once.
   const capKey = `${network}:${responseKey}`;
   if (!warnedCapKeys.has(capKey)) {
     warnedCapKeys.add(capKey);
@@ -355,13 +245,69 @@ async function fetchPaginatedSnapshotPages<K extends string>(
       tags: { source: "hasura", responseKey, network },
       extra: {
         rowsFetched: rows.length,
-        poolCount: poolIds.length,
         maxPages: SNAPSHOT_MAX_PAGES,
         pageSize: SNAPSHOT_PAGE_SIZE,
+        ...extra,
       },
     });
   }
   return { rows, truncated: true, error: null };
+}
+
+/**
+ * Daily rollup pagination — ~365 rows/pool/year, so for typical history a
+ * few pages cover everything.
+ */
+async function fetchAllDailySnapshotPages(
+  client: GraphQLClient,
+  poolIds: string[],
+  network: string,
+): Promise<SnapshotPageResult> {
+  return fetchPaginatedRows<PoolSnapshotWindow, unknown>({
+    client,
+    query: POOL_DAILY_SNAPSHOTS_ALL,
+    responseKey: "PoolDailySnapshot",
+    network,
+    variablesFor: (page) => ({
+      poolIds,
+      limit: SNAPSHOT_PAGE_SIZE,
+      offset: page * SNAPSHOT_PAGE_SIZE,
+    }),
+    dedupKey: snapshotDedupKey,
+    extra: { poolCount: poolIds.length },
+  });
+}
+
+/**
+ * Paginate `BrokerDailySnapshot` rows for a chain — already filtered to
+ * `routedViaV3Router=false` server-side. Row count grows as
+ * `(daily_distinct_providers × days)`, so a single chain stays under the
+ * 1000-row Hasura cap for years; pagination is here for safety.
+ */
+async function fetchAllBrokerDailySnapshotPages(
+  client: GraphQLClient,
+  chainId: number,
+  network: string,
+): Promise<{
+  rows: BrokerDailySnapshotRow[];
+  truncated: boolean;
+  error: Error | null;
+}> {
+  return fetchPaginatedRows<BrokerDailySnapshotRow, unknown>({
+    client,
+    query: BROKER_DAILY_SNAPSHOTS_ALL,
+    responseKey: "BrokerDailySnapshot",
+    network,
+    variablesFor: (page) => ({
+      chainId,
+      limit: SNAPSHOT_PAGE_SIZE,
+      offset: page * SNAPSHOT_PAGE_SIZE,
+    }),
+    // The schema id `{chainId}-{provider}-{router|direct}-{day}` is the
+    // canonical row key — required because two providers can share the same
+    // (timestamp, volumeUsdWei, swapCount) tuple at low traffic.
+    dedupKey: (row) => row.id,
+  });
 }
 
 /** @internal Exported for testing only. */

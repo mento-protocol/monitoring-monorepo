@@ -295,7 +295,8 @@ describe("buildBrokerDailyV2Series", () => {
     return [
       makeNetworkData({
         network: TVL_NETWORK,
-        brokerSnapshotsAllDaily: rows.map((r) => ({
+        brokerSnapshotsAllDaily: rows.map((r, i) => ({
+          id: `42220-bipool-direct-${r.timestamp}-${i}`,
           timestamp: String(r.timestamp),
           volumeUsdWei: r.volumeUsdWei,
           swapCount: r.swapCount,
@@ -365,6 +366,7 @@ describe("buildBrokerDailyV2Series", () => {
           network: TVL_NETWORK,
           brokerSnapshotsAllDaily: [
             {
+              id: `42220-bipool-direct-${day0}`,
               timestamp: String(day0),
               volumeUsdWei: "3000000000000000000",
               swapCount: 1,
@@ -375,6 +377,7 @@ describe("buildBrokerDailyV2Series", () => {
           network: TVL_NETWORK_2,
           brokerSnapshotsAllDaily: [
             {
+              id: `143-bipool-direct-${day0}`,
               timestamp: String(day0),
               volumeUsdWei: "1000000000000000000",
               swapCount: 1,

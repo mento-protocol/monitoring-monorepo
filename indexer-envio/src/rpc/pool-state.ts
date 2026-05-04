@@ -693,25 +693,8 @@ export async function fetchTokenDecimalsScaling(
   } catch (err) {
     logRpcFailure(chainId, fn, poolAddress, err);
     if (!fallbackTokenAddress) return null;
-    const erc20Key = `${chainId}:${fallbackTokenAddress.toLowerCase()}`;
-    if (_testERC20Decimals.has(erc20Key)) {
-      const d = _testERC20Decimals.get(erc20Key)!;
-      return 10n ** BigInt(d);
-    }
-    try {
-      const client = getRpcClient(chainId);
-      const d = await client.readContract({
-        address: fallbackTokenAddress as `0x${string}`,
-        abi: ERC20_DECIMALS_ABI,
-        functionName: "decimals",
-      });
-      const decimals = Number(d);
-      if (decimals < 0 || decimals > 36) return null;
-      return 10n ** BigInt(decimals);
-    } catch (err) {
-      logRpcFailure(chainId, "erc20Decimals", fallbackTokenAddress, err);
-      return null;
-    }
+    const decimals = await fetchErc20Decimals(chainId, fallbackTokenAddress);
+    return decimals == null ? null : 10n ** BigInt(decimals);
   }
 }
 

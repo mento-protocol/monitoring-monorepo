@@ -216,6 +216,25 @@ export function weekOverWeekChangePct(
   return ((sum(last7) - prior) / prior) * 100;
 }
 
+// Show "N/A" only on explicit failure. An empty series without errors
+// legitimately sums to $0 (no volume yet) — flagging it N/A would conflate
+// "no activity" with "data missing".
+function computeHeadline(
+  isLoading: boolean,
+  hasError: boolean,
+  hasSnapshotError: boolean,
+  v3Points: SeriesPoint[],
+  v2Points: SeriesPoint[],
+  v3Total: number,
+  v2Total: number,
+): string {
+  if (isLoading) return "…";
+  if (hasError) return "N/A";
+  if (hasSnapshotError && v3Points.length === 0 && v2Points.length === 0)
+    return "N/A";
+  return `${formatUSD(v3Total)} v3 · ${formatUSD(v2Total)} v2`;
+}
+
 interface VolumeOverTimeChartProps {
   networkData: NetworkData[];
   isLoading: boolean;
@@ -316,32 +335,29 @@ export function VolumeOverTimeChart({
     [visibleV2Points],
   );
 
-  // Combined-bars series the chart card uses for non-stacked render paths
-  // (e.g. loading skeleton's reserved layout). In stacked mode the breakdown
-  // areas plot on their own; this series is required by the prop contract
-  // but isn't drawn.
-  const visibleCombinedSeries = useMemo<TimeSeriesPoint[]>(() => {
-    const byTs = new Map<number, number>();
-    for (const p of visibleV3Points)
-      byTs.set(p.timestamp, (byTs.get(p.timestamp) ?? 0) + p.volumeUSD);
-    for (const p of visibleV2Points)
-      byTs.set(p.timestamp, (byTs.get(p.timestamp) ?? 0) + p.volumeUSD);
-    return Array.from(byTs)
-      .sort((a, b) => a[0] - b[0])
-      .map(([timestamp, value]) => ({ timestamp, value }));
-  }, [visibleV3Points, visibleV2Points]);
+  // The chart card reads `series` for the x-axis timestamps and the
+  // empty-state gate (`!isLoading && series.length === 0`). The y-axis range
+  // in stacked mode comes from the breakdown traces, so we don't need a
+  // summed-Y series here — the v3 points are already day-aligned with v2,
+  // already sorted, and non-empty whenever either side has data.
+  const visibleSeriesForCard = useMemo<TimeSeriesPoint[]>(
+    () =>
+      (visibleV3Points.length >= visibleV2Points.length
+        ? visibleV3Points
+        : visibleV2Points
+      ).map((p) => ({ timestamp: p.timestamp, value: p.volumeUSD })),
+    [visibleV3Points, visibleV2Points],
+  );
 
-  // Show "N/A" only on explicit failure. An empty series without errors
-  // legitimately sums to $0 (no volume yet) — flagging that as N/A would
-  // incorrectly conflate "no activity" with "data missing".
-  const headline = isLoading
-    ? "…"
-    : hasError ||
-        (hasSnapshotError &&
-          visibleV3Points.length === 0 &&
-          visibleV2Points.length === 0)
-      ? "N/A"
-      : `${formatUSD(v3RangeTotal)} v3 · ${formatUSD(v2RangeTotal)} v2`;
+  const headline = computeHeadline(
+    isLoading,
+    hasError,
+    hasSnapshotError,
+    visibleV3Points,
+    visibleV2Points,
+    v3RangeTotal,
+    v2RangeTotal,
+  );
 
   const change = weekOverWeekChangePct(fullV3Series);
 
@@ -355,7 +371,7 @@ export function VolumeOverTimeChart({
     <TimeSeriesChartCard
       title="Volume"
       rangeAriaLabel="Volume chart time range"
-      series={visibleCombinedSeries}
+      series={visibleSeriesForCard}
       breakdown={visibleBreakdown}
       breakdownMode="stacked"
       range={range}
