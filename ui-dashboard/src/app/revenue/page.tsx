@@ -31,6 +31,11 @@ function RevenueContent() {
       (n.ratesError !== null || n.feeSnapshotsError !== null) &&
       n.error === null,
   );
+  // Pagination cap exhausted on at least one chain — totals are a lower
+  // bound. Surface as `≈` rather than blanking, since most history is in.
+  const anyFeesTruncated = networkData.some(
+    (n) => n.feeSnapshotsTruncated && n.error === null,
+  );
 
   const aggregated = useMemo(() => {
     let totalFeesAllTime: number | null =
@@ -68,7 +73,8 @@ function RevenueContent() {
 
   const feesApprox =
     aggregated.unpricedSymbols.length > 0 ||
-    aggregated.totalUnresolvedCount > 0;
+    aggregated.totalUnresolvedCount > 0 ||
+    anyFeesTruncated;
 
   return (
     <div className="space-y-8">
@@ -93,11 +99,13 @@ function RevenueContent() {
             totalPrefix={feesApprox ? "≈ " : ""}
             href="https://debank.com/profile/0x0dd57f6f181d0469143fe9380762d8a112e96e4a"
             subtitle={
-              aggregated.unpricedSymbols.length > 0
-                ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
-                : aggregated.totalUnresolvedCount > 0
-                  ? "Approximate — some tokens unresolved"
-                  : "Protocol fee transfers to yield split address"
+              anyFeesTruncated
+                ? "Approximate — full history exceeds pagination cap"
+                : aggregated.unpricedSymbols.length > 0
+                  ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
+                  : aggregated.totalUnresolvedCount > 0
+                    ? "Approximate — some tokens unresolved"
+                    : "Protocol fee transfers to yield split address"
             }
           />
 

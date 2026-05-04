@@ -79,6 +79,13 @@ export type NetworkData = {
    */
   feeSnapshotsError: Error | null;
   /**
+   * True when paginated snapshot fetch hit `SNAPSHOT_MAX_PAGES` without
+   * exhausting the result set — `feeSnapshots` carries the most-recent rows
+   * we did fetch, but oldest history was dropped. All-time totals are a
+   * lower bound; UI marks them approximate.
+   */
+  feeSnapshotsTruncated: boolean;
+  /**
    * Lowercase-address → token-pair map for slim hooks that don't fetch the
    * full `pools` payload. Empty by default; consumers with a populated
    * `pools` array should derive labels from that instead.

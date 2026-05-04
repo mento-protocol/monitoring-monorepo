@@ -58,6 +58,7 @@ export function isNetworkDataFullyHealthy(n: NetworkData): boolean {
     n.error === null &&
     n.ratesError === null &&
     n.feeSnapshotsError === null &&
+    !n.feeSnapshotsTruncated &&
     n.snapshotsError === null &&
     n.snapshots7dError === null &&
     n.snapshots30dError === null &&
@@ -95,6 +96,7 @@ export const blankNetworkData = (
   fees: null,
   feeSnapshots: [],
   feeSnapshotsError: null,
+  feeSnapshotsTruncated: false,
   ratesError: null,
   poolLabels: new Map(),
   uniqueLpAddresses: null,
@@ -463,6 +465,12 @@ export async function fetchNetworkData(
     feeSnapshotsResult.status === "rejected"
       ? toError(feeSnapshotsResult.reason)
       : (feeSnapshotsResult.value.error ?? null);
+  // Cap-exhaustion: helper returns `truncated: true, error: null`. We still
+  // aggregate from the rows we did fetch; consumers gate on this flag to
+  // mark the all-time total approximate.
+  const feeSnapshotsTruncated =
+    feeSnapshotsResult.status === "fulfilled" &&
+    feeSnapshotsResult.value.truncated;
   const fees =
     feeSnapshotsResult.status === "fulfilled" &&
     feeSnapshotsResult.value.error === null
@@ -606,6 +614,7 @@ export async function fetchNetworkData(
     fees,
     feeSnapshots,
     feeSnapshotsError,
+    feeSnapshotsTruncated,
     // Homepage SSR path doesn't fetch oracle rates separately — rates come
     // from `pools` query above which is gated by the early-return error
     // path, so a rates "failure" surfaces as the top-level `error`. Leave

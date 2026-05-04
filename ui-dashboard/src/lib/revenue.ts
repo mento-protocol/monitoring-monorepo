@@ -43,6 +43,19 @@ export function buildDailyFeeSeries(
   >();
   let minBucket = Infinity;
 
+  // Snapshot timestamps are UTC-midnight buckets. Hour-aligned window bounds
+  // from snapshotWindow7d/30d would drop the oldest intended day's bucket
+  // (its midnight ts is before the hour-aligned `from`) and then immediately
+  // zero-fill it back via `floor(window.from / DAY)` — chart shows a
+  // leading-zero day while the headline excludes that day's fees. Floor
+  // to UTC midnight here so the filter and the gap-fill agree.
+  const dayAlignedWindow = window
+    ? {
+        from: Math.floor(window.from / SECONDS_PER_DAY) * SECONDS_PER_DAY,
+        to: window.to,
+      }
+    : undefined;
+
   for (const netData of networkData) {
     // Skip transport errors, `ratesError` (empty rate map silently drops
     // FX-token slots while pegged ones still price → trace would be subtly
@@ -56,8 +69,8 @@ export function buildDailyFeeSeries(
 
     for (const s of netData.feeSnapshots) {
       const ts = Number(s.timestamp);
-      if (window) {
-        if (ts < window.from || ts >= window.to) continue;
+      if (dayAlignedWindow) {
+        if (ts < dayAlignedWindow.from || ts >= dayAlignedWindow.to) continue;
       }
       const bucket = Math.floor(ts / SECONDS_PER_DAY) * SECONDS_PER_DAY;
       let usd = Number(s.feesUsdWei) / 1e18;
@@ -99,9 +112,7 @@ export function buildDailyFeeSeries(
   // is inside D still appears — the bucket for day D contains only in-window
   // snapshots because the filter above already excluded anything before
   // window.from.
-  const startBucket = window
-    ? Math.floor(window.from / SECONDS_PER_DAY) * SECONDS_PER_DAY
-    : minBucket;
+  const startBucket = dayAlignedWindow ? dayAlignedWindow.from : minBucket;
   const endRef = window?.to ?? Math.floor(Date.now() / 1000);
   const endBucket = Math.floor(endRef / SECONDS_PER_DAY) * SECONDS_PER_DAY;
   const lastBucket =

@@ -92,6 +92,9 @@ function GlobalContent({
       (netData.ratesError !== null || netData.feeSnapshotsError !== null) &&
       netData.error === null,
   );
+  const anyFeesTruncated = networkData.some(
+    (netData) => netData.feeSnapshotsTruncated && netData.error === null,
+  );
   const anySnapshots7dError = networkData.some(
     (netData) => netData.snapshots7dError !== null && netData.error === null,
   );
@@ -245,7 +248,8 @@ function GlobalContent({
 
   const feesApprox =
     aggregated.unpricedSymbols.length > 0 ||
-    aggregated.totalUnresolvedCount > 0;
+    aggregated.totalUnresolvedCount > 0 ||
+    anyFeesTruncated;
 
   return (
     <div className="space-y-8">
@@ -297,11 +301,13 @@ function GlobalContent({
             totalPrefix={feesApprox ? "≈ " : ""}
             href="https://debank.com/profile/0x0dd57f6f181d0469143fe9380762d8a112e96e4a"
             subtitle={
-              aggregated.unpricedSymbols.length > 0
-                ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
-                : aggregated.totalUnresolvedCount > 0
-                  ? "Approximate — some tokens unresolved"
-                  : undefined
+              anyFeesTruncated
+                ? "Approximate — full history exceeds pagination cap"
+                : aggregated.unpricedSymbols.length > 0
+                  ? `Approximate — unpriced: ${aggregated.unpricedSymbols.join(", ")}`
+                  : aggregated.totalUnresolvedCount > 0
+                    ? "Approximate — some tokens unresolved"
+                    : undefined
             }
           />
 

@@ -66,6 +66,7 @@ function networkData(
     fees: null,
     feeSnapshots,
     feeSnapshotsError: null,
+    feeSnapshotsTruncated: false,
     ratesError: null,
     poolLabels: new Map(),
     uniqueLpAddresses: null,

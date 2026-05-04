@@ -57,9 +57,16 @@ export function aggregateProtocolFees(
   rates: OracleRateMap,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): ProtocolFeeSummary {
-  const cutoff24h = nowSeconds - SECS_PER_DAY;
-  const cutoff7d = nowSeconds - 7 * SECS_PER_DAY;
-  const cutoff30d = nowSeconds - 30 * SECS_PER_DAY;
+  // Day-aligned cutoffs. Snapshot timestamps are already UTC-midnight buckets
+  // (`(ts / 86400) * 86400`), so a rolling `nowSeconds - N*86400` cutoff
+  // would drop the oldest bucket as soon as the wall clock passed midnight
+  // — the 7d total would silently shrink to 6 days mid-period. Anchoring
+  // on `dayStart - (N-1)*86400` keeps each window covering exactly N daily
+  // buckets regardless of intra-day position.
+  const dayStart = Math.floor(nowSeconds / SECS_PER_DAY) * SECS_PER_DAY;
+  const cutoff24h = dayStart;
+  const cutoff7d = dayStart - 6 * SECS_PER_DAY;
+  const cutoff30d = dayStart - 29 * SECS_PER_DAY;
 
   let totalFeesUSD = 0;
   let fees24hUSD = 0;

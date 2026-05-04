@@ -29,9 +29,15 @@ export function aggregateFeeSnapshotsByPool(
   chainId: number,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): PoolFeeEntry[] {
-  const cutoff24h = nowSeconds - SECS_PER_DAY;
-  const cutoff7d = nowSeconds - 7 * SECS_PER_DAY;
-  const cutoff30d = nowSeconds - 30 * SECS_PER_DAY;
+  // Day-aligned cutoffs — snapshot timestamps are UTC-midnight buckets, so
+  // anchoring on `dayStart - (N-1)*86400` keeps each window covering exactly
+  // N daily buckets regardless of intra-day position. A rolling
+  // `nowSeconds - N*86400` cutoff would drop the oldest bucket as soon as
+  // the clock passed midnight (silent undercount mid-period).
+  const dayStart = Math.floor(nowSeconds / SECS_PER_DAY) * SECS_PER_DAY;
+  const cutoff24h = dayStart;
+  const cutoff7d = dayStart - 6 * SECS_PER_DAY;
+  const cutoff30d = dayStart - 29 * SECS_PER_DAY;
   const byPool = new Map<string, PoolFeeEntry>();
 
   for (const s of snapshots) {

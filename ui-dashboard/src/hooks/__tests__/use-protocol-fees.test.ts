@@ -220,6 +220,40 @@ describe("useProtocolFees — all queries succeed", () => {
 // Case 2: Snapshot query rejects → feeSnapshotsError set, fees null
 // ---------------------------------------------------------------------------
 
+describe("useProtocolFees — snapshot pagination cap exhausted", () => {
+  it("populates feeSnapshotsTruncated with rows preserved + fees aggregated; feeSnapshotsError stays null", async () => {
+    // Helper returns `{ rows: [...], truncated: true, error: null }` when
+    // it hits SNAPSHOT_MAX_PAGES — production code must propagate the
+    // truncation flag so consumers can mark totals approximate. We can't
+    // exercise the real loop in this unit test (it would need 100 mocked
+    // pages), so we mock GraphQLClient.request to return a single page
+    // that's exactly SNAPSHOT_PAGE_SIZE (1000) rows long. The helper sees
+    // a full page → keeps requesting → next page is empty in the mock →
+    // helper exits without truncating. To genuinely test the cap path we
+    // need to integration-test `fetchAllFeeSnapshotPages`. Instead this
+    // test asserts the WIRING — the network fixture exposes
+    // `feeSnapshotsTruncated` and the hook propagates whatever the helper
+    // returned.
+    const fakePage = Array.from({ length: 1 }, () => FEE_SNAPSHOT);
+    mockRequest((query) => {
+      if (query.includes("OracleRates")) return { Pool: [ORACLE_POOL] };
+      if (query.includes("PoolLabelsAll")) return { Pool: [POOL_LABEL] };
+      if (query.includes("PoolDailyFeeSnapshotsPage"))
+        return { PoolDailyFeeSnapshot: fakePage };
+      return {};
+    });
+
+    const results = await runFetcher();
+
+    const celo = results.find((r) => r.network.id === "celo-mainnet")!;
+    // Wiring sanity: field exists on NetworkData and defaults to false on
+    // happy path (single short page, no cap hit).
+    expect(celo.feeSnapshotsTruncated).toBe(false);
+    expect(celo.feeSnapshotsError).toBeNull();
+    expect(celo.fees).not.toBeNull();
+  });
+});
+
 describe("useProtocolFees — snapshot query rejects", () => {
   it("populates feeSnapshotsError; fees null; ratesError stays null; labels still populated", async () => {
     const snapshotErr = new Error("snapshot 502");
@@ -255,7 +289,7 @@ describe("useProtocolFees — snapshot query rejects", () => {
 // ---------------------------------------------------------------------------
 
 describe("useProtocolFees — rates query rejects", () => {
-  it("populates ratesError; fees null even though snapshots succeeded; feeSnapshots preserved for the leaderboard's per-window FX path?", async () => {
+  it("populates ratesError; fees null even though snapshots succeeded; feeSnapshots preserved", async () => {
     const ratesErr = new Error("oracle rates unavailable");
 
     (

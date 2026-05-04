@@ -112,6 +112,13 @@ async function fetchFeesForNetwork(
     snapshotsResult.status === "rejected"
       ? toError(snapshotsResult.reason)
       : (snapshotsResult.value.error ?? null);
+  // Cap-exhaustion path: helper returns `truncated: true, error: null` when
+  // it hit `SNAPSHOT_MAX_PAGES` without running out of rows. We still
+  // aggregate from the rows we did fetch; consumers (KPI tile, page-client)
+  // OR this into `feesApprox` to surface the `≈` prefix + an
+  // "Approximate — full history exceeds pagination cap" subtitle.
+  const feeSnapshotsTruncated =
+    snapshotsResult.status === "fulfilled" && snapshotsResult.value.truncated;
   const feeSnapshots =
     snapshotsResult.status === "fulfilled" ? snapshotsResult.value.rows : [];
   const fees: ProtocolFeeSummary | null =
@@ -126,6 +133,7 @@ async function fetchFeesForNetwork(
     fees,
     feeSnapshots,
     feeSnapshotsError,
+    feeSnapshotsTruncated,
     poolLabels,
     ratesError,
   });

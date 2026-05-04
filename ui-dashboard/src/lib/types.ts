@@ -249,10 +249,12 @@ export type LiquidityPosition = {
 };
 
 /**
- * Daily rollup of `ProtocolFeeTransfer`, one row per (chainId, poolAddress, UTC day).
- * Source of truth for the per-pool revenue leaderboard — pool×day cardinality stays
- * within a few thousand rows even at all-time scale, so we paginate the full history
- * cleanly. See `indexer-envio/schema.graphql` → `PoolDailyFeeSnapshot`.
+ * Daily rollup of pool-level protocol fee transfers, one row per
+ * (chainId, poolAddress, UTC day). Source of truth for every fee surface
+ * on /revenue (KPI tile, chart, per-pool leaderboard) — pool×day
+ * cardinality stays within a few thousand rows even at all-time scale,
+ * so we paginate the full history cleanly. See
+ * `indexer-envio/schema.graphql` → `PoolDailyFeeSnapshot`.
  *
  * Hybrid USD pricing: `feesUsdWei` carries USD-pegged tokens converted indexer-side
  * (18-dp USD-wei BigInt). Non-pegged FX tokens are dashboard-priced from the parallel
