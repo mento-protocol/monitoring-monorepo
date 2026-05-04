@@ -6,6 +6,11 @@
  * Pattern: jsdom + `react-dom/client` + `act` — no @testing-library/react
  * (not installed in this repo). The hook is exercised via a minimal wrapper
  * component that exposes its return values as data attributes on a div.
+ *
+ * URL persistence is tested via `window.location.search` after `act()` (and
+ * a spy on `window.history.replaceState`), not via `router.replace`. The hook
+ * intentionally bypasses Next.js routing to avoid an RSC refetch on every
+ * sort click — see the hook's JSDoc for the perf rationale.
  */
 
 import React from "react";
@@ -17,13 +22,10 @@ import { createRoot, type Root } from "react-dom/client";
 // Mocks — must be declared before the SUT import.
 // ---------------------------------------------------------------------------
 
-const mockReplace = vi.fn();
 let mockSearchParams = new URLSearchParams();
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => mockSearchParams,
-  useRouter: () => ({ replace: mockReplace }),
-  usePathname: () => "/",
 }));
 
 import { useTableSort } from "@/lib/use-table-sort";
@@ -94,9 +96,24 @@ function LeaderboardHookWrapper({
 let container: HTMLElement;
 let root: Root;
 let setupActive = false;
+let replaceStateSpy: ReturnType<typeof vi.spyOn>;
+
+function syncLocation(params: URLSearchParams) {
+  // Reset jsdom's `window.location` to match the mocked search params so the
+  // hook's `replaceState`-based URL updates compose against the right base.
+  // jsdom doesn't allow direct assignment to `location.search`, so we go
+  // through `history.replaceState`.
+  const qs = params.toString();
+  const url = qs ? `/?${qs}` : "/";
+  window.history.replaceState(window.history.state, "", url);
+}
 
 function setup(params: URLSearchParams = new URLSearchParams()) {
   mockSearchParams = params;
+  syncLocation(params);
+  // Re-spy after syncLocation so the spy only sees calls made by the hook,
+  // not by our test setup.
+  replaceStateSpy = vi.spyOn(window.history, "replaceState");
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -110,17 +127,16 @@ function teardown() {
     root.unmount();
   });
   document.body.removeChild(container);
+  replaceStateSpy?.mockRestore();
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockSearchParams = new URLSearchParams();
+  syncLocation(mockSearchParams);
   setupActive = false;
 });
 
-// `afterEach` cleans up unconditionally so a failing assertion can't leak the
-// DOM container into the next test. Idempotent — no-op when a test (e.g. the
-// two-prefix isolation cases below) already cleaned up its own roots.
 afterEach(() => {
   teardown();
 });
@@ -197,11 +213,10 @@ describe("useTableSort — handleSort(sameKey) toggles direction", () => {
     act(() => {
       ref.current?.handleSort("tvl");
     });
-    expect(mockReplace).toHaveBeenCalledTimes(1);
-    const callArg = mockReplace.mock.calls[0][0] as string;
-    // tvl+asc differs from defaults (tvl/desc), so params should be set
-    expect(callArg).toContain("Sort=tvl");
-    expect(callArg).toContain("Dir=asc");
+    expect(ref.current?.sortKey).toBe("tvl");
+    expect(ref.current?.sortDir).toBe("asc");
+    expect(window.location.search).toContain("Sort=tvl");
+    expect(window.location.search).toContain("Dir=asc");
   });
 
   it("toggles asc → desc when handleSort called with the active key", () => {
@@ -213,9 +228,10 @@ describe("useTableSort — handleSort(sameKey) toggles direction", () => {
     act(() => {
       ref.current?.handleSort("volume24h");
     });
-    const callArg = mockReplace.mock.calls[0][0] as string;
-    expect(callArg).toContain("Sort=volume24h");
-    expect(callArg).toContain("Dir=desc");
+    expect(ref.current?.sortKey).toBe("volume24h");
+    expect(ref.current?.sortDir).toBe("desc");
+    expect(window.location.search).toContain("Sort=volume24h");
+    expect(window.location.search).toContain("Dir=desc");
   });
 });
 
@@ -229,14 +245,15 @@ describe("useTableSort — handleSort(newKey) resets dir to 'desc'", () => {
     act(() => {
       ref.current?.handleSort("volume24h");
     });
-    const callArg = mockReplace.mock.calls[0][0] as string;
-    expect(callArg).toContain("Sort=volume24h");
-    expect(callArg).toContain("Dir=desc");
+    expect(ref.current?.sortKey).toBe("volume24h");
+    expect(ref.current?.sortDir).toBe("desc");
+    expect(window.location.search).toContain("Sort=volume24h");
+    expect(window.location.search).toContain("Dir=desc");
   });
 });
 
 describe("useTableSort — strips params when new state matches defaults", () => {
-  it("replaces to bare '?' when new state is exactly the defaults", () => {
+  it("clears search to '' when new state is exactly the defaults", () => {
     // Start on pool/asc, click tvl → tvl/desc matches defaults → strip
     setup(new URLSearchParams("Sort=pool&Dir=asc"));
     const ref: ResultRef = { current: null };
@@ -246,8 +263,8 @@ describe("useTableSort — strips params when new state matches defaults", () =>
     act(() => {
       ref.current?.handleSort("tvl");
     });
-    const callArg = mockReplace.mock.calls[0][0] as string;
-    expect(callArg).toBe("/");
+    expect(window.location.search).toBe("");
+    expect(window.location.pathname).toBe("/");
   });
 
   it("keeps params when new state differs from defaults", () => {
@@ -259,9 +276,8 @@ describe("useTableSort — strips params when new state matches defaults", () =>
     act(() => {
       ref.current?.handleSort("pool");
     });
-    const callArg = mockReplace.mock.calls[0][0] as string;
-    expect(callArg).toContain("Sort=pool");
-    expect(callArg).toContain("Dir=desc");
+    expect(window.location.search).toContain("Sort=pool");
+    expect(window.location.search).toContain("Dir=desc");
   });
 });
 
@@ -274,10 +290,9 @@ describe("useTableSort — canonicalizes malformed / partial URL params on mount
     });
     expect(ref.current?.sortKey).toBe("tvl");
     expect(ref.current?.sortDir).toBe("asc");
-    expect(mockReplace).toHaveBeenCalledTimes(1);
-    const callArg = mockReplace.mock.calls[0][0] as string;
-    expect(callArg).toContain("Sort=tvl");
-    expect(callArg).toContain("Dir=asc");
+    expect(replaceStateSpy).toHaveBeenCalledTimes(1);
+    expect(window.location.search).toContain("Sort=tvl");
+    expect(window.location.search).toContain("Dir=asc");
   });
 
   it("strips both params when bogus sort + invalid dir collapse to defaults", () => {
@@ -288,8 +303,8 @@ describe("useTableSort — canonicalizes malformed / partial URL params on mount
     });
     expect(ref.current?.sortKey).toBe("tvl");
     expect(ref.current?.sortDir).toBe("desc");
-    expect(mockReplace).toHaveBeenCalledTimes(1);
-    expect(mockReplace.mock.calls[0][0]).toBe("/");
+    expect(replaceStateSpy).toHaveBeenCalledTimes(1);
+    expect(window.location.search).toBe("");
   });
 
   it("backfills the missing dir param when only sort is present", () => {
@@ -300,10 +315,9 @@ describe("useTableSort — canonicalizes malformed / partial URL params on mount
     });
     expect(ref.current?.sortKey).toBe("pool");
     expect(ref.current?.sortDir).toBe("desc");
-    expect(mockReplace).toHaveBeenCalledTimes(1);
-    const callArg = mockReplace.mock.calls[0][0] as string;
-    expect(callArg).toContain("Sort=pool");
-    expect(callArg).toContain("Dir=desc");
+    expect(replaceStateSpy).toHaveBeenCalledTimes(1);
+    expect(window.location.search).toContain("Sort=pool");
+    expect(window.location.search).toContain("Dir=desc");
   });
 
   it("strips literal-default params (Sort=tvl&Dir=desc) so URL stays canonical", () => {
@@ -312,8 +326,8 @@ describe("useTableSort — canonicalizes malformed / partial URL params on mount
     act(() => {
       root.render(React.createElement(HookWrapper, { resultRef: ref }));
     });
-    expect(mockReplace).toHaveBeenCalledTimes(1);
-    expect(mockReplace.mock.calls[0][0]).toBe("/");
+    expect(replaceStateSpy).toHaveBeenCalledTimes(1);
+    expect(window.location.search).toBe("");
   });
 
   it("does NOT rewrite when URL is already canonical", () => {
@@ -322,7 +336,7 @@ describe("useTableSort — canonicalizes malformed / partial URL params on mount
     act(() => {
       root.render(React.createElement(HookWrapper, { resultRef: ref }));
     });
-    expect(mockReplace).not.toHaveBeenCalled();
+    expect(replaceStateSpy).not.toHaveBeenCalled();
   });
 
   it("does NOT rewrite when URL is empty (defaults already canonical)", () => {
@@ -331,7 +345,7 @@ describe("useTableSort — canonicalizes malformed / partial URL params on mount
     act(() => {
       root.render(React.createElement(HookWrapper, { resultRef: ref }));
     });
-    expect(mockReplace).not.toHaveBeenCalled();
+    expect(replaceStateSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -357,9 +371,9 @@ describe("useTableSort — handleSort honors defaultDir on new-key reset", () =>
     act(() => {
       ref.current?.handleSort("pool");
     });
-    const callArg = mockReplace.mock.calls[0][0] as string;
-    expect(callArg).toContain("Sort=pool");
-    expect(callArg).toContain("Dir=asc");
+    expect(ref.current?.sortDir).toBe("asc");
+    expect(window.location.search).toContain("Sort=pool");
+    expect(window.location.search).toContain("Dir=asc");
   });
 
   it("when new state matches defaultDir=asc default, params are stripped", () => {
@@ -380,69 +394,72 @@ describe("useTableSort — handleSort honors defaultDir on new-key reset", () =>
     act(() => {
       root.render(React.createElement(AscDefaultWrapper));
     });
-    // First call may be the canonicalization — we want the handleSort one.
-    mockReplace.mockClear();
     act(() => {
       ref.current?.handleSort("tvl");
     });
-    expect(mockReplace.mock.calls[0][0]).toBe("/");
+    expect(window.location.search).toBe("");
   });
 });
 
-describe("useTableSort — rapid toggles compose without dropping intent", () => {
-  it("two consecutive toggles on the active key produce two distinct URL writes", () => {
-    setup(); // default tvl/desc — same key, same closure across both clicks
-    const ref: ResultRef = { current: null };
-    act(() => {
-      root.render(React.createElement(HookWrapper, { resultRef: ref }));
-    });
-    // Without the intent ref, both calls would compute against the URL-derived
-    // sortDir="desc" and both would write `Dir=asc`. With the ref, the second
-    // call composes against the first call's intent ("asc") and writes
-    // `Dir=desc` (which is the default → params stripped → "/").
-    act(() => {
-      ref.current?.handleSort("tvl");
-      ref.current?.handleSort("tvl");
-    });
-    expect(mockReplace).toHaveBeenCalledTimes(2);
-    const first = mockReplace.mock.calls[0][0] as string;
-    const second = mockReplace.mock.calls[1][0] as string;
-    expect(first).toContain("Sort=tvl");
-    expect(first).toContain("Dir=asc");
-    // tvl/desc matches the defaults, so the second toggle strips params.
-    expect(second).toBe("/");
-  });
-
-  it("intent ref resets when URL search params change, so external nav wins", () => {
+describe("useTableSort — popstate (browser back/forward) syncs state from URL", () => {
+  it("updates state when popstate fires after the URL changed externally", () => {
     setup(new URLSearchParams("Sort=pool&Dir=asc"));
     const ref: ResultRef = { current: null };
     act(() => {
       root.render(React.createElement(HookWrapper, { resultRef: ref }));
     });
-    // First click composes off the URL state (pool/asc) → toggle to pool/desc.
-    act(() => {
-      ref.current?.handleSort("pool");
-    });
-    expect(mockReplace.mock.calls[0][0] as string).toContain("Dir=desc");
+    expect(ref.current?.sortKey).toBe("pool");
+    expect(ref.current?.sortDir).toBe("asc");
 
-    // Simulate external navigation: search params switch to a different state.
-    // The mounted hook re-renders, the [sortKey, sortDir] effect fires, and
-    // the intent ref is cleared. Subsequent toggle should compose off the
-    // NEW URL state, not the stale ref.
-    mockSearchParams = new URLSearchParams("Sort=tvl&Dir=desc");
+    // Simulate the browser back button: URL changes, then `popstate` fires.
+    // We update `window.location` via `replaceState` first (without listener)
+    // then dispatch `popstate` separately.
+    window.history.replaceState(
+      window.history.state,
+      "",
+      "/?Sort=volume24h&Dir=desc",
+    );
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(ref.current?.sortKey).toBe("volume24h");
+    expect(ref.current?.sortDir).toBe("desc");
+  });
+
+  it("falls back to defaults when popstate fires with empty params", () => {
+    setup(new URLSearchParams("Sort=pool&Dir=asc"));
+    const ref: ResultRef = { current: null };
     act(() => {
       root.render(React.createElement(HookWrapper, { resultRef: ref }));
     });
+    window.history.replaceState(window.history.state, "", "/");
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(ref.current?.sortKey).toBe("tvl");
+    expect(ref.current?.sortDir).toBe("desc");
+  });
+});
 
+describe("useTableSort — rapid toggles compose without dropping intent", () => {
+  it("two consecutive toggles on the active key produce the expected final state", () => {
+    setup(); // default tvl/desc — same key, same closure across both clicks
+    const ref: ResultRef = { current: null };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { resultRef: ref }));
+    });
+    // With state-driven `handleSort`, `setState`'s functional updater always
+    // sees the latest local state — two desc-keyed clicks must compose to
+    // desc → asc → desc, not stall at desc → asc → asc. The desc final state
+    // matches the defaults, so URL params get stripped.
     act(() => {
       ref.current?.handleSort("tvl");
+      ref.current?.handleSort("tvl");
     });
-    // Latest call: from tvl/desc, toggle on same key → tvl/asc.
-    const latest = mockReplace.mock.calls[
-      mockReplace.mock.calls.length - 1
-    ][0] as string;
-    expect(latest).toContain("Sort=tvl");
-    expect(latest).toContain("Dir=asc");
+    expect(ref.current?.sortKey).toBe("tvl");
+    expect(ref.current?.sortDir).toBe("desc");
+    // Final URL: defaults match → no params.
+    expect(window.location.search).toBe("");
   });
 });
 
@@ -453,14 +470,13 @@ describe("useTableSort — two hooks with different paramPrefix don't interfere"
   let ref2: LeaderboardResultRef;
 
   it("reads from separate prefix-scoped params independently", () => {
-    mockSearchParams = new URLSearchParams(
-      "leaderboardSort=fees24h&leaderboardDir=asc&poolsSort=pool&poolsDir=asc",
+    setup(
+      new URLSearchParams(
+        "leaderboardSort=fees24h&leaderboardDir=asc&poolsSort=pool&poolsDir=asc",
+      ),
     );
-    container = document.createElement("div");
     container2 = document.createElement("div");
-    document.body.appendChild(container);
     document.body.appendChild(container2);
-    root = createRoot(container);
     root2 = createRoot(container2);
     ref = { current: null };
     ref2 = { current: null };
@@ -483,20 +499,13 @@ describe("useTableSort — two hooks with different paramPrefix don't interfere"
     expect(ref.current?.sortDir).toBe("asc");
 
     act(() => {
-      root.unmount();
       root2.unmount();
     });
-    document.body.removeChild(container);
     document.body.removeChild(container2);
   });
 
   it("handleSort on one prefix preserves the other prefix's params in the URL", () => {
-    mockSearchParams = new URLSearchParams(
-      "leaderboardSort=fees24h&leaderboardDir=asc",
-    );
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
+    setup(new URLSearchParams("leaderboardSort=fees24h&leaderboardDir=asc"));
     ref = { current: null };
 
     act(() => {
@@ -509,17 +518,11 @@ describe("useTableSort — two hooks with different paramPrefix don't interfere"
       ref.current?.handleSort("volume24h");
     });
 
-    const callArg = mockReplace.mock.calls[0][0] as string;
-    // leaderboard params should be preserved
-    expect(callArg).toContain("leaderboardSort=fees24h");
-    expect(callArg).toContain("leaderboardDir=asc");
-    // pools params should now be set
-    expect(callArg).toContain("poolsSort=volume24h");
-    expect(callArg).toContain("poolsDir=desc");
-
-    act(() => {
-      root.unmount();
-    });
-    document.body.removeChild(container);
+    // Other prefix's params survive untouched
+    expect(window.location.search).toContain("leaderboardSort=fees24h");
+    expect(window.location.search).toContain("leaderboardDir=asc");
+    // Our prefix's params now reflect the click
+    expect(window.location.search).toContain("poolsSort=volume24h");
+    expect(window.location.search).toContain("poolsDir=desc");
   });
 });
