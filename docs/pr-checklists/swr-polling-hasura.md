@@ -50,9 +50,22 @@ Hasura silently caps every query at **1000 rows** (Envio hosted Hasura config). 
 - [ ] Test the populated state with both empty array and >0 entries
 - [ ] If the hook sets `revalidateOnFocus: false`, write a regression test that asserts the option is set — otherwise it gets removed in a future refactor
 
-## 6. Lessons already paid for
+## 6. Per-consumer error-channel isolation
+
+When a polling hook adds a query branch with a different downstream consumer than the existing branches (e.g. PR #317's `PoolDailyFeeSnapshot` fetch landing in `useProtocolFees` next to raw transfers + rates), each consumer's failure mode MUST land on its own error channel on `NetworkData`.
+
+- [ ] Identify every consumer that reads the hook's output (which page, which component, which derived field)
+- [ ] For each consumer, list the queries it actually reads. Folding two consumer-specific failures into one boolean (`feesError`) blanks consumers that don't even depend on the failed query
+- [ ] Each independent failure mode → its own channel: e.g. PR #317 ended at `feesError` (raw `ProtocolFeeTransfer` rejected), `ratesError` (oracle rates rejected), `feeSnapshotsError` (snapshot pagination rejected). The chain-level KPI tile gates on `feesError || ratesError`; the leaderboard gates on `ratesError || feeSnapshotsError`; the chart gates on `feesError || ratesError`
+- [ ] Update `isNetworkDataFullyHealthy` (or equivalent SSR-freshness gate) to check every new channel — silent omissions trap users on partial `N/A` until the next poll
+- [ ] Test the per-channel isolation explicitly: a query rejecting on its own MUST populate only its channel and leave the others null. No precedence ternaries.
+
+PR #317 had this caught by cursor + chatgpt-codex-connector + claude (3 reviewers, all P1) on the initial collapsed-feesError implementation.
+
+## 7. Lessons already paid for
 
 - PRs #202 (open) and #194 — focus/reconnect revalidation was missing from `useGQL` and `UptimeValue`'s breach hook; bots flagged it as the cause of bursty 429s
 - PR #194 — `POOL_DEVIATION_BREACHES` capped at `limit: 100` silently inflated uptime % for pools with >100 breaches; fix was to use the indexer-side cumulative counter
 - PR #194 — `UptimeValue` rendered 100% during initial load
 - PR #185 — bridge-redeem hook fired toasts on transient RPC errors during component teardown; AbortSignal now bounds the request
+- PR #317 — initial implementation collapsed snapshot, rates, and fees rejections into a single `feesError`; cascade blanked the chart + KPI tile (raw-transfer-driven) on a leaderboard-only outage. Required 3 review rounds to fully split.
