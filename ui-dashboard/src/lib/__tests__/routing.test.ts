@@ -57,6 +57,21 @@ describe("buildPoolsFilterUrl", () => {
     const url = buildPoolsFilterUrl(new URLSearchParams("pool=0xold"), "", 25);
     expect(url).not.toContain("pool=");
   });
+
+  it("preserves unrelated params (e.g. poolsSort/poolsDir from useTableSort)", () => {
+    // `useTableSort` writes `poolsSort` / `poolsDir` via `history.replaceState`,
+    // which doesn't notify Next.js's router. The `/pools` page's `setURL`
+    // therefore reads `window.location.search` directly and passes it here —
+    // those params must survive a filter/limit change.
+    const url = buildPoolsFilterUrl(
+      new URLSearchParams("poolsSort=tvl&poolsDir=desc"),
+      "0xabc",
+      25,
+    );
+    expect(url).toContain("poolsSort=tvl");
+    expect(url).toContain("poolsDir=desc");
+    expect(url).toContain("pool=0xabc");
+  });
 });
 
 describe("buildPoolDetailUrl", () => {

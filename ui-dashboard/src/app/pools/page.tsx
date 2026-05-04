@@ -99,11 +99,18 @@ function PoolsContent() {
 
   const setURL = useCallback(
     (pool: string, lim: number) => {
-      router.replace(buildPoolsFilterUrl(searchParams, pool, lim), {
+      // Read live URL from window.location, not the closed-over `searchParams`
+      // snapshot. `useTableSort` updates sort params via `history.replaceState`
+      // which doesn't notify Next.js's router, so `searchParams` lags behind
+      // the real URL. Without this, a sort click followed by a filter/limit
+      // change rebuilds the URL from the stale snapshot and silently strips
+      // `poolsSort` / `poolsDir`.
+      const live = new URLSearchParams(window.location.search);
+      router.replace(buildPoolsFilterUrl(live, pool, lim), {
         scroll: false,
       });
     },
-    [router, searchParams],
+    [router],
   );
 
   const resolvePoolFilter = useCallback(
