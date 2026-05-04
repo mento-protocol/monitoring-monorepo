@@ -10,7 +10,7 @@ import {
   mergeRefreshEntry,
   type EnrichmentResult,
 } from "@/lib/arkham";
-import { discoverMentoAddresses } from "@/lib/arkham-discovery";
+import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 import { requireCronAuth } from "@/lib/cron-auth";
 import { NETWORKS } from "@/lib/networks";
 

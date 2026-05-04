@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { getAllLabels, importLabels } from "@/lib/address-labels";
 import type { AddressEntry } from "@/lib/address-labels-shared";
-import { discoverMentoAddresses } from "@/lib/arkham-discovery";
+import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 import { requireCronAuth } from "@/lib/cron-auth";
 import {
   getMiniPaySetSize,
