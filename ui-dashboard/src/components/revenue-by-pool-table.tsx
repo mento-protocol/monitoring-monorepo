@@ -7,11 +7,8 @@ import { poolName } from "@/lib/tokens";
 import { Table, Row } from "@/components/table";
 import { SortableTh } from "@/components/sortable-th";
 import { ChainIcon } from "@/components/chain-icon";
-import {
-  aggregateProtocolFeesByPool,
-  PROTOCOL_FEE_QUERY_LIMIT,
-  type PoolFeeEntry,
-} from "@/lib/protocol-fees";
+import { type PoolFeeEntry } from "@/lib/protocol-fees";
+import { aggregateFeeSnapshotsByPool } from "@/lib/protocol-fee-snapshots";
 import { buildPoolDetailHref } from "@/lib/routing";
 import type { NetworkData, PoolLabel } from "@/lib/fetch-all-networks";
 import type { Network } from "@/lib/networks";
@@ -21,19 +18,6 @@ import { useTableSort } from "@/lib/use-table-sort";
 type PoolFeeRow = PoolFeeEntry & {
   network: Network;
   label: PoolLabel | null;
-  /**
-   * Per-window truncation flags. A window is truncated when the chain hit
-   * the row-cap AND the oldest returned transfer's timestamp is more recent
-   * than the window's lower bound — i.e. the cap clipped data inside the
-   * window, so its total is a lower bound. Rows return newest-first, so
-   * shorter windows usually stay clean even when the chain is capped, but
-   * this is NOT guaranteed: a chain that crosses the cap inside 30d (or
-   * even 7d/24h on extreme volume) flips the corresponding flag.
-   */
-  truncated24h: boolean;
-  truncated7d: boolean;
-  truncated30d: boolean;
-  truncatedAll: boolean;
 };
 
 type SortKey = "pool" | "chain" | "fees24h" | "fees7d" | "fees30d" | "feesAll";
@@ -57,16 +41,9 @@ type FeeColumn = {
   key: Extract<SortKey, "fees24h" | "fees7d" | "fees30d" | "feesAll">;
   label: string;
   field: "fees24hUSD" | "fees7dUSD" | "fees30dUSD" | "totalFeesUSD";
-  /** Per-column unpriced flag — scoped so an OLD unpriced transfer doesn't
+  /** Per-column unpriced flag — scoped so an OLD unpriced snapshot doesn't
    *  pollute recent windows. `feesAll` falls back to the all-history flag. */
   unpricedField: "unpriced24h" | "unpriced7d" | "unpriced30d" | "unpriced";
-  /** Per-column truncation flag — scoped so a chain capped only on the
-   *  All-time column doesn't surface ≈ on its recent-window cells. */
-  truncatedField:
-    | "truncated24h"
-    | "truncated7d"
-    | "truncated30d"
-    | "truncatedAll";
   className?: string;
 };
 
@@ -76,21 +53,18 @@ const FEE_COLUMNS: ReadonlyArray<FeeColumn> = [
     label: "24h",
     field: "fees24hUSD",
     unpricedField: "unpriced24h",
-    truncatedField: "truncated24h",
   },
   {
     key: "fees7d",
     label: "7d",
     field: "fees7dUSD",
     unpricedField: "unpriced7d",
-    truncatedField: "truncated7d",
   },
   {
     key: "fees30d",
     label: "30d",
     field: "fees30dUSD",
     unpricedField: "unpriced30d",
-    truncatedField: "truncated30d",
     className: "hidden sm:table-cell",
   },
   {
@@ -98,47 +72,36 @@ const FEE_COLUMNS: ReadonlyArray<FeeColumn> = [
     label: "All-time",
     field: "totalFeesUSD",
     unpricedField: "unpriced",
-    truncatedField: "truncatedAll",
     className: "hidden md:table-cell",
   },
 ];
 
 function buildRows(networkData: NetworkData[]): PoolFeeRow[] {
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const cutoff24h = nowSeconds - 86400;
-  const cutoff7d = nowSeconds - 7 * 86400;
-  const cutoff30d = nowSeconds - 30 * 86400;
   const rows: PoolFeeRow[] = [];
   for (const n of networkData) {
-    // Skip both top-level transport errors and `feesError` (rates or fees
-    // query rejected). The latter still has raw `feeTransfers` but an empty
-    // `rates` map, so `aggregateProtocolFeesByPool` would mark every FX-pool
-    // transfer as unpriced and render misleading $0 rows.
-    if (n.error !== null || n.feesError !== null) continue;
-    const chainTruncated = n.fees?.isTruncated ?? false;
-    // `feeTransfers` is `order_by: { blockTimestamp: desc }`, so the last
-    // element is the oldest returned. A window is truncated when the chain
-    // is capped AND that oldest timestamp is younger than the window's lower
-    // bound — i.e. the cap clipped data inside the window.
-    const oldest =
-      chainTruncated && n.feeTransfers.length > 0
-        ? Number(n.feeTransfers[n.feeTransfers.length - 1].blockTimestamp)
-        : null;
-    const truncated24h =
-      chainTruncated && oldest !== null && oldest > cutoff24h;
-    const truncated7d = chainTruncated && oldest !== null && oldest > cutoff7d;
-    const truncated30d =
-      chainTruncated && oldest !== null && oldest > cutoff30d;
-    const entries = aggregateProtocolFeesByPool(n.feeTransfers, n.rates);
+    // Skip top-level transport errors, `ratesError` (empty `rates` map ⇒
+    // FX slots would mis-price as unpriced and produce misleading $0 rows),
+    // and `feeSnapshotsError` (the snapshot fetch itself failed, so the
+    // leaderboard row data is gone). Note: `feesError` is intentionally
+    // NOT checked here — it covers the raw `ProtocolFeeTransfer` query
+    // which the leaderboard does not read. A transfer-only outage keeps
+    // the leaderboard live as long as snapshots and rates succeeded.
+    if (
+      n.error !== null ||
+      n.ratesError !== null ||
+      n.feeSnapshotsError !== null
+    )
+      continue;
+    const entries = aggregateFeeSnapshotsByPool(
+      n.feeSnapshots,
+      n.rates,
+      n.network.chainId,
+    );
     for (const e of entries) {
       rows.push({
         ...e,
         network: n.network,
         label: n.poolLabels.get(e.poolAddress) ?? null,
-        truncated24h,
-        truncated7d,
-        truncated30d,
-        truncatedAll: chainTruncated,
       });
     }
   }
@@ -199,13 +162,7 @@ function approxAnnotation(
     return {
       prefix: "≈ ",
       title:
-        "Some transfers from this pool used unpriced/unknown tokens in this window — total is a lower bound.",
-    };
-  }
-  if (row[column.truncatedField]) {
-    return {
-      prefix: "≈ ",
-      title: `Chain hit the ${PROTOCOL_FEE_QUERY_LIMIT.toLocaleString()}-row query cap inside this window — total is a lower bound for this chain.`,
+        "Some transfers from this pool used unknown tokens or tokens with no oracle rate in this window — total is a lower bound.",
     };
   }
   return { prefix: "", title: undefined };

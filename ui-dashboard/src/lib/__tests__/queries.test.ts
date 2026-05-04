@@ -32,6 +32,7 @@ const EXPECTED_EXPORT_NAMES = [
   "POOL_DAILY_SNAPSHOTS_CHART",
   "POOL_DAILY_SNAPSHOTS_ALL",
   "BROKER_DAILY_SNAPSHOTS_ALL",
+  "POOL_DAILY_FEE_SNAPSHOTS_PAGE",
   "ALL_TRADING_LIMITS",
   "TRADING_LIMITS",
   "ORACLE_SNAPSHOTS",
@@ -314,6 +315,16 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
 
   it("PROTOCOL_FEE_TRANSFERS_ALL caps at Hasura's silent 1000-row cap", () => {
     expect(queries.PROTOCOL_FEE_TRANSFERS_ALL).toMatch(/limit:\s*1000\b/);
+  });
+
+  it("POOL_DAILY_FEE_SNAPSHOTS_PAGE paginates by [timestamp desc, id desc] scoped to chainId", () => {
+    expect(queries.POOL_DAILY_FEE_SNAPSHOTS_PAGE).toContain("$chainId: Int!");
+    expect(queries.POOL_DAILY_FEE_SNAPSHOTS_PAGE).toContain("$limit: Int!");
+    expect(queries.POOL_DAILY_FEE_SNAPSHOTS_PAGE).toContain("$offset: Int!");
+    expect(normalize(queries.POOL_DAILY_FEE_SNAPSHOTS_PAGE)).toContain(
+      "order_by: [{ timestamp: desc }, { id: desc }]",
+    );
+    expect(queries.POOL_DAILY_FEE_SNAPSHOTS_PAGE).toContain("feesUsdWei");
   });
 });
 
