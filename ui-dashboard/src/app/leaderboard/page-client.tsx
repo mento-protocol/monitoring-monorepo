@@ -21,7 +21,7 @@ import {
   type LeaderboardRangeKey,
   type TraderDailyRow,
 } from "@/lib/leaderboard";
-import type { RangeKey } from "@/lib/time-series";
+import { SECONDS_PER_DAY, type RangeKey } from "@/lib/time-series";
 import { LeaderboardTable } from "./_components/leaderboard-table";
 
 type PoolRow = {
@@ -114,12 +114,35 @@ export function LeaderboardClient() {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  // Memoize on `range` alone — `rangeCutoffSeconds` calls `Date.now()` and
-  // would otherwise tick forward every render, creating a new SWR cache key
-  // each second and triggering excess Hasura fetches. The window endpoint
-  // being pinned to mount time is acceptable: daily snapshots only roll over
-  // at UTC midnight, and SWR's 30s polling already keeps the data fresh.
-  const cutoff = useMemo(() => rangeCutoffSeconds(range), [range]);
+  // `cutoff` only re-derives when `range` or the current UTC day changes.
+  // Memoizing on `range` alone is not enough: `rangeCutoffSeconds` aligns
+  // to UTC midnight, so a tab left open across midnight would keep firing
+  // `_gte` queries against yesterday's boundary until the user reloaded
+  // (codex finding 3183954662). We track UTC-day-of-mount via state and
+  // bump it when a tick crosses midnight; the cache key flips at most
+  // once per UTC day.
+  const [utcDayKey, setUtcDayKey] = useState<number>(() =>
+    Math.floor(Date.now() / 1000 / SECONDS_PER_DAY),
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // Poll once per minute — cheap, and the worst-case visible drift between
+    // wall-clock midnight and the leaderboard updating is < 1 minute. We
+    // can't `setTimeout` precisely to midnight because the user's tab may
+    // be backgrounded and timers get throttled.
+    const id = window.setInterval(() => {
+      setUtcDayKey((prev) => {
+        const next = Math.floor(Date.now() / 1000 / SECONDS_PER_DAY);
+        return next === prev ? prev : next;
+      });
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  // `utcDayKey` is in the deps so the cutoff re-derives at midnight even
+  // though it's not referenced inside the memo body — `rangeCutoffSeconds`
+  // calls `Date.now()` internally and we need to flush the memo cache when
+  // the day flips. Including the key is the cheapest way to express that.
+  const cutoff = useMemo(() => rangeCutoffSeconds(range), [range, utcDayKey]);
   const isSystemAddressIn = useMemo(
     () => (showSystem ? [false, true] : [false]),
     [showSystem],
@@ -202,6 +225,12 @@ export function LeaderboardClient() {
 
   const isLoading = tradersResult.isLoading || poolsResult.isLoading;
   const hasError = !!tradersResult.error;
+  // True iff the trader-day query saturated the Hasura cap. When this is
+  // set, `aggregated` and the derived KPIs may be undercounting; we badge
+  // them with `≈` and surface a banner above the tiles.
+  const isCapHit =
+    !!tradersResult.data &&
+    (tradersResult.data.TraderDailySnapshot?.length ?? 0) === ENVIO_MAX_ROWS;
 
   // Headline = window total. Change pill is week-over-week if the range is
   // ≥7d, otherwise null (24h has no meaningful WoW peer).
@@ -257,20 +286,56 @@ export function LeaderboardClient() {
         </div>
       </header>
 
+      {/* The 1000-row cap on `TRADER_DAILY_TOP` is shared by the tiles, the
+          daily-volume chart, AND the table — surface the warning above the
+          tiles, not just below the table, so users don't read the totals
+          and concentration percentage as exact when they're approximate. */}
+      {isCapHit && (
+        <div className="rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200/90">
+          <strong className="font-medium">
+            Approximate values for this window.
+          </strong>{" "}
+          Showing the top {ENVIO_MAX_ROWS.toLocaleString()} trader-day rows by
+          single-day volume — total volume, unique-trader count, top-10
+          concentration, and the daily-volume chart all derive from this cap.
+          High-frequency traders whose individual days don&apos;t crack the cap
+          may be undercounted at longer windows. A pre-rolled window-snapshot
+          entity is planned (<code>BACKLOG.md</code> &rarr; PR 4).
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Tile
-          label="Total volume"
-          value={isLoading ? "…" : formatUSD(totalVolume)}
+          label={isCapHit ? "Total volume (≈)" : "Total volume"}
+          value={
+            isLoading
+              ? "…"
+              : hasError
+                ? "—"
+                : `${isCapHit ? "≈ " : ""}${formatUSD(totalVolume)}`
+          }
           subtitle={rangeSubtitle(range)}
         />
         <Tile
-          label="Unique traders"
-          value={isLoading ? "…" : totalTraders.toLocaleString()}
+          label={isCapHit ? "Unique traders (≈)" : "Unique traders"}
+          value={
+            isLoading
+              ? "…"
+              : hasError
+                ? "—"
+                : `${isCapHit ? "≥ " : ""}${totalTraders.toLocaleString()}`
+          }
           subtitle={`${totalSwaps.toLocaleString()} swaps`}
         />
         <Tile
-          label="Top-10 concentration"
-          value={isLoading ? "…" : `${top10Concentration.toFixed(1)}%`}
+          label={isCapHit ? "Top-10 concentration (≈)" : "Top-10 concentration"}
+          value={
+            isLoading
+              ? "…"
+              : hasError
+                ? "—"
+                : `${top10Concentration.toFixed(1)}%`
+          }
           subtitle="Share of window volume"
         />
       </div>
@@ -305,18 +370,6 @@ export function LeaderboardClient() {
           isLoading={isLoading}
           hasError={hasError}
         />
-        {tradersResult.data &&
-          (tradersResult.data.TraderDailySnapshot?.length ?? 0) ===
-            ENVIO_MAX_ROWS && (
-            <p className="mt-2 text-[11px] text-slate-500">
-              Approximate top-N. Showing the top{" "}
-              {ENVIO_MAX_ROWS.toLocaleString()} trader-day rows by single-day
-              volume; high-frequency traders whose individual days don&apos;t
-              crack this cap may be undercounted at longer windows. A pre-rolled
-              window-snapshot entity is planned (see <code>BACKLOG.md</code>{" "}
-              &rarr; PR 4).
-            </p>
-          )}
       </section>
     </div>
   );
@@ -325,7 +378,11 @@ export function LeaderboardClient() {
 function rangeSubtitle(range: LeaderboardRangeKey): string {
   if (range === "all") return "All time";
   const days = rangeDays(range);
-  if (days === 1) return "Last 24 hours";
+  // The 24h window aligns to today's UTC bucket (`rangeCutoffSeconds`),
+  // not a rolling 24h. At 03:00 UTC that's 3 hours of data, not 24 — so
+  // labeling it "Last 24 hours" was confidently wrong. "Today (UTC)"
+  // matches what the cutoff actually selects.
+  if (days === 1) return "Today (UTC)";
   return `Last ${days} days`;
 }
 

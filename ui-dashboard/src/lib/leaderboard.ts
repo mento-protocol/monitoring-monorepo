@@ -164,10 +164,15 @@ export function aggregateTradersByWindow(
       });
     }
   }
+  // Stable secondary order: `(chainId, trader)` lexicographic. Ties on
+  // volume otherwise reorder across polls (SWR returns rows in insertion
+  // order from a fresh fetch), causing the flow badge to flicker between
+  // tied traders' primary pools and the rank column to shift.
   return Array.from(byKey.values()).sort((a, b) => {
     if (b.volumeUsdWei > a.volumeUsdWei) return 1;
     if (b.volumeUsdWei < a.volumeUsdWei) return -1;
-    return 0;
+    if (a.chainId !== b.chainId) return a.chainId - b.chainId;
+    return a.trader.localeCompare(b.trader);
   });
 }
 
@@ -205,10 +210,13 @@ export function aggregateTraderPoolsByWindow(
       });
     }
   }
+  // Stable secondary order on poolId: ties on volume would otherwise
+  // reorder `breakdownRows[0]` (the trader's "primary pool") across polls,
+  // making the flow badge flicker.
   return Array.from(byKey.values()).sort((a, b) => {
     if (b.volumeUsdWei > a.volumeUsdWei) return 1;
     if (b.volumeUsdWei < a.volumeUsdWei) return -1;
-    return 0;
+    return a.poolId.localeCompare(b.poolId);
   });
 }
 

@@ -21,7 +21,6 @@ import {
 import { useTableSort } from "@/lib/use-table-sort";
 import { networkForChainId } from "@/lib/networks";
 import { poolName } from "@/lib/tokens";
-import type { SortDir } from "@/lib/table-sort";
 import { TRADER_POOL_DAILY_FOR_TRADER } from "@/lib/queries/leaderboard";
 import { FlowBadge } from "./flow-badge";
 
@@ -54,21 +53,31 @@ export function LeaderboardTable({
   const sorted = useMemo(() => {
     const sign = sortDir === "asc" ? 1 : -1;
     const arr = [...traders];
+    // Comparator falls back to `(chainId, trader)` lexicographic on the
+    // primary key tying — without this, equal-key rows reorder across
+    // SWR polls and the rank column shifts (cursor 3184000775).
     arr.sort((a, b) => {
+      let cmp = 0;
       switch (sortKey) {
         case "volume":
-          return sign * cmpBigInt(a.volumeUsdWei, b.volumeUsdWei);
+          cmp = sign * cmpBigInt(a.volumeUsdWei, b.volumeUsdWei);
+          break;
         case "swaps":
-          return sign * (a.swapCount - b.swapCount);
+          cmp = sign * (a.swapCount - b.swapCount);
+          break;
         case "pools":
-          return sign * (a.uniquePoolsApprox - b.uniquePoolsApprox);
+          cmp = sign * (a.uniquePoolsApprox - b.uniquePoolsApprox);
+          break;
         case "fees":
-          return sign * cmpBigInt(a.feesPaidUsdWei, b.feesPaidUsdWei);
+          cmp = sign * cmpBigInt(a.feesPaidUsdWei, b.feesPaidUsdWei);
+          break;
         case "lastSeen":
-          return sign * (a.lastSeenTimestamp - b.lastSeenTimestamp);
-        default:
-          return 0;
+          cmp = sign * (a.lastSeenTimestamp - b.lastSeenTimestamp);
+          break;
       }
+      if (cmp !== 0) return cmp;
+      if (a.chainId !== b.chainId) return a.chainId - b.chainId;
+      return a.trader.localeCompare(b.trader);
     });
     return arr.slice(0, PAGE_LIMIT);
   }, [traders, sortKey, sortDir]);
@@ -232,8 +241,12 @@ function TraderRow({
         <Td align="right" mono>
           {trader.swapCount.toLocaleString()}
         </Td>
-        <Td align="right" mono>
-          {trader.uniquePoolsApprox}
+        <Td
+          align="right"
+          mono
+          title={`Lower bound — max single-day unique pool count over the window. The trader may have touched more distinct pools across days.`}
+        >
+          ≥ {trader.uniquePoolsApprox}
         </Td>
         <Td>
           {expanded ? (
@@ -266,7 +279,9 @@ function TraderRow({
             type="button"
             aria-expanded={expanded}
             aria-label={
-              expanded ? "Collapse pool breakdown" : "Expand pool breakdown"
+              expanded
+                ? `Collapse pool breakdown for ${trader.trader}`
+                : `Expand pool breakdown for ${trader.trader}`
             }
             onClick={() => setExpanded((v) => !v)}
             className="rounded p-1 text-slate-500 hover:bg-slate-800/60 hover:text-slate-200 transition-colors"
@@ -277,7 +292,13 @@ function TraderRow({
               viewBox="0 0 16 16"
               fill="currentColor"
               aria-hidden="true"
-              style={{ transform: expanded ? "rotate(90deg)" : undefined }}
+              // Both states need an explicit `transform` so the CSS
+              // transition fires on collapse too — `undefined` would
+              // remove the inline style and snap back instantly.
+              style={{
+                transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+                transition: "transform 150ms ease",
+              }}
             >
               <path d="M5 3l6 5-6 5V3z" />
             </svg>
@@ -415,6 +436,3 @@ function cmpBigInt(a: bigint, b: bigint): number {
   if (a > b) return 1;
   return 0;
 }
-
-// Re-export for editor IntelliSense / future debugging.
-export type { SortDir };

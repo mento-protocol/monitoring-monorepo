@@ -48,6 +48,12 @@ export const TRADER_DAILY_TOP = /* GraphQL */ `
  * leaderboard's per-row expand and the flow-badge imbalance computation
  * (which needs each pool's inflow/outflow split to score the trader's
  * primary pool).
+ *
+ * Ordered by `volumeUsdWei desc` (not `timestamp desc`): a busy trader can
+ * have >1000 pool-day rows in a 30d/all window, and the row that becomes
+ * "primary pool" for the flow badge is the largest-volume pool aggregated
+ * across the window. Ordering by recency would let an old high-volume pool
+ * day fall outside the cap and silently misclassify the trader's flow.
  */
 export const TRADER_POOL_DAILY_FOR_TRADER = /* GraphQL */ `
   query TraderPoolDailyForTrader(
@@ -61,7 +67,7 @@ export const TRADER_POOL_DAILY_FOR_TRADER = /* GraphQL */ `
         trader: { _eq: $trader }
         timestamp: { _gte: $afterTimestamp }
       }
-      order_by: { timestamp: desc }
+      order_by: [{ volumeUsdWei: desc }, { timestamp: desc }]
       limit: 1000
     ) {
       id

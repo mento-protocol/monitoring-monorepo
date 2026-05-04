@@ -79,6 +79,44 @@ describe("weiToUsd", () => {
   });
 });
 
+describe("aggregateTradersByWindow stability", () => {
+  it("ties on volume break by (chainId, trader) lexicographic, not insertion order", () => {
+    // Same window-volume, different chain/address. The ordering must be
+    // deterministic — without a stable secondary key, SWR's row order
+    // would dictate the rank column and the flow badge would flicker.
+    const equalVolume = USD(100);
+    const rows: TraderDailyRow[] = [
+      trader({
+        chainId: 143,
+        trader: "0xff",
+        timestamp: "100",
+        volumeUsdWei: equalVolume,
+      }),
+      trader({
+        chainId: 42220,
+        trader: "0xaa",
+        timestamp: "100",
+        volumeUsdWei: equalVolume,
+      }),
+      trader({
+        chainId: 42220,
+        trader: "0x11",
+        timestamp: "100",
+        volumeUsdWei: equalVolume,
+      }),
+    ];
+    const a = aggregateTradersByWindow(rows);
+    // Reverse the input — should produce the SAME output order.
+    const b = aggregateTradersByWindow([...rows].reverse());
+    expect(a.map((r) => `${r.chainId}-${r.trader}`)).toEqual(
+      b.map((r) => `${r.chainId}-${r.trader}`),
+    );
+    // Lexicographic order of (chainId, trader): 143 before 42220; within
+    // 42220, "0x11" before "0xaa".
+    expect(a.map((r) => r.trader)).toEqual(["0xff", "0x11", "0xaa"]);
+  });
+});
+
 describe("aggregateTradersByWindow", () => {
   it("groups by (chainId, trader) and sums", () => {
     const rows: TraderDailyRow[] = [

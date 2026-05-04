@@ -8,8 +8,10 @@ import type { FlowResult } from "@/lib/leaderboard";
  *   delta-neutral   → ⇌ (round-tripping, MM-like)
  *   mixed           → ⤺
  *
- * Imbalance score lives behind the `title` attribute so a hover surfaces the
- * underlying number without cluttering the table cell.
+ * The imbalance score is rendered as visible text (`+87% USDC`, `2%`, etc.)
+ * — earlier versions kept it behind the `title` attribute, which left
+ * keyboard, touch, and many screen-reader users with no access to the
+ * quantitative meaning of the badge (cursor finding 3184000783).
  */
 export function FlowBadge({
   flow,
@@ -20,6 +22,7 @@ export function FlowBadge({
   token0Symbol?: string | null;
   token1Symbol?: string | null;
 }) {
+  const pct = `${(flow.imbalance * 100).toFixed(0)}%`;
   if (flow.kind === "one-directional") {
     const accumulated =
       flow.direction === 0
@@ -30,10 +33,10 @@ export function FlowBadge({
     return (
       <span
         className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300"
-        title={`Imbalance ${(flow.imbalance * 100).toFixed(0)}% — net accumulating ${accumulated ?? "one token"}`}
+        title={`Imbalance ${pct} — net accumulating ${accumulated ?? "one token"}`}
       >
         <span aria-hidden="true">🡆</span>
-        {accumulated ? `+${accumulated}` : "1-way"}
+        {accumulated ? `+${pct} ${accumulated}` : `${pct} 1-way`}
       </span>
     );
   }
@@ -41,20 +44,20 @@ export function FlowBadge({
     return (
       <span
         className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300"
-        title={`Imbalance ${(flow.imbalance * 100).toFixed(0)}% — flows roughly cancel out`}
+        title={`Imbalance ${pct} — flows roughly cancel out`}
       >
         <span aria-hidden="true">⇌</span>
-        Round-trip
+        {pct} round-trip
       </span>
     );
   }
   return (
     <span
       className="inline-flex items-center gap-1 rounded bg-slate-500/15 px-1.5 py-0.5 text-[10px] font-medium text-slate-300"
-      title={`Imbalance ${(flow.imbalance * 100).toFixed(0)}%`}
+      title={`Imbalance ${pct}`}
     >
       <span aria-hidden="true">⤺</span>
-      Mixed
+      {pct} mixed
     </span>
   );
 }
