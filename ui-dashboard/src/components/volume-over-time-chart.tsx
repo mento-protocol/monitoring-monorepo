@@ -300,8 +300,14 @@ function computeHeadline(
   // "$X v3 · $Y v2" reading.
   const v2Display = hasBrokerSnapshotError ? "—" : formatUSD(v2Total);
   const ariaLabel = `${formatUSD(v3Total)} v3 · ${v2Display} v2`;
+  // `role="group"` is required: a bare `<span>` has the implicit `generic`
+  // role, which doesn't honor `aria-label` per WAI-ARIA. NVDA/JAWS skip the
+  // label and the headline becomes silent for screen-reader users (every
+  // child is `aria-hidden`). `group` carries the `name-from-author`
+  // property so the label is announced.
   return (
     <span
+      role="group"
       aria-label={ariaLabel}
       className="inline-flex flex-wrap items-baseline gap-x-3"
     >
@@ -309,7 +315,6 @@ function computeHeadline(
         {formatUSD(v3Total)}
         <VersionBadge version="v3" />
       </span>
-      {/* Visual-only separator; the screen-reader reading is on the parent. */}
       <span aria-hidden="true" className="text-slate-600">
         ·
       </span>

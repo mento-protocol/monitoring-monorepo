@@ -523,8 +523,11 @@ describe("VolumeOverTimeChart render", () => {
     expect(html).toMatch(/\$0\.00.*?<[^>]*>v2</);
     // Screen-reader text must restore the separators the visual layout drops:
     // gap-x-3 between cells reads as `$3.00v3$0.00v2` to assistive tech
-    // without the explicit aria-label.
+    // without the explicit aria-label. The `role="group"` is required —
+    // bare `<span>` has the `generic` role, which doesn't honor aria-label
+    // (NVDA/JAWS skip it).
     expect(html).toContain('aria-label="$3.00 v3 · $0.00 v2"');
+    expect(html).toContain('role="group"');
     // Only 2 days of history < 15 buckets required for WoW comparison, so
     // the delta is null. The 30d range itself does NOT suppress the pill —
     // the WoW basis is always 7d-vs-7d, independent of visible range.
