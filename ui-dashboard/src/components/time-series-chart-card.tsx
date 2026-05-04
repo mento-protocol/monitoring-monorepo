@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   escapePlotText,
   PLOTLY_BASE_LAYOUT,
@@ -48,7 +48,9 @@ interface TimeSeriesChartCardProps {
   breakdownMode?: BreakdownMode;
   range: RangeKey;
   onRangeChange: (range: RangeKey) => void;
-  headline: string;
+  /** String for simple "$X.XM" headlines, or a ReactNode for richer layouts
+   *  (e.g. multi-value cells with inline badges). */
+  headline: string | ReactNode;
   change: number | null;
   changeLabel?: string;
   /**

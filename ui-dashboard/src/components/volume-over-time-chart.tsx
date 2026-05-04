@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { formatUSD } from "@/lib/format";
 import {
   getSnapshotVolumeInUsd,
@@ -225,6 +225,28 @@ export function weekOverWeekChangePct(
   return ((sum(last7) - prior) / prior) * 100;
 }
 
+// Tiny pill rendered after each $-value in the headline so "v3" / "v2" labels
+// don't compete typographically with the dollar amount the user is reading.
+function VersionBadge({
+  label,
+  color,
+}: {
+  label: string;
+  color: string;
+}): ReactNode {
+  return (
+    <span
+      // 35% alpha background derived from the same hex the chart uses for the
+      // matching trace, so headline pills and breakdown areas read as the
+      // same series at a glance.
+      style={{ backgroundColor: `${color}59`, color }}
+      className="ml-1.5 inline-flex translate-y-[-3px] items-center rounded px-1.5 py-px font-mono text-[10px] font-medium uppercase tracking-wide sm:text-xs"
+    >
+      {label}
+    </span>
+  );
+}
+
 // Show "N/A" only on explicit failure. An empty series without errors
 // legitimately sums to $0 (no volume yet) — flagging it N/A would conflate
 // "no activity" with "data missing".
@@ -243,13 +265,23 @@ function computeHeadline(
   v2Points: SeriesPoint[],
   v3Total: number,
   v2Total: number,
-): string {
+): ReactNode {
   if (isLoading) return "…";
   if (hasError) return "N/A";
   if (hasSnapshotError && v3Points.length === 0 && v2Points.length === 0)
     return "N/A";
-  const v2Cell = hasBrokerSnapshotError ? "— v2" : `${formatUSD(v2Total)} v2`;
-  return `${formatUSD(v3Total)} v3 · ${v2Cell}`;
+  return (
+    <span className="inline-flex flex-wrap items-baseline gap-x-3">
+      <span>
+        {formatUSD(v3Total)}
+        <VersionBadge label="v3" color={V3_COLOR} />
+      </span>
+      <span>
+        {hasBrokerSnapshotError ? "—" : formatUSD(v2Total)}
+        <VersionBadge label="v2" color={V2_COLOR} />
+      </span>
+    </span>
+  );
 }
 
 interface VolumeOverTimeChartProps {

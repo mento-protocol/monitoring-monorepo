@@ -468,12 +468,14 @@ describe("VolumeOverTimeChart render", () => {
     expect(html).toContain("· partial data");
   });
 
-  it("renders $0.00 v3 · $0.00 v2 (not N/A) when there's no volume yet and no errors", () => {
+  it("renders both v3 and v2 zero cells (not N/A) when there's no volume yet and no errors", () => {
     // The v2/v3 split is the chart's contract — both versions render their
-    // own $0 column even when empty so the columns aren't suddenly missing
-    // the moment one side has no data (or hasn't synced yet).
+    // own $0 cell even when empty so the columns aren't suddenly missing
+    // the moment one side has no data (or hasn't synced yet). Headline now
+    // uses inline pill badges so we look for the value + badge structure.
     const html = renderChart();
-    expect(html).toContain("$0.00 v3 · $0.00 v2");
+    expect(html).toMatch(/\$0\.00.*?<[^>]*>v3</);
+    expect(html).toMatch(/\$0\.00.*?<[^>]*>v2</);
     expect(html).not.toContain("N/A");
   });
 
@@ -515,7 +517,10 @@ describe("VolumeOverTimeChart render", () => {
       ]),
     });
 
-    expect(html).toContain("$3.00 v3 · $0.00 v2");
+    // Headline renders as `$3.00 [v3 pill] $0.00 [v2 pill]`. Both values plus
+    // both badges must be present.
+    expect(html).toMatch(/\$3\.00.*?<[^>]*>v3</);
+    expect(html).toMatch(/\$0\.00.*?<[^>]*>v2</);
     // Only 2 days of history < 15 buckets required for WoW comparison, so
     // the delta is null. The 30d range itself does NOT suppress the pill —
     // the WoW basis is always 7d-vs-7d, independent of visible range.
@@ -537,8 +542,12 @@ describe("VolumeOverTimeChart render", () => {
       hasBrokerSnapshotError: true,
     });
 
-    expect(html).toContain("$1.00 v3 · — v2");
-    expect(html).not.toContain("$0.00 v2");
+    // v3 cell renders the dollar value + v3 pill, v2 cell renders `—` + v2 pill.
+    expect(html).toMatch(/\$1\.00.*?<[^>]*>v3</);
+    expect(html).toMatch(/—.*?<[^>]*>v2</);
+    // The dollar amount must NOT appear next to the v2 badge — that's the
+    // pre-fix bug where Broker outage masqueraded as confident $0.
+    expect(html).not.toMatch(/\$0\.00.*?<[^>]*>v2</);
   });
 
   it("includes per-day v3+v2 sum in the chart card's series prop so stacked y-axis ceiling fits", () => {
@@ -664,7 +673,8 @@ describe("VolumeOverTimeChart render", () => {
     // passing explicit snapshotWindows, any future regression that swaps
     // back to Date.now() will show the snapshot being dropped at boundary
     // edge cases.
-    expect(html).toContain("$5.00 v3 · $0.00 v2");
+    expect(html).toMatch(/\$5\.00.*?<[^>]*>v3</);
+    expect(html).toMatch(/\$0\.00.*?<[^>]*>v2</);
   });
 
   it("passes Plotly config overrides when data is present", () => {
