@@ -73,11 +73,9 @@ const {
 // its internal structure, these imports will fail — that's intentional.
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const EventRegister = require("envio/src/EventRegister.res.js") as {
   getContractRegister: (reg: unknown) => unknown;
 };
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const GeneratedTypes = require("generated/src/Types.res.js") as {
   FPMMFactory: { FPMMDeployed: { handlerRegister: unknown } };
   VirtualPoolFactory: { VirtualPoolDeployed: { handlerRegister: unknown } };

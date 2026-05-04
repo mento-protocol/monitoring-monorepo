@@ -5,7 +5,6 @@ import { makePoolId } from "../src/helpers.ts";
 import {
   _setMockReserves,
   _clearMockReserves,
-  _setMockRebalancingState,
   _clearMockRebalancingStates,
   _setMockRebalanceIncentiveAtBlock,
   _clearMockRebalanceIncentivesAtBlock,
