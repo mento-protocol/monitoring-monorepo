@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import * as fetchAllNetworks from "@/lib/fetch-all-networks";
+import { NETWORKS } from "@/lib/networks";
 
 // Surface-contract test (TDD safety net for the network-fetcher split).
 // Mirrors the `EXPECTED_EXPORT_NAMES` pattern from `queries.test.ts`. Locks
@@ -48,6 +49,28 @@ describe("@/lib/fetch-all-networks — surface contract", () => {
   it("blankNetworkData and isNetworkDataFullyHealthy are functions", () => {
     expect(typeof fetchAllNetworks.blankNetworkData).toBe("function");
     expect(typeof fetchAllNetworks.isNetworkDataFullyHealthy).toBe("function");
+  });
+
+  it("treats feeSnapshotsError as unhealthy", () => {
+    const network = NETWORKS["celo-mainnet"];
+    const windows = {
+      w24h: { from: 0, to: 0 },
+      w7d: { from: 0, to: 0 },
+      w30d: { from: 0, to: 0 },
+    };
+    const healthy = fetchAllNetworks.blankNetworkData(network, windows);
+    expect(fetchAllNetworks.isNetworkDataFullyHealthy(healthy)).toBe(true);
+
+    const snapshotDegraded = fetchAllNetworks.blankNetworkData(
+      network,
+      windows,
+      {
+        feeSnapshotsError: new Error("snapshot timeout"),
+      },
+    );
+    expect(fetchAllNetworks.isNetworkDataFullyHealthy(snapshotDegraded)).toBe(
+      false,
+    );
   });
 
   it("warnedCapKeys is a Set and partialPageLastCapturedAt is a Map (mutable module state)", () => {
