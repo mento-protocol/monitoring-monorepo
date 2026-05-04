@@ -38,6 +38,11 @@ type DiscoveryEntity = {
 const DISCOVERY_TARGETS: readonly DiscoveryEntity[] = [
   { table: "SwapEvent", field: "sender", chainIdColumn: "chainId" },
   { table: "SwapEvent", field: "recipient", chainIdColumn: "chainId" },
+  // `caller` (tx.from) and `txTo` (tx.to) capture the EOA that signed the
+  // swap and the entry-point contract — needed for MiniPay tagging since
+  // routed v3 swaps surface the broker/router as `sender`, not the user.
+  { table: "SwapEvent", field: "caller", chainIdColumn: "chainId" },
+  { table: "SwapEvent", field: "txTo", chainIdColumn: "chainId" },
   { table: "LiquidityEvent", field: "sender", chainIdColumn: "chainId" },
   { table: "LiquidityEvent", field: "recipient", chainIdColumn: "chainId" },
   { table: "RebalanceEvent", field: "sender", chainIdColumn: "chainId" },
