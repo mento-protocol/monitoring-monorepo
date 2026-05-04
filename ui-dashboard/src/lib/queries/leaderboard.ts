@@ -112,6 +112,13 @@ export const POOLS_FOR_LEADERBOARD = /* GraphQL */ `
  * Ordered by `volumeUsdWei desc` so the cap, when hit, drops the
  * smallest contributors — the top-5 pools that drive the stacked chart's
  * visual signal stay intact.
+ *
+ * `trader` is selected so the page can intersect rows against the
+ * non-system trader allowlist client-side when the system toggle is
+ * off — `TraderPoolDailySnapshot` doesn't carry an `isSystemAddress`
+ * column of its own (indexer schema doesn't snapshot it on this
+ * entity), so we can't push the filter into Hasura. PR 4's
+ * `PoolDailyVolumeSnapshot` rollup will fix this properly.
  */
 export const POOL_DAILY_VOLUME = /* GraphQL */ `
   query PoolDailyVolume($afterTimestamp: numeric!, $limit: Int!) {
@@ -122,6 +129,7 @@ export const POOL_DAILY_VOLUME = /* GraphQL */ `
     ) {
       id
       chainId
+      trader
       poolId
       timestamp
       volumeUsdWei

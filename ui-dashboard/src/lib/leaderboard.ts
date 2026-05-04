@@ -309,6 +309,7 @@ export function computeFlow(pool: TraderPoolWindowRow): FlowResult {
 export type PoolDailyVolumeRow = {
   id: string;
   chainId: number;
+  trader: string;
   poolId: string;
   timestamp: string;
   volumeUsdWei: string;
@@ -353,6 +354,15 @@ const OTHER_KEY = "__other__";
 export function aggregatePoolDailyVolume(
   rows: readonly PoolDailyVolumeRow[],
   poolLabel: (poolId: string) => string,
+  /**
+   * Optional set of `${chainId}-${trader}` keys that are allowed to
+   * contribute. When provided, rows whose `(chainId, trader)` is NOT in
+   * the set are dropped. Used to keep the chart consistent with the
+   * trader-keyed headline when the system-address toggle is off:
+   * `TraderPoolDailySnapshot` doesn't carry an `isSystemAddress` column,
+   * so Hasura can't filter at query time.
+   */
+  traderAllowList?: ReadonlySet<string>,
 ): {
   totalSeries: Array<{ timestamp: number; value: number }>;
   breakdown: PoolBreakdown[];
@@ -363,6 +373,12 @@ export function aggregatePoolDailyVolume(
   const totalsByPool = new Map<string, bigint>();
   const days = new Set<number>();
   for (const r of rows) {
+    if (
+      traderAllowList !== undefined &&
+      !traderAllowList.has(`${r.chainId}-${r.trader}`)
+    ) {
+      continue;
+    }
     const day = Number(r.timestamp);
     days.add(day);
     const wei = BigInt(r.volumeUsdWei);

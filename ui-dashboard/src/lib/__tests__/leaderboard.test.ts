@@ -396,10 +396,12 @@ describe("aggregatePoolDailyVolume", () => {
     poolId: string,
     timestamp: string,
     volumeUsd: number,
+    trader = "0x0",
   ) {
     return {
-      id: `${chainId}-${poolId}-${timestamp}`,
+      id: `${chainId}-${trader}-${poolId}-${timestamp}`,
       chainId,
+      trader,
       poolId,
       timestamp,
       volumeUsdWei: usd(volumeUsd),
@@ -477,5 +479,21 @@ describe("aggregatePoolDailyVolume", () => {
     const rows = [row(42220, "0xpool1", day(1), 100)];
     const r = aggregatePoolDailyVolume(rows, () => "USDC/USDm");
     expect(r.breakdown[0]!.name).toBe("USDC/USDm");
+  });
+
+  it("filters by traderAllowList when provided (system-toggle parity)", () => {
+    // Two traders contributing to the same pool, but only `0xUser` is in
+    // the allowlist — system trader's volume must NOT contribute to
+    // the chart.
+    const rows = [
+      row(42220, "0xA", day(1), 100, "0xUser"),
+      row(42220, "0xA", day(1), 50, "0xSystem"),
+    ];
+    const allowList = new Set([`42220-0xUser`]);
+    const r = aggregatePoolDailyVolume(rows, noLabel, allowList);
+    expect(r.totalSeries[0]!.value).toBeCloseTo(100, 4);
+    // Without the allowlist, the same input includes both traders.
+    const rUnfiltered = aggregatePoolDailyVolume(rows, noLabel);
+    expect(rUnfiltered.totalSeries[0]!.value).toBeCloseTo(150, 4);
   });
 });

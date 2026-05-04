@@ -200,25 +200,43 @@ export function LeaderboardClient() {
     return m;
   }, [poolRows]);
 
+  // When the system-address toggle is off, restrict the chart to rows
+  // whose `(chainId, trader)` is in the parent trader query's result —
+  // `TraderPoolDailySnapshot` doesn't carry an `isSystemAddress` flag of
+  // its own, so the chart would otherwise include system flow that the
+  // headline excludes (codex review on b0d9cf0). When the toggle is on
+  // we pass `undefined` which short-circuits the filter.
+  const traderAllowList = useMemo<ReadonlySet<string> | undefined>(() => {
+    if (showSystem) return undefined;
+    const s = new Set<string>();
+    for (const t of aggregated) s.add(`${t.chainId}-${t.trader}`);
+    return s;
+  }, [showSystem, aggregated]);
+
   const poolVolumeBreakdown = useMemo(() => {
-    return aggregatePoolDailyVolume(poolVolumeRows, (poolId: string) => {
-      const meta = poolMeta.get(poolId.toLowerCase());
-      const [chainIdPart, addr] = poolId.split("-", 2);
-      const network = chainIdPart
-        ? networkForChainId(Number(chainIdPart))
-        : null;
-      if (network && meta) {
-        // Cross-chain disambiguation: the same pair name (e.g. "GBPm/USDm")
-        // can exist on both Celo and Monad, so the legend must show the
-        // chain to keep the two series distinguishable.
-        return `${poolName(network, meta.token0, meta.token1)} · ${network.label}`;
-      }
-      // Fallback display when the pool isn't in our metadata cache yet:
-      // `0x1234…5678` (first 6 + last 4 of addr).
-      const a = addr ?? poolId;
-      return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
-    });
-  }, [poolVolumeRows, poolMeta]);
+    return aggregatePoolDailyVolume(
+      poolVolumeRows,
+      (poolId: string) => {
+        const meta = poolMeta.get(poolId.toLowerCase());
+        const [chainIdPart, addr] = poolId.split("-", 2);
+        const network = chainIdPart
+          ? networkForChainId(Number(chainIdPart))
+          : null;
+        if (network && meta) {
+          // Cross-chain disambiguation: the same pair name (e.g.
+          // "GBPm/USDm") can exist on both Celo and Monad, so the
+          // legend must show the chain to keep the two series
+          // distinguishable.
+          return `${poolName(network, meta.token0, meta.token1)} · ${network.label}`;
+        }
+        // Fallback display when the pool isn't in our metadata cache
+        // yet: `0x1234…5678` (first 6 + last 4 of addr).
+        const a = addr ?? poolId;
+        return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
+      },
+      traderAllowList,
+    );
+  }, [poolVolumeRows, poolMeta, traderAllowList]);
 
   // Hero KPIs.
   const totalVolume = useMemo(() => {
@@ -258,12 +276,18 @@ export function LeaderboardClient() {
 
   const isLoading = tradersResult.isLoading || poolsResult.isLoading;
   const hasError = !!tradersResult.error;
-  // True iff the trader-day query saturated the Hasura cap. When this is
-  // set, `aggregated` and the derived KPIs may be undercounting; we badge
-  // them with `≈` and surface a banner above the tiles.
-  const isCapHit =
+  // True iff EITHER the trader-day or the pool-day query saturated the
+  // Hasura cap. When set, `aggregated`, the per-pool stacked chart, and
+  // the derived KPIs may all be undercounting — banner + `≈` / `≥`
+  // value prefixes flag the approximation.
+  const traderCapHit =
     !!tradersResult.data &&
     (tradersResult.data.TraderDailySnapshot?.length ?? 0) === ENVIO_MAX_ROWS;
+  const poolCapHit =
+    !!poolVolumeResult.data &&
+    (poolVolumeResult.data.TraderPoolDailySnapshot?.length ?? 0) ===
+      ENVIO_MAX_ROWS;
+  const isCapHit = traderCapHit || poolCapHit;
 
   // Headline = window total. Change pill is week-over-week if the range is
   // ≥7d, otherwise null (24h has no meaningful WoW peer).
