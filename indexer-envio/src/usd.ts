@@ -124,3 +124,97 @@ export function computeRebalanceUsd(input: RebalanceUsdInput): RebalanceUsd {
 
   return { notionalUsd, rewardUsd };
 }
+
+// ---------------------------------------------------------------------------
+// Swap USD valuation
+// ---------------------------------------------------------------------------
+
+/** Common scale for aggregated USD fields in trader/aggregator snapshots.
+ *  18 decimals (matches ETH-wei convention) — chosen so a single BigInt cell
+ *  comfortably holds total volume across years without precision loss, and
+ *  arithmetic is plain BigInt addition. */
+export const USD_WEI_DECIMALS = 18;
+
+/** Scale a token-native amount to 18-decimal USD-wei.
+ *  Assumes the input token is USD-pegged (i.e., 1 token = $1). */
+function scaleToUsdWei(amount: bigint, tokenDecimals: number): bigint {
+  if (tokenDecimals === USD_WEI_DECIMALS) return amount;
+  if (tokenDecimals < USD_WEI_DECIMALS) {
+    return amount * 10n ** BigInt(USD_WEI_DECIMALS - tokenDecimals);
+  }
+  // Truncates sub-USD-wei precision — fine for monitoring; only triggers for
+  // tokens with > 18 decimals which Mento doesn't use today.
+  return amount / 10n ** BigInt(tokenDecimals - USD_WEI_DECIMALS);
+}
+
+export interface SwapUsdInput {
+  chainId: number;
+  token0: string | undefined;
+  token1: string | undefined;
+  token0Decimals: number;
+  token1Decimals: number;
+  amount0In: bigint;
+  amount0Out: bigint;
+  amount1In: bigint;
+  amount1Out: bigint;
+}
+
+/**
+ * Compute the USD notional of a swap as 18-decimal USD-wei.
+ *
+ * Picks the USD-pegged side (per `USD_PEGGED_SYMBOLS`) and uses
+ * `|amountIn - amountOut|` of that side as the notional — exactly one of in/out
+ * is non-zero per side in a normal swap, so the absolute difference equals the
+ * traded amount. If both sides are pegged (stable/stable), prefers the side
+ * with the larger USD notional after decimal normalization (defensive against
+ * fee/rounding asymmetry).
+ *
+ * Returns `0n` when neither token address is provided or neither side is
+ * pegged. Callers should distinguish "uncomputable" from "zero-volume swap"
+ * by also checking the raw amounts.
+ */
+export function computeSwapUsdWei(input: SwapUsdInput): bigint {
+  const {
+    chainId,
+    token0,
+    token1,
+    token0Decimals,
+    token1Decimals,
+    amount0In,
+    amount0Out,
+    amount1In,
+    amount1Out,
+  } = input;
+
+  if (!token0 || !token1) return 0n;
+
+  const sym0 = KNOWN_TOKEN_META.get(
+    `${chainId}:${token0.toLowerCase()}`,
+  )?.symbol;
+  const sym1 = KNOWN_TOKEN_META.get(
+    `${chainId}:${token1.toLowerCase()}`,
+  )?.symbol;
+  const peg0 = sym0 !== undefined && USD_PEGGED_SYMBOLS.has(sym0);
+  const peg1 = sym1 !== undefined && USD_PEGGED_SYMBOLS.has(sym1);
+
+  if (!peg0 && !peg1) return 0n;
+
+  const a0 = bAbs(amount0In - amount0Out);
+  const a1 = bAbs(amount1In - amount1Out);
+
+  const useToken0 =
+    peg0 &&
+    (!peg1 ||
+      a0 * 10n ** BigInt(token1Decimals) >= a1 * 10n ** BigInt(token0Decimals));
+
+  return useToken0
+    ? scaleToUsdWei(a0, token0Decimals)
+    : scaleToUsdWei(a1, token1Decimals);
+}
+
+/** Multiply USD-wei by a fee bps and return the fee in USD-wei.
+ *  `feeBps` is integer bps (e.g., 30 = 0.30%). */
+export function applyFeeBps(volumeUsdWei: bigint, feeBps: number): bigint {
+  if (feeBps <= 0) return 0n;
+  return (volumeUsdWei * BigInt(feeBps)) / 10_000n;
+}

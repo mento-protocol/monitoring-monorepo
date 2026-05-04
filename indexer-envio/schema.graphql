@@ -240,12 +240,18 @@ type SwapEvent @index(fields: ["poolId", "blockTimestamp"]) {
   id: ID!
   chainId: Int! @index
   poolId: String! @index
-  sender: String!
-  recipient: String!
+  sender: String! # event.params.sender — the pool's caller (router/broker for routed swaps)
+  recipient: String! # event.params.to — where output tokens land
+  caller: String! @index # tx.from — the EOA that signed the tx (volume-leaderboard primary key)
+  txTo: String! @index # tx.to — entry-point contract; aggregator router if routed via Squid/Jumper/etc.
   amount0In: BigInt!
   amount1In: BigInt!
   amount0Out: BigInt!
   amount1Out: BigInt!
+  # Notional USD value, 18-decimal "USD-wei" scaling. 0 when neither token is
+  # USD-pegged (see USD_PEGGED_SYMBOLS in src/usd.ts) — distinguishable from
+  # genuine zero-volume swaps via amount0In/Out being non-zero.
+  volumeUsdWei: BigInt!
   txHash: String!
   blockNumber: BigInt!
   blockTimestamp: BigInt! @index
@@ -719,4 +725,81 @@ type WormholeTransferPending {
   msgSequence: BigInt!
   sentBlock: BigInt!
   sentTimestamp: BigInt!
+}
+
+# -----------------------------------------------------------------------------
+# Volume Leaderboard rollups
+#
+# Per-trader daily and per-(trader, pool) daily aggregates, plus per-aggregator
+# daily aggregates. Source: SwapEvent. Trader key = SwapEvent.caller (tx.from).
+# USD fields use 18-decimal "USD-wei" scaling for cheap BigInt summation;
+# format to 4dp on read (USD = wei * 10000 / 10^18 / 10000).
+# Day bucketing: timestamp = ts / 86400 * 86400 (UTC midnight).
+# -----------------------------------------------------------------------------
+
+type TraderDailySnapshot @index(fields: ["chainId", "trader", "timestamp"]) {
+  id: ID! # "{chainId}-{trader}-{day}"
+  chainId: Int! @index
+  trader: String! @index # tx.from (lowercased)
+  timestamp: BigInt! @index # UTC day bucket
+  swapCount: Int!
+  uniquePoolsApprox: Int! # count of distinct (chainId,trader,poolId) snapshots seen this day; tracked by upserting TraderPoolDailySnapshot first and incrementing here on first-touch
+  volumeUsdWei: BigInt! # sum of |USD| per swap, 18-dec USD-wei
+  feesPaidUsdWei: BigInt! # volumeUsdWei × poolFeeBps / 10000
+  isSystemAddress: Boolean! @index # snapshotted at write time so toggle filter is index-friendly
+  lastSeenBlock: BigInt!
+  lastSeenTimestamp: BigInt!
+}
+
+type TraderPoolDailySnapshot
+  @index(fields: ["chainId", "trader", "poolId", "timestamp"]) {
+  id: ID! # "{chainId}-{trader}-{poolId}-{day}"
+  chainId: Int! @index
+  trader: String! @index # tx.from
+  poolId: String! @index
+  timestamp: BigInt! @index
+  swapCount: Int!
+  # Direction-split USD-wei totals. "Inflow" = tokens flowing TO the trader
+  # (i.e., the swap's amountXOut for that token). "Outflow" = amountXIn.
+  # Sum of all four ≈ 2 × volumeUsdWei (each swap contributes one inflow + one outflow).
+  inflowToken0UsdWei: BigInt!
+  outflowToken0UsdWei: BigInt!
+  inflowToken1UsdWei: BigInt!
+  outflowToken1UsdWei: BigInt!
+  feesPaidUsdWei: BigInt!
+  lastSeenBlock: BigInt!
+  lastSeenTimestamp: BigInt!
+}
+
+type AggregatorDailySnapshot
+  @index(fields: ["chainId", "aggregator", "timestamp"]) {
+  id: ID! # "{chainId}-{aggregator}-{day}"
+  chainId: Int! @index
+  # Canonical name from classifyAggregator(): "squid" | "jumper" | "lifi" |
+  # "openocean" | "0x" | "1inch" | "paraswap" | "cowswap" | "direct" | "system"
+  # | "unknown". "direct" = txTo is the Mento Broker (user used Mento UI/SDK).
+  # "system" = txTo is a known internal contract (rebalancer, NTT, etc.).
+  # "unknown" = txTo not in any known list — surfaces gaps for follow-up.
+  aggregator: String! @index
+  # Most recently observed router address mapped to this aggregator. May vary
+  # across days if multiple routers map to the same canonical name.
+  lastSeenAggregatorAddress: String!
+  timestamp: BigInt! @index
+  swapCount: Int!
+  uniqueTradersApprox: Int! # incremented when a new (chainId,aggregator,trader,day) tuple first appears; tracked via AggregatorTraderDayMarker
+  volumeUsdWei: BigInt!
+  feesPaidUsdWei: BigInt!
+  lastSeenBlock: BigInt!
+  lastSeenTimestamp: BigInt!
+}
+
+# Marker entity used to dedupe (aggregator, trader, day) tuples for the
+# uniqueTradersApprox counter. Existence-only — no payload needed.
+type AggregatorTraderDayMarker {
+  id: ID! # "{chainId}-{aggregator}-{trader}-{day}"
+}
+
+# Same idea for TraderDailySnapshot.uniquePoolsApprox (per-day, per-trader, per-pool).
+type TraderPoolDayMarker {
+  id: ID! # "{chainId}-{trader}-{poolId}-{day}"
 }

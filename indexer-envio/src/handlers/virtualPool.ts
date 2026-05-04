@@ -13,6 +13,7 @@ import {
 } from "generated";
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
+import { computeSwapUsdWei } from "../usd";
 import { buildRebalanceOutcome } from "../priceDifference";
 
 // ---------------------------------------------------------------------------
@@ -141,16 +142,31 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
     swapDelta: { volume0, volume1 },
   });
 
+  const volumeUsdWei = computeSwapUsdWei({
+    chainId: event.chainId,
+    token0: pool.token0,
+    token1: pool.token1,
+    token0Decimals: pool.token0Decimals,
+    token1Decimals: pool.token1Decimals,
+    amount0In: event.params.amount0In,
+    amount0Out: event.params.amount0Out,
+    amount1In: event.params.amount1In,
+    amount1Out: event.params.amount1Out,
+  });
+
   const swap: SwapEvent = {
     id,
     chainId: event.chainId,
     poolId,
     sender: asAddress(event.params.sender),
     recipient: asAddress(event.params.to),
+    caller: asAddress(event.transaction.from ?? ""),
+    txTo: asAddress(event.transaction.to ?? ""),
     amount0In: event.params.amount0In,
     amount1In: event.params.amount1In,
     amount0Out: event.params.amount0Out,
     amount1Out: event.params.amount1Out,
+    volumeUsdWei,
     txHash: event.transaction.hash,
     blockNumber,
     blockTimestamp,

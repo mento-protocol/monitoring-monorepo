@@ -207,3 +207,4 @@ field_selection:
   transaction_fields:
     - hash
     - from
+    - to # entry-point contract; used to classify swap routing (aggregator vs direct vs system)
