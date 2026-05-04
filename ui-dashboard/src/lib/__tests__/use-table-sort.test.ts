@@ -389,6 +389,63 @@ describe("useTableSort — handleSort honors defaultDir on new-key reset", () =>
   });
 });
 
+describe("useTableSort — rapid toggles compose without dropping intent", () => {
+  it("two consecutive toggles on the active key produce two distinct URL writes", () => {
+    setup(); // default tvl/desc — same key, same closure across both clicks
+    const ref: ResultRef = { current: null };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { resultRef: ref }));
+    });
+    // Without the intent ref, both calls would compute against the URL-derived
+    // sortDir="desc" and both would write `Dir=asc`. With the ref, the second
+    // call composes against the first call's intent ("asc") and writes
+    // `Dir=desc` (which is the default → params stripped → "/").
+    act(() => {
+      ref.current?.handleSort("tvl");
+      ref.current?.handleSort("tvl");
+    });
+    expect(mockReplace).toHaveBeenCalledTimes(2);
+    const first = mockReplace.mock.calls[0][0] as string;
+    const second = mockReplace.mock.calls[1][0] as string;
+    expect(first).toContain("Sort=tvl");
+    expect(first).toContain("Dir=asc");
+    // tvl/desc matches the defaults, so the second toggle strips params.
+    expect(second).toBe("/");
+  });
+
+  it("intent ref resets when URL search params change, so external nav wins", () => {
+    setup(new URLSearchParams("Sort=pool&Dir=asc"));
+    const ref: ResultRef = { current: null };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { resultRef: ref }));
+    });
+    // First click composes off the URL state (pool/asc) → toggle to pool/desc.
+    act(() => {
+      ref.current?.handleSort("pool");
+    });
+    expect(mockReplace.mock.calls[0][0] as string).toContain("Dir=desc");
+
+    // Simulate external navigation: search params switch to a different state.
+    // The mounted hook re-renders, the [sortKey, sortDir] effect fires, and
+    // the intent ref is cleared. Subsequent toggle should compose off the
+    // NEW URL state, not the stale ref.
+    mockSearchParams = new URLSearchParams("Sort=tvl&Dir=desc");
+    act(() => {
+      root.render(React.createElement(HookWrapper, { resultRef: ref }));
+    });
+
+    act(() => {
+      ref.current?.handleSort("tvl");
+    });
+    // Latest call: from tvl/desc, toggle on same key → tvl/asc.
+    const latest = mockReplace.mock.calls[
+      mockReplace.mock.calls.length - 1
+    ][0] as string;
+    expect(latest).toContain("Sort=tvl");
+    expect(latest).toContain("Dir=asc");
+  });
+});
+
 describe("useTableSort — two hooks with different paramPrefix don't interfere", () => {
   let container2: HTMLElement;
   let root2: Root;

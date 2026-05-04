@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { SortDir } from "@/lib/table-sort";
 
@@ -90,10 +90,27 @@ export function useTableSort<K extends string>({
     pathname,
   ]);
 
+  // Track the most recent intent so rapid successive clicks compose against
+  // each other instead of all reading the same stale URL-derived `sortDir`.
+  // App Router navigation is async; without this ref a fast asc→desc→asc
+  // double-click would write the same URL twice and silently lose the second
+  // toggle. Cleared whenever URL state changes (either to match our intent or
+  // to a value from external navigation).
+  const intentRef = useRef<{ key: K; dir: SortDir } | null>(null);
+  useEffect(() => {
+    intentRef.current = null;
+  }, [sortKey, sortDir]);
+
   const handleSort = useCallback(
     (key: K) => {
+      const current = intentRef.current ?? { key: sortKey, dir: sortDir };
       const nextDir: SortDir =
-        key === sortKey ? (sortDir === "asc" ? "desc" : "asc") : defaultDir;
+        key === current.key
+          ? current.dir === "asc"
+            ? "desc"
+            : "asc"
+          : defaultDir;
+      intentRef.current = { key, dir: nextDir };
 
       const params = new URLSearchParams(searchParams.toString());
 
