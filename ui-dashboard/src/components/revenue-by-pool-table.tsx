@@ -191,27 +191,26 @@ export function RevenueByPoolTable({
     [rows, sortKey, sortDir],
   );
 
-  if (hasError) {
-    return (
-      <section>
-        <Heading />
-        <EmptyShell>Couldn&apos;t load per-pool revenue.</EmptyShell>
-      </section>
-    );
-  }
-  if (isLoading) {
-    return (
-      <section>
-        <Heading />
-        <EmptyShell>Loading…</EmptyShell>
-      </section>
-    );
-  }
+  // `buildRows` already skips chains with `error !== null`, so we render rows
+  // from the chains that did succeed. Only fall back to the empty shell when
+  // there's literally nothing to show.
   if (rows.length === 0) {
+    if (isLoading) {
+      return (
+        <section>
+          <Heading />
+          <EmptyShell>Loading…</EmptyShell>
+        </section>
+      );
+    }
     return (
       <section>
         <Heading />
-        <EmptyShell>No swap-fee transfers indexed yet.</EmptyShell>
+        <EmptyShell>
+          {hasError
+            ? "Couldn't load per-pool revenue."
+            : "No swap-fee transfers indexed yet."}
+        </EmptyShell>
       </section>
     );
   }
@@ -219,6 +218,11 @@ export function RevenueByPoolTable({
   return (
     <section>
       <Heading />
+      {hasError ? (
+        <p className="mb-3 text-xs text-amber-400/80">
+          One or more chains failed to load — showing partial data.
+        </p>
+      ) : null}
       <Table>
         <thead>
           <tr className="border-b border-slate-800 bg-slate-900/50">
