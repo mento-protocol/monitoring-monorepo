@@ -19,6 +19,12 @@ import type { SortDir } from "@/lib/table-sort";
 type PoolFeeRow = PoolFeeEntry & {
   network: Network;
   label: PoolLabel | null;
+  /**
+   * True when the source chain hit the 1000-row Hasura cap — the All-time
+   * total for every pool on that chain is a lower bound. Only applied to the
+   * All-time column; recent windows are unaffected (rows return newest-first).
+   */
+  chainTruncated: boolean;
 };
 
 type SortKey = "pool" | "chain" | "fees24h" | "fees7d" | "fees30d" | "feesAll";
@@ -76,12 +82,14 @@ function buildRows(networkData: NetworkData[]): PoolFeeRow[] {
     // `rates` map, so `aggregateProtocolFeesByPool` would mark every FX-pool
     // transfer as unpriced and render misleading $0 rows.
     if (n.error !== null || n.feesError !== null) continue;
+    const chainTruncated = n.fees?.isTruncated ?? false;
     const entries = aggregateProtocolFeesByPool(n.feeTransfers, n.rates);
     for (const e of entries) {
       rows.push({
         ...e,
         network: n.network,
         label: n.poolLabels.get(e.poolAddress) ?? null,
+        chainTruncated,
       });
     }
   }
@@ -143,6 +151,16 @@ function approxAnnotation(
       prefix: "≈ ",
       title:
         "Some transfers from this pool used unpriced/unknown tokens in this window — total is a lower bound.",
+    };
+  }
+  // Truncation only applies to the All-time column (identified by its unpriced
+  // field). Recent windows (24h/7d/30d) are unaffected because Hasura returns
+  // rows newest-first, so the cap never clips recent history.
+  if (unpricedField === "unpriced" && row.chainTruncated) {
+    return {
+      prefix: "≈ ",
+      title:
+        "Chain hit the 1000-row query cap — All-time total is a lower bound for this chain.",
     };
   }
   return { prefix: "", title: undefined };
