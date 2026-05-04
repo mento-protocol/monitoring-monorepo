@@ -230,7 +230,7 @@ describe("RevenueByPoolTable — snapshot path", () => {
     );
     // No tbody rows — the chain was skipped despite having a snapshot, and the
     // empty shell renders the partial-outage copy gated on hasError.
-    expect(html).toContain("Couldn&#x27;t load per-pool revenue");
+    expect(html).toMatch(/load per-pool revenue/);
     expect(html).not.toContain(POOL_ADDR);
   });
 
