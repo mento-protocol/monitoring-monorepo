@@ -813,14 +813,18 @@ type AggregatorDailySnapshot
   id: ID! # "{chainId}-{aggregator}-{day}"
   chainId: Int!
   # Canonical name from classifyAggregator(). Values currently produced:
-  # "squid" | "lifi" | "0x" | "openocean" | "direct" | "system" | "unknown".
+  # "squid" | "lifi" | "0x" | "openocean" | "cluster-<deployer-prefix>" |
+  # "direct" | "system" | "unknown".
   # "direct" = txTo is the Mento Broker / Router (user used Mento UI/SDK)
   # or the swap went directly to the pool with no router mediation.
   # "system" = txTo is a known Mento internal contract (rebalancer, NTT, etc.).
+  # "cluster-*" = txTo is one of multiple contracts deployed by the same EOA
+  # (e.g. an MEV / MM operator running a fleet); see `$clusters` block in
+  # indexer-envio/config/aggregators.json for the deployer EOA + explorer URL.
   # "unknown" = txTo not in any known list — surfaces gaps for follow-up
   # curation. Add new aggregators (1inch / paraswap / jumper / cowswap /
-  # ...) to indexer-envio/config/aggregators.json once they're deployed and
-  # they'll start appearing here on next re-sync.
+  # ...) or new clusters to indexer-envio/config/aggregators.json once
+  # they're identified and they'll start appearing here on next re-sync.
   aggregator: String! @index
   # Most recently observed router address mapped to this aggregator. May vary
   # across days if multiple routers map to the same canonical name.

@@ -2,7 +2,9 @@
 import { strict as assert } from "assert";
 import {
   classifyAggregator,
+  getClusterMetadata,
   _aggregatorAddressesForChain,
+  _allClusterNames,
   _directEntriesForChain,
 } from "../src/aggregators";
 
@@ -88,9 +90,9 @@ describe("classifyAggregator", () => {
 });
 
 describe("_aggregatorAddressesForChain", () => {
-  it("Celo has all 4 verified aggregators", () => {
+  it("Celo has 4 verified aggregators + 4 cluster-7dc08ec2 contracts", () => {
     const map = _aggregatorAddressesForChain(CHAIN_CELO);
-    assert.equal(map.size, 4);
+    assert.equal(map.size, 8);
     assert.equal(map.get(SQUID_CELO), "squid");
   });
 
@@ -98,6 +100,67 @@ describe("_aggregatorAddressesForChain", () => {
     const map = _aggregatorAddressesForChain(CHAIN_MONAD);
     assert.equal(map.size, 3);
     assert.ok(!map.has(SQUID_CELO), "Squid not deployed on Monad");
+  });
+});
+
+describe("cluster classification", () => {
+  // The 4 contracts in cluster-7dc08ec2 (deployer 0x7dc08ec2…df8f022).
+  // Source: celoscan creator field on each contract, verified 2026-05-04.
+  const CLUSTER_CONTRACTS = [
+    "0xef6956414006e161fca5f048331d91e472077e9b",
+    "0x2e73e4a7f4c2ee4fb5d5d2fd823821e3975237d7",
+    "0x00d1cda22d867e2d2f22931b5567e93cc1e047cd",
+    "0xfe8237bcba52339d818c9c9c3c94481196e4b653",
+  ];
+
+  it("classifies all 4 fleet contracts under the same cluster name", () => {
+    for (const addr of CLUSTER_CONTRACTS) {
+      assert.equal(
+        classifyAggregator(CHAIN_CELO, addr),
+        "cluster-7dc08ec2",
+        `expected cluster-7dc08ec2 for ${addr}`,
+      );
+    }
+  });
+
+  it("does NOT classify cluster contracts on the wrong chain", () => {
+    // Same address on Monad falls through to "unknown" — the cluster
+    // exists only on Celo.
+    assert.equal(
+      classifyAggregator(CHAIN_MONAD, CLUSTER_CONTRACTS[0]!),
+      "unknown",
+    );
+  });
+
+  it("getClusterMetadata returns deployer + explorer for known clusters", () => {
+    const meta = getClusterMetadata("cluster-7dc08ec2");
+    assert.ok(meta, "cluster-7dc08ec2 metadata should exist");
+    assert.equal(meta.chainId, 42220);
+    assert.equal(meta.deployer, "0x7dc08ec28f299c062d2941de1f9cfb741df8f022");
+    assert.ok(
+      meta.explorerUrl.includes(meta.deployer),
+      "explorerUrl should link to the deployer",
+    );
+  });
+
+  it("getClusterMetadata returns undefined for non-cluster names", () => {
+    assert.equal(getClusterMetadata("squid"), undefined);
+    assert.equal(getClusterMetadata("direct"), undefined);
+    assert.equal(getClusterMetadata("unknown"), undefined);
+    assert.equal(getClusterMetadata("cluster-deadbeef"), undefined);
+  });
+
+  it("_allClusterNames lists every cluster currently labeled", () => {
+    const names = _allClusterNames();
+    assert.ok(names.includes("cluster-7dc08ec2"));
+    // Sanity: all returned names follow the cluster-<8hex> convention.
+    for (const name of names) {
+      assert.match(
+        name,
+        /^cluster-[0-9a-f]{8}$/,
+        `cluster name "${name}" should match cluster-<8 hex chars>`,
+      );
+    }
   });
 });
 
