@@ -604,6 +604,16 @@ describe("PoolDailyFeeSnapshot handler integration", () => {
     );
   });
 
+  // NOTE: cross-day backfill (a later-day resolution healing past-day
+  // snapshots via the handler's backfill loop) cannot be verified here.
+  // Envio's mockDb does not surface multi-id `set()` calls within a single
+  // handler invocation — even the EXISTING `ProtocolFeeTransfer` repair in
+  // the same loop is invisible after `processEvent` returns. Production
+  // Envio runtime persists all sets correctly. The cross-day heal logic is
+  // covered at the unit-test level via `mergeFeeSnapshot` heal mode tests
+  // below (heal mode reprices the prior accumulated amount and decrements
+  // `unresolvedCount` regardless of the day boundary).
+
   it("replay with newly-resolved symbol: heals snapshot without double-counting", async function () {
     this.timeout(15_000);
     let mockDb = MockDb.createMockDb();
