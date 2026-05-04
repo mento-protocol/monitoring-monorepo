@@ -8,11 +8,30 @@ interface AggregatorEntry {
   $note?: string;
 }
 
+/** Metadata for a cluster-prefixed aggregator name (`cluster-<deployer-prefix>`).
+ *  Surfaces the deployer EOA + explorer URL so the leaderboard's UI can render
+ *  an info-icon tooltip explaining the grouping signal and link to the deployer
+ *  for follow-up research. Pure on-chain fact: shared deployer; no inference
+ *  about the operator's identity. */
+export interface ClusterMetadata {
+  chainId: number;
+  deployer: string;
+  explorerUrl: string;
+  $note?: string;
+}
+
+interface ClustersBlock {
+  $comment?: string;
+  [clusterName: string]: ClusterMetadata | string | undefined;
+}
+
 /** address → canonical aggregator name, per chain. */
 const AGGREGATOR_BY_CHAIN: Map<number, Map<string, string>> = (() => {
   const out = new Map<number, Map<string, string>>();
   for (const [chainIdStr, perChain] of Object.entries(aggregatorsRaw)) {
-    if (chainIdStr.startsWith("$")) continue; // skip $comment
+    // Skip top-level metadata blocks (`$comment`, `$clusters`, future `$*`).
+    // Per-chain JSON blocks are keyed by numeric chainId strings.
+    if (chainIdStr.startsWith("$")) continue;
     const chainId = Number(chainIdStr);
     if (Number.isNaN(chainId)) continue;
     const inner = new Map<string, string>();
@@ -23,6 +42,35 @@ const AGGREGATOR_BY_CHAIN: Map<number, Map<string, string>> = (() => {
       inner.set(addr.toLowerCase(), entry.name);
     }
     out.set(chainId, inner);
+  }
+  return out;
+})();
+
+/** cluster name (e.g. `cluster-7dc08ec28f299c06`) → {deployer, explorerUrl, ...}.
+ *  Validated at module load: every entry must have non-empty string `deployer`
+ *  + `explorerUrl`. A typo or missing field fails the indexer at startup
+ *  rather than letting the UI receive an undefined-field metadata object at
+ *  render time. */
+const CLUSTERS_BY_NAME: Map<string, ClusterMetadata> = (() => {
+  const out = new Map<string, ClusterMetadata>();
+  const block = (aggregatorsRaw as { $clusters?: ClustersBlock }).$clusters;
+  if (!block) return out;
+  for (const [name, value] of Object.entries(block)) {
+    if (name.startsWith("$")) continue; // skip nested $comment
+    if (typeof value !== "object" || value === null) continue;
+    const meta = value as ClusterMetadata;
+    if (
+      typeof meta.deployer !== "string" ||
+      meta.deployer.length === 0 ||
+      typeof meta.explorerUrl !== "string" ||
+      meta.explorerUrl.length === 0
+    ) {
+      throw new Error(
+        `[aggregators.json] $clusters.${name} is missing required string fields ` +
+          `(deployer, explorerUrl). Got: ${JSON.stringify(value)}`,
+      );
+    }
+    out.set(name, meta);
   }
   return out;
 })();
@@ -63,12 +111,14 @@ const DIRECT_ENTRY_BY_CHAIN: Map<number, Set<string>> = (() => {
  * for the leaderboard's aggregator-flow analysis.
  *
  * Resolution order (most specific wins):
- * 1. Known aggregator router → its name (e.g. `"squid"`, `"lifi"`, `"0x"`).
+ * 1. Known aggregator router → its name. Includes both branded aggregators
+ *    (`"squid"`, `"lifi"`, `"0x"`, `"openocean"`) AND `"cluster-<id>"` labels
+ *    for multi-contract operators identified by shared deployer EOA.
  * 2. Mento `Broker` / `Router*` OR the pool's own address → `"direct"`.
  * 3. Other Mento internal contract (rebalancer, NTT manager, etc.) → `"system"`.
  * 4. Otherwise → `"unknown"`. These should be inspected periodically and either
- *    promoted to a known aggregator (add to `aggregators.json`) or left as a
- *    long tail of unlabelled custom routers / MEV bots.
+ *    promoted to a known aggregator / cluster (add to `aggregators.json`) or
+ *    left as a long tail of unlabelled custom routers / MEV bots.
  *
  * Pass `poolAddress` (the swap's underlying pool contract) so direct-to-pool
  * swaps without router mediation are classified as `"direct"`, not `"unknown"`.
@@ -92,6 +142,16 @@ export function classifyAggregator(
   return "unknown";
 }
 
+/** Look up cluster metadata (deployer EOA + explorer URL + note) by cluster
+ *  name. Used by the leaderboard's UI to render an info-icon tooltip on
+ *  cluster-labeled rows. Returns `undefined` for non-cluster names like
+ *  `"squid"` / `"direct"` / `"unknown"`. */
+export function getClusterMetadata(
+  aggregatorName: string,
+): ClusterMetadata | undefined {
+  return CLUSTERS_BY_NAME.get(aggregatorName);
+}
+
 /** Test-only accessors. */
 export function _aggregatorAddressesForChain(
   chainId: number,
@@ -100,4 +160,7 @@ export function _aggregatorAddressesForChain(
 }
 export function _directEntriesForChain(chainId: number): Set<string> {
   return DIRECT_ENTRY_BY_CHAIN.get(chainId) ?? new Set();
+}
+export function _allClusterNames(): string[] {
+  return [...CLUSTERS_BY_NAME.keys()];
 }
