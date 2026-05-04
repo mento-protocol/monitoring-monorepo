@@ -27,8 +27,6 @@ interface RevenueByPoolTableProps {
   networkData: NetworkData[];
   isLoading: boolean;
   hasError: boolean;
-  /** When true, prefix USD values with `≈` (chain-level truncation or unpriced symbols upstream). */
-  isApproximate?: boolean;
 }
 
 type FeeColumn = {
@@ -73,7 +71,11 @@ const FEE_COLUMNS: ReadonlyArray<FeeColumn> = [
 function buildRows(networkData: NetworkData[]): PoolFeeRow[] {
   const rows: PoolFeeRow[] = [];
   for (const n of networkData) {
-    if (n.error !== null) continue;
+    // Skip both top-level transport errors and `feesError` (rates or fees
+    // query rejected). The latter still has raw `feeTransfers` but an empty
+    // `rates` map, so `aggregateProtocolFeesByPool` would mark every FX-pool
+    // transfer as unpriced and render misleading $0 rows.
+    if (n.error !== null || n.feesError !== null) continue;
     const entries = aggregateProtocolFeesByPool(n.feeTransfers, n.rates);
     for (const e of entries) {
       rows.push({
@@ -135,19 +137,12 @@ function sortRows(
 function approxAnnotation(
   row: PoolFeeRow,
   unpricedField: FeeColumn["unpricedField"],
-  isApproximate: boolean,
 ): { prefix: string; title: string | undefined } {
   if (row[unpricedField]) {
     return {
       prefix: "≈ ",
       title:
         "Some transfers from this pool used unpriced/unknown tokens in this window — total is a lower bound.",
-    };
-  }
-  if (isApproximate) {
-    return {
-      prefix: "≈ ",
-      title: "Chain-level totals upstream are approximate.",
     };
   }
   return { prefix: "", title: undefined };
@@ -171,7 +166,6 @@ export function RevenueByPoolTable({
   networkData,
   isLoading,
   hasError,
-  isApproximate = false,
 }: RevenueByPoolTableProps) {
   const rows = useMemo(() => buildRows(networkData), [networkData]);
   const [sortKey, setSortKey] = useState<SortKey>("fees7d");
@@ -285,7 +279,6 @@ export function RevenueByPoolTable({
                   const { prefix, title } = approxAnnotation(
                     row,
                     c.unpricedField,
-                    isApproximate,
                   );
                   return (
                     <td

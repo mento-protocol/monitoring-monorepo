@@ -311,8 +311,8 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
     );
   });
 
-  it("PROTOCOL_FEE_TRANSFERS_ALL caps at 10000 rows", () => {
-    expect(queries.PROTOCOL_FEE_TRANSFERS_ALL).toMatch(/limit:\s*10000\b/);
+  it("PROTOCOL_FEE_TRANSFERS_ALL caps at Hasura's silent 1000-row cap", () => {
+    expect(queries.PROTOCOL_FEE_TRANSFERS_ALL).toMatch(/limit:\s*1000\b/);
   });
 });
 

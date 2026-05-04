@@ -18,8 +18,15 @@ export const UNRESOLVED_SYMBOLS = new Set(["UNKNOWN"]);
 
 // Public API
 
-/** Maximum rows fetched by the PROTOCOL_FEE_TRANSFERS_ALL query. */
-export const PROTOCOL_FEE_QUERY_LIMIT = 10_000;
+/**
+ * Effective row cap for the PROTOCOL_FEE_TRANSFERS_ALL query.
+ *
+ * Hosted Envio Hasura silently caps every UI query at 1 000 rows regardless
+ * of any larger literal `limit`, so this is the real ceiling. Once a chain
+ * crosses 1 000 lifetime fee-transfer rows, `isTruncated` flips and the UI
+ * surfaces a lower-bound badge.
+ */
+export const PROTOCOL_FEE_QUERY_LIMIT = 1_000;
 
 export type ProtocolFeeSummary = {
   totalFeesUSD: number;
@@ -131,19 +138,39 @@ export type PoolFeeEntry = {
   unpriced30d: boolean;
 };
 
+type WindowCutoffs = {
+  cutoff24h: number;
+  cutoff7d: number;
+  cutoff30d: number;
+};
+
+function markUnpricedForTs(
+  entry: PoolFeeEntry,
+  ts: number,
+  c: WindowCutoffs,
+): void {
+  entry.unpriced = true;
+  if (ts >= c.cutoff30d) entry.unpriced30d = true;
+  if (ts >= c.cutoff7d) entry.unpriced7d = true;
+  if (ts >= c.cutoff24h) entry.unpriced24h = true;
+}
+
 /**
- * Per-pool variant of `aggregateProtocolFees`. Inherits the same 1000-row
- * Hasura cap caveat: 24h / 7d / 30d windows are accurate (rows return
- * newest-first), but all-time may undercount on busy chains.
+ * Per-pool variant of `aggregateProtocolFees`. Inherits the same row-cap
+ * caveat: 24h / 7d / 30d windows are accurate (rows return newest-first),
+ * but all-time may undercount on busy chains once `PROTOCOL_FEE_QUERY_LIMIT`
+ * is hit.
  */
 export function aggregateProtocolFeesByPool(
   transfers: ProtocolFeeTransfer[],
   rates: OracleRateMap,
 ): PoolFeeEntry[] {
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const cutoff24h = nowSeconds - 86400;
-  const cutoff7d = nowSeconds - 7 * 86400;
-  const cutoff30d = nowSeconds - 30 * 86400;
+  const cutoffs: WindowCutoffs = {
+    cutoff24h: nowSeconds - 86400,
+    cutoff7d: nowSeconds - 7 * 86400,
+    cutoff30d: nowSeconds - 30 * 86400,
+  };
   const byPool = new Map<string, PoolFeeEntry>();
 
   for (const t of transfers) {
@@ -170,27 +197,20 @@ export function aggregateProtocolFeesByPool(
 
     const ts = Number(t.blockTimestamp);
 
-    const markUnpricedForTs = (entry: PoolFeeEntry) => {
-      entry.unpriced = true;
-      if (ts >= cutoff30d) entry.unpriced30d = true;
-      if (ts >= cutoff7d) entry.unpriced7d = true;
-      if (ts >= cutoff24h) entry.unpriced24h = true;
-    };
-
     if (UNRESOLVED_SYMBOLS.has(t.tokenSymbol)) {
-      markUnpricedForTs(entry);
+      markUnpricedForTs(entry, ts, cutoffs);
       continue;
     }
     const amount = parseWei(t.amount, t.tokenDecimals);
     const usd = tokenToUSD(t.tokenSymbol, amount, rates);
     if (usd === null) {
-      markUnpricedForTs(entry);
+      markUnpricedForTs(entry, ts, cutoffs);
       continue;
     }
     entry.totalFeesUSD += usd;
-    if (ts >= cutoff24h) entry.fees24hUSD += usd;
-    if (ts >= cutoff7d) entry.fees7dUSD += usd;
-    if (ts >= cutoff30d) entry.fees30dUSD += usd;
+    if (ts >= cutoffs.cutoff24h) entry.fees24hUSD += usd;
+    if (ts >= cutoffs.cutoff7d) entry.fees7dUSD += usd;
+    if (ts >= cutoffs.cutoff30d) entry.fees30dUSD += usd;
   }
 
   return Array.from(byPool.values());

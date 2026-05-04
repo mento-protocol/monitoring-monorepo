@@ -103,9 +103,11 @@ export const ORACLE_RATES = `
 // minimum fields needed to render `poolName()` and the FPMM/Virtual badge on
 // the per-pool revenue leaderboard. No `oracleOk` filter: paused FX pools
 // must still resolve to readable labels for their historical fee transfers.
+// Explicit `limit: 1000` matches the hosted Hasura silent cap so the literal
+// reflects the real ceiling (per chain, pool count is well under that today).
 export const POOL_LABELS_ALL = `
   query PoolLabelsAll($chainId: Int!) {
-    Pool(where: { chainId: { _eq: $chainId } }) {
+    Pool(where: { chainId: { _eq: $chainId } }, limit: 1000) {
       id
       token0
       token1

@@ -44,6 +44,13 @@ Pre-existing behavior carried over verbatim from the monolithic pool page; flagg
 - [ ] `_tabs/reserves-tab.tsx` — `<Th align="right">Total (USD)</Th>` is rendered unconditionally even when `showUsd` is false (cells then show `—`). Mirror the `LpsTab` pattern: `{showUsd && <Th align="right">Total (USD)</Th>}` plus matching cell wrap.
 - [ ] `_tabs/swaps-tab.tsx` — cumulative-stats IIFE block. Replace `{(() => { const last = snapshots[0]; if (!last) return null; return (...); })()}` with `const lastSnapshot = snapshots[0]` above the return + `{lastSnapshot && (...)}`.
 
+## Follow-ups deferred from PR #304 (per-pool revenue leaderboard)
+
+- [ ] **Component-level tests for `RevenueByPoolTable`.** Sort transitions, label fallback (truncated address when `poolLabels` lookup misses), partial-data render when one chain has `feesError`, and the `≈`-prefix per-window scoping. Both `/review` (65 conf) and Cursor flagged the gap. Helpers (`aggregateProtocolFeesByPool`) are well-covered; the stateful UI is not.
+- [ ] **Tests for `useProtocolFees` orchestration.** Three-query parallel fetch (rates/fees/labels), rates-only failure → `feesError` promotion, labels-only failure → non-fatal silent degrade.
+- [ ] **URL-persisted sort state on `RevenueByPoolTable`.** Sort key + direction live in `useState` only; refresh / back-forward / share drops the chosen ordering. Cursor flagged this as the "stateful-table URL-state" regression pattern. Pattern is generic — likely applies to `GlobalPoolsTable` too if it doesn't already have it. Use `useSearchParams` + `useRouter().replace()` to round-trip.
+- [ ] **Per-chain truncation flag on the leaderboard's All-time column.** Today the page-level `feesApprox` is no longer passed to `RevenueByPoolTable` (Cursor finding: too coarse for per-row); the row-level `unpriced*` flags handle pricing-quality. But chain-level truncation (`isTruncated` on `ProtocolFeeSummary`) isn't surfaced on the All-time column. Either compute per-chain `isTruncated` and apply only to that chain's rows' All-time cell, or wait for the pre-rolled snapshot follow-up that eliminates the cap entirely.
+
 ## File-size watchlist (auto-generated)
 
 _Last updated: 2026-05-01 by file-size-budget-drift-detector. Soft cap 600 lines / hard cap 1,000. See `/AGENTS.md` §"File-size budget"._

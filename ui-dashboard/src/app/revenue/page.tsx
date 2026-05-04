@@ -151,7 +151,6 @@ function RevenueContent() {
         networkData={networkData}
         isLoading={isLoading}
         hasError={anyNetworkError || anyFeesError}
-        isApproximate={feesApprox}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
