@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { formatUSD } from "@/lib/format";
 import {
@@ -29,6 +29,7 @@ import { isWeekend } from "@/lib/weekend";
 import { poolTotalVolumeUSD } from "@/lib/volume";
 import { buildPoolDetailHref } from "@/lib/routing";
 import type { SortDir } from "@/lib/table-sort";
+import { useTableSort } from "@/lib/use-table-sort";
 
 /** A pool entry enriched with its originating network and oracle rates. */
 export type GlobalPoolEntry = {
@@ -47,6 +48,18 @@ type GlobalSortKey =
   | "volume24h"
   | "volume7d"
   | "totalVolume";
+
+const GLOBAL_SORT_KEYS: ReadonlySet<GlobalSortKey> = new Set([
+  "pool",
+  "health",
+  "uptime",
+  "fee",
+  "tvl",
+  "tvlChangeWoW",
+  "volume24h",
+  "volume7d",
+  "totalVolume",
+]);
 
 // Higher rank = more severe. "desc" puts highest rank first → CRITICAL first.
 const HEALTH_ORDER: Record<string, number> = {
@@ -323,8 +336,12 @@ export function GlobalPoolsTable({
   cdpPoolKeys,
   reservePoolKeys,
 }: GlobalPoolsTableProps) {
-  const [sortKey, setSortKey] = useState<GlobalSortKey>("tvl");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const { sortKey, sortDir, handleSort } = useTableSort<GlobalSortKey>({
+    defaultKey: "tvl",
+    defaultDir: "desc",
+    validKeys: GLOBAL_SORT_KEYS,
+    paramPrefix: "pools",
+  });
 
   const tvlByKey = useMemo(
     () =>
@@ -347,15 +364,6 @@ export function GlobalPoolsTable({
       ),
     [entries],
   );
-
-  const handleSort = (key: GlobalSortKey) => {
-    if (key === sortKey) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("desc");
-    }
-  };
 
   const sortedEntries = useMemo(
     () =>
