@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { NetworkData } from "@/lib/fetch-all-networks";
-import type { ProtocolFeeTransfer } from "@/lib/types";
+import type { PoolDailyFeeSnapshot } from "@/lib/types";
 
 let mockSearchParams = new URLSearchParams();
 const mockReplace = vi.fn();
@@ -43,26 +43,31 @@ vi.mock("@/components/chain-icon", () => ({
 import { RevenueByPoolTable } from "@/components/revenue-by-pool-table";
 
 const POOL_ADDR = "0xaaaa000000000000000000000000000000000001";
+const CHAIN = 42220;
+const SECS_PER_DAY = 86_400;
+const TODAY_BUCKET = String(
+  Math.floor(Math.floor(Date.now() / 1000) / SECS_PER_DAY) * SECS_PER_DAY,
+);
 
-function transfer(
-  overrides: Partial<ProtocolFeeTransfer> = {},
-): ProtocolFeeTransfer {
+function feeSnapshot(): PoolDailyFeeSnapshot {
   return {
-    chainId: 42220,
-    tokenSymbol: "USDm",
-    tokenDecimals: 18,
-    amount: "1000000000000000000",
-    blockTimestamp: "100",
-    from: POOL_ADDR,
-    ...overrides,
+    id: `${CHAIN}-${POOL_ADDR}-${TODAY_BUCKET}`,
+    chainId: CHAIN,
+    poolAddress: POOL_ADDR,
+    timestamp: TODAY_BUCKET,
+    tokens: ["0xusd"],
+    tokenSymbols: ["USDm"],
+    tokenDecimals: [18],
+    amounts: ["1000000000000000000"],
+    feesUsdWei: "1000000000000000000",
   };
 }
 
-function networkData(transfers: ProtocolFeeTransfer[]): NetworkData {
+function networkData(snapshots: PoolDailyFeeSnapshot[]): NetworkData {
   return {
     network: {
       id: "celo-mainnet",
-      chainId: 42220,
+      chainId: CHAIN,
       label: "Celo",
       contractsNamespace: null,
       hasuraUrl: "",
@@ -90,7 +95,10 @@ function networkData(transfers: ProtocolFeeTransfer[]): NetworkData {
     cdpPoolIds: new Set(),
     reservePoolIds: new Set(),
     fees: null,
-    feeTransfers: transfers,
+    feeTransfers: [],
+    feeSnapshots: snapshots,
+    feeSnapshotsError: null,
+    ratesError: null,
     poolLabels: new Map(),
     uniqueLpAddresses: null,
     rates: new Map([["USDm", 1]]),
@@ -128,7 +136,7 @@ function ariaSortByLabel(html: string): Record<string, string> {
 function render(): Record<string, string> {
   const html = renderToStaticMarkup(
     <RevenueByPoolTable
-      networkData={[networkData([transfer()])]}
+      networkData={[networkData([feeSnapshot()])]}
       isLoading={false}
       hasError={false}
     />,

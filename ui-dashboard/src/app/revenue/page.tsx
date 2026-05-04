@@ -24,8 +24,18 @@ function RevenueContent() {
   const { networkData, isLoading } = useProtocolFees();
 
   const anyNetworkError = networkData.some((n) => n.error !== null);
+  // Tile + chart depend on raw transfers AND rates. Either failure should
+  // null the tile and degrade the chart trace.
   const anyFeesError = networkData.some(
-    (n) => n.feesError !== null && n.error === null,
+    (n) => (n.feesError !== null || n.ratesError !== null) && n.error === null,
+  );
+  // Leaderboard depends on snapshots AND rates — but NOT raw transfers.
+  // A raw-transfer-only outage keeps it live; only `ratesError` (FX
+  // mis-pricing) or `feeSnapshotsError` (no row data) should warn.
+  const anyLeaderboardError = networkData.some(
+    (n) =>
+      (n.ratesError !== null || n.feeSnapshotsError !== null) &&
+      n.error === null,
   );
 
   const aggregated = useMemo(() => {
@@ -150,7 +160,7 @@ function RevenueContent() {
       <RevenueByPoolTable
         networkData={networkData}
         isLoading={isLoading}
-        hasError={anyNetworkError || anyFeesError}
+        hasError={anyNetworkError || anyLeaderboardError}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
