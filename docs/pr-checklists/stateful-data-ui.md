@@ -194,7 +194,15 @@ If a refactor removes per-window state (e.g. `unpriced{24h,7d,30d}` collapsed in
 - [ ] If the producer emits per-day or per-event timestamps, the window flags are derivable: scope `markUnpriced(entry, in24h, in7d, in30d)` to only set the flags whose cutoffs include the row's timestamp. Don't drop precision the renderer needs.
 - [ ] Add at least two test cases: (a) a recent unpriced entry inside all windows flags every column; (b) an OLD unpriced entry outside the recent windows flags ONLY all-time and leaves 24h/7d/30d exact.
 
-PR #306 added the per-window precision specifically to avoid stale-data pollution; PR #317 dropped it as "simplification" and reintroduced the regression. cursor + claude both caught it.
+### Day-aligned cutoff math for daily-bucket data
+
+When aggregating UTC-day-bucketed snapshot rows over rolling 24h/7d/30d windows, the cutoff math must be day-aligned, not rolling-by-second.
+
+- [ ] Anchor cutoffs on `dayStart(now) - (N-1)*86400`, NOT `nowSeconds - N*86400`. The latter drops the oldest day's bucket once the wall clock passes midnight (silent N→N-1 day undercount mid-period; fees, volume, etc. shrink without any UI signal).
+- [ ] For chart/series builders that take an hour-aligned `[from, to)` window, floor `to - 1` (not `to`) when deriving the last day-bucket — half-open windows where `to` lands exactly on a midnight boundary otherwise advance to the next day.
+- [ ] When the chart and a KPI tile share the same window length, derive both from the same anchor (`dayStart - (N-1)*86400`) so the headline number and the chart's last bucket sum to identical totals. PR #319 had a chart-vs-tile mismatch (8 buckets vs 7) caught by codex.
+
+PR #306 added the per-window precision specifically to avoid stale-data pollution; PR #317 dropped it as "simplification" and reintroduced the regression. PR-snapshot-2 also had the rolling-cutoff bug in `aggregateFeeSnapshotsByPool`, only caught one PR later in #319.
 
 ## 8. Repo-specific lessons already paid for
 

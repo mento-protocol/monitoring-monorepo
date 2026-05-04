@@ -59,8 +59,9 @@ When a polling hook adds a query branch with a different downstream consumer tha
 - [ ] Each independent failure mode → its own channel: e.g. PR #317 ended at `feesError` (raw `ProtocolFeeTransfer` rejected), `ratesError` (oracle rates rejected), `feeSnapshotsError` (snapshot pagination rejected). The chain-level KPI tile gates on `feesError || ratesError`; the leaderboard gates on `ratesError || feeSnapshotsError`; the chart gates on `feesError || ratesError`
 - [ ] Update `isNetworkDataFullyHealthy` (or equivalent SSR-freshness gate) to check every new channel — silent omissions trap users on partial `N/A` until the next poll
 - [ ] Test the per-channel isolation explicitly: a query rejecting on its own MUST populate only its channel and leave the others null. No precedence ternaries.
+- [ ] **Truncation/cap-exhaustion flags MUST NOT be checked in client-revalidation health gates** (`isNetworkDataFullyHealthy` and friends). Truncation is permanent until the underlying pagination cap is raised, so refetch can't recover; including it forces perpetual mount-time revalidation that's pure overhead. Surface truncation through the UI's `≈` prefix + "approximate" subtitle instead. Existing precedent: `snapshotsAllDailyTruncated`, `brokerSnapshotsAllDailyTruncated` are deliberately excluded; PR #319 cursor caught the same omission for `feeSnapshotsTruncated`.
 
-PR #317 had this caught by cursor + chatgpt-codex-connector + claude (3 reviewers, all P1) on the initial collapsed-feesError implementation.
+PR #317 had the channel-collapse caught by cursor + chatgpt-codex-connector + claude (3 reviewers, all P1) on the initial collapsed-feesError implementation. PR #319 had the truncation-vs-error confusion caught after-the-fact by cursor.
 
 ## 7. Lessons already paid for
 
