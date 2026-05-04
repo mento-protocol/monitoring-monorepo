@@ -2,7 +2,6 @@
 import { assert } from "chai";
 import generated from "generated";
 import {
-  _setMockReserves,
   _clearMockReserves,
   _clearMockERC20Decimals,
 } from "../src/EventHandlers.ts";
@@ -444,8 +443,3 @@ describe("PoolDailySnapshot rollup", () => {
     assert.equal(daily!.swapVolume0, 0n, "swapVolume0 untouched by Burn");
   });
 });
-
-// Silence "unused import" warnings from strict TS when _setMockReserves
-// isn't exercised directly — the helpers above use FPMM.UpdateReserves to
-// seed reserves without touching the mock RPC layer.
-void _setMockReserves;
