@@ -109,10 +109,8 @@ describe("buildDailyFeeSeries", () => {
   });
 
   it("sums multiple snapshots in the same day across pools", () => {
-    const window = {
-      from: TODAY_BUCKET,
-      to: TODAY_BUCKET + SECONDS_PER_DAY + 1,
-    };
+    // Use a 1-day window matching production's mid-day-now `to`.
+    const window = { from: TODAY_BUCKET, to: NOW_S + 1 };
     const result = buildDailyFeeSeries(
       [
         networkData([
@@ -139,8 +137,7 @@ describe("buildDailyFeeSeries", () => {
 
   it("gap-fills missing days with zeros", () => {
     const day0 = TODAY_BUCKET - 3 * SECONDS_PER_DAY;
-    const day3 = TODAY_BUCKET;
-    const window = { from: day0, to: day3 + SECONDS_PER_DAY + 1 };
+    const window = { from: day0, to: NOW_S + 1 };
     const result = buildDailyFeeSeries(
       [
         networkData([
@@ -149,7 +146,7 @@ describe("buildDailyFeeSeries", () => {
             feesUsdWei: "1000000000000000000",
           }),
           feeSnapshot({
-            timestamp: String(day3),
+            timestamp: String(TODAY_BUCKET),
             feesUsdWei: "1000000000000000000",
           }),
         ]),

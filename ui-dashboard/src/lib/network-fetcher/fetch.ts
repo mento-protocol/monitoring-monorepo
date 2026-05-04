@@ -52,13 +52,19 @@ import type {
  * to skip client-side revalidation; any per-slice failure on the server
  * would otherwise trap the user on partial `N/A` metrics until the next
  * poll.
+ *
+ * Truncation flags (`feeSnapshotsTruncated`, `snapshotsAllDailyTruncated`,
+ * `brokerSnapshotsAllDailyTruncated`) are intentionally excluded — they
+ * represent a permanent cap-exhaustion state until `SNAPSHOT_MAX_PAGES`
+ * is raised. Including them would force perpetual mount-time revalidation
+ * that can never recover. The UI surfaces truncation via the `≈` prefix
+ * + subtitle; this gate is for transient errors only.
  */
 export function isNetworkDataFullyHealthy(n: NetworkData): boolean {
   return (
     n.error === null &&
     n.ratesError === null &&
     n.feeSnapshotsError === null &&
-    !n.feeSnapshotsTruncated &&
     n.snapshotsError === null &&
     n.snapshots7dError === null &&
     n.snapshots30dError === null &&

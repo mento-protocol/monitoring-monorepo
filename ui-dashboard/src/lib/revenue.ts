@@ -43,17 +43,27 @@ export function buildDailyFeeSeries(
   >();
   let minBucket = Infinity;
 
-  // Snapshot timestamps are UTC-midnight buckets. Hour-aligned window bounds
-  // from snapshotWindow7d/30d would drop the oldest intended day's bucket
-  // (its midnight ts is before the hour-aligned `from`) and then immediately
-  // zero-fill it back via `floor(window.from / DAY)` — chart shows a
-  // leading-zero day while the headline excludes that day's fees. Floor
-  // to UTC midnight here so the filter and the gap-fill agree.
+  // Snapshot timestamps are UTC-midnight buckets, but the input
+  // `snapshotWindow7d/30d` carries hour-aligned bounds (`now - N*86400`).
+  // Naively flooring `window.from` to midnight produces N+1 daily buckets
+  // because half a day spills back across the day boundary — chart would
+  // show 8 buckets while the KPI tile uses `dayStart - 6*86400` (7 buckets).
+  // Match the tile's math: anchor on `dayStart(window.to) - (N-1)*86400`
+  // so the chart and headline cover the same N daily buckets exactly.
   const dayAlignedWindow = window
-    ? {
-        from: Math.floor(window.from / SECONDS_PER_DAY) * SECONDS_PER_DAY,
-        to: window.to,
-      }
+    ? (() => {
+        const days = Math.round((window.to - window.from) / SECONDS_PER_DAY);
+        // The window is half-open `[from, to)`, so the last bucket in
+        // range is `floor((to - 1) / 86400) * 86400` — using `to`
+        // directly would land on the NEXT midnight when `to` is at or
+        // past a day boundary (e.g. `now = TODAY + 86400 + 1`).
+        const lastBucketDayStart =
+          Math.floor((window.to - 1) / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+        return {
+          from: lastBucketDayStart - (days - 1) * SECONDS_PER_DAY,
+          to: window.to,
+        };
+      })()
     : undefined;
 
   for (const netData of networkData) {
