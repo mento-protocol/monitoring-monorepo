@@ -40,12 +40,12 @@ function readSortFromParams<K extends string>(
   return { key, dir };
 }
 
-function buildNextSearch(
+function buildNextSearch<K extends string>(
   currentSearch: string,
   sortParam: string,
   dirParam: string,
-  state: SortState<string>,
-  defaultKey: string,
+  state: SortState<K>,
+  defaultKey: K,
   defaultDir: SortDir,
 ): string {
   const params = new URLSearchParams(currentSearch);
@@ -71,6 +71,10 @@ function buildNextSearch(
  * current route segment. On the homepage that round-trip costs ~700ms, which
  * is what the user sees as sort lag. The native call has no React/Next
  * involvement, so the click → re-render is synchronous.
+ *
+ * Caller contract: `defaultKey`, `defaultDir`, and `paramPrefix` must be
+ * render-stable (literal constants in practice). Mount-time canonicalization
+ * captures them in an empty-deps effect and won't re-run if they change.
  *
  * @example
  * const { sortKey, sortDir, handleSort } = useTableSort({
@@ -106,6 +110,24 @@ export function useTableSort<K extends string>({
     ),
   );
 
+  const replaceUrlForState = useCallback(
+    (next: SortState<K>) => {
+      if (typeof window === "undefined") return;
+      const qs = buildNextSearch(
+        window.location.search,
+        sortParam,
+        dirParam,
+        next,
+        defaultKey,
+        defaultDir,
+      );
+      const nextUrl =
+        window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
+      window.history.replaceState(window.history.state, "", nextUrl);
+    },
+    [defaultKey, defaultDir, sortParam, dirParam],
+  );
+
   // Canonicalize malformed / partial / stale URL params on mount. Without this,
   // deep links like `?fooSort=bogus` or one-sided `?fooSort=fees24h` (no dir)
   // leave junk in the URL while the table renders defaults — refresh / share
@@ -116,22 +138,16 @@ export function useTableSort<K extends string>({
     const current = new URLSearchParams(window.location.search);
     const rawKey = current.get(sortParam);
     const rawDir = current.get(dirParam);
-    const isCanonical = state.key !== defaultKey || state.dir !== defaultDir;
-    const sortMatches = isCanonical ? rawKey === state.key : rawKey === null;
-    const dirMatches = isCanonical ? rawDir === state.dir : rawDir === null;
+    const hasNonDefaultState =
+      state.key !== defaultKey || state.dir !== defaultDir;
+    const sortMatches = hasNonDefaultState
+      ? rawKey === state.key
+      : rawKey === null;
+    const dirMatches = hasNonDefaultState
+      ? rawDir === state.dir
+      : rawDir === null;
     if (sortMatches && dirMatches) return;
-
-    const qs = buildNextSearch(
-      window.location.search,
-      sortParam,
-      dirParam,
-      state,
-      defaultKey,
-      defaultDir,
-    );
-    const nextUrl =
-      window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
-    window.history.replaceState(window.history.state, "", nextUrl);
+    replaceUrlForState(state);
     // Empty deps: canonicalization is a one-shot mount-time concern. Re-running
     // on every state change would race with `handleSort`'s replaceState and
     // bounce the URL when the user clicks a header before the effect resolves.
@@ -143,27 +159,11 @@ export function useTableSort<K extends string>({
         const nextDir: SortDir =
           key === prev.key ? (prev.dir === "asc" ? "desc" : "asc") : defaultDir;
         const next = { key, dir: nextDir };
-
-        if (typeof window !== "undefined") {
-          const qs = buildNextSearch(
-            window.location.search,
-            sortParam,
-            dirParam,
-            next,
-            defaultKey,
-            defaultDir,
-          );
-          const nextUrl =
-            window.location.pathname +
-            (qs ? `?${qs}` : "") +
-            window.location.hash;
-          window.history.replaceState(window.history.state, "", nextUrl);
-        }
-
+        replaceUrlForState(next);
         return next;
       });
     },
-    [defaultKey, defaultDir, sortParam, dirParam],
+    [defaultDir, replaceUrlForState],
   );
 
   return { sortKey: state.key, sortDir: state.dir, handleSort };
