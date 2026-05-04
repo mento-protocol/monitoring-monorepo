@@ -78,6 +78,7 @@ Pre-existing behavior carried over verbatim from the monolithic pool page; flagg
 - [ ] **Tests for `useProtocolFees` orchestration.** Three-query parallel fetch (rates/fees/labels), rates-only failure → `feesError` promotion, labels-only failure → non-fatal silent degrade.
 - [ ] **URL-persisted sort state on `RevenueByPoolTable`.** Sort key + direction live in `useState` only; refresh / back-forward / share drops the chosen ordering. Cursor flagged this as the "stateful-table URL-state" regression pattern. Pattern is generic — likely applies to `GlobalPoolsTable` too if it doesn't already have it. Use `useSearchParams` + `useRouter().replace()` to round-trip.
 - [ ] **Per-chain truncation flag on the leaderboard's All-time column.** Today the page-level `feesApprox` is no longer passed to `RevenueByPoolTable` (Cursor finding: too coarse for per-row); the row-level `unpriced*` flags handle pricing-quality. But chain-level truncation (`isTruncated` on `ProtocolFeeSummary`) isn't surfaced on the All-time column. Either compute per-chain `isTruncated` and apply only to that chain's rows' All-time cell, or wait for the pre-rolled snapshot follow-up that eliminates the cap entirely.
+
 ## File-size watchlist (auto-generated)
 
 _Last updated: 2026-05-01 by file-size-budget-drift-detector. Soft cap 600 lines / hard cap 1,000. See `/AGENTS.md` §"File-size budget"._
