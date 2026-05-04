@@ -17,6 +17,15 @@ description: Mento v3 multichain testnet indexer — Celo Sepolia (11142220) + M
 # Global contract definitions (shared ABI + handler across all networks)
 # ---------------------------------------------------------------------------
 contracts:
+  # Mento Broker — declared so the shared EventHandlers.ts codegen resolves on
+  # testnet; no testnet Broker addresses are wired today, so no events fire.
+  # Mainnet config carries the live address; see config.multichain.mainnet.yaml.
+  - name: Broker
+    abi_file_path: abis/Broker.json
+    handler: src/EventHandlers.ts
+    events:
+      - event: Swap
+
   - name: FPMMFactory
     abi_file_path: abis/FPMMFactory.json
     handler: src/EventHandlers.ts
@@ -128,6 +137,8 @@ networks:
       url: ${ENVIO_RPC_URL_CELO_SEPOLIA:-https://forno.celo-sepolia.celo-testnet.org}
     start_block: ${ENVIO_START_BLOCK_CELO_SEPOLIA:-18946570}
     contracts:
+      - name: Broker
+        address: [] # No testnet Broker address wired today
       - name: FPMMFactory
         address:
           - 0x353ED52bF8482027C0e0b9e3c0e5d96A9F680980
@@ -174,6 +185,8 @@ networks:
   - id: 10143 # Monad Testnet — HyperSync: https://10143.hypersync.xyz
     start_block: ${ENVIO_START_BLOCK_MONAD_TESTNET:-17932300} # SortedOracles ~17932362, FPMMFactory ~17932599
     contracts:
+      - name: Broker
+        address: [] # No Broker on Monad
       - name: FPMMFactory
         address:
           - 0x353ED52bF8482027C0e0b9e3c0e5d96A9F680980

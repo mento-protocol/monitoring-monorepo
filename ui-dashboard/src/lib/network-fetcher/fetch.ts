@@ -16,6 +16,7 @@ import {
   ALL_POOLS_WITH_HEALTH,
   ALL_TRADING_LIMITS,
   ALL_OLS_POOLS,
+  BROKER_DAILY_SNAPSHOTS_ALL,
   POOL_DAILY_SNAPSHOTS_ALL,
   PROTOCOL_FEE_TRANSFERS_ALL,
   UNIQUE_LP_ADDRESSES,
@@ -37,7 +38,11 @@ import type {
   OlsPool,
 } from "@/lib/types";
 import { isFpmm, buildOracleRateMap } from "@/lib/tokens";
-import type { NetworkData, SnapshotPageResult } from "./types";
+import type {
+  BrokerDailySnapshotRow,
+  NetworkData,
+  SnapshotPageResult,
+} from "./types";
 
 /**
  * True iff every error channel on `n` is null — top-level, fees,
@@ -54,6 +59,7 @@ export function isNetworkDataFullyHealthy(n: NetworkData): boolean {
     n.snapshots7dError === null &&
     n.snapshots30dError === null &&
     n.snapshotsAllDailyError === null &&
+    n.brokerSnapshotsAllDailyError === null &&
     n.lpError === null
   );
 }
@@ -77,6 +83,7 @@ export const blankNetworkData = (
   snapshots30d: [],
   snapshotsAllDaily: [],
   snapshotsAllDailyTruncated: false,
+  brokerSnapshotsAllDaily: [],
   tradingLimits: [],
   olsPoolIds: new Set(),
   cdpPoolIds: new Set(),
@@ -92,6 +99,7 @@ export const blankNetworkData = (
   snapshots7dError: null,
   snapshots30dError: null,
   snapshotsAllDailyError: null,
+  brokerSnapshotsAllDailyError: null,
   lpError: null,
   ...overrides,
 });
@@ -176,6 +184,102 @@ async function fetchAllDailySnapshotPages(
     "PoolDailySnapshot",
     network,
   );
+}
+
+/**
+ * Per-day Broker rollup result — analogous to `SnapshotPageResult` but for
+ * `BrokerDailySnapshot`. Held in this file rather than `./types` because no
+ * external module needs the shape.
+ */
+type BrokerSnapshotPageResult = {
+  rows: BrokerDailySnapshotRow[];
+  truncated: boolean;
+  error: Error | null;
+};
+
+const brokerSnapshotDedupKey = (s: BrokerDailySnapshotRow) =>
+  // BrokerDailySnapshot.id is `{chainId}-{provider}-{router|direct}-{day}`; the
+  // server-side filter pins `routedViaV3Router=false` and chainId, so within
+  // one fetch the (provider, day) tuple uniquely identifies a row.
+  `${s.timestamp}-${s.volumeUsdWei}-${s.swapCount}`;
+
+/**
+ * Paginate `BrokerDailySnapshot` rows for a chain (already filtered to
+ * `routedViaV3Router=false`). Mirrors `fetchAllDailySnapshotPages` semantics:
+ * fail-open after page 1, hard-fail if page 0 throws. Row count grows as
+ * `(daily_distinct_providers × days)`, so a single chain stays under the
+ * 1000-row Hasura cap for years; pagination is here for safety.
+ */
+async function fetchAllBrokerDailySnapshotPages(
+  client: GraphQLClient,
+  chainId: number,
+  network: string,
+): Promise<BrokerSnapshotPageResult> {
+  const seen = new Set<string>();
+  const rows: BrokerDailySnapshotRow[] = [];
+  for (let page = 0; page < SNAPSHOT_MAX_PAGES; page++) {
+    let batch: BrokerDailySnapshotRow[];
+    try {
+      const result = await client.request<{
+        BrokerDailySnapshot: BrokerDailySnapshotRow[];
+      }>({
+        document: BROKER_DAILY_SNAPSHOTS_ALL,
+        variables: {
+          chainId,
+          limit: SNAPSHOT_PAGE_SIZE,
+          offset: page * SNAPSHOT_PAGE_SIZE,
+        },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      batch = result.BrokerDailySnapshot ?? [];
+    } catch (err) {
+      // Page 0 failure → no data to salvage; let the caller surface it.
+      if (rows.length === 0) throw err;
+      const partialKey = `${network}:BrokerDailySnapshot`;
+      const now = Date.now();
+      const last = partialPageLastCapturedAt.get(partialKey) ?? 0;
+      if (now - last >= PARTIAL_PAGE_THROTTLE_MS) {
+        partialPageLastCapturedAt.set(partialKey, now);
+        Sentry.captureException(err, {
+          tags: {
+            source: "hasura",
+            responseKey: "BrokerDailySnapshot",
+            network,
+            degraded: "partial-pages",
+          },
+          extra: { page, rowsFetched: rows.length },
+        });
+      }
+      return {
+        rows,
+        truncated: true,
+        error: err instanceof Error ? err : new Error(String(err)),
+      };
+    }
+    for (const row of batch) {
+      const key = brokerSnapshotDedupKey(row);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+    }
+    if (batch.length < SNAPSHOT_PAGE_SIZE) {
+      return { rows, truncated: false, error: null };
+    }
+  }
+  const capKey = `${network}:BrokerDailySnapshot`;
+  if (!warnedCapKeys.has(capKey)) {
+    warnedCapKeys.add(capKey);
+    Sentry.captureMessage("hasura-snapshot-cap-exhausted", {
+      level: "warning",
+      tags: {
+        source: "hasura",
+        responseKey: "BrokerDailySnapshot",
+        network,
+      },
+      extra: { rowsFetched: rows.length },
+    });
+  }
+  return { rows, truncated: true, error: null };
 }
 
 async function fetchPaginatedSnapshotPages<K extends string>(
@@ -304,6 +408,7 @@ export async function fetchNetworkData(
   const [
     feesResult,
     snapshotsAllDailyResult,
+    brokerSnapshotsAllDailyResult,
     lpResult,
     tradingLimitsResult,
     olsResult,
@@ -317,6 +422,10 @@ export async function fetchNetworkData(
     shouldQuery
       ? fetchAllDailySnapshotPages(client, poolIds, network.id)
       : Promise.resolve(emptySnapshotPage),
+    // Legacy v2 daily volume rollup (Broker.Swap with `routedViaV3Router=false`).
+    // Filtered server-side by chainId — only Celo has a Broker today, but
+    // querying on every chain is harmless (Monad simply returns 0 rows).
+    fetchAllBrokerDailySnapshotPages(client, network.chainId, network.id),
     fpmmPoolIds.length > 0
       ? timed<{ LiquidityPosition: { address: string }[] }>(
           UNIQUE_LP_ADDRESSES,
@@ -399,6 +508,17 @@ export async function fetchNetworkData(
     snapshotsAllDailyResult.status === "rejected"
       ? toError(snapshotsAllDailyResult.reason)
       : (snapshotsAllDailyResult.value.error ?? null);
+
+  // Legacy v2 daily volume — already filtered to `routedViaV3Router=false`
+  // server-side, so no client-side disambiguation is needed.
+  const brokerSnapshotsAllDaily =
+    brokerSnapshotsAllDailyResult.status === "fulfilled"
+      ? brokerSnapshotsAllDailyResult.value.rows
+      : [];
+  const brokerSnapshotsAllDailyError =
+    brokerSnapshotsAllDailyResult.status === "rejected"
+      ? toError(brokerSnapshotsAllDailyResult.reason)
+      : (brokerSnapshotsAllDailyResult.value.error ?? null);
 
   // PoolDailySnapshot rows are UTC-midnight-aligned incremental aggregates
   // (one row per pool per UTC day). Anchoring on today's UTC midnight gives
@@ -495,6 +615,7 @@ export async function fetchNetworkData(
     snapshots30d,
     snapshotsAllDaily,
     snapshotsAllDailyTruncated,
+    brokerSnapshotsAllDaily,
     tradingLimits,
     olsPoolIds,
     cdpPoolIds,
@@ -516,6 +637,7 @@ export async function fetchNetworkData(
     snapshots7dError,
     snapshots30dError,
     snapshotsAllDailyError,
+    brokerSnapshotsAllDailyError,
     lpError: lpResult.status === "rejected" ? toError(lpResult.reason) : null,
   };
 }

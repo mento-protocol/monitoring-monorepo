@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { chainColor } from "@/lib/chain-colors";
 import { formatUSD } from "@/lib/format";
 import {
   getSnapshotVolumeInUsd,
@@ -27,6 +26,13 @@ export type ChainVolumeSeries = {
   network: Network;
   series: SeriesPoint[];
 };
+
+// Mento-protocol indigo for v3 (Router-driven) and a teal contrast for v2
+// (legacy Broker → BiPoolManager). v3 dominates today, so it sits at the
+// bottom of the stack and uses the brand color; v2 stacks on top in a
+// distinct teal so the gap reads at a glance even when small.
+const V3_COLOR = "#6366f1"; // indigo-500
+const V2_COLOR = "#14b8a6"; // teal-500
 
 /**
  * Includes swap volume from every pool type (FPMM and virtual), matching the
@@ -137,6 +143,60 @@ export function buildDailyVolumeSeries(
 }
 
 /**
+ * Aggregate per-chain `brokerSnapshotsAllDaily` rows into a single daily
+ * USD-volume series for legacy v2 traffic (Broker → BiPoolManager). Rows are
+ * already filtered server-side to `routedViaV3Router=false`, so summing them
+ * directly gives the v2 number without re-checking the v3-Router siblings.
+ *
+ * Same windowing semantics as `buildDailyVolumeSeries`: a `window` filters
+ * rows to `[window.from, window.to)` and the emitted series zero-fills any
+ * empty UTC-day bucket inside the window so the stack alignment with the v3
+ * series stays correct.
+ */
+export function buildBrokerDailyV2Series(
+  networkData: NetworkData[],
+  window?: TimeRange,
+): SeriesPoint[] {
+  const totalBuckets = new Map<number, number>();
+  let minBucket = Infinity;
+  for (const netData of networkData) {
+    if (netData.error !== null) continue;
+    for (const row of netData.brokerSnapshotsAllDaily) {
+      const timestamp = Number(row.timestamp);
+      if (window && (timestamp < window.from || timestamp >= window.to))
+        continue;
+      // 18-decimal "USD-wei" → JS number USD. BigInt() handles the string;
+      // dividing by 1e18 in floating-point loses sub-cent precision, which
+      // is fine for chart rendering (we don't display sub-cent on a chart
+      // measured in $K/$M).
+      const usd = Number(BigInt(row.volumeUsdWei)) / 1e18;
+      const bucket = Math.floor(timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+      minBucket = Math.min(minBucket, bucket);
+      totalBuckets.set(bucket, (totalBuckets.get(bucket) ?? 0) + usd);
+    }
+  }
+  if (!Number.isFinite(minBucket)) return [];
+
+  const startBucket = window
+    ? Math.ceil(window.from / SECONDS_PER_DAY) * SECONDS_PER_DAY
+    : minBucket;
+  const endRef = window?.to ?? Math.floor(Date.now() / 1000);
+  const endBucket = Math.floor(endRef / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  const lastBucket =
+    endRef > endBucket ? endBucket : endBucket - SECONDS_PER_DAY;
+
+  const series: SeriesPoint[] = [];
+  for (
+    let timestamp = startBucket;
+    timestamp <= lastBucket;
+    timestamp += SECONDS_PER_DAY
+  ) {
+    series.push({ timestamp, volumeUSD: totalBuckets.get(timestamp) ?? 0 });
+  }
+  return series;
+}
+
+/**
  * Week-over-week % change: sum of the last 7 completed UTC days vs the 7 days
  * before that. The final bucket in `fullSeries` is usually the partial current
  * UTC day (still filling up), so the comparison excludes it and uses the
@@ -171,20 +231,24 @@ export function VolumeOverTimeChart({
 }: VolumeOverTimeChartProps) {
   const [range, setRange] = useState<RangeKey>("30d");
 
-  // Full-history pass kept for the WoW delta (≥15 UTC-day buckets) and for
-  // the "all" range tab.
-  const fullResult = useMemo(
+  // Full-history v3 pass kept for the WoW delta (≥15 UTC-day buckets) and the
+  // "all" range tab. v3 = Router-driven volume, sourced from PoolDailySnapshot
+  // (FPMM + VirtualPool, summed since both are downstream of the v3 Router).
+  const fullV3Result = useMemo(
     () => buildDailyVolumeSeries(networkData),
     [networkData],
   );
 
-  const fullSeries = useMemo<TimeSeriesPoint[]>(
+  // v3 WoW pill — v2 has a separate trajectory but is much smaller today, so
+  // tracking the dominant-side delta keeps the headline meaningful. v2 WoW
+  // can be added once v2 volumes are large enough to read at chart scale.
+  const fullV3Series = useMemo<TimeSeriesPoint[]>(
     () =>
-      fullResult.series.map((p) => ({
+      fullV3Result.series.map((p) => ({
         timestamp: p.timestamp,
         value: p.volumeUSD,
       })),
-    [fullResult],
+    [fullV3Result],
   );
 
   const activeWindow = useMemo<TimeRange | undefined>(() => {
@@ -203,48 +267,83 @@ export function VolumeOverTimeChart({
         : snapshotWindow30d(Date.now());
   }, [networkData, range]);
 
-  // The "all" tab reuses `fullResult` since its window matches.
-  const { visibleSeries, visibleBreakdown } = useMemo<{
-    visibleSeries: TimeSeriesPoint[];
-    visibleBreakdown: BreakdownSeries[];
-  }>(() => {
-    const { series, byChain } =
+  // v3 series for the active window — reuses fullV3Result on the "all" tab
+  // since the window matches.
+  const visibleV3Points = useMemo<SeriesPoint[]>(
+    () =>
       range === "all"
-        ? fullResult
-        : buildDailyVolumeSeries(networkData, activeWindow);
-    return {
-      visibleSeries: series.map((p) => ({
-        timestamp: p.timestamp,
-        value: p.volumeUSD,
-      })),
-      visibleBreakdown: byChain.map((entry) => ({
-        name: entry.network.label,
-        color: chainColor(entry.network.chainId),
-        series: entry.series.map((p) => ({
-          timestamp: p.timestamp,
-          value: p.volumeUSD,
-        })),
-      })),
-    };
-  }, [networkData, range, activeWindow, fullResult]);
-
-  // Hero = sum of visible bars. With rolling-window bucketing on 7d/30d this
-  // exactly equals the Summary tile's subtotal for the same window.
-  const rangeTotal = useMemo(
-    () => visibleSeries.reduce((sum, point) => sum + point.value, 0),
-    [visibleSeries],
+        ? fullV3Result.series
+        : buildDailyVolumeSeries(networkData, activeWindow).series,
+    [networkData, range, activeWindow, fullV3Result],
   );
+
+  // v2 series for the active window — sourced from BrokerDailySnapshot
+  // (already filtered to routedViaV3Router=false server-side). Empty until
+  // the indexer's Broker handler is deployed and resyncs.
+  const visibleV2Points = useMemo<SeriesPoint[]>(
+    () => buildBrokerDailyV2Series(networkData, activeWindow),
+    [networkData, activeWindow],
+  );
+
+  // Stack v3 (bottom) + v2 (top). Distinct, named legend entries; the chart
+  // card suppresses its own total trace in `stacked` mode so the breakdown
+  // areas read directly.
+  const visibleBreakdown = useMemo<BreakdownSeries[]>(() => {
+    const toPoints = (xs: SeriesPoint[]) =>
+      xs.map((p) => ({ timestamp: p.timestamp, value: p.volumeUSD }));
+    return [
+      {
+        name: "v3 (Router)",
+        color: V3_COLOR,
+        series: toPoints(visibleV3Points),
+      },
+      {
+        name: "v2 (Legacy)",
+        color: V2_COLOR,
+        series: toPoints(visibleV2Points),
+      },
+    ];
+  }, [visibleV3Points, visibleV2Points]);
+
+  // Per-version range totals — rolling-window bucketing means each side's
+  // sum equals that version's volume for the visible range.
+  const v3RangeTotal = useMemo(
+    () => visibleV3Points.reduce((sum, p) => sum + p.volumeUSD, 0),
+    [visibleV3Points],
+  );
+  const v2RangeTotal = useMemo(
+    () => visibleV2Points.reduce((sum, p) => sum + p.volumeUSD, 0),
+    [visibleV2Points],
+  );
+
+  // Combined-bars series the chart card uses for non-stacked render paths
+  // (e.g. loading skeleton's reserved layout). In stacked mode the breakdown
+  // areas plot on their own; this series is required by the prop contract
+  // but isn't drawn.
+  const visibleCombinedSeries = useMemo<TimeSeriesPoint[]>(() => {
+    const byTs = new Map<number, number>();
+    for (const p of visibleV3Points)
+      byTs.set(p.timestamp, (byTs.get(p.timestamp) ?? 0) + p.volumeUSD);
+    for (const p of visibleV2Points)
+      byTs.set(p.timestamp, (byTs.get(p.timestamp) ?? 0) + p.volumeUSD);
+    return Array.from(byTs)
+      .sort((a, b) => a[0] - b[0])
+      .map(([timestamp, value]) => ({ timestamp, value }));
+  }, [visibleV3Points, visibleV2Points]);
 
   // Show "N/A" only on explicit failure. An empty series without errors
   // legitimately sums to $0 (no volume yet) — flagging that as N/A would
   // incorrectly conflate "no activity" with "data missing".
   const headline = isLoading
     ? "…"
-    : hasError || (hasSnapshotError && fullSeries.length === 0)
+    : hasError ||
+        (hasSnapshotError &&
+          visibleV3Points.length === 0 &&
+          visibleV2Points.length === 0)
       ? "N/A"
-      : formatUSD(rangeTotal);
+      : `${formatUSD(v3RangeTotal)} v3 · ${formatUSD(v2RangeTotal)} v2`;
 
-  const change = weekOverWeekChangePct(fullSeries);
+  const change = weekOverWeekChangePct(fullV3Series);
 
   const emptyMessage = hasError
     ? "Unable to load volume history"
@@ -256,13 +355,14 @@ export function VolumeOverTimeChart({
     <TimeSeriesChartCard
       title="Volume"
       rangeAriaLabel="Volume chart time range"
-      series={visibleSeries}
+      series={visibleCombinedSeries}
       breakdown={visibleBreakdown}
       breakdownMode="stacked"
       range={range}
       onRangeChange={setRange}
       headline={headline}
       change={change}
+      changeLabel="v3 week-over-week"
       isLoading={isLoading}
       hasError={hasError}
       hasSnapshotError={hasSnapshotError}

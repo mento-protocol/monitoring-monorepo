@@ -22,6 +22,7 @@ vi.mock("next/dynamic", () => ({
 
 import {
   VolumeOverTimeChart,
+  buildBrokerDailyV2Series,
   buildDailyVolumeSeries,
   weekOverWeekChangePct,
 } from "@/components/volume-over-time-chart";
@@ -287,6 +288,106 @@ describe("buildDailyVolumeSeries", () => {
   });
 });
 
+describe("buildBrokerDailyV2Series", () => {
+  function makeBrokerNetworkData(
+    rows: { timestamp: number; volumeUsdWei: string; swapCount: number }[],
+  ) {
+    return [
+      makeNetworkData({
+        network: TVL_NETWORK,
+        brokerSnapshotsAllDaily: rows.map((r) => ({
+          timestamp: String(r.timestamp),
+          volumeUsdWei: r.volumeUsdWei,
+          swapCount: r.swapCount,
+        })),
+      }),
+    ];
+  }
+
+  it("converts USD-wei rows into per-day USD totals", () => {
+    const today = dayAlignedNow();
+    const day0 = today - 2 * SECONDS_PER_DAY;
+    const day1 = today - 1 * SECONDS_PER_DAY;
+
+    const series = buildBrokerDailyV2Series(
+      makeBrokerNetworkData([
+        { timestamp: day0, volumeUsdWei: "1000000000000000000", swapCount: 1 }, // $1
+        { timestamp: day1, volumeUsdWei: "2500000000000000000", swapCount: 3 }, // $2.5
+      ]),
+      { from: day0, to: today },
+    );
+
+    expect(series).toHaveLength(2);
+    expect(series[0]).toEqual({ timestamp: day0, volumeUSD: 1 });
+    expect(series[1]).toEqual({ timestamp: day1, volumeUSD: 2.5 });
+  });
+
+  it("zero-fills missing days within the active window", () => {
+    // Same window-bucketing semantics as buildDailyVolumeSeries: stack
+    // alignment between v2 and v3 requires every day in the window to be
+    // emitted, even when v2 had no swaps that day.
+    const today = dayAlignedNow();
+    const day0 = today - 2 * SECONDS_PER_DAY;
+
+    const series = buildBrokerDailyV2Series(
+      makeBrokerNetworkData([
+        { timestamp: day0, volumeUsdWei: "1000000000000000000", swapCount: 1 },
+      ]),
+      { from: day0, to: today },
+    );
+
+    expect(series).toEqual([
+      { timestamp: day0, volumeUSD: 1 },
+      { timestamp: day0 + SECONDS_PER_DAY, volumeUSD: 0 },
+    ]);
+  });
+
+  it("returns empty when no broker rows are provided", () => {
+    // Guards against the chart rendering an empty zero series before the
+    // indexer's Broker handler has synced.
+    const today = dayAlignedNow();
+    const series = buildBrokerDailyV2Series(makeBrokerNetworkData([]), {
+      from: today - SECONDS_PER_DAY,
+      to: today,
+    });
+    expect(series).toEqual([]);
+  });
+
+  it("aggregates rows from multiple chains into one series", () => {
+    // Chains with no Broker (Monad) return empty arrays, so a chain with rows
+    // and a chain without must merge cleanly. Future-proofs against a Broker
+    // showing up on Monad later.
+    const today = dayAlignedNow();
+    const day0 = today - 1 * SECONDS_PER_DAY;
+    const series = buildBrokerDailyV2Series(
+      [
+        makeNetworkData({
+          network: TVL_NETWORK,
+          brokerSnapshotsAllDaily: [
+            {
+              timestamp: String(day0),
+              volumeUsdWei: "3000000000000000000",
+              swapCount: 1,
+            },
+          ],
+        }),
+        makeNetworkData({
+          network: TVL_NETWORK_2,
+          brokerSnapshotsAllDaily: [
+            {
+              timestamp: String(day0),
+              volumeUsdWei: "1000000000000000000",
+              swapCount: 1,
+            },
+          ],
+        }),
+      ],
+      { from: day0, to: today },
+    );
+    expect(series).toEqual([{ timestamp: day0, volumeUSD: 4 }]);
+  });
+});
+
 describe("weekOverWeekChangePct", () => {
   function buildSeries(values: number[]): TimeSeriesPoint[] {
     const start = dayAlignedNow() - (values.length - 1) * SECONDS_PER_DAY;
@@ -363,9 +464,12 @@ describe("VolumeOverTimeChart render", () => {
     expect(html).toContain("· partial data");
   });
 
-  it("renders $0.00 (not N/A) when there's simply no volume yet and no errors", () => {
+  it("renders $0.00 v3 · $0.00 v2 (not N/A) when there's no volume yet and no errors", () => {
+    // The v2/v3 split is the chart's contract — both versions render their
+    // own $0 column even when empty so the columns aren't suddenly missing
+    // the moment one side has no data (or hasn't synced yet).
     const html = renderChart();
-    expect(html).toContain("$0.00");
+    expect(html).toContain("$0.00 v3 · $0.00 v2");
     expect(html).not.toContain("N/A");
   });
 
@@ -391,11 +495,12 @@ describe("VolumeOverTimeChart render", () => {
     );
   });
 
-  it("shows the headline as a formatted USD total covering the default (30d) range", () => {
+  it("renders the headline as `$X v3 · $Y v2` covering the default (30d) range", () => {
     const today = dayAlignedNow();
     // Both snapshots are within the default 30d window. Today's bucket is
     // included because PoolDailySnapshot is incremental (partial today data
-    // is valid in-window volume, not a precomputed full-day total).
+    // is valid in-window volume, not a precomputed full-day total). The
+    // fixture has no Broker data so v2 = $0.00.
     const html = renderChart({
       networkData: makeVolumeNetworkData([
         {
@@ -406,17 +511,17 @@ describe("VolumeOverTimeChart render", () => {
       ]),
     });
 
-    expect(html).toContain("$3.00");
+    expect(html).toContain("$3.00 v3 · $0.00 v2");
     // Only 2 days of history < 15 buckets required for WoW comparison, so
     // the delta is null. The 30d range itself does NOT suppress the pill —
     // the WoW basis is always 7d-vs-7d, independent of visible range.
     expect(html).not.toContain("week-over-week");
   });
 
-  it("shows the WoW delta pill at the default 30d range when ≥15 days of history exist", () => {
-    // The pill must be visible at every range tab — the comparison basis
-    // (last 7 completed UTC days vs prior 7) is independent of the visible
-    // range. Build 15 buckets with prior 7 sum < last 7 sum so WoW is +ve.
+  it("shows the WoW delta pill labeled 'v3 week-over-week' at the default range when ≥15 days of v3 history exist", () => {
+    // The pill is v3-specific (the dominant series); v2 has its own
+    // trajectory but tracking both deltas would clutter the headline. Build
+    // 15 v3 buckets with prior 7 sum < last 7 sum so WoW is positive.
     const today = dayAlignedNow();
     const start = today - 14 * SECONDS_PER_DAY;
     const snapshots = Array.from({ length: 15 }, (_, i) => ({
@@ -430,7 +535,7 @@ describe("VolumeOverTimeChart render", () => {
       networkData: makeVolumeNetworkData(snapshots),
     });
 
-    expect(html).toContain("week-over-week");
+    expect(html).toContain("v3 week-over-week");
   });
 
   it("uses the fetch-anchored snapshotWindows rather than render-time Date.now()", () => {
@@ -477,12 +582,13 @@ describe("VolumeOverTimeChart render", () => {
       ],
     });
 
-    // The hero should reflect the anchored-window total ($5); render-time
-    // window might or might not — but since we've verified this path runs
-    // through the anchored window by passing explicit snapshotWindows, any
-    // future regression that swaps back to Date.now() will show the
-    // snapshot being dropped at boundary edge cases.
-    expect(html).toContain("$5.00");
+    // The hero should reflect the anchored-window total ($5 on the v3 side,
+    // no Broker data → $0 on v2); render-time window might or might not —
+    // but since we've verified this path runs through the anchored window by
+    // passing explicit snapshotWindows, any future regression that swaps
+    // back to Date.now() will show the snapshot being dropped at boundary
+    // edge cases.
+    expect(html).toContain("$5.00 v3 · $0.00 v2");
   });
 
   it("passes Plotly config overrides when data is present", () => {

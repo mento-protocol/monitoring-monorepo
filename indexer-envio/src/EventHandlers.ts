@@ -17,6 +17,7 @@ import { runStartupChecks } from "./startupChecks";
 runStartupChecks();
 
 // Handler registrations (side-effect imports)
+import "./handlers/broker";
 import "./handlers/fpmm";
 import "./handlers/fpmm/factory";
 import "./handlers/fpmm/liquidity";
