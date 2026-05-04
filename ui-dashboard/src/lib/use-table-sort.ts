@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { SortDir } from "@/lib/table-sort";
 
 export interface UseTableSortOptions<K extends string> {
@@ -40,6 +40,7 @@ export function useTableSort<K extends string>({
   paramPrefix = "",
 }: UseTableSortOptions<K>): UseTableSortResult<K> {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const sortParam = `${paramPrefix}Sort`;
@@ -74,7 +75,7 @@ export function useTableSort<K extends string>({
       params.delete(dirParam);
     }
     const qs = params.toString();
-    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+    router.replace(qs ? `?${qs}` : pathname, { scroll: false });
   }, [
     rawKey,
     rawDir,
@@ -86,6 +87,7 @@ export function useTableSort<K extends string>({
     dirParam,
     searchParams,
     router,
+    pathname,
   ]);
 
   const handleSort = useCallback(
@@ -104,7 +106,7 @@ export function useTableSort<K extends string>({
       }
 
       const qs = params.toString();
-      router.replace(qs ? `?${qs}` : "?", { scroll: false });
+      router.replace(qs ? `?${qs}` : pathname, { scroll: false });
     },
     [
       sortKey,
@@ -115,6 +117,7 @@ export function useTableSort<K extends string>({
       sortParam,
       dirParam,
       router,
+      pathname,
     ],
   );
 

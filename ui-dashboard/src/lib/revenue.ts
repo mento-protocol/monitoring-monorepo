@@ -44,7 +44,10 @@ export function buildDailyFeeSeries(
   let minBucket = Infinity;
 
   for (const netData of networkData) {
-    if (netData.error !== null) continue;
+    // Skip both transport errors and feesError (rates query rejected): an empty
+    // rate map causes non-USD-pegged transfers to silently drop while USD-pegged
+    // ones price correctly, making the chart traces subtly wrong.
+    if (netData.error !== null || netData.feesError !== null) continue;
 
     for (const transfer of netData.feeTransfers) {
       if (UNRESOLVED_SYMBOLS.has(transfer.tokenSymbol)) continue;

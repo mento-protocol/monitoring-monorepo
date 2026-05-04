@@ -9,7 +9,7 @@
  */
 
 import React from "react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
@@ -93,15 +93,19 @@ function LeaderboardHookWrapper({
 
 let container: HTMLElement;
 let root: Root;
+let setupActive = false;
 
 function setup(params: URLSearchParams = new URLSearchParams()) {
   mockSearchParams = params;
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
+  setupActive = true;
 }
 
 function teardown() {
+  if (!setupActive) return;
+  setupActive = false;
   act(() => {
     root.unmount();
   });
@@ -111,6 +115,14 @@ function teardown() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockSearchParams = new URLSearchParams();
+  setupActive = false;
+});
+
+// `afterEach` cleans up unconditionally so a failing assertion can't leak the
+// DOM container into the next test. Idempotent — no-op when a test (e.g. the
+// two-prefix isolation cases below) already cleaned up its own roots.
+afterEach(() => {
+  teardown();
 });
 
 // ---------------------------------------------------------------------------
@@ -126,7 +138,6 @@ describe("useTableSort — defaults applied when URL has no params", () => {
     });
     expect(ref.current?.sortKey).toBe("tvl");
     expect(ref.current?.sortDir).toBe("desc");
-    teardown();
   });
 });
 
@@ -141,7 +152,6 @@ describe("useTableSort — URL param round-trips", () => {
     });
     expect(ref.current?.sortKey).toBe("fees24h");
     expect(ref.current?.sortDir).toBe("asc");
-    teardown();
   });
 
   it("reads Sort and Dir params without prefix", () => {
@@ -152,7 +162,6 @@ describe("useTableSort — URL param round-trips", () => {
     });
     expect(ref.current?.sortKey).toBe("volume24h");
     expect(ref.current?.sortDir).toBe("asc");
-    teardown();
   });
 });
 
@@ -165,7 +174,6 @@ describe("useTableSort — invalid sort param falls back to default key", () => 
     });
     expect(ref.current?.sortKey).toBe("tvl");
     expect(ref.current?.sortDir).toBe("asc");
-    teardown();
   });
 
   it("falls back to defaultDir when dir value is not 'asc' or 'desc'", () => {
@@ -176,7 +184,6 @@ describe("useTableSort — invalid sort param falls back to default key", () => 
     });
     expect(ref.current?.sortKey).toBe("pool");
     expect(ref.current?.sortDir).toBe("desc");
-    teardown();
   });
 });
 
@@ -195,7 +202,6 @@ describe("useTableSort — handleSort(sameKey) toggles direction", () => {
     // tvl+asc differs from defaults (tvl/desc), so params should be set
     expect(callArg).toContain("Sort=tvl");
     expect(callArg).toContain("Dir=asc");
-    teardown();
   });
 
   it("toggles asc → desc when handleSort called with the active key", () => {
@@ -210,7 +216,6 @@ describe("useTableSort — handleSort(sameKey) toggles direction", () => {
     const callArg = mockReplace.mock.calls[0][0] as string;
     expect(callArg).toContain("Sort=volume24h");
     expect(callArg).toContain("Dir=desc");
-    teardown();
   });
 });
 
@@ -227,7 +232,6 @@ describe("useTableSort — handleSort(newKey) resets dir to 'desc'", () => {
     const callArg = mockReplace.mock.calls[0][0] as string;
     expect(callArg).toContain("Sort=volume24h");
     expect(callArg).toContain("Dir=desc");
-    teardown();
   });
 });
 
@@ -243,8 +247,7 @@ describe("useTableSort — strips params when new state matches defaults", () =>
       ref.current?.handleSort("tvl");
     });
     const callArg = mockReplace.mock.calls[0][0] as string;
-    expect(callArg).toBe("?");
-    teardown();
+    expect(callArg).toBe("/");
   });
 
   it("keeps params when new state differs from defaults", () => {
@@ -259,7 +262,6 @@ describe("useTableSort — strips params when new state matches defaults", () =>
     const callArg = mockReplace.mock.calls[0][0] as string;
     expect(callArg).toContain("Sort=pool");
     expect(callArg).toContain("Dir=desc");
-    teardown();
   });
 });
 
@@ -276,7 +278,6 @@ describe("useTableSort — canonicalizes malformed / partial URL params on mount
     const callArg = mockReplace.mock.calls[0][0] as string;
     expect(callArg).toContain("Sort=tvl");
     expect(callArg).toContain("Dir=asc");
-    teardown();
   });
 
   it("strips both params when bogus sort + invalid dir collapse to defaults", () => {
@@ -288,8 +289,7 @@ describe("useTableSort — canonicalizes malformed / partial URL params on mount
     expect(ref.current?.sortKey).toBe("tvl");
     expect(ref.current?.sortDir).toBe("desc");
     expect(mockReplace).toHaveBeenCalledTimes(1);
-    expect(mockReplace.mock.calls[0][0]).toBe("?");
-    teardown();
+    expect(mockReplace.mock.calls[0][0]).toBe("/");
   });
 
   it("backfills the missing dir param when only sort is present", () => {
@@ -304,7 +304,6 @@ describe("useTableSort — canonicalizes malformed / partial URL params on mount
     const callArg = mockReplace.mock.calls[0][0] as string;
     expect(callArg).toContain("Sort=pool");
     expect(callArg).toContain("Dir=desc");
-    teardown();
   });
 
   it("strips literal-default params (Sort=tvl&Dir=desc) so URL stays canonical", () => {
@@ -314,8 +313,7 @@ describe("useTableSort — canonicalizes malformed / partial URL params on mount
       root.render(React.createElement(HookWrapper, { resultRef: ref }));
     });
     expect(mockReplace).toHaveBeenCalledTimes(1);
-    expect(mockReplace.mock.calls[0][0]).toBe("?");
-    teardown();
+    expect(mockReplace.mock.calls[0][0]).toBe("/");
   });
 
   it("does NOT rewrite when URL is already canonical", () => {
@@ -325,7 +323,6 @@ describe("useTableSort — canonicalizes malformed / partial URL params on mount
       root.render(React.createElement(HookWrapper, { resultRef: ref }));
     });
     expect(mockReplace).not.toHaveBeenCalled();
-    teardown();
   });
 
   it("does NOT rewrite when URL is empty (defaults already canonical)", () => {
@@ -335,7 +332,6 @@ describe("useTableSort — canonicalizes malformed / partial URL params on mount
       root.render(React.createElement(HookWrapper, { resultRef: ref }));
     });
     expect(mockReplace).not.toHaveBeenCalled();
-    teardown();
   });
 });
 
@@ -364,7 +360,6 @@ describe("useTableSort — handleSort honors defaultDir on new-key reset", () =>
     const callArg = mockReplace.mock.calls[0][0] as string;
     expect(callArg).toContain("Sort=pool");
     expect(callArg).toContain("Dir=asc");
-    teardown();
   });
 
   it("when new state matches defaultDir=asc default, params are stripped", () => {
@@ -390,8 +385,7 @@ describe("useTableSort — handleSort honors defaultDir on new-key reset", () =>
     act(() => {
       ref.current?.handleSort("tvl");
     });
-    expect(mockReplace.mock.calls[0][0]).toBe("?");
-    teardown();
+    expect(mockReplace.mock.calls[0][0]).toBe("/");
   });
 });
 
