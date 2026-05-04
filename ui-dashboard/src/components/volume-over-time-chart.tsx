@@ -31,8 +31,16 @@ export type ChainVolumeSeries = {
 // (legacy Broker → BiPoolManager). v3 dominates today, so it sits at the
 // bottom of the stack and uses the brand color; v2 stacks on top in a
 // distinct teal so the gap reads at a glance even when small.
-const V3_COLOR = "#6366f1"; // indigo-500
-const V2_COLOR = "#14b8a6"; // teal-500
+//
+// `bg` = same hex with `59` appended = 35% alpha — used for the headline
+// pill background so it reads as the same series as its matching trace.
+const VERSION_STYLE = {
+  v3: { label: "v3", color: "#6366f1", bg: "#6366f159" },
+  v2: { label: "v2", color: "#14b8a6", bg: "#14b8a659" },
+} as const;
+type Version = keyof typeof VERSION_STYLE;
+const V3_COLOR = VERSION_STYLE.v3.color;
+const V2_COLOR = VERSION_STYLE.v2.color;
 
 // 1e16 — divide BigInt USD-wei by this to land in "cent" units that fit in
 // Number safely above MAX_SAFE_INTEGER. Hoisted out of `buildBrokerDailyV2Series`
@@ -227,19 +235,16 @@ export function weekOverWeekChangePct(
 
 // Tiny pill rendered after each $-value in the headline so "v3" / "v2" labels
 // don't compete typographically with the dollar amount the user is reading.
-function VersionBadge({
-  label,
-  color,
-}: {
-  label: string;
-  color: string;
-}): ReactNode {
+// Caller picks the version; color + bg + label come from `VERSION_STYLE` so
+// the pill can't drift out of sync with its matching breakdown trace.
+function VersionBadge({ version }: { version: Version }): ReactNode {
+  const { label, color, bg } = VERSION_STYLE[version];
   return (
     <span
-      // 35% alpha background derived from the same hex the chart uses for the
-      // matching trace, so headline pills and breakdown areas read as the
-      // same series at a glance.
-      style={{ backgroundColor: `${color}59`, color }}
+      style={{ backgroundColor: bg, color }}
+      // `translate-y-[-3px]` nudges the cap-height-based pill up onto the
+      // baseline of the surrounding text-3xl/4xl digits — without it the
+      // pill sits noticeably below the dollar value's midline.
       className="ml-1.5 inline-flex translate-y-[-3px] items-center rounded px-1.5 py-px font-mono text-[10px] font-medium uppercase tracking-wide sm:text-xs"
     >
       {label}
@@ -274,11 +279,11 @@ function computeHeadline(
     <span className="inline-flex flex-wrap items-baseline gap-x-3">
       <span>
         {formatUSD(v3Total)}
-        <VersionBadge label="v3" color={V3_COLOR} />
+        <VersionBadge version="v3" />
       </span>
       <span>
         {hasBrokerSnapshotError ? "—" : formatUSD(v2Total)}
-        <VersionBadge label="v2" color={V2_COLOR} />
+        <VersionBadge version="v2" />
       </span>
     </span>
   );
