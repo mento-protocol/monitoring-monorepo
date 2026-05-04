@@ -157,7 +157,9 @@ export function computeRebalanceUsd(input: RebalanceUsdInput): RebalanceUsd {
 export const USD_WEI_DECIMALS = 18;
 
 /** Scale a token-native amount to 18-decimal USD-wei.
- *  Assumes the input token is USD-pegged (1 token = $1). */
+ *  Assumes the input token is USD-pegged (1 token = $1).
+ *  Truncates (not rounds) when `tokenDecimals > 18`. No USD-pegged token
+ *  exceeds 18 decimals today; revisit if that ever changes. */
 function scaleToUsdWei(amount: bigint, tokenDecimals: number): bigint {
   if (tokenDecimals === USD_WEI_DECIMALS) return amount;
   if (tokenDecimals < USD_WEI_DECIMALS) {
@@ -205,12 +207,20 @@ export function computeSwapUsdWei(input: SwapUsdInput): bigint {
     amount1Out,
   } = input;
 
+  // Match the gross-leg convention used by `Pool.notionalVolume0/1` upserts
+  // (handlers/fpmm.ts, handlers/virtualPool.ts): notional per side is the
+  // larger of (in, out). For standard Uniswap-V2-style swaps exactly one is
+  // non-zero so this equals |in − out|; for callback/flash-style flows where
+  // both are non-zero, gross is the correct accounting choice.
+  const a0 = amount0In > amount0Out ? amount0In : amount0Out;
+  const a1 = amount1In > amount1Out ? amount1In : amount1Out;
+
   const picked = pickPeggedSide(
     chainId,
     token0,
     token1,
-    bAbs(amount0In - amount0Out),
-    bAbs(amount1In - amount1Out),
+    a0,
+    a1,
     token0Decimals,
     token1Decimals,
   );

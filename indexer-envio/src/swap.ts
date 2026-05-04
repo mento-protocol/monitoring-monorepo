@@ -3,7 +3,15 @@ import { computeSwapUsdWei } from "./usd";
 
 /** Subset of an Envio FPMM/VirtualPool Swap event we need to derive the new
  *  trader-facing fields on `SwapEvent`. Loosely typed so both handlers can pass
- *  their concrete event without importing each other's generated types. */
+ *  their concrete event without importing each other's generated types.
+ *
+ *  Envio's generated types declare both `transaction.from` and `transaction.to`
+ *  as `string | undefined`. At runtime, `from` is always populated when
+ *  `field_selection.transaction_fields` includes `"from"` (see
+ *  config.multichain.*.yaml — this PR ensures both `from` and `to` are loaded).
+ *  `to` can be genuinely null on EVM for contract-creation txs, but those
+ *  don't emit Mento Swap events. The empty-string fallbacks below are dead at
+ *  runtime; they exist only to satisfy the looser generated type. */
 export interface SwapEventLike {
   chainId: number;
   transaction: { from: string | undefined; to: string | undefined };
