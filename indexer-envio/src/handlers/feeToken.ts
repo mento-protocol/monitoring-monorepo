@@ -120,8 +120,12 @@ ERC20FeeToken.Transfer.handler(
 
           // Heal the original day's snapshot.
           const stalePoolId = makePoolId(chainId, s.from);
-          let stalePool = poolCache.get(stalePoolId);
-          if (stalePool === undefined) {
+          // `.has()` (not `.get() === undefined`) so a cached negative
+          // lookup (`undefined` value) doesn't re-query on every iteration.
+          let stalePool: Awaited<ReturnType<typeof context.Pool.get>>;
+          if (poolCache.has(stalePoolId)) {
+            stalePool = poolCache.get(stalePoolId);
+          } else {
             stalePool = await context.Pool.get(stalePoolId);
             poolCache.set(stalePoolId, stalePool);
           }
