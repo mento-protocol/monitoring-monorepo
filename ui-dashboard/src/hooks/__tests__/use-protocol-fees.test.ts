@@ -40,48 +40,59 @@ vi.mock("graphql-request", () => {
 import { GraphQLClient } from "graphql-request";
 
 // ---------------------------------------------------------------------------
-// @/lib/networks mock — two deterministic networks so cross-chain isolation
-// tests have predictable indexes. Only one vi.mock per module is allowed;
-// all test cases use this two-network registry.
+// @/lib/networks mock — `vi.hoisted` shares mutable state with the hoisted
+// `vi.mock` factory so individual tests can swap the network registry to
+// exercise paths like the missing-Hasura-URL guard. The mock factory exposes
+// `NETWORK_IDS` / `NETWORKS` / `isConfiguredNetworkId` as live getters so each
+// `runFetcher()` call sees the current `mocks.*` state.
 // ---------------------------------------------------------------------------
+
+const DEFAULT_CELO = {
+  id: "celo-mainnet" as const,
+  label: "Celo",
+  chainId: 42220,
+  contractsNamespace: null,
+  hasuraUrl: "https://celo.example.com/v1/graphql",
+  hasuraSecret: "",
+  explorerBaseUrl: "https://celoscan.io",
+  tokenSymbols: {},
+  addressLabels: {},
+  local: false,
+  hasVirtualPools: false,
+  testnet: false,
+};
+
+const DEFAULT_MONAD = {
+  id: "monad-mainnet" as const,
+  label: "Monad",
+  chainId: 143,
+  contractsNamespace: null,
+  hasuraUrl: "https://monad.example.com/v1/graphql",
+  hasuraSecret: "",
+  explorerBaseUrl: "https://monadscan.com",
+  tokenSymbols: {},
+  addressLabels: {},
+  local: false,
+  hasVirtualPools: false,
+  testnet: false,
+};
+
+const mocks = vi.hoisted(() => ({
+  networkIds: ["celo-mainnet", "monad-mainnet"] as string[],
+  networks: {} as Record<string, unknown>,
+}));
 
 vi.mock("@/lib/networks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/networks")>();
   return {
     ...actual,
-    NETWORK_IDS: ["celo-mainnet", "monad-mainnet"],
-    NETWORKS: {
-      "celo-mainnet": {
-        id: "celo-mainnet",
-        label: "Celo",
-        chainId: 42220,
-        contractsNamespace: null,
-        hasuraUrl: "https://celo.example.com/v1/graphql",
-        hasuraSecret: "",
-        explorerBaseUrl: "https://celoscan.io",
-        tokenSymbols: {},
-        addressLabels: {},
-        local: false,
-        hasVirtualPools: false,
-        testnet: false,
-      },
-      "monad-mainnet": {
-        id: "monad-mainnet",
-        label: "Monad",
-        chainId: 143,
-        contractsNamespace: null,
-        hasuraUrl: "https://monad.example.com/v1/graphql",
-        hasuraSecret: "",
-        explorerBaseUrl: "https://monadscan.com",
-        tokenSymbols: {},
-        addressLabels: {},
-        local: false,
-        hasVirtualPools: false,
-        testnet: false,
-      },
+    get NETWORK_IDS() {
+      return mocks.networkIds;
     },
-    isConfiguredNetworkId: (id: string) =>
-      ["celo-mainnet", "monad-mainnet"].includes(id),
+    get NETWORKS() {
+      return mocks.networks;
+    },
+    isConfiguredNetworkId: (id: string) => mocks.networkIds.includes(id),
   };
 });
 
@@ -106,21 +117,17 @@ function extractQuery(arg: unknown): string {
 
 /**
  * Set up a per-query response implementation for all `GraphQLClient.request`
- * calls. Each invocation routes based on the query document string.
+ * calls. Each invocation routes based on the query document string. Use this
+ * for tests where every chain returns the same fixture; for per-chain routing
+ * see Case 7's inline `mockImplementation` which inspects the constructor's
+ * URL history.
  */
-function mockRequest(
-  impl: (query: string, url: string) => unknown | Promise<unknown>,
-) {
+function mockRequest(impl: (query: string) => unknown | Promise<unknown>) {
   (
     GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
   ).mockImplementation((...args: unknown[]) => {
     const query = extractQuery(args[0]);
-    // Determine which client's URL this belongs to.
-    const constructedUrls = (
-      GraphQLClient as ReturnType<typeof vi.fn>
-    ).mock.calls.map((c: unknown[]) => c[0] as string);
-    const lastUrl = constructedUrls[constructedUrls.length - 1] ?? "";
-    const result = impl(query, lastUrl);
+    const result = impl(query);
     return result instanceof Promise ? result : Promise.resolve(result);
   });
 }
@@ -194,8 +201,17 @@ function setupSuccessfulMock() {
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  // `resetAllMocks` (not `clearAllMocks`) is required because some tests set
+  // a mockImplementation on `GraphQLClient` itself (the constructor) — clear
+  // only wipes call history, leaving the implementation in place to leak
+  // into the next test. Reset wipes both.
+  vi.resetAllMocks();
   capturedFetcher = null;
+  mocks.networkIds = ["celo-mainnet", "monad-mainnet"];
+  mocks.networks = {
+    "celo-mainnet": DEFAULT_CELO,
+    "monad-mainnet": DEFAULT_MONAD,
+  };
 });
 
 // ---------------------------------------------------------------------------
@@ -397,54 +413,66 @@ describe("useProtocolFees — all three queries reject", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Case 6: Hasura URL missing
-// The hasura guard is module-private inside fetchFeesForNetwork. We test it
-// by verifying the `blankNetworkData` shape it produces — the guard's exact
-// error message format is load-bearing because consumers key on it for UI banners.
+// Case 6: Hasura URL missing — driven through the actual hook fetch path.
 // ---------------------------------------------------------------------------
 
 describe("useProtocolFees — hasura URL guard", () => {
-  it("blankNetworkData with missing-URL error carries correct message and zero data", async () => {
-    const { blankNetworkData } = await import("@/lib/fetch-all-networks");
-    const { buildSnapshotWindows } = await import("@/lib/volume");
-
-    const network = {
-      id: "celo-mainnet" as const,
-      label: "Celo No URL",
-      chainId: 42220,
-      contractsNamespace: null,
-      hasuraUrl: "",
-      hasuraSecret: "",
-      explorerBaseUrl: "https://celoscan.io",
-      tokenSymbols: {},
-      addressLabels: {},
-      local: false,
-      hasVirtualPools: false,
-      testnet: false,
+  it("when network has empty hasuraUrl, no GraphQL queries fire and result.error carries the guard message", async () => {
+    // Override the hoisted networks fixture for THIS test only — the
+    // beforeEach resets it. Single chain to make the assertions sharp.
+    mocks.networkIds = ["celo-mainnet"];
+    mocks.networks = {
+      "celo-mainnet": { ...DEFAULT_CELO, hasuraUrl: "", label: "Celo No URL" },
     };
-    const windows = buildSnapshotWindows(Date.now());
-    // This mirrors exactly what fetchFeesForNetwork returns when !network.hasuraUrl.
-    const result = blankNetworkData(network, windows, {
-      error: new Error(`Hasura URL not configured for "${network.label}"`),
-    });
 
-    expect(result.error).not.toBeNull();
-    expect(result.error?.message).toContain("Hasura URL not configured");
-    expect(result.error?.message).toContain(network.label);
-    expect(result.fees).toBeNull();
-    expect(result.feeTransfers).toHaveLength(0);
-    expect(result.poolLabels.size).toBe(0);
-    expect(result.feesError).toBeNull(); // error is on `error`, not `feesError`
-  });
-
-  it("networks with hasuraUrl set do not produce Hasura-config errors", async () => {
-    // Verify the two mocked networks (both have hasuraUrl) produce no URL guard errors.
-    setupSuccessfulMock();
     const results = await runFetcher();
 
-    for (const r of results) {
-      expect(r.error?.message ?? "").not.toContain("Hasura URL not configured");
-    }
+    expect(results).toHaveLength(1);
+    const celo = results[0];
+    expect(celo.error).not.toBeNull();
+    expect(celo.error?.message).toContain("Hasura URL not configured");
+    expect(celo.error?.message).toContain("Celo No URL");
+    expect(celo.fees).toBeNull();
+    expect(celo.feeTransfers).toHaveLength(0);
+    expect(celo.poolLabels.size).toBe(0);
+    expect(celo.feesError).toBeNull(); // error is on `error`, not `feesError`
+
+    // Guard short-circuits BEFORE any client construction. No GraphQL
+    // requests should have fired and no client should have been built.
+    expect(GraphQLClient).not.toHaveBeenCalled();
+    expect(GraphQLClient.prototype.request).not.toHaveBeenCalled();
+  });
+
+  it("the configured-URL network in a mixed fixture doesn't get blanked by another network's missing URL", async () => {
+    // One chain has a URL, the other doesn't. The URL-having chain must
+    // still hit the network and return populated data.
+    mocks.networkIds = ["celo-mainnet", "monad-mainnet"];
+    mocks.networks = {
+      "celo-mainnet": DEFAULT_CELO,
+      "monad-mainnet": { ...DEFAULT_MONAD, hasuraUrl: "" },
+    };
+    setupSuccessfulMock();
+
+    const results = await runFetcher();
+
+    const celo = results.find((r) => r.network.id === "celo-mainnet")!;
+    const monad = results.find((r) => r.network.id === "monad-mainnet")!;
+
+    // Celo: full success.
+    expect(celo.error).toBeNull();
+    expect(celo.fees).not.toBeNull();
+    expect(celo.feeTransfers).toHaveLength(1);
+
+    // Monad: guard fired.
+    expect(monad.error?.message).toContain("Hasura URL not configured");
+    expect(monad.fees).toBeNull();
+    expect(monad.feeTransfers).toHaveLength(0);
+
+    // GraphQLClient should have been constructed exactly once (for Celo).
+    expect(GraphQLClient).toHaveBeenCalledTimes(1);
+    expect((GraphQLClient as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(
+      DEFAULT_CELO.hasuraUrl,
+    );
   });
 });
 
@@ -455,8 +483,12 @@ describe("useProtocolFees — hasura URL guard", () => {
 describe("useProtocolFees — per-chain isolation", () => {
   it("one chain with all queries failing does not blank the other chain", async () => {
     // All three of Monad's queries reject. fetchFeesForNetwork still returns
-    // (via allSettled), carrying feesError. Celo is unaffected.
-    // We differentiate by the URL used to construct each GraphQLClient.
+    // (via allSettled), carrying feesError. Celo is unaffected. We route by
+    // the URL used to construct each GraphQLClient — works because each
+    // fetchFeesForNetwork constructs its client and fires all three
+    // request() calls synchronously before awaiting, so by the time
+    // request() runs, the most-recently-constructed URL identifies the
+    // current network.
     (
       GraphQLClient.prototype.request as ReturnType<typeof vi.fn>
     ).mockImplementation((...args: unknown[]) => {
@@ -500,40 +532,43 @@ describe("useProtocolFees — per-chain isolation", () => {
     expect(monad.network.id).toBe("monad-mainnet");
   });
 
-  it("outer allSettled surfaces a network-level error on the error channel when fetchFeesForNetwork throws", async () => {
-    // fetchFeesForNetwork can throw synchronously after the allSettled block
-    // (e.g. a bug in blankNetworkData or stripChainIdFromPoolId). fetchAllProtocolFees
-    // wraps each per-network call in its own allSettled, mapping rejected entries
-    // to blankNetworkData({error}). We verify that shape here by simulating a
-    // network that would get the outer catch path — the easiest proxy is to verify
-    // the shape of blankNetworkData(network, windows, {error}) which is what the
-    // outer catch produces.
-    const { blankNetworkData } = await import("@/lib/fetch-all-networks");
-    const { buildSnapshotWindows } = await import("@/lib/volume");
+  it("when fetchFeesForNetwork throws synchronously, the outer allSettled maps the rejection to result.error for THAT chain only", async () => {
+    // Drive the outer rejection mapping in `fetchAllProtocolFees`: make the
+    // GraphQLClient constructor throw for Monad's URL only. That throw
+    // propagates out of fetchFeesForNetwork → outer Promise.allSettled
+    // catches it → maps to blankNetworkData(NETWORKS[id], windows, { error }).
+    const ctorErr = new Error("client construction failed for monad");
+    // `function` (not arrow) so vi.fn can invoke it as a constructor when
+    // `new GraphQLClient(...)` runs. Arrow functions are not constructible
+    // and would surface as "is not a constructor" before our throw fires.
+    (GraphQLClient as ReturnType<typeof vi.fn>).mockImplementation(function (
+      this: object,
+      url: string,
+    ) {
+      if (url.includes("monad")) throw ctorErr;
+      // Celo: leave `this` as-is. `new` returns the constructed object
+      // (an instance of GraphQLClient with the prototype's request mock).
+    } as (this: object, ...args: unknown[]) => unknown);
+    // Wire Celo's queries to succeed via the prototype mock.
+    setupSuccessfulMock();
 
-    const network = {
-      id: "monad-mainnet" as const,
-      label: "Monad",
-      chainId: 143,
-      contractsNamespace: null,
-      hasuraUrl: "https://monad.example.com/v1/graphql",
-      hasuraSecret: "",
-      explorerBaseUrl: "https://monadscan.com",
-      tokenSymbols: {},
-      addressLabels: {},
-      local: false,
-      hasVirtualPools: false,
-      testnet: false,
-    };
-    const windows = buildSnapshotWindows(Date.now());
-    const outerErr = new Error("unexpected throw");
-    const result = blankNetworkData(network, windows, { error: outerErr });
+    const results = await runFetcher();
 
-    expect(result.error).toBe(outerErr);
-    expect(result.network.id).toBe("monad-mainnet");
-    expect(result.fees).toBeNull();
-    expect(result.feeTransfers).toHaveLength(0);
-    expect(result.feesError).toBeNull(); // outer error goes on `error`, not `feesError`
+    const celo = results.find((r) => r.network.id === "celo-mainnet")!;
+    const monad = results.find((r) => r.network.id === "monad-mainnet")!;
+
+    // Celo path unaffected.
+    expect(celo.error).toBeNull();
+    expect(celo.fees).not.toBeNull();
+    expect(celo.feeTransfers).toHaveLength(1);
+
+    // Monad: outer allSettled mapped the constructor throw to result.error.
+    expect(monad.error).toBe(ctorErr);
+    expect(monad.feesError).toBeNull(); // outer-channel error, not fees-channel
+    expect(monad.fees).toBeNull();
+    expect(monad.feeTransfers).toHaveLength(0);
+    expect(monad.poolLabels.size).toBe(0);
+    expect(monad.network.id).toBe("monad-mainnet");
   });
 
   it("per-chain feesError does not bleed across networks", async () => {
