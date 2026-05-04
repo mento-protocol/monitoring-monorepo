@@ -1,16 +1,8 @@
 /**
- * Tests for the per-chain truncation badge on the All-time column of
- * `RevenueByPoolTable`. Covers all four combinations of (chainTruncated,
- * unpriced) per-row state:
- *
- *   1. truncated + unpriced   → ≈ with unpriced tooltip (unpriced wins)
- *   2. truncated + not unpriced → ≈ with truncation tooltip
- *   3. not truncated + unpriced → ≈ with unpriced tooltip
- *   4. neither              → no ≈ on any column
- *
- * Uses `renderToStaticMarkup` (server-side render, no jsdom) since we only
- * inspect the static HTML output. Mocks are limited to what's strictly
- * required for the import chain to resolve.
+ * Tests for the per-chain truncation badge on `RevenueByPoolTable`.
+ * Truncation is now per-window: a window is flagged when the chain hit the
+ * row cap AND the oldest returned transfer's timestamp is younger than the
+ * window's lower bound (i.e. the cap clipped data inside the window).
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -192,7 +184,7 @@ describe("RevenueByPoolTable — per-chain truncation badge", () => {
     const cells = renderFeeCells([networkData(transfers, feeSummary(true))]);
 
     expect(cells.feesAll).toContain("≈");
-    expect(cells.feesAll).toContain("1000-row query cap");
+    expect(cells.feesAll).toContain("query cap");
     expect(cells.fees24h).not.toContain("≈");
     expect(cells.fees7d).not.toContain("≈");
     expect(cells.fees30d).not.toContain("≈");
@@ -223,20 +215,95 @@ describe("RevenueByPoolTable — per-chain truncation badge", () => {
     expect(cells.feesAll).not.toContain("≈");
   });
 
-  it("truncation does not affect recent windows (24h/7d/30d) even when chain is truncated", () => {
-    // All transfers are priced USDm — old timestamps (outside all windows).
-    // We have PROTOCOL_FEE_QUERY_LIMIT transfers to simulate a truncated chain.
-    const transfers = Array.from({ length: PROTOCOL_FEE_QUERY_LIMIT }, () =>
-      transfer(),
-    );
-    // isTruncated=true because we hit the cap
+  // -----------------------------------------------------------------------
+  // Per-window truncation — the badge is driven by whether the oldest
+  // returned transfer predates each window boundary.
+  // -----------------------------------------------------------------------
+
+  const NOW_S = Math.floor(Date.now() / 1000);
+
+  it("capped chain whose oldest returned transfer predates 30d → only All-time is truncated", () => {
+    // Newest transfer is recent; oldest is well outside 30d. Chain is capped
+    // (more transfers exist beyond the oldest returned one), but the cap did
+    // NOT clip data inside any of the 24h/7d/30d windows because we already
+    // see history older than 30d.
+    const transfers = [
+      transfer({ blockTimestamp: String(NOW_S - 60) }), // newest, inside 24h
+      transfer({ blockTimestamp: String(NOW_S - 60 * 86400) }), // oldest, > 30d
+    ];
     const cells = renderFeeCells([networkData(transfers, feeSummary(true))]);
 
-    // All-time should be ≈
     expect(cells.feesAll).toContain("≈");
-    // Recent windows must NOT be ≈ (no unpriced transfers, cap only clips history)
+    expect(cells.feesAll).toContain("query cap");
+    expect(cells.fees30d).not.toContain("≈");
+    expect(cells.fees7d).not.toContain("≈");
+    expect(cells.fees24h).not.toContain("≈");
+  });
+
+  it("capped chain whose oldest returned transfer is inside 30d → 30d + All-time truncated, 24h/7d clean", () => {
+    // Oldest returned is 14 days ago — outside 7d/24h, inside 30d. Cap
+    // clipped data older than 14 days, so 30d total is a lower bound; 7d
+    // and 24h are unaffected.
+    const transfers = [
+      transfer({ blockTimestamp: String(NOW_S - 60) }), // newest, inside 24h
+      transfer({ blockTimestamp: String(NOW_S - 14 * 86400) }), // oldest, in 30d
+    ];
+    const cells = renderFeeCells([networkData(transfers, feeSummary(true))]);
+
+    expect(cells.fees30d).toContain("≈");
+    expect(cells.fees30d).toContain("query cap");
+    expect(cells.feesAll).toContain("≈");
+    expect(cells.fees24h).not.toContain("≈");
+    expect(cells.fees7d).not.toContain("≈");
+  });
+
+  it("capped chain whose oldest returned transfer is inside 7d → 7d + 30d + All-time truncated, 24h clean", () => {
+    const transfers = [
+      transfer({ blockTimestamp: String(NOW_S - 60) }), // newest, inside 24h
+      transfer({ blockTimestamp: String(NOW_S - 3 * 86400) }), // oldest, in 7d
+    ];
+    const cells = renderFeeCells([networkData(transfers, feeSummary(true))]);
+
+    expect(cells.fees7d).toContain("≈");
+    expect(cells.fees30d).toContain("≈");
+    expect(cells.feesAll).toContain("≈");
+    expect(cells.fees24h).not.toContain("≈");
+  });
+
+  it("capped chain whose oldest returned transfer is inside 24h → every window truncated", () => {
+    // Extreme case: chain is doing >1000 transfers/day. Cap clipped data
+    // inside every window we display.
+    const transfers = [
+      transfer({ blockTimestamp: String(NOW_S - 60) }), // newest
+      transfer({ blockTimestamp: String(NOW_S - 3600) }), // oldest, 1h ago
+    ];
+    const cells = renderFeeCells([networkData(transfers, feeSummary(true))]);
+
+    expect(cells.fees24h).toContain("≈");
+    expect(cells.fees7d).toContain("≈");
+    expect(cells.fees30d).toContain("≈");
+    expect(cells.feesAll).toContain("≈");
+  });
+
+  it("not-capped chain ignores oldest-timestamp regardless of how recent it is", () => {
+    // Even if all returned transfers are inside 24h, when the chain's
+    // ProtocolFeeSummary.isTruncated is false we trust the full history is
+    // present; no truncation badge anywhere.
+    const transfers = [
+      transfer({ blockTimestamp: String(NOW_S - 60) }),
+      transfer({ blockTimestamp: String(NOW_S - 600) }),
+    ];
+    const cells = renderFeeCells([networkData(transfers, feeSummary(false))]);
+
     expect(cells.fees24h).not.toContain("≈");
     expect(cells.fees7d).not.toContain("≈");
     expect(cells.fees30d).not.toContain("≈");
+    expect(cells.feesAll).not.toContain("≈");
+  });
+
+  it("tooltip cap number tracks PROTOCOL_FEE_QUERY_LIMIT", () => {
+    const transfers = [transfer()];
+    const cells = renderFeeCells([networkData(transfers, feeSummary(true))]);
+    expect(cells.feesAll).toContain(PROTOCOL_FEE_QUERY_LIMIT.toLocaleString());
   });
 });
