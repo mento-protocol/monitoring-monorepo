@@ -254,6 +254,8 @@ export type ProtocolFeeTransfer = {
   tokenDecimals: number;
   amount: string;
   blockTimestamp: string;
+  /** Source pool address (lowercased on-chain in indexer); join key for per-pool revenue. */
+  from: string;
 };
 
 export type OlsPool = {

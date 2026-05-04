@@ -6,6 +6,7 @@
  */
 
 import { parseWei } from "./format";
+import { normalizePoolIdForChain } from "./pool-id";
 import { tokenToUSD, type OracleRateMap } from "./tokens";
 import type { ProtocolFeeTransfer } from "./types";
 
@@ -17,8 +18,15 @@ export const UNRESOLVED_SYMBOLS = new Set(["UNKNOWN"]);
 
 // Public API
 
-/** Maximum rows fetched by the PROTOCOL_FEE_TRANSFERS_ALL query. */
-export const PROTOCOL_FEE_QUERY_LIMIT = 10_000;
+/**
+ * Effective row cap for the PROTOCOL_FEE_TRANSFERS_ALL query.
+ *
+ * Hosted Envio Hasura silently caps every UI query at 1 000 rows regardless
+ * of any larger literal `limit`, so this is the real ceiling. Once a chain
+ * crosses 1 000 lifetime fee-transfer rows, `isTruncated` flips and the UI
+ * surfaces a lower-bound badge.
+ */
+export const PROTOCOL_FEE_QUERY_LIMIT = 1_000;
 
 export type ProtocolFeeSummary = {
   totalFeesUSD: number;
@@ -108,4 +116,102 @@ export function aggregateProtocolFees(
     unresolvedCount24h,
     isTruncated: transfers.length >= PROTOCOL_FEE_QUERY_LIMIT,
   };
+}
+
+export type PoolFeeEntry = {
+  poolId: string;
+  chainId: number;
+  poolAddress: string;
+  totalFeesUSD: number;
+  fees24hUSD: number;
+  fees7dUSD: number;
+  fees30dUSD: number;
+  /**
+   * Any transfer for this pool used an unknown or unpriced symbol — the
+   * all-time total is a lower bound. Window-scoped flags below let the UI
+   * apply `≈` per column so an OLD unpriced transfer doesn't pollute the
+   * 24h/7d/30d cells (mirrors `unpricedSymbols24h` on `ProtocolFeeSummary`).
+   */
+  unpriced: boolean;
+  unpriced24h: boolean;
+  unpriced7d: boolean;
+  unpriced30d: boolean;
+};
+
+type WindowCutoffs = {
+  cutoff24h: number;
+  cutoff7d: number;
+  cutoff30d: number;
+};
+
+function markUnpricedForTs(
+  entry: PoolFeeEntry,
+  ts: number,
+  c: WindowCutoffs,
+): void {
+  entry.unpriced = true;
+  if (ts >= c.cutoff30d) entry.unpriced30d = true;
+  if (ts >= c.cutoff7d) entry.unpriced7d = true;
+  if (ts >= c.cutoff24h) entry.unpriced24h = true;
+}
+
+/**
+ * Per-pool variant of `aggregateProtocolFees`. Inherits the same row-cap
+ * caveat: 24h / 7d / 30d windows are accurate (rows return newest-first),
+ * but all-time may undercount on busy chains once `PROTOCOL_FEE_QUERY_LIMIT`
+ * is hit.
+ */
+export function aggregateProtocolFeesByPool(
+  transfers: ProtocolFeeTransfer[],
+  rates: OracleRateMap,
+): PoolFeeEntry[] {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const cutoffs: WindowCutoffs = {
+    cutoff24h: nowSeconds - 86400,
+    cutoff7d: nowSeconds - 7 * 86400,
+    cutoff30d: nowSeconds - 30 * 86400,
+  };
+  const byPool = new Map<string, PoolFeeEntry>();
+
+  for (const t of transfers) {
+    if (!t.from) continue;
+    const poolAddress = t.from.toLowerCase();
+    const poolId = normalizePoolIdForChain(poolAddress, t.chainId);
+    let entry = byPool.get(poolId);
+    if (!entry) {
+      entry = {
+        poolId,
+        chainId: t.chainId,
+        poolAddress,
+        totalFeesUSD: 0,
+        fees24hUSD: 0,
+        fees7dUSD: 0,
+        fees30dUSD: 0,
+        unpriced: false,
+        unpriced24h: false,
+        unpriced7d: false,
+        unpriced30d: false,
+      };
+      byPool.set(poolId, entry);
+    }
+
+    const ts = Number(t.blockTimestamp);
+
+    if (UNRESOLVED_SYMBOLS.has(t.tokenSymbol)) {
+      markUnpricedForTs(entry, ts, cutoffs);
+      continue;
+    }
+    const amount = parseWei(t.amount, t.tokenDecimals);
+    const usd = tokenToUSD(t.tokenSymbol, amount, rates);
+    if (usd === null) {
+      markUnpricedForTs(entry, ts, cutoffs);
+      continue;
+    }
+    entry.totalFeesUSD += usd;
+    if (ts >= cutoffs.cutoff24h) entry.fees24hUSD += usd;
+    if (ts >= cutoffs.cutoff7d) entry.fees7dUSD += usd;
+    if (ts >= cutoffs.cutoff30d) entry.fees30dUSD += usd;
+  }
+
+  return Array.from(byPool.values());
 }

@@ -61,6 +61,12 @@ export type NetworkData = {
   fees: ProtocolFeeSummary | null;
   /** Raw fee transfer rows — kept for time-series bucketing on the revenue page. */
   feeTransfers: ProtocolFeeTransfer[];
+  /**
+   * Lowercase-address → token-pair map for slim hooks that don't fetch the
+   * full `pools` payload. Empty by default; consumers with a populated
+   * `pools` array should derive labels from that instead.
+   */
+  poolLabels: Map<string, PoolLabel>;
   uniqueLpAddresses: string[] | null;
   rates: OracleRateMap;
   error: Error | null;
@@ -77,6 +83,8 @@ export type NetworkData = {
   snapshotsAllDailyError: Error | null;
   lpError: Error | null;
 };
+
+export type PoolLabel = Pick<Pool, "id" | "token0" | "token1" | "source">;
 
 export type SnapshotPageResult = {
   rows: PoolSnapshotWindow[];

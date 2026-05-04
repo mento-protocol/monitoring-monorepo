@@ -83,6 +83,7 @@ export const blankNetworkData = (
   reservePoolIds: new Set(),
   fees: null,
   feeTransfers: [],
+  poolLabels: new Map(),
   uniqueLpAddresses: null,
   rates: new Map(),
   error: null,
@@ -503,6 +504,7 @@ export async function fetchNetworkData(
       feesResult.status === "fulfilled"
         ? (feesResult.value.ProtocolFeeTransfer ?? [])
         : [],
+    poolLabels: new Map(),
     uniqueLpAddresses,
     rates,
     error: null,

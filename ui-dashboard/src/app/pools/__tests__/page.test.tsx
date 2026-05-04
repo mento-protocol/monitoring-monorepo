@@ -151,6 +151,7 @@ function makeNetworkData(
     reservePoolIds: new Set(),
     fees: null,
     feeTransfers: [],
+    poolLabels: new Map(),
     uniqueLpAddresses: null,
     rates: new Map(),
     error: null,

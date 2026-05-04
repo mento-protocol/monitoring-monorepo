@@ -5,22 +5,20 @@
 /**
  * Fetch all protocol fee transfers for client-side USD aggregation.
  *
- * Nominally capped at 10 000 rows as a safety net. Fee transfers are
- * infrequent (the yield split address receives fees only on swap activity,
- * typically hundreds/year), so this limit won't clip real data for a long
- * time.
- *
- * **Caveat:** hosted Hasura silently caps every UI query at 1 000 rows
- * regardless of the literal limit (see `AGENTS.md` §"Recurring patterns").
- * Once any chain crosses 1 000 lifetime fee-transfer rows, the revenue
- * tiles will silently undercount. Tracked for follow-up: switch to a
- * pre-rolled snapshot entity or paginate with `fetchAllSnapshotPages`.
+ * Hosted Envio Hasura silently caps every UI query at 1 000 rows regardless
+ * of the literal `limit` (see `AGENTS.md` §"Recurring patterns"). The literal
+ * here matches that cap so `aggregateProtocolFees().isTruncated` flips at the
+ * real ceiling — otherwise the lower-bound badge stays hidden until 10 000
+ * rows that prod will never deliver. Once any chain crosses 1 000 lifetime
+ * fee-transfer rows, the revenue tiles correctly mark themselves as a lower
+ * bound. Follow-up: switch to a pre-rolled snapshot entity or paginate with
+ * `fetchAllSnapshotPages`.
  */
 export const PROTOCOL_FEE_TRANSFERS_ALL = `
   query ProtocolFeeTransfersAll($chainId: Int!) {
     ProtocolFeeTransfer(
       where: { chainId: { _eq: $chainId } }
-      limit: 10000
+      limit: 1000
       order_by: { blockTimestamp: desc }
     ) {
       chainId
@@ -28,6 +26,7 @@ export const PROTOCOL_FEE_TRANSFERS_ALL = `
       tokenDecimals
       amount
       blockTimestamp
+      from
     }
   }
 `;

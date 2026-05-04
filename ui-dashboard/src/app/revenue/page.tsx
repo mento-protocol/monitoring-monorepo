@@ -5,6 +5,7 @@ import { formatUSD } from "@/lib/format";
 import { useProtocolFees } from "@/hooks/use-protocol-fees";
 import { BreakdownTile } from "@/components/breakdown-tile";
 import { FeeOverTimeChart } from "@/components/fee-over-time-chart";
+import { RevenueByPoolTable } from "@/components/revenue-by-pool-table";
 import { ComingSoonSection } from "@/components/coming-soon-section";
 
 export default function RevenuePage() {
@@ -144,6 +145,12 @@ function RevenueContent() {
         hasError={anyNetworkError}
         hasFeesError={anyFeesError}
         isApproximate={feesApprox}
+      />
+
+      <RevenueByPoolTable
+        networkData={networkData}
+        isLoading={isLoading}
+        hasError={anyNetworkError || anyFeesError}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
