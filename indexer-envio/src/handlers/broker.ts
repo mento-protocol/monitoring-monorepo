@@ -44,9 +44,10 @@ Broker.Swap.handler(async ({ event, context }) => {
   ]);
 
   // computeSwapUsdWei is built around the FPMM `(token0, token1,
-  // amount{0,1}{In,Out})` shape. Map the Broker's tokenIn/tokenOut into that
-  // shape and reuse the same USD-pegged-side picker the FPMM/VirtualPool
-  // handlers use.
+  // amount{0,1}{In,Out})` shape. Broker.Swap is single-direction (only
+  // amountIn flows in, only amountOut flows out), so we map tokenIn → token0
+  // / amount0In and tokenOut → token1 / amount1Out, leaving the reverse legs
+  // at 0n. The picker then reads the USD-pegged side off the correct token.
   const volumeUsdWei = computeSwapUsdWei({
     chainId: event.chainId,
     token0: tokenIn,

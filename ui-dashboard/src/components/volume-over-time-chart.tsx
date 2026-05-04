@@ -34,6 +34,11 @@ export type ChainVolumeSeries = {
 const V3_COLOR = "#6366f1"; // indigo-500
 const V2_COLOR = "#14b8a6"; // teal-500
 
+// 1e16 — divide BigInt USD-wei by this to land in "cent" units that fit in
+// Number safely above MAX_SAFE_INTEGER. Hoisted out of `buildBrokerDailyV2Series`
+// so it's not recomputed per row. ES2017 target prevents BigInt literals.
+const USD_WEI_PER_CENT = BigInt(10) ** BigInt(16);
+
 /**
  * Includes swap volume from every pool type (FPMM and virtual), matching the
  * Summary tile's volume totals. Virtual pools also emit PoolDailySnapshot
@@ -168,12 +173,12 @@ export function buildBrokerDailyV2Series(
       // 18-decimal "USD-wei" → JS number USD, with cent-precision preserved.
       // `Number(BigInt(volumeUsdWei))` overflows MAX_SAFE_INTEGER (~9e15) for
       // any daily v2 volume above ~$10K, silently losing precision. Divide in
-      // BigInt down to "cents" (1e16 → 1) so the result fits in Number, then
-      // scale back to USD. Sub-cent precision is sacrificed (fine for $K/$M
-      // chart rendering). BigInt literals (`100n`, `10n ** 18n`) aren't used
-      // because the dashboard's `tsconfig.json` targets ES2017.
-      const usd =
-        Number(BigInt(row.volumeUsdWei) / BigInt(10) ** BigInt(16)) / 100;
+      // BigInt down to "cents" first so the result fits in Number, then scale
+      // back to USD. Sub-cent precision is sacrificed (fine for $K/$M chart).
+      const usd = Number(BigInt(row.volumeUsdWei) / USD_WEI_PER_CENT) / 100;
+      // The indexer's `dayBucket()` already rounds `BrokerDailySnapshot.timestamp`
+      // to UTC midnight, so this floor is a no-op in practice — kept defensive
+      // so an upstream timestamp shift can't desync v2 / v3 stack alignment.
       const bucket = Math.floor(timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
       minBucket = Math.min(minBucket, bucket);
       totalBuckets.set(bucket, (totalBuckets.get(bucket) ?? 0) + usd);
@@ -341,9 +346,13 @@ export function VolumeOverTimeChart({
 
   // The chart card reads `series` for the x-axis timestamps and the
   // empty-state gate (`!isLoading && series.length === 0`). The y-axis range
-  // in stacked mode comes from the breakdown traces, so we don't need a
-  // summed-Y series here — the v3 points are already day-aligned with v2,
-  // already sorted, and non-empty whenever either side has data.
+  // in stacked mode comes from the breakdown traces, so the `value` field
+  // here is intentionally unused — do NOT "fix" it by summing v2+v3, the
+  // stack would render that sum as a hidden third series and double-paint.
+  // We pick the longer side so that on the "all" tab where the Broker may
+  // have synced earlier days than v3 (or vice versa) the x-axis still
+  // covers every bucket; Plotly aligns by timestamp value not index, so
+  // missing days on the shorter series render correctly as zero.
   const visibleSeriesForCard = useMemo<TimeSeriesPoint[]>(
     () =>
       (visibleV3Points.length >= visibleV2Points.length

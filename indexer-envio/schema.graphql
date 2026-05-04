@@ -228,14 +228,15 @@ type PoolDailySnapshot @index(fields: ["poolId", "timestamp"]) {
 #
 # The Broker (`0x777A8255cA72412f0d706dc03C9D1987306B4CaD` on Celo) is the
 # settlement layer for v2 legacy swaps that route through `IExchangeProvider`s
-# such as the BiPoolManager. The v3 Router (`0x4861840C...`) bypasses the
-# Broker entirely, calling FPMM/VirtualPool contracts directly, so v2 vs v3
-# volume is split cleanly by event source: Broker.Swap → v2,
-# FPMM.Swap/VirtualPool.Swap → v3.
+# such as the BiPoolManager. The v3 Router (`0x4861840C...`) does NOT bypass
+# the Broker entirely: a Router → VirtualPool wrapper swap also fires
+# `Broker.Swap` transitively, in addition to the wrapper's own `Swap` event.
+# `routedViaV3Router` flags those router-driven sibling rows so the dashboard
+# can exclude them from the v2 series and avoid double-counting against v3.
 #
-# Per-day rollup keyed by (chainId, exchangeProvider, day) so the dashboard
-# can render a v2 volume series filtered to BiPoolManager swaps without
-# touching the per-event table.
+# Per-day rollup keyed by (chainId, exchangeProvider, routedViaV3Router, day)
+# so the dashboard's `routedViaV3Router=false` filter reads from a single
+# index without scanning the per-event table.
 # ============================================================================
 
 type BrokerSwapEvent
@@ -272,9 +273,10 @@ type BrokerSwapEvent
 
 type BrokerDailySnapshot
   @index(fields: ["chainId", "exchangeProvider", "timestamp"]) {
-  # "{chainId}-{exchangeProvider}-{routedViaV3Router}-{day}" so the chart's
-  # v2 query can filter by `routedViaV3Router=false` without scanning the
-  # full per-event table.
+  # `{chainId}-{exchangeProvider}-{router|direct}-{day}` (handler stringifies
+  # `routedViaV3Router` to "router" / "direct"). Bucketing by routing key
+  # lets the chart's v2 filter `routedViaV3Router=false` read a single row
+  # set without scanning the per-event table.
   id: ID!
   chainId: Int! @index
   exchangeProvider: String! @index

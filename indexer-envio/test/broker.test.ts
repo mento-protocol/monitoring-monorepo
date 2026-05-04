@@ -39,10 +39,11 @@ const { MockDb, Broker } = TestHelpers;
 const CHAIN_CELO = 42220;
 // Real Mento BiPoolManager (v2 legacy) on Celo — what the chart will filter for.
 const BIPOOL_MANAGER = "0x22d9db95E6Ae61c104A7B6F6C78D7993B94ec901";
-// USDM (cUSD-equivalent on Mento V2) — 18 decimals; USD-pegged so volumeUsdWei ≠ 0.
-const USDM = "0x765de816845861e75a25fca122bb6898b8b1282a";
-// USDC bridged token — 6 decimals; non-pegged in pickPeggedSide so the
-// USDM leg is what gets used as the USD notional.
+// cUSD (Celo Dollar) — 18 decimals, USD-pegged via USD_PEGGED_SYMBOLS so
+// volumeUsdWei ≠ 0. Both legs of a cUSD/USDC swap are pegged; the larger
+// one wins under `pickPeggedSide`.
+const CUSD = "0x765de816845861e75a25fca122bb6898b8b1282a";
+// USDC bridged token — 6 decimals.
 const USDC = "0xcebA9300f2b948710d2653dD7B07f33A8B32118C";
 const TRADER = "0xAbCdEf1234567890aBCdef1234567890ABCDef12";
 const EXCHANGE_ID =
@@ -72,9 +73,9 @@ const fireSwap = async (
     exchangeProvider: args.exchangeProvider ?? BIPOOL_MANAGER,
     exchangeId: EXCHANGE_ID,
     trader: TRADER,
-    tokenIn: args.tokenIn ?? USDM,
+    tokenIn: args.tokenIn ?? CUSD,
     tokenOut: args.tokenOut ?? USDC,
-    amountIn: args.amountIn ?? 1_000n * 10n ** 18n, // 1000 USDM
+    amountIn: args.amountIn ?? 1_000n * 10n ** 18n, // 1000 CUSD
     amountOut: args.amountOut ?? 999_500_000n, // 999.5 USDC (6dp)
     mockEventData: {
       chainId: CHAIN_CELO,
@@ -92,7 +93,7 @@ const fireSwap = async (
 describe("Broker.Swap handler", () => {
   beforeEach(() => {
     _clearMockERC20Decimals();
-    _setMockERC20Decimals(CHAIN_CELO, USDM, 18);
+    _setMockERC20Decimals(CHAIN_CELO, CUSD, 18);
     _setMockERC20Decimals(CHAIN_CELO, USDC, 6);
   });
 
@@ -128,12 +129,12 @@ describe("Broker.Swap handler", () => {
     // All address fields lowercased per `asAddress`.
     assert.equal(row!.exchangeProvider, BIPOOL_MANAGER.toLowerCase());
     assert.equal(row!.trader, TRADER.toLowerCase());
-    assert.equal(row!.tokenIn, USDM.toLowerCase());
+    assert.equal(row!.tokenIn, CUSD.toLowerCase());
     assert.equal(row!.tokenOut, USDC.toLowerCase());
     // Amounts pass through untouched.
     assert.equal(row!.amountIn, 1_000n * 10n ** 18n);
     assert.equal(row!.amountOut, 999_500_000n);
-    // USDM leg drives the USD notional: 1000 USDM = 1000 × 1e18 = 1e21 USD-wei.
+    // CUSD leg drives the USD notional: 1000 CUSD = 1000 × 1e18 = 1e21 USD-wei.
     assert.equal(row!.volumeUsdWei, 1_000n * 10n ** 18n);
     // Default fixture sends to BROKER_PROXY → not router-driven.
     assert.equal(row!.txTo, BROKER_PROXY.toLowerCase());
@@ -162,21 +163,21 @@ describe("Broker.Swap handler", () => {
   it("rolls (chain, exchangeProvider, day) into a single BrokerDailySnapshot that accumulates", async () => {
     let mockDb = MockDb.createMockDb();
     // Two swaps in the same UTC day on the same provider. Both swaps have a
-    // USDM leg larger than the USDC leg so `pickPeggedSide` consistently picks
-    // USDM as the notional side — keeps the assertion stable.
+    // CUSD leg larger than the USDC leg so `pickPeggedSide` consistently picks
+    // CUSD as the notional side — keeps the assertion stable.
     mockDb = await fireSwap(mockDb, {
       blockNumber: 100,
       blockTimestamp: 1_700_000_000,
       logIndex: 0,
-      amountIn: 1_000n * 10n ** 18n, // 1000 USDM in
-      amountOut: 999_500_000n, // 999.5 USDC out (1000 > 999.5 → USDM wins)
+      amountIn: 1_000n * 10n ** 18n, // 1000 CUSD in
+      amountOut: 999_500_000n, // 999.5 USDC out (1000 > 999.5 → CUSD wins)
     });
     mockDb = await fireSwap(mockDb, {
       blockNumber: 101,
       blockTimestamp: 1_700_000_500, // same day
       logIndex: 0,
-      amountIn: 500n * 10n ** 18n, // 500 USDM in
-      amountOut: 499_750_000n, // 499.75 USDC out (500 > 499.75 → USDM wins)
+      amountIn: 500n * 10n ** 18n, // 500 CUSD in
+      amountOut: 499_750_000n, // 499.75 USDC out (500 > 499.75 → CUSD wins)
     });
 
     const dayTs = dayBucket(1_700_000_000n);
@@ -186,7 +187,7 @@ describe("Broker.Swap handler", () => {
       | undefined;
     assert.isOk(snap, "BrokerDailySnapshot missing");
     assert.equal(snap!.swapCount, 2);
-    // 1000 + 500 = 1500 USDM in USD-wei.
+    // 1000 + 500 = 1500 CUSD in USD-wei.
     assert.equal(snap!.volumeUsdWei, 1_500n * 10n ** 18n);
     assert.equal(snap!.routedViaV3Router, false);
   });
@@ -221,10 +222,13 @@ describe("Broker.Swap handler", () => {
   });
 
   it("buckets distinct exchangeProviders into separate daily snapshots", async () => {
-    // Future-proofs against the dashboard treating non-BiPoolManager events
-    // as v2: each provider gets its own snapshot row, so the filter
-    // `exchangeProvider == BiPoolManager` is mechanically a no-op against
-    // unrelated providers (CDP, OLS, etc., if they ever emit Broker.Swap).
+    // Per-provider rows are kept so a future "v2 by exchange provider"
+    // breakdown is a query-time filter rather than a schema migration. The
+    // current chart's v2 filter is `routedViaV3Router=false` only — any
+    // future non-BiPoolManager provider (CDP, OLS, etc., if they ever emit
+    // `Broker.Swap`) will land in the same v2 series intentionally; that's
+    // the user-chosen design ("v2 = anything entering the Broker that
+    // didn't come from the v3 Router").
     const OTHER_PROVIDER = "0x000000000000000000000000000000000000beef";
     let mockDb = MockDb.createMockDb();
     mockDb = await fireSwap(mockDb, {
