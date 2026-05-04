@@ -236,6 +236,27 @@ describe("buildDailyFeeSeries", () => {
     expect(result[0].protocolFeesUSD).toBeCloseTo(1, 2);
   });
 
+  it("skips chains with feesError even when feeTransfers is populated", () => {
+    // Simulates a rates-only failure: feeTransfers arrived but rates map is empty.
+    // Without the fix, the EURm transfer would silently drop (tokenToUSD → null)
+    // and the USD-pegged transfer would price correctly, producing a subtly wrong trace.
+    const ts = NOW_S - 3600;
+    const bucket = Math.floor(ts / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+    const window = { from: bucket, to: NOW_S + 1 };
+    const goodNet = networkData([transfer({ blockTimestamp: String(ts) })]);
+    const errorNet = networkData(
+      [
+        transfer({ blockTimestamp: String(ts), tokenSymbol: "EURm" }),
+        transfer({ blockTimestamp: String(ts) }), // 1 USDm — would price correctly
+      ],
+      { feesError: new Error("rates failed"), rates: new Map() },
+    );
+    const result = buildDailyFeeSeries([goodNet, errorNet], window);
+    expect(result).toHaveLength(1);
+    // Only goodNet's 1 USDm should appear; errorNet's transfers must be excluded entirely.
+    expect(result[0].protocolFeesUSD).toBeCloseTo(1, 2);
+  });
+
   it("respects window filter — excludes out-of-range transfers", () => {
     const day5ago = TODAY_BUCKET - 5 * SECONDS_PER_DAY;
     const day2ago = TODAY_BUCKET - 2 * SECONDS_PER_DAY;
