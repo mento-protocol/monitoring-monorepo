@@ -100,3 +100,31 @@ export const POOLS_FOR_LEADERBOARD = /* GraphQL */ `
     }
   }
 `;
+
+/**
+ * Trader-pool-day rows in a window, used to drive the per-pool stacked
+ * volume chart on `/leaderboard`. The dashboard sums these client-side
+ * by `(poolId, day)` to produce one series per pool — pre-rolling
+ * `PoolDailyVolumeSnapshot` at the indexer level is the proper fix
+ * (`BACKLOG.md` PR 4) but client-side aggregation is fine for the MVP
+ * given the 1000-row cap is rarely hit at 7d/30d.
+ *
+ * Ordered by `volumeUsdWei desc` so the cap, when hit, drops the
+ * smallest contributors — the top-5 pools that drive the stacked chart's
+ * visual signal stay intact.
+ */
+export const POOL_DAILY_VOLUME = /* GraphQL */ `
+  query PoolDailyVolume($afterTimestamp: numeric!, $limit: Int!) {
+    TraderPoolDailySnapshot(
+      where: { timestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWei: desc }, { timestamp: desc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      poolId
+      timestamp
+      volumeUsdWei
+    }
+  }
+`;

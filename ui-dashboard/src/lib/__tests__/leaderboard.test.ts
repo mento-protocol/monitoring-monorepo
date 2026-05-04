@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
-  aggregateDailyVolume,
+  aggregatePoolDailyVolume,
   aggregateTraderPoolsByWindow,
   aggregateTradersByWindow,
   computeFlow,
@@ -333,37 +333,6 @@ describe("computeFlow", () => {
   });
 });
 
-describe("aggregateDailyVolume", () => {
-  it("buckets by day timestamp and sorts ascending", () => {
-    const rows: TraderDailyRow[] = [
-      trader({
-        chainId: 42220,
-        trader: "0xa",
-        timestamp: "200",
-        volumeUsdWei: USD(10),
-      }),
-      trader({
-        chainId: 42220,
-        trader: "0xb",
-        timestamp: "100",
-        volumeUsdWei: USD(20),
-      }),
-      trader({
-        chainId: 42220,
-        trader: "0xc",
-        timestamp: "100",
-        volumeUsdWei: USD(5),
-      }),
-    ];
-    const out = aggregateDailyVolume(rows);
-    expect(out).toHaveLength(2);
-    expect(out[0]!.timestamp).toBe(100);
-    expect(out[0]!.value).toBeCloseTo(25, 4);
-    expect(out[1]!.timestamp).toBe(200);
-    expect(out[1]!.value).toBeCloseTo(10, 4);
-  });
-});
-
 describe("rangeCutoffSeconds", () => {
   const SECONDS_PER_DAY = 86_400;
   // Pin "now" mid-day UTC so we can prove the cutoff aligns to UTC midnight.
@@ -413,5 +382,100 @@ describe("rangeCutoffSeconds", () => {
     vi.setSystemTime(Date.UTC(2026, 4, 4, 23, 59, 0));
     const evening = rangeCutoffSeconds("7d");
     expect(morning).toBe(evening);
+  });
+});
+
+describe("aggregatePoolDailyVolume", () => {
+  const day = (n: number) => String(n * 86400);
+  const usd = (n: number) =>
+    (BigInt(Math.floor(n * 1_000_000)) * BigInt(10) ** BigInt(12)).toString();
+  const noLabel = (poolId: string) => poolId;
+
+  function row(
+    chainId: number,
+    poolId: string,
+    timestamp: string,
+    volumeUsd: number,
+  ) {
+    return {
+      id: `${chainId}-${poolId}-${timestamp}`,
+      chainId,
+      poolId,
+      timestamp,
+      volumeUsdWei: usd(volumeUsd),
+    };
+  }
+
+  it("buckets by (poolId, day) and ranks pools by total window volume", () => {
+    // pool A: 100 + 50 = 150 over 2 days; pool B: 200 once; pool C: 30 once.
+    const rows = [
+      row(42220, "0xA", day(1), 100),
+      row(42220, "0xA", day(2), 50),
+      row(42220, "0xB", day(1), 200),
+      row(42220, "0xC", day(2), 30),
+    ];
+    const r = aggregatePoolDailyVolume(rows, noLabel);
+    expect(r.poolCount).toBe(3);
+    // Top 5 cap not hit — all 3 pools should be in the breakdown,
+    // ordered by window volume desc.
+    expect(r.breakdown.map((b) => b.key)).toEqual(["0xB", "0xA", "0xC"]);
+    // Total per day = sum across all pools.
+    expect(r.totalSeries.map((p) => p.timestamp)).toEqual([
+      Number(day(1)),
+      Number(day(2)),
+    ]);
+    expect(r.totalSeries[0]!.value).toBeCloseTo(300, 4); // 100 + 200
+    expect(r.totalSeries[1]!.value).toBeCloseTo(80, 4); // 50 + 30
+  });
+
+  it("buckets pools beyond top-5 into a single 'Other' series", () => {
+    // 7 pools, ranks 1-5 stay, 6+7 collapse into "Other".
+    const rows: Array<ReturnType<typeof row>> = [];
+    const volumes = [100, 80, 60, 40, 20, 10, 5];
+    for (let i = 0; i < volumes.length; i += 1) {
+      rows.push(row(42220, `0xP${i}`, day(1), volumes[i]!));
+    }
+    const r = aggregatePoolDailyVolume(rows, noLabel);
+    expect(r.poolCount).toBe(7);
+    expect(r.breakdown).toHaveLength(6); // 5 pools + 1 "Other"
+    expect(r.breakdown.slice(0, 5).map((b) => b.key)).toEqual([
+      "0xP0",
+      "0xP1",
+      "0xP2",
+      "0xP3",
+      "0xP4",
+    ]);
+    const other = r.breakdown[5]!;
+    expect(other.key).toBe("__other__");
+    expect(other.name).toContain("Other");
+    expect(other.series[0]!.value).toBeCloseTo(15, 4); // 10 + 5
+  });
+
+  it("zero-fills inactive days per pool so stack alignment is correct", () => {
+    // pool A active days 1+3, pool B active day 2 only. The series for
+    // each pool must have entries for days 1, 2, AND 3 (with value=0
+    // where inactive) so the stacked chart's x-axis aligns.
+    const rows = [
+      row(42220, "0xA", day(1), 50),
+      row(42220, "0xA", day(3), 70),
+      row(42220, "0xB", day(2), 30),
+    ];
+    const r = aggregatePoolDailyVolume(rows, noLabel);
+    expect(r.breakdown).toHaveLength(2);
+    const poolA = r.breakdown.find((b) => b.key === "0xA")!;
+    expect(poolA.series.map((p) => p.timestamp)).toEqual([
+      Number(day(1)),
+      Number(day(2)),
+      Number(day(3)),
+    ]);
+    expect(poolA.series.map((p) => p.value)).toEqual([50, 0, 70]);
+    const poolB = r.breakdown.find((b) => b.key === "0xB")!;
+    expect(poolB.series.map((p) => p.value)).toEqual([0, 30, 0]);
+  });
+
+  it("uses the supplied poolLabel callback for legend names", () => {
+    const rows = [row(42220, "0xpool1", day(1), 100)];
+    const r = aggregatePoolDailyVolume(rows, () => "USDC/USDm");
+    expect(r.breakdown[0]!.name).toBe("USDC/USDm");
   });
 });

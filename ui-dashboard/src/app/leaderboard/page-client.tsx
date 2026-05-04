@@ -8,20 +8,24 @@ import { Tile } from "@/components/feedback";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import { formatUSD } from "@/lib/format";
 import {
+  POOL_DAILY_VOLUME,
   POOLS_FOR_LEADERBOARD,
   TRADER_DAILY_TOP,
 } from "@/lib/queries/leaderboard";
 import {
   LEADERBOARD_RANGES,
-  aggregateDailyVolume,
+  aggregatePoolDailyVolume,
   aggregateTradersByWindow,
   rangeCutoffSeconds,
   rangeDays,
   weiToUsd,
   type LeaderboardRangeKey,
+  type PoolDailyVolumeRow,
   type TraderDailyRow,
 } from "@/lib/leaderboard";
 import { SECONDS_PER_DAY, type RangeKey } from "@/lib/time-series";
+import { networkForChainId } from "@/lib/networks";
+import { poolName } from "@/lib/tokens";
 import { LeaderboardTable } from "./_components/leaderboard-table";
 
 type PoolRow = {
@@ -162,15 +166,24 @@ export function LeaderboardClient() {
     300_000, // pool metadata barely changes; refresh every 5 min
   );
 
+  // Per-pool stacked chart data. Separate query from `TRADER_DAILY_TOP`
+  // because the chart needs (poolId, day) granularity that the trader-day
+  // rollup throws away. Sums to the same total per day across all traders
+  // — pre-rolling `PoolDailyVolumeSnapshot` is the proper fix at scale
+  // (`BACKLOG.md` PR 4).
+  const poolVolumeResult = useGQL<{
+    TraderPoolDailySnapshot: PoolDailyVolumeRow[];
+  }>(POOL_DAILY_VOLUME, {
+    afterTimestamp: cutoff,
+    limit: ENVIO_MAX_ROWS,
+  });
+
   const traderRows = tradersResult.data?.TraderDailySnapshot ?? [];
   const poolRows = poolsResult.data?.Pool ?? [];
+  const poolVolumeRows = poolVolumeResult.data?.TraderPoolDailySnapshot ?? [];
 
   const aggregated = useMemo(
     () => aggregateTradersByWindow(traderRows),
-    [traderRows],
-  );
-  const dailyVolume = useMemo(
-    () => aggregateDailyVolume(traderRows),
     [traderRows],
   );
 
@@ -186,6 +199,26 @@ export function LeaderboardClient() {
     }
     return m;
   }, [poolRows]);
+
+  const poolVolumeBreakdown = useMemo(() => {
+    return aggregatePoolDailyVolume(poolVolumeRows, (poolId: string) => {
+      const meta = poolMeta.get(poolId.toLowerCase());
+      const [chainIdPart, addr] = poolId.split("-", 2);
+      const network = chainIdPart
+        ? networkForChainId(Number(chainIdPart))
+        : null;
+      if (network && meta) {
+        // Cross-chain disambiguation: the same pair name (e.g. "GBPm/USDm")
+        // can exist on both Celo and Monad, so the legend must show the
+        // chain to keep the two series distinguishable.
+        return `${poolName(network, meta.token0, meta.token1)} · ${network.label}`;
+      }
+      // Fallback display when the pool isn't in our metadata cache yet:
+      // `0x1234…5678` (first 6 + last 4 of addr).
+      const a = addr ?? poolId;
+      return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
+    });
+  }, [poolVolumeRows, poolMeta]);
 
   // Hero KPIs.
   const totalVolume = useMemo(() => {
@@ -340,22 +373,26 @@ export function LeaderboardClient() {
         />
       </div>
 
-      {/* The chart only makes sense with multi-day data — the 24h window
-          collapses to a single point and the chart's "1W / 1M / All" pill
-          row would mismatch the visible series. */}
+      {/* Per-pool stacked volume — answers "which pools contribute how
+          much, on which days?" without duplicating the homepage's
+          single-line total volume chart. The 24h window collapses to a
+          single point and the chart's "1W / 1M / All" pill row would
+          mismatch the visible series, so we hide it. */}
       {range !== "24h" && (
         <TimeSeriesChartCard
-          title="Daily traded volume"
+          title="Volume by pool"
           rangeAriaLabel="Chart range"
-          series={dailyVolume}
+          series={poolVolumeBreakdown.totalSeries}
+          breakdown={poolVolumeBreakdown.breakdown}
+          breakdownMode="stacked"
           range={chartRange}
           onRangeChange={onChartRangeChange}
           headline={headline}
           change={null}
-          isLoading={isLoading}
-          hasError={hasError}
+          isLoading={isLoading || poolVolumeResult.isLoading}
+          hasError={hasError || !!poolVolumeResult.error}
           hasSnapshotError={false}
-          emptyMessage="No trader volume in this window."
+          emptyMessage="No pool volume in this window."
         />
       )}
 
