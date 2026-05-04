@@ -157,7 +157,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: SQUID,
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: buyToken1,
-      blockNumber: 100n,
       blockTimestamp: DAY_2026_05_04 + 3600n, // 1am UTC
     });
 
@@ -216,7 +215,6 @@ describe("applyLeaderboardSnapshots", () => {
         txTo: SQUID,
         volumeUsdWei: 500n * ONE_USD,
         amounts: buyToken1,
-        blockNumber: BigInt(100 + i),
         blockTimestamp: DAY_2026_05_04 + BigInt(3600 + i * 60),
       });
     }
@@ -247,7 +245,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: SQUID,
       volumeUsdWei: 100n * ONE_USD,
       amounts: buyToken1,
-      blockNumber: 100n,
       blockTimestamp: DAY_2026_05_04 + 100n,
     });
 
@@ -260,7 +257,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: SQUID,
       volumeUsdWei: 200n * ONE_USD,
       amounts: buyToken1,
-      blockNumber: 101n,
       blockTimestamp: DAY_2026_05_04 + 200n,
     });
 
@@ -286,7 +282,6 @@ describe("applyLeaderboardSnapshots", () => {
         txTo: SQUID,
         volumeUsdWei: 100n * ONE_USD,
         amounts: buyToken1,
-        blockNumber: 100n,
         blockTimestamp: DAY_2026_05_04 + 100n,
       });
     }
@@ -315,7 +310,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: SQUID,
       volumeUsdWei: 100n * ONE_USD,
       amounts: buyToken1,
-      blockNumber: 100n,
       blockTimestamp: DAY_2026_05_04 + 100n,
     });
 
@@ -328,7 +322,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: LIFI,
       volumeUsdWei: 200n * ONE_USD,
       amounts: buyToken1,
-      blockNumber: 101n,
       blockTimestamp: DAY_2026_05_04 + 200n,
     });
 
@@ -359,7 +352,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: CELO_BROKER,
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: buyToken1,
-      blockNumber: 100n,
       blockTimestamp: DAY_2026_05_04 + 100n,
     });
 
@@ -382,7 +374,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: rebalancerEoa, // direct call from rebalancer
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: buyToken1,
-      blockNumber: 100n,
       blockTimestamp: DAY_2026_05_04 + 100n,
     });
 
@@ -407,7 +398,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: SQUID,
       volumeUsdWei: 100n * ONE_USD,
       amounts: buyToken1,
-      blockNumber: 100n,
       blockTimestamp: DAY_2026_05_04 + 100n,
     });
 
@@ -427,7 +417,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: SQUID,
       volumeUsdWei: 100n * ONE_USD,
       amounts: buyToken1,
-      blockNumber: 101n,
       blockTimestamp: DAY_2026_05_04 + 200n,
     });
 
@@ -453,7 +442,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: SQUID,
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: buyToken1,
-      blockNumber: 100n,
       blockTimestamp: DAY_2026_05_04 + 100n,
     });
 
@@ -474,7 +462,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: SQUID,
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: sellToken1,
-      blockNumber: 100n,
       blockTimestamp: DAY_2026_05_04 + 100n,
     });
 
@@ -500,7 +487,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: SQUID,
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: buyToken1,
-      blockNumber: 100n,
       blockTimestamp: DAY_2026_05_04 + 100n,
     });
 
@@ -524,7 +510,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: SQUID,
       volumeUsdWei: 100n * ONE_USD,
       amounts: buyToken1,
-      blockNumber: 100n,
       blockTimestamp: DAY_2026_05_04 + 3600n,
     });
 
@@ -538,7 +523,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: SQUID,
       volumeUsdWei: 200n * ONE_USD,
       amounts: buyToken1,
-      blockNumber: 101n,
       blockTimestamp: DAY_2026_05_04 + 86_400n + 3600n,
     });
 
@@ -553,6 +537,78 @@ describe("applyLeaderboardSnapshots", () => {
     assert.equal(day2.volumeUsdWei, 200n * ONE_USD);
   });
 
+  it("uncomputable USD (volumeUsdWei === 0n) is dropped — no entities created", async () => {
+    // computeSwapUsdWei returns 0n for pools where neither token is in
+    // USD_PEGGED_SYMBOLS. Persisting 0n into the rollups would conflate
+    // "uncomputable" with "real zero volume" and silently undercount those
+    // pools' traders. Helper short-circuits — same pattern as missing caller.
+    const { context, store } = makeContext();
+
+    await applyLeaderboardSnapshots({
+      context,
+      chainId: CHAIN,
+      poolId: POOL_ID_1,
+      pool: fakePool(),
+      caller: TRADER_A,
+      txTo: SQUID,
+      volumeUsdWei: 0n,
+      amounts: buyToken1,
+      blockTimestamp: DAY_2026_05_04 + 100n,
+    });
+
+    assert.equal(store.TraderDailySnapshot.size, 0);
+    assert.equal(store.TraderPoolDailySnapshot.size, 0);
+    assert.equal(store.AggregatorDailySnapshot.size, 0);
+    assert.equal(store.TraderPoolDayMarker.size, 0);
+    assert.equal(store.AggregatorTraderDayMarker.size, 0);
+  });
+
+  it("callback-flow swap (both In and Out non-zero on same side) inflates direction-split per documented invariant break", async () => {
+    // The src/usd.ts comment notes that for callback / flash-style flows
+    // both amount0In AND amount0Out can be non-zero simultaneously. In the
+    // standard Uniswap-V2 case exactly one is zero, so inflow + outflow
+    // sums to 2 × volumeUsdWei. In callback flow, a single side
+    // contributes to BOTH inflow and outflow, breaking that invariant.
+    // This test pins the current behavior: don't double-count volumeUsdWei
+    // (it's a single value), but DO record both directions for that side.
+    const { context, store } = makeContext();
+    const callbackAmounts = {
+      amount0In: 1_000n * ONE_USD,
+      amount0Out: 50n * ONE_USD, // refund leg
+      amount1In: 0n,
+      amount1Out: 1_000n * ONE_USD,
+    };
+
+    await applyLeaderboardSnapshots({
+      context,
+      chainId: CHAIN,
+      poolId: POOL_ID_1,
+      pool: fakePool(),
+      caller: TRADER_A,
+      txTo: SQUID,
+      volumeUsdWei: 1_000n * ONE_USD,
+      amounts: callbackAmounts,
+      blockTimestamp: DAY_2026_05_04 + 100n,
+    });
+
+    const tpd = store.TraderPoolDailySnapshot.get(
+      `${CHAIN}-${TRADER_A}-${POOL_ID_1}-${DAY_2026_05_04}`,
+    )!;
+    // Both inflow_token0 and outflow_token0 receive the full volumeUsdWei
+    // (current behavior: each non-zero leg → += volumeUsdWei). Token1 only
+    // has Out → only inflow_token1.
+    assert.equal(tpd.inflowToken0UsdWei, 1_000n * ONE_USD);
+    assert.equal(tpd.outflowToken0UsdWei, 1_000n * ONE_USD);
+    assert.equal(tpd.inflowToken1UsdWei, 1_000n * ONE_USD);
+    assert.equal(tpd.outflowToken1UsdWei, 0n);
+    // Sum = 3 × volumeUsdWei, not 2 × — invariant intentionally broken
+    // because a single swap genuinely flowed in both directions on token0.
+    // TraderDailySnapshot.volumeUsdWei stays = 1 × volumeUsdWei (the SwapEvent's
+    // pre-computed notional, not the inflow+outflow sum), so leaderboard
+    // ranking is unaffected.
+    assert.equal(tpd.volumeUsdWei, 1_000n * ONE_USD);
+  });
+
   it("invariant: inflow + outflow = 2 × volumeUsdWei per swap", async () => {
     const { context, store } = makeContext();
 
@@ -565,7 +621,6 @@ describe("applyLeaderboardSnapshots", () => {
       txTo: SQUID,
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: buyToken1,
-      blockNumber: 100n,
       blockTimestamp: DAY_2026_05_04 + 100n,
     });
 

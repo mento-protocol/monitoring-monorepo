@@ -16,8 +16,10 @@ const NTT_ENTRIES: NttEntry[] = (nttAddressesRaw as { entries: NttEntry[] })
 
 /** Iterate every "contract" type entry in @mento-protocol/contracts for the
  *  given chain. Returns lowercased addresses paired with their raw name (so
- *  callers can also build name-pattern filters, e.g. "is this a Router?"). */
-function iterateContractAddresses(
+ *  callers can also build name-pattern filters, e.g. "is this a Router?").
+ *  Also exported for `aggregators.ts` which uses the same iteration to
+ *  identify Mento direct-entry routers. */
+export function iterateContractAddresses(
   chainId: number,
 ): Array<{ address: string; rawName: string }> {
   const ns = CONTRACT_NAMESPACE_BY_CHAIN[String(chainId)];
@@ -33,13 +35,13 @@ function iterateContractAddresses(
   return out;
 }
 
-/** Test-only helper exposed for `aggregators.ts` (which needs the same
- *  contracts.json iteration to identify Mento direct-entry routers). */
-export function _iterateContractAddresses(
-  chainId: number,
-): Array<{ address: string; rawName: string }> {
-  return iterateContractAddresses(chainId);
-}
+/** Every chainId we know how to look up — covers mainnet + testnet so the
+ *  same handlers compiled against `config.multichain.testnet.yaml` get
+ *  correct system-address coverage on Alfajores (11142220) and Monad
+ *  testnet (10143). Source of truth: `config/deployment-namespaces.json`. */
+const ALL_INDEXED_CHAIN_IDS: number[] = Object.keys(
+  CONTRACT_NAMESPACE_BY_CHAIN,
+).map(Number);
 
 /**
  * Per-chain set of "Mento system" addresses. Includes:
@@ -58,8 +60,9 @@ export function _iterateContractAddresses(
 const STATIC_SYSTEM_ADDRESSES_BY_CHAIN: Map<number, Set<string>> = (() => {
   const out = new Map<number, Set<string>>();
 
-  // Collect from `@mento-protocol/contracts` for both mainnets we index.
-  for (const chainId of [42220, 143]) {
+  // Collect from `@mento-protocol/contracts` for every indexed chain
+  // (mainnet + testnet). Same handlers run against both yamls.
+  for (const chainId of ALL_INDEXED_CHAIN_IDS) {
     const set = new Set<string>();
     for (const entry of iterateContractAddresses(chainId)) {
       set.add(entry.address);

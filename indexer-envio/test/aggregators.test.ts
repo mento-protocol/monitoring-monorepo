@@ -113,4 +113,18 @@ describe("_directEntriesForChain", () => {
     assert.ok(set.has(ROUTER_BOTH));
     assert.ok(!set.has(CELO_BROKER), "Monad has no Broker contract");
   });
+
+  it("Testnet chains (Alfajores + Monad testnet) get direct-entry sets too", () => {
+    // Same handler path runs against config.multichain.testnet.yaml; if the
+    // direct-entry map were mainnet-only, testnet Broker/Router calls would
+    // misclassify as "unknown".
+    assert.ok(
+      _directEntriesForChain(11142220).size > 0,
+      "Alfajores direct-entry set should be non-empty",
+    );
+    assert.ok(
+      _directEntriesForChain(10143).size > 0,
+      "Monad testnet direct-entry set should be non-empty",
+    );
+  });
 });

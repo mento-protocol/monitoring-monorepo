@@ -9,9 +9,7 @@ import type {
 import { applyFeeBps } from "./usd";
 import { isSystemAddress } from "./system-addresses";
 import { classifyAggregator } from "./aggregators";
-import { extractAddressFromPoolId } from "./helpers";
-
-const DAY_SECONDS = 86_400n;
+import { dayBucket, extractAddressFromPoolId } from "./helpers";
 
 /** Subset of Envio's handler context that the leaderboard snapshot helper
  *  reads/writes. Both the FPMM and VirtualPool swap handlers' contexts are
@@ -55,7 +53,6 @@ export interface ApplyLeaderboardSnapshotsArgs {
   txTo: string; // tx.to, lowercased — the entry-point contract for aggregator classification
   volumeUsdWei: bigint; // pre-computed via computeSwapUsdWei (lives on SwapEvent)
   amounts: SwapAmounts;
-  blockNumber: bigint;
   blockTimestamp: bigint;
 }
 
@@ -79,7 +76,6 @@ export async function applyLeaderboardSnapshots(
     txTo,
     volumeUsdWei,
     amounts,
-    blockNumber,
     blockTimestamp,
   } = args;
 
@@ -88,12 +84,22 @@ export async function applyLeaderboardSnapshots(
   // leaderboard's primary axis. Better to drop than to bucket as "".
   if (!caller) return;
 
-  // Day bucket (UTC midnight in seconds, BigInt for entity IDs).
-  const day = (blockTimestamp / DAY_SECONDS) * DAY_SECONDS;
+  // Skip uncomputable USD swaps. `computeSwapUsdWei` returns 0n in two
+  // cases: (1) a degenerate zero-amount swap (impossible from a real
+  // SwapEvent) and (2) a pool whose USD value can't be derived from the
+  // pegged-side trick (neither leg is in USD_PEGGED_SYMBOLS — e.g. a
+  // hypothetical axlEUROC/EURm pool). Writing 0n into the rollups would
+  // collapse "uncomputable" with "real zero volume" and silently
+  // undercount those pools' traders. The raw SwapEvent still records the
+  // unit token amounts and the original `volumeUsdWei = 0n` — a future
+  // PR can backfill the rollups via a recovery job once a proper rate
+  // map is wired up indexer-side.
+  if (volumeUsdWei === 0n) return;
+
+  const day = dayBucket(blockTimestamp);
   const dayKey = day.toString();
   const traderDayId = `${chainId}-${caller}-${dayKey}`;
   const traderPoolDayId = `${chainId}-${caller}-${poolId}-${dayKey}`;
-  const traderPoolDayMarkerId = traderPoolDayId; // same key, different entity
 
   const aggregator = classifyAggregator(
     chainId,
@@ -120,12 +126,13 @@ export async function applyLeaderboardSnapshots(
   const outflowToken1 = amounts.amount1In > 0n ? volumeUsdWei : 0n;
 
   // 1. TraderPoolDayMarker → first-touch dedup for TraderDailySnapshot.uniquePools.
-  const existingTraderPoolMarker = await context.TraderPoolDayMarker.get(
-    traderPoolDayMarkerId,
-  );
+  //    Marker key matches the parent snapshot key — same string, different
+  //    entity table.
+  const existingTraderPoolMarker =
+    await context.TraderPoolDayMarker.get(traderPoolDayId);
   const traderPoolFirstTouch = existingTraderPoolMarker === undefined;
   if (traderPoolFirstTouch) {
-    context.TraderPoolDayMarker.set({ id: traderPoolDayMarkerId });
+    context.TraderPoolDayMarker.set({ id: traderPoolDayId });
   }
 
   // 2. AggregatorTraderDayMarker → first-touch dedup for
@@ -199,9 +206,4 @@ export async function applyLeaderboardSnapshots(
     volumeUsdWei: (existingAggDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
     feesPaidUsdWei: (existingAggDay?.feesPaidUsdWei ?? 0n) + feesPaidUsdWei,
   });
-
-  // blockNumber is captured for downstream debugging only; not currently
-  // persisted on any of the rollup entities (the day-bucket timestamp +
-  // lastSeenTimestamp are the load-bearing "when" fields).
-  void blockNumber;
 }

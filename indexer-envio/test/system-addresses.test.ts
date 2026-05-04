@@ -109,6 +109,21 @@ describe("_staticSystemAddressesForChain", () => {
     );
   });
 
+  it("Testnet chains (Alfajores 11142220, Monad testnet 10143) are seeded so testnet runs get correct system-flow filtering", () => {
+    // Source of truth: config/deployment-namespaces.json. Both testnet chains
+    // ship in @mento-protocol/contracts under the testnet-v2-rc5 namespace.
+    const alfajoresSet = _staticSystemAddressesForChain(11142220);
+    const monadTestnetSet = _staticSystemAddressesForChain(10143);
+    assert.ok(
+      alfajoresSet.size > 0,
+      `expected non-empty Alfajores system set, got ${alfajoresSet.size}`,
+    );
+    assert.ok(
+      monadTestnetSet.size > 0,
+      `expected non-empty Monad-testnet system set, got ${monadTestnetSet.size}`,
+    );
+  });
+
   it("unknown chain returns empty set", () => {
     assert.equal(_staticSystemAddressesForChain(99999).size, 0);
   });

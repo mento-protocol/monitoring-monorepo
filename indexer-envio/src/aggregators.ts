@@ -1,5 +1,6 @@
 import aggregatorsRaw from "../config/aggregators.json";
-import { isSystemAddress, _iterateContractAddresses } from "./system-addresses";
+import { CONTRACT_NAMESPACE_BY_CHAIN } from "./contractAddresses";
+import { isSystemAddress, iterateContractAddresses } from "./system-addresses";
 
 interface AggregatorEntry {
   name: string;
@@ -42,9 +43,12 @@ const DIRECT_ENTRY_BY_CHAIN: Map<number, Set<string>> = (() => {
   // canonical addresses. Patterns cover both Celo's "Broker" / "Router" and
   // Monad's "Routerv300" / future versioned router contracts.
   const directNamePatterns = /^(Broker|Router(v\d+)?)$/;
-  for (const chainId of [42220, 143]) {
+  // Same handlers run against mainnet AND testnet yamls; cover every
+  // indexed chain so testnet Broker/Router calls don't fall through to
+  // "unknown".
+  for (const chainId of Object.keys(CONTRACT_NAMESPACE_BY_CHAIN).map(Number)) {
     const set = new Set<string>();
-    for (const entry of _iterateContractAddresses(chainId)) {
+    for (const entry of iterateContractAddresses(chainId)) {
       if (directNamePatterns.test(entry.rawName)) {
         set.add(entry.address);
       }

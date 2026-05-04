@@ -197,7 +197,6 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
       amount1In: event.params.amount1In,
       amount1Out: event.params.amount1Out,
     },
-    blockNumber,
     blockTimestamp,
   });
 });
