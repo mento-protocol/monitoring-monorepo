@@ -56,7 +56,7 @@ describe("discoverMentoAddresses", () => {
     expect(result.addresses).toContain(A(0x333));
     expect(result.addresses).toContain(A(0x444));
     expect(result.addresses).toContain(A(0x555));
-    expect(result.perEntity.length).toBeGreaterThan(0);
+    expect(result.perEntity).toHaveLength(12);
   });
 
   it("filters out malformed addresses", async () => {
