@@ -50,6 +50,7 @@
     "@vitest/coverage-v8": "^4.0.18",
     "eslint": "^10.0.3",
     "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-unused-imports": "^4.2.0",
     "globals": "^17.4.0",
     "jsdom": "^29.0.1",
     "tailwindcss": "^4.2.1",
