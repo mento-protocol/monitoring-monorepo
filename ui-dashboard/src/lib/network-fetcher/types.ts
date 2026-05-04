@@ -53,6 +53,8 @@ export type NetworkData = {
    * double-counted against v3. Empty on chains without a Broker (Monad).
    */
   brokerSnapshotsAllDaily: BrokerDailySnapshotRow[];
+  /** True when the broker pagination loop hit its safety cap. */
+  brokerSnapshotsAllDailyTruncated: boolean;
   tradingLimits: TradingLimit[];
   olsPoolIds: Set<string>;
   /**

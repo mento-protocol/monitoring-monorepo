@@ -108,6 +108,7 @@ function networkData(
     snapshotsAllDaily: [],
     snapshotsAllDailyTruncated: false,
     brokerSnapshotsAllDaily: [],
+    brokerSnapshotsAllDailyTruncated: false,
     tradingLimits: [],
     olsPoolIds: new Set(),
     cdpPoolIds: new Set(),

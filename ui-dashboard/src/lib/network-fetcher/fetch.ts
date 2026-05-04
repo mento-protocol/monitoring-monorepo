@@ -84,6 +84,7 @@ export const blankNetworkData = (
   snapshotsAllDaily: [],
   snapshotsAllDailyTruncated: false,
   brokerSnapshotsAllDaily: [],
+  brokerSnapshotsAllDailyTruncated: false,
   tradingLimits: [],
   olsPoolIds: new Set(),
   cdpPoolIds: new Set(),
@@ -461,6 +462,10 @@ export async function fetchNetworkData(
     brokerSnapshotsAllDailyResult.status === "fulfilled"
       ? brokerSnapshotsAllDailyResult.value.rows
       : [];
+  const brokerSnapshotsAllDailyTruncated =
+    brokerSnapshotsAllDailyResult.status === "fulfilled"
+      ? brokerSnapshotsAllDailyResult.value.truncated
+      : false;
   const brokerSnapshotsAllDailyError =
     brokerSnapshotsAllDailyResult.status === "rejected"
       ? toError(brokerSnapshotsAllDailyResult.reason)
@@ -562,6 +567,7 @@ export async function fetchNetworkData(
     snapshotsAllDaily,
     snapshotsAllDailyTruncated,
     brokerSnapshotsAllDaily,
+    brokerSnapshotsAllDailyTruncated,
     tradingLimits,
     olsPoolIds,
     cdpPoolIds,

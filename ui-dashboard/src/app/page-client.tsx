@@ -96,6 +96,14 @@ function GlobalContent({
   const anySnapshotsAllDailyTruncated = networkData.some(
     (netData) => netData.snapshotsAllDailyTruncated && netData.error === null,
   );
+  const anyBrokerSnapshotsAllDailyError = networkData.some(
+    (netData) =>
+      netData.brokerSnapshotsAllDailyError !== null && netData.error === null,
+  );
+  const anyBrokerSnapshotsAllDailyTruncated = networkData.some(
+    (netData) =>
+      netData.brokerSnapshotsAllDailyTruncated && netData.error === null,
+  );
   const anyLpError = networkData.some(
     (netData) => netData.lpError !== null && netData.error === null,
   );
@@ -263,7 +271,10 @@ function GlobalContent({
           isLoading={isLoading}
           hasError={anyNetworkError}
           hasSnapshotError={
-            anySnapshotsAllDailyError || anySnapshotsAllDailyTruncated
+            anySnapshotsAllDailyError ||
+            anySnapshotsAllDailyTruncated ||
+            anyBrokerSnapshotsAllDailyError ||
+            anyBrokerSnapshotsAllDailyTruncated
           }
         />
       </div>

@@ -6,6 +6,7 @@ import {
   _clearMockERC20Decimals,
 } from "../src/EventHandlers.ts";
 import { dayBucket } from "../src/helpers.ts";
+import { getContractAddress } from "../src/contractAddresses.ts";
 
 // MockDb shape is hand-typed per the existing pattern in dailySnapshot.test.ts —
 // generated types aren't exported in a stable form for direct import.
@@ -248,5 +249,21 @@ describe("Broker.Swap handler", () => {
     ) as { swapCount: number } | undefined;
     assert.equal(bipool?.swapCount, 1);
     assert.equal(other?.swapCount, 1);
+  });
+});
+
+describe("v3 router lookup smoke test", () => {
+  it("@mento-protocol/contracts still registers the v3 Router on Celo at the expected address", () => {
+    // The handler at handlers/broker.ts derives `routedViaV3Router` from
+    // `getContractAddress(chainId, "Routerv300")`. If the package ever loses
+    // that entry (rename, repackaging) the comparison silently always returns
+    // false → every Broker.Swap gets misclassified as v2-direct, inflating
+    // legacy volume on the chart. This catches that regression at test time
+    // rather than at production sync.
+    assert.equal(
+      getContractAddress(CHAIN_CELO, "Routerv300")?.toLowerCase(),
+      V3_ROUTER.toLowerCase(),
+      "If this fails, @mento-protocol/contracts has changed Routerv300 — update V3_ROUTER constant or restore the entry.",
+    );
   });
 });
