@@ -434,6 +434,67 @@ describe("aggregateProtocolFeesByPool", () => {
     expect(entries.find((e) => e.poolAddress === POOL_B)!.unpriced).toBe(true);
   });
 
+  it("window-scoped unpriced flags: OLD unpriced transfer doesn't pollute recent windows", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const transfers = [
+      // Unpriced transfer 6 months ago (outside 30d/7d/24h)
+      transfer({
+        from: POOL_A,
+        tokenSymbol: "MYSTERY",
+        blockTimestamp: String(now - 180 * 86400),
+      }),
+      // Recent priced transfer (1h ago, inside all windows)
+      transfer({
+        from: POOL_A,
+        tokenSymbol: "USDm",
+        blockTimestamp: String(now - 3600),
+      }),
+    ];
+    const entries = aggregateProtocolFeesByPool(transfers, TEST_RATES);
+    const a = entries.find((e) => e.poolAddress === POOL_A)!;
+    // All-time aggregate is approximate (lower bound).
+    expect(a.unpriced).toBe(true);
+    // 24h/7d/30d cells are exact — unpriced transfer is outside their windows.
+    expect(a.unpriced24h).toBe(false);
+    expect(a.unpriced7d).toBe(false);
+    expect(a.unpriced30d).toBe(false);
+  });
+
+  it("window-scoped unpriced flags: recent unpriced transfer marks the right windows", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const transfers = [
+      // Unpriced transfer 3 days ago — inside 7d and 30d, outside 24h
+      transfer({
+        from: POOL_A,
+        tokenSymbol: "MYSTERY",
+        blockTimestamp: String(now - 3 * 86400),
+      }),
+    ];
+    const entries = aggregateProtocolFeesByPool(transfers, TEST_RATES);
+    const a = entries.find((e) => e.poolAddress === POOL_A)!;
+    expect(a.unpriced).toBe(true);
+    expect(a.unpriced24h).toBe(false);
+    expect(a.unpriced7d).toBe(true);
+    expect(a.unpriced30d).toBe(true);
+  });
+
+  it("window-scoped unpriced flags: UNKNOWN placeholder is treated identically to unpriced symbol", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const transfers = [
+      transfer({
+        from: POOL_A,
+        tokenSymbol: "UNKNOWN",
+        blockTimestamp: String(now - 1800), // 30m ago — inside all windows
+      }),
+    ];
+    const entries = aggregateProtocolFeesByPool(transfers, TEST_RATES);
+    const a = entries.find((e) => e.poolAddress === POOL_A)!;
+    expect(a.unpriced).toBe(true);
+    expect(a.unpriced24h).toBe(true);
+    expect(a.unpriced7d).toBe(true);
+    expect(a.unpriced30d).toBe(true);
+  });
+
   it("normalizes mixed-case pool addresses to lowercase", () => {
     const transfers = [
       transfer({ from: POOL_A.toUpperCase() }),

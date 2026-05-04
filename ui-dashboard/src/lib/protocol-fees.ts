@@ -120,10 +120,15 @@ export type PoolFeeEntry = {
   fees7dUSD: number;
   fees30dUSD: number;
   /**
-   * Any transfer for this pool used an unknown or unpriced symbol — totals
-   * are a lower bound and the UI should prefix values with `≈`.
+   * Any transfer for this pool used an unknown or unpriced symbol — the
+   * all-time total is a lower bound. Window-scoped flags below let the UI
+   * apply `≈` per column so an OLD unpriced transfer doesn't pollute the
+   * 24h/7d/30d cells (mirrors `unpricedSymbols24h` on `ProtocolFeeSummary`).
    */
   unpriced: boolean;
+  unpriced24h: boolean;
+  unpriced7d: boolean;
+  unpriced30d: boolean;
 };
 
 /**
@@ -156,20 +161,30 @@ export function aggregateProtocolFeesByPool(
         fees7dUSD: 0,
         fees30dUSD: 0,
         unpriced: false,
+        unpriced24h: false,
+        unpriced7d: false,
+        unpriced30d: false,
       };
       byPool.set(poolId, entry);
     }
 
     const ts = Number(t.blockTimestamp);
 
-    if (UNRESOLVED_SYMBOLS.has(t.tokenSymbol)) {
+    const markUnpricedForTs = (entry: PoolFeeEntry) => {
       entry.unpriced = true;
+      if (ts >= cutoff30d) entry.unpriced30d = true;
+      if (ts >= cutoff7d) entry.unpriced7d = true;
+      if (ts >= cutoff24h) entry.unpriced24h = true;
+    };
+
+    if (UNRESOLVED_SYMBOLS.has(t.tokenSymbol)) {
+      markUnpricedForTs(entry);
       continue;
     }
     const amount = parseWei(t.amount, t.tokenDecimals);
     const usd = tokenToUSD(t.tokenSymbol, amount, rates);
     if (usd === null) {
-      entry.unpriced = true;
+      markUnpricedForTs(entry);
       continue;
     }
     entry.totalFeesUSD += usd;

@@ -35,22 +35,37 @@ type FeeColumn = {
   key: Extract<SortKey, "fees24h" | "fees7d" | "fees30d" | "feesAll">;
   label: string;
   field: "fees24hUSD" | "fees7dUSD" | "fees30dUSD" | "totalFeesUSD";
+  /** Per-column unpriced flag — scoped so an OLD unpriced transfer doesn't
+   *  pollute recent windows. `feesAll` falls back to the all-history flag. */
+  unpricedField: "unpriced24h" | "unpriced7d" | "unpriced30d" | "unpriced";
   className?: string;
 };
 
 const FEE_COLUMNS: ReadonlyArray<FeeColumn> = [
-  { key: "fees24h", label: "24h", field: "fees24hUSD" },
-  { key: "fees7d", label: "7d", field: "fees7dUSD" },
+  {
+    key: "fees24h",
+    label: "24h",
+    field: "fees24hUSD",
+    unpricedField: "unpriced24h",
+  },
+  {
+    key: "fees7d",
+    label: "7d",
+    field: "fees7dUSD",
+    unpricedField: "unpriced7d",
+  },
   {
     key: "fees30d",
     label: "30d",
     field: "fees30dUSD",
+    unpricedField: "unpriced30d",
     className: "hidden sm:table-cell",
   },
   {
     key: "feesAll",
     label: "All-time",
     field: "totalFeesUSD",
+    unpricedField: "unpriced",
     className: "hidden md:table-cell",
   },
 ];
@@ -119,13 +134,14 @@ function sortRows(
 
 function approxAnnotation(
   row: PoolFeeRow,
+  unpricedField: FeeColumn["unpricedField"],
   isApproximate: boolean,
 ): { prefix: string; title: string | undefined } {
-  if (row.unpriced) {
+  if (row[unpricedField]) {
     return {
       prefix: "≈ ",
       title:
-        "Some transfers from this pool used unpriced/unknown tokens — total is a lower bound.",
+        "Some transfers from this pool used unpriced/unknown tokens in this window — total is a lower bound.",
     };
   }
   if (isApproximate) {
@@ -242,7 +258,6 @@ export function RevenueByPoolTable({
           {sorted.map((row) => {
             const display = rowDisplayName(row);
             const href = buildPoolDetailHref(row.poolId);
-            const { prefix, title } = approxAnnotation(row, isApproximate);
             return (
               <Row key={row.poolId}>
                 <td className="px-2 sm:px-4 py-2 sm:py-3">
@@ -262,16 +277,23 @@ export function RevenueByPoolTable({
                 >
                   {row.network.label}
                 </td>
-                {FEE_COLUMNS.map((c) => (
-                  <td
-                    key={c.key}
-                    className={`${c.className ?? ""} px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-slate-300 font-mono text-right`}
-                    title={title}
-                  >
-                    {prefix}
-                    {formatUSD(row[c.field])}
-                  </td>
-                ))}
+                {FEE_COLUMNS.map((c) => {
+                  const { prefix, title } = approxAnnotation(
+                    row,
+                    c.unpricedField,
+                    isApproximate,
+                  );
+                  return (
+                    <td
+                      key={c.key}
+                      className={`${c.className ?? ""} px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-slate-300 font-mono text-right`}
+                      title={title}
+                    >
+                      {prefix}
+                      {formatUSD(row[c.field])}
+                    </td>
+                  );
+                })}
               </Row>
             );
           })}
