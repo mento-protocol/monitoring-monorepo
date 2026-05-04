@@ -59,6 +59,7 @@ function networkData(
     fees: null,
     feeTransfers,
     feeSnapshots: [],
+    feeSnapshotsError: null,
     poolLabels: new Map(),
     uniqueLpAddresses: null,
     rates: TEST_RATES,

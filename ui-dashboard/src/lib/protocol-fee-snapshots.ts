@@ -76,8 +76,9 @@ export function aggregateFeeSnapshotsByPool(
 
     // FX side: price each non-pegged slot via the oracle rate map. Skip
     // pegged symbols (already counted in `feesUsdWei`) and indexer
-    // placeholders (UNRESOLVED_SYMBOLS).
-    for (let i = 0; i < s.tokens.length; i++) {
+    // placeholders (UNRESOLVED_SYMBOLS). Bound on `tokenSymbols` since
+    // that's what the body reads first.
+    for (let i = 0; i < s.tokenSymbols.length; i++) {
       const sym = s.tokenSymbols[i];
       if (UNRESOLVED_SYMBOLS.has(sym)) {
         entry.unpriced = true;

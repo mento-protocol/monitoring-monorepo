@@ -90,6 +90,7 @@ export const blankNetworkData = (
   fees: null,
   feeTransfers: [],
   feeSnapshots: [],
+  feeSnapshotsError: null,
   poolLabels: new Map(),
   uniqueLpAddresses: null,
   rates: new Map(),
@@ -537,6 +538,7 @@ export async function fetchNetworkData(
     // snapshots aren't fetched here. `useProtocolFees` populates them on
     // /revenue. Default `[]` keeps `NetworkData` shape uniform.
     feeSnapshots: [],
+    feeSnapshotsError: null,
     poolLabels: new Map(),
     uniqueLpAddresses,
     rates,

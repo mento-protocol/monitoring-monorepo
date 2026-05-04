@@ -116,21 +116,21 @@ async function fetchFeesForNetwork(
   // for unknown symbols and gets counted as "unresolved"). That understates
   // the chain's fees without any error signal to the consumer. Promote the
   // rates failure into `feesError` so the revenue page shows the partial-
-  // data banner instead of a confidently-wrong lower bound. Snapshot
-  // failures (used by the leaderboard) follow the same fail-loud model: a
-  // hard rejection or a partial-page error inside the helper both flow into
-  // `feesError` so the leaderboard shows the partial-data banner instead of
-  // silently undercounted rows.
-  const snapshotInnerError =
-    snapshotsResult.status === "fulfilled" ? snapshotsResult.value.error : null;
+  // data banner instead of a confidently-wrong lower bound.
   const feesError =
     feesResult.status === "rejected"
       ? toError(feesResult.reason)
       : ratesResult.status === "rejected"
         ? toError(ratesResult.reason)
-        : snapshotsResult.status === "rejected"
-          ? toError(snapshotsResult.reason)
-          : (snapshotInnerError ?? null);
+        : null;
+  // Snapshot failures land on a separate channel so the chain-level Swap
+  // Fees tile + FeeOverTimeChart — neither of which read snapshots — stay
+  // live when only the leaderboard's snapshot path is degraded. The
+  // leaderboard reads `feeSnapshotsError` and gates its own rendering.
+  const feeSnapshotsError =
+    snapshotsResult.status === "rejected"
+      ? toError(snapshotsResult.reason)
+      : (snapshotsResult.value.error ?? null);
   const fees: ProtocolFeeSummary | null =
     feesResult.status === "fulfilled" && ratesResult.status === "fulfilled"
       ? aggregateProtocolFees(feeTransfers, rates)
@@ -143,6 +143,7 @@ async function fetchFeesForNetwork(
     fees,
     feeTransfers,
     feeSnapshots,
+    feeSnapshotsError,
     poolLabels,
     feesError,
   });

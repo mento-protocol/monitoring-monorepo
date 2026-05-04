@@ -11,8 +11,12 @@
  * real ceiling — otherwise the lower-bound badge stays hidden until 10 000
  * rows that prod will never deliver. Once any chain crosses 1 000 lifetime
  * fee-transfer rows, the revenue tiles correctly mark themselves as a lower
- * bound. Follow-up: switch to a pre-rolled snapshot entity or paginate with
- * `fetchAllSnapshotPages`.
+ * bound.
+ *
+ * Still consumed by the chain-level Swap Fees `BreakdownTile` and
+ * `FeeOverTimeChart` on `/revenue`; the per-pool leaderboard moved to
+ * `POOL_DAILY_FEE_SNAPSHOTS_PAGE` in PR-snapshot-2. Migrating the tile +
+ * chart off raw transfers is deferred to PR-snapshot-3.
  */
 export const PROTOCOL_FEE_TRANSFERS_ALL = `
   query ProtocolFeeTransfersAll($chainId: Int!) {

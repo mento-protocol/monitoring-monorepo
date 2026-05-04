@@ -97,6 +97,7 @@ function networkData(snapshots: PoolDailyFeeSnapshot[]): NetworkData {
     fees: null,
     feeTransfers: [],
     feeSnapshots: snapshots,
+    feeSnapshotsError: null,
     poolLabels: new Map(),
     uniqueLpAddresses: null,
     rates: new Map([["USDm", 1]]),

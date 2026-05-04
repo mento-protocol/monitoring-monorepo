@@ -496,11 +496,14 @@ describe("useProtocolFees — hasura URL guard", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Case 6.5: Snapshot branch failures — promoted into feesError
+// Case 6.5: Snapshot branch failures — surface on a SEPARATE channel
+// (`feeSnapshotsError`) so they don't blank the chain-level KPI tile or
+// `FeeOverTimeChart`, both of which read raw transfers and don't depend
+// on `PoolDailyFeeSnapshot` rows.
 // ---------------------------------------------------------------------------
 
-describe("useProtocolFees — snapshot branch", () => {
-  it("snapshot first-page failure promotes into feesError; fees still aggregated from raw transfers", async () => {
+describe("useProtocolFees — snapshot branch isolated from feesError", () => {
+  it("snapshot first-page failure populates feeSnapshotsError but leaves feesError null and fees populated", async () => {
     const snapshotErr = new Error("snapshot 502");
 
     (
@@ -521,19 +524,17 @@ describe("useProtocolFees — snapshot branch", () => {
     const results = await runFetcher();
 
     const celo = results.find((r) => r.network.id === "celo-mainnet")!;
-    // Snapshot rejection is the only thing left to fall through to in the
-    // feesError ternary — fees + rates both succeeded.
-    expect(celo.feesError).toBe(snapshotErr);
-    // The chart's chain-level summary still wires up — it reads raw transfers,
-    // not snapshots.
+    // Snapshot rejection lands on its own channel — KPI tile + chart stay live.
+    expect(celo.feeSnapshotsError).toBe(snapshotErr);
+    expect(celo.feesError).toBeNull();
+    // Chain-level fees aggregate still wires up — raw transfers untouched.
     expect(celo.fees).not.toBeNull();
     expect(celo.feeTransfers).toHaveLength(1);
-    // Snapshot rows are empty after a first-page failure.
     expect(celo.feeSnapshots).toHaveLength(0);
   });
 
-  it("fees rejection takes precedence over snapshot rejection in feesError", async () => {
-    const feesErr = new Error("fees rejected first");
+  it("fees rejection still uses feesError; snapshot rejection in same call routes to feeSnapshotsError independently", async () => {
+    const feesErr = new Error("fees rejected");
     const snapshotErr = new Error("snapshot also down");
 
     (
@@ -552,9 +553,10 @@ describe("useProtocolFees — snapshot branch", () => {
     const results = await runFetcher();
 
     const celo = results.find((r) => r.network.id === "celo-mainnet")!;
-    // Fees rejection wins by precedence in the hook's ternary.
+    // The two error channels are populated independently from their own
+    // rejection — no precedence, no cross-channel cascade.
     expect(celo.feesError).toBe(feesErr);
-    expect(celo.feesError).not.toBe(snapshotErr);
+    expect(celo.feeSnapshotsError).toBe(snapshotErr);
   });
 });
 

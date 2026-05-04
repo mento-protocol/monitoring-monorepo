@@ -70,6 +70,14 @@ export type NetworkData = {
    */
   feeSnapshots: PoolDailyFeeSnapshot[];
   /**
+   * Snapshot-only failures (paginated `PoolDailyFeeSnapshot` fetch rejected
+   * or surfaced a mid-pagination error). Kept SEPARATE from `feesError` so
+   * the chain-level Swap Fees KPI tile and `FeeOverTimeChart` — both fed by
+   * raw `feeTransfers` and unaffected by snapshot health — stay live when
+   * only the leaderboard's snapshot path is degraded.
+   */
+  feeSnapshotsError: Error | null;
+  /**
    * Lowercase-address → token-pair map for slim hooks that don't fetch the
    * full `pools` payload. Empty by default; consumers with a populated
    * `pools` array should derive labels from that instead.

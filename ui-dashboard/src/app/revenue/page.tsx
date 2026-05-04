@@ -27,6 +27,11 @@ function RevenueContent() {
   const anyFeesError = networkData.some(
     (n) => n.feesError !== null && n.error === null,
   );
+  // Snapshot-only failure: leaderboard goes empty, but the chain-level
+  // Swap Fees tile + FeeOverTimeChart (both raw-transfer driven) stay live.
+  const anyFeeSnapshotsError = networkData.some(
+    (n) => n.feeSnapshotsError !== null && n.error === null,
+  );
 
   const aggregated = useMemo(() => {
     let totalFeesAllTime: number | null =
@@ -150,7 +155,7 @@ function RevenueContent() {
       <RevenueByPoolTable
         networkData={networkData}
         isLoading={isLoading}
-        hasError={anyNetworkError || anyFeesError}
+        hasError={anyNetworkError || anyFeesError || anyFeeSnapshotsError}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

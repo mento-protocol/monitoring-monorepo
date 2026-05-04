@@ -64,11 +64,17 @@ const FEE_COLUMNS: ReadonlyArray<FeeColumn> = [
 function buildRows(networkData: NetworkData[]): PoolFeeRow[] {
   const rows: PoolFeeRow[] = [];
   for (const n of networkData) {
-    // Skip both top-level transport errors and `feesError` (rates, fees, or
-    // snapshot fetch rejected — see useProtocolFees for the merge). The
-    // latter usually has an empty `rates` map, so any FX slot would price as
-    // unpriced and render misleading $0 rows.
-    if (n.error !== null || n.feesError !== null) continue;
+    // Skip top-level transport errors, `feesError` (rates rejection ⇒ empty
+    // `rates` map ⇒ FX slots would mis-price as unpriced and produce
+    // misleading $0 rows), and `feeSnapshotsError` (snapshot fetch failed,
+    // so the leaderboard row data itself is gone). The chain-level KPI
+    // tile + FeeOverTimeChart ignore `feeSnapshotsError` and stay live.
+    if (
+      n.error !== null ||
+      n.feesError !== null ||
+      n.feeSnapshotsError !== null
+    )
+      continue;
     const entries = aggregateFeeSnapshotsByPool(
       n.feeSnapshots,
       n.rates,

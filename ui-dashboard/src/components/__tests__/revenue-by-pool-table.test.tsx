@@ -114,6 +114,7 @@ function networkData(snapshots: PoolDailyFeeSnapshot[]): NetworkData {
     fees: null,
     feeTransfers: [],
     feeSnapshots: snapshots,
+    feeSnapshotsError: null,
     poolLabels: new Map(),
     uniqueLpAddresses: null,
     rates: new Map([
@@ -230,6 +231,22 @@ describe("RevenueByPoolTable — snapshot path", () => {
     );
     // No tbody rows — the chain was skipped despite having a snapshot, and the
     // empty shell renders the partial-outage copy gated on hasError.
+    expect(html).toMatch(/load per-pool revenue/);
+    expect(html).not.toContain(POOL_ADDR);
+  });
+
+  it("skips chains with feeSnapshotsError (snapshot fetch failed) without affecting raw-transfer KPIs", () => {
+    const n = networkData([feeSnapshot()]);
+    n.feeSnapshotsError = new Error("snapshot timeout");
+    // Note: `feesError` stays null — only the leaderboard loses its row.
+    expect(n.feesError).toBeNull();
+    const html = renderToStaticMarkup(
+      <RevenueByPoolTable
+        networkData={[n]}
+        isLoading={false}
+        hasError={true}
+      />,
+    );
     expect(html).toMatch(/load per-pool revenue/);
     expect(html).not.toContain(POOL_ADDR);
   });
