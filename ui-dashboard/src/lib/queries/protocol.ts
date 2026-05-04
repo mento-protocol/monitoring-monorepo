@@ -28,6 +28,7 @@ export const PROTOCOL_FEE_TRANSFERS_ALL = `
       tokenDecimals
       amount
       blockTimestamp
+      from
     }
   }
 `;

@@ -25,6 +25,7 @@ function transfer(
     tokenDecimals: 18,
     amount: "1000000000000000000", // 1e18 = 1 token
     blockTimestamp: String(NOW_S - 3600), // 1h ago by default
+    from: "0x0000000000000000000000000000000000000000",
     ...overrides,
   };
 }
@@ -57,6 +58,7 @@ function networkData(
     reservePoolIds: new Set(),
     fees: null,
     feeTransfers,
+    poolLabels: new Map(),
     uniqueLpAddresses: null,
     rates: TEST_RATES,
     error: null,

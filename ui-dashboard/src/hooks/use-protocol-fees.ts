@@ -9,7 +9,11 @@ import {
   type Network,
 } from "@/lib/networks";
 import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
-import { ORACLE_RATES, PROTOCOL_FEE_TRANSFERS_ALL } from "@/lib/queries";
+import {
+  ORACLE_RATES,
+  POOL_LABELS_ALL,
+  PROTOCOL_FEE_TRANSFERS_ALL,
+} from "@/lib/queries";
 import { buildSnapshotWindows, type SnapshotWindows } from "@/lib/volume";
 import {
   buildOracleRateMap,
@@ -24,6 +28,7 @@ import {
   blankNetworkData,
   REQUEST_TIMEOUT_MS,
   type NetworkData,
+  type PoolLabel,
 } from "@/lib/fetch-all-networks";
 import { SWR_KEY_PROTOCOL_FEES } from "@/lib/swr-keys";
 import type { ProtocolFeeTransfer } from "@/lib/types";
@@ -56,10 +61,15 @@ async function fetchFeesForNetwork(
   }
   const client = new GraphQLClient(network.hasuraUrl);
 
-  // Fetch rates + fees in parallel per chain — both needed to aggregate
-  // protocol fees in USD. `allSettled` so a rates failure doesn't blank
-  // fees and vice versa.
-  const [ratesResult, feesResult] = await Promise.allSettled([
+  // Fetch rates + fees + pool labels in parallel per chain — rates and fees
+  // are both needed to aggregate protocol fees in USD; labels resolve the
+  // `from` (pool address) on each transfer back to a `token0/token1` pair
+  // for the per-pool revenue leaderboard. `allSettled` so any single failure
+  // doesn't blank the others. A labels-only failure is non-fatal: the
+  // leaderboard renders rows with truncated-address fallback (handled by
+  // `tokenSymbol()` in `lib/tokens.ts`), so we don't promote it into
+  // `feesError`.
+  const [ratesResult, feesResult, labelsResult] = await Promise.allSettled([
     client.request<{ Pool: OracleRatePool[] }>({
       document: ORACLE_RATES,
       variables: { chainId: network.chainId },
@@ -67,6 +77,11 @@ async function fetchFeesForNetwork(
     }),
     client.request<{ ProtocolFeeTransfer: ProtocolFeeTransfer[] }>({
       document: PROTOCOL_FEE_TRANSFERS_ALL,
+      variables: { chainId: network.chainId },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    }),
+    client.request<{ Pool: Array<PoolLabel & { id: string }> }>({
+      document: POOL_LABELS_ALL,
       variables: { chainId: network.chainId },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     }),
@@ -81,6 +96,23 @@ async function fetchFeesForNetwork(
     feesResult.status === "fulfilled"
       ? (feesResult.value.ProtocolFeeTransfer ?? [])
       : [];
+
+  const poolLabels = new Map<string, PoolLabel>();
+  if (labelsResult.status === "fulfilled") {
+    for (const p of labelsResult.value.Pool ?? []) {
+      // Pool.id is `${chainId}-${lowercaseAddress}`; key the per-network map
+      // by the bare address so callers don't need to repeat the chain prefix.
+      const addr = p.id.includes("-")
+        ? p.id.slice(p.id.indexOf("-") + 1)
+        : p.id;
+      poolLabels.set(addr.toLowerCase(), {
+        id: p.id,
+        token0: p.token0,
+        token1: p.token1,
+        source: p.source,
+      });
+    }
+  }
   const toError = (reason: unknown) =>
     reason instanceof Error ? reason : new Error(String(reason));
 
@@ -105,6 +137,7 @@ async function fetchFeesForNetwork(
     rates,
     fees,
     feeTransfers,
+    poolLabels,
     feesError,
   });
 }

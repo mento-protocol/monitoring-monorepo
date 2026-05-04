@@ -99,6 +99,21 @@ export const ORACLE_RATES = `
   }
 `;
 
+// Pool label lookup — `id` (multichain `${chainId}-${address}`) plus the
+// minimum fields needed to render `poolName()` and the FPMM/Virtual badge on
+// the per-pool revenue leaderboard. No `oracleOk` filter: paused FX pools
+// must still resolve to readable labels for their historical fee transfers.
+export const POOL_LABELS_ALL = `
+  query PoolLabelsAll($chainId: Int!) {
+    Pool(where: { chainId: { _eq: $chainId } }) {
+      id
+      token0
+      token1
+      source
+    }
+  }
+`;
+
 export const RECENT_SWAPS = `
   query RecentSwaps($limit: Int!) {
     SwapEvent(

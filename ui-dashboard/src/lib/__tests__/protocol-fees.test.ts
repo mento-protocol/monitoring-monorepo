@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   aggregateProtocolFees,
+  aggregateProtocolFeesByPool,
   PROTOCOL_FEE_QUERY_LIMIT,
 } from "../protocol-fees";
 import { tokenToUSD, type OracleRateMap } from "../tokens";
@@ -126,6 +127,7 @@ function transfer(
     tokenDecimals: 18,
     amount: "1000000000000000000", // 1e18 = 1 token
     blockTimestamp: "0", // old by default
+    from: "0x0000000000000000000000000000000000000000",
     ...overrides,
   };
 }
@@ -354,5 +356,114 @@ describe("aggregateProtocolFees", () => {
     expect(result.unresolvedCount).toBe(2);
     expect(result.unresolvedCount24h).toBe(1); // only the recent UNKNOWN
     expect(result.fees24hUSD).toBeCloseTo(0, 2); // UNKNOWN excluded from total
+  });
+});
+
+describe("aggregateProtocolFeesByPool", () => {
+  const POOL_A = "0xaaaa000000000000000000000000000000000001";
+  const POOL_B = "0xbbbb000000000000000000000000000000000002";
+
+  it("groups transfers by pool address and chain", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const transfers = [
+      transfer({
+        from: POOL_A,
+        amount: "1000000000000000000", // 1 USDm
+        blockTimestamp: String(now - 1800), // 30m ago
+      }),
+      transfer({
+        from: POOL_A,
+        amount: "2000000000000000000", // 2 USDm
+        blockTimestamp: String(now - 3 * 86400), // 3 days ago
+      }),
+      transfer({
+        from: POOL_B,
+        amount: "5000000000000000000", // 5 USDm
+        blockTimestamp: String(now - 1800),
+      }),
+    ];
+    const entries = aggregateProtocolFeesByPool(transfers, TEST_RATES);
+    expect(entries).toHaveLength(2);
+    const a = entries.find((e) => e.poolAddress === POOL_A)!;
+    const b = entries.find((e) => e.poolAddress === POOL_B)!;
+    expect(a.poolId).toBe(`42220-${POOL_A}`);
+    expect(a.fees24hUSD).toBeCloseTo(1, 2);
+    expect(a.fees7dUSD).toBeCloseTo(3, 2);
+    expect(a.totalFeesUSD).toBeCloseTo(3, 2);
+    expect(b.fees24hUSD).toBeCloseTo(5, 2);
+    expect(b.totalFeesUSD).toBeCloseTo(5, 2);
+  });
+
+  it("sum across pools matches the chain-level aggregate", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const transfers = [
+      transfer({
+        from: POOL_A,
+        amount: "1000000000000000000",
+        blockTimestamp: String(now - 1800),
+      }),
+      transfer({
+        from: POOL_A,
+        tokenSymbol: "EURm",
+        amount: "1000000000000000000",
+        blockTimestamp: String(now - 1800),
+      }),
+      transfer({
+        from: POOL_B,
+        amount: "3000000000000000000",
+        blockTimestamp: String(now - 5 * 86400),
+      }),
+    ];
+    const chain = aggregateProtocolFees(transfers, TEST_RATES);
+    const pools = aggregateProtocolFeesByPool(transfers, TEST_RATES);
+    const sum24h = pools.reduce((s, p) => s + p.fees24hUSD, 0);
+    const sum7d = pools.reduce((s, p) => s + p.fees7dUSD, 0);
+    const sumAll = pools.reduce((s, p) => s + p.totalFeesUSD, 0);
+    expect(sum24h).toBeCloseTo(chain.fees24hUSD, 5);
+    expect(sum7d).toBeCloseTo(chain.fees7dUSD, 5);
+    expect(sumAll).toBeCloseTo(chain.totalFeesUSD, 5);
+  });
+
+  it("flags pools with unpriced or unknown tokens", () => {
+    const transfers = [
+      transfer({ from: POOL_A, tokenSymbol: "USDm" }),
+      transfer({ from: POOL_B, tokenSymbol: "MYSTERY" }),
+    ];
+    const entries = aggregateProtocolFeesByPool(transfers, TEST_RATES);
+    expect(entries.find((e) => e.poolAddress === POOL_A)!.unpriced).toBe(false);
+    expect(entries.find((e) => e.poolAddress === POOL_B)!.unpriced).toBe(true);
+  });
+
+  it("normalizes mixed-case pool addresses to lowercase", () => {
+    const transfers = [
+      transfer({ from: POOL_A.toUpperCase() }),
+      transfer({ from: POOL_A }),
+    ];
+    const entries = aggregateProtocolFeesByPool(transfers, TEST_RATES);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].poolAddress).toBe(POOL_A);
+  });
+
+  it("emits one entry per (chain, address) tuple", () => {
+    const transfers = [
+      transfer({ chainId: 42220, from: POOL_A }),
+      transfer({ chainId: 143, from: POOL_A }),
+    ];
+    const entries = aggregateProtocolFeesByPool(transfers, TEST_RATES);
+    expect(entries).toHaveLength(2);
+    const ids = new Set(entries.map((e) => e.poolId));
+    expect(ids.has(`42220-${POOL_A}`)).toBe(true);
+    expect(ids.has(`143-${POOL_A}`)).toBe(true);
+  });
+
+  it("returns empty array for empty input", () => {
+    expect(aggregateProtocolFeesByPool([], TEST_RATES)).toEqual([]);
+  });
+
+  it("skips transfers with empty `from`", () => {
+    const transfers = [transfer({ from: "" }), transfer({ from: POOL_A })];
+    const entries = aggregateProtocolFeesByPool(transfers, TEST_RATES);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].poolAddress).toBe(POOL_A);
   });
 });

@@ -109,3 +109,83 @@ export function aggregateProtocolFees(
     isTruncated: transfers.length >= PROTOCOL_FEE_QUERY_LIMIT,
   };
 }
+
+export type PoolFeeEntry = {
+  /** `${chainId}-${lowercasePoolAddress}` — matches Pool.id from the indexer. */
+  poolId: string;
+  chainId: number;
+  /** Lowercased pool address (the `from` field on ProtocolFeeTransfer). */
+  poolAddress: string;
+  totalFeesUSD: number;
+  fees24hUSD: number;
+  fees7dUSD: number;
+  fees30dUSD: number;
+  /**
+   * True if any transfer attributed to this pool was unpriced (unknown symbol
+   * or symbol without an oracle rate). The pool's totals are then a lower
+   * bound — the UI should prefix values with `≈`.
+   */
+  unpriced: boolean;
+};
+
+/**
+ * Per-pool variant of `aggregateProtocolFees`.
+ *
+ * Groups transfers by `${chainId}-${from.toLowerCase()}` (matching the
+ * indexer's `Pool.id` convention from `indexer-envio/src/helpers.ts`) and
+ * computes the same 24h / 7d / 30d / all-time USD totals for each pool.
+ *
+ * Inherits the same 1000-row Hasura cap caveat as the chain aggregator: rows
+ * are returned newest-first by `PROTOCOL_FEE_TRANSFERS_ALL`, so 24h / 7d / 30d
+ * windows are accurate while the all-time column may undercount on busy
+ * chains. Surface that via the parent `ProtocolFeeSummary.isTruncated`.
+ */
+export function aggregateProtocolFeesByPool(
+  transfers: ProtocolFeeTransfer[],
+  rates: OracleRateMap,
+): PoolFeeEntry[] {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const cutoff24h = nowSeconds - 86400;
+  const cutoff7d = nowSeconds - 7 * 86400;
+  const cutoff30d = nowSeconds - 30 * 86400;
+  const byPool = new Map<string, PoolFeeEntry>();
+
+  for (const t of transfers) {
+    if (!t.from) continue;
+    const poolAddress = t.from.toLowerCase();
+    const poolId = `${t.chainId}-${poolAddress}`;
+    let entry = byPool.get(poolId);
+    if (!entry) {
+      entry = {
+        poolId,
+        chainId: t.chainId,
+        poolAddress,
+        totalFeesUSD: 0,
+        fees24hUSD: 0,
+        fees7dUSD: 0,
+        fees30dUSD: 0,
+        unpriced: false,
+      };
+      byPool.set(poolId, entry);
+    }
+
+    const ts = Number(t.blockTimestamp);
+
+    if (UNRESOLVED_SYMBOLS.has(t.tokenSymbol)) {
+      entry.unpriced = true;
+      continue;
+    }
+    const amount = parseWei(t.amount, t.tokenDecimals);
+    const usd = tokenToUSD(t.tokenSymbol, amount, rates);
+    if (usd === null) {
+      entry.unpriced = true;
+      continue;
+    }
+    entry.totalFeesUSD += usd;
+    if (ts >= cutoff24h) entry.fees24hUSD += usd;
+    if (ts >= cutoff7d) entry.fees7dUSD += usd;
+    if (ts >= cutoff30d) entry.fees30dUSD += usd;
+  }
+
+  return Array.from(byPool.values());
+}
