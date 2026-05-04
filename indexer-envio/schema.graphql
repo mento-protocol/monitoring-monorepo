@@ -739,42 +739,42 @@ type WormholeTransferPending {
 
 type TraderDailySnapshot @index(fields: ["chainId", "trader", "timestamp"]) {
   id: ID! # "{chainId}-{trader}-{day}"
-  chainId: Int! @index
-  trader: String! @index # tx.from (lowercased)
-  timestamp: BigInt! @index # UTC day bucket
+  chainId: Int!
+  trader: String! @index
+  timestamp: BigInt! @index
   swapCount: Int!
-  uniquePoolsApprox: Int! # count of distinct (chainId,trader,poolId) snapshots seen this day; tracked by upserting TraderPoolDailySnapshot first and incrementing here on first-touch
-  volumeUsdWei: BigInt! # sum of |USD| per swap, 18-dec USD-wei
-  feesPaidUsdWei: BigInt! # volumeUsdWei × poolFeeBps / 10000
-  isSystemAddress: Boolean! @index # snapshotted at write time so toggle filter is index-friendly
-  lastSeenBlock: BigInt!
+  uniquePools: Int!
+  volumeUsdWei: BigInt!
+  feesPaidUsdWei: BigInt!
+  isSystemAddress: Boolean! @index
+  # Block timestamp of the trader's most recent swap within this day — drives
+  # the leaderboard's "Last active" column at sub-day precision (the day bucket
+  # alone would show every active trader as "today").
   lastSeenTimestamp: BigInt!
 }
 
 type TraderPoolDailySnapshot
   @index(fields: ["chainId", "trader", "poolId", "timestamp"]) {
   id: ID! # "{chainId}-{trader}-{poolId}-{day}"
-  chainId: Int! @index
-  trader: String! @index # tx.from
+  chainId: Int!
+  trader: String! @index
   poolId: String! @index
   timestamp: BigInt! @index
   swapCount: Int!
   # Direction-split USD-wei totals. "Inflow" = tokens flowing TO the trader
-  # (i.e., the swap's amountXOut for that token). "Outflow" = amountXIn.
-  # Sum of all four ≈ 2 × volumeUsdWei (each swap contributes one inflow + one outflow).
+  # (the swap's amountXOut for that token). "Outflow" = amountXIn.
+  # Sum of all four ≈ 2 × volumeUsdWei (one inflow + one outflow per swap).
   inflowToken0UsdWei: BigInt!
   outflowToken0UsdWei: BigInt!
   inflowToken1UsdWei: BigInt!
   outflowToken1UsdWei: BigInt!
   feesPaidUsdWei: BigInt!
-  lastSeenBlock: BigInt!
-  lastSeenTimestamp: BigInt!
 }
 
 type AggregatorDailySnapshot
   @index(fields: ["chainId", "aggregator", "timestamp"]) {
   id: ID! # "{chainId}-{aggregator}-{day}"
-  chainId: Int! @index
+  chainId: Int!
   # Canonical name from classifyAggregator(): "squid" | "jumper" | "lifi" |
   # "openocean" | "0x" | "1inch" | "paraswap" | "cowswap" | "direct" | "system"
   # | "unknown". "direct" = txTo is the Mento Broker (user used Mento UI/SDK).
@@ -786,20 +786,17 @@ type AggregatorDailySnapshot
   lastSeenAggregatorAddress: String!
   timestamp: BigInt! @index
   swapCount: Int!
-  uniqueTradersApprox: Int! # incremented when a new (chainId,aggregator,trader,day) tuple first appears; tracked via AggregatorTraderDayMarker
+  uniqueTraders: Int!
   volumeUsdWei: BigInt!
   feesPaidUsdWei: BigInt!
-  lastSeenBlock: BigInt!
-  lastSeenTimestamp: BigInt!
 }
 
-# Marker entity used to dedupe (aggregator, trader, day) tuples for the
-# uniqueTradersApprox counter. Existence-only — no payload needed.
+# Existence-only marker entities used to dedupe first-touch increments of
+# `uniqueTraders` and `uniquePools`. Cheaper than scanning the parent table.
 type AggregatorTraderDayMarker {
   id: ID! # "{chainId}-{aggregator}-{trader}-{day}"
 }
 
-# Same idea for TraderDailySnapshot.uniquePoolsApprox (per-day, per-trader, per-pool).
 type TraderPoolDayMarker {
   id: ID! # "{chainId}-{trader}-{poolId}-{day}"
 }

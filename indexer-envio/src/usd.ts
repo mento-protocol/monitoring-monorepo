@@ -40,6 +40,45 @@ function formatFixed4(value: bigint, decimals: number): string {
   return `${int4dp / SCALE}.${String(int4dp % SCALE).padStart(4, "0")}`;
 }
 
+/**
+ * Pick the USD-pegged side from two absolute token amounts. If both sides are
+ * pegged (stable/stable), prefers the side with the larger USD notional after
+ * decimal normalization to be robust against asymmetric fees/rounding. Cross-
+ * multiplies to compare without dividing: a/10^da ≥ b/10^db ⇔ a × 10^db ≥ b × 10^da.
+ *
+ * Returns `null` when token addresses are missing, both abs amounts are zero,
+ * or neither side is in `USD_PEGGED_SYMBOLS`.
+ */
+function pickPeggedSide(
+  chainId: number,
+  token0: string | undefined,
+  token1: string | undefined,
+  abs0: bigint,
+  abs1: bigint,
+  decimals0: number,
+  decimals1: number,
+): { peggedAmount: bigint; peggedDecimals: number } | null {
+  if (!token0 || !token1 || (abs0 === 0n && abs1 === 0n)) return null;
+
+  const sym0 = KNOWN_TOKEN_META.get(
+    `${chainId}:${token0.toLowerCase()}`,
+  )?.symbol;
+  const sym1 = KNOWN_TOKEN_META.get(
+    `${chainId}:${token1.toLowerCase()}`,
+  )?.symbol;
+  const peg0 = sym0 !== undefined && USD_PEGGED_SYMBOLS.has(sym0);
+  const peg1 = sym1 !== undefined && USD_PEGGED_SYMBOLS.has(sym1);
+  if (!peg0 && !peg1) return null;
+
+  const useToken0 =
+    peg0 &&
+    (!peg1 ||
+      abs0 * 10n ** BigInt(decimals1) >= abs1 * 10n ** BigInt(decimals0));
+  return useToken0
+    ? { peggedAmount: abs0, peggedDecimals: decimals0 }
+    : { peggedAmount: abs1, peggedDecimals: decimals1 };
+}
+
 export interface RebalanceUsdInput {
   chainId: number;
   /** Pool.token0 / token1. Optional — VirtualPools can lack token addresses,
@@ -87,41 +126,23 @@ export function computeRebalanceUsd(input: RebalanceUsdInput): RebalanceUsd {
     rewardBps,
   } = input;
 
-  if (!token0 || !token1 || (amount0Delta === 0n && amount1Delta === 0n)) {
-    return { notionalUsd: "", rewardUsd: "" };
-  }
-
-  const sym0 = KNOWN_TOKEN_META.get(
-    `${chainId}:${token0.toLowerCase()}`,
-  )?.symbol;
-  const sym1 = KNOWN_TOKEN_META.get(
-    `${chainId}:${token1.toLowerCase()}`,
-  )?.symbol;
-  const peg0 = sym0 !== undefined && USD_PEGGED_SYMBOLS.has(sym0);
-  const peg1 = sym1 !== undefined && USD_PEGGED_SYMBOLS.has(sym1);
-
-  if (!peg0 && !peg1) {
-    return { notionalUsd: "", rewardUsd: "" };
-  }
-
-  // Pick the pegged side. If both pegged, prefer the one with the larger
-  // USD notional after decimal scaling — cross-multiply to compare without
-  // dividing: a/10^da >= b/10^db ⇔ a × 10^db >= b × 10^da.
-  const a0 = bAbs(amount0Delta);
-  const a1 = bAbs(amount1Delta);
-  const useToken0 =
-    peg0 &&
-    (!peg1 ||
-      a0 * 10n ** BigInt(token1Decimals) >= a1 * 10n ** BigInt(token0Decimals));
-  const absDelta = useToken0 ? a0 : a1;
-  const decimals = useToken0 ? token0Decimals : token1Decimals;
-
-  const notionalUsd = formatFixed4(absDelta, decimals);
-  const rewardUsd = formatFixed4(
-    (absDelta * BigInt(rewardBps)) / 10_000n,
-    decimals,
+  const picked = pickPeggedSide(
+    chainId,
+    token0,
+    token1,
+    bAbs(amount0Delta),
+    bAbs(amount1Delta),
+    token0Decimals,
+    token1Decimals,
   );
+  if (picked === null) return { notionalUsd: "", rewardUsd: "" };
 
+  const { peggedAmount, peggedDecimals } = picked;
+  const notionalUsd = formatFixed4(peggedAmount, peggedDecimals);
+  const rewardUsd = formatFixed4(
+    applyFeeBps(peggedAmount, rewardBps),
+    peggedDecimals,
+  );
   return { notionalUsd, rewardUsd };
 }
 
@@ -136,14 +157,12 @@ export function computeRebalanceUsd(input: RebalanceUsdInput): RebalanceUsd {
 export const USD_WEI_DECIMALS = 18;
 
 /** Scale a token-native amount to 18-decimal USD-wei.
- *  Assumes the input token is USD-pegged (i.e., 1 token = $1). */
+ *  Assumes the input token is USD-pegged (1 token = $1). */
 function scaleToUsdWei(amount: bigint, tokenDecimals: number): bigint {
   if (tokenDecimals === USD_WEI_DECIMALS) return amount;
   if (tokenDecimals < USD_WEI_DECIMALS) {
     return amount * 10n ** BigInt(USD_WEI_DECIMALS - tokenDecimals);
   }
-  // Truncates sub-USD-wei precision — fine for monitoring; only triggers for
-  // tokens with > 18 decimals which Mento doesn't use today.
   return amount / 10n ** BigInt(tokenDecimals - USD_WEI_DECIMALS);
 }
 
@@ -186,30 +205,17 @@ export function computeSwapUsdWei(input: SwapUsdInput): bigint {
     amount1Out,
   } = input;
 
-  if (!token0 || !token1) return 0n;
-
-  const sym0 = KNOWN_TOKEN_META.get(
-    `${chainId}:${token0.toLowerCase()}`,
-  )?.symbol;
-  const sym1 = KNOWN_TOKEN_META.get(
-    `${chainId}:${token1.toLowerCase()}`,
-  )?.symbol;
-  const peg0 = sym0 !== undefined && USD_PEGGED_SYMBOLS.has(sym0);
-  const peg1 = sym1 !== undefined && USD_PEGGED_SYMBOLS.has(sym1);
-
-  if (!peg0 && !peg1) return 0n;
-
-  const a0 = bAbs(amount0In - amount0Out);
-  const a1 = bAbs(amount1In - amount1Out);
-
-  const useToken0 =
-    peg0 &&
-    (!peg1 ||
-      a0 * 10n ** BigInt(token1Decimals) >= a1 * 10n ** BigInt(token0Decimals));
-
-  return useToken0
-    ? scaleToUsdWei(a0, token0Decimals)
-    : scaleToUsdWei(a1, token1Decimals);
+  const picked = pickPeggedSide(
+    chainId,
+    token0,
+    token1,
+    bAbs(amount0In - amount0Out),
+    bAbs(amount1In - amount1Out),
+    token0Decimals,
+    token1Decimals,
+  );
+  if (picked === null) return 0n;
+  return scaleToUsdWei(picked.peggedAmount, picked.peggedDecimals);
 }
 
 /** Multiply USD-wei by a fee bps and return the fee in USD-wei.

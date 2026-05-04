@@ -2,7 +2,7 @@
 
 ## Volume Leaderboard — follow-up PRs after PR 1 (indexer foundation)
 
-PR 1 (this PR): schema entities + `caller`/`txTo`/`volumeUsdWei` on `SwapEvent` + handler population + `computeSwapUsdWei`. The new `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `AggregatorTraderDayMarker`, `TraderPoolDayMarker` entities are defined but no handlers write to them yet (empty tables on deploy — fine).
+PR 1 landed the schema entities + `caller`/`txTo`/`volumeUsdWei` on `SwapEvent` + handler population + `computeSwapUsdWei`. The `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `AggregatorTraderDayMarker`, `TraderPoolDayMarker` entities exist but no handlers write to them yet (empty tables on deploy — fine; PR 2 fills them).
 
 Approved plan lives at `~/.claude/plans/lately-i-ve-been-thinking-expressive-pearl.md`. Sequence (each self-contained, deploy-able):
 
