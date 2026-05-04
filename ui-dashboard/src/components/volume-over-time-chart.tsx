@@ -315,7 +315,11 @@ function computeHeadline(
         {formatUSD(v3Total)}
         <VersionBadge version="v3" />
       </span>
-      <span aria-hidden="true" className="text-slate-600">
+      {/* `self-center` overrides the wrapper's `items-baseline` for this one
+          child so the dot sits at the digits' visual midline, not on their
+          baseline. `text-2xl` knocks it down from the inherited 3xl/4xl
+          (otherwise the dot dominates the row). */}
+      <span aria-hidden="true" className="self-center text-2xl text-slate-600">
         ·
       </span>
       <span aria-hidden="true">
