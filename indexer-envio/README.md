@@ -11,6 +11,7 @@ Listens to on-chain events from Mento v3 contracts and writes structured entitie
 
 | Contract              | Events                                                                                                       |
 | --------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Broker                | `Swap` (legacy v2 settlement layer; Celo only — no Broker on Monad)                                          |
 | FPMMFactory           | `FPMMDeployed`                                                                                               |
 | FPMM (pool)           | `Swap`, `Mint`, `Burn`, `UpdateReserves`, `Rebalanced`, `TradingLimitConfigured`, `LiquidityStrategyUpdated` |
 | VirtualPool           | `Swap`, `Mint`, `Burn`, `UpdateReserves`, `Rebalanced`                                                       |
@@ -21,21 +22,23 @@ Listens to on-chain events from Mento v3 contracts and writes structured entitie
 
 ### Entities Written
 
-| Entity                 | Description                                                                   |
-| ---------------------- | ----------------------------------------------------------------------------- |
-| `Pool`                 | Per-pool state: reserves, health, oracle, trading limits, rebalancer liveness |
-| `PoolSnapshot`         | Hourly aggregates: volume, TVL, swap count                                    |
-| `OracleSnapshot`       | Per-oracle-event: price, deviation, health status                             |
-| `TradingLimit`         | Per-pool per-token: limit state, netflow, pressure ratio                      |
-| `SwapEvent`            | Individual swap: amounts in/out, txHash, timestamp                            |
-| `LiquidityEvent`       | Mint/burn events                                                              |
-| `ReserveUpdate`        | Reserve snapshots on every `UpdateReserves`                                   |
-| `RebalanceEvent`       | Per-rebalance: improvement, effectiveness ratio                               |
-| `FactoryDeployment`    | Pool creation events from factory                                             |
-| `VirtualPoolLifecycle` | VirtualPool deploy/deprecate events                                           |
-| `OlsPool`              | Open Liquidity Strategy pool registrations                                    |
-| `OlsLiquidityEvent`    | OLS liquidity movements                                                       |
-| `ProtocolFeeTransfer`  | ERC20 fee token transfers                                                     |
+| Entity                 | Description                                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------------------------------ |
+| `Pool`                 | Per-pool state: reserves, health, oracle, trading limits, rebalancer liveness                          |
+| `PoolSnapshot`         | Hourly aggregates: volume, TVL, swap count                                                             |
+| `OracleSnapshot`       | Per-oracle-event: price, deviation, health status                                                      |
+| `TradingLimit`         | Per-pool per-token: limit state, netflow, pressure ratio                                               |
+| `SwapEvent`            | Individual v3 swap: amounts in/out, txHash, timestamp                                                  |
+| `LiquidityEvent`       | Mint/burn events                                                                                       |
+| `ReserveUpdate`        | Reserve snapshots on every `UpdateReserves`                                                            |
+| `RebalanceEvent`       | Per-rebalance: improvement, effectiveness ratio                                                        |
+| `FactoryDeployment`    | Pool creation events from factory                                                                      |
+| `VirtualPoolLifecycle` | VirtualPool deploy/deprecate events                                                                    |
+| `OlsPool`              | Open Liquidity Strategy pool registrations                                                             |
+| `OlsLiquidityEvent`    | OLS liquidity movements                                                                                |
+| `ProtocolFeeTransfer`  | ERC20 fee token transfers                                                                              |
+| `BrokerSwapEvent`      | Individual legacy v2 swap (Broker → BiPoolManager); flags `routedViaV3Router` to dedupe vs VirtualPool |
+| `BrokerDailySnapshot`  | Daily v2 volume rollup keyed by `(chainId, exchangeProvider, routedViaV3Router, day)`                  |
 
 ### Pool ID Format
 

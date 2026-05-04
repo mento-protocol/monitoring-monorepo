@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain).
+Envio HyperIndex indexer for Mento v3 FPMM (Fixed Product Market Maker) pools on Celo + Monad (multichain). Also indexes the Mento v2 Broker on Celo (legacy `Broker → BiPoolManager` swap path) for the homepage v2/v3 volume split.
 
 ## Before Opening PRs
 
@@ -16,7 +16,7 @@ This is mandatory for cross-layer/stateful data work. Do not assume the UI/query
 
 - `config.multichain.mainnet.yaml` — **Default** mainnet config (Celo + Monad)
 - `config.multichain.testnet.yaml` — Testnet multichain config
-- `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced)
+- `schema.graphql` — Entity definitions (FPMM, Swap, Mint, Burn, UpdateReserves, Rebalanced, BrokerSwapEvent + BrokerDailySnapshot for the v2 path)
 - `src/EventHandlers.ts` — Event processing logic
 - `src/contractAddresses.ts` — Contract address resolution from `@mento-protocol/contracts`; also exports `CONTRACT_NAMESPACE_BY_CHAIN` (backed by `config/deployment-namespaces.json`)
 - `config/deployment-namespaces.json` — Vendored copy of the chain ID → active namespace map used by Envio hosted builds
@@ -42,6 +42,7 @@ pnpm test      # Run tests (mocha + chai)
 
 ## Contract Types
 
+- **Broker** — Legacy v2 settlement layer (`Broker → BiPoolManager`). Celo only (no Broker on Monad). Each `Swap` is denormalized with `routedViaV3Router` (`tx.to == Routerv300`) so the homepage chart can exclude router-driven sibling rows that are already counted via `VirtualPool.Swap`.
 - **FPMMFactory** — Deploys new FPMM pools
 - **FPMM** — Fixed Product Market Maker pools (Swap, Mint, Burn, UpdateReserves, Rebalanced events)
 - **VirtualPoolFactory** — Deploys virtual pools

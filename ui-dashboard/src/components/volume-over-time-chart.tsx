@@ -165,11 +165,15 @@ export function buildBrokerDailyV2Series(
       const timestamp = Number(row.timestamp);
       if (window && (timestamp < window.from || timestamp >= window.to))
         continue;
-      // 18-decimal "USD-wei" → JS number USD. BigInt() handles the string;
-      // dividing by 1e18 in floating-point loses sub-cent precision, which
-      // is fine for chart rendering (we don't display sub-cent on a chart
-      // measured in $K/$M).
-      const usd = Number(BigInt(row.volumeUsdWei)) / 1e18;
+      // 18-decimal "USD-wei" → JS number USD, with cent-precision preserved.
+      // `Number(BigInt(volumeUsdWei))` overflows MAX_SAFE_INTEGER (~9e15) for
+      // any daily v2 volume above ~$10K, silently losing precision. Divide in
+      // BigInt down to "cents" (1e16 → 1) so the result fits in Number, then
+      // scale back to USD. Sub-cent precision is sacrificed (fine for $K/$M
+      // chart rendering). BigInt literals (`100n`, `10n ** 18n`) aren't used
+      // because the dashboard's `tsconfig.json` targets ES2017.
+      const usd =
+        Number(BigInt(row.volumeUsdWei) / BigInt(10) ** BigInt(16)) / 100;
       const bucket = Math.floor(timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
       minBucket = Math.min(minBucket, bucket);
       totalBuckets.set(bucket, (totalBuckets.get(bucket) ?? 0) + usd);
