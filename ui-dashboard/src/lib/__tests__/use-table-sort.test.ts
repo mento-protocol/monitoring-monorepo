@@ -263,6 +263,138 @@ describe("useTableSort — strips params when new state matches defaults", () =>
   });
 });
 
+describe("useTableSort — canonicalizes malformed / partial URL params on mount", () => {
+  it("rewrites bogus sort param to default key while keeping a valid dir", () => {
+    setup(new URLSearchParams("Sort=bogus&Dir=asc"));
+    const ref: ResultRef = { current: null };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { resultRef: ref }));
+    });
+    expect(ref.current?.sortKey).toBe("tvl");
+    expect(ref.current?.sortDir).toBe("asc");
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+    const callArg = mockReplace.mock.calls[0][0] as string;
+    expect(callArg).toContain("Sort=tvl");
+    expect(callArg).toContain("Dir=asc");
+    teardown();
+  });
+
+  it("strips both params when bogus sort + invalid dir collapse to defaults", () => {
+    setup(new URLSearchParams("Sort=bogus&Dir=garbage"));
+    const ref: ResultRef = { current: null };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { resultRef: ref }));
+    });
+    expect(ref.current?.sortKey).toBe("tvl");
+    expect(ref.current?.sortDir).toBe("desc");
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+    expect(mockReplace.mock.calls[0][0]).toBe("?");
+    teardown();
+  });
+
+  it("backfills the missing dir param when only sort is present", () => {
+    setup(new URLSearchParams("Sort=pool"));
+    const ref: ResultRef = { current: null };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { resultRef: ref }));
+    });
+    expect(ref.current?.sortKey).toBe("pool");
+    expect(ref.current?.sortDir).toBe("desc");
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+    const callArg = mockReplace.mock.calls[0][0] as string;
+    expect(callArg).toContain("Sort=pool");
+    expect(callArg).toContain("Dir=desc");
+    teardown();
+  });
+
+  it("strips literal-default params (Sort=tvl&Dir=desc) so URL stays canonical", () => {
+    setup(new URLSearchParams("Sort=tvl&Dir=desc"));
+    const ref: ResultRef = { current: null };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { resultRef: ref }));
+    });
+    expect(mockReplace).toHaveBeenCalledTimes(1);
+    expect(mockReplace.mock.calls[0][0]).toBe("?");
+    teardown();
+  });
+
+  it("does NOT rewrite when URL is already canonical", () => {
+    setup(new URLSearchParams("Sort=pool&Dir=asc"));
+    const ref: ResultRef = { current: null };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { resultRef: ref }));
+    });
+    expect(mockReplace).not.toHaveBeenCalled();
+    teardown();
+  });
+
+  it("does NOT rewrite when URL is empty (defaults already canonical)", () => {
+    setup();
+    const ref: ResultRef = { current: null };
+    act(() => {
+      root.render(React.createElement(HookWrapper, { resultRef: ref }));
+    });
+    expect(mockReplace).not.toHaveBeenCalled();
+    teardown();
+  });
+});
+
+describe("useTableSort — handleSort honors defaultDir on new-key reset", () => {
+  it("uses defaultDir (asc) when configured, not hard-coded desc", () => {
+    setup();
+    const ref: { current: UseTableSortResult<TestKey> | null } = {
+      current: null,
+    };
+    function AscDefaultWrapper() {
+      const result = useTableSort<TestKey>({
+        defaultKey: "tvl",
+        defaultDir: "asc",
+        validKeys: VALID_KEYS,
+      });
+      ref.current = result;
+      return null;
+    }
+    act(() => {
+      root.render(React.createElement(AscDefaultWrapper));
+    });
+    // Switching to a new key should reset to defaultDir ("asc"), not "desc".
+    act(() => {
+      ref.current?.handleSort("pool");
+    });
+    const callArg = mockReplace.mock.calls[0][0] as string;
+    expect(callArg).toContain("Sort=pool");
+    expect(callArg).toContain("Dir=asc");
+    teardown();
+  });
+
+  it("when new state matches defaultDir=asc default, params are stripped", () => {
+    // Start on pool/desc, click tvl. defaultDir=asc, so reset is tvl/asc → matches defaults → strip.
+    setup(new URLSearchParams("Sort=pool&Dir=desc"));
+    const ref: { current: UseTableSortResult<TestKey> | null } = {
+      current: null,
+    };
+    function AscDefaultWrapper() {
+      const result = useTableSort<TestKey>({
+        defaultKey: "tvl",
+        defaultDir: "asc",
+        validKeys: VALID_KEYS,
+      });
+      ref.current = result;
+      return null;
+    }
+    act(() => {
+      root.render(React.createElement(AscDefaultWrapper));
+    });
+    // First call may be the canonicalization — we want the handleSort one.
+    mockReplace.mockClear();
+    act(() => {
+      ref.current?.handleSort("tvl");
+    });
+    expect(mockReplace.mock.calls[0][0]).toBe("?");
+    teardown();
+  });
+});
+
 describe("useTableSort — two hooks with different paramPrefix don't interfere", () => {
   let container2: HTMLElement;
   let root2: Root;

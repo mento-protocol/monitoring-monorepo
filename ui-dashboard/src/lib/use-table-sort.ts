@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { SortDir } from "@/lib/table-sort";
 
@@ -54,10 +54,44 @@ export function useTableSort<K extends string>({
   const sortDir: SortDir =
     rawDir === "asc" || rawDir === "desc" ? rawDir : defaultDir;
 
+  // Canonicalize malformed / partial / stale params back into the URL so the
+  // address bar always describes the rendered state. Without this, deep links
+  // like `?fooSort=bogus` or one-sided `?fooSort=fees24h` (no dir) leave junk
+  // in the URL while the table renders defaults — refresh / share would carry
+  // the junk forward indefinitely.
+  useEffect(() => {
+    const isCanonical = sortKey !== defaultKey || sortDir !== defaultDir;
+    const sortMatches = isCanonical ? rawKey === sortKey : rawKey === null;
+    const dirMatches = isCanonical ? rawDir === sortDir : rawDir === null;
+    if (sortMatches && dirMatches) return;
+
+    const params = new URLSearchParams(searchParams.toString());
+    if (isCanonical) {
+      params.set(sortParam, sortKey);
+      params.set(dirParam, sortDir);
+    } else {
+      params.delete(sortParam);
+      params.delete(dirParam);
+    }
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+  }, [
+    rawKey,
+    rawDir,
+    sortKey,
+    sortDir,
+    defaultKey,
+    defaultDir,
+    sortParam,
+    dirParam,
+    searchParams,
+    router,
+  ]);
+
   const handleSort = useCallback(
     (key: K) => {
       const nextDir: SortDir =
-        key === sortKey ? (sortDir === "asc" ? "desc" : "asc") : "desc";
+        key === sortKey ? (sortDir === "asc" ? "desc" : "asc") : defaultDir;
 
       const params = new URLSearchParams(searchParams.toString());
 

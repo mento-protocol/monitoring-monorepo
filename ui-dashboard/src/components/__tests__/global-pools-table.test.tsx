@@ -1,14 +1,22 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ReactNode } from "react";
 import type { Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 
+let mockSearchParams = new URLSearchParams();
+const mockReplace = vi.fn();
+
 vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(),
-  useRouter: () => ({ replace: vi.fn() }),
+  useSearchParams: () => mockSearchParams,
+  useRouter: () => ({ replace: mockReplace }),
   usePathname: () => "/pools",
 }));
+
+beforeEach(() => {
+  mockSearchParams = new URLSearchParams();
+  mockReplace.mockClear();
+});
 
 // Mock weekend detection so tests are deterministic.
 vi.mock("@/lib/weekend", () => ({
@@ -513,5 +521,40 @@ describe("GlobalPoolsTable — Strategy badge", () => {
     expect(html).not.toContain(">Reserve<");
     expect(html).not.toContain(">CDP<");
     expect(html).not.toContain(">Open<");
+  });
+});
+
+/**
+ * Extracts a `label → aria-sort` map from rendered HTML by splitting on
+ * `</th>` and matching each segment independently. Robust against
+ * cross-element regex matching.
+ */
+function ariaSortByLabel(html: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const seg of html.split("</th>")) {
+    const sort = seg.match(/aria-sort="([^"]+)"/);
+    const label = seg.match(/<button[^>]*>([^<]+)/);
+    if (sort && label) result[label[1].trim()] = sort[1];
+  }
+  return result;
+}
+
+describe("GlobalPoolsTable — URL-driven sort wiring", () => {
+  it("aria-sort on the active header matches the URL state", () => {
+    mockSearchParams = new URLSearchParams("poolsSort=tvl&poolsDir=asc");
+    const entry = makeEntry();
+    const html = renderToStaticMarkup(<GlobalPoolsTable entries={[entry]} />);
+    const sort = ariaSortByLabel(html);
+    expect(sort.TVL).toBe("ascending");
+    // sanity: a non-active column stays "none"
+    expect(sort.Health).toBe("none");
+  });
+
+  it("falls back to defaultKey/defaultDir aria-sort when URL is empty", () => {
+    mockSearchParams = new URLSearchParams();
+    const entry = makeEntry();
+    const html = renderToStaticMarkup(<GlobalPoolsTable entries={[entry]} />);
+    const sort = ariaSortByLabel(html);
+    expect(sort.TVL).toBe("descending");
   });
 });
