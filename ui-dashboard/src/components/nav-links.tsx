@@ -27,6 +27,12 @@ export function NavLinks() {
         Bridges
       </Link>
       <Link
+        href="/leaderboard"
+        className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+      >
+        Leaderboard
+      </Link>
+      <Link
         href="/revenue"
         className="text-xs sm:text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
       >
