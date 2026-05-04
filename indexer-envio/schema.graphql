@@ -761,6 +761,11 @@ type TraderPoolDailySnapshot
   poolId: String! @index
   timestamp: BigInt! @index
   swapCount: Int!
+  # Total USD volume the trader did in this pool today, summed from
+  # SwapEvent.volumeUsdWei. Mirrors TraderDailySnapshot.volumeUsdWei but
+  # scoped to one pool — the dashboard's per-pool breakdown reads this
+  # directly instead of deriving it from the inflow/outflow split.
+  volumeUsdWei: BigInt!
   # Direction-split USD-wei totals. "Inflow" = tokens flowing TO the trader
   # (the swap's amountXOut for that token). "Outflow" = amountXIn.
   # Sum of all four ≈ 2 × volumeUsdWei (one inflow + one outflow per swap).
@@ -775,11 +780,15 @@ type AggregatorDailySnapshot
   @index(fields: ["chainId", "aggregator", "timestamp"]) {
   id: ID! # "{chainId}-{aggregator}-{day}"
   chainId: Int!
-  # Canonical name from classifyAggregator(): "squid" | "jumper" | "lifi" |
-  # "openocean" | "0x" | "1inch" | "paraswap" | "cowswap" | "direct" | "system"
-  # | "unknown". "direct" = txTo is the Mento Broker (user used Mento UI/SDK).
-  # "system" = txTo is a known internal contract (rebalancer, NTT, etc.).
-  # "unknown" = txTo not in any known list — surfaces gaps for follow-up.
+  # Canonical name from classifyAggregator(). Values currently produced:
+  # "squid" | "lifi" | "0x" | "openocean" | "direct" | "system" | "unknown".
+  # "direct" = txTo is the Mento Broker / Router (user used Mento UI/SDK)
+  # or the swap went directly to the pool with no router mediation.
+  # "system" = txTo is a known Mento internal contract (rebalancer, NTT, etc.).
+  # "unknown" = txTo not in any known list — surfaces gaps for follow-up
+  # curation. Add new aggregators (1inch / paraswap / jumper / cowswap /
+  # ...) to indexer-envio/config/aggregators.json once they're deployed and
+  # they'll start appearing here on next re-sync.
   aggregator: String! @index
   # Most recently observed router address mapped to this aggregator. May vary
   # across days if multiple routers map to the same canonical name.
