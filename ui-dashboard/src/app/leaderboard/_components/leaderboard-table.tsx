@@ -175,7 +175,10 @@ function TraderRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const network = networkForChainId(trader.chainId);
-  const cutoff = rangeCutoffSeconds(range);
+  // Memoize on `range` alone — `rangeCutoffSeconds` reads `Date.now()` and
+  // would otherwise tick forward each render, churning SWR's cache key for
+  // the breakdown query and re-fetching on every parent re-render.
+  const cutoff = useMemo(() => rangeCutoffSeconds(range), [range]);
   // Only fetch the pool breakdown after the user opens the row — paying for
   // 50 sub-queries upfront would defeat the point of paginated fetches.
   const breakdown = useGQL<{

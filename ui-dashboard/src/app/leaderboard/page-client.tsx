@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useGQL } from "@/lib/graphql";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { Tile } from "@/components/feedback";
@@ -33,43 +33,97 @@ type PoolRow = {
 
 const VALID_RANGES = new Set<LeaderboardRangeKey>(["24h", "7d", "30d", "all"]);
 
+function readRangeFromParams(params: URLSearchParams): LeaderboardRangeKey {
+  const raw = params.get("range");
+  return raw && VALID_RANGES.has(raw as LeaderboardRangeKey)
+    ? (raw as LeaderboardRangeKey)
+    : "7d";
+}
+
+function readShowSystemFromParams(params: URLSearchParams): boolean {
+  return params.get("system") === "1";
+}
+
 export function LeaderboardClient() {
   const searchParams = useSearchParams();
-  const router = useRouter();
 
-  // URL-backed state for range + system-toggle so the view is shareable and
-  // survives refresh — same pattern as bridge-flows page.
-  const range = useMemo<LeaderboardRangeKey>(() => {
-    const raw = searchParams.get("range");
-    return raw && VALID_RANGES.has(raw as LeaderboardRangeKey)
-      ? (raw as LeaderboardRangeKey)
-      : "7d";
-  }, [searchParams]);
+  // URL-backed state. Reads happen via `useSearchParams` on initial mount
+  // (server-rendered + first client paint), but writes go through
+  // `window.history.replaceState` — NOT `router.replace`. The App Router's
+  // `router.replace` triggers an RSC payload refetch on the current segment
+  // (`?_rsc=...`) every URL write, which adds ~700ms latency to range/filter
+  // toggles. See AGENTS.md "URL state in client-only tables / filters" and
+  // PR #314 for the regression that established this rule.
+  const [range, setRangeState] = useState<LeaderboardRangeKey>(() =>
+    readRangeFromParams(searchParams),
+  );
+  const [showSystem, setShowSystemState] = useState<boolean>(() =>
+    readShowSystemFromParams(searchParams),
+  );
 
-  const showSystem = searchParams.get("system") === "1";
+  const writeUrl = useCallback(
+    (nextRange: LeaderboardRangeKey, nextShowSystem: boolean) => {
+      if (typeof window === "undefined") return;
+      const params = new URLSearchParams(window.location.search);
+      if (nextRange === "7d") params.delete("range");
+      else params.set("range", nextRange);
+      if (nextShowSystem) params.set("system", "1");
+      else params.delete("system");
+      const qs = params.toString();
+      const nextUrl =
+        window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
+      window.history.replaceState(window.history.state, "", nextUrl);
+    },
+    [],
+  );
 
   const setRange = useCallback(
     (next: LeaderboardRangeKey) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (next === "7d") params.delete("range");
-      else params.set("range", next);
-      router.replace(`?${params.toString()}`, { scroll: false });
+      setRangeState(next);
+      writeUrl(next, showSystem);
     },
-    [router, searchParams],
+    [showSystem, writeUrl],
   );
 
   const setShowSystem = useCallback(
     (next: boolean) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (next) params.set("system", "1");
-      else params.delete("system");
-      router.replace(`?${params.toString()}`, { scroll: false });
+      setShowSystemState(next);
+      writeUrl(range, next);
     },
-    [router, searchParams],
+    [range, writeUrl],
   );
 
-  const cutoff = rangeCutoffSeconds(range);
-  const isSystemAddressIn = showSystem ? [false, true] : [false];
+  // Browser back/forward buttons fire `popstate`. `replaceState` itself
+  // doesn't (and Next's `useSearchParams` doesn't observe our writes), so
+  // popstate is the only signal that real navigation moved the URL out from
+  // under us — sync local state when it happens.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      setRangeState((prev) => {
+        const next = readRangeFromParams(params);
+        return prev === next ? prev : next;
+      });
+      setShowSystemState((prev) => {
+        const next = readShowSystemFromParams(params);
+        return prev === next ? prev : next;
+      });
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  // Memoize on `range` alone — `rangeCutoffSeconds` calls `Date.now()` and
+  // would otherwise tick forward every render, creating a new SWR cache key
+  // each second and triggering excess Hasura fetches. The window endpoint
+  // being pinned to mount time is acceptable: daily snapshots only roll over
+  // at UTC midnight, and SWR's 30s polling already keeps the data fresh.
+  const cutoff = useMemo(() => rangeCutoffSeconds(range), [range]);
+  const isSystemAddressIn = useMemo(
+    () => (showSystem ? [false, true] : [false]),
+    [showSystem],
+  );
 
   const tradersResult = useGQL<{ TraderDailySnapshot: TraderDailyRow[] }>(
     TRADER_DAILY_TOP,
