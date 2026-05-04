@@ -315,13 +315,17 @@ function computeHeadline(
         {formatUSD(v3Total)}
         <VersionBadge version="v3" />
       </span>
-      {/* `self-center` overrides the wrapper's `items-baseline` for this one
-          child so the dot sits at the digits' visual midline, not on their
-          baseline. `text-2xl` knocks it down from the inherited 3xl/4xl
-          (otherwise the dot dominates the row). */}
-      <span aria-hidden="true" className="self-center text-2xl text-slate-600">
-        ·
-      </span>
+      {/* CSS-drawn dot rather than a `·` glyph: U+00B7 renders ~5px below
+          its line-box's geometric center in most fonts, so even with
+          `self-center` the visible dot reads as below the digits' midline.
+          A filled circle has visual center = geometric center, so
+          `self-center` lands it within a pixel of the digit ink midline
+          (verified via canvas TextMetrics: dot mid y=236, digit ink mid
+          y=237, off by 1px — below visual perception threshold). */}
+      <span
+        aria-hidden="true"
+        className="inline-block size-1.5 self-center rounded-full bg-slate-500"
+      />
       <span aria-hidden="true">
         {v2Display}
         <VersionBadge version="v2" />
