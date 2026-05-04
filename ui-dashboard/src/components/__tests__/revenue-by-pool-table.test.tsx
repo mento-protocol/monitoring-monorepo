@@ -17,6 +17,16 @@ import { PROTOCOL_FEE_QUERY_LIMIT } from "@/lib/protocol-fees";
 // Module-level mocks — must be hoisted before SUT import.
 // ---------------------------------------------------------------------------
 
+// `RevenueByPoolTable` calls `useTableSort` which transitively pulls in
+// `useRouter` / `usePathname` / `useSearchParams` from next/navigation.
+// Without the App Router mounted (we're SSR-rendering with renderToStaticMarkup),
+// those hooks throw "invariant expected app router to be mounted".
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ replace: vi.fn() }),
+  usePathname: () => "/revenue",
+}));
+
 vi.mock("next/link", () => ({
   default: ({
     href,

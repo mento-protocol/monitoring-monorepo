@@ -1,0 +1,62 @@
+{
+  "$comment": "Per-chain aggregator/router contract addresses → canonical name. All addresses lowercased. Verified on-chain via celoscan / monadscan (bytecode + tx history) on 2026-05-04. Adding a new aggregator: lookup canonical address in the project's docs, verify on the explorer, add here. Removing an entry retroactively re-classifies historical AggregatorDailySnapshot rows as 'unknown' — handle via re-sync.",
+  "$clusters": {
+    "$comment": "Multi-contract operators on a single deployer EOA. Naming convention: `cluster-<first-16-hex-of-deployer-EOA>` (16 hex chars = 64 bits, collision-free in practice for the foreseeable cluster count). Tag each contract in the per-chain block below with the same `name: cluster-...`. The cluster label is purely a fact about on-chain deploy provenance — no inference about the operator's identity (MEV / MM / arb / etc.) — added so the leaderboard's UI can group volume by operator and link to the deployer for follow-up research. The `chainId` field on each cluster entry is informational (where the contracts have been observed); it does NOT constrain placement and a cross-chain deployer would extend the cluster's contract list across multiple per-chain blocks. Adding a cluster: 1) confirm two or more in-our-data contracts share a deployer EOA via celoscan, 2) add the cluster entry here, 3) tag each contract address with the cluster name in the per-chain block.",
+    "cluster-7dc08ec28f299c06": {
+      "chainId": 42220,
+      "deployer": "0x7dc08ec28f299c062d2941de1f9cfb741df8f022",
+      "explorerUrl": "https://celoscan.io/address/0x7dc08ec28f299c062d2941de1f9cfb741df8f022",
+      "$note": "Operator of 4 unverified contracts driving Mento swap volume on Celo (~$235k cumulative observed). Identified via deployer-EOA grouping; no public project / brand identity found. Worth re-checking quarterly for new contracts deployed by this EOA."
+    }
+  },
+  "42220": {
+    "0xce16f69375520ab01377ce7b88f5ba8c48f8d666": {
+      "name": "squid",
+      "source": "https://docs.squidrouter.com/additional-resources/contracts"
+    },
+    "0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae": {
+      "name": "lifi",
+      "source": "https://li.quest/v1/chains?chainTypes=EVM"
+    },
+    "0xdef1c0ded9bec7f1a1670819833240f027b25eff": {
+      "name": "0x",
+      "source": "https://github.com/0xProject/protocol/blob/main/packages/contract-addresses/addresses.json"
+    },
+    "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": {
+      "name": "openocean",
+      "source": "https://apis.openocean.finance/developer/apis/supported-chains"
+    },
+    "0xef6956414006e161fca5f048331d91e472077e9b": {
+      "name": "cluster-7dc08ec28f299c06",
+      "source": "https://celoscan.io/address/0xef6956414006e161fca5f048331d91e472077e9b"
+    },
+    "0x2e73e4a7f4c2ee4fb5d5d2fd823821e3975237d7": {
+      "name": "cluster-7dc08ec28f299c06",
+      "source": "https://celoscan.io/address/0x2e73e4a7f4c2ee4fb5d5d2fd823821e3975237d7"
+    },
+    "0x00d1cda22d867e2d2f22931b5567e93cc1e047cd": {
+      "name": "cluster-7dc08ec28f299c06",
+      "source": "https://celoscan.io/address/0x00d1cda22d867e2d2f22931b5567e93cc1e047cd"
+    },
+    "0xfe8237bcba52339d818c9c9c3c94481196e4b653": {
+      "name": "cluster-7dc08ec28f299c06",
+      "source": "https://celoscan.io/address/0xfe8237bcba52339d818c9c9c3c94481196e4b653"
+    }
+  },
+  "143": {
+    "0x026f252016a7c47cdef1f05a3fc9e20c92a49c37": {
+      "name": "lifi",
+      "source": "https://li.quest/v1/chains?chainTypes=EVM",
+      "$note": "Non-default LI.FI diamond on Monad — not the 0x1231… address used on most chains."
+    },
+    "0x0000000000001ff3684f28c67538d4d072c22734": {
+      "name": "0x",
+      "source": "https://docs.0x.org/introduction/0x-cheat-sheet",
+      "$note": "0x V2 AllowanceHolder. Per-pair Settler contracts rotate and are not stable enough to track here; AllowanceHolder is the stable entry point."
+    },
+    "0x6352a56caadc4f1e25cd6c75970fa768a3304e64": {
+      "name": "openocean",
+      "source": "https://apis.openocean.finance/developer/apis/supported-chains"
+    }
+  }
+}

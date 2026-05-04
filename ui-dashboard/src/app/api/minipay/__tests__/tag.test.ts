@@ -6,7 +6,7 @@ vi.mock("@/lib/address-labels", () => ({
   importLabels: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@/lib/arkham-discovery", () => ({
+vi.mock("@/lib/mento-address-discovery", () => ({
   discoverMentoAddresses: vi.fn(),
 }));
 
@@ -29,7 +29,7 @@ vi.mock("@sentry/nextjs", () => ({
 
 import { GET } from "../tag/route";
 import { getAllLabels, importLabels } from "@/lib/address-labels";
-import { discoverMentoAddresses } from "@/lib/arkham-discovery";
+import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 import { intersectMiniPay, getMiniPaySetSize } from "@/lib/minipay";
 
 const mockGetAllLabels = vi.mocked(getAllLabels);

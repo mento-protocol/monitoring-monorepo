@@ -21,7 +21,7 @@ vi.mock("@/lib/arkham", async () => {
   };
 });
 
-vi.mock("@/lib/arkham-discovery", () => ({
+vi.mock("@/lib/mento-address-discovery", () => ({
   discoverMentoAddresses: vi.fn(),
 }));
 
@@ -41,7 +41,7 @@ import {
   enrichBatch,
   fetchHealth,
 } from "@/lib/arkham";
-import { discoverMentoAddresses } from "@/lib/arkham-discovery";
+import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 
 const mockGetAuthSession = vi.mocked(getAuthSession);
 const mockGetAllLabels = vi.mocked(getAllLabels);

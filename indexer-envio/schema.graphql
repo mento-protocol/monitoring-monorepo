@@ -445,6 +445,38 @@ type ProtocolFeeTransfer {
   blockTimestamp: BigInt! @index
 }
 
+# Daily rollup of ProtocolFeeTransfer rows, bucketed per UTC day per pool.
+# Lets the per-pool revenue leaderboard query a small fixed-cardinality
+# table (~1 row/pool/day) instead of one row per raw transfer, so all-time
+# totals fit within Hasura's 1000-row page limit when paginated.
+type PoolDailyFeeSnapshot @index(fields: ["chainId", "poolId", "timestamp"]) {
+  id: ID! # "{chainId}-{poolAddress}-{dayTs}"
+  chainId: Int! @index
+  poolId: String! @index # FK to Pool.id; namespaced "{chainId}-{poolAddress}"
+  poolAddress: String! @index # Lowercased raw address (matches ProtocolFeeTransfer.from)
+  timestamp: BigInt! @index # UTC day bucket: (ts / 86400) * 86400
+  # Per-day deltas. Parallel arrays aligned by index. A pool can carry
+  # transfers in multiple tokens within a day (FPMM takes its swap fee in
+  # the input token), so we store the full set rather than two columns.
+  tokens: [String!]! # lowercased token contract addresses
+  tokenSymbols: [String!]! # symbols at upsert time (or "UNKNOWN")
+  tokenDecimals: [Int!]! # decimals per index
+  amounts: [BigInt!]! @config(precision: 78) # raw token-native, summed
+  # USD-pegged subset only — non-pegged FX is dashboard-priced from the
+  # parallel arrays above using the live oracle rate map. Stored as
+  # 18-dp USD-wei BigInt to match TraderDailySnapshot.feesPaidUsdWei.
+  feesUsdWei: BigInt! @config(precision: 78)
+  # True iff every transfer in this day's bucket was a USD-pegged token.
+  allPegged: Boolean!
+  # Number of token symbols that resolved to "UNKNOWN" at upsert time and
+  # therefore did NOT contribute to feesUsdWei.
+  unresolvedCount: Int!
+
+  transferCount: Int!
+  blockNumber: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
 # ─── Open Liquidity Strategy ───────────────────────────────────
 
 # Registered OLS pool config. One record per (pool, OLS contract).
@@ -823,6 +855,11 @@ type TraderPoolDailySnapshot
   poolId: String! @index
   timestamp: BigInt! @index
   swapCount: Int!
+  # Total USD volume the trader did in this pool today, summed from
+  # SwapEvent.volumeUsdWei. Mirrors TraderDailySnapshot.volumeUsdWei but
+  # scoped to one pool — the dashboard's per-pool breakdown reads this
+  # directly instead of deriving it from the inflow/outflow split.
+  volumeUsdWei: BigInt!
   # Direction-split USD-wei totals. "Inflow" = tokens flowing TO the trader
   # (the swap's amountXOut for that token). "Outflow" = amountXIn.
   # Sum of all four ≈ 2 × volumeUsdWei (one inflow + one outflow per swap).
@@ -837,11 +874,19 @@ type AggregatorDailySnapshot
   @index(fields: ["chainId", "aggregator", "timestamp"]) {
   id: ID! # "{chainId}-{aggregator}-{day}"
   chainId: Int!
-  # Canonical name from classifyAggregator(): "squid" | "jumper" | "lifi" |
-  # "openocean" | "0x" | "1inch" | "paraswap" | "cowswap" | "direct" | "system"
-  # | "unknown". "direct" = txTo is the Mento Broker (user used Mento UI/SDK).
-  # "system" = txTo is a known internal contract (rebalancer, NTT, etc.).
-  # "unknown" = txTo not in any known list — surfaces gaps for follow-up.
+  # Canonical name from classifyAggregator(). Values currently produced:
+  # "squid" | "lifi" | "0x" | "openocean" | "cluster-<first-16-hex-of-deployer-EOA>" |
+  # "direct" | "system" | "unknown".
+  # "direct" = txTo is the Mento Broker / Router (user used Mento UI/SDK)
+  # or the swap went directly to the pool with no router mediation.
+  # "system" = txTo is a known Mento internal contract (rebalancer, NTT, etc.).
+  # "cluster-*" = txTo is one of multiple contracts deployed by the same EOA
+  # (e.g. an MEV / MM operator running a fleet); see `$clusters` block in
+  # indexer-envio/config/aggregators.json for the deployer EOA + explorer URL.
+  # "unknown" = txTo not in any known list — surfaces gaps for follow-up
+  # curation. Add new aggregators (1inch / paraswap / jumper / cowswap /
+  # ...) or new clusters to indexer-envio/config/aggregators.json once
+  # they're identified and they'll start appearing here on next re-sync.
   aggregator: String! @index
   # Most recently observed router address mapped to this aggregator. May vary
   # across days if multiple routers map to the same canonical name.
