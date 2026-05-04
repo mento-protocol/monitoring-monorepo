@@ -14,6 +14,7 @@ import {
 import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
 import { buildSwapTraderFields } from "../swap";
+import { applyLeaderboardSnapshots } from "../leaderboardSnapshots";
 import { fetchTokenDecimalsScaling } from "../rpc";
 import {
   buildRebalanceOutcome,
@@ -163,13 +164,14 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
     swapDelta: { volume0, volume1 },
   });
 
+  const traderFields = buildSwapTraderFields(event, pool);
   const swap: SwapEvent = {
     id,
     chainId: event.chainId,
     poolId,
     sender: asAddress(event.params.sender),
     recipient: asAddress(event.params.to),
-    ...buildSwapTraderFields(event, pool),
+    ...traderFields,
     amount0In: event.params.amount0In,
     amount1In: event.params.amount1In,
     amount0Out: event.params.amount0Out,
@@ -180,6 +182,24 @@ VirtualPool.Swap.handler(async ({ event, context }) => {
   };
 
   context.SwapEvent.set(swap);
+
+  await applyLeaderboardSnapshots({
+    context,
+    chainId: event.chainId,
+    poolId,
+    pool,
+    caller: traderFields.caller,
+    txTo: traderFields.txTo,
+    volumeUsdWei: traderFields.volumeUsdWei,
+    amounts: {
+      amount0In: event.params.amount0In,
+      amount0Out: event.params.amount0Out,
+      amount1In: event.params.amount1In,
+      amount1Out: event.params.amount1Out,
+    },
+    blockNumber,
+    blockTimestamp,
+  });
 });
 
 // ---------------------------------------------------------------------------
