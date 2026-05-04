@@ -54,10 +54,10 @@ export function LeaderboardClient() {
   // (`?_rsc=...`) every URL write, which adds ~700ms latency to range/filter
   // toggles. See AGENTS.md "URL state in client-only tables / filters" and
   // PR #314 for the regression that established this rule.
-  const [range, setRangeState] = useState<LeaderboardRangeKey>(() =>
+  const [range, setRange] = useState<LeaderboardRangeKey>(() =>
     readRangeFromParams(searchParams),
   );
-  const [showSystem, setShowSystemState] = useState<boolean>(() =>
+  const [showSystem, setShowSystem] = useState<boolean>(() =>
     readShowSystemFromParams(searchParams),
   );
 
@@ -77,17 +77,17 @@ export function LeaderboardClient() {
     [],
   );
 
-  const setRange = useCallback(
+  const updateRange = useCallback(
     (next: LeaderboardRangeKey) => {
-      setRangeState(next);
+      setRange(next);
       writeUrl(next, showSystem);
     },
     [showSystem, writeUrl],
   );
 
-  const setShowSystem = useCallback(
+  const updateShowSystem = useCallback(
     (next: boolean) => {
-      setShowSystemState(next);
+      setShowSystem(next);
       writeUrl(range, next);
     },
     [range, writeUrl],
@@ -101,11 +101,11 @@ export function LeaderboardClient() {
     if (typeof window === "undefined") return;
     const onPopState = () => {
       const params = new URLSearchParams(window.location.search);
-      setRangeState((prev) => {
+      setRange((prev) => {
         const next = readRangeFromParams(params);
         return prev === next ? prev : next;
       });
-      setShowSystemState((prev) => {
+      setShowSystem((prev) => {
         const next = readShowSystemFromParams(params);
         return prev === next ? prev : next;
       });
@@ -195,9 +195,9 @@ export function LeaderboardClient() {
     range === "30d" ? "30d" : range === "all" ? "all" : "7d";
   const onChartRangeChange = useCallback(
     (next: RangeKey) => {
-      setRange(next === "all" ? "all" : next === "30d" ? "30d" : "7d");
+      updateRange(next === "all" ? "all" : next === "30d" ? "30d" : "7d");
     },
-    [setRange],
+    [updateRange],
   );
 
   const isLoading = tradersResult.isLoading || poolsResult.isLoading;
@@ -232,7 +232,7 @@ export function LeaderboardClient() {
                   key={r.key}
                   type="button"
                   aria-pressed={active}
-                  onClick={() => setRange(r.key)}
+                  onClick={() => updateRange(r.key)}
                   className={
                     "rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
                     (active
@@ -249,7 +249,7 @@ export function LeaderboardClient() {
             <input
               type="checkbox"
               checked={showSystem}
-              onChange={(e) => setShowSystem(e.target.checked)}
+              onChange={(e) => updateShowSystem(e.target.checked)}
               className="h-3.5 w-3.5 rounded border-slate-700 bg-slate-800 text-indigo-500 focus:ring-indigo-400"
             />
             Show system addresses
@@ -275,19 +275,24 @@ export function LeaderboardClient() {
         />
       </div>
 
-      <TimeSeriesChartCard
-        title="Daily traded volume"
-        rangeAriaLabel="Chart range"
-        series={dailyVolume}
-        range={chartRange}
-        onRangeChange={onChartRangeChange}
-        headline={headline}
-        change={null}
-        isLoading={isLoading}
-        hasError={hasError}
-        hasSnapshotError={false}
-        emptyMessage="No trader volume in this window."
-      />
+      {/* The chart only makes sense with multi-day data — the 24h window
+          collapses to a single point and the chart's "1W / 1M / All" pill
+          row would mismatch the visible series. */}
+      {range !== "24h" && (
+        <TimeSeriesChartCard
+          title="Daily traded volume"
+          rangeAriaLabel="Chart range"
+          series={dailyVolume}
+          range={chartRange}
+          onRangeChange={onChartRangeChange}
+          headline={headline}
+          change={null}
+          isLoading={isLoading}
+          hasError={hasError}
+          hasSnapshotError={false}
+          emptyMessage="No trader volume in this window."
+        />
+      )}
 
       <section>
         <h2 className="mb-3 text-sm font-medium text-slate-300">
@@ -304,10 +309,12 @@ export function LeaderboardClient() {
           (tradersResult.data.TraderDailySnapshot?.length ?? 0) ===
             ENVIO_MAX_ROWS && (
             <p className="mt-2 text-[11px] text-slate-500">
-              Showing top {ENVIO_MAX_ROWS.toLocaleString()} trader-day rows by
-              single-day volume in this window. Long-tail traders below this cap
-              are omitted from the per-trader sums — top-of-list ranking is
-              unaffected.
+              Approximate top-N. Showing the top{" "}
+              {ENVIO_MAX_ROWS.toLocaleString()} trader-day rows by single-day
+              volume; high-frequency traders whose individual days don&apos;t
+              crack this cap may be undercounted at longer windows. A pre-rolled
+              window-snapshot entity is planned (see <code>BACKLOG.md</code>{" "}
+              &rarr; PR 4).
             </p>
           )}
       </section>

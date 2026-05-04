@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   aggregateDailyVolume,
   aggregateTraderPoolsByWindow,
   aggregateTradersByWindow,
   computeFlow,
+  rangeCutoffSeconds,
   weiToUsd,
   type TraderDailyRow,
   type TraderPoolDailyRow,
@@ -268,13 +269,26 @@ describe("computeFlow", () => {
     expect(r.direction).toBeNull();
   });
 
-  it("direction tracks the larger absolute net leg", () => {
+  it("direction tracks the leg the trader net-accumulated", () => {
     // Token1's net move dominates (|+50| > |−10|).
     const r = computeFlow(
       pool({
         inflowToken0UsdWei: BigInt(USD(20)),
         outflowToken0UsdWei: BigInt(USD(30)),
         inflowToken1UsdWei: BigInt(USD(50)),
+      }),
+    );
+    expect(r.direction).toBe(1);
+  });
+
+  it("symmetric one-way swap labels the accumulated token, not the larger |net|", () => {
+    // Trader sold token0, received token1 — |net0| == |net1| == 100.
+    // The naive "larger abs net wins, ties → 0" rule mislabels this as
+    // direction=0 (they did NOT accumulate token0; they got rid of it).
+    const r = computeFlow(
+      pool({
+        outflowToken0UsdWei: BigInt(USD(100)),
+        inflowToken1UsdWei: BigInt(USD(100)),
       }),
     );
     expect(r.direction).toBe(1);
@@ -309,5 +323,57 @@ describe("aggregateDailyVolume", () => {
     expect(out[0]!.value).toBeCloseTo(25, 4);
     expect(out[1]!.timestamp).toBe(200);
     expect(out[1]!.value).toBeCloseTo(10, 4);
+  });
+});
+
+describe("rangeCutoffSeconds", () => {
+  const SECONDS_PER_DAY = 86_400;
+  // Pin "now" mid-day UTC so we can prove the cutoff aligns to UTC midnight.
+  // 2026-05-04 14:30:00 UTC.
+  const FIXED_NOW_MS = Date.UTC(2026, 4, 4, 14, 30, 0);
+  const TODAY_MIDNIGHT_UTC =
+    Math.floor(FIXED_NOW_MS / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("24h aligns to UTC midnight (today's bucket)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW_MS);
+    // 1-day window = "today's UTC bucket only" — `_gte: today_midnight_utc`.
+    expect(rangeCutoffSeconds("24h")).toBe(TODAY_MIDNIGHT_UTC);
+  });
+
+  it("7d covers today + previous 6 UTC buckets", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW_MS);
+    expect(rangeCutoffSeconds("7d")).toBe(
+      TODAY_MIDNIGHT_UTC - 6 * SECONDS_PER_DAY,
+    );
+  });
+
+  it("30d covers today + previous 29 UTC buckets", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW_MS);
+    expect(rangeCutoffSeconds("30d")).toBe(
+      TODAY_MIDNIGHT_UTC - 29 * SECONDS_PER_DAY,
+    );
+  });
+
+  it("all returns 0 (no cutoff)", () => {
+    expect(rangeCutoffSeconds("all")).toBe(0);
+  });
+
+  it("cutoff is independent of intra-day clock drift", () => {
+    // Two probes at 09:00 UTC and 23:59 UTC of the same UTC day must
+    // produce identical cutoffs — the `Date.now() / 86400` floor masks
+    // sub-day drift, so the SWR cache key stays stable across re-renders.
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.UTC(2026, 4, 4, 9, 0, 0));
+    const morning = rangeCutoffSeconds("7d");
+    vi.setSystemTime(Date.UTC(2026, 4, 4, 23, 59, 0));
+    const evening = rangeCutoffSeconds("7d");
+    expect(morning).toBe(evening);
   });
 });

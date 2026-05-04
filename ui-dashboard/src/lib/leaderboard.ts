@@ -43,11 +43,20 @@ export function rangeDays(range: LeaderboardRangeKey): number | null {
 /**
  * Cutoff timestamp (seconds) for the `_gte` filter. For "all" we pass 0
  * rather than skipping the filter so the query shape stays uniform.
+ *
+ * The cutoff aligns to UTC-day boundaries because the snapshot entities
+ * bucket on `floor(timestamp / 86400) * 86400`. A naive `now - days * 86400`
+ * cutoff drops the previous day's bucket whenever it lands mid-bucket —
+ * mid-UTC-day the "24h" window would actually mean "since today's UTC
+ * midnight" (≤ 24h of data, sometimes only a few hours). Aligning to the
+ * UTC boundary makes the window deterministic against bucket size.
  */
 export function rangeCutoffSeconds(range: LeaderboardRangeKey): number {
   const days = rangeDays(range);
   if (days === null) return 0;
-  return Math.floor(Date.now() / 1000) - days * SECONDS_PER_DAY;
+  const todayMidnightUtc =
+    Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+  return todayMidnightUtc - (days - 1) * SECONDS_PER_DAY;
 }
 
 // ─── Wire types — mirror the GraphQL response shape ────────────────────────
@@ -289,8 +298,13 @@ export function computeFlow(pool: TraderPoolWindowRow): FlowResult {
   // BigInt division would truncate to 0 — multiply through to keep two
   // decimals of precision.
   const imbalance = Number((absNet * BigInt(10000)) / gross) / 10000;
+  // Direction = the leg the trader net-accumulated (net > 0). For a real
+  // swap net0 and net1 have opposite signs (one in, one out), so the
+  // positive-net leg is unambiguous. Picking by `|net|` magnitude alone
+  // mislabels the symmetric tie case (`outflow0=100, inflow1=100` →
+  // |net0|==|net1|==100 but the trader accumulated token1).
   const direction: 0 | 1 | null =
-    imbalance < 0.05 ? null : abs0 >= abs1 ? 0 : 1;
+    imbalance < 0.05 ? null : net0 > ZERO ? 0 : net1 > ZERO ? 1 : null;
   const kind: FlowKind =
     imbalance >= 0.7
       ? "one-directional"
