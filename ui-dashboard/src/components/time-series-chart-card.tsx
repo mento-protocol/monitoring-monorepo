@@ -166,6 +166,7 @@ export function TimeSeriesChartCard({
       const dayLabel =
         typeof xRaw === "string" || typeof xRaw === "number"
           ? new Date(xRaw).toLocaleDateString(undefined, {
+              weekday: "short",
               month: "short",
               day: "numeric",
               year: "numeric",
@@ -458,7 +459,12 @@ export function TimeSeriesChartCard({
         )}
         {customSortedHover && hover && (
           <div
-            className="pointer-events-none absolute z-50 rounded border border-indigo-500/60 bg-slate-950/95 px-2.5 py-2 text-[12px] text-slate-200 shadow-lg"
+            // `whitespace-nowrap` prevents per-row name wrapping (e.g.
+            // "USDC/USDm · Monad" used to break onto two lines because
+            // the default flex `min-width: auto` allowed shrinking).
+            // The dollar value is right-aligned via `ml-auto` so the
+            // amount column stays visually consistent across rows.
+            className="pointer-events-none absolute z-50 whitespace-nowrap rounded border border-indigo-500/60 bg-slate-950/95 px-2.5 py-2 text-[12px] text-slate-200 shadow-lg"
             style={{
               // Offset from the cursor a bit so the tooltip doesn't sit
               // under the pointer. Container has `position: relative`.
@@ -471,14 +477,14 @@ export function TimeSeriesChartCard({
             </div>
             <div className="space-y-0.5">
               {hover.points.map((p) => (
-                <div key={p.name} className="flex items-center gap-1.5">
+                <div key={p.name} className="flex items-center gap-2">
                   <span
                     aria-hidden="true"
                     className="inline-block h-2 w-2 flex-shrink-0 rounded-sm"
                     style={{ background: p.color }}
                   />
                   <span className="text-slate-400">{p.name}:</span>
-                  <span className="font-mono">
+                  <span className="ml-auto font-mono">
                     $
                     {p.value.toLocaleString(undefined, {
                       maximumFractionDigits: 0,
