@@ -161,8 +161,20 @@ function stackedRangeMax(v3: number[], v2: number[], headroom = 1.1): number {
 // Plotly handles the legend click natively; autorange recomputes the range
 // to fit just the visible stack. No animation, no easing.
 // ---------------------------------------------------------------------------
-function VariantSnap({ data }: { data: ReturnType<typeof buildMockData> }) {
-  const traces = useMemo(() => makeTraces(data), [data]);
+function VariantSnap({
+  data,
+  v2Hidden,
+}: {
+  data: ReturnType<typeof buildMockData>;
+  v2Hidden: boolean;
+}) {
+  const traces = useMemo(
+    () =>
+      makeTraces(data, {
+        v2Visible: v2Hidden ? "legendonly" : true,
+      }),
+    [data, v2Hidden],
+  );
   const layout = useMemo(() => makeLayout(), []);
   return (
     <Plot
