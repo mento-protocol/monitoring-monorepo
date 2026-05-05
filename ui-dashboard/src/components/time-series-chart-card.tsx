@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   escapePlotText,
   PLOTLY_BASE_LAYOUT,
@@ -85,6 +85,13 @@ export function TimeSeriesChartCard({
 }: TimeSeriesChartCardProps) {
   const hasBreakdown = (breakdown?.length ?? 0) > 0;
   const isStacked = hasBreakdown && breakdownMode === "stacked";
+  // Track which breakdown traces the user has hidden via legend click.
+  // Stacked-mode only — non-stacked uses Plotly's default toggle handling.
+  // Indices map to the breakdown[] array (no offset; the total trace is
+  // suppressed in stacked mode, so curveNumber == breakdown index).
+  const [hiddenBreakdownIdx, setHiddenBreakdownIdx] = useState<Set<number>>(
+    () => new Set(),
+  );
   const { traces, layout } = useMemo(() => {
     const xs = series.map((point) =>
       new Date(point.timestamp * 1000).toISOString(),
@@ -103,16 +110,21 @@ export function TimeSeriesChartCard({
           fillcolor: "rgba(99,102,241,0.08)",
           hovertemplate: `<b>$%{y:,.0f}</b><br>%{x|${hoverDateFormat}}<extra></extra>`,
         };
-    const breakdownTraces = (breakdown ?? []).map((b) => {
+    const breakdownTraces = (breakdown ?? []).map((b, i) => {
       // Escape `name` before it reaches Plotly's `name` and `hovertemplate`
       // slots — both are HTML sinks per `lib/plot.ts:escapePlotText`.
       const safeName = escapePlotText(b.name);
+      const hidden = isStacked && hiddenBreakdownIdx.has(i);
       return {
         x: b.series.map((p) => new Date(p.timestamp * 1000).toISOString()),
         y: b.series.map((p) => p.value),
         name: safeName,
         type: "scatter" as const,
         mode: "lines" as const,
+        // Drive visibility from React state so legend clicks route through
+        // `Plotly.react` (which honors `layout.transition`) instead of
+        // Plotly's native click handler (which doesn't).
+        ...(hidden ? { visible: "legendonly" as const } : {}),
         ...(isStacked
           ? {
               stackgroup: "total",
@@ -127,6 +139,33 @@ export function TimeSeriesChartCard({
         hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>`,
       };
     });
+    // Stacked-mode y-range = max per-day sum of VISIBLE breakdown traces +
+    // headroom. Computing this explicitly (rather than using `autorange`)
+    // is required for the toggle animation: `layout.transition` interpolates
+    // an explicit range change, but autorange recomputation runs outside
+    // the transition pipeline and snaps.
+    const stackedYRange: [number, number] | null = isStacked
+      ? (() => {
+          const dayBuckets = new Map<number, number>();
+          (breakdown ?? []).forEach((b, i) => {
+            if (hiddenBreakdownIdx.has(i)) return;
+            b.series.forEach((p) => {
+              dayBuckets.set(
+                p.timestamp,
+                (dayBuckets.get(p.timestamp) ?? 0) + p.value,
+              );
+            });
+          });
+          const visibleMax = Array.from(dayBuckets.values()).reduce(
+            (a, b) => Math.max(a, b),
+            0,
+          );
+          // 10% headroom keeps the top of the stack from kissing the
+          // chart's top edge; 1 is the floor so an all-zero series still
+          // gets a visible y-range.
+          return [0, Math.max(visibleMax * 1.1, 1)];
+        })()
+      : null;
     // Pull y-min toward 0 when a breakdown is present so smaller chains
     // don't get clipped off the bottom edge by the total-tight range.
     const breakdownYs = (breakdown ?? []).flatMap((b) =>
@@ -188,20 +227,12 @@ export function TimeSeriesChartCard({
           showticklabels: false,
           showline: false,
           zeroline: false,
-          // Stacked breakdowns let Plotly autorange so the visible series
-          // grows to fill the card when the user toggles others off via
-          // the legend (e.g. hide v2 on the Volume chart and v3 should
-          // own the full vertical space). Pinning to a precomputed
-          // `range` would freeze the axis at the original v3+v2 stack
-          // max. Single-trace and `lines` breakdowns keep the explicit
-          // range — they don't have a multi-trace toggle UX, and the
-          // computed range gives controlled headroom for hover labels.
-          ...(isStacked
-            ? {
-                autorange: true as const,
-                rangemode: "tozero" as const,
-              }
-            : { range: yRange }),
+          // Stacked mode uses an explicit range computed from VISIBLE
+          // traces only, recomputed on every legend toggle. Explicit (not
+          // autorange) is required for the transition animation —
+          // `layout.transition` interpolates a range change, autorange
+          // bypasses the transition pipeline and snaps.
+          range: stackedYRange ?? yRange,
           fixedrange: true,
         },
         showlegend: hasBreakdown,
@@ -242,7 +273,14 @@ export function TimeSeriesChartCard({
           : {}),
       },
     };
-  }, [series, breakdown, hasBreakdown, isStacked, hoverDateFormat]);
+  }, [
+    series,
+    breakdown,
+    hasBreakdown,
+    isStacked,
+    hoverDateFormat,
+    hiddenBreakdownIdx,
+  ]);
 
   const deltaPill =
     change === null || isLoading || hasError ? null : (
@@ -326,6 +364,23 @@ export function TimeSeriesChartCard({
           <Plot
             data={traces}
             layout={layout}
+            // Intercept legend clicks in stacked mode so visibility flows
+            // through React state → `Plotly.react`, which honors
+            // `layout.transition`. Returning false suppresses Plotly's
+            // own (non-animated) toggle.
+            onLegendClick={
+              isStacked
+                ? (e: { curveNumber: number }) => {
+                    setHiddenBreakdownIdx((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(e.curveNumber)) next.delete(e.curveNumber);
+                      else next.add(e.curveNumber);
+                      return next;
+                    });
+                    return false;
+                  }
+                : undefined
+            }
             config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
             style={{ width: "100%", height: ROW_CHART_HEIGHT_PX }}
             useResizeHandler
