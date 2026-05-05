@@ -559,13 +559,13 @@ describe("VolumeOverTimeChart render", () => {
     expect(html).toContain('aria-label="$1.00 v3 · — v2"');
   });
 
-  it("ships an explicit y-range derived from the visible v3+v2 stack so layout.transition can interpolate it on legend toggle", () => {
-    // The chart card recomputes `yaxis.range` on every render from the
-    // sum-per-day of currently-visible breakdown traces, with 10%
-    // headroom. `layout.transition` interpolates an explicit range
-    // change but autorange recomputation bypasses the transition
-    // pipeline — so explicit-range is required for the toggle
-    // animation to ease the y-axis re-fit instead of snapping.
+  it("uses autorange + rangemode 'tozero' on the y-axis in stacked mode so toggling a trace via the legend regrows the visible series", () => {
+    // Stacked breakdowns set `autorange: true` so Plotly's native
+    // legend-click handler recomputes the y-range to fit just the
+    // visible traces — without it the axis would stay pinned to the
+    // original v3+v2 stack max and the remaining series would render
+    // as a flat line at the bottom of the card. `rangemode: "tozero"`
+    // keeps the floor at 0 regardless.
     const today = dayAlignedNow();
     const day0 = today - 2 * SECONDS_PER_DAY;
     const day1 = today - 1 * SECONDS_PER_DAY;
@@ -602,19 +602,13 @@ describe("VolumeOverTimeChart render", () => {
     });
 
     const yaxis = capturedPlotProps.layout?.yaxis as {
+      autorange?: boolean;
+      rangemode?: string;
       range?: [number, number];
     };
-    expect(yaxis?.range).toBeDefined();
-    // Day0 stack = v3 $3 + v2 $4 = $7. Range ceiling must clear $7 so the
-    // top of the stack stays inside the card.
-    expect(yaxis?.range![0]).toBe(0);
-    expect(yaxis?.range![1]).toBeGreaterThanOrEqual(7);
-    // `layout.transition` is what makes the y-range interpolate when
-    // legend clicks update the visibility state.
-    const transition = (
-      capturedPlotProps.layout as { transition?: { duration?: number } }
-    )?.transition;
-    expect(transition?.duration).toBeGreaterThan(0);
+    expect(yaxis?.autorange).toBe(true);
+    expect(yaxis?.rangemode).toBe("tozero");
+    expect(yaxis?.range).toBeUndefined();
   });
 
   it("shows the WoW delta pill labeled 'v3 week-over-week' at the default range when ≥15 days of v3 history exist", () => {

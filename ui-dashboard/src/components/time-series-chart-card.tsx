@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   escapePlotText,
   PLOTLY_BASE_LAYOUT,
@@ -85,13 +85,6 @@ export function TimeSeriesChartCard({
 }: TimeSeriesChartCardProps) {
   const hasBreakdown = (breakdown?.length ?? 0) > 0;
   const isStacked = hasBreakdown && breakdownMode === "stacked";
-  // Track which breakdown traces the user has hidden via legend click.
-  // Stacked-mode only — non-stacked uses Plotly's default toggle handling.
-  // Indices map to the breakdown[] array (no offset; the total trace is
-  // suppressed in stacked mode, so curveNumber == breakdown index).
-  const [hiddenBreakdownIdx, setHiddenBreakdownIdx] = useState<Set<number>>(
-    () => new Set(),
-  );
   const { traces, layout } = useMemo(() => {
     const xs = series.map((point) =>
       new Date(point.timestamp * 1000).toISOString(),
@@ -110,29 +103,16 @@ export function TimeSeriesChartCard({
           fillcolor: "rgba(99,102,241,0.08)",
           hovertemplate: `<b>$%{y:,.0f}</b><br>%{x|${hoverDateFormat}}<extra></extra>`,
         };
-    const breakdownTraces = (breakdown ?? []).map((b, i) => {
+    const breakdownTraces = (breakdown ?? []).map((b) => {
       // Escape `name` before it reaches Plotly's `name` and `hovertemplate`
       // slots — both are HTML sinks per `lib/plot.ts:escapePlotText`.
       const safeName = escapePlotText(b.name);
-      const hidden = isStacked && hiddenBreakdownIdx.has(i);
-      // Use Plotly's native `visible: "legendonly"` for the hidden state
-      // (snaps the trace out cleanly + dims the legend swatch). The
-      // *animation* in stacked mode is just the y-range easing into the
-      // smaller visible-only stacked max — verified via `Plotly.react`
-      // sampling: range interpolation IS honored by `layout.transition`,
-      // but trace y-values and opacity on stackgroup traces are NOT
-      // interpolated reliably (they snap regardless of transition
-      // config). So we stop trying to animate the trace itself and lean
-      // on the range animation alone — the remaining trace visually
-      // grows into the shrinking range, which reads as the "fill the
-      // space" behavior the user asked for.
       return {
         x: b.series.map((p) => new Date(p.timestamp * 1000).toISOString()),
         y: b.series.map((p) => p.value),
         name: safeName,
         type: "scatter" as const,
         mode: "lines" as const,
-        ...(hidden ? { visible: "legendonly" as const } : {}),
         ...(isStacked
           ? {
               stackgroup: "total",
@@ -147,33 +127,6 @@ export function TimeSeriesChartCard({
         hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>`,
       };
     });
-    // Stacked-mode y-range = max per-day sum of VISIBLE breakdown traces +
-    // headroom. Computing this explicitly (rather than using `autorange`)
-    // is required for the toggle animation: `layout.transition` interpolates
-    // an explicit range change, but autorange recomputation runs outside
-    // the transition pipeline and snaps.
-    const stackedYRange: [number, number] | null = isStacked
-      ? (() => {
-          const dayBuckets = new Map<number, number>();
-          (breakdown ?? []).forEach((b, i) => {
-            if (hiddenBreakdownIdx.has(i)) return;
-            b.series.forEach((p) => {
-              dayBuckets.set(
-                p.timestamp,
-                (dayBuckets.get(p.timestamp) ?? 0) + p.value,
-              );
-            });
-          });
-          const visibleMax = Array.from(dayBuckets.values()).reduce(
-            (a, b) => Math.max(a, b),
-            0,
-          );
-          // 10% headroom keeps the top of the stack from kissing the
-          // chart's top edge; 1 is the floor so an all-zero series still
-          // gets a visible y-range.
-          return [0, Math.max(visibleMax * 1.1, 1)];
-        })()
-      : null;
     // Pull y-min toward 0 when a breakdown is present so smaller chains
     // don't get clipped off the bottom edge by the total-tight range.
     const breakdownYs = (breakdown ?? []).flatMap((b) =>
@@ -235,12 +188,15 @@ export function TimeSeriesChartCard({
           showticklabels: false,
           showline: false,
           zeroline: false,
-          // Stacked mode uses an explicit range computed from VISIBLE
-          // traces only, recomputed on every legend toggle. Explicit (not
-          // autorange) is required for the transition animation —
-          // `layout.transition` interpolates a range change, autorange
-          // bypasses the transition pipeline and snaps.
-          range: stackedYRange ?? yRange,
+          // Stacked mode uses Plotly's default `autorange` so the chart
+          // re-fits when the user toggles a trace via legend click —
+          // visibility changes route through Plotly's native handler
+          // and the range recomputes from the visible stack max.
+          // `lines` mode and single-trace charts keep the explicit
+          // range with controlled hover-label headroom.
+          ...(isStacked
+            ? { autorange: true as const, rangemode: "tozero" as const }
+            : { range: yRange }),
           fixedrange: true,
         },
         showlegend: hasBreakdown,
@@ -264,36 +220,9 @@ export function TimeSeriesChartCard({
           bordercolor: "#6366f1",
           font: { color: "#e2e8f0", size: 12, family: "inherit" },
         },
-        // Smooth y-axis re-fit when stacked-breakdown traces are toggled
-        // via the legend (e.g. hiding v2 lets v3 grow to fill the card).
-        // Plotly applies `layout.transition` to its restyle/relayout
-        // pipeline; legend clicks are restyle events. Skipped for non-
-        // stacked charts since they have no multi-trace toggle UX and
-        // animating a single-trace range change is just visual noise on
-        // initial mount.
-        ...(isStacked
-          ? {
-              transition: {
-                // Gentle ease-out, NO overshoot. `back-*` and `elastic`
-                // easings overshoot the y-range past its target, which
-                // briefly enlarges the chart and looks like the hidden
-                // trace "grows super tall" before snapping out. Plain
-                // `cubic-out` ramps to the new range smoothly and stops.
-                duration: 350,
-                easing: "cubic-out" as const,
-              },
-            }
-          : {}),
       },
     };
-  }, [
-    series,
-    breakdown,
-    hasBreakdown,
-    isStacked,
-    hoverDateFormat,
-    hiddenBreakdownIdx,
-  ]);
+  }, [series, breakdown, hasBreakdown, isStacked, hoverDateFormat]);
 
   const deltaPill =
     change === null || isLoading || hasError ? null : (
@@ -377,23 +306,6 @@ export function TimeSeriesChartCard({
           <Plot
             data={traces}
             layout={layout}
-            // Intercept legend clicks in stacked mode so visibility flows
-            // through React state → `Plotly.react`, which honors
-            // `layout.transition`. Returning false suppresses Plotly's
-            // own (non-animated) toggle.
-            onLegendClick={
-              isStacked
-                ? (e: { curveNumber: number }) => {
-                    setHiddenBreakdownIdx((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(e.curveNumber)) next.delete(e.curveNumber);
-                      else next.add(e.curveNumber);
-                      return next;
-                    });
-                    return false;
-                  }
-                : undefined
-            }
             config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
             style={{ width: "100%", height: ROW_CHART_HEIGHT_PX }}
             useResizeHandler
