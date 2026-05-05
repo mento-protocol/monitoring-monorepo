@@ -115,41 +115,47 @@ export function TimeSeriesChartCard({
       // slots — both are HTML sinks per `lib/plot.ts:escapePlotText`.
       const safeName = escapePlotText(b.name);
       const hidden = isStacked && hiddenBreakdownIdx.has(i);
-      // When hidden, animate the trace's y-values to 0 instead of using
-      // `visible: "legendonly"`. Reasoning: legendonly removes the trace
-      // from the stack instantly while the y-axis range eases — so the
-      // remaining trace's *position* and the *axis* desync mid-animation,
-      // producing the "grows-then-shrinks" / "outside-chart" weirdness
-      // the user flagged. With y→0, the hidden trace's contribution to
-      // the stack monotonically decays, the visible trace's stack base
-      // monotonically falls toward zero, and Plotly interpolates
-      // everything (y-values + range) on the same timeline. The hidden
-      // trace's line/fill desaturate to a muted slate tone so the legend
-      // swatch reads as "off" (Plotly draws the legend marker from
-      // line.color).
+      // Drive the hide/show via trace `opacity`, not y-values or
+      // `visible: "legendonly"`. Reasoning, verified empirically by
+      // sampling `gd._fullData` at 30ms intervals during a real toggle:
+      //
+      //   • `visible: "legendonly"` removes the trace instantly — y-axis
+      //     eases but the trace snaps. Looks like a hard cut.
+      //   • Mutating `y` to all-zeros: Plotly.react sees a full y-array
+      //     replacement, snaps to zero in ~30ms regardless of
+      //     `layout.transition` — so visually identical to legendonly.
+      //   • `opacity` IS interpolated by Plotly.react on the same
+      //     timeline as the range change. The trace fades smoothly over
+      //     `transition.duration`, the range eases in lockstep, and the
+      //     remaining traces grow into the freed space without overshoot.
+      //
+      // Stack contribution stays at full magnitude for the faded trace,
+      // but the range is computed from VISIBLE-only stacked sums (see
+      // `stackedYRange` below) so the chart re-fits to the visible
+      // stack — the faded trace's invisible area gets clipped by
+      // `cliponaxis` (Plotly's default for scatter), which is fine
+      // since opacity is 0 anyway.
       return {
         x: b.series.map((p) => new Date(p.timestamp * 1000).toISOString()),
-        y: hidden ? b.series.map(() => 0) : b.series.map((p) => p.value),
+        y: b.series.map((p) => p.value),
         name: safeName,
         type: "scatter" as const,
         mode: "lines" as const,
+        opacity: hidden ? 0 : 1,
         ...(isStacked
           ? {
               stackgroup: "total",
-              line: { color: hidden ? "#475569" : b.color, width: 1.2 },
+              line: { color: b.color, width: 1.2 },
               // 8-digit hex = 6-digit color + "cc" alpha (≈80% opacity).
               // Assumes b.color is a 6-digit hex (the contract of chainColor()).
-              // When hidden the fillcolor goes fully transparent so the
-              // collapsed-to-zero band doesn't leave a visible 1px line
-              // sitting on the x-axis.
-              fillcolor: hidden ? "transparent" : b.color + "cc",
+              fillcolor: b.color + "cc",
             }
           : {
               line: { color: b.color, width: 1 },
             }),
         // Skip the hover label for hidden traces — otherwise the unified
-        // tooltip lists "v2: $0" for every cursor sample, which is
-        // misleading (the user toggled it off, not "v2 had no volume").
+        // tooltip lists "v2: $X" for every cursor sample even though the
+        // trace is faded to invisible.
         ...(hidden
           ? { hoverinfo: "skip" as const }
           : { hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>` }),
