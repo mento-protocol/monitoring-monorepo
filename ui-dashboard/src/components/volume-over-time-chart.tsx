@@ -256,14 +256,21 @@ export function weekOverWeekChangePct(
 // alongside the dollar value).
 function VersionBadge({ version }: { version: Version }): ReactNode {
   const { label, pillFg, pillBg } = VERSION_STYLE[version];
+  // Absolute positioning keeps the pill out of inline flow so its
+  // margin-box can't extend the headline's line-box. With the pill
+  // inline + `align-text-top` the line-box grew ~4px (the pill's top
+  // sits above the line-box's natural top via half-leading), making the
+  // Volume headline 4px taller than the adjacent TVL card and shifting
+  // the digits 2-3px lower. Absolute positioning sidesteps the whole
+  // line-box accounting — the pill renders inside its `relative`
+  // wrapper but takes zero inline space. The wrapper reserves
+  // horizontal room with `pr-9` so the dollar amount doesn't run into
+  // the pill.
   return (
     <span
       aria-hidden="true"
       style={{ backgroundColor: pillBg, color: pillFg }}
-      // `align-text-top` parks the pill at the top of the surrounding text's
-      // font height — superscript-style alongside the text-3xl/4xl digits
-      // rather than sitting on their baseline.
-      className="ml-1.5 inline-flex items-center rounded px-1.5 py-px align-text-top font-mono text-[10px] font-medium uppercase tracking-wide sm:text-xs"
+      className="absolute right-0 top-1.5 inline-flex items-center rounded px-1.5 py-px font-mono text-[10px] font-medium uppercase leading-none tracking-wide sm:text-xs"
     >
       {label}
     </span>
@@ -305,28 +312,32 @@ function computeHeadline(
   // label and the headline becomes silent for screen-reader users (every
   // child is `aria-hidden`). `group` carries the `name-from-author`
   // property so the label is announced.
+  // Wrapper is plain inline (NOT inline-flex): inline-flex gave the wrapper
+  // its own line-box, which sized to max(digit ascent, pill ascent) and
+  // ended up ~4px taller than the TVL card's plain-text headline next to
+  // it on the homepage row. Plain inline lets each cell flow inside the
+  // parent `<p>`'s text line-box, so both headlines share the same height
+  // and baseline. `mx-3` on the dot replaces the former `gap-x-3` for
+  // horizontal spacing between cells.
+  // Each cell is `relative` to anchor its absolutely-positioned pill, and
+  // `pr-9` reserves horizontal room for the pill so the dollar amount
+  // doesn't render under it.
   return (
-    <span
-      role="group"
-      aria-label={ariaLabel}
-      className="inline-flex flex-wrap items-baseline gap-x-3"
-    >
-      <span aria-hidden="true">
+    <span role="group" aria-label={ariaLabel}>
+      <span aria-hidden="true" className="relative pr-9">
         {formatUSD(v3Total)}
         <VersionBadge version="v3" />
       </span>
-      {/* CSS-drawn dot rather than a `·` glyph: U+00B7 renders ~5px below
-          its line-box's geometric center in most fonts, so even with
-          `self-center` the visible dot reads as below the digits' midline.
-          A filled circle has visual center = geometric center, so
-          `self-center` lands it within a pixel of the digit ink midline
-          (verified via canvas TextMetrics: dot mid y=236, digit ink mid
-          y=237, off by 1px — below visual perception threshold). */}
+      {/* CSS-drawn dot rather than a `·` glyph (U+00B7 renders ~5px below
+          its line-box's geometric center in most fonts). The translate
+          compensates for `align-middle` placing the dot at x-height/2 above
+          baseline, while the digit ink midline sits closer to cap-height/2
+          — for monospace digits at 36px that's a ~5px upward nudge. */}
       <span
         aria-hidden="true"
-        className="inline-block size-1.5 self-center rounded-full bg-slate-500"
+        className="mx-3 inline-block size-1.5 -translate-y-[5px] rounded-full bg-slate-500 align-middle"
       />
-      <span aria-hidden="true">
+      <span aria-hidden="true" className="relative pr-9">
         {v2Display}
         <VersionBadge version="v2" />
       </span>
