@@ -220,13 +220,21 @@ export function TimeSeriesChartCard({
         legend: hasBreakdown
           ? {
               orientation: "h" as const,
-              y: -0.15,
+              // Dense layout (callers passing low `yAxisTopPadding`) gets
+              // a tighter legend gap too — keeps the bottom whitespace
+              // proportional to the top.
+              y: yAxisTopPadding < 0.1 ? -0.075 : -0.15,
               x: 0,
               font: { color: "#94a3b8", size: 11 },
               bgcolor: "transparent",
             }
           : undefined,
-        margin: { t: 8, r: 8, b: hasBreakdown ? 48 : 24, l: 8 },
+        margin: {
+          t: 8,
+          r: 8,
+          b: hasBreakdown ? 48 : 24,
+          l: 8,
+        },
         autosize: true,
         dragmode: false as const,
         // Unified hover only when there's a breakdown — single-trace charts
@@ -239,7 +247,14 @@ export function TimeSeriesChartCard({
         },
       },
     };
-  }, [series, breakdown, hasBreakdown, isStacked, hoverDateFormat]);
+  }, [
+    series,
+    breakdown,
+    hasBreakdown,
+    isStacked,
+    hoverDateFormat,
+    yAxisTopPadding,
+  ]);
 
   const deltaPill =
     change === null || isLoading || hasError ? null : (
