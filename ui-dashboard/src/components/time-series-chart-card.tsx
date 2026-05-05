@@ -115,33 +115,24 @@ export function TimeSeriesChartCard({
       // slots — both are HTML sinks per `lib/plot.ts:escapePlotText`.
       const safeName = escapePlotText(b.name);
       const hidden = isStacked && hiddenBreakdownIdx.has(i);
-      // Drive the hide/show via trace `opacity`, not y-values or
-      // `visible: "legendonly"`. Reasoning, verified empirically by
-      // sampling `gd._fullData` at 30ms intervals during a real toggle:
-      //
-      //   • `visible: "legendonly"` removes the trace instantly — y-axis
-      //     eases but the trace snaps. Looks like a hard cut.
-      //   • Mutating `y` to all-zeros: Plotly.react sees a full y-array
-      //     replacement, snaps to zero in ~30ms regardless of
-      //     `layout.transition` — so visually identical to legendonly.
-      //   • `opacity` IS interpolated by Plotly.react on the same
-      //     timeline as the range change. The trace fades smoothly over
-      //     `transition.duration`, the range eases in lockstep, and the
-      //     remaining traces grow into the freed space without overshoot.
-      //
-      // Stack contribution stays at full magnitude for the faded trace,
-      // but the range is computed from VISIBLE-only stacked sums (see
-      // `stackedYRange` below) so the chart re-fits to the visible
-      // stack — the faded trace's invisible area gets clipped by
-      // `cliponaxis` (Plotly's default for scatter), which is fine
-      // since opacity is 0 anyway.
+      // Use Plotly's native `visible: "legendonly"` for the hidden state
+      // (snaps the trace out cleanly + dims the legend swatch). The
+      // *animation* in stacked mode is just the y-range easing into the
+      // smaller visible-only stacked max — verified via `Plotly.react`
+      // sampling: range interpolation IS honored by `layout.transition`,
+      // but trace y-values and opacity on stackgroup traces are NOT
+      // interpolated reliably (they snap regardless of transition
+      // config). So we stop trying to animate the trace itself and lean
+      // on the range animation alone — the remaining trace visually
+      // grows into the shrinking range, which reads as the "fill the
+      // space" behavior the user asked for.
       return {
         x: b.series.map((p) => new Date(p.timestamp * 1000).toISOString()),
         y: b.series.map((p) => p.value),
         name: safeName,
         type: "scatter" as const,
         mode: "lines" as const,
-        opacity: hidden ? 0 : 1,
+        ...(hidden ? { visible: "legendonly" as const } : {}),
         ...(isStacked
           ? {
               stackgroup: "total",
@@ -153,12 +144,7 @@ export function TimeSeriesChartCard({
           : {
               line: { color: b.color, width: 1 },
             }),
-        // Skip the hover label for hidden traces — otherwise the unified
-        // tooltip lists "v2: $X" for every cursor sample even though the
-        // trace is faded to invisible.
-        ...(hidden
-          ? { hoverinfo: "skip" as const }
-          : { hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>` }),
+        hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>`,
       };
     });
     // Stacked-mode y-range = max per-day sum of VISIBLE breakdown traces +
@@ -288,13 +274,13 @@ export function TimeSeriesChartCard({
         ...(isStacked
           ? {
               transition: {
-                // `back-in-out` adds the small "anticipation" overshoot
-                // the user asked for — the stack briefly moves a few
-                // pixels in the opposite direction before settling, which
-                // reads as "gathering momentum" rather than the linear
-                // grows-then-shrinks of `cubic-in-out`.
-                duration: 450,
-                easing: "back-in-out" as const,
+                // Gentle ease-out, NO overshoot. `back-*` and `elastic`
+                // easings overshoot the y-range past its target, which
+                // briefly enlarges the chart and looks like the hidden
+                // trace "grows super tall" before snapping out. Plain
+                // `cubic-out` ramps to the new range smoothly and stops.
+                duration: 350,
+                easing: "cubic-out" as const,
               },
             }
           : {}),
