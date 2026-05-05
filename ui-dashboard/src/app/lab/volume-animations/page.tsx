@@ -1,13 +1,8 @@
 "use client";
 
-// Temporary lab page — pick an animation strategy for the volume-chart
-// stacked legend toggle, then we revert this file before merge.
-//
-// Each variant mounts the same Plotly stacked-area chart with the same
-// mock data. The "Toggle v2" button hides/shows v2 across all variants
-// at once. Y-axis ticks are SHOWN here so the range animation is visible
-// even though the production chart hides them. Durations are slow
-// (~1500ms) so the animation behavior is unmistakable.
+// Cross-fade refinements — six variants of the same "two charts overlaid,
+// CSS-fade between them" pattern, tuned with different durations,
+// easings, and sequencing strategies. Pick whichever feels best.
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -16,11 +11,8 @@ const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
 const V3_COLOR = "#6366f1";
 const V2_COLOR = "#14b8a6";
-const CHART_HEIGHT = 280;
+const CHART_HEIGHT = 240;
 
-// DRAMATIC data: v3 ~$100k flat, v2 ~$5M peaks. v3 is ~2% of the stacked
-// max, so hiding v2 should produce a huge visual change (chart ceiling
-// drops from $5M+ to $200k).
 function buildMockData() {
   const days = 30;
   const now = Math.floor(Date.now() / 1000);
@@ -31,9 +23,7 @@ function buildMockData() {
   for (let i = days - 1; i >= 0; i--) {
     const ts = now - i * SECS_PER_DAY;
     xs.push(new Date(ts * 1000).toISOString());
-    // v3: 50k–150k (small, roughly flat)
     v3.push(50_000 + Math.random() * 100_000);
-    // v2: 500k–4M with two big peaks
     v2.push(
       500_000 +
         Math.random() * 1_500_000 +
@@ -54,15 +44,11 @@ interface ChartTraceData {
   line: { color: string; width: number };
   fillcolor: string;
   visible?: boolean | "legendonly";
-  opacity?: number;
 }
 
 function makeTraces(
   data: { xs: string[]; v3: number[]; v2: number[] },
-  opts: {
-    v2Visible?: boolean | "legendonly";
-    v2YOverride?: number[];
-  } = {},
+  v2Visible: boolean | "legendonly" | undefined = undefined,
 ): ChartTraceData[] {
   const v3: ChartTraceData = {
     x: data.xs,
@@ -76,7 +62,7 @@ function makeTraces(
   };
   const v2: ChartTraceData = {
     x: data.xs,
-    y: opts.v2YOverride ?? data.v2,
+    y: data.v2,
     name: "v2",
     type: "scatter",
     mode: "lines",
@@ -84,7 +70,7 @@ function makeTraces(
     line: { color: V2_COLOR, width: 1.2 },
     fillcolor: V2_COLOR + "cc",
   };
-  if (opts.v2Visible !== undefined) v2.visible = opts.v2Visible;
+  if (v2Visible !== undefined) v2.visible = v2Visible;
   return [v3, v2];
 }
 
@@ -116,24 +102,10 @@ const BASE_LAYOUT = {
   hovermode: "x unified" as const,
 };
 
-type PlotlyEasing =
-  | "linear"
-  | "cubic-out"
-  | "cubic-in-out"
-  | "back-out"
-  | "back-in-out";
-
-function makeLayout(
-  opts: {
-    yRange?: [number, number];
-    transition?: { duration: number; easing: PlotlyEasing };
-  } = {},
-) {
+function makeLayout(yMax: number) {
   return {
     ...BASE_LAYOUT,
     yaxis: {
-      // SHOW y-axis ticks here (production hides them) so the range
-      // animation is visible to the human eye.
       showgrid: true,
       gridcolor: "#1e293b",
       showticklabels: true,
@@ -143,11 +115,8 @@ function makeLayout(
       zeroline: true,
       zerolinecolor: "#334155",
       fixedrange: true,
-      ...(opts.yRange
-        ? { range: opts.yRange }
-        : { autorange: true as const, rangemode: "tozero" as const }),
+      range: [0, yMax],
     },
-    ...(opts.transition ? { transition: opts.transition } : {}),
   };
 }
 
@@ -161,270 +130,27 @@ function stackedRangeMax(v3: number[], v2: number[], headroom = 1.1): number {
 }
 
 // ---------------------------------------------------------------------------
-// Variant A — Snap (current production)
+// Generic cross-fade helper — render two overlaid Plot components, fade
+// between them via CSS opacity transition with configurable
+// duration/easing.
 // ---------------------------------------------------------------------------
-function VariantSnap({
+function CrossFadeChart({
   data,
   v2Hidden,
+  duration,
+  easing,
 }: {
   data: ReturnType<typeof buildMockData>;
   v2Hidden: boolean;
-}) {
-  const traces = useMemo(
-    () =>
-      makeTraces(data, {
-        v2Visible: v2Hidden ? "legendonly" : true,
-      }),
-    [data, v2Hidden],
-  );
-  const layout = useMemo(() => makeLayout(), []);
-  return (
-    <Plot
-      data={traces}
-      layout={layout}
-      config={{ displayModeBar: false, responsive: true }}
-      style={{ width: "100%", height: CHART_HEIGHT }}
-      useResizeHandler
-    />
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Variant B — Range ease (cubic-out 1500ms, slow so it's obvious)
-// ---------------------------------------------------------------------------
-function VariantRangeEase({
-  data,
-  v2Hidden,
-}: {
-  data: ReturnType<typeof buildMockData>;
-  v2Hidden: boolean;
-}) {
-  const traces = useMemo(
-    () =>
-      makeTraces(data, {
-        v2Visible: v2Hidden ? "legendonly" : true,
-      }),
-    [data, v2Hidden],
-  );
-  const yMax = useMemo(
-    () =>
-      v2Hidden
-        ? stackedRangeMax(data.v3, [])
-        : stackedRangeMax(data.v3, data.v2),
-    [data, v2Hidden],
-  );
-  const layout = useMemo(
-    () =>
-      makeLayout({
-        yRange: [0, yMax],
-        transition: { duration: 1500, easing: "cubic-out" as const },
-      }),
-    [yMax],
-  );
-  return (
-    <Plot
-      data={traces}
-      layout={layout}
-      config={{ displayModeBar: false, responsive: true }}
-      style={{ width: "100%", height: CHART_HEIGHT }}
-      useResizeHandler
-    />
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Variant C — CSS fade out → snap → fade in (~600ms total)
-// ---------------------------------------------------------------------------
-function VariantCssFade({
-  data,
-  v2Hidden,
-}: {
-  data: ReturnType<typeof buildMockData>;
-  v2Hidden: boolean;
-}) {
-  const [chartV2Hidden, setChartV2Hidden] = useState(v2Hidden);
-  const [opacity, setOpacity] = useState(1);
-  const seqRef = useRef<{ pendingHidden: boolean | null }>({
-    pendingHidden: null,
-  });
-  useEffect(() => {
-    if (chartV2Hidden === v2Hidden) return;
-    seqRef.current.pendingHidden = v2Hidden;
-    // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
-    setOpacity(0);
-    const t1 = setTimeout(() => {
-      setChartV2Hidden(seqRef.current.pendingHidden ?? false);
-      setOpacity(1);
-    }, 300);
-    return () => clearTimeout(t1);
-  }, [v2Hidden, chartV2Hidden]);
-
-  const traces = useMemo(
-    () =>
-      makeTraces(data, {
-        v2Visible: chartV2Hidden ? "legendonly" : true,
-      }),
-    [data, chartV2Hidden],
-  );
-  const layout = useMemo(() => makeLayout(), []);
-  return (
-    <div
-      style={{
-        opacity,
-        transition: "opacity 300ms ease-in-out",
-        height: CHART_HEIGHT,
-      }}
-    >
-      <Plot
-        data={traces}
-        layout={layout}
-        config={{ displayModeBar: false, responsive: true }}
-        style={{ width: "100%", height: CHART_HEIGHT }}
-        useResizeHandler
-      />
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Variant D — Plotly.animate frames (1200ms) — explicit y-array interpolation
-// ---------------------------------------------------------------------------
-function VariantPlotlyAnimate({
-  data,
-  v2Hidden,
-}: {
-  data: ReturnType<typeof buildMockData>;
-  v2Hidden: boolean;
-}) {
-  const gdRef = useRef<HTMLElement | null>(null);
-  const lastHiddenRef = useRef<boolean | null>(null);
-
-  const initialTraces = useMemo(() => makeTraces(data), [data]);
-  const initialLayout = useMemo(
-    () => makeLayout({ yRange: [0, stackedRangeMax(data.v3, data.v2)] }),
-    [data],
-  );
-
-  useEffect(() => {
-    if (!gdRef.current) return;
-    if (lastHiddenRef.current === v2Hidden) return;
-    lastHiddenRef.current = v2Hidden;
-    const Plotly = (window as unknown as { Plotly?: PlotlyAPI }).Plotly;
-    if (!Plotly) return;
-
-    const targetV2Y = v2Hidden ? data.v2.map(() => 0) : data.v2;
-    const targetMax = v2Hidden
-      ? stackedRangeMax(data.v3, [])
-      : stackedRangeMax(data.v3, data.v2);
-
-    Plotly.animate(
-      gdRef.current,
-      {
-        data: [{ y: data.v3 }, { y: targetV2Y }],
-        layout: { yaxis: { range: [0, targetMax] } },
-        traces: [0, 1],
-      },
-      {
-        transition: { duration: 1200, easing: "cubic-out" },
-        frame: { duration: 1200, redraw: false },
-      },
-    );
-  }, [v2Hidden, data]);
-
-  return (
-    <Plot
-      data={initialTraces}
-      layout={initialLayout}
-      config={{ displayModeBar: false, responsive: true }}
-      style={{ width: "100%", height: CHART_HEIGHT }}
-      useResizeHandler
-      onInitialized={(_fig, gd) => {
-        gdRef.current = gd as unknown as HTMLElement;
-      }}
-    />
-  );
-}
-
-interface PlotlyAPI {
-  animate: (
-    gd: HTMLElement,
-    update: {
-      data?: Array<{ y?: number[] }>;
-      layout?: { yaxis?: { range?: [number, number] } };
-      traces?: number[];
-    },
-    opts: {
-      transition: { duration: number; easing: string };
-      frame: { duration: number; redraw: boolean };
-    },
-  ) => Promise<void>;
-}
-
-// ---------------------------------------------------------------------------
-// Variant E — Slow back-out 2000ms with anticipation tail
-// ---------------------------------------------------------------------------
-function VariantSlowBackOut({
-  data,
-  v2Hidden,
-}: {
-  data: ReturnType<typeof buildMockData>;
-  v2Hidden: boolean;
-}) {
-  const traces = useMemo(
-    () =>
-      makeTraces(data, {
-        v2Visible: v2Hidden ? "legendonly" : true,
-      }),
-    [data, v2Hidden],
-  );
-  const yMax = useMemo(
-    () =>
-      v2Hidden
-        ? stackedRangeMax(data.v3, [])
-        : stackedRangeMax(data.v3, data.v2),
-    [data, v2Hidden],
-  );
-  const layout = useMemo(
-    () =>
-      makeLayout({
-        yRange: [0, yMax],
-        transition: { duration: 2000, easing: "back-out" as const },
-      }),
-    [yMax],
-  );
-  return (
-    <Plot
-      data={traces}
-      layout={layout}
-      config={{ displayModeBar: false, responsive: true }}
-      style={{ width: "100%", height: CHART_HEIGHT }}
-      useResizeHandler
-    />
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Variant F — Cross-fade between v3+v2 chart and v3-only chart (~500ms)
-// ---------------------------------------------------------------------------
-function VariantCrossFade({
-  data,
-  v2Hidden,
-}: {
-  data: ReturnType<typeof buildMockData>;
-  v2Hidden: boolean;
+  duration: number;
+  easing: string;
 }) {
   const tracesAll = useMemo(() => makeTraces(data), [data]);
-  const tracesV3Only = useMemo(
-    () => makeTraces(data, { v2Visible: "legendonly" }),
-    [data],
-  );
+  const tracesV3Only = useMemo(() => makeTraces(data, "legendonly"), [data]);
   const yMaxAll = useMemo(() => stackedRangeMax(data.v3, data.v2), [data]);
   const yMaxV3 = useMemo(() => stackedRangeMax(data.v3, []), [data]);
-  const layoutAll = useMemo(
-    () => makeLayout({ yRange: [0, yMaxAll] }),
-    [yMaxAll],
-  );
-  const layoutV3 = useMemo(() => makeLayout({ yRange: [0, yMaxV3] }), [yMaxV3]);
+  const layoutAll = useMemo(() => makeLayout(yMaxAll), [yMaxAll]);
+  const layoutV3 = useMemo(() => makeLayout(yMaxV3), [yMaxV3]);
   return (
     <div style={{ position: "relative", height: CHART_HEIGHT }}>
       <div
@@ -432,7 +158,7 @@ function VariantCrossFade({
           position: "absolute",
           inset: 0,
           opacity: v2Hidden ? 0 : 1,
-          transition: "opacity 500ms ease-in-out",
+          transition: `opacity ${duration}ms ${easing}`,
           pointerEvents: v2Hidden ? "none" : "auto",
         }}
       >
@@ -449,7 +175,7 @@ function VariantCrossFade({
           position: "absolute",
           inset: 0,
           opacity: v2Hidden ? 1 : 0,
-          transition: "opacity 500ms ease-in-out",
+          transition: `opacity ${duration}ms ${easing}`,
           pointerEvents: v2Hidden ? "auto" : "none",
         }}
       >
@@ -465,43 +191,168 @@ function VariantCrossFade({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
+// Sequential fade — first chart fades OUT fully, then second chart fades
+// IN. No overlap, no concurrent rendering of both states. The user sees
+// the disappearing chart fade to nothing, then the new chart materialize.
+function SequentialFadeChart({
+  data,
+  v2Hidden,
+  fadeOutMs,
+  holdMs,
+  fadeInMs,
+}: {
+  data: ReturnType<typeof buildMockData>;
+  v2Hidden: boolean;
+  fadeOutMs: number;
+  holdMs: number;
+  fadeInMs: number;
+}) {
+  const [phase, setPhase] = useState<"idle" | "fadeOut" | "swap" | "fadeIn">(
+    "idle",
+  );
+  const [shownV2Hidden, setShownV2Hidden] = useState(v2Hidden);
+  const lastV2HiddenRef = useRef(v2Hidden);
+
+  useEffect(() => {
+    if (lastV2HiddenRef.current === v2Hidden) return;
+    lastV2HiddenRef.current = v2Hidden;
+    // eslint-disable-next-line @eslint-react/hooks-extra/no-direct-set-state-in-use-effect
+    setPhase("fadeOut");
+    const t1 = setTimeout(() => {
+      setShownV2Hidden(v2Hidden);
+      setPhase("swap");
+    }, fadeOutMs);
+    const t2 = setTimeout(() => setPhase("fadeIn"), fadeOutMs + holdMs);
+    const t3 = setTimeout(
+      () => setPhase("idle"),
+      fadeOutMs + holdMs + fadeInMs,
+    );
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, [v2Hidden, fadeOutMs, holdMs, fadeInMs]);
+
+  const tracesAll = useMemo(() => makeTraces(data), [data]);
+  const tracesV3 = useMemo(() => makeTraces(data, "legendonly"), [data]);
+  const yMaxAll = useMemo(() => stackedRangeMax(data.v3, data.v2), [data]);
+  const yMaxV3 = useMemo(() => stackedRangeMax(data.v3, []), [data]);
+  const layoutAll = useMemo(() => makeLayout(yMaxAll), [yMaxAll]);
+  const layoutV3 = useMemo(() => makeLayout(yMaxV3), [yMaxV3]);
+
+  // Decide opacity + which chart to show this frame
+  const useV3Only = shownV2Hidden;
+  let opacity = 1;
+  let transitionMs = 0;
+  if (phase === "fadeOut") {
+    opacity = 0;
+    transitionMs = fadeOutMs;
+  } else if (phase === "swap") {
+    opacity = 0;
+    transitionMs = 0;
+  } else if (phase === "fadeIn") {
+    opacity = 1;
+    transitionMs = fadeInMs;
+  }
+
+  return (
+    <div
+      style={{
+        opacity,
+        transition: `opacity ${transitionMs}ms ease-in-out`,
+        height: CHART_HEIGHT,
+      }}
+    >
+      <Plot
+        data={useV3Only ? tracesV3 : tracesAll}
+        layout={useV3Only ? layoutV3 : layoutAll}
+        config={{ displayModeBar: false, responsive: true }}
+        style={{ width: "100%", height: CHART_HEIGHT }}
+        useResizeHandler
+      />
+    </div>
+  );
+}
+
+type VariantProps = {
+  data: ReturnType<typeof buildMockData>;
+  v2Hidden: boolean;
+};
+
+function VariantF1(props: VariantProps) {
+  return <CrossFadeChart {...props} duration={250} easing="ease-out" />;
+}
+function VariantF2(props: VariantProps) {
+  return <CrossFadeChart {...props} duration={500} easing="ease-in-out" />;
+}
+function VariantF3(props: VariantProps) {
+  return <CrossFadeChart {...props} duration={800} easing="ease-in-out" />;
+}
+function VariantF4(props: VariantProps) {
+  return (
+    <CrossFadeChart
+      {...props}
+      duration={400}
+      easing="cubic-bezier(0.4, 0, 0.2, 1)"
+    />
+  );
+}
+function VariantF5(props: VariantProps) {
+  return (
+    <SequentialFadeChart
+      {...props}
+      fadeOutMs={350}
+      holdMs={50}
+      fadeInMs={350}
+    />
+  );
+}
+function VariantF6(props: VariantProps) {
+  return (
+    <SequentialFadeChart
+      {...props}
+      fadeOutMs={200}
+      holdMs={20}
+      fadeInMs={200}
+    />
+  );
+}
+
 export default function VolumeAnimationsLab() {
   const data = useMemo(() => buildMockData(), []);
   const [v2Hidden, setV2Hidden] = useState(false);
 
   const variants = [
     {
-      name: "A — Snap (no animation)",
-      desc: "Current production. Visibility flips instantly, autorange snaps the y-range to the new visible-only stack max.",
-      Component: VariantSnap,
+      name: "F1 — Cross-fade 250ms ease-out",
+      desc: "Snappy, fast cross-fade. Two charts overlap during the transition.",
+      Component: VariantF1,
     },
     {
-      name: "B — Range ease, cubic-out 1.5s",
-      desc: "Visibility snaps but layout.transition interpolates the y-range over 1.5s. Trace shape stays the same; the y-axis ceiling visibly shrinks.",
-      Component: VariantRangeEase,
+      name: "F2 — Cross-fade 500ms ease-in-out",
+      desc: "Mid-speed cross-fade. The default cross-fade you saw before.",
+      Component: VariantF2,
     },
     {
-      name: "C — CSS fade-out → swap → fade-in (~600ms)",
-      desc: "Wrapper opacity 1 → 0 over 300ms, flip Plotly state under cover of invisibility, opacity 0 → 1 over 300ms. Hides the snap entirely.",
-      Component: VariantCssFade,
+      name: "F3 — Cross-fade 800ms ease-in-out",
+      desc: "Slower, more graceful. Lets you see both states overlap longer.",
+      Component: VariantF3,
     },
     {
-      name: "D — Plotly.animate frames, 1.2s",
-      desc: "Bypasses Plotly.react. Calls Plotly.animate with explicit y-arrays + range. The only path that interpolates trace y-values too.",
-      Component: VariantPlotlyAnimate,
+      name: "F4 — Cross-fade 400ms with Material curve",
+      desc: "400ms cubic-bezier(0.4, 0, 0.2, 1) — Material Design's 'standard' easing. Feels more deliberate than a stock ease-in-out.",
+      Component: VariantF4,
     },
     {
-      name: "E — Slow back-out 2s with overshoot",
-      desc: "Same shape as B but slower (2s) and with `back-out` easing (overshoots target slightly then settles). For comparison with cubic-out.",
-      Component: VariantSlowBackOut,
+      name: "F5 — Sequential fade-out → swap → fade-in (350ms each)",
+      desc: "The OLD chart fades to invisible, then the NEW chart fades in. No overlap, no two-states-on-screen-at-once. ~700ms total.",
+      Component: VariantF5,
     },
     {
-      name: "F — Cross-fade between two charts (~500ms)",
-      desc: "Two charts overlaid: one shows v3+v2 (its OWN y-range), the other v3-only (its own y-range). CSS-cross-fade between them. No Plotly transitions.",
-      Component: VariantCrossFade,
+      name: "F6 — Sequential 200ms each (snappier)",
+      desc: "Same as F5 but fast: fade out 200ms, fade in 200ms. ~400ms total.",
+      Component: VariantF6,
     },
   ];
 
@@ -509,15 +360,14 @@ export default function VolumeAnimationsLab() {
     <main className="min-h-screen bg-slate-950 px-6 py-8 text-slate-200">
       <header className="mx-auto mb-6 max-w-7xl">
         <h1 className="text-2xl font-semibold text-white">
-          Volume chart — legend toggle animation lab
+          Cross-fade refinements
         </h1>
         <p className="mt-2 text-sm text-slate-400">
-          One <strong>Toggle v2</strong> button drives all six variants
-          simultaneously. Mock data: v3 is small (~$100k flat), v2 is huge (~$5M
-          peaks) — so toggling v2 produces a dramatic range change (chart
-          ceiling drops from $5M+ to $200k) that&apos;s easy to see. Y-axis
-          ticks are SHOWN here (production hides them) so the range animation is
-          visible. Durations are slow (1.2–2s) so the behavior is unmistakable.
+          Six cross-fade variations. F1–F4 are simultaneous cross-fades (two
+          charts overlaid, opacity flips between them) at different durations /
+          easings. F5–F6 are SEQUENTIAL fades (old fades out completely, then
+          new fades in — no overlap). Click toggle to see all six animate in
+          parallel.
         </p>
         <div className="mt-4 flex items-center gap-3">
           <button
@@ -527,10 +377,6 @@ export default function VolumeAnimationsLab() {
           >
             Toggle v2 — currently {v2Hidden ? "HIDDEN" : "SHOWN"}
           </button>
-          <span className="text-xs text-slate-500">
-            Click to flip across all variants. They animate in parallel so you
-            can A/B compare.
-          </span>
         </div>
       </header>
 
