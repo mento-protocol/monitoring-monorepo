@@ -489,11 +489,46 @@ describe("aggregatePoolDailyVolume", () => {
       row(42220, "0xA", day(1), 100, "0xUser"),
       row(42220, "0xA", day(1), 50, "0xSystem"),
     ];
-    const allowList = new Set([`42220-0xUser`]);
+    // Day-scoped allowlist: `${chainId}-${trader}-${day}`.
+    const allowList = new Set([`42220-0xUser-${day(1)}`]);
     const r = aggregatePoolDailyVolume(rows, noLabel, allowList);
     expect(r.totalSeries[0]!.value).toBeCloseTo(100, 4);
     // Without the allowlist, the same input includes both traders.
     const rUnfiltered = aggregatePoolDailyVolume(rows, noLabel);
     expect(rUnfiltered.totalSeries[0]!.value).toBeCloseTo(150, 4);
+  });
+
+  it("allowlist is day-scoped — same trader can have system + non-system days", () => {
+    // Trader 0xFlip flipped from system to non-system between day 1 and
+    // day 2. System volume must NOT leak from day 1 even though the
+    // trader is admitted on day 2.
+    const rows = [
+      row(42220, "0xA", day(1), 100, "0xFlip"), // system day → excluded
+      row(42220, "0xA", day(2), 80, "0xFlip"), // non-system day → admitted
+    ];
+    const allowList = new Set([`42220-0xFlip-${day(2)}`]);
+    const r = aggregatePoolDailyVolume(rows, noLabel, allowList);
+    // Only day 2's 80 contributes; day 1's 100 is dropped.
+    const day2 = r.totalSeries.find((p) => p.timestamp === Number(day(2)))!;
+    expect(day2.value).toBeCloseTo(80, 4);
+    const day1 = r.totalSeries.find((p) => p.timestamp === Number(day(1)));
+    if (day1) expect(day1.value).toBe(0);
+  });
+
+  it("zero-fills every day in windowRange even when no row touched it", () => {
+    // Only day 2 has any activity; days 1 and 3 must still appear in the
+    // series with value=0 so the stacked area's x-axis stays contiguous.
+    const SECONDS_PER_DAY = 86_400;
+    const rows = [row(42220, "0xA", day(2), 100, "0xUser")];
+    const r = aggregatePoolDailyVolume(rows, noLabel, undefined, {
+      fromSec: Number(day(1)),
+      toSec: Number(day(3)),
+    });
+    expect(r.totalSeries.map((p) => p.timestamp)).toEqual([
+      Number(day(1)),
+      Number(day(1)) + SECONDS_PER_DAY,
+      Number(day(3)),
+    ]);
+    expect(r.totalSeries.map((p) => p.value)).toEqual([0, 100, 0]);
   });
 });

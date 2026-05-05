@@ -201,17 +201,38 @@ export function LeaderboardClient() {
   }, [poolRows]);
 
   // When the system-address toggle is off, restrict the chart to rows
-  // whose `(chainId, trader)` is in the parent trader query's result —
-  // `TraderPoolDailySnapshot` doesn't carry an `isSystemAddress` flag of
-  // its own, so the chart would otherwise include system flow that the
-  // headline excludes (codex review on b0d9cf0). When the toggle is on
-  // we pass `undefined` which short-circuits the filter.
+  // whose `(chainId, trader, day)` is in the parent trader query's
+  // result. `TraderPoolDailySnapshot` doesn't carry an `isSystemAddress`
+  // flag of its own, so the chart would otherwise include system flow
+  // that the headline excludes (codex review). The allowlist is
+  // day-scoped because `TraderDailySnapshot.isSystemAddress` is itself
+  // day-scoped — a trader who flipped flag mid-window would otherwise
+  // re-admit their excluded days into the chart (cursor agent finding
+  // on 5fcc663). When the toggle is on we pass `undefined` to
+  // short-circuit the filter.
   const traderAllowList = useMemo<ReadonlySet<string> | undefined>(() => {
     if (showSystem) return undefined;
     const s = new Set<string>();
-    for (const t of aggregated) s.add(`${t.chainId}-${t.trader}`);
+    for (const r of traderRows) {
+      if (r.isSystemAddress) continue;
+      s.add(`${r.chainId}-${r.trader}-${r.timestamp}`);
+    }
     return s;
-  }, [showSystem, aggregated]);
+  }, [showSystem, traderRows]);
+
+  // UTC-day window range so the chart's x-axis stays contiguous when a
+  // day had zero volume protocol-wide. `cutoff` is already aligned to
+  // UTC midnight by `rangeCutoffSeconds`. `toSec` is today's UTC
+  // midnight; the daily-rollover ticker (`utcDayKey`) flushes this memo
+  // along with the cutoff at midnight.
+  const windowRange = useMemo(() => {
+    const todayMidnightUtc =
+      Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+    return cutoff > 0
+      ? { fromSec: cutoff, toSec: todayMidnightUtc }
+      : undefined;
+    // utcDayKey is intentional — see `cutoff` memo above.
+  }, [cutoff, utcDayKey]);
 
   const poolVolumeBreakdown = useMemo(() => {
     return aggregatePoolDailyVolume(
@@ -235,8 +256,9 @@ export function LeaderboardClient() {
         return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
       },
       traderAllowList,
+      windowRange,
     );
-  }, [poolVolumeRows, poolMeta, traderAllowList]);
+  }, [poolVolumeRows, poolMeta, traderAllowList, windowRange]);
 
   // Hero KPIs.
   const totalVolume = useMemo(() => {
@@ -276,18 +298,23 @@ export function LeaderboardClient() {
 
   const isLoading = tradersResult.isLoading || poolsResult.isLoading;
   const hasError = !!tradersResult.error;
-  // True iff EITHER the trader-day or the pool-day query saturated the
-  // Hasura cap. When set, `aggregated`, the per-pool stacked chart, and
-  // the derived KPIs may all be undercounting — banner + `≈` / `≥`
-  // value prefixes flag the approximation.
+  // The trader-day and pool-day queries saturate the Hasura 1000-row
+  // cap independently. The KPI tiles (totalVolume, totalTraders,
+  // top10Concentration) are derived ONLY from `aggregated` →
+  // `traderRows` → `TRADER_DAILY_TOP`, so they're approximate iff
+  // `traderCapHit`. The chart is derived from `POOL_DAILY_VOLUME`, so
+  // it's approximate iff `poolCapHit`. Conflating the two over-flagged
+  // tiles when only the chart query was capped (codex finding on
+  // 5fcc663). The banner above the tiles fires when EITHER source is
+  // capped so the user knows something on the page is approximate.
   const traderCapHit =
     !!tradersResult.data &&
     (tradersResult.data.TraderDailySnapshot?.length ?? 0) === ENVIO_MAX_ROWS;
-  const poolCapHit =
+  const chartCapHit =
     !!poolVolumeResult.data &&
     (poolVolumeResult.data.TraderPoolDailySnapshot?.length ?? 0) ===
       ENVIO_MAX_ROWS;
-  const isCapHit = traderCapHit || poolCapHit;
+  const anyCapHit = traderCapHit || chartCapHit;
 
   // Headline = window total. Change pill is week-over-week if the range is
   // ≥7d, otherwise null (24h has no meaningful WoW peer).
@@ -343,49 +370,56 @@ export function LeaderboardClient() {
         </div>
       </header>
 
-      {/* The 1000-row cap on `TRADER_DAILY_TOP` is shared by the tiles, the
-          daily-volume chart, AND the table — surface the warning above the
-          tiles, not just below the table, so users don't read the totals
-          and concentration percentage as exact when they're approximate. */}
-      {isCapHit && (
+      {/* Banner fires when EITHER query is capped, so users know SOME
+          surface on the page is approximate. Tile labels and value
+          prefixes only flip when the trader query is capped (the
+          source they actually derive from); the chart card has its
+          own approximation badge driven by `chartCapHit`. */}
+      {anyCapHit && (
         <div className="rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200/90">
           <strong className="font-medium">
             Approximate values for this window.
           </strong>{" "}
-          Showing the top {ENVIO_MAX_ROWS.toLocaleString()} trader-day rows by
-          single-day volume — total volume, unique-trader count, top-10
-          concentration, and the daily-volume chart all derive from this cap.
-          High-frequency traders whose individual days don&apos;t crack the cap
-          may be undercounted at longer windows. A pre-rolled window-snapshot
-          entity is planned (<code>BACKLOG.md</code> &rarr; PR 4).
+          Showing the top {ENVIO_MAX_ROWS.toLocaleString()}{" "}
+          {traderCapHit && chartCapHit
+            ? "trader-day and pool-day"
+            : traderCapHit
+              ? "trader-day"
+              : "pool-day"}{" "}
+          rows by single-day volume — high-frequency contributors whose
+          individual days don&apos;t crack the cap may be undercounted at longer
+          windows. A pre-rolled window-snapshot entity is planned (
+          <code>BACKLOG.md</code> &rarr; PR 4).
         </div>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Tile
-          label={isCapHit ? "Total volume (≈)" : "Total volume"}
+          label={traderCapHit ? "Total volume (≈)" : "Total volume"}
           value={
             isLoading
               ? "…"
               : hasError
                 ? "—"
-                : `${isCapHit ? "≈ " : ""}${formatUSD(totalVolume)}`
+                : `${traderCapHit ? "≈ " : ""}${formatUSD(totalVolume)}`
           }
           subtitle={rangeSubtitle(range)}
         />
         <Tile
-          label={isCapHit ? "Unique traders (≈)" : "Unique traders"}
+          label={traderCapHit ? "Unique traders (≈)" : "Unique traders"}
           value={
             isLoading
               ? "…"
               : hasError
                 ? "—"
-                : `${isCapHit ? "≥ " : ""}${totalTraders.toLocaleString()}`
+                : `${traderCapHit ? "≥ " : ""}${totalTraders.toLocaleString()}`
           }
           subtitle={`${totalSwaps.toLocaleString()} swaps`}
         />
         <Tile
-          label={isCapHit ? "Top-10 concentration (≈)" : "Top-10 concentration"}
+          label={
+            traderCapHit ? "Top-10 concentration (≈)" : "Top-10 concentration"
+          }
           value={
             isLoading
               ? "…"
@@ -417,6 +451,11 @@ export function LeaderboardClient() {
           hasError={hasError || !!poolVolumeResult.error}
           hasSnapshotError={false}
           emptyMessage="No pool volume in this window."
+          // Taller plot + minimal top padding so peaks reach close to
+          // the headline figure instead of bottoming out in 1/3 of the
+          // available card area.
+          chartHeightPx={340}
+          yAxisTopPadding={0}
         />
       )}
 

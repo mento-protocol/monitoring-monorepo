@@ -124,7 +124,7 @@ export const POOL_DAILY_VOLUME = /* GraphQL */ `
   query PoolDailyVolume($afterTimestamp: numeric!, $limit: Int!) {
     TraderPoolDailySnapshot(
       where: { timestamp: { _gte: $afterTimestamp } }
-      order_by: [{ volumeUsdWei: desc }, { timestamp: desc }]
+      order_by: [{ volumeUsdWei: desc }, { timestamp: desc }, { id: asc }]
       limit: $limit
     ) {
       id

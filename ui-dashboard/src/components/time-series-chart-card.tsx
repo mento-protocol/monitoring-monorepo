@@ -13,16 +13,26 @@ import { RANGES, type RangeKey, type TimeSeriesPoint } from "@/lib/time-series";
 // A skeleton rendered while the Plotly chunk is still loading. Without this
 // fallback there's a brief gap between `isLoading` flipping to false and the
 // <Plot> chunk resolving — the card's plot area goes blank for a frame.
-const PlotSkeleton = () => (
-  <div
-    className="animate-pulse rounded bg-slate-800/30"
-    style={{ height: ROW_CHART_HEIGHT_PX }}
-  />
-);
+function PlotSkeleton({
+  heightPx = ROW_CHART_HEIGHT_PX,
+}: {
+  heightPx?: number;
+}) {
+  return (
+    <div
+      className="animate-pulse rounded bg-slate-800/30"
+      style={{ height: heightPx }}
+    />
+  );
+}
 
+// `dynamic`'s `loading` prop receives `DynamicOptionsLoadingProps`, not
+// our custom `{ heightPx }`, so the chunk-loading flash falls back to
+// the default 200px height. That's a 1-frame visual nit before
+// hydration; not worth threading the height through.
 const Plot = dynamic(() => import("react-plotly.js"), {
   ssr: false,
-  loading: PlotSkeleton,
+  loading: () => <PlotSkeleton />,
 });
 
 export type BreakdownSeries = {
@@ -62,6 +72,21 @@ interface TimeSeriesChartCardProps {
   hasError: boolean;
   hasSnapshotError: boolean;
   emptyMessage: string;
+  /**
+   * Plot area height in pixels. Defaults to `ROW_CHART_HEIGHT_PX` (200).
+   * Charts that want more vertical real estate can override — the
+   * leaderboard's per-pool stacked chart uses ~340 to let peaks reach
+   * close to the headline figure instead of bottoming out in 1/3 of
+   * the available card height.
+   */
+  chartHeightPx?: number;
+  /**
+   * Top-of-axis padding as a fraction of the y-range span. Defaults to
+   * 0.35 (35% headroom). Stacked charts that want peaks to fill more
+   * of the plot can drop this to ~0.05–0.10. The bottom is always
+   * pinned to 0 in stacked / breakdown mode regardless of this value.
+   */
+  yAxisTopPadding?: number;
 }
 
 export function TimeSeriesChartCard({
@@ -80,6 +105,8 @@ export function TimeSeriesChartCard({
   hasError,
   hasSnapshotError,
   emptyMessage,
+  chartHeightPx = ROW_CHART_HEIGHT_PX,
+  yAxisTopPadding = 0.35,
 }: TimeSeriesChartCardProps) {
   const hasBreakdown = (breakdown?.length ?? 0) > 0;
   const isStacked = hasBreakdown && breakdownMode === "stacked";
@@ -141,7 +168,7 @@ export function TimeSeriesChartCard({
     const span = Math.max(ymax - ymin, ymax * 0.02, 1);
     const yRange: [number, number] = [
       hasBreakdown ? 0 : Math.max(0, ymin - span * 0.1),
-      ymax + span * 0.35,
+      ymax + span * yAxisTopPadding,
     ];
 
     return {
@@ -238,21 +265,34 @@ export function TimeSeriesChartCard({
               headline
             )}
           </p>
-          <div className="mt-1 flex h-5 items-center gap-1.5 font-mono text-sm">
-            {isLoading ? (
-              <span className="h-3 w-24 animate-pulse rounded bg-slate-800/40" />
-            ) : (
-              <>
-                {deltaPill}
-                {deltaPill && (
-                  <span className="text-slate-500">{changeLabel}</span>
-                )}
-                {(hasError || hasSnapshotError) && (
-                  <span className="text-xs text-slate-500">· partial data</span>
-                )}
-              </>
-            )}
-          </div>
+          {/* Reserve the change-pill row only when there's something to
+              show — when the caller passes `change={null}` and the chart
+              isn't in loading or error state, this row is empty and just
+              wastes ~20px of vertical real estate that pushes the plot
+              area down (per-pool stacked chart's headline-to-peak gap
+              feedback). */}
+          {(isLoading ||
+            deltaPill !== null ||
+            hasError ||
+            hasSnapshotError) && (
+            <div className="mt-1 flex h-5 items-center gap-1.5 font-mono text-sm">
+              {isLoading ? (
+                <span className="h-3 w-24 animate-pulse rounded bg-slate-800/40" />
+              ) : (
+                <>
+                  {deltaPill}
+                  {deltaPill && (
+                    <span className="text-slate-500">{changeLabel}</span>
+                  )}
+                  {(hasError || hasSnapshotError) && (
+                    <span className="text-xs text-slate-500">
+                      · partial data
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         <div
@@ -284,11 +324,11 @@ export function TimeSeriesChartCard({
 
       <div className="mt-4 -mx-2 sm:-mx-3">
         {isLoading ? (
-          <PlotSkeleton />
+          <PlotSkeleton heightPx={chartHeightPx} />
         ) : showEmptyState ? (
           <div
             className="flex items-center justify-center text-sm text-slate-500"
-            style={{ height: ROW_CHART_HEIGHT_PX }}
+            style={{ height: chartHeightPx }}
           >
             {emptyMessage}
           </div>
@@ -297,7 +337,7 @@ export function TimeSeriesChartCard({
             data={traces}
             layout={layout}
             config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
-            style={{ width: "100%", height: ROW_CHART_HEIGHT_PX }}
+            style={{ width: "100%", height: chartHeightPx }}
             useResizeHandler
           />
         )}
