@@ -165,22 +165,6 @@ export function TimeSeriesChartCard({
     }>;
   } | null>(null);
 
-  // Map of (color + name) → legendIcon for the hover handler. Plotly
-  // only passes the trace's own data through `plotly_hover` events;
-  // React nodes have to be looked up out-of-band. Keying by name alone
-  // collides when the same pair (e.g. "USDC/USDm") exists on multiple
-  // chains — the later `set()` would overwrite the earlier one and
-  // both rows would render the same chain icon. `POOL_PALETTE` assigns
-  // a unique color per trace, so `${color}|${name}` is collision-free.
-  const legendIconByKey = useMemo(() => {
-    const m = new Map<string, ReactNode>();
-    for (const b of breakdown ?? []) {
-      if (b.legendIcon !== undefined)
-        m.set(`${b.color}|${b.name}`, b.legendIcon);
-    }
-    return m;
-  }, [breakdown]);
-
   const onPlotlyHover = useCallback(
     (e: {
       points?: unknown[];
@@ -192,7 +176,6 @@ export function TimeSeriesChartCard({
         y?: number;
         curveNumber?: number;
         fullData?: {
-          name?: string;
           line?: { color?: string };
           fillcolor?: string;
         };
@@ -210,24 +193,33 @@ export function TimeSeriesChartCard({
         seenCurves.add(cn);
         return true;
       });
+      // Look up the original BreakdownSeries by curveNumber. Each Plotly
+      // trace's index matches the breakdown array index 1:1 (we don't
+      // prepend a totalTrace in stacked mode), so this gives us the
+      // unescaped pool name + the React legendIcon directly. Reading
+      // `fullData.name` was unreliable: it carries `escapePlotText`'d
+      // text (HTML entities for `<`, `&`, etc.), and a name lookup
+      // collided across cross-chain pairs (codex 3191231362, cursor
+      // 3191249022).
+      const breakdownByCurve = breakdown ?? [];
       const sorted = uniquePoints
         .map((p) => {
-          const name = p.fullData?.name ?? "";
+          const cn = p.curveNumber;
+          const b = typeof cn === "number" ? breakdownByCurve[cn] : undefined;
           // Stacked traces use `fillcolor` (with alpha suffix); strip
           // it for the legend swatch by falling back to `line.color`
-          // first. The `color` is the unique-per-trace identifier
-          // we use to look up the per-trace legendIcon — keying by
-          // `name` alone collides on cross-chain pairs.
+          // first.
           const color =
+            b?.color ??
             p.fullData?.line?.color ??
             (p.fullData?.fillcolor
               ? p.fullData.fillcolor.replace(/cc$/i, "")
               : "#94a3b8");
           return {
-            name,
+            name: b?.name ?? "",
             value: typeof p.y === "number" ? p.y : 0,
             color,
-            legendIcon: legendIconByKey.get(`${color}|${name}`),
+            legendIcon: b?.legendIcon,
           };
         })
         .sort((a, b) => b.value - a.value);
@@ -252,7 +244,7 @@ export function TimeSeriesChartCard({
         points: sorted,
       });
     },
-    [customSortedHover, legendIconByKey],
+    [customSortedHover, breakdown],
   );
 
   const onPlotlyUnhover = useCallback(() => {
