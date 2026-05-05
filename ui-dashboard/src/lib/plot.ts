@@ -122,6 +122,11 @@ export const PLOTLY_CONFIG = {
   responsive: true,
   displayModeBar: false,
   scrollZoom: true,
+  // Suppress Plotly's "Double-click on legend to isolate one trace"
+  // tooltip that pops up on legend single-click. The interaction
+  // (single-click toggle / double-click isolate) still works; only the
+  // hint dialog is hidden.
+  showTips: false,
 } as const;
 
 /**
