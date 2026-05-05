@@ -559,11 +559,12 @@ describe("VolumeOverTimeChart render", () => {
     expect(html).toContain('aria-label="$1.00 v3 · — v2"');
   });
 
-  it("includes per-day v3+v2 sum in the chart card's series prop so stacked y-axis ceiling fits", () => {
-    // The chart card derives the y-axis range from `max([...series.value,
-    // ...breakdownYs])`. In stacked mode the rendered top is v3+v2 per day,
-    // so `series` MUST carry the summed value or large v2 days clip past
-    // the ceiling.
+  it("uses autorange + rangemode 'tozero' on the y-axis in stacked mode so toggling a trace via the legend regrows the visible series", () => {
+    // Stacked breakdowns set `autorange: true` so Plotly recomputes the
+    // y-range when the user hides v2 (or v3) via legend click — without
+    // it the axis stays pinned to the original v3+v2 stack max and the
+    // remaining series renders as a flat line at the bottom of the card.
+    // `rangemode: "tozero"` keeps the floor at 0 regardless.
     const today = dayAlignedNow();
     const day0 = today - 2 * SECONDS_PER_DAY;
     const day1 = today - 1 * SECONDS_PER_DAY;
@@ -599,17 +600,16 @@ describe("VolumeOverTimeChart render", () => {
       ],
     });
 
-    // The chart card derives `yaxis.range` from `max([...series.value,
-    // ...breakdownYs])`. In stacked mode the breakdown traces don't carry
-    // the cumulative top — only the summed-`series` prop does. So the
-    // y-axis ceiling MUST be at or above the actual stacked top of $7
-    // (v3 $3 + v2 $4 on day0). Pre-fix it was max($5 v3 day1, $4 v2 day0) =
-    // $5, so day0's stack ($7) clipped past the ceiling.
-    const yRange = (
-      capturedPlotProps.layout?.yaxis as { range?: [number, number] }
-    )?.range;
-    expect(yRange).toBeDefined();
-    expect(yRange![1]).toBeGreaterThanOrEqual(7);
+    const yaxis = capturedPlotProps.layout?.yaxis as {
+      autorange?: boolean;
+      rangemode?: string;
+      range?: [number, number];
+    };
+    expect(yaxis?.autorange).toBe(true);
+    expect(yaxis?.rangemode).toBe("tozero");
+    // No explicit range — autorange owns the ceiling so legend toggles
+    // can regrow the axis to fit just the visible traces.
+    expect(yaxis?.range).toBeUndefined();
   });
 
   it("shows the WoW delta pill labeled 'v3 week-over-week' at the default range when ≥15 days of v3 history exist", () => {

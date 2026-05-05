@@ -188,7 +188,20 @@ export function TimeSeriesChartCard({
           showticklabels: false,
           showline: false,
           zeroline: false,
-          range: yRange,
+          // Stacked breakdowns let Plotly autorange so the visible series
+          // grows to fill the card when the user toggles others off via
+          // the legend (e.g. hide v2 on the Volume chart and v3 should
+          // own the full vertical space). Pinning to a precomputed
+          // `range` would freeze the axis at the original v3+v2 stack
+          // max. Single-trace and `lines` breakdowns keep the explicit
+          // range — they don't have a multi-trace toggle UX, and the
+          // computed range gives controlled headroom for hover labels.
+          ...(isStacked
+            ? {
+                autorange: true as const,
+                rangemode: "tozero" as const,
+              }
+            : { range: yRange }),
           fixedrange: true,
         },
         showlegend: hasBreakdown,
