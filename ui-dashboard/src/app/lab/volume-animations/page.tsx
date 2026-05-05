@@ -275,6 +275,125 @@ function SequentialFadeChart({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Frame-based animation per Plotly's filled-area-animation tutorial.
+// Plotly's docs explicitly state: "Currently, only scatter traces may be
+// smoothly transitioned from one state to the next. Other traces are
+// compatible with frames and animations but will be updated
+// instantaneously." Stackgroup scatter falls in the "instantaneous"
+// bucket on Plotly.react / Plotly.animate single-state calls.
+//
+// Workaround: build N explicit intermediate frames (each with a slightly
+// scaled v2 y-array) and play them in sequence. Plotly snaps between
+// adjacent frames, but with N=24+ frames at ~25ms each, the eye reads it
+// as smooth motion. y-axis range is recomputed per frame so the chart
+// re-fits in step with the shrinking v2 area.
+// ---------------------------------------------------------------------------
+function FrameAnimateChart({
+  data,
+  v2Hidden,
+  frameCount,
+  msPerFrame,
+  easing,
+}: {
+  data: ReturnType<typeof buildMockData>;
+  v2Hidden: boolean;
+  frameCount: number;
+  msPerFrame: number;
+  easing: "linear" | "cubic-out" | "cubic-in-out";
+}) {
+  const gdRef = useRef<HTMLElement | null>(null);
+  const lastHiddenRef = useRef<boolean | null>(null);
+
+  const initialTraces = useMemo(() => makeTraces(data), [data]);
+  const initialLayout = useMemo(
+    () => makeLayout(stackedRangeMax(data.v3, data.v2)),
+    [data],
+  );
+
+  useEffect(() => {
+    if (!gdRef.current) return;
+    if (lastHiddenRef.current === v2Hidden) return;
+    lastHiddenRef.current = v2Hidden;
+    const Plotly = (window as unknown as { Plotly?: PlotlyAPI }).Plotly;
+    if (!Plotly) return;
+
+    // Build N+1 frames going from current state to target.
+    const targetV2Scale = v2Hidden ? 0 : 1;
+    const startV2Scale = v2Hidden ? 1 : 0;
+    const fullMax = stackedRangeMax(data.v3, data.v2);
+    const v3OnlyMax = stackedRangeMax(data.v3, []);
+    const frames: Array<{
+      data: Array<{ y: number[] }>;
+      layout: { yaxis: { range: [number, number] } };
+    }> = [];
+    for (let i = 0; i <= frameCount; i++) {
+      const t = i / frameCount;
+      // Apply easing to t
+      let easedT: number;
+      if (easing === "cubic-out") {
+        easedT = 1 - Math.pow(1 - t, 3);
+      } else if (easing === "cubic-in-out") {
+        easedT = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      } else {
+        easedT = t;
+      }
+      const v2Scale = startV2Scale + (targetV2Scale - startV2Scale) * easedT;
+      const yMax = fullMax + (v3OnlyMax - fullMax) * easedT;
+      frames.push({
+        data: [{ y: data.v3 }, { y: data.v2.map((v) => v * v2Scale) }],
+        layout: { yaxis: { range: [0, yMax] } },
+      });
+    }
+
+    Plotly.animate(
+      gdRef.current,
+      // Plotly.animate accepts an array of frames OR a frames object;
+      // the helper here passes our pre-built frames array.
+      frames as unknown as Parameters<PlotlyAPI["animate"]>[1],
+      {
+        transition: { duration: 0, easing: "linear" },
+        frame: { duration: msPerFrame, redraw: true },
+      },
+    );
+  }, [v2Hidden, data, frameCount, msPerFrame, easing]);
+
+  return (
+    <Plot
+      data={initialTraces}
+      layout={initialLayout}
+      config={{ displayModeBar: false, responsive: true }}
+      style={{ width: "100%", height: CHART_HEIGHT }}
+      useResizeHandler
+      onInitialized={(_fig, gd) => {
+        gdRef.current = gd as unknown as HTMLElement;
+      }}
+    />
+  );
+}
+
+interface PlotlyAPI {
+  animate: (
+    gd: HTMLElement,
+    update:
+      | {
+          data?: Array<{ y?: number[] }>;
+          layout?: { yaxis?: { range?: [number, number] } };
+          traces?: number[];
+        }
+      | {
+          frames: Array<{
+            data: Array<{ y: number[] }>;
+            layout: { yaxis: { range: [number, number] } };
+          }>;
+        },
+    opts: {
+      transition: { duration: number; easing: string };
+      frame: { duration: number; redraw: boolean };
+    },
+  ) => Promise<void>;
+}
+
 type VariantProps = {
   data: ReturnType<typeof buildMockData>;
   v2Hidden: boolean;
@@ -318,6 +437,36 @@ function VariantF6(props: VariantProps) {
     />
   );
 }
+function VariantG1(props: VariantProps) {
+  return (
+    <FrameAnimateChart
+      {...props}
+      frameCount={24}
+      msPerFrame={25}
+      easing="cubic-out"
+    />
+  );
+}
+function VariantG2(props: VariantProps) {
+  return (
+    <FrameAnimateChart
+      {...props}
+      frameCount={36}
+      msPerFrame={25}
+      easing="cubic-in-out"
+    />
+  );
+}
+function VariantG3(props: VariantProps) {
+  return (
+    <FrameAnimateChart
+      {...props}
+      frameCount={48}
+      msPerFrame={20}
+      easing="cubic-out"
+    />
+  );
+}
 
 export default function VolumeAnimationsLab() {
   const data = useMemo(() => buildMockData(), []);
@@ -353,6 +502,21 @@ export default function VolumeAnimationsLab() {
       name: "F6 — Sequential 200ms each (snappier)",
       desc: "Same as F5 but fast: fade out 200ms, fade in 200ms. ~400ms total.",
       Component: VariantF6,
+    },
+    {
+      name: "G1 — Frame-based grow/shrink, 24 frames × 25ms (~600ms, cubic-out)",
+      desc: "Per Plotly's filled-area-animation tutorial: build N intermediate frames with progressively scaled v2 y-values, play in sequence. v2 visibly shrinks frame-by-frame instead of snapping. y-range eases in lockstep. The trace itself ACTUALLY grows/shrinks, not just the wrapper opacity.",
+      Component: VariantG1,
+    },
+    {
+      name: "G2 — Frame-based, 36 frames × 25ms (~900ms, cubic-in-out)",
+      desc: "Smoother / slower variant of G1 with more frames and ease-in-out.",
+      Component: VariantG2,
+    },
+    {
+      name: "G3 — Frame-based, 48 frames × 20ms (~960ms, cubic-out)",
+      desc: "Highest frame count for maximum smoothness; a hair slower than G2.",
+      Component: VariantG3,
     },
   ];
 
