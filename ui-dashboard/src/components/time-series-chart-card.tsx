@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   escapePlotText,
   PLOTLY_BASE_LAYOUT,
@@ -87,6 +87,15 @@ interface TimeSeriesChartCardProps {
    * pinned to 0 in stacked / breakdown mode regardless of this value.
    */
   yAxisTopPadding?: number;
+  /**
+   * When true, suppress Plotly's built-in x-unified hover label and
+   * render a custom React tooltip whose entries are sorted by the
+   * value at the hovered x. Plotly's native unified hover lists traces
+   * in fixed (data-array) order — for stacked charts that order is
+   * "rank by total window volume", which doesn't match the user's
+   * mental model when they want to see "what was biggest TODAY".
+   */
+  customSortedHover?: boolean;
 }
 
 export function TimeSeriesChartCard({
@@ -107,9 +116,79 @@ export function TimeSeriesChartCard({
   emptyMessage,
   chartHeightPx = ROW_CHART_HEIGHT_PX,
   yAxisTopPadding = 0.35,
+  customSortedHover = false,
 }: TimeSeriesChartCardProps) {
   const hasBreakdown = (breakdown?.length ?? 0) > 0;
   const isStacked = hasBreakdown && breakdownMode === "stacked";
+
+  // Custom-tooltip state — only used when `customSortedHover` is on.
+  // Plotly fires `plotly_hover` per-x; we collect the points, sort by
+  // value, and render an absolutely-positioned div whose entries reflect
+  // the hovered day's actual rank.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<{
+    leftPx: number;
+    topPx: number;
+    dayLabel: string;
+    points: Array<{ name: string; value: number; color: string }>;
+  } | null>(null);
+
+  const onPlotlyHover = useCallback(
+    (e: {
+      points?: unknown[];
+      event?: { clientX?: number; clientY?: number };
+    }) => {
+      if (!customSortedHover) return;
+      const rawPoints = (e.points ?? []) as Array<{
+        x?: string | number;
+        y?: number;
+        fullData?: {
+          name?: string;
+          line?: { color?: string };
+          fillcolor?: string;
+        };
+      }>;
+      if (rawPoints.length === 0) return;
+      const sorted = rawPoints
+        .map((p) => ({
+          name: p.fullData?.name ?? "",
+          value: typeof p.y === "number" ? p.y : 0,
+          // Stacked traces use `fillcolor` (with alpha suffix); strip it
+          // for the legend swatch by falling back to `line.color` first.
+          color:
+            p.fullData?.line?.color ??
+            (p.fullData?.fillcolor
+              ? p.fullData.fillcolor.replace(/cc$/i, "")
+              : "#94a3b8"),
+        }))
+        .sort((a, b) => b.value - a.value);
+      const xRaw = rawPoints[0]?.x;
+      const dayLabel =
+        typeof xRaw === "string" || typeof xRaw === "number"
+          ? new Date(xRaw).toLocaleDateString(undefined, {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+              timeZone: "UTC",
+            })
+          : "";
+      const containerRect = containerRef.current?.getBoundingClientRect();
+      const cx = e.event?.clientX ?? 0;
+      const cy = e.event?.clientY ?? 0;
+      setHover({
+        leftPx: containerRect ? cx - containerRect.left : cx,
+        topPx: containerRect ? cy - containerRect.top : cy,
+        dayLabel,
+        points: sorted,
+      });
+    },
+    [customSortedHover],
+  );
+
+  const onPlotlyUnhover = useCallback(() => {
+    if (!customSortedHover) return;
+    setHover(null);
+  }, [customSortedHover]);
   const { traces, layout } = useMemo(() => {
     const xs = series.map((point) =>
       new Date(point.timestamp * 1000).toISOString(),
@@ -149,6 +228,10 @@ export function TimeSeriesChartCard({
           : {
               line: { color: b.color, width: 1 },
             }),
+        // `hoverinfo: "none"` suppresses Plotly's built-in label visually
+        // but keeps `plotly_hover` events firing (vs `"skip"` which
+        // suppresses both). Custom React tooltip below renders sorted.
+        ...(customSortedHover ? { hoverinfo: "none" as const } : {}),
         hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>`,
       };
     });
@@ -220,10 +303,7 @@ export function TimeSeriesChartCard({
         legend: hasBreakdown
           ? {
               orientation: "h" as const,
-              // Dense layout (callers passing low `yAxisTopPadding`) gets
-              // a tighter legend gap too — keeps the bottom whitespace
-              // proportional to the top.
-              y: yAxisTopPadding < 0.1 ? -0.075 : -0.15,
+              y: -0.15,
               x: 0,
               font: { color: "#94a3b8", size: 11 },
               bgcolor: "transparent",
@@ -254,6 +334,7 @@ export function TimeSeriesChartCard({
     isStacked,
     hoverDateFormat,
     yAxisTopPadding,
+    customSortedHover,
   ]);
 
   const deltaPill =
@@ -267,7 +348,17 @@ export function TimeSeriesChartCard({
   const showEmptyState = !isLoading && series.length === 0;
 
   return (
-    <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
+    <section
+      className={
+        "rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6 " +
+        // Dense-layout charts (low `yAxisTopPadding`) reduce the bottom
+        // padding so the legend doesn't sit far above the card edge —
+        // the user's stacked chart was 33px from the legend to the
+        // card's lower border with the default `p-6` (24px). Other
+        // cards keep the symmetric padding.
+        (yAxisTopPadding < 0.1 ? "pb-2 sm:pb-3" : "")
+      }
+    >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm text-slate-400">{title}</p>
@@ -337,7 +428,7 @@ export function TimeSeriesChartCard({
         </div>
       </div>
 
-      <div className="mt-4 -mx-2 sm:-mx-3">
+      <div ref={containerRef} className="relative mt-4 -mx-2 sm:-mx-3">
         {isLoading ? (
           <PlotSkeleton heightPx={chartHeightPx} />
         ) : showEmptyState ? (
@@ -354,7 +445,42 @@ export function TimeSeriesChartCard({
             config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
             style={{ width: "100%", height: chartHeightPx }}
             useResizeHandler
+            onHover={onPlotlyHover}
+            onUnhover={onPlotlyUnhover}
           />
+        )}
+        {customSortedHover && hover && (
+          <div
+            className="pointer-events-none absolute z-50 rounded border border-indigo-500/60 bg-slate-950/95 px-2.5 py-2 text-[12px] text-slate-200 shadow-lg"
+            style={{
+              // Offset from the cursor a bit so the tooltip doesn't sit
+              // under the pointer. Container has `position: relative`.
+              left: hover.leftPx + 14,
+              top: hover.topPx + 14,
+            }}
+          >
+            <div className="mb-1 font-medium text-slate-300">
+              {hover.dayLabel}
+            </div>
+            <div className="space-y-0.5">
+              {hover.points.map((p) => (
+                <div key={p.name} className="flex items-center gap-1.5">
+                  <span
+                    aria-hidden="true"
+                    className="inline-block h-2 w-2 flex-shrink-0 rounded-sm"
+                    style={{ background: p.color }}
+                  />
+                  <span className="text-slate-400">{p.name}:</span>
+                  <span className="font-mono">
+                    $
+                    {p.value.toLocaleString(undefined, {
+                      maximumFractionDigits: 0,
+                    })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </section>

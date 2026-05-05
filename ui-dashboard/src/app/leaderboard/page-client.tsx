@@ -456,6 +456,11 @@ export function LeaderboardClient() {
           // available card area.
           chartHeightPx={340}
           yAxisTopPadding={0}
+          // Sort hover-tooltip entries by the hovered day's volume desc
+          // — Plotly's native unified hover uses fixed trace order
+          // (rank by total window volume), which doesn't match what's
+          // visually largest on a given day.
+          customSortedHover
         />
       )}
 
