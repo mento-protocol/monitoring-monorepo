@@ -321,10 +321,15 @@ function computeHeadline(
   // horizontal spacing between cells.
   // Each cell is `relative` to anchor its absolutely-positioned pill, and
   // `pr-9` reserves horizontal room for the pill so the dollar amount
-  // doesn't render under it.
+  // doesn't render under it. `title` gives sighted users an explainer on
+  // hover; the parent's `aria-label` already covers screen readers.
   return (
     <span role="group" aria-label={ariaLabel}>
-      <span aria-hidden="true" className="relative pr-9">
+      <span
+        aria-hidden="true"
+        title="New Mento (v3): swaps routed through the v3 Router — the path used by app.mento.org today."
+        className="relative pr-9"
+      >
         {formatUSD(v3Total)}
         <VersionBadge version="v3" />
       </span>
@@ -337,7 +342,11 @@ function computeHeadline(
         aria-hidden="true"
         className="mx-3 inline-block size-1.5 -translate-y-[5px] rounded-full bg-slate-500 align-middle"
       />
-      <span aria-hidden="true" className="relative pr-9">
+      <span
+        aria-hidden="true"
+        title="Legacy Mento (v2): direct Broker swaps that bypass the v3 Router — older integrations and routers calling Broker directly."
+        className="relative pr-9"
+      >
         {v2Display}
         <VersionBadge version="v2" />
       </span>
@@ -429,12 +438,12 @@ export function VolumeOverTimeChart({
       xs.map((p) => ({ timestamp: p.timestamp, value: p.volumeUSD }));
     return [
       {
-        name: "v3 (Router)",
+        name: "v3",
         color: V3_COLOR,
         series: toPoints(visibleV3Points),
       },
       {
-        name: "v2 (Legacy)",
+        name: "v2",
         color: V2_COLOR,
         series: toPoints(visibleV2Points),
       },
