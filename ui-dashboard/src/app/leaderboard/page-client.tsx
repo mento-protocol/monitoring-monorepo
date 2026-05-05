@@ -271,6 +271,11 @@ export function LeaderboardClient() {
   // render the legend (and tooltip) with chain marks instead of text
   // suffixes. `poolBreakdown.breakdown[i].key` is the poolId
   // (`{chainId}-{addr}`), so we extract the chainId for `networkForChainId`.
+  // The chain icon at 16px + a 1-letter text badge is recognisable at
+  // a glance — earlier the 12px icons looked near-identical for users
+  // who weren't already familiar with the Celo/Monad marks, so two
+  // legitimate cross-chain rows (e.g. USDC/USDm on both chains) read
+  // as confusing duplicates.
   const chartBreakdown = useMemo(() => {
     return poolVolumeBreakdown.breakdown.map((b) => {
       const [chainIdPart] = b.key.split("-", 2);
@@ -281,7 +286,14 @@ export function LeaderboardClient() {
         name: b.name,
         color: b.color,
         series: b.series,
-        legendIcon: network ? <ChainIcon network={network} size={12} /> : null,
+        legendIcon: network ? (
+          <span className="inline-flex items-center gap-1">
+            <ChainIcon network={network} size={16} />
+            <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              {network.label}
+            </span>
+          </span>
+        ) : null,
       };
     });
   }, [poolVolumeBreakdown]);
