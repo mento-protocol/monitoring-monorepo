@@ -185,6 +185,7 @@ export function TimeSeriesChartCard({
       const rawPoints = (e.points ?? []) as Array<{
         x?: string | number;
         y?: number;
+        curveNumber?: number;
         fullData?: {
           name?: string;
           line?: { color?: string };
@@ -192,7 +193,19 @@ export function TimeSeriesChartCard({
         };
       }>;
       if (rawPoints.length === 0) return;
-      const sorted = rawPoints
+      // Dedupe by `curveNumber` — Plotly occasionally emits the same
+      // trace twice in `x unified` mode for stacked areas (once for the
+      // line, once for the fill, near segment boundaries), which
+      // produced doubled rows in the tooltip. `curveNumber` is the
+      // canonical per-trace identifier; first hit wins.
+      const seenCurves = new Set<number>();
+      const uniquePoints = rawPoints.filter((p) => {
+        const cn = p.curveNumber ?? -1;
+        if (seenCurves.has(cn)) return false;
+        seenCurves.add(cn);
+        return true;
+      });
+      const sorted = uniquePoints
         .map((p) => {
           const name = p.fullData?.name ?? "";
           return {
@@ -529,7 +542,14 @@ export function TimeSeriesChartCard({
             </div>
             <div className="space-y-0.5">
               {hover.points.map((p) => (
-                <div key={p.name} className="flex items-center gap-2">
+                // Composite key — `name` alone collides when the same
+                // pool pair (e.g. "EURm/USDm") exists on both Celo and
+                // Monad. Color is unique per trace via `POOL_PALETTE`
+                // assignment, so `${color}-${name}` is collision-free.
+                <div
+                  key={`${p.color}-${p.name}`}
+                  className="flex items-center gap-2"
+                >
                   <span
                     aria-hidden="true"
                     className="inline-block h-2 w-2 flex-shrink-0 rounded-sm"
@@ -562,7 +582,9 @@ export function TimeSeriesChartCard({
         >
           {(breakdown ?? []).map((b) => (
             <span
-              key={b.name}
+              // Composite key — same reason as the tooltip's row key:
+              // pool pairs (e.g. "EURm/USDm") can repeat across chains.
+              key={`${b.color}-${b.name}`}
               className="inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <span
