@@ -387,6 +387,7 @@ export function aggregatePoolDailyVolume(
   const totalsByPool = new Map<string, bigint>();
   const totalsByDay = new Map<number, bigint>();
   const days = new Set<number>();
+  let admittedRowCount = 0;
   for (const r of rows) {
     if (
       traderAllowList !== undefined &&
@@ -401,6 +402,17 @@ export function aggregatePoolDailyVolume(
     byPoolDay.set(k, (byPoolDay.get(k) ?? BigInt(0)) + wei);
     totalsByPool.set(r.poolId, (totalsByPool.get(r.poolId) ?? BigInt(0)) + wei);
     totalsByDay.set(day, (totalsByDay.get(day) ?? BigInt(0)) + wei);
+    admittedRowCount += 1;
+  }
+
+  // Empty-state short-circuit: when no rows survived filtering, return
+  // empty series + breakdown so the chart card's `series.length === 0`
+  // empty-state check still triggers. Otherwise the windowRange
+  // zero-fill below would synthesize one zero-valued point per UTC day,
+  // making `series.length` equal the window size and silently hiding
+  // the "No pool volume" message (codex finding 3189490296).
+  if (admittedRowCount === 0) {
+    return { totalSeries: [], breakdown: [], poolCount: 0 };
   }
 
   // sortedDays — when the caller passed a windowRange, walk every UTC

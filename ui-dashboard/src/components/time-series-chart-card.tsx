@@ -228,11 +228,18 @@ export function TimeSeriesChartCard({
           : {
               line: { color: b.color, width: 1 },
             }),
-        // `hoverinfo: "none"` suppresses Plotly's built-in label visually
-        // but keeps `plotly_hover` events firing (vs `"skip"` which
-        // suppresses both). Custom React tooltip below renders sorted.
-        ...(customSortedHover ? { hoverinfo: "none" as const } : {}),
-        hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>`,
+        // Custom React tooltip mode: `hoverinfo: "none"` suppresses
+        // Plotly's built-in label visually while keeping `plotly_hover`
+        // events firing. We also drop `hovertemplate` entirely — per
+        // Plotly's API, a non-empty `hovertemplate` overrides
+        // `hoverinfo` and re-enables the native label, defeating the
+        // purpose. Default mode keeps `hovertemplate` for the
+        // x-unified hover.
+        ...(customSortedHover
+          ? { hoverinfo: "none" as const }
+          : {
+              hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>`,
+            }),
       };
     });
     // Pull y-min toward 0 when a breakdown is present so smaller chains

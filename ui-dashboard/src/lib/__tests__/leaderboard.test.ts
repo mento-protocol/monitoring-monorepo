@@ -531,4 +531,30 @@ describe("aggregatePoolDailyVolume", () => {
     ]);
     expect(r.totalSeries.map((p) => p.value)).toEqual([0, 100, 0]);
   });
+
+  it("returns empty series even with windowRange when no rows survive filtering", () => {
+    // Empty input + windowRange must NOT zero-fill — the chart card's
+    // `series.length === 0` empty-state check would otherwise be hidden
+    // behind a synthetic all-zero series (codex finding).
+    const r = aggregatePoolDailyVolume([], noLabel, undefined, {
+      fromSec: Number(day(1)),
+      toSec: Number(day(7)),
+    });
+    expect(r.totalSeries).toEqual([]);
+    expect(r.breakdown).toEqual([]);
+    expect(r.poolCount).toBe(0);
+  });
+
+  it("returns empty series when allowlist excludes every row", () => {
+    // Same short-circuit when an allowlist filters everything out.
+    const rows = [row(42220, "0xA", day(1), 100, "0xUser")];
+    const allowList = new Set<string>(); // empty allowlist
+    const r = aggregatePoolDailyVolume(rows, noLabel, allowList, {
+      fromSec: Number(day(1)),
+      toSec: Number(day(7)),
+    });
+    expect(r.totalSeries).toEqual([]);
+    expect(r.breakdown).toEqual([]);
+    expect(r.poolCount).toBe(0);
+  });
 });
