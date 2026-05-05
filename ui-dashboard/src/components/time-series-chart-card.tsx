@@ -245,9 +245,13 @@ export function TimeSeriesChartCard({
     if (!useCrossFade) return [];
     const N = breakdownCount;
     const combos: Array<Set<number>> = [];
-    // Skip the all-hidden combo (would be an empty chart) — that case
-    // falls back to the empty-state render path below.
-    for (let mask = 0; mask < (1 << N) - 1; mask++) {
+    // Enumerate ALL 2^N visibility combos including the all-hidden one
+    // — Plotly still renders the legend (with all entries dimmed) when
+    // every trace is `visible: "legendonly"`, so users can click to
+    // restore. Skipping the all-hidden combo would leave the user
+    // stranded if they toggle both v3 and v2 off (no plot active → no
+    // legend visible → no way to recover without a page reload).
+    for (let mask = 0; mask < 1 << N; mask++) {
       const set = new Set<number>();
       for (let i = 0; i < N; i++) if (mask & (1 << i)) set.add(i);
       combos.push(set);
