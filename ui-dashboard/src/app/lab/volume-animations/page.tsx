@@ -4,9 +4,10 @@
 // stacked legend toggle, then we revert this file before merge.
 //
 // Each variant mounts the same Plotly stacked-area chart with the same
-// mock v3+v2 data. The "Toggle v2" button hides/shows v2 and runs the
-// variant-specific animation. Click the toggle a few times in each
-// variant and pick a winner.
+// mock data. The "Toggle v2" button hides/shows v2 across all variants
+// at once. Y-axis ticks are SHOWN here so the range animation is visible
+// even though the production chart hides them. Durations are slow
+// (~1500ms) so the animation behavior is unmistakable.
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -15,9 +16,11 @@ const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
 const V3_COLOR = "#6366f1";
 const V2_COLOR = "#14b8a6";
-const CHART_HEIGHT = 240;
+const CHART_HEIGHT = 280;
 
-// Mock 30 days of v3+v2 daily volume, shaped roughly like production.
+// DRAMATIC data: v3 ~$100k flat, v2 ~$5M peaks. v3 is ~2% of the stacked
+// max, so hiding v2 should produce a huge visual change (chart ceiling
+// drops from $5M+ to $200k).
 function buildMockData() {
   const days = 30;
   const now = Math.floor(Date.now() / 1000);
@@ -28,14 +31,14 @@ function buildMockData() {
   for (let i = days - 1; i >= 0; i--) {
     const ts = now - i * SECS_PER_DAY;
     xs.push(new Date(ts * 1000).toISOString());
-    // v3: $50k–$400k with one spike
-    v3.push(50_000 + Math.random() * 350_000 + (i === 5 ? 600_000 : 0));
-    // v2: $200k–$3M with a few peaks
+    // v3: 50k–150k (small, roughly flat)
+    v3.push(50_000 + Math.random() * 100_000);
+    // v2: 500k–4M with two big peaks
     v2.push(
-      200_000 +
-        Math.random() * 700_000 +
-        (i === 3 ? 2_500_000 : 0) +
-        (i === 12 ? 1_800_000 : 0),
+      500_000 +
+        Math.random() * 1_500_000 +
+        (i === 5 ? 3_000_000 : 0) +
+        (i === 18 ? 2_500_000 : 0),
     );
   }
   return { xs, v3, v2 };
@@ -57,9 +60,7 @@ interface ChartTraceData {
 function makeTraces(
   data: { xs: string[]; v3: number[]; v2: number[] },
   opts: {
-    v2Hidden?: boolean;
     v2Visible?: boolean | "legendonly";
-    v2Opacity?: number;
     v2YOverride?: number[];
   } = {},
 ): ChartTraceData[] {
@@ -84,14 +85,13 @@ function makeTraces(
     fillcolor: V2_COLOR + "cc",
   };
   if (opts.v2Visible !== undefined) v2.visible = opts.v2Visible;
-  if (opts.v2Opacity !== undefined) v2.opacity = opts.v2Opacity;
   return [v3, v2];
 }
 
 const BASE_LAYOUT = {
   paper_bgcolor: "transparent",
   plot_bgcolor: "transparent",
-  font: { color: "#e2e8f0", size: 11, family: "inherit" },
+  font: { color: "#cbd5e1", size: 11, family: "inherit" },
   xaxis: {
     type: "date" as const,
     showgrid: false,
@@ -110,7 +110,7 @@ const BASE_LAYOUT = {
     font: { color: "#94a3b8", size: 11 },
     bgcolor: "transparent",
   },
-  margin: { t: 8, r: 8, b: 48, l: 8 },
+  margin: { t: 10, r: 60, b: 50, l: 60 },
   autosize: true,
   dragmode: false as const,
   hovermode: "x unified" as const,
@@ -126,17 +126,22 @@ type PlotlyEasing =
 function makeLayout(
   opts: {
     yRange?: [number, number];
-    autorange?: boolean;
     transition?: { duration: number; easing: PlotlyEasing };
   } = {},
 ) {
   return {
     ...BASE_LAYOUT,
     yaxis: {
-      showgrid: false,
-      showticklabels: false,
+      // SHOW y-axis ticks here (production hides them) so the range
+      // animation is visible to the human eye.
+      showgrid: true,
+      gridcolor: "#1e293b",
+      showticklabels: true,
+      tickfont: { size: 10, color: "#64748b" },
+      tickformat: ".2s",
       showline: false,
-      zeroline: false,
+      zeroline: true,
+      zerolinecolor: "#334155",
       fixedrange: true,
       ...(opts.yRange
         ? { range: opts.yRange }
@@ -146,7 +151,6 @@ function makeLayout(
   };
 }
 
-// Compute the y-range max for a stacked v3+v2 series (per-day sum), with headroom.
 function stackedRangeMax(v3: number[], v2: number[], headroom = 1.1): number {
   let max = 0;
   for (let i = 0; i < v3.length; i++) {
@@ -158,8 +162,6 @@ function stackedRangeMax(v3: number[], v2: number[], headroom = 1.1): number {
 
 // ---------------------------------------------------------------------------
 // Variant A — Snap (current production)
-// Plotly handles the legend click natively; autorange recomputes the range
-// to fit just the visible stack. No animation, no easing.
 // ---------------------------------------------------------------------------
 function VariantSnap({
   data,
@@ -188,10 +190,7 @@ function VariantSnap({
 }
 
 // ---------------------------------------------------------------------------
-// Variant B — Range-only ease (cubic-out 350ms)
-// React state drives v2 visibility; layout.transition interpolates the
-// y-range. Trace itself snaps (Plotly limitation on stackgroup), but the
-// range glides into the new value.
+// Variant B — Range ease (cubic-out 1500ms, slow so it's obvious)
 // ---------------------------------------------------------------------------
 function VariantRangeEase({
   data,
@@ -218,7 +217,7 @@ function VariantRangeEase({
     () =>
       makeLayout({
         yRange: [0, yMax],
-        transition: { duration: 350, easing: "cubic-out" as const },
+        transition: { duration: 1500, easing: "cubic-out" as const },
       }),
     [yMax],
   );
@@ -234,10 +233,7 @@ function VariantRangeEase({
 }
 
 // ---------------------------------------------------------------------------
-// Variant C — CSS fade-out → snap → fade-in
-// Wrap the chart in a div with `transition: opacity 180ms`. On toggle:
-// set opacity 0, wait 180ms (fade out), flip the Plotly state under cover
-// of the invisibility, set opacity 1 (fade in). Total: ~360ms.
+// Variant C — CSS fade out → snap → fade in (~600ms total)
 // ---------------------------------------------------------------------------
 function VariantCssFade({
   data,
@@ -248,7 +244,6 @@ function VariantCssFade({
 }) {
   const [chartV2Hidden, setChartV2Hidden] = useState(v2Hidden);
   const [opacity, setOpacity] = useState(1);
-  // When the parent toggles v2Hidden, fade out, swap, fade in.
   const seqRef = useRef<{ pendingHidden: boolean | null }>({
     pendingHidden: null,
   });
@@ -260,7 +255,7 @@ function VariantCssFade({
     const t1 = setTimeout(() => {
       setChartV2Hidden(seqRef.current.pendingHidden ?? false);
       setOpacity(1);
-    }, 180);
+    }, 300);
     return () => clearTimeout(t1);
   }, [v2Hidden, chartV2Hidden]);
 
@@ -276,7 +271,7 @@ function VariantCssFade({
     <div
       style={{
         opacity,
-        transition: "opacity 180ms ease-in-out",
+        transition: "opacity 300ms ease-in-out",
         height: CHART_HEIGHT,
       }}
     >
@@ -292,11 +287,7 @@ function VariantCssFade({
 }
 
 // ---------------------------------------------------------------------------
-// Variant D — Plotly.animate explicit frames
-// Use Plotly's `Plotly.animate` API to interpolate v2's y-values to zero
-// over 400ms. This is the only Plotly path that ACTUALLY interpolates
-// stack-trace y-values (verified in earlier instrumentation:
-// `Plotly.react` snaps stacked y-arrays regardless of transition config).
+// Variant D — Plotly.animate frames (1200ms) — explicit y-array interpolation
 // ---------------------------------------------------------------------------
 function VariantPlotlyAnimate({
   data,
@@ -308,7 +299,6 @@ function VariantPlotlyAnimate({
   const gdRef = useRef<HTMLElement | null>(null);
   const lastHiddenRef = useRef<boolean | null>(null);
 
-  // Initial render uses static traces.
   const initialTraces = useMemo(() => makeTraces(data), [data]);
   const initialLayout = useMemo(
     () => makeLayout({ yRange: [0, stackedRangeMax(data.v3, data.v2)] }),
@@ -330,16 +320,13 @@ function VariantPlotlyAnimate({
     Plotly.animate(
       gdRef.current,
       {
-        data: [
-          { y: data.v3 }, // v3 unchanged
-          { y: targetV2Y }, // v2 → 0 or back
-        ],
+        data: [{ y: data.v3 }, { y: targetV2Y }],
         layout: { yaxis: { range: [0, targetMax] } },
         traces: [0, 1],
       },
       {
-        transition: { duration: 400, easing: "cubic-out" },
-        frame: { duration: 400, redraw: false },
+        transition: { duration: 1200, easing: "cubic-out" },
+        frame: { duration: 1200, redraw: false },
       },
     );
   }, [v2Hidden, data]);
@@ -374,10 +361,7 @@ interface PlotlyAPI {
 }
 
 // ---------------------------------------------------------------------------
-// Variant E — Slow back-out 700ms
-// Same as B (range-ease) but slower duration with an "out" curve that has
-// a tiny tail bounce. To gauge whether more time on a smoother curve feels
-// right, vs. the fast cubic-out.
+// Variant E — Slow back-out 2000ms with anticipation tail
 // ---------------------------------------------------------------------------
 function VariantSlowBackOut({
   data,
@@ -404,7 +388,7 @@ function VariantSlowBackOut({
     () =>
       makeLayout({
         yRange: [0, yMax],
-        transition: { duration: 700, easing: "back-out" as const },
+        transition: { duration: 2000, easing: "back-out" as const },
       }),
     [yMax],
   );
@@ -420,8 +404,7 @@ function VariantSlowBackOut({
 }
 
 // ---------------------------------------------------------------------------
-// Variant F — Cross-fade (two charts overlaid, one shows v3+v2, the other
-// v3 only; CSS-cross-fade between them on toggle).
+// Variant F — Cross-fade between v3+v2 chart and v3-only chart (~500ms)
 // ---------------------------------------------------------------------------
 function VariantCrossFade({
   data,
@@ -449,7 +432,7 @@ function VariantCrossFade({
           position: "absolute",
           inset: 0,
           opacity: v2Hidden ? 0 : 1,
-          transition: "opacity 280ms ease-in-out",
+          transition: "opacity 500ms ease-in-out",
           pointerEvents: v2Hidden ? "none" : "auto",
         }}
       >
@@ -466,7 +449,7 @@ function VariantCrossFade({
           position: "absolute",
           inset: 0,
           opacity: v2Hidden ? 1 : 0,
-          transition: "opacity 280ms ease-in-out",
+          transition: "opacity 500ms ease-in-out",
           pointerEvents: v2Hidden ? "auto" : "none",
         }}
       >
@@ -491,33 +474,33 @@ export default function VolumeAnimationsLab() {
 
   const variants = [
     {
-      name: "A — Snap (current production)",
-      desc: "No animation. Plotly's native legend click; autorange snaps to the new visible-only stack max.",
+      name: "A — Snap (no animation)",
+      desc: "Current production. Visibility flips instantly, autorange snaps the y-range to the new visible-only stack max.",
       Component: VariantSnap,
     },
     {
-      name: "B — Range ease (cubic-out 350ms)",
-      desc: "React state drives visibility. Trace snaps but `layout.transition` eases the y-range. Visible trace appears to grow as range shrinks.",
+      name: "B — Range ease, cubic-out 1.5s",
+      desc: "Visibility snaps but layout.transition interpolates the y-range over 1.5s. Trace shape stays the same; the y-axis ceiling visibly shrinks.",
       Component: VariantRangeEase,
     },
     {
-      name: "C — CSS fade out → swap → fade in (~360ms)",
-      desc: "Wrapper opacity 1 → 0 (180ms), flip Plotly state under cover, opacity 0 → 1 (180ms). Hides the snap entirely.",
+      name: "C — CSS fade-out → swap → fade-in (~600ms)",
+      desc: "Wrapper opacity 1 → 0 over 300ms, flip Plotly state under cover of invisibility, opacity 0 → 1 over 300ms. Hides the snap entirely.",
       Component: VariantCssFade,
     },
     {
-      name: "D — Plotly.animate frames (400ms)",
-      desc: "Bypasses Plotly.react. Calls Plotly.animate with explicit y-arrays + range. Should interpolate y-values too (the only path that does).",
+      name: "D — Plotly.animate frames, 1.2s",
+      desc: "Bypasses Plotly.react. Calls Plotly.animate with explicit y-arrays + range. The only path that interpolates trace y-values too.",
       Component: VariantPlotlyAnimate,
     },
     {
-      name: "E — Slow back-out 700ms",
-      desc: "Same as B but slower with a tiny tail bounce. Gauges whether more time helps.",
+      name: "E — Slow back-out 2s with overshoot",
+      desc: "Same shape as B but slower (2s) and with `back-out` easing (overshoots target slightly then settles). For comparison with cubic-out.",
       Component: VariantSlowBackOut,
     },
     {
-      name: "F — Cross-fade between two charts",
-      desc: "Two charts overlaid: one shows v3+v2, the other v3 only. CSS-cross-fade between them on toggle. No Plotly transitions involved.",
+      name: "F — Cross-fade between two charts (~500ms)",
+      desc: "Two charts overlaid: one shows v3+v2 (its OWN y-range), the other v3-only (its own y-range). CSS-cross-fade between them. No Plotly transitions.",
       Component: VariantCrossFade,
     },
   ];
@@ -529,10 +512,12 @@ export default function VolumeAnimationsLab() {
           Volume chart — legend toggle animation lab
         </h1>
         <p className="mt-2 text-sm text-slate-400">
-          Click <strong>Toggle v2</strong> below to hide/show v2 across all
-          variants simultaneously. Compare the visual feel and pick a direction.
-          Toggling all together makes A/B comparison easier than per-variant
-          buttons.
+          One <strong>Toggle v2</strong> button drives all six variants
+          simultaneously. Mock data: v3 is small (~$100k flat), v2 is huge (~$5M
+          peaks) — so toggling v2 produces a dramatic range change (chart
+          ceiling drops from $5M+ to $200k) that&apos;s easy to see. Y-axis
+          ticks are SHOWN here (production hides them) so the range animation is
+          visible. Durations are slow (1.2–2s) so the behavior is unmistakable.
         </p>
         <div className="mt-4 flex items-center gap-3">
           <button
@@ -540,10 +525,11 @@ export default function VolumeAnimationsLab() {
             onClick={() => setV2Hidden((v) => !v)}
             className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
           >
-            Toggle v2 ({v2Hidden ? "currently hidden" : "currently shown"})
+            Toggle v2 — currently {v2Hidden ? "HIDDEN" : "SHOWN"}
           </button>
           <span className="text-xs text-slate-500">
-            tip: click rapidly to stress-test interruption behavior
+            Click to flip across all variants. They animate in parallel so you
+            can A/B compare.
           </span>
         </div>
       </header>
