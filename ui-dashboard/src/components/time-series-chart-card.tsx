@@ -115,28 +115,44 @@ export function TimeSeriesChartCard({
       // slots — both are HTML sinks per `lib/plot.ts:escapePlotText`.
       const safeName = escapePlotText(b.name);
       const hidden = isStacked && hiddenBreakdownIdx.has(i);
+      // When hidden, animate the trace's y-values to 0 instead of using
+      // `visible: "legendonly"`. Reasoning: legendonly removes the trace
+      // from the stack instantly while the y-axis range eases — so the
+      // remaining trace's *position* and the *axis* desync mid-animation,
+      // producing the "grows-then-shrinks" / "outside-chart" weirdness
+      // the user flagged. With y→0, the hidden trace's contribution to
+      // the stack monotonically decays, the visible trace's stack base
+      // monotonically falls toward zero, and Plotly interpolates
+      // everything (y-values + range) on the same timeline. The hidden
+      // trace's line/fill desaturate to a muted slate tone so the legend
+      // swatch reads as "off" (Plotly draws the legend marker from
+      // line.color).
       return {
         x: b.series.map((p) => new Date(p.timestamp * 1000).toISOString()),
-        y: b.series.map((p) => p.value),
+        y: hidden ? b.series.map(() => 0) : b.series.map((p) => p.value),
         name: safeName,
         type: "scatter" as const,
         mode: "lines" as const,
-        // Drive visibility from React state so legend clicks route through
-        // `Plotly.react` (which honors `layout.transition`) instead of
-        // Plotly's native click handler (which doesn't).
-        ...(hidden ? { visible: "legendonly" as const } : {}),
         ...(isStacked
           ? {
               stackgroup: "total",
-              line: { color: b.color, width: 1.2 },
+              line: { color: hidden ? "#475569" : b.color, width: 1.2 },
               // 8-digit hex = 6-digit color + "cc" alpha (≈80% opacity).
               // Assumes b.color is a 6-digit hex (the contract of chainColor()).
-              fillcolor: b.color + "cc",
+              // When hidden the fillcolor goes fully transparent so the
+              // collapsed-to-zero band doesn't leave a visible 1px line
+              // sitting on the x-axis.
+              fillcolor: hidden ? "transparent" : b.color + "cc",
             }
           : {
               line: { color: b.color, width: 1 },
             }),
-        hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>`,
+        // Skip the hover label for hidden traces — otherwise the unified
+        // tooltip lists "v2: $0" for every cursor sample, which is
+        // misleading (the user toggled it off, not "v2 had no volume").
+        ...(hidden
+          ? { hoverinfo: "skip" as const }
+          : { hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>` }),
       };
     });
     // Stacked-mode y-range = max per-day sum of VISIBLE breakdown traces +
@@ -266,8 +282,13 @@ export function TimeSeriesChartCard({
         ...(isStacked
           ? {
               transition: {
-                duration: 350,
-                easing: "cubic-in-out" as const,
+                // `back-in-out` adds the small "anticipation" overshoot
+                // the user asked for — the stack briefly moves a few
+                // pixels in the opposite direction before settling, which
+                // reads as "gathering momentum" rather than the linear
+                // grows-then-shrinks of `cubic-in-out`.
+                duration: 450,
+                easing: "back-in-out" as const,
               },
             }
           : {}),
