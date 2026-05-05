@@ -1,11 +1,12 @@
 export const SECONDS_PER_HOUR = 3_600;
 export const SECONDS_PER_DAY = 86_400;
 
-export type RangeKey = "7d" | "30d" | "all";
+export type RangeKey = "7d" | "30d" | "90d" | "all";
 
 const RANGE_DAYS: Record<RangeKey, number | null> = {
   "7d": 7,
   "30d": 30,
+  "90d": 90,
   all: null,
 };
 
@@ -15,6 +16,21 @@ export const RANGES: ReadonlyArray<{
 }> = [
   { key: "7d", label: "1W" },
   { key: "30d", label: "1M" },
+  { key: "all", label: "All" },
+];
+
+/**
+ * Leaderboard-specific ranges: 1M / 3M / All (no 1W — too few datapoints
+ * to read the per-pool stacked breakdown). Charts that want a different
+ * pill set than the default `RANGES` pass this via the chart card's
+ * `ranges` prop.
+ */
+export const LEADERBOARD_CHART_RANGES: ReadonlyArray<{
+  key: RangeKey;
+  label: string;
+}> = [
+  { key: "30d", label: "1M" },
+  { key: "90d", label: "3M" },
   { key: "all", label: "All" },
 ];
 

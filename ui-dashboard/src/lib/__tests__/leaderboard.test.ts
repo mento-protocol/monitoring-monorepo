@@ -345,26 +345,19 @@ describe("rangeCutoffSeconds", () => {
     vi.useRealTimers();
   });
 
-  it("24h aligns to UTC midnight (today's bucket)", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(FIXED_NOW_MS);
-    // 1-day window = "today's UTC bucket only" — `_gte: today_midnight_utc`.
-    expect(rangeCutoffSeconds("24h")).toBe(TODAY_MIDNIGHT_UTC);
-  });
-
-  it("7d covers today + previous 6 UTC buckets", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(FIXED_NOW_MS);
-    expect(rangeCutoffSeconds("7d")).toBe(
-      TODAY_MIDNIGHT_UTC - 6 * SECONDS_PER_DAY,
-    );
-  });
-
   it("30d covers today + previous 29 UTC buckets", () => {
     vi.useFakeTimers();
     vi.setSystemTime(FIXED_NOW_MS);
     expect(rangeCutoffSeconds("30d")).toBe(
       TODAY_MIDNIGHT_UTC - 29 * SECONDS_PER_DAY,
+    );
+  });
+
+  it("90d covers today + previous 89 UTC buckets", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FIXED_NOW_MS);
+    expect(rangeCutoffSeconds("90d")).toBe(
+      TODAY_MIDNIGHT_UTC - 89 * SECONDS_PER_DAY,
     );
   });
 
@@ -378,9 +371,9 @@ describe("rangeCutoffSeconds", () => {
     // sub-day drift, so the SWR cache key stays stable across re-renders.
     vi.useFakeTimers();
     vi.setSystemTime(Date.UTC(2026, 4, 4, 9, 0, 0));
-    const morning = rangeCutoffSeconds("7d");
+    const morning = rangeCutoffSeconds("30d");
     vi.setSystemTime(Date.UTC(2026, 4, 4, 23, 59, 0));
-    const evening = rangeCutoffSeconds("7d");
+    const evening = rangeCutoffSeconds("30d");
     expect(morning).toBe(evening);
   });
 });
@@ -430,24 +423,26 @@ describe("aggregatePoolDailyVolume", () => {
     expect(r.totalSeries[1]!.value).toBeCloseTo(80, 4); // 50 + 30
   });
 
-  it("buckets pools beyond top-5 into a single 'Other' series", () => {
-    // 7 pools, ranks 1-5 stay, 6+7 collapse into "Other".
+  it("buckets pools beyond top-7 into a single 'Other' series", () => {
+    // 9 pools, ranks 1-7 stay, 8+9 collapse into "Other".
     const rows: Array<ReturnType<typeof row>> = [];
-    const volumes = [100, 80, 60, 40, 20, 10, 5];
+    const volumes = [100, 90, 80, 70, 60, 50, 40, 10, 5];
     for (let i = 0; i < volumes.length; i += 1) {
       rows.push(row(42220, `0xP${i}`, day(1), volumes[i]!));
     }
     const r = aggregatePoolDailyVolume(rows, noLabel);
-    expect(r.poolCount).toBe(7);
-    expect(r.breakdown).toHaveLength(6); // 5 pools + 1 "Other"
-    expect(r.breakdown.slice(0, 5).map((b) => b.key)).toEqual([
+    expect(r.poolCount).toBe(9);
+    expect(r.breakdown).toHaveLength(8); // 7 pools + 1 "Other"
+    expect(r.breakdown.slice(0, 7).map((b) => b.key)).toEqual([
       "0xP0",
       "0xP1",
       "0xP2",
       "0xP3",
       "0xP4",
+      "0xP5",
+      "0xP6",
     ]);
-    const other = r.breakdown[5]!;
+    const other = r.breakdown[7]!;
     expect(other.key).toBe("__other__");
     expect(other.name).toContain("Other");
     expect(other.series[0]!.value).toBeCloseTo(15, 4); // 10 + 5

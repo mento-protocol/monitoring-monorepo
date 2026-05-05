@@ -23,9 +23,14 @@ import {
   type PoolDailyVolumeRow,
   type TraderDailyRow,
 } from "@/lib/leaderboard";
-import { SECONDS_PER_DAY, type RangeKey } from "@/lib/time-series";
+import {
+  LEADERBOARD_CHART_RANGES,
+  SECONDS_PER_DAY,
+  type RangeKey,
+} from "@/lib/time-series";
 import { networkForChainId } from "@/lib/networks";
 import { poolName } from "@/lib/tokens";
+import { ChainIcon } from "@/components/chain-icon";
 import { LeaderboardTable } from "./_components/leaderboard-table";
 
 type PoolRow = {
@@ -35,13 +40,14 @@ type PoolRow = {
   token1: string | null;
 };
 
-const VALID_RANGES = new Set<LeaderboardRangeKey>(["24h", "7d", "30d", "all"]);
+const VALID_RANGES = new Set<LeaderboardRangeKey>(["30d", "90d", "all"]);
+const DEFAULT_RANGE: LeaderboardRangeKey = "30d";
 
 function readRangeFromParams(params: URLSearchParams): LeaderboardRangeKey {
   const raw = params.get("range");
   return raw && VALID_RANGES.has(raw as LeaderboardRangeKey)
     ? (raw as LeaderboardRangeKey)
-    : "7d";
+    : DEFAULT_RANGE;
 }
 
 function readShowSystemFromParams(params: URLSearchParams): boolean {
@@ -69,7 +75,7 @@ export function LeaderboardClient() {
     (nextRange: LeaderboardRangeKey, nextShowSystem: boolean) => {
       if (typeof window === "undefined") return;
       const params = new URLSearchParams(window.location.search);
-      if (nextRange === "7d") params.delete("range");
+      if (nextRange === DEFAULT_RANGE) params.delete("range");
       else params.set("range", nextRange);
       if (nextShowSystem) params.set("system", "1");
       else params.delete("system");
@@ -244,11 +250,12 @@ export function LeaderboardClient() {
           ? networkForChainId(Number(chainIdPart))
           : null;
         if (network && meta) {
-          // Cross-chain disambiguation: the same pair name (e.g.
-          // "GBPm/USDm") can exist on both Celo and Monad, so the
-          // legend must show the chain to keep the two series
-          // distinguishable.
-          return `${poolName(network, meta.token0, meta.token1)} · ${network.label}`;
+          // Pool name only — the chain is shown via the chain icon
+          // in the legend / tooltip, so suffixing "· Celo" /
+          // "· Monad" was redundant and burned legend horizontal
+          // space (cross-chain disambiguation now lives at the
+          // icon layer, not the text).
+          return poolName(network, meta.token0, meta.token1);
         }
         // Fallback display when the pool isn't in our metadata cache
         // yet: `0x1234…5678` (first 6 + last 4 of addr).
@@ -259,6 +266,25 @@ export function LeaderboardClient() {
       windowRange,
     );
   }, [poolVolumeRows, poolMeta, traderAllowList, windowRange]);
+
+  // Decorate aggregator output with chain icons so the chart card can
+  // render the legend (and tooltip) with chain marks instead of text
+  // suffixes. `poolBreakdown.breakdown[i].key` is the poolId
+  // (`{chainId}-{addr}`), so we extract the chainId for `networkForChainId`.
+  const chartBreakdown = useMemo(() => {
+    return poolVolumeBreakdown.breakdown.map((b) => {
+      const [chainIdPart] = b.key.split("-", 2);
+      const network = chainIdPart
+        ? networkForChainId(Number(chainIdPart))
+        : null;
+      return {
+        name: b.name,
+        color: b.color,
+        series: b.series,
+        legendIcon: network ? <ChainIcon network={network} size={12} /> : null,
+      };
+    });
+  }, [poolVolumeBreakdown]);
 
   // Hero KPIs.
   const totalVolume = useMemo(() => {
@@ -284,14 +310,18 @@ export function LeaderboardClient() {
     return Number((top10 * BigInt(10000)) / total) / 100;
   }, [aggregated]);
 
-  // The TimeSeriesChartCard takes a 7d/30d/all RangeKey. Map the leaderboard
-  // range onto the chart's range — both 24h and 7d show the 7d view (the
-  // chart can't render a single-day point as a meaningful series anyway).
-  const chartRange: RangeKey =
-    range === "30d" ? "30d" : range === "all" ? "all" : "7d";
+  // Leaderboard ranges (`30d` / `90d` / `all`) line up 1:1 with the
+  // chart's RangeKey, so this is now an identity passthrough — kept as
+  // a separate variable so a future leaderboard-specific range that
+  // doesn't map cleanly to a chart range stays easy to handle.
+  const chartRange: RangeKey = range;
   const onChartRangeChange = useCallback(
     (next: RangeKey) => {
-      updateRange(next === "all" ? "all" : next === "30d" ? "30d" : "7d");
+      // The chart's range pills are `LEADERBOARD_CHART_RANGES`
+      // (30d/90d/all), so any value here is a valid LeaderboardRangeKey.
+      if (next === "30d" || next === "90d" || next === "all") {
+        updateRange(next);
+      }
     },
     [updateRange],
   );
@@ -433,36 +463,33 @@ export function LeaderboardClient() {
 
       {/* Per-pool stacked volume — answers "which pools contribute how
           much, on which days?" without duplicating the homepage's
-          single-line total volume chart. The 24h window collapses to a
-          single point and the chart's "1W / 1M / All" pill row would
-          mismatch the visible series, so we hide it. */}
-      {range !== "24h" && (
-        <TimeSeriesChartCard
-          title="Volume by pool"
-          rangeAriaLabel="Chart range"
-          series={poolVolumeBreakdown.totalSeries}
-          breakdown={poolVolumeBreakdown.breakdown}
-          breakdownMode="stacked"
-          range={chartRange}
-          onRangeChange={onChartRangeChange}
-          headline={headline}
-          change={null}
-          isLoading={isLoading || poolVolumeResult.isLoading}
-          hasError={hasError || !!poolVolumeResult.error}
-          hasSnapshotError={false}
-          emptyMessage="No pool volume in this window."
-          // Taller plot + minimal top padding so peaks reach close to
-          // the headline figure instead of bottoming out in 1/3 of the
-          // available card area.
-          chartHeightPx={340}
-          yAxisTopPadding={0}
-          // Sort hover-tooltip entries by the hovered day's volume desc
-          // — Plotly's native unified hover uses fixed trace order
-          // (rank by total window volume), which doesn't match what's
-          // visually largest on a given day.
-          customSortedHover
-        />
-      )}
+          single-line total volume chart. */}
+      <TimeSeriesChartCard
+        title="Volume by pool"
+        rangeAriaLabel="Chart range"
+        series={poolVolumeBreakdown.totalSeries}
+        breakdown={chartBreakdown}
+        breakdownMode="stacked"
+        range={chartRange}
+        onRangeChange={onChartRangeChange}
+        ranges={LEADERBOARD_CHART_RANGES}
+        headline={headline}
+        change={null}
+        isLoading={isLoading || poolVolumeResult.isLoading}
+        hasError={hasError || !!poolVolumeResult.error}
+        hasSnapshotError={false}
+        emptyMessage="No pool volume in this window."
+        // Taller plot + minimal top padding so peaks reach close to
+        // the headline figure instead of bottoming out in 1/3 of the
+        // available card area.
+        chartHeightPx={340}
+        yAxisTopPadding={0}
+        // Sort hover-tooltip entries by the hovered day's volume desc
+        // — Plotly's native unified hover uses fixed trace order
+        // (rank by total window volume), which doesn't match what's
+        // visually largest on a given day.
+        customSortedHover
+      />
 
       <section>
         <h2 className="mb-3 text-sm font-medium text-slate-300">
@@ -483,17 +510,11 @@ export function LeaderboardClient() {
 function rangeSubtitle(range: LeaderboardRangeKey): string {
   if (range === "all") return "All time";
   const days = rangeDays(range);
-  // The 24h window aligns to today's UTC bucket (`rangeCutoffSeconds`),
-  // not a rolling 24h. At 03:00 UTC that's 3 hours of data, not 24 — so
-  // labeling it "Last 24 hours" was confidently wrong. "Today (UTC)"
-  // matches what the cutoff actually selects.
-  if (days === 1) return "Today (UTC)";
   return `Last ${days} days`;
 }
 
 function rangeLabel(range: LeaderboardRangeKey): string {
-  if (range === "24h") return "24h";
-  if (range === "7d") return "7d";
-  if (range === "30d") return "30d";
+  if (range === "30d") return "1M";
+  if (range === "90d") return "3M";
   return "all-time";
 }

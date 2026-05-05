@@ -17,26 +17,24 @@ import { SECONDS_PER_DAY } from "@/lib/time-series";
 /** USD-wei: 18-decimal fixed-point (`indexer-envio/src/usd.ts:USD_WEI_DECIMALS`). */
 export const USD_WEI_DECIMALS = 18;
 
-/** Window selection for the leaderboard view. Extends the global RangeKey
- * with `24h` since "today" is a meaningful operator-side question that the
- * existing 7d/30d/all charts don't expose. */
-export type LeaderboardRangeKey = "24h" | "7d" | "30d" | "all";
+/** Window selection for the leaderboard view. 1W is too short for the
+ * per-pool stacked chart to read clearly, and 24h collapses to a single
+ * datapoint, so the operator-facing pills are 1M / 3M / All. */
+export type LeaderboardRangeKey = "30d" | "90d" | "all";
 
 export const LEADERBOARD_RANGES: ReadonlyArray<{
   key: LeaderboardRangeKey;
   label: string;
 }> = [
-  { key: "24h", label: "24h" },
-  { key: "7d", label: "7d" },
-  { key: "30d", label: "30d" },
+  { key: "30d", label: "1M" },
+  { key: "90d", label: "3M" },
   { key: "all", label: "All" },
 ];
 
 /** Days in the window. `null` = no cutoff. */
 export function rangeDays(range: LeaderboardRangeKey): number | null {
-  if (range === "24h") return 1;
-  if (range === "7d") return 7;
   if (range === "30d") return 30;
+  if (range === "90d") return 90;
   return null;
 }
 
@@ -325,7 +323,7 @@ export type PoolBreakdown = {
   series: Array<{ timestamp: number; value: number }>;
 };
 
-/** Stable palette for the top-5 pools + "Other". Keeps the colors
+/** Stable palette for the top-N pools + "Other". Keeps the colors
  * consistent across renders and across windows so users learn which
  * color = which pool by repeated exposure. */
 const POOL_PALETTE = [
@@ -334,15 +332,17 @@ const POOL_PALETTE = [
   "#f59e0b", // amber
   "#ec4899", // pink
   "#10b981", // emerald
+  "#a855f7", // purple
+  "#f97316", // orange
 ] as const;
 const OTHER_COLOR = "#475569"; // slate-600
 
-const TOP_N_POOLS = 5;
+const TOP_N_POOLS = 7;
 const OTHER_KEY = "__other__";
 
 /**
  * Build a `BreakdownSeries[]`-shaped output from raw trader-pool-day
- * rows: top-5 pools by total window-volume keep their own series, the
+ * rows: top-N pools by total window-volume keep their own series, the
  * rest collapse into a single "Other" bucket. Every series has a value
  * for every day in the window (zero-fill) so Plotly's `stackgroup`
  * lays out the bars correctly even when a pool was inactive on a day.

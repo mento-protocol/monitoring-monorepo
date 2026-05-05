@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   escapePlotText,
   PLOTLY_BASE_LAYOUT,
@@ -39,6 +39,19 @@ export type BreakdownSeries = {
   name: string;
   color: string;
   series: TimeSeriesPoint[];
+  /**
+   * Optional decorative element shown next to `name` in the legend AND
+   * the custom hover tooltip. The leaderboard's per-pool chart uses
+   * this to inline a chain icon (e.g. Celo / Monad mark) so the legend
+   * stays compact — without the icon the names had to carry a
+   * "· Celo" / "· Monad" suffix that wasted horizontal space.
+   *
+   * Whenever ANY breakdown series provides this, Plotly's built-in
+   * legend is replaced with a custom React legend below the plot.
+   * Plotly's SVG legend can't render arbitrary elements like SVG
+   * icons, so we render the legend ourselves.
+   */
+  legendIcon?: ReactNode;
 };
 
 /** `stacked` suppresses the dedicated total trace (top of stack = total). */
@@ -96,6 +109,13 @@ interface TimeSeriesChartCardProps {
    * mental model when they want to see "what was biggest TODAY".
    */
   customSortedHover?: boolean;
+  /**
+   * Custom range pill set, defaulting to the global `RANGES`
+   * (`1W / 1M / All`). Charts with a different cadence — e.g. the
+   * leaderboard's per-pool stacked chart, which drops 1W in favor of
+   * 3M — pass their own array here.
+   */
+  ranges?: ReadonlyArray<{ key: RangeKey; label: string }>;
 }
 
 export function TimeSeriesChartCard({
@@ -117,9 +137,16 @@ export function TimeSeriesChartCard({
   chartHeightPx = ROW_CHART_HEIGHT_PX,
   yAxisTopPadding = 0.35,
   customSortedHover = false,
+  ranges = RANGES,
 }: TimeSeriesChartCardProps) {
   const hasBreakdown = (breakdown?.length ?? 0) > 0;
   const isStacked = hasBreakdown && breakdownMode === "stacked";
+  // When any breakdown series carries a `legendIcon`, swap Plotly's
+  // built-in legend for a custom React legend rendered below the plot.
+  // Plotly's SVG legend can't render arbitrary React nodes (chain
+  // icons, in our case).
+  const useCustomLegend =
+    hasBreakdown && (breakdown ?? []).some((b) => b.legendIcon !== undefined);
 
   // Custom-tooltip state — only used when `customSortedHover` is on.
   // Plotly fires `plotly_hover` per-x; we collect the points, sort by
@@ -130,8 +157,24 @@ export function TimeSeriesChartCard({
     leftPx: number;
     topPx: number;
     dayLabel: string;
-    points: Array<{ name: string; value: number; color: string }>;
+    points: Array<{
+      name: string;
+      value: number;
+      color: string;
+      legendIcon?: ReactNode;
+    }>;
   } | null>(null);
+
+  // Map of trace name → legendIcon for the hover handler. Plotly only
+  // passes the trace's own data through `plotly_hover` events; React
+  // nodes have to be looked up out-of-band.
+  const legendIconByName = useMemo(() => {
+    const m = new Map<string, ReactNode>();
+    for (const b of breakdown ?? []) {
+      if (b.legendIcon !== undefined) m.set(b.name, b.legendIcon);
+    }
+    return m;
+  }, [breakdown]);
 
   const onPlotlyHover = useCallback(
     (e: {
@@ -150,17 +193,22 @@ export function TimeSeriesChartCard({
       }>;
       if (rawPoints.length === 0) return;
       const sorted = rawPoints
-        .map((p) => ({
-          name: p.fullData?.name ?? "",
-          value: typeof p.y === "number" ? p.y : 0,
-          // Stacked traces use `fillcolor` (with alpha suffix); strip it
-          // for the legend swatch by falling back to `line.color` first.
-          color:
-            p.fullData?.line?.color ??
-            (p.fullData?.fillcolor
-              ? p.fullData.fillcolor.replace(/cc$/i, "")
-              : "#94a3b8"),
-        }))
+        .map((p) => {
+          const name = p.fullData?.name ?? "";
+          return {
+            name,
+            value: typeof p.y === "number" ? p.y : 0,
+            // Stacked traces use `fillcolor` (with alpha suffix); strip
+            // it for the legend swatch by falling back to `line.color`
+            // first.
+            color:
+              p.fullData?.line?.color ??
+              (p.fullData?.fillcolor
+                ? p.fullData.fillcolor.replace(/cc$/i, "")
+                : "#94a3b8"),
+            legendIcon: legendIconByName.get(name),
+          };
+        })
         .sort((a, b) => b.value - a.value);
       const xRaw = rawPoints[0]?.x;
       const dayLabel =
@@ -183,7 +231,7 @@ export function TimeSeriesChartCard({
         points: sorted,
       });
     },
-    [customSortedHover],
+    [customSortedHover, legendIconByName],
   );
 
   const onPlotlyUnhover = useCallback(() => {
@@ -307,20 +355,23 @@ export function TimeSeriesChartCard({
           range: yRange,
           fixedrange: true,
         },
-        showlegend: hasBreakdown,
-        legend: hasBreakdown
-          ? {
-              orientation: "h" as const,
-              y: -0.15,
-              x: 0,
-              font: { color: "#94a3b8", size: 11 },
-              bgcolor: "transparent",
-            }
-          : undefined,
+        showlegend: hasBreakdown && !useCustomLegend,
+        legend:
+          hasBreakdown && !useCustomLegend
+            ? {
+                orientation: "h" as const,
+                y: -0.15,
+                x: 0,
+                font: { color: "#94a3b8", size: 11 },
+                bgcolor: "transparent",
+              }
+            : undefined,
         margin: {
           t: 8,
           r: 8,
-          b: hasBreakdown ? 48 : 24,
+          // Custom legend is rendered as a sibling below the Plot — no
+          // need to reserve plot-margin space for Plotly's own legend.
+          b: hasBreakdown && !useCustomLegend ? 48 : 24,
           l: 8,
         },
         autosize: true,
@@ -343,6 +394,7 @@ export function TimeSeriesChartCard({
     hoverDateFormat,
     yAxisTopPadding,
     customSortedHover,
+    useCustomLegend,
   ]);
 
   const deltaPill =
@@ -414,7 +466,7 @@ export function TimeSeriesChartCard({
           aria-label={rangeAriaLabel}
           className="flex gap-0.5 rounded-md bg-slate-800/50 p-0.5"
         >
-          {RANGES.map((item) => {
+          {ranges.map((item) => {
             const active = range === item.key;
             return (
               <button
@@ -483,6 +535,11 @@ export function TimeSeriesChartCard({
                     className="inline-block h-2 w-2 flex-shrink-0 rounded-sm"
                     style={{ background: p.color }}
                   />
+                  {p.legendIcon && (
+                    <span className="inline-flex flex-shrink-0 items-center">
+                      {p.legendIcon}
+                    </span>
+                  )}
                   <span className="text-slate-400">{p.name}:</span>
                   <span className="ml-auto font-mono">
                     $
@@ -496,6 +553,33 @@ export function TimeSeriesChartCard({
           </div>
         )}
       </div>
+      {useCustomLegend && (
+        <div
+          // Wraps to a second row when the entries don't fit. Each chip
+          // is its own flex item with `gap-x-3` between chips and
+          // `gap-y-1` between rows when wrapping kicks in.
+          className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400"
+        >
+          {(breakdown ?? []).map((b) => (
+            <span
+              key={b.name}
+              className="inline-flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <span
+                aria-hidden="true"
+                className="inline-block h-2 w-2 flex-shrink-0 rounded-sm"
+                style={{ background: b.color }}
+              />
+              {b.legendIcon && (
+                <span className="inline-flex flex-shrink-0 items-center">
+                  {b.legendIcon}
+                </span>
+              )}
+              <span>{b.name}</span>
+            </span>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
