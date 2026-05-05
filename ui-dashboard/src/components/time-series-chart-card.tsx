@@ -165,13 +165,18 @@ export function TimeSeriesChartCard({
     }>;
   } | null>(null);
 
-  // Map of trace name → legendIcon for the hover handler. Plotly only
-  // passes the trace's own data through `plotly_hover` events; React
-  // nodes have to be looked up out-of-band.
-  const legendIconByName = useMemo(() => {
+  // Map of (color + name) → legendIcon for the hover handler. Plotly
+  // only passes the trace's own data through `plotly_hover` events;
+  // React nodes have to be looked up out-of-band. Keying by name alone
+  // collides when the same pair (e.g. "USDC/USDm") exists on multiple
+  // chains — the later `set()` would overwrite the earlier one and
+  // both rows would render the same chain icon. `POOL_PALETTE` assigns
+  // a unique color per trace, so `${color}|${name}` is collision-free.
+  const legendIconByKey = useMemo(() => {
     const m = new Map<string, ReactNode>();
     for (const b of breakdown ?? []) {
-      if (b.legendIcon !== undefined) m.set(b.name, b.legendIcon);
+      if (b.legendIcon !== undefined)
+        m.set(`${b.color}|${b.name}`, b.legendIcon);
     }
     return m;
   }, [breakdown]);
@@ -208,18 +213,21 @@ export function TimeSeriesChartCard({
       const sorted = uniquePoints
         .map((p) => {
           const name = p.fullData?.name ?? "";
+          // Stacked traces use `fillcolor` (with alpha suffix); strip
+          // it for the legend swatch by falling back to `line.color`
+          // first. The `color` is the unique-per-trace identifier
+          // we use to look up the per-trace legendIcon — keying by
+          // `name` alone collides on cross-chain pairs.
+          const color =
+            p.fullData?.line?.color ??
+            (p.fullData?.fillcolor
+              ? p.fullData.fillcolor.replace(/cc$/i, "")
+              : "#94a3b8");
           return {
             name,
             value: typeof p.y === "number" ? p.y : 0,
-            // Stacked traces use `fillcolor` (with alpha suffix); strip
-            // it for the legend swatch by falling back to `line.color`
-            // first.
-            color:
-              p.fullData?.line?.color ??
-              (p.fullData?.fillcolor
-                ? p.fullData.fillcolor.replace(/cc$/i, "")
-                : "#94a3b8"),
-            legendIcon: legendIconByName.get(name),
+            color,
+            legendIcon: legendIconByKey.get(`${color}|${name}`),
           };
         })
         .sort((a, b) => b.value - a.value);
@@ -244,7 +252,7 @@ export function TimeSeriesChartCard({
         points: sorted,
       });
     },
-    [customSortedHover, legendIconByName],
+    [customSortedHover, legendIconByKey],
   );
 
   const onPlotlyUnhover = useCallback(() => {
