@@ -225,6 +225,21 @@ export function TimeSeriesChartCard({
           bordercolor: "#6366f1",
           font: { color: "#e2e8f0", size: 12, family: "inherit" },
         },
+        // Smooth y-axis re-fit when stacked-breakdown traces are toggled
+        // via the legend (e.g. hiding v2 lets v3 grow to fill the card).
+        // Plotly applies `layout.transition` to its restyle/relayout
+        // pipeline; legend clicks are restyle events. Skipped for non-
+        // stacked charts since they have no multi-trace toggle UX and
+        // animating a single-trace range change is just visual noise on
+        // initial mount.
+        ...(isStacked
+          ? {
+              transition: {
+                duration: 350,
+                easing: "cubic-in-out" as const,
+              },
+            }
+          : {}),
       },
     };
   }, [series, breakdown, hasBreakdown, isStacked, hoverDateFormat]);
