@@ -559,13 +559,13 @@ describe("VolumeOverTimeChart render", () => {
     expect(html).toContain('aria-label="$1.00 v3 · — v2"');
   });
 
-  it("uses autorange + rangemode 'tozero' on the y-axis in stacked mode so toggling a trace via the legend regrows the visible series", () => {
-    // Stacked breakdowns set `autorange: true` so Plotly's native
-    // legend-click handler recomputes the y-range to fit just the
-    // visible traces — without it the axis would stay pinned to the
-    // original v3+v2 stack max and the remaining series would render
-    // as a flat line at the bottom of the card. `rangemode: "tozero"`
-    // keeps the floor at 0 regardless.
+  it("ships an explicit y-range derived from the visible v3+v2 stack so the cross-fade renderer has a fixed range per visibility combo", () => {
+    // Stacked mode in the chart card now pre-renders a Plot per
+    // visibility combo (v3+v2 / v3-only / v2-only) and CSS-cross-fades
+    // between them on legend toggle. Each combo's plot needs an
+    // explicit `range` (NOT autorange) so its chart geometry stays
+    // stable while the user is hovering / cursor-tracking — autorange
+    // would re-fit on every restyle and produce micro-jitter.
     const today = dayAlignedNow();
     const day0 = today - 2 * SECONDS_PER_DAY;
     const day1 = today - 1 * SECONDS_PER_DAY;
@@ -601,14 +601,21 @@ describe("VolumeOverTimeChart render", () => {
       ],
     });
 
+    // The captured Plot props are from one of the cross-fade combos —
+    // it doesn't matter which (the test reads whichever was rendered
+    // last). All combos must ship an explicit numeric range with floor
+    // 0 and a non-zero ceiling so each plot's geometry is stable.
     const yaxis = capturedPlotProps.layout?.yaxis as {
-      autorange?: boolean;
-      rangemode?: string;
+      autorange?: false;
       range?: [number, number];
     };
-    expect(yaxis?.autorange).toBe(true);
-    expect(yaxis?.rangemode).toBe("tozero");
-    expect(yaxis?.range).toBeUndefined();
+    expect(yaxis?.range).toBeDefined();
+    expect(yaxis?.range![0]).toBe(0);
+    expect(yaxis?.range![1]).toBeGreaterThan(0);
+    // Autorange must be explicitly disabled — any combo that uses
+    // autorange would re-fit Plotly-side and contradict the cross-fade
+    // assumption that each combo's chart is geometrically static.
+    expect(yaxis?.autorange).toBe(false);
   });
 
   it("shows the WoW delta pill labeled 'v3 week-over-week' at the default range when ≥15 days of v3 history exist", () => {
