@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { formatUSD } from "@/lib/format";
 import {
   getSnapshotVolumeInUsd,
@@ -31,8 +31,30 @@ export type ChainVolumeSeries = {
 // (legacy Broker → BiPoolManager). v3 dominates today, so it sits at the
 // bottom of the stack and uses the brand color; v2 stacks on top in a
 // distinct teal so the gap reads at a glance even when small.
-const V3_COLOR = "#6366f1"; // indigo-500
-const V2_COLOR = "#14b8a6"; // teal-500
+//
+// Pill foreground/background pair: the chart trace uses `color` directly
+// (saturated, on slate-900). The headline pill uses the lighter `pillFg`
+// (Tailwind indigo-200 / teal-200) on the matching `pillBg` (same hue at
+// 35% alpha — `59` appended = 0x59/0xff ≈ 0.35). The lighter foreground is
+// what keeps WCAG AA contrast against the tinted background — `color` on
+// `${color}59` over slate-900 lands at ~2.6:1, below 4.5:1 for small text.
+const VERSION_STYLE = {
+  v3: {
+    label: "v3",
+    color: "#6366f1", // indigo-500 — saturated for the trace fill
+    pillFg: "#c7d2fe", // indigo-200 — readable on the tinted pill bg
+    pillBg: "#6366f159", // indigo-500 @ 35% alpha
+  },
+  v2: {
+    label: "v2",
+    color: "#14b8a6", // teal-500
+    pillFg: "#99f6e4", // teal-200
+    pillBg: "#14b8a659", // teal-500 @ 35% alpha
+  },
+} as const;
+type Version = keyof typeof VERSION_STYLE;
+const V3_COLOR = VERSION_STYLE.v3.color;
+const V2_COLOR = VERSION_STYLE.v2.color;
 
 // 1e16 — divide BigInt USD-wei by this to land in "cent" units that fit in
 // Number safely above MAX_SAFE_INTEGER. Hoisted out of `buildBrokerDailyV2Series`
@@ -225,6 +247,36 @@ export function weekOverWeekChangePct(
   return ((sum(last7) - prior) / prior) * 100;
 }
 
+// Tiny pill rendered after each $-value in the headline so "v3" / "v2" labels
+// don't compete typographically with the dollar amount the user is reading.
+// Caller picks the version; foreground/background/label come from
+// `VERSION_STYLE` so the pill can't drift out of sync with its matching
+// breakdown trace. `aria-hidden` because the parent headline span carries
+// the human-readable `aria-label` for assistive tech (the pill is decorative
+// alongside the dollar value).
+function VersionBadge({ version }: { version: Version }): ReactNode {
+  const { label, pillFg, pillBg } = VERSION_STYLE[version];
+  // Absolute positioning keeps the pill out of inline flow so its
+  // margin-box can't extend the headline's line-box. With the pill
+  // inline + `align-text-top` the line-box grew ~4px (the pill's top
+  // sits above the line-box's natural top via half-leading), making the
+  // Volume headline 4px taller than the adjacent TVL card and shifting
+  // the digits 2-3px lower. Absolute positioning sidesteps the whole
+  // line-box accounting — the pill renders inside its `relative`
+  // wrapper but takes zero inline space. The wrapper reserves
+  // horizontal room with `pr-9` so the dollar amount doesn't run into
+  // the pill.
+  return (
+    <span
+      aria-hidden="true"
+      style={{ backgroundColor: pillBg, color: pillFg }}
+      className="absolute right-0 top-1.5 inline-flex items-center rounded px-1.5 py-px font-mono text-[10px] font-medium uppercase leading-none tracking-wide sm:text-xs"
+    >
+      {label}
+    </span>
+  );
+}
+
 // Show "N/A" only on explicit failure. An empty series without errors
 // legitimately sums to $0 (no volume yet) — flagging it N/A would conflate
 // "no activity" with "data missing".
@@ -243,13 +295,63 @@ function computeHeadline(
   v2Points: SeriesPoint[],
   v3Total: number,
   v2Total: number,
-): string {
+): ReactNode {
   if (isLoading) return "…";
   if (hasError) return "N/A";
   if (hasSnapshotError && v3Points.length === 0 && v2Points.length === 0)
     return "N/A";
-  const v2Cell = hasBrokerSnapshotError ? "— v2" : `${formatUSD(v2Total)} v2`;
-  return `${formatUSD(v3Total)} v3 · ${v2Cell}`;
+  // Visual layout has no whitespace/punctuation between values and pill
+  // badges, and gap-x-3 between the v3 and v2 cells is rendering-only.
+  // Without an explicit `aria-label`, screen readers read the headline as
+  // "$3.00v3$0.00v2"; the explicit label restores the original
+  // "$X v3 · $Y v2" reading.
+  const v2Display = hasBrokerSnapshotError ? "—" : formatUSD(v2Total);
+  const ariaLabel = `${formatUSD(v3Total)} v3 · ${v2Display} v2`;
+  // `role="group"` is required: a bare `<span>` has the implicit `generic`
+  // role, which doesn't honor `aria-label` per WAI-ARIA. NVDA/JAWS skip the
+  // label and the headline becomes silent for screen-reader users (every
+  // child is `aria-hidden`). `group` carries the `name-from-author`
+  // property so the label is announced.
+  // Wrapper is plain inline (NOT inline-flex): inline-flex gave the wrapper
+  // its own line-box, which sized to max(digit ascent, pill ascent) and
+  // ended up ~4px taller than the TVL card's plain-text headline next to
+  // it on the homepage row. Plain inline lets each cell flow inside the
+  // parent `<p>`'s text line-box, so both headlines share the same height
+  // and baseline. `mx-3` on the dot replaces the former `gap-x-3` for
+  // horizontal spacing between cells.
+  // Each cell is `relative` to anchor its absolutely-positioned pill, and
+  // `pr-9` reserves horizontal room for the pill so the dollar amount
+  // doesn't render under it. `title` gives sighted users an explainer on
+  // hover; the parent's `aria-label` already covers screen readers.
+  return (
+    <span role="group" aria-label={ariaLabel}>
+      <span
+        aria-hidden="true"
+        title="New Mento (v3): swaps routed through the v3 Router — the path used by app.mento.org today."
+        className="relative pr-9"
+      >
+        {formatUSD(v3Total)}
+        <VersionBadge version="v3" />
+      </span>
+      {/* CSS-drawn dot rather than a `·` glyph (U+00B7 renders ~5px below
+          its line-box's geometric center in most fonts). The translate
+          compensates for `align-middle` placing the dot at x-height/2 above
+          baseline, while the digit ink midline sits closer to cap-height/2
+          — for monospace digits at 36px that's a ~5px upward nudge. */}
+      <span
+        aria-hidden="true"
+        className="mx-3 inline-block size-1.5 -translate-y-[5px] rounded-full bg-slate-500 align-middle"
+      />
+      <span
+        aria-hidden="true"
+        title="Legacy Mento (v2): direct Broker swaps that bypass the v3 Router — older integrations and routers calling Broker directly."
+        className="relative pr-9"
+      >
+        {v2Display}
+        <VersionBadge version="v2" />
+      </span>
+    </span>
+  );
 }
 
 interface VolumeOverTimeChartProps {
@@ -336,12 +438,12 @@ export function VolumeOverTimeChart({
       xs.map((p) => ({ timestamp: p.timestamp, value: p.volumeUSD }));
     return [
       {
-        name: "v3 (Router)",
+        name: "v3",
         color: V3_COLOR,
         series: toPoints(visibleV3Points),
       },
       {
-        name: "v2 (Legacy)",
+        name: "v2",
         color: V2_COLOR,
         series: toPoints(visibleV2Points),
       },
