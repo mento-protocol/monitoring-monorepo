@@ -546,6 +546,9 @@ export function TimeSeriesChartCard({
                 // pool pair (e.g. "EURm/USDm") exists on both Celo and
                 // Monad. Color is unique per trace via `POOL_PALETTE`
                 // assignment, so `${color}-${name}` is collision-free.
+                // Layout: [swatch] [name] ··· [value] [chain] — value
+                // and chain right-align together via `ml-auto` on the
+                // value, then the chain trails it.
                 <div
                   key={`${p.color}-${p.name}`}
                   className="flex items-center gap-2"
@@ -555,18 +558,18 @@ export function TimeSeriesChartCard({
                     className="inline-block h-2 w-2 flex-shrink-0 rounded-sm"
                     style={{ background: p.color }}
                   />
-                  {p.legendIcon && (
-                    <span className="inline-flex flex-shrink-0 items-center">
-                      {p.legendIcon}
-                    </span>
-                  )}
-                  <span className="text-slate-400">{p.name}:</span>
+                  <span className="text-slate-400">{p.name}</span>
                   <span className="ml-auto font-mono">
                     $
                     {p.value.toLocaleString(undefined, {
                       maximumFractionDigits: 0,
                     })}
                   </span>
+                  {p.legendIcon && (
+                    <span className="inline-flex flex-shrink-0 items-center">
+                      {p.legendIcon}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

@@ -30,7 +30,6 @@ import {
 } from "@/lib/time-series";
 import { networkForChainId } from "@/lib/networks";
 import { poolName } from "@/lib/tokens";
-import { ChainIcon } from "@/components/chain-icon";
 import { LeaderboardTable } from "./_components/leaderboard-table";
 
 type PoolRow = {
@@ -286,12 +285,13 @@ export function LeaderboardClient() {
         name: b.name,
         color: b.color,
         series: b.series,
+        // Chain name as a small uppercase right-aligned label. Chain
+        // icons were dropped — they were too small to read at 12px and
+        // visually conflated cross-chain pairs (USDC/USDm Celo vs
+        // Monad). Plain text is unambiguous.
         legendIcon: network ? (
-          <span className="inline-flex items-center gap-1">
-            <ChainIcon network={network} size={16} />
-            <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-              {network.label}
-            </span>
+          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            {network.label}
           </span>
         ) : null,
       };
