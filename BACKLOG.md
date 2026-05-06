@@ -1,5 +1,36 @@
 # Backlog
 
+## v2-Broker leaderboard — exclude VirtualPool-routed sibling rows
+
+The current double-count guard in `indexer-envio/src/handlers/broker.ts:109`
+only skips Broker rows whose top-level `tx.to` equals the v3 `Routerv300`.
+That catches Mento's own router-bypass path but **misses** swaps where a
+third-party aggregator (1inch, Odos, etc.) routes through a `VirtualPool`
+wrapper: `tx.to` is the aggregator router, but `VirtualPool.swap()` still
+fires both a `VirtualPool.Swap` (counted by the v3 leaderboard via
+`applyLeaderboardSnapshots` in `handlers/virtualPool.ts:186`) **and** a
+sibling `Broker.Swap` (currently counted into `BrokerTraderDailySnapshot` /
+`BrokerAggregatorDailySnapshot`). Result: the v2 view can attribute v3
+volume to "legacy v2 producers/aggregators."
+
+Codex review on PR #324 raised this as P2; deferred because the fix needs
+on-chain verification of how Broker sets `event.params.trader` for
+VirtualPool-routed swaps. If `trader === msg.sender`, then `trader` will
+equal a known `VirtualPool` address whenever VirtualPool was the caller,
+and the simplest fix is:
+
+```ts
+// Pseudocode in broker.ts, before the v2 rollup writes:
+const traderPool = await context.Pool.get(makePoolId(event.chainId, trader));
+const fromVirtualPool = traderPool?.source === "virtual_pool_factory";
+if (routedViaV3Router || fromVirtualPool || volumeUsdWei === 0n) return;
+```
+
+Before shipping, validate against prod data: pull a few
+`BrokerTraderDailySnapshot` rows on Celo where the trader matches a
+`VirtualPool` address registered via `VirtualPoolFactory.VirtualPoolDeployed`.
+If any such rows exist, the gap is real and the fix above is correct.
+
 ## Volume Leaderboard — follow-up PRs after PR 1 (indexer foundation)
 
 PR 1 landed the schema entities + `caller`/`txTo`/`volumeUsdWei` on `SwapEvent` + handler population + `computeSwapUsdWei`. The `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `AggregatorTraderDayMarker`, `TraderPoolDayMarker` entities exist but no handlers write to them yet (empty tables on deploy — fine; PR 2 fills them).

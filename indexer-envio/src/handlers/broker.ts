@@ -30,6 +30,7 @@ Broker.Swap.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
   const exchangeProvider = asAddress(event.params.exchangeProvider);
+  const trader = asAddress(event.params.trader);
   const tokenIn = asAddress(event.params.tokenIn);
   const tokenOut = asAddress(event.params.tokenOut);
   const txTo = asAddress(event.transaction.to ?? "");
@@ -67,7 +68,7 @@ Broker.Swap.handler(async ({ event, context }) => {
     chainId: event.chainId,
     exchangeProvider,
     exchangeId: event.params.exchangeId,
-    trader: asAddress(event.params.trader),
+    trader,
     tokenIn,
     tokenOut,
     amountIn: event.params.amountIn,
@@ -108,7 +109,6 @@ Broker.Swap.handler(async ({ event, context }) => {
   //     would conflate "uncomputable" with "real zero volume".
   if (routedViaV3Router || volumeUsdWei === 0n) return;
 
-  const trader = asAddress(event.params.trader);
   // No `pool` arg available here: BrokerSwapEvent doesn't have a Pool entity
   // backing it (v2 exchanges aren't in the `Pool` table). The static
   // contracts.json check still catches Mento internal addresses.
