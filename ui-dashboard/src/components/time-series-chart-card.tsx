@@ -9,6 +9,11 @@ import {
   ROW_CHART_HEIGHT_PX,
 } from "@/lib/plot";
 import { RANGES, type RangeKey, type TimeSeriesPoint } from "@/lib/time-series";
+import {
+  CustomLegend,
+  CustomSortedTooltip,
+  type SortedHoverState,
+} from "@/components/time-series-chart-card-overlays";
 
 // A skeleton rendered while the Plotly chunk is still loading. Without this
 // fallback there's a brief gap between `isLoading` flipping to false and the
@@ -153,17 +158,7 @@ export function TimeSeriesChartCard({
   // value, and render an absolutely-positioned div whose entries reflect
   // the hovered day's actual rank.
   const containerRef = useRef<HTMLDivElement>(null);
-  const [hover, setHover] = useState<{
-    leftPx: number;
-    topPx: number;
-    dayLabel: string;
-    points: Array<{
-      name: string;
-      value: number;
-      color: string;
-      legendIcon?: ReactNode;
-    }>;
-  } | null>(null);
+  const [hover, setHover] = useState<SortedHoverState | null>(null);
 
   const onPlotlyHover = useCallback(
     (e: {
@@ -173,12 +168,8 @@ export function TimeSeriesChartCard({
       if (!customSortedHover) return;
       const rawPoints = (e.points ?? []) as Array<{
         x?: string | number;
-        y?: number;
         curveNumber?: number;
-        fullData?: {
-          line?: { color?: string };
-          fillcolor?: string;
-        };
+        pointIndex?: number;
       }>;
       if (rawPoints.length === 0) return;
       // Dedupe by `curveNumber` — Plotly occasionally emits the same
@@ -193,32 +184,28 @@ export function TimeSeriesChartCard({
         seenCurves.add(cn);
         return true;
       });
-      // Look up the original BreakdownSeries by curveNumber. Each Plotly
-      // trace's index matches the breakdown array index 1:1 (we don't
-      // prepend a totalTrace in stacked mode), so this gives us the
-      // unescaped pool name + the React legendIcon directly. Reading
-      // `fullData.name` was unreliable: it carries `escapePlotText`'d
-      // text (HTML entities for `<`, `&`, etc.), and a name lookup
-      // collided across cross-chain pairs (codex 3191231362, cursor
-      // 3191249022).
+      // Look up everything by `(curveNumber, pointIndex)` directly from
+      // the BreakdownSeries we passed in — name, color, icon, AND the
+      // value. Reading `point.y` for stacked traces is risky (Plotly's
+      // hover-event y is documented as the "data point y" but stacked-
+      // mode rendering occasionally diverges, especially near the cap
+      // boundary and `stackgaps` interactions — cursor flagged this on
+      // 72f2fce). Sourcing from `breakdown[i].series[pointIndex]`
+      // guarantees we display the same numbers we computed in
+      // `aggregatePoolDailyVolume`, regardless of Plotly's internal
+      // representation.
       const breakdownByCurve = breakdown ?? [];
       const sorted = uniquePoints
         .map((p) => {
           const cn = p.curveNumber;
+          const pi = p.pointIndex;
           const b = typeof cn === "number" ? breakdownByCurve[cn] : undefined;
-          // Stacked traces use `fillcolor` (with alpha suffix); strip
-          // it for the legend swatch by falling back to `line.color`
-          // first.
-          const color =
-            b?.color ??
-            p.fullData?.line?.color ??
-            (p.fullData?.fillcolor
-              ? p.fullData.fillcolor.replace(/cc$/i, "")
-              : "#94a3b8");
+          const seriesPoint =
+            b && typeof pi === "number" ? b.series[pi] : undefined;
           return {
             name: b?.name ?? "",
-            value: typeof p.y === "number" ? p.y : 0,
-            color,
+            value: seriesPoint?.value ?? 0,
+            color: b?.color ?? "#94a3b8",
             legendIcon: b?.legendIcon,
           };
         })
@@ -522,89 +509,9 @@ export function TimeSeriesChartCard({
             onUnhover={onPlotlyUnhover}
           />
         )}
-        {customSortedHover && hover && (
-          <div
-            // `whitespace-nowrap` prevents per-row name wrapping (e.g.
-            // "USDC/USDm · Monad" used to break onto two lines because
-            // the default flex `min-width: auto` allowed shrinking).
-            // The dollar value is right-aligned via `ml-auto` so the
-            // amount column stays visually consistent across rows.
-            className="pointer-events-none absolute z-50 whitespace-nowrap rounded border border-indigo-500/60 bg-slate-950/95 px-2.5 py-2 text-[12px] text-slate-200 shadow-lg"
-            style={{
-              // Offset from the cursor a bit so the tooltip doesn't sit
-              // under the pointer. Container has `position: relative`.
-              left: hover.leftPx + 14,
-              top: hover.topPx + 14,
-            }}
-          >
-            <div className="mb-1 font-medium text-slate-300">
-              {hover.dayLabel}
-            </div>
-            <div className="space-y-0.5">
-              {hover.points.map((p) => (
-                // Composite key — `name` alone collides when the same
-                // pool pair (e.g. "EURm/USDm") exists on both Celo and
-                // Monad. Color is unique per trace via `POOL_PALETTE`
-                // assignment, so `${color}-${name}` is collision-free.
-                // Layout: [swatch] [name] ··· [value] [chain] — value
-                // and chain right-align together via `ml-auto` on the
-                // value, then the chain trails it.
-                <div
-                  key={`${p.color}-${p.name}`}
-                  className="flex items-center gap-2"
-                >
-                  <span
-                    aria-hidden="true"
-                    className="inline-block h-2 w-2 flex-shrink-0 rounded-sm"
-                    style={{ background: p.color }}
-                  />
-                  <span className="text-slate-400">{p.name}</span>
-                  <span className="ml-auto font-mono">
-                    $
-                    {p.value.toLocaleString(undefined, {
-                      maximumFractionDigits: 0,
-                    })}
-                  </span>
-                  {p.legendIcon && (
-                    <span className="inline-flex flex-shrink-0 items-center">
-                      {p.legendIcon}
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {customSortedHover && hover && <CustomSortedTooltip hover={hover} />}
       </div>
-      {useCustomLegend && (
-        <div
-          // Wraps to a second row when the entries don't fit. Each chip
-          // is its own flex item with `gap-x-3` between chips and
-          // `gap-y-1` between rows when wrapping kicks in.
-          className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400"
-        >
-          {(breakdown ?? []).map((b) => (
-            <span
-              // Composite key — same reason as the tooltip's row key:
-              // pool pairs (e.g. "EURm/USDm") can repeat across chains.
-              key={`${b.color}-${b.name}`}
-              className="inline-flex items-center gap-1.5 whitespace-nowrap"
-            >
-              <span
-                aria-hidden="true"
-                className="inline-block h-2 w-2 flex-shrink-0 rounded-sm"
-                style={{ background: b.color }}
-              />
-              {b.legendIcon && (
-                <span className="inline-flex flex-shrink-0 items-center">
-                  {b.legendIcon}
-                </span>
-              )}
-              <span>{b.name}</span>
-            </span>
-          ))}
-        </div>
-      )}
+      {useCustomLegend && <CustomLegend breakdown={breakdown ?? []} />}
     </section>
   );
 }

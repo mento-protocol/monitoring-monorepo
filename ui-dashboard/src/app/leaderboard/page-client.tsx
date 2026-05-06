@@ -494,7 +494,7 @@ export function LeaderboardClient() {
         // Taller plot + minimal top padding so peaks reach close to
         // the headline figure instead of bottoming out in 1/3 of the
         // available card area.
-        chartHeightPx={340}
+        chartHeightPx={300}
         yAxisTopPadding={0}
         // Sort hover-tooltip entries by the hovered day's volume desc
         // — Plotly's native unified hover uses fixed trace order
