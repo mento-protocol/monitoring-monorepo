@@ -100,19 +100,28 @@ export function useTableSort<K extends string>({
   const sortParam = `${paramPrefix}Sort`;
   const dirParam = `${paramPrefix}Dir`;
 
-  // Lazy-init from the current URL so deep links land on the right column.
-  // Subsequent updates flow exclusively through `setState` + history.replaceState
-  // — we never re-derive from `searchParams` after mount.
-  const [state, setState] = useState<SortState<K>>(() =>
-    readSortFromParams(
-      searchParams,
+  // Lazy-init from the live URL so deep links land on the right column AND
+  // remounts during a session pick up the latest sort. We can't rely on
+  // Next's `useSearchParams` here: it returns the snapshot from the route's
+  // last RSC payload, which is stale relative to our own `replaceState`
+  // writes. A remount triggered by an in-page state change (e.g. the
+  // `/leaderboard` venue toggle unmounting + remounting the table) needs
+  // the *current* URL params, not the stale snapshot. Fall back to
+  // `searchParams` only on the SSR pass.
+  const [state, setState] = useState<SortState<K>>(() => {
+    const params =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search)
+        : searchParams;
+    return readSortFromParams(
+      params,
       sortParam,
       dirParam,
       validKeys,
       defaultKey,
       defaultDir,
-    ),
-  );
+    );
+  });
 
   const replaceUrlForState = useCallback(
     (next: SortState<K>) => {

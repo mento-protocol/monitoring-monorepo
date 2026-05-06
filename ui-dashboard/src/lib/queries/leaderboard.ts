@@ -122,7 +122,7 @@ export const BROKER_TRADER_DAILY_TOP = /* GraphQL */ `
         timestamp: { _gte: $afterTimestamp }
         isSystemAddress: { _in: $isSystemAddressIn }
       }
-      order_by: { volumeUsdWei: desc }
+      order_by: [{ volumeUsdWei: desc }, { id: asc }]
       limit: $limit
     ) {
       id
@@ -150,7 +150,7 @@ export const BROKER_AGGREGATOR_DAILY_TOP = /* GraphQL */ `
   query BrokerAggregatorDailyTop($afterTimestamp: numeric!, $limit: Int!) {
     BrokerAggregatorDailySnapshot(
       where: { timestamp: { _gte: $afterTimestamp } }
-      order_by: { volumeUsdWei: desc }
+      order_by: [{ volumeUsdWei: desc }, { id: asc }]
       limit: $limit
     ) {
       id

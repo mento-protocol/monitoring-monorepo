@@ -237,8 +237,19 @@ export function LeaderboardClient() {
     [v2TraderRows],
   );
   const v2AggregatorAggregated = useMemo(
-    () => aggregateBrokerAggregatorsByWindow(v2AggregatorRows),
-    [v2AggregatorRows],
+    () =>
+      // Honour the page-level `Show system addresses` toggle on the
+      // aggregator section too — `BrokerAggregatorDailySnapshot` uses
+      // the canonical aggregator name, so the filter is on the
+      // `"system"` bucket rather than an `isSystemAddress` flag. Filter
+      // client-side because the schema doesn't carry an indexed
+      // boolean for the aggregator side.
+      aggregateBrokerAggregatorsByWindow(
+        showSystem
+          ? v2AggregatorRows
+          : v2AggregatorRows.filter((r) => r.aggregator !== "system"),
+      ),
+    [v2AggregatorRows, showSystem],
   );
   const v2DailyVolume = useMemo(
     () => aggregateDailyVolume(v2TraderRows),
