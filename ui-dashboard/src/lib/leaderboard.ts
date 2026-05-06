@@ -379,6 +379,20 @@ export function aggregatePoolDailyVolume(
   totalSeries: Array<{ timestamp: number; value: number }>;
   breakdown: PoolBreakdown[];
   poolCount: number;
+  /** All pools, ranked by total window volume desc. Drives the Top
+   * Pools list rendered alongside the chart. The first N entries
+   * here line up 1:1 with `breakdown[0..N-1]` (same order, same
+   * poolId), so list rows can borrow the chart's color for visual
+   * continuity. Entries beyond N are pools that landed in the
+   * "Other" bucket on the chart side. */
+  poolRanking: Array<{
+    poolId: string;
+    totalUsdWei: bigint;
+    totalUsd: number;
+  }>;
+  /** Sum of `totalUsdWei` across all pools — denominator for the
+   * "share of window volume" % column in the list. */
+  windowTotalUsdWei: bigint;
 } {
   // Step 1: bucket by (poolId, day) and sum. Track per-day totals
   // alongside so the headline series is O(1)-per-day instead of
@@ -412,7 +426,13 @@ export function aggregatePoolDailyVolume(
   // making `series.length` equal the window size and silently hiding
   // the "No pool volume" message (codex finding 3189490296).
   if (admittedRowCount === 0) {
-    return { totalSeries: [], breakdown: [], poolCount: 0 };
+    return {
+      totalSeries: [],
+      breakdown: [],
+      poolCount: 0,
+      poolRanking: [],
+      windowTotalUsdWei: BigInt(0),
+    };
   }
 
   // sortedDays — when the caller passed a windowRange, walk every UTC
@@ -478,5 +498,22 @@ export function aggregatePoolDailyVolume(
     value: weiToUsd(totalsByDay.get(day) ?? BigInt(0)),
   }));
 
-  return { totalSeries, breakdown, poolCount: totalsByPool.size };
+  // Step 5: full ranked list of pools by total window volume. Drives
+  // the Top Pools sidebar list. Order matches `rankedPools` (so list
+  // entries 0..TOP_N-1 line up with `breakdown[0..TOP_N-1]`).
+  const poolRanking = rankedPools.map(([poolId, totalUsdWei]) => ({
+    poolId,
+    totalUsdWei,
+    totalUsd: weiToUsd(totalUsdWei),
+  }));
+  let windowTotalUsdWei = BigInt(0);
+  for (const v of totalsByPool.values()) windowTotalUsdWei += v;
+
+  return {
+    totalSeries,
+    breakdown,
+    poolCount: totalsByPool.size,
+    poolRanking,
+    windowTotalUsdWei,
+  };
 }

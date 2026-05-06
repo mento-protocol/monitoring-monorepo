@@ -31,6 +31,7 @@ import {
 import { networkForChainId } from "@/lib/networks";
 import { poolName } from "@/lib/tokens";
 import { LeaderboardTable } from "./_components/leaderboard-table";
+import { TopPoolsList } from "./_components/top-pools-list";
 
 type PoolRow = {
   id: string;
@@ -298,6 +299,50 @@ export function LeaderboardClient() {
     });
   }, [poolVolumeBreakdown]);
 
+  // Top-pools sidebar list — top 10 by total window volume. Top-N
+  // (where N = chart's TOP_N_POOLS) borrow the chart's stack color
+  // for visual continuity; entries beyond that get null (rendered
+  // muted by `<TopPoolsList>`).
+  const topPoolsListEntries = useMemo(() => {
+    const total = poolVolumeBreakdown.windowTotalUsdWei;
+    // Build a lookup from poolId → chart color. Fast O(1) per row.
+    const colorByPoolId = new Map<string, string>();
+    for (const b of poolVolumeBreakdown.breakdown) {
+      if (b.key !== "__other__") colorByPoolId.set(b.key, b.color);
+    }
+    return poolVolumeBreakdown.poolRanking.slice(0, 10).map((p) => {
+      const meta = poolMeta.get(p.poolId.toLowerCase());
+      const [chainIdPart, addr] = p.poolId.split("-", 2);
+      const network = chainIdPart
+        ? networkForChainId(Number(chainIdPart))
+        : null;
+      const name =
+        network && meta
+          ? poolName(network, meta.token0, meta.token1)
+          : (addr ?? p.poolId).length > 12
+            ? `${(addr ?? p.poolId).slice(0, 6)}…${(addr ?? p.poolId).slice(-4)}`
+            : (addr ?? p.poolId);
+      const share =
+        total === BigInt(0)
+          ? 0
+          : // (totalUsdWei * 10000n) / total — keeps 4 decimals of
+            // precision via BigInt before converting.
+            Number((p.totalUsdWei * BigInt(10000)) / total) / 10000;
+      return {
+        poolId: p.poolId,
+        name,
+        chainBadge: network ? (
+          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            {network.label}
+          </span>
+        ) : null,
+        totalUsd: p.totalUsd,
+        share,
+        color: colorByPoolId.get(p.poolId) ?? null,
+      };
+    });
+  }, [poolVolumeBreakdown, poolMeta]);
+
   // Hero KPIs.
   const totalVolume = useMemo(() => {
     let acc = BigInt(0);
@@ -473,35 +518,48 @@ export function LeaderboardClient() {
         />
       </div>
 
-      {/* Per-pool stacked volume — answers "which pools contribute how
-          much, on which days?" without duplicating the homepage's
-          single-line total volume chart. */}
-      <TimeSeriesChartCard
-        title="Volume by pool"
-        rangeAriaLabel="Chart range"
-        series={poolVolumeBreakdown.totalSeries}
-        breakdown={chartBreakdown}
-        breakdownMode="stacked"
-        range={chartRange}
-        onRangeChange={onChartRangeChange}
-        ranges={LEADERBOARD_CHART_RANGES}
-        headline={headline}
-        change={null}
-        isLoading={isLoading || poolVolumeResult.isLoading}
-        hasError={hasError || !!poolVolumeResult.error}
-        hasSnapshotError={false}
-        emptyMessage="No pool volume in this window."
-        // Taller plot + minimal top padding so peaks reach close to
-        // the headline figure instead of bottoming out in 1/3 of the
-        // available card area.
-        chartHeightPx={300}
-        yAxisTopPadding={0}
-        // Sort hover-tooltip entries by the hovered day's volume desc
-        // — Plotly's native unified hover uses fixed trace order
-        // (rank by total window volume), which doesn't match what's
-        // visually largest on a given day.
-        customSortedHover
-      />
+      {/* Chart (2/3) + top-pools list (1/3). The chart answers "which
+          pools contribute how much, on which days?"; the list answers
+          "what's the leaderboard order over the whole window?". On
+          screens narrower than `lg`, both stack to full width. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <TimeSeriesChartCard
+            title="Volume by pool"
+            rangeAriaLabel="Chart range"
+            series={poolVolumeBreakdown.totalSeries}
+            breakdown={chartBreakdown}
+            breakdownMode="stacked"
+            range={chartRange}
+            onRangeChange={onChartRangeChange}
+            ranges={LEADERBOARD_CHART_RANGES}
+            headline={headline}
+            change={null}
+            isLoading={isLoading || poolVolumeResult.isLoading}
+            hasError={hasError || !!poolVolumeResult.error}
+            hasSnapshotError={false}
+            emptyMessage="No pool volume in this window."
+            // Taller plot + minimal top padding so peaks reach close
+            // to the headline figure instead of bottoming out in 1/3
+            // of the available card area.
+            chartHeightPx={300}
+            yAxisTopPadding={0}
+            // Sort hover-tooltip entries by the hovered day's volume
+            // desc — Plotly's native unified hover uses fixed trace
+            // order (rank by total window volume), which doesn't
+            // match what's visually largest on a given day.
+            customSortedHover
+          />
+        </div>
+        <div className="lg:col-span-1">
+          <TopPoolsList
+            entries={topPoolsListEntries}
+            isLoading={isLoading || poolVolumeResult.isLoading}
+            hasError={hasError || !!poolVolumeResult.error}
+            windowLabel={rangeLabel(range)}
+          />
+        </div>
+      </div>
 
       <section>
         <h2 className="mb-3 text-sm font-medium text-slate-300">

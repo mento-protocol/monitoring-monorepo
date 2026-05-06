@@ -540,6 +540,27 @@ describe("aggregatePoolDailyVolume", () => {
     expect(r.poolCount).toBe(0);
   });
 
+  it("emits poolRanking sorted desc with windowTotalUsdWei", () => {
+    // Drives the Top Pools sidebar list. Ranking must match the chart's
+    // breakdown order (so list rows can borrow chart colors via
+    // poolId), and `windowTotalUsdWei` is the denominator for the % share.
+    const rows = [
+      row(42220, "0xA", day(1), 100),
+      row(42220, "0xB", day(1), 80),
+      row(42220, "0xC", day(1), 60),
+      row(42220, "0xC", day(2), 5), // bumps C to 65 total — still rank 3
+    ];
+    const r = aggregatePoolDailyVolume(rows, noLabel);
+    expect(r.poolRanking.map((p) => p.poolId)).toEqual(["0xA", "0xB", "0xC"]);
+    expect(r.poolRanking[0]!.totalUsd).toBeCloseTo(100, 4);
+    expect(r.poolRanking[2]!.totalUsd).toBeCloseTo(65, 4);
+    expect(weiToUsd(r.windowTotalUsdWei)).toBeCloseTo(245, 4);
+    // Chart's `breakdown[i].key` lines up with `poolRanking[i].poolId`
+    // for i in [0, TOP_N_POOLS).
+    expect(r.breakdown[0]!.key).toBe(r.poolRanking[0]!.poolId);
+    expect(r.breakdown[1]!.key).toBe(r.poolRanking[1]!.poolId);
+  });
+
   it("returns empty series when allowlist excludes every row", () => {
     // Same short-circuit when an allowlist filters everything out.
     const rows = [row(42220, "0xA", day(1), 100, "0xUser")];
