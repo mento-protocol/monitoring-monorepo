@@ -169,10 +169,7 @@ export function TimeSeriesChartCard({
   // visibility by clicking it), so disable when the caller switches to
   // the custom React legend.
   const useCrossFade =
-    isStacked &&
-    !useCustomLegend &&
-    breakdownCount >= 1 &&
-    breakdownCount <= 3;
+    isStacked && !useCustomLegend && breakdownCount >= 1 && breakdownCount <= 3;
 
   // Custom-tooltip state — only used when `customSortedHover` is on.
   // Plotly fires `plotly_hover` per-x; we collect the points, sort by

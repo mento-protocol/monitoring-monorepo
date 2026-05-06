@@ -69,7 +69,7 @@ export type SortedHoverState = {
 /**
  * Custom React tooltip for stacked charts that need per-day-sorted
  * entries (Plotly's `x unified` hover lists traces in fixed
- * data-array order). Layout: `[swatch] [name] ··· [legendIcon]
+ * data-array order). Layout: `[swatch] [name] [legendIcon] ···
  * [value (rightmost)]`.
  *
  * Position is absolute relative to the chart container. Caller is
@@ -104,18 +104,15 @@ export function CustomSortedTooltip({ hover }: { hover: SortedHoverState }) {
               style={{ background: p.color }}
             />
             <span className="text-slate-400">{p.name}</span>
-            {/* Layout: [swatch] [name] ··· [chain] [value-rightmost].
-                Chain badge gets `ml-auto` so the value column sits
-                flush against the right edge. When there's no chain,
-                the value carries `ml-auto` itself. */}
+            {/* Layout: [swatch] [name] [chain (left)] ··· [value
+                (right)]. Chain badge sits next to the name with the
+                default flex gap; value is right-aligned via `ml-auto`. */}
             {p.legendIcon && (
-              <span className="ml-auto inline-flex flex-shrink-0 items-center">
+              <span className="inline-flex flex-shrink-0 items-center">
                 {p.legendIcon}
               </span>
             )}
-            <span
-              className={"font-mono" + (p.legendIcon ? "" : " ml-auto")}
-            >
+            <span className="ml-auto font-mono">
               $
               {p.value.toLocaleString(undefined, {
                 maximumFractionDigits: 0,
