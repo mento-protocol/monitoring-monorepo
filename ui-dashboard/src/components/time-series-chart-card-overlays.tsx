@@ -37,12 +37,15 @@ export function CustomLegend({
             className="inline-block h-2 w-2 flex-shrink-0 rounded-sm"
             style={{ background: b.color }}
           />
+          {/* Chip layout: [swatch] [pool] [chain] — chain trails the
+              pool name so the eye reads "USDC/USDm Monad" left-to-right
+              like a sentence. */}
+          <span>{b.name}</span>
           {b.legendIcon && (
             <span className="inline-flex flex-shrink-0 items-center">
               {b.legendIcon}
             </span>
           )}
-          <span>{b.name}</span>
         </span>
       ))}
     </div>
@@ -66,8 +69,8 @@ export type SortedHoverState = {
 /**
  * Custom React tooltip for stacked charts that need per-day-sorted
  * entries (Plotly's `x unified` hover lists traces in fixed
- * data-array order). Layout: `[swatch] [name] ··· [value (right)]
- * [legendIcon (right)]`.
+ * data-array order). Layout: `[swatch] [name] ··· [legendIcon]
+ * [value (rightmost)]`.
  *
  * Position is absolute relative to the chart container. Caller is
  * responsible for ensuring the container has `position: relative`.
@@ -101,17 +104,23 @@ export function CustomSortedTooltip({ hover }: { hover: SortedHoverState }) {
               style={{ background: p.color }}
             />
             <span className="text-slate-400">{p.name}</span>
-            <span className="ml-auto font-mono">
+            {/* Layout: [swatch] [name] ··· [chain] [value-rightmost].
+                Chain badge gets `ml-auto` so the value column sits
+                flush against the right edge. When there's no chain,
+                the value carries `ml-auto` itself. */}
+            {p.legendIcon && (
+              <span className="ml-auto inline-flex flex-shrink-0 items-center">
+                {p.legendIcon}
+              </span>
+            )}
+            <span
+              className={"font-mono" + (p.legendIcon ? "" : " ml-auto")}
+            >
               $
               {p.value.toLocaleString(undefined, {
                 maximumFractionDigits: 0,
               })}
             </span>
-            {p.legendIcon && (
-              <span className="inline-flex flex-shrink-0 items-center">
-                {p.legendIcon}
-              </span>
-            )}
           </div>
         ))}
       </div>

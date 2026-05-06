@@ -88,11 +88,17 @@ locals {
   #      The timestamp uses Go format `"Jan 02 15:04 UTC"` so multi-day-old
   #      breaches read e.g. "Apr 28 15:04 UTC" instead of just "15:04 UTC"
   #      — the latter is misleading once a breach lives longer than a day.
+  #   6. *Alert ID* — Grafana's `.Fingerprint`, a deterministic hash of the
+  #      alert's label set. The same value is rendered on the firing and the
+  #      resolved message, so an operator scrolling Slack can match a ✅
+  #      "resolved" post back to the 🔴 "fired" post that opened the breach.
+  #      Especially useful for deviation breaches where the same pool can
+  #      churn through multiple fire/resolve cycles in a day.
   #
   # Layout (service-scoped, e.g. metrics-bridge — no pool_id/pair/chain):
   #   1. Plain bold alertname (no link target — there is no pool details page).
   #   2. Summary / description as above.
-  #   3. Metadata row with start time so operators can scan when it began.
+  #   3. Metadata row with start time and Alert ID, as in the pool-scoped layout.
   slack_body_template = <<-EOT
     {{ range .Alerts -}}
     {{ if .Labels.pool_id -}}
@@ -122,6 +128,7 @@ locals {
     *Previous Oracle Price:* {{ .Annotations.previous_oracle_price }}
     {{ end -}}
     *Started:* {{ .StartsAt.Format "Jan 02 15:04 UTC" }}
+    *Alert ID:* `{{ .Fingerprint }}`
     {{ end }}
   EOT
 

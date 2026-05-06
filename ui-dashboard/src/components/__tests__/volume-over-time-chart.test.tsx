@@ -468,12 +468,14 @@ describe("VolumeOverTimeChart render", () => {
     expect(html).toContain("· partial data");
   });
 
-  it("renders $0.00 v3 · $0.00 v2 (not N/A) when there's no volume yet and no errors", () => {
+  it("renders both v3 and v2 zero cells (not N/A) when there's no volume yet and no errors", () => {
     // The v2/v3 split is the chart's contract — both versions render their
-    // own $0 column even when empty so the columns aren't suddenly missing
-    // the moment one side has no data (or hasn't synced yet).
+    // own $0 cell even when empty so the columns aren't suddenly missing
+    // the moment one side has no data (or hasn't synced yet). Headline now
+    // uses inline pill badges so we look for the value + badge structure.
     const html = renderChart();
-    expect(html).toContain("$0.00 v3 · $0.00 v2");
+    expect(html).toMatch(/\$0\.00.*?<[^>]*>v3</);
+    expect(html).toMatch(/\$0\.00.*?<[^>]*>v2</);
     expect(html).not.toContain("N/A");
   });
 
@@ -515,7 +517,17 @@ describe("VolumeOverTimeChart render", () => {
       ]),
     });
 
-    expect(html).toContain("$3.00 v3 · $0.00 v2");
+    // Headline renders as `$3.00 [v3 pill] $0.00 [v2 pill]`. Both values plus
+    // both badges must be present.
+    expect(html).toMatch(/\$3\.00.*?<[^>]*>v3</);
+    expect(html).toMatch(/\$0\.00.*?<[^>]*>v2</);
+    // Screen-reader text must restore the separators the visual layout drops:
+    // gap-x-3 between cells reads as `$3.00v3$0.00v2` to assistive tech
+    // without the explicit aria-label. The `role="group"` is required —
+    // bare `<span>` has the `generic` role, which doesn't honor aria-label
+    // (NVDA/JAWS skip it).
+    expect(html).toContain('aria-label="$3.00 v3 · $0.00 v2"');
+    expect(html).toContain('role="group"');
     // Only 2 days of history < 15 buckets required for WoW comparison, so
     // the delta is null. The 30d range itself does NOT suppress the pill —
     // the WoW basis is always 7d-vs-7d, independent of visible range.
@@ -537,15 +549,23 @@ describe("VolumeOverTimeChart render", () => {
       hasBrokerSnapshotError: true,
     });
 
-    expect(html).toContain("$1.00 v3 · — v2");
-    expect(html).not.toContain("$0.00 v2");
+    // v3 cell renders the dollar value + v3 pill, v2 cell renders `—` + v2 pill.
+    expect(html).toMatch(/\$1\.00.*?<[^>]*>v3</);
+    expect(html).toMatch(/—.*?<[^>]*>v2</);
+    // The dollar amount must NOT appear next to the v2 badge — that's the
+    // pre-fix bug where Broker outage masqueraded as confident $0.
+    expect(html).not.toMatch(/\$0\.00.*?<[^>]*>v2</);
+    // Accessible label must reflect the data-unavailable state, not "$0.00".
+    expect(html).toContain('aria-label="$1.00 v3 · — v2"');
   });
 
-  it("includes per-day v3+v2 sum in the chart card's series prop so stacked y-axis ceiling fits", () => {
-    // The chart card derives the y-axis range from `max([...series.value,
-    // ...breakdownYs])`. In stacked mode the rendered top is v3+v2 per day,
-    // so `series` MUST carry the summed value or large v2 days clip past
-    // the ceiling.
+  it("ships an explicit y-range derived from the visible v3+v2 stack so the cross-fade renderer has a fixed range per visibility combo", () => {
+    // Stacked mode in the chart card now pre-renders a Plot per
+    // visibility combo (v3+v2 / v3-only / v2-only) and CSS-cross-fades
+    // between them on legend toggle. Each combo's plot needs an
+    // explicit `range` (NOT autorange) so its chart geometry stays
+    // stable while the user is hovering / cursor-tracking — autorange
+    // would re-fit on every restyle and produce micro-jitter.
     const today = dayAlignedNow();
     const day0 = today - 2 * SECONDS_PER_DAY;
     const day1 = today - 1 * SECONDS_PER_DAY;
@@ -581,17 +601,21 @@ describe("VolumeOverTimeChart render", () => {
       ],
     });
 
-    // The chart card derives `yaxis.range` from `max([...series.value,
-    // ...breakdownYs])`. In stacked mode the breakdown traces don't carry
-    // the cumulative top — only the summed-`series` prop does. So the
-    // y-axis ceiling MUST be at or above the actual stacked top of $7
-    // (v3 $3 + v2 $4 on day0). Pre-fix it was max($5 v3 day1, $4 v2 day0) =
-    // $5, so day0's stack ($7) clipped past the ceiling.
-    const yRange = (
-      capturedPlotProps.layout?.yaxis as { range?: [number, number] }
-    )?.range;
-    expect(yRange).toBeDefined();
-    expect(yRange![1]).toBeGreaterThanOrEqual(7);
+    // The captured Plot props are from one of the cross-fade combos —
+    // it doesn't matter which (the test reads whichever was rendered
+    // last). All combos must ship an explicit numeric range with floor
+    // 0 and a non-zero ceiling so each plot's geometry is stable.
+    const yaxis = capturedPlotProps.layout?.yaxis as {
+      autorange?: false;
+      range?: [number, number];
+    };
+    expect(yaxis?.range).toBeDefined();
+    expect(yaxis?.range![0]).toBe(0);
+    expect(yaxis?.range![1]).toBeGreaterThan(0);
+    // Autorange must be explicitly disabled — any combo that uses
+    // autorange would re-fit Plotly-side and contradict the cross-fade
+    // assumption that each combo's chart is geometrically static.
+    expect(yaxis?.autorange).toBe(false);
   });
 
   it("shows the WoW delta pill labeled 'v3 week-over-week' at the default range when ≥15 days of v3 history exist", () => {
@@ -664,7 +688,8 @@ describe("VolumeOverTimeChart render", () => {
     // passing explicit snapshotWindows, any future regression that swaps
     // back to Date.now() will show the snapshot being dropped at boundary
     // edge cases.
-    expect(html).toContain("$5.00 v3 · $0.00 v2");
+    expect(html).toMatch(/\$5\.00.*?<[^>]*>v3</);
+    expect(html).toMatch(/\$0\.00.*?<[^>]*>v2</);
   });
 
   it("passes Plotly config overrides when data is present", () => {

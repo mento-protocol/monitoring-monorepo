@@ -76,7 +76,9 @@ interface TimeSeriesChartCardProps {
   breakdownMode?: BreakdownMode;
   range: RangeKey;
   onRangeChange: (range: RangeKey) => void;
-  headline: string;
+  /** String for simple "$X.XM" headlines, or a ReactNode for richer layouts
+   *  (e.g. multi-value cells with inline badges). */
+  headline: string | ReactNode;
   change: number | null;
   changeLabel?: string;
   /**
@@ -152,6 +154,25 @@ export function TimeSeriesChartCard({
   // icons, in our case).
   const useCustomLegend =
     hasBreakdown && (breakdown ?? []).some((b) => b.legendIcon !== undefined);
+
+  // Track which breakdown traces the user has hidden via legend click.
+  // Used only by the cross-fade renderer below (stacked mode + ≤3
+  // breakdowns) — otherwise Plotly's native legend toggle owns
+  // visibility. Imported from main as part of the homepage volume
+  // chart's v3-vs-v2 cross-fade work.
+  const [hiddenIdx, setHiddenIdx] = useState<Set<number>>(() => new Set());
+  const breakdownCount = breakdown?.length ?? 0;
+  // Cross-fade between pre-rendered visibility states. Pre-rendering
+  // 2^N Plot instances stays fine perf-wise up to N=3 (8 plots, ~10KB
+  // SVG each) — past that, fall back to a single chart with native
+  // toggle. Cross-fade also requires Plotly's native legend (we toggle
+  // visibility by clicking it), so disable when the caller switches to
+  // the custom React legend.
+  const useCrossFade =
+    isStacked &&
+    !useCustomLegend &&
+    breakdownCount >= 1 &&
+    breakdownCount <= 3;
 
   // Custom-tooltip state — only used when `customSortedHover` is on.
   // Plotly fires `plotly_hover` per-x; we collect the points, sort by
@@ -352,7 +373,15 @@ export function TimeSeriesChartCard({
           showticklabels: false,
           showline: false,
           zeroline: false,
-          range: yRange,
+          // Stacked mode uses Plotly's default `autorange` so the chart
+          // re-fits when the user toggles a trace via legend click —
+          // visibility changes route through Plotly's native handler
+          // and the range recomputes from the visible stack max.
+          // `lines` mode and single-trace charts keep the explicit
+          // range with controlled hover-label headroom.
+          ...(isStacked
+            ? { autorange: true as const, rangemode: "tozero" as const }
+            : { range: yRange }),
           fixedrange: true,
         },
         showlegend: hasBreakdown && !useCustomLegend,
@@ -396,6 +425,111 @@ export function TimeSeriesChartCard({
     customSortedHover,
     useCustomLegend,
   ]);
+
+  // Cross-fade in stacked mode: pre-render every visibility combo (2^N
+  // total, minus the all-hidden state) as its own Plot with its own
+  // y-range. Each combo's wrapper has CSS `opacity` 250ms-eased; the one
+  // matching the user's current `hiddenIdx` is at opacity 1, the rest at
+  // 0. Toggling a trace flips the active combo and CSS handles the
+  // visual blend. This is the only animation path that produces a clean
+  // grow/shrink for stacked-area charts — Plotly cannot interpolate
+  // stackgroup y-values via `Plotly.react` + `layout.transition`.
+  const crossFadeCombos = useMemo(() => {
+    if (!useCrossFade) return [];
+    const N = breakdownCount;
+    const combos: Array<Set<number>> = [];
+    // Enumerate ALL 2^N visibility combos including the all-hidden one
+    // — Plotly still renders the legend (with all entries dimmed) when
+    // every trace is `visible: "legendonly"`, so users can click to
+    // restore. Skipping the all-hidden combo would leave the user
+    // stranded if they toggle both v3 and v2 off (no plot active → no
+    // legend visible → no way to recover without a page reload).
+    for (let mask = 0; mask < 1 << N; mask++) {
+      const set = new Set<number>();
+      for (let i = 0; i < N; i++) if (mask & (1 << i)) set.add(i);
+      combos.push(set);
+    }
+    return combos;
+  }, [useCrossFade, breakdownCount]);
+
+  const crossFadeData = useMemo(() => {
+    if (!useCrossFade) return null;
+    const xs = series.map((point) =>
+      new Date(point.timestamp * 1000).toISOString(),
+    );
+    const breakdownArr = breakdown ?? [];
+    return crossFadeCombos.map((combo) => {
+      // Per-day stacked sum of VISIBLE traces — drives this combo's y-range.
+      const dayBuckets = new Map<number, number>();
+      breakdownArr.forEach((b, i) => {
+        if (combo.has(i)) return;
+        b.series.forEach((p) => {
+          dayBuckets.set(
+            p.timestamp,
+            (dayBuckets.get(p.timestamp) ?? 0) + p.value,
+          );
+        });
+      });
+      const visibleMax = Array.from(dayBuckets.values()).reduce(
+        (a, b) => Math.max(a, b),
+        0,
+      );
+      const yRange: [number, number] = [0, Math.max(visibleMax * 1.1, 1)];
+
+      const comboTraces = breakdownArr.map((b, i) => {
+        const safeName = escapePlotText(b.name);
+        return {
+          x: b.series.map((p) => new Date(p.timestamp * 1000).toISOString()),
+          y: b.series.map((p) => p.value),
+          name: safeName,
+          type: "scatter" as const,
+          mode: "lines" as const,
+          ...(combo.has(i) ? { visible: "legendonly" as const } : {}),
+          stackgroup: "total",
+          line: { color: b.color, width: 1.2 },
+          fillcolor: b.color + "cc",
+          hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>`,
+        };
+      });
+
+      const comboLayout = {
+        ...layout,
+        yaxis: {
+          ...layout.yaxis,
+          range: yRange,
+          autorange: false as const,
+        },
+      };
+      // Mark unused vars (xs needed for non-stacked total trace path; not used here)
+      void xs;
+      return {
+        key: [...combo].join(",") || "all",
+        combo,
+        traces: comboTraces,
+        layout: comboLayout,
+      };
+    });
+  }, [useCrossFade, series, breakdown, crossFadeCombos, layout]);
+
+  // Returns false to suppress Plotly's native legend toggle so visibility
+  // flows through React state (which drives the cross-fade). Only attached
+  // to the active Plot in the cross-fade overlay path; native handler runs
+  // unchanged for non-stacked / >3-trace charts.
+  const handleLegendClick = (e: { readonly curveNumber: number }): boolean => {
+    setHiddenIdx((prev) => {
+      const next = new Set(prev);
+      if (next.has(e.curveNumber)) next.delete(e.curveNumber);
+      else next.add(e.curveNumber);
+      return next;
+    });
+    return false;
+  };
+
+  const setEquals = (a: Set<number>, b: Set<number>) => {
+    if (a.size !== b.size) return false;
+    for (const x of a) if (!b.has(x)) return false;
+    return true;
+  };
 
   const deltaPill =
     change === null || isLoading || hasError ? null : (
@@ -497,6 +631,33 @@ export function TimeSeriesChartCard({
             style={{ height: chartHeightPx }}
           >
             {emptyMessage}
+          </div>
+        ) : useCrossFade && crossFadeData ? (
+          <div style={{ position: "relative", height: ROW_CHART_HEIGHT_PX }}>
+            {crossFadeData.map(({ key, combo, traces, layout }) => {
+              const active = setEquals(combo, hiddenIdx);
+              return (
+                <div
+                  key={key}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    opacity: active ? 1 : 0,
+                    transition: "opacity 250ms ease-out",
+                    pointerEvents: active ? "auto" : "none",
+                  }}
+                >
+                  <Plot
+                    data={traces}
+                    layout={layout}
+                    config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
+                    style={{ width: "100%", height: ROW_CHART_HEIGHT_PX }}
+                    useResizeHandler
+                    onLegendClick={handleLegendClick}
+                  />
+                </div>
+              );
+            })}
           </div>
         ) : (
           <Plot
