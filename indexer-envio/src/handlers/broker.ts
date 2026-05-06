@@ -2,9 +2,20 @@
 // also fire Broker.Swap (the wrapper transitively invokes the Broker), so we
 // flag `routedViaV3Router` from `tx.to` to let the dashboard exclude those
 // router-driven sibling rows from the v2 series and avoid double-count.
+// VirtualPool-routed Broker.Swaps (where an external aggregator routes
+// through VirtualPool — `tx.to` is the aggregator, not Router300) are
+// detected separately via a Pool lookup on `event.params.trader` (which is
+// `msg.sender` to Broker, == VirtualPool address in this case).
 
 import { Broker, type BrokerSwapEvent } from "generated";
-import { eventId, asAddress, asBigInt, dayBucket } from "../helpers";
+import {
+  eventId,
+  asAddress,
+  asBigInt,
+  dayBucket,
+  isVirtualPool,
+  makePoolId,
+} from "../helpers";
 import { computeSwapUsdWei } from "../usd";
 import { resolveFeeTokenMeta } from "../feeToken";
 import { getContractAddress } from "../contractAddresses";
@@ -100,14 +111,28 @@ Broker.Swap.handler(async ({ event, context }) => {
     blockNumber,
   });
 
+  // VirtualPool-routed Broker.Swap detection. Mento's Broker emits
+  // `event.params.trader = msg.sender`. When VirtualPool wraps the swap
+  // (typically a third-party aggregator → VirtualPool → Broker), the
+  // immediate Broker caller is the VirtualPool contract, so `trader`
+  // equals a registered VirtualPool address. The v3 path already counts
+  // the sibling `VirtualPool.Swap` via `applyLeaderboardSnapshots`
+  // (see handlers/virtualPool.ts:186); writing v2 rollups for the same
+  // tx would attribute v3 flow as legacy-v2 producer activity.
+  const traderPool = await context.Pool.get(makePoolId(event.chainId, trader));
+  const traderIsVirtualPool = traderPool ? isVirtualPool(traderPool) : false;
+
   // Legacy-v2 producer rollups. Skip when:
   //   - routedViaV3Router: this Broker.Swap is a sibling of a VirtualPool.Swap
   //     already counted by the v3 leaderboard. Including it here would
   //     double-count the same trader/aggregator across both venues.
+  //   - traderIsVirtualPool: aggregator → VirtualPool → Broker — same
+  //     double-count concern; `tx.to` is the aggregator router (not
+  //     `Routerv300`), so the `routedViaV3Router` guard misses this path.
   //   - volumeUsdWei == 0n: USD value couldn't be derived (neither leg
   //     pegged). Same skip rule as applyLeaderboardSnapshots — writing 0n
   //     would conflate "uncomputable" with "real zero volume".
-  if (routedViaV3Router || volumeUsdWei === 0n) return;
+  if (routedViaV3Router || traderIsVirtualPool || volumeUsdWei === 0n) return;
 
   // No `pool` arg available here: BrokerSwapEvent doesn't have a Pool entity
   // backing it (v2 exchanges aren't in the `Pool` table). The static
