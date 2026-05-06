@@ -301,7 +301,10 @@ describe("Broker.Swap handler", () => {
     const traderRow = mockDb.entities.BrokerTraderDailySnapshot.get(
       `${CHAIN_CELO}-${TRADER.toLowerCase()}-${dayTs}`,
     ) as { swapCount: number; volumeUsdWei: bigint } | undefined;
-    assert.isOk(traderRow, "BrokerTraderDailySnapshot should still exist for the broker-direct swap");
+    assert.isOk(
+      traderRow,
+      "BrokerTraderDailySnapshot should still exist for the broker-direct swap",
+    );
     // The router-driven swap was excluded — count and volume reflect ONE swap.
     assert.equal(traderRow!.swapCount, 1);
     assert.equal(traderRow!.volumeUsdWei, 1_000n * 10n ** 18n);

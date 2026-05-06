@@ -300,14 +300,21 @@ export function LeaderboardClient() {
     [updateRange],
   );
 
+  // Page chrome / KPIs / chart / producer table all read from the
+  // trader-side query for the active venue. The v2 aggregator query is
+  // independent — its loading/error feed only the aggregator table below
+  // so a slow or erroring `BrokerAggregatorDailySnapshot` (e.g. during the
+  // post-deploy resync window for that new entity) doesn't take down the
+  // producer view that's the actual outreach driver. Codex review:
+  // https://github.com/mento-protocol/monitoring-monorepo/pull/324#discussion_r3195117172
   const isLoading =
     venue === "v3"
       ? tradersResult.isLoading || poolsResult.isLoading
-      : v2TradersResult.isLoading || v2AggregatorsResult.isLoading;
+      : v2TradersResult.isLoading;
   const hasError =
-    venue === "v3"
-      ? !!tradersResult.error
-      : !!v2TradersResult.error || !!v2AggregatorsResult.error;
+    venue === "v3" ? !!tradersResult.error : !!v2TradersResult.error;
+  const v2AggIsLoading = v2AggregatorsResult.isLoading;
+  const v2AggHasError = !!v2AggregatorsResult.error;
   // True iff the trader-day query saturated the Hasura cap. When this is
   // set, `aggregated` and the derived KPIs may be undercounting; we badge
   // them with `≈` and surface a banner above the tiles. Same approximation
@@ -315,8 +322,7 @@ export function LeaderboardClient() {
   const isCapHit =
     venue === "v3"
       ? !!tradersResult.data &&
-        (tradersResult.data.TraderDailySnapshot?.length ?? 0) ===
-          ENVIO_MAX_ROWS
+        (tradersResult.data.TraderDailySnapshot?.length ?? 0) === ENVIO_MAX_ROWS
       : !!v2TradersResult.data &&
         (v2TradersResult.data.BrokerTraderDailySnapshot?.length ?? 0) ===
           ENVIO_MAX_ROWS;
@@ -519,8 +525,8 @@ export function LeaderboardClient() {
             </p>
             <V2LeaderboardAggregatorTable
               aggregators={v2AggregatorAggregated}
-              isLoading={isLoading}
-              hasError={hasError}
+              isLoading={v2AggIsLoading}
+              hasError={v2AggHasError}
             />
           </section>
         </>

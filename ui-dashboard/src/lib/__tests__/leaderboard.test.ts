@@ -573,30 +573,39 @@ describe("aggregateBrokerAggregatorsByWindow", () => {
     expect(weiToUsd(out[0]!.volumeUsdWei)).toBeCloseTo(3_000, 4);
   });
 
-  it("keeps the most recently observed router address per (chain, aggregator)", () => {
-    // Cluster aggregators rotate routers — we want the latest visible one
-    // so the explorer link in the table points at a contract the cluster
-    // is still using.
+  it("picks lastSeenAggregatorAddress by latest timestamp, not iteration order", () => {
+    // BROKER_AGGREGATOR_DAILY_TOP orders by `volumeUsdWei desc`, so the
+    // newer day can come AFTER the older day in iteration when the older
+    // day has more volume. The aggregator is expected to compare timestamps
+    // — picking by iteration would surface the older router for clusters
+    // that rotated their entry-point.
     const rows = [
+      // Older day, but bigger volume → comes first in the volume-desc query.
       brokerAggregator({
         chainId: 42220,
         aggregator: "cluster-deadbeef",
         timestamp: "1000",
         lastSeenAggregatorAddress: "0xrouter1",
-        volumeUsdWei: USD(10),
+        volumeUsdWei: USD(100),
       }),
+      // Newer day, smaller volume → comes second in iteration.
       brokerAggregator({
         chainId: 42220,
         aggregator: "cluster-deadbeef",
         timestamp: "2000",
         lastSeenAggregatorAddress: "0xrouter2",
-        volumeUsdWei: USD(20),
+        volumeUsdWei: USD(10),
       }),
     ];
     const [row] = aggregateBrokerAggregatorsByWindow(rows);
-    // Iteration order = insertion order (timestamp 1000 first then 2000),
-    // so the second write wins → "0xrouter2".
     expect(row!.lastSeenAggregatorAddress).toBe("0xrouter2");
+
+    // Reverse the iteration order — newer day comes first. The result
+    // must be identical: the timestamp-comparison guard prevents a later
+    // older-day row from clobbering it.
+    const reversed = [...rows].reverse();
+    const [row2] = aggregateBrokerAggregatorsByWindow(reversed);
+    expect(row2!.lastSeenAggregatorAddress).toBe("0xrouter2");
   });
 });
 

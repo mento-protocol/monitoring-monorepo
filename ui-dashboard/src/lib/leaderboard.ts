@@ -317,8 +317,16 @@ export function aggregateBrokerAggregatorsByWindow(
   rows: readonly BrokerAggregatorDailyRow[],
 ): BrokerAggregatorWindowRow[] {
   const byKey = new Map<string, BrokerAggregatorWindowRow>();
+  // Tracks the latest day-bucket timestamp seen per key so
+  // `lastSeenAggregatorAddress` reflects the most recent day, not whichever
+  // single-day row happened to come last in iteration order. The
+  // BROKER_AGGREGATOR_DAILY_TOP query orders by `volumeUsdWei desc`, so
+  // iterating without comparing timestamps would surface the lowest-volume
+  // day's router (often a stale or rotated address).
+  const latestTsByKey = new Map<string, number>();
   for (const r of rows) {
     const key = `${r.chainId}-${r.aggregator}`;
+    const ts = Number(r.timestamp);
     const existing = byKey.get(key);
     if (existing) {
       existing.swapCount += r.swapCount;
@@ -327,10 +335,11 @@ export function aggregateBrokerAggregatorsByWindow(
         existing.uniqueTradersApprox,
         r.uniqueTraders,
       );
-      // Keep the most recently observed router address per (chain,
-      // aggregator) — clusters can have multiple deployed routers and the
-      // most recent one is the most useful for outreach links.
-      existing.lastSeenAggregatorAddress = r.lastSeenAggregatorAddress;
+      const prevLatest = latestTsByKey.get(key) ?? 0;
+      if (ts > prevLatest) {
+        existing.lastSeenAggregatorAddress = r.lastSeenAggregatorAddress;
+        latestTsByKey.set(key, ts);
+      }
     } else {
       byKey.set(key, {
         chainId: r.chainId,
@@ -340,6 +349,7 @@ export function aggregateBrokerAggregatorsByWindow(
         uniqueTradersApprox: r.uniqueTraders,
         volumeUsdWei: BigInt(r.volumeUsdWei),
       });
+      latestTsByKey.set(key, ts);
     }
   }
   return Array.from(byKey.values()).sort((a, b) => {
