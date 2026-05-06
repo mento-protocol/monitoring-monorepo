@@ -1,7 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   aggregateBrokerAggregatorsByWindow,
-  aggregateBrokerDailyVolume,
   aggregateBrokerTradersByWindow,
   aggregateDailyVolume,
   aggregateTraderPoolsByWindow,
@@ -609,8 +608,8 @@ describe("aggregateBrokerAggregatorsByWindow", () => {
   });
 });
 
-describe("aggregateBrokerDailyVolume", () => {
-  it("sums BrokerTraderDailyRow volumes by day key", () => {
+describe("aggregateDailyVolume (BrokerTraderDailyRow)", () => {
+  it("accepts the skinnier v2 row shape and sums by day key", () => {
     const rows = [
       brokerTrader({
         chainId: 42220,
@@ -631,7 +630,7 @@ describe("aggregateBrokerDailyVolume", () => {
         volumeUsdWei: USD(25),
       }),
     ];
-    const out = aggregateBrokerDailyVolume(rows);
+    const out = aggregateDailyVolume(rows);
     expect(out).toHaveLength(2);
     expect(out[0]!.timestamp).toBe(86400);
     expect(out[0]!.value).toBeCloseTo(150, 4);

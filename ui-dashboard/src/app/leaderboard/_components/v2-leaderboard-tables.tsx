@@ -8,12 +8,14 @@ import { AddressLink } from "@/components/address-link";
 import { Skeleton, EmptyBox, ErrorBox } from "@/components/feedback";
 import { formatUSD, relativeTime } from "@/lib/format";
 import {
+  cmpBigInt,
   weiToUsd,
   type BrokerAggregatorWindowRow,
   type BrokerTraderWindowRow,
 } from "@/lib/leaderboard";
 import { useTableSort } from "@/lib/use-table-sort";
 import { networkForChainId } from "@/lib/networks";
+import { SystemAddressChip } from "./system-address-chip";
 
 const PAGE_LIMIT = 50;
 
@@ -121,14 +123,7 @@ export function V2LeaderboardTraderTable({
                 <span className="inline-flex items-center gap-1.5">
                   {network && <ChainIcon network={network} />}
                   <AddressLink address={row.trader} chainId={row.chainId} />
-                  {row.isSystemAddress && (
-                    <span
-                      className="rounded bg-slate-700/60 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-slate-300"
-                      title="Mento internal contract (rebalancer, NTT, treasury, etc.)"
-                    >
-                      System
-                    </span>
-                  )}
+                  {row.isSystemAddress && <SystemAddressChip />}
                 </span>
               </Td>
               <Td align="right" mono>
@@ -292,22 +287,18 @@ export function V2LeaderboardAggregatorTable({
  * importantly) reach out to whoever runs it about migrating to v3.
  */
 function AggregatorLabel({ name }: { name: string }) {
-  const isUnknown = name === "unknown";
-  const isCluster = name.startsWith("cluster-");
-  const isSystem = name === "system";
-  const isDirect = name === "direct";
-  const className = isUnknown
-    ? "rounded bg-amber-900/40 px-1.5 py-0.5 text-[11px] font-medium text-amber-200"
-    : isCluster
-      ? "rounded bg-slate-800/60 px-1.5 py-0.5 font-mono text-[11px] text-slate-300"
-      : isSystem || isDirect
-        ? "rounded bg-slate-800/60 px-1.5 py-0.5 text-[11px] font-medium text-slate-300"
-        : "rounded bg-indigo-900/30 px-1.5 py-0.5 text-[11px] font-medium text-indigo-200";
-  return <span className={className}>{name}</span>;
+  return <span className={aggregatorLabelClass(name)}>{name}</span>;
 }
 
-function cmpBigInt(a: bigint, b: bigint): number {
-  if (a < b) return -1;
-  if (a > b) return 1;
-  return 0;
+function aggregatorLabelClass(name: string): string {
+  if (name === "unknown") {
+    return "rounded bg-amber-900/40 px-1.5 py-0.5 text-[11px] font-medium text-amber-200";
+  }
+  if (name.startsWith("cluster-")) {
+    return "rounded bg-slate-800/60 px-1.5 py-0.5 font-mono text-[11px] text-slate-300";
+  }
+  if (name === "system" || name === "direct") {
+    return "rounded bg-slate-800/60 px-1.5 py-0.5 text-[11px] font-medium text-slate-300";
+  }
+  return "rounded bg-indigo-900/30 px-1.5 py-0.5 text-[11px] font-medium text-indigo-200";
 }

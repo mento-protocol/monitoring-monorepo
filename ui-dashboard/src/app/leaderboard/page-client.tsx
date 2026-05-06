@@ -16,7 +16,6 @@ import {
 import {
   LEADERBOARD_RANGES,
   aggregateBrokerAggregatorsByWindow,
-  aggregateBrokerDailyVolume,
   aggregateBrokerTradersByWindow,
   aggregateDailyVolume,
   aggregateTradersByWindow,
@@ -188,9 +187,9 @@ export function LeaderboardClient() {
     [showSystem],
   );
 
-  // v3 queries — fire only when venue=v3 to avoid burning Envio quota on the
-  // tab the user isn't looking at. Same trick as `expanded ? Q : null` in
-  // LeaderboardTable.TraderRow (line 196).
+  // Each venue's queries are gated to its tab so we don't burn Envio quota
+  // on the side the user isn't looking at — same trick as `expanded ? Q : null`
+  // in LeaderboardTable.TraderRow.
   const tradersResult = useGQL<{ TraderDailySnapshot: TraderDailyRow[] }>(
     venue === "v3" ? TRADER_DAILY_TOP : null,
     {
@@ -205,7 +204,6 @@ export function LeaderboardClient() {
     300_000, // pool metadata barely changes; refresh every 5 min
   );
 
-  // v2 queries — fire only when venue=v2.
   const v2TradersResult = useGQL<{
     BrokerTraderDailySnapshot: BrokerTraderDailyRow[];
   }>(venue === "v2" ? BROKER_TRADER_DAILY_TOP : null, {
@@ -243,7 +241,7 @@ export function LeaderboardClient() {
     [v2AggregatorRows],
   );
   const v2DailyVolume = useMemo(
-    () => aggregateBrokerDailyVolume(v2TraderRows),
+    () => aggregateDailyVolume(v2TraderRows),
     [v2TraderRows],
   );
 

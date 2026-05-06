@@ -361,11 +361,14 @@ export function aggregateBrokerAggregatorsByWindow(
 }
 
 /**
- * v2 sibling of `aggregateDailyVolume`. Shape is the same; only the row
- * type differs.
+ * Day-keyed totals across all traders in the window. Drives the volume
+ * hero chart's daily series. Day key = floor(timestamp / 86400) * 86400
+ * which already matches the indexer's UTC-midnight bucket. Accepts both
+ * v3 (`TraderDailyRow`) and v2 (`BrokerTraderDailyRow`) shapes — only
+ * `timestamp` and `volumeUsdWei` are read.
  */
-export function aggregateBrokerDailyVolume(
-  rows: readonly BrokerTraderDailyRow[],
+export function aggregateDailyVolume(
+  rows: readonly { timestamp: string; volumeUsdWei: string }[],
 ): Array<{ timestamp: number; value: number }> {
   const byDay = new Map<number, bigint>();
   for (const r of rows) {
@@ -377,22 +380,12 @@ export function aggregateBrokerDailyVolume(
     .map(([timestamp, wei]) => ({ timestamp, value: weiToUsd(wei) }));
 }
 
-/**
- * Day-keyed totals across all traders in the window. Drives the volume
- * hero chart's daily series. Day key = floor(timestamp / 86400) * 86400
- * which already matches the indexer's UTC-midnight bucket.
- */
-export function aggregateDailyVolume(
-  rows: readonly TraderDailyRow[],
-): Array<{ timestamp: number; value: number }> {
-  const byDay = new Map<number, bigint>();
-  for (const r of rows) {
-    const day = Number(r.timestamp);
-    byDay.set(day, (byDay.get(day) ?? BigInt(0)) + BigInt(r.volumeUsdWei));
-  }
-  return Array.from(byDay.entries())
-    .sort(([a], [b]) => a - b)
-    .map(([timestamp, wei]) => ({ timestamp, value: weiToUsd(wei) }));
+/** Three-way comparator for BigInts. Used by table sort handlers that need
+ * an ascending base ordering and apply their own `sign` to flip direction. */
+export function cmpBigInt(a: bigint, b: bigint): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
 }
 
 // ─── Display conversions ──────────────────────────────────────────────────
