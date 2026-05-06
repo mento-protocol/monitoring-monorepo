@@ -268,7 +268,13 @@ export function V2LeaderboardAggregatorTable({
                 mono
                 title="Lower bound: max single-day uniqueTraders across the window's days. True window-unique would need a per-window marker."
               >
-                ≥ {row.uniqueTradersApprox.toLocaleString()}
+                <span aria-hidden="true">
+                  ≥ {row.uniqueTradersApprox.toLocaleString()}
+                </span>
+                <span className="sr-only">
+                  At least {row.uniqueTradersApprox.toLocaleString()} unique
+                  traders (lower bound; max single-day count over the window).
+                </span>
               </Td>
             </Row>
           );

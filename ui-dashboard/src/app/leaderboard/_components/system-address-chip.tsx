@@ -6,6 +6,7 @@ export function SystemAddressChip() {
     <span
       className="rounded bg-slate-700/60 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-slate-300"
       title="Mento internal contract (rebalancer, NTT, treasury, etc.)"
+      aria-label="System — Mento internal contract (rebalancer, NTT, treasury, etc.)"
     >
       System
     </span>
