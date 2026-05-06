@@ -121,6 +121,56 @@ export type TraderPoolWindowRow = {
   feesPaidUsdWei: bigint;
 };
 
+// ─── V2 (legacy-Broker) wire + window types ───────────────────────────────
+// Mirror of TraderDailyRow / TraderWindowRow but skinnier: BrokerSwapEvent
+// doesn't carry fee bps or pool metadata, so the v2 entity drops fees and
+// per-pool-uniques. See indexer-envio/schema.graphql BrokerTraderDailySnapshot.
+
+export type BrokerTraderDailyRow = {
+  id: string;
+  chainId: number;
+  trader: string;
+  timestamp: string;
+  swapCount: number;
+  volumeUsdWei: string;
+  isSystemAddress: boolean;
+  lastSeenTimestamp: string;
+};
+
+export type BrokerTraderWindowRow = {
+  chainId: number;
+  trader: string;
+  swapCount: number;
+  volumeUsdWei: bigint;
+  isSystemAddress: boolean;
+  lastSeenTimestamp: number;
+};
+
+export type BrokerAggregatorDailyRow = {
+  id: string;
+  chainId: number;
+  aggregator: string;
+  lastSeenAggregatorAddress: string;
+  timestamp: string;
+  swapCount: number;
+  uniqueTraders: number;
+  volumeUsdWei: string;
+};
+
+export type BrokerAggregatorWindowRow = {
+  chainId: number;
+  aggregator: string;
+  lastSeenAggregatorAddress: string;
+  swapCount: number;
+  /** Lower bound: max single-day uniqueTraders across the window's days for
+   * this (chain, aggregator). True window-unique would need a marker per
+   * (chain, aggregator, trader, window) which isn't worth the indexer
+   * complexity for an outreach view. Same approximation pattern as
+   * `TraderWindowRow.uniquePoolsApprox`. */
+  uniqueTradersApprox: number;
+  volumeUsdWei: bigint;
+};
+
 // ─── Aggregations ─────────────────────────────────────────────────────────
 
 /**
@@ -218,6 +268,103 @@ export function aggregateTraderPoolsByWindow(
     if (b.volumeUsdWei < a.volumeUsdWei) return -1;
     return a.poolId.localeCompare(b.poolId);
   });
+}
+
+/**
+ * v2 sibling of `aggregateTradersByWindow`. Skinnier shape (no fees,
+ * no uniquePools) since BrokerTraderDailySnapshot doesn't carry them.
+ */
+export function aggregateBrokerTradersByWindow(
+  rows: readonly BrokerTraderDailyRow[],
+): BrokerTraderWindowRow[] {
+  const byKey = new Map<string, BrokerTraderWindowRow>();
+  for (const r of rows) {
+    const key = `${r.chainId}-${r.trader}`;
+    const lastSeen = Number(r.lastSeenTimestamp);
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.swapCount += r.swapCount;
+      existing.volumeUsdWei += BigInt(r.volumeUsdWei);
+      existing.isSystemAddress = existing.isSystemAddress || r.isSystemAddress;
+      if (lastSeen > existing.lastSeenTimestamp) {
+        existing.lastSeenTimestamp = lastSeen;
+      }
+    } else {
+      byKey.set(key, {
+        chainId: r.chainId,
+        trader: r.trader,
+        swapCount: r.swapCount,
+        volumeUsdWei: BigInt(r.volumeUsdWei),
+        isSystemAddress: r.isSystemAddress,
+        lastSeenTimestamp: lastSeen,
+      });
+    }
+  }
+  return Array.from(byKey.values()).sort((a, b) => {
+    if (b.volumeUsdWei > a.volumeUsdWei) return 1;
+    if (b.volumeUsdWei < a.volumeUsdWei) return -1;
+    if (a.chainId !== b.chainId) return a.chainId - b.chainId;
+    return a.trader.localeCompare(b.trader);
+  });
+}
+
+/**
+ * Group `BrokerAggregatorDailyRow`s by `(chainId, aggregator)`. Volume + swap
+ * counts sum; `uniqueTraders` becomes a max-of-day-counts lower bound (see
+ * `BrokerAggregatorWindowRow.uniqueTradersApprox` rationale).
+ */
+export function aggregateBrokerAggregatorsByWindow(
+  rows: readonly BrokerAggregatorDailyRow[],
+): BrokerAggregatorWindowRow[] {
+  const byKey = new Map<string, BrokerAggregatorWindowRow>();
+  for (const r of rows) {
+    const key = `${r.chainId}-${r.aggregator}`;
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.swapCount += r.swapCount;
+      existing.volumeUsdWei += BigInt(r.volumeUsdWei);
+      existing.uniqueTradersApprox = Math.max(
+        existing.uniqueTradersApprox,
+        r.uniqueTraders,
+      );
+      // Keep the most recently observed router address per (chain,
+      // aggregator) — clusters can have multiple deployed routers and the
+      // most recent one is the most useful for outreach links.
+      existing.lastSeenAggregatorAddress = r.lastSeenAggregatorAddress;
+    } else {
+      byKey.set(key, {
+        chainId: r.chainId,
+        aggregator: r.aggregator,
+        lastSeenAggregatorAddress: r.lastSeenAggregatorAddress,
+        swapCount: r.swapCount,
+        uniqueTradersApprox: r.uniqueTraders,
+        volumeUsdWei: BigInt(r.volumeUsdWei),
+      });
+    }
+  }
+  return Array.from(byKey.values()).sort((a, b) => {
+    if (b.volumeUsdWei > a.volumeUsdWei) return 1;
+    if (b.volumeUsdWei < a.volumeUsdWei) return -1;
+    if (a.chainId !== b.chainId) return a.chainId - b.chainId;
+    return a.aggregator.localeCompare(b.aggregator);
+  });
+}
+
+/**
+ * v2 sibling of `aggregateDailyVolume`. Shape is the same; only the row
+ * type differs.
+ */
+export function aggregateBrokerDailyVolume(
+  rows: readonly BrokerTraderDailyRow[],
+): Array<{ timestamp: number; value: number }> {
+  const byDay = new Map<number, bigint>();
+  for (const r of rows) {
+    const day = Number(r.timestamp);
+    byDay.set(day, (byDay.get(day) ?? BigInt(0)) + BigInt(r.volumeUsdWei));
+  }
+  return Array.from(byDay.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([timestamp, wei]) => ({ timestamp, value: weiToUsd(wei) }));
 }
 
 /**

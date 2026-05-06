@@ -8,6 +8,8 @@ import { eventId, asAddress, asBigInt, dayBucket } from "../helpers";
 import { computeSwapUsdWei } from "../usd";
 import { resolveFeeTokenMeta } from "../feeToken";
 import { getContractAddress } from "../contractAddresses";
+import { isSystemAddress } from "../system-addresses";
+import { classifyAggregator } from "../aggregators";
 
 // Per-chain cache of the v3 Router address. JSON lookup once per chain is
 // cheap, but a Map is cheaper still and Broker.Swap fires per swap event.
@@ -95,5 +97,64 @@ Broker.Swap.handler(async ({ event, context }) => {
     swapCount: (existing?.swapCount ?? 0) + 1,
     volumeUsdWei: (existing?.volumeUsdWei ?? 0n) + volumeUsdWei,
     blockNumber,
+  });
+
+  // Legacy-v2 producer rollups. Skip when:
+  //   - routedViaV3Router: this Broker.Swap is a sibling of a VirtualPool.Swap
+  //     already counted by the v3 leaderboard. Including it here would
+  //     double-count the same trader/aggregator across both venues.
+  //   - volumeUsdWei == 0n: USD value couldn't be derived (neither leg
+  //     pegged). Same skip rule as applyLeaderboardSnapshots — writing 0n
+  //     would conflate "uncomputable" with "real zero volume".
+  if (routedViaV3Router || volumeUsdWei === 0n) return;
+
+  const trader = asAddress(event.params.trader);
+  // No `pool` arg available here: BrokerSwapEvent doesn't have a Pool entity
+  // backing it (v2 exchanges aren't in the `Pool` table). The static
+  // contracts.json check still catches Mento internal addresses.
+  const traderIsSystem = isSystemAddress(event.chainId, trader);
+  const traderDayId = `${event.chainId}-${trader}-${dayTs}`;
+  const existingTraderDay =
+    await context.BrokerTraderDailySnapshot.get(traderDayId);
+  context.BrokerTraderDailySnapshot.set({
+    id: traderDayId,
+    chainId: event.chainId,
+    trader,
+    timestamp: dayTs,
+    swapCount: (existingTraderDay?.swapCount ?? 0) + 1,
+    volumeUsdWei: (existingTraderDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
+    // Sticky-true once seen: matches TraderDailySnapshot's behaviour so a
+    // sweep within a day where the address briefly didn't classify (shouldn't
+    // happen for Broker swaps but mirrors v3 invariant) doesn't toggle.
+    isSystemAddress: existingTraderDay
+      ? existingTraderDay.isSystemAddress || traderIsSystem
+      : traderIsSystem,
+    lastSeenTimestamp: blockTimestamp,
+  });
+
+  // No pool address to pass — `classifyAggregator` falls back to the
+  // direct-entry / system-address / unknown ladder, which is the right
+  // taxonomy for v2 entry-point analysis.
+  const aggregator = classifyAggregator(event.chainId, txTo);
+  const aggDayId = `${event.chainId}-${aggregator}-${dayTs}`;
+  const aggTraderMarkerId = `${event.chainId}-${aggregator}-${trader}-${dayTs}`;
+  const existingAggTraderMarker =
+    await context.BrokerAggregatorTraderDayMarker.get(aggTraderMarkerId);
+  const aggTraderFirstTouch = existingAggTraderMarker === undefined;
+  if (aggTraderFirstTouch) {
+    context.BrokerAggregatorTraderDayMarker.set({ id: aggTraderMarkerId });
+  }
+  const existingAggDay =
+    await context.BrokerAggregatorDailySnapshot.get(aggDayId);
+  context.BrokerAggregatorDailySnapshot.set({
+    id: aggDayId,
+    chainId: event.chainId,
+    aggregator,
+    lastSeenAggregatorAddress: txTo,
+    timestamp: dayTs,
+    swapCount: (existingAggDay?.swapCount ?? 0) + 1,
+    uniqueTraders:
+      (existingAggDay?.uniqueTraders ?? 0) + (aggTraderFirstTouch ? 1 : 0),
+    volumeUsdWei: (existingAggDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
   });
 });
