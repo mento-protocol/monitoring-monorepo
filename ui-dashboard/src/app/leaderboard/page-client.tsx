@@ -324,6 +324,14 @@ export function LeaderboardClient() {
       : !!v2TradersResult.data &&
         (v2TradersResult.data.BrokerTraderDailySnapshot?.length ?? 0) ===
           ENVIO_MAX_ROWS;
+  // BROKER_AGGREGATOR_DAILY_TOP is also a top-N-volume cut. If it saturates
+  // we'd silently drop long-tail aggregators from the table; surface it
+  // with a separate banner above the aggregator section.
+  const isV2AggregatorCapHit =
+    venue === "v2" &&
+    !!v2AggregatorsResult.data &&
+    (v2AggregatorsResult.data.BrokerAggregatorDailySnapshot?.length ?? 0) ===
+      ENVIO_MAX_ROWS;
 
   // Headline = window total. Change pill is week-over-week if the range is
   // ≥7d, otherwise null (24h has no meaningful WoW peer).
@@ -521,6 +529,16 @@ export function LeaderboardClient() {
               rows are unclassified routers — file an entry to label them and
               reach out to the operator about migrating to v3.
             </p>
+            {isV2AggregatorCapHit && (
+              <div className="mb-3 rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200/90">
+                <strong className="font-medium">
+                  Approximate aggregator list.
+                </strong>{" "}
+                Showing the top {ENVIO_MAX_ROWS.toLocaleString()} aggregator-day
+                rows by single-day volume — long-tail aggregators whose daily
+                volume doesn&apos;t crack the cap may be missing.
+              </div>
+            )}
             <V2LeaderboardAggregatorTable
               aggregators={v2AggregatorAggregated}
               isLoading={v2AggIsLoading}
