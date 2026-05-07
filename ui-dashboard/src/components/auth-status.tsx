@@ -7,6 +7,8 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import * as Sentry from "@sentry/nextjs";
 
+const SIGN_IN_PATH = "/sign-in";
+
 export function AuthStatus() {
   const { data: session, status } = useSession();
   const { mutate } = useSWRConfig();
@@ -28,13 +30,12 @@ export function AuthStatus() {
   if (status === "loading") return null;
 
   if (!session) {
-    // Preserve the current page so the user lands back where they were
-    // after Google OAuth, instead of being dumped on the sign-in page's
-    // hardcoded default.
+    // Round-trip the current page through OAuth so the user lands back where
+    // they were instead of on the sign-in page's hardcoded default.
     const search = searchParams?.toString();
-    const here = pathname && pathname !== "/sign-in" ? pathname : "/";
+    const here = pathname && pathname !== SIGN_IN_PATH ? pathname : "/";
     const callback = search ? `${here}?${search}` : here;
-    const signInHref = `/sign-in?callbackUrl=${encodeURIComponent(callback)}`;
+    const signInHref = `${SIGN_IN_PATH}?callbackUrl=${encodeURIComponent(callback)}`;
     return (
       <Link
         href={signInHref}
