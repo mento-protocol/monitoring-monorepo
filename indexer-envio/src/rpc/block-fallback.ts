@@ -18,9 +18,15 @@ import {
  * - "block is out of range" (forno.celo.org)
  * - "block number out of range" (some Geth variants)
  * - "header not found" (Erigon, some Geth configurations)
- * - "unknown block" (Nethermind) */
+ * - "unknown block" (Nethermind)
+ * - "block requested not found" (some providers, when used WITHOUT the
+ *   "querying historical state" qualifier — bare phrasing tends to mean
+ *   transient lag rather than archive depth). When the same string co-
+ *   occurs with "querying historical state" we treat it as archive-depth
+ *   instead via ARCHIVE_DEPTH_RE; the dispatcher checks ARCHIVE_DEPTH_RE
+ *   first and never falls through to here for that combined phrasing. */
 const BLOCK_NOT_AVAILABLE_RE =
-  /block is out of range|block number out of range|header not found|unknown block/i;
+  /block is out of range|block number out of range|header not found|unknown block|block requested not found/i;
 
 /** Matches RPC error messages indicating the node lacks archive depth back
  * to the requested block — *the contract IS deployed there, the node just
@@ -142,15 +148,28 @@ export async function readContractWithBlockFallback(
           return { result, usedFallback: false, usedLatestFallback: false };
         } catch (retryErr) {
           if (!isRateLimitError(retryErr)) {
-            // Non-rate-limit error surfaced during retry. Reassign and let
-            // the archive-depth / block-not-available branches below
-            // classify it — otherwise an archive-depth error that only
-            // emerged after the rate-limit cleared would skip the
-            // same-block secondary fallback and bubble straight to the
-            // caller.
-            currentError = retryErr;
-            exitedWithRateLimit = false;
-            break;
+            // Archive-depth error surfaced after the rate-limit cleared:
+            // route to the archive-depth branch below so the same-block
+            // secondary fallback IS consulted (otherwise the call would
+            // bubble straight to the caller with no recovery attempt).
+            //
+            // BLOCK_NOT_AVAILABLE-style errors from a retry are NOT
+            // routed through — they'd hit the retry-then-`latest` path,
+            // and several historical callers (fetchNumReporters,
+            // fetchReportExpiry, fetchTradingLimits) destructure `result`
+            // without checking `usedLatestFallback`, so silently swapping
+            // in current-block data after a 429-then-block-miss would
+            // corrupt their entity state. Throwing matches pre-PR
+            // behaviour for the same retry-surfaced shape.
+            if (
+              retryErr instanceof Error &&
+              ARCHIVE_DEPTH_RE.test(retryErr.message)
+            ) {
+              currentError = retryErr;
+              exitedWithRateLimit = false;
+              break;
+            }
+            throw retryErr;
           }
         }
       }
