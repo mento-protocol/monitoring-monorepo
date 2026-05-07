@@ -75,28 +75,6 @@ Lightweight plan:
 
 Acceptance: finds at least one real assertion gap or gives high confidence on a critical module with acceptable manual/nightly runtime.
 
-## Homepage Swaps KPI + OG card — include legacy v2 broker swaps
-
-PR #318 (volume v3/v2 split) and PR #322 (cross-fade + pills) cover the
-volume _chart_ and _headline_, but the homepage **Swaps** KPI tile
-(`page-client.tsx:335`) and the OpenGraph card both still count only
-FPMM/VirtualPool swaps via `pools[].swapCount` — they don't include
-the v2 Broker→BiPoolManager swaps already indexed as
-`BrokerDailySnapshot` (filtered to `routedViaV3Router=false`).
-
-Small follow-up PR:
-
-- [ ] Sum `BrokerDailySnapshot.swapCount` (where `routedViaV3Router =
-false`) across the chosen window into the Swaps tile, alongside
-      the existing FPMM count. Matches how the Volume chart already
-      composes both rollups.
-- [ ] Apply the same v2 inclusion to the OG card's swap-count fallback
-      (`opengraph-image.tsx`).
-- [ ] Decide on display: a single combined number (most likely) vs.
-      two pills like the volume headline. The Swaps tile is smaller
-      real estate than the Volume hero; combined number is probably
-      right but worth testing in a preview deploy.
-
 ## Volume Leaderboard — follow-up PRs after PR 1 (indexer foundation)
 
 PR 1 landed the schema entities + `caller`/`txTo`/`volumeUsdWei` on `SwapEvent` + handler population + `computeSwapUsdWei`. The `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `AggregatorTraderDayMarker`, `TraderPoolDayMarker` entities exist but no handlers write to them yet (empty tables on deploy — fine; PR 2 fills them).
@@ -203,6 +181,10 @@ Pre-existing behavior carried over verbatim from the monolithic pool page; flagg
 - [ ] **Backup parity for forensic reports.** The daily backup cron (`/api/address-labels/backup` triggered by `vercel.json`) only snapshots labels. Forensic reports live in the same Upstash instance under a single `reports` hash but aren't included — a Redis flush would lose them. Either extend the existing handler to also dump `reports` to Vercel Blob, or add a parallel `/api/address-reports/backup` route + cron. Restore + import/export paths need matching coverage. Flagged by Codex on PR #330.
 - [ ] **Report-only addresses need a UI surface.** The address-book page builds rows from `contractRows + customRows`. An address with a forensic report but no label has no row, so the report is unreachable through the UI after the modal closes. Options: (a) add a `/address-book/reports` index page listing every address with a report, or (b) include report-only rows in the main address book (deduplicated against contract + custom rows). Flagged by Codex on PR #330.
 - [ ] **Address labels: drop chain/global scope (mirror reports).** Reports went global-only on PR #330 after recurring scope-mismatch bugs. Labels still carry the same scope architecture (`labels:global` + `labels:{chainId}` + strict-either-or Lua). The threat model that justified per-chain labels — "same EVM address, different purposes per chain" — is exotic; same private key → same entity. Migration: merge `labels:{chainId}` entries into `labels:global` (union tags, prefer non-empty fields, log diffs). Deletes the scope picker from `AddressLabelEditor`, the per-scope Redis Lua, the import/export per-scope branches, and the chain → global fallback in `useAddressLabels`. ~250 lines deleted, ~100 for migration. Touches live production data so needs careful validation.
+
+## Follow-ups deferred from PR #335 (sign-in callback preservation)
+
+- [ ] **Live `href` on the global "Sign in" link for cmd/ctrl/middle-click.** PR #335 keeps the unmodified-click path on a live URL by recomputing `callbackUrl` from `window.location` inside the click handler, but the anchor `href` itself stays frozen at the render-time `useSearchParams()` snapshot — so cmd-click / middle-click / "open link in new tab" sends OAuth through the stale callback. Acceptable today: cmd-click is a deliberate "open in a side tab" gesture, the original tab still has the live URL state, and shared session means returning to the source tab works. To fix properly: monkeypatch `history.pushState`/`replaceState` once at the app root to dispatch a `'locationchange'` custom event, and have `AuthStatus` (and any future consumers) re-derive `href` via a `useSyncExternalStore` (or equivalent) that listens to `popstate` + `locationchange`. Cursor flagged this on PR #335 review.
 
 ## File-size watchlist (auto-generated)
 

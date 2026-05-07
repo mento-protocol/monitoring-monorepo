@@ -29,23 +29,23 @@ describe("sanitizeCallbackUrl", () => {
   });
 
   it("rejects protocol-relative URLs (//evil.com)", () => {
-    expect(sanitizeCallbackUrl("//evil.com")).toBe("/address-book");
+    expect(sanitizeCallbackUrl("//evil.com")).toBe("/");
   });
 
   it("rejects absolute URLs", () => {
-    expect(sanitizeCallbackUrl("https://evil.com")).toBe("/address-book");
+    expect(sanitizeCallbackUrl("https://evil.com")).toBe("/");
   });
 
   it("rejects javascript: URLs", () => {
-    expect(sanitizeCallbackUrl("javascript:alert(1)")).toBe("/address-book");
+    expect(sanitizeCallbackUrl("javascript:alert(1)")).toBe("/");
   });
 
   it("returns default for undefined", () => {
-    expect(sanitizeCallbackUrl(undefined)).toBe("/address-book");
+    expect(sanitizeCallbackUrl(undefined)).toBe("/");
   });
 
   it("returns default for empty string", () => {
-    expect(sanitizeCallbackUrl("")).toBe("/address-book");
+    expect(sanitizeCallbackUrl("")).toBe("/");
   });
 
   // P5-04 fuzz — browsers normalize `\` to `/`, tab/CR/LF get stripped by
@@ -67,6 +67,6 @@ describe("sanitizeCallbackUrl", () => {
     ["null byte", "/\x00evil.com"],
     ["leading whitespace", " //evil.com"],
   ])("rejects %s", (_label, input) => {
-    expect(sanitizeCallbackUrl(input)).toBe("/address-book");
+    expect(sanitizeCallbackUrl(input)).toBe("/");
   });
 });
