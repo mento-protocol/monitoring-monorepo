@@ -52,7 +52,15 @@ export function buildDailyFeeSeries(
   // so the chart and headline cover the same N daily buckets exactly.
   const dayAlignedWindow = window
     ? (() => {
-        const days = Math.round((window.to - window.from) / SECONDS_PER_DAY);
+        // `Math.ceil` (not round): the window endpoints are usually
+        // hour-aligned, so a `[TODAY_MIDNIGHT - 3*86400, NOW]` window
+        // ends up spanning ~3.x days, but the caller wants 4 buckets
+        // (the start day + every day since). `round` would drop the
+        // fractional bucket; `ceil` guarantees the start day is
+        // covered. Also handles the sub-day case (`from = TODAY,
+        // to = NOW` before noon UTC — `ceil(0.5) = 1`) where `round`
+        // would collapse to 0 and exclude every snapshot.
+        const days = Math.ceil((window.to - window.from) / SECONDS_PER_DAY);
         // The window is half-open `[from, to)`, so the last bucket in
         // range is `floor((to - 1) / 86400) * 86400` — using `to`
         // directly would land on the NEXT midnight when `to` is at or

@@ -14,12 +14,13 @@ import { SECONDS_PER_DAY } from "./helpers";
 // Mirror of `LeaderboardRangeKey` in
 // `ui-dashboard/src/lib/leaderboard.ts` — duplicated because the
 // indexer and dashboard packages don't share types.
-export type WindowKey = "24h" | "7d" | "30d" | "all";
+export type WindowKey = "24h" | "7d" | "30d" | "90d" | "all";
 
 export const WINDOW_KEYS: ReadonlyArray<WindowKey> = [
   "24h",
   "7d",
   "30d",
+  "90d",
   "all",
 ];
 
@@ -28,6 +29,7 @@ export const WINDOW_DAYS: Readonly<Record<WindowKey, number | null>> = {
   "24h": 1,
   "7d": 7,
   "30d": 30,
+  "90d": 90,
   all: null,
 };
 
