@@ -1,7 +1,7 @@
 import { signIn } from "@/auth";
 
 export function sanitizeCallbackUrl(raw?: string): string {
-  const DEFAULT = "/address-book";
+  const DEFAULT = "/";
   if (!raw) return DEFAULT;
 
   // Raw-level checks: things URL parsing would silently strip or normalize
