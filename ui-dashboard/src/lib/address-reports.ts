@@ -134,11 +134,20 @@ export async function getReport(
  * Read the report for an address across every scope (strict either/or means
  * at most one will be present). Returns the first match or null.
  *
+ * When `preferredScope` is supplied (e.g. the row scope the editor was opened
+ * from), the lookup is filtered to that scope OR the global scope — same
+ * fallback the 📄 indicator's `hasReport` uses, so the editor never loads a
+ * chain-specific report that the indicator wouldn't surface on the current
+ * row. Without this, opening 0xABC from a Monad row could load 0xABC's
+ * Celo report, which would be confusing even though the save scope is
+ * preserved correctly.
+ *
  * Issues all per-scope HGETs in parallel — sequential reads added 150–400 ms
  * to every modal open and every save (5 RTTs × Upstash REST latency).
  */
 export async function findReport(
   address: string,
+  preferredScope?: Scope,
 ): Promise<{ scope: Scope; report: AddressReport } | null> {
   const redis = getRedis();
   const lower = address.toLowerCase();
@@ -151,10 +160,20 @@ export async function findReport(
       return { scope, report: upgradeReport(raw) };
     }),
   );
+  const matches = results.filter(
+    (r): r is { scope: Scope; report: AddressReport } => r !== null,
+  );
+  if (preferredScope === undefined) {
+    return matches[0] ?? null;
+  }
+  // Symmetric with `hasReport`: a chain-scoped row sees its own report and
+  // the global one; a global-scope request sees only the global report.
+  if (preferredScope === "global") {
+    return matches.find((r) => r.scope === "global") ?? null;
+  }
   return (
-    results.find(
-      (r): r is { scope: Scope; report: AddressReport } => r !== null,
-    ) ?? null
+    matches.find((r) => r.scope === preferredScope || r.scope === "global") ??
+    null
   );
 }
 

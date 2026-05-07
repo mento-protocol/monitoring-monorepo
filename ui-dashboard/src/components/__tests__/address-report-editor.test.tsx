@@ -185,6 +185,21 @@ describe("AddressReportEditor — empty state", () => {
   });
 });
 
+describe("AddressReportEditor — Save disabled while initial lookup is pending", () => {
+  it("disables Save button while isLoading=true even with body typed", () => {
+    // Existing-address flow: SWR is still fetching, data undefined.
+    // Without the isLoading guard, handleSave would take the new-report
+    // path with parent scope and overwrite the existing report.
+    mockSwrIsLoading = true;
+    mockSwrData = undefined;
+    render();
+    setTextarea("ar-body", "drafted before lookup returned");
+    const saveBtn = findButton("Save report");
+    expect(saveBtn).not.toBeNull();
+    expect(saveBtn?.disabled).toBe(true);
+  });
+});
+
 describe("AddressReportEditor — loaded state", () => {
   beforeEach(() => {
     mockSwrData = {

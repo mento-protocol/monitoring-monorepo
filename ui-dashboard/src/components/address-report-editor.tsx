@@ -28,11 +28,18 @@ type SingleReportResponse = AddressReport & { scope: Scope };
 
 async function fetchSingleReport(
   address: string,
+  scope: Scope,
 ): Promise<SingleReportResponse | null> {
-  const res = await fetch(
-    `/api/address-reports?address=${encodeURIComponent(address)}`,
-    { signal: AbortSignal.timeout(8_000) },
-  );
+  // Pass the row's scope so the server applies the same chain → global
+  // fallback as the 📄 indicator. Without this, opening 0xABC from a Monad
+  // row could load 0xABC's Celo report.
+  const params = new URLSearchParams({
+    address,
+    scope: String(scope),
+  });
+  const res = await fetch(`/api/address-reports?${params.toString()}`, {
+    signal: AbortSignal.timeout(8_000),
+  });
   if (res.status === 404) return null;
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -44,8 +51,11 @@ async function fetchSingleReport(
 export function AddressReportEditor({ address, scope }: Props) {
   const trimmed = address.trim();
   const isAddressValid = isValidAddress(trimmed);
+  // Include scope in the SWR key so opening the same address from a global
+  // row vs a per-chain row doesn't share a stale cache entry pointing at
+  // the wrong scope's report.
   const swrKey = isAddressValid
-    ? `address-reports:single:${trimmed.toLowerCase()}`
+    ? `address-reports:single:${trimmed.toLowerCase()}:${scope}`
     : null;
 
   const {
@@ -55,7 +65,7 @@ export function AddressReportEditor({ address, scope }: Props) {
     mutate,
   } = useSWR<SingleReportResponse | null>(
     swrKey,
-    () => fetchSingleReport(trimmed),
+    () => fetchSingleReport(trimmed, scope),
     { revalidateOnFocus: false, revalidateOnReconnect: false },
   );
   const { mutate: globalMutate } = useSWRConfig();
@@ -63,10 +73,12 @@ export function AddressReportEditor({ address, scope }: Props) {
   // Hydrate form state when the fetched report changes (or arrives for the
   // first time). `recordKey` changes only on identity moves of the underlying
   // record — SWR background refetches that return identical data don't reset
-  // user edits.
+  // user edits. The empty-state key includes the normalized address so a
+  // user typing in the new-address flow doesn't carry a draft from one
+  // address into the next when both happen to be empty.
   const recordKey = data
     ? `${data.scope}:${data.updatedAt}:${data.version}`
-    : "empty";
+    : `empty:${trimmed.toLowerCase()}`;
   const [title, setTitle] = useState(data?.title ?? "");
   const [body, setBody] = useState(data?.body ?? "");
   const [previewMode, setPreviewMode] = useState(Boolean(data));
@@ -373,7 +385,12 @@ export function AddressReportEditor({ address, scope }: Props) {
           <button
             type="button"
             onClick={handleSave}
-            disabled={saving || deleting || overLimit || !dirty}
+            // Block while the initial lookup is pending — without this, the
+            // user can type into the form before SWR returns and trigger
+            // handleSave with `data === undefined`, which then takes the
+            // new-report code path (parent prop scope) and overwrites the
+            // existing report on save.
+            disabled={saving || deleting || overLimit || !dirty || isLoading}
             className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
           >
             {saving ? "Saving…" : hasExisting ? "Save changes" : "Save report"}

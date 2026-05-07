@@ -2,7 +2,6 @@
 
 import { TagPills } from "@/components/tag-pills";
 import { ChainIcon } from "@/components/chain-icon";
-import { useAddressReportsIndex } from "@/hooks/use-address-reports-index";
 import { truncateAddress } from "@/lib/format";
 import {
   ARKHAM_TAG,
@@ -36,6 +35,9 @@ type AddressRowProps = {
   createdAt?: string;
   updatedAt?: string;
   canEdit: boolean;
+  /** Pre-computed by the parent so the reports index hook isn't re-subscribed
+   * per row — see AddressBookClient. */
+  reportPresent: boolean;
   explorerUrl: string | null;
   onEdit: () => void;
 };
@@ -53,6 +55,7 @@ export function AddressTableRow({
   createdAt,
   updatedAt,
   canEdit,
+  reportPresent,
   explorerUrl,
   onEdit,
 }: AddressRowProps) {
@@ -63,8 +66,6 @@ export function AddressTableRow({
   const displayTags = tags.filter(
     (t) => t !== ARKHAM_TAG && t !== MINIPAY_SOURCE,
   );
-  const { hasReport } = useAddressReportsIndex();
-  const reportPresent = hasReport(address, scope);
   return (
     <tr className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
       <td className="px-4 py-3 whitespace-nowrap">

@@ -40,14 +40,27 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const addressParam = req.nextUrl.searchParams.get("address");
 
-  // Single-report read: ?address=0x... — finds across every scope (strict
-  // either/or means at most one match).
+  // Single-report read: ?address=0x...&scope=42220 — when scope is supplied,
+  // the lookup filters to that scope OR global (mirrors the indicator's
+  // chain → global fallback so the editor never loads a chain-specific
+  // report a different chain row wouldn't have flagged).
   if (addressParam !== null) {
     if (!isValidAddress(addressParam)) {
       return NextResponse.json({ error: "Invalid address" }, { status: 400 });
     }
+    const scopeParam = req.nextUrl.searchParams.get("scope");
+    let preferredScope: Scope | undefined;
+    if (scopeParam !== null) {
+      const parsed = parseScope(
+        scopeParam === "global" ? "global" : Number(scopeParam),
+      );
+      if (parsed === null) {
+        return NextResponse.json({ error: "Invalid scope" }, { status: 400 });
+      }
+      preferredScope = parsed;
+    }
     try {
-      const found = await findReport(addressParam);
+      const found = await findReport(addressParam, preferredScope);
       if (!found) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
