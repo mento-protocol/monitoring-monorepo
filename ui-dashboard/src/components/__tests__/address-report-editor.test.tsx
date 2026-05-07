@@ -254,6 +254,44 @@ describe("AddressReportEditor — load error", () => {
   });
 });
 
+describe("AddressReportEditor — SWR alias invalidation (regression for #330)", () => {
+  it("save invalidates every per-scope cache key for the address (predicate function)", async () => {
+    mockSwrData = null;
+    render({ scope: 42220 });
+    setTextarea("ar-body", "x");
+    await act(async () => {
+      findButton("Save report")?.click();
+    });
+
+    // Find the predicate-based mutate call (alias invalidator). Same address
+    // can be cached under multiple `address-reports:single:{addr}:{scope}`
+    // keys, so the helper passes a function predicate to globalMutate.
+    const predicateCalls = mockGlobalMutate.mock.calls.filter(
+      (call) => typeof call[0] === "function",
+    );
+    expect(predicateCalls.length).toBeGreaterThan(0);
+    const predicate = predicateCalls[0]![0] as (k: unknown) => boolean;
+    // Predicate should match every per-scope alias for this address...
+    expect(
+      predicate(`address-reports:single:${VALID_ADDR.toLowerCase()}:global`),
+    ).toBe(true);
+    expect(
+      predicate(`address-reports:single:${VALID_ADDR.toLowerCase()}:42220`),
+    ).toBe(true);
+    expect(
+      predicate(`address-reports:single:${VALID_ADDR.toLowerCase()}:10143`),
+    ).toBe(true);
+    // ...but NOT a different address...
+    expect(
+      predicate(
+        `address-reports:single:${SECOND_VALID_ADDR.toLowerCase()}:global`,
+      ),
+    ).toBe(false);
+    // ...and NOT the index key.
+    expect(predicate("address-reports:index")).toBe(false);
+  });
+});
+
 describe("AddressReportEditor — save scope (regression for #330)", () => {
   it("keeps Save disabled while the initial lookup is still loading", () => {
     mockSwrData = undefined;

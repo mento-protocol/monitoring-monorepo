@@ -315,7 +315,16 @@ export function AddressLabelEditor({
           id="al-tab-report-panel"
           aria-labelledby="al-tab-report"
         >
-          <AddressReportEditor address={address} scope={selectedScope} />
+          {/* Pass the IMMUTABLE startingScope, not the live selectedScope.
+              The label-tab radio is independent state; if the user toggles it
+              from "Only on Celo" to "All chains" before opening the report
+              tab, sending `selectedScope=global` would tell the server to
+              filter to global-only and hide the existing chain-scoped
+              report — saving from that empty editor would then create a new
+              global report and the strict-either-or upsert would HDEL the
+              original. Reports are scoped to the address row, not to the
+              label radio. */}
+          <AddressReportEditor address={address} scope={startingScope} />
         </div>
       ) : (
         <form

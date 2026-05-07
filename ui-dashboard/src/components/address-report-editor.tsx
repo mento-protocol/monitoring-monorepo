@@ -154,6 +154,12 @@ export function AddressReportEditor({ address, scope }: Props) {
         report: SingleReportResponse;
       };
       await mutate(out.report, { revalidate: false });
+      // Invalidate every per-scope SWR alias for this address. The same
+      // record can be cached under multiple keys (e.g. `:global` from the
+      // global row and `:42220` from a chain row via the chain → global
+      // fallback). Without this, opening a different row after save would
+      // serve a stale body until the local SWR revalidates.
+      await invalidateAllAddressAliases(globalMutate, normalizedAddress);
       // Refresh the index so the address-book 📄 indicator picks up the new
       // entry without waiting for the next poll cycle.
       await globalMutate(ADDRESS_REPORTS_INDEX_SWR_KEY);
@@ -169,6 +175,7 @@ export function AddressReportEditor({ address, scope }: Props) {
     scope,
     data,
     trimmed,
+    normalizedAddress,
     isAddressValid,
     isLookupPending,
     overLimit,
@@ -202,6 +209,11 @@ export function AddressReportEditor({ address, scope }: Props) {
         throw new Error(errBody.error ?? `Delete failed: ${res.status}`);
       }
       await mutate(null, { revalidate: false });
+      // Same alias-invalidation as save — without this, deleting via the
+      // chain row leaves the global SWR key holding the deleted body, and
+      // reopening the global row briefly serves the stale record + lets the
+      // user "edit" what they thought they deleted.
+      await invalidateAllAddressAliases(globalMutate, normalizedAddress);
       await globalMutate(ADDRESS_REPORTS_INDEX_SWR_KEY);
       setTitle("");
       setBody("");
@@ -211,7 +223,7 @@ export function AddressReportEditor({ address, scope }: Props) {
     } finally {
       setDeleting(false);
     }
-  }, [data, hasExisting, trimmed, mutate, globalMutate]);
+  }, [data, hasExisting, trimmed, normalizedAddress, mutate, globalMutate]);
 
   if (!isAddressValid) {
     return (
@@ -408,5 +420,24 @@ export function AddressReportEditor({ address, scope }: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Invalidate every per-scope SWR alias for a given address. The single-report
+ * key encodes scope (`address-reports:single:${addr}:${scope}`), so the same
+ * persisted record can be cached under multiple keys when the user opens it
+ * from different rows. Call this after any write/delete that mutates the
+ * underlying record so future re-renders never serve a stale alias.
+ */
+function invalidateAllAddressAliases(
+  globalMutate: ReturnType<typeof useSWRConfig>["mutate"],
+  normalizedAddress: string,
+): Promise<unknown> {
+  const prefix = `address-reports:single:${normalizedAddress}:`;
+  return globalMutate(
+    (key) => typeof key === "string" && key.startsWith(prefix),
+    undefined,
+    { revalidate: false },
   );
 }
