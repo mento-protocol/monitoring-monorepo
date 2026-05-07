@@ -14,8 +14,13 @@ const sanitizeSchema = {
   attributes: {
     ...defaultSchema.attributes,
     // Allow language hints on code blocks (`bash`, `solidity`, etc.) — react-
-    // markdown emits them as `className="language-xxx"` on <code>.
-    code: [...(defaultSchema.attributes?.code ?? []), ["className"]],
+    // markdown emits them as `className="language-xxx"` on <code>. The tuple
+    // form `["className", /^language-/]` constrains the allowlist to that
+    // exact prefix so arbitrary className values can't ride through.
+    code: [
+      ...(defaultSchema.attributes?.code ?? []),
+      ["className", /^language-[a-zA-Z0-9_-]+$/],
+    ],
   },
 };
 

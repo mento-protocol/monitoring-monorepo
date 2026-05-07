@@ -36,16 +36,20 @@ export type AddressReport = {
   version: number;
 };
 
-/** Lightweight metadata returned by the index endpoint — body excluded. */
-export type AddressReportSummary = {
-  address: string;
-  scope: Scope;
-  title?: string;
-  authorEmail?: string;
-  updatedAt: string;
-  version: number;
-  /** Body length in characters — UI hint, not a security boundary. */
-  bodyLength: number;
+/**
+ * Per-scope index of addresses that have a report — bodies, titles, and
+ * other metadata are NOT included so the index endpoint only reads field
+ * names from Redis (HKEYS), not full 50KB hash values.
+ *
+ * The 📄 indicator only needs existence; the editor fetches the full
+ * report on open via `?address=...`, which is also where title / version /
+ * authorEmail / updatedAt come from.
+ */
+export type AddressReportsIndex = {
+  /** Lowercase 0x addresses with a report at "global" scope. */
+  global: string[];
+  /** chainId (string) → lowercase addresses with a report at that scope. */
+  chains: Record<string, string[]>;
 };
 
 /** Full record including the address + scope it lives in. */
@@ -151,21 +155,4 @@ export function upgradeReports(
     }
   }
   return result;
-}
-
-/** Project a stored report onto its index-summary shape (no body). */
-export function reportToSummary(
-  report: AddressReport,
-  address: string,
-  scope: Scope,
-): AddressReportSummary {
-  return {
-    address,
-    scope,
-    ...(report.title ? { title: report.title } : {}),
-    ...(report.authorEmail ? { authorEmail: report.authorEmail } : {}),
-    updatedAt: report.updatedAt,
-    version: report.version,
-    bodyLength: report.body.length,
-  };
 }

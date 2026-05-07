@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import useSWR from "swr";
-import type { AddressReportSummary } from "@/lib/address-reports-shared";
+import type { AddressReportsIndex } from "@/lib/address-reports-shared";
 import type { Scope } from "@/lib/address-labels-shared";
 
 /**
@@ -17,24 +17,19 @@ import type { Scope } from "@/lib/address-labels-shared";
 
 export const ADDRESS_REPORTS_INDEX_SWR_KEY = "address-reports:index";
 
-type IndexResponse = {
-  global: AddressReportSummary[];
-  chains: Record<string, AddressReportSummary[]>;
-};
-
-async function fetchReportsIndex(): Promise<IndexResponse> {
+async function fetchReportsIndex(): Promise<AddressReportsIndex> {
   const res = await fetch("/api/address-reports", {
     signal: AbortSignal.timeout(8_000),
   });
   if (!res.ok) {
     throw new Error(`Failed to fetch reports index: ${res.status}`);
   }
-  return (await res.json()) as IndexResponse;
+  return (await res.json()) as AddressReportsIndex;
 }
 
 export function useAddressReportsIndex() {
   const { status } = useSession();
-  const { data, isLoading, error, mutate } = useSWR<IndexResponse>(
+  const { data, isLoading, error, mutate } = useSWR<AddressReportsIndex>(
     status === "authenticated" ? ADDRESS_REPORTS_INDEX_SWR_KEY : null,
     fetchReportsIndex,
     {
@@ -48,16 +43,13 @@ export function useAddressReportsIndex() {
   );
 
   // Pre-bucket addresses into per-scope sets so per-row `hasReport` lookups
-  // are O(1) — at 500 rows × 200 summaries the prior `Array.some` scan was
-  // 100k comparisons per render. Addresses are lowercased server-side, so no
-  // per-call normalization needed beyond the input.
+  // are O(1) — addresses arrive lowercased from the server, no per-call
+  // normalization needed beyond the input.
   const addressSets = useMemo(() => {
-    const global = new Set<string>(
-      data?.global.map((r) => r.address.toLowerCase()) ?? [],
-    );
+    const global = new Set<string>(data?.global ?? []);
     const chains = new Map<string, Set<string>>();
     for (const [chainId, list] of Object.entries(data?.chains ?? {})) {
-      chains.set(chainId, new Set(list.map((r) => r.address.toLowerCase())));
+      chains.set(chainId, new Set(list));
     }
     return { global, chains };
   }, [data]);
@@ -68,7 +60,14 @@ export function useAddressReportsIndex() {
       const lower = address.toLowerCase();
       if (scope === "global") return addressSets.global.has(lower);
       if (typeof scope === "number") {
-        return addressSets.chains.get(String(scope))?.has(lower) ?? false;
+        // Global reports apply to every chain — mirror useAddressLabels.getName's
+        // chain → global fallback so a report saved at "All chains" surfaces
+        // on per-chain rows too. Without this, contract rows whose default
+        // scope is "global" never show their own report indicator.
+        return (
+          (addressSets.chains.get(String(scope))?.has(lower) ?? false) ||
+          addressSets.global.has(lower)
+        );
       }
       // No scope: cross-scope check (used by inline AddressLink, which
       // doesn't know which scope a report lives in).

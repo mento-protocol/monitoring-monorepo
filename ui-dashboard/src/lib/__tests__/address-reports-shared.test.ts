@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_BODY_LENGTH,
   MAX_TITLE_LENGTH,
-  reportToSummary,
   sanitizeReportInput,
   upgradeReport,
 } from "@/lib/address-reports-shared";
@@ -92,36 +91,5 @@ describe("upgradeReport", () => {
   it("preserves a valid source value", () => {
     const r = upgradeReport({ body: "x", source: "claude" });
     expect(r.source).toBe("claude");
-  });
-});
-
-describe("reportToSummary", () => {
-  it("excludes the body from the summary", () => {
-    const r = upgradeReport({
-      body: "long body".repeat(100),
-      title: "T",
-      authorEmail: "philip@mentolabs.xyz",
-      version: 4,
-      createdAt: "2026-01-01T00:00:00Z",
-      updatedAt: "2026-02-01T00:00:00Z",
-    });
-    const s = reportToSummary(r, "0xabc", "global");
-    expect(s).toMatchObject({
-      address: "0xabc",
-      scope: "global",
-      title: "T",
-      authorEmail: "philip@mentolabs.xyz",
-      version: 4,
-      bodyLength: r.body.length,
-    });
-    // Sanity: 'body' must not leak through into the summary shape.
-    expect((s as Record<string, unknown>).body).toBeUndefined();
-  });
-
-  it("omits optional fields when absent", () => {
-    const r = upgradeReport({ body: "x", version: 1 });
-    const s = reportToSummary(r, "0xabc", 42220);
-    expect(s.title).toBeUndefined();
-    expect(s.authorEmail).toBeUndefined();
   });
 });

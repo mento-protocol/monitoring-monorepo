@@ -3,7 +3,7 @@ import * as Sentry from "@sentry/nextjs";
 import { getAuthSession } from "@/auth";
 import {
   findReport,
-  getReportSummaries,
+  getReportsIndex,
   upsertReport,
   deleteReport,
   sanitizeReportInput,
@@ -19,6 +19,15 @@ import { NETWORKS } from "@/lib/networks";
 const SUPPORTED_CHAIN_IDS: ReadonlySet<number> = new Set(
   Object.values(NETWORKS).map((n) => n.chainId),
 );
+
+// HTTP body size guard for PUT — 50KB chars × 4-byte worst-case UTF-8 + JSON
+// overhead = ~256KB. Mirrors the labels-import route's defense-in-depth check
+// so an authenticated client can't force the server to read multi-MB payloads
+// into memory before the in-handler `MAX_BODY_LENGTH` cap kicks in.
+const MAX_PUT_BODY_BYTES = 256 * 1024;
+// DELETE bodies are tiny (`{ scope, address }`) — keep the cap generous
+// enough for headroom but well below the PUT cap.
+const MAX_DELETE_BODY_BYTES = 4 * 1024;
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const session = await getAuthSession();
@@ -48,10 +57,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // Index read: lightweight summaries (no bodies) for the 📄 indicator.
+  // Index read: addresses-only — the 📄 indicator needs nothing else, and
+  // pulling full hash values just to drop the body would waste bandwidth on
+  // every 60s poll.
   try {
-    const summaries = await getReportSummaries();
-    return NextResponse.json(summaries);
+    const index = await getReportsIndex();
+    return NextResponse.json(index);
   } catch (err) {
     return serverError(err, "read");
   }
@@ -65,6 +76,9 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
       { status: 401 },
     );
   }
+
+  const tooLarge = guardBodySize(req, MAX_PUT_BODY_BYTES);
+  if (tooLarge) return tooLarge;
 
   let body: unknown;
   try {
@@ -126,6 +140,9 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  const tooLarge = guardBodySize(req, MAX_DELETE_BODY_BYTES);
+  if (tooLarge) return tooLarge;
+
   let body: unknown;
   try {
     body = await req.json();
@@ -166,6 +183,23 @@ function parseScope(scopeValue: unknown): Scope | null {
     return SUPPORTED_CHAIN_IDS.has(scopeValue) ? scopeValue : null;
   }
   return null;
+}
+
+// Pre-read body-size guard. Trusts a present `content-length` header (Vercel /
+// Next.js fastpath) — clients that omit it get the JSON-parse path's default
+// limits. Returns a 413 response when over cap, or null when safe to proceed.
+function guardBodySize(
+  req: NextRequest,
+  maxBytes: number,
+): NextResponse | null {
+  const header = req.headers.get("content-length");
+  if (header === null) return null;
+  const size = Number(header);
+  if (!Number.isFinite(size) || size <= maxBytes) return null;
+  return NextResponse.json(
+    { error: "Request body too large" },
+    { status: 413 },
+  );
 }
 
 function serverError(

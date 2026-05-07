@@ -15,7 +15,7 @@ vi.mock("@/lib/address-reports", async () => {
   >("@/lib/address-reports-shared");
   return {
     findReport: vi.fn(),
-    getReportSummaries: vi.fn().mockResolvedValue({ global: [], chains: {} }),
+    getReportsIndex: vi.fn().mockResolvedValue({ global: [], chains: {} }),
     upsertReport: vi.fn(),
     deleteReport: vi.fn().mockResolvedValue(undefined),
     sanitizeReportInput: shared.sanitizeReportInput,
@@ -26,7 +26,7 @@ vi.mock("@/lib/address-reports", async () => {
 import { getAuthSession } from "@/auth";
 import {
   findReport,
-  getReportSummaries,
+  getReportsIndex,
   upsertReport,
   deleteReport,
 } from "@/lib/address-reports";
@@ -49,7 +49,7 @@ describe("GET /api/address-reports", () => {
       new NextRequest("http://localhost/api/address-reports"),
     );
     expect(res.status).toBe(401);
-    expect(getReportSummaries).not.toHaveBeenCalled();
+    expect(getReportsIndex).not.toHaveBeenCalled();
   });
 
   it("returns 401 when unauthenticated (single)", async () => {
@@ -63,29 +63,22 @@ describe("GET /api/address-reports", () => {
     expect(findReport).not.toHaveBeenCalled();
   });
 
-  it("returns the lightweight index when authenticated", async () => {
+  it("returns the addresses-only index when authenticated", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
-    (getReportSummaries as ReturnType<typeof vi.fn>).mockResolvedValue({
-      global: [
-        {
-          address: VALID_ADDR,
-          scope: "global",
-          updatedAt: "2026-05-07T00:00:00Z",
-          version: 2,
-          bodyLength: 1234,
-        },
-      ],
-      chains: {},
+    (getReportsIndex as ReturnType<typeof vi.fn>).mockResolvedValue({
+      global: [VALID_ADDR],
+      chains: { "42220": ["0xaaaa"] },
     });
     const res = await GET(
       new NextRequest("http://localhost/api/address-reports"),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      global: { address: string; bodyLength: number }[];
+      global: string[];
+      chains: Record<string, string[]>;
     };
-    expect(body.global[0]?.address).toBe(VALID_ADDR);
-    expect(body.global[0]?.bodyLength).toBe(1234);
+    expect(body.global).toEqual([VALID_ADDR]);
+    expect(body.chains["42220"]).toEqual(["0xaaaa"]);
   });
 
   it("returns 404 when single report not found", async () => {
@@ -231,5 +224,63 @@ describe("DELETE /api/address-reports", () => {
     );
     expect(res.status).toBe(200);
     expect(deleteReport).toHaveBeenCalledWith("global", VALID_ADDR);
+  });
+
+  it("rejects an invalid scope", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    const res = await DELETE(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "DELETE",
+        body: JSON.stringify({ scope: "not-a-scope", address: VALID_ADDR }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(deleteReport).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid address", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    const res = await DELETE(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "DELETE",
+        body: JSON.stringify({ scope: "global", address: "not-hex" }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(deleteReport).not.toHaveBeenCalled();
+  });
+});
+
+describe("body-size guard", () => {
+  it("PUT returns 413 when content-length exceeds the cap", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    const res = await PUT(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "PUT",
+        // 1 MiB content-length forces the early-exit before req.json runs.
+        headers: { "content-length": String(1024 * 1024) },
+        body: JSON.stringify({
+          scope: "global",
+          address: VALID_ADDR,
+          body: "x",
+        }),
+      }),
+    );
+    expect(res.status).toBe(413);
+    expect(upsertReport).not.toHaveBeenCalled();
+  });
+
+  it("DELETE returns 413 when content-length exceeds its smaller cap", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
+    const res = await DELETE(
+      new NextRequest("http://localhost/api/address-reports", {
+        method: "DELETE",
+        // DELETE cap is 4 KiB — 8 KiB triggers the early reject.
+        headers: { "content-length": String(8 * 1024) },
+        body: JSON.stringify({ scope: "global", address: VALID_ADDR }),
+      }),
+    );
+    expect(res.status).toBe(413);
+    expect(deleteReport).not.toHaveBeenCalled();
   });
 });
