@@ -220,13 +220,18 @@ export async function upsertReport(
     ...(payload.source ? { source: payload.source } : {}),
   };
 
-  const encoded = (await redis.eval(
+  // The Upstash SDK auto-parses JSON-shaped responses (`parseResponse` →
+  // `parseRecursive`), so the script's `cjson.encode(payload)` return value
+  // arrives here as an already-deserialized object — calling JSON.parse on
+  // it would coerce to "[object Object]" and throw at runtime, breaking
+  // every save.
+  const result = (await redis.eval(
     UPSERT_SCRIPT,
     [...ALL_REPORT_SCOPE_KEYS],
     [String(targetIdx), lower, JSON.stringify(partial), now],
-  )) as string;
+  )) as Record<string, unknown>;
 
-  return upgradeReport(JSON.parse(encoded) as Record<string, unknown>);
+  return upgradeReport(result);
 }
 
 export async function deleteReport(
