@@ -161,10 +161,16 @@ export function AddressReportEditor({ address, scope }: Props) {
       // global row and `:42220` from a chain row via the chain → global
       // fallback). Without this, opening a different row after save would
       // serve a stale body until the local SWR revalidates.
+      // Pass the editor's `scope` prop (matches the local SWR key suffix),
+      // NOT `effectiveScope` (the report's persisted scope). When a global
+      // report is opened from a chain row via the chain→global fallback,
+      // these differ — using `effectiveScope` would exclude `:global` from
+      // the predicate while the actual local key is `:42220`, clobbering
+      // the just-saved local cache to undefined and stranding the editor.
       await invalidateOtherAddressAliases(
         globalMutate,
         normalizedAddress,
-        effectiveScope,
+        scope,
       );
       // Refresh the index so the address-book 📄 indicator picks up the new
       // entry without waiting for the next poll cycle.
@@ -215,16 +221,15 @@ export function AddressReportEditor({ address, scope }: Props) {
         throw new Error(errBody.error ?? `Delete failed: ${res.status}`);
       }
       await mutate(null, { revalidate: false });
-      // Same alias-invalidation as save — exclude the current key (we just
-      // set it to null which is the correct deleted-state value) and clear
-      // every OTHER scope variant. Without this, deleting via the chain
-      // row leaves the global SWR key holding the deleted body, and
-      // reopening the global row briefly serves the stale record + lets
-      // the user "edit" what they thought they deleted.
+      // Same alias-invalidation key choice as save — use the editor's
+      // `scope` prop (matches the local SWR key) to exclude the just-set
+      // null. `data.scope` would point at the persisted scope, which can
+      // differ from the local key when the report was viewed via the
+      // chain→global fallback.
       await invalidateOtherAddressAliases(
         globalMutate,
         normalizedAddress,
-        data.scope,
+        scope,
       );
       await globalMutate(ADDRESS_REPORTS_INDEX_SWR_KEY);
       setTitle("");

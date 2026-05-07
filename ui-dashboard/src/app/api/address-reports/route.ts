@@ -90,22 +90,15 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const tooLarge = guardBodySize(req, MAX_PUT_BODY_BYTES);
-  if (tooLarge) return tooLarge;
-
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+  const parsed = await readBoundedJson(req, MAX_PUT_BODY_BYTES);
+  if (parsed instanceof NextResponse) return parsed;
 
   const {
     scope: scopeBody,
     address,
     body: reportBody,
     title,
-  } = body as Record<string, unknown>;
+  } = parsed as Record<string, unknown>;
 
   const scope = parseScope(scopeBody);
   if (scope === null) {
@@ -153,17 +146,10 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const tooLarge = guardBodySize(req, MAX_DELETE_BODY_BYTES);
-  if (tooLarge) return tooLarge;
+  const parsed = await readBoundedJson(req, MAX_DELETE_BODY_BYTES);
+  if (parsed instanceof NextResponse) return parsed;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const { scope: scopeBody, address } = body as Record<string, unknown>;
+  const { scope: scopeBody, address } = parsed as Record<string, unknown>;
 
   const scope = parseScope(scopeBody);
   if (scope === null) {
@@ -198,21 +184,40 @@ function parseScope(scopeValue: unknown): Scope | null {
   return null;
 }
 
-// Pre-read body-size guard. Trusts a present `content-length` header (Vercel /
-// Next.js fastpath) — clients that omit it get the JSON-parse path's default
-// limits. Returns a 413 response when over cap, or null when safe to proceed.
-function guardBodySize(
+// Body-size guard. Two-step like the labels-import route: a fast Content-
+// Length check rejects oversized requests before any read, then we read the
+// body as text and re-check the actual byte length. Without the post-read
+// check, a chunked / no-Content-Length client can stream an arbitrary-size
+// JSON payload past `req.json()` before the in-handler 50KB validator runs.
+//
+// Returns either a 413 NextResponse OR the parsed JSON body. Callers narrow
+// via `body instanceof NextResponse`.
+async function readBoundedJson(
   req: NextRequest,
   maxBytes: number,
-): NextResponse | null {
+): Promise<unknown | NextResponse> {
   const header = req.headers.get("content-length");
-  if (header === null) return null;
-  const size = Number(header);
-  if (!Number.isFinite(size) || size <= maxBytes) return null;
-  return NextResponse.json(
-    { error: "Request body too large" },
-    { status: 413 },
-  );
+  if (header !== null) {
+    const size = Number(header);
+    if (Number.isFinite(size) && size > maxBytes) {
+      return NextResponse.json(
+        { error: "Request body too large" },
+        { status: 413 },
+      );
+    }
+  }
+  const text = await req.text();
+  if (Buffer.byteLength(text, "utf8") > maxBytes) {
+    return NextResponse.json(
+      { error: "Request body too large" },
+      { status: 413 },
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 }
 
 function serverError(
