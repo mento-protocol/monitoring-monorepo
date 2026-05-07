@@ -532,9 +532,8 @@ type PoolDailyFeeSnapshot @index(fields: ["chainId", "poolId", "timestamp"]) {
   updatedAtTimestamp: BigInt!
 }
 
-# Pre-rolled hero metrics for /leaderboard. Eliminates the top-1000-rows
-# Hasura cap on TraderDailySnapshot for any window-level aggregation
-# (banner: "Approximate values for this window" — gone after this entity).
+# Pre-rolled hero metrics for /leaderboard. Bypasses Hasura's 1000-row
+# cap on TraderDailySnapshot for any window-level aggregation.
 # One row per (chainId, windowKey, snapshotDay). The dashboard reads the
 # LATEST snapshotDay per (chainId, windowKey) — that's the most recently
 # finalized hero card — and adds today's partial from a small direct

@@ -172,11 +172,9 @@ export const BROKER_AGGREGATOR_DAILY_TOP = /* GraphQL */ `
 `;
 
 // ---------------------------------------------------------------------------
-// Pre-rolled hero metrics. Replaces top-1000-row aggregation that hit
-// Hasura's silent cap on long windows. `distinct_on: [chainId]` returns
-// the LATEST snapshotDay per chain (most recent finalized hero card) —
-// the dashboard adds today's partial from the small TraderDailySnapshot
-// query below.
+// Pre-rolled hero metrics. `distinct_on: [chainId]` returns the LATEST
+// snapshotDay per chain (most recent finalized hero card); the dashboard
+// adds today's partial from the small TraderDailySnapshot query below.
 // ---------------------------------------------------------------------------
 
 export const LEADERBOARD_WINDOW_LATEST = /* GraphQL */ `

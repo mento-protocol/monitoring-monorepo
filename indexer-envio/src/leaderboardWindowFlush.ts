@@ -18,20 +18,13 @@ import type {
   LeaderboardWindowSnapshot,
   TraderDailySnapshot,
 } from "generated";
+import { SECONDS_PER_DAY, dayBucket } from "./helpers";
 import {
   WINDOW_KEYS,
   aggregatePerWindow,
-  buildBrokerLeaderboardWindowSnapshot,
   buildLeaderboardWindowSnapshot,
   windowStartDay,
 } from "./leaderboardWindowSnapshot";
-
-const SECONDS_PER_DAY = 86400n;
-
-/** UTC-midnight day bucket for a unix-second timestamp. */
-function dayBucket(timestamp: bigint): bigint {
-  return (timestamp / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-}
 
 // ────────────────────────────────────────────────────────────────────
 // v3 — TraderDailySnapshot → LeaderboardWindowSnapshot
@@ -150,15 +143,18 @@ export async function flushV2LeaderboardWindowSnapshots(args: {
   );
   const grouped = aggregatePerWindow(rows, args.chainId, args.snapshotDay);
   for (const w of WINDOW_KEYS) {
-    const snap = buildBrokerLeaderboardWindowSnapshot({
-      chainId: args.chainId,
-      windowKey: w,
-      snapshotDay: args.snapshotDay,
-      windowStartDay: windowStartDay(args.snapshotDay, w),
-      aggregates: grouped[w],
-      blockNumber: args.blockNumber,
-      updatedAtTimestamp: args.updatedAtTimestamp,
-    });
+    // BrokerLeaderboardWindowSnapshot is structurally identical to
+    // LeaderboardWindowSnapshot — see schema.graphql.
+    const snap: BrokerLeaderboardWindowSnapshot =
+      buildLeaderboardWindowSnapshot({
+        chainId: args.chainId,
+        windowKey: w,
+        snapshotDay: args.snapshotDay,
+        windowStartDay: windowStartDay(args.snapshotDay, w),
+        aggregates: grouped[w],
+        blockNumber: args.blockNumber,
+        updatedAtTimestamp: args.updatedAtTimestamp,
+      });
     args.context.BrokerLeaderboardWindowSnapshot.set(snap);
   }
 }

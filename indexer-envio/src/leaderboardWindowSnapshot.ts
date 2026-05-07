@@ -8,13 +8,12 @@
 // TraderDailySnapshot / BrokerTraderDailySnapshot / Leaderboard*State
 // entity tables.
 
-import type {
-  BrokerLeaderboardWindowSnapshot,
-  LeaderboardWindowSnapshot,
-} from "generated";
+import type { LeaderboardWindowSnapshot } from "generated";
+import { SECONDS_PER_DAY } from "./helpers";
 
-const SECONDS_PER_DAY = 86400n;
-
+// Mirror of `LeaderboardRangeKey` in
+// `ui-dashboard/src/lib/leaderboard.ts` — duplicated because the
+// indexer and dashboard packages don't share types.
 export type WindowKey = "24h" | "7d" | "30d" | "all";
 
 export const WINDOW_KEYS: ReadonlyArray<WindowKey> = [
@@ -115,20 +114,19 @@ export interface BuildSnapshotArgs {
 }
 
 /** Build a single LeaderboardWindowSnapshot row from per-trader aggregates.
- *  Same pure shape works for v2 (BrokerLeaderboardWindowSnapshot) — the
- *  field set is identical (see schema.graphql). */
+ *  Same shape works for v2 (BrokerLeaderboardWindowSnapshot) — the field set
+ *  is identical (see schema.graphql). `aggregatePerWindow` already dedupes
+ *  per-trader, so each entry in `aggregates` is one unique trader. */
 export function buildLeaderboardWindowSnapshot(
   args: BuildSnapshotArgs,
 ): LeaderboardWindowSnapshot {
   let totalVolumeUsdWei = 0n;
   let totalSwapCount = 0;
-  const tradersAll = new Set<string>();
-  const tradersExcludingSystem = new Set<string>();
+  let nonSystemCount = 0;
   for (const a of args.aggregates) {
     totalVolumeUsdWei += a.volumeUsdWei;
     totalSwapCount += a.swapCount;
-    tradersAll.add(a.trader);
-    if (!a.isSystemAddress) tradersExcludingSystem.add(a.trader);
+    if (!a.isSystemAddress) nonSystemCount += 1;
   }
   return {
     id: `${args.chainId}-${args.windowKey}-${args.snapshotDay}`,
@@ -138,18 +136,9 @@ export function buildLeaderboardWindowSnapshot(
     windowStartDay: args.windowStartDay,
     totalVolumeUsdWei,
     totalSwapCount,
-    uniqueTraders: tradersExcludingSystem.size,
-    uniqueTradersIncludingSystem: tradersAll.size,
+    uniqueTraders: nonSystemCount,
+    uniqueTradersIncludingSystem: args.aggregates.length,
     blockNumber: args.blockNumber,
     updatedAtTimestamp: args.updatedAtTimestamp,
   };
-}
-
-/** v2 sibling — same logic, different output type. The structural identity
- *  with v3 makes both call sites trivial; we keep them as separate
- *  functions for type clarity. */
-export function buildBrokerLeaderboardWindowSnapshot(
-  args: BuildSnapshotArgs,
-): BrokerLeaderboardWindowSnapshot {
-  return buildLeaderboardWindowSnapshot(args);
 }

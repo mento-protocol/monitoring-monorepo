@@ -226,9 +226,9 @@ export function LeaderboardClient() {
   });
 
   // Pre-rolled hero snapshot (one row per chain for the active window).
-  // Replaces the top-1000-row aggregation that hit Hasura's silent cap on
-  // long windows. The snapshot covers [windowStart, yesterday]; today's
-  // partial is fetched separately and added client-side.
+  // Bypasses Hasura's 1000-row cap on long windows. The snapshot covers
+  // [windowStart, yesterday]; today's partial is fetched separately and
+  // added client-side.
   const heroV3Result = useGQL<{
     LeaderboardWindowSnapshot: LeaderboardWindowRow[];
   }>(venue === "v3" ? LEADERBOARD_WINDOW_LATEST : null, { windowKey: range });
@@ -311,9 +311,9 @@ export function LeaderboardClient() {
   }, [poolRows]);
 
   // Hero KPIs — totals come from the pre-rolled LeaderboardWindowSnapshot
-  // plus today's partial (both EXACT — no Hasura row cap). Top-10
+  // plus today's partial (both exact, no Hasura row cap). Top-10
   // concentration uses the existing top-50 query for the numerator and
-  // the snapshot total for the denominator: now exact end-to-end.
+  // the snapshot total for the denominator: exact end-to-end.
   const heroSnapshotRows =
     venue === "v3"
       ? heroV3Result.data?.LeaderboardWindowSnapshot
@@ -486,7 +486,11 @@ export function LeaderboardClient() {
         <Tile
           label="Total volume"
           value={
-            heroIsLoading ? "…" : heroHasError ? "—" : formatUSD(totalVolume)
+            heroIsLoading
+              ? "…"
+              : heroHasError
+                ? "—"
+                : formatUSD(totalVolume)
           }
           subtitle={rangeSubtitle(range)}
         />
