@@ -4,11 +4,14 @@ import { useEffect } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useSWRConfig } from "swr";
 import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import * as Sentry from "@sentry/nextjs";
 
 export function AuthStatus() {
   const { data: session, status } = useSession();
   const { mutate } = useSWRConfig();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   // Attach the authenticated user's email to every Sentry event so issues
   // are filterable by who's affected. Internal-only tool (mentolabs.xyz
@@ -25,9 +28,16 @@ export function AuthStatus() {
   if (status === "loading") return null;
 
   if (!session) {
+    // Preserve the current page so the user lands back where they were
+    // after Google OAuth, instead of being dumped on the sign-in page's
+    // hardcoded default.
+    const search = searchParams?.toString();
+    const here = pathname && pathname !== "/sign-in" ? pathname : "/";
+    const callback = search ? `${here}?${search}` : here;
+    const signInHref = `/sign-in?callbackUrl=${encodeURIComponent(callback)}`;
     return (
       <Link
-        href="/sign-in"
+        href={signInHref}
         className="ml-auto text-xs text-slate-400 hover:text-white transition-colors"
       >
         Sign in
