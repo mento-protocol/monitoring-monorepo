@@ -6,10 +6,13 @@ import {
   aggregateTraderPoolsByWindow,
   aggregateTradersByWindow,
   computeFlow,
+  mergeHeroSnapshot,
   rangeCutoffSeconds,
   weiToUsd,
   type BrokerAggregatorDailyRow,
   type BrokerTraderDailyRow,
+  type LeaderboardTodayTraderRow,
+  type LeaderboardWindowRow,
   type TraderDailyRow,
   type TraderPoolDailyRow,
   type TraderPoolWindowRow,
@@ -636,5 +639,188 @@ describe("aggregateDailyVolume (BrokerTraderDailyRow)", () => {
     expect(out[0]!.value).toBeCloseTo(150, 4);
     expect(out[1]!.timestamp).toBe(172800);
     expect(out[1]!.value).toBeCloseTo(25, 4);
+  });
+});
+
+describe("mergeHeroSnapshot", () => {
+  function snap(
+    overrides: Partial<LeaderboardWindowRow> & {
+      chainId: number;
+      totalVolumeUsdWei: string;
+    },
+  ): LeaderboardWindowRow {
+    return {
+      id: `${overrides.chainId}-7d-1`,
+      windowKey: "7d",
+      snapshotDay: "1",
+      windowStartDay: "0",
+      totalSwapCount: 0,
+      uniqueTraders: 0,
+      uniqueTradersIncludingSystem: 0,
+      ...overrides,
+    };
+  }
+  function today(
+    overrides: Partial<LeaderboardTodayTraderRow> & {
+      chainId: number;
+      trader: string;
+      volumeUsdWei: string;
+    },
+  ): LeaderboardTodayTraderRow {
+    return {
+      swapCount: 1,
+      isSystemAddress: false,
+      ...overrides,
+    };
+  }
+
+  it("returns zeros when both inputs are empty/undefined", () => {
+    expect(
+      mergeHeroSnapshot({
+        snapshotRows: undefined,
+        todayRows: undefined,
+        showSystem: false,
+      }),
+    ).toEqual({
+      totalVolumeUsdWei: BigInt(0),
+      totalSwapCount: 0,
+      uniqueTraders: 0,
+    });
+  });
+
+  it("snapshot-only: passes through totals", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 10,
+        }),
+      ],
+      todayRows: [],
+      showSystem: false,
+    });
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1000)));
+    expect(out.totalSwapCount).toBe(50);
+    expect(out.uniqueTraders).toBe(10);
+  });
+
+  it("today-only (cold start): returns today's totals", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: undefined,
+      todayRows: [
+        today({
+          chainId: 42220,
+          trader: "0xa",
+          volumeUsdWei: USD(50),
+          swapCount: 2,
+        }),
+        today({
+          chainId: 42220,
+          trader: "0xb",
+          volumeUsdWei: USD(100),
+          swapCount: 3,
+        }),
+      ],
+      showSystem: false,
+    });
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(150)));
+    expect(out.totalSwapCount).toBe(5);
+    expect(out.uniqueTraders).toBe(2);
+  });
+
+  it("snapshot + today: sums totals; counts today's distinct traders separately", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 10,
+        }),
+      ],
+      todayRows: [
+        today({
+          chainId: 42220,
+          trader: "0xa",
+          volumeUsdWei: USD(50),
+          swapCount: 2,
+        }),
+      ],
+      showSystem: false,
+    });
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1050)));
+    expect(out.totalSwapCount).toBe(52);
+    // Snapshot's 10 + today's 1 = 11 (no dedup; documented overcount)
+    expect(out.uniqueTraders).toBe(11);
+  });
+
+  it("showSystem=true uses uniqueTradersIncludingSystem from snapshot", () => {
+    const row = snap({
+      chainId: 42220,
+      totalVolumeUsdWei: USD(0),
+      uniqueTraders: 5,
+      uniqueTradersIncludingSystem: 12,
+    });
+    const off = mergeHeroSnapshot({
+      snapshotRows: [row],
+      todayRows: [],
+      showSystem: false,
+    });
+    const on = mergeHeroSnapshot({
+      snapshotRows: [row],
+      todayRows: [],
+      showSystem: true,
+    });
+    expect(off.uniqueTraders).toBe(5);
+    expect(on.uniqueTraders).toBe(12);
+  });
+
+  it("showSystem=false filters system traders out of today's partial", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [],
+      todayRows: [
+        today({
+          chainId: 42220,
+          trader: "0xa",
+          volumeUsdWei: USD(100),
+          isSystemAddress: false,
+        }),
+        today({
+          chainId: 42220,
+          trader: "0xb",
+          volumeUsdWei: USD(999),
+          isSystemAddress: true,
+        }),
+      ],
+      showSystem: false,
+    });
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(100)));
+    expect(out.uniqueTraders).toBe(1);
+  });
+
+  it("sums across chains (Celo + Monad rows on the same window)", () => {
+    const out = mergeHeroSnapshot({
+      snapshotRows: [
+        snap({
+          chainId: 42220,
+          totalVolumeUsdWei: USD(1000),
+          totalSwapCount: 50,
+          uniqueTraders: 10,
+        }),
+        snap({
+          chainId: 10143,
+          totalVolumeUsdWei: USD(500),
+          totalSwapCount: 20,
+          uniqueTraders: 4,
+        }),
+      ],
+      todayRows: [],
+      showSystem: false,
+    });
+    expect(out.totalVolumeUsdWei).toBe(BigInt(USD(1500)));
+    expect(out.totalSwapCount).toBe(70);
+    expect(out.uniqueTraders).toBe(14);
   });
 });

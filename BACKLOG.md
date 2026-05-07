@@ -137,7 +137,9 @@ Expansion procedure: when a new entry shows up in the top-N of `AggregatorDailyS
 
 ### Deferred from PR 1
 
-- [ ] **`LeaderboardWindowSnapshot` entity for hero metrics.** Originally in the plan but deferred — dashboard can compute totals/top-N share by paginating top-50 from `TraderDailySnapshot` within Hasura's 1000-row cap. Revisit only if the cap becomes a bottleneck (>50 unique traders/day on a single chain whose tail volume materially shifts top-N share).
+- [x] ~~**`LeaderboardWindowSnapshot` entity for hero metrics.**~~ Done: schema entities (`LeaderboardWindowSnapshot`, `BrokerLeaderboardWindowSnapshot`, `LeaderboardChainState`) + heartbeat-driven flush in `indexer-envio/src/leaderboardWindowFlush.ts` + dashboard rewire in `page-client.tsx`. Hero tiles read the pre-rolled snapshot for `[windowStart, yesterday]` and add today's partial from a small `TraderDailySnapshot` direct query. `mergeHeroSnapshot()` in `ui-dashboard/src/lib/leaderboard.ts` does the merge. Top-10 concentration uses the existing top-50 query as numerator and the snapshot total as denominator — exact end-to-end. The "≈ Approximate values for this window" banner is gone.
+
+  Daily-volume chart still derives from the capped `TRADER_DAILY_TOP` rows — follow-up: paginate `TraderDailySnapshot` keyset on `(timestamp desc, id asc)` so the chart is exact too.
 
 ## Refactor — long files (next candidates after PR #263)
 

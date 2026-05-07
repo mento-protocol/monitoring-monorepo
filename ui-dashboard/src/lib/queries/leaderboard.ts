@@ -2,18 +2,24 @@
  * GraphQL queries for the /leaderboard page.
  *
  * Hosted Hasura caps results at 1000 rows per query and disables
- * `_aggregate` (see `feedback_no_hasura_aggregates`), so all aggregation is
- * client-side over the indexer's pre-rolled snapshot entities. The window
- * `_gte` filter is applied in Hasura; the per-trader summing happens in
- * `lib/leaderboard.ts`.
+ * `_aggregate` (see `feedback_no_hasura_aggregates`).
+ *
+ * Hero tiles (total volume / unique traders / top-N concentration) read
+ * the pre-rolled `LeaderboardWindowSnapshot` (or v2 sibling) plus a
+ * small today-partial direct query — both bounded well under 1000 rows.
+ *
+ * The top-50 leaderboard table still reads `TraderDailySnapshot` directly
+ * with `limit: 1000` (the lemma below): top-50 by window-sum is a subset
+ * of top-1000 by single-day volume in any reasonable trader distribution.
  */
 
 /**
  * Top trader-day rows by volume in a window. The 1000-row cap is fine for
- * an MVP top-50 ranking: a trader who would crack the top-50 by summed
+ * the top-50 table because a trader who would crack the top-50 by summed
  * window-volume necessarily has at least one daily row in the top-1000 by
- * single-day volume in any reasonable distribution. Long-tail $100/day
- * regulars don't displace top-of-list.
+ * single-day volume. Long-tail $100/day regulars don't displace
+ * top-of-list. (Hero tiles, which sum across ALL traders, read the
+ * pre-rolled LeaderboardWindowSnapshot instead — see below.)
  */
 export const TRADER_DAILY_TOP = /* GraphQL */ `
   query TraderDailyTop(
@@ -161,6 +167,104 @@ export const BROKER_AGGREGATOR_DAILY_TOP = /* GraphQL */ `
       swapCount
       uniqueTraders
       volumeUsdWei
+    }
+  }
+`;
+
+// ---------------------------------------------------------------------------
+// Pre-rolled hero metrics. Replaces top-1000-row aggregation that hit
+// Hasura's silent cap on long windows. `distinct_on: [chainId]` returns
+// the LATEST snapshotDay per chain (most recent finalized hero card) —
+// the dashboard adds today's partial from the small TraderDailySnapshot
+// query below.
+// ---------------------------------------------------------------------------
+
+export const LEADERBOARD_WINDOW_LATEST = /* GraphQL */ `
+  query LeaderboardWindowLatest($windowKey: String!) {
+    LeaderboardWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      id
+      chainId
+      windowKey
+      snapshotDay
+      windowStartDay
+      totalVolumeUsdWei
+      totalSwapCount
+      uniqueTraders
+      uniqueTradersIncludingSystem
+    }
+  }
+`;
+
+export const BROKER_LEADERBOARD_WINDOW_LATEST = /* GraphQL */ `
+  query BrokerLeaderboardWindowLatest($windowKey: String!) {
+    BrokerLeaderboardWindowSnapshot(
+      where: { windowKey: { _eq: $windowKey } }
+      order_by: [{ chainId: asc }, { snapshotDay: desc }]
+      distinct_on: [chainId]
+      limit: 100
+    ) {
+      id
+      chainId
+      windowKey
+      snapshotDay
+      windowStartDay
+      totalVolumeUsdWei
+      totalSwapCount
+      uniqueTraders
+      uniqueTradersIncludingSystem
+    }
+  }
+`;
+
+/**
+ * Today's partial — added on top of the snapshot's [windowStart, yesterday]
+ * total to keep hero numbers current to the minute. Today's
+ * TraderDailySnapshot rows are bounded by active-traders-today (well under
+ * 1000 in practice).
+ */
+export const LEADERBOARD_TODAY_TRADERS = /* GraphQL */ `
+  query LeaderboardTodayTraders(
+    $todayMidnight: numeric!
+    $isSystemAddressIn: [Boolean!]!
+  ) {
+    TraderDailySnapshot(
+      where: {
+        timestamp: { _gte: $todayMidnight }
+        isSystemAddress: { _in: $isSystemAddressIn }
+      }
+      limit: 1000
+    ) {
+      chainId
+      trader
+      volumeUsdWei
+      swapCount
+      isSystemAddress
+    }
+  }
+`;
+
+export const BROKER_LEADERBOARD_TODAY_TRADERS = /* GraphQL */ `
+  query BrokerLeaderboardTodayTraders(
+    $todayMidnight: numeric!
+    $isSystemAddressIn: [Boolean!]!
+  ) {
+    BrokerTraderDailySnapshot(
+      where: {
+        timestamp: { _gte: $todayMidnight }
+        isSystemAddress: { _in: $isSystemAddressIn }
+      }
+      limit: 1000
+    ) {
+      chainId
+      trader
+      volumeUsdWei
+      swapCount
+      isSystemAddress
     }
   }
 `;

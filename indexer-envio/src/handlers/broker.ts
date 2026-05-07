@@ -21,6 +21,7 @@ import { resolveFeeTokenMeta } from "../feeToken";
 import { getContractAddress } from "../contractAddresses";
 import { isSystemAddress } from "../system-addresses";
 import { classifyAggregator } from "../aggregators";
+import { maybeHeartbeatFlushV2 } from "../leaderboardWindowFlush";
 
 // Per-chain cache of the v3 Router address. JSON lookup once per chain is
 // cheap, but a Map is cheaper still and Broker.Swap fires per swap event.
@@ -108,6 +109,19 @@ Broker.Swap.handler(async ({ event, context }) => {
     timestamp: dayTs,
     swapCount: (existing?.swapCount ?? 0) + 1,
     volumeUsdWei: (existing?.volumeUsdWei ?? 0n) + volumeUsdWei,
+    blockNumber,
+  });
+
+  // Heartbeat the v2 leaderboard window snapshot before any of the
+  // legacy-v2 producer early-returns below. Every broker.swap is a
+  // heartbeat opportunity: even routed/virtual-pool swaps advance the
+  // UTC-day cursor so a chain that only sees routed swaps for a stretch
+  // still gets snapshots flushed at midnight rather than waiting for the
+  // next direct-broker swap.
+  await maybeHeartbeatFlushV2({
+    context,
+    chainId: event.chainId,
+    blockTimestamp,
     blockNumber,
   });
 
