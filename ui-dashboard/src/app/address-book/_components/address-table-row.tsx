@@ -2,6 +2,7 @@
 
 import { TagPills } from "@/components/tag-pills";
 import { ChainIcon } from "@/components/chain-icon";
+import { useAddressReportsIndex } from "@/hooks/use-address-reports-index";
 import { truncateAddress } from "@/lib/format";
 import {
   ARKHAM_TAG,
@@ -62,6 +63,10 @@ export function AddressTableRow({
   const displayTags = tags.filter(
     (t) => t !== ARKHAM_TAG && t !== MINIPAY_SOURCE,
   );
+  // Single SWR fetch shared across every row via the hook's stable key —
+  // doesn't N+1 even when the table renders hundreds of rows.
+  const { hasReport } = useAddressReportsIndex();
+  const reportPresent = hasReport(address, scope);
   return (
     <tr className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
       <td className="px-4 py-3 whitespace-nowrap">
@@ -79,24 +84,36 @@ export function AddressTableRow({
         )}
       </td>
       <td className="px-4 py-3 whitespace-nowrap">
-        {explorerUrl ? (
-          <a
-            href={explorerUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={address}
-            className="font-mono text-xs text-slate-300 hover:text-indigo-300 transition-colors"
-          >
-            {truncateAddress(address)}
-            <span className="ml-1 text-slate-600" aria-hidden="true">
-              ↗
+        <div className="flex items-center gap-1.5">
+          {explorerUrl ? (
+            <a
+              href={explorerUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={address}
+              className="font-mono text-xs text-slate-300 hover:text-indigo-300 transition-colors"
+            >
+              {truncateAddress(address)}
+              <span className="ml-1 text-slate-600" aria-hidden="true">
+                ↗
+              </span>
+            </a>
+          ) : (
+            <span title={address} className="font-mono text-xs text-slate-500">
+              {truncateAddress(address)}
             </span>
-          </a>
-        ) : (
-          <span title={address} className="font-mono text-xs text-slate-500">
-            {truncateAddress(address)}
-          </span>
-        )}
+          )}
+          {reportPresent && (
+            <span
+              role="img"
+              aria-label="Has forensic report"
+              title="Forensic report attached"
+              className="text-xs leading-none"
+            >
+              📄
+            </span>
+          )}
+        </div>
       </td>
       <td className="px-4 py-3 max-w-[180px]">
         <span

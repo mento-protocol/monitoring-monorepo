@@ -64,6 +64,22 @@ vi.mock("@/components/address-labels-provider", () => ({
   useAddressLabels: () => mockUseAddressLabels(),
 }));
 
+// AddressTableRow consults the reports index to render the 📄 indicator. The
+// hook calls `useSession`, which throws outside a <SessionProvider/>. Stub
+// with an "empty index" shape — every assertion in this file targets non-
+// indicator behaviour, so the indicator stays hidden and the table layout
+// remains unchanged.
+vi.mock("@/hooks/use-address-reports-index", () => ({
+  useAddressReportsIndex: () => ({
+    data: { global: [], chains: {} },
+    hasReport: () => false,
+    isLoading: false,
+    error: undefined,
+    mutate: vi.fn(),
+  }),
+  ADDRESS_REPORTS_INDEX_SWR_KEY: "address-reports:index",
+}));
+
 // AddressBookClient calls `useNetwork()` to compute the chain context for the
 // editor's "Only on X" target. Pin to celo-mainnet so the chainId is a known
 // constant in assertions.

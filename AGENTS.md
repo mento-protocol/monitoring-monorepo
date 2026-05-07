@@ -51,6 +51,14 @@ Across the last 20 PRs, automated reviewers (`cursor[bot]`, `chatgpt-codex-conne
 - Composite IDs MUST include enough entropy to be collision-resistant under same-block writes. `poolId + startedAt(seconds)` is **insufficient** — include `chainId`, `blockNumber`, and `logIndex` (or `txHash + logIndex`)
 - Cumulative counters belong on the entity (rolled up in handlers), not derived client-side from a paginated list
 
+### Multi-chain coverage
+
+- Anywhere indexer code iterates over indexed chains, derive the chain list from `Object.keys(CONTRACT_NAMESPACE_BY_CHAIN)` (in `indexer-envio/src/contractAddresses.ts`), **never** a hardcoded `[42220, 143]`. The same compiled handlers run against `config.multichain.testnet.yaml` (chains 11142220, 10143), so a hardcoded mainnet list silently breaks testnet classification (system addresses misclassified, direct-entry routers fall through to "unknown"). Bit us on PR #311 (`isSystemAddress` / `classifyAggregator`) and PR #316 (cluster direct entries) — flagged 4× across cursor + codex inline reviews
+
+### Config-name → metadata cross-reference tests
+
+- When a config file has a name → metadata lookup pattern (e.g. `aggregators.json`'s `cluster-*` keys ↔ `$clusters` block, or any future `name: "X"` per-chain entry pointing at a separate `$X` metadata block), add a test that asserts every name used in the per-chain entries has a corresponding metadata entry. A typo in either side silently breaks the consumer (e.g. `getClusterMetadata("cluster-7dc08ec28f299c07")` returning `undefined` if you typo the address by one digit). Caught by cursor + claude[bot] on PR #316
+
 ### Indexer RPC self-heal (`rpc.ts`)
 
 - Multi-getter RPC helpers (`fetchFees` etc.) use `Promise.allSettled` + distinct sentinels: `-1` = not yet attempted (retry), `-2` = viem "returned no data" signature = getter missing from bytecode (stop retrying). All-or-nothing `Promise.all` loses wins from fulfilled getters; a single sentinel creates forever-retry loops on older deployments lacking a getter (bit us on PR #222)
@@ -162,6 +170,7 @@ Never `terraform apply` without explicit user approval — plan first, surface t
 - **Multi-chain:** Network selector switches between celo-mainnet, celo-sepolia, monad-mainnet, monad-testnet Hasura endpoints; all networks defined in `src/lib/networks.ts`
 - **Contract labels:** token symbols and address labels come from `@mento-protocol/monitoring-config/tokens` (shared with metrics-bridge); `src/lib/networks.ts` layers per-network `addressLabels` overrides on top. Explorer base URLs default from `@mento-protocol/monitoring-config/chains`; each network keeps its env-var override (`NEXT_PUBLIC_EXPLORER_URL_*`) for local dev
 - **Address book:** `/address-book` page + inline editing; custom labels stored in Upstash Redis, backed up daily to Vercel Blob; custom labels override/extend the package-derived ones
+- **Forensic reports:** long-form markdown investigations attached to an address (separate from the 500-char `notes` field). Stored in Upstash under `reports:global` / `reports:{chainId}` with the same strict either/or scope invariant as labels. Never write deep investigations into `notes` — open the address modal's **Forensic Report** tab. Body cap is 50KB; auth-gated, never public. Save standalone investigation drafts as markdown under `docs/investigations/` for review before pasting into the editor
 - **Deployment:** Vercel (`monitoring-dashboard` project); infra managed by Terraform in `terraform/`
 
 ### PR Review Guidance (Dashboard Scale)
@@ -221,18 +230,27 @@ monitoring-monorepo/
     ├── src/
     │   ├── app/
     │   │   ├── address-book/ # Address book page
-    │   │   └── api/address-labels/  # CRUD + export/import/backup routes
+    │   │   ├── api/address-labels/   # Labels CRUD + export/import/backup routes
+    │   │   └── api/address-reports/  # Forensic-report CRUD (auth-gated, 50KB markdown bodies)
     │   ├── components/
-    │   │   ├── address-label-editor.tsx   # Inline edit dialog
-    │   │   └── address-labels-provider.tsx  # Context: merges package + custom labels
+    │   │   ├── address-label-editor.tsx     # Modal with Label/Tags + Forensic Report tabs
+    │   │   ├── address-labels-provider.tsx  # Context: merges package + custom labels
+    │   │   ├── address-report-editor.tsx    # Markdown editor + preview for the report tab
+    │   │   └── markdown-renderer.tsx        # react-markdown wrapper used by the report editor
+    │   ├── hooks/
+    │   │   └── use-address-reports-index.ts # SWR hook for the lightweight report-presence index (powers the 📄 indicator)
     │   └── lib/
-    │       ├── address-labels.ts        # Upstash Redis data access (server-side)
-    │       ├── address-labels/import.ts # Import handlers (CSV/JSON/Snapshot/Gnosis Safe) for /api/address-labels/import
-    │       └── networks.ts              # Network defs; delegates token/label derivation to @mento-protocol/monitoring-config
+    │       ├── address-labels.ts             # Upstash Redis data access (server-side)
+    │       ├── address-labels/import.ts      # Import handlers (CSV/JSON/Snapshot/Gnosis Safe) for /api/address-labels/import
+    │       ├── address-reports.ts            # Upstash Redis data access for forensic reports
+    │       ├── address-reports-shared.ts     # Isomorphic types + sanitization for reports (50KB body cap)
+    │       └── networks.ts                   # Network defs; delegates token/label derivation to @mento-protocol/monitoring-config
     ├── public/               # Static assets
     ├── vercel.json           # Vercel config + daily backup cron
     └── next.config.ts        # Next.js config
 ```
+
+Standalone investigation drafts live under `docs/investigations/<address>-<slug>.md` — checked in for review history, then pasted into the Forensic Report tab once approved.
 
 ## Environment
 
