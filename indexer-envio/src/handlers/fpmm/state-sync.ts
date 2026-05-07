@@ -22,6 +22,7 @@ import { computeRebalanceUsd, normalizeRewardBps } from "../../usd";
 import {
   DEFAULT_ORACLE_FIELDS,
   maybePreloadPool,
+  selfHealInvertRateFeed,
   upsertPool,
   upsertSnapshot,
 } from "../../pool";
@@ -51,7 +52,7 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   // success path (to read invertRateFeed), so the "waste" on the RPC-null
   // path is tolerable and already cached by Envio's in-batch store.
   // Use raw srcAddress for RPC calls (not the namespaced poolId).
-  const [rebalancingState, existing] = await Promise.all([
+  const [rebalancingState, fetched] = await Promise.all([
     context.effect(rebalancingStateEffect, {
       chainId: event.chainId,
       poolAddress: asAddress(event.srcAddress),
@@ -59,6 +60,13 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     }),
     context.Pool.get(poolId),
   ]);
+  // Self-heal invertRateFeed before reading it for the oraclePrice flip.
+  // Without this, a pool deployed during an RPC blip whose first event is
+  // an UpdateReserves would persist wrong-side oraclePrice on its
+  // OracleSnapshot until the next FPMM event triggers upsertPool's heal.
+  const existing = fetched
+    ? await selfHealInvertRateFeed(context, fetched)
+    : undefined;
 
   let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
   // Hoist oraclePrice outside the if-block so it's accessible for OracleSnapshot
@@ -181,8 +189,8 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   // getter is already known missing (-2 sentinel from PR #222) — otherwise
   // every rebalance on an old FPMM would trigger an RPC that's guaranteed
   // to fail with `isUnsupportedGetterError`.
-  const existing = await context.Pool.get(poolId);
-  const incentiveGetterMissing = existing?.rebalanceReward === -2;
+  const initial = await context.Pool.get(poolId);
+  const incentiveGetterMissing = initial?.rebalanceReward === -2;
   const [rebalancingState, preReserves, blockScopedIncentive] =
     await Promise.all([
       context.effect(rebalancingStateEffect, {
@@ -209,6 +217,11 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
             blockNumber,
           }),
     ]);
+  // Self-heal invertRateFeed before reading it for the oraclePrice flip.
+  // Same rationale as the UpdateReserves handler.
+  const existing = initial
+    ? await selfHealInvertRateFeed(context, initial)
+    : undefined;
 
   const rebalancerAddress = asAddress(event.params.sender);
 

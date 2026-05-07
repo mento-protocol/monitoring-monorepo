@@ -182,13 +182,26 @@ export const tokenDecimalsScalingEffect = createEffect(
     rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
-  async ({ input }) =>
-    (await fetchTokenDecimalsScaling(
+  // Effect-calls-effect: when the FPMM-direct read fails, route the ERC20
+  // fallback through `erc20DecimalsEffect` rather than calling
+  // `fetchErc20Decimals` directly. This way two concurrent pool deployments
+  // that share a fallback token produce one ERC20 read per (chain, token)
+  // per batch instead of N. Trades a tiny bit of orchestration here for
+  // proper dedup on the slow-path.
+  async ({ input, context }) => {
+    const direct = await fetchTokenDecimalsScaling(
       input.chainId,
       input.poolAddress,
       input.fn as "decimals0" | "decimals1",
-      input.fallbackTokenAddress,
-    )) ?? undefined,
+    );
+    if (direct !== null) return direct;
+    if (!input.fallbackTokenAddress) return undefined;
+    const decimals = await context.effect(erc20DecimalsEffect, {
+      chainId: input.chainId,
+      tokenAddress: input.fallbackTokenAddress,
+    });
+    return decimals === undefined ? undefined : 10n ** BigInt(decimals);
+  },
 );
 
 // ---------------------------------------------------------------------------

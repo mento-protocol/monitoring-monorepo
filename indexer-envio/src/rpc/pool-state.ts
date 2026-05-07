@@ -231,11 +231,16 @@ function parseRebalancingState(result: unknown): RebalancingState {
 }
 
 /** Fetch on-chain getRebalancingState() for a pool at a specific block.
- * Returns null on RPC failure so callers preserve stale state.
+ * Returns null on RPC failure or `latest`-block fallback so callers
+ * preserve stale state instead of being silently fed wrong-block data.
+ * Matches the pattern in `fetchReserves` / `fetchRebalanceIncentiveAtBlock`.
  *
  * Cross-event dedup (FPMM emits 2× UR + 1× Rebalanced in the same rebalance
  * tx) is handled upstream by `rebalancingStateEffect` in src/rpc/effects.ts
- * — Envio's Effect API memoizes per-batch on identical inputs. */
+ * — Envio's Effect API memoizes per-batch on identical inputs. The
+ * `usedLatestFallback` null gate matters here: without it, the effect
+ * would memoize a `latest`-block result across the whole batch and serve
+ * it to every later caller as if it were block-scoped to their block. */
 export async function fetchRebalancingState(
   chainId: number,
   poolAddress: string,
@@ -247,7 +252,7 @@ export async function fetchRebalancingState(
   }
   try {
     const client = getRpcClient(chainId);
-    const { result } = await readContractWithBlockFallback(
+    const { result, usedLatestFallback } = await readContractWithBlockFallback(
       client,
       {
         address: poolAddress as `0x${string}`,
@@ -257,6 +262,7 @@ export async function fetchRebalancingState(
       blockNumber,
       getFallbackRpcClient(chainId),
     );
+    if (usedLatestFallback) return null;
     return parseRebalancingState(result);
   } catch (err) {
     logRpcFailure(
@@ -487,24 +493,15 @@ export async function fetchReportExpiry(
   }
 }
 
-/** Fetches decimals0() or decimals1() from an FPMM pool — returns the scaling
- *  factor (e.g. 1000000000000000000n for 18dp, 1000000n for 6dp).
- *  Falls back to calling ERC20 decimals() on the token contract if the pool
- *  method fails.
- *
- *  Known gap: when this fallback fires, it calls `fetchErc20Decimals`
- *  directly instead of routing through `erc20DecimalsEffect`. That bypasses
- *  effect-level dedup if two concurrent pool deployments share a fallback
- *  token. Practical impact is negligible — the fallback only fires when
- *  `decimals0()` / `decimals1()` reverts (rare, older deployments) — but
- *  flagging it here so we can revisit if profiling shows the path matters.
- *  Routing it through the effect would require plumbing a `context` arg
- *  through `fetchTokenDecimalsScaling`. */
+/** Fetches decimals0() or decimals1() from an FPMM pool — returns the
+ *  scaling factor (e.g. 1000000000000000000n for 18dp, 1000000n for 6dp).
+ *  Returns null on RPC failure so the caller (the effect handler) can
+ *  fall back to `erc20DecimalsEffect` and benefit from effect-level dedup
+ *  on shared fallback tokens. */
 export async function fetchTokenDecimalsScaling(
   chainId: number,
   poolAddress: string,
   fn: "decimals0" | "decimals1",
-  fallbackTokenAddress?: string,
 ): Promise<bigint | null> {
   try {
     const client = getRpcClient(chainId);
@@ -516,9 +513,7 @@ export async function fetchTokenDecimalsScaling(
     return result as bigint;
   } catch (err) {
     logRpcFailure(chainId, fn, poolAddress, err);
-    if (!fallbackTokenAddress) return null;
-    const decimals = await fetchErc20Decimals(chainId, fallbackTokenAddress);
-    return decimals == null ? null : 10n ** BigInt(decimals);
+    return null;
   }
 }
 

@@ -9,6 +9,7 @@ import {
   computeHealthStatus,
   maybePreloadPool,
   nextDeviationBreachStartedAt,
+  selfHealInvertRateFeed,
   upsertDailySnapshot,
 } from "../pool";
 import { recordBreachTransition } from "../deviationBreach";
@@ -49,8 +50,14 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
   // pools this collapses N sequential awaits into 1 concurrent batch.
   await Promise.all(
     poolIds.map(async (poolId) => {
-      const existing = await context.Pool.get(poolId);
-      if (!existing) return;
+      const initial = await context.Pool.get(poolId);
+      if (!initial) return;
+      // Self-heal invertRateFeed before computePriceDifference reads it.
+      // Without this, a pool deployed during an RPC blip whose only event
+      // post-deploy is OracleReported would persist wrong-orientation
+      // priceDifference / health / breach state until an FPMM event runs
+      // upsertPool's heal.
+      const existing = await selfHealInvertRateFeed(context, initial);
 
       // Resolve oracleExpiry from DB if already populated, otherwise fetch
       // via RPC (one-time seed — subsequent events use the DB value).
@@ -189,8 +196,11 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   // See OracleReported handler — parallel fan-out across distinct pools.
   await Promise.all(
     poolIds.map(async (poolId) => {
-      const existing = await context.Pool.get(poolId);
-      if (!existing) return;
+      const initial = await context.Pool.get(poolId);
+      if (!initial) return;
+      // Self-heal invertRateFeed before computePriceDifference — same
+      // rationale as the OracleReported handler above.
+      const existing = await selfHealInvertRateFeed(context, initial);
 
       const oracleExpiry =
         existing.oracleExpiry > 0n
