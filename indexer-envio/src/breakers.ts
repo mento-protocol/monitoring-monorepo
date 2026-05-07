@@ -188,12 +188,19 @@ const _bootstrapAttempted = new Set<string>();
  * effect-level dedup across blocks, that compounds into thousands of
  * wasted calls per hour. Capping retries to once per N seconds of CHAIN
  * time (not wall-clock) bounds the storm without giving up the eventual
- * recovery path. */
+ * recovery path.
+ *
+ * Soft-capped with FIFO eviction at the same `BOOTSTRAP_ATTEMPTED_MAX`
+ * cap as `_bootstrapAttempted` — a hostile feed that registers many
+ * distinct rateFeedIDs while the upstream RPC is broken would otherwise
+ * grow this map unboundedly. Eviction matches the success-cache pattern;
+ * markBootstrapAttempted's eviction also drops the paired backoff entry
+ * so the two caches don't drift. */
 const BOOTSTRAP_BACKOFF_SECONDS = 5n * 60n;
 const _bootstrapBackoffUntilTs = new Map<string, bigint>();
 
-/** @internal Test-only: clear the bootstrap-attempted cache between tests. */
-export function _clearBootstrapAttempted(): void {
+/** @internal Test-only: clear both bootstrap caches between tests. */
+export function _clearBootstrapCaches(): void {
   _bootstrapAttempted.clear();
   _bootstrapBackoffUntilTs.clear();
 }
@@ -222,10 +229,7 @@ export async function bootstrapFeedBreakerConfigs(
     blockNumber,
   });
   if (!breakerAddresses) {
-    _bootstrapBackoffUntilTs.set(
-      cacheKey,
-      blockTimestamp + BOOTSTRAP_BACKOFF_SECONDS,
-    );
+    setBootstrapBackoff(cacheKey, blockTimestamp + BOOTSTRAP_BACKOFF_SECONDS);
     return;
   }
   if (breakerAddresses.length === 0) {
@@ -270,13 +274,34 @@ export async function bootstrapFeedBreakerConfigs(
   }
 }
 
+/** Set a backoff TTL for a (chain, feed) tuple, applying FIFO eviction at
+ * the same `BOOTSTRAP_ATTEMPTED_MAX` cap so the two caches grow together.
+ * Map preserves insertion order, so `keys().next().value` is the oldest. */
+function setBootstrapBackoff(cacheKey: string, untilTs: bigint): void {
+  if (
+    _bootstrapBackoffUntilTs.size >= BOOTSTRAP_ATTEMPTED_MAX &&
+    !_bootstrapBackoffUntilTs.has(cacheKey)
+  ) {
+    const oldest = _bootstrapBackoffUntilTs.keys().next().value;
+    if (oldest !== undefined) _bootstrapBackoffUntilTs.delete(oldest);
+  }
+  _bootstrapBackoffUntilTs.set(cacheKey, untilTs);
+}
+
 /** Add a feed to the bootstrap-attempted cache, applying FIFO eviction when
  * we're at the soft cap. Sets preserve insertion order so we drop the oldest
- * entry; the evicted feed's next event simply re-bootstraps (idempotent). */
+ * entry; the evicted feed's next event simply re-bootstraps (idempotent).
+ * Paired backoff entry is dropped on eviction so the two caches stay in sync. */
 function markBootstrapAttempted(cacheKey: string): void {
-  if (_bootstrapAttempted.size >= BOOTSTRAP_ATTEMPTED_MAX) {
+  if (
+    _bootstrapAttempted.size >= BOOTSTRAP_ATTEMPTED_MAX &&
+    !_bootstrapAttempted.has(cacheKey)
+  ) {
     const oldest = _bootstrapAttempted.values().next().value;
-    if (oldest !== undefined) _bootstrapAttempted.delete(oldest);
+    if (oldest !== undefined) {
+      _bootstrapAttempted.delete(oldest);
+      _bootstrapBackoffUntilTs.delete(oldest);
+    }
   }
   _bootstrapAttempted.add(cacheKey);
 }
