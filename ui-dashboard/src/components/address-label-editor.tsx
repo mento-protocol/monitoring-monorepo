@@ -324,7 +324,12 @@ export function AddressLabelEditor({
               global report and the strict-either-or upsert would HDEL the
               original. Reports are scoped to the address row, not to the
               label radio. */}
-          <AddressReportEditor address={address} scope={startingScope} />
+          {/* Reports are address-keyed only — no scope. Same EVM address
+              means same entity (same private key derives the same address
+              across every chain), so a single report applies wherever the
+              address appears. The scope-radio above governs only the label,
+              not the forensic report. */}
+          <AddressReportEditor address={address} />
         </div>
       ) : (
         <form

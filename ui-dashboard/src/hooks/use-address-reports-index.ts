@@ -4,7 +4,6 @@ import { useCallback, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import useSWR from "swr";
 import type { AddressReportsIndex } from "@/lib/address-reports-shared";
-import type { Scope } from "@/lib/address-labels-shared";
 
 /**
  * Lightweight index of which addresses have a forensic report. Used to render
@@ -34,50 +33,27 @@ export function useAddressReportsIndex() {
     status === "authenticated" ? ADDRESS_REPORTS_INDEX_SWR_KEY : null,
     fetchReportsIndex,
     {
-      // Reports don't change often — 60s poll is plenty. Mirrors the
-      // SWR-polling defaults from the project's swr-polling-hasura checklist.
+      // Reports don't change often — 60s poll is plenty.
       refreshInterval: 60_000,
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
-      fallbackData: { global: [], chains: {} },
+      fallbackData: { addresses: [] },
     },
   );
 
-  // Pre-bucket addresses into per-scope sets so per-row `hasReport` lookups
-  // are O(1) — addresses arrive lowercased from the server, no per-call
-  // normalization needed beyond the input.
-  const addressSets = useMemo(() => {
-    const global = new Set<string>(data?.global ?? []);
-    const chains = new Map<string, Set<string>>();
-    for (const [chainId, list] of Object.entries(data?.chains ?? {})) {
-      chains.set(chainId, new Set(list));
-    }
-    return { global, chains };
-  }, [data]);
+  // Pre-bucket addresses into a Set so per-row `hasReport` lookups are O(1).
+  // Addresses arrive lowercased from the server.
+  const addressSet = useMemo(
+    () => new Set<string>(data?.addresses ?? []),
+    [data],
+  );
 
   const hasReport = useCallback(
-    (address: string | null, scope?: Scope): boolean => {
+    (address: string | null): boolean => {
       if (!address) return false;
-      const lower = address.toLowerCase();
-      // Strict scope match: a report shows only on the row whose scope
-      // matches exactly. No chain → global fallback — a global report
-      // shows on the global row, a chain report on its chain row. Keeping
-      // the two scopes independent removes the asymmetry that caused most
-      // of the codex/cursor scope-model findings on PR #330.
-      if (scope === "global") return addressSets.global.has(lower);
-      if (typeof scope === "number") {
-        return addressSets.chains.get(String(scope))?.has(lower) ?? false;
-      }
-      // No scope: cross-scope check (used by inline AddressLink, which
-      // doesn't know which scope a report lives in — surface 📄 if any
-      // report exists for the address).
-      if (addressSets.global.has(lower)) return true;
-      for (const set of addressSets.chains.values()) {
-        if (set.has(lower)) return true;
-      }
-      return false;
+      return addressSet.has(address.toLowerCase());
     },
-    [addressSets],
+    [addressSet],
   );
 
   return {

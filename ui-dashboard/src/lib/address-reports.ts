@@ -1,6 +1,4 @@
 import { Redis } from "@upstash/redis";
-import { NETWORKS } from "@/lib/networks";
-import type { Scope } from "@/lib/address-labels-shared";
 
 // Re-export isomorphic types and helpers so callers can import from a single
 // path. Mirrors the address-labels split.
@@ -15,50 +13,15 @@ export {
   upgradeReports,
 } from "./address-reports-shared";
 
-import {
-  upgradeReport,
-  type AddressReport,
-  type AddressReportsIndex,
-} from "./address-reports-shared";
+import { upgradeReport, type AddressReport } from "./address-reports-shared";
 
-// Redis key helpers
-
-const GLOBAL_KEY = "reports:global";
-
-function reportsKey(scope: Scope): string {
-  return scope === "global" ? GLOBAL_KEY : `reports:${scope}`;
-}
-
-// Static list of every scope key we may ever write to, derived from NETWORKS.
-// The strict-either-or Lua script iterates this deterministic key list so two
-// concurrent writers see the same set and the cross-scope HDEL stays
-// race-safe (Redis serializes Lua executions; HDEL on the target is filtered
-// inside the script).
-const ALL_REPORT_SCOPE_KEYS: readonly string[] = Object.freeze([
-  GLOBAL_KEY,
-  ...Array.from(
-    new Set(Object.values(NETWORKS).map((n) => `reports:${n.chainId}`)),
-  ),
-]);
-
-// Set of supported chainIds — orphan keys (e.g. `reports:99999` from legacy /
-// manual writes, or a future config drift) are filtered out so callers never
-// receive a scope they can't subsequently update via the strict-either-or
-// route.
-const SUPPORTED_CHAIN_IDS: ReadonlySet<number> = new Set(
-  Object.values(NETWORKS).map((n) => n.chainId),
-);
-
-function parseScopeFromKey(key: string): Scope | null {
-  if (key === GLOBAL_KEY) return "global";
-  const suffix = key.slice("reports:".length);
-  if (!/^\d+$/.test(suffix)) return null;
-  const n = Number(suffix);
-  if (!Number.isInteger(n) || n <= 0) return null;
-  return SUPPORTED_CHAIN_IDS.has(n) ? n : null;
-}
-
-// Redis client (server-side only)
+// Redis layout: a single `reports` hash keyed by lowercase address. Reports
+// are not chain-scoped — same EVM address means same entity (same private
+// key derives the same address across every chain), so a single global
+// report applies wherever the address appears. Earlier per-scope storage
+// caused recurring scope-mismatch bugs that the model itself doesn't
+// justify (PR #330).
+const REPORTS_KEY = "reports";
 
 function getRedis(): Redis {
   const url = process.env.UPSTASH_REDIS_REST_URL;
@@ -71,33 +34,28 @@ function getRedis(): Redis {
   return new Redis({ url, token });
 }
 
-// Atomic upsert script.
+// Atomic upsert script. Reads prior, increments version, preserves
+// createdAt, writes. Atomicity guards the version monotonicity invariant
+// against concurrent writers — without the script, two simultaneous saves
+// could both observe v=N and both write v=N+1.
 //
-// KEYS[1..N] = every scope key (the full ALL_REPORT_SCOPE_KEYS list).
-// ARGV[1]    = 1-based index into KEYS marking the target scope.
-// ARGV[2]    = address (lowercase).
-// ARGV[3]    = JSON-encoded payload (body + optional title/authorEmail/source).
-// ARGV[4]    = ISO timestamp for `now`.
+// KEYS[1]  = "reports"
+// ARGV[1]  = address (lowercase)
+// ARGV[2]  = JSON-encoded payload (body + optional title/authorEmail/source)
+// ARGV[3]  = ISO timestamp for `now`
 //
-// Reads the prior record (across every scope, since strict-either-or guarantees
-// at most one) inside the script so version increments and createdAt
-// preservation are race-free under concurrent writers — the prior version
-// is read in the same atomic execution that writes the new one. Returns the
-// JSON-encoded persisted record so the caller knows the assigned version.
+// Returns the JSON-encoded persisted record so the caller knows the
+// assigned version.
 const UPSERT_SCRIPT = `
-local targetIdx = tonumber(ARGV[1])
-local targetKey = KEYS[targetIdx]
-local addr = ARGV[2]
-local payload = cjson.decode(ARGV[3])
-local now = ARGV[4]
+local key = KEYS[1]
+local addr = ARGV[1]
+local payload = cjson.decode(ARGV[2])
+local now = ARGV[3]
 
+local existing = redis.call('HGET', key, addr)
 local prior = nil
-for i = 1, #KEYS do
-  local existing = redis.call('HGET', KEYS[i], addr)
-  if existing then
-    prior = cjson.decode(existing)
-    break
-  end
+if existing then
+  prior = cjson.decode(existing)
 end
 
 payload.createdAt = (prior and prior.createdAt) or now
@@ -105,83 +63,33 @@ payload.updatedAt = now
 payload.version = ((prior and prior.version) or 0) + 1
 
 local encoded = cjson.encode(payload)
-redis.call('HSET', targetKey, addr, encoded)
-
-for i = 1, #KEYS do
-  if i ~= targetIdx then
-    redis.call('HDEL', KEYS[i], addr)
-  end
-end
-
+redis.call('HSET', key, addr, encoded)
 return encoded
 `;
 
 // Data access helpers (all server-side)
 
-export async function getReport(
-  scope: Scope,
+/**
+ * Read the report for an address. Returns null if no report exists.
+ */
+export async function findReport(
   address: string,
 ): Promise<AddressReport | null> {
   const redis = getRedis();
   const raw = await redis.hget<Record<string, unknown>>(
-    reportsKey(scope),
+    REPORTS_KEY,
     address.toLowerCase(),
   );
   return raw ? upgradeReport(raw) : null;
 }
 
 /**
- * Read the report for an address across every scope (strict either/or means
- * at most one will be present). Returns the first match or null.
- *
- * When `preferredScope` is supplied, the lookup requires an EXACT scope
- * match — symmetric with `hasReport`'s strict-scope semantics. Reports are
- * scope-bound: a chain-scoped report is shown only on its chain's row, a
- * global report only on the global row. (The earlier chain → global
- * fallback was rolled back on PR #330 because it caused recurring
- * scope-model debt — see commit history if curious.)
- *
- * When `preferredScope` is omitted, returns the first match in any scope —
- * used by callers that don't have a row context (e.g. inline AddressLink).
- *
- * Issues all per-scope HGETs in parallel — sequential reads added 150–400 ms
- * to every modal open and every save (5 RTTs × Upstash REST latency).
- */
-export async function findReport(
-  address: string,
-  preferredScope?: Scope,
-): Promise<{ scope: Scope; report: AddressReport } | null> {
-  const redis = getRedis();
-  const lower = address.toLowerCase();
-  const results = await Promise.all(
-    ALL_REPORT_SCOPE_KEYS.map(async (key) => {
-      const raw = await redis.hget<Record<string, unknown>>(key, lower);
-      if (!raw) return null;
-      const scope = parseScopeFromKey(key);
-      if (scope === null) return null;
-      return { scope, report: upgradeReport(raw) };
-    }),
-  );
-  const matches = results.filter(
-    (r): r is { scope: Scope; report: AddressReport } => r !== null,
-  );
-  if (preferredScope === undefined) {
-    return matches[0] ?? null;
-  }
-  return matches.find((r) => r.scope === preferredScope) ?? null;
-}
-
-/**
- * Upsert a report at the target scope. Atomically increments `version` and
- * preserves `createdAt` from any prior record (across every scope) inside
- * a single Lua execution — concurrent writers can no longer both observe
- * the same prior version and both write `version + 1`.
- *
- * Strict-either-or is preserved by HDEL'ing the address from every other
- * scope in the same atomic block.
+ * Upsert a report for an address. Atomically increments `version` and
+ * preserves `createdAt` from any prior record inside a single Lua execution
+ * — concurrent writers can no longer both observe the same prior version
+ * and both write `version + 1`.
  */
 export async function upsertReport(
-  scope: Scope,
   address: string,
   payload: {
     body: string;
@@ -192,18 +100,7 @@ export async function upsertReport(
 ): Promise<AddressReport> {
   const redis = getRedis();
   const lower = address.toLowerCase();
-  const targetKey = reportsKey(scope);
   const now = new Date().toISOString();
-
-  // 1-based index for Lua. ALL_REPORT_SCOPE_KEYS is derived from NETWORKS so
-  // the target is always present; throw loudly if a future scope drift breaks
-  // that invariant rather than silently writing to KEYS[0] (= nil in Lua).
-  const targetIdx = ALL_REPORT_SCOPE_KEYS.indexOf(targetKey) + 1;
-  if (targetIdx === 0) {
-    throw new Error(
-      `Target scope key ${targetKey} not in ALL_REPORT_SCOPE_KEYS — NETWORKS config drift?`,
-    );
-  }
 
   // Send only user-controlled fields; the Lua script stamps createdAt /
   // updatedAt / version atomically based on the prior record.
@@ -217,48 +114,28 @@ export async function upsertReport(
   // The Upstash SDK auto-parses JSON-shaped responses (`parseResponse` →
   // `parseRecursive`), so the script's `cjson.encode(payload)` return value
   // arrives here as an already-deserialized object — calling JSON.parse on
-  // it would coerce to "[object Object]" and throw at runtime, breaking
-  // every save.
+  // it would coerce to "[object Object]" and throw at runtime.
   const result = (await redis.eval(
     UPSERT_SCRIPT,
-    [...ALL_REPORT_SCOPE_KEYS],
-    [String(targetIdx), lower, JSON.stringify(partial), now],
+    [REPORTS_KEY],
+    [lower, JSON.stringify(partial), now],
   )) as Record<string, unknown>;
 
   return upgradeReport(result);
 }
 
-export async function deleteReport(
-  scope: Scope,
-  address: string,
-): Promise<void> {
+export async function deleteReport(address: string): Promise<void> {
   const redis = getRedis();
-  await redis.hdel(reportsKey(scope), address.toLowerCase());
+  await redis.hdel(REPORTS_KEY, address.toLowerCase());
 }
 
 /**
- * Read just the addresses that have a report at each scope. Reads field
- * names only (HKEYS) — does NOT pull the 50KB report bodies the way an
- * HGETALL would, so the index endpoint stays cheap to poll on a 60s loop.
+ * Read just the addresses that have a report. Reads field names only
+ * (HKEYS) — does NOT pull the 50KB report bodies the way an HGETALL would,
+ * so the index endpoint stays cheap to poll on a 60s loop.
  */
-export async function getReportsIndex(): Promise<AddressReportsIndex> {
+export async function getReportsIndex(): Promise<{ addresses: string[] }> {
   const redis = getRedis();
-  const result: AddressReportsIndex = { global: [], chains: {} };
-
-  await Promise.all(
-    ALL_REPORT_SCOPE_KEYS.map(async (key) => {
-      const fields = await redis.hkeys(key);
-      if (!fields || fields.length === 0) return;
-      const parsedScope = parseScopeFromKey(key);
-      if (parsedScope === null) return;
-      const lower = fields.map((f) => f.toLowerCase());
-      if (parsedScope === "global") {
-        result.global = lower;
-      } else {
-        result.chains[String(parsedScope)] = lower;
-      }
-    }),
-  );
-
-  return result;
+  const fields = await redis.hkeys(REPORTS_KEY);
+  return { addresses: (fields ?? []).map((f) => f.toLowerCase()) };
 }

@@ -9,54 +9,34 @@ import {
   MAX_TITLE_LENGTH,
   type AddressReport,
 } from "@/lib/address-reports-shared";
-import type { Scope } from "@/lib/address-labels-shared";
 import { isValidAddress, relativeTimeFromIso } from "@/lib/format";
 
 type Props = {
   /** Address being edited. Empty string disables the form. */
   address: string;
-  /**
-   * Scope to use for NEW reports (the parent label tab's currently-selected
-   * scope). Edits to existing reports preserve `data.scope` instead — see
-   * `effectiveScope` in `handleSave` — so a report saved at "global" never
-   * silently moves when the user opens the modal from a per-chain row.
-   */
-  scope: Scope;
 };
-
-type SingleReportResponse = AddressReport & { scope: Scope };
 
 async function fetchSingleReport(
   address: string,
-  scope: Scope,
-): Promise<SingleReportResponse | null> {
-  // Pass the row's scope so the server applies the same chain → global
-  // fallback as the 📄 indicator. Without this, opening 0xABC from a Monad
-  // row could load 0xABC's Celo report.
-  const params = new URLSearchParams({
-    address,
-    scope: String(scope),
-  });
-  const res = await fetch(`/api/address-reports?${params.toString()}`, {
-    signal: AbortSignal.timeout(8_000),
-  });
+): Promise<AddressReport | null> {
+  const res = await fetch(
+    `/api/address-reports?address=${encodeURIComponent(address)}`,
+    { signal: AbortSignal.timeout(8_000) },
+  );
   if (res.status === 404) return null;
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `Failed to fetch report: ${res.status}`);
   }
-  return (await res.json()) as SingleReportResponse;
+  return (await res.json()) as AddressReport;
 }
 
-export function AddressReportEditor({ address, scope }: Props) {
+export function AddressReportEditor({ address }: Props) {
   const trimmed = address.trim();
   const normalizedAddress = trimmed.toLowerCase();
   const isAddressValid = isValidAddress(trimmed);
-  // Include scope in the SWR key so opening the same address from a global
-  // row vs a per-chain row doesn't share a stale cache entry pointing at
-  // the wrong scope's report.
   const swrKey = isAddressValid
-    ? `address-reports:single:${normalizedAddress}:${scope}`
+    ? `address-reports:single:${normalizedAddress}`
     : null;
 
   const {
@@ -64,11 +44,10 @@ export function AddressReportEditor({ address, scope }: Props) {
     isLoading,
     error: loadError,
     mutate,
-  } = useSWR<SingleReportResponse | null>(
-    swrKey,
-    () => fetchSingleReport(trimmed, scope),
-    { revalidateOnFocus: false, revalidateOnReconnect: false },
-  );
+  } = useSWR<AddressReport | null>(swrKey, () => fetchSingleReport(trimmed), {
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+  });
   const { mutate: globalMutate } = useSWRConfig();
 
   // Hydrate form state when the fetched report changes (or arrives for the
@@ -78,7 +57,7 @@ export function AddressReportEditor({ address, scope }: Props) {
   // user typing in the new-address flow doesn't carry a draft from one
   // address into the next when both happen to be empty.
   const recordKey = data
-    ? `${data.scope}:${data.updatedAt}:${data.version}`
+    ? `${data.updatedAt}:${data.version}`
     : `empty:${normalizedAddress}`;
   const [title, setTitle] = useState(data?.title ?? "");
   const [body, setBody] = useState(data?.body ?? "");
@@ -125,19 +104,13 @@ export function AddressReportEditor({ address, scope }: Props) {
     }
     setSaving(true);
     setError(null);
+    let saved = false;
     try {
-      // Edits preserve the report's existing scope; new reports go to the
-      // parent label tab's selected scope. Without this, editing a global
-      // report from a per-chain row (where the indicator surfaces it via
-      // the chain → global fallback) would silently move it to the chain
-      // scope on the first save.
-      const effectiveScope = data?.scope ?? scope;
       const res = await fetch("/api/address-reports", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         signal: AbortSignal.timeout(8_000),
         body: JSON.stringify({
-          scope: effectiveScope,
           address: trimmed,
           body,
           title: title.trim() || undefined,
@@ -151,43 +124,36 @@ export function AddressReportEditor({ address, scope }: Props) {
       }
       const out = (await res.json()) as {
         ok: boolean;
-        report: SingleReportResponse;
+        report: AddressReport;
       };
       await mutate(out.report, { revalidate: false });
-      // Invalidate OTHER per-scope SWR aliases for this address (not the
-      // current key — the local mutate above already set that to fresh
-      // data, and including it would clobber back to undefined). The same
-      // record can be cached under multiple keys (e.g. `:global` from the
-      // global row and `:42220` from a chain row via the chain → global
-      // fallback). Without this, opening a different row after save would
-      // serve a stale body until the local SWR revalidates.
-      // Pass the editor's `scope` prop (matches the local SWR key suffix),
-      // NOT `effectiveScope` (the report's persisted scope). When a global
-      // report is opened from a chain row via the chain→global fallback,
-      // these differ — using `effectiveScope` would exclude `:global` from
-      // the predicate while the actual local key is `:42220`, clobbering
-      // the just-saved local cache to undefined and stranding the editor.
-      await invalidateOtherAddressAliases(
-        globalMutate,
-        normalizedAddress,
-        scope,
-      );
-      // Refresh the index so the address-book 📄 indicator picks up the new
-      // entry without waiting for the next poll cycle.
-      await globalMutate(ADDRESS_REPORTS_INDEX_SWR_KEY);
+      saved = true;
       setPreviewMode(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed.");
     } finally {
       setSaving(false);
     }
+
+    // Post-save bookkeeping. Failures here do NOT undo the save — Redis
+    // persisted the report, the local cache already shows it, and a
+    // transient SWR mutate failure shouldn't be surfaced as "Save failed".
+    if (saved) {
+      try {
+        // Refresh the index so the address-book 📄 indicator picks up the
+        // new entry without waiting for the next poll cycle.
+        await globalMutate(ADDRESS_REPORTS_INDEX_SWR_KEY);
+      } catch (e) {
+        console.warn(
+          "[address-report-editor] post-save index refresh failed (save itself succeeded):",
+          e,
+        );
+      }
+    }
   }, [
     body,
     title,
-    scope,
-    data,
     trimmed,
-    normalizedAddress,
     isAddressValid,
     isLookupPending,
     overLimit,
@@ -207,12 +173,13 @@ export function AddressReportEditor({ address, scope }: Props) {
     }
     setDeleting(true);
     setError(null);
+    let deleted = false;
     try {
       const res = await fetch("/api/address-reports", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         signal: AbortSignal.timeout(8_000),
-        body: JSON.stringify({ scope: data.scope, address: trimmed }),
+        body: JSON.stringify({ address: trimmed }),
       });
       if (!res.ok) {
         const errBody = (await res.json().catch(() => ({}))) as {
@@ -221,17 +188,7 @@ export function AddressReportEditor({ address, scope }: Props) {
         throw new Error(errBody.error ?? `Delete failed: ${res.status}`);
       }
       await mutate(null, { revalidate: false });
-      // Same alias-invalidation key choice as save — use the editor's
-      // `scope` prop (matches the local SWR key) to exclude the just-set
-      // null. `data.scope` would point at the persisted scope, which can
-      // differ from the local key when the report was viewed via the
-      // chain→global fallback.
-      await invalidateOtherAddressAliases(
-        globalMutate,
-        normalizedAddress,
-        scope,
-      );
-      await globalMutate(ADDRESS_REPORTS_INDEX_SWR_KEY);
+      deleted = true;
       setTitle("");
       setBody("");
       setPreviewMode(false);
@@ -240,15 +197,18 @@ export function AddressReportEditor({ address, scope }: Props) {
     } finally {
       setDeleting(false);
     }
-  }, [
-    data,
-    hasExisting,
-    trimmed,
-    normalizedAddress,
-    scope,
-    mutate,
-    globalMutate,
-  ]);
+
+    if (deleted) {
+      try {
+        await globalMutate(ADDRESS_REPORTS_INDEX_SWR_KEY);
+      } catch (e) {
+        console.warn(
+          "[address-report-editor] post-delete index refresh failed (delete itself succeeded):",
+          e,
+        );
+      }
+    }
+  }, [data, hasExisting, trimmed, mutate, globalMutate]);
 
   if (!isAddressValid) {
     return (
@@ -392,19 +352,6 @@ export function AddressReportEditor({ address, scope }: Props) {
           </div>
         )}
 
-        {/* Scope display — mirrors the save logic so the user sees the
-            actual destination (existing report's scope, or label tab's scope
-            for new reports). */}
-        <div className="text-xs text-slate-500">
-          Saved to scope:{" "}
-          <span className="text-slate-300">
-            {(() => {
-              const s = data?.scope ?? scope;
-              return s === "global" ? "All chains" : `Chain ${s}`;
-            })()}
-          </span>
-        </div>
-
         {error && (
           <p role="alert" className="text-xs text-red-400">
             {error}
@@ -433,11 +380,8 @@ export function AddressReportEditor({ address, scope }: Props) {
             // Block while the initial lookup is pending — without this, the
             // user can type into the form before SWR returns and trigger
             // handleSave with `data === undefined`, which then takes the
-            // new-report code path (parent prop scope) and overwrites the
-            // existing report on save.
-            disabled={
-              saving || deleting || overLimit || !dirty || isLookupPending
-            }
+            // new-report code path and overwrites the existing report.
+            disabled={saving || deleting || overLimit || !dirty || isLoading}
             className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
           >
             {saving ? "Saving…" : hasExisting ? "Save changes" : "Save report"}
@@ -445,38 +389,5 @@ export function AddressReportEditor({ address, scope }: Props) {
         </div>
       </div>
     </div>
-  );
-}
-
-/**
- * Invalidate every OTHER per-scope SWR alias for a given address (the caller's
- * current scope is excluded — they've already updated that key with the
- * authoritative new value via the local `mutate`, so including it here would
- * clobber back to undefined).
- *
- * The single-report SWR key encodes scope
- * (`address-reports:single:${addr}:${scope}`), so the same persisted record
- * can be cached under multiple keys when the user opens it from different
- * rows. Call this after any write/delete so future re-mounts of a different
- * scope row never serve a stale alias.
- *
- * Note for reviewers: passing `undefined` as the second arg with
- * `{ revalidate: false }` IS a real cache clear in SWR v2.4 — the
- * `populateCache: true` default routes through `set({ data: undefined, … })`
- * (see `config-context-12s-CCVTDPOP.mjs` ~line 355). It is NOT the
- * "do nothing" no-op some SWR docs imply for two-arg `mutate(key, undefined)`.
- */
-function invalidateOtherAddressAliases(
-  globalMutate: ReturnType<typeof useSWRConfig>["mutate"],
-  normalizedAddress: string,
-  currentScope: Scope,
-): Promise<unknown> {
-  const prefix = `address-reports:single:${normalizedAddress}:`;
-  const currentKey = `${prefix}${currentScope}`;
-  return globalMutate(
-    (key) =>
-      typeof key === "string" && key.startsWith(prefix) && key !== currentKey,
-    undefined,
-    { revalidate: false },
   );
 }

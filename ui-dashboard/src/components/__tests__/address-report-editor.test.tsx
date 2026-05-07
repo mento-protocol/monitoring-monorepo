@@ -69,16 +69,10 @@ let fetchMock: Mock;
 function render(
   props: {
     address?: string;
-    scope?: "global" | number;
   } = {},
 ): void {
   act(() => {
-    root.render(
-      <AddressReportEditor
-        address={props.address ?? VALID_ADDR}
-        scope={props.scope ?? "global"}
-      />,
-    );
+    root.render(<AddressReportEditor address={props.address ?? VALID_ADDR} />);
   });
 }
 
@@ -101,7 +95,6 @@ beforeEach(() => {
       report: {
         body: "x",
         version: 1,
-        scope: "global",
         createdAt: "2026-05-07T00:00:00Z",
         updatedAt: "2026-05-07T00:00:00Z",
       },
@@ -142,14 +135,6 @@ function findButton(text: string): HTMLButtonElement | null {
       (b) => b.textContent?.trim() === text,
     ) as HTMLButtonElement | undefined) ?? null
   );
-}
-
-function clickButton(text: string): void {
-  const btn = findButton(text);
-  if (!btn) throw new Error(`button "${text}" not found`);
-  act(() => {
-    btn.click();
-  });
 }
 
 function setTextarea(id: string, value: string): void {
@@ -204,7 +189,6 @@ describe("AddressReportEditor — loaded state", () => {
       title: "T",
       authorEmail: "alice@mentolabs.xyz",
       version: 3,
-      scope: "global" as const,
       createdAt: "2026-05-07T00:00:00Z",
       updatedAt: "2026-05-07T00:00:00Z",
     };
@@ -217,14 +201,6 @@ describe("AddressReportEditor — loaded state", () => {
     expect(findButton("Edit")).not.toBeNull();
     expect(findButton("Preview")).not.toBeNull();
     expect(findButton("Save changes")).not.toBeNull();
-  });
-
-  it("shows Saved to scope = data.scope (not parent prop) — regression for #330 codex finding", () => {
-    // Parent passes scope=42220 (per-chain) but the report lives in global.
-    // The scope display must reflect the persisted scope, not the prop.
-    render({ scope: 42220 });
-    expect(findByTextIncludes("Saved to scope:")).not.toBeNull();
-    expect(findByTextIncludes("All chains")).not.toBeNull();
   });
 });
 
@@ -254,50 +230,7 @@ describe("AddressReportEditor — load error", () => {
   });
 });
 
-describe("AddressReportEditor — SWR alias invalidation (regression for #330)", () => {
-  it("save invalidates every OTHER per-scope cache key (predicate excludes current scope)", async () => {
-    // New report: data === null, so effectiveScope falls back to parent prop (42220).
-    mockSwrData = null;
-    render({ scope: 42220 });
-    setTextarea("ar-body", "x");
-    await act(async () => {
-      findButton("Save report")?.click();
-    });
-
-    // Predicate-based mutate call. The local SWR mutate already wrote
-    // out.report to `:42220`; the predicate must NOT match that key
-    // (otherwise we'd clobber the freshly-saved cache to undefined).
-    const predicateCalls = mockGlobalMutate.mock.calls.filter(
-      (call) => typeof call[0] === "function",
-    );
-    expect(predicateCalls.length).toBeGreaterThan(0);
-    const [predicateArg, dataArg, optsArg] = predicateCalls[0]!;
-    const predicate = predicateArg as (k: unknown) => boolean;
-    const lower = VALID_ADDR.toLowerCase();
-
-    // OTHER scope variants must match (so they get invalidated)...
-    expect(predicate(`address-reports:single:${lower}:global`)).toBe(true);
-    expect(predicate(`address-reports:single:${lower}:10143`)).toBe(true);
-    // ...current scope must NOT match (would clobber the just-saved data)...
-    expect(predicate(`address-reports:single:${lower}:42220`)).toBe(false);
-    // ...different address must NOT match...
-    expect(
-      predicate(
-        `address-reports:single:${SECOND_VALID_ADDR.toLowerCase()}:global`,
-      ),
-    ).toBe(false);
-    // ...and NOT the index key.
-    expect(predicate("address-reports:index")).toBe(false);
-
-    // Args must be (predicate, undefined, { revalidate: false }) — that
-    // shape triggers SWR's populateCache=true → set({data: undefined}) path
-    // in v2.4 (config-context-12s-CCVTDPOP.mjs ~line 355). NOT a no-op.
-    expect(dataArg).toBeUndefined();
-    expect(optsArg).toEqual({ revalidate: false });
-  });
-});
-
-describe("AddressReportEditor — save scope (regression for #330)", () => {
+describe("AddressReportEditor — save", () => {
   it("keeps Save disabled while the initial lookup is still loading", () => {
     mockSwrData = undefined;
     mockSwrError = undefined;
@@ -308,44 +241,22 @@ describe("AddressReportEditor — save scope (regression for #330)", () => {
     expect(findButton("Save report")?.disabled).toBe(true);
   });
 
-  it("sends scope = data.scope when editing an existing report", async () => {
-    // Existing report at global scope; parent passes per-chain scope.
-    mockSwrData = {
-      body: "old body",
-      version: 1,
-      scope: "global" as const,
-      createdAt: "2026-05-07T00:00:00Z",
-      updatedAt: "2026-05-07T00:00:00Z",
-    };
-    render({ scope: 42220 });
-
-    // Switch to edit mode + change the body so dirty=true, save enabled.
-    clickButton("Edit");
-    setTextarea("ar-body", "old body — with edits");
-    await act(async () => {
-      findButton("Save changes")?.click();
-    });
-
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [, init] = fetchMock.mock.calls[0]!;
-    const body = JSON.parse((init as RequestInit).body as string);
-    // scope must be the report's persisted scope, not the parent's prop.
-    expect(body.scope).toBe("global");
-    expect(body.address).toBe(VALID_ADDR);
-  });
-
-  it("sends scope = parent prop when creating a new report", async () => {
-    mockSwrData = null; // no existing report
-    render({ scope: 42220 });
+  it("sends only address + body + title (no scope) on save", async () => {
+    mockSwrData = null;
+    render();
     setTextarea("ar-body", "first draft");
     await act(async () => {
       findButton("Save report")?.click();
     });
 
     expect(fetchMock).toHaveBeenCalledOnce();
-    const [, init] = fetchMock.mock.calls[0]!;
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/address-reports");
     const body = JSON.parse((init as RequestInit).body as string);
-    expect(body.scope).toBe(42220);
+    expect(body.address).toBe(VALID_ADDR);
+    expect(body.body).toBe("first draft");
+    // Reports are address-keyed only — no scope in the request body.
+    expect(body.scope).toBeUndefined();
   });
 
   it("save fetch uses AbortSignal.timeout (defense against wedged TCP)", async () => {
@@ -357,5 +268,21 @@ describe("AddressReportEditor — save scope (regression for #330)", () => {
     });
     const [, init] = fetchMock.mock.calls[0]!;
     expect((init as RequestInit).signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("on save, refreshes the index but not per-scope aliases (none exist)", async () => {
+    mockSwrData = null;
+    render();
+    setTextarea("ar-body", "x");
+    await act(async () => {
+      findButton("Save report")?.click();
+    });
+
+    // Only the lightweight address-reports index gets refreshed via
+    // globalMutate — there are no per-scope aliases under the global-only
+    // model so we don't need a predicate-based invalidation.
+    const calls = mockGlobalMutate.mock.calls;
+    expect(calls.some((c) => c[0] === "address-reports:index")).toBe(true);
+    expect(calls.some((c) => typeof c[0] === "function")).toBe(false);
   });
 });

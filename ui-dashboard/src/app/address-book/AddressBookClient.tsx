@@ -222,7 +222,7 @@ export default function AddressBookPage({
                     createdAt={row.createdAt ?? resolved?.entry.createdAt}
                     updatedAt={row.updatedAt ?? resolved?.entry.updatedAt}
                     canEdit={userCanEdit}
-                    reportPresent={hasReport(row.address, row.scope)}
+                    reportPresent={hasReport(row.address)}
                     explorerUrl={
                       row.network.explorerBaseUrl
                         ? explorerAddressUrl(row.network, row.address)

@@ -6,12 +6,12 @@
  * bodies up to 50KB. Distinct from the 500-char `notes` field on AddressEntry,
  * which stays optimised for short recognition labels.
  *
- * Reports live in their own Redis hashes (`reports:global`, `reports:{chainId}`)
- * with the same strict either/or scope invariant as address-labels: each
- * address has at most one report, in exactly one scope.
+ * Reports are address-keyed only — there is no chain/global scope. Same EVM
+ * address → same entity (same private key derives the same address across
+ * every chain), so a single report applies wherever the address appears.
+ * The earlier per-scope storage caused recurring scope-mismatch bugs that
+ * the model itself doesn't justify; rolled back to address-only on PR #330.
  */
-
-import type { Scope } from "./address-labels-shared";
 
 export type AddressReport = {
   /** Markdown body of the report. Capped at MAX_BODY_LENGTH characters. */
@@ -37,28 +37,22 @@ export type AddressReport = {
 };
 
 /**
- * Per-scope index of addresses that have a report — bodies, titles, and
- * other metadata are NOT included so the index endpoint only reads field
- * names from Redis (HKEYS), not full 50KB hash values.
- *
+ * Index of addresses that have a report — just the lowercase address list.
  * The 📄 indicator only needs existence; the editor fetches the full
- * report on open via `?address=...`, which is also where title / version /
- * authorEmail / updatedAt come from.
+ * report on open by address, which is where title / version / authorEmail /
+ * updatedAt come from.
  */
 export type AddressReportsIndex = {
-  /** Lowercase 0x addresses with a report at "global" scope. */
-  global: string[];
-  /** chainId (string) → lowercase addresses with a report at that scope. */
-  chains: Record<string, string[]>;
+  /** Lowercase 0x addresses with a report. */
+  addresses: string[];
 };
 
-/** Full record including the address + scope it lives in. */
+/** Full record including the address. */
 export type AddressReportRecord = AddressReport & {
   address: string;
-  scope: Scope;
 };
 
-// Limits — Phase 1 cap is 50KB per body (50,000 characters).
+// Limits — 50KB per body (50,000 characters).
 export const MAX_BODY_LENGTH = 50_000;
 export const MAX_TITLE_LENGTH = 200;
 

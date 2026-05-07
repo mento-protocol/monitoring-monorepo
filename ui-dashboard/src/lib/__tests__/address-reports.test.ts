@@ -3,20 +3,10 @@
  * match real SDK behavior — particularly that `redis.eval`'s response is
  * auto-deserialized: a script that returns `cjson.encode(table)` arrives in
  * JS as an already-parsed object, NOT a string.
- *
- * Cursor flagged a regression on PR #330 / commit 31a1167 where
- * `JSON.parse(encoded)` was being called on that already-parsed object,
- * coercing to `"[object Object]"` and throwing on every save. This file
- * pins the contract so a future "fix" doesn't accidentally re-introduce
- * the parse.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock @upstash/redis to a controllable Redis client. The real SDK
-// auto-deserializes JSON via parseResponse → parseRecursive (see
-// node_modules/@upstash/redis/nodejs.js); reproducing that here is what
-// makes the test catch the regression.
 const mockEval = vi.fn();
 const mockHget = vi.fn();
 const mockHkeys = vi.fn();
@@ -65,7 +55,7 @@ describe("upsertReport — Upstash auto-deserialization contract", () => {
 
     const { upsertReport } = await import("@/lib/address-reports");
 
-    const saved = await upsertReport("global", ADDR, {
+    const saved = await upsertReport(ADDR, {
       body: "x",
       authorEmail: "alice@mentolabs.xyz",
       source: "manual",
@@ -91,105 +81,74 @@ describe("upsertReport — Upstash auto-deserialization contract", () => {
     });
 
     const { upsertReport } = await import("@/lib/address-reports");
-    const saved = await upsertReport("global", ADDR, { body: "x" });
+    const saved = await upsertReport(ADDR, { body: "x" });
     expect(saved.version).toBe(7);
+  });
+
+  it("targets the single `reports` Redis hash (no scope)", async () => {
+    mockEval.mockResolvedValueOnce({
+      body: "x",
+      createdAt: "1",
+      updatedAt: "1",
+      version: 1,
+    });
+    const { upsertReport } = await import("@/lib/address-reports");
+    await upsertReport(ADDR, { body: "x" });
+    const callArgs = mockEval.mock.calls[0]!;
+    // KEYS arg is the second positional — should be ["reports"], no scope.
+    expect(callArgs[1]).toEqual(["reports"]);
   });
 });
 
-describe("findReport — preferredScope filter (strict scope match)", () => {
-  it("returns chain match when preferredScope matches", async () => {
-    // ALL_REPORT_SCOPE_KEYS iterates in derivation order; mock per-key.
-    mockHget.mockImplementation((key: string) => {
-      if (key === "reports:42220") {
-        return Promise.resolve({
-          body: "celo",
-          createdAt: "1",
-          updatedAt: "1",
-          version: 1,
-        });
-      }
-      return Promise.resolve(null);
-    });
-
-    const { findReport } = await import("@/lib/address-reports");
-    const found = await findReport(ADDR, 42220);
-    expect(found).not.toBeNull();
-    expect(found?.scope).toBe(42220);
-    expect(found?.report.body).toBe("celo");
-  });
-
-  it("does NOT return a global report when a chain scope is requested (strict match)", async () => {
-    // Strict-scope mode: a chain row must NOT see a global report. If the
-    // user wants the global one, they should open the global row.
-    mockHget.mockImplementation((key: string) => {
-      if (key === "reports:global") {
-        return Promise.resolve({
-          body: "global",
-          createdAt: "1",
-          updatedAt: "1",
-          version: 1,
-        });
-      }
-      return Promise.resolve(null);
-    });
-
-    const { findReport } = await import("@/lib/address-reports");
-    const found = await findReport(ADDR, 42220);
-    expect(found).toBeNull();
-  });
-
-  it("does NOT return a chain-scoped report when a different chain is requested", async () => {
-    mockHget.mockImplementation((key: string) => {
-      if (key === "reports:42220") {
-        return Promise.resolve({
-          body: "celo only",
-          createdAt: "1",
-          updatedAt: "1",
-          version: 1,
-        });
-      }
-      return Promise.resolve(null);
-    });
-
-    const { findReport } = await import("@/lib/address-reports");
-    // Request from Monad scope — should not see the Celo report.
-    const found = await findReport(ADDR, 10143);
-    expect(found).toBeNull();
-  });
-
-  it("global request only returns global match", async () => {
-    mockHget.mockImplementation((key: string) => {
-      if (key === "reports:42220") {
-        return Promise.resolve({
-          body: "celo",
-          createdAt: "1",
-          updatedAt: "1",
-          version: 1,
-        });
-      }
-      return Promise.resolve(null);
-    });
-
-    const { findReport } = await import("@/lib/address-reports");
-    const found = await findReport(ADDR, "global");
-    expect(found).toBeNull();
-  });
-
-  it("no preferredScope returns first match (back-compat)", async () => {
-    mockHget.mockImplementation((key: string) => {
-      if (key === "reports:42220") {
-        return Promise.resolve({
-          body: "celo",
-          createdAt: "1",
-          updatedAt: "1",
-          version: 1,
-        });
-      }
-      return Promise.resolve(null);
+describe("findReport — single-key lookup", () => {
+  it("returns the report when it exists", async () => {
+    mockHget.mockResolvedValueOnce({
+      body: "yo",
+      createdAt: "1",
+      updatedAt: "1",
+      version: 1,
     });
 
     const { findReport } = await import("@/lib/address-reports");
     const found = await findReport(ADDR);
-    expect(found?.scope).toBe(42220);
+    expect(found).not.toBeNull();
+    expect(found?.body).toBe("yo");
+    expect(mockHget).toHaveBeenCalledWith("reports", ADDR.toLowerCase());
+  });
+
+  it("returns null when no report exists", async () => {
+    mockHget.mockResolvedValueOnce(null);
+    const { findReport } = await import("@/lib/address-reports");
+    const found = await findReport(ADDR);
+    expect(found).toBeNull();
+  });
+
+  it("normalizes the address to lowercase for the lookup", async () => {
+    mockHget.mockResolvedValueOnce(null);
+    const { findReport } = await import("@/lib/address-reports");
+    await findReport("0xB64C8B0A3F8008D5028D8F9323B858F17B18C3C4");
+    expect(mockHget).toHaveBeenCalledWith(
+      "reports",
+      "0xb64c8b0a3f8008d5028d8f9323b858f17b18c3c4",
+    );
+  });
+});
+
+describe("getReportsIndex — addresses-only", () => {
+  it("returns the lowercase address list with no metadata", async () => {
+    mockHkeys.mockResolvedValueOnce(["0xaaa", "0xBBB"]);
+    const { getReportsIndex } = await import("@/lib/address-reports");
+    const idx = await getReportsIndex();
+    expect(idx.addresses).toEqual(["0xaaa", "0xbbb"]);
+  });
+
+  it("hits HKEYS, never HGETALL — bandwidth guard for 50KB bodies", async () => {
+    mockHkeys.mockResolvedValueOnce([]);
+    const { getReportsIndex } = await import("@/lib/address-reports");
+    await getReportsIndex();
+    // Verify the bandwidth-cheap path is used — HKEYS returns field names
+    // only. If a future change switches to HGETALL the 60s poll loop would
+    // ship every 50KB body.
+    expect(mockHkeys).toHaveBeenCalledWith("reports");
   });
 });

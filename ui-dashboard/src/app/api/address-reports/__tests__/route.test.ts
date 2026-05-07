@@ -15,7 +15,7 @@ vi.mock("@/lib/address-reports", async () => {
   >("@/lib/address-reports-shared");
   return {
     findReport: vi.fn(),
-    getReportsIndex: vi.fn().mockResolvedValue({ global: [], chains: {} }),
+    getReportsIndex: vi.fn().mockResolvedValue({ addresses: [] }),
     upsertReport: vi.fn(),
     deleteReport: vi.fn().mockResolvedValue(undefined),
     sanitizeReportInput: shared.sanitizeReportInput,
@@ -66,19 +66,14 @@ describe("GET /api/address-reports", () => {
   it("returns the addresses-only index when authenticated", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
     (getReportsIndex as ReturnType<typeof vi.fn>).mockResolvedValue({
-      global: [VALID_ADDR],
-      chains: { "42220": ["0xaaaa"] },
+      addresses: [VALID_ADDR, "0xaaaa"],
     });
     const res = await GET(
       new NextRequest("http://localhost/api/address-reports"),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      global: string[];
-      chains: Record<string, string[]>;
-    };
-    expect(body.global).toEqual([VALID_ADDR]);
-    expect(body.chains["42220"]).toEqual(["0xaaaa"]);
+    const body = (await res.json()) as { addresses: string[] };
+    expect(body.addresses).toEqual([VALID_ADDR, "0xaaaa"]);
   });
 
   it("returns 404 when single report not found", async () => {
@@ -92,17 +87,14 @@ describe("GET /api/address-reports", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns the report with its scope when found", async () => {
+  it("returns the report when found", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
     (findReport as ReturnType<typeof vi.fn>).mockResolvedValue({
-      scope: 42220,
-      report: {
-        body: "# hello",
-        title: "T",
-        version: 3,
-        createdAt: "2026-01-01T00:00:00Z",
-        updatedAt: "2026-05-07T00:00:00Z",
-      },
+      body: "# hello",
+      title: "T",
+      version: 3,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-05-07T00:00:00Z",
     });
     const res = await GET(
       new NextRequest(
@@ -110,9 +102,9 @@ describe("GET /api/address-reports", () => {
       ),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { scope: number; body: string };
-    expect(body.scope).toBe(42220);
+    const body = (await res.json()) as { body: string; version: number };
     expect(body.body).toBe("# hello");
+    expect(body.version).toBe(3);
   });
 
   it("returns 400 on an invalid address query param", async () => {
@@ -130,26 +122,18 @@ describe("PUT /api/address-reports", () => {
     const res = await PUT(
       new NextRequest("http://localhost/api/address-reports", {
         method: "PUT",
-        body: JSON.stringify({
-          scope: "global",
-          address: VALID_ADDR,
-          body: "x",
-        }),
+        body: JSON.stringify({ address: VALID_ADDR, body: "x" }),
       }),
     );
     expect(res.status).toBe(401);
   });
 
-  it("rejects an unsupported chainId scope", async () => {
+  it("rejects an invalid address", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
     const res = await PUT(
       new NextRequest("http://localhost/api/address-reports", {
         method: "PUT",
-        body: JSON.stringify({
-          scope: 999_999,
-          address: VALID_ADDR,
-          body: "x",
-        }),
+        body: JSON.stringify({ address: "not-hex", body: "x" }),
       }),
     );
     expect(res.status).toBe(400);
@@ -161,11 +145,7 @@ describe("PUT /api/address-reports", () => {
     const res = await PUT(
       new NextRequest("http://localhost/api/address-reports", {
         method: "PUT",
-        body: JSON.stringify({
-          scope: "global",
-          address: VALID_ADDR,
-          body: tooBig,
-        }),
+        body: JSON.stringify({ address: VALID_ADDR, body: tooBig }),
       }),
     );
     expect(res.status).toBe(400);
@@ -186,7 +166,6 @@ describe("PUT /api/address-reports", () => {
       new NextRequest("http://localhost/api/address-reports", {
         method: "PUT",
         body: JSON.stringify({
-          scope: "global",
           address: VALID_ADDR,
           body: "x",
           // attempt to spoof the author — must be ignored
@@ -197,7 +176,8 @@ describe("PUT /api/address-reports", () => {
 
     expect(upsertReport).toHaveBeenCalledOnce();
     const args = (upsertReport as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(args[2]).toMatchObject({ authorEmail: "alice@mentolabs.xyz" });
+    // upsertReport(address, payload) — payload is the second arg.
+    expect(args[1]).toMatchObject({ authorEmail: "alice@mentolabs.xyz" });
   });
 });
 
@@ -207,35 +187,23 @@ describe("DELETE /api/address-reports", () => {
     const res = await DELETE(
       new NextRequest("http://localhost/api/address-reports", {
         method: "DELETE",
-        body: JSON.stringify({ scope: "global", address: VALID_ADDR }),
+        body: JSON.stringify({ address: VALID_ADDR }),
       }),
     );
     expect(res.status).toBe(401);
     expect(deleteReport).not.toHaveBeenCalled();
   });
 
-  it("deletes when authenticated with valid scope", async () => {
+  it("deletes when authenticated", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
     const res = await DELETE(
       new NextRequest("http://localhost/api/address-reports", {
         method: "DELETE",
-        body: JSON.stringify({ scope: "global", address: VALID_ADDR }),
+        body: JSON.stringify({ address: VALID_ADDR }),
       }),
     );
     expect(res.status).toBe(200);
-    expect(deleteReport).toHaveBeenCalledWith("global", VALID_ADDR);
-  });
-
-  it("rejects an invalid scope", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
-    const res = await DELETE(
-      new NextRequest("http://localhost/api/address-reports", {
-        method: "DELETE",
-        body: JSON.stringify({ scope: "not-a-scope", address: VALID_ADDR }),
-      }),
-    );
-    expect(res.status).toBe(400);
-    expect(deleteReport).not.toHaveBeenCalled();
+    expect(deleteReport).toHaveBeenCalledWith(VALID_ADDR);
   });
 
   it("rejects an invalid address", async () => {
@@ -243,7 +211,7 @@ describe("DELETE /api/address-reports", () => {
     const res = await DELETE(
       new NextRequest("http://localhost/api/address-reports", {
         method: "DELETE",
-        body: JSON.stringify({ scope: "global", address: "not-hex" }),
+        body: JSON.stringify({ address: "not-hex" }),
       }),
     );
     expect(res.status).toBe(400);
@@ -260,7 +228,6 @@ describe("body-size guard", () => {
         // 1 MiB content-length forces the early-exit before req.json runs.
         headers: { "content-length": String(1024 * 1024) },
         body: JSON.stringify({
-          scope: "global",
           address: VALID_ADDR,
           body: "x",
         }),
@@ -270,17 +237,19 @@ describe("body-size guard", () => {
     expect(upsertReport).not.toHaveBeenCalled();
   });
 
-  it("DELETE returns 413 when content-length exceeds its smaller cap", async () => {
+  it("PUT enforces byte cap even without content-length header", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(SESSION);
-    const res = await DELETE(
-      new NextRequest("http://localhost/api/address-reports", {
-        method: "DELETE",
-        // DELETE cap is 4 KiB — 8 KiB triggers the early reject.
-        headers: { "content-length": String(8 * 1024) },
-        body: JSON.stringify({ scope: "global", address: VALID_ADDR }),
-      }),
-    );
+    // Construct a body that's over the 256KB PUT cap. Drop the
+    // content-length header to simulate a chunked request.
+    const oversizedBody = "a".repeat(300 * 1024);
+    const req = new NextRequest("http://localhost/api/address-reports", {
+      method: "PUT",
+      body: JSON.stringify({ address: VALID_ADDR, body: oversizedBody }),
+    });
+    // Force absent content-length to simulate chunked transfer.
+    req.headers.delete("content-length");
+    const res = await PUT(req);
     expect(res.status).toBe(413);
-    expect(deleteReport).not.toHaveBeenCalled();
+    expect(upsertReport).not.toHaveBeenCalled();
   });
 });
