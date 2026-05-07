@@ -48,7 +48,12 @@ export function AddressReportEditor({ address, scope }: Props) {
     ? `address-reports:single:${trimmed.toLowerCase()}`
     : null;
 
-  const { data, isLoading, mutate } = useSWR<SingleReportResponse | null>(
+  const {
+    data,
+    isLoading,
+    error: loadError,
+    mutate,
+  } = useSWR<SingleReportResponse | null>(
     swrKey,
     () => fetchSingleReport(trimmed),
     { revalidateOnFocus: false, revalidateOnReconnect: false },
@@ -193,6 +198,35 @@ export function AddressReportEditor({ address, scope }: Props) {
       <div className="px-5 py-4 text-sm text-slate-400">
         Enter a valid address on the <strong>Label &amp; Tags</strong> tab
         before adding a forensic report.
+      </div>
+    );
+  }
+
+  // Surface read failures explicitly. Without this, a Redis/Upstash hiccup
+  // collapses into the same "No report yet" copy as a genuinely empty
+  // record — the user might then type a fresh body and silently overwrite
+  // the existing report on save (the Lua upsert preserves createdAt + bumps
+  // version, so data isn't destroyed, but body content IS).
+  if (loadError && !data) {
+    return (
+      <div className="px-5 py-4 space-y-3">
+        <p role="alert" className="text-sm text-red-400">
+          Could not load this report:{" "}
+          <span className="font-mono text-xs">
+            {loadError instanceof Error ? loadError.message : String(loadError)}
+          </span>
+        </p>
+        <button
+          type="button"
+          onClick={() => mutate()}
+          className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 hover:text-white transition-colors"
+        >
+          Retry
+        </button>
+        <p className="text-xs text-slate-500">
+          The Forensic Report tab is disabled while the read fails — close and
+          reopen the modal once the issue is resolved.
+        </p>
       </div>
     );
   }
