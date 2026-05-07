@@ -15,12 +15,12 @@ import { recordBreachTransition } from "../deviationBreach";
 import { recordHealthSample } from "../healthScore";
 import { computeMedianLineageNext } from "../oracleJump";
 import {
-  fetchReportExpiry,
   getPoolsByFeed,
   updatePoolsOracleExpiry,
   getPoolsWithReferenceFeed,
   getBreakerConfigsByFeed,
 } from "../rpc";
+import { reportExpiryEffect } from "../rpc/effects";
 import { bootstrapFeedBreakerConfigs, nextMedianEMA } from "../breakers";
 
 // ---------------------------------------------------------------------------
@@ -57,11 +57,11 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
       const oracleExpiry =
         existing.oracleExpiry > 0n
           ? existing.oracleExpiry
-          : ((await fetchReportExpiry(
-              event.chainId,
+          : ((await context.effect(reportExpiryEffect, {
+              chainId: event.chainId,
               rateFeedID,
               blockNumber,
-            )) ?? existing.oracleExpiry);
+            })) ?? existing.oracleExpiry);
 
       const oraclePrice = event.params.value;
 
@@ -195,11 +195,11 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
       const oracleExpiry =
         existing.oracleExpiry > 0n
           ? existing.oracleExpiry
-          : ((await fetchReportExpiry(
-              event.chainId,
+          : ((await context.effect(reportExpiryEffect, {
+              chainId: event.chainId,
               rateFeedID,
               blockNumber,
-            )) ?? existing.oracleExpiry);
+            })) ?? existing.oracleExpiry);
 
       const lineage = computeMedianLineageNext(
         existing,
@@ -383,11 +383,11 @@ SortedOracles.TokenReportExpirySet.handler(async ({ event, context }) => {
   if (await maybePreloadPool(context, poolIds)) return;
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
-  const oracleExpiry = await fetchReportExpiry(
-    event.chainId,
+  const oracleExpiry = await context.effect(reportExpiryEffect, {
+    chainId: event.chainId,
     rateFeedID,
     blockNumber,
-  );
+  });
 
   await updatePoolsOracleExpiry(
     context,
@@ -417,11 +417,11 @@ SortedOracles.ReportExpirySet.handler(async ({ event, context }) => {
 
   await Promise.all(
     pools.map(async (pool) => {
-      const oracleExpiry = await fetchReportExpiry(
-        event.chainId,
-        pool.referenceRateFeedID,
+      const oracleExpiry = await context.effect(reportExpiryEffect, {
+        chainId: event.chainId,
+        rateFeedID: pool.referenceRateFeedID,
         blockNumber,
-      );
+      });
       await updatePoolsOracleExpiry(
         context,
         [pool.id],

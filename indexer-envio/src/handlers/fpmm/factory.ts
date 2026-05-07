@@ -16,13 +16,14 @@ import {
   extractAddressFromPoolId,
 } from "../../helpers";
 import { scalingFactorToDecimals } from "../../priceDifference";
-import { fetchReportExpiry, fetchNumReporters } from "../../rpc";
 import {
   compactFees,
   feesEffect,
   invertRateFeedEffect,
+  numReportersEffect,
   rebalanceThresholdEffect,
   referenceRateFeedIDEffect,
+  reportExpiryEffect,
   tokenDecimalsScalingEffect,
 } from "../../rpc/effects";
 import {
@@ -202,13 +203,21 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     // Seed oracleExpiry and oracleNumReporters at pool creation so oracle
     // handlers can read them from the DB without per-event RPC calls.
     const [oracleExpiry, numReporters] = await Promise.all([
-      fetchReportExpiry(event.chainId, rateFeedID, blockNumber),
-      fetchNumReporters(event.chainId, rateFeedID, blockNumber),
+      context.effect(reportExpiryEffect, {
+        chainId: event.chainId,
+        rateFeedID,
+        blockNumber,
+      }),
+      context.effect(numReportersEffect, {
+        chainId: event.chainId,
+        rateFeedID,
+        blockNumber,
+      }),
     ]);
-    if (oracleExpiry !== null) {
+    if (oracleExpiry !== undefined) {
       oracleDelta.oracleExpiry = oracleExpiry;
     }
-    if (numReporters !== null) {
+    if (numReporters !== undefined) {
       oracleDelta.oracleNumReporters = numReporters;
     }
   }

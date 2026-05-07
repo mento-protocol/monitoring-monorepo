@@ -17,11 +17,11 @@ import {
   extractAddressFromPoolId,
 } from "./helpers";
 import { computePriceDifference } from "./priceDifference";
-import { fetchReportExpiry } from "./rpc";
 import {
   compactFees,
   feesEffect,
   referenceRateFeedIDEffect,
+  reportExpiryEffect,
 } from "./rpc/effects";
 import { isVirtualPool } from "./helpers";
 import { recordBreachTransition } from "./deviationBreach";
@@ -431,8 +431,12 @@ export const upsertPool = async ({
     });
     if (rateFeedID) {
       healedOracleDelta = { referenceRateFeedID: rateFeedID };
-      const expiry = await fetchReportExpiry(chainId, rateFeedID, blockNumber);
-      if (expiry !== null) healedOracleDelta.oracleExpiry = expiry;
+      const expiry = await context.effect(reportExpiryEffect, {
+        chainId,
+        rateFeedID,
+        blockNumber,
+      });
+      if (expiry !== undefined) healedOracleDelta.oracleExpiry = expiry;
     }
   }
 

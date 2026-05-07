@@ -9,7 +9,7 @@ import {
   computeLimitPressures,
   computeLimitStatus,
 } from "../tradingLimits";
-import { fetchTradingLimits } from "../rpc";
+import { tradingLimitsEffect } from "../rpc/effects";
 import { maybePreloadPool, upsertPool, upsertSnapshot } from "../pool";
 import { buildSwapTraderFields } from "../swap";
 import { applyLeaderboardSnapshots } from "../leaderboardSnapshots";
@@ -66,18 +66,18 @@ FPMM.Swap.handler(async ({ event, context }) => {
     pool.token1
   ) {
     const [limits0, limits1] = await Promise.all([
-      fetchTradingLimits(
-        event.chainId,
-        event.srcAddress,
-        pool.token0,
+      context.effect(tradingLimitsEffect, {
+        chainId: event.chainId,
+        poolAddress: event.srcAddress,
+        token: pool.token0,
         blockNumber,
-      ),
-      fetchTradingLimits(
-        event.chainId,
-        event.srcAddress,
-        pool.token1,
+      }),
+      context.effect(tradingLimitsEffect, {
+        chainId: event.chainId,
+        poolAddress: event.srcAddress,
+        token: pool.token1,
         blockNumber,
-      ),
+      }),
     ]);
 
     let worstP0 = 0;
