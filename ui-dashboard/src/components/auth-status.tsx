@@ -12,8 +12,9 @@ const SIGN_IN_PATH = "/sign-in";
 // Build the `?callbackUrl=` payload that round-trips OAuth back to where the
 // user was. Pulled out of the component so it can run with either the SSR
 // snapshot (initial paint, when `window` is unavailable) or the live URL
-// (click time — see the long comment on the click handler below).
-function buildSignInHref(pathname: string, search: string): string {
+// (click time — see the long comment on the click handler below). Exported
+// for unit tests; not intended as a public component API.
+export function buildSignInHref(pathname: string, search: string): string {
   // Already on `/sign-in`? Don't re-wrap — preserve any existing `callbackUrl`
   // so the chain of redirects doesn't lose the original destination. Falling
   // through to the wrap-and-encode path here would produce
