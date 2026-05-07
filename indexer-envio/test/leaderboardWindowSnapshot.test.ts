@@ -1,6 +1,8 @@
 /// <reference types="mocha" />
 import { strict as assert } from "assert";
 import type {
+  BrokerLeaderboardWindowSnapshot,
+  BrokerTraderDailySnapshot,
   LeaderboardChainState,
   LeaderboardWindowSnapshot,
   TraderDailySnapshot,
@@ -13,8 +15,11 @@ import {
   type TraderDailyRow,
 } from "../src/leaderboardWindowSnapshot";
 import {
+  flushV2LeaderboardWindowSnapshots,
   flushV3LeaderboardWindowSnapshots,
+  maybeHeartbeatFlushV2,
   maybeHeartbeatFlushV3,
+  type V2FlushContext,
   type V3FlushContext,
 } from "../src/leaderboardWindowFlush";
 
@@ -482,5 +487,200 @@ describe("maybeHeartbeatFlushV3", () => {
     );
     assert.equal(snap24h?.totalVolumeUsdWei, 0n);
     assert.equal(snap24h?.uniqueTraders, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2 (Broker) heartbeat tests — symmetric with the v3 suite above. The
+// shared LeaderboardChainState row tracks v3 (`lastFlushedDay`) and v2
+// (`lastFlushedDayBroker`) cursors independently; these tests cover the
+// v2 side end-to-end.
+// ---------------------------------------------------------------------------
+
+function makeV2Context(traderRows: BrokerTraderDailySnapshot[] = []): {
+  context: V2FlushContext;
+  store: {
+    BrokerLeaderboardWindowSnapshot: Map<
+      string,
+      BrokerLeaderboardWindowSnapshot
+    >;
+    LeaderboardChainState: Map<string, LeaderboardChainState>;
+  };
+} {
+  const store = {
+    BrokerLeaderboardWindowSnapshot: new Map<
+      string,
+      BrokerLeaderboardWindowSnapshot
+    >(),
+    LeaderboardChainState: new Map<string, LeaderboardChainState>(),
+  };
+  const wrap = <T extends { id: string }>(m: Map<string, T>) => ({
+    get: async (id: string) => m.get(id),
+    set: (entity: T) => {
+      m.set(entity.id, entity);
+    },
+  });
+  return {
+    context: {
+      BrokerTraderDailySnapshot: {
+        getWhere: {
+          chainId: {
+            eq: async (chainId: number) =>
+              traderRows.filter((r) => r.chainId === chainId),
+          },
+        },
+      },
+      LeaderboardChainState: wrap(store.LeaderboardChainState),
+      BrokerLeaderboardWindowSnapshot: wrap(
+        store.BrokerLeaderboardWindowSnapshot,
+      ),
+    },
+    store,
+  };
+}
+
+function fakeBrokerTraderDay(
+  trader: string,
+  timestamp: bigint,
+  volumeUsd: bigint,
+  isSystem = false,
+): BrokerTraderDailySnapshot {
+  return {
+    id: `${CHAIN}-${trader}-${timestamp}`,
+    chainId: CHAIN,
+    trader,
+    timestamp,
+    swapCount: 1,
+    volumeUsdWei: volumeUsd * ONE_USD,
+    isSystemAddress: isSystem,
+    lastSeenTimestamp: timestamp,
+  };
+}
+
+describe("flushV2LeaderboardWindowSnapshots", () => {
+  it("writes 4 rows (one per windowKey) for the same snapshotDay", async () => {
+    const { context, store } = makeV2Context([
+      fakeBrokerTraderDay(TRADER_A, DAY_2026_05_06, 100n),
+      fakeBrokerTraderDay(TRADER_B, DAY_2026_05_06, 50n),
+    ]);
+    await flushV2LeaderboardWindowSnapshots({
+      context,
+      chainId: CHAIN,
+      snapshotDay: DAY_2026_05_06,
+      blockNumber: 1n,
+      updatedAtTimestamp: 1n,
+    });
+    assert.equal(store.BrokerLeaderboardWindowSnapshot.size, 4);
+    for (const w of ["7d", "30d", "all"] as const) {
+      const snap = store.BrokerLeaderboardWindowSnapshot.get(
+        `${CHAIN}-${w}-${DAY_2026_05_06}`,
+      );
+      assert(snap, `snapshot for windowKey=${w}`);
+      assert.equal(snap.totalVolumeUsdWei, 150n * ONE_USD);
+      assert.equal(snap.uniqueTraders, 2);
+    }
+  });
+});
+
+describe("maybeHeartbeatFlushV2", () => {
+  it("cold-start (lastFlushedDayBroker=0) flushes only the most recent closed day", async () => {
+    const { context, store } = makeV2Context([
+      fakeBrokerTraderDay(TRADER_A, DAY_2026_05_06, 100n),
+    ]);
+    await maybeHeartbeatFlushV2({
+      context,
+      chainId: CHAIN,
+      blockTimestamp: DAY_2026_05_07 + 60n * 60n * 12n,
+      blockNumber: 1n,
+    });
+    assert.equal(store.BrokerLeaderboardWindowSnapshot.size, 4);
+    for (const w of WINDOW_KEYS) {
+      assert(
+        store.BrokerLeaderboardWindowSnapshot.has(
+          `${CHAIN}-${w}-${DAY_2026_05_06}`,
+        ),
+        `flushed yesterday for windowKey=${w}`,
+      );
+    }
+    const state = store.LeaderboardChainState.get(`${CHAIN}`);
+    assert.equal(state?.lastFlushedDayBroker, DAY_2026_05_06);
+    assert.equal(state?.lastFlushedDay, 0n, "v3 cursor untouched");
+  });
+
+  it("same-day no-op: lastFlushedDayBroker already at today-1", async () => {
+    const { context, store } = makeV2Context();
+    store.LeaderboardChainState.set(`${CHAIN}`, {
+      id: `${CHAIN}`,
+      chainId: CHAIN,
+      lastFlushedDay: 0n,
+      lastFlushedDayBroker: DAY_2026_05_06,
+      updatedAtTimestamp: 0n,
+    });
+    await maybeHeartbeatFlushV2({
+      context,
+      chainId: CHAIN,
+      blockTimestamp: DAY_2026_05_07 + 1n,
+      blockNumber: 1n,
+    });
+    assert.equal(store.BrokerLeaderboardWindowSnapshot.size, 0);
+  });
+
+  it("multi-day gap: flushes one row per closed day", async () => {
+    const { context, store } = makeV2Context([
+      fakeBrokerTraderDay(TRADER_A, DAY_2026_05_05, 100n),
+      fakeBrokerTraderDay(TRADER_B, DAY_2026_05_06, 50n),
+    ]);
+    const DAY_2026_05_04 = DAY_2026_05_07 - 3n * SECONDS_PER_DAY;
+    store.LeaderboardChainState.set(`${CHAIN}`, {
+      id: `${CHAIN}`,
+      chainId: CHAIN,
+      lastFlushedDay: 0n,
+      lastFlushedDayBroker: DAY_2026_05_04,
+      updatedAtTimestamp: 0n,
+    });
+    await maybeHeartbeatFlushV2({
+      context,
+      chainId: CHAIN,
+      blockTimestamp: DAY_2026_05_07 + 60n * 60n * 12n,
+      blockNumber: 100n,
+    });
+    // 2 days × 4 windowKeys = 8 rows
+    assert.equal(store.BrokerLeaderboardWindowSnapshot.size, 8);
+    assert(
+      store.BrokerLeaderboardWindowSnapshot.has(
+        `${CHAIN}-7d-${DAY_2026_05_05}`,
+      ),
+    );
+    assert(
+      store.BrokerLeaderboardWindowSnapshot.has(
+        `${CHAIN}-7d-${DAY_2026_05_06}`,
+      ),
+    );
+    const state = store.LeaderboardChainState.get(`${CHAIN}`);
+    assert.equal(state?.lastFlushedDayBroker, DAY_2026_05_06);
+  });
+
+  it("preserves lastFlushedDay (v3 cursor) when advancing v2 cursor", async () => {
+    const { context, store } = makeV2Context();
+    store.LeaderboardChainState.set(`${CHAIN}`, {
+      id: `${CHAIN}`,
+      chainId: CHAIN,
+      lastFlushedDay: DAY_2026_04_29,
+      lastFlushedDayBroker: 0n,
+      updatedAtTimestamp: 0n,
+    });
+    await maybeHeartbeatFlushV2({
+      context,
+      chainId: CHAIN,
+      blockTimestamp: DAY_2026_05_07,
+      blockNumber: 1n,
+    });
+    const state = store.LeaderboardChainState.get(`${CHAIN}`);
+    assert.equal(state?.lastFlushedDayBroker, DAY_2026_05_06);
+    assert.equal(
+      state?.lastFlushedDay,
+      DAY_2026_04_29,
+      "v3 cursor untouched by v2 heartbeat",
+    );
   });
 });

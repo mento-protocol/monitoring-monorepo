@@ -1,7 +1,7 @@
 // Pure-function helpers for the LeaderboardWindowSnapshot heartbeat flush.
-// Kept context-free so they're unit-testable without Envio's mockDb (which
-// hides multi-id `set()` within a single handler — see
-// reference_envio_mockdb_intra_handler).
+// Kept context-free so they're unit-testable without Envio's mockDb, which
+// hides multi-id `set()` calls within a single handler invocation (an
+// observed quirk of the test harness, not a documented invariant).
 //
 // The async flush wrappers and heartbeat trigger live in
 // leaderboardWindowFlush.ts; they wire these pure pieces to the

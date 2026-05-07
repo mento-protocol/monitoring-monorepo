@@ -2,7 +2,8 @@
  * GraphQL queries for the /leaderboard page.
  *
  * Hosted Hasura caps results at 1000 rows per query and disables
- * `_aggregate` (see `feedback_no_hasura_aggregates`).
+ * `_aggregate` queries (count/sum/avg fields), so all aggregation we need
+ * has to be either pre-rolled in the indexer or summed client-side.
  *
  * Hero tiles (total volume / unique traders / top-N concentration) read
  * the pre-rolled `LeaderboardWindowSnapshot` (or v2 sibling) plus a
@@ -226,8 +227,12 @@ export const BROKER_LEADERBOARD_WINDOW_LATEST = /* GraphQL */ `
 /**
  * Today's partial — added on top of the snapshot's [windowStart, yesterday]
  * total to keep hero numbers current to the minute. Today's
- * TraderDailySnapshot rows are bounded by active-traders-today (well under
- * 1000 in practice).
+ * TraderDailySnapshot rows are bounded by active-traders-today: Mento
+ * peaks well under 200 distinct traders/day across all chains, so the
+ * `limit: 1000` cap is a >5x safety margin. If a single day ever
+ * saturates 1000, the hero volume tile will silently understate (no
+ * cap-hit banner), which is the same blind spot as
+ * BROKER_AGGREGATOR_DAILY_TOP — revisit cap detection then.
  */
 export const LEADERBOARD_TODAY_TRADERS = /* GraphQL */ `
   query LeaderboardTodayTraders(

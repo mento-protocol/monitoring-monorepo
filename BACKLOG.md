@@ -141,6 +141,12 @@ Expansion procedure: when a new entry shows up in the top-N of `AggregatorDailyS
 
   Daily-volume chart still derives from the capped `TRADER_DAILY_TOP` rows — follow-up: paginate `TraderDailySnapshot` keyset on `(timestamp desc, id asc)` so the chart is exact too.
 
+### Volume Leaderboard — follow-ups noted during PR #328 review
+
+- [ ] **Dedupe overlap between snapshot range and today in unique-trader count.** `mergeHeroSnapshot` adds the snapshot's `uniqueTraders` and today's distinct trader count without de-duplicating; a trader active both in `[windowStart, yesterday]` and today is counted twice. Acceptable today (today's distinct count is small, usually <50). Fix when needed: ship `distinctTraders: [String!]!` on `LeaderboardWindowSnapshot` so the dashboard can subtract the overlap. Source: claude[bot] review on PR #328 (finding 2).
+- [ ] **Date-range filter on `getWhere.chainId.eq` during heartbeat flush.** `flushV{2,3}LeaderboardWindowSnapshots` loads ALL historical `TraderDailySnapshot` / `BrokerTraderDailySnapshot` rows for the chain on each flush, then filters in memory. Fine at current scale (~21k rows / 100ms on Celo's all-window); needs a date-range filter (or a per-day partitioning entity) at 10× scale. Source: claude[bot] review on PR #328 (finding 4).
+- [ ] **Stale-snapshot detection when a chain has no events for ≥1 UTC day.** The heartbeat fires on the first swap of a new UTC day. If a chain is silent through day N, no snapshot is written for day N-1 until the next swap arrives. `distinct_on: [chainId]` returns the latest snapshot regardless of staleness, so until the catchup loop fires the hero KPIs silently exclude day N-1. Fix when needed: filter snapshots whose `snapshotDay < today - 86400` and surface a stale-data banner. Source: claude[bot] review on PR #328 (finding 3).
+
 ## Refactor — long files (next candidates after PR #263)
 
 PR #263 split `ui-dashboard/src/app/pool/[poolId]/page.tsx` from 2,831 → 470 lines. Same playbook (characterization tests first, then per-module extraction, snapshot-diff verification per commit) applies to the rest. Ranked by impact × tractability:
