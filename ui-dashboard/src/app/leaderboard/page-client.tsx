@@ -9,7 +9,11 @@ import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import { formatUSD } from "@/lib/format";
 import {
   BROKER_AGGREGATOR_DAILY_TOP,
+  BROKER_LEADERBOARD_TODAY_TRADERS,
+  BROKER_LEADERBOARD_WINDOW_LATEST,
   BROKER_TRADER_DAILY_TOP,
+  LEADERBOARD_TODAY_TRADERS,
+  LEADERBOARD_WINDOW_LATEST,
   POOLS_FOR_LEADERBOARD,
   TRADER_DAILY_TOP,
 } from "@/lib/queries/leaderboard";
@@ -19,12 +23,15 @@ import {
   aggregateBrokerTradersByWindow,
   aggregateDailyVolume,
   aggregateTradersByWindow,
+  mergeHeroSnapshot,
   rangeCutoffSeconds,
   rangeDays,
   weiToUsd,
   type BrokerAggregatorDailyRow,
   type BrokerTraderDailyRow,
   type LeaderboardRangeKey,
+  type LeaderboardTodayTraderRow,
+  type LeaderboardWindowRow,
   type TraderDailyRow,
 } from "@/lib/leaderboard";
 import { SECONDS_PER_DAY, type RangeKey } from "@/lib/time-series";
@@ -218,6 +225,40 @@ export function LeaderboardClient() {
     limit: ENVIO_MAX_ROWS,
   });
 
+  // Pre-rolled hero snapshot (one row per chain for the active window).
+  // Bypasses Hasura's 1000-row cap on long windows. The snapshot covers
+  // [windowStart, yesterday]; today's partial is fetched separately and
+  // added client-side.
+  const heroV3Result = useGQL<{
+    LeaderboardWindowSnapshot: LeaderboardWindowRow[];
+  }>(venue === "v3" ? LEADERBOARD_WINDOW_LATEST : null, { windowKey: range });
+  const heroV2Result = useGQL<{
+    BrokerLeaderboardWindowSnapshot: LeaderboardWindowRow[];
+  }>(venue === "v2" ? BROKER_LEADERBOARD_WINDOW_LATEST : null, {
+    windowKey: range,
+  });
+
+  // Today's UTC midnight in seconds. The hero snapshot's upper bound is
+  // yesterday, so today's TraderDailySnapshot rows fill in the gap.
+  // Memoised on `utcDayKey` so it flips at midnight without retriggering
+  // every minute.
+  const todayMidnight = useMemo(
+    () => Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY,
+    [utcDayKey],
+  );
+  const todayV3Result = useGQL<{
+    TraderDailySnapshot: LeaderboardTodayTraderRow[];
+  }>(venue === "v3" ? LEADERBOARD_TODAY_TRADERS : null, {
+    todayMidnight,
+    isSystemAddressIn,
+  });
+  const todayV2Result = useGQL<{
+    BrokerTraderDailySnapshot: LeaderboardTodayTraderRow[];
+  }>(venue === "v2" ? BROKER_LEADERBOARD_TODAY_TRADERS : null, {
+    todayMidnight,
+    isSystemAddressIn,
+  });
+
   const traderRows = tradersResult.data?.TraderDailySnapshot ?? [];
   const poolRows = poolsResult.data?.Pool ?? [];
   const v2TraderRows = v2TradersResult.data?.BrokerTraderDailySnapshot ?? [];
@@ -269,33 +310,46 @@ export function LeaderboardClient() {
     return m;
   }, [poolRows]);
 
-  // Hero KPIs — switch the source list by venue. The KPI shapes are
-  // identical between v3 and v2 (volume / traders / top-10 concentration /
-  // swap count), so we pick one input array and the math below is unified.
-  const kpiSource = venue === "v3" ? aggregated : v2Aggregated;
-
-  const totalVolume = useMemo(() => {
-    let acc = BigInt(0);
-    for (const t of kpiSource) acc += t.volumeUsdWei;
-    return weiToUsd(acc);
-  }, [kpiSource]);
-
-  const totalTraders = kpiSource.length;
-  const totalSwaps = useMemo(
-    () => kpiSource.reduce((acc, t) => acc + t.swapCount, 0),
-    [kpiSource],
+  // Hero KPIs — totals come from the pre-rolled LeaderboardWindowSnapshot
+  // plus today's partial (both exact, no Hasura row cap). Top-10
+  // concentration uses the existing top-50 query for the numerator and
+  // the snapshot total for the denominator: exact end-to-end.
+  const heroSnapshotRows =
+    venue === "v3"
+      ? heroV3Result.data?.LeaderboardWindowSnapshot
+      : heroV2Result.data?.BrokerLeaderboardWindowSnapshot;
+  const todayPartialRows =
+    venue === "v3"
+      ? todayV3Result.data?.TraderDailySnapshot
+      : todayV2Result.data?.BrokerTraderDailySnapshot;
+  const heroTotals = useMemo(
+    () =>
+      mergeHeroSnapshot({
+        snapshotRows: heroSnapshotRows,
+        todayRows: todayPartialRows,
+        showSystem,
+      }),
+    [heroSnapshotRows, todayPartialRows, showSystem],
   );
+  const totalVolume = useMemo(
+    () => weiToUsd(heroTotals.totalVolumeUsdWei),
+    [heroTotals.totalVolumeUsdWei],
+  );
+  const totalTraders = heroTotals.uniqueTraders;
+  const totalSwaps = heroTotals.totalSwapCount;
+
+  // Source list for top-10 concentration's numerator (top-50 paginated
+  // per-day query). Denominator is the exact snapshot total above.
+  const kpiSource = venue === "v3" ? aggregated : v2Aggregated;
   const top10Concentration = useMemo(() => {
-    if (kpiSource.length === 0) return 0;
-    let total = BigInt(0);
+    if (kpiSource.length === 0 || heroTotals.totalVolumeUsdWei === BigInt(0))
+      return 0;
     let top10 = BigInt(0);
-    for (let i = 0; i < kpiSource.length; i += 1) {
-      total += kpiSource[i]!.volumeUsdWei;
-      if (i < 10) top10 += kpiSource[i]!.volumeUsdWei;
+    for (let i = 0; i < kpiSource.length && i < 10; i += 1) {
+      top10 += kpiSource[i]!.volumeUsdWei;
     }
-    if (total === BigInt(0)) return 0;
-    return Number((top10 * BigInt(10000)) / total) / 100;
-  }, [kpiSource]);
+    return Number((top10 * BigInt(10000)) / heroTotals.totalVolumeUsdWei) / 100;
+  }, [kpiSource, heroTotals.totalVolumeUsdWei]);
 
   // The TimeSeriesChartCard takes a 7d/30d/all RangeKey. Map the leaderboard
   // range onto the chart's range — both 24h and 7d show the 7d view (the
@@ -316,25 +370,29 @@ export function LeaderboardClient() {
   // post-deploy resync window for that new entity) doesn't take down the
   // producer view that's the actual outreach driver. Codex review:
   // https://github.com/mento-protocol/monitoring-monorepo/pull/324#discussion_r3195117172
-  const isLoading =
+  // Tiles + chart load when the hero snapshot AND its today-partial both
+  // land. The top-50 table loads independently from the existing
+  // TraderDailySnapshot query (which is fast — capped at 1000 by design).
+  const heroIsLoading =
+    venue === "v3"
+      ? heroV3Result.isLoading || todayV3Result.isLoading
+      : heroV2Result.isLoading || todayV2Result.isLoading;
+  const heroHasError =
+    venue === "v3"
+      ? !!heroV3Result.error || !!todayV3Result.error
+      : !!heroV2Result.error || !!todayV2Result.error;
+  const tableIsLoading =
     venue === "v3"
       ? tradersResult.isLoading || poolsResult.isLoading
       : v2TradersResult.isLoading;
-  const hasError =
+  const tableHasError =
     venue === "v3" ? !!tradersResult.error : !!v2TradersResult.error;
+  // Hero and table data are sourced from independent queries; a snapshot
+  // failure must NOT blank the chart or top-50 table (and vice versa).
+  // Per docs/pr-checklists/swr-polling-hasura.md: new schema fields ship
+  // in isolated queries that degrade independently.
   const v2AggIsLoading = v2AggregatorsResult.isLoading;
   const v2AggHasError = !!v2AggregatorsResult.error;
-  // True iff the trader-day query saturated the Hasura cap. When this is
-  // set, `aggregated` and the derived KPIs may be undercounting; we badge
-  // them with `≈` and surface a banner above the tiles. Same approximation
-  // semantics for v2 — the cap applies to BrokerTraderDailySnapshot too.
-  const isCapHit =
-    venue === "v3"
-      ? !!tradersResult.data &&
-        (tradersResult.data.TraderDailySnapshot?.length ?? 0) === ENVIO_MAX_ROWS
-      : !!v2TradersResult.data &&
-        (v2TradersResult.data.BrokerTraderDailySnapshot?.length ?? 0) ===
-          ENVIO_MAX_ROWS;
   // BROKER_AGGREGATOR_DAILY_TOP is also a top-N-volume cut. If it saturates
   // we'd silently drop long-tail aggregators from the table; surface it
   // with a separate banner above the aggregator section.
@@ -343,10 +401,26 @@ export function LeaderboardClient() {
     !!v2AggregatorsResult.data &&
     (v2AggregatorsResult.data.BrokerAggregatorDailySnapshot?.length ?? 0) ===
       ENVIO_MAX_ROWS;
+  // True when the top-50 table query (TRADER_DAILY_TOP / its v2 sibling)
+  // saturates the 1000-row cap. The hero `Total volume` and `Unique
+  // traders` tiles are EXACT regardless (they read the pre-rolled
+  // snapshot + today's small partial, neither of which is cap-bound).
+  // But the top-10 concentration NUMERATOR sums the table's rows — and
+  // a top-10 trader whose long-tail single-day rows fall outside the
+  // cap will have an undercounted window-sum, biasing the concentration
+  // ratio low. Surface this as `≈` only on that one tile.
+  const isTableCapHit =
+    venue === "v3"
+      ? !!tradersResult.data &&
+        (tradersResult.data.TraderDailySnapshot?.length ?? 0) === ENVIO_MAX_ROWS
+      : !!v2TradersResult.data &&
+        (v2TradersResult.data.BrokerTraderDailySnapshot?.length ?? 0) ===
+          ENVIO_MAX_ROWS;
 
-  // Headline = window total. Change pill is week-over-week if the range is
-  // ≥7d, otherwise null (24h has no meaningful WoW peer).
-  const headline = isLoading || hasError ? "" : formatUSD(totalVolume);
+  // Headline reads `totalVolume` from the hero snapshot, so it follows
+  // hero loading/error — not the table's. Change pill is week-over-week
+  // if the range is ≥7d, otherwise null (24h has no meaningful WoW peer).
+  const headline = heroIsLoading || heroHasError ? "" : formatUSD(totalVolume);
 
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 sm:py-8 space-y-6">
@@ -424,57 +498,41 @@ export function LeaderboardClient() {
         </div>
       </header>
 
-      {/* The 1000-row cap on `TRADER_DAILY_TOP` is shared by the tiles, the
-          daily-volume chart, AND the table — surface the warning above the
-          tiles, not just below the table, so users don't read the totals
-          and concentration percentage as exact when they're approximate. */}
-      {isCapHit && (
-        <div className="rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200/90">
-          <strong className="font-medium">
-            Approximate values for this window.
-          </strong>{" "}
-          Showing the top {ENVIO_MAX_ROWS.toLocaleString()} trader-day rows by
-          single-day volume — total volume, unique-trader count, top-10
-          concentration, and the daily-volume chart all derive from this cap.
-          High-frequency traders whose individual days don&apos;t crack the cap
-          may be undercounted at longer windows. A pre-rolled window-snapshot
-          entity is planned (<code>BACKLOG.md</code> &rarr; PR 4).
-        </div>
-      )}
-
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Tile
-          label={isCapHit ? "Total volume (≈)" : "Total volume"}
+          label="Total volume"
           value={
-            isLoading
-              ? "…"
-              : hasError
-                ? "—"
-                : `${isCapHit ? "≈ " : ""}${formatUSD(totalVolume)}`
+            heroIsLoading ? "…" : heroHasError ? "—" : formatUSD(totalVolume)
           }
           subtitle={rangeSubtitle(range)}
         />
         <Tile
-          label={isCapHit ? "Unique traders (≈)" : "Unique traders"}
+          label="Unique traders"
           value={
-            isLoading
+            heroIsLoading
               ? "…"
-              : hasError
+              : heroHasError
                 ? "—"
-                : `${isCapHit ? "≥ " : ""}${totalTraders.toLocaleString()}`
+                : totalTraders.toLocaleString()
           }
           subtitle={`${totalSwaps.toLocaleString()} swaps`}
         />
         <Tile
-          label={isCapHit ? "Top-10 concentration (≈)" : "Top-10 concentration"}
-          value={
-            isLoading
-              ? "…"
-              : hasError
-                ? "—"
-                : `${top10Concentration.toFixed(1)}%`
+          label={
+            isTableCapHit ? "Top-10 concentration (≈)" : "Top-10 concentration"
           }
-          subtitle="Share of window volume"
+          value={
+            heroIsLoading || tableIsLoading
+              ? "…"
+              : heroHasError || tableHasError
+                ? "—"
+                : `${isTableCapHit ? "≈ " : ""}${top10Concentration.toFixed(1)}%`
+          }
+          subtitle={
+            isTableCapHit
+              ? "Lower bound — long-tail trader-days outside top-1000 by single-day volume can bias this low"
+              : "Share of window volume"
+          }
         />
       </div>
 
@@ -492,8 +550,8 @@ export function LeaderboardClient() {
           onRangeChange={onChartRangeChange}
           headline={headline}
           change={null}
-          isLoading={isLoading}
-          hasError={hasError}
+          isLoading={tableIsLoading}
+          hasError={tableHasError}
           hasSnapshotError={false}
           emptyMessage={
             venue === "v3"
@@ -512,8 +570,8 @@ export function LeaderboardClient() {
             cutoff={cutoff}
             traders={aggregated}
             pools={poolMeta}
-            isLoading={isLoading}
-            hasError={hasError}
+            isLoading={tableIsLoading}
+            hasError={tableHasError}
           />
         </section>
       ) : (
@@ -524,8 +582,8 @@ export function LeaderboardClient() {
             </h2>
             <V2LeaderboardTraderTable
               traders={v2Aggregated}
-              isLoading={isLoading}
-              hasError={hasError}
+              isLoading={tableIsLoading}
+              hasError={tableHasError}
             />
           </section>
           <section>
