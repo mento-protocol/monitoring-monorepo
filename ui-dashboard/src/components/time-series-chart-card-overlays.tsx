@@ -4,20 +4,25 @@ import type { ReactNode } from "react";
 import type { TimeSeriesPoint } from "@/lib/time-series";
 
 export type BreakdownSeries = {
+  /**
+   * Optional stable identity for the series — survives reshuffling of
+   * `name` and `color` (color is rank-assigned in the leaderboard's pool
+   * palette, name can collide cross-chain after dropping the "· Celo"
+   * suffix). Used by the custom legend to track per-trace visibility
+   * without index- or color-keyed drift. When omitted the chart card
+   * falls back to `${color}-${name}` as a best-effort key.
+   */
+  id?: string;
   name: string;
   color: string;
   series: TimeSeriesPoint[];
   /**
    * Optional decorative element shown next to `name` in the legend AND
    * the custom hover tooltip. The leaderboard's per-pool chart uses
-   * this to inline a chain icon (e.g. Celo / Monad mark) so the legend
-   * stays compact — without the icon the names had to carry a
-   * "· Celo" / "· Monad" suffix that wasted horizontal space.
+   * this to inline a chain badge (Celo / Monad text label).
    *
    * Whenever ANY breakdown series provides this, Plotly's built-in
    * legend is replaced with a custom React legend below the plot.
-   * Plotly's SVG legend can't render arbitrary elements like SVG
-   * icons, so we render the legend ourselves.
    */
   legendIcon?: ReactNode;
 };

@@ -161,17 +161,18 @@ export function TimeSeriesChartCard({
   // visibility via React state and a different render path.
   const crossFadeEnabled =
     isStacked && !useCustomLegend && breakdownCount >= 1 && breakdownCount <= 3;
-  // Custom-legend visibility state. Keyed by `${color}-${name}` rather
-  // than trace index so that user intent ("hide USDC/USDm Monad") is
-  // preserved across range switches that reshuffle the breakdown's
-  // top-N ordering — an index-keyed set would silently hide the wrong
-  // pool when index 3 points to a different trace after the data
-  // changes (cursor finding on 88147ad).
+  // Custom-legend visibility state. Keyed by `BreakdownSeries.id` (a
+  // stable identity supplied by the caller — the leaderboard passes the
+  // poolId) so user intent ("hide USDC/USDm Monad") survives both
+  // breakdown reshuffles (cursor finding on 88147ad) AND the rank-based
+  // color/name churn that can happen after a range switch (codex finding
+  // on b259ee9). When the caller doesn't supply `id`, falls back to
+  // `${color}-${name}` as a best-effort key.
   const [customLegendHidden, setCustomLegendHidden] = useState<Set<string>>(
     () => new Set(),
   );
   const customLegendKey = useCallback(
-    (b: BreakdownSeries) => `${b.color}-${b.name}`,
+    (b: BreakdownSeries) => b.id ?? `${b.color}-${b.name}`,
     [],
   );
   const toggleCustomLegend = useCallback((key: string) => {

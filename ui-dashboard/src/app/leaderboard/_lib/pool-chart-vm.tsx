@@ -15,6 +15,7 @@ type PoolMetaEntry = {
 };
 
 type ChartBreakdownEntry = {
+  id: string;
   name: string;
   color: string;
   series: Array<{ timestamp: number; value: number }>;
@@ -112,6 +113,10 @@ export function usePoolChartViewModel(args: {
         ? networkForChainId(Number(chainIdPart))
         : null;
       return {
+        // Stable identity for legend visibility tracking — survives
+        // rank-based color reshuffles and cross-chain name collisions.
+        // For "Other" the key is the constant `__other__`, also stable.
+        id: b.key,
         name: b.name,
         color: b.color,
         series: b.series,
