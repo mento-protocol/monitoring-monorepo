@@ -1,13 +1,31 @@
+/** @vitest-environment jsdom */
+
+// Tell React 19 we're in an act-compatible test environment so legitimate
+// state-update warnings stay visible (and so the harness stops printing
+// "The current testing environment is not configured to support act(...)"
+// to stderr on every render in the interactive sort-transition block).
+//
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
 /**
  * Tests for `RevenueByPoolTable` against the snapshot-based aggregator.
  * Per-window truncation badges (PR #306) were retired in PR-snapshot-2 once
  * the leaderboard switched off raw transfers — snapshot pagination covers
  * all-time history, so the only remaining `≈` flag is genuine pricing gaps
  * (UNKNOWN tokens or missing FX rates).
+ *
+ * The aggregator/render tests below use `renderToStaticMarkup` for cheap
+ * HTML inspection; the sort-transition + label-fallback blocks at the
+ * bottom flip to `react-dom/client` + `act` + native `.click()` so we can
+ * drive the `useTableSort` cycle through the SortableTh button — the same
+ * jsdom-based interactive convention used by `breach-history-panel.test.tsx`
+ * (no @testing-library/react in this package).
  */
 
-import { describe, it, expect, vi } from "vitest";
-import React from "react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { NetworkData } from "@/lib/fetch-all-networks";
 import type { PoolDailyFeeSnapshot } from "@/lib/types";
@@ -289,5 +307,278 @@ describe("RevenueByPoolTable — snapshot path", () => {
       />,
     );
     expect(html).toContain(`/pool/${CHAIN}-${POOL_ADDR}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Interactive harness — used by the sort-transition block below. We mount
+// into a real jsdom DOM so click events reach the SortableTh button and the
+// `useTableSort` state setter actually fires (renderToStaticMarkup can't
+// observe state transitions). Mirrors the convention in
+// `breach-history-panel.test.tsx` since this package has no @testing-library
+// dep.
+// ---------------------------------------------------------------------------
+
+interface InteractiveHandle {
+  container: HTMLElement;
+  root: Root;
+}
+
+function renderInteractive(networks: NetworkData[]): InteractiveHandle {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  act(() => {
+    root.render(
+      <RevenueByPoolTable
+        networkData={networks}
+        isLoading={false}
+        hasError={false}
+      />,
+    );
+  });
+  return { container, root };
+}
+
+function teardown(handle: InteractiveHandle): void {
+  act(() => {
+    handle.root.unmount();
+  });
+  handle.container.remove();
+}
+
+/**
+ * Resolve the SortableTh-wrapped <button> for a column by its visible label.
+ * The button text contains the column label plus a sort-state arrow glyph
+ * (↑/↓/↕), so we match against `startsWith` on the label.
+ */
+function headerButton(
+  container: HTMLElement,
+  label: string,
+): HTMLButtonElement {
+  const btns = Array.from(
+    container.querySelectorAll<HTMLButtonElement>("thead button"),
+  );
+  const match = btns.find((b) =>
+    (b.textContent ?? "").trim().startsWith(label),
+  );
+  if (!match) {
+    throw new Error(
+      `No header button matched "${label}". Buttons: ${btns
+        .map((b) => `"${(b.textContent ?? "").trim()}"`)
+        .join(", ")}`,
+    );
+  }
+  return match;
+}
+
+/** Read the `aria-sort` attribute on the <th> ancestor of a SortableTh button. */
+function ariaSortFor(container: HTMLElement, label: string): string | null {
+  const th = headerButton(container, label).closest("th");
+  if (!th) throw new Error(`Header "${label}" has no parent <th>`);
+  return th.getAttribute("aria-sort");
+}
+
+/**
+ * Read pool display names from the rendered tbody, in row order. The pool
+ * link is the only `<a>` inside each `<tr>` whose `href` starts with `/pool/`.
+ */
+function poolNamesInOrder(container: HTMLElement): string[] {
+  const rows = Array.from(
+    container.querySelectorAll<HTMLTableRowElement>("tbody tr"),
+  );
+  return rows.map((tr) => {
+    const link = tr.querySelector<HTMLAnchorElement>('a[href^="/pool/"]');
+    return (link?.textContent ?? "").trim();
+  });
+}
+
+/** Build a NetworkData with two pools at controllable fee levels. */
+function twoPoolNetwork(): NetworkData {
+  const POOL_A = "0xaaaa000000000000000000000000000000000001";
+  const POOL_B = "0xbbbb000000000000000000000000000000000002";
+  // Pool A: $1 fee. Pool B: $5 fee. Both today's bucket so they land in
+  // 24h/7d/30d/all windows simultaneously.
+  const snapshots: PoolDailyFeeSnapshot[] = [
+    feeSnapshot({
+      poolAddress: POOL_A,
+      feesUsdWei: "1000000000000000000", // $1
+    }),
+    feeSnapshot({
+      poolAddress: POOL_B,
+      feesUsdWei: "5000000000000000000", // $5
+    }),
+  ];
+  return networkData(snapshots);
+}
+
+describe("RevenueByPoolTable — sort transitions", () => {
+  let handle: InteractiveHandle | null = null;
+
+  beforeEach(() => {
+    // `useTableSort` reads `window.location.search` on mount and writes to
+    // it via `history.replaceState` on every click. Without resetting the
+    // URL between tests, click side-effects from one test leak into the
+    // next test's mount-time read and break the "clicking N times cycles"
+    // assertions. Reset to a clean slate every time.
+    window.history.replaceState(null, "", "/revenue");
+  });
+
+  afterEach(() => {
+    if (handle) {
+      teardown(handle);
+      handle = null;
+    }
+  });
+
+  it("default sort is fees7d desc — bigger row first, aria-sort wired", () => {
+    handle = renderInteractive([twoPoolNetwork()]);
+    // Default state from useTableSort: { defaultKey: "fees7d", defaultDir: "desc" }.
+    expect(ariaSortFor(handle.container, "7d")).toBe("descending");
+    expect(ariaSortFor(handle.container, "24h")).toBe("none");
+    expect(ariaSortFor(handle.container, "Pool")).toBe("none");
+    // Pool B ($5) renders before Pool A ($1) under fees7d desc.
+    const names = poolNamesInOrder(handle.container);
+    expect(names).toHaveLength(2);
+    expect(names[0]).toContain("0xbbbb");
+    expect(names[1]).toContain("0xaaaa");
+  });
+
+  it("clicking the active fees7d header toggles desc → asc — rows flip", () => {
+    handle = renderInteractive([twoPoolNetwork()]);
+    const btn = headerButton(handle.container, "7d");
+
+    act(() => {
+      btn.click();
+    });
+
+    expect(ariaSortFor(handle.container, "7d")).toBe("ascending");
+    // Smaller fee row (Pool A, $1) now first.
+    const names = poolNamesInOrder(handle.container);
+    expect(names[0]).toContain("0xaaaa");
+    expect(names[1]).toContain("0xbbbb");
+  });
+
+  it("clicking fees7d twice cycles desc → asc → desc", () => {
+    handle = renderInteractive([twoPoolNetwork()]);
+    const btn = headerButton(handle.container, "7d");
+
+    act(() => {
+      btn.click(); // → asc
+    });
+    expect(ariaSortFor(handle.container, "7d")).toBe("ascending");
+
+    act(() => {
+      btn.click(); // → desc again
+    });
+    expect(ariaSortFor(handle.container, "7d")).toBe("descending");
+    // And rows are back to bigger-first order.
+    const names = poolNamesInOrder(handle.container);
+    expect(names[0]).toContain("0xbbbb");
+    expect(names[1]).toContain("0xaaaa");
+  });
+
+  it("clicking a different column resets to defaultDir (desc) and updates aria-sort", () => {
+    handle = renderInteractive([twoPoolNetwork()]);
+    // Initially fees7d is descending.
+    expect(ariaSortFor(handle.container, "7d")).toBe("descending");
+    expect(ariaSortFor(handle.container, "24h")).toBe("none");
+
+    act(() => {
+      headerButton(handle!.container, "24h").click();
+    });
+
+    // 24h becomes the active column, defaults to descending; 7d goes back to none.
+    expect(ariaSortFor(handle.container, "24h")).toBe("descending");
+    expect(ariaSortFor(handle.container, "7d")).toBe("none");
+    // Same data magnitude order in 24h ⇒ Pool B still first.
+    const names = poolNamesInOrder(handle.container);
+    expect(names[0]).toContain("0xbbbb");
+    expect(names[1]).toContain("0xaaaa");
+  });
+
+  it("clicking the Pool (string) header sorts by display name desc → asc", () => {
+    handle = renderInteractive([twoPoolNetwork()]);
+    // Pool labels are empty in this fixture, so display = truncateAddress(addr).
+    // Truncated forms: "0xaaaa…0001" and "0xbbbb…0002". Local-compare on those.
+    act(() => {
+      headerButton(handle!.container, "Pool").click();
+    });
+    // First click → defaultDir = desc → "0xbbbb…0002" first (lexicographic high).
+    expect(ariaSortFor(handle.container, "Pool")).toBe("descending");
+    let names = poolNamesInOrder(handle.container);
+    expect(names[0]).toContain("0xbbbb");
+    expect(names[1]).toContain("0xaaaa");
+
+    act(() => {
+      headerButton(handle!.container, "Pool").click();
+    });
+    // Second click toggles to asc → "0xaaaa…0001" first.
+    expect(ariaSortFor(handle.container, "Pool")).toBe("ascending");
+    names = poolNamesInOrder(handle.container);
+    expect(names[0]).toContain("0xaaaa");
+    expect(names[1]).toContain("0xbbbb");
+  });
+});
+
+describe("RevenueByPoolTable — label fallback", () => {
+  beforeEach(() => {
+    // Each label-fallback test mounts its own jsdom container; nothing to
+    // pre-seed beyond the network-level mocks already in place at the top.
+  });
+
+  it("renders truncated address (0xaaaa…0001) when poolLabels lookup misses", () => {
+    // Default `networkData` builds an empty poolLabels map, so every row's
+    // `label` is null and `rowDisplayName` falls back to truncateAddress.
+    const html = renderToStaticMarkup(
+      <RevenueByPoolTable
+        networkData={[networkData([feeSnapshot()])]}
+        isLoading={false}
+        hasError={false}
+      />,
+    );
+    // truncateAddress: 6-char prefix + U+2026 ellipsis + 4-char suffix.
+    // For POOL_ADDR = "0xaaaa…0000…0001" → "0xaaaa…0001".
+    expect(html).toContain("0xaaaa…0001");
+    // And the un-truncated address must NOT appear in the cell text — this
+    // is the whole point of the truncation. (It still appears in the
+    // `/pool/<chain>-<addr>` link href, which is fine.)
+    const cellMatches = html.match(/>0xaaaa0+1</);
+    expect(cellMatches).toBeNull();
+  });
+
+  it("renders friendly poolName (e.g. KESm/USDm) when poolLabels has a hit", () => {
+    // Sanity-check the other branch of `rowDisplayName` so the fallback test
+    // above can't pass via a degenerate truncation everywhere — pin both
+    // sides of the conditional.
+    const network = networkData([feeSnapshot()]);
+    const TOKEN_USDM = "0xusd";
+    const TOKEN_KESM = "0xkes";
+    network.network.tokenSymbols = {
+      [TOKEN_USDM]: "USDm",
+      [TOKEN_KESM]: "KESm",
+    };
+    network.poolLabels = new Map([
+      [
+        POOL_ADDR,
+        {
+          id: `${CHAIN}-${POOL_ADDR}`,
+          token0: TOKEN_KESM,
+          token1: TOKEN_USDM,
+          source: "fpmm_factory",
+        },
+      ],
+    ]);
+    const html = renderToStaticMarkup(
+      <RevenueByPoolTable
+        networkData={[network]}
+        isLoading={false}
+        hasError={false}
+      />,
+    );
+    // poolName puts USDm last, so the display string is "KESm/USDm".
+    expect(html).toContain("KESm/USDm");
+    // Truncated form must NOT show — the friendly name took priority.
+    expect(html).not.toContain("0xaaaa…0001");
   });
 });
