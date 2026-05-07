@@ -50,12 +50,13 @@ async function fetchSingleReport(
 
 export function AddressReportEditor({ address, scope }: Props) {
   const trimmed = address.trim();
+  const normalizedAddress = trimmed.toLowerCase();
   const isAddressValid = isValidAddress(trimmed);
   // Include scope in the SWR key so opening the same address from a global
   // row vs a per-chain row doesn't share a stale cache entry pointing at
   // the wrong scope's report.
   const swrKey = isAddressValid
-    ? `address-reports:single:${trimmed.toLowerCase()}:${scope}`
+    ? `address-reports:single:${normalizedAddress}:${scope}`
     : null;
 
   const {
@@ -78,7 +79,7 @@ export function AddressReportEditor({ address, scope }: Props) {
   // address into the next when both happen to be empty.
   const recordKey = data
     ? `${data.scope}:${data.updatedAt}:${data.version}`
-    : `empty:${trimmed.toLowerCase()}`;
+    : `empty:${normalizedAddress}`;
   const [title, setTitle] = useState(data?.title ?? "");
   const [body, setBody] = useState(data?.body ?? "");
   const [previewMode, setPreviewMode] = useState(Boolean(data));
@@ -95,8 +96,10 @@ export function AddressReportEditor({ address, scope }: Props) {
   }
 
   const hasExisting = data !== undefined && data !== null;
-  const dirty =
-    hasExisting && data
+  const isLookupPending = data === undefined && !loadError;
+  const dirty = isLookupPending
+    ? false
+    : hasExisting && data
       ? body !== data.body || title !== (data.title ?? "")
       : body.trim() !== "" || title.trim() !== "";
 
@@ -106,6 +109,10 @@ export function AddressReportEditor({ address, scope }: Props) {
   const handleSave = useCallback(async () => {
     if (!isAddressValid) {
       setError("Address must be valid before saving a report.");
+      return;
+    }
+    if (isLookupPending) {
+      setError("Still loading the existing report. Please wait a moment.");
       return;
     }
     if (overLimit) {
@@ -163,6 +170,7 @@ export function AddressReportEditor({ address, scope }: Props) {
     data,
     trimmed,
     isAddressValid,
+    isLookupPending,
     overLimit,
     bodyLen,
     mutate,
@@ -390,7 +398,9 @@ export function AddressReportEditor({ address, scope }: Props) {
             // handleSave with `data === undefined`, which then takes the
             // new-report code path (parent prop scope) and overwrites the
             // existing report on save.
-            disabled={saving || deleting || overLimit || !dirty || isLoading}
+            disabled={
+              saving || deleting || overLimit || !dirty || isLookupPending
+            }
             className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
           >
             {saving ? "Saving…" : hasExisting ? "Save changes" : "Save report"}

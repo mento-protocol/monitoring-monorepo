@@ -60,6 +60,7 @@ import { AddressReportEditor } from "@/components/address-report-editor";
 // ---- DOM setup -------------------------------------------------------------
 
 const VALID_ADDR = "0xb64c8b0a3F8008d5028D8F9323b858F17b18C3C4";
+const SECOND_VALID_ADDR = "0x1111111111111111111111111111111111111111";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -183,20 +184,16 @@ describe("AddressReportEditor — empty state", () => {
     expect(findButton("Edit")).toBeNull();
     expect(findButton("Preview")).toBeNull();
   });
-});
 
-describe("AddressReportEditor — Save disabled while initial lookup is pending", () => {
-  it("disables Save button while isLoading=true even with body typed", () => {
-    // Existing-address flow: SWR is still fetching, data undefined.
-    // Without the isLoading guard, handleSave would take the new-report
-    // path with parent scope and overwrite the existing report.
-    mockSwrIsLoading = true;
-    mockSwrData = undefined;
-    render();
-    setTextarea("ar-body", "drafted before lookup returned");
-    const saveBtn = findButton("Save report");
-    expect(saveBtn).not.toBeNull();
-    expect(saveBtn?.disabled).toBe(true);
+  it("resets the draft when the address changes and both addresses are empty-state reports", () => {
+    mockSwrData = null;
+    render({ address: VALID_ADDR });
+    setTextarea("ar-body", "draft for the first address");
+
+    render({ address: SECOND_VALID_ADDR });
+
+    const textarea = container.querySelector("#ar-body") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("");
   });
 });
 
@@ -258,6 +255,16 @@ describe("AddressReportEditor — load error", () => {
 });
 
 describe("AddressReportEditor — save scope (regression for #330)", () => {
+  it("keeps Save disabled while the initial lookup is still loading", () => {
+    mockSwrData = undefined;
+    mockSwrError = undefined;
+    mockSwrIsLoading = true;
+    render();
+    setTextarea("ar-body", "typed before the lookup settled");
+
+    expect(findButton("Save report")?.disabled).toBe(true);
+  });
+
   it("sends scope = data.scope when editing an existing report", async () => {
     // Existing report at global scope; parent passes per-chain scope.
     mockSwrData = {
