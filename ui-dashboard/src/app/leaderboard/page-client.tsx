@@ -401,6 +401,21 @@ export function LeaderboardClient() {
     !!v2AggregatorsResult.data &&
     (v2AggregatorsResult.data.BrokerAggregatorDailySnapshot?.length ?? 0) ===
       ENVIO_MAX_ROWS;
+  // True when the top-50 table query (TRADER_DAILY_TOP / its v2 sibling)
+  // saturates the 1000-row cap. The hero `Total volume` and `Unique
+  // traders` tiles are EXACT regardless (they read the pre-rolled
+  // snapshot + today's small partial, neither of which is cap-bound).
+  // But the top-10 concentration NUMERATOR sums the table's rows — and
+  // a top-10 trader whose long-tail single-day rows fall outside the
+  // cap will have an undercounted window-sum, biasing the concentration
+  // ratio low. Surface this as `≈` only on that one tile.
+  const isTableCapHit =
+    venue === "v3"
+      ? !!tradersResult.data &&
+        (tradersResult.data.TraderDailySnapshot?.length ?? 0) === ENVIO_MAX_ROWS
+      : !!v2TradersResult.data &&
+        (v2TradersResult.data.BrokerTraderDailySnapshot?.length ?? 0) ===
+          ENVIO_MAX_ROWS;
 
   // Headline reads `totalVolume` from the hero snapshot, so it follows
   // hero loading/error — not the table's. Change pill is week-over-week
@@ -503,15 +518,21 @@ export function LeaderboardClient() {
           subtitle={`${totalSwaps.toLocaleString()} swaps`}
         />
         <Tile
-          label="Top-10 concentration"
+          label={
+            isTableCapHit ? "Top-10 concentration (≈)" : "Top-10 concentration"
+          }
           value={
             heroIsLoading || tableIsLoading
               ? "…"
               : heroHasError || tableHasError
                 ? "—"
-                : `${top10Concentration.toFixed(1)}%`
+                : `${isTableCapHit ? "≈ " : ""}${top10Concentration.toFixed(1)}%`
           }
-          subtitle="Share of window volume"
+          subtitle={
+            isTableCapHit
+              ? "Lower bound — long-tail trader-days outside top-1000 by single-day volume can bias this low"
+              : "Share of window volume"
+          }
         />
       </div>
 
