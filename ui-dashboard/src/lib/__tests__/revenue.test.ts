@@ -12,8 +12,8 @@ const TEST_RATES: OracleRateMap = new Map([
 ]);
 
 /** Anchor all test timestamps relative to "now" so gap-fill doesn't explode. */
-const NOW_S = Math.floor(Date.now() / 1000);
-const TODAY_BUCKET = Math.floor(NOW_S / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+const TODAY_BUCKET =
+  Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
 const POOL_ADDR = "0xaaaa000000000000000000000000000000000001";
 
 function feeSnapshot(
@@ -100,7 +100,7 @@ describe("buildDailyFeeSeries", () => {
   });
 
   it("buckets a single pegged snapshot into one day", () => {
-    const window = { from: TODAY_BUCKET, to: NOW_S + 1 };
+    const window = { from: TODAY_BUCKET, to: TODAY_BUCKET + SECONDS_PER_DAY };
     const result = buildDailyFeeSeries([networkData([feeSnapshot()])], window);
     expect(result).toHaveLength(1);
     expect(result[0].timestamp).toBe(TODAY_BUCKET);
@@ -109,8 +109,8 @@ describe("buildDailyFeeSeries", () => {
   });
 
   it("sums multiple snapshots in the same day across pools", () => {
-    // Use a 1-day window matching production's mid-day-now `to`.
-    const window = { from: TODAY_BUCKET, to: NOW_S + 1 };
+    // Use an explicit 1-day half-open window to avoid Date.now()-dependent rounding.
+    const window = { from: TODAY_BUCKET, to: TODAY_BUCKET + SECONDS_PER_DAY };
     const result = buildDailyFeeSeries(
       [
         networkData([
@@ -137,7 +137,7 @@ describe("buildDailyFeeSeries", () => {
 
   it("gap-fills missing days with zeros", () => {
     const day0 = TODAY_BUCKET - 3 * SECONDS_PER_DAY;
-    const window = { from: day0, to: NOW_S + 1 };
+    const window = { from: day0, to: TODAY_BUCKET + SECONDS_PER_DAY };
     const result = buildDailyFeeSeries(
       [
         networkData([
@@ -163,7 +163,7 @@ describe("buildDailyFeeSeries", () => {
   });
 
   it("prices FX-only snapshot via the rate map", () => {
-    const window = { from: TODAY_BUCKET, to: NOW_S + 1 };
+    const window = { from: TODAY_BUCKET, to: TODAY_BUCKET + SECONDS_PER_DAY };
     const result = buildDailyFeeSeries(
       [
         networkData([
@@ -216,7 +216,7 @@ describe("buildDailyFeeSeries", () => {
   });
 
   it("aggregates across multiple networks", () => {
-    const window = { from: TODAY_BUCKET, to: NOW_S + 1 };
+    const window = { from: TODAY_BUCKET, to: TODAY_BUCKET + SECONDS_PER_DAY };
     const net1 = networkData([feeSnapshot()]);
     const net2 = networkData([feeSnapshot()], {
       network: {
@@ -232,7 +232,7 @@ describe("buildDailyFeeSeries", () => {
   });
 
   it("skips networks with top-level errors", () => {
-    const window = { from: TODAY_BUCKET, to: NOW_S + 1 };
+    const window = { from: TODAY_BUCKET, to: TODAY_BUCKET + SECONDS_PER_DAY };
     const net1 = networkData([feeSnapshot()]);
     const net2 = networkData(
       [feeSnapshot({ feesUsdWei: "5000000000000000000" })],
@@ -244,7 +244,7 @@ describe("buildDailyFeeSeries", () => {
   });
 
   it("contributes nothing from networks with feeSnapshotsError", () => {
-    const window = { from: TODAY_BUCKET, to: NOW_S + 1 };
+    const window = { from: TODAY_BUCKET, to: TODAY_BUCKET + SECONDS_PER_DAY };
     const net = networkData([], {
       feeSnapshotsError: new Error("snapshot pagination timed out"),
     });
@@ -253,7 +253,7 @@ describe("buildDailyFeeSeries", () => {
   });
 
   it("skips networks with ratesError even when snapshots are present", () => {
-    const window = { from: TODAY_BUCKET, to: NOW_S + 1 };
+    const window = { from: TODAY_BUCKET, to: TODAY_BUCKET + SECONDS_PER_DAY };
     const net = networkData([feeSnapshot()], {
       ratesError: new Error("oracle rates timed out"),
     });
