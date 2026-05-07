@@ -9,18 +9,19 @@ import {
   computeHealthStatus,
   maybePreloadPool,
   nextDeviationBreachStartedAt,
+  selfHealInvertRateFeed,
   upsertDailySnapshot,
 } from "../pool";
 import { recordBreachTransition } from "../deviationBreach";
 import { recordHealthSample } from "../healthScore";
 import { computeMedianLineageNext } from "../oracleJump";
 import {
-  fetchReportExpiry,
   getPoolsByFeed,
   updatePoolsOracleExpiry,
   getPoolsWithReferenceFeed,
   getBreakerConfigsByFeed,
 } from "../rpc";
+import { reportExpiryEffect } from "../rpc/effects";
 import { bootstrapFeedBreakerConfigs, nextMedianEMA } from "../breakers";
 
 // ---------------------------------------------------------------------------
@@ -49,19 +50,25 @@ SortedOracles.OracleReported.handler(async ({ event, context }) => {
   // pools this collapses N sequential awaits into 1 concurrent batch.
   await Promise.all(
     poolIds.map(async (poolId) => {
-      const existing = await context.Pool.get(poolId);
-      if (!existing) return;
+      const initial = await context.Pool.get(poolId);
+      if (!initial) return;
+      // Self-heal invertRateFeed before computePriceDifference reads it.
+      // Without this, a pool deployed during an RPC blip whose only event
+      // post-deploy is OracleReported would persist wrong-orientation
+      // priceDifference / health / breach state until an FPMM event runs
+      // upsertPool's heal.
+      const existing = await selfHealInvertRateFeed(context, initial);
 
       // Resolve oracleExpiry from DB if already populated, otherwise fetch
       // via RPC (one-time seed — subsequent events use the DB value).
       const oracleExpiry =
         existing.oracleExpiry > 0n
           ? existing.oracleExpiry
-          : ((await fetchReportExpiry(
-              event.chainId,
+          : ((await context.effect(reportExpiryEffect, {
+              chainId: event.chainId,
               rateFeedID,
               blockNumber,
-            )) ?? existing.oracleExpiry);
+            })) ?? existing.oracleExpiry);
 
       const oraclePrice = event.params.value;
 
@@ -189,17 +196,20 @@ SortedOracles.MedianUpdated.handler(async ({ event, context }) => {
   // See OracleReported handler — parallel fan-out across distinct pools.
   await Promise.all(
     poolIds.map(async (poolId) => {
-      const existing = await context.Pool.get(poolId);
-      if (!existing) return;
+      const initial = await context.Pool.get(poolId);
+      if (!initial) return;
+      // Self-heal invertRateFeed before computePriceDifference — same
+      // rationale as the OracleReported handler above.
+      const existing = await selfHealInvertRateFeed(context, initial);
 
       const oracleExpiry =
         existing.oracleExpiry > 0n
           ? existing.oracleExpiry
-          : ((await fetchReportExpiry(
-              event.chainId,
+          : ((await context.effect(reportExpiryEffect, {
+              chainId: event.chainId,
               rateFeedID,
               blockNumber,
-            )) ?? existing.oracleExpiry);
+            })) ?? existing.oracleExpiry);
 
       const lineage = computeMedianLineageNext(
         existing,
@@ -383,11 +393,11 @@ SortedOracles.TokenReportExpirySet.handler(async ({ event, context }) => {
   if (await maybePreloadPool(context, poolIds)) return;
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
-  const oracleExpiry = await fetchReportExpiry(
-    event.chainId,
+  const oracleExpiry = await context.effect(reportExpiryEffect, {
+    chainId: event.chainId,
     rateFeedID,
     blockNumber,
-  );
+  });
 
   await updatePoolsOracleExpiry(
     context,
@@ -417,11 +427,11 @@ SortedOracles.ReportExpirySet.handler(async ({ event, context }) => {
 
   await Promise.all(
     pools.map(async (pool) => {
-      const oracleExpiry = await fetchReportExpiry(
-        event.chainId,
-        pool.referenceRateFeedID,
+      const oracleExpiry = await context.effect(reportExpiryEffect, {
+        chainId: event.chainId,
+        rateFeedID: pool.referenceRateFeedID,
         blockNumber,
-      );
+      });
       await updatePoolsOracleExpiry(
         context,
         [pool.id],

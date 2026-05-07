@@ -15,7 +15,7 @@ import { eventId, asAddress, asBigInt, makePoolId } from "../helpers";
 import { upsertPool, upsertSnapshot, DEFAULT_ORACLE_FIELDS } from "../pool";
 import { buildSwapTraderFields } from "../swap";
 import { applyLeaderboardSnapshots } from "../leaderboardSnapshots";
-import { fetchTokenDecimalsScaling } from "../rpc";
+import { tokenDecimalsScalingEffect } from "../rpc/effects";
 import {
   buildRebalanceOutcome,
   scalingFactorToDecimals,
@@ -47,8 +47,18 @@ VirtualPoolFactory.VirtualPoolDeployed.handler(async ({ event, context }) => {
   // pattern (handlers/fpmm/factory.ts). Required for `volumeUsdWei` to scale
   // correctly when a USD-pegged non-18dp token (e.g. USDC, 6dp) is on a leg.
   const [dec0Raw, dec1Raw] = await Promise.all([
-    fetchTokenDecimalsScaling(event.chainId, poolAddr, "decimals0", token0),
-    fetchTokenDecimalsScaling(event.chainId, poolAddr, "decimals1", token1),
+    context.effect(tokenDecimalsScalingEffect, {
+      chainId: event.chainId,
+      poolAddress: poolAddr,
+      fn: "decimals0",
+      fallbackTokenAddress: token0,
+    }),
+    context.effect(tokenDecimalsScalingEffect, {
+      chainId: event.chainId,
+      poolAddress: poolAddr,
+      fn: "decimals1",
+      fallbackTokenAddress: token1,
+    }),
   ]);
   const token0Decimals = dec0Raw
     ? (scalingFactorToDecimals(dec0Raw) ?? 18)

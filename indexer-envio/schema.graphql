@@ -54,6 +54,14 @@ type Pool {
 
   # Deviation / rebalance state
   invertRateFeed: Boolean!
+  # Tracks whether `invertRateFeed` reflects a successful on-chain read or
+  # the schema default. We can't use a sentinel value (boolean has no
+  # "unread" state), so this flag drives the self-heal in `upsertPool` —
+  # while false, every pool event re-attempts the RPC. Set to true when
+  # the factory's `invertRateFeedEffect` returns a real value or when the
+  # self-heal RPC eventually succeeds. Required because preload-phase RPC
+  # failures would otherwise persist a fabricated `false` and never retry.
+  invertRateFeedKnown: Boolean!
   priceDifference: BigInt!
   rebalanceThreshold: Int!
   lastRebalancedAt: BigInt!

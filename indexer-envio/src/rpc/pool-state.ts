@@ -196,71 +196,17 @@ export type RebalancingState = {
   priceDifference: bigint;
 };
 
-// ---------------------------------------------------------------------------
-// Caches
-// ---------------------------------------------------------------------------
-
 /** Returns SortedOracles address for chainId, throws if not in @mento-protocol/contracts. */
 const SORTED_ORACLES_ADDRESS = SortedOraclesContract.address;
 
-/** Per-chain block-scoped caches. Each cache holds entries for the most
- * recently seen block on each chain — when a chain advances to a new block,
- * its prior entries are evicted. Per-chain (rather than global) eviction is
- * required because the multichain configs run with `unordered_multichain_mode:
- * true`, so events from different chains can interleave at independent block
- * heights. Cardinality is bounded by `chains × keys_per_block`.
- *
- * Per-block keying remains correct for historical backfills (e.g. across an
- * oracle governance change): each fetch is keyed by its own blockNumber, so a
- * cached value can never be returned for a different block. */
-
-/** Cache numRates: "chainId:feedId:blockNumber" → count. */
-const numReportersCache = new Map<string, number>();
-const numReportersCacheLastBlocks = new Map<number, bigint>();
-
-/** Cache report expiry: "chainId:feedId:blockNumber" → expiry seconds. */
-const reportExpiryCache = new Map<string, bigint>();
-const reportExpiryCacheLastBlocks = new Map<number, bigint>();
-
-/** Cache getReserves(): "chainId:poolAddress:blockNumber" → reserves. */
-const reservesCache = new Map<string, { reserve0: bigint; reserve1: bigint }>();
-const reservesCacheLastBlocks = new Map<number, bigint>();
-
-/** Evict any entries for the given chain whose block doesn't match `blockNumber`.
- * Caller passes the cache and its per-chain lastBlocks tracker; we delete
- * entries with the `${chainId}:` prefix when the chain has advanced.
- * Exported under `_evictCacheForChain` for unit testing. */
-function evictCacheForChain<T>(
-  cache: Map<string, T>,
-  lastBlocks: Map<number, bigint>,
-  chainId: number,
-  blockNumber: bigint,
-): void {
-  if (lastBlocks.get(chainId) === blockNumber) return;
-  const prefix = `${chainId}:`;
-  for (const key of cache.keys()) {
-    if (key.startsWith(prefix)) cache.delete(key);
-  }
-  lastBlocks.set(chainId, blockNumber);
-}
-
-/** @internal Test-only: pure helper for unit-testing the eviction logic. */
-export const _evictCacheForChain = evictCacheForChain;
-
-/** @internal Test-only: snapshot block-scoped cache sizes for invariant
- * assertions. Caches are bounded by chains × keys-per-block; tests can drive
- * the fetchers across many blocks and assert the size never explodes. */
-export function _getOracleCacheStats(): {
-  numReporters: number;
-  reportExpiry: number;
-  reserves: number;
-} {
-  return {
-    numReporters: numReportersCache.size,
-    reportExpiry: reportExpiryCache.size,
-    reserves: reservesCache.size,
-  };
-}
+// Per-block in-process caches (numReportersCache, reportExpiryCache,
+// reservesCache, _rebalancingStateCache, _reportExpiryInFlight) used to live
+// here. They were deduplication shims for handlers that fired the same RPC
+// concurrently or across same-block events. Envio's Effect API runs
+// equivalent dedup at the batch level — every caller now goes through
+// `context.effect(...)` from src/rpc/effects.ts, so the shims are
+// redundant. Removed in the createEffect migration; `git log` has the
+// pre-migration design.
 
 // ---------------------------------------------------------------------------
 // Fetch functions
@@ -284,111 +230,50 @@ function parseRebalancingState(result: unknown): RebalancingState {
   };
 }
 
-// Memoize `fetchRebalancingState` per (chainId, addr, blockNumber). FPMM
-// emits 2× UR + 1× Rebalanced in the same rebalance tx → without this
-// cache each handler re-RPCs for identical block state.
-//
-// Two important invariants:
-// 1. Only cache `usedFallback=false` results. If the request fell back
-//    to `latest` (e.g. requested block not yet available), the response
-//    isn't actually scoped to the cache key's blockNumber, so caching
-//    it would serve stale-across-block data to later callers.
-//    NOTE: this caching invariant differs slightly from `fetchReserves`,
-//    which uses the stricter `usedLatestFallback` distinction to also
-//    return null on `latest` fallback (rebalance-delta callers need
-//    historical exactness). Event-dedup callers here only need the
-//    current state, so eviction-on-any-fallback is sufficient.
-// 2. Only cache non-null results. A null means the RPC failed; a retry
-//    next time is cheaper than serving the failure forever.
-const REBALANCING_STATE_CACHE_MAX = 256;
-const _rebalancingStateCache = new Map<
-  string,
-  Promise<RebalancingState | null>
->();
-
-function rebalancingCacheKey(
-  chainId: number,
-  poolAddress: string,
-  blockNumber: bigint,
-): string {
-  return `${chainId}:${poolAddress.toLowerCase()}:${blockNumber}`;
-}
-
+/** Fetch on-chain getRebalancingState() for a pool at a specific block.
+ * Returns null on RPC failure or `latest`-block fallback so callers
+ * preserve stale state instead of being silently fed wrong-block data.
+ * Matches the pattern in `fetchReserves` / `fetchRebalanceIncentiveAtBlock`.
+ *
+ * Cross-event dedup (FPMM emits 2× UR + 1× Rebalanced in the same rebalance
+ * tx) is handled upstream by `rebalancingStateEffect` in src/rpc/effects.ts
+ * — Envio's Effect API memoizes per-batch on identical inputs. The
+ * `usedLatestFallback` null gate matters here: without it, the effect
+ * would memoize a `latest`-block result across the whole batch and serve
+ * it to every later caller as if it were block-scoped to their block. */
 export async function fetchRebalancingState(
   chainId: number,
   poolAddress: string,
-  // `blockNumber` is required so the memoization key is always
-  // block-scoped. Previously optional — an undefined caller would have
-  // cached a `latest` response under a "latest" key, serving stale state
-  // across wall-clock time to later callers.
   blockNumber: bigint,
 ): Promise<RebalancingState | null> {
   const testKey = `${chainId}:${poolAddress.toLowerCase()}`;
   if (_testRebalancingStates.has(testKey)) {
     return _testRebalancingStates.get(testKey) ?? null;
   }
-
-  const cacheKey = rebalancingCacheKey(chainId, poolAddress, blockNumber);
-  const cached = _rebalancingStateCache.get(cacheKey);
-  if (cached !== undefined) {
-    // Refresh LRU position.
-    _rebalancingStateCache.delete(cacheKey);
-    _rebalancingStateCache.set(cacheKey, cached);
-    return cached;
+  try {
+    const client = getRpcClient(chainId);
+    const { result, usedLatestFallback } = await readContractWithBlockFallback(
+      client,
+      {
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_MINIMAL_ABI,
+        functionName: "getRebalancingState",
+      },
+      blockNumber,
+      getFallbackRpcClient(chainId),
+    );
+    if (usedLatestFallback) return null;
+    return parseRebalancingState(result);
+  } catch (err) {
+    logRpcFailure(
+      chainId,
+      "getRebalancingState",
+      poolAddress,
+      err,
+      blockNumber,
+    );
+    return null;
   }
-
-  // Capture usedFallback + null from inside the closure so the outer
-  // code can decide whether to cache. Storing the promise (not the
-  // resolved value) is critical — concurrent callers share the flight.
-  let cachedFallback = false;
-  let cachedNull = false;
-  const promise = (async (): Promise<RebalancingState | null> => {
-    try {
-      const client = getRpcClient(chainId);
-      const { result, usedFallback } = await readContractWithBlockFallback(
-        client,
-        {
-          address: poolAddress as `0x${string}`,
-          abi: FPMM_MINIMAL_ABI,
-          functionName: "getRebalancingState",
-        },
-        blockNumber,
-        getFallbackRpcClient(chainId),
-      );
-      if (usedFallback) cachedFallback = true;
-      return parseRebalancingState(result);
-    } catch (err) {
-      logRpcFailure(
-        chainId,
-        "getRebalancingState",
-        poolAddress,
-        err,
-        blockNumber,
-      );
-      cachedNull = true;
-      return null;
-    }
-  })();
-
-  _rebalancingStateCache.set(cacheKey, promise);
-  if (_rebalancingStateCache.size > REBALANCING_STATE_CACHE_MAX) {
-    const oldestKey = _rebalancingStateCache.keys().next().value;
-    if (oldestKey !== undefined) _rebalancingStateCache.delete(oldestKey);
-  }
-  // After the flight resolves, evict if the response is not a
-  // block-scoped hit. In-flight dedup still works (concurrent callers
-  // awaited the same promise); only LATER callers need a fresh attempt.
-  promise.finally(() => {
-    if (cachedFallback || cachedNull) {
-      _rebalancingStateCache.delete(cacheKey);
-    }
-  });
-  return promise;
-}
-
-/** Test-only cache reset — lets unit tests start from a clean slate. */
-export function _resetRebalancingStateCacheForTests(): void {
-  _rebalancingStateCache.clear();
 }
 
 /**
@@ -413,32 +298,18 @@ export async function fetchReserves(
     const mock = _testReserves.get(testKey);
     return mock === NULL_RESERVES ? null : (mock ?? null);
   }
-
-  if (blockNumber !== undefined) {
-    evictCacheForChain(
-      reservesCache,
-      reservesCacheLastBlocks,
-      chainId,
-      blockNumber,
-    );
-  }
-  const cacheKey = `${chainId}:${poolAddress.toLowerCase()}:${blockNumber}`;
-  const cached = reservesCache.get(cacheKey);
-  if (cached !== undefined) return cached;
-
   try {
     const client = getRpcClient(chainId);
-    const { result, usedFallback, usedLatestFallback } =
-      await readContractWithBlockFallback(
-        client,
-        {
-          address: poolAddress as `0x${string}`,
-          abi: FPMM_MINIMAL_ABI,
-          functionName: "getReserves",
-        },
-        blockNumber,
-        getFallbackRpcClient(chainId),
-      );
+    const { result, usedLatestFallback } = await readContractWithBlockFallback(
+      client,
+      {
+        address: poolAddress as `0x${string}`,
+        abi: FPMM_MINIMAL_ABI,
+        functionName: "getReserves",
+      },
+      blockNumber,
+      getFallbackRpcClient(chainId),
+    );
     // Only the `latest`-block fallback breaks the historical-accuracy
     // guarantee callers rely on. Secondary-RPC fallback still queries
     // the requested block, so its result is fine to return.
@@ -446,22 +317,25 @@ export async function fetchReserves(
       return null;
     }
     const r = result as readonly [bigint, bigint, bigint];
-    const reserves = { reserve0: r[0], reserve1: r[1] };
-    if (!usedFallback) {
-      reservesCache.set(cacheKey, reserves);
-    }
-    return reserves;
+    return { reserve0: r[0], reserve1: r[1] };
   } catch (err) {
     logRpcFailure(chainId, "getReserves", poolAddress, err, blockNumber);
     return null;
   }
 }
 
-/** Fetch the pool's invertRateFeed flag. Returns false on error (default). */
+/** Fetch the pool's invertRateFeed flag. Returns null on RPC error so the
+ * caller can distinguish "RPC failed" from a real `false`. With
+ * `preload_handlers: true`, an effect that returned a fabricated `false` on
+ * a transient blip would memoize and persist the wrong orientation for an
+ * actually-inverted pool — every downstream oracle/health calc would be on
+ * the wrong side of the rate until reindex. Caller skips the assignment on
+ * null and the schema default (false) survives until the next event triggers
+ * a re-fetch. */
 export async function fetchInvertRateFeed(
   chainId: number,
   poolAddress: string,
-): Promise<boolean> {
+): Promise<boolean | null> {
   try {
     const client = getRpcClient(chainId);
     const result = await client.readContract({
@@ -472,7 +346,7 @@ export async function fetchInvertRateFeed(
     return result as boolean;
   } catch (err) {
     logRpcFailure(chainId, "invertRateFeed", poolAddress, err);
-    return false;
+    return null;
   }
 }
 
@@ -527,7 +401,8 @@ export async function fetchReferenceRateFeedID(
 }
 
 /** Returns the number of active oracle reporters for the given rateFeedID at
- * the given block, or null on error. Results are cached per block. */
+ * the given block, or null on error. Per-batch dedup is handled by
+ * `numReportersEffect` in src/rpc/effects.ts. */
 export async function fetchNumReporters(
   chainId: number,
   rateFeedID: string,
@@ -539,20 +414,9 @@ export async function fetchNumReporters(
   } catch {
     return null;
   }
-
-  evictCacheForChain(
-    numReportersCache,
-    numReportersCacheLastBlocks,
-    chainId,
-    blockNumber,
-  );
-  const cacheKey = `${chainId}:${rateFeedID}:${blockNumber}`;
-  const cached = numReportersCache.get(cacheKey);
-  if (cached !== undefined) return cached;
-
   try {
     const client = getRpcClient(chainId);
-    const { result, usedFallback } = await readContractWithBlockFallback(
+    const { result } = await readContractWithBlockFallback(
       client,
       {
         address,
@@ -563,29 +427,19 @@ export async function fetchNumReporters(
       blockNumber,
       getFallbackRpcClient(chainId),
     );
-    const value = Number(result);
-    if (!usedFallback) {
-      numReportersCache.set(cacheKey, value);
-    }
-    return value;
+    return Number(result);
   } catch (err) {
     logRpcFailure(chainId, "numRates", rateFeedID, err, blockNumber);
     return null;
   }
 }
 
-// In-flight dedup for `fetchReportExpiry`. The value-level `reportExpiryCache`
-// is populated only AFTER the RPC resolves, so under `Promise.all` fan-out
-// (oracle handlers parallelize per pool — pools sharing a feed fire
-// identical requests concurrently) every caller misses and re-RPCs. This
-// Promise map collapses in-flight requests: concurrent callers share one
-// flight, the value cache then absorbs subsequent calls. Entries are
-// cleared on resolve (win + loss) so the value cache / retry path
-// takes over afterwards.
-const _reportExpiryInFlight = new Map<string, Promise<bigint | null>>();
-
-/** Returns the effective oracle report expiry (seconds) for the given rateFeedID.
- * Returns null on RPC/address error so callers can preserve the previous known-good value. */
+/** Returns the effective oracle report expiry (seconds) for the given
+ * rateFeedID. Returns null on RPC/address error so callers can preserve the
+ * previous known-good value. Concurrent-call dedup (oracle handlers fan out
+ * across pools sharing a feed) is handled upstream by `reportExpiryEffect`
+ * in src/rpc/effects.ts — Envio's Effect API memoizes per-batch on
+ * identical inputs. */
 export async function fetchReportExpiry(
   chainId: number,
   rateFeedID: string,
@@ -601,86 +455,53 @@ export async function fetchReportExpiry(
   } catch {
     return null;
   }
-
-  evictCacheForChain(
-    reportExpiryCache,
-    reportExpiryCacheLastBlocks,
-    chainId,
-    blockNumber,
-  );
-  const cacheKey = `${chainId}:${rateFeedID}:${blockNumber}`;
-  const cached = reportExpiryCache.get(cacheKey);
-  if (cached !== undefined) return cached;
-
-  const inFlight = _reportExpiryInFlight.get(cacheKey);
-  if (inFlight !== undefined) return inFlight;
-
-  const promise = (async (): Promise<bigint | null> => {
-    try {
-      const client = getRpcClient(chainId);
-      let usedAnyFallback = false;
-      const tokenExpiryRes = await readContractWithBlockFallback(
+  try {
+    const client = getRpcClient(chainId);
+    const tokenExpiryRes = await readContractWithBlockFallback(
+      client,
+      {
+        address,
+        abi: SortedOraclesContract.abi,
+        functionName: "tokenReportExpirySeconds",
+        args: [rateFeedID as `0x${string}`],
+      },
+      blockNumber,
+      getFallbackRpcClient(chainId),
+    );
+    const tokenExpiry = tokenExpiryRes.result as bigint;
+    let expiry: bigint;
+    if (tokenExpiry > 0n) {
+      expiry = tokenExpiry;
+    } else {
+      const globalRes = await readContractWithBlockFallback(
         client,
         {
           address,
           abi: SortedOraclesContract.abi,
-          functionName: "tokenReportExpirySeconds",
-          args: [rateFeedID as `0x${string}`],
+          functionName: "reportExpirySeconds",
         },
         blockNumber,
         getFallbackRpcClient(chainId),
       );
-      if (tokenExpiryRes.usedFallback) usedAnyFallback = true;
-      const tokenExpiry = tokenExpiryRes.result as bigint;
-      let expiry: bigint;
-      if (tokenExpiry > 0n) {
-        expiry = tokenExpiry;
-      } else {
-        const globalRes = await readContractWithBlockFallback(
-          client,
-          {
-            address,
-            abi: SortedOraclesContract.abi,
-            functionName: "reportExpirySeconds",
-          },
-          blockNumber,
-          getFallbackRpcClient(chainId),
-        );
-        if (globalRes.usedFallback) usedAnyFallback = true;
-        expiry = globalRes.result as bigint;
-      }
-      if (expiry <= 0n) return null;
-      if (!usedAnyFallback) {
-        reportExpiryCache.set(cacheKey, expiry);
-      }
-      return expiry;
-    } catch (err) {
-      logRpcFailure(chainId, "reportExpiry", rateFeedID, err, blockNumber);
-      return null;
+      expiry = globalRes.result as bigint;
     }
-  })();
-
-  _reportExpiryInFlight.set(cacheKey, promise);
-  promise.finally(() => {
-    _reportExpiryInFlight.delete(cacheKey);
-  });
-  return promise;
+    if (expiry <= 0n) return null;
+    return expiry;
+  } catch (err) {
+    logRpcFailure(chainId, "reportExpiry", rateFeedID, err, blockNumber);
+    return null;
+  }
 }
 
-/** Test-only: clear the in-flight `fetchReportExpiry` map. */
-export function _resetReportExpiryInFlightForTests(): void {
-  _reportExpiryInFlight.clear();
-}
-
-/** Fetches decimals0() or decimals1() from an FPMM pool — returns the scaling
- *  factor (e.g. 1000000000000000000n for 18dp, 1000000n for 6dp).
- *  Falls back to calling ERC20 decimals() on the token contract if the pool
- *  method fails. */
+/** Fetches decimals0() or decimals1() from an FPMM pool — returns the
+ *  scaling factor (e.g. 1000000000000000000n for 18dp, 1000000n for 6dp).
+ *  Returns null on RPC failure so the caller (the effect handler) can
+ *  fall back to `erc20DecimalsEffect` and benefit from effect-level dedup
+ *  on shared fallback tokens. */
 export async function fetchTokenDecimalsScaling(
   chainId: number,
   poolAddress: string,
   fn: "decimals0" | "decimals1",
-  fallbackTokenAddress?: string,
 ): Promise<bigint | null> {
   try {
     const client = getRpcClient(chainId);
@@ -692,9 +513,7 @@ export async function fetchTokenDecimalsScaling(
     return result as bigint;
   } catch (err) {
     logRpcFailure(chainId, fn, poolAddress, err);
-    if (!fallbackTokenAddress) return null;
-    const decimals = await fetchErc20Decimals(chainId, fallbackTokenAddress);
-    return decimals == null ? null : 10n ** BigInt(decimals);
+    return null;
   }
 }
 

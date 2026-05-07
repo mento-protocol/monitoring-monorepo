@@ -10,7 +10,7 @@ import {
   computeLimitPressures,
   computeLimitStatus,
 } from "../../tradingLimits";
-import { fetchTradingLimits } from "../../rpc";
+import { tradingLimitsEffect } from "../../rpc/effects";
 import { maybePreloadPool } from "../../pool";
 
 // ---------------------------------------------------------------------------
@@ -34,12 +34,12 @@ FPMM.TradingLimitConfigured.handler(async ({ event, context }) => {
   const eventLimit0 = configTuple[0];
   const eventLimit1 = configTuple[1];
 
-  const limits = await fetchTradingLimits(
-    event.chainId,
-    event.srcAddress,
-    event.params.token,
+  const limits = await context.effect(tradingLimitsEffect, {
+    chainId: event.chainId,
+    poolAddress: event.srcAddress,
+    token: event.params.token,
     blockNumber,
-  );
+  });
 
   const limit0 = limits ? limits.config.limit0 : eventLimit0;
   const limit1 = limits ? limits.config.limit1 : eventLimit1;

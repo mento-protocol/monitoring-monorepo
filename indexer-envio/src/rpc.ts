@@ -40,17 +40,13 @@ export {
   _clearMockRateFeedIDs,
   _setMockReportExpiry,
   _clearMockReportExpiry,
-  _evictCacheForChain,
-  _getOracleCacheStats,
   fetchRebalancingState,
-  _resetRebalancingStateCacheForTests,
   fetchReserves,
   fetchInvertRateFeed,
   fetchRebalanceThreshold,
   fetchReferenceRateFeedID,
   fetchNumReporters,
   fetchReportExpiry,
-  _resetReportExpiryInFlightForTests,
   fetchTokenDecimalsScaling,
   fetchErc20Decimals,
   fetchTradingLimits,
@@ -110,11 +106,13 @@ export async function getPoolsByFeed(
 export async function updatePoolsOracleExpiry(
   context: HandlerContext,
   poolIds: string[],
-  oracleExpiry: bigint | null,
+  // Accept undefined too so callers can pass the `reportExpiryEffect` result
+  // (Sury maps null → undefined) without normalizing at every call site.
+  oracleExpiry: bigint | null | undefined,
   blockNumber: bigint,
   blockTimestamp: bigint,
 ): Promise<void> {
-  if (oracleExpiry === null || poolIds.length === 0) return;
+  if (oracleExpiry == null || poolIds.length === 0) return;
 
   for (const poolId of poolIds) {
     const existing = await context.Pool.get(poolId);

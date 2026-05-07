@@ -16,6 +16,10 @@ import { runStartupChecks } from "./startupChecks";
 // See src/startupChecks.ts for details and rationale.
 runStartupChecks();
 
+// Effect registrations (side-effect import — registers the 16 RPC effects
+// with the Envio runtime so they're available via `context.effect(...)`).
+import "./rpc/effects";
+
 // Handler registrations (side-effect imports)
 import "./handlers/broker";
 import "./handlers/fpmm";
@@ -53,8 +57,6 @@ export {
   _clearMockReportExpiry,
   _setMockFees,
   _clearMockFees,
-  _evictCacheForChain,
-  _getOracleCacheStats,
   _setMockBreakerKind,
   _setMockBreakerDefaults,
   _setMockBreakerFeedState,

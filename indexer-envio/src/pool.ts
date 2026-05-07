@@ -2,6 +2,7 @@
 // Pool and PoolSnapshot upsert logic, health status computation
 // ---------------------------------------------------------------------------
 
+import type { EffectCaller } from "envio";
 import type {
   Pool,
   PoolSnapshot,
@@ -16,7 +17,13 @@ import {
   extractAddressFromPoolId,
 } from "./helpers";
 import { computePriceDifference } from "./priceDifference";
-import { fetchReferenceRateFeedID, fetchReportExpiry, fetchFees } from "./rpc";
+import {
+  compactFees,
+  feesEffect,
+  invertRateFeedEffect,
+  referenceRateFeedIDEffect,
+  reportExpiryEffect,
+} from "./rpc/effects";
 import { isVirtualPool } from "./helpers";
 import { recordBreachTransition } from "./deviationBreach";
 
@@ -257,6 +264,7 @@ export async function maybePreloadPool(
 }
 
 export type PoolContext = {
+  effect: EffectCaller;
   Pool: {
     get: (id: string) => Promise<Pool | undefined>;
     set: (entity: Pool) => void;
@@ -266,6 +274,42 @@ export type PoolContext = {
     set: (entity: DeviationThresholdBreach) => void;
   };
 };
+
+/** Self-heal `invertRateFeed` when it was never successfully read at pool
+ * deployment (factory's RPC fan-out hit a transient blip → the field rode
+ * the schema default). Returns the same pool when already healed / not
+ * applicable, otherwise returns a copy with `invertRateFeed` corrected and
+ * `invertRateFeedKnown: true`.
+ *
+ * Must be called before any code path reads `pool.invertRateFeed` to
+ * compute oracle/health/priceDifference state — including the
+ * `OracleReported`/`MedianUpdated` handlers (which write directly without
+ * going through `upsertPool`) and the `UpdateReserves`/`Rebalanced`
+ * handlers (which read `existing.invertRateFeed` before `upsertPool` runs).
+ *
+ * Effect-level dedup means this is one RPC read per (pool, batch) when
+ * unhealed; once `invertRateFeedKnown` flips true, subsequent calls are
+ * pure object identity returns — no RPC, no Pool.set side-effect. The
+ * caller's own Pool.set persists the healed value. */
+export async function selfHealInvertRateFeed(
+  context: { effect: EffectCaller },
+  pool: Pool,
+): Promise<Pool> {
+  if (pool.invertRateFeedKnown || pool.source === "" || isVirtualPool(pool)) {
+    return pool;
+  }
+  const poolAddr = extractAddressFromPoolId(pool.id);
+  const invert = await context.effect(invertRateFeedEffect, {
+    chainId: pool.chainId,
+    poolAddress: poolAddr,
+  });
+  if (invert === undefined) return pool;
+  return {
+    ...pool,
+    invertRateFeed: invert,
+    invertRateFeedKnown: true,
+  };
+}
 
 export type SnapshotContext = {
   PoolSnapshot: {
@@ -294,6 +338,9 @@ export const DEFAULT_ORACLE_FIELDS = {
   lastOracleJumpBps: "0.0000",
   lastOracleJumpAt: 0n,
   invertRateFeed: false,
+  // false = unread (schema default); true = real on-chain value persisted.
+  // While false, upsertPool's self-heal retries the effect on every event.
+  invertRateFeedKnown: false,
   priceDifference: 0n,
   rebalanceThreshold: 0,
   lastRebalancedAt: 0n,
@@ -402,10 +449,14 @@ export const upsertPool = async ({
    * from "not passed". When `undefined`, upsertPool does its own lookup. */
   existing?: { pool: Pool | undefined };
 }): Promise<Pool> => {
-  const existing = existingOverride
+  const existingInitial = existingOverride
     ? (existingOverride.pool ??
       defaultPool(chainId, poolId, { token0, token1 }))
     : await getOrCreatePool(context, chainId, poolId, { token0, token1 });
+  // Self-heal invertRateFeed up front so every downstream computation
+  // (priceDifference, oraclePrice flip, breach status) sees the corrected
+  // orientation. Same helper that handlers call before reading the field.
+  const existing = await selfHealInvertRateFeed(context, existingInitial);
 
   // Self-heal: if referenceRateFeedID is missing (transient RPC failure at
   // pool creation), retry now so oracle events can start flowing.
@@ -417,13 +468,24 @@ export const upsertPool = async ({
     existing.source !== "" &&
     !isVirtualPool(existing)
   ) {
-    const rateFeedID = await fetchReferenceRateFeedID(chainId, poolAddr);
+    const rateFeedID = await context.effect(referenceRateFeedIDEffect, {
+      chainId,
+      poolAddress: poolAddr,
+    });
     if (rateFeedID) {
       healedOracleDelta = { referenceRateFeedID: rateFeedID };
-      const expiry = await fetchReportExpiry(chainId, rateFeedID, blockNumber);
-      if (expiry !== null) healedOracleDelta.oracleExpiry = expiry;
+      const expiry = await context.effect(reportExpiryEffect, {
+        chainId,
+        rateFeedID,
+        blockNumber,
+      });
+      if (expiry !== undefined) healedOracleDelta.oracleExpiry = expiry;
     }
   }
+
+  // (invertRateFeed self-heal already happened above via
+  // `selfHealInvertRateFeed(context, existingInitial)` — its result is in
+  // `existing` and flows through the `...existing` spread into `next`.)
 
   // Self-heal: if fees are still at the -1 "not yet attempted" sentinel,
   // retry now. Once we get a successful read — even if the real fees are
@@ -441,9 +503,12 @@ export const upsertPool = async ({
     existing.source !== "" &&
     !isVirtualPool(existing)
   ) {
-    const fees = await fetchFees(chainId, poolAddr);
+    const fees = await context.effect(feesEffect, {
+      chainId,
+      poolAddress: poolAddr,
+    });
     if (fees) {
-      healedFees = fees;
+      healedFees = compactFees(fees);
     }
   }
 
