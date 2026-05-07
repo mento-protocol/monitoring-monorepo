@@ -1,5 +1,41 @@
 # Backlog
 
+## Test Quality — introduce mutation testing baseline
+
+Add a lightweight StrykerJS mutation-testing baseline so the existing unit tests prove they catch bad logic, not just execute lines. Start non-blocking and scoped; do not turn this into a CI tarpit.
+
+Recommended first PR for Claude Code:
+
+- [ ] Add StrykerJS dependencies at the workspace/package level needed for:
+  - Vitest packages: `ui-dashboard`, `metrics-bridge`, `shared-config`
+  - Mocha package: `indexer-envio`
+  - TypeScript checking so compile-invalid mutants are discarded before test execution
+- [ ] Add an initial `ui-dashboard/stryker.config.json` scoped only to high-value pure logic:
+  - include: `src/lib/**/*.{ts,tsx}`
+  - exclude: tests, `*.d.ts`, GraphQL query barrels/config-only files, generated/static type files
+  - use the Vitest runner with `vitest.config.ts`
+  - enable incremental mode
+  - reporters: clear text + HTML + JSON
+  - thresholds: record a baseline, but set `break: 0` initially
+- [ ] Add package scripts, e.g. `test:mutation` and `test:mutation:ui`, without changing required CI gates yet.
+- [ ] Run one local baseline against a narrow file set first (`format`, `health`, `reserves`, `volume`, `weekend`, `routing`, `rebalance-check`, `protocol-fees`) and document the mutation score + top surviving mutants in this backlog item or a small `docs/` note.
+- [ ] Add a non-blocking/manual GitHub Actions job only after the first local run proves runtime is acceptable. Prefer weekly/manual or changed-files-only over every PR.
+- [ ] Follow-up phases:
+  1. Expand `ui-dashboard` mutation scope from pure `src/lib` utilities to hooks/API routes with stable mocks.
+  2. Add `metrics-bridge` and `shared-config` Vitest configs; these are likely high ROI because they contain alert/math/config logic.
+  3. Add `indexer-envio` Mocha mutation config for pure helper modules and event math. Exclude generated Envio output, ABIs, config JSON, and runtime-heavy RPC/dev-server paths.
+  4. Only after two clean baseline runs, set a conservative gating policy: fail on mutation-score regression for touched scoped files, not on an absolute repo-wide threshold.
+
+Acceptance criteria for the first PR:
+
+- [ ] `pnpm install --lockfile-only` / lockfile update is intentional and minimal.
+- [ ] `pnpm --filter @mento-protocol/ui-dashboard test` still passes.
+- [ ] `pnpm --filter @mento-protocol/ui-dashboard typecheck` still passes.
+- [ ] A scoped mutation command completes locally and writes an HTML/JSON report.
+- [ ] README/backlog note explains how to run mutation testing and why CI is non-blocking at first.
+
+Rationale: coverage currently tells us dashboard/indexer/bridge code was executed; mutation testing checks whether tests fail when threshold comparisons, boolean rollups, fallback operators, arithmetic, and routing/filter predicates are subtly wrong — exactly the class of bugs that monitoring dashboards and alerting code can hide until production.
+
 ## Homepage Swaps KPI + OG card — include legacy v2 broker swaps
 
 PR #318 (volume v3/v2 split) and PR #322 (cross-fade + pills) cover the
