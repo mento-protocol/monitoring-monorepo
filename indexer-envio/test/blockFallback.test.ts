@@ -282,4 +282,119 @@ describe("readContractWithBlockFallback", () => {
     assert.equal((calls[4] as any).functionName, "bar");
     assert.deepEqual((calls[4] as any).args, ["0xfeed"]);
   });
+
+  // -------------------------------------------------------------------------
+  // Archive-depth fallback (primary's archive doesn't reach this block, but
+  // a deeper-archive secondary does). Distinct from rate-limit fallback
+  // because the secondary is consulted on the archive-depth error pattern,
+  // not just rate-limit. Distinct from block-not-available because the
+  // recovery is the SAME block on a deeper RPC, not `latest` on the same RPC.
+  // -------------------------------------------------------------------------
+
+  it("archive-depth: secondary at SAME block returns block-scoped result", async () => {
+    const primaryCalls: Record<string, unknown>[] = [];
+    const fallbackCalls: Record<string, unknown>[] = [];
+    const primary = mockClient(async (args) => {
+      primaryCalls.push({ ...args });
+      throw new Error(
+        "Block requested not found. Request might be querying historical state that is not available.",
+      );
+    });
+    const fallback = mockClient(async (args) => {
+      fallbackCalls.push({ ...args });
+      return "deep-archive-result";
+    });
+    const res = await readContractWithBlockFallback(
+      primary,
+      baseArgs,
+      68202836n,
+      fallback,
+    );
+    assert.equal(res.result, "deep-archive-result");
+    assert.equal(res.usedFallback, true);
+    assert.equal(
+      res.usedLatestFallback,
+      false,
+      "block-scoped accuracy must be preserved when secondary returns at the same block",
+    );
+    assert.equal(
+      primaryCalls.length,
+      1,
+      "no retries on primary for archive-depth",
+    );
+    assert.equal(fallbackCalls.length, 1);
+    assert.equal((fallbackCalls[0] as any).blockNumber, 68202836n);
+  });
+
+  it("archive-depth: matches 'querying historical state' phrasing too", async () => {
+    const primary = mockClient(async () => {
+      throw new Error(
+        "RPC error: querying historical state that is not available on this node",
+      );
+    });
+    const fallback = mockClient(async () => "ok");
+    const res = await readContractWithBlockFallback(
+      primary,
+      baseArgs,
+      100n,
+      fallback,
+    );
+    assert.equal(res.result, "ok");
+    assert.equal(res.usedFallback, true);
+    assert.equal(res.usedLatestFallback, false);
+  });
+
+  it("archive-depth: secondary also fails → falls through to `latest` on primary", async () => {
+    const primary = mockClient(async (args) => {
+      // Block-scoped calls: archive-depth error
+      if ((args as any).blockNumber !== undefined) {
+        throw new Error("Block requested not found");
+      }
+      // `latest` call: succeeds
+      return "latest-on-primary";
+    });
+    const fallback = mockClient(async () => {
+      throw new Error("rate limit"); // Secondary itself rate-limits
+    });
+    const res = await readContractWithBlockFallback(
+      primary,
+      baseArgs,
+      100n,
+      fallback,
+    );
+    assert.equal(res.result, "latest-on-primary");
+    assert.equal(res.usedFallback, true);
+    assert.equal(
+      res.usedLatestFallback,
+      true,
+      "must signal latest-fallback when primary archive miss + secondary fails — call sites use this gate to discard non-block-scoped results",
+    );
+  });
+
+  it("archive-depth: no fallback configured → straight to `latest`, no retries", async () => {
+    let primaryCallNo = 0;
+    const primary = mockClient(async (args) => {
+      primaryCallNo++;
+      if ((args as any).blockNumber !== undefined) {
+        throw new Error("Block requested not found");
+      }
+      return "latest-result";
+    });
+    const res = await readContractWithBlockFallback(
+      primary,
+      baseArgs,
+      100n,
+      null,
+    );
+    assert.equal(res.result, "latest-result");
+    assert.equal(res.usedLatestFallback, true);
+    // 1 block-scoped attempt + 1 latest attempt = 2; no retry loop entered
+    // (archive-depth would deterministically fail on retries against the
+    // same primary, so we skip them — see block-fallback.ts).
+    assert.equal(
+      primaryCallNo,
+      2,
+      "no retry loop for archive-depth — straight to latest",
+    );
+  });
 });
