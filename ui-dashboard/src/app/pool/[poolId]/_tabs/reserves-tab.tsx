@@ -112,7 +112,7 @@ export function ReservesTab({
               <Th>Tx</Th>
               <Th align="right">{sym0} Reserve</Th>
               <Th align="right">{sym1} Reserve</Th>
-              <Th align="right">Total (USD)</Th>
+              {showUsd && <Th align="right">Total (USD)</Th>}
               <th
                 scope="col"
                 className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-right"
@@ -163,11 +163,11 @@ export function ReservesTab({
                       </div>
                     )}
                   </Td>
-                  <Td mono small align="right">
-                    {showUsd
-                      ? `$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      : "—"}
-                  </Td>
+                  {showUsd && (
+                    <Td mono small align="right">
+                      {`$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                    </Td>
+                  )}
                   <td className="hidden sm:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
                     {formatBlock(r.blockNumber)}
                   </td>
