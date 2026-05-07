@@ -57,8 +57,6 @@ export {
   _clearMockReportExpiry,
   _setMockFees,
   _clearMockFees,
-  _evictCacheForChain,
-  _getOracleCacheStats,
   _setMockBreakerKind,
   _setMockBreakerDefaults,
   _setMockBreakerFeedState,
