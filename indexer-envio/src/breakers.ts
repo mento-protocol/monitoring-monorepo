@@ -180,9 +180,29 @@ export async function ensureBreakerConfig(
 const BOOTSTRAP_ATTEMPTED_MAX = 1024;
 const _bootstrapAttempted = new Set<string>();
 
-/** @internal Test-only: clear the bootstrap-attempted cache between tests. */
-export function _clearBootstrapAttempted(): void {
+/** Negative cache: chain-time TTL after a `breakerListEffect` failure. The
+ * "transient failure → never mark attempted" design loops cleanly when the
+ * RPC actually is transient, but persistently-broken providers (observed:
+ * Monad RPCs without full archive depth back to `start_block`) fire one
+ * `getBreakers()` call per `MedianUpdated` event during catch-up. With no
+ * effect-level dedup across blocks, that compounds into thousands of
+ * wasted calls per hour. Capping retries to once per N seconds of CHAIN
+ * time (not wall-clock) bounds the storm without giving up the eventual
+ * recovery path.
+ *
+ * Soft-capped with FIFO eviction at the same `BOOTSTRAP_ATTEMPTED_MAX`
+ * cap as `_bootstrapAttempted` — a hostile feed that registers many
+ * distinct rateFeedIDs while the upstream RPC is broken would otherwise
+ * grow this map unboundedly. Eviction matches the success-cache pattern;
+ * markBootstrapAttempted's eviction also drops the paired backoff entry
+ * so the two caches don't drift. */
+const BOOTSTRAP_BACKOFF_SECONDS = 5n * 60n;
+const _bootstrapBackoffUntilTs = new Map<string, bigint>();
+
+/** @internal Test-only: clear both bootstrap caches between tests. */
+export function _clearBootstrapCaches(): void {
   _bootstrapAttempted.clear();
+  _bootstrapBackoffUntilTs.clear();
 }
 
 export async function bootstrapFeedBreakerConfigs(
@@ -194,21 +214,29 @@ export async function bootstrapFeedBreakerConfigs(
 ): Promise<void> {
   const cacheKey = `${chainId}:${rateFeedID.toLowerCase()}`;
   if (_bootstrapAttempted.has(cacheKey)) return;
+  // Skip retry while inside the negative-cache TTL window.
+  const backoffUntil = _bootstrapBackoffUntilTs.get(cacheKey);
+  if (backoffUntil !== undefined && blockTimestamp < backoffUntil) return;
 
   // Only mark as attempted AFTER a successful BreakerBox.getBreakers() call.
   // A transient RPC failure here would otherwise permanently poison the
   // cache for the rest of the process — and for feeds whose breaker setup
   // happened before `start_block`, this is the only hydration path, so a
   // brief network blip would leave breaker state missing until restart.
+  // Persistent failures land in the negative-cache TTL above instead.
   const breakerAddresses = await context.effect(breakerListEffect, {
     chainId,
     blockNumber,
   });
-  if (!breakerAddresses) return; // RPC failed — let the next event retry.
+  if (!breakerAddresses) {
+    setBootstrapBackoff(cacheKey, blockTimestamp + BOOTSTRAP_BACKOFF_SECONDS);
+    return;
+  }
   if (breakerAddresses.length === 0) {
     // Empty list is itself authoritative (no breakers registered for this
     // BreakerBox at this block) — safe to cache so we don't refetch.
     markBootstrapAttempted(cacheKey);
+    _bootstrapBackoffUntilTs.delete(cacheKey);
     return;
   }
 
@@ -240,16 +268,40 @@ export async function bootstrapFeedBreakerConfigs(
     if (!cfg) allSucceeded = false;
   }
 
-  if (allSucceeded) markBootstrapAttempted(cacheKey);
+  if (allSucceeded) {
+    markBootstrapAttempted(cacheKey);
+    _bootstrapBackoffUntilTs.delete(cacheKey);
+  }
+}
+
+/** Set a backoff TTL for a (chain, feed) tuple, applying FIFO eviction at
+ * the same `BOOTSTRAP_ATTEMPTED_MAX` cap so the two caches grow together.
+ * Map preserves insertion order, so `keys().next().value` is the oldest. */
+function setBootstrapBackoff(cacheKey: string, untilTs: bigint): void {
+  if (
+    _bootstrapBackoffUntilTs.size >= BOOTSTRAP_ATTEMPTED_MAX &&
+    !_bootstrapBackoffUntilTs.has(cacheKey)
+  ) {
+    const oldest = _bootstrapBackoffUntilTs.keys().next().value;
+    if (oldest !== undefined) _bootstrapBackoffUntilTs.delete(oldest);
+  }
+  _bootstrapBackoffUntilTs.set(cacheKey, untilTs);
 }
 
 /** Add a feed to the bootstrap-attempted cache, applying FIFO eviction when
  * we're at the soft cap. Sets preserve insertion order so we drop the oldest
- * entry; the evicted feed's next event simply re-bootstraps (idempotent). */
+ * entry; the evicted feed's next event simply re-bootstraps (idempotent).
+ * Paired backoff entry is dropped on eviction so the two caches stay in sync. */
 function markBootstrapAttempted(cacheKey: string): void {
-  if (_bootstrapAttempted.size >= BOOTSTRAP_ATTEMPTED_MAX) {
+  if (
+    _bootstrapAttempted.size >= BOOTSTRAP_ATTEMPTED_MAX &&
+    !_bootstrapAttempted.has(cacheKey)
+  ) {
     const oldest = _bootstrapAttempted.values().next().value;
-    if (oldest !== undefined) _bootstrapAttempted.delete(oldest);
+    if (oldest !== undefined) {
+      _bootstrapAttempted.delete(oldest);
+      _bootstrapBackoffUntilTs.delete(oldest);
+    }
   }
   _bootstrapAttempted.add(cacheKey);
 }

@@ -64,7 +64,7 @@ export {
   _clearBreakerMocks,
 } from "./rpc";
 
-export { _clearBootstrapAttempted } from "./breakers";
+export { _clearBootstrapCaches } from "./breakers";
 
 // Fee token test mocks and helpers
 export {
