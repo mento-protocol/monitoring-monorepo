@@ -75,28 +75,6 @@ Lightweight plan:
 
 Acceptance: finds at least one real assertion gap or gives high confidence on a critical module with acceptable manual/nightly runtime.
 
-## Homepage Swaps KPI + OG card — include legacy v2 broker swaps
-
-PR #318 (volume v3/v2 split) and PR #322 (cross-fade + pills) cover the
-volume _chart_ and _headline_, but the homepage **Swaps** KPI tile
-(`page-client.tsx:335`) and the OpenGraph card both still count only
-FPMM/VirtualPool swaps via `pools[].swapCount` — they don't include
-the v2 Broker→BiPoolManager swaps already indexed as
-`BrokerDailySnapshot` (filtered to `routedViaV3Router=false`).
-
-Small follow-up PR:
-
-- [ ] Sum `BrokerDailySnapshot.swapCount` (where `routedViaV3Router =
-false`) across the chosen window into the Swaps tile, alongside
-      the existing FPMM count. Matches how the Volume chart already
-      composes both rollups.
-- [ ] Apply the same v2 inclusion to the OG card's swap-count fallback
-      (`opengraph-image.tsx`).
-- [ ] Decide on display: a single combined number (most likely) vs.
-      two pills like the volume headline. The Swaps tile is smaller
-      real estate than the Volume hero; combined number is probably
-      right but worth testing in a preview deploy.
-
 ## Volume Leaderboard — follow-up PRs after PR 1 (indexer foundation)
 
 PR 1 landed the schema entities + `caller`/`txTo`/`volumeUsdWei` on `SwapEvent` + handler population + `computeSwapUsdWei`. The `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `AggregatorTraderDayMarker`, `TraderPoolDayMarker` entities exist but no handlers write to them yet (empty tables on deploy — fine; PR 2 fills them).
