@@ -18,11 +18,6 @@
 // effects (groups C, D, E) MUST stay false even on medium because reorgs
 // would silently corrupt cached values; immutable / governance-rare effects
 // (groups A, B, F) are safe to flip later.
-//
-// Commit 1 of 4: each effect handler just delegates to the existing fetcher.
-// Behavior is unchanged. Call sites still call the legacy `fetch*` functions.
-// Commits 2–3 migrate call sites; commit 4 moves mock seams inside the
-// effect closure and deletes the now-redundant in-process caches.
 // ---------------------------------------------------------------------------
 
 import { createEffect, S } from "envio";
@@ -360,6 +355,10 @@ export const reportExpiryEffect = createEffect(
 // ---------------------------------------------------------------------------
 // Group E — trading limits.
 // MUST stay `cache: false` permanently (block-scoped state).
+// Higher rate limit than other block-scoped effects: fires twice per FPMM
+// Swap (once per token), so peak Celo catch-up of ~120 events/sec → up to
+// ~240 fetcher invocations/sec. Effect-level batching collapses concurrent
+// calls into multicalls, but the cap still needs headroom.
 // ---------------------------------------------------------------------------
 
 export const tradingLimitsEffect = createEffect(
@@ -375,7 +374,7 @@ export const tradingLimitsEffect = createEffect(
       blockNumber: S.optional(S.bigint),
     },
     output: S.nullable(tradingLimitsShape),
-    rateLimit: { calls: 100, per: "second" },
+    rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
   async ({ input }) =>

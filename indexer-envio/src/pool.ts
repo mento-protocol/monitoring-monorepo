@@ -263,7 +263,6 @@ export async function maybePreloadPool(
 }
 
 export type PoolContext = {
-  // Effect caller — only used by upsertPool's self-heal RPC paths today.
   effect: EffectCaller;
   Pool: {
     get: (id: string) => Promise<Pool | undefined>;
