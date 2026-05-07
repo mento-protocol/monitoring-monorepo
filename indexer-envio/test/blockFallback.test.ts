@@ -344,57 +344,94 @@ describe("readContractWithBlockFallback", () => {
     assert.equal(res.usedLatestFallback, false);
   });
 
-  it("archive-depth: secondary also fails → falls through to `latest` on primary", async () => {
-    const primary = mockClient(async (args) => {
-      // Block-scoped calls: archive-depth error
-      if ((args as any).blockNumber !== undefined) {
-        throw new Error("Block requested not found");
-      }
-      // `latest` call: succeeds
-      return "latest-on-primary";
+  it("archive-depth: secondary also fails → throws (fail-closed)", async () => {
+    // Pre-PR behaviour preserved: archive-depth + secondary failure
+    // throws to the caller. We must NOT silently fall through to `latest`
+    // because many call sites consume `result` without checking
+    // `usedLatestFallback` — that would corrupt historical entity state
+    // with current-block data.
+    const primary = mockClient(async () => {
+      throw new Error(
+        "querying historical state that is not available on this node",
+      );
     });
     const fallback = mockClient(async () => {
       throw new Error("rate limit"); // Secondary itself rate-limits
     });
-    const res = await readContractWithBlockFallback(
-      primary,
-      baseArgs,
-      100n,
-      fallback,
-    );
-    assert.equal(res.result, "latest-on-primary");
-    assert.equal(res.usedFallback, true);
-    assert.equal(
-      res.usedLatestFallback,
-      true,
-      "must signal latest-fallback when primary archive miss + secondary fails — call sites use this gate to discard non-block-scoped results",
+    await assert.rejects(
+      readContractWithBlockFallback(primary, baseArgs, 100n, fallback),
+      /rate limit/,
+      "should propagate the secondary error, not swallow it into a latest read",
     );
   });
 
-  it("archive-depth: no fallback configured → straight to `latest`, no retries", async () => {
+  it("archive-depth: secondary returns 'returned no data' → throws so caller classifies it", async () => {
+    // The 'returned no data' classification matters: e.g.
+    // fetchRebalanceIncentiveAtBlock stamps a -2 sentinel for older pools
+    // missing the getter. Eating this into a `latest` read would replace
+    // the legitimate "getter doesn't exist" signal with current-block
+    // contract state.
+    const primary = mockClient(async () => {
+      throw new Error("querying historical state");
+    });
+    const fallback = mockClient(async () => {
+      throw new Error('The contract function "x" returned no data ("0x").');
+    });
+    await assert.rejects(
+      readContractWithBlockFallback(primary, baseArgs, 100n, fallback),
+      /returned no data/,
+      "should propagate the 'returned no data' error so the caller can stamp the -2 sentinel",
+    );
+  });
+
+  it("archive-depth: no fallback configured → throws original error", async () => {
+    let primaryCallNo = 0;
+    const primary = mockClient(async () => {
+      primaryCallNo++;
+      throw new Error(
+        "Block requested not found. Request might be querying historical state that is not available.",
+      );
+    });
+    await assert.rejects(
+      readContractWithBlockFallback(primary, baseArgs, 100n, null),
+      /querying historical state/,
+      "no fallback → must throw, not silently use latest",
+    );
+    assert.equal(
+      primaryCallNo,
+      1,
+      "no retry loop on primary for archive-depth (would deterministically fail)",
+    );
+  });
+
+  it("archive-depth regex: bare 'block requested not found' (no historical-state qualifier) does NOT trigger archive-depth path", async () => {
+    // Some providers may emit the bare phrase for transient lag (the node
+    // hasn't seen this block yet) rather than archive-depth pruning.
+    // Mis-classifying that as archive-depth would skip the retry-then-
+    // latest path — this test pins the regex to the unambiguous
+    // historical-state marker.
     let primaryCallNo = 0;
     const primary = mockClient(async (args) => {
       primaryCallNo++;
       if ((args as any).blockNumber !== undefined) {
+        // The first call AND the retries throw with bare block-miss phrasing
+        // — but the regex narrowing means this doesn't enter the
+        // archive-depth branch. It also doesn't match BLOCK_NOT_AVAILABLE_RE
+        // (which expects "block is out of range" / "header not found" /
+        // etc.), so it propagates as an unrecognised error.
         throw new Error("Block requested not found");
       }
       return "latest-result";
     });
-    const res = await readContractWithBlockFallback(
-      primary,
-      baseArgs,
-      100n,
-      null,
+    await assert.rejects(
+      readContractWithBlockFallback(primary, baseArgs, 100n, null),
+      /Block requested not found/,
+      "bare 'block requested not found' is treated as an unrecognised error, not archive-depth",
     );
-    assert.equal(res.result, "latest-result");
-    assert.equal(res.usedLatestFallback, true);
-    // 1 block-scoped attempt + 1 latest attempt = 2; no retry loop entered
-    // (archive-depth would deterministically fail on retries against the
-    // same primary, so we skip them — see block-fallback.ts).
     assert.equal(
       primaryCallNo,
-      2,
-      "no retry loop for archive-depth — straight to latest",
+      1,
+      "no retries / latest-fallback for unrecognised errors",
     );
   });
 });

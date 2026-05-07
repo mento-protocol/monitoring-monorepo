@@ -23,16 +23,28 @@ const BLOCK_NOT_AVAILABLE_RE =
 
 /** Matches RPC error messages indicating the node lacks archive depth back
  * to the requested block — *the contract IS deployed there, the node just
- * doesn't have state pruned that far back*. Different providers:
- * - "Block requested not found" (quiknode)
- * - "querying historical state that is not available" (quiknode/others)
+ * doesn't have state pruned that far back*. Quiknode emits the full phrase:
  *
- * Distinct from BLOCK_NOT_AVAILABLE_RE (which means "the chain hasn't
- * reached this block yet"). Archive-depth failures are recoverable via a
- * secondary RPC with deeper archive at the SAME block — block-scoped
- * accuracy is preserved. BLOCK_NOT_AVAILABLE_RE failures are recoverable
- * only by retrying or reading `latest` (different block). */
-const ARCHIVE_DEPTH_RE = /block requested not found|querying historical state/i;
+ *   "Block requested not found. Request might be querying historical state
+ *    that is not available."
+ *
+ * We match on `querying historical state` only (the unambiguous archive-
+ * depth marker). The bare `Block requested not found` phrase by itself can
+ * also mean "transient lag — node hasn't seen this block yet" on some
+ * providers, which is recoverable via the BLOCK_NOT_AVAILABLE_RE retry
+ * path; mis-classifying it as archive-depth would skip those retries.
+ *
+ * Distinct from BLOCK_NOT_AVAILABLE_RE: archive-depth failures are
+ * recoverable only via a deeper-archive secondary at the SAME block.
+ * Reading `latest` is NOT a valid recovery — the result wouldn't be
+ * scoped to the requested block, and several callers consume `result`
+ * directly without checking `usedLatestFallback`, so silently swapping
+ * in current-block data would corrupt historical entity state. The
+ * archive-depth branch is therefore fail-closed: secondary failure or no
+ * fallback throws, callers' existing try/catch returns null, indexer
+ * preserves the prior known-good value (or schema default) until the
+ * indexer reaches a block whose state the primary can serve. */
+const ARCHIVE_DEPTH_RE = /querying historical state/i;
 
 export type BlockFallbackResult = {
   result: unknown;
@@ -144,54 +156,59 @@ export async function readContractWithBlockFallback(
       throw err;
     }
 
-    // --- Archive-depth handling: try the secondary RPC at the SAME block ---
-    // The primary's state is pruned past this block, but the secondary may
-    // have deeper archive coverage. Try the secondary at the requested block
-    // before considering any block-substitution (`latest`) fallback —
-    // block-scoped accuracy is preferable when achievable. Observed in
-    // production: Monad mainnet's quiknode default has shallow archive that
-    // fails ~5M blocks behind head, while `rpc2.monad.xyz` (the hardcoded
-    // fallback) returns real data at the same blocks.
-    if (
-      blockNumber !== undefined &&
-      err instanceof Error &&
-      ARCHIVE_DEPTH_RE.test(err.message) &&
-      fallbackClient
-    ) {
-      console.warn(
-        `[RPC_ARCHIVE_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — primary lacks archive depth, using fallback RPC`,
-      );
-      try {
-        const result = await makeCall(fallbackClient, blockNumber);
-        // Successful block-scoped read via the secondary — usedLatestFallback
-        // stays false because the requested block was honoured.
-        return { result, usedFallback: true, usedLatestFallback: false };
-      } catch (fallbackErr) {
-        // Secondary also failed (rate-limit, deeper-archive miss, or some
-        // other transient). Fall through to the block-not-available
-        // "read latest" path below — both BLOCK_NOT_AVAILABLE_RE and
-        // ARCHIVE_DEPTH_RE patterns trigger that branch, so the original
-        // primary error (`err`) keeps the flow moving rather than the
-        // secondary error short-circuiting it.
-        console.warn(
-          `[RPC_ARCHIVE_FALLBACK_FAILED] fn=${fn} target=${target} requestedBlock=${blockNumber} — both primary and secondary failed; falling through to latest-block fallback`,
-        );
-      }
-    }
-
-    // --- Archive-depth, no-or-failed-fallback path: skip retries (they will
-    // deterministically fail with the same error on the same primary) and
-    // jump straight to the `latest`-block fallback. ---
+    // --- Archive-depth handling: try the secondary RPC at the SAME block,
+    // fail-closed otherwise.
+    //
+    // The primary's state is pruned past this block. The secondary may
+    // have deeper archive coverage — try it at the requested block.
+    // Observed in production: Monad mainnet's quiknode default has shallow
+    // archive that fails ~5M blocks behind head, while `rpc2.monad.xyz`
+    // (the hardcoded fallback) returns real data at the same blocks.
+    //
+    // If the secondary also fails (or no secondary is configured), THROW.
+    // We must NOT fall through to `latest` here: many call sites — e.g.
+    // fetchBreakerList, fetchReportExpiry, fetchTradingLimits in
+    // src/rpc/{breakers,pool-state}.ts — destructure `result` directly
+    // without checking `usedLatestFallback`, so silently swapping in
+    // current-block data would corrupt historical entity state. Throwing
+    // is the same behaviour those callers had before this PR (their
+    // try/catch returns null), so fail-closed is the safe default.
     if (
       blockNumber !== undefined &&
       err instanceof Error &&
       ARCHIVE_DEPTH_RE.test(err.message)
     ) {
-      console.warn(
-        `[RPC_BLOCK_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — primary lacks archive depth and no usable fallback, reading latest instead`,
-      );
-      const result = await makeCall(client, undefined);
-      return { result, usedFallback: true, usedLatestFallback: true };
+      if (fallbackClient) {
+        console.warn(
+          `[RPC_ARCHIVE_FALLBACK] fn=${fn} target=${target} requestedBlock=${blockNumber} — primary lacks archive depth, using fallback RPC`,
+        );
+        try {
+          const result = await makeCall(fallbackClient, blockNumber);
+          // Successful block-scoped read via the secondary —
+          // usedLatestFallback stays false because the requested block
+          // was honoured.
+          return { result, usedFallback: true, usedLatestFallback: false };
+        } catch (fallbackErr) {
+          // Secondary also failed (rate-limit, deeper-archive miss,
+          // contract-not-deployed-at-this-block, or some other transient).
+          // Throw the secondary's error so callers can classify it
+          // correctly — e.g. fetchRebalanceIncentiveAtBlock needs to see
+          // "returned no data" to stamp the -2 sentinel for older pools
+          // without the getter.
+          const secondaryMsg =
+            fallbackErr instanceof Error
+              ? fallbackErr.message
+              : String(fallbackErr);
+          console.warn(
+            `[RPC_ARCHIVE_FALLBACK_FAILED] fn=${fn} target=${target} requestedBlock=${blockNumber} secondaryErr="${secondaryMsg}" — propagating to caller`,
+          );
+          throw fallbackErr;
+        }
+      }
+      // No fallback configured — primary's archive depth is our only
+      // option, and it failed. Throw the original error so callers
+      // degrade to null cleanly (matches pre-PR behaviour for this path).
+      throw err;
     }
 
     // --- Block-not-available handling: retry then read "latest" ---
