@@ -240,7 +240,15 @@ export function AddressReportEditor({ address, scope }: Props) {
     } finally {
       setDeleting(false);
     }
-  }, [data, hasExisting, trimmed, normalizedAddress, mutate, globalMutate]);
+  }, [
+    data,
+    hasExisting,
+    trimmed,
+    normalizedAddress,
+    scope,
+    mutate,
+    globalMutate,
+  ]);
 
   if (!isAddressValid) {
     return (
