@@ -3,6 +3,8 @@ import { strict as assert } from "assert";
 import type {
   AggregatorDailySnapshot,
   AggregatorTraderDayMarker,
+  LeaderboardChainState,
+  LeaderboardWindowSnapshot,
   Pool,
   TraderDailySnapshot,
   TraderPoolDailySnapshot,
@@ -39,6 +41,8 @@ function makeContext(): {
     AggregatorDailySnapshot: Map<string, AggregatorDailySnapshot>;
     TraderPoolDayMarker: Map<string, TraderPoolDayMarker>;
     AggregatorTraderDayMarker: Map<string, AggregatorTraderDayMarker>;
+    LeaderboardChainState: Map<string, LeaderboardChainState>;
+    LeaderboardWindowSnapshot: Map<string, LeaderboardWindowSnapshot>;
   };
 } {
   const store = {
@@ -47,6 +51,8 @@ function makeContext(): {
     AggregatorDailySnapshot: new Map<string, AggregatorDailySnapshot>(),
     TraderPoolDayMarker: new Map<string, TraderPoolDayMarker>(),
     AggregatorTraderDayMarker: new Map<string, AggregatorTraderDayMarker>(),
+    LeaderboardChainState: new Map<string, LeaderboardChainState>(),
+    LeaderboardWindowSnapshot: new Map<string, LeaderboardWindowSnapshot>(),
   };
   const wrap = <T extends { id: string }>(m: Map<string, T>) => ({
     get: async (id: string) => m.get(id),
@@ -56,11 +62,23 @@ function makeContext(): {
   });
   return {
     context: {
-      TraderDailySnapshot: wrap(store.TraderDailySnapshot),
+      TraderDailySnapshot: {
+        ...wrap(store.TraderDailySnapshot),
+        getWhere: {
+          chainId: {
+            eq: async (chainId: number) =>
+              Array.from(store.TraderDailySnapshot.values()).filter(
+                (r) => r.chainId === chainId,
+              ),
+          },
+        },
+      },
       TraderPoolDailySnapshot: wrap(store.TraderPoolDailySnapshot),
       AggregatorDailySnapshot: wrap(store.AggregatorDailySnapshot),
       TraderPoolDayMarker: wrap(store.TraderPoolDayMarker),
       AggregatorTraderDayMarker: wrap(store.AggregatorTraderDayMarker),
+      LeaderboardChainState: wrap(store.LeaderboardChainState),
+      LeaderboardWindowSnapshot: wrap(store.LeaderboardWindowSnapshot),
     },
     store,
   };
@@ -158,6 +176,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 3600n, // 1am UTC
+      blockNumber: 0n,
     });
 
     // TraderDailySnapshot
@@ -216,6 +235,7 @@ describe("applyLeaderboardSnapshots", () => {
         volumeUsdWei: 500n * ONE_USD,
         amounts: buyToken1,
         blockTimestamp: DAY_2026_05_04 + BigInt(3600 + i * 60),
+        blockNumber: 0n,
       });
     }
 
@@ -246,6 +266,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 100n * ONE_USD,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 100n,
+      blockNumber: 0n,
     });
 
     await applyLeaderboardSnapshots({
@@ -258,6 +279,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 200n * ONE_USD,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 200n,
+      blockNumber: 0n,
     });
 
     const td = store.TraderDailySnapshot.get(
@@ -283,6 +305,7 @@ describe("applyLeaderboardSnapshots", () => {
         volumeUsdWei: 100n * ONE_USD,
         amounts: buyToken1,
         blockTimestamp: DAY_2026_05_04 + 100n,
+        blockNumber: 0n,
       });
     }
 
@@ -311,6 +334,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 100n * ONE_USD,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 100n,
+      blockNumber: 0n,
     });
 
     await applyLeaderboardSnapshots({
@@ -323,6 +347,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 200n * ONE_USD,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 200n,
+      blockNumber: 0n,
     });
 
     assert.ok(
@@ -353,6 +378,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 100n,
+      blockNumber: 0n,
     });
 
     assert.ok(
@@ -375,6 +401,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 100n,
+      blockNumber: 0n,
     });
 
     const td = store.TraderDailySnapshot.get(
@@ -399,6 +426,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 100n * ONE_USD,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 100n,
+      blockNumber: 0n,
     });
 
     // Second swap: rebalancer EOA on a *different* pool where the rebalancer
@@ -418,6 +446,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 100n * ONE_USD,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 200n,
+      blockNumber: 0n,
     });
 
     const td = store.TraderDailySnapshot.get(
@@ -443,6 +472,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 100n,
+      blockNumber: 0n,
     });
 
     assert.equal(store.TraderDailySnapshot.size, 0);
@@ -463,6 +493,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: sellToken1,
       blockTimestamp: DAY_2026_05_04 + 100n,
+      blockNumber: 0n,
     });
 
     const tpd = store.TraderPoolDailySnapshot.get(
@@ -488,6 +519,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 100n,
+      blockNumber: 0n,
     });
 
     const td = store.TraderDailySnapshot.get(
@@ -511,6 +543,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 100n * ONE_USD,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 3600n,
+      blockNumber: 0n,
     });
 
     // Day N+1
@@ -524,6 +557,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 200n * ONE_USD,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 86_400n + 3600n,
+      blockNumber: 0n,
     });
 
     assert.equal(store.TraderDailySnapshot.size, 2);
@@ -554,6 +588,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 0n,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 100n,
+      blockNumber: 0n,
     });
 
     assert.equal(store.TraderDailySnapshot.size, 0);
@@ -589,6 +624,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: callbackAmounts,
       blockTimestamp: DAY_2026_05_04 + 100n,
+      blockNumber: 0n,
     });
 
     const tpd = store.TraderPoolDailySnapshot.get(
@@ -622,6 +658,7 @@ describe("applyLeaderboardSnapshots", () => {
       volumeUsdWei: 1_000n * ONE_USD,
       amounts: buyToken1,
       blockTimestamp: DAY_2026_05_04 + 100n,
+      blockNumber: 0n,
     });
 
     const tpd = store.TraderPoolDailySnapshot.get(

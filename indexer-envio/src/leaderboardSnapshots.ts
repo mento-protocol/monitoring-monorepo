@@ -10,11 +10,15 @@ import { applyFeeBps } from "./usd";
 import { isSystemAddress } from "./system-addresses";
 import { classifyAggregator } from "./aggregators";
 import { dayBucket, extractAddressFromPoolId } from "./helpers";
+import {
+  maybeHeartbeatFlushV3,
+  type V3FlushContext,
+} from "./leaderboardWindowFlush";
 
 /** Subset of Envio's handler context that the leaderboard snapshot helper
  *  reads/writes. Both the FPMM and VirtualPool swap handlers' contexts are
  *  structurally compatible with this shape. */
-export type LeaderboardContext = {
+export type LeaderboardContext = V3FlushContext & {
   TraderDailySnapshot: {
     get: (id: string) => Promise<TraderDailySnapshot | undefined>;
     set: (entity: TraderDailySnapshot) => void;
@@ -54,6 +58,7 @@ export interface ApplyLeaderboardSnapshotsArgs {
   volumeUsdWei: bigint; // pre-computed via computeSwapUsdWei (lives on SwapEvent)
   amounts: SwapAmounts;
   blockTimestamp: bigint;
+  blockNumber: bigint; // for the LeaderboardWindowSnapshot heartbeat flush
 }
 
 /**
@@ -77,6 +82,7 @@ export async function applyLeaderboardSnapshots(
     volumeUsdWei,
     amounts,
     blockTimestamp,
+    blockNumber,
   } = args;
 
   // Skip swaps where caller is missing — Envio's transaction.from fallback
@@ -205,5 +211,18 @@ export async function applyLeaderboardSnapshots(
       (existingAggDay?.uniqueTraders ?? 0) + (aggTraderFirstTouch ? 1 : 0),
     volumeUsdWei: (existingAggDay?.volumeUsdWei ?? 0n) + volumeUsdWei,
     feesPaidUsdWei: (existingAggDay?.feesPaidUsdWei ?? 0n) + feesPaidUsdWei,
+  });
+
+  // 6. Heartbeat: flush LeaderboardWindowSnapshot rows for any closed UTC
+  //    days since the last flush. Reads only TraderDailySnapshot
+  //    (already-written including this swap's row), filters by
+  //    [windowStartDay, snapshotDay] inclusive — today's row is excluded
+  //    by the upper bound, so we never write a "today" snapshot. The
+  //    dashboard adds today's partial from a small direct query.
+  await maybeHeartbeatFlushV3({
+    context,
+    chainId,
+    blockTimestamp,
+    blockNumber,
   });
 }
