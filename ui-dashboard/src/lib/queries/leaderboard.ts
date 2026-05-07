@@ -191,7 +191,9 @@ export const LEADERBOARD_WINDOW_LATEST = /* GraphQL */ `
       snapshotDay
       windowStartDay
       totalVolumeUsdWei
+      totalVolumeUsdWeiIncludingSystem
       totalSwapCount
+      totalSwapCountIncludingSystem
       uniqueTraders
       uniqueTradersIncludingSystem
     }
@@ -212,7 +214,9 @@ export const BROKER_LEADERBOARD_WINDOW_LATEST = /* GraphQL */ `
       snapshotDay
       windowStartDay
       totalVolumeUsdWei
+      totalVolumeUsdWeiIncludingSystem
       totalSwapCount
+      totalSwapCountIncludingSystem
       uniqueTraders
       uniqueTradersIncludingSystem
     }

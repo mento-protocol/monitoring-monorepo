@@ -31,15 +31,29 @@ export const WINDOW_DAYS: Readonly<Record<WindowKey, number | null>> = {
   all: null,
 };
 
-/** UTC-midnight start-of-window for a given snapshotDay + windowKey. "all"
- *  returns 0n (epoch genesis) so the in-memory filter passes every row. */
+/** UTC-midnight start-of-window for a given snapshotDay + windowKey.
+ *
+ *  The snapshot covers `[windowStartDay, snapshotDay]` (inclusive — both
+ *  ends are UTC day buckets). The dashboard adds today's partial (one
+ *  more day) on top, so the snapshot's job is to cover exactly
+ *  `windowDays - 1` closed days. With `snapshotDay = yesterday`:
+ *
+ *    24h (1 day total)  → snapshot empty,           today provides 1 day
+ *    7d  (7 days total) → snapshot covers 6 closed, today provides 1 day
+ *    30d (30 days)      → snapshot covers 29 closed, today provides 1 day
+ *    all                → snapshot covers everything from epoch
+ *
+ *  Returning `snapshotDay + 1 day` for 24h yields an empty inclusive range
+ *  (`[snapshotDay+1, snapshotDay]`) so no rows pass the filter — correct
+ *  by construction. */
 export function windowStartDay(
   snapshotDay: bigint,
   windowKey: WindowKey,
 ): bigint {
   const days = WINDOW_DAYS[windowKey];
   if (days === null) return 0n;
-  return snapshotDay - BigInt(days - 1) * SECONDS_PER_DAY;
+  if (days <= 1) return snapshotDay + SECONDS_PER_DAY;
+  return snapshotDay - BigInt(days - 2) * SECONDS_PER_DAY;
 }
 
 /** Per-trader summed totals over a window. Built once per
@@ -116,17 +130,26 @@ export interface BuildSnapshotArgs {
 /** Build a single LeaderboardWindowSnapshot row from per-trader aggregates.
  *  Same shape works for v2 (BrokerLeaderboardWindowSnapshot) — the field set
  *  is identical (see schema.graphql). `aggregatePerWindow` already dedupes
- *  per-trader, so each entry in `aggregates` is one unique trader. */
+ *  per-trader, so each entry in `aggregates` is one unique trader. The
+ *  primary `total*` fields exclude system addresses to match the dashboard's
+ *  default "Show system addresses = off" view; sibling `*IncludingSystem`
+ *  fields keep the all-up totals for the toggle-on case. */
 export function buildLeaderboardWindowSnapshot(
   args: BuildSnapshotArgs,
 ): LeaderboardWindowSnapshot {
   let totalVolumeUsdWei = 0n;
+  let totalVolumeUsdWeiIncludingSystem = 0n;
   let totalSwapCount = 0;
+  let totalSwapCountIncludingSystem = 0;
   let nonSystemCount = 0;
   for (const a of args.aggregates) {
-    totalVolumeUsdWei += a.volumeUsdWei;
-    totalSwapCount += a.swapCount;
-    if (!a.isSystemAddress) nonSystemCount += 1;
+    totalVolumeUsdWeiIncludingSystem += a.volumeUsdWei;
+    totalSwapCountIncludingSystem += a.swapCount;
+    if (!a.isSystemAddress) {
+      totalVolumeUsdWei += a.volumeUsdWei;
+      totalSwapCount += a.swapCount;
+      nonSystemCount += 1;
+    }
   }
   return {
     id: `${args.chainId}-${args.windowKey}-${args.snapshotDay}`,
@@ -135,7 +158,9 @@ export function buildLeaderboardWindowSnapshot(
     snapshotDay: args.snapshotDay,
     windowStartDay: args.windowStartDay,
     totalVolumeUsdWei,
+    totalVolumeUsdWeiIncludingSystem,
     totalSwapCount,
+    totalSwapCountIncludingSystem,
     uniqueTraders: nonSystemCount,
     uniqueTradersIncludingSystem: args.aggregates.length,
     blockNumber: args.blockNumber,

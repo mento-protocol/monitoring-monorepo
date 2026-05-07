@@ -654,9 +654,16 @@ describe("mergeHeroSnapshot", () => {
       windowKey: "7d",
       snapshotDay: "1",
       windowStartDay: "0",
+      // Default the *IncludingSystem siblings to match the primary fields
+      // — most tests don't exercise the toggle, so picking either branch
+      // yields the same numbers.
+      totalVolumeUsdWeiIncludingSystem:
+        overrides.totalVolumeUsdWeiIncludingSystem ??
+        overrides.totalVolumeUsdWei,
       totalSwapCount: 0,
+      totalSwapCountIncludingSystem: overrides.totalSwapCount ?? 0,
       uniqueTraders: 0,
-      uniqueTradersIncludingSystem: 0,
+      uniqueTradersIncludingSystem: overrides.uniqueTraders ?? 0,
       ...overrides,
     };
   }
@@ -756,10 +763,13 @@ describe("mergeHeroSnapshot", () => {
     expect(out.uniqueTraders).toBe(11);
   });
 
-  it("showSystem=true uses uniqueTradersIncludingSystem from snapshot", () => {
+  it("showSystem=true uses *IncludingSystem fields from snapshot", () => {
     const row = snap({
       chainId: 42220,
-      totalVolumeUsdWei: USD(0),
+      totalVolumeUsdWei: USD(100),
+      totalVolumeUsdWeiIncludingSystem: USD(150),
+      totalSwapCount: 5,
+      totalSwapCountIncludingSystem: 8,
       uniqueTraders: 5,
       uniqueTradersIncludingSystem: 12,
     });
@@ -773,7 +783,11 @@ describe("mergeHeroSnapshot", () => {
       todayRows: [],
       showSystem: true,
     });
+    expect(off.totalVolumeUsdWei).toBe(BigInt(USD(100)));
+    expect(off.totalSwapCount).toBe(5);
     expect(off.uniqueTraders).toBe(5);
+    expect(on.totalVolumeUsdWei).toBe(BigInt(USD(150)));
+    expect(on.totalSwapCount).toBe(8);
     expect(on.uniqueTraders).toBe(12);
   });
 

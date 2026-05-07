@@ -548,10 +548,15 @@ type LeaderboardWindowSnapshot
   chainId: Int! @index
   windowKey: String! @index # "24h" | "7d" | "30d" | "all"
   snapshotDay: BigInt! @index # UTC-midnight day this row was flushed at
-  windowStartDay: BigInt! # snapshotDay - (days-1)*86400 ; "all" = 0
+  windowStartDay: BigInt! # see leaderboardWindowSnapshot.ts:windowStartDay
+  # Totals exclude isSystemAddress=true rows (matches the dashboard's
+  # default "Show system addresses = off" view); the *IncludingSystem
+  # variants are used when the toggle is on.
   totalVolumeUsdWei: BigInt! @config(precision: 78)
+  totalVolumeUsdWeiIncludingSystem: BigInt! @config(precision: 78)
   totalSwapCount: Int!
-  uniqueTraders: Int! # exact, isSystemAddress = false
+  totalSwapCountIncludingSystem: Int!
+  uniqueTraders: Int!
   uniqueTradersIncludingSystem: Int!
   blockNumber: BigInt!
   updatedAtTimestamp: BigInt!
@@ -568,7 +573,9 @@ type BrokerLeaderboardWindowSnapshot
   snapshotDay: BigInt! @index
   windowStartDay: BigInt!
   totalVolumeUsdWei: BigInt! @config(precision: 78)
+  totalVolumeUsdWeiIncludingSystem: BigInt! @config(precision: 78)
   totalSwapCount: Int!
+  totalSwapCountIncludingSystem: Int!
   uniqueTraders: Int!
   uniqueTradersIncludingSystem: Int!
   blockNumber: BigInt!

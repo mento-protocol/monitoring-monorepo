@@ -45,21 +45,24 @@ function row(
 }
 
 describe("windowStartDay", () => {
-  it("24h returns the snapshotDay itself (single-day window)", () => {
-    assert.equal(windowStartDay(DAY_2026_05_07, "24h"), DAY_2026_05_07);
-  });
-
-  it("7d returns snapshotDay - 6 days (inclusive 7-day window)", () => {
+  it("24h returns snapshotDay+1 (empty range — today provides the only day)", () => {
     assert.equal(
-      windowStartDay(DAY_2026_05_07, "7d"),
-      DAY_2026_05_07 - 6n * SECONDS_PER_DAY,
+      windowStartDay(DAY_2026_05_07, "24h"),
+      DAY_2026_05_07 + SECONDS_PER_DAY,
     );
   });
 
-  it("30d returns snapshotDay - 29 days", () => {
+  it("7d covers snapshotDay - 5 days (6 closed days; today is the 7th)", () => {
+    assert.equal(
+      windowStartDay(DAY_2026_05_07, "7d"),
+      DAY_2026_05_07 - 5n * SECONDS_PER_DAY,
+    );
+  });
+
+  it("30d covers snapshotDay - 28 days (29 closed days)", () => {
     assert.equal(
       windowStartDay(DAY_2026_05_07, "30d"),
-      DAY_2026_05_07 - 29n * SECONDS_PER_DAY,
+      DAY_2026_05_07 - 28n * SECONDS_PER_DAY,
     );
   });
 
@@ -86,7 +89,7 @@ describe("buildLeaderboardWindowSnapshot", () => {
     assert.equal(snap.uniqueTradersIncludingSystem, 0);
   });
 
-  it("counts system traders only in uniqueTradersIncludingSystem", () => {
+  it("primary totals exclude system; *IncludingSystem variants keep all", () => {
     const snap = buildLeaderboardWindowSnapshot({
       chainId: CHAIN,
       windowKey: "24h",
@@ -109,9 +112,11 @@ describe("buildLeaderboardWindowSnapshot", () => {
       blockNumber: 1n,
       updatedAtTimestamp: 1n,
     });
-    assert.equal(snap.totalVolumeUsdWei, 150n * ONE_USD);
-    assert.equal(snap.totalSwapCount, 3);
-    assert.equal(snap.uniqueTraders, 1, "system trader excluded");
+    assert.equal(snap.totalVolumeUsdWei, 100n * ONE_USD, "system excluded");
+    assert.equal(snap.totalVolumeUsdWeiIncludingSystem, 150n * ONE_USD);
+    assert.equal(snap.totalSwapCount, 2, "system swaps excluded");
+    assert.equal(snap.totalSwapCountIncludingSystem, 3);
+    assert.equal(snap.uniqueTraders, 1);
     assert.equal(snap.uniqueTradersIncludingSystem, 2);
   });
 });
@@ -126,11 +131,12 @@ describe("aggregatePerWindow", () => {
       CHAIN,
       DAY_2026_05_07,
     );
-    assert.equal(grouped["24h"].length, 1, "only chainId=42220 row kept");
-    assert.equal(grouped["24h"][0].trader, TRADER_A);
+    // Use 7d (24h window is empty by design — see windowStartDay).
+    assert.equal(grouped["7d"].length, 1, "only chainId=42220 row kept");
+    assert.equal(grouped["7d"][0].trader, TRADER_A);
   });
 
-  it("inclusive bounds: timestamp == snapshotDay included; > snapshotDay dropped", () => {
+  it("inclusive upper bound: timestamp == snapshotDay included in 7d/30d/all; > snapshotDay dropped", () => {
     const grouped = aggregatePerWindow(
       [
         row({ trader: TRADER_A, timestamp: DAY_2026_05_07 }),
@@ -142,29 +148,49 @@ describe("aggregatePerWindow", () => {
       CHAIN,
       DAY_2026_05_07,
     );
-    assert.equal(grouped["24h"].length, 1);
-    assert.equal(grouped["24h"][0].trader, TRADER_A);
+    assert.equal(grouped["7d"].length, 1);
+    assert.equal(grouped["7d"][0].trader, TRADER_A);
+    // 24h window is empty (its start = snapshotDay + 1d, so even
+    // timestamp == snapshotDay is below it).
+    assert.equal(grouped["24h"].length, 0);
   });
 
-  it("7d window includes day-7 boundary and excludes day-8", () => {
+  it("7d window covers 6 closed days (snapshotDay-5 .. snapshotDay); today is the 7th", () => {
     const grouped = aggregatePerWindow(
       [
-        // day -6 from snapshotDay → in 7d window (start = snapshotDay - 6d)
+        // day -5 from snapshotDay → in 7d window (start = snapshotDay - 5d)
         row({
           trader: TRADER_A,
+          timestamp: DAY_2026_05_07 - 5n * SECONDS_PER_DAY,
+        }),
+        // day -6 from snapshotDay → out of 7d window (today on the dashboard
+        // would have been the 7th day, so this falls off the back)
+        row({
+          trader: TRADER_B,
           timestamp: DAY_2026_05_07 - 6n * SECONDS_PER_DAY,
         }),
-        // day -7 from snapshotDay → out of 7d window
-        row({ trader: TRADER_B, timestamp: DAY_2026_04_30 }),
       ],
       CHAIN,
       DAY_2026_05_07,
     );
     assert.equal(grouped["7d"].length, 1);
     assert.equal(grouped["7d"][0].trader, TRADER_A);
-    // 30d window catches the day-7 row
-    const trader7d = grouped["30d"].find((a) => a.trader === TRADER_B);
-    assert(trader7d, "TRADER_B in 30d window");
+    // 30d window catches the day-6 row (covers snapshotDay-28 onwards)
+    const trader30d = grouped["30d"].find((a) => a.trader === TRADER_B);
+    assert(trader30d, "TRADER_B in 30d window");
+  });
+
+  it("24h window is empty; today's partial provides the day on the dashboard", () => {
+    const grouped = aggregatePerWindow(
+      [row({ trader: TRADER_A, timestamp: DAY_2026_05_07 })],
+      CHAIN,
+      DAY_2026_05_07,
+    );
+    assert.equal(
+      grouped["24h"].length,
+      0,
+      "24h snapshot covers nothing; today fills it on the dashboard",
+    );
   });
 
   it("sums volume across multiple days for the same trader", () => {
@@ -294,7 +320,14 @@ describe("flushV3LeaderboardWindowSnapshots", () => {
       updatedAtTimestamp: 1n,
     });
     assert.equal(store.LeaderboardWindowSnapshot.size, 4);
-    for (const w of WINDOW_KEYS) {
+    // 24h is empty (today's partial fills it on the dashboard); 7d/30d/all
+    // see the full yesterday's data.
+    const snap24h = store.LeaderboardWindowSnapshot.get(
+      `${CHAIN}-24h-${DAY_2026_05_06}`,
+    );
+    assert.equal(snap24h?.totalVolumeUsdWei, 0n);
+    assert.equal(snap24h?.uniqueTraders, 0);
+    for (const w of ["7d", "30d", "all"] as const) {
       const snap = store.LeaderboardWindowSnapshot.get(
         `${CHAIN}-${w}-${DAY_2026_05_06}`,
       );
@@ -426,7 +459,7 @@ describe("maybeHeartbeatFlushV3", () => {
 
   it("excludes today's rows from window aggregates (upper bound = snapshotDay)", async () => {
     const { context, store } = makeV3Context([
-      // Yesterday — should appear in flush
+      // Yesterday — should appear in 7d/30d/all snapshots
       fakeTraderDay(TRADER_A, DAY_2026_05_06, 100n),
       // Today — should NOT appear (timestamp > snapshotDay = yesterday)
       fakeTraderDay(TRADER_C, DAY_2026_05_07, 999n),
@@ -437,10 +470,17 @@ describe("maybeHeartbeatFlushV3", () => {
       blockTimestamp: DAY_2026_05_07 + 1n,
       blockNumber: 1n,
     });
+    const snap7d = store.LeaderboardWindowSnapshot.get(
+      `${CHAIN}-7d-${DAY_2026_05_06}`,
+    );
+    assert.equal(snap7d?.totalVolumeUsdWei, 100n * ONE_USD);
+    assert.equal(snap7d?.uniqueTraders, 1);
+    // 24h snapshot is empty by design: today's partial covers it on the
+    // dashboard.
     const snap24h = store.LeaderboardWindowSnapshot.get(
       `${CHAIN}-24h-${DAY_2026_05_06}`,
     );
-    assert.equal(snap24h?.totalVolumeUsdWei, 100n * ONE_USD);
-    assert.equal(snap24h?.uniqueTraders, 1);
+    assert.equal(snap24h?.totalVolumeUsdWei, 0n);
+    assert.equal(snap24h?.uniqueTraders, 0);
   });
 });

@@ -387,10 +387,10 @@ export function LeaderboardClient() {
       : v2TradersResult.isLoading;
   const tableHasError =
     venue === "v3" ? !!tradersResult.error : !!v2TradersResult.error;
-  // Page-level (KPIs + chart + table) loading is the union: the chart's
-  // `isLoading` should reflect the actual data its series depends on.
-  const isLoading = heroIsLoading || tableIsLoading;
-  const hasError = heroHasError || tableHasError;
+  // Hero and table data are sourced from independent queries; a snapshot
+  // failure must NOT blank the chart or top-50 table (and vice versa).
+  // Per docs/pr-checklists/swr-polling-hasura.md: new schema fields ship
+  // in isolated queries that degrade independently.
   const v2AggIsLoading = v2AggregatorsResult.isLoading;
   const v2AggHasError = !!v2AggregatorsResult.error;
   // BROKER_AGGREGATOR_DAILY_TOP is also a top-N-volume cut. If it saturates
@@ -402,9 +402,10 @@ export function LeaderboardClient() {
     (v2AggregatorsResult.data.BrokerAggregatorDailySnapshot?.length ?? 0) ===
       ENVIO_MAX_ROWS;
 
-  // Headline = window total. Change pill is week-over-week if the range is
-  // ≥7d, otherwise null (24h has no meaningful WoW peer).
-  const headline = isLoading || hasError ? "" : formatUSD(totalVolume);
+  // Headline reads `totalVolume` from the hero snapshot, so it follows
+  // hero loading/error — not the table's. Change pill is week-over-week
+  // if the range is ≥7d, otherwise null (24h has no meaningful WoW peer).
+  const headline = heroIsLoading || heroHasError ? "" : formatUSD(totalVolume);
 
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 sm:py-8 space-y-6">
@@ -486,11 +487,7 @@ export function LeaderboardClient() {
         <Tile
           label="Total volume"
           value={
-            heroIsLoading
-              ? "…"
-              : heroHasError
-                ? "—"
-                : formatUSD(totalVolume)
+            heroIsLoading ? "…" : heroHasError ? "—" : formatUSD(totalVolume)
           }
           subtitle={rangeSubtitle(range)}
         />
@@ -532,8 +529,8 @@ export function LeaderboardClient() {
           onRangeChange={onChartRangeChange}
           headline={headline}
           change={null}
-          isLoading={isLoading}
-          hasError={hasError}
+          isLoading={tableIsLoading}
+          hasError={tableHasError}
           hasSnapshotError={false}
           emptyMessage={
             venue === "v3"
@@ -552,8 +549,8 @@ export function LeaderboardClient() {
             cutoff={cutoff}
             traders={aggregated}
             pools={poolMeta}
-            isLoading={isLoading}
-            hasError={hasError}
+            isLoading={tableIsLoading}
+            hasError={tableHasError}
           />
         </section>
       ) : (
@@ -564,8 +561,8 @@ export function LeaderboardClient() {
             </h2>
             <V2LeaderboardTraderTable
               traders={v2Aggregated}
-              isLoading={isLoading}
-              hasError={hasError}
+              isLoading={tableIsLoading}
+              hasError={tableHasError}
             />
           </section>
           <section>

@@ -487,7 +487,9 @@ export function computeFlow(pool: TraderPoolWindowRow): FlowResult {
 // the exact denominator.
 
 /** Wire shape of LeaderboardWindowSnapshot / BrokerLeaderboardWindowSnapshot
- *  rows. Both v3 and v2 GraphQL queries return the same fields. */
+ *  rows. Both v3 and v2 GraphQL queries return the same fields. The primary
+ *  total* fields exclude system addresses; the *IncludingSystem siblings
+ *  feed the "Show system addresses = on" toggle. */
 export type LeaderboardWindowRow = {
   id: string;
   chainId: number;
@@ -495,7 +497,9 @@ export type LeaderboardWindowRow = {
   snapshotDay: string;
   windowStartDay: string;
   totalVolumeUsdWei: string;
+  totalVolumeUsdWeiIncludingSystem: string;
   totalSwapCount: number;
+  totalSwapCountIncludingSystem: number;
   uniqueTraders: number;
   uniqueTradersIncludingSystem: number;
 };
@@ -520,17 +524,18 @@ export type HeroSnapshotTotals = {
  * Sum hero-tile totals across all chains, combining the pre-rolled
  * [windowStart, yesterday] snapshot with today's partial.
  *
- * The unique-trader count adds the snapshot's exact count to today's
+ * `showSystem` selects between the snapshot's primary fields (system
+ * excluded — matches the dashboard's default view and the table's
+ * filter) and the *IncludingSystem variants. Today's rows are
+ * pre-filtered by the `isSystemAddressIn` query variable, so the
+ * showSystem branch only filters out anything that snuck through.
+ *
+ * The unique-trader count adds the snapshot's count to today's
  * distinct-trader count without de-duplicating across the two sources.
  * A trader active both in the snapshot range AND today is counted twice.
  * Acceptable for the hero tile (today's distinct count is small — usually
- * <50 — and the overcount is at most that). If precise dedup becomes
- * necessary, follow-up: ship a `distinctTraders: [String!]!` array on
- * the snapshot entity.
- *
- * `showSystem=true` toggles between `uniqueTraders` and
- * `uniqueTradersIncludingSystem` on the snapshot side; today's rows are
- * already pre-filtered by the `isSystemAddressIn` query variable.
+ * <50 — and the overcount is at most that). Follow-up if precision is
+ * needed: ship a `distinctTraders: [String!]!` array on the snapshot.
  */
 export function mergeHeroSnapshot(args: {
   snapshotRows: ReadonlyArray<LeaderboardWindowRow> | undefined;
@@ -541,11 +546,15 @@ export function mergeHeroSnapshot(args: {
   let totalSwapCount = 0;
   let uniqueFromSnapshot = 0;
   for (const row of args.snapshotRows ?? []) {
-    totalVolumeUsdWei += BigInt(row.totalVolumeUsdWei);
-    totalSwapCount += row.totalSwapCount;
-    uniqueFromSnapshot += args.showSystem
-      ? row.uniqueTradersIncludingSystem
-      : row.uniqueTraders;
+    if (args.showSystem) {
+      totalVolumeUsdWei += BigInt(row.totalVolumeUsdWeiIncludingSystem);
+      totalSwapCount += row.totalSwapCountIncludingSystem;
+      uniqueFromSnapshot += row.uniqueTradersIncludingSystem;
+    } else {
+      totalVolumeUsdWei += BigInt(row.totalVolumeUsdWei);
+      totalSwapCount += row.totalSwapCount;
+      uniqueFromSnapshot += row.uniqueTraders;
+    }
   }
   // Today's rows: sum volume / swaps and count distinct traders.
   const todayTraders = new Set<string>();
