@@ -34,6 +34,22 @@ export const LEADERBOARD_CHART_RANGES: ReadonlyArray<{
   { key: "all", label: "All" },
 ];
 
+/**
+ * Leaderboard fallback / single-line chart pill set. Used by the v3+<30d
+ * and v2 single-line daily-volume charts: needs to cover every chartRange
+ * the page can produce (7d / 30d / 90d / all) so the active pill always
+ * matches the page's selected window.
+ */
+export const LEADERBOARD_FALLBACK_CHART_RANGES: ReadonlyArray<{
+  key: RangeKey;
+  label: string;
+}> = [
+  { key: "7d", label: "1W" },
+  { key: "30d", label: "1M" },
+  { key: "90d", label: "3M" },
+  { key: "all", label: "All" },
+];
+
 export type TimeSeriesPoint = {
   timestamp: number;
   value: number;

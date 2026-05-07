@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useMemo } from "react";
 import { useGQL } from "@/lib/graphql";
 import { ENVIO_MAX_ROWS } from "@/lib/constants";
 import { Tile } from "@/components/feedback";
@@ -19,30 +18,28 @@ import {
   aggregateBrokerAggregatorsByWindow,
   aggregateBrokerTradersByWindow,
   aggregateDailyVolume,
-  aggregatePoolDailyVolume,
   aggregateTradersByWindow,
-  rangeCutoffSeconds,
   rangeDays,
   weiToUsd,
   type BrokerAggregatorDailyRow,
   type BrokerTraderDailyRow,
   type LeaderboardRangeKey,
-  type PoolDailyVolumeRow,
   type TraderDailyRow,
 } from "@/lib/leaderboard";
+import type { PoolDailyVolumeRow } from "@/lib/leaderboard-pool";
 import {
   LEADERBOARD_CHART_RANGES,
-  SECONDS_PER_DAY,
+  LEADERBOARD_FALLBACK_CHART_RANGES,
   type RangeKey,
 } from "@/lib/time-series";
-import { networkForChainId } from "@/lib/networks";
-import { poolName } from "@/lib/tokens";
 import { LeaderboardTable } from "./_components/leaderboard-table";
 import { TopPoolsList } from "./_components/top-pools-list";
 import {
   V2LeaderboardAggregatorTable,
   V2LeaderboardTraderTable,
 } from "./_components/v2-leaderboard-tables";
+import { usePoolChartViewModel } from "./_lib/pool-chart-vm";
+import { useLeaderboardUrlState } from "./_lib/url-state";
 
 type PoolRow = {
   id: string;
@@ -51,158 +48,23 @@ type PoolRow = {
   token1: string | null;
 };
 
-type Venue = "v3" | "v2";
-
-const VALID_RANGES = new Set<LeaderboardRangeKey>([
-  "24h",
-  "7d",
-  "30d",
-  "90d",
-  "all",
-]);
-const DEFAULT_RANGE: LeaderboardRangeKey = "7d";
-const VALID_VENUES = new Set<Venue>(["v3", "v2"]);
 // Per-pool stacked chart needs ≥30 days of data to read meaningfully —
 // hide it for shorter ranges (24h collapses to a point, 7d gives 7
 // stacked bars of varying widths that look noisy).
 const RANGES_WITH_CHART = new Set<LeaderboardRangeKey>(["30d", "90d", "all"]);
 
-function readRangeFromParams(params: URLSearchParams): LeaderboardRangeKey {
-  const raw = params.get("range");
-  return raw && VALID_RANGES.has(raw as LeaderboardRangeKey)
-    ? (raw as LeaderboardRangeKey)
-    : DEFAULT_RANGE;
-}
-
-function readShowSystemFromParams(params: URLSearchParams): boolean {
-  return params.get("system") === "1";
-}
-
-function readVenueFromParams(params: URLSearchParams): Venue {
-  const raw = params.get("venue");
-  return raw && VALID_VENUES.has(raw as Venue) ? (raw as Venue) : "v3";
-}
-
 export function LeaderboardClient() {
-  const searchParams = useSearchParams();
+  const {
+    range,
+    showSystem,
+    venue,
+    cutoff,
+    utcDayKey,
+    updateRange,
+    updateShowSystem,
+    updateVenue,
+  } = useLeaderboardUrlState();
 
-  // URL-backed state. Reads happen via `useSearchParams` on initial mount
-  // (server-rendered + first client paint), but writes go through
-  // `window.history.replaceState` — NOT `router.replace`. The App Router's
-  // `router.replace` triggers an RSC payload refetch on the current segment
-  // (`?_rsc=...`) every URL write, which adds ~700ms latency to range/filter
-  // toggles. See AGENTS.md "URL state in client-only tables / filters" and
-  // PR #314 for the regression that established this rule.
-  const [range, setRange] = useState<LeaderboardRangeKey>(() =>
-    readRangeFromParams(searchParams),
-  );
-  const [showSystem, setShowSystem] = useState<boolean>(() =>
-    readShowSystemFromParams(searchParams),
-  );
-  const [venue, setVenue] = useState<Venue>(() =>
-    readVenueFromParams(searchParams),
-  );
-
-  const writeUrl = useCallback(
-    (
-      nextRange: LeaderboardRangeKey,
-      nextShowSystem: boolean,
-      nextVenue: Venue,
-    ) => {
-      if (typeof window === "undefined") return;
-      const params = new URLSearchParams(window.location.search);
-      if (nextRange === DEFAULT_RANGE) params.delete("range");
-      else params.set("range", nextRange);
-      if (nextShowSystem) params.set("system", "1");
-      else params.delete("system");
-      if (nextVenue === "v3") params.delete("venue");
-      else params.set("venue", nextVenue);
-      const qs = params.toString();
-      const nextUrl =
-        window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
-      window.history.replaceState(window.history.state, "", nextUrl);
-    },
-    [],
-  );
-
-  const updateRange = useCallback(
-    (next: LeaderboardRangeKey) => {
-      setRange(next);
-      writeUrl(next, showSystem, venue);
-    },
-    [showSystem, venue, writeUrl],
-  );
-
-  const updateShowSystem = useCallback(
-    (next: boolean) => {
-      setShowSystem(next);
-      writeUrl(range, next, venue);
-    },
-    [range, venue, writeUrl],
-  );
-
-  const updateVenue = useCallback(
-    (next: Venue) => {
-      setVenue(next);
-      writeUrl(range, showSystem, next);
-    },
-    [range, showSystem, writeUrl],
-  );
-
-  // Browser back/forward buttons fire `popstate`. `replaceState` itself
-  // doesn't (and Next's `useSearchParams` doesn't observe our writes), so
-  // popstate is the only signal that real navigation moved the URL out from
-  // under us — sync local state when it happens.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const onPopState = () => {
-      const params = new URLSearchParams(window.location.search);
-      setRange((prev) => {
-        const next = readRangeFromParams(params);
-        return prev === next ? prev : next;
-      });
-      setShowSystem((prev) => {
-        const next = readShowSystemFromParams(params);
-        return prev === next ? prev : next;
-      });
-      setVenue((prev) => {
-        const next = readVenueFromParams(params);
-        return prev === next ? prev : next;
-      });
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
-
-  // `cutoff` only re-derives when `range` or the current UTC day changes.
-  // Memoizing on `range` alone is not enough: `rangeCutoffSeconds` aligns
-  // to UTC midnight, so a tab left open across midnight would keep firing
-  // `_gte` queries against yesterday's boundary until the user reloaded
-  // (codex finding 3183954662). We track UTC-day-of-mount via state and
-  // bump it when a tick crosses midnight; the cache key flips at most
-  // once per UTC day.
-  const [utcDayKey, setUtcDayKey] = useState<number>(() =>
-    Math.floor(Date.now() / 1000 / SECONDS_PER_DAY),
-  );
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    // Poll once per minute — cheap, and the worst-case visible drift between
-    // wall-clock midnight and the leaderboard updating is < 1 minute. We
-    // can't `setTimeout` precisely to midnight because the user's tab may
-    // be backgrounded and timers get throttled.
-    const id = window.setInterval(() => {
-      setUtcDayKey((prev) => {
-        const next = Math.floor(Date.now() / 1000 / SECONDS_PER_DAY);
-        return next === prev ? prev : next;
-      });
-    }, 60_000);
-    return () => window.clearInterval(id);
-  }, []);
-  // `utcDayKey` is in the deps so the cutoff re-derives at midnight even
-  // though it's not referenced inside the memo body — `rangeCutoffSeconds`
-  // calls `Date.now()` internally and we need to flush the memo cache when
-  // the day flips. Including the key is the cheapest way to express that.
-  const cutoff = useMemo(() => rangeCutoffSeconds(range), [range, utcDayKey]);
   const isSystemAddressIn = useMemo(
     () => (showSystem ? [false, true] : [false]),
     [showSystem],
@@ -316,132 +178,18 @@ export function LeaderboardClient() {
   // re-admit their excluded days into the chart (cursor agent finding
   // on 5fcc663). When the toggle is on we pass `undefined` to
   // short-circuit the filter.
-  const traderAllowList = useMemo<ReadonlySet<string> | undefined>(() => {
-    if (showSystem) return undefined;
-    const s = new Set<string>();
-    for (const r of traderRows) {
-      if (r.isSystemAddress) continue;
-      s.add(`${r.chainId}-${r.trader}-${r.timestamp}`);
-    }
-    return s;
-  }, [showSystem, traderRows]);
-
-  // UTC-day window range so the chart's x-axis stays contiguous when a
-  // day had zero volume protocol-wide. `cutoff` is already aligned to
-  // UTC midnight by `rangeCutoffSeconds`. `toSec` is today's UTC
-  // midnight; the daily-rollover ticker (`utcDayKey`) flushes this memo
-  // along with the cutoff at midnight.
-  const windowRange = useMemo(() => {
-    const todayMidnightUtc =
-      Math.floor(Date.now() / 1000 / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-    return cutoff > 0
-      ? { fromSec: cutoff, toSec: todayMidnightUtc }
-      : undefined;
-    // utcDayKey is intentional — see `cutoff` memo above.
-  }, [cutoff, utcDayKey]);
-
-  const poolVolumeBreakdown = useMemo(() => {
-    return aggregatePoolDailyVolume(
+  // Per-pool stacked chart + Top Pools list view-model. Bundled in a
+  // hook so the page client doesn't carry the full derivation chain
+  // (allowlist → window → aggregation → chain decoration → list).
+  const { poolVolumeBreakdown, chartBreakdown, topPoolsListEntries } =
+    usePoolChartViewModel({
+      showSystem,
+      traderRows,
       poolVolumeRows,
-      (poolId: string) => {
-        const meta = poolMeta.get(poolId.toLowerCase());
-        const [chainIdPart, addr] = poolId.split("-", 2);
-        const network = chainIdPart
-          ? networkForChainId(Number(chainIdPart))
-          : null;
-        if (network && meta) {
-          // Pool name only — the chain is shown via the chain icon
-          // in the legend / tooltip, so suffixing "· Celo" /
-          // "· Monad" was redundant and burned legend horizontal
-          // space (cross-chain disambiguation now lives at the
-          // icon layer, not the text).
-          return poolName(network, meta.token0, meta.token1);
-        }
-        // Fallback display when the pool isn't in our metadata cache
-        // yet: `0x1234…5678` (first 6 + last 4 of addr).
-        const a = addr ?? poolId;
-        return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
-      },
-      traderAllowList,
-      windowRange,
-    );
-  }, [poolVolumeRows, poolMeta, traderAllowList, windowRange]);
-
-  // Decorate aggregator output with chain icons so the chart card can
-  // render the legend (and tooltip) with chain marks instead of text
-  // suffixes. `poolBreakdown.breakdown[i].key` is the poolId
-  // (`{chainId}-{addr}`), so we extract the chainId for `networkForChainId`.
-  // The chain icon at 16px + a 1-letter text badge is recognisable at
-  // a glance — earlier the 12px icons looked near-identical for users
-  // who weren't already familiar with the Celo/Monad marks, so two
-  // legitimate cross-chain rows (e.g. USDC/USDm on both chains) read
-  // as confusing duplicates.
-  const chartBreakdown = useMemo(() => {
-    return poolVolumeBreakdown.breakdown.map((b) => {
-      const [chainIdPart] = b.key.split("-", 2);
-      const network = chainIdPart
-        ? networkForChainId(Number(chainIdPart))
-        : null;
-      return {
-        name: b.name,
-        color: b.color,
-        series: b.series,
-        // Chain name as a small uppercase right-aligned label. Chain
-        // icons were dropped — they were too small to read at 12px and
-        // visually conflated cross-chain pairs (USDC/USDm Celo vs
-        // Monad). Plain text is unambiguous.
-        legendIcon: network ? (
-          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-            {network.label}
-          </span>
-        ) : null,
-      };
+      poolMeta,
+      cutoff,
+      utcDayKey,
     });
-  }, [poolVolumeBreakdown]);
-
-  // Top-pools sidebar list — top 10 by total window volume. Top-N
-  // (where N = chart's TOP_N_POOLS) borrow the chart's stack color
-  // for visual continuity; entries beyond that get null (rendered
-  // muted by `<TopPoolsList>`).
-  const topPoolsListEntries = useMemo(() => {
-    const total = poolVolumeBreakdown.windowTotalUsdWei;
-    // Build a lookup from poolId → chart color. Fast O(1) per row.
-    const colorByPoolId = new Map<string, string>();
-    for (const b of poolVolumeBreakdown.breakdown) {
-      if (b.key !== "__other__") colorByPoolId.set(b.key, b.color);
-    }
-    return poolVolumeBreakdown.poolRanking.slice(0, 10).map((p) => {
-      const meta = poolMeta.get(p.poolId.toLowerCase());
-      const [chainIdPart, addr] = p.poolId.split("-", 2);
-      const network = chainIdPart
-        ? networkForChainId(Number(chainIdPart))
-        : null;
-      const name =
-        network && meta
-          ? poolName(network, meta.token0, meta.token1)
-          : (addr ?? p.poolId).length > 12
-            ? `${(addr ?? p.poolId).slice(0, 6)}…${(addr ?? p.poolId).slice(-4)}`
-            : (addr ?? p.poolId);
-      const share =
-        total === BigInt(0)
-          ? 0
-          : // (totalUsdWei * 10000n) / total — keeps 4 decimals of
-            // precision via BigInt before converting.
-            Number((p.totalUsdWei * BigInt(10000)) / total) / 10000;
-      return {
-        poolId: p.poolId,
-        name,
-        chainBadge: network ? (
-          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-            {network.label}
-          </span>
-        ) : null,
-        totalUsd: p.totalUsd,
-        share,
-        color: colorByPoolId.get(p.poolId) ?? null,
-      };
-    });
-  }, [poolVolumeBreakdown, poolMeta]);
 
   // Hero KPIs — switch the source list by venue. The KPI shapes are
   // identical between v3 and v2 (volume / traders / top-10 concentration /
@@ -628,7 +376,9 @@ export function LeaderboardClient() {
             ? "trader-day and pool-day"
             : traderCapHit
               ? "trader-day"
-              : "pool-day"}{" "}
+              : chartCapHit
+                ? "pool-day"
+                : "aggregator-day"}{" "}
           rows by single-day volume — high-frequency contributors whose
           individual days don&apos;t crack the cap may be undercounted at longer
           windows. A pre-rolled window-snapshot entity is planned (
@@ -737,6 +487,7 @@ export function LeaderboardClient() {
           series={venue === "v3" ? dailyVolume : v2DailyVolume}
           range={chartRange}
           onRangeChange={onChartRangeChange}
+          ranges={LEADERBOARD_FALLBACK_CHART_RANGES}
           headline={headline}
           change={null}
           isLoading={isLoading}
@@ -811,11 +562,14 @@ export function LeaderboardClient() {
 
 function rangeSubtitle(range: LeaderboardRangeKey): string {
   if (range === "all") return "All time";
+  if (range === "24h") return "Today (UTC)";
   const days = rangeDays(range);
   return `Last ${days} days`;
 }
 
 function rangeLabel(range: LeaderboardRangeKey): string {
+  if (range === "24h") return "24h";
+  if (range === "7d") return "7d";
   if (range === "30d") return "1M";
   if (range === "90d") return "3M";
   return "all-time";
