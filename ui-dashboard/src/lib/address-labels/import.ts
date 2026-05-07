@@ -9,11 +9,11 @@
  * `return await handleX(...)`. Validation errors come back as 400, server
  * errors (Redis etc.) are captured to Sentry and returned as a generic 500.
  *
- * Labels are no longer chain-scoped (PR #332 follow-up). The `chainId` column
- * in CSV imports and the `chainId` field in Gnosis Safe exports are still
- * accepted for backward compatibility but ignored — every entry imports as a
- * single address-keyed label. Old snapshots with `global` / `chains` keys
- * are read and merged into a flat address map.
+ * Labels are address-keyed only — no chain/global scope. The `chainId`
+ * column in CSV imports and the `chainId` field in Gnosis Safe exports are
+ * still accepted for backward compatibility but ignored — every entry
+ * imports as a single address-keyed label. Old snapshots with `global` /
+ * `chains` keys are read and merged into a flat address map.
  */
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";

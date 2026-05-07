@@ -5,15 +5,17 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // produces a callable but not a constructor).
 vi.mock("@upstash/redis", () => {
   const hgetall = vi.fn();
+  const hget = vi.fn();
+  const hmget = vi.fn();
   const hset = vi.fn();
   const hdel = vi.fn();
   const scan = vi.fn();
   const del = vi.fn();
   return {
     Redis: function MockRedis() {
-      return { hgetall, hset, hdel, scan, del };
+      return { hgetall, hget, hmget, hset, hdel, scan, del };
     },
-    __mocks: { hgetall, hset, hdel, scan, del },
+    __mocks: { hgetall, hget, hmget, hset, hdel, scan, del },
   };
 });
 
@@ -22,6 +24,8 @@ vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "fake-token");
 
 import {
   getLabels,
+  getLabel,
+  getLabelsByAddress,
   upsertEntry,
   deleteLabel,
   importLabels,
@@ -35,6 +39,8 @@ const mocks = (
   upstash as unknown as {
     __mocks: {
       hgetall: ReturnType<typeof vi.fn>;
+      hget: ReturnType<typeof vi.fn>;
+      hmget: ReturnType<typeof vi.fn>;
       hset: ReturnType<typeof vi.fn>;
       hdel: ReturnType<typeof vi.fn>;
       scan: ReturnType<typeof vi.fn>;
@@ -216,16 +222,66 @@ describe("readLegacyScopes — migration helper", () => {
 });
 
 describe("dropLegacyScopes — migration helper", () => {
-  it("DELs every legacy labels:* hash, leaves the flat 'labels' key intact", async () => {
+  it("DELs every legacy key in a single variadic call", async () => {
+    await dropLegacyScopes(["labels:global", "labels:42220"]);
+    expect(mocks.del).toHaveBeenCalledTimes(1);
+    expect(mocks.del).toHaveBeenCalledWith("labels:global", "labels:42220");
+  });
+
+  it("is a no-op when the legacy-key list is empty", async () => {
+    await dropLegacyScopes([]);
+    expect(mocks.del).not.toHaveBeenCalled();
+  });
+});
+
+describe("readLegacyScopes — returns legacyKeys for downstream DEL", () => {
+  it("returns both the per-scope entries and the raw key list", async () => {
     mocks.scan.mockResolvedValueOnce([
       "0",
       ["labels:global", "labels:42220", "labels"],
     ]);
-    await dropLegacyScopes();
-    expect(mocks.del).toHaveBeenCalledTimes(2);
-    expect(mocks.del).toHaveBeenCalledWith("labels:global");
-    expect(mocks.del).toHaveBeenCalledWith("labels:42220");
-    expect(mocks.del).not.toHaveBeenCalledWith("labels");
+    mocks.hgetall.mockResolvedValueOnce({}).mockResolvedValueOnce({});
+    const { legacyKeys } = await readLegacyScopes();
+    expect(legacyKeys.sort()).toEqual(["labels:42220", "labels:global"]);
+  });
+});
+
+describe("getLabel — single-address HGET", () => {
+  it("returns the entry for an address (lowercased)", async () => {
+    mocks.hget.mockResolvedValueOnce({
+      name: "Alice",
+      tags: [],
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+    const entry = await getLabel("0xABC");
+    expect(mocks.hget).toHaveBeenCalledWith("labels", "0xabc");
+    expect(entry?.name).toBe("Alice");
+  });
+
+  it("returns null when the address has no entry", async () => {
+    mocks.hget.mockResolvedValueOnce(null);
+    expect(await getLabel("0xABC")).toBeNull();
+  });
+});
+
+describe("getLabelsByAddress — HMGET batch", () => {
+  it("returns an array aligned with the input addresses (null for missing)", async () => {
+    mocks.hmget.mockResolvedValueOnce({
+      "0xaaa": {
+        name: "A",
+        tags: [],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    });
+    const result = await getLabelsByAddress(["0xAAA", "0xBBB"]);
+    expect(mocks.hmget).toHaveBeenCalledWith("labels", "0xaaa", "0xbbb");
+    expect(result[0]?.name).toBe("A");
+    expect(result[1]).toBeNull();
+  });
+
+  it("returns an empty array for an empty input (no Redis call)", async () => {
+    expect(await getLabelsByAddress([])).toEqual([]);
+    expect(mocks.hmget).not.toHaveBeenCalled();
   });
 });
 

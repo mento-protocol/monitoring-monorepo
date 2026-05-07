@@ -276,7 +276,7 @@ describe("filterRows", () => {
     expect(result.map((r) => r.key)).toEqual(["custom:0xaaa"]);
   });
 
-  it("matches 'all chains' against every custom row (post-flat refactor)", () => {
+  it("matches 'all chains' against every custom row", () => {
     const result = filterRows(all, "all chains");
     // Every custom row reports "all chains" as its chain text.
     expect(result.map((r) => r.key).sort()).toEqual([

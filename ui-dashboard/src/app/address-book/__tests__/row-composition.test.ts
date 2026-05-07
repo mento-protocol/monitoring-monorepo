@@ -2,7 +2,7 @@
  * Tests for address book row composition using the shared helpers from
  * @/lib/address-book — same functions used in page.tsx.
  *
- * Key invariants (post-#332 global-only refactor):
+ * Key invariants:
  * - Custom rows are address-keyed; one row per address.
  * - A custom row suppresses every contract row for the same address (across all chains).
  * - Contract rows are still per-chain (each network's static addressLabels registry).

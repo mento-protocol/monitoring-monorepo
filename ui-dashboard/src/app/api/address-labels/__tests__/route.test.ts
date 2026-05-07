@@ -6,17 +6,26 @@ vi.mock("@/auth", () => ({
   getAuthSession: vi.fn(),
 }));
 
-vi.mock("@/lib/address-labels", () => ({
-  getLabels: vi.fn().mockResolvedValue({}),
-  upsertEntry: vi.fn().mockResolvedValue(undefined),
-  deleteLabel: vi.fn().mockResolvedValue(undefined),
-  isArkhamSourced: (entry: { source?: string; tags?: string[] }) =>
-    entry.source === "arkham" || entry.tags?.includes("arkham") === true,
-  isMiniPaySourced: (entry: { source?: string }) => entry.source === "minipay",
-}));
+vi.mock("@/lib/address-labels", async () => {
+  const shared = await vi.importActual<
+    typeof import("@/lib/address-labels-shared")
+  >("@/lib/address-labels-shared");
+  return {
+    ...shared,
+    getLabels: vi.fn().mockResolvedValue({}),
+    getLabel: vi.fn().mockResolvedValue(null),
+    upsertEntry: vi.fn().mockResolvedValue(undefined),
+    deleteLabel: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 import { getAuthSession } from "@/auth";
-import { getLabels, upsertEntry, deleteLabel } from "@/lib/address-labels";
+import {
+  deleteLabel,
+  getLabel,
+  getLabels,
+  upsertEntry,
+} from "@/lib/address-labels";
 
 const VALID_ADDR = "0x" + "a".repeat(40);
 
@@ -26,6 +35,7 @@ beforeEach(() => {
   // next test.
   vi.resetAllMocks();
   (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
+  (getLabel as ReturnType<typeof vi.fn>).mockResolvedValue(null);
   (upsertEntry as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
   (deleteLabel as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 });
@@ -193,14 +203,12 @@ describe("PUT /api/address-labels", () => {
   });
 
   it("preserves Arkham source on edit (does not demote to custom)", async () => {
-    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
-      [VALID_ADDR.toLowerCase()]: {
-        name: "Old",
-        tags: [],
-        source: "arkham",
-        updatedAt: "2025-01-01T00:00:00Z",
-        createdAt: "2025-01-01T00:00:00Z",
-      },
+    (getLabel as ReturnType<typeof vi.fn>).mockResolvedValue({
+      name: "Old",
+      tags: [],
+      source: "arkham",
+      updatedAt: "2025-01-01T00:00:00Z",
+      createdAt: "2025-01-01T00:00:00Z",
     });
     const res = await PUT(
       jsonReq({ address: VALID_ADDR, name: "User edit", tags: ["whale"] }),
@@ -212,13 +220,11 @@ describe("PUT /api/address-labels", () => {
   });
 
   it("preserves MiniPay source on edit", async () => {
-    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
-      [VALID_ADDR.toLowerCase()]: {
-        name: "MiniPay user",
-        tags: [],
-        source: "minipay",
-        updatedAt: "2025-01-01T00:00:00Z",
-      },
+    (getLabel as ReturnType<typeof vi.fn>).mockResolvedValue({
+      name: "MiniPay user",
+      tags: [],
+      source: "minipay",
+      updatedAt: "2025-01-01T00:00:00Z",
     });
     const res = await PUT(jsonReq({ address: VALID_ADDR, name: "Edited" }));
     expect(res.status).toBe(200);

@@ -621,7 +621,7 @@ describe("AddressBookClient — edit modal", () => {
 
   it("contract rows render '+ Tag' which opens the editor for that address", () => {
     // No custom entries — only synthetic contracts from the mocked NETWORKS.
-    // Labels are address-keyed only post-#332, so the editor opens with the
+    // Labels are address-keyed only, so the editor opens with the
     // contract's address; chain context lives only in the static contract
     // registry pre-fill below.
     mockCustomEntries = [];

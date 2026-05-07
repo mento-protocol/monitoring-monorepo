@@ -11,6 +11,7 @@ export {
   type ImportedCounts,
   ARKHAM_TAG,
   MINIPAY_SOURCE,
+  derivePreservedSource,
   isArkhamSourced,
   isMiniPaySourced,
   upgradeEntry,
@@ -18,15 +19,16 @@ export {
   sanitizeEntry,
 } from "./address-labels-shared";
 
-import { upgradeEntries, type AddressEntry } from "./address-labels-shared";
+import {
+  upgradeEntry,
+  upgradeEntries,
+  type AddressEntry,
+} from "./address-labels-shared";
 
-// Redis layout: a single `labels` hash keyed by lowercase address. Labels
-// are not chain-scoped — same EVM address means same entity (same private
-// key derives the same address across every chain), so a single label
-// applies wherever the address appears. Earlier per-scope storage caused
-// recurring scope-mismatch bugs that the model itself doesn't justify
-// (mirrors the reports refactor on PR #330).
+// Single `labels` hash keyed by lowercase address — same EVM address means
+// same entity, so a single label applies wherever the address appears.
 const LABELS_KEY = "labels";
+const LEGACY_KEY_PATTERN = /^labels:(global|\d+)$/;
 
 function getRedis(): Redis {
   const url = process.env.UPSTASH_REDIS_REST_URL;
@@ -49,10 +51,19 @@ export async function getLabels(): Promise<Record<string, AddressEntry>> {
 }
 
 /**
- * Upsert a label entry for an address. Single-key write; no scope iteration,
- * no cross-scope HDEL — the per-scope architecture was rolled back, so the
- * write is just an HSET.
+ * Read a single address entry. Cheaper than `getLabels()` for the common
+ * "look up prior entry to preserve provenance/createdAt" pattern in the
+ * PUT handler — one HGET vs HGETALL of the entire hash.
  */
+export async function getLabel(address: string): Promise<AddressEntry | null> {
+  const redis = getRedis();
+  const raw = await redis.hget<Record<string, unknown>>(
+    LABELS_KEY,
+    address.toLowerCase(),
+  );
+  return raw ? upgradeEntry(raw) : null;
+}
+
 export async function upsertEntry(
   address: string,
   entry: Omit<AddressEntry, "updatedAt">,
@@ -62,9 +73,7 @@ export async function upsertEntry(
   const value: AddressEntry = {
     ...entry,
     // Preserve caller-supplied createdAt (read from prior entry); fall back
-    // to `now` for first-time writes. Callers that want history preserved
-    // must read the prior entry and forward its createdAt — the route
-    // helpers in `route.ts` and `arkham/enrich/route.ts` already do this.
+    // to `now` for first-time writes.
     createdAt: entry.createdAt ?? now,
     updatedAt: now,
   };
@@ -103,25 +112,34 @@ export async function importLabels(
   await redis.hset(LABELS_KEY, fields);
 }
 
+/**
+ * Read multiple address entries in one round trip. Returns a sparse array
+ * aligned with `addresses` — null at indexes where no entry exists. Used
+ * by the migration route to verify a write without re-reading the entire
+ * flat hash.
+ */
+export async function getLabelsByAddress(
+  addresses: string[],
+): Promise<Array<AddressEntry | null>> {
+  if (addresses.length === 0) return [];
+  const redis = getRedis();
+  const lowered = addresses.map((a) => a.toLowerCase());
+  const raw = await redis.hmget<Record<string, Record<string, unknown>>>(
+    LABELS_KEY,
+    ...lowered,
+  );
+  if (!raw) return addresses.map(() => null);
+  return lowered.map((addr) => {
+    const entry = raw[addr];
+    return entry ? upgradeEntry(entry) : null;
+  });
+}
+
 // Migration helpers — used by `/api/address-labels/migrate-flat` to merge
 // per-chain + legacy global entries into the flat `labels` hash. NOT used
 // by runtime CRUD.
 
-/**
- * Read every legacy scope key (`labels:global` + `labels:{chainId}`) currently
- * in Redis. Used only by the migration route. Returns the raw per-scope
- * snapshots so the migration can decide how to resolve conflicts.
- */
-export async function readLegacyScopes(): Promise<{
-  scopes: Array<{
-    key: string;
-    entries: Record<string, AddressEntry>;
-  }>;
-}> {
-  const redis = getRedis();
-  // Paginated SCAN — old codepath had a static NETWORKS-derived list;
-  // for the migration we want EVERY existing key matching the legacy
-  // pattern, in case some chain isn't in NETWORKS anymore.
+async function scanLegacyKeys(redis: Redis): Promise<string[]> {
   const keys: string[] = [];
   let cursor = 0;
   do {
@@ -132,10 +150,22 @@ export async function readLegacyScopes(): Promise<{
     cursor = Number(nextCursor);
     keys.push(...batch);
   } while (cursor !== 0);
+  // Match `labels:global` or `labels:{number}`; the new flat `labels` key
+  // (no colon) doesn't match the SCAN pattern but filter explicitly anyway.
+  return keys.filter((k) => LEGACY_KEY_PATTERN.test(k));
+}
 
-  // Filter to the legacy shape: `labels:global` or `labels:{number}`. Skip
-  // the new flat `labels` key (no colon).
-  const legacyKeys = keys.filter((k) => /^labels:(global|\d+)$/.test(k));
+/**
+ * Read every legacy scope key (`labels:global` + `labels:{chainId}`) currently
+ * in Redis. Returns both the per-scope snapshots and the raw key list so the
+ * caller can pass it to `dropLegacyScopes` without a second SCAN.
+ */
+export async function readLegacyScopes(): Promise<{
+  legacyKeys: string[];
+  scopes: Array<{ key: string; entries: Record<string, AddressEntry> }>;
+}> {
+  const redis = getRedis();
+  const legacyKeys = await scanLegacyKeys(redis);
 
   const scopes = await Promise.all(
     legacyKeys.map(async (key) => {
@@ -146,28 +176,16 @@ export async function readLegacyScopes(): Promise<{
     }),
   );
 
-  return { scopes };
+  return { legacyKeys, scopes };
 }
 
 /**
- * Delete the legacy per-scope hashes after the merge is verified. Idempotent
- * (HDEL is a no-op on missing keys via the SCAN-then-DEL pattern).
+ * Delete the legacy per-scope hashes after the merge is verified. Pass the
+ * `legacyKeys` returned by `readLegacyScopes` to skip a redundant SCAN.
+ * Idempotent — DEL on missing keys is a no-op.
  */
-export async function dropLegacyScopes(): Promise<void> {
+export async function dropLegacyScopes(legacyKeys: string[]): Promise<void> {
+  if (legacyKeys.length === 0) return;
   const redis = getRedis();
-  const keys: string[] = [];
-  let cursor = 0;
-  do {
-    const [nextCursor, batch] = await redis.scan(cursor, {
-      match: "labels:*",
-      count: 100,
-    });
-    cursor = Number(nextCursor);
-    keys.push(...batch);
-  } while (cursor !== 0);
-
-  const legacyKeys = keys.filter((k) => /^labels:(global|\d+)$/.test(k));
-  for (const key of legacyKeys) {
-    await redis.del(key);
-  }
+  await redis.del(...legacyKeys);
 }

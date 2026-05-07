@@ -59,7 +59,7 @@ export function buildAddressBookRows(
 /**
  * Count the number of distinct labels that will be persisted from a parsed
  * import payload. All three import formats normalise to a per-address key,
- * since labels are address-keyed only post-#332.
+ * since labels are address-keyed only.
  */
 export function countImportLabels(parsed: unknown): number {
   const addresses = new Set<string>();

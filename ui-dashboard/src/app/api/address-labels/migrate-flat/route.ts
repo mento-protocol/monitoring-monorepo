@@ -3,10 +3,11 @@ import * as Sentry from "@sentry/nextjs";
 import { put } from "@vercel/blob";
 import { getAuthSession } from "@/auth";
 import {
+  dropLegacyScopes,
   getLabels,
+  getLabelsByAddress,
   importLabels,
   readLegacyScopes,
-  dropLegacyScopes,
   type AddressEntry,
 } from "@/lib/address-labels";
 
@@ -47,13 +48,13 @@ type MigrateResponse = {
  *   - source: prefer non-empty (server-side cron provenance is authoritative)
  *   - createdAt: earliest non-empty
  *   - updatedAt: latest
- *   - name / notes / isPublic: prefer the most recent (max updatedAt) source
+ *   - name / notes / isPublic: prefer the more recent (max updatedAt) source;
+ *     ties resolve to `incoming` (the newer arg).
  *
  * Idempotent: a second run with no legacy keys present is a clean no-op.
  *
- * Auth: dual — `Bearer CRON_SECRET` OR an authenticated `@mentolabs.xyz`
- * session. The migration runs once after deploy via `curl` from a maintainer
- * laptop.
+ * Auth: dual — `Bearer CRON_SECRET` OR an authenticated session. The
+ * migration runs once after deploy via `curl` from a maintainer laptop.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const authBail = await requireMigrationAuth(req);
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const dryRun = req.nextUrl.searchParams.get("dryRun") === "true";
 
   try {
-    const [{ scopes }, preExistingFlat] = await Promise.all([
+    const [{ legacyKeys, scopes }, preExistingFlat] = await Promise.all([
       readLegacyScopes(),
       getLabels(),
     ]);
@@ -95,9 +96,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       preExistingFlat,
     });
 
-    // Build the flat merged map. Walk legacy scopes first (each scope's entries
-    // are timestamped); when an address appears in multiple sources, resolve
-    // via mergeEntries below.
+    // Build the flat merged map. Track multi-source addresses so the
+    // response can surface the conflict list for human review.
     const merged: Record<string, AddressEntry> = {};
     const sourcesByAddress = new Map<string, string[]>();
 
@@ -145,19 +145,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     await importLabels(merged);
 
-    // Verify the merge before dropping legacy keys: re-read the flat hash and
-    // confirm every merged address landed. Fail loud if it didn't — we have
-    // the backup to restore from.
-    const verify = await getLabels();
+    // HMGET only the addresses we just wrote — confirm every one landed.
+    // HGETALL would re-pull the entire flat hash including pre-existing
+    // entries we didn't touch.
     const expected = Object.keys(merged);
-    const missing = expected.filter((a) => !verify[a]);
+    const verify = await getLabelsByAddress(expected);
+    const missing = expected.filter((_, i) => verify[i] === null);
     if (missing.length > 0) {
       throw new Error(
         `flat-write verification failed: ${missing.length} address(es) missing after import (sample: ${missing.slice(0, 3).join(", ")})`,
       );
     }
 
-    await dropLegacyScopes();
+    await dropLegacyScopes(legacyKeys);
 
     const body: MigrateResponse = {
       ok: true,
@@ -186,14 +186,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 }
 
 /**
- * Merge two entries that exist for the same address in different sources.
- * Resolution rules: union tags, prefer the more recently updated entry for
- * scalar fields, take the earliest createdAt.
+ * Merge a prior entry with an incoming one. Resolution: union tags
+ * (case-insensitive dedup), prefer the more recently updated entry's
+ * scalar fields, take the earliest createdAt. Ties on `updatedAt` resolve
+ * in favour of `incoming` so callers can pass legacy entries as `prior`
+ * and trust later writes to win deterministically.
  */
-function mergeEntries(a: AddressEntry, b: AddressEntry): AddressEntry {
-  const aLater = (a.updatedAt ?? "") >= (b.updatedAt ?? "");
-  const newer = aLater ? a : b;
-  const older = aLater ? b : a;
+function mergeEntries(
+  prior: AddressEntry,
+  incoming: AddressEntry,
+): AddressEntry {
+  const incomingLater = (incoming.updatedAt ?? "") >= (prior.updatedAt ?? "");
+  const newer = incomingLater ? incoming : prior;
+  const older = incomingLater ? prior : incoming;
 
   const tagSet = new Map<string, string>();
   for (const t of [...older.tags, ...newer.tags]) {
@@ -201,7 +206,7 @@ function mergeEntries(a: AddressEntry, b: AddressEntry): AddressEntry {
     if (!tagSet.has(key)) tagSet.set(key, t);
   }
 
-  const createdCandidates = [a.createdAt, b.createdAt].filter(
+  const createdCandidates = [prior.createdAt, incoming.createdAt].filter(
     (s): s is string => typeof s === "string" && s.length > 0,
   );
   const createdAt = createdCandidates.sort()[0];

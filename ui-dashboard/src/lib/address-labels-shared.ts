@@ -81,6 +81,22 @@ export function isMiniPaySourced(entry: { source?: string }): boolean {
 }
 
 /**
+ * Map a prior entry (or its absence) to the `source` field that should be
+ * carried into a write. User edits MUST NOT silently demote a server-tagged
+ * entry to `custom` — that would drop it out of future refresh runs and
+ * lose entity attribution. Returns `undefined` for fresh writes and for
+ * priors that never had a server provenance.
+ */
+export function derivePreservedSource(
+  prior: { source?: string; tags?: string[] } | null | undefined,
+): "arkham" | "minipay" | undefined {
+  if (!prior) return undefined;
+  if (isArkhamSourced(prior)) return "arkham";
+  if (isMiniPaySourced(prior)) return "minipay";
+  return undefined;
+}
+
+/**
  * Normalise a legacy-shaped entry (`tags` carries the `ARKHAM_TAG` sentinel,
  * no `source` field) into the new shape (`source: "arkham"`, sentinel removed
  * from tags). New-shape entries pass through untouched.

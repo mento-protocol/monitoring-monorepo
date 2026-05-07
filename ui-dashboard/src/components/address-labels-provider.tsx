@@ -13,8 +13,7 @@ import { useNetwork } from "@/components/network-provider";
 import { truncateAddress } from "@/lib/format";
 import { NETWORKS, networkIdForChainId, type Network } from "@/lib/networks";
 import {
-  isArkhamSourced,
-  isMiniPaySourced,
+  derivePreservedSource,
   normalizeArkhamLegacy,
   upgradeEntries,
   type AddressEntry,
@@ -212,17 +211,10 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
       const lower = address.toLowerCase();
       // Carry server-side provenance into the optimistic write so the
       // SOURCE badge doesn't flash to "custom" between the optimistic
-      // update and the SWR refetch. Mirrors the PUT handler's
-      // source-preservation check.
+      // update and the SWR refetch. Mirrors the PUT handler.
       const buildOptimistic = (current: EntriesState): AddressEntry => {
         const prior = current[lower];
-        const preservedSource = !prior
-          ? undefined
-          : isArkhamSourced(prior)
-            ? "arkham"
-            : isMiniPaySourced(prior)
-              ? "minipay"
-              : undefined;
+        const preservedSource = derivePreservedSource(prior);
         return {
           name: entry.name,
           tags: entry.tags,

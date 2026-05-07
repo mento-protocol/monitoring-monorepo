@@ -2,13 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { getAuthSession } from "@/auth";
 import {
+  ARKHAM_TAG,
+  MINIPAY_SOURCE,
+  derivePreservedSource,
+  deleteLabel,
+  getLabel,
   getLabels,
   upsertEntry,
-  deleteLabel,
-  isArkhamSourced,
-  isMiniPaySourced,
 } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
+
+// Reserved server-provenance tag names. Letting users set these via the
+// editor either clobbers manually-curated entries on the next cron run
+// (arkham) or causes UI confusion where the badge says "custom" but the
+// Tags column shows "minipay". Provenance lives on `source`, not tags.
+const RESERVED_SOURCE_TAGS = new Set<string>([ARKHAM_TAG, MINIPAY_SOURCE]);
 
 export async function GET(): Promise<NextResponse> {
   const session = await getAuthSession();
@@ -97,14 +105,8 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // Deduplicate tags: case-insensitive, preserve first-occurrence casing.
-  // Strip reserved server-provenance tags ("arkham", "minipay") — these
-  // mark an entry as written by a server-side cron. Letting users set them
-  // via the label editor would either clobber manually-curated entries on
-  // the next cron run (arkham) or cause UI confusion where the badge says
-  // "custom" but the Tags column shows "minipay" (minipay). Provenance is
-  // authoritative through `source`, not tags.
-  const RESERVED_SOURCE_TAGS = new Set(["arkham", "minipay"]);
+  // Deduplicate tags case-insensitively (preserve first-occurrence casing)
+  // and strip reserved server-provenance tags.
   const seenTags = new Set<string>();
   const deduplicatedTags = parsedTags
     .map((t) => t.trim())
@@ -117,22 +119,12 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
     });
 
   try {
-    // Preserve server-controlled provenance across edits. A user editing
-    // notes/tags on an Arkham-sourced row must NOT silently demote it to
-    // `custom` — that would drop it out of future refresh cron runs and
-    // lose the entity attribution. The user-supplied body never sets source
-    // (no `source` in the destructure above); it's read here from the prior
-    // entry only.
-    const all = await getLabels();
-    const addrLower = address.toLowerCase();
-    const prior = all[addrLower];
-    const preservedSource = !prior
-      ? undefined
-      : isArkhamSourced(prior)
-        ? "arkham"
-        : isMiniPaySourced(prior)
-          ? "minipay"
-          : undefined;
+    // Read only the prior entry, not the entire hash — `getLabel` does an
+    // HGET vs HGETALL. Source is preserved across edits so user changes
+    // don't silently demote an Arkham/MiniPay entry to `custom` and drop
+    // it out of future refresh runs.
+    const prior = await getLabel(address);
+    const preservedSource = derivePreservedSource(prior);
 
     await upsertEntry(address, {
       name: trimmedName,
@@ -140,8 +132,8 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
       notes: trimmedNotes,
       isPublic: isPublic === true,
       ...(preservedSource ? { source: preservedSource } : {}),
-      // Preserve first-write timestamp across edits;
-      // upsertEntry defaults to `now` when this is undefined (new row).
+      // Preserve first-write timestamp; `upsertEntry` defaults to `now`
+      // when undefined (new row).
       createdAt: prior?.createdAt,
     });
     return NextResponse.json({ ok: true });
