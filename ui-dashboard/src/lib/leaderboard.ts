@@ -17,10 +17,11 @@ import { SECONDS_PER_DAY } from "@/lib/time-series";
 /** USD-wei: 18-decimal fixed-point (`indexer-envio/src/usd.ts:USD_WEI_DECIMALS`). */
 export const USD_WEI_DECIMALS = 18;
 
-/** Window selection for the leaderboard view. Extends the global RangeKey
- * with `24h` since "today" is a meaningful operator-side question that the
- * existing 7d/30d/all charts don't expose. */
-export type LeaderboardRangeKey = "24h" | "7d" | "30d" | "all";
+/** Window selection for the leaderboard view. The full range set covers
+ * both v3 and v2 venues; the per-pool chart is hidden for `<30d` windows
+ * where there are too few datapoints to read a stacked breakdown
+ * meaningfully (see `page-client.tsx`). */
+export type LeaderboardRangeKey = "24h" | "7d" | "30d" | "90d" | "all";
 
 export const LEADERBOARD_RANGES: ReadonlyArray<{
   key: LeaderboardRangeKey;
@@ -28,7 +29,8 @@ export const LEADERBOARD_RANGES: ReadonlyArray<{
 }> = [
   { key: "24h", label: "24h" },
   { key: "7d", label: "7d" },
-  { key: "30d", label: "30d" },
+  { key: "30d", label: "1M" },
+  { key: "90d", label: "3M" },
   { key: "all", label: "All" },
 ];
 
@@ -37,6 +39,7 @@ export function rangeDays(range: LeaderboardRangeKey): number | null {
   if (range === "24h") return 1;
   if (range === "7d") return 7;
   if (range === "30d") return 30;
+  if (range === "90d") return 90;
   return null;
 }
 
@@ -471,6 +474,15 @@ export function computeFlow(pool: TraderPoolWindowRow): FlowResult {
         : "mixed";
   return { kind, imbalance, direction };
 }
+
+// ─── Per-pool stacked chart aggregation ───────────────────────────────────
+// Moved to `lib/leaderboard-pool.ts` to keep this file under the AGENTS.md
+// 600-line soft cap. Re-exported below so existing imports keep working.
+export {
+  aggregatePoolDailyVolume,
+  type PoolBreakdown,
+  type PoolDailyVolumeRow,
+} from "@/lib/leaderboard-pool";
 
 // ─── Hero KPI rollup ──────────────────────────────────────────────────────
 //

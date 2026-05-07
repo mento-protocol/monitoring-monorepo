@@ -71,6 +71,13 @@ describe("windowStartDay", () => {
     );
   });
 
+  it("90d covers snapshotDay - 88 days (89 closed days)", () => {
+    assert.equal(
+      windowStartDay(DAY_2026_05_07, "90d"),
+      DAY_2026_05_07 - 88n * SECONDS_PER_DAY,
+    );
+  });
+
   it("all returns 0n (no lower bound)", () => {
     assert.equal(windowStartDay(DAY_2026_05_07, "all"), 0n);
   });
@@ -324,7 +331,7 @@ describe("flushV3LeaderboardWindowSnapshots", () => {
       blockNumber: 1n,
       updatedAtTimestamp: 1n,
     });
-    assert.equal(store.LeaderboardWindowSnapshot.size, 4);
+    assert.equal(store.LeaderboardWindowSnapshot.size, 5);
     // 24h is empty (today's partial fills it on the dashboard); 7d/30d/all
     // see the full yesterday's data.
     const snap24h = store.LeaderboardWindowSnapshot.get(
@@ -332,7 +339,7 @@ describe("flushV3LeaderboardWindowSnapshots", () => {
     );
     assert.equal(snap24h?.totalVolumeUsdWei, 0n);
     assert.equal(snap24h?.uniqueTraders, 0);
-    for (const w of ["7d", "30d", "all"] as const) {
+    for (const w of ["7d", "30d", "90d", "all"] as const) {
       const snap = store.LeaderboardWindowSnapshot.get(
         `${CHAIN}-${w}-${DAY_2026_05_06}`,
       );
@@ -360,7 +367,7 @@ describe("flushV3LeaderboardWindowSnapshots", () => {
       blockNumber: 1n,
       updatedAtTimestamp: 1n,
     });
-    assert.equal(store.LeaderboardWindowSnapshot.size, 4);
+    assert.equal(store.LeaderboardWindowSnapshot.size, 5);
   });
 });
 
@@ -376,7 +383,7 @@ describe("maybeHeartbeatFlushV3", () => {
       blockTimestamp: DAY_2026_05_07 + 60n * 60n * 12n,
       blockNumber: 1n,
     });
-    assert.equal(store.LeaderboardWindowSnapshot.size, 4);
+    assert.equal(store.LeaderboardWindowSnapshot.size, 5);
     for (const w of WINDOW_KEYS) {
       assert(
         store.LeaderboardWindowSnapshot.has(`${CHAIN}-${w}-${DAY_2026_05_06}`),
@@ -427,7 +434,7 @@ describe("maybeHeartbeatFlushV3", () => {
       blockNumber: 100n,
     });
     // 2 days × 4 windowKeys = 8 rows
-    assert.equal(store.LeaderboardWindowSnapshot.size, 8);
+    assert.equal(store.LeaderboardWindowSnapshot.size, 10);
     assert(
       store.LeaderboardWindowSnapshot.has(`${CHAIN}-7d-${DAY_2026_05_05}`),
     );
@@ -570,8 +577,8 @@ describe("flushV2LeaderboardWindowSnapshots", () => {
       blockNumber: 1n,
       updatedAtTimestamp: 1n,
     });
-    assert.equal(store.BrokerLeaderboardWindowSnapshot.size, 4);
-    for (const w of ["7d", "30d", "all"] as const) {
+    assert.equal(store.BrokerLeaderboardWindowSnapshot.size, 5);
+    for (const w of ["7d", "30d", "90d", "all"] as const) {
       const snap = store.BrokerLeaderboardWindowSnapshot.get(
         `${CHAIN}-${w}-${DAY_2026_05_06}`,
       );
@@ -593,7 +600,7 @@ describe("maybeHeartbeatFlushV2", () => {
       blockTimestamp: DAY_2026_05_07 + 60n * 60n * 12n,
       blockNumber: 1n,
     });
-    assert.equal(store.BrokerLeaderboardWindowSnapshot.size, 4);
+    assert.equal(store.BrokerLeaderboardWindowSnapshot.size, 5);
     for (const w of WINDOW_KEYS) {
       assert(
         store.BrokerLeaderboardWindowSnapshot.has(
@@ -645,7 +652,7 @@ describe("maybeHeartbeatFlushV2", () => {
       blockNumber: 100n,
     });
     // 2 days × 4 windowKeys = 8 rows
-    assert.equal(store.BrokerLeaderboardWindowSnapshot.size, 8);
+    assert.equal(store.BrokerLeaderboardWindowSnapshot.size, 10);
     assert(
       store.BrokerLeaderboardWindowSnapshot.has(
         `${CHAIN}-7d-${DAY_2026_05_05}`,
