@@ -255,7 +255,8 @@ describe("AddressReportEditor — load error", () => {
 });
 
 describe("AddressReportEditor — SWR alias invalidation (regression for #330)", () => {
-  it("save invalidates every per-scope cache key for the address (predicate function)", async () => {
+  it("save invalidates every OTHER per-scope cache key (predicate excludes current scope)", async () => {
+    // New report: data === null, so effectiveScope falls back to parent prop (42220).
     mockSwrData = null;
     render({ scope: 42220 });
     setTextarea("ar-body", "x");
@@ -263,25 +264,23 @@ describe("AddressReportEditor — SWR alias invalidation (regression for #330)",
       findButton("Save report")?.click();
     });
 
-    // Find the predicate-based mutate call (alias invalidator). Same address
-    // can be cached under multiple `address-reports:single:{addr}:{scope}`
-    // keys, so the helper passes a function predicate to globalMutate.
+    // Predicate-based mutate call. The local SWR mutate already wrote
+    // out.report to `:42220`; the predicate must NOT match that key
+    // (otherwise we'd clobber the freshly-saved cache to undefined).
     const predicateCalls = mockGlobalMutate.mock.calls.filter(
       (call) => typeof call[0] === "function",
     );
     expect(predicateCalls.length).toBeGreaterThan(0);
-    const predicate = predicateCalls[0]![0] as (k: unknown) => boolean;
-    // Predicate should match every per-scope alias for this address...
-    expect(
-      predicate(`address-reports:single:${VALID_ADDR.toLowerCase()}:global`),
-    ).toBe(true);
-    expect(
-      predicate(`address-reports:single:${VALID_ADDR.toLowerCase()}:42220`),
-    ).toBe(true);
-    expect(
-      predicate(`address-reports:single:${VALID_ADDR.toLowerCase()}:10143`),
-    ).toBe(true);
-    // ...but NOT a different address...
+    const [predicateArg, dataArg, optsArg] = predicateCalls[0]!;
+    const predicate = predicateArg as (k: unknown) => boolean;
+    const lower = VALID_ADDR.toLowerCase();
+
+    // OTHER scope variants must match (so they get invalidated)...
+    expect(predicate(`address-reports:single:${lower}:global`)).toBe(true);
+    expect(predicate(`address-reports:single:${lower}:10143`)).toBe(true);
+    // ...current scope must NOT match (would clobber the just-saved data)...
+    expect(predicate(`address-reports:single:${lower}:42220`)).toBe(false);
+    // ...different address must NOT match...
     expect(
       predicate(
         `address-reports:single:${SECOND_VALID_ADDR.toLowerCase()}:global`,
@@ -289,6 +288,12 @@ describe("AddressReportEditor — SWR alias invalidation (regression for #330)",
     ).toBe(false);
     // ...and NOT the index key.
     expect(predicate("address-reports:index")).toBe(false);
+
+    // Args must be (predicate, undefined, { revalidate: false }) — that
+    // shape triggers SWR's populateCache=true → set({data: undefined}) path
+    // in v2.4 (config-context-12s-CCVTDPOP.mjs ~line 355). NOT a no-op.
+    expect(dataArg).toBeUndefined();
+    expect(optsArg).toEqual({ revalidate: false });
   });
 });
 

@@ -154,12 +154,18 @@ export function AddressReportEditor({ address, scope }: Props) {
         report: SingleReportResponse;
       };
       await mutate(out.report, { revalidate: false });
-      // Invalidate every per-scope SWR alias for this address. The same
+      // Invalidate OTHER per-scope SWR aliases for this address (not the
+      // current key — the local mutate above already set that to fresh
+      // data, and including it would clobber back to undefined). The same
       // record can be cached under multiple keys (e.g. `:global` from the
       // global row and `:42220` from a chain row via the chain → global
       // fallback). Without this, opening a different row after save would
       // serve a stale body until the local SWR revalidates.
-      await invalidateAllAddressAliases(globalMutate, normalizedAddress);
+      await invalidateOtherAddressAliases(
+        globalMutate,
+        normalizedAddress,
+        effectiveScope,
+      );
       // Refresh the index so the address-book 📄 indicator picks up the new
       // entry without waiting for the next poll cycle.
       await globalMutate(ADDRESS_REPORTS_INDEX_SWR_KEY);
@@ -209,11 +215,17 @@ export function AddressReportEditor({ address, scope }: Props) {
         throw new Error(errBody.error ?? `Delete failed: ${res.status}`);
       }
       await mutate(null, { revalidate: false });
-      // Same alias-invalidation as save — without this, deleting via the
-      // chain row leaves the global SWR key holding the deleted body, and
-      // reopening the global row briefly serves the stale record + lets the
-      // user "edit" what they thought they deleted.
-      await invalidateAllAddressAliases(globalMutate, normalizedAddress);
+      // Same alias-invalidation as save — exclude the current key (we just
+      // set it to null which is the correct deleted-state value) and clear
+      // every OTHER scope variant. Without this, deleting via the chain
+      // row leaves the global SWR key holding the deleted body, and
+      // reopening the global row briefly serves the stale record + lets
+      // the user "edit" what they thought they deleted.
+      await invalidateOtherAddressAliases(
+        globalMutate,
+        normalizedAddress,
+        data.scope,
+      );
       await globalMutate(ADDRESS_REPORTS_INDEX_SWR_KEY);
       setTitle("");
       setBody("");
@@ -424,19 +436,33 @@ export function AddressReportEditor({ address, scope }: Props) {
 }
 
 /**
- * Invalidate every per-scope SWR alias for a given address. The single-report
- * key encodes scope (`address-reports:single:${addr}:${scope}`), so the same
- * persisted record can be cached under multiple keys when the user opens it
- * from different rows. Call this after any write/delete that mutates the
- * underlying record so future re-renders never serve a stale alias.
+ * Invalidate every OTHER per-scope SWR alias for a given address (the caller's
+ * current scope is excluded — they've already updated that key with the
+ * authoritative new value via the local `mutate`, so including it here would
+ * clobber back to undefined).
+ *
+ * The single-report SWR key encodes scope
+ * (`address-reports:single:${addr}:${scope}`), so the same persisted record
+ * can be cached under multiple keys when the user opens it from different
+ * rows. Call this after any write/delete so future re-mounts of a different
+ * scope row never serve a stale alias.
+ *
+ * Note for reviewers: passing `undefined` as the second arg with
+ * `{ revalidate: false }` IS a real cache clear in SWR v2.4 — the
+ * `populateCache: true` default routes through `set({ data: undefined, … })`
+ * (see `config-context-12s-CCVTDPOP.mjs` ~line 355). It is NOT the
+ * "do nothing" no-op some SWR docs imply for two-arg `mutate(key, undefined)`.
  */
-function invalidateAllAddressAliases(
+function invalidateOtherAddressAliases(
   globalMutate: ReturnType<typeof useSWRConfig>["mutate"],
   normalizedAddress: string,
+  currentScope: Scope,
 ): Promise<unknown> {
   const prefix = `address-reports:single:${normalizedAddress}:`;
+  const currentKey = `${prefix}${currentScope}`;
   return globalMutate(
-    (key) => typeof key === "string" && key.startsWith(prefix),
+    (key) =>
+      typeof key === "string" && key.startsWith(prefix) && key !== currentKey,
     undefined,
     { revalidate: false },
   );
