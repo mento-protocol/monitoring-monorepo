@@ -28,28 +28,33 @@ export type BreakdownSeries = {
  * `legendIcon` (chain badges, etc.) — Plotly's legend can't render
  * arbitrary React nodes. Click a chip to hide that trace; click again
  * to restore.
+ *
+ * Hidden state is keyed by `keyFor(b)` rather than by index so user
+ * intent ("hide USDC/USDm Monad") survives breakdown reshuffling
+ * across range/venue switches.
  */
 export function CustomLegend({
   breakdown,
   hiddenIdx,
+  keyFor,
   onToggle,
 }: {
   breakdown: readonly BreakdownSeries[];
-  hiddenIdx: ReadonlySet<number>;
-  onToggle: (idx: number) => void;
+  hiddenIdx: ReadonlySet<string>;
+  keyFor: (b: BreakdownSeries) => string;
+  onToggle: (key: string) => void;
 }) {
   return (
     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
-      {breakdown.map((b, i) => {
-        const hidden = hiddenIdx.has(i);
+      {breakdown.map((b) => {
+        const k = keyFor(b);
+        const hidden = hiddenIdx.has(k);
         return (
           <button
-            // Composite key — pool pairs (e.g. "EURm/USDm") can repeat
-            // across chains, so name alone collides.
-            key={`${b.color}-${b.name}`}
+            key={k}
             type="button"
             aria-pressed={!hidden}
-            onClick={() => onToggle(i)}
+            onClick={() => onToggle(k)}
             className={
               "inline-flex items-center gap-1.5 whitespace-nowrap rounded transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400 " +
               (hidden ? "opacity-40 line-through" : "opacity-100")

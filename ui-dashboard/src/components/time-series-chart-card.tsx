@@ -161,17 +161,24 @@ export function TimeSeriesChartCard({
   // visibility via React state and a different render path.
   const crossFadeEnabled =
     isStacked && !useCustomLegend && breakdownCount >= 1 && breakdownCount <= 3;
-  // Custom-legend visibility state. Mirrors the cross-fade hook's
-  // hiddenIdx — see the regular Plot path below for how
-  // `visible: "legendonly"` is applied.
-  const [customLegendHidden, setCustomLegendHidden] = useState<Set<number>>(
+  // Custom-legend visibility state. Keyed by `${color}-${name}` rather
+  // than trace index so that user intent ("hide USDC/USDm Monad") is
+  // preserved across range switches that reshuffle the breakdown's
+  // top-N ordering — an index-keyed set would silently hide the wrong
+  // pool when index 3 points to a different trace after the data
+  // changes (cursor finding on 88147ad).
+  const [customLegendHidden, setCustomLegendHidden] = useState<Set<string>>(
     () => new Set(),
   );
-  const toggleCustomLegend = useCallback((i: number) => {
+  const customLegendKey = useCallback(
+    (b: BreakdownSeries) => `${b.color}-${b.name}`,
+    [],
+  );
+  const toggleCustomLegend = useCallback((key: string) => {
     setCustomLegendHidden((prev) => {
       const next = new Set(prev);
-      if (next.has(i)) next.delete(i);
-      else next.add(i);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }, []);
@@ -208,7 +215,7 @@ export function TimeSeriesChartCard({
           fillcolor: "rgba(99,102,241,0.08)",
           hovertemplate: `<b>$%{y:,.0f}</b><br>%{x|${hoverDateFormat}}<extra></extra>`,
         };
-    const breakdownTraces = (breakdown ?? []).map((b, i) => {
+    const breakdownTraces = (breakdown ?? []).map((b) => {
       // Escape `name` before it reaches Plotly's `name` and `hovertemplate`
       // slots — both are HTML sinks per `lib/plot.ts:escapePlotText`.
       const safeName = escapePlotText(b.name);
@@ -216,7 +223,8 @@ export function TimeSeriesChartCard({
       // "legendonly"` rather than going through Plotly's native click
       // handler (the native legend is suppressed, so we own visibility
       // via React state).
-      const hidden = useCustomLegend && customLegendHidden.has(i);
+      const hidden =
+        useCustomLegend && customLegendHidden.has(customLegendKey(b));
       return {
         x: b.series.map((p) => new Date(p.timestamp * 1000).toISOString()),
         y: b.series.map((p) => p.value),
@@ -362,6 +370,7 @@ export function TimeSeriesChartCard({
     customSortedHover,
     useCustomLegend,
     customLegendHidden,
+    customLegendKey,
   ]);
 
   // Cross-fade in stacked mode: pre-render every visibility combo (2^N
@@ -500,6 +509,14 @@ export function TimeSeriesChartCard({
                     style={{ width: "100%", height: chartHeightPx }}
                     useResizeHandler
                     onLegendClick={handleLegendClick}
+                    // Forward Plotly hover events on the active overlay
+                    // so a future caller using both crossFade + custom-
+                    // sorted-hover gets the React tooltip wired up. No
+                    // current caller hits both (custom-sorted-hover
+                    // implies legendIcon → useCustomLegend → cross-fade
+                    // disabled), but cursor flagged the asymmetry.
+                    onHover={onPlotlyHover}
+                    onUnhover={onPlotlyUnhover}
                   />
                 </div>
               );
@@ -522,6 +539,7 @@ export function TimeSeriesChartCard({
         <CustomLegend
           breakdown={breakdown ?? []}
           hiddenIdx={customLegendHidden}
+          keyFor={customLegendKey}
           onToggle={toggleCustomLegend}
         />
       )}
