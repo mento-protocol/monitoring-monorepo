@@ -416,7 +416,7 @@ export async function fetchNumReporters(
   }
   try {
     const client = getRpcClient(chainId);
-    const { result } = await readContractWithBlockFallback(
+    const { result, usedLatestFallback } = await readContractWithBlockFallback(
       client,
       {
         address,
@@ -427,6 +427,10 @@ export async function fetchNumReporters(
       blockNumber,
       getFallbackRpcClient(chainId),
     );
+    // numRates can change with governance (reporter allowlist updates), so
+    // a `latest`-block fallback is NOT a valid stand-in for the requested
+    // historical block. Reject and let the caller preserve stale state.
+    if (usedLatestFallback) return null;
     return Number(result);
   } catch (err) {
     logRpcFailure(chainId, "numRates", rateFeedID, err, blockNumber);
@@ -468,6 +472,10 @@ export async function fetchReportExpiry(
       blockNumber,
       getFallbackRpcClient(chainId),
     );
+    // Report expiry can change via governance (TokenReportExpirySet /
+    // ReportExpirySet events); a `latest`-block fallback isn't valid for
+    // the requested historical block.
+    if (tokenExpiryRes.usedLatestFallback) return null;
     const tokenExpiry = tokenExpiryRes.result as bigint;
     let expiry: bigint;
     if (tokenExpiry > 0n) {
@@ -483,6 +491,7 @@ export async function fetchReportExpiry(
         blockNumber,
         getFallbackRpcClient(chainId),
       );
+      if (globalRes.usedLatestFallback) return null;
       expiry = globalRes.result as bigint;
     }
     if (expiry <= 0n) return null;
@@ -525,17 +534,25 @@ export async function fetchTradingLimits(
 ): Promise<TradingLimitData | null> {
   try {
     const client = getRpcClient(chainId);
-    const { result: raw } = await readContractWithBlockFallback(
-      client,
-      {
-        address: poolAddress as `0x${string}`,
-        abi: FPMM_TRADING_LIMITS_ABI,
-        functionName: "getTradingLimits",
-        args: [token as `0x${string}`],
-      },
-      blockNumber,
-      getFallbackRpcClient(chainId),
-    );
+    const { result: raw, usedLatestFallback } =
+      await readContractWithBlockFallback(
+        client,
+        {
+          address: poolAddress as `0x${string}`,
+          abi: FPMM_TRADING_LIMITS_ABI,
+          functionName: "getTradingLimits",
+          args: [token as `0x${string}`],
+        },
+        blockNumber,
+        getFallbackRpcClient(chainId),
+      );
+    // Trading limit `state` (netflow0/1, lastUpdated0/1) accumulates with
+    // each swap, so a `latest`-block fallback is fundamentally non-
+    // historical. The Swap handler reading limits "at this event's block"
+    // would otherwise persist current-block netflow against a 6-hour-old
+    // event during catch-up. Reject and let the caller skip the limit
+    // update for this event.
+    if (usedLatestFallback) return null;
     const result = raw as unknown as [
       { limit0: bigint; limit1: bigint; decimals: number },
       {
