@@ -23,6 +23,7 @@ vi.mock("@/lib/address-labels", async () => {
   return {
     ...shared,
     readLegacyScopes: vi.fn(),
+    getFlatLabels: vi.fn(),
     importLabels: vi.fn().mockResolvedValue(undefined),
     getLabelsByAddress: vi.fn(),
     dropLegacyScopes: vi.fn().mockResolvedValue(undefined),
@@ -34,6 +35,7 @@ import { getAuthSession } from "@/auth";
 import { put } from "@vercel/blob";
 import {
   dropLegacyScopes,
+  getFlatLabels,
   getLabelsByAddress,
   importLabels,
   readLegacyScopes,
@@ -41,6 +43,7 @@ import {
 
 const mockGetAuthSession = vi.mocked(getAuthSession);
 const mockReadLegacyScopes = vi.mocked(readLegacyScopes);
+const mockGetFlatLabels = vi.mocked(getFlatLabels);
 const mockImportLabels = vi.mocked(importLabels);
 const mockGetLabelsByAddress = vi.mocked(getLabelsByAddress);
 const mockDropLegacyScopes = vi.mocked(dropLegacyScopes);
@@ -55,6 +58,8 @@ beforeEach(() => {
   } as Awaited<ReturnType<typeof put>>);
   mockImportLabels.mockResolvedValue(undefined);
   mockDropLegacyScopes.mockResolvedValue(undefined);
+  // Default: no pre-existing flat entries. Per-test override seeds them.
+  mockGetFlatLabels.mockResolvedValue({});
 });
 
 function makeReq(
@@ -343,6 +348,63 @@ describe("POST /api/address-labels/migrate-flat — conflict resolution", () => 
     ];
     expect(merged.name).toBe("Newer Alice");
     expect(merged.tags.sort()).toEqual(["new", "old"]);
+  });
+
+  it("preserves user PUT edits made during the dual-read transition window", async () => {
+    // Regression for the second cursor finding: 8d9978a's rewrite dropped
+    // the flat-hash read, so a user edit written via the UI before the
+    // migration ran would be silently overwritten by stale legacy data.
+    // The migration must merge the pre-existing flat entry with the
+    // legacy entry; updatedAt-newer-wins keeps the user edit on top.
+    mockGetFlatLabels.mockResolvedValue({
+      "0xaaa": {
+        name: "User edit during transition",
+        tags: ["custom"],
+        notes: "user notes",
+        updatedAt: "2026-04-30T00:00:00Z",
+      },
+    });
+    mockReadLegacyScopes.mockResolvedValue({
+      legacyKeys: ["labels:42220"],
+      scopes: [
+        {
+          key: "labels:42220",
+          entries: {
+            "0xaaa": {
+              name: "Stale legacy name",
+              tags: ["arkham"],
+              source: "arkham",
+              updatedAt: "2026-01-01T00:00:00Z",
+            },
+          },
+        },
+      ],
+    });
+    mockGetLabelsByAddress.mockResolvedValue([
+      {
+        name: "User edit during transition",
+        tags: [],
+        updatedAt: "2026-04-30T00:00:00Z",
+      },
+    ]);
+
+    const res = await POST(makeReq({ bearer: "cron-secret" }));
+    expect(res.status).toBe(200);
+    const [labels] = mockImportLabels.mock.calls[0];
+    const merged = (
+      labels as Record<
+        string,
+        { name: string; tags: string[]; notes?: string; source?: string }
+      >
+    )["0xaaa"];
+    // User edit is newer → its scalars win.
+    expect(merged.name).toBe("User edit during transition");
+    expect(merged.notes).toBe("user notes");
+    // Tag union (case-insensitive dedup) preserves both.
+    expect(merged.tags.sort()).toEqual(["arkham", "custom"]);
+    // Provenance carries forward from legacy (older has source set; newer
+    // doesn't, so newer.source ?? older.source = "arkham").
+    expect(merged.source).toBe("arkham");
   });
 
   it("tag-only newer entry preserves empty name (does not resurrect older name)", async () => {

@@ -96,6 +96,19 @@ export async function getLabels(): Promise<Record<string, AddressEntry>> {
 }
 
 /**
+ * Flat-only read — bypasses the legacy dual-read in `getLabels()`. Used by
+ * the migration route to detect user edits made via the UI during the
+ * deploy → migrate-flat window so they survive the merge instead of being
+ * clobbered by stale legacy data.
+ */
+export async function getFlatLabels(): Promise<Record<string, AddressEntry>> {
+  const redis = getRedis();
+  const raw =
+    await redis.hgetall<Record<string, Record<string, unknown>>>(LABELS_KEY);
+  return raw ? upgradeEntries(raw as Record<string, unknown>) : {};
+}
+
+/**
  * Read a single address entry. Cheaper than `getLabels()` for the common
  * "look up prior entry to preserve provenance/createdAt" pattern in the
  * PUT handler — one HGET vs HGETALL of the entire hash.

@@ -6,6 +6,7 @@ import {
   type AddressEntry,
   type AddressLabelsSnapshot,
   dropLegacyScopes,
+  getFlatLabels,
   getLabelsByAddress,
   importLabels,
   readLegacyScopes,
@@ -67,7 +68,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const dryRun = req.nextUrl.searchParams.get("dryRun") === "true";
 
   try {
-    const { legacyKeys, scopes } = await readLegacyScopes();
+    const [{ legacyKeys, scopes }, preExistingFlat] = await Promise.all([
+      readLegacyScopes(),
+      // Flat-only read so user edits made via the UI during the deploy →
+      // migration window survive the merge. The dual-read `getLabels()`
+      // would double-count legacy entries here.
+      getFlatLabels(),
+    ]);
 
     const legacyEntries = scopes.reduce(
       (sum, s) => sum + Object.keys(s.entries).length,
@@ -79,7 +86,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         ok: true,
         legacyScopes: 0,
         legacyEntries: 0,
-        preExistingFlat: 0,
+        preExistingFlat: Object.keys(preExistingFlat).length,
         written: 0,
         conflicts: [],
         legacyDropped: false,
@@ -88,10 +95,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(body);
     }
 
-    // Build the flat merged map. Track multi-source addresses so the
-    // response can surface the conflict list for human review.
+    // Build the flat merged map. Seed with pre-existing flat entries first
+    // so user PUTs made during the dual-read transition window aren't
+    // silently overwritten by stale legacy data; mergeEntries' updatedAt
+    // tiebreaker still picks the freshest scalar fields per address.
     const merged: Record<string, AddressEntry> = {};
     const sourcesByAddress = new Map<string, string[]>();
+
+    for (const [address, entry] of Object.entries(preExistingFlat)) {
+      const lower = address.toLowerCase();
+      merged[lower] = entry;
+      sourcesByAddress.set(lower, ["labels"]);
+    }
 
     for (const { key, entries } of scopes) {
       for (const [address, entry] of Object.entries(entries)) {
@@ -121,7 +136,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         ok: true,
         legacyScopes: scopes.length,
         legacyEntries,
-        preExistingFlat: 0,
+        preExistingFlat: Object.keys(preExistingFlat).length,
         written: 0,
         conflicts,
         legacyDropped: false,
@@ -157,7 +172,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       backupPathname,
       legacyScopes: scopes.length,
       legacyEntries,
-      preExistingFlat: 0,
+      preExistingFlat: Object.keys(preExistingFlat).length,
       written: expected.length,
       conflicts,
       legacyDropped: true,
