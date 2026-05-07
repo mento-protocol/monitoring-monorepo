@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import useSWR from "swr";
 import type { AddressReportSummary } from "@/lib/address-reports-shared";
@@ -47,34 +47,38 @@ export function useAddressReportsIndex() {
     },
   );
 
+  // Pre-bucket addresses into per-scope sets so per-row `hasReport` lookups
+  // are O(1) — at 500 rows × 200 summaries the prior `Array.some` scan was
+  // 100k comparisons per render. Addresses are lowercased server-side, so no
+  // per-call normalization needed beyond the input.
+  const addressSets = useMemo(() => {
+    const global = new Set<string>(
+      data?.global.map((r) => r.address.toLowerCase()) ?? [],
+    );
+    const chains = new Map<string, Set<string>>();
+    for (const [chainId, list] of Object.entries(data?.chains ?? {})) {
+      chains.set(chainId, new Set(list.map((r) => r.address.toLowerCase())));
+    }
+    return { global, chains };
+  }, [data]);
+
   const hasReport = useCallback(
     (address: string | null, scope?: Scope): boolean => {
-      if (!address || !data) return false;
+      if (!address) return false;
       const lower = address.toLowerCase();
-      // Strict either/or means a row exists in at most one scope. When the
-      // caller passes a specific scope, check only that scope. When no scope
-      // is provided, scan all scopes so the indicator works on UI surfaces
-      // (like inline AddressLink) that don't know which scope a report lives
-      // in.
-      if (scope === "global") {
-        return data.global.some((r) => r.address.toLowerCase() === lower);
-      }
+      if (scope === "global") return addressSets.global.has(lower);
       if (typeof scope === "number") {
-        return (
-          data.chains[String(scope)]?.some(
-            (r) => r.address.toLowerCase() === lower,
-          ) ?? false
-        );
+        return addressSets.chains.get(String(scope))?.has(lower) ?? false;
       }
-      if (data.global.some((r) => r.address.toLowerCase() === lower)) {
-        return true;
-      }
-      for (const list of Object.values(data.chains)) {
-        if (list.some((r) => r.address.toLowerCase() === lower)) return true;
+      // No scope: cross-scope check (used by inline AddressLink, which
+      // doesn't know which scope a report lives in).
+      if (addressSets.global.has(lower)) return true;
+      for (const set of addressSets.chains.values()) {
+        if (set.has(lower)) return true;
       }
       return false;
     },
-    [data],
+    [addressSets],
   );
 
   return {

@@ -17,6 +17,7 @@ export {
 } from "./address-reports-shared";
 
 import {
+  upgradeReport,
   upgradeReports,
   reportToSummary,
   type AddressReport,
@@ -31,11 +32,10 @@ function reportsKey(scope: Scope): string {
   return scope === "global" ? GLOBAL_KEY : `reports:${scope}`;
 }
 
-// Static list of every scope key we may ever write to. Same derivation as
-// `address-labels.ts` ALL_LABEL_SCOPE_KEYS — derived from NETWORKS so the
-// strict-either-or Lua script can iterate a deterministic key list and stay
-// race-safe under concurrent writers (every concurrent writer derives the
-// same list; Redis serializes Lua executions; HDEL on the target is filtered
+// Static list of every scope key we may ever write to, derived from NETWORKS.
+// The strict-either-or Lua script iterates this deterministic key list so two
+// concurrent writers see the same set and the cross-scope HDEL stays
+// race-safe (Redis serializes Lua executions; HDEL on the target is filtered
 // inside the script).
 const ALL_REPORT_SCOPE_KEYS: readonly string[] = Object.freeze([
   GLOBAL_KEY,
@@ -63,20 +63,6 @@ function getRedis(): Redis {
     );
   }
   return new Redis({ url, token });
-}
-
-async function listAllScopeKeys(redis: Redis): Promise<string[]> {
-  const keys: string[] = [];
-  let cursor = 0;
-  do {
-    const [nextCursor, batch] = await redis.scan(cursor, {
-      match: "reports:*",
-      count: 100,
-    });
-    cursor = Number(nextCursor);
-    keys.push(...batch);
-  } while (cursor !== 0);
-  return keys;
 }
 
 // Strict-either-or Lua script — same shape as address-labels' version, but
@@ -115,30 +101,35 @@ export async function getReport(
     reportsKey(scope),
     address.toLowerCase(),
   );
-  if (!raw) return null;
-  return upgradeReports({ x: raw }).x ?? null;
+  return raw ? upgradeReport(raw) : null;
 }
 
 /**
  * Read the report for an address across every scope (strict either/or means
  * at most one will be present). Returns the first match or null.
+ *
+ * Issues all per-scope HGETs in parallel — sequential reads added 150–400 ms
+ * to every modal open and every save (5 RTTs × Upstash REST latency).
  */
 export async function findReport(
   address: string,
 ): Promise<{ scope: Scope; report: AddressReport } | null> {
   const redis = getRedis();
   const lower = address.toLowerCase();
-  const allKeys = await listAllScopeKeys(redis);
-  for (const key of allKeys) {
-    const raw = await redis.hget<Record<string, unknown>>(key, lower);
-    if (raw) {
-      const parsedScope = parseScopeFromKey(key);
-      if (parsedScope === null) continue;
-      const report = upgradeReports({ x: raw }).x;
-      if (report) return { scope: parsedScope, report };
-    }
-  }
-  return null;
+  const results = await Promise.all(
+    ALL_REPORT_SCOPE_KEYS.map(async (key) => {
+      const raw = await redis.hget<Record<string, unknown>>(key, lower);
+      if (!raw) return null;
+      const scope = parseScopeFromKey(key);
+      if (scope === null) return null;
+      return { scope, report: upgradeReport(raw) };
+    }),
+  );
+  return (
+    results.find(
+      (r): r is { scope: Scope; report: AddressReport } => r !== null,
+    ) ?? null
+  );
 }
 
 /**
@@ -206,13 +197,11 @@ export async function getReportSummaries(): Promise<{
   chains: Record<string, AddressReportSummary[]>;
 }> {
   const redis = getRedis();
-  const allKeys = await listAllScopeKeys(redis);
-
   const globalSummaries: AddressReportSummary[] = [];
   const chainSummaries: Record<string, AddressReportSummary[]> = {};
 
   await Promise.all(
-    allKeys.map(async (key) => {
+    ALL_REPORT_SCOPE_KEYS.map(async (key) => {
       const raw =
         await redis.hgetall<Record<string, Record<string, unknown>>>(key);
       if (!raw) return;

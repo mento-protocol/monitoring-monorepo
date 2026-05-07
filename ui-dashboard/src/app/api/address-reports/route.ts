@@ -13,9 +13,9 @@ import type { Scope } from "@/lib/address-labels-shared";
 import { isValidAddress } from "@/lib/format";
 import { NETWORKS } from "@/lib/networks";
 
-// Same NETWORKS guard as address-labels: only chainIds we know about can be
-// targets, otherwise the strict-either-or Lua script's static KEYS list won't
-// cover the orphan scope and a future cross-scope HDEL would silently miss it.
+// Only chainIds in NETWORKS can be scope targets — otherwise the strict-
+// either-or Lua script's static KEYS list won't cover the orphan scope and a
+// future cross-scope HDEL would silently miss it.
 const SUPPORTED_CHAIN_IDS: ReadonlySet<number> = new Set(
   Object.values(NETWORKS).map((n) => n.chainId),
 );
@@ -75,13 +75,12 @@ export async function PUT(req: NextRequest): Promise<NextResponse> {
 
   const {
     scope: scopeBody,
-    chainId: chainIdBody,
     address,
     body: reportBody,
     title,
   } = body as Record<string, unknown>;
 
-  const scope = parseScope(scopeBody, chainIdBody);
+  const scope = parseScope(scopeBody);
   if (scope === null) {
     return NextResponse.json(
       {
@@ -134,13 +133,9 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const {
-    scope: scopeBody,
-    chainId: chainIdBody,
-    address,
-  } = body as Record<string, unknown>;
+  const { scope: scopeBody, address } = body as Record<string, unknown>;
 
-  const scope = parseScope(scopeBody, chainIdBody);
+  const scope = parseScope(scopeBody);
   if (scope === null) {
     return NextResponse.json(
       {
@@ -165,14 +160,10 @@ function isPositiveInt(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v > 0;
 }
 
-function parseScope(scopeValue: unknown, chainIdValue: unknown): Scope | null {
+function parseScope(scopeValue: unknown): Scope | null {
   if (scopeValue === "global") return "global";
   if (isPositiveInt(scopeValue)) {
     return SUPPORTED_CHAIN_IDS.has(scopeValue) ? scopeValue : null;
-  }
-  if (scopeValue !== undefined) return null;
-  if (isPositiveInt(chainIdValue)) {
-    return SUPPORTED_CHAIN_IDS.has(chainIdValue) ? chainIdValue : null;
   }
   return null;
 }

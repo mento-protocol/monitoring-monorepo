@@ -63,8 +63,6 @@ export function AddressTableRow({
   const displayTags = tags.filter(
     (t) => t !== ARKHAM_TAG && t !== MINIPAY_SOURCE,
   );
-  // Single SWR fetch shared across every row via the hook's stable key —
-  // doesn't N+1 even when the table renders hundreds of rows.
   const { hasReport } = useAddressReportsIndex();
   const reportPresent = hasReport(address, scope);
   return (
