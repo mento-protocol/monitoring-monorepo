@@ -213,11 +213,22 @@ export function TimeSeriesChartCard({
       // `aggregatePoolDailyVolume`, regardless of Plotly's internal
       // representation.
       const breakdownByCurve = breakdown ?? [];
+      // Plotly trace order: in stacked mode `traces = breakdownTraces`
+      // (1:1 with breakdown). In non-stacked mode `traces = [totalTrace,
+      // ...breakdownTraces]`, so `curveNumber` is shifted by 1 — the
+      // total trace occupies index 0 and `breakdown[curveNumber - 1]`
+      // is the underlying series. The leaderboard chart is stacked
+      // today, but a future caller using `customSortedHover` without
+      // stacking would otherwise get tooltip rows shifted by one.
+      const breakdownIndexOffset = isStacked ? 0 : 1;
       const sorted = uniquePoints
         .map((p) => {
           const cn = p.curveNumber;
           const pi = p.pointIndex;
-          const b = typeof cn === "number" ? breakdownByCurve[cn] : undefined;
+          const breakdownIdx =
+            typeof cn === "number" ? cn - breakdownIndexOffset : -1;
+          const b =
+            breakdownIdx >= 0 ? breakdownByCurve[breakdownIdx] : undefined;
           const seriesPoint =
             b && typeof pi === "number" ? b.series[pi] : undefined;
           return {
@@ -227,6 +238,9 @@ export function TimeSeriesChartCard({
             legendIcon: b?.legendIcon,
           };
         })
+        // Filter out the totalTrace point (curveNumber 0 in non-stacked
+        // mode) — it has no `breakdown[]` entry, so name will be empty.
+        .filter((p) => p.name !== "")
         .sort((a, b) => b.value - a.value);
       const xRaw = rawPoints[0]?.x;
       const dayLabel =
@@ -249,7 +263,7 @@ export function TimeSeriesChartCard({
         points: sorted,
       });
     },
-    [customSortedHover, breakdown],
+    [customSortedHover, breakdown, isStacked],
   );
 
   const onPlotlyUnhover = useCallback(() => {
@@ -630,7 +644,7 @@ export function TimeSeriesChartCard({
             {emptyMessage}
           </div>
         ) : useCrossFade && crossFadeData ? (
-          <div style={{ position: "relative", height: ROW_CHART_HEIGHT_PX }}>
+          <div style={{ position: "relative", height: chartHeightPx }}>
             {crossFadeData.map(({ key, combo, traces, layout }) => {
               const active = setEquals(combo, hiddenIdx);
               return (
@@ -648,7 +662,7 @@ export function TimeSeriesChartCard({
                     data={traces}
                     layout={layout}
                     config={{ ...PLOTLY_CONFIG, scrollZoom: false }}
-                    style={{ width: "100%", height: ROW_CHART_HEIGHT_PX }}
+                    style={{ width: "100%", height: chartHeightPx }}
                     useResizeHandler
                     onLegendClick={handleLegendClick}
                   />
