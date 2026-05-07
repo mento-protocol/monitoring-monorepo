@@ -404,6 +404,78 @@ describe("readContractWithBlockFallback", () => {
     );
   });
 
+  it("archive-depth: error surfaced AFTER rate-limit retry routes to secondary at same block", async () => {
+    // Production scenario the targeted Codex P2 finding flagged: shallow
+    // primary returns 429 first, our retries wait it out, then the next
+    // attempt returns the archive-depth error. Pre-fix this short-
+    // circuited (non-rate-limit retry error → throw), bypassing the
+    // same-block secondary.
+    let primaryCallNo = 0;
+    const primary = mockClient(async () => {
+      primaryCallNo++;
+      if (primaryCallNo === 1) throw new Error("rate limit exceeded");
+      throw new Error(
+        "querying historical state that is not available on this node",
+      );
+    });
+    const fallback = mockClient(async () => "secondary-block-scoped");
+    const res = await readContractWithBlockFallback(
+      primary,
+      baseArgs,
+      100n,
+      fallback,
+    );
+    assert.equal(res.result, "secondary-block-scoped");
+    assert.equal(res.usedFallback, true);
+    assert.equal(
+      res.usedLatestFallback,
+      false,
+      "block-scoped result, not latest — secondary is consulted at the requested block even when the archive-depth error surfaced after the rate-limit cleared",
+    );
+  });
+
+  it("archive-depth: secondary error sanitization redacts URL-bearing messages before logging", async () => {
+    // Tokenized RPC URLs (HyperRPC, quiknode-with-token) can appear in
+    // viem error stacks. The diagnostic warning must redact them so logs
+    // don't leak credentials. We capture stderr via console.warn
+    // monkeypatch to assert.
+    const origWarn = console.warn;
+    const captured: string[] = [];
+    console.warn = (...m: unknown[]) => {
+      captured.push(m.join(" "));
+    };
+    try {
+      const primary = mockClient(async () => {
+        throw new Error("querying historical state");
+      });
+      const fallback = mockClient(async () => {
+        throw new Error(
+          'HTTP request failed. URL: "https://misty.quiknode.pro/SECRET-TOKEN-12345" reason: timeout',
+        );
+      });
+      await assert.rejects(
+        readContractWithBlockFallback(primary, baseArgs, 100n, fallback),
+      );
+      const fallbackFailedLine = captured.find((l) =>
+        l.includes("RPC_ARCHIVE_FALLBACK_FAILED"),
+      );
+      assert.ok(
+        fallbackFailedLine,
+        "archive-fallback-failed warning must fire",
+      );
+      assert.ok(
+        !fallbackFailedLine.includes("SECRET-TOKEN-12345"),
+        "secondary error message must be sanitized (token-bearing URL redacted)",
+      );
+      assert.ok(
+        fallbackFailedLine.includes("<redacted>"),
+        "sanitized URL replacement marker must appear",
+      );
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
   it("archive-depth regex: bare 'block requested not found' (no historical-state qualifier) does NOT trigger archive-depth path", async () => {
     // Some providers may emit the bare phrase for transient lag (the node
     // hasn't seen this block yet) rather than archive-depth pruning.

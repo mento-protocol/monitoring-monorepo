@@ -10,6 +10,7 @@ import {
   _resetRpcFailureCounts,
   isRateLimitError,
   logRpcFailure,
+  sanitizeErrorMessage,
 } from "./client";
 
 /** Matches common RPC error messages indicating the requested block is not
@@ -118,9 +119,18 @@ export async function readContractWithBlockFallback(
   try {
     const result = await callWithBlock();
     return { result, usedFallback: false, usedLatestFallback: false };
-  } catch (err) {
+  } catch (initialErr) {
+    // `currentError` may be reassigned during the rate-limit retry loop if
+    // a retry surfaces a non-rate-limit error (e.g. archive-depth — primary
+    // recovered from rate-limit but the requested block isn't in its
+    // archive). Letting the retry-surfaced error fall through to the
+    // archive-depth / block-not-available branches below means we still
+    // get the same-block secondary fallback for those.
+    let currentError: unknown = initialErr;
+
     // --- Rate limit handling: retry then fall back to secondary RPC ---
-    if (isRateLimitError(err)) {
+    if (isRateLimitError(currentError)) {
+      let exitedWithRateLimit = true;
       for (let i = 0; i < RATE_LIMIT_RETRY_DELAYS_MS.length; i++) {
         const delay = RATE_LIMIT_RETRY_DELAYS_MS[i];
         console.debug(
@@ -131,29 +141,44 @@ export async function readContractWithBlockFallback(
           const result = await callWithBlock();
           return { result, usedFallback: false, usedLatestFallback: false };
         } catch (retryErr) {
-          if (!isRateLimitError(retryErr)) throw retryErr;
+          if (!isRateLimitError(retryErr)) {
+            // Non-rate-limit error surfaced during retry. Reassign and let
+            // the archive-depth / block-not-available branches below
+            // classify it — otherwise an archive-depth error that only
+            // emerged after the rate-limit cleared would skip the
+            // same-block secondary fallback and bubble straight to the
+            // caller.
+            currentError = retryErr;
+            exitedWithRateLimit = false;
+            break;
+          }
         }
       }
-      // Retries exhausted — try fallback client if available.
-      // Note: fallback client still queries the same `blockNumber`, so the
-      // result IS block-scoped. usedLatestFallback stays false.
-      if (fallbackClient) {
-        console.warn(
-          `[RPC_RATE_LIMIT_FALLBACK] fn=${fn} target=${target} — primary rate-limited, using fallback RPC`,
-        );
-        try {
-          const result = await makeCall(fallbackClient, blockNumber);
-          return { result, usedFallback: true, usedLatestFallback: false };
-        } catch (fallbackErr) {
-          // Throw the fallback error (not the primary rate-limit error) so
-          // the caller can classify it — e.g. fetchRebalanceIncentiveAtBlock
-          // needs to see "returned no data" to stamp the -2 sentinel for
-          // older pools without the getter. The rate-limit context is
-          // already in the [RPC_RATE_LIMIT_FALLBACK] warning above.
-          throw fallbackErr;
+      if (exitedWithRateLimit) {
+        // Retries exhausted with rate-limit still in place — try fallback
+        // client at the same block. usedLatestFallback stays false.
+        if (fallbackClient) {
+          console.warn(
+            `[RPC_RATE_LIMIT_FALLBACK] fn=${fn} target=${target} — primary rate-limited, using fallback RPC`,
+          );
+          try {
+            const result = await makeCall(fallbackClient, blockNumber);
+            return { result, usedFallback: true, usedLatestFallback: false };
+          } catch (fallbackErr) {
+            // Throw the fallback error (not the primary rate-limit error)
+            // so the caller can classify it — e.g.
+            // fetchRebalanceIncentiveAtBlock needs to see "returned no
+            // data" to stamp the -2 sentinel for older pools without the
+            // getter. The rate-limit context is already in the
+            // [RPC_RATE_LIMIT_FALLBACK] warning above.
+            throw fallbackErr;
+          }
         }
+        throw currentError;
       }
-      throw err;
+      // Otherwise: a non-rate-limit error surfaced from the retry. Fall
+      // through to the archive-depth / block-not-available branches with
+      // currentError set to the retry-surfaced error.
     }
 
     // --- Archive-depth handling: try the secondary RPC at the SAME block,
@@ -175,8 +200,8 @@ export async function readContractWithBlockFallback(
     // try/catch returns null), so fail-closed is the safe default.
     if (
       blockNumber !== undefined &&
-      err instanceof Error &&
-      ARCHIVE_DEPTH_RE.test(err.message)
+      currentError instanceof Error &&
+      ARCHIVE_DEPTH_RE.test(currentError.message)
     ) {
       if (fallbackClient) {
         console.warn(
@@ -195,10 +220,11 @@ export async function readContractWithBlockFallback(
           // correctly — e.g. fetchRebalanceIncentiveAtBlock needs to see
           // "returned no data" to stamp the -2 sentinel for older pools
           // without the getter.
-          const secondaryMsg =
+          const secondaryMsg = sanitizeErrorMessage(
             fallbackErr instanceof Error
               ? fallbackErr.message
-              : String(fallbackErr);
+              : String(fallbackErr),
+          );
           console.warn(
             `[RPC_ARCHIVE_FALLBACK_FAILED] fn=${fn} target=${target} requestedBlock=${blockNumber} secondaryErr="${secondaryMsg}" — propagating to caller`,
           );
@@ -208,7 +234,7 @@ export async function readContractWithBlockFallback(
       // No fallback configured — primary's archive depth is our only
       // option, and it failed. Throw the original error so callers
       // degrade to null cleanly (matches pre-PR behaviour for this path).
-      throw err;
+      throw currentError;
     }
 
     // --- Block-not-available handling: retry then read "latest" ---
@@ -217,8 +243,8 @@ export async function readContractWithBlockFallback(
     // way they don't for archive-depth.
     if (
       blockNumber !== undefined &&
-      err instanceof Error &&
-      BLOCK_NOT_AVAILABLE_RE.test(err.message)
+      currentError instanceof Error &&
+      BLOCK_NOT_AVAILABLE_RE.test(currentError.message)
     ) {
       // Retry the original blockNumber a few times with increasing delays —
       // the RPC node may just be slightly behind HyperSync.
@@ -248,6 +274,6 @@ export async function readContractWithBlockFallback(
       const result = await makeCall(client, undefined);
       return { result, usedFallback: true, usedLatestFallback: true };
     }
-    throw err;
+    throw currentError;
   }
 }
