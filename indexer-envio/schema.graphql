@@ -287,6 +287,59 @@ type BrokerDailySnapshot
   blockNumber: BigInt!
 }
 
+# -----------------------------------------------------------------------------
+# Legacy-v2 producer leaderboard. Mirrors TraderDailySnapshot /
+# AggregatorDailySnapshot (further down in this file) but sourced from
+# BrokerSwapEvent and only populated when `routedViaV3Router == false` (i.e.
+# broker-direct legacy v2 — v3-Router-driven Broker swaps are sibling rows of
+# a VirtualPool.Swap already covered by the v3 leaderboard; including them
+# here would double-count).
+#
+# Skinnier than the v3 entities by design:
+#   - No feesPaidUsdWei: BrokerSwapEvent doesn't carry fee bps and v2
+#     exchanges aren't in the `Pool` table the v3 helper joins against.
+#   - No uniquePools / per-pool breakdown: v2 has a small handful of
+#     exchanges, not a useful axis for migration outreach.
+# -----------------------------------------------------------------------------
+
+type BrokerTraderDailySnapshot
+  @index(fields: ["chainId", "trader", "timestamp"]) {
+  id: ID! # "{chainId}-{trader}-{day}"
+  chainId: Int!
+  trader: String! @index
+  timestamp: BigInt! @index # UTC day bucket
+  swapCount: Int!
+  volumeUsdWei: BigInt!
+  isSystemAddress: Boolean! @index
+  # Block timestamp of the trader's most recent v2-direct swap within this
+  # day. Drives "Last active" at sub-day precision (the day bucket alone would
+  # show every active trader as "today").
+  lastSeenTimestamp: BigInt!
+}
+
+type BrokerAggregatorDailySnapshot
+  @index(fields: ["chainId", "aggregator", "timestamp"]) {
+  id: ID! # "{chainId}-{aggregator}-{day}"
+  chainId: Int!
+  # Canonical name from classifyAggregator(). Same value space as
+  # AggregatorDailySnapshot.aggregator. "unknown" rows here directly drive
+  # outreach: someone is routing real v2 volume through a router we haven't
+  # classified yet — file a follow-up entry in
+  # indexer-envio/config/aggregators.json so they get a readable label.
+  aggregator: String! @index
+  lastSeenAggregatorAddress: String!
+  timestamp: BigInt! @index
+  swapCount: Int!
+  uniqueTraders: Int!
+  volumeUsdWei: BigInt!
+}
+
+# Existence-only marker: dedupes first-touch increments of
+# BrokerAggregatorDailySnapshot.uniqueTraders. Mirrors AggregatorTraderDayMarker.
+type BrokerAggregatorTraderDayMarker {
+  id: ID! # "{chainId}-{aggregator}-{trader}-{day}"
+}
+
 type FactoryDeployment {
   id: ID!
   chainId: Int! @index

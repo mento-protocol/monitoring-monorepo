@@ -1,11 +1,15 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
+  aggregateBrokerAggregatorsByWindow,
+  aggregateBrokerTradersByWindow,
   aggregateDailyVolume,
   aggregateTraderPoolsByWindow,
   aggregateTradersByWindow,
   computeFlow,
   rangeCutoffSeconds,
   weiToUsd,
+  type BrokerAggregatorDailyRow,
+  type BrokerTraderDailyRow,
   type TraderDailyRow,
   type TraderPoolDailyRow,
   type TraderPoolWindowRow,
@@ -413,5 +417,224 @@ describe("rangeCutoffSeconds", () => {
     vi.setSystemTime(Date.UTC(2026, 4, 4, 23, 59, 0));
     const evening = rangeCutoffSeconds("7d");
     expect(morning).toBe(evening);
+  });
+});
+
+// ─── V2 (legacy-Broker) aggregations ─────────────────────────────────────
+
+function brokerTrader(
+  partial: Partial<BrokerTraderDailyRow> & {
+    chainId: number;
+    trader: string;
+    timestamp: string;
+    volumeUsdWei: string;
+  },
+): BrokerTraderDailyRow {
+  return {
+    id: `${partial.chainId}-${partial.trader}-${partial.timestamp}`,
+    swapCount: 1,
+    isSystemAddress: false,
+    lastSeenTimestamp: partial.timestamp,
+    ...partial,
+  };
+}
+
+function brokerAggregator(
+  partial: Partial<BrokerAggregatorDailyRow> & {
+    chainId: number;
+    aggregator: string;
+    timestamp: string;
+    volumeUsdWei: string;
+  },
+): BrokerAggregatorDailyRow {
+  return {
+    id: `${partial.chainId}-${partial.aggregator}-${partial.timestamp}`,
+    lastSeenAggregatorAddress: "0x0000000000000000000000000000000000000000",
+    swapCount: 1,
+    uniqueTraders: 1,
+    ...partial,
+  };
+}
+
+describe("aggregateBrokerTradersByWindow", () => {
+  it("sums same trader's daily rows and tracks the latest lastSeenTimestamp", () => {
+    const rows = [
+      brokerTrader({
+        chainId: 42220,
+        trader: "0xa",
+        timestamp: "1000",
+        volumeUsdWei: USD(100),
+        swapCount: 3,
+        lastSeenTimestamp: "1500",
+      }),
+      brokerTrader({
+        chainId: 42220,
+        trader: "0xa",
+        timestamp: "2000",
+        volumeUsdWei: USD(50),
+        swapCount: 2,
+        lastSeenTimestamp: "2500",
+      }),
+    ];
+    const out = aggregateBrokerTradersByWindow(rows);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.swapCount).toBe(5);
+    expect(weiToUsd(out[0]!.volumeUsdWei)).toBeCloseTo(150, 4);
+    expect(out[0]!.lastSeenTimestamp).toBe(2500);
+  });
+
+  it("keeps same EOA on different chains separate", () => {
+    const rows = [
+      brokerTrader({
+        chainId: 42220,
+        trader: "0xa",
+        timestamp: "1000",
+        volumeUsdWei: USD(100),
+      }),
+      brokerTrader({
+        chainId: 10143,
+        trader: "0xa",
+        timestamp: "1000",
+        volumeUsdWei: USD(50),
+      }),
+    ];
+    const out = aggregateBrokerTradersByWindow(rows);
+    expect(out).toHaveLength(2);
+  });
+
+  it("sticky-true: a trader flagged isSystem on any day stays system in the window", () => {
+    const rows = [
+      brokerTrader({
+        chainId: 42220,
+        trader: "0xa",
+        timestamp: "1000",
+        volumeUsdWei: USD(100),
+        isSystemAddress: false,
+      }),
+      brokerTrader({
+        chainId: 42220,
+        trader: "0xa",
+        timestamp: "2000",
+        volumeUsdWei: USD(100),
+        isSystemAddress: true,
+      }),
+    ];
+    expect(aggregateBrokerTradersByWindow(rows)[0]!.isSystemAddress).toBe(true);
+  });
+
+  it("sorts by volume desc with stable (chainId, trader) tiebreaker", () => {
+    const rows = [
+      brokerTrader({
+        chainId: 42220,
+        trader: "0xb",
+        timestamp: "1000",
+        volumeUsdWei: USD(100),
+      }),
+      brokerTrader({
+        chainId: 42220,
+        trader: "0xa",
+        timestamp: "1000",
+        volumeUsdWei: USD(100),
+      }),
+    ];
+    const out = aggregateBrokerTradersByWindow(rows);
+    // Same volume → secondary sort on `trader` ascending puts 0xa first.
+    expect(out[0]!.trader).toBe("0xa");
+    expect(out[1]!.trader).toBe("0xb");
+  });
+});
+
+describe("aggregateBrokerAggregatorsByWindow", () => {
+  it("uniqueTradersApprox is max-of-day-counts (lower bound)", () => {
+    // Two days for the same aggregator: 5 unique traders one day, 3 the next.
+    // The window's true unique count is somewhere in [5, 8] — we surface 5
+    // as a documented lower bound rather than 8 (which would over-count
+    // returning traders).
+    const rows = [
+      brokerAggregator({
+        chainId: 42220,
+        aggregator: "squid",
+        timestamp: "1000",
+        volumeUsdWei: USD(1_000),
+        uniqueTraders: 5,
+      }),
+      brokerAggregator({
+        chainId: 42220,
+        aggregator: "squid",
+        timestamp: "2000",
+        volumeUsdWei: USD(2_000),
+        uniqueTraders: 3,
+      }),
+    ];
+    const out = aggregateBrokerAggregatorsByWindow(rows);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.uniqueTradersApprox).toBe(5);
+    expect(weiToUsd(out[0]!.volumeUsdWei)).toBeCloseTo(3_000, 4);
+  });
+
+  it("picks lastSeenAggregatorAddress by latest timestamp, not iteration order", () => {
+    // BROKER_AGGREGATOR_DAILY_TOP orders by `volumeUsdWei desc`, so the
+    // newer day can come AFTER the older day in iteration when the older
+    // day has more volume. The aggregator is expected to compare timestamps
+    // — picking by iteration would surface the older router for clusters
+    // that rotated their entry-point.
+    const rows = [
+      // Older day, but bigger volume → comes first in the volume-desc query.
+      brokerAggregator({
+        chainId: 42220,
+        aggregator: "cluster-deadbeef",
+        timestamp: "1000",
+        lastSeenAggregatorAddress: "0xrouter1",
+        volumeUsdWei: USD(100),
+      }),
+      // Newer day, smaller volume → comes second in iteration.
+      brokerAggregator({
+        chainId: 42220,
+        aggregator: "cluster-deadbeef",
+        timestamp: "2000",
+        lastSeenAggregatorAddress: "0xrouter2",
+        volumeUsdWei: USD(10),
+      }),
+    ];
+    const [row] = aggregateBrokerAggregatorsByWindow(rows);
+    expect(row!.lastSeenAggregatorAddress).toBe("0xrouter2");
+
+    // Reverse the iteration order — newer day comes first. The result
+    // must be identical: the timestamp-comparison guard prevents a later
+    // older-day row from clobbering it.
+    const reversed = [...rows].reverse();
+    const [row2] = aggregateBrokerAggregatorsByWindow(reversed);
+    expect(row2!.lastSeenAggregatorAddress).toBe("0xrouter2");
+  });
+});
+
+describe("aggregateDailyVolume (BrokerTraderDailyRow)", () => {
+  it("accepts the skinnier v2 row shape and sums by day key", () => {
+    const rows = [
+      brokerTrader({
+        chainId: 42220,
+        trader: "0xa",
+        timestamp: "86400",
+        volumeUsdWei: USD(100),
+      }),
+      brokerTrader({
+        chainId: 42220,
+        trader: "0xb",
+        timestamp: "86400",
+        volumeUsdWei: USD(50),
+      }),
+      brokerTrader({
+        chainId: 42220,
+        trader: "0xa",
+        timestamp: "172800",
+        volumeUsdWei: USD(25),
+      }),
+    ];
+    const out = aggregateDailyVolume(rows);
+    expect(out).toHaveLength(2);
+    expect(out[0]!.timestamp).toBe(86400);
+    expect(out[0]!.value).toBeCloseTo(150, 4);
+    expect(out[1]!.timestamp).toBe(172800);
+    expect(out[1]!.value).toBeCloseTo(25, 4);
   });
 });

@@ -8,21 +8,31 @@ import { Tile } from "@/components/feedback";
 import { TimeSeriesChartCard } from "@/components/time-series-chart-card";
 import { formatUSD } from "@/lib/format";
 import {
+  BROKER_AGGREGATOR_DAILY_TOP,
+  BROKER_TRADER_DAILY_TOP,
   POOLS_FOR_LEADERBOARD,
   TRADER_DAILY_TOP,
 } from "@/lib/queries/leaderboard";
 import {
   LEADERBOARD_RANGES,
+  aggregateBrokerAggregatorsByWindow,
+  aggregateBrokerTradersByWindow,
   aggregateDailyVolume,
   aggregateTradersByWindow,
   rangeCutoffSeconds,
   rangeDays,
   weiToUsd,
+  type BrokerAggregatorDailyRow,
+  type BrokerTraderDailyRow,
   type LeaderboardRangeKey,
   type TraderDailyRow,
 } from "@/lib/leaderboard";
 import { SECONDS_PER_DAY, type RangeKey } from "@/lib/time-series";
 import { LeaderboardTable } from "./_components/leaderboard-table";
+import {
+  V2LeaderboardAggregatorTable,
+  V2LeaderboardTraderTable,
+} from "./_components/v2-leaderboard-tables";
 
 type PoolRow = {
   id: string;
@@ -31,7 +41,10 @@ type PoolRow = {
   token1: string | null;
 };
 
+type Venue = "v3" | "v2";
+
 const VALID_RANGES = new Set<LeaderboardRangeKey>(["24h", "7d", "30d", "all"]);
+const VALID_VENUES = new Set<Venue>(["v3", "v2"]);
 
 function readRangeFromParams(params: URLSearchParams): LeaderboardRangeKey {
   const raw = params.get("range");
@@ -42,6 +55,11 @@ function readRangeFromParams(params: URLSearchParams): LeaderboardRangeKey {
 
 function readShowSystemFromParams(params: URLSearchParams): boolean {
   return params.get("system") === "1";
+}
+
+function readVenueFromParams(params: URLSearchParams): Venue {
+  const raw = params.get("venue");
+  return raw && VALID_VENUES.has(raw as Venue) ? (raw as Venue) : "v3";
 }
 
 export function LeaderboardClient() {
@@ -60,15 +78,24 @@ export function LeaderboardClient() {
   const [showSystem, setShowSystem] = useState<boolean>(() =>
     readShowSystemFromParams(searchParams),
   );
+  const [venue, setVenue] = useState<Venue>(() =>
+    readVenueFromParams(searchParams),
+  );
 
   const writeUrl = useCallback(
-    (nextRange: LeaderboardRangeKey, nextShowSystem: boolean) => {
+    (
+      nextRange: LeaderboardRangeKey,
+      nextShowSystem: boolean,
+      nextVenue: Venue,
+    ) => {
       if (typeof window === "undefined") return;
       const params = new URLSearchParams(window.location.search);
       if (nextRange === "7d") params.delete("range");
       else params.set("range", nextRange);
       if (nextShowSystem) params.set("system", "1");
       else params.delete("system");
+      if (nextVenue === "v3") params.delete("venue");
+      else params.set("venue", nextVenue);
       const qs = params.toString();
       const nextUrl =
         window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
@@ -80,17 +107,25 @@ export function LeaderboardClient() {
   const updateRange = useCallback(
     (next: LeaderboardRangeKey) => {
       setRange(next);
-      writeUrl(next, showSystem);
+      writeUrl(next, showSystem, venue);
     },
-    [showSystem, writeUrl],
+    [showSystem, venue, writeUrl],
   );
 
   const updateShowSystem = useCallback(
     (next: boolean) => {
       setShowSystem(next);
-      writeUrl(range, next);
+      writeUrl(range, next, venue);
     },
-    [range, writeUrl],
+    [range, venue, writeUrl],
+  );
+
+  const updateVenue = useCallback(
+    (next: Venue) => {
+      setVenue(next);
+      writeUrl(range, showSystem, next);
+    },
+    [range, showSystem, writeUrl],
   );
 
   // Browser back/forward buttons fire `popstate`. `replaceState` itself
@@ -107,6 +142,10 @@ export function LeaderboardClient() {
       });
       setShowSystem((prev) => {
         const next = readShowSystemFromParams(params);
+        return prev === next ? prev : next;
+      });
+      setVenue((prev) => {
+        const next = readVenueFromParams(params);
         return prev === next ? prev : next;
       });
     };
@@ -148,8 +187,11 @@ export function LeaderboardClient() {
     [showSystem],
   );
 
+  // Each venue's queries are gated to its tab so we don't burn Envio quota
+  // on the side the user isn't looking at — same trick as `expanded ? Q : null`
+  // in LeaderboardTable.TraderRow.
   const tradersResult = useGQL<{ TraderDailySnapshot: TraderDailyRow[] }>(
-    TRADER_DAILY_TOP,
+    venue === "v3" ? TRADER_DAILY_TOP : null,
     {
       afterTimestamp: cutoff,
       isSystemAddressIn,
@@ -157,13 +199,30 @@ export function LeaderboardClient() {
     },
   );
   const poolsResult = useGQL<{ Pool: PoolRow[] }>(
-    POOLS_FOR_LEADERBOARD,
+    venue === "v3" ? POOLS_FOR_LEADERBOARD : null,
     undefined,
     300_000, // pool metadata barely changes; refresh every 5 min
   );
 
+  const v2TradersResult = useGQL<{
+    BrokerTraderDailySnapshot: BrokerTraderDailyRow[];
+  }>(venue === "v2" ? BROKER_TRADER_DAILY_TOP : null, {
+    afterTimestamp: cutoff,
+    isSystemAddressIn,
+    limit: ENVIO_MAX_ROWS,
+  });
+  const v2AggregatorsResult = useGQL<{
+    BrokerAggregatorDailySnapshot: BrokerAggregatorDailyRow[];
+  }>(venue === "v2" ? BROKER_AGGREGATOR_DAILY_TOP : null, {
+    afterTimestamp: cutoff,
+    limit: ENVIO_MAX_ROWS,
+  });
+
   const traderRows = tradersResult.data?.TraderDailySnapshot ?? [];
   const poolRows = poolsResult.data?.Pool ?? [];
+  const v2TraderRows = v2TradersResult.data?.BrokerTraderDailySnapshot ?? [];
+  const v2AggregatorRows =
+    v2AggregatorsResult.data?.BrokerAggregatorDailySnapshot ?? [];
 
   const aggregated = useMemo(
     () => aggregateTradersByWindow(traderRows),
@@ -172,6 +231,29 @@ export function LeaderboardClient() {
   const dailyVolume = useMemo(
     () => aggregateDailyVolume(traderRows),
     [traderRows],
+  );
+  const v2Aggregated = useMemo(
+    () => aggregateBrokerTradersByWindow(v2TraderRows),
+    [v2TraderRows],
+  );
+  const v2AggregatorAggregated = useMemo(
+    () =>
+      // Honour the page-level `Show system addresses` toggle on the
+      // aggregator section too — `BrokerAggregatorDailySnapshot` uses
+      // the canonical aggregator name, so the filter is on the
+      // `"system"` bucket rather than an `isSystemAddress` flag. Filter
+      // client-side because the schema doesn't carry an indexed
+      // boolean for the aggregator side.
+      aggregateBrokerAggregatorsByWindow(
+        showSystem
+          ? v2AggregatorRows
+          : v2AggregatorRows.filter((r) => r.aggregator !== "system"),
+      ),
+    [v2AggregatorRows, showSystem],
+  );
+  const v2DailyVolume = useMemo(
+    () => aggregateDailyVolume(v2TraderRows),
+    [v2TraderRows],
   );
 
   // Lower-cased pool id keying so the table can look up
@@ -187,29 +269,33 @@ export function LeaderboardClient() {
     return m;
   }, [poolRows]);
 
-  // Hero KPIs.
+  // Hero KPIs — switch the source list by venue. The KPI shapes are
+  // identical between v3 and v2 (volume / traders / top-10 concentration /
+  // swap count), so we pick one input array and the math below is unified.
+  const kpiSource = venue === "v3" ? aggregated : v2Aggregated;
+
   const totalVolume = useMemo(() => {
     let acc = BigInt(0);
-    for (const t of aggregated) acc += t.volumeUsdWei;
+    for (const t of kpiSource) acc += t.volumeUsdWei;
     return weiToUsd(acc);
-  }, [aggregated]);
+  }, [kpiSource]);
 
-  const totalTraders = aggregated.length;
+  const totalTraders = kpiSource.length;
   const totalSwaps = useMemo(
-    () => aggregated.reduce((acc, t) => acc + t.swapCount, 0),
-    [aggregated],
+    () => kpiSource.reduce((acc, t) => acc + t.swapCount, 0),
+    [kpiSource],
   );
   const top10Concentration = useMemo(() => {
-    if (aggregated.length === 0) return 0;
+    if (kpiSource.length === 0) return 0;
     let total = BigInt(0);
     let top10 = BigInt(0);
-    for (let i = 0; i < aggregated.length; i += 1) {
-      total += aggregated[i]!.volumeUsdWei;
-      if (i < 10) top10 += aggregated[i]!.volumeUsdWei;
+    for (let i = 0; i < kpiSource.length; i += 1) {
+      total += kpiSource[i]!.volumeUsdWei;
+      if (i < 10) top10 += kpiSource[i]!.volumeUsdWei;
     }
     if (total === BigInt(0)) return 0;
     return Number((top10 * BigInt(10000)) / total) / 100;
-  }, [aggregated]);
+  }, [kpiSource]);
 
   // The TimeSeriesChartCard takes a 7d/30d/all RangeKey. Map the leaderboard
   // range onto the chart's range — both 24h and 7d show the 7d view (the
@@ -223,14 +309,40 @@ export function LeaderboardClient() {
     [updateRange],
   );
 
-  const isLoading = tradersResult.isLoading || poolsResult.isLoading;
-  const hasError = !!tradersResult.error;
+  // Page chrome / KPIs / chart / producer table all read from the
+  // trader-side query for the active venue. The v2 aggregator query is
+  // independent — its loading/error feed only the aggregator table below
+  // so a slow or erroring `BrokerAggregatorDailySnapshot` (e.g. during the
+  // post-deploy resync window for that new entity) doesn't take down the
+  // producer view that's the actual outreach driver. Codex review:
+  // https://github.com/mento-protocol/monitoring-monorepo/pull/324#discussion_r3195117172
+  const isLoading =
+    venue === "v3"
+      ? tradersResult.isLoading || poolsResult.isLoading
+      : v2TradersResult.isLoading;
+  const hasError =
+    venue === "v3" ? !!tradersResult.error : !!v2TradersResult.error;
+  const v2AggIsLoading = v2AggregatorsResult.isLoading;
+  const v2AggHasError = !!v2AggregatorsResult.error;
   // True iff the trader-day query saturated the Hasura cap. When this is
   // set, `aggregated` and the derived KPIs may be undercounting; we badge
-  // them with `≈` and surface a banner above the tiles.
+  // them with `≈` and surface a banner above the tiles. Same approximation
+  // semantics for v2 — the cap applies to BrokerTraderDailySnapshot too.
   const isCapHit =
-    !!tradersResult.data &&
-    (tradersResult.data.TraderDailySnapshot?.length ?? 0) === ENVIO_MAX_ROWS;
+    venue === "v3"
+      ? !!tradersResult.data &&
+        (tradersResult.data.TraderDailySnapshot?.length ?? 0) === ENVIO_MAX_ROWS
+      : !!v2TradersResult.data &&
+        (v2TradersResult.data.BrokerTraderDailySnapshot?.length ?? 0) ===
+          ENVIO_MAX_ROWS;
+  // BROKER_AGGREGATOR_DAILY_TOP is also a top-N-volume cut. If it saturates
+  // we'd silently drop long-tail aggregators from the table; surface it
+  // with a separate banner above the aggregator section.
+  const isV2AggregatorCapHit =
+    venue === "v2" &&
+    !!v2AggregatorsResult.data &&
+    (v2AggregatorsResult.data.BrokerAggregatorDailySnapshot?.length ?? 0) ===
+      ENVIO_MAX_ROWS;
 
   // Headline = window total. Change pill is week-over-week if the range is
   // ≥7d, otherwise null (24h has no meaningful WoW peer).
@@ -244,11 +356,37 @@ export function LeaderboardClient() {
             Volume Leaderboard
           </h1>
           <p className="mt-1 text-sm text-slate-400">
-            Top traders on Mento by USD volume — system addresses hidden by
-            default.
+            {venue === "v3"
+              ? "Top traders on Mento by USD volume — system addresses hidden by default."
+              : "Top legacy-v2 producers — wallets and integrators we want to migrate to v3."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <div
+            role="group"
+            aria-label="Venue"
+            className="flex gap-0.5 rounded-md bg-slate-800/50 p-0.5"
+          >
+            {(["v3", "v2"] as const).map((v) => {
+              const active = venue === v;
+              return (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => updateVenue(v)}
+                  className={
+                    "rounded px-3 py-1 text-xs font-medium uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 " +
+                    (active
+                      ? "bg-slate-700 text-white shadow-sm"
+                      : "text-slate-400 hover:text-slate-200")
+                  }
+                >
+                  {v}
+                </button>
+              );
+            })}
+          </div>
           <div
             role="group"
             aria-label="Time window"
@@ -345,9 +483,11 @@ export function LeaderboardClient() {
           row would mismatch the visible series. */}
       {range !== "24h" && (
         <TimeSeriesChartCard
-          title="Daily traded volume"
+          title={
+            venue === "v3" ? "Daily traded volume" : "Daily v2 traded volume"
+          }
           rangeAriaLabel="Chart range"
-          series={dailyVolume}
+          series={venue === "v3" ? dailyVolume : v2DailyVolume}
           range={chartRange}
           onRangeChange={onChartRangeChange}
           headline={headline}
@@ -355,22 +495,69 @@ export function LeaderboardClient() {
           isLoading={isLoading}
           hasError={hasError}
           hasSnapshotError={false}
-          emptyMessage="No trader volume in this window."
+          emptyMessage={
+            venue === "v3"
+              ? "No trader volume in this window."
+              : "No legacy-v2 volume in this window."
+          }
         />
       )}
 
-      <section>
-        <h2 className="mb-3 text-sm font-medium text-slate-300">
-          Top traders ({rangeLabel(range)})
-        </h2>
-        <LeaderboardTable
-          cutoff={cutoff}
-          traders={aggregated}
-          pools={poolMeta}
-          isLoading={isLoading}
-          hasError={hasError}
-        />
-      </section>
+      {venue === "v3" ? (
+        <section>
+          <h2 className="mb-3 text-sm font-medium text-slate-300">
+            Top traders ({rangeLabel(range)})
+          </h2>
+          <LeaderboardTable
+            cutoff={cutoff}
+            traders={aggregated}
+            pools={poolMeta}
+            isLoading={isLoading}
+            hasError={hasError}
+          />
+        </section>
+      ) : (
+        <>
+          <section>
+            <h2 className="mb-3 text-sm font-medium text-slate-300">
+              Top v2 producers ({rangeLabel(range)})
+            </h2>
+            <V2LeaderboardTraderTable
+              traders={v2Aggregated}
+              isLoading={isLoading}
+              hasError={hasError}
+            />
+          </section>
+          <section>
+            <h2 className="mb-3 text-sm font-medium text-slate-300">
+              v2 volume by aggregator / entry-point ({rangeLabel(range)})
+            </h2>
+            <p className="mb-3 text-xs text-slate-500">
+              Canonical name from <code>aggregators.json</code>. Large{" "}
+              <span className="rounded bg-amber-900/40 px-1 py-px text-amber-200">
+                unknown
+              </span>{" "}
+              rows are unclassified routers — file an entry to label them and
+              reach out to the operator about migrating to v3.
+            </p>
+            {isV2AggregatorCapHit && (
+              <div className="mb-3 rounded-md border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200/90">
+                <strong className="font-medium">
+                  Approximate aggregator list.
+                </strong>{" "}
+                Showing the top {ENVIO_MAX_ROWS.toLocaleString()} aggregator-day
+                rows by single-day volume — long-tail aggregators whose daily
+                volume doesn&apos;t crack the cap may be missing.
+              </div>
+            )}
+            <V2LeaderboardAggregatorTable
+              aggregators={v2AggregatorAggregated}
+              isLoading={v2AggIsLoading}
+              hasError={v2AggHasError}
+            />
+          </section>
+        </>
+      )}
     </div>
   );
 }

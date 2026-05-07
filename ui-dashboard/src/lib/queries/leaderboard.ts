@@ -100,3 +100,67 @@ export const POOLS_FOR_LEADERBOARD = /* GraphQL */ `
     }
   }
 `;
+
+/**
+ * Top legacy-v2 trader-day rows by volume. Source: BrokerTraderDailySnapshot,
+ * which the broker handler only writes when `routedViaV3Router=false` — so
+ * these are *broker-direct* swaps (Mento UI/SDK + third-party aggregators
+ * still routing through the legacy Broker). The leaderboard's `venue=v2`
+ * tab uses this to surface migration-outreach targets: who's still on v2.
+ *
+ * No `feesPaidUsdWei`/`uniquePools` (the v2 entity doesn't carry them — see
+ * schema.graphql comment on BrokerTraderDailySnapshot for why).
+ */
+export const BROKER_TRADER_DAILY_TOP = /* GraphQL */ `
+  query BrokerTraderDailyTop(
+    $afterTimestamp: numeric!
+    $isSystemAddressIn: [Boolean!]!
+    $limit: Int!
+  ) {
+    BrokerTraderDailySnapshot(
+      where: {
+        timestamp: { _gte: $afterTimestamp }
+        isSystemAddress: { _in: $isSystemAddressIn }
+      }
+      order_by: [{ volumeUsdWei: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      trader
+      timestamp
+      swapCount
+      volumeUsdWei
+      isSystemAddress
+      lastSeenTimestamp
+    }
+  }
+`;
+
+/**
+ * Top legacy-v2 aggregator-day rows by volume. The "unknown" bucket here is
+ * the curation backlog: any large unknown row is a router we should classify
+ * in `indexer-envio/config/aggregators.json` and ideally an integrator we
+ * should reach out to about migrating to v3.
+ *
+ * No system-address filter — `aggregator` is already a canonical name; the
+ * `system` value covers Mento internals and is naturally tiny.
+ */
+export const BROKER_AGGREGATOR_DAILY_TOP = /* GraphQL */ `
+  query BrokerAggregatorDailyTop($afterTimestamp: numeric!, $limit: Int!) {
+    BrokerAggregatorDailySnapshot(
+      where: { timestamp: { _gte: $afterTimestamp } }
+      order_by: [{ volumeUsdWei: desc }, { id: asc }]
+      limit: $limit
+    ) {
+      id
+      chainId
+      aggregator
+      lastSeenAggregatorAddress
+      timestamp
+      swapCount
+      uniqueTraders
+      volumeUsdWei
+    }
+  }
+`;
