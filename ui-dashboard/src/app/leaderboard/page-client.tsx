@@ -523,7 +523,7 @@ export function LeaderboardClient() {
           "what's the leaderboard order over the whole window?". On
           screens narrower than `lg`, both stack to full width. */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+        <div className="h-full lg:col-span-2">
           <TimeSeriesChartCard
             title="Volume by pool"
             rangeAriaLabel="Chart range"
@@ -539,10 +539,11 @@ export function LeaderboardClient() {
             hasError={hasError || !!poolVolumeResult.error}
             hasSnapshotError={false}
             emptyMessage="No pool volume in this window."
-            // Taller plot + minimal top padding so peaks reach close
-            // to the headline figure instead of bottoming out in 1/3
-            // of the available card area.
-            chartHeightPx={300}
+            // Plot height tuned to roughly match the Top Pools list
+            // tile's natural height — keeps the two tiles visually
+            // balanced when sitting side-by-side. Minimal y-axis top
+            // padding so peaks still reach close to the headline.
+            chartHeightPx={250}
             yAxisTopPadding={0}
             // Sort hover-tooltip entries by the hovered day's volume
             // desc — Plotly's native unified hover uses fixed trace
@@ -551,7 +552,7 @@ export function LeaderboardClient() {
             customSortedHover
           />
         </div>
-        <div className="lg:col-span-1">
+        <div className="h-full lg:col-span-1">
           <TopPoolsList
             entries={topPoolsListEntries}
             isLoading={isLoading || poolVolumeResult.isLoading}

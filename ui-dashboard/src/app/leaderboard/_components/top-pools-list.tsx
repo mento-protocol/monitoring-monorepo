@@ -43,11 +43,22 @@ export function TopPoolsList({
   windowLabel: string;
 }) {
   return (
-    <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
-      <div className="mb-3 flex items-baseline justify-between">
-        <h3 className="text-sm font-medium text-slate-300">Top pools</h3>
-        <span className="text-[11px] text-slate-500">
-          by volume · {windowLabel}
+    <section className="h-full rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:p-6">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-4">
+        {/* Title styling matches the "Volume by pool" chart card title
+            so the two tiles read as a pair (`text-sm text-slate-400`,
+            no font-medium). */}
+        <p className="text-sm text-slate-400">Top pools</p>
+        {/* Window-label badge mirrors the active state of the chart's
+            range pills (`bg-slate-700 text-white shadow-sm`). It's
+            read-only — the chart's pills are the canonical control —
+            but the matching visual language makes it unambiguous which
+            range the list is summarising. */}
+        <span
+          aria-label={`Window: ${windowLabel}`}
+          className="rounded bg-slate-700 px-3 py-1 text-xs font-medium text-white shadow-sm"
+        >
+          {windowLabel}
         </span>
       </div>
       {hasError ? (
