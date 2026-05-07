@@ -222,12 +222,13 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     }
   }
 
-  // Only persist invertRateFeed when the RPC actually succeeded. A
-  // fabricated `false` from a transient preload-phase blip would otherwise
-  // be memoized and persisted, flipping every downstream oracle/health
-  // calculation for an actually-inverted pool until reindex.
+  // Only persist invertRateFeed when the RPC actually succeeded, and stamp
+  // `invertRateFeedKnown` so upsertPool's self-heal stops retrying. When the
+  // read failed, both fields stay at the schema defaults and the self-heal
+  // path picks up the correction on the next event for this pool.
   if (invertRateFeed !== undefined) {
     oracleDelta.invertRateFeed = invertRateFeed;
+    oracleDelta.invertRateFeedKnown = true;
   }
 
   if (rebalanceThreshold > 0) {

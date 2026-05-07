@@ -20,6 +20,7 @@ import { computePriceDifference } from "./priceDifference";
 import {
   compactFees,
   feesEffect,
+  invertRateFeedEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
 } from "./rpc/effects";
@@ -301,6 +302,9 @@ export const DEFAULT_ORACLE_FIELDS = {
   lastOracleJumpBps: "0.0000",
   lastOracleJumpAt: 0n,
   invertRateFeed: false,
+  // false = unread (schema default); true = real on-chain value persisted.
+  // While false, upsertPool's self-heal retries the effect on every event.
+  invertRateFeedKnown: false,
   priceDifference: 0n,
   rebalanceThreshold: 0,
   lastRebalancedAt: 0n,
@@ -436,6 +440,31 @@ export const upsertPool = async ({
         blockNumber,
       });
       if (expiry !== undefined) healedOracleDelta.oracleExpiry = expiry;
+    }
+  }
+
+  // Self-heal: if invertRateFeed was never successfully read (transient RPC
+  // failure at pool deployment, captured by `invertRateFeedKnown === false`),
+  // retry until we have a real on-chain value. Without this, an actually-
+  // inverted pool deployed during an RPC blip would persist the schema
+  // default `false` forever and every downstream oracle/health calc would
+  // read the wrong side of the rate until full reindex. Effect-level dedup
+  // means this is one read per (pool, batch), not per event.
+  if (
+    !existing.invertRateFeedKnown &&
+    existing.source !== "" &&
+    !isVirtualPool(existing)
+  ) {
+    const invert = await context.effect(invertRateFeedEffect, {
+      chainId,
+      poolAddress: poolAddr,
+    });
+    if (invert !== undefined) {
+      healedOracleDelta = {
+        ...(healedOracleDelta ?? {}),
+        invertRateFeed: invert,
+        invertRateFeedKnown: true,
+      };
     }
   }
 
