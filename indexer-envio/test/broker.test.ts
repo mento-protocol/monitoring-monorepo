@@ -5,7 +5,7 @@ import {
   _setMockFeeTokenMeta,
   _clearMockFeeTokenMeta,
 } from "../src/EventHandlers.ts";
-import { dayBucket } from "../src/helpers.ts";
+import { dayBucket, makePoolId } from "../src/helpers.ts";
 import { getContractAddress } from "../src/contractAddresses.ts";
 
 // MockDb shape is hand-typed per the existing pattern in dailySnapshot.test.ts —
@@ -16,6 +16,18 @@ type MockDb = {
       get: (id: string) => unknown;
     };
     BrokerDailySnapshot: {
+      get: (id: string) => unknown;
+    };
+    BrokerTraderDailySnapshot: {
+      get: (id: string) => unknown;
+    };
+    BrokerAggregatorDailySnapshot: {
+      get: (id: string) => unknown;
+    };
+    BrokerAggregatorTraderDayMarker: {
+      get: (id: string) => unknown;
+    };
+    Pool: {
       get: (id: string) => unknown;
     };
   };
@@ -30,11 +42,12 @@ type GeneratedModule = {
   TestHelpers: {
     MockDb: { createMockDb: () => MockDb };
     Broker: { Swap: EventProcessor };
+    VirtualPoolFactory: { VirtualPoolDeployed: EventProcessor };
   };
 };
 
 const { TestHelpers } = generated as unknown as GeneratedModule;
-const { MockDb, Broker } = TestHelpers;
+const { MockDb, Broker, VirtualPoolFactory } = TestHelpers;
 
 const CHAIN_CELO = 42220;
 // Real Mento BiPoolManager (v2 legacy) on Celo — what the chart will filter for.
@@ -67,12 +80,13 @@ const fireSwap = async (
     amountIn?: bigint;
     amountOut?: bigint;
     txTo?: string;
+    trader?: string;
   },
 ): Promise<MockDb> => {
   const event = Broker.Swap.createMockEvent({
     exchangeProvider: args.exchangeProvider ?? BIPOOL_MANAGER,
     exchangeId: EXCHANGE_ID,
-    trader: TRADER,
+    trader: args.trader ?? TRADER,
     tokenIn: args.tokenIn ?? CUSD,
     tokenOut: args.tokenOut ?? USDC,
     amountIn: args.amountIn ?? 1_000n * 10n ** 18n, // 1000 CUSD
@@ -224,6 +238,273 @@ describe("Broker.Swap handler", () => {
     ) as { swapCount: number } | undefined;
     assert.equal(direct?.swapCount, 1);
     assert.equal(router?.swapCount, 1);
+  });
+
+  it("rolls broker-direct swaps into BrokerTraderDailySnapshot per (chain, trader, day)", async () => {
+    let mockDb = MockDb.createMockDb();
+    // Two same-day v2 swaps from the same trader; assert the rollup
+    // accumulates and is keyed correctly.
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 100,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+      amountIn: 1_000n * 10n ** 18n,
+      amountOut: 999_500_000n,
+    });
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 101,
+      blockTimestamp: 1_700_000_500,
+      logIndex: 0,
+      amountIn: 500n * 10n ** 18n,
+      amountOut: 499_750_000n,
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+    const id = `${CHAIN_CELO}-${TRADER.toLowerCase()}-${dayTs}`;
+    const row = mockDb.entities.BrokerTraderDailySnapshot.get(id) as
+      | {
+          chainId: number;
+          trader: string;
+          timestamp: bigint;
+          swapCount: number;
+          volumeUsdWei: bigint;
+          isSystemAddress: boolean;
+          lastSeenTimestamp: bigint;
+        }
+      | undefined;
+    assert.isOk(row, "BrokerTraderDailySnapshot missing");
+    assert.equal(row!.chainId, CHAIN_CELO);
+    assert.equal(row!.trader, TRADER.toLowerCase());
+    assert.equal(row!.swapCount, 2);
+    assert.equal(row!.volumeUsdWei, 1_500n * 10n ** 18n);
+    assert.equal(row!.isSystemAddress, false);
+    // lastSeenTimestamp tracks the most recent swap's block timestamp
+    // (not the day bucket) for sub-day "Last active" precision.
+    assert.equal(row!.lastSeenTimestamp, 1_700_000_500n);
+  });
+
+  it("does NOT write trader/aggregator rollups when routedViaV3Router=true (avoids double-count vs v3)", async () => {
+    // Same trader, two swaps: one direct, one via the v3 Router. Only the
+    // direct row should land in the v2 trader rollup; the router-driven row
+    // is already covered by the v3 leaderboard's TraderDailySnapshot via the
+    // VirtualPool.Swap sibling that fired in the same tx.
+    let mockDb = MockDb.createMockDb();
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 100,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+    });
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 101,
+      blockTimestamp: 1_700_000_500,
+      logIndex: 0,
+      txTo: V3_ROUTER, // routedViaV3Router=true → skip rollups
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+    const traderRow = mockDb.entities.BrokerTraderDailySnapshot.get(
+      `${CHAIN_CELO}-${TRADER.toLowerCase()}-${dayTs}`,
+    ) as { swapCount: number; volumeUsdWei: bigint } | undefined;
+    assert.isOk(
+      traderRow,
+      "BrokerTraderDailySnapshot should still exist for the broker-direct swap",
+    );
+    // The router-driven swap was excluded — count and volume reflect ONE swap.
+    assert.equal(traderRow!.swapCount, 1);
+    assert.equal(traderRow!.volumeUsdWei, 1_000n * 10n ** 18n);
+  });
+
+  it("does NOT write trader/aggregator rollups when trader is a registered VirtualPool (avoids double-count vs v3 VirtualPool.Swap path)", async () => {
+    // Scenario: third-party aggregator → VirtualPool → Broker. The v3
+    // leaderboard already counts the sibling VirtualPool.Swap (via
+    // applyLeaderboardSnapshots in handlers/virtualPool.ts). `tx.to` is the
+    // aggregator's router (so `routedViaV3Router=false`), but Broker emits
+    // `trader = msg.sender = the VirtualPool address`. The handler's Pool
+    // lookup on `trader` should detect the virtual_pool_factory source and
+    // skip the v2 producer/aggregator rollups even though the simple
+    // routedViaV3Router guard misses this path.
+    const VIRTUAL_POOL_ADDR =
+      "0x00000000000000000000000000000000000000aa".toLowerCase();
+    // Some external aggregator router that ISN'T Routerv300 — proves the
+    // routedViaV3Router guard alone wouldn't skip this swap.
+    const EXTERNAL_AGGREGATOR =
+      "0x0000000000000000000000000000000000001111".toLowerCase();
+
+    let mockDb = MockDb.createMockDb();
+
+    // Register the VirtualPool with source="virtual_pool_factory" via the
+    // real factory deploy handler so the Pool entity matches what
+    // production would index.
+    const deployEvent = VirtualPoolFactory.VirtualPoolDeployed.createMockEvent({
+      pool: VIRTUAL_POOL_ADDR,
+      token0: CUSD,
+      token1: USDC,
+      mockEventData: {
+        chainId: CHAIN_CELO,
+        logIndex: 0,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 99, timestamp: 1_699_999_999 },
+      },
+    });
+    mockDb = await VirtualPoolFactory.VirtualPoolDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+    const seededPool = mockDb.entities.Pool.get(
+      makePoolId(CHAIN_CELO, VIRTUAL_POOL_ADDR),
+    ) as { source: string } | undefined;
+    assert.ok(seededPool, "VirtualPool must exist after VirtualPoolDeployed");
+    assert.include(
+      seededPool!.source,
+      "virtual",
+      "Seeded pool must carry a virtual_* source so isVirtualPool() detects it",
+    );
+
+    // Now fire a Broker.Swap whose trader is the VirtualPool address — the
+    // signature of an aggregator → VirtualPool → Broker tx.
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 100,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+      trader: VIRTUAL_POOL_ADDR,
+      txTo: EXTERNAL_AGGREGATOR, // routedViaV3Router=false (not Routerv300)
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+
+    // BrokerSwapEvent: still written (raw audit log preserves all events).
+    const eventRow = mockDb.entities.BrokerSwapEvent.get(`${CHAIN_CELO}_100_0`);
+    assert.isOk(
+      eventRow,
+      "BrokerSwapEvent should still record the raw VirtualPool-routed swap",
+    );
+
+    // BrokerDailySnapshot: still written (preserves the existing partition;
+    // any future Swaps-KPI consumer can decide how to filter VirtualPool
+    // siblings).
+    const dailyRow = mockDb.entities.BrokerDailySnapshot.get(
+      `${CHAIN_CELO}-${BIPOOL_MANAGER.toLowerCase()}-direct-${dayTs}`,
+    );
+    assert.isOk(
+      dailyRow,
+      "BrokerDailySnapshot should still record this swap in the legacy 'direct' partition",
+    );
+
+    // BrokerTraderDailySnapshot: NOT written (the whole point of the fix).
+    const traderRow = mockDb.entities.BrokerTraderDailySnapshot.get(
+      `${CHAIN_CELO}-${VIRTUAL_POOL_ADDR}-${dayTs}`,
+    );
+    assert.isUndefined(
+      traderRow,
+      "VirtualPool-routed Broker.Swap must not produce a BrokerTraderDailySnapshot — would double-count vs the v3 VirtualPool.Swap path",
+    );
+
+    // BrokerAggregatorDailySnapshot: also NOT written for the same reason.
+    // classifyAggregator(EXTERNAL_AGGREGATOR) would yield "unknown" for an
+    // un-registered router, so the negative assertion checks all aggregator
+    // names that could plausibly land here.
+    const allAggregatorRowsEmpty = (
+      ["unknown", "direct", "system"] as const
+    ).every(
+      (name) =>
+        !mockDb.entities.BrokerAggregatorDailySnapshot.get(
+          `${CHAIN_CELO}-${name}-${dayTs}`,
+        ),
+    );
+    assert.isTrue(
+      allAggregatorRowsEmpty,
+      "VirtualPool-routed Broker.Swap must not produce any BrokerAggregatorDailySnapshot row",
+    );
+  });
+
+  it("rolls broker-direct swaps into BrokerAggregatorDailySnapshot keyed by classifyAggregator(txTo)", async () => {
+    let mockDb = MockDb.createMockDb();
+    // Two distinct traders both entering via the Broker proxy (a
+    // "direct"-classified entry-point per classifyAggregator). Assert the
+    // aggregator rollup tallies swaps + uniqueTraders correctly across them.
+    const TRADER_B = "0xBeefBeefBeefBeefBeefBeefBeefBeefBeefBeef";
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 100,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+      trader: TRADER,
+    });
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 101,
+      blockTimestamp: 1_700_000_500,
+      logIndex: 0,
+      trader: TRADER_B,
+    });
+    // Same trader as the first swap — uniqueTraders should NOT increment.
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 102,
+      blockTimestamp: 1_700_000_900,
+      logIndex: 0,
+      trader: TRADER,
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+    const id = `${CHAIN_CELO}-direct-${dayTs}`;
+    const row = mockDb.entities.BrokerAggregatorDailySnapshot.get(id) as
+      | {
+          aggregator: string;
+          lastSeenAggregatorAddress: string;
+          swapCount: number;
+          uniqueTraders: number;
+          volumeUsdWei: bigint;
+        }
+      | undefined;
+    assert.isOk(row, "BrokerAggregatorDailySnapshot missing");
+    assert.equal(row!.aggregator, "direct");
+    assert.equal(row!.lastSeenAggregatorAddress, BROKER_PROXY.toLowerCase());
+    assert.equal(row!.swapCount, 3);
+    // First-touch dedup via BrokerAggregatorTraderDayMarker — TRADER seen
+    // twice on the same day shouldn't double-count.
+    assert.equal(row!.uniqueTraders, 2);
+    // 1000 + 1000 + 1000 CUSD.
+    assert.equal(row!.volumeUsdWei, 3_000n * 10n ** 18n);
+
+    // Marker entities exist per (aggregator, trader, day).
+    assert.isOk(
+      mockDb.entities.BrokerAggregatorTraderDayMarker.get(
+        `${CHAIN_CELO}-direct-${TRADER.toLowerCase()}-${dayTs}`,
+      ),
+    );
+    assert.isOk(
+      mockDb.entities.BrokerAggregatorTraderDayMarker.get(
+        `${CHAIN_CELO}-direct-${TRADER_B.toLowerCase()}-${dayTs}`,
+      ),
+    );
+  });
+
+  it("classifies an unknown txTo as 'unknown' so unlabelled v2 routers surface for follow-up", async () => {
+    // A swap that entered via some random contract not in
+    // contracts.json / aggregators.json. The leaderboard's "unknown" bucket
+    // is the curation backlog: anything large here should be triaged into
+    // aggregators.json so it gets a readable label.
+    const MYSTERY_ROUTER = "0x1234567890abcdef1234567890abcdef12345678";
+    let mockDb = MockDb.createMockDb();
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: 100,
+      blockTimestamp: 1_700_000_000,
+      logIndex: 0,
+      txTo: MYSTERY_ROUTER,
+    });
+
+    const dayTs = dayBucket(1_700_000_000n);
+    const row = mockDb.entities.BrokerAggregatorDailySnapshot.get(
+      `${CHAIN_CELO}-unknown-${dayTs}`,
+    ) as
+      | {
+          aggregator: string;
+          lastSeenAggregatorAddress: string;
+          swapCount: number;
+        }
+      | undefined;
+    assert.isOk(row, "unknown-bucket row missing");
+    assert.equal(row!.aggregator, "unknown");
+    assert.equal(row!.lastSeenAggregatorAddress, MYSTERY_ROUTER.toLowerCase());
+    assert.equal(row!.swapCount, 1);
   });
 
   it("buckets distinct exchangeProviders into separate daily snapshots", async () => {

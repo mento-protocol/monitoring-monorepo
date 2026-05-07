@@ -10,6 +10,7 @@ import { Skeleton, EmptyBox, ErrorBox } from "@/components/feedback";
 import { formatUSD, relativeTime } from "@/lib/format";
 import {
   aggregateTraderPoolsByWindow,
+  cmpBigInt,
   computeFlow,
   weiToUsd,
   type TraderPoolDailyRow,
@@ -21,6 +22,7 @@ import { networkForChainId } from "@/lib/networks";
 import { poolName } from "@/lib/tokens";
 import { TRADER_POOL_DAILY_FOR_TRADER } from "@/lib/queries/leaderboard";
 import { FlowBadge } from "./flow-badge";
+import { SystemAddressChip } from "./system-address-chip";
 
 const SORT_KEYS = ["volume", "swaps", "pools", "fees", "lastSeen"] as const;
 type SortKey = (typeof SORT_KEYS)[number];
@@ -225,14 +227,7 @@ function TraderRow({
           <span className="inline-flex items-center gap-1.5">
             {network && <ChainIcon network={network} />}
             <AddressLink address={trader.trader} chainId={trader.chainId} />
-            {trader.isSystemAddress && (
-              <span
-                className="rounded bg-slate-700/60 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-slate-300"
-                title="Mento internal contract (rebalancer, NTT, treasury, etc.)"
-              >
-                System
-              </span>
-            )}
+            {trader.isSystemAddress && <SystemAddressChip />}
           </span>
         </Td>
         <Td align="right" mono>
@@ -429,10 +424,4 @@ function ExpandedBreakdown({
       )}
     </div>
   );
-}
-
-function cmpBigInt(a: bigint, b: bigint): number {
-  if (a < b) return -1;
-  if (a > b) return 1;
-  return 0;
 }
