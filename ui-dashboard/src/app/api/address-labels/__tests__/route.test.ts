@@ -33,7 +33,6 @@ beforeEach(() => {
 describe("GET /api/address-labels", () => {
   it("returns 401 when unauthenticated", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    const req = new NextRequest("http://localhost/api/address-labels");
     const res = await GET();
     expect(res.status).toBe(401);
     expect(getLabels).not.toHaveBeenCalled();
@@ -46,7 +45,6 @@ describe("GET /api/address-labels", () => {
     (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
       [VALID_ADDR]: { name: "Alice", tags: [], updatedAt: "2026-01-01" },
     });
-    const req = new NextRequest("http://localhost/api/address-labels");
     const res = await GET();
     expect(res.status).toBe(200);
     expect(getLabels).toHaveBeenCalledOnce();
@@ -59,9 +57,6 @@ describe("GET /api/address-labels", () => {
       user: { email: "alice@mentolabs.xyz" },
     });
     (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
-    const req = new NextRequest(
-      "http://localhost/api/address-labels?chainId=42220&scope=global",
-    );
     const res = await GET();
     expect(res.status).toBe(200);
     // Single-arg call — chainId/scope aren't forwarded.
@@ -75,7 +70,6 @@ describe("GET /api/address-labels", () => {
     (getLabels as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("Redis offline"),
     );
-    const req = new NextRequest("http://localhost/api/address-labels");
     const res = await GET();
     expect(res.status).toBe(500);
   });

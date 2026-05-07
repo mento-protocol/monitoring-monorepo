@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { NextRequest } from "next/server";
 import { GET } from "../route";
 
 vi.mock("@/auth", () => ({
@@ -25,7 +24,6 @@ beforeEach(() => {
 describe("GET /api/address-labels/export", () => {
   it("returns 401 when unauthenticated", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    const req = new NextRequest("http://localhost/api/address-labels/export");
     const res = await GET();
     expect(res.status).toBe(401);
     const body = await res.json();
@@ -42,7 +40,6 @@ describe("GET /api/address-labels/export", () => {
       },
     });
 
-    const req = new NextRequest("http://localhost/api/address-labels/export");
     const res = await GET();
 
     expect(res.status).toBe(200);
@@ -62,9 +59,6 @@ describe("GET /api/address-labels/export", () => {
 
   it("ignores any chainId/scope query params (back-compat)", async () => {
     (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
-    const req = new NextRequest(
-      "http://localhost/api/address-labels/export?chainId=42220&scope=global",
-    );
     const res = await GET();
     expect(res.status).toBe(200);
     expect(getLabels).toHaveBeenCalledWith();
@@ -72,7 +66,6 @@ describe("GET /api/address-labels/export", () => {
 
   it("attaches a Content-Disposition with a date-stamped filename", async () => {
     (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
-    const req = new NextRequest("http://localhost/api/address-labels/export");
     const res = await GET();
     const disposition = res.headers.get("Content-Disposition") ?? "";
     expect(disposition).toMatch(/address-labels-\d{4}-\d{2}-\d{2}\.json/);
@@ -82,7 +75,6 @@ describe("GET /api/address-labels/export", () => {
     (getLabels as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("Redis connection failed"),
     );
-    const req = new NextRequest("http://localhost/api/address-labels/export");
     const res = await GET();
     expect(res.status).toBe(500);
     const body = await res.json();
