@@ -222,7 +222,13 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     }
   }
 
-  oracleDelta.invertRateFeed = invertRateFeed;
+  // Only persist invertRateFeed when the RPC actually succeeded. A
+  // fabricated `false` from a transient preload-phase blip would otherwise
+  // be memoized and persisted, flipping every downstream oracle/health
+  // calculation for an actually-inverted pool until reindex.
+  if (invertRateFeed !== undefined) {
+    oracleDelta.invertRateFeed = invertRateFeed;
+  }
 
   if (rebalanceThreshold > 0) {
     oracleDelta.rebalanceThreshold = rebalanceThreshold;

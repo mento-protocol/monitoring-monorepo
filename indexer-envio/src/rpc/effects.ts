@@ -136,15 +136,20 @@ export const referenceRateFeedIDEffect = createEffect(
     undefined,
 );
 
+// Output is nullable: with `preload_handlers: true` an effect that fabricated
+// `false` on a transient RPC blip during preload would memoize and persist
+// the wrong orientation — call sites must skip the assignment on undefined
+// and let the schema default ride until the next event re-fetches.
 export const invertRateFeedEffect = createEffect(
   {
     name: "invertRateFeed",
     input: { chainId: S.int32, poolAddress: S.string },
-    output: S.boolean,
+    output: S.nullable(S.boolean),
     rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
-  async ({ input }) => fetchInvertRateFeed(input.chainId, input.poolAddress),
+  async ({ input }) =>
+    (await fetchInvertRateFeed(input.chainId, input.poolAddress)) ?? undefined,
 );
 
 export const rebalanceThresholdEffect = createEffect(
@@ -191,6 +196,12 @@ export const tokenDecimalsScalingEffect = createEffect(
 // `cache: false` initially; safe to flip on medium. Per-getter mock
 // granularity (`FetchFeesMock` rejection semantics) lives inside `fetchFees`
 // itself, which the effect handler delegates to.
+//
+// Rate limit matches Group A's 200/s ceiling so it isn't artificially tighter
+// than peers; `fetchFees` internally fans out 3 readContract calls per
+// invocation (lpFee/protocolFee/rebalanceIncentive), but viem's batched
+// transport collapses them at the wire so the effective HTTP rate is one
+// per invocation.
 // ---------------------------------------------------------------------------
 
 export const feesEffect = createEffect(
@@ -198,7 +209,7 @@ export const feesEffect = createEffect(
     name: "fees",
     input: { chainId: S.int32, poolAddress: S.string },
     output: S.nullable(feesShape),
-    rateLimit: { calls: 100, per: "second" },
+    rateLimit: { calls: 200, per: "second" },
     cache: false,
   },
   // Schema's `S.optional(S.int32)` outputs `number | undefined` with the key
@@ -388,9 +399,15 @@ export const tradingLimitsEffect = createEffect(
 
 // ---------------------------------------------------------------------------
 // Group F — circuit breakers (per-chain governance state).
-// `cache: false` initially. `breakerListEffect` and `breakerKindEffect` /
-// `breakerDefaultsEffect` are governance-rare and safe for `cache: true` on
-// medium; `breakerFeedStateEffect` is block-scoped and stays false.
+// `cache: false` initially. On a medium-tier upgrade:
+//   - `breakerListEffect` and `breakerKindEffect` are address-keyed (no
+//     blockNumber input), so `cache: true` produces durable per-address
+//     dedup that survives across re-indexes — biggest win.
+//   - `breakerDefaultsEffect` is block-keyed (blockNumber is part of the
+//     input). `cache: true` is safe (governance-rare), but each block gets
+//     its own cache row — re-indexing N blocks creates N entries per
+//     breaker, so the persistent-cache benefit collapses to in-batch dedup.
+//   - `breakerFeedStateEffect` is block-scoped state and stays `cache: false`.
 // ---------------------------------------------------------------------------
 
 export const breakerListEffect = createEffect(

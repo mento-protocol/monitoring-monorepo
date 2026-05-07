@@ -318,11 +318,18 @@ export async function fetchReserves(
   }
 }
 
-/** Fetch the pool's invertRateFeed flag. Returns false on error (default). */
+/** Fetch the pool's invertRateFeed flag. Returns null on RPC error so the
+ * caller can distinguish "RPC failed" from a real `false`. With
+ * `preload_handlers: true`, an effect that returned a fabricated `false` on
+ * a transient blip would memoize and persist the wrong orientation for an
+ * actually-inverted pool — every downstream oracle/health calc would be on
+ * the wrong side of the rate until reindex. Caller skips the assignment on
+ * null and the schema default (false) survives until the next event triggers
+ * a re-fetch. */
 export async function fetchInvertRateFeed(
   chainId: number,
   poolAddress: string,
-): Promise<boolean> {
+): Promise<boolean | null> {
   try {
     const client = getRpcClient(chainId);
     const result = await client.readContract({
@@ -333,7 +340,7 @@ export async function fetchInvertRateFeed(
     return result as boolean;
   } catch (err) {
     logRpcFailure(chainId, "invertRateFeed", poolAddress, err);
-    return false;
+    return null;
   }
 }
 
@@ -483,7 +490,16 @@ export async function fetchReportExpiry(
 /** Fetches decimals0() or decimals1() from an FPMM pool — returns the scaling
  *  factor (e.g. 1000000000000000000n for 18dp, 1000000n for 6dp).
  *  Falls back to calling ERC20 decimals() on the token contract if the pool
- *  method fails. */
+ *  method fails.
+ *
+ *  Known gap: when this fallback fires, it calls `fetchErc20Decimals`
+ *  directly instead of routing through `erc20DecimalsEffect`. That bypasses
+ *  effect-level dedup if two concurrent pool deployments share a fallback
+ *  token. Practical impact is negligible — the fallback only fires when
+ *  `decimals0()` / `decimals1()` reverts (rare, older deployments) — but
+ *  flagging it here so we can revisit if profiling shows the path matters.
+ *  Routing it through the effect would require plumbing a `context` arg
+ *  through `fetchTokenDecimalsScaling`. */
 export async function fetchTokenDecimalsScaling(
   chainId: number,
   poolAddress: string,
