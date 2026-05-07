@@ -59,19 +59,18 @@ export function useAddressReportsIndex() {
     (address: string | null, scope?: Scope): boolean => {
       if (!address) return false;
       const lower = address.toLowerCase();
+      // Strict scope match: a report shows only on the row whose scope
+      // matches exactly. No chain → global fallback — a global report
+      // shows on the global row, a chain report on its chain row. Keeping
+      // the two scopes independent removes the asymmetry that caused most
+      // of the codex/cursor scope-model findings on PR #330.
       if (scope === "global") return addressSets.global.has(lower);
       if (typeof scope === "number") {
-        // Global reports apply to every chain — mirror useAddressLabels.getName's
-        // chain → global fallback so a report saved at "All chains" surfaces
-        // on per-chain rows too. Without this, contract rows whose default
-        // scope is "global" never show their own report indicator.
-        return (
-          (addressSets.chains.get(String(scope))?.has(lower) ?? false) ||
-          addressSets.global.has(lower)
-        );
+        return addressSets.chains.get(String(scope))?.has(lower) ?? false;
       }
       // No scope: cross-scope check (used by inline AddressLink, which
-      // doesn't know which scope a report lives in).
+      // doesn't know which scope a report lives in — surface 📄 if any
+      // report exists for the address).
       if (addressSets.global.has(lower)) return true;
       for (const set of addressSets.chains.values()) {
         if (set.has(lower)) return true;

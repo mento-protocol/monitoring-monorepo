@@ -134,13 +134,15 @@ export async function getReport(
  * Read the report for an address across every scope (strict either/or means
  * at most one will be present). Returns the first match or null.
  *
- * When `preferredScope` is supplied (e.g. the row scope the editor was opened
- * from), the lookup is filtered to that scope OR the global scope — same
- * fallback the 📄 indicator's `hasReport` uses, so the editor never loads a
- * chain-specific report that the indicator wouldn't surface on the current
- * row. Without this, opening 0xABC from a Monad row could load 0xABC's
- * Celo report, which would be confusing even though the save scope is
- * preserved correctly.
+ * When `preferredScope` is supplied, the lookup requires an EXACT scope
+ * match — symmetric with `hasReport`'s strict-scope semantics. Reports are
+ * scope-bound: a chain-scoped report is shown only on its chain's row, a
+ * global report only on the global row. (The earlier chain → global
+ * fallback was rolled back on PR #330 because it caused recurring
+ * scope-model debt — see commit history if curious.)
+ *
+ * When `preferredScope` is omitted, returns the first match in any scope —
+ * used by callers that don't have a row context (e.g. inline AddressLink).
  *
  * Issues all per-scope HGETs in parallel — sequential reads added 150–400 ms
  * to every modal open and every save (5 RTTs × Upstash REST latency).
@@ -166,15 +168,7 @@ export async function findReport(
   if (preferredScope === undefined) {
     return matches[0] ?? null;
   }
-  // Symmetric with `hasReport`: a chain-scoped row sees its own report and
-  // the global one; a global-scope request sees only the global report.
-  if (preferredScope === "global") {
-    return matches.find((r) => r.scope === "global") ?? null;
-  }
-  return (
-    matches.find((r) => r.scope === preferredScope || r.scope === "global") ??
-    null
-  );
+  return matches.find((r) => r.scope === preferredScope) ?? null;
 }
 
 /**

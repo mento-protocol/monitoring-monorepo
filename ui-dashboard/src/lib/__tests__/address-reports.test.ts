@@ -96,7 +96,7 @@ describe("upsertReport — Upstash auto-deserialization contract", () => {
   });
 });
 
-describe("findReport — preferredScope filter (chain → global fallback)", () => {
+describe("findReport — preferredScope filter (strict scope match)", () => {
   it("returns chain match when preferredScope matches", async () => {
     // ALL_REPORT_SCOPE_KEYS iterates in derivation order; mock per-key.
     mockHget.mockImplementation((key: string) => {
@@ -118,7 +118,9 @@ describe("findReport — preferredScope filter (chain → global fallback)", () 
     expect(found?.report.body).toBe("celo");
   });
 
-  it("falls back to global when chain-scoped match is absent", async () => {
+  it("does NOT return a global report when a chain scope is requested (strict match)", async () => {
+    // Strict-scope mode: a chain row must NOT see a global report. If the
+    // user wants the global one, they should open the global row.
     mockHget.mockImplementation((key: string) => {
       if (key === "reports:global") {
         return Promise.resolve({
@@ -133,8 +135,7 @@ describe("findReport — preferredScope filter (chain → global fallback)", () 
 
     const { findReport } = await import("@/lib/address-reports");
     const found = await findReport(ADDR, 42220);
-    expect(found?.scope).toBe("global");
-    expect(found?.report.body).toBe("global");
+    expect(found).toBeNull();
   });
 
   it("does NOT return a chain-scoped report when a different chain is requested", async () => {
