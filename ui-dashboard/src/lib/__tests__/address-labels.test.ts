@@ -54,20 +54,24 @@ beforeEach(() => {
 });
 
 describe("getLabels", () => {
-  it("returns all entries from the flat labels hash", async () => {
-    mocks.hgetall.mockResolvedValueOnce({
-      "0xaaa": {
-        name: "One",
-        tags: [],
-        isPublic: true,
-        updatedAt: "2026-01-01T00:00:00Z",
-      },
-      "0xbbb": {
-        name: "Two",
-        tags: [],
-        isPublic: false,
-        updatedAt: "2026-01-01T00:00:00Z",
-      },
+  it("returns all entries from the flat labels hash (legacy hashes empty)", async () => {
+    mocks.hgetall.mockImplementation(async (key: string) => {
+      if (key === "labels")
+        return {
+          "0xaaa": {
+            name: "One",
+            tags: [],
+            isPublic: true,
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+          "0xbbb": {
+            name: "Two",
+            tags: [],
+            isPublic: false,
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        };
+      return null;
     });
     const result = await getLabels();
     expect(mocks.hgetall).toHaveBeenCalledWith("labels");
@@ -75,24 +79,57 @@ describe("getLabels", () => {
     expect(result["0xaaa"].name).toBe("One");
   });
 
-  it("returns empty object when hgetall returns null", async () => {
-    mocks.hgetall.mockResolvedValueOnce(null);
-    const result = await getLabels();
-    expect(result).toEqual({});
+  it("returns empty object when every hash returns null", async () => {
+    mocks.hgetall.mockResolvedValue(null);
+    expect(await getLabels()).toEqual({});
   });
 
   it("auto-upgrades legacy v1 entries on read (label → name)", async () => {
-    mocks.hgetall.mockResolvedValueOnce({
-      "0xaaa": {
-        label: "Legacy",
-        category: "DeFi",
-        updatedAt: "2026-01-01T00:00:00Z",
-      },
-    });
+    mocks.hgetall.mockImplementation(async (key: string) =>
+      key === "labels"
+        ? {
+            "0xaaa": {
+              label: "Legacy",
+              category: "DeFi",
+              updatedAt: "2026-01-01T00:00:00Z",
+            },
+          }
+        : null,
+    );
     const result = await getLabels();
     expect(result["0xaaa"].name).toBe("Legacy");
     expect(result["0xaaa"].tags).toEqual(["DeFi"]);
     expect((result["0xaaa"] as Record<string, unknown>).label).toBeUndefined();
+  });
+
+  it("dual-reads legacy scopes during the migration window — flat wins on conflict", async () => {
+    mocks.hgetall.mockImplementation(async (key: string) => {
+      if (key === "labels")
+        return {
+          "0xaaa": {
+            name: "Flat-Alice",
+            tags: [],
+            updatedAt: "2026-04-01T00:00:00Z",
+          },
+        };
+      if (key === "labels:global")
+        return {
+          "0xaaa": {
+            name: "Legacy-Alice",
+            tags: [],
+            updatedAt: "2026-03-01T00:00:00Z",
+          },
+          "0xbbb": {
+            name: "Legacy-Bob",
+            tags: [],
+            updatedAt: "2026-03-01T00:00:00Z",
+          },
+        };
+      return null;
+    });
+    const result = await getLabels();
+    expect(result["0xaaa"].name).toBe("Flat-Alice");
+    expect(result["0xbbb"].name).toBe("Legacy-Bob");
   });
 });
 
@@ -187,25 +224,32 @@ describe("importLabels", () => {
 });
 
 describe("readLegacyScopes — migration helper", () => {
-  it("returns every legacy labels:* hash via SCAN", async () => {
-    mocks.scan.mockResolvedValueOnce([
-      "0",
-      ["labels:global", "labels:42220", "labels"],
-    ]);
-    mocks.hgetall
-      .mockResolvedValueOnce({
-        "0xggg": {
-          name: "Global",
-          tags: [],
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
-      })
-      .mockResolvedValueOnce({
-        "0xccc": { name: "Celo", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
-      });
+  it("returns only the legacy keys with non-empty entries", async () => {
+    // KNOWN_LEGACY_KEYS = labels:global + 2 retired (44787, 62320) + 3
+    // NETWORKS chains (42220, 11142220, 143) = 6 hgetall calls in parallel.
+    // Seed labels:global + labels:42220 with entries; rest empty.
+    mocks.hgetall.mockImplementation(async (key: string) => {
+      if (key === "labels:global")
+        return {
+          "0xggg": {
+            name: "Global",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        };
+      if (key === "labels:42220")
+        return {
+          "0xccc": {
+            name: "Celo",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        };
+      return null;
+    });
 
-    const { scopes } = await readLegacyScopes();
-    // Only labels:global and labels:42220 — the new flat `labels` key is excluded.
+    const { scopes, legacyKeys } = await readLegacyScopes();
+    expect(legacyKeys.sort()).toEqual(["labels:42220", "labels:global"]);
     expect(scopes.map((s) => s.key).sort()).toEqual([
       "labels:42220",
       "labels:global",
@@ -214,10 +258,17 @@ describe("readLegacyScopes — migration helper", () => {
     expect(global?.entries["0xggg"].name).toBe("Global");
   });
 
-  it("excludes the new flat 'labels' key from the legacy scan result", async () => {
-    mocks.scan.mockResolvedValueOnce(["0", ["labels"]]);
-    const { scopes } = await readLegacyScopes();
+  it("returns an empty scope/key list when no legacy hash has entries", async () => {
+    mocks.hgetall.mockResolvedValue(null);
+    const { scopes, legacyKeys } = await readLegacyScopes();
     expect(scopes).toHaveLength(0);
+    expect(legacyKeys).toHaveLength(0);
+  });
+
+  it("does not call SCAN — uses the deterministic legacy-key list", async () => {
+    mocks.hgetall.mockResolvedValue(null);
+    await readLegacyScopes();
+    expect(mocks.scan).not.toHaveBeenCalled();
   });
 });
 
@@ -234,32 +285,41 @@ describe("dropLegacyScopes — migration helper", () => {
   });
 });
 
-describe("readLegacyScopes — returns legacyKeys for downstream DEL", () => {
-  it("returns both the per-scope entries and the raw key list", async () => {
-    mocks.scan.mockResolvedValueOnce([
-      "0",
-      ["labels:global", "labels:42220", "labels"],
-    ]);
-    mocks.hgetall.mockResolvedValueOnce({}).mockResolvedValueOnce({});
-    const { legacyKeys } = await readLegacyScopes();
-    expect(legacyKeys.sort()).toEqual(["labels:42220", "labels:global"]);
-  });
-});
-
-describe("getLabel — single-address HGET", () => {
-  it("returns the entry for an address (lowercased)", async () => {
-    mocks.hget.mockResolvedValueOnce({
-      name: "Alice",
-      tags: [],
-      updatedAt: "2026-01-01T00:00:00Z",
-    });
+describe("getLabel — single-address HGET with legacy fallback", () => {
+  it("returns the entry from the flat hash without checking legacy", async () => {
+    mocks.hget.mockImplementation(async (key: string) =>
+      key === "labels"
+        ? {
+            name: "Alice",
+            tags: [],
+            updatedAt: "2026-01-01T00:00:00Z",
+          }
+        : null,
+    );
     const entry = await getLabel("0xABC");
+    // Only the flat-hash HGET should fire; no legacy fallback when flat hits.
+    expect(mocks.hget).toHaveBeenCalledTimes(1);
     expect(mocks.hget).toHaveBeenCalledWith("labels", "0xabc");
     expect(entry?.name).toBe("Alice");
   });
 
-  it("returns null when the address has no entry", async () => {
-    mocks.hget.mockResolvedValueOnce(null);
+  it("falls back to legacy scopes when the address isn't in the flat hash", async () => {
+    mocks.hget.mockImplementation(async (key: string) => {
+      if (key === "labels") return null;
+      if (key === "labels:42220")
+        return {
+          name: "Legacy-Alice",
+          tags: [],
+          updatedAt: "2026-01-01T00:00:00Z",
+        };
+      return null;
+    });
+    const entry = await getLabel("0xABC");
+    expect(entry?.name).toBe("Legacy-Alice");
+  });
+
+  it("returns null when no flat or legacy hash has the address", async () => {
+    mocks.hget.mockResolvedValue(null);
     expect(await getLabel("0xABC")).toBeNull();
   });
 });

@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { put } from "@vercel/blob";
-import { getAuthSession } from "@/auth";
+import { ALLOWED_DOMAIN, getAuthSession } from "@/auth";
 import {
+  type AddressEntry,
+  type AddressLabelsSnapshot,
   dropLegacyScopes,
-  getLabels,
   getLabelsByAddress,
   importLabels,
   readLegacyScopes,
-  type AddressEntry,
 } from "@/lib/address-labels";
 
 export const runtime = "nodejs";
@@ -16,7 +16,8 @@ export const maxDuration = 300;
 
 type ConflictRecord = {
   address: string;
-  scopes: string[];
+  /** Redis key names where this address appeared (e.g. `labels:42220`). */
+  sources: string[];
   resolved: AddressEntry;
 };
 
@@ -49,12 +50,14 @@ type MigrateResponse = {
  *   - createdAt: earliest non-empty
  *   - updatedAt: latest
  *   - name / notes / isPublic: prefer the more recent (max updatedAt) source;
- *     ties resolve to `incoming` (the newer arg).
+ *     ties resolve to `incoming`.
  *
  * Idempotent: a second run with no legacy keys present is a clean no-op.
  *
- * Auth: dual — `Bearer CRON_SECRET` OR an authenticated session. The
- * migration runs once after deploy via `curl` from a maintainer laptop.
+ * Auth: dual — `Bearer CRON_SECRET` OR an authenticated `@mentolabs.xyz`
+ * session. The migration runs once after deploy via `curl` from a maintainer
+ * laptop. The route is exempted from the address-labels middleware (mirrors
+ * `/backup`) so the bearer-token path actually reaches the handler.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const authBail = await requireMigrationAuth(req);
@@ -64,10 +67,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const dryRun = req.nextUrl.searchParams.get("dryRun") === "true";
 
   try {
-    const [{ legacyKeys, scopes }, preExistingFlat] = await Promise.all([
-      readLegacyScopes(),
-      getLabels(),
-    ]);
+    const { legacyKeys, scopes } = await readLegacyScopes();
 
     const legacyEntries = scopes.reduce(
       (sum, s) => sum + Object.keys(s.entries).length,
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         ok: true,
         legacyScopes: 0,
         legacyEntries: 0,
-        preExistingFlat: Object.keys(preExistingFlat).length,
+        preExistingFlat: 0,
         written: 0,
         conflicts: [],
         legacyDropped: false,
@@ -88,24 +88,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(body);
     }
 
-    // Always back up before mutating Redis. Snapshot includes both legacy
-    // shape (so import can round-trip) and the existing flat key. Blob is
-    // private so it doesn't leak via dashboard download.
-    const backupPathname = await writeBackup({
-      scopes,
-      preExistingFlat,
-    });
-
     // Build the flat merged map. Track multi-source addresses so the
     // response can surface the conflict list for human review.
     const merged: Record<string, AddressEntry> = {};
     const sourcesByAddress = new Map<string, string[]>();
-
-    for (const [address, entry] of Object.entries(preExistingFlat)) {
-      const lower = address.toLowerCase();
-      merged[lower] = entry;
-      sourcesByAddress.set(lower, ["labels"]);
-    }
 
     for (const { key, entries } of scopes) {
       for (const [address, entry] of Object.entries(entries)) {
@@ -124,17 +110,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const conflicts: ConflictRecord[] = [];
     for (const [address, sources] of sourcesByAddress) {
       if (sources.length > 1) {
-        conflicts.push({ address, scopes: sources, resolved: merged[address] });
+        conflicts.push({ address, sources, resolved: merged[address] });
       }
     }
 
     if (dryRun) {
+      // Dry runs are read-only — no Blob write, no HSET, no DEL. Return
+      // the merge plan so a maintainer can spot-check before the live run.
       const body: MigrateResponse = {
         ok: true,
-        backupPathname,
         legacyScopes: scopes.length,
         legacyEntries,
-        preExistingFlat: Object.keys(preExistingFlat).length,
+        preExistingFlat: 0,
         written: 0,
         conflicts,
         legacyDropped: false,
@@ -142,6 +129,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       };
       return NextResponse.json(body);
     }
+
+    // Always back up before mutating Redis. Snapshot uses the importable
+    // shape (`{exportedAt, global, chains}`) so the backup can round-trip
+    // through `/api/address-labels/import` if rollback is needed. Blob is
+    // private so it doesn't leak via dashboard download.
+    const backupPathname = await writeBackup(scopes);
 
     await importLabels(merged);
 
@@ -164,7 +157,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       backupPathname,
       legacyScopes: scopes.length,
       legacyEntries,
-      preExistingFlat: Object.keys(preExistingFlat).length,
+      preExistingFlat: 0,
       written: expected.length,
       conflicts,
       legacyDropped: true,
@@ -189,8 +182,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
  * Merge a prior entry with an incoming one. Resolution: union tags
  * (case-insensitive dedup), prefer the more recently updated entry's
  * scalar fields, take the earliest createdAt. Ties on `updatedAt` resolve
- * in favour of `incoming` so callers can pass legacy entries as `prior`
- * and trust later writes to win deterministically.
+ * in favour of `incoming`.
+ *
+ * `name` is taken from `newer` directly — empty-name tag-only entries are
+ * meaningful in this codebase, so a truthiness fallback (`newer.name ||
+ * older.name`) would resurrect a stale older name when the newer write
+ * intentionally cleared it.
  */
 function mergeEntries(
   prior: AddressEntry,
@@ -212,7 +209,7 @@ function mergeEntries(
   const createdAt = createdCandidates.sort()[0];
 
   return {
-    name: newer.name || older.name,
+    name: newer.name,
     tags: Array.from(tagSet.values()),
     notes: newer.notes ?? older.notes,
     isPublic: newer.isPublic ?? older.isPublic,
@@ -222,18 +219,32 @@ function mergeEntries(
   };
 }
 
-async function writeBackup(payload: {
-  scopes: Array<{ key: string; entries: Record<string, AddressEntry> }>;
-  preExistingFlat: Record<string, AddressEntry>;
-}): Promise<string> {
+/**
+ * Write a pre-migration snapshot to Vercel Blob using the same shape the
+ * `/api/address-labels/import` route accepts (`{exportedAt, global,
+ * chains}`). If rollback is ever needed, the operator can download the
+ * blob and POST it back through the import endpoint without translation.
+ */
+async function writeBackup(
+  scopes: Array<{ key: string; entries: Record<string, AddressEntry> }>,
+): Promise<string> {
   const date = new Date().toISOString().replace(/[:.]/g, "-");
   const filename = `address-labels-pre-migrate-flat-${date}.json`;
-  const body = {
-    capturedAt: new Date().toISOString(),
-    legacyScopes: payload.scopes,
-    preExistingFlat: payload.preExistingFlat,
+  const snapshot: AddressLabelsSnapshot = {
+    exportedAt: new Date().toISOString(),
   };
-  const blob = await put(filename, JSON.stringify(body, null, 2), {
+  const chains: Record<string, Record<string, AddressEntry>> = {};
+  for (const { key, entries } of scopes) {
+    if (key === "labels:global") {
+      snapshot.global = entries;
+      continue;
+    }
+    const chainId = key.slice("labels:".length);
+    if (/^\d+$/.test(chainId)) chains[chainId] = entries;
+  }
+  if (Object.keys(chains).length > 0) snapshot.chains = chains;
+
+  const blob = await put(filename, JSON.stringify(snapshot, null, 2), {
     access: "private",
     contentType: "application/json",
     addRandomSuffix: false,
@@ -255,8 +266,12 @@ async function requireMigrationAuth(
   const auth = req.headers.get("authorization");
   if (auth === `Bearer ${cronSecret}`) return null;
 
+  // Mirror the middleware's domain enforcement: a bare `getAuthSession()`
+  // session isn't enough since a forged JWT (e.g. leaked AUTH_SECRET) with
+  // an arbitrary email would otherwise pass.
   const session = await getAuthSession();
-  if (session) return null;
+  const email = session?.user?.email?.toLowerCase();
+  if (email && email.endsWith(ALLOWED_DOMAIN)) return null;
 
   return NextResponse.json(
     { error: "Authentication required" },

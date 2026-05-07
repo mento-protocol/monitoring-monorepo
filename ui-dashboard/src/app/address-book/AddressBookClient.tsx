@@ -220,9 +220,15 @@ export default function AddressBookPage({
                     canEdit={userCanEdit}
                     reportPresent={hasReport(row.address)}
                     explorerUrl={
-                      row.network.explorerBaseUrl
-                        ? explorerAddressUrl(row.network, row.address)
-                        : null
+                      // Custom rows are chainless (the `network` is just the
+                      // display placeholder for "All chains"), so a
+                      // chain-specific explorer link would be wrong — e.g.
+                      // a Monad-only address would open CeloScan. Suppress
+                      // the link entirely; users can still edit, copy, or
+                      // open via the inline AddressLink in other tables.
+                      row.isCustom || !row.network.explorerBaseUrl
+                        ? null
+                        : explorerAddressUrl(row.network, row.address)
                     }
                     onEdit={() => setEditTarget({ address: row.address })}
                   />
@@ -252,19 +258,22 @@ export default function AddressBookPage({
 }
 
 function contractInitial(address: string) {
-  // Walk every network's static contract registry. Same address on multiple
-  // chains generally has the same contract name (deterministic deploys); if
-  // names diverge we use the first hit, which is fine for editor pre-fill
-  // since the user can override.
+  // Walk every network's static contract registry case-insensitively —
+  // `@mento-protocol/contracts` exports checksummed mixed-case keys, but
+  // callers may pass either casing. Same address on multiple chains
+  // generally has the same contract name (deterministic deploys); if names
+  // diverge we use the first hit, which is fine for editor pre-fill since
+  // the user can override.
   const lower = address.toLowerCase();
   for (const net of Object.values(NETWORKS)) {
-    const name = net.addressLabels[lower];
-    if (name) {
-      return {
-        name,
-        tags: [],
-        updatedAt: new Date().toISOString(),
-      };
+    for (const [registered, name] of Object.entries(net.addressLabels)) {
+      if (registered.toLowerCase() === lower) {
+        return {
+          name,
+          tags: [],
+          updatedAt: new Date().toISOString(),
+        };
+      }
     }
   }
   return undefined;
