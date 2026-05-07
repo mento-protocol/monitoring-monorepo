@@ -16,15 +16,15 @@ import {
   extractAddressFromPoolId,
 } from "../../helpers";
 import { scalingFactorToDecimals } from "../../priceDifference";
+import { fetchReportExpiry, fetchNumReporters } from "../../rpc";
 import {
-  fetchReferenceRateFeedID,
-  fetchRebalanceThreshold,
-  fetchTokenDecimalsScaling,
-  fetchInvertRateFeed,
-  fetchFees,
-  fetchReportExpiry,
-  fetchNumReporters,
-} from "../../rpc";
+  compactFees,
+  feesEffect,
+  invertRateFeedEffect,
+  rebalanceThresholdEffect,
+  referenceRateFeedIDEffect,
+  tokenDecimalsScalingEffect,
+} from "../../rpc/effects";
 import {
   DEFAULT_ORACLE_FIELDS,
   maybePreloadPool,
@@ -157,15 +157,37 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     invertRateFeed,
     fees,
   ] = await Promise.all([
-    fetchReferenceRateFeedID(event.chainId, poolAddr),
+    context.effect(referenceRateFeedIDEffect, {
+      chainId: event.chainId,
+      poolAddress: poolAddr,
+    }),
     // Use standalone getters — they work even when the oracle is stale,
     // unlike getRebalancingState() which reverts on stale/expired oracle data.
-    fetchRebalanceThreshold(event.chainId, poolAddr),
+    context.effect(rebalanceThresholdEffect, {
+      chainId: event.chainId,
+      poolAddress: poolAddr,
+    }),
     // Fetch token decimals scaling factors (e.g. 1e18 for 18-decimal tokens)
-    fetchTokenDecimalsScaling(event.chainId, poolAddr, "decimals0", token0),
-    fetchTokenDecimalsScaling(event.chainId, poolAddr, "decimals1", token1),
-    fetchInvertRateFeed(event.chainId, poolAddr),
-    fetchFees(event.chainId, poolAddr),
+    context.effect(tokenDecimalsScalingEffect, {
+      chainId: event.chainId,
+      poolAddress: poolAddr,
+      fn: "decimals0",
+      fallbackTokenAddress: token0,
+    }),
+    context.effect(tokenDecimalsScalingEffect, {
+      chainId: event.chainId,
+      poolAddress: poolAddr,
+      fn: "decimals1",
+      fallbackTokenAddress: token1,
+    }),
+    context.effect(invertRateFeedEffect, {
+      chainId: event.chainId,
+      poolAddress: poolAddr,
+    }),
+    context.effect(feesEffect, {
+      chainId: event.chainId,
+      poolAddress: poolAddr,
+    }),
   ]);
   // Convert scaling factor (1e18, 1e6, etc.) to decimals count (18, 6, etc.)
   const token0Decimals = dec0Raw
@@ -211,11 +233,12 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     tokenDecimals: { token0Decimals, token1Decimals },
   });
 
-  // Persist fee config read at pool creation. `fees` is Partial — only
-  // fields whose RPC call succeeded are present, so a partial failure
-  // leaves the others at the -1 sentinel for self-heal to retry.
+  // Persist fee config read at pool creation. `compactFees` strips
+  // undefined keys (effect schema outputs explicit undefined for missing
+  // getters) so a partial failure leaves the others at the -1 sentinel
+  // for self-heal to retry.
   if (fees) {
-    context.Pool.set({ ...pool, ...fees });
+    context.Pool.set({ ...pool, ...compactFees(fees) });
   }
 
   const deployment: FactoryDeployment = {

@@ -11,13 +11,13 @@
 import type { Breaker, BreakerConfig } from "generated";
 import type { HandlerContext } from "generated/src/Types";
 import { asAddress } from "./helpers";
+import { type BreakerKindRpc } from "./rpc";
 import {
-  fetchBreakerDefaults,
-  fetchBreakerFeedState,
-  fetchBreakerKind,
-  fetchBreakerList,
-  type BreakerKindRpc,
-} from "./rpc";
+  breakerDefaultsEffect,
+  breakerFeedStateEffect,
+  breakerKindEffect,
+  breakerListEffect,
+} from "./rpc/effects";
 
 /** ID for the per-breaker `Breaker` entity. */
 export function makeBreakerId(chainId: number, breakerAddress: string): string {
@@ -79,25 +79,30 @@ export async function ensureBreaker(
   const existing = await context.Breaker.get(id);
   if (existing) return existing;
 
-  // fetchBreakerKind returns null on transient RPC failure so we don't
-  // poison the kind (e.g. persisting MARKET_HOURS for a real MedianDelta
-  // breaker just because a single probe call timed out). Bail and let the
-  // next event retry.
-  const kind = await fetchBreakerKind(chainId, breakerAddress);
+  // breakerKindEffect returns undefined on transient RPC failure so we
+  // don't poison the kind (e.g. persisting MARKET_HOURS for a real
+  // MedianDelta breaker just because a single probe call timed out).
+  // Bail and let the next event retry.
+  const kind = await context.effect(breakerKindEffect, {
+    chainId,
+    breakerAddress,
+  });
   if (!kind) return null;
-  const defaults = await fetchBreakerDefaults(
+  const defaults = await context.effect(breakerDefaultsEffect, {
     chainId,
     breakerAddress,
     kind,
     blockNumber,
-  );
+  });
   if (!defaults) return null;
 
   const breaker: Breaker = {
     id,
     chainId,
     address: asAddress(breakerAddress),
-    kind,
+    // The effect outputs `string` (BreakerKindRpc rides as S.string); cast
+    // back to the typed union before persisting to the entity.
+    kind: kind as BreakerKindRpc,
     activatesTradingMode: defaults.activatesTradingMode,
     defaultCooldownTime: defaults.defaultCooldownTime,
     defaultRateChangeThreshold: defaults.defaultRateChangeThreshold,
@@ -123,13 +128,13 @@ export async function ensureBreakerConfig(
   const existing = await context.BreakerConfig.get(id);
   if (existing) return existing;
 
-  const state = await fetchBreakerFeedState(
+  const state = await context.effect(breakerFeedStateEffect, {
     chainId,
-    breaker.address,
-    breaker.kind as BreakerKindRpc,
+    breakerAddress: breaker.address,
+    kind: breaker.kind as BreakerKindRpc,
     rateFeedID,
     blockNumber,
-  );
+  });
   if (!state) return null;
 
   const cfg: BreakerConfig = {
@@ -195,7 +200,10 @@ export async function bootstrapFeedBreakerConfigs(
   // cache for the rest of the process — and for feeds whose breaker setup
   // happened before `start_block`, this is the only hydration path, so a
   // brief network blip would leave breaker state missing until restart.
-  const breakerAddresses = await fetchBreakerList(chainId, blockNumber);
+  const breakerAddresses = await context.effect(breakerListEffect, {
+    chainId,
+    blockNumber,
+  });
   if (!breakerAddresses) return; // RPC failed — let the next event retry.
   if (breakerAddresses.length === 0) {
     // Empty list is itself authoritative (no breakers registered for this

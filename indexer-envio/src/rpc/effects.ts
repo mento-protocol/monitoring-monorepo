@@ -220,6 +220,31 @@ export const feesEffect = createEffect(
   },
 );
 
+/** Convert the `feesEffect` output (explicit `undefined` keys) into a
+ * Partial-style object (omits undefined keys). Use this at call sites that
+ * spread the result onto a Pool entity whose `lpFee` / `protocolFee` /
+ * `rebalanceReward` fields are typed `number` (not `number | undefined`). */
+export function compactFees(
+  f:
+    | {
+        lpFee: number | undefined;
+        protocolFee: number | undefined;
+        rebalanceReward: number | undefined;
+      }
+    | undefined,
+): Partial<{ lpFee: number; protocolFee: number; rebalanceReward: number }> {
+  if (!f) return {};
+  const out: Partial<{
+    lpFee: number;
+    protocolFee: number;
+    rebalanceReward: number;
+  }> = {};
+  if (f.lpFee !== undefined) out.lpFee = f.lpFee;
+  if (f.protocolFee !== undefined) out.protocolFee = f.protocolFee;
+  if (f.rebalanceReward !== undefined) out.rebalanceReward = f.rebalanceReward;
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Group C — block-scoped, address-keyed.
 // MUST stay `cache: false` permanently even on medium. Reason: Celo archive-

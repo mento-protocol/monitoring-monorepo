@@ -2,6 +2,7 @@
 // Pool and PoolSnapshot upsert logic, health status computation
 // ---------------------------------------------------------------------------
 
+import type { EffectCaller } from "envio";
 import type {
   Pool,
   PoolSnapshot,
@@ -16,7 +17,12 @@ import {
   extractAddressFromPoolId,
 } from "./helpers";
 import { computePriceDifference } from "./priceDifference";
-import { fetchReferenceRateFeedID, fetchReportExpiry, fetchFees } from "./rpc";
+import { fetchReportExpiry } from "./rpc";
+import {
+  compactFees,
+  feesEffect,
+  referenceRateFeedIDEffect,
+} from "./rpc/effects";
 import { isVirtualPool } from "./helpers";
 import { recordBreachTransition } from "./deviationBreach";
 
@@ -257,6 +263,8 @@ export async function maybePreloadPool(
 }
 
 export type PoolContext = {
+  // Effect caller — only used by upsertPool's self-heal RPC paths today.
+  effect: EffectCaller;
   Pool: {
     get: (id: string) => Promise<Pool | undefined>;
     set: (entity: Pool) => void;
@@ -417,7 +425,10 @@ export const upsertPool = async ({
     existing.source !== "" &&
     !isVirtualPool(existing)
   ) {
-    const rateFeedID = await fetchReferenceRateFeedID(chainId, poolAddr);
+    const rateFeedID = await context.effect(referenceRateFeedIDEffect, {
+      chainId,
+      poolAddress: poolAddr,
+    });
     if (rateFeedID) {
       healedOracleDelta = { referenceRateFeedID: rateFeedID };
       const expiry = await fetchReportExpiry(chainId, rateFeedID, blockNumber);
@@ -441,9 +452,12 @@ export const upsertPool = async ({
     existing.source !== "" &&
     !isVirtualPool(existing)
   ) {
-    const fees = await fetchFees(chainId, poolAddr);
+    const fees = await context.effect(feesEffect, {
+      chainId,
+      poolAddress: poolAddr,
+    });
     if (fees) {
-      healedFees = fees;
+      healedFees = compactFees(fees);
     }
   }
 
