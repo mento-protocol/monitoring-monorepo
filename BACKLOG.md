@@ -1,40 +1,79 @@
 # Backlog
 
-## Test Quality — introduce mutation testing baseline
+## Thoughtworks Technology Radar follow-ups — lightweight implementation plans
 
-Add a lightweight StrykerJS mutation-testing baseline so the existing unit tests prove they catch bad logic, not just execute lines. Start non-blocking and scoped; do not turn this into a CI tarpit.
+Source plan: `projects/mento-v3-monitoring/technology-radar-evaluation-plan.md`. These are the Radar recommendations we want to pursue now: **1, 2, 3, 5, and 6**. DORA metrics (#4), CodeScene (#7), and Dev Containers (#8) are intentionally excluded for now.
 
-Recommended first PR for Claude Code:
+### 1. `axe-core` accessibility checks for dashboard UI
 
-- [ ] Add StrykerJS dependencies at the workspace/package level needed for:
-  - Vitest packages: `ui-dashboard`, `metrics-bridge`, `shared-config`
-  - Mocha package: `indexer-envio`
-  - TypeScript checking so compile-invalid mutants are discarded before test execution
-- [ ] Add an initial `ui-dashboard/stryker.config.json` scoped only to high-value pure logic:
-  - include: `src/lib/**/*.{ts,tsx}`
-  - exclude: tests, `*.d.ts`, GraphQL query barrels/config-only files, generated/static type files
-  - use the Vitest runner with `vitest.config.ts`
-  - enable incremental mode
-  - reporters: clear text + HTML + JSON
-  - thresholds: record a baseline, but set `break: 0` initially
-- [ ] Add package scripts, e.g. `test:mutation` and `test:mutation:ui`, without changing required CI gates yet.
-- [ ] Run one local baseline against a narrow file set first (`format`, `health`, `reserves`, `volume`, `weekend`, `routing`, `rebalance-check`, `protocol-fees`) and document the mutation score + top surviving mutants in this backlog item or a small `docs/` note.
-- [ ] Add a non-blocking/manual GitHub Actions job only after the first local run proves runtime is acceptable. Prefer weekly/manual or changed-files-only over every PR.
-- [ ] Follow-up phases:
-  1. Expand `ui-dashboard` mutation scope from pure `src/lib` utilities to hooks/API routes with stable mocks.
-  2. Add `metrics-bridge` and `shared-config` Vitest configs; these are likely high ROI because they contain alert/math/config logic.
-  3. Add `indexer-envio` Mocha mutation config for pure helper modules and event math. Exclude generated Envio output, ABIs, config JSON, and runtime-heavy RPC/dev-server paths.
-  4. Only after two clean baseline runs, set a conservative gating policy: fail on mutation-score regression for touched scoped files, not on an absolute repo-wide threshold.
+Why: the dashboard communicates operational risk through badges, tabs, tables, empty/error states, and chart-adjacent labels. We need deterministic feedback that those states remain perceivable and usable, not just visually plausible.
 
-Acceptance criteria for the first PR:
+Lightweight plan:
 
-- [ ] `pnpm install --lockfile-only` / lockfile update is intentional and minimal.
-- [ ] `pnpm --filter @mento-protocol/ui-dashboard test` still passes.
-- [ ] `pnpm --filter @mento-protocol/ui-dashboard typecheck` still passes.
-- [ ] A scoped mutation command completes locally and writes an HTML/JSON report.
-- [ ] README/backlog note explains how to run mutation testing and why CI is non-blocking at first.
+- [ ] Add an `axe-core`-based Vitest helper (`jest-axe` or `vitest-axe`, whichever is cleaner with React 19 / Vitest 4).
+- [ ] Add 5–10 high-signal tests around health/severity badges, network selection, pool tabs, tables, and Hasura empty/loading/error states.
+- [ ] Scope checks to our semantics/wrappers; do not attempt to certify Plotly internals.
+- [ ] Keep the tests under the existing dashboard test command if runtime stays low.
+- [ ] Document the command only if it differs from `pnpm --filter @mento-protocol/ui-dashboard test`.
 
-Rationale: coverage currently tells us dashboard/indexer/bridge code was executed; mutation testing checks whether tests fail when threshold comparisons, boolean rollups, fallback operators, arithmetic, and routing/filter predicates are subtly wrong — exactly the class of bugs that monitoring dashboards and alerting code can hide until production.
+Acceptance: CI/local test runtime increases by <30s, with no broad a11y suppressions.
+
+### 2. Browser-based component/interaction testing pilot
+
+Why: jsdom cannot prove real-browser behavior for Plotly, focus, hydration, layout, and stateful UI interactions. This repo already requires interaction tests for stateful data/UI changes; we need a small real-browser safety net for the flows that matter.
+
+Lightweight plan:
+
+- [ ] Spike Playwright Component Testing first; fall back to a minimal Playwright app-level harness if Next.js 16 / React 19 setup is too awkward.
+- [ ] Use deterministic GraphQL fixtures/stubs; never hit live Hasura/Envio in tests.
+- [ ] Cover 2–3 flows only: network switching, pool detail tab navigation, and degraded Hasura/query states.
+- [ ] Add a `test:browser` script but do not make it required until runtime/flakiness is known.
+- [ ] Record setup friction, runtime, and whether the tests catch behavior Vitest cannot.
+
+Acceptance: headless run is stable, fixture-driven, and adds <2m if promoted to a PR-required check.
+
+### 3. Feedback sensors for coding agents
+
+Why: repo knowledge currently lives in `AGENTS.md` and PR checklists, but agents/humans still have to remember which gates apply. Path-aware feedback should make the repo tell agents what to run before review, reducing repeated Cursor/Codex findings.
+
+Lightweight plan:
+
+- [ ] Add `scripts/agent-quality-gate.sh` with a dry-run mode that maps changed paths to required commands/checklists.
+- [ ] Cover the main path groups: `indexer-envio`, `ui-dashboard`, `metrics-bridge`, `shared-config`, workflows, Terraform, docs.
+- [ ] In execution mode, run only safe local checks: codegen, lint, typecheck, tests, Trunk checks as applicable. Never run deploys or Terraform apply.
+- [ ] Link the script from `AGENTS.md` as the expected pre-PR handoff gate for agent-authored code changes.
+- [ ] Trial on the next three PRs and note whether it prevents repeat review findings.
+
+Acceptance: script is readable, supports dry-run, and catches or prevents at least one issue before review.
+
+### 5. `mise` toolchain management trial
+
+Why: tool versions are currently spread across `.node-version`, `packageManager`, Trunk runtimes, README/setup docs, and Terraform config. `mise` is only worth adding if it reduces setup drift for fresh worktrees and agent sessions.
+
+Lightweight plan:
+
+- [ ] Inventory current version sources for Node, pnpm, Terraform, Python, Trunk, and setup scripts.
+- [ ] Draft a minimal `mise.toml` for the tools where version drift actually hurts.
+- [ ] Test fresh-shell setup: `mise install`, `pnpm install`, codegen, typecheck, and tests.
+- [ ] Decide whether `mise` is canonical or optional convenience.
+- [ ] If canonical, update docs and remove/clarify duplicate version declarations where safe.
+
+Acceptance: setup becomes simpler than today. Reject if it just adds another version source of truth.
+
+### 6. Targeted mutation testing baseline
+
+Why: normal coverage can tell us code executed while missing the invariant. Monitoring logic has subtle failure modes — trading-seconds math, severity thresholds, pool IDs, degraded-mode fallbacks — where mutation testing can expose weak assertions.
+
+Lightweight plan:
+
+- [ ] Evaluate StrykerJS or equivalent against one narrow pure-logic target first, likely `ui-dashboard/src/lib/weekend.ts`.
+- [ ] Keep mutation testing non-blocking and out of required CI until runtime/noise is proven.
+- [ ] Configure the smallest useful scope; exclude generated files, tests, GraphQL barrels, ABIs, config-only files, and runtime-heavy RPC/dev-server paths.
+- [ ] Classify surviving mutants as real test gaps, equivalent mutants/noise, or tool limitations.
+- [ ] Add/improve tests only for real gaps, then record runtime and mutation score.
+- [ ] Consider expanding next to pool ID/helpers and `metrics-bridge` rebalance probe/check logic.
+
+Acceptance: finds at least one real assertion gap or gives high confidence on a critical module with acceptable manual/nightly runtime.
 
 ## Homepage Swaps KPI + OG card — include legacy v2 broker swaps
 
