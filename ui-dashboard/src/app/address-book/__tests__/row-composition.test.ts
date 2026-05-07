@@ -2,10 +2,10 @@
  * Tests for address book row composition using the shared helpers from
  * @/lib/address-book — same functions used in page.tsx.
  *
- * Key invariants:
- * - Every row has a scope ("global" or a chainId).
- * - Per-chain custom rows suppress the contract row at same (chainId, address).
- * - Global custom rows render alongside contract rows; they do NOT suppress.
+ * Key invariants (post-#332 global-only refactor):
+ * - Custom rows are address-keyed; one row per address.
+ * - A custom row suppresses every contract row for the same address (across all chains).
+ * - Contract rows are still per-chain (each network's static addressLabels registry).
  */
 
 import { describe, it, expect } from "vitest";
@@ -52,31 +52,17 @@ function contractRow(
     name,
     tags: [],
     isCustom: false,
-    scope: net.chainId,
     network: net,
   };
 }
 
-function customRow(address: string, net: Network): AddressBookRow {
+function customRow(address: string, displayNet: Network): AddressBookRow {
   return {
-    key: `custom:${net.chainId}:${address.toLowerCase()}`,
+    key: `custom:${address.toLowerCase()}`,
     address,
     name: "Custom label",
     tags: [],
     isCustom: true,
-    scope: net.chainId,
-    network: net,
-  };
-}
-
-function globalCustomRow(address: string, displayNet: Network): AddressBookRow {
-  return {
-    key: `custom:global:${address.toLowerCase()}`,
-    address,
-    name: "Global custom",
-    tags: [],
-    isCustom: true,
-    scope: "global",
     network: displayNet,
   };
 }
@@ -90,7 +76,7 @@ describe("buildAddressBookRows", () => {
     expect(rows).toHaveLength(2);
   });
 
-  it("keeps same address from different chains as separate rows", () => {
+  it("keeps same address from different chains as separate rows when no custom label", () => {
     const rows = buildAddressBookRows(
       [contractRow(ADDR_A, NET_CELO), contractRow(ADDR_A, NET_MONAD)],
       [],
@@ -98,27 +84,25 @@ describe("buildAddressBookRows", () => {
     expect(rows).toHaveLength(2);
   });
 
-  it("hides contract row on the same chain when a custom label exists", () => {
+  it("a custom row suppresses every contract row for the same address (all chains)", () => {
     const rows = buildAddressBookRows(
-      [contractRow(ADDR_A, NET_CELO)],
+      [contractRow(ADDR_A, NET_CELO), contractRow(ADDR_A, NET_MONAD)],
       [customRow(ADDR_A, NET_CELO)],
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].isCustom).toBe(true);
   });
 
-  it("does NOT hide contract row on a different chain when custom is on another", () => {
+  it("custom row for one address does NOT suppress contract rows for unrelated addresses", () => {
     const rows = buildAddressBookRows(
-      [contractRow(ADDR_A, NET_CELO), contractRow(ADDR_A, NET_MONAD)],
+      [contractRow(ADDR_A, NET_CELO), contractRow(ADDR_B, NET_MONAD)],
       [customRow(ADDR_A, NET_CELO)],
     );
     expect(rows).toHaveLength(2);
-    expect(rows.some((r) => r.network.chainId === NET_MONAD.chainId)).toBe(
-      true,
-    );
+    expect(rows.some((r) => !r.isCustom && r.address === ADDR_B)).toBe(true);
   });
 
-  it("same-chainId different-networkId: custom suppresses both contract rows on that chain", () => {
+  it("same-chainId different-networkId: custom suppresses both contract rows for that address", () => {
     const rows = buildAddressBookRows(
       [contractRow(ADDR_A, NET_CELO), contractRow(ADDR_A, NET_CELO_LOCAL)],
       [customRow(ADDR_A, NET_CELO)],
@@ -143,28 +127,6 @@ describe("buildAddressBookRows", () => {
     );
     expect(rows[0].isCustom).toBe(true);
   });
-
-  it("global custom row does NOT suppress contract rows on any chain", () => {
-    const rows = buildAddressBookRows(
-      [contractRow(ADDR_A, NET_CELO), contractRow(ADDR_A, NET_MONAD)],
-      [globalCustomRow(ADDR_A, NET_CELO)],
-    );
-    // 1 global custom + 2 per-chain contract rows = 3.
-    expect(rows).toHaveLength(3);
-    expect(rows.filter((r) => r.scope === "global")).toHaveLength(1);
-    expect(rows.filter((r) => r.scope === NET_CELO.chainId)).toHaveLength(1);
-    expect(rows.filter((r) => r.scope === NET_MONAD.chainId)).toHaveLength(1);
-  });
-
-  it("global + per-chain custom for same address: both coexist", () => {
-    // Strict either/or is enforced server-side, but the composer must still
-    // render whatever state the API returns.
-    const rows = buildAddressBookRows(
-      [],
-      [globalCustomRow(ADDR_A, NET_CELO), customRow(ADDR_A, NET_CELO)],
-    );
-    expect(rows).toHaveLength(2);
-  });
 });
 
 describe("countImportLabels", () => {
@@ -175,7 +137,7 @@ describe("countImportLabels", () => {
     expect(countImportLabels([])).toBe(0);
   });
 
-  it("counts distinct (chainId, address) pairs in Gnosis Safe format", () => {
+  it("counts distinct addresses in Gnosis Safe format (chainId is ignored)", () => {
     const entries = [
       { address: addr, chainId: "42220", name: "A" },
       { address: addr2, chainId: "42220", name: "B" },
@@ -183,7 +145,7 @@ describe("countImportLabels", () => {
     expect(countImportLabels(entries)).toBe(2);
   });
 
-  it("deduplicates duplicate (chainId, address) entries", () => {
+  it("deduplicates duplicate address entries", () => {
     const entries = [
       { address: addr, chainId: "42220", name: "A" },
       { address: addr, chainId: "42220", name: "A duplicate" },
@@ -191,12 +153,12 @@ describe("countImportLabels", () => {
     expect(countImportLabels(entries)).toBe(1);
   });
 
-  it("does not deduplicate same address on different chains", () => {
+  it("deduplicates same address across different chainIds (labels are now address-keyed)", () => {
     const entries = [
       { address: addr, chainId: "42220", name: "Celo" },
       { address: addr, chainId: "1", name: "Mainnet" },
     ];
-    expect(countImportLabels(entries)).toBe(2);
+    expect(countImportLabels(entries)).toBe(1);
   });
 
   it("deduplicates case-insensitive addresses", () => {
@@ -207,15 +169,7 @@ describe("countImportLabels", () => {
     expect(countImportLabels(entries)).toBe(1);
   });
 
-  it("deduplicates zero-padded chainId strings ('1' vs '001')", () => {
-    const entries = [
-      { address: addr, chainId: "1", name: "A" },
-      { address: addr, chainId: "001", name: "A again" },
-    ];
-    expect(countImportLabels(entries)).toBe(1);
-  });
-
-  it("counts entries in snapshot format (v2 schema)", () => {
+  it("counts entries in legacy snapshot format (chains)", () => {
     const snapshot = {
       chains: {
         "42220": { [addr]: { name: "A", tags: [], updatedAt: "" } },
@@ -225,7 +179,7 @@ describe("countImportLabels", () => {
     expect(countImportLabels(snapshot)).toBe(2);
   });
 
-  it("counts global + chain entries in new snapshot shape", () => {
+  it("counts legacy global + chain entries together (no double-counting)", () => {
     const snapshot = {
       global: { [addr]: { name: "Global", tags: [], updatedAt: "" } },
       chains: {
@@ -235,25 +189,24 @@ describe("countImportLabels", () => {
     expect(countImportLabels(snapshot)).toBe(2);
   });
 
-  it("global and chain entries for same address count as distinct keys", () => {
-    // The server will reject this payload (strict either/or), but the counter
-    // uses distinct (scope, address) pairs — so it returns 2 here.
+  it("legacy global and chain entries for same address dedupe to one address-key", () => {
     const snapshot = {
       global: { [addr]: { name: "Global", tags: [], updatedAt: "" } },
       chains: {
         "42220": { [addr]: { name: "Celo", tags: [], updatedAt: "" } },
       },
     };
-    expect(countImportLabels(snapshot)).toBe(2);
+    expect(countImportLabels(snapshot)).toBe(1);
   });
 
-  it("counts entries in snapshot format (legacy v1 schema)", () => {
+  it("counts entries in new flat snapshot shape (addresses)", () => {
     const snapshot = {
-      chains: {
-        "42220": { [addr]: { label: "A", updatedAt: "" } },
+      addresses: {
+        [addr]: { name: "A", tags: [], updatedAt: "" },
+        [addr2]: { name: "B", tags: [], updatedAt: "" },
       },
     };
-    expect(countImportLabels(snapshot)).toBe(1);
+    expect(countImportLabels(snapshot)).toBe(2);
   });
 
   it("deduplicates checksummed vs lowercase addresses in snapshot format", () => {
@@ -268,7 +221,7 @@ describe("countImportLabels", () => {
     expect(countImportLabels(snapshot)).toBe(1);
   });
 
-  it("counts entries in simple format (v2 schema)", () => {
+  it("counts entries in simple format (chainId column ignored)", () => {
     const simple = {
       chainId: 42220,
       labels: {
@@ -277,27 +230,6 @@ describe("countImportLabels", () => {
       },
     };
     expect(countImportLabels(simple)).toBe(2);
-  });
-
-  it("counts entries in simple format (legacy v1 schema)", () => {
-    const simple = {
-      chainId: 42220,
-      labels: {
-        [addr]: { label: "A", updatedAt: "" },
-      },
-    };
-    expect(countImportLabels(simple)).toBe(1);
-  });
-
-  it("deduplicates checksummed vs lowercase addresses in simple format", () => {
-    const simple = {
-      chainId: 42220,
-      labels: {
-        [addr.toLowerCase()]: { name: "A", tags: [], updatedAt: "" },
-        [addr.toUpperCase()]: { name: "A upper", tags: [], updatedAt: "" },
-      },
-    };
-    expect(countImportLabels(simple)).toBe(1);
   });
 
   it("returns 0 for unrecognised payload", () => {
@@ -329,12 +261,12 @@ describe("countImportLabels", () => {
     ).toBe(1);
   });
 
-  it("does not count array entries with non-string address or chainId", () => {
+  it("does not count array entries with non-string address", () => {
     expect(
       countImportLabels([
         { chainId: 42220, address: addr, name: "A" },
         { chainId: "42220", address: 123, name: "B" },
       ]),
-    ).toBe(0);
+    ).toBe(1);
   });
 });

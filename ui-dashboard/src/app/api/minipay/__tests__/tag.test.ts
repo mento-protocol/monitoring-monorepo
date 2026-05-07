@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 vi.mock("@/lib/address-labels", () => ({
-  getAllLabels: vi.fn(),
+  getLabels: vi.fn(),
   importLabels: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -28,11 +28,11 @@ vi.mock("@sentry/nextjs", () => ({
 }));
 
 import { GET } from "../tag/route";
-import { getAllLabels, importLabels } from "@/lib/address-labels";
+import { getLabels, importLabels } from "@/lib/address-labels";
 import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 import { intersectMiniPay, getMiniPaySetSize } from "@/lib/minipay";
 
-const mockGetAllLabels = vi.mocked(getAllLabels);
+const mockGetLabels = vi.mocked(getLabels);
 const mockImportLabels = vi.mocked(importLabels);
 const mockDiscover = vi.mocked(discoverMentoAddresses);
 const mockIntersect = vi.mocked(intersectMiniPay);
@@ -78,19 +78,16 @@ describe("GET /api/minipay/tag — filtering", () => {
       addresses: ["0xa", "0xb", "0xc"],
       perEntity: [],
     });
-    mockGetAllLabels.mockResolvedValue({
-      global: {
-        // 0xa has an Arkham label — must NOT be re-tagged
-        "0xa": {
-          name: "Binance",
-          tags: [],
-          source: "arkham",
-          updatedAt: "2026-01-01",
-        },
-        // 0xb has a manual label — must NOT be re-tagged
-        "0xb": { name: "Treasury", tags: [], updatedAt: "2026-01-01" },
+    mockGetLabels.mockResolvedValue({
+      // 0xa has an Arkham label — must NOT be re-tagged
+      "0xa": {
+        name: "Binance",
+        tags: [],
+        source: "arkham",
+        updatedAt: "2026-01-01",
       },
-      chains: {},
+      // 0xb has a manual label — must NOT be re-tagged
+      "0xb": { name: "Treasury", tags: [], updatedAt: "2026-01-01" },
     });
     // Only 0xc is a candidate; intersect returns it as a MiniPay user
     mockIntersect.mockResolvedValue(["0xc"]);
@@ -101,8 +98,8 @@ describe("GET /api/minipay/tag — filtering", () => {
     // intersect should be called with only 0xc — others were filtered out
     expect(mockIntersect).toHaveBeenCalledWith(["0xc"]);
 
-    // import should write only 0xc, with source=minipay
-    expect(mockImportLabels).toHaveBeenCalledWith("global", {
+    // import should write only 0xc, with source=minipay (single-arg signature)
+    expect(mockImportLabels).toHaveBeenCalledWith({
       "0xc": expect.objectContaining({ source: "minipay" }),
     });
   });
@@ -112,7 +109,7 @@ describe("GET /api/minipay/tag — filtering", () => {
       addresses: ["0xa", "0xb", "0xc"],
       perEntity: [],
     });
-    mockGetAllLabels.mockResolvedValue({ global: {}, chains: {} });
+    mockGetLabels.mockResolvedValue({});
     mockIntersect.mockResolvedValue(["0xa", "0xc"]);
 
     const res = await GET(
@@ -128,15 +125,13 @@ describe("GET /api/minipay/tag — filtering", () => {
     expect(body.mode).toBe("dryRun");
     expect(body.matched).toBe(2);
     expect(body.written).toBe(0);
-    // Documented spot-check flow: dryRun must surface the actual address
-    // list so reviewers can verify a few against Celoscan.
     expect(body.wouldWrite).toEqual(["0xa", "0xc"]);
     expect(mockImportLabels).not.toHaveBeenCalled();
   });
 
   it("non-dryRun does not include wouldWrite (keeps payload small)", async () => {
     mockDiscover.mockResolvedValue({ addresses: ["0xa"], perEntity: [] });
-    mockGetAllLabels.mockResolvedValue({ global: {}, chains: {} });
+    mockGetLabels.mockResolvedValue({});
     mockIntersect.mockResolvedValue(["0xa"]);
 
     const res = await GET(makeReq({ bearer: "cron-secret" }));
@@ -160,9 +155,8 @@ describe("GET /api/minipay/tag — filtering", () => {
     expect(body.written).toBe(0);
     expect(body.minipaySetSize).toBe(0);
     expect(body.discovered).toBe(0);
-    // Hot path: skip Hasura + Redis SCAN + intersect when the set is empty.
     expect(mockDiscover).not.toHaveBeenCalled();
-    expect(mockGetAllLabels).not.toHaveBeenCalled();
+    expect(mockGetLabels).not.toHaveBeenCalled();
     expect(mockIntersect).not.toHaveBeenCalled();
     expect(mockImportLabels).not.toHaveBeenCalled();
   });

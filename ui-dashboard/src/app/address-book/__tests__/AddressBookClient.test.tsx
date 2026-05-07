@@ -130,8 +130,6 @@ vi.mock("@/lib/networks", async () => {
 type CapturedEditor = {
   address: string;
   initial?: { name?: string; tags?: string[] };
-  scope?: "global" | number;
-  chainId?: number;
   onClose: () => void;
 };
 let capturedEditor: CapturedEditor | null = null;
@@ -139,19 +137,7 @@ let capturedEditor: CapturedEditor | null = null;
 vi.mock("@/components/address-label-editor", () => ({
   AddressLabelEditor: (props: CapturedEditor) => {
     capturedEditor = props;
-    return (
-      <div
-        data-testid="editor-stub"
-        data-address={props.address}
-        data-scope={
-          props.scope === undefined
-            ? "undefined"
-            : typeof props.scope === "number"
-              ? `chain:${props.scope}`
-              : props.scope
-        }
-      />
-    );
+    return <div data-testid="editor-stub" data-address={props.address} />;
   },
 }));
 
@@ -243,7 +229,6 @@ function customEntry(
 ): AddressEntryRow {
   return {
     address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    scope: "global",
     name: "Custom Whale",
     tags: ["whale"],
     notes: undefined,
@@ -443,13 +428,11 @@ describe("AddressBookClient — search filter", () => {
         address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         name: "Whale Alice",
         tags: ["whale", "cex"],
-        scope: "global",
       }),
       customEntry({
         address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         name: "Bob Custodian",
         tags: ["unique-tag-xyz"],
-        scope: 42220,
       }),
     ];
   });
@@ -479,13 +462,16 @@ describe("AddressBookClient — search filter", () => {
     );
   });
 
-  it("matches by chain text ('all chains' for global scope)", () => {
+  it("matches by chain text ('all chains' for every custom row)", () => {
+    // Post-#332: every custom row renders as "All chains" since labels are
+    // address-keyed only. Both seeded customEntries match.
     render();
     setSearch("all chains");
-    expect(rowCount()).toBe(1);
-    expect(rowAddresses()[0]).toBe(
+    expect(rowCount()).toBe(2);
+    expect(rowAddresses().sort()).toEqual([
       "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    );
+      "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    ]);
   });
 
   it("matches by source badge text ('contract')", () => {
@@ -589,7 +575,6 @@ describe("AddressBookClient — edit modal", () => {
         tags: ["whale"],
         updatedAt: "2026-01-01T00:00:00Z",
       },
-      scope: "global",
     });
     render();
     expect(capturedEditor).toBeNull();
@@ -612,7 +597,7 @@ describe("AddressBookClient — edit modal", () => {
       notes: "some notes",
       updatedAt: "2026-01-01T00:00:00Z",
     };
-    mockGetEntry.mockReturnValue({ entry: resolvedEntry, scope: "global" });
+    mockGetEntry.mockReturnValue({ entry: resolvedEntry });
     render();
     clickByText("Edit");
     expect(capturedEditor?.initial?.name).toBe("Existing Name");
@@ -623,7 +608,6 @@ describe("AddressBookClient — edit modal", () => {
     mockCustomEntries = [customEntry()];
     mockGetEntry.mockReturnValue({
       entry: { name: "X", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
-      scope: "global",
     });
     render();
     clickByText("Edit");
@@ -635,26 +619,24 @@ describe("AddressBookClient — edit modal", () => {
     expect(container.querySelector('[data-testid="editor-stub"]')).toBeNull();
   });
 
-  it("contract rows render '+ Tag' which opens the editor with scope=global", () => {
+  it("contract rows render '+ Tag' which opens the editor for that address", () => {
     // No custom entries — only synthetic contracts from the mocked NETWORKS.
-    // Contract rows pass scope=global so editing a contract whose address
-    // has a global label doesn't silently migrate it to the row's chain
-    // (codex finding on PR #330). Reports are scope-free so this doesn't
-    // affect report lookup.
+    // Labels are address-keyed only post-#332, so the editor opens with the
+    // contract's address; chain context lives only in the static contract
+    // registry pre-fill below.
     mockCustomEntries = [];
     mockGetEntry.mockReturnValue(undefined);
     render();
     clickByText("+ Tag");
     expect(capturedEditor).not.toBeNull();
-    expect(capturedEditor?.scope).toBe("global");
+    expect(capturedEditor?.address).toBeTruthy();
   });
 
-  it("contract row's '+ Tag' targets the row's own chain (not the page's first chain)", () => {
-    // Regression for a refactor that lost the per-row chain context: targets
-    // the Monad ContractD row (chainId 143), not the Celo ContractC row, so
-    // any code path that hard-codes the first chain for every row's editor
-    // would fail this assertion. Editor `initial` should also carry the
-    // contract's name as a default.
+  it("contract row's '+ Tag' opens the editor with the row's address pre-filled", () => {
+    // Regression: targets the Monad ContractD row (chainId 143), not the Celo
+    // ContractC row. The editor should pre-fill with the contract's name
+    // sourced from the static registry. Labels are now address-keyed; chainId
+    // doesn't flow into the editor anymore.
     const monadNet = NETWORKS["monad-mainnet"];
     if (!monadNet) {
       // Cleanly skip if monad-mainnet ever leaves the config — surfaces as a
@@ -664,7 +646,6 @@ describe("AddressBookClient — edit modal", () => {
     mockCustomEntries = [];
     mockGetEntry.mockReturnValue(undefined);
     render();
-    // Find the +Tag button on the row whose address cell carries ContractD.
     const rows = Array.from(container.querySelectorAll("tbody tr"));
     const monadRow = rows.find((tr) => tr.textContent?.includes("ContractD"));
     if (!monadRow) {
@@ -683,10 +664,6 @@ describe("AddressBookClient — edit modal", () => {
     expect(capturedEditor?.address).toBe(
       "0xdddddddddddddddddddddddddddddddddddddddd",
     );
-    // Contract row passes scope=global (default for contracts without a
-    // custom label) — the chain context flows through `chainId` instead.
-    expect(capturedEditor?.scope).toBe("global");
-    expect(capturedEditor?.chainId).toBe(monadNet.chainId);
     expect(capturedEditor?.initial?.name).toBe("ContractD");
   });
 });
@@ -755,7 +732,7 @@ describe("AddressBookClient — export", () => {
 describe("AddressBookClient — CSV import", () => {
   it("posts CSV body with text/csv content-type and revalidates on success", async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ imported: { global: 1, chains: {} } }), {
+      new Response(JSON.stringify({ imported: { addresses: 1 } }), {
         status: 200,
       }),
     );
@@ -831,7 +808,7 @@ describe("AddressBookClient — CSV import", () => {
     // stay distinct from the generic "Import failed" path so a confused
     // user does not re-import and create duplicates.
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ imported: { global: 1, chains: {} } }), {
+      new Response(JSON.stringify({ imported: { addresses: 1 } }), {
         status: 200,
       }),
     );
@@ -883,10 +860,9 @@ describe("AddressBookClient — CSV import", () => {
 describe("AddressBookClient — JSON import variants", () => {
   async function importJson(payload: unknown, filename = "labels.json") {
     fetchMock.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ imported: { global: 0, chains: { "42220": 1 } } }),
-        { status: 200 },
-      ),
+      new Response(JSON.stringify({ imported: { addresses: 1 } }), {
+        status: 200,
+      }),
     );
     render();
     await dispatchFile(
@@ -998,7 +974,6 @@ describe("AddressBookClient — badges", () => {
     ];
     mockGetEntry.mockReturnValue({
       entry: { name: "X", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
-      scope: "global",
     });
     render();
     expect(tbodyBadges()).toContain("custom");
@@ -1019,7 +994,6 @@ describe("AddressBookClient — badges", () => {
         source: "arkham",
         updatedAt: "2026-01-01T00:00:00Z",
       },
-      scope: "global",
     });
     render();
     expect(tbodyBadges()).toContain("arkham");
@@ -1045,7 +1019,6 @@ describe("AddressBookClient — badges", () => {
         source: "minipay",
         updatedAt: "2026-01-01T00:00:00Z",
       },
-      scope: "global",
     });
     render();
     const badges = tbodyBadges();
@@ -1055,11 +1028,10 @@ describe("AddressBookClient — badges", () => {
     expect(badges).not.toContain("custom");
   });
 
-  it("renders the 'All chains' chain pill for global custom rows", () => {
+  it("renders the 'All chains' chain pill for custom rows", () => {
     mockCustomEntries = [
       customEntry({
         address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        scope: "global",
       }),
     ];
     render();
@@ -1070,7 +1042,6 @@ describe("AddressBookClient — badges", () => {
     mockCustomEntries = [
       customEntry({
         address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        scope: "global",
       }),
     ];
     mockGetEntry.mockReturnValue({
@@ -1080,7 +1051,6 @@ describe("AddressBookClient — badges", () => {
         isPublic: true,
         updatedAt: "2026-01-01T00:00:00Z",
       },
-      scope: "global",
     });
     render();
     expect(tbodyBadges()).toContain("public");
@@ -1093,7 +1063,6 @@ describe("AddressBookClient — badges", () => {
         isPublic: false,
         updatedAt: "2026-01-01T00:00:00Z",
       },
-      scope: "global",
     });
     render();
     expect(tbodyBadges()).toContain("private");

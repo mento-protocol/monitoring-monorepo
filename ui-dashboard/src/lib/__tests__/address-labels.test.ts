@@ -1,168 +1,152 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock @upstash/redis before importing the module under test
+// Mock @upstash/redis before importing the module under test.
+// `Redis` must be a constructor (use `function`, not arrow — vi.fn().mockImplementation()
+// produces a callable but not a constructor).
 vi.mock("@upstash/redis", () => {
-  const Redis = vi.fn();
-  Redis.prototype.scan = vi.fn();
-  Redis.prototype.hgetall = vi.fn();
-  Redis.prototype.hset = vi.fn();
-  Redis.prototype.hdel = vi.fn();
-  Redis.prototype.eval = vi.fn().mockResolvedValue(1);
-  return { Redis };
+  const hgetall = vi.fn();
+  const hset = vi.fn();
+  const hdel = vi.fn();
+  const scan = vi.fn();
+  const del = vi.fn();
+  return {
+    Redis: function MockRedis() {
+      return { hgetall, hset, hdel, scan, del };
+    },
+    __mocks: { hgetall, hset, hdel, scan, del },
+  };
 });
 
-// Stub env vars so getRedis() doesn't throw
 vi.stubEnv("UPSTASH_REDIS_REST_URL", "https://fake.upstash.io");
 vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "fake-token");
 
 import {
-  getAllLabels,
   getLabels,
   upsertEntry,
+  deleteLabel,
   importLabels,
+  readLegacyScopes,
+  dropLegacyScopes,
   upgradeEntry,
 } from "@/lib/address-labels";
-import { Redis } from "@upstash/redis";
+import * as upstash from "@upstash/redis";
 
-const evalMock = Redis.prototype.eval as ReturnType<typeof vi.fn>;
+const mocks = (
+  upstash as unknown as {
+    __mocks: {
+      hgetall: ReturnType<typeof vi.fn>;
+      hset: ReturnType<typeof vi.fn>;
+      hdel: ReturnType<typeof vi.fn>;
+      scan: ReturnType<typeof vi.fn>;
+      del: ReturnType<typeof vi.fn>;
+    };
+  }
+).__mocks;
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
 });
 
 describe("getLabels", () => {
-  it("returns all entries for a chain scope", async () => {
-    (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      {
-        "0xaaa": {
-          name: "One",
-          tags: [],
-          isPublic: true,
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
-        "0xbbb": {
-          name: "Two",
-          tags: [],
-          isPublic: false,
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
-        "0xccc": {
-          name: "Three",
-          tags: [],
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
+  it("returns all entries from the flat labels hash", async () => {
+    mocks.hgetall.mockResolvedValueOnce({
+      "0xaaa": {
+        name: "One",
+        tags: [],
+        isPublic: true,
+        updatedAt: "2026-01-01T00:00:00Z",
       },
-    );
-    const result = await getLabels(42220);
-    expect(Object.keys(result)).toHaveLength(3);
-  });
-
-  it("works for global scope", async () => {
-    (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      {
-        "0xaaa": {
-          name: "Cross-chain",
-          tags: [],
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
+      "0xbbb": {
+        name: "Two",
+        tags: [],
+        isPublic: false,
+        updatedAt: "2026-01-01T00:00:00Z",
       },
-    );
-    const result = await getLabels("global");
-    expect(Redis.prototype.hgetall).toHaveBeenCalledWith("labels:global");
-    expect(result["0xaaa"].name).toBe("Cross-chain");
+    });
+    const result = await getLabels();
+    expect(mocks.hgetall).toHaveBeenCalledWith("labels");
+    expect(Object.keys(result)).toHaveLength(2);
+    expect(result["0xaaa"].name).toBe("One");
   });
 
   it("returns empty object when hgetall returns null", async () => {
-    (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      null,
-    );
-    const result = await getLabels(42220);
+    mocks.hgetall.mockResolvedValueOnce(null);
+    const result = await getLabels();
     expect(result).toEqual({});
   });
+
+  it("auto-upgrades legacy v1 entries on read (label → name)", async () => {
+    mocks.hgetall.mockResolvedValueOnce({
+      "0xaaa": {
+        label: "Legacy",
+        category: "DeFi",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    });
+    const result = await getLabels();
+    expect(result["0xaaa"].name).toBe("Legacy");
+    expect(result["0xaaa"].tags).toEqual(["DeFi"]);
+    expect((result["0xaaa"] as Record<string, unknown>).label).toBeUndefined();
+  });
 });
 
-// Helpers for the atomic Lua-script path. The script takes the target
-// scope as KEYS[1], the static list of every other scope key as KEYS[2..],
-// and a flat [count, addr1, value1, addr2, value2, …] ARGV tuple.
-function evalCall(call: unknown[]): {
-  script: string;
-  keys: string[];
-  args: string[];
-} {
-  const [script, keys, args] = call as [string, string[], string[]];
-  return { script, keys, args };
-}
+describe("upsertEntry", () => {
+  it("writes a single HSET to the flat labels hash, lowercasing the address", async () => {
+    await upsertEntry("0xABC", { name: "Test", tags: [], isPublic: true });
+    expect(mocks.hset).toHaveBeenCalledTimes(1);
+    const [key, fields] = mocks.hset.mock.calls[0];
+    expect(key).toBe("labels");
+    const value = JSON.parse((fields as Record<string, string>)["0xabc"]);
+    expect(value.name).toBe("Test");
+    expect(value.isPublic).toBe(true);
+    expect(value.updatedAt).toBeTruthy();
+    expect(value.createdAt).toBeTruthy();
+  });
 
-function evalEntries(args: string[]): Array<{ addr: string; value: unknown }> {
-  const count = Number(args[0]);
-  const entries: Array<{ addr: string; value: unknown }> = [];
-  for (let i = 0; i < count; i++) {
-    entries.push({
-      addr: args[1 + i * 2],
-      value: JSON.parse(args[2 + i * 2]),
-    });
-  }
-  return entries;
-}
-
-describe("upsertEntry — persists isPublic and enforces strict either/or", () => {
-  it("stores isPublic: true when provided, writes to per-chain key", async () => {
-    await upsertEntry(42220, "0xABC", {
+  it("preserves caller-supplied createdAt (e.g. from a prior entry)", async () => {
+    await upsertEntry("0xABC", {
       name: "Test",
       tags: [],
-      isPublic: true,
+      createdAt: "2025-01-01T00:00:00.000Z",
     });
-    expect(evalMock).toHaveBeenCalledTimes(1);
-    const { keys, args } = evalCall(evalMock.mock.calls[0]);
-    expect(keys[0]).toBe("labels:42220");
-    // Script no longer runs `KEYS 'labels:*'` itself; it iterates the
-    // explicit KEYS[2..] list passed by the caller.
-    expect(keys.slice(1).length).toBeGreaterThan(0);
-    expect(keys.slice(1)).toContain("labels:global");
-    const [{ addr, value }] = evalEntries(args);
-    expect(addr).toBe("0xabc");
-    expect((value as { isPublic: boolean }).isPublic).toBe(true);
-  });
-
-  it("writes to labels:global when scope is 'global'", async () => {
-    await upsertEntry("global", "0xABC", { name: "Test", tags: [] });
-    const { keys } = evalCall(evalMock.mock.calls[0]);
-    expect(keys[0]).toBe("labels:global");
-    // Other scopes pass through as KEYS[2..]; chain-scope keys must be
-    // included so the script can HDEL them.
-    expect(keys.slice(1)).toContain("labels:42220");
-  });
-
-  it("passes the static scope-key list via KEYS[2..] (race-safe + bounded)", async () => {
-    await upsertEntry(42220, "0xABC", { name: "Celo", tags: [] });
-    const { script, keys } = evalCall(evalMock.mock.calls[0]);
-    // The script no longer runs the `KEYS 'labels:*'` keyspace scan — it
-    // iterates the explicit KEYS[2..] array. Static derivation keeps the
-    // race window closed (every concurrent writer derives the same list
-    // deterministically from NETWORKS) AND keeps the script bounded.
-    expect(script).not.toContain("'labels:*'");
-    expect(script).not.toContain("redis.call('KEYS'");
-    expect(script).toContain("for i = 2, #KEYS");
-    expect(script).toContain("HDEL");
-    expect(script).toContain("HSET");
-    // KEYS[1] target, KEYS[2..] every other potential scope.
-    expect(keys[0]).toBe("labels:42220");
-    expect(keys.slice(1)).toContain("labels:global");
-  });
-
-  it("upsert at global writes via the same atomic script path", async () => {
-    await upsertEntry("global", "0xABC", { name: "Cross-chain", tags: [] });
-    const { keys, args } = evalCall(evalMock.mock.calls[0]);
-    expect(keys[0]).toBe("labels:global");
-    const [{ addr, value }] = evalEntries(args);
-    expect(addr).toBe("0xabc");
-    expect((value as { name: string }).name).toBe("Cross-chain");
+    const [, fields] = mocks.hset.mock.calls[0];
+    const value = JSON.parse((fields as Record<string, string>)["0xabc"]);
+    expect(value.createdAt).toBe("2025-01-01T00:00:00.000Z");
   });
 });
 
-describe("importLabels — isPublic coercion and invariant", () => {
-  it('coerces isPublic: "yes" to false', async () => {
-    await importLabels(42220, {
+describe("deleteLabel", () => {
+  it("HDEL removes the address from the flat hash, lowercasing", async () => {
+    await deleteLabel("0xABC");
+    expect(mocks.hdel).toHaveBeenCalledWith("labels", "0xabc");
+  });
+});
+
+describe("importLabels", () => {
+  it("batches all imports into a single HSET", async () => {
+    await importLabels({
+      "0xaaa": {
+        name: "A",
+        tags: [],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+      "0xBBB": {
+        name: "B",
+        tags: [],
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    });
+    expect(mocks.hset).toHaveBeenCalledTimes(1);
+    const [key, fields] = mocks.hset.mock.calls[0];
+    expect(key).toBe("labels");
+    expect(Object.keys(fields as Record<string, string>).sort()).toEqual([
+      "0xaaa",
+      "0xbbb",
+    ]);
+  });
+
+  it("coerces non-true isPublic to false", async () => {
+    await importLabels({
       "0xabc": {
         name: "Test",
         tags: [],
@@ -171,13 +155,13 @@ describe("importLabels — isPublic coercion and invariant", () => {
         updatedAt: "2026-01-01T00:00:00Z",
       },
     });
-    const { args } = evalCall(evalMock.mock.calls[0]);
-    const [{ value }] = evalEntries(args);
-    expect((value as { isPublic: boolean }).isPublic).toBe(false);
+    const [, fields] = mocks.hset.mock.calls[0];
+    const value = JSON.parse((fields as Record<string, string>)["0xabc"]);
+    expect(value.isPublic).toBe(false);
   });
 
-  it("keeps isPublic: true when it is strictly true", async () => {
-    await importLabels(42220, {
+  it("keeps isPublic: true when strictly true", async () => {
+    await importLabels({
       "0xabc": {
         name: "Test",
         tags: [],
@@ -185,63 +169,24 @@ describe("importLabels — isPublic coercion and invariant", () => {
         updatedAt: "2026-01-01T00:00:00Z",
       },
     });
-    const { args } = evalCall(evalMock.mock.calls[0]);
-    const [{ value }] = evalEntries(args);
-    expect((value as { isPublic: boolean }).isPublic).toBe(true);
+    const [, fields] = mocks.hset.mock.calls[0];
+    const value = JSON.parse((fields as Record<string, string>)["0xabc"]);
+    expect(value.isPublic).toBe(true);
   });
 
-  it("batches all imported addresses into a single atomic EVAL", async () => {
-    await importLabels("global", {
-      "0xaaa": {
-        name: "A",
-        tags: [],
-        updatedAt: "2026-01-01T00:00:00Z",
-      },
-      "0xbbb": {
-        name: "B",
-        tags: [],
-        updatedAt: "2026-01-01T00:00:00Z",
-      },
-    });
-
-    expect(evalMock).toHaveBeenCalledTimes(1);
-    const { keys, args } = evalCall(evalMock.mock.calls[0]);
-    expect(keys[0]).toBe("labels:global");
-    // Script iterates the static scope list passed via KEYS[2..]; chain
-    // scopes must be present so the script can HDEL across all of them.
-    expect(keys.slice(1)).toContain("labels:42220");
-    expect(Number(args[0])).toBe(2);
-    const addrs = evalEntries(args).map((e) => e.addr);
-    expect(addrs).toEqual(["0xaaa", "0xbbb"]);
-  });
-
-  it("passes the same static scope-key list as upsertEntry (race-safe)", async () => {
-    await importLabels(42220, {
-      "0xaaa": {
-        name: "Test",
-        tags: [],
-        updatedAt: "2026-04-30T00:00:00Z",
-      },
-    });
-    const { script, keys } = evalCall(evalMock.mock.calls[0]);
-    expect(script).not.toContain("'labels:*'");
-    expect(keys[0]).toBe("labels:42220");
-    expect(keys.slice(1)).toContain("labels:global");
-  });
-
-  it("is a no-op when the batch is empty (no EVAL call)", async () => {
-    await importLabels("global", {});
-    expect(evalMock).not.toHaveBeenCalled();
+  it("is a no-op when the batch is empty", async () => {
+    await importLabels({});
+    expect(mocks.hset).not.toHaveBeenCalled();
   });
 });
 
-describe("getAllLabels — paginated SCAN", () => {
-  it("returns { global, chains } from a single-page scan", async () => {
-    (Redis.prototype.scan as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+describe("readLegacyScopes — migration helper", () => {
+  it("returns every legacy labels:* hash via SCAN", async () => {
+    mocks.scan.mockResolvedValueOnce([
       "0",
-      ["labels:global", "labels:42220"],
+      ["labels:global", "labels:42220", "labels"],
     ]);
-    (Redis.prototype.hgetall as ReturnType<typeof vi.fn>)
+    mocks.hgetall
       .mockResolvedValueOnce({
         "0xggg": {
           name: "Global",
@@ -253,40 +198,34 @@ describe("getAllLabels — paginated SCAN", () => {
         "0xccc": { name: "Celo", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
       });
 
-    const result = await getAllLabels();
-    expect(result.global["0xggg"].name).toBe("Global");
-    expect(result.chains["42220"]["0xccc"].name).toBe("Celo");
-  });
-
-  it("follows cursor pagination across multiple pages", async () => {
-    (Redis.prototype.scan as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce(["5", ["labels:42220"]])
-      .mockResolvedValueOnce(["0", ["labels:143"]]);
-
-    (Redis.prototype.hgetall as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({
-        "0xaaa": { name: "Celo", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
-      })
-      .mockResolvedValueOnce({
-        "0xbbb": { name: "Monad", tags: [], updatedAt: "2026-01-01T00:00:00Z" },
-      });
-
-    const result = await getAllLabels();
-    expect(Redis.prototype.scan).toHaveBeenCalledTimes(2);
-    expect(result.chains).toHaveProperty("42220");
-    expect(result.chains).toHaveProperty("143");
-    expect(result.global).toEqual({});
-  });
-
-  it("returns empty global + chains when no labels:* keys exist", async () => {
-    (Redis.prototype.scan as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
-      "0",
-      [],
+    const { scopes } = await readLegacyScopes();
+    // Only labels:global and labels:42220 — the new flat `labels` key is excluded.
+    expect(scopes.map((s) => s.key).sort()).toEqual([
+      "labels:42220",
+      "labels:global",
     ]);
+    const global = scopes.find((s) => s.key === "labels:global");
+    expect(global?.entries["0xggg"].name).toBe("Global");
+  });
 
-    const result = await getAllLabels();
-    expect(result).toEqual({ global: {}, chains: {} });
-    expect(Redis.prototype.scan).toHaveBeenCalledTimes(1);
+  it("excludes the new flat 'labels' key from the legacy scan result", async () => {
+    mocks.scan.mockResolvedValueOnce(["0", ["labels"]]);
+    const { scopes } = await readLegacyScopes();
+    expect(scopes).toHaveLength(0);
+  });
+});
+
+describe("dropLegacyScopes — migration helper", () => {
+  it("DELs every legacy labels:* hash, leaves the flat 'labels' key intact", async () => {
+    mocks.scan.mockResolvedValueOnce([
+      "0",
+      ["labels:global", "labels:42220", "labels"],
+    ]);
+    await dropLegacyScopes();
+    expect(mocks.del).toHaveBeenCalledTimes(2);
+    expect(mocks.del).toHaveBeenCalledWith("labels:global");
+    expect(mocks.del).toHaveBeenCalledWith("labels:42220");
+    expect(mocks.del).not.toHaveBeenCalledWith("labels");
   });
 });
 
@@ -311,38 +250,9 @@ describe("upgradeEntry — backward compat", () => {
     expect(entry.tags).toEqual(["CEX"]);
   });
 
-  it("upgrades v1 entries without category (empty tags)", () => {
-    const entry = upgradeEntry({
-      label: "Old Name",
-      updatedAt: "2026-01-01T00:00:00Z",
-    });
-    expect(entry.name).toBe("Old Name");
-    expect(entry.tags).toEqual([]);
-  });
-
   it("handles entries with neither name nor label", () => {
     const entry = upgradeEntry({ updatedAt: "2026-01-01T00:00:00Z" });
     expect(entry.name).toBe("");
     expect(entry.tags).toEqual([]);
-  });
-
-  it("auto-upgrades v1 entries on getLabels read", async () => {
-    (Redis.prototype.hgetall as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      {
-        "0xaaa": {
-          label: "Legacy",
-          category: "DeFi",
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
-      },
-    );
-    const result = await getLabels(42220);
-    expect(result["0xaaa"].name).toBe("Legacy");
-    expect(result["0xaaa"].tags).toEqual(["DeFi"]);
-    // label/category should not exist in returned entry
-    expect((result["0xaaa"] as Record<string, unknown>).label).toBeUndefined();
-    expect(
-      (result["0xaaa"] as Record<string, unknown>).category,
-    ).toBeUndefined();
   });
 });

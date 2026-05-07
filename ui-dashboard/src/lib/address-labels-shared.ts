@@ -25,32 +25,30 @@ export type AddressEntry = {
   updatedAt: string;
 };
 
-/**
- * Where a label lives. `"global"` means cross-chain — the label applies to
- * every chain unless a chain-specific entry exists for that address. A
- * numeric value is a chainId, meaning the label applies only on that chain.
- * Per-address, exactly one scope holds the entry (strict either/or).
- */
-export type Scope = "global" | number;
-
 /** Full record as returned from the API -- includes the address itself. */
 export type AddressEntryRecord = AddressEntry & {
   address: string;
 };
 
-/** Shape of a full export/backup snapshot. */
+/** Shape of a full export/backup snapshot.
+ *
+ * The `chains` field is retained as an OPTIONAL READ for backward compat
+ * with older snapshots that predate the global-only refactor — old backups
+ * with `labels:{chainId}` entries can still be imported. New writes always
+ * produce `addresses` only. */
 export type AddressLabelsSnapshot = {
   exportedAt: string;
-  /** Cross-chain entries. Optional for back-compat with older snapshots. */
+  /** Flat per-address entries — current shape. */
+  addresses?: Record<string, AddressEntry>;
+  /** Legacy: cross-chain entries from pre-flat snapshots. Read-only. */
   global?: Record<string, AddressEntry>;
-  /** chainId → address (lower) → entry */
-  chains: Record<string, Record<string, AddressEntry>>;
+  /** Legacy: chainId → address → entry. Read-only; merged into addresses on import. */
+  chains?: Record<string, Record<string, AddressEntry>>;
 };
 
-/** Per-scope tally of newly-imported labels returned by the import API. */
+/** Tally of newly-imported labels returned by the import API. */
 export type ImportedCounts = {
-  global: number;
-  chains: Record<string, number>;
+  addresses: number;
 };
 
 /**

@@ -1,22 +1,8 @@
-import { NETWORKS, networkIdForChainId } from "@/lib/networks";
 import type { ImportedCounts } from "@/lib/address-labels-shared";
 
 function formatImportCounts(counts?: ImportedCounts): string {
-  if (!counts) return "Imported 0 labels.";
-  const parts: string[] = [];
-  if (counts.global > 0) {
-    parts.push(`${counts.global} global`);
-  }
-  for (const [chainId, n] of Object.entries(counts.chains)) {
-    if (n === 0) continue;
-    const id = networkIdForChainId(Number(chainId));
-    const label = id ? NETWORKS[id].label : `Chain ${chainId}`;
-    parts.push(`${n} ${label}-only`);
-  }
-  const total =
-    counts.global + Object.values(counts.chains).reduce((a, b) => a + b, 0);
-  if (parts.length === 0) return "Imported 0 labels.";
-  return `Imported ${total} label${total !== 1 ? "s" : ""}: ${parts.join(", ")}.`;
+  const total = counts?.addresses ?? 0;
+  return `Imported ${total} label${total !== 1 ? "s" : ""}.`;
 }
 
 async function postImport(

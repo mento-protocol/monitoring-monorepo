@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
-import { getAllLabels, importLabels } from "@/lib/address-labels";
+import { getLabels, importLabels } from "@/lib/address-labels";
 import type { AddressEntry } from "@/lib/address-labels-shared";
 import { discoverMentoAddresses } from "@/lib/mento-address-discovery";
 import { requireCronAuth } from "@/lib/cron-auth";
@@ -116,27 +116,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(body);
     }
 
-    const [discovery, allLabels] = await Promise.all([
+    const [discovery, existing] = await Promise.all([
       discoverMentoAddresses(hasuraUrl, CELO_CHAIN_ID),
-      getAllLabels(),
+      getLabels(),
     ]);
 
     const { addresses, perEntity } = discovery;
 
-    // Flatten every scope into one map for filtering. Same rationale as
-    // arkham/enrich/route.ts:135-138 — strict either/or invariant means
-    // no key collisions; we filter against the union so we don't write
-    // a duplicate when a legacy chain-scoped row exists.
-    const existing: Record<string, AddressEntry> = { ...allLabels.global };
-    for (const chainEntries of Object.values(allLabels.chains)) {
-      Object.assign(existing, chainEntries);
-    }
-
     // Drop anything already labelled by any source. MiniPay writes only
     // to fresh addresses to avoid stomping Arkham/manual labels.
     const candidates = addresses
-      .map((a) => a.toLowerCase())
-      .filter((a) => !existing[a]);
+      .map((a: string) => a.toLowerCase())
+      .filter((a: string) => !existing[a]);
 
     // Intersect before slicing: `discoverMentoAddresses` returns
     // alphabetically-sorted addresses, so a `.slice(0, maxAddresses)`
@@ -152,10 +143,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
 
     if (mode !== "dryRun" && Object.keys(toWrite).length > 0) {
-      // Write to global scope — MiniPay attestations are issued on Celo
-      // but the EOA itself is chain-agnostic. Mirrors the Arkham scope
-      // choice (arkham/enrich/route.ts:178-185).
-      await importLabels("global", toWrite);
+      // Single labels hash — MiniPay attestations are issued on Celo but
+      // the EOA itself is chain-agnostic, which matches the global-only
+      // address-keyed model.
+      await importLabels(toWrite);
     }
 
     const body: TagResponse = {

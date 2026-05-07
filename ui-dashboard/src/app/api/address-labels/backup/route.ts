@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import { put } from "@vercel/blob";
-import { getAllLabels, type AddressLabelsSnapshot } from "@/lib/address-labels";
+import { getLabels, type AddressLabelsSnapshot } from "@/lib/address-labels";
 import { requireCronAuth } from "@/lib/cron-auth";
 
 // Vercel cron jobs invoke with GET, not POST. Read-only handler taking no
-// body — GET is the right verb. (Cursor + Codex flagged this on PR #236.)
+// body — GET is the right verb.
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const authBail = await requireCronAuth(req, "backup");
   if (authBail) return authBail;
@@ -16,12 +16,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // monitored — recovery is by spot-checking the Blob store for a missing
   // date file.
   try {
-    const { global, chains } = await getAllLabels();
+    const labels = await getLabels();
     const now = new Date();
     const snapshot: AddressLabelsSnapshot = {
       exportedAt: now.toISOString(),
-      global,
-      chains,
+      addresses: labels,
     };
 
     const date = now.toISOString().slice(0, 10);

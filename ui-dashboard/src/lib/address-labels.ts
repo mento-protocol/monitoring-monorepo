@@ -1,5 +1,4 @@
 import { Redis } from "@upstash/redis";
-import { NETWORKS } from "@/lib/networks";
 
 // Re-export all isomorphic types and utilities from the shared module.
 // This keeps backward-compat for existing imports from "@/lib/address-labels"
@@ -10,7 +9,6 @@ export {
   type AddressEntryRecord,
   type AddressLabelsSnapshot,
   type ImportedCounts,
-  type Scope,
   ARKHAM_TAG,
   MINIPAY_SOURCE,
   isArkhamSourced,
@@ -20,54 +18,15 @@ export {
   sanitizeEntry,
 } from "./address-labels-shared";
 
-import {
-  upgradeEntries,
-  type AddressEntry,
-  type Scope,
-} from "./address-labels-shared";
+import { upgradeEntries, type AddressEntry } from "./address-labels-shared";
 
-// Redis key helpers
-
-const GLOBAL_KEY = "labels:global";
-
-function labelsKey(scope: Scope): string {
-  return scope === "global" ? GLOBAL_KEY : `labels:${scope}`;
-}
-
-// Static list of every scope key we may ever write to. Derived from the
-// NETWORKS config (each chain → `labels:{chainId}`) plus the cross-chain
-// global scope. Used by the strict-either-or Lua script as KEYS[2..] so
-// the script can iterate a tiny, deterministic key list instead of running
-// `redis.call('KEYS', 'labels:*')` over the full Redis keyspace — that
-// scan is O(total-keys-in-db), and after PR #258's `minipay:users:*`
-// sharding the keyspace contains 16M+ entries, pushing the in-script scan
-// past Upstash's 250 ms per-script Lua timeout.
-//
-// Static derivation (vs. a client-side SCAN snapshot before the EVAL)
-// keeps the cross-scope HDEL race-free: every concurrent writer derives
-// the same key list deterministically, the script remains atomic, and
-// Redis serializes Lua executions, so last-writer-wins preserves the
-// strict either/or invariant even under concurrent writes of the same
-// address to different scopes.
-const ALL_LABEL_SCOPE_KEYS: readonly string[] = Object.freeze([
-  GLOBAL_KEY,
-  ...Array.from(
-    new Set(Object.values(NETWORKS).map((n) => `labels:${n.chainId}`)),
-  ),
-]);
-
-function parseScopeFromKey(key: string): Scope | null {
-  if (key === GLOBAL_KEY) return "global";
-  const suffix = key.slice("labels:".length);
-  // Strict decimal-only parse — matches the import-route guards so malformed
-  // keys like `labels:1e3` or `labels:0x1` don't silently resolve to a valid
-  // chainId and collide with real entries in `getAllLabels`.
-  if (!/^\d+$/.test(suffix)) return null;
-  const n = Number(suffix);
-  return Number.isInteger(n) && n > 0 ? n : null;
-}
-
-// Redis client (server-side only)
+// Redis layout: a single `labels` hash keyed by lowercase address. Labels
+// are not chain-scoped — same EVM address means same entity (same private
+// key derives the same address across every chain), so a single label
+// applies wherever the address appears. Earlier per-scope storage caused
+// recurring scope-mismatch bugs that the model itself doesn't justify
+// (mirrors the reports refactor on PR #330).
+const LABELS_KEY = "labels";
 
 function getRedis(): Redis {
   const url = process.env.UPSTASH_REDIS_REST_URL;
@@ -80,98 +39,21 @@ function getRedis(): Redis {
   return new Redis({ url, token });
 }
 
-// Paginated SCAN — returns every existing `labels:*` key.
-async function listAllScopeKeys(redis: Redis): Promise<string[]> {
-  const keys: string[] = [];
-  let cursor = 0;
-  do {
-    const [nextCursor, batch] = await redis.scan(cursor, {
-      match: "labels:*",
-      count: 100,
-    });
-    cursor = Number(nextCursor);
-    keys.push(...batch);
-  } while (cursor !== 0);
-  return keys;
-}
-
-// Lua script that atomically writes a batch of (address, value) pairs to a
-// target scope and HDELs the same addresses from every other `labels:*`
-// scope.
-//
-// Contract:
-//   KEYS[1]    = target scope key (`labels:global` or `labels:{chainId}`)
-//   KEYS[2..]  = every OTHER potentially-existent scope key (caller passes
-//                the full `ALL_LABEL_SCOPE_KEYS` list verbatim — the script
-//                filters out KEYS[1] itself, so `HDEL` on the target is a
-//                no-op the script doesn't perform)
-//   ARGV[1]    = decimal count N of (address, value) pairs
-//   ARGV[2..]  = address, JSON-value, address, JSON-value, … (2N strings)
-//
-// We pass the scope key list via KEYS instead of running
-// `redis.call('KEYS', 'labels:*')` inside the script. The `KEYS` command
-// is O(total-keys-in-db); after PR #258's `minipay:users:*` sharding the
-// keyspace contains 16M+ entries, pushing the in-script scan past
-// Upstash's 250 ms per-script Lua timeout. Static derivation from
-// `NETWORKS` keeps the iteration bounded to the (small) set of chain
-// scopes we actually support.
-//
-// Race-safety: deriving from a static config (every concurrent writer
-// computes the same list deterministically) is what closes the race
-// window that a client-side SCAN snapshot would open. The script itself
-// remains atomic and Redis serializes Lua executions, so two concurrent
-// writes of the same address to different scopes resolve as
-// last-writer-wins with the strict either/or invariant intact.
-//
-// Returns the number of pairs written (for assertions/logging).
-const STRICT_EITHER_OR_SCRIPT = `
-local targetKey = KEYS[1]
-local count = tonumber(ARGV[1])
-if count == nil or count <= 0 then return 0 end
-
-local addrs = {}
-local hsetArgs = { targetKey }
-for i = 0, count - 1 do
-  local addr = ARGV[2 + i * 2]
-  local value = ARGV[3 + i * 2]
-  addrs[#addrs + 1] = addr
-  hsetArgs[#hsetArgs + 1] = addr
-  hsetArgs[#hsetArgs + 1] = value
-end
-redis.call('HSET', unpack(hsetArgs))
-
-for i = 2, #KEYS do
-  local k = KEYS[i]
-  if k ~= targetKey then
-    redis.call('HDEL', k, unpack(addrs))
-  end
-end
-
-return count
-`;
-
 // Data access helpers (all server-side)
 
-export async function getLabels(
-  scope: Scope,
-): Promise<Record<string, AddressEntry>> {
+export async function getLabels(): Promise<Record<string, AddressEntry>> {
   const redis = getRedis();
-  const raw = await redis.hgetall<Record<string, Record<string, unknown>>>(
-    labelsKey(scope),
-  );
+  const raw =
+    await redis.hgetall<Record<string, Record<string, unknown>>>(LABELS_KEY);
   return raw ? upgradeEntries(raw as Record<string, unknown>) : {};
 }
 
 /**
- * Upsert an entry at the target scope.
- *
- * Executes HSET + HDEL-from-every-other-scope as a single atomic Lua script
- * on the Redis server. This closes the race where two concurrent writers
- * creating first-time entries for the same address on different chain
- * scopes would each miss the other's new key via a separate SCAN.
+ * Upsert a label entry for an address. Single-key write; no scope iteration,
+ * no cross-scope HDEL — the per-scope architecture was rolled back, so the
+ * write is just an HSET.
  */
 export async function upsertEntry(
-  scope: Scope,
   address: string,
   entry: Omit<AddressEntry, "updatedAt">,
 ): Promise<void> {
@@ -187,76 +69,26 @@ export async function upsertEntry(
     updatedAt: now,
   };
   const lower = address.toLowerCase();
-  const targetKey = labelsKey(scope);
-
-  await redis.eval(
-    STRICT_EITHER_OR_SCRIPT,
-    [targetKey, ...ALL_LABEL_SCOPE_KEYS],
-    ["1", lower, JSON.stringify(value)],
-  );
+  await redis.hset(LABELS_KEY, { [lower]: JSON.stringify(value) });
 }
 
-export async function deleteLabel(
-  scope: Scope,
-  address: string,
-): Promise<void> {
+export async function deleteLabel(address: string): Promise<void> {
   const redis = getRedis();
-  await redis.hdel(labelsKey(scope), address.toLowerCase());
+  await redis.hdel(LABELS_KEY, address.toLowerCase());
 }
 
 /**
- * Read every label across every scope.
- *
- * Returns { global, chains } — `global` holds cross-chain entries,
- * `chains[chainId]` holds chain-specific entries.
- */
-export async function getAllLabels(): Promise<{
-  global: Record<string, AddressEntry>;
-  chains: Record<string, Record<string, AddressEntry>>;
-}> {
-  const redis = getRedis();
-  const allKeys = await listAllScopeKeys(redis);
-
-  let global: Record<string, AddressEntry> = {};
-  const chains: Record<string, Record<string, AddressEntry>> = {};
-
-  await Promise.all(
-    allKeys.map(async (key) => {
-      const raw =
-        await redis.hgetall<Record<string, Record<string, unknown>>>(key);
-      if (!raw) return;
-      const entries = upgradeEntries(raw as Record<string, unknown>);
-      const parsedScope = parseScopeFromKey(key);
-      if (parsedScope === "global") {
-        global = entries;
-      } else if (typeof parsedScope === "number") {
-        chains[String(parsedScope)] = entries;
-      }
-      // Silently skip keys that don't parse (shouldn't happen with our SCAN
-      // pattern but guards against malformed keys).
-    }),
-  );
-
-  return { global, chains };
-}
-
-/**
- * Import a batch of labels into a single scope.
- *
- * Uses the same atomic Lua script as `upsertEntry` so a batch write +
- * cross-scope HDEL completes with strict either/or guarantees even under
- * concurrent writers (Redis serializes Lua executions).
+ * Bulk import a batch of labels. Same shape as `upsertEntry` but as a single
+ * HSET call so an N-entry import is one round trip.
  */
 export async function importLabels(
-  scope: Scope,
   labels: Record<string, AddressEntry>,
 ): Promise<void> {
   const entries = Object.entries(labels);
   if (entries.length === 0) return;
   const redis = getRedis();
-  const targetKey = labelsKey(scope);
 
-  const args: string[] = [String(entries.length)];
+  const fields: Record<string, string> = {};
   const now = new Date().toISOString();
   for (const [addr, entry] of entries) {
     const normalized: AddressEntry = {
@@ -265,12 +97,77 @@ export async function importLabels(
       createdAt: entry.createdAt ?? now,
       updatedAt: entry.updatedAt ?? now,
     };
-    args.push(addr.toLowerCase(), JSON.stringify(normalized));
+    fields[addr.toLowerCase()] = JSON.stringify(normalized);
   }
 
-  await redis.eval(
-    STRICT_EITHER_OR_SCRIPT,
-    [targetKey, ...ALL_LABEL_SCOPE_KEYS],
-    args,
+  await redis.hset(LABELS_KEY, fields);
+}
+
+// Migration helpers — used by `/api/address-labels/migrate-flat` to merge
+// per-chain + legacy global entries into the flat `labels` hash. NOT used
+// by runtime CRUD.
+
+/**
+ * Read every legacy scope key (`labels:global` + `labels:{chainId}`) currently
+ * in Redis. Used only by the migration route. Returns the raw per-scope
+ * snapshots so the migration can decide how to resolve conflicts.
+ */
+export async function readLegacyScopes(): Promise<{
+  scopes: Array<{
+    key: string;
+    entries: Record<string, AddressEntry>;
+  }>;
+}> {
+  const redis = getRedis();
+  // Paginated SCAN — old codepath had a static NETWORKS-derived list;
+  // for the migration we want EVERY existing key matching the legacy
+  // pattern, in case some chain isn't in NETWORKS anymore.
+  const keys: string[] = [];
+  let cursor = 0;
+  do {
+    const [nextCursor, batch] = await redis.scan(cursor, {
+      match: "labels:*",
+      count: 100,
+    });
+    cursor = Number(nextCursor);
+    keys.push(...batch);
+  } while (cursor !== 0);
+
+  // Filter to the legacy shape: `labels:global` or `labels:{number}`. Skip
+  // the new flat `labels` key (no colon).
+  const legacyKeys = keys.filter((k) => /^labels:(global|\d+)$/.test(k));
+
+  const scopes = await Promise.all(
+    legacyKeys.map(async (key) => {
+      const raw =
+        await redis.hgetall<Record<string, Record<string, unknown>>>(key);
+      const entries = raw ? upgradeEntries(raw as Record<string, unknown>) : {};
+      return { key, entries };
+    }),
   );
+
+  return { scopes };
+}
+
+/**
+ * Delete the legacy per-scope hashes after the merge is verified. Idempotent
+ * (HDEL is a no-op on missing keys via the SCAN-then-DEL pattern).
+ */
+export async function dropLegacyScopes(): Promise<void> {
+  const redis = getRedis();
+  const keys: string[] = [];
+  let cursor = 0;
+  do {
+    const [nextCursor, batch] = await redis.scan(cursor, {
+      match: "labels:*",
+      count: 100,
+    });
+    cursor = Number(nextCursor);
+    keys.push(...batch);
+  } while (cursor !== 0);
+
+  const legacyKeys = keys.filter((k) => /^labels:(global|\d+)$/.test(k));
+  for (const key of legacyKeys) {
+    await redis.del(key);
+  }
 }

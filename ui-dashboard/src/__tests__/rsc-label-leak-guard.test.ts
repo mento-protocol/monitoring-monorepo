@@ -29,6 +29,10 @@ const RUNTIME_IMPORT_ALLOWLIST = new Set<string>([
   "src/app/api/address-labels/backup/route.ts",
   "src/app/api/address-labels/export/route.ts",
   "src/app/api/address-labels/import/route.ts",
+  // One-shot migration endpoint — bearer-or-session gated; reads legacy
+  // per-scope hashes, merges, writes the flat key. Snapshots to Vercel Blob
+  // before mutating. Expected to import Redis-backed helpers.
+  "src/app/api/address-labels/migrate-flat/route.ts",
   // CRON_SECRET-gated cron endpoint that writes Arkham-sourced labels.
   // Same posture as backup: never serialises labels into HTML/RSC, only
   // reads to diff against existing entries before writing new ones.

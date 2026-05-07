@@ -9,13 +9,6 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock the server-only `@/lib/address-labels` module so the import.ts file can
-// be loaded without an Upstash Redis client. We re-export the real shared
-// helpers (sanitizeEntry, upgradeEntries, ARKHAM_TAG, types) and stub out the
-// server functions (importLabels, getAllLabels) — matching the pattern in
-// route.test.ts. We import the real shared module and re-export its members
-// instead of duplicating sanitizeEntry/upgradeEntry behaviour, so these tests
-// assert against the production semantics of those helpers.
 vi.mock("@/lib/address-labels", async () => {
   const shared = await vi.importActual<
     typeof import("@/lib/address-labels-shared")
@@ -24,21 +17,18 @@ vi.mock("@/lib/address-labels", async () => {
     ...shared,
     importLabels: vi.fn().mockResolvedValue(undefined),
     getLabels: vi.fn().mockResolvedValue({}),
-    getAllLabels: vi.fn().mockResolvedValue({ global: {}, chains: {} }),
   };
 });
 
 import type { AddressEntry } from "@/lib/address-labels";
-import { getAllLabels } from "@/lib/address-labels";
+import { getLabels } from "@/lib/address-labels";
 
 import {
-  addCount,
-  buildCrossScopeExisting,
   emptyCounts,
   isEntriesMap,
   isGnosisSafeFormat,
   isSnapshot,
-  mergeWithCrossScope,
+  mergeWithExisting,
   parseCsv,
   sanitizeAndFilter,
   splitCsvLine,
@@ -47,7 +37,6 @@ import {
 
 const ADDR_A = "0x" + "a".repeat(40);
 const ADDR_B = "0x" + "b".repeat(40);
-const ADDR_C = "0x" + "c".repeat(40);
 
 function entry(overrides: Partial<AddressEntry> = {}): AddressEntry {
   return {
@@ -60,10 +49,7 @@ function entry(overrides: Partial<AddressEntry> = {}): AddressEntry {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
-    global: {},
-    chains: {},
-  });
+  (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
 });
 
 describe("splitCsvLine", () => {
@@ -78,8 +64,6 @@ describe("splitCsvLine", () => {
   });
 
   it("treats trailing whitespace as part of the cell (no implicit trim)", () => {
-    // splitCsvLine is the lowest-level tokenizer — trimming is the caller's
-    // responsibility (parseCsv calls .trim() on each cell after split).
     const result = splitCsvLine("foo , bar  ");
     expect(result).toEqual({ cols: ["foo ", " bar  "] });
   });
@@ -122,18 +106,18 @@ describe("parseCsv", () => {
     const csv = `address,name\n${ADDR_A},Alice`;
     const result = parseCsv(csv);
     expect(result).toEqual({
-      rows: [{ address: ADDR_A, name: "Alice", tags: [], scope: "global" }],
+      rows: [{ address: ADDR_A, name: "Alice", tags: [] }],
       hasTagsColumn: false,
     });
   });
 
   it("strips a leading UTF-8 BOM (Excel/Google Sheets export)", () => {
-    const BOM = "\uFEFF";
+    const BOM = "﻿";
     const csv = `${BOM}address,name\n${ADDR_A},BOM Label`;
     const result = parseCsv(csv);
     expect(result).toMatchObject({
       hasTagsColumn: false,
-      rows: [{ address: ADDR_A, name: "BOM Label", scope: "global" }],
+      rows: [{ address: ADDR_A, name: "BOM Label" }],
     });
   });
 
@@ -151,53 +135,29 @@ describe("parseCsv", () => {
     expect(result).toEqual({ error: expect.stringMatching(/name/i) });
   });
 
-  it("rejects a non-numeric chainId column value", () => {
-    const csv = `address,name,chainId\n${ADDR_A},Alice,not-a-number`;
-    const result = parseCsv(csv);
-    expect(result).toEqual({
-      error: expect.stringMatching(/Invalid chainId .+ on line 2/),
-    });
-  });
-
-  it("rejects a hex-encoded chainId column value", () => {
-    const csv = `address,name,chainId\n${ADDR_A},Alice,0x1`;
-    const result = parseCsv(csv);
-    expect(result).toEqual({ error: expect.stringMatching(/Invalid chainId/) });
-  });
-
-  it("rejects a chainId not in NETWORKS", () => {
-    // chainId 1 (Ethereum mainnet) isn't in our NETWORKS config — same guard
-    // as the JSON paths so a stray import can't write a `labels:1` key the
-    // strict-either-or HDEL list doesn't cover.
-    const csv = `address,name,chainId\n${ADDR_A},Alice,1`;
-    const result = parseCsv(csv);
-    expect(result).toEqual({
-      error: expect.stringMatching(/Unsupported chainId/),
-    });
-  });
-
-  it("routes a row with a populated supported chainId to per-chain scope", () => {
+  it("ignores the legacy chainId column (back-compat: no error, no scope)", () => {
+    // Post-#332: chainId is accepted for back-compat with old Gnosis Safe
+    // exports but ignored — every row imports as a single address-keyed
+    // label.
     const csv = `address,name,chainId\n${ADDR_A},Alice,42220`;
     const result = parseCsv(csv);
     expect(result).toMatchObject({
       hasTagsColumn: false,
-      rows: [{ address: ADDR_A, name: "Alice", scope: 42220 }],
+      rows: [{ address: ADDR_A, name: "Alice" }],
     });
   });
 
-  it("treats a blank chainId cell as global scope", () => {
-    const csv = `address,name,chainId\n${ADDR_A},Alice,`;
+  it("ignores a non-numeric chainId without erroring (chainId is back-compat only)", () => {
+    const csv = `address,name,chainId\n${ADDR_A},Alice,not-a-number`;
     const result = parseCsv(csv);
     expect(result).toMatchObject({
-      rows: [{ address: ADDR_A, name: "Alice", scope: "global" }],
+      rows: [{ address: ADDR_A, name: "Alice" }],
     });
   });
 
-  it("returns last-wins rows for duplicate (scope, address) pairs in input order", () => {
-    // parseCsv is not responsible for deduplication; it returns rows as-is and
-    // last-wins is enforced by the per-scope bucket overwrite in
-    // handleCsvText. We verify here that parseCsv preserves both rows so the
-    // downstream dedup contract can rely on input order.
+  it("returns last-wins rows for duplicate addresses in input order", () => {
+    // parseCsv preserves both rows; downstream handleCsvText is responsible
+    // for last-wins dedup.
     const csv = `address,name\n${ADDR_A},First\n${ADDR_A},Second`;
     const result = parseCsv(csv);
     expect(result).toMatchObject({
@@ -275,7 +235,6 @@ describe("parseCsv", () => {
           address: ADDR_A,
           name: "",
           tags: ["Whale", "Staker"],
-          scope: "global",
         },
       ],
     });
@@ -327,13 +286,6 @@ describe("stripArkhamProvenance", () => {
     expect(result.name).toBe(e.name);
   });
 
-  it("leaves non-arkham tags intact while clearing the sentinel", () => {
-    const result = stripArkhamProvenance(
-      entry({ tags: ["arkham", "Custom Tag", "another"] }),
-    );
-    expect(result.tags).toEqual(["Custom Tag", "another"]);
-  });
-
   it("preserves notes/isPublic/createdAt while clearing provenance", () => {
     const result = stripArkhamProvenance(
       entry({
@@ -354,10 +306,10 @@ describe("stripArkhamProvenance", () => {
   });
 });
 
-describe("mergeWithCrossScope", () => {
-  it("returns the incoming entry unchanged when no prior cross-scope entry exists", () => {
+describe("mergeWithExisting", () => {
+  it("returns the incoming entry unchanged when no prior entry exists", () => {
     const incoming = { [ADDR_A]: entry({ name: "New" }) };
-    const result = mergeWithCrossScope(incoming, {});
+    const result = mergeWithExisting(incoming, {});
     expect(result[ADDR_A]).toMatchObject({ name: "New" });
   });
 
@@ -369,11 +321,9 @@ describe("mergeWithCrossScope", () => {
       isPublic: true,
     });
     const incoming = { [ADDR_A]: entry({ name: "New", tags: ["Whale"] }) };
-    const result = mergeWithCrossScope(incoming, { [ADDR_A]: prev });
+    const result = mergeWithExisting(incoming, { [ADDR_A]: prev });
     expect(result[ADDR_A]).toMatchObject({
       name: "New",
-      // Incoming.tags is authoritative, prev.tags is dropped — the function
-      // contract is "tags from import override prev.tags"
       tags: ["Whale"],
       notes: "carry me",
       isPublic: true,
@@ -383,14 +333,14 @@ describe("mergeWithCrossScope", () => {
   it("uses the incoming entry's tags rather than the prior entry's", () => {
     const prev = entry({ tags: ["OldTag1", "OldTag2"] });
     const incoming = { [ADDR_A]: entry({ tags: ["NewTag"] }) };
-    const result = mergeWithCrossScope(incoming, { [ADDR_A]: prev });
+    const result = mergeWithExisting(incoming, { [ADDR_A]: prev });
     expect(result[ADDR_A]?.tags).toEqual(["NewTag"]);
   });
 
   it("strips arkham provenance from the merged result (legacy tag)", () => {
     const prev = entry({ tags: ["arkham"], source: "arkham" });
     const incoming = { [ADDR_A]: entry({ tags: ["arkham", "exchange"] }) };
-    const result = mergeWithCrossScope(incoming, { [ADDR_A]: prev });
+    const result = mergeWithExisting(incoming, { [ADDR_A]: prev });
     expect(result[ADDR_A]).toMatchObject({
       tags: ["exchange"],
       source: undefined,
@@ -398,14 +348,10 @@ describe("mergeWithCrossScope", () => {
   });
 
   it("looks up `prev` by lowercased address regardless of incoming key case", () => {
-    // Cross-scope lookup is keyed by lowercase address — the incoming map's
-    // own keys are not normalized here (handleCsvText/handleSimpleFormat do
-    // that downstream via sanitizeAndFilter), but `prev` is found via
-    // .toLowerCase().
     const prev = entry({ notes: "lowercase-prev" });
     const upper = ADDR_A.toUpperCase().replace(/^0X/, "0x");
     const incoming = { [upper]: entry({ name: "Mixed-case import" }) };
-    const result = mergeWithCrossScope(incoming, { [ADDR_A]: prev });
+    const result = mergeWithExisting(incoming, { [ADDR_A]: prev });
     expect(result[upper]).toMatchObject({
       name: "Mixed-case import",
       notes: "lowercase-prev",
@@ -436,9 +382,6 @@ describe("sanitizeAndFilter", () => {
   });
 
   it("applies sanitizeEntry — case-insensitive tag dedup + trimming", () => {
-    // sanitizeEntry de-duplicates tags case-insensitively and trims
-    // surrounding whitespace; sanitizeAndFilter wires it in at the entry
-    // level.
     const result = sanitizeAndFilter({
       [ADDR_A]: entry({ tags: [" Whale ", "whale", "Whale"], name: "T" }),
     });
@@ -453,12 +396,6 @@ describe("sanitizeAndFilter", () => {
   });
 
   it("end-to-end: tag-only JSON survives upgradeEntries → sanitizeAndFilter", async () => {
-    // Regression for the silent-drop bug Codex caught on this PR: tag-only
-    // JSON imports satisfy `isEntriesMap` but used to round-trip to
-    // `{ name: "", tags: [] }` because `upgradeEntry`'s fallback dropped
-    // `normalizedTags`, so `sanitizeAndFilter` then filtered the entry out
-    // and the import returned 200 with 0 persisted. With the fallback fix in
-    // place, the same input must persist `{ name: "", tags: ["Whale"] }`.
     const { upgradeEntries } = await import("@/lib/address-labels-shared");
     const upgraded = upgradeEntries({
       [ADDR_A]: { tags: ["Whale"], updatedAt: "2026-01-01" },
@@ -473,6 +410,10 @@ describe("isGnosisSafeFormat", () => {
     expect(
       isGnosisSafeFormat([{ address: ADDR_A, chainId: "42220", name: "Safe" }]),
     ).toBe(true);
+  });
+
+  it("returns true for an entry with no chainId (chainId is now optional)", () => {
+    expect(isGnosisSafeFormat([{ address: ADDR_A, name: "Safe" }])).toBe(true);
   });
 
   it("returns true for an empty array (no-op import)", () => {
@@ -490,9 +431,6 @@ describe("isGnosisSafeFormat", () => {
   });
 
   it("returns false when chainId is a number rather than a string", () => {
-    // Gnosis Safe exports use a string `chainId` — mixing in a numeric
-    // chainId is a different format and should fall through to other
-    // detectors.
     expect(
       isGnosisSafeFormat([{ address: ADDR_A, chainId: 42220, name: "Safe" }]),
     ).toBe(false);
@@ -504,7 +442,11 @@ describe("isGnosisSafeFormat", () => {
 });
 
 describe("isSnapshot", () => {
-  it("returns true for a payload with a `chains` object", () => {
+  it("returns true for a payload with the new `addresses` key", () => {
+    expect(isSnapshot({ addresses: { [ADDR_A]: entry() } })).toBe(true);
+  });
+
+  it("returns true for a payload with a legacy `chains` object", () => {
     expect(
       isSnapshot({
         chains: { "42220": {} },
@@ -512,18 +454,12 @@ describe("isSnapshot", () => {
     ).toBe(true);
   });
 
-  it("returns true for an empty `chains` object", () => {
-    // The route-level snapshot handler still validates per-chain shapes; the
-    // detector only checks the presence + object-shape of `chains`.
-    expect(isSnapshot({ chains: {} })).toBe(true);
+  it("returns true for a payload with a legacy `global` object", () => {
+    expect(isSnapshot({ global: {} })).toBe(true);
   });
 
-  it("returns false when `chains` is missing", () => {
+  it("returns false when none of addresses/global/chains are present", () => {
     expect(isSnapshot({ exportedAt: "2026-01-01T00:00:00Z" })).toBe(false);
-  });
-
-  it("returns false when `chains` is an array, not an object", () => {
-    expect(isSnapshot({ chains: [] })).toBe(false);
   });
 
   it("returns false for null and primitives", () => {
@@ -551,10 +487,6 @@ describe("isEntriesMap", () => {
   });
 
   it("returns true for a tag-only entry (no name, but non-empty tags)", () => {
-    // Tag-only entries flow through the full pipeline as `{ name: "", tags: [...] }`
-    // — the downstream `sanitizeAndFilter` keeps them because tags.length > 0 satisfies
-    // the "has signal" gate. Pinned end-to-end by the upgradeEntry fallback test in
-    // `address-labels-shared.test.ts` and a sanitizeAndFilter test below.
     expect(
       isEntriesMap({
         [ADDR_A]: { tags: ["Whale"], updatedAt: "2026-01-01" },
@@ -567,11 +499,6 @@ describe("isEntriesMap", () => {
   });
 
   it("returns true for { name: '', tags: [] } — structural gate, not content filter", () => {
-    // `isEntriesMap` is a shape gate: an object with a string `name` (even
-    // empty) satisfies the `hasName` branch. The downstream
-    // `sanitizeAndFilter` is what rejects empty-name + empty-tags entries.
-    // Pinning so a future tightening doesn't accidentally collapse the two
-    // layers' contracts together.
     expect(
       isEntriesMap({
         [ADDR_A]: { name: "", tags: [], updatedAt: "2026-01-01" },
@@ -609,89 +536,8 @@ describe("isEntriesMap", () => {
   });
 });
 
-describe("emptyCounts + addCount", () => {
-  it("emptyCounts returns the zero state", () => {
-    expect(emptyCounts()).toEqual({ global: 0, chains: {} });
-  });
-
-  it("addCount increments the global slot", () => {
-    const counts = emptyCounts();
-    addCount(counts, "global", 3);
-    expect(counts).toEqual({ global: 3, chains: {} });
-  });
-
-  it("addCount creates the chain bucket on first use", () => {
-    const counts = emptyCounts();
-    addCount(counts, 42220, 5);
-    expect(counts).toEqual({ global: 0, chains: { "42220": 5 } });
-  });
-
-  it("addCount accumulates within an existing chain bucket", () => {
-    const counts = emptyCounts();
-    addCount(counts, 42220, 2);
-    addCount(counts, 42220, 3);
-    expect(counts).toEqual({ global: 0, chains: { "42220": 5 } });
-  });
-
-  it("addCount with n=0 is a no-op (does not create the chain bucket)", () => {
-    // Without the early-return, a chain that contributes zero rows would
-    // still appear in the counts payload as `{ "143": 0 }` and confuse
-    // dashboard readers that treat presence as "imported some".
-    const counts = emptyCounts();
-    addCount(counts, 143, 0);
-    expect(counts).toEqual({ global: 0, chains: {} });
-  });
-
-  it("addCount keys chain buckets by the stringified chainId", () => {
-    const counts = emptyCounts();
-    addCount(counts, 42220, 1);
-    expect(counts.chains).toEqual({ "42220": 1 });
-  });
-});
-
-describe("buildCrossScopeExisting", () => {
-  it("returns an empty object when no labels are seeded", async () => {
-    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      global: {},
-      chains: {},
-    });
-    const result = await buildCrossScopeExisting();
-    expect(result).toEqual({});
-  });
-
-  it("flattens global + per-chain entries into a single map keyed by address", async () => {
-    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      global: { [ADDR_A]: entry({ name: "Global A" }) },
-      chains: {
-        "42220": { [ADDR_B]: entry({ name: "Celo B" }) },
-        "143": { [ADDR_C]: entry({ name: "Monad C" }) },
-      },
-    });
-    const result = await buildCrossScopeExisting();
-    expect(Object.keys(result).sort()).toEqual([ADDR_A, ADDR_B, ADDR_C].sort());
-    expect(result[ADDR_A]).toMatchObject({ name: "Global A" });
-    expect(result[ADDR_B]).toMatchObject({ name: "Celo B" });
-    expect(result[ADDR_C]).toMatchObject({ name: "Monad C" });
-  });
-
-  it("prefers global over a chain-scoped entry for the same address (invariant violation fallback)", async () => {
-    // Per strict either/or there's at most one scope per address; the helper
-    // documents the deterministic fallback for hypothetical disk corruption:
-    // global wins when present in `all.global`.
-    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      global: { [ADDR_A]: entry({ name: "Global wins" }) },
-      chains: {
-        "42220": { [ADDR_A]: entry({ name: "Should be ignored" }) },
-      },
-    });
-    const result = await buildCrossScopeExisting();
-    expect(result[ADDR_A]).toMatchObject({ name: "Global wins" });
-  });
-
-  it("propagates a getAllLabels rejection (caller is responsible for serverError)", async () => {
-    (getAllLabels as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error("Redis offline"),
-    );
-    await expect(buildCrossScopeExisting()).rejects.toThrow("Redis offline");
+describe("emptyCounts", () => {
+  it("returns the zero state with the new flat `addresses` count", () => {
+    expect(emptyCounts()).toEqual({ addresses: 0 });
   });
 });

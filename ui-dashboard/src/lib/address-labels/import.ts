@@ -9,29 +9,25 @@
  * `return await handleX(...)`. Validation errors come back as 400, server
  * errors (Redis etc.) are captured to Sentry and returned as a generic 500.
  *
- * This module is kept route-agnostic-ish: it only takes plain inputs (parsed
- * JSON, raw CSV text, or a `NextRequest` for streaming the CSV body) and the
- * shape predicates / type guards are exported so the route can sniff format.
+ * Labels are no longer chain-scoped (PR #332 follow-up). The `chainId` column
+ * in CSV imports and the `chainId` field in Gnosis Safe exports are still
+ * accepted for backward compatibility but ignored — every entry imports as a
+ * single address-keyed label. Old snapshots with `global` / `chains` keys
+ * are read and merged into a flat address map.
  */
 import { NextRequest, NextResponse } from "next/server";
 import * as Sentry from "@sentry/nextjs";
 import {
   importLabels,
-  getAllLabels,
+  getLabels,
   upgradeEntries,
   sanitizeEntry,
   ARKHAM_TAG,
   type AddressEntry,
   type AddressLabelsSnapshot,
   type ImportedCounts,
-  type Scope,
 } from "@/lib/address-labels";
 import { isValidAddress } from "@/lib/format";
-import { NETWORKS } from "@/lib/networks";
-
-const SUPPORTED_CHAIN_IDS: ReadonlySet<number> = new Set(
-  Object.values(NETWORKS).map((n) => n.chainId),
-);
 
 /**
  * User-controlled imports must never claim Arkham provenance — neither via
@@ -51,85 +47,19 @@ export function stripArkhamProvenance(entry: AddressEntry): AddressEntry {
   };
 }
 
-/**
- * Build a `lowercase address → existing entry` lookup across every scope.
- *
- * When an import moves an address from one scope to another, the server's
- * strict either/or invariant HDELs the source scope. Merging only against
- * the target scope's entries would drop the user's notes/isPublic from the
- * source. This helper flattens every scope into one map so the merge step
- * can pull metadata forward regardless of which scope the prior entry
- * lived in.
- */
-export async function buildCrossScopeExisting(): Promise<
-  Record<string, AddressEntry>
-> {
-  const all = await getAllLabels();
-  const out: Record<string, AddressEntry> = { ...all.global };
-  for (const entries of Object.values(all.chains)) {
-    for (const [addr, entry] of Object.entries(entries)) {
-      // Per strict either/or there's at most one scope per address; if the
-      // invariant is ever violated on disk, prefer the first scope we saw
-      // (global wins over chains, lower chainIds win over higher by iteration
-      // order) — deterministic and harmless since the merge only pulls
-      // notes/isPublic.
-      if (!(addr in out)) out[addr] = entry;
-    }
-  }
-  return out;
-}
-
 export function emptyCounts(): ImportedCounts {
-  return { global: 0, chains: {} };
-}
-
-export function addCount(
-  counts: ImportedCounts,
-  scope: Scope,
-  n: number,
-): void {
-  if (n === 0) return;
-  if (scope === "global") {
-    counts.global += n;
-  } else {
-    counts.chains[String(scope)] = (counts.chains[String(scope)] ?? 0) + n;
-  }
+  return { addresses: 0 };
 }
 
 export async function handleGnosisSafe(
-  body: Array<{ address: string; chainId: string; name: string }>,
+  body: Array<{ address: string; chainId?: string; name: string }>,
 ): Promise<NextResponse> {
-  const entries = body;
-
-  // Validate all entries upfront, then group by chainId.
-  type ParsedEntry = { chainId: number; address: string; name: string };
+  // Validate addresses + names; chainId is ignored (back-compat with the
+  // pre-flat schema). If the same address appears more than once with
+  // different names, last-wins.
+  type ParsedEntry = { address: string; name: string };
   const parsed: ParsedEntry[] = [];
-  for (const entry of entries) {
-    // Strict decimal-only parse — reject "1e3", "0x1", and whitespace-padded
-    // strings that Number() silently coerces to valid-looking chain IDs.
-    // We intentionally do NOT trim: leading/trailing spaces are malformed input.
-    if (!/^\d+$/.test(entry.chainId)) {
-      return NextResponse.json(
-        { error: `Invalid chainId: ${entry.chainId}` },
-        { status: 400 },
-      );
-    }
-    const chainId = parseInt(entry.chainId, 10);
-    if (!Number.isInteger(chainId) || chainId <= 0) {
-      return NextResponse.json(
-        { error: `Invalid chainId: ${entry.chainId}` },
-        { status: 400 },
-      );
-    }
-    // Reject chainIds we don't index — see address-labels.ts comment on
-    // ALL_LABEL_SCOPE_KEYS for why the strict-either-or HDEL only covers
-    // chains in NETWORKS.
-    if (!SUPPORTED_CHAIN_IDS.has(chainId)) {
-      return NextResponse.json(
-        { error: `Unsupported chainId: ${entry.chainId}` },
-        { status: 400 },
-      );
-    }
+  for (const entry of body) {
     if (!isValidAddress(entry.address)) {
       return NextResponse.json(
         { error: `Invalid address: ${entry.address}` },
@@ -142,66 +72,38 @@ export async function handleGnosisSafe(
         { status: 400 },
       );
     }
-    parsed.push({ chainId, address: entry.address, name: entry.name });
+    parsed.push({ address: entry.address, name: entry.name });
   }
 
-  // Strict either/or: reject if the same address appears on two different
-  // chains. Gnosis Safe exports of counterfactually-deployed Safes legitimately
-  // put the same address on every chain; without this check, sequential
-  // importLabels calls would HDEL each other and silently keep only the last
-  // chain's entry while reporting all as imported. Users who want such a Safe
-  // labelled everywhere should convert the entry to global scope before
-  // importing.
-  const chainByAddress = new Map<string, number>();
-  for (const { address, chainId } of parsed) {
-    const lower = address.toLowerCase();
-    const prior = chainByAddress.get(lower);
-    if (prior !== undefined && prior !== chainId) {
-      return NextResponse.json(
-        {
-          error: `Address ${address} appears in both chain ${prior} and chain ${chainId}; a label must be in exactly one scope. Convert same-address Safes to global scope before importing.`,
-        },
-        { status: 400 },
-      );
-    }
-    chainByAddress.set(lower, chainId);
-  }
-
-  // Cross-scope lookup: merge against any existing entry for this address,
-  // regardless of which scope currently holds it. Without this, moving an
-  // address from (say) chain X to global via Gnosis Safe import would
-  // silently drop the user's prior notes/isPublic.
-  let crossScope: Record<string, AddressEntry>;
+  let existing: Record<string, AddressEntry>;
   try {
-    crossScope = await buildCrossScopeExisting();
+    existing = await getLabels();
   } catch (err) {
     return serverError(err);
   }
 
-  const byChain = new Map<number, Record<string, AddressEntry>>();
-  for (const entry of parsed) {
-    const { chainId, address, name } = entry;
-    const normalizedAddress = address.toLowerCase();
-    const prev = crossScope[normalizedAddress];
-    if (!byChain.has(chainId)) byChain.set(chainId, {});
-    byChain.get(chainId)![normalizedAddress] = sanitizeEntry(
+  const labels: Record<string, AddressEntry> = {};
+  const now = new Date().toISOString();
+  for (const { address, name } of parsed) {
+    const lower = address.toLowerCase();
+    const prev = existing[lower];
+    labels[lower] = sanitizeEntry(
       stripArkhamProvenance({
         // Preserve existing metadata; only overwrite name and timestamp.
         ...prev,
         name,
         tags: prev?.tags ?? [],
-        updatedAt: new Date().toISOString(),
+        updatedAt: now,
       }),
     );
   }
 
   try {
-    const counts = emptyCounts();
-    for (const [chainId, labels] of byChain.entries()) {
-      addCount(counts, chainId, Object.keys(labels).length);
-      await importLabels(chainId, labels);
-    }
-    return NextResponse.json({ ok: true, imported: counts });
+    await importLabels(labels);
+    return NextResponse.json({
+      ok: true,
+      imported: { addresses: Object.keys(labels).length },
+    });
   } catch (err) {
     return serverError(err);
   }
@@ -210,135 +112,125 @@ export async function handleGnosisSafe(
 export async function handleSnapshot(
   body: AddressLabelsSnapshot,
 ): Promise<NextResponse> {
-  const chainEntries = Object.entries(body.chains);
-  const globalEntries = body.global ?? {};
+  // Merge every entry from {addresses, global, chains} into a single map.
+  // Old backups carry `global` + `chains`; new backups carry `addresses`.
+  // For an address present in multiple legacy scopes (shouldn't happen
+  // post-migration, but possible in old snapshots), last write wins per
+  // iteration order: chains[chainId] > global > addresses. The choice is
+  // arbitrary — same-address-different-scope already lost meaning under
+  // the new model.
+  const merged: Record<string, AddressEntry> = {};
 
-  // Validate chains upfront before writing anything.
-  for (const [key, labels] of chainEntries) {
-    const n = Number(key);
-    if (!Number.isInteger(n) || n <= 0) {
+  if (body.addresses !== undefined) {
+    if (!isEntriesMap(body.addresses)) {
       return NextResponse.json(
-        { error: `Invalid chainId key: ${key}` },
+        { error: "Invalid labels map for addresses" },
         { status: 400 },
       );
     }
-    if (!SUPPORTED_CHAIN_IDS.has(n)) {
-      return NextResponse.json(
-        { error: `Unsupported chainId: ${key}` },
-        { status: 400 },
-      );
-    }
-    if (!isEntriesMap(labels)) {
-      return NextResponse.json(
-        { error: `Invalid labels map for chainId ${key}` },
-        { status: 400 },
-      );
-    }
-  }
-
-  // Validate global if present.
-  if (body.global !== undefined && !isEntriesMap(body.global)) {
-    return NextResponse.json(
-      { error: "Invalid labels map for global scope" },
-      { status: 400 },
+    Object.assign(
+      merged,
+      upgradeEntries(body.addresses as Record<string, unknown>),
     );
   }
-
-  // Strict either/or: an address must live in exactly one scope. Reject any
-  // snapshot where the same address appears in two or more scopes (global
-  // and a chain, or two different chains). Without this check, sequential
-  // `importLabels` calls would silently clobber each other via HDEL and the
-  // import result would depend on iteration order.
-  const scopeByAddress = new Map<string, Scope>();
-  for (const addr of Object.keys(globalEntries)) {
-    scopeByAddress.set(addr.toLowerCase(), "global");
+  if (body.global !== undefined) {
+    if (!isEntriesMap(body.global)) {
+      return NextResponse.json(
+        { error: "Invalid labels map for legacy global scope" },
+        { status: 400 },
+      );
+    }
+    Object.assign(
+      merged,
+      upgradeEntries(body.global as Record<string, unknown>),
+    );
   }
-  for (const [chainId, labels] of chainEntries) {
-    const cid = Number(chainId);
-    for (const addr of Object.keys(labels as Record<string, unknown>)) {
-      const lower = addr.toLowerCase();
-      const prior = scopeByAddress.get(lower);
-      if (prior !== undefined && prior !== cid) {
-        const priorLabel = prior === "global" ? "global" : `chain ${prior}`;
+  if (body.chains !== undefined) {
+    if (typeof body.chains !== "object" || body.chains === null) {
+      return NextResponse.json(
+        { error: "chains must be an object" },
+        { status: 400 },
+      );
+    }
+    for (const [key, labels] of Object.entries(body.chains)) {
+      if (!isEntriesMap(labels)) {
         return NextResponse.json(
-          {
-            error: `Address ${addr} appears in both ${priorLabel} and chain ${chainId}; a label must be in exactly one scope`,
-          },
+          { error: `Invalid labels map for legacy chain ${key}` },
           { status: 400 },
         );
       }
-      scopeByAddress.set(lower, cid);
+      Object.assign(merged, upgradeEntries(labels as Record<string, unknown>));
     }
   }
 
+  if (Object.keys(merged).length === 0) {
+    return NextResponse.json({ ok: true, imported: emptyCounts() });
+  }
+
   try {
-    const crossScope = await buildCrossScopeExisting();
-    const counts = emptyCounts();
-
-    if (Object.keys(globalEntries).length > 0) {
-      const upgraded = upgradeEntries(globalEntries as Record<string, unknown>);
-      const merged = mergeWithCrossScope(upgraded, crossScope);
-      const filtered = sanitizeAndFilter(merged);
-      addCount(counts, "global", Object.keys(filtered).length);
-      await importLabels("global", filtered);
+    let existing: Record<string, AddressEntry>;
+    try {
+      existing = await getLabels();
+    } catch (err) {
+      return serverError(err);
     }
-
-    for (const [chainId, labels] of chainEntries) {
-      const upgraded = upgradeEntries(labels as Record<string, unknown>);
-      const merged = mergeWithCrossScope(upgraded, crossScope);
-      const filtered = sanitizeAndFilter(merged);
-      addCount(counts, Number(chainId), Object.keys(filtered).length);
-      await importLabels(Number(chainId), filtered);
-    }
-    return NextResponse.json({ ok: true, imported: counts });
+    const finalLabels = sanitizeAndFilter(mergeWithExisting(merged, existing));
+    await importLabels(finalLabels);
+    return NextResponse.json({
+      ok: true,
+      imported: { addresses: Object.keys(finalLabels).length },
+    });
   } catch (err) {
     return serverError(err);
   }
 }
 
 /**
- * Merge an import batch against a cross-scope existing map so an address
- * moving from one scope to another keeps its prior `notes` + `isPublic`
- * unless the import explicitly overwrites them.
+ * Merge an import batch against the existing labels map so an address keeps
+ * its prior `notes` + `isPublic` unless the import explicitly overwrites
+ * them.
+ *
+ * Plain `{...prev, ...entry}` is broken here: `upgradeEntry` materialises
+ * `notes: undefined` and `isPublic: undefined` for fields the import doesn't
+ * set, which then clobber prev's real values during the spread (a present-
+ * undefined key beats prev's "carry me"). Drop undefined keys from incoming
+ * before the spread so prev's values survive.
  */
-export function mergeWithCrossScope(
+export function mergeWithExisting(
   incoming: Record<string, AddressEntry>,
-  crossScope: Record<string, AddressEntry>,
+  existing: Record<string, AddressEntry>,
 ): Record<string, AddressEntry> {
   const out: Record<string, AddressEntry> = {};
   for (const [addr, entry] of Object.entries(incoming)) {
-    const prev = crossScope[addr.toLowerCase()];
-    out[addr] = stripArkhamProvenance(
-      prev
-        ? {
-            ...prev,
-            ...entry,
-            // The import's tags are authoritative when the format supports
-            // tags; otherwise (simple + snapshot) incoming `entry.tags`
-            // already reflects the caller's intent (they may be empty).
-            tags: entry.tags,
-          }
-        : entry,
-    );
+    const prev = existing[addr.toLowerCase()];
+    if (!prev) {
+      out[addr] = stripArkhamProvenance(entry);
+      continue;
+    }
+    const incomingDefined: Partial<AddressEntry> = {};
+    for (const [k, v] of Object.entries(entry) as Array<
+      [keyof AddressEntry, unknown]
+    >) {
+      if (v !== undefined) {
+        (incomingDefined as Record<string, unknown>)[k] = v;
+      }
+    }
+    out[addr] = stripArkhamProvenance({
+      ...prev,
+      ...incomingDefined,
+      // The import's tags are authoritative when the format supports tags;
+      // otherwise (simple + snapshot) incoming `entry.tags` already reflects
+      // the caller's intent (they may be empty).
+      tags: entry.tags,
+    } as AddressEntry);
   }
   return out;
 }
 
 export async function handleSimpleFormat(body: unknown): Promise<NextResponse> {
-  const { chainId, labels } = body as Record<string, unknown>;
-  if (
-    typeof chainId !== "number" ||
-    !Number.isInteger(chainId) ||
-    chainId <= 0
-  ) {
-    return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });
-  }
-  if (!SUPPORTED_CHAIN_IDS.has(chainId)) {
-    return NextResponse.json(
-      { error: `Unsupported chainId: ${chainId}` },
-      { status: 400 },
-    );
-  }
+  const { labels } = body as Record<string, unknown>;
+  // The legacy simple format had `chainId` + `labels`; chainId is now
+  // ignored. Accept the field (or not) but only validate `labels`.
   if (!isEntriesMap(labels)) {
     return NextResponse.json(
       { error: "labels must be an object mapping address → entry" },
@@ -347,21 +239,28 @@ export async function handleSimpleFormat(body: unknown): Promise<NextResponse> {
   }
 
   try {
-    const crossScope = await buildCrossScopeExisting();
+    let existing: Record<string, AddressEntry>;
+    try {
+      existing = await getLabels();
+    } catch (err) {
+      return serverError(err);
+    }
     const upgraded = upgradeEntries(labels as Record<string, unknown>);
-    const merged = mergeWithCrossScope(upgraded, crossScope);
-    const filtered = sanitizeAndFilter(merged);
-    await importLabels(chainId, filtered);
-    const counts = emptyCounts();
-    addCount(counts, chainId, Object.keys(filtered).length);
-    return NextResponse.json({ ok: true, imported: counts });
+    const finalLabels = sanitizeAndFilter(
+      mergeWithExisting(upgraded, existing),
+    );
+    await importLabels(finalLabels);
+    return NextResponse.json({
+      ok: true,
+      imported: { addresses: Object.keys(finalLabels).length },
+    });
   } catch (err) {
     return serverError(err);
   }
 }
 
-// Sanitize (enforce limits) + filter empty entries (#4, #7).
-// Lower-cases addresses so downstream writes are canonical.
+// Sanitize (enforce limits) + filter empty entries. Lower-cases addresses so
+// downstream writes are canonical.
 export function sanitizeAndFilter(
   entries: Record<string, AddressEntry>,
 ): Record<string, AddressEntry> {
@@ -374,33 +273,34 @@ export function sanitizeAndFilter(
 
 export function isGnosisSafeFormat(
   v: unknown,
-): v is Array<{ address: string; chainId: string; name: string }> {
+): v is Array<{ address: string; chainId?: string; name: string }> {
   if (!Array.isArray(v)) return false;
   // An empty array is a valid (no-op) Gnosis Safe export — handle it as this
-  // format so callers get 200 instead of a misleading "Invalid chainId" 400.
+  // format so callers get 200 instead of a misleading parse error.
   if (v.length === 0) return true;
   return v.every(
     (entry) =>
       typeof entry === "object" &&
       entry !== null &&
       typeof (entry as Record<string, unknown>).address === "string" &&
-      typeof (entry as Record<string, unknown>).chainId === "string" &&
-      typeof (entry as Record<string, unknown>).name === "string",
+      typeof (entry as Record<string, unknown>).name === "string" &&
+      // chainId is optional now; if present it must be a string for back-compat
+      ((entry as Record<string, unknown>).chainId === undefined ||
+        typeof (entry as Record<string, unknown>).chainId === "string"),
   );
 }
 
 export function isSnapshot(v: unknown): v is AddressLabelsSnapshot {
-  if (typeof v !== "object" || v === null || !("chains" in v)) return false;
-  const { chains } = v as AddressLabelsSnapshot;
-  return (
-    typeof chains === "object" && chains !== null && !Array.isArray(chains)
-  );
+  if (typeof v !== "object" || v === null) return false;
+  // A snapshot has at least one of `addresses`, `global`, `chains`.
+  const obj = v as Record<string, unknown>;
+  return "addresses" in obj || "global" in obj || "chains" in obj;
 }
 
 /**
  * Validates that a value is a map of address → entry objects.
  * Accepts both v1 (label field) and v2 (name field) entry shapes.
- * Entries where both name/label is empty and tags is empty are excluded (#7).
+ * Entries where both name/label is empty and tags is empty are excluded.
  */
 export function isEntriesMap(v: unknown): v is Record<string, AddressEntry> {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
@@ -427,17 +327,16 @@ export function serverError(err: unknown): NextResponse {
 // CSV import helpers
 
 /**
- * Parse a CSV body and route rows per-scope.
+ * Parse a CSV body and import the rows.
  *
  * Expected format (header row required):
- *   address,name,tags,chainId
- *   0x1234...,My Label,"Market Maker;Arbitrageur",
- *   0x5678...,Celo Rebalancer,,42220
+ *   address,name,tags
+ *   0x1234...,My Label,"Market Maker;Arbitrageur"
  *
- * Columns `tags` and `chainId` are optional. When `chainId` is populated, the
- * row becomes a chain-specific label; when blank or the column is missing, the
- * row becomes a cross-chain (global) label. Tags are semicolon-delimited.
- * Additional columns are ignored. Duplicate (scope, address) pairs: last wins.
+ * Columns `tags` and `chainId` are optional. The `chainId` column is accepted
+ * for backward compatibility but ignored — labels are no longer chain-scoped.
+ * Tags are semicolon-delimited. Additional columns are ignored. Duplicate
+ * addresses: last wins.
  */
 export async function handleCsvImport(req: NextRequest): Promise<NextResponse> {
   let text: string;
@@ -469,34 +368,13 @@ export async function handleCsvText(text: string): Promise<NextResponse> {
     return NextResponse.json({ ok: true, imported: emptyCounts() });
   }
 
-  // Strict either/or: reject a CSV that puts the same address under two
-  // different scopes. Without this check, the later `importLabels(scope, …)`
-  // call would HDEL the address from the earlier scope and the first row
-  // would be silently lost.
-  const scopeByAddress = new Map<string, Scope>();
-  for (const { address, scope } of rows) {
-    const lower = address.toLowerCase();
-    const prior = scopeByAddress.get(lower);
-    if (prior !== undefined && prior !== scope) {
-      const priorLabel = prior === "global" ? "global" : `chain ${prior}`;
-      const scopeLabel = scope === "global" ? "global" : `chain ${scope}`;
-      return NextResponse.json(
-        {
-          error: `Address ${address} appears in both ${priorLabel} and ${scopeLabel}; a label must be in exactly one scope`,
-        },
-        { status: 400 },
-      );
-    }
-    scopeByAddress.set(lower, scope);
-  }
-
-  // Group rows by scope. Within a scope, last row wins for duplicate addresses.
-  const byScope = new Map<Scope, Record<string, AddressEntry>>();
+  // Last-row-wins for duplicate addresses.
+  const labels: Record<string, AddressEntry> = {};
   const now = new Date().toISOString();
-  for (const { address, name, tags, scope } of rows) {
+  for (const { address, name, tags } of rows) {
     // Do NOT set isPublic here — the merge below preserves the existing value.
     // Forcing isPublic:true would silently un-private any previously private label.
-    // Deduplicate tags case-insensitively (#6)
+    // Deduplicate tags case-insensitively
     const seenTags = new Set<string>();
     const deduplicatedTags = tags
       .map((t) => t.trim())
@@ -507,58 +385,40 @@ export async function handleCsvText(text: string): Promise<NextResponse> {
         return true;
       });
     const lower = address.toLowerCase();
-    const bucket = byScope.get(scope) ?? {};
-    bucket[lower] = {
+    labels[lower] = {
       name,
       tags: deduplicatedTags,
       updatedAt: now,
     };
-    byScope.set(scope, bucket);
   }
 
-  // Cross-scope merge: `prev` comes from whichever scope currently holds
-  // this address (or undefined if none), so a CSV row moving an address to
-  // a new scope keeps its notes + isPublic.
-  let crossScope: Record<string, AddressEntry>;
+  let existing: Record<string, AddressEntry>;
   try {
-    crossScope = await buildCrossScopeExisting();
+    existing = await getLabels();
   } catch (err) {
     return serverError(err);
   }
 
-  const mergedByScope = new Map<Scope, Record<string, AddressEntry>>();
-  for (const [scope, labels] of byScope.entries()) {
-    const merged: Record<string, AddressEntry> = {};
-    for (const [addr, entry] of Object.entries(labels)) {
-      // Defensive .toLowerCase() — `addr` is already lowercased upstream and
-      // writers always normalise before HSET, but matching mergeWithCrossScope's
-      // pattern stays robust against any historical mixed-case row that pre-dates
-      // the writer normalisation.
-      const prev = crossScope[addr.toLowerCase()];
-      merged[addr] = sanitizeEntry(
-        stripArkhamProvenance({
-          ...prev,
-          ...entry,
-          // When CSV has no tags column, preserve existing tags instead of
-          // overwriting with [] (#1)
-          tags: hasTagsColumn ? entry.tags : (prev?.tags ?? []),
-        }),
-      );
-    }
-    mergedByScope.set(scope, merged);
+  const merged: Record<string, AddressEntry> = {};
+  for (const [addr, entry] of Object.entries(labels)) {
+    const prev = existing[addr.toLowerCase()];
+    merged[addr] = sanitizeEntry(
+      stripArkhamProvenance({
+        ...prev,
+        ...entry,
+        // When CSV has no tags column, preserve existing tags instead of
+        // overwriting with []
+        tags: hasTagsColumn ? entry.tags : (prev?.tags ?? []),
+      }),
+    );
   }
 
   try {
-    const counts = emptyCounts();
-    // Writes are sequential rather than parallel: `importLabels` enforces the
-    // strict-either/or invariant by HDEL-ing from other scopes, so concurrent
-    // writes across scopes for the same address could race. Sequential is
-    // simpler and the import volume is small.
-    for (const [scope, merged] of mergedByScope.entries()) {
-      await importLabels(scope, merged);
-      addCount(counts, scope, Object.keys(merged).length);
-    }
-    return NextResponse.json({ ok: true, imported: counts });
+    await importLabels(merged);
+    return NextResponse.json({
+      ok: true,
+      imported: { addresses: Object.keys(merged).length },
+    });
   } catch (err) {
     return serverError(err);
   }
@@ -568,7 +428,6 @@ type CsvRow = {
   address: string;
   name: string;
   tags: string[];
-  scope: Scope;
 };
 
 type CsvParseResult =
@@ -583,8 +442,7 @@ type CsvParseResult =
  * Minimal CSV parser. Supports quoted fields and UTF-8 BOM. Expects a header
  * row containing at least "address" and "name" columns (case-insensitive).
  * Optional "tags" column with semicolon-delimited values.
- * Optional "chainId" column: populated → per-chain, blank/missing → global.
- * Extra columns are ignored.
+ * The legacy "chainId" column is parsed but ignored. Extra columns are ignored.
  *
  * Limitation: quoted fields containing embedded newlines (RFC 4180 §2.6) are
  * not supported. This is intentional — address/label data never spans lines
@@ -593,7 +451,7 @@ type CsvParseResult =
  */
 export function parseCsv(text: string): CsvParseResult {
   // Strip UTF-8 BOM (U+FEFF) that Excel/Google Sheets prepend to CSV exports.
-  const stripped = text.startsWith("\uFEFF") ? text.slice(1) : text;
+  const stripped = text.startsWith("﻿") ? text.slice(1) : text;
   const lines = stripped.split(/\r?\n/).filter((l) => l.trim() !== "");
   if (lines.length === 0) return { rows: [], hasTagsColumn: false };
 
@@ -606,7 +464,6 @@ export function parseCsv(text: string): CsvParseResult {
   const addrIdx = header.indexOf("address");
   const nameIdx = header.indexOf("name");
   const tagsIdx = header.indexOf("tags");
-  const chainIdIdx = header.indexOf("chainid");
 
   if (addrIdx === -1 || nameIdx === -1) {
     return {
@@ -628,8 +485,6 @@ export function parseCsv(text: string): CsvParseResult {
     const address = cols[addrIdx]?.trim() ?? "";
     const name = cols[nameIdx]?.trim() ?? "";
     const tagsRaw = tagsIdx !== -1 ? (cols[tagsIdx]?.trim() ?? "") : "";
-    const chainIdRaw =
-      chainIdIdx !== -1 ? (cols[chainIdIdx]?.trim() ?? "") : "";
     const tags = tagsRaw
       ? tagsRaw
           .split(";")
@@ -639,7 +494,7 @@ export function parseCsv(text: string): CsvParseResult {
 
     // Skip only fully empty rows. Half-empty rows are malformed input and
     // should fail loudly rather than silently disappearing from the import.
-    if (!address && !name && tags.length === 0 && !chainIdRaw) continue;
+    if (!address && !name && tags.length === 0) continue;
     if (!address) {
       return {
         error: `Empty address on line ${i + 1}`,
@@ -657,36 +512,7 @@ export function parseCsv(text: string): CsvParseResult {
       };
     }
 
-    // chainId column: blank → global, populated → validated per-chain.
-    let scope: Scope;
-    if (!chainIdRaw) {
-      scope = "global";
-    } else {
-      // Strict decimal-only parse — matches the Gnosis Safe format parser.
-      if (!/^\d+$/.test(chainIdRaw)) {
-        return {
-          error: `Invalid chainId "${chainIdRaw}" on line ${i + 1}`,
-        };
-      }
-      const chainId = parseInt(chainIdRaw, 10);
-      if (!Number.isInteger(chainId) || chainId <= 0) {
-        return {
-          error: `Invalid chainId "${chainIdRaw}" on line ${i + 1}`,
-        };
-      }
-      // Same NETWORKS guard as the JSON import paths — see the comment on
-      // ALL_LABEL_SCOPE_KEYS in address-labels.ts. A chainId outside
-      // NETWORKS would write a `labels:{chainId}` key that the static
-      // cross-scope HDEL list doesn't cover.
-      if (!SUPPORTED_CHAIN_IDS.has(chainId)) {
-        return {
-          error: `Unsupported chainId "${chainIdRaw}" on line ${i + 1}`,
-        };
-      }
-      scope = chainId;
-    }
-
-    rows.push({ address, name, tags, scope });
+    rows.push({ address, name, tags });
   }
 
   return { rows, hasTagsColumn: tagsIdx !== -1 };

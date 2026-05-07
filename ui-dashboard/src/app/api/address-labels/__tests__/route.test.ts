@@ -8,7 +8,6 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/lib/address-labels", () => ({
   getLabels: vi.fn().mockResolvedValue({}),
-  getAllLabels: vi.fn().mockResolvedValue({ global: {}, chains: {} }),
   upsertEntry: vi.fn().mockResolvedValue(undefined),
   deleteLabel: vi.fn().mockResolvedValue(undefined),
   isArkhamSourced: (entry: { source?: string; tags?: string[] }) =>
@@ -17,537 +16,257 @@ vi.mock("@/lib/address-labels", () => ({
 }));
 
 import { getAuthSession } from "@/auth";
-import { getLabels, getAllLabels, upsertEntry } from "@/lib/address-labels";
+import { getLabels, upsertEntry, deleteLabel } from "@/lib/address-labels";
+
+const VALID_ADDR = "0x" + "a".repeat(40);
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  // resetAllMocks (not clearAllMocks) — wipes implementations so a per-test
+  // override (e.g. `mockResolvedValue({...prior})`) doesn't bleed into the
+  // next test.
+  vi.resetAllMocks();
+  (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
+  (upsertEntry as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+  (deleteLabel as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 });
 
 describe("GET /api/address-labels", () => {
-  it("returns 401 when unauthenticated (chain-narrow)", async () => {
+  it("returns 401 when unauthenticated", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    const req = new NextRequest(
-      "http://localhost/api/address-labels?chainId=42220",
-    );
-    const res = await GET(req);
+    const req = new NextRequest("http://localhost/api/address-labels");
+    const res = await GET();
     expect(res.status).toBe(401);
     expect(getLabels).not.toHaveBeenCalled();
   });
 
-  it("returns 401 when unauthenticated (full read)", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+  it("returns the flat labels map when authenticated", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      [VALID_ADDR]: { name: "Alice", tags: [], updatedAt: "2026-01-01" },
+    });
     const req = new NextRequest("http://localhost/api/address-labels");
-    const res = await GET(req);
-    expect(res.status).toBe(401);
-    expect(getAllLabels).not.toHaveBeenCalled();
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(getLabels).toHaveBeenCalledOnce();
+    const body = (await res.json()) as Record<string, { name: string }>;
+    expect(body[VALID_ADDR].name).toBe("Alice");
   });
 
-  it("returns all labels when authenticated (chain-narrow)", async () => {
+  it("ignores any chainId/scope query params (back-compat: flat map only)", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
       user: { email: "alice@mentolabs.xyz" },
     });
     (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
     const req = new NextRequest(
-      "http://localhost/api/address-labels?chainId=42220",
+      "http://localhost/api/address-labels?chainId=42220&scope=global",
     );
-    const res = await GET(req);
+    const res = await GET();
     expect(res.status).toBe(200);
-    expect(getLabels).toHaveBeenCalledWith(42220);
+    // Single-arg call — chainId/scope aren't forwarded.
+    expect(getLabels).toHaveBeenCalledWith();
   });
 
-  it("?scope=global routes to getLabels('global')", async () => {
+  it("returns 500 when getLabels throws", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
       user: { email: "alice@mentolabs.xyz" },
     });
-    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
-    const req = new NextRequest(
-      "http://localhost/api/address-labels?scope=global",
+    (getLabels as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("Redis offline"),
     );
-    const res = await GET(req);
-    expect(res.status).toBe(200);
-    expect(getLabels).toHaveBeenCalledWith("global");
-  });
-
-  it("returns { global, chains } when no params (authenticated)", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
-      global: {
-        "0xggg": {
-          name: "Cross-chain",
-          tags: [],
-          isPublic: true,
-          updatedAt: "1",
-        },
-      },
-      chains: {
-        "42220": {
-          "0xaaa": {
-            name: "Public A",
-            tags: [],
-            isPublic: true,
-            updatedAt: "1",
-          },
-          "0xbbb": {
-            name: "Private B",
-            tags: [],
-            isPublic: false,
-            updatedAt: "2",
-          },
-        },
-        "143": {
-          "0xccc": {
-            name: "Monad C",
-            tags: [],
-            isPublic: true,
-            updatedAt: "3",
-          },
-        },
-      },
-    });
     const req = new NextRequest("http://localhost/api/address-labels");
-    const res = await GET(req);
-    expect(res.status).toBe(200);
-    expect(getAllLabels).toHaveBeenCalledOnce();
-    const body = (await res.json()) as {
-      global: Record<string, { name: string }>;
-      chains: Record<string, Record<string, { name: string }>>;
-    };
-    expect(body.global["0xggg"].name).toBe("Cross-chain");
-    expect(Object.keys(body.chains).sort()).toEqual(["143", "42220"]);
-    expect(body.chains["42220"]["0xaaa"].name).toBe("Public A");
-    expect(body.chains["42220"]["0xbbb"].name).toBe("Private B");
-    expect(body.chains["143"]["0xccc"].name).toBe("Monad C");
+    const res = await GET();
+    expect(res.status).toBe(500);
   });
 });
 
 describe("PUT /api/address-labels", () => {
+  beforeEach(() => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+  });
+
+  function jsonReq(body: Record<string, unknown>): NextRequest {
+    return new NextRequest("http://localhost/api/address-labels", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
   it("returns 401 when unauthenticated", async () => {
     (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: "global",
-        address: "0x" + "a".repeat(40),
-        name: "Test",
-        tags: [],
-      }),
-    });
-    const res = await PUT(req);
+    const res = await PUT(jsonReq({ address: VALID_ADDR, name: "Alice" }));
     expect(res.status).toBe(401);
+    expect(upsertEntry).not.toHaveBeenCalled();
   });
 
-  it("accepts scope: 'global'", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    const address = "0x" + "a".repeat(40);
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: "global",
-        address,
-        name: "Cross-chain",
-        tags: [],
-      }),
-    });
-    const res = await PUT(req);
-    expect(res.status).toBe(200);
-    expect(upsertEntry).toHaveBeenCalledWith("global", address, {
-      name: "Cross-chain",
-      tags: [],
-      notes: undefined,
-      isPublic: false,
-    });
-  });
-
-  it("strips the reserved 'arkham' provenance tag from user input", async () => {
-    // The arkham/enrich monthly refresh treats `tags.includes("arkham")` as
-    // "safe to overwrite". A user typing "arkham" via the label editor must
-    // not get their entry classified as arkham-sourced.
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    const address = "0x" + "a".repeat(40);
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chainId: 42220,
-        address,
-        name: "My exchange",
-        tags: ["arkham", "Arkham", "ARKHAM", "exchange"],
-      }),
-    });
-    const res = await PUT(req);
-    expect(res.status).toBe(200);
-    expect(upsertEntry).toHaveBeenCalledWith(42220, address, {
-      name: "My exchange",
-      tags: ["exchange"], // arkham (any case) stripped
-      notes: undefined,
-      isPublic: false,
-    });
-  });
-
-  it("accepts scope: <chainId>", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    const address = "0x" + "a".repeat(40);
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: 42220,
-        address,
-        name: "Celo only",
-        tags: [],
-      }),
-    });
-    const res = await PUT(req);
-    expect(res.status).toBe(200);
-    expect(upsertEntry).toHaveBeenCalledWith(42220, address, {
-      name: "Celo only",
-      tags: [],
-      notes: undefined,
-      isPublic: false,
-    });
-  });
-
-  it("rejects scope: <unsupported chainId> (not in NETWORKS)", async () => {
-    // The strict-either-or Lua script's HDEL only covers chains in
-    // NETWORKS via the static ALL_LABEL_SCOPE_KEYS list. Letting an
-    // unsupported chainId through here would create a `labels:99999` key
-    // that no future cross-scope HDEL would ever reach, silently breaking
-    // strict either/or for any later move involving the same address.
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    const address = "0x" + "a".repeat(40);
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: 99999,
-        address,
-        name: "Unknown chain",
-        tags: [],
-      }),
-    });
-    const res = await PUT(req);
+  it("rejects an invalid address", async () => {
+    const res = await PUT(jsonReq({ address: "not-an-address", name: "X" }));
     expect(res.status).toBe(400);
     expect(upsertEntry).not.toHaveBeenCalled();
   });
 
-  it("accepts legacy { chainId } alias", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    const address = "0x" + "a".repeat(40);
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chainId: 42220,
-        address,
-        name: "Legacy client",
-        tags: [],
-      }),
-    });
-    const res = await PUT(req);
-    expect(res.status).toBe(200);
-    expect(upsertEntry).toHaveBeenCalledWith(42220, address, {
-      name: "Legacy client",
-      tags: [],
-      notes: undefined,
-      isPublic: false,
-    });
-  });
-
-  it("accepts name + tags in PUT body", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    const address = "0x" + "a".repeat(40);
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: 42220,
-        address,
-        name: "Wintermute",
-        tags: ["Market Maker", "Arbitrageur"],
-      }),
-    });
-    const res = await PUT(req);
-    expect(res.status).toBe(200);
-    expect(upsertEntry).toHaveBeenCalledWith(42220, address, {
-      name: "Wintermute",
-      tags: ["Market Maker", "Arbitrageur"],
-      notes: undefined,
-      isPublic: false,
-    });
-  });
-
-  it("accepts tags-only (no name) in PUT body", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    const address = "0x" + "a".repeat(40);
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: 42220,
-        address,
-        name: "",
-        tags: ["Whale"],
-      }),
-    });
-    const res = await PUT(req);
-    expect(res.status).toBe(200);
-  });
-
-  it("ignores attacker-supplied source on a previously-unlabelled row", async () => {
-    // Prior state: no entry for this address. User submits `source: "arkham"`
-    // in the body. The route never destructures `source` from the body, so it
-    // can't promote the new entry to Arkham-sourced.
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({});
-    const address = "0x" + "a".repeat(40);
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: "global",
-        address,
-        name: "Spoofed",
-        tags: ["foo"],
-        source: "arkham", // ignored — route never destructures `source`
-      }),
-    });
-    const res = await PUT(req);
-    expect(res.status).toBe(200);
-    expect(upsertEntry).toHaveBeenCalledWith(
-      "global",
-      address,
-      expect.not.objectContaining({ source: expect.anything() }),
-    );
-  });
-
-  it("preserves existing Arkham source on edit (notes/tags update)", async () => {
-    // Prior state: an Arkham-enriched entry. User edits notes/tags via the
-    // dashboard — the body has no `source`, but the existing provenance must
-    // survive so the entry stays in the refresh cron's candidate set.
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    const address = "0x" + "a".repeat(40);
-    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
-      global: {
-        [address.toLowerCase()]: {
-          name: "Binance Hot Wallet 14",
-          tags: ["exchange"],
-          source: "arkham",
-          updatedAt: "2026-04-01T00:00:00Z",
-        },
-      },
-      chains: {},
-    });
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: "global",
-        address,
-        name: "Binance Hot Wallet 14",
-        tags: ["exchange", "user-curated"],
-        notes: "routes the bridge fees",
-      }),
-    });
-    const res = await PUT(req);
-    expect(res.status).toBe(200);
-    expect(upsertEntry).toHaveBeenCalledWith(
-      "global",
-      address,
-      expect.objectContaining({ source: "arkham" }),
-    );
-  });
-
-  it("preserves Arkham source on edit of a LEGACY entry (tag-only shape)", async () => {
-    // Pre-migration entries carry `tags: ["arkham", ...]` but no `source`
-    // field. Without the dual-check `isArkhamSourced`, editing such a row
-    // would leave it with neither marker — invisible to the refresh cron
-    // and indistinguishable from a manual entry. (Bugbot + Claude bot.)
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    const address = "0x" + "a".repeat(40);
-    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
-      global: {
-        [address.toLowerCase()]: {
-          name: "Binance",
-          tags: ["arkham", "exchange"], // legacy shape
-          updatedAt: "2026-04-01T00:00:00Z",
-        },
-      },
-      chains: {},
-    });
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: "global",
-        address,
-        name: "Binance",
-        tags: ["exchange"], // sentinel stripped client-side already
-        notes: "edited",
-      }),
-    });
-    const res = await PUT(req);
-    expect(res.status).toBe(200);
-    expect(upsertEntry).toHaveBeenCalledWith(
-      "global",
-      address,
-      expect.objectContaining({ source: "arkham" }),
-    );
-  });
-
-  it("preserves Arkham source when changing scope (chain → global)", async () => {
-    // The user moves an Arkham-sourced row from chain 42220 to global. The
-    // strict either/or semantics mean the entry currently lives ONLY in the
-    // chain scope; looking up the target scope alone would miss it. The
-    // cross-scope lookup must find it. (Codex P2 catch.)
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    const address = "0x" + "a".repeat(40);
-    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
-      global: {},
-      chains: {
-        "42220": {
-          [address.toLowerCase()]: {
-            name: "Binance",
-            tags: ["exchange"],
-            source: "arkham",
-            updatedAt: "2026-04-01T00:00:00Z",
-          },
-        },
-      },
-    });
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: "global",
-        address,
-        name: "Binance",
-        tags: ["exchange"],
-      }),
-    });
-    const res = await PUT(req);
-    expect(res.status).toBe(200);
-    expect(upsertEntry).toHaveBeenCalledWith(
-      "global",
-      address,
-      expect.objectContaining({ source: "arkham" }),
-    );
-  });
-
-  it("preserves MiniPay source across user edits (regression: codex finding)", async () => {
-    // The MiniPay tagging cron writes `source: "minipay"`. Without explicit
-    // preservation, editing a MiniPay-tagged row would demote it to a custom
-    // entry and break the address-book badge classification.
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    const address = "0x" + "b".repeat(40);
-    (getAllLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
-      global: {
-        [address.toLowerCase()]: {
-          name: "",
-          tags: ["MiniPay User"],
-          source: "minipay",
-          updatedAt: "2026-04-30T00:00:00Z",
-        },
-      },
-      chains: {},
-    });
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: "global",
-        address,
-        name: "Alice's MiniPay wallet", // user added a personal note via edit
-        tags: ["minipay", "friend"],
-      }),
-    });
-    const res = await PUT(req);
-    expect(res.status).toBe(200);
-    expect(upsertEntry).toHaveBeenCalledWith(
-      "global",
-      address,
-      expect.objectContaining({ source: "minipay" }),
-    );
-  });
-
-  it("rejects when both name and tags are empty", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: 42220,
-        address: "0x" + "a".repeat(40),
-        name: "",
-        tags: [],
-      }),
-    });
-    const res = await PUT(req);
+  it("rejects a payload with neither name nor tags", async () => {
+    const res = await PUT(jsonReq({ address: VALID_ADDR, name: "", tags: [] }));
     expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toContain("name or tags");
   });
 
-  it("rejects invalid scope values", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
-      user: { email: "alice@mentolabs.xyz" },
-    });
-    const req = new NextRequest("http://localhost/api/address-labels", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: "not-a-scope",
-        address: "0x" + "a".repeat(40),
-        name: "x",
-        tags: [],
-      }),
-    });
-    const res = await PUT(req);
+  it("accepts a tag-only payload (empty name, non-empty tags)", async () => {
+    const res = await PUT(
+      jsonReq({ address: VALID_ADDR, name: "", tags: ["whale"] }),
+    );
+    expect(res.status).toBe(200);
+    const [addr, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock
+      .calls[0];
+    expect(addr).toBe(VALID_ADDR);
+    expect(entry).toMatchObject({ name: "", tags: ["whale"] });
+  });
+
+  it("calls upsertEntry with single-arg signature (address, entry)", async () => {
+    const res = await PUT(
+      jsonReq({ address: VALID_ADDR, name: "Alice", tags: [] }),
+    );
+    expect(res.status).toBe(200);
+    const calls = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toHaveLength(2); // (address, entry) — no scope arg
+    expect(calls[0][0]).toBe(VALID_ADDR);
+  });
+
+  it("rejects name longer than 200 chars", async () => {
+    const longName = "a".repeat(201);
+    const res = await PUT(jsonReq({ address: VALID_ADDR, name: longName }));
     expect(res.status).toBe(400);
+  });
+
+  it("rejects notes longer than 500 chars", async () => {
+    const res = await PUT(
+      jsonReq({
+        address: VALID_ADDR,
+        name: "Alice",
+        notes: "x".repeat(501),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects more than 20 tags", async () => {
+    const tags = Array.from({ length: 21 }, (_, i) => `t${i}`);
+    const res = await PUT(
+      jsonReq({ address: VALID_ADDR, name: "Alice", tags }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects tags longer than 50 chars", async () => {
+    const res = await PUT(
+      jsonReq({
+        address: VALID_ADDR,
+        name: "Alice",
+        tags: ["a".repeat(51)],
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("strips reserved server-provenance tags (arkham, minipay) from user input", async () => {
+    const res = await PUT(
+      jsonReq({
+        address: VALID_ADDR,
+        name: "Alice",
+        tags: ["arkham", "minipay", "whale"],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(entry.tags).toEqual(["whale"]);
+  });
+
+  it("dedupes tags case-insensitively, preserving first-occurrence casing", async () => {
+    const res = await PUT(
+      jsonReq({
+        address: VALID_ADDR,
+        name: "Alice",
+        tags: ["Whale", "whale", "WHALE"],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(entry.tags).toEqual(["Whale"]);
+  });
+
+  it("preserves Arkham source on edit (does not demote to custom)", async () => {
+    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      [VALID_ADDR.toLowerCase()]: {
+        name: "Old",
+        tags: [],
+        source: "arkham",
+        updatedAt: "2025-01-01T00:00:00Z",
+        createdAt: "2025-01-01T00:00:00Z",
+      },
+    });
+    const res = await PUT(
+      jsonReq({ address: VALID_ADDR, name: "User edit", tags: ["whale"] }),
+    );
+    expect(res.status).toBe(200);
+    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(entry.source).toBe("arkham");
+    expect(entry.createdAt).toBe("2025-01-01T00:00:00Z");
+  });
+
+  it("preserves MiniPay source on edit", async () => {
+    (getLabels as ReturnType<typeof vi.fn>).mockResolvedValue({
+      [VALID_ADDR.toLowerCase()]: {
+        name: "MiniPay user",
+        tags: [],
+        source: "minipay",
+        updatedAt: "2025-01-01T00:00:00Z",
+      },
+    });
+    const res = await PUT(jsonReq({ address: VALID_ADDR, name: "Edited" }));
+    expect(res.status).toBe(200);
+    const [, entry] = (upsertEntry as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(entry.source).toBe("minipay");
   });
 });
 
 describe("DELETE /api/address-labels", () => {
-  it("returns 401 when unauthenticated", async () => {
-    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    const req = new NextRequest("http://localhost/api/address-labels", {
+  beforeEach(() => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { email: "alice@mentolabs.xyz" },
+    });
+  });
+
+  function jsonReq(body: Record<string, unknown>): NextRequest {
+    return new NextRequest("http://localhost/api/address-labels", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scope: "global",
-        address: "0x" + "a".repeat(40),
-      }),
+      body: JSON.stringify(body),
     });
-    const res = await DELETE(req);
+  }
+
+  it("returns 401 when unauthenticated", async () => {
+    (getAuthSession as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    const res = await DELETE(jsonReq({ address: VALID_ADDR }));
     expect(res.status).toBe(401);
+    expect(deleteLabel).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid address", async () => {
+    const res = await DELETE(jsonReq({ address: "not-an-address" }));
+    expect(res.status).toBe(400);
+    expect(deleteLabel).not.toHaveBeenCalled();
+  });
+
+  it("calls deleteLabel with single-arg signature (address only)", async () => {
+    const res = await DELETE(jsonReq({ address: VALID_ADDR }));
+    expect(res.status).toBe(200);
+    const calls = (deleteLabel as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toHaveLength(1); // (address) — no scope arg
+    expect(calls[0][0]).toBe(VALID_ADDR);
   });
 });

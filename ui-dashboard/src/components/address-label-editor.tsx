@@ -1,14 +1,12 @@
 "use client";
 
 import { useRef, useEffect, useState, useMemo } from "react";
-import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressReportEditor } from "@/components/address-report-editor";
-import type { AddressEntry, Scope } from "@/lib/address-labels-shared";
+import type { AddressEntry } from "@/lib/address-labels-shared";
 import { TagInput } from "@/components/tag-input";
 import { SUGGESTED_TAGS, getUsedTags } from "@/lib/tag-suggestions";
 import { isValidAddress } from "@/lib/format";
-import { NETWORKS, networkIdForChainId } from "@/lib/networks";
 
 type EditorTab = "label" | "report";
 
@@ -66,40 +64,19 @@ export function validateEntryForm(opts: {
   return null;
 }
 
-/** Human-readable label for a scope, for use in the editor UI. */
-function scopeLabel(scope: Scope): string {
-  if (scope === "global") return "All chains";
-  const id = networkIdForChainId(scope);
-  const net = id ? NETWORKS[id] : null;
-  return net ? `Only on ${net.label}` : `Chain ${scope}`;
-}
-
 type Props = {
   /** Pass empty string to allow the user to type a new address */
   address: string;
   /** Pre-filled initial values when editing an existing entry */
   initial?: AddressEntry;
-  /**
-   * The chain context for this editor session. Used as the target when the
-   * user picks the "Only on {network}" scope. Defaults to the current network.
-   */
-  chainId?: number;
-  /**
-   * Current scope of the entry being edited. When omitted (new entry), the
-   * editor defaults to "global".
-   */
-  scope?: Scope;
   onClose: () => void;
 };
 
 export function AddressLabelEditor({
   address: initialAddress,
   initial,
-  chainId,
-  scope: initialScope,
   onClose,
 }: Props) {
-  const { network } = useNetwork();
   const {
     upsertEntry,
     deleteEntry,
@@ -110,18 +87,6 @@ export function AddressLabelEditor({
   const firstInputRef = useRef<HTMLInputElement>(null);
 
   const isNewAddress = initialAddress === "";
-  // Chain context for the "Only on X" radio. If the caller passed an explicit
-  // per-chain `scope`, that takes precedence over `chainId` — otherwise the
-  // scope radio would have no matching option when `scope` and `chainId`
-  // disagree (latent bug surface for any future caller).
-  const effectiveChainId =
-    typeof initialScope === "number"
-      ? initialScope
-      : (chainId ?? network.chainId);
-
-  // Starting scope: the entry's current scope for edits, "global" for new.
-  const startingScope: Scope = initialScope ?? "global";
-  const [selectedScope, setSelectedScope] = useState<Scope>(startingScope);
 
   const [address, setAddress] = useState(initialAddress);
   const [name, setName] = useState(initial?.name ?? "");
@@ -156,13 +121,10 @@ export function AddressLabelEditor({
 
   // When editing an existing contract row (not a new address, no custom label yet),
   // label is optional — empty means "keep the contract name".
-  // isCustom is evaluated against the effective chain context — contract rows
-  // have no custom entry at the per-chain scope, and we don't want to flag a
-  // global-custom row from another unrelated chain as a contract row here.
   const isContractRow = resolveIsContractRow({
     isNewAddress,
     initial,
-    isCustom: isCustomLabel(address, effectiveChainId),
+    isCustom: isCustomLabel(address),
   });
 
   async function handleSave(e: React.FormEvent) {
@@ -186,16 +148,12 @@ export function AddressLabelEditor({
     setSaving(true);
     setError(null);
     try {
-      await upsertEntry(
-        address,
-        {
-          name: effectiveName,
-          tags,
-          notes: notes.trim() || undefined,
-          isPublic,
-        },
-        selectedScope,
-      );
+      await upsertEntry(address, {
+        name: effectiveName,
+        tags,
+        notes: notes.trim() || undefined,
+        isPublic,
+      });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save label.");
@@ -212,7 +170,7 @@ export function AddressLabelEditor({
     setDeleting(true);
     setError(null);
     try {
-      await deleteEntry(address, startingScope);
+      await deleteEntry(address);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete label.");
@@ -222,27 +180,6 @@ export function AddressLabelEditor({
   }
 
   const hasExistingCustomEntry = initial !== undefined && !isContractRow;
-
-  // Every existing custom entry for this address at a scope != the one the
-  // user picked. The server's strict either/or invariant will HDEL each of
-  // these on save, so we warn explicitly — critical for the "editing a
-  // contract row on chain Y when a custom label already exists on chain X"
-  // path where the editor would otherwise give no hint of cross-scope impact.
-  const willRemoveScopes: Scope[] =
-    address.trim() === ""
-      ? []
-      : customEntries
-          .filter(
-            (e) =>
-              e.address.toLowerCase() === address.toLowerCase() &&
-              e.scope !== selectedScope,
-          )
-          .map((e) => e.scope);
-
-  const perChainLabel =
-    (networkIdForChainId(effectiveChainId)
-      ? NETWORKS[networkIdForChainId(effectiveChainId)!]?.label
-      : null) ?? `Chain ${effectiveChainId}`;
 
   return (
     <dialog
@@ -315,20 +252,6 @@ export function AddressLabelEditor({
           id="al-tab-report-panel"
           aria-labelledby="al-tab-report"
         >
-          {/* Pass the IMMUTABLE startingScope, not the live selectedScope.
-              The label-tab radio is independent state; if the user toggles it
-              from "Only on Celo" to "All chains" before opening the report
-              tab, sending `selectedScope=global` would tell the server to
-              filter to global-only and hide the existing chain-scoped
-              report — saving from that empty editor would then create a new
-              global report and the strict-either-or upsert would HDEL the
-              original. Reports are scoped to the address row, not to the
-              label radio. */}
-          {/* Reports are address-keyed only — no scope. Same EVM address
-              means same entity (same private key derives the same address
-              across every chain), so a single report applies wherever the
-              address appears. The scope-radio above governs only the label,
-              not the forensic report. */}
           <AddressReportEditor address={address} />
         </div>
       ) : (
@@ -362,52 +285,6 @@ export function AddressLabelEditor({
               ) : (
                 <p className="font-mono text-xs text-slate-300 break-all select-all">
                   {address}
-                </p>
-              )}
-            </div>
-
-            {/* Scope (always visible) */}
-            <div>
-              <span
-                id="al-scope-label"
-                className="block text-xs font-medium text-slate-400 mb-2"
-              >
-                Applies to
-              </span>
-              <div
-                role="radiogroup"
-                aria-labelledby="al-scope-label"
-                className="space-y-1.5"
-              >
-                <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="al-scope"
-                    checked={selectedScope === "global"}
-                    onChange={() => setSelectedScope("global")}
-                    className="accent-indigo-500"
-                  />
-                  <span>All chains</span>
-                  <span className="text-xs text-slate-500">
-                    (cross-chain default)
-                  </span>
-                </label>
-                <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="al-scope"
-                    checked={selectedScope === effectiveChainId}
-                    onChange={() => setSelectedScope(effectiveChainId)}
-                    className="accent-indigo-500"
-                  />
-                  <span>Only on {perChainLabel}</span>
-                </label>
-              </div>
-              {willRemoveScopes.length > 0 && (
-                <p className="mt-2 text-xs text-amber-400">
-                  Saving will remove this address&apos;s existing label
-                  {willRemoveScopes.length > 1 ? "s" : ""} on:{" "}
-                  {willRemoveScopes.map(scopeLabel).join(", ")}.
                 </p>
               )}
             </div>
