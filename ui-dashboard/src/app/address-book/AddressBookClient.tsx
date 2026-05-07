@@ -4,6 +4,7 @@ import { useRef, useState, useCallback, useMemo } from "react";
 import { useNetwork } from "@/components/network-provider";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import { AddressLabelEditor } from "@/components/address-label-editor";
+import { useAddressReportsIndex } from "@/hooks/use-address-reports-index";
 import { explorerAddressUrl } from "@/lib/tokens";
 import { NETWORKS, DEFAULT_NETWORK, networkForChainId } from "@/lib/networks";
 import { type Scope } from "@/lib/address-labels-shared";
@@ -28,6 +29,12 @@ export default function AddressBookPage({
   const { network: currentNetwork } = useNetwork();
   const { customEntries, getEntry, revalidate, isLoading, error } =
     useAddressLabels();
+  // Hook lifted from AddressTableRow so the SWR subscription, useSession
+  // call, and per-render Set construction happen ONCE per table render
+  // instead of N times (one per row). Cursor flagged the per-row pattern
+  // as a perf regression at 200–500 rows; passing `hasReport` down keeps
+  // the row component pure.
+  const { hasReport } = useAddressReportsIndex();
 
   const [search, setSearch] = useState("");
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
@@ -215,6 +222,7 @@ export default function AddressBookPage({
                     createdAt={row.createdAt ?? resolved?.entry.createdAt}
                     updatedAt={row.updatedAt ?? resolved?.entry.updatedAt}
                     canEdit={userCanEdit}
+                    reportPresent={hasReport(row.address)}
                     explorerUrl={
                       row.network.explorerBaseUrl
                         ? explorerAddressUrl(row.network, row.address)
@@ -223,14 +231,20 @@ export default function AddressBookPage({
                     onEdit={() =>
                       setEditTarget({
                         address: row.address,
-                        // For custom rows, scope is authoritative. For contract
-                        // rows (no custom entry yet), default to "global" so
-                        // new labels are cross-chain by default.
+                        // For custom rows, scope is authoritative. For
+                        // contract rows (no custom entry yet), default to
+                        // "global" so new labels are cross-chain by
+                        // default — and so editing a contract row whose
+                        // address has a global label doesn't silently
+                        // migrate it to the row's chain on save (codex
+                        // finding from PR #330). Reports are no longer
+                        // scope-bound (single global hash), so this
+                        // doesn't affect report lookup.
                         scope: row.isCustom ? row.scope : "global",
                         // Chain context for the editor's "Only on X" option.
-                        // Global-scope custom rows use the current network
-                        // (user's active view) so "Only on X" means "demote
-                        // to the chain I'm currently looking at".
+                        // Global-scope rows use the current network (user's
+                        // active view) so "Only on X" means "demote to the
+                        // chain I'm currently looking at".
                         chainId:
                           row.scope === "global"
                             ? currentNetwork.chainId

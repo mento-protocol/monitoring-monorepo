@@ -64,6 +64,22 @@ vi.mock("@/components/address-labels-provider", () => ({
   useAddressLabels: () => mockUseAddressLabels(),
 }));
 
+// AddressTableRow consults the reports index to render the 📄 indicator. The
+// hook calls `useSession`, which throws outside a <SessionProvider/>. Stub
+// with an "empty index" shape — every assertion in this file targets non-
+// indicator behaviour, so the indicator stays hidden and the table layout
+// remains unchanged.
+vi.mock("@/hooks/use-address-reports-index", () => ({
+  useAddressReportsIndex: () => ({
+    data: { global: [], chains: {} },
+    hasReport: () => false,
+    isLoading: false,
+    error: undefined,
+    mutate: vi.fn(),
+  }),
+  ADDRESS_REPORTS_INDEX_SWR_KEY: "address-reports:index",
+}));
+
 // AddressBookClient calls `useNetwork()` to compute the chain context for the
 // editor's "Only on X" target. Pin to celo-mainnet so the chainId is a known
 // constant in assertions.
@@ -621,6 +637,10 @@ describe("AddressBookClient — edit modal", () => {
 
   it("contract rows render '+ Tag' which opens the editor with scope=global", () => {
     // No custom entries — only synthetic contracts from the mocked NETWORKS.
+    // Contract rows pass scope=global so editing a contract whose address
+    // has a global label doesn't silently migrate it to the row's chain
+    // (codex finding on PR #330). Reports are scope-free so this doesn't
+    // affect report lookup.
     mockCustomEntries = [];
     mockGetEntry.mockReturnValue(undefined);
     render();
@@ -663,6 +683,8 @@ describe("AddressBookClient — edit modal", () => {
     expect(capturedEditor?.address).toBe(
       "0xdddddddddddddddddddddddddddddddddddddddd",
     );
+    // Contract row passes scope=global (default for contracts without a
+    // custom label) — the chain context flows through `chainId` instead.
     expect(capturedEditor?.scope).toBe("global");
     expect(capturedEditor?.chainId).toBe(monadNet.chainId);
     expect(capturedEditor?.initial?.name).toBe("ContractD");

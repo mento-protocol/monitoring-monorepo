@@ -1,0 +1,171 @@
+import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
+import { getAuthSession } from "@/auth";
+import {
+  findReport,
+  getReportsIndex,
+  upsertReport,
+  deleteReport,
+  sanitizeReportInput,
+  type AddressReport,
+} from "@/lib/address-reports";
+import { isValidAddress } from "@/lib/format";
+
+// HTTP body size guards. PUT carries up to 50KB of markdown plus JSON
+// overhead — 256KB cap leaves headroom while bounding the worst case.
+// DELETE bodies are tiny (`{ address }`).
+const MAX_PUT_BODY_BYTES = 256 * 1024;
+const MAX_DELETE_BODY_BYTES = 4 * 1024;
+
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const session = await getAuthSession();
+  if (!session) {
+    return NextResponse.json(
+      { error: "Authentication required" },
+      { status: 401 },
+    );
+  }
+
+  const addressParam = req.nextUrl.searchParams.get("address");
+
+  // Single-report read: ?address=0x...
+  if (addressParam !== null) {
+    if (!isValidAddress(addressParam)) {
+      return NextResponse.json({ error: "Invalid address" }, { status: 400 });
+    }
+    try {
+      const found = await findReport(addressParam);
+      if (!found) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      return NextResponse.json(found);
+    } catch (err) {
+      return serverError(err, "read");
+    }
+  }
+
+  // Index read: addresses-only — the 📄 indicator needs nothing else.
+  try {
+    const index = await getReportsIndex();
+    return NextResponse.json(index);
+  } catch (err) {
+    return serverError(err, "read");
+  }
+}
+
+export async function PUT(req: NextRequest): Promise<NextResponse> {
+  const session = await getAuthSession();
+  if (!session) {
+    return NextResponse.json(
+      { error: "Authentication required" },
+      { status: 401 },
+    );
+  }
+
+  const parsed = await readBoundedJson(req, MAX_PUT_BODY_BYTES);
+  if (parsed instanceof NextResponse) return parsed;
+
+  const {
+    address,
+    body: reportBody,
+    title,
+  } = parsed as Record<string, unknown>;
+
+  if (typeof address !== "string" || !isValidAddress(address)) {
+    return NextResponse.json({ error: "Invalid address" }, { status: 400 });
+  }
+
+  const sanitized = sanitizeReportInput({ body: reportBody, title });
+  if (!sanitized.ok) {
+    return NextResponse.json({ error: sanitized.error }, { status: 400 });
+  }
+
+  try {
+    // authorEmail comes from the session — never trust the request body
+    // for identity. Our Google Workspace gate (`@mentolabs.xyz` only)
+    // makes this a meaningful audit trail without an extra users table.
+    const authorEmail = session.user?.email ?? undefined;
+
+    const saved: AddressReport = await upsertReport(address, {
+      body: sanitized.body,
+      title: sanitized.title,
+      authorEmail,
+      source: "manual",
+    });
+
+    return NextResponse.json({ ok: true, report: saved });
+  } catch (err) {
+    return serverError(err, "save");
+  }
+}
+
+export async function DELETE(req: NextRequest): Promise<NextResponse> {
+  const session = await getAuthSession();
+  if (!session) {
+    return NextResponse.json(
+      { error: "Authentication required" },
+      { status: 401 },
+    );
+  }
+
+  const parsed = await readBoundedJson(req, MAX_DELETE_BODY_BYTES);
+  if (parsed instanceof NextResponse) return parsed;
+
+  const { address } = parsed as Record<string, unknown>;
+
+  if (typeof address !== "string" || !isValidAddress(address)) {
+    return NextResponse.json({ error: "Invalid address" }, { status: 400 });
+  }
+
+  try {
+    await deleteReport(address);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    return serverError(err, "delete");
+  }
+}
+
+// Body-size guard. Two-step like the labels-import route: a fast Content-
+// Length check rejects oversized requests before any read, then we read the
+// body as text and re-check the actual byte length. Without the post-read
+// check, a chunked / no-Content-Length client can stream an arbitrary-size
+// JSON payload past `req.json()` before the in-handler 50KB validator runs.
+async function readBoundedJson(
+  req: NextRequest,
+  maxBytes: number,
+): Promise<unknown | NextResponse> {
+  const header = req.headers.get("content-length");
+  if (header !== null) {
+    const size = Number(header);
+    if (Number.isFinite(size) && size > maxBytes) {
+      return NextResponse.json(
+        { error: "Request body too large" },
+        { status: 413 },
+      );
+    }
+  }
+  const text = await req.text();
+  if (Buffer.byteLength(text, "utf8") > maxBytes) {
+    return NextResponse.json(
+      { error: "Request body too large" },
+      { status: 413 },
+    );
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+}
+
+function serverError(
+  err: unknown,
+  op: "read" | "save" | "delete",
+): NextResponse {
+  Sentry.captureException(err, { tags: { route: "address-reports", op } });
+  console.error("[address-reports]", op, err);
+  return NextResponse.json(
+    { error: `Failed to ${op} address report` },
+    { status: 500 },
+  );
+}

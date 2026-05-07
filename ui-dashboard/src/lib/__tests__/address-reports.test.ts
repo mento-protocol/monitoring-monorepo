@@ -1,0 +1,154 @@
+/**
+ * Server-side tests for the report Redis client. Mocks `@upstash/redis` to
+ * match real SDK behavior — particularly that `redis.eval`'s response is
+ * auto-deserialized: a script that returns `cjson.encode(table)` arrives in
+ * JS as an already-parsed object, NOT a string.
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const mockEval = vi.fn();
+const mockHget = vi.fn();
+const mockHkeys = vi.fn();
+const mockHdel = vi.fn();
+
+vi.mock("@upstash/redis", () => ({
+  // Constructor mock — vitest-mock-quirks rule: must be a real `function`
+  // declaration (not an arrow), otherwise `new Redis(...)` throws "is not
+  // a constructor".
+  Redis: function MockRedis() {
+    return {
+      eval: mockEval,
+      hget: mockHget,
+      hkeys: mockHkeys,
+      hdel: mockHdel,
+    };
+  },
+}));
+
+beforeEach(() => {
+  process.env.UPSTASH_REDIS_REST_URL = "https://test";
+  process.env.UPSTASH_REDIS_REST_TOKEN = "test-token";
+  vi.clearAllMocks();
+});
+
+afterEach(() => {
+  delete process.env.UPSTASH_REDIS_REST_URL;
+  delete process.env.UPSTASH_REDIS_REST_TOKEN;
+});
+
+const ADDR = "0xb64c8b0a3f8008d5028d8f9323b858f17b18c3c4";
+
+describe("upsertReport — Upstash auto-deserialization contract", () => {
+  it("uses redis.eval result directly (Upstash already parsed it; no JSON.parse)", async () => {
+    // Real Upstash returns the cjson.encode'd payload as a parsed object.
+    // If a future change re-introduces `JSON.parse(result)`, that becomes
+    // `JSON.parse("[object Object]")` and throws SyntaxError.
+    mockEval.mockResolvedValueOnce({
+      body: "x",
+      authorEmail: "alice@mentolabs.xyz",
+      source: "manual",
+      createdAt: "2026-05-07T00:00:00.000Z",
+      updatedAt: "2026-05-07T00:00:00.000Z",
+      version: 1,
+    });
+
+    const { upsertReport } = await import("@/lib/address-reports");
+
+    const saved = await upsertReport(ADDR, {
+      body: "x",
+      authorEmail: "alice@mentolabs.xyz",
+      source: "manual",
+    });
+
+    expect(saved).toEqual({
+      body: "x",
+      authorEmail: "alice@mentolabs.xyz",
+      source: "manual",
+      createdAt: "2026-05-07T00:00:00.000Z",
+      updatedAt: "2026-05-07T00:00:00.000Z",
+      version: 1,
+    });
+    expect(mockEval).toHaveBeenCalledOnce();
+  });
+
+  it("propagates the version stamped by the Lua script", async () => {
+    mockEval.mockResolvedValueOnce({
+      body: "x",
+      createdAt: "2026-05-07T00:00:00.000Z",
+      updatedAt: "2026-05-07T00:00:01.000Z",
+      version: 7,
+    });
+
+    const { upsertReport } = await import("@/lib/address-reports");
+    const saved = await upsertReport(ADDR, { body: "x" });
+    expect(saved.version).toBe(7);
+  });
+
+  it("targets the single `reports` Redis hash (no scope)", async () => {
+    mockEval.mockResolvedValueOnce({
+      body: "x",
+      createdAt: "1",
+      updatedAt: "1",
+      version: 1,
+    });
+    const { upsertReport } = await import("@/lib/address-reports");
+    await upsertReport(ADDR, { body: "x" });
+    const callArgs = mockEval.mock.calls[0]!;
+    // KEYS arg is the second positional — should be ["reports"], no scope.
+    expect(callArgs[1]).toEqual(["reports"]);
+  });
+});
+
+describe("findReport — single-key lookup", () => {
+  it("returns the report when it exists", async () => {
+    mockHget.mockResolvedValueOnce({
+      body: "yo",
+      createdAt: "1",
+      updatedAt: "1",
+      version: 1,
+    });
+
+    const { findReport } = await import("@/lib/address-reports");
+    const found = await findReport(ADDR);
+    expect(found).not.toBeNull();
+    expect(found?.body).toBe("yo");
+    expect(mockHget).toHaveBeenCalledWith("reports", ADDR.toLowerCase());
+  });
+
+  it("returns null when no report exists", async () => {
+    mockHget.mockResolvedValueOnce(null);
+    const { findReport } = await import("@/lib/address-reports");
+    const found = await findReport(ADDR);
+    expect(found).toBeNull();
+  });
+
+  it("normalizes the address to lowercase for the lookup", async () => {
+    mockHget.mockResolvedValueOnce(null);
+    const { findReport } = await import("@/lib/address-reports");
+    await findReport("0xB64C8B0A3F8008D5028D8F9323B858F17B18C3C4");
+    expect(mockHget).toHaveBeenCalledWith(
+      "reports",
+      "0xb64c8b0a3f8008d5028d8f9323b858f17b18c3c4",
+    );
+  });
+});
+
+describe("getReportsIndex — addresses-only", () => {
+  it("returns the lowercase address list with no metadata", async () => {
+    mockHkeys.mockResolvedValueOnce(["0xaaa", "0xBBB"]);
+    const { getReportsIndex } = await import("@/lib/address-reports");
+    const idx = await getReportsIndex();
+    expect(idx.addresses).toEqual(["0xaaa", "0xbbb"]);
+  });
+
+  it("hits HKEYS, never HGETALL — bandwidth guard for 50KB bodies", async () => {
+    mockHkeys.mockResolvedValueOnce([]);
+    const { getReportsIndex } = await import("@/lib/address-reports");
+    await getReportsIndex();
+    // Verify the bandwidth-cheap path is used — HKEYS returns field names
+    // only. If a future change switches to HGETALL the 60s poll loop would
+    // ship every 50KB body.
+    expect(mockHkeys).toHaveBeenCalledWith("reports");
+  });
+});
