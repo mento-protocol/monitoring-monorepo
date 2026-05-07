@@ -1,0 +1,141 @@
+import { Redis } from "@upstash/redis";
+
+// Re-export isomorphic types and helpers so callers can import from a single
+// path. Mirrors the address-labels split.
+export {
+  type AddressReport,
+  type AddressReportRecord,
+  type AddressReportsIndex,
+  MAX_BODY_LENGTH,
+  MAX_TITLE_LENGTH,
+  sanitizeReportInput,
+  upgradeReport,
+  upgradeReports,
+} from "./address-reports-shared";
+
+import { upgradeReport, type AddressReport } from "./address-reports-shared";
+
+// Redis layout: a single `reports` hash keyed by lowercase address. Reports
+// are not chain-scoped — same EVM address means same entity (same private
+// key derives the same address across every chain), so a single global
+// report applies wherever the address appears. Earlier per-scope storage
+// caused recurring scope-mismatch bugs that the model itself doesn't
+// justify (PR #330).
+const REPORTS_KEY = "reports";
+
+function getRedis(): Redis {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) {
+    throw new Error(
+      "Upstash Redis not configured. Set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.",
+    );
+  }
+  return new Redis({ url, token });
+}
+
+// Atomic upsert script. Reads prior, increments version, preserves
+// createdAt, writes. Atomicity guards the version monotonicity invariant
+// against concurrent writers — without the script, two simultaneous saves
+// could both observe v=N and both write v=N+1.
+//
+// KEYS[1]  = "reports"
+// ARGV[1]  = address (lowercase)
+// ARGV[2]  = JSON-encoded payload (body + optional title/authorEmail/source)
+// ARGV[3]  = ISO timestamp for `now`
+//
+// Returns the JSON-encoded persisted record so the caller knows the
+// assigned version.
+const UPSERT_SCRIPT = `
+local key = KEYS[1]
+local addr = ARGV[1]
+local payload = cjson.decode(ARGV[2])
+local now = ARGV[3]
+
+local existing = redis.call('HGET', key, addr)
+local prior = nil
+if existing then
+  prior = cjson.decode(existing)
+end
+
+payload.createdAt = (prior and prior.createdAt) or now
+payload.updatedAt = now
+payload.version = ((prior and prior.version) or 0) + 1
+
+local encoded = cjson.encode(payload)
+redis.call('HSET', key, addr, encoded)
+return encoded
+`;
+
+// Data access helpers (all server-side)
+
+/**
+ * Read the report for an address. Returns null if no report exists.
+ */
+export async function findReport(
+  address: string,
+): Promise<AddressReport | null> {
+  const redis = getRedis();
+  const raw = await redis.hget<Record<string, unknown>>(
+    REPORTS_KEY,
+    address.toLowerCase(),
+  );
+  return raw ? upgradeReport(raw) : null;
+}
+
+/**
+ * Upsert a report for an address. Atomically increments `version` and
+ * preserves `createdAt` from any prior record inside a single Lua execution
+ * — concurrent writers can no longer both observe the same prior version
+ * and both write `version + 1`.
+ */
+export async function upsertReport(
+  address: string,
+  payload: {
+    body: string;
+    title?: string;
+    authorEmail?: string;
+    source?: AddressReport["source"];
+  },
+): Promise<AddressReport> {
+  const redis = getRedis();
+  const lower = address.toLowerCase();
+  const now = new Date().toISOString();
+
+  // Send only user-controlled fields; the Lua script stamps createdAt /
+  // updatedAt / version atomically based on the prior record.
+  const partial = {
+    body: payload.body,
+    ...(payload.title ? { title: payload.title } : {}),
+    ...(payload.authorEmail ? { authorEmail: payload.authorEmail } : {}),
+    ...(payload.source ? { source: payload.source } : {}),
+  };
+
+  // The Upstash SDK auto-parses JSON-shaped responses (`parseResponse` →
+  // `parseRecursive`), so the script's `cjson.encode(payload)` return value
+  // arrives here as an already-deserialized object — calling JSON.parse on
+  // it would coerce to "[object Object]" and throw at runtime.
+  const result = (await redis.eval(
+    UPSERT_SCRIPT,
+    [REPORTS_KEY],
+    [lower, JSON.stringify(partial), now],
+  )) as Record<string, unknown>;
+
+  return upgradeReport(result);
+}
+
+export async function deleteReport(address: string): Promise<void> {
+  const redis = getRedis();
+  await redis.hdel(REPORTS_KEY, address.toLowerCase());
+}
+
+/**
+ * Read just the addresses that have a report. Reads field names only
+ * (HKEYS) — does NOT pull the 50KB report bodies the way an HGETALL would,
+ * so the index endpoint stays cheap to poll on a 60s loop.
+ */
+export async function getReportsIndex(): Promise<{ addresses: string[] }> {
+  const redis = getRedis();
+  const fields = await redis.hkeys(REPORTS_KEY);
+  return { addresses: (fields ?? []).map((f) => f.toLowerCase()) };
+}

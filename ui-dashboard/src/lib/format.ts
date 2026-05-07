@@ -49,6 +49,18 @@ export function relativeTime(ts: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+/** Like `relativeTime` but takes an ISO string and falls back to the ISO date
+ * for \u226530-day-old timestamps \u2014 content that ages months/years reads better
+ * as `2026-01-15` than `412d ago`. */
+export function relativeTimeFromIso(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return iso;
+  if (Date.now() - t >= 30 * 24 * 60 * 60 * 1000) {
+    return iso.slice(0, 10);
+  }
+  return relativeTime(String(Math.floor(t / 1000)));
+}
+
 export function formatBlock(bn: string): string {
   return Number(bn).toLocaleString();
 }

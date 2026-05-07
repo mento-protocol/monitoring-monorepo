@@ -35,6 +35,9 @@ type AddressRowProps = {
   createdAt?: string;
   updatedAt?: string;
   canEdit: boolean;
+  /** Pre-computed by the parent so the reports index hook isn't re-subscribed
+   * per row — see AddressBookClient. */
+  reportPresent: boolean;
   explorerUrl: string | null;
   onEdit: () => void;
 };
@@ -52,6 +55,7 @@ export function AddressTableRow({
   createdAt,
   updatedAt,
   canEdit,
+  reportPresent,
   explorerUrl,
   onEdit,
 }: AddressRowProps) {
@@ -79,24 +83,36 @@ export function AddressTableRow({
         )}
       </td>
       <td className="px-4 py-3 whitespace-nowrap">
-        {explorerUrl ? (
-          <a
-            href={explorerUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={address}
-            className="font-mono text-xs text-slate-300 hover:text-indigo-300 transition-colors"
-          >
-            {truncateAddress(address)}
-            <span className="ml-1 text-slate-600" aria-hidden="true">
-              ↗
+        <div className="flex items-center gap-1.5">
+          {explorerUrl ? (
+            <a
+              href={explorerUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={address}
+              className="font-mono text-xs text-slate-300 hover:text-indigo-300 transition-colors"
+            >
+              {truncateAddress(address)}
+              <span className="ml-1 text-slate-600" aria-hidden="true">
+                ↗
+              </span>
+            </a>
+          ) : (
+            <span title={address} className="font-mono text-xs text-slate-500">
+              {truncateAddress(address)}
             </span>
-          </a>
-        ) : (
-          <span title={address} className="font-mono text-xs text-slate-500">
-            {truncateAddress(address)}
-          </span>
-        )}
+          )}
+          {reportPresent && (
+            <span
+              role="img"
+              aria-label="Has forensic report"
+              title="Forensic report attached"
+              className="text-xs leading-none"
+            >
+              📄
+            </span>
+          )}
+        </div>
       </td>
       <td className="px-4 py-3 max-w-[180px]">
         <span
