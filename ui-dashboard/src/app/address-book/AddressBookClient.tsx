@@ -231,14 +231,16 @@ export default function AddressBookPage({
                     onEdit={() =>
                       setEditTarget({
                         address: row.address,
-                        // Always pass the row's actual scope. The editor's
-                        // report tab uses this to look up reports at exactly
-                        // that scope (strict scope match), so contract rows
-                        // with chain-scoped reports remain reachable. The
-                        // label tab still defaults its scope-radio to
-                        // `startingScope` and the user can change it before
-                        // saving a new label.
-                        scope: row.scope,
+                        // For custom rows, scope is authoritative. For
+                        // contract rows (no custom entry yet), default to
+                        // "global" so new labels are cross-chain by
+                        // default — and so editing a contract row whose
+                        // address has a global label doesn't silently
+                        // migrate it to the row's chain on save (codex
+                        // finding from PR #330). Reports are no longer
+                        // scope-bound (single global hash), so this
+                        // doesn't affect report lookup.
+                        scope: row.isCustom ? row.scope : "global",
                         // Chain context for the editor's "Only on X" option.
                         // Global-scope rows use the current network (user's
                         // active view) so "Only on X" means "demote to the

@@ -635,19 +635,18 @@ describe("AddressBookClient — edit modal", () => {
     expect(container.querySelector('[data-testid="editor-stub"]')).toBeNull();
   });
 
-  it("contract rows render '+ Tag' which opens the editor with the row's own scope", () => {
+  it("contract rows render '+ Tag' which opens the editor with scope=global", () => {
     // No custom entries — only synthetic contracts from the mocked NETWORKS.
-    // Strict-scope mode (PR #330): the editor receives the row's actual
-    // scope, not a global default — so the Forensic Report tab can find a
-    // chain-scoped report attached to a contract address even when no
-    // custom label exists yet.
+    // Contract rows pass scope=global so editing a contract whose address
+    // has a global label doesn't silently migrate it to the row's chain
+    // (codex finding on PR #330). Reports are scope-free so this doesn't
+    // affect report lookup.
     mockCustomEntries = [];
     mockGetEntry.mockReturnValue(undefined);
     render();
     clickByText("+ Tag");
     expect(capturedEditor).not.toBeNull();
-    // ContractC is in celo-mainnet (chainId 42220).
-    expect(capturedEditor?.scope).toBe(42220);
+    expect(capturedEditor?.scope).toBe("global");
   });
 
   it("contract row's '+ Tag' targets the row's own chain (not the page's first chain)", () => {
@@ -684,8 +683,9 @@ describe("AddressBookClient — edit modal", () => {
     expect(capturedEditor?.address).toBe(
       "0xdddddddddddddddddddddddddddddddddddddddd",
     );
-    // Strict-scope mode: contract row passes its own chain, not a global default.
-    expect(capturedEditor?.scope).toBe(monadNet.chainId);
+    // Contract row passes scope=global (default for contracts without a
+    // custom label) — the chain context flows through `chainId` instead.
+    expect(capturedEditor?.scope).toBe("global");
     expect(capturedEditor?.chainId).toBe(monadNet.chainId);
     expect(capturedEditor?.initial?.name).toBe("ContractD");
   });
