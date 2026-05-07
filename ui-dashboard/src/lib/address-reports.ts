@@ -73,12 +73,11 @@ function getRedis(): Redis {
 
 // Atomic upsert script.
 //
-// KEYS[1]   = target scope key (`reports:global` or `reports:{chainId}`)
-// KEYS[2..] = every OTHER potentially-existent scope key (script filters out
-//             KEYS[1] itself so HDEL on the target is a no-op).
-// ARGV[1]   = address (lowercase)
-// ARGV[2]   = JSON-encoded payload (body + optional title/authorEmail/source)
-// ARGV[3]   = ISO timestamp for `now`
+// KEYS[1..N] = every scope key (the full ALL_REPORT_SCOPE_KEYS list).
+// ARGV[1]    = 1-based index into KEYS marking the target scope.
+// ARGV[2]    = address (lowercase).
+// ARGV[3]    = JSON-encoded payload (body + optional title/authorEmail/source).
+// ARGV[4]    = ISO timestamp for `now`.
 //
 // Reads the prior record (across every scope, since strict-either-or guarantees
 // at most one) inside the script so version increments and createdAt
@@ -86,10 +85,11 @@ function getRedis(): Redis {
 // is read in the same atomic execution that writes the new one. Returns the
 // JSON-encoded persisted record so the caller knows the assigned version.
 const UPSERT_SCRIPT = `
-local targetKey = KEYS[1]
-local addr = ARGV[1]
-local payload = cjson.decode(ARGV[2])
-local now = ARGV[3]
+local targetIdx = tonumber(ARGV[1])
+local targetKey = KEYS[targetIdx]
+local addr = ARGV[2]
+local payload = cjson.decode(ARGV[3])
+local now = ARGV[4]
 
 local prior = nil
 for i = 1, #KEYS do
@@ -107,8 +107,8 @@ payload.version = ((prior and prior.version) or 0) + 1
 local encoded = cjson.encode(payload)
 redis.call('HSET', targetKey, addr, encoded)
 
-for i = 2, #KEYS do
-  if KEYS[i] ~= targetKey then
+for i = 1, #KEYS do
+  if i ~= targetIdx then
     redis.call('HDEL', KEYS[i], addr)
   end
 end
@@ -182,6 +182,16 @@ export async function upsertReport(
   const targetKey = reportsKey(scope);
   const now = new Date().toISOString();
 
+  // 1-based index for Lua. ALL_REPORT_SCOPE_KEYS is derived from NETWORKS so
+  // the target is always present; throw loudly if a future scope drift breaks
+  // that invariant rather than silently writing to KEYS[0] (= nil in Lua).
+  const targetIdx = ALL_REPORT_SCOPE_KEYS.indexOf(targetKey) + 1;
+  if (targetIdx === 0) {
+    throw new Error(
+      `Target scope key ${targetKey} not in ALL_REPORT_SCOPE_KEYS — NETWORKS config drift?`,
+    );
+  }
+
   // Send only user-controlled fields; the Lua script stamps createdAt /
   // updatedAt / version atomically based on the prior record.
   const partial = {
@@ -193,8 +203,8 @@ export async function upsertReport(
 
   const encoded = (await redis.eval(
     UPSERT_SCRIPT,
-    [targetKey, ...ALL_REPORT_SCOPE_KEYS],
-    [lower, JSON.stringify(partial), now],
+    [...ALL_REPORT_SCOPE_KEYS],
+    [String(targetIdx), lower, JSON.stringify(partial), now],
   )) as string;
 
   return upgradeReport(JSON.parse(encoded) as Record<string, unknown>);

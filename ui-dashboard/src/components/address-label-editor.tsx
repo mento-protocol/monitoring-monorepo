@@ -204,6 +204,10 @@ export function AddressLabelEditor({
     }
   }
 
+  // Deletes the LABEL only — any forensic report on the same address
+  // survives by design. Reports are evidence/history attached to the
+  // address; labels are display aliases. The Forensic Report tab has its
+  // own Delete button for the report.
   async function handleDelete() {
     setDeleting(true);
     setError(null);

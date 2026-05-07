@@ -16,8 +16,10 @@ type Props = {
   /** Address being edited. Empty string disables the form. */
   address: string;
   /**
-   * Scope to save the report under. Resolved by the parent: prior-report
-   * scope > label scope > "global" default. Read-only here in v1.
+   * Scope to use for NEW reports (the parent label tab's currently-selected
+   * scope). Edits to existing reports preserve `data.scope` instead — see
+   * `effectiveScope` in `handleSave` — so a report saved at "global" never
+   * silently moves when the user opens the modal from a per-chain row.
    */
   scope: Scope;
 };
@@ -100,11 +102,18 @@ export function AddressReportEditor({ address, scope }: Props) {
     setSaving(true);
     setError(null);
     try {
+      // Edits preserve the report's existing scope; new reports go to the
+      // parent label tab's selected scope. Without this, editing a global
+      // report from a per-chain row (where the indicator surfaces it via
+      // the chain → global fallback) would silently move it to the chain
+      // scope on the first save.
+      const effectiveScope = data?.scope ?? scope;
       const res = await fetch("/api/address-reports", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(8_000),
         body: JSON.stringify({
-          scope,
+          scope: effectiveScope,
           address: trimmed,
           body,
           title: title.trim() || undefined,
@@ -134,6 +143,7 @@ export function AddressReportEditor({ address, scope }: Props) {
     body,
     title,
     scope,
+    data,
     trimmed,
     isAddressValid,
     overLimit,
@@ -157,6 +167,7 @@ export function AddressReportEditor({ address, scope }: Props) {
       const res = await fetch("/api/address-reports", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(8_000),
         body: JSON.stringify({ scope: data.scope, address: trimmed }),
       });
       if (!res.ok) {
@@ -290,11 +301,16 @@ export function AddressReportEditor({ address, scope }: Props) {
           </div>
         )}
 
-        {/* Scope display */}
+        {/* Scope display — mirrors the save logic so the user sees the
+            actual destination (existing report's scope, or label tab's scope
+            for new reports). */}
         <div className="text-xs text-slate-500">
           Saved to scope:{" "}
           <span className="text-slate-300">
-            {scope === "global" ? "All chains" : `Chain ${scope}`}
+            {(() => {
+              const s = data?.scope ?? scope;
+              return s === "global" ? "All chains" : `Chain ${s}`;
+            })()}
           </span>
         </div>
 

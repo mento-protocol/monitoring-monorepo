@@ -8,11 +8,12 @@ import type { Scope } from "@/lib/address-labels-shared";
 
 /**
  * Lightweight index of which addresses have a forensic report. Used to render
- * the 📄 indicator in the address book — bodies are NOT loaded here, only
- * metadata (title, length, author, version, updatedAt).
+ * the 📄 indicator in the address book — only the addresses are loaded
+ * (server-side HKEYS), not titles, bodies, or any other metadata.
  *
- * The full report body is fetched on-demand by `AddressReportEditor` when the
- * Forensic Report tab opens, keyed by `address-reports:single:{addr}`.
+ * The full report body and metadata are fetched on-demand by
+ * `AddressReportEditor` when the Forensic Report tab opens, keyed by
+ * `address-reports:single:{addr}`.
  */
 
 export const ADDRESS_REPORTS_INDEX_SWR_KEY = "address-reports:index";
