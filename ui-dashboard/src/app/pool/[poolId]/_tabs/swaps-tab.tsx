@@ -101,6 +101,8 @@ export function SwapsTab({
     SNAPSHOT_REFRESH_MS,
   );
   const snapshots = snapshotData?.PoolDailySnapshot ?? [];
+  // snapshots are desc (newest-first) from the query
+  const lastSnapshot = snapshots[0];
 
   const { data: rebalanceData } = useGQL<{
     RebalanceEvent: { blockTimestamp: string }[];
@@ -152,34 +154,29 @@ export function SwapsTab({
             token1Symbol={sym1}
             rebalanceTimestamps={rebalanceTimestamps}
           />
-          {(() => {
-            // snapshots are desc (newest-first) from the query
-            const last = snapshots[0];
-            if (!last) return null;
-            return (
-              <div className="flex flex-wrap gap-4 mb-4 text-xs text-slate-400">
-                <span>
-                  Cumulative:{" "}
-                  <span className="font-mono text-slate-300">
-                    {formatWei(last.cumulativeVolume0, dec0)}
-                  </span>{" "}
-                  {sym0} sold
-                </span>
-                <span>
-                  <span className="font-mono text-slate-300">
-                    {formatWei(last.cumulativeVolume1, dec1)}
-                  </span>{" "}
-                  {sym1} sold
-                </span>
-                <span>
-                  <span className="font-mono text-slate-300">
-                    {last.cumulativeSwapCount.toLocaleString()}
-                  </span>{" "}
-                  total swaps
-                </span>
-              </div>
-            );
-          })()}
+          {lastSnapshot && (
+            <div className="flex flex-wrap gap-4 mb-4 text-xs text-slate-400">
+              <span>
+                Cumulative:{" "}
+                <span className="font-mono text-slate-300">
+                  {formatWei(lastSnapshot.cumulativeVolume0, dec0)}
+                </span>{" "}
+                {sym0} sold
+              </span>
+              <span>
+                <span className="font-mono text-slate-300">
+                  {formatWei(lastSnapshot.cumulativeVolume1, dec1)}
+                </span>{" "}
+                {sym1} sold
+              </span>
+              <span>
+                <span className="font-mono text-slate-300">
+                  {lastSnapshot.cumulativeSwapCount.toLocaleString()}
+                </span>{" "}
+                total swaps
+              </span>
+            </div>
+          )}
         </>
       )}
       {swaps.length > 0 && (
