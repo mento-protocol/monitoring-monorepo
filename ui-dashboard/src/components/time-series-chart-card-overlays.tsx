@@ -1,53 +1,74 @@
 "use client";
 
 import type { ReactNode } from "react";
-import type { BreakdownSeries } from "@/components/time-series-chart-card";
+import type { TimeSeriesPoint } from "@/lib/time-series";
+
+export type BreakdownSeries = {
+  name: string;
+  color: string;
+  series: TimeSeriesPoint[];
+  /**
+   * Optional decorative element shown next to `name` in the legend AND
+   * the custom hover tooltip. The leaderboard's per-pool chart uses
+   * this to inline a chain icon (e.g. Celo / Monad mark) so the legend
+   * stays compact — without the icon the names had to carry a
+   * "· Celo" / "· Monad" suffix that wasted horizontal space.
+   *
+   * Whenever ANY breakdown series provides this, Plotly's built-in
+   * legend is replaced with a custom React legend below the plot.
+   * Plotly's SVG legend can't render arbitrary elements like SVG
+   * icons, so we render the legend ourselves.
+   */
+  legendIcon?: ReactNode;
+};
 
 /**
  * Custom React legend rendered below the plot in lieu of Plotly's
  * built-in SVG legend. Used when any `BreakdownSeries` carries a
  * `legendIcon` (chain badges, etc.) — Plotly's legend can't render
- * arbitrary React nodes. The chip layout is `[swatch] [icon?]
- * [name]`; chips wrap to a second row when they don't fit.
- *
- * Extracted out of `TimeSeriesChartCard` so the parent stays under
- * the AGENTS.md 600-line file-size budget.
+ * arbitrary React nodes. Click a chip to hide that trace; click again
+ * to restore.
  */
 export function CustomLegend({
   breakdown,
+  hiddenIdx,
+  onToggle,
 }: {
   breakdown: readonly BreakdownSeries[];
+  hiddenIdx: ReadonlySet<number>;
+  onToggle: (idx: number) => void;
 }) {
   return (
-    <div
-      // Wraps to a second row when the entries don't fit. Each chip is
-      // its own flex item with `gap-x-3` between chips and `gap-y-1`
-      // between rows when wrapping kicks in.
-      className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400"
-    >
-      {breakdown.map((b) => (
-        <span
-          // Composite key — same reason as the tooltip's row key: pool
-          // pairs (e.g. "EURm/USDm") can repeat across chains.
-          key={`${b.color}-${b.name}`}
-          className="inline-flex items-center gap-1.5 whitespace-nowrap"
-        >
-          <span
-            aria-hidden="true"
-            className="inline-block h-2 w-2 flex-shrink-0 rounded-sm"
-            style={{ background: b.color }}
-          />
-          {/* Chip layout: [swatch] [pool] [chain] — chain trails the
-              pool name so the eye reads "USDC/USDm Monad" left-to-right
-              like a sentence. */}
-          <span>{b.name}</span>
-          {b.legendIcon && (
-            <span className="inline-flex flex-shrink-0 items-center">
-              {b.legendIcon}
-            </span>
-          )}
-        </span>
-      ))}
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+      {breakdown.map((b, i) => {
+        const hidden = hiddenIdx.has(i);
+        return (
+          <button
+            // Composite key — pool pairs (e.g. "EURm/USDm") can repeat
+            // across chains, so name alone collides.
+            key={`${b.color}-${b.name}`}
+            type="button"
+            aria-pressed={!hidden}
+            onClick={() => onToggle(i)}
+            className={
+              "inline-flex items-center gap-1.5 whitespace-nowrap rounded transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400 " +
+              (hidden ? "opacity-40 line-through" : "opacity-100")
+            }
+          >
+            <span
+              aria-hidden="true"
+              className="inline-block h-2 w-2 flex-shrink-0 rounded-sm"
+              style={{ background: b.color }}
+            />
+            <span>{b.name}</span>
+            {b.legendIcon && (
+              <span className="inline-flex flex-shrink-0 items-center">
+                {b.legendIcon}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

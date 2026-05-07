@@ -12,8 +12,15 @@ import { RANGES, type RangeKey, type TimeSeriesPoint } from "@/lib/time-series";
 import {
   CustomLegend,
   CustomSortedTooltip,
-  type SortedHoverState,
+  type BreakdownSeries,
 } from "@/components/time-series-chart-card-overlays";
+import {
+  setEquals,
+  useCrossFade,
+  useSortedHover,
+} from "@/components/time-series-chart-card-hooks";
+
+export type { BreakdownSeries };
 
 // A skeleton rendered while the Plotly chunk is still loading. Without this
 // fallback there's a brief gap between `isLoading` flipping to false and the
@@ -39,25 +46,6 @@ const Plot = dynamic(() => import("react-plotly.js"), {
   ssr: false,
   loading: () => <PlotSkeleton />,
 });
-
-export type BreakdownSeries = {
-  name: string;
-  color: string;
-  series: TimeSeriesPoint[];
-  /**
-   * Optional decorative element shown next to `name` in the legend AND
-   * the custom hover tooltip. The leaderboard's per-pool chart uses
-   * this to inline a chain icon (e.g. Celo / Monad mark) so the legend
-   * stays compact — without the icon the names had to carry a
-   * "· Celo" / "· Monad" suffix that wasted horizontal space.
-   *
-   * Whenever ANY breakdown series provides this, Plotly's built-in
-   * legend is replaced with a custom React legend below the plot.
-   * Plotly's SVG legend can't render arbitrary elements like SVG
-   * icons, so we render the legend ourselves.
-   */
-  legendIcon?: ReactNode;
-};
 
 /** `stacked` suppresses the dedicated total trace (top of stack = total). */
 export type BreakdownMode = "lines" | "stacked";
@@ -102,9 +90,18 @@ interface TimeSeriesChartCardProps {
   chartHeightPx?: number;
   /**
    * Top-of-axis padding as a fraction of the y-range span. Defaults to
-   * 0.35 (35% headroom). Stacked charts that want peaks to fill more
-   * of the plot can drop this to ~0.05–0.10. The bottom is always
-   * pinned to 0 in stacked / breakdown mode regardless of this value.
+   * 0.35 (35% headroom).
+   *
+   * Two effects:
+   * - **Non-stacked / single-trace** charts: drives the explicit
+   *   `yaxis.range` upper bound (`ymax + span * yAxisTopPadding`). The
+   *   bottom is pinned to 0 when a breakdown is present.
+   * - **Stacked** charts (breakdownMode === "stacked"): the y-axis
+   *   uses Plotly autorange so trace toggling can re-fit, so this
+   *   value is *not* read by the y-axis math. It still controls the
+   *   outer card bottom padding — values < 0.1 tighten the gap
+   *   between the legend row and the card edge (the leaderboard chart
+   *   passes 0 for this reason).
    */
   yAxisTopPadding?: number;
   /**
@@ -155,121 +152,44 @@ export function TimeSeriesChartCard({
   const useCustomLegend =
     hasBreakdown && (breakdown ?? []).some((b) => b.legendIcon !== undefined);
 
-  // Track which breakdown traces the user has hidden via legend click.
-  // Used only by the cross-fade renderer below (stacked mode + ≤3
-  // breakdowns) — otherwise Plotly's native legend toggle owns
-  // visibility. Imported from main as part of the homepage volume
-  // chart's v3-vs-v2 cross-fade work.
-  const [hiddenIdx, setHiddenIdx] = useState<Set<number>>(() => new Set());
   const breakdownCount = breakdown?.length ?? 0;
   // Cross-fade between pre-rendered visibility states. Pre-rendering
   // 2^N Plot instances stays fine perf-wise up to N=3 (8 plots, ~10KB
   // SVG each) — past that, fall back to a single chart with native
-  // toggle. Cross-fade also requires Plotly's native legend (we toggle
-  // visibility by clicking it), so disable when the caller switches to
-  // the custom React legend.
-  const useCrossFade =
+  // toggle. Cross-fade requires Plotly's native legend (we toggle
+  // visibility by clicking it); custom-legend mode owns its own
+  // visibility via React state and a different render path.
+  const crossFadeEnabled =
     isStacked && !useCustomLegend && breakdownCount >= 1 && breakdownCount <= 3;
+  // Custom-legend visibility state. Mirrors the cross-fade hook's
+  // hiddenIdx — see the regular Plot path below for how
+  // `visible: "legendonly"` is applied.
+  const [customLegendHidden, setCustomLegendHidden] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const toggleCustomLegend = useCallback((i: number) => {
+    setCustomLegendHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }, []);
 
   // Custom-tooltip state — only used when `customSortedHover` is on.
-  // Plotly fires `plotly_hover` per-x; we collect the points, sort by
-  // value, and render an absolutely-positioned div whose entries reflect
-  // the hovered day's actual rank.
+  // The hook collects Plotly hover points, sorts by value, and exposes
+  // `hover` / `onHover` / `onUnhover` for the JSX below to wire up.
   const containerRef = useRef<HTMLDivElement>(null);
-  const [hover, setHover] = useState<SortedHoverState | null>(null);
-
-  const onPlotlyHover = useCallback(
-    (e: {
-      points?: unknown[];
-      event?: { clientX?: number; clientY?: number };
-    }) => {
-      if (!customSortedHover) return;
-      const rawPoints = (e.points ?? []) as Array<{
-        x?: string | number;
-        curveNumber?: number;
-        pointIndex?: number;
-      }>;
-      if (rawPoints.length === 0) return;
-      // Dedupe by `curveNumber` — Plotly occasionally emits the same
-      // trace twice in `x unified` mode for stacked areas (once for the
-      // line, once for the fill, near segment boundaries), which
-      // produced doubled rows in the tooltip. `curveNumber` is the
-      // canonical per-trace identifier; first hit wins.
-      const seenCurves = new Set<number>();
-      const uniquePoints = rawPoints.filter((p) => {
-        const cn = p.curveNumber ?? -1;
-        if (seenCurves.has(cn)) return false;
-        seenCurves.add(cn);
-        return true;
-      });
-      // Look up everything by `(curveNumber, pointIndex)` directly from
-      // the BreakdownSeries we passed in — name, color, icon, AND the
-      // value. Reading `point.y` for stacked traces is risky (Plotly's
-      // hover-event y is documented as the "data point y" but stacked-
-      // mode rendering occasionally diverges, especially near the cap
-      // boundary and `stackgaps` interactions — cursor flagged this on
-      // 72f2fce). Sourcing from `breakdown[i].series[pointIndex]`
-      // guarantees we display the same numbers we computed in
-      // `aggregatePoolDailyVolume`, regardless of Plotly's internal
-      // representation.
-      const breakdownByCurve = breakdown ?? [];
-      // Plotly trace order: in stacked mode `traces = breakdownTraces`
-      // (1:1 with breakdown). In non-stacked mode `traces = [totalTrace,
-      // ...breakdownTraces]`, so `curveNumber` is shifted by 1 — the
-      // total trace occupies index 0 and `breakdown[curveNumber - 1]`
-      // is the underlying series. The leaderboard chart is stacked
-      // today, but a future caller using `customSortedHover` without
-      // stacking would otherwise get tooltip rows shifted by one.
-      const breakdownIndexOffset = isStacked ? 0 : 1;
-      const sorted = uniquePoints
-        .map((p) => {
-          const cn = p.curveNumber;
-          const pi = p.pointIndex;
-          const breakdownIdx =
-            typeof cn === "number" ? cn - breakdownIndexOffset : -1;
-          const b =
-            breakdownIdx >= 0 ? breakdownByCurve[breakdownIdx] : undefined;
-          const seriesPoint =
-            b && typeof pi === "number" ? b.series[pi] : undefined;
-          return {
-            name: b?.name ?? "",
-            value: seriesPoint?.value ?? 0,
-            color: b?.color ?? "#94a3b8",
-            legendIcon: b?.legendIcon,
-          };
-        })
-        // Filter out the totalTrace point (curveNumber 0 in non-stacked
-        // mode) — it has no `breakdown[]` entry, so name will be empty.
-        .filter((p) => p.name !== "")
-        .sort((a, b) => b.value - a.value);
-      const xRaw = rawPoints[0]?.x;
-      const dayLabel =
-        typeof xRaw === "string" || typeof xRaw === "number"
-          ? new Date(xRaw).toLocaleDateString(undefined, {
-              weekday: "short",
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-              timeZone: "UTC",
-            })
-          : "";
-      const containerRect = containerRef.current?.getBoundingClientRect();
-      const cx = e.event?.clientX ?? 0;
-      const cy = e.event?.clientY ?? 0;
-      setHover({
-        leftPx: containerRect ? cx - containerRect.left : cx,
-        topPx: containerRect ? cy - containerRect.top : cy,
-        dayLabel,
-        points: sorted,
-      });
-    },
-    [customSortedHover, breakdown, isStacked],
-  );
-
-  const onPlotlyUnhover = useCallback(() => {
-    if (!customSortedHover) return;
-    setHover(null);
-  }, [customSortedHover]);
+  const {
+    hover,
+    onHover: onPlotlyHover,
+    onUnhover: onPlotlyUnhover,
+  } = useSortedHover({
+    enabled: customSortedHover,
+    isStacked,
+    breakdown,
+    containerRef,
+  });
   const { traces, layout } = useMemo(() => {
     const xs = series.map((point) =>
       new Date(point.timestamp * 1000).toISOString(),
@@ -288,16 +208,22 @@ export function TimeSeriesChartCard({
           fillcolor: "rgba(99,102,241,0.08)",
           hovertemplate: `<b>$%{y:,.0f}</b><br>%{x|${hoverDateFormat}}<extra></extra>`,
         };
-    const breakdownTraces = (breakdown ?? []).map((b) => {
+    const breakdownTraces = (breakdown ?? []).map((b, i) => {
       // Escape `name` before it reaches Plotly's `name` and `hovertemplate`
       // slots — both are HTML sinks per `lib/plot.ts:escapePlotText`.
       const safeName = escapePlotText(b.name);
+      // Custom-legend mode hides traces by re-rendering with `visible:
+      // "legendonly"` rather than going through Plotly's native click
+      // handler (the native legend is suppressed, so we own visibility
+      // via React state).
+      const hidden = useCustomLegend && customLegendHidden.has(i);
       return {
         x: b.series.map((p) => new Date(p.timestamp * 1000).toISOString()),
         y: b.series.map((p) => p.value),
         name: safeName,
         type: "scatter" as const,
         mode: "lines" as const,
+        ...(hidden ? { visible: "legendonly" as const } : {}),
         ...(isStacked
           ? {
               stackgroup: "total",
@@ -435,112 +361,21 @@ export function TimeSeriesChartCard({
     yAxisTopPadding,
     customSortedHover,
     useCustomLegend,
+    customLegendHidden,
   ]);
 
   // Cross-fade in stacked mode: pre-render every visibility combo (2^N
-  // total, minus the all-hidden state) as its own Plot with its own
-  // y-range. Each combo's wrapper has CSS `opacity` 250ms-eased; the one
-  // matching the user's current `hiddenIdx` is at opacity 1, the rest at
-  // 0. Toggling a trace flips the active combo and CSS handles the
-  // visual blend. This is the only animation path that produces a clean
-  // grow/shrink for stacked-area charts — Plotly cannot interpolate
-  // stackgroup y-values via `Plotly.react` + `layout.transition`.
-  const crossFadeCombos = useMemo(() => {
-    if (!useCrossFade) return [];
-    const N = breakdownCount;
-    const combos: Array<Set<number>> = [];
-    // Enumerate ALL 2^N visibility combos including the all-hidden one
-    // — Plotly still renders the legend (with all entries dimmed) when
-    // every trace is `visible: "legendonly"`, so users can click to
-    // restore. Skipping the all-hidden combo would leave the user
-    // stranded if they toggle both v3 and v2 off (no plot active → no
-    // legend visible → no way to recover without a page reload).
-    for (let mask = 0; mask < 1 << N; mask++) {
-      const set = new Set<number>();
-      for (let i = 0; i < N; i++) if (mask & (1 << i)) set.add(i);
-      combos.push(set);
-    }
-    return combos;
-  }, [useCrossFade, breakdownCount]);
-
-  const crossFadeData = useMemo(() => {
-    if (!useCrossFade) return null;
-    const xs = series.map((point) =>
-      new Date(point.timestamp * 1000).toISOString(),
-    );
-    const breakdownArr = breakdown ?? [];
-    return crossFadeCombos.map((combo) => {
-      // Per-day stacked sum of VISIBLE traces — drives this combo's y-range.
-      const dayBuckets = new Map<number, number>();
-      breakdownArr.forEach((b, i) => {
-        if (combo.has(i)) return;
-        b.series.forEach((p) => {
-          dayBuckets.set(
-            p.timestamp,
-            (dayBuckets.get(p.timestamp) ?? 0) + p.value,
-          );
-        });
-      });
-      const visibleMax = Array.from(dayBuckets.values()).reduce(
-        (a, b) => Math.max(a, b),
-        0,
-      );
-      const yRange: [number, number] = [0, Math.max(visibleMax * 1.1, 1)];
-
-      const comboTraces = breakdownArr.map((b, i) => {
-        const safeName = escapePlotText(b.name);
-        return {
-          x: b.series.map((p) => new Date(p.timestamp * 1000).toISOString()),
-          y: b.series.map((p) => p.value),
-          name: safeName,
-          type: "scatter" as const,
-          mode: "lines" as const,
-          ...(combo.has(i) ? { visible: "legendonly" as const } : {}),
-          stackgroup: "total",
-          line: { color: b.color, width: 1.2 },
-          fillcolor: b.color + "cc",
-          hovertemplate: `${safeName}: $%{y:,.0f}<extra></extra>`,
-        };
-      });
-
-      const comboLayout = {
-        ...layout,
-        yaxis: {
-          ...layout.yaxis,
-          range: yRange,
-          autorange: false as const,
-        },
-      };
-      // Mark unused vars (xs needed for non-stacked total trace path; not used here)
-      void xs;
-      return {
-        key: [...combo].join(",") || "all",
-        combo,
-        traces: comboTraces,
-        layout: comboLayout,
-      };
-    });
-  }, [useCrossFade, series, breakdown, crossFadeCombos, layout]);
-
-  // Returns false to suppress Plotly's native legend toggle so visibility
-  // flows through React state (which drives the cross-fade). Only attached
-  // to the active Plot in the cross-fade overlay path; native handler runs
-  // unchanged for non-stacked / >3-trace charts.
-  const handleLegendClick = (e: { readonly curveNumber: number }): boolean => {
-    setHiddenIdx((prev) => {
-      const next = new Set(prev);
-      if (next.has(e.curveNumber)) next.delete(e.curveNumber);
-      else next.add(e.curveNumber);
-      return next;
-    });
-    return false;
-  };
-
-  const setEquals = (a: Set<number>, b: Set<number>) => {
-    if (a.size !== b.size) return false;
-    for (const x of a) if (!b.has(x)) return false;
-    return true;
-  };
+  // total) as its own Plot, CSS-fade between them on legend click. Only
+  // animation path that produces a clean grow/shrink for stacked-area
+  // charts (Plotly cannot interpolate stackgroup y-values via
+  // `Plotly.react` + `layout.transition`).
+  const { hiddenIdx, handleLegendClick, crossFadeData } = useCrossFade({
+    enabled: crossFadeEnabled,
+    breakdownCount,
+    series,
+    breakdown,
+    baseLayout: layout,
+  });
 
   const deltaPill =
     change === null || isLoading || hasError ? null : (
@@ -643,7 +478,7 @@ export function TimeSeriesChartCard({
           >
             {emptyMessage}
           </div>
-        ) : useCrossFade && crossFadeData ? (
+        ) : crossFadeEnabled && crossFadeData ? (
           <div style={{ position: "relative", height: chartHeightPx }}>
             {crossFadeData.map(({ key, combo, traces, layout }) => {
               const active = setEquals(combo, hiddenIdx);
@@ -683,7 +518,13 @@ export function TimeSeriesChartCard({
         )}
         {customSortedHover && hover && <CustomSortedTooltip hover={hover} />}
       </div>
-      {useCustomLegend && <CustomLegend breakdown={breakdown ?? []} />}
+      {useCustomLegend && (
+        <CustomLegend
+          breakdown={breakdown ?? []}
+          hiddenIdx={customLegendHidden}
+          onToggle={toggleCustomLegend}
+        />
+      )}
     </section>
   );
 }
