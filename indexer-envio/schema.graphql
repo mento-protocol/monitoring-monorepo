@@ -65,13 +65,19 @@ type Pool {
   priceDifference: BigInt!
   rebalanceThreshold: Int!
   # Direction-split thresholds (bps) populated from `FPMMRebalanceThresholdUpdated`
-  # events and seeded at FPMMDeployed. `rebalanceThreshold` (above) is the
-  # active threshold for the current reserve direction, refreshed on every
+  # events and seeded at FPMMDeployed. `rebalanceThreshold` is the active
+  # threshold for the current reserve direction, refreshed on every
   # UpdateReserves/Rebalanced. The split fields let state-sync handlers
-  # pick the active side from the entity store without an `eth_call`. 0 =
-  # not yet known (sentinel; pre-FPMMDeployed-seed or RPC failure).
+  # pick the active side from the entity store without an `eth_call`.
+  # `rebalanceThresholdsKnown` mirrors `invertRateFeedKnown`: false = unread
+  # (pre-seed or RPC failure), true = real on-chain values persisted. While
+  # false, state-sync's self-heal retries the cached effect on every event
+  # so a transient deploy-time blip doesn't permanently disable the
+  # entity-derived path. The two int fields can both be 0 in the legitimate
+  # "configured to never rebalance" case, distinct from "not yet known".
   rebalanceThresholdAbove: Int!
   rebalanceThresholdBelow: Int!
+  rebalanceThresholdsKnown: Boolean!
   lastRebalancedAt: BigInt!
   # Rising-edge timestamp: block time when priceDifference crossed strictly
   # above the 1% tolerance line (devRatio > 1.01). Exact-tolerance pools

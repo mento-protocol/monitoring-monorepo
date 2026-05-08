@@ -21,6 +21,7 @@ import {
   compactFees,
   feesEffect,
   invertRateFeedEffect,
+  rebalanceThresholdsEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
 } from "./rpc/effects";
@@ -311,6 +312,43 @@ export async function selfHealInvertRateFeed(
   };
 }
 
+/** Self-heal `rebalanceThresholdAbove/Below` when the factory's
+ * `rebalanceThresholdsEffect` failed at deploy. Without this, a transient
+ * RPC blip would permanently leave both split fields at 0 → derive returns
+ * null forever → the entity-derived path is dead for that pool. Mirrors
+ * `selfHealInvertRateFeed`: cached effect (Group A `cache: true`) means
+ * one RPC at most per pool per resync, then pure object-identity returns.
+ * The caller's own Pool.set persists the healed values. */
+export async function selfHealRebalanceThresholds(
+  context: { effect: EffectCaller },
+  pool: Pool,
+): Promise<Pool> {
+  if (
+    pool.rebalanceThresholdsKnown ||
+    pool.source === "" ||
+    isVirtualPool(pool)
+  ) {
+    return pool;
+  }
+  const poolAddr = extractAddressFromPoolId(pool.id);
+  const thresholds = await context.effect(rebalanceThresholdsEffect, {
+    chainId: pool.chainId,
+    poolAddress: poolAddr,
+  });
+  if (thresholds === undefined) return pool;
+  // Refresh the legacy `rebalanceThreshold` only when at least one side is
+  // configured. Both-zero means "never rebalance" — leave the legacy field
+  // at whatever the next state-sync event pins.
+  const broadest = Math.max(thresholds.above, thresholds.below);
+  return {
+    ...pool,
+    rebalanceThresholdAbove: thresholds.above,
+    rebalanceThresholdBelow: thresholds.below,
+    rebalanceThresholdsKnown: true,
+    rebalanceThreshold: broadest > 0 ? broadest : pool.rebalanceThreshold,
+  };
+}
+
 export type SnapshotContext = {
   PoolSnapshot: {
     get: (id: string) => Promise<PoolSnapshot | undefined>;
@@ -345,6 +383,9 @@ export const DEFAULT_ORACLE_FIELDS = {
   rebalanceThreshold: 0,
   rebalanceThresholdAbove: 0,
   rebalanceThresholdBelow: 0,
+  // Mirrors `invertRateFeedKnown`: false until factory seed or
+  // `RebalanceThresholdUpdated` lands real values; gates state-sync self-heal.
+  rebalanceThresholdsKnown: false,
   lastRebalancedAt: 0n,
   deviationBreachStartedAt: 0n,
   currentOpenBreachPeak: 0n,

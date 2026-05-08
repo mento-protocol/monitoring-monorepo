@@ -25,6 +25,7 @@ import {
   DEFAULT_ORACLE_FIELDS,
   maybePreloadPool,
   selfHealInvertRateFeed,
+  selfHealRebalanceThresholds,
   upsertPool,
   upsertSnapshot,
 } from "../../pool";
@@ -55,12 +56,16 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   // isn't yet seeded (cold-start: pre-MedianUpdated for the feed, or
   // pre-RebalanceThresholdUpdated seed).
   const fetched = await context.Pool.get(poolId);
-  // Self-heal invertRateFeed before reading it for the oraclePrice flip.
-  // Without this, a pool deployed during an RPC blip whose first event is
-  // an UpdateReserves would persist wrong-side oraclePrice on its
-  // OracleSnapshot until the next FPMM event triggers upsertPool's heal.
+  // Self-heal invertRateFeed and split thresholds before reading either.
+  // invertRateFeed gates oraclePrice direction; split thresholds gate the
+  // entity-derived path. A factory-time RPC blip that left either at the
+  // schema default would otherwise persist wrong-side oraclePrice or
+  // permanently disable derive (forcing every event back to RPC).
   const existing = fetched
-    ? await selfHealInvertRateFeed(context, fetched)
+    ? await selfHealRebalanceThresholds(
+        context,
+        await selfHealInvertRateFeed(context, fetched),
+      )
     : undefined;
 
   // Override reserves: `getRebalancingState` reads post-event state on
@@ -191,10 +196,13 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   //     from PR #222) — otherwise every rebalance on an old FPMM would
   //     trigger an RPC that's guaranteed to fail with `isUnsupportedGetterError`.
   const initial = await context.Pool.get(poolId);
-  // Self-heal invertRateFeed before reading it for the oraclePrice flip.
+  // Self-heal invertRateFeed + split thresholds before reading either.
   // Same rationale as the UpdateReserves handler.
   const existing = initial
-    ? await selfHealInvertRateFeed(context, initial)
+    ? await selfHealRebalanceThresholds(
+        context,
+        await selfHealInvertRateFeed(context, initial),
+      )
     : undefined;
   const incentiveGetterMissing = initial?.rebalanceReward === -2;
   // By the time Rebalanced fires, the 2× UpdateReserves handlers in the

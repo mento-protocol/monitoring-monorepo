@@ -101,7 +101,7 @@ export function computePriceDifference(pool: RatioInputs): bigint {
  * `above` when reserves are degenerate so an uninitialized pool doesn't
  * silently bias toward `below`.
  */
-function pickActiveThreshold(
+export function pickActiveThreshold(
   pool: RatioInputs,
   thresholds: { above: number; below: number },
 ): number {

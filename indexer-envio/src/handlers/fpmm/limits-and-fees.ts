@@ -13,6 +13,7 @@ import {
 } from "../../tradingLimits";
 import { tradingLimitsEffect } from "../../rpc/effects";
 import { maybePreloadPool } from "../../pool";
+import { pickActiveThreshold } from "../../priceDifference";
 
 // ---------------------------------------------------------------------------
 // FPMM.TradingLimitConfigured
@@ -158,22 +159,25 @@ FPMM.RebalanceIncentiveUpdated.handler(async ({ event, context }) =>
 // FPMM.RebalanceThresholdUpdated
 // ---------------------------------------------------------------------------
 
-// `rebalanceThreshold` is refreshed to `max(above, below)` here as a
-// conservative bridge: a governance change between two state-sync events
-// would otherwise leave the active field stale on whichever direction the
-// new threshold tightened. The next UpdateReserves/Rebalanced re-picks
-// the direction-correct value via `tryDeriveRebalanceState`.
+// `rebalanceThreshold` is refreshed to the direction-correct active value
+// using the pool's current reserves + oracle. `max(above, below)` would be
+// wrong when thresholds are asymmetric: if reservePrice is on the side
+// with the smaller threshold, max() would understate breach. Falls back
+// to `above` when reserves are uninitialized (degenerate pool); the next
+// state-sync event re-picks once reserves land.
 FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
   const poolId = makePoolId(event.chainId, event.srcAddress);
   const pool = await context.Pool.get(poolId);
   if (!pool) return;
   const above = Number(event.params.newThresholdAbove);
   const below = Number(event.params.newThresholdBelow);
+  const active = pickActiveThreshold(pool, { above, below });
   context.Pool.set({
     ...pool,
     rebalanceThresholdAbove: above,
     rebalanceThresholdBelow: below,
-    rebalanceThreshold: Math.max(above, below),
+    rebalanceThreshold: active,
+    rebalanceThresholdsKnown: true,
     updatedAtBlock: asBigInt(event.block.number),
     updatedAtTimestamp: asBigInt(event.block.timestamp),
   });

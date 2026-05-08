@@ -377,6 +377,7 @@ type PoolEntity = {
   rebalanceThreshold: number;
   rebalanceThresholdAbove: number;
   rebalanceThresholdBelow: number;
+  rebalanceThresholdsKnown: boolean;
   lastRebalancedAt: bigint;
   healthStatus: string;
   limitStatus: string;
@@ -1821,7 +1822,7 @@ describe("Envio Celo indexer handlers", () => {
     );
   });
 
-  it("RebalanceThresholdUpdated: writes above + below + active to Pool", async () => {
+  it("RebalanceThresholdUpdated: picks direction-correct active threshold (asymmetric, reservePrice<oraclePrice → below side)", async () => {
     const POOL_ADDR = "0x00000000000000000000000000000000000000c3";
     let mockDb = MockDb.createMockDb();
 
@@ -1840,6 +1841,21 @@ describe("Envio Celo indexer handlers", () => {
     mockDb = await FPMMFactory.FPMMDeployed.processEvent({
       event: deployEvent,
       mockDb,
+    });
+
+    // Seed reserves + oraclePrice so the handler can compute direction.
+    // 60k/40k reserves with oracle ≈ 1.0 → reservePrice (norm1/norm0) ≈ 0.667
+    // < oracle → below side is active. Asymmetric thresholds (above=250,
+    // below=175) verify the handler picks 175, not max(250, 175) = 250.
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      reserves0: 60_000_000_000_000_000_000_000n,
+      reserves1: 40_000_000_000_000_000_000_000n,
+      oraclePrice: 1_000_000_000_000_000_000_000_000n,
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
     });
 
     const thresholdEvent = (
@@ -1865,9 +1881,16 @@ describe("Envio Celo indexer handlers", () => {
     assert.ok(pool, "Pool must exist after RebalanceThresholdUpdated");
     assert.equal(pool.rebalanceThresholdAbove, 250);
     assert.equal(pool.rebalanceThresholdBelow, 175);
-    // Active threshold = max(above, below) = 250 (refreshed conservatively;
-    // next state-sync event re-picks the direction-correct value).
-    assert.equal(pool.rebalanceThreshold, 250);
+    assert.equal(
+      pool.rebalanceThreshold,
+      175,
+      "must pick `below` (175) for reservePrice < oraclePrice — `max` would have given 250 and understated breach",
+    );
+    assert.equal(
+      pool.rebalanceThresholdsKnown,
+      true,
+      "handler must mark thresholds known so state-sync's self-heal stops retrying",
+    );
   });
 
   // ---------------------------------------------------------------------------

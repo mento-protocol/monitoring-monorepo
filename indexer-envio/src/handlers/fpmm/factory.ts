@@ -235,13 +235,15 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     const { above, below } = rebalanceThresholds;
     oracleDelta.rebalanceThresholdAbove = above;
     oracleDelta.rebalanceThresholdBelow = below;
+    oracleDelta.rebalanceThresholdsKnown = true;
     // Active threshold seed: the contract picks above OR below at evaluation
     // time based on reservePriceAboveOraclePrice. Pre-first-event we don't
     // know the direction, so seed with `max(above, below)` (the broadest
     // band) — the next UpdateReserves/Rebalanced will refresh with the
-    // direction-correct value. Skip the legacy field when both are 0
-    // (configured to never rebalance) so callers can still treat 0 as
-    // "not yet known" if upstream RPC failed before this seed.
+    // direction-correct value via `tryDeriveRebalanceState`. Skip when both
+    // are 0 (configured to never rebalance) so the legacy field stays at
+    // its 0 default; the `rebalanceThresholdsKnown: true` flag distinguishes
+    // this legitimate state from "RPC failed".
     const broadest = Math.max(above, below);
     if (broadest > 0) {
       oracleDelta.rebalanceThreshold = broadest;
