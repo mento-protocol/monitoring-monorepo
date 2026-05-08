@@ -32,7 +32,14 @@ export type AddressRow = AddressBookRow;
  */
 export function findContractInitial(address: string): AddressEntry | undefined {
   const lower = address.toLowerCase();
-  for (const net of Object.values(NETWORKS)) {
+  // Filter to the same `isConfiguredNetworkId` set `buildContractRows`
+  // uses — devnet / local-only registries carry deployer addresses that
+  // are inappropriate to surface on the prod detail page. Without this,
+  // a deep-link to an address that only exists in the devnet registry
+  // would seed the form with a devnet-only contract name and a save
+  // would persist that as a global custom label.
+  for (const id of NETWORK_IDS.filter(isConfiguredNetworkId)) {
+    const net = NETWORKS[id];
     for (const [registered, name] of Object.entries(net.addressLabels)) {
       if (registered.toLowerCase() === lower) {
         return {

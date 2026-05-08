@@ -111,11 +111,18 @@ export default function AddressDetailPage() {
             </div>
           ) : (
             <AddressLabelForm
-              // Remount the form when the resolved entry transitions between
-              // states (loaded custom entry vs. contract fallback vs. fresh).
-              // Prevents stale local state when a deep-link's SWR fetch
-              // resolves after first paint.
-              key={`${address}:${entry ? "custom" : formInitial ? "contract" : "new"}`}
+              // Remount on:
+              //   - state transitions (custom / contract / new) — covers the
+              //     deep-link-with-no-cache case where SWR resolves after
+              //     first paint.
+              //   - the loaded entry's `updatedAt` changing — covers the
+              //     "another teammate edited this label, SWR refreshed it,
+              //     and a save from this page would otherwise overwrite the
+              //     newer remote value with my stale local state". The cost
+              //     is losing in-progress local edits when a remote update
+              //     lands; that's the right tradeoff vs. silently
+              //     clobbering newer data without optimistic-concurrency.
+              key={`${address}:${entry ? `custom:${entry.updatedAt}` : formInitial ? "contract" : "new"}`}
               address={address}
               initial={formInitial}
               // No onSaved/onDeleted callbacks — the provider's optimistic

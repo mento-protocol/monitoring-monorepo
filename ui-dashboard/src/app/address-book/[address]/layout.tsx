@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { findReport } from "@/lib/address-reports";
 import { getLabel } from "@/lib/address-labels";
 import { isValidAddress, truncateAddress } from "@/lib/format";
 
@@ -59,24 +58,32 @@ export async function generateMetadata({
     };
   }
 
-  // Both helpers tolerate `null` for missing entries — return fallback
-  // metadata when neither label nor report exists rather than 404ing the
-  // page (the empty page is a valid input surface). Each call is also
-  // bounded by `withTimeout` so a hung Upstash can't stall the build.
-  const [label, report] = await Promise.all([
-    withTimeout(getLabel(address), METADATA_FETCH_TIMEOUT_MS).catch(() => null),
-    withTimeout(findReport(address), METADATA_FETCH_TIMEOUT_MS).catch(
-      () => null,
-    ),
-  ]);
+  // Privacy gate: `generateMetadata` runs without a session and the
+  // resulting <title>/<meta> tags are visible to any crawler / shared-link
+  // preview that sees this URL. Labels default to private (`isPublic !==
+  // true`) and reports are NEVER public per AGENTS.md, so include label
+  // info ONLY when the user explicitly flagged the entry as public, and
+  // never expose report titles. Private labels and report-attached
+  // addresses fall through to the generic fallback metadata — a small
+  // OG-preview UX downgrade in exchange for not leaking entity
+  // attributions to anyone who guesses an address URL.
+  const label = await withTimeout(
+    getLabel(address),
+    METADATA_FETCH_TIMEOUT_MS,
+  ).catch(() => null);
 
-  const displayName = label?.name?.trim() || truncateAddress(address);
+  if (!label || label.isPublic !== true) {
+    return {
+      title: FALLBACK_TITLE,
+      description: FALLBACK_DESCRIPTION,
+    };
+  }
+
+  const displayName = label.name?.trim() || truncateAddress(address);
   const title = `${displayName} — Address Book — Mento Analytics`;
   const descParts: string[] = [];
-  if (label?.tags?.length) descParts.push(`Tags: ${label.tags.join(", ")}`);
-  if (label?.source) descParts.push(`Source: ${label.source}`);
-  if (report?.title) descParts.push(`Report: ${report.title}`);
-  else if (report) descParts.push("Forensic report attached");
+  if (label.tags?.length) descParts.push(`Tags: ${label.tags.join(", ")}`);
+  if (label.source) descParts.push(`Source: ${label.source}`);
   const description = descParts.join(" · ") || FALLBACK_DESCRIPTION;
 
   return {

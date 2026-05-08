@@ -5,6 +5,7 @@ import {
   use,
   useCallback,
   useMemo,
+  useState,
   type ReactNode,
 } from "react";
 import { useSession } from "next-auth/react";
@@ -110,12 +111,25 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
   // Labels are private — only fetch when the user is signed in. For
   // unauthenticated views, the provider returns empty state and the UI falls
   // back to truncated addresses / contract registry names.
+  //
+  // `hasLoaded` tracks REAL fetch completion via `onSuccess` instead of
+  // `data !== undefined`. With `fallbackData`, SWR populates `data` from
+  // the fallback immediately on first render — before any network fetch
+  // resolves — so a `data !== undefined` check would flip to "loaded"
+  // while the auth/SWR machinery is still warming up. A page that gates
+  // its save UI on `hasLoaded` could otherwise let a fast save PUT empty
+  // defaults over an existing label during that window.
+  const [hasLoaded, setHasLoaded] = useState(false);
   const { data, error, isLoading } = useSWR<EntriesState>(
     status === "authenticated" ? SWR_KEY : null,
     fetchAllLabels,
     {
       refreshInterval: 30_000,
       fallbackData: emptyState(),
+      // Fires after every successful fetch. Setting state to the same
+      // value (`true`) after the first fetch is a React no-op so this
+      // doesn't trigger extra renders on the 30s refresh cadence.
+      onSuccess: () => setHasLoaded(true),
     },
   );
 
@@ -295,13 +309,6 @@ export function AddressLabelsProvider({ children }: { children: ReactNode }) {
   const revalidate = useCallback(async (): Promise<void> => {
     await mutate(SWR_KEY);
   }, [mutate]);
-
-  // hasLoaded is true once SWR returns a real response. `data === undefined`
-  // covers both the "session still loading → SWR not started" case (the
-  // hook's key is `null`, so `data` stays undefined) and the "fetch in
-  // flight" case. After authentication + first response (even an empty
-  // `{}`), `data` becomes defined and stays defined across re-renders.
-  const hasLoaded = data !== undefined;
 
   const value: AddressLabelsContextValue = {
     getName,
