@@ -15,13 +15,26 @@ interface BridgeStatusFilterProps {
  * "All" (null) or a single status. Inactive pills are visually dimmed
  * but remain clickable — clicking any pill switches directly to it.
  *
- * Implements the WAI-ARIA radiogroup keyboard contract:
+ * Implements the WAI-ARIA radiogroup keyboard contract
+ * (https://www.w3.org/WAI/ARIA/apg/patterns/radio/ — selection follows
+ * focus per the spec):
  * - Single tab stop: `tabIndex={0}` on the selected pill, `tabIndex={-1}`
  *   on all others.
- * - Arrow keys (Left/Right/Up/Down) move focus AND change selection
- *   (radiogroup convention: focus and selection move together).
+ * - Arrow keys (Left/Right/Up/Down) move focus AND change selection.
  * - Home / End jump to first / last option (and select it).
  * - Space/Enter activate the focused pill (native `<button>` behavior).
+ *
+ * NOTE on URL-backed callers: the keyboard handler always calls
+ * `onChange` (no equality guard against `selected`). Some callers wire
+ * `onChange` to a `router.replace` URL update; the `selected` prop
+ * therefore lags one render cycle behind keyboard activity. Comparing
+ * the new value against the stale prop and skipping `onChange` would
+ * race: a quick End-then-Home before the URL re-render would compute
+ * `newValue === null === selected` and silently skip, leaving focus on
+ * the first pill while the pending End navigation commits the last
+ * status. Always firing `onChange` accepts an extra no-op
+ * `router.replace` per same-pill keystroke (cheap; same-URL replace
+ * deduped by Next).
  *
  * Pill index map: 0 = "All" (`null`), 1..N = `options[i - 1]`.
  */
@@ -77,8 +90,7 @@ export function BridgeStatusFilter({
     }
 
     radios[nextIndex]?.focus();
-    const newValue = valueAt(nextIndex);
-    if (newValue !== selected) onChange(newValue);
+    onChange(valueAt(nextIndex));
   }
 
   return (

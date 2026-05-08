@@ -10,14 +10,24 @@ import { getTabLabel } from "../_lib/helpers";
  *  meant a regression on `role="tablist"` / `aria-controls` / button
  *  ordering would slip past the test silently (Cursor finding on PR #342).
  *
- *  Implements the WAI-ARIA tablist keyboard contract (automatic
- *  activation):
+ *  Implements the WAI-ARIA tablist keyboard contract with **manual
+ *  activation** (https://www.w3.org/WAI/ARIA/apg/patterns/tabs/ —
+ *  manual activation is the spec-supported variant for tablists where
+ *  activation is expensive):
  *  - Single tab stop: `tabIndex={0}` on the selected tab,
  *    `tabIndex={-1}` on all others.
- *  - Left / Right arrows move focus AND activate the tab (`onSelect`
- *    called as focus moves).
- *  - Home / End jump to first / last and activate.
- *  - Space / Enter activate the focused tab (native `<button>`).
+ *  - Left / Right / Home / End move focus only. Activation does NOT
+ *    follow focus.
+ *  - Space / Enter (or click) on the focused tab activates it via the
+ *    native `<button>`'s `onClick` → `onSelect`.
+ *
+ *  Manual activation (vs. automatic) because the pool page wires
+ *  `onSelect` to a `router.replace` URL change, which triggers a Next
+ *  App Router RSC refetch. Automatic activation would fire that
+ *  navigation per arrow keystroke — a held arrow key turns into a
+ *  navigation storm, plus a stale-prop race (the URL-backed `active`
+ *  prop hasn't updated by the time the next arrow fires) that can
+ *  desync focus from the URL state. Codex flagged both on PR #350.
  *
  *  `visibleTabs` is the page-side filtered list (e.g. `breaches` is
  *  hidden for virtual pools, `ols` only shows when the pool has an OLS
@@ -73,9 +83,9 @@ export function PoolTablist({
       nextIndex = (fromIndex - 1 + tabs.length) % tabs.length;
     }
 
+    // Manual activation: move focus only, do NOT call `onSelect` here.
+    // Activation happens on Space/Enter (native button onClick) or click.
     tabs[nextIndex]?.focus();
-    const nextTab = visibleTabs[nextIndex];
-    if (nextTab !== undefined && nextTab !== active) onSelect(nextTab);
   }
 
   return (

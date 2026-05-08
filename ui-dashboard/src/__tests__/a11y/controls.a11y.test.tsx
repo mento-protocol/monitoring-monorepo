@@ -398,9 +398,14 @@ describe("PoolTablist a11y (real component)", () => {
   // role contract for the tablist itself is pinned above.
 
   // WAI-ARIA tablist keyboard contract — single tab stop with arrow
-  // keys moving focus AND activating the tab (automatic activation).
+  // keys moving focus only; activation requires Enter/Space (manual
+  // activation). The pool page's `onSelect` is wired to a router URL
+  // change, which makes automatic activation a navigation-storm risk
+  // and creates stale-prop races between keystrokes (codex flagged
+  // both on PR #350). Manual activation is the WAI-ARIA-spec-supported
+  // variant for this case.
   // See https://www.w3.org/WAI/ARIA/apg/patterns/tabs/.
-  describe("PoolTablist: keyboard contract", () => {
+  describe("PoolTablist: keyboard contract (manual activation)", () => {
     function tabs(): HTMLButtonElement[] {
       return Array.from(
         container.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
@@ -449,69 +454,87 @@ describe("PoolTablist a11y (real component)", () => {
       expect(tabbable[0].id).toBe("tab-rebalances");
     });
 
-    it("ArrowRight moves focus to the next tab AND activates it (automatic activation)", () => {
+    it("ArrowRight moves focus to the next tab WITHOUT activating it", () => {
       const onSelect = vi.fn();
       renderTablist("rebalances", onSelect);
       const start = tabById("tab-rebalances");
       start.focus();
       dispatch(start, "ArrowRight");
       // TABS[3] = "rebalances"; next is TABS[4] = "liquidity"
-      expect(onSelect).toHaveBeenCalledWith("liquidity");
       expect(document.activeElement).toBe(tabById("tab-liquidity"));
+      expect(onSelect).not.toHaveBeenCalled();
     });
 
-    it("ArrowLeft moves focus to the previous tab AND activates it", () => {
+    it("ArrowLeft moves focus to the previous tab WITHOUT activating it", () => {
       const onSelect = vi.fn();
       renderTablist("rebalances", onSelect);
       const start = tabById("tab-rebalances");
       start.focus();
       dispatch(start, "ArrowLeft");
       // TABS[3] = "rebalances"; previous is TABS[2] = "reserves"
-      expect(onSelect).toHaveBeenCalledWith("reserves");
       expect(document.activeElement).toBe(tabById("tab-reserves"));
+      expect(onSelect).not.toHaveBeenCalled();
     });
 
-    it("ArrowLeft from the first tab wraps to the last tab", () => {
+    it("ArrowLeft from the first tab wraps focus to the last tab (no activation)", () => {
       const onSelect = vi.fn();
       renderTablist("providers", onSelect);
       const start = tabById("tab-providers");
       start.focus();
       dispatch(start, "ArrowLeft");
       const last = TABS[TABS.length - 1];
-      expect(onSelect).toHaveBeenCalledWith(last);
       expect(document.activeElement).toBe(tabById(`tab-${last}`));
+      expect(onSelect).not.toHaveBeenCalled();
     });
 
-    it("ArrowRight from the last tab wraps to the first tab", () => {
+    it("ArrowRight from the last tab wraps focus to the first tab (no activation)", () => {
       const onSelect = vi.fn();
       const last = TABS[TABS.length - 1];
       renderTablist(last, onSelect);
       const start = tabById(`tab-${last}`);
       start.focus();
       dispatch(start, "ArrowRight");
-      expect(onSelect).toHaveBeenCalledWith(TABS[0]);
       expect(document.activeElement).toBe(tabById(`tab-${TABS[0]}`));
+      expect(onSelect).not.toHaveBeenCalled();
     });
 
-    it("Home jumps focus + activation to the first tab", () => {
+    it("Home jumps focus to the first tab (no activation)", () => {
       const onSelect = vi.fn();
       renderTablist("rebalances", onSelect);
       const start = tabById("tab-rebalances");
       start.focus();
       dispatch(start, "Home");
-      expect(onSelect).toHaveBeenCalledWith(TABS[0]);
       expect(document.activeElement).toBe(tabById(`tab-${TABS[0]}`));
+      expect(onSelect).not.toHaveBeenCalled();
     });
 
-    it("End jumps focus + activation to the last tab", () => {
+    it("End jumps focus to the last tab (no activation)", () => {
       const onSelect = vi.fn();
       renderTablist("rebalances", onSelect);
       const start = tabById("tab-rebalances");
       start.focus();
       dispatch(start, "End");
       const last = TABS[TABS.length - 1];
-      expect(onSelect).toHaveBeenCalledWith(last);
       expect(document.activeElement).toBe(tabById(`tab-${last}`));
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("clicking the focused tab activates it (Enter/Space dispatch via native button onClick)", () => {
+      const onSelect = vi.fn();
+      renderTablist("rebalances", onSelect);
+      // Move focus with the keyboard, then commit with click — native
+      // <button> handles Space/Enter as a click, so this exercises the
+      // same activation path.
+      const start = tabById("tab-rebalances");
+      start.focus();
+      dispatch(start, "ArrowRight");
+      const focused = document.activeElement as HTMLButtonElement;
+      expect(focused.id).toBe("tab-liquidity");
+      act(() => {
+        focused.click();
+      });
+      expect(onSelect).toHaveBeenCalledWith("liquidity");
+      expect(onSelect).toHaveBeenCalledTimes(1);
     });
 
     it("axe still passes after the keyboard contract is in place", async () => {
