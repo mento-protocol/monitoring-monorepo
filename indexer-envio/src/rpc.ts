@@ -43,7 +43,7 @@ export {
   fetchRebalancingState,
   fetchReserves,
   fetchInvertRateFeed,
-  fetchRebalanceThreshold,
+  fetchRebalanceThresholds,
   fetchReferenceRateFeedID,
   fetchNumReporters,
   fetchReportExpiry,

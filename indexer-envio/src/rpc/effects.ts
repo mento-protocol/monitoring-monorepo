@@ -27,7 +27,7 @@ import {
   fetchInvertRateFeed,
   fetchNumReporters,
   fetchRebalanceIncentiveAtBlock,
-  fetchRebalanceThreshold,
+  fetchRebalanceThresholds,
   fetchRebalancingState,
   fetchReferenceRateFeedID,
   fetchReportExpiry,
@@ -190,22 +190,27 @@ export const invertRateFeedEffect = createEffect(
   },
 );
 
-// Output nullable so transient RPC failures (`fetchRebalanceThreshold`
+const rebalanceThresholdsShape = S.schema({
+  above: S.int32,
+  below: S.int32,
+});
+
+// Output nullable so transient RPC failures (`fetchRebalanceThresholds`
 // returns `null`) can opt out of caching. Without this, a single failed
 // read during the first touch would persist a sentinel in Postgres and
 // every subsequent self-heal call would receive the cached miss instead
-// of retrying. Callers (factory.ts) already handle `undefined` via the
-// `> 0` gate that doubles for "not yet known".
-export const rebalanceThresholdEffect = createEffect(
+// of retrying. Callers (factory.ts) handle `undefined` via the `> 0` gate
+// that doubles for "not yet known".
+export const rebalanceThresholdsEffect = createEffect(
   {
-    name: "rebalanceThreshold",
+    name: "rebalanceThresholds",
     input: { chainId: S.int32, poolAddress: S.string },
-    output: S.nullable(S.int32),
+    output: S.nullable(rebalanceThresholdsShape),
     rateLimit: { calls: 200, per: "second" },
     cache: true,
   },
   async ({ input, context }) => {
-    const result = await fetchRebalanceThreshold(
+    const result = await fetchRebalanceThresholds(
       input.chainId,
       input.poolAddress,
       context.log,

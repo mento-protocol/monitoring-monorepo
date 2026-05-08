@@ -12,6 +12,7 @@ import { eventId, asAddress, asBigInt, makePoolId } from "../../helpers";
 import {
   ORACLE_ADAPTER_SCALE_FACTOR,
   buildRebalanceOutcome,
+  tryDeriveRebalanceState,
 } from "../../priceDifference";
 import {
   rebalanceIncentiveAtBlockEffect,
@@ -27,6 +28,38 @@ import {
   upsertSnapshot,
 } from "../../pool";
 import { recordHealthSample } from "../../healthScore";
+
+// Resolved shape consumed by both UpdateReserves and Rebalanced handlers.
+// Shared between the entity-derived path and the `getRebalancingState` RPC
+// fallback so downstream code is identical regardless of source.
+type ResolvedRebalanceState = {
+  oraclePrice: bigint;
+  rebalanceThreshold: number;
+  priceDifference: bigint;
+};
+
+/** Convert `rebalancingStateEffect` output into the resolved shape — apply
+ * the OracleAdapter SCALE_FACTOR and the invertRateFeed flip exactly as
+ * the legacy state-sync code did. Kept as a tiny helper so the entity-
+ * derived path and the RPC-fallback path always agree on the scalar. */
+function scaleRpcRebalanceState(
+  rs: {
+    oraclePriceNumerator: bigint;
+    oraclePriceDenominator: bigint;
+    rebalanceThreshold: number;
+    priceDifference: bigint;
+  },
+  existing: { invertRateFeed: boolean } | undefined,
+): ResolvedRebalanceState {
+  const isInverted = existing?.invertRateFeed ?? false;
+  return {
+    oraclePrice: isInverted
+      ? rs.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
+      : rs.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR,
+    rebalanceThreshold: rs.rebalanceThreshold,
+    priceDifference: rs.priceDifference,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // FPMM.UpdateReserves
@@ -47,19 +80,14 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // RPC and Pool.get are independent — fire in parallel to eliminate the
-  // serial RTT. `context.Pool.get` only matters on the rebalancingState
-  // success path (to read invertRateFeed), so the "waste" on the RPC-null
-  // path is tolerable and already cached by Envio's in-batch store.
-  // Use raw srcAddress for RPC calls (not the namespaced poolId).
-  const [rebalancingState, fetched] = await Promise.all([
-    context.effect(rebalancingStateEffect, {
-      chainId: event.chainId,
-      poolAddress: asAddress(event.srcAddress),
-      blockNumber,
-    }),
-    context.Pool.get(poolId),
-  ]);
+  // Lever 4: try to derive {oraclePrice, rebalanceThreshold, priceDifference}
+  // from the entity store before reaching for the RPC. Pool.get must come
+  // first so we can attempt the derive; the RPC is only fired when the
+  // entity isn't yet populated (cold-start: pre-MedianUpdated for the
+  // feed, or pre-RebalanceThresholdUpdated seed). Eliminates the
+  // `getRebalancingState` `eth_call` for every steady-state UpdateReserves
+  // — the bulk of the catch-up RPC budget on Celo.
+  const fetched = await context.Pool.get(poolId);
   // Self-heal invertRateFeed before reading it for the oraclePrice flip.
   // Without this, a pool deployed during an RPC blip whose first event is
   // an UpdateReserves would persist wrong-side oraclePrice on its
@@ -68,20 +96,34 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
     ? await selfHealInvertRateFeed(context, fetched)
     : undefined;
 
-  let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
-  // Hoist oraclePrice outside the if-block so it's accessible for OracleSnapshot
-  // construction without a non-null assertion on oracleDelta.oraclePrice.
-  let updateReservesOraclePrice = 0n;
-  if (rebalancingState) {
-    const isInverted = existing?.invertRateFeed ?? false;
-    updateReservesOraclePrice = isInverted
-      ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
-      : rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
+  const eventReserves = {
+    reserve0: event.params.reserve0,
+    reserve1: event.params.reserve1,
+  };
+  // The contract's `getRebalancingState` reads reserves AFTER the swap/mint/
+  // burn that triggered this UpdateReserves — i.e. the values now in the
+  // event params. Pool's persisted reserves still reflect the prior block
+  // here, so we pass the override.
+  let resolved: ResolvedRebalanceState | null = existing
+    ? tryDeriveRebalanceState(existing, eventReserves)
+    : null;
+  if (!resolved) {
+    const rs = await context.effect(rebalancingStateEffect, {
+      chainId: event.chainId,
+      poolAddress: asAddress(event.srcAddress),
+      blockNumber,
+    });
+    resolved = rs ? scaleRpcRebalanceState(rs, existing) : null;
+  }
 
+  let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
+  let updateReservesOraclePrice = 0n;
+  if (resolved) {
+    updateReservesOraclePrice = resolved.oraclePrice;
     oracleDelta = {
       oraclePrice: updateReservesOraclePrice,
-      rebalanceThreshold: rebalancingState.rebalanceThreshold,
-      priceDifference: rebalancingState.priceDifference,
+      rebalanceThreshold: resolved.rebalanceThreshold,
+      priceDifference: resolved.priceDifference,
       oracleTimestamp: blockTimestamp,
     };
   }
@@ -99,12 +141,12 @@ FPMM.UpdateReserves.handler(async ({ event, context }) => {
       reserve1: event.params.reserve1,
     },
     oracleDelta,
-    // Reuse the Pool read from the concurrent Promise.all above — avoids
-    // a second context.Pool.get inside getOrCreatePool.
+    // Reuse the Pool read from above — avoids a second context.Pool.get
+    // inside getOrCreatePool.
     existing: { pool: existing },
   });
 
-  if (rebalancingState) {
+  if (resolved) {
     // Health score: compute snapshot fields + update pool accumulators.
     // Note: upsertPool above calls context.Pool.set(pool) internally with
     // default health fields. We immediately overwrite with the correct
@@ -176,28 +218,44 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   const blockNumber = asBigInt(event.block.number);
   const blockTimestamp = asBigInt(event.block.timestamp);
 
-  // Fire RPC + Pool.get concurrently (see UpdateReserves handler).
-  // Use raw srcAddress for RPC calls (not the namespaced poolId).
+  // We sequence the Pool.get first (cheap local lookup, no RPC) so we can
+  // (a) attempt the entity-derived rebalanceState and skip the
+  //     `getRebalancingState` RPC entirely when the entity has the data
+  //     (Lever 4 — eliminates the bulk of `eth_call` traffic on Celo);
+  // (b) skip `fetchRebalanceIncentiveAtBlock` for pools whose
+  //     `rebalanceIncentive()` getter is already known missing (-2 sentinel
+  //     from PR #222) — otherwise every rebalance on an old FPMM would
+  //     trigger an RPC that's guaranteed to fail with `isUnsupportedGetterError`.
+  const initial = await context.Pool.get(poolId);
+  // Self-heal invertRateFeed before reading it for the oraclePrice flip.
+  // Same rationale as the UpdateReserves handler.
+  const existing = initial
+    ? await selfHealInvertRateFeed(context, initial)
+    : undefined;
+  const incentiveGetterMissing = initial?.rebalanceReward === -2;
+  // By the time Rebalanced fires, the 2× UpdateReserves handlers in the
+  // same tx have already written post-rebalance reserves to the Pool
+  // entity. So `existing.reserves0/1` matches what `getRebalancingState`
+  // sees on chain — no override needed.
+  const derivedRebalanceState = existing
+    ? tryDeriveRebalanceState(existing)
+    : null;
+
   // `preReserves` is sampled at `blockNumber - 1` so that subtracting from
   // the post-rebalance reserves on `pool` (after `upsertPool` below) gives
   // the rebalance's swap notional. Sibling Swap events are not emitted by
-  // FPMM.rebalance() (separate code path), and the 2× UpdateReserves
-  // handlers in the same tx have already overwritten the entity by the
-  // time we run — RPC at the previous block is the cleanest source.
-  // We sequence the Pool.get first (cheap local lookup, no RPC) so we can
-  // skip `fetchRebalanceIncentiveAtBlock` for pools whose `rebalanceIncentive()`
-  // getter is already known missing (-2 sentinel from PR #222) — otherwise
-  // every rebalance on an old FPMM would trigger an RPC that's guaranteed
-  // to fail with `isUnsupportedGetterError`.
-  const initial = await context.Pool.get(poolId);
-  const incentiveGetterMissing = initial?.rebalanceReward === -2;
-  const [rebalancingState, preReserves, blockScopedIncentive] =
+  // FPMM.rebalance() (separate code path), so RPC at the previous block is
+  // the cleanest source until Lever 4 PR 3 swaps it for a ReserveUpdate
+  // entity lookup.
+  const [rebalancingStateRpc, preReserves, blockScopedIncentive] =
     await Promise.all([
-      context.effect(rebalancingStateEffect, {
-        chainId: event.chainId,
-        poolAddress: asAddress(event.srcAddress),
-        blockNumber,
-      }),
+      derivedRebalanceState
+        ? Promise.resolve(undefined)
+        : context.effect(rebalancingStateEffect, {
+            chainId: event.chainId,
+            poolAddress: asAddress(event.srcAddress),
+            blockNumber,
+          }),
       context.effect(reservesEffect, {
         chainId: event.chainId,
         poolAddress: asAddress(event.srcAddress),
@@ -217,18 +275,20 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
             blockNumber,
           }),
     ]);
-  // Self-heal invertRateFeed before reading it for the oraclePrice flip.
-  // Same rationale as the UpdateReserves handler.
-  const existing = initial
-    ? await selfHealInvertRateFeed(context, initial)
-    : undefined;
+
+  const resolved: ResolvedRebalanceState | null =
+    derivedRebalanceState ??
+    (rebalancingStateRpc
+      ? scaleRpcRebalanceState(rebalancingStateRpc, existing)
+      : null);
 
   const rebalancerAddress = asAddress(event.params.sender);
 
-  // Prefer the RPC-read threshold (matches what the contract just used);
-  // fall back to the persisted Pool row if the RPC failed.
+  // Prefer the resolved threshold (whether entity-derived or RPC-read —
+  // both reflect the direction-correct active threshold for this block).
+  // Fall back to the persisted Pool row if both paths failed.
   const rebalanceThresholdForEvent =
-    rebalancingState?.rebalanceThreshold ?? existing?.rebalanceThreshold ?? 0;
+    resolved?.rebalanceThreshold ?? existing?.rebalanceThreshold ?? 0;
   const priceDifferenceBefore = event.params.priceDifferenceBefore;
   const priceDifferenceAfter = event.params.priceDifferenceAfter;
   const { improvement, lastEffectivenessRatio, eventEffectivenessRatio } =
@@ -249,16 +309,12 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
   // Hoist oraclePrice outside the if-block so it's accessible for OracleSnapshot
   // construction without a non-null assertion on oracleDelta.oraclePrice.
   let rebalancedOraclePrice = 0n;
-  if (rebalancingState) {
-    const isInverted = existing?.invertRateFeed ?? false;
-    rebalancedOraclePrice = isInverted
-      ? rebalancingState.oraclePriceDenominator * ORACLE_ADAPTER_SCALE_FACTOR
-      : rebalancingState.oraclePriceNumerator * ORACLE_ADAPTER_SCALE_FACTOR;
-
+  if (resolved) {
+    rebalancedOraclePrice = resolved.oraclePrice;
     oracleDelta = {
       ...oracleDelta,
       oraclePrice: rebalancedOraclePrice,
-      rebalanceThreshold: rebalancingState.rebalanceThreshold,
+      rebalanceThreshold: resolved.rebalanceThreshold,
       oracleTimestamp: blockTimestamp,
     };
   }
@@ -274,11 +330,12 @@ FPMM.Rebalanced.handler(async ({ event, context }) => {
     strategy: rebalancerAddress,
     rebalanceDelta: true,
     oracleDelta,
-    // Reuse the Pool read from the concurrent Promise.all above.
+    // Reuse the Pool read from above — avoids a second context.Pool.get
+    // inside getOrCreatePool.
     existing: { pool: existing },
   });
 
-  if (rebalancingState) {
+  if (resolved) {
     // Health score: compute snapshot fields + update pool accumulators.
     // Note: upsertPool above calls context.Pool.set(pool) internally with
     // default health fields. We immediately overwrite with the correct

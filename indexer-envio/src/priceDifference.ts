@@ -87,6 +87,103 @@ export function computePriceDifference(pool: {
 }
 
 /**
+ * Direction-correct active threshold: matches the on-chain
+ * `getRebalancingState` selection of `rebalanceThreshold` based on
+ * `reservePriceAboveOraclePrice`. `reservePrice = norm1/norm0` (after
+ * 18dp normalization) is compared against the inverted-or-not oracle ref;
+ * `>` picks `above`, `<=` picks `below` (mirrors contract: equality is a
+ * tie that the contract resolves as `below`, which we follow exactly so
+ * derived values match `getRebalancingState` to the bps).
+ */
+function pickActiveThreshold(
+  pool: {
+    reserves0: bigint;
+    reserves1: bigint;
+    oraclePrice: bigint;
+    invertRateFeed: boolean;
+    token0Decimals: number;
+    token1Decimals: number;
+  },
+  thresholds: { above: number; below: number },
+): number {
+  const norm0 = normalizeTo18(pool.reserves0, pool.token0Decimals);
+  const norm1 = normalizeTo18(pool.reserves1, pool.token1Decimals);
+  if (norm0 === 0n || norm1 === 0n) return thresholds.above;
+  const SCALE = 10n ** 24n;
+  const reserveRatio = (norm1 * SCALE) / norm0;
+  const oracleRef = pool.invertRateFeed
+    ? (SCALE * SCALE) / pool.oraclePrice
+    : pool.oraclePrice;
+  return reserveRatio > oracleRef ? thresholds.above : thresholds.below;
+}
+
+/**
+ * Derive `getRebalancingState`'s relevant outputs (priceDifference + active
+ * rebalanceThreshold) from the entity store. Returns `null` when the
+ * required inputs aren't yet populated — caller falls back to RPC.
+ *
+ * Required inputs:
+ *   - `oraclePrice > 0`: at least one `MedianUpdated` for the rate feed
+ *     has been indexed (or factory's `getRebalancingState` seed succeeded).
+ *   - `rebalanceThresholdAbove > 0` OR `rebalanceThresholdBelow > 0`: the
+ *     factory's `rebalanceThresholdsEffect` seed succeeded, or a
+ *     `RebalanceThresholdUpdated` event has been seen.
+ *
+ * The returned `oraclePrice` is the same scalar that
+ * `rebalancingStateEffect` would have written, computed by inverting the
+ * OracleAdapter normalization: 24dp = numerator * SCALE_FACTOR =
+ * pool.oraclePrice (which `MedianUpdated` writes as the raw 24dp feed
+ * rate). Inversion-aware, mirroring the existing state-sync code path.
+ */
+export function tryDeriveRebalanceState(
+  pool: {
+    reserves0: bigint;
+    reserves1: bigint;
+    oraclePrice: bigint;
+    invertRateFeed: boolean;
+    rebalanceThresholdAbove: number;
+    rebalanceThresholdBelow: number;
+    token0Decimals: number;
+    token1Decimals: number;
+  },
+  reservesOverride?: { reserve0: bigint; reserve1: bigint },
+): {
+  oraclePrice: bigint;
+  rebalanceThreshold: number;
+  priceDifference: bigint;
+} | null {
+  if (pool.oraclePrice <= 0n) return null;
+  if (pool.rebalanceThresholdAbove <= 0 && pool.rebalanceThresholdBelow <= 0) {
+    return null;
+  }
+  // For UpdateReserves we want the threshold/priceDifference computed from
+  // the *new* reserves the event carries (pool.reserves still hold the
+  // pre-event state at this point in the handler). For Rebalanced we use
+  // the post-rebalance reserves the FPMM has just written via the same
+  // event chain. `reservesOverride` lets the caller decide.
+  const reserves = reservesOverride
+    ? {
+        reserves0: reservesOverride.reserve0,
+        reserves1: reservesOverride.reserve1,
+      }
+    : { reserves0: pool.reserves0, reserves1: pool.reserves1 };
+  const poolForCalc = {
+    ...pool,
+    ...reserves,
+  };
+  const priceDifference = computePriceDifference(poolForCalc);
+  const rebalanceThreshold = pickActiveThreshold(poolForCalc, {
+    above: pool.rebalanceThresholdAbove,
+    below: pool.rebalanceThresholdBelow,
+  });
+  return {
+    oraclePrice: pool.oraclePrice,
+    rebalanceThreshold,
+    priceDifference,
+  };
+}
+
+/**
  * Rebalance effectiveness: fraction of the pre-rebalance gap-to-boundary
  * that a single rebalance closed. `1.0` = landed exactly on the boundary;
  * `>1` = overshoot past the boundary; `<0` = made deviation worse; `0.0000`

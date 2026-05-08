@@ -378,18 +378,19 @@ export async function fetchInvertRateFeed(
   }
 }
 
-/** Fetch the pool's rebalance threshold using standalone getters that do NOT
- * require the oracle to be live (unlike getRebalancingState which reverts when
- * the oracle is stale). Returns the max of thresholdAbove/thresholdBelow, or
- * `null` on transient RPC failure. The pool entity treats absence /
- * `<= 0` as "not yet known" (defaults to the 10000 fallback in `pool.ts`),
- * so callers can persist 0 for "configured to never rebalance" and
- * `undefined`/null for "retry next event" without ambiguity. */
-export async function fetchRebalanceThreshold(
+/** Fetch the pool's rebalance thresholds (above and below) using standalone
+ * getters that do NOT require the oracle to be live (unlike
+ * getRebalancingState which reverts on stale/expired oracle data). Returns
+ * `{above, below}` or `null` on transient RPC failure. Callers that want a
+ * single representative value can take `max(above, below)` (broadest band).
+ * The pool entity treats `<= 0` as "not yet known" so callers can persist
+ * 0 for "configured to never rebalance" and `null` for "retry next event"
+ * without ambiguity. */
+export async function fetchRebalanceThresholds(
   chainId: number,
   poolAddress: string,
   log: RpcLogger = consoleLogger,
-): Promise<number | null> {
+): Promise<{ above: number; below: number } | null> {
   try {
     const client = getRpcClient(chainId);
     const fallback = getFallbackRpcClient(chainId);
@@ -419,7 +420,10 @@ export async function fetchRebalanceThreshold(
         log,
       ),
     ]);
-    return Math.max(Number(aboveRes.result), Number(belowRes.result));
+    return {
+      above: Number(aboveRes.result),
+      below: Number(belowRes.result),
+    };
   } catch (err) {
     logRpcFailure(
       chainId,

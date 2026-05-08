@@ -4,6 +4,7 @@ import { computePriceDifference } from "../src/EventHandlers";
 import {
   buildRebalanceOutcome,
   computeEffectivenessRatio,
+  tryDeriveRebalanceState,
 } from "../src/priceDifference";
 
 const SCALE = 10n ** 24n;
@@ -378,5 +379,136 @@ describe("buildRebalanceOutcome — sentinel rendering", () => {
     assert.equal(out.eventEffectivenessRatio, "1.0000");
     assert.equal(out.lastEffectivenessRatio, "1.0000");
     assert.equal(out.improvement, 333n);
+  });
+});
+
+describe("tryDeriveRebalanceState", () => {
+  // -----------------------------------------------------------------------
+  // Lever 4 (PR 1): the entity-derived alternative to `getRebalancingState`.
+  // Reuses the AUSD/USDm contract-verified scenario above so the derived
+  // priceDifference is anchored to the on-chain expected value.
+  // -----------------------------------------------------------------------
+
+  // Same 24dp scale as `computePriceDifference` test fixture above.
+  const ORACLE = 999_931_000_000_000_000_000_000n;
+  const R0 = 60_001_377_664n; // 6dp
+  const R1 = 40_047_366_881_133_248_737_236n; // 18dp
+
+  function basePool(opts?: {
+    oraclePrice?: bigint;
+    rebalanceThresholdAbove?: number;
+    rebalanceThresholdBelow?: number;
+    invertRateFeed?: boolean;
+    reserves0?: bigint;
+    reserves1?: bigint;
+  }) {
+    return {
+      reserves0: opts?.reserves0 ?? R0,
+      reserves1: opts?.reserves1 ?? R1,
+      oraclePrice: opts?.oraclePrice ?? ORACLE,
+      invertRateFeed: opts?.invertRateFeed ?? false,
+      rebalanceThresholdAbove: opts?.rebalanceThresholdAbove ?? 100,
+      rebalanceThresholdBelow: opts?.rebalanceThresholdBelow ?? 100,
+      token0Decimals: 6,
+      token1Decimals: 18,
+    };
+  }
+
+  it("returns null when oraclePrice is 0 (pre-MedianUpdated)", () => {
+    assert.equal(tryDeriveRebalanceState(basePool({ oraclePrice: 0n })), null);
+  });
+
+  it("returns null when both thresholds are 0 (pre-FPMMDeployed seed)", () => {
+    assert.equal(
+      tryDeriveRebalanceState(
+        basePool({ rebalanceThresholdAbove: 0, rebalanceThresholdBelow: 0 }),
+      ),
+      null,
+    );
+  });
+
+  it("derives priceDifference matching computePriceDifference (3325 bps)", () => {
+    const derived = tryDeriveRebalanceState(basePool());
+    assert.ok(derived != null, "expected non-null derive result");
+    assert.equal(derived.priceDifference, 3325n);
+    assert.equal(derived.oraclePrice, ORACLE);
+  });
+
+  it("picks `below` threshold when reservePrice <= oraclePrice", () => {
+    // AUSD/USDm: norm0 ≈ 60001 (after 1e12 scale-up), norm1 ≈ 40047 → reserveRatio < 1.
+    // Oracle ≈ 0.999931 → reservePrice (norm1/norm0) ≈ 0.667 < oracle. Below side wins.
+    const derived = tryDeriveRebalanceState(
+      basePool({ rebalanceThresholdAbove: 50, rebalanceThresholdBelow: 200 }),
+    );
+    assert.equal(derived?.rebalanceThreshold, 200);
+  });
+
+  it("picks `above` threshold when reservePrice > oraclePrice", () => {
+    // Use a much higher reserves1 so reservePrice exceeds oracle.
+    const derived = tryDeriveRebalanceState(
+      basePool({
+        reserves1: R1 * 10n, // bumps norm1 → reservePrice well above oracle
+        rebalanceThresholdAbove: 50,
+        rebalanceThresholdBelow: 200,
+      }),
+    );
+    assert.equal(derived?.rebalanceThreshold, 50);
+  });
+
+  it("invertRateFeed flag flips the direction comparison", () => {
+    // Construct a fixture that actually triggers the flip:
+    //   reserveRatio = SCALE (norm0 == norm1), oraclePrice = 2 * SCALE.
+    //   un-inverted: reserveRatio (1) < oraclePrice (2) → below
+    //   inverted:    oracleRef = SCALE^2 / oraclePrice = 0.5 * SCALE
+    //                reserveRatio (1) > oracleRef (0.5)  → above
+    const r0 = 1_000n * 10n ** 18n;
+    const r1 = 1_000n * 10n ** 18n;
+    const oraclePrice = 2n * 10n ** 24n;
+    const flipPool = (invert: boolean) => ({
+      reserves0: r0,
+      reserves1: r1,
+      oraclePrice,
+      invertRateFeed: invert,
+      rebalanceThresholdAbove: 50,
+      rebalanceThresholdBelow: 200,
+      token0Decimals: 18,
+      token1Decimals: 18,
+    });
+    const noInv = tryDeriveRebalanceState(flipPool(false));
+    const inv = tryDeriveRebalanceState(flipPool(true));
+    assert.equal(noInv?.rebalanceThreshold, 200, "below side un-inverted");
+    assert.equal(inv?.rebalanceThreshold, 50, "above side after invert");
+  });
+
+  it("uses reservesOverride when caller passes pre-write reserves (UpdateReserves path)", () => {
+    // Pool's persisted reserves are stale (still old values); caller passes
+    // the event params as override so derive sees post-event state.
+    const stalePool = basePool({
+      reserves0: 1n, // bogus pre-event value
+      reserves1: 1n,
+    });
+    const derived = tryDeriveRebalanceState(stalePool, {
+      reserve0: R0,
+      reserve1: R1,
+    });
+    assert.ok(derived != null);
+    assert.equal(derived.priceDifference, 3325n);
+  });
+
+  it("returns 0 priceDifference when reserves are 0 (degenerate pool)", () => {
+    const derived = tryDeriveRebalanceState(
+      basePool({ reserves0: 0n, reserves1: 0n }),
+    );
+    assert.ok(derived != null);
+    assert.equal(derived.priceDifference, 0n);
+  });
+
+  it("works with only one of the two thresholds set (asymmetric governance)", () => {
+    // above = 0 means "no rebalance required when reservePrice is above oracle".
+    // The pool we're testing has reservePrice < oracle, so we hit the below path.
+    const derived = tryDeriveRebalanceState(
+      basePool({ rebalanceThresholdAbove: 0, rebalanceThresholdBelow: 150 }),
+    );
+    assert.equal(derived?.rebalanceThreshold, 150);
   });
 });

@@ -375,6 +375,8 @@ type PoolEntity = {
   oracleOk: boolean;
   priceDifference: bigint;
   rebalanceThreshold: number;
+  rebalanceThresholdAbove: number;
+  rebalanceThresholdBelow: number;
   lastRebalancedAt: bigint;
   healthStatus: string;
   limitStatus: string;
@@ -1735,6 +1737,165 @@ describe("Envio Celo indexer handlers", () => {
       "UpdateReserves snapshot must carry the triggering tx hash",
     );
     assert.equal(snapshot!.source, "update_reserves");
+  });
+
+  // ---------------------------------------------------------------------------
+  // Lever 4 PR 1 — entity-derived rebalanceState (no eth_call)
+  //
+  // Verify that when the Pool entity has oraclePrice + thresholds populated,
+  // state-sync handlers derive priceDifference / rebalanceThreshold from the
+  // entity store and skip the `getRebalancingState` RPC entirely. The mock
+  // RPC value is intentionally set to a wrong sentinel so a regression that
+  // re-introduces the RPC dependency would surface immediately.
+  // ---------------------------------------------------------------------------
+
+  it("UpdateReserves: derives priceDifference from entity when oraclePrice + thresholds are populated", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000c2";
+    // Wrong-on-purpose RPC mock: if the handler skips derive and reaches RPC,
+    // the assertion below will fail because pool.priceDifference would equal 999.
+    _setMockRebalancingState(42220, POOL_ADDR, {
+      oraclePriceNumerator: 1_000_000_000_000_000_000n,
+      oraclePriceDenominator: 1_000_000_000_000_000_000n,
+      rebalanceThreshold: 999, // distinct from the entity's 200
+      priceDifference: 999n,
+    });
+
+    let mockDb = MockDb.createMockDb();
+
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 900, timestamp: 1_700_007_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    // Pre-seed entity with ALL the inputs `tryDeriveRebalanceState` needs.
+    const seeded = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    mockDb = mockDb.entities.Pool.set({
+      ...seeded,
+      oraclePrice: 1_000_000_000_000_000_000_000_000n, // 24dp
+      token0Decimals: 18,
+      token1Decimals: 18,
+      invertRateFeed: false,
+      rebalanceThresholdAbove: 200,
+      rebalanceThresholdBelow: 200,
+      source: "fpmm_update_reserves",
+    });
+
+    // Imbalanced reserves → ~3333 bps locally; if RPC fired we'd see 999.
+    const updateEvent = FPMM.UpdateReserves.createMockEvent({
+      reserve0: 60_000_000_000_000_000_000_000n,
+      reserve1: 40_000_000_000_000_000_000_000n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 11,
+        srcAddress: POOL_ADDR,
+        block: { number: 901, timestamp: 1_700_007_100 },
+      },
+    });
+    mockDb = await FPMM.UpdateReserves.processEvent({
+      event: updateEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.ok(pool, "Pool must exist after UpdateReserves");
+    assert.ok(
+      pool.priceDifference >= 3330n && pool.priceDifference <= 3340n,
+      `expected entity-derived ~3333 bps, got ${pool.priceDifference} (RPC fallback would have returned 999)`,
+    );
+    assert.equal(
+      pool.rebalanceThreshold,
+      200,
+      "active threshold must come from entity (above==below==200), not RPC mock (999)",
+    );
+  });
+
+  it("RebalanceThresholdUpdated: writes above + below + active to Pool", async () => {
+    const POOL_ADDR = "0x00000000000000000000000000000000000000c3";
+    let mockDb = MockDb.createMockDb();
+
+    const deployEvent = FPMMFactory.FPMMDeployed.createMockEvent({
+      token0: "0x0000000000000000000000000000000000000003",
+      token1: "0x0000000000000000000000000000000000000004",
+      fpmmProxy: POOL_ADDR,
+      fpmmImplementation: "0x00000000000000000000000000000000000000bc",
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 10,
+        srcAddress: "0x00000000000000000000000000000000000000cc",
+        block: { number: 1000, timestamp: 1_700_008_000 },
+      },
+    });
+    mockDb = await FPMMFactory.FPMMDeployed.processEvent({
+      event: deployEvent,
+      mockDb,
+    });
+
+    const thresholdEvent = (
+      FPMM as unknown as {
+        RebalanceThresholdUpdated: {
+          createMockEvent: (args: {
+            oldThresholdAbove: bigint;
+            oldThresholdBelow: bigint;
+            newThresholdAbove: bigint;
+            newThresholdBelow: bigint;
+            mockEventData: {
+              chainId: number;
+              logIndex: number;
+              srcAddress: string;
+              block: { number: number; timestamp: number };
+            };
+          }) => unknown;
+          processEvent: (args: {
+            event: unknown;
+            mockDb: MockDb;
+          }) => Promise<MockDb>;
+        };
+      }
+    ).RebalanceThresholdUpdated.createMockEvent({
+      oldThresholdAbove: 100n,
+      oldThresholdBelow: 100n,
+      newThresholdAbove: 250n,
+      newThresholdBelow: 175n,
+      mockEventData: {
+        chainId: 42220,
+        logIndex: 11,
+        srcAddress: POOL_ADDR,
+        block: { number: 1001, timestamp: 1_700_008_100 },
+      },
+    });
+    mockDb = await (
+      FPMM as unknown as {
+        RebalanceThresholdUpdated: {
+          processEvent: (args: {
+            event: unknown;
+            mockDb: MockDb;
+          }) => Promise<MockDb>;
+        };
+      }
+    ).RebalanceThresholdUpdated.processEvent({
+      event: thresholdEvent,
+      mockDb,
+    });
+
+    const pool = mockDb.entities.Pool.get(pid(POOL_ADDR)) as PoolEntity;
+    assert.ok(pool, "Pool must exist after RebalanceThresholdUpdated");
+    assert.equal(pool.rebalanceThresholdAbove, 250);
+    assert.equal(pool.rebalanceThresholdBelow, 175);
+    // Active threshold = max(above, below) = 250 (refreshed conservatively;
+    // next state-sync event re-picks the direction-correct value).
+    assert.equal(pool.rebalanceThreshold, 250);
   });
 
   // ---------------------------------------------------------------------------

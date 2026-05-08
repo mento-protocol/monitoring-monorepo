@@ -21,7 +21,7 @@ import {
   feesEffect,
   invertRateFeedEffect,
   numReportersEffect,
-  rebalanceThresholdEffect,
+  rebalanceThresholdsEffect,
   referenceRateFeedIDEffect,
   reportExpiryEffect,
   tokenDecimalsScalingEffect,
@@ -152,7 +152,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
 
   const [
     rateFeedID,
-    rebalanceThreshold,
+    rebalanceThresholds,
     dec0Raw,
     dec1Raw,
     invertRateFeed,
@@ -164,7 +164,7 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     }),
     // Use standalone getters — they work even when the oracle is stale,
     // unlike getRebalancingState() which reverts on stale/expired oracle data.
-    context.effect(rebalanceThresholdEffect, {
+    context.effect(rebalanceThresholdsEffect, {
       chainId: event.chainId,
       poolAddress: poolAddr,
     }),
@@ -231,8 +231,21 @@ FPMMFactory.FPMMDeployed.handler(async ({ event, context }) => {
     oracleDelta.invertRateFeedKnown = true;
   }
 
-  if (rebalanceThreshold !== undefined && rebalanceThreshold > 0) {
-    oracleDelta.rebalanceThreshold = rebalanceThreshold;
+  if (rebalanceThresholds !== undefined) {
+    const { above, below } = rebalanceThresholds;
+    oracleDelta.rebalanceThresholdAbove = above;
+    oracleDelta.rebalanceThresholdBelow = below;
+    // Active threshold seed: the contract picks above OR below at evaluation
+    // time based on reservePriceAboveOraclePrice. Pre-first-event we don't
+    // know the direction, so seed with `max(above, below)` (the broadest
+    // band) — the next UpdateReserves/Rebalanced will refresh with the
+    // direction-correct value. Skip the legacy field when both are 0
+    // (configured to never rebalance) so callers can still treat 0 as
+    // "not yet known" if upstream RPC failed before this seed.
+    const broadest = Math.max(above, below);
+    if (broadest > 0) {
+      oracleDelta.rebalanceThreshold = broadest;
+    }
   }
 
   const pool = await upsertPool({

@@ -343,6 +343,8 @@ export const DEFAULT_ORACLE_FIELDS = {
   invertRateFeedKnown: false,
   priceDifference: 0n,
   rebalanceThreshold: 0,
+  rebalanceThresholdAbove: 0,
+  rebalanceThresholdBelow: 0,
   lastRebalancedAt: 0n,
   deviationBreachStartedAt: 0n,
   currentOpenBreachPeak: 0n,

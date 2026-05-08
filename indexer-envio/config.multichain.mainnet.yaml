@@ -64,6 +64,7 @@ contracts:
       - event: LPFeeUpdated
       - event: ProtocolFeeUpdated
       - event: RebalanceIncentiveUpdated
+      - event: RebalanceThresholdUpdated
 
   - name: VirtualPool
     abi_file_path: abis/FPMM.json

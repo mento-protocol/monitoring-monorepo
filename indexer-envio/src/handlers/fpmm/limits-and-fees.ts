@@ -1,6 +1,7 @@
 // ---------------------------------------------------------------------------
 // FPMM limits and fees handlers: TradingLimitConfigured + LiquidityStrategyUpdated
 // + LPFeeUpdated + ProtocolFeeUpdated + RebalanceIncentiveUpdated
+// + RebalanceThresholdUpdated
 // ---------------------------------------------------------------------------
 
 import { FPMM, type Pool, type TradingLimit } from "generated";
@@ -152,3 +153,34 @@ FPMM.RebalanceIncentiveUpdated.handler(async ({ event, context }) =>
     event.params.newIncentive,
   ),
 );
+
+// ---------------------------------------------------------------------------
+// FPMM.RebalanceThresholdUpdated
+//
+// Mirrors `newThresholdAbove` / `newThresholdBelow` to Pool fields so
+// state-sync can derive the active threshold for an event from the entity
+// store instead of `getRebalancingState()`. The legacy `rebalanceThreshold`
+// field continues to track the active (direction-correct) value, picked
+// each UpdateReserves/Rebalanced event from the persisted above/below
+// pair. Here we conservatively refresh `rebalanceThreshold` to
+// `max(above, below)` — the broadest band — so a governance change
+// arriving between two state-sync events doesn't leave the active field
+// stale relative to either direction. The next state-sync event will
+// re-pick the direction-correct value.
+// ---------------------------------------------------------------------------
+
+FPMM.RebalanceThresholdUpdated.handler(async ({ event, context }) => {
+  const poolId = makePoolId(event.chainId, event.srcAddress);
+  const pool = await context.Pool.get(poolId);
+  if (!pool) return;
+  const above = Number(event.params.newThresholdAbove);
+  const below = Number(event.params.newThresholdBelow);
+  context.Pool.set({
+    ...pool,
+    rebalanceThresholdAbove: above,
+    rebalanceThresholdBelow: below,
+    rebalanceThreshold: Math.max(above, below),
+    updatedAtBlock: asBigInt(event.block.number),
+    updatedAtTimestamp: asBigInt(event.block.timestamp),
+  });
+});
